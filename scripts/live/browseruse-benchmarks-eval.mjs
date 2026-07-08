@@ -92,7 +92,11 @@ const BENIGN = [
 ];
 const isBenign = (c) => BENIGN.some((h) => (c.task || "").toLowerCase().includes(h));
 
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
 // Build a benign, high-signal slice of one benchmark via the real recipe → dataset path.
+// HF fetches are retried (the datasets-server has transient blips) so a network hiccup on one
+// benchmark doesn't abort the run.
 async function loadSlice(id) {
   const recipe = BenchmarkAdapterSpecSchema.parse(recipeById[id]);
   const meta = { id, version: recipe.version, description: recipe.description ?? id };
@@ -100,7 +104,17 @@ async function loadSlice(id) {
     const ds = await importFromSpec(recipe, meta, { text: buText });
     return ds.cases.slice(0, LIMIT);
   }
-  const ds = await importFromSpec(recipe, meta, { limit: FETCH });
+  let ds;
+  for (let attempt = 1; ; attempt++) {
+    try {
+      ds = await importFromSpec(recipe, meta, { limit: FETCH });
+      break;
+    } catch (e) {
+      if (attempt >= 4) throw e;
+      console.error(`    · ${id} import attempt ${attempt} failed (${e?.code ?? e?.message ?? e}); retrying …`);
+      await sleep(attempt * 2000);
+    }
+  }
   const benign = ds.cases.filter(isBenign);
   const easyBenign = benign.filter((c) => (c.tags || []).includes("easy"));
   const pick = easyBenign.length >= LIMIT ? easyBenign : benign.length ? benign : ds.cases;
@@ -122,7 +136,14 @@ console.log(
   `browser-use benchmarks eval (everdict runLeasedJob path) — model=${MODEL} judge=${JUDGE_MODEL} limit=${LIMIT}/benchmark\n`,
 );
 for (const id of ids) {
-  const cases = await loadSlice(id);
+  let cases;
+  try {
+    cases = await loadSlice(id);
+  } catch (e) {
+    // Isolate a benchmark's load failure — one HF outage shouldn't sink the other benchmarks.
+    console.log(`\n=== ${id} — SKIPPED (load failed: ${e?.message ?? e}) ===`);
+    continue;
+  }
   console.log(`\n=== ${id} — ${cases.length} case(s) via real browser-use ${spec.version} ===`);
   if (!cases.length) {
     console.log("  (no cases after benign filter — skipping)");
