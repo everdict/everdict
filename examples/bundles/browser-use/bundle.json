@@ -1,7 +1,7 @@
 {
   "id": "browser-use",
-  "version": "1.1.0",
-  "description": "browser-use (web browsing agent) harness + two open web-agent benchmarks (WebVoyager 2025 / Online-Mind2Web) as reusable recipes. The agent drives its own headless Chromium inside a BYO image (build ./Dockerfile) and reports its final answer on stdout; grading is judge-over-final-answer. Pure data — no core changes. v1.1.0: recipes also recover the agent's own step count from the stdout result block (text-metric → agent_steps).",
+  "version": "1.2.0",
+  "description": "browser-use (web browsing agent) harness + three open web-agent benchmarks (WebVoyager 2025 / Online-Mind2Web / BU Bench V1 open reconstruction) as reusable recipes. The agent drives its own headless Chromium inside a BYO image (build ./Dockerfile) and reports its final answer on stdout; grading is judge-over-final-answer. Pure data — no core changes. v1.1.0: recipes also recover the agent's own step count from the stdout result block (text-metric → agent_steps). v1.2.0: adds bu-bench-v1-open — an open, browseable reconstruction of browser-use's own BU Bench V1 (the official 100 hand-picked tasks ship encrypted, so this samples its five source components: Custom / WebBench / Mind2Web-2 / GAIA / BrowseComp), tagged per source component.",
   "harnessTemplates": [
     {
       "kind": "command",
@@ -105,9 +105,7 @@
         "taskField": "confirmed_task",
         "taskTemplate": "{confirmed_task}\n\nStart at: {website}",
         "promptEnv": true,
-        "tagFields": [
-          "level"
-        ],
+        "tagFields": ["level"],
         "extraGraders": [
           {
             "id": "steps"
@@ -126,6 +124,48 @@
           "id": "judge",
           "config": {
             "rubric": "Task difficulty: {level}. Reference human trajectory length: {reference_length} steps. PASS only if the agent's reported final result shows the task on {website} was concretely completed as stated (the requested navigation/filter/extraction actually happened, grounded in the run log — not just intent). FAIL if the result is missing, generic, self-reports failure, hits a blocker (CAPTCHA/login wall/unreachable page), or violates an explicit constraint in the task."
+          }
+        }
+      ]
+    },
+    {
+      "id": "bu-bench-v1-open",
+      "version": "1.0.0",
+      "description": "BU Bench V1 (open reconstruction) — browser-use's own composite benchmark is 100 hand-picked tasks drawn from five sources (20 Custom + 20 WebBench + 20 Mind2Web-2 + 20 GAIA + 20 BrowseComp), scored by an LLM judge. The official set ships ENCRYPTED (BU_Bench_V1.enc) and is not distributable, so this recipe is an open, browseable stand-in that samples the same five components on bot-friendly info-seeking sites; each case is tagged with its source component. Import with opts.text = @bu_bench_v1_open.jsonl.",
+      "category": "browser",
+      "origin": {
+        "homepage": "https://browser-use.com/benchmarks",
+        "code": "https://github.com/browser-use/benchmark",
+        "authors": "Browser Use (composite of WebBench, Mind2Web-2/OSU-NLP, GAIA, BrowseComp/OpenAI, + custom tasks)",
+        "taskType": "live-web task completion + information extraction across five source components (official 100 tasks encrypted; this is an open reconstruction)"
+      },
+      "source": {
+        "kind": "jsonl"
+      },
+      "mapping": {
+        "idField": "id",
+        "taskField": "task",
+        "taskTemplate": "{task}\n\nStart at: {start_url}",
+        "promptEnv": true,
+        "tagFields": ["source", "web_name"],
+        "extraGraders": [
+          {
+            "id": "steps"
+          },
+          {
+            "id": "text-metric",
+            "config": {
+              "pattern": "^steps: (\\d+)",
+              "metric": "agent_steps"
+            }
+          }
+        ]
+      },
+      "graderTemplates": [
+        {
+          "id": "judge",
+          "config": {
+            "rubric": "BU Bench V1 source component: {source}. Reference answer (may be empty): {answer}. PASS only if the agent's reported final result concretely and correctly accomplishes the task: when a reference answer is given, the result must match it (semantically, ignoring formatting); otherwise the result must be specific, grounded in the run log, and satisfy every explicit task constraint. FAIL if the result is missing, generic, self-reports failure, hits a blocker (CAPTCHA/login wall/unreachable page), or contradicts the task."
           }
         }
       ]
