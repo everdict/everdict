@@ -62,6 +62,10 @@ same failure) · **agent** (a legitimate grader verdict — never a "failure", n
 signals the mapper reads: `OOM_KILLED` (K8s pod `OOMKilled` reason / Nomad alloc OOM events) is FATAL infra —
 same limits, same death, so the transient retry skips it and the message says "raise resources.memoryMb".
 
+**Stages survive the process boundary**: the agent entrypoint catches in-job errors and emits a CLASSIFIED
+CaseResult through the sentinel (`stageForError`: HARNESS_INSTALL_FAILED→install · run · grade · dispatch), so a
+setup break lands as `{install, harness, retryable:false}` instead of a mushy backend-side "sentinel not found".
+
 Consumers: `runSuite` retries only `retryable` classes; retry-failed takes a class filter
 (HTTP `?class=infra` · MCP `failure_class`) so a cluster incident re-runs exactly its casualties while agent
 FAILs stay carried as legitimate results. Harnesses declare their weight (`resources {cpu, memoryMb}` on the
