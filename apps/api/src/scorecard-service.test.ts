@@ -114,6 +114,49 @@ describe("ScorecardService.diff", () => {
     await store.create(record("queued", { status: "queued" }));
     await expect(svc(store).diff("acme", "base", "queued")).rejects.toBeInstanceOf(BadRequestError);
   });
+
+  // N trials of case c1, the first `passes` passing.
+  const trialCard = (harness: string, passes: number, n: number): Scorecard => ({
+    suiteId: "d",
+    harness,
+    results: Array.from(
+      { length: n },
+      (_, i): CaseResult => ({
+        caseId: "c1",
+        harness,
+        trial: i,
+        trace: [],
+        snapshot: { kind: "repo", diff: "", changedFiles: [], headSha: "h" },
+        scores: [{ graderId: "tests-pass", metric: "tests_pass", value: i < passes ? 1 : 0, pass: i < passes }],
+      }),
+    ),
+  });
+
+  it("attaches a statistically-gated trial diff — a significant pass-rate collapse (5/5 → 0/5) is a regression", async () => {
+    const store = new InMemoryScorecardStore();
+    await store.create(record("base", { scorecard: trialCard("h@1", 5, 5) }));
+    await store.create(record("cand", { scorecard: trialCard("h@2", 0, 5) }));
+    const diff = await svc(store).diff("acme", "base", "cand");
+    expect(diff.trials?.regressions.map((r) => r.caseId)).toEqual(["c1"]);
+    expect(diff.trials?.cases[0]?.significant).toBe(true);
+  });
+
+  it("a within-noise trial drop (3/5 → 2/5) is NOT flagged as a trial regression", async () => {
+    const store = new InMemoryScorecardStore();
+    await store.create(record("base", { scorecard: trialCard("h@1", 3, 5) }));
+    await store.create(record("cand", { scorecard: trialCard("h@2", 2, 5) }));
+    const diff = await svc(store).diff("acme", "base", "cand");
+    expect(diff.trials?.regressions).toEqual([]);
+    expect(diff.trials?.cases[0]?.significant).toBe(false);
+  });
+
+  it("a single-run diff carries no trials field (backward compatible)", async () => {
+    const store = new InMemoryScorecardStore();
+    await store.create(record("base", { scorecard: scorecard(true) }));
+    await store.create(record("cand", { scorecard: scorecard(false) }));
+    const diff = await svc(store).diff("acme", "base", "cand");
+    expect(diff.trials).toBeUndefined();
+  });
 });
 
 describe("ScorecardService.leaderboard", () => {

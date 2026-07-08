@@ -1982,23 +1982,37 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   });
 
   // baseline vs candidate comparison (regressions/improvements). Static path → matched before :id. Both must be this workspace's and completed.
-  app.get<{ Querystring: { baseline?: string; candidate?: string } }>("/scorecards/diff", async (req, reply) => {
-    if (!deps.scorecardService)
-      return reply.code(404).send({ code: "NOT_FOUND", message: "scorecard service not configured" });
-    const principal = await resolvePrincipal(req, reply, deps);
-    if (!principal) return reply;
-    const { baseline, candidate } = req.query;
-    if (!baseline || !candidate)
-      return reply
-        .code(400)
-        .send({ code: "BAD_REQUEST", message: "baseline and candidate query parameters are required." });
-    try {
-      gate(principal, "scorecards:read");
-      return reply.send(await deps.scorecardService.diff(principal.workspace, baseline, candidate));
-    } catch (err) {
-      return sendError(reply, err); // 404 if not found, 400 if incomplete
-    }
-  });
+  app.get<{ Querystring: { baseline?: string; candidate?: string; z?: string } }>(
+    "/scorecards/diff",
+    async (req, reply) => {
+      if (!deps.scorecardService)
+        return reply.code(404).send({ code: "NOT_FOUND", message: "scorecard service not configured" });
+      const principal = await resolvePrincipal(req, reply, deps);
+      if (!principal) return reply;
+      const { baseline, candidate, z } = req.query;
+      if (!baseline || !candidate)
+        return reply
+          .code(400)
+          .send({ code: "BAD_REQUEST", message: "baseline and candidate query parameters are required." });
+      // Optional confidence for the trial regression gate (default 1.96 ≈ 95%). Only used when either side has trials.
+      let zThreshold: number | undefined;
+      if (z !== undefined) {
+        zThreshold = Number(z);
+        if (!Number.isFinite(zThreshold) || zThreshold <= 0)
+          return reply.code(400).send({ code: "BAD_REQUEST", message: "z must be a positive number." });
+      }
+      try {
+        gate(principal, "scorecards:read");
+        return reply.send(
+          await deps.scorecardService.diff(principal.workspace, baseline, candidate, {
+            ...(zThreshold !== undefined ? { zThreshold } : {}),
+          }),
+        );
+      } catch (err) {
+        return sendError(reply, err); // 404 if not found, 400 if incomplete
+      }
+    },
+  );
 
   // Period trend / regression-over-time — one (dataset, metric)'s scorecards in time order + regression vs baseline. Static path → before :id.
   app.get<{

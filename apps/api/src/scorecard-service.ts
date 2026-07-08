@@ -37,8 +37,10 @@ import {
   type Leaderboard,
   type ScorecardDiff,
   type ScorecardTrend,
+  type TrialDiff,
   caseVerdict,
   diffScorecards,
+  diffTrials,
   leaderboard,
   runSuite,
   scorecardModels,
@@ -1071,10 +1073,20 @@ export class ScorecardService {
   }
 
   // baseline vs candidate comparison — metric deltas over the same cases + pass transitions (regression/improvement). Both must be owned by this workspace and complete.
-  async diff(tenant: string, baselineId: string, candidateId: string): Promise<ScorecardDiff> {
+  // When either side ran repeated trials, the pass-transition regressions above are last-trial-noisy — attach the
+  // statistically-gated trial diff (two-proportion z-test) as the authoritative regression signal. docs/architecture/trial-based-verdict.md
+  async diff(
+    tenant: string,
+    baselineId: string,
+    candidateId: string,
+    opts: { zThreshold?: number } = {},
+  ): Promise<ScorecardDiff & { trials?: TrialDiff }> {
     const baseline = await this.requireSucceeded(tenant, baselineId);
     const candidate = await this.requireSucceeded(tenant, candidateId);
-    return diffScorecards(baseline, candidate);
+    const diff = diffScorecards(baseline, candidate);
+    const hasTrials =
+      baseline.results.some((r) => r.trial !== undefined) || candidate.results.some((r) => r.trial !== undefined);
+    return hasTrials ? { ...diff, trials: diffTrials(baseline, candidate, opts) } : diff;
   }
 
   // Time-range trend / regression-over-time — line up a (dataset, metric)'s scorecards chronologically and flag regressions vs the baseline.

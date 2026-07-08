@@ -950,11 +950,21 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
       "diff_scorecards",
       {
         description:
-          "Compare two scorecards (baseline vs candidate) → metric delta + per-case regression/improvement. Both must be completed in this workspace",
-        inputSchema: { baseline: z.string(), candidate: z.string() },
+          "Compare two scorecards (baseline vs candidate) → metric delta + per-case regression/improvement. Both must be completed in this workspace. When either ran trials, the result also carries a statistically-gated 'trials' diff (pass@k regression)",
+        inputSchema: {
+          baseline: z.string(),
+          candidate: z.string(),
+          z: z
+            .number()
+            .positive()
+            .optional()
+            .describe("confidence threshold for the trial regression gate (default 1.96 ≈ 95%; only used with trials)"),
+        },
       },
-      ({ baseline, candidate }) =>
-        run(principal, "scorecards:read", async () => ok(await scorecards.diff(ws, baseline, candidate))),
+      ({ baseline, candidate, z: zThreshold }) =>
+        run(principal, "scorecards:read", async () =>
+          ok(await scorecards.diff(ws, baseline, candidate, zThreshold !== undefined ? { zThreshold } : {})),
+        ),
     );
 
     server.registerTool(
