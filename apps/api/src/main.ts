@@ -362,6 +362,8 @@ async function main(): Promise<void> {
     dispatcher,
     store: scorecardStore,
     ...(temporalBatchAddress ? { temporalBatches: new TemporalBatchDriver({ address: temporalBatchAddress }) } : {}),
+    // runtime:"auto" — expand to every registered runtime id for the tenant (sharding across all of them).
+    runtimesFor: async (tenant) => (await runtimeRegistry.list(tenant)).map((r) => r.id),
     requireRuntime: true, // policy (default): a batch with no runtime is 400 at submit — the API does not register local
     // Fan out a child run per case (sharing the same RunStore as a single run) — each case becomes an addressable run, hidden by default in the activity list.
     runStore: store,

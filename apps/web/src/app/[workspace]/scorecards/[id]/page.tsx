@@ -240,6 +240,10 @@ export default async function ScorecardDetailPage({
             </dd>
           </div>
         )}
+        {/* Temporal-owned batch — the durable workflow's id (driver-loop durability; deep-link target for ops). */}
+        {record.orchestration?.workflowId && (
+          <Prop label={t('metaWorkflow')} value={record.orchestration.workflowId} />
+        )}
         {record.subset && (
           <Prop
             label={t('metaSubset')}

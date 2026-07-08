@@ -1748,7 +1748,8 @@
     "needTwoPoints": "Need at least 2 completed scorecards to draw a trend (currently {count}).",
     "runHistoryTitle": "Run history",
     "regressed": "Regressed",
-    "sparklineLabel": "score trend"
+    "sparklineLabel": "score trend",
+    "metaWorkflow": "Workflow"
   },
   "scorecardSummary": {
     "statTotal": "Total runs",

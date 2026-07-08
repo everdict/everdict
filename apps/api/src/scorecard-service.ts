@@ -205,7 +205,13 @@ export interface ScorecardServiceDeps {
   budget?: BudgetTracker; // admit/settle per case
   // Batch-on-Temporal driver (docs/architecture/temporal-batch-orchestration.md). When set, submit starts a durable
   // workflow that drives the batch through the internal routes instead of the in-process track loop.
-  temporalBatches?: { workflowIdFor(scorecardId: string): string; start(scorecardId: string): Promise<void> };
+  temporalBatches?: {
+    workflowIdFor(scorecardId: string): string;
+    start(scorecardId: string): Promise<void>;
+    cancel?(scorecardId: string): Promise<void>; // supersede → cooperative workflow cancellation (best-effort)
+  };
+  // Registered runtime ids for this tenant — powers runtime:"auto" (expand to every registered runtime and shard).
+  runtimesFor?: (tenant: string) => Promise<string[]>;
   buildTraceSource?: (cfg: TraceSourceConfig) => TraceSource; // trace source factory for pull-ingest (@everdict/trace)
   secretsFor?: (tenant: string) => Promise<Record<string, string>>; // tenant SecretStore values (inject judge-model keys)
   // For resolving {secretRef} in harness env — two tiers: shared + submitter (owner) personal secrets. Injected by scope.
@@ -272,6 +278,18 @@ export class ScorecardService {
   async submit(input: RunScorecardInput): Promise<ScorecardRecord> {
     // Deployment policy: the batch's execution target (a registered runtime or self:<runner>) must be specified — 400 if absent (blocks a silent local fallback).
     assertRuntimeTarget(this.deps.requireRuntime, input.runtime);
+    // runtime:"auto" — expand to EVERY runtime the tenant has registered and shard across them (same comma-list
+    // round-robin; each backend's capacity still admission-controls actual placement via the Scheduler).
+    if (input.runtime === "auto") {
+      const ids = this.deps.runtimesFor ? await this.deps.runtimesFor(input.tenant) : [];
+      if (ids.length === 0)
+        throw new BadRequestError(
+          "BAD_REQUEST",
+          { tenant: input.tenant },
+          'runtime:"auto" needs at least one registered runtime in this workspace.',
+        );
+      input = { ...input, runtime: ids.join(",") };
+    }
     const resolved = await this.deps.datasets.get(input.tenant, input.dataset.id, input.dataset.version || "latest");
     // Partial run — the rest of the pipeline (batch/judge/aggregate) operates on a dataset containing only the selected cases. Marked via record.subset.
     const { cases: selectedCases, subset } = selectSubsetCases(resolved, input.cases);
@@ -379,6 +397,12 @@ export class ScorecardService {
   // Terminate any queued/running batch under the same (repo, PR, harness, dataset) key as superseded and send an abort signal.
   // Mark status/error first (track's termination respects the aborted guard) + stop firing remaining cases. Already-fired cases
   // complete naturally and are recorded on their child run (not a force-kill). superseded is not succeeded, so baseline/leaderboard stay clean.
+  // Cancel a superseded batch's Temporal workflow (cooperative, best-effort — the record is already marked).
+  private async cancelWorkflowIfAny(rec: ScorecardRecord | undefined): Promise<void> {
+    if (!rec?.orchestration?.workflowId || !this.deps.temporalBatches?.cancel) return;
+    await this.deps.temporalBatches.cancel(rec.id).catch(() => {});
+  }
+
   private async supersedeInFlight(
     tenant: string,
     repo: string,
@@ -400,6 +424,7 @@ export class ScorecardService {
         updatedAt: this.now(),
       });
       this.inFlight.get(r.id)?.abort(); // don't fire remaining cases (cooperative) — track attaches partial results and terminates
+      await this.cancelWorkflowIfAny(r); // temporal-owned batch → cancel the workflow too (best-effort)
     }
   }
 
@@ -637,6 +662,9 @@ export class ScorecardService {
   // (executeCase, classifyFailure, applyJudges, billing), only the loop ownership differs.
   async runBatchCase(id: string, caseId: string): Promise<{ settled: boolean; skipped?: boolean }> {
     const ctx = this.batchContexts.get(id) ?? (await this.buildBatchContext(id));
+    // Superseded mid-flight (a newer fire reclaimed this batch) — don't spend more compute/LLM on it. The workflow
+    // is cancelled cooperatively by supersede; this guard covers activities already in the queue.
+    if ((await this.deps.store.get(id))?.status === "superseded") return { settled: true, skipped: true };
     if (ctx.doneIds.has(caseId)) return { settled: true, skipped: true };
     const evalCase = ctx.caseIndex.get(caseId);
     if (!evalCase) throw new NotFoundError("NOT_FOUND", { scorecard: id, caseId }, "case not in this batch.");

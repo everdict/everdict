@@ -26,4 +26,16 @@ export class TemporalBatchDriver {
       await connection.close();
     }
   }
+
+  // Cooperative cancellation for a superseded batch — best-effort (the record is already terminal; in-queue
+  // activities also skip on the CP-side superseded guard).
+  async cancel(scorecardId: string): Promise<void> {
+    const connection = await Connection.connect({ address: this.opts.address });
+    try {
+      const client = new Client({ connection });
+      await client.workflow.getHandle(this.workflowIdFor(scorecardId)).cancel();
+    } finally {
+      await connection.close();
+    }
+  }
 }

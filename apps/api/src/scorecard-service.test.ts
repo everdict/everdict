@@ -1508,6 +1508,51 @@ describe("ScorecardService — batch resilience (resume · retry-failed)", () =>
     return { store, runs, datasets, service };
   }
 
+  it('runtime:"auto" expands to every registered runtime and shards; empty registry is a 400', async () => {
+    const seen: string[] = [];
+    const dispatcher: Dispatcher = {
+      async dispatch(job: AgentJob) {
+        seen.push(job.evalCase.placement?.target ?? "?");
+        return passResult(job.evalCase.id);
+      },
+    };
+    const { store, datasets } = build(dispatcher);
+    await datasets.register("acme", threeCaseDataset);
+    let n = 0;
+    const svc = new ScorecardService({
+      dispatcher,
+      store,
+      datasets,
+      newId: () => `auto-${n++}`,
+      runtimesFor: async () => ["rt-x", "rt-y"],
+    });
+    const rec = await svc.submit({
+      tenant: "acme",
+      dataset: { id: "rd", version: "1.0.0" },
+      harness: { id: "h", version: "1" },
+      runtime: "auto",
+      concurrency: 1,
+    });
+    await waitTerminal(store, rec.id);
+    expect(rec.runtime).toBe("rt-x,rt-y"); // the record shows the expansion
+    expect(seen).toEqual(["rt-x", "rt-y", "rt-x"]);
+
+    const empty = new ScorecardService({
+      dispatcher,
+      store: new InMemoryScorecardStore(),
+      datasets,
+      runtimesFor: async () => [],
+    });
+    await expect(
+      empty.submit({
+        tenant: "acme",
+        dataset: { id: "rd", version: "1.0.0" },
+        harness: { id: "h", version: "1" },
+        runtime: "auto",
+      }),
+    ).rejects.toBeInstanceOf(BadRequestError);
+  });
+
   it("a comma-separated runtime SHARDS the batch — cases round-robin across the listed runtimes", async () => {
     const seen: string[] = [];
     const dispatcher: Dispatcher = {

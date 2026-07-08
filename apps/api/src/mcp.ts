@@ -792,7 +792,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
             .string()
             .optional()
             .describe(
-              "tenant Runtime id (placement.target) or self runner target; a comma-separated list SHARDS the batch round-robin across runtimes. If absent, 400 per the deployment policy",
+              'tenant Runtime id (placement.target) or self runner target; a comma-separated list SHARDS the batch round-robin across runtimes; "auto" expands to every registered runtime. If absent, 400 per the deployment policy',
             ),
           harness_pins: z
             .record(z.string())

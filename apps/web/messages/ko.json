@@ -1748,7 +1748,8 @@
     "needTwoPoints": "추이를 그리려면 완료된 스코어카드가 2건 이상 필요해요 (지금 {count}건).",
     "runHistoryTitle": "실행 이력",
     "regressed": "나빠짐",
-    "sparklineLabel": "score 추이"
+    "sparklineLabel": "score 추이",
+    "metaWorkflow": "워크플로"
   },
   "scorecardSummary": {
     "statTotal": "전체 실행",
