@@ -12,6 +12,7 @@ import {
   type HarnessSpec,
   type JudgeRunConfig,
   NotFoundError,
+  OOM_KILLED,
   type RegistryAuth,
   ScoreSchema,
   type Scorecard,
@@ -69,6 +70,10 @@ function exportStepMessage(e: ScorecardExport): string {
 // Child-run key for a (case, trial) pair — a batch with trials>1 fans N children per case, so caseId alone is
 // ambiguous. trial absent (single-run) collapses to "<caseId>#0", so single-run keying is byte-identical.
 // docs/architecture/trial-based-verdict.md
+// OOM escalation ceiling — doubling stops here; past it the fix is a real spec change (raise resources.memoryMb),
+// not more automatic headroom.
+const OOM_ESCALATION_CAP_MB = 16_384;
+
 function childKey(caseId: string, trial?: number): string {
   return `${caseId}#${trial ?? 0}`;
 }
@@ -976,6 +981,21 @@ export class ScorecardService {
       }
     }
 
+    // OOM auto-escalation: a case killed for memory dies the same way on an as-is retry, so its re-dispatch runs
+    // with resources.memoryMb DOUBLED. The base is the previous retry's boost (origin.memoryBoostMb) when there
+    // was one, so repeated retries compound (64 → 128 → 256 …) up to the cap; the registry spec is never mutated
+    // (the boost rides the job only) and non-OOM cases keep the declared resources.
+    const specBaseMb = harnessSpec?.kind === "command" ? (harnessSpec.resources?.memoryMb ?? 1024) : 1024;
+    const memoryBoostMb: Record<string, number> = {};
+    for (const r of redispatch) {
+      if (r.failure?.code !== OOM_KILLED) continue;
+      const base = src.origin?.memoryBoostMb?.[r.caseId] ?? specBaseMb;
+      memoryBoostMb[r.caseId] = Math.min(OOM_ESCALATION_CAP_MB, base * 2);
+    }
+    const boosted = Object.keys(memoryBoostMb).length;
+    // Inherit lineage fields but never the previous boost map — the new record carries only ITS boosts.
+    const { memoryBoostMb: _previousBoost, ...inheritedOrigin } = (src.origin ?? {}) as Partial<ScorecardOrigin>;
+
     // Pre-orchestration source records still retry — with no judges/judge on file, re-run cases get grader scores only.
     const orch = src.orchestration ?? { judges: [], concurrency: this.concurrency, retries: 1 };
     const ts = this.now();
@@ -985,7 +1005,14 @@ export class ScorecardService {
       dataset: { id: dataset.id, version: dataset.version },
       harness: src.harness,
       status: "queued",
-      origin: { source: "api", ...(src.origin ?? {}), retryOf: src.id },
+      // The boost map is REPLACED per retry (not inherited) — it records what THIS retry ran with; recovered
+      // cases drop out, still-OOM cases re-enter with the compounded value.
+      origin: {
+        source: "api",
+        ...inheritedOrigin,
+        retryOf: src.id,
+        ...(boosted > 0 ? { memoryBoostMb } : {}),
+      },
       ...(input.submittedBy ? { createdBy: input.submittedBy } : {}),
       ...(src.runtime ? { runtime: src.runtime } : {}),
       ...(src.subset ? { subset: src.subset } : {}),
@@ -1029,11 +1056,13 @@ export class ScorecardService {
         {
           seed: [...seed, ...recovered],
           retries: orch.retries,
+          ...(boosted > 0 ? { memoryBoostMb } : {}),
           resumeNote:
             `Retry of ${src.id} — re-running ${redispatch.length} failed case(s), ${seed.length} passing result(s) carried over` +
             (recollect.length > 0
               ? `, ${recollect.length} collect-failed case(s) re-collected without re-run (${healed} recovered)`
-              : ""),
+              : "") +
+            (boosted > 0 ? `, ${boosted} OOM case(s) escalated to ${Object.values(memoryBoostMb).join("/")}Mb` : ""),
         },
       );
     })();
@@ -1210,7 +1239,15 @@ export class ScorecardService {
     //  retries     — transient dispatch retries per case (throw-only).
     //  resumeNote  — a timeline step explaining why this track run starts mid-way.
     //  trials      — run each case N times (pass@k / flakiness); one child run per (case, trial). Default 1.
-    opts: { seed?: CaseResult[]; seedRunIds?: string[]; retries?: number; resumeNote?: string; trials?: number } = {},
+    opts: {
+      seed?: CaseResult[];
+      seedRunIds?: string[];
+      retries?: number;
+      resumeNote?: string;
+      trials?: number;
+      // OOM escalation (retry-failed) — per-case memoryMb override applied to the job's harnessSpec at dispatch.
+      memoryBoostMb?: Record<string, number>;
+    } = {},
   ): Promise<void> {
     const trials = opts.trials ?? 1;
     // If supersede already reclaimed this batch, don't start (prevents reviving queued→superseded back to running).
@@ -1284,10 +1321,22 @@ export class ScorecardService {
       }
       try {
         // Resolve env secret references (just before dispatch). If a referenced secret is missing, resolveHarnessSecrets throws → this case is isolated as a failure.
-        const jobToRun =
+        const resolved =
           secretMap && enriched.harnessSpec
             ? { ...enriched, harnessSpec: resolveHarnessSecrets(enriched.harnessSpec, secretMap) }
             : enriched;
+        // OOM escalation — a retry re-runs a memory-killed case with the boosted memoryMb on the job only.
+        const boostMb = opts.memoryBoostMb?.[job.evalCase.id];
+        const jobToRun =
+          boostMb !== undefined && resolved.harnessSpec?.kind === "command"
+            ? {
+                ...resolved,
+                harnessSpec: {
+                  ...resolved.harnessSpec,
+                  resources: { ...resolved.harnessSpec.resources, memoryMb: boostMb },
+                },
+              }
+            : resolved;
         // Spillover: a retryable infra failure on the assigned runtime moves the case to the next healthy runtime
         // of the shard list; the shared breaker skips runtimes with a known outage entirely.
         // Tail speculation on top: at the batch tail a straggler gets a duplicate on another healthy runtime and

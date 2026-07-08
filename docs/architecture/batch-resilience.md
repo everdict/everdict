@@ -62,6 +62,13 @@ same failure) · **agent** (a legitimate grader verdict — never a "failure", n
 signals the mapper reads: `OOM_KILLED` (K8s pod `OOMKilled` reason / Nomad alloc OOM events) is FATAL infra —
 same limits, same death, so the transient retry skips it and the message says "raise resources.memoryMb".
 
+`retry-failed` goes one step further and AUTO-ESCALATES: an OOM_KILLED case re-dispatches with
+`resources.memoryMb` doubled, riding the job only (the registry spec is never mutated). The applied value is
+recorded per case on `origin.memoryBoostMb`, and the next retry uses it as its base, so consecutive retries
+compound (64 → 128 → 256 …) up to a 16GB cap — past the cap the fix is a real spec change, not more automatic
+headroom. Live: a 150MB allocator declared at 64Mb OOMed, retry 1 escalated to 128Mb (OOM again), retry 2
+compounded to 256Mb and PASSED, with the spec still reading 64.
+
 **Stages survive the process boundary**: the agent entrypoint catches in-job errors and emits a CLASSIFIED
 CaseResult through the sentinel (`stageForError`: HARNESS_INSTALL_FAILED→install · run · grade · collect ·
 dispatch), so a setup break lands as `{install, harness, retryable:false}` instead of a mushy backend-side

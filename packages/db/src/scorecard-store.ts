@@ -61,6 +61,10 @@ export const ScorecardOriginSchema = z.object({
   // Lineage of a retry-failed run — the source scorecard this record re-ran the failed cases of (passing results
   // carried over verbatim). The source record itself is never mutated. docs/architecture/batch-resilience.md
   retryOf: z.string().optional(),
+  // OOM escalation state (per case, Mb) — the memory this retry ran the case with after doubling on OOM_KILLED.
+  // The next retry reads it as its base, so repeated retries compound (64 → 128 → 256 …) up to the cap. The
+  // registry spec itself is never mutated — the boost rides the job only. docs/architecture/batch-resilience.md
+  memoryBoostMb: z.record(z.number()).optional(),
 });
 export type ScorecardOrigin = z.infer<typeof ScorecardOriginSchema>;
 

@@ -1854,6 +1854,85 @@ describe("ScorecardService — batch resilience (resume · retry-failed)", () =>
     expect(c2?.scores.some((s) => s.graderId === "tests-pass" && s.pass === true)).toBe(true); // ground truth kept
   });
 
+  it("retryFailed doubles an OOM_KILLED case's memoryMb on the job only, and compounds across consecutive retries", async () => {
+    const templates = new InMemoryHarnessTemplateRegistry();
+    const instances = new InMemoryHarnessInstanceRegistry(templates);
+    await templates.register("acme", {
+      kind: "command",
+      category: "cli-agent",
+      id: "oomb",
+      version: "1",
+      resources: { memoryMb: 64 },
+      setup: [],
+      command: "run",
+      env: {},
+      params: {},
+      trace: { kind: "none" },
+    });
+    await instances.register("acme", {
+      template: { id: "oomb", version: "1" },
+      id: "oomb",
+      version: "1.0.0",
+      pins: {},
+    });
+
+    const oomResult = (caseId: string): CaseResult => ({
+      ...passResult(caseId, false),
+      failure: { stage: "dispatch", class: "infra", code: "OOM_KILLED", message: "task OOM-killed", retryable: false },
+    });
+    // The dispatcher keeps OOM-killing c2 — each retry must escalate from the PREVIOUS boost, not the spec base.
+    const jobs: AgentJob[] = [];
+    const dispatcher: Dispatcher = {
+      async dispatch(job) {
+        jobs.push(job);
+        return oomResult(job.evalCase.id);
+      },
+    };
+    const store = new InMemoryScorecardStore();
+    const datasets = new InMemoryDatasetRegistry();
+    await datasets.register("acme", threeCaseDataset);
+    let n = 0;
+    const service = new ScorecardService({
+      dispatcher,
+      store,
+      datasets,
+      harnesses: instances,
+      newId: () => `oom-${n++}`,
+    });
+    await store.create({
+      id: "sc-oom",
+      tenant: "acme",
+      dataset: { id: "rd", version: "1.0.0" },
+      harness: { id: "oomb", version: "1.0.0" },
+      status: "succeeded",
+      orchestration: { judges: [], concurrency: 3, retries: 0 },
+      scorecard: {
+        suiteId: "rd",
+        harness: "oomb@1.0.0",
+        results: [passResult("c1"), oomResult("c2"), passResult("c3")],
+      },
+      createdAt: "2026-07-08T00:00:00.000Z",
+      updatedAt: "2026-07-08T00:00:00.000Z",
+    });
+
+    const retry1 = await service.retryFailed({ tenant: "acme", id: "sc-oom" });
+    await waitTerminal(store, retry1.id);
+    expect(retry1.origin?.memoryBoostMb).toEqual({ c2: 128 }); // 64 → 128
+    const job1 = jobs.find((j) => j.evalCase.id === "c2");
+    expect(job1?.harnessSpec?.kind === "command" && job1.harnessSpec.resources?.memoryMb).toBe(128);
+
+    // The retried case OOMed again → the next retry compounds from 128, not from the 64 spec base.
+    jobs.length = 0;
+    const retry2 = await service.retryFailed({ tenant: "acme", id: retry1.id });
+    await waitTerminal(store, retry2.id);
+    expect(retry2.origin?.memoryBoostMb).toEqual({ c2: 256 });
+    const job2 = jobs.find((j) => j.evalCase.id === "c2");
+    expect(job2?.harnessSpec?.kind === "command" && job2.harnessSpec.resources?.memoryMb).toBe(256);
+    // The registry spec itself is untouched — the boost rides the job only.
+    const spec = await instances.get("acme", "oomb", "1.0.0");
+    expect(spec.kind === "command" && spec.resources?.memoryMb).toBe(64);
+  });
+
   it("retryFailed rejects an in-flight source (400) and an all-pass source (nothing to retry)", async () => {
     const { dispatcher } = capturingDispatcher();
     const { store, datasets, service } = build(dispatcher);
