@@ -232,6 +232,16 @@ The export outcome rides the existing scorecard surfaces (`GET /scorecards/:id` 
 - Everdict as a *proxy* for the platform UI (we link out; we don't re-render their trace viewer).
 - Multi-sink fan-out (one workspace = one sink).
 
+## Live verification status
+
+- **MLflow** — create/attach + spans round-trip: PASS vs 3.11 (span degrade) and 3.14 (`scripts/live/trace-sink-mlflow.mjs`).
+- **Phoenix** — create (spans + annotations) / attach (annotations only, trace count stable) / source round-trip:
+  PASS vs a real `arizephoenix/phoenix` (`scripts/live/trace-sink-phoenix.mjs`).
+- **Langfuse v2** — create (ingestion batch) / attach (score events only, trace count stable) / source round-trip:
+  PASS vs a real `langfuse/langfuse:2` + postgres, headless-init keys (`scripts/live/trace-sink-langfuse.mjs`).
+- **LangSmith** — cloud-only (no self-hostable OSS server, needs an account API key): adapter is unit-tested
+  against the documented API shape; live verification pending a key.
+
 ## Per-scorecard override
 
 `POST /scorecards` (+ MCP `run_scorecard` `trace_sink`) accepts `traceSink`: the name of a configured workspace
