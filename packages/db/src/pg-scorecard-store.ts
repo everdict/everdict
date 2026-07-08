@@ -109,6 +109,12 @@ export class PgScorecardStore implements ScorecardStore {
       sets.push(`summary = $${i++}`);
       vals.push(JSON.stringify(patch.summary));
     }
+    if (patch.orchestration !== undefined) {
+      // submit stamps workflowId onto the persisted orchestration (batch-on-Temporal) — silently dropping this
+      // left records unmarked and boot recovery double-driving workflow-owned batches.
+      sets.push(`orchestration = $${i++}`);
+      vals.push(JSON.stringify(patch.orchestration));
+    }
     if (patch.models !== undefined) {
       sets.push(`models = $${i++}`);
       vals.push(JSON.stringify(patch.models));
