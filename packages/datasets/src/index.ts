@@ -5,3 +5,4 @@ export * from "./diff.js";
 export * from "./mapping.js";
 export * from "./sources.js";
 export * from "./spec.js";
+export * from "./terminal-bench.js";
