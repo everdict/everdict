@@ -274,6 +274,38 @@ describe("MCP tools", () => {
     expect(bad.isError).toBe(true);
   });
 
+  it("register_harness surfaces private:true for a user-secret harness and stamps the creator (owner keeps seeing it)", async () => {
+    const deps = harness();
+    const me = await connect(deps, ["member"]);
+    const template = JSON.stringify({
+      kind: "command",
+      category: "browser-agent",
+      id: "bu-cli",
+      version: "1",
+      setup: [],
+      command: "run {{task}}",
+      env: { API_KEY: { secretRef: "API_KEY", scope: "user" } },
+      trace: { kind: "none" },
+    });
+    const instance = JSON.stringify({
+      template: { id: "bu-cli", version: "1" },
+      id: "bu-cli",
+      version: "1.0.0",
+      pins: {},
+    });
+    await me.callTool({ name: "register_harness_template", arguments: { spec: template } });
+    const reg = await me.callTool({ name: "register_harness", arguments: { spec: instance } });
+    expect(reg.isError).toBeFalsy();
+    // The visibility tradeoff is announced at write time…
+    expect(JSON.parse(text(reg))).toMatchObject({ id: "bu-cli", version: "1.0.0", private: true });
+    // …and the creator stamp keeps the private harness visible to its registrant (old MCP path lost it entirely).
+    const mine = await me.callTool({ name: "list_harnesses", arguments: {} });
+    expect((JSON.parse(text(mine)) as Array<{ id: string }>).map((e) => e.id)).toContain("bu-cli");
+    const other = await connect(deps, ["member"], "acme", "someone-else");
+    const theirs = await other.callTool({ name: "list_harnesses", arguments: {} });
+    expect((JSON.parse(text(theirs)) as Array<{ id: string }>).map((e) => e.id)).not.toContain("bu-cli");
+  });
+
   it("set_harness_version_tags — replace version tags (mutable metadata outside the spec), then exposed via list_harnesses.versionTags", async () => {
     const deps = harness();
     const viewer = await connect(deps, ["viewer"]); // harnesses:register is viewer+ (same gate as register)

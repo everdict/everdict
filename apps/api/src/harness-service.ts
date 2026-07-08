@@ -24,6 +24,22 @@ export async function harnessVisibleTo(
   }
 }
 
+// Whether a just-registered version resolves to a user-secret (private) harness — surfaced in the register response
+// (HTTP + MCP) so the registrant learns the visibility tradeoff at write time, not when teammates report a 404.
+// Resolve failure → false (the register call itself already validated the spec; this is display metadata only).
+export async function harnessIsPrivate(
+  registry: HarnessInstanceRegistry,
+  workspace: string,
+  id: string,
+  version: string,
+): Promise<boolean> {
+  try {
+    return referencesUserSecret(await registry.get(workspace, id, version));
+  } catch {
+    return false;
+  }
+}
+
 // Shared core for harness (instance) version soft delete — the HTTP routes (server.ts) and MCP tools (mcp.ts) use the same
 // logic (BFF↔MCP parity). Same pattern as dataset delete (dataset-service.deleteDatasetVersion).
 // Permission: only the version's registrant (createdBy === subject) or a workspace admin (harnesses:delete).

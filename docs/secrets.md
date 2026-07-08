@@ -47,9 +47,12 @@ a union until resolution).
 A harness whose resolved env references a **`user`-scoped** secret is **private to its creator** — only they can see
 or run it. Two layers enforce it, both **derived** (no extra column): `referencesUserSecret(spec)` (`@everdict/core`)
 + the instance's `createdBy`.
-- **Can't see** — `GET /harnesses` (+ `list_harnesses`) drops entries where `private && createdBy !== subject`
-  (`enrichHarnessList` stamps `private` from the latest resolved instance); `GET /harnesses/:id[/:version]` 404s a
-  non-creator. The web list shows a **Private** badge on your own private harnesses.
+- **Can't see** — `GET /harnesses` (+ `list_harnesses`) drops entries for non-owners; `GET /harnesses/:id[/:version]`
+  (and the raw `/instance` read) 404 a non-owner. The **owner** is the creator of the *latest* version — the version
+  whose resolved spec decides privacy (`VersionMeta.latestCreatedBy`; the id-level `createdBy` stays the display
+  "author"). The web list shows a **Private** badge on your own private harnesses, and the register response
+  (HTTP `POST /harnesses` + MCP `register_harness`) returns **`private: true`** so the tradeoff is visible at
+  write time, not when a teammate reports a 404.
 - **Can't run** — even if guessed, `resolveHarnessSecrets` for a non-owner fails: a `user` ref resolves against
   **that submitter's** `user` tier only, which lacks the creator's personal secret → `BadRequestError` (the case
   fails with a clear reason). So privacy is enforced by the secret resolution itself, not just the read filter.

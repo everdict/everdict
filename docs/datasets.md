@@ -88,7 +88,11 @@ add, all member+ (`datasets:write`), all immutable-on-register:
     collapsed **"Advanced · Need to run it differently?"** disclosure, each with an InfoTip. The full expressive power
     (env-kind isomorphism above) is unchanged — it's just no longer a mandatory quiz for the common QA case.
 - **Catalog** — `GET /benchmarks` lists the first-party code catalog (webvoyager/gaia/swe-bench/mind2web/gsm8k/
-  osworld); `POST /benchmarks/import {benchmark}` pulls it.
+  osworld); `POST /benchmarks/import {benchmark}` pulls it. Mind the **env kind** each entry maps to: the
+  browser-category entries (webvoyager/mind2web) produce `browser`-env cases, which only a **service-topology**
+  harness can run (Everdict provisions the browser). A **self-browsing command agent** (browser-use etc., which
+  drives its own Chromium) needs the same benchmark mapped with `promptEnv: true` + the start URL embedded via
+  `taskTemplate` — register that as a recipe instead (working example: `examples/bundles/browser-use`).
 - **Recipe** — `POST /benchmark-recipes` saves a reusable `BenchmarkAdapterSpec` (`BenchmarkRegistry`, owner +
   `_shared`); `POST /benchmarks/import {recipe}` imports from it. A recipe is a **first-class entity** in the web
   (`/{ws}/recipes` list + detail, its own nav item); the produced dataset records `producedBy` so the dataset

@@ -53,7 +53,7 @@ import { deleteDatasetVersion } from "./dataset-service.js";
 import type { GithubAppService } from "./github-app-service.js";
 import { installGithubWorkspaceRunner } from "./github-runner-install.js";
 import { RepinBodySchema, repinHarnessImages } from "./harness-pin-service.js";
-import { deleteHarnessVersion, harnessVisibleTo } from "./harness-service.js";
+import { deleteHarnessVersion, harnessIsPrivate, harnessVisibleTo } from "./harness-service.js";
 import type { ImageRegistryService } from "./image-registry-service.js";
 import type { MattermostCommandService } from "./mattermost-command-service.js";
 import type { MattermostService } from "./mattermost-service.js";
@@ -779,11 +779,19 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       await deps.harnessInstances.register(principal.workspace, parsed.data, principal.subject);
       // Image-classification warnings (warn-not-block) — local/unqualified images have no pull guarantee (risky to run off the build machine).
       const warnings = await harnessImageWarnings(deps, principal.workspace, parsed.data.id, parsed.data.version);
+      // Visibility tradeoff surfaced at write time: a user-scope secretRef makes the harness visible to you only.
+      const isPrivate = await harnessIsPrivate(
+        deps.harnessInstances,
+        principal.workspace,
+        parsed.data.id,
+        parsed.data.version,
+      );
       return reply.code(201).send({
         workspace: principal.workspace,
         id: parsed.data.id,
         version: parsed.data.version,
         ...(warnings.length > 0 ? { imageWarnings: warnings } : {}),
+        ...(isPrivate ? { private: true } : {}),
       });
     } catch (err) {
       return sendError(reply, err); // missing template 404 / missing pin 400 / immutable 409

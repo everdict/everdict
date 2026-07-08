@@ -32,7 +32,7 @@ import { deleteDatasetVersion } from "./dataset-service.js";
 import type { GithubAppService } from "./github-app-service.js";
 import { installGithubWorkspaceRunner } from "./github-runner-install.js";
 import { repinHarnessImages } from "./harness-pin-service.js";
-import { deleteHarnessVersion, harnessVisibleTo } from "./harness-service.js";
+import { deleteHarnessVersion, harnessIsPrivate, harnessVisibleTo } from "./harness-service.js";
 import type { ImageRegistryService } from "./image-registry-service.js";
 import type { MattermostService } from "./mattermost-service.js";
 import type { MembershipService } from "./membership-service.js";
@@ -324,7 +324,14 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
           if (!result.success) return fail(`BAD_REQUEST: ${result.error.message}`);
           // creator stamp = HTTP parity — without it a user-secret (private) instance becomes invisible even to its registrant
           await instances.register(ws, result.data, principal.subject); // resolve validation (missing template / absent pins → error)
-          return ok({ workspace: ws, id: result.data.id, version: result.data.version });
+          // Visibility tradeoff surfaced at write time (HTTP parity): user-scope secretRef → visible to you only.
+          const isPrivate = await harnessIsPrivate(instances, ws, result.data.id, result.data.version);
+          return ok({
+            workspace: ws,
+            id: result.data.id,
+            version: result.data.version,
+            ...(isPrivate ? { private: true } : {}),
+          });
         }),
     );
 

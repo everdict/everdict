@@ -190,7 +190,8 @@ export const BENCHMARK_CATALOG = {
   // Real-website browsing tasks (jsonl source, github). Scoring=judge (official WebVoyager is model-judged) + answer-match + steps.
   webvoyager: {
     id: "webvoyager",
-    description: "WebVoyager — real-website browsing tasks, model-judged (github.com/MinorJerry/WebVoyager)",
+    description:
+      "WebVoyager — real-website browsing tasks, model-judged (github.com/MinorJerry/WebVoyager). Maps to a browser env (topology harnesses — Everdict provisions the browser); a self-browsing command agent (browser-use etc.) needs a promptEnv recipe instead (see examples/bundles/browser-use)",
     category: "browser",
     defaultVersion: "1.0.0",
     source: { kind: "jsonl" },
