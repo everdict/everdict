@@ -1244,6 +1244,32 @@ describe("API — datasets (workspace-owned, member+ write)", () => {
     await app.close();
   });
 
+  it("member imports a Harbor task set → a registered dataset (201 + case count)", async () => {
+    const { app } = server({ requireAuth: true, authenticator: roleAuth(["member"]) });
+    const h = { authorization: "Bearer x" };
+    const res = await app.inject({
+      method: "POST",
+      url: "/datasets/harbor",
+      headers: h,
+      payload: {
+        dataset: { id: "harbor-core", version: "1.0.0" },
+        tasks: [
+          { id: "repro", instruction: "reproduce figure 3", difficulty: "hard" },
+          { id: "fix", instruction: "fix the bug", verifierCommand: "pytest -q", image: "explicit/fix:v1" },
+        ],
+        imageTemplate: "ghcr.io/acme/harbor/{id}:v1",
+      },
+    });
+    expect(res.statusCode).toBe(201);
+    expect(res.json()).toMatchObject({ id: "harbor-core", version: "1.0.0", cases: 2 });
+    expect(
+      (await app.inject({ method: "GET", url: "/datasets", headers: h }))
+        .json()
+        .some((d: { id: string }) => d.id === "harbor-core"),
+    ).toBe(true);
+    await app.close();
+  });
+
   it("DELETE version — the registrant soft-deletes (200, get 404 afterward); other workspaces cannot delete it (404)", async () => {
     const { app, keyStore } = server({ requireAuth: true });
     const acme = `Bearer ${await issueKey(keyStore, "acme")}`;

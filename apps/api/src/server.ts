@@ -27,8 +27,10 @@ import {
 } from "@everdict/core";
 import {
   BenchmarkAdapterSpecSchema,
+  HarborTaskSchema,
   TerminalBenchTaskSchema,
   diffDatasets,
+  harborToDataset,
   terminalBenchToDataset,
 } from "@everdict/datasets";
 import {
@@ -162,6 +164,15 @@ export const ImportTerminalBenchBodySchema = z.object({
   dataset: z.object({ id: z.string().min(1), version: z.string().min(1) }),
   tasks: z.array(TerminalBenchTaskSchema).min(1),
   imageTemplate: z.string().optional(), // resolves a task's image via {id} when the task carries none
+  description: z.string().optional(),
+  tags: z.array(z.string()).optional(),
+});
+
+// Harbor (Anthropic) task-set import → a workspace Dataset (same on-ramp as Terminal-Bench). docs/architecture/standard-task-formats.md
+export const ImportHarborBodySchema = z.object({
+  dataset: z.object({ id: z.string().min(1), version: z.string().min(1) }),
+  tasks: z.array(HarborTaskSchema).min(1),
+  imageTemplate: z.string().optional(),
   description: z.string().optional(),
   tags: z.array(z.string()).optional(),
 });
@@ -1079,6 +1090,44 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
         version: dataset.version,
         cases: dataset.cases.length,
       });
+    } catch (err) {
+      return sendError(reply, err); // unresolved image 400 / immutable 409
+    }
+  });
+
+  // Harbor (Anthropic) task-set → workspace Dataset — same on-ramp as Terminal-Bench (datasets:write, unresolved image 400).
+  app.post("/datasets/harbor", async (req, reply) => {
+    if (!deps.datasetRegistry)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "dataset registry not configured" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "datasets:write");
+    } catch (err) {
+      return sendError(reply, err);
+    }
+    const parsed = ImportHarborBodySchema.safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
+    try {
+      const dataset = harborToDataset(
+        parsed.data.tasks,
+        {
+          id: parsed.data.dataset.id,
+          version: parsed.data.dataset.version,
+          ...(parsed.data.description ? { description: parsed.data.description } : {}),
+          ...(parsed.data.tags ? { tags: parsed.data.tags } : {}),
+        },
+        parsed.data.imageTemplate ? { imageTemplate: parsed.data.imageTemplate } : {},
+      );
+      await deps.datasetRegistry.register(principal.workspace, dataset, principal.subject);
+      return reply
+        .code(201)
+        .send({
+          workspace: principal.workspace,
+          id: dataset.id,
+          version: dataset.version,
+          cases: dataset.cases.length,
+        });
     } catch (err) {
       return sendError(reply, err); // unresolved image 400 / immutable 409
     }

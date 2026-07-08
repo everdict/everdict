@@ -63,7 +63,10 @@ The `imageTemplate` (e.g. `ghcr.io/acme/tb-tasks/{id}:v1`) keeps the recipe ters
    accept a Terminal-Bench source (BFF↔MCP parity).
 4. **Image provenance helper** — prebuild+push tasks to the workspace registry; `imageWarnings` on register.
 5. **Web** — the add-benchmark wizard recognizes the Terminal-Bench source kind.
-6. **Harbor** — the same seam for Anthropic's Harbor task format (a second dedicated mapper).
+6. **Harbor** ✅ — the same seam for Anthropic's Harbor task format (`harbor.ts`, a second dedicated mapper).
+   A Harbor task (instruction.md + task.toml `[metadata]`/`[agent]`/`[environment]`/`[verifier]` + environment/
+   Dockerfile + tests/ verifier) maps to the SAME EvalCase shape as Terminal-Bench (image env + instruction +
+   tests-pass over the verifier command). Pure + tested in `datasets`.
 
 ## Non-goals (for now)
 - Building task images in-platform (against the `case.image` contract — reference, don't build).
