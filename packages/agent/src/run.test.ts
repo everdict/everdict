@@ -25,3 +25,40 @@ describe("runAgentJob", () => {
     expect(result.snapshot.changedFiles).toContain("out.txt");
   });
 });
+
+// Metering fail-safe: the usage-proxy binds 127.0.0.1 on the runner host, so a containerized (case.image) child
+// could never reach it — with metering left on, the child's model base URL is rewritten to a dead endpoint and
+// every model call dies. runAgentJob must disable metering when the case is containerized.
+describe("runAgentJob meterUsage × containerize fail-safe", () => {
+  const meteredJob = (): AgentJob => ({
+    harness: { id: "probe", version: "1" },
+    meterUsage: true,
+    harnessSpec: {
+      kind: "command",
+      id: "probe",
+      version: "1",
+      setup: [],
+      command: "echo base=$OPENAI_API_BASE",
+      env: { OPENAI_API_BASE: "http://upstream.test/v1" },
+      params: {},
+      trace: { kind: "none" },
+    },
+    evalCase: { id: "m1", env: { kind: "prompt" }, task: "t", graders: [], timeoutSec: 60, tags: [] },
+  });
+
+  const finalText = (trace: Array<{ kind: string; text?: string }>): string =>
+    trace.filter((e) => e.kind === "message").at(-1)?.text ?? "";
+
+  it("host-native (LocalDriver): metering rewrites the child's base URL to the loopback proxy", async () => {
+    const result = await runAgentJob(meteredJob());
+    expect(finalText(result.trace)).toMatch(/base=http:\/\/127\.0\.0\.1:\d+/);
+  });
+
+  it("containerized: metering is disabled so the child keeps the real upstream URL", async () => {
+    const { LocalDriver } = await import("@everdict/drivers");
+    // explicit driver wins over containerize, so the case still executes host-side — but the guard must
+    // key off containerize (what the runner passes for image-cases) and leave the env untouched.
+    const result = await runAgentJob(meteredJob(), { driver: new LocalDriver(), containerize: true });
+    expect(finalText(result.trace)).toContain("base=http://upstream.test/v1");
+  });
+});

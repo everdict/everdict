@@ -27,7 +27,12 @@ the original architecture.) **Tokens always; `$` when the gateway prices the mod
 
 ## Wired into the run lifecycle (per-workspace / per-run)
 The proxy lives **in the agent's sandbox**, on `localhost` — so it works on every backend (Local/Nomad/K8s)
-without any cross-network reconfiguration (the agent→upstream path is the one that already works):
+without any cross-network reconfiguration (the agent→upstream path is the one that already works).
+**Exception — containerized image-cases on a self-hosted runner (DockerDriver):** there the agent process runs on
+the runner HOST while the child runs in a container, so the loopback proxy is unreachable from the child; leaving
+metering on would rewrite the child's model base URL to a dead endpoint and kill every model call. `runAgentJob`
+disables metering fail-safe for `containerize` jobs (warn logged) — meter those runs via trace instrumentation
+(`trace: otel/mlflow`) instead:
 1. **Control plane decides** whether to meter a run and sets **`AgentJob.meterUsage`** (authoritative).
    Resolution in `RunService` (async): per-run override (`POST /runs` body `meterUsage`) → per-workspace policy
    (`meterUsageFor(tenant)`) → `false`. `main.ts` wires the policy as **durable per-workspace settings → env

@@ -21,7 +21,15 @@ export async function runAgentJob(
   // Usage metering (BYO + Everdict-owned budget): the control plane decides from workspace/request policy and sends it via job.meterUsage.
   // If unset, fall back for dev to the EVERDICT_METER_USAGE env (when dispatching directly to LocalBackend without a control plane).
   // When on, the command harness routes model calls through a usage-proxy to recover tokens → carried into the result as synthetic trace events.
-  const meterUsage = job.meterUsage ?? process.env.EVERDICT_METER_USAGE === "1";
+  // Containerized (case.image) jobs are excluded fail-safe: the proxy binds 127.0.0.1 on the RUNNER host, which is
+  // unreachable from inside the container — leaving metering on would rewrite the child's model base URL to a dead
+  // endpoint and kill every model call, far worse than missing cost data. See docs/usage-metering.md.
+  const requestedMetering = job.meterUsage ?? process.env.EVERDICT_METER_USAGE === "1";
+  const meterUsage = requestedMetering && opts.containerize !== true;
+  if (requestedMetering && !meterUsage)
+    console.error(
+      "⚠ meterUsage requested but the case runs in a container — the loopback usage-proxy is unreachable from a container, so metering is disabled for this case (use trace instrumentation instead).",
+    );
   const harness = makeHarness(job.harness.id, job.harness.version, job.harnessSpec, { meterUsage });
   // Include the judge grader: build the Judge from env (key=secretEnv) + job.judge (model/provider, loaded onto the job by the control plane).
   // A remote alloc already has judgeEnv injected into env by the backend, but merge here so local (process.env) behaves the same.

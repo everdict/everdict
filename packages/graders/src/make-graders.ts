@@ -5,6 +5,7 @@ import { type Judge, JudgeGrader } from "./judge.js";
 import { ScriptScoreGrader } from "./script-score.js";
 import { SweBenchGrader } from "./swe-bench.js";
 import { TestsPassGrader } from "./tests-pass.js";
+import { TextMetricGrader } from "./text-metric.js";
 import { costGrader, latencyGrader, stepsGrader } from "./trace-graders.js";
 
 function strArray(v: unknown): string[] {
@@ -63,6 +64,13 @@ export function makeGraders(specs: GraderSpec[], opts: { judge?: Judge } = {}): 
         return new UrlMatchesGrader(String(s.config?.pattern ?? ".*"));
       case "answer-match":
         return new AnswerMatchGrader(String(s.config?.expect ?? ""), s.config?.mode === "exact" ? "exact" : "contains");
+      case "text-metric":
+        // Numeric metric recovered from the agent's printed output (trace:none stdout tail) — pattern/metric are required data.
+        return new TextMetricGrader({
+          pattern: String(s.config?.pattern ?? ""),
+          metric: String(s.config?.metric ?? ""),
+          ...(optStr(s.config?.id) ? { id: optStr(s.config?.id) } : {}),
+        });
       case "judge": {
         if (!opts.judge) {
           throw new BadRequestError(

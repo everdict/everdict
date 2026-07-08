@@ -35,7 +35,11 @@ path → runs on **Local / Nomad / K8s** backends with the existing isolation.
 - **`none`** — no trajectory/cost. The command's **stdout (tail 32k) becomes the final assistant `message`**
   trace event, so prompt-QA benchmarks (`answer-match`/judge — e.g. OfficeQA-style) grade a black-box CLI's
   printed answer; outcome grading (repo diff + `tests-pass`) is unchanged. A non-zero exit yields an `error`
-  trace event (never silently swallowed).
+  trace event (never silently swallowed). Numeric metrics the agent prints itself (e.g. browser-use's
+  `steps: 12` result block) are recoverable with the **`text-metric` grader**
+  (`{id:"text-metric", config:{pattern:"^steps: (\\d+)", metric:"agent_steps"}}` — one capture group over the
+  final assistant message), so a trace:none run still gets a per-case step/score axis; real trajectory/cost
+  still requires instrumentation (`otel`/`mlflow`) or the `meterUsage` proxy.
 - **`otel` / `mlflow` / `langfuse` / `langsmith` / `phoenix`** — after the command, the trace is pulled via
   `@everdict/trace` `buildTraceSource` (the same 5 kinds as pull-ingest; phoenix needs `project`) by
   `EVERDICT_RUN_ID`. The agent must tag its spans with that id
