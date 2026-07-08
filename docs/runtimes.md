@@ -88,4 +88,18 @@ unreachable address. The credential is used only for the probe's auth header (ne
   reachable/detail before you commit.
 - The scorecard **Run** form gains a **Runtime** selector (defaults to the global backend).
 
+## Sizing a Nomad runtime for eval batch churn (live-verified)
+A 100+-case batch leaves that many dead jobs/allocs behind per run. Two operational facts, both hit live
+(docs/architecture/batch-resilience.md):
+- **`client.gc_max_allocs`** (default 50) must be sized well above the burst dead-alloc count. Past the threshold the
+  client instantly GCs each newly terminal alloc DIR, and the result-log fetch loses the race — the whole batch reads
+  as dispatch failures ("alloc log fetch failed"). The backend's 404 error names this knob.
+- **Do not enable `purgeDeadJobs`** unless the cluster is known to tolerate it: purging a job whose alloc a client
+  still tracks panics the client's alloc watcher (nil deref in Allocation.Canonicalize) — fatal on a dev-mode agent,
+  a lost client on a real cluster. Rely on server job GC (`job_gc_threshold`) plus a sized `gc_max_allocs` instead.
+
+**Agent image per runtime**: `RuntimeSpec.image` is tenant-chosen, so pure-command/BYO-image workloads can run the
+**slim agent** (`packages/agent/Dockerfile.slim`, ~330MB — node+git, no claude/aider batteries) — 3× faster alloc
+start than the batteries-included default and small enough to `kind load` into a local cluster.
+
 See `docs/backends.md` (skill `backends`), `docs/tenancy.md`, `docs/scorecards.md`.
