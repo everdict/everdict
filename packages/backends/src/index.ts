@@ -9,6 +9,7 @@ export {
   type BackendSlot,
   type SchedulerOptions,
 } from "./scheduler.js";
+export { CircuitBreaker, type CircuitBreakerOpts } from "./circuit-breaker.js";
 export { FairQueue, type FairQueueOptions } from "./fair-queue.js";
 export {
   Autoscaler,
