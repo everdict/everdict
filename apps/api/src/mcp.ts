@@ -788,7 +788,12 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
           dataset_version: z.string().optional(),
           harness_id: z.string(),
           harness_version: z.string().optional(),
-          runtime: z.string().optional(), // tenant Runtime id to run on (placement.target) or a self runner target. If absent, 400 per the deployment policy.
+          runtime: z
+            .string()
+            .optional()
+            .describe(
+              "tenant Runtime id (placement.target) or self runner target; a comma-separated list SHARDS the batch round-robin across runtimes. If absent, 400 per the deployment policy",
+            ),
           harness_pins: z
             .record(z.string())
             .optional()

@@ -123,7 +123,9 @@ export const RunScorecardBodySchema = z.object({
   }),
   origin: ScorecardOriginBodySchema.optional(),
   judges: z.array(z.object({ id: z.string(), version: z.string().default("latest") })).default([]),
-  runtime: z.string().optional(), // tenant Runtime id to execute on (placement.target). Absent = default backend.
+  // tenant Runtime id to execute on (placement.target). A comma-separated list SHARDS the batch round-robin
+  // across the listed runtimes (e.g. "nomad-seoul,k8s-east"). Absent = default backend.
+  runtime: z.string().optional(),
   judge: JudgeRunConfigSchema.optional(), // inline judge-grader scoring-model override (unset = workspace default)
   // concurrent case dispatches within a batch (runSuite parallelism). Unset = service default (=4). The Scheduler's
   // per-backend capacity + queue backpressure govern actual placement, so this mostly means "how many cases this

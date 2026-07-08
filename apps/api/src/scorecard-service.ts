@@ -831,11 +831,23 @@ export class ScorecardService {
     let scorecard: Scorecard | undefined;
     try {
       // When a runtime is selected, inject it as each case's placement.target → RuntimeDispatcher routes to the tenant runtime.
+      // A comma-separated list SHARDS the batch: cases round-robin across the listed runtimes (per-case placement,
+      // per-case failure isolation unchanged) — one 601-case batch can drain a Nomad pool and a K8s pool at once.
       // Seeded cases (already-finished results carried in by resume/retry) are excluded from dispatch entirely.
       const casesToRun = seed.length > 0 ? dataset.cases.filter((c) => !seededIds.has(c.id)) : dataset.cases;
-      const cases = runtime
-        ? casesToRun.map((c) => ({ ...c, placement: { ...c.placement, target: runtime } }))
-        : casesToRun;
+      const targets = runtime
+        ? runtime
+            .split(",")
+            .map((t) => t.trim())
+            .filter(Boolean)
+        : [];
+      const cases =
+        targets.length > 0
+          ? casesToRun.map((c, i) => ({
+              ...c,
+              placement: { ...c.placement, target: targets[i % targets.length] as string },
+            }))
+          : casesToRun;
       const suite: Suite = { id: dataset.id, harness: { id: harnessId }, cases };
       // judge streaming — fire a case's judge the moment it finishes, without waiting for the whole batch to complete
       // (case-axis parallel·bounded). Removes the barrier where the slowest case blocked judging of the rest.

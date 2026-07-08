@@ -1338,6 +1338,28 @@ describe("ScorecardService — batch resilience (resume · retry-failed)", () =>
     return { store, runs, datasets, service };
   }
 
+  it("a comma-separated runtime SHARDS the batch — cases round-robin across the listed runtimes", async () => {
+    const seen: string[] = [];
+    const dispatcher: Dispatcher = {
+      async dispatch(job: AgentJob) {
+        seen.push(job.evalCase.placement?.target ?? "?");
+        return passResult(job.evalCase.id);
+      },
+    };
+    const { store, datasets, service } = build(dispatcher);
+    await datasets.register("acme", threeCaseDataset);
+    const rec = await service.submit({
+      tenant: "acme",
+      dataset: { id: "rd", version: "1.0.0" },
+      harness: { id: "h", version: "1" },
+      runtime: "nomad-a, k8s-b",
+      concurrency: 1, // serial → deterministic round-robin order
+    });
+    await waitTerminal(store, rec.id);
+    expect(seen).toEqual(["nomad-a", "k8s-b", "nomad-a"]);
+    expect(rec.runtime).toBe("nomad-a, k8s-b"); // the record keeps the full sharding list
+  });
+
   it("submit persists the orchestration inputs (judges/judge/concurrency/retries) needed to re-drive the batch", async () => {
     const { dispatcher } = capturingDispatcher();
     const { store, datasets, service } = build(dispatcher);
