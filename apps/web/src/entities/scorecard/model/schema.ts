@@ -19,6 +19,19 @@ export const metricSummarySchema = z.object({
 })
 export type MetricSummary = z.infer<typeof metricSummarySchema>
 
+// trial roll-up (pass@k / flakiness) — derived on the detail when a batch ran trials>1. Absent on single-run batches.
+export const scorecardTrialSummarySchema = z.object({
+  cases: z.number(), // cases with >=1 scored trial
+  minTrials: z.number(),
+  maxTrials: z.number(),
+  passAt1: z.number(), // mean over cases of the per-case pass rate
+  k: z.number(), // the k used for passAtK
+  passAtK: z.number(),
+  flakyCases: z.number(), // cases with mixed pass/fail across trials
+  flakeRate: z.number(),
+})
+export type ScorecardTrialSummary = z.infer<typeof scorecardTrialSummarySchema>
+
 // per-case scores (loose — display fields only, the rest passthrough). detail = the grader/judge's verdict rationale (VLM rubric reasoning, etc.).
 export const caseScoreSchema = z
   .object({
@@ -125,6 +138,7 @@ export const scorecardRecordSchema = z.object({
   harness: z.object({ id: z.string(), version: z.string() }),
   status: scorecardStatusSchema,
   summary: z.array(metricSummarySchema).optional(),
+  trialSummary: scorecardTrialSummarySchema.optional(), // pass@k / flakiness — present only on a multi-trial batch's detail
   models: scorecardModelsSchema.optional(), // unset on legacy records (unknown)
   judgeModels: z.array(z.string()).optional(), // the judge model(s) that graded this run — separate from the model axis (the grader)
   origin: scorecardOriginSchema.optional(), // trigger provenance — lightweight, so also included in the list. Unset on legacy records.
@@ -165,6 +179,31 @@ export const caseDeltaSchema = z.object({
 })
 export type CaseDelta = z.infer<typeof caseDeltaSchema>
 
+// A trial-aware per-case delta — baseline vs candidate pass RATE over N trials + the two-proportion z gate.
+export const trialCaseDeltaSchema = z.object({
+  caseId: z.string(),
+  baselineRate: z.number(),
+  baselineTrials: z.number(),
+  candidateRate: z.number(),
+  candidateTrials: z.number(),
+  delta: z.number(),
+  z: z.number(), // two-proportion z of candidate vs baseline (negative = candidate lower)
+  significant: z.boolean(), // |z| >= zThreshold
+})
+export type TrialCaseDelta = z.infer<typeof trialCaseDeltaSchema>
+
+// Statistically-gated diff — attached to the diff response when either side ran trials (regressions are the
+// significant pass-rate drops, not single flips). docs/architecture/trial-based-verdict.md
+export const trialDiffSchema = z.object({
+  baseline: z.string(),
+  candidate: z.string(),
+  zThreshold: z.number(),
+  cases: z.array(trialCaseDeltaSchema),
+  regressions: z.array(trialCaseDeltaSchema),
+  improvements: z.array(trialCaseDeltaSchema),
+})
+export type TrialDiff = z.infer<typeof trialDiffSchema>
+
 export const scorecardDiffSchema = z.object({
   baseline: z.string(),
   candidate: z.string(),
@@ -178,6 +217,7 @@ export const scorecardDiffSchema = z.object({
   ),
   regressions: z.array(caseDeltaSchema),
   improvements: z.array(caseDeltaSchema),
+  trials: trialDiffSchema.optional(), // statistical (pass@k) gate — present only when either side ran trials
 })
 export type ScorecardDiff = z.infer<typeof scorecardDiffSchema>
 

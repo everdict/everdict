@@ -14,6 +14,7 @@ export interface RunScorecardInput {
   // The control plane 400s an unspecified placement (requireRuntime — no host fallback).
   runtime?: string
   concurrency?: number // Number of cases dispatched concurrently within the batch (parallelism). Unset uses the control plane default.
+  trials?: number // Run each case N times for pass@k / flakiness. Unset = 1 (single run).
   cases?: { limit?: number; tags?: string[] } // Partial run — only a subset of the full dataset (unset = all)
 }
 
@@ -33,6 +34,7 @@ export async function runScorecardAction(input: RunScorecardInput): Promise<RunS
     // When runtime is selected the control plane injects it as each case's placement.target → RuntimeDispatcher routing.
     ...(input.runtime ? { runtime: input.runtime } : {}),
     ...(input.concurrency ? { concurrency: input.concurrency } : {}),
+    ...(input.trials && input.trials > 1 ? { trials: input.trials } : {}),
     ...(input.cases ? { cases: input.cases } : {}),
   }
   try {

@@ -22,6 +22,12 @@ import { SectionHeader } from '@/shared/ui/section-header'
 import { StatCard } from '@/shared/ui/stat-card'
 import { StatusPill } from '@/shared/ui/status-pill'
 import { Table, TBody, TD, TH, THead, TR } from '@/shared/ui/table'
+import { InfoTip } from '@/shared/ui/tooltip'
+
+// pass-rate tone shared by pass@1 / pass@k stat cards (mirror of the case rollup's pass-rate thresholds).
+function rateTone(rate: number): 'success' | 'default' | 'danger' {
+  return rate >= 0.75 ? 'success' : rate >= 0.4 ? 'default' : 'danger'
+}
 
 export const dynamic = 'force-dynamic'
 
@@ -212,6 +218,42 @@ export default async function ScorecardDetailPage({
             }
           />
         </div>
+      )}
+
+      {/* Trials — pass@k / flakiness roll-up (only when this batch ran repeated trials per case). */}
+      {record.trialSummary && (
+        <section className="space-y-2.5">
+          <SectionHeader title={t('trialsTitle')} action={<InfoTip content={t('trialsInfo')} />} />
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <StatCard
+              label={t('trialsPassAt1')}
+              value={fmtPct(record.trialSummary.passAt1)}
+              tone={rateTone(record.trialSummary.passAt1)}
+            />
+            <StatCard
+              label={t('trialsPassAtK', { k: record.trialSummary.k })}
+              value={fmtPct(record.trialSummary.passAtK)}
+              tone={rateTone(record.trialSummary.passAtK)}
+            />
+            <StatCard
+              label={t('trialsFlakeRate')}
+              value={fmtPct(record.trialSummary.flakeRate)}
+              tone={record.trialSummary.flakyCases > 0 ? 'danger' : 'success'}
+              hint={t('trialsFlakyCases', {
+                n: record.trialSummary.flakyCases,
+                total: record.trialSummary.cases,
+              })}
+            />
+            <StatCard
+              label={t('trialsPerCase')}
+              value={
+                record.trialSummary.minTrials === record.trialSummary.maxTrials
+                  ? record.trialSummary.minTrials
+                  : `${record.trialSummary.minTrials}–${record.trialSummary.maxTrials}`
+              }
+            />
+          </div>
+        </section>
       )}
 
       <Card className="grid grid-cols-2 gap-4 p-4 sm:grid-cols-4">

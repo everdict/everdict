@@ -6,6 +6,7 @@ import { ComparePicker, type CompareOption } from '@/features/compare-scorecards
 import { scorecardDiffSchema, scorecardsSchema, type ScorecardDiff } from '@/entities/scorecard'
 import { authContext } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
+import { fmtPct } from '@/shared/lib/format'
 import { cn } from '@/shared/lib/utils'
 import { Badge } from '@/shared/ui/badge'
 import { Callout } from '@/shared/ui/callout'
@@ -15,6 +16,7 @@ import { EmptyState } from '@/shared/ui/empty-state'
 import { PageHeader } from '@/shared/ui/page-header'
 import { SectionHeader } from '@/shared/ui/section-header'
 import { Table, TBody, TD, TH, THead, TR } from '@/shared/ui/table'
+import { InfoTip } from '@/shared/ui/tooltip'
 
 export const dynamic = 'force-dynamic'
 
@@ -171,23 +173,101 @@ export default async function CompareScorecardsPage({
             </Table>
           </section>
 
-          <section className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-            <DeltaList
-              title={t('regressionsTitle')}
-              tone="danger"
-              items={diff.regressions}
-              empty={t('noRegressions')}
-            />
-            <DeltaList
-              title={t('improvementsTitle')}
-              tone="success"
-              items={diff.improvements}
-              empty={t('noImprovements')}
-            />
-          </section>
+          {/* When either side ran trials, the pass-transition lists are last-trial-noisy — show the statistically-gated
+              (two-proportion) regressions instead. Otherwise fall back to the single-run pass-transition lists. */}
+          {diff.trials ? (
+            <section className="space-y-3">
+              <SectionHeader
+                title={t('trialGateTitle')}
+                action={
+                  <InfoTip content={t('trialGateInfo', { z: diff.trials.zThreshold.toFixed(2) })} />
+                }
+              />
+              <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                <TrialDeltaList
+                  title={t('regressionsTitle')}
+                  tone="danger"
+                  items={diff.trials.regressions}
+                  empty={t('noTrialRegressions')}
+                />
+                <TrialDeltaList
+                  title={t('improvementsTitle')}
+                  tone="success"
+                  items={diff.trials.improvements}
+                  empty={t('noTrialImprovements')}
+                />
+              </div>
+            </section>
+          ) : (
+            <section className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+              <DeltaList
+                title={t('regressionsTitle')}
+                tone="danger"
+                items={diff.regressions}
+                empty={t('noRegressions')}
+              />
+              <DeltaList
+                title={t('improvementsTitle')}
+                tone="success"
+                items={diff.improvements}
+                empty={t('noImprovements')}
+              />
+            </section>
+          )}
         </div>
       )}
     </div>
+  )
+}
+
+// A statistically-gated trial delta list — baseline vs candidate pass RATE over N trials + the two-proportion z.
+// Every item here already cleared the significance gate on the server, so the count IS the significant set.
+function TrialDeltaList({
+  title,
+  tone,
+  items,
+  empty,
+}: {
+  title: string
+  tone: 'danger' | 'success'
+  items: NonNullable<ScorecardDiff['trials']>['regressions']
+  empty: string
+}) {
+  const sorted = [...items].sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta))
+  return (
+    <Card className="space-y-2.5 p-4">
+      <div className="flex items-center justify-between">
+        <h2 className="text-[13px] font-[560]">{title}</h2>
+        <Badge tone={tone}>{items.length}</Badge>
+      </div>
+      {sorted.length === 0 ? (
+        <p className="text-[13px] text-muted-foreground">{empty}</p>
+      ) : (
+        <ul className="divide-y divide-border/70">
+          {sorted.map((d) => (
+            <li
+              key={d.caseId}
+              className="flex items-center justify-between gap-2 py-1.5 first:pt-0 last:pb-0"
+            >
+              <span className="min-w-0 truncate font-mono text-[12px]">{d.caseId}</span>
+              <span className="flex shrink-0 items-center gap-2 font-mono text-[12px] tabular-nums">
+                <span className="text-muted-foreground">
+                  {fmtPct(d.baselineRate)} → {fmtPct(d.candidateRate)}
+                </span>
+                <span
+                  className={cn(
+                    'font-[510]',
+                    tone === 'danger' ? 'text-destructive' : 'text-[var(--color-success)]'
+                  )}
+                >
+                  z {d.z.toFixed(2)}
+                </span>
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Card>
   )
 }
 

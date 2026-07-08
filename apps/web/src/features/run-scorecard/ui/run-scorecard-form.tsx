@@ -45,6 +45,7 @@ interface Values {
   harnessVersion: string
   runtime: string // Execution location (registered runtime id or self runner target). The control plane 400s an unspecified placement — required.
   concurrency: string // Parallelism (empty = control plane default). Parsed to a number on submit.
+  trials: string // Run each case N times for pass@k / flakiness (empty = 1). Parsed to a number on submit.
   caseLimit: string // Partial run — only the first N (empty = all). Parsed to a number on submit.
   caseTags: string // Partial run — tag filter (comma-separated, any-match; empty = all)
 }
@@ -82,6 +83,7 @@ export function RunScorecardForm({
       harnessVersion: 'latest',
       runtime: '',
       concurrency: '',
+      trials: '',
       caseLimit: '',
       caseTags: '',
     },
@@ -111,8 +113,9 @@ export function RunScorecardForm({
 
   async function onSubmit(values: Values) {
     setServerError(undefined)
-    const { concurrency, caseLimit, caseTags, ...rest } = values
+    const { concurrency, trials, caseLimit, caseTags, ...rest } = values
     const n = Number.parseInt(concurrency, 10) // empty/invalid → omit (use control plane default)
+    const tn = Number.parseInt(trials, 10) // empty/invalid → omit (1 trial)
     // Partial run — limit (first N) / tags (comma-separated). If both are empty, run all (omit cases).
     const limit = Number.parseInt(caseLimit, 10)
     const tags = caseTags
@@ -126,6 +129,7 @@ export function RunScorecardForm({
     const res = await runScorecardAction({
       ...rest,
       ...(Number.isFinite(n) && n > 0 ? { concurrency: n } : {}),
+      ...(Number.isFinite(tn) && tn > 1 ? { trials: tn } : {}),
       ...(Object.keys(cases).length > 0 ? { cases } : {}),
     })
     if (res.ok && res.id) router.push(`/${workspace}/scorecards/${res.id}`)
@@ -270,6 +274,22 @@ export function RunScorecardForm({
           {...register('concurrency')}
         />
         <p className="text-[12px] text-muted-foreground">{t('concurrencyHelp')}</p>
+      </div>
+
+      {/* Trials — run each case N times for pass@k / flakiness (empty/1 = single run). */}
+      <div className="space-y-1.5">
+        <div className="flex items-center gap-1">
+          <Label htmlFor="trials">{t('trialsLabel')}</Label>
+          <InfoTip content={t('trialsTip')} />
+        </div>
+        <Input
+          id="trials"
+          type="number"
+          min={1}
+          max={100}
+          placeholder={t('trialsPlaceholder')}
+          {...register('trials')}
+        />
       </div>
 
       {/* Partial run — only a subset of cases instead of all (cost/smoke). The result keeps a "partial n/N" marker. */}
