@@ -2,8 +2,10 @@ name: "Everdict Run Eval"
 description: >-
   Fire an Everdict evaluation from CI. Pull requests run the topology with this build's image
   swapped in (ephemeral pins — registry untouched); /evaluate PR comments (issue_comment)
-  do the same on demand, replying to the PR conversation; pushes to dev/main re-pin the
-  harness to a new immutable version (the "dev channel") and evaluate it.
+  do the same on demand, replying to the PR conversation — key=value arguments after the
+  command tune that one fire (limit/tags/ids/trials/concurrency/retries/runtime/sink);
+  pushes to dev/main re-pin the harness to a new immutable version (the "dev channel")
+  and evaluate it.
 author: "everdict"
 
 inputs:

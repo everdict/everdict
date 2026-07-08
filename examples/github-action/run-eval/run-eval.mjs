@@ -6,6 +6,7 @@
 // Auth: the api-key input → if absent, GitHub OIDC token (aud=everdict) federation (requires a repo link in the workspace).
 // Design: docs/architecture/github-actions-trigger.md
 import { appendFileSync, readFileSync } from "node:fs";
+import { parseEvaluateArgs } from "./parse-evaluate-args.mjs";
 
 // GitHub passes JS action inputs as INPUT_<UPPER> env (read directly, without @actions/core, to stay zero-dep).
 // GitHub replaces only spaces with _ and preserves hyphens → `api-url` = INPUT_API-URL. (Replacing hyphens with _ would not find it.)
@@ -133,6 +134,12 @@ async function main() {
 
   // /evaluate acknowledgment — the evaluation takes minutes, so react to the trigger comment with 👀 immediately (the conversation is the only feedback surface).
   const commentFire = event === "issue_comment";
+  // /evaluate arguments (key=value after the command) tune this one fire — subset/trials/runtime/sink — without
+  // touching the workflow. Malformed/unknown tokens are warnings in the reply, never failures.
+  const evalArgs = commentFire ? parseEvaluateArgs(payload.comment?.body) : { overrides: {}, warnings: [] };
+  if (Object.keys(evalArgs.overrides).length > 0)
+    console.log(`/evaluate overrides: ${JSON.stringify(evalArgs.overrides)}`);
+  for (const w of evalArgs.warnings) console.log(`/evaluate: ${w}`);
   if (commentFire && payload.comment?.id !== undefined)
     await githubApi(`/repos/${origin.repo}/issues/comments/${payload.comment.id}/reactions`, { content: "eyes" });
 
@@ -155,6 +162,7 @@ async function main() {
   }
 
   // Launch — PR uses ephemeral pins, push uses the re-pinned version.
+  const ov = evalArgs.overrides;
   const submitted = await api("POST", "/scorecards", {
     dataset: { id: dataset },
     harness: {
@@ -164,7 +172,12 @@ async function main() {
     },
     origin,
     ...(judges ? { judges } : {}),
-    ...(runtime ? { runtime } : {}),
+    ...(ov.runtime ?? runtime ? { runtime: ov.runtime ?? runtime } : {}),
+    ...(ov.cases ? { cases: ov.cases } : {}),
+    ...(ov.trials !== undefined ? { trials: ov.trials } : {}),
+    ...(ov.concurrency !== undefined ? { concurrency: ov.concurrency } : {}),
+    ...(ov.retries !== undefined ? { retries: ov.retries } : {}),
+    ...(ov.traceSink !== undefined ? { traceSink: ov.traceSink } : {}),
   });
   setOutput("scorecard-id", submitted.id);
   console.log(`scorecard ${submitted.id} queued (mode=${mode}, harness=${harness}@${harnessVersion})`);
@@ -211,7 +224,13 @@ async function main() {
 
   // A comment trigger (/evaluate) replies with the result in the conversation — for success/failure/regression alike (before the throw below).
   if (commentFire && origin.prNumber !== undefined) {
-    await githubApi(`/repos/${origin.repo}/issues/${origin.prNumber}/comments`, { body: lines.join("\n") });
+    const argLines = [];
+    if (Object.keys(evalArgs.overrides).length > 0)
+      argLines.push("", `applied /evaluate arguments: \`${JSON.stringify(evalArgs.overrides)}\``);
+    for (const w of evalArgs.warnings) argLines.push(`- ⚠️ ${w}`);
+    await githubApi(`/repos/${origin.repo}/issues/${origin.prNumber}/comments`, {
+      body: [...lines, ...argLines].join("\n"),
+    });
     conversationNotified = true;
   }
 

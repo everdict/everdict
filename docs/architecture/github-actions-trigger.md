@@ -260,3 +260,13 @@ self-hosted**, which is fail-closed by construction and matches the shipped one-
 - **Link write gating.** Creating a link both wires a harness and grants repo-federated access — lean
   `settings:write` (admin) for creation, since it is a trust grant; the picker/setup-PR UX stays member-visible
   read-only until an admin confirms. To revisit when the UX is built.
+
+
+## /evaluate arguments
+
+`key=value` tokens after the command tune that ONE fire without editing the workflow:
+`/evaluate limit=20 tags=smoke,fast trials=3 runtime=self:ws sink=none`. Supported: `limit`/`tags`/`ids`
+(case subset), `trials` (pass@k), `concurrency`, `retries` (0–5), `runtime` (override, incl. comma shard list /
+`auto` / `self:…`), `sink` (per-batch trace-sink override, `none` suppresses export). Parsed inside the action
+(`parse-evaluate-args.mjs` — the comment body comes from the event payload, so no workflow change); malformed or
+unknown tokens are WARNINGS surfaced in the PR reply, never failures — a typo must not cost the fire.
