@@ -4,6 +4,9 @@ import type { AgentJob, CaseResult } from "@everdict/core";
 export interface BackendCapacity {
   total: number; // upper bound of concurrent slots (static config or live probe)
   used: number; // external usage observed by the backend (0 if unknown; the scheduler additionally accounts for its own in-flight)
+  // Optional memory envelope (declared, e.g. RuntimeSpec.memoryBudgetMb) — caps the SUM of in-flight
+  // harness-declared memory the Scheduler admits at once. Absent = slots-only admission (previous behavior).
+  memoryBudgetMb?: number;
 }
 
 // Runtime connection probe result — without running a job, checks only "does this cluster actually connect (reachability + auth)".

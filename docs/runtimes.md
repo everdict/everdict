@@ -20,6 +20,11 @@ own runtimes ("bring your own compute") and select one per scorecard run; the co
   e.g. a SWE-bench prebuilt). `{ image? }` (default image when a case carries none).
 - **nomad** — `{ addr, image, runtime?, datacenters?, namespace?, authSecret? }`.
 - **k8s** — `{ image, context?, namespace?, runtimeClass?, server?, authSecret?, kubeconfigSecret? }`.
+- shared admission envelope (nomad/k8s) — `maxConcurrent?` (slot cap the Scheduler admits; absent → backend
+  default 20) + `memoryBudgetMb?` (cap on the SUM of in-flight harness-declared `resources.memoryMb`; heavy
+  harnesses queue when the envelope is full even with slots free — harnesses that declare no memory are admitted
+  outside it). The cluster's own scheduler still bin-packs nodes; the envelope keeps the control plane from
+  over-committing the cluster in the first place.
 - **topology** — for a `kind:"service"` topology harness (e.g. browser-use): a warm service pool + per-case
   browser on `orchestrator` (nomad|k8s), trace pulled from `traceSource`.
   `{ orchestrator, addr?|context?, namespace?, browserImage?, traceSource, authSecret? }`.

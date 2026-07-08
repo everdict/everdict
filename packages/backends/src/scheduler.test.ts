@@ -21,6 +21,7 @@ class ControlledBackend implements Backend {
   maxSeen = 0;
   handled = 0;
   dispatchedIds: string[] = []; // order of dispatched case ids (for fairness verification)
+  memoryBudgetMb: number | undefined;
   private pending: Array<() => void> = [];
   constructor(
     readonly id: string,
@@ -28,7 +29,11 @@ class ControlledBackend implements Backend {
     private readonly used = 0,
   ) {}
   async capacity() {
-    return { total: this.total, used: this.used };
+    return {
+      total: this.total,
+      used: this.used,
+      ...(this.memoryBudgetMb !== undefined ? { memoryBudgetMb: this.memoryBudgetMb } : {}),
+    };
   }
   dispatch(job: AgentJob): Promise<CaseResult> {
     this.inFlight++;
@@ -278,5 +283,88 @@ describe("Scheduler", () => {
     b.releaseAll();
     await flush();
     await Promise.all([p1, p2, p3]);
+  });
+
+  // A job whose harness declares its memory weight (resource-aware admission).
+  function heavyJob(id: string, memoryMb: number): AgentJob {
+    return {
+      ...tjob("acme", id),
+      harnessSpec: {
+        kind: "command",
+        id: "heavy",
+        version: "1",
+        resources: { memoryMb },
+        setup: [],
+        command: "run",
+        env: {},
+        params: {},
+        trace: { kind: "none" },
+      },
+    };
+  }
+
+  it("memory budget gates admission even when slots remain", async () => {
+    const b = new ControlledBackend("a", 10); // plenty of slots
+    b.memoryBudgetMb = 1000;
+    const sched = new Scheduler(new BackendRegistry().register("a", b));
+
+    const p = [heavyJob("h1", 600), heavyJob("h2", 600)].map((j) => sched.dispatch(j));
+    await flush();
+    expect(b.handled).toBe(1); // 600 + 600 > 1000 → the second waits despite 9 free slots
+    expect(sched.stats().queued).toBe(1);
+    expect(sched.stats().memInFlightMb.a).toBe(600);
+
+    b.releaseAll();
+    await flush();
+    expect(b.handled).toBe(2); // memory freed → the queued heavy job admitted
+    b.releaseAll();
+    await flush();
+    await Promise.all(p);
+    expect(sched.stats().memInFlightMb.a).toBe(0);
+  });
+
+  it("undeclared-memory jobs are admitted outside the memory budget (opt-in gating)", async () => {
+    const b = new ControlledBackend("a", 10);
+    b.memoryBudgetMb = 500;
+    const sched = new Scheduler(new BackendRegistry().register("a", b));
+
+    const heavy = sched.dispatch(heavyJob("h1", 500)); // fills the whole envelope
+    const light = sched.dispatch(tjob("acme", "l1")); // declares nothing
+    await flush();
+    expect(b.handled).toBe(2); // the undeclared job is not blocked by the exhausted envelope
+
+    b.releaseAll();
+    await flush();
+    await Promise.all([heavy, light]);
+  });
+
+  it("a backend without a memory budget keeps slots-only admission", async () => {
+    const b = new ControlledBackend("a", 3);
+    const sched = new Scheduler(new BackendRegistry().register("a", b));
+
+    const p = [heavyJob("h1", 4000), heavyJob("h2", 4000), heavyJob("h3", 4000)].map((j) => sched.dispatch(j));
+    await flush();
+    expect(b.handled).toBe(3); // no envelope declared → previous behavior
+
+    b.releaseAll();
+    await flush();
+    await Promise.all(p);
+  });
+
+  it("a heavy job routes to the backend whose memory envelope fits it", async () => {
+    const small = new ControlledBackend("small", 10);
+    small.memoryBudgetMb = 256;
+    const big = new ControlledBackend("big", 10);
+    big.memoryBudgetMb = 8192;
+    const sched = new Scheduler(new BackendRegistry().register("small", small).register("big", big));
+
+    const p = sched.dispatch(heavyJob("h1", 1024));
+    await flush();
+    expect(big.handled).toBe(1); // small (256Mb) can't hold 1024Mb
+    expect(small.handled).toBe(0);
+
+    big.releaseAll();
+    await flush();
+    await p;
   });
 });

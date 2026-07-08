@@ -4,10 +4,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RESULT_SENTINEL } from "@everdict/agent";
 import {
-  OOM_KILLED,
   type AgentJob,
   type CaseResult,
   CaseResultSchema,
+  OOM_KILLED,
   UpstreamError,
   assertHardenedIsolation,
   dockerAuthConfigJson,
@@ -191,6 +191,9 @@ export interface K8sBackendOptions {
   pollIntervalMs?: number;
   maxPolls?: number;
   maxConcurrent?: number | (() => number);
+  // Declared memory envelope (RuntimeSpec.memoryBudgetMb) — the Scheduler caps the sum of in-flight
+  // harness-declared memory against it. Absent = slots-only admission.
+  memoryBudgetMb?: number;
 }
 
 // Mapping from hardened isolation runtime (Nomad notation) → K8s RuntimeClass name.
@@ -359,7 +362,11 @@ export class K8sBackend implements Backend {
     const mc = this.opts.maxConcurrent;
     const total = (typeof mc === "function" ? mc() : mc) ?? 20;
     const used = await this.withApi((api) => api.countActiveJobs());
-    return { total, used: used ?? 0 };
+    return {
+      total,
+      used: used ?? 0,
+      ...(this.opts.memoryBudgetMb !== undefined ? { memoryBudgetMb: this.opts.memoryBudgetMb } : {}),
+    };
   }
 
   // Connection test — check reachability + auth (context/token/kubeconfig) via the API server /version without a job.

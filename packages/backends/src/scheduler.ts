@@ -11,7 +11,15 @@ export interface BackendSlot {
   name: string;
   free: number;
   total: number;
+  // Free memory of the backend's declared admission envelope (Infinity when the backend declares none) —
+  // a job's harness-declared memory must fit here, so slots-free-but-memory-full backends stop admitting.
+  memFreeMb: number;
 }
+
+// The memory a job asks of the admission envelope — the harness's declared weight. Undeclared → 0 (admitted
+// outside the memory budget; resource-aware admission is opt-in by declaring resources on the harness).
+const jobMemoryMb = (job: AgentJob): number =>
+  job.harnessSpec?.kind === "command" ? (job.harnessSpec.resources?.memoryMb ?? 0) : 0;
 
 // The placement policy that picks one of the candidates with room (must be pure/deterministic).
 export interface PlacementPolicy {
@@ -56,6 +64,7 @@ export interface SchedulerOptions {
 export class Scheduler {
   private readonly policy: PlacementPolicy;
   private readonly inFlight = new Map<string, number>(); // backend name → in-flight
+  private readonly memInFlight = new Map<string, number>(); // backend name → in-flight harness-declared memory (Mb)
   private readonly tenantInFlight = new Map<string, number>(); // tenant → in-flight
   private readonly queue: FairQueue<QueueEntry>;
   private pumping = false;
@@ -99,12 +108,14 @@ export class Scheduler {
   stats(): {
     queued: number;
     inFlight: Record<string, number>;
+    memInFlightMb: Record<string, number>;
     tenantInFlight: Record<string, number>;
     queuedByTenant: Record<string, number>;
   } {
     return {
       queued: this.queue.size,
       inFlight: Object.fromEntries(this.inFlight),
+      memInFlightMb: Object.fromEntries(this.memInFlight),
       tenantInFlight: Object.fromEntries(this.tenantInFlight),
       queuedByTenant: this.queue.queuedByTenant(),
     };
@@ -128,7 +139,11 @@ export class Scheduler {
       this.registry.names().map(async (name) => {
         const cap = await this.registry.get(name).capacity();
         const used = Math.max(cap.used, this.inFlight.get(name) ?? 0);
-        slots.set(name, { name, total: cap.total, free: Math.max(0, cap.total - used) });
+        const memFreeMb =
+          cap.memoryBudgetMb === undefined
+            ? Number.POSITIVE_INFINITY
+            : Math.max(0, cap.memoryBudgetMb - (this.memInFlight.get(name) ?? 0));
+        slots.set(name, { name, total: cap.total, free: Math.max(0, cap.total - used), memFreeMb });
       }),
     );
     return slots;
@@ -159,9 +174,12 @@ export class Scheduler {
             continue;
           }
 
+          // Slots AND memory: a heavy harness (declared resources.memoryMb) only goes where its memory fits the
+          // backend's remaining admission envelope — slots-free-but-memory-full backends stop admitting heavy jobs.
+          const memNeed = jobMemoryMb(entry.job);
           const candidates = names
             .map((n) => slots.get(n))
-            .filter((s): s is BackendSlot => s !== undefined && s.free > 0);
+            .filter((s): s is BackendSlot => s !== undefined && s.free > 0 && memNeed <= s.memFreeMb);
           if (candidates.length === 0) continue; // no room right now → try the next job
 
           const chosen = this.policy.choose(candidates, entry.job);
@@ -169,10 +187,14 @@ export class Scheduler {
 
           this.queue.remove(entry);
           const slot = slots.get(chosen);
-          if (slot) slot.free -= 1; // local decrement within the same pump pass
+          if (slot) {
+            slot.free -= 1; // local decrement within the same pump pass
+            slot.memFreeMb -= memNeed;
+          }
           this.inFlight.set(chosen, (this.inFlight.get(chosen) ?? 0) + 1);
+          if (memNeed > 0) this.memInFlight.set(chosen, (this.memInFlight.get(chosen) ?? 0) + memNeed);
           this.tenantInFlight.set(tenant, (this.tenantInFlight.get(tenant) ?? 0) + 1);
-          this.runOne(entry, chosen, tenant);
+          this.runOne(entry, chosen, tenant, memNeed);
           placedAny = true;
         }
       }
@@ -181,7 +203,7 @@ export class Scheduler {
     }
   }
 
-  private runOne(entry: QueueEntry, name: string, tenant: string): void {
+  private runOne(entry: QueueEntry, name: string, tenant: string, memNeedMb: number): void {
     this.registry
       .get(name)
       .dispatch(entry.job)
@@ -191,6 +213,8 @@ export class Scheduler {
       }, entry.reject)
       .finally(() => {
         this.inFlight.set(name, Math.max(0, (this.inFlight.get(name) ?? 1) - 1));
+        if (memNeedMb > 0)
+          this.memInFlight.set(name, Math.max(0, (this.memInFlight.get(name) ?? memNeedMb) - memNeedMb));
         this.tenantInFlight.set(tenant, Math.max(0, (this.tenantInFlight.get(tenant) ?? 1) - 1));
         void this.pump();
       });

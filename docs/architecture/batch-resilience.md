@@ -77,6 +77,14 @@ FAILs stay carried as legitimate results. Harnesses declare their weight (`resou
 command spec/template → Nomad Task Resources / K8s requests=limits) so heavy harnesses bin-pack correctly and
 starvation classifies as infra instead of poisoning pass rates.
 
+The declared weight also drives ADMISSION, not just execution: a runtime may declare an envelope
+(`RuntimeSpec.maxConcurrent` + `memoryBudgetMb`) and the `Scheduler` caps the sum of in-flight
+harness-declared memory against it — a heavy batch queues at the control plane when the envelope is full even
+with slots free, instead of over-committing the cluster and converting the overload into OOM/starvation
+downstream. Undeclared harnesses are admitted outside the memory budget (opt-in by declaring). Live: 4×512Mb
+cases on a 600Mb-envelope runtime = strict serialization (24s, completion gaps 6/6/6s) vs the same batch on an
+unbounded runtime = full parallel (9s, gaps 0/0/0).
+
 ## Cross-runtime sharding
 
 `runtime` accepts a comma-separated list — cases round-robin across the listed runtimes at dispatch (per-case

@@ -109,6 +109,8 @@ export function nomadRuntimeOptions(
     ...(spec.runtime ? { runtime: spec.runtime } : {}),
     ...(spec.datacenters ? { datacenters: spec.datacenters } : {}),
     ...(spec.namespace ? { namespace: spec.namespace } : {}),
+    ...(spec.maxConcurrent !== undefined ? { maxConcurrent: spec.maxConcurrent } : {}),
+    ...(spec.memoryBudgetMb !== undefined ? { memoryBudgetMb: spec.memoryBudgetMb } : {}),
     ...(apiToken ? { apiToken } : {}),
     ...(allocEnv && Object.keys(allocEnv).length > 0 ? { secretEnv: allocEnv } : {}),
   };
@@ -129,6 +131,8 @@ export function k8sRuntimeOptions(
     ...(spec.namespace ? { namespace: spec.namespace } : {}),
     ...(spec.runtimeClass ? { runtimeClass: spec.runtimeClass } : {}),
     ...(spec.server ? { server: spec.server } : {}),
+    ...(spec.maxConcurrent !== undefined ? { maxConcurrent: spec.maxConcurrent } : {}),
+    ...(spec.memoryBudgetMb !== undefined ? { memoryBudgetMb: spec.memoryBudgetMb } : {}),
     ...(apiToken ? { apiToken } : {}),
     ...(kubeconfig ? { kubeconfig } : {}),
     ...(allocEnv && Object.keys(allocEnv).length > 0 ? { secretEnv: allocEnv } : {}),

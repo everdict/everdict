@@ -16,6 +16,13 @@ const base = {
   // (requiredCapabilities) via functionalGate. The self-hosted runner advertises via self-probe; a registered runtime
   // (nomad/k8s) declares them here or fills them via probe. Absent = unchecked (backward-compatible). Design: docs/architecture/self-hosted-runtime-and-runners.md.
   capabilities: z.array(CapabilityNameSchema).optional(),
+  // Admission envelope — how much the control plane may pack onto this runtime CONCURRENTLY. The cluster's own
+  // scheduler still does node-level bin-packing; these declared bounds keep the control plane from over-committing
+  // it in the first place. maxConcurrent = slot cap (absent → the backend's default). memoryBudgetMb = the sum of
+  // in-flight harness-declared memory (resources.memoryMb) the Scheduler may admit at once; harnesses that declare
+  // no memory are admitted outside this budget (resource-aware admission is opt-in by declaring).
+  maxConcurrent: z.number().int().positive().optional(),
+  memoryBudgetMb: z.number().int().positive().optional(),
 };
 
 // local — in-process execution on the control-plane host (dev only). This is the control plane's host, not "the user's machine" —

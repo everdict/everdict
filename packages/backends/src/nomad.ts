@@ -1,9 +1,9 @@
 import { RESULT_SENTINEL } from "@everdict/agent";
 import {
-  OOM_KILLED,
   type AgentJob,
   type CaseResult,
   CaseResultSchema,
+  OOM_KILLED,
   UpstreamError,
   assertHardenedIsolation,
   imageUsesRegistryHost,
@@ -60,6 +60,9 @@ export interface NomadBackendOptions {
   maxPolls?: number;
   // This cluster's concurrent-job cap (for capacity-aware placement). If a function, dynamically reads the value the autoscaler changes.
   maxConcurrent?: number | (() => number);
+  // Declared memory envelope (RuntimeSpec.memoryBudgetMb) — the Scheduler caps the sum of in-flight
+  // harness-declared memory against it. Absent = slots-only admission.
+  memoryBudgetMb?: number;
 }
 
 // --- Nomad job spec (only the needed parts typed) ---
@@ -180,12 +183,20 @@ export class NomadBackend implements Backend {
       if (res.status < 300) {
         const jobs = JSON.parse(res.text) as Array<{ Status?: string }>;
         const used = jobs.filter((j) => j.Status === "running" || j.Status === "pending").length;
-        return { total, used };
+        return {
+          total,
+          used,
+          ...(this.opts.memoryBudgetMb !== undefined ? { memoryBudgetMb: this.opts.memoryBudgetMb } : {}),
+        };
       }
     } catch {
       // probe failed → used 0
     }
-    return { total, used: 0 };
+    return {
+      total,
+      used: 0,
+      ...(this.opts.memoryBudgetMb !== undefined ? { memoryBudgetMb: this.opts.memoryBudgetMb } : {}),
+    };
   }
 
   // Connection test — check reachability + ACL auth via /v1/agent/self without a job (an ACL cluster requires X-Nomad-Token).
