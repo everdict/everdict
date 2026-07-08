@@ -50,6 +50,7 @@ export interface NomadBackendOptions {
   cpuMhz?: number;
   memMb?: number;
   pollIntervalMs?: number;
+  purgeDelayMs?: number; // age before a dead job is purge-swept (default 60s; 0 = immediate). Avoids the fresh-terminal alloc-watcher race.
   maxPolls?: number;
   // This cluster's concurrent-job cap (for capacity-aware placement). If a function, dynamically reads the value the autoscaler changes.
   maxConcurrent?: number | (() => number);
@@ -236,11 +237,26 @@ export class NomadBackend implements Backend {
         );
       return parseResult(logs.text);
     } finally {
-      // Purge the dead job after capturing the result (parity with K8sBackend's deleteJob-in-finally). Without this,
-      // every batch case leaves a dead job+alloc behind; past gc_max_allocs the client instantly GCs each newly
-      // terminal alloc, and the NEXT case's log fetch loses the race → the whole batch reads as dispatch failures.
-      const nsq = ns ? `?purge=true&namespace=${encodeURIComponent(ns)}` : "?purge=true";
-      await this.http.request("DELETE", `/v1/job/${jobId}${nsq}`).catch(() => {});
+      // Purge dead jobs after capturing results (parity with K8sBackend's deleteJob-in-finally). Without it, every
+      // batch case leaves a dead job+alloc behind; past gc_max_allocs the client instantly GCs each newly terminal
+      // alloc, and the NEXT case's log fetch loses the race → the whole batch reads as dispatch failures.
+      // DEFERRED, not immediate: purging a job whose alloc just went terminal races the client's alloc watcher
+      // (nil-deref panic on a dev-mode single-process agent, observed live). Each dispatch enqueues its own job and
+      // sweeps only entries older than purgeDelayMs — steady state stays bounded, fresh allocs are left alone.
+      this.purgeQueue.push({ jobId, ns, at: Date.now() });
+      await this.sweepPurge();
+    }
+  }
+
+  private readonly purgeQueue: Array<{ jobId: string; ns: string | undefined; at: number }> = [];
+  private async sweepPurge(): Promise<void> {
+    const cutoff = Date.now() - (this.opts.purgeDelayMs ?? 60_000);
+    while (this.purgeQueue.length > 0) {
+      const head = this.purgeQueue[0];
+      if (head === undefined || head.at > cutoff) break;
+      this.purgeQueue.shift();
+      const nsq = head.ns ? `?purge=true&namespace=${encodeURIComponent(head.ns)}` : "?purge=true";
+      await this.http.request("DELETE", `/v1/job/${head.jobId}${nsq}`).catch(() => {});
     }
   }
 

@@ -119,7 +119,13 @@ describe("NomadBackend.dispatch", () => {
         return { status: 404, text: "" };
       },
     };
-    const backend = new NomadBackend({ addr: "http://nomad:4646", image: "img", http, pollIntervalMs: 1 });
+    const backend = new NomadBackend({
+      addr: "http://nomad:4646",
+      image: "img",
+      http,
+      pollIntervalMs: 1,
+      purgeDelayMs: 0,
+    });
 
     const result = await backend.dispatch(JOB);
 
@@ -145,9 +151,41 @@ describe("NomadBackend.dispatch", () => {
         return { status: 200, text: "{}" };
       },
     };
-    const backend = new NomadBackend({ addr: "http://nomad:4646", image: "img", http, pollIntervalMs: 1 });
+    const backend = new NomadBackend({
+      addr: "http://nomad:4646",
+      image: "img",
+      http,
+      pollIntervalMs: 1,
+      purgeDelayMs: 0,
+    });
     await expect(backend.dispatch(JOB)).rejects.toThrow(/gc_max_allocs/); // actionable error, not a bare 404
     expect(calls.some((c) => c.startsWith("DELETE /v1/job/everdict-c1") && c.includes("purge=true"))).toBe(true);
+  });
+
+  it("purge is DEFERRED — a just-finished job is left alone (fresh-terminal alloc watcher race), swept by a later dispatch", async () => {
+    const calls: string[] = [];
+    const http: NomadHttp = {
+      async request(method, path) {
+        calls.push(`${method} ${path}`);
+        if (path === "/v1/jobs") return { status: 200, text: "{}" };
+        if (path.includes("/allocations"))
+          return { status: 200, text: JSON.stringify([{ ID: "alloc1", ClientStatus: "complete" }]) };
+        if (path.includes("/logs/")) return { status: 200, text: `${RESULT_SENTINEL}${JSON.stringify(RESULT)}\n` };
+        return { status: 200, text: "{}" };
+      },
+    };
+    const backend = new NomadBackend({
+      addr: "http://nomad:4646",
+      image: "img",
+      http,
+      pollIntervalMs: 1,
+      purgeDelayMs: 50,
+    });
+    await backend.dispatch(JOB);
+    expect(calls.some((c) => c.startsWith("DELETE"))).toBe(false); // own job too fresh to purge
+    await new Promise((r) => setTimeout(r, 60));
+    await backend.dispatch(JOB); // the next dispatch sweeps the aged entry
+    expect(calls.filter((c) => c.startsWith("DELETE /v1/job/everdict-c1"))).toHaveLength(1);
   });
 
   it("trustZones: applies the tenant zone per job (namespace + strong-isolation runtime)", async () => {
