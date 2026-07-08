@@ -21,6 +21,12 @@ export interface ProbeResult {
 export interface Backend {
   readonly id: string;
   capacity(): Promise<BackendCapacity>; // for capacity-aware placement — free concurrent slots
+  // Adopt an already-dispatched case job (boot recovery): find the orchestrator job this backend previously
+  // submitted for the case, wait for it, and harvest its result — instead of re-dispatching and double-spending
+  // compute. undefined = nothing adoptable (no job / logs unreadable) → the caller re-dispatches. Best-effort.
+  adopt?(caseId: string): Promise<CaseResult | undefined>;
+  // Force-stop every live orchestrator job of a case (superseded batch reclaim). Best-effort, never throws.
+  kill?(caseId: string): Promise<void>;
   dispatch(job: AgentJob): Promise<CaseResult>;
   // Connection test (optional) — sends a light call to the cluster API without a job to check reachability/auth. undefined for backends that don't implement it.
   probe?(): Promise<ProbeResult>;

@@ -236,6 +236,12 @@ export interface ScorecardServiceDeps {
   // Per-runtime circuit breaker shared across batches — remembers a runtime outage so sharded batches spill
   // straight to a healthy runtime instead of re-discovering the failure per case. Defaults to an internal instance.
   breaker?: CircuitBreaker;
+  // Boot-recovery adoption: harvest an already-dispatched case's result from the runtime's still-alive job
+  // instead of re-dispatching (double compute). runtime = the child's recorded runtime (may be a comma list).
+  adoptCase?: (tenant: string, runtime: string | undefined, caseId: string) => Promise<CaseResult | undefined>;
+  // Supersede force-kill: stop a reclaimed batch's live orchestrator jobs (best-effort; cooperative abort already
+  // stops the un-fired remainder — this reclaims the compute of the already-fired ones).
+  killCase?: (tenant: string, runtime: string | undefined, caseId: string) => Promise<void>;
   buildTraceSource?: (cfg: TraceSourceConfig) => TraceSource; // trace source factory for pull-ingest (@everdict/trace)
   secretsFor?: (tenant: string) => Promise<Record<string, string>>; // tenant SecretStore values (inject judge-model keys)
   // For resolving {secretRef} in harness env — two tiers: shared + submitter (owner) personal secrets. Injected by scope.
@@ -463,6 +469,15 @@ export class ScorecardService {
       });
       this.inFlight.get(r.id)?.abort(); // don't fire remaining cases (cooperative) — track attaches partial results and terminates
       await this.cancelWorkflowIfAny(r); // temporal-owned batch → cancel the workflow too (best-effort)
+      // Force-kill the already-fired backend jobs (best-effort) — the abort above only stops the un-fired
+      // remainder; without this, a superseded 601-case batch keeps burning cluster compute to the end.
+      if (this.deps.killCase && this.deps.runStore) {
+        const children = await this.deps.runStore.list(tenant, { scorecardId: r.id }).catch(() => []);
+        for (const c of children) {
+          if (c.status !== "running") continue;
+          void this.deps.killCase(tenant, c.runtime ?? r.runtime, c.caseId).catch(() => {});
+        }
+      }
     }
   }
 
@@ -515,6 +530,7 @@ export class ScorecardService {
     let dataset: Dataset;
     let seed: CaseResult[] = [];
     const seedRunIds: string[] = [];
+    let adopted = 0;
     try {
       const resolved = await this.deps.datasets.get(rec.tenant, rec.dataset.id, rec.dataset.version);
       // Re-apply the recorded selection — ids/tags/limit selection is deterministic, so the same knobs give the same cases.
@@ -536,7 +552,19 @@ export class ScorecardService {
             seed.push(c.result);
             seedRunIds.push(c.id);
           } else if (c.status === "running" || c.status === "queued") {
-            // Mid-flight when the process died — superseded by the re-dispatch below.
+            // Mid-flight when the process died. ADOPT first: the orchestrator job the old process submitted may
+            // still be running (or already finished) — harvest its result instead of re-dispatching and paying
+            // for the same execution twice. Only when nothing is adoptable does the case fall to re-dispatch.
+            const adoptable = this.deps.adoptCase
+              ? await this.deps.adoptCase(rec.tenant, c.runtime ?? rec.runtime, c.caseId).catch(() => undefined)
+              : undefined;
+            if (adoptable) {
+              adopted += 1;
+              await this.deps.runStore.update(c.id, { status: "succeeded", result: adoptable, updatedAt: this.now() });
+              seed.push(adoptable);
+              seedRunIds.push(c.id);
+              continue;
+            }
             await this.deps.runStore.update(c.id, {
               status: "failed",
               error: {
@@ -587,7 +615,9 @@ export class ScorecardService {
         seed,
         seedRunIds,
         retries: rec.orchestration.retries,
-        resumeNote: `Resumed after a control-plane restart — ${seed.length} finished case(s) kept, ${remaining} re-dispatched`,
+        resumeNote:
+          `Resumed after a control-plane restart — ${seed.length} finished case(s) kept, ${remaining} re-dispatched` +
+          (adopted > 0 ? ` (${adopted} in-flight job(s) adopted without re-running)` : ""),
       },
     );
     return true;

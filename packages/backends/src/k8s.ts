@@ -25,6 +25,8 @@ export interface K8sApi {
   jobStatus(name: string, ns: string): Promise<{ succeeded: number; failed: number }>;
   podLogs(name: string, ns: string): Promise<string>; // stdout of job/<name>
   deleteJob(name: string, ns: string): Promise<void>;
+  // Force-stop by label across namespaces (kill(caseId) → everdict.dev/case=<slug>). Best-effort, no wait.
+  deleteJobsByLabel(selector: string): Promise<void>;
   // Termination reason of the job's (failed) pod — e.g. "OOMKilled". Best-effort: undefined when unavailable.
   podFailureReason(name: string, ns: string): Promise<string | undefined>;
   countActiveJobs(): Promise<number | undefined>; // capacity probe (in-flight app=everdict jobs across all namespaces)
@@ -144,6 +146,19 @@ export function kubectlApi(
         "--wait=false",
       ]);
     },
+    async deleteJobsByLabel(selector) {
+      await run(bin, [
+        ...ctx,
+        "delete",
+        "jobs",
+        "--all-namespaces",
+        "-l",
+        selector,
+        "--ignore-not-found",
+        "--cascade=background",
+        "--wait=false",
+      ]);
+    },
     async countActiveJobs() {
       const res = await run(bin, [...ctx, "get", "jobs", "-A", "-l", "app=everdict", "-o", "json"]);
       if (res.code !== 0) return undefined;
@@ -209,12 +224,17 @@ export function parseJobStatusOutput(stdout: string): { succeeded: number; faile
 
 export function k8sJobName(job: AgentJob, suffix?: string): string {
   // With a suffix the slug budget shrinks so the full name stays within the DNS-1123 63-char cap.
-  const slug = job.evalCase.id
+  const slug = caseSlug(job.evalCase.id, suffix ? 43 : 50);
+  return `everdict-${slug || "case"}${suffix ? `-${suffix}` : ""}`;
+}
+
+// Label-safe case identifier — the selector kill(caseId) deletes by (label values share DNS-1123-ish limits).
+export function caseSlug(caseId: string, max = 50): string {
+  return caseId
     .toLowerCase()
     .replace(/[^a-z0-9-]/g, "-")
     .replace(/^-+|-+$/g, "")
-    .slice(0, suffix ? 43 : 50);
-  return `everdict-${slug || "case"}${suffix ? `-${suffix}` : ""}`;
+    .slice(0, max);
 }
 
 function dispatchSuffix(): string {
@@ -260,7 +280,12 @@ export function buildK8sJob(
   return {
     apiVersion: "batch/v1",
     kind: "Job",
-    metadata: { name, namespace: ns, labels: { app: "everdict", "everdict.dev/tenant": tenant } },
+    metadata: {
+      name,
+      namespace: ns,
+      // The case label is the kill(caseId) selector — a superseded batch force-stops its live jobs by it.
+      labels: { app: "everdict", "everdict.dev/tenant": tenant, "everdict.dev/case": caseSlug(job.evalCase.id) },
+    },
     spec: {
       backoffLimit: 0,
       ttlSecondsAfterFinished: opts.ttlSecondsAfterFinished ?? 300,
@@ -367,6 +392,15 @@ export class K8sBackend implements Backend {
       used: used ?? 0,
       ...(this.opts.memoryBudgetMb !== undefined ? { memoryBudgetMb: this.opts.memoryBudgetMb } : {}),
     };
+  }
+
+  // Force-stop every live job of a case (superseded batch reclaim) — by the everdict.dev/case label. Best-effort.
+  async kill(caseId: string): Promise<void> {
+    try {
+      await this.withApi((api) => api.deleteJobsByLabel(`everdict.dev/case=${caseSlug(caseId)}`));
+    } catch {
+      // best-effort
+    }
   }
 
   // Connection test — check reachability + auth (context/token/kubeconfig) via the API server /version without a job.

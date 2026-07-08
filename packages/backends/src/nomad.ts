@@ -277,6 +277,52 @@ export class NomadBackend implements Backend {
     }
   }
 
+  // Adopt an already-dispatched case job (boot recovery): the control plane died after submitting
+  // everdict-<caseId>-<suffix> — instead of re-dispatching (double compute), find the NEWEST such job, wait for
+  // its alloc like a normal dispatch, and harvest the result from its logs. undefined on any miss (no job, logs
+  // gone, no sentinel) — the caller re-dispatches as before. Best-effort by design.
+  async adopt(caseId: string): Promise<CaseResult | undefined> {
+    try {
+      const prefix = `everdict-${caseId}-`;
+      const res = await this.http.request("GET", `/v1/jobs?prefix=${encodeURIComponent(prefix)}&namespace=*`);
+      if (res.status >= 300) return undefined;
+      const jobs = JSON.parse(res.text) as Array<{ ID?: string; Namespace?: string; SubmitTime?: number }>;
+      const newest = jobs
+        .filter((j) => j.ID?.startsWith(prefix))
+        .sort((a, b) => (b.SubmitTime ?? 0) - (a.SubmitTime ?? 0))[0];
+      if (!newest?.ID) return undefined;
+      const ns = newest.Namespace && newest.Namespace !== "default" ? newest.Namespace : undefined;
+      const allocId = await this.waitForAlloc(newest.ID, ns);
+      const nsq = ns ? `&namespace=${encodeURIComponent(ns)}` : "";
+      const logs = await this.http.request(
+        "GET",
+        `/v1/client/fs/logs/${allocId}?task=agent&type=stdout&plain=true${nsq}`,
+      );
+      if (logs.status >= 300) return undefined;
+      return parseResult(logs.text);
+    } catch {
+      return undefined;
+    }
+  }
+
+  // Force-stop every live job of a case (superseded batch reclaim) — deregister WITHOUT purge (the purge saga:
+  // purging a job a client still tracks panics its alloc watcher). Best-effort, never throws.
+  async kill(caseId: string): Promise<void> {
+    try {
+      const prefix = `everdict-${caseId}-`;
+      const res = await this.http.request("GET", `/v1/jobs?prefix=${encodeURIComponent(prefix)}&namespace=*`);
+      if (res.status >= 300) return;
+      const jobs = JSON.parse(res.text) as Array<{ ID?: string; Namespace?: string; Status?: string }>;
+      for (const j of jobs) {
+        if (!j.ID?.startsWith(prefix) || j.Status === "dead") continue;
+        const nsq = j.Namespace && j.Namespace !== "default" ? `?namespace=${encodeURIComponent(j.Namespace)}` : "";
+        await this.http.request("DELETE", `/v1/job/${encodeURIComponent(j.ID)}${nsq}`);
+      }
+    } catch {
+      // best-effort
+    }
+  }
+
   // Scan the alloc's task events for an OOM kill (docker driver reports "OOM Killed"/oom notifications).
   private async allocWasOomKilled(allocId: string): Promise<boolean> {
     try {

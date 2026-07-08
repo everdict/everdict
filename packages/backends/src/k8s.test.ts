@@ -81,6 +81,9 @@ function mockApi(
     async deleteJob(name) {
       deleted.push(name);
     },
+    async deleteJobsByLabel(selector) {
+      deleted.push(`label:${selector}`);
+    },
     async countActiveJobs() {
       return opts.active ?? 3;
     },
@@ -106,6 +109,15 @@ describe("buildK8sJob / k8sJobName", () => {
     expect(m.spec.template.spec.runtimeClassName).toBeUndefined();
     const decoded = JSON.parse(Buffer.from(envOf(m, "EVERDICT_AGENT_JOB") ?? "", "base64").toString("utf8"));
     expect(decoded.harness.id).toBe("aider");
+    // The case label is the kill(caseId) selector — a superseded batch force-stops its live jobs by it.
+    expect((m.metadata as { labels?: Record<string, string> }).labels?.["everdict.dev/case"]).toBe("c1");
+  });
+
+  it("kill deletes jobs by the everdict.dev/case label selector (best-effort, all namespaces)", async () => {
+    const { api, deleted } = mockApi();
+    const backend = new K8sBackend({ image: "i", api });
+    await backend.kill("Case_1");
+    expect(deleted).toEqual(["label:everdict.dev/case=case-1"]); // slugged the same way as the job label
   });
 
   it("with evalCase.image, override with the per-case container image (SWE-bench prebuilt)", () => {

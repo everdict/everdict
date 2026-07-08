@@ -9,6 +9,7 @@ import {
 } from "@everdict/auth";
 import {
   Autoscaler,
+  type Backend,
   BackendRegistry,
   type BudgetLimit,
   CircuitBreaker,
@@ -19,7 +20,7 @@ import {
   buildRuntimeBackend,
   inMemoryBudget,
 } from "@everdict/backends";
-import type { RegistryAuth, RuntimeSpec } from "@everdict/core";
+import type { CaseResult, RegistryAuth, RuntimeSpec } from "@everdict/core";
 import {
   type CommentStore,
   InMemoryCommentStore,
@@ -423,10 +424,47 @@ async function main(): Promise<void> {
     process.env.EVERDICT_TEMPORAL_ADDRESS && process.env.EVERDICT_TEMPORAL_BATCHES === "1"
       ? process.env.EVERDICT_TEMPORAL_ADDRESS
       : undefined;
+  // Boot-recovery adoption + supersede force-kill: resolve each runtime of the child's recorded lane (may be a
+  // comma shard list) to a live backend and use its optional adopt/kill. Best-effort by design — a miss falls
+  // back to re-dispatch (adopt) or leaves the job to finish unobserved (kill).
+  const eachRuntimeBackend = async (
+    tenant: string,
+    runtimeList: string | undefined,
+    fn: (backend: Backend) => Promise<boolean>, // return true to stop iterating (handled)
+  ): Promise<void> => {
+    const targets = (runtimeList ?? "")
+      .split(",")
+      .map((t) => t.trim())
+      .filter((t) => t !== "" && !t.startsWith("self:")); // self-hosted lanes are lease queues — nothing to adopt/kill
+    for (const target of targets) {
+      const spec = await runtimeRegistry.get(tenant, target).catch(() => undefined);
+      if (!spec) continue;
+      const secretEnv = await runtimeSecretsFor(tenant).catch(() => ({}) as Record<string, string>);
+      const backend = runtimeBuildBackend(spec, { secretEnv });
+      if (await fn(backend)) return;
+    }
+  };
+
   const scorecardService = new ScorecardService({
     dispatcher,
     store: scorecardStore,
     breaker, // shared with the queue view — spillover writes, observability reads
+    adoptCase: async (tenant, runtimeList, caseId) => {
+      let adopted: CaseResult | undefined;
+      await eachRuntimeBackend(tenant, runtimeList, async (backend) => {
+        if (!backend.adopt) return false;
+        adopted = await backend.adopt(caseId).catch(() => undefined);
+        return adopted !== undefined;
+      });
+      return adopted;
+    },
+    killCase: async (tenant, runtimeList, caseId) => {
+      await eachRuntimeBackend(tenant, runtimeList, async (backend) => {
+        if (!backend.kill) return false;
+        await backend.kill(caseId).catch(() => {});
+        return false; // every runtime of the shard list gets the kill (the case may live on any of them)
+      });
+    },
     ...(temporalBatchAddress
       ? {
           temporalBatches: new TemporalBatchDriver({

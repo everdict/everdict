@@ -321,3 +321,83 @@ describe("NomadBackend.probe", () => {
     expect(r.detail).toContain("ECONNREFUSED");
   });
 });
+
+describe("NomadBackend.adopt / kill (boot-recovery adoption + supersede force-stop)", () => {
+  it("adopt finds the NEWEST everdict-<caseId>-* job, waits for its alloc, and harvests the sentinel result", async () => {
+    const calls: string[] = [];
+    const http: NomadHttp = {
+      async request(method, path) {
+        calls.push(`${method} ${path}`);
+        if (path.startsWith("/v1/jobs?prefix="))
+          return {
+            status: 200,
+            text: JSON.stringify([
+              { ID: "everdict-c1-old01", Namespace: "default", SubmitTime: 100 },
+              { ID: "everdict-c1-new02", Namespace: "default", SubmitTime: 200 },
+            ]),
+          };
+        if (path.includes("everdict-c1-new02/allocations"))
+          return { status: 200, text: JSON.stringify([{ ID: "alloc9", ClientStatus: "complete" }]) };
+        if (path.includes("/logs/alloc9"))
+          return { status: 200, text: `x\n${RESULT_SENTINEL}${JSON.stringify(RESULT)}\n` };
+        return { status: 404, text: "" };
+      },
+    };
+    const backend = new NomadBackend({ addr: "http://n:4646", image: "img", http, pollIntervalMs: 1 });
+
+    const adopted = await backend.adopt("c1");
+
+    expect(adopted?.caseId).toBe("c1"); // harvested without a POST /v1/jobs (no re-dispatch)
+    expect(calls.some((c) => c.startsWith("POST"))).toBe(false);
+    expect(calls.some((c) => c.includes("everdict-c1-old01"))).toBe(false); // newest submission wins
+  });
+
+  it("adopt returns undefined when nothing is adoptable (no job / unreadable logs) — the caller re-dispatches", async () => {
+    const empty: NomadHttp = {
+      async request(_m, path) {
+        if (path.startsWith("/v1/jobs?prefix=")) return { status: 200, text: "[]" };
+        return { status: 404, text: "" };
+      },
+    };
+    expect(await new NomadBackend({ addr: "http://n:4646", image: "i", http: empty }).adopt("c1")).toBeUndefined();
+
+    const goneLogs: NomadHttp = {
+      async request(_m, path) {
+        if (path.startsWith("/v1/jobs?prefix="))
+          return { status: 200, text: JSON.stringify([{ ID: "everdict-c1-a", SubmitTime: 1 }]) };
+        if (path.includes("/allocations"))
+          return { status: 200, text: JSON.stringify([{ ID: "a1", ClientStatus: "complete" }]) };
+        return { status: 404, text: "" };
+      },
+    };
+    expect(
+      await new NomadBackend({ addr: "http://n:4646", image: "i", http: goneLogs, pollIntervalMs: 1 }).adopt("c1"),
+    ).toBeUndefined();
+  });
+
+  it("kill deregisters every live everdict-<caseId>-* job (dead ones skipped, no purge)", async () => {
+    const deletes: string[] = [];
+    const http: NomadHttp = {
+      async request(method, path) {
+        if (method === "DELETE") {
+          deletes.push(path);
+          return { status: 200, text: "{}" };
+        }
+        if (path.startsWith("/v1/jobs?prefix="))
+          return {
+            status: 200,
+            text: JSON.stringify([
+              { ID: "everdict-c1-live1", Namespace: "default", Status: "running" },
+              { ID: "everdict-c1-done1", Namespace: "default", Status: "dead" },
+              { ID: "everdict-c1-pend1", Namespace: "everdict-acme", Status: "pending" },
+            ]),
+          };
+        return { status: 404, text: "" };
+      },
+    };
+    await new NomadBackend({ addr: "http://n:4646", image: "i", http }).kill("c1");
+
+    expect(deletes).toEqual(["/v1/job/everdict-c1-live1", "/v1/job/everdict-c1-pend1?namespace=everdict-acme"]);
+    expect(deletes.every((d) => !d.includes("purge"))).toBe(true); // stop, never purge (the purge saga)
+  });
+});

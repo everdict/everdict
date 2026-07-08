@@ -133,6 +133,21 @@ Provenance follows the case: the child run's `runtime` is rewritten to the runti
 `runtime spillover a → b (code)` progress step records each move. Live: dead-nomad+kind shard, 8 cases → 8/8
 pass, exactly 3 spill steps then breaker-open (the 4th dead-assigned case skipped silently to kind).
 
+## In-flight adoption + supersede force-kill
+
+Boot resume used to re-dispatch every mid-flight case — correct but double-spending: the orchestrator job the
+dead control plane submitted was often still running (or already finished). Resume now ADOPTS first:
+`Backend.adopt(caseId)` (Nomad) finds the newest `everdict-<caseId>-*` job, waits for its alloc like a normal
+dispatch, and harvests the sentinel result; only when nothing is adoptable does the case fall back to
+re-dispatch (K8s adopt is a follow-up — its cases re-dispatch as before). Live: CP SIGKILLed 8s into a batch of
+sleep-25 cases → the restarted CP resumed with "3 in-flight job(s) adopted without re-running", 3/3 pass,
+Nomad job count unchanged.
+
+Supersede symmetric: the cooperative abort only stops the UN-fired remainder, so a superseded 601-case batch
+kept burning cluster compute to the end. `Backend.kill(caseId)` (Nomad: prefix deregister without purge — the
+purge saga; K8s: delete by the `everdict.dev/case` label) now force-stops the already-fired jobs of a reclaimed
+batch's running children (best-effort).
+
 ## Tail speculation — stragglers duplicate, first result wins
 
 Spillover reacts to failure; speculation reacts to SLOWNESS (a slow-but-alive runtime holding its shard while
