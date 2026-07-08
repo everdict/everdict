@@ -120,13 +120,15 @@ export class TraceSinkService {
   // docs/architecture/streaming-case-pipeline.md D5 + docs/architecture/trace-sink.md
   async exportStream(
     tenant: string,
-    ctx: { scorecardId: string; dataset: string; harness: string },
+    ctx: { scorecardId: string; dataset: string; harness: string; sinkOverride?: string },
     attach?: { sourceKind: string; externalIdByCase: Record<string, string> },
   ): Promise<CaseExportStream | undefined> {
+    // Per-batch override wins over the harness selection; the literal "none" suppresses export for this batch.
+    if (ctx.sinkOverride === "none") return undefined;
     const s = await this.settings.get(tenant);
     // ctx.harness = "id@version" — sink selection is per harness id (version-independent).
     const harnessId = ctx.harness.split("@")[0] ?? ctx.harness;
-    const sinkName = s?.traceSinkByHarness?.[harnessId];
+    const sinkName = ctx.sinkOverride ?? s?.traceSinkByHarness?.[harnessId];
     const sink = sinkName ? (s?.traceSinks ?? []).find((e) => e.name === sinkName) : undefined;
     const buildSink = this.deps.buildSink;
     if (!sink || !buildSink) return undefined;
@@ -223,7 +225,7 @@ export class TraceSinkService {
   // the results already exist, e.g. ingest). Internally pushes everything to the stream, then joins (the core is a single exportStream).
   async exportScorecard(
     tenant: string,
-    ctx: { scorecardId: string; dataset: string; harness: string },
+    ctx: { scorecardId: string; dataset: string; harness: string; sinkOverride?: string },
     results: CaseResult[],
     attach?: { sourceKind: string; externalIdByCase: Record<string, string> },
   ): Promise<ScorecardExport | undefined> {

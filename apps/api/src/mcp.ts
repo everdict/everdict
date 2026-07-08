@@ -894,6 +894,13 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
             .describe(
               "partial run — only a subset of the full dataset (explicit ids → tags any-match → limit first N, applied in that order)",
             ),
+          trace_sink: z
+            .string()
+            .min(1)
+            .optional()
+            .describe(
+              'per-batch trace-sink override: a configured workspace sink name, or "none" to suppress export for this batch. Unset = the harness own selection — HTTP parity',
+            ),
           origin: z
             .object({
               repo: z.string().optional(),
@@ -919,6 +926,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
         retries,
         trials,
         cases,
+        trace_sink,
         origin,
       }) =>
         run(principal, "scorecards:run", async () =>
@@ -940,6 +948,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
               ...(retries !== undefined ? { retries } : {}),
               ...(trials !== undefined ? { trials } : {}),
               ...(cases ? { cases } : {}),
+              ...(trace_sink ? { traceSink: trace_sink } : {}),
             }),
           ),
         ),

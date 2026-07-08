@@ -151,6 +151,9 @@ export const ScorecardRecordSchema = z.object({
       // Set when a Temporal workflow owns this batch's driver loop — boot recovery leaves such batches alone
       // (they own themselves) and the web can deep-link the workflow. docs/architecture/temporal-batch-orchestration.md
       workflowId: z.string().optional(),
+      // Per-batch trace-sink override — a configured sink name, or "none" to suppress export for this batch.
+      // Persisted so resume/retry keep the same destination. docs/architecture/trace-sink.md
+      traceSink: z.string().optional(),
     })
     .optional(),
   scorecard: ScorecardSchema.optional(), // full per-case results (for detail, heavy)

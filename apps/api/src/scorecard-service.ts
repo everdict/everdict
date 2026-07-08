@@ -212,6 +212,9 @@ export interface RunScorecardInput {
   // Run each case this many times for pass@k / flakiness (>=1). Absent = 1 (single run). Each case fans out into N
   // dispatches; the detail carries a derived trialSummary (pass@k / flake rate). docs/architecture/trial-based-verdict.md
   trials?: number;
+  // Per-batch trace-sink override — the name of a configured workspace sink, or "none" to suppress export for
+  // this batch. Absent = the harness's own selection (traceSinkByHarness). docs/architecture/trace-sink.md
+  traceSink?: string;
 }
 
 export interface ScorecardServiceDeps {
@@ -242,6 +245,8 @@ export interface ScorecardServiceDeps {
   // Supersede force-kill: stop a reclaimed batch's live orchestrator jobs (best-effort; cooperative abort already
   // stops the un-fired remainder — this reclaims the compute of the already-fired ones).
   killCase?: (tenant: string, runtime: string | undefined, caseId: string) => Promise<void>;
+  // Per-batch trace-sink override validation — does a workspace sink with this name exist? (submit 400s otherwise).
+  sinkExists?: (tenant: string, name: string) => Promise<boolean>;
   buildTraceSource?: (cfg: TraceSourceConfig) => TraceSource; // trace source factory for pull-ingest (@everdict/trace)
   secretsFor?: (tenant: string) => Promise<Record<string, string>>; // tenant SecretStore values (inject judge-model keys)
   // For resolving {secretRef} in harness env — two tiers: shared + submitter (owner) personal secrets. Injected by scope.
@@ -260,7 +265,7 @@ export interface ScorecardServiceDeps {
   // attach: the pull-ingest (source.kind, caseId→external runId) — if source=sink platform, attach scores to the existing trace instead of duplicating.
   exportResults?: (
     tenant: string,
-    ctx: { scorecardId: string; dataset: string; harness: string },
+    ctx: { scorecardId: string; dataset: string; harness: string; sinkOverride?: string },
     results: CaseResult[],
     attach?: { sourceKind: string; externalIdByCase: Record<string, string> },
   ) => Promise<ScorecardExport | undefined>;
@@ -268,7 +273,7 @@ export interface ScorecardServiceDeps {
   // If unset, a live batch falls back to exportResults (batched, after the run) (no regression). ingest always uses exportResults (batched).
   exportStreamFor?: (
     tenant: string,
-    ctx: { scorecardId: string; dataset: string; harness: string },
+    ctx: { scorecardId: string; dataset: string; harness: string; sinkOverride?: string },
   ) => Promise<CaseExportStream | undefined>;
   artifacts?: ArtifactStore; // when set, offload os-use screenshots to object storage (record keeps only the URL)
   // When set, fan out a child run (RunRecord) per case so each case becomes an addressable run (trace/usage/provenance).
@@ -323,6 +328,15 @@ export class ScorecardService {
           'runtime:"auto" needs at least one registered runtime in this workspace.',
         );
       input = { ...input, runtime: ids.join(",") };
+    }
+    // Per-batch sink override must name a configured sink ("none" = suppress export for this batch only).
+    if (input.traceSink && input.traceSink !== "none" && this.deps.sinkExists) {
+      if (!(await this.deps.sinkExists(input.tenant, input.traceSink)))
+        throw new BadRequestError(
+          "BAD_REQUEST",
+          { traceSink: input.traceSink },
+          `No trace sink named '${input.traceSink}' is configured in this workspace ("none" suppresses export).`,
+        );
     }
     const resolved = await this.deps.datasets.get(input.tenant, input.dataset.id, input.dataset.version || "latest");
     // Partial run — the rest of the pipeline (batch/judge/aggregate) operates on a dataset containing only the selected cases. Marked via record.subset.
@@ -386,6 +400,7 @@ export class ScorecardService {
         concurrency,
         retries,
         ...(trials > 1 ? { trials } : {}),
+        ...(input.traceSink ? { traceSink: input.traceSink } : {}),
       },
       createdAt: ts,
       updatedAt: ts,
@@ -433,7 +448,7 @@ export class ScorecardService {
       judge,
       // Request parallelism takes precedence, else the service default. Positive integers only (the boundary is enforced by the route/MCP via Zod).
       concurrency,
-      { retries, ...(trials > 1 ? { trials } : {}) },
+      { retries, ...(trials > 1 ? { trials } : {}), ...(input.traceSink ? { sinkOverride: input.traceSink } : {}) },
     );
     return record;
   }
@@ -615,6 +630,7 @@ export class ScorecardService {
         seed,
         seedRunIds,
         retries: rec.orchestration.retries,
+        ...(rec.orchestration.traceSink ? { sinkOverride: rec.orchestration.traceSink } : {}),
         resumeNote:
           `Resumed after a control-plane restart — ${seed.length} finished case(s) kept, ${remaining} re-dispatched` +
           (adopted > 0 ? ` (${adopted} in-flight job(s) adopted without re-running)` : ""),
@@ -645,6 +661,7 @@ export class ScorecardService {
       targets: string[]; // the shard list — spillover candidates (empty = no runtime selection)
       speculation?: SpeculationController; // tail-straggler duplication (sharded batches only)
       memoryBoostMb?: Record<string, number>; // OOM escalation of a Temporal-owned retry (origin.memoryBoostMb)
+      traceSink?: string; // per-batch sink override (orchestration.traceSink)
       doneIds: Set<string>;
       stepChain: Promise<void>;
     }
@@ -711,6 +728,7 @@ export class ScorecardService {
       caseIndex,
       targets,
       ...(rec.origin?.memoryBoostMb ? { memoryBoostMb: rec.origin.memoryBoostMb } : {}),
+      ...(orch.traceSink ? { traceSink: orch.traceSink } : {}),
       // Tail speculation — sharded batches only. The controller lives with the batch context (rebuilt with
       // empty duration history on a CP restart — it re-learns the median from the resumed cases).
       ...(targets.length > 1
@@ -921,7 +939,12 @@ export class ScorecardService {
       ? await this.deps
           .exportResults(
             ctx.tenant,
-            { scorecardId: id, dataset: `${rec.dataset.id}@${rec.dataset.version}`, harness: scorecard.harness },
+            {
+              scorecardId: id,
+              dataset: `${rec.dataset.id}@${rec.dataset.version}`,
+              harness: scorecard.harness,
+              ...(ctx.traceSink ? { sinkOverride: ctx.traceSink } : {}),
+            },
             results,
           )
           .catch(() => undefined)
@@ -1143,6 +1166,7 @@ export class ScorecardService {
           seed: [...seed, ...recovered],
           retries: orch.retries,
           ...(boosted > 0 ? { memoryBoostMb } : {}),
+          ...(orch.traceSink ? { sinkOverride: orch.traceSink } : {}),
           resumeNote,
         },
       );
@@ -1328,6 +1352,8 @@ export class ScorecardService {
       trials?: number;
       // OOM escalation (retry-failed) — per-case memoryMb override applied to the job's harnessSpec at dispatch.
       memoryBoostMb?: Record<string, number>;
+      // Per-batch trace-sink override (orchestration.traceSink) — threaded into the export context.
+      sinkOverride?: string;
     } = {},
   ): Promise<void> {
     const trials = opts.trials ?? 1;
@@ -1497,6 +1523,7 @@ export class ScorecardService {
         scorecardId: id,
         dataset: `${dataset.id}@${dataset.version}`,
         harness: `${harnessId}@${harnessVersion}`,
+        ...(opts.sinkOverride ? { sinkOverride: opts.sinkOverride } : {}),
       };
       const exportStream = this.deps.exportStreamFor
         ? await this.deps.exportStreamFor(tenant, exportCtx).catch(() => undefined)

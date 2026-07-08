@@ -142,6 +142,9 @@ export const RunScorecardBodySchema = z.object({
   // run each case N times for pass@k / flakiness (fans out N dispatches per case). Unset = 1 (single run). The
   // scorecard detail carries a derived trialSummary (pass@k / flake rate). docs/architecture/trial-based-verdict.md
   trials: z.number().int().min(1).max(100).optional(),
+  // per-batch trace-sink override: a configured workspace sink name, or "none" to suppress export for this batch.
+  // Unset = the harness's own selection. docs/architecture/trace-sink.md
+  traceSink: z.string().min(1).optional(),
   // partial run — only a subset of the full dataset (cost/smoke). Applied in order: ids (explicit) → tags (any-match) → limit (first N).
   cases: z
     .object({
@@ -1056,7 +1059,12 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       await deps.datasetRegistry.register(principal.workspace, dataset, principal.subject);
       return reply
         .code(201)
-        .send({ workspace: principal.workspace, id: dataset.id, version: dataset.version, cases: dataset.cases.length });
+        .send({
+          workspace: principal.workspace,
+          id: dataset.id,
+          version: dataset.version,
+          cases: dataset.cases.length,
+        });
     } catch (err) {
       return sendError(reply, err); // unresolved image 400 / immutable 409
     }

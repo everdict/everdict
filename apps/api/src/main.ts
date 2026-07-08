@@ -449,6 +449,9 @@ async function main(): Promise<void> {
     dispatcher,
     store: scorecardStore,
     breaker, // shared with the queue view — spillover writes, observability reads
+    // Per-batch sink override validation (submit 400s on an unknown sink name; "none" is always allowed).
+    sinkExists: async (tenant, name) =>
+      ((await settingsStore.get(tenant))?.traceSinks ?? []).some((e) => e.name === name),
     adoptCase: async (tenant, runtimeList, caseId) => {
       let adopted: CaseResult | undefined;
       await eachRuntimeBackend(tenant, runtimeList, async (backend) => {

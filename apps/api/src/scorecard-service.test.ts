@@ -2038,6 +2038,48 @@ describe("ScorecardService — batch resilience (resume · retry-failed)", () =>
     expect(plan.caseIds).toEqual(["c2"]);
   });
 
+  it("submit validates a per-batch traceSink against the workspace sinks and persists it on orchestration", async () => {
+    const { dispatcher } = capturingDispatcher();
+    const store = new InMemoryScorecardStore();
+    const datasets = new InMemoryDatasetRegistry();
+    await datasets.register("acme", threeCaseDataset);
+    let n = 0;
+    const service = new ScorecardService({
+      dispatcher,
+      store,
+      datasets,
+      newId: () => `sink-${n++}`,
+      sinkExists: async (_t, name) => name === "mlf",
+    });
+    await expect(
+      service.submit({
+        tenant: "acme",
+        dataset: { id: "rd", version: "1.0.0" },
+        harness: { id: "h", version: "1" },
+        traceSink: "ghost", // not configured → 400 at submit, before any dispatch
+      }),
+    ).rejects.toBeInstanceOf(BadRequestError);
+
+    const rec = await service.submit({
+      tenant: "acme",
+      dataset: { id: "rd", version: "1.0.0" },
+      harness: { id: "h", version: "1" },
+      traceSink: "mlf",
+    });
+    expect(rec.orchestration?.traceSink).toBe("mlf"); // persisted — resume/retry keep the destination
+    await waitTerminal(store, rec.id);
+
+    // "none" never needs a configured sink — it means "suppress export for this batch".
+    const none = await service.submit({
+      tenant: "acme",
+      dataset: { id: "rd", version: "1.0.0" },
+      harness: { id: "h", version: "1" },
+      traceSink: "none",
+    });
+    expect(none.orchestration?.traceSink).toBe("none");
+    await waitTerminal(store, none.id);
+  });
+
   it("retryFailed rejects an in-flight source (400) and an all-pass source (nothing to retry)", async () => {
     const { dispatcher } = capturingDispatcher();
     const { store, datasets, service } = build(dispatcher);

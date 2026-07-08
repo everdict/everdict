@@ -231,3 +231,12 @@ The export outcome rides the existing scorecard surfaces (`GET /scorecards/:id` 
 - Streaming/incremental export (per-case as it completes) — v1 exports once at finalize.
 - Everdict as a *proxy* for the platform UI (we link out; we don't re-render their trace viewer).
 - Multi-sink fan-out (one workspace = one sink).
+
+## Per-scorecard override
+
+`POST /scorecards` (+ MCP `run_scorecard` `trace_sink`) accepts `traceSink`: the name of a configured workspace
+sink — a one-shot override above the harness's own selection — or the literal `"none"` to suppress export for
+that batch only. Submit validates the name against the workspace roster (400 on unknown; `"none"` always
+allowed) and persists it on `orchestration.traceSink`, so resume/retry keep the same destination. Resolution
+order inside `TraceSinkService.exportStream`: batch override → harness selection → no export.
+

@@ -120,6 +120,24 @@ describe("TraceSinkService.exportScorecard — resolving the per-harness selecti
     expect(await svc.exportScorecard("acme", CTX, [RESULT])).toBeUndefined();
   });
 
+  it("a per-batch sinkOverride selects the named sink even when the harness selected nothing", async () => {
+    const { svc, captured } = await exportHarness({ assignTo: null }); // no harness selection at all
+    const out = await svc.exportScorecard("acme", { ...CTX, sinkOverride: "mlf" }, [RESULT]);
+    expect(out?.status).toBe("succeeded");
+    expect(out?.name).toBe("mlf");
+    expect(captured.cases?.[0]?.caseId).toBe("c1");
+  });
+
+  it('a per-batch sinkOverride of "none" suppresses export even when the harness selected a sink', async () => {
+    const { svc } = await exportHarness({}); // harness h HAS mlf selected
+    expect(await svc.exportScorecard("acme", { ...CTX, sinkOverride: "none" }, [RESULT])).toBeUndefined();
+  });
+
+  it("an unknown sinkOverride name is a no-op stream (submit-time validation is the real gate)", async () => {
+    const { svc } = await exportHarness({});
+    expect(await svc.exportScorecard("acme", { ...CTX, sinkOverride: "ghost" }, [RESULT])).toBeUndefined();
+  });
+
   it("another harness's selection does not apply to this harness (per-harness isolation)", async () => {
     const { svc } = await exportHarness({ assignTo: "other-harness" });
     expect(await svc.exportScorecard("acme", CTX, [RESULT])).toBeUndefined();
