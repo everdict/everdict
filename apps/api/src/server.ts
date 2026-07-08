@@ -134,6 +134,9 @@ export const RunScorecardBodySchema = z.object({
   concurrency: z.number().int().min(1).max(512).optional(),
   // transient dispatch retries per case (throw-only — a failing eval result is never retried). Unset = 1.
   retries: z.number().int().min(0).max(5).optional(),
+  // run each case N times for pass@k / flakiness (fans out N dispatches per case). Unset = 1 (single run). The
+  // scorecard detail carries a derived trialSummary (pass@k / flake rate). docs/architecture/trial-based-verdict.md
+  trials: z.number().int().min(1).max(100).optional(),
   // partial run — only a subset of the full dataset (cost/smoke). Applied in order: ids (explicit) → tags (any-match) → limit (first N).
   cases: z
     .object({

@@ -828,6 +828,15 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
             .describe(
               "transient dispatch retries per case (throw-only; a failing eval result is never retried). Default 1",
             ),
+          trials: z
+            .number()
+            .int()
+            .min(1)
+            .max(100)
+            .optional()
+            .describe(
+              "run each case N times for pass@k / flakiness (fans out N dispatches per case). Default 1; the scorecard detail carries a derived trialSummary — HTTP parity",
+            ),
           cases: z
             .object({
               ids: z.array(z.string().min(1)).min(1).optional(),
@@ -861,6 +870,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
         judge,
         concurrency,
         retries,
+        trials,
         cases,
         origin,
       }) =>
@@ -881,6 +891,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
               ...(runtime ? { runtime } : {}),
               ...(concurrency !== undefined ? { concurrency } : {}),
               ...(retries !== undefined ? { retries } : {}),
+              ...(trials !== undefined ? { trials } : {}),
               ...(cases ? { cases } : {}),
             }),
           ),

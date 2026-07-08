@@ -1574,6 +1574,47 @@ describe("API — scorecards (dataset×harness batch eval)", () => {
     await app.close();
   });
 
+  it("trials: run each case N times → detail exposes a pass@k / flakiness trialSummary", async () => {
+    const { app } = server({ requireAuth: true, authenticator: roleAuth(["member"]) });
+    const h = { authorization: "Bearer x" };
+    await app.inject({ method: "POST", url: "/datasets", headers: h, payload: DATASET });
+    const post = await app.inject({
+      method: "POST",
+      url: "/scorecards",
+      headers: h,
+      payload: { dataset: { id: "smoke" }, harness: { id: "scripted" }, trials: 3 },
+    });
+    expect(post.statusCode).toBe(202);
+    const settled = await pollScorecard(app, post.json().id, h);
+    expect(settled.status).toBe("succeeded");
+    expect(settled.scorecard?.results).toHaveLength(3); // 1 case × 3 trials
+    // the detail carries the derived trial roll-up (pass@k / flake rate)
+    const detail = await app.inject({ method: "GET", url: `/scorecards/${post.json().id}`, headers: h });
+    expect(detail.json().trialSummary).toMatchObject({
+      cases: 1,
+      minTrials: 3,
+      maxTrials: 3,
+      passAt1: 1,
+      passAtK: 1,
+      flakyCases: 0,
+    });
+    await app.close();
+  });
+
+  it("trials out of range (0) → 400", async () => {
+    const { app } = server({ requireAuth: true, authenticator: roleAuth(["member"]) });
+    const h = { authorization: "Bearer x" };
+    await app.inject({ method: "POST", url: "/datasets", headers: h, payload: DATASET });
+    const res = await app.inject({
+      method: "POST",
+      url: "/scorecards",
+      headers: h,
+      payload: { dataset: { id: "smoke" }, harness: { id: "scripted" }, trials: 0 },
+    });
+    expect(res.statusCode).toBe(400);
+    await app.close();
+  });
+
   it("judge selection: applied to the trace so a judge:<id> score is attached per case (no key → skip score)", async () => {
     const { app } = server({ requireAuth: true, authenticator: roleAuth(["member"]) });
     const h = { authorization: "Bearer x" };
