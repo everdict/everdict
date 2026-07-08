@@ -1,5 +1,6 @@
 import type { CaseResult } from "@everdict/core";
 import { describe, expect, it } from "vitest";
+import { PgCallbackStore } from "./callback-store.js";
 import type { SqlClient } from "./client.js";
 import { migrate, preflight } from "./migrate.js";
 import { PgRunStore } from "./pg-run-store.js";
@@ -204,5 +205,28 @@ describe("migrate", () => {
     expect(await preflight(client, "0001_create_runs.sql")).toBe("OK_TO_APPLY");
     const applied = fakeClient((text) => ({ rows: text.includes("SELECT name FROM") ? [{ name: "x" }] : [] }));
     expect(await preflight(applied.client, "0001_create_runs.sql")).toBe("ALREADY_APPLIED");
+  });
+});
+
+describe("PgCallbackStore", () => {
+  it("deliver inserts the body and sweeps dead rows; claim consumes atomically (SKIP LOCKED)", async () => {
+    const { client, calls } = fakeClient((text) =>
+      text.startsWith("UPDATE everdict_frontdoor_callbacks") ? { rows: [{ body: { status: "done" } }] } : { rows: [] },
+    );
+    const store = new PgCallbackStore(client);
+    await store.deliver("run-1", { status: "done" });
+    expect(calls[0]?.text).toMatch(/INSERT INTO everdict_frontdoor_callbacks \(run_id, body\)/);
+    expect(calls[0]?.params).toEqual(["run-1", JSON.stringify({ status: "done" })]);
+    expect(calls[1]?.text).toMatch(/DELETE FROM everdict_frontdoor_callbacks WHERE consumed/); // opportunistic sweep
+
+    const claimed = await store.claim("run-1");
+    expect(claimed).toEqual({ body: { status: "done" } });
+    expect(calls[2]?.text).toMatch(/FOR UPDATE SKIP LOCKED/); // exactly-once consume across replicas
+    expect(calls[2]?.text).toMatch(/SET consumed = true/);
+  });
+
+  it("claim returns undefined when nothing is pending", async () => {
+    const { client } = fakeClient(() => ({ rows: [] }));
+    expect(await new PgCallbackStore(client).claim("ghost")).toBeUndefined();
   });
 });

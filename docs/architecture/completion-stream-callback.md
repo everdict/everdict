@@ -98,8 +98,7 @@ uses `sync`/provisioned-browser → untouched.
    - **C2b** — control-plane endpoint: public `POST /frontdoor-callback/:runId` (capability-URL auth via the
      unguessable UUID runId — **not** `/internal/**`), wired in `main.ts` to **one shared** `InProcessCallbackRendezvous`
      (outbound `url`/`wait` → topology backend; inbound `deliver` → the route) gated on `EVERDICT_CALLBACK_BASE_URL`.
-     No MCP parity — a webhook receiver has no tenant-facing BFF analog. (A store-backed rendezvous for multi-process
-     dispatch is the remaining follow-up.)
+     No MCP parity — a webhook receiver has no tenant-facing BFF analog. (Superseded for deployment: `StoreCallbackRendezvous`, below.)
 
 ## Touch points (for the eventual PR)
 - `packages/core/src/harness-spec.ts` — add `stream` + `callback` variants to `FrontDoorCompletionSchema`
@@ -119,3 +118,15 @@ uses `sync`/provisioned-browser → untouched.
 - Per-event trace ingestion from the stream (we take the trace via `traceSource` as today; stream events drive
   *completion*, not trace assembly).
 </content>
+
+
+## Store-backed rendezvous (multi-replica)
+
+`StoreCallbackRendezvous` (apps/api) + `CallbackStore` (`@everdict/db`, migration `0050_frontdoor_callbacks`)
+replace the single-process assumption: `deliver` persists the inbound body to the shared store and the driving
+replica's `wait` polls a CLAIM — a `FOR UPDATE SKIP LOCKED` single-row consume, so exactly one waiter takes each
+body even with several replicas polling. `main.ts` wires the Pg store when `DATABASE_URL` is set and the
+in-memory store otherwise (single-process dev — equivalent to the old in-process rendezvous). The route and the
+topology backend are unchanged: the same object implements both the sink (`deliver`) and the outbound
+rendezvous (`url`/`wait`). Consumed/stale rows are swept opportunistically on deliver (callbacks are plumbing,
+not history).

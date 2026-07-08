@@ -22,7 +22,9 @@ import {
 } from "@everdict/backends";
 import type { CaseResult, RegistryAuth, RuntimeSpec } from "@everdict/core";
 import {
+  type CallbackStore,
   type CommentStore,
+  InMemoryCallbackStore,
   InMemoryCommentStore,
   InMemoryNotificationStore,
   InMemoryOAuthStateStore,
@@ -39,6 +41,7 @@ import {
   InMemoryWorkspaceStore,
   type NotificationStore,
   type OAuthStateStore,
+  PgCallbackStore,
   PgCommentStore,
   PgNotificationStore,
   PgOAuthStateStore,
@@ -98,7 +101,6 @@ import {
   loadModelDir,
 } from "@everdict/registry";
 import { S3ArtifactStore } from "@everdict/storage";
-import { InProcessCallbackRendezvous } from "@everdict/topology";
 import { buildTraceSink, buildTraceSource } from "@everdict/trace";
 import { BenchmarkService } from "./benchmark-service.js";
 import { BundleService } from "./bundle-service.js";
@@ -125,6 +127,7 @@ import { ScorecardService } from "./scorecard-service.js";
 import { SelfHostedBackend } from "./self-hosted-backend.js";
 import { buildServer } from "./server.js";
 import { recoverInterrupted } from "./startup-recovery.js";
+import { StoreCallbackRendezvous } from "./store-callback-rendezvous.js";
 import { TemporalBatchDriver } from "./temporal-batch-driver.js";
 import { TemporalScheduleDriver } from "./temporal-schedule-driver.js";
 import { buildTopologyBackend } from "./topology-backend.js";
@@ -162,6 +165,7 @@ async function main(): Promise<void> {
     notificationStore,
     commentStore,
     viewStore,
+    callbackStore,
   } = await makePersistence();
   const workspaceService = new WorkspaceService(workspaceStore);
   // scheduleService is created below (it depends on scorecardService), but the member-removal hook late-binds it via a closure
@@ -268,8 +272,11 @@ async function main(): Promise<void> {
   // Front-door callback completion model: when a public base URL is set, build one in-process rendezvous shared by the topology
   // backend (outbound: {{callback_url}}/wait) and the /frontdoor-callback route (inbound: deliver). If unset, the callback model
   // fails clearly in the driver (no rendezvous). Assumes a single control-plane process (in-process dispatch) — distribution via a store-backed rendezvous is a follow-up.
+  // Store-backed rendezvous: the inbound POST may land on ANY replica — deliver persists to the shared store and
+  // the driving replica's wait claims it (Pg store when DATABASE_URL is set; in-memory store = the single-process
+  // dev shape, equivalent to the old in-process rendezvous).
   const callbackRendezvous = process.env.EVERDICT_CALLBACK_BASE_URL
-    ? new InProcessCallbackRendezvous(process.env.EVERDICT_CALLBACK_BASE_URL)
+    ? new StoreCallbackRendezvous(process.env.EVERDICT_CALLBACK_BASE_URL, callbackStore)
     : undefined;
   if (callbackRendezvous) console.log("▶ front-door callback rendezvous:", process.env.EVERDICT_CALLBACK_BASE_URL);
 
@@ -686,6 +693,9 @@ interface Persistence {
   notificationStore: NotificationStore; // personal notification feed (bell inbox) — records run/scorecard completion with recipient=subject
   commentStore: CommentStore; // resource comments (datasets, etc.) — collaborative discussion
   viewStore: ViewStore; // saved scorecard-analysis Views (named AnalysisConfig, private|workspace) — live re-run
+  // Front-door callback bodies (multi-replica rendezvous) — Pg-backed when DATABASE_URL is set, else in-memory
+  // (single process; the in-process rendezvous is equivalent there). docs/architecture/completion-stream-callback.md
+  callbackStore: CallbackStore;
 }
 
 // At-rest encryption KEK: use EVERDICT_SECRETS_KEY (base64 32B) if present, otherwise auto-generate an ephemeral key
@@ -731,6 +741,7 @@ async function makePersistence(): Promise<Persistence> {
       notificationStore: new InMemoryNotificationStore(),
       commentStore: new InMemoryCommentStore(),
       viewStore: new InMemoryViewStore(),
+      callbackStore: new InMemoryCallbackStore(),
     };
   }
   const client = sqlClient(makePool(url));
@@ -759,6 +770,7 @@ async function makePersistence(): Promise<Persistence> {
     notificationStore: new PgNotificationStore(client),
     commentStore: new PgCommentStore(client),
     viewStore: new PgViewStore(client),
+    callbackStore: new PgCallbackStore(client),
   };
 }
 
