@@ -1,4 +1,4 @@
-import { AgentJobSchema } from "@everdict/core";
+import { AgentJobSchema, classifyFailure, stageForError } from "@everdict/core";
 import { RESULT_SENTINEL, runAgentJob } from "./run.js";
 
 // Runner-agent entrypoint (runs inside the sandbox/alloc).
@@ -12,8 +12,35 @@ async function main(): Promise<void> {
     return;
   }
   const job = AgentJobSchema.parse(JSON.parse(Buffer.from(raw, "base64").toString("utf8")));
-  const result = await runAgentJob(job);
-  console.log(RESULT_SENTINEL + JSON.stringify(result));
+  try {
+    const result = await runAgentJob(job);
+    console.log(RESULT_SENTINEL + JSON.stringify(result));
+  } catch (err) {
+    // An in-job failure (harness install/run, grader, driver) still crosses the process boundary as a CLASSIFIED
+    // CaseResult — a bare non-zero exit would surface backend-side as a mushy "sentinel not found" dispatch error,
+    // erasing WHERE the case died. The stage comes from the error code (install|run|grade|dispatch).
+    const failure = classifyFailure(err, stageForError(err));
+    const message = err instanceof Error ? err.message : String(err);
+    console.log(
+      RESULT_SENTINEL +
+        JSON.stringify({
+          caseId: job.evalCase.id,
+          harness: `${job.harness.id}@${job.harness.version}`,
+          trace: [{ t: 0, kind: "error", message }],
+          snapshot: { kind: "prompt", output: "" },
+          scores: [
+            {
+              graderId: failure.stage,
+              metric: "error",
+              value: 0,
+              pass: false,
+              detail: `[${failure.class}] ${message}`,
+            },
+          ],
+          failure,
+        }),
+    );
+  }
 }
 
 void main();

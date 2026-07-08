@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { OOM_KILLED, classifyFailure } from "./case-failure.js";
+import { OOM_KILLED, classifyFailure, stageForError } from "./case-failure.js";
 import { BadRequestError, InternalError, UpstreamError } from "./errors.js";
 
 describe("classifyFailure (failure taxonomy: where it died × whose fault)", () => {
@@ -27,5 +27,15 @@ describe("classifyFailure (failure taxonomy: where it died × whose fault)", () 
   it("an unknown raw throw defaults to retryable infra (the previous every-throw-retries behavior)", () => {
     const f = classifyFailure(new Error("socket hang up"), "dispatch");
     expect(f).toMatchObject({ class: "infra", code: "INTERNAL", retryable: true });
+  });
+});
+
+describe("stageForError (which pipeline stage an error code names)", () => {
+  it("harness codes name their own stage; driver provisioning is dispatch-side", () => {
+    expect(stageForError(new InternalError("HARNESS_INSTALL_FAILED", {}, "pip failed"))).toBe("install");
+    expect(stageForError(new InternalError("HARNESS_RUN_FAILED", {}, "exit 127"))).toBe("run");
+    expect(stageForError(new InternalError("GRADER_FAILED", {}, "cmd"))).toBe("grade");
+    expect(stageForError(new InternalError("DRIVER_PROVISION_FAILED", {}, "no docker"))).toBe("dispatch");
+    expect(stageForError(new Error("raw"))).toBe("run");
   });
 });
