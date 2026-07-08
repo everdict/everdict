@@ -1184,7 +1184,21 @@
     "schedules": "예약",
     "queue": "작업",
     "runtimes": "런타임",
-    "report": "리포트"
+    "report": "리포트",
+    "usage": "사용량"
+  },
+  "usagePage": {
+    "title": "사용량",
+    "description": "과금 대상(오케스트레이션 + verdict)의 미터링된 LLM 비용이에요. own-pays(셀프호스티드) 런은 제외돼요.",
+    "cost": "비용",
+    "tokens": "토큰",
+    "evaluations": "평가 수",
+    "bySourceTitle": "출처별",
+    "source": "출처",
+    "sourceHarness": "평가 대상 하네스",
+    "sourceJudge": "평가/judge 모델",
+    "note": "미터링만 해요 — 런을 절대 막지 않아요. 컴퓨트는 BYO라, 개인 셀프호스티드 런 비용은 본인 로그인으로 지불되고 여기서 미터링하지 않아요.",
+    "loadError": "사용량을 불러오지 못했어요: {error}"
   },
   "newWorkspacePage": {
     "back": "돌아가기",

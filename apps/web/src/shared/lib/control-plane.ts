@@ -94,6 +94,8 @@ export const controlPlane = {
   getRun: <T>(auth: AuthContext, id: string) => call<T>(auth, `/runs/${encodeURIComponent(id)}`),
   // Work queue snapshot — per-runtime-lane running / waiting (FIFO) / next scheduled fire.
   getQueue: <T>(auth: AuthContext) => call<T>(auth, '/queue'),
+  // Metered billing usage (LLM cost for orchestration + verdict; own-pays runs excluded) — meter-only, never blocks.
+  getUsage: <T>(auth: AuthContext) => call<T>(auth, '/usage'),
   submitRun: <T>(auth: AuthContext, body: unknown) =>
     call<T>(auth, '/runs', { method: 'POST', body: JSON.stringify(body) }),
   listHarnesses: <T>(auth: AuthContext) => call<T>(auth, '/harnesses'),

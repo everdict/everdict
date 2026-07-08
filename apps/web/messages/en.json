@@ -1184,7 +1184,21 @@
     "schedules": "Schedules",
     "queue": "Queue",
     "runtimes": "Runtimes",
-    "report": "Report"
+    "report": "Report",
+    "usage": "Usage"
+  },
+  "usagePage": {
+    "title": "Usage",
+    "description": "Metered LLM cost for the billable surface — orchestration + verdict. Own-pays (self-hosted) runs are excluded.",
+    "cost": "Cost",
+    "tokens": "Tokens",
+    "evaluations": "Evaluations",
+    "bySourceTitle": "By source",
+    "source": "Source",
+    "sourceHarness": "Harness under test",
+    "sourceJudge": "Eval / judge model",
+    "note": "Metering only — this never blocks a run. Compute is BYO: a personal self-hosted run's cost is paid by your own login and is not metered here.",
+    "loadError": "Could not load usage: {error}"
   },
   "newWorkspacePage": {
     "back": "Back",
