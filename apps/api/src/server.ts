@@ -22,7 +22,6 @@ import {
   RuntimeSpecSchema,
   collectHarnessImages,
   imageWarnings,
-  referencesUserSecret,
   resolveHarnessInstance,
 } from "@everdict/core";
 import { BenchmarkAdapterSpecSchema, diffDatasets } from "@everdict/datasets";
@@ -875,11 +874,9 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       gate(principal, "harnesses:read");
       // resolved HarnessSpec (template + pins) — for the web pin diff/preview.
       const resolved = await deps.harnessInstances.get(principal.workspace, req.params.id, req.params.version);
-      // A private harness (references a personal secret) is viewable only by createdBy → others get 404 (existence hidden).
-      if (
-        referencesUserSecret(resolved) &&
-        (await deps.harnessInstances.creatorOf(principal.workspace, req.params.id)) !== principal.subject
-      )
+      // A private harness (references a personal secret) is viewable only by its owner → others get 404 (existence
+      // hidden). Owner semantics live in the one shared helper (latest-version creator) — no inline fork.
+      if (!(await harnessVisibleTo(deps.harnessInstances, principal, req.params.id)))
         return reply.code(404).send({ code: "NOT_FOUND", message: "harness not found." });
       return reply.send(resolved);
     } catch (err) {
@@ -895,6 +892,10 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     if (!principal) return reply;
     try {
       gate(principal, "harnesses:read");
+      // Same owner-only 404 as the resolved read — a private harness's raw instance (existence, pins) is not
+      // visible to other members either.
+      if (!(await harnessVisibleTo(deps.harnessInstances, principal, req.params.id)))
+        return reply.code(404).send({ code: "NOT_FOUND", message: "harness not found." });
       return reply.send(
         await deps.harnessInstances.getInstance(principal.workspace, req.params.id, req.params.version),
       );
