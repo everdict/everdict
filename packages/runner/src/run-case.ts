@@ -1,4 +1,5 @@
 import type {
+  CaseFailure,
   CaseResult,
   ComputeHandle,
   Driver,
@@ -11,7 +12,7 @@ import type {
   Score,
   TraceEvent,
 } from "@everdict/core";
-import { UpstreamError } from "@everdict/core";
+import { UpstreamError, classifyFailure } from "@everdict/core";
 import { safeGrade } from "@everdict/graders";
 
 export interface RunCaseDeps {
@@ -91,20 +92,29 @@ export async function runCase(evalCase: EvalCase, deps: RunCaseDeps): Promise<Ca
     if (defer) snapshot = materialized;
     await release(); // The remaining work (platform pull · observation scoring) doesn't need the environment — release the sandbox here
 
+    let collectFailure: CaseFailure | undefined;
     if (!defer) {
       if (deps.harness.collectTrace && source) {
         try {
           trace.push(...(await deps.harness.collectTrace(runId)));
         } catch (err) {
-          // Stage-preserving remap: a platform pull failure is a COLLECT-stage infra problem (endpoint down, auth,
-          // flush lag beyond the adapter's retries) — without the code it would classify as a run-stage crash.
+          // Keep the work: execution succeeded and the compute-bound scores exist — only observability failed.
+          // Stamp the result {collect} and carry a traceRef, so the control plane can re-pull (executeCase right
+          // away, stage-aware retry later) WITHOUT re-running the agent. Observation scoring defers with the
+          // trace — scoring steps/cost/judge against a known-incomplete trace would be silently wrong.
           const message = err instanceof Error ? err.message : String(err);
-          throw new UpstreamError("TRACE_COLLECT_FAILED", { runId }, `trace collection failed: ${message}`);
+          collectFailure = classifyFailure(
+            new UpstreamError("TRACE_COLLECT_FAILED", { runId }, `trace collection failed: ${message}`),
+            "collect",
+          );
+          trace.push({ t: Date.now(), kind: "error", message: collectFailure.message });
         }
       }
-      for (const [i, grader] of deps.graders.entries()) {
-        if (grader.needsCompute !== true) {
-          slots[i] = await safeGrade(grader, { case: evalCase, trace, snapshot: materialized });
+      if (!collectFailure) {
+        for (const [i, grader] of deps.graders.entries()) {
+          if (grader.needsCompute !== true) {
+            slots[i] = await safeGrade(grader, { case: evalCase, trace, snapshot: materialized });
+          }
         }
       }
     }
@@ -113,9 +123,12 @@ export async function runCase(evalCase: EvalCase, deps: RunCaseDeps): Promise<Ca
       caseId: evalCase.id,
       harness: `${deps.harness.id}@${deps.harness.version}`,
       trace,
-      snapshot,
+      // On a collect failure the deferred observation scoring happens control-plane-side — hand it the
+      // materialized snapshot (screenshot embedded), same as defer mode.
+      snapshot: collectFailure ? materialized : snapshot,
       scores: slots.filter((s): s is Score => s !== undefined),
-      ...(defer && source
+      ...(collectFailure ? { failure: collectFailure } : {}),
+      ...((defer || collectFailure) && source
         ? {
             traceRef: {
               kind: source.kind,

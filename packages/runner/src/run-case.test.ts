@@ -239,6 +239,52 @@ describe("runCase — early compute release (observation-only graders score afte
     expect(compute.disposed).toBe(true);
   });
 
+  it("a collect=job pull failure keeps the work: result carries {collect} failure + traceRef, ground-truth scores preserved, observation scoring deferred", async () => {
+    const compute = fakeCompute();
+    const harness: EvaluableHarness = {
+      id: "cmd",
+      version: "1",
+      install: async () => {},
+      async *run() {},
+      traceSource: () => ({ kind: "otel", endpoint: "http://collector:9", collect: "job" }),
+      async collectTrace() {
+        throw new Error("fetch failed");
+      },
+    };
+    let observationGraded = false;
+    const graders: Grader[] = [
+      {
+        id: "outcome",
+        needsCompute: true,
+        async grade(): Promise<Score> {
+          return { graderId: "outcome", metric: "outcome", value: 1, pass: true };
+        },
+      },
+      {
+        id: "steps",
+        async grade(): Promise<Score> {
+          observationGraded = true;
+          return { graderId: "steps", metric: "steps", value: 0 };
+        },
+      },
+    ];
+
+    // Pre-fix this threw TRACE_COLLECT_FAILED, discarding the executed run's scores and snapshot entirely.
+    const result = await runCase(CASE, { ...fakeDeps(compute, REPO_SNAPSHOT, graders), harness });
+
+    expect(result.failure).toMatchObject({
+      stage: "collect",
+      class: "infra",
+      code: "TRACE_COLLECT_FAILED",
+      retryable: true,
+    });
+    expect(result.scores.map((s) => s.graderId)).toEqual(["outcome"]); // ground truth kept, observations deferred
+    expect(observationGraded).toBe(false); // never scored against the known-incomplete trace
+    expect(result.traceRef?.kind).toBe("otel"); // re-collect coordinates for the control plane / stage-aware retry
+    expect(typeof result.traceRef?.runId).toBe("string");
+    expect(compute.disposed).toBe(true);
+  });
+
   it("isolates a grader that throws — the case survives with a visible error score, sibling graders still score, and compute is released exactly once", async () => {
     // Given: a throwing grader (a transient judge LLM hiccup) alongside a healthy one
     let disposeCount = 0;
