@@ -199,3 +199,13 @@ single owner in the API — **no fork, no stores duplicated into the worker**. (
 [scorecards.md](../scorecards.md) · [orchestration.md](../orchestration.md) · [suites.md](../suites.md)
 (trend/diff) · [workspace-scoped-integrations.md](./workspace-scoped-integrations.md) (private-repo token lifecycle) ·
 [self-hosted-runner.md](./self-hosted-runner.md) (runtime online-ness) · rules `orchestrator` / `api-layer` / `auth`.
+
+
+## Auto-disable on a deterministic fire failure
+
+A CONFIG-class submit failure at fire time (deleted dataset/harness, revoked credentials/authz, invalid
+template, exhausted budget — `classifyFailure` class `config`) is deterministic: the same fire fails the same
+way on every tick, so firing on is pure noise. The schedule is AUTO-DISABLED with a visible reason
+(`lastStatus: "Auto-disabled: <code> — <message>"`) and the Temporal schedule is paused (`driver.ensure`),
+the same pattern as creator-left auto-disable. Transient (infra) failures rethrow — the firing workflow's
+activity retry owns those, and the schedule stays enabled.

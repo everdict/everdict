@@ -163,6 +163,44 @@ describe("ScheduleService.fire — firing (called by the internal route)", () =>
     });
   });
 
+  it("a CONFIG-class fire failure auto-disables the schedule (visible reason + Temporal pause); transient failures don't", async () => {
+    const store = new InMemoryScheduleStore();
+    const ensured: Array<{ id: string; paused: boolean }> = [];
+    const driver: ScheduleDriver = {
+      ensure: async (spec: ScheduleSpec) => {
+        ensured.push({ id: spec.id, paused: spec.paused });
+      },
+      remove: async () => {},
+    };
+    let failWith: Error = new NotFoundError("NOT_FOUND", { dataset: "repo-smoke" }, "dataset not found.");
+    const s = new ScheduleService({
+      store,
+      driver,
+      newId: () => "sch-1",
+      now: () => "2026-07-08T00:00:00.000Z",
+      submitScorecard: async () => {
+        throw failWith;
+      },
+    });
+    await s.create(base);
+    ensured.length = 0;
+
+    // Deterministic (config) failure — the same fire fails every tick → auto-disable, don't keep firing noise.
+    await expect(s.fire("acme", "sch-1")).rejects.toBeInstanceOf(NotFoundError);
+    const disabled = await s.get("acme", "sch-1");
+    expect(disabled?.enabled).toBe(false);
+    expect(disabled?.lastStatus).toContain("Auto-disabled: NOT_FOUND");
+    expect(ensured).toEqual([{ id: "sch-1", paused: true }]); // Temporal schedule paused too
+
+    // Transient (infra) failure — the workflow's activity retry owns it; the schedule stays enabled.
+    await s.update("acme", "sch-1", { enabled: true });
+    ensured.length = 0;
+    failWith = new Error("upstream connection reset"); // raw/transient → classified infra retryable
+    await expect(s.fire("acme", "sch-1")).rejects.toThrow("connection reset");
+    expect((await s.get("acme", "sch-1"))?.enabled).toBe(true);
+    expect(ensured).toEqual([]); // no pause
+  });
+
   it("with no submitScorecard (Temporal-less), fire is a BadRequest", async () => {
     const s = new ScheduleService({ store: new InMemoryScheduleStore(), newId: () => "sch-1", now: () => "t" });
     await s.create(base);

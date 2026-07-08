@@ -1,4 +1,4 @@
-import { BadRequestError, ForbiddenError, NotFoundError } from "@everdict/core";
+import { BadRequestError, ForbiddenError, NotFoundError, classifyFailure } from "@everdict/core";
 import type { ScheduleOverlapPolicy, ScheduleRecord, ScheduleRunTemplate, ScheduleStore } from "@everdict/db";
 import type { RunScorecardInput } from "./scorecard-service.js";
 
@@ -233,16 +233,34 @@ export class ScheduleService {
       throw new BadRequestError("BAD_REQUEST", { id }, "Scorecard firer is not configured (firing disabled).");
     const previousScorecardId = schedule.lastScorecardId; // the run just before this fire (finalize's regression baseline)
     const t = schedule.runTemplate;
-    const rec = await this.deps.submitScorecard({
-      tenant,
-      submittedBy: schedule.createdBy, // fired run = creator's identity (budget → tenant, private-repo connection resolve)
-      origin: { source: "schedule" }, // provenance — stamp that this is a schedule fire
-      dataset: t.dataset,
-      harness: t.harness,
-      judges: t.judges,
-      ...(t.runtime !== undefined ? { runtime: t.runtime } : {}),
-      ...(t.concurrency !== undefined ? { concurrency: t.concurrency } : {}),
-    });
+    let rec: Awaited<ReturnType<NonNullable<ScheduleServiceDeps["submitScorecard"]>>>;
+    try {
+      rec = await this.deps.submitScorecard({
+        tenant,
+        submittedBy: schedule.createdBy, // fired run = creator's identity (budget → tenant, private-repo connection resolve)
+        origin: { source: "schedule" }, // provenance — stamp that this is a schedule fire
+        dataset: t.dataset,
+        harness: t.harness,
+        judges: t.judges,
+        ...(t.runtime !== undefined ? { runtime: t.runtime } : {}),
+        ...(t.concurrency !== undefined ? { concurrency: t.concurrency } : {}),
+      });
+    } catch (err) {
+      // A CONFIG-class submit failure is deterministic — the same fire fails the same way on every tick (deleted
+      // dataset/harness, revoked credentials/authz, invalid template, exhausted budget). Firing on is pure noise:
+      // AUTO-DISABLE with a visible reason (the same pattern as creator-left) and pause the Temporal schedule.
+      // Transient failures rethrow — the workflow's activity retry owns those.
+      const failure = classifyFailure(err, "dispatch");
+      if (failure.class === "config") {
+        const updated = await this.deps.store.update(tenant, id, {
+          enabled: false,
+          lastStatus: `Auto-disabled: ${failure.code} — ${failure.message}`.slice(0, 300),
+          updatedAt: this.now(),
+        });
+        if (updated) await this.deps.driver?.ensure(this.specOf(updated)); // Temporal pause
+      }
+      throw err;
+    }
     await this.deps.store.update(tenant, id, {
       lastFiredAt: this.now(),
       lastScorecardId: rec.id,
