@@ -110,7 +110,7 @@ The runner already declares `capabilities[]` (`self-hosted-runner.md` D-model: `
    `runAgentJob` (absent `harnessSpec` ⇒ process path = today). The runner loop (`main.ts:273`) calls it instead of
    `runAgentJob`. `apps/cli` gains `@everdict/topology` + `@everdict/trace` deps. Injectable `runService`/`runProcess` →
    daemon-free unit test of the branch (3 cases). cli build + 3/3 test + full turbo build 20/20 green.
-3. ✅ **Capabilities + routing — DONE (code; live e2e is manual).** Auto-advertise: the CLI runner probes
+3. ✅ **Capabilities + routing — DONE (code + live e2e).** Auto-advertise: the CLI runner probes
    `docker version` on start → `capabilities = ["repo", ...(docker ? ["docker","browser"] : [])]`, reported on every
    `lease_job` (new optional `capabilities` param → `RunnerService.setCapabilities` → `RunnerStore.setCapabilities`,
    filtered to `RUNNER_CAPABILITIES`). **Gate at dispatch (not lease — jobs are pinned to one runner):**
@@ -121,6 +121,11 @@ The runner already declares `capabilities[]` (`self-hosted-runner.md` D-model: `
    Docker daemon + a real service-harness image): the live round-trip** — pair a runner, `everdict runner`, submit a
    scorecard with a service harness pinned to `self:<runner>`, assert snapshot-graded result back (trace degraded).
    Tracked like the repo's other live-infra-blocked validations.
+   **Live e2e PASS** (`scripts/live/self-hosted-service-runner.mjs`): pair → `everdict runner` (docker
+   auto-advertised on lease) → register a one-service harness (stub front door, dead traceSource) → run pinned
+   to `self:<runner>` → the topology container stood up in local Docker (readiness GET + `POST /runs` with
+   per-run wiring visible in its logs), the trace degraded as designed, and the result landed with
+   `provenance.ranOn=self-hosted`.
 
 ## Non-goals (this pass)
 
