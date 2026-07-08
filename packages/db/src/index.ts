@@ -47,6 +47,14 @@ export {
   PgViewStore,
 } from "./view-store.js";
 export { type SqlClient, type PgPool, makePool, sqlClient } from "./client.js";
+export {
+  type UsageStore,
+  type UsageRow,
+  type UsageCost,
+  type UsageSource,
+  InMemoryUsageStore,
+  PgUsageStore,
+} from "./usage-store.js";
 export { PgRunStore } from "./pg-run-store.js";
 export { PgScorecardStore } from "./pg-scorecard-store.js";
 export { PgScheduleStore } from "./pg-schedule-store.js";

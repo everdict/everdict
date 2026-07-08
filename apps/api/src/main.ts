@@ -19,7 +19,6 @@ import {
   Scheduler,
   buildRuntimeBackend,
   inMemoryBudget,
-  inMemoryUsageMeter,
 } from "@everdict/backends";
 import type { CaseResult, RegistryAuth, RuntimeSpec } from "@everdict/core";
 import {
@@ -35,6 +34,7 @@ import {
   InMemoryScorecardStore,
   InMemorySecretStore,
   InMemoryTenantKeyStore,
+  InMemoryUsageStore,
   InMemoryUserProfileStore,
   InMemoryViewStore,
   InMemoryWorkspaceInviteStore,
@@ -52,6 +52,7 @@ import {
   PgScorecardStore,
   PgSecretStore,
   PgTenantKeyStore,
+  PgUsageStore,
   PgUserProfileStore,
   PgViewStore,
   PgWorkspaceInviteStore,
@@ -64,6 +65,7 @@ import {
   type SecretCipher,
   type SecretStore,
   type TenantKeyStore,
+  type UsageStore,
   type UserProfileStore,
   type ViewStore,
   type WorkspaceInviteStore,
@@ -133,6 +135,7 @@ import { TemporalBatchDriver } from "./temporal-batch-driver.js";
 import { TemporalScheduleDriver } from "./temporal-schedule-driver.js";
 import { buildTopologyBackend } from "./topology-backend.js";
 import { TraceSinkService } from "./trace-sink-service.js";
+import { persistentUsageMeter } from "./usage-meter.js";
 import { ViewService } from "./view-service.js";
 import { WorkspaceService } from "./workspace-service.js";
 
@@ -167,6 +170,7 @@ async function main(): Promise<void> {
     commentStore,
     viewStore,
     callbackStore,
+    usageStore,
   } = await makePersistence();
   const workspaceService = new WorkspaceService(workspaceStore);
   // scheduleService is created below (it depends on scorecardService), but the member-removal hook late-binds it via a closure
@@ -262,7 +266,9 @@ async function main(): Promise<void> {
   }
   const budget = inMemoryBudget({ limitFor: budgetFromEnv() });
   // Meter-only usage accounting for billing (never blocks; distinct from the enforcement budget above). Read via GET /usage.
-  const usageMeter = inMemoryUsageMeter();
+  // In-memory reads + best-effort write-through to the durable UsageStore + boot hydration → usage survives restarts.
+  const usageMeter = persistentUsageMeter(usageStore);
+  await usageMeter.hydrate();
 
   // Self-hosted runner lease hub — parks self:<runnerId> jobs; the runner protocol (MCP, slice 4) leases/returns them.
   // A single instance shared by the dispatcher (park) and the MCP lease/result tools (lease/complete).
@@ -704,6 +710,7 @@ interface Persistence {
   // Front-door callback bodies (multi-replica rendezvous) — Pg-backed when DATABASE_URL is set, else in-memory
   // (single process; the in-process rendezvous is equivalent there). docs/architecture/completion-stream-callback.md
   callbackStore: CallbackStore;
+  usageStore: UsageStore; // durable meter-only billing usage — the in-memory UsageMeter write-throughs + hydrates from it
 }
 
 // At-rest encryption KEK: use EVERDICT_SECRETS_KEY (base64 32B) if present, otherwise auto-generate an ephemeral key
@@ -750,6 +757,7 @@ async function makePersistence(): Promise<Persistence> {
       commentStore: new InMemoryCommentStore(),
       viewStore: new InMemoryViewStore(),
       callbackStore: new InMemoryCallbackStore(),
+      usageStore: new InMemoryUsageStore(),
     };
   }
   const client = sqlClient(makePool(url));
@@ -779,6 +787,7 @@ async function makePersistence(): Promise<Persistence> {
     commentStore: new PgCommentStore(client),
     viewStore: new PgViewStore(client),
     callbackStore: new PgCallbackStore(client),
+    usageStore: new PgUsageStore(client),
   };
 }
 
