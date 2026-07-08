@@ -1508,7 +1508,11 @@
     "submitting": "등록 중…",
     "submit": "런타임 등록",
     "probe": "연결 테스트",
-    "cancel": "취소"
+    "cancel": "취소",
+    "maxConcurrentLabel": "동시 실행 슬롯 (선택)",
+    "maxConcurrentHint": "컨트롤플레인이 이 런타임에 동시에 보낼 최대 작업 수예요. 비워두면 백엔드 기본값(20)을 사용해요.",
+    "memoryBudgetLabel": "메모리 예산 Mb (선택)",
+    "memoryBudgetHint": "실행 중인 하네스가 선언한 메모리 합의 상한이에요. 예산이 차면 무거운 작업은 슬롯이 남아도 대기해요."
   },
   "reportPage": {
     "title": "통합 리포트",
@@ -1630,7 +1634,9 @@
     "noExtraConfig": "추가 설정이 없어요.",
     "versionTags": "버전 태그",
     "versions": "버전",
-    "discuss": "논의"
+    "discuss": "논의",
+    "specMaxConcurrent": "동시 실행 슬롯",
+    "specMemoryBudget": "메모리 예산"
   },
   "schedulesPage": {
     "title": "예약",

@@ -38,6 +38,8 @@ interface Fields {
   server: string
   authSecret: string
   kubeconfigSecret: string
+  maxConcurrent: string
+  memoryBudgetMb: string
   supportsTopology: boolean
   browserImage: string
   traceKind: 'otel' | 'mlflow'
@@ -60,6 +62,8 @@ const INITIAL: Fields = {
   server: '',
   authSecret: '',
   kubeconfigSecret: '',
+  maxConcurrent: '',
+  memoryBudgetMb: '',
   supportsTopology: false,
   browserImage: '',
   traceKind: 'otel',
@@ -95,6 +99,15 @@ function buildSpec(f: Fields): Record<string, unknown> {
     ...(csv(f.tags).length ? { tags: csv(f.tags) } : {}),
   }
   const opt = (k: string, v: string) => (t(v) ? { [k]: t(v) } : {})
+  // Admission envelope — positive integers only; anything else is treated as unset (the server validates too).
+  const posInt = (v: string): number | undefined => {
+    const n = Number(t(v))
+    return t(v) && Number.isInteger(n) && n > 0 ? n : undefined
+  }
+  const envelope = {
+    ...(posInt(f.maxConcurrent) !== undefined ? { maxConcurrent: posInt(f.maxConcurrent) } : {}),
+    ...(posInt(f.memoryBudgetMb) !== undefined ? { memoryBudgetMb: posInt(f.memoryBudgetMb) } : {}),
+  }
   const topology = f.supportsTopology
     ? {
         traceSource: { kind: f.traceKind, endpoint: t(f.traceEndpoint) },
@@ -111,6 +124,7 @@ function buildSpec(f: Fields): Record<string, unknown> {
       ...(csv(f.datacenters).length ? { datacenters: csv(f.datacenters) } : {}),
       ...opt('runtime', f.runtime),
       ...opt('authSecret', f.authSecret),
+      ...envelope,
       ...topology,
       capabilities,
     }
@@ -124,6 +138,7 @@ function buildSpec(f: Fields): Record<string, unknown> {
     ...opt('server', f.server),
     ...opt('authSecret', f.authSecret),
     ...opt('kubeconfigSecret', f.kubeconfigSecret),
+    ...envelope,
     ...topology,
     capabilities,
   }
@@ -369,6 +384,30 @@ export function RegisterRuntimeForm({ workspace }: { workspace: string }) {
               />
             </Field>
           </div>
+        </div>
+      )}
+
+      {/* Admission envelope — how much the control plane may pack onto this runtime concurrently (docs/execution-backends.md) */}
+      {cluster && (
+        <div className="grid grid-cols-2 gap-4">
+          <Field label={t('maxConcurrentLabel')} hint={t('maxConcurrentHint')}>
+            <Input
+              value={f.maxConcurrent}
+              onChange={(e) => set('maxConcurrent', e.target.value)}
+              placeholder="20"
+              inputMode="numeric"
+              autoComplete="off"
+            />
+          </Field>
+          <Field label={t('memoryBudgetLabel')} hint={t('memoryBudgetHint')}>
+            <Input
+              value={f.memoryBudgetMb}
+              onChange={(e) => set('memoryBudgetMb', e.target.value)}
+              placeholder="8192"
+              inputMode="numeric"
+              autoComplete="off"
+            />
+          </Field>
         </div>
       )}
 

@@ -1508,7 +1508,11 @@
     "submitting": "Registering…",
     "submit": "Register runtime",
     "probe": "Test connection",
-    "cancel": "Cancel"
+    "cancel": "Cancel",
+    "maxConcurrentLabel": "Concurrent slots (optional)",
+    "maxConcurrentHint": "Max jobs the control plane sends to this runtime at once. Empty uses the backend default (20).",
+    "memoryBudgetLabel": "Memory budget Mb (optional)",
+    "memoryBudgetHint": "Cap on the sum of in-flight harness-declared memory. When full, heavy jobs wait even with free slots."
   },
   "reportPage": {
     "title": "Combined report",
@@ -1630,7 +1634,9 @@
     "noExtraConfig": "No extra configuration.",
     "versionTags": "Version tags",
     "versions": "Versions",
-    "discuss": "Discussion"
+    "discuss": "Discussion",
+    "specMaxConcurrent": "Concurrent slots",
+    "specMemoryBudget": "Memory budget"
   },
   "schedulesPage": {
     "title": "Schedules",

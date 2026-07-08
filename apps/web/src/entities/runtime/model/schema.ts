@@ -30,6 +30,9 @@ export const runtimeSpecSchema = z
     image: z.string().optional(),
     namespace: z.string().optional(),
     tags: z.array(z.string()).optional(),
+    // admission envelope — how much the control plane may pack onto this runtime concurrently
+    maxConcurrent: z.number().optional(),
+    memoryBudgetMb: z.number().optional(),
   })
   .passthrough()
 export type RuntimeSpec = z.infer<typeof runtimeSpecSchema>

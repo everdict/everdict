@@ -32,6 +32,8 @@ function specRows(
     k8sContext: string
     image: string
     namespace: string
+    maxConcurrent: string
+    memoryBudget: string
     tags: string
   }
 ): { label: string; value: string }[] {
@@ -51,6 +53,15 @@ function specRows(
   add('RuntimeClass', spec.runtimeClass)
   add(labels.image, spec.image)
   add(labels.namespace, spec.namespace)
+  // Admission envelope — what the scheduler may pack onto this runtime concurrently.
+  add(
+    labels.maxConcurrent,
+    spec.maxConcurrent !== undefined ? String(spec.maxConcurrent) : undefined
+  )
+  add(
+    labels.memoryBudget,
+    spec.memoryBudgetMb !== undefined ? `${spec.memoryBudgetMb}Mb` : undefined
+  )
   add(labels.tags, spec.tags)
   return rows
 }
@@ -91,6 +102,8 @@ export default async function RuntimeDetailPage({
         k8sContext: t('specK8sContext'),
         image: t('specImage'),
         namespace: t('specNamespace'),
+        maxConcurrent: t('specMaxConcurrent'),
+        memoryBudget: t('specMemoryBudget'),
         tags: t('specTags'),
       })
     : []
