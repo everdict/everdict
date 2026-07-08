@@ -175,14 +175,6 @@ async function main(): Promise<void> {
   // Runtimes are not auto-seeded either — the default _shared docker/local were noise ("whose infra is this?" ambiguity).
   // A runtime is meant to be a workspace registering its own infra (examples/runtimes/*.json kept for reference only).
 
-  // Recover orphaned jobs at boot — batches/runs are tracked in-process within this process, so at restart any
-  // queued/running record is a ghost with no one to resume it (why the work queue would show 'running' forever).
-  const recovered = await recoverInterrupted({ scorecards: scorecardStore, runs: store });
-  if (recovered.scorecards + recovered.runs > 0)
-    console.error(
-      `▶ recovered interrupted jobs: batches ${recovered.scorecards} · runs ${recovered.runs} → failed(INTERRUPTED)`,
-    );
-
   // Inject workspace secrets (model/provider keys) only into that tenant's job env (no leakage). The store is always active.
   const secrets = { secretsFor: (tenant: string) => secretStore.entries(tenant) };
 
@@ -389,6 +381,20 @@ async function main(): Promise<void> {
     // A live batch streams the export the moment a case completes (after judging) (D5) — ingest keeps the batched exportResults above.
     exportStreamFor: (tenant, ctx) => traceSinkService.exportStream(tenant, ctx),
   });
+
+  // Recover orphaned jobs at boot — batches/runs are tracked in-process within this process, so at restart any
+  // queued/running record is a ghost with no one to resume it. Interrupted BATCHES are resumed from their finished
+  // child results (unfinished cases re-dispatched); unresumable records fall back to failed(INTERRUPTED).
+  // docs/architecture/batch-resilience.md
+  const recovered = await recoverInterrupted({
+    scorecards: scorecardStore,
+    runs: store,
+    resume: (id) => scorecardService.resume(id),
+  });
+  if (recovered.scorecards + recovered.resumed + recovered.runs > 0)
+    console.error(
+      `▶ boot recovery: batches resumed ${recovered.resumed} · batches failed(INTERRUPTED) ${recovered.scorecards} · runs failed ${recovered.runs}`,
+    );
   // Mattermost inbound (slash commands/buttons) — after commandToken verification, run a scorecard / view the leaderboard from chat.
   const mattermostCommandService = new MattermostCommandService({
     settings: settingsStore,

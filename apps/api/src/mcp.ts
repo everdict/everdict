@@ -809,10 +809,19 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
             .number()
             .int()
             .min(1)
-            .max(64)
+            .max(512)
             .optional()
             .describe(
-              "number of cases dispatched concurrently within the batch (parallelism). Defaults to the service default (=4) if unset",
+              "number of cases this batch keeps in flight (parallelism; actual placement is capacity-governed by the scheduler). Defaults to the service default (=4) if unset",
+            ),
+          retries: z
+            .number()
+            .int()
+            .min(0)
+            .max(5)
+            .optional()
+            .describe(
+              "transient dispatch retries per case (throw-only; a failing eval result is never retried). Default 1",
             ),
           cases: z
             .object({
@@ -846,6 +855,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
         judges,
         judge,
         concurrency,
+        retries,
         cases,
         origin,
       }) =>
@@ -865,9 +875,23 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
               ...(judge ? { judge } : {}),
               ...(runtime ? { runtime } : {}),
               ...(concurrency !== undefined ? { concurrency } : {}),
+              ...(retries !== undefined ? { retries } : {}),
               ...(cases ? { cases } : {}),
             }),
           ),
+        ),
+    );
+
+    server.registerTool(
+      "retry_scorecard",
+      {
+        description:
+          "Retry a finished batch's FAILED cases as a new scorecard — passing results are carried over verbatim (full comparable case set), origin.retryOf keeps the lineage. The source record is never mutated.",
+        inputSchema: { id: z.string().describe("source scorecard id (must be succeeded/failed)") },
+      },
+      ({ id }) =>
+        run(principal, "scorecards:run", async () =>
+          ok(await scorecards.retryFailed({ tenant: ws, id, submittedBy: principal.subject })),
         ),
     );
 

@@ -125,8 +125,12 @@ export const RunScorecardBodySchema = z.object({
   judges: z.array(z.object({ id: z.string(), version: z.string().default("latest") })).default([]),
   runtime: z.string().optional(), // tenant Runtime id to execute on (placement.target). Absent = default backend.
   judge: JudgeRunConfigSchema.optional(), // inline judge-grader scoring-model override (unset = workspace default)
-  // concurrent case dispatches within a batch (runSuite parallelism). Unset = service default (=4). Cap prevents excessive fan-out.
-  concurrency: z.number().int().min(1).max(64).optional(),
+  // concurrent case dispatches within a batch (runSuite parallelism). Unset = service default (=4). The Scheduler's
+  // per-backend capacity + queue backpressure govern actual placement, so this mostly means "how many cases this
+  // batch is willing to have in flight" — sized for cluster runtimes (nomad/k8s spread allocs across nodes).
+  concurrency: z.number().int().min(1).max(512).optional(),
+  // transient dispatch retries per case (throw-only — a failing eval result is never retried). Unset = 1.
+  retries: z.number().int().min(0).max(5).optional(),
   // partial run — only a subset of the full dataset (cost/smoke). Applied in order: ids (explicit) → tags (any-match) → limit (first N).
   cases: z
     .object({
@@ -1662,6 +1666,28 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       );
     } catch (err) {
       return sendError(reply, err);
+    }
+  });
+
+  // Retry-failed — a NEW scorecard that re-runs only the failed cases of a terminal batch; passing results are
+  // carried over verbatim and origin.retryOf keeps the lineage (the source record is never mutated).
+  // Same gate as submit (scorecards:run). docs/architecture/batch-resilience.md
+  app.post<{ Params: { id: string } }>("/scorecards/:id/retry", async (req, reply) => {
+    if (!deps.scorecardService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "scorecard service not configured" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "scorecards:run");
+      return reply.code(202).send(
+        await deps.scorecardService.retryFailed({
+          tenant: principal.workspace,
+          id: req.params.id,
+          submittedBy: principal.subject,
+        }),
+      );
+    } catch (err) {
+      return sendError(reply, err); // not found 404 / not terminal · nothing failed 400
     }
   });
 

@@ -186,6 +186,9 @@ export interface RunScorecardInput {
   // Partial run — run only a subset of the full dataset (cost/smoke). Applied in order: ids (explicit selection) → tags (any-match) → limit (first N).
   // The result record is stamped with subset{total,selected,…} to mark that it is "not the whole thing".
   cases?: { ids?: string[]; tags?: string[]; limit?: number };
+  // Transient dispatch retries per case (a THROWING dispatch only — a failing eval result is never retried).
+  // Default 1. docs/architecture/batch-resilience.md
+  retries?: number;
 }
 
 export interface ScorecardServiceDeps {
@@ -300,6 +303,11 @@ export class ScorecardService {
         ? { source: input.origin?.source ?? "api", ...(input.origin ?? {}), ...(pins ? { pinOverrides: pins } : {}) }
         : undefined;
 
+    // judge model: request override → workspace default (DB) → none (the inline judge grader is skipped in the agent).
+    const judge = input.judge ?? (this.deps.judgeFor ? await this.deps.judgeFor(input.tenant) : undefined);
+    const concurrency = input.concurrency ?? this.concurrency;
+    const retries = input.retries ?? 1; // transient dispatch retry (throw-only) — default one extra attempt
+
     const ts = this.now();
     const record: ScorecardRecord = {
       id: this.newId(),
@@ -311,11 +319,12 @@ export class ScorecardService {
       ...(input.submittedBy ? { createdBy: input.submittedBy } : {}), // the runner — the "who" paired with origin (the "where")
       ...(input.runtime ? { runtime: input.runtime } : {}), // placed runtime (work-queue axis) — unset = default backend
       ...(subset ? { subset } : {}), // partial-run marker — consumers know it's "not the whole thing"
+      // Everything a re-drive needs (restart resume / retry-failed) — persisted at submit so the batch can be
+      // reconstructed after a control-plane restart. docs/architecture/batch-resilience.md
+      orchestration: { judges: input.judges ?? [], ...(judge ? { judge } : {}), concurrency, retries },
       createdAt: ts,
       updatedAt: ts,
     };
-    // judge model: request override → workspace default (DB) → none (the inline judge grader is skipped in the agent).
-    const judge = input.judge ?? (this.deps.judgeFor ? await this.deps.judgeFor(input.tenant) : undefined);
 
     await this.deps.store.create(record);
     // Server-side supersede — reclaim any in-flight batch for the same PR (origin.repo+prNumber) × same (harness, dataset) and
@@ -336,7 +345,8 @@ export class ScorecardService {
       input.runtime,
       judge,
       // Request parallelism takes precedence, else the service default. Positive integers only (the boundary is enforced by the route/MCP via Zod).
-      input.concurrency ?? this.concurrency,
+      concurrency,
+      { retries },
     );
     return record;
   }
@@ -383,6 +393,175 @@ export class ScorecardService {
 
   list(tenant?: string): Promise<ScorecardRecord[]> {
     return this.deps.store.list(tenant);
+  }
+
+  // Restart resume — re-drive an interrupted (queued/running) batch from where it stopped: keep the child runs that
+  // finished (status=succeeded with a stored result), re-dispatch everything else. Boot recovery calls this instead of
+  // tombstoning the batch. Returns false when the record can't be faithfully resumed (no orchestration field — pre-mig
+  // records — or the dataset/subset no longer resolves); the caller falls back to the old INTERRUPTED tombstone.
+  // docs/architecture/batch-resilience.md
+  async resume(id: string): Promise<boolean> {
+    const rec = await this.deps.store.get(id);
+    if (!rec || (rec.status !== "queued" && rec.status !== "running") || !rec.orchestration) return false;
+    let dataset: Dataset;
+    let seed: CaseResult[] = [];
+    const seedRunIds: string[] = [];
+    try {
+      const resolved = await this.deps.datasets.get(rec.tenant, rec.dataset.id, rec.dataset.version);
+      // Re-apply the recorded selection — ids/tags/limit selection is deterministic, so the same knobs give the same cases.
+      const { cases } = selectSubsetCases(
+        resolved,
+        rec.subset ? { ids: rec.subset.ids, tags: rec.subset.tags, limit: rec.subset.limit } : undefined,
+      );
+      dataset = { ...resolved, cases };
+      if (this.deps.runStore) {
+        const children = await this.deps.runStore.list(rec.tenant, { scorecardId: id });
+        // Latest child per case wins (a batch resumed more than once has several children for a re-run case).
+        const latestByCase = new Map<string, (typeof children)[number]>();
+        for (const c of children) {
+          const prev = latestByCase.get(c.caseId);
+          if (!prev || c.updatedAt > prev.updatedAt) latestByCase.set(c.caseId, c);
+        }
+        for (const c of latestByCase.values()) {
+          if (c.status === "succeeded" && c.result) {
+            seed.push(c.result);
+            seedRunIds.push(c.id);
+          } else if (c.status === "running" || c.status === "queued") {
+            // Mid-flight when the process died — superseded by the re-dispatch below.
+            await this.deps.runStore.update(c.id, {
+              status: "failed",
+              error: {
+                code: "INTERRUPTED",
+                message: "Interrupted by a control-plane restart — re-dispatched on resume.",
+              },
+              updatedAt: this.now(),
+            });
+          }
+        }
+        // Only seed cases that are still in the selection (dataset edits between runs shrink, never corrupt).
+        const selected = new Set(dataset.cases.map((c) => c.id));
+        const keep = seed.map((r, i) => [r, seedRunIds[i]] as const).filter(([r]) => selected.has(r.caseId));
+        seed = keep.map(([r]) => r);
+        seedRunIds.length = 0;
+        seedRunIds.push(...keep.map(([, rid]) => rid).filter((x): x is string => x !== undefined));
+      }
+    } catch {
+      return false; // dataset/subset no longer resolves — not faithfully resumable
+    }
+    // Harness spec re-resolve at the recorded concrete version (+ the recorded ephemeral pins, if any).
+    let harnessSpec: HarnessSpec | undefined;
+    const pins = rec.origin?.pinOverrides;
+    if (this.deps.harnesses) {
+      try {
+        harnessSpec =
+          pins && Object.keys(pins).length > 0
+            ? await this.deps.harnesses.resolveWithPins(rec.tenant, rec.harness.id, rec.harness.version, pins)
+            : await this.deps.harnesses.get(rec.tenant, rec.harness.id, rec.harness.version);
+      } catch {
+        // unregistered/built-in → no spec embedded (same as submit)
+      }
+    }
+    const remaining = dataset.cases.length - seed.length;
+    void this.track(
+      id,
+      rec.tenant,
+      rec.createdBy ?? rec.tenant,
+      dataset,
+      rec.harness.id,
+      rec.harness.version,
+      harnessSpec,
+      rec.orchestration.judges,
+      rec.runtime,
+      rec.orchestration.judge,
+      rec.orchestration.concurrency,
+      {
+        seed,
+        seedRunIds,
+        retries: rec.orchestration.retries,
+        resumeNote: `Resumed after a control-plane restart — ${seed.length} finished case(s) kept, ${remaining} re-dispatched`,
+      },
+    );
+    return true;
+  }
+
+  // Retry-failed — a NEW scorecard that re-runs only the failed cases of a terminal batch and carries the passing
+  // results over verbatim (full, directly comparable case set; origin.retryOf keeps the lineage). The source record
+  // is never mutated — eval history stays immutable. docs/architecture/batch-resilience.md
+  async retryFailed(input: { tenant: string; id: string; submittedBy?: string }): Promise<ScorecardRecord> {
+    const src = await this.get(input.id); // hydrated (results from child runs when stored as references)
+    if (!src || src.tenant !== input.tenant)
+      throw new NotFoundError("NOT_FOUND", { scorecard: input.id }, "scorecard not found.");
+    if (src.status !== "succeeded" && src.status !== "failed")
+      throw new BadRequestError(
+        "BAD_REQUEST",
+        { scorecard: input.id, status: src.status },
+        "Only a finished batch can be retried — wait for it to finish (or resume handles interruptions).",
+      );
+    const results = src.scorecard?.results ?? [];
+    if (results.length === 0)
+      throw new BadRequestError("BAD_REQUEST", { scorecard: input.id }, "This batch has no per-case results to retry.");
+    const failed = results.filter((r) => caseVerdict(r) !== true);
+    if (failed.length === 0)
+      throw new BadRequestError("BAD_REQUEST", { scorecard: input.id }, "Nothing to retry — every case passed.");
+    const seed = results.filter((r) => caseVerdict(r) === true);
+
+    const resolved = await this.deps.datasets.get(input.tenant, src.dataset.id, src.dataset.version);
+    const { cases } = selectSubsetCases(
+      resolved,
+      src.subset ? { ids: src.subset.ids, tags: src.subset.tags, limit: src.subset.limit } : undefined,
+    );
+    const dataset: Dataset = { ...resolved, cases };
+
+    let harnessSpec: HarnessSpec | undefined;
+    const pins = src.origin?.pinOverrides;
+    if (this.deps.harnesses) {
+      try {
+        harnessSpec =
+          pins && Object.keys(pins).length > 0
+            ? await this.deps.harnesses.resolveWithPins(input.tenant, src.harness.id, src.harness.version, pins)
+            : await this.deps.harnesses.get(input.tenant, src.harness.id, src.harness.version);
+      } catch {
+        // unregistered/built-in → no spec embedded (same as submit)
+      }
+    }
+
+    // Pre-orchestration source records still retry — with no judges/judge on file, re-run cases get grader scores only.
+    const orch = src.orchestration ?? { judges: [], concurrency: this.concurrency, retries: 1 };
+    const ts = this.now();
+    const record: ScorecardRecord = {
+      id: this.newId(),
+      tenant: input.tenant,
+      dataset: { id: dataset.id, version: dataset.version },
+      harness: src.harness,
+      status: "queued",
+      origin: { source: "api", ...(src.origin ?? {}), retryOf: src.id },
+      ...(input.submittedBy ? { createdBy: input.submittedBy } : {}),
+      ...(src.runtime ? { runtime: src.runtime } : {}),
+      ...(src.subset ? { subset: src.subset } : {}),
+      orchestration: orch,
+      createdAt: ts,
+      updatedAt: ts,
+    };
+    await this.deps.store.create(record);
+    void this.track(
+      record.id,
+      input.tenant,
+      input.submittedBy ?? input.tenant,
+      dataset,
+      src.harness.id,
+      src.harness.version,
+      harnessSpec,
+      orch.judges,
+      src.runtime,
+      orch.judge,
+      orch.concurrency,
+      {
+        seed,
+        retries: orch.retries,
+        resumeNote: `Retry of ${src.id} — re-running ${failed.length} failed case(s), ${seed.length} passing result(s) carried over`,
+      },
+    );
+    return record;
   }
 
   // Trace ingest — create a scorecard from traces already produced externally (harness not run). Resolve dataset (404 if missing) → queued → async scoring.
@@ -538,6 +717,13 @@ export class ScorecardService {
     runtime: string | undefined,
     judge: JudgeRunConfig | undefined,
     concurrency: number, // number of cases to dispatch concurrently (request override→service default is resolved in submit).
+    // Re-drive support (docs/architecture/batch-resilience.md):
+    //  seed        — finished CaseResults carried in verbatim (restart resume: done children · retry-failed: source passes).
+    //                Seeded cases are NOT re-dispatched, re-judged, or re-exported; they merge into the final scorecard.
+    //  seedRunIds  — the child-run ids behind the seeds (kept in record.runIds so get() hydration still sees every case).
+    //  retries     — transient dispatch retries per case (throw-only).
+    //  resumeNote  — a timeline step explaining why this track run starts mid-way.
+    opts: { seed?: CaseResult[]; seedRunIds?: string[]; retries?: number; resumeNote?: string } = {},
   ): Promise<void> {
     // If supersede already reclaimed this batch, don't start (prevents reviving queued→superseded back to running).
     if ((await this.deps.store.get(id))?.status === "superseded") return;
@@ -551,6 +737,13 @@ export class ScorecardService {
       steps.push({ ts: this.now(), phase: p, status, message, ...(caseId ? { caseId } : {}) });
     };
     const flushSteps = (): Promise<unknown> => this.deps.store.update(id, { steps: [...steps], updatedAt: this.now() });
+    const seed = opts.seed ?? [];
+    const seedRunIds = opts.seedRunIds ?? [];
+    // Seeds carried WITHOUT child-run backing (retry-failed carries another scorecard's results) can't be
+    // hydrated from this batch's children — those batches embed the full scorecard alongside runIds.
+    const seedChildBacked = seedRunIds.length >= seed.length;
+    const seededIds = new Set(seed.map((r) => r.caseId));
+    if (opts.resumeNote) pushStep("resume", "info", opts.resumeNote);
     // Child runs this batch fanned out: caseId → childId (when runStore is set). Used after completion for the final write-back + storing runIds references.
     const caseToChild = new Map<string, string>();
     // Once per batch: shared + submitter (owner) personal secret maps (if any). Just before dispatching a case, resolve {secretRef} in the harness env by scope
@@ -618,9 +811,11 @@ export class ScorecardService {
     let scorecard: Scorecard | undefined;
     try {
       // When a runtime is selected, inject it as each case's placement.target → RuntimeDispatcher routes to the tenant runtime.
+      // Seeded cases (already-finished results carried in by resume/retry) are excluded from dispatch entirely.
+      const casesToRun = seed.length > 0 ? dataset.cases.filter((c) => !seededIds.has(c.id)) : dataset.cases;
       const cases = runtime
-        ? dataset.cases.map((c) => ({ ...c, placement: { ...c.placement, target: runtime } }))
-        : dataset.cases;
+        ? casesToRun.map((c) => ({ ...c, placement: { ...c.placement, target: runtime } }))
+        : casesToRun;
       const suite: Suite = { id: dataset.id, harness: { id: harnessId }, cases };
       // judge streaming — fire a case's judge the moment it finishes, without waiting for the whole batch to complete
       // (case-axis parallel·bounded). Removes the barrier where the slowest case blocked judging of the rest.
@@ -637,11 +832,16 @@ export class ScorecardService {
       const exportStream = this.deps.exportStreamFor
         ? await this.deps.exportStreamFor(tenant, exportCtx).catch(() => undefined)
         : undefined;
-      pushStep("dispatch", "started", `Running ${cases.length} case(s)`);
+      pushStep(
+        "dispatch",
+        "started",
+        `Running ${cases.length} case(s)${seed.length > 0 ? ` (${seed.length} finished result(s) carried over)` : ""}`,
+      );
       await flushSteps();
       // onResult: as each case finishes (completion order), record PASS/FAIL + reason as a step — the heart of "progress".
       scorecard = await runSuite(suite, harnessVersion, dispatch, {
         concurrency,
+        ...(opts.retries !== undefined ? { retries: opts.retries } : {}), // transient dispatch retry (throw-only)
         signal: controller.signal, // on supersede, don't fire remaining cases (already-fired cases complete naturally)
         onResult: (r) => {
           const v = caseVerdict(r);
@@ -667,6 +867,17 @@ export class ScorecardService {
           }
         },
       });
+      // Merge carried-over results back in (dataset case order) — seeds were already judged/exported on their
+      // original run, so they bypass the judge/export streams (which only ever saw the re-run cases).
+      if (seed.length > 0) {
+        const order = new Map(dataset.cases.map((c, i) => [c.id, i] as const));
+        scorecard = {
+          ...scorecard,
+          results: [...seed, ...scorecard.results].sort(
+            (a, b) => (order.get(a.caseId) ?? 0) - (order.get(b.caseId) ?? 0),
+          ),
+        };
+      }
       pushStep("dispatch", "ok", `Dispatch complete — ${scorecard.results.length} case(s)`);
       await flushSteps();
       // Superseded — a newer fire reclaimed this batch. Skip the remaining pipeline (judge/offload/notify) and
@@ -683,14 +894,16 @@ export class ScorecardService {
           "info",
           "Replaced by a newer fire of the same PR — remaining cases not fired, only partial results kept",
         );
-        const hasChildren = caseToChild.size > 0;
+        const hasChildren = caseToChild.size > 0 || seedRunIds.length > 0;
         if (hasChildren) await this.writeBackResults(caseToChild, scorecard.results);
         await this.deps.store.update(id, {
           status: "superseded",
           ...(scorecard.results.length > 0 ? { summary: summarizeScorecard(scorecard) } : {}),
           ...(exportedPartial?.cases?.length ? { export: exportedPartial } : {}),
           steps: [...steps],
-          ...(hasChildren ? { runIds: [...caseToChild.values()] } : { scorecard }),
+          ...(hasChildren && seedChildBacked
+            ? { runIds: [...seedRunIds, ...caseToChild.values()] }
+            : { scorecard, ...(hasChildren ? { runIds: [...seedRunIds, ...caseToChild.values()] } : {}) }),
           updatedAt: this.now(),
         });
         this.inFlight.delete(id);
@@ -730,7 +943,7 @@ export class ScorecardService {
       pushStep("persist", "ok", "aggregated and persisted");
       // If there are child runs: write back the judge/offload-finalized results to the children, then store only runIds instead of the heavy embed
       //  → get hydrates from the children (storage dedup, response shape unchanged). Without children (no runStore), embed as before.
-      const hasChildren = caseToChild.size > 0;
+      const hasChildren = caseToChild.size > 0 || seedRunIds.length > 0;
       if (hasChildren) await this.writeBackResults(caseToChild, scorecard.results);
       await this.deps.store.update(id, {
         // If supersede arrived mid-pipeline (judge/offload), don't revive to succeeded — all results attach, but
@@ -741,7 +954,9 @@ export class ScorecardService {
         ...(judgeModels.length > 0 ? { judgeModels } : {}),
         ...(exported ? { export: exported } : {}),
         steps: [...steps],
-        ...(hasChildren ? { runIds: [...caseToChild.values()] } : { scorecard }),
+        ...(hasChildren && seedChildBacked
+          ? { runIds: [...seedRunIds, ...caseToChild.values()] }
+          : { scorecard, ...(hasChildren ? { runIds: [...seedRunIds, ...caseToChild.values()] } : {}) }),
         updatedAt: this.now(),
       });
     } catch (err) {
@@ -752,7 +967,7 @@ export class ScorecardService {
       pushStep(phase, "failed", base.message);
       // Preserve partial results — on a post-dispatch (judge/offload) failure, persist the case results already gathered for visibility.
       // With child runs, mirror the success path: runIds references (partial) instead of embed + write back results to the children.
-      const hasChildren = caseToChild.size > 0;
+      const hasChildren = caseToChild.size > 0 || seedRunIds.length > 0;
       if (scorecard && hasChildren) await this.writeBackResults(caseToChild, scorecard.results);
       const declared = harnessSpec?.kind === "command" ? harnessSpec.model : undefined;
       await this.deps.store.update(id, {
@@ -760,7 +975,7 @@ export class ScorecardService {
         status: controller.signal.aborted ? "superseded" : "failed",
         error: { ...base, phase },
         steps: [...steps],
-        ...(hasChildren ? { runIds: [...caseToChild.values()] } : {}),
+        ...(hasChildren ? { runIds: [...seedRunIds, ...caseToChild.values()] } : {}),
         ...(scorecard
           ? {
               summary: summarizeScorecard(scorecard),

@@ -15,6 +15,7 @@ interface ScorecardRow {
   harness_version: string;
   status: string;
   summary: unknown;
+  orchestration: unknown; // resume/retry inputs (mig 0049)
   models: unknown;
   judge_models: unknown;
   origin: unknown;
@@ -48,6 +49,7 @@ function rowToRecord(row: ScorecardRow, hasDetail: boolean): ScorecardRecord {
     createdBy: row.created_by ?? undefined, // lightweight → included in list too (runner display/filter)
     runtime: row.runtime ?? undefined, // lightweight → included in list too (work-queue runtime axis)
     subset: row.subset ?? undefined, // lightweight → included in list too (partial-run badge)
+    orchestration: row.orchestration ?? undefined, // resume/retry inputs (mig 0049) — lightweight
     scorecard: hasDetail ? (row.scorecard ?? undefined) : undefined,
     export: hasDetail ? (row.sink_export ?? undefined) : undefined, // for detail (get only, like steps). Column name is sink_export (reserved-word avoidance)
     error: row.error ?? undefined,
@@ -65,8 +67,8 @@ export class PgScorecardStore implements ScorecardStore {
   async create(r: ScorecardRecord): Promise<void> {
     await this.client.query(
       `INSERT INTO everdict_scorecards
-        (id, tenant, dataset_id, dataset_version, harness_id, harness_version, status, summary, models, judge_models, origin, created_by, runtime, subset, scorecard, sink_export, error, steps, run_ids, created_at, updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)`,
+        (id, tenant, dataset_id, dataset_version, harness_id, harness_version, status, summary, models, judge_models, origin, created_by, runtime, subset, orchestration, scorecard, sink_export, error, steps, run_ids, created_at, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)`,
       [
         r.id,
         r.tenant,
@@ -82,6 +84,7 @@ export class PgScorecardStore implements ScorecardStore {
         r.createdBy ?? null,
         r.runtime ?? null,
         r.subset ? JSON.stringify(r.subset) : null,
+        r.orchestration ? JSON.stringify(r.orchestration) : null,
         r.scorecard ? JSON.stringify(r.scorecard) : null,
         r.export ? JSON.stringify(r.export) : null,
         r.error ? JSON.stringify(r.error) : null,

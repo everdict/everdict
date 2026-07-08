@@ -41,17 +41,36 @@ export async function runSuite(
   // onResult: called as each case completes (in completion order; both success and isolated failure) — for progress (step) reporting.
   // signal: cooperative cancellation — after abort, "remaining" cases are not launched (already-launched cases complete naturally and are included in the results).
   // Not a force kill — aborting backend jobs is a separate matter. supersede (re-launch of the same PR) reclaims a stale batch via this signal.
-  opts: { concurrency?: number; onResult?: (result: CaseResult) => void; signal?: AbortSignal } = {},
+  // retries: extra attempts when dispatch THROWS (transient infra: placement blip, node drain, network) — a
+  // CaseResult with failing scores is a legitimate eval outcome and is never retried. Linear backoff between
+  // attempts. Default 0 (previous fail-fast behavior). docs/architecture/batch-resilience.md
+  opts: {
+    concurrency?: number;
+    onResult?: (result: CaseResult) => void;
+    signal?: AbortSignal;
+    retries?: number;
+    retryBackoffMs?: number; // base backoff (attempt n waits n×base). Injectable so tests don't sleep.
+  } = {},
 ): Promise<Scorecard> {
   const jobs: AgentJob[] = suite.cases.map((evalCase) => ({ evalCase, harness: { id: suite.harness.id, version } }));
+  const retries = Math.max(0, opts.retries ?? 0);
+  const backoff = opts.retryBackoffMs ?? 1_000;
   // Isolate dispatch failures per case — even if one case throws, the rest keep running and the failure is captured as a result.
   const results = await mapLimit(jobs, opts.concurrency ?? 4, async (job): Promise<CaseResult | undefined> => {
     if (opts.signal?.aborted) return undefined; // cancelled — unlaunched cases are skipped with no result
-    let result: CaseResult;
-    try {
-      result = await dispatch(job);
-    } catch (error) {
-      result = failedCaseResult(job, error);
+    let result: CaseResult | undefined;
+    for (let attempt = 0; ; attempt++) {
+      if (attempt > 0 && opts.signal?.aborted) return undefined; // don't burn retries on a reclaimed batch
+      try {
+        result = await dispatch(job);
+        break;
+      } catch (error) {
+        if (attempt >= retries) {
+          result = failedCaseResult(job, error);
+          break;
+        }
+        await new Promise((r) => setTimeout(r, backoff * (attempt + 1)));
+      }
     }
     opts.onResult?.(result);
     return result;

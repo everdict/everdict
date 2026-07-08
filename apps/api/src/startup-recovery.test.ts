@@ -40,7 +40,7 @@ describe("recoverInterrupted (reclaim orphaned jobs at boot)", () => {
 
     const res = await recoverInterrupted({ scorecards, runs, now: () => "2026-07-04T00:00:00.000Z" });
 
-    expect(res).toEqual({ scorecards: 2, runs: 2 });
+    expect(res).toEqual({ scorecards: 2, resumed: 0, runs: 2 });
     expect((await scorecards.get("zombie-running"))?.status).toBe("failed");
     expect((await scorecards.get("zombie-running"))?.error?.code).toBe("INTERRUPTED");
     expect((await scorecards.get("zombie-queued"))?.status).toBe("failed");
@@ -55,6 +55,42 @@ describe("recoverInterrupted (reclaim orphaned jobs at boot)", () => {
     const scorecards = new InMemoryScorecardStore();
     const runs = new InMemoryRunStore();
     await scorecards.create(card("done", { status: "succeeded" }));
-    expect(await recoverInterrupted({ scorecards, runs })).toEqual({ scorecards: 0, runs: 0 });
+    expect(await recoverInterrupted({ scorecards, runs })).toEqual({ scorecards: 0, resumed: 0, runs: 0 });
+  });
+
+  it("resumes a resumable batch instead of tombstoning it — only unresumable ones fall back to INTERRUPTED", async () => {
+    const scorecards = new InMemoryScorecardStore();
+    const runs = new InMemoryRunStore();
+    await scorecards.create(card("resumable"));
+    await scorecards.create(card("legacy")); // pre-orchestration record — resume() reports false
+    const resumedIds: string[] = [];
+    const res = await recoverInterrupted({
+      scorecards,
+      runs,
+      resume: async (id) => {
+        resumedIds.push(id);
+        return id === "resumable";
+      },
+      now: () => "2026-07-04T00:00:00.000Z",
+    });
+    expect(res).toEqual({ scorecards: 1, resumed: 1, runs: 0 });
+    expect(resumedIds).toEqual(["resumable", "legacy"]);
+    // The resumed batch is left alone (its own track loop drives the status); the legacy one is tombstoned.
+    expect((await scorecards.get("resumable"))?.status).toBe("running");
+    expect((await scorecards.get("legacy"))?.status).toBe("failed");
+    expect((await scorecards.get("legacy"))?.error?.code).toBe("INTERRUPTED");
+  });
+
+  it("a throwing resume() does not crash boot — that batch tombstones like an unresumable one", async () => {
+    const scorecards = new InMemoryScorecardStore();
+    await scorecards.create(card("explodes"));
+    const res = await recoverInterrupted({
+      scorecards,
+      resume: async () => {
+        throw new Error("dataset gone");
+      },
+    });
+    expect(res).toEqual({ scorecards: 1, resumed: 0, runs: 0 });
+    expect((await scorecards.get("explodes"))?.status).toBe("failed");
   });
 });

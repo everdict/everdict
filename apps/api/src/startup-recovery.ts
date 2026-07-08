@@ -2,8 +2,12 @@ import type { RunStore, ScorecardStore } from "@everdict/db";
 
 // Reclaim orphaned work on boot — batches (scorecards) and runs are tracked in-process inside the control-plane process
 // (the single-process assumption, same as inFlight supersede / in-process rendezvous). So when the process restarts, the
-// queued/running records the previous process was driving become ghosts with no owner to resume them — the cause of the
-// queue/status showing "running" forever. At boot we finalize these as failed (INTERRUPTED) so the state matches reality.
+// queued/running records the previous process was driving become ghosts with no owner to resume them.
+//
+// Batches are RESUMED, not tombstoned (docs/architecture/batch-resilience.md): results persist per case (child runs),
+// so an interrupted batch re-drives only its unfinished cases via the injected `resume`. Records that can't be
+// faithfully resumed (pre-orchestration records, unresolvable dataset) fall back to the old failed(INTERRUPTED)
+// tombstone so the state still matches reality. Standalone runs keep the tombstone (a single run is cheap to resubmit).
 // Note: if more than one control plane shares the same store (DB), this also reclaims another's in-flight work — we simply
 // follow the single-control-plane assumption (common across the codebase).
 
@@ -17,17 +21,27 @@ const ACTIVE = new Set(["queued", "running"]);
 export interface RecoveryDeps {
   scorecards: ScorecardStore;
   runs?: RunStore;
+  // ScorecardService.resume — re-drive an interrupted batch from its finished child results. Returns false when the
+  // record can't be resumed (then we tombstone). Optional so recovery still works in stores-only wiring/tests.
+  resume?: (id: string) => Promise<boolean>;
   now?: () => string;
 }
 
-export async function recoverInterrupted(deps: RecoveryDeps): Promise<{ scorecards: number; runs: number }> {
+export async function recoverInterrupted(
+  deps: RecoveryDeps,
+): Promise<{ scorecards: number; resumed: number; runs: number }> {
   const now = deps.now ?? (() => new Date().toISOString());
   let scorecardCount = 0;
+  let resumedCount = 0;
   let runCount = 0;
 
-  // ① Orphaned batches + the running child runs of those batches.
+  // ① Orphaned batches — resume when possible; tombstone (plus their still-active children) when not.
   const cards = (await deps.scorecards.list()).filter((c) => ACTIVE.has(c.status));
   for (const c of cards) {
+    if (deps.resume && (await deps.resume(c.id).catch(() => false))) {
+      resumedCount += 1;
+      continue; // resume re-dispatches unfinished cases and supersedes mid-flight children itself
+    }
     await deps.scorecards.update(c.id, { status: "failed", error: INTERRUPTED, updatedAt: now() });
     scorecardCount += 1;
     if (!deps.runs) continue;
@@ -47,6 +61,5 @@ export async function recoverInterrupted(deps: RecoveryDeps): Promise<{ scorecar
       runCount += 1;
     }
   }
-
-  return { scorecards: scorecardCount, runs: runCount };
+  return { scorecards: scorecardCount, resumed: resumedCount, runs: runCount };
 }

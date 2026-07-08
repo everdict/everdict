@@ -235,6 +235,7 @@ describe("MCP tools", () => {
       "remove_workspace_github_app_registration",
       "remove_workspace_mattermost",
       "remove_workspace_trace_sink",
+      "retry_scorecard",
       "revoke_api_key",
       "revoke_invite",
       "revoke_runner",

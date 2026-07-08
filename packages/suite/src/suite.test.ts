@@ -170,3 +170,53 @@ describe("caseVerdict (authority-based)", () => {
     expect(scorecardPassRate(card)).toEqual({ pass: 2, total: 2, rate: 1 });
   });
 });
+
+// Transient dispatch retry — a throw is an infra signal and gets retried; a failing RESULT is an eval outcome and never is.
+describe("runSuite transient retry", () => {
+  const suite = {
+    id: "s",
+    harness: { id: "h" },
+    cases: [{ id: "c1", env: { kind: "prompt" as const }, task: "t", graders: [], timeoutSec: 60, tags: [] }],
+  };
+  const okResult = {
+    caseId: "c1",
+    harness: "h@1",
+    trace: [],
+    snapshot: { kind: "prompt" as const, output: "" },
+    scores: [{ graderId: "g", metric: "m", value: 0, pass: false }], // failing SCORE — must not trigger a retry
+  };
+
+  it("retries a throwing dispatch and succeeds on a later attempt", async () => {
+    let calls = 0;
+    const dispatch = async () => {
+      calls++;
+      if (calls < 3) throw new Error("placement blip");
+      return okResult;
+    };
+    const sc = await runSuite(suite, "1", dispatch, { retries: 2, retryBackoffMs: 1 });
+    expect(calls).toBe(3);
+    expect(sc.results[0]?.caseId).toBe("c1");
+    expect(sc.results[0]?.scores.some((s) => s.graderId === "dispatch")).toBe(false);
+  });
+
+  it("freezes into a dispatch-error result once attempts are exhausted", async () => {
+    let calls = 0;
+    const dispatch = async () => {
+      calls++;
+      throw new Error("still down");
+    };
+    const sc = await runSuite(suite, "1", dispatch, { retries: 2, retryBackoffMs: 1 });
+    expect(calls).toBe(3);
+    expect(sc.results[0]?.scores[0]).toMatchObject({ graderId: "dispatch", pass: false });
+  });
+
+  it("a result with failing scores is a legitimate outcome — exactly one dispatch, no retry", async () => {
+    let calls = 0;
+    const dispatch = async () => {
+      calls++;
+      return okResult;
+    };
+    await runSuite(suite, "1", dispatch, { retries: 3, retryBackoffMs: 1 });
+    expect(calls).toBe(1);
+  });
+});

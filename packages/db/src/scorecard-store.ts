@@ -43,6 +43,9 @@ export const ScorecardOriginSchema = z.object({
   prNumber: z.number().int().optional(),
   runUrl: z.string().optional(), // CI run link
   pinOverrides: z.record(z.string()).optional(), // submit-time ephemeral pins (slot→image) — records the PR image swap
+  // Lineage of a retry-failed run — the source scorecard this record re-ran the failed cases of (passing results
+  // carried over verbatim). The source record itself is never mutated. docs/architecture/batch-resilience.md
+  retryOf: z.string().optional(),
 });
 export type ScorecardOrigin = z.infer<typeof ScorecardOriginSchema>;
 
@@ -111,6 +114,17 @@ export const ScorecardRecordSchema = z.object({
   // The runtime it was placed on (placement.target) — the work-queue's "where does it run" axis. Unset = default backend. mig 0040.
   runtime: z.string().optional(),
   subset: ScorecardSubsetSchema.optional(), // partial-run marker (unset for a full run)
+  // Orchestration inputs needed to re-drive this batch after the fact (restart resume / retry-failed):
+  // selected Agent Judges + inline judge model + concurrency + transient-retry count. Persisted at submit
+  // (mig 0049); records without it (pre-field) cannot be faithfully resumed. docs/architecture/batch-resilience.md
+  orchestration: z
+    .object({
+      judges: z.array(z.object({ id: z.string(), version: z.string() })).default([]),
+      judge: z.object({ provider: z.enum(["openai", "anthropic"]).optional(), model: z.string() }).optional(),
+      concurrency: z.number().int().positive(),
+      retries: z.number().int().min(0).default(0),
+    })
+    .optional(),
   scorecard: ScorecardSchema.optional(), // full per-case results (for detail, heavy)
   export: ScorecardExportSchema.optional(), // trace-sink export result (for detail — get only, like steps)
   error: ScorecardRunErrorSchema.optional(),

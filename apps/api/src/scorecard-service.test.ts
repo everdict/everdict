@@ -1290,3 +1290,213 @@ describe("ScorecardService.submit — partial run (subset)", () => {
     expect(dispatched).toHaveLength(3);
   });
 });
+
+// Batch resilience — restart resume + retry-failed + persisted orchestration (docs/architecture/batch-resilience.md).
+describe("ScorecardService — batch resilience (resume · retry-failed)", () => {
+  const threeCaseDataset: Dataset = {
+    id: "rd",
+    version: "1.0.0",
+    cases: (["c1", "c2", "c3"] as const).map((id) => ({
+      id,
+      env: { kind: "prompt" as const },
+      task: "t",
+      graders: [],
+      timeoutSec: 60,
+      tags: [],
+    })),
+    tags: [],
+  };
+  const passResult = (caseId: string, pass = true): CaseResult => ({
+    caseId,
+    harness: "h@1",
+    trace: [],
+    snapshot: { kind: "prompt", output: "" },
+    scores: [{ graderId: "tests-pass", metric: "tests-pass", value: pass ? 1 : 0, pass }],
+  });
+  function capturingDispatcher() {
+    const dispatched: string[] = [];
+    const dispatcher: Dispatcher = {
+      async dispatch(job: AgentJob) {
+        dispatched.push(job.evalCase.id);
+        return passResult(job.evalCase.id);
+      },
+    };
+    return { dispatched, dispatcher };
+  }
+  function build(dispatcher: Dispatcher) {
+    const store = new InMemoryScorecardStore();
+    const runs = new InMemoryRunStore();
+    const datasets = new InMemoryDatasetRegistry();
+    let n = 0;
+    const service = new ScorecardService({
+      dispatcher,
+      store,
+      datasets,
+      runStore: runs,
+      newId: () => `id-${n++}`,
+    });
+    return { store, runs, datasets, service };
+  }
+
+  it("submit persists the orchestration inputs (judges/judge/concurrency/retries) needed to re-drive the batch", async () => {
+    const { dispatcher } = capturingDispatcher();
+    const { store, datasets, service } = build(dispatcher);
+    await datasets.register("acme", threeCaseDataset);
+    const rec = await service.submit({
+      tenant: "acme",
+      dataset: { id: "rd", version: "1.0.0" },
+      harness: { id: "h", version: "1" },
+      judge: { model: "gpt-5.4-mini" },
+      concurrency: 7,
+      retries: 2,
+    });
+    expect(rec.orchestration).toEqual({
+      judges: [],
+      judge: { model: "gpt-5.4-mini" },
+      concurrency: 7,
+      retries: 2,
+    });
+    await waitTerminal(store, rec.id);
+  });
+
+  it("resume keeps the finished children and re-dispatches only the unfinished cases", async () => {
+    const { dispatched, dispatcher } = capturingDispatcher();
+    const { store, runs, datasets, service } = build(dispatcher);
+    await datasets.register("acme", threeCaseDataset);
+    // An interrupted batch: c1 finished (child with result), c2 was mid-flight when the process died, c3 never started.
+    await store.create({
+      id: "sc-int",
+      tenant: "acme",
+      dataset: { id: "rd", version: "1.0.0" },
+      harness: { id: "h", version: "1" },
+      status: "running",
+      orchestration: { judges: [], concurrency: 2, retries: 0 },
+      createdAt: "2026-07-08T00:00:00.000Z",
+      updatedAt: "2026-07-08T00:00:00.000Z",
+    });
+    await runs.create({
+      id: "child-c1",
+      tenant: "acme",
+      harness: { id: "h", version: "1" },
+      caseId: "c1",
+      status: "succeeded",
+      result: passResult("c1"),
+      parentScorecardId: "sc-int",
+      createdAt: "2026-07-08T00:00:01.000Z",
+      updatedAt: "2026-07-08T00:00:02.000Z",
+    });
+    await runs.create({
+      id: "child-c2",
+      tenant: "acme",
+      harness: { id: "h", version: "1" },
+      caseId: "c2",
+      status: "running",
+      parentScorecardId: "sc-int",
+      createdAt: "2026-07-08T00:00:01.000Z",
+      updatedAt: "2026-07-08T00:00:01.000Z",
+    });
+
+    expect(await service.resume("sc-int")).toBe(true);
+    const rec = await waitTerminal(store, "sc-int");
+
+    expect(dispatched.sort()).toEqual(["c2", "c3"]); // c1 is never re-run
+    expect(rec.status).toBe("succeeded");
+    // Full case set in the final aggregate — the carried result plus the two re-runs.
+    const hydrated = await service.get("sc-int");
+    expect(hydrated?.scorecard?.results.map((r) => r.caseId).sort()).toEqual(["c1", "c2", "c3"]);
+    expect(rec.runIds).toContain("child-c1"); // the seed child stays addressable
+    expect(rec.steps?.some((s) => s.phase === "resume")).toBe(true);
+    // The mid-flight child was superseded by the re-dispatch.
+    expect((await runs.get("child-c2"))?.status).toBe("failed");
+    expect((await runs.get("child-c2"))?.error?.code).toBe("INTERRUPTED");
+  });
+
+  it("resume refuses records it cannot faithfully re-drive (terminal status / no orchestration)", async () => {
+    const { dispatcher } = capturingDispatcher();
+    const { store, service, datasets } = build(dispatcher);
+    await datasets.register("acme", threeCaseDataset);
+    await store.create({
+      id: "sc-done",
+      tenant: "acme",
+      dataset: { id: "rd", version: "1.0.0" },
+      harness: { id: "h", version: "1" },
+      status: "succeeded",
+      orchestration: { judges: [], concurrency: 1, retries: 0 },
+      createdAt: "2026-07-08T00:00:00.000Z",
+      updatedAt: "2026-07-08T00:00:00.000Z",
+    });
+    await store.create({
+      id: "sc-legacy",
+      tenant: "acme",
+      dataset: { id: "rd", version: "1.0.0" },
+      harness: { id: "h", version: "1" },
+      status: "running", // interrupted, but a pre-orchestration record
+      createdAt: "2026-07-08T00:00:00.000Z",
+      updatedAt: "2026-07-08T00:00:00.000Z",
+    });
+    expect(await service.resume("sc-done")).toBe(false);
+    expect(await service.resume("sc-legacy")).toBe(false);
+  });
+
+  it("retryFailed re-runs only the failed cases into a NEW scorecard and carries the passes verbatim", async () => {
+    const { dispatched, dispatcher } = capturingDispatcher();
+    const { store, datasets, service } = build(dispatcher);
+    await datasets.register("acme", threeCaseDataset);
+    await store.create({
+      id: "sc-src",
+      tenant: "acme",
+      dataset: { id: "rd", version: "1.0.0" },
+      harness: { id: "h", version: "1" },
+      status: "succeeded",
+      orchestration: { judges: [], concurrency: 3, retries: 1 },
+      scorecard: {
+        suiteId: "rd",
+        harness: "h@1",
+        results: [passResult("c1"), passResult("c2", false), passResult("c3", false)],
+      },
+      createdAt: "2026-07-08T00:00:00.000Z",
+      updatedAt: "2026-07-08T00:00:00.000Z",
+    });
+
+    const rec = await service.retryFailed({ tenant: "acme", id: "sc-src", submittedBy: "alice" });
+    expect(rec.origin?.retryOf).toBe("sc-src");
+    expect(rec.createdBy).toBe("alice");
+    const done = await waitTerminal(store, rec.id);
+
+    expect(dispatched.sort()).toEqual(["c2", "c3"]); // only the failed cases re-run
+    expect(done.status).toBe("succeeded");
+    const hydrated = await service.get(rec.id);
+    expect(hydrated?.scorecard?.results.map((r) => r.caseId).sort()).toEqual(["c1", "c2", "c3"]);
+    // The source record is untouched (history immutable).
+    expect((await store.get("sc-src"))?.status).toBe("succeeded");
+    expect((await store.get("sc-src"))?.scorecard?.results).toHaveLength(3);
+  });
+
+  it("retryFailed rejects an in-flight source (400) and an all-pass source (nothing to retry)", async () => {
+    const { dispatcher } = capturingDispatcher();
+    const { store, datasets, service } = build(dispatcher);
+    await datasets.register("acme", threeCaseDataset);
+    await store.create({
+      id: "sc-running",
+      tenant: "acme",
+      dataset: { id: "rd", version: "1.0.0" },
+      harness: { id: "h", version: "1" },
+      status: "running",
+      createdAt: "2026-07-08T00:00:00.000Z",
+      updatedAt: "2026-07-08T00:00:00.000Z",
+    });
+    await store.create({
+      id: "sc-clean",
+      tenant: "acme",
+      dataset: { id: "rd", version: "1.0.0" },
+      harness: { id: "h", version: "1" },
+      status: "succeeded",
+      scorecard: { suiteId: "rd", harness: "h@1", results: [passResult("c1")] },
+      createdAt: "2026-07-08T00:00:00.000Z",
+      updatedAt: "2026-07-08T00:00:00.000Z",
+    });
+    await expect(service.retryFailed({ tenant: "acme", id: "sc-running" })).rejects.toBeInstanceOf(BadRequestError);
+    await expect(service.retryFailed({ tenant: "acme", id: "sc-clean" })).rejects.toBeInstanceOf(BadRequestError);
+    await expect(service.retryFailed({ tenant: "beta", id: "sc-clean" })).rejects.toBeInstanceOf(NotFoundError); // other-workspace = 404
+  });
+});
