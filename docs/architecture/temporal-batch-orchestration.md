@@ -4,7 +4,7 @@
 > worker replays the history and finishes the workflow (W1); control-plane SIGKILL mid-batch → the
 > activities retry against the restarted CP, boot recovery respects workflow ownership ("batches
 > resumed 1", no double-drive), 24/24 cases complete with zero loss or duplication (W2). Opt-in via
-> EVERDICT_TEMPORAL_ADDRESS + EVERDICT_TEMPORAL_BATCHES=1; a failed workflow START degrades
+> EVERDICT_TEMPORAL_ADDRESS (default-on once set; EVERDICT_TEMPORAL_BATCHES=0 opts out); a failed workflow START degrades
 > gracefully to the in-process loop.
 
 ## Why (and why not yet)
