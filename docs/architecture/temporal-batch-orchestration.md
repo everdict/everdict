@@ -1,4 +1,11 @@
-# Temporal batch orchestration — design (implementation: next slice)
+# Temporal batch orchestration — SHIPPED (live-verified vs a real dev Temporal)
+
+> Status: implemented per this design and live-verified 2026-07-08 — worker SIGKILL mid-batch → a new
+> worker replays the history and finishes the workflow (W1); control-plane SIGKILL mid-batch → the
+> activities retry against the restarted CP, boot recovery respects workflow ownership ("batches
+> resumed 1", no double-drive), 24/24 cases complete with zero loss or duplication (W2). Opt-in via
+> EVERDICT_TEMPORAL_ADDRESS + EVERDICT_TEMPORAL_BATCHES=1; a failed workflow START degrades
+> gracefully to the in-process loop.
 
 ## Why (and why not yet)
 
