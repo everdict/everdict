@@ -7,6 +7,7 @@ import {
   type BenchmarkCatalogItem,
   type RecipeItem,
 } from '@/features/import-benchmark'
+import { ImportTerminalBenchForm } from '@/features/import-terminal-bench'
 import { datasetsSchema } from '@/entities/dataset'
 import { can } from '@/shared/auth/can'
 import { currentPrincipal } from '@/shared/auth/principal'
@@ -76,15 +77,26 @@ export default async function ImportBenchmarkPage({
       ) : error ? (
         <Callout tone="danger">{t('catalogLoadError', { error })}</Callout>
       ) : (
-        <Card className="p-5">
-          <AddBenchmark
-            benchmarks={benchmarks}
-            recipes={recipes}
-            existingDatasets={existingDatasets}
-            preselectRecipe={preselectRecipe}
-            {...(hfTokenScope ? { hfTokenScope } : {})}
-          />
-        </Card>
+        <>
+          <Card className="p-5">
+            <AddBenchmark
+              benchmarks={benchmarks}
+              recipes={recipes}
+              existingDatasets={existingDatasets}
+              preselectRecipe={preselectRecipe}
+              {...(hfTokenScope ? { hfTokenScope } : {})}
+            />
+          </Card>
+          {/* Standard task-format on-ramp — bring an existing Terminal-Bench task set (directory/container tasks the
+              row-based wizard above can't express). docs/architecture/standard-task-formats.md */}
+          <Card className="space-y-4 p-5">
+            <div>
+              <h2 className="text-[14px] font-[560] tracking-[-0.01em]">{t('tbTitle')}</h2>
+              <p className="text-[12px] text-muted-foreground">{t('tbSubtitle')}</p>
+            </div>
+            <ImportTerminalBenchForm />
+          </Card>
+        </>
       )}
     </div>
   )

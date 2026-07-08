@@ -159,6 +159,10 @@ export const controlPlane = {
     ),
   createDataset: <T>(auth: AuthContext, dataset: unknown) =>
     call<T>(auth, '/datasets', { method: 'POST', body: JSON.stringify(dataset) }),
+  // Register a Terminal-Bench task set as a dataset (standard task-format on-ramp). The control plane maps each task
+  // to an EvalCase (image env + instruction + tests-pass) and 400s a task with no resolvable image.
+  importTerminalBench: <T>(auth: AuthContext, body: unknown) =>
+    call<T>(auth, '/datasets/terminal-bench', { method: 'POST', body: JSON.stringify(body) }),
   validateDataset: <T>(auth: AuthContext, dataset: unknown) =>
     call<T>(auth, '/datasets/validate', { method: 'POST', body: JSON.stringify(dataset) }),
   listBenchmarks: <T>(auth: AuthContext) => call<T>(auth, '/benchmarks'),
