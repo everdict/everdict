@@ -50,7 +50,12 @@ export interface NomadBackendOptions {
   cpuMhz?: number;
   memMb?: number;
   pollIntervalMs?: number;
-  purgeDelayMs?: number; // age before a dead job is purge-swept (default 60s; 0 = immediate). Avoids the fresh-terminal alloc-watcher race.
+  // Dead-job purge is OPT-IN: purging a job whose alloc a client still tracks nils the alloc's job reference and
+  // panics the client's alloc watcher (observed live on a dev-mode agent, with immediate AND 60s-deferred purges).
+  // Real deployments size client.gc_max_allocs for eval churn instead (the actionable 404 below names it); enable
+  // purge only where the cluster is known to tolerate it.
+  purgeDeadJobs?: boolean; // default false
+  purgeDelayMs?: number; // age before a dead job is purge-swept when enabled (default 60s; 0 = immediate for tests)
   maxPolls?: number;
   // This cluster's concurrent-job cap (for capacity-aware placement). If a function, dynamically reads the value the autoscaler changes.
   maxConcurrent?: number | (() => number);
@@ -243,8 +248,10 @@ export class NomadBackend implements Backend {
       // DEFERRED, not immediate: purging a job whose alloc just went terminal races the client's alloc watcher
       // (nil-deref panic on a dev-mode single-process agent, observed live). Each dispatch enqueues its own job and
       // sweeps only entries older than purgeDelayMs — steady state stays bounded, fresh allocs are left alone.
-      this.purgeQueue.push({ jobId, ns, at: Date.now() });
-      await this.sweepPurge();
+      if (this.opts.purgeDeadJobs === true) {
+        this.purgeQueue.push({ jobId, ns, at: Date.now() });
+        await this.sweepPurge();
+      }
     }
   }
 
