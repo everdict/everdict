@@ -12,6 +12,8 @@ const schema = z.object({
   DESKTOP_RELEASES_TOKEN: z.string().optional(),
   // Fallback external link — where the download page points when release metadata can't be fetched (e.g. a private repo with no token).
   DESKTOP_DOWNLOAD_URL: z.string().url().optional(),
+  // Temporal Web UI base (e.g. http://localhost:8233) — when set, a Temporal-owned batch's workflow chip deep-links there.
+  TEMPORAL_UI_URL: z.string().url().optional(),
   // Keycloak (Auth.js)
   AUTH_SECRET: z.string().optional(),
   KEYCLOAK_ISSUER: z.string().url().optional(), // e.g. http://localhost:8081/realms/everdict
@@ -24,6 +26,7 @@ export const env = schema.parse({
   DESKTOP_RELEASES_REPO: process.env.DESKTOP_RELEASES_REPO,
   DESKTOP_RELEASES_TOKEN: process.env.DESKTOP_RELEASES_TOKEN,
   DESKTOP_DOWNLOAD_URL: process.env.DESKTOP_DOWNLOAD_URL,
+  TEMPORAL_UI_URL: process.env.TEMPORAL_UI_URL,
   AUTH_SECRET: process.env.AUTH_SECRET,
   KEYCLOAK_ISSUER: process.env.KEYCLOAK_ISSUER,
   KEYCLOAK_CLIENT_ID: process.env.KEYCLOAK_CLIENT_ID,

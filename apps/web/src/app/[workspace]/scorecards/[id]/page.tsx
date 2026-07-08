@@ -7,6 +7,7 @@ import { membersSchema } from '@/entities/member'
 import { runsSchema } from '@/entities/run'
 import { caseVerdict, scorecardRecordSchema, type ScorecardRecord } from '@/entities/scorecard'
 import { authContext } from '@/shared/auth/principal'
+import { env } from '@/shared/config/env'
 import { controlPlane } from '@/shared/lib/control-plane'
 import { fmtPct, fmtSubject, HEALTH_TEXT, rateHealth } from '@/shared/lib/format'
 import { cn } from '@/shared/lib/utils'
@@ -240,9 +241,27 @@ export default async function ScorecardDetailPage({
             </dd>
           </div>
         )}
-        {/* Temporal-owned batch — the durable workflow's id (driver-loop durability; deep-link target for ops). */}
+        {/* Temporal-owned batch — the durable workflow's id; deep-links to the Temporal UI when TEMPORAL_UI_URL is set. */}
         {record.orchestration?.workflowId && (
-          <Prop label={t('metaWorkflow')} value={record.orchestration.workflowId} />
+          <div className="min-w-0">
+            <dt className="text-[11px] font-[510] uppercase tracking-wide text-faint">
+              {t('metaWorkflow')}
+            </dt>
+            <dd className="mt-1 truncate font-mono text-[13px] text-foreground">
+              {env.TEMPORAL_UI_URL ? (
+                <a
+                  href={`${env.TEMPORAL_UI_URL}/namespaces/default/workflows/${encodeURIComponent(record.orchestration.workflowId)}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="rounded-sm hover:underline"
+                >
+                  {record.orchestration.workflowId}
+                </a>
+              ) : (
+                record.orchestration.workflowId
+              )}
+            </dd>
+          </div>
         )}
         {record.subset && (
           <Prop
