@@ -19,6 +19,7 @@ import {
   Scheduler,
   buildRuntimeBackend,
   inMemoryBudget,
+  inMemoryUsageMeter,
 } from "@everdict/backends";
 import type { CaseResult, RegistryAuth, RuntimeSpec } from "@everdict/core";
 import {
@@ -260,6 +261,8 @@ async function main(): Promise<void> {
     );
   }
   const budget = inMemoryBudget({ limitFor: budgetFromEnv() });
+  // Meter-only usage accounting for billing (never blocks; distinct from the enforcement budget above). Read via GET /usage.
+  const usageMeter = inMemoryUsageMeter();
 
   // Self-hosted runner lease hub — parks self:<runnerId> jobs; the runner protocol (MCP, slice 4) leases/returns them.
   // A single instance shared by the dispatcher (park) and the MCP lease/result tools (lease/complete).
@@ -498,6 +501,7 @@ async function main(): Promise<void> {
     judges: judgeRegistry,
     judgeRunner,
     budget,
+    usage: usageMeter,
     ...(artifacts ? { artifacts } : {}),
     // Workspace default judge model (a per-request override wins): the batch eval's inline judge grader scores with this model.
     judgeFor: async (tenant) => (await settingsStore.get(tenant))?.judge,
@@ -626,6 +630,7 @@ async function main(): Promise<void> {
   const app = buildServer({
     service,
     scorecardService,
+    usageMeter, // meter-only billing usage — GET /usage
     scheduleService,
     queueService,
     viewService,

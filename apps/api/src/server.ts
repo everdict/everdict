@@ -8,6 +8,7 @@ import {
   authorize,
   can,
 } from "@everdict/auth";
+import type { UsageMeter } from "@everdict/backends";
 import {
   AppError,
   DatasetSchema,
@@ -219,6 +220,7 @@ export const WorkspaceSettingsBodySchema = z.object({
 export interface ServerDeps {
   service: RunService;
   scorecardService?: ScorecardService; // dataset×harness batch eval (route disabled if absent)
+  usageMeter?: UsageMeter; // meter-only billing usage (GET /usage) — never blocks (route disabled if absent)
   scheduleService?: ScheduleService; // scheduled (cron) scorecard CRUD (route disabled if absent)
   queueService?: QueueService; // work-queue snapshot (running/waiting/next-scheduled per runtime lane) (route disabled if absent)
   viewService?: ViewService; // saved scorecard-analysis View CRUD (route disabled if absent)
@@ -709,6 +711,20 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     }
   });
 
+  // --- usage (billing meter) — the workspace's metered LLM cost (orchestration + verdict; own-pays runs excluded). ---
+  // Meter-only (never blocks), so this is purely a read. viewer+ (reuses scorecards:read — usage is part of the eval read surface).
+  app.get("/usage", async (req, reply) => {
+    if (!deps.usageMeter) return reply.code(404).send({ code: "NOT_FOUND", message: "usage meter not configured" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "scorecards:read");
+      return reply.send(deps.usageMeter.usage(principal.workspace));
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
   // --- harness templates (category: structure/slots, versions unpinned) + instances (template+pins → resolved) ---
   // Harnesses are collaborative content → both define and register are ungated (viewer+, equal regardless of role). Reads are viewer+ too.
   app.post("/harness-templates", async (req, reply) => {
@@ -1057,14 +1073,12 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
         parsed.data.imageTemplate ? { imageTemplate: parsed.data.imageTemplate } : {},
       );
       await deps.datasetRegistry.register(principal.workspace, dataset, principal.subject);
-      return reply
-        .code(201)
-        .send({
-          workspace: principal.workspace,
-          id: dataset.id,
-          version: dataset.version,
-          cases: dataset.cases.length,
-        });
+      return reply.code(201).send({
+        workspace: principal.workspace,
+        id: dataset.id,
+        version: dataset.version,
+        cases: dataset.cases.length,
+      });
     } catch (err) {
       return sendError(reply, err); // unresolved image 400 / immutable 409
     }
@@ -3212,6 +3226,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
         {
           service: deps.service,
           scorecardService: deps.scorecardService,
+          usageMeter: deps.usageMeter,
           scheduleService: deps.scheduleService,
           queueService: deps.queueService,
           viewService: deps.viewService,

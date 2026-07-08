@@ -1,4 +1,11 @@
-import { type BudgetTracker, CircuitBreaker, type Dispatcher, billingTenant, costOf } from "@everdict/backends";
+import {
+  type BudgetTracker,
+  CircuitBreaker,
+  type Dispatcher,
+  type UsageMeter,
+  billingTenant,
+  costOf,
+} from "@everdict/backends";
 import {
   type AgentJob,
   AppError,
@@ -227,6 +234,9 @@ export interface ScorecardServiceDeps {
   // Workspace default judge model (for inline judge-grader scoring). A per-request override (RunScorecardInput.judge) takes precedence.
   judgeFor?: (tenant: string) => JudgeRunConfig | undefined | Promise<JudgeRunConfig | undefined>;
   budget?: BudgetTracker; // admit/settle per case
+  // Meter-only usage accounting for billing (never blocks) — records each case's harness LLM cost, attributed to the
+  // billing tenant. The billable surface is orchestration + verdict, not resold compute. docs/architecture/one-call-sdk.md
+  usage?: UsageMeter;
   // Batch-on-Temporal driver (docs/architecture/temporal-batch-orchestration.md). When set, submit starts a durable
   // workflow that drives the batch through the internal routes instead of the in-process track loop.
   temporalBatches?: {
@@ -899,6 +909,7 @@ export class ScorecardService {
     }
     const bill = billingTenant(result, ctx.tenant);
     if (bill) this.deps.budget?.settle(bill, costOf(result));
+    this.deps.usage?.meterCase(result, ctx.tenant); // meter-only billing usage (own-pays runs skip themselves)
     // Per-case judge scoring — the same "judge the moment the case lands" semantics as the in-process judge stream.
     if (ctx.judges.length > 0) {
       await this.scoring.applyJudges(ctx.tenant, ctx.dataset, [result], ctx.judges).catch(() => {});
@@ -1474,6 +1485,7 @@ export class ScorecardService {
         // Cost attribution: managed=batch tenant · workspace-shared runner=that workspace (team resource) · personal runner=own-pays. Same as a single run.
         const bill = billingTenant(result, tenant);
         if (bill) this.deps.budget?.settle(bill, costOf(result));
+        this.deps.usage?.meterCase(result, tenant); // meter-only billing usage (own-pays runs skip themselves)
         // Provenance: record the runtime that ACTUALLY ran the case (differs from the assigned one after a spillover).
         if (runStore && childId)
           await runStore.update(childId, {

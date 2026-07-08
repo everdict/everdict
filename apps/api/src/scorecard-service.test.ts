@@ -1,4 +1,4 @@
-import type { Dispatcher } from "@everdict/backends";
+import { type Dispatcher, inMemoryUsageMeter } from "@everdict/backends";
 import {
   type AgentJob,
   BadRequestError,
@@ -2199,5 +2199,47 @@ describe("ScorecardService.submit — N-trial (pass@k / flakiness)", () => {
     const detail = await service.get(created.id);
     expect(detail?.trialSummary).toBeUndefined();
     expect(detail?.orchestration?.trials).toBeUndefined();
+  });
+});
+
+describe("ScorecardService usage metering", () => {
+  it("meters each case's harness LLM cost against the billing tenant (meter-only, never blocks)", async () => {
+    // Given: a dispatch whose result carries an llm_call cost
+    const costDispatch: Dispatcher = {
+      async dispatch(job) {
+        return {
+          caseId: job.evalCase.id,
+          harness: `${job.harness.id}@${job.harness.version}`,
+          trace: [{ t: 0, kind: "llm_call", model: "m", cost: { usd: 0.05, inputTokens: 200, outputTokens: 0 } }],
+          snapshot: { kind: "repo", diff: "", changedFiles: [], headSha: "h" },
+          scores: [{ graderId: "tests-pass", metric: "tests_pass", value: 1, pass: true }],
+        };
+      },
+    };
+    const datasets = new InMemoryDatasetRegistry();
+    await datasets.register("acme", datasetWithCase());
+    const store = new InMemoryScorecardStore();
+    const usage = inMemoryUsageMeter();
+    let n = 0;
+    const service = new ScorecardService({
+      dispatcher: costDispatch,
+      store,
+      datasets,
+      usage,
+      newId: () => `id-${n++}`,
+    });
+
+    // When: a managed batch runs
+    const created = await service.submit({
+      tenant: "acme",
+      dataset: { id: "d", version: "1.0.0" },
+      harness: { id: "scripted", version: "0" },
+    });
+    await waitTerminal(store, created.id);
+
+    // Then: the workspace's metered usage reflects the harness LLM cost (one evaluation)
+    const u = usage.usage("acme");
+    expect(u).toMatchObject({ usd: 0.05, tokens: 200, evaluations: 1 });
+    expect(u.bySource.harness).toMatchObject({ usd: 0.05, tokens: 200, evaluations: 1 });
   });
 });

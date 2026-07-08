@@ -1,4 +1,5 @@
 import { API_KEY_SCOPES, type Action, EVERDICT_ROLES, type Principal, authorize } from "@everdict/auth";
+import type { UsageMeter } from "@everdict/backends";
 import {
   AppError,
   CaseResultSchema,
@@ -60,6 +61,7 @@ import type { WorkspaceService } from "./workspace-service.js";
 export interface McpDeps {
   service: RunService;
   scorecardService?: ScorecardService;
+  usageMeter?: UsageMeter; // meter-only billing usage (get_usage)
   scheduleService?: ScheduleService;
   queueService?: QueueService; // work queue snapshot (running/waiting/next-scheduled per runtime lane)
   viewService?: ViewService; // saved scorecard-analysis Views — create/list/get/update/delete
@@ -160,6 +162,19 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
         inputSchema: {},
       },
       () => run(principal, "runs:read", async () => ok(await queue.snapshot(ws, principal.subject))),
+    );
+  }
+
+  if (deps.usageMeter) {
+    const usageMeter = deps.usageMeter;
+    server.registerTool(
+      "get_usage",
+      {
+        description:
+          "The workspace's metered billing usage — LLM cost (usd/tokens) + evaluations for orchestration + verdict (harness under test + eval/judge model), split by source. Own-pays (personal self-hosted) runs are excluded (BYO compute). Meter-only — this never blocks a run.",
+        inputSchema: {},
+      },
+      () => run(principal, "scorecards:read", async () => ok(usageMeter.usage(ws))),
     );
   }
 

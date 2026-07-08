@@ -1,5 +1,5 @@
 import type { Principal } from "@everdict/auth";
-import type { Dispatcher } from "@everdict/backends";
+import { type Dispatcher, inMemoryUsageMeter } from "@everdict/backends";
 import type { AgentJob, CaseResult, RuntimeSpec } from "@everdict/core";
 import {
   InMemoryOAuthStateStore,
@@ -133,6 +133,7 @@ function harness() {
       newId: () => `sc-${n++}`,
     }),
     scheduleService: new ScheduleService({ store: new InMemoryScheduleStore(), newId: () => `sch-${n++}` }),
+    usageMeter: inMemoryUsageMeter(),
   };
 }
 
@@ -200,6 +201,7 @@ describe("MCP tools", () => {
       "get_runtime",
       "get_schedule",
       "get_scorecard",
+      "get_usage",
       "get_workspace_mattermost",
       "heartbeat_job",
       "import_terminal_bench",
@@ -708,6 +710,18 @@ describe("MCP tools", () => {
     });
     expect(denied.isError).toBe(true);
     expect(text(denied)).toContain("FORBIDDEN");
+  });
+
+  it("get_usage: returns the workspace's metered usage shape (viewer+ read)", async () => {
+    const viewer = await connect(harness(), ["viewer"]);
+    const got = await viewer.callTool({ name: "get_usage", arguments: {} });
+    expect(got.isError).toBeFalsy();
+    expect(JSON.parse(text(got))).toMatchObject({
+      usd: 0,
+      tokens: 0,
+      evaluations: 0,
+      bySource: { harness: {}, judge: {} },
+    });
   });
 
   it("datasets: get_dataset returns the full thing (including cases); another workspace is NOT_FOUND", async () => {

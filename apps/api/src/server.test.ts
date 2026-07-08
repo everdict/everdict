@@ -1,6 +1,6 @@
 import { type Authenticator, apiKeyAuthenticator, compositeAuthenticator } from "@everdict/auth";
 import type { Dispatcher } from "@everdict/backends";
-import { inMemoryBudget } from "@everdict/backends";
+import { inMemoryBudget, inMemoryUsageMeter } from "@everdict/backends";
 import { type CaseResult, DatasetSchema } from "@everdict/core";
 import {
   InMemoryOAuthStateStore,
@@ -196,9 +196,11 @@ function server(
     settings: settingsStore,
     secretsFor: (ws) => secretStore.entries(ws),
   });
+  const usageMeter = inMemoryUsageMeter();
   const app = buildServer({
     service: svc,
     scorecardService,
+    usageMeter,
     scheduleService,
     benchmarkService,
     bundleService,
@@ -236,6 +238,7 @@ function server(
     workspaceStore,
     harnessTemplates,
     harnessInstances,
+    usageMeter,
   };
 }
 
@@ -1587,6 +1590,36 @@ describe("API — benchmarks (catalog → tenant dataset import)", () => {
     // validate does not register — the list has only v-bench (the schema-error one is not registered).
     const list = await app.inject({ method: "GET", url: "/benchmark-recipes", headers: h });
     expect((list.json() as Array<{ id: string }>).map((r) => r.id)).toEqual(["v-bench"]);
+    await app.close();
+  });
+});
+
+describe("API — usage (billing meter)", () => {
+  it("GET /usage returns the workspace's metered usage; other workspaces are isolated", async () => {
+    const { app, keyStore, usageMeter } = server({ requireAuth: true });
+    const acme = `Bearer ${await issueKey(keyStore, "acme")}`;
+    usageMeter.record("acme", "harness", { usd: 0.5, tokens: 300 }, 2);
+    usageMeter.record("acme", "judge", { usd: 0.1, tokens: 40 });
+    const res = await app.inject({ method: "GET", url: "/usage", headers: { authorization: acme } });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({
+      usd: 0.6,
+      tokens: 340,
+      evaluations: 2,
+      bySource: { harness: { usd: 0.5, evaluations: 2 }, judge: { usd: 0.1 } },
+    });
+    // another workspace sees only its own (zero) usage
+    const beta = `Bearer ${await issueKey(keyStore, "beta")}`;
+    expect((await app.inject({ method: "GET", url: "/usage", headers: { authorization: beta } })).json()).toMatchObject(
+      { usd: 0, evaluations: 0 },
+    );
+    await app.close();
+  });
+
+  it("viewer can read usage (reuses scorecards:read)", async () => {
+    const { app } = server({ requireAuth: true, authenticator: roleAuth(["viewer"]) });
+    const res = await app.inject({ method: "GET", url: "/usage", headers: { authorization: "Bearer x" } });
+    expect(res.statusCode).toBe(200);
     await app.close();
   });
 });
