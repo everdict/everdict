@@ -130,6 +130,16 @@ claude mcp add --transport http everdict http://<host>:8787/mcp \
   --header "Authorization: Bearer ak_..."
 ```
 
+**Easiest — the Everdict plugin** (this repo is also a Claude Code plugin marketplace). It bundles the
+MCP server **and** the Everdict domain context (an `everdict` skill + `/everdict:setup` · `/everdict:eval`
+commands) so any session can drive an eval end-to-end without prior context:
+```bash
+/plugin marketplace add everdict/everdict          # then, inside Claude Code:
+/plugin install everdict@everdict
+export EVERDICT_MCP_URL=http://<host>:8787/mcp     # the bundled server reads this; restart Claude Code
+```
+See [`plugin/README.md`](plugin/README.md).
+
 ### Codex
 Codex reaches a remote MCP via `mcp-remote` (runs the OAuth + PKCE flow). Add to `~/.codex/config.toml`:
 ```toml

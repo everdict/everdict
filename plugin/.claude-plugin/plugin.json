@@ -1,0 +1,13 @@
+{
+  "name": "everdict",
+  "description": "Evaluate, benchmark, and regression-test your agent with Everdict — bundles the Everdict MCP tools plus the domain model and workflows so any Claude Code session can drive an eval end-to-end.",
+  "version": "0.1.0",
+  "author": {
+    "name": "Everdict",
+    "url": "https://github.com/everdict/everdict"
+  },
+  "homepage": "https://github.com/everdict/everdict",
+  "repository": "https://github.com/everdict/everdict",
+  "license": "Apache-2.0",
+  "keywords": ["everdict", "evaluation", "eval", "benchmark", "agent", "scorecard", "mcp"]
+}

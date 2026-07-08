@@ -1,0 +1,6 @@
+{
+  "everdict": {
+    "transport": "http",
+    "url": "${EVERDICT_MCP_URL}"
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "name": "everdict",
+  "owner": {
+    "name": "Everdict",
+    "url": "https://github.com/everdict/everdict"
+  },
+  "description": "The Everdict plugin — bring the Everdict evaluation runtime (MCP tools + domain context) into any Claude Code session.",
+  "plugins": [
+    {
+      "name": "everdict",
+      "source": "./plugin",
+      "description": "Evaluate, benchmark, and regression-test your agent with Everdict: bundled MCP tools + the domain model and eval workflows.",
+      "category": "development",
+      "keywords": ["everdict", "evaluation", "benchmark", "agent", "scorecard", "mcp"]
+    }
+  ]
+}
