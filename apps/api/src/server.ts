@@ -24,7 +24,12 @@ import {
   imageWarnings,
   resolveHarnessInstance,
 } from "@everdict/core";
-import { BenchmarkAdapterSpecSchema, diffDatasets } from "@everdict/datasets";
+import {
+  BenchmarkAdapterSpecSchema,
+  TerminalBenchTaskSchema,
+  diffDatasets,
+  terminalBenchToDataset,
+} from "@everdict/datasets";
 import {
   type SecretStore,
   type TenantKeyStore,
@@ -145,6 +150,16 @@ export const RunScorecardBodySchema = z.object({
       limit: z.number().int().min(1).max(10_000).optional(),
     })
     .optional(),
+});
+
+// Terminal-Bench task-set import → a workspace Dataset (standard task-format on-ramp). The client parses task.yaml/git
+// into structured tasks (YAML is a boundary concern); this maps + registers them. docs/architecture/standard-task-formats.md
+export const ImportTerminalBenchBodySchema = z.object({
+  dataset: z.object({ id: z.string().min(1), version: z.string().min(1) }),
+  tasks: z.array(TerminalBenchTaskSchema).min(1),
+  imageTemplate: z.string().optional(), // resolves a task's image via {id} when the task carries none
+  description: z.string().optional(),
+  tags: z.array(z.string()).optional(),
 });
 
 // Scheduled (cron) scorecard request — the definition that flows into ScorecardService.submit on fire (= RunScorecardBody minus the judge override).
@@ -1009,6 +1024,41 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       return reply.code(201).send({ workspace: principal.workspace, id: parsed.data.id, version: parsed.data.version });
     } catch (err) {
       return sendError(reply, err); // immutable 409
+    }
+  });
+
+  // Terminal-Bench task-set → workspace Dataset (standard task-format on-ramp). Same gate as datasets:write. Each task
+  // maps to an EvalCase (prebuilt image env + instruction + tests-pass); a task with no resolvable image is a 400
+  // (Everdict references images, never builds). Versions are immutable (409 on collision). docs/architecture/standard-task-formats.md
+  app.post("/datasets/terminal-bench", async (req, reply) => {
+    if (!deps.datasetRegistry)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "dataset registry not configured" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "datasets:write");
+    } catch (err) {
+      return sendError(reply, err); // gate before validation — don't leak validation info to the unauthorized
+    }
+    const parsed = ImportTerminalBenchBodySchema.safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
+    try {
+      const dataset = terminalBenchToDataset(
+        parsed.data.tasks,
+        {
+          id: parsed.data.dataset.id,
+          version: parsed.data.dataset.version,
+          ...(parsed.data.description ? { description: parsed.data.description } : {}),
+          ...(parsed.data.tags ? { tags: parsed.data.tags } : {}),
+        },
+        parsed.data.imageTemplate ? { imageTemplate: parsed.data.imageTemplate } : {},
+      );
+      await deps.datasetRegistry.register(principal.workspace, dataset, principal.subject);
+      return reply
+        .code(201)
+        .send({ workspace: principal.workspace, id: dataset.id, version: dataset.version, cases: dataset.cases.length });
+    } catch (err) {
+      return sendError(reply, err); // unresolved image 400 / immutable 409
     }
   });
 

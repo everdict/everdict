@@ -202,6 +202,7 @@ describe("MCP tools", () => {
       "get_scorecard",
       "get_workspace_mattermost",
       "heartbeat_job",
+      "import_terminal_bench",
       "ingest_scorecard",
       "leaderboard_scorecards",
       "lease_job",
@@ -668,6 +669,45 @@ describe("MCP tools", () => {
     expect(text(denied)).toContain("FORBIDDEN");
     // viewer can read
     expect((await viewer.callTool({ name: "list_datasets", arguments: {} })).isError).toBeFalsy();
+  });
+
+  it("import_terminal_bench: member registers a Terminal-Bench task set; unresolved image → BAD_REQUEST; viewer → FORBIDDEN", async () => {
+    const deps = harness();
+    const member = await connect(deps, ["member"]);
+    const tasks = JSON.stringify([
+      { id: "hello", instruction: "print hello", difficulty: "easy" }, // image via template
+      { id: "sort", instruction: "sort the file", testCommand: "pytest -q", image: "explicit/sort:v1" },
+    ]);
+    const created = await member.callTool({
+      name: "import_terminal_bench",
+      arguments: { dataset_id: "tbench", dataset_version: "1.0.0", tasks, image_template: "ghcr.io/acme/tb/{id}:v1" },
+    });
+    expect(created.isError).toBeFalsy();
+    expect(JSON.parse(text(created))).toMatchObject({ id: "tbench", version: "1.0.0", cases: 2 });
+
+    // no resolvable image → BAD_REQUEST (Everdict references images, never builds)
+    const bad = await member.callTool({
+      name: "import_terminal_bench",
+      arguments: {
+        dataset_id: "tb2",
+        dataset_version: "1.0.0",
+        tasks: JSON.stringify([{ id: "a", instruction: "x" }]),
+      },
+    });
+    expect(bad.isError).toBe(true);
+    expect(text(bad)).toContain("BAD_REQUEST");
+
+    const viewer = await connect(deps, ["viewer"]);
+    const denied = await viewer.callTool({
+      name: "import_terminal_bench",
+      arguments: {
+        dataset_id: "tb3",
+        dataset_version: "1.0.0",
+        tasks: JSON.stringify([{ id: "a", instruction: "x", image: "i:1" }]),
+      },
+    });
+    expect(denied.isError).toBe(true);
+    expect(text(denied)).toContain("FORBIDDEN");
   });
 
   it("datasets: get_dataset returns the full thing (including cases); another workspace is NOT_FOUND", async () => {

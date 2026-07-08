@@ -11,7 +11,7 @@ import {
   type RuntimeSpec,
   RuntimeSpecSchema,
 } from "@everdict/core";
-import { diffDatasets } from "@everdict/datasets";
+import { TerminalBenchTaskSchema, diffDatasets, terminalBenchToDataset } from "@everdict/datasets";
 import { type SecretStore, type TenantKeyStore, type WorkspaceSettingsStore, issueKey } from "@everdict/db";
 import type {
   DatasetRegistry,
@@ -464,6 +464,53 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
           if (!result.success) return fail(`BAD_REQUEST: ${result.error.message}`);
           await datasets.register(ws, result.data, principal.subject); // creator = subject (delete permission)
           return ok({ workspace: ws, id: result.data.id, version: result.data.version });
+        }),
+    );
+
+    server.registerTool(
+      "import_terminal_bench",
+      {
+        description:
+          "Register a Terminal-Bench task set as a Dataset owned by the active workspace (standard task-format on-ramp). Each task → an EvalCase (prebuilt image env + instruction prompt + tests-pass grader). A task needs a prebuilt image (task.image, or an image_template with {id}) — Everdict references images, it does not build them. Versions are immutable (re-registering the same id@version with different content is CONFLICT). Once registered it runs like any dataset (run_scorecard, trials/pass@k, diff, leaderboard).",
+        inputSchema: {
+          dataset_id: z.string(),
+          dataset_version: z.string(),
+          tasks: z
+            .string()
+            .describe(
+              "JSON array of Terminal-Bench tasks: {id, instruction, image?, testCommand?, workdir?, difficulty?, tags?, timeoutSec?}",
+            ),
+          image_template: z
+            .string()
+            .optional()
+            .describe("resolve a task's image via {id} when the task carries none, e.g. ghcr.io/acme/tb/{id}:v1"),
+          description: z.string().optional(),
+          tags: z.array(z.string()).optional(),
+        },
+      },
+      ({ dataset_id, dataset_version, tasks, image_template, description, tags }) =>
+        run(principal, "datasets:write", async () => {
+          let parsedTasks: unknown;
+          try {
+            parsedTasks = JSON.parse(tasks);
+          } catch {
+            return fail("BAD_REQUEST: tasks must be a JSON array.");
+          }
+          const result = z.array(TerminalBenchTaskSchema).min(1).safeParse(parsedTasks);
+          if (!result.success) return fail(`BAD_REQUEST: ${result.error.message}`);
+          // terminalBenchToDataset throws BadRequestError for an unresolved image — run() maps it to a tool error.
+          const dataset = terminalBenchToDataset(
+            result.data,
+            {
+              id: dataset_id,
+              version: dataset_version,
+              ...(description ? { description } : {}),
+              ...(tags ? { tags } : {}),
+            },
+            image_template ? { imageTemplate: image_template } : {},
+          );
+          await datasets.register(ws, dataset, principal.subject);
+          return ok({ workspace: ws, id: dataset.id, version: dataset.version, cases: dataset.cases.length });
         }),
     );
 

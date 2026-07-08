@@ -1199,6 +1199,48 @@ describe("API — datasets (workspace-owned, member+ write)", () => {
     await member.app.close();
   });
 
+  it("member imports a Terminal-Bench task set → a registered dataset (201 + case count); viewer → 403", async () => {
+    const { app } = server({ requireAuth: true, authenticator: roleAuth(["member"]) });
+    const h = { authorization: "Bearer x" };
+    const body = {
+      dataset: { id: "tbench", version: "1.0.0" },
+      tasks: [
+        { id: "hello", instruction: "print hello", difficulty: "easy" }, // image via template
+        { id: "sort", instruction: "sort the file", testCommand: "pytest -q", image: "explicit/sort:v1" },
+      ],
+      imageTemplate: "ghcr.io/acme/tb/{id}:v1",
+    };
+    const res = await app.inject({ method: "POST", url: "/datasets/terminal-bench", headers: h, payload: body });
+    expect(res.statusCode).toBe(201);
+    expect(res.json()).toMatchObject({ id: "tbench", version: "1.0.0", cases: 2 });
+    // registered → shows up as a normal dataset (runnable by run_scorecard etc.)
+    const list = await app.inject({ method: "GET", url: "/datasets", headers: h });
+    expect((list.json() as Array<{ id: string }>).some((d) => d.id === "tbench")).toBe(true);
+    await app.close();
+
+    const viewer = server({ requireAuth: true, authenticator: roleAuth(["viewer"]) });
+    const denied = await viewer.app.inject({
+      method: "POST",
+      url: "/datasets/terminal-bench",
+      headers: h,
+      payload: body,
+    });
+    expect(denied.statusCode).toBe(403);
+    await viewer.app.close();
+  });
+
+  it("Terminal-Bench task with no resolvable image → 400 (Everdict references images, never builds)", async () => {
+    const { app } = server({ requireAuth: true, authenticator: roleAuth(["member"]) });
+    const res = await app.inject({
+      method: "POST",
+      url: "/datasets/terminal-bench",
+      headers: { authorization: "Bearer x" },
+      payload: { dataset: { id: "tb", version: "1.0.0" }, tasks: [{ id: "a", instruction: "x" }] }, // no image, no template
+    });
+    expect(res.statusCode).toBe(400);
+    await app.close();
+  });
+
   it("DELETE version — the registrant soft-deletes (200, get 404 afterward); other workspaces cannot delete it (404)", async () => {
     const { app, keyStore } = server({ requireAuth: true });
     const acme = `Bearer ${await issueKey(keyStore, "acme")}`;

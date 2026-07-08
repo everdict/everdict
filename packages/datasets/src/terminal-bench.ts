@@ -58,7 +58,19 @@ export interface TerminalBenchMeta {
   tags?: string[];
 }
 
+// Terminal-Bench provenance — lets the dataset detail show "where this came from" (lineage), like the recipe/catalog paths.
+const TERMINAL_BENCH_PROVENANCE = {
+  via: "spec",
+  id: "terminal-bench",
+  origin: {
+    homepage: "https://www.tbench.ai/",
+    code: "https://github.com/laude-institute/terminal-bench",
+    taskType: "terminal/coding agent tasks",
+  },
+} as const;
+
 // A set of Terminal-Bench tasks → a validated Everdict Dataset (DatasetSchema.parse applies EvalCase validation/defaults).
+// Stamps producedBy so the dataset records it was ingested from Terminal-Bench (lineage, same as recipe/catalog imports).
 export function terminalBenchToDataset(
   tasks: unknown[],
   meta: TerminalBenchMeta,
@@ -70,5 +82,6 @@ export function terminalBenchToDataset(
     ...(meta.description ? { description: meta.description } : {}),
     cases: tasks.map((t) => terminalBenchTaskToCase(t, opts)),
     tags: meta.tags ?? [],
+    producedBy: TERMINAL_BENCH_PROVENANCE,
   });
 }

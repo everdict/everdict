@@ -68,6 +68,7 @@ describe("terminalBenchToDataset", () => {
     );
     expect(DatasetSchema.safeParse(ds).success).toBe(true);
     expect(ds.id).toBe("terminal-bench");
+    expect(ds.producedBy?.id).toBe("terminal-bench"); // lineage stamped
     expect(ds.cases).toHaveLength(2);
     expect(ds.cases[0]?.image).toBe("reg.example.com/tb/a:v1");
     expect(ds.cases[0]?.tags).toEqual(["easy"]);
