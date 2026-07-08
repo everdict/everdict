@@ -53,6 +53,27 @@ Carried-over results keep their scores (including judge scores) verbatim; only r
 through dispatch → judge → export again. "Failed" = `caseVerdict(result) !== true` (explicit FAIL
 and no-verdict cases both re-run).
 
+## Failure taxonomy (WHERE it died × WHOSE fault)
+
+`CaseResult.failure` = `{stage, class, code, message, retryable}` (`@everdict/core` `classifyFailure`):
+**infra** (platform's fault — placement, network, OOM, log race; usually retryable) · **config** (workspace
+setup — missing secret, bad pin; retrying changes nothing) · **harness** (its own install/run crash; same input →
+same failure) · **agent** (a legitimate grader verdict — never a "failure", never auto-retried). Backends stamp
+signals the mapper reads: `OOM_KILLED` (K8s pod `OOMKilled` reason / Nomad alloc OOM events) is FATAL infra —
+same limits, same death, so the transient retry skips it and the message says "raise resources.memoryMb".
+
+Consumers: `runSuite` retries only `retryable` classes; retry-failed takes a class filter
+(HTTP `?class=infra` · MCP `failure_class`) so a cluster incident re-runs exactly its casualties while agent
+FAILs stay carried as legitimate results. Harnesses declare their weight (`resources {cpu, memoryMb}` on the
+command spec/template → Nomad Task Resources / K8s requests=limits) so heavy harnesses bin-pack correctly and
+starvation classifies as infra instead of poisoning pass rates.
+
+## Cross-runtime sharding
+
+`runtime` accepts a comma-separated list — cases round-robin across the listed runtimes at dispatch (per-case
+`placement.target`), so one 601-case batch drains a Nomad pool and a K8s pool at once. Live: 40 cases across
+nomad+kind in 49s, 100% pass.
+
 ## Shared core
 
 All three paths run through one seeded batch loop (`track` refactored around
