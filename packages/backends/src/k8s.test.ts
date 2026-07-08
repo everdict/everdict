@@ -11,6 +11,7 @@ import {
   k8sRegistryAuthSecret,
   kubectlArgs,
   materializeKubeconfig,
+  parseJobStatusOutput,
 } from "./k8s.js";
 import { staticSecrets } from "./secrets.js";
 import { perTenantTrustZones, staticTrustZones } from "./trust-zone.js";
@@ -337,5 +338,20 @@ describe("K8s harness resources + OOM classification", () => {
     expect(err).toBeInstanceOf(UpstreamError);
     expect(err.extra?.signal).toBe("OOM_KILLED");
     expect(err.message).toContain("resources.memoryMb");
+  });
+});
+
+// Regression: a Failed-only job must never read as Succeeded. The old whitespace-split parsing shifted the failed
+// count into the succeeded slot when succeeded was empty — every K8s job failure surfaced as a log-parse error.
+describe("parseJobStatusOutput", () => {
+  it("a failed-only job (empty succeeded) parses as failed, not succeeded", () => {
+    expect(parseJobStatusOutput("/1")).toEqual({ succeeded: 0, failed: 1 });
+  });
+  it("a succeeded-only job parses as succeeded", () => {
+    expect(parseJobStatusOutput("1/")).toEqual({ succeeded: 1, failed: 0 });
+  });
+  it("both present / both empty", () => {
+    expect(parseJobStatusOutput("1/2")).toEqual({ succeeded: 1, failed: 2 });
+    expect(parseJobStatusOutput("/")).toEqual({ succeeded: 0, failed: 0 });
   });
 });

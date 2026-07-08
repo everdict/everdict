@@ -100,11 +100,14 @@ export function kubectlApi(
         "job",
         name,
         "-o",
-        "jsonpath={.status.succeeded} {.status.failed}",
+        // Position-preserving separator — a failed-only job renders succeeded as EMPTY, and a whitespace split
+        // then shifts failed into the succeeded slot (a Failed job read as Succeeded → the dispatcher went on to
+        // parse the dead pod's logs and every K8s job failure surfaced as "sentinel not found"). Found live via an
+        // OOM-killed case that classified as a log-parse error instead of OOM_KILLED.
+        "jsonpath={.status.succeeded}/{.status.failed}",
       ]);
       if (res.code !== 0) return { succeeded: 0, failed: 0 };
-      const [su, fa] = res.stdout.trim().split(/\s+/);
-      return { succeeded: Number(su) || 0, failed: Number(fa) || 0 };
+      return parseJobStatusOutput(res.stdout);
     },
     async podLogs(name, ns) {
       const res = await run(bin, [...ctx, "-n", ns, "logs", `job/${name}`, "--tail=-1"]);
@@ -194,6 +197,13 @@ export interface K8sBackendOptions {
 const RUNTIME_CLASS: Record<string, string> = { runsc: "gvisor", kata: "kata", "kata-runtime": "kata" };
 
 // DNS-1123 job name (lowercase/digits/hyphen, ≤63).
+// "{succeeded}/{failed}" jsonpath output → counts. Either side may be EMPTY (K8s omits zero-valued status
+// fields), so the separator keeps positions honest.
+export function parseJobStatusOutput(stdout: string): { succeeded: number; failed: number } {
+  const [su = "", fa = ""] = stdout.trim().split("/");
+  return { succeeded: Number(su) || 0, failed: Number(fa) || 0 };
+}
+
 export function k8sJobName(job: AgentJob, suffix?: string): string {
   // With a suffix the slug budget shrinks so the full name stays within the DNS-1123 63-char cap.
   const slug = job.evalCase.id
