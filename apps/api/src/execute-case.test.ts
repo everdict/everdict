@@ -246,7 +246,7 @@ describe("executeCase — out-of-job trace collection (traceRef completion)", ()
     expect(result.traceRef?.runId).toBe("rid-9"); // kept as provenance
   });
 
-  it("a pull failure is soft — surfaced as an error event while execution output (ground-truth scores) is preserved", async () => {
+  it("a pull failure classifies the case {collect, infra, retryable} while execution output (ground-truth scores) is preserved", async () => {
     const result = await executeCase(
       {
         dispatcher: dispatcherOf(deferredResult),
@@ -261,6 +261,70 @@ describe("executeCase — out-of-job trace collection (traceRef completion)", ()
     );
     expect(result.trace.some((e) => e.kind === "error" && e.message.includes("collector down"))).toBe(true);
     expect(result.scores.some((s) => s.graderId === "tests-pass" && s.pass === true)).toBe(true); // preserved
+    // The case is CLASSIFIED (stage-aware retry re-pulls it later) — not silently scored on an incomplete trace.
+    expect(result.failure).toMatchObject({
+      stage: "collect",
+      class: "infra",
+      code: "TRACE_COLLECT_FAILED",
+      retryable: true,
+    });
+    expect(result.scores.some((s) => s.graderId === "steps")).toBe(false); // observation scoring stays deferred
+  });
+
+  it("a job-side collect failure RECOVERS on the control-plane pull: failure cleared, deferred observations scored", async () => {
+    // The sandbox couldn't reach the platform, but the control plane can (the common network-asymmetry case).
+    const failedInJob = (job: AgentJob): CaseResult => ({
+      ...deferredResult(job),
+      failure: {
+        stage: "collect",
+        class: "infra",
+        code: "TRACE_COLLECT_FAILED",
+        message: "trace collection failed: fetch failed",
+        retryable: true,
+      },
+    });
+    const result = await executeCase(
+      {
+        dispatcher: dispatcherOf(failedInJob),
+        buildTraceSource: () => ({
+          async fetch() {
+            return [{ t: 1, kind: "tool_call", id: "x", name: "bash", args: {} }];
+          },
+        }),
+      },
+      "u",
+      jobWithGraders,
+    );
+    expect(result.failure).toBeUndefined(); // recovered — the classification is shed
+    expect(result.scores.map((s) => s.graderId)).toEqual(["tests-pass", "steps"]); // deferred scoring completed
+  });
+
+  it("a failed case does NOT recover on zero events — the {collect} classification is kept for a later stage-aware retry", async () => {
+    const failedInJob = (job: AgentJob): CaseResult => ({
+      ...deferredResult(job),
+      failure: {
+        stage: "collect",
+        class: "infra",
+        code: "TRACE_COLLECT_FAILED",
+        message: "trace collection failed: fetch failed",
+        retryable: true,
+      },
+    });
+    const result = await executeCase(
+      {
+        dispatcher: dispatcherOf(failedInJob),
+        sleep: async () => {},
+        buildTraceSource: () => ({
+          async fetch() {
+            return []; // reachable but nothing correlated — the failed case is NOT healed by an empty pull
+          },
+        }),
+      },
+      "u",
+      jobWithGraders,
+    );
+    expect(result.failure).toMatchObject({ stage: "collect", code: "TRACE_COLLECT_FAILED" });
+    expect(result.scores.some((s) => s.graderId === "steps")).toBe(false);
   });
 
   it("authSecret is re-resolved from the tenant SecretStore into Authorization, and correlate/experiment flow into the source config", async () => {
@@ -339,6 +403,7 @@ describe("executeCase — out-of-job trace collection (traceRef completion)", ()
     );
     expect(missing.trace.some((e) => e.kind === "error" && e.message.includes("NOPE"))).toBe(true);
     expect(missing.scores.some((s) => s.graderId === "tests-pass" && s.pass === true)).toBe(true);
+    expect(missing.failure).toMatchObject({ stage: "collect", code: "TRACE_COLLECT_FAILED" }); // classified, not silent
   });
 
   it("a result with no traceRef (default job collection) passes through unchanged (no regression) + an unset buildTraceSource is surfaced", async () => {

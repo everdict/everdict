@@ -65,11 +65,30 @@ same limits, same death, so the transient retry skips it and the message says "r
 **Stages survive the process boundary**: the agent entrypoint catches in-job errors and emits a CLASSIFIED
 CaseResult through the sentinel (`stageForError`: HARNESS_INSTALL_FAILED→install · run · grade · collect ·
 dispatch), so a setup break lands as `{install, harness, retryable:false}` instead of a mushy backend-side
-"sentinel not found". Trace pull after the run (`collectTrace`) is its own stage: a dead/unreachable trace
-endpoint rethrows as `TRACE_COLLECT_FAILED` → `{collect, infra, retryable:true}` — the agent DID run; only
-observability failed, so it must not read as a harness crash. The self-hosted runner path has the same parity:
-`runLeaseWorkers` submits a classified failed CaseResult (`submit_job_result` with `failure` stamped) instead of
-a bare `fail_job`, which is now only the fallback for malformed jobs or when the submit itself fails.
+"sentinel not found". The self-hosted runner path has the same parity: `runLeaseWorkers` submits a classified
+failed CaseResult (`submit_job_result` with `failure` stamped) instead of a bare `fail_job`, which is now only
+the fallback for malformed jobs or when the submit itself fails.
+
+## Stage-aware resume — a collect failure never re-runs the agent
+
+Trace pull after the run (`collectTrace`) is its own stage, and its failure KEEPS THE WORK: the agent ran,
+compute-bound scores exist — only observability failed. `runCase` returns the result stamped
+`{collect, infra, TRACE_COLLECT_FAILED, retryable}` with the ground-truth scores, the snapshot, and a
+`traceRef` (the frozen re-collect coordinates: kind/endpoint/runId/authSecret-name/correlate), while
+observation scoring defers with the trace (scoring steps/cost against a known-incomplete trace would be
+silently wrong). Recovery then escalates in three steps, none of which re-runs the agent:
+
+1. `executeCase` immediately attempts the pull control-plane-side (`collectDeferredTrace` — the same completion
+   step as `collect="control-plane"`): the CP's network often reaches what the sandbox couldn't. Success sheds
+   the classification and completes the deferred scoring; a pull exception classifies `{collect}` in BOTH
+   collection modes (the CP mode used to soft-score observations against the incomplete trace).
+2. A collect-classified case is retryable even when its ground-truth verdict PASSED (it is incomplete — judges
+   never saw a trace). `retry-failed` partitions by stage: collect-stage cases with a `traceRef` re-COLLECT
+   (pull → judge → carried as recovered results) while everything else re-dispatches. Still-unrecovered cases
+   carry their classification verbatim — fix the platform, retry again.
+3. Live e2e: 2 cases run with the OTel endpoint DOWN → `{collect}` + `tests_pass=true` preserved; endpoint
+   brought up + spans injected under the frozen `everdict.run_id`s → retry = "re-running 0 failed case(s) …
+   2 collect-failed case(s) re-collected without re-run (2 recovered)", Nomad job count unchanged (101→101).
 
 Consumers: `runSuite` retries only `retryable` classes; retry-failed takes a class filter
 (HTTP `?class=infra` · MCP `failure_class`) so a cluster incident re-runs exactly its casualties while agent

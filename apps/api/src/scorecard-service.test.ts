@@ -1751,6 +1751,66 @@ describe("ScorecardService — batch resilience (resume · retry-failed)", () =>
     );
   });
 
+  it("retryFailed re-COLLECTS a collect-stage failure by its traceRef — the agent is never re-dispatched", async () => {
+    const { dispatched, dispatcher } = capturingDispatcher();
+    const { store, datasets } = build(dispatcher);
+    await datasets.register("acme", threeCaseDataset);
+    const pulled: string[] = [];
+    let n = 0;
+    const service = new ScorecardService({
+      dispatcher,
+      store,
+      datasets,
+      newId: () => `rc-${n++}`,
+      // The platform is reachable again at retry time — the pull recovers the case.
+      buildTraceSource: () => ({
+        async fetch(runId: string) {
+          pulled.push(runId);
+          return [{ t: 1, kind: "llm_call" as const, model: "m" }];
+        },
+      }),
+    });
+    // c2 ran fine (ground-truth PASS) but its trace pull died — classified {collect} with re-collect coordinates.
+    const collectFailed: CaseResult = {
+      ...passResult("c2"),
+      traceRef: { kind: "otel", endpoint: "http://collector:9", runId: "rid-c2" },
+      failure: {
+        stage: "collect",
+        class: "infra",
+        code: "TRACE_COLLECT_FAILED",
+        message: "trace collection failed: fetch failed",
+        retryable: true,
+      },
+    };
+    await store.create({
+      id: "sc-collect",
+      tenant: "acme",
+      dataset: { id: "rd", version: "1.0.0" },
+      harness: { id: "h", version: "1" },
+      status: "succeeded",
+      orchestration: { judges: [], concurrency: 3, retries: 1 },
+      scorecard: {
+        suiteId: "rd",
+        harness: "h@1",
+        results: [passResult("c1"), collectFailed, passResult("c3", false)],
+      },
+      createdAt: "2026-07-08T00:00:00.000Z",
+      updatedAt: "2026-07-08T00:00:00.000Z",
+    });
+
+    const rec = await service.retryFailed({ tenant: "acme", id: "sc-collect" });
+    const done = await waitTerminal(store, rec.id);
+
+    expect(done.status).toBe("succeeded");
+    expect(pulled).toEqual(["rid-c2"]); // re-pulled by the frozen correlation key
+    expect(dispatched.sort()).toEqual(["c3"]); // ONLY the genuine failure re-dispatched — c2 never re-ran
+    const hydrated = await service.get(rec.id);
+    const c2 = hydrated?.scorecard?.results.find((r) => r.caseId === "c2");
+    expect(c2?.failure).toBeUndefined(); // recovered — classification shed
+    expect(c2?.trace.some((e) => e.kind === "llm_call")).toBe(true); // the collected platform trace landed
+    expect(c2?.scores.some((s) => s.graderId === "tests-pass" && s.pass === true)).toBe(true); // ground truth kept
+  });
+
   it("retryFailed rejects an in-flight source (400) and an all-pass source (nothing to retry)", async () => {
     const { dispatcher } = capturingDispatcher();
     const { store, datasets, service } = build(dispatcher);

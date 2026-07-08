@@ -1,4 +1,12 @@
-import type { CaseResult, EvalCase, GradeContext, Grader, Score } from "@everdict/core";
+import {
+  type CaseResult,
+  type EvalCase,
+  type GradeContext,
+  type Grader,
+  type Score,
+  UpstreamError,
+  classifyFailure,
+} from "@everdict/core";
 import { makeGraders, safeGrade } from "@everdict/graders";
 import type { TraceSource, TraceSourceConfig } from "@everdict/trace";
 
@@ -8,7 +16,14 @@ import type { TraceSource, TraceSourceConfig } from "@everdict/trace";
 // separation rule as the agent) → a completed CaseResult. Auth re-resolves traceRef.authSecret (a name) from the tenant SecretStore
 // into a verbatim Authorization header (same convention as pull-ingest). With mlflow correlate="tag", search the everdict.run_id tag.
 // executeCase calls this right after dispatch, so settlement (costOf) and the judge stream see the collected trace as-is.
-// docs/architecture/streaming-case-pipeline.md D4
+//
+// This is ALSO the recovery step for a job-side collect failure (failure.stage="collect" + traceRef): the job kept
+// its execution output and deferred observation scoring, and this pull — from the control plane's network, which
+// often reaches what the sandbox couldn't — either RECOVERS the case (failure cleared, scoring completed) or keeps
+// it classified {collect, infra, retryable} for a later stage-aware retry. A pull exception classifies the same
+// way here (control-plane mode included), so both collection modes fail identically instead of the CP mode
+// silently scoring observations against a known-incomplete trace.
+// docs/architecture/streaming-case-pipeline.md D4 + docs/architecture/batch-resilience.md (stage-aware retry)
 export interface CollectTraceDeps {
   buildTraceSource?: (cfg: TraceSourceConfig) => TraceSource;
   secretsFor?: (tenant: string) => Promise<Record<string, string>>; // re-resolve traceRef.authSecret (SecretStore)
@@ -31,10 +46,16 @@ export async function collectDeferredTrace(
   const ref = result.traceRef;
   if (!ref) return result; // a result whose collection wasn't deferred (default) — as-is (no regression)
 
-  // 1) Platform pull. Failure is soft — surface it as an error event without discarding execution output (snapshot · ground-truth scores)
-  //    (in the caseVerdict authority ranking, an absent trace can't override a ground-truth verdict). Zero results are also surfaced after retry
-  //    (don't silently swallow a flush-latency / correlation-key problem as a zero score).
+  // Whether this call is a RECOVERY of a job-side collect failure (vs the normal defer-mode completion).
+  const recovering = result.failure?.stage === "collect";
+
+  // 1) Platform pull. A pull exception (endpoint down, auth, misconfig) classifies the case {collect, infra,
+  //    retryable} WITHOUT discarding execution output (snapshot · ground-truth scores) — stage-aware retry re-pulls
+  //    later, never re-running the agent. Zero results after retry stay SOFT for defer-mode (a reachable platform
+  //    with nothing correlated may be legitimate) but do NOT recover a failed case.
   const trace = [...result.trace];
+  let pullFailed: string | undefined;
+  let gotEvents = false;
   if (deps.buildTraceSource) {
     try {
       // Auth: authSecret name → tenant SecretStore value → verbatim Authorization (pull-ingest convention).
@@ -64,7 +85,8 @@ export async function collectDeferredTrace(
         events = await source.fetch(ref.runId);
         if (events.length > 0) break;
       }
-      if (events.length === 0) {
+      gotEvents = events.length > 0;
+      if (!gotEvents) {
         trace.push({
           t: Date.now(),
           kind: "error",
@@ -73,14 +95,26 @@ export async function collectDeferredTrace(
       }
       trace.push(...events);
     } catch (err) {
-      trace.push({
-        t: Date.now(),
-        kind: "error",
-        message: `trace collection failed (${ref.kind} ${ref.endpoint}): ${err instanceof Error ? err.message : String(err)}`,
-      });
+      pullFailed = `trace collection failed (${ref.kind} ${ref.endpoint}): ${err instanceof Error ? err.message : String(err)}`;
+      trace.push({ t: Date.now(), kind: "error", message: pullFailed });
     }
   } else {
-    trace.push({ t: Date.now(), kind: "error", message: "cannot collect traces — buildTraceSource not configured" });
+    pullFailed = "cannot collect traces — buildTraceSource not configured";
+    trace.push({ t: Date.now(), kind: "error", message: pullFailed });
+  }
+
+  // Collection is still incomplete → keep the case classified and DON'T score deferred observations against a
+  // known-incomplete trace. The result carries everything a later stage-aware retry needs (traceRef + scores so far).
+  if (pullFailed !== undefined || (recovering && !gotEvents)) {
+    const failure = classifyFailure(
+      new UpstreamError(
+        "TRACE_COLLECT_FAILED",
+        { runId: ref.runId },
+        pullFailed ?? `trace collection recovered 0 events (${ref.kind} ${ref.endpoint})`,
+      ),
+      "collect",
+    );
+    return { ...result, trace, failure };
   }
 
   // 2) Score the observations the job deferred — the separation rule matches the agent (needsCompute=true was already scored in the job).
@@ -107,5 +141,10 @@ export async function collectDeferredTrace(
     scores.push(await safeGrade(grader, ctx));
   }
 
+  // Collection completed — a recovered case sheds its {collect} classification (the pull succeeded this time).
+  if (recovering) {
+    const { failure: _recovered, ...rest } = result;
+    return { ...rest, trace, scores };
+  }
   return { ...result, trace, scores };
 }

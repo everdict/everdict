@@ -47,6 +47,7 @@ import {
 } from "@everdict/suite";
 import type { TraceSource, TraceSourceConfig } from "@everdict/trace";
 import { z } from "zod";
+import { collectDeferredTrace } from "./collect-trace.js";
 import { executeCase } from "./execute-case.js";
 import type { JudgeRunner } from "./judge-runner.js";
 import { assertRuntimeTarget } from "./require-runtime.js";
@@ -856,10 +857,13 @@ export class ScorecardService {
       throw new BadRequestError("BAD_REQUEST", { scorecard: input.id }, "This batch has no per-case results to retry.");
     // Class selection: a result with a classified failure matches its class; a plain grader FAIL (no failure field)
     // is the agent's own outcome → class "agent". Unset = every non-passing case.
+    // A collect-stage failure is retryable even when the ground-truth verdict PASSED — the case is incomplete
+    // (trace missing, observation/judge scores never ran), and its retry is a re-collect, not a re-run.
+    const incomplete = (r: CaseResult): boolean => r.failure?.stage === "collect";
     const classOf = (r: CaseResult): string | undefined =>
-      caseVerdict(r) === true ? undefined : (r.failure?.class ?? "agent");
+      caseVerdict(r) === true && !incomplete(r) ? undefined : (r.failure?.class ?? "agent");
     const failed = results.filter((r) =>
-      input.failureClass ? classOf(r) === input.failureClass : caseVerdict(r) !== true,
+      input.failureClass ? classOf(r) === input.failureClass : caseVerdict(r) !== true || incomplete(r),
     );
     if (failed.length === 0)
       throw new BadRequestError(
@@ -869,8 +873,14 @@ export class ScorecardService {
           ? `Nothing to retry — no ${input.failureClass}-class failures in this batch.`
           : "Nothing to retry — every case passed.",
       );
-    const retryIds = new Set(failed.map((r) => r.caseId));
-    const seed = results.filter((r) => !retryIds.has(r.caseId));
+    // Stage-aware split: collect-stage failures with a traceRef re-COLLECT (control-plane pull by the frozen
+    // correlation coordinates, then judge) — the agent already ran and its output is preserved, so re-dispatching
+    // would burn compute to reproduce what we have. Everything else re-dispatches as before.
+    const recollect = failed.filter((r) => incomplete(r) && r.traceRef !== undefined);
+    const recollectIds = new Set(recollect.map((r) => r.caseId));
+    const redispatch = failed.filter((r) => !recollectIds.has(r.caseId));
+    const retryIds = new Set(redispatch.map((r) => r.caseId));
+    const seed = results.filter((r) => !retryIds.has(r.caseId) && !recollectIds.has(r.caseId));
 
     const resolved = await this.deps.datasets.get(input.tenant, src.dataset.id, src.dataset.version);
     const { cases } = selectSubsetCases(
@@ -910,24 +920,49 @@ export class ScorecardService {
       updatedAt: ts,
     };
     await this.deps.store.create(record);
-    void this.track(
-      record.id,
-      input.tenant,
-      input.submittedBy ?? input.tenant,
-      dataset,
-      src.harness.id,
-      src.harness.version,
-      harnessSpec,
-      orch.judges,
-      src.runtime,
-      orch.judge,
-      orch.concurrency,
-      {
-        seed,
-        retries: orch.retries,
-        resumeNote: `Retry of ${src.id} — re-running ${failed.length} failed case(s), ${seed.length} passing result(s) carried over`,
-      },
-    );
+    void (async () => {
+      // Stage-aware recovery BEFORE the dispatch loop: re-pull each collect-failed case by its traceRef and
+      // judge the ones that recovered — zero agent re-runs. Still-unrecovered cases carry their {collect}
+      // classification into the new batch verbatim (fix the platform, retry again).
+      const recovered: CaseResult[] = [];
+      let healed = 0;
+      for (const r of recollect) {
+        const evalCase = dataset.cases.find((c) => c.id === r.caseId);
+        if (!evalCase) {
+          recovered.push(r); // case left the dataset — carry as-is rather than dropping the result
+          continue;
+        }
+        const attempt = await collectDeferredTrace(this.deps, input.tenant, evalCase, r).catch(() => r);
+        if (attempt.failure === undefined) {
+          healed += 1;
+          if (orch.judges.length > 0)
+            await this.scoring.applyJudges(input.tenant, dataset, [attempt], orch.judges).catch(() => {});
+        }
+        recovered.push(attempt);
+      }
+      await this.track(
+        record.id,
+        input.tenant,
+        input.submittedBy ?? input.tenant,
+        dataset,
+        src.harness.id,
+        src.harness.version,
+        harnessSpec,
+        orch.judges,
+        src.runtime,
+        orch.judge,
+        orch.concurrency,
+        {
+          seed: [...seed, ...recovered],
+          retries: orch.retries,
+          resumeNote:
+            `Retry of ${src.id} — re-running ${redispatch.length} failed case(s), ${seed.length} passing result(s) carried over` +
+            (recollect.length > 0
+              ? `, ${recollect.length} collect-failed case(s) re-collected without re-run (${healed} recovered)`
+              : ""),
+        },
+      );
+    })();
     return record;
   }
 
