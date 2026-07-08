@@ -160,6 +160,13 @@ describe("buildK8sJob / k8sJobName", () => {
     expect(off.spec.template.spec.hostNetwork).toBeUndefined();
   });
 
+  it("a suffixed name stays within the DNS-1123 63-char cap even for a long case id", () => {
+    const long = { ...JOB, evalCase: { ...JOB.evalCase, id: "x".repeat(80) } };
+    const name = k8sJobName(long, "ab1cd");
+    expect(name.length).toBeLessThanOrEqual(63);
+    expect(name.endsWith("-ab1cd")).toBe(true);
+  });
+
   it("k8sJobName normalizes to DNS-1123", () => {
     expect(k8sJobName({ ...JOB, evalCase: { ...JOB.evalCase, id: "Web_Case#1" } })).toBe("everdict-web-case-1");
   });
@@ -173,14 +180,25 @@ describe("K8sBackend.dispatch", () => {
     expect(result.caseId).toBe("c1");
     expect(result.harness).toBe("aider@latest");
     expect(applied).toHaveLength(1);
-    expect(deleted).toEqual(["everdict-c1"]); // finally cleanup
+    expect(deleted).toHaveLength(1);
+    expect(deleted[0]).toMatch(/^everdict-c1-[a-z0-9]{1,5}$/); // per-dispatch unique name, finally cleanup
   });
 
   it("Job failure → UpstreamError but cleanup still runs", async () => {
     const { api, deleted } = mockApi({ failed: true });
     const backend = new K8sBackend({ image: "img", api, pollIntervalMs: 1 });
     await expect(backend.dispatch(JOB)).rejects.toBeInstanceOf(UpstreamError);
-    expect(deleted).toEqual(["everdict-c1"]);
+    expect(deleted).toHaveLength(1);
+    expect(deleted[0]).toMatch(/^everdict-c1-[a-z0-9]{1,5}$/);
+  });
+
+  it("two dispatches of the SAME case get different Job names — concurrent same-dataset batches must not collide", async () => {
+    const { api, deleted } = mockApi();
+    const backend = new K8sBackend({ image: "img", api, pollIntervalMs: 1 });
+    await backend.dispatch(JOB);
+    await backend.dispatch(JOB);
+    expect(deleted).toHaveLength(2);
+    expect(deleted[0]).not.toBe(deleted[1]);
   });
 
   it("trustZones: applies the tenant zone per job (namespace + runtimeClassName=gvisor)", async () => {

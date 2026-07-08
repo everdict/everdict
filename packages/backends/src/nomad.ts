@@ -79,12 +79,20 @@ export interface NomadJobSpec {
   };
 }
 
-export function nomadJobId(job: AgentJob): string {
-  return `everdict-${job.evalCase.id}`;
+export function nomadJobId(job: AgentJob, suffix?: string): string {
+  return `everdict-${job.evalCase.id}${suffix ? `-${suffix}` : ""}`;
+}
+
+// Per-dispatch uniqueness — two concurrent batches over the same dataset (or a retry of a finished one) would
+// otherwise submit the SAME job id: Nomad treats that as a job update, and waitForAlloc's allocs[0] can then read
+// the PREVIOUS dead alloc's logs as this case's result. A fresh id per dispatch removes both hazards; the
+// capacity probe matches on the `everdict-` prefix, so it still counts these.
+function dispatchSuffix(): string {
+  return Math.random().toString(36).slice(2, 7);
 }
 
 // AgentJob → Nomad batch job spec. The job payload is carried in the EVERDICT_AGENT_JOB(base64) env.
-export function buildNomadJob(job: AgentJob, opts: NomadBackendOptions): NomadJobSpec {
+export function buildNomadJob(job: AgentJob, opts: NomadBackendOptions, jobId?: string): NomadJobSpec {
   const env: Record<string, string> = {
     EVERDICT_AGENT_JOB: Buffer.from(JSON.stringify(job)).toString("base64"),
     ...judgeEnv(job.judge), // per-run judge model config (keys via secretEnv). The inline judge grader judges with this model.
@@ -100,7 +108,7 @@ export function buildNomadJob(job: AgentJob, opts: NomadBackendOptions): NomadJo
       : undefined;
   return {
     Job: {
-      ID: nomadJobId(job),
+      ID: jobId ?? nomadJobId(job),
       Type: "batch",
       Namespace: opts.namespace,
       Datacenters: opts.datacenters ?? ["dc1"],
@@ -203,11 +211,12 @@ export class NomadBackend implements Backend {
   async dispatch(job: AgentJob): Promise<CaseResult> {
     const opts = await this.effectiveOpts(job);
     const ns = opts.namespace;
-    const submit = await this.http.request("POST", "/v1/jobs", buildNomadJob(job, opts));
+    const jobId = nomadJobId(job, dispatchSuffix()); // unique per dispatch (concurrent same-case batches + no stale-alloc reads)
+    const submit = await this.http.request("POST", "/v1/jobs", buildNomadJob(job, opts, jobId));
     if (submit.status >= 300) {
       throw new UpstreamError("UPSTREAM_ERROR", { status: submit.status }, "Nomad job submission failed");
     }
-    const allocId = await this.waitForAlloc(nomadJobId(job), ns);
+    const allocId = await this.waitForAlloc(jobId, ns);
     const nsq = ns ? `&namespace=${encodeURIComponent(ns)}` : "";
     const logs = await this.http.request(
       "GET",

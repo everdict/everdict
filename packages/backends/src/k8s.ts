@@ -175,13 +175,18 @@ export interface K8sBackendOptions {
 const RUNTIME_CLASS: Record<string, string> = { runsc: "gvisor", kata: "kata", "kata-runtime": "kata" };
 
 // DNS-1123 job name (lowercase/digits/hyphen, ≤63).
-export function k8sJobName(job: AgentJob): string {
+export function k8sJobName(job: AgentJob, suffix?: string): string {
+  // With a suffix the slug budget shrinks so the full name stays within the DNS-1123 63-char cap.
   const slug = job.evalCase.id
     .toLowerCase()
     .replace(/[^a-z0-9-]/g, "-")
     .replace(/^-+|-+$/g, "")
-    .slice(0, 50);
-  return `everdict-${slug || "case"}`;
+    .slice(0, suffix ? 43 : 50);
+  return `everdict-${slug || "case"}${suffix ? `-${suffix}` : ""}`;
+}
+
+function dispatchSuffix(): string {
+  return Math.random().toString(36).slice(2, 7);
 }
 
 // The Secret name imagePullSecrets references — one per namespace, apply idempotently upserts it (kept independent of job deletion).
@@ -330,7 +335,9 @@ export class K8sBackend implements Backend {
 
   async dispatch(job: AgentJob): Promise<CaseResult> {
     const { ns, runtimeClassName, secretEnv } = await this.resolve(job);
-    const name = k8sJobName(job);
+    // Unique per dispatch — two concurrent batches over the same dataset would otherwise collide on the same Job
+    // name (409 AlreadyExists → dispatch error). The capacity probe matches the label, not the name.
+    const name = k8sJobName(job, dispatchSuffix());
     // With kubeconfig auth, the temp kubeconfig lives only for the one job (removed after completion/failure). cleanup after deleteJob.
     return this.withApi(async (api) => {
       await api.ensureNamespace(ns);
