@@ -3029,7 +3029,14 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     const sid = req.headers["mcp-session-id"] as string | undefined;
     let transport = sid ? sessions.get(sid) : undefined;
     if (!transport) {
-      if (sid || !isInitializeRequest(req.body))
+      // Stale/unknown session (e.g. after a control-plane restart) → 404 per the Streamable HTTP spec, which
+      // obliges the client to start a NEW session with a fresh InitializeRequest. A 400 here strands well-behaved
+      // clients on a dead session id with no recovery signal.
+      if (sid)
+        return reply
+          .code(404)
+          .send({ code: "NOT_FOUND", message: "unknown mcp-session-id — start a new session (initialize)." });
+      if (!isInitializeRequest(req.body))
         return reply
           .code(400)
           .send({ code: "BAD_REQUEST", message: "initialize request or a valid mcp-session-id is required." });
@@ -3088,7 +3095,16 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     if (!principal) return mcpChallenge(req, reply);
     const sid = req.headers["mcp-session-id"] as string | undefined;
     const transport = sid ? sessions.get(sid) : undefined;
-    if (!transport) return reply.code(400).send({ code: "BAD_REQUEST", message: "unknown mcp-session-id." });
+    if (!transport) {
+      // Same spec split as POST: a stale id is 404 (restart the session); a missing id is 400 (initialize first).
+      if (sid)
+        return reply
+          .code(404)
+          .send({ code: "NOT_FOUND", message: "unknown mcp-session-id — start a new session (initialize)." });
+      return reply
+        .code(400)
+        .send({ code: "BAD_REQUEST", message: "initialize request or a valid mcp-session-id is required." });
+    }
     reply.hijack();
     await transport.handleRequest(req.raw, reply.raw);
   };

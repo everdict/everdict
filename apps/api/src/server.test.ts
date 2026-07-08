@@ -1104,6 +1104,27 @@ describe("API — MCP OAuth (login like Linear)", () => {
     await app.close();
   });
 
+  it("a stale mcp-session-id → 404 so the client restarts the session (spec recovery)", async () => {
+    // After a control-plane restart every session id is gone. The Streamable HTTP spec says an unknown
+    // session id must get 404 — the signal that obliges the client to re-initialize. 400 strands it.
+    const { app, keyStore } = server();
+    const key = await issueKey(keyStore, "acme");
+    const post = await app.inject({
+      method: "POST",
+      url: "/mcp",
+      headers: { authorization: `Bearer ${key}`, "mcp-session-id": "gone-after-restart" },
+      payload: { jsonrpc: "2.0", id: 1, method: "tools/list" },
+    });
+    expect(post.statusCode).toBe(404);
+    const get = await app.inject({
+      method: "GET",
+      url: "/mcp",
+      headers: { authorization: `Bearer ${key}`, "mcp-session-id": "gone-after-restart" },
+    });
+    expect(get.statusCode).toBe(404);
+    await app.close();
+  });
+
   it("unauthenticated GET /mcp → 401 challenge", async () => {
     const { app } = server();
     const res = await app.inject({ method: "GET", url: "/mcp" });
