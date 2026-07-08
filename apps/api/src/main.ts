@@ -369,7 +369,17 @@ async function main(): Promise<void> {
   const scorecardService = new ScorecardService({
     dispatcher,
     store: scorecardStore,
-    ...(temporalBatchAddress ? { temporalBatches: new TemporalBatchDriver({ address: temporalBatchAddress }) } : {}),
+    ...(temporalBatchAddress
+      ? {
+          temporalBatches: new TemporalBatchDriver({
+            address: temporalBatchAddress,
+            // History-budget dial: settled cases per workflow execution before continue-as-new (default 500 in the workflow).
+            ...(process.env.EVERDICT_TEMPORAL_BATCH_CONTINUE_EVERY
+              ? { continueEvery: Number(process.env.EVERDICT_TEMPORAL_BATCH_CONTINUE_EVERY) }
+              : {}),
+          }),
+        }
+      : {}),
     // runtime:"auto" — expand to every registered runtime id for the tenant (sharding across all of them).
     runtimesFor: async (tenant) => (await runtimeRegistry.list(tenant)).map((r) => r.id),
     requireRuntime: true, // policy (default): a batch with no runtime is 400 at submit — the API does not register local

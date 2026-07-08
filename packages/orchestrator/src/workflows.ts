@@ -1,5 +1,5 @@
 import type { AgentJob, CaseResult } from "@everdict/core";
-import { proxyActivities, sleep } from "@temporalio/workflow";
+import { continueAsNew, proxyActivities, sleep } from "@temporalio/workflow";
 import type { Activities } from "./types.js";
 
 // ⚠ Workflow code must be deterministic — no I/O, import types only.
@@ -62,9 +62,18 @@ const batchActivities = proxyActivities<Activities>({
 // Workflow-side lane cap — the CP's own concurrency figure drives lanes (bounded, deterministic counter pattern).
 const MAX_BATCH_LANES = 64;
 
-export async function scorecardBatchWorkflow(input: { scorecardId: string }): Promise<void> {
+// Settled cases per workflow execution before continue-as-new. Each case is ~a handful of history events
+// (activity scheduled/started/completed, × transport retries), so an unbounded 5,000-case batch would walk into
+// Temporal's history limits (50K events / 50MB). planBatch is idempotent (unfinished-only), which makes
+// continue-as-new trivially correct: the continued execution re-plans and picks up exactly the remainder with a
+// FRESH history. Overridable per start (input.continueEvery — the CP driver reads its env).
+const BATCH_CONTINUE_EVERY = 500;
+
+export async function scorecardBatchWorkflow(input: { scorecardId: string; continueEvery?: number }): Promise<void> {
   const plan = await batchActivities.planBatch({ scorecardId: input.scorecardId });
-  const ids = plan.caseIds;
+  const limit = Math.max(1, input.continueEvery ?? BATCH_CONTINUE_EVERY);
+  // Only this slice runs in THIS execution — the rest belongs to the continued one.
+  const ids = plan.caseIds.slice(0, limit);
   let next = 0;
   const lane = async (): Promise<void> => {
     while (next < ids.length) {
@@ -76,6 +85,10 @@ export async function scorecardBatchWorkflow(input: { scorecardId: string }): Pr
   };
   const lanes = Math.max(1, Math.min(plan.concurrency, MAX_BATCH_LANES, ids.length || 1));
   await Promise.all(Array.from({ length: lanes }, () => lane()));
+  if (plan.caseIds.length > limit) {
+    await continueAsNew<typeof scorecardBatchWorkflow>(input); // ends this execution — the chain continues under the same workflowId
+    return;
+  }
   await batchActivities.finalizeBatch({ scorecardId: input.scorecardId });
 }
 

@@ -7,7 +7,15 @@ import { Client, Connection } from "@temporalio/client";
 const TASK_QUEUE = "everdict-eval";
 
 export class TemporalBatchDriver {
-  constructor(private readonly opts: { address: string; taskQueue?: string }) {}
+  constructor(
+    private readonly opts: {
+      address: string;
+      taskQueue?: string;
+      // Settled cases per workflow execution before continue-as-new (EVERDICT_TEMPORAL_BATCH_CONTINUE_EVERY).
+      // Unset = the workflow's own default (500) — the knob exists for history-budget tuning and live e2e.
+      continueEvery?: number;
+    },
+  ) {}
 
   workflowIdFor(scorecardId: string): string {
     return `everdict-batch-${scorecardId}`;
@@ -20,7 +28,12 @@ export class TemporalBatchDriver {
       await client.workflow.start("scorecardBatchWorkflow", {
         taskQueue: this.opts.taskQueue ?? TASK_QUEUE,
         workflowId: this.workflowIdFor(scorecardId),
-        args: [{ scorecardId }],
+        args: [
+          {
+            scorecardId,
+            ...(this.opts.continueEvery !== undefined ? { continueEvery: this.opts.continueEvery } : {}),
+          },
+        ],
       });
     } finally {
       await connection.close();

@@ -63,6 +63,19 @@ scorecardBatchWorkflow(input: {scorecardId, tenant, dataset ref, harness ref, ju
    worker picks the workflow up with zero lost cases; kill the control plane → same.
 4. Queue view: Temporal-owned batches surface `workflowId` on the record for deep-linking.
 
+## History budget — continue-as-new
+
+One case ≈ a handful of history events (activity scheduled/started/completed × transport retries), so an
+unbounded multi-thousand-case batch would walk into Temporal's per-execution history limits (50K events /
+50MB). The workflow processes at most `continueEvery` cases per execution (default 500;
+`EVERDICT_TEMPORAL_BATCH_CONTINUE_EVERY` on the CP feeds the start args) and then `continueAsNew`s with the
+same input. `planBatch`'s idempotence (unfinished-only) is what makes this trivially correct — the continued
+execution re-plans and receives exactly the remainder, with a fresh history, under the same workflowId.
+
+Live e2e: 12-case batch with `continueEvery=5` → plan steps "Running 12" → "Running 7 (5 kept)" →
+"Running 2 (10 kept)"; `temporal workflow list` shows ContinuedAsNew ×2 → Completed on one workflowId;
+12/12 pass.
+
 ## Non-goals
 
 - Moving judge/export streaming into Temporal (they are per-case activities already chained after
