@@ -259,3 +259,14 @@ Each slice: doc touch if it changes a convention + BFF↔MCP parity + tests. Qua
 - Migrating existing personal tokens into installations (users re-install the App; personal tokens are
   simply dropped in S6).
 - GitLab/Bitbucket (out of scope).
+
+
+## Rerun button on completion posts
+
+A scorecard completion post carries an interactive **Rerun** action when the workspace has the inbound half
+configured (`commandTokenSecretName`) and the control plane knows its public URL (`API_PUBLIC_URL`): the button
+posts back to `/integrations/mattermost/action?ws=<workspace>` with the embedded context (the same verification
+token the slash-command inbound checks + the dataset/harness coordinates), and the existing `handleAction`
+re-fires dataset×harness from chat. Without either precondition the post stays a plain message — no dead
+buttons. Regression alerts stay button-less for now (their payload carries scorecard ids, not rerun
+coordinates).

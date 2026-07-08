@@ -14,6 +14,9 @@ export interface NotificationServiceDeps {
   settingsFor: (tenant: string) => Promise<WorkspaceSettings | undefined>;
   // Workspace Mattermost (bot token) — resolves settings.mattermost.botTokenSecretName from the workspace SecretStore.
   secretsFor?: (tenant: string) => Promise<Record<string, string>>;
+  // Control-plane public base URL (API_PUBLIC_URL) — the interactive Rerun button posts back to
+  // /integrations/mattermost/action, so it only attaches when Mattermost can actually reach us.
+  apiPublicUrl?: string;
   feed?: NotificationStore; // personal notification feed — if unset, only the feed channel is silently skipped
   fetch?: typeof fetch;
   newId?: () => string;
@@ -70,6 +73,7 @@ export class NotificationService {
     await this.post(
       tenant,
       `${icon} **Scorecard \`${record.id}\`** ${record.status} — dataset \`${record.dataset.id}@${record.dataset.version}\` × \`${record.harness.id}@${record.harness.version}\``,
+      { dataset: record.dataset.id, harness: record.harness.id },
     );
   }
 
@@ -156,18 +160,45 @@ export class NotificationService {
   }
 
   // Post to a channel via the workspace-registered Mattermost (bot token). Unset/no-token/failure are silently ignored (notification failure never affects the result).
-  private async post(tenant: string, message: string): Promise<void> {
+  // With `rerun` context + configured inbound (commandTokenSecretName) + a public URL, the post carries an
+  // interactive Rerun button — the click posts back to /integrations/mattermost/action with the embedded
+  // context (the same token the slash-command inbound verifies), re-firing dataset×harness from chat.
+  private async post(tenant: string, message: string, rerun?: { dataset: string; harness: string }): Promise<void> {
     try {
       const mm = (await this.deps.settingsFor(tenant))?.mattermost;
       // Only posts if there's a defaultChannelId + a bot token in the SecretStore.
       if (!mm?.defaultChannelId || !this.deps.secretsFor) return;
-      const token = (await this.deps.secretsFor(tenant))[mm.botTokenSecretName];
+      const secrets = await this.deps.secretsFor(tenant);
+      const token = secrets[mm.botTokenSecretName];
       if (!token) return;
       const base = mm.host.endsWith("/") ? mm.host.slice(0, -1) : mm.host;
+      const actionToken = mm.commandTokenSecretName ? secrets[mm.commandTokenSecretName] : undefined;
+      const publicUrl = this.deps.apiPublicUrl?.replace(/\/$/, "");
+      const attachments =
+        rerun && actionToken && publicUrl
+          ? [
+              {
+                fallback: "Rerun",
+                actions: [
+                  {
+                    name: "Rerun",
+                    integration: {
+                      url: `${publicUrl}/integrations/mattermost/action?ws=${encodeURIComponent(tenant)}`,
+                      context: { token: actionToken, action: "rerun", dataset: rerun.dataset, harness: rerun.harness },
+                    },
+                  },
+                ],
+              },
+            ]
+          : undefined;
       await this.fetchImpl(`${base}/api/v4/posts`, {
         method: "POST",
         headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-        body: JSON.stringify({ channel_id: mm.defaultChannelId, message }),
+        body: JSON.stringify({
+          channel_id: mm.defaultChannelId,
+          message,
+          ...(attachments ? { props: { attachments } } : {}),
+        }),
       });
     } catch {
       // Notification failure never affects the run/scorecard result.

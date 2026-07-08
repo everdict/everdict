@@ -348,6 +348,8 @@ async function main(): Promise<void> {
     // Workspace Mattermost (bot token) — resolve settings.mattermost.botTokenSecretName from shared secrets.
     secretsFor: runtimeSecretsFor,
     feed: notificationStore, // personal notification feed (bell inbox) — docs/architecture/notifications.md
+    // Rerun button on completion posts — only attaches when Mattermost can reach us back (public URL known).
+    ...(process.env.API_PUBLIC_URL ? { apiPublicUrl: process.env.API_PUBLIC_URL } : {}),
   });
   // Workspace-owned Mattermost integration (register → bot notifications + inbound slash commands/buttons). apiPublicUrl exposes the inbound URL.
   const mattermostService = new MattermostService(settingsStore, {
