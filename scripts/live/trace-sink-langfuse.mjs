@@ -39,19 +39,55 @@ if (!ENDPOINT) {
   console.log(`Langfuse v2 boot (docker) → ${ENDPOINT}`);
   execFileSync("docker", ["network", "create", NET], { stdio: "ignore" });
   execFileSync("docker", [
-    "run", "-d", "--rm", "--name", PG, "--network", NET,
-    "-e", "POSTGRES_PASSWORD=lf", "-e", "POSTGRES_DB=langfuse",
+    "run",
+    "-d",
+    "--rm",
+    "--name",
+    PG,
+    "--network",
+    NET,
+    "-e",
+    "POSTGRES_PASSWORD=lf",
+    "-e",
+    "POSTGRES_DB=langfuse",
     "postgres:16-alpine",
   ]);
   execFileSync("docker", [
-    "run", "-d", "--rm", "--name", LF, "--network", NET, "-p", "3111:3000",
-    "-e", `DATABASE_URL=postgresql://postgres:lf@${PG}:5432/langfuse`,
-    "-e", "NEXTAUTH_SECRET=e2e-secret", "-e", "SALT=e2e-salt", "-e", "NEXTAUTH_URL=http://127.0.0.1:3111",
-    "-e", "LANGFUSE_INIT_ORG_ID=e2e-org", "-e", "LANGFUSE_INIT_ORG_NAME=e2e",
-    "-e", "LANGFUSE_INIT_PROJECT_ID=e2e-proj", "-e", "LANGFUSE_INIT_PROJECT_NAME=e2e",
-    "-e", `LANGFUSE_INIT_PROJECT_PUBLIC_KEY=${PK}`, "-e", `LANGFUSE_INIT_PROJECT_SECRET_KEY=${SK}`,
-    "-e", "LANGFUSE_INIT_USER_EMAIL=e2e@example.com", "-e", "LANGFUSE_INIT_USER_NAME=e2e",
-    "-e", "LANGFUSE_INIT_USER_PASSWORD=e2e-password-123",
+    "run",
+    "-d",
+    "--rm",
+    "--name",
+    LF,
+    "--network",
+    NET,
+    "-p",
+    "3111:3000",
+    "-e",
+    `DATABASE_URL=postgresql://postgres:lf@${PG}:5432/langfuse`,
+    "-e",
+    "NEXTAUTH_SECRET=e2e-secret",
+    "-e",
+    "SALT=e2e-salt",
+    "-e",
+    "NEXTAUTH_URL=http://127.0.0.1:3111",
+    "-e",
+    "LANGFUSE_INIT_ORG_ID=e2e-org",
+    "-e",
+    "LANGFUSE_INIT_ORG_NAME=e2e",
+    "-e",
+    "LANGFUSE_INIT_PROJECT_ID=e2e-proj",
+    "-e",
+    "LANGFUSE_INIT_PROJECT_NAME=e2e",
+    "-e",
+    `LANGFUSE_INIT_PROJECT_PUBLIC_KEY=${PK}`,
+    "-e",
+    `LANGFUSE_INIT_PROJECT_SECRET_KEY=${SK}`,
+    "-e",
+    "LANGFUSE_INIT_USER_EMAIL=e2e@example.com",
+    "-e",
+    "LANGFUSE_INIT_USER_NAME=e2e",
+    "-e",
+    "LANGFUSE_INIT_USER_PASSWORD=e2e-password-123",
     "langfuse/langfuse:2",
   ]);
   bootedDocker = true;
@@ -116,7 +152,7 @@ try {
   let afterScores = [];
   for (let i = 0; i < 30; i++) {
     await sleep(2000);
-    afterScores = (await api(`/api/public/scores?limit=50`)).data ?? [];
+    afterScores = (await api("/api/public/scores?limit=50")).data ?? [];
     if (afterScores.some((s) => s.name === "judge:safety")) break;
   }
   const afterTraces = (await api("/api/public/traces?limit=50")).data ?? [];

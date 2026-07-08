@@ -326,11 +326,12 @@ export class ScorecardService {
   }
 
   // Resolve the dataset synchronously (NotFound→404), resolve the harness version/spec, create the record, then run the batch asynchronously.
-  async submit(input: RunScorecardInput): Promise<ScorecardRecord> {
+  async submit(rawInput: RunScorecardInput): Promise<ScorecardRecord> {
     // Deployment policy: the batch's execution target (a registered runtime or self:<runner>) must be specified — 400 if absent (blocks a silent local fallback).
-    assertRuntimeTarget(this.deps.requireRuntime, input.runtime);
+    assertRuntimeTarget(this.deps.requireRuntime, rawInput.runtime);
     // runtime:"auto" — expand to EVERY runtime the tenant has registered and shard across them (same comma-list
     // round-robin; each backend's capacity still admission-controls actual placement via the Scheduler).
+    let input = rawInput;
     if (input.runtime === "auto") {
       const ids = this.deps.runtimesFor ? await this.deps.runtimesFor(input.tenant) : [];
       if (ids.length === 0)
@@ -645,9 +646,7 @@ export class ScorecardService {
         seedRunIds,
         retries: rec.orchestration.retries,
         ...(rec.orchestration.traceSink ? { sinkOverride: rec.orchestration.traceSink } : {}),
-        resumeNote:
-          `Resumed after a control-plane restart — ${seed.length} finished case(s) kept, ${remaining} re-dispatched` +
-          (adopted > 0 ? ` (${adopted} in-flight job(s) adopted without re-running)` : ""),
+        resumeNote: `Resumed after a control-plane restart — ${seed.length} finished case(s) kept, ${remaining} re-dispatched${adopted > 0 ? ` (${adopted} in-flight job(s) adopted without re-running)` : ""}`,
       },
     );
     return true;
@@ -1130,12 +1129,13 @@ export class ScorecardService {
         }
         recovered.push(attempt);
       }
-      const resumeNote =
-        `Retry of ${src.id} — re-running ${redispatch.length} failed case(s), ${seed.length} passing result(s) carried over` +
-        (recollect.length > 0
+      const recollectNote =
+        recollect.length > 0
           ? `, ${recollect.length} collect-failed case(s) re-collected without re-run (${healed} recovered)`
-          : "") +
-        (boosted > 0 ? `, ${boosted} OOM case(s) escalated to ${Object.values(memoryBoostMb).join("/")}Mb` : "");
+          : "";
+      const boostNote =
+        boosted > 0 ? `, ${boosted} OOM case(s) escalated to ${Object.values(memoryBoostMb).join("/")}Mb` : "";
+      const resumeNote = `Retry of ${src.id} — re-running ${redispatch.length} failed case(s), ${seed.length} passing result(s) carried over${recollectNote}${boostNote}`;
 
       // Temporal parity: when the batch driver is configured, the retry batch is workflow-owned too — a CP
       // restart mid-retry must not lose it. Seeds (passes + recovered) are MATERIALIZED as succeeded child runs

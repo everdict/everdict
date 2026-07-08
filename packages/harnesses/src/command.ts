@@ -1,9 +1,9 @@
 import {
-  InternalError,
   type CommandHarnessSpec,
   type ComputeHandle,
   type EvaluableHarness,
   type HarnessTraceSource,
+  InternalError,
   type RunContext,
   type TraceEvent,
   flattenEnv,

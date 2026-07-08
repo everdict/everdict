@@ -37,7 +37,7 @@ const mm = async (method, path, body, opts = {}) => {
     method,
     headers: {
       "content-type": "application/json",
-      ...(opts.token ?? adminToken ? { authorization: `Bearer ${opts.token ?? adminToken}` } : {}),
+      ...((opts.token ?? adminToken) ? { authorization: `Bearer ${opts.token ?? adminToken}` } : {}),
     },
     ...(body ? { body: JSON.stringify(body) } : {}),
   });
@@ -61,15 +61,31 @@ try {
   console.log("▶ Mattermost up — bootstrapping admin/team/channel/bot");
 
   // First user on a fresh server = system admin.
-  await mm("POST", "/api/v4/users", { email: "e2e@example.com", username: "e2e-admin", password: "E2e-password-123" }, { token: "" });
-  const login = await mm("POST", "/api/v4/users/login", { login_id: "e2e-admin", password: "E2e-password-123" }, { token: "" });
+  await mm(
+    "POST",
+    "/api/v4/users",
+    { email: "e2e@example.com", username: "e2e-admin", password: "E2e-password-123" },
+    { token: "" },
+  );
+  const login = await mm(
+    "POST",
+    "/api/v4/users/login",
+    { login_id: "e2e-admin", password: "E2e-password-123" },
+    { token: "" },
+  );
   adminToken = login.headers.get("token");
   if (!adminToken) throw new Error("MM login gave no session token");
 
   await mm("PUT", "/api/v4/config/patch", { ServiceSettings: { EnableBotAccountCreation: true } });
-  const team = (await mm("POST", "/api/v4/teams", { name: "everdict-e2e", display_name: "Everdict E2E", type: "O" })).json;
+  const team = (await mm("POST", "/api/v4/teams", { name: "everdict-e2e", display_name: "Everdict E2E", type: "O" }))
+    .json;
   const channel = (
-    await mm("POST", "/api/v4/channels", { team_id: team.id, name: "eval-alerts", display_name: "Eval alerts", type: "O" })
+    await mm("POST", "/api/v4/channels", {
+      team_id: team.id,
+      name: "eval-alerts",
+      display_name: "Eval alerts",
+      type: "O",
+    })
   ).json;
   const bot = (await mm("POST", "/api/v4/bots", { username: "everdict-bot", display_name: "Everdict" })).json;
   const botToken = (await mm("POST", `/api/v4/users/${bot.user_id}/tokens`, { description: "e2e" })).json.token;
@@ -113,7 +129,9 @@ try {
   }
   if (!found) throw new Error("✗ completion notification did not land in the channel");
   console.log(`✓ completion notification in #eval-alerts: ${found.message.split("\n")[0].slice(0, 120)}`);
-  console.log("\n✅ mattermost-notify live e2e PASS — workspace integration → real channel post, read back via the MM API.");
+  console.log(
+    "\n✅ mattermost-notify live e2e PASS — workspace integration → real channel post, read back via the MM API.",
+  );
 } finally {
   try {
     await everdict("DELETE", "/workspace/mattermost", undefined, { admin: true });

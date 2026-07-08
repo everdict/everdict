@@ -99,7 +99,8 @@ try {
     rec = await api(`/runs/${submitted.id}`);
     if (rec.status === "succeeded" || rec.status === "failed") break;
   }
-  if (rec.status !== "succeeded") throw new Error(`run ${rec.status}: ${JSON.stringify(rec.error ?? rec.result?.failure)}`);
+  if (rec.status !== "succeeded")
+    throw new Error(`run ${rec.status}: ${JSON.stringify(rec.error ?? rec.result?.failure)}`);
 
   const prov = rec.result?.provenance;
   if (prov?.ranOn !== "self-hosted" || prov.runner !== runner.id)
@@ -108,8 +109,7 @@ try {
   const trace = rec.result?.trace ?? [];
   if (!trace.some((e) => e.kind === "error" && String(e.message).includes("trace fetch failed")))
     throw new Error(`✗ expected the degraded-trace marker: ${JSON.stringify(trace).slice(0, 200)}`);
-  if (!(rec.result?.scores ?? []).some((sc) => sc.graderId === "steps"))
-    throw new Error("✗ steps score missing");
+  if (!(rec.result?.scores ?? []).some((sc) => sc.graderId === "steps")) throw new Error("✗ steps score missing");
   // The drive itself is visible in the topology container: readiness GET + POST /runs with per-run wiring.
   const container = `everdict-${HARNESS_ID}-1.0.0-frontdoor`;
   const logs = execFileSync("docker", ["logs", container], { encoding: "utf8" });

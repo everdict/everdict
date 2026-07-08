@@ -172,7 +172,7 @@ async function main() {
     },
     origin,
     ...(judges ? { judges } : {}),
-    ...(ov.runtime ?? runtime ? { runtime: ov.runtime ?? runtime } : {}),
+    ...((ov.runtime ?? runtime) ? { runtime: ov.runtime ?? runtime } : {}),
     ...(ov.cases ? { cases: ov.cases } : {}),
     ...(ov.trials !== undefined ? { trials: ov.trials } : {}),
     ...(ov.concurrency !== undefined ? { concurrency: ov.concurrency } : {}),

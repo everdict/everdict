@@ -15,10 +15,7 @@ export function parseEvaluateArgs(body) {
   const warnings = [];
   const text = String(body ?? "").trim();
   if (!text.startsWith("/evaluate")) return { overrides, warnings };
-  const tokens = text
-    .slice("/evaluate".length)
-    .split(/\s+/)
-    .filter(Boolean);
+  const tokens = text.slice("/evaluate".length).split(/\s+/).filter(Boolean);
   const setCases = (patch) => {
     overrides.cases = { ...(overrides.cases ?? {}), ...patch };
   };
