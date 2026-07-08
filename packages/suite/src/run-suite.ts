@@ -13,6 +13,7 @@ function failedCaseResult(job: AgentJob, error: unknown): CaseResult {
   return {
     caseId: job.evalCase.id,
     harness: `${job.harness.id}@${job.harness.version}`,
+    ...(job.trial !== undefined ? { trial: job.trial } : {}), // carry the trial index so pass@k/flakiness sees this failure
     trace: [{ t: 0, kind: "error", message }],
     snapshot: { kind: "prompt", output: "" },
     // Carry the reason in detail — the web/CLI surface score.detail as-is, so "why it failed" is visible per case.
@@ -54,9 +55,20 @@ export async function runSuite(
     signal?: AbortSignal;
     retries?: number;
     retryBackoffMs?: number; // base backoff (attempt n waits n×base). Injectable so tests don't sleep.
+    // Run each case this many times for pass@k / flakiness — one job per (case, trial), each carrying its trial index.
+    // Default 1 leaves trial unset → byte-identical single-run behavior. docs/architecture/trial-based-verdict.md
+    trials?: number;
   } = {},
 ): Promise<Scorecard> {
-  const jobs: AgentJob[] = suite.cases.map((evalCase) => ({ evalCase, harness: { id: suite.harness.id, version } }));
+  // Fan out each case into `trials` jobs. trials=1 keeps the single-run shape (no trial field) for backward compatibility.
+  const trials = Math.max(1, opts.trials ?? 1);
+  const jobs: AgentJob[] = suite.cases.flatMap((evalCase) =>
+    Array.from({ length: trials }, (_, trial) => ({
+      evalCase,
+      harness: { id: suite.harness.id, version },
+      ...(trials > 1 ? { trial } : {}),
+    })),
+  );
   const retries = Math.max(0, opts.retries ?? 0);
   const backoff = opts.retryBackoffMs ?? 1_000;
   // Isolate dispatch failures per case — even if one case throws, the rest keep running and the failure is captured as a result.
@@ -67,6 +79,8 @@ export async function runSuite(
       if (attempt > 0 && opts.signal?.aborted) return undefined; // don't burn retries on a reclaimed batch
       try {
         result = await dispatch(job);
+        // Stamp the trial index from the job — the agent runs one case and doesn't know which repetition it is.
+        if (job.trial !== undefined && result.trial === undefined) result = { ...result, trial: job.trial };
         break;
       } catch (error) {
         // Only retryable-classified failures earn another attempt: config errors (missing secret, bad pin) and

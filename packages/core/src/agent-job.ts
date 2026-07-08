@@ -53,5 +53,13 @@ export const AgentJobSchema = z.object({
   // (extending register-time HarnessTemplate slot/pins to dispatch time). Only meaningful for service harnesses.
   // With pins present, a deterministic suffix is appended to the effective version so warm pools don't mix (a distinct topology identity).
   imagePins: z.record(z.string()).optional(),
+  // Scheduling class — "interactive" (a person is waiting: single runs, probes) jumps ahead of "batch" (scorecard
+  // fan-out) in the Scheduler's wait queue, so a 3-case check doesn't sit behind a 601-case batch. Tenant-fair WFQ
+  // order is preserved WITHIN each class. Absent = batch-equivalent (only interactive jumps). The agent ignores it.
+  priority: z.enum(["interactive", "batch"]).optional(),
+  // Trial index (0-based) when a case is dispatched N times for pass@k / flakiness. runSuite's fan-out stamps it so
+  // the orchestration can key one child run per (case, trial) and the resulting CaseResult carries its trial. Absent =
+  // single-run. The agent ignores it (it runs exactly one job); the control plane stamps the result. docs/architecture/trial-based-verdict.md
+  trial: z.number().int().nonnegative().optional(),
 });
 export type AgentJob = z.infer<typeof AgentJobSchema>;

@@ -9,6 +9,7 @@ import {
 import { describe, expect, it } from "vitest";
 import { runSuite } from "./run-suite.js";
 import { caseVerdict, diffScorecards, scorecardPassRate, summarizeScorecard } from "./scorecard.js";
+import { caseTrialStats } from "./trials.js";
 
 function caseResult(caseId: string, harness: string, pass: boolean, steps: number): CaseResult {
   return {
@@ -58,7 +59,9 @@ describe("runSuite", () => {
     const failed = sc.results.find((r) => r.caseId === "a");
     expect(failed?.harness).toBe("claude-code@1.0.0");
     expect(failed?.trace).toEqual([{ t: 0, kind: "error", message: "boom" }]);
-    expect(failed?.scores).toEqual([{ graderId: "dispatch", metric: "error", value: 0, pass: false, detail: "[infra] boom" }]);
+    expect(failed?.scores).toEqual([
+      { graderId: "dispatch", metric: "error", value: 0, pass: false, detail: "[infra] boom" },
+    ]);
     expect(caseVerdict(failed ?? { scores: [] })).toBe(false);
     // the successful case aggregates normally
     expect(caseVerdict(sc.results.find((r) => r.caseId === "b") ?? { scores: [] })).toBe(true);
@@ -254,5 +257,56 @@ describe("runSuite failure classification", () => {
     const sc = await runSuite(suite, "1", dispatch, { retries: 1, retryBackoffMs: 1 });
     expect(sc.results[0]?.failure).toMatchObject({ class: "infra", code: "UPSTREAM_ERROR", retryable: true });
     expect(String(sc.results[0]?.scores[0]?.detail)).toContain("[infra]");
+  });
+});
+
+// N-trial fan-out — run each case multiple times so the scorecard can compute pass@k / flakiness.
+describe("runSuite N-trial fan-out", () => {
+  it("runs each case N times, stamping a distinct trial index on every job and result", async () => {
+    // Given: a dispatch that records the jobs it sees
+    const seen: AgentJob[] = [];
+    const dispatch = async (job: AgentJob): Promise<CaseResult> => {
+      seen.push(job);
+      return caseResult(job.evalCase.id, `${job.harness.id}@${job.harness.version}`, true, 1);
+    };
+    // When: running 3 trials of a 2-case suite
+    const sc = await runSuite(SUITE, "1.0.0", dispatch, { concurrency: 4, trials: 3 });
+    // Then: 2 cases × 3 trials = 6 dispatches, each case's trials indexed 0..2, and every result carries its trial
+    expect(seen).toHaveLength(6);
+    expect(
+      seen
+        .filter((j) => j.evalCase.id === "a")
+        .map((j) => j.trial)
+        .sort(),
+    ).toEqual([0, 1, 2]);
+    const aResults = sc.results.filter((r) => r.caseId === "a");
+    expect(aResults).toHaveLength(3);
+    expect(aResults.map((r) => r.trial).sort()).toEqual([0, 1, 2]);
+  });
+
+  it("defaults to 1 trial and leaves the trial index unset (single-run shape unchanged)", async () => {
+    const seen: AgentJob[] = [];
+    const dispatch = async (job: AgentJob): Promise<CaseResult> => {
+      seen.push(job);
+      return caseResult(job.evalCase.id, `${job.harness.id}@${job.harness.version}`, true, 1);
+    };
+    const sc = await runSuite(SUITE, "1.0.0", dispatch);
+    expect(seen.every((j) => j.trial === undefined)).toBe(true);
+    expect(sc.results.every((r) => r.trial === undefined)).toBe(true);
+  });
+
+  it("isolates a throwing trial — the other trials of the same case still run and feed pass@k", async () => {
+    // Given: case a's second trial throws, every other trial passes
+    const dispatch = async (job: AgentJob): Promise<CaseResult> => {
+      if (job.evalCase.id === "a" && job.trial === 1) throw new Error("flake");
+      return caseResult(job.evalCase.id, `${job.harness.id}@${job.harness.version}`, true, 1);
+    };
+    // When: running 3 trials per case
+    const sc = await runSuite(SUITE, "1.0.0", dispatch, { concurrency: 4, trials: 3 });
+    // Then: case a still has all 3 trials, one the isolated dispatch failure, and the trial math sees 2/3 (flaky)
+    const aResults = sc.results.filter((r) => r.caseId === "a").sort((x, y) => (x.trial ?? 0) - (y.trial ?? 0));
+    expect(aResults.map((r) => r.trial)).toEqual([0, 1, 2]);
+    expect(aResults[1]?.scores[0]).toMatchObject({ graderId: "dispatch", pass: false });
+    expect(caseTrialStats("a", aResults)).toMatchObject({ trials: 3, passes: 2, flaky: true });
   });
 });
