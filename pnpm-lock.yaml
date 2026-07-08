@@ -387,6 +387,8 @@ importers:
         specifier: ^1.29.0
         version: 1.29.0(zod@4.4.3)
 
+  packages/sdk: {}
+
   packages/storage:
     dependencies:
       '@aws-sdk/client-s3':
