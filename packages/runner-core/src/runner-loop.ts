@@ -1,4 +1,4 @@
-import { type AgentJob, AgentJobSchema, type CaseResult } from "@everdict/core";
+import { type AgentJob, AgentJobSchema, type CaseResult, classifyFailure, stageForError } from "@everdict/core";
 
 // Dependencies of the runner lease worker pool — the caller (main.ts) absorbs transport/session via ResilientMcpSession,
 // and here we inject only callJson (already JSON-parsed and retried) and job execution, keeping just the pure lease-loop logic (test-friendly).
@@ -69,8 +69,30 @@ export async function runLeaseWorkers(deps: RunnerLoopDeps, opts: RunnerLoopOpts
         await deps.callJson("submit_job_result", { jobId, result });
         log(`✓ job ${jobId} done → replied`);
       } catch (e) {
-        log(`✗ job ${jobId} failed: ${errMsg(e)} → replying fail`);
-        await deps.callJson("fail_job", { jobId, message: errMsg(e) }).catch(() => {});
+        // Classified failure parity with the agent sentinel: the self-hosted path has no sentinel, so a bare
+        // fail_job would erase WHERE the case died. Submit a classified failed CaseResult instead (the batch
+        // settles it with stage/class intact); fail_job stays only for jobs we cannot even parse.
+        const failure = classifyFailure(e, stageForError(e));
+        log(`✗ job ${jobId} failed [${failure.class}/${failure.stage}]: ${errMsg(e)} → replying classified result`);
+        const failed = {
+          caseId: parsed.data.evalCase.id,
+          harness: `${parsed.data.harness.id}@${parsed.data.harness.version}`,
+          trace: [{ t: 0, kind: "error", message: errMsg(e) }],
+          snapshot: { kind: "prompt", output: "" },
+          scores: [
+            {
+              graderId: failure.stage,
+              metric: "error",
+              value: 0,
+              pass: false,
+              detail: `[${failure.class}] ${errMsg(e)}`,
+            },
+          ],
+          failure,
+        };
+        await deps.callJson("submit_job_result", { jobId, result: failed }).catch(async () => {
+          await deps.callJson("fail_job", { jobId, message: errMsg(e) }).catch(() => {});
+        });
       } finally {
         stopHeartbeat();
       }

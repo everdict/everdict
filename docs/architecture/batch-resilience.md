@@ -63,8 +63,13 @@ signals the mapper reads: `OOM_KILLED` (K8s pod `OOMKilled` reason / Nomad alloc
 same limits, same death, so the transient retry skips it and the message says "raise resources.memoryMb".
 
 **Stages survive the process boundary**: the agent entrypoint catches in-job errors and emits a CLASSIFIED
-CaseResult through the sentinel (`stageForError`: HARNESS_INSTALL_FAILED→install · run · grade · dispatch), so a
-setup break lands as `{install, harness, retryable:false}` instead of a mushy backend-side "sentinel not found".
+CaseResult through the sentinel (`stageForError`: HARNESS_INSTALL_FAILED→install · run · grade · collect ·
+dispatch), so a setup break lands as `{install, harness, retryable:false}` instead of a mushy backend-side
+"sentinel not found". Trace pull after the run (`collectTrace`) is its own stage: a dead/unreachable trace
+endpoint rethrows as `TRACE_COLLECT_FAILED` → `{collect, infra, retryable:true}` — the agent DID run; only
+observability failed, so it must not read as a harness crash. The self-hosted runner path has the same parity:
+`runLeaseWorkers` submits a classified failed CaseResult (`submit_job_result` with `failure` stamped) instead of
+a bare `fail_job`, which is now only the fallback for malformed jobs or when the submit itself fails.
 
 Consumers: `runSuite` retries only `retryable` classes; retry-failed takes a class filter
 (HTTP `?class=infra` · MCP `failure_class`) so a cluster incident re-runs exactly its casualties while agent

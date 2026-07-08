@@ -1,4 +1,4 @@
-import type { AgentJob, CaseResult } from "@everdict/core";
+import { type AgentJob, type CaseResult, InternalError } from "@everdict/core";
 import { describe, expect, it } from "vitest";
 import { runLeaseWorkers } from "./runner-loop.js";
 
@@ -170,5 +170,58 @@ describe("runLeaseWorkers — case-level parallelism (maxConcurrent)", () => {
     expect(failed).toEqual(["bad"]);
     expect(submitted).toEqual([]);
     expect(ran).toBe(false); // a malformed job isn't run
+  });
+});
+
+// Classified-failure parity with the agent sentinel — the self-hosted path has no sentinel, so a runJob throw
+// must settle as a CLASSIFIED failed CaseResult (stage × class preserved), not evaporate into a bare fail_job.
+describe("runLeaseWorkers — classified failure submission", () => {
+  it("a runJob throw submits a failed CaseResult with stage/class; fail_job is not used", async () => {
+    const results: Array<Record<string, unknown>> = [];
+    const failed: string[] = [];
+    let stop = false;
+    const queue: Array<Record<string, unknown>> = [
+      {
+        jobId: "j1",
+        job: {
+          harness: { id: "h", version: "1" },
+          evalCase: { id: "c1", env: { kind: "prompt" }, task: "t", graders: [], timeoutSec: 60, tags: [] },
+        },
+      },
+    ];
+    const callJson = async (name: string, args: Record<string, unknown>): Promise<Record<string, unknown>> => {
+      if (name === "lease_job") {
+        const next = queue.shift();
+        if (!next) stop = true;
+        return next ?? {};
+      }
+      if (name === "submit_job_result") {
+        results.push(args.result as Record<string, unknown>);
+        stop = true;
+        return {};
+      }
+      if (name === "fail_job") {
+        failed.push(String(args.jobId));
+        stop = true;
+        return {};
+      }
+      return {};
+    };
+    await runLeaseWorkers(
+      {
+        callJson,
+        runJob: async () => {
+          throw new InternalError("HARNESS_INSTALL_FAILED", {}, "pip exploded");
+        },
+        log: () => {},
+      },
+      { maxConcurrent: 1, waitMs: 0, heartbeatMs: 10_000, pollMs: 0, capabilities: ["repo"], shouldStop: () => stop },
+    );
+    expect(failed).toEqual([]); // no bare fail_job
+    expect(results).toHaveLength(1);
+    expect(results[0]).toMatchObject({
+      caseId: "c1",
+      failure: { stage: "install", class: "harness", code: "HARNESS_INSTALL_FAILED", retryable: false },
+    });
   });
 });
