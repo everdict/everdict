@@ -1,13 +1,12 @@
-import { type BudgetTracker, type Dispatcher, billingTenant, costOf } from "@everdict/backends";
+import { type BudgetTracker, CircuitBreaker, type Dispatcher, billingTenant, costOf } from "@everdict/backends";
 import {
   type AgentJob,
   AppError,
   BadRequestError,
   type CaseResult,
-  type EvalCase,
-  classifyFailure,
   type Dataset,
   EnvSnapshotSchema,
+  type EvalCase,
   type GradeContext,
   type HarnessSecretMaps,
   type HarnessSpec,
@@ -18,6 +17,7 @@ import {
   type Scorecard,
   type Suite,
   TraceEventSchema,
+  classifyFailure,
   resolveHarnessSecrets,
 } from "@everdict/core";
 import type {
@@ -50,6 +50,7 @@ import { z } from "zod";
 import { executeCase } from "./execute-case.js";
 import type { JudgeRunner } from "./judge-runner.js";
 import { assertRuntimeTarget } from "./require-runtime.js";
+import { executeWithSpillover } from "./runtime-spillover.js";
 import { ScoringService } from "./scoring-service.js";
 import type { CaseExportStream } from "./trace-sink-service.js";
 
@@ -212,6 +213,9 @@ export interface ScorecardServiceDeps {
   };
   // Registered runtime ids for this tenant — powers runtime:"auto" (expand to every registered runtime and shard).
   runtimesFor?: (tenant: string) => Promise<string[]>;
+  // Per-runtime circuit breaker shared across batches — remembers a runtime outage so sharded batches spill
+  // straight to a healthy runtime instead of re-discovering the failure per case. Defaults to an internal instance.
+  breaker?: CircuitBreaker;
   buildTraceSource?: (cfg: TraceSourceConfig) => TraceSource; // trace source factory for pull-ingest (@everdict/trace)
   secretsFor?: (tenant: string) => Promise<Record<string, string>>; // tenant SecretStore values (inject judge-model keys)
   // For resolving {secretRef} in harness env — two tiers: shared + submitter (owner) personal secrets. Injected by scope.
@@ -264,10 +268,14 @@ export class ScorecardService {
   // abort only goes as far as "don't fire the remaining cases": force-killing already-fired backend jobs is a separate problem (follow-up).
   private readonly inFlight = new Map<string, AbortController>();
 
+  // Runtime health memory for sharded-batch spillover (docs/architecture/batch-resilience.md).
+  private readonly breaker: CircuitBreaker;
+
   constructor(private readonly deps: ScorecardServiceDeps) {
     this.newId = deps.newId ?? (() => crypto.randomUUID());
     this.now = deps.now ?? (() => new Date().toISOString());
     this.concurrency = deps.concurrency ?? 4;
+    this.breaker = deps.breaker ?? new CircuitBreaker();
     this.scoring = new ScoringService({
       ...(deps.judges ? { judges: deps.judges } : {}),
       ...(deps.judgeRunner ? { judgeRunner: deps.judgeRunner } : {}),
@@ -556,6 +564,7 @@ export class ScorecardService {
       concurrency: number;
       secretMap?: HarnessSecretMaps;
       caseIndex: Map<string, EvalCase>; // placement target already assigned (stable round-robin by selected index)
+      targets: string[]; // the shard list — spillover candidates (empty = no runtime selection)
       doneIds: Set<string>;
       stepChain: Promise<void>;
     }
@@ -620,6 +629,7 @@ export class ScorecardService {
       concurrency: orch.concurrency,
       ...(secretMap ? { secretMap } : {}),
       caseIndex,
+      targets,
       doneIds,
       stepChain: Promise.resolve(),
     };
@@ -697,13 +707,30 @@ export class ScorecardService {
       ...(ctx.judge ? { judge: ctx.judge } : {}),
     };
     let result: CaseResult | undefined;
+    let ranOn: string | undefined; // the runtime that actually ran the case (spillover provenance)
     for (let attempt = 0; ; attempt++) {
       try {
         const jobToRun =
           ctx.secretMap && baseJob.harnessSpec
             ? { ...baseJob, harnessSpec: resolveHarnessSecrets(baseJob.harnessSpec, ctx.secretMap) }
             : baseJob;
-        result = await executeCase(this.deps, ctx.owner, jobToRun);
+        // Spillover: same failover as the in-process loop — a retryable infra failure moves the case to the
+        // next healthy runtime of the shard list before the transient retry burns attempts on a dead cluster.
+        const outcome = await executeWithSpillover((j) => executeCase(this.deps, ctx.owner, j), jobToRun, {
+          targets: ctx.targets,
+          tenant: ctx.tenant,
+          breaker: this.breaker,
+          onSpill: (cid, from, to, code) => {
+            void this.appendBatchStep(id, {
+              phase: "case",
+              status: "info",
+              message: `${cid}: runtime spillover ${from} → ${to} (${code})`,
+              caseId: cid,
+            });
+          },
+        });
+        result = outcome.result;
+        ranOn = outcome.target;
         break;
       } catch (err) {
         const failure = classifyFailure(err, "dispatch");
@@ -730,7 +757,13 @@ export class ScorecardService {
     if (ctx.judges.length > 0) {
       await this.scoring.applyJudges(ctx.tenant, ctx.dataset, [result], ctx.judges).catch(() => {});
     }
-    if (runStore && childId) await runStore.update(childId, { status: "succeeded", result, updatedAt: this.now() });
+    if (runStore && childId)
+      await runStore.update(childId, {
+        status: "succeeded",
+        result,
+        ...(ranOn ? { runtime: ranOn } : {}),
+        updatedAt: this.now(),
+      });
     ctx.doneIds.add(caseId);
     const v = caseVerdict(result);
     const reason = caseReason(result);
@@ -1084,6 +1117,14 @@ export class ScorecardService {
     // — no plaintext remains in the registry spec; it's injected only at run time. If a referenced secret is missing, that case fails with a clear reason.
     const secretMap =
       harnessSpec && this.deps.scopedSecretsFor ? await this.deps.scopedSecretsFor(tenant, owner) : undefined;
+    // Shard list (comma-separated runtime list) — computed up front because the dispatch closure needs it for
+    // runtime spillover (a retryable infra failure moves the case to the next healthy runtime in this list).
+    const targets = runtime
+      ? runtime
+          .split(",")
+          .map((t) => t.trim())
+          .filter(Boolean)
+      : [];
     // Per-case dispatch (orchestration per case): admit (per-case since it's a batch) → enrich the job → pure executeCase → settle.
     // The pure execution (token resolve+attach → dispatch) is handled by executeCase (shared with a single run); settlement/child-run lifecycle is handled by the orchestration here.
     // When runStore is set, create a child run (RunRecord) per case so each case becomes an addressable run (trace/usage/provenance).
@@ -1123,11 +1164,32 @@ export class ScorecardService {
           secretMap && enriched.harnessSpec
             ? { ...enriched, harnessSpec: resolveHarnessSecrets(enriched.harnessSpec, secretMap) }
             : enriched;
-        const result = await executeCase(this.deps, owner, jobToRun);
+        // Spillover: a retryable infra failure on the assigned runtime moves the case to the next healthy runtime
+        // of the shard list; the shared breaker skips runtimes with a known outage entirely.
+        const { result, target: ranOn } = await executeWithSpillover(
+          (j) => executeCase(this.deps, owner, j),
+          jobToRun,
+          {
+            targets,
+            tenant,
+            breaker: this.breaker,
+            onSpill: (caseId, from, to, code) => {
+              pushStep("case", "info", `${caseId}: runtime spillover ${from} → ${to} (${code})`, caseId);
+              void flushSteps();
+            },
+          },
+        );
         // Cost attribution: managed=batch tenant · workspace-shared runner=that workspace (team resource) · personal runner=own-pays. Same as a single run.
         const bill = billingTenant(result, tenant);
         if (bill) this.deps.budget?.settle(bill, costOf(result));
-        if (runStore && childId) await runStore.update(childId, { status: "succeeded", result, updatedAt: this.now() });
+        // Provenance: record the runtime that ACTUALLY ran the case (differs from the assigned one after a spillover).
+        if (runStore && childId)
+          await runStore.update(childId, {
+            status: "succeeded",
+            result,
+            ...(ranOn ? { runtime: ranOn } : {}),
+            updatedAt: this.now(),
+          });
         return result;
       } catch (err) {
         if (runStore && childId) {
@@ -1149,12 +1211,6 @@ export class ScorecardService {
       // per-case failure isolation unchanged) — one 601-case batch can drain a Nomad pool and a K8s pool at once.
       // Seeded cases (already-finished results carried in by resume/retry) are excluded from dispatch entirely.
       const casesToRun = seed.length > 0 ? dataset.cases.filter((c) => !seededIds.has(c.id)) : dataset.cases;
-      const targets = runtime
-        ? runtime
-            .split(",")
-            .map((t) => t.trim())
-            .filter(Boolean)
-        : [];
       const cases =
         targets.length > 0
           ? casesToRun.map((c, i) => ({

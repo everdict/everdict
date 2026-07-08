@@ -81,6 +81,13 @@ describe("PgRunStore", () => {
     expect(rec?.status).toBe("succeeded");
   });
 
+  it("update persists a runtime patch (spillover provenance is not silently dropped)", async () => {
+    const { client, calls } = fakeClient(() => ({ rows: [{ ...ROW, runtime: "kind-local" }] }));
+    const rec = await new PgRunStore(client).update("r1", { runtime: "kind-local", updatedAt: "x" });
+    expect(calls[0]?.text).toMatch(/UPDATE everdict_runs SET runtime = \$1, updated_at = \$2 WHERE id = \$3/);
+    expect(rec?.runtime).toBe("kind-local");
+  });
+
   it("list → tenant filter + created_at DESC sort", async () => {
     const { client, calls } = fakeClient(() => ({ rows: [ROW] }));
     await new PgRunStore(client).list("acme");

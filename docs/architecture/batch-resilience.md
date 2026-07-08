@@ -83,6 +83,22 @@ starvation classifies as infra instead of poisoning pass rates.
 `placement.target`), so one 601-case batch drains a Nomad pool and a K8s pool at once. Live: 40 cases across
 nomad+kind in 49s, 100% pass.
 
+## Runtime spillover + circuit breaker
+
+A sharded batch survives a runtime dying MID-batch without human intervention: a retryable INFRA dispatch
+failure moves the case to the next healthy runtime of the same user-selected shard list (`executeWithSpillover`,
+both the in-process loop and the Temporal `runBatchCase` path). A per-runtime `CircuitBreaker`
+(`@everdict/backends`, keyed `tenant:runtimeId`, shared across batches) remembers the outage: after N
+consecutive infra failures (default 3) the circuit opens for a cooldown (default 30s) and later cases assigned
+to the dead runtime skip straight to a healthy one — no per-case re-discovery of the same outage. After the
+cooldown, exactly one probe goes through (half-open); success closes the circuit, failure re-arms it.
+
+What never spills: fatal infra (OOM — the same resources die anywhere), config, harness, and agent FAILs.
+Single-runtime batches pass through unchanged (the transient retry owns them — there is nowhere to spill to).
+Provenance follows the case: the child run's `runtime` is rewritten to the runtime that ACTUALLY ran it, and a
+`runtime spillover a → b (code)` progress step records each move. Live: dead-nomad+kind shard, 8 cases → 8/8
+pass, exactly 3 spill steps then breaker-open (the 4th dead-assigned case skipped silently to kind).
+
 ## Shared core
 
 All three paths run through one seeded batch loop (`track` refactored around

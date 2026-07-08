@@ -69,7 +69,7 @@ export class PgRunStore implements RunStore {
   }
 
   async update(id: string, patch: Partial<RunRecord>): Promise<RunRecord | undefined> {
-    // Only lifecycle fields are allowed to be updated (status/result/error/updatedAt).
+    // Only lifecycle fields are allowed to be updated (status/result/error/runtime/updatedAt).
     const sets: string[] = [];
     const vals: unknown[] = [];
     let i = 1;
@@ -84,6 +84,11 @@ export class PgRunStore implements RunStore {
     if (patch.error !== undefined) {
       sets.push(`error = $${i++}`);
       vals.push(JSON.stringify(patch.error));
+    }
+    // Spillover provenance — settle rewrites the assigned runtime to the one that actually ran the case.
+    if (patch.runtime !== undefined) {
+      sets.push(`runtime = $${i++}`);
+      vals.push(patch.runtime);
     }
     if (patch.updatedAt !== undefined) {
       sets.push(`updated_at = $${i++}`);
