@@ -135,6 +135,7 @@ export class RunService {
       harness: input.harness,
       tenant: input.tenant,
       meterUsage,
+      priority: "interactive", // a person is waiting on a single run — jumps ahead of batch fan-out in the queue
       ...(input.submittedBy ? { submittedBy: input.submittedBy } : {}),
       ...(harnessSpec ? { harnessSpec } : {}),
       ...(judge ? { judge } : {}),

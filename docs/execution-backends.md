@@ -91,6 +91,18 @@ At SaaS scale many users submit many cases against finite/elastic infra, so plac
   is dispatched the moment a slot frees (a dispatch settling re-pumps the queue). `maxQueueDepth` rejects
   with `RateLimitError` (429) when the queue is saturated. The scheduler avoids head-of-line blocking by
   scanning the fair-ordered queue for the first placeable job.
+- **priority classes** — `AgentJob.priority`: `"interactive"` (a person is waiting — single runs) is scanned
+  before `"batch"` (scorecard fan-out), with WFQ order preserved WITHIN each class, so a 3-case check never
+  sits behind a 601-case batch. RunService stamps interactive; the batch loops stamp batch; absent = batch-
+  equivalent. Live: on a quota-1 lane, a run submitted after 3 queued batch cases finished ahead of 2 of them.
+- **resource-aware admission** — a runtime may declare an envelope (`RuntimeSpec.maxConcurrent` +
+  `memoryBudgetMb` → `BackendCapacity.memoryBudgetMb`); the scheduler tracks in-flight harness-declared
+  memory (`resources.memoryMb`) per backend and admits a heavy job only where it fits. See
+  `docs/architecture/batch-resilience.md` for the live serialization proof.
+- **operator dials (env)** — `EVERDICT_TENANT_QUOTAS="acme=8,*=16"` / `EVERDICT_TENANT_WEIGHTS="acme=3,*=1"`
+  feed `tenantQuota`/`weightFor` (apps/api `scheduling-config.ts`; `*` = default for unlisted tenants,
+  malformed entries fail the boot loudly). Unset = unlimited quota, weight 1 — the machinery is always on;
+  these are just the dials. Cross-tenant fairness is operator-set, not workspace self-serve.
 - **wiring** — the Temporal `everdict worker` builds a `Scheduler` over its registry (replacing `Router`),
   and `suiteWorkflow` fans out with a bounded lane count so a large suite can't flood activity slots;
   the scheduler then does fine-grained per-cluster capacity gating + tenant fairness on top.

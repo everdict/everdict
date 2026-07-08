@@ -351,6 +351,33 @@ describe("Scheduler", () => {
     await Promise.all(p);
   });
 
+  it("an interactive job jumps ahead of earlier-queued batch jobs when a slot frees", async () => {
+    const b = new ControlledBackend("a", 1);
+    const sched = new Scheduler(new BackendRegistry().register("a", b));
+
+    const batchJob = (id: string): AgentJob => ({ ...tjob("acme", id), priority: "batch" });
+    const running = sched.dispatch(batchJob("b0")); // occupies the single slot
+    await flush();
+    const waiting = [batchJob("b1"), batchJob("b2")].map((j) => sched.dispatch(j));
+    await flush();
+    const interactive = sched.dispatch({ ...tjob("acme", "i1"), priority: "interactive" }); // queued LAST
+    await flush();
+    expect(sched.stats().queued).toBe(3);
+
+    b.releaseOne(); // slot frees → the interactive job must be picked, not the older batch jobs
+    await flush();
+    expect(b.dispatchedIds).toEqual(["b0", "i1"]);
+
+    b.releaseAll();
+    await flush();
+    b.releaseAll();
+    await flush();
+    b.releaseAll();
+    await flush();
+    await Promise.all([running, ...waiting, interactive]);
+    expect(b.dispatchedIds).toEqual(["b0", "i1", "b1", "b2"]); // batch order itself is preserved (WFQ within class)
+  });
+
   it("a heavy job routes to the backend whose memory envelope fits it", async () => {
     const small = new ControlledBackend("small", 10);
     small.memoryBudgetMb = 256;

@@ -116,6 +116,7 @@ import { RunnerService } from "./runner-service.js";
 import { RuntimeDispatcher } from "./runtime-dispatcher.js";
 import { makeRuntimeProber } from "./runtime-probe.js";
 import { ScheduleService } from "./schedule-service.js";
+import { parseTenantMap } from "./scheduling-config.js";
 import { ScorecardService } from "./scorecard-service.js";
 import { SelfHostedBackend } from "./self-hosted-backend.js";
 import { buildServer } from "./server.js";
@@ -188,7 +189,14 @@ async function main(): Promise<void> {
   // Policy (default): never register LocalBackend (unisolated in-process on the control-plane host) — every run must
   // target a registered tenant runtime or a self-hosted runner (self:<id>/self:ws). This is the default with no opt-in env.
   // (For dev/single-host in-process runs use apps/cli's `everdict run` — the API only does managed/remote execution.)
-  const scheduler = new Scheduler(backends);
+  // Operator fairness dials (docs/execution-backends.md): per-tenant concurrent caps + WFQ weights. Unset = the
+  // previous defaults (unlimited quota, weight 1) — the fairness machinery is always on; these are just the dials.
+  const tenantQuotas = parseTenantMap(process.env.EVERDICT_TENANT_QUOTAS, "EVERDICT_TENANT_QUOTAS");
+  const tenantWeights = parseTenantMap(process.env.EVERDICT_TENANT_WEIGHTS, "EVERDICT_TENANT_WEIGHTS");
+  const scheduler = new Scheduler(backends, {
+    ...(tenantQuotas ? { tenantQuota: (t: string) => tenantQuotas.get(t) ?? Number.POSITIVE_INFINITY } : {}),
+    ...(tenantWeights ? { weightFor: (t: string) => tenantWeights.get(t) ?? 1 } : {}),
+  });
   const budget = inMemoryBudget({ limitFor: budgetFromEnv() });
 
   // Self-hosted runner lease hub — parks self:<runnerId> jobs; the runner protocol (MCP, slice 4) leases/returns them.

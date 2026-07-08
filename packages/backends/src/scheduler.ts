@@ -158,7 +158,14 @@ export class Scheduler {
         placedAny = false;
         const slots = await this.freeSlots();
         // Scan in WFQ fair order, but skip jobs that can't be sent now due to quota/capacity (HOL avoidance).
-        for (const entry of this.queue.ordered()) {
+        // Priority classes first: interactive jobs (a person is waiting — single runs) jump ahead of batch
+        // fan-out, while the tenant-fair WFQ order is preserved WITHIN each class (stable partition).
+        const ordered = this.queue.ordered();
+        const scan = [
+          ...ordered.filter((e) => e.job.priority === "interactive"),
+          ...ordered.filter((e) => e.job.priority !== "interactive"),
+        ];
+        for (const entry of scan) {
           const tenant = tenantOf(entry.job);
           const quota = this.opts.tenantQuota?.(tenant) ?? Number.POSITIVE_INFINITY;
           if ((this.tenantInFlight.get(tenant) ?? 0) >= quota) continue; // tenant quota reached

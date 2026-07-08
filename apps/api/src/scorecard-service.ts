@@ -703,6 +703,7 @@ export class ScorecardService {
       evalCase,
       harness: { id: ctx.harnessId, version: ctx.harnessVersion },
       tenant: ctx.tenant,
+      priority: "batch", // fan-out work — yields the queue to interactive single runs
       ...(ctx.owner ? { submittedBy: ctx.owner } : {}),
       ...(ctx.harnessSpec ? { harnessSpec: ctx.harnessSpec } : {}),
       ...(ctx.judge ? { judge: ctx.judge } : {}),
@@ -1168,6 +1169,7 @@ export class ScorecardService {
       const enriched: AgentJob = {
         ...job,
         tenant,
+        priority: "batch", // fan-out work — yields the queue to interactive single runs
         // owner (submitter subject) — self-hosted runner dispatch-ownership check + lease-queue key (same as a single run).
         ...(owner ? { submittedBy: owner } : {}),
         ...(harnessSpec ? { harnessSpec } : {}),
