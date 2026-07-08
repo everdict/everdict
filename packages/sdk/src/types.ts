@@ -27,6 +27,7 @@ export interface EvaluateInput {
   judges?: Array<{ id: string; version?: string }>;
   runtime?: string; // placement.target (registered runtime id | self:*). Omit = control-plane default.
   poll?: { intervalMs?: number; timeoutMs?: number };
+  onProgress?: (record: ScorecardRecord) => void; // called on each poll with the latest record (status + steps)
 }
 
 // Per-metric aggregate the control plane returns (subset of the fields).
@@ -69,4 +70,57 @@ export interface Verdict {
   flakeRate?: number;
   summary: MetricSummary[];
   record: ScorecardRecord;
+}
+
+// Query for the leaderboard helper (GET /scorecards/leaderboard).
+export interface LeaderboardQuery {
+  dataset: string;
+  metric?: string; // default "judge" server-side
+  harness?: string;
+  model?: string;
+  judgeModel?: string;
+  window?: "latest" | "best";
+}
+
+export interface LeaderboardRow {
+  rank: number;
+  harness: { id: string; version: string };
+  model?: string;
+  scorecardId: string;
+  score: number | null;
+  passRate: number | null;
+  mean: number | null;
+  runs: number;
+  [k: string]: unknown;
+}
+export interface Leaderboard {
+  dataset: string;
+  metric: string;
+  window: "latest" | "best";
+  rows: LeaderboardRow[];
+}
+
+// A trial-aware per-case delta (present on the diff's statistical `trials` gate).
+export interface TrialCaseDelta {
+  caseId: string;
+  baselineRate: number;
+  candidateRate: number;
+  delta: number;
+  z: number;
+  significant: boolean;
+  [k: string]: unknown;
+}
+// baseline vs candidate diff. `trials` is present only when either side ran trials (the statistical gate).
+export interface ScorecardDiff {
+  baseline: string;
+  candidate: string;
+  metrics: Array<{ metric: string; baselineMean: number; candidateMean: number; delta: number }>;
+  regressions: Array<{ caseId: string; metric: string; delta: number; [k: string]: unknown }>;
+  improvements: Array<{ caseId: string; metric: string; delta: number; [k: string]: unknown }>;
+  trials?: {
+    zThreshold: number;
+    cases: TrialCaseDelta[];
+    regressions: TrialCaseDelta[];
+    improvements: TrialCaseDelta[];
+  };
 }

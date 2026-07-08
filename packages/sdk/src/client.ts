@@ -1,4 +1,15 @@
-import type { DatasetInput, EvaluateInput, HarnessInput, Ref, ScorecardRecord, SdkFetch, Verdict } from "./types.js";
+import type {
+  DatasetInput,
+  EvaluateInput,
+  HarnessInput,
+  Leaderboard,
+  LeaderboardQuery,
+  Ref,
+  ScorecardDiff,
+  ScorecardRecord,
+  SdkFetch,
+  Verdict,
+} from "./types.js";
 
 // A control-plane error (a {code,message} body from the API), carrying the HTTP status.
 export class EverdictError extends Error {
@@ -99,6 +110,25 @@ export class EverdictClient {
     return this.request("GET", `/scorecards/${encodeURIComponent(id)}`);
   }
 
+  // Compare two completed scorecards. When either ran trials, the result carries a statistically-gated `trials` diff
+  // (two-proportion z gate); `z` tunes the confidence threshold (default 1.96 ≈ 95%).
+  diff(baseline: string, candidate: string, opts?: { z?: number }): Promise<ScorecardDiff> {
+    const query = [`baseline=${encodeURIComponent(baseline)}`, `candidate=${encodeURIComponent(candidate)}`];
+    if (opts?.z !== undefined) query.push(`z=${encodeURIComponent(String(opts.z))}`);
+    return this.request("GET", `/scorecards/diff?${query.join("&")}`);
+  }
+
+  // Rank (harness × model) on one dataset by a metric (default judge). window: latest | best.
+  leaderboard(query: LeaderboardQuery): Promise<Leaderboard> {
+    const params = [`dataset=${encodeURIComponent(query.dataset)}`];
+    if (query.metric) params.push(`metric=${encodeURIComponent(query.metric)}`);
+    if (query.harness) params.push(`harness=${encodeURIComponent(query.harness)}`);
+    if (query.model) params.push(`model=${encodeURIComponent(query.model)}`);
+    if (query.judgeModel) params.push(`judgeModel=${encodeURIComponent(query.judgeModel)}`);
+    if (query.window) params.push(`window=${encodeURIComponent(query.window)}`);
+    return this.request("GET", `/scorecards/leaderboard?${params.join("&")}`);
+  }
+
   // One call: reproduce env + N trials + score → verdict. Registers inline specs, submits, polls to terminal, reduces.
   async evaluate(input: EvaluateInput): Promise<Verdict> {
     const dataset =
@@ -112,7 +142,10 @@ export class EverdictClient {
       ...(input.judges ? { judges: input.judges } : {}),
       ...(input.runtime ? { runtime: input.runtime } : {}),
     });
-    const record = await this.poll(submitted.id, input.poll);
+    const record = await this.poll(submitted.id, {
+      ...(input.poll ?? {}),
+      ...(input.onProgress ? { onProgress: input.onProgress } : {}),
+    });
     return {
       scorecardId: record.id,
       status: record.status,
@@ -130,13 +163,18 @@ export class EverdictClient {
   }
 
   // Poll GET /scorecards/:id until terminal (succeeded|failed|superseded). Injectable interval/timeout; a timeout throws.
-  async poll(id: string, opts?: { intervalMs?: number; timeoutMs?: number }): Promise<ScorecardRecord> {
+  // onProgress fires on every poll with the latest record (status + steps) — for live progress.
+  async poll(
+    id: string,
+    opts?: { intervalMs?: number; timeoutMs?: number; onProgress?: (record: ScorecardRecord) => void },
+  ): Promise<ScorecardRecord> {
     const interval = opts?.intervalMs ?? 2000;
     const timeout = opts?.timeoutMs ?? 30 * 60 * 1000;
     const terminal = new Set(["succeeded", "failed", "superseded"]);
     let waited = 0;
     for (;;) {
       const record = await this.getScorecard(id);
+      opts?.onProgress?.(record);
       if (terminal.has(record.status)) return record;
       if (waited >= timeout)
         throw new EverdictError(

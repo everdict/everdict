@@ -148,3 +148,56 @@ describe("EverdictClient constructor", () => {
     expect(() => new EverdictClient({ baseUrl: "http://x", apiKey: "", fetch: async () => res(200, {}) })).toThrow();
   });
 });
+
+describe("EverdictClient.evaluate progress", () => {
+  it("fires onProgress on every poll with the latest record", async () => {
+    const { fetch } = fakeFetch([
+      res(202, { id: "sc1", status: "queued" }),
+      res(200, { id: "sc1", status: "running" }),
+      res(200, { id: "sc1", status: "succeeded" }),
+    ]);
+    const seen: string[] = [];
+    await client(fetch).evaluate({
+      harness: "h@1",
+      dataset: "d@1",
+      poll: { intervalMs: 1 },
+      onProgress: (r) => seen.push(r.status),
+    });
+    expect(seen).toEqual(["running", "succeeded"]);
+  });
+});
+
+describe("EverdictClient.diff", () => {
+  it("builds the diff query (baseline/candidate/z) and returns the trial-aware diff", async () => {
+    const { fetch, calls } = fakeFetch([
+      res(200, {
+        baseline: "h@1",
+        candidate: "h@2",
+        metrics: [],
+        regressions: [],
+        improvements: [],
+        trials: {
+          zThreshold: 1.96,
+          cases: [],
+          regressions: [{ caseId: "c1", z: -3.1, significant: true }],
+          improvements: [],
+        },
+      }),
+    ]);
+    const diff = await client(fetch).diff("sc-a", "sc-b", { z: 2.58 });
+    expect(calls[0]?.method).toBe("GET");
+    expect(calls[0]?.url).toBe("http://cp.test/scorecards/diff?baseline=sc-a&candidate=sc-b&z=2.58");
+    expect(diff.trials?.regressions[0]?.caseId).toBe("c1");
+  });
+});
+
+describe("EverdictClient.leaderboard", () => {
+  it("builds the leaderboard query from the options", async () => {
+    const { fetch, calls } = fakeFetch([res(200, { dataset: "d", metric: "judge", window: "best", rows: [] })]);
+    const lb = await client(fetch).leaderboard({ dataset: "swe", metric: "tests_pass", window: "best", harness: "h" });
+    expect(calls[0]?.url).toBe(
+      "http://cp.test/scorecards/leaderboard?dataset=swe&metric=tests_pass&harness=h&window=best",
+    );
+    expect(lb.window).toBe("best");
+  });
+});
