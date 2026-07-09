@@ -1,6 +1,8 @@
 # Eval domain model — Dataset / Rubric / Grader split
 
-**Status: PROPOSED** (design SSOT; no slice implemented yet).
+**Status: SHIPPED (all five slices).** S1 `7d1d809` (multi-metric contract) · S2 `59f26fa` (promptTemplate +
+criteria) · S3 `1889fdb` (Rubric entity full stack) · S4 `8b17290` (script grader) · S5 `4edd577` (dataset
+purification). #4 (delivery) shipped earlier as `7d259c1`.
 Related: `docs/judges.md` · `docs/datasets.md` · `docs/scorecards.md` ·
 `docs/architecture/judge-placement-locality.md` · skills `evaluation` / `graders`.
 
@@ -100,16 +102,13 @@ weighted `judge:<judge-id>` overall, so `caseVerdict` authority ranking and exis
 
 ## Slices (each independently shippable)
 
-| Slice | Contents | Size |
+| Slice | Contents | Shipped |
 | --- | --- | --- |
-| **S1 multi-metric contract** | `Grader.grade → Score \| Score[]`; flatten at the collectors (`runCase`, topology `service-backend`, `ScoringService`/`JudgeRunner`, ingest). No schema/db change. | S |
-| **S2 judge prompt + criteria** | `renderJudgePrompt` + default template extraction; `ModelJudgeSpec.promptTemplate` (inline) + multi-criteria verdict parse → per-criterion scores (needs S1). | M |
-| **S3 Rubric entity** | `RubricRegistry` (in-mem/file/Pg) + migration + `POST/GET /rubrics` + MCP parity + web pages; `JudgeSpec.rubric` accepts a ref; `BundleSchema.rubrics[]`. | L |
-| **S4 script grader** | `script` kind: python/node, stdin context → stdout `Score[]`, sandboxed in the case compute or a grader image; classification `GRADER_FAILED` distinct from harness failure. | L |
-| **S5 dataset purification** | `EvalCase.expected` + scorecard-time `graders` plan (case plan = default); benchmark adapters emit `expected`; `answer-match`/judges read it. Existing datasets untouched (back-compat). | M |
-
-Recommended order: **S1 → S2 → S3 → S4 → S5** (S1 unblocks S2; S3 formalizes what S2 proves;
-S4/S5 are orthogonal after S1).
+| **S1 multi-metric contract** | `Grader.grade → Score \| Score[]` + `toScores`; flatten at the collectors (`safeGrade`, `runCase`, topology `service-backend`, control-plane collect, `JudgeRunner`, ingest). No schema/db change. | `7d1d809` |
+| **S2 judge prompt + criteria** | `promptTemplate` + `criteria[]` on BOTH judge kinds (schema superRefine enforces `{verdict_instruction}` + unique ids); custom template = raw-evidence placeholders, default template unchanged; multi-criteria verdict parse → `judge:<id>:<criterion>` + weighted overall. | `59f26fa` |
+| **S3 Rubric entity** | `RubricSpec`/`RubricRef` in core; `RubricRegistry` (in-mem/file/Pg, mig 0053) + `POST/GET /rubrics` + MCP parity + web pages (judge pages restored for the ref UI); `JudgeSpec.rubric: string \| ref` (judge's own fields override the rubric's; unresolved → skip); `BundleSchema.rubrics[]`. | `1889fdb` |
+| **S4 script grader** | `script` kind: python/node, full serialized `GradeContext` as a JSON file arg → last-JSON-on-stdout `Score \| Score[]`; sandboxed in the case compute (`needsCompute`); failures are explicit AppErrors → visible error scores. Dedicated grader image = follow-up. | `8b17290` |
+| **S5 dataset purification** | `EvalCase.expected` (answer-match fallback + judge `EXPECTED OUTPUT`/`{expected}`) + scorecard-time `graders` plan applied at submit AND every re-materialization point, persisted in `orchestration.graders`. Benchmark adapters emitting `expected` = follow-up. | `4edd577` |
 
 ## Back-compat invariants
 
