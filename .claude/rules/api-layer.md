@@ -7,11 +7,18 @@ paths: "apps/api/**"
 repository, domain-packaged, one-way call chain). See skill `api-layer` for the recipe;
 `docs/architecture/api-route-modularization.md` is the design SSOT.
 
-- **Domain folder = grouping; resource = slice.** `src/<domain>/` holds several *resource* slices, one per HTTP
-  resource (a domain is NOT one file): `<resource>.routes.ts` (HTTP registration) + `<resource>.mcp.ts` (the
-  same resource's MCP tools) + `<resource>.schema.ts` (request Zod DTOs + OpenAPI text, English — only when the
-  resource has bodies) + `<resource>-service.ts` (logic). When a domain accretes resources, promote a
-  **sub-domain folder** (e.g. `integrations/`).
+- **Folder = the domain entity; slice = that entity's vertical cut through both transports.** `src/<domain>/`
+  is one folder per business entity directly under src — the thing the URL prefix and the registries name
+  (run, scorecard, harness, dataset, judge, model, runtime, benchmark, bundle, schedule, view, secret, member,
+  workspace, profile, notification, comment, api-key, runner, github-app, mattermost, trace-sink,
+  image-registry, ci-link, queue, billing, …). Inside it live that entity's files: `<resource>.routes.ts`
+  (HTTP registration) + `<resource>.mcp.ts` (the same resource's MCP tools) + `<resource>.schema.ts` (request
+  Zod DTOs + OpenAPI text, English — only when the resource has bodies) + `<resource>-service.ts` (logic) +
+  collaborator services + colocated tests. A **sub-resource lives in its owner's folder** (harness-template in
+  `harness/`, invite in `member/`, workspace-runner in `runner/`). **NEVER an umbrella concern folder**
+  (`catalog/`, `integrations/` as grouping buckets) — the folder axis is the entity, not the concern.
+  Machinery that is not a transport domain keeps concern folders: `execution/` (the case-execution engine),
+  `ops/` (instrumentation/recovery), `lib/`, `oauth/`.
 - **One-way call chain — transport → service → store/registry.** Same direction always; a lower layer never
   learns about an upper one. A transport handler may call a store **directly only for envelope-free trivial
   CRUD** (secrets list/set/remove); the first composition, policy, or cross-store read promotes a service.

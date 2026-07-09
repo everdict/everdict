@@ -16,11 +16,14 @@
 > same idiom to the remaining monoliths: the MCP tool surface, the compound `ScorecardService`, and the
 > `main.ts` wiring.
 >
-> **Slicing refinement (locked):** the slice unit is the **resource, not the domain**. A domain folder groups
-> several resource modules (`catalog/` = dataset + judge + model + runtime + benchmark + bundle + harness …);
-> a large domain promotes **sub-domain folders** (`integrations/` beside `workspace/`). This follows the proven
-> layered-service idiom (thin controller → service → repository, domain-packaged, request-DTO files per
-> resource) reinterpreted for Fastify/TS — codified in `.claude/rules/api-layer.md` + skill `api-layer`.
+> **Grouping axis (corrected in Round 3, maintainer-directed):** the folder is the **domain entity**, and the
+> slice is that entity's **vertical cut** (routes + mcp + schema + service + tests). Rounds 1-2 grouped
+> resources under concern umbrellas (`catalog/` = dataset + judge + model + …) — a misreading of the proven
+> layered-service idiom, which packages **by business domain directly** (one package per entity; a
+> sub-resource nests in its owner's package; there is no "catalog"-style bucket). Round 3 regroups
+> accordingly: one `src/<entity>/` folder per entity; machinery that is not a transport domain keeps concern
+> folders (`execution/` engine, `ops/` instrumentation, `lib/`, `oauth/`). Codified in
+> `.claude/rules/api-layer.md` + skill `api-layer`.
 
 ## Problem
 
@@ -155,3 +158,40 @@ thread spaghetti), and the `buildServer` assembly. The empty-env boot contract
 (`scripts/live/empty-env-boot.mjs`) is main.ts's behavior gate.
 
 Gates per slice: scoped Biome + `pnpm --filter @everdict/api typecheck` + the full apps/api test suite + build.
+
+## Round 3 — regroup by domain entity (the corrected grouping axis)
+
+The concern umbrellas were the wrong folder axis (see the corrected note in the header). Regroup `src/` so
+each business entity owns one folder holding its whole vertical slice:
+
+```
+run/        run.routes|schema|mcp, run-service(+test), run-observability.routes
+scorecard/  scorecard.routes|schema|mcp, scorecard-service(+test), -batch/-ingest/-analytics/-shared,
+            temporal-batch-driver
+harness/    harness.routes|mcp, harness-service(+test), harness-pin-service(+test),
+            harness-template.routes|mcp, harness-seed.test
+dataset/    dataset.routes|schema|mcp, dataset-service          judge/    judge.routes|mcp
+model/      model.routes|mcp                                    runtime/  runtime.routes|mcp
+benchmark/  benchmark.routes|mcp, benchmark-service(+test)      bundle/   bundle.routes|mcp, bundle-service(+test)
+schedule/   schedule.routes|schema|mcp, schedule-service(+test), temporal-schedule-driver
+view/ secret/ notification/ comment/ api-key/                   (each: routes|schema|mcp[, service+test])
+member/     member.routes|mcp, invite.routes|mcp, membership-service(+tests incl. leave/list)
+workspace/  workspace.routes|mcp, workspace-service(+test), settings.routes|schema|mcp, workspace-mcp.test
+profile/    profile.routes|mcp, profile-service(+test), profile-mcp.test
+runner/     runner.routes|mcp, runner-service, workspace-runner.routes|mcp, runner-lease.mcp,
+            runner-hub(+test), github-runner-install(+test)
+github-app/ mattermost/ trace-sink/ image-registry/ ci-link/    (each integration entity owns its folder;
+            ci-link/ also takes evaluate-args.test — the /evaluate ChatOps parser test)
+queue/      queue.routes|mcp, queue-service(+test)              billing/  billing.routes|mcp
+execution/  MACHINERY ONLY: execute-case, scoring-service, judge-runner, runtime-dispatcher,
+            model-resolving-dispatcher, collect-trace, topology-backend, self-hosted-backend,
+            frontdoor-callback.routes, store-callback-rendezvous (all +tests)
+ops/        internal.routes, metrics, adaptive-concurrency, concurrency, oom-boost, runtime-probe,
+            runtime-spillover, shard-weights, speculation, startup-recovery, scheduling-config (+tests)
+lib/        + version-tag-service (spans harness/dataset/judge/runtime — cross-entity helper)
+root        server.ts, mcp.ts, mcp-context.ts, route-context.ts, main.ts, mcp.routes.ts,
+            server.test.ts, mcp.test.ts (composition-root suites)
+```
+
+Pure `git mv` + import-path repointing (compiler-guided); no code-content changes. The route/tool surface and
+all 636 tests stay identical; gates as above plus the empty-env boot contract.
