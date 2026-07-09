@@ -61,6 +61,7 @@ import {
 } from "./catalog/benchmark-service.js";
 import { registerBenchmarkRoutes } from "./catalog/benchmark.routes.js";
 import { BundleSchema, type BundleService, requiredActionsForBundle } from "./catalog/bundle-service.js";
+import { registerBundleRoutes } from "./catalog/bundle.routes.js";
 import { deleteDatasetVersion } from "./catalog/dataset-service.js";
 import { registerDatasetRoutes } from "./catalog/dataset.routes.js";
 import { RepinBodySchema, repinHarnessImages } from "./catalog/harness-pin-service.js";
@@ -975,22 +976,8 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   // benchmarks + benchmark-recipes → catalog/benchmark.routes.ts
   registerBenchmarkRoutes(app, deps);
 
-  // --- bundles (one-shot bundle apply: register harness+benchmark+dataset+runtime+judge/model from a single manifest) ---
-  // authZ = compose and enforce the required per-type gates derived from the bundle contents, with no new action (requiredActionsForBundle).
-  app.post("/bundles/apply", async (req, reply) => {
-    if (!deps.bundleService)
-      return reply.code(404).send({ code: "NOT_FOUND", message: "bundle service not configured" });
-    const principal = await resolvePrincipal(req, reply, deps);
-    if (!principal) return reply;
-    const parsed = BundleSchema.safeParse(req.body);
-    if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
-    try {
-      for (const action of requiredActionsForBundle(parsed.data)) gate(principal, action); // per-section gate
-      return reply.send(await deps.bundleService.apply(principal.workspace, principal.subject, parsed.data));
-    } catch (err) {
-      return sendError(reply, err);
-    }
-  });
+  // bundles → catalog/bundle.routes.ts
+  registerBundleRoutes(app, deps);
 
   // judges → catalog/judge.routes.ts
   registerJudgeRoutes(app, deps);
