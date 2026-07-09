@@ -65,15 +65,13 @@ export {
   type K8sApi,
   type K8sBackendOptions,
 } from "./k8s.js";
+export { BackendRegistry } from "./registry.js";
+export { Router } from "./router.js";
+export { buildRuntimeBackend, nomadRuntimeOptions, k8sRuntimeOptions } from "./build-runtime-backend.js";
 export {
-  BackendRegistry,
-  Router,
   buildRegistry,
-  buildRuntimeBackend,
-  nomadRuntimeOptions,
-  k8sRuntimeOptions,
   BackendConfigSchema,
   BackendsConfigSchema,
   type BackendConfig,
   type BackendsConfig,
-} from "./registry.js";
+} from "./config.js";
