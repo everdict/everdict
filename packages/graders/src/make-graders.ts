@@ -2,6 +2,7 @@ import { BadRequestError, type Grader, type GraderSpec, JudgeCriterionSchema } f
 import { AnswerMatchGrader, DomContainsGrader, UrlMatchesGrader } from "./browser-graders.js";
 import { CommandGrader } from "./command.js";
 import { type Judge, JudgeGrader } from "./judge.js";
+import { ScriptGrader } from "./script-grader.js";
 import { ScriptScoreGrader } from "./script-score.js";
 import { SweBenchGrader } from "./swe-bench.js";
 import { TestsPassGrader } from "./tests-pass.js";
@@ -45,6 +46,25 @@ export function makeGraders(specs: GraderSpec[], opts: { judge?: Judge } = {}): 
           ...(optStr(s.config?.metric) ? { metric: optStr(s.config?.metric) } : {}),
           ...(optStr(s.config?.id) ? { id: optStr(s.config?.id) } : {}),
         });
+      case "script": {
+        // Custom grader (user Python/TS code over the full serialized GradeContext) — see script-grader.ts for the contract.
+        const language = s.config?.language;
+        if (language !== "python" && language !== "node") {
+          throw new BadRequestError(
+            "BAD_REQUEST",
+            { grader: "script" },
+            'The script grader requires config.language: "python" | "node".',
+          );
+        }
+        return new ScriptGrader({
+          language,
+          ...(optStr(s.config?.code) ? { code: optStr(s.config?.code) } : {}),
+          ...(optStr(s.config?.entrypoint) ? { entrypoint: optStr(s.config?.entrypoint) } : {}),
+          ...(optStr(s.config?.cwd) ? { cwd: optStr(s.config?.cwd) } : {}),
+          ...(typeof s.config?.timeoutSec === "number" ? { timeoutSec: s.config.timeoutSec } : {}),
+          ...(optStr(s.config?.id) ? { id: optStr(s.config?.id) } : {}),
+        });
+      }
       case "swe-bench":
         return new SweBenchGrader({
           testPatch: String(s.config?.testPatch ?? ""),
