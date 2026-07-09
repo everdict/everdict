@@ -20,6 +20,8 @@ describe("importWebVoyager", () => {
     expect(c0?.tags).toEqual(["Example"]); // web_name → tag
     // answer → answer-match grader, + steps
     expect(c0?.graders).toEqual([{ id: "answer-match", config: { expect: "Example Domain" } }, { id: "steps" }]);
+    // answer is also case DATA — judges receive it as EXPECTED OUTPUT evidence (dataset purification).
+    expect(c0?.expected).toBe("Example Domain");
   });
 });
 
@@ -40,11 +42,13 @@ describe("importJsonl (generic mapping)", () => {
     expect(ds.cases[0]?.task).toBe("do X");
     expect(ds.cases[0]?.env).toEqual({ kind: "browser", startUrl: "https://x" });
     expect(ds.cases[0]?.graders).toEqual([{ id: "answer-match", config: { expect: "yes" } }]);
+    expect(ds.cases[0]?.expected).toBe("yes"); // reference answer emitted as row data too
   });
-  it("no startUrl/answer → a browser env with no startUrl + no graders", () => {
+  it("no startUrl/answer → a browser env with no startUrl + no graders (and no expected)", () => {
     const ds = importJsonl('{"id":"q1","q":"hi"}', { id: "d", version: "1" }, { idField: "id", taskField: "q" });
     expect(ds.cases[0]?.env).toEqual({ kind: "browser" });
     expect(ds.cases[0]?.graders).toEqual([]);
+    expect(ds.cases[0]?.expected).toBeUndefined();
   });
 });
 

@@ -68,8 +68,11 @@ export function rowToCase(row: Record<string, unknown>, i: number, meta: Dataset
     env = url ? { kind: "browser", startUrl: url } : { kind: "browser" };
   }
   const graders: GraderSpec[] = [];
-  if (m.answerField && str(row[m.answerField])) {
-    const config: Record<string, unknown> = { expect: str(row[m.answerField]) };
+  // The reference answer is case DATA (EvalCase.expected — judges get it as EXPECTED OUTPUT evidence) as well as
+  // the answer-match grader's expect config (kept for behavior parity; the config wins when both exist).
+  const expected = m.answerField ? str(row[m.answerField]) : "";
+  if (m.answerField && expected) {
+    const config: Record<string, unknown> = { expect: expected };
     if (m.answerMode === "exact") config.mode = "exact";
     graders.push({ id: "answer-match", config });
   }
@@ -83,6 +86,7 @@ export function rowToCase(row: Record<string, unknown>, i: number, meta: Dataset
     id: str(row[m.idField]) || `${meta.id}-${i}`,
     env,
     task: m.taskTemplate ? interpolateFields(m.taskTemplate, row) : str(row[m.taskField]),
+    ...(expected ? { expected } : {}),
     graders,
     ...(image ? { image } : {}),
     ...(m.placement ? { placement: { target: m.placement } } : {}),
