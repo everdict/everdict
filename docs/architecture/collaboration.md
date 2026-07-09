@@ -44,7 +44,7 @@ flowchart TD
     runner["@everdict/runner"]
   end
 
-  subgraph L3["dispatched unit (model B)"]
+  subgraph L3["dispatched unit (self-contained worker)"]
     agent["@everdict/agent"]
   end
 
@@ -511,7 +511,7 @@ flowchart LR
 
 ---
 
-## `@everdict/agent` — the dispatched unit (model B)
+## `@everdict/agent` — the dispatched unit (self-contained worker)
 
 **Role.** `runAgentJob(AgentJob) → CaseResult`: assemble concrete adapters from the job, run `runCase`,
 emit the result behind the `EVERDICT_RESULT` stdout sentinel.

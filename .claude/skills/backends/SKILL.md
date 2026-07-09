@@ -1,6 +1,6 @@
 ---
 name: backends
-description: How Everdict dispatches eval runs to execution backends (Nomad/K8s/Windows) — model B runner-agent, the AgentJob contract, isolation, secret injection. Use when adding or editing a Backend.
+description: How Everdict dispatches eval runs to execution backends (Nomad/K8s/Windows) — the dispatched runner-agent, the AgentJob contract, isolation, secret injection. Use when adding or editing a Backend.
 allowed-tools: Read, Grep, Glob, Edit, Write, Bash
 ---
 # Backends (placement layer)

@@ -4,7 +4,7 @@ paths: "packages/agent/**"
 # Agent rules (push)
 
 `@everdict/agent` is the runner-agent — the dispatched unit that runs a whole eval case inside an
-isolated job (model B). See skill `backends`.
+isolated job (the backend dispatches this worker; it does not run the harness itself). See skill `backends`.
 
 - Reconstruct harness + graders from the registry (`makeHarness`/`makeGraders`) using the
   `AgentJob` (`{evalCase, harness:{id,version}}`); graders carry config via `GraderSpec`.

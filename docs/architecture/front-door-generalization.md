@@ -66,7 +66,7 @@ spec data — not to attach Everdict to an external control-plane.
 
 ## Root cause — one abstraction is missing
 
-`dispatch` conflates two concerns that the rest of the codebase keeps separate (the "model B" doctrine:
+`dispatch` conflates two concerns that the rest of the codebase keeps separate (the placement/compute split:
 Backend = *placement*, Driver = *compute*):
 
 | Concern | Axis | Status |

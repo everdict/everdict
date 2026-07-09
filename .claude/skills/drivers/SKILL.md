@@ -7,7 +7,7 @@ allowed-tools: Read, Grep, Glob, Edit, Write, Bash
 
 A Driver = *compute inside an already-isolated unit*, NOT placement. It `provision`s a
 `ComputeHandle` on which the runner `exec`s the harness + graders, then always releases it.
-Isolation/placement is the Backend's job (see skill `backends`) — this is the other half of model B.
+Isolation/placement is the Backend's job (see skill `backends`) — this is the other half of that split (the Backend places, the Driver computes).
 
 ## Checklist
 1. Implement `Driver` (`packages/core/src/compute.ts`): `readonly id` + `provision(spec) → ComputeHandle`.
@@ -30,7 +30,7 @@ paths in (e.g. the runner's `~/.codex` login). Consumed by the managed `DockerBa
 (`packages/backends/src/docker-backend.ts`) AND the self-hosted runner's `docker` capability
 (`packages/runner-core/src/run-leased-job.ts`) — one `case.image` definition runs managed OR local identically.
 
-## Driver vs Backend (model B)
+## Driver vs Backend
 - **Backend** (`@everdict/backends`) = *placement*: dispatches the runner-agent job to an orchestrator; isolation
   = the orchestrator runtime. It never runs the harness itself (see skill `backends`).
 - **Driver** (`@everdict/drivers`) = *compute*: runs the harness/graders inside that already-isolated job.

@@ -3,7 +3,7 @@
 > **Status: design (doc-first). Three decisions locked with the user; implementation in slices.**
 > - **D1 — local topology = a new `DockerTopologyRuntime`.** Deploy the topology (services + dependency stores +
 >   per-case browser) on the **user's Docker daemon** — the orchestrator-agnostic sibling of
->   `NomadTopologyRuntime` / `K8sTopologyRuntime`. `ServiceTopologyBackend` is untouched (model B preserved).
+>   `NomadTopologyRuntime` / `K8sTopologyRuntime`. `ServiceTopologyBackend` is untouched (the dispatch-a-worker split preserved).
 > - **D2 — doc-first → slices.** `DockerTopologyRuntime` → runner kind-branch → capability gating + routing.
 > - **D3 — trace degrades to snapshot.** No local OTel/MLflow required — the topology already records a trace-fetch
 >   failure as one `error` event and grades on the browser snapshot. A local collector is optional (non-goal here).

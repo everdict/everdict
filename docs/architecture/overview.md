@@ -11,7 +11,7 @@ levels (whole-mesh + per-module) — see [`collaboration.md`](collaboration.md).
 | Environment (world acted on) | `Environment<EnvSnapshot>` | `RepoEnvironment` |
 | Driver (in-sandbox compute) | `Driver` / `ComputeHandle` | `LocalDriver` (dev / inside the agent) |
 | Grader (how we judge) | `Grader` | `tests-pass`, `cost`, `steps`, `latency` |
-| **Backend** (placement, model B) | `Backend` | `LocalBackend`, `NomadBackend` (K8s/Windows later) |
+| **Backend** (placement) | `Backend` | `LocalBackend`, `NomadBackend` (K8s/Windows later) |
 
 ## The eval loop (runs inside the dispatched agent)
 provision(Driver) → seed(Environment) → install+run(Harness)→normalized trace →

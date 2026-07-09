@@ -183,5 +183,5 @@ not formulas" hack. (Recalc-on-load may need LibreOffice's `RecalcOptOnLoad` reg
 
 [self-hosted-runner.md](./self-hosted-runner.md) · [self-hosted-service-runner.md](./self-hosted-service-runner.md)
 (the service-harness precedent for local Docker) · [execution-backends.md](../execution-backends.md) (Backend vs
-Driver, model B) · [runtimes.md](../runtimes.md) · `examples/bundles/spreadsheetbench/` · rules `drivers` /
+Driver) · [runtimes.md](../runtimes.md) · `examples/bundles/spreadsheetbench/` · rules `drivers` /
 `agent` / `backends`.

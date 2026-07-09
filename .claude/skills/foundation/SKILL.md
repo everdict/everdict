@@ -21,7 +21,7 @@ core ← { drivers · environments · harnesses · graders · trace } ← runner
 - `core` — contracts only (interfaces + Zod + errors). No I/O, no SDK. Dependency root.
 - `drivers` / `environments` / `harnesses` / `graders` — adapters; depend on `core` only.
 - `runner` — the eval loop (`runCase`); composes adapters.
-- `agent` — the dispatched unit (model B): runs `runCase` over `LocalDriver` inside an isolated job, emits `__EVERDICT_RESULT__`.
+- `agent` — the dispatched unit: a self-contained worker that runs `runCase` over `LocalDriver` inside an isolated job, emits `__EVERDICT_RESULT__`.
 - `backends` — placement + SaaS operational layer: `Backend.dispatch(AgentJob)` + `capacity()` → orchestrator (LocalBackend/NomadBackend; K8s/Windows later); `Router` (static) / `Scheduler` (capacity-aware + tenant-fair WFQ + quotas + backpressure) / `BackendRegistry`; `TrustZonePolicy` (per-tenant isolation), `SecretProvider`, `BudgetTracker`, `Autoscaler`.
 - `orchestrator` — durable control plane (Temporal): `DirectOrchestrator` / `TemporalOrchestrator` + worker.
 - `trace` — pull a harness trace from OTel/MLflow → `TraceEvent`. `topology` — service-topology harnesses
@@ -35,14 +35,14 @@ core ← { drivers · environments · harnesses · graders · trace } ← runner
 ## The spine: 4 in-sandbox concerns + 1 placement layer
 Harness (under test) · Environment (the world it acts on) · Driver (where it runs *in-sandbox*) · Grader (how we judge).
 A run = provision(Driver) → seed(Environment) → install+run(Harness)→trace → snapshot(Environment) → grade(Grader[]).
-**Backend** (placement, model B) wraps this: it dispatches the agent — which runs the above via
+**Backend** (placement) wraps this: it dispatches the agent — which runs the above via
 `LocalDriver` — to an orchestrator (Nomad/K8s/Windows) and parses the returned `CaseResult`.
 
 ## Topic map → references
-- `references/architecture.md` — packages, the eval loop, Backend/agent (model B), how new types plug in.
+- `references/architecture.md` — packages, the eval loop, Backend/agent, how new types plug in.
 - `references/conventions.md`  — naming, error model, null discipline, language policy, commits.
 - Contracts in detail → skill `core-contracts`. Adapters → skills `drivers` / `harnesses` / `graders`.
-- Distributed execution → skill `backends` (Backend vs Driver, AgentJob, model B).
+- Distributed execution → skill `backends` (Backend vs Driver, AgentJob).
 
 ## Critical rules (also pushed via .claude/rules)
 - No `any` / no `!` / no silent nullable defaults; Zod-validate boundaries.

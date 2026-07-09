@@ -9,7 +9,7 @@
 | `@everdict/harnesses` | `EvaluableHarness` impls — the agent under test | core |
 | `@everdict/graders` | `Grader` impls — scoring | core |
 | `@everdict/runner` | the eval loop (`runCase`) | core, drivers, environments, harnesses, graders |
-| `@everdict/agent` | dispatched unit (model B): runs runCase inside a job, emits result | core, runner, drivers, environments, harnesses, graders |
+| `@everdict/agent` | dispatched unit: a self-contained worker that runs runCase inside a job, emits result | core, runner, drivers, environments, harnesses, graders |
 | `@everdict/backends` | `Backend` impls (+ `capacity()`) — placement (Local, Nomad; K8s/Windows later) + `Router` (static) / `Scheduler` (capacity-aware + queue) / `BackendRegistry` | core, agent |
 | `@everdict/orchestrator` | durable control plane (Temporal): Direct/Temporal orchestrators + worker | core, backends, agent |
 | `@everdict/trace` | pull a harness trace from OTel/MLflow → `TraceEvent` | core |
@@ -37,7 +37,7 @@ runCase(case, { driver, environment, harness, graders, runCtx }):
     compute.dispose()
 ```
 
-## Distributed execution: Backend (placement) vs Driver (in-sandbox) — model B
+## Distributed execution: Backend (placement) vs Driver (in-sandbox)
 The control plane (outside the clusters) builds an `AgentJob` (`{evalCase, harness:{id,version}}`)
 and calls `Backend.dispatch(job)`. The Backend dispatches the **runner-agent** (`@everdict/agent`)
 into an isolated unit; the agent reconstructs the harness+graders from a registry

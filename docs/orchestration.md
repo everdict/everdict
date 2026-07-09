@@ -7,7 +7,7 @@ survive control-plane restarts and retry transient backend failures.
 - `DirectOrchestrator(dispatcher)` — runs in-process via a `Dispatcher` (Router or Scheduler). Simple; dies with the process.
 - `TemporalOrchestrator({address, taskQueue})` — client: starts a workflow and awaits its result.
 
-## Topology (model B + Temporal)
+## Topology (dispatched worker + Temporal)
 ```
 everdict run --orchestrator temporal  (client)  ── start workflow ──▶ Temporal Server
                                                                         │  task queue
