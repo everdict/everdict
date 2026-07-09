@@ -10,7 +10,15 @@ import {
   imageUsesRegistryHost,
   judgeEnv,
 } from "@everdict/core";
-import type { Backend, BackendCapacity, ProbeResult } from "./backend.js";
+import type {
+  Backend,
+  BackendCapacity,
+  Observable,
+  ProbeResult,
+  Probeable,
+  Recoverable,
+  Shellable,
+} from "./backend.js";
 import type { SecretProvider } from "./secrets.js";
 import type { TrustZonePolicy } from "./trust-zone.js";
 
@@ -196,7 +204,7 @@ function parseResult(stdout: string): CaseResult {
 
 // Model B: launch the runner-agent as a Nomad batch alloc, poll for completion, then
 // parse the CaseResult from the sentinel in the stdout log.
-export class NomadBackend implements Backend {
+export class NomadBackend implements Backend, Recoverable, Observable, Shellable, Probeable {
   readonly id = "nomad";
   private readonly http: NomadHttp;
 

@@ -3,13 +3,13 @@ import { promisify } from "node:util";
 import { runAgentJob } from "@everdict/agent";
 import type { AgentJob, CaseResult } from "@everdict/core";
 import { DockerDriver } from "@everdict/drivers";
-import type { Backend, BackendCapacity, ProbeResult } from "./backend.js";
+import type { Backend, BackendCapacity, ProbeResult, Probeable } from "./backend.js";
 
 const execFileAsync = promisify(execFile);
 
 // A single-host docker backend — runs the job in a container of the case's env image (EvalCase.image; e.g. the official SWE-bench prebuilt).
 // Rather than baking the agent into the image, it runs the harness+scoring inside via DockerDriver (environment container). Isolation is the docker container.
-export class DockerBackend implements Backend {
+export class DockerBackend implements Backend, Probeable {
   readonly id = "docker";
   private readonly driver: DockerDriver;
 

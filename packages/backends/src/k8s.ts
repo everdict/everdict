@@ -14,7 +14,7 @@ import {
   imageUsesRegistryHost,
   judgeEnv,
 } from "@everdict/core";
-import type { Backend, BackendCapacity, ProbeResult } from "./backend.js";
+import type { Backend, BackendCapacity, Observable, ProbeResult, Probeable, Recoverable } from "./backend.js";
 import type { SecretProvider } from "./secrets.js";
 import type { TrustZonePolicy } from "./trust-zone.js";
 
@@ -383,7 +383,7 @@ export async function materializeKubeconfig(yaml: string): Promise<{ path: strin
 
 // Model B: launch the runner-agent as a K8s Job, poll for completion, then parse the CaseResult from the sentinel in the pod log.
 // Isolation is namespace (per-tenant) + runtimeClassName (gVisor/kata). The K8s counterpart of NomadBackend.
-export class K8sBackend implements Backend {
+export class K8sBackend implements Backend, Recoverable, Observable, Probeable {
   readonly id = "k8s";
   // A long-lived api from an injected api (test) or non-kubeconfig auth (context/server/token).
   // With kubeconfig auth, build a fresh api from a temp kubeconfig per dispatch so the credential isn't left on disk for long (withApi).

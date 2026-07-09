@@ -1,10 +1,10 @@
 import { runAgentJob } from "@everdict/agent";
 import type { AgentJob, CaseResult } from "@everdict/core";
-import type { Backend, BackendCapacity, ProbeResult } from "./backend.js";
+import type { Backend, BackendCapacity, ProbeResult, Probeable } from "./backend.js";
 
 // For dev / single host — runs the job in the same process (no isolation).
 // claude uses this machine's subscription login.
-export class LocalBackend implements Backend {
+export class LocalBackend implements Backend, Probeable {
   readonly id = "local";
   // maxConcurrent may also be a function — lets it read slots that the autoscaler changes dynamically.
   constructor(private readonly maxConcurrent: number | (() => number) = 4) {}

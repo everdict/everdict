@@ -1,4 +1,4 @@
-import { type Backend, type ProbeResult, buildRuntimeBackend } from "@everdict/backends";
+import { type Backend, type ProbeResult, buildRuntimeBackend, isProbeable } from "@everdict/backends";
 import type { RuntimeSpec } from "@everdict/core";
 
 // Connection test result — checks only cluster reachability/auth, no job.
@@ -31,7 +31,7 @@ export function makeRuntimeProber(
     } catch (e) {
       return { kind: spec.kind, reachable: false, detail: e instanceof Error ? e.message : String(e) };
     }
-    if (!backend.probe)
+    if (!isProbeable(backend))
       return {
         kind: spec.kind,
         reachable: false,

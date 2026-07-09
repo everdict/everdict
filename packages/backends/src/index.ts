@@ -1,10 +1,20 @@
-export type {
-  Backend,
-  BackendCapacity,
-  Dispatcher,
-  ExecInContainer,
-  ExecStreamHandle,
-  ProbeResult,
+export {
+  type Backend,
+  type BackendCapacity,
+  type Dispatcher,
+  type ExecInContainer,
+  type ExecStreamHandle,
+  isObservable,
+  isProbeable,
+  isRecoverable,
+  isScreenCapturable,
+  isShellable,
+  type Observable,
+  type Probeable,
+  type ProbeResult,
+  type Recoverable,
+  type ScreenCapturable,
+  type Shellable,
 } from "./backend.js";
 export { LocalBackend } from "./local.js";
 export { DockerBackend } from "./docker-backend.js";

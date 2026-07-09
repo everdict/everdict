@@ -22,6 +22,12 @@ A Backend = placement: dispatch a runner-agent job to an orchestrator. See skill
 - Implement `Backend.dispatch(job: AgentJob): Promise<CaseResult>` AND `capacity(): Promise<{total, used}>`
   (`./backend`, `@everdict/core`). `capacity()` is what the `Scheduler` gates on — report a configured
   `maxConcurrent` as `total`; live-probe the cluster for `used` where cheap (else `used: 0`).
+- **Capabilities are typed, not optional methods.** `Backend` is the CORE (`dispatch`+`capacity`+`id`) — anything
+  beyond it (`Recoverable`=adopt/kill, `Observable`=logs/exec, `Shellable`=execStream, `ScreenCapturable`=
+  captureScreen, `Probeable`=probe) is a SEPARATE interface the backend also `implements`, and consumers narrow
+  with the matching guard (`isObservable(backend)`), never a `backend.logs?.()` feature-detect. Don't add a new
+  optional method to `Backend`; add/extend a capability interface + its `is*` guard. If a backend can't do a
+  capability, it simply doesn't implement that interface (e.g. K8s is not `Shellable` — no interactive stream exec).
 - Do NOT run the harness here. Dispatch the `@everdict/agent` image with the job as
   `EVERDICT_AGENT_JOB` (base64 JSON) env; the agent runs `runCase` and prints the `__EVERDICT_RESULT__`
   sentinel. Parse the CaseResult from job logs (v1) — keep transport swappable (HTTP callback later).

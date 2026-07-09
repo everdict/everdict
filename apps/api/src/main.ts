@@ -20,6 +20,10 @@ import {
   Scheduler,
   buildRuntimeBackend,
   inMemoryBudget,
+  isObservable,
+  isRecoverable,
+  isScreenCapturable,
+  isShellable,
 } from "@everdict/backends";
 import { type CaseResult, type RegistryAuth, type RuntimeSpec, classifyFailure } from "@everdict/core";
 import {
@@ -564,7 +568,7 @@ async function main(): Promise<void> {
   ): Promise<CaseResult | undefined> => {
     let adopted: CaseResult | undefined;
     await eachRuntimeBackend(tenant, runtimeList, async (backend) => {
-      if (!backend.adopt) return false;
+      if (!isRecoverable(backend)) return false;
       adopted = await backend.adopt(caseId).catch(() => undefined);
       return adopted !== undefined;
     });
@@ -579,7 +583,7 @@ async function main(): Promise<void> {
   ): Promise<string | undefined> => {
     let text: string | undefined;
     await eachRuntimeBackend(tenant, runtimeList, async (backend) => {
-      if (!backend.logs) return false;
+      if (!isObservable(backend)) return false;
       text = await backend.logs(caseId).catch(() => undefined);
       return text !== undefined;
     });
@@ -590,7 +594,7 @@ async function main(): Promise<void> {
   const openTerminalStreamFn = async (tenant: string, runtimeList: string | undefined, caseId: string) => {
     let handle: import("@everdict/backends").ExecStreamHandle | undefined;
     await eachRuntimeBackend(tenant, runtimeList, async (backend) => {
-      if (!backend.execStream) return false;
+      if (!isShellable(backend)) return false;
       handle = await backend.execStream(caseId).catch(() => undefined);
       return handle !== undefined;
     });
@@ -606,7 +610,7 @@ async function main(): Promise<void> {
   ): Promise<string | undefined> => {
     let b64: string | undefined;
     await eachRuntimeBackend(tenant, runtimeList, async (backend) => {
-      if (!backend.captureScreen) return false;
+      if (!isScreenCapturable(backend)) return false;
       b64 = await backend.captureScreen(runId).catch(() => undefined);
       return b64 !== undefined;
     });
@@ -622,7 +626,7 @@ async function main(): Promise<void> {
   ): Promise<{ stdout: string; stderr: string; exitCode: number } | undefined> => {
     let out: { stdout: string; stderr: string; exitCode: number } | undefined;
     await eachRuntimeBackend(tenant, runtimeList, async (backend) => {
-      if (!backend.exec) return false;
+      if (!isObservable(backend)) return false;
       out = await backend.exec(caseId, command).catch(() => undefined);
       return out !== undefined;
     });
@@ -660,7 +664,7 @@ async function main(): Promise<void> {
     adoptCase: adoptCaseFn,
     killCase: async (tenant, runtimeList, caseId) => {
       await eachRuntimeBackend(tenant, runtimeList, async (backend) => {
-        if (!backend.kill) return false;
+        if (!isRecoverable(backend)) return false;
         await backend.kill(caseId).catch(() => {});
         return false; // every runtime of the shard list gets the kill (the case may live on any of them)
       });

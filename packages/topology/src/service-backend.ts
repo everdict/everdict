@@ -1,4 +1,4 @@
-import type { Backend, BackendCapacity, TrustZonePolicy } from "@everdict/backends";
+import type { Backend, BackendCapacity, ScreenCapturable, TrustZonePolicy } from "@everdict/backends";
 import {
   type AgentJob,
   type CaseResult,
@@ -52,7 +52,7 @@ export interface ServiceTopologyBackendOptions {
 
 // The orchestrator-agnostic service-topology backend (a Backend implementation).
 // ensure warm topology → per-case browser → drive (front-door, per-run wiring) → collectTrace → observe → grade.
-export class ServiceTopologyBackend implements Backend {
+export class ServiceTopologyBackend implements Backend, ScreenCapturable {
   readonly id: string;
   constructor(private readonly opts: ServiceTopologyBackendOptions) {
     this.id = `service:${opts.runtime.id}`;

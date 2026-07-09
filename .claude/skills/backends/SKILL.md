@@ -9,11 +9,27 @@ Model B: control plane (outside clusters) → `Backend.dispatch(AgentJob)` → r
 whole `runCase` inside an isolated unit → emits CaseResult (`__EVERDICT_RESULT__` sentinel on stdout).
 
 ## Checklist
-1. Implement `Backend` (`packages/backends/src/backend.ts`).
-2. Dispatch the `@everdict/agent` image with the job as `EVERDICT_AGENT_JOB` (base64 JSON) env.
-3. Isolation = orchestrator runtime (Nomad `runtime`, K8s `runtimeClassName`) — config, not code.
-4. Inject auth (`collectAuthEnv()` from `@everdict/agent`) into the job env; never log it.
-5. Parse the CaseResult from the sentinel line; map failures to `UpstreamError`.
+1. Implement the CORE `Backend` (`packages/backends/src/backend.ts`) = `dispatch` + `capacity` only.
+2. Add capabilities as SEPARATE interfaces you also `implements`, never as optional methods on `Backend`
+   (see "Capabilities" below). A caller narrows with a guard (`isObservable(backend)`), not `backend.logs`.
+3. Dispatch the `@everdict/agent` image with the job as `EVERDICT_AGENT_JOB` (base64 JSON) env.
+4. Isolation = orchestrator runtime (Nomad `runtime`, K8s `runtimeClassName`) — config, not code.
+5. Inject auth (`collectAuthEnv()` from `@everdict/agent`) into the job env; never log it.
+6. Parse the CaseResult from the sentinel line; map failures to `UpstreamError`.
+
+## Capabilities (typed, not optional-method feature-detection)
+`Backend` is the CORE contract (`dispatch` + `capacity` + `id`). Everything else a backend can do is a distinct
+capability interface it *also* implements, narrowed by a guard — so the compiler tracks who can do what, instead of
+a runtime `backend.logs?.()` returning `undefined` on backends that never had it:
+- `Recoverable` (`adopt` + `kill`) — jobs that outlive the control plane (Nomad/K8s). In-process/pull backends omit it.
+- `Observable` (`logs` + `exec`) — live-progress read + one-shot exec (Nomad + K8s).
+- `Shellable` (`execStream`) — interactive PTY-over-WS. **Nomad only** (`nomad alloc exec -i`); K8s has no stream exec.
+- `ScreenCapturable` (`captureScreen(runId)`) — topology backends' per-RUN browser frame (keyed by runId, not caseId).
+- `Probeable` (`probe`) — connection test without a job.
+
+Guards live next to the interfaces: `isRecoverable` / `isObservable` / `isShellable` / `isScreenCapturable` /
+`isProbeable`. A consumer does `if (!isObservable(backend)) return; backend.logs(caseId)` — no `?.`, no `undefined`
+overload for "not implemented". If your new backend can't do a capability, just don't implement its interface.
 
 ## Reference impl
 `packages/backends/src/nomad.ts` — `buildNomadJob` (job spec) + `NomadBackend` (submit → poll

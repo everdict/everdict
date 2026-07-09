@@ -1,4 +1,4 @@
-import type { Backend, BackendCapacity, ProbeResult } from "@everdict/backends";
+import type { Backend, BackendCapacity, ProbeResult, Probeable } from "@everdict/backends";
 import type { AgentJob, CaseResult } from "@everdict/core";
 import { type RunnerHub, type SelfHostedKey, selfHostedBackendName } from "./runner-hub.js";
 
@@ -6,7 +6,7 @@ import { type RunnerHub, type SelfHostedKey, selfHostedBackendName } from "./run
 // returns a promise. When the runner client (everdict runner) leases it via MCP, runs it on its own machine, and reports
 // the result back, that promise resolves. The backend instance is registered per runner (= key) by RuntimeDispatcher.
 // Design: docs/architecture/self-hosted-runner.md.
-export class SelfHostedBackend implements Backend {
+export class SelfHostedBackend implements Backend, Probeable {
   readonly id: string;
   constructor(
     private readonly key: SelfHostedKey,
