@@ -147,7 +147,7 @@ pure and unit-tested per adapter (`packages/trace/src/*-sink.ts`).
 
 ## Pipeline wiring (apps/api)
 
-One service core, `TraceSinkService` (`apps/api/src/trace-sink-service.ts`):
+One service core, `TraceSinkService` (`apps/api/src/integrations/trace-sink-service.ts`):
 
 - **Settings CRUD** — `get/set/clear(workspace)`, mirror of `MattermostService` (view = name-refs
   only, safe to expose).

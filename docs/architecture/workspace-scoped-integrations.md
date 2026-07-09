@@ -124,7 +124,7 @@ against the submitter. New: reference the **workspace installation** instead. Th
 env.source = { git: "https://github.com/acme/api", ref: "main", via: "workspace-github-app" }
 ```
 
-`apps/api/src/execute-case.ts` gains one branch: if the source is a workspace-github-app source, mint
+`apps/api/src/execution/execute-case.ts` gains one branch: if the source is a workspace-github-app source, mint
 an installation token (by workspace) instead of pulling a personal connection token. The CI-link repo
 picker (`ci-link-service.ts listRepos`) switches from the personal token to the installation's
 `GET {apiBase}/installation/repositories`.
@@ -152,7 +152,7 @@ picker (`ci-link-service.ts listRepos`) switches from the personal token to the 
 - `DELETE /workspace/github-app/installations/{id}` → forget the record (actual uninstall is on
   GitHub). `POST /workspace/github-app/registrations` (GHE App creds) + `DELETE …/{host}`.
 - **BFF↔MCP parity:** every route has an MCP tool twin (`*_workspace_github_app`), one shared service
-  core (`apps/api/src/github-app-service.ts`).
+  core (`apps/api/src/integrations/github-app-service.ts`).
 
 ## Mattermost integration (full two-way)
 

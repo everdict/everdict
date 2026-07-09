@@ -1,7 +1,7 @@
 import { BadRequestError, type CaseResult } from "@everdict/core";
 import type { ScorecardExport, WorkspaceSettings, WorkspaceSettingsStore } from "@everdict/db";
 import type { TraceSink, TraceSinkCase, TraceSinkConfig } from "@everdict/trace";
-import { createLimiter } from "./concurrency.js";
+import { createLimiter } from "../ops/concurrency.js";
 
 // Workspace trace-sink integration — outbound config to export judged scorecard detail results to the team's observability
 // platform (MLflow/Langfuse/LangSmith/Phoenix). Sinks are registered as a plural roster keyed by name (a team may have several

@@ -90,7 +90,7 @@ repo↔service wiring. Competing products call this an "integration" and make it
   images from pins and throws `BadRequestError` on missing/mismatched pins. `POST /harnesses` registers instance
   versions; `GET /harnesses/:id/:version/instance` returns the raw instance (pins) — the web "edit → new version" flow
   already re-pins through this. A CI re-pin is the **headless version of an existing flow**, not a new concept.
-- **Submit-time seam exists** (`apps/api/src/scorecard-service.ts` ~154–168): `submit()` resolves the harness via
+- **Submit-time seam exists** (`apps/api/src/execution/scorecard-service.ts` ~154–168): `submit()` resolves the harness via
   `deps.harnesses.get(tenant, id, version)` before dispatch — the single point to apply an ephemeral pin override.
 - **Auth is composable** (`packages/auth`): `compositeAuthenticator([...])` already chains OIDC (jose
   `createRemoteJWKSet`), API-key (`ak_`), and runner (`rnr_`) authenticators; adding a 4th issuer is additive.

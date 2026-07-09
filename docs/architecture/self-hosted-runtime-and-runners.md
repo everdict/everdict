@@ -40,10 +40,10 @@ The shipped self-hosted runner nailed pull/lease/provenance/budget, but under th
 
 ## Current state — verified (`docs/architecture/self-hosted-runner.md`)
 
-- **Placement** — `runtime` selector → `placement.target`; `RuntimeDispatcher` (`apps/api/src/runtime-dispatcher.ts`)
+- **Placement** — `runtime` selector → `placement.target`; `RuntimeDispatcher` (`apps/api/src/execution/runtime-dispatcher.ts`)
   branches on `target.startsWith("self:")` → owner-checked lease queue; else resolves a workspace `RuntimeSpec` →
   `buildRuntimeBackend` → push via `Scheduler`.
-- **Pull/lease** — `SelfHostedBackend` + `RunnerHub` (`apps/api/src/runner-hub.ts`): lease queue keyed
+- **Pull/lease** — `SelfHostedBackend` + `RunnerHub` (`apps/api/src/runners/runner-hub.ts`): lease queue keyed
   `(owner, runnerId)` = `self:<owner>:<runnerId>` (cross-workspace). `RunnerHub.lease` is single-thread-atomic
   (concurrent `lease_job` never double-hands a job → the basis for many workers/runners sharing a queue).
 - **Worker** — `everdict runner --pair <rnr_…>` (`apps/cli` → `@everdict/runner-core` `runLeaseWorkers`): one process,

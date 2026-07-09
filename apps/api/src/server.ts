@@ -54,40 +54,44 @@ import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
 import { WebSocketServer } from "ws";
 import { z } from "zod";
-import { BenchmarkImportBodySchema, BenchmarkPreviewBodySchema, type BenchmarkService } from "./benchmark-service.js";
-import { type BudgetAdmin, BudgetLimitInputSchema } from "./budget-tracker.js";
-import { BundleSchema, type BundleService, requiredActionsForBundle } from "./bundle-service.js";
-import { type CiLinkService, UpsertCiLinkBodySchema } from "./ci-link-service.js";
-import { COMMENT_RESOURCE_TYPES, type CommentService } from "./comment-service.js";
-import { deleteDatasetVersion } from "./dataset-service.js";
-import type { GithubAppService } from "./github-app-service.js";
-import { installGithubWorkspaceRunner } from "./github-runner-install.js";
-import { RepinBodySchema, repinHarnessImages } from "./harness-pin-service.js";
-import { deleteHarnessVersion, harnessIsPrivate, harnessVisibleTo } from "./harness-service.js";
-import type { ImageRegistryService } from "./image-registry-service.js";
-import type { MattermostCommandService } from "./mattermost-command-service.js";
-import type { MattermostService } from "./mattermost-service.js";
-import { buildMcpServer } from "./mcp.js";
-import type { MembershipService } from "./membership-service.js";
-import type { NotificationService } from "./notification-service.js";
-import type { ProfileService } from "./profile-service.js";
-import type { QueueService } from "./queue-service.js";
-import type { RunService } from "./run-service.js";
-import type { RunnerHub } from "./runner-hub.js";
-import { PairRunnerBodySchema, RUNNER_CAPABILITIES, type RunnerService } from "./runner-service.js";
-import type { RuntimeProbeResult } from "./runtime-probe.js";
-import { type ScheduleService, isValidCron } from "./schedule-service.js";
+import {
+  BenchmarkImportBodySchema,
+  BenchmarkPreviewBodySchema,
+  type BenchmarkService,
+} from "./catalog/benchmark-service.js";
+import { BundleSchema, type BundleService, requiredActionsForBundle } from "./catalog/bundle-service.js";
+import { deleteDatasetVersion } from "./catalog/dataset-service.js";
+import { RepinBodySchema, repinHarnessImages } from "./catalog/harness-pin-service.js";
+import { deleteHarnessVersion, harnessIsPrivate, harnessVisibleTo } from "./catalog/harness-service.js";
+import { VersionTagsBodySchema, setVersionTags } from "./catalog/version-tag-service.js";
+import type { RunService } from "./execution/run-service.js";
 import {
   IngestScorecardBodySchema,
   PullIngestBodySchema,
   type ScorecardService,
   originSource,
-} from "./scorecard-service.js";
-import type { TerminalTicketStore } from "./terminal-ticket.js";
-import type { TraceSinkService } from "./trace-sink-service.js";
-import { VersionTagsBodySchema, setVersionTags } from "./version-tag-service.js";
-import type { ViewService } from "./view-service.js";
-import type { WorkspaceService } from "./workspace-service.js";
+} from "./execution/scorecard-service.js";
+import { type CiLinkService, UpsertCiLinkBodySchema } from "./integrations/ci-link-service.js";
+import type { GithubAppService } from "./integrations/github-app-service.js";
+import type { ImageRegistryService } from "./integrations/image-registry-service.js";
+import type { MattermostCommandService } from "./integrations/mattermost-command-service.js";
+import type { MattermostService } from "./integrations/mattermost-service.js";
+import type { TraceSinkService } from "./integrations/trace-sink-service.js";
+import { type BudgetAdmin, BudgetLimitInputSchema } from "./lib/budget-tracker.js";
+import type { TerminalTicketStore } from "./lib/terminal-ticket.js";
+import { buildMcpServer } from "./mcp.js";
+import type { QueueService } from "./ops/queue-service.js";
+import type { RuntimeProbeResult } from "./ops/runtime-probe.js";
+import { installGithubWorkspaceRunner } from "./runners/github-runner-install.js";
+import type { RunnerHub } from "./runners/runner-hub.js";
+import { PairRunnerBodySchema, RUNNER_CAPABILITIES, type RunnerService } from "./runners/runner-service.js";
+import { type ScheduleService, isValidCron } from "./scheduling/schedule-service.js";
+import { COMMENT_RESOURCE_TYPES, type CommentService } from "./workspace/comment-service.js";
+import type { MembershipService } from "./workspace/membership-service.js";
+import type { NotificationService } from "./workspace/notification-service.js";
+import type { ProfileService } from "./workspace/profile-service.js";
+import type { ViewService } from "./workspace/view-service.js";
+import type { WorkspaceService } from "./workspace/workspace-service.js";
 
 // Mark-notifications-read request — one of ids or all:true (empty = no-op → read:0).
 const ReadNotificationsBodySchema = z.object({

@@ -1,6 +1,6 @@
 import type { CaseResult, Dataset, EvalCase, GradeContext, JudgeRunConfig, JudgeSpec, Placement } from "@everdict/core";
 import type { JudgeRegistry } from "@everdict/registry";
-import { createLimiter } from "./concurrency.js";
+import { createLimiter } from "../ops/concurrency.js";
 import type { JudgeRunner } from "./judge-runner.js";
 
 // Scoring concern — pure evaluation over results (traces): apply judges · collect judge models.

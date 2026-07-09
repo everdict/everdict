@@ -14,8 +14,8 @@ import {
 import type { RunRecord, RunStore } from "@everdict/db";
 import { type ArtifactStore, offloadSnapshot } from "@everdict/storage";
 import type { TraceSource, TraceSourceConfig } from "@everdict/trace";
+import { assertRuntimeTarget } from "../lib/require-runtime.js";
 import { executeCase } from "./execute-case.js";
-import { assertRuntimeTarget } from "./require-runtime.js";
 
 // Where a running case's platform trace is accumulating (derived on read; docs/architecture/live-observability.md).
 export interface LiveTraceRef {

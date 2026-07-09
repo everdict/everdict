@@ -52,17 +52,17 @@ import {
 } from "@everdict/suite";
 import type { TraceSource, TraceSourceConfig } from "@everdict/trace";
 import { z } from "zod";
-import { AdaptiveConcurrencyGate } from "./adaptive-concurrency.js";
+import type { CaseExportStream } from "../integrations/trace-sink-service.js";
+import { assertRuntimeTarget } from "../lib/require-runtime.js";
+import { AdaptiveConcurrencyGate } from "../ops/adaptive-concurrency.js";
+import { OOM_ESCALATION_CAP_MB, executeWithOomBoost } from "../ops/oom-boost.js";
+import { executeWithSpillover } from "../ops/runtime-spillover.js";
+import { weightedTargets } from "../ops/shard-weights.js";
+import { SpeculationController } from "../ops/speculation.js";
 import { collectDeferredTrace } from "./collect-trace.js";
 import { executeCase } from "./execute-case.js";
 import type { JudgeRunner } from "./judge-runner.js";
-import { OOM_ESCALATION_CAP_MB, executeWithOomBoost } from "./oom-boost.js";
-import { assertRuntimeTarget } from "./require-runtime.js";
-import { executeWithSpillover } from "./runtime-spillover.js";
 import { ScoringService } from "./scoring-service.js";
-import { weightedTargets } from "./shard-weights.js";
-import { SpeculationController } from "./speculation.js";
-import type { CaseExportStream } from "./trace-sink-service.js";
 
 // One-line trace-sink export result — for progress-step messages (success/partial/failure + reason).
 function exportStepMessage(e: ScorecardExport): string {

@@ -38,12 +38,12 @@ transport-injectable core shared by `apps/cli` + `apps/desktop` (desktop shell =
 Registered `RuntimeSpec` kinds are **`local | nomad | k8s`** only. The `docker` and `topology` KINDS were removed (slice 5b): "single docker host" → the self-hosted runner's local docker (the `docker` capability), and topology → a `nomad|k8s` runtime carrying `traceSource` (the `topology` capability). `local` = control-plane host, dev-only. `authSecret`/`kubeconfigSecret` name a SecretStore key (never the value; stripped from alloc env).
 
 ## Tiers, pairing, dispatch (apps/api)
-- Pairing token `rnr_` (desktop `safeStorage`, or CLI `--pair`) → `runnerAuthenticator` maps it to `Principal{via:"runner"}` (`packages/auth/src/runner.ts`). Pair via `RunnerService.pair`/`pairWorkspace` (`apps/api/src/runner-service.ts`).
-- Targets (`runtime` selector → `placement.target`), routed by `RuntimeDispatcher` (`apps/api/src/runtime-dispatcher.ts`):
+- Pairing token `rnr_` (desktop `safeStorage`, or CLI `--pair`) → `runnerAuthenticator` maps it to `Principal{via:"runner"}` (`packages/auth/src/runner.ts`). Pair via `RunnerService.pair`/`pairWorkspace` (`apps/api/src/runners/runner-service.ts`).
+- Targets (`runtime` selector → `placement.target`), routed by `RuntimeDispatcher` (`apps/api/src/execution/runtime-dispatcher.ts`):
   - `self:<id>` — a personal-owned runner (owner=submitter, **owner-checked**, own-pays).
   - `self` — the personal pool (any of my runners; own-pays).
   - `self:ws:<id>` / `self:ws` — a workspace-shared runner / pool (owner=`ws:<tenant>` **derived from the job tenant** → membership IS access, cross-workspace structurally impossible; workspace-pays via `billingTenant`, `packages/backends/src/budget.ts`).
-- `RunnerHub` (`apps/api/src/runner-hub.ts`) — the lease queue; `POOL_RUNNER="*"` sentinel + `poolKeyFor(owner)` route pool jobs (a capability mismatch on the pool is **skipped**, not rejected, so a capable runner takes it); `requiredRunnerCapabilities(job)` adds `docker` for service harnesses. `SelfHostedBackend` (`apps/api/src/self-hosted-backend.ts`) stamps `provenance`.
+- `RunnerHub` (`apps/api/src/runners/runner-hub.ts`) — the lease queue; `POOL_RUNNER="*"` sentinel + `poolKeyFor(owner)` route pool jobs (a capability mismatch on the pool is **skipped**, not rejected, so a capable runner takes it); `requiredRunnerCapabilities(job)` adds `docker` for service harnesses. `SelfHostedBackend` (`apps/api/src/execution/self-hosted-backend.ts`) stamps `provenance`.
 - **Ownership precedent**: personal ownership (`owner=subject`, no role gate) — originally mirrored the now-removed Connected accounts; the pattern persists for personal runners + personal API keys.
 
 ## `everdict runner` (`apps/cli/src/main.ts` `runnerCommand`)

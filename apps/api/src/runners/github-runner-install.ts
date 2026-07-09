@@ -1,6 +1,6 @@
 import { BadRequestError } from "@everdict/core";
 import type { RunnerMeta } from "@everdict/db";
-import type { CiLinkService } from "./ci-link-service.js";
+import type { CiLinkService } from "../integrations/ci-link-service.js";
 import type { RunnerService } from "./runner-service.js";
 
 // GitHub Actions self-hosted runner self-registration (design doc §4) — one admin action stands up **two workers** on a build server:

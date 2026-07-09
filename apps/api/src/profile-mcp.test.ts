@@ -10,10 +10,10 @@ import {
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { describe, expect, it } from "vitest";
+import { RunService } from "./execution/run-service.js";
 import { type McpDeps, buildMcpServer } from "./mcp.js";
-import { MembershipService } from "./membership-service.js";
-import { ProfileService } from "./profile-service.js";
-import { RunService } from "./run-service.js";
+import { MembershipService } from "./workspace/membership-service.js";
+import { ProfileService } from "./workspace/profile-service.js";
 
 const result: CaseResult = {
   caseId: "c1",

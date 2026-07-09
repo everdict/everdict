@@ -159,7 +159,7 @@ workspace-scoped reads, `datasets:write` gating, `409`/`CONFLICT` on the immutab
 
 `validate` is a dry-run: schema + this workspace's existing versions/conflict, no write. `version` may be
 `latest` (except `delete`, which **requires an exact version** — it removes exactly one). The shared
-`deleteDatasetVersion` (`apps/api/src/dataset-service.ts`) is the single authz core both transports call (no
+`deleteDatasetVersion` (`apps/api/src/catalog/dataset-service.ts`) is the single authz core both transports call (no
 fork): `creatorOf` → `404` if not owned/live, then creator-or-admin gate → `403`/`FORBIDDEN`, then `softDelete`.
 Other-workspace reads → `404`/`NOT_FOUND` (no existence leak). See `docs/api.md`, `docs/mcp.md`,
 `docs/web.md`, `docs/tenancy.md`.

@@ -46,7 +46,7 @@ automated regression monitoring with near-zero new analytics code.
 
 ## Current state — verified
 
-- **Trigger is one call** — `ScorecardService.submit(RunScorecardInput)` (`apps/api/src/scorecard-service.ts`)
+- **Trigger is one call** — `ScorecardService.submit(RunScorecardInput)` (`apps/api/src/execution/scorecard-service.ts`)
   → `queued` record → async batch via the in-process **`dispatcher`** (Scheduler/Router).
 - **Scorecards do NOT go through Temporal today.** `scorecardService` holds a `Dispatcher` and never touches the
   `Orchestrator`. (Single runs via `RunService` *can* use the Orchestrator; scorecards don't.)

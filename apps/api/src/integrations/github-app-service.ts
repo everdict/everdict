@@ -6,8 +6,8 @@ import {
   generateOAuthState,
 } from "@everdict/db";
 import { z } from "zod";
-import { getInstallation, mintInstallationToken } from "./oauth/github-app.js";
-import { oauthFetchJson } from "./oauth/provider.js";
+import { getInstallation, mintInstallationToken } from "../oauth/github-app.js";
+import { oauthFetchJson } from "../oauth/provider.js";
 
 // Workspace-owned GitHub App integration service — replaces personal Connected accounts (OAuth tokens).
 // Org install → chosen repos → a workspace-owned installation. github.com App = operator env (config.githubCom);

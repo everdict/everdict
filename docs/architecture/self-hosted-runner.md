@@ -69,7 +69,7 @@ box, identity, and bill.
   return contract. The push path scrapes `__EVERDICT_RESULT__` from logs; the pull path posts `CaseResult` JSON
   directly (Zod-validated at the MCP boundary) — cleaner, no sentinel.
 - **Placement selection** — a scorecard run's `runtime` selector sets `placement.target` on every case
-  (`apps/api/src/scorecard-service.ts`); `RuntimeDispatcher` (`apps/api/src/runtime-dispatcher.ts`) resolves
+  (`apps/api/src/execution/scorecard-service.ts`); `RuntimeDispatcher` (`apps/api/src/execution/runtime-dispatcher.ts`) resolves
   `placement.target` → tenant `RuntimeSpec` → live `Backend`, then routes through the global `Scheduler` so
   **fairness/budget/capacity/isolation are preserved**. We reuse this seam: a self-hosted target is just
   another `placement.target` value.

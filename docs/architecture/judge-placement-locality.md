@@ -37,19 +37,19 @@ decision, so they ship as one coherent design.
 ## Current state — verified
 
 ### Judge dispatch has no placement (but rides the same dispatcher as a run)
-`apps/api/src/judge-runner.ts:76-81` builds the harness judge's `AgentJob` with **no `evalCase.placement`**, then
+`apps/api/src/execution/judge-runner.ts:76-81` builds the harness judge's `AgentJob` with **no `evalCase.placement`**, then
 dispatches via `DefaultJudgeRunnerDeps.dispatch` — documented as *"same path as a single run"* (the same
 `RuntimeDispatcher` the scorecard run uses). So **threading `placement.target` is sufficient to route a judge** —
 no new dispatch path.
 
-The scorecard run already does exactly this (`apps/api/src/scorecard-service.ts:308-311`):
+The scorecard run already does exactly this (`apps/api/src/execution/scorecard-service.ts:308-311`):
 ```ts
 const cases = runtime
   ? dataset.cases.map((c) => ({ ...c, placement: { ...c.placement, target: runtime } }))
   : dataset.cases;
 ```
 `RuntimeDispatcher.dispatch` then resolves `placement.target` → tenant `RuntimeSpec` → `Backend`
-(`apps/api/src/runtime-dispatcher.ts`). `PlacementSchema = { target?, os?, isolation? }`
+(`apps/api/src/execution/runtime-dispatcher.ts`). `PlacementSchema = { target?, os?, isolation? }`
 (`packages/core/src/execution/eval-case.ts`).
 
 ### Co-location gotcha: the judge's `ctx.case` is the *original* case, not the run-placed one
@@ -170,8 +170,8 @@ dispatcher already resolves it. D3 is the only new core surface (one optional `J
 
 - `packages/core/src/harness/judge-spec.ts` — `HarnessJudgeSpecSchema.runtime?` (slice 1).
 - `packages/core/src/harness/harness-spec.ts` + `harness-template.ts` — `TopologyTarget.delivery?` + template mirror (slice 2).
-- `apps/api/src/scorecard-service.ts` — thread producing-run placement into `applyJudges` (slice 1).
-- `apps/api/src/judge-runner.ts` — co-locate/override placement on the judge `AgentJob` (slice 1).
+- `apps/api/src/execution/scorecard-service.ts` — thread producing-run placement into `applyJudges` (slice 1).
+- `apps/api/src/execution/judge-runner.ts` — co-locate/override placement on the judge `AgentJob` (slice 1).
 - `apps/api/src/server.ts` + `mcp.ts` — judge `runtime` field validated against the runtime registry; **BFF↔MCP
   parity** (slice 1).
 - `apps/web/src/features/register-judge/*` — runtime selector on the judge form (slice 1).

@@ -17,12 +17,12 @@ dataset×harness → `Scorecard` + summary via `runSuite`. Regression = `diffSco
 5. External model/HTTP failure in a transport → `UpstreamError` (never raw).
 
 ## Reference impl
-`apps/api/src/scorecard-service.ts` — the batch lifecycle: dataset resolve (404) → `queued` record (202)
+`apps/api/src/execution/scorecard-service.ts` — the batch lifecycle: dataset resolve (404) → `queued` record (202)
 → `runSuite` (per-case child runs, admit/settle budget, cooperative `AbortSignal` supersede) with **streaming
 judges** (each case is pushed into `ScoringService.createJudgeStream` from `onResult` the moment it completes —
 bounded case-axis parallelism, deterministic per-case judge order; the `judges` phase after dispatch is just
 `settle()`, the join) → offload → aggregate (`summarizeScorecard`+`scorecardModels`) → persist. Scoring is
-split out to `apps/api/src/scoring-service.ts` (`ScoringService.createJudgeStream`/`applyJudges`(=push-all+settle,
+split out to `apps/api/src/execution/scoring-service.ts` (`ScoringService.createJudgeStream`/`applyJudges`(=push-all+settle,
 used by ingest)/`collectJudgeModels`). See `docs/architecture/streaming-case-pipeline.md`.
 
 ## Scoring model — Grader-only (recently consolidated — IMPORTANT)
@@ -45,7 +45,7 @@ testable) from an injected **transport** `JudgeCompletion`: `anthropicComplete` 
 trace via `traceToText`). `JudgeGrader` (`packages/graders/src/judge.ts`) wraps it; `useScreenshot` feeds the
 snapshot to a VLM. Judges are user-registered `model`|`harness` `JudgeSpec`s (`@everdict/registry`). The control
 plane builds the right transport from the spec + the tenant's SecretStore key/dispatcher:
-`apps/api/src/judge-runner.ts` `defaultJudgeRunner` (`ANTHROPIC_API_KEY`/`OPENAI_API_KEY`, model-registry
+`apps/api/src/execution/judge-runner.ts` `defaultJudgeRunner` (`ANTHROPIC_API_KEY`/`OPENAI_API_KEY`, model-registry
 resolve, missing key ⇒ explicit `skip` score, never silent). Score metric = `judge:<id>`.
 
 ## Batch aggregation, regression & leaderboard
@@ -80,12 +80,12 @@ whose `source.kind` equals the sink kind **attaches scores to the original trace
 `runs[{caseId,runId}]` mapping flows through as `attach`. SSOT `docs/architecture/trace-sink.md` + rule `trace`.
 
 ## Saved Views
-`apps/api/src/view-service.ts` + `packages/db/src/results/view-store.ts` — private|workspace saved scorecard-analysis
+`apps/api/src/workspace/view-service.ts` + `packages/db/src/results/view-store.ts` — private|workspace saved scorecard-analysis
 lenses (opaque `config`, live re-run). AuthZ **reuses** `scorecards:read` (read) / `scorecards:run` (write) —
 no new action; edit/delete = owner or admin. See `docs/architecture/scorecard-analysis-views.md`.
 
 ## Execution/scoring/orchestration separation
-Three concerns stay split: `apps/api/src/execute-case.ts` (`executeCase` = pure exec: token resolve + attach +
+Three concerns stay split: `apps/api/src/execution/execute-case.ts` (`executeCase` = pure exec: token resolve + attach +
 dispatch) · `ScoringService` (scoring on a trace) · the services (`ScorecardService`/`RunService` orchestrate
 lifecycle, budget, child runs). Live batch and ingest share the SAME scoring path. See
 `docs/architecture/execution-scoring-orchestration.md`.

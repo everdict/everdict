@@ -1,7 +1,7 @@
 import { AppError } from "@everdict/core";
 import { InMemoryUserProfileStore, InMemoryWorkspaceInviteStore, InMemoryWorkspaceStore } from "@everdict/db";
 import { describe, expect, it } from "vitest";
-import { MembershipService } from "./membership-service.js";
+import { MembershipService } from "./workspace/membership-service.js";
 
 async function seed() {
   const store = new InMemoryWorkspaceStore();

@@ -1,5 +1,5 @@
 import type { RunStore, ScorecardStore } from "@everdict/db";
-import type { ScheduleRecordWithNext } from "./schedule-service.js";
+import type { ScheduleRecordWithNext } from "../scheduling/schedule-service.js";
 
 // Work queue snapshot — "what is running/waiting where (which runtime) right now, and what's next" on one screen.
 // The unit is batch=1 item (a scorecard, with progress) + standalone run=1 item (child runs are folded into the batch's progress — a design decision).

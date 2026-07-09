@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { BadRequestError, ConflictError, ForbiddenError, NotFoundError } from "@everdict/core";
 import type { WorkspaceRecord, WorkspaceStore, WorkspaceWithRole } from "@everdict/db";
-import { validateImageRef } from "./image-ref.js";
+import { validateImageRef } from "../lib/image-ref.js";
 
 // Service core for self-serve workspace membership — shared by the HTTP route and the MCP tool (parity: one logic, two transports).
 // Operates on the authenticated subject (no workspace-internal role gate — creating a new workspace is self-serve, open to anyone).

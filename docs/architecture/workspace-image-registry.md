@@ -113,7 +113,7 @@ instance/harness registration responses gain `imageWarnings` listing pins whose 
 
 ## Surface (BFF↔MCP parity, one service core)
 
-`apps/api/src/image-registry-service.ts` (`ImageRegistryService`), routes in `server.ts`,
+`apps/api/src/integrations/image-registry-service.ts` (`ImageRegistryService`), routes in `server.ts`,
 tool twins in `mcp.ts`:
 
 | HTTP | MCP tool | Gate |

@@ -31,37 +31,41 @@ import type {
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
-import { BenchmarkImportBodySchema, BenchmarkPreviewBodySchema, type BenchmarkService } from "./benchmark-service.js";
-import { type BudgetAdmin, BudgetLimitInputSchema } from "./budget-tracker.js";
-import { BundleSchema, type BundleService, requiredActionsForBundle } from "./bundle-service.js";
-import type { CiLinkService } from "./ci-link-service.js";
-import { COMMENT_RESOURCE_TYPES, type CommentService } from "./comment-service.js";
-import { deleteDatasetVersion } from "./dataset-service.js";
-import type { GithubAppService } from "./github-app-service.js";
-import { installGithubWorkspaceRunner } from "./github-runner-install.js";
-import { repinHarnessImages } from "./harness-pin-service.js";
-import { deleteHarnessVersion, harnessIsPrivate, harnessVisibleTo } from "./harness-service.js";
-import type { ImageRegistryService } from "./image-registry-service.js";
-import type { MattermostService } from "./mattermost-service.js";
-import type { MembershipService } from "./membership-service.js";
-import type { NotificationService } from "./notification-service.js";
-import type { ProfileService } from "./profile-service.js";
-import type { QueueService } from "./queue-service.js";
-import type { RunService } from "./run-service.js";
-import type { RunnerHub, SelfHostedKey } from "./runner-hub.js";
-import { RUNNER_CAPABILITIES, type RunnerService } from "./runner-service.js";
-import type { RuntimeProbeResult } from "./runtime-probe.js";
-import type { ScheduleService, UpdateScheduleInput } from "./schedule-service.js";
+import {
+  BenchmarkImportBodySchema,
+  BenchmarkPreviewBodySchema,
+  type BenchmarkService,
+} from "./catalog/benchmark-service.js";
+import { BundleSchema, type BundleService, requiredActionsForBundle } from "./catalog/bundle-service.js";
+import { deleteDatasetVersion } from "./catalog/dataset-service.js";
+import { repinHarnessImages } from "./catalog/harness-pin-service.js";
+import { deleteHarnessVersion, harnessIsPrivate, harnessVisibleTo } from "./catalog/harness-service.js";
+import { setVersionTags } from "./catalog/version-tag-service.js";
+import type { RunService } from "./execution/run-service.js";
 import {
   IngestScorecardBodySchema,
   PullIngestBodySchema,
   type ScorecardService,
   originSource,
-} from "./scorecard-service.js";
-import type { TraceSinkService } from "./trace-sink-service.js";
-import { setVersionTags } from "./version-tag-service.js";
-import type { UpdateViewInput, ViewService } from "./view-service.js";
-import type { WorkspaceService } from "./workspace-service.js";
+} from "./execution/scorecard-service.js";
+import type { CiLinkService } from "./integrations/ci-link-service.js";
+import type { GithubAppService } from "./integrations/github-app-service.js";
+import type { ImageRegistryService } from "./integrations/image-registry-service.js";
+import type { MattermostService } from "./integrations/mattermost-service.js";
+import type { TraceSinkService } from "./integrations/trace-sink-service.js";
+import { type BudgetAdmin, BudgetLimitInputSchema } from "./lib/budget-tracker.js";
+import type { QueueService } from "./ops/queue-service.js";
+import type { RuntimeProbeResult } from "./ops/runtime-probe.js";
+import { installGithubWorkspaceRunner } from "./runners/github-runner-install.js";
+import type { RunnerHub, SelfHostedKey } from "./runners/runner-hub.js";
+import { RUNNER_CAPABILITIES, type RunnerService } from "./runners/runner-service.js";
+import type { ScheduleService, UpdateScheduleInput } from "./scheduling/schedule-service.js";
+import { COMMENT_RESOURCE_TYPES, type CommentService } from "./workspace/comment-service.js";
+import type { MembershipService } from "./workspace/membership-service.js";
+import type { NotificationService } from "./workspace/notification-service.js";
+import type { ProfileService } from "./workspace/profile-service.js";
+import type { UpdateViewInput, ViewService } from "./workspace/view-service.js";
+import type { WorkspaceService } from "./workspace/workspace-service.js";
 
 // MCP tool surface — the "agent transport" sharing the same service core as the HTTP routes.
 // Each tool is authorized by the Principal's roles and scoped to workspace (the control plane is the auth/authz authority).

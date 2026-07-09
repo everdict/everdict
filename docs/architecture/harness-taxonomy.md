@@ -174,10 +174,10 @@ The in-memory + Pg `HarnessInstanceRegistry` (Phase 2) already exposes `get()/ge
 **resolved** `HarnessSpec`, so the read bucket is a **zero-signature drop-in**.
 
 **Bucket A — read-only `.get()/.getService()` → swap the injected registry to `HarnessInstanceRegistry` (no code change at the call site):**
-- `apps/api/src/run-service.ts` `resolveHarness(tenant,id,version)` — wired in `main.ts:165` to `registry.get`.
-- `apps/api/src/scorecard-service.ts:127,431` — `this.deps.harnesses.get(...)` (`harnesses: HarnessRegistry`).
-- `apps/api/src/topology-backend.ts` `ServiceTopologyBackend.specFor` — `deps.harnesses.get(...)` → must be `kind:service`.
-- `apps/api/src/judge-runner.ts` — harness-judge resolution via the injected harness registry.
+- `apps/api/src/execution/run-service.ts` `resolveHarness(tenant,id,version)` — wired in `main.ts:165` to `registry.get`.
+- `apps/api/src/execution/scorecard-service.ts:127,431` — `this.deps.harnesses.get(...)` (`harnesses: HarnessRegistry`).
+- `apps/api/src/execution/topology-backend.ts` `ServiceTopologyBackend.specFor` — `deps.harnesses.get(...)` → must be `kind:service`.
+- `apps/api/src/execution/judge-runner.ts` — harness-judge resolution via the injected harness registry.
   (RuntimeDispatcher reaches topology via `buildTopologyBackend({harnesses})`.)
 
 **Bucket B — write/list/validate surface → re-shaped (this is the real work + the auth change):**

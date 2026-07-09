@@ -20,8 +20,8 @@ import {
 } from "@everdict/registry";
 import type { TraceSource, TraceSourceConfig } from "@everdict/trace";
 import { describe, expect, it } from "vitest";
+import type { CaseExportStream } from "../integrations/trace-sink-service.js";
 import { ScorecardService } from "./scorecard-service.js";
-import type { CaseExportStream } from "./trace-sink-service.js";
 
 const dispatcher: Dispatcher = {
   async dispatch() {

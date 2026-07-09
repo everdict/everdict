@@ -1,6 +1,6 @@
 import { BadRequestError } from "@everdict/core";
 import type { UserProfile, UserProfilePatch, UserProfileStore } from "@everdict/db";
-import { validateImageRef } from "./image-ref.js";
+import { validateImageRef } from "../lib/image-ref.js";
 
 // Profile-edit core — the single core shared by the HTTP route (PATCH /me/profile) and the MCP tool (update_profile) (parity).
 // Only edits your own profile (subject = principal.subject) — no role gate (authz-irrelevant display info decoupled from SSO identity).

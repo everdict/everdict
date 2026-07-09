@@ -29,7 +29,7 @@ personal = the requester's **own** self-hosted runner (`self:<runnerId>`) queue 
 Other members' personal runner queues are not exposed (same as the runner ownership model) and are excluded from totals aggregation.
 
 ## Service/transport (BFF↔MCP parity)
-`QueueService.snapshot(tenant, subject?)` (`apps/api/src/queue-service.ts`) — assembles `{ workspace: lanes[],
+`QueueService.snapshot(tenant, subject?)` (`apps/api/src/ops/queue-service.ts`) — assembles `{ workspace: lanes[],
 personal: lanes[] }` from store listings (lightweight) alone (personal scope determined by `myRunners(subject)`):
 the active states of scorecards + runs (standalone) + `ScheduleService.list`'s `nextFireTimes` (Temporal
 authoritative; if absent, upcoming is omitted — cron approximation is the web schedule screen's domain) + `RuntimeRegistry.list`.

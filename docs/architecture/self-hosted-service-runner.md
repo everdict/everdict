@@ -145,6 +145,6 @@ The runner already declares `capabilities[]` (`self-hosted-runner.md` D-model: `
   mirroring `nomad-topology.ts`/`k8s-topology.ts`.
 - `apps/cli/src/main.ts` — `runLeasedJob` kind-branch (slice 2); `apps/cli/package.json` deps (`@everdict/topology`,
   `@everdict/trace`).
-- `apps/api/src/runner-hub.ts` / `mcp.ts` — `lease_job` capability gating for service jobs (slice 3).
+- `apps/api/src/runners/runner-hub.ts` / `mcp.ts` — `lease_job` capability gating for service jobs (slice 3).
 - Docs/skill: `docs/architecture/self-hosted-runner.md` (link this extension) + the `topology` skill reference
   (the third `TopologyRuntime`) travel with the change.

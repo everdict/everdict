@@ -85,7 +85,7 @@ describe("BundleService.apply", () => {
 
 describe("examples/bundles/codex-pinch bundle (artifact guard)", () => {
   it("the real bundle file satisfies the schema and every item applies", async () => {
-    const raw = readFileSync(new URL("../../../examples/bundles/codex-pinch/bundle.json", import.meta.url), "utf8");
+    const raw = readFileSync(new URL("../../../../examples/bundles/codex-pinch/bundle.json", import.meta.url), "utf8");
     const parsed = BundleSchema.parse(JSON.parse(raw));
     const templates = new InMemoryHarnessTemplateRegistry();
     const svc = new BundleService({

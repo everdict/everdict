@@ -39,8 +39,8 @@ An agent (Claude Code) reaching for Everdict via MCP thinks in one verb: **"run 
 That is a `run`. A scorecard is just that verb applied over a dataset (`run × N`). So the natural dependency is
 `run ⊂ scorecard`. Today it is inverted in two ways:
 
-1. **Execution lifecycle is duplicated across two parallel services.** `RunService` (`apps/api/src/run-service.ts`)
-   and `ScorecardService` (`apps/api/src/scorecard-service.ts`) each independently wire budget admit/settle,
+1. **Execution lifecycle is duplicated across two parallel services.** `RunService` (`apps/api/src/execution/run-service.ts`)
+   and `ScorecardService` (`apps/api/src/execution/scorecard-service.ts`) each independently wire budget admit/settle,
    repo-token resolution, artifact offload, judge-model injection, completion notification, and provenance. The
    scorecard fan-out (`ScorecardService.track`'s inline `dispatch` closure, ~line 318) is a near-verbatim copy of
    `RunService.submit`'s dispatch path. Scorecard does **not** go through `RunService` and does **not** create
@@ -119,7 +119,7 @@ specific runtime") is first-class without waiting for Steps 1–2.
 
 ## Step 1 — extract a shared `execute-case` lifecycle core
 
-Factor the per-case execution lifecycle out of both services into one unit (proposed `apps/api/src/execute-case.ts`,
+Factor the per-case execution lifecycle out of both services into one unit (proposed `apps/api/src/execution/execute-case.ts`,
 or a small class `CaseExecutor`). Responsibilities (the currently-duplicated concerns):
 
 ```

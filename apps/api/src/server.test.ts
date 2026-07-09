@@ -27,23 +27,23 @@ import {
   InMemoryRuntimeRegistry,
 } from "@everdict/registry";
 import { describe, expect, it } from "vitest";
-import { BenchmarkService } from "./benchmark-service.js";
-import { persistentBudget } from "./budget-tracker.js";
-import { BundleService } from "./bundle-service.js";
-import { GithubAppService } from "./github-app-service.js";
-import { ImageRegistryService } from "./image-registry-service.js";
-import { defaultJudgeRunner } from "./judge-runner.js";
-import { MattermostCommandService } from "./mattermost-command-service.js";
-import { MattermostService } from "./mattermost-service.js";
-import { MembershipService } from "./membership-service.js";
-import { RunService, type RunServiceDeps } from "./run-service.js";
-import { RunnerService } from "./runner-service.js";
-import { ScheduleService } from "./schedule-service.js";
-import { ScorecardService } from "./scorecard-service.js";
+import { BenchmarkService } from "./catalog/benchmark-service.js";
+import { BundleService } from "./catalog/bundle-service.js";
+import { defaultJudgeRunner } from "./execution/judge-runner.js";
+import { RunService, type RunServiceDeps } from "./execution/run-service.js";
+import { ScorecardService } from "./execution/scorecard-service.js";
+import { GithubAppService } from "./integrations/github-app-service.js";
+import { ImageRegistryService } from "./integrations/image-registry-service.js";
+import { MattermostCommandService } from "./integrations/mattermost-command-service.js";
+import { MattermostService } from "./integrations/mattermost-service.js";
+import { TraceSinkService } from "./integrations/trace-sink-service.js";
+import { persistentBudget } from "./lib/budget-tracker.js";
+import { TerminalTicketStore } from "./lib/terminal-ticket.js";
+import { RunnerService } from "./runners/runner-service.js";
+import { ScheduleService } from "./scheduling/schedule-service.js";
 import { buildServer } from "./server.js";
-import { TerminalTicketStore } from "./terminal-ticket.js";
-import { TraceSinkService } from "./trace-sink-service.js";
-import { WorkspaceService } from "./workspace-service.js";
+import { MembershipService } from "./workspace/membership-service.js";
+import { WorkspaceService } from "./workspace/workspace-service.js";
 
 const result: CaseResult = {
   caseId: "c1",

@@ -1,6 +1,6 @@
 import { BadRequestError, ForbiddenError, NotFoundError, classifyFailure } from "@everdict/core";
 import type { ScheduleOverlapPolicy, ScheduleRecord, ScheduleRunTemplate, ScheduleStore } from "@everdict/db";
-import type { RunScorecardInput } from "./scorecard-service.js";
+import type { RunScorecardInput } from "../execution/scorecard-service.js";
 
 // Lightweight structural check of a 5-field cron — firing (Temporal Schedule, slice 2) parses precisely, so here we only reject obviously malformed input.
 // Each field: * | n | n-m, optional step (/k), comma list. (Value-range semantics are enforced by Temporal.)

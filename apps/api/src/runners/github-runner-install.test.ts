@@ -1,6 +1,6 @@
 import { InMemoryRunnerStore, InMemoryWorkspaceSettingsStore } from "@everdict/db";
 import { describe, expect, it } from "vitest";
-import { CiLinkService, type GithubAppRepoAccess } from "./ci-link-service.js";
+import { CiLinkService, type GithubAppRepoAccess } from "../integrations/ci-link-service.js";
 import { installGithubWorkspaceRunner } from "./github-runner-install.js";
 import { RunnerService } from "./runner-service.js";
 
