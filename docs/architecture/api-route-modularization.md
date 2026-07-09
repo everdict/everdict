@@ -1,8 +1,10 @@
 # apps/api route modularization — split the 3676-line server.ts into resource route modules (design)
 
-> **Status: Rounds 1-3 SHIPPED · Round 4 IN PROGRESS.** Round 4 restores the **layer axis**: root = layer
-> (`api/` transport ← `core/` business, + `common/` + `infrastructure/`; one-way `common ← core ← api`),
-> domain folders INSIDE each layer with the same entity name recurring per layer (see the Round 4 section).
+> **Status: Rounds 1-4 SHIPPED.** Round 4 (`7064919`+`d9ddafd`) restores the **layer axis**: root = layer
+> (`api/` transport ← `core/` business, + `common/` + `infrastructure/`; one-way `common ← core ← api`,
+> verified zero core→api imports), domain folders INSIDE each layer with the same entity name recurring per
+> layer (api/ = 26 entities + execution/ops transport surfaces; core/ = 20 entities + execution/ops
+> machinery; 181 files pure-renamed, 636 tests + build + boot contract green — see the Round 4 section).
 > Round 3 (`44963d5`+`d4f2405`): src regrouped by **domain entity** — 26
 > entity folders (run · scorecard · harness · dataset · … · queue · billing), each owning its vertical slice
 > (routes + mcp + schema + service + tests); the concern umbrellas (catalog/, integrations/, runners/,
