@@ -19,7 +19,6 @@ import {
   NomadBackend,
   Scheduler,
   buildRuntimeBackend,
-  inMemoryBudget,
   isObservable,
   isRecoverable,
   isScreenCapturable,
@@ -27,8 +26,10 @@ import {
 } from "@everdict/backends";
 import { type CaseResult, type RegistryAuth, type RuntimeSpec, classifyFailure } from "@everdict/core";
 import {
+  type BudgetStore,
   type CallbackStore,
   type CommentStore,
+  InMemoryBudgetStore,
   InMemoryCallbackStore,
   InMemoryCommentStore,
   InMemoryNotificationStore,
@@ -47,6 +48,7 @@ import {
   InMemoryWorkspaceStore,
   type NotificationStore,
   type OAuthStateStore,
+  PgBudgetStore,
   PgCallbackStore,
   PgCommentStore,
   PgNotificationStore,
@@ -111,6 +113,7 @@ import {
 import { S3ArtifactStore } from "@everdict/storage";
 import { buildTraceSink, buildTraceSource } from "@everdict/trace";
 import { BenchmarkService } from "./benchmark-service.js";
+import { persistentBudget } from "./budget-tracker.js";
 import { BundleService } from "./bundle-service.js";
 import { CiLinkService } from "./ci-link-service.js";
 import { CommentService } from "./comment-service.js";
@@ -178,6 +181,7 @@ async function main(): Promise<void> {
     viewStore,
     callbackStore,
     usageStore,
+    budgetStore,
   } = await makePersistence();
   const workspaceService = new WorkspaceService(workspaceStore);
   // scheduleService is created below (it depends on scorecardService), but the member-removal hook late-binds it via a closure
@@ -327,7 +331,11 @@ async function main(): Promise<void> {
       `▶ autoscale: [${scalingTargets.map((t) => t.id).join(", ")}] slots ${autoscale.min}..${autoscale.max}`,
     );
   }
-  const budget = inMemoryBudget({ limitFor: budgetFromEnv() });
+  // Enforcement budget (blocks with 402; distinct from the meter-only usage above). In-memory decision + best-effort
+  // write-through to the durable BudgetStore + boot hydration → caps + usage survive restarts. DB-set per-tenant
+  // limits take precedence; env-configured limits (budgetFromEnv) are the fallback for tenants without a stored one.
+  const budget = persistentBudget(budgetStore, { fallback: budgetFromEnv() });
+  await budget.hydrate();
   // Meter-only usage accounting for billing (never blocks; distinct from the enforcement budget above). Read via GET /usage.
   // In-memory reads + best-effort write-through to the durable UsageStore + boot hydration → usage survives restarts.
   const usageMeter = persistentUsageMeter(usageStore);
@@ -922,6 +930,7 @@ interface Persistence {
   // (single process; the in-process rendezvous is equivalent there). docs/architecture/completion-stream-callback.md
   callbackStore: CallbackStore;
   usageStore: UsageStore; // durable meter-only billing usage — the in-memory UsageMeter write-throughs + hydrates from it
+  budgetStore: BudgetStore; // durable per-tenant budget (usage + limits) — the in-memory BudgetTracker write-throughs + hydrates from it
 }
 
 // At-rest encryption KEK: use EVERDICT_SECRETS_KEY (base64 32B) if present, otherwise auto-generate an ephemeral key
@@ -969,6 +978,7 @@ async function makePersistence(): Promise<Persistence> {
       viewStore: new InMemoryViewStore(),
       callbackStore: new InMemoryCallbackStore(),
       usageStore: new InMemoryUsageStore(),
+      budgetStore: new InMemoryBudgetStore(),
     };
   }
   const client = sqlClient(makePool(url));
@@ -999,6 +1009,7 @@ async function makePersistence(): Promise<Persistence> {
     viewStore: new PgViewStore(client),
     callbackStore: new PgCallbackStore(client),
     usageStore: new PgUsageStore(client),
+    budgetStore: new PgBudgetStore(client),
   };
 }
 

@@ -63,6 +63,27 @@ export interface InMemoryBudgetOptions {
   limitFor: (tenant: string) => BudgetLimit | undefined;
 }
 
+// The admission check shared by every BudgetTracker impl (in-memory + the persistent one in apps/api): throw a 402 if
+// any already-committed dimension is at/above its cap. usd/tokens aren't known before a run, so the last run that
+// slightly exceeds is allowed — the standard cost-budget behavior. Call BEFORE reserving the run.
+export function assertWithinBudget(tenant: string, usage: BudgetUsage, limit: BudgetLimit | undefined): void {
+  if (!limit) return;
+  if (limit.usd !== undefined && usage.usd >= limit.usd)
+    throw new PaymentRequiredError(
+      "BUDGET_EXCEEDED",
+      { tenant, usd: usage.usd, limit: limit.usd },
+      "cost budget exceeded",
+    );
+  if (limit.tokens !== undefined && usage.tokens >= limit.tokens)
+    throw new PaymentRequiredError("BUDGET_EXCEEDED", { tenant, tokens: usage.tokens }, "token budget exceeded");
+  if (limit.runs !== undefined && usage.runs >= limit.runs)
+    throw new PaymentRequiredError(
+      "BUDGET_EXCEEDED",
+      { tenant, runs: usage.runs, limit: limit.runs },
+      "run-count budget exceeded",
+    );
+}
+
 export function inMemoryBudget(opts: InMemoryBudgetOptions): BudgetTracker {
   const usage = new Map<string, BudgetUsage>();
   const get = (t: string): BudgetUsage => {
@@ -75,30 +96,8 @@ export function inMemoryBudget(opts: InMemoryBudgetOptions): BudgetTracker {
   };
   return {
     admit(tenant) {
-      const limit = opts.limitFor(tenant);
-      if (!limit) {
-        get(tenant).runs += 1; // count runs even when unlimited
-        return;
-      }
-      const u = get(tenant);
-      if (limit.usd !== undefined && u.usd >= limit.usd) {
-        throw new PaymentRequiredError(
-          "BUDGET_EXCEEDED",
-          { tenant, usd: u.usd, limit: limit.usd },
-          "cost budget exceeded",
-        );
-      }
-      if (limit.tokens !== undefined && u.tokens >= limit.tokens) {
-        throw new PaymentRequiredError("BUDGET_EXCEEDED", { tenant, tokens: u.tokens }, "token budget exceeded");
-      }
-      if (limit.runs !== undefined && u.runs >= limit.runs) {
-        throw new PaymentRequiredError(
-          "BUDGET_EXCEEDED",
-          { tenant, runs: u.runs, limit: limit.runs },
-          "run-count budget exceeded",
-        );
-      }
-      u.runs += 1; // reserve (so concurrent bursts can't exceed the cap)
+      assertWithinBudget(tenant, get(tenant), opts.limitFor(tenant));
+      get(tenant).runs += 1; // reserve (so concurrent bursts can't exceed the cap; counted even when unlimited)
     },
     release(tenant) {
       const u = get(tenant);

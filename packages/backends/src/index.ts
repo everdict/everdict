@@ -52,6 +52,7 @@ export {
   type BudgetTracker,
   type BudgetLimit,
   type BudgetUsage,
+  assertWithinBudget,
   inMemoryBudget,
   sumCost,
   costOf,
