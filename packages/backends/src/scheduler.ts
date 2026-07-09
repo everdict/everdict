@@ -42,6 +42,7 @@ export const binPackPolicy: PlacementPolicy = {
 
 interface QueueEntry {
   job: AgentJob;
+  enqueuedAt: number; // aging clock — a long-waiting batch entry is promoted to the urgent scan (starvation guard)
   resolve: (r: CaseResult) => void;
   reject: (e: unknown) => void;
 }
@@ -54,6 +55,13 @@ export interface SchedulerOptions {
   // Multi-tenant fairness: WFQ weight (larger = more often) + per-tenant concurrent-execution cap (quota).
   weightFor?: (tenant: string) => number; // default 1
   tenantQuota?: (tenant: string) => number; // default unlimited
+  // Per-tenant QUEUE depth cap — the global maxQueueDepth alone lets one tenant fill the whole queue (its
+  // in-flight quota caps execution, not waiting). Over the cap ⇒ RateLimitError(429) at dispatch. Default unlimited.
+  tenantMaxQueueDepth?: (tenant: string) => number;
+  // Priority aging (starvation guard) — a queued entry older than this is scanned with the interactive class
+  // regardless of its own priority, so an interactive flood can't starve batch work forever. Default 60s.
+  agingMs?: number;
+  now?: () => number; // injectable clock (aging tests)
   // Tenant budget: admit on dispatch (402 if over), settle cost on completion.
   budget?: BudgetTracker;
 }
@@ -93,8 +101,19 @@ export class Scheduler {
         new RateLimitError("RATE_LIMITED", { queueDepth: this.queue.size }, "the scheduler queue is full."),
       );
     }
+    const tenant = tenantOf(job);
+    const tenantMax = this.opts.tenantMaxQueueDepth?.(tenant) ?? Number.POSITIVE_INFINITY;
+    if ((this.queue.queuedByTenant()[tenant] ?? 0) >= tenantMax) {
+      return Promise.reject(
+        new RateLimitError(
+          "RATE_LIMITED",
+          { tenant, queueDepth: this.queue.queuedByTenant()[tenant] },
+          "this workspace's scheduler queue is full.",
+        ),
+      );
+    }
     return new Promise<CaseResult>((resolve, reject) => {
-      this.queue.enqueue({ job, resolve, reject });
+      this.queue.enqueue({ job, enqueuedAt: (this.opts.now ?? Date.now)(), resolve, reject });
       void this.pump();
     });
   }
@@ -175,11 +194,13 @@ export class Scheduler {
         // Scan in WFQ fair order, but skip jobs that can't be sent now due to quota/capacity (HOL avoidance).
         // Priority classes first: interactive jobs (a person is waiting — single runs) jump ahead of batch
         // fan-out, while the tenant-fair WFQ order is preserved WITHIN each class (stable partition).
+        // AGING: an entry waiting past agingMs joins the urgent class regardless of its own priority — an
+        // interactive flood must not starve batch work forever.
+        const nowMs = (this.opts.now ?? Date.now)();
+        const agingMs = this.opts.agingMs ?? 60_000;
+        const urgent = (e: QueueEntry): boolean => e.job.priority === "interactive" || nowMs - e.enqueuedAt >= agingMs;
         const ordered = this.queue.ordered();
-        const scan = [
-          ...ordered.filter((e) => e.job.priority === "interactive"),
-          ...ordered.filter((e) => e.job.priority !== "interactive"),
-        ];
+        const scan = [...ordered.filter(urgent), ...ordered.filter((e) => !urgent(e))];
         for (const entry of scan) {
           const tenant = tenantOf(entry.job);
           const quota = this.opts.tenantQuota?.(tenant) ?? Number.POSITIVE_INFINITY;

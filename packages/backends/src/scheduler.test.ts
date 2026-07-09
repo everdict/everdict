@@ -402,6 +402,53 @@ describe("Scheduler", () => {
     expect(b.dispatchedIds).toEqual(["r1", "q2"]); // q1 never reached the backend
   });
 
+  it("aging promotes a long-waiting batch entry past fresh interactive arrivals (starvation guard)", async () => {
+    const b = new ControlledBackend("a", 1);
+    let now = 0;
+    const sched = new Scheduler(new BackendRegistry().register("a", b), { agingMs: 1000, now: () => now });
+
+    const running = sched.dispatch({ ...tjob("acme", "r0"), priority: "interactive" });
+    await flush();
+    const oldBatch = sched.dispatch({ ...tjob("acme", "b-old"), priority: "batch" });
+    await flush();
+    now = 1500; // b-old has now waited past agingMs
+    const freshInteractive = sched.dispatch({ ...tjob("acme", "i-fresh"), priority: "interactive" });
+    await flush();
+
+    b.releaseOne();
+    await flush();
+    // Both are urgent now — WFQ order within the urgent class puts the older entry first.
+    expect(b.dispatchedIds).toEqual(["r0", "b-old"]);
+    b.releaseAll();
+    await flush();
+    b.releaseAll();
+    await flush();
+    await Promise.all([running, oldBatch, freshInteractive]);
+  });
+
+  it("per-tenant queue depth cap rejects 429 while other tenants keep enqueueing", async () => {
+    const b = new ControlledBackend("a", 1);
+    const sched = new Scheduler(new BackendRegistry().register("a", b), {
+      tenantMaxQueueDepth: (t) => (t === "greedy" ? 2 : 100),
+    });
+
+    const running = sched.dispatch(tjob("greedy", "g0")); // in flight (not queued)
+    await flush();
+    const q1 = sched.dispatch(tjob("greedy", "g1"));
+    const q2 = sched.dispatch(tjob("greedy", "g2"));
+    await flush();
+    await expect(sched.dispatch(tjob("greedy", "g3"))).rejects.toMatchObject({ code: "RATE_LIMITED" });
+    const other = sched.dispatch(tjob("polite", "p1")); // another workspace is unaffected
+    await flush();
+    expect(sched.stats().queuedByTenant).toEqual({ greedy: 2, polite: 1 });
+
+    for (let i = 0; i < 5; i++) {
+      b.releaseAll();
+      await flush();
+    }
+    await Promise.all([running, q1, q2, other]);
+  });
+
   it("a heavy job routes to the backend whose memory envelope fits it", async () => {
     const small = new ControlledBackend("small", 10);
     small.memoryBudgetMb = 256;
