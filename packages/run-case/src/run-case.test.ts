@@ -130,6 +130,26 @@ describe("runCase — early compute release (observation-only graders score afte
     expect(compute.disposed).toBe(true);
   });
 
+  it("both scoring phases receive ctx.provision (dedicated grading compute for image-mode graders)", async () => {
+    const compute = fakeCompute();
+    const seen: Array<{ id: string; hasProvision: boolean }> = [];
+    const grader = (id: string, needsCompute?: boolean): Grader => ({
+      id,
+      ...(needsCompute ? { needsCompute } : {}),
+      async grade(ctx: GradeContext): Promise<Score> {
+        seen.push({ id, hasProvision: ctx.provision !== undefined });
+        return { graderId: id, metric: id, value: 1, pass: true };
+      },
+    });
+
+    await runCase(CASE, fakeDeps(compute, REPO_SNAPSHOT, [grader("observation"), grader("outcome", true)]));
+
+    expect(seen).toEqual([
+      { id: "outcome", hasProvision: true },
+      { id: "observation", hasProvision: true },
+    ]);
+  });
+
   it("a multi-metric grader's Score[] is flattened in place, preserving the grader array order (multi-metric contract)", async () => {
     const compute = fakeCompute();
     const single = (id: string): Grader => ({

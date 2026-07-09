@@ -37,7 +37,9 @@ a number, `pass` optional (trace graders like `steps`/`cost`/`latency` emit valu
 - **outcome** — `tests-pass.ts` (`TestsPassGrader`), `command.ts` (`CommandGrader`), `swe-bench.ts`,
   `script-score.ts` (`ScriptScoreGrader`, continuous score), `script-grader.ts` (`ScriptGrader`, **custom
   grader**: user python/node code gets the full serialized GradeContext as a JSON file arg and prints
-  `Score | Score[]` JSON — multi-metric, sandboxed in the case compute). All need `ctx.compute` → guard it.
+  `Score | Score[]` JSON — multi-metric, sandboxed in the case compute; `image` mode instead provisions a
+  DEDICATED grader container via `ctx.provision` — observation-family, own the handle + dispose in finally).
+  All need `ctx.compute` → guard it (image mode guards `ctx.provision`).
 - **trace** — `trace-graders.ts`: `stepsGrader` (tool_call count), `costGrader` (sum `llm_call.cost.usd`),
   `latencyGrader` (last.t − first.t). Read ONLY `ctx.trace`; cost/tokens come from the harness's own trace.
 - **browser** — `browser-graders.ts`: `DomContainsGrader`, `UrlMatchesGrader` (require `snapshot.kind==="browser"`),

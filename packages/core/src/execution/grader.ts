@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { ComputeHandle } from "./compute.js";
+import type { ComputeHandle, ComputeSpec } from "./compute.js";
 import type { EnvSnapshot } from "./environment.js";
 import type { EvalCase, Scorecard } from "./eval-case.js";
 import type { TraceEvent } from "./trace.js";
@@ -19,6 +19,10 @@ export interface GradeContext {
   snapshot: EnvSnapshot;
   // Outcome graders can run commands in the environment (process harness). Optional because service/browser harnesses have no compute.
   compute?: ComputeHandle;
+  // Provision a DEDICATED grading compute (script grader `image` mode) — injected by runCase from its driver.
+  // Optional: scoring paths without a driver (control-plane collect, topology) leave it unset. The grader that
+  // provisions OWNS the handle and MUST dispose it in a finally.
+  provision?: (spec: ComputeSpec) => Promise<ComputeHandle>;
   baseline?: Scorecard; // for regression comparison
 }
 

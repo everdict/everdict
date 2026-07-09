@@ -2,6 +2,7 @@ import type {
   CaseFailure,
   CaseResult,
   ComputeHandle,
+  ComputeSpec,
   Driver,
   EnvSnapshot,
   Environment,
@@ -83,9 +84,11 @@ export async function runCase(evalCase: EvalCase, deps: RunCaseDeps): Promise<Ca
     // A slot holds the grader's Score[] (multi-metric graders emit several from one pass) — flattened in order at the end.
     const observes = deps.graders.some((g) => g.needsCompute !== true);
     const slots: Array<Score[] | undefined> = new Array(deps.graders.length);
+    // Dedicated grading compute (script grader image mode) — a grader that provisions owns/disposes its handle.
+    const provision = (spec: ComputeSpec): Promise<ComputeHandle> => deps.driver.provision(spec);
     for (const [i, grader] of deps.graders.entries()) {
       if (grader.needsCompute === true) {
-        slots[i] = await safeGrade(grader, { case: evalCase, trace, snapshot, compute });
+        slots[i] = await safeGrade(grader, { case: evalCase, trace, snapshot, compute, provision });
       }
     }
     const materialized = await materializeScreenshot(snapshot, compute, observes || defer);
@@ -114,7 +117,7 @@ export async function runCase(evalCase: EvalCase, deps: RunCaseDeps): Promise<Ca
       if (!collectFailure) {
         for (const [i, grader] of deps.graders.entries()) {
           if (grader.needsCompute !== true) {
-            slots[i] = await safeGrade(grader, { case: evalCase, trace, snapshot: materialized });
+            slots[i] = await safeGrade(grader, { case: evalCase, trace, snapshot: materialized, provision });
           }
         }
       }

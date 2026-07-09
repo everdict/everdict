@@ -91,4 +91,66 @@ describe("ScriptGrader — user code over the full serialized GradeContext", () 
     expect(g?.needsCompute).toBe(true);
     expect(() => makeGraders([{ id: "script", config: { code: "x" } }])).toThrow(/language/);
   });
+
+  it("image mode provisions a DEDICATED grader compute (observation-family), runs there, and disposes it", async () => {
+    let disposed = false;
+    let provisionedImage: string | undefined;
+    const writes: string[] = [];
+    const dedicated: ComputeHandle = {
+      async exec() {
+        return { exitCode: 0, stdout: '[{"graderId":"g","metric":"m","value":1,"pass":true}]', stderr: "" };
+      },
+      async writeFile(path: string) {
+        writes.push(path);
+      },
+      async readFile() {
+        return "";
+      },
+      async dispose() {
+        disposed = true;
+      },
+    };
+    const grader = new ScriptGrader({ language: "python", code: "c", image: "everdict/grader:1" });
+    expect(grader.needsCompute).toBe(false); // the case sandbox is not held for image-mode grading
+    const scores = await grader.grade({
+      ...ctx(), // no case compute at all — image mode must not need it
+      provision: async (spec) => {
+        provisionedImage = spec.image;
+        return dedicated;
+      },
+    });
+    expect(provisionedImage).toBe("everdict/grader:1");
+    expect(writes).toContain("/tmp/everdict-grade-context.json"); // context lands in the dedicated compute
+    expect(scores[0]?.value).toBe(1);
+    expect(disposed).toBe(true);
+  });
+
+  it("image mode disposes the dedicated compute even when the script fails", async () => {
+    let disposed = false;
+    const dedicated: ComputeHandle = {
+      async exec() {
+        return { exitCode: 1, stdout: "", stderr: "boom" };
+      },
+      async writeFile() {},
+      async readFile() {
+        return "";
+      },
+      async dispose() {
+        disposed = true;
+      },
+    };
+    const grader = new ScriptGrader({ language: "node", code: "c", image: "img" });
+    await expect(grader.grade({ ...ctx(), provision: async () => dedicated })).rejects.toBeInstanceOf(AppError);
+    expect(disposed).toBe(true);
+  });
+
+  it("image mode without a provisioning driver is an explicit error (control-plane/topology scoring paths)", async () => {
+    const grader = new ScriptGrader({ language: "python", code: "c", image: "img" });
+    await expect(grader.grade(ctx())).rejects.toThrow(/provisioning driver/);
+  });
+
+  it("makeGraders passes the image knob through", () => {
+    const [g] = makeGraders([{ id: "script", config: { language: "python", code: "c", image: "everdict/grader:1" } }]);
+    expect(g?.needsCompute).toBe(false);
+  });
 });
