@@ -39,7 +39,29 @@ Everything resume needs is on the record: dataset/harness refs, `runtime`, `subs
 `0049_add_scorecard_orchestration`) persisted at submit. Records from before this field (no
 `orchestration`) can't be faithfully resumed and keep the old tombstone path.
 
-Standalone runs keep the tombstone behavior (a single run is cheap to resubmit; a batch is not).
+### Single-run durability (standalone runs resume too)
+
+Standalone runs used to keep the tombstone (`failed INTERRUPTED`) on restart. Now `RunService.submit`
+persists the **effective case body** — placement target already injected — as `RunRecord.caseSpec`
+(migration `0051_add_run_case_spec`), and boot recovery resumes standalone runs **adopt-first**:
+
+1. **Adopt** — resolve the recorded runtime lane to a live backend and try `Backend.adopt(caseId)`:
+   if the dispatched job outlived the restart (still running, or already finished with the result in
+   its logs), the harvested `CaseResult` settles the run directly — zero re-run.
+2. **Re-dispatch** — no adoptable job (purged/GC'd): re-drive the run from the persisted `caseSpec`.
+   Because the persisted case is the effective one, it routes back to the same runtime with no
+   re-injection step.
+3. **Tombstone** — pre-0051 records with no `caseSpec` keep the old `failed (INTERRUPTED)` path.
+
+Boot log: `runs resumed N · runs failed M`. Live-verified both ways (Nomad): a sleep-25 run whose
+control plane was SIGKILLed mid-flight settled `succeeded` via adoption with exactly one Nomad job;
+with the job purged before restart, recovery dispatched a fresh job from `caseSpec` and settled.
+
+> **Scope note (multi-replica):** startup recovery — batch and single-run alike — assumes a
+> **single control-plane process** owning the store. Running N replicas over one DB would make every
+> replica adopt/re-dispatch the others' in-flight work on boot. The multi-replica path is
+> batch-on-Temporal (`docs/architecture/temporal-batch-orchestration.md`), where the workflow owns
+> continuation; single-run durability stays a single-CP convenience.
 
 ## 3. Retry-failed (`POST /scorecards/:id/retry`, MCP `retry_scorecard`)
 

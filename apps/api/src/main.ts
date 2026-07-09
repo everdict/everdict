@@ -546,6 +546,22 @@ async function main(): Promise<void> {
     }
   };
 
+  // Adopt a still-alive backend job's finished result by caseId — shared by scorecard resume and
+  // standalone-run boot recovery (P4 single-run durability): zero re-run when the job outlived the CP restart.
+  const adoptCaseFn = async (
+    tenant: string,
+    runtimeList: string | undefined, // may be a comma shard list — eachRuntimeBackend splits it
+    caseId: string,
+  ): Promise<CaseResult | undefined> => {
+    let adopted: CaseResult | undefined;
+    await eachRuntimeBackend(tenant, runtimeList, async (backend) => {
+      if (!backend.adopt) return false;
+      adopted = await backend.adopt(caseId).catch(() => undefined);
+      return adopted !== undefined;
+    });
+    return adopted;
+  };
+
   const scorecardService = new ScorecardService({
     dispatcher: meteredDispatcher,
     store: scorecardStore,
@@ -567,15 +583,7 @@ async function main(): Promise<void> {
       ((await settingsStore.get(tenant))?.traceSinks ?? []).some((e) => e.name === name),
     // Queued-entry reclaim (supersede / speculation loser) — in-flight jobs stay Backend.kill's concern.
     cancelQueued: (predicate) => scheduler.cancelQueued(predicate),
-    adoptCase: async (tenant, runtimeList, caseId) => {
-      let adopted: CaseResult | undefined;
-      await eachRuntimeBackend(tenant, runtimeList, async (backend) => {
-        if (!backend.adopt) return false;
-        adopted = await backend.adopt(caseId).catch(() => undefined);
-        return adopted !== undefined;
-      });
-      return adopted;
-    },
+    adoptCase: adoptCaseFn,
     killCase: async (tenant, runtimeList, caseId) => {
       await eachRuntimeBackend(tenant, runtimeList, async (backend) => {
         if (!backend.kill) return false;
@@ -632,10 +640,13 @@ async function main(): Promise<void> {
     scorecards: scorecardStore,
     runs: store,
     resume: (id) => scorecardService.resume(id),
+    // Standalone runs: adopt the still-alive backend job first (zero re-run), else re-dispatch from the
+    // persisted caseSpec (mig 0051); legacy records without one keep the tombstone path.
+    resumeRun: async (r) => service.resume(r, await adoptCaseFn(r.tenant, r.runtime, r.caseId).catch(() => undefined)),
   });
-  if (recovered.scorecards + recovered.resumed + recovered.runs > 0)
+  if (recovered.scorecards + recovered.resumed + recovered.runs + recovered.runsResumed > 0)
     console.error(
-      `▶ boot recovery: batches resumed ${recovered.resumed} · batches failed(INTERRUPTED) ${recovered.scorecards} · runs failed ${recovered.runs}`,
+      `▶ boot recovery: batches resumed ${recovered.resumed} · batches failed(INTERRUPTED) ${recovered.scorecards} · runs resumed ${recovered.runsResumed} · runs failed ${recovered.runs}`,
     );
   // Mattermost inbound (slash commands/buttons) — after commandToken verification, run a scorecard / view the leaderboard from chat.
   const mattermostCommandService = new MattermostCommandService({

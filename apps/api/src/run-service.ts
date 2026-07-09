@@ -2,6 +2,7 @@ import { type BudgetTracker, type Dispatcher, billingTenant, costOf } from "@eve
 import {
   type AgentJob,
   AppError,
+  type CaseResult,
   type EvalCase,
   type HarnessSecretMaps,
   type HarnessSpec,
@@ -102,6 +103,9 @@ export class RunService {
       // Executor stamp — notification-feed recipient (notifications N2). Same pattern as scorecard createdBy (0035).
       ...(effective.submittedBy ? { createdBy: effective.submittedBy } : {}),
       ...(placedRuntime ? { runtime: placedRuntime } : {}),
+      // Persist the (placement-injected) case body — boot recovery's re-dispatch basis (mig 0051). Without it a
+      // CP restart used to tombstone queued/running standalone runs, since the inline case lived only in memory.
+      caseSpec: effective.case,
       createdAt: ts,
       updatedAt: ts,
     };
@@ -112,6 +116,26 @@ export class RunService {
 
   get(id: string): Promise<RunRecord | undefined> {
     return this.deps.store.get(id);
+  }
+
+  // Boot recovery for an interrupted standalone run. adopted = a result harvested from the still-alive backend
+  // job (settle it directly — zero re-run); else re-drive from the persisted caseSpec; legacy records without
+  // one return false and keep the tombstone path. docs/architecture/batch-resilience.md
+  async resume(record: RunRecord, adopted?: CaseResult): Promise<boolean> {
+    if (adopted) {
+      await this.deps.store.update(record.id, { status: "succeeded", result: adopted, updatedAt: this.now() });
+      return true;
+    }
+    if (!record.caseSpec) return false;
+    await this.deps.store.update(record.id, { status: "running", updatedAt: this.now() });
+    void this.track(record.id, {
+      tenant: record.tenant,
+      harness: record.harness,
+      case: record.caseSpec, // placement.target was injected before persisting — routes to the same runtime
+      ...(record.createdBy ? { submittedBy: record.createdBy } : {}),
+      ...(record.trigger ? { trigger: record.trigger } : {}),
+    });
+    return true;
   }
 
   // Default is standalone runs (activity list) — when scorecardId is given, only that batch's child runs (scorecard-detail case drilldown).

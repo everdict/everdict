@@ -1,4 +1,4 @@
-import type { CaseResult } from "@everdict/core";
+import type { CaseResult, EvalCase } from "@everdict/core";
 import { describe, expect, it } from "vitest";
 import { PgCallbackStore } from "./callback-store.js";
 import type { SqlClient } from "./client.js";
@@ -60,6 +60,34 @@ describe("PgRunStore", () => {
     expect(calls[0]?.text).toMatch(/INSERT INTO everdict_runs/);
     expect(calls[0]?.params?.[0]).toBe("r1");
     expect(calls[0]?.params?.[6]).toBeNull(); // no result
+  });
+
+  it("round-trips caseSpec (mig 0051, single-run durability): INSERT stringifies it, get maps it back", async () => {
+    const caseSpec: EvalCase = {
+      id: "c1",
+      env: { kind: "repo", source: { files: {} } },
+      task: "t",
+      graders: [],
+      timeoutSec: 60,
+      tags: [],
+      placement: { target: "nomad-x" },
+    };
+    const { client, calls } = fakeClient(() => ({ rows: [] }));
+    await new PgRunStore(client).create({
+      id: "r2",
+      tenant: "acme",
+      harness: { id: "scripted", version: "0" },
+      caseId: "c1",
+      status: "queued",
+      caseSpec,
+      createdAt: "2026-06-18T00:00:00.000Z",
+      updatedAt: "2026-06-18T00:00:00.000Z",
+    });
+    expect(calls[0]?.params?.[12]).toBe(JSON.stringify(caseSpec)); // case_spec column, jsonb
+
+    const { client: reader } = fakeClient(() => ({ rows: [{ ...ROW, case_spec: caseSpec }] }));
+    const rec = await new PgRunStore(reader).get("r2");
+    expect(rec?.caseSpec?.placement?.target).toBe("nomad-x"); // the effective (placement-injected) case survives
   });
 
   it("get → maps the row to a RunRecord (Date→ISO, jsonb→object) + derives usage", async () => {

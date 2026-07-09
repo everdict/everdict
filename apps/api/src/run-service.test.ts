@@ -1,7 +1,7 @@
 import type { Dispatcher } from "@everdict/backends";
 import { inMemoryBudget } from "@everdict/backends";
 import { type AgentJob, BadRequestError, type CaseResult, type EvalCase } from "@everdict/core";
-import { InMemoryRunStore } from "@everdict/db";
+import { InMemoryRunStore, type RunRecord } from "@everdict/db";
 import { describe, expect, it, vi } from "vitest";
 import { RunService } from "./run-service.js";
 
@@ -353,5 +353,95 @@ describe("RunService", () => {
     await flush();
     expect(calls[0]?.url).toBe("https://hook.example/cb");
     expect(calls[0]?.status).toBe("succeeded");
+  });
+});
+
+describe("RunService — single-run durability (P4, docs/architecture/batch-resilience.md)", () => {
+  it("submit persists the placement-injected case as caseSpec (the boot-recovery re-dispatch basis)", async () => {
+    const store = new InMemoryRunStore();
+    const svc = new RunService({ dispatcher: okDispatcher, store, newId: ids });
+    const rec = await svc.submit({ tenant: "t", harness: { id: "s", version: "0" }, case: CASE, runtime: "nomad-x" });
+    const stored = await store.get(rec.id);
+    expect(stored?.caseSpec?.id).toBe("c1");
+    // The EFFECTIVE case is persisted — placement.target already baked in, so resume needs no re-injection.
+    expect(stored?.caseSpec?.placement?.target).toBe("nomad-x");
+  });
+
+  it("resume with an adopted result settles the run directly — zero re-dispatch", async () => {
+    const store = new InMemoryRunStore();
+    const jobs: AgentJob[] = [];
+    const capture: Dispatcher = {
+      async dispatch(job) {
+        jobs.push(job);
+        return resultFor(job);
+      },
+    };
+    const svc = new RunService({ dispatcher: capture, store, newId: ids });
+    const rec = await svc.submit({ tenant: "t", harness: { id: "s", version: "0" }, case: CASE, runtime: "rt" });
+    await flush();
+    jobs.length = 0; // discard the original dispatch — resume is what's under test
+    await store.update(rec.id, { status: "running" }); // simulate the interrupted state
+
+    const adopted = resultFor({ evalCase: CASE, harness: { id: "s", version: "0" }, tenant: "t" });
+    expect(await svc.resume((await store.get(rec.id)) as RunRecord, adopted)).toBe(true);
+    expect(jobs).toHaveLength(0);
+    const done = await store.get(rec.id);
+    expect(done?.status).toBe("succeeded");
+    expect(done?.result?.caseId).toBe("c1");
+  });
+
+  it("resume without an adopted result re-dispatches from the persisted caseSpec to the same runtime", async () => {
+    const store = new InMemoryRunStore();
+    const jobs: AgentJob[] = [];
+    const capture: Dispatcher = {
+      async dispatch(job) {
+        jobs.push(job);
+        return resultFor(job);
+      },
+    };
+    const svc = new RunService({ dispatcher: capture, store, newId: ids });
+    const rec = await svc.submit({
+      tenant: "t",
+      submittedBy: "alice",
+      harness: { id: "s", version: "0" },
+      case: CASE,
+      runtime: "nomad-x",
+    });
+    await flush();
+    jobs.length = 0;
+    await store.update(rec.id, { status: "queued" }); // interrupted before the first dispatch settled
+
+    expect(await svc.resume((await store.get(rec.id)) as RunRecord)).toBe(true);
+    await flush();
+    expect(jobs).toHaveLength(1);
+    expect(jobs[0]?.evalCase.id).toBe("c1");
+    expect(jobs[0]?.evalCase.placement?.target).toBe("nomad-x"); // routes to the recorded runtime, not a fresh default
+    const done = await store.get(rec.id);
+    expect(done?.status).toBe("succeeded");
+  });
+
+  it("resume returns false for a legacy record with no caseSpec — the caller keeps the tombstone path", async () => {
+    const store = new InMemoryRunStore();
+    const jobs: AgentJob[] = [];
+    const capture: Dispatcher = {
+      async dispatch(job) {
+        jobs.push(job);
+        return resultFor(job);
+      },
+    };
+    const svc = new RunService({ dispatcher: capture, store, newId: ids });
+    const legacy: RunRecord = {
+      id: "legacy-1",
+      tenant: "t",
+      harness: { id: "s", version: "0" },
+      caseId: "c1",
+      status: "running",
+      createdAt: "2026-07-08T00:00:00.000Z",
+      updatedAt: "2026-07-08T00:00:00.000Z",
+    };
+    await store.create(legacy);
+    expect(await svc.resume(legacy)).toBe(false);
+    expect(jobs).toHaveLength(0);
+    expect((await store.get("legacy-1"))?.status).toBe("running"); // untouched — recovery tombstones it
   });
 });

@@ -1,4 +1,4 @@
-import { CaseResultSchema, RunUsageSummarySchema, usageFromTrace } from "@everdict/core";
+import { CaseResultSchema, EvalCaseSchema, RunUsageSummarySchema, usageFromTrace } from "@everdict/core";
 import { z } from "zod";
 
 // A run's lifecycle: accept → (scheduler queue/dispatch) → success/failure. The result store keeps this record.
@@ -14,6 +14,9 @@ export const RunRecordSchema = z.object({
   caseId: z.string(),
   status: RunStatusSchema,
   result: CaseResultSchema.optional(),
+  // The submitted EvalCase (standalone runs, mig 0051) — boot recovery's re-dispatch basis. Absent on batch
+  // children (the batch re-plans from its dataset) and on legacy records (those keep the tombstone path).
+  caseSpec: EvalCaseSchema.optional(),
   // Usage summary — not stored, derived from result.trace (filled on read). Lets the client see tokens/cost without parsing the trace.
   usage: RunUsageSummarySchema.optional(),
   error: RunErrorSchema.optional(),
