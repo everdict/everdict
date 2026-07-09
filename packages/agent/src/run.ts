@@ -16,9 +16,6 @@ import { runCase } from "@everdict/runner";
 import { runContextFromEnv } from "./env.js";
 import { makeGradersFromEnv, makeHarness } from "./registry.js";
 
-// Delimiter the agent uses to emit the result to stdout. The backend parses this line from logs.
-export const RESULT_SENTINEL = "__EVERDICT_RESULT__";
-
 // Whether to meter the harness's model usage for this dispatch. The usage-proxy binds 127.0.0.1 on the runner host,
 // unreachable from inside a container — so metering MUST be off whenever the case runs containerized. That is true
 // two ways: the containerize flag (self-hosted runner image-cases) OR an explicitly injected container driver

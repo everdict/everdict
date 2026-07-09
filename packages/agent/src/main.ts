@@ -1,5 +1,6 @@
 import { type AgentJob, AgentJobSchema } from "@everdict/core";
-import { RESULT_SENTINEL, failureResult, runAgentJob } from "./run.js";
+import { failureResult, runAgentJob } from "./run.js";
+import { encodeResult } from "./sentinel.js";
 
 // Runner-agent entrypoint (runs inside the sandbox/alloc).
 // The AgentJob is passed as base64(JSON) in the EVERDICT_AGENT_JOB env.
@@ -19,9 +20,9 @@ async function main(): Promise<void> {
   try {
     job = AgentJobSchema.parse(JSON.parse(Buffer.from(raw, "base64").toString("utf8")));
     const result = await runAgentJob(job);
-    console.log(RESULT_SENTINEL + JSON.stringify(result));
+    console.log(encodeResult(result));
   } catch (err) {
-    console.log(RESULT_SENTINEL + JSON.stringify(failureResult(err, job)));
+    console.log(encodeResult(failureResult(err, job)));
   }
 }
 
