@@ -6,40 +6,45 @@ allowed-tools: Read, Grep, Glob, Edit, Write, Bash
 # API layer (`apps/api`)
 
 The external SaaS surface. A Fastify server over the runtime (Scheduler + trust zones + secrets + budgets +
-autoscaling). Structured by a TS reinterpretation of the proven layered-service idiom (controller → service →
-repository, domain-packaged, one-way call chain): **one folder per domain entity; inside it, the entity's
-vertical slice — routes + mcp + schema + service.** See `docs/api.md` +
-`docs/architecture/api-route-modularization.md`. Rule: `.claude/rules/api-layer.md`.
+autoscaling). Structured by a TS reinterpretation of the proven layered-service idiom: **root = layer
+(`common ← core ← api`, one-way), inside each layer = domain folders, the same domain name recurring per
+layer.** See `docs/api.md` + `docs/architecture/api-route-modularization.md`.
+Rule: `.claude/rules/api-layer.md`.
 
 ## Structure map
 
 ```
 apps/api/src/
+  main.ts            ← process composition root: env → deps wiring, grouped into per-concern builders
   server.ts          ← HTTP composition root ONLY: app build (parsers/logging), WS upgrade, MCP transport,
                        register<X>Routes(app, deps) calls
   mcp.ts             ← MCP composition root ONLY: McpServer build + register<X>Tools(server, ctx) calls
-                       (same services, second transport; helpers live in mcp-context.ts)
-  main.ts            ← process composition root: env → deps wiring, grouped into per-concern builders
-  route-context.ts   ← ServerDeps (deps bag) + auth chain (resolveIdentity/applyActiveWorkspace/
-                       resolvePrincipal/resolveBearerPrincipal) + gate/sendError/zodIssues/constantTimeEq
-  mcp-context.ts     ← McpDeps + McpToolContext + ok/fail/run/plain (the MCP twin of route-context)
-  <domain>/          ← ONE business entity: run · scorecard · harness · dataset · judge · model · runtime ·
-                       benchmark · bundle · schedule · view · secret · member · workspace · profile ·
-                       notification · comment · api-key · runner · github-app · mattermost · trace-sink ·
-                       image-registry · ci-link · queue · billing …
-    <resource>.routes.ts    ← registerXRoutes(app, deps): thin handlers, zero logic
-    <resource>.mcp.ts       ← registerXTools(server, ctx): the same resource's MCP tools, zero logic
-    <resource>.schema.ts    ← request Zod DTOs (XxxBodySchema) — only when the resource has bodies
-    <resource>-service.ts   ← the logic (framework-agnostic; owns response shaping + creator-override)
-  execution/ ops/ lib/ oauth/  ← machinery, NOT transport domains (case-execution engine · instrumentation/
-                       recovery · shared helpers · oauth plumbing)
+  api/               ← TRANSPORT layer (one folder per domain entity)
+    route-context.ts   ← ServerDeps (deps bag) + auth chain (resolveIdentity/applyActiveWorkspace/
+                         resolvePrincipal/resolveBearerPrincipal) + gate/sendError/zodIssues/constantTimeEq
+    mcp-context.ts     ← McpDeps + McpToolContext + ok/fail/run/plain (the MCP twin of route-context)
+    <domain>/          ← run · scorecard · harness · dataset · judge · model · runtime · benchmark · bundle ·
+                         schedule · view · secret · member · workspace · profile · notification · comment ·
+                         api-key · runner · github-app · mattermost · trace-sink · image-registry · ci-link ·
+                         queue · billing (+ execution/ ops/ = machinery's thin transport surfaces)
+      <resource>.routes.ts   ← registerXRoutes(app, deps): thin handlers, zero logic
+      <resource>.mcp.ts      ← registerXTools(server, ctx): the same resource's MCP tools, zero logic
+      <resource>.schema.ts   ← request Zod DTOs (XxxBodySchema) — only when the resource has bodies
+      (+ inject-based transport tests)
+  core/              ← BUSINESS layer (same domain names as api/)
+    <domain>/          ← <resource>-service.ts + collaborator services + service tests
+    execution/         ← engine machinery: execute-case, scoring-service, judge-runner, dispatchers, backends
+    ops/               ← instrumentation/recovery machinery: metrics, speculation, startup-recovery, …
+  common/            ← cross-cutting helpers (budget-tracker, usage-meter, version-tag-service, …)
+  infrastructure/    ← external-client plumbing (oauth/)
 ```
 
-- **Folder = entity, slice = the entity's vertical cut.** The folder is the business entity the URL prefix
-  and registries name; a sub-resource lives in its owner's folder (harness-template in `harness/`, invite in
-  `member/`, workspace-runner in `runner/`). Never an umbrella concern folder (`catalog/` grouping dataset +
-  judge + model was the anti-pattern); never one mega-file per domain; never routes in server.ts; never tool
-  bodies in mcp.ts. The slice owns **both transports** — parity is structural, not a convention you remember.
+- **Root = layer, inside = domain.** `api/<domain>/` and `core/<domain>/` share the entity name — the
+  vertical slice spans layers by NAME. One-way imports: `common ← core ← api` (core never imports api).
+  A sub-resource lives in its owner's domain (harness-template in `harness/`, invite in `member/`). Never a
+  concern umbrella (`catalog/`) on the domain axis; never routes in server.ts; never tool bodies in mcp.ts.
+  The slice owns **both transports** — parity is structural, not a convention you remember. Storage is the
+  `@everdict/db`/`@everdict/registry` packages, injected — apps/api has no storage layer of its own.
 
 ## Call chain — one direction, always
 

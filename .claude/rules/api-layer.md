@@ -7,18 +7,19 @@ paths: "apps/api/**"
 repository, domain-packaged, one-way call chain). See skill `api-layer` for the recipe;
 `docs/architecture/api-route-modularization.md` is the design SSOT.
 
-- **Folder = the domain entity; slice = that entity's vertical cut through both transports.** `src/<domain>/`
-  is one folder per business entity directly under src — the thing the URL prefix and the registries name
-  (run, scorecard, harness, dataset, judge, model, runtime, benchmark, bundle, schedule, view, secret, member,
-  workspace, profile, notification, comment, api-key, runner, github-app, mattermost, trace-sink,
-  image-registry, ci-link, queue, billing, …). Inside it live that entity's files: `<resource>.routes.ts`
-  (HTTP registration) + `<resource>.mcp.ts` (the same resource's MCP tools) + `<resource>.schema.ts` (request
-  Zod DTOs + OpenAPI text, English — only when the resource has bodies) + `<resource>-service.ts` (logic) +
-  collaborator services + colocated tests. A **sub-resource lives in its owner's folder** (harness-template in
-  `harness/`, invite in `member/`, workspace-runner in `runner/`). **NEVER an umbrella concern folder**
-  (`catalog/`, `integrations/` as grouping buckets) — the folder axis is the entity, not the concern.
-  Machinery that is not a transport domain keeps concern folders: `execution/` (the case-execution engine),
-  `ops/` (instrumentation/recovery), `lib/`, `oauth/`.
+- **Two axes: root = layer, inside = domain.** `src/` has the layer roots — `api/` (transport) over `core/`
+  (business logic), with `common/` (cross-cutting helpers) and `infrastructure/` (external-client plumbing)
+  beneath both. **One-way: `common ← core ← api`** (api calls core; core never knows api; infrastructure
+  imports only common). Inside each layer, one folder per **domain entity**, the SAME name recurring across
+  layers (`api/run` + `core/run`, `api/scorecard` + `core/scorecard`, …): `api/<domain>/` holds
+  `<resource>.routes.ts` (HTTP registration) + `<resource>.mcp.ts` (the same resource's MCP tools) +
+  `<resource>.schema.ts` (request Zod DTOs + OpenAPI text, English — only when the resource has bodies) +
+  inject-based transport tests; `core/<domain>/` holds `<resource>-service.ts` + collaborator services +
+  service tests. A **sub-resource lives in its owner's domain** (harness-template in `harness/`, invite in
+  `member/`). **NEVER a concern umbrella** (`catalog/`, `integrations/`) on the domain axis. Engine machinery
+  lives in `core/execution/` and `core/ops/`; their thin transport surfaces in `api/execution/` + `api/ops/`.
+  The **storage layer is not in apps/api** — it is the `@everdict/db` + `@everdict/registry` packages (the
+  monorepo implements the module DAG at package level); services receive stores by injection.
 - **One-way call chain — transport → service → store/registry.** Same direction always; a lower layer never
   learns about an upper one. A transport handler may call a store **directly only for envelope-free trivial
   CRUD** (secrets list/set/remove); the first composition, policy, or cross-store read promotes a service.
@@ -40,7 +41,7 @@ repository, domain-packaged, one-way call chain). See skill `api-layer` for the 
   ...body }`) → ⑥ map failures via `sendError`. Anything conditional beyond this shape belongs in the service.
   Services never touch HTTP (no req/reply, no status codes). Response shaping (domain → response mapping) is the
   service's job — a route returns the service result verbatim.
-- **Shared context lives in `route-context.ts`** — `ServerDeps` + the auth chain (`resolveIdentity` /
+- **Shared context lives in `api/route-context.ts`** — `ServerDeps` + the auth chain (`resolveIdentity` /
   `applyActiveWorkspace` / `resolvePrincipal` / `resolveBearerPrincipal`) + `gate` / `sendError` / `zodIssues` /
   `constantTimeEq`. Route modules import from it; NEVER re-implement auth in a route (active-workspace logic has
   exactly one owner: `applyActiveWorkspace`).

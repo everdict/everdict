@@ -1,6 +1,9 @@
 # apps/api route modularization — split the 3676-line server.ts into resource route modules (design)
 
-> **Status: Rounds 1-3 SHIPPED.** Round 3 (`44963d5`+`d4f2405`): src regrouped by **domain entity** — 26
+> **Status: Rounds 1-3 SHIPPED · Round 4 IN PROGRESS.** Round 4 restores the **layer axis**: root = layer
+> (`api/` transport ← `core/` business, + `common/` + `infrastructure/`; one-way `common ← core ← api`),
+> domain folders INSIDE each layer with the same entity name recurring per layer (see the Round 4 section).
+> Round 3 (`44963d5`+`d4f2405`): src regrouped by **domain entity** — 26
 > entity folders (run · scorecard · harness · dataset · … · queue · billing), each owning its vertical slice
 > (routes + mcp + schema + service + tests); the concern umbrellas (catalog/, integrations/, runners/,
 > scheduling/) are gone; execution/ and ops/ remain machinery-only. 128 files moved as pure renames (import
@@ -199,3 +202,37 @@ root        server.ts, mcp.ts, mcp-context.ts, route-context.ts, main.ts, mcp.ro
 
 Pure `git mv` + import-path repointing (compiler-guided); no code-content changes. The route/tool surface and
 all 636 tests stay identical; gates as above plus the empty-env boot contract.
+
+## Round 4 — restore the layer axis (root = layer, inside = domain)
+
+Round 3 fixed the domain axis but flattened the layers into the entity folders. The source idiom is
+two-axis: **layer modules at the root** (one-way `common ← storage ← core ← api`), **domain packages inside
+each layer**, the same domain name recurring per layer. apps/api restores that:
+
+```
+src/
+  main.ts server.ts mcp.ts mcp.routes.ts (+ server.test.ts mcp.test.ts)   ← composition roots
+  api/                          ← transport layer
+    route-context.ts mcp-context.ts                                        ← transport-shared context
+    <domain>/ ×26   *.routes.ts *.mcp.ts *.schema.ts + inject transport tests
+                    (member/ also: membership-leave/list tests · workspace/: workspace-mcp.test ·
+                     profile/: profile-mcp.test · ci-link/: evaluate-args.test)
+    execution/      frontdoor-callback.routes.ts        ops/  internal.routes.ts
+  core/                         ← business layer (same domain names)
+    <domain>/       *-service.ts + collaborators + service tests
+                    (scorecard/ also: temporal-batch-driver · schedule/: temporal-schedule-driver ·
+                     harness/: harness-seed.test · runner/: runner-hub + github-runner-install)
+    execution/      execute-case, scoring-service, judge-runner, runtime-dispatcher,
+                    model-resolving-dispatcher, collect-trace, topology-backend, self-hosted-backend,
+                    store-callback-rendezvous (+tests)
+    ops/            metrics, adaptive-concurrency, concurrency, oom-boost, runtime-probe,
+                    runtime-spillover, shard-weights, speculation, startup-recovery, scheduling-config (+tests)
+  common/                       ← lib/ renamed (budget-tracker, image-ref, require-runtime, terminal-ticket,
+                                  usage-meter, version-tag-service, +tests)
+  infrastructure/               ← oauth/ moved (github-app, provider)
+```
+
+**No `storage/` in apps/api** — the storage layer is the `@everdict/db` + `@everdict/registry` packages: the
+monorepo already implements the module DAG at package level (`@everdict/core` ≈ the contracts/common tier);
+services receive stores by injection. Import direction inside the app: `common ← core ← api`; infrastructure
+imports only common; core never imports api. Pure `git mv` + import repointing; same gates as Round 3.
