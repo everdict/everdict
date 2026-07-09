@@ -25,6 +25,11 @@ export const EvalCaseSchema = z.object({
   id: z.string(),
   env: EnvSpecSchema,
   task: z.string(),
+  // Reference output/answer — case DATA (rows of inputs/outputs), not grader config. answer-match falls back to it
+  // and judges receive it as EXPECTED OUTPUT evidence. docs/architecture/eval-domain-model.md S5
+  expected: z.string().optional(),
+  // The case's DEFAULT grading plan — a scorecard run may override it (`POST /scorecards` `graders`), so re-scoring
+  // the same dataset differently never edits the dataset.
   graders: z.array(GraderSpecSchema),
   image: z.string().optional(),
   timeoutSec: z.number().default(1800),

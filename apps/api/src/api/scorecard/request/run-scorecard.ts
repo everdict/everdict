@@ -1,4 +1,4 @@
-import { JudgeRunConfigSchema } from "@everdict/core";
+import { GraderSpecSchema, JudgeRunConfigSchema } from "@everdict/core";
 import { z } from "zod";
 import { ScorecardOriginBodySchema } from "./scorecard-origin.js";
 
@@ -13,6 +13,9 @@ export const RunScorecardBodySchema = z.object({
   }),
   origin: ScorecardOriginBodySchema.optional(),
   judges: z.array(z.object({ id: z.string(), version: z.string().default("latest") })).default([]),
+  // Run-time grading plan — replaces every case's default graders for THIS batch (the dataset stays pure data;
+  // re-scoring differently never edits the dataset). Persisted in orchestration so resume/retry re-apply it.
+  graders: z.array(GraderSpecSchema).min(1).optional(),
   // tenant Runtime id to execute on (placement.target). A comma-separated list SHARDS the batch round-robin
   // across the listed runtimes (e.g. "nomad-seoul,k8s-east"); "auto" expands to every registered runtime.
   // Absent = default backend.

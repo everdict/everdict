@@ -29,6 +29,7 @@ import { weightedTargets } from "../ops/shard-weights.js";
 import { SpeculationController } from "../ops/speculation.js";
 import {
   type ScorecardServiceDeps,
+  applyGradingPlan,
   caseReason,
   childKey,
   exportStepMessage,
@@ -156,7 +157,8 @@ export class ScorecardBatchService {
         resolved,
         rec.subset ? { ids: rec.subset.ids, tags: rec.subset.tags, limit: rec.subset.limit } : undefined,
       );
-      dataset = { ...resolved, cases };
+      // Re-apply the recorded grading plan — resume must score exactly like the original submit.
+      dataset = { ...resolved, cases: applyGradingPlan(cases, rec.orchestration.graders) };
       if (this.deps.runStore) {
         const children = await this.deps.runStore.list(rec.tenant, { scorecardId: id });
         // Latest child per case wins (a batch resumed more than once has several children for a re-run case).
@@ -276,10 +278,12 @@ export class ScorecardBatchService {
     const orch = rec.orchestration;
     if (!orch) throw new BadRequestError("BAD_REQUEST", { scorecard: id }, "This batch has no orchestration inputs.");
     const resolved = await this.deps.datasets.get(rec.tenant, rec.dataset.id, rec.dataset.version);
-    const { cases } = selectSubsetCases(
+    const { cases: selected } = selectSubsetCases(
       resolved,
       rec.subset ? { ids: rec.subset.ids, tags: rec.subset.tags, limit: rec.subset.limit } : undefined,
     );
+    // Re-apply the recorded grading plan — a workflow-driven case must score exactly like the original submit.
+    const cases = applyGradingPlan(selected, orch.graders);
     // Sharding: same comma-list round-robin as the in-process loop, keyed by the SELECTED index so a re-plan after
     // a restart assigns every case the same target it had before.
     const targets = (rec.runtime ?? "")
@@ -672,7 +676,8 @@ export class ScorecardBatchService {
       resolved,
       src.subset ? { ids: src.subset.ids, tags: src.subset.tags, limit: src.subset.limit } : undefined,
     );
-    const dataset: Dataset = { ...resolved, cases };
+    // Re-apply the recorded grading plan — a retry must score exactly like the original submit.
+    const dataset: Dataset = { ...resolved, cases: applyGradingPlan(cases, src.orchestration?.graders) };
 
     let harnessSpec: HarnessSpec | undefined;
     const pins = src.origin?.pinOverrides;

@@ -73,6 +73,9 @@ Migrations: `packages/db/migrations/0006_create_scorecards.sql`, `0035_add_score
 | `GET /scorecards/:id` (full) | `get_scorecard` | `scorecards:read` |
 | `GET /scorecards/diff?baseline=&candidate=` | `diff_scorecards` | `scorecards:read` |
 
+Optional `graders: GraderSpec[]` is the **run-time grading plan** — it replaces every case's default graders for
+this batch only (the dataset stays pure data), and is persisted in `orchestration.graders` so restart-resume /
+retry-failed / Temporal re-plans score exactly like the original submit (docs/architecture/eval-domain-model.md S5).
 Optional `judges:[{id,version?}]` applies registered **Agent Judges** to each case's trace →
 `judge:<id>` scores in the summary (control-plane, trace-based). Judging **streams per case**: each case is
 judged as soon as it completes (bounded case-axis parallelism, deterministic per-case judge order), overlapping

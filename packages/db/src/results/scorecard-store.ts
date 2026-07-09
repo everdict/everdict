@@ -1,4 +1,4 @@
-import { ScorecardSchema } from "@everdict/core";
+import { GraderSpecSchema, ScorecardSchema } from "@everdict/core";
 import { z } from "zod";
 
 // Scorecard run lifecycle: accept a dataset×harness batch eval → run → success/failure.
@@ -145,6 +145,9 @@ export const ScorecardRecordSchema = z.object({
   orchestration: z
     .object({
       judges: z.array(z.object({ id: z.string(), version: z.string() })).default([]),
+      // Run-time grading plan — replaced every case's default graders at submit; persisted so resume/retry/
+      // workflow re-plans score exactly like the original. docs/architecture/eval-domain-model.md S5
+      graders: z.array(GraderSpecSchema).optional(),
       judge: z.object({ provider: z.enum(["openai", "anthropic"]).optional(), model: z.string() }).optional(),
       concurrency: z.number().int().positive(),
       retries: z.number().int().min(0).default(0),

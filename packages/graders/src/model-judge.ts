@@ -13,6 +13,7 @@ interface JudgeInput {
   dom?: string;
   screenshot?: JudgeImage;
   response?: string; // result-channel final response (prompt snapshot output)
+  expected?: string; // the case's reference output (EvalCase.expected)
   rubric?: string;
   criteria?: JudgeCriterion[]; // multi-criteria: the verdict must score every listed criterion
   promptTemplate?: string; // custom prompt (must carry {verdict_instruction}); absent → the default template
@@ -53,13 +54,14 @@ function renderTemplate(template: string, input: JudgeInput): string {
     rubric: input.rubric ?? "",
     criteria: criteriaText(input.criteria),
     dom: input.dom ? input.dom.slice(0, MAX_CHARS) : "",
+    expected: input.expected ? input.expected.slice(0, MAX_CHARS) : "",
     final_answer: finalAnswer.slice(0, MAX_CHARS),
     response: input.response ? input.response.slice(0, MAX_CHARS) : "",
     trace: input.trace ? JSON.stringify(input.trace).slice(0, MAX_CHARS) : "",
     verdict_instruction: verdictInstruction(input.criteria),
   };
   return template.replace(
-    /\{(task|rubric|criteria|dom|final_answer|response|trace|verdict_instruction)\}/g,
+    /\{(task|rubric|criteria|dom|expected|final_answer|response|trace|verdict_instruction)\}/g,
     (_, key: string) => values[key] ?? "",
   );
 }
@@ -79,6 +81,7 @@ function buildPrompt(input: JudgeInput): string {
     `TASK:\n${input.task}`,
     input.rubric ? `RUBRIC:\n${input.rubric}` : "",
     criteria ? `CRITERIA (score each):\n${criteria}` : "",
+    input.expected ? `EXPECTED OUTPUT (reference):\n${input.expected.slice(0, MAX_CHARS)}` : "",
     input.dom ? `FINAL DOM (truncated):\n${input.dom.slice(0, MAX_CHARS)}` : "",
     input.screenshot
       ? "A SCREENSHOT of the final UI/desktop state is attached. Judge whether it shows the task's goal state."

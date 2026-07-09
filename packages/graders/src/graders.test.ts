@@ -59,6 +59,19 @@ describe("answer-match grader (QA benchmark answer matching)", () => {
     const g = makeGraders([{ id: "answer-match", config: { expect: "x" } }]);
     expect(g[0]?.id).toBe("answer-match");
   });
+
+  it("falls back to the case's own `expected` row data; an explicit expect config wins (dataset purification)", async () => {
+    const base = ctxWithAnswer("Python was first released in 1991.");
+    const ctx: GradeContext = { ...base, case: { ...base.case, expected: "1991" } };
+    // No config → the case row data decides.
+    expect((await new AnswerMatchGrader().grade(ctx)).pass).toBe(true);
+    // Config wins over the row data.
+    expect((await new AnswerMatchGrader("2020").grade(ctx)).pass).toBe(false);
+    // makeGraders without expect config leaves the fallback open (regression: "" used to block it).
+    const [g] = makeGraders([{ id: "answer-match" }]);
+    const [score] = toScores((await g?.grade(ctx)) ?? []);
+    expect(score?.pass).toBe(true);
+  });
 });
 
 describe("JudgeGrader", () => {
@@ -120,6 +133,20 @@ describe("JudgeGrader", () => {
     expect(scores[1]?.metric).toBe("judge:accuracy");
     expect(scores[1]?.pass).toBeUndefined();
     expect(String(scores[1]?.detail)).toContain("skipped");
+  });
+
+  it("passes the case's expected output to the judge (EXPECTED OUTPUT evidence)", async () => {
+    let received: Parameters<Judge["judge"]>[0] | undefined;
+    const spy: Judge = {
+      async judge(input) {
+        received = input;
+        return { pass: true, score: 1, reason: "ok" };
+      },
+    };
+    const base = browserCtx("<html/>", "https://x");
+    const ctx: GradeContext = { ...base, case: { ...base.case, expected: "the reference answer" } };
+    await new JudgeGrader(spy).grade(ctx);
+    expect(received?.expected).toBe("the reference answer");
   });
 
   it("passes the prompt snapshot's output to the judge as the final response (regression: judges got an empty snapshot for trace-less runs)", async () => {

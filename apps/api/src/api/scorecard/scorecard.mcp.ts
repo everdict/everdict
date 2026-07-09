@@ -39,6 +39,13 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
             .array(z.object({ id: z.string(), version: z.string().optional() }))
             .optional()
             .describe("Agent Judges to apply to the trace (version defaults to latest)"),
+          graders: z
+            .array(z.object({ id: z.string(), config: z.record(z.unknown()).optional() }))
+            .min(1)
+            .optional()
+            .describe(
+              "run-time grading plan (GraderSpec[] {id, config?}) — replaces every case's default graders for THIS batch; the dataset stays untouched",
+            ),
           judge: z
             .object({ provider: z.enum(["openai", "anthropic"]).optional(), model: z.string() })
             .optional()
@@ -115,6 +122,7 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
         harness_pins,
         runtime,
         judges,
+        graders,
         judge,
         concurrency,
         retries,
@@ -137,6 +145,7 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
               },
               origin: { source: originSource(principal.via), ...(origin ?? {}) },
               judges: (judges ?? []).map((j) => ({ id: j.id, version: j.version ?? "latest" })),
+              ...(graders ? { graders } : {}),
               ...(judge ? { judge } : {}),
               ...(runtime ? { runtime } : {}),
               ...(concurrency !== undefined ? { concurrency } : {}),

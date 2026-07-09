@@ -2625,3 +2625,65 @@ describe("ScorecardService — trace-correlation runId on batch jobs (observabil
     expect(jobs[0]?.runId).toBe(`evd-${rec.id}-x1`);
   });
 });
+
+describe("ScorecardService.submit — run-time grading plan (dataset stays pure data)", () => {
+  const planDataset: Dataset = {
+    id: "pd",
+    version: "1.0.0",
+    cases: [
+      {
+        id: "c1",
+        env: { kind: "prompt" },
+        task: "t",
+        expected: "42",
+        graders: [{ id: "steps" }],
+        timeoutSec: 60,
+        tags: [],
+      },
+    ],
+    tags: [],
+  };
+  const capture = (jobs: AgentJob[]): Dispatcher => ({
+    async dispatch(job) {
+      jobs.push(job);
+      return { ...caseResult(true), caseId: job.evalCase.id };
+    },
+  });
+
+  it("a graders plan replaces every dispatched case's defaults and is persisted in orchestration (resume/retry parity)", async () => {
+    const store = new InMemoryScorecardStore();
+    const datasets = new InMemoryDatasetRegistry();
+    await datasets.register("acme", planDataset);
+    const jobs: AgentJob[] = [];
+    const service = new ScorecardService({ dispatcher: capture(jobs), store, datasets, newId: () => "sc-plan" });
+    await service.submit({
+      tenant: "acme",
+      dataset: { id: "pd", version: "1.0.0" },
+      harness: { id: "scripted", version: "0" },
+      graders: [{ id: "answer-match" }, { id: "cost" }],
+    });
+    for (let i = 0; i < 100 && (await store.get("sc-plan"))?.status !== "succeeded"; i++)
+      await new Promise((r) => setTimeout(r, 5));
+    expect(jobs[0]?.evalCase.graders.map((g) => g.id)).toEqual(["answer-match", "cost"]); // the plan, not the case default
+    expect(jobs[0]?.evalCase.expected).toBe("42"); // row data rides along untouched
+    const rec = await store.get("sc-plan");
+    expect(rec?.orchestration?.graders?.map((g) => g.id)).toEqual(["answer-match", "cost"]);
+  });
+
+  it("without a plan, each case keeps its own default graders and nothing extra is persisted", async () => {
+    const store = new InMemoryScorecardStore();
+    const datasets = new InMemoryDatasetRegistry();
+    await datasets.register("acme", planDataset);
+    const jobs: AgentJob[] = [];
+    const service = new ScorecardService({ dispatcher: capture(jobs), store, datasets, newId: () => "sc-noplan" });
+    await service.submit({
+      tenant: "acme",
+      dataset: { id: "pd", version: "1.0.0" },
+      harness: { id: "scripted", version: "0" },
+    });
+    for (let i = 0; i < 100 && (await store.get("sc-noplan"))?.status !== "succeeded"; i++)
+      await new Promise((r) => setTimeout(r, 5));
+    expect(jobs[0]?.evalCase.graders.map((g) => g.id)).toEqual(["steps"]);
+    expect((await store.get("sc-noplan"))?.orchestration?.graders).toBeUndefined();
+  });
+});

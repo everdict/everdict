@@ -6,6 +6,8 @@ import {
   type CaseResult,
   type Dataset,
   EnvSnapshotSchema,
+  type EvalCase,
+  type GraderSpec,
   type HarnessSecretMaps,
   type JudgeRunConfig,
   type RegistryAuth,
@@ -150,6 +152,14 @@ export function selectSubsetCases(
   };
 }
 
+// Run-time grading plan (docs/architecture/eval-domain-model.md S5) — overrides EVERY case's default graders for
+// this batch only, so re-scoring a dataset differently never edits the dataset. Pure function; applied at submit
+// AND at every re-materialization point (resume / retry-failed / Temporal planBatch) from the persisted orchestration.
+export function applyGradingPlan(cases: EvalCase[], plan?: GraderSpec[]): EvalCase[] {
+  if (!plan || plan.length === 0) return cases;
+  return cases.map((c) => ({ ...c, graders: plan }));
+}
+
 export interface RunScorecardInput {
   tenant: string;
   // submitter (principal.subject) — the owner used to resolve a private-repo case's personally-owned connection ("clone via my connection").
@@ -161,6 +171,9 @@ export interface RunScorecardInput {
   harness: { id: string; version: string; pins?: Record<string, string> };
   origin?: ScorecardOrigin; // trigger origin (provenance) — the route/schedule stamps source
   judges?: Array<{ id: string; version: string }>; // selected Agent Judges — applied to the trace
+  // Run-time grading plan — replaces every case's default graders for THIS batch (the dataset stays pure data).
+  // Persisted in orchestration so resume/retry re-apply it. Absent = each case's own graders.
+  graders?: GraderSpec[];
   runtime?: string; // tenant Runtime id to run on (placement.target). Absent = default backend.
   judge?: JudgeRunConfig; // inline judge-grader scoring-model override (defaults to the workspace default if unset)
   // Number of cases to dispatch concurrently within one batch (runSuite parallelism). Defaults to the service default if unset.

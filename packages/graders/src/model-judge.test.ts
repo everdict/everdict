@@ -135,6 +135,22 @@ describe("modelJudge", () => {
     expect(v.criteria?.accuracy?.pass).toBe(false); // 0.9 < 0.95 despite the model's pass:true
   });
 
+  it("includes the case's expected output as reference evidence (default section + {expected} placeholder)", async () => {
+    const complete = vi.fn((_prompt: string) => Promise.resolve('{"pass":true,"score":1,"reason":"ok"}'));
+    await modelJudge(complete).judge({ task: "t", trace: TRACE, expected: "the reference answer" });
+    const prompt = complete.mock.calls[0]?.[0] ?? "";
+    expect(prompt).toContain("EXPECTED OUTPUT (reference):");
+    expect(prompt).toContain("the reference answer");
+
+    const complete2 = vi.fn((_prompt: string) => Promise.resolve('{"pass":true,"score":1,"reason":"ok"}'));
+    await modelJudge(complete2).judge({
+      task: "t",
+      expected: "ref",
+      promptTemplate: "Reference: {expected}\n{verdict_instruction}",
+    });
+    expect(complete2.mock.calls[0]?.[0]).toContain("Reference: ref");
+  });
+
   it("includes the result-channel final response in the prompt when the trace has no assistant answer (regression: it was dropped, leaving the judge without evidence)", async () => {
     const complete = vi.fn((_prompt: string) => Promise.resolve('{"pass":true,"score":1,"reason":"ok"}'));
     await modelJudge(complete).judge({ task: "t", trace: TRACE, response: "the produced result body" });

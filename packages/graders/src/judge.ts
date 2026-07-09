@@ -36,6 +36,7 @@ export interface Judge {
     screenshotRef?: string; // External ref such as a browser snapshot (model transport uses screenshot)
     screenshot?: JudgeImage; // Image bytes resolved for VLM input
     response?: string; // Final response from the result channel (prompt snapshot output) — the only evidence when the trace has no assistant message
+    expected?: string; // the case's reference output (EvalCase.expected) — EXPECTED OUTPUT evidence
     rubric?: string;
     criteria?: JudgeCriterion[]; // multi-criteria: the verdict must score every listed criterion
     promptTemplate?: string; // custom judging prompt (must carry {verdict_instruction}) — absent: the default template
@@ -91,6 +92,7 @@ export class JudgeGrader implements Grader {
       screenshotRef: snap.kind === "browser" && this.opts.useScreenshot ? snap.screenshotRef : undefined,
       ...(screenshot ? { screenshot } : {}),
       ...(snap.kind === "prompt" && snap.output ? { response: snap.output } : {}),
+      ...(ctx.case.expected ? { expected: ctx.case.expected } : {}),
       rubric: this.opts.rubric,
       ...(this.opts.criteria?.length ? { criteria: this.opts.criteria } : {}),
       ...(this.opts.promptTemplate ? { promptTemplate: this.opts.promptTemplate } : {}),

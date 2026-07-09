@@ -83,7 +83,8 @@ export function makeGraders(specs: GraderSpec[], opts: { judge?: Judge } = {}): 
       case "url-matches":
         return new UrlMatchesGrader(String(s.config?.pattern ?? ".*"));
       case "answer-match":
-        return new AnswerMatchGrader(String(s.config?.expect ?? ""), s.config?.mode === "exact" ? "exact" : "contains");
+        // No expect config → undefined (NOT ""), so the grader can fall back to the case's own `expected` row data.
+        return new AnswerMatchGrader(optStr(s.config?.expect), s.config?.mode === "exact" ? "exact" : "contains");
       case "text-metric":
         // Numeric metric recovered from the agent's printed output (trace:none stdout tail) — pattern/metric are required data.
         return new TextMetricGrader({

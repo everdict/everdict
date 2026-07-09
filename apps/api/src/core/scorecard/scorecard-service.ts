@@ -18,6 +18,7 @@ import {
   type PullIngestInput,
   type RunScorecardInput,
   type ScorecardServiceDeps,
+  applyGradingPlan,
   selectSubsetCases,
 } from "./scorecard-shared.js";
 
@@ -107,7 +108,8 @@ export class ScorecardService {
     const resolved = await this.deps.datasets.get(input.tenant, input.dataset.id, input.dataset.version || "latest");
     // Partial run — the rest of the pipeline (batch/judge/aggregate) operates on a dataset containing only the selected cases. Marked via record.subset.
     const { cases: selectedCases, subset } = selectSubsetCases(resolved, input.cases);
-    const dataset: Dataset = subset ? { ...resolved, cases: selectedCases } : resolved;
+    // Run-time grading plan — this batch scores with the requested graders instead of each case's defaults (S5).
+    const dataset: Dataset = { ...resolved, cases: applyGradingPlan(selectedCases, input.graders) };
 
     // Resolve the harness version (latest→concrete) + embed the declarative spec. Built-ins (scripted/claude-code) aren't in the registry → as-given.
     // If submit-time ephemeral pins are present, use resolveWithPins with no fallback — evaluation must not pass while silently ignoring the pins.
@@ -162,6 +164,7 @@ export class ScorecardService {
       // reconstructed after a control-plane restart. docs/architecture/batch-resilience.md
       orchestration: {
         judges: input.judges ?? [],
+        ...(input.graders && input.graders.length > 0 ? { graders: input.graders } : {}),
         ...(judge ? { judge } : {}),
         concurrency,
         retries,

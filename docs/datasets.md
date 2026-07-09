@@ -131,6 +131,11 @@ gated benchmark end-to-end from the web. The wizard is state-aware: gated + no t
 
 ## Contract (`@everdict/core`)
 `Dataset = { id, version, description?, cases: EvalCase[], tags: string[], producedBy? }` (`DatasetSchema`).
+A case is **rows of inputs/outputs** (docs/architecture/eval-domain-model.md S5): `EvalCase.expected?` carries the
+reference output as case DATA — `answer-match` falls back to it when the grader has no `expect` config, and judges
+receive it as `EXPECTED OUTPUT` evidence (`{expected}` placeholder). `EvalCase.graders` is only the case's
+**default** grading plan — a scorecard run may override it (`POST /scorecards` `graders`), so re-scoring the same
+dataset differently never edits the dataset.
 `producedBy` (`{ via: recipe|catalog|spec, id, version? }`) is **content** stamped at import (it *is* part of
 `specsEqual`) — the intrinsic "how it was made", powering the dataset→recipe reverse link. `createdBy` and the
 tombstone are **registry metadata** (not on the Dataset content) — so immutability stays content-only and a
