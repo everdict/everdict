@@ -3592,6 +3592,11 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
           shell.onData((chunk: string) => {
             if (ws.readyState === OPEN) ws.send(chunk);
           });
+          shell.onError((err) => {
+            // a transport/spawn failure would otherwise be silent — surface it to the terminal, then close.
+            if (ws.readyState === OPEN) ws.send(`\r\n[everdict] terminal error: ${err.message}\r\n`);
+            ws.close();
+          });
           shell.onExit(() => ws.close());
           for (const buffered of pending) shell.write(buffered); // flush what the user typed before the shell was ready
           pending.length = 0;

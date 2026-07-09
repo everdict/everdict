@@ -1,7 +1,8 @@
+import { EventEmitter } from "node:events";
 import { RESULT_SENTINEL } from "@everdict/agent";
 import { type AgentJob, BadRequestError, type CaseResult } from "@everdict/core";
 import { describe, expect, it, vi } from "vitest";
-import { NomadBackend, type NomadHttp, buildNomadJob, fetchHttp } from "./nomad.js";
+import { NomadBackend, type NomadHttp, type StreamChild, buildNomadJob, fetchHttp, streamHandleFor } from "./nomad.js";
 import { staticSecrets } from "./secrets.js";
 import { perTenantTrustZones, staticTrustZones } from "./trust-zone.js";
 
@@ -470,5 +471,96 @@ describe("NomadBackend.exec — one-shot exec into a live case alloc", () => {
     });
     expect(await backend.exec("c1", "ls")).toBeUndefined();
     expect(ran).toBe(false); // never shells out when there's no running alloc
+  });
+});
+
+// A fake spawned child (EventEmitter-backed) so the handle wiring is testable without spawning a real `nomad`.
+function fakeStreamChild() {
+  const stdout = new EventEmitter();
+  const stderr = new EventEmitter();
+  const proc = new EventEmitter();
+  const stdinErr = new EventEmitter();
+  const writes: string[] = [];
+  let killed = false;
+  let writeShouldThrow = false;
+  const child: StreamChild = {
+    stdin: {
+      write: (chunk) => {
+        if (writeShouldThrow) throw new Error("EPIPE");
+        writes.push(chunk);
+      },
+      on: (event, listener) => {
+        stdinErr.on(event, listener);
+      },
+    },
+    stdout: {
+      on: (event, listener) => {
+        stdout.on(event, listener);
+      },
+    },
+    stderr: {
+      on: (event, listener) => {
+        stderr.on(event, listener);
+      },
+    },
+    on: (event, listener) => {
+      proc.on(event, listener);
+    },
+    kill: () => {
+      killed = true;
+    },
+  };
+  return {
+    child,
+    emitStdout: (s: string) => stdout.emit("data", Buffer.from(s)),
+    emitStderr: (s: string) => stderr.emit("data", Buffer.from(s)),
+    emitError: (e: Error) => proc.emit("error", e),
+    emitClose: (code: number | null) => proc.emit("close", code),
+    breakWrite: () => {
+      writeShouldThrow = true;
+    },
+    writes,
+    killed: () => killed,
+  };
+}
+
+describe("streamHandleFor (ExecStreamHandle wiring — the terminal PTY handle)", () => {
+  it("fans stdout+stderr to onData, delivers errors to onError, reports the exit code, and kills on close", () => {
+    const f = fakeStreamChild();
+    const handle = streamHandleFor(f.child);
+    const chunks: string[] = [];
+    handle.onData((c) => chunks.push(c));
+    const errors: string[] = [];
+    handle.onError((e) => errors.push(e.message));
+    let exit: number | null = -99;
+    handle.onExit((code) => {
+      exit = code;
+    });
+
+    f.emitStdout("hello ");
+    f.emitStderr("world");
+    expect(chunks).toEqual(["hello ", "world"]);
+
+    handle.write("ls\n");
+    expect(f.writes).toEqual(["ls\n"]);
+
+    f.emitError(new Error("spawn nomad ENOENT"));
+    expect(errors).toEqual(["spawn nomad ENOENT"]);
+
+    f.emitClose(0);
+    expect(exit).toBe(0);
+
+    handle.close();
+    expect(f.killed()).toBe(true);
+  });
+
+  it("never crashes: a spawn 'error' with no onError subscriber is absorbed, and a write on a dead shell is swallowed", () => {
+    const f = fakeStreamChild();
+    const handle = streamHandleFor(f.child); // NB: no onError registered
+    // Without the eager error sink this would be an uncaught 'error' event → a process crash.
+    expect(() => f.emitError(new Error("boom"))).not.toThrow();
+    // A keystroke after the shell exited must not propagate the EPIPE.
+    f.breakWrite();
+    expect(() => handle.write("late")).not.toThrow();
   });
 });

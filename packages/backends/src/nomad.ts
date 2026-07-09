@@ -14,6 +14,7 @@ import type {
   AdoptOutcome,
   Backend,
   BackendCapacity,
+  ExecStreamHandle,
   Observable,
   ProbeResult,
   Probeable,
@@ -201,6 +202,42 @@ function parseResult(stdout: string): CaseResult {
   if (idx < 0) throw new UpstreamError("UPSTREAM_ERROR", undefined, "could not find the agent result (sentinel).");
   const line = stdout.slice(idx + RESULT_SENTINEL.length).split("\n")[0] ?? "";
   return CaseResultSchema.parse(JSON.parse(line));
+}
+
+// The child-process surface streamHandleFor needs — a structural subset of Node's spawned ChildProcess (stdio:"pipe"),
+// so the handle-building logic is testable with a fake instead of a real `nomad` spawn.
+export interface StreamChild {
+  readonly stdin: { write(chunk: string): void; on(event: "error", listener: (err: Error) => void): void };
+  readonly stdout: { on(event: "data", listener: (chunk: Buffer) => void): void };
+  readonly stderr: { on(event: "data", listener: (chunk: Buffer) => void): void };
+  on(event: "error", listener: (err: Error) => void): void;
+  on(event: "close", listener: (code: number | null) => void): void;
+  kill(signal: "SIGKILL"): void;
+}
+
+// Wrap a spawned interactive shell process into an ExecStreamHandle. Pure (no spawn) so it's unit-testable.
+export function streamHandleFor(child: StreamChild): ExecStreamHandle {
+  // Eager error sinks: a spawn failure (e.g. `nomad` not on PATH) or a stdin EPIPE emits an async 'error' event —
+  // with no listener that is an UNCAUGHT exception that crashes the control plane. Register no-ops up front so the
+  // process is safe even when the consumer never calls onError; real onError callbacks fan out on top.
+  child.on("error", () => {});
+  child.stdin.on("error", () => {});
+  return {
+    write: (data) => {
+      try {
+        child.stdin.write(data);
+      } catch {
+        // the shell already exited — dropping a keystroke on a dead shell is fine (best-effort terminal input)
+      }
+    },
+    onData: (cb) => {
+      child.stdout.on("data", (d) => cb(String(d)));
+      child.stderr.on("data", (d) => cb(String(d)));
+    },
+    onError: (cb) => child.on("error", (err) => cb(err)),
+    onExit: (cb) => child.on("close", (code) => cb(code)),
+    close: () => child.kill("SIGKILL"),
+  };
 }
 
 // Model B: launch the runner-agent as a Nomad batch alloc, poll for completion, then
@@ -406,15 +443,7 @@ export class NomadBackend implements Backend, Recoverable, Observable, Shellable
 
   // Open an interactive shell inside the case's live alloc (observability ⑥) — `nomad alloc exec -i -task agent
   // <alloc> /bin/sh`. Returns a stream handle the WS terminal route pipes to. undefined = no running alloc.
-  async execStream(caseId: string): Promise<
-    | {
-        write(data: string): void;
-        onData(cb: (chunk: string) => void): void;
-        onExit(cb: (code: number | null) => void): void;
-        close(): void;
-      }
-    | undefined
-  > {
+  async execStream(caseId: string): Promise<ExecStreamHandle | undefined> {
     try {
       const prefix = `everdict-${caseId}-`;
       const res = await this.http.request("GET", `/v1/jobs?prefix=${encodeURIComponent(prefix)}&namespace=*`);
@@ -435,16 +464,7 @@ export class NomadBackend implements Backend, Recoverable, Observable, Shellable
       const env: Record<string, string> = { ...process.env, NOMAD_ADDR: this.opts.addr };
       if (this.opts.apiToken) env.NOMAD_TOKEN = this.opts.apiToken;
       const args = ["alloc", "exec", "-i", "-task", "agent", ...(ns ? ["-namespace", ns] : []), alloc.ID, "/bin/sh"];
-      const child = spawn("nomad", args, { stdio: ["pipe", "pipe", "pipe"], env });
-      return {
-        write: (data) => child.stdin.write(data),
-        onData: (cb) => {
-          child.stdout.on("data", (d: Buffer) => cb(String(d)));
-          child.stderr.on("data", (d: Buffer) => cb(String(d)));
-        },
-        onExit: (cb) => child.on("close", (code) => cb(code)),
-        close: () => child.kill("SIGKILL"),
-      };
+      return streamHandleFor(spawn("nomad", args, { stdio: ["pipe", "pipe", "pipe"], env }));
     } catch {
       return undefined;
     }
