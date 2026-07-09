@@ -98,6 +98,7 @@ import { installGithubWorkspaceRunner } from "./runners/github-runner-install.js
 import type { RunnerHub } from "./runners/runner-hub.js";
 import { PairRunnerBodySchema, RUNNER_CAPABILITIES, type RunnerService } from "./runners/runner-service.js";
 import { type ScheduleService, isValidCron } from "./scheduling/schedule-service.js";
+import { registerScheduleRoutes } from "./scheduling/schedule.routes.js";
 import { COMMENT_RESOURCE_TYPES, type CommentService } from "./workspace/comment-service.js";
 import type { MembershipService } from "./workspace/membership-service.js";
 import type { NotificationService } from "./workspace/notification-service.js";
@@ -198,33 +199,6 @@ export const ImportHarborBodySchema = z.object({
   imageTemplate: z.string().optional(),
   description: z.string().optional(),
   tags: z.array(z.string()).optional(),
-});
-
-// Scheduled (cron) scorecard request — the definition that flows into ScorecardService.submit on fire (= RunScorecardBody minus the judge override).
-const ScheduleRunTemplateBodySchema = z.object({
-  dataset: z.object({ id: z.string(), version: z.string().default("latest") }),
-  harness: z.object({ id: z.string(), version: z.string().default("latest") }),
-  judges: z.array(z.object({ id: z.string(), version: z.string().default("latest") })).default([]),
-  runtime: z.string().optional(),
-  concurrency: z.number().int().min(1).max(64).optional(),
-});
-const cronExpr = z.string().refine(isValidCron, "invalid cron expression (5 fields: minute hour day month weekday).");
-const overlapPolicy = z.enum(["skip", "bufferOne", "allowAll"]);
-export const CreateScheduleBodySchema = z.object({
-  name: z.string().min(1),
-  cron: cronExpr,
-  timezone: z.string().default("UTC"), // IANA tz (e.g. "Asia/Seoul")
-  overlapPolicy: overlapPolicy.default("skip"),
-  enabled: z.boolean().default(true),
-  runTemplate: ScheduleRunTemplateBodySchema,
-});
-export const UpdateScheduleBodySchema = z.object({
-  name: z.string().min(1).optional(),
-  cron: cronExpr.optional(),
-  timezone: z.string().optional(),
-  overlapPolicy: overlapPolicy.optional(),
-  enabled: z.boolean().optional(), // pause/resume
-  runTemplate: ScheduleRunTemplateBodySchema.optional(),
 });
 
 // Secret name = env-variable format (since it's injected as job env).
@@ -1802,110 +1776,8 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     }
   });
 
-  // --- scheduled (cron) scorecards — stored RunScorecardInput + cron expression + policy. Firing (Temporal Schedule) is slice 2. ---
-  // The fired run's submittedBy = the creator (principal.subject): budget → tenant, private-repo connection resolution.
-  app.post("/schedules", async (req, reply) => {
-    if (!deps.scheduleService)
-      return reply.code(404).send({ code: "NOT_FOUND", message: "schedule service not configured" });
-    const principal = await resolvePrincipal(req, reply, deps);
-    if (!principal) return reply;
-    try {
-      gate(principal, "schedules:write");
-    } catch (err) {
-      return sendError(reply, err);
-    }
-    let body: z.infer<typeof CreateScheduleBodySchema>;
-    try {
-      body = CreateScheduleBodySchema.parse(req.body);
-    } catch (err) {
-      return reply.code(400).send({ code: "BAD_REQUEST", message: (err as Error).message });
-    }
-    try {
-      return reply
-        .code(201)
-        .send(
-          await deps.scheduleService.create({ tenant: principal.workspace, createdBy: principal.subject, ...body }),
-        );
-    } catch (err) {
-      return sendError(reply, err);
-    }
-  });
-
-  app.get("/schedules", async (req, reply) => {
-    if (!deps.scheduleService)
-      return reply.code(404).send({ code: "NOT_FOUND", message: "schedule service not configured" });
-    const principal = await resolvePrincipal(req, reply, deps);
-    if (!principal) return reply;
-    try {
-      gate(principal, "schedules:read");
-    } catch (err) {
-      return sendError(reply, err);
-    }
-    return reply.send(await deps.scheduleService.list(principal.workspace));
-  });
-
-  app.get<{ Params: { id: string } }>("/schedules/:id", async (req, reply) => {
-    if (!deps.scheduleService)
-      return reply.code(404).send({ code: "NOT_FOUND", message: "schedule service not configured" });
-    const principal = await resolvePrincipal(req, reply, deps);
-    if (!principal) return reply;
-    try {
-      gate(principal, "schedules:read");
-    } catch (err) {
-      return sendError(reply, err);
-    }
-    try {
-      return reply.send(await deps.scheduleService.get(principal.workspace, req.params.id)); // 404 if not found
-    } catch (err) {
-      return sendError(reply, err);
-    }
-  });
-
-  app.patch<{ Params: { id: string } }>("/schedules/:id", async (req, reply) => {
-    if (!deps.scheduleService)
-      return reply.code(404).send({ code: "NOT_FOUND", message: "schedule service not configured" });
-    const principal = await resolvePrincipal(req, reply, deps);
-    if (!principal) return reply;
-    try {
-      gate(principal, "schedules:write");
-    } catch (err) {
-      return sendError(reply, err);
-    }
-    let body: z.infer<typeof UpdateScheduleBodySchema>;
-    try {
-      body = UpdateScheduleBodySchema.parse(req.body);
-    } catch (err) {
-      return reply.code(400).send({ code: "BAD_REQUEST", message: (err as Error).message });
-    }
-    try {
-      return reply.send(
-        await deps.scheduleService.update(principal.workspace, req.params.id, body, {
-          subject: principal.subject,
-          isAdmin: principal.roles.includes("admin"),
-        }),
-      ); // 404 if not found (content edits are creator·admin only → 403)
-    } catch (err) {
-      return sendError(reply, err);
-    }
-  });
-
-  app.delete<{ Params: { id: string } }>("/schedules/:id", async (req, reply) => {
-    if (!deps.scheduleService)
-      return reply.code(404).send({ code: "NOT_FOUND", message: "schedule service not configured" });
-    const principal = await resolvePrincipal(req, reply, deps);
-    if (!principal) return reply;
-    try {
-      gate(principal, "schedules:write");
-    } catch (err) {
-      return sendError(reply, err);
-    }
-    try {
-      await deps.scheduleService.remove(principal.workspace, req.params.id); // 404 if not found
-      return reply.code(204).send();
-    } catch (err) {
-      return sendError(reply, err);
-    }
-  });
+  // scheduled (cron) scorecards → scheduling/schedule.routes.ts
+  registerScheduleRoutes(app, deps);
 
   // saved scorecard-analysis Views → workspace/view.routes.ts
   registerViewRoutes(app, deps);
