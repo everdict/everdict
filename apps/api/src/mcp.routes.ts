@@ -3,9 +3,9 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import type { FastifyReply, FastifyRequest } from "fastify";
 import type { FastifyInstance } from "fastify";
+import { type ServerDeps, gate, resolvePrincipal, sendError, zodIssues } from "./api/route-context.js";
+import { baseUrl, mcpChallenge, protectedResourceMetadata, resolveBearerPrincipal } from "./api/route-context.js";
 import { buildMcpServer } from "./mcp.js";
-import { type ServerDeps, gate, resolvePrincipal, sendError, zodIssues } from "./route-context.js";
-import { baseUrl, mcpChallenge, protectedResourceMetadata, resolveBearerPrincipal } from "./route-context.js";
 
 // MCP (agent-facing surface, OAuth-protected): RFC 9728 discovery + the Streamable HTTP endpoint (stateful sessions keyed by mcp-session-id).
 export function registerMcpRoutes(app: FastifyInstance, deps: ServerDeps): void {

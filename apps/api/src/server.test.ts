@@ -27,23 +27,23 @@ import {
   InMemoryRuntimeRegistry,
 } from "@everdict/registry";
 import { describe, expect, it } from "vitest";
-import { BenchmarkService } from "./benchmark/benchmark-service.js";
-import { BundleService } from "./bundle/bundle-service.js";
-import { defaultJudgeRunner } from "./execution/judge-runner.js";
-import { GithubAppService } from "./github-app/github-app-service.js";
-import { ImageRegistryService } from "./image-registry/image-registry-service.js";
-import { persistentBudget } from "./lib/budget-tracker.js";
-import { TerminalTicketStore } from "./lib/terminal-ticket.js";
-import { MattermostCommandService } from "./mattermost/mattermost-command-service.js";
-import { MattermostService } from "./mattermost/mattermost-service.js";
-import { MembershipService } from "./member/membership-service.js";
-import { RunService, type RunServiceDeps } from "./run/run-service.js";
-import { RunnerService } from "./runner/runner-service.js";
-import { ScheduleService } from "./schedule/schedule-service.js";
-import { ScorecardService } from "./scorecard/scorecard-service.js";
+import { persistentBudget } from "./common/budget-tracker.js";
+import { TerminalTicketStore } from "./common/terminal-ticket.js";
+import { BenchmarkService } from "./core/benchmark/benchmark-service.js";
+import { BundleService } from "./core/bundle/bundle-service.js";
+import { defaultJudgeRunner } from "./core/execution/judge-runner.js";
+import { GithubAppService } from "./core/github-app/github-app-service.js";
+import { ImageRegistryService } from "./core/image-registry/image-registry-service.js";
+import { MattermostCommandService } from "./core/mattermost/mattermost-command-service.js";
+import { MattermostService } from "./core/mattermost/mattermost-service.js";
+import { MembershipService } from "./core/member/membership-service.js";
+import { RunService, type RunServiceDeps } from "./core/run/run-service.js";
+import { RunnerService } from "./core/runner/runner-service.js";
+import { ScheduleService } from "./core/schedule/schedule-service.js";
+import { ScorecardService } from "./core/scorecard/scorecard-service.js";
+import { TraceSinkService } from "./core/trace-sink/trace-sink-service.js";
+import { WorkspaceService } from "./core/workspace/workspace-service.js";
 import { buildServer } from "./server.js";
-import { TraceSinkService } from "./trace-sink/trace-sink-service.js";
-import { WorkspaceService } from "./workspace/workspace-service.js";
 
 const result: CaseResult = {
   caseId: "c1",

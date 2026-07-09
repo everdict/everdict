@@ -54,53 +54,28 @@ import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
 import { WebSocketServer } from "ws";
 import { z } from "zod";
-import { registerApiKeyRoutes } from "./api-key/api-key.routes.js";
-import {
-  BenchmarkImportBodySchema,
-  BenchmarkPreviewBodySchema,
-  type BenchmarkService,
-} from "./benchmark/benchmark-service.js";
-import { registerBenchmarkRoutes } from "./benchmark/benchmark.routes.js";
-import { registerBillingRoutes } from "./billing/billing.routes.js";
-import { BundleSchema, type BundleService, requiredActionsForBundle } from "./bundle/bundle-service.js";
-import { registerBundleRoutes } from "./bundle/bundle.routes.js";
-import { type CiLinkService, UpsertCiLinkBodySchema } from "./ci-link/ci-link-service.js";
-import { registerCiLinkRoutes } from "./ci-link/ci-link.routes.js";
-import { COMMENT_RESOURCE_TYPES, type CommentService } from "./comment/comment-service.js";
-import { registerCommentRoutes } from "./comment/comment.routes.js";
-import { deleteDatasetVersion } from "./dataset/dataset-service.js";
-import { registerDatasetRoutes } from "./dataset/dataset.routes.js";
-import { registerFrontdoorCallbackRoutes } from "./execution/frontdoor-callback.routes.js";
-import type { GithubAppService } from "./github-app/github-app-service.js";
-import { registerGithubAppRoutes } from "./github-app/github-app.routes.js";
-import { RepinBodySchema, repinHarnessImages } from "./harness/harness-pin-service.js";
-import { deleteHarnessVersion, harnessIsPrivate, harnessVisibleTo } from "./harness/harness-service.js";
-import { registerHarnessTemplateRoutes } from "./harness/harness-template.routes.js";
-import { registerHarnessRoutes } from "./harness/harness.routes.js";
-import type { ImageRegistryService } from "./image-registry/image-registry-service.js";
-import { registerImageRegistryRoutes } from "./image-registry/image-registry.routes.js";
-import { registerJudgeRoutes } from "./judge/judge.routes.js";
-import { type BudgetAdmin, BudgetLimitInputSchema } from "./lib/budget-tracker.js";
-import type { TerminalTicketStore } from "./lib/terminal-ticket.js";
-import { VersionTagsBodySchema, setVersionTags } from "./lib/version-tag-service.js";
-import type { MattermostCommandService } from "./mattermost/mattermost-command-service.js";
-import type { MattermostService } from "./mattermost/mattermost-service.js";
-import { registerMattermostRoutes } from "./mattermost/mattermost.routes.js";
-import { buildMcpServer } from "./mcp.js";
-import { registerMcpRoutes } from "./mcp.routes.js";
-import { registerInviteRoutes } from "./member/invite.routes.js";
-import { registerMemberRoutes } from "./member/member.routes.js";
-import type { MembershipService } from "./member/membership-service.js";
-import { registerModelRoutes } from "./model/model.routes.js";
-import type { NotificationService } from "./notification/notification-service.js";
-import { registerNotificationRoutes } from "./notification/notification.routes.js";
-import { registerInternalRoutes } from "./ops/internal.routes.js";
-import type { RuntimeProbeResult } from "./ops/runtime-probe.js";
-import type { ProfileService } from "./profile/profile-service.js";
-import { registerProfileRoutes } from "./profile/profile.routes.js";
-import type { QueueService } from "./queue/queue-service.js";
-import { registerQueueRoutes } from "./queue/queue.routes.js";
-import type { ServerDeps } from "./route-context.js";
+import { registerApiKeyRoutes } from "./api/api-key/api-key.routes.js";
+import { registerBenchmarkRoutes } from "./api/benchmark/benchmark.routes.js";
+import { registerBillingRoutes } from "./api/billing/billing.routes.js";
+import { registerBundleRoutes } from "./api/bundle/bundle.routes.js";
+import { registerCiLinkRoutes } from "./api/ci-link/ci-link.routes.js";
+import { registerCommentRoutes } from "./api/comment/comment.routes.js";
+import { registerDatasetRoutes } from "./api/dataset/dataset.routes.js";
+import { registerFrontdoorCallbackRoutes } from "./api/execution/frontdoor-callback.routes.js";
+import { registerGithubAppRoutes } from "./api/github-app/github-app.routes.js";
+import { registerHarnessTemplateRoutes } from "./api/harness/harness-template.routes.js";
+import { registerHarnessRoutes } from "./api/harness/harness.routes.js";
+import { registerImageRegistryRoutes } from "./api/image-registry/image-registry.routes.js";
+import { registerJudgeRoutes } from "./api/judge/judge.routes.js";
+import { registerMattermostRoutes } from "./api/mattermost/mattermost.routes.js";
+import { registerInviteRoutes } from "./api/member/invite.routes.js";
+import { registerMemberRoutes } from "./api/member/member.routes.js";
+import { registerModelRoutes } from "./api/model/model.routes.js";
+import { registerNotificationRoutes } from "./api/notification/notification.routes.js";
+import { registerInternalRoutes } from "./api/ops/internal.routes.js";
+import { registerProfileRoutes } from "./api/profile/profile.routes.js";
+import { registerQueueRoutes } from "./api/queue/queue.routes.js";
+import type { ServerDeps } from "./api/route-context.js";
 import {
   baseUrl,
   constantTimeEq,
@@ -111,33 +86,58 @@ import {
   resolvePrincipal,
   sendError,
   zodIssues,
-} from "./route-context.js";
-import { registerRunObservabilityRoutes } from "./run/run-observability.routes.js";
-import type { RunService } from "./run/run-service.js";
-import { registerRunRoutes } from "./run/run.routes.js";
-import { installGithubWorkspaceRunner } from "./runner/github-runner-install.js";
-import type { RunnerHub } from "./runner/runner-hub.js";
-import { PairRunnerBodySchema, RUNNER_CAPABILITIES, type RunnerService } from "./runner/runner-service.js";
-import { registerRunnerRoutes } from "./runner/runner.routes.js";
-import { registerWorkspaceRunnerRoutes } from "./runner/workspace-runner.routes.js";
-import { registerRuntimeRoutes } from "./runtime/runtime.routes.js";
-import { type ScheduleService, isValidCron } from "./schedule/schedule-service.js";
-import { registerScheduleRoutes } from "./schedule/schedule.routes.js";
+} from "./api/route-context.js";
+import { registerRunObservabilityRoutes } from "./api/run/run-observability.routes.js";
+import { registerRunRoutes } from "./api/run/run.routes.js";
+import { registerRunnerRoutes } from "./api/runner/runner.routes.js";
+import { registerWorkspaceRunnerRoutes } from "./api/runner/workspace-runner.routes.js";
+import { registerRuntimeRoutes } from "./api/runtime/runtime.routes.js";
+import { registerScheduleRoutes } from "./api/schedule/schedule.routes.js";
+import { registerScorecardRoutes } from "./api/scorecard/scorecard.routes.js";
+import { registerSecretRoutes } from "./api/secret/secret.routes.js";
+import { registerTraceSinkRoutes } from "./api/trace-sink/trace-sink.routes.js";
+import { registerViewRoutes } from "./api/view/view.routes.js";
+import { registerWorkspaceSettingsRoutes } from "./api/workspace/settings.routes.js";
+import { registerWorkspaceRoutes } from "./api/workspace/workspace.routes.js";
+import { type BudgetAdmin, BudgetLimitInputSchema } from "./common/budget-tracker.js";
+import type { TerminalTicketStore } from "./common/terminal-ticket.js";
+import { VersionTagsBodySchema, setVersionTags } from "./common/version-tag-service.js";
+import {
+  BenchmarkImportBodySchema,
+  BenchmarkPreviewBodySchema,
+  type BenchmarkService,
+} from "./core/benchmark/benchmark-service.js";
+import { BundleSchema, type BundleService, requiredActionsForBundle } from "./core/bundle/bundle-service.js";
+import { type CiLinkService, UpsertCiLinkBodySchema } from "./core/ci-link/ci-link-service.js";
+import { COMMENT_RESOURCE_TYPES, type CommentService } from "./core/comment/comment-service.js";
+import { deleteDatasetVersion } from "./core/dataset/dataset-service.js";
+import type { GithubAppService } from "./core/github-app/github-app-service.js";
+import { RepinBodySchema, repinHarnessImages } from "./core/harness/harness-pin-service.js";
+import { deleteHarnessVersion, harnessIsPrivate, harnessVisibleTo } from "./core/harness/harness-service.js";
+import type { ImageRegistryService } from "./core/image-registry/image-registry-service.js";
+import type { MattermostCommandService } from "./core/mattermost/mattermost-command-service.js";
+import type { MattermostService } from "./core/mattermost/mattermost-service.js";
+import type { MembershipService } from "./core/member/membership-service.js";
+import type { NotificationService } from "./core/notification/notification-service.js";
+import type { RuntimeProbeResult } from "./core/ops/runtime-probe.js";
+import type { ProfileService } from "./core/profile/profile-service.js";
+import type { QueueService } from "./core/queue/queue-service.js";
+import type { RunService } from "./core/run/run-service.js";
+import { installGithubWorkspaceRunner } from "./core/runner/github-runner-install.js";
+import type { RunnerHub } from "./core/runner/runner-hub.js";
+import { PairRunnerBodySchema, RUNNER_CAPABILITIES, type RunnerService } from "./core/runner/runner-service.js";
+import { type ScheduleService, isValidCron } from "./core/schedule/schedule-service.js";
 import {
   IngestScorecardBodySchema,
   PullIngestBodySchema,
   type ScorecardService,
   originSource,
-} from "./scorecard/scorecard-service.js";
-import { registerScorecardRoutes } from "./scorecard/scorecard.routes.js";
-import { registerSecretRoutes } from "./secret/secret.routes.js";
-import type { TraceSinkService } from "./trace-sink/trace-sink-service.js";
-import { registerTraceSinkRoutes } from "./trace-sink/trace-sink.routes.js";
-import type { ViewService } from "./view/view-service.js";
-import { registerViewRoutes } from "./view/view.routes.js";
-import { registerWorkspaceSettingsRoutes } from "./workspace/settings.routes.js";
-import type { WorkspaceService } from "./workspace/workspace-service.js";
-import { registerWorkspaceRoutes } from "./workspace/workspace.routes.js";
+} from "./core/scorecard/scorecard-service.js";
+import type { TraceSinkService } from "./core/trace-sink/trace-sink-service.js";
+import type { ViewService } from "./core/view/view-service.js";
+import type { WorkspaceService } from "./core/workspace/workspace-service.js";
+import { buildMcpServer } from "./mcp.js";
+import { registerMcpRoutes } from "./mcp.routes.js";
 
 // Control-plane HTTP surface. Auth is owned by the control plane (OIDC/JWT + API keys), workspace=tenant, authZ enforced.
 export function buildServer(deps: ServerDeps): FastifyInstance {
