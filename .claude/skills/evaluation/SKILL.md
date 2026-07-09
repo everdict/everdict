@@ -45,8 +45,11 @@ testable) from an injected **transport** `JudgeCompletion`: `anthropicComplete` 
 trace via `traceToText`). `JudgeGrader` (`packages/graders/src/judge.ts`) wraps it; `useScreenshot` feeds the
 snapshot to a VLM. Judges are user-registered `model`|`harness` `JudgeSpec`s (`@everdict/registry`). The control
 plane builds the right transport from the spec + the tenant's SecretStore key/dispatcher:
-`apps/api/src/execution/judge-runner.ts` `defaultJudgeRunner` (`ANTHROPIC_API_KEY`/`OPENAI_API_KEY`, model-registry
+`apps/api/src/core/execution/judge-runner.ts` `defaultJudgeRunner` (`ANTHROPIC_API_KEY`/`OPENAI_API_KEY`, model-registry
 resolve, missing key ⇒ explicit `skip` score, never silent). Score metric = `judge:<id>`.
+Custom prompts: `JudgeSpec.promptTemplate` (placeholders incl. mandatory `{verdict_instruction}`, schema-enforced);
+multi-criteria: `JudgeSpec.criteria[]` → ONE model call scores each criterion (`judge:<id>:<criterion>`) + the
+weighted overall (`judge:<id>`). See `docs/judges.md` + `docs/architecture/eval-domain-model.md`.
 
 ## Batch aggregation, regression & leaderboard
 - `diffScorecards(baseline, candidate)` (`packages/suite/src/scorecard.ts`) — same-case metric delta +

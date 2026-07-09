@@ -1,4 +1,4 @@
-import { BadRequestError, type Grader, type GraderSpec } from "@everdict/core";
+import { BadRequestError, type Grader, type GraderSpec, JudgeCriterionSchema } from "@everdict/core";
 import { AnswerMatchGrader, DomContainsGrader, UrlMatchesGrader } from "./browser-graders.js";
 import { CommandGrader } from "./command.js";
 import { type Judge, JudgeGrader } from "./judge.js";
@@ -79,9 +79,13 @@ export function makeGraders(specs: GraderSpec[], opts: { judge?: Judge } = {}): 
             "The judge grader requires Judge injection: makeGraders(specs, { judge }).",
           );
         }
+        // Inline judge parity with registered JudgeSpecs: criteria/promptTemplate ride the grader config too.
+        const criteria = JudgeCriterionSchema.array().min(1).safeParse(s.config?.criteria);
         return new JudgeGrader(opts.judge, {
           id: typeof s.config?.id === "string" ? s.config.id : "judge",
           ...(typeof s.config?.rubric === "string" ? { rubric: s.config.rubric } : {}),
+          ...(criteria.success ? { criteria: criteria.data } : {}),
+          ...(typeof s.config?.promptTemplate === "string" ? { promptTemplate: s.config.promptTemplate } : {}),
           useScreenshot: s.config?.useScreenshot === true,
         });
       }

@@ -5,7 +5,7 @@ export { ScriptScoreGrader, type ScriptScoreConfig } from "./script-score.js";
 export { stepsGrader, costGrader, latencyGrader } from "./trace-graders.js";
 export { DomContainsGrader, UrlMatchesGrader, AnswerMatchGrader } from "./browser-graders.js";
 export { TextMetricGrader } from "./text-metric.js";
-export { type Judge, type JudgeVerdict, JudgeGrader } from "./judge.js";
+export { type Judge, type JudgeVerdict, type CriterionVerdict, JudgeGrader } from "./judge.js";
 export {
   type JudgeCompletion,
   modelJudge,

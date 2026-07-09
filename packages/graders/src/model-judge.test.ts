@@ -69,6 +69,72 @@ describe("modelJudge", () => {
     expect(section).not.toContain("interim-thought");
   });
 
+  const CRITERIA = [
+    { id: "accuracy", description: "is it right", weight: 2 },
+    { id: "style", description: "is it clean", weight: 1 },
+  ];
+
+  it("a custom promptTemplate replaces the default framing; placeholders expand to raw evidence + the verdict instruction", async () => {
+    const complete = vi.fn((_prompt: string) => Promise.resolve('{"pass":true,"score":1,"reason":"ok"}'));
+    await modelJudge(complete).judge({
+      task: "do X",
+      rubric: "be correct",
+      trace: TRACE,
+      promptTemplate: "Custom judge for {task}.\nRules: {rubric}\n{verdict_instruction}",
+    });
+    const prompt = complete.mock.calls[0]?.[0] ?? "";
+    expect(prompt).toContain("Custom judge for do X.");
+    expect(prompt).toContain("Rules: be correct");
+    expect(prompt).toContain("Respond with ONLY a JSON object");
+    expect(prompt).not.toContain("You are a strict evaluation judge"); // default framing fully replaced
+  });
+
+  it("criteria: the default prompt lists every criterion and demands the multi-criteria verdict shape", async () => {
+    const complete = vi.fn((_prompt: string) =>
+      Promise.resolve(
+        '{"criteria":{"accuracy":{"score":1,"pass":true,"reason":"a"},"style":{"score":1,"pass":true,"reason":"b"}},"pass":true,"score":1,"reason":"ok"}',
+      ),
+    );
+    await modelJudge(complete).judge({ task: "t", trace: TRACE, criteria: CRITERIA });
+    const prompt = complete.mock.calls[0]?.[0] ?? "";
+    expect(prompt).toContain("CRITERIA (score each):");
+    expect(prompt).toContain("- accuracy (weight 2): is it right");
+    expect(prompt).toContain("- style: is it clean"); // weight 1 → no weight annotation
+    expect(prompt).toContain("scoring EVERY listed criterion");
+  });
+
+  it("criteria: parses per-criterion verdicts; overall = the model's verdict when present", async () => {
+    const complete = async () =>
+      '{"criteria":{"accuracy":{"score":0.9,"pass":true,"reason":"right"},"style":{"score":0.5,"pass":false,"reason":"messy"}},"pass":true,"score":0.8,"reason":"overall"}';
+    const v = await modelJudge(complete).judge({ task: "t", criteria: CRITERIA });
+    expect(v.score).toBe(0.8);
+    expect(v.criteria?.accuracy).toEqual({ pass: true, score: 0.9, reason: "right" });
+    expect(v.criteria?.style).toEqual({ pass: false, score: 0.5, reason: "messy" });
+  });
+
+  it("criteria: overall falls back to the weighted mean when the model gives no overall score", async () => {
+    const complete = async () =>
+      '{"criteria":{"accuracy":{"score":1,"pass":true,"reason":"a"},"style":{"score":0.1,"pass":false,"reason":"b"}}}';
+    const v = await modelJudge(complete).judge({ task: "t", criteria: CRITERIA });
+    expect(v.score).toBeCloseTo((2 * 1 + 1 * 0.1) / 3); // Σ(w·score)/Σw
+    expect(v.pass).toBe(true); // 0.7 >= 0.5
+    expect(v.reason).toContain("weighted mean");
+  });
+
+  it("criteria: a criterion missing from the verdict is an explicit UpstreamError (never a silent 0)", async () => {
+    const complete = async () =>
+      '{"criteria":{"accuracy":{"score":1,"pass":true,"reason":"a"}},"pass":true,"score":1,"reason":"r"}';
+    await expect(modelJudge(complete).judge({ task: "t", criteria: CRITERIA })).rejects.toBeInstanceOf(AppError);
+  });
+
+  it("criteria: a per-criterion passThreshold re-decides that criterion's pass from its score", async () => {
+    const strict = [{ id: "accuracy", description: "d", weight: 1, passThreshold: 0.95 }];
+    const complete = async () =>
+      '{"criteria":{"accuracy":{"score":0.9,"pass":true,"reason":"a"}},"pass":true,"score":0.9,"reason":"r"}';
+    const v = await modelJudge(complete).judge({ task: "t", criteria: strict });
+    expect(v.criteria?.accuracy?.pass).toBe(false); // 0.9 < 0.95 despite the model's pass:true
+  });
+
   it("includes the result-channel final response in the prompt when the trace has no assistant answer (regression: it was dropped, leaving the judge without evidence)", async () => {
     const complete = vi.fn((_prompt: string) => Promise.resolve('{"pass":true,"score":1,"reason":"ok"}'));
     await modelJudge(complete).judge({ task: "t", trace: TRACE, response: "the produced result body" });

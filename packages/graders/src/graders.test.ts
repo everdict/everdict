@@ -1,4 +1,4 @@
-import type { GradeContext, TraceEvent } from "@everdict/core";
+import { type GradeContext, type TraceEvent, toScores } from "@everdict/core";
 import { describe, expect, it } from "vitest";
 import { AnswerMatchGrader, DomContainsGrader, UrlMatchesGrader } from "./browser-graders.js";
 import { type Judge, JudgeGrader } from "./judge.js";
@@ -68,12 +68,58 @@ describe("JudgeGrader", () => {
     },
   };
   it("converts a Judge verdict to a Score", async () => {
-    const score = await new JudgeGrader(mockJudge, { id: "vlm-judge", useScreenshot: true }).grade(
-      browserCtx("<html/>", "https://x"),
+    const [score] = toScores(
+      await new JudgeGrader(mockJudge, { id: "vlm-judge", useScreenshot: true }).grade(
+        browserCtx("<html/>", "https://x"),
+      ),
     );
-    expect(score.graderId).toBe("vlm-judge");
-    expect(score.pass).toBe(true);
-    expect(score.value).toBe(0.9);
+    expect(score?.graderId).toBe("vlm-judge");
+    expect(score?.pass).toBe(true);
+    expect(score?.value).toBe(0.9);
+  });
+
+  it("with criteria, one judge call emits the overall Score plus one Score per criterion (multi-metric)", async () => {
+    const criteria = [
+      { id: "accuracy", description: "is it right", weight: 2 },
+      { id: "style", description: "is it clean", weight: 1 },
+    ];
+    const judge: Judge = {
+      async judge(input) {
+        expect(input.criteria?.map((c) => c.id)).toEqual(["accuracy", "style"]);
+        return {
+          pass: true,
+          score: 0.8,
+          reason: "overall",
+          criteria: {
+            accuracy: { pass: true, score: 0.9, reason: "right" },
+            style: { pass: false, score: 0.5, reason: "messy" },
+          },
+        };
+      },
+    };
+    const scores = toScores(
+      await new JudgeGrader(judge, { id: "quality", criteria }).grade(browserCtx("<html/>", "https://x")),
+    );
+    expect(scores.map((s) => s.metric)).toEqual(["judge", "judge:accuracy", "judge:style"]);
+    expect(scores[0]).toMatchObject({ graderId: "quality", value: 0.8, pass: true });
+    expect(scores[1]).toMatchObject({ graderId: "quality", value: 0.9, pass: true, detail: "right" });
+    expect(scores[2]).toMatchObject({ graderId: "quality", value: 0.5, pass: false, detail: "messy" });
+  });
+
+  it("a Judge impl that ignores criteria yields visible per-criterion skips (never a silent drop)", async () => {
+    const judge: Judge = {
+      async judge() {
+        return { pass: true, score: 1, reason: "no criteria support" };
+      },
+    };
+    const scores = toScores(
+      await new JudgeGrader(judge, { criteria: [{ id: "accuracy", description: "d", weight: 1 }] }).grade(
+        browserCtx("<html/>", "https://x"),
+      ),
+    );
+    expect(scores[1]?.metric).toBe("judge:accuracy");
+    expect(scores[1]?.pass).toBeUndefined();
+    expect(String(scores[1]?.detail)).toContain("skipped");
   });
 
   it("passes the prompt snapshot's output to the judge as the final response (regression: judges got an empty snapshot for trace-less runs)", async () => {
@@ -136,8 +182,8 @@ describe("JudgeGrader", () => {
       snapshot: { kind: "os-use", screenshotRef: "/tmp/everdict-screen.png", screenshot: "", windows: [] }, // none embedded → compute fallback
       compute,
     };
-    const score = await new JudgeGrader(spy, { id: "vlm", useScreenshot: true }).grade(ctx);
-    expect(score.pass).toBe(true);
+    const [score] = toScores(await new JudgeGrader(spy, { id: "vlm", useScreenshot: true }).grade(ctx));
+    expect(score?.pass).toBe(true);
     expect(calls[0]).toContain("base64 -w0");
     expect(calls[0]).toContain("/tmp/everdict-screen.png");
     expect(received?.screenshot).toEqual({ base64: "QkFTRTY0", mediaType: "image/png" }); // newline trimmed + png

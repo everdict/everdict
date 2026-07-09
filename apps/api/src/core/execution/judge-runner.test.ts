@@ -63,6 +63,52 @@ describe("defaultJudgeRunner", () => {
     expect(score?.pass).toBe(false); // 0.6 < 0.7
   });
 
+  it("a multi-criteria model judge lands as judge:<id> + judge:<id>:<criterion> from ONE model call", async () => {
+    const verdict =
+      '{"criteria":{"accuracy":{"score":0.9,"pass":true,"reason":"right"},"style":{"score":0.5,"pass":false,"reason":"messy"}},"pass":true,"score":0.8,"reason":"overall"}';
+    const fetchImpl = vi.fn((_u: string, _i?: RequestInit) =>
+      Promise.resolve(new Response(JSON.stringify({ content: [{ text: verdict }] }), { status: 200 })),
+    );
+    const runner = defaultJudgeRunner({
+      secretsFor: async () => ({ ANTHROPIC_API_KEY: "sk" }),
+      fetchImpl: fetchImpl as typeof fetch,
+    });
+    const spec: JudgeSpec = {
+      ...modelSpec,
+      criteria: [
+        { id: "accuracy", description: "is it right", weight: 2 },
+        { id: "style", description: "is it clean", weight: 1 },
+      ],
+    };
+    const scores = await runner.run(spec, "acme", ctx);
+    expect(scores.map((s) => s.metric)).toEqual([
+      "judge:correctness",
+      "judge:correctness:accuracy",
+      "judge:correctness:style",
+    ]);
+    expect(fetchImpl).toHaveBeenCalledOnce(); // one call scores everything
+  });
+
+  it("spec.passThreshold re-decides pass for the OVERALL score only (criteria keep their own verdicts)", async () => {
+    const verdict =
+      '{"criteria":{"accuracy":{"score":0.9,"pass":true,"reason":"right"}},"pass":true,"score":0.6,"reason":"overall"}';
+    const fetchImpl = vi.fn((_u: string, _i?: RequestInit) =>
+      Promise.resolve(new Response(JSON.stringify({ content: [{ text: verdict }] }), { status: 200 })),
+    );
+    const runner = defaultJudgeRunner({
+      secretsFor: async () => ({ ANTHROPIC_API_KEY: "sk" }),
+      fetchImpl: fetchImpl as typeof fetch,
+    });
+    const spec: JudgeSpec = {
+      ...modelSpec,
+      passThreshold: 0.7,
+      criteria: [{ id: "accuracy", description: "d", weight: 1 }],
+    };
+    const scores = await runner.run(spec, "acme", ctx);
+    expect(scores[0]?.pass).toBe(false); // overall 0.6 < 0.7
+    expect(scores[1]?.pass).toBe(true); // criterion untouched by the overall threshold
+  });
+
   it("no key → skip score (no real call)", async () => {
     const fetchImpl = vi.fn();
     const runner = defaultJudgeRunner({

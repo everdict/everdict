@@ -153,14 +153,18 @@ export function defaultJudgeRunner(deps: DefaultJudgeRunnerDeps): JudgeRunner {
         const grader: Grader = new JudgeGrader(modelJudge(complete), {
           id: spec.id,
           ...(rubric ? { rubric } : {}),
+          ...(spec.criteria?.length ? { criteria: spec.criteria } : {}),
+          ...(spec.promptTemplate ? { promptTemplate: spec.promptTemplate } : {}),
           useScreenshot,
         });
         const graded = toScores(await grader.grade(ctx));
         const threshold = spec.kind === "model" ? spec.passThreshold : undefined;
         // JudgeGrader emits the metric prefix "judge" (criteria as "judge:<criterion>") — rewrite the prefix to this
         // judge's identity so multiple selected judges stay distinct: judge:<id> / judge:<id>:<criterion>.
+        // spec.passThreshold re-decides pass for the OVERALL score only (criteria carry their own passThreshold).
         return graded.map((score) => {
-          const pass = threshold != null ? score.value >= threshold : score.pass;
+          const isOverall = score.metric === "judge";
+          const pass = isOverall && threshold != null ? score.value >= threshold : score.pass;
           return {
             ...score,
             metric: score.metric.replace(/^judge/, metricOf(spec)),

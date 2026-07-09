@@ -3,9 +3,22 @@
 An **Agent Judge** scores a run/scorecard's trace — it's a **first-class, user-registerable entity** with the
 same ownership/lifecycle as harnesses and datasets. A judge is one of two kinds:
 
-- **`model`** — a function that calls an **LLM/VLM** directly: `{ model, rubric, inputs, provider, passThreshold }`.
-  Judges from the trace (and optionally DOM/screenshot → VLM) against a rubric → `{pass, score, reason}`.
-- **`harness`** — delegates judging to a **registered harness** (an agent judge): `{ harness: {id, version}, rubric?, runtime? }`.
+- **`model`** — a function that calls an **LLM/VLM** directly: `{ model, rubric, inputs, provider, passThreshold,
+  promptTemplate?, criteria? }`. Judges from the trace (and optionally DOM/screenshot → VLM) against a rubric →
+  `{pass, score, reason}`.
+- **`harness`** — delegates judging to a **registered harness** (an agent judge): `{ harness: {id, version}, rubric?,
+  runtime?, promptTemplate?, criteria? }`.
+
+Both kinds take the shared prompt fields (`docs/architecture/eval-domain-model.md` S2):
+- **`promptTemplate?`** — a full custom judging prompt replacing the default framing. Placeholders expand to the raw
+  evidence: `{task} {rubric} {criteria} {dom} {final_answer} {response} {trace} {verdict_instruction}`. It MUST
+  include `{verdict_instruction}` (the JSON verdict shape the parser relies on) — enforced by `JudgeSpecSchema`
+  at registration. Absent → the default template (unchanged behavior).
+- **`criteria?`** — `[{id, description, weight=1, passThreshold?}]`: a **multi-criteria** judge scores every
+  criterion in ONE model call. Scores land as `judge:<judge-id>:<criterion-id>` per criterion plus the overall
+  `judge:<judge-id>` (the model's overall verdict, else the weighted mean Σ(w·score)/Σw). A criterion missing from
+  the model's verdict is an explicit error (skip score), never a silent 0. `passThreshold` on the spec re-decides
+  the overall only; per-criterion thresholds live on each criterion.
 
 This is the **agent-judge** step of the pipeline:
 ```

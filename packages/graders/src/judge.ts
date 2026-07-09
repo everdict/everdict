@@ -1,9 +1,24 @@
-import type { ComputeHandle, EnvSnapshot, GradeContext, Grader, Score, TraceEvent } from "@everdict/core";
+import type {
+  ComputeHandle,
+  EnvSnapshot,
+  GradeContext,
+  Grader,
+  JudgeCriterion,
+  Score,
+  TraceEvent,
+} from "@everdict/core";
+
+export interface CriterionVerdict {
+  pass: boolean;
+  score: number;
+  reason: string;
+}
 
 export interface JudgeVerdict {
   pass: boolean;
   score: number;
   reason: string;
+  criteria?: Record<string, CriterionVerdict>; // per-criterion verdicts when the judge was given criteria
 }
 
 // Image (screenshot) bytes passed to VLM judging. The ref (path) is read from the environment by the grader and resolved to base64.
@@ -22,6 +37,8 @@ export interface Judge {
     screenshot?: JudgeImage; // Image bytes resolved for VLM input
     response?: string; // Final response from the result channel (prompt snapshot output) — the only evidence when the trace has no assistant message
     rubric?: string;
+    criteria?: JudgeCriterion[]; // multi-criteria: the verdict must score every listed criterion
+    promptTemplate?: string; // custom judging prompt (must carry {verdict_instruction}) — absent: the default template
   }): Promise<JudgeVerdict>;
 }
 
@@ -47,16 +64,24 @@ async function resolveScreenshot(snap: EnvSnapshot, compute?: ComputeHandle): Pr
 }
 
 // LLM/VLM judge grader. When useScreenshot, passes the snapshot's screenshot as vision input (browser=ref, os-use=read from the environment as bytes).
+// With criteria it is a multi-metric grader: ONE model call → the overall Score (metric "judge") followed by one Score
+// per criterion (metric "judge:<criterion-id>"). The judge runner rewrites the "judge" prefix to "judge:<judge-id>".
 export class JudgeGrader implements Grader {
   readonly id: string;
   constructor(
     private readonly judge: Judge,
-    private readonly opts: { id?: string; rubric?: string; useScreenshot?: boolean } = {},
+    private readonly opts: {
+      id?: string;
+      rubric?: string;
+      useScreenshot?: boolean;
+      criteria?: JudgeCriterion[];
+      promptTemplate?: string;
+    } = {},
   ) {
     this.id = opts.id ?? "judge";
   }
 
-  async grade(ctx: GradeContext): Promise<Score> {
+  async grade(ctx: GradeContext): Promise<Score | Score[]> {
     const snap = ctx.snapshot;
     const screenshot = this.opts.useScreenshot ? await resolveScreenshot(snap, ctx.compute) : undefined;
     const verdict = await this.judge.judge({
@@ -67,7 +92,31 @@ export class JudgeGrader implements Grader {
       ...(screenshot ? { screenshot } : {}),
       ...(snap.kind === "prompt" && snap.output ? { response: snap.output } : {}),
       rubric: this.opts.rubric,
+      ...(this.opts.criteria?.length ? { criteria: this.opts.criteria } : {}),
+      ...(this.opts.promptTemplate ? { promptTemplate: this.opts.promptTemplate } : {}),
     });
-    return { graderId: this.id, metric: "judge", value: verdict.score, pass: verdict.pass, detail: verdict.reason };
+    const overall: Score = {
+      graderId: this.id,
+      metric: "judge",
+      value: verdict.score,
+      pass: verdict.pass,
+      detail: verdict.reason,
+    };
+    const criteria = this.opts.criteria ?? [];
+    if (criteria.length === 0) return overall;
+    const perCriterion = criteria.map((c): Score => {
+      const v = verdict.criteria?.[c.id];
+      // A Judge impl that ignores criteria (non-modelJudge) yields a visible skip, not a silent drop (pass undefined).
+      if (!v) {
+        return {
+          graderId: this.id,
+          metric: `judge:${c.id}`,
+          value: 0,
+          detail: "skipped: criterion missing from the verdict",
+        };
+      }
+      return { graderId: this.id, metric: `judge:${c.id}`, value: v.score, pass: v.pass, detail: v.reason };
+    });
+    return [overall, ...perCriterion];
   }
 }
