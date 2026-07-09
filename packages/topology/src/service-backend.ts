@@ -204,7 +204,7 @@ export class ServiceTopologyBackend implements Backend, ScreenCapturable {
           : [stepsGrader, costGrader, latencyGrader]);
       const scores: Score[] = [];
       for (const grader of graders) {
-        scores.push(await safeGrade(grader, { case: job.evalCase, trace, snapshot }));
+        scores.push(...(await safeGrade(grader, { case: job.evalCase, trace, snapshot })));
       }
 
       return { caseId: job.evalCase.id, harness: `${spec.id}@${spec.version}`, trace, snapshot, scores };

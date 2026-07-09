@@ -30,5 +30,12 @@ export interface Grader {
   // Undeclared = observation-only (trace/snapshot) → runCase scores it after releasing compute, minimizing sandbox occupancy to
   // the execution window (not held while waiting on the judge LLM). docs/architecture/streaming-case-pipeline.md
   readonly needsCompute?: boolean;
-  grade(ctx: GradeContext): Promise<Score>;
+  // One Score for most graders; a multi-metric grader (multi-criteria judge, script) returns several from ONE
+  // evaluation pass — each Score's `metric` label stays the aggregation axis. docs/architecture/eval-domain-model.md
+  grade(ctx: GradeContext): Promise<Score | Score[]>;
+}
+
+// Normalize a grader result at the collection points (runCase / service backends / judge runner).
+export function toScores(result: Score | Score[]): Score[] {
+  return Array.isArray(result) ? result : [result];
 }

@@ -5,6 +5,7 @@ import {
   type Dataset,
   type GradeContext,
   type Scorecard,
+  toScores,
 } from "@everdict/core";
 import type { ScorecardRecord } from "@everdict/db";
 import { costGrader, latencyGrader, stepsGrader } from "@everdict/graders";
@@ -174,7 +175,9 @@ export class ScorecardIngestService {
       const snapshot = up.snapshot ?? { kind: "repo", diff: "", changedFiles: [], headSha: "ingested" };
       const ctx: GradeContext = { case: evalCase, trace: up.trace, snapshot };
       // Re-derive trace-only graders (steps/cost/latency) — same metrics as a live run for diff alignment.
-      const derived = await Promise.all([stepsGrader, costGrader, latencyGrader].map((g) => g.grade(ctx)));
+      const derived = (await Promise.all([stepsGrader, costGrader, latencyGrader].map((g) => g.grade(ctx)))).flatMap(
+        toScores,
+      );
       results.push({
         caseId: up.caseId,
         harness: harnessLabel,

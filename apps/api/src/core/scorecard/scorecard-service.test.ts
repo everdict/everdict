@@ -486,7 +486,7 @@ describe("ScorecardService.submit — private-repo repoToken injection (per case
       judgeRunner: {
         async run(spec) {
           judgeStarted(); // reached right after c1 completes (streaming) → c2 is released
-          return { graderId: spec.id, metric: `judge:${spec.id}`, value: 1, pass: true };
+          return [{ graderId: spec.id, metric: `judge:${spec.id}`, value: 1, pass: true }];
         },
       },
       newId: () => "sc-stream",

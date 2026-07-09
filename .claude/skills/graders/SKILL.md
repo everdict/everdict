@@ -6,11 +6,12 @@ allowed-tools: Read, Grep, Glob, Edit, Write, Bash
 # Graders (the scoring adapter)
 
 A grader is a pluggable scorer, **fully separate from the harness**. It reads a finished run
-(`GradeContext`) and emits ONE `Score`; the runner collects a `Score[]` across every grader on the
-case. Same grader scores every harness identically → fair cross-harness/version comparison.
+(`GradeContext`) and emits one `Score` — or a `Score[]` when one evaluation pass yields several
+metrics (multi-criteria judge, script grader); the runner flattens across every grader on the
+case in grader order. Same grader scores every harness identically → fair cross-harness/version comparison.
 
 ## Checklist
-1. Implement `Grader` (`packages/core/src/execution/grader.ts`): `readonly id` + `grade(ctx): Promise<Score>`.
+1. Implement `Grader` (`packages/core/src/execution/grader.ts`): `readonly id` + `grade(ctx): Promise<Score | Score[]>` (return one Score unless one pass genuinely yields several metrics).
 2. Read from `ctx` only — NEVER mutate the trace/env and NEVER re-run the harness.
 3. `ctx.compute` is OPTIONAL (service/browser harnesses have none) — outcome graders MUST guard it
    (else `BadRequestError`); trace graders read ONLY `ctx.trace`; browser graders require the snapshot `kind`.

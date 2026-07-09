@@ -138,7 +138,7 @@ export async function collectDeferredTrace(
       continue;
     }
     if (grader.needsCompute === true) continue; // already scored in the job (before compute was released)
-    scores.push(await safeGrade(grader, ctx));
+    scores.push(...(await safeGrade(grader, ctx)));
   }
 
   // Collection completed — a recovered case sheds its {collect} classification (the pull succeeded this time).

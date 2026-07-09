@@ -58,7 +58,7 @@ export class ScoringService {
       : evalCase.placement;
     const ctx: GradeContext = { case: evalCase, trace: result.trace, snapshot: result.snapshot };
     for (const spec of specs) {
-      result.scores.push(await runner.run(spec, tenant, ctx, runPlacement));
+      result.scores.push(...(await runner.run(spec, tenant, ctx, runPlacement)));
     }
   }
 

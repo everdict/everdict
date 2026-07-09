@@ -130,6 +130,29 @@ describe("runCase — early compute release (observation-only graders score afte
     expect(compute.disposed).toBe(true);
   });
 
+  it("a multi-metric grader's Score[] is flattened in place, preserving the grader array order (multi-metric contract)", async () => {
+    const compute = fakeCompute();
+    const single = (id: string): Grader => ({
+      id,
+      async grade(): Promise<Score> {
+        return { graderId: id, metric: id, value: 1, pass: true };
+      },
+    });
+    const multi: Grader = {
+      id: "rubric-judge",
+      async grade(): Promise<Score[]> {
+        return [
+          { graderId: "rubric-judge", metric: "judge", value: 0.8, pass: true },
+          { graderId: "rubric-judge", metric: "judge:accuracy", value: 0.9 },
+        ];
+      },
+    };
+
+    const result = await runCase(CASE, fakeDeps(compute, REPO_SNAPSHOT, [single("steps"), multi, single("cost")]));
+
+    expect(result.scores.map((s) => s.metric)).toEqual(["steps", "judge", "judge:accuracy", "cost"]);
+  });
+
   it("an os-use ref-only screenshot is materialized before release and included only in the scoring snapshot (the stored snapshot keeps the ref)", async () => {
     const compute = fakeCompute({
       async exec(cmd: string) {

@@ -35,9 +35,9 @@ describe("ScoringService — scoring unit decoupled from execution", () => {
     await judges.register("acme", spec);
     let seenPlacement: Placement | undefined;
     const judgeRunner: JudgeRunner = {
-      async run(_spec: JudgeSpec, _tenant: string, _ctx: GradeContext, placement?: Placement): Promise<Score> {
+      async run(_spec: JudgeSpec, _tenant: string, _ctx: GradeContext, placement?: Placement): Promise<Score[]> {
         seenPlacement = placement;
-        return { graderId: "judge:j", metric: "judge", value: 1, pass: true };
+        return [{ graderId: "judge:j", metric: "judge", value: 1, pass: true }];
       },
     };
     const scoring = new ScoringService({ judges, judgeRunner });
@@ -116,11 +116,11 @@ describe("ScoringService — case streaming / parallel judge application", () =>
       releaseAll = resolve;
     });
     const judgeRunner: JudgeRunner = {
-      async run(spec: JudgeSpec, _t: string, ctx: GradeContext): Promise<Score> {
+      async run(spec: JudgeSpec, _t: string, ctx: GradeContext): Promise<Score[]> {
         arrived += 1;
         if (arrived === 2) releaseAll();
         await bothArrived; // wait until the other case's judge has started
-        return { graderId: spec.id, metric: `judge:${spec.id}`, value: 1, pass: true, detail: ctx.case.id };
+        return [{ graderId: spec.id, metric: `judge:${spec.id}`, value: 1, pass: true, detail: ctx.case.id }];
       },
     };
     const scoring = new ScoringService({ judges, judgeRunner, caseConcurrency: 2 });
@@ -137,8 +137,8 @@ describe("ScoringService — case streaming / parallel judge application", () =>
     await judges.register("acme", JUDGE("j1"));
     await judges.register("acme", JUDGE("j2"));
     const judgeRunner: JudgeRunner = {
-      async run(spec: JudgeSpec): Promise<Score> {
-        return { graderId: spec.id, metric: `judge:${spec.id}`, value: 1, pass: true };
+      async run(spec: JudgeSpec): Promise<Score[]> {
+        return [{ graderId: spec.id, metric: `judge:${spec.id}`, value: 1, pass: true }];
       },
     };
     const scoring = new ScoringService({ judges, judgeRunner });
@@ -158,10 +158,10 @@ describe("ScoringService — case streaming / parallel judge application", () =>
     await judges.register("acme", JUDGE("j"));
     const seen: string[] = [];
     const judgeRunner: JudgeRunner = {
-      async run(_spec: JudgeSpec, _t: string, ctx: GradeContext): Promise<Score> {
+      async run(_spec: JudgeSpec, _t: string, ctx: GradeContext): Promise<Score[]> {
         seen.push(ctx.case.id);
         if (ctx.case.id === "boom") throw new Error("judge boom");
-        return { graderId: "j", metric: "judge:j", value: 1, pass: true };
+        return [{ graderId: "j", metric: "judge:j", value: 1, pass: true }];
       },
     };
     const scoring = new ScoringService({ judges, judgeRunner });

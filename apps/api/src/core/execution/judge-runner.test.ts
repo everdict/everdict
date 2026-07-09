@@ -41,8 +41,9 @@ describe("defaultJudgeRunner", () => {
       secretsFor: async () => ({ ANTHROPIC_API_KEY: "sk" }),
       fetchImpl: fetchImpl as typeof fetch,
     });
-    const score = await runner.run(modelSpec, "acme", ctx);
-    expect(score).toMatchObject({ graderId: "correctness", metric: "judge:correctness", value: 0.8, pass: true });
+    const scores = await runner.run(modelSpec, "acme", ctx);
+    expect(scores).toHaveLength(1);
+    expect(scores[0]).toMatchObject({ graderId: "correctness", metric: "judge:correctness", value: 0.8, pass: true });
     expect(fetchImpl).toHaveBeenCalledOnce();
   });
 
@@ -58,8 +59,8 @@ describe("defaultJudgeRunner", () => {
       secretsFor: async () => ({ ANTHROPIC_API_KEY: "sk" }),
       fetchImpl: fetchImpl as typeof fetch,
     });
-    const score = await runner.run({ ...modelSpec, passThreshold: 0.7 }, "acme", ctx);
-    expect(score.pass).toBe(false); // 0.6 < 0.7
+    const [score] = await runner.run({ ...modelSpec, passThreshold: 0.7 }, "acme", ctx);
+    expect(score?.pass).toBe(false); // 0.6 < 0.7
   });
 
   it("no key → skip score (no real call)", async () => {
@@ -68,9 +69,9 @@ describe("defaultJudgeRunner", () => {
       secretsFor: async () => ({}),
       fetchImpl: fetchImpl as unknown as typeof fetch,
     });
-    const score = await runner.run(modelSpec, "acme", ctx);
-    expect(score.metric).toBe("judge:correctness");
-    expect(score.detail).toContain("skipped");
+    const [score] = await runner.run(modelSpec, "acme", ctx);
+    expect(score?.metric).toBe("judge:correctness");
+    expect(score?.detail).toContain("skipped");
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
@@ -83,12 +84,12 @@ describe("defaultJudgeRunner", () => {
       },
       fetchImpl: fetchImpl as unknown as typeof fetch,
     });
-    const score = await runner.run(modelSpec, "acme", ctx);
-    expect(score.metric).toBe("judge:correctness");
+    const [score] = await runner.run(modelSpec, "acme", ctx);
+    expect(score?.metric).toBe("judge:correctness");
     // Swallowing it with an empty-map fallback used to be misjudged as "not configured" — now the real reason shows.
-    expect(score.detail).toContain("decryption failed");
-    expect(score.detail).toContain("EVERDICT_SECRETS_KEY mismatch");
-    expect(score.detail).not.toContain("not configured");
+    expect(score?.detail).toContain("decryption failed");
+    expect(score?.detail).toContain("EVERDICT_SECRETS_KEY mismatch");
+    expect(score?.detail).not.toContain("not configured");
     expect(fetchImpl).not.toHaveBeenCalled(); // no provider call on a decryption failure
   });
 
@@ -105,7 +106,7 @@ describe("defaultJudgeRunner", () => {
       secretsFor: async () => ({ OPENAI_API_KEY: "sk", OPENAI_BASE_URL: "http://litellm/v1" }),
       fetchImpl: fetchImpl as typeof fetch,
     });
-    const score = await runner.run({ ...modelSpec, provider: "openai", model: "gpt-5.4-mini" }, "acme", ctx);
+    const [score] = await runner.run({ ...modelSpec, provider: "openai", model: "gpt-5.4-mini" }, "acme", ctx);
     expect(score).toMatchObject({ metric: "judge:correctness", value: 0.7, pass: true });
     const url = fetchImpl.mock.calls[0]?.[0];
     expect(url).toMatch(/\/chat\/completions$/);
@@ -122,7 +123,7 @@ describe("defaultJudgeRunner", () => {
     };
     const dispatch = vi.fn((_job: AgentJob) => Promise.resolve(result));
     const runner = defaultJudgeRunner({ secretsFor: async () => ({}), dispatch });
-    const score = await runner.run(harnessSpec, "acme", ctx);
+    const [score] = await runner.run(harnessSpec, "acme", ctx);
     expect(score).toMatchObject({ metric: "judge:reviewer", value: 0.9, pass: true });
     expect(dispatch).toHaveBeenCalledOnce();
     expect(dispatch.mock.calls[0]?.[0]?.harness).toEqual({ id: "claude-code", version: "latest" });
@@ -130,8 +131,8 @@ describe("defaultJudgeRunner", () => {
 
   it("harness kind + no dispatch → skip", async () => {
     const runner = defaultJudgeRunner({ secretsFor: async () => ({}) });
-    const score = await runner.run(harnessSpec, "acme", ctx);
-    expect(score.detail).toContain("skipped");
+    const [score] = await runner.run(harnessSpec, "acme", ctx);
+    expect(score?.detail).toContain("skipped");
   });
 
   // --- runtime selection + co-locate (slice 1) ---

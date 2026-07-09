@@ -1,4 +1,4 @@
-import type { ComputeHandle, ExecResult, GradeContext } from "@everdict/core";
+import { type ComputeHandle, type ExecResult, type GradeContext, toScores } from "@everdict/core";
 import { describe, expect, it } from "vitest";
 import { CommandGrader } from "./command.js";
 import { makeGraders } from "./make-graders.js";
@@ -73,7 +73,8 @@ describe("CommandGrader (generic test-runner, user-configurable)", () => {
     const { compute } = mockCompute({ cmdExit: 0 });
     const [g] = makeGraders([{ id: "command", config: { cmd: "pytest -q", metric: "resolved" } }]);
     expect(g?.id).toBe("command");
-    expect((await g?.grade(ctx(compute)))?.metric).toBe("resolved");
+    const [s] = toScores((await g?.grade(ctx(compute))) ?? []);
+    expect(s?.metric).toBe("resolved");
   });
 
   it("errors without compute", async () => {

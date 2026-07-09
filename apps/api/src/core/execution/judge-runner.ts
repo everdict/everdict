@@ -9,6 +9,7 @@ import type {
   Placement,
   Score,
 } from "@everdict/core";
+import { toScores } from "@everdict/core";
 import {
   type JudgeCompletion,
   JudgeGrader,
@@ -19,19 +20,20 @@ import {
 } from "@everdict/graders";
 import type { HarnessInstanceRegistry, ModelRegistry } from "@everdict/registry";
 
-// Judge runner — JudgeSpec + tenant + GradeContext (trace) → Score. The control plane judges from the trace.
+// Judge runner — JudgeSpec + tenant + GradeContext (trace) → Score[]. The control plane judges from the trace.
 // model (anthropic/openai) and harness are unified via modelJudge (a transport) — only the transport differs (API call / agent dispatch).
+// One judge usually yields one score; a multi-criteria judge yields one per criterion plus the overall (multi-metric contract).
 export interface JudgeRunner {
   // placement = the source run's placement (where the observations are). A harness judge prefers spec.runtime, else inherits this (co-locate).
-  run(spec: JudgeSpec, tenant: string, ctx: GradeContext, placement?: Placement): Promise<Score>;
+  run(spec: JudgeSpec, tenant: string, ctx: GradeContext, placement?: Placement): Promise<Score[]>;
 }
 
 // The metric key that distinguishes multiple judges in the summary.
 const metricOf = (spec: JudgeSpec): string => `judge:${spec.id}`;
 
 // skip score — no key / no dispatch, etc. State the reason in detail so a judge the user chose doesn't silently vanish.
-function skip(spec: JudgeSpec, reason: string): Score {
-  return { graderId: spec.id, metric: metricOf(spec), value: 0, pass: undefined, detail: `skipped: ${reason}` };
+function skip(spec: JudgeSpec, reason: string): Score[] {
+  return [{ graderId: spec.id, metric: metricOf(spec), value: 0, pass: undefined, detail: `skipped: ${reason}` }];
 }
 
 const ANTHROPIC_KEY = "ANTHROPIC_API_KEY"; // the key name looked up in the tenant SecretStore
@@ -144,7 +146,7 @@ export function defaultJudgeRunner(deps: DefaultJudgeRunnerDeps): JudgeRunner {
         }
       }
 
-      // 2) Unified judging: wrap modelJudge (transport) in JudgeGrader to score the trace → a judge:<id> score.
+      // 2) Unified judging: wrap modelJudge (transport) in JudgeGrader to score the trace → judge:<id> score(s).
       try {
         const rubric = spec.rubric;
         const useScreenshot = spec.kind === "model" && (spec.inputs ?? []).includes("screenshot");
@@ -153,10 +155,18 @@ export function defaultJudgeRunner(deps: DefaultJudgeRunnerDeps): JudgeRunner {
           ...(rubric ? { rubric } : {}),
           useScreenshot,
         });
-        const score = await grader.grade(ctx);
+        const graded = toScores(await grader.grade(ctx));
         const threshold = spec.kind === "model" ? spec.passThreshold : undefined;
-        const pass = threshold != null ? score.value >= threshold : score.pass;
-        return { ...score, metric: metricOf(spec), ...(pass != null ? { pass } : {}) };
+        // JudgeGrader emits the metric prefix "judge" (criteria as "judge:<criterion>") — rewrite the prefix to this
+        // judge's identity so multiple selected judges stay distinct: judge:<id> / judge:<id>:<criterion>.
+        return graded.map((score) => {
+          const pass = threshold != null ? score.value >= threshold : score.pass;
+          return {
+            ...score,
+            metric: score.metric.replace(/^judge/, metricOf(spec)),
+            ...(pass != null ? { pass } : {}),
+          };
+        });
       } catch (err) {
         return skip(spec, err instanceof Error ? err.message : String(err));
       }

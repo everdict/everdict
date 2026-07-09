@@ -1,4 +1,4 @@
-import type { ComputeHandle, ExecResult, GradeContext } from "@everdict/core";
+import { type ComputeHandle, type ExecResult, type GradeContext, toScores } from "@everdict/core";
 import { describe, expect, it } from "vitest";
 import { makeGraders } from "./make-graders.js";
 import { ScriptScoreGrader } from "./script-score.js";
@@ -58,7 +58,7 @@ describe("ScriptScoreGrader (generic numeric-score grader)", () => {
   it("makeGraders spec→grader (user data path)", async () => {
     const [g] = makeGraders([{ id: "script-score", config: { cmd: "run", metric: "pinch" } }]);
     expect(g?.id).toBe("script-score");
-    const s = await g?.grade(ctx(mockCompute("SCORE=1.0")));
+    const [s] = toScores((await g?.grade(ctx(mockCompute("SCORE=1.0")))) ?? []);
     expect(s?.metric).toBe("pinch");
     expect(s?.value).toBeCloseTo(1.0);
   });

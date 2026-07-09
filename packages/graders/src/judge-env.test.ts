@@ -1,4 +1,4 @@
-import type { GradeContext, TraceEvent } from "@everdict/core";
+import { type GradeContext, type TraceEvent, toScores } from "@everdict/core";
 import { describe, expect, it } from "vitest";
 import { judgeFromEnv, makeGradersFromEnv } from "./judge-env.js";
 
@@ -28,7 +28,7 @@ describe("makeGradersFromEnv", () => {
   it("judge not configured: judge spec becomes a skip score grader, the rest stay normal (eval doesn't die)", async () => {
     const graders = makeGradersFromEnv([{ id: "steps" }, { id: "judge", config: { rubric: "r" } }], {});
     expect(graders.map((g) => g.id)).toEqual(["steps", "judge"]);
-    const judgeScore = await graders[1]?.grade(ctx("hi"));
+    const [judgeScore] = toScores((await graders[1]?.grade(ctx("hi"))) ?? []);
     expect(judgeScore?.pass).toBeUndefined(); // skip = pass undefined
     expect(String(judgeScore?.detail)).toContain("skipped");
     expect(judgeScore?.metric).toBe("judge");

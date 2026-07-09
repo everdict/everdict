@@ -80,8 +80,9 @@ export async function runCase(evalCase: EvalCase, deps: RunCaseDeps): Promise<Ca
     const defer = source?.collect === "control-plane";
 
     // Score slots follow the graders array order — the order is invariant even across the two phases. Only defer-deferred slots are left empty.
+    // A slot holds the grader's Score[] (multi-metric graders emit several from one pass) — flattened in order at the end.
     const observes = deps.graders.some((g) => g.needsCompute !== true);
-    const slots: Array<Score | undefined> = new Array(deps.graders.length);
+    const slots: Array<Score[] | undefined> = new Array(deps.graders.length);
     for (const [i, grader] of deps.graders.entries()) {
       if (grader.needsCompute === true) {
         slots[i] = await safeGrade(grader, { case: evalCase, trace, snapshot, compute });
@@ -126,7 +127,7 @@ export async function runCase(evalCase: EvalCase, deps: RunCaseDeps): Promise<Ca
       // On a collect failure the deferred observation scoring happens control-plane-side — hand it the
       // materialized snapshot (screenshot embedded), same as defer mode.
       snapshot: collectFailure ? materialized : snapshot,
-      scores: slots.filter((s): s is Score => s !== undefined),
+      scores: slots.filter((s): s is Score[] => s !== undefined).flat(),
       ...(collectFailure ? { failure: collectFailure } : {}),
       ...((defer || collectFailure) && source
         ? {
