@@ -54,6 +54,12 @@ core ← { drivers · environments · harnesses · graders · trace } ← runner
 - `apps/desktop`          — **Electron desktop shell**: renders the *deployed* `apps/web` in a BrowserWindow (full web parity by construction — zero UI re-implementation; desktop-aware UI = `window.everdictDesktop`-conditional branches inside `apps/web`) + resident self-hosted runner (`@everdict/runner-core` in the main process, one-click pairing via an origin-gated preload bridge, `rnr_` token in `safeStorage`). Tray-resident (close = hide). Security invariants + conventions: `.claude/skills/desktop/SKILL.md`. See `docs/architecture/desktop-app.md`.
 Reverse imports are bugs. The same concern name recurs per package (vertical slices).
 
+**Intra-package layout:** a package's `src/` stays flat until ~15 non-test files; beyond that, group into
+**domain** subdirectories (tests colocated) with the barrel `index.ts` + the package's core contract kept at the
+root. The barrel re-exports the same symbols, so grouping never changes the public surface (consumers are untouched).
+See `packages/backends` (`placement`/`orchestrators`/`scheduling`/`policy`), `core` (`execution`/`harness`/`infra`),
+`trace` (`sources`/`sinks`); `apps/web` (FSD) is the reference for large apps. Small packages stay flat by design.
+
 ### Two execution layers: Backend (placement) vs Driver (in-sandbox)
 - **Backend** (`@everdict/backends`) = *placement*: dispatch a runner-agent job to an orchestrator
   (Nomad/K8s/Windows) and return the `CaseResult`. Isolation = the orchestrator's runtime.

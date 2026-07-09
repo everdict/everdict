@@ -12,6 +12,9 @@ Everdict is a harness-agnostic, infra-agnostic **agent evaluation runtime**. Eva
 2. If you touch a contract in `core`, update its Zod schema + the `core-contracts` skill in the same PR.
 3. Use `AppError` for failures; remap any external/SDK error.
 4. Run `pnpm format && pnpm lint && pnpm typecheck && pnpm test` before finishing.
+5. Layout: `src/` is flat until ~15 non-test files, then grouped into domain subdirs (barrel + core contract at
+   root, tests colocated). New file in a grouped package → put it in the matching domain subdir; adding one to a
+   flat package that crosses ~15 files is the trigger to group it. Grouping keeps `index.ts`'s exports unchanged.
 
 ## Module dependency (one-way; reverse import = bug)
 ```
