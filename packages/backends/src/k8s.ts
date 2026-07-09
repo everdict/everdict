@@ -2,11 +2,10 @@ import { spawn } from "node:child_process";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { RESULT_SENTINEL } from "@everdict/agent";
+import { parseResult, stripSentinel } from "@everdict/agent";
 import {
   type AgentJob,
   type CaseResult,
-  CaseResultSchema,
   InternalError,
   OOM_KILLED,
   UpstreamError,
@@ -377,13 +376,6 @@ export function buildK8sJob(
   };
 }
 
-function parseResult(stdout: string): CaseResult {
-  const idx = stdout.lastIndexOf(RESULT_SENTINEL);
-  if (idx < 0) throw new UpstreamError("UPSTREAM_ERROR", undefined, "could not find the agent result (sentinel).");
-  const line = stdout.slice(idx + RESULT_SENTINEL.length).split("\n")[0] ?? "";
-  return CaseResultSchema.parse(JSON.parse(line));
-}
-
 // Write the kubeconfig (YAML value) to a temp file and return a path to use with kubectl --kubeconfig. Being a decrypted cluster
 // credential, write it with mode 0600, and once dispatch finishes, remove the file+directory via cleanup() (don't leave it on disk for long).
 export async function materializeKubeconfig(yaml: string): Promise<{ path: string; cleanup: () => Promise<void> }> {
@@ -494,8 +486,7 @@ export class K8sBackend implements Backend, Recoverable, Observable, Probeable {
         )[0];
         if (!newest) return undefined;
         const text = await api.podLogs(newest.name, newest.namespace);
-        const idx = text.lastIndexOf(RESULT_SENTINEL);
-        return idx < 0 ? text : text.slice(0, idx);
+        return stripSentinel(text);
       });
     } catch {
       return undefined;

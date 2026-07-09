@@ -1,9 +1,8 @@
 import { spawn } from "node:child_process";
-import { RESULT_SENTINEL } from "@everdict/agent";
+import { parseResult, stripSentinel } from "@everdict/agent";
 import {
   type AgentJob,
   type CaseResult,
-  CaseResultSchema,
   InternalError,
   OOM_KILLED,
   UpstreamError,
@@ -199,13 +198,6 @@ function spawnRunner(
     proc.on("error", (e) => resolve({ code: 127, stdout, stderr: stderr + String(e) }));
     proc.on("close", (code) => resolve({ code: code ?? -1, stdout, stderr }));
   });
-}
-
-function parseResult(stdout: string): CaseResult {
-  const idx = stdout.lastIndexOf(RESULT_SENTINEL);
-  if (idx < 0) throw new UpstreamError("UPSTREAM_ERROR", undefined, "could not find the agent result (sentinel).");
-  const line = stdout.slice(idx + RESULT_SENTINEL.length).split("\n")[0] ?? "";
-  return CaseResultSchema.parse(JSON.parse(line));
 }
 
 // The child-process surface streamHandleFor needs — a structural subset of Node's spawned ChildProcess (stdio:"pipe"),
@@ -510,8 +502,7 @@ export class NomadBackend implements Backend, Recoverable, Observable, Shellable
         `/v1/client/fs/logs/${alloc.ID}?task=agent&type=stdout&plain=true${nsq2}`,
       );
       if (logs.status >= 300) return undefined;
-      const idx = logs.text.lastIndexOf(RESULT_SENTINEL);
-      return idx < 0 ? logs.text : logs.text.slice(0, idx);
+      return stripSentinel(logs.text);
     } catch {
       return undefined; // best-effort — observability must never fail a run
     }
