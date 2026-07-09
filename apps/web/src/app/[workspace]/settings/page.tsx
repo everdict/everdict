@@ -9,6 +9,7 @@ import { invitesSchema, membersSchema, type Invite, type Member } from '@/entiti
 import { runnersResponseSchema, type RunnerMeta } from '@/entities/runner'
 import { secretsSchema, type SecretMeta } from '@/entities/secret'
 import { traceSinksResponseSchema, type TraceSinkConfig } from '@/entities/trace-sink'
+import { tenantUsageSchema, type TenantUsage } from '@/entities/usage'
 import { workspaceRecordSchema, type WorkspaceRecord } from '@/entities/workspace'
 import { can } from '@/shared/auth/can'
 import { currentPrincipal } from '@/shared/auth/principal'
@@ -56,6 +57,7 @@ export default async function SettingsPage({
   let imageRegistries: ImageRegistryConfig[] = []
   let ciLinks: CiLink[] = []
   let budget: BudgetResponse | undefined
+  let metered: TenantUsage | undefined
   let workspaceRunners: RunnerMeta[] = []
   let members: Member[] = []
   let invites: Invite[] = []
@@ -77,6 +79,8 @@ export default async function SettingsPage({
       ciLinks = ciLinksResponseSchema.parse(await controlPlane.listCiLinks(ctx)).links
       // Enforcement budget (per-tenant cost/token/run caps that block runs with 402). Admin config (settings:read|write).
       budget = budgetResponseSchema.parse(await controlPlane.getBudget(ctx))
+      // Metered billing usage (the LLM cost surface) — shown read-only alongside the budget limits (consolidated here from the old /usage page).
+      metered = tenantUsageSchema.parse(await controlPlane.getUsage(ctx))
     }
     // Workspace-shared runners (owner=ws:<workspace>) — team build server/CI. Register/read/remove are all admin (settings:write).
     if (canWriteSettings) {
@@ -118,6 +122,7 @@ export default async function SettingsPage({
           imageRegistries={imageRegistries}
           ciLinks={ciLinks}
           {...(budget !== undefined ? { budget } : {})}
+          {...(metered !== undefined ? { metered } : {})}
           workspaceRunners={workspaceRunners}
           members={members}
           invites={invites}

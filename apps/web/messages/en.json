@@ -1832,7 +1832,12 @@
     "usageNow": "Committed so far: {runs} runs · ${usd} · {tokens} tokens",
     "save": "Save limits",
     "saving": "Saving…",
-    "saved": "Saved"
+    "saved": "Saved",
+    "meteredTitle": "Metered usage",
+    "meteredTip": "Billable LLM cost for the workspace's runs (orchestration + verdict), measured continuously — this is what the cost/token limits above are checked against. Own-pays self-hosted runs are excluded.",
+    "meteredCost": "Cost",
+    "meteredTokens": "Tokens",
+    "meteredEvaluations": "Evaluations"
   },
   "settingsPage": {
     "title": "Workspace settings",
@@ -1845,7 +1850,7 @@
     "tabIntegrations": "Integrations",
     "tabCi": "CI",
     "tabRunners": "Shared runners",
-    "tabBudget": "Budget",
+    "tabBudget": "Budget & usage",
     "tabMembers": "Members",
     "githubHint": "Connect private clone/CI via org install and selected repositories.",
     "githubConnected": "Connected · {count} orgs",

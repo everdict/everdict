@@ -4,10 +4,12 @@ import { useState, useTransition } from 'react'
 import { useTranslations } from 'next-intl'
 
 import type { BudgetLimit, BudgetUsage } from '@/entities/budget'
+import type { TenantUsage } from '@/entities/usage'
 import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
 import { Input } from '@/shared/ui/input'
 import { SettingsList, SettingsRow } from '@/shared/ui/settings-list'
+import { StatCard } from '@/shared/ui/stat-card'
 import { InfoTip } from '@/shared/ui/tooltip'
 
 import { setBudgetLimitAction } from '../api/manage-budget'
@@ -26,10 +28,12 @@ const fromNum = (n?: number): string => (n === undefined ? '' : String(n))
 export function BudgetManager({
   usage,
   limit,
+  metered,
   canWrite,
 }: {
   usage: BudgetUsage
   limit: BudgetLimit | null
+  metered?: TenantUsage // metered billing usage (GET /usage) — the LLM cost surface, shown read-only under the limits
   canWrite: boolean
 }) {
   const t = useTranslations('manageBudget')
@@ -130,6 +134,23 @@ export function BudgetManager({
         <Callout tone="danger" className="py-1.5">
           {error}
         </Callout>
+      )}
+
+      {metered && (
+        <div className="space-y-2 pt-2">
+          <h3 className="flex items-center gap-1.5 text-[13px] font-[560] text-foreground">
+            {t('meteredTitle')}
+            <InfoTip content={t('meteredTip')} />
+          </h3>
+          <div className="grid grid-cols-3 gap-3">
+            <StatCard label={t('meteredCost')} value={`$${metered.usd.toFixed(2)}`} />
+            <StatCard label={t('meteredTokens')} value={metered.tokens.toLocaleString()} />
+            <StatCard
+              label={t('meteredEvaluations')}
+              value={metered.evaluations.toLocaleString()}
+            />
+          </div>
+        </div>
       )}
     </div>
   )

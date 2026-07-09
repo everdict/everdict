@@ -1832,7 +1832,12 @@
     "usageNow": "현재까지 사용: 실행 {runs}회 · ${usd} · 토큰 {tokens}",
     "save": "한도 저장",
     "saving": "저장 중…",
-    "saved": "저장됨"
+    "saved": "저장됨",
+    "meteredTitle": "계량 사용량",
+    "meteredTip": "이 워크스페이스 실행의 청구 대상 LLM 비용(오케스트레이션 + 판정)을 지속적으로 계량한 값이에요 — 위의 비용/토큰 한도가 이 값을 기준으로 확인돼요. own-pays 셀프호스티드 실행은 제외돼요.",
+    "meteredCost": "비용",
+    "meteredTokens": "토큰",
+    "meteredEvaluations": "평가"
   },
   "settingsPage": {
     "title": "워크스페이스 설정",
@@ -1845,7 +1850,7 @@
     "tabIntegrations": "통합",
     "tabCi": "CI 연동",
     "tabRunners": "공유 러너",
-    "tabBudget": "예산",
+    "tabBudget": "예산·사용량",
     "tabMembers": "멤버",
     "githubHint": "조직 설치·선택 저장소로 비공개 클론/CI 를 연동해요.",
     "githubConnected": "연결됨 · {count}개 조직",

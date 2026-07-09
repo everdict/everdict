@@ -21,6 +21,7 @@ import type { Invite, Member } from '@/entities/member'
 import type { RunnerMeta } from '@/entities/runner'
 import type { SecretMeta } from '@/entities/secret'
 import type { TraceSinkConfig } from '@/entities/trace-sink'
+import type { TenantUsage } from '@/entities/usage'
 import type { WorkspaceRecord } from '@/entities/workspace'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/shared/ui/tabs'
 
@@ -45,6 +46,7 @@ export function SettingsTabs(props: {
   imageRegistries: ImageRegistryConfig[] // Workspace image registries (multiple — classification baseline + push publishing)
   ciLinks: CiLink[] // CI repo link (repo↔harness slot = OIDC trust) list
   budget?: BudgetResponse // Enforcement budget (per-tenant cost/token/run caps that block runs with 402) — only when settings:read
+  metered?: TenantUsage // Metered billing usage (LLM cost surface) — shown read-only in the budget tab (consolidated from the old /usage page)
   workspaceRunners: RunnerMeta[] // Workspace-shared runners (owner=ws:<workspace>) — team build server/CI (admin)
   members: Member[]
   invites: Invite[]
@@ -145,6 +147,7 @@ export function SettingsTabs(props: {
           <BudgetManager
             usage={props.budget.usage}
             limit={props.budget.limit}
+            {...(props.metered !== undefined ? { metered: props.metered } : {})}
             canWrite={props.canWriteSettings}
           />
         )}
