@@ -27,7 +27,7 @@ container from `spec.image ?? defaultImage`, then `docker exec` per command. Bas
 paths (`RepoEnvironment`'s `work`) resolve under it and absolute paths (SWE-bench `/testbed`) pass through —
 `resolve(p)`. `writeFile` streams via stdin (size/escape-safe). Optional `mounts: DriverMount[]` bind host
 paths in (e.g. the runner's `~/.codex` login). Consumed by the managed `DockerBackend`
-(`packages/backends/src/docker-backend.ts`) AND the self-hosted runner's `docker` capability
+(`packages/backends/src/orchestrators/docker-backend.ts`) AND the self-hosted runner's `docker` capability
 (`packages/runner-core/src/run-leased-job.ts`) — one `case.image` definition runs managed OR local identically.
 
 ## Driver vs Backend

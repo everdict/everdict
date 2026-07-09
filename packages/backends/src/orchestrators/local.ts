@@ -7,7 +7,7 @@ import {
   type ProbeResult,
   type Probeable,
   dispatchAborted,
-} from "./backend.js";
+} from "../backend.js";
 
 // For dev / single host — runs the job in the same process (no isolation).
 // claude uses this machine's subscription login.

@@ -1,7 +1,7 @@
 import { z } from "zod";
-import { K8sBackend } from "./k8s.js";
-import { LocalBackend } from "./local.js";
-import { NomadBackend } from "./nomad.js";
+import { K8sBackend } from "../orchestrators/k8s.js";
+import { LocalBackend } from "../orchestrators/local.js";
+import { NomadBackend } from "../orchestrators/nomad.js";
 import { BackendRegistry } from "./registry.js";
 
 // --- Build the registry from config (declares multiple clusters/pools; Zod-validated as external input) ---

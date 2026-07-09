@@ -10,7 +10,7 @@ import {
   type ProbeResult,
   type Probeable,
   dispatchAborted,
-} from "./backend.js";
+} from "../backend.js";
 
 const execFileAsync = promisify(execFile);
 

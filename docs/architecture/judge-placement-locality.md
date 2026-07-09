@@ -61,7 +61,7 @@ const cases = runtime
 to `JudgeSpec.runtime` or the default backend.)
 
 ### Placement is store-blind; no locality primitive exists
-`Scheduler` (`packages/backends/src/scheduler.ts`) chooses by capacity (`free = total − max(used, in-flight)`) +
+`Scheduler` (`packages/backends/src/scheduling/scheduler.ts`) chooses by capacity (`free = total − max(used, in-flight)`) +
 tenant WFQ + `tenantQuota`, honoring `placement.target` as a hard pin. `TrustZonePolicy` decides isolation, not
 affinity. `RuntimeSpec` carries coarse location (`datacenters`/`namespace`/`context`) but the scheduler never
 reasons about store proximity, and topology stores (`everdict-shared` namespace / runtime-discovered) have no

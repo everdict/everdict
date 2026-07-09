@@ -14,7 +14,6 @@ import {
   imageUsesRegistryHost,
   judgeEnv,
 } from "@everdict/core";
-import { abortableDelay } from "./abortable-delay.js";
 import {
   type AdoptOutcome,
   type Backend,
@@ -25,9 +24,10 @@ import {
   type Probeable,
   type Recoverable,
   dispatchAborted,
-} from "./backend.js";
-import type { SecretProvider } from "./secrets.js";
-import type { TrustZonePolicy } from "./trust-zone.js";
+} from "../backend.js";
+import type { SecretProvider } from "../policy/secrets.js";
+import type { TrustZonePolicy } from "../policy/trust-zone.js";
+import { abortableDelay } from "./abortable-delay.js";
 
 // --- kubectl abstraction (mockable in tests; the K8s version of NomadHttp) ---
 export interface K8sApi {

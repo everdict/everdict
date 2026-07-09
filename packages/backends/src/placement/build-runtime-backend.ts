@@ -1,8 +1,8 @@
 import { BadRequestError, type RuntimeSpec } from "@everdict/core";
-import type { Backend } from "./backend.js";
-import { K8sBackend, type K8sBackendOptions } from "./k8s.js";
-import { LocalBackend } from "./local.js";
-import { NomadBackend, type NomadBackendOptions } from "./nomad.js";
+import type { Backend } from "../backend.js";
+import { K8sBackend, type K8sBackendOptions } from "../orchestrators/k8s.js";
+import { LocalBackend } from "../orchestrators/local.js";
+import { NomadBackend, type NomadBackendOptions } from "../orchestrators/nomad.js";
 
 // --- Cluster-credential separation ---
 // The cluster API token / kubeconfig authenticate the control plane TO the cluster API; they must never reach the

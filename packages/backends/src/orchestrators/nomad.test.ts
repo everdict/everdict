@@ -2,9 +2,9 @@ import { EventEmitter } from "node:events";
 import { RESULT_SENTINEL } from "@everdict/agent";
 import { type AgentJob, BadRequestError, type CaseResult } from "@everdict/core";
 import { describe, expect, it, vi } from "vitest";
+import { staticSecrets } from "../policy/secrets.js";
+import { perTenantTrustZones, staticTrustZones } from "../policy/trust-zone.js";
 import { NomadBackend, type NomadHttp, type StreamChild, buildNomadJob, fetchHttp, streamHandleFor } from "./nomad.js";
-import { staticSecrets } from "./secrets.js";
-import { perTenantTrustZones, staticTrustZones } from "./trust-zone.js";
 
 const JOB: AgentJob = {
   harness: { id: "claude-code", version: "latest" },

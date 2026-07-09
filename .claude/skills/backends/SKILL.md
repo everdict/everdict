@@ -44,7 +44,7 @@ a signal that fires while the job is still QUEUED (removes the entry, no wasted 
 backend once in-flight. This is promise-tied cancellation, complementing the id-keyed `kill(caseId)` side channel.
 
 ## Reference impl
-`packages/backends/src/nomad.ts` — `buildNomadJob` (job spec) + `NomadBackend` (submit → poll
+`packages/backends/src/orchestrators/nomad.ts` — `buildNomadJob` (job spec) + `NomadBackend` (submit → poll
 alloc → read logs → parse). `LocalBackend` runs in-process (dev). K8s/Windows mirror this shape.
 
 Every `Backend` also implements `capacity(): Promise<{total, used}>` — what the `Scheduler` gates on.

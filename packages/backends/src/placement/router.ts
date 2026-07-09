@@ -1,5 +1,5 @@
 import { type AgentJob, BadRequestError, type CaseResult } from "@everdict/core";
-import type { DispatchOptions } from "./backend.js";
+import type { DispatchOptions } from "../backend.js";
 import type { BackendRegistry } from "./registry.js";
 
 // Control plane: pick a backend by the job's placement.target (or default) and dispatch.

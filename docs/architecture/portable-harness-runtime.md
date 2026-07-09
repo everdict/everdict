@@ -44,8 +44,8 @@ not formulas"). That is not a proper harness; the environment contract leaked.
 - **A container driver already exists and is proven:** `DockerDriver` (`packages/drivers/src/docker.ts`) provisions
   `spec.image ?? defaultImage` as a container `ComputeHandle` (`docker run` keep-alive + `docker exec`). The managed
   **`DockerBackend`** runs cases in their image via exactly this: `runAgentJob(job, { driver: new DockerDriver(...) })`
-  (`packages/backends/src/docker-backend.ts:26`). Nomad/K8s backends also honor `evalCase.image`
-  (`packages/backends/src/nomad.ts:92`).
+  (`packages/backends/src/orchestrators/docker-backend.ts:26`). Nomad/K8s backends also honor `evalCase.image`
+  (`packages/backends/src/orchestrators/nomad.ts:92`).
 - **`runAgentJob` already accepts an injected driver** (`packages/agent/src/run.ts:13`, default `LocalDriver`).
 - **The gap is only in the self-hosted runner.** `runLeasedJob` branches: `service`(topology) → local Docker
   topology; **everything else → `runAgentJob(job)` with the default `LocalDriver`** — in-process on the bare host,

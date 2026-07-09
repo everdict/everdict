@@ -2,6 +2,8 @@ import { stat } from "node:fs/promises";
 import { RESULT_SENTINEL } from "@everdict/agent";
 import { type AgentJob, BadRequestError, type CaseResult, UpstreamError } from "@everdict/core";
 import { describe, expect, it } from "vitest";
+import { staticSecrets } from "../policy/secrets.js";
+import { perTenantTrustZones, staticTrustZones } from "../policy/trust-zone.js";
 import {
   K8S_REGISTRY_AUTH_SECRET,
   type K8sApi,
@@ -13,8 +15,6 @@ import {
   materializeKubeconfig,
   parseJobStatusOutput,
 } from "./k8s.js";
-import { staticSecrets } from "./secrets.js";
-import { perTenantTrustZones, staticTrustZones } from "./trust-zone.js";
 
 const JOB: AgentJob = {
   harness: { id: "aider", version: "latest" },

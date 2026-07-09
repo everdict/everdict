@@ -1,6 +1,6 @@
 import type { AgentJob, CaseResult } from "@everdict/core";
 import { describe, expect, it } from "vitest";
-import type { Backend } from "./backend.js";
+import type { Backend } from "../backend.js";
 import { BackendRegistry } from "./registry.js";
 import { Router } from "./router.js";
 

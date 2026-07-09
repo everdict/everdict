@@ -1,8 +1,8 @@
 import { type BudgetTracker, costOf } from "@everdict/billing";
 import { type AgentJob, type CaseResult, InternalError, NotFoundError, RateLimitError } from "@everdict/core";
-import { type BackendCapacity, type DispatchOptions, dispatchAborted } from "./backend.js";
+import { type BackendCapacity, type DispatchOptions, dispatchAborted } from "../backend.js";
+import type { BackendRegistry } from "../placement/registry.js";
 import { FairQueue } from "./fair-queue.js";
-import type { BackendRegistry } from "./registry.js";
 
 const DEFAULT_TENANT = "default";
 const tenantOf = (job: AgentJob): string => job.tenant ?? DEFAULT_TENANT;
