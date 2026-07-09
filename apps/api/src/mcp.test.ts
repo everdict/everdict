@@ -191,6 +191,7 @@ describe("MCP tools", () => {
       "delete_schedule",
       "diff_datasets",
       "diff_scorecards",
+      "estimate_scorecard",
       "fail_job",
       "get_dataset",
       "get_harness_instance",
