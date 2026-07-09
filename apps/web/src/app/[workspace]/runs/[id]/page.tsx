@@ -110,6 +110,20 @@ export default async function RunDetailPage({
       {(run.status === 'queued' || run.status === 'running') && (
         <section className="space-y-2.5">
           <SectionHeader title={t('liveLogs')} />
+          {/* live trace deep-link — the platform trace is accumulating under this correlation id right now */}
+          {run.liveTrace && (
+            <Callout tone="info" hint={`everdict.run_id=${run.liveTrace.runId}`}>
+              {t('liveTrace', { kind: run.liveTrace.kind })}{' '}
+              <a
+                href={run.liveTrace.endpoint}
+                target="_blank"
+                rel="noreferrer"
+                className="font-mono underline underline-offset-2"
+              >
+                {run.liveTrace.endpoint}
+              </a>
+            </Callout>
+          )}
           <Card className="p-4">
             <LiveLogs runId={run.id} initialStatus={run.status} />
           </Card>

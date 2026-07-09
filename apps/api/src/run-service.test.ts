@@ -445,3 +445,91 @@ describe("RunService — single-run durability (P4, docs/architecture/batch-resi
     expect((await store.get("legacy-1"))?.status).toBe("running"); // untouched — recovery tombstones it
   });
 });
+
+describe("RunService — live trace correlation (observability ③)", () => {
+  it("stamps the control-plane-minted job runId (evd-run-<record id>) so observers can correlate mid-run", async () => {
+    const store = new InMemoryRunStore();
+    const jobs: AgentJob[] = [];
+    const capture: Dispatcher = {
+      async dispatch(job) {
+        jobs.push(job);
+        return resultFor(job);
+      },
+    };
+    const svc = new RunService({ dispatcher: capture, store, newId: ids });
+    const rec = await svc.submit({ tenant: "t", harness: { id: "s", version: "0" }, case: CASE });
+    await flush();
+    expect(jobs[0]?.runId).toBe(`evd-run-${rec.id}`);
+  });
+
+  it("get() derives liveTrace while the run is active AND the harness exports a platform trace", async () => {
+    const store = new InMemoryRunStore();
+    let release!: () => void;
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    const parking: Dispatcher = {
+      async dispatch(job) {
+        await gate;
+        return resultFor(job);
+      },
+    };
+    const svc = new RunService({
+      dispatcher: parking,
+      store,
+      newId: ids,
+      resolveHarness: async () => ({
+        kind: "command",
+        id: "traced",
+        version: "1",
+        setup: [],
+        command: "run {{task}}",
+        env: {},
+        params: {},
+        trace: { kind: "mlflow", endpoint: "http://mlflow:5000", collect: "control-plane", correlate: "id" },
+      }),
+    });
+    const rec = await svc.submit({ tenant: "t", harness: { id: "traced", version: "1" }, case: CASE });
+    const live = await svc.get(rec.id);
+    expect(live?.liveTrace).toEqual({ kind: "mlflow", endpoint: "http://mlflow:5000", runId: `evd-run-${rec.id}` });
+
+    release();
+    await flush();
+    const done = await svc.get(rec.id);
+    expect(done?.status).toBe("succeeded");
+    expect(done?.liveTrace).toBeUndefined(); // settled — the collected trace/traceRef is the evidence now
+  });
+
+  it("a trace:none harness never gets a liveTrace (nothing accumulates anywhere)", async () => {
+    const store = new InMemoryRunStore();
+    let release!: () => void;
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    const parking: Dispatcher = {
+      async dispatch(job) {
+        await gate;
+        return resultFor(job);
+      },
+    };
+    const svc = new RunService({
+      dispatcher: parking,
+      store,
+      newId: ids,
+      resolveHarness: async () => ({
+        kind: "command",
+        id: "dark",
+        version: "1",
+        setup: [],
+        command: "run",
+        env: {},
+        params: {},
+        trace: { kind: "none" },
+      }),
+    });
+    const rec = await svc.submit({ tenant: "t", harness: { id: "dark", version: "1" }, case: CASE });
+    expect((await svc.get(rec.id))?.liveTrace).toBeUndefined();
+    release();
+    await flush();
+  });
+});

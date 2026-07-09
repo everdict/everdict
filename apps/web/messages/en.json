@@ -1603,7 +1603,8 @@
     "trace": "Trace",
     "snapshot": "Snapshot ({kind})",
     "discuss": "Discussion",
-    "liveLogs": "Live logs"
+    "liveLogs": "Live logs",
+    "liveTrace": "The trace is accumulating on the {kind} platform right now:"
   },
   "runsTable": {
     "sourceWeb": "Web",

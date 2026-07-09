@@ -2593,3 +2593,34 @@ describe("ScorecardService — in-batch OOM auto-boost (opt-in)", () => {
     expect(done.scorecard?.results[0]?.failure?.code).toBe("OOM_KILLED");
   });
 });
+
+describe("ScorecardService — trace-correlation runId on batch jobs (observability ③)", () => {
+  it("every dispatched case job carries evd-<batchId>-<caseId> (observers derive it with zero lookups)", async () => {
+    const store = new InMemoryScorecardStore();
+    const datasets = new InMemoryDatasetRegistry();
+    await datasets.register("acme", {
+      id: "cd",
+      version: "1.0.0",
+      cases: [
+        { id: "x1", env: { kind: "repo", source: { files: {} } }, task: "t", graders: [], timeoutSec: 60, tags: [] },
+      ],
+      tags: [],
+    });
+    const jobs: AgentJob[] = [];
+    const capture: Dispatcher = {
+      async dispatch(job) {
+        jobs.push(job);
+        return { ...caseResult(true), caseId: job.evalCase.id };
+      },
+    };
+    const service = new ScorecardService({ dispatcher: capture, store, datasets, newId: () => "sc-rid" });
+    const rec = await service.submit({
+      tenant: "acme",
+      dataset: { id: "cd", version: "latest" },
+      harness: { id: "scripted", version: "0" },
+    });
+    for (let i = 0; i < 100 && (await store.get(rec.id))?.status !== "succeeded"; i++)
+      await new Promise((r) => setTimeout(r, 5));
+    expect(jobs[0]?.runId).toBe(`evd-${rec.id}-x1`);
+  });
+});

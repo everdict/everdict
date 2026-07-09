@@ -43,6 +43,21 @@ line, then `event: end {"status":"succeeded"}`.
 ## ③ Live trace deep-link — where the platform trace is accumulating
 
 For harnesses that DO export a platform trace (otel/mlflow/langfuse/langsmith/phoenix), the
-correlation is deterministic from dispatch (`ctx.runId` → `everdict.run_id` tag), so the tenant's
-own observability UI can show the trace **while the run is still running** — see the section in
-this doc once ③ lands.
+correlation used to be minted IN-JOB (`runCase`'s `newRunId()`), so nothing outside the job could
+find the trace until the result landed. The control plane now mints it at dispatch and carries it
+on the job (`AgentJob.runId`; `runCase` keeps its self-mint only as the no-CP fallback):
+
+- standalone run → `evd-run-<record id>` · batch child → `evd-<scorecardId>-<caseId>[-t<n>]` —
+  **derivable from the record alone**, zero lookups for observers.
+- `GET /runs/:id` (and MCP `get_run`) adds a derived `liveTrace {kind, endpoint, runId}` while the
+  run is queued/running and its harness exports a platform trace; the web run detail renders it as
+  a deep-link callout ("트레이스가 mlflow 플랫폼에 실시간 적재 중" + the correlation id). Settled
+  runs drop it — the collected trace/traceRef is the evidence then.
+- Stability note: the id is stable across spillover/transient retries of the same record, so a
+  re-attempt's spans land under the same address (more evidence, same search key). Collection
+  behavior is unchanged (`collectTrace(runId)` uses the same value).
+
+Live-verified against real MLflow: mid-run `GET /runs/:id` returned
+`liveTrace {mlflow, http://…:5501, evd-run-<id>}`, the live log tail printed
+`my-correlation=evd-run-<id>` from INSIDE the job (`$EVERDICT_RUN_ID` — zero coordination), and the
+field disappeared once the run settled.

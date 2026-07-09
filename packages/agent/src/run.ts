@@ -60,6 +60,6 @@ export async function runAgentJob(
     environment,
     harness,
     graders,
-    runCtx: runContextFromEnv(),
+    runCtx: { ...runContextFromEnv(), ...(job.runId ? { runId: job.runId } : {}) },
   });
 }

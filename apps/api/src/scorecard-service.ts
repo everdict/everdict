@@ -1026,6 +1026,7 @@ export class ScorecardService {
       harness: { id: ctx.harnessId, version: ctx.harnessVersion },
       tenant: ctx.tenant,
       batchId: id, // scheduler-side reclaim key (supersede / speculation-loser queue cancel)
+      runId: `evd-${id}-${caseId}`, // trace correlation (Temporal path parity — no trial fan-out here)
       priority: "batch", // fan-out work — yields the queue to interactive single runs
       ...(ctx.owner ? { submittedBy: ctx.owner } : {}),
       ...(ctx.harnessSpec ? { harnessSpec: ctx.harnessSpec } : {}),
@@ -1628,6 +1629,8 @@ export class ScorecardService {
         ...job,
         tenant,
         batchId: id, // scheduler-side reclaim key (supersede / speculation-loser queue cancel)
+        // Trace correlation, derivable by observers: evd-<batchId>-<caseId>[-t<n>] (live-observability).
+        runId: `evd-${id}-${job.evalCase.id}${job.trial !== undefined ? `-t${job.trial}` : ""}`,
         priority: "batch", // fan-out work — yields the queue to interactive single runs
         // owner (submitter subject) — self-hosted runner dispatch-ownership check + lease-queue key (same as a single run).
         ...(owner ? { submittedBy: owner } : {}),

@@ -57,6 +57,8 @@ export const runSchema = z.object({
   trigger: z.string().optional(),
   // the scorecard batch this run belongs to (if any). The control plane excludes children (where set) from the activity list by default.
   parentScorecardId: z.string().optional(),
+  // live trace deep-link (derived, present only while active + the harness exports a platform trace)
+  liveTrace: z.object({ kind: z.string(), endpoint: z.string(), runId: z.string() }).optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 })

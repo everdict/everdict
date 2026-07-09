@@ -1603,7 +1603,8 @@
     "trace": "트레이스",
     "snapshot": "스냅샷 ({kind})",
     "discuss": "논의",
-    "liveLogs": "라이브 로그"
+    "liveLogs": "라이브 로그",
+    "liveTrace": "트레이스가 {kind} 플랫폼에 실시간 적재 중이에요:"
   },
   "runsTable": {
     "sourceWeb": "웹",

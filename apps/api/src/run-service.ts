@@ -16,6 +16,13 @@ import type { TraceSource, TraceSourceConfig } from "@everdict/trace";
 import { executeCase } from "./execute-case.js";
 import { assertRuntimeTarget } from "./require-runtime.js";
 
+// Where a running case's platform trace is accumulating (derived on read; docs/architecture/live-observability.md).
+export interface LiveTraceRef {
+  kind: string; // otel | mlflow | langfuse | langsmith | phoenix
+  endpoint: string; // the platform endpoint from the harness spec (UI entry point, best-effort)
+  runId: string; // correlation value (everdict.run_id tag / trace search key)
+}
+
 export interface SubmitInput {
   tenant: string;
   // submitter (principal.subject) — the owner used to resolve a personally-owned connection for a private-repo seed ("clone with my connection").
@@ -117,8 +124,33 @@ export class RunService {
     return record;
   }
 
-  get(id: string): Promise<RunRecord | undefined> {
-    return this.deps.store.get(id);
+  async get(id: string): Promise<(RunRecord & { liveTrace?: LiveTraceRef }) | undefined> {
+    const record = await this.deps.store.get(id);
+    if (!record) return undefined;
+    return this.withLiveTrace(record);
+  }
+
+  // Live trace deep-link (observability ③, derived — never stored): while the run is still active AND its
+  // harness exports a platform trace, surface where that trace is accumulating. The correlation id is the
+  // control-plane-minted job runId, derivable from the record alone (evd-run-<id> / evd-<batch>-<caseId>), so
+  // observers can open the tenant's own observability UI mid-run with zero coordination.
+  private async withLiveTrace(record: RunRecord): Promise<RunRecord & { liveTrace?: LiveTraceRef }> {
+    if (record.status !== "queued" && record.status !== "running") return record;
+    if (!this.deps.resolveHarness) return record;
+    const spec = await this.deps
+      .resolveHarness(record.tenant, record.harness.id, record.harness.version)
+      .catch(() => undefined);
+    const source =
+      spec?.kind === "command" && spec.trace.kind !== "none"
+        ? { kind: spec.trace.kind, endpoint: spec.trace.endpoint }
+        : spec?.kind === "service"
+          ? { kind: spec.traceSource.kind, endpoint: spec.traceSource.endpoint }
+          : undefined;
+    if (!source) return record;
+    const runId = record.parentScorecardId
+      ? `evd-${record.parentScorecardId}-${record.caseId}`
+      : `evd-run-${record.id}`;
+    return { ...record, liveTrace: { ...source, runId } };
   }
 
   // Live-progress logs (observability ②) — the record plus the case job's current raw stdout. text=undefined
@@ -173,6 +205,7 @@ export class RunService {
       harness: input.harness,
       tenant: input.tenant,
       meterUsage,
+      runId: `evd-run-${id}`, // trace correlation — derivable from the record id, so live observers need no lookup
       priority: "interactive", // a person is waiting on a single run — jumps ahead of batch fan-out in the queue
       ...(input.submittedBy ? { submittedBy: input.submittedBy } : {}),
       ...(harnessSpec ? { harnessSpec } : {}),

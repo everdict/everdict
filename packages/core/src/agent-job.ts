@@ -60,6 +60,11 @@ export const AgentJobSchema = z.object({
   // Batch id (CP-internal) — lets the scheduler cancel a reclaimed batch's still-queued jobs precisely
   // (supersede / speculation-loser reclaim). The agent ignores it.
   batchId: z.string().optional(),
+  // Trace-correlation run id, minted BY THE CONTROL PLANE at dispatch (evd-run-<runId> / evd-<batchId>-<caseId>[-t<n>])
+  // so live observers can find the platform trace while the case is still running (docs/architecture/live-observability.md).
+  // runCase uses it instead of self-minting; absent (tests/CLI) = the old in-job mint. Stable across spillover/
+  // retries of the same record — a re-attempt's spans land under the same id (more evidence, same address).
+  runId: z.string().optional(),
   // Trial index (0-based) when a case is dispatched N times for pass@k / flakiness. runSuite's fan-out stamps it so
   // the orchestration can key one child run per (case, trial) and the resulting CaseResult carries its trial. Absent =
   // single-run. The agent ignores it (it runs exactly one job); the control plane stamps the result. docs/architecture/trial-based-verdict.md
