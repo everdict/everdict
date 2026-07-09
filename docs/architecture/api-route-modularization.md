@@ -238,3 +238,26 @@ src/
 monorepo already implements the module DAG at package level (`@everdict/core` ≈ the contracts/common tier);
 services receive stores by injection. Import direction inside the app: `common ← core ← api`; infrastructure
 imports only common; core never imports api. Pure `git mv` + import repointing; same gates as Round 3.
+
+## Round 5 — request/response DTO folders + OpenAPI docs (maintainer-approved)
+
+The source idiom's transport layer separates DTOs into `request/`/`response/` sub-packages (one file per
+DTO; the DTO code IS the API doc) and splits the swagger documentation from the controller implementation
+(a docs interface the controller implements). The Fastify/TS reinterpretation:
+
+- **`api/<domain>/request/<dto>.ts`** — the 9 `<resource>.schema.ts` files split into one file per request
+  Zod DTO. Registry-backed resources keep validating with the core spec schema directly (no file).
+- **`api/<domain>/response/<dto>.ts`** — response DTO schemas. Response SHAPES stay byte-identical (the
+  636-test suite pins them): reuse the `@everdict/db`/`@everdict/core` record/spec Zod schemas as the SSOT
+  and define only what has no schema yet.
+- **`api/<domain>/<resource>.docs.ts`** — the ControllerDocs analog: per-route OpenAPI descriptors
+  (`summary`/`tags`/`params`/`querystring`/`body`/`response`) built from request/+response/ schemas via
+  zod→JSON Schema; `.routes.ts` attaches `{ schema: docs.x }` per registration.
+- **Serving**: `@fastify/swagger` + `@fastify/swagger-ui` → `/docs` (UI) + OpenAPI JSON. All text English.
+- **Doc-only, behavior frozen**: the validator and serializer compilers are set to no-ops — request
+  validation stays in the handler (safeParse → flat envelope), responses serialize as plain JSON. Attaching
+  a schema must never change behavior. Migrating validation to Fastify is explicitly a separate future round.
+
+Slices: S1 swagger infra (plugins + no-op compilers + /docs smoke) → S2 request/ split → S3 response/ +
+docs.ts sweep (per-domain agent batches; every route gets a descriptor). Gates per slice: typecheck + 636
+tests + build + boot contract (+ a /docs smoke asserting the OpenAPI JSON lists the routes).

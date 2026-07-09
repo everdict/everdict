@@ -29,7 +29,10 @@ apps/api/src/
                          queue · billing (+ execution/ ops/ = machinery's thin transport surfaces)
       <resource>.routes.ts   ← registerXRoutes(app, deps): thin handlers, zero logic
       <resource>.mcp.ts      ← registerXTools(server, ctx): the same resource's MCP tools, zero logic
-      <resource>.schema.ts   ← request Zod DTOs (XxxBodySchema) — only when the resource has bodies
+      <resource>.docs.ts     ← OpenAPI route descriptors (summary/tags/params/body/response) — the
+                               docs/impl separation; routes attach { schema: docs.x }
+      request/<dto>.ts       ← one file per request Zod DTO (XxxBodySchema) — only when it has bodies
+      response/<dto>.ts      ← response DTO schemas (reuse @everdict/db/core record schemas as SSOT)
       (+ inject-based transport tests)
   core/              ← BUSINESS layer (same domain names as api/)
     <domain>/          ← <resource>-service.ts + collaborator services + service tests
@@ -82,16 +85,19 @@ workspace's resource is 404 (no existence leak). "Admin or creator" checks live 
 (`deleteDatasetVersion` pattern), never in the route.
 
 ## Recipe: adding a resource
-1. `<domain>/<resource>-service.ts` — logic + store access + response shaping. Inputs are command objects.
-2. `<domain>/<resource>.schema.ts` — `CreateXBodySchema`/`UpdateXBodySchema` (Zod). Registry-backed resources
-   often validate with the core spec schema directly (no schema file needed).
-3. `<domain>/<resource>.routes.ts` — `registerXRoutes(app, deps)` in the fixed shape above.
-4. `server.ts` — one `registerXRoutes(app, deps)` line. `route-context.ts` — add the service to `ServerDeps`
-   (optional field; absent = feature-gated 404).
-5. **MCP parity** — `<domain>/<resource>.mcp.ts` with `registerXTools(server, ctx)` calling the same service
-   function; one `registerXTools(...)` line in `mcp.ts`. Descriptions carry the semantics (the tool schema IS
-   the doc for agents).
-6. Tests: `buildServer` + `inject` (see skill `testing`) — cover authz (401/403), validation (400), 404 scoping.
+1. `core/<domain>/<resource>-service.ts` — logic + store access + response shaping. Inputs are command objects.
+2. `api/<domain>/request/<dto>.ts` — `CreateXBodySchema`/`UpdateXBodySchema` (Zod), one file per DTO.
+   Registry-backed resources often validate with the core spec schema directly (no file needed).
+3. `api/<domain>/<resource>.routes.ts` — `registerXRoutes(app, deps)` in the fixed shape above.
+4. `server.ts` — one `registerXRoutes(app, deps)` line. `api/route-context.ts` — add the service to
+   `ServerDeps` (optional field; absent = feature-gated 404).
+5. **MCP parity** — `api/<domain>/<resource>.mcp.ts` with `registerXTools(server, ctx)` calling the same
+   service function; one `registerXTools(...)` line in `mcp.ts`. Descriptions carry the semantics (the tool
+   schema IS the doc for agents).
+6. **OpenAPI** — `api/<domain>/response/<dto>.ts` (reuse the db/core record schema if one exists) +
+   `api/<domain>/<resource>.docs.ts` descriptors; attach `{ schema: docs.x }` in the route registration.
+   Doc-only (no-op validator/serializer) — never changes behavior; English text.
+7. Tests: `buildServer` + `inject` (see skill `testing`) — cover authz (401/403), validation (400), 404 scoping.
 
 ## Run lifecycle (`RunService`) — the archetype service
 `submit`: `budget.admit(tenant)` (over-limit → 402, no run created) → `store.create(queued)` → return 202 →

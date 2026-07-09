@@ -13,9 +13,11 @@ repository, domain-packaged, one-way call chain). See skill `api-layer` for the 
   imports only common). Inside each layer, one folder per **domain entity**, the SAME name recurring across
   layers (`api/run` + `core/run`, `api/scorecard` + `core/scorecard`, …): `api/<domain>/` holds
   `<resource>.routes.ts` (HTTP registration) + `<resource>.mcp.ts` (the same resource's MCP tools) +
-  `<resource>.schema.ts` (request Zod DTOs + OpenAPI text, English — only when the resource has bodies) +
-  inject-based transport tests; `core/<domain>/` holds `<resource>-service.ts` + collaborator services +
-  service tests. A **sub-resource lives in its owner's domain** (harness-template in `harness/`, invite in
+  `request/<dto>.ts` (one file per request Zod DTO — only when the resource has bodies; registry-backed
+  resources validate with the core spec schema directly, no file) + `response/<dto>.ts` (response DTO
+  schemas — REUSE the `@everdict/db`/`@everdict/core` record/spec Zod schemas as the SSOT, define only
+  what has no schema yet) + `<resource>.docs.ts` (the OpenAPI route descriptors) + inject-based transport
+  tests; `core/<domain>/` holds `<resource>-service.ts` + collaborator services + service tests. A **sub-resource lives in its owner's domain** (harness-template in `harness/`, invite in
   `member/`). **NEVER a concern umbrella** (`catalog/`, `integrations/`) on the domain axis. Engine machinery
   lives in `core/execution/` and `core/ops/`; their thin transport surfaces in `api/execution/` + `api/ops/`.
   The **storage layer is not in apps/api** — it is the `@everdict/db` + `@everdict/registry` packages (the
@@ -52,6 +54,12 @@ repository, domain-packaged, one-way call chain). See skill `api-layer` for the 
   per-concern builder functions — no business logic.
 - Responses are **flat** — no success envelope. Error envelope is flat `{ code, message, data? }` from
   `AppError.toEnvelope()` (routes funnel every failure through `sendError`).
+- **OpenAPI docs are separated from the implementation**: each resource's route descriptors (`summary` /
+  `tags` / `params` / `body` / `response`, built from the `request/`+`response/` schemas via zod→JSON Schema)
+  live in `<resource>.docs.ts`; `.routes.ts` only attaches `{ schema: docs.x }`. Served at `/docs`
+  (`@fastify/swagger` + UI). **Doc-only**: the validator/serializer compilers are no-ops — request validation
+  stays in the handler (safeParse → flat envelope) and responses serialize as plain JSON; attaching a schema
+  must never change behavior. All OpenAPI text is English (repo language policy).
 - POST default status = **200** (201 allowed, but be consistent within a resource). No `/api` prefix.
 - List endpoints are paginated by default (cursor: `created_at DESC, id DESC`, fetch `size+1`, opaque base64 token). No `pagination` wrapper.
 - `/internal/**` routes are guarded by `x-internal-token` (constant-time compare, fail-closed if unset); no
