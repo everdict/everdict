@@ -297,3 +297,14 @@ export function mcpChallenge(req: FastifyRequest, reply: FastifyReply): FastifyR
     .header("WWW-Authenticate", `Bearer resource_metadata="${metaUrl}"`)
     .send({ code: "UNAUTHENTICATED", message: "MCP requires OAuth authentication (see resource_metadata)." });
 }
+
+// authorize wrapper — throws ForbiddenError as-is so sendError maps it to 403.
+export function gate(principal: Principal, action: Action): void {
+  authorize(principal, action);
+}
+
+// AppError → flat error response; anything else → 500. Every route funnels failures through this.
+export function sendError(reply: FastifyReply, err: unknown): FastifyReply {
+  if (err instanceof AppError) return reply.code(err.status).send(err.toEnvelope());
+  return reply.code(500).send({ code: "INTERNAL", message: err instanceof Error ? err.message : String(err) });
+}

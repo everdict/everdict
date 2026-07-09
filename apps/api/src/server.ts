@@ -86,10 +86,12 @@ import type { ServerDeps } from "./route-context.js";
 import {
   baseUrl,
   constantTimeEq,
+  gate,
   mcpChallenge,
   protectedResourceMetadata,
   resolveBearerPrincipal,
   resolvePrincipal,
+  sendError,
   zodIssues,
 } from "./route-context.js";
 import { installGithubWorkspaceRunner } from "./runners/github-runner-install.js";
@@ -101,6 +103,7 @@ import type { MembershipService } from "./workspace/membership-service.js";
 import type { NotificationService } from "./workspace/notification-service.js";
 import type { ProfileService } from "./workspace/profile-service.js";
 import type { ViewService } from "./workspace/view-service.js";
+import { registerViewRoutes } from "./workspace/view.routes.js";
 import type { WorkspaceService } from "./workspace/workspace-service.js";
 
 // Mark-notifications-read request — one of ids or all:true (empty = no-op → read:0).
@@ -222,19 +225,6 @@ export const UpdateScheduleBodySchema = z.object({
   overlapPolicy: overlapPolicy.optional(),
   enabled: z.boolean().optional(), // pause/resume
   runTemplate: ScheduleRunTemplateBodySchema.optional(),
-});
-
-// Saved scorecard-analysis View — a named AnalysisConfig (opaque config: the web validates its shape) + visibility (private|workspace).
-const ViewVisibilityBody = z.enum(["private", "workspace"]);
-export const CreateViewBodySchema = z.object({
-  name: z.string().min(1),
-  config: z.unknown(), // web AnalysisConfig (recipe). The control plane does not enforce its shape.
-  visibility: ViewVisibilityBody.default("private"),
-});
-export const UpdateViewBodySchema = z.object({
-  name: z.string().min(1).optional(),
-  config: z.unknown().optional(),
-  visibility: ViewVisibilityBody.optional(),
 });
 
 // Secret name = env-variable format (since it's injected as job env).
@@ -1917,112 +1907,8 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     }
   });
 
-  // --- saved scorecard-analysis Views — a named AnalysisConfig (opaque). Read = shared + my private, edit·delete = owner·admin. ---
-  // Reuses scorecard read/run permissions (no new authz action): read = scorecards:read, write = scorecards:run.
-  app.post("/views", async (req, reply) => {
-    if (!deps.viewService) return reply.code(404).send({ code: "NOT_FOUND", message: "view service not configured" });
-    const principal = await resolvePrincipal(req, reply, deps);
-    if (!principal) return reply;
-    try {
-      gate(principal, "scorecards:run");
-    } catch (err) {
-      return sendError(reply, err);
-    }
-    let body: z.infer<typeof CreateViewBodySchema>;
-    try {
-      body = CreateViewBodySchema.parse(req.body);
-    } catch (err) {
-      return reply.code(400).send({ code: "BAD_REQUEST", message: (err as Error).message });
-    }
-    try {
-      return reply.code(201).send(
-        await deps.viewService.create({
-          tenant: principal.workspace,
-          createdBy: principal.subject,
-          name: body.name,
-          config: body.config,
-          visibility: body.visibility,
-        }),
-      );
-    } catch (err) {
-      return sendError(reply, err);
-    }
-  });
-
-  app.get("/views", async (req, reply) => {
-    if (!deps.viewService) return reply.code(404).send({ code: "NOT_FOUND", message: "view service not configured" });
-    const principal = await resolvePrincipal(req, reply, deps);
-    if (!principal) return reply;
-    try {
-      gate(principal, "scorecards:read");
-    } catch (err) {
-      return sendError(reply, err);
-    }
-    return reply.send(await deps.viewService.list(principal.workspace, principal.subject));
-  });
-
-  app.get<{ Params: { id: string } }>("/views/:id", async (req, reply) => {
-    if (!deps.viewService) return reply.code(404).send({ code: "NOT_FOUND", message: "view service not configured" });
-    const principal = await resolvePrincipal(req, reply, deps);
-    if (!principal) return reply;
-    try {
-      gate(principal, "scorecards:read");
-    } catch (err) {
-      return sendError(reply, err);
-    }
-    try {
-      return reply.send(await deps.viewService.get(principal.workspace, req.params.id, principal.subject)); // 404 if it's someone else's private view / not found
-    } catch (err) {
-      return sendError(reply, err);
-    }
-  });
-
-  app.patch<{ Params: { id: string } }>("/views/:id", async (req, reply) => {
-    if (!deps.viewService) return reply.code(404).send({ code: "NOT_FOUND", message: "view service not configured" });
-    const principal = await resolvePrincipal(req, reply, deps);
-    if (!principal) return reply;
-    try {
-      gate(principal, "scorecards:run");
-    } catch (err) {
-      return sendError(reply, err);
-    }
-    let body: z.infer<typeof UpdateViewBodySchema>;
-    try {
-      body = UpdateViewBodySchema.parse(req.body);
-    } catch (err) {
-      return reply.code(400).send({ code: "BAD_REQUEST", message: (err as Error).message });
-    }
-    try {
-      return reply.send(
-        await deps.viewService.update(principal.workspace, req.params.id, body, {
-          subject: principal.subject,
-          isAdmin: principal.roles.includes("admin"),
-        }),
-      ); // 404 if not found (edit is creator·admin only → 403)
-    } catch (err) {
-      return sendError(reply, err);
-    }
-  });
-
-  app.delete<{ Params: { id: string } }>("/views/:id", async (req, reply) => {
-    if (!deps.viewService) return reply.code(404).send({ code: "NOT_FOUND", message: "view service not configured" });
-    const principal = await resolvePrincipal(req, reply, deps);
-    if (!principal) return reply;
-    try {
-      gate(principal, "scorecards:run");
-    } catch (err) {
-      return sendError(reply, err);
-    }
-    try {
-      await deps.viewService.remove(principal.workspace, req.params.id, {
-        subject: principal.subject,
-        isAdmin: principal.roles.includes("admin"),
-      }); // 404 if not found (delete is creator·admin only → 403)
-      return reply.code(204).send();
-    } catch (err) {
-      return sendError(reply, err);
-    }
-  });
+  // saved scorecard-analysis Views → workspace/view.routes.ts
+  registerViewRoutes(app, deps);
 
   // Trace ingest — upload traces already produced externally (TraceEvent[]) and turn them into a scorecard (no harness run). Validated at the boundary.
   app.post("/scorecards/ingest", async (req, reply) => {
@@ -3451,11 +3337,6 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   return app;
 }
 
-// authorize wrapper — throws ForbiddenError as-is so sendError maps it to 403.
-function gate(principal: Principal, action: Action): void {
-  authorize(principal, action);
-}
-
 // Image-classification warnings right after registration — classify the resolved spec's images against the workspace registries
 // and keep only local/unqualified (no pull guarantee). A failure to compute warnings does not block registration (warn-not-block).
 async function harnessImageWarnings(
@@ -3473,9 +3354,4 @@ async function harnessImageWarnings(
   } catch {
     return [];
   }
-}
-
-function sendError(reply: FastifyReply, err: unknown): FastifyReply {
-  if (err instanceof AppError) return reply.code(err.status).send(err.toEnvelope());
-  return reply.code(500).send({ code: "INTERNAL", message: err instanceof Error ? err.message : String(err) });
 }
