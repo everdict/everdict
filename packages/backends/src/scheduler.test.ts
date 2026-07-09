@@ -526,6 +526,29 @@ describe("Scheduler", () => {
   });
 });
 
+describe("Scheduler budget admission", () => {
+  it("does NOT reserve a run when the job is rejected for a full queue (no phantom-run leak)", async () => {
+    const b = new ControlledBackend("a", 1); // a single slot
+    const budget = inMemoryBudget({ limitFor: () => ({ runs: 10 }) });
+    const sched = new Scheduler(new BackendRegistry().register("a", b), { maxQueueDepth: 1, budget });
+
+    const first = sched.dispatch(tjob("t", "j1")); // takes the slot (admitted + dispatched)
+    await flush();
+    const second = sched.dispatch(tjob("t", "j2")); // no slot → admitted + queued (fills the depth-1 queue)
+    await flush();
+
+    const runsBefore = budget.usage("t").runs; // 2 admitted so far
+    // Third has nowhere to go — the queue is full. It must be rejected BEFORE admit, so no run is reserved.
+    await expect(sched.dispatch(tjob("t", "j3"))).rejects.toThrow(/queue is full/i);
+    expect(budget.usage("t").runs).toBe(runsBefore); // pre-fix this was runsBefore + 1 (a phantom run)
+
+    b.releaseAll(); // release the in-flight j1 → its settle lets the queued j2 dispatch
+    await flush();
+    b.releaseAll(); // release j2
+    await Promise.all([first, second]);
+  });
+});
+
 describe("Scheduler capacity probing", () => {
   it("probes each backend's capacity once per drain, not once per placement", async () => {
     const b = new ControlledBackend("a", 0); // start full → jobs queue instead of dispatching

@@ -98,21 +98,18 @@ export class Scheduler {
   }
 
   dispatch(job: AgentJob, opts?: DispatchOptions): Promise<CaseResult> {
-    // Already cancelled before we did anything — reject without admitting a budget run or touching the queue.
+    // Already cancelled before we did anything — reject without touching the budget or the queue.
     if (opts?.signal?.aborted) return Promise.reject(dispatchAborted(job));
-    // Budget admit — if over, reject immediately before queuing (402). If it passes, reserve one run (burst-cap protection).
-    try {
-      this.opts.budget?.admit(tenantOf(job));
-    } catch (err) {
-      return Promise.reject(err);
-    }
+    const tenant = tenantOf(job);
+    // Backpressure checks run BEFORE the budget admit — otherwise a queue-full / over-quota rejection would leak
+    // admit()'s reserved run (never dispatched, never settled), permanently inflating the tenant's run count and
+    // eventually 402-ing them for jobs that never ran. Admit only once the job is guaranteed to be enqueued.
     const max = this.opts.maxQueueDepth ?? Number.POSITIVE_INFINITY;
     if (this.queue.size >= max) {
       return Promise.reject(
         new RateLimitError("RATE_LIMITED", { queueDepth: this.queue.size }, "the scheduler queue is full."),
       );
     }
-    const tenant = tenantOf(job);
     const tenantMax = this.opts.tenantMaxQueueDepth?.(tenant) ?? Number.POSITIVE_INFINITY;
     if ((this.queue.queuedByTenant()[tenant] ?? 0) >= tenantMax) {
       return Promise.reject(
@@ -122,6 +119,12 @@ export class Scheduler {
           "this workspace's scheduler queue is full.",
         ),
       );
+    }
+    // Budget admit — over-limit ⇒ 402 before queuing; on pass, reserve one run (burst-cap protection).
+    try {
+      this.opts.budget?.admit(tenant);
+    } catch (err) {
+      return Promise.reject(err);
     }
     return new Promise<CaseResult>((resolve, reject) => {
       const entry: QueueEntry = {
