@@ -91,6 +91,15 @@ compound (64 → 128 → 256 …) up to a 16GB cap — past the cap the fix is a
 headroom. Live: a 150MB allocator declared at 64Mb OOMed, retry 1 escalated to 128Mb (OOM again), retry 2
 compounded to 256Mb and PASSED, with the spec still reading 64.
 
+**In-batch auto-boost (opt-in)** removes the human round-trip per doubling: with `oomAutoBoost: true` on the
+batch (HTTP/MCP submit knob, persisted on `orchestration` so resume keeps it), an OOM_KILLED case
+re-dispatches INSIDE the running batch with doubled job-only memory, compounding up to the same 16GB cap and
+then surfacing the OOM (`executeWithOomBoost`, shared by the in-process and Temporal drivers). Off by
+default because every boost re-runs the case — extra compute the submitter must have chosen. Boosts surface
+as progress steps (`hog1: OOM auto-boost 64 → 128Mb (in-batch retry)`) and the existing
+`everdict_oom_escalated_total` counter. Live: the same 150MB allocator went 64 → 128 → 256 inside one batch
+and completed, zero retry-failed round-trips.
+
 **Stages survive the process boundary**: the agent entrypoint catches in-job errors and emits a CLASSIFIED
 CaseResult through the sentinel (`stageForError`: HARNESS_INSTALL_FAILED→install · run · grade · collect ·
 dispatch), so a setup break lands as `{install, harness, retryable:false}` instead of a mushy backend-side

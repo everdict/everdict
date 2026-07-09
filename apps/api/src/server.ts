@@ -148,6 +148,9 @@ export const RunScorecardBodySchema = z.object({
   // per-batch trace-sink override: a configured workspace sink name, or "none" to suppress export for this batch.
   // Unset = the harness's own selection. docs/architecture/trace-sink.md
   traceSink: z.string().min(1).optional(),
+  // in-batch OOM auto-boost (opt-in — every boost re-runs the case): an OOM_KILLED case re-dispatches inside
+  // the batch with doubled job-only memory up to the cap. docs/architecture/batch-resilience.md
+  oomAutoBoost: z.boolean().optional(),
   // partial run — only a subset of the full dataset (cost/smoke). Applied in order: ids (explicit) → tags (any-match) → limit (first N).
   cases: z
     .object({

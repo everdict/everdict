@@ -157,6 +157,9 @@ export const ScorecardRecordSchema = z.object({
       // Per-batch trace-sink override — a configured sink name, or "none" to suppress export for this batch.
       // Persisted so resume/retry keep the same destination. docs/architecture/trace-sink.md
       traceSink: z.string().optional(),
+      // In-batch OOM auto-boost (opt-in) — an OOM_KILLED case re-dispatches inside the batch with doubled
+      // job-only memory up to the cap. Persisted so resume keeps the behavior. docs/architecture/batch-resilience.md
+      oomAutoBoost: z.boolean().optional(),
     })
     .optional(),
   scorecard: ScorecardSchema.optional(), // full per-case results (for detail, heavy)

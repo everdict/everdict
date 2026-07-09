@@ -968,6 +968,12 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
             .describe(
               'per-batch trace-sink override: a configured workspace sink name, or "none" to suppress export for this batch. Unset = the harness own selection — HTTP parity',
             ),
+          oom_auto_boost: z
+            .boolean()
+            .optional()
+            .describe(
+              "in-batch OOM auto-boost (opt-in — every boost re-runs the case): an OOM_KILLED case re-dispatches with doubled job-only memory up to the cap",
+            ),
           origin: z
             .object({
               repo: z.string().optional(),
@@ -994,6 +1000,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
         trials,
         cases,
         trace_sink,
+        oom_auto_boost,
         origin,
       }) =>
         run(principal, "scorecards:run", async () =>
@@ -1016,6 +1023,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
               ...(trials !== undefined ? { trials } : {}),
               ...(cases ? { cases } : {}),
               ...(trace_sink ? { traceSink: trace_sink } : {}),
+              ...(oom_auto_boost ? { oomAutoBoost: true } : {}),
             }),
           ),
         ),

@@ -62,6 +62,7 @@ import { AdaptiveConcurrencyGate } from "./adaptive-concurrency.js";
 import { collectDeferredTrace } from "./collect-trace.js";
 import { executeCase } from "./execute-case.js";
 import type { JudgeRunner } from "./judge-runner.js";
+import { OOM_ESCALATION_CAP_MB, executeWithOomBoost } from "./oom-boost.js";
 import { assertRuntimeTarget } from "./require-runtime.js";
 import { executeWithSpillover } from "./runtime-spillover.js";
 import { ScoringService } from "./scoring-service.js";
@@ -79,10 +80,6 @@ function exportStepMessage(e: ScorecardExport): string {
 // Child-run key for a (case, trial) pair — a batch with trials>1 fans N children per case, so caseId alone is
 // ambiguous. trial absent (single-run) collapses to "<caseId>#0", so single-run keying is byte-identical.
 // docs/architecture/trial-based-verdict.md
-// OOM escalation ceiling — doubling stops here; past it the fix is a real spec change (raise resources.memoryMb),
-// not more automatic headroom.
-const OOM_ESCALATION_CAP_MB = 16_384;
-
 function childKey(caseId: string, trial?: number): string {
   return `${caseId}#${trial ?? 0}`;
 }
@@ -224,6 +221,9 @@ export interface RunScorecardInput {
   // Per-batch trace-sink override — the name of a configured workspace sink, or "none" to suppress export for
   // this batch. Absent = the harness's own selection (traceSinkByHarness). docs/architecture/trace-sink.md
   traceSink?: string;
+  // In-batch OOM auto-boost (opt-in — every boost re-runs the case): an OOM_KILLED case re-dispatches inside
+  // the batch with doubled job-only memory up to the cap, instead of waiting for a retry-failed round-trip.
+  oomAutoBoost?: boolean;
 }
 
 export interface ScorecardServiceDeps {
@@ -430,6 +430,7 @@ export class ScorecardService {
         retries,
         ...(trials > 1 ? { trials } : {}),
         ...(input.traceSink ? { traceSink: input.traceSink } : {}),
+        ...(input.oomAutoBoost ? { oomAutoBoost: true } : {}),
       },
       createdAt: ts,
       updatedAt: ts,
@@ -477,7 +478,12 @@ export class ScorecardService {
       judge,
       // Request parallelism takes precedence, else the service default. Positive integers only (the boundary is enforced by the route/MCP via Zod).
       concurrency,
-      { retries, ...(trials > 1 ? { trials } : {}), ...(input.traceSink ? { sinkOverride: input.traceSink } : {}) },
+      {
+        retries,
+        ...(trials > 1 ? { trials } : {}),
+        ...(input.traceSink ? { sinkOverride: input.traceSink } : {}),
+        ...(input.oomAutoBoost ? { oomAutoBoost: true } : {}),
+      },
     );
     return record;
   }
@@ -813,6 +819,7 @@ export class ScorecardService {
         seedRunIds,
         retries: rec.orchestration.retries,
         ...(rec.orchestration.traceSink ? { sinkOverride: rec.orchestration.traceSink } : {}),
+        ...(rec.orchestration.oomAutoBoost ? { oomAutoBoost: true } : {}),
         resumeNote: `Resumed after a control-plane restart — ${seed.length} finished case(s) kept, ${remaining} re-dispatched${adopted > 0 ? ` (${adopted} in-flight job(s) adopted without re-running)` : ""}`,
       },
     );
@@ -841,6 +848,7 @@ export class ScorecardService {
       targets: string[]; // the shard list — spillover candidates (empty = no runtime selection)
       speculation?: SpeculationController; // tail-straggler duplication (sharded batches only)
       memoryBoostMb?: Record<string, number>; // OOM escalation of a Temporal-owned retry (origin.memoryBoostMb)
+      oomAutoBoost?: boolean; // in-batch OOM auto-boost (orchestration.oomAutoBoost)
       traceSink?: string; // per-batch sink override (orchestration.traceSink)
       doneIds: Set<string>;
       stepChain: Promise<void>;
@@ -915,6 +923,7 @@ export class ScorecardService {
       caseIndex,
       targets,
       ...(rec.origin?.memoryBoostMb ? { memoryBoostMb: rec.origin.memoryBoostMb } : {}),
+      ...(rec.orchestration?.oomAutoBoost ? { oomAutoBoost: true } : {}),
       ...(orch.traceSink ? { traceSink: orch.traceSink } : {}),
       // Tail speculation — sharded batches only. The controller lives with the batch context (rebuilt with
       // empty duration history on a CP restart — it re-learns the median from the resumed cases).
@@ -1060,7 +1069,23 @@ export class ScorecardService {
               });
             },
           });
-        const outcome = ctx.speculation ? await ctx.speculation.run(exec, jobToRun) : await exec(jobToRun);
+        // In-batch OOM auto-boost — same opt-in doubling as the in-process loop (parity by construction).
+        const outcome = await executeWithOomBoost(
+          (j) => (ctx.speculation ? ctx.speculation.run(exec, j) : exec(j)),
+          jobToRun,
+          {
+            enabled: ctx.oomAutoBoost ?? false,
+            onBoost: (cid, fromMb, toMb) => {
+              this.deps.onOrchestrationEvent?.({ kind: "oom_escalated", memoryMb: toMb });
+              void this.appendBatchStep(id, {
+                phase: "case",
+                status: "info",
+                message: `${cid}: OOM auto-boost ${fromMb} → ${toMb}Mb (in-batch retry)`,
+                caseId: cid,
+              });
+            },
+          },
+        );
         result = outcome.result;
         ranOn = outcome.target;
         break;
@@ -1554,6 +1579,8 @@ export class ScorecardService {
       memoryBoostMb?: Record<string, number>;
       // Per-batch trace-sink override (orchestration.traceSink) — threaded into the export context.
       sinkOverride?: string;
+      // In-batch OOM auto-boost (orchestration.oomAutoBoost) — see oom-boost.ts.
+      oomAutoBoost?: boolean;
     } = {},
   ): Promise<void> {
     const trials = opts.trials ?? 1;
@@ -1660,7 +1687,21 @@ export class ScorecardService {
               void flushSteps();
             },
           });
-        const { result, target: ranOn } = speculation ? await speculation.run(exec, jobToRun) : await exec(jobToRun);
+        // In-batch OOM auto-boost (opt-in): an OOM_KILLED throw re-dispatches this case with doubled job-only
+        // memory up to the cap — no retry-failed round-trip. Wraps speculation/spillover so a boosted attempt
+        // rides the same failover machinery.
+        const { result, target: ranOn } = await executeWithOomBoost(
+          (j) => (speculation ? speculation.run(exec, j) : exec(j)),
+          jobToRun,
+          {
+            enabled: opts.oomAutoBoost ?? false,
+            onBoost: (cid, fromMb, toMb) => {
+              this.deps.onOrchestrationEvent?.({ kind: "oom_escalated", memoryMb: toMb });
+              pushStep("case", "info", `${cid}: OOM auto-boost ${fromMb} → ${toMb}Mb (in-batch retry)`, cid);
+              void flushSteps();
+            },
+          },
+        );
         // Cost attribution: managed=batch tenant · workspace-shared runner=that workspace (team resource) · personal runner=own-pays. Same as a single run.
         const bill = billingTenant(result, tenant);
         if (bill) this.deps.budget?.settle(bill, costOf(result));

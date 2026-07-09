@@ -8,6 +8,7 @@ import {
   NotFoundError,
   type Scorecard,
   type TraceEvent,
+  UpstreamError,
 } from "@everdict/core";
 import { InMemoryRunStore, InMemoryScorecardStore, type ScorecardRecord } from "@everdict/db";
 import {
@@ -2473,5 +2474,122 @@ describe("ScorecardService — adaptive batch concurrency (pressure shrinks the 
     park2.releaseAll();
     await until(async () => (await store.get(rec2.id))?.status === "succeeded");
     expect(park2.max()).toBe(2); // trickle → half-width restore observed, no reset call anywhere
+  });
+});
+
+describe("ScorecardService — in-batch OOM auto-boost (opt-in)", () => {
+  const oneCaseDataset: Dataset = {
+    id: "od",
+    version: "1.0.0",
+    cases: [
+      { id: "m1", env: { kind: "repo", source: { files: {} } }, task: "t", graders: [], timeoutSec: 60, tags: [] },
+    ],
+    tags: [],
+  };
+  const oomTemplate: HarnessTemplateSpec = {
+    kind: "command",
+    category: "cli-agent",
+    id: "hungry",
+    version: "1",
+    resources: { memoryMb: 64 },
+    setup: [],
+    command: "run",
+    env: {},
+    params: {},
+    trace: { kind: "none" },
+  };
+  async function fixtures() {
+    const datasets = new InMemoryDatasetRegistry();
+    await datasets.register("acme", oneCaseDataset);
+    const templates = new InMemoryHarnessTemplateRegistry();
+    const instances = new InMemoryHarnessInstanceRegistry(templates);
+    await templates.register("acme", oomTemplate);
+    await instances.register("acme", {
+      template: { id: "hungry", version: "1" },
+      id: "hungry",
+      version: "1.0.0",
+      pins: {},
+    });
+    return { datasets, instances };
+  }
+  // A dispatcher that OOM-kills any job under `needMb` of declared memory — the boost loop's foil.
+  function oomBelow(needMb: number) {
+    const memoriesSeen: number[] = [];
+    const dispatcher: Dispatcher = {
+      async dispatch(job) {
+        const mb = job.harnessSpec?.kind === "command" ? (job.harnessSpec.resources?.memoryMb ?? 0) : 0;
+        memoriesSeen.push(mb);
+        if (mb < needMb) throw new UpstreamError("UPSTREAM_ERROR", { signal: "OOM_KILLED" }, "task OOM-killed");
+        return { ...caseResult(true), caseId: job.evalCase.id };
+      },
+    };
+    return { dispatcher, memoriesSeen };
+  }
+  const waitTerminal = async (store: InMemoryScorecardStore, id: string) => {
+    for (let i = 0; i < 200; i++) {
+      const rec = await store.get(id);
+      if (rec && rec.status !== "queued" && rec.status !== "running") return rec;
+      await new Promise((r) => setTimeout(r, 5));
+    }
+    throw new Error("not terminal");
+  };
+
+  it("with the knob set, an OOM case re-dispatches with doubled memory until it fits (64 → 128 → 256)", async () => {
+    const { datasets, instances } = await fixtures();
+    const store = new InMemoryScorecardStore();
+    const oom = oomBelow(256);
+    const boosts: number[] = [];
+    const service = new ScorecardService({
+      dispatcher: oom.dispatcher,
+      store,
+      datasets,
+      harnesses: instances,
+      onOrchestrationEvent: (e) => {
+        if (e.kind === "oom_escalated") boosts.push(e.memoryMb);
+      },
+    });
+    const rec = await service.submit({
+      tenant: "acme",
+      dataset: { id: "od", version: "latest" },
+      harness: { id: "hungry", version: "latest" },
+      oomAutoBoost: true,
+    });
+    expect(rec.orchestration?.oomAutoBoost).toBe(true); // persisted — resume keeps the behavior
+    const done = await waitTerminal(store, rec.id);
+    expect(done.status).toBe("succeeded");
+    expect(oom.memoriesSeen).toEqual([64, 128, 256]); // in-batch compounding, no retry-failed round-trip
+    expect(boosts).toEqual([128, 256]); // each boost surfaced to the metrics seam
+    expect(done.steps?.some((st) => st.message.includes("OOM auto-boost 64 → 128Mb"))).toBe(true);
+  });
+
+  it("without the knob, the OOM stays a fatal infra failure (no hidden re-runs)", async () => {
+    const { datasets, instances } = await fixtures();
+    const store = new InMemoryScorecardStore();
+    const oom = oomBelow(256);
+    const service = new ScorecardService({ dispatcher: oom.dispatcher, store, datasets, harnesses: instances });
+    const rec = await service.submit({
+      tenant: "acme",
+      dataset: { id: "od", version: "latest" },
+      harness: { id: "hungry", version: "latest" },
+    });
+    const done = await waitTerminal(store, rec.id);
+    expect(oom.memoriesSeen).toEqual([64]); // exactly one attempt
+    expect(done.scorecard?.results[0]?.failure?.code).toBe("OOM_KILLED"); // classification preserved for retry-failed
+  });
+
+  it("boosting stops at the cap — a case that can never fit surfaces its OOM instead of looping", async () => {
+    const { datasets, instances } = await fixtures();
+    const store = new InMemoryScorecardStore();
+    const oom = oomBelow(Number.POSITIVE_INFINITY); // insatiable
+    const service = new ScorecardService({ dispatcher: oom.dispatcher, store, datasets, harnesses: instances });
+    const rec = await service.submit({
+      tenant: "acme",
+      dataset: { id: "od", version: "latest" },
+      harness: { id: "hungry", version: "latest" },
+      oomAutoBoost: true,
+    });
+    const done = await waitTerminal(store, rec.id);
+    expect(oom.memoriesSeen[oom.memoriesSeen.length - 1]).toBe(16_384); // capped, then surfaced
+    expect(done.scorecard?.results[0]?.failure?.code).toBe("OOM_KILLED");
   });
 });
