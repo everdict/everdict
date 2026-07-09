@@ -51,6 +51,10 @@ export function billingTenant(result: CaseResult, originalTenant: string): strin
 //    so the last run that slightly exceeds the cap is allowed — the standard behavior of a cost budget.)
 export interface BudgetTracker {
   admit(tenant: string): void;
+  // Undo an admit reservation for a job that was admitted but then left WITHOUT running (cancelled while queued,
+  // superseded, or an immediate placement failure). Decrements the reserved run count so a never-run job doesn't
+  // permanently inflate the tenant's budget. Never touches usd/tokens (those are settled only on real completion).
+  release(tenant: string): void;
   settle(tenant: string, cost: { usd: number; tokens: number }): void;
   usage(tenant: string): BudgetUsage;
 }
@@ -95,6 +99,10 @@ export function inMemoryBudget(opts: InMemoryBudgetOptions): BudgetTracker {
         );
       }
       u.runs += 1; // reserve (so concurrent bursts can't exceed the cap)
+    },
+    release(tenant) {
+      const u = get(tenant);
+      u.runs = Math.max(0, u.runs - 1); // give back the reserved run; floor at 0 so releases can't underflow
     },
     settle(tenant, cost) {
       const u = get(tenant);

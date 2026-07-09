@@ -138,7 +138,10 @@ export class Scheduler {
         // Aborted while still QUEUED → remove and reject, so a cancelled job never wastes a placement slot. Once
         // in-flight this listener is detached (see pump) and cancellation flows to the backend via the signal instead.
         const onAbort = (): void => {
-          if (this.queue.remove(entry)) reject(dispatchAborted(job));
+          if (this.queue.remove(entry)) {
+            this.releaseBudget(job); // admitted-then-cancelled while queued → give the reserved run back
+            reject(dispatchAborted(job));
+          }
         };
         entry.onAbort = onAbort;
         opts.signal.addEventListener("abort", onAbort, { once: true });
@@ -162,6 +165,7 @@ export class Scheduler {
     for (const entry of this.queue.ordered()) {
       if (!predicate(entry.job)) continue;
       this.queue.remove(entry);
+      this.releaseBudget(entry.job); // superseded/speculation-loser while queued → refund its admit reservation
       entry.reject(new InternalError("CANCELLED", { caseId: entry.job.evalCase.id }, "cancelled while queued."));
       cancelled += 1;
     }
@@ -262,6 +266,7 @@ export class Scheduler {
           } catch (err) {
             // e.g. an unregistered pin → fail just that job immediately and continue.
             this.queue.remove(entry);
+            this.releaseBudget(entry.job); // admitted but never dispatched → refund the reserved run
             entry.reject(err);
             placedAny = true;
             continue;
@@ -302,6 +307,12 @@ export class Scheduler {
     } finally {
       this.pumping = false;
     }
+  }
+
+  // Give back a queued job's admit reservation when it leaves the queue WITHOUT being dispatched (abort / supersede /
+  // placement failure); a dispatched job that later fails still ran, so it is NOT released here.
+  private releaseBudget(job: AgentJob): void {
+    this.opts.budget?.release(tenantOf(job));
   }
 
   private runOne(entry: QueueEntry, name: string, tenant: string, memNeedMb: number, cpuNeed: number): void {

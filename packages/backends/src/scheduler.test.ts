@@ -527,6 +527,26 @@ describe("Scheduler", () => {
 });
 
 describe("Scheduler budget admission", () => {
+  it("refunds the admit reservation when a queued job is cancelled (no orphaned run)", async () => {
+    const b = new ControlledBackend("a", 1); // one slot
+    const budget = inMemoryBudget({ limitFor: () => ({ runs: 5 }) });
+    const sched = new Scheduler(new BackendRegistry().register("a", b), { budget });
+
+    const first = sched.dispatch(tjob("t", "j1")); // takes the slot (admitted + dispatched)
+    await flush();
+    const second = sched.dispatch(tjob("t", "j2")); // no slot → admitted + queued
+    await flush();
+    expect(budget.usage("t").runs).toBe(2); // both admitted
+
+    const cancelled = sched.cancelQueued((job) => job.evalCase.id === "j2"); // supersede the queued j2
+    expect(cancelled).toBe(1);
+    await expect(second).rejects.toThrow(/cancelled/i);
+    expect(budget.usage("t").runs).toBe(1); // j2's reservation refunded → only the in-flight j1 remains
+
+    b.releaseAll();
+    await first;
+  });
+
   it("does NOT reserve a run when the job is rejected for a full queue (no phantom-run leak)", async () => {
     const b = new ControlledBackend("a", 1); // a single slot
     const budget = inMemoryBudget({ limitFor: () => ({ runs: 10 }) });

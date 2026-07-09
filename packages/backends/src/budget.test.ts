@@ -45,6 +45,22 @@ describe("inMemoryBudget", () => {
     b.admit("t");
     expect(b.usage("t").runs).toBe(2);
   });
+
+  it("release gives back a reserved run (a cancelled-before-run job restores headroom)", () => {
+    const b = inMemoryBudget({ limitFor: () => ({ runs: 2 }) });
+    b.admit("t");
+    b.admit("t"); // runs = 2, at the cap
+    expect(() => b.admit("t")).toThrow(PaymentRequiredError);
+    b.release("t"); // one admitted job was cancelled before running
+    expect(b.usage("t").runs).toBe(1);
+    expect(() => b.admit("t")).not.toThrow(); // headroom restored
+  });
+
+  it("release floors at 0 (releasing more than was admitted can't underflow)", () => {
+    const b = inMemoryBudget({ limitFor: () => undefined });
+    b.release("t"); // never admitted
+    expect(b.usage("t").runs).toBe(0);
+  });
 });
 
 describe("billingTenant — which tenant's budget the cost goes on (provenance-based)", () => {
