@@ -533,3 +533,48 @@ describe("RunService — live trace correlation (observability ③)", () => {
     await flush();
   });
 });
+
+describe("RunService.screen — browser (topology) live frame (observability ⑦)", () => {
+  const browserCase: EvalCase = {
+    id: "b1",
+    env: { kind: "browser", startUrl: "https://example.com" },
+    task: "browse",
+    graders: [],
+    timeoutSec: 60,
+    tags: [],
+  };
+
+  it("captures the per-case browser via captureBrowserScreen, keyed by the record-derivable runId", async () => {
+    const store = new InMemoryRunStore();
+    const seen: string[] = [];
+    const svc = new RunService({
+      dispatcher: okDispatcher,
+      store,
+      newId: ids,
+      captureBrowserScreen: async (_t, _r, runId) => {
+        seen.push(runId);
+        return "BROWSERB64";
+      },
+    });
+    const rec = await svc.submit({ tenant: "t", harness: { id: "s", version: "0" }, case: browserCase, runtime: "rt" });
+    await store.update(rec.id, { status: "running" });
+    const out = await svc.screen(rec.id);
+    expect(out?.supported).toBe(true);
+    expect(out?.dataUrl).toBe("data:image/png;base64,BROWSERB64");
+    expect(seen).toEqual([`evd-run-${rec.id}`]); // the standalone-run correlation id
+  });
+
+  it("supported:true but no frame when the browser isn't reachable (dataUrl undefined)", async () => {
+    const store = new InMemoryRunStore();
+    const svc = new RunService({
+      dispatcher: okDispatcher,
+      store,
+      newId: ids,
+      captureBrowserScreen: async () => undefined,
+    });
+    const rec = await svc.submit({ tenant: "t", harness: { id: "s", version: "0" }, case: browserCase, runtime: "rt" });
+    await store.update(rec.id, { status: "running" });
+    const out = await svc.screen(rec.id);
+    expect(out).toMatchObject({ supported: true, dataUrl: undefined });
+  });
+});

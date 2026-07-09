@@ -69,6 +69,13 @@ export interface RunServiceDeps {
   // Live-progress log read (observability ②): resolve the run's runtime lane to a live backend and read the
   // case job's current stdout (Backend.logs). Best-effort — absent/miss = no logs, never an error.
   readCaseLogs?: (tenant: string, runtimeList: string | undefined, caseId: string) => Promise<string | undefined>;
+  // Capture a live browser frame (observability ⑦) — resolves the run's runtime to a topology backend and
+  // captures its per-case browser CDP screen by runId. Returns base64 PNG (no data: prefix). undefined = none.
+  captureBrowserScreen?: (
+    tenant: string,
+    runtimeList: string | undefined,
+    runId: string,
+  ) => Promise<string | undefined>;
   // One-shot exec inside the case's live sandbox (observability ④ web terminal / ⑤ screen capture). Resolves the
   // run's runtime to a live backend and runs `sh -c command`. undefined = no live container.
   execInSandbox?: (
@@ -185,6 +192,16 @@ export class RunService {
     const record = await this.deps.store.get(id);
     if (!record) return undefined;
     const env = record.caseSpec?.env;
+    // browser (topology) — capture the per-case browser via CDP, keyed by the CP-minted runId derivable from the record.
+    if (env?.kind === "browser") {
+      if (!this.deps.captureBrowserScreen) return { record, dataUrl: undefined, supported: false };
+      const runId = record.parentScorecardId
+        ? `evd-${record.parentScorecardId}-${record.caseId}`
+        : `evd-run-${record.id}`;
+      const b64 = await this.deps.captureBrowserScreen(record.tenant, record.runtime, runId).catch(() => undefined);
+      return { record, dataUrl: b64 ? `data:image/png;base64,${b64}` : undefined, supported: true };
+    }
+    // os-use (desktop) — scrot on the case's DISPLAY via an in-sandbox exec.
     if (env?.kind !== "os-use" || !this.deps.execInSandbox) return { record, dataUrl: undefined, supported: false };
     const display = env.display ?? ":99";
     const shot = "/tmp/.everdict-live.png";

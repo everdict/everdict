@@ -117,3 +117,4 @@ export {
   referenceObservationSource,
   sentinelObservationSource,
 } from "./observation-source.js";
+export { captureCdpScreenshot, type CdpSocket, type CaptureCdpOptions } from "./capture-cdp.js";

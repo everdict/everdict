@@ -22,4 +22,8 @@ export interface TopologyRuntime {
   readonly id: string;
   ensureTopology(spec: ServiceHarnessSpec, zone?: TrustZone): Promise<TopologyHandle>; // warm (per-zone)
   provisionBrowserEnv(spec: ServiceHarnessSpec, runId: string, zone?: TrustZone): Promise<TargetEnvHandle>; // per-case
+  // Live-screen (observability ⑦): the CDP HTTP base of a run's already-provisioned browser (rediscovered by
+  // runId — no new provisioning), or undefined if there is none running. Optional: only runtimes with a
+  // per-case browser implement it. best-effort.
+  browserCdpBase?(runId: string, zone?: TrustZone): Promise<string | undefined>;
 }

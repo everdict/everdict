@@ -72,9 +72,17 @@ no extra state. Live-verified: the base64 frame transport round-tripped through 
 `supported:true` for an os-use case (with `found:false` on the slim image, which has no scrot —
 graceful). Full desktop capture is the same exec against an Xvfb image (remaining live check).
 
-**browser-use (topology)** live view is a follow-up: the browser is a SIBLING container reached via
-CDP (`target_cdp_url`), not the agent container, so it needs the live CDP endpoint persisted per run
-+ a `Page.captureScreenshot`/screencast proxy — a separate seam from the single-container exec here.
+**browser-use (topology)** now works too: the per-case browser is a SIBLING container reached via CDP,
+so the control plane rediscovers it by the CP-minted runId (`ServiceTopologyBackend` prefers
+`job.runId`, so the browser alloc is keyed by the record-derivable id) and captures a live frame with
+`captureCdpScreenshot` (find a page target → `Page.captureScreenshot` over the CDP WebSocket → base64
+PNG). `RunService.screen` routes `env.kind === "browser"` to `Backend.captureScreen(runId)`; the same
+web `LiveScreen` widget renders it (it keys off `supported`, not the env kind). The CDP-capture
+primitive is live-verified against a real `chromedp/headless-shell` (a 15 KB PNG captured over CDP).
+Nomad exposes the browser CDP as a host:port so rediscovery is clean; the **K8s** topology reaches CDP
+through an ephemeral port-forward tied to the provision, so its `browserCdpBase` is a follow-up
+(captureScreen returns undefined there — the widget just shows nothing). End-to-end browser-run screen
+needs a live topology run (same remaining live check as os-use's Xvfb image).
 
 ## ③ Live trace deep-link — where the platform trace is accumulating
 

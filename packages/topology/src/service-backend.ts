@@ -13,6 +13,7 @@ import {
 } from "@everdict/core";
 import { costGrader, latencyGrader, makeGradersFromEnv, safeGrade, stepsGrader } from "@everdict/graders";
 import type { TraceSource } from "@everdict/trace";
+import { captureCdpScreenshot } from "./capture-cdp.js";
 import { keysFor, newRunId, wiringVars } from "./environment-manager.js";
 import {
   type CallbackRendezvous,
@@ -63,12 +64,22 @@ export class ServiceTopologyBackend implements Backend {
     return { total: (typeof mc === "function" ? mc() : mc) ?? 8, used: 0 };
   }
 
+  // Live browser frame (observability ⑦): rediscover this run's browser CDP endpoint (by runId) and capture a
+  // PNG. undefined when the runtime has no per-case browser rediscovery or none is running. base64, no data: prefix.
+  async captureScreen(runId: string): Promise<string | undefined> {
+    const base = await this.opts.runtime.browserCdpBase?.(runId).catch(() => undefined);
+    if (!base) return undefined;
+    return await captureCdpScreenshot(base).catch(() => undefined);
+  }
+
   async dispatch(job: AgentJob): Promise<CaseResult> {
     const registered = await this.opts.specFor(job.tenant ?? "default", job.harness.id, job.harness.version);
     // per-dispatch image pins (#5) — override service images at run time. When pins are present, a suffix is appended to the effective version
     // so the warm pool separates into a distinct identity (the same topology can be evaluated as service X v1 ↔ v2).
     const spec = applyImagePins(registered, job.imagePins);
-    const runId = (this.opts.newRunId ?? newRunId)();
+    // Prefer the CP-minted job.runId — the per-case browser is then keyed by the record-derivable id, so the
+    // control plane can rediscover it for the live-screen capture (observability ⑦). Falls back to a fresh id.
+    const runId = job.runId ?? (this.opts.newRunId ?? newRunId)();
     const keys = keysFor(runId);
 
     // Resolve the tenant zone — untrusted forces hardened isolation, and the warm pool is separated per zone.

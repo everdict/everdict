@@ -44,6 +44,9 @@ export interface Backend {
   // command is passed to `sh -c`. undefined = no live container to exec into. Best-effort; the sandbox is
   // already untrusted+isolated, so the control plane gates WHO may call this (run creator / workspace admin).
   exec?(caseId: string, command: string): Promise<ExecInContainer | undefined>;
+  // Capture a live screen frame (observability ⑦) for a run's per-case browser, keyed by the CP-minted runId
+  // (topology backends only). Returns base64 PNG (no data: prefix), or undefined when there's no running browser.
+  captureScreen?(runId: string): Promise<string | undefined>;
   dispatch(job: AgentJob): Promise<CaseResult>;
   // Connection test (optional) — sends a light call to the cluster API without a job to check reachability/auth. undefined for backends that don't implement it.
   probe?(): Promise<ProbeResult>;

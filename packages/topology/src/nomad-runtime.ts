@@ -314,6 +314,26 @@ export class NomadTopologyRuntime implements TopologyRuntime {
     }
   }
 
+  // Rediscover a running browser alloc's CDP HTTP base by runId (observability ⑦) — one poll, no provisioning,
+  // undefined on any miss (no alloc / not running / no cdp port). The control plane captures a live frame from it.
+  async browserCdpBase(runId: string, zone?: TrustZone): Promise<string | undefined> {
+    try {
+      const ns = zone?.namespace ?? this.opts.namespace;
+      const res = await this.http.request("GET", `/v1/job/${browserJobId(runId)}/allocations${this.nsq(ns, "?")}`);
+      if (res.status >= 300) return undefined;
+      const running = (JSON.parse(res.text) as AllocLike[]).find(
+        (a) => a.TaskGroup === "browser" && a.ClientStatus === "running",
+      );
+      if (!running?.ID) return undefined;
+      const full = await this.http.request("GET", `/v1/allocation/${running.ID}${this.nsq(ns, "?")}`);
+      if (full.status >= 300) return undefined;
+      const p = resolvePort(JSON.parse(full.text) as AllocLike, "cdp");
+      return p ? `http://${p.hostIp}:${p.port}` : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
   private async connectBrowser(runId: string, ns?: string): Promise<TargetEnvHandle> {
     const alloc = await this.waitForGroupRunning(browserJobId(runId), "browser", ns);
     const p = resolvePort(alloc, "cdp");

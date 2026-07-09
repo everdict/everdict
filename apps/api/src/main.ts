@@ -488,6 +488,7 @@ async function main(): Promise<void> {
     // Lazy — the lane-resolving closure is built further down (after the runtime registry wiring).
     readCaseLogs: (tenant, runtimeList, caseId) => readCaseLogsFn(tenant, runtimeList, caseId),
     execInSandbox: (tenant, runtimeList, caseId, command) => execInSandboxFn(tenant, runtimeList, caseId, command),
+    captureBrowserScreen: (tenant, runtimeList, runId) => captureBrowserScreenFn(tenant, runtimeList, runId),
     dispatcher: meteredDispatcher,
     store,
     budget,
@@ -581,6 +582,22 @@ async function main(): Promise<void> {
       return text !== undefined;
     });
     return text;
+  };
+
+  // Live browser frame (observability ⑦) — resolve the run's runtime to a topology backend and capture its
+  // per-case browser CDP screen by runId. Only ServiceTopologyBackend implements captureScreen.
+  const captureBrowserScreenFn = async (
+    tenant: string,
+    runtimeList: string | undefined,
+    runId: string,
+  ): Promise<string | undefined> => {
+    let b64: string | undefined;
+    await eachRuntimeBackend(tenant, runtimeList, async (backend) => {
+      if (!backend.captureScreen) return false;
+      b64 = await backend.captureScreen(runId).catch(() => undefined);
+      return b64 !== undefined;
+    });
+    return b64;
   };
 
   // One-shot exec into a case's live sandbox (web terminal / live screen) — same lane resolution as logs.
