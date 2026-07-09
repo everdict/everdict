@@ -1,6 +1,12 @@
 # apps/api route modularization — split the 3676-line server.ts into resource route modules (design)
 
-> **Status: Round 1 SHIPPED · Round 2 IN PROGRESS.** Round 1: all 158 routes extracted into **34 resource
+> **Status: Round 1 + Round 2 SHIPPED.** Round 2 (`b1c5d2a`…`4b53aba`): the MCP tool surface split into
+> **31 per-resource `<resource>.mcp.ts` modules** (129 tools verbatim; `mcp.ts` 2,564 → **88-line composition
+> root** over `mcp-context.ts`), `ScorecardService` decomposed into **facade (465) + batch (1,264) + ingest
+> (223) + analytics (113) + shared (284)** with the public surface re-exported unchanged, and `main()` grouped
+> into **8 per-concern builders** (753 → 386 lines; order-sensitive blocks and the scheduleService late-bind
+> closure deliberately left inline). Every slice landed with the 636-test suite green; the final state also
+> passes build + the empty-env boot contract. Round 1: all 158 routes extracted into **34 resource
 > route modules** (+9 schema files) across `execution/ catalog/ workspace/ integrations/ runners/ scheduling/
 > ops/` + `mcp.routes.ts` (`3929563`…`07ed7e1`); `server.ts` is a **285-line composition root** (was 3676):
 > app construction, the domain-grouped register-call list, and the WS terminal upgrade. Every slice landed
@@ -110,10 +116,11 @@ mcp.ts                       ← composition root: McpServer build + shared help
                                stays with the transport in server.ts/mcp.routes.ts) + registerXTools calls
 ```
 
-`McpToolContext` = `{ deps, principal, ws, run, ok, fail }` — the shared helpers the tool bodies already close
-over, passed explicitly. Tool names, descriptions, schemas, and behavior move **verbatim**; `mcp.test.ts` (the
-in-memory client↔server suite) is the safety net — the tool surface must stay identical. One commit per domain
-batch (execution → catalog → workspace → integrations/runners → scheduling/ops).
+`McpToolContext` = `{ deps, principal, ws }` (as shipped); the `ok`/`fail`/`run`/`plain` helpers are imported
+from `mcp-context.ts` directly. Tool names, descriptions, schemas, and behavior move **verbatim**;
+`mcp.test.ts` (the in-memory client↔server suite) is the safety net — the tool surface must stay identical.
+Shipped as two commits: the mcp-context extraction, then the 31-module split (the per-domain extraction ran as
+parallel file-creation, so a single gated switch-over of the composition root was the honest commit unit).
 
 ### R2-b — `ScorecardService` (2,122 lines) → facade + lifecycle collaborators
 
@@ -139,5 +146,12 @@ Collaborators receive the stores/seams they need (never each other); the facade 
 `main.ts` (persistence, auth, registries, execution, integrations, observability, server assembly) — the
 process composition root reads as a table of contents; no behavior change. (A `main/` folder is overkill until
 builders grow past ~15 — same flat-until-grouped rule as packages.)
+
+Shipped: `buildExecutionScheduling` · `buildObservability` · `startAutoscaler` · `buildBudgets` ·
+`buildDispatch` · `buildIntegrations` · `buildRuntimeAccess` · `runStartupRecovery`. Deliberately inline: the
+persistence+workspace-services+seeding block (owns the `scheduleService` late-bind closure), the
+`RunService`/`ScorecardService` constructions (single constructors over 15-24 bindings — a builder would only
+thread spaghetti), and the `buildServer` assembly. The empty-env boot contract
+(`scripts/live/empty-env-boot.mjs`) is main.ts's behavior gate.
 
 Gates per slice: scoped Biome + `pnpm --filter @everdict/api typecheck` + the full apps/api test suite + build.
