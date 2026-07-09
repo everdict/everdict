@@ -199,6 +199,7 @@ describe("MCP tools", () => {
       "get_judge",
       "get_model",
       "get_run",
+      "get_run_logs",
       "get_runtime",
       "get_schedule",
       "get_scorecard",

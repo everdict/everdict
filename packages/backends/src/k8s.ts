@@ -440,6 +440,25 @@ export class K8sBackend implements Backend {
     }
   }
 
+  // Current stdout of the case's newest job pod — live-progress tail (a pending pod reads as undefined and the
+  // caller polls again). Sentinel payload stripped. Best-effort, never throws.
+  async logs(caseId: string): Promise<string | undefined> {
+    try {
+      return await this.withApi(async (api) => {
+        const jobs = await api.jobsByLabel(`everdict.dev/case=${caseSlug(caseId)}`);
+        const newest = (jobs ?? []).sort((a, b) =>
+          (b.creationTimestamp ?? "").localeCompare(a.creationTimestamp ?? ""),
+        )[0];
+        if (!newest) return undefined;
+        const text = await api.podLogs(newest.name, newest.namespace);
+        const idx = text.lastIndexOf(RESULT_SENTINEL);
+        return idx < 0 ? text : text.slice(0, idx);
+      });
+    } catch {
+      return undefined;
+    }
+  }
+
   // Force-stop every live job of a case (superseded batch reclaim) — by the everdict.dev/case label. Best-effort.
   async kill(caseId: string): Promise<void> {
     try {

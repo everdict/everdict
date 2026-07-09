@@ -1,7 +1,7 @@
 import { type Authenticator, apiKeyAuthenticator, compositeAuthenticator } from "@everdict/auth";
 import type { Dispatcher } from "@everdict/backends";
 import { inMemoryBudget, inMemoryUsageMeter } from "@everdict/backends";
-import { type CaseResult, DatasetSchema } from "@everdict/core";
+import { type CaseResult, DatasetSchema, type EvalCase } from "@everdict/core";
 import {
   InMemoryOAuthStateStore,
   InMemoryRunStore,
@@ -1037,6 +1037,91 @@ describe("API — harness taxonomy (template category + instance)", () => {
       ).statusCode,
     ).toBe(404);
     await app.close();
+  });
+});
+
+describe("API — run live logs (observability: snapshot + SSE tail)", () => {
+  const CASE: EvalCase = {
+    id: "c1",
+    env: { kind: "repo", source: { files: {} } },
+    task: "t",
+    graders: [],
+    timeoutSec: 60,
+    tags: [],
+  };
+  it("GET /runs/:id/logs returns the case job's current stdout; cross-workspace reads 404", async () => {
+    const keyStore = new InMemoryTenantKeyStore();
+    const store = new InMemoryRunStore();
+    const svc = new RunService({
+      dispatcher: okDispatcher,
+      store,
+      readCaseLogs: async (_t, _r, caseId) => `progress of ${caseId}\nstep 2`,
+    });
+    const app = buildServer({
+      service: svc,
+      authenticator: compositeAuthenticator([apiKeyAuthenticator({ keyStore })]),
+      keyStore,
+    });
+    const rec = await svc.submit({ tenant: "acme", harness: { id: "s", version: "0" }, case: CASE });
+    const res = await app.inject({
+      method: "GET",
+      url: `/runs/${rec.id}/logs`,
+      headers: { "x-everdict-tenant": "acme" },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({ found: true, text: "progress of c1\nstep 2" });
+
+    const other = await app.inject({
+      method: "GET",
+      url: `/runs/${rec.id}/logs`,
+      headers: { "x-everdict-tenant": "beta" },
+    });
+    expect(other.statusCode).toBe(404); // another workspace's run is invisible, not forbidden
+  });
+
+  it("GET /runs/:id/logs/stream emits SSE chunks and closes with event:end once the run is terminal", async () => {
+    const keyStore = new InMemoryTenantKeyStore();
+    const store = new InMemoryRunStore();
+    const svc = new RunService({
+      dispatcher: okDispatcher,
+      store,
+      readCaseLogs: async () => "hello from the job",
+    });
+    const app = buildServer({
+      service: svc,
+      authenticator: compositeAuthenticator([apiKeyAuthenticator({ keyStore })]),
+      keyStore,
+    });
+    const rec = await svc.submit({ tenant: "acme", harness: { id: "s", version: "0" }, case: CASE });
+    await new Promise((r) => setTimeout(r, 10)); // let the dispatch settle → terminal → the stream ends by itself
+    const res = await app.inject({
+      method: "GET",
+      url: `/runs/${rec.id}/logs/stream`,
+      headers: { "x-everdict-tenant": "acme" },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.headers["content-type"]).toContain("text/event-stream");
+    expect(res.body).toContain(`data: ${JSON.stringify("hello from the job")}`);
+    expect(res.body).toContain("event: end");
+    expect(res.body).toContain("succeeded");
+  });
+
+  it("no backend support (readCaseLogs absent) → found:false with an empty text, never an error", async () => {
+    const keyStore = new InMemoryTenantKeyStore();
+    const store = new InMemoryRunStore();
+    const svc = new RunService({ dispatcher: okDispatcher, store });
+    const app = buildServer({
+      service: svc,
+      authenticator: compositeAuthenticator([apiKeyAuthenticator({ keyStore })]),
+      keyStore,
+    });
+    const rec = await svc.submit({ tenant: "acme", harness: { id: "s", version: "0" }, case: CASE });
+    const res = await app.inject({
+      method: "GET",
+      url: `/runs/${rec.id}/logs`,
+      headers: { "x-everdict-tenant": "acme" },
+    });
+    expect(res.json()).toMatchObject({ found: false, text: "" });
   });
 });
 

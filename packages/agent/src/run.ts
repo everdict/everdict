@@ -56,7 +56,7 @@ export async function runAgentJob(
             ...(opts.mounts ? { mounts: opts.mounts } : {}),
             ...(job.registryAuth ? { registryAuth: job.registryAuth } : {}),
           })
-        : new LocalDriver()),
+        : new LocalDriver({ echo: true })), // in-job: tee harness output to the job log (live tail feed)
     environment,
     harness,
     graders,

@@ -59,6 +59,9 @@ export interface RunServiceDeps {
   installationTokenFor?: (workspace: string, gitUrl: string) => Promise<string | undefined>;
   // Workspace image-registry pull credentials — if the job image is from that registry, attach as job.registryAuth (executeCase).
   registryAuthsFor?: (workspace: string) => Promise<RegistryAuth[]>;
+  // Live-progress log read (observability ②): resolve the run's runtime lane to a live backend and read the
+  // case job's current stdout (Backend.logs). Best-effort — absent/miss = no logs, never an error.
+  readCaseLogs?: (tenant: string, runtimeList: string | undefined, caseId: string) => Promise<string | undefined>;
   // Completion callback (succeeded/failed) — completion notifications (Mattermost etc.). Failure is independent of the run result (the service swallows it). Separate from webhook.
   onComplete?: (tenant: string, record: RunRecord) => Promise<void>;
   // Artifact store (when configured): offload os-use screenshots to object storage → the record keeps only the URL (no inline base64).
@@ -116,6 +119,17 @@ export class RunService {
 
   get(id: string): Promise<RunRecord | undefined> {
     return this.deps.store.get(id);
+  }
+
+  // Live-progress logs (observability ②) — the record plus the case job's current raw stdout. text=undefined
+  // when there is no job to read (queued, GC'd, or the backend can't tail); the record still scopes/authorizes.
+  async logs(id: string): Promise<{ record: RunRecord; text: string | undefined } | undefined> {
+    const record = await this.deps.store.get(id);
+    if (!record) return undefined;
+    const text = this.deps.readCaseLogs
+      ? await this.deps.readCaseLogs(record.tenant, record.runtime, record.caseId).catch(() => undefined)
+      : undefined;
+    return { record, text };
   }
 
   // Boot recovery for an interrupted standalone run. adopted = a result harvested from the still-alive backend

@@ -30,6 +30,9 @@ export interface Backend {
   adopt?(caseId: string): Promise<CaseResult | undefined>;
   // Force-stop every live orchestrator job of a case (superseded batch reclaim). Best-effort, never throws.
   kill?(caseId: string): Promise<void>;
+  // Current stdout of the case's newest orchestrator job (live-progress observability). Raw text with the result
+  // sentinel stripped; undefined = no job / logs unreadable. Snapshot semantics — callers poll and diff for a tail.
+  logs?(caseId: string): Promise<string | undefined>;
   dispatch(job: AgentJob): Promise<CaseResult>;
   // Connection test (optional) — sends a light call to the cluster API without a job to check reachability/auth. undefined for backends that don't implement it.
   probe?(): Promise<ProbeResult>;

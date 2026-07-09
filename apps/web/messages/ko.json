@@ -1602,7 +1602,8 @@
     "noScores": "아직 점수가 없어요.",
     "trace": "트레이스",
     "snapshot": "스냅샷 ({kind})",
-    "discuss": "논의"
+    "discuss": "논의",
+    "liveLogs": "라이브 로그"
   },
   "runsTable": {
     "sourceWeb": "웹",
@@ -2010,5 +2011,10 @@
     "switchHeading": "워크스페이스 전환",
     "empty": "아직 워크스페이스가 없습니다.",
     "newWorkspace": "새 워크스페이스"
+  },
+  "liveLogs": {
+    "streaming": "실행 중 — 잡 로그를 3초마다 따라가요",
+    "finished": "실행 종료 — 마지막 로그",
+    "waiting": "아직 테일링할 로그가 없어요 (잡 대기 중)"
   }
 }

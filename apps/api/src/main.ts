@@ -485,6 +485,8 @@ async function main(): Promise<void> {
     );
 
   const service = new RunService({
+    // Lazy — the lane-resolving closure is built further down (after the runtime registry wiring).
+    readCaseLogs: (tenant, runtimeList, caseId) => readCaseLogsFn(tenant, runtimeList, caseId),
     dispatcher: meteredDispatcher,
     store,
     budget,
@@ -563,6 +565,21 @@ async function main(): Promise<void> {
       return adopted !== undefined;
     });
     return adopted;
+  };
+
+  // Live-progress log read — same lane resolution as adoption; the first backend with a readable log wins.
+  const readCaseLogsFn = async (
+    tenant: string,
+    runtimeList: string | undefined,
+    caseId: string,
+  ): Promise<string | undefined> => {
+    let text: string | undefined;
+    await eachRuntimeBackend(tenant, runtimeList, async (backend) => {
+      if (!backend.logs) return false;
+      text = await backend.logs(caseId).catch(() => undefined);
+      return text !== undefined;
+    });
+    return text;
   };
 
   const scorecardService = new ScorecardService({

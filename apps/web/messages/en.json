@@ -1602,7 +1602,8 @@
     "noScores": "No scores yet.",
     "trace": "Trace",
     "snapshot": "Snapshot ({kind})",
-    "discuss": "Discussion"
+    "discuss": "Discussion",
+    "liveLogs": "Live logs"
   },
   "runsTable": {
     "sourceWeb": "Web",
@@ -2010,5 +2011,10 @@
     "switchHeading": "Switch workspace",
     "empty": "No workspaces yet.",
     "newWorkspace": "New workspace"
+  },
+  "liveLogs": {
+    "streaming": "Running — following the job log every 3s",
+    "finished": "Finished — final log",
+    "waiting": "Nothing to tail yet (job queued)"
   }
 }

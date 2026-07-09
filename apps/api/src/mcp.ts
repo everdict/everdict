@@ -158,6 +158,21 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
       }),
   );
 
+  server.registerTool(
+    "get_run_logs",
+    {
+      description:
+        "Current raw stdout of a run's job (live progress — poll while running; sentinel-stripped). found=false = nothing to tail yet",
+      inputSchema: { id: z.string() },
+    },
+    ({ id }) =>
+      run(principal, "runs:read", async () => {
+        const out = await deps.service.logs(id);
+        if (!out || out.record.tenant !== ws) return fail("NOT_FOUND: run not found.");
+        return ok({ status: out.record.status, found: out.text !== undefined, text: out.text ?? "" });
+      }),
+  );
+
   if (deps.queueService) {
     const queue = deps.queueService;
     server.registerTool(

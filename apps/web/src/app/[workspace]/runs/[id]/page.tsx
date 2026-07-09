@@ -2,6 +2,7 @@ import Link from 'next/link'
 import { ChevronLeft } from 'lucide-react'
 import { getTranslations } from 'next-intl/server'
 
+import { LiveLogs } from '@/widgets/live-logs'
 import { TraceTimeline } from '@/widgets/trace-timeline'
 import { CommentsSection } from '@/features/discuss'
 import { runSchema, type Run } from '@/entities/run'
@@ -104,6 +105,15 @@ export default async function RunDetailPage({
         <Callout tone="danger" hint={run.error.message}>
           {run.error.code}
         </Callout>
+      )}
+
+      {(run.status === 'queued' || run.status === 'running') && (
+        <section className="space-y-2.5">
+          <SectionHeader title={t('liveLogs')} />
+          <Card className="p-4">
+            <LiveLogs runId={run.id} initialStatus={run.status} />
+          </Card>
+        </section>
       )}
 
       <section className="space-y-2.5">

@@ -309,6 +309,37 @@ export class NomadBackend implements Backend {
     }
   }
 
+  // Current stdout of the case's newest job — live-progress tail (no waiting: a job with no alloc yet reads as
+  // undefined and the caller polls again). Sentinel payload stripped (it's the machine result, not progress).
+  async logs(caseId: string): Promise<string | undefined> {
+    try {
+      const prefix = `everdict-${caseId}-`;
+      const res = await this.http.request("GET", `/v1/jobs?prefix=${encodeURIComponent(prefix)}&namespace=*`);
+      if (res.status >= 300) return undefined;
+      const jobs = JSON.parse(res.text) as Array<{ ID?: string; Namespace?: string; SubmitTime?: number }>;
+      const newest = jobs
+        .filter((j) => j.ID?.startsWith(prefix))
+        .sort((a, b) => (b.SubmitTime ?? 0) - (a.SubmitTime ?? 0))[0];
+      if (!newest?.ID) return undefined;
+      const ns = newest.Namespace && newest.Namespace !== "default" ? newest.Namespace : undefined;
+      const nsq = ns ? `?namespace=${encodeURIComponent(ns)}` : "";
+      const allocsRes = await this.http.request("GET", `/v1/job/${encodeURIComponent(newest.ID)}/allocations${nsq}`);
+      if (allocsRes.status >= 300) return undefined;
+      const alloc = (JSON.parse(allocsRes.text) as Array<{ ID: string }>)[0];
+      if (!alloc) return undefined; // still queued — nothing to tail yet
+      const nsq2 = ns ? `&namespace=${encodeURIComponent(ns)}` : "";
+      const logs = await this.http.request(
+        "GET",
+        `/v1/client/fs/logs/${alloc.ID}?task=agent&type=stdout&plain=true${nsq2}`,
+      );
+      if (logs.status >= 300) return undefined;
+      const idx = logs.text.lastIndexOf(RESULT_SENTINEL);
+      return idx < 0 ? logs.text : logs.text.slice(0, idx);
+    } catch {
+      return undefined; // best-effort — observability must never fail a run
+    }
+  }
+
   // Force-stop every live job of a case (superseded batch reclaim) — deregister WITHOUT purge (the purge saga:
   // purging a job a client still tracks panics its alloc watcher). Best-effort, never throws.
   async kill(caseId: string): Promise<void> {
