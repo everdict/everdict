@@ -170,6 +170,20 @@ describe("SpeculationController — tail straggler duplication", () => {
     expect(reclaimed).toEqual(["a"]); // the loser's queued entry gets cancelled at the scheduler
   });
 
+  it("seedMedianMs sets the threshold before any sibling completes (the lone straggler doesn't wait for the bare floor)", async () => {
+    const time = fakeTime();
+    const breaker = new CircuitBreaker({ now: time.now });
+    const exec = fakeExecutor();
+    // Historical median 3s → threshold max(minStragglerMs=1000, 2×3000) = 6000ms — ABOVE the floor, so the
+    // duplicate must NOT fire at 1s (the un-seeded behavior) and MUST fire past 6s.
+    const ctl = new SpeculationController({ ...baseOpts(time, breaker, 1), seedMedianMs: 3000 });
+    void ctl.run(exec.execute, jobOn("a", "slow-rt"));
+    await time.advance(1200);
+    expect(exec.dispatched).toEqual(["a@slow-rt"]); // floor alone would have fired here
+    await time.advance(6200);
+    expect(exec.dispatched).toEqual(["a@slow-rt", "a@fast-rt"]); // seed-informed threshold fired
+  });
+
   it("does not speculate onto an open circuit", async () => {
     const time = fakeTime();
     const breaker = new CircuitBreaker({ threshold: 1, cooldownMs: 60_000, now: time.now });

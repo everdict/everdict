@@ -150,6 +150,19 @@ batch's running children (best-effort). Live: a same-PR refire superseded a batc
 6s later only the new fire's 3 jobs were running (the reclaimed batch's jobs were deregistered ~15s before
 their natural end) and the record read `superseded/SUPERSEDED`.
 
+## History-informed shard split (speculation's preventive half)
+
+Uniform round-robin gives a 3×-slower runtime the same share, and tail speculation then CORRECTS the imbalance
+with duplicate compute. The shard split is now weighted by history: per-target duration medians from recent
+succeeded batches of the same harness, but as RELATIVE ratios — only batches that themselves spanned ≥2 of the
+current targets contribute, each normalized by its own batch mean, so version/workload differences cancel
+(found live: absolute medians keyed by harness id inverted the split — v8's sleep-25 history made the fast
+runtime read as slow). Distribution is a deterministic smooth weighted round-robin; a target with no history
+gets the average weight (unknown ≠ slow), no history at all = the old uniform split. The speculation
+threshold's cold start is seeded from same id@version history (absolute ms), so the tail's lone straggler no
+longer waits for the bare 10s floor. Live: after one cross-runtime batch of history, an 8-case
+tight(600Mb-envelope)+local shard split 6:2 toward the fast lane (uniform was 4:4).
+
 ## Tail speculation — stragglers duplicate, first result wins
 
 Spillover reacts to failure; speculation reacts to SLOWNESS (a slow-but-alive runtime holding its shard while

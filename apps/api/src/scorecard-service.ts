@@ -64,6 +64,7 @@ import type { JudgeRunner } from "./judge-runner.js";
 import { assertRuntimeTarget } from "./require-runtime.js";
 import { executeWithSpillover } from "./runtime-spillover.js";
 import { ScoringService } from "./scoring-service.js";
+import { weightedTargets } from "./shard-weights.js";
 import { SpeculationController } from "./speculation.js";
 import type { CaseExportStream } from "./trace-sink-service.js";
 
@@ -578,6 +579,66 @@ export class ScorecardService {
     return this.deps.store.list(tenant);
   }
 
+  // Runtime speed signal from history — RELATIVE, not absolute. Absolute per-runtime medians keyed by harness
+  // id confound the signal: v5 sleeps 3s and v8 sleeps 25s, so whichever runtime happened to run the heavier
+  // VERSION reads as "slow" (found live: the weighted split inverted). Only batches that themselves spanned ≥2
+  // of the current targets carry cross-runtime information; within each, per-target medians are normalized by
+  // that batch's mean, and the ratios aggregate across batches — version/workload differences cancel out.
+  // The speculation seed needs an ABSOLUTE ms value instead, so it comes only from same id@version batches.
+  private async shardHistory(
+    tenant: string,
+    harnessId: string,
+    harnessVersion: string,
+    targets: string[],
+  ): Promise<{ ratios: Map<string, number>; seedMedianSec?: number }> {
+    const ratios = new Map<string, number>();
+    let seedMedianSec: number | undefined;
+    if (!this.deps.runStore) return { ratios };
+    try {
+      const past = (await this.deps.store.list(tenant, { status: "succeeded", harness: harnessId })).slice(0, 8);
+      const ratioSamples = new Map<string, number[]>();
+      const seedDurations: number[] = [];
+      const median = (xs: number[]): number | undefined => {
+        if (xs.length === 0) return undefined;
+        const sorted = [...xs].sort((a, b) => a - b);
+        return sorted[Math.floor(sorted.length / 2)];
+      };
+      for (const rec of past) {
+        const children = await this.deps.runStore.list(tenant, { scorecardId: rec.id });
+        const byTarget = new Map<string, number[]>();
+        for (const c of children) {
+          if (c.status !== "succeeded" || !c.result) continue;
+          const d = (new Date(c.updatedAt).getTime() - new Date(c.createdAt).getTime()) / 1000;
+          if (d <= 0) continue;
+          if (rec.harness.version === harnessVersion) seedDurations.push(d);
+          if (!c.runtime || !targets.includes(c.runtime)) continue;
+          const xs = byTarget.get(c.runtime) ?? [];
+          xs.push(d);
+          byTarget.set(c.runtime, xs);
+        }
+        if (byTarget.size < 2) continue; // a single-runtime batch has no cross-runtime signal
+        const perTarget = [...byTarget.entries()]
+          .map(([t, xs]) => [t, median(xs)] as const)
+          .filter((e): e is readonly [string, number] => e[1] !== undefined);
+        const mean = perTarget.reduce((a, [, m]) => a + m, 0) / perTarget.length;
+        if (mean <= 0) continue;
+        for (const [t, m] of perTarget) {
+          const xs = ratioSamples.get(t) ?? [];
+          xs.push(m / mean);
+          ratioSamples.set(t, xs);
+        }
+      }
+      for (const [t, xs] of ratioSamples) {
+        const m = median(xs);
+        if (m !== undefined) ratios.set(t, m);
+      }
+      seedMedianSec = median(seedDurations);
+    } catch {
+      // history is an optimization — never let it break a submit
+    }
+    return { ratios, ...(seedMedianSec !== undefined ? { seedMedianSec } : {}) };
+  }
+
   // Cost/time preflight — "what will this batch cost, and how long will it run?" answered from HISTORY: the per-case
   // usd/duration medians of the last few succeeded batches of the same dataset×harness. Honest when there is no
   // history (basis.samples=0, no estimate) — a guess would be worse than nothing. usd comes from RunRecord.usage
@@ -796,9 +857,16 @@ export class ScorecardService {
       .split(",")
       .map((t) => t.trim())
       .filter(Boolean);
+    // History-weighted split (same as the in-process loop) — deterministic for a given history snapshot; a
+    // mid-batch context rebuild may re-split remaining cases, which only moves NOT-YET-DISPATCHED work.
+    const history =
+      targets.length > 1
+        ? await this.shardHistory(rec.tenant, rec.harness.id, rec.harness.version, targets)
+        : { ratios: new Map<string, number>() };
+    const assigned = weightedTargets(cases.length, targets, history.ratios);
     const caseIndex = new Map<string, EvalCase>();
     cases.forEach((c, i) => {
-      const target = targets.length > 0 ? targets[i % targets.length] : undefined;
+      const target = targets.length > 0 ? assigned[i] : undefined;
       caseIndex.set(c.id, target ? { ...c, placement: { ...c.placement, target } } : c);
     });
     let harnessSpec: HarnessSpec | undefined;
@@ -851,6 +919,7 @@ export class ScorecardService {
               tenant: rec.tenant,
               breaker: this.breaker,
               totalCases: caseIndex.size,
+              ...(history.seedMedianSec !== undefined ? { seedMedianMs: history.seedMedianSec * 1000 } : {}),
               onSpeculate: (cid: string, from: string, to: string) => {
                 this.deps.onOrchestrationEvent?.({ kind: "speculation_fired", from, to });
                 void this.appendBatchStep(id, {
@@ -1619,11 +1688,18 @@ export class ScorecardService {
       // per-case failure isolation unchanged) — one 601-case batch can drain a Nomad pool and a K8s pool at once.
       // Seeded cases (already-finished results carried in by resume/retry) are excluded from dispatch entirely.
       const casesToRun = seed.length > 0 ? dataset.cases.filter((c) => !seededIds.has(c.id)) : dataset.cases;
+      // History-weighted split: fast runtimes take proportionally more cases so the shards finish together
+      // (speculation stays a safety net, not a scheduler). No history → the old uniform round-robin.
+      const history =
+        targets.length > 1
+          ? await this.shardHistory(tenant, harnessId, harnessVersion, targets)
+          : { ratios: new Map<string, number>() };
+      const assigned = weightedTargets(casesToRun.length, targets, history.ratios);
       const cases =
         targets.length > 0
           ? casesToRun.map((c, i) => ({
               ...c,
-              placement: { ...c.placement, target: targets[i % targets.length] as string },
+              placement: { ...c.placement, target: assigned[i] as string },
             }))
           : casesToRun;
       const suite: Suite = { id: dataset.id, harness: { id: harnessId }, cases };
@@ -1634,6 +1710,7 @@ export class ScorecardService {
           tenant,
           breaker: this.breaker,
           totalCases: cases.length,
+          ...(history.seedMedianSec !== undefined ? { seedMedianMs: history.seedMedianSec * 1000 } : {}),
           onSpeculate: (cid, from, to) => {
             this.deps.onOrchestrationEvent?.({ kind: "speculation_fired", from, to });
             pushStep("case", "info", `${cid}: tail speculation ${from} ⇢ ${to} (straggler duplicate)`, cid);

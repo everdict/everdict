@@ -17,6 +17,9 @@ export interface SpeculationOpts {
   breaker: CircuitBreaker; // skip open circuits when picking the duplicate's runtime
   totalCases: number; // dispatched-vs-total defines the tail
   minStragglerMs?: number; // floor before anything counts as a straggler (default 10s)
+  // Historical per-case median (ms) for this harness — seeds the threshold BEFORE any sibling completes (the
+  // tail's lone straggler otherwise waits for the bare floor). Live medians take over as siblings land.
+  seedMedianMs?: number;
   medianFactor?: number; // straggler = elapsed > factor × median completed duration (default 2)
   rearmMs?: number; // poll floor when the check fires but conditions aren't met yet (default 1s)
   now?: () => number;
@@ -48,11 +51,13 @@ export class SpeculationController {
       });
   }
 
-  // Straggler threshold — needs at least one completed sibling (no basis before that).
+  // Straggler threshold — live sibling durations first, the historical seed before any land, else undefined.
   private thresholdMs(): number | undefined {
-    if (this.durations.length === 0) return undefined;
-    const sorted = [...this.durations].sort((a, b) => a - b);
-    const median = sorted[Math.floor(sorted.length / 2)] as number;
+    const median =
+      this.durations.length > 0
+        ? ([...this.durations].sort((a, b) => a - b)[Math.floor(this.durations.length / 2)] as number)
+        : this.opts.seedMedianMs;
+    if (median === undefined) return undefined;
     return Math.max(this.opts.minStragglerMs ?? DEFAULT_MIN_STRAGGLER_MS, (this.opts.medianFactor ?? 2) * median);
   }
 
