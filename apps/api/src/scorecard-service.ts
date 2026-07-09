@@ -58,6 +58,7 @@ import {
 } from "@everdict/suite";
 import type { TraceSource, TraceSourceConfig } from "@everdict/trace";
 import { z } from "zod";
+import { AdaptiveConcurrencyGate } from "./adaptive-concurrency.js";
 import { collectDeferredTrace } from "./collect-trace.js";
 import { executeCase } from "./execute-case.js";
 import type { JudgeRunner } from "./judge-runner.js";
@@ -267,8 +268,13 @@ export interface ScorecardServiceDeps {
       | { kind: "spillover"; from: string; to: string; code: string }
       | { kind: "speculation_fired"; from: string; to: string }
       | { kind: "speculation_settled"; winnerSpeculated: boolean }
-      | { kind: "oom_escalated"; memoryMb: number },
+      | { kind: "oom_escalated"; memoryMb: number }
+      | { kind: "concurrency_adapted"; effective: number; previous: number; base: number },
   ) => void;
+  // Adaptive batch concurrency (pressure signals) — scheduler queue depth + the threshold above which the
+  // effective batch width halves. Absent queueDepth = breaker-only adaptation. docs/architecture/batch-resilience.md
+  queueDepth?: () => number;
+  queuePressure?: number; // queued entries above this = pressure (default 64)
   buildTraceSource?: (cfg: TraceSourceConfig) => TraceSource; // trace source factory for pull-ingest (@everdict/trace)
   secretsFor?: (tenant: string) => Promise<Record<string, string>>; // tenant SecretStore values (inject judge-model keys)
   // For resolving {secretRef} in harness env — two tiers: shared + submitter (owner) personal secrets. Injected by scope.
@@ -1750,8 +1756,38 @@ export class ScorecardService {
         `Running ${cases.length} case(s)${trials > 1 ? ` × ${trials} trials` : ""}${seed.length > 0 ? ` (${seed.length} finished result(s) carried over)` : ""}`,
       );
       await flushSteps();
+      // Adaptive concurrency — halve the effective batch width per pressure signal (an open circuit on one of
+      // this batch's runtimes / a scheduler queue spike; both open or single-target-open = trickle at 1) and
+      // restore automatically when the signal clears. Never cancels in-flight work; runSuite's worker count is
+      // the ceiling. docs/architecture/batch-resilience.md
+      const queuePressure = this.deps.queuePressure ?? 64;
+      const gate = new AdaptiveConcurrencyGate({
+        base: concurrency,
+        factor: () => {
+          let factor = 1;
+          if (targets.length > 0) {
+            const open = targets.filter((t) => this.breaker.isOpen(`${tenant}:${t}`)).length;
+            if (open >= targets.length) return 0; // nowhere healthy → floor of 1 (trickle probe)
+            if (open > 0) factor *= 0.5;
+          }
+          if ((this.deps.queueDepth?.() ?? 0) > queuePressure) factor *= 0.5;
+          return factor;
+        },
+        onChange: (effective, previous) => {
+          this.deps.onOrchestrationEvent?.({ kind: "concurrency_adapted", effective, previous, base: concurrency });
+          pushStep(
+            "dispatch",
+            "info",
+            effective < previous
+              ? `concurrency shrunk ${previous} → ${effective} (runtime circuit / queue pressure)`
+              : `concurrency restored ${previous} → ${effective}`,
+          );
+          void flushSteps();
+        },
+      });
+      const gatedDispatch: Dispatch = (job) => gate.run(() => dispatch(job));
       // onResult: as each case finishes (completion order), record PASS/FAIL + reason as a step — the heart of "progress".
-      scorecard = await runSuite(suite, harnessVersion, dispatch, {
+      scorecard = await runSuite(suite, harnessVersion, gatedDispatch, {
         concurrency,
         ...(opts.retries !== undefined ? { retries: opts.retries } : {}), // transient dispatch retry (throw-only)
         ...(trials > 1 ? { trials } : {}), // fan each case into N trials (pass@k / flakiness)

@@ -111,6 +111,9 @@ At SaaS scale many users submit many cases against finite/elastic infra, so plac
   (`{"quotas":{"acme":2,"beta":null},"weights":{…}}`, `null` clears an override; `GET` returns the
   effective view) — an override layer on top of the env defaults, guarded like every `/internal/**`
   route by `x-internal-token`. A restart falls back to env.
+- **adaptive batch width** — `EVERDICT_QUEUE_PRESSURE` (default 64): scheduler queue depth above which a
+  running batch halves its effective dispatch concurrency (see `docs/architecture/batch-resilience.md`,
+  Adaptive batch concurrency). Open runtime circuits halve it too; both signals self-restore.
 - **queue aging (anti-starvation)** — a queued entry waiting past `agingMs` (default 60 s) is promoted
   into the urgent scan class alongside `priority: "interactive"` jobs, so heavy WFQ weights/quotas can
   delay a tenant's batch work but never starve it indefinitely.

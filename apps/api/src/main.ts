@@ -580,7 +580,14 @@ async function main(): Promise<void> {
         });
       else if (event.kind === "oom_escalated")
         metrics.counter("everdict_oom_escalated_total", "OOM auto-escalations on retry.", {});
+      else if (event.kind === "concurrency_adapted")
+        metrics.counter("everdict_concurrency_adapted_total", "Adaptive batch-width transitions.", {
+          direction: event.effective < event.previous ? "shrink" : "restore",
+        });
     },
+    // Adaptive batch concurrency — pressure = the shared scheduler's queue depth (EVERDICT_QUEUE_PRESSURE dial).
+    queueDepth: () => scheduler.stats().queued,
+    ...(process.env.EVERDICT_QUEUE_PRESSURE ? { queuePressure: Number(process.env.EVERDICT_QUEUE_PRESSURE) } : {}),
     // Per-batch sink override validation (submit 400s on an unknown sink name; "none" is always allowed).
     sinkExists: async (tenant, name) =>
       ((await settingsStore.get(tenant))?.traceSinks ?? []).some((e) => e.name === name),

@@ -1,4 +1,4 @@
-import { type Dispatcher, inMemoryUsageMeter } from "@everdict/backends";
+import { CircuitBreaker, type Dispatcher, inMemoryUsageMeter } from "@everdict/backends";
 import {
   type AgentJob,
   BadRequestError,
@@ -2332,5 +2332,146 @@ describe("ScorecardService usage metering", () => {
     const u = usage.usage("acme");
     expect(u).toMatchObject({ usd: 0.05, tokens: 200, evaluations: 1 });
     expect(u.bySource.harness).toMatchObject({ usd: 0.05, tokens: 200, evaluations: 1 });
+  });
+});
+
+describe("ScorecardService — adaptive batch concurrency (pressure shrinks the effective width)", () => {
+  const fourCaseDataset: Dataset = {
+    id: "ad",
+    version: "1.0.0",
+    cases: ["c1", "c2", "c3", "c4"].map((id) => ({
+      id,
+      env: { kind: "repo", source: { files: {} } },
+      task: "t",
+      graders: [],
+      timeoutSec: 60,
+      tags: [],
+    })),
+    tags: [],
+  };
+
+  // A parking dispatcher that records the in-flight high-water mark (the observable effective width).
+  function parkingDispatcher() {
+    let inFlight = 0;
+    let maxSeen = 0;
+    const pending: Array<() => void> = [];
+    const dispatcher: Dispatcher = {
+      async dispatch(job) {
+        inFlight += 1;
+        maxSeen = Math.max(maxSeen, inFlight);
+        await new Promise<void>((resolve) =>
+          pending.push(() => {
+            inFlight -= 1;
+            resolve();
+          }),
+        );
+        return { ...caseResult(true), caseId: job.evalCase.id };
+      },
+    };
+    return {
+      dispatcher,
+      releaseAll: () => {
+        while (pending.length > 0) pending.shift()?.();
+      },
+      pendingCount: () => pending.length,
+      max: () => maxSeen,
+    };
+  }
+  const until = async (cond: () => boolean | Promise<boolean>): Promise<void> => {
+    for (let i = 0; i < 200; i++) {
+      if (await cond()) return;
+      await new Promise((r) => setTimeout(r, 5));
+    }
+    throw new Error("condition not met");
+  };
+
+  it("a scheduler queue spike halves the effective width (4 workers → 2 concurrent dispatches)", async () => {
+    const store = new InMemoryScorecardStore();
+    const datasets = new InMemoryDatasetRegistry();
+    await datasets.register("acme", fourCaseDataset);
+    const park = parkingDispatcher();
+    const events: string[] = [];
+    const service = new ScorecardService({
+      dispatcher: park.dispatcher,
+      store,
+      datasets,
+      concurrency: 4,
+      queueDepth: () => 100, // pressured from the start
+      queuePressure: 10,
+      onOrchestrationEvent: (e) => {
+        if (e.kind === "concurrency_adapted") events.push(`${e.previous}->${e.effective}`);
+      },
+    });
+    const rec = await service.submit({
+      tenant: "acme",
+      dataset: { id: "ad", version: "latest" },
+      harness: { id: "scripted", version: "0" },
+    });
+    await until(() => park.pendingCount() === 2); // only 2 of 4 cases dispatched under pressure
+    expect(park.max()).toBe(2);
+    // Drain: release the parked pair, the remaining two follow (still ≤2 at a time).
+    park.releaseAll();
+    await until(() => park.pendingCount() === 2);
+    park.releaseAll();
+    await until(async () => (await store.get(rec.id))?.status === "succeeded");
+    expect(park.max()).toBe(2);
+    expect(events).toContain("4->2"); // the shrink transition surfaced to the metrics seam
+  });
+
+  it("an open circuit on one of the batch's runtimes halves the width; all-open floors it at 1", async () => {
+    const store = new InMemoryScorecardStore();
+    const datasets = new InMemoryDatasetRegistry();
+    await datasets.register("acme", fourCaseDataset);
+    const park = parkingDispatcher();
+    const breaker = new CircuitBreaker({ threshold: 1, cooldownMs: 60_000 });
+    breaker.failure("acme:rt-a"); // rt-a is known-dead before the batch starts
+    const service = new ScorecardService({
+      dispatcher: park.dispatcher,
+      store,
+      datasets,
+      concurrency: 4,
+      breaker,
+    });
+    const rec = await service.submit({
+      tenant: "acme",
+      dataset: { id: "ad", version: "latest" },
+      harness: { id: "scripted", version: "0" },
+      runtime: "rt-a,rt-b", // sharded — rt-a open → factor 0.5 → effective 2 (cases spill to rt-b and succeed)
+    });
+    await until(() => park.pendingCount() === 2);
+    expect(park.max()).toBe(2);
+    park.releaseAll();
+    await until(() => park.pendingCount() === 2);
+    park.releaseAll();
+    await until(async () => (await store.get(rec.id))?.status === "succeeded");
+    expect(park.max()).toBe(2);
+
+    // All targets open → trickle at 1, then AUTO-RESTORE: the trickle probe succeeds (spillover reports
+    // breaker.success), the circuits close, and the remaining cases fan back out without any reset call.
+    breaker.failure("acme:rt-a");
+    breaker.failure("acme:rt-b");
+    const park2 = parkingDispatcher();
+    const service2 = new ScorecardService({
+      dispatcher: park2.dispatcher,
+      store,
+      datasets,
+      concurrency: 4,
+      breaker,
+    });
+    const rec2 = await service2.submit({
+      tenant: "acme",
+      dataset: { id: "ad", version: "latest" },
+      harness: { id: "scripted", version: "0" },
+      runtime: "rt-a,rt-b",
+    });
+    await until(() => park2.pendingCount() === 1);
+    expect(park2.max()).toBe(1); // fully-open shard list → serialized probe, never a full stop
+    park2.releaseAll(); // the probe succeeds on rt-a → breaker.success closes THAT circuit → width doubles
+    await until(() => park2.pendingCount() === 2);
+    park2.releaseAll(); // rt-b stays open (its cases spill to healthy rt-a first), so half-width is the plateau
+    await until(() => park2.pendingCount() === 1);
+    park2.releaseAll();
+    await until(async () => (await store.get(rec2.id))?.status === "succeeded");
+    expect(park2.max()).toBe(2); // trickle → half-width restore observed, no reset call anywhere
   });
 });

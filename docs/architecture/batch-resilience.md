@@ -185,6 +185,25 @@ threshold's cold start is seeded from same id@version history (absolute ms), so 
 longer waits for the bare 10s floor. Live: after one cross-runtime batch of history, an 8-case
 tight(600Mb-envelope)+local shard split 6:2 toward the fast lane (uniform was 4:4).
 
+## Adaptive batch concurrency — pressure shrinks the width, recovery restores it
+
+A batch's configured concurrency is a fixed worker count in `runSuite`; under pressure, full-width fan-out
+just piles work onto a struggling system (spillover churn on a dead runtime, scheduler queue floods). An
+`AdaptiveConcurrencyGate` inside the batch's dispatch closure shrinks the EFFECTIVE parallelism and restores
+it by itself — the pressure factor is re-sampled at every acquire/release, so there is no timer and no reset
+path:
+
+- **runtime circuit open** (one of the batch's shard runtimes): width × 0.5; ALL open → floor of 1 — a
+  trickle probe that keeps running, so the moment a probe succeeds (spillover reports `breaker.success`)
+  the circuit closes and the width restores on its own.
+- **scheduler queue spike** (`queueDepth > EVERDICT_QUEUE_PRESSURE`, default 64): width × 0.5.
+
+Shrinking never cancels in-flight work (excess dispatches finish naturally and are not replaced), and
+`runSuite`'s worker count stays the hard ceiling. Transitions surface as progress steps
+(`concurrency shrunk 4 → 2 …`) and `everdict_concurrency_adapted_total{direction}`. Live-verified: an
+8-case batch sharded `dead-nomad,nomad-local` opened the dead runtime's circuit, logged the 4 → 2 shrink,
+and completed via spillover. In-process (`track`) batches only — the Temporal driver bounds its own lanes.
+
 ## Tail speculation — stragglers duplicate, first result wins
 
 Spillover reacts to failure; speculation reacts to SLOWNESS (a slow-but-alive runtime holding its shard while
