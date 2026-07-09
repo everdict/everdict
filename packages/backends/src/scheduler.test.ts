@@ -520,3 +520,36 @@ describe("Scheduler", () => {
     await p;
   });
 });
+
+describe("Scheduler cancellation (AbortSignal)", () => {
+  it("dispatch: an already-aborted signal rejects without ever reaching the backend", async () => {
+    const b = new ControlledBackend("a", 5);
+    const sched = new Scheduler(new BackendRegistry().register("a", b));
+    const ac = new AbortController();
+    ac.abort();
+    await expect(sched.dispatch(job("a"), { signal: ac.signal })).rejects.toThrow(/aborted/i);
+    await flush();
+    expect(b.handled).toBe(0); // never dispatched
+  });
+
+  it("dispatch: aborting a QUEUED job removes it and rejects, and it is never dispatched", async () => {
+    const b = new ControlledBackend("a", 1); // a single slot
+    const sched = new Scheduler(new BackendRegistry().register("a", b));
+    const first = sched.dispatch(tjob("t", "first")); // occupies the slot, stays in flight
+    await flush();
+    expect(b.handled).toBe(1);
+
+    const ac = new AbortController();
+    const second = sched.dispatch(tjob("t", "second"), { signal: ac.signal });
+    await flush();
+    expect(sched.stats().queued).toBe(1); // no slot → queued
+
+    ac.abort();
+    await expect(second).rejects.toThrow(/aborted/i);
+    expect(sched.stats().queued).toBe(0); // removed from the queue on abort
+
+    b.releaseAll();
+    await first;
+    expect(b.dispatchedIds).toEqual(["first"]); // the aborted job never got dispatched
+  });
+});

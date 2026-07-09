@@ -1,4 +1,10 @@
-import { type Backend, type BackendRegistry, type Dispatcher, buildRuntimeBackend } from "@everdict/backends";
+import {
+  type Backend,
+  type BackendRegistry,
+  type DispatchOptions,
+  type Dispatcher,
+  buildRuntimeBackend,
+} from "@everdict/backends";
 import {
   type AgentJob,
   BadRequestError,
@@ -40,7 +46,7 @@ export interface RuntimeDispatcherDeps {
 export class RuntimeDispatcher implements Dispatcher {
   constructor(private readonly deps: RuntimeDispatcherDeps) {}
 
-  async dispatch(job: AgentJob): Promise<CaseResult> {
+  async dispatch(job: AgentJob, opts?: DispatchOptions): Promise<CaseResult> {
     const tenant = job.tenant ?? "default";
     const target = job.evalCase.placement?.target;
 
@@ -68,10 +74,13 @@ export class RuntimeDispatcher implements Dispatcher {
       const key = poolKeyFor(owner);
       const name = selfHostedBackendName(key);
       if (!this.deps.backends.has(name)) this.deps.backends.register(name, this.deps.buildSelfHostedBackend(key));
-      return this.deps.inner.dispatch({
-        ...job,
-        evalCase: { ...job.evalCase, placement: { ...job.evalCase.placement, target: name } },
-      });
+      return this.deps.inner.dispatch(
+        {
+          ...job,
+          evalCase: { ...job.evalCase, placement: { ...job.evalCase.placement, target: name } },
+        },
+        opts,
+      );
     }
 
     // self:<runnerId> — a personally-owned self-hosted runner. Verify the submitter (submittedBy) owns that runner, then
@@ -103,10 +112,13 @@ export class RuntimeDispatcher implements Dispatcher {
       const key: SelfHostedKey = { owner, runnerId };
       const name = selfHostedBackendName(key);
       if (!this.deps.backends.has(name)) this.deps.backends.register(name, this.deps.buildSelfHostedBackend(key));
-      return this.deps.inner.dispatch({
-        ...job,
-        evalCase: { ...job.evalCase, placement: { ...job.evalCase.placement, target: name } },
-      });
+      return this.deps.inner.dispatch(
+        {
+          ...job,
+          evalCase: { ...job.evalCase, placement: { ...job.evalCase.placement, target: name } },
+        },
+        opts,
+      );
     }
 
     let routed = job;
@@ -129,6 +141,6 @@ export class RuntimeDispatcher implements Dispatcher {
       }
       // If the spec isn't found, keep target as-is → the Scheduler fails NOT_FOUND on the unregistered backend (explicit failure).
     }
-    return this.deps.inner.dispatch(routed);
+    return this.deps.inner.dispatch(routed, opts);
   }
 }

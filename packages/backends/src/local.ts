@@ -1,6 +1,13 @@
 import { runAgentJob } from "@everdict/agent";
 import type { AgentJob, CaseResult } from "@everdict/core";
-import type { Backend, BackendCapacity, ProbeResult, Probeable } from "./backend.js";
+import {
+  type Backend,
+  type BackendCapacity,
+  type DispatchOptions,
+  type ProbeResult,
+  type Probeable,
+  dispatchAborted,
+} from "./backend.js";
 
 // For dev / single host — runs the job in the same process (no isolation).
 // claude uses this machine's subscription login.
@@ -14,7 +21,9 @@ export class LocalBackend implements Backend, Probeable {
     return { total, used: 0 };
   }
 
-  dispatch(job: AgentJob): Promise<CaseResult> {
+  dispatch(job: AgentJob, opts?: DispatchOptions): Promise<CaseResult> {
+    // In-process — can't interrupt a started run, so honor the signal best-effort by refusing a not-yet-started one.
+    if (opts?.signal?.aborted) return Promise.reject(dispatchAborted(job));
     return runAgentJob(job);
   }
 

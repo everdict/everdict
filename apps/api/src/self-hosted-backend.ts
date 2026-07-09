@@ -1,4 +1,11 @@
-import type { Backend, BackendCapacity, ProbeResult, Probeable } from "@everdict/backends";
+import {
+  type Backend,
+  type BackendCapacity,
+  type DispatchOptions,
+  type ProbeResult,
+  type Probeable,
+  dispatchAborted,
+} from "@everdict/backends";
 import type { AgentJob, CaseResult } from "@everdict/core";
 import type { RunnerHub, SelfHostedKey } from "./runner-hub.js";
 
@@ -17,7 +24,8 @@ export class SelfHostedBackend implements Backend, Probeable {
     // used is 0 since the scheduler tracks it via its own in-flight (here the park queue absorbs the real waiting).
     return { total: this.maxConcurrent, used: 0 };
   }
-  async dispatch(job: AgentJob): Promise<CaseResult> {
+  async dispatch(job: AgentJob, opts?: DispatchOptions): Promise<CaseResult> {
+    if (opts?.signal?.aborted) throw dispatchAborted(job); // best-effort: refuse a pre-cancelled park
     const { result, ranBy } = await this.hub.enqueue(this.key, job);
     // Provenance is stamped by the control plane (not runner self-reported) — record in the result that this ran on an unmanaged personal host (D2).
     // runner = the runner that actually completed it (ranBy). For a pool (self:ws) job key.runnerId is "*" (the pool), so use ranBy to record the real runner.

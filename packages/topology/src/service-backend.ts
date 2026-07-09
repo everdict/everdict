@@ -1,4 +1,11 @@
-import type { Backend, BackendCapacity, ScreenCapturable, TrustZonePolicy } from "@everdict/backends";
+import {
+  type Backend,
+  type BackendCapacity,
+  type DispatchOptions,
+  type ScreenCapturable,
+  type TrustZonePolicy,
+  dispatchAborted,
+} from "@everdict/backends";
 import {
   type AgentJob,
   type CaseResult,
@@ -69,7 +76,8 @@ export class ServiceTopologyBackend implements Backend, ScreenCapturable {
     return await captureCdpScreenshot(base).catch(() => undefined);
   }
 
-  async dispatch(job: AgentJob): Promise<CaseResult> {
+  async dispatch(job: AgentJob, opts?: DispatchOptions): Promise<CaseResult> {
+    if (opts?.signal?.aborted) throw dispatchAborted(job); // best-effort: refuse a pre-cancelled run
     const registered = await this.opts.specFor(job.tenant ?? "default", job.harness.id, job.harness.version);
     // per-dispatch image pins (#5) — override service images at run time. When pins are present, a suffix is appended to the effective version
     // so the warm pool separates into a distinct identity (the same topology can be evaluated as service X v1 ↔ v2).

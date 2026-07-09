@@ -399,11 +399,11 @@ async function main(): Promise<void> {
   // Metered dispatcher — every dispatch (single runs, batch cases, judges) flows through one seam, so outcome
   // counters and the per-runtime duration histogram cover the whole system without per-caller wiring.
   const meteredDispatcher: CoreDispatcher = {
-    dispatch: async (job) => {
+    dispatch: async (job, opts) => {
       const runtime = job.evalCase.placement?.target ?? "default";
       const startedAt = Date.now();
       try {
-        const result = await dispatcher.dispatch(job);
+        const result = await dispatcher.dispatch(job, opts);
         metrics.counter("everdict_dispatch_total", "Dispatch outcomes.", { runtime, outcome: "ok" });
         metrics.observe(
           "everdict_case_duration_seconds",

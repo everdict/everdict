@@ -7,6 +7,7 @@ import {
   type AgentJob,
   type CaseResult,
   CaseResultSchema,
+  InternalError,
   OOM_KILLED,
   UpstreamError,
   assertHardenedIsolation,
@@ -14,14 +15,17 @@ import {
   imageUsesRegistryHost,
   judgeEnv,
 } from "@everdict/core";
-import type {
-  AdoptOutcome,
-  Backend,
-  BackendCapacity,
-  Observable,
-  ProbeResult,
-  Probeable,
-  Recoverable,
+import { abortableDelay } from "./abortable-delay.js";
+import {
+  type AdoptOutcome,
+  type Backend,
+  type BackendCapacity,
+  type DispatchOptions,
+  type Observable,
+  type ProbeResult,
+  type Probeable,
+  type Recoverable,
+  dispatchAborted,
 } from "./backend.js";
 import type { SecretProvider } from "./secrets.js";
 import type { TrustZonePolicy } from "./trust-zone.js";
@@ -531,7 +535,8 @@ export class K8sBackend implements Backend, Recoverable, Observable, Probeable {
     return { ns: zone.namespace ?? this.opts.namespace ?? "default", runtimeClassName, secretEnv };
   }
 
-  async dispatch(job: AgentJob): Promise<CaseResult> {
+  async dispatch(job: AgentJob, options?: DispatchOptions): Promise<CaseResult> {
+    if (options?.signal?.aborted) throw dispatchAborted(job); // cancelled before we applied the Job
     const { ns, runtimeClassName, secretEnv } = await this.resolve(job);
     // Unique per dispatch — two concurrent batches over the same dataset would otherwise collide on the same Job
     // name (409 AlreadyExists → dispatch error). The capacity probe matches the label, not the name.
@@ -549,18 +554,21 @@ export class K8sBackend implements Backend, Recoverable, Observable, Probeable {
           : manifest;
       await api.applyJob(payload, ns);
       try {
-        await this.waitForJob(api, name, ns);
+        await this.waitForJob(api, name, ns, options?.signal);
         return parseResult(await api.podLogs(name, ns));
       } finally {
+        // On an aborted wait this finally is exactly the reclaim — the submitted Job is deleted, not left running.
         await api.deleteJob(name, ns);
       }
     });
   }
 
-  private async waitForJob(api: K8sApi, name: string, ns: string): Promise<void> {
+  private async waitForJob(api: K8sApi, name: string, ns: string, signal?: AbortSignal): Promise<void> {
     const interval = this.opts.pollIntervalMs ?? 2000;
     const maxPolls = this.opts.maxPolls ?? 900;
     for (let i = 0; i < maxPolls; i++) {
+      if (signal?.aborted)
+        throw new InternalError("CANCELLED", { name, ns }, "dispatch aborted while waiting for the K8s Job.");
       const { succeeded, failed } = await api.jobStatus(name, ns);
       if (succeeded > 0) return;
       if (failed > 0) {
@@ -574,7 +582,7 @@ export class K8sBackend implements Backend, Recoverable, Observable, Probeable {
           );
         throw new UpstreamError("UPSTREAM_ERROR", { name, ns, ...(reason ? { reason } : {}) }, "K8s Job failed");
       }
-      await new Promise((r) => setTimeout(r, interval));
+      await abortableDelay(interval, signal);
     }
     throw new UpstreamError("UPSTREAM_ERROR", { name, ns }, "timed out waiting for K8s Job completion");
   }

@@ -4,22 +4,26 @@ import {
   type AgentJob,
   type CaseResult,
   CaseResultSchema,
+  InternalError,
   OOM_KILLED,
   UpstreamError,
   assertHardenedIsolation,
   imageUsesRegistryHost,
   judgeEnv,
 } from "@everdict/core";
-import type {
-  AdoptOutcome,
-  Backend,
-  BackendCapacity,
-  ExecStreamHandle,
-  Observable,
-  ProbeResult,
-  Probeable,
-  Recoverable,
-  Shellable,
+import { abortableDelay } from "./abortable-delay.js";
+import {
+  type AdoptOutcome,
+  type Backend,
+  type BackendCapacity,
+  type DispatchOptions,
+  type ExecStreamHandle,
+  type Observable,
+  type ProbeResult,
+  type Probeable,
+  type Recoverable,
+  type Shellable,
+  dispatchAborted,
 } from "./backend.js";
 import type { SecretProvider } from "./secrets.js";
 import type { TrustZonePolicy } from "./trust-zone.js";
@@ -314,7 +318,8 @@ export class NomadBackend implements Backend, Recoverable, Observable, Shellable
     };
   }
 
-  async dispatch(job: AgentJob): Promise<CaseResult> {
+  async dispatch(job: AgentJob, options?: DispatchOptions): Promise<CaseResult> {
+    if (options?.signal?.aborted) throw dispatchAborted(job); // cancelled before we even submitted
     const opts = await this.effectiveOpts(job);
     const ns = opts.namespace;
     const jobId = nomadJobId(job, dispatchSuffix()); // unique per dispatch (concurrent same-case batches + no stale-alloc reads)
@@ -323,7 +328,7 @@ export class NomadBackend implements Backend, Recoverable, Observable, Shellable
       throw new UpstreamError("UPSTREAM_ERROR", { status: submit.status }, "Nomad job submission failed");
     }
     try {
-      const allocId = await this.waitForAlloc(jobId, ns);
+      const allocId = await this.waitForAlloc(jobId, ns, options?.signal);
       const nsq = ns ? `&namespace=${encodeURIComponent(ns)}` : "";
       const logs = await this.http.request(
         "GET",
@@ -341,6 +346,13 @@ export class NomadBackend implements Backend, Recoverable, Observable, Shellable
             : "alloc log fetch failed",
         );
       return parseResult(logs.text);
+    } catch (err) {
+      // If the wait was aborted, reclaim the submitted job so it doesn't keep running (best-effort, never masks err).
+      if (options?.signal?.aborted) {
+        const delq = ns ? `?namespace=${encodeURIComponent(ns)}` : "";
+        await this.http.request("DELETE", `/v1/job/${jobId}${delq}`).catch(() => {});
+      }
+      throw err;
     } finally {
       // Purge dead jobs after capturing results (parity with K8sBackend's deleteJob-in-finally). Without it, every
       // batch case leaves a dead job+alloc behind; past gc_max_allocs the client instantly GCs each newly terminal
@@ -554,11 +566,12 @@ export class NomadBackend implements Backend, Recoverable, Observable, Shellable
     }
   }
 
-  private async waitForAlloc(jobId: string, namespace?: string): Promise<string> {
+  private async waitForAlloc(jobId: string, namespace?: string, signal?: AbortSignal): Promise<string> {
     const interval = this.opts.pollIntervalMs ?? 2000;
     const maxPolls = this.opts.maxPolls ?? 900;
     const nsq = namespace ? `?namespace=${encodeURIComponent(namespace)}` : "";
     for (let i = 0; i < maxPolls; i++) {
+      if (signal?.aborted) throw new InternalError("CANCELLED", { jobId }, "dispatch aborted while waiting for alloc.");
       const res = await this.http.request("GET", `/v1/job/${jobId}/allocations${nsq}`);
       if (res.status < 300) {
         const allocs = JSON.parse(res.text) as Array<{ ID: string; ClientStatus: string }>;
@@ -578,7 +591,7 @@ export class NomadBackend implements Backend, Recoverable, Observable, Shellable
           }
         }
       }
-      await new Promise((r) => setTimeout(r, interval));
+      await abortableDelay(interval, signal);
     }
     throw new UpstreamError("UPSTREAM_ERROR", { jobId }, "timed out waiting for alloc completion");
   }

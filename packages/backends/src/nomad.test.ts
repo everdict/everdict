@@ -564,3 +564,43 @@ describe("streamHandleFor (ExecStreamHandle wiring — the terminal PTY handle)"
     expect(() => handle.write("late")).not.toThrow();
   });
 });
+
+describe("NomadBackend.dispatch cancellation (AbortSignal)", () => {
+  it("a pre-aborted signal rejects before submitting anything", async () => {
+    const ac = new AbortController();
+    ac.abort();
+    const calls: string[] = [];
+    const http: NomadHttp = {
+      async request(method, path) {
+        calls.push(`${method} ${path}`);
+        return { status: 200, text: "{}" };
+      },
+    };
+    await expect(
+      new NomadBackend({ addr: "http://n:4646", image: "i", http }).dispatch(JOB, { signal: ac.signal }),
+    ).rejects.toThrow(/aborted/i);
+    expect(calls).toEqual([]); // never even POSTed the job
+  });
+
+  it("aborting mid-poll stops the wait, reclaims the submitted job, and rejects with CANCELLED", async () => {
+    const ac = new AbortController();
+    const deletes: string[] = [];
+    const http: NomadHttp = {
+      async request(method, path) {
+        if (method === "POST" && path === "/v1/jobs") return { status: 200, text: "{}" };
+        if (method === "DELETE") {
+          deletes.push(path);
+          return { status: 200, text: "" };
+        }
+        if (path.includes("/allocations")) {
+          ac.abort(); // cancel while we're waiting for an alloc
+          return { status: 200, text: "[]" }; // no alloc yet — the loop would poll again, but the abort short-circuits it
+        }
+        return { status: 404, text: "" };
+      },
+    };
+    const backend = new NomadBackend({ addr: "http://n:4646", image: "i", http, pollIntervalMs: 1 });
+    await expect(backend.dispatch(JOB, { signal: ac.signal })).rejects.toThrow(/aborted/i);
+    expect(deletes.some((p) => p.includes("everdict-c1-"))).toBe(true); // the submitted job was deregistered, not left running
+  });
+});

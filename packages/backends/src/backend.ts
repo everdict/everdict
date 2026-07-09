@@ -1,4 +1,4 @@
-import type { AgentJob, CaseResult } from "@everdict/core";
+import { type AgentJob, type CaseResult, InternalError } from "@everdict/core";
 
 // Result of a one-shot in-container exec (Observable.exec) — the sandbox command's stdout/stderr/exit.
 export interface ExecInContainer {
@@ -37,10 +37,24 @@ export interface ProbeResult {
   detail: string; // success: identifying info like version/name; failure: reason (status code/error message)
 }
 
+// Per-dispatch options — currently just cooperative cancellation. A backend that cannot interrupt an already-started
+// run (in-process / pull) honors `signal` best-effort by rejecting a not-yet-started dispatch; the pollers (Nomad/K8s)
+// additionally stop waiting and reclaim the orchestrator job when the signal aborts mid-run. Ties cancellation to the
+// in-flight promise, complementing the id-keyed kill(caseId) side channel.
+export interface DispatchOptions {
+  signal?: AbortSignal;
+}
+
+// The uniform "this dispatch was cancelled via its AbortSignal" rejection (reuses the CANCELLED code the Scheduler
+// already rejects queued entries with, so callers classify it the same way).
+export function dispatchAborted(job: AgentJob): InternalError {
+  return new InternalError("CANCELLED", { caseId: job.evalCase.id }, "dispatch aborted.");
+}
+
 // The (job)→CaseResult dispatch abstraction — satisfied by both Router (static) and Scheduler (capacity-aware).
 // The orchestrator/activity depends on this interface, not the implementation (drop-in swap).
 export interface Dispatcher {
-  dispatch(job: AgentJob): Promise<CaseResult>;
+  dispatch(job: AgentJob, opts?: DispatchOptions): Promise<CaseResult>;
 }
 
 // The CORE placement contract — every backend implements this. "Where does it run": the control plane holds the

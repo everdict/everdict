@@ -1,4 +1,4 @@
-import type { Dispatcher } from "@everdict/backends";
+import type { DispatchOptions, Dispatcher } from "@everdict/backends";
 import type { AgentJob, CaseResult } from "@everdict/core";
 import type { ModelRegistry } from "@everdict/registry";
 
@@ -28,7 +28,7 @@ export class ModelResolvingDispatcher implements Dispatcher {
     private readonly inner: Dispatcher,
   ) {}
 
-  async dispatch(job: AgentJob): Promise<CaseResult> {
-    return this.inner.dispatch(await resolveJobModel(this.models, job));
+  async dispatch(job: AgentJob, opts?: DispatchOptions): Promise<CaseResult> {
+    return this.inner.dispatch(await resolveJobModel(this.models, job), opts);
   }
 }

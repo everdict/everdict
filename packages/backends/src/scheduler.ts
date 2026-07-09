@@ -1,4 +1,5 @@
 import { type AgentJob, type CaseResult, InternalError, NotFoundError, RateLimitError } from "@everdict/core";
+import { type DispatchOptions, dispatchAborted } from "./backend.js";
 import { type BudgetTracker, costOf } from "./budget.js";
 import { FairQueue } from "./fair-queue.js";
 import type { BackendRegistry } from "./registry.js";
@@ -50,6 +51,8 @@ interface QueueEntry {
   enqueuedAt: number; // aging clock — a long-waiting batch entry is promoted to the urgent scan (starvation guard)
   resolve: (r: CaseResult) => void;
   reject: (e: unknown) => void;
+  signal?: AbortSignal; // per-dispatch cancellation — forwarded to the backend once in-flight
+  onAbort?: () => void; // the queued-abort listener, detached when the entry leaves the queue
 }
 
 export interface SchedulerOptions {
@@ -94,7 +97,9 @@ export class Scheduler {
     });
   }
 
-  dispatch(job: AgentJob): Promise<CaseResult> {
+  dispatch(job: AgentJob, opts?: DispatchOptions): Promise<CaseResult> {
+    // Already cancelled before we did anything — reject without admitting a budget run or touching the queue.
+    if (opts?.signal?.aborted) return Promise.reject(dispatchAborted(job));
     // Budget admit — if over, reject immediately before queuing (402). If it passes, reserve one run (burst-cap protection).
     try {
       this.opts.budget?.admit(tenantOf(job));
@@ -119,7 +124,23 @@ export class Scheduler {
       );
     }
     return new Promise<CaseResult>((resolve, reject) => {
-      this.queue.enqueue({ job, enqueuedAt: (this.opts.now ?? Date.now)(), resolve, reject });
+      const entry: QueueEntry = {
+        job,
+        enqueuedAt: (this.opts.now ?? Date.now)(),
+        resolve,
+        reject,
+        ...(opts?.signal ? { signal: opts.signal } : {}),
+      };
+      if (opts?.signal) {
+        // Aborted while still QUEUED → remove and reject, so a cancelled job never wastes a placement slot. Once
+        // in-flight this listener is detached (see pump) and cancellation flows to the backend via the signal instead.
+        const onAbort = (): void => {
+          if (this.queue.remove(entry)) reject(dispatchAborted(job));
+        };
+        entry.onAbort = onAbort;
+        opts.signal.addEventListener("abort", onAbort, { once: true });
+      }
+      this.queue.enqueue(entry);
       void this.pump();
     });
   }
@@ -244,6 +265,9 @@ export class Scheduler {
           if (chosen === undefined) continue;
 
           this.queue.remove(entry);
+          // Leaving the queue → detach the queued-abort listener; from here cancellation rides the signal we hand
+          // to backend.dispatch below (the backend stops its poll and reclaims the orchestrator job).
+          if (entry.onAbort && entry.signal) entry.signal.removeEventListener("abort", entry.onAbort);
           const slot = slots.get(chosen);
           if (slot) {
             slot.free -= 1; // local decrement within the same pump pass
@@ -266,7 +290,7 @@ export class Scheduler {
   private runOne(entry: QueueEntry, name: string, tenant: string, memNeedMb: number, cpuNeed: number): void {
     this.registry
       .get(name)
-      .dispatch(entry.job)
+      .dispatch(entry.job, entry.signal ? { signal: entry.signal } : undefined)
       .then((result) => {
         this.opts.budget?.settle(tenant, costOf(result)); // commit the actual cost on completion
         entry.resolve(result);

@@ -1,6 +1,6 @@
 import { type AgentJob, BadRequestError, type CaseResult, NotFoundError, type RuntimeSpec } from "@everdict/core";
 import { z } from "zod";
-import type { Backend } from "./backend.js";
+import type { Backend, DispatchOptions } from "./backend.js";
 import { K8sBackend, type K8sBackendOptions } from "./k8s.js";
 import { LocalBackend } from "./local.js";
 import { NomadBackend, type NomadBackendOptions } from "./nomad.js";
@@ -38,12 +38,12 @@ export class Router {
   ) {}
 
   // async: makes a synchronous throw consistently a rejection (the caller handles it with await/.catch).
-  async dispatch(job: AgentJob): Promise<CaseResult> {
+  async dispatch(job: AgentJob, opts?: DispatchOptions): Promise<CaseResult> {
     const target = job.evalCase.placement?.target ?? this.defaultTarget;
     if (!target) {
       throw new BadRequestError("BAD_REQUEST", undefined, "placement.target or a default backend is required.");
     }
-    return this.registry.get(target).dispatch(job);
+    return this.registry.get(target).dispatch(job, opts);
   }
 }
 

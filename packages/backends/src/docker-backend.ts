@@ -3,7 +3,14 @@ import { promisify } from "node:util";
 import { runAgentJob } from "@everdict/agent";
 import type { AgentJob, CaseResult } from "@everdict/core";
 import { DockerDriver } from "@everdict/drivers";
-import type { Backend, BackendCapacity, ProbeResult, Probeable } from "./backend.js";
+import {
+  type Backend,
+  type BackendCapacity,
+  type DispatchOptions,
+  type ProbeResult,
+  type Probeable,
+  dispatchAborted,
+} from "./backend.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -21,7 +28,8 @@ export class DockerBackend implements Backend, Probeable {
     return { total: typeof m === "function" ? m() : m, used: 0 };
   }
 
-  dispatch(job: AgentJob): Promise<CaseResult> {
+  dispatch(job: AgentJob, opts?: DispatchOptions): Promise<CaseResult> {
+    if (opts?.signal?.aborted) return Promise.reject(dispatchAborted(job)); // best-effort: refuse a pre-cancelled run
     return runAgentJob(job, { driver: this.driver }); // run the case in a container (case.image ?? default image)
   }
 
