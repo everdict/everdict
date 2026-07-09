@@ -53,10 +53,7 @@ export interface ServiceTopologyBackendOptions {
 // The orchestrator-agnostic service-topology backend (a Backend implementation).
 // ensure warm topology → per-case browser → drive (front-door, per-run wiring) → collectTrace → observe → grade.
 export class ServiceTopologyBackend implements Backend, ScreenCapturable {
-  readonly id: string;
-  constructor(private readonly opts: ServiceTopologyBackendOptions) {
-    this.id = `service:${opts.runtime.id}`;
-  }
+  constructor(private readonly opts: ServiceTopologyBackendOptions) {}
 
   // Capacity: how many per-case browsers can run at once (warm services are a shared pool, so the per-case browser is the bottleneck).
   async capacity(): Promise<BackendCapacity> {

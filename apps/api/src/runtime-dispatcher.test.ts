@@ -65,7 +65,6 @@ describe("RuntimeDispatcher", () => {
     const resolve = vi.spyOn(runtimes, "get");
     // Assume a global backend "local" already exists (only BackendRegistry.has is consulted)
     backends.register("local", {
-      id: "local",
       capacity: async () => ({ total: 1, used: 0 }),
       dispatch: async () => result,
     });

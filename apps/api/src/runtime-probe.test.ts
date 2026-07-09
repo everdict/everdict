@@ -7,7 +7,6 @@ const SPEC: RuntimeSpec = { kind: "local", id: "rt", version: "1.0.0", tags: [] 
 
 function stubBackend(probe?: () => Promise<ProbeResult>): Backend {
   return {
-    id: "stub",
     capacity: async () => ({ total: 1, used: 0 }),
     dispatch: async () => {
       throw new Error("not used");

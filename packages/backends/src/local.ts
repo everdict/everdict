@@ -5,7 +5,6 @@ import type { Backend, BackendCapacity, ProbeResult, Probeable } from "./backend
 // For dev / single host — runs the job in the same process (no isolation).
 // claude uses this machine's subscription login.
 export class LocalBackend implements Backend, Probeable {
-  readonly id = "local";
   // maxConcurrent may also be a function — lets it read slots that the autoscaler changes dynamically.
   constructor(private readonly maxConcurrent: number | (() => number) = 4) {}
 

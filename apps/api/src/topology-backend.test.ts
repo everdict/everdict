@@ -1,3 +1,4 @@
+import { isScreenCapturable } from "@everdict/backends";
 import { type AgentJob, AppError, type RuntimeSpec, RuntimeSpecSchema } from "@everdict/core";
 import type { HarnessInstanceRegistry } from "@everdict/registry";
 import { describe, expect, it } from "vitest";
@@ -43,14 +44,14 @@ describe("buildTopologyBackend (topology RuntimeSpec → ServiceTopologyBackend)
     expect(RuntimeSpecSchema.safeParse(k8sSpec).success).toBe(true);
   });
 
-  it("nomad orchestrator → ServiceTopologyBackend (id=service:nomad)", () => {
+  it("nomad orchestrator → a ScreenCapturable topology backend", () => {
     const b = buildTopologyBackend(nomadSpec, { harnesses: harnessesReturning("service") });
-    expect(b.id).toBe("service:nomad");
+    expect(isScreenCapturable(b)).toBe(true); // topology backends expose a per-run browser frame
   });
 
-  it("k8s orchestrator → ServiceTopologyBackend (id=service:k8s)", () => {
+  it("k8s orchestrator → a ScreenCapturable topology backend", () => {
     const b = buildTopologyBackend(k8sSpec, { harnesses: harnessesReturning("service") });
-    expect(b.id).toBe("service:k8s");
+    expect(isScreenCapturable(b)).toBe(true);
   });
 
   it("dispatch: if the harness isn't kind:service, BAD_REQUEST before cluster access (specFor rejects)", async () => {

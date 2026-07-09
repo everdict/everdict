@@ -46,7 +46,6 @@ export interface Dispatcher {
 // expressed as a separate interface + a narrowing guard, NOT as optional methods on this one, so a caller narrows
 // with `isObservable(backend)` (compiler-checked) instead of feature-detecting `backend.logs` (undefined at runtime).
 export interface Backend extends Dispatcher {
-  readonly id: string;
   capacity(): Promise<BackendCapacity>; // for capacity-aware placement — free concurrent slots
 }
 

@@ -1,21 +1,18 @@
 import type { Backend, BackendCapacity, ProbeResult, Probeable } from "@everdict/backends";
 import type { AgentJob, CaseResult } from "@everdict/core";
-import { type RunnerHub, type SelfHostedKey, selfHostedBackendName } from "./runner-hub.js";
+import type { RunnerHub, SelfHostedKey } from "./runner-hub.js";
 
 // Personally-owned self-hosted runner backend — pull, not push. dispatch(job) parks the job in the RunnerHub and
 // returns a promise. When the runner client (everdict runner) leases it via MCP, runs it on its own machine, and reports
 // the result back, that promise resolves. The backend instance is registered per runner (= key) by RuntimeDispatcher.
 // Design: docs/architecture/self-hosted-runner.md.
 export class SelfHostedBackend implements Backend, Probeable {
-  readonly id: string;
   constructor(
     private readonly key: SelfHostedKey,
     private readonly hub: RunnerHub,
     // Per-runner concurrent-park ceiling — for scheduler gating (parking uses no real resources, so keep it generous; the real serialization is done by lease availability).
     private readonly maxConcurrent = 8,
-  ) {
-    this.id = selfHostedBackendName(key);
-  }
+  ) {}
   async capacity(): Promise<BackendCapacity> {
     // used is 0 since the scheduler tracks it via its own in-flight (here the park queue absorbs the real waiting).
     return { total: this.maxConcurrent, used: 0 };

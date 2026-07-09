@@ -239,7 +239,6 @@ describe("Scheduler", () => {
   it("budget: cost is settled on completion, so once past the usd cap the next submission is rejected", async () => {
     // A backend that returns a result with a cost.
     const costly: Backend = {
-      id: "c",
       async capacity() {
         return { total: 5, used: 0 };
       },
