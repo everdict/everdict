@@ -12,6 +12,7 @@ interface JudgeInput {
   trace?: TraceEvent[];
   dom?: string;
   screenshot?: JudgeImage;
+  response?: string; // result-channel final response (prompt snapshot output)
   rubric?: string;
 }
 
@@ -24,10 +25,12 @@ function finalAnswerOf(trace: TraceEvent[] | undefined): string | undefined {
   return assistant[assistant.length - 1]?.text;
 }
 
-// Judging prompt — asks the LLM/VLM for a JSON verdict from task + rubric + (final answer/trace/DOM/screenshot).
+// Judging prompt — asks the LLM/VLM for a JSON verdict from task + rubric + (final answer/response/trace/DOM/screenshot).
 function buildPrompt(input: JudgeInput): string {
   // The final answer is always fully included in a dedicated section regardless of trace JSON truncation (sliced with its own cap) — avoids misjudgment from truncation.
   const finalAnswer = finalAnswerOf(input.trace);
+  // The result-channel response is separate evidence from the trace's final answer — skip it only when identical (avoid duplication).
+  const response = input.response && input.response !== finalAnswer ? input.response : undefined;
   const trace = input.trace ? JSON.stringify(input.trace).slice(0, MAX_CHARS) : "(none)";
   return [
     "You are a strict evaluation judge for an AI agent's run. Judge ONLY from the evidence below.",
@@ -38,6 +41,7 @@ function buildPrompt(input: JudgeInput): string {
       ? "A SCREENSHOT of the final UI/desktop state is attached. Judge whether it shows the task's goal state."
       : "",
     finalAnswer ? `AGENT FINAL ANSWER:\n${finalAnswer.slice(0, MAX_CHARS)}` : "",
+    response ? `AGENT FINAL RESPONSE (result channel):\n${response.slice(0, MAX_CHARS)}` : "",
     // Since the trace JSON may be truncated, tell it to look at the section above even if the final answer is cut off.
     `EXECUTION TRACE (JSON, truncated${finalAnswer ? "; see AGENT FINAL ANSWER above" : ""}):\n${trace}`,
     'Respond with ONLY a JSON object, no prose: {"pass": boolean, "score": number in [0,1], "reason": string}.',

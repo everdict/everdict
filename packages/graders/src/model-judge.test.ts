@@ -69,6 +69,23 @@ describe("modelJudge", () => {
     expect(section).not.toContain("interim-thought");
   });
 
+  it("includes the result-channel final response in the prompt when the trace has no assistant answer (regression: it was dropped, leaving the judge without evidence)", async () => {
+    const complete = vi.fn((_prompt: string) => Promise.resolve('{"pass":true,"score":1,"reason":"ok"}'));
+    await modelJudge(complete).judge({ task: "t", trace: TRACE, response: "the produced result body" });
+    const prompt = complete.mock.calls[0]?.[0] ?? "";
+    expect(prompt).toContain("AGENT FINAL RESPONSE");
+    expect(prompt).toContain("the produced result body");
+  });
+
+  it("omits the response section when it duplicates the trace's final answer", async () => {
+    const trace: TraceEvent[] = [{ t: 0, kind: "message", role: "assistant", text: "same answer" }];
+    const complete = vi.fn((_prompt: string) => Promise.resolve('{"pass":true,"score":1,"reason":"ok"}'));
+    await modelJudge(complete).judge({ task: "t", trace, response: "same answer" });
+    const prompt = complete.mock.calls[0]?.[0] ?? "";
+    expect(prompt).toContain("AGENT FINAL ANSWER");
+    expect(prompt).not.toContain("AGENT FINAL RESPONSE");
+  });
+
   it("with a screenshot (VLM), passes the image to complete and notes it in the prompt", async () => {
     const complete = vi.fn((_prompt: string, _image?: { base64: string; mediaType: string }) =>
       Promise.resolve('{"pass":true,"score":1,"reason":"goal state shown"}'),

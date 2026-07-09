@@ -16,9 +16,19 @@ describe("observation-source (delivery seam)", () => {
     expect(snap).toEqual(browserSnap);
   });
 
-  it("reference: a prompt snapshot when there's no target (no stage — the primary signal is the trace)", async () => {
+  it("reference: a prompt snapshot when there's no target and no response (no stage — the primary signal is the trace)", async () => {
     const snap = await referenceObservationSource.observe({ target: undefined });
     expect(snap).toEqual({ kind: "prompt", output: "" });
+  });
+
+  it("reference: with no target, carries the result-channel response as the prompt output (regression: it was dropped, leaving the snapshot empty)", async () => {
+    const snap = await referenceObservationSource.observe({ target: undefined, response: "final answer text" });
+    expect(snap).toEqual({ kind: "prompt", output: "final answer text" });
+  });
+
+  it("reference: a non-string response body is carried as JSON text", async () => {
+    const snap = await referenceObservationSource.observe({ target: undefined, response: { answer: 42 } });
+    expect(snap).toEqual({ kind: "prompt", output: '{"answer":42}' });
   });
 
   it("sentinel: extracts the observation from the result-channel body by dot-path (inline return)", async () => {

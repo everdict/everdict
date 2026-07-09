@@ -92,7 +92,7 @@ behind a small `ObservationSource` seam, the sibling of those two.
 
 | mode | who moves the observation | snapshot source | natural locality | topology status |
 | --- | --- | --- | --- | --- |
-| `reference` (default) | judge/grader **pulls** | `target.snapshot()` (CDP today; a store handle generally) | judge **co-located** with the store (D2) | ✅ exists (the only path today) |
+| `reference` (default) | judge/grader **pulls** | `target.snapshot()` (CDP today; a store handle generally); with **no target**, falls back to a prompt snapshot carrying the result-channel body (`DriveOutcome.response`) as `output` — judges also receive it as `response` evidence | judge **co-located** with the store (D2) | ✅ exists (the only path today) |
 | `sentinel` | the run **returns it inline** | embedded in the drive outcome / result channel (`__EVERDICT_RESULT__`-style) | locality irrelevant (no store hop) — best for small observations | ❌ **missing — the gap the user named** |
 | `egress` | the run **pushes it out** | written to a sink (object store / the judge's locality) before grading | judge anywhere; push beats pull when the judge is far | ❌ missing |
 

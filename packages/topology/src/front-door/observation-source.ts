@@ -37,10 +37,19 @@ function parseSnapshot(raw: unknown, label: string): EnvSnapshot {
   return parsed.data;
 }
 
-// reference (store-fetch): pull the target's snapshot if present, otherwise prompt. Same as the current service-backend observation step.
+// Result-channel body → prompt output text: a string as-is, other shapes as JSON. The response is evidence for
+// judges/graders, not a structured EnvSnapshot (that's what sentinel is for).
+function responseText(response: unknown): string {
+  if (response == null) return "";
+  return typeof response === "string" ? response : JSON.stringify(response);
+}
+
+// reference (store-fetch): pull the target's snapshot if present. With no target there is no stage to pull from —
+// carry the result-channel body (DriveOutcome.response) as the prompt output so the final response still reaches
+// judges/graders (dropping it left the snapshot empty for trace-less harnesses).
 export const referenceObservationSource: ObservationSource = {
-  async observe({ target }) {
-    return target ? target.snapshot() : { kind: "prompt", output: "" };
+  async observe({ target, response }) {
+    return target ? target.snapshot() : { kind: "prompt", output: responseText(response) };
   },
 };
 

@@ -76,6 +76,40 @@ describe("JudgeGrader", () => {
     expect(score.value).toBe(0.9);
   });
 
+  it("passes the prompt snapshot's output to the judge as the final response (regression: judges got an empty snapshot for trace-less runs)", async () => {
+    let received: Parameters<Judge["judge"]>[0] | undefined;
+    const spy: Judge = {
+      async judge(input) {
+        received = input;
+        return { pass: true, score: 1, reason: "ok" };
+      },
+    };
+    const ctx: GradeContext = {
+      case: { id: "c", env: { kind: "prompt" }, task: "answer q", graders: [], timeoutSec: 1, tags: [] },
+      trace: [] as TraceEvent[],
+      snapshot: { kind: "prompt", output: "the final response body" },
+    };
+    await new JudgeGrader(spy).grade(ctx);
+    expect(received?.response).toBe("the final response body");
+  });
+
+  it("does not pass a response for an empty prompt output (nothing to add as evidence)", async () => {
+    let received: Parameters<Judge["judge"]>[0] | undefined;
+    const spy: Judge = {
+      async judge(input) {
+        received = input;
+        return { pass: true, score: 1, reason: "ok" };
+      },
+    };
+    const ctx: GradeContext = {
+      case: { id: "c", env: { kind: "prompt" }, task: "answer q", graders: [], timeoutSec: 1, tags: [] },
+      trace: [] as TraceEvent[],
+      snapshot: { kind: "prompt", output: "" },
+    };
+    await new JudgeGrader(spy).grade(ctx);
+    expect(received?.response).toBeUndefined();
+  });
+
   it("os-use snapshot: reads the screenshot as base64 from the environment and passes it as VLM input (screenshot)", async () => {
     let received: Parameters<Judge["judge"]>[0] | undefined;
     const spy: Judge = {

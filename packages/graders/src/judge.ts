@@ -20,6 +20,7 @@ export interface Judge {
     dom?: string;
     screenshotRef?: string; // External ref such as a browser snapshot (model transport uses screenshot)
     screenshot?: JudgeImage; // Image bytes resolved for VLM input
+    response?: string; // Final response from the result channel (prompt snapshot output) — the only evidence when the trace has no assistant message
     rubric?: string;
   }): Promise<JudgeVerdict>;
 }
@@ -64,6 +65,7 @@ export class JudgeGrader implements Grader {
       dom: snap.kind === "browser" ? snap.dom : undefined,
       screenshotRef: snap.kind === "browser" && this.opts.useScreenshot ? snap.screenshotRef : undefined,
       ...(screenshot ? { screenshot } : {}),
+      ...(snap.kind === "prompt" && snap.output ? { response: snap.output } : {}),
       rubric: this.opts.rubric,
     });
     return { graderId: this.id, metric: "judge", value: verdict.score, pass: verdict.pass, detail: verdict.reason };
