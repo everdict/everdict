@@ -1,7 +1,7 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { ModelSpecSchema } from "@everdict/core";
+import { SHARED_TENANT } from "../registry.js";
 import { InMemoryModelRegistry, type ModelRegistry } from "./model-registry.js";
-import { SHARED_TENANT } from "./registry.js";
 
 // Load a directory's *.json models into the registry. Version-controlled files = SSOT (GitOps).
 // Default owner is SHARED_TENANT (first-party default model — every tenant sees it via fallback). Pass into to register there (e.g. Pg seed).

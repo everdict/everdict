@@ -1,5 +1,5 @@
 import { ConflictError, NotFoundError, type RuntimeSpec } from "@everdict/core";
-import { SHARED_TENANT, compareVersions, resolveRef, specsEqual } from "./registry.js";
+import { SHARED_TENANT, compareVersions, resolveRef, specsEqual } from "../registry.js";
 
 // Runtime (execution infra) version SSOT — (tenant, id, version) → RuntimeSpec. Versions are immutable. "latest" = newest by semver/registration order.
 // Same ownership model as harness/dataset/judge: tenant-owned first, else SHARED_TENANT (first-party shared runtime) fallback.

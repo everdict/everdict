@@ -1,8 +1,8 @@
 import { ConflictError, NotFoundError } from "@everdict/core";
 import { type BenchmarkAdapterSpec, BenchmarkAdapterSpecSchema } from "@everdict/datasets";
 import type { SqlClient } from "@everdict/db";
+import { SHARED_TENANT, resolveRef, sortVersions, specsEqual } from "../registry.js";
 import type { BenchmarkRegistry } from "./benchmark-registry.js";
-import { SHARED_TENANT, resolveRef, sortVersions, specsEqual } from "./registry.js";
 
 interface SpecRow {
   spec: unknown;

@@ -1,7 +1,7 @@
 import { ConflictError, type ModelSpec, ModelSpecSchema, NotFoundError } from "@everdict/core";
 import type { SqlClient } from "@everdict/db";
+import { SHARED_TENANT, resolveRef, sortVersions, specsEqual } from "../registry.js";
 import type { ModelRegistry } from "./model-registry.js";
-import { SHARED_TENANT, resolveRef, sortVersions, specsEqual } from "./registry.js";
 
 interface ModelRow {
   model: unknown;

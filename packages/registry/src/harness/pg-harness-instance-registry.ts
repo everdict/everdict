@@ -6,6 +6,8 @@ import {
   resolveHarnessInstance,
 } from "@everdict/core";
 import type { SqlClient } from "@everdict/db";
+import { PgVersionedStore } from "../pg-versioned-store.js";
+import { asService } from "../registry.js";
 import {
   type HarnessInstanceRegistry,
   type HarnessListEntry,
@@ -13,8 +15,6 @@ import {
   resolveInstanceWithPins,
 } from "./harness-instance-registry.js";
 import type { HarnessTemplateRegistry } from "./harness-template-registry.js";
-import { PgVersionedStore } from "./pg-versioned-store.js";
-import { asService } from "./registry.js";
 
 // Postgres-backed individual harness (instance) SSOT. Stores HarnessInstanceSpec (template reference + pins), get resolves.
 // Schema: @everdict/db/migrations/0016_create_harness_taxonomy. Template resolution via the injected HarnessTemplateRegistry.

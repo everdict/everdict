@@ -1,5 +1,5 @@
 import { ConflictError, type JudgeSpec, NotFoundError } from "@everdict/core";
-import { SHARED_TENANT, compareVersions, resolveRef, specsEqual } from "./registry.js";
+import { SHARED_TENANT, compareVersions, resolveRef, specsEqual } from "../registry.js";
 
 // One list entry — version metadata (registration history) + display fields derived from the latest judge spec (kind/provider/model/description).
 // GET /judges and MCP list_judges emit this shape. Same feel as the dataset/harness ListEntry.

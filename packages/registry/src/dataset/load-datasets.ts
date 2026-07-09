@@ -1,7 +1,7 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { DatasetSchema } from "@everdict/core";
+import { SHARED_TENANT } from "../registry.js";
 import { type DatasetRegistry, InMemoryDatasetRegistry } from "./dataset-registry.js";
-import { SHARED_TENANT } from "./registry.js";
 
 // Load a directory's *.json datasets into the registry. Version-controlled files = SSOT (GitOps).
 // Default owner is SHARED_TENANT (first-party benchmarks — every tenant sees them as a fallback). Pass `into` to register there instead (e.g. Pg seed).

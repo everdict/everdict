@@ -1,6 +1,6 @@
 import { ConflictError, NotFoundError, type RuntimeSpec, RuntimeSpecSchema } from "@everdict/core";
 import type { SqlClient } from "@everdict/db";
-import { SHARED_TENANT, parseVersionTags, resolveRef, sortVersions, specsEqual } from "./registry.js";
+import { SHARED_TENANT, parseVersionTags, resolveRef, sortVersions, specsEqual } from "../registry.js";
 import type { RuntimeListEntry, RuntimeRegistry } from "./runtime-registry.js";
 
 interface RuntimeRow {

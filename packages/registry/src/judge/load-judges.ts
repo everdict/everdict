@@ -1,7 +1,7 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { JudgeSpecSchema } from "@everdict/core";
+import { SHARED_TENANT } from "../registry.js";
 import { InMemoryJudgeRegistry, type JudgeRegistry } from "./judge-registry.js";
-import { SHARED_TENANT } from "./registry.js";
 
 // Load a directory's *.json judges into the registry. Version-controlled files = SSOT (GitOps).
 // Default owner is SHARED_TENANT (first-party default judge — every tenant sees it via fallback). Pass into to register there (e.g. Pg seed).

@@ -1,7 +1,7 @@
 import { ConflictError, type JudgeSpec, JudgeSpecSchema, NotFoundError } from "@everdict/core";
 import type { SqlClient } from "@everdict/db";
+import { SHARED_TENANT, parseVersionTags, resolveRef, sortVersions, specsEqual } from "../registry.js";
 import { type JudgeListEntry, type JudgeRegistry, judgeDerived } from "./judge-registry.js";
-import { SHARED_TENANT, parseVersionTags, resolveRef, sortVersions, specsEqual } from "./registry.js";
 
 interface JudgeRow {
   judge: unknown;

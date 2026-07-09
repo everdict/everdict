@@ -1,8 +1,8 @@
 import { BadRequestError, ConflictError, type HarnessTemplateSpec, NotFoundError } from "@everdict/core";
 import { beforeEach, describe, expect, it } from "vitest";
+import { SHARED_TENANT } from "../registry.js";
 import { InMemoryHarnessInstanceRegistry } from "./harness-instance-registry.js";
 import { InMemoryHarnessTemplateRegistry } from "./harness-template-registry.js";
-import { SHARED_TENANT } from "./registry.js";
 
 const buTemplate: HarnessTemplateSpec = {
   kind: "service",

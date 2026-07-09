@@ -1,6 +1,6 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { RuntimeSpecSchema } from "@everdict/core";
-import { SHARED_TENANT } from "./registry.js";
+import { SHARED_TENANT } from "../registry.js";
 import { InMemoryRuntimeRegistry, type RuntimeRegistry } from "./runtime-registry.js";
 
 // Load a directory's *.json Runtime definitions into the registry. Version-controlled files = SSOT (GitOps).

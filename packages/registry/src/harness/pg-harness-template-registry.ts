@@ -1,7 +1,7 @@
 import { type HarnessTemplateSpec, HarnessTemplateSpecSchema } from "@everdict/core";
 import type { SqlClient } from "@everdict/db";
+import { PgVersionedStore } from "../pg-versioned-store.js";
 import type { HarnessTemplateRegistry } from "./harness-template-registry.js";
-import { PgVersionedStore } from "./pg-versioned-store.js";
 
 // Postgres-backed harness template (category) SSOT. Schema: @everdict/db/migrations/0016_create_harness_taxonomy.
 export class PgHarnessTemplateRegistry implements HarnessTemplateRegistry {

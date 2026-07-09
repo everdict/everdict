@@ -1,8 +1,8 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { HarnessInstanceSpecSchema, HarnessTemplateSpecSchema } from "@everdict/core";
+import { SHARED_TENANT } from "../registry.js";
 import { type HarnessInstanceRegistry, InMemoryHarnessInstanceRegistry } from "./harness-instance-registry.js";
 import { type HarnessTemplateRegistry, InMemoryHarnessTemplateRegistry } from "./harness-template-registry.js";
-import { SHARED_TENANT } from "./registry.js";
 
 // Load harness taxonomy files from a directory (file SSOT/GitOps). Distinguished by filename convention:
 //   *.template.json  → HarnessTemplateSpec (category structure)

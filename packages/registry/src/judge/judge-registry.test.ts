@@ -4,10 +4,10 @@ import { join } from "node:path";
 import { ConflictError, type JudgeSpec, JudgeSpecSchema, NotFoundError } from "@everdict/core";
 import type { SqlClient } from "@everdict/db";
 import { describe, expect, it } from "vitest";
+import { SHARED_TENANT } from "../registry.js";
 import { InMemoryJudgeRegistry } from "./judge-registry.js";
 import { loadJudgeDir } from "./load-judges.js";
 import { PgJudgeRegistry } from "./pg-judge-registry.js";
-import { SHARED_TENANT } from "./registry.js";
 
 // Minimal judge — model kind. extra changes content (for immutability checks).
 const judge = (id: string, version: string, extra: Record<string, unknown> = {}): JudgeSpec =>

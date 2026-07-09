@@ -4,10 +4,10 @@ import { join } from "node:path";
 import { ConflictError, type ModelSpec, ModelSpecSchema, NotFoundError } from "@everdict/core";
 import type { SqlClient } from "@everdict/db";
 import { describe, expect, it } from "vitest";
+import { SHARED_TENANT } from "../registry.js";
 import { loadModelDir } from "./load-models.js";
 import { InMemoryModelRegistry } from "./model-registry.js";
 import { PgModelRegistry } from "./pg-model-registry.js";
-import { SHARED_TENANT } from "./registry.js";
 
 // Minimal model. extra changes content (for immutability checks).
 const model = (id: string, version: string, extra: Record<string, unknown> = {}): ModelSpec =>

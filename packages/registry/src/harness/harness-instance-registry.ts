@@ -7,9 +7,9 @@ import {
   referencesUserSecret,
   resolveHarnessInstance,
 } from "@everdict/core";
+import { asService } from "../registry.js";
+import { type VersionMeta, VersionedStore } from "../versioned-store.js";
 import type { HarnessTemplateRegistry } from "./harness-template-registry.js";
-import { asService } from "./registry.js";
-import { type VersionMeta, VersionedStore } from "./versioned-store.js";
 
 // One list entry — version meta (registration history) + display fields derived from the latest instance (category/kind/subtitle).
 // GET /harnesses and MCP list_harnesses produce this shape. Same grain as the dataset DatasetListEntry.

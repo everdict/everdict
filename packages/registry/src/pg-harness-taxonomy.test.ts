@@ -4,9 +4,9 @@ import { join } from "node:path";
 import { BadRequestError, ConflictError, type HarnessTemplateSpec, NotFoundError } from "@everdict/core";
 import type { SqlClient } from "@everdict/db";
 import { describe, expect, it } from "vitest";
-import { loadHarnessTaxonomyDir } from "./load-harness-taxonomy.js";
-import { PgHarnessInstanceRegistry } from "./pg-harness-instance-registry.js";
-import { PgHarnessTemplateRegistry } from "./pg-harness-template-registry.js";
+import { loadHarnessTaxonomyDir } from "./harness/load-harness-taxonomy.js";
+import { PgHarnessInstanceRegistry } from "./harness/pg-harness-instance-registry.js";
+import { PgHarnessTemplateRegistry } from "./harness/pg-harness-template-registry.js";
 import { SHARED_TENANT } from "./registry.js";
 
 // Fake SqlClient mimicking multiple everdict_harness_* tables (table name extracted from the query; tags = version tags).

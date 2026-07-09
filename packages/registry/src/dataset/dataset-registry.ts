@@ -1,5 +1,5 @@
 import { ConflictError, type Dataset, type DatasetProvenance, NotFoundError } from "@everdict/core";
-import { SHARED_TENANT, compareVersions, resolveRef, specsEqual } from "./registry.js";
+import { SHARED_TENANT, compareVersions, resolveRef, specsEqual } from "../registry.js";
 
 // One list() entry — summarizes a single id (with several immutable versions) into list-view metadata. Content
 // (case count / description / tags / provenance) comes from the latest semver version; creator and timestamps come

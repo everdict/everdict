@@ -1,5 +1,5 @@
 import type { HarnessTemplateSpec } from "@everdict/core";
-import { VersionedStore } from "./versioned-store.js";
+import { VersionedStore } from "../versioned-store.js";
 
 // Harness template (category) version SSOT — (tenant, id, version) → HarnessTemplateSpec. Versions immutable, _shared fallback.
 // Holds structure only (services/dependencies/slots) (versions not pinned). Instances are made by HarnessInstanceRegistry pinning this template.

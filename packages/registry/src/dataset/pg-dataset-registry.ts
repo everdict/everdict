@@ -1,7 +1,7 @@
 import { ConflictError, type Dataset, DatasetSchema, NotFoundError } from "@everdict/core";
 import type { SqlClient } from "@everdict/db";
+import { SHARED_TENANT, parseVersionTags, resolveRef, sortVersions, specsEqual } from "../registry.js";
 import type { DatasetListEntry, DatasetRegistry } from "./dataset-registry.js";
-import { SHARED_TENANT, parseVersionTags, resolveRef, sortVersions, specsEqual } from "./registry.js";
 
 interface DatasetRow {
   dataset: unknown;

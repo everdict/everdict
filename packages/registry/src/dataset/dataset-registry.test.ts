@@ -4,10 +4,10 @@ import { join } from "node:path";
 import { ConflictError, type Dataset, DatasetSchema, NotFoundError } from "@everdict/core";
 import type { SqlClient } from "@everdict/db";
 import { describe, expect, it } from "vitest";
+import { SHARED_TENANT } from "../registry.js";
 import { InMemoryDatasetRegistry } from "./dataset-registry.js";
 import { loadDatasetDir } from "./load-datasets.js";
 import { PgDatasetRegistry } from "./pg-dataset-registry.js";
-import { SHARED_TENANT } from "./registry.js";
 
 // Minimal dataset — one empty repo seed case. Use extra to change content (for immutability checks).
 const ds = (id: string, version: string, extra: Partial<Dataset> = {}): Dataset =>

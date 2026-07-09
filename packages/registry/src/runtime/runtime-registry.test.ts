@@ -4,9 +4,9 @@ import { join } from "node:path";
 import { ConflictError, NotFoundError, type RuntimeSpec, RuntimeSpecSchema } from "@everdict/core";
 import type { SqlClient } from "@everdict/db";
 import { describe, expect, it } from "vitest";
+import { SHARED_TENANT } from "../registry.js";
 import { loadRuntimeDir } from "./load-runtimes.js";
 import { PgRuntimeRegistry } from "./pg-runtime-registry.js";
-import { SHARED_TENANT } from "./registry.js";
 import { InMemoryRuntimeRegistry } from "./runtime-registry.js";
 
 // minimal runtime — local kind. extra changes content (for immutability checks).

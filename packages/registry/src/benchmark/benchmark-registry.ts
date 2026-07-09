@@ -1,6 +1,6 @@
 import { ConflictError, NotFoundError } from "@everdict/core";
 import type { BenchmarkAdapterSpec } from "@everdict/datasets";
-import { SHARED_TENANT, compareVersions, resolveRef, specsEqual } from "./registry.js";
+import { SHARED_TENANT, compareVersions, resolveRef, specsEqual } from "../registry.js";
 
 // Benchmark definition (recipe) SSOT — (tenant, id, version) → BenchmarkAdapterSpec (data). Versions are immutable.
 // Same ownership model as dataset/harness/judge: tenant-owned first, else _shared (first-party) fallback.

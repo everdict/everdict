@@ -1,5 +1,5 @@
 import { ConflictError, type ModelSpec, NotFoundError } from "@everdict/core";
-import { SHARED_TENANT, compareVersions, resolveRef, specsEqual } from "./registry.js";
+import { SHARED_TENANT, compareVersions, resolveRef, specsEqual } from "../registry.js";
 
 // Model version SSOT — (tenant, id, version) → ModelSpec. Versions are immutable. "latest" is the semver/registration-order latest.
 // Same ownership model as harnesses/judges: tenant-owned first, else SHARED_TENANT (first-party default model) fallback.
