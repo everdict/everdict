@@ -100,6 +100,7 @@ import { PairRunnerBodySchema, RUNNER_CAPABILITIES, type RunnerService } from ".
 import { type ScheduleService, isValidCron } from "./scheduling/schedule-service.js";
 import { registerScheduleRoutes } from "./scheduling/schedule.routes.js";
 import { COMMENT_RESOURCE_TYPES, type CommentService } from "./workspace/comment-service.js";
+import { registerCommentRoutes } from "./workspace/comment.routes.js";
 import type { MembershipService } from "./workspace/membership-service.js";
 import type { NotificationService } from "./workspace/notification-service.js";
 import type { ProfileService } from "./workspace/profile-service.js";
@@ -111,15 +112,6 @@ import type { WorkspaceService } from "./workspace/workspace-service.js";
 const ReadNotificationsBodySchema = z.object({
   ids: z.array(z.string()).optional(),
   all: z.boolean().optional(),
-});
-
-// Create-comment body — target (resourceType/resourceId) + body + optional parentId (reply) + @mention subjects.
-const CreateCommentBodySchema = z.object({
-  resourceType: z.enum(COMMENT_RESOURCE_TYPES),
-  resourceId: z.string().min(1),
-  parentId: z.string().min(1).optional(), // parent comment id if this is a reply (one-level thread)
-  body: z.string().min(1),
-  mentions: z.array(z.string().min(1)).max(50).optional(), // @mentioned member subjects (filled by the client picker)
 });
 
 export const SubmitBodySchema = z.object({
@@ -2149,66 +2141,8 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     }
   });
 
-  // --- comments (resource comments — collaborative discussion on datasets, etc.; read = viewer+, write = member+, delete = author-or-admin) ---
-  app.get("/comments", async (req, reply) => {
-    if (!deps.commentService)
-      return reply.code(404).send({ code: "NOT_FOUND", message: "comment service not configured" });
-    const principal = await resolvePrincipal(req, reply, deps);
-    if (!principal) return reply;
-    const q = req.query as { resourceType?: string; resourceId?: string };
-    if (!q.resourceType || !q.resourceId)
-      return reply.code(400).send({ code: "BAD_REQUEST", message: "resourceType and resourceId are required." });
-    try {
-      gate(principal, "comments:read");
-      const comments = await deps.commentService.list(principal.workspace, q.resourceType, q.resourceId);
-      return reply.send({ comments });
-    } catch (err) {
-      return sendError(reply, err);
-    }
-  });
-
-  app.post("/comments", async (req, reply) => {
-    if (!deps.commentService)
-      return reply.code(404).send({ code: "NOT_FOUND", message: "comment service not configured" });
-    const principal = await resolvePrincipal(req, reply, deps);
-    if (!principal) return reply;
-    const body = CreateCommentBodySchema.safeParse(req.body);
-    if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: zodIssues(body.error).join("; ") });
-    try {
-      gate(principal, "comments:write");
-      const comment = await deps.commentService.create({
-        tenant: principal.workspace,
-        resourceType: body.data.resourceType,
-        resourceId: body.data.resourceId,
-        author: principal.subject,
-        body: body.data.body,
-        ...(body.data.parentId ? { parentId: body.data.parentId } : {}),
-        ...(body.data.mentions ? { mentions: body.data.mentions } : {}),
-      });
-      return reply.code(201).send(comment);
-    } catch (err) {
-      return sendError(reply, err);
-    }
-  });
-
-  app.delete<{ Params: { id: string } }>("/comments/:id", async (req, reply) => {
-    if (!deps.commentService)
-      return reply.code(404).send({ code: "NOT_FOUND", message: "comment service not configured" });
-    const principal = await resolvePrincipal(req, reply, deps);
-    if (!principal) return reply;
-    try {
-      // Author-or-admin is decided by the service (the route only authenticates) — the same creator-override pattern as datasets:delete.
-      await deps.commentService.delete({
-        tenant: principal.workspace,
-        id: req.params.id,
-        subject: principal.subject,
-        isAdmin: principal.roles.includes("admin"),
-      });
-      return reply.code(204).send();
-    } catch (err) {
-      return sendError(reply, err);
-    }
-  });
+  // comments → workspace/comment.routes.ts
+  registerCommentRoutes(app, deps);
 
   // Workspace runner roster — runners paired in this workspace (metadata only, no tokens). Read-only (members:read).
   // Pair/revoke management is personal-owned, done on the account page (GET /runners); this is the workspace's at-a-glance view of member runners.
