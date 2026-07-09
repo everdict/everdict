@@ -53,6 +53,7 @@ export async function runAgentJob(
       opts.driver ??
       (opts.containerize
         ? new DockerDriver({
+            echo: true, // in-job: tee container output to the job log (live tail feed) — parity with LocalDriver
             ...(opts.mounts ? { mounts: opts.mounts } : {}),
             ...(job.registryAuth ? { registryAuth: job.registryAuth } : {}),
           })

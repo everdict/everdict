@@ -28,6 +28,7 @@ class DockerComputeHandle implements ComputeHandle {
   constructor(
     private readonly cid: string,
     private readonly base: string,
+    private readonly echo: boolean = false,
   ) {}
 
   private resolve(p: string): string {
@@ -38,6 +39,10 @@ class DockerComputeHandle implements ComputeHandle {
     const args = ["exec", "-w", opts?.cwd ? this.resolve(opts.cwd) : this.base];
     for (const [k, v] of Object.entries(opts?.env ?? {})) args.push("-e", `${k}=${v}`);
     args.push(this.cid, "sh", "-c", cmd);
+    // echo mode (in-job): TEE the container command's output to this process's stdio while buffering — so the
+    // orchestrator job log carries a case.image harness's output AS IT RUNS (the live log tail reads it), the
+    // same contract as LocalDriver({echo}). The quiet path stays on the battle-tested buffered execFile.
+    if (this.echo) return execEchoDocker(args, (opts?.timeoutSec ?? 600) * 1000, cmd);
     try {
       const { stdout, stderr } = await pexecFile("docker", args, {
         timeout: (opts?.timeoutSec ?? 600) * 1000,
@@ -112,6 +117,41 @@ export async function pullWithRegistryAuth(image: string, auth: RegistryAuth): P
   }
 }
 
+// Buffered + teed `docker exec` — same result contract as the pexecFile path (a non-zero container exit
+// resolves, never throws). On timeout the docker exec child is killed and exit 124 is returned (GNU convention).
+function execEchoDocker(args: string[], timeoutMs: number, cmd: string): Promise<ExecResult> {
+  return new Promise((resolve) => {
+    const child = spawn("docker", args, { stdio: ["ignore", "pipe", "pipe"] });
+    let stdout = "";
+    let stderr = "";
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      child.kill("SIGKILL");
+    }, timeoutMs);
+    child.stdout.on("data", (d: Buffer) => {
+      if (stdout.length < MAX_BUFFER) stdout += String(d);
+      process.stdout.write(d);
+    });
+    child.stderr.on("data", (d: Buffer) => {
+      if (stderr.length < MAX_BUFFER) stderr += String(d);
+      process.stderr.write(d);
+    });
+    child.on("error", (e) => {
+      clearTimeout(timer);
+      resolve({ exitCode: 1, stdout, stderr: stderr + String(e) });
+    });
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      resolve({
+        exitCode: timedOut ? 124 : (code ?? 1),
+        stdout,
+        stderr: timedOut ? `${stderr}\n[everdict] docker exec timed out (${cmd.slice(0, 40)}…)` : stderr,
+      });
+    });
+  });
+}
+
 // A Driver that launches a container from an env image. Isolation is docker (the container) — for local/simple execution, separate from the strong isolation of a Backend (Nomad/K8s).
 export class DockerDriver implements Driver {
   readonly id = "docker";
@@ -128,6 +168,7 @@ export class DockerDriver implements Driver {
       base?: string;
       mounts?: DriverMount[];
       registryAuth?: RegistryAuth;
+      echo?: boolean; // TEE every exec's output to this process's stdio (in-job: the job log becomes a live feed)
     } = {},
   ) {
     this.base = opts.base ?? "/everdict";
@@ -154,6 +195,6 @@ export class DockerDriver implements Driver {
       const e = err as { stderr?: string; message?: string };
       throw new InternalError("DRIVER_PROVISION_FAILED", { image }, e.stderr || e.message);
     });
-    return new DockerComputeHandle(stdout.trim(), this.base);
+    return new DockerComputeHandle(stdout.trim(), this.base, this.opts.echo ?? false);
   }
 }

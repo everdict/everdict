@@ -33,8 +33,9 @@ On top of that job log:
 Scope: standalone runs (the run detail page). Batch children are addressable runs too, so the same
 endpoints work on a child run id (drill in from the scorecard). The self-hosted runner path also
 echoes (its terminal shows harness output), but `Backend.logs` covers nomad/k8s jobs only —
-lease-queue lanes have no orchestrator job to read; `DockerDriver` (case.image jobs) still buffers
-(follow-up if the need shows).
+lease-queue lanes have no orchestrator job to read. `DockerDriver` (case.image jobs) now ALSO echoes
+in-job (`DockerDriver({echo:true})` — same tee contract as LocalDriver), so case.image harnesses feed
+the live log tail too.
 
 Live-verified on Nomad: a 2s-tick harness showed `tick 1..6` in the mid-run snapshot, `tick 7..9`
 six seconds later, and the SSE stream delivered the initial chunk, incremental `tick 10`, the final
