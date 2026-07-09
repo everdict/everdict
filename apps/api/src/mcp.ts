@@ -54,6 +54,7 @@ import type { ImageRegistryService } from "./integrations/image-registry-service
 import type { MattermostService } from "./integrations/mattermost-service.js";
 import type { TraceSinkService } from "./integrations/trace-sink-service.js";
 import { type BudgetAdmin, BudgetLimitInputSchema } from "./lib/budget-tracker.js";
+import { type McpDeps, fail, ok, plain, run } from "./mcp-context.js";
 import type { QueueService } from "./ops/queue-service.js";
 import type { RuntimeProbeResult } from "./ops/runtime-probe.js";
 import { installGithubWorkspaceRunner } from "./runners/github-runner-install.js";
@@ -67,70 +68,7 @@ import type { ProfileService } from "./workspace/profile-service.js";
 import type { UpdateViewInput, ViewService } from "./workspace/view-service.js";
 import type { WorkspaceService } from "./workspace/workspace-service.js";
 
-// MCP tool surface — the "agent transport" sharing the same service core as the HTTP routes.
-// Each tool is authorized by the Principal's roles and scoped to workspace (the control plane is the auth/authz authority).
-export interface McpDeps {
-  service: RunService;
-  scorecardService?: ScorecardService;
-  usageMeter?: UsageMeter; // meter-only billing usage (get_usage)
-  budget?: BudgetAdmin; // enforcement budget config (get_budget / set_budget_limit)
-  scheduleService?: ScheduleService;
-  queueService?: QueueService; // work queue snapshot (running/waiting/next-scheduled per runtime lane)
-  viewService?: ViewService; // saved scorecard-analysis Views — create/list/get/update/delete
-  harnessTemplates?: HarnessTemplateRegistry;
-  harnessInstances?: HarnessInstanceRegistry;
-  datasetRegistry?: DatasetRegistry;
-  judgeRegistry?: JudgeRegistry;
-  modelRegistry?: ModelRegistry; // Model (inference/judgment model) register/read — judge and command harnesses reference it by id
-  runtimeRegistry?: RuntimeRegistry;
-  probeRuntime?: (workspace: string, spec: RuntimeSpec) => Promise<RuntimeProbeResult>; // runtime connection test
-  secretStore?: SecretStore;
-  githubAppService?: GithubAppService; // workspace-owned GitHub App integration (org install → selected repos)
-  mattermostService?: MattermostService; // workspace-owned Mattermost integration (register → bot notifications)
-  traceSinkService?: TraceSinkService; // workspace trace sinks (export to an observability platform)
-  imageRegistryService?: ImageRegistryService; // workspace image registry (classification baseline + push publishing)
-  ciLinkService?: CiLinkService; // CI repo link (repo↔harness slot + OIDC trust) + picker/setup-PR
-  runnerService?: RunnerService; // self-hosted runners (personal device pairing) — pair/list/revoke + workspace roster
-  notificationService?: NotificationService; // personal notification feed (bell inbox) — list/read (self-scoped)
-  commentService?: CommentService; // resource comments (datasets, etc.) — list/create/delete
-  runnerHub?: RunnerHub; // runner lease hub — lease_job/submit_job_result/fail_job/heartbeat_job (runner token only)
-  settingsStore?: WorkspaceSettingsStore;
-  benchmarkService?: BenchmarkService; // benchmark preview + import (source → dataset)
-  bundleService?: BundleService; // bundle one-shot apply (harness + benchmark + runtime, etc.)
-  workspaceService?: WorkspaceService; // workspace self-serve list/create (no role gate — by subject)
-  membershipService?: MembershipService; // member management (list/role/remove/leave) + invites (issue/accept)
-  profileService?: ProfileService; // my profile (name/username/avatar) read/edit (self-serve)
-  keyStore?: TenantKeyStore; // API key self-serve issue/list/revoke (admin)
-  apiPublicUrl?: string; // control-plane public base — the everdict runner --api-url in github_install_workspace_runner (falls back to the request base)
-}
-
-function ok(data: unknown): CallToolResult {
-  return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
-}
-function fail(message: string): CallToolResult {
-  return { content: [{ type: "text", text: message }], isError: true };
-}
-
-// authorize + AppError → isError conversion (so the agent recognizes it as a tool error / permission error).
-async function run(principal: Principal, action: Action, fn: () => Promise<CallToolResult>): Promise<CallToolResult> {
-  try {
-    authorize(principal, action);
-    return await fn();
-  } catch (err) {
-    if (err instanceof AppError) return fail(`${err.code}: ${err.message}`);
-    return fail(err instanceof Error ? err.message : String(err));
-  }
-}
-
-// Tools with no role gate (workspace self-serve list/create). AppError → isError conversion only.
-async function plain(fn: () => Promise<CallToolResult>): Promise<CallToolResult> {
-  try {
-    return await fn();
-  } catch (err) {
-    if (err instanceof AppError) return fail(`${err.code}: ${err.message}`);
-    return fail(err instanceof Error ? err.message : String(err));
-  }
-}
+export type { McpDeps, McpToolContext } from "./mcp-context.js";
 
 // MCP server bound to this Principal (stateless per-request instance). tools = runs/harnesses CRUD.
 export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
