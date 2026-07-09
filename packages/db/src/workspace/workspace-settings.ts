@@ -1,6 +1,6 @@
 import { JudgeRunConfigSchema } from "@everdict/core";
 import { z } from "zod";
-import type { SqlClient } from "./client.js";
+import type { SqlClient } from "../client.js";
 
 // CI repo link — a single record that doubles as the repository ↔ harness service-slot mapping + the GitHub Actions OIDC trust policy.
 // The "existence" of a link trusts that repo's GitHub OIDC token into this workspace (no separate policy screen — zero-input).

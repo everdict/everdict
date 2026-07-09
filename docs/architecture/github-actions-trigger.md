@@ -103,7 +103,7 @@ repo↔service wiring. Competing products call this an "integration" and make it
   (`GET /workspace/github-app/repos`) and GitHub App infrastructure (installations, per-repo installation tokens)
   is in place — see [workspace-scoped-integrations.md](./workspace-scoped-integrations.md). (Migrated in S6b/S6c
   from the earlier personal Connected accounts, since removed.)
-- **`ScorecardRecord` has no origin/provenance fields** (`packages/db/src/scorecard-store.ts`) — submitter,
+- **`ScorecardRecord` has no origin/provenance fields** (`packages/db/src/results/scorecard-store.ts`) — submitter,
   trigger source, and commit identity are not recorded today.
 
 ## Design

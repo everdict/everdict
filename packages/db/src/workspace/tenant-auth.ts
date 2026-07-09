@@ -1,5 +1,5 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import type { SqlClient } from "./client.js";
+import type { SqlClient } from "../client.js";
 
 // Tenant API key store — never stores the plaintext, keeps only the SHA-256 hash.
 // For self-serve management (list/revoke), also keeps non-secret metadata (id/label/prefix/scopes):

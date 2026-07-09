@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
+import type { SqlClient } from "../client.js";
 import { InMemoryBudgetStore, PgBudgetStore } from "./budget-store.js";
-import type { SqlClient } from "./client.js";
 
 function fakeClient(handler: (text: string, params?: unknown[]) => { rows: unknown[] }): {
   client: SqlClient;

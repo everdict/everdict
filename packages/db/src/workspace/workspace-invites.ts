@@ -1,5 +1,5 @@
 import { randomBytes, randomUUID } from "node:crypto";
-import type { SqlClient } from "./client.js";
+import type { SqlClient } from "../client.js";
 import { hashKey } from "./tenant-auth.js";
 import type { WorkspaceStore } from "./workspace-store.js";
 

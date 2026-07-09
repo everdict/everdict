@@ -1,4 +1,4 @@
-import type { SqlClient } from "./client.js";
+import type { SqlClient } from "../client.js";
 import {
   type ScorecardListFilter,
   type ScorecardRecord,

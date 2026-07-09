@@ -1,4 +1,4 @@
-import type { SqlClient } from "./client.js";
+import type { SqlClient } from "../client.js";
 import { type RunListOptions, type RunRecord, RunRecordSchema, type RunStore, withRunUsage } from "./run-store.js";
 
 interface RunRow {

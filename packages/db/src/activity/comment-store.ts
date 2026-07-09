@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { SqlClient } from "./client.js";
+import type { SqlClient } from "../client.js";
 
 // Comments on a resource (dataset etc.) — collaborative discussion, like Linear issue comments. Flows mixed with events in the activity timeline.
 // resourceType is extensible (currently "dataset"). Workspace-scoped + author=author subject.

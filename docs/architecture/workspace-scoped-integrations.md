@@ -61,7 +61,7 @@ Everything non-secret lives in `WorkspaceSettings` JSONB (like `integrations` an
 the only secret (GHE App private key, Mattermost webhook URL) is a **SecretStore name-ref**.
 
 ```ts
-// packages/db/src/workspace-settings.ts — WorkspaceSettingsSchema additions
+// packages/db/src/workspace/workspace-settings.ts — WorkspaceSettingsSchema additions
 githubApp: z.object({
   // GHE App registrations (github.com uses operator env → not listed here). Admin-registered.
   registrations: z.array(z.object({

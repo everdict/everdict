@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { SqlClient } from "./client.js";
+import type { SqlClient } from "../client.js";
 
 // Notification feed — the web bell inbox/desktop native notifications consume "the job I asked for is done".
 // Personally owned (recipient=subject) + workspace-scoped — same self-scoped model as connections/runners.

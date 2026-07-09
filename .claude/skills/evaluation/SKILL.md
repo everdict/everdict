@@ -80,7 +80,7 @@ whose `source.kind` equals the sink kind **attaches scores to the original trace
 `runs[{caseId,runId}]` mapping flows through as `attach`. SSOT `docs/architecture/trace-sink.md` + rule `trace`.
 
 ## Saved Views
-`apps/api/src/view-service.ts` + `packages/db/src/view-store.ts` — private|workspace saved scorecard-analysis
+`apps/api/src/view-service.ts` + `packages/db/src/results/view-store.ts` — private|workspace saved scorecard-analysis
 lenses (opaque `config`, live re-run). AuthZ **reuses** `scorecards:read` (read) / `scorecards:run` (write) —
 no new action; edit/delete = owner or admin. See `docs/architecture/scorecard-analysis-views.md`.
 

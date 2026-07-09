@@ -1,4 +1,4 @@
-import type { SqlClient } from "./client.js";
+import type { SqlClient } from "../client.js";
 
 // Durable per-tenant budgets. The in-memory BudgetTracker (@everdict/backends) enforces synchronously and
 // write-throughs here (best-effort), hydrating from it at boot so caps survive a control-plane restart. Two kinds of

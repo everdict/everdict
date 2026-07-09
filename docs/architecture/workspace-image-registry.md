@@ -73,7 +73,7 @@ So two features, one axis:
 ## Data model
 
 ```ts
-// packages/db/src/workspace-settings.ts — WorkspaceSettingsSchema (JSONB, additive)
+// packages/db/src/workspace/workspace-settings.ts — WorkspaceSettingsSchema (JSONB, additive)
 imageRegistries: z.array(z.object({
   name: z.string().min(1),               // reference key — push selection points at this
   host: z.string().min(1),               // registry host[:port] — "ghcr.io", "registry.acme.dev:5000"

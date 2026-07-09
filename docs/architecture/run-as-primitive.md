@@ -145,13 +145,13 @@ aggregates by reference.
 
 ### Schema changes
 
-`RunRecord` (`packages/db/src/run-store.ts`) — additive:
+`RunRecord` (`packages/db/src/results/run-store.ts`) — additive:
 - `parentScorecardId?: string` — set when this run is a scorecard child (null for standalone runs).
 - `trigger: "standalone" | "scorecard" | "schedule" | "mcp" | "front-door"` — provenance of *why* the run exists
   (feeds the web activity view's source column from the prior design turn).
 - `notify: "default" | "silent"` — child runs are `silent` so the batch fires **one** completion notification, not N.
 
-`ScorecardRecord` (`packages/db/src/scorecard-store.ts`) — the heavy `scorecard: Scorecard` (embedded
+`ScorecardRecord` (`packages/db/src/results/scorecard-store.ts`) — the heavy `scorecard: Scorecard` (embedded
 `CaseResult[]`) is replaced/augmented by `runIds: string[]` (references). `summary`/`models`/`steps` stay. `get`
 can hydrate the full `Scorecard` by joining the referenced runs; `list` stays cheap (summary only, unchanged).
 

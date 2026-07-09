@@ -38,7 +38,7 @@ derived from the harness spec. This is why model is a run-derived tag, **not** a
 
 ## Current state — verified
 
-- **`ScorecardRecord`** (`packages/db/src/scorecard-store.ts:36`) keys on `{dataset:{id,version}, harness:{id,version}}`
+- **`ScorecardRecord`** (`packages/db/src/results/scorecard-store.ts:36`) keys on `{dataset:{id,version}, harness:{id,version}}`
   + lightweight `summary: MetricSummary[]` + heavy `scorecard` (per-case, omitted from `list`). `harness.version`
   is the **resolved concrete** version (never `latest`) — `scorecard-service.ts:164`.
 - **Trace carries the actual model** — `TraceEvent` `llm_call.model` (`core/src/trace.ts:18`). `CommandHarness`

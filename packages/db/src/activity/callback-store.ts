@@ -1,4 +1,4 @@
-import type { SqlClient } from "./client.js";
+import type { SqlClient } from "../client.js";
 
 // Front-door callback store — the persistence behind the multi-replica callback rendezvous
 // (docs/architecture/completion-stream-callback.md). With several control planes, the agent's terminal

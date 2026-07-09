@@ -1,4 +1,4 @@
-import type { SqlClient } from "./client.js";
+import type { SqlClient } from "../client.js";
 
 // User profile — mutable display info (name/username/avatar) layered on top of the Keycloak (OIDC) identity. subject (=sub) is the key.
 // email is not kept here — it's an SSO claim (display-only/read-only), so it comes only from the Principal. This store is

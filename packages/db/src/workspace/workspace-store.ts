@@ -1,4 +1,4 @@
-import type { SqlClient } from "./client.js";
+import type { SqlClient } from "../client.js";
 
 // Workspace membership store — which workspace a subject (user sub/key) belongs to with which role.
 // workspace === tenant === trust-zone key. The control plane is the membership SSOT (the token claim is merely a bootstrap default).

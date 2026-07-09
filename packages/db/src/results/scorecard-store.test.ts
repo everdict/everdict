@@ -1,6 +1,6 @@
 import type { Scorecard } from "@everdict/core";
 import { describe, expect, it } from "vitest";
-import type { SqlClient } from "./client.js";
+import type { SqlClient } from "../client.js";
 import { PgScorecardStore } from "./pg-scorecard-store.js";
 import { InMemoryScorecardStore, type ScorecardRecord } from "./scorecard-store.js";
 

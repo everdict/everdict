@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { SqlClient } from "./client.js";
+import type { SqlClient } from "../client.js";
 import { InMemoryUsageStore, PgUsageStore } from "./usage-store.js";
 
 function fakeClient(handler: (text: string, params?: unknown[]) => { rows: unknown[] }): {

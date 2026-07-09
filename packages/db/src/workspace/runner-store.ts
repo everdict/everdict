@@ -1,5 +1,5 @@
 import { randomBytes, randomUUID } from "node:crypto";
-import type { SqlClient } from "./client.js";
+import type { SqlClient } from "../client.js";
 import { hashKey } from "./tenant-auth.js";
 
 // Self-hosted runner store — a personal device where a user paired their own machine with a workspace.

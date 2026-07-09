@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import type { SqlClient } from "./client.js";
+import type { SqlClient } from "../client.js";
 
 // Single-use pending-state store between OAuth authorize→callback (CSRF + callback-context restore).
 // put on start, take on callback (single-use — consumed and deleted). Expired ones are null. self-hosted (GHE/Mattermost)

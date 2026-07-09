@@ -1,4 +1,4 @@
-import type { SqlClient } from "./client.js";
+import type { SqlClient } from "../client.js";
 import { type ScheduleRecord, ScheduleRecordSchema, type ScheduleStore } from "./schedule-store.js";
 
 interface ScheduleRow {

@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import type { SqlClient } from "./client.js";
+import type { SqlClient } from "../client.js";
 
 // Saved scorecard-analysis "View" — save the web AnalysisConfig (filter·group·measure·search config) under a name and
 // share it in the workspace. Not a snapshot, only the config (recipe) — re-runs with current data when opened (live).

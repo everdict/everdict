@@ -1,4 +1,4 @@
-import type { SqlClient } from "./client.js";
+import type { SqlClient } from "../client.js";
 import type { EncryptedSecret, SecretCipher } from "./secret-cipher.js";
 
 // Workspace secret store — manages model/provider keys (OPENAI_API_KEY etc.) per scope.

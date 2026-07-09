@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { SqlClient } from "./client.js";
+import type { SqlClient } from "../client.js";
 import {
   InMemoryWorkspaceSettingsStore,
   PgWorkspaceSettingsStore,
