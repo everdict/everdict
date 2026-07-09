@@ -1,6 +1,12 @@
 # apps/api route modularization — split the 3676-line server.ts into resource route modules (design)
 
-> **Status: Rounds 1-4 SHIPPED.** Round 4 (`7064919`+`d9ddafd`) restores the **layer axis**: root = layer
+> **Status: Rounds 1-5 SHIPPED.** Round 5 (`d7505a0`…`84b038d`): the transport layer gains the DTO/docs
+> separation — `request/` per-DTO folders (S2, `b7c1d86`), `response/` DTO schemas + `<resource>.docs.ts`
+> OpenAPI descriptors for **all 154 operations across 125 paths** (S3, `84b038d`; db/core record+spec Zod
+> schemas reused as SSOT, zero passthrough fallbacks), served at **`/docs`** via @fastify/swagger with no-op
+> validator/serializer compilers (S1, `5f997c9` — doc-only, behavior frozen; route modules boot in a child
+> scope after the plugin so onRoute collects the whole surface). Live-verified: 651 tests + build + boot
+> contract + a /docs/json render check (154 summaries). Round 4 (`7064919`+`d9ddafd`) restores the **layer axis**: root = layer
 > (`api/` transport ← `core/` business, + `common/` + `infrastructure/`; one-way `common ← core ← api`,
 > verified zero core→api imports), domain folders INSIDE each layer with the same entity name recurring per
 > layer (api/ = 26 entities + execution/ops transport surfaces; core/ = 20 entities + execution/ops
