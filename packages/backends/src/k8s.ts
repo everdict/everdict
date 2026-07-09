@@ -24,6 +24,8 @@ export interface K8sApi {
   applyJob(manifest: unknown, ns: string): Promise<void>; // kubectl -n ns apply -f -
   jobStatus(name: string, ns: string): Promise<{ succeeded: number; failed: number }>;
   podLogs(name: string, ns: string): Promise<string>; // stdout of job/<name>
+  // One-shot exec into the job's pod (sh -c command) — non-interactive; live terminal / screen capture.
+  exec(name: string, ns: string, command: string): Promise<{ stdout: string; stderr: string; exitCode: number }>;
   deleteJob(name: string, ns: string): Promise<void>;
   // Force-stop by label across namespaces (kill(caseId) → everdict.dev/case=<slug>). Best-effort, no wait.
   deleteJobsByLabel(selector: string): Promise<void>;
@@ -120,6 +122,11 @@ export function kubectlApi(
       if (res.code !== 0)
         throw new UpstreamError("UPSTREAM_ERROR", { name }, `log fetch failed: ${res.stderr || res.stdout}`);
       return res.stdout;
+    },
+    async exec(name, ns, command) {
+      // The job's pod (job/<name> selects it) — one-shot, non-interactive (no -it). sh -c carries the command verbatim.
+      const res = await run(bin, [...ctx, "-n", ns, "exec", `job/${name}`, "--", "sh", "-c", command]);
+      return { stdout: res.stdout, stderr: res.stderr, exitCode: res.code };
     },
     async podFailureReason(name, ns) {
       const res = await run(bin, [
@@ -437,6 +444,26 @@ export class K8sBackend implements Backend {
       });
     } catch {
       return undefined; // adoption is best-effort — any failure falls back to re-dispatch
+    }
+  }
+
+  // One-shot exec inside the case's live pod (web terminal / live-screen capture): kubectl exec job/<name> -- sh -c <command>.
+  // undefined = no live pod. Best-effort, never throws.
+  async exec(
+    caseId: string,
+    command: string,
+  ): Promise<{ stdout: string; stderr: string; exitCode: number } | undefined> {
+    try {
+      return await this.withApi(async (api) => {
+        const jobs = await api.jobsByLabel(`everdict.dev/case=${caseSlug(caseId)}`);
+        const newest = (jobs ?? []).sort((a, b) =>
+          (b.creationTimestamp ?? "").localeCompare(a.creationTimestamp ?? ""),
+        )[0];
+        if (!newest) return undefined;
+        return await api.exec(newest.name, newest.namespace, command);
+      });
+    } catch {
+      return undefined;
     }
   }
 

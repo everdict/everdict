@@ -192,6 +192,7 @@ describe("MCP tools", () => {
       "diff_datasets",
       "diff_scorecards",
       "estimate_scorecard",
+      "exec_in_run",
       "fail_job",
       "get_dataset",
       "get_harness_instance",

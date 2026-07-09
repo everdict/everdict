@@ -159,6 +159,24 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
   );
 
   server.registerTool(
+    "exec_in_run",
+    {
+      description:
+        "Run a one-shot shell command inside a run's live sandbox container (web-terminal exec). Creator-or-admin only; found=false = no live container",
+      inputSchema: { id: z.string(), command: z.string() },
+    },
+    ({ id, command }) =>
+      run(principal, "runs:read", async () => {
+        const out = await deps.service.exec(id, command);
+        if (!out || out.record.tenant !== ws) return fail("NOT_FOUND: run not found.");
+        if (out.record.createdBy && out.record.createdBy !== principal.subject && !principal.roles.includes("admin"))
+          return fail("FORBIDDEN: only the run's creator or an admin can exec.");
+        if (!out.result) return ok({ found: false, stdout: "", stderr: "", exitCode: null });
+        return ok({ found: true, ...out.result });
+      }),
+  );
+
+  server.registerTool(
     "get_run_logs",
     {
       description:

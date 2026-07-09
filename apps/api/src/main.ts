@@ -487,6 +487,7 @@ async function main(): Promise<void> {
   const service = new RunService({
     // Lazy — the lane-resolving closure is built further down (after the runtime registry wiring).
     readCaseLogs: (tenant, runtimeList, caseId) => readCaseLogsFn(tenant, runtimeList, caseId),
+    execInSandbox: (tenant, runtimeList, caseId, command) => execInSandboxFn(tenant, runtimeList, caseId, command),
     dispatcher: meteredDispatcher,
     store,
     budget,
@@ -580,6 +581,22 @@ async function main(): Promise<void> {
       return text !== undefined;
     });
     return text;
+  };
+
+  // One-shot exec into a case's live sandbox (web terminal / live screen) — same lane resolution as logs.
+  const execInSandboxFn = async (
+    tenant: string,
+    runtimeList: string | undefined,
+    caseId: string,
+    command: string,
+  ): Promise<{ stdout: string; stderr: string; exitCode: number } | undefined> => {
+    let out: { stdout: string; stderr: string; exitCode: number } | undefined;
+    await eachRuntimeBackend(tenant, runtimeList, async (backend) => {
+      if (!backend.exec) return false;
+      out = await backend.exec(caseId, command).catch(() => undefined);
+      return out !== undefined;
+    });
+    return out;
   };
 
   const scorecardService = new ScorecardService({

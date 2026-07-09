@@ -95,6 +95,15 @@ export const controlPlane = {
   // Live-progress log snapshot (the LiveLogs widget polls; found=false = nothing to tail yet).
   getRunLogs: <T>(auth: AuthContext, id: string) =>
     call<T>(auth, `/runs/${encodeURIComponent(id)}/logs`),
+  // One-shot exec inside a run's live sandbox (SandboxTerminal). Creator-or-admin, enforced by the control plane.
+  execInRun: <T>(auth: AuthContext, id: string, body: unknown) =>
+    call<T>(auth, `/runs/${encodeURIComponent(id)}/exec`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  // Live screen frame (LiveScreen — os-use desktop). supported=false for other env kinds.
+  getRunScreen: <T>(auth: AuthContext, id: string) =>
+    call<T>(auth, `/runs/${encodeURIComponent(id)}/screen`),
   // Work queue snapshot — per-runtime-lane running / waiting (FIFO) / next scheduled fire.
   getQueue: <T>(auth: AuthContext) => call<T>(auth, '/queue'),
   // Metered billing usage (LLM cost for orchestration + verdict; own-pays runs excluded) — meter-only, never blocks.

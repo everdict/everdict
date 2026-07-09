@@ -69,6 +69,14 @@ export interface RunServiceDeps {
   // Live-progress log read (observability ②): resolve the run's runtime lane to a live backend and read the
   // case job's current stdout (Backend.logs). Best-effort — absent/miss = no logs, never an error.
   readCaseLogs?: (tenant: string, runtimeList: string | undefined, caseId: string) => Promise<string | undefined>;
+  // One-shot exec inside the case's live sandbox (observability ④ web terminal / ⑤ screen capture). Resolves the
+  // run's runtime to a live backend and runs `sh -c command`. undefined = no live container.
+  execInSandbox?: (
+    tenant: string,
+    runtimeList: string | undefined,
+    caseId: string,
+    command: string,
+  ) => Promise<{ stdout: string; stderr: string; exitCode: number } | undefined>;
   // Completion callback (succeeded/failed) — completion notifications (Mattermost etc.). Failure is independent of the run result (the service swallows it). Separate from webhook.
   onComplete?: (tenant: string, record: RunRecord) => Promise<void>;
   // Artifact store (when configured): offload os-use screenshots to object storage → the record keeps only the URL (no inline base64).
@@ -151,6 +159,42 @@ export class RunService {
       ? `evd-${record.parentScorecardId}-${record.caseId}`
       : `evd-run-${record.id}`;
     return { ...record, liveTrace: { ...source, runId } };
+  }
+
+  // One-shot exec inside a run's live sandbox (observability ④). Returns the record (for authz/scoping) + the
+  // command result, or undefined when the record doesn't exist. result=undefined = no live container to exec into.
+  async exec(
+    id: string,
+    command: string,
+  ): Promise<
+    { record: RunRecord; result: { stdout: string; stderr: string; exitCode: number } | undefined } | undefined
+  > {
+    const record = await this.deps.store.get(id);
+    if (!record) return undefined;
+    const result = this.deps.execInSandbox
+      ? await this.deps.execInSandbox(record.tenant, record.runtime, record.caseId, command).catch(() => undefined)
+      : undefined;
+    return { record, result };
+  }
+
+  // Live screen frame (observability ⑤) — captures the case's current screen via an in-sandbox exec and returns a
+  // PNG data URL. os-use (desktop): scrot on the case's DISPLAY. Other env kinds have no single-container screen → undefined.
+  async screen(
+    id: string,
+  ): Promise<{ record: RunRecord; dataUrl: string | undefined; supported: boolean } | undefined> {
+    const record = await this.deps.store.get(id);
+    if (!record) return undefined;
+    const env = record.caseSpec?.env;
+    if (env?.kind !== "os-use" || !this.deps.execInSandbox) return { record, dataUrl: undefined, supported: false };
+    const display = env.display ?? ":99";
+    const shot = "/tmp/.everdict-live.png";
+    // Capture then base64 in one shell so nothing is left on disk / no second round-trip. best-effort.
+    const command = `DISPLAY=${display} scrot -o ${shot} 2>/dev/null && base64 -w0 ${shot}`;
+    const out = await this.deps
+      .execInSandbox(record.tenant, record.runtime, record.caseId, command)
+      .catch(() => undefined);
+    const b64 = out && out.exitCode === 0 ? out.stdout.trim() : "";
+    return { record, dataUrl: b64 ? `data:image/png;base64,${b64}` : undefined, supported: true };
   }
 
   // Live-progress logs (observability ②) — the record plus the case job's current raw stdout. text=undefined

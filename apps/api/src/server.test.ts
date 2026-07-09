@@ -34,7 +34,7 @@ import { defaultJudgeRunner } from "./judge-runner.js";
 import { MattermostCommandService } from "./mattermost-command-service.js";
 import { MattermostService } from "./mattermost-service.js";
 import { MembershipService } from "./membership-service.js";
-import { RunService } from "./run-service.js";
+import { RunService, type RunServiceDeps } from "./run-service.js";
 import { RunnerService } from "./runner-service.js";
 import { ScheduleService } from "./schedule-service.js";
 import { ScorecardService } from "./scorecard-service.js";
@@ -1037,6 +1037,133 @@ describe("API — harness taxonomy (template category + instance)", () => {
       ).statusCode,
     ).toBe(404);
     await app.close();
+  });
+});
+
+describe("API — sandbox exec + live screen (observability ④/⑤)", () => {
+  const CASE2: EvalCase = {
+    id: "c1",
+    env: { kind: "repo", source: { files: {} } },
+    task: "t",
+    graders: [],
+    timeoutSec: 60,
+    tags: [],
+  };
+  const OS_CASE: EvalCase = {
+    id: "d1",
+    env: { kind: "os-use", display: ":99", setup: [] },
+    task: "click",
+    graders: [],
+    timeoutSec: 60,
+    tags: [],
+  };
+  function appWith(exec?: RunServiceDeps["execInSandbox"]) {
+    const keyStore = new InMemoryTenantKeyStore();
+    const store = new InMemoryRunStore();
+    const svc = new RunService({
+      dispatcher: okDispatcher,
+      store,
+      ...(exec ? { execInSandbox: exec } : {}),
+    });
+    const app = buildServer({
+      service: svc,
+      authenticator: compositeAuthenticator([apiKeyAuthenticator({ keyStore })]),
+      keyStore,
+    });
+    return { app, svc };
+  }
+
+  it("POST /runs/:id/exec runs a command in the sandbox and returns its output", async () => {
+    const { app, svc } = appWith(async (_t, _r, _c, command) => ({
+      stdout: `ran:${command}`,
+      stderr: "",
+      exitCode: 0,
+    }));
+    const rec = await svc.submit({ tenant: "acme", harness: { id: "s", version: "0" }, case: CASE2 });
+    const res = await app.inject({
+      method: "POST",
+      url: `/runs/${rec.id}/exec`,
+      headers: { "x-everdict-tenant": "acme", "content-type": "application/json" },
+      payload: { command: "ls /work" },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ found: true, stdout: "ran:ls /work", stderr: "", exitCode: 0 });
+  });
+
+  it("exec requires a non-empty command (400) and 404s another workspace's run", async () => {
+    const { app, svc } = appWith(async () => ({ stdout: "", stderr: "", exitCode: 0 }));
+    const rec = await svc.submit({ tenant: "acme", harness: { id: "s", version: "0" }, case: CASE2 });
+    expect(
+      (
+        await app.inject({
+          method: "POST",
+          url: `/runs/${rec.id}/exec`,
+          headers: { "x-everdict-tenant": "acme", "content-type": "application/json" },
+          payload: {},
+        })
+      ).statusCode,
+    ).toBe(400);
+    expect(
+      (
+        await app.inject({
+          method: "POST",
+          url: `/runs/${rec.id}/exec`,
+          headers: { "x-everdict-tenant": "beta", "content-type": "application/json" },
+          payload: { command: "ls" },
+        })
+      ).statusCode,
+    ).toBe(404);
+  });
+
+  it("exec is creator-or-admin: a different subject with a non-admin role is 403", async () => {
+    const keyStore = new InMemoryTenantKeyStore();
+    const store = new InMemoryRunStore();
+    const svc = new RunService({
+      dispatcher: okDispatcher,
+      store,
+      execInSandbox: async () => ({ stdout: "x", stderr: "", exitCode: 0 }),
+    });
+    const app = buildServer({
+      service: svc,
+      authenticator: roleAuth(["member"], "acme"), // subject "u"
+      keyStore,
+    });
+    const rec = await svc.submit({
+      tenant: "acme",
+      submittedBy: "someone-else",
+      harness: { id: "s", version: "0" },
+      case: CASE2,
+    });
+    const res = await app.inject({
+      method: "POST",
+      url: `/runs/${rec.id}/exec`,
+      headers: { authorization: "Bearer x", "content-type": "application/json" },
+      payload: { command: "whoami" },
+    });
+    expect(res.statusCode).toBe(403);
+  });
+
+  it("GET /runs/:id/screen: supported for os-use (data URL), unsupported for other env kinds", async () => {
+    // A 1x1 PNG, base64 — what scrot+base64 would return from the desktop.
+    const png1x1 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+    const { app, svc } = appWith(async (_t, _r, _c, command) =>
+      command.includes("scrot") ? { stdout: png1x1, stderr: "", exitCode: 0 } : { stdout: "", stderr: "", exitCode: 1 },
+    );
+    const os = await svc.submit({ tenant: "acme", harness: { id: "s", version: "0" }, case: OS_CASE });
+    const res = await app.inject({
+      method: "GET",
+      url: `/runs/${os.id}/screen`,
+      headers: { "x-everdict-tenant": "acme" },
+    });
+    expect(res.json()).toEqual({ supported: true, found: true, dataUrl: `data:image/png;base64,${png1x1}` });
+
+    const repo = await svc.submit({ tenant: "acme", harness: { id: "s", version: "0" }, case: CASE2 });
+    const res2 = await app.inject({
+      method: "GET",
+      url: `/runs/${repo.id}/screen`,
+      headers: { "x-everdict-tenant": "acme" },
+    });
+    expect(res2.json()).toMatchObject({ supported: false, found: false });
   });
 });
 

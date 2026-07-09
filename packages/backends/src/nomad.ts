@@ -1,3 +1,4 @@
+import { spawn } from "node:child_process";
 import { RESULT_SENTINEL } from "@everdict/agent";
 import {
   type AgentJob,
@@ -56,6 +57,13 @@ export interface NomadBackendOptions {
   // Real deployments size client.gc_max_allocs for eval churn instead (the actionable 404 below names it); enable
   // purge only where the cluster is known to tolerate it.
   purgeDeadJobs?: boolean; // default false
+  // Injectable exec runner (test seam) — default shells to the `nomad` CLI (WS exec is CLI-only in practice).
+  // (bin, args, opts) → {code, stdout, stderr}. The default passes NOMAD_ADDR/NOMAD_TOKEN via env.
+  execRunner?: (
+    bin: string,
+    args: string[],
+    env: Record<string, string>,
+  ) => Promise<{ code: number; stdout: string; stderr: string }>;
   purgeDelayMs?: number; // age before a dead job is purge-swept when enabled (default 60s; 0 = immediate for tests)
   maxPolls?: number;
   // This cluster's concurrent-job cap (for capacity-aware placement). If a function, dynamically reads the value the autoscaler changes.
@@ -156,6 +164,27 @@ export function buildNomadJob(job: AgentJob, opts: NomadBackendOptions, jobId?: 
       ],
     },
   };
+}
+
+// Default exec runner — spawn a local CLI (nomad) with addr/token in env.
+function spawnRunner(
+  bin: string,
+  args: string[],
+  env: Record<string, string>,
+): Promise<{ code: number; stdout: string; stderr: string }> {
+  return new Promise((resolve) => {
+    const proc = spawn(bin, args, { stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, ...env } });
+    let stdout = "";
+    let stderr = "";
+    proc.stdout.on("data", (d) => {
+      stdout += String(d);
+    });
+    proc.stderr.on("data", (d) => {
+      stderr += String(d);
+    });
+    proc.on("error", (e) => resolve({ code: 127, stdout, stderr: stderr + String(e) }));
+    proc.on("close", (code) => resolve({ code: code ?? -1, stdout, stderr }));
+  });
 }
 
 function parseResult(stdout: string): CaseResult {
@@ -306,6 +335,50 @@ export class NomadBackend implements Backend {
       return parseResult(logs.text);
     } catch {
       return undefined;
+    }
+  }
+
+  // One-shot exec inside the case's live alloc (web terminal / live-screen capture). Shells to `nomad alloc
+  // exec -task agent <alloc> sh -c <command>` (WS exec is CLI-only), addr/token via env. undefined = no live alloc.
+  async exec(
+    caseId: string,
+    command: string,
+  ): Promise<{ stdout: string; stderr: string; exitCode: number } | undefined> {
+    try {
+      const prefix = `everdict-${caseId}-`;
+      const res = await this.http.request("GET", `/v1/jobs?prefix=${encodeURIComponent(prefix)}&namespace=*`);
+      if (res.status >= 300) return undefined;
+      const jobs = JSON.parse(res.text) as Array<{ ID?: string; Namespace?: string; SubmitTime?: number }>;
+      const newest = jobs
+        .filter((j) => j.ID?.startsWith(prefix))
+        .sort((a, b) => (b.SubmitTime ?? 0) - (a.SubmitTime ?? 0))[0];
+      if (!newest?.ID) return undefined;
+      const ns = newest.Namespace && newest.Namespace !== "default" ? newest.Namespace : undefined;
+      const nsq = ns ? `?namespace=${encodeURIComponent(ns)}` : "";
+      const allocsRes = await this.http.request("GET", `/v1/job/${encodeURIComponent(newest.ID)}/allocations${nsq}`);
+      if (allocsRes.status >= 300) return undefined;
+      const alloc = (JSON.parse(allocsRes.text) as Array<{ ID: string; ClientStatus?: string }>).find(
+        (a) => a.ClientStatus === "running",
+      );
+      if (!alloc) return undefined; // no RUNNING alloc — nothing to exec into
+      const runner = this.opts.execRunner ?? ((bin, args, env) => spawnRunner(bin, args, env));
+      const env: Record<string, string> = { NOMAD_ADDR: this.opts.addr };
+      if (this.opts.apiToken) env.NOMAD_TOKEN = this.opts.apiToken;
+      const args = [
+        "alloc",
+        "exec",
+        "-task",
+        "agent",
+        ...(ns ? ["-namespace", ns] : []),
+        alloc.ID,
+        "sh",
+        "-c",
+        command,
+      ];
+      const r = await runner("nomad", args, env);
+      return { stdout: r.stdout, stderr: r.stderr, exitCode: r.code };
+    } catch {
+      return undefined; // best-effort — observability must never fail a run
     }
   }
 

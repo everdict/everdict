@@ -401,3 +401,58 @@ describe("NomadBackend.adopt / kill (boot-recovery adoption + supersede force-st
     expect(deletes.every((d) => !d.includes("purge"))).toBe(true); // stop, never purge (the purge saga)
   });
 });
+
+describe("NomadBackend.exec — one-shot exec into a live case alloc", () => {
+  it("resolves the newest RUNNING alloc and shells to `nomad alloc exec -task agent`", async () => {
+    const http: NomadHttp = {
+      async request(_method, path) {
+        if (path.includes("/v1/jobs?prefix="))
+          return { status: 200, text: JSON.stringify([{ ID: "everdict-c1-aa", SubmitTime: 2 }]) };
+        if (path.includes("/allocations"))
+          return { status: 200, text: JSON.stringify([{ ID: "alloc-run", ClientStatus: "running" }]) };
+        return { status: 404, text: "" };
+      },
+    };
+    const runnerCalls: Array<{ bin: string; args: string[]; env: Record<string, string> }> = [];
+    const backend = new NomadBackend({
+      addr: "http://nomad:4646",
+      image: "img",
+      http,
+      apiToken: "tok",
+      execRunner: async (bin, args, env) => {
+        runnerCalls.push({ bin, args, env });
+        return { code: 0, stdout: "EXEC_OK\n", stderr: "", exitCode: 0 } as never;
+      },
+    });
+    const out = await backend.exec("c1", "ls /app");
+    expect(out).toEqual({ stdout: "EXEC_OK\n", stderr: "", exitCode: 0 });
+    const call = runnerCalls[0];
+    expect(call?.bin).toBe("nomad");
+    expect(call?.args).toEqual(["alloc", "exec", "-task", "agent", "alloc-run", "sh", "-c", "ls /app"]);
+    expect(call?.env).toMatchObject({ NOMAD_ADDR: "http://nomad:4646", NOMAD_TOKEN: "tok" }); // API auth via env, not the alloc
+  });
+
+  it("returns undefined when there is no RUNNING alloc (nothing to exec into)", async () => {
+    const http: NomadHttp = {
+      async request(_method, path) {
+        if (path.includes("/v1/jobs?prefix="))
+          return { status: 200, text: JSON.stringify([{ ID: "everdict-c1-aa", SubmitTime: 1 }]) };
+        if (path.includes("/allocations"))
+          return { status: 200, text: JSON.stringify([{ ID: "a", ClientStatus: "complete" }]) };
+        return { status: 404, text: "" };
+      },
+    };
+    let ran = false;
+    const backend = new NomadBackend({
+      addr: "http://nomad:4646",
+      image: "img",
+      http,
+      execRunner: async () => {
+        ran = true;
+        return { code: 0, stdout: "", stderr: "" };
+      },
+    });
+    expect(await backend.exec("c1", "ls")).toBeUndefined();
+    expect(ran).toBe(false); // never shells out when there's no running alloc
+  });
+});

@@ -1,5 +1,12 @@
 import type { AgentJob, CaseResult } from "@everdict/core";
 
+// Result of a one-shot in-container exec (Backend.exec) — the sandbox command's stdout/stderr/exit.
+export interface ExecInContainer {
+  stdout: string;
+  stderr: string;
+  exitCode: number;
+}
+
 // A backend's concurrent capacity. The scheduler adds its own in-flight to compute free slots.
 export interface BackendCapacity {
   total: number; // upper bound of concurrent slots (static config or live probe)
@@ -33,6 +40,10 @@ export interface Backend {
   // Current stdout of the case's newest orchestrator job (live-progress observability). Raw text with the result
   // sentinel stripped; undefined = no job / logs unreadable. Snapshot semantics — callers poll and diff for a tail.
   logs?(caseId: string): Promise<string | undefined>;
+  // Run a one-shot command INSIDE the case's live sandbox container (web terminal / live-screen capture). The
+  // command is passed to `sh -c`. undefined = no live container to exec into. Best-effort; the sandbox is
+  // already untrusted+isolated, so the control plane gates WHO may call this (run creator / workspace admin).
+  exec?(caseId: string, command: string): Promise<ExecInContainer | undefined>;
   dispatch(job: AgentJob): Promise<CaseResult>;
   // Connection test (optional) — sends a light call to the cluster API without a job to check reachability/auth. undefined for backends that don't implement it.
   probe?(): Promise<ProbeResult>;

@@ -76,6 +76,9 @@ function mockApi(
     async podLogs() {
       return opts.logs ?? `prelude\n${RESULT_SENTINEL}${JSON.stringify(RESULT)}\n`;
     },
+    async exec(_name, _ns, command) {
+      return { stdout: `ran: ${command}`, stderr: "", exitCode: 0 };
+    },
     async podFailureReason() {
       return opts.failureReason;
     },
@@ -405,5 +408,35 @@ describe("parseJobStatusOutput", () => {
   it("both present / both empty", () => {
     expect(parseJobStatusOutput("1/2")).toEqual({ succeeded: 1, failed: 2 });
     expect(parseJobStatusOutput("/")).toEqual({ succeeded: 0, failed: 0 });
+  });
+});
+
+describe("K8sBackend.exec — one-shot exec into a live case pod", () => {
+  it("resolves the case's newest job and runs sh -c <command> in it", async () => {
+    const { api } = mockApi({
+      labeledJobs: [
+        {
+          selector: "everdict.dev/case=c1",
+          name: "everdict-c1-x",
+          namespace: "default",
+          creationTimestamp: "2026-01-02",
+        },
+        {
+          selector: "everdict.dev/case=c1",
+          name: "everdict-c1-old",
+          namespace: "default",
+          creationTimestamp: "2026-01-01",
+        },
+      ],
+    });
+    const backend = new K8sBackend({ image: "img", api });
+    const out = await backend.exec("c1", "ls /work");
+    expect(out).toEqual({ stdout: "ran: ls /work", stderr: "", exitCode: 0 });
+  });
+
+  it("returns undefined when the case has no live job", async () => {
+    const { api } = mockApi({ labeledJobs: [] });
+    const backend = new K8sBackend({ image: "img", api });
+    expect(await backend.exec("gone", "ls")).toBeUndefined();
   });
 });
