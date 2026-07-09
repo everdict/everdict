@@ -2,11 +2,8 @@ import { perTenantTrustZones } from "@everdict/backends";
 import type { AgentJob, BrowserSnapshot, Grader, ServiceHarnessSpec, TraceEvent, TrustZone } from "@everdict/core";
 import type { TraceSource } from "@everdict/trace";
 import { describe, expect, it } from "vitest";
-import { InProcessCallbackRendezvous } from "./callback-rendezvous.js";
-import { buildSharedStoreManifests } from "./dependencies.js";
-import { keysFor } from "./environment-manager.js";
-import type { FrontDoorDriver } from "./front-door-driver.js";
-import { buildK8sManifests } from "./k8s-topology.js";
+import { buildSharedStoreManifests } from "./deploy/dependencies.js";
+import { buildK8sManifests } from "./deploy/k8s-topology.js";
 import {
   type AllocLike,
   SERVICE_GROUP_NAME,
@@ -19,10 +16,13 @@ import {
   resolvePort,
   servicePortLabel,
   topologyJobId,
-} from "./nomad-topology.js";
+} from "./deploy/nomad-topology.js";
+import type { TargetEnvHandle, TopologyRuntime } from "./deploy/topology-runtime.js";
+import { keysFor } from "./environment-manager.js";
+import { InProcessCallbackRendezvous } from "./front-door/callback-rendezvous.js";
+import type { FrontDoorDriver } from "./front-door/front-door-driver.js";
+import type { AcquireRequestFn } from "./front-door/target-acquirer.js";
 import { ServiceTopologyBackend, type SubmitFn } from "./service-backend.js";
-import type { AcquireRequestFn } from "./target-acquirer.js";
-import type { TargetEnvHandle, TopologyRuntime } from "./topology-runtime.js";
 
 const SPEC: ServiceHarnessSpec = {
   kind: "service",

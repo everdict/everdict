@@ -139,7 +139,7 @@ The runner already declares `capabilities[]` (`self-hosted-runner.md` D-model: `
 
 ## Touch points (per slice)
 
-- `packages/topology/src/docker-runtime.ts` — **new**: `DockerTopologyRuntime` + injectable `Docker` adapter
+- `packages/topology/src/deploy/docker-runtime.ts` — **new**: `DockerTopologyRuntime` + injectable `Docker` adapter
   (slice 1); barrel export in `index.ts`.
 - `packages/topology/src/docker-topology.ts` — **new (if needed)**: pure docker-arg builders (deterministic-tested),
   mirroring `nomad-topology.ts`/`k8s-topology.ts`.

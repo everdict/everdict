@@ -20,8 +20,9 @@ import {
 } from "@everdict/core";
 import { costGrader, latencyGrader, makeGradersFromEnv, safeGrade, stepsGrader } from "@everdict/graders";
 import type { TraceSource } from "@everdict/trace";
-import { captureCdpScreenshot } from "./capture-cdp.js";
+import type { TopologyRuntime } from "./deploy/topology-runtime.js";
 import { keysFor, newRunId, wiringVars } from "./environment-manager.js";
+import { captureCdpScreenshot } from "./front-door/capture-cdp.js";
 import {
   type CallbackRendezvous,
   type FrontDoorDriver,
@@ -32,14 +33,13 @@ import {
   fetchJson,
   interpolateHeaders,
   interpolateTemplate,
-} from "./front-door-driver.js";
+} from "./front-door/front-door-driver.js";
+import { observationSourceFor } from "./front-door/observation-source.js";
+import { type AcquireRequestFn, targetAcquirerFor } from "./front-door/target-acquirer.js";
 import { applyImagePins } from "./image-pins.js";
-import { observationSourceFor } from "./observation-source.js";
-import { type AcquireRequestFn, targetAcquirerFor } from "./target-acquirer.js";
-import type { TopologyRuntime } from "./topology-runtime.js";
 
 // Backward-compatible re-export — keep existing `import { type SubmitFn } from "./service-backend.js"`.
-export type { SubmitFn } from "./front-door-driver.js";
+export type { SubmitFn } from "./front-door/front-door-driver.js";
 
 export interface ServiceTopologyBackendOptions {
   runtime: TopologyRuntime;

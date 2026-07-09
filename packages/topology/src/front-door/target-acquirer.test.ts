@@ -1,5 +1,6 @@
 import type { ServiceHarnessSpec, TargetAcquire, TopologyTarget } from "@everdict/core";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { TopologyRuntime } from "../deploy/topology-runtime.js";
 import {
   type AcquireRequestFn,
   type ProbeFn,
@@ -7,7 +8,6 @@ import {
   serviceAcquirer,
   targetAcquirerFor,
 } from "./target-acquirer.js";
-import type { TopologyRuntime } from "./topology-runtime.js";
 
 const SPEC: ServiceHarnessSpec = {
   kind: "service",

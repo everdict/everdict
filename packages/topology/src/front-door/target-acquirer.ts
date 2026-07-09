@@ -6,8 +6,8 @@ import {
   type TrustZone,
   UpstreamError,
 } from "@everdict/core";
+import type { TargetEnvHandle, TopologyRuntime } from "../deploy/topology-runtime.js";
 import { getField, interpolatePath, joinUrl, methodPath } from "./front-door-driver.js";
-import type { TargetEnvHandle, TopologyRuntime } from "./topology-runtime.js";
 
 // Abstraction for target acquisition (WHAT-target) — the fourth sibling of
 // TopologyRuntime (WHERE) / FrontDoorDriver (HOW-drive) / ObservationSource (HOW-observe). Separates "how the per-case

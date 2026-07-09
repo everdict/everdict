@@ -191,7 +191,7 @@ Each step merges independently; defaults keep current behavior, so no regression
 
 - `packages/core/src/harness-spec.ts` — extend the `frontDoor` schema (knobs 1–4); `agent-job.ts` (knob 5 pin).
 - `packages/core/src/harness-template.ts` — mirror the `frontDoor` extension in `ServiceTemplateSpecSchema`.
-- `packages/topology/src/front-door-driver.ts` — **new**: the `FrontDoorDriver` interface + a default driver that
+- `packages/topology/src/front-door/front-door-driver.ts` — **new**: the `FrontDoorDriver` interface + a default driver that
   resolves the protocol (request template, completion strategy, correlation, target acquisition).
 - `packages/topology/src/service-backend.ts` — shrink `dispatch` to the skeleton; delegate to `FrontDoorDriver`.
 - `packages/topology/src/environment-manager.ts` — derive wiring variables from `isolateBy` instead of fixed keys.

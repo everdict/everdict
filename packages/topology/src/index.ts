@@ -1,4 +1,4 @@
-export type { TopologyRuntime, TopologyHandle, TargetEnvHandle } from "./topology-runtime.js";
+export type { TopologyRuntime, TopologyHandle, TargetEnvHandle } from "./deploy/topology-runtime.js";
 export { type RunKeys, keysFor, newRunId, wiringVars, EnvironmentManager } from "./environment-manager.js";
 export {
   type StoreDef,
@@ -7,7 +7,7 @@ export {
   dependencyConnEnv,
   buildSharedStoreManifests,
   storeName,
-} from "./dependencies.js";
+} from "./deploy/dependencies.js";
 export {
   type StoreIsolation,
   type StoreBindingOptions,
@@ -17,7 +17,7 @@ export {
   planTenantStores,
   sanitizeIdent,
   sharedStoreHost,
-} from "./store-binding.js";
+} from "./deploy/store-binding.js";
 export {
   buildNomadTopologyJob,
   buildDependencyGroups,
@@ -41,13 +41,13 @@ export {
   type AllocLike,
   type AllocPort,
   type ResolvedPort,
-} from "./nomad-topology.js";
+} from "./deploy/nomad-topology.js";
 export {
   NomadTopologyRuntime,
   type NomadTopologyRuntimeOptions,
   type NomadHttp,
   type NomadExec,
-} from "./nomad-runtime.js";
+} from "./deploy/nomad-runtime.js";
 export {
   buildK8sManifests,
   buildDependencyManifests,
@@ -57,7 +57,7 @@ export {
   type K8sManifest,
   type K8sTopologyOptions,
   type K8sBrowserOptions,
-} from "./k8s-topology.js";
+} from "./deploy/k8s-topology.js";
 export {
   type NetworkPolicyManifest,
   type ZoneNetworkPolicyOptions,
@@ -65,7 +65,7 @@ export {
   buildZoneNetworkPolicies,
   buildSharedStoreIngressPolicy,
   resolveEgressCidrs,
-} from "./network-policy.js";
+} from "./deploy/network-policy.js";
 export {
   type ServiceIntention,
   type ConsulClient,
@@ -73,11 +73,11 @@ export {
   buildTenantIntentions,
   buildSharedStoreIntention,
   consulHttp,
-} from "./consul-intentions.js";
-export { K8sTopologyRuntime, type K8sTopologyRuntimeOptions } from "./k8s-runtime.js";
-export { type Kubectl, type PortForward, kubectlCli } from "./kubectl.js";
-export { DockerTopologyRuntime, type DockerTopologyRuntimeOptions } from "./docker-runtime.js";
-export { type Docker, type DockerRunSpec, dockerCli, dockerRunArgs, parseHostPort } from "./docker.js";
+} from "./deploy/consul-intentions.js";
+export { K8sTopologyRuntime, type K8sTopologyRuntimeOptions } from "./deploy/k8s-runtime.js";
+export { type Kubectl, type PortForward, kubectlCli } from "./deploy/kubectl.js";
+export { DockerTopologyRuntime, type DockerTopologyRuntimeOptions } from "./deploy/docker-runtime.js";
+export { type Docker, type DockerRunSpec, dockerCli, dockerRunArgs, parseHostPort } from "./deploy/docker.js";
 export { ServiceTopologyBackend, type ServiceTopologyBackendOptions, type SubmitFn } from "./service-backend.js";
 export {
   type FrontDoorDriver,
@@ -96,9 +96,9 @@ export {
   interpolatePath,
   interpolateHeaders,
   interpolateTemplate,
-} from "./front-door-driver.js";
+} from "./front-door/front-door-driver.js";
 export { applyImagePins } from "./image-pins.js";
-export { InProcessCallbackRendezvous, type CallbackSink } from "./callback-rendezvous.js";
+export { InProcessCallbackRendezvous, type CallbackSink } from "./front-door/callback-rendezvous.js";
 export {
   type TargetAcquirer,
   type AcquireRequest,
@@ -107,7 +107,7 @@ export {
   provisionAcquirer,
   serviceAcquirer,
   targetAcquirerFor,
-} from "./target-acquirer.js";
+} from "./front-door/target-acquirer.js";
 export {
   type ObservationSource,
   type ObservationTarget,
@@ -116,5 +116,5 @@ export {
   observationSourceFor,
   referenceObservationSource,
   sentinelObservationSource,
-} from "./observation-source.js";
-export { captureCdpScreenshot, type CdpSocket, type CaptureCdpOptions } from "./capture-cdp.js";
+} from "./front-door/observation-source.js";
+export { captureCdpScreenshot, type CdpSocket, type CaptureCdpOptions } from "./front-door/capture-cdp.js";

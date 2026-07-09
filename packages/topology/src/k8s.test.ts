@@ -1,14 +1,14 @@
 import type { ServiceHarnessSpec, TrustZone } from "@everdict/core";
 import { describe, expect, it } from "vitest";
-import { K8sTopologyRuntime } from "./k8s-runtime.js";
+import { K8sTopologyRuntime } from "./deploy/k8s-runtime.js";
 import {
   REGISTRY_AUTH_SECRET_NAME,
   browserDeployName,
   buildBrowserManifests,
   buildK8sManifests,
   namespaceManifest,
-} from "./k8s-topology.js";
-import type { Kubectl, PortForward } from "./kubectl.js";
+} from "./deploy/k8s-topology.js";
+import type { Kubectl, PortForward } from "./deploy/kubectl.js";
 
 const SPEC: ServiceHarnessSpec = {
   kind: "service",

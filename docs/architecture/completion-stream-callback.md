@@ -103,7 +103,7 @@ uses `sync`/provisioned-browser → untouched.
 ## Touch points (for the eventual PR)
 - `packages/core/src/harness-spec.ts` — add `stream` + `callback` variants to `FrontDoorCompletionSchema`
   (+ mirror nothing else — `frontDoor` already flows through `ServiceTemplateSpecSchema`).
-- `packages/topology/src/front-door-driver.ts` — `HttpFrontDoorDriverIo.openStream?` + `callbackRendezvous?`;
+- `packages/topology/src/front-door/front-door-driver.ts` — `HttpFrontDoorDriverIo.openStream?` + `callbackRendezvous?`;
   `awaitCompletion` grows `stream`/`callback` branches; `drive` peeks the first stream event for `correlate`.
 - `packages/topology/src/service-backend.ts` — inject the rendezvous; add `callback_url` to `wiringVars` extra when
   `completion.mode === "callback"`; surface `openStream`/`callbackRendezvous` as backend options (like

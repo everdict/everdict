@@ -198,12 +198,12 @@ Each step merges independently; defaults keep current behavior, so no regression
 
 - `packages/core/src/harness-spec.ts` — `TopologyTargetSchema.acquire` (discriminated union; absence = provision).
 - `packages/core/src/harness-template.ts` — mirror `acquire` in `TemplateServiceSchema`/the service template spec.
-- `packages/topology/src/topology-runtime.ts` — `BrowserEnvHandle` → `TargetEnvHandle` (`cdpUrl` → `wiring`).
+- `packages/topology/src/deploy/topology-runtime.ts` — `BrowserEnvHandle` → `TargetEnvHandle` (`cdpUrl` → `wiring`).
 - `packages/topology/src/{docker,nomad,k8s}-runtime.ts` — return `wiring:{ target_cdp_url: cdpUrl }`.
-- `packages/topology/src/target-acquirer.ts` — **new**: `TargetAcquirer` + `provisionAcquirer` + `serviceAcquirer`
+- `packages/topology/src/front-door/target-acquirer.ts` — **new**: `TargetAcquirer` + `provisionAcquirer` + `serviceAcquirer`
   + `targetAcquirerFor`; reuse `methodPath`/`joinUrl`/`interpolatePath`/`getField` from `front-door-driver.ts`.
 - `packages/topology/src/service-backend.ts` — `dispatch` selects a `TargetAcquirer`; merge `...target.wiring`.
-- `packages/topology/src/observation-source.ts` — unchanged (already the observation seam B2 composes with).
+- `packages/topology/src/front-door/observation-source.ts` — unchanged (already the observation seam B2 composes with).
 - Docs/skill: `docs/service-harness.md` (target section) + the `topology` skill reference travel with the code.
 
 ## Out of scope (later)

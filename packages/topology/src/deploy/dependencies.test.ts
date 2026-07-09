@@ -1,7 +1,7 @@
 import type { ServiceHarnessSpec } from "@everdict/core";
 import { describe, expect, it } from "vitest";
+import { wiringVars } from "../environment-manager.js";
 import { dependencyConnEnv, dependencyStores } from "./dependencies.js";
-import { wiringVars } from "./environment-manager.js";
 
 // An external (BYO) dependency is not deployed/isolated by Everdict — excluded from provisioning, connEnv, and case isolation.
 function spec(dependencies: ServiceHarnessSpec["dependencies"]): ServiceHarnessSpec {

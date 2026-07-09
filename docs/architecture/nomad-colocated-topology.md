@@ -75,8 +75,8 @@ What remains, deliberately:
 
 ## Files
 
-- `packages/topology/src/nomad-topology.ts` — `buildNomadTopologyJob` (co-located group), `SERVICE_GROUP_NAME`,
+- `packages/topology/src/deploy/nomad-topology.ts` — `buildNomadTopologyJob` (co-located group), `SERVICE_GROUP_NAME`,
   `servicePortLabel`.
-- `packages/topology/src/nomad-runtime.ts` — `ensureTopology` discovers all ports from the one co-located alloc.
+- `packages/topology/src/deploy/nomad-runtime.ts` — `ensureTopology` discovers all ports from the one co-located alloc.
 - Tests: `topology.test.ts` (builder shape, extra_hosts, unique-port), `nomad-runtime.test.ts` (single-alloc
   discovery regression).

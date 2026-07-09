@@ -175,7 +175,7 @@ dispatcher already resolves it. D3 is the only new core surface (one optional `J
 - `apps/api/src/server.ts` + `mcp.ts` — judge `runtime` field validated against the runtime registry; **BFF↔MCP
   parity** (slice 1).
 - `apps/web/src/features/register-judge/*` — runtime selector on the judge form (slice 1).
-- `packages/topology/src/observation-source.ts` — **new**: the delivery seam (slice 2); sentinel impl (slice 3).
+- `packages/topology/src/front-door/observation-source.ts` — **new**: the delivery seam (slice 2); sentinel impl (slice 3).
 - `packages/topology/src/service-backend.ts` — delegate observation to `ObservationSource` (slices 2–3).
 - Docs/skill: `docs/judges.md` (runtime field) + `docs/service-harness.md` (delivery) + the `topology`/`api-layer`
   skill references travel with the change.
