@@ -1,6 +1,10 @@
 # apps/api route modularization — split the 3676-line server.ts into resource route modules (design)
 
-> **Status: Round 1 + Round 2 SHIPPED.** Round 2 (`b1c5d2a`…`4b53aba`): the MCP tool surface split into
+> **Status: Rounds 1-3 SHIPPED.** Round 3 (`44963d5`+`d4f2405`): src regrouped by **domain entity** — 26
+> entity folders (run · scorecard · harness · dataset · … · queue · billing), each owning its vertical slice
+> (routes + mcp + schema + service + tests); the concern umbrellas (catalog/, integrations/, runners/,
+> scheduling/) are gone; execution/ and ops/ remain machinery-only. 128 files moved as pure renames (import
+> specifiers were the only content diffs); 636 tests + build + boot contract green. Round 2 (`b1c5d2a`…`4b53aba`): the MCP tool surface split into
 > **31 per-resource `<resource>.mcp.ts` modules** (129 tools verbatim; `mcp.ts` 2,564 → **88-line composition
 > root** over `mcp-context.ts`), `ScorecardService` decomposed into **facade (465) + batch (1,264) + ingest
 > (223) + analytics (113) + shared (284)** with the public surface re-exported unchanged, and `main()` grouped
