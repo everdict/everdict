@@ -728,7 +728,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     if (!principal) return reply;
     try {
       gate(principal, "runs:read");
-      const command = (req.body ?? {}).command;
+      const command = req.body?.command;
       if (typeof command !== "string" || command.trim() === "")
         return reply.code(400).send({ code: "BAD_REQUEST", message: "command is required." });
       const out = await deps.service.exec(req.params.id, command);

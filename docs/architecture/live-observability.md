@@ -40,6 +40,41 @@ Live-verified on Nomad: a 2s-tick harness showed `tick 1..6` in the mid-run snap
 six seconds later, and the SSE stream delivered the initial chunk, incremental `tick 10`, the final
 line, then `event: end {"status":"succeeded"}`.
 
+## ④ Sandbox web terminal — exec into the live case container
+
+A new **`Backend.exec(caseId, command)`** seam runs a one-shot `sh -c command` inside the case's
+live sandbox (Nomad: `nomad alloc exec -task agent <alloc>` shelling to the CLI with NOMAD_ADDR/
+TOKEN in env — WS exec is CLI-only; K8s: `kubectl exec job/<name>`; both reuse the adopt lookup for
+the newest RUNNING alloc/pod). undefined = no live container.
+
+- **`POST /runs/:id/exec {command}`** → `{found, stdout, stderr, exitCode}`; MCP `exec_in_run`.
+- Authz is tightened beyond `runs:read`: exec runs arbitrary (mutating) commands in the sandbox, so
+  it's **the run's creator or a workspace admin only** (403 otherwise). The sandbox is already
+  untrusted+isolated — this gates WHO may look in, not what runs there.
+- Web: a `SandboxTerminal` on the run detail (command box + scrollback). One-shot, not a full PTY —
+  enough to inspect the sandbox mid-run (`ls`/`cat`/`ps`/`env`). Interactive PTY-over-WS is a
+  follow-up (Nomad/K8s exec both support a TTY stream; the seam is one-shot for now).
+
+Live-verified on Nomad: `whoami && ls /app` returned root + the image tree from inside a running
+case; a failing command surfaced its stderr and exit 1.
+
+## ⑤ Live screen — the desktop/browser frame while it runs
+
+**`GET /runs/:id/screen`** → `{supported, found, dataUrl}`. For an **os-use** (desktop) case it
+execs `DISPLAY=<display> scrot -o … && base64` via the ④ seam and returns a PNG data URL; the web
+`LiveScreen` widget polls it every 2s into an `<img>`. `supported:false` for non-desktop env kinds
+(no single-container screen — the widget renders nothing). Creator-or-admin, same as exec.
+
+The env kind + display come from the persisted `caseSpec.env` (mig 0051), so the screen route needs
+no extra state. Live-verified: the base64 frame transport round-tripped through `Backend.exec`
+(PNGDATA and a 1×1 PNG in unit tests → `data:image/png;base64,…`), and the route correctly reported
+`supported:true` for an os-use case (with `found:false` on the slim image, which has no scrot —
+graceful). Full desktop capture is the same exec against an Xvfb image (remaining live check).
+
+**browser-use (topology)** live view is a follow-up: the browser is a SIBLING container reached via
+CDP (`target_cdp_url`), not the agent container, so it needs the live CDP endpoint persisted per run
++ a `Page.captureScreenshot`/screencast proxy — a separate seam from the single-container exec here.
+
 ## ③ Live trace deep-link — where the platform trace is accumulating
 
 For harnesses that DO export a platform trace (otel/mlflow/langfuse/langsmith/phoenix), the
