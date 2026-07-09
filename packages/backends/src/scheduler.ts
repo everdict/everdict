@@ -1,6 +1,6 @@
+import { type BudgetTracker, costOf } from "@everdict/billing";
 import { type AgentJob, type CaseResult, InternalError, NotFoundError, RateLimitError } from "@everdict/core";
 import { type BackendCapacity, type DispatchOptions, dispatchAborted } from "./backend.js";
-import { type BudgetTracker, costOf } from "./budget.js";
 import { FairQueue } from "./fair-queue.js";
 import type { BackendRegistry } from "./registry.js";
 

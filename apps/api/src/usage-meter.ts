@@ -1,4 +1,4 @@
-import { type UsageMeter, billingTenant, costOf, inMemoryUsageMeter } from "@everdict/backends";
+import { type UsageMeter, billingTenant, costOf, inMemoryUsageMeter } from "@everdict/billing";
 import type { CaseResult } from "@everdict/core";
 import type { UsageStore } from "@everdict/db";
 

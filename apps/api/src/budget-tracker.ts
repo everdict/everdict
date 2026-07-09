@@ -1,4 +1,4 @@
-import { type BudgetLimit, type BudgetTracker, type BudgetUsage, assertWithinBudget } from "@everdict/backends";
+import { type BudgetLimit, type BudgetTracker, type BudgetUsage, assertWithinBudget } from "@everdict/billing";
 import type { BudgetStore } from "@everdict/db";
 import { z } from "zod";
 

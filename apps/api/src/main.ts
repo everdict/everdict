@@ -11,7 +11,6 @@ import {
   Autoscaler,
   type Backend,
   BackendRegistry,
-  type BudgetLimit,
   CircuitBreaker,
   type Dispatcher as CoreDispatcher,
   K8sBackend,
@@ -24,6 +23,7 @@ import {
   isScreenCapturable,
   isShellable,
 } from "@everdict/backends";
+import type { BudgetLimit } from "@everdict/billing";
 import { type CaseResult, type RegistryAuth, type RuntimeSpec, classifyFailure } from "@everdict/core";
 import {
   type BudgetStore,

@@ -1,7 +1,8 @@
 import type { CaseResult } from "@everdict/core";
 import { PaymentRequiredError } from "@everdict/core";
 import { describe, expect, it } from "vitest";
-import { billingTenant, inMemoryBudget, sumCost } from "./budget.js";
+import { inMemoryBudget } from "./budget.js";
+import { billingTenant, sumCost } from "./cost.js";
 
 describe("sumCost", () => {
   it("sums the trace's llm_call cost (usd/tokens)", () => {

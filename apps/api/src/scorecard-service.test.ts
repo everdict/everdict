@@ -1,4 +1,5 @@
-import { CircuitBreaker, type Dispatcher, inMemoryUsageMeter } from "@everdict/backends";
+import { CircuitBreaker, type Dispatcher } from "@everdict/backends";
+import { inMemoryUsageMeter } from "@everdict/billing";
 import {
   type AgentJob,
   BadRequestError,

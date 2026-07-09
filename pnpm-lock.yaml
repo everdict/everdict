@@ -35,6 +35,9 @@ importers:
       '@everdict/backends':
         specifier: workspace:*
         version: link:../../packages/backends
+      '@everdict/billing':
+        specifier: workspace:*
+        version: link:../../packages/billing
       '@everdict/core':
         specifier: workspace:*
         version: link:../../packages/core
@@ -254,6 +257,9 @@ importers:
       '@everdict/agent':
         specifier: workspace:*
         version: link:../agent
+      '@everdict/billing':
+        specifier: workspace:*
+        version: link:../billing
       '@everdict/core':
         specifier: workspace:*
         version: link:../core
@@ -263,6 +269,12 @@ importers:
       zod:
         specifier: ^3.24.1
         version: 3.25.76
+
+  packages/billing:
+    dependencies:
+      '@everdict/core':
+        specifier: workspace:*
+        version: link:../core
 
   packages/core:
     dependencies:

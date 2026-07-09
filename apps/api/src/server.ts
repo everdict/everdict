@@ -8,7 +8,7 @@ import {
   authorize,
   can,
 } from "@everdict/auth";
-import type { UsageMeter } from "@everdict/backends";
+import type { UsageMeter } from "@everdict/billing";
 import {
   AppError,
   DatasetSchema,

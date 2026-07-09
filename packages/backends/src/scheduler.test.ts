@@ -1,7 +1,7 @@
+import { inMemoryBudget } from "@everdict/billing";
 import { type AgentJob, type CaseResult, PaymentRequiredError } from "@everdict/core";
 import { describe, expect, it } from "vitest";
 import type { Backend } from "./backend.js";
-import { inMemoryBudget } from "./budget.js";
 import { BackendRegistry } from "./registry.js";
 import { Scheduler, binPackPolicy } from "./scheduler.js";
 

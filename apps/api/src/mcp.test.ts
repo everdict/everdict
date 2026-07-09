@@ -1,5 +1,6 @@
 import type { Principal } from "@everdict/auth";
-import { type Dispatcher, inMemoryUsageMeter } from "@everdict/backends";
+import type { Dispatcher } from "@everdict/backends";
+import { inMemoryUsageMeter } from "@everdict/billing";
 import type { AgentJob, CaseResult, RuntimeSpec } from "@everdict/core";
 import {
   InMemoryBudgetStore,

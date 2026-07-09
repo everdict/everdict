@@ -1,5 +1,5 @@
 import type { CaseResult } from "@everdict/core";
-import { billingTenant, costOf } from "./budget.js";
+import { billingTenant, costOf } from "./cost.js";
 
 // Usage metering for billing — the pricing surface. Meter-only: it NEVER blocks (distinct from the enforcement
 // BudgetTracker, whose admit() throws 402). The billable surface is orchestration + verdict LLM cost — the harness

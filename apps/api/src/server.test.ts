@@ -1,6 +1,6 @@
 import { type Authenticator, apiKeyAuthenticator, compositeAuthenticator } from "@everdict/auth";
 import type { Dispatcher } from "@everdict/backends";
-import { inMemoryBudget, inMemoryUsageMeter } from "@everdict/backends";
+import { inMemoryBudget, inMemoryUsageMeter } from "@everdict/billing";
 import { type CaseResult, DatasetSchema, type EvalCase } from "@everdict/core";
 import {
   InMemoryBudgetStore,

@@ -1,4 +1,5 @@
-import { type BudgetTracker, type Dispatcher, billingTenant, costOf } from "@everdict/backends";
+import type { Dispatcher } from "@everdict/backends";
+import { type BudgetTracker, billingTenant, costOf } from "@everdict/billing";
 import {
   type AgentJob,
   AppError,

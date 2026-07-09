@@ -1,5 +1,5 @@
 import { API_KEY_SCOPES, type Action, EVERDICT_ROLES, type Principal, authorize } from "@everdict/auth";
-import type { UsageMeter } from "@everdict/backends";
+import type { UsageMeter } from "@everdict/billing";
 import {
   AppError,
   CaseResultSchema,
