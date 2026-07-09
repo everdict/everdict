@@ -138,7 +138,7 @@ import { recoverInterrupted } from "./ops/startup-recovery.js";
 import { RunnerHub } from "./runners/runner-hub.js";
 import { RunnerService } from "./runners/runner-service.js";
 import { ScheduleService } from "./scheduling/schedule-service.js";
-import { parseAutoscale, parseTenantMap } from "./scheduling/scheduling-config.js";
+import { type AutoscaleConfig, parseAutoscale, parseTenantMap } from "./scheduling/scheduling-config.js";
 import { TemporalBatchDriver } from "./scheduling/temporal-batch-driver.js";
 import { TemporalScheduleDriver } from "./scheduling/temporal-schedule-driver.js";
 import { buildServer } from "./server.js";
@@ -201,236 +201,38 @@ async function main(): Promise<void> {
   // Runtimes are not auto-seeded either — the default _shared docker/local were noise ("whose infra is this?" ambiguity).
   // A runtime is meant to be a workspace registering its own infra (examples/runtimes/*.json kept for reference only).
 
-  // Inject workspace secrets (model/provider keys) only into that tenant's job env (no leakage). The store is always active.
-  const secrets = { secretsFor: (tenant: string) => secretStore.entries(tenant) };
-
-  const backends = new BackendRegistry();
-  // Slot autoscaling (EVERDICT_AUTOSCALE="min:max[:intervalMs]") — global env backends only: their slot cap
-  // becomes a MutableSlots the Autoscaler grows with queue depth (a downstream cluster autoscaler then sees the
-  // pending work) and shrinks after idle hysteresis. Tenant runtimes keep their spec-declared envelope.
-  const autoscale = parseAutoscale(process.env.EVERDICT_AUTOSCALE);
-  const scalingTargets: MutableSlots[] = [];
-  const slotsFor = (name: string): MutableSlots | undefined => {
-    if (!autoscale) return undefined;
-    const slots = new MutableSlots(name, Math.max(1, autoscale.min));
-    scalingTargets.push(slots);
-    return slots;
-  };
-  if (nomadAddr && image) {
-    const slots = slotsFor("nomad");
-    backends.register(
-      "nomad",
-      new NomadBackend({
-        addr: nomadAddr,
-        image,
-        secretEnv: collectAuthEnv(),
-        secrets,
-        ...(slots ? { maxConcurrent: slots.get } : {}),
-      }),
-    );
-  } else if (k8sContext && image) {
-    const slots = slotsFor("k8s");
-    backends.register(
-      "k8s",
-      new K8sBackend({
-        image,
-        context: k8sContext,
-        secretEnv: collectAuthEnv(),
-        secrets,
-        ...(slots ? { maxConcurrent: slots.get } : {}),
-      }),
-    );
-  }
-  // Policy (default): never register LocalBackend (unisolated in-process on the control-plane host) — every run must
-  // target a registered tenant runtime or a self-hosted runner (self:<id>/self:ws). This is the default with no opt-in env.
-  // (For dev/single-host in-process runs use apps/cli's `everdict run` — the API only does managed/remote execution.)
-  // Operator fairness dials (docs/execution-backends.md): per-tenant concurrent caps + WFQ weights. Unset = the
-  // previous defaults (unlimited quota, weight 1) — the fairness machinery is always on; these are just the dials.
-  const tenantQuotas = parseTenantMap(process.env.EVERDICT_TENANT_QUOTAS, "EVERDICT_TENANT_QUOTAS");
-  const tenantWeights = parseTenantMap(process.env.EVERDICT_TENANT_WEIGHTS, "EVERDICT_TENANT_WEIGHTS");
-  const tenantQueueDepths = parseTenantMap(process.env.EVERDICT_TENANT_QUEUE_DEPTHS, "EVERDICT_TENANT_QUEUE_DEPTHS");
-  // Runtime-adjustable fairness dials (PUT /internal/scheduling) layered OVER the env defaults — env keeps
-  // being the boot baseline, overrides live in memory (a restart falls back to env; documented).
-  const quotaOverrides = new Map<string, number>();
-  const weightOverrides = new Map<string, number>();
-  const schedulingControl = {
-    effective(): { quotas: Record<string, number>; weights: Record<string, number> } {
-      const tenants = new Set<string>([...quotaOverrides.keys(), ...weightOverrides.keys()]);
-      const quotas: Record<string, number> = {};
-      const weights: Record<string, number> = {};
-      for (const t of tenants) {
-        quotas[t] = quotaOverrides.get(t) ?? tenantQuotas?.get(t) ?? Number.POSITIVE_INFINITY;
-        weights[t] = weightOverrides.get(t) ?? tenantWeights?.get(t) ?? 1;
-      }
-      return { quotas, weights };
-    },
-    set(patch: { quotas?: Record<string, number | null>; weights?: Record<string, number | null> }): void {
-      for (const [t, v] of Object.entries(patch.quotas ?? {}))
-        v === null ? quotaOverrides.delete(t) : quotaOverrides.set(t, v);
-      for (const [t, v] of Object.entries(patch.weights ?? {}))
-        v === null ? weightOverrides.delete(t) : weightOverrides.set(t, v);
-      scheduler.poke(); // loosened quotas should drain the queue immediately
-    },
-  };
-  const scheduler = new Scheduler(backends, {
-    tenantQuota: (t: string) => quotaOverrides.get(t) ?? tenantQuotas?.get(t) ?? Number.POSITIVE_INFINITY,
-    weightFor: (t: string) => weightOverrides.get(t) ?? tenantWeights?.get(t) ?? 1,
-    ...(tenantQueueDepths
-      ? { tenantMaxQueueDepth: (t: string) => tenantQueueDepths.get(t) ?? Number.POSITIVE_INFINITY }
-      : {}),
+  const { backends, scheduler, schedulingControl, autoscale, scalingTargets, tenantQuotas } = buildExecutionScheduling({
+    nomadAddr,
+    k8sContext,
+    image,
+    secretStore,
   });
-  // Prometheus metrics (docs/architecture/work-queue.md — the time-series half; /queue is the snapshot half).
-  const metrics = new Metrics();
-  // Per-runtime circuit breaker — shared between the batch spillover (ScorecardService) and the queue view
-  // (observability): one health memory, three consumers (spillover · queue view · metrics).
-  const breaker = new CircuitBreaker({
-    onOpen: (key) =>
-      metrics.counter("everdict_breaker_open_total", "Circuit-breaker open transitions.", { circuit: key }),
-  });
-  // Scrape-time gauges — sampled live so the scrape always reflects the current scheduler state.
-  metrics.gauge("everdict_scheduler_queued", "Jobs waiting in the control-plane scheduler queue.", () => [
-    { labels: {}, value: scheduler.stats().queued },
-  ]);
-  metrics.gauge("everdict_scheduler_inflight", "In-flight dispatches per backend.", () =>
-    Object.entries(scheduler.stats().inFlight).map(([backend, value]) => ({ labels: { backend }, value })),
-  );
-  metrics.gauge("everdict_scheduler_mem_inflight_mb", "In-flight harness-declared memory per backend (Mb).", () =>
-    Object.entries(scheduler.stats().memInFlightMb).map(([backend, value]) => ({ labels: { backend }, value })),
-  );
-  metrics.gauge("everdict_scheduler_cpu_inflight", "In-flight harness-declared cpu per backend (1000 = 1 vCPU).", () =>
-    Object.entries(scheduler.stats().cpuInFlight).map(([backend, value]) => ({ labels: { backend }, value })),
-  );
-  metrics.gauge("everdict_tenant_inflight", "In-flight dispatches per workspace.", () =>
-    Object.entries(scheduler.stats().tenantInFlight).map(([tenant, value]) => ({ labels: { tenant }, value })),
-  );
-  metrics.gauge("everdict_tenant_queued", "Queued jobs per workspace.", () =>
-    Object.entries(scheduler.stats().queuedByTenant).map(([tenant, value]) => ({ labels: { tenant }, value })),
-  );
-  metrics.gauge("everdict_breaker_open", "Currently-open circuits (1 = open).", () =>
-    Object.entries(breaker.stats())
-      .filter(([, st]) => st.open)
-      .map(([circuit]) => ({ labels: { circuit }, value: 1 })),
-  );
-  if (autoscale && scalingTargets.length > 0) {
-    const autoscaler = new Autoscaler({
-      // Demand = this deployment's whole backlog + what the global backends already run (tenant-runtime jobs
-      // never target these slots, but their queue share still signals pressure — clamped by max anyway).
-      signal: () => {
-        const s = scheduler.stats();
-        const inFlight = scalingTargets.reduce((a, t) => a + (s.inFlight[t.id] ?? 0), 0);
-        return { queued: s.queued, inFlight };
-      },
-      targets: scalingTargets,
-      policy: { min: autoscale.min, max: autoscale.max },
-      ...(autoscale.intervalMs !== undefined ? { intervalMs: autoscale.intervalMs } : {}),
-      onScale: (id, from, to) => console.log(`▶ autoscale ${id}: ${from} → ${to} slots`),
-      onChanged: () => scheduler.poke(), // re-pump so newly-granted slots drain the queue immediately
-    });
-    autoscaler.start();
-    console.log(
-      `▶ autoscale: [${scalingTargets.map((t) => t.id).join(", ")}] slots ${autoscale.min}..${autoscale.max}`,
-    );
-  }
-  // Enforcement budget (blocks with 402; distinct from the meter-only usage above). In-memory decision + best-effort
-  // write-through to the durable BudgetStore + boot hydration → caps + usage survive restarts. DB-set per-tenant
-  // limits take precedence; env-configured limits (budgetFromEnv) are the fallback for tenants without a stored one.
-  const budget = persistentBudget(budgetStore, { fallback: budgetFromEnv() });
-  await budget.hydrate();
-  // Meter-only usage accounting for billing (never blocks; distinct from the enforcement budget above). Read via GET /usage.
-  // In-memory reads + best-effort write-through to the durable UsageStore + boot hydration → usage survives restarts.
-  const usageMeter = persistentUsageMeter(usageStore);
-  await usageMeter.hydrate();
+  const { metrics, breaker } = buildObservability(scheduler);
+  startAutoscaler({ autoscale, scalingTargets, scheduler });
+  const { budget, usageMeter } = await buildBudgets({ budgetStore, usageStore });
 
-  // Self-hosted runner lease hub — parks self:<runnerId> jobs; the runner protocol (MCP, slice 4) leases/returns them.
-  // A single instance shared by the dispatcher (park) and the MCP lease/result tools (lease/complete).
-  const runnerHub = new RunnerHub(
-    process.env.EVERDICT_SELF_HOSTED_QUEUE_TIMEOUT_MS
-      ? { queueTimeoutMs: Number(process.env.EVERDICT_SELF_HOSTED_QUEUE_TIMEOUT_MS) }
-      : {},
-  );
-
-  // Front-door callback completion model: when a public base URL is set, build one in-process rendezvous shared by the topology
-  // backend (outbound: {{callback_url}}/wait) and the /frontdoor-callback route (inbound: deliver). If unset, the callback model
-  // fails clearly in the driver (no rendezvous). Assumes a single control-plane process (in-process dispatch) — distribution via a store-backed rendezvous is a follow-up.
-  // Store-backed rendezvous: the inbound POST may land on ANY replica — deliver persists to the shared store and
-  // the driving replica's wait claims it (Pg store when DATABASE_URL is set; in-memory store = the single-process
-  // dev shape, equivalent to the old in-process rendezvous).
-  const callbackRendezvous = process.env.EVERDICT_CALLBACK_BASE_URL
-    ? new StoreCallbackRendezvous(process.env.EVERDICT_CALLBACK_BASE_URL, callbackStore)
-    : undefined;
-  if (callbackRendezvous) console.log("▶ front-door callback rendezvous:", process.env.EVERDICT_CALLBACK_BASE_URL);
-
-  // Tenant runtime routing: if placement.target is a tenant-registered Runtime, build/register that backend and route to it (else the global backend as-is).
-  const runtimeSecretsFor = (tenant: string) => secretStore.entries(tenant);
-  // Two tiers for resolving harness env {secretRef} — shared (owner='') + submitter's personal (owner=subject). run/scorecard call as the submitter.
-  const scopedSecretsFor = (tenant: string, subject?: string) => secretStore.scopedEntries(tenant, subject ?? "");
-  // Workspace image registry (BYO) — the harness image classification baseline + `everdict image push` publish target + pull-credential injection.
-  // The runtime builder / dispatch enrichment uses pullAuth, so create it beforehand.
-  const imageRegistryService = new ImageRegistryService({
-    settings: settingsStore,
-    secretsFor: runtimeSecretsFor, // push/pull credentials + registration warnings resolve from the shared (workspace) secret tier
-  });
-  // RuntimeSpec → live backend. nomad/k8s with a traceSource (= topology-capable) → ServiceTopologyBackend,
-  // everything else → buildRuntimeBackend (local/nomad/k8s). (The old topology kind was folded into nomad/k8s + traceSource in slice 5b-2.)
-  // Defined in one place so dispatch and the connection test (probe) share the same builder/auth path.
-  const runtimeBuildBackend = (
-    spec: RuntimeSpec,
-    opts: { secretEnv?: Record<string, string>; registryAuth?: RegistryAuth },
-  ) =>
-    (spec.kind === "nomad" || spec.kind === "k8s") && spec.traceSource
-      ? buildTopologyBackend(spec, {
-          harnesses: harnessInstanceRegistry,
-          ...(callbackRendezvous ? { callbackRendezvous } : {}),
-          // Workspace registry pull credentials — the topology runtime authenticates when pulling service images (nomad auth / k8s imagePullSecrets).
-          ...(opts.registryAuth ? { registryAuth: opts.registryAuth } : {}),
-        })
-      : buildRuntimeBackend(spec, opts);
-  // Resolve a command harness's {{model}} to a registered Model id (else raw), then delegate to RuntimeDispatcher (placement).
-  // run/judge/scorecard share this one dispatcher, so every path runs with the identically-resolved model.
-  const dispatcher = new ModelResolvingDispatcher(
+  const {
+    runnerHub,
+    callbackRendezvous,
+    runtimeSecretsFor,
+    scopedSecretsFor,
+    imageRegistryService,
+    runtimeBuildBackend,
+    dispatcher,
+    meteredDispatcher,
+    probeRuntime,
+  } = buildDispatch({
+    callbackStore,
+    secretStore,
+    settingsStore,
+    harnessInstanceRegistry,
     modelRegistry,
-    new RuntimeDispatcher({
-      inner: scheduler,
-      backends,
-      runtimes: runtimeRegistry,
-      secretsFor: runtimeSecretsFor,
-      buildBackend: runtimeBuildBackend,
-      // Workspace registry pull credentials — carried into the topology backend build to authenticate service-image pulls.
-      registryAuthsFor: (tenant) => imageRegistryService.pullAuths(tenant),
-      // self:<runnerId> — personally-owned runner. Confirm ownership (not owned = undefined) + return that runner's capabilities (for the service gate).
-      resolveSelfRunner: async (owner, runnerId) => (await runnerStore.get(owner, runnerId))?.capabilities,
-      // self:ws — workspace pool. Whether that owner (=ws:<tenant>) has any runner at all (lease any runner).
-      poolHasRunners: async (owner) => (await runnerStore.list(owner)).length > 0,
-      buildSelfHostedBackend: (key) => new SelfHostedBackend(key, runnerHub),
-    }),
-  );
-  // Metered dispatcher — every dispatch (single runs, batch cases, judges) flows through one seam, so outcome
-  // counters and the per-runtime duration histogram cover the whole system without per-caller wiring.
-  const meteredDispatcher: CoreDispatcher = {
-    dispatch: async (job, opts) => {
-      const runtime = job.evalCase.placement?.target ?? "default";
-      const startedAt = Date.now();
-      try {
-        const result = await dispatcher.dispatch(job, opts);
-        metrics.counter("everdict_dispatch_total", "Dispatch outcomes.", { runtime, outcome: "ok" });
-        metrics.observe(
-          "everdict_case_duration_seconds",
-          "Case wall-clock from dispatch to result, per runtime.",
-          { runtime },
-          (Date.now() - startedAt) / 1000,
-        );
-        return result;
-      } catch (err) {
-        metrics.counter("everdict_dispatch_total", "Dispatch outcomes.", {
-          runtime,
-          outcome: classifyFailure(err, "dispatch").class,
-        });
-        throw err;
-      }
-    },
-  };
-  // Connection test: build a backend with the same builder + tenant secrets and probe() (reachability/auth with no job). Shared by server/MCP.
-  const probeRuntime = makeRuntimeProber({ secretsFor: runtimeSecretsFor, buildBackend: runtimeBuildBackend });
+    runtimeRegistry,
+    runnerStore,
+    scheduler,
+    backends,
+    metrics,
+  });
 
   // Artifact store (when env-configured): offload os-use screenshots to S3/MinIO → result records carry only a presigned URL (no base64 inline).
   // Unset → undefined → the service falls back to base64 inline (dev). Credentials are env secrets (never committed).
@@ -438,64 +240,15 @@ async function main(): Promise<void> {
   if (artifacts) console.log("▶ artifact store: S3/MinIO offload enabled (os-use screenshots)");
 
   const envMeterPolicy = meterUsagePolicyFromEnv(); // default policy when the workspace has no DB setting
-  // Completion notifications: when workspace notify settings exist (Mattermost connection + channel), post run/scorecard completion to the channel (consumer slice).
-  const notificationService = new NotificationService({
-    settingsFor: (tenant) => settingsStore.get(tenant),
-    // Workspace Mattermost (bot token) — resolve settings.mattermost.botTokenSecretName from shared secrets.
-    secretsFor: runtimeSecretsFor,
-    feed: notificationStore, // personal notification feed (bell inbox) — docs/architecture/notifications.md
-    // Rerun button on completion posts — only attaches when Mattermost can reach us back (public URL known).
-    ...(process.env.API_PUBLIC_URL ? { apiPublicUrl: process.env.API_PUBLIC_URL } : {}),
-  });
-  // Workspace-owned Mattermost integration (register → bot notifications + inbound slash commands/buttons). apiPublicUrl exposes the inbound URL.
-  const mattermostService = new MattermostService(settingsStore, {
-    ...(process.env.API_PUBLIC_URL ? { apiPublicUrl: process.env.API_PUBLIC_URL } : {}),
-  });
-  // Workspace trace sinks — export scorecard detail results to the team's observability platform. docs/architecture/trace-sink.md
-  const traceSinkService = new TraceSinkService(settingsStore, {
-    secretsFor: runtimeSecretsFor, // authSecretName → shared (workspace) secret value
-    buildSink: buildTraceSink,
-  });
-  // Resource comments (datasets, etc.) for collaborative discussion + @mention notifications. On a mention, resolve the mentioner's name from profile/membership into the personal feed.
-  const commentService = new CommentService({
-    store: commentStore,
-    notifyMention: async ({ tenant, comment, recipients }) => {
-      // listMembers already merges in profile names — the mentioner's display name (name > email local-part > default).
-      const member = await membershipService
-        .listMembers(tenant)
-        .then((ms) => ms.find((m) => m.subject === comment.author))
-        .catch(() => undefined);
-      const actorName = member?.name ?? member?.email?.split("@")[0] ?? "someone";
-      await notificationService.notifyMention(tenant, {
-        recipients,
-        actorName,
-        resourceType: comment.resourceType,
-        resourceId: comment.resourceId,
-        commentId: comment.id,
-        preview: comment.body,
-      });
-    },
-  });
-  // Workspace-owned GitHub App integration — org install → selected repos → workspace-owned installation (replaces personal connections).
-  // github.com App = operator env (GITHUB_APP_*); GHE App = admin registers it on the workspace (private key = SecretStore name-ref).
-  // RunService/ScorecardService's installationTokenFor calls this, so create it beforehand.
-  const githubComApp = githubComAppConfig();
-  const githubAppService = new GithubAppService({
-    states: oauthStateStore,
-    settings: settingsStore,
-    secretsFor: runtimeSecretsFor,
-    config: {
-      webBaseUrl: process.env.WEB_BASE_URL ?? "http://localhost:3001",
-      ...(process.env.API_PUBLIC_URL ? { apiPublicUrl: process.env.API_PUBLIC_URL } : {}),
-      ...(githubComApp ? { githubCom: githubComApp } : {}),
-    },
-  });
-  if (githubComApp)
-    console.error("▶ github-app: github.com App enabled (GITHUB_APP_ID/SLUG) — org install → selected-repo one-click");
-  else
-    console.warn(
-      "▶ github-app: GITHUB_APP_* unset — github.com App install disabled (GHE still works when an admin registers it on the workspace).",
-    );
+  const { notificationService, mattermostService, traceSinkService, commentService, githubAppService } =
+    buildIntegrations({
+      settingsStore,
+      notificationStore,
+      commentStore,
+      oauthStateStore,
+      membershipService,
+      runtimeSecretsFor,
+    });
 
   const service = new RunService({
     // Lazy — the lane-resolving closure is built further down (after the runtime registry wiring).
@@ -546,110 +299,14 @@ async function main(): Promise<void> {
     process.env.EVERDICT_TEMPORAL_ADDRESS && process.env.EVERDICT_TEMPORAL_BATCHES !== "0"
       ? process.env.EVERDICT_TEMPORAL_ADDRESS
       : undefined;
-  // Boot-recovery adoption + supersede force-kill: resolve each runtime of the child's recorded lane (may be a
-  // comma shard list) to a live backend and use its optional adopt/kill. Best-effort by design — a miss falls
-  // back to re-dispatch (adopt) or leaves the job to finish unobserved (kill).
-  const eachRuntimeBackend = async (
-    tenant: string,
-    runtimeList: string | undefined,
-    fn: (backend: Backend) => Promise<boolean>, // return true to stop iterating (handled)
-  ): Promise<void> => {
-    const targets = (runtimeList ?? "")
-      .split(",")
-      .map((t) => t.trim())
-      .filter((t) => t !== "" && !t.startsWith("self:")); // self-hosted lanes are lease queues — nothing to adopt/kill
-    for (const target of targets) {
-      const spec = await runtimeRegistry.get(tenant, target).catch(() => undefined);
-      if (!spec) continue;
-      const secretEnv = await runtimeSecretsFor(tenant).catch(() => ({}) as Record<string, string>);
-      const backend = runtimeBuildBackend(spec, { secretEnv });
-      if (await fn(backend)) return;
-    }
-  };
-
-  // Adopt a still-alive backend job's finished result by caseId — shared by scorecard resume and
-  // standalone-run boot recovery (P4 single-run durability): zero re-run when the job outlived the CP restart.
-  const adoptCaseFn = async (
-    tenant: string,
-    runtimeList: string | undefined, // may be a comma shard list — eachRuntimeBackend splits it
-    caseId: string,
-  ): Promise<CaseResult | undefined> => {
-    let adopted: CaseResult | undefined;
-    await eachRuntimeBackend(tenant, runtimeList, async (backend) => {
-      if (!isRecoverable(backend)) return false;
-      const outcome = await backend.adopt(caseId); // total (never throws) — no redundant .catch here
-      if (outcome.status === "adopted") {
-        adopted = outcome.result;
-        return true; // harvested a finished job — stop scanning lanes
-      }
-      if (outcome.status === "unknown") {
-        // The job may still be live but we couldn't confirm — surface that re-dispatch might double-spend compute.
-        console.warn(
-          `▶ adopt: inconclusive for case ${caseId} (tenant ${tenant}) — re-dispatch may double-spend a live job`,
-        );
-      }
-      return false; // absent or unknown → try the next runtime lane, then fall back to re-dispatch
-    });
-    return adopted;
-  };
-
-  // Live-progress log read — same lane resolution as adoption; the first backend with a readable log wins.
-  const readCaseLogsFn = async (
-    tenant: string,
-    runtimeList: string | undefined,
-    caseId: string,
-  ): Promise<string | undefined> => {
-    let text: string | undefined;
-    await eachRuntimeBackend(tenant, runtimeList, async (backend) => {
-      if (!isObservable(backend)) return false;
-      text = await backend.logs(caseId).catch(() => undefined);
-      return text !== undefined;
-    });
-    return text;
-  };
-
-  // Open an interactive shell stream on a case's live sandbox (observability ⑥) — same lane resolution as logs.
-  const openTerminalStreamFn = async (tenant: string, runtimeList: string | undefined, caseId: string) => {
-    let handle: import("@everdict/backends").ExecStreamHandle | undefined;
-    await eachRuntimeBackend(tenant, runtimeList, async (backend) => {
-      if (!isShellable(backend)) return false;
-      handle = await backend.execStream(caseId).catch(() => undefined);
-      return handle !== undefined;
-    });
-    return handle;
-  };
-
-  // Live browser frame (observability ⑦) — resolve the run's runtime to a topology backend and capture its
-  // per-case browser CDP screen by runId. Only ServiceTopologyBackend implements captureScreen.
-  const captureBrowserScreenFn = async (
-    tenant: string,
-    runtimeList: string | undefined,
-    runId: string,
-  ): Promise<string | undefined> => {
-    let b64: string | undefined;
-    await eachRuntimeBackend(tenant, runtimeList, async (backend) => {
-      if (!isScreenCapturable(backend)) return false;
-      b64 = await backend.captureScreen(runId).catch(() => undefined);
-      return b64 !== undefined;
-    });
-    return b64;
-  };
-
-  // One-shot exec into a case's live sandbox (web terminal / live screen) — same lane resolution as logs.
-  const execInSandboxFn = async (
-    tenant: string,
-    runtimeList: string | undefined,
-    caseId: string,
-    command: string,
-  ): Promise<{ stdout: string; stderr: string; exitCode: number } | undefined> => {
-    let out: { stdout: string; stderr: string; exitCode: number } | undefined;
-    await eachRuntimeBackend(tenant, runtimeList, async (backend) => {
-      if (!isObservable(backend)) return false;
-      out = await backend.exec(caseId, command).catch(() => undefined);
-      return out !== undefined;
-    });
-    return out;
-  };
+  const {
+    eachRuntimeBackend,
+    adoptCaseFn,
+    readCaseLogsFn,
+    openTerminalStreamFn,
+    captureBrowserScreenFn,
+    execInSandboxFn,
+  } = buildRuntimeAccess({ runtimeRegistry, runtimeSecretsFor, runtimeBuildBackend });
 
   const scorecardService = new ScorecardService({
     dispatcher: meteredDispatcher,
@@ -732,31 +389,7 @@ async function main(): Promise<void> {
     exportStreamFor: (tenant, ctx) => traceSinkService.exportStream(tenant, ctx),
   });
 
-  // Recover orphaned jobs at boot — batches/runs are tracked in-process within this process, so at restart any
-  // queued/running record is a ghost with no one to resume it. Interrupted BATCHES are resumed from their finished
-  // child results (unfinished cases re-dispatched); unresumable records fall back to failed(INTERRUPTED).
-  // docs/architecture/batch-resilience.md
-  const recovered = await recoverInterrupted({
-    scorecards: scorecardStore,
-    runs: store,
-    resume: (id) => scorecardService.resume(id),
-    // Standalone runs: adopt the still-alive backend job first (zero re-run), else re-dispatch from the
-    // persisted caseSpec (mig 0051); legacy records without one keep the tombstone path.
-    // Claim the run for resume and adopt IN THE BACKGROUND — adopting a still-running run waits for its alloc to
-    // finish (a long run would otherwise block control-plane startup). The background task settles via adoption
-    // (zero re-run) or falls back to caseSpec re-dispatch. Returning true keeps recovery from tombstoning it.
-    resumeRun: async (r) => {
-      void (async () => {
-        const adopted = await adoptCaseFn(r.tenant, r.runtime, r.caseId).catch(() => undefined);
-        await service.resume(r, adopted).catch(() => {});
-      })();
-      return true;
-    },
-  });
-  if (recovered.scorecards + recovered.resumed + recovered.runs + recovered.runsResumed > 0)
-    console.error(
-      `▶ boot recovery: batches resumed ${recovered.resumed} · batches failed(INTERRUPTED) ${recovered.scorecards} · runs resumed ${recovered.runsResumed} · runs failed ${recovered.runs}`,
-    );
+  await runStartupRecovery({ scorecardStore, store, scorecardService, service, adoptCaseFn });
   // Mattermost inbound (slash commands/buttons) — after commandToken verification, run a scorecard / view the leaderboard from chat.
   const mattermostCommandService = new MattermostCommandService({
     settings: settingsStore,
@@ -903,6 +536,541 @@ async function main(): Promise<void> {
   console.error(
     `▶ everdict-api on :${port} (backend:${nomadAddr ? "nomad" : k8sContext ? "k8s" : "runtime-only"} store:${process.env.DATABASE_URL ? "postgres" : "memory"} auth:${process.env.EVERDICT_REQUIRE_AUTH === "1" ? "required" : "dev-fallback"} runtime:required)`,
   );
+}
+
+// Execution scheduling: the global env backends (Nomad/K8s) + their slot-autoscaling targets + the operator
+// fairness dials (quota/weight/queue-depth), feeding the capacity-aware tenant-fair Scheduler.
+function buildExecutionScheduling(deps: {
+  nomadAddr: string | undefined;
+  k8sContext: string | undefined;
+  image: string | undefined;
+  secretStore: SecretStore;
+}) {
+  const { nomadAddr, k8sContext, image, secretStore } = deps;
+  // Inject workspace secrets (model/provider keys) only into that tenant's job env (no leakage). The store is always active.
+  const secrets = { secretsFor: (tenant: string) => secretStore.entries(tenant) };
+
+  const backends = new BackendRegistry();
+  // Slot autoscaling (EVERDICT_AUTOSCALE="min:max[:intervalMs]") — global env backends only: their slot cap
+  // becomes a MutableSlots the Autoscaler grows with queue depth (a downstream cluster autoscaler then sees the
+  // pending work) and shrinks after idle hysteresis. Tenant runtimes keep their spec-declared envelope.
+  const autoscale = parseAutoscale(process.env.EVERDICT_AUTOSCALE);
+  const scalingTargets: MutableSlots[] = [];
+  const slotsFor = (name: string): MutableSlots | undefined => {
+    if (!autoscale) return undefined;
+    const slots = new MutableSlots(name, Math.max(1, autoscale.min));
+    scalingTargets.push(slots);
+    return slots;
+  };
+  if (nomadAddr && image) {
+    const slots = slotsFor("nomad");
+    backends.register(
+      "nomad",
+      new NomadBackend({
+        addr: nomadAddr,
+        image,
+        secretEnv: collectAuthEnv(),
+        secrets,
+        ...(slots ? { maxConcurrent: slots.get } : {}),
+      }),
+    );
+  } else if (k8sContext && image) {
+    const slots = slotsFor("k8s");
+    backends.register(
+      "k8s",
+      new K8sBackend({
+        image,
+        context: k8sContext,
+        secretEnv: collectAuthEnv(),
+        secrets,
+        ...(slots ? { maxConcurrent: slots.get } : {}),
+      }),
+    );
+  }
+  // Policy (default): never register LocalBackend (unisolated in-process on the control-plane host) — every run must
+  // target a registered tenant runtime or a self-hosted runner (self:<id>/self:ws). This is the default with no opt-in env.
+  // (For dev/single-host in-process runs use apps/cli's `everdict run` — the API only does managed/remote execution.)
+  // Operator fairness dials (docs/execution-backends.md): per-tenant concurrent caps + WFQ weights. Unset = the
+  // previous defaults (unlimited quota, weight 1) — the fairness machinery is always on; these are just the dials.
+  const tenantQuotas = parseTenantMap(process.env.EVERDICT_TENANT_QUOTAS, "EVERDICT_TENANT_QUOTAS");
+  const tenantWeights = parseTenantMap(process.env.EVERDICT_TENANT_WEIGHTS, "EVERDICT_TENANT_WEIGHTS");
+  const tenantQueueDepths = parseTenantMap(process.env.EVERDICT_TENANT_QUEUE_DEPTHS, "EVERDICT_TENANT_QUEUE_DEPTHS");
+  // Runtime-adjustable fairness dials (PUT /internal/scheduling) layered OVER the env defaults — env keeps
+  // being the boot baseline, overrides live in memory (a restart falls back to env; documented).
+  const quotaOverrides = new Map<string, number>();
+  const weightOverrides = new Map<string, number>();
+  const schedulingControl = {
+    effective(): { quotas: Record<string, number>; weights: Record<string, number> } {
+      const tenants = new Set<string>([...quotaOverrides.keys(), ...weightOverrides.keys()]);
+      const quotas: Record<string, number> = {};
+      const weights: Record<string, number> = {};
+      for (const t of tenants) {
+        quotas[t] = quotaOverrides.get(t) ?? tenantQuotas?.get(t) ?? Number.POSITIVE_INFINITY;
+        weights[t] = weightOverrides.get(t) ?? tenantWeights?.get(t) ?? 1;
+      }
+      return { quotas, weights };
+    },
+    set(patch: { quotas?: Record<string, number | null>; weights?: Record<string, number | null> }): void {
+      for (const [t, v] of Object.entries(patch.quotas ?? {}))
+        v === null ? quotaOverrides.delete(t) : quotaOverrides.set(t, v);
+      for (const [t, v] of Object.entries(patch.weights ?? {}))
+        v === null ? weightOverrides.delete(t) : weightOverrides.set(t, v);
+      scheduler.poke(); // loosened quotas should drain the queue immediately
+    },
+  };
+  const scheduler = new Scheduler(backends, {
+    tenantQuota: (t: string) => quotaOverrides.get(t) ?? tenantQuotas?.get(t) ?? Number.POSITIVE_INFINITY,
+    weightFor: (t: string) => weightOverrides.get(t) ?? tenantWeights?.get(t) ?? 1,
+    ...(tenantQueueDepths
+      ? { tenantMaxQueueDepth: (t: string) => tenantQueueDepths.get(t) ?? Number.POSITIVE_INFINITY }
+      : {}),
+  });
+  return { backends, scheduler, schedulingControl, autoscale, scalingTargets, tenantQuotas };
+}
+
+// Prometheus metrics (docs/architecture/work-queue.md — the time-series half; /queue is the snapshot half)
+// + the per-runtime circuit breaker + the scrape-time scheduler gauges.
+function buildObservability(scheduler: Scheduler) {
+  const metrics = new Metrics();
+  // Per-runtime circuit breaker — shared between the batch spillover (ScorecardService) and the queue view
+  // (observability): one health memory, three consumers (spillover · queue view · metrics).
+  const breaker = new CircuitBreaker({
+    onOpen: (key) =>
+      metrics.counter("everdict_breaker_open_total", "Circuit-breaker open transitions.", { circuit: key }),
+  });
+  // Scrape-time gauges — sampled live so the scrape always reflects the current scheduler state.
+  metrics.gauge("everdict_scheduler_queued", "Jobs waiting in the control-plane scheduler queue.", () => [
+    { labels: {}, value: scheduler.stats().queued },
+  ]);
+  metrics.gauge("everdict_scheduler_inflight", "In-flight dispatches per backend.", () =>
+    Object.entries(scheduler.stats().inFlight).map(([backend, value]) => ({ labels: { backend }, value })),
+  );
+  metrics.gauge("everdict_scheduler_mem_inflight_mb", "In-flight harness-declared memory per backend (Mb).", () =>
+    Object.entries(scheduler.stats().memInFlightMb).map(([backend, value]) => ({ labels: { backend }, value })),
+  );
+  metrics.gauge("everdict_scheduler_cpu_inflight", "In-flight harness-declared cpu per backend (1000 = 1 vCPU).", () =>
+    Object.entries(scheduler.stats().cpuInFlight).map(([backend, value]) => ({ labels: { backend }, value })),
+  );
+  metrics.gauge("everdict_tenant_inflight", "In-flight dispatches per workspace.", () =>
+    Object.entries(scheduler.stats().tenantInFlight).map(([tenant, value]) => ({ labels: { tenant }, value })),
+  );
+  metrics.gauge("everdict_tenant_queued", "Queued jobs per workspace.", () =>
+    Object.entries(scheduler.stats().queuedByTenant).map(([tenant, value]) => ({ labels: { tenant }, value })),
+  );
+  metrics.gauge("everdict_breaker_open", "Currently-open circuits (1 = open).", () =>
+    Object.entries(breaker.stats())
+      .filter(([, st]) => st.open)
+      .map(([circuit]) => ({ labels: { circuit }, value: 1 })),
+  );
+  return { metrics, breaker };
+}
+
+// Slot autoscaler (EVERDICT_AUTOSCALE) — grows the global backends' slots with queue depth, shrinks after idle.
+function startAutoscaler(deps: {
+  autoscale: AutoscaleConfig | undefined;
+  scalingTargets: MutableSlots[];
+  scheduler: Scheduler;
+}): void {
+  const { autoscale, scalingTargets, scheduler } = deps;
+  if (autoscale && scalingTargets.length > 0) {
+    const autoscaler = new Autoscaler({
+      // Demand = this deployment's whole backlog + what the global backends already run (tenant-runtime jobs
+      // never target these slots, but their queue share still signals pressure — clamped by max anyway).
+      signal: () => {
+        const s = scheduler.stats();
+        const inFlight = scalingTargets.reduce((a, t) => a + (s.inFlight[t.id] ?? 0), 0);
+        return { queued: s.queued, inFlight };
+      },
+      targets: scalingTargets,
+      policy: { min: autoscale.min, max: autoscale.max },
+      ...(autoscale.intervalMs !== undefined ? { intervalMs: autoscale.intervalMs } : {}),
+      onScale: (id, from, to) => console.log(`▶ autoscale ${id}: ${from} → ${to} slots`),
+      onChanged: () => scheduler.poke(), // re-pump so newly-granted slots drain the queue immediately
+    });
+    autoscaler.start();
+    console.log(
+      `▶ autoscale: [${scalingTargets.map((t) => t.id).join(", ")}] slots ${autoscale.min}..${autoscale.max}`,
+    );
+  }
+}
+
+// Budgets: the enforcement budget (402-blocking) + the meter-only usage accounting — both hydrate from their
+// durable stores at boot so caps and usage survive restarts.
+async function buildBudgets(deps: { budgetStore: BudgetStore; usageStore: UsageStore }) {
+  const { budgetStore, usageStore } = deps;
+  // Enforcement budget (blocks with 402; distinct from the meter-only usage above). In-memory decision + best-effort
+  // write-through to the durable BudgetStore + boot hydration → caps + usage survive restarts. DB-set per-tenant
+  // limits take precedence; env-configured limits (budgetFromEnv) are the fallback for tenants without a stored one.
+  const budget = persistentBudget(budgetStore, { fallback: budgetFromEnv() });
+  await budget.hydrate();
+  // Meter-only usage accounting for billing (never blocks; distinct from the enforcement budget above). Read via GET /usage.
+  // In-memory reads + best-effort write-through to the durable UsageStore + boot hydration → usage survives restarts.
+  const usageMeter = persistentUsageMeter(usageStore);
+  await usageMeter.hydrate();
+  return { budget, usageMeter };
+}
+
+// Dispatch stack: the self-hosted runner lease hub + the front-door callback rendezvous + tenant runtime routing
+// (RuntimeSpec → live backend) + the one model-resolving/metered dispatcher every path shares + the connection probe.
+function buildDispatch(deps: {
+  callbackStore: CallbackStore;
+  secretStore: SecretStore;
+  settingsStore: WorkspaceSettingsStore;
+  harnessInstanceRegistry: HarnessInstanceRegistry;
+  modelRegistry: ModelRegistry;
+  runtimeRegistry: RuntimeRegistry;
+  runnerStore: RunnerStore;
+  scheduler: Scheduler;
+  backends: BackendRegistry;
+  metrics: Metrics;
+}) {
+  const {
+    callbackStore,
+    secretStore,
+    settingsStore,
+    harnessInstanceRegistry,
+    modelRegistry,
+    runtimeRegistry,
+    runnerStore,
+    scheduler,
+    backends,
+    metrics,
+  } = deps;
+  // Self-hosted runner lease hub — parks self:<runnerId> jobs; the runner protocol (MCP, slice 4) leases/returns them.
+  // A single instance shared by the dispatcher (park) and the MCP lease/result tools (lease/complete).
+  const runnerHub = new RunnerHub(
+    process.env.EVERDICT_SELF_HOSTED_QUEUE_TIMEOUT_MS
+      ? { queueTimeoutMs: Number(process.env.EVERDICT_SELF_HOSTED_QUEUE_TIMEOUT_MS) }
+      : {},
+  );
+
+  // Front-door callback completion model: when a public base URL is set, build one in-process rendezvous shared by the topology
+  // backend (outbound: {{callback_url}}/wait) and the /frontdoor-callback route (inbound: deliver). If unset, the callback model
+  // fails clearly in the driver (no rendezvous). Assumes a single control-plane process (in-process dispatch) — distribution via a store-backed rendezvous is a follow-up.
+  // Store-backed rendezvous: the inbound POST may land on ANY replica — deliver persists to the shared store and
+  // the driving replica's wait claims it (Pg store when DATABASE_URL is set; in-memory store = the single-process
+  // dev shape, equivalent to the old in-process rendezvous).
+  const callbackRendezvous = process.env.EVERDICT_CALLBACK_BASE_URL
+    ? new StoreCallbackRendezvous(process.env.EVERDICT_CALLBACK_BASE_URL, callbackStore)
+    : undefined;
+  if (callbackRendezvous) console.log("▶ front-door callback rendezvous:", process.env.EVERDICT_CALLBACK_BASE_URL);
+
+  // Tenant runtime routing: if placement.target is a tenant-registered Runtime, build/register that backend and route to it (else the global backend as-is).
+  const runtimeSecretsFor = (tenant: string) => secretStore.entries(tenant);
+  // Two tiers for resolving harness env {secretRef} — shared (owner='') + submitter's personal (owner=subject). run/scorecard call as the submitter.
+  const scopedSecretsFor = (tenant: string, subject?: string) => secretStore.scopedEntries(tenant, subject ?? "");
+  // Workspace image registry (BYO) — the harness image classification baseline + `everdict image push` publish target + pull-credential injection.
+  // The runtime builder / dispatch enrichment uses pullAuth, so create it beforehand.
+  const imageRegistryService = new ImageRegistryService({
+    settings: settingsStore,
+    secretsFor: runtimeSecretsFor, // push/pull credentials + registration warnings resolve from the shared (workspace) secret tier
+  });
+  // RuntimeSpec → live backend. nomad/k8s with a traceSource (= topology-capable) → ServiceTopologyBackend,
+  // everything else → buildRuntimeBackend (local/nomad/k8s). (The old topology kind was folded into nomad/k8s + traceSource in slice 5b-2.)
+  // Defined in one place so dispatch and the connection test (probe) share the same builder/auth path.
+  const runtimeBuildBackend = (
+    spec: RuntimeSpec,
+    opts: { secretEnv?: Record<string, string>; registryAuth?: RegistryAuth },
+  ) =>
+    (spec.kind === "nomad" || spec.kind === "k8s") && spec.traceSource
+      ? buildTopologyBackend(spec, {
+          harnesses: harnessInstanceRegistry,
+          ...(callbackRendezvous ? { callbackRendezvous } : {}),
+          // Workspace registry pull credentials — the topology runtime authenticates when pulling service images (nomad auth / k8s imagePullSecrets).
+          ...(opts.registryAuth ? { registryAuth: opts.registryAuth } : {}),
+        })
+      : buildRuntimeBackend(spec, opts);
+  // Resolve a command harness's {{model}} to a registered Model id (else raw), then delegate to RuntimeDispatcher (placement).
+  // run/judge/scorecard share this one dispatcher, so every path runs with the identically-resolved model.
+  const dispatcher = new ModelResolvingDispatcher(
+    modelRegistry,
+    new RuntimeDispatcher({
+      inner: scheduler,
+      backends,
+      runtimes: runtimeRegistry,
+      secretsFor: runtimeSecretsFor,
+      buildBackend: runtimeBuildBackend,
+      // Workspace registry pull credentials — carried into the topology backend build to authenticate service-image pulls.
+      registryAuthsFor: (tenant) => imageRegistryService.pullAuths(tenant),
+      // self:<runnerId> — personally-owned runner. Confirm ownership (not owned = undefined) + return that runner's capabilities (for the service gate).
+      resolveSelfRunner: async (owner, runnerId) => (await runnerStore.get(owner, runnerId))?.capabilities,
+      // self:ws — workspace pool. Whether that owner (=ws:<tenant>) has any runner at all (lease any runner).
+      poolHasRunners: async (owner) => (await runnerStore.list(owner)).length > 0,
+      buildSelfHostedBackend: (key) => new SelfHostedBackend(key, runnerHub),
+    }),
+  );
+  // Metered dispatcher — every dispatch (single runs, batch cases, judges) flows through one seam, so outcome
+  // counters and the per-runtime duration histogram cover the whole system without per-caller wiring.
+  const meteredDispatcher: CoreDispatcher = {
+    dispatch: async (job, opts) => {
+      const runtime = job.evalCase.placement?.target ?? "default";
+      const startedAt = Date.now();
+      try {
+        const result = await dispatcher.dispatch(job, opts);
+        metrics.counter("everdict_dispatch_total", "Dispatch outcomes.", { runtime, outcome: "ok" });
+        metrics.observe(
+          "everdict_case_duration_seconds",
+          "Case wall-clock from dispatch to result, per runtime.",
+          { runtime },
+          (Date.now() - startedAt) / 1000,
+        );
+        return result;
+      } catch (err) {
+        metrics.counter("everdict_dispatch_total", "Dispatch outcomes.", {
+          runtime,
+          outcome: classifyFailure(err, "dispatch").class,
+        });
+        throw err;
+      }
+    },
+  };
+  // Connection test: build a backend with the same builder + tenant secrets and probe() (reachability/auth with no job). Shared by server/MCP.
+  const probeRuntime = makeRuntimeProber({ secretsFor: runtimeSecretsFor, buildBackend: runtimeBuildBackend });
+  return {
+    runnerHub,
+    callbackRendezvous,
+    runtimeSecretsFor,
+    scopedSecretsFor,
+    imageRegistryService,
+    runtimeBuildBackend,
+    dispatcher,
+    meteredDispatcher,
+    probeRuntime,
+  };
+}
+
+// Workspace integration services: completion notifications (Mattermost channel + personal feed), the Mattermost
+// registration surface, trace sinks, resource comments (@mention feed), and the workspace GitHub App.
+function buildIntegrations(deps: {
+  settingsStore: WorkspaceSettingsStore;
+  notificationStore: NotificationStore;
+  commentStore: CommentStore;
+  oauthStateStore: OAuthStateStore;
+  membershipService: MembershipService;
+  runtimeSecretsFor: (tenant: string) => Promise<Record<string, string>>;
+}) {
+  const { settingsStore, notificationStore, commentStore, oauthStateStore, membershipService, runtimeSecretsFor } =
+    deps;
+  // Completion notifications: when workspace notify settings exist (Mattermost connection + channel), post run/scorecard completion to the channel (consumer slice).
+  const notificationService = new NotificationService({
+    settingsFor: (tenant) => settingsStore.get(tenant),
+    // Workspace Mattermost (bot token) — resolve settings.mattermost.botTokenSecretName from shared secrets.
+    secretsFor: runtimeSecretsFor,
+    feed: notificationStore, // personal notification feed (bell inbox) — docs/architecture/notifications.md
+    // Rerun button on completion posts — only attaches when Mattermost can reach us back (public URL known).
+    ...(process.env.API_PUBLIC_URL ? { apiPublicUrl: process.env.API_PUBLIC_URL } : {}),
+  });
+  // Workspace-owned Mattermost integration (register → bot notifications + inbound slash commands/buttons). apiPublicUrl exposes the inbound URL.
+  const mattermostService = new MattermostService(settingsStore, {
+    ...(process.env.API_PUBLIC_URL ? { apiPublicUrl: process.env.API_PUBLIC_URL } : {}),
+  });
+  // Workspace trace sinks — export scorecard detail results to the team's observability platform. docs/architecture/trace-sink.md
+  const traceSinkService = new TraceSinkService(settingsStore, {
+    secretsFor: runtimeSecretsFor, // authSecretName → shared (workspace) secret value
+    buildSink: buildTraceSink,
+  });
+  // Resource comments (datasets, etc.) for collaborative discussion + @mention notifications. On a mention, resolve the mentioner's name from profile/membership into the personal feed.
+  const commentService = new CommentService({
+    store: commentStore,
+    notifyMention: async ({ tenant, comment, recipients }) => {
+      // listMembers already merges in profile names — the mentioner's display name (name > email local-part > default).
+      const member = await membershipService
+        .listMembers(tenant)
+        .then((ms) => ms.find((m) => m.subject === comment.author))
+        .catch(() => undefined);
+      const actorName = member?.name ?? member?.email?.split("@")[0] ?? "someone";
+      await notificationService.notifyMention(tenant, {
+        recipients,
+        actorName,
+        resourceType: comment.resourceType,
+        resourceId: comment.resourceId,
+        commentId: comment.id,
+        preview: comment.body,
+      });
+    },
+  });
+  // Workspace-owned GitHub App integration — org install → selected repos → workspace-owned installation (replaces personal connections).
+  // github.com App = operator env (GITHUB_APP_*); GHE App = admin registers it on the workspace (private key = SecretStore name-ref).
+  // RunService/ScorecardService's installationTokenFor calls this, so create it beforehand.
+  const githubComApp = githubComAppConfig();
+  const githubAppService = new GithubAppService({
+    states: oauthStateStore,
+    settings: settingsStore,
+    secretsFor: runtimeSecretsFor,
+    config: {
+      webBaseUrl: process.env.WEB_BASE_URL ?? "http://localhost:3001",
+      ...(process.env.API_PUBLIC_URL ? { apiPublicUrl: process.env.API_PUBLIC_URL } : {}),
+      ...(githubComApp ? { githubCom: githubComApp } : {}),
+    },
+  });
+  if (githubComApp)
+    console.error("▶ github-app: github.com App enabled (GITHUB_APP_ID/SLUG) — org install → selected-repo one-click");
+  else
+    console.warn(
+      "▶ github-app: GITHUB_APP_* unset — github.com App install disabled (GHE still works when an admin registers it on the workspace).",
+    );
+  return { notificationService, mattermostService, traceSinkService, commentService, githubAppService };
+}
+
+// Per-runtime backend access for already-dispatched cases: adoption/kill (boot recovery, supersede) + the
+// live-observability reads (logs / one-shot exec / terminal stream / browser frame). Resolves the recorded
+// runtime lane (possibly a comma shard list) to live backends via the shared runtime builder/auth path.
+function buildRuntimeAccess(deps: {
+  runtimeRegistry: RuntimeRegistry;
+  runtimeSecretsFor: (tenant: string) => Promise<Record<string, string>>;
+  runtimeBuildBackend: (
+    spec: RuntimeSpec,
+    opts: { secretEnv?: Record<string, string>; registryAuth?: RegistryAuth },
+  ) => Backend;
+}) {
+  const { runtimeRegistry, runtimeSecretsFor, runtimeBuildBackend } = deps;
+  // Boot-recovery adoption + supersede force-kill: resolve each runtime of the child's recorded lane (may be a
+  // comma shard list) to a live backend and use its optional adopt/kill. Best-effort by design — a miss falls
+  // back to re-dispatch (adopt) or leaves the job to finish unobserved (kill).
+  const eachRuntimeBackend = async (
+    tenant: string,
+    runtimeList: string | undefined,
+    fn: (backend: Backend) => Promise<boolean>, // return true to stop iterating (handled)
+  ): Promise<void> => {
+    const targets = (runtimeList ?? "")
+      .split(",")
+      .map((t) => t.trim())
+      .filter((t) => t !== "" && !t.startsWith("self:")); // self-hosted lanes are lease queues — nothing to adopt/kill
+    for (const target of targets) {
+      const spec = await runtimeRegistry.get(tenant, target).catch(() => undefined);
+      if (!spec) continue;
+      const secretEnv = await runtimeSecretsFor(tenant).catch(() => ({}) as Record<string, string>);
+      const backend = runtimeBuildBackend(spec, { secretEnv });
+      if (await fn(backend)) return;
+    }
+  };
+
+  // Adopt a still-alive backend job's finished result by caseId — shared by scorecard resume and
+  // standalone-run boot recovery (P4 single-run durability): zero re-run when the job outlived the CP restart.
+  const adoptCaseFn = async (
+    tenant: string,
+    runtimeList: string | undefined, // may be a comma shard list — eachRuntimeBackend splits it
+    caseId: string,
+  ): Promise<CaseResult | undefined> => {
+    let adopted: CaseResult | undefined;
+    await eachRuntimeBackend(tenant, runtimeList, async (backend) => {
+      if (!isRecoverable(backend)) return false;
+      const outcome = await backend.adopt(caseId); // total (never throws) — no redundant .catch here
+      if (outcome.status === "adopted") {
+        adopted = outcome.result;
+        return true; // harvested a finished job — stop scanning lanes
+      }
+      if (outcome.status === "unknown") {
+        // The job may still be live but we couldn't confirm — surface that re-dispatch might double-spend compute.
+        console.warn(
+          `▶ adopt: inconclusive for case ${caseId} (tenant ${tenant}) — re-dispatch may double-spend a live job`,
+        );
+      }
+      return false; // absent or unknown → try the next runtime lane, then fall back to re-dispatch
+    });
+    return adopted;
+  };
+
+  // Live-progress log read — same lane resolution as adoption; the first backend with a readable log wins.
+  const readCaseLogsFn = async (
+    tenant: string,
+    runtimeList: string | undefined,
+    caseId: string,
+  ): Promise<string | undefined> => {
+    let text: string | undefined;
+    await eachRuntimeBackend(tenant, runtimeList, async (backend) => {
+      if (!isObservable(backend)) return false;
+      text = await backend.logs(caseId).catch(() => undefined);
+      return text !== undefined;
+    });
+    return text;
+  };
+
+  // Open an interactive shell stream on a case's live sandbox (observability ⑥) — same lane resolution as logs.
+  const openTerminalStreamFn = async (tenant: string, runtimeList: string | undefined, caseId: string) => {
+    let handle: import("@everdict/backends").ExecStreamHandle | undefined;
+    await eachRuntimeBackend(tenant, runtimeList, async (backend) => {
+      if (!isShellable(backend)) return false;
+      handle = await backend.execStream(caseId).catch(() => undefined);
+      return handle !== undefined;
+    });
+    return handle;
+  };
+
+  // Live browser frame (observability ⑦) — resolve the run's runtime to a topology backend and capture its
+  // per-case browser CDP screen by runId. Only ServiceTopologyBackend implements captureScreen.
+  const captureBrowserScreenFn = async (
+    tenant: string,
+    runtimeList: string | undefined,
+    runId: string,
+  ): Promise<string | undefined> => {
+    let b64: string | undefined;
+    await eachRuntimeBackend(tenant, runtimeList, async (backend) => {
+      if (!isScreenCapturable(backend)) return false;
+      b64 = await backend.captureScreen(runId).catch(() => undefined);
+      return b64 !== undefined;
+    });
+    return b64;
+  };
+
+  // One-shot exec into a case's live sandbox (web terminal / live screen) — same lane resolution as logs.
+  const execInSandboxFn = async (
+    tenant: string,
+    runtimeList: string | undefined,
+    caseId: string,
+    command: string,
+  ): Promise<{ stdout: string; stderr: string; exitCode: number } | undefined> => {
+    let out: { stdout: string; stderr: string; exitCode: number } | undefined;
+    await eachRuntimeBackend(tenant, runtimeList, async (backend) => {
+      if (!isObservable(backend)) return false;
+      out = await backend.exec(caseId, command).catch(() => undefined);
+      return out !== undefined;
+    });
+    return out;
+  };
+  return {
+    eachRuntimeBackend,
+    adoptCaseFn,
+    readCaseLogsFn,
+    openTerminalStreamFn,
+    captureBrowserScreenFn,
+    execInSandboxFn,
+  };
+}
+
+// Recover orphaned jobs at boot — batches/runs are tracked in-process within this process, so at restart any
+// queued/running record is a ghost with no one to resume it. Interrupted BATCHES are resumed from their finished
+// child results (unfinished cases re-dispatched); unresumable records fall back to failed(INTERRUPTED).
+// docs/architecture/batch-resilience.md
+async function runStartupRecovery(deps: {
+  scorecardStore: ScorecardStore;
+  store: RunStore;
+  scorecardService: ScorecardService;
+  service: RunService;
+  adoptCaseFn: (tenant: string, runtimeList: string | undefined, caseId: string) => Promise<CaseResult | undefined>;
+}): Promise<void> {
+  const { scorecardStore, store, scorecardService, service, adoptCaseFn } = deps;
+  const recovered = await recoverInterrupted({
+    scorecards: scorecardStore,
+    runs: store,
+    resume: (id) => scorecardService.resume(id),
+    // Standalone runs: adopt the still-alive backend job first (zero re-run), else re-dispatch from the
+    // persisted caseSpec (mig 0051); legacy records without one keep the tombstone path.
+    // Claim the run for resume and adopt IN THE BACKGROUND — adopting a still-running run waits for its alloc to
+    // finish (a long run would otherwise block control-plane startup). The background task settles via adoption
+    // (zero re-run) or falls back to caseSpec re-dispatch. Returning true keeps recovery from tombstoning it.
+    resumeRun: async (r) => {
+      void (async () => {
+        const adopted = await adoptCaseFn(r.tenant, r.runtime, r.caseId).catch(() => undefined);
+        await service.resume(r, adopted).catch(() => {});
+      })();
+      return true;
+    },
+  });
+  if (recovered.scorecards + recovered.resumed + recovered.runs + recovered.runsResumed > 0)
+    console.error(
+      `▶ boot recovery: batches resumed ${recovered.resumed} · batches failed(INTERRUPTED) ${recovered.scorecards} · runs resumed ${recovered.runsResumed} · runs failed ${recovered.runs}`,
+    );
 }
 
 interface Persistence {
