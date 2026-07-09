@@ -236,7 +236,7 @@ export function streamHandleFor(child: StreamChild): ExecStreamHandle {
   };
 }
 
-// Model B: launch the runner-agent as a Nomad batch alloc, poll for completion, then
+// Launch the runner-agent as a Nomad batch alloc, poll for completion, then
 // parse the CaseResult from the sentinel in the stdout log.
 export class NomadBackend implements Backend, Recoverable, Observable, Shellable, Probeable {
   private readonly http: NomadHttp;

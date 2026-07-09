@@ -7,7 +7,7 @@ Two layers decide *where a harness run executes*:
 - **Backend** (`@everdict/backends`, placement): dispatches a runner-agent job to an orchestrator
   and returns the `CaseResult`. Isolation is the orchestrator's job, not Everdict's.
 
-## Model B (runner-agent)
+## The runner-agent (dispatched worker)
 The control plane (outside the clusters) builds an `AgentJob` and hands it to a `Backend`:
 `dispatch(job)` → runs `@everdict/agent` (`runAgentJob`) inside an isolated unit → the agent does
 the whole `runCase` and prints the `CaseResult` on stdout behind the `__EVERDICT_RESULT__`

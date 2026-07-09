@@ -385,7 +385,7 @@ export async function materializeKubeconfig(yaml: string): Promise<{ path: strin
   return { path, cleanup: () => rm(dir, { recursive: true, force: true }) };
 }
 
-// Model B: launch the runner-agent as a K8s Job, poll for completion, then parse the CaseResult from the sentinel in the pod log.
+// Launch the runner-agent as a K8s Job, poll for completion, then parse the CaseResult from the sentinel in the pod log.
 // Isolation is namespace (per-tenant) + runtimeClassName (gVisor/kata). The K8s counterpart of NomadBackend.
 export class K8sBackend implements Backend, Recoverable, Observable, Probeable {
   // A long-lived api from an injected api (test) or non-kubeconfig auth (context/server/token).

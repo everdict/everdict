@@ -5,7 +5,7 @@ allowed-tools: Read, Grep, Glob, Edit, Write, Bash
 ---
 # Backends (placement layer)
 
-Model B: control plane (outside clusters) → `Backend.dispatch(AgentJob)` → runner-agent runs the
+The control plane (outside clusters) → `Backend.dispatch(AgentJob)` → runner-agent runs the
 whole `runCase` inside an isolated unit → emits CaseResult (`__EVERDICT_RESULT__` sentinel on stdout).
 
 ## Checklist
