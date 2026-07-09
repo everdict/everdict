@@ -8,6 +8,9 @@ second transport. See `docs/mcp.md` + rule `auth`.
 
 - **Reuse the service core** (`RunService` + `HarnessRegistry`) — MCP tools are a transport over the SAME logic
   the HTTP routes use, not a fork. A new capability = one feature, two transports (HTTP route + MCP tool).
+- **Tools live in the resource slice**: `<domain>/<resource>.mcp.ts` exports `registerXTools(server, ctx)` next
+  to the resource's `.routes.ts`; `mcp.ts` is a composition root (McpServer build + shared `ok`/`fail`/`run`
+  helpers + the register calls) with no tool bodies. See rule `api-layer`.
 - **Same auth core, no second path.** The Bearer on `/mcp` is validated by the SAME `compositeAuthenticator`
   (Keycloak JWT via JWKS / `ak_…`) → `Principal`. Build the MCP server bound to that Principal; every tool gates
   with `authorize(principal, action)` and scopes to `principal.workspace`. Authz/validation failures → MCP tool

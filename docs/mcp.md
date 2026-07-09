@@ -7,7 +7,9 @@ validates the token. Humans use the web; agents (Claude Code, CI, custom) use MC
 ## Tools
 Streamable-HTTP MCP endpoint at `POST /mcp` (stateful sessions). Each tool runs over the **same service core** as
 the HTTP routes (`RunService` + `ScorecardService` + `HarnessRegistry` + `DatasetRegistry` + `JudgeRegistry` +
-`RuntimeRegistry`), is **role-gated** (`authorize(principal, action)`) and **workspace-scoped**:
+`RuntimeRegistry`), is **role-gated** (`authorize(principal, action)`) and **workspace-scoped**. Tool bodies live
+in the owning resource slice (`apps/api/src/<domain>/<resource>.mcp.ts`); `mcp.ts` is the composition root (see
+rule `api-layer`):
 
 | Tool | Action (role) | Effect |
 |---|---|---|

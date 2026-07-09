@@ -7,28 +7,47 @@ allowed-tools: Read, Grep, Glob, Edit, Write, Bash
 
 The external SaaS surface. A Fastify server over the runtime (Scheduler + trust zones + secrets + budgets +
 autoscaling). Structured by a TS reinterpretation of the proven layered-service idiom (controller → service →
-repository, domain-packaged): **domain folders group resource slices; each resource is routes + schema + service.**
-See `docs/api.md` + `docs/architecture/api-route-modularization.md`. Rule: `.claude/rules/api-layer.md`.
+repository, domain-packaged, one-way call chain): **domain folders group resource slices; each resource is
+routes + mcp + schema + service.** See `docs/api.md` + `docs/architecture/api-route-modularization.md`.
+Rule: `.claude/rules/api-layer.md`.
 
 ## Structure map
 
 ```
 apps/api/src/
-  server.ts          ← composition root ONLY: app build (parsers/logging), WS upgrade, MCP transport,
+  server.ts          ← HTTP composition root ONLY: app build (parsers/logging), WS upgrade, MCP transport,
                        register<X>Routes(app, deps) calls
+  mcp.ts             ← MCP composition root ONLY: McpServer build + shared helpers (ok/fail/run) +
+                       register<X>Tools(server, ctx) calls (same services, second transport)
+  main.ts            ← process composition root: env → deps wiring, grouped into per-concern builders
   route-context.ts   ← ServerDeps (deps bag) + auth chain (resolveIdentity/applyActiveWorkspace/
                        resolvePrincipal/resolveBearerPrincipal) + gate/sendError/zodIssues/constantTimeEq
-  mcp.ts             ← the MCP tool server (same services, second transport)
   <domain>/          ← execution · catalog · workspace · integrations · runners · scheduling · ops · lib
     <resource>.routes.ts    ← registerXRoutes(app, deps): thin handlers, zero logic
+    <resource>.mcp.ts       ← registerXTools(server, ctx): the same resource's MCP tools, zero logic
     <resource>.schema.ts    ← request Zod DTOs (XxxBodySchema) — only when the resource has bodies
     <resource>-service.ts   ← the logic (framework-agnostic; owns response shaping + creator-override)
 ```
 
 - **Resource = slice, domain = folder.** A domain holds several resources (`catalog/` has dataset, judge,
-  model, runtime, benchmark, bundle, harness…). Never one mega-file per domain; never routes in server.ts.
+  model, runtime, benchmark, bundle, harness…). Never one mega-file per domain; never routes in server.ts;
+  never tool bodies in mcp.ts. The slice owns **both transports** — parity is structural, not a convention
+  you remember.
 - **Sub-domain folders** when a domain accretes: `integrations/{github-app,mattermost,image-registry,
   trace-sink,ci-link}` rather than one bloated `workspace/`.
+
+## Call chain — one direction, always
+
+`transport (route | tool) → service → store/registry → DB`. A lower layer never knows an upper one.
+- A transport handler may call a store **directly only for envelope-free trivial CRUD** (e.g. secrets
+  list/set/remove). The first composition, policy decision, or cross-store read promotes a service.
+- **Peer resource services never call each other.** Cross-resource data goes through the owning
+  store/registry, not the sibling service — service graphs are how mega-monoliths grow back. The sanctioned
+  exceptions are the named concern seams (orchestration → `ScoringService`/`executeCase`); a new seam must be
+  argued in `docs/architecture/execution-scoring-orchestration.md`, not just wired.
+- **Compound resources decompose behind a facade.** When one service accretes distinct lifecycles (batch
+  orchestration vs ingest vs analytics), extract named collaborator services in the same domain folder and
+  compose them in the facade — `deps.<x>`, both transports, and the tests stay untouched.
 
 ## The handler shape (fixed — anything more belongs in the service)
 
@@ -59,7 +78,9 @@ workspace's resource is 404 (no existence leak). "Admin or creator" checks live 
 3. `<domain>/<resource>.routes.ts` — `registerXRoutes(app, deps)` in the fixed shape above.
 4. `server.ts` — one `registerXRoutes(app, deps)` line. `route-context.ts` — add the service to `ServerDeps`
    (optional field; absent = feature-gated 404).
-5. **MCP parity** — add the matching tool in `mcp.ts` calling the same service function.
+5. **MCP parity** — `<domain>/<resource>.mcp.ts` with `registerXTools(server, ctx)` calling the same service
+   function; one `registerXTools(...)` line in `mcp.ts`. Descriptions carry the semantics (the tool schema IS
+   the doc for agents).
 6. Tests: `buildServer` + `inject` (see skill `testing`) — cover authz (401/403), validation (400), 404 scoping.
 
 ## Run lifecycle (`RunService`) — the archetype service

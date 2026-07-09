@@ -1,12 +1,14 @@
 # apps/api route modularization — split the 3676-line server.ts into resource route modules (design)
 
-> **Status: SHIPPED.** All 158 routes extracted into **34 resource route modules** (+9 schema files) across
-> `execution/ catalog/ workspace/ integrations/ runners/ scheduling/ ops/` + `mcp.routes.ts`
-> (`3929563`…`07ed7e1`); `server.ts` is a **285-line composition root** (was 3676): app construction, the
-> domain-grouped register-call list, and the WS terminal upgrade. Every slice landed with the full 636-test
-> suite green; final state also passes apps/api build + the full workspace typecheck (42/42). This realizes the
-> `api-layer` rule's own convention — *"three-file split per resource"* — the services were already domained
-> (`2258302`); the routes now live next to them.
+> **Status: Round 1 SHIPPED · Round 2 IN PROGRESS.** Round 1: all 158 routes extracted into **34 resource
+> route modules** (+9 schema files) across `execution/ catalog/ workspace/ integrations/ runners/ scheduling/
+> ops/` + `mcp.routes.ts` (`3929563`…`07ed7e1`); `server.ts` is a **285-line composition root** (was 3676):
+> app construction, the domain-grouped register-call list, and the WS terminal upgrade. Every slice landed
+> with the full 636-test suite green; final state also passes apps/api build + the full workspace typecheck
+> (42/42). This realizes the `api-layer` rule's own convention — *"three-file split per resource"* — the
+> services were already domained (`2258302`); the routes now live next to them. Round 2 (below) extends the
+> same idiom to the remaining monoliths: the MCP tool surface, the compound `ScorecardService`, and the
+> `main.ts` wiring.
 >
 > **Slicing refinement (locked):** the slice unit is the **resource, not the domain**. A domain folder groups
 > several resource modules (`catalog/` = dataset + judge + model + runtime + benchmark + bundle + harness …);
@@ -89,3 +91,53 @@ BFF↔MCP parity is preserved — the MCP tools (`mcp.ts`) already call the same
   time. Never a single mega-edit.
 - **Coordinate with the shared tree.** apps/api is an active area; check `git status` before each slice and only
   stage the resource being moved.
+
+## Round 2 — the layered-service ideology, applied to what's left
+
+Round 1 fixed the HTTP transport. Three monoliths still contradict the idiom the harness codifies
+(one-way call chain `transport → service → store`; peer services never call each other — the sanctioned seams
+are documented in `execution-scoring-orchestration.md`; the resource slice owns **both** transports; a field
+without a current caller does not exist):
+
+### R2-a — MCP tool surface → per-resource tool modules
+
+`mcp.ts` is 2,564 lines: 129 `registerTool` bodies inside one `buildMcpServer`. The HTTP surface got resource
+modules; the second transport didn't — parity is currently a convention, not a structure. Split:
+
+```
+<domain>/<resource>.mcp.ts   ← export function registerXTools(server: McpServer, ctx: McpToolContext): void
+mcp.ts                       ← composition root: McpServer build + shared helpers (ok/fail/run, session state
+                               stays with the transport in server.ts/mcp.routes.ts) + registerXTools calls
+```
+
+`McpToolContext` = `{ deps, principal, ws, run, ok, fail }` — the shared helpers the tool bodies already close
+over, passed explicitly. Tool names, descriptions, schemas, and behavior move **verbatim**; `mcp.test.ts` (the
+in-memory client↔server suite) is the safety net — the tool surface must stay identical. One commit per domain
+batch (execution → catalog → workspace → integrations/runners → scheduling/ops).
+
+### R2-b — `ScorecardService` (2,122 lines) → facade + lifecycle collaborators
+
+One class mixes four lifecycles: batch orchestration (submit/plan/runBatchCase/finalize + batchContexts),
+ingest (push `ingest` / pull `ingestPull` + track/finish/fail), analytics reads (diff/trend/leaderboard/
+backfillModels), and progress/export tracking (`track`, offload, export). Decompose into collaborator services
+in `execution/`, composed by the facade so `deps.scorecards`, both transports, and every existing test stay
+untouched:
+
+```
+scorecard-service.ts            ← the facade: submit/get/list + composition; public surface UNCHANGED
+scorecard-batch-service.ts      ← batch contexts + plan/run/finalize/retry/resume (Temporal bridge included)
+scorecard-ingest-service.ts     ← push + pull ingest lifecycles
+scorecard-analytics-service.ts  ← diff / trend / leaderboard / backfillModels (reads over the store + suite)
+```
+
+Collaborators receive the stores/seams they need (never each other); the facade is the only composer. The
+`ScoringService` edge stays — it is the documented scoring seam.
+
+### R2-c — `main.ts` wiring → per-concern builders
+
+`main()` is ~785 lines of env→deps wiring in one function. Group it into named builder functions inside
+`main.ts` (persistence, auth, registries, execution, integrations, observability, server assembly) — the
+process composition root reads as a table of contents; no behavior change. (A `main/` folder is overkill until
+builders grow past ~15 — same flat-until-grouped rule as packages.)
+
+Gates per slice: scoped Biome + `pnpm --filter @everdict/api typecheck` + the full apps/api test suite + build.
