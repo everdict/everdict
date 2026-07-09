@@ -101,6 +101,8 @@ describe("CommandHarness", () => {
     const events = await collect(new CommandHarness(spec()).run(compute, "t", ctx));
     expect(events).toEqual([
       { t: expect.any(Number), kind: "error", message: "command exit 127: sh: codex: command not found" },
+      // trace:none evidence fallback — the stderr tail also lands as a log event (full context next to the reason)
+      { t: expect.any(Number), kind: "log", stream: "stderr", text: "sh: codex: command not found" },
     ]);
   });
 
@@ -347,5 +349,53 @@ describe("CommandHarness", () => {
       async dispose() {},
     };
     await expect(new CommandHarness(spec()).install(compute)).rejects.toThrow(/setup failed/);
+  });
+});
+
+describe("CommandHarness — trace:none evidence fallback (stderr log events)", () => {
+  function computeWith(out: { stdout?: string; stderr?: string; exitCode?: number }) {
+    const compute: ComputeHandle = {
+      async exec() {
+        return { exitCode: out.exitCode ?? 0, stdout: out.stdout ?? "", stderr: out.stderr ?? "" };
+      },
+      async writeFile() {},
+      async readFile() {
+        return "";
+      },
+      async dispose() {},
+    };
+    return compute;
+  }
+
+  it("a SUCCESSFUL run still persists the stderr tail as a log event (progress logs are evidence)", async () => {
+    const compute = computeWith({ stdout: "final answer", stderr: "step 1/3 …\nstep 3/3 done" });
+    const events = await collect(new CommandHarness(spec()).run(compute, "t", ctx));
+    expect(events.find((e) => e.kind === "message")).toMatchObject({ role: "assistant", text: "final answer" });
+    const log = events.find((e) => e.kind === "log");
+    expect(log).toMatchObject({ stream: "stderr", text: "step 1/3 …\nstep 3/3 done" });
+  });
+
+  it("on exit≠0 both the error event AND the stderr log event are emitted (short reason + full-tail context)", async () => {
+    const compute = computeWith({ exitCode: 2, stderr: "x".repeat(20_000) });
+    const events = await collect(new CommandHarness(spec()).run(compute, "t", ctx));
+    expect(events.some((e) => e.kind === "error")).toBe(true);
+    const log = events.find((e) => e.kind === "log");
+    expect(log?.kind === "log" && log.text.length).toBe(16_000); // tail-capped, larger than the error's 2k excerpt
+  });
+
+  it("harnesses with their own trace (kind≠none) do not get log events (no double evidence)", async () => {
+    const compute = computeWith({ stdout: "ignored", stderr: "noise" });
+    const h = new CommandHarness(
+      spec({ trace: { kind: "otel", endpoint: "http://jaeger:16686", collect: "control-plane", correlate: "id" } }),
+      { runId: () => "r-1" },
+    );
+    const events = await collect(h.run(compute, "t", ctx));
+    expect(events.filter((e) => e.kind === "log" || e.kind === "message")).toHaveLength(0);
+  });
+
+  it("empty stderr emits no log event (no noise records)", async () => {
+    const compute = computeWith({ stdout: "answer", stderr: "  " });
+    const events = await collect(new CommandHarness(spec()).run(compute, "t", ctx));
+    expect(events.some((e) => e.kind === "log")).toBe(false);
   });
 });

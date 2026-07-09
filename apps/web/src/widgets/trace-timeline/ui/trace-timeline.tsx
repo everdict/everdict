@@ -10,6 +10,7 @@ const KIND_COLOR: Record<string, string> = {
   tool_result: 'bg-[var(--color-success)]',
   env_action: 'bg-accent-foreground',
   error: 'bg-destructive',
+  log: 'bg-border',
 }
 
 function summarize(e: TraceEvent): string {
@@ -27,6 +28,8 @@ function summarize(e: TraceEvent): string {
       return `→ ${a.ok ? 'ok' : 'fail'} ${String(a.output ?? '').slice(0, 80)}`
     case 'error':
       return String(a.message ?? '')
+    case 'log':
+      return `[${String(a.stream ?? '')}] ${String(a.text ?? '').slice(0, 140)}`
     default:
       return ''
   }

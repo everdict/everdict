@@ -167,6 +167,10 @@ export class CommandHarness implements EvaluableHarness {
       if (trace.kind === "none") {
         const text = res.stdout.trim().slice(-32_000);
         if (text) yield { t: Date.now(), kind: "message", role: "assistant", text };
+        // Evidence fallback: black-box CLIs log progress to stderr — without this, a successful run leaves no
+        // trail at all (the error event above fires only on exit≠0). Tail-capped to avoid record bloat.
+        const errText = res.stderr.trim().slice(-16_000);
+        if (errText) yield { t: Date.now(), kind: "log", stream: "stderr", text: errText };
       }
 
       // Emit the metered tokens+cost as a synthetic llm_call — aggregated by the sumCost/cost grader via the existing path.

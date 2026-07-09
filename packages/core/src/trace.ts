@@ -23,6 +23,9 @@ export const TraceEventSchema = z.discriminatedUnion("kind", [
   z.object({ t: z.number(), kind: z.literal("tool_result"), id: z.string(), ok: z.boolean(), output: z.string() }),
   z.object({ t: z.number(), kind: z.literal("env_action"), action: z.string(), detail: z.unknown().optional() }),
   z.object({ t: z.number(), kind: z.literal("error"), message: z.string() }),
+  // Raw process output (evidence fallback for black-box harnesses) — stderr progress logs and oversized stdout
+  // that don't fit the message/tool vocabulary. Tail-capped by the emitter; judges/sinks may ignore it.
+  z.object({ t: z.number(), kind: z.literal("log"), stream: z.enum(["stdout", "stderr"]), text: z.string() }),
 ]);
 export type TraceEvent = z.infer<typeof TraceEventSchema>;
 
