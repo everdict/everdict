@@ -288,6 +288,9 @@ async function main(): Promise<void> {
   metrics.gauge("everdict_scheduler_mem_inflight_mb", "In-flight harness-declared memory per backend (Mb).", () =>
     Object.entries(scheduler.stats().memInFlightMb).map(([backend, value]) => ({ labels: { backend }, value })),
   );
+  metrics.gauge("everdict_scheduler_cpu_inflight", "In-flight harness-declared cpu per backend (1000 = 1 vCPU).", () =>
+    Object.entries(scheduler.stats().cpuInFlight).map(([backend, value]) => ({ labels: { backend }, value })),
+  );
   metrics.gauge("everdict_tenant_inflight", "In-flight dispatches per workspace.", () =>
     Object.entries(scheduler.stats().tenantInFlight).map(([tenant, value]) => ({ labels: { tenant }, value })),
   );
@@ -734,6 +737,7 @@ async function main(): Promise<void> {
       return {
         ...(spec.maxConcurrent !== undefined ? { maxConcurrent: spec.maxConcurrent } : {}),
         ...(spec.memoryBudgetMb !== undefined ? { memoryBudgetMb: spec.memoryBudgetMb } : {}),
+        ...(spec.cpuBudget !== undefined ? { cpuBudget: spec.cpuBudget } : {}),
       };
     },
   });

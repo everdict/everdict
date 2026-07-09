@@ -96,9 +96,11 @@ At SaaS scale many users submit many cases against finite/elastic infra, so plac
   sits behind a 601-case batch. RunService stamps interactive; the batch loops stamp batch; absent = batch-
   equivalent. Live: on a quota-1 lane, a run submitted after 3 queued batch cases finished ahead of 2 of them.
 - **resource-aware admission** — a runtime may declare an envelope (`RuntimeSpec.maxConcurrent` +
-  `memoryBudgetMb` → `BackendCapacity.memoryBudgetMb`); the scheduler tracks in-flight harness-declared
-  memory (`resources.memoryMb`) per backend and admits a heavy job only where it fits. See
-  `docs/architecture/batch-resilience.md` for the live serialization proof.
+  `memoryBudgetMb`/`cpuBudget` → `BackendCapacity`); the scheduler tracks in-flight harness-declared
+  memory (`resources.memoryMb`) AND cpu (`resources.cpu`, 1000 = 1 vCPU) per backend and admits a heavy
+  job only where both fit. Undeclared harnesses stay outside the budgets (opt-in by declaring). See
+  `docs/architecture/batch-resilience.md` for the live serialization proof; the cpu twin was live-verified
+  the same way (two cpu-600 jobs on a cpu-1000 runtime serialize despite free slots).
 - **operator dials (env)** — `EVERDICT_TENANT_QUOTAS="acme=8,*=16"` / `EVERDICT_TENANT_WEIGHTS="acme=3,*=1"`
   feed `tenantQuota`/`weightFor` (apps/api `scheduling-config.ts`; `*` = default for unlisted tenants,
   malformed entries fail the boot loudly). Unset = unlimited quota, weight 1 — the machinery is always on;

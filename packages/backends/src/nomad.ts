@@ -63,6 +63,8 @@ export interface NomadBackendOptions {
   // Declared memory envelope (RuntimeSpec.memoryBudgetMb) — the Scheduler caps the sum of in-flight
   // harness-declared memory against it. Absent = slots-only admission.
   memoryBudgetMb?: number;
+  // Declared CPU envelope (RuntimeSpec.cpuBudget) — same admission contract, resources.cpu units.
+  cpuBudget?: number;
 }
 
 // --- Nomad job spec (only the needed parts typed) ---
@@ -187,6 +189,7 @@ export class NomadBackend implements Backend {
           total,
           used,
           ...(this.opts.memoryBudgetMb !== undefined ? { memoryBudgetMb: this.opts.memoryBudgetMb } : {}),
+          ...(this.opts.cpuBudget !== undefined ? { cpuBudget: this.opts.cpuBudget } : {}),
         };
       }
     } catch {
@@ -196,6 +199,7 @@ export class NomadBackend implements Backend {
       total,
       used: 0,
       ...(this.opts.memoryBudgetMb !== undefined ? { memoryBudgetMb: this.opts.memoryBudgetMb } : {}),
+      ...(this.opts.cpuBudget !== undefined ? { cpuBudget: this.opts.cpuBudget } : {}),
     };
   }
 

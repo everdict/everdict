@@ -36,6 +36,8 @@ export interface QueueLaneAdmission {
   inFlight: number; // scheduler-tracked dispatches currently on this lane's backend(s)
   memInFlightMb?: number; // sum of in-flight harness-declared memory (resource-aware admission)
   memoryBudgetMb?: number; // the runtime's declared memory envelope (RuntimeSpec)
+  cpuInFlight?: number; // sum of in-flight harness-declared cpu (resources.cpu units, 1000 = 1 vCPU)
+  cpuBudget?: number; // the runtime's declared cpu envelope (RuntimeSpec)
   maxConcurrent?: number; // the runtime's declared slot cap (RuntimeSpec)
   circuit?: { open: boolean; consecutive: number }; // spillover breaker state (open = dispatches skip this runtime)
 }
@@ -78,6 +80,7 @@ export interface QueueServiceDeps {
     queued: number;
     inFlight: Record<string, number>;
     memInFlightMb: Record<string, number>;
+    cpuInFlight?: Record<string, number>;
     tenantInFlight: Record<string, number>;
     queuedByTenant: Record<string, number>;
   };
@@ -87,7 +90,7 @@ export interface QueueServiceDeps {
   runtimeEnvelopeFor?: (
     tenant: string,
     runtimeId: string,
-  ) => Promise<{ maxConcurrent?: number; memoryBudgetMb?: number } | undefined>;
+  ) => Promise<{ maxConcurrent?: number; memoryBudgetMb?: number; cpuBudget?: number } | undefined>;
   upcomingPerLane?: number;
   now?: () => string;
 }
@@ -217,6 +220,7 @@ export class QueueService {
               .reduce((a, [, v]) => a + v, 0);
           const inFlight = sum(stats.inFlight);
           const mem = sum(stats.memInFlightMb);
+          const cpu = sum(stats.cpuInFlight ?? {});
           const circuit = circuits?.[`${tenant}:${lane}`];
           const envelope =
             lane !== "" && this.deps.runtimeEnvelopeFor
@@ -226,6 +230,8 @@ export class QueueService {
             inFlight,
             ...(mem > 0 || envelope?.memoryBudgetMb !== undefined ? { memInFlightMb: mem } : {}),
             ...(envelope?.memoryBudgetMb !== undefined ? { memoryBudgetMb: envelope.memoryBudgetMb } : {}),
+            ...(cpu > 0 || envelope?.cpuBudget !== undefined ? { cpuInFlight: cpu } : {}),
+            ...(envelope?.cpuBudget !== undefined ? { cpuBudget: envelope.cpuBudget } : {}),
             ...(envelope?.maxConcurrent !== undefined ? { maxConcurrent: envelope.maxConcurrent } : {}),
             ...(circuit ? { circuit: { open: circuit.open, consecutive: circuit.consecutive } } : {}),
           });

@@ -7,6 +7,9 @@ export interface BackendCapacity {
   // Optional memory envelope (declared, e.g. RuntimeSpec.memoryBudgetMb) — caps the SUM of in-flight
   // harness-declared memory the Scheduler admits at once. Absent = slots-only admission (previous behavior).
   memoryBudgetMb?: number;
+  // Optional CPU envelope (RuntimeSpec.cpuBudget, resources.cpu units: 1000 = 1 vCPU) — same admission
+  // contract as memoryBudgetMb for the SUM of in-flight harness-declared cpu.
+  cpuBudget?: number;
 }
 
 // Runtime connection probe result — without running a job, checks only "does this cluster actually connect (reachability + auth)".

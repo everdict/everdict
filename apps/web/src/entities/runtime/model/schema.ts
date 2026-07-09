@@ -33,6 +33,7 @@ export const runtimeSpecSchema = z
     // admission envelope — how much the control plane may pack onto this runtime concurrently
     maxConcurrent: z.number().optional(),
     memoryBudgetMb: z.number().optional(),
+    cpuBudget: z.number().optional(),
   })
   .passthrough()
 export type RuntimeSpec = z.infer<typeof runtimeSpecSchema>

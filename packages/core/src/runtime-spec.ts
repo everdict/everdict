@@ -23,6 +23,9 @@ const base = {
   // no memory are admitted outside this budget (resource-aware admission is opt-in by declaring).
   maxConcurrent: z.number().int().positive().optional(),
   memoryBudgetMb: z.number().int().positive().optional(),
+  // cpuBudget = the CPU twin: sum of in-flight harness-declared cpu (resources.cpu, 1000 = 1 vCPU / Nomad MHz)
+  // the Scheduler may admit at once; undeclared harnesses are admitted outside it (same opt-in as memory).
+  cpuBudget: z.number().int().positive().optional(),
 };
 
 // local — in-process execution on the control-plane host (dev only). This is the control plane's host, not "the user's machine" —

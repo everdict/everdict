@@ -34,6 +34,7 @@ function specRows(
     namespace: string
     maxConcurrent: string
     memoryBudget: string
+    cpuBudget: string
     tags: string
   }
 ): { label: string; value: string }[] {
@@ -62,6 +63,7 @@ function specRows(
     labels.memoryBudget,
     spec.memoryBudgetMb !== undefined ? `${spec.memoryBudgetMb}Mb` : undefined
   )
+  add(labels.cpuBudget, spec.cpuBudget !== undefined ? String(spec.cpuBudget) : undefined)
   add(labels.tags, spec.tags)
   return rows
 }
@@ -104,6 +106,7 @@ export default async function RuntimeDetailPage({
         namespace: t('specNamespace'),
         maxConcurrent: t('specMaxConcurrent'),
         memoryBudget: t('specMemoryBudget'),
+        cpuBudget: t('specCpuBudget'),
         tags: t('specTags'),
       })
     : []

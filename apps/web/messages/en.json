@@ -1297,6 +1297,8 @@
     "personalEmpty": "No runner connected — <link>connect your machine in Runtimes</link>.",
     "admissionMemory": "Memory {used}/{budget}Mb",
     "admissionMemoryTitle": "This runtime's admission envelope — sum of in-flight harness-declared memory / declared budget",
+    "admissionCpu": "CPU {used}/{budget}",
+    "admissionCpuTitle": "This runtime's admission envelope — sum of in-flight harness-declared cpu / declared budget (1000 = 1 vCPU)",
     "circuitOpen": "Circuit open",
     "circuitOpenTitle": "{n} consecutive infra failures — new work is routed to another runtime in the shard",
     "schedulerLine": "Control-plane scheduler — waiting {queued} · in flight {inFlight}",
@@ -1526,7 +1528,9 @@
     "maxConcurrentLabel": "Concurrent slots (optional)",
     "maxConcurrentHint": "Max jobs the control plane sends to this runtime at once. Empty uses the backend default (20).",
     "memoryBudgetLabel": "Memory budget Mb (optional)",
-    "memoryBudgetHint": "Cap on the sum of in-flight harness-declared memory. When full, heavy jobs wait even with free slots."
+    "memoryBudgetHint": "Cap on the sum of in-flight harness-declared memory. When full, heavy jobs wait even with free slots.",
+    "cpuBudgetLabel": "CPU budget (optional)",
+    "cpuBudgetHint": "Cap on the sum of in-flight harness-declared cpu (1000 = 1 vCPU). When full, cpu-declaring jobs wait even with free slots."
   },
   "reportPage": {
     "title": "Combined report",
@@ -1650,7 +1654,8 @@
     "versions": "Versions",
     "discuss": "Discussion",
     "specMaxConcurrent": "Concurrent slots",
-    "specMemoryBudget": "Memory budget"
+    "specMemoryBudget": "Memory budget",
+    "specCpuBudget": "CPU budget"
   },
   "schedulesPage": {
     "title": "Schedules",

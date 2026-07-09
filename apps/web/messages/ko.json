@@ -1297,6 +1297,8 @@
     "personalEmpty": "연결된 내 러너가 없어요 — <link>런타임에서 내 머신을 연결</link>해보세요.",
     "admissionMemory": "메모리 {used}/{budget}Mb",
     "admissionMemoryTitle": "이 런타임의 admission 봉투 — 실행 중인 하네스가 선언한 메모리 합 / 선언된 예산",
+    "admissionCpu": "CPU {used}/{budget}",
+    "admissionCpuTitle": "이 런타임의 admission 봉투 — 실행 중인 하네스가 선언한 CPU 합 / 선언된 예산 (1000 = 1 vCPU)",
     "circuitOpen": "우회 중",
     "circuitOpenTitle": "연속 {n}회 인프라 실패 — 새 작업은 샤드의 다른 런타임으로 우회합니다",
     "schedulerLine": "컨트롤플레인 스케줄러 — 대기 {queued} · 실행 {inFlight}",
@@ -1526,7 +1528,9 @@
     "maxConcurrentLabel": "동시 실행 슬롯 (선택)",
     "maxConcurrentHint": "컨트롤플레인이 이 런타임에 동시에 보낼 최대 작업 수예요. 비워두면 백엔드 기본값(20)을 사용해요.",
     "memoryBudgetLabel": "메모리 예산 Mb (선택)",
-    "memoryBudgetHint": "실행 중인 하네스가 선언한 메모리 합의 상한이에요. 예산이 차면 무거운 작업은 슬롯이 남아도 대기해요."
+    "memoryBudgetHint": "실행 중인 하네스가 선언한 메모리 합의 상한이에요. 예산이 차면 무거운 작업은 슬롯이 남아도 대기해요.",
+    "cpuBudgetLabel": "CPU 예산 (선택)",
+    "cpuBudgetHint": "실행 중인 하네스가 선언한 CPU(1000 = 1 vCPU) 합의 상한이에요. 예산이 차면 CPU를 선언한 작업은 슬롯이 남아도 대기해요."
   },
   "reportPage": {
     "title": "통합 리포트",
@@ -1650,7 +1654,8 @@
     "versions": "버전",
     "discuss": "논의",
     "specMaxConcurrent": "동시 실행 슬롯",
-    "specMemoryBudget": "메모리 예산"
+    "specMemoryBudget": "메모리 예산",
+    "specCpuBudget": "CPU 예산"
   },
   "schedulesPage": {
     "title": "예약",

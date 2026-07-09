@@ -231,6 +231,8 @@ export interface K8sBackendOptions {
   // Declared memory envelope (RuntimeSpec.memoryBudgetMb) — the Scheduler caps the sum of in-flight
   // harness-declared memory against it. Absent = slots-only admission.
   memoryBudgetMb?: number;
+  // Declared CPU envelope (RuntimeSpec.cpuBudget) — same admission contract, resources.cpu units.
+  cpuBudget?: number;
 }
 
 // Mapping from hardened isolation runtime (Nomad notation) → K8s RuntimeClass name.
@@ -413,6 +415,7 @@ export class K8sBackend implements Backend {
       total,
       used: used ?? 0,
       ...(this.opts.memoryBudgetMb !== undefined ? { memoryBudgetMb: this.opts.memoryBudgetMb } : {}),
+      ...(this.opts.cpuBudget !== undefined ? { cpuBudget: this.opts.cpuBudget } : {}),
     };
   }
 

@@ -200,6 +200,17 @@ function Lane({
             })}
           </span>
         )}
+        {lane.admission?.cpuBudget !== undefined && (
+          <span
+            className="shrink-0 font-mono text-[10.5px] tabular-nums text-muted-foreground"
+            title={t('admissionCpuTitle')}
+          >
+            {t('admissionCpu', {
+              used: lane.admission.cpuInFlight ?? 0,
+              budget: lane.admission.cpuBudget,
+            })}
+          </span>
+        )}
         {lane.admission?.circuit?.open && (
           <Badge
             tone="danger"

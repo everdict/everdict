@@ -22,6 +22,7 @@ class ControlledBackend implements Backend {
   handled = 0;
   dispatchedIds: string[] = []; // order of dispatched case ids (for fairness verification)
   memoryBudgetMb: number | undefined;
+  cpuBudget: number | undefined;
   private pending: Array<() => void> = [];
   constructor(
     readonly id: string,
@@ -33,6 +34,7 @@ class ControlledBackend implements Backend {
       total: this.total,
       used: this.used,
       ...(this.memoryBudgetMb !== undefined ? { memoryBudgetMb: this.memoryBudgetMb } : {}),
+      ...(this.cpuBudget !== undefined ? { cpuBudget: this.cpuBudget } : {}),
     };
   }
   dispatch(job: AgentJob): Promise<CaseResult> {
@@ -336,6 +338,59 @@ describe("Scheduler", () => {
     b.releaseAll();
     await flush();
     await Promise.all([heavy, light]);
+  });
+
+  // A job whose harness declares its cpu weight (resources.cpu, 1000 = 1 vCPU).
+  function cpuJob(id: string, cpu: number): AgentJob {
+    return {
+      ...tjob("acme", id),
+      harnessSpec: {
+        kind: "command",
+        id: "cruncher",
+        version: "1",
+        resources: { cpu },
+        setup: [],
+        command: "run",
+        env: {},
+        params: {},
+        trace: { kind: "none" },
+      },
+    };
+  }
+
+  it("cpu budget gates admission even when slots remain (the memory envelope's twin)", async () => {
+    const b = new ControlledBackend("a", 10); // plenty of slots
+    b.cpuBudget = 1000;
+    const sched = new Scheduler(new BackendRegistry().register("a", b));
+
+    const p = [cpuJob("c1", 600), cpuJob("c2", 600)].map((j) => sched.dispatch(j));
+    await flush();
+    expect(b.handled).toBe(1); // 600 + 600 > 1000 → the second waits despite 9 free slots
+    expect(sched.stats().queued).toBe(1);
+    expect(sched.stats().cpuInFlight.a).toBe(600);
+
+    b.releaseAll();
+    await flush();
+    expect(b.handled).toBe(2); // cpu freed → the queued job admitted
+    b.releaseAll();
+    await flush();
+    await Promise.all(p);
+    expect(sched.stats().cpuInFlight.a).toBe(0);
+  });
+
+  it("undeclared-cpu jobs are admitted outside the cpu budget (opt-in gating)", async () => {
+    const b = new ControlledBackend("a", 10);
+    b.cpuBudget = 500;
+    const sched = new Scheduler(new BackendRegistry().register("a", b));
+
+    const busy = sched.dispatch(cpuJob("c1", 500)); // fills the whole envelope
+    const light = sched.dispatch(tjob("acme", "l1")); // declares nothing
+    await flush();
+    expect(b.handled).toBe(2); // the undeclared job is not blocked by the exhausted envelope
+
+    b.releaseAll();
+    await flush();
+    await Promise.all([busy, light]);
   });
 
   it("a backend without a memory budget keeps slots-only admission", async () => {

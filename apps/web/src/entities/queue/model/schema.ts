@@ -35,6 +35,8 @@ export const queueLaneAdmissionSchema = z.object({
   inFlight: z.number(),
   memInFlightMb: z.number().optional(),
   memoryBudgetMb: z.number().optional(),
+  cpuInFlight: z.number().optional(),
+  cpuBudget: z.number().optional(),
   maxConcurrent: z.number().optional(),
   circuit: z.object({ open: z.boolean(), consecutive: z.number() }).optional(),
 })

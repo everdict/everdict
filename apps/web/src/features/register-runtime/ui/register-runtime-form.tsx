@@ -40,6 +40,7 @@ interface Fields {
   kubeconfigSecret: string
   maxConcurrent: string
   memoryBudgetMb: string
+  cpuBudget: string
   supportsTopology: boolean
   browserImage: string
   traceKind: 'otel' | 'mlflow'
@@ -64,6 +65,7 @@ const INITIAL: Fields = {
   kubeconfigSecret: '',
   maxConcurrent: '',
   memoryBudgetMb: '',
+  cpuBudget: '',
   supportsTopology: false,
   browserImage: '',
   traceKind: 'otel',
@@ -107,6 +109,7 @@ function buildSpec(f: Fields): Record<string, unknown> {
   const envelope = {
     ...(posInt(f.maxConcurrent) !== undefined ? { maxConcurrent: posInt(f.maxConcurrent) } : {}),
     ...(posInt(f.memoryBudgetMb) !== undefined ? { memoryBudgetMb: posInt(f.memoryBudgetMb) } : {}),
+    ...(posInt(f.cpuBudget) !== undefined ? { cpuBudget: posInt(f.cpuBudget) } : {}),
   }
   const topology = f.supportsTopology
     ? {
@@ -404,6 +407,15 @@ export function RegisterRuntimeForm({ workspace }: { workspace: string }) {
               value={f.memoryBudgetMb}
               onChange={(e) => set('memoryBudgetMb', e.target.value)}
               placeholder="8192"
+              inputMode="numeric"
+              autoComplete="off"
+            />
+          </Field>
+          <Field label={t('cpuBudgetLabel')} hint={t('cpuBudgetHint')}>
+            <Input
+              value={f.cpuBudget}
+              onChange={(e) => set('cpuBudget', e.target.value)}
+              placeholder="4000"
               inputMode="numeric"
               autoComplete="off"
             />
