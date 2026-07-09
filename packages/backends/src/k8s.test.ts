@@ -146,21 +146,29 @@ describe("buildK8sJob / k8sJobName", () => {
     });
     const backend = new K8sBackend({ image: "i", api, pollIntervalMs: 1 });
     const adopted = await backend.adopt("c1");
-    expect(adopted?.caseId).toBe("c1"); // harvested without applying a new Job
+    expect(adopted.status).toBe("adopted");
+    if (adopted.status === "adopted") expect(adopted.result.caseId).toBe("c1"); // harvested without applying a new Job
     expect(deleted).toContain("everdict-c1-new"); // the adopted job gets the same cleanup as a dispatch
     expect(deleted).not.toContain("everdict-c1-old");
   });
 
-  it("adopt returns undefined when no labeled job exists or the job failed — the caller re-dispatches", async () => {
+  it("adopt distinguishes absent (no labeled job) from unknown (label query failed / job harvest failed)", async () => {
+    // No labeled job → the query succeeded and found nothing → definitively absent (safe to re-dispatch).
     const none = new K8sBackend({ image: "i", api: mockApi().api, pollIntervalMs: 1 });
-    expect(await none.adopt("ghost")).toBeUndefined();
+    expect((await none.adopt("ghost")).status).toBe("absent");
 
+    // The label query itself failed (jobsByLabel → undefined) → we can't tell if a job is live → unknown.
+    const brokenApi = { ...mockApi().api, jobsByLabel: async () => undefined };
+    const broken = new K8sBackend({ image: "i", api: brokenApi, pollIntervalMs: 1 });
+    expect((await broken.adopt("c1")).status).toBe("unknown");
+
+    // A labeled job exists but it failed to complete → harvest throws → unknown, never "absent".
     const failing = mockApi({
       failed: true,
       labeledJobs: [{ selector: "everdict.dev/case=c1", name: "everdict-c1-x", namespace: "ns" }],
     });
     const backend = new K8sBackend({ image: "i", api: failing.api, pollIntervalMs: 1 });
-    expect(await backend.adopt("c1")).toBeUndefined();
+    expect((await backend.adopt("c1")).status).toBe("unknown");
   });
 
   it("with evalCase.image, override with the per-case container image (SWE-bench prebuilt)", () => {

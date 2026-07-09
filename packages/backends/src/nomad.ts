@@ -11,6 +11,7 @@ import {
   judgeEnv,
 } from "@everdict/core";
 import type {
+  AdoptOutcome,
   Backend,
   BackendCapacity,
   Observable,
@@ -321,16 +322,30 @@ export class NomadBackend implements Backend, Recoverable, Observable, Shellable
   // everdict-<caseId>-<suffix> — instead of re-dispatching (double compute), find the NEWEST such job, wait for
   // its alloc like a normal dispatch, and harvest the result from its logs. undefined on any miss (no job, logs
   // gone, no sentinel) — the caller re-dispatches as before. Best-effort by design.
-  async adopt(caseId: string): Promise<CaseResult | undefined> {
+  async adopt(caseId: string): Promise<AdoptOutcome> {
+    const prefix = `everdict-${caseId}-`;
+    // Step 1: list the case's jobs. If this fails, we CANNOT tell whether a job is live → "unknown", never "absent".
+    let listText: string;
     try {
-      const prefix = `everdict-${caseId}-`;
       const res = await this.http.request("GET", `/v1/jobs?prefix=${encodeURIComponent(prefix)}&namespace=*`);
-      if (res.status >= 300) return undefined;
-      const jobs = JSON.parse(res.text) as Array<{ ID?: string; Namespace?: string; SubmitTime?: number }>;
-      const newest = jobs
+      if (res.status >= 300) return { status: "unknown" };
+      listText = res.text;
+    } catch {
+      return { status: "unknown" };
+    }
+    let newest: { ID?: string; Namespace?: string; SubmitTime?: number } | undefined;
+    try {
+      const jobs = JSON.parse(listText) as Array<{ ID?: string; Namespace?: string; SubmitTime?: number }>;
+      newest = jobs
         .filter((j) => j.ID?.startsWith(prefix))
         .sort((a, b) => (b.SubmitTime ?? 0) - (a.SubmitTime ?? 0))[0];
-      if (!newest?.ID) return undefined;
+    } catch {
+      return { status: "unknown" };
+    }
+    // Step 2: the listing succeeded and there is no job → definitively nothing to adopt (safe to re-dispatch).
+    if (!newest?.ID) return { status: "absent" };
+    // Step 3: a job exists — harvest it. Any failure from here is ambiguous (the job is real), so it's "unknown".
+    try {
       const ns = newest.Namespace && newest.Namespace !== "default" ? newest.Namespace : undefined;
       const allocId = await this.waitForAlloc(newest.ID, ns);
       const nsq = ns ? `&namespace=${encodeURIComponent(ns)}` : "";
@@ -338,10 +353,10 @@ export class NomadBackend implements Backend, Recoverable, Observable, Shellable
         "GET",
         `/v1/client/fs/logs/${allocId}?task=agent&type=stdout&plain=true${nsq}`,
       );
-      if (logs.status >= 300) return undefined;
-      return parseResult(logs.text);
+      if (logs.status >= 300) return { status: "unknown" };
+      return { status: "adopted", result: parseResult(logs.text) };
     } catch {
-      return undefined;
+      return { status: "unknown" };
     }
   }
 

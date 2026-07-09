@@ -1,4 +1,5 @@
 export {
+  type AdoptOutcome,
   type Backend,
   type BackendCapacity,
   type Dispatcher,

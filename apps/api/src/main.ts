@@ -569,8 +569,18 @@ async function main(): Promise<void> {
     let adopted: CaseResult | undefined;
     await eachRuntimeBackend(tenant, runtimeList, async (backend) => {
       if (!isRecoverable(backend)) return false;
-      adopted = await backend.adopt(caseId).catch(() => undefined);
-      return adopted !== undefined;
+      const outcome = await backend.adopt(caseId); // total (never throws) — no redundant .catch here
+      if (outcome.status === "adopted") {
+        adopted = outcome.result;
+        return true; // harvested a finished job — stop scanning lanes
+      }
+      if (outcome.status === "unknown") {
+        // The job may still be live but we couldn't confirm — surface that re-dispatch might double-spend compute.
+        console.warn(
+          `▶ adopt: inconclusive for case ${caseId} (tenant ${tenant}) — re-dispatch may double-spend a live job`,
+        );
+      }
+      return false; // absent or unknown → try the next runtime lane, then fall back to re-dispatch
     });
     return adopted;
   };

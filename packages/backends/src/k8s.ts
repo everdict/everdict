@@ -14,7 +14,15 @@ import {
   imageUsesRegistryHost,
   judgeEnv,
 } from "@everdict/core";
-import type { Backend, BackendCapacity, Observable, ProbeResult, Probeable, Recoverable } from "./backend.js";
+import type {
+  AdoptOutcome,
+  Backend,
+  BackendCapacity,
+  Observable,
+  ProbeResult,
+  Probeable,
+  Recoverable,
+} from "./backend.js";
 import type { SecretProvider } from "./secrets.js";
 import type { TrustZonePolicy } from "./trust-zone.js";
 
@@ -428,21 +436,22 @@ export class K8sBackend implements Backend, Recoverable, Observable, Probeable {
   // Adopt an already-dispatched case job (boot recovery): the control plane died after applying the Job — find
   // the NEWEST job carrying the case label, wait for it like a normal dispatch, and harvest the sentinel from
   // its pod logs. undefined on any miss (no job / failed / logs unreadable) — the caller re-dispatches.
-  async adopt(caseId: string): Promise<CaseResult | undefined> {
+  async adopt(caseId: string): Promise<AdoptOutcome> {
     try {
-      return await this.withApi(async (api) => {
+      return await this.withApi(async (api): Promise<AdoptOutcome> => {
         const jobs = await api.jobsByLabel(`everdict.dev/case=${caseSlug(caseId)}`);
-        const newest = (jobs ?? []).sort((a, b) =>
-          (b.creationTimestamp ?? "").localeCompare(a.creationTimestamp ?? ""),
-        )[0];
-        if (!newest) return undefined;
+        // jobsByLabel returns undefined when the label query itself failed — we can't tell if a job is live → unknown.
+        if (jobs === undefined) return { status: "unknown" };
+        const newest = jobs.sort((a, b) => (b.creationTimestamp ?? "").localeCompare(a.creationTimestamp ?? ""))[0];
+        if (!newest) return { status: "absent" }; // query succeeded, no job → safe to re-dispatch
         await this.waitForJob(api, newest.name, newest.namespace);
         const result = parseResult(await api.podLogs(newest.name, newest.namespace));
         await api.deleteJob(newest.name, newest.namespace).catch(() => {}); // same cleanup as a normal dispatch
-        return result;
+        return { status: "adopted", result };
       });
     } catch {
-      return undefined; // adoption is best-effort — any failure falls back to re-dispatch
+      // A job existed but harvesting threw (wait/logs/parse), or the api couldn't be built — ambiguous, not "absent".
+      return { status: "unknown" };
     }
   }
 

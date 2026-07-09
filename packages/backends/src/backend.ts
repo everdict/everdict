@@ -51,13 +51,22 @@ export interface Backend extends Dispatcher {
 
 // --- Capability interfaces: a backend MAY additionally implement any of these. Narrow to them with the guards below. ---
 
+// The result of Recoverable.adopt — deliberately three-valued so the caller never conflates "no job to adopt"
+// (safe to re-dispatch) with "couldn't determine" (re-dispatching may double-spend a job that is actually still
+// live). The old `CaseResult | undefined` collapsed both into undefined and quietly risked double compute.
+export type AdoptOutcome =
+  | { status: "adopted"; result: CaseResult } // harvested a finished job's result → do NOT re-dispatch
+  | { status: "absent" } // the listing succeeded and there is definitively no job for this case → safe to re-dispatch
+  | { status: "unknown" }; // an API/parse failure left it ambiguous → re-dispatch MAY double-spend a live job
+
 // Recoverable — reclaim a case's orchestrator job without re-running it. Backends whose jobs outlive the control
 // plane (Nomad/K8s) implement this; in-process/pull backends do not.
 export interface Recoverable {
   // Adopt an already-dispatched case job (boot recovery): find the orchestrator job this backend previously
   // submitted for the case, wait for it, and harvest its result — instead of re-dispatching and double-spending
-  // compute. undefined = nothing adoptable (no job / logs unreadable) → the caller re-dispatches. Best-effort.
-  adopt(caseId: string): Promise<CaseResult | undefined>;
+  // compute. Best-effort and TOTAL — never throws; the ambiguity is encoded in AdoptOutcome, not swallowed to a
+  // bare undefined, so the caller decides re-dispatch policy per `absent` (safe) vs `unknown` (may double-spend).
+  adopt(caseId: string): Promise<AdoptOutcome>;
   // Force-stop every live orchestrator job of a case (superseded batch reclaim). Best-effort, never throws.
   kill(caseId: string): Promise<void>;
 }

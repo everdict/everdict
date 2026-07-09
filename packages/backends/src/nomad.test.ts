@@ -347,20 +347,35 @@ describe("NomadBackend.adopt / kill (boot-recovery adoption + supersede force-st
 
     const adopted = await backend.adopt("c1");
 
-    expect(adopted?.caseId).toBe("c1"); // harvested without a POST /v1/jobs (no re-dispatch)
+    expect(adopted.status).toBe("adopted");
+    if (adopted.status === "adopted") expect(adopted.result.caseId).toBe("c1"); // harvested without a POST /v1/jobs
     expect(calls.some((c) => c.startsWith("POST"))).toBe(false);
     expect(calls.some((c) => c.includes("everdict-c1-old01"))).toBe(false); // newest submission wins
   });
 
-  it("adopt returns undefined when nothing is adoptable (no job / unreadable logs) — the caller re-dispatches", async () => {
+  it("adopt distinguishes absent (no job → safe re-dispatch) from unknown (ambiguous → may double-spend)", async () => {
+    // The listing succeeds and finds nothing → definitively no job for this case → safe to re-dispatch.
     const empty: NomadHttp = {
       async request(_m, path) {
         if (path.startsWith("/v1/jobs?prefix=")) return { status: 200, text: "[]" };
         return { status: 404, text: "" };
       },
     };
-    expect(await new NomadBackend({ addr: "http://n:4646", image: "i", http: empty }).adopt("c1")).toBeUndefined();
+    expect((await new NomadBackend({ addr: "http://n:4646", image: "i", http: empty }).adopt("c1")).status).toBe(
+      "absent",
+    );
 
+    // The jobs listing itself errors → we CANNOT tell whether a job is live → unknown, never "absent".
+    const listErr: NomadHttp = {
+      async request() {
+        return { status: 500, text: "boom" };
+      },
+    };
+    expect((await new NomadBackend({ addr: "http://n:4646", image: "i", http: listErr }).adopt("c1")).status).toBe(
+      "unknown",
+    );
+
+    // A job exists but its alloc logs are gone → the job is real, harvest failed → unknown (re-dispatch may double-spend).
     const goneLogs: NomadHttp = {
       async request(_m, path) {
         if (path.startsWith("/v1/jobs?prefix="))
@@ -371,8 +386,9 @@ describe("NomadBackend.adopt / kill (boot-recovery adoption + supersede force-st
       },
     };
     expect(
-      await new NomadBackend({ addr: "http://n:4646", image: "i", http: goneLogs, pollIntervalMs: 1 }).adopt("c1"),
-    ).toBeUndefined();
+      (await new NomadBackend({ addr: "http://n:4646", image: "i", http: goneLogs, pollIntervalMs: 1 }).adopt("c1"))
+        .status,
+    ).toBe("unknown");
   });
 
   it("kill deregisters every live everdict-<caseId>-* job (dead ones skipped, no purge)", async () => {
