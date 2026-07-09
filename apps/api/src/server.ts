@@ -266,6 +266,11 @@ export interface ServerDeps {
   authenticator?: Authenticator; // authentication owned by the control plane (OIDC + API keys)
   keyStore?: TenantKeyStore; // for /internal/tenant-keys issuance
   internalToken?: string; // /internal/** guard (fail-closed if absent)
+  // Runtime fairness dials (operator plane) — read/patch per-tenant quota/weight overrides without a restart.
+  schedulingControl?: {
+    effective(): { quotas: Record<string, number>; weights: Record<string, number> };
+    set(patch: { quotas?: Record<string, number | null>; weights?: Record<string, number | null> }): void;
+  };
   requireAuth?: boolean; // if true, auth is required (no dev fallback)
   devTenantHeader?: string; // unauthenticated dev-fallback header (default x-everdict-tenant)
   authorizationServers?: string[]; // MCP OAuth: authorization servers in the protected-resource metadata (Keycloak issuer)
@@ -3115,6 +3120,33 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   });
 
   // --- internal: key issuance (x-internal-token guard, fail-closed if unset) ---
+  // Operator fairness dials — adjust per-tenant quota/weight without a restart (overrides layer over the env
+  // defaults; a restart falls back to env). Same guard as every /internal/** route.
+  app.put("/internal/scheduling", async (req, reply) => {
+    if (!deps.internalToken || !deps.schedulingControl)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "scheduling control not configured" });
+    const provided = req.headers["x-internal-token"];
+    if (typeof provided !== "string" || !constantTimeEq(provided, deps.internalToken))
+      return reply.code(401).send({ code: "UNAUTHENTICATED", message: "x-internal-token required." });
+    const body = z
+      .object({
+        quotas: z.record(z.number().int().positive().nullable()).optional(),
+        weights: z.record(z.number().positive().nullable()).optional(),
+      })
+      .safeParse(req.body ?? {});
+    if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: body.error.message });
+    deps.schedulingControl.set(body.data);
+    return reply.send(deps.schedulingControl.effective());
+  });
+  app.get("/internal/scheduling", async (req, reply) => {
+    if (!deps.internalToken || !deps.schedulingControl)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "scheduling control not configured" });
+    const provided = req.headers["x-internal-token"];
+    if (typeof provided !== "string" || !constantTimeEq(provided, deps.internalToken))
+      return reply.code(401).send({ code: "UNAUTHENTICATED", message: "x-internal-token required." });
+    return reply.send(deps.schedulingControl.effective());
+  });
+
   app.post("/internal/tenant-keys", async (req, reply) => {
     if (!deps.internalToken || !deps.keyStore)
       return reply.code(404).send({ code: "NOT_FOUND", message: "internal endpoints disabled" });

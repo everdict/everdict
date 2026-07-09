@@ -239,9 +239,36 @@ async function main(): Promise<void> {
   // previous defaults (unlimited quota, weight 1) — the fairness machinery is always on; these are just the dials.
   const tenantQuotas = parseTenantMap(process.env.EVERDICT_TENANT_QUOTAS, "EVERDICT_TENANT_QUOTAS");
   const tenantWeights = parseTenantMap(process.env.EVERDICT_TENANT_WEIGHTS, "EVERDICT_TENANT_WEIGHTS");
+  const tenantQueueDepths = parseTenantMap(process.env.EVERDICT_TENANT_QUEUE_DEPTHS, "EVERDICT_TENANT_QUEUE_DEPTHS");
+  // Runtime-adjustable fairness dials (PUT /internal/scheduling) layered OVER the env defaults — env keeps
+  // being the boot baseline, overrides live in memory (a restart falls back to env; documented).
+  const quotaOverrides = new Map<string, number>();
+  const weightOverrides = new Map<string, number>();
+  const schedulingControl = {
+    effective(): { quotas: Record<string, number>; weights: Record<string, number> } {
+      const tenants = new Set<string>([...quotaOverrides.keys(), ...weightOverrides.keys()]);
+      const quotas: Record<string, number> = {};
+      const weights: Record<string, number> = {};
+      for (const t of tenants) {
+        quotas[t] = quotaOverrides.get(t) ?? tenantQuotas?.get(t) ?? Number.POSITIVE_INFINITY;
+        weights[t] = weightOverrides.get(t) ?? tenantWeights?.get(t) ?? 1;
+      }
+      return { quotas, weights };
+    },
+    set(patch: { quotas?: Record<string, number | null>; weights?: Record<string, number | null> }): void {
+      for (const [t, v] of Object.entries(patch.quotas ?? {}))
+        v === null ? quotaOverrides.delete(t) : quotaOverrides.set(t, v);
+      for (const [t, v] of Object.entries(patch.weights ?? {}))
+        v === null ? weightOverrides.delete(t) : weightOverrides.set(t, v);
+      scheduler.poke(); // loosened quotas should drain the queue immediately
+    },
+  };
   const scheduler = new Scheduler(backends, {
-    ...(tenantQuotas ? { tenantQuota: (t: string) => tenantQuotas.get(t) ?? Number.POSITIVE_INFINITY } : {}),
-    ...(tenantWeights ? { weightFor: (t: string) => tenantWeights.get(t) ?? 1 } : {}),
+    tenantQuota: (t: string) => quotaOverrides.get(t) ?? tenantQuotas?.get(t) ?? Number.POSITIVE_INFINITY,
+    weightFor: (t: string) => weightOverrides.get(t) ?? tenantWeights?.get(t) ?? 1,
+    ...(tenantQueueDepths
+      ? { tenantMaxQueueDepth: (t: string) => tenantQueueDepths.get(t) ?? Number.POSITIVE_INFINITY }
+      : {}),
   });
   // Prometheus metrics (docs/architecture/work-queue.md — the time-series half; /queue is the snapshot half).
   const metrics = new Metrics();
@@ -707,6 +734,7 @@ async function main(): Promise<void> {
     service,
     scorecardService,
     metrics, // GET /metrics (Prometheus text) — unauthenticated; deployments firewall the scrape path
+    schedulingControl, // PUT/GET /internal/scheduling — runtime fairness dials (env stays the boot baseline)
     usageMeter, // meter-only billing usage — GET /usage
     scheduleService,
     queueService,

@@ -103,6 +103,15 @@ At SaaS scale many users submit many cases against finite/elastic infra, so plac
   feed `tenantQuota`/`weightFor` (apps/api `scheduling-config.ts`; `*` = default for unlisted tenants,
   malformed entries fail the boot loudly). Unset = unlimited quota, weight 1 — the machinery is always on;
   these are just the dials. Cross-tenant fairness is operator-set, not workspace self-serve.
+  `EVERDICT_TENANT_QUEUE_DEPTHS="acme=200,*=1000"` caps a tenant's **queued** entries (over-cap submit =
+  429 `RATE_LIMITED`, never a silent drop) so one tenant's burst can't consume unbounded queue memory.
+  Quota/weight can also be adjusted **without a restart** via `PUT /internal/scheduling`
+  (`{"quotas":{"acme":2,"beta":null},"weights":{…}}`, `null` clears an override; `GET` returns the
+  effective view) — an override layer on top of the env defaults, guarded like every `/internal/**`
+  route by `x-internal-token`. A restart falls back to env.
+- **queue aging (anti-starvation)** — a queued entry waiting past `agingMs` (default 60 s) is promoted
+  into the urgent scan class alongside `priority: "interactive"` jobs, so heavy WFQ weights/quotas can
+  delay a tenant's batch work but never starve it indefinitely.
 - **wiring** — the Temporal `everdict worker` builds a `Scheduler` over its registry (replacing `Router`),
   and `suiteWorkflow` fans out with a bounded lane count so a large suite can't flood activity slots;
   the scheduler then does fine-grained per-cluster capacity gating + tenant fairness on top.

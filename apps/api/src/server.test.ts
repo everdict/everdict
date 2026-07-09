@@ -123,6 +123,10 @@ function server(
     authenticator?: Authenticator;
     authorizationServers?: string[];
     callbackSink?: { deliver(runId: string, body: unknown): void };
+    schedulingControl?: {
+      effective(): { quotas: Record<string, number>; weights: Record<string, number> };
+      set(patch: { quotas?: Record<string, number | null>; weights?: Record<string, number | null> }): void;
+    };
   } = {},
 ) {
   const keyStore = new InMemoryTenantKeyStore();
@@ -228,6 +232,7 @@ function server(
     requireAuth: opts.requireAuth,
     ...(opts.authorizationServers ? { authorizationServers: opts.authorizationServers } : {}),
     ...(opts.callbackSink ? { callbackSink: opts.callbackSink } : {}),
+    ...(opts.schedulingControl ? { schedulingControl: opts.schedulingControl } : {}),
   });
   return {
     app,
@@ -1032,6 +1037,82 @@ describe("API — harness taxonomy (template category + instance)", () => {
       ).statusCode,
     ).toBe(404);
     await app.close();
+  });
+});
+
+describe("API — internal scheduling dials (operator plane)", () => {
+  // Minimal in-memory stand-in mirroring main.ts's override-layer semantics (null = clear the override).
+  function fakeControl() {
+    const quotas = new Map<string, number>();
+    const weights = new Map<string, number>();
+    return {
+      effective: () => ({ quotas: Object.fromEntries(quotas), weights: Object.fromEntries(weights) }),
+      set: (patch: { quotas?: Record<string, number | null>; weights?: Record<string, number | null> }) => {
+        for (const [t, v] of Object.entries(patch.quotas ?? {})) v === null ? quotas.delete(t) : quotas.set(t, v);
+        for (const [t, v] of Object.entries(patch.weights ?? {})) v === null ? weights.delete(t) : weights.set(t, v);
+      },
+    };
+  }
+
+  it("PUT applies quota/weight overrides and returns the effective view; null clears an override", async () => {
+    const { app } = server({ internalToken: "itok", schedulingControl: fakeControl() });
+    const put = await app.inject({
+      method: "PUT",
+      url: "/internal/scheduling",
+      headers: { "x-internal-token": "itok" },
+      payload: { quotas: { acme: 4 }, weights: { beta: 2 } },
+    });
+    expect(put.statusCode).toBe(200);
+    expect(put.json()).toEqual({ quotas: { acme: 4 }, weights: { beta: 2 } });
+
+    const clear = await app.inject({
+      method: "PUT",
+      url: "/internal/scheduling",
+      headers: { "x-internal-token": "itok" },
+      payload: { quotas: { acme: null } },
+    });
+    expect(clear.json()).toEqual({ quotas: {}, weights: { beta: 2 } });
+
+    const get = await app.inject({
+      method: "GET",
+      url: "/internal/scheduling",
+      headers: { "x-internal-token": "itok" },
+    });
+    expect(get.json()).toEqual({ quotas: {}, weights: { beta: 2 } });
+  });
+
+  it("guards: token mismatch 401, control not wired 404, malformed body 400", async () => {
+    const control = fakeControl();
+    const { app } = server({ internalToken: "itok", schedulingControl: control });
+    expect(
+      (
+        await app.inject({
+          method: "GET",
+          url: "/internal/scheduling",
+          headers: { "x-internal-token": "wrong" },
+        })
+      ).statusCode,
+    ).toBe(401);
+    expect(
+      (
+        await app.inject({
+          method: "PUT",
+          url: "/internal/scheduling",
+          headers: { "x-internal-token": "itok" },
+          payload: { quotas: { acme: -1 } }, // quota must be a positive integer
+        })
+      ).statusCode,
+    ).toBe(400);
+    const unwired = server({ internalToken: "itok" });
+    expect(
+      (
+        await unwired.app.inject({
+          method: "GET",
+          url: "/internal/scheduling",
+          headers: { "x-internal-token": "itok" },
+        })
+      ).statusCode,
+    ).toBe(404);
   });
 });
 
