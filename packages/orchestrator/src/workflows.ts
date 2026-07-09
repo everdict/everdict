@@ -1,5 +1,5 @@
 import type { AgentJob, CaseResult } from "@everdict/core";
-import { continueAsNew, proxyActivities, sleep } from "@temporalio/workflow";
+import { continueAsNew, proxyActivities, sleep, workflowInfo } from "@temporalio/workflow";
 import type { Activities } from "./types.js";
 
 // ⚠ Workflow code must be deterministic — no I/O, import types only.
@@ -69,14 +69,34 @@ const MAX_BATCH_LANES = 64;
 // FRESH history. Overridable per start (input.continueEvery — the CP driver reads its env).
 const BATCH_CONTINUE_EVERY = 500;
 
-export async function scorecardBatchWorkflow(input: { scorecardId: string; continueEvery?: number }): Promise<void> {
+// History-pressure rotation floor (ADAPTIVE continue-as-new). The fixed case-count slice assumes ~a handful of
+// events per case, but activity transport retries inflate events-per-case — a flaky network can walk a
+// 500-case slice into the history limits anyway. Rotate on the SERVER's own continueAsNewSuggested signal, with
+// this event-count floor as belt-and-braces for servers that don't set it. planBatch's idempotent re-plan makes
+// an early rotation harmless (the continuation picks up exactly the remainder).
+const HISTORY_ROTATE_AT = 20_000;
+
+export async function scorecardBatchWorkflow(input: {
+  scorecardId: string;
+  continueEvery?: number;
+  rotateAtHistoryLength?: number;
+}): Promise<void> {
   const plan = await batchActivities.planBatch({ scorecardId: input.scorecardId });
   const limit = Math.max(1, input.continueEvery ?? BATCH_CONTINUE_EVERY);
+  const rotateAt = Math.max(1, input.rotateAtHistoryLength ?? HISTORY_ROTATE_AT);
   // Only this slice runs in THIS execution — the rest belongs to the continued one.
   const ids = plan.caseIds.slice(0, limit);
   let next = 0;
+  let rotatedEarly = false;
   const lane = async (): Promise<void> => {
     while (next < ids.length) {
+      // History pressure — stop TAKING new cases and drain in-flight lanes; the continued execution re-plans.
+      // workflowInfo() is deterministic (replay reads the recorded history), so this is replay-safe.
+      const info = workflowInfo();
+      if (info.continueAsNewSuggested || info.historyLength >= rotateAt) {
+        rotatedEarly = true;
+        return;
+      }
       const i = next++;
       const caseId = ids[i];
       if (caseId === undefined) continue;
@@ -85,7 +105,7 @@ export async function scorecardBatchWorkflow(input: { scorecardId: string; conti
   };
   const lanes = Math.max(1, Math.min(plan.concurrency, MAX_BATCH_LANES, ids.length || 1));
   await Promise.all(Array.from({ length: lanes }, () => lane()));
-  if (plan.caseIds.length > limit) {
+  if (rotatedEarly || plan.caseIds.length > limit) {
     await continueAsNew<typeof scorecardBatchWorkflow>(input); // ends this execution — the chain continues under the same workflowId
     return;
   }

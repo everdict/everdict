@@ -76,6 +76,15 @@ Live e2e: 12-case batch with `continueEvery=5` → plan steps "Running 12" → "
 "Running 2 (10 kept)"; `temporal workflow list` shows ContinuedAsNew ×2 → Completed on one workflowId;
 12/12 pass.
 
+**Adaptive rotation (history pressure).** The fixed case-count slice assumes ~a handful of events per case,
+but activity transport retries inflate events-per-case — a flaky network can walk a 500-case slice into the
+history limits anyway. The workflow therefore ALSO rotates when the server itself suggests it
+(`workflowInfo().continueAsNewSuggested`) or when `historyLength` crosses a floor
+(`rotateAtHistoryLength`, default 20 000; dial `EVERDICT_TEMPORAL_BATCH_ROTATE_HISTORY`): lanes stop TAKING
+new cases, in-flight activities drain, and the execution continues-as-new — planBatch's idempotent re-plan
+makes an early rotation harmless. Live: a 24-case batch with the floor at 40 ran as a 4-execution chain
+(~56–59 events each) instead of one 158-event history, 24/24 succeeded.
+
 ## Retry parity
 
 `retry-failed` batches are workflow-owned too (a CP restart mid-retry must not lose them): the carried seeds

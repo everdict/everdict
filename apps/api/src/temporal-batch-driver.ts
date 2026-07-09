@@ -14,6 +14,7 @@ export class TemporalBatchDriver {
       // Settled cases per workflow execution before continue-as-new (EVERDICT_TEMPORAL_BATCH_CONTINUE_EVERY).
       // Unset = the workflow's own default (500) — the knob exists for history-budget tuning and live e2e.
       continueEvery?: number;
+      rotateAtHistoryLength?: number; // history-pressure rotation floor (adaptive continue-as-new)
     },
   ) {}
 
@@ -32,6 +33,9 @@ export class TemporalBatchDriver {
           {
             scorecardId,
             ...(this.opts.continueEvery !== undefined ? { continueEvery: this.opts.continueEvery } : {}),
+            ...(this.opts.rotateAtHistoryLength !== undefined
+              ? { rotateAtHistoryLength: this.opts.rotateAtHistoryLength }
+              : {}),
           },
         ],
       });

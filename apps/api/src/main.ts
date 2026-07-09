@@ -609,6 +609,10 @@ async function main(): Promise<void> {
             ...(process.env.EVERDICT_TEMPORAL_BATCH_CONTINUE_EVERY
               ? { continueEvery: Number(process.env.EVERDICT_TEMPORAL_BATCH_CONTINUE_EVERY) }
               : {}),
+            // Adaptive continue-as-new floor (event count) — the server's continueAsNewSuggested is primary.
+            ...(process.env.EVERDICT_TEMPORAL_BATCH_ROTATE_HISTORY
+              ? { rotateAtHistoryLength: Number(process.env.EVERDICT_TEMPORAL_BATCH_ROTATE_HISTORY) }
+              : {}),
           }),
         }
       : {}),
