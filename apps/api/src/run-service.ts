@@ -69,6 +69,12 @@ export interface RunServiceDeps {
   // Live-progress log read (observability ②): resolve the run's runtime lane to a live backend and read the
   // case job's current stdout (Backend.logs). Best-effort — absent/miss = no logs, never an error.
   readCaseLogs?: (tenant: string, runtimeList: string | undefined, caseId: string) => Promise<string | undefined>;
+  // Open an interactive shell stream inside a run's live sandbox (observability ⑥). undefined = no live container.
+  openTerminalStream?: (
+    tenant: string,
+    runtimeList: string | undefined,
+    caseId: string,
+  ) => Promise<import("@everdict/backends").ExecStreamHandle | undefined>;
   // Capture a live browser frame (observability ⑦) — resolves the run's runtime to a topology backend and
   // captures its per-case browser CDP screen by runId. Returns base64 PNG (no data: prefix). undefined = none.
   captureBrowserScreen?: (
@@ -212,6 +218,19 @@ export class RunService {
       .catch(() => undefined);
     const b64 = out && out.exitCode === 0 ? out.stdout.trim() : "";
     return { record, dataUrl: b64 ? `data:image/png;base64,${b64}` : undefined, supported: true };
+  }
+
+  // Open an interactive terminal on a run's live sandbox (observability ⑥). Returns the record (for authz) + a
+  // stream handle, or undefined when the record doesn't exist. stream=undefined = no live container to attach to.
+  async openTerminal(
+    id: string,
+  ): Promise<{ record: RunRecord; stream: import("@everdict/backends").ExecStreamHandle | undefined } | undefined> {
+    const record = await this.deps.store.get(id);
+    if (!record) return undefined;
+    const stream = this.deps.openTerminalStream
+      ? await this.deps.openTerminalStream(record.tenant, record.runtime, record.caseId).catch(() => undefined)
+      : undefined;
+    return { record, stream };
   }
 
   // Live-progress logs (observability ②) — the record plus the case job's current raw stdout. text=undefined

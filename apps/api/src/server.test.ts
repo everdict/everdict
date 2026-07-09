@@ -39,6 +39,7 @@ import { RunnerService } from "./runner-service.js";
 import { ScheduleService } from "./schedule-service.js";
 import { ScorecardService } from "./scorecard-service.js";
 import { buildServer } from "./server.js";
+import { TerminalTicketStore } from "./terminal-ticket.js";
 import { TraceSinkService } from "./trace-sink-service.js";
 import { WorkspaceService } from "./workspace-service.js";
 
@@ -1037,6 +1038,69 @@ describe("API — harness taxonomy (template category + instance)", () => {
       ).statusCode,
     ).toBe(404);
     await app.close();
+  });
+});
+
+describe("API — interactive terminal ticket (observability ⑥)", () => {
+  const CASE3: EvalCase = {
+    id: "c1",
+    env: { kind: "repo", source: { files: {} } },
+    task: "t",
+    graders: [],
+    timeoutSec: 60,
+    tags: [],
+  };
+
+  it("mints a ticket for the run's creator; 404 when the terminal store is not wired", async () => {
+    const keyStore = new InMemoryTenantKeyStore();
+    const store = new InMemoryRunStore();
+    const svc = new RunService({ dispatcher: okDispatcher, store });
+    const withStore = buildServer({
+      service: svc,
+      authenticator: roleAuth(["member"], "acme"),
+      keyStore,
+      terminalTickets: new TerminalTicketStore(1000, () => 0),
+    });
+    const rec = await svc.submit({ tenant: "acme", submittedBy: "u", harness: { id: "s", version: "0" }, case: CASE3 });
+    const res = await withStore.inject({
+      method: "POST",
+      url: `/runs/${rec.id}/terminal-ticket`,
+      headers: { authorization: "Bearer x" },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(typeof res.json().ticket).toBe("string");
+
+    const noStore = buildServer({ service: svc, authenticator: roleAuth(["member"], "acme"), keyStore });
+    const res2 = await noStore.inject({
+      method: "POST",
+      url: `/runs/${rec.id}/terminal-ticket`,
+      headers: { authorization: "Bearer x" },
+    });
+    expect(res2.statusCode).toBe(404);
+  });
+
+  it("403 when a non-creator non-admin asks for a ticket", async () => {
+    const keyStore = new InMemoryTenantKeyStore();
+    const store = new InMemoryRunStore();
+    const svc = new RunService({ dispatcher: okDispatcher, store });
+    const app = buildServer({
+      service: svc,
+      authenticator: roleAuth(["member"], "acme"), // subject "u"
+      keyStore,
+      terminalTickets: new TerminalTicketStore(1000, () => 0),
+    });
+    const rec = await svc.submit({
+      tenant: "acme",
+      submittedBy: "someone-else",
+      harness: { id: "s", version: "0" },
+      case: CASE3,
+    });
+    const res = await app.inject({
+      method: "POST",
+      url: `/runs/${rec.id}/terminal-ticket`,
+      headers: { authorization: "Bearer x" },
+    });
+    expect(res.statusCode).toBe(403);
   });
 });
 

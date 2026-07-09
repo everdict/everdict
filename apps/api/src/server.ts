@@ -52,6 +52,7 @@ import type { CallbackSink } from "@everdict/topology";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
+import { WebSocketServer } from "ws";
 import { z } from "zod";
 import { BenchmarkImportBodySchema, BenchmarkPreviewBodySchema, type BenchmarkService } from "./benchmark-service.js";
 import { BundleSchema, type BundleService, requiredActionsForBundle } from "./bundle-service.js";
@@ -81,6 +82,7 @@ import {
   type ScorecardService,
   originSource,
 } from "./scorecard-service.js";
+import type { TerminalTicketStore } from "./terminal-ticket.js";
 import type { TraceSinkService } from "./trace-sink-service.js";
 import { VersionTagsBodySchema, setVersionTags } from "./version-tag-service.js";
 import type { ViewService } from "./view-service.js";
@@ -279,6 +281,7 @@ export interface ServerDeps {
   authorizationServers?: string[]; // MCP OAuth: authorization servers in the protected-resource metadata (Keycloak issuer)
   logLevel?: string; // pino log level (info/debug/warn/…). Absent = logging disabled (silent tests). main injects it via EVERDICT_LOG_LEVEL.
   callbackSink?: CallbackSink; // inbound receiver for the front-door callback completion model (/frontdoor-callback disabled if absent)
+  terminalTickets?: TerminalTicketStore; // WS terminal (observability ⑥) — mints/consumes short-lived tickets (WS routes disabled if absent)
 }
 
 // Resolve identity (subject + default workspace + roles): Bearer (JWT or ak_) → Authenticator. Unauthenticated dev = header workspace + admin.
@@ -739,6 +742,29 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
         return reply.code(403).send({ code: "FORBIDDEN", message: "only the run's creator or an admin can exec." });
       if (!out.result) return reply.send({ found: false, stdout: "", stderr: "", exitCode: null });
       return reply.send({ found: true, ...out.result });
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  // Interactive terminal ticket (observability ⑥) — a browser can't send an Authorization header on a WS, so an
+  // authenticated (creator-or-admin) POST mints a short-lived single-use ticket; the browser then opens
+  // WS /runs/:id/terminal?ticket=… . Same gate as exec.
+  app.post<{ Params: { id: string } }>("/runs/:id/terminal-ticket", async (req, reply) => {
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "runs:read");
+      if (!deps.terminalTickets) return reply.code(404).send({ code: "NOT_FOUND", message: "terminal not configured" });
+      const rec = await deps.service.get(req.params.id);
+      if (!rec || rec.tenant !== principal.workspace)
+        return reply.code(404).send({ code: "NOT_FOUND", message: "run not found." });
+      if (rec.createdBy && rec.createdBy !== principal.subject && !principal.roles.includes("admin"))
+        return reply
+          .code(403)
+          .send({ code: "FORBIDDEN", message: "only the run's creator or an admin can attach a terminal." });
+      const ticket = deps.terminalTickets.issue(req.params.id, principal.subject);
+      return reply.send({ ticket });
     } catch (err) {
       return sendError(reply, err);
     }
@@ -3510,6 +3536,69 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   };
   app.get("/mcp", bySession);
   app.delete("/mcp", bySession);
+
+  // Interactive terminal WebSocket (observability ⑥) — attach a noServer WS to Fastify's http.Server and handle
+  // upgrades for /runs/:id/terminal?ticket=… . The ticket (minted by the authenticated POST above) is the auth;
+  // on a valid ticket, open the case's interactive shell (Backend.execStream) and pipe bytes both ways.
+  if (deps.terminalTickets) {
+    const tickets = deps.terminalTickets;
+    const wss = new WebSocketServer({ noServer: true });
+    app.server.on("upgrade", (request, socket, head) => {
+      let url: URL;
+      try {
+        url = new URL(request.url ?? "", "http://localhost");
+      } catch {
+        socket.destroy();
+        return;
+      }
+      const match = /^\/runs\/([^/]+)\/terminal$/.exec(url.pathname);
+      if (!match) return; // not our path — let other upgrade handlers (if any) take it
+      const runId = decodeURIComponent(match[1] ?? "");
+      const ticket = url.searchParams.get("ticket") ?? "";
+      if (!tickets.consume(ticket, runId)) {
+        socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
+        socket.destroy();
+        return;
+      }
+      wss.handleUpgrade(request, socket, head, (ws) => {
+        // Buffer the terminal's early keystrokes SYNCHRONOUSLY — opening the shell (Backend.execStream) does
+        // Nomad/K8s lookups (~hundreds of ms), and anything the client types before then would otherwise be
+        // dropped (no 'message' listener yet). Flush the buffer once the shell is attached.
+        const pending: string[] = [];
+        let shell: import("@everdict/backends").ExecStreamHandle | undefined;
+        let closed = false;
+        ws.on("message", (data) => {
+          const text = data.toString();
+          if (shell) shell.write(text);
+          else pending.push(text);
+        });
+        ws.on("close", () => {
+          closed = true;
+          shell?.close();
+        });
+        void (async () => {
+          const opened = await deps.service.openTerminal(runId).catch(() => undefined);
+          if (!opened?.stream) {
+            ws.send("\r\n[everdict] no live container to attach to.\r\n");
+            ws.close();
+            return;
+          }
+          if (closed) {
+            opened.stream.close(); // the client already went away while we were opening
+            return;
+          }
+          shell = opened.stream;
+          const OPEN = 1; // ws readyState OPEN (numeric — the instance constant is unreliable across ws versions)
+          shell.onData((chunk: string) => {
+            if (ws.readyState === OPEN) ws.send(chunk);
+          });
+          shell.onExit(() => ws.close());
+          for (const buffered of pending) shell.write(buffered); // flush what the user typed before the shell was ready
+          pending.length = 0;
+        })();
+      });
+    });
+  }
 
   return app;
 }

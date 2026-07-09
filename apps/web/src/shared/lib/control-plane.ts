@@ -104,6 +104,9 @@ export const controlPlane = {
   // Live screen frame (LiveScreen — os-use desktop). supported=false for other env kinds.
   getRunScreen: <T>(auth: AuthContext, id: string) =>
     call<T>(auth, `/runs/${encodeURIComponent(id)}/screen`),
+  // Interactive-terminal ticket (LiveTerminal — observability ⑥). Creator-or-admin, enforced by the control plane.
+  terminalTicket: <T>(auth: AuthContext, id: string) =>
+    call<T>(auth, `/runs/${encodeURIComponent(id)}/terminal-ticket`, { method: 'POST' }),
   // Work queue snapshot — per-runtime-lane running / waiting (FIFO) / next scheduled fire.
   getQueue: <T>(auth: AuthContext) => call<T>(auth, '/queue'),
   // Metered billing usage (LLM cost for orchestration + verdict; own-pays runs excluded) — meter-only, never blocks.

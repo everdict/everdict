@@ -382,6 +382,52 @@ export class NomadBackend implements Backend {
     }
   }
 
+  // Open an interactive shell inside the case's live alloc (observability ⑥) — `nomad alloc exec -i -task agent
+  // <alloc> /bin/sh`. Returns a stream handle the WS terminal route pipes to. undefined = no running alloc.
+  async execStream(caseId: string): Promise<
+    | {
+        write(data: string): void;
+        onData(cb: (chunk: string) => void): void;
+        onExit(cb: (code: number | null) => void): void;
+        close(): void;
+      }
+    | undefined
+  > {
+    try {
+      const prefix = `everdict-${caseId}-`;
+      const res = await this.http.request("GET", `/v1/jobs?prefix=${encodeURIComponent(prefix)}&namespace=*`);
+      if (res.status >= 300) return undefined;
+      const jobs = JSON.parse(res.text) as Array<{ ID?: string; Namespace?: string; SubmitTime?: number }>;
+      const newest = jobs
+        .filter((j) => j.ID?.startsWith(prefix))
+        .sort((a, b) => (b.SubmitTime ?? 0) - (a.SubmitTime ?? 0))[0];
+      if (!newest?.ID) return undefined;
+      const ns = newest.Namespace && newest.Namespace !== "default" ? newest.Namespace : undefined;
+      const nsq = ns ? `?namespace=${encodeURIComponent(ns)}` : "";
+      const allocsRes = await this.http.request("GET", `/v1/job/${encodeURIComponent(newest.ID)}/allocations${nsq}`);
+      if (allocsRes.status >= 300) return undefined;
+      const alloc = (JSON.parse(allocsRes.text) as Array<{ ID: string; ClientStatus?: string }>).find(
+        (a) => a.ClientStatus === "running",
+      );
+      if (!alloc) return undefined;
+      const env: Record<string, string> = { ...process.env, NOMAD_ADDR: this.opts.addr };
+      if (this.opts.apiToken) env.NOMAD_TOKEN = this.opts.apiToken;
+      const args = ["alloc", "exec", "-i", "-task", "agent", ...(ns ? ["-namespace", ns] : []), alloc.ID, "/bin/sh"];
+      const child = spawn("nomad", args, { stdio: ["pipe", "pipe", "pipe"], env });
+      return {
+        write: (data) => child.stdin.write(data),
+        onData: (cb) => {
+          child.stdout.on("data", (d: Buffer) => cb(String(d)));
+          child.stderr.on("data", (d: Buffer) => cb(String(d)));
+        },
+        onExit: (cb) => child.on("close", (code) => cb(code)),
+        close: () => child.kill("SIGKILL"),
+      };
+    } catch {
+      return undefined;
+    }
+  }
+
   // Current stdout of the case's newest job — live-progress tail (no waiting: a job with no alloc yet reads as
   // undefined and the caller polls again). Sentinel payload stripped (it's the machine result, not progress).
   async logs(caseId: string): Promise<string | undefined> {

@@ -14,6 +14,10 @@ const schema = z.object({
   DESKTOP_DOWNLOAD_URL: z.string().url().optional(),
   // Temporal Web UI base (e.g. http://localhost:8233) — when set, a Temporal-owned batch's workflow chip deep-links there.
   TEMPORAL_UI_URL: z.string().url().optional(),
+  // Public WebSocket base of the control plane for the interactive terminal (observability ⑥) — the BROWSER
+  // connects here directly with a short-lived ticket. Unset → derived from CONTROL_PLANE_URL (http→ws), which is
+  // reachable in dev (localhost) but should be set to the public wss:// origin in a deployed setup.
+  CONTROL_PLANE_WS_URL: z.string().optional(),
   // Keycloak (Auth.js)
   AUTH_SECRET: z.string().optional(),
   KEYCLOAK_ISSUER: z.string().url().optional(), // e.g. http://localhost:8081/realms/everdict
@@ -27,6 +31,7 @@ export const env = schema.parse({
   DESKTOP_RELEASES_TOKEN: process.env.DESKTOP_RELEASES_TOKEN,
   DESKTOP_DOWNLOAD_URL: process.env.DESKTOP_DOWNLOAD_URL,
   TEMPORAL_UI_URL: process.env.TEMPORAL_UI_URL,
+  CONTROL_PLANE_WS_URL: process.env.CONTROL_PLANE_WS_URL,
   AUTH_SECRET: process.env.AUTH_SECRET,
   KEYCLOAK_ISSUER: process.env.KEYCLOAK_ISSUER,
   KEYCLOAK_CLIENT_ID: process.env.KEYCLOAK_CLIENT_ID,

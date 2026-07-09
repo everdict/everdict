@@ -52,9 +52,9 @@ the newest RUNNING alloc/pod). undefined = no live container.
 - Authz is tightened beyond `runs:read`: exec runs arbitrary (mutating) commands in the sandbox, so
   it's **the run's creator or a workspace admin only** (403 otherwise). The sandbox is already
   untrusted+isolated — this gates WHO may look in, not what runs there.
-- Web: a `SandboxTerminal` on the run detail (command box + scrollback). One-shot, not a full PTY —
-  enough to inspect the sandbox mid-run (`ls`/`cat`/`ps`/`env`). Interactive PTY-over-WS is a
-  follow-up (Nomad/K8s exec both support a TTY stream; the seam is one-shot for now).
+- Web: `LiveTerminal` on the run detail — a **persistent interactive shell over WebSocket** (⑥ below).
+  `SandboxTerminal` (one-shot exec) remains for scripted/stateless use, but the run detail now mounts the
+  interactive one.
 
 Live-verified on Nomad: `whoami && ls /app` returned root + the image tree from inside a running
 case; a failing command surfaced its stderr and exit 1.
@@ -83,6 +83,26 @@ Nomad exposes the browser CDP as a host:port so rediscovery is clean; the **K8s*
 through an ephemeral port-forward tied to the provision, so its `browserCdpBase` is a follow-up
 (captureScreen returns undefined there — the widget just shows nothing). End-to-end browser-run screen
 needs a live topology run (same remaining live check as os-use's Xvfb image).
+
+## ⑥ Interactive terminal — a persistent shell over WebSocket
+
+The one-shot exec (④) can't hold shell state (each call is a fresh `sh -c`). `Backend.execStream(caseId)`
+opens a PERSISTENT interactive shell — Nomad `nomad alloc exec -i -task agent <alloc> /bin/sh` (K8s is a
+follow-up: its kubeconfig is materialized per-dispatch, so a long-lived stream needs the temp file kept open)
+— and returns a `{write, onData, onExit, close}` handle.
+
+Transport: a browser can't set an Authorization header on a WebSocket, so an authenticated (creator-or-admin)
+`POST /runs/:id/terminal-ticket` mints a short-lived (30 s) single-use ticket; the browser then opens
+`WS /runs/:id/terminal?ticket=…` directly to the control plane (a `ws` `WebSocketServer` on Fastify's
+`upgrade`). The upgrade handler consumes the ticket, opens the shell, and pipes bytes both ways. Two traps
+handled: the terminal's early keystrokes are **buffered synchronously** and flushed once the shell is attached
+(opening it does Nomad lookups — otherwise the first commands are lost), and the ready-state guard uses the
+numeric `OPEN` (the `ws` instance constant is unreliable). The web `LiveTerminal` is line-oriented (command +
+Enter, local echo — the shell has no TTY) so it needs no xterm.
+
+Live-verified end to end on Nomad: over the WS, `cd /app; pwd` returned `/app` and
+`SESSION=alive; echo persisted:$SESSION calc:$((6*7))` returned `persisted:alive calc:42` — cd AND the shell
+variable survived across commands (a real persistent session), and a reused ticket was rejected (401).
 
 ## ③ Live trace deep-link — where the platform trace is accumulating
 

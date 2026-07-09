@@ -467,6 +467,10 @@ export class K8sBackend implements Backend {
     }
   }
 
+  // (Interactive execStream — observability ⑥ — is Nomad-only for now: K8s reaches the pod through kubectl with a
+  // per-dispatch materialized kubeconfig, so a long-lived interactive stream needs the temp file kept open for the
+  // stream's lifetime — a follow-up. One-shot exec above already works. The WS route degrades gracefully.)
+
   // Current stdout of the case's newest job pod — live-progress tail (a pending pod reads as undefined and the
   // caller polls again). Sentinel payload stripped. Best-effort, never throws.
   async logs(caseId: string): Promise<string | undefined> {
