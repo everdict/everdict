@@ -4,12 +4,13 @@ import type { FastifyInstance } from "fastify";
 import { VersionTagsBodySchema, setVersionTags } from "../../common/version-tag-service.js";
 import { deleteDatasetVersion } from "../../core/dataset/dataset-service.js";
 import { type ServerDeps, gate, resolvePrincipal, sendError, zodIssues } from "../route-context.js";
+import { datasetDocs } from "./dataset.docs.js";
 import { ImportHarborBodySchema } from "./request/import-harbor.js";
 import { ImportTerminalBenchBodySchema } from "./request/import-terminal-bench.js";
 
 // datasets (workspace-owned SSOT, harness-agnostic eval-case bundles)
 export function registerDatasetRoutes(app: FastifyInstance, deps: ServerDeps): void {
-  app.post("/datasets", async (req, reply) => {
+  app.post("/datasets", { schema: datasetDocs.register }, async (req, reply) => {
     if (!deps.datasetRegistry)
       return reply.code(404).send({ code: "NOT_FOUND", message: "dataset registry not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
@@ -32,7 +33,7 @@ export function registerDatasetRoutes(app: FastifyInstance, deps: ServerDeps): v
   // Terminal-Bench task-set → workspace Dataset (standard task-format on-ramp). Same gate as datasets:write. Each task
   // maps to an EvalCase (prebuilt image env + instruction + tests-pass); a task with no resolvable image is a 400
   // (Everdict references images, never builds). Versions are immutable (409 on collision). docs/architecture/standard-task-formats.md
-  app.post("/datasets/terminal-bench", async (req, reply) => {
+  app.post("/datasets/terminal-bench", { schema: datasetDocs.importTerminalBench }, async (req, reply) => {
     if (!deps.datasetRegistry)
       return reply.code(404).send({ code: "NOT_FOUND", message: "dataset registry not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
@@ -68,7 +69,7 @@ export function registerDatasetRoutes(app: FastifyInstance, deps: ServerDeps): v
   });
 
   // Harbor (Anthropic) task-set → workspace Dataset — same on-ramp as Terminal-Bench (datasets:write, unresolved image 400).
-  app.post("/datasets/harbor", async (req, reply) => {
+  app.post("/datasets/harbor", { schema: datasetDocs.importHarbor }, async (req, reply) => {
     if (!deps.datasetRegistry)
       return reply.code(404).send({ code: "NOT_FOUND", message: "dataset registry not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
@@ -104,7 +105,7 @@ export function registerDatasetRoutes(app: FastifyInstance, deps: ServerDeps): v
   });
 
   // dry-run validate — schema + this workspace's existing versions/conflict (does not register). Pre-check for the register flow.
-  app.post("/datasets/validate", async (req, reply) => {
+  app.post("/datasets/validate", { schema: datasetDocs.validate }, async (req, reply) => {
     if (!deps.datasetRegistry)
       return reply.code(404).send({ code: "NOT_FOUND", message: "dataset registry not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
@@ -128,7 +129,7 @@ export function registerDatasetRoutes(app: FastifyInstance, deps: ServerDeps): v
     });
   });
 
-  app.get("/datasets", async (req, reply) => {
+  app.get("/datasets", { schema: datasetDocs.list }, async (req, reply) => {
     if (!deps.datasetRegistry)
       return reply.code(404).send({ code: "NOT_FOUND", message: "dataset registry not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
@@ -142,62 +143,77 @@ export function registerDatasetRoutes(app: FastifyInstance, deps: ServerDeps): v
   });
 
   // Full dataset for a specific version (cases included). version may be "latest". Other workspace → NOT_FOUND.
-  app.get<{ Params: { id: string; version: string } }>("/datasets/:id/versions/:version", async (req, reply) => {
-    if (!deps.datasetRegistry)
-      return reply.code(404).send({ code: "NOT_FOUND", message: "dataset registry not configured" });
-    const principal = await resolvePrincipal(req, reply, deps);
-    if (!principal) return reply;
-    try {
-      gate(principal, "datasets:read");
-      return reply.send(await deps.datasetRegistry.get(principal.workspace, req.params.id, req.params.version));
-    } catch (err) {
-      return sendError(reply, err); // not found → NotFoundError → 404
-    }
-  });
+  app.get<{ Params: { id: string; version: string } }>(
+    "/datasets/:id/versions/:version",
+    { schema: datasetDocs.get },
+    async (req, reply) => {
+      if (!deps.datasetRegistry)
+        return reply.code(404).send({ code: "NOT_FOUND", message: "dataset registry not configured" });
+      const principal = await resolvePrincipal(req, reply, deps);
+      if (!principal) return reply;
+      try {
+        gate(principal, "datasets:read");
+        return reply.send(await deps.datasetRegistry.get(principal.workspace, req.params.id, req.params.version));
+      } catch (err) {
+        return sendError(reply, err); // not found → NotFoundError → 404
+      }
+    },
+  );
 
   // Soft-delete a dataset version — only that version's own creator or a workspace admin (deleteDatasetVersion gates it).
   // Deletion is a tombstone (data preserved, excluded from reads) → past scorecards stay reproducible. Missing/already-deleted/non-owned version = 404.
-  app.delete<{ Params: { id: string; version: string } }>("/datasets/:id/versions/:version", async (req, reply) => {
-    if (!deps.datasetRegistry)
-      return reply.code(404).send({ code: "NOT_FOUND", message: "dataset registry not configured" });
-    const principal = await resolvePrincipal(req, reply, deps);
-    if (!principal) return reply;
-    try {
-      return reply.send(await deleteDatasetVersion(deps.datasetRegistry, principal, req.params.id, req.params.version));
-    } catch (err) {
-      return sendError(reply, err); // no permission 403 / not found 404
-    }
-  });
+  app.delete<{ Params: { id: string; version: string } }>(
+    "/datasets/:id/versions/:version",
+    { schema: datasetDocs.deleteVersion },
+    async (req, reply) => {
+      if (!deps.datasetRegistry)
+        return reply.code(404).send({ code: "NOT_FOUND", message: "dataset registry not configured" });
+      const principal = await resolvePrincipal(req, reply, deps);
+      if (!principal) return reply;
+      try {
+        return reply.send(
+          await deleteDatasetVersion(deps.datasetRegistry, principal, req.params.id, req.params.version),
+        );
+      } catch (err) {
+        return sendError(reply, err); // no permission 403 / not found 404
+      }
+    },
+  );
 
   // Replace version tags (whole-array PUT; empty array = clear) — mutable metadata outside the spec (free labels, to tell versions apart).
   // Distinct from the content's tags (entity classification). Reuses the datasets:write gate. _shared / other-workspace versions = 404.
-  app.put<{ Params: { id: string; version: string } }>("/datasets/:id/versions/:version/tags", async (req, reply) => {
-    if (!deps.datasetRegistry)
-      return reply.code(404).send({ code: "NOT_FOUND", message: "dataset registry not configured" });
-    const principal = await resolvePrincipal(req, reply, deps);
-    if (!principal) return reply;
-    const parsed = VersionTagsBodySchema.safeParse(req.body);
-    if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
-    try {
-      return reply.send(
-        await setVersionTags(
-          deps.datasetRegistry,
-          principal,
-          "datasets:write",
-          req.params.id,
-          req.params.version,
-          parsed.data.tags,
-        ),
-      );
-    } catch (err) {
-      return sendError(reply, err); // no permission 403 / not found·non-owned 404
-    }
-  });
+  app.put<{ Params: { id: string; version: string } }>(
+    "/datasets/:id/versions/:version/tags",
+    { schema: datasetDocs.setVersionTags },
+    async (req, reply) => {
+      if (!deps.datasetRegistry)
+        return reply.code(404).send({ code: "NOT_FOUND", message: "dataset registry not configured" });
+      const principal = await resolvePrincipal(req, reply, deps);
+      if (!principal) return reply;
+      const parsed = VersionTagsBodySchema.safeParse(req.body);
+      if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
+      try {
+        return reply.send(
+          await setVersionTags(
+            deps.datasetRegistry,
+            principal,
+            "datasets:write",
+            req.params.id,
+            req.params.version,
+            parsed.data.tags,
+          ),
+        );
+      } catch (err) {
+        return sendError(reply, err); // no permission 403 / not found·non-owned 404
+      }
+    },
+  );
 
   // Diff between versions — case additions/removals/changes + metadata changes between base↔candidate. Both may be "latest".
   // Immutable-version premise (registry-enforced) → the same (id, version) always has the same content, so the comparison is reproducible.
   app.get<{ Params: { id: string }; Querystring: { base?: string; candidate?: string } }>(
     "/datasets/:id/diff",
+    { schema: datasetDocs.diff },
     async (req, reply) => {
       if (!deps.datasetRegistry)
         return reply.code(404).send({ code: "NOT_FOUND", message: "dataset registry not configured" });

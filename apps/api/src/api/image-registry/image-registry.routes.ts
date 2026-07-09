@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { type ServerDeps, gate, resolvePrincipal, sendError, zodIssues } from "../route-context.js";
+import { imageRegistryDocs } from "./image-registry.docs.js";
 
 // workspace image registries (BYO, multiple) — the image-classification baseline + push-credential mint.
 export function registerImageRegistryRoutes(app: FastifyInstance, deps: ServerDeps): void {
@@ -8,7 +9,7 @@ export function registerImageRegistryRoutes(app: FastifyInstance, deps: ServerDe
   // Register multiple by name and select one at push time (classification/pull-auth match across all hosts). Read harnesses:read (viewer+ —
   // the classification badge is a harness-read concern, the view is a name reference/coordinates only) / register·unregister settings:write / push credentials
   // images:push (member+ — value disclosure named as its own action). Design: docs/architecture/workspace-image-registry.md
-  app.get("/workspace/image-registries", async (req, reply) => {
+  app.get("/workspace/image-registries", { schema: imageRegistryDocs.list }, async (req, reply) => {
     if (!deps.imageRegistryService)
       return reply.code(404).send({ code: "NOT_FOUND", message: "image registry service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
@@ -21,7 +22,7 @@ export function registerImageRegistryRoutes(app: FastifyInstance, deps: ServerDe
     }
   });
 
-  app.put("/workspace/image-registries", async (req, reply) => {
+  app.put("/workspace/image-registries", { schema: imageRegistryDocs.upsert }, async (req, reply) => {
     if (!deps.imageRegistryService)
       return reply.code(404).send({ code: "NOT_FOUND", message: "image registry service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
@@ -46,7 +47,7 @@ export function registerImageRegistryRoutes(app: FastifyInstance, deps: ServerDe
     }
   });
 
-  app.delete("/workspace/image-registries/:name", async (req, reply) => {
+  app.delete("/workspace/image-registries/:name", { schema: imageRegistryDocs.remove }, async (req, reply) => {
     if (!deps.imageRegistryService)
       return reply.code(404).send({ code: "NOT_FOUND", message: "image registry service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
@@ -63,17 +64,21 @@ export function registerImageRegistryRoutes(app: FastifyInstance, deps: ServerDe
 
   // Mint push credentials — the 'value' of pushSecretName goes out in the response (non-persistent, the caller discards it after docker login+push).
   // Select the registry via ?name= — omitting it is allowed only when there's exactly one (omitting it with multiple → 400, listing the names).
-  app.post<{ Querystring: { name?: string } }>("/workspace/image-registries/push-credentials", async (req, reply) => {
-    if (!deps.imageRegistryService)
-      return reply.code(404).send({ code: "NOT_FOUND", message: "image registry service not configured" });
-    const principal = await resolvePrincipal(req, reply, deps);
-    if (!principal) return reply;
-    try {
-      gate(principal, "images:push");
-      const credentials = await deps.imageRegistryService.pushCredentials(principal.workspace, req.query.name);
-      return reply.send({ credentials });
-    } catch (err) {
-      return sendError(reply, err);
-    }
-  });
+  app.post<{ Querystring: { name?: string } }>(
+    "/workspace/image-registries/push-credentials",
+    { schema: imageRegistryDocs.pushCredentials },
+    async (req, reply) => {
+      if (!deps.imageRegistryService)
+        return reply.code(404).send({ code: "NOT_FOUND", message: "image registry service not configured" });
+      const principal = await resolvePrincipal(req, reply, deps);
+      if (!principal) return reply;
+      try {
+        gate(principal, "images:push");
+        const credentials = await deps.imageRegistryService.pushCredentials(principal.workspace, req.query.name);
+        return reply.send({ credentials });
+      } catch (err) {
+        return sendError(reply, err);
+      }
+    },
+  );
 }

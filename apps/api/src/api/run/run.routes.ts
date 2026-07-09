@@ -2,10 +2,11 @@ import type { FastifyInstance } from "fastify";
 import type { z } from "zod";
 import { type ServerDeps, gate, resolvePrincipal, sendError } from "../route-context.js";
 import { SubmitBodySchema } from "./request/submit.js";
+import { runDocs } from "./run.docs.js";
 
 // runs — the async execution primitive: submit returns a run id; the result arrives by poll or webhook.
 export function registerRunRoutes(app: FastifyInstance, deps: ServerDeps): void {
-  app.post("/runs", async (req, reply) => {
+  app.post("/runs", { schema: runDocs.submit }, async (req, reply) => {
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     let body: z.infer<typeof SubmitBodySchema>;
@@ -25,7 +26,7 @@ export function registerRunRoutes(app: FastifyInstance, deps: ServerDeps): void 
     }
   });
 
-  app.get<{ Params: { id: string } }>("/runs/:id", async (req, reply) => {
+  app.get<{ Params: { id: string } }>("/runs/:id", { schema: runDocs.get }, async (req, reply) => {
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     try {
@@ -39,7 +40,7 @@ export function registerRunRoutes(app: FastifyInstance, deps: ServerDeps): void 
     }
   });
 
-  app.get<{ Querystring: { scorecardId?: string } }>("/runs", async (req, reply) => {
+  app.get<{ Querystring: { scorecardId?: string } }>("/runs", { schema: runDocs.list }, async (req, reply) => {
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     try {

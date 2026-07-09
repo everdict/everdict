@@ -1,11 +1,12 @@
 import type { FastifyInstance } from "fastify";
 import { BundleSchema, requiredActionsForBundle } from "../../core/bundle/bundle-service.js";
 import { type ServerDeps, gate, resolvePrincipal, sendError } from "../route-context.js";
+import { bundleDocs } from "./bundle.docs.js";
 
 // bundles (one-shot bundle apply: register harness+benchmark+dataset+runtime+judge/model from a single manifest)
 // authZ = compose and enforce the required per-type gates derived from the bundle contents, with no new action (requiredActionsForBundle).
 export function registerBundleRoutes(app: FastifyInstance, deps: ServerDeps): void {
-  app.post("/bundles/apply", async (req, reply) => {
+  app.post("/bundles/apply", { schema: bundleDocs.apply }, async (req, reply) => {
     if (!deps.bundleService)
       return reply.code(404).send({ code: "NOT_FOUND", message: "bundle service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);

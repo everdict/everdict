@@ -1,10 +1,11 @@
 import type { FastifyInstance } from "fastify";
 import { type ServerDeps, gate, resolvePrincipal, sendError, zodIssues } from "../route-context.js";
+import { commentDocs } from "./comment.docs.js";
 import { CreateCommentBodySchema } from "./request/create-comment.js";
 
 // comments (resource comments — collaborative discussion on datasets, etc.; read = viewer+, write = member+, delete = author-or-admin)
 export function registerCommentRoutes(app: FastifyInstance, deps: ServerDeps): void {
-  app.get("/comments", async (req, reply) => {
+  app.get("/comments", { schema: commentDocs.list }, async (req, reply) => {
     if (!deps.commentService)
       return reply.code(404).send({ code: "NOT_FOUND", message: "comment service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
@@ -21,7 +22,7 @@ export function registerCommentRoutes(app: FastifyInstance, deps: ServerDeps): v
     }
   });
 
-  app.post("/comments", async (req, reply) => {
+  app.post("/comments", { schema: commentDocs.create }, async (req, reply) => {
     if (!deps.commentService)
       return reply.code(404).send({ code: "NOT_FOUND", message: "comment service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
@@ -45,7 +46,7 @@ export function registerCommentRoutes(app: FastifyInstance, deps: ServerDeps): v
     }
   });
 
-  app.delete<{ Params: { id: string } }>("/comments/:id", async (req, reply) => {
+  app.delete<{ Params: { id: string } }>("/comments/:id", { schema: commentDocs.delete }, async (req, reply) => {
     if (!deps.commentService)
       return reply.code(404).send({ code: "NOT_FOUND", message: "comment service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);

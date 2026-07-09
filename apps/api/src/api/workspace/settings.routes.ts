@@ -1,11 +1,12 @@
 import type { FastifyInstance } from "fastify";
 import { type ServerDeps, gate, resolvePrincipal, sendError, zodIssues } from "../route-context.js";
 import { WorkspaceSettingsBodySchema } from "./request/workspace-settings.js";
+import { settingsDocs } from "./settings.docs.js";
 
 // workspace settings (metering policy, default judge, notify target; admin only).
 export function registerWorkspaceSettingsRoutes(app: FastifyInstance, deps: ServerDeps): void {
   // --- workspace settings (metering policy, etc.; admin only) ---
-  app.get("/workspace/settings", async (req, reply) => {
+  app.get("/workspace/settings", { schema: settingsDocs.get }, async (req, reply) => {
     if (!deps.settingsStore)
       return reply.code(404).send({ code: "NOT_FOUND", message: "settings store not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
@@ -18,7 +19,7 @@ export function registerWorkspaceSettingsRoutes(app: FastifyInstance, deps: Serv
     }
   });
 
-  app.put("/workspace/settings", async (req, reply) => {
+  app.put("/workspace/settings", { schema: settingsDocs.put }, async (req, reply) => {
     if (!deps.settingsStore)
       return reply.code(404).send({ code: "NOT_FOUND", message: "settings store not configured" });
     const principal = await resolvePrincipal(req, reply, deps);

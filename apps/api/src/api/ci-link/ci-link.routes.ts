@@ -3,12 +3,13 @@ import { z } from "zod";
 import { UpsertCiLinkBodySchema } from "../../core/ci-link/ci-link-service.js";
 import { baseUrl } from "../route-context.js";
 import { type ServerDeps, gate, resolvePrincipal, sendError, zodIssues } from "../route-context.js";
+import { ciLinkDocs } from "./ci-link.docs.js";
 
 // CI repo links (repository ↔ harness slot = GitHub Actions OIDC trust policy) + the setup-PR generator.
 export function registerCiLinkRoutes(app: FastifyInstance, deps: ServerDeps): void {
   // --- CI repo links (repository ↔ harness slot mapping = GitHub Actions OIDC trust policy) ---
   // Read is harnesses:read (benign metadata exposed on the harness detail), create/delete is settings:write (link = granting trust — admin).
-  app.get("/workspace/ci/links", async (req, reply) => {
+  app.get("/workspace/ci/links", { schema: ciLinkDocs.list }, async (req, reply) => {
     if (!deps.ciLinkService)
       return reply.code(404).send({ code: "NOT_FOUND", message: "ci link service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
@@ -21,7 +22,7 @@ export function registerCiLinkRoutes(app: FastifyInstance, deps: ServerDeps): vo
     }
   });
 
-  app.put("/workspace/ci/links", async (req, reply) => {
+  app.put("/workspace/ci/links", { schema: ciLinkDocs.upsert }, async (req, reply) => {
     if (!deps.ciLinkService)
       return reply.code(404).send({ code: "NOT_FOUND", message: "ci link service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
@@ -37,26 +38,30 @@ export function registerCiLinkRoutes(app: FastifyInstance, deps: ServerDeps): vo
   });
 
   // repository is "owner/name" (contains a slash) — taken as a query rather than a path parameter. host unset = github.com link.
-  app.delete<{ Querystring: { repository?: string; host?: string } }>("/workspace/ci/links", async (req, reply) => {
-    if (!deps.ciLinkService)
-      return reply.code(404).send({ code: "NOT_FOUND", message: "ci link service not configured" });
-    const principal = await resolvePrincipal(req, reply, deps);
-    if (!principal) return reply;
-    if (!req.query.repository)
-      return reply.code(400).send({ code: "BAD_REQUEST", message: "repository query parameter is required." });
-    try {
-      gate(principal, "settings:write");
-      return reply.send({
-        links: await deps.ciLinkService.remove(principal.workspace, req.query.repository, req.query.host),
-      });
-    } catch (err) {
-      return sendError(reply, err);
-    }
-  });
+  app.delete<{ Querystring: { repository?: string; host?: string } }>(
+    "/workspace/ci/links",
+    { schema: ciLinkDocs.remove },
+    async (req, reply) => {
+      if (!deps.ciLinkService)
+        return reply.code(404).send({ code: "NOT_FOUND", message: "ci link service not configured" });
+      const principal = await resolvePrincipal(req, reply, deps);
+      if (!principal) return reply;
+      if (!req.query.repository)
+        return reply.code(400).send({ code: "BAD_REQUEST", message: "repository query parameter is required." });
+      try {
+        gate(principal, "settings:write");
+        return reply.send({
+          links: await deps.ciLinkService.remove(principal.workspace, req.query.repository, req.query.host),
+        });
+      } catch (err) {
+        return sendError(reply, err);
+      }
+    },
+  );
 
   // setup-PR — synthesize the link's workflow YAML and open a branch+commit+PR on the target repo (workspace GitHub App token).
   // Since the link already granted trust, this is harnesses:read (the PR still needs merge approval on GitHub — not a run permission).
-  app.post("/workspace/ci/links/setup-pr", async (req, reply) => {
+  app.post("/workspace/ci/links/setup-pr", { schema: ciLinkDocs.setupPr }, async (req, reply) => {
     if (!deps.ciLinkService)
       return reply.code(404).send({ code: "NOT_FOUND", message: "ci link service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);

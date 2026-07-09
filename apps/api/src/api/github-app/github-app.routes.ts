@@ -2,12 +2,13 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { baseUrl } from "../route-context.js";
 import { type ServerDeps, gate, resolvePrincipal, sendError, zodIssues } from "../route-context.js";
+import { githubAppDocs } from "./github-app.docs.js";
 
 // workspace-owned GitHub App integration — org install → selected repos → workspace-owned installation tokens (github.com + GHE registrations).
 export function registerGithubAppRoutes(app: FastifyInstance, deps: ServerDeps): void {
   // --- workspace-owned GitHub App integration (replaces personal connections) — org install→selected repos→workspace-owned installation ---
   // Read settings:read / install·register·unlink settings:write. The callback is a public route GitHub calls (no auth, verified via state).
-  app.get("/workspace/github-app", async (req, reply) => {
+  app.get("/workspace/github-app", { schema: githubAppDocs.view }, async (req, reply) => {
     if (!deps.githubAppService)
       return reply.code(404).send({ code: "NOT_FOUND", message: "github app service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
@@ -24,7 +25,7 @@ export function registerGithubAppRoutes(app: FastifyInstance, deps: ServerDeps):
   });
 
   // repo picker — the repos the workspace App installation can access (only those chosen at install). For the CI repo-link UX. settings:read.
-  app.get("/workspace/github-app/repos", async (req, reply) => {
+  app.get("/workspace/github-app/repos", { schema: githubAppDocs.repos }, async (req, reply) => {
     if (!deps.githubAppService)
       return reply.code(404).send({ code: "NOT_FOUND", message: "github app service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
@@ -37,7 +38,7 @@ export function registerGithubAppRoutes(app: FastifyInstance, deps: ServerDeps):
     }
   });
 
-  app.post("/workspace/github-app/install/start", async (req, reply) => {
+  app.post("/workspace/github-app/install/start", { schema: githubAppDocs.startInstall }, async (req, reply) => {
     if (!deps.githubAppService)
       return reply.code(404).send({ code: "NOT_FOUND", message: "github app service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
@@ -58,7 +59,7 @@ export function registerGithubAppRoutes(app: FastifyInstance, deps: ServerDeps):
   });
 
   // Public callback — GitHub redirects to the Setup URL after App install (installation_id + setup_action + state).
-  app.get("/workspace/github-app/callback", async (req, reply) => {
+  app.get("/workspace/github-app/callback", { schema: githubAppDocs.callback }, async (req, reply) => {
     if (!deps.githubAppService)
       return reply.code(404).send({ code: "NOT_FOUND", message: "github app service not configured" });
     const q = z
@@ -71,7 +72,7 @@ export function registerGithubAppRoutes(app: FastifyInstance, deps: ServerDeps):
     return reply.redirect(redirectTo);
   });
 
-  app.post("/workspace/github-app/registrations", async (req, reply) => {
+  app.post("/workspace/github-app/registrations", { schema: githubAppDocs.registerGheApp }, async (req, reply) => {
     if (!deps.githubAppService)
       return reply.code(404).send({ code: "NOT_FOUND", message: "github app service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
@@ -93,33 +94,41 @@ export function registerGithubAppRoutes(app: FastifyInstance, deps: ServerDeps):
     }
   });
 
-  app.delete("/workspace/github-app/registrations", async (req, reply) => {
-    if (!deps.githubAppService)
-      return reply.code(404).send({ code: "NOT_FOUND", message: "github app service not configured" });
-    const principal = await resolvePrincipal(req, reply, deps);
-    if (!principal) return reply;
-    const q = z.object({ host: z.string().url() }).safeParse(req.query ?? {});
-    if (!q.success) return reply.code(400).send({ code: "BAD_REQUEST", message: zodIssues(q.error).join("; ") });
-    try {
-      gate(principal, "settings:write");
-      return reply.send(await deps.githubAppService.removeRegistration(principal.workspace, q.data.host));
-    } catch (err) {
-      return sendError(reply, err);
-    }
-  });
+  app.delete(
+    "/workspace/github-app/registrations",
+    { schema: githubAppDocs.removeRegistration },
+    async (req, reply) => {
+      if (!deps.githubAppService)
+        return reply.code(404).send({ code: "NOT_FOUND", message: "github app service not configured" });
+      const principal = await resolvePrincipal(req, reply, deps);
+      if (!principal) return reply;
+      const q = z.object({ host: z.string().url() }).safeParse(req.query ?? {});
+      if (!q.success) return reply.code(400).send({ code: "BAD_REQUEST", message: zodIssues(q.error).join("; ") });
+      try {
+        gate(principal, "settings:write");
+        return reply.send(await deps.githubAppService.removeRegistration(principal.workspace, q.data.host));
+      } catch (err) {
+        return sendError(reply, err);
+      }
+    },
+  );
 
-  app.delete<{ Params: { id: string } }>("/workspace/github-app/installations/:id", async (req, reply) => {
-    if (!deps.githubAppService)
-      return reply.code(404).send({ code: "NOT_FOUND", message: "github app service not configured" });
-    const principal = await resolvePrincipal(req, reply, deps);
-    if (!principal) return reply;
-    const id = z.coerce.number().int().safeParse(req.params.id);
-    if (!id.success) return reply.code(400).send({ code: "BAD_REQUEST", message: "installation id is not a number" });
-    try {
-      gate(principal, "settings:write");
-      return reply.send(await deps.githubAppService.unlinkInstallation(principal.workspace, id.data));
-    } catch (err) {
-      return sendError(reply, err);
-    }
-  });
+  app.delete<{ Params: { id: string } }>(
+    "/workspace/github-app/installations/:id",
+    { schema: githubAppDocs.unlinkInstallation },
+    async (req, reply) => {
+      if (!deps.githubAppService)
+        return reply.code(404).send({ code: "NOT_FOUND", message: "github app service not configured" });
+      const principal = await resolvePrincipal(req, reply, deps);
+      if (!principal) return reply;
+      const id = z.coerce.number().int().safeParse(req.params.id);
+      if (!id.success) return reply.code(400).send({ code: "BAD_REQUEST", message: "installation id is not a number" });
+      try {
+        gate(principal, "settings:write");
+        return reply.send(await deps.githubAppService.unlinkInstallation(principal.workspace, id.data));
+      } catch (err) {
+        return sendError(reply, err);
+      }
+    },
+  );
 }

@@ -1,12 +1,13 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { type ServerDeps, gate, resolvePrincipal, sendError, zodIssues } from "../route-context.js";
+import { workspaceDocs } from "./workspace.docs.js";
 
 // workspaces (self-serve membership: list + create) + the singular /workspace metadata record (name/logo/owner; delete = owner only).
 export function registerWorkspaceRoutes(app: FastifyInstance, deps: ServerDeps): void {
   // --- workspaces (self-serve membership: my workspace list + create) ---
   // Create is self-serve for anyone (no in-workspace role gate) — the creator is the admin of that workspace.
-  app.get("/workspaces", async (req, reply) => {
+  app.get("/workspaces", { schema: workspaceDocs.list }, async (req, reply) => {
     if (!deps.workspaceService)
       return reply.code(404).send({ code: "NOT_FOUND", message: "workspace store not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
@@ -14,7 +15,7 @@ export function registerWorkspaceRoutes(app: FastifyInstance, deps: ServerDeps):
     return reply.send(await deps.workspaceService.listForSubject(principal.subject));
   });
 
-  app.post("/workspaces", async (req, reply) => {
+  app.post("/workspaces", { schema: workspaceDocs.create }, async (req, reply) => {
     if (!deps.workspaceService)
       return reply.code(404).send({ code: "NOT_FOUND", message: "workspace store not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
@@ -28,7 +29,7 @@ export function registerWorkspaceRoutes(app: FastifyInstance, deps: ServerDeps):
     }
   });
   // --- workspace metadata (name/logo/owner) — singular /workspace = the active workspace record (distinct from plural /workspaces) ---
-  app.get("/workspace", async (req, reply) => {
+  app.get("/workspace", { schema: workspaceDocs.get }, async (req, reply) => {
     if (!deps.workspaceService)
       return reply.code(404).send({ code: "NOT_FOUND", message: "workspace store not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
@@ -41,7 +42,7 @@ export function registerWorkspaceRoutes(app: FastifyInstance, deps: ServerDeps):
     }
   });
 
-  app.patch("/workspace", async (req, reply) => {
+  app.patch("/workspace", { schema: workspaceDocs.update }, async (req, reply) => {
     if (!deps.workspaceService)
       return reply.code(404).send({ code: "NOT_FOUND", message: "workspace store not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
@@ -57,7 +58,7 @@ export function registerWorkspaceRoutes(app: FastifyInstance, deps: ServerDeps):
   });
 
   // Delete is owner (creator) only — no role gate. The service compares principal.subject to the record owner and throws ForbiddenError (403).
-  app.delete("/workspace", async (req, reply) => {
+  app.delete("/workspace", { schema: workspaceDocs.delete }, async (req, reply) => {
     if (!deps.workspaceService)
       return reply.code(404).send({ code: "NOT_FOUND", message: "workspace store not configured" });
     const principal = await resolvePrincipal(req, reply, deps);

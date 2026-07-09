@@ -1,11 +1,12 @@
 import type { FastifyInstance } from "fastify";
 import { PairRunnerBodySchema } from "../../core/runner/runner-service.js";
 import { type ServerDeps, gate, resolvePrincipal, sendError, zodIssues } from "../route-context.js";
+import { runnerDocs } from "./runner.docs.js";
 
 // self-hosted runners (personal device pairing — self-scoped like profile/connections, no role gate).
 export function registerRunnerRoutes(app: FastifyInstance, deps: ServerDeps): void {
   // --- runners (self-hosted runners; personal device pairing — self-scoped like profile/connections, no role gate) ---
-  app.get("/runners", async (req, reply) => {
+  app.get("/runners", { schema: runnerDocs.list }, async (req, reply) => {
     if (!deps.runnerService)
       return reply.code(404).send({ code: "NOT_FOUND", message: "runner service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
@@ -19,7 +20,7 @@ export function registerRunnerRoutes(app: FastifyInstance, deps: ServerDeps): vo
   });
 
   // Device pairing — the plaintext token (rnr_…) is exposed in the response only once and never again (stored as a hash). The everdict runner authenticates with it.
-  app.post("/runners", async (req, reply) => {
+  app.post("/runners", { schema: runnerDocs.pair }, async (req, reply) => {
     if (!deps.runnerService)
       return reply.code(404).send({ code: "NOT_FOUND", message: "runner service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
@@ -41,7 +42,7 @@ export function registerRunnerRoutes(app: FastifyInstance, deps: ServerDeps): vo
     }
   });
 
-  app.delete<{ Params: { id: string } }>("/runners/:id", async (req, reply) => {
+  app.delete<{ Params: { id: string } }>("/runners/:id", { schema: runnerDocs.revoke }, async (req, reply) => {
     if (!deps.runnerService)
       return reply.code(404).send({ code: "NOT_FOUND", message: "runner service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);

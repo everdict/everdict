@@ -3,11 +3,12 @@ import type { z } from "zod";
 import { type ServerDeps, gate, resolvePrincipal, sendError } from "../route-context.js";
 import { CreateViewBodySchema } from "./request/create-view.js";
 import { UpdateViewBodySchema } from "./request/update-view.js";
+import { viewDocs } from "./view.docs.js";
 
 // Saved scorecard-analysis Views — a named AnalysisConfig (opaque). Read = shared + my private, edit·delete = owner·admin.
 // Reuses scorecard read/run permissions (no new authz action): read = scorecards:read, write = scorecards:run.
 export function registerViewRoutes(app: FastifyInstance, deps: ServerDeps): void {
-  app.post("/views", async (req, reply) => {
+  app.post("/views", { schema: viewDocs.create }, async (req, reply) => {
     if (!deps.viewService) return reply.code(404).send({ code: "NOT_FOUND", message: "view service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
@@ -37,7 +38,7 @@ export function registerViewRoutes(app: FastifyInstance, deps: ServerDeps): void
     }
   });
 
-  app.get("/views", async (req, reply) => {
+  app.get("/views", { schema: viewDocs.list }, async (req, reply) => {
     if (!deps.viewService) return reply.code(404).send({ code: "NOT_FOUND", message: "view service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
@@ -49,7 +50,7 @@ export function registerViewRoutes(app: FastifyInstance, deps: ServerDeps): void
     return reply.send(await deps.viewService.list(principal.workspace, principal.subject));
   });
 
-  app.get<{ Params: { id: string } }>("/views/:id", async (req, reply) => {
+  app.get<{ Params: { id: string } }>("/views/:id", { schema: viewDocs.get }, async (req, reply) => {
     if (!deps.viewService) return reply.code(404).send({ code: "NOT_FOUND", message: "view service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
@@ -65,7 +66,7 @@ export function registerViewRoutes(app: FastifyInstance, deps: ServerDeps): void
     }
   });
 
-  app.patch<{ Params: { id: string } }>("/views/:id", async (req, reply) => {
+  app.patch<{ Params: { id: string } }>("/views/:id", { schema: viewDocs.update }, async (req, reply) => {
     if (!deps.viewService) return reply.code(404).send({ code: "NOT_FOUND", message: "view service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
@@ -92,7 +93,7 @@ export function registerViewRoutes(app: FastifyInstance, deps: ServerDeps): void
     }
   });
 
-  app.delete<{ Params: { id: string } }>("/views/:id", async (req, reply) => {
+  app.delete<{ Params: { id: string } }>("/views/:id", { schema: viewDocs.delete }, async (req, reply) => {
     if (!deps.viewService) return reply.code(404).send({ code: "NOT_FOUND", message: "view service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;

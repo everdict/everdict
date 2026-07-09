@@ -1,10 +1,11 @@
 import { ModelSpecSchema } from "@everdict/core";
 import type { FastifyInstance } from "fastify";
 import { type ServerDeps, gate, resolvePrincipal, sendError, zodIssues } from "../route-context.js";
+import { modelDocs } from "./model.docs.js";
 
 // models (workspace-owned SSOT, inference/judging model: provider + underlying model + baseUrl)
 export function registerModelRoutes(app: FastifyInstance, deps: ServerDeps): void {
-  app.post("/models", async (req, reply) => {
+  app.post("/models", { schema: modelDocs.register }, async (req, reply) => {
     if (!deps.modelRegistry)
       return reply.code(404).send({ code: "NOT_FOUND", message: "model registry not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
@@ -25,7 +26,7 @@ export function registerModelRoutes(app: FastifyInstance, deps: ServerDeps): voi
   });
 
   // dry-run validate — schema + this workspace's existing versions/conflict (does not register).
-  app.post("/models/validate", async (req, reply) => {
+  app.post("/models/validate", { schema: modelDocs.validate }, async (req, reply) => {
     if (!deps.modelRegistry)
       return reply.code(404).send({ code: "NOT_FOUND", message: "model registry not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
@@ -49,7 +50,7 @@ export function registerModelRoutes(app: FastifyInstance, deps: ServerDeps): voi
     });
   });
 
-  app.get("/models", async (req, reply) => {
+  app.get("/models", { schema: modelDocs.list }, async (req, reply) => {
     if (!deps.modelRegistry)
       return reply.code(404).send({ code: "NOT_FOUND", message: "model registry not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
@@ -63,16 +64,20 @@ export function registerModelRoutes(app: FastifyInstance, deps: ServerDeps): voi
   });
 
   // Full ModelSpec for a specific version. version may be "latest". Other workspace → NOT_FOUND.
-  app.get<{ Params: { id: string; version: string } }>("/models/:id/versions/:version", async (req, reply) => {
-    if (!deps.modelRegistry)
-      return reply.code(404).send({ code: "NOT_FOUND", message: "model registry not configured" });
-    const principal = await resolvePrincipal(req, reply, deps);
-    if (!principal) return reply;
-    try {
-      gate(principal, "models:read");
-      return reply.send(await deps.modelRegistry.get(principal.workspace, req.params.id, req.params.version));
-    } catch (err) {
-      return sendError(reply, err); // not found → NotFoundError → 404
-    }
-  });
+  app.get<{ Params: { id: string; version: string } }>(
+    "/models/:id/versions/:version",
+    { schema: modelDocs.get },
+    async (req, reply) => {
+      if (!deps.modelRegistry)
+        return reply.code(404).send({ code: "NOT_FOUND", message: "model registry not configured" });
+      const principal = await resolvePrincipal(req, reply, deps);
+      if (!principal) return reply;
+      try {
+        gate(principal, "models:read");
+        return reply.send(await deps.modelRegistry.get(principal.workspace, req.params.id, req.params.version));
+      } catch (err) {
+        return sendError(reply, err); // not found → NotFoundError → 404
+      }
+    },
+  );
 }

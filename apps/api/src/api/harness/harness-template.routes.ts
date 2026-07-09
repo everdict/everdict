@@ -1,11 +1,12 @@
 import { HarnessTemplateSpecSchema } from "@everdict/core";
 import type { FastifyInstance } from "fastify";
 import { type ServerDeps, gate, resolvePrincipal, sendError, zodIssues } from "../route-context.js";
+import { harnessTemplateDocs } from "./harness-template.docs.js";
 
 // harness templates (category: structure/slots, versions unpinned) — the /harness-templates surface.
 // Harnesses are collaborative content → both define and register are ungated (viewer+). Reads are viewer+ too.
 export function registerHarnessTemplateRoutes(app: FastifyInstance, deps: ServerDeps): void {
-  app.post("/harness-templates", async (req, reply) => {
+  app.post("/harness-templates", { schema: harnessTemplateDocs.register }, async (req, reply) => {
     if (!deps.harnessTemplates)
       return reply.code(404).send({ code: "NOT_FOUND", message: "harness template registry not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
@@ -21,7 +22,7 @@ export function registerHarnessTemplateRoutes(app: FastifyInstance, deps: Server
     }
   });
 
-  app.post("/harness-templates/validate", async (req, reply) => {
+  app.post("/harness-templates/validate", { schema: harnessTemplateDocs.validate }, async (req, reply) => {
     if (!deps.harnessTemplates)
       return reply.code(404).send({ code: "NOT_FOUND", message: "harness template registry not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
@@ -45,7 +46,7 @@ export function registerHarnessTemplateRoutes(app: FastifyInstance, deps: Server
     });
   });
 
-  app.get("/harness-templates", async (req, reply) => {
+  app.get("/harness-templates", { schema: harnessTemplateDocs.list }, async (req, reply) => {
     if (!deps.harnessTemplates)
       return reply.code(404).send({ code: "NOT_FOUND", message: "harness template registry not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
@@ -58,32 +59,40 @@ export function registerHarnessTemplateRoutes(app: FastifyInstance, deps: Server
     }
   });
 
-  app.get<{ Params: { id: string } }>("/harness-templates/:id", async (req, reply) => {
-    if (!deps.harnessTemplates)
-      return reply.code(404).send({ code: "NOT_FOUND", message: "harness template registry not configured" });
-    const principal = await resolvePrincipal(req, reply, deps);
-    if (!principal) return reply;
-    try {
-      gate(principal, "harnesses:read");
-      const versions = await deps.harnessTemplates.versions(principal.workspace, req.params.id);
-      if (versions.length === 0) return reply.code(404).send({ code: "NOT_FOUND", message: "template not found." });
-      return reply.send({ id: req.params.id, versions });
-    } catch (err) {
-      return sendError(reply, err);
-    }
-  });
+  app.get<{ Params: { id: string } }>(
+    "/harness-templates/:id",
+    { schema: harnessTemplateDocs.versions },
+    async (req, reply) => {
+      if (!deps.harnessTemplates)
+        return reply.code(404).send({ code: "NOT_FOUND", message: "harness template registry not configured" });
+      const principal = await resolvePrincipal(req, reply, deps);
+      if (!principal) return reply;
+      try {
+        gate(principal, "harnesses:read");
+        const versions = await deps.harnessTemplates.versions(principal.workspace, req.params.id);
+        if (versions.length === 0) return reply.code(404).send({ code: "NOT_FOUND", message: "template not found." });
+        return reply.send({ id: req.params.id, versions });
+      } catch (err) {
+        return sendError(reply, err);
+      }
+    },
+  );
 
   // A single template (category) structure spec — for the detail-view config panel + new-version edit prefill.
-  app.get<{ Params: { id: string; version: string } }>("/harness-templates/:id/:version", async (req, reply) => {
-    if (!deps.harnessTemplates)
-      return reply.code(404).send({ code: "NOT_FOUND", message: "harness template registry not configured" });
-    const principal = await resolvePrincipal(req, reply, deps);
-    if (!principal) return reply;
-    try {
-      gate(principal, "harnesses:read");
-      return reply.send(await deps.harnessTemplates.get(principal.workspace, req.params.id, req.params.version));
-    } catch (err) {
-      return sendError(reply, err); // missing id/version → 404
-    }
-  });
+  app.get<{ Params: { id: string; version: string } }>(
+    "/harness-templates/:id/:version",
+    { schema: harnessTemplateDocs.get },
+    async (req, reply) => {
+      if (!deps.harnessTemplates)
+        return reply.code(404).send({ code: "NOT_FOUND", message: "harness template registry not configured" });
+      const principal = await resolvePrincipal(req, reply, deps);
+      if (!principal) return reply;
+      try {
+        gate(principal, "harnesses:read");
+        return reply.send(await deps.harnessTemplates.get(principal.workspace, req.params.id, req.params.version));
+      } catch (err) {
+        return sendError(reply, err); // missing id/version → 404
+      }
+    },
+  );
 }

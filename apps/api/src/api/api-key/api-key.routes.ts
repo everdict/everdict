@@ -3,12 +3,13 @@ import { issueKey } from "@everdict/db";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { type ServerDeps, gate, resolvePrincipal, sendError, zodIssues } from "../route-context.js";
+import { apiKeyDocs } from "./api-key.docs.js";
 
 // personal API key self-serve (no role gate — personal-owned; a key acts with the issuer's identity/permissions).
 export function registerApiKeyRoutes(app: FastifyInstance, deps: ServerDeps): void {
   // --- personal API key self-serve (no role gate — personal-owned. A key acts with the issuer's identity·permissions) ---
   // Self-scoped like connections·personal secrets: each user sees/issues/revokes only their own (subject) keys.
-  app.get("/keys", async (req, reply) => {
+  app.get("/keys", { schema: apiKeyDocs.list }, async (req, reply) => {
     if (!deps.keyStore) return reply.code(404).send({ code: "NOT_FOUND", message: "key store not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
@@ -19,7 +20,7 @@ export function registerApiKeyRoutes(app: FastifyInstance, deps: ServerDeps): vo
     }
   });
 
-  app.post("/keys", async (req, reply) => {
+  app.post("/keys", { schema: apiKeyDocs.create }, async (req, reply) => {
     if (!deps.keyStore) return reply.code(404).send({ code: "NOT_FOUND", message: "key store not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
@@ -38,7 +39,7 @@ export function registerApiKeyRoutes(app: FastifyInstance, deps: ServerDeps): vo
     }
   });
 
-  app.delete<{ Params: { id: string } }>("/keys/:id", async (req, reply) => {
+  app.delete<{ Params: { id: string } }>("/keys/:id", { schema: apiKeyDocs.revoke }, async (req, reply) => {
     if (!deps.keyStore) return reply.code(404).send({ code: "NOT_FOUND", message: "key store not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;

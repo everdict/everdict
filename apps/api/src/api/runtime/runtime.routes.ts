@@ -2,10 +2,11 @@ import { RuntimeSpecSchema } from "@everdict/core";
 import type { FastifyInstance } from "fastify";
 import { VersionTagsBodySchema, setVersionTags } from "../../common/version-tag-service.js";
 import { type ServerDeps, gate, resolvePrincipal, sendError, zodIssues } from "../route-context.js";
+import { runtimeDocs } from "./runtime.docs.js";
 
 // runtimes (workspace-owned SSOT, execution infra: local | nomad | k8s)
 export function registerRuntimeRoutes(app: FastifyInstance, deps: ServerDeps): void {
-  app.post("/runtimes", async (req, reply) => {
+  app.post("/runtimes", { schema: runtimeDocs.register }, async (req, reply) => {
     if (!deps.runtimeRegistry)
       return reply.code(404).send({ code: "NOT_FOUND", message: "runtime registry not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
@@ -25,7 +26,7 @@ export function registerRuntimeRoutes(app: FastifyInstance, deps: ServerDeps): v
     }
   });
 
-  app.post("/runtimes/validate", async (req, reply) => {
+  app.post("/runtimes/validate", { schema: runtimeDocs.validate }, async (req, reply) => {
     if (!deps.runtimeRegistry)
       return reply.code(404).send({ code: "NOT_FOUND", message: "runtime registry not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
@@ -62,7 +63,7 @@ export function registerRuntimeRoutes(app: FastifyInstance, deps: ServerDeps): v
 
   // Connection test (live) — unlike validate (schema), actually connects to the cluster to confirm reachability/auth (does not run a job).
   // The control plane resolves the credentials (authSecret/kubeconfigSecret) from secrets and uses them only as auth headers, never exposing them to the agent.
-  app.post("/runtimes/probe", async (req, reply) => {
+  app.post("/runtimes/probe", { schema: runtimeDocs.probe }, async (req, reply) => {
     if (!deps.probeRuntime) return reply.code(404).send({ code: "NOT_FOUND", message: "probe not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
@@ -80,7 +81,7 @@ export function registerRuntimeRoutes(app: FastifyInstance, deps: ServerDeps): v
     }
   });
 
-  app.get("/runtimes", async (req, reply) => {
+  app.get("/runtimes", { schema: runtimeDocs.list }, async (req, reply) => {
     if (!deps.runtimeRegistry)
       return reply.code(404).send({ code: "NOT_FOUND", message: "runtime registry not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
@@ -93,40 +94,48 @@ export function registerRuntimeRoutes(app: FastifyInstance, deps: ServerDeps): v
     }
   });
 
-  app.get<{ Params: { id: string; version: string } }>("/runtimes/:id/versions/:version", async (req, reply) => {
-    if (!deps.runtimeRegistry)
-      return reply.code(404).send({ code: "NOT_FOUND", message: "runtime registry not configured" });
-    const principal = await resolvePrincipal(req, reply, deps);
-    if (!principal) return reply;
-    try {
-      gate(principal, "runtimes:read");
-      return reply.send(await deps.runtimeRegistry.get(principal.workspace, req.params.id, req.params.version));
-    } catch (err) {
-      return sendError(reply, err);
-    }
-  });
+  app.get<{ Params: { id: string; version: string } }>(
+    "/runtimes/:id/versions/:version",
+    { schema: runtimeDocs.get },
+    async (req, reply) => {
+      if (!deps.runtimeRegistry)
+        return reply.code(404).send({ code: "NOT_FOUND", message: "runtime registry not configured" });
+      const principal = await resolvePrincipal(req, reply, deps);
+      if (!principal) return reply;
+      try {
+        gate(principal, "runtimes:read");
+        return reply.send(await deps.runtimeRegistry.get(principal.workspace, req.params.id, req.params.version));
+      } catch (err) {
+        return sendError(reply, err);
+      }
+    },
+  );
 
   // Replace version tags (whole-array PUT; empty array = clear) — mutable metadata outside the spec (free labels, to tell versions apart). Reuses runtimes:write.
-  app.put<{ Params: { id: string; version: string } }>("/runtimes/:id/versions/:version/tags", async (req, reply) => {
-    if (!deps.runtimeRegistry)
-      return reply.code(404).send({ code: "NOT_FOUND", message: "runtime registry not configured" });
-    const principal = await resolvePrincipal(req, reply, deps);
-    if (!principal) return reply;
-    const parsed = VersionTagsBodySchema.safeParse(req.body);
-    if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
-    try {
-      return reply.send(
-        await setVersionTags(
-          deps.runtimeRegistry,
-          principal,
-          "runtimes:write",
-          req.params.id,
-          req.params.version,
-          parsed.data.tags,
-        ),
-      );
-    } catch (err) {
-      return sendError(reply, err); // no permission 403 / not found·non-owned 404
-    }
-  });
+  app.put<{ Params: { id: string; version: string } }>(
+    "/runtimes/:id/versions/:version/tags",
+    { schema: runtimeDocs.setVersionTags },
+    async (req, reply) => {
+      if (!deps.runtimeRegistry)
+        return reply.code(404).send({ code: "NOT_FOUND", message: "runtime registry not configured" });
+      const principal = await resolvePrincipal(req, reply, deps);
+      if (!principal) return reply;
+      const parsed = VersionTagsBodySchema.safeParse(req.body);
+      if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
+      try {
+        return reply.send(
+          await setVersionTags(
+            deps.runtimeRegistry,
+            principal,
+            "runtimes:write",
+            req.params.id,
+            req.params.version,
+            parsed.data.tags,
+          ),
+        );
+      } catch (err) {
+        return sendError(reply, err); // no permission 403 / not found·non-owned 404
+      }
+    },
+  );
 }

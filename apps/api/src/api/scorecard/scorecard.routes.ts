@@ -7,11 +7,12 @@ import {
 } from "../../core/scorecard/scorecard-service.js";
 import { type ServerDeps, gate, resolvePrincipal, sendError, zodIssues } from "../route-context.js";
 import { RunScorecardBodySchema } from "./request/run-scorecard.js";
+import { scorecardDocs } from "./scorecard.docs.js";
 
 // scorecards (dataset×harness batch eval → aggregated result): run/retry, push+pull trace ingest,
 // list/get, estimate, baseline↔candidate diff, leaderboard/trend, model backfill.
 export function registerScorecardRoutes(app: FastifyInstance, deps: ServerDeps): void {
-  app.post("/scorecards", async (req, reply) => {
+  app.post("/scorecards", { schema: scorecardDocs.submit }, async (req, reply) => {
     if (!deps.scorecardService)
       return reply.code(404).send({ code: "NOT_FOUND", message: "scorecard service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
@@ -47,7 +48,7 @@ export function registerScorecardRoutes(app: FastifyInstance, deps: ServerDeps):
   // Retry-failed — a NEW scorecard that re-runs only the failed cases of a terminal batch; passing results are
   // carried over verbatim and origin.retryOf keeps the lineage (the source record is never mutated).
   // Same gate as submit (scorecards:run). docs/architecture/batch-resilience.md
-  app.post<{ Params: { id: string } }>("/scorecards/:id/retry", async (req, reply) => {
+  app.post<{ Params: { id: string } }>("/scorecards/:id/retry", { schema: scorecardDocs.retry }, async (req, reply) => {
     if (!deps.scorecardService)
       return reply.code(404).send({ code: "NOT_FOUND", message: "scorecard service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
@@ -72,7 +73,7 @@ export function registerScorecardRoutes(app: FastifyInstance, deps: ServerDeps):
   });
 
   // Trace ingest — upload traces already produced externally (TraceEvent[]) and turn them into a scorecard (no harness run). Validated at the boundary.
-  app.post("/scorecards/ingest", async (req, reply) => {
+  app.post("/scorecards/ingest", { schema: scorecardDocs.ingest }, async (req, reply) => {
     if (!deps.scorecardService)
       return reply.code(404).send({ code: "NOT_FOUND", message: "scorecard service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
@@ -99,7 +100,7 @@ export function registerScorecardRoutes(app: FastifyInstance, deps: ServerDeps):
   });
 
   // Pull ingest — pull per-runId traces from the tenant's OTel/MLflow and score them (no harness run). Source credentials are authSecret (SecretStore).
-  app.post("/scorecards/ingest/pull", async (req, reply) => {
+  app.post("/scorecards/ingest/pull", { schema: scorecardDocs.ingestPull }, async (req, reply) => {
     if (!deps.scorecardService)
       return reply.code(404).send({ code: "NOT_FOUND", message: "scorecard service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
@@ -125,7 +126,7 @@ export function registerScorecardRoutes(app: FastifyInstance, deps: ServerDeps):
     }
   });
 
-  app.get("/scorecards", async (req, reply) => {
+  app.get("/scorecards", { schema: scorecardDocs.list }, async (req, reply) => {
     if (!deps.scorecardService)
       return reply.code(404).send({ code: "NOT_FOUND", message: "scorecard service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
@@ -143,6 +144,7 @@ export function registerScorecardRoutes(app: FastifyInstance, deps: ServerDeps):
   // Honest empty when no history (basis.samples=0). Same gate as reading scorecards.
   app.get<{ Querystring: { dataset?: string; harness?: string; cases?: string; concurrency?: string } }>(
     "/scorecards/estimate",
+    { schema: scorecardDocs.estimate },
     async (req, reply) => {
       const principal = await resolvePrincipal(req, reply, deps);
       if (!principal) return reply;
@@ -170,6 +172,7 @@ export function registerScorecardRoutes(app: FastifyInstance, deps: ServerDeps):
 
   app.get<{ Querystring: { baseline?: string; candidate?: string; z?: string } }>(
     "/scorecards/diff",
+    { schema: scorecardDocs.diff },
     async (req, reply) => {
       if (!deps.scorecardService)
         return reply.code(404).send({ code: "NOT_FOUND", message: "scorecard service not configured" });
@@ -203,7 +206,7 @@ export function registerScorecardRoutes(app: FastifyInstance, deps: ServerDeps):
   // Period trend / regression-over-time — one (dataset, metric)'s scorecards in time order + regression vs baseline. Static path → before :id.
   app.get<{
     Querystring: { dataset?: string; metric?: string; harness?: string; from?: string; to?: string; baseline?: string };
-  }>("/scorecards/trend", async (req, reply) => {
+  }>("/scorecards/trend", { schema: scorecardDocs.trend }, async (req, reply) => {
     if (!deps.scorecardService)
       return reply.code(404).send({ code: "NOT_FOUND", message: "scorecard service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
@@ -237,7 +240,7 @@ export function registerScorecardRoutes(app: FastifyInstance, deps: ServerDeps):
       judgeModel?: string;
       window?: string;
     };
-  }>("/scorecards/leaderboard", async (req, reply) => {
+  }>("/scorecards/leaderboard", { schema: scorecardDocs.leaderboard }, async (req, reply) => {
     if (!deps.scorecardService)
       return reply.code(404).send({ code: "NOT_FOUND", message: "scorecard service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
@@ -262,7 +265,7 @@ export function registerScorecardRoutes(app: FastifyInstance, deps: ServerDeps):
   });
 
   // model-axis backfill — fill past succeeded scorecards that lack models from stored traces (idempotent). Static path → before :id.
-  app.post("/scorecards/backfill-models", async (req, reply) => {
+  app.post("/scorecards/backfill-models", { schema: scorecardDocs.backfillModels }, async (req, reply) => {
     if (!deps.scorecardService)
       return reply.code(404).send({ code: "NOT_FOUND", message: "scorecard service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
@@ -275,7 +278,7 @@ export function registerScorecardRoutes(app: FastifyInstance, deps: ServerDeps):
     }
   });
 
-  app.get<{ Params: { id: string } }>("/scorecards/:id", async (req, reply) => {
+  app.get<{ Params: { id: string } }>("/scorecards/:id", { schema: scorecardDocs.get }, async (req, reply) => {
     if (!deps.scorecardService)
       return reply.code(404).send({ code: "NOT_FOUND", message: "scorecard service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);

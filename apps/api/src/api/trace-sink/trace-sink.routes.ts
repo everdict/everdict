@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { type ServerDeps, gate, resolvePrincipal, sendError, zodIssues } from "../route-context.js";
+import { traceSinkDocs } from "./trace-sink.docs.js";
 
 // workspace trace sinks (multiple) — export judged scorecard detail to the team observability platform + the per-harness sink selection.
 export function registerTraceSinkRoutes(app: FastifyInstance, deps: ServerDeps): void {
@@ -8,7 +9,7 @@ export function registerTraceSinkRoutes(app: FastifyInstance, deps: ServerDeps):
   // Register multiple sinks by name and select them per-harness (a harness with no selection isn't exported — opt-in).
   // Read harnesses:read (viewer+ — to show the sink on the harness detail, the view is a name reference/URL only) / register·unregister settings:write /
   // per-harness selection harnesses:register (member+ — part of the harness config). Design: docs/architecture/trace-sink.md
-  app.get("/workspace/trace-sinks", async (req, reply) => {
+  app.get("/workspace/trace-sinks", { schema: traceSinkDocs.list }, async (req, reply) => {
     if (!deps.traceSinkService)
       return reply.code(404).send({ code: "NOT_FOUND", message: "trace sink service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
@@ -21,7 +22,7 @@ export function registerTraceSinkRoutes(app: FastifyInstance, deps: ServerDeps):
     }
   });
 
-  app.put("/workspace/trace-sinks", async (req, reply) => {
+  app.put("/workspace/trace-sinks", { schema: traceSinkDocs.upsert }, async (req, reply) => {
     if (!deps.traceSinkService)
       return reply.code(404).send({ code: "NOT_FOUND", message: "trace sink service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
@@ -46,7 +47,7 @@ export function registerTraceSinkRoutes(app: FastifyInstance, deps: ServerDeps):
     }
   });
 
-  app.delete("/workspace/trace-sinks/:name", async (req, reply) => {
+  app.delete("/workspace/trace-sinks/:name", { schema: traceSinkDocs.remove }, async (req, reply) => {
     if (!deps.traceSinkService)
       return reply.code(404).send({ code: "NOT_FOUND", message: "trace sink service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
@@ -62,7 +63,7 @@ export function registerTraceSinkRoutes(app: FastifyInstance, deps: ServerDeps):
   });
 
   // Per-harness sink selection — which sink to export to when that harness's scorecard completes. sink:null = deselect (export off).
-  app.put("/harnesses/:id/trace-sink", async (req, reply) => {
+  app.put("/harnesses/:id/trace-sink", { schema: traceSinkDocs.assign }, async (req, reply) => {
     if (!deps.traceSinkService)
       return reply.code(404).send({ code: "NOT_FOUND", message: "trace sink service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);

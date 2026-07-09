@@ -2,10 +2,11 @@ import { BenchmarkAdapterSpecSchema } from "@everdict/datasets";
 import type { FastifyInstance } from "fastify";
 import { BenchmarkImportBodySchema, BenchmarkPreviewBodySchema } from "../../core/benchmark/benchmark-service.js";
 import { type ServerDeps, gate, resolvePrincipal, sendError, zodIssues } from "../route-context.js";
+import { benchmarkDocs } from "./benchmark.docs.js";
 
 // benchmarks (first-party catalog → ingest into tenant-owned datasets; user self-serve) + benchmark-recipes
 export function registerBenchmarkRoutes(app: FastifyInstance, deps: ServerDeps): void {
-  app.get("/benchmarks", async (req, reply) => {
+  app.get("/benchmarks", { schema: benchmarkDocs.list }, async (req, reply) => {
     if (!deps.benchmarkService)
       return reply.code(404).send({ code: "NOT_FOUND", message: "benchmark catalog not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
@@ -19,7 +20,7 @@ export function registerBenchmarkRoutes(app: FastifyInstance, deps: ServerDeps):
   });
 
   // HF Hub dataset search — the wizard picks candidates by query (avoids typing an exact id). Discovery → viewer+.
-  app.get("/benchmarks/hf/datasets", async (req, reply) => {
+  app.get("/benchmarks/hf/datasets", { schema: benchmarkDocs.hfDatasets }, async (req, reply) => {
     if (!deps.benchmarkService)
       return reply.code(404).send({ code: "NOT_FOUND", message: "benchmark catalog not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
@@ -39,7 +40,7 @@ export function registerBenchmarkRoutes(app: FastifyInstance, deps: ServerDeps):
   });
 
   // config/split combinations for the selected HF dataset — for the wizard dropdown (avoids typing a split by hand).
-  app.get("/benchmarks/hf/splits", async (req, reply) => {
+  app.get("/benchmarks/hf/splits", { schema: benchmarkDocs.hfSplits }, async (req, reply) => {
     if (!deps.benchmarkService)
       return reply.code(404).send({ code: "NOT_FOUND", message: "benchmark catalog not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
@@ -56,7 +57,7 @@ export function registerBenchmarkRoutes(app: FastifyInstance, deps: ServerDeps):
   });
 
   // Fallback for datasets not served by the viewer (datasets-server) — a list of repo data files (csv/jsonl/json). For the wizard file dropdown.
-  app.get("/benchmarks/hf/files", async (req, reply) => {
+  app.get("/benchmarks/hf/files", { schema: benchmarkDocs.hfFiles }, async (req, reply) => {
     if (!deps.benchmarkService)
       return reply.code(404).send({ code: "NOT_FOUND", message: "benchmark catalog not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
@@ -73,7 +74,7 @@ export function registerBenchmarkRoutes(app: FastifyInstance, deps: ServerDeps):
   });
 
   // Source preview — N raw rows before mapping + detected fields (the "Add benchmark" wizard: field auto-detect → mapping). No registration.
-  app.post("/benchmarks/preview", async (req, reply) => {
+  app.post("/benchmarks/preview", { schema: benchmarkDocs.preview }, async (req, reply) => {
     if (!deps.benchmarkService)
       return reply.code(404).send({ code: "NOT_FOUND", message: "benchmark catalog not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
@@ -99,7 +100,7 @@ export function registerBenchmarkRoutes(app: FastifyInstance, deps: ServerDeps):
   });
 
   // Pull a catalog/recipe/inline spec and register it as this workspace's dataset (HF sources fetch over the network, using the HF_TOKEN secret if gated).
-  app.post("/benchmarks/import", async (req, reply) => {
+  app.post("/benchmarks/import", { schema: benchmarkDocs.import }, async (req, reply) => {
     if (!deps.benchmarkService)
       return reply.code(404).send({ code: "NOT_FOUND", message: "benchmark catalog not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
@@ -124,7 +125,7 @@ export function registerBenchmarkRoutes(app: FastifyInstance, deps: ServerDeps):
   });
 
   // Register a tenant benchmark recipe (BenchmarkAdapterSpec, data) — a reusable definition owned by your own workspace.
-  app.post("/benchmark-recipes", async (req, reply) => {
+  app.post("/benchmark-recipes", { schema: benchmarkDocs.registerRecipe }, async (req, reply) => {
     if (!deps.benchmarkService)
       return reply.code(404).send({ code: "NOT_FOUND", message: "benchmark catalog not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
@@ -145,7 +146,7 @@ export function registerBenchmarkRoutes(app: FastifyInstance, deps: ServerDeps):
   });
 
   // dry-run validate — schema + this workspace's existing versions/conflict (does not register). Pre-check before registering a recipe.
-  app.post("/benchmark-recipes/validate", async (req, reply) => {
+  app.post("/benchmark-recipes/validate", { schema: benchmarkDocs.validateRecipe }, async (req, reply) => {
     if (!deps.benchmarkService)
       return reply.code(404).send({ code: "NOT_FOUND", message: "benchmark catalog not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
@@ -171,7 +172,7 @@ export function registerBenchmarkRoutes(app: FastifyInstance, deps: ServerDeps):
   });
 
   // List tenant + _shared recipes.
-  app.get("/benchmark-recipes", async (req, reply) => {
+  app.get("/benchmark-recipes", { schema: benchmarkDocs.listRecipes }, async (req, reply) => {
     if (!deps.benchmarkService)
       return reply.code(404).send({ code: "NOT_FOUND", message: "benchmark catalog not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
@@ -186,6 +187,7 @@ export function registerBenchmarkRoutes(app: FastifyInstance, deps: ServerDeps):
 
   app.get<{ Params: { id: string; version: string } }>(
     "/benchmark-recipes/:id/versions/:version",
+    { schema: benchmarkDocs.getRecipe },
     async (req, reply) => {
       if (!deps.benchmarkService)
         return reply.code(404).send({ code: "NOT_FOUND", message: "benchmark catalog not configured" });

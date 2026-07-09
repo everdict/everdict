@@ -1,0 +1,101 @@
+import type { FastifySchema } from "fastify";
+import { z } from "zod";
+import { errorResponses, toJsonSchema } from "../openapi.js";
+import { MattermostActionReplySchema } from "./response/mattermost-action-reply.js";
+import { MattermostStatusResponseSchema, MattermostUpsertResponseSchema } from "./response/mattermost-config-view.js";
+import { MattermostReplySchema } from "./response/mattermost-reply.js";
+
+// Doc-only OpenAPI descriptors for the workspace Mattermost integration + the public inbound surface
+// (rule api-layer: schemas document, never validate/serialize — the compilers are no-ops).
+// Values are widened to FastifySchema so Fastify does NOT narrow reply.code() to the documented status keys.
+const docs = {
+  status: {
+    summary: "Workspace Mattermost integration status",
+    description:
+      "Workspace-owned integration (an admin registers the company Mattermost once — replaces personal " +
+      "connected-account notifications). config is absent when nothing is registered. All secret fields are " +
+      "SecretStore name references, never values. Requires settings:read.",
+    tags: ["mattermost"],
+    response: {
+      200: { description: "Current config (or empty object)", ...toJsonSchema(MattermostStatusResponseSchema) },
+      ...errorResponses(401, 403, 404),
+    },
+  },
+  upsert: {
+    summary: "Register or update the workspace Mattermost",
+    description:
+      "Put the bot token (and optionally the inbound verification token) into the SecretStore first, then pass " +
+      "only their names here. Setting commandTokenSecretName activates the /everdict slash command and buttons. " +
+      "Requires settings:write (admin).",
+    tags: ["mattermost"],
+    body: toJsonSchema(
+      z.object({
+        host: z.string().url().describe("In-house Mattermost base URL"),
+        botTokenSecretName: z.string().min(1).describe("SecretStore name of the bot access token"),
+        defaultChannelId: z.string().min(1).optional(),
+        commandTokenSecretName: z
+          .string()
+          .min(1)
+          .optional()
+          .describe("SecretStore name of the inbound (slash command/button) verification token"),
+      }),
+    ),
+    response: {
+      200: { description: "Stored config", ...toJsonSchema(MattermostUpsertResponseSchema) },
+      ...errorResponses(400, 401, 403, 404),
+    },
+  },
+  remove: {
+    summary: "Remove the workspace Mattermost integration",
+    description: "Clears the workspace Mattermost config (notifications stop). Requires settings:write (admin).",
+    tags: ["mattermost"],
+    response: { 204: { description: "Removed", type: "null" }, ...errorResponses(401, 403, 404) },
+  },
+  command: {
+    summary: "Mattermost slash command inbound (public)",
+    description:
+      "Mattermost calls this directly (form-urlencoded, not a user session). The workspace is routed by ?ws=; " +
+      "authenticity is a constant-time comparison of the request token against the workspace's inbound " +
+      "verification token (fail-closed — unconfigured or mismatching tokens are 403).",
+    tags: ["mattermost"],
+    querystring: toJsonSchema(z.object({ ws: z.string().describe("Workspace slug (routing only — not auth)") })),
+    body: toJsonSchema(
+      z.object({
+        token: z.string().optional().describe("Mattermost outgoing-command verification token"),
+        text: z.string().optional().describe("Command text after /everdict"),
+        user_name: z.string().optional(),
+      }),
+    ),
+    response: {
+      200: { description: "Slash-command reply rendered by Mattermost", ...toJsonSchema(MattermostReplySchema) },
+      ...errorResponses(400, 403, 404),
+    },
+  },
+  action: {
+    summary: "Mattermost interactive button inbound (public)",
+    description:
+      "Mattermost echoes back the context embedded in an interactive message (token/action/dataset/harness). " +
+      "The verification token rides in context.token — same constant-time, fail-closed check as the slash command.",
+    tags: ["mattermost"],
+    querystring: toJsonSchema(z.object({ ws: z.string().describe("Workspace slug (routing only — not auth)") })),
+    body: toJsonSchema(
+      z.object({
+        context: z
+          .object({
+            token: z.string().optional().describe("Inbound verification token embedded in the message"),
+            action: z.string().optional().describe('Action name (currently "rerun")'),
+            dataset: z.string().optional(),
+            harness: z.string().optional(),
+            userName: z.string().optional(),
+          })
+          .optional(),
+      }),
+    ),
+    response: {
+      200: { description: "Ephemeral reply for the clicking user", ...toJsonSchema(MattermostActionReplySchema) },
+      ...errorResponses(400, 403, 404),
+    },
+  },
+} satisfies Record<string, FastifySchema>;
+
+export const mattermostDocs: Record<keyof typeof docs, FastifySchema> = docs;

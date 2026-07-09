@@ -3,13 +3,14 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { constantTimeEq } from "../route-context.js";
 import { type ServerDeps, gate, resolvePrincipal, sendError, zodIssues } from "../route-context.js";
+import { internalDocs } from "./internal.docs.js";
 
 // internal control-plane surface (x-internal-token guard, fail-closed): scheduling dials, tenant-key issuance, Temporal schedule fire/finalize + batch bridge.
 export function registerInternalRoutes(app: FastifyInstance, deps: ServerDeps): void {
   // --- internal: key issuance (x-internal-token guard, fail-closed if unset) ---
   // Operator fairness dials — adjust per-tenant quota/weight without a restart (overrides layer over the env
   // defaults; a restart falls back to env). Same guard as every /internal/** route.
-  app.put("/internal/scheduling", async (req, reply) => {
+  app.put("/internal/scheduling", { schema: internalDocs.schedulingSet }, async (req, reply) => {
     if (!deps.internalToken || !deps.schedulingControl)
       return reply.code(404).send({ code: "NOT_FOUND", message: "scheduling control not configured" });
     const provided = req.headers["x-internal-token"];
@@ -25,7 +26,7 @@ export function registerInternalRoutes(app: FastifyInstance, deps: ServerDeps): 
     deps.schedulingControl.set(body.data);
     return reply.send(deps.schedulingControl.effective());
   });
-  app.get("/internal/scheduling", async (req, reply) => {
+  app.get("/internal/scheduling", { schema: internalDocs.schedulingGet }, async (req, reply) => {
     if (!deps.internalToken || !deps.schedulingControl)
       return reply.code(404).send({ code: "NOT_FOUND", message: "scheduling control not configured" });
     const provided = req.headers["x-internal-token"];
@@ -34,7 +35,7 @@ export function registerInternalRoutes(app: FastifyInstance, deps: ServerDeps): 
     return reply.send(deps.schedulingControl.effective());
   });
 
-  app.post("/internal/tenant-keys", async (req, reply) => {
+  app.post("/internal/tenant-keys", { schema: internalDocs.tenantKeys }, async (req, reply) => {
     if (!deps.internalToken || !deps.keyStore)
       return reply.code(404).send({ code: "NOT_FOUND", message: "internal endpoints disabled" });
     const provided = req.headers["x-internal-token"];
@@ -51,88 +52,113 @@ export function registerInternalRoutes(app: FastifyInstance, deps: ServerDeps): 
   // tenant is baked in as a workflow argument at schedule creation and arrives in a trusted body (already trusted via the internal token).
   // --- Batch-on-Temporal internal bridge (worker activities → CP; the CP owns execution/scoring, the workflow
   // owns driver-loop durability). Same x-internal-token guard as the schedule bridge. ---
-  app.post<{ Params: { id: string } }>("/internal/batches/:id/plan", async (req, reply) => {
-    if (!deps.internalToken || !deps.scorecardService)
-      return reply.code(404).send({ code: "NOT_FOUND", message: "internal endpoints disabled" });
-    const provided = req.headers["x-internal-token"];
-    if (typeof provided !== "string" || !constantTimeEq(provided, deps.internalToken))
-      return reply.code(403).send({ code: "FORBIDDEN", message: "internal token mismatch" });
-    try {
-      return reply.send(await deps.scorecardService.planBatch(req.params.id));
-    } catch (err) {
-      return sendError(reply, err);
-    }
-  });
-  app.post<{ Params: { id: string } }>("/internal/batches/:id/case", async (req, reply) => {
-    if (!deps.internalToken || !deps.scorecardService)
-      return reply.code(404).send({ code: "NOT_FOUND", message: "internal endpoints disabled" });
-    const provided = req.headers["x-internal-token"];
-    if (typeof provided !== "string" || !constantTimeEq(provided, deps.internalToken))
-      return reply.code(403).send({ code: "FORBIDDEN", message: "internal token mismatch" });
-    const body = z.object({ caseId: z.string().min(1) }).safeParse(req.body);
-    if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: body.error.message });
-    try {
-      return reply.send(await deps.scorecardService.runBatchCase(req.params.id, body.data.caseId));
-    } catch (err) {
-      return sendError(reply, err);
-    }
-  });
-  app.post<{ Params: { id: string } }>("/internal/batches/:id/finalize", async (req, reply) => {
-    if (!deps.internalToken || !deps.scorecardService)
-      return reply.code(404).send({ code: "NOT_FOUND", message: "internal endpoints disabled" });
-    const provided = req.headers["x-internal-token"];
-    if (typeof provided !== "string" || !constantTimeEq(provided, deps.internalToken))
-      return reply.code(403).send({ code: "FORBIDDEN", message: "internal token mismatch" });
-    try {
-      await deps.scorecardService.finalizeBatch(req.params.id);
-      return reply.send({ ok: true });
-    } catch (err) {
-      return sendError(reply, err);
-    }
-  });
+  app.post<{ Params: { id: string } }>(
+    "/internal/batches/:id/plan",
+    { schema: internalDocs.batchPlan },
+    async (req, reply) => {
+      if (!deps.internalToken || !deps.scorecardService)
+        return reply.code(404).send({ code: "NOT_FOUND", message: "internal endpoints disabled" });
+      const provided = req.headers["x-internal-token"];
+      if (typeof provided !== "string" || !constantTimeEq(provided, deps.internalToken))
+        return reply.code(403).send({ code: "FORBIDDEN", message: "internal token mismatch" });
+      try {
+        return reply.send(await deps.scorecardService.planBatch(req.params.id));
+      } catch (err) {
+        return sendError(reply, err);
+      }
+    },
+  );
+  app.post<{ Params: { id: string } }>(
+    "/internal/batches/:id/case",
+    { schema: internalDocs.batchCase },
+    async (req, reply) => {
+      if (!deps.internalToken || !deps.scorecardService)
+        return reply.code(404).send({ code: "NOT_FOUND", message: "internal endpoints disabled" });
+      const provided = req.headers["x-internal-token"];
+      if (typeof provided !== "string" || !constantTimeEq(provided, deps.internalToken))
+        return reply.code(403).send({ code: "FORBIDDEN", message: "internal token mismatch" });
+      const body = z.object({ caseId: z.string().min(1) }).safeParse(req.body);
+      if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: body.error.message });
+      try {
+        return reply.send(await deps.scorecardService.runBatchCase(req.params.id, body.data.caseId));
+      } catch (err) {
+        return sendError(reply, err);
+      }
+    },
+  );
+  app.post<{ Params: { id: string } }>(
+    "/internal/batches/:id/finalize",
+    { schema: internalDocs.batchFinalize },
+    async (req, reply) => {
+      if (!deps.internalToken || !deps.scorecardService)
+        return reply.code(404).send({ code: "NOT_FOUND", message: "internal endpoints disabled" });
+      const provided = req.headers["x-internal-token"];
+      if (typeof provided !== "string" || !constantTimeEq(provided, deps.internalToken))
+        return reply.code(403).send({ code: "FORBIDDEN", message: "internal token mismatch" });
+      try {
+        await deps.scorecardService.finalizeBatch(req.params.id);
+        return reply.send({ ok: true });
+      } catch (err) {
+        return sendError(reply, err);
+      }
+    },
+  );
 
-  app.post<{ Params: { id: string } }>("/internal/schedules/:id/fire", async (req, reply) => {
-    if (!deps.internalToken || !deps.scheduleService)
-      return reply.code(404).send({ code: "NOT_FOUND", message: "internal endpoints disabled" });
-    const provided = req.headers["x-internal-token"];
-    if (typeof provided !== "string" || !constantTimeEq(provided, deps.internalToken))
-      return reply.code(403).send({ code: "FORBIDDEN", message: "internal token mismatch" });
-    const body = z.object({ tenant: z.string().min(1) }).safeParse(req.body);
-    if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: body.error.message });
-    try {
-      return reply.send(await deps.scheduleService.fire(body.data.tenant, req.params.id)); // { scorecardId, previousScorecardId? }
-    } catch (err) {
-      return sendError(reply, err); // missing schedule 404, firer not configured 400
-    }
-  });
+  app.post<{ Params: { id: string } }>(
+    "/internal/schedules/:id/fire",
+    { schema: internalDocs.scheduleFire },
+    async (req, reply) => {
+      if (!deps.internalToken || !deps.scheduleService)
+        return reply.code(404).send({ code: "NOT_FOUND", message: "internal endpoints disabled" });
+      const provided = req.headers["x-internal-token"];
+      if (typeof provided !== "string" || !constantTimeEq(provided, deps.internalToken))
+        return reply.code(403).send({ code: "FORBIDDEN", message: "internal token mismatch" });
+      const body = z.object({ tenant: z.string().min(1) }).safeParse(req.body);
+      if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: body.error.message });
+      try {
+        return reply.send(await deps.scheduleService.fire(body.data.tenant, req.params.id)); // { scorecardId, previousScorecardId? }
+      } catch (err) {
+        return sendError(reply, err); // missing schedule 404, firer not configured 400
+      }
+    },
+  );
 
   // Fire finalization — the workflow calls this after poll-to-terminal. Records the final status + a regression notification vs the previous run.
-  app.post<{ Params: { id: string } }>("/internal/schedules/:id/finalize", async (req, reply) => {
-    if (!deps.internalToken || !deps.scheduleService)
-      return reply.code(404).send({ code: "NOT_FOUND", message: "internal endpoints disabled" });
-    const provided = req.headers["x-internal-token"];
-    if (typeof provided !== "string" || !constantTimeEq(provided, deps.internalToken))
-      return reply.code(403).send({ code: "FORBIDDEN", message: "internal token mismatch" });
-    const body = z
-      .object({ tenant: z.string().min(1), scorecardId: z.string().min(1), previousScorecardId: z.string().optional() })
-      .safeParse(req.body);
-    if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: body.error.message });
-    try {
-      await deps.scheduleService.finalize(
-        body.data.tenant,
-        req.params.id,
-        body.data.scorecardId,
-        body.data.previousScorecardId,
-      );
-      return reply.send({ ok: true });
-    } catch (err) {
-      return sendError(reply, err); // missing schedule 404
-    }
-  });
+  app.post<{ Params: { id: string } }>(
+    "/internal/schedules/:id/finalize",
+    { schema: internalDocs.scheduleFinalize },
+    async (req, reply) => {
+      if (!deps.internalToken || !deps.scheduleService)
+        return reply.code(404).send({ code: "NOT_FOUND", message: "internal endpoints disabled" });
+      const provided = req.headers["x-internal-token"];
+      if (typeof provided !== "string" || !constantTimeEq(provided, deps.internalToken))
+        return reply.code(403).send({ code: "FORBIDDEN", message: "internal token mismatch" });
+      const body = z
+        .object({
+          tenant: z.string().min(1),
+          scorecardId: z.string().min(1),
+          previousScorecardId: z.string().optional(),
+        })
+        .safeParse(req.body);
+      if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: body.error.message });
+      try {
+        await deps.scheduleService.finalize(
+          body.data.tenant,
+          req.params.id,
+          body.data.scorecardId,
+          body.data.previousScorecardId,
+        );
+        return reply.send({ ok: true });
+      } catch (err) {
+        return sendError(reply, err); // missing schedule 404
+      }
+    },
+  );
 
   // Status of the fired scorecard (workflow poll-to-terminal). Internal only.
   app.get<{ Params: { scorecardId: string } }>(
     "/internal/schedules/scorecard-status/:scorecardId",
+    { schema: internalDocs.scorecardStatus },
     async (req, reply) => {
       if (!deps.internalToken || !deps.scheduleService)
         return reply.code(404).send({ code: "NOT_FOUND", message: "internal endpoints disabled" });

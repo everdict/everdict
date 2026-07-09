@@ -1,12 +1,13 @@
 import type { FastifyInstance } from "fastify";
 import { type ServerDeps, gate, resolvePrincipal, sendError, zodIssues } from "../route-context.js";
+import { notificationDocs } from "./notification.docs.js";
 import { ReadNotificationsBodySchema } from "./request/read-notifications.js";
 
 // notifications (personal feed — bell inbox; self-scoped, no role gate).
 export function registerNotificationRoutes(app: FastifyInstance, deps: ServerDeps): void {
   // --- notifications (personal notification feed — bell inbox; self-scoped like connections/runners, no role gate.
   //     docs/architecture/notifications.md — the web consumes it by polling, new items fire as browser/desktop native notifications) ---
-  app.get("/notifications", async (req, reply) => {
+  app.get("/notifications", { schema: notificationDocs.list }, async (req, reply) => {
     if (!deps.notificationService)
       return reply.code(404).send({ code: "NOT_FOUND", message: "notification service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
@@ -26,7 +27,7 @@ export function registerNotificationRoutes(app: FastifyInstance, deps: ServerDep
   });
 
   // Mark read — {ids:[…]} or {all:true}. Returns the count processed (idempotent — already-read items are left alone).
-  app.post("/notifications/read", async (req, reply) => {
+  app.post("/notifications/read", { schema: notificationDocs.markRead }, async (req, reply) => {
     if (!deps.notificationService)
       return reply.code(404).send({ code: "NOT_FOUND", message: "notification service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);

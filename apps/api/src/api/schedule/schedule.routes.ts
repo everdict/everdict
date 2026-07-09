@@ -3,11 +3,12 @@ import type { z } from "zod";
 import { type ServerDeps, gate, resolvePrincipal, sendError } from "../route-context.js";
 import { CreateScheduleBodySchema } from "./request/create-schedule.js";
 import { UpdateScheduleBodySchema } from "./request/update-schedule.js";
+import { scheduleDocs } from "./schedule.docs.js";
 
 // scheduled (cron) scorecards — stored RunScorecardInput + cron expression + policy. Firing (Temporal Schedule) is slice 2.
 // The fired run's submittedBy = the creator (principal.subject): budget → tenant, private-repo connection resolution.
 export function registerScheduleRoutes(app: FastifyInstance, deps: ServerDeps): void {
-  app.post("/schedules", async (req, reply) => {
+  app.post("/schedules", { schema: scheduleDocs.create }, async (req, reply) => {
     if (!deps.scheduleService)
       return reply.code(404).send({ code: "NOT_FOUND", message: "schedule service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
@@ -34,7 +35,7 @@ export function registerScheduleRoutes(app: FastifyInstance, deps: ServerDeps): 
     }
   });
 
-  app.get("/schedules", async (req, reply) => {
+  app.get("/schedules", { schema: scheduleDocs.list }, async (req, reply) => {
     if (!deps.scheduleService)
       return reply.code(404).send({ code: "NOT_FOUND", message: "schedule service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
@@ -47,7 +48,7 @@ export function registerScheduleRoutes(app: FastifyInstance, deps: ServerDeps): 
     return reply.send(await deps.scheduleService.list(principal.workspace));
   });
 
-  app.get<{ Params: { id: string } }>("/schedules/:id", async (req, reply) => {
+  app.get<{ Params: { id: string } }>("/schedules/:id", { schema: scheduleDocs.get }, async (req, reply) => {
     if (!deps.scheduleService)
       return reply.code(404).send({ code: "NOT_FOUND", message: "schedule service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
@@ -64,7 +65,7 @@ export function registerScheduleRoutes(app: FastifyInstance, deps: ServerDeps): 
     }
   });
 
-  app.patch<{ Params: { id: string } }>("/schedules/:id", async (req, reply) => {
+  app.patch<{ Params: { id: string } }>("/schedules/:id", { schema: scheduleDocs.update }, async (req, reply) => {
     if (!deps.scheduleService)
       return reply.code(404).send({ code: "NOT_FOUND", message: "schedule service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
@@ -92,7 +93,7 @@ export function registerScheduleRoutes(app: FastifyInstance, deps: ServerDeps): 
     }
   });
 
-  app.delete<{ Params: { id: string } }>("/schedules/:id", async (req, reply) => {
+  app.delete<{ Params: { id: string } }>("/schedules/:id", { schema: scheduleDocs.remove }, async (req, reply) => {
     if (!deps.scheduleService)
       return reply.code(404).send({ code: "NOT_FOUND", message: "schedule service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);

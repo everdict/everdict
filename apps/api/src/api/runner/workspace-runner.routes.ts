@@ -4,10 +4,11 @@ import { installGithubWorkspaceRunner } from "../../core/runner/github-runner-in
 import { PairRunnerBodySchema, RUNNER_CAPABILITIES } from "../../core/runner/runner-service.js";
 import { baseUrl } from "../route-context.js";
 import { type ServerDeps, gate, resolvePrincipal, sendError, zodIssues } from "../route-context.js";
+import { workspaceRunnerDocs } from "./workspace-runner.docs.js";
 
 // workspace-shared runners (team tier self:ws) — roster, pairing, owned list, revoke + GitHub Actions runner self-install.
 export function registerWorkspaceRunnerRoutes(app: FastifyInstance, deps: ServerDeps): void {
-  app.get("/workspace/runners", async (req, reply) => {
+  app.get("/workspace/runners", { schema: workspaceRunnerDocs.roster }, async (req, reply) => {
     if (!deps.runnerService)
       return reply.code(404).send({ code: "NOT_FOUND", message: "runner service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
@@ -22,7 +23,7 @@ export function registerWorkspaceRunnerRoutes(app: FastifyInstance, deps: Server
 
   // Register a workspace-shared runner (team resource) — an admin pairs it with owner="ws:<workspace>". Unlike a personal runner (POST /runners,
   // self-scoped), any member of this workspace can target it via self:ws:<id> (a team build server/CI runner). Plaintext token only once.
-  app.post("/workspace/runners", async (req, reply) => {
+  app.post("/workspace/runners", { schema: workspaceRunnerDocs.pair }, async (req, reply) => {
     if (!deps.runnerService)
       return reply.code(404).send({ code: "NOT_FOUND", message: "runner service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
@@ -44,7 +45,7 @@ export function registerWorkspaceRunnerRoutes(app: FastifyInstance, deps: Server
   });
 
   // List workspace-shared runners (owner=ws:<workspace> only — the roster [GET /workspace/runners] includes personal runners, this is team-owned only).
-  app.get("/workspace/runners/owned", async (req, reply) => {
+  app.get("/workspace/runners/owned", { schema: workspaceRunnerDocs.owned }, async (req, reply) => {
     if (!deps.runnerService)
       return reply.code(404).send({ code: "NOT_FOUND", message: "runner service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
@@ -58,20 +59,24 @@ export function registerWorkspaceRunnerRoutes(app: FastifyInstance, deps: Server
   });
 
   // Revoke a workspace-shared runner — admin only (owner=ws:<workspace> scope; can't touch personal runners).
-  app.delete<{ Params: { id: string } }>("/workspace/runners/:id", async (req, reply) => {
-    if (!deps.runnerService)
-      return reply.code(404).send({ code: "NOT_FOUND", message: "runner service not configured" });
-    const principal = await resolvePrincipal(req, reply, deps);
-    if (!principal) return reply;
-    try {
-      gate(principal, "settings:write");
-      await deps.runnerService.revokeWorkspaceRunner(principal.workspace, req.params.id);
-      return reply.code(204).send();
-    } catch (err) {
-      return sendError(reply, err);
-    }
-  });
-  app.post("/workspace/runners/github-install", async (req, reply) => {
+  app.delete<{ Params: { id: string } }>(
+    "/workspace/runners/:id",
+    { schema: workspaceRunnerDocs.revoke },
+    async (req, reply) => {
+      if (!deps.runnerService)
+        return reply.code(404).send({ code: "NOT_FOUND", message: "runner service not configured" });
+      const principal = await resolvePrincipal(req, reply, deps);
+      if (!principal) return reply;
+      try {
+        gate(principal, "settings:write");
+        await deps.runnerService.revokeWorkspaceRunner(principal.workspace, req.params.id);
+        return reply.code(204).send();
+      } catch (err) {
+        return sendError(reply, err);
+      }
+    },
+  );
+  app.post("/workspace/runners/github-install", { schema: workspaceRunnerDocs.githubInstall }, async (req, reply) => {
     if (!deps.runnerService || !deps.ciLinkService)
       return reply.code(404).send({ code: "NOT_FOUND", message: "runner/ci link service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);

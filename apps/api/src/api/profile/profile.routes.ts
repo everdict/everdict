@@ -1,10 +1,11 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { type ServerDeps, gate, resolvePrincipal, sendError, zodIssues } from "../route-context.js";
+import { profileDocs } from "./profile.docs.js";
 
 // the current principal (/me: identity + workspaces + profile) and profile editing.
 export function registerProfileRoutes(app: FastifyInstance, deps: ServerDeps): void {
-  app.get("/me", async (req, reply) => {
+  app.get("/me", { schema: profileDocs.me }, async (req, reply) => {
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     const workspaces = deps.workspaceService
@@ -20,7 +21,7 @@ export function registerProfileRoutes(app: FastifyInstance, deps: ServerDeps): v
   });
 
   // Edit my profile (self-serve — no role gate, subject = self). email is immutable since it's SSO (not accepted here).
-  app.patch("/me/profile", async (req, reply) => {
+  app.patch("/me/profile", { schema: profileDocs.updateProfile }, async (req, reply) => {
     if (!deps.profileService)
       return reply.code(404).send({ code: "NOT_FOUND", message: "profile service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
