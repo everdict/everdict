@@ -1,11 +1,17 @@
-# apps/api route modularization — split the 3676-line server.ts into domain route modules (design)
+# apps/api route modularization — split the 3676-line server.ts into resource route modules (design)
 
-> **Status: design locked; realizes the api-layer rule's own convention; executed in green-gated slices.** This is
-> not a new architecture — the `api-layer` rule already mandates *"three-file split per resource: `*.routes.ts` +
-> `*.schema.ts` + `*.service.ts`; routes never contain business logic."* The services are already domained
-> (`2258302`: execution/catalog/workspace/…). This refactor finishes the job: the routes (and their request
-> schemas), still inline in one mega-file, move next to their services. Public route surface is unchanged, so the
-> 636 apps/api tests are the safety net at every step.
+> **Status: in rollout, green-gated.** Foundation (route-context) + views/schedules/comments/models/judges/
+> runtimes/datasets/benchmarks/bundles extracted (`3929563`…`cf92308`, server.ts 3676→2444); remaining:
+> harnesses, scorecards, runs, workspace/members/invites/secrets, integrations, runners, account, ops, internal,
+> mcp. This realizes the `api-layer` rule's own convention — *"three-file split per resource"* — the services are
+> already domained (`2258302`); the routes move next to them. Public route surface is unchanged, so the 636
+> apps/api tests are the safety net at every step.
+>
+> **Slicing refinement (locked):** the slice unit is the **resource, not the domain**. A domain folder groups
+> several resource modules (`catalog/` = dataset + judge + model + runtime + benchmark + bundle + harness …);
+> a large domain promotes **sub-domain folders** (`integrations/` beside `workspace/`). This follows the proven
+> layered-service idiom (thin controller → service → repository, domain-packaged, request-DTO files per
+> resource) reinterpreted for Fastify/TS — codified in `.claude/rules/api-layer.md` + skill `api-layer`.
 
 ## Problem
 

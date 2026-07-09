@@ -1,47 +1,91 @@
 ---
 name: api-layer
-description: The control-plane HTTP API (apps/api, Fastify) — async POST /runs + poll/webhook, RunStore, multi-tenant via x-everdict-tenant, flat error envelopes. Use when adding or editing API routes/services/the result store.
+description: The control-plane HTTP API (apps/api, Fastify) — domain-foldered resource slices (routes/schema/service), thin handlers over route-context, flat error envelopes, BFF↔MCP parity. Use when adding or editing API routes/services/schemas.
 allowed-tools: Read, Grep, Glob, Edit, Write, Bash
 ---
 # API layer (`apps/api`)
 
 The external SaaS surface. A Fastify server over the runtime (Scheduler + trust zones + secrets + budgets +
-autoscaling). Runs are **async**: submit returns a `runId`; the result arrives by polling or webhook. See
-`docs/api.md`. Rule: `.claude/rules/api-layer.md`.
+autoscaling). Structured by a TS reinterpretation of the proven layered-service idiom (controller → service →
+repository, domain-packaged): **domain folders group resource slices; each resource is routes + schema + service.**
+See `docs/api.md` + `docs/architecture/api-route-modularization.md`. Rule: `.claude/rules/api-layer.md`.
 
-## Layering
-- **server.ts** = routes only (registration + HTTP), **run-service.ts** = logic (framework-agnostic),
-  **run-store.ts** = persistence. Routes never hold business logic; the service never touches HTTP.
-- Request/response schemas are Zod (`SubmitBodySchema`, `RunRecordSchema`) — external input is validated.
-- Error envelopes are **flat** `{code, message, data?}` from `AppError.toEnvelope()`; status from
-  `AppError.status` (budget→402, queue→429, not-found→404, bad-body→400). No success envelope (send the record).
+## Structure map
 
-## Endpoints
-`POST /runs` → **202** `RunRecord(queued)` · `GET /runs/:id` (poll) · `GET /runs` (per-tenant) · `GET /healthz`.
-Tenant from the `x-everdict-tenant` header (default `default`) — keys fairness, quotas, isolation, secrets, budgets.
+```
+apps/api/src/
+  server.ts          ← composition root ONLY: app build (parsers/logging), WS upgrade, MCP transport,
+                       register<X>Routes(app, deps) calls
+  route-context.ts   ← ServerDeps (deps bag) + auth chain (resolveIdentity/applyActiveWorkspace/
+                       resolvePrincipal/resolveBearerPrincipal) + gate/sendError/zodIssues/constantTimeEq
+  mcp.ts             ← the MCP tool server (same services, second transport)
+  <domain>/          ← execution · catalog · workspace · integrations · runners · scheduling · ops · lib
+    <resource>.routes.ts    ← registerXRoutes(app, deps): thin handlers, zero logic
+    <resource>.schema.ts    ← request Zod DTOs (XxxBodySchema) — only when the resource has bodies
+    <resource>-service.ts   ← the logic (framework-agnostic; owns response shaping + creator-override)
+```
 
-## Run lifecycle (`RunService`)
+- **Resource = slice, domain = folder.** A domain holds several resources (`catalog/` has dataset, judge,
+  model, runtime, benchmark, bundle, harness…). Never one mega-file per domain; never routes in server.ts.
+- **Sub-domain folders** when a domain accretes: `integrations/{github-app,mattermost,image-registry,
+  trace-sink,ci-link}` rather than one bloated `workspace/`.
+
+## The handler shape (fixed — anything more belongs in the service)
+
+```ts
+export function registerXRoutes(app: FastifyInstance, deps: ServerDeps): void {
+  app.post("/xs", async (req, reply) => {
+    if (!deps.xService) return reply.code(404).send({ code: "NOT_FOUND", message: "x service not configured" }); // ① feature gate
+    const principal = await resolvePrincipal(req, reply, deps);                                                  // ② authenticate
+    if (!principal) return reply;
+    try { gate(principal, "xs:write"); } catch (err) { return sendError(reply, err); }                           // ③ authorize
+    const parsed = CreateXBodySchema.safeParse(req.body);                                                        // ④ validate
+    if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
+    try {                                                                                                        // ⑤ delegate (command object)
+      return reply.code(201).send(await deps.xService.create({ tenant: principal.workspace, createdBy: principal.subject, ...parsed.data }));
+    } catch (err) { return sendError(reply, err); }                                                              // ⑥ map failures
+  });
+}
+```
+
+Gate **before** validate (don't leak validation info to the unauthorized). Read routes gate `xs:read`; another
+workspace's resource is 404 (no existence leak). "Admin or creator" checks live in the service
+(`deleteDatasetVersion` pattern), never in the route.
+
+## Recipe: adding a resource
+1. `<domain>/<resource>-service.ts` — logic + store access + response shaping. Inputs are command objects.
+2. `<domain>/<resource>.schema.ts` — `CreateXBodySchema`/`UpdateXBodySchema` (Zod). Registry-backed resources
+   often validate with the core spec schema directly (no schema file needed).
+3. `<domain>/<resource>.routes.ts` — `registerXRoutes(app, deps)` in the fixed shape above.
+4. `server.ts` — one `registerXRoutes(app, deps)` line. `route-context.ts` — add the service to `ServerDeps`
+   (optional field; absent = feature-gated 404).
+5. **MCP parity** — add the matching tool in `mcp.ts` calling the same service function.
+6. Tests: `buildServer` + `inject` (see skill `testing`) — cover authz (401/403), validation (400), 404 scoping.
+
+## Run lifecycle (`RunService`) — the archetype service
 `submit`: `budget.admit(tenant)` (over-limit → 402, no run created) → `store.create(queued)` → return 202 →
 (background) `executeCase` → on success `budget.settle(costOf)` + `store.update(succeeded, result)`,
 on error `store.update(failed, envelope)` → optional `webhookUrl` POST of the final record. The dispatcher is a
 `Dispatcher` — an in-process `Scheduler` (default) or the Temporal orchestrator for the durable path.
 
 ## Three concerns: execution · orchestration · scoring (don't re-tangle)
-Control-plane runs/scorecards are split by concern — see `docs/architecture/execution-scoring-orchestration.md`.
-- **Execution** = `execute-case.ts` `executeCase(deps, owner, job) → CaseResult` — **pure**: repo-token + dispatch.
-  No settle/offload/notify. `RunService` and `ScorecardService` both call it; the shared unit is execution, NOT the
-  single-run orchestrator (never route the batch through `RunService.submit`).
-- **Scoring** = `scoring-service.ts` `ScoringService` — judge application over results, independent of how
-  they were produced. Live batch **and** ingest share it; aggregation (passRate/mean summary) stays pure in `@everdict/suite`.
-- **Orchestration** = the services drive execution (single/batch) and own admit/settle, delivery (202/webhook),
-  notify, progress. `run` is just execution — the "after" belongs to the orchestrator.
+See `docs/architecture/execution-scoring-orchestration.md`.
+- **Execution** = `execution/execute-case.ts` `executeCase(deps, owner, job) → CaseResult` — **pure**. No
+  settle/offload/notify. `RunService` and `ScorecardService` both call it (never route the batch through
+  `RunService.submit`).
+- **Scoring** = `execution/scoring-service.ts` — judge application over results, independent of how they were
+  produced (live batch **and** ingest share it); aggregation stays pure in `@everdict/suite`.
+- **Orchestration** = the services drive execution and own admit/settle, delivery (202/webhook), notify, progress.
 
 ## Result store (`@everdict/db`)
-`RunStore` (create/update/get/list). Default `InMemoryRunStore`; with `DATABASE_URL` the API uses `PgRunStore`
-(Postgres, `result`/`error` as jsonb) and runs idempotent SQL migrations at boot — service/routes/lifecycle
-unchanged. Migrations: `packages/db/migrations/` + discipline in `docs/migration/`. The store + migrator share an
-injectable `SqlClient` (fake in tests, `pg.Pool` in prod).
+`RunStore`/`ScorecardStore` (create/update/get/list). Default `InMemory*`; with `DATABASE_URL` the API uses the
+`Pg*` stores and runs idempotent SQL migrations at boot. The store + migrator share an injectable `SqlClient`
+(fake in tests, `pg.Pool` in prod). Migrations: `packages/db/migrations/` + `docs/migration/`.
 
-## Reference impl
-`apps/api/src/{server,run-service,run-store,main}.ts`. Live-verified end-to-end against real Nomad
-(`POST /runs` → poll → succeeded; 402 past the run budget).
+## Gotchas
+- Route paths can sit on their **own line** (`app.get<…>(\n  "/x/:id/diff",`) — grep `^\s+"/<resource>` too.
+- Before moving an exported schema, grep its consumers (`mcp.ts`, tests) — update imports in the same change.
+- The `server.test.ts` suite (buildServer+inject, ~636 tests incl. 401/403/400/404) is the refactor safety net:
+  the route surface must stay identical.
+- Body-less DELETE with `content-type: application/json` is tolerated (the lenient parser in server.ts) — don't
+  add a second content-type parser.
