@@ -259,6 +259,15 @@ export interface ScorecardServiceDeps {
   sinkExists?: (tenant: string, name: string) => Promise<boolean>;
   // Cancel still-QUEUED scheduler entries matching the predicate (supersede reclaim + speculation-loser reclaim).
   cancelQueued?: (predicate: (job: AgentJob) => boolean) => number;
+  // Orchestration-event observability hook (metrics) — fired on spillover / speculation / OOM escalation.
+  // One generic seam so the service stays metrics-vocabulary-free; main.ts maps events to counters.
+  onOrchestrationEvent?: (
+    event:
+      | { kind: "spillover"; from: string; to: string; code: string }
+      | { kind: "speculation_fired"; from: string; to: string }
+      | { kind: "speculation_settled"; winnerSpeculated: boolean }
+      | { kind: "oom_escalated"; memoryMb: number },
+  ) => void;
   buildTraceSource?: (cfg: TraceSourceConfig) => TraceSource; // trace source factory for pull-ingest (@everdict/trace)
   secretsFor?: (tenant: string) => Promise<Record<string, string>>; // tenant SecretStore values (inject judge-model keys)
   // For resolving {secretRef} in harness env — two tiers: shared + submitter (owner) personal secrets. Injected by scope.
@@ -752,6 +761,7 @@ export class ScorecardService {
               breaker: this.breaker,
               totalCases: caseIndex.size,
               onSpeculate: (cid: string, from: string, to: string) => {
+                this.deps.onOrchestrationEvent?.({ kind: "speculation_fired", from, to });
                 void this.appendBatchStep(id, {
                   phase: "case",
                   status: "info",
@@ -875,6 +885,7 @@ export class ScorecardService {
             tenant: ctx.tenant,
             breaker: this.breaker,
             onSpill: (cid, from, to, code) => {
+              this.deps.onOrchestrationEvent?.({ kind: "spillover", from, to, code });
               void this.appendBatchStep(id, {
                 phase: "case",
                 status: "info",
@@ -1079,6 +1090,7 @@ export class ScorecardService {
       if (r.failure?.code !== OOM_KILLED) continue;
       const base = src.origin?.memoryBoostMb?.[r.caseId] ?? specBaseMb;
       memoryBoostMb[r.caseId] = Math.min(OOM_ESCALATION_CAP_MB, base * 2);
+      this.deps.onOrchestrationEvent?.({ kind: "oom_escalated", memoryMb: memoryBoostMb[r.caseId] as number });
     }
     const boosted = Object.keys(memoryBoostMb).length;
     // Inherit lineage fields but never the previous boost map — the new record carries only ITS boosts.
@@ -1477,6 +1489,7 @@ export class ScorecardService {
             tenant,
             breaker: this.breaker,
             onSpill: (caseId, from, to, code) => {
+              this.deps.onOrchestrationEvent?.({ kind: "spillover", from, to, code });
               pushStep("case", "info", `${caseId}: runtime spillover ${from} → ${to} (${code})`, caseId);
               void flushSteps();
             },
@@ -1531,8 +1544,13 @@ export class ScorecardService {
           breaker: this.breaker,
           totalCases: cases.length,
           onSpeculate: (cid, from, to) => {
+            this.deps.onOrchestrationEvent?.({ kind: "speculation_fired", from, to });
             pushStep("case", "info", `${cid}: tail speculation ${from} ⇢ ${to} (straggler duplicate)`, cid);
             void flushSteps();
+          },
+          onWin: (_cid, _winner, speculated) => {
+            if (speculated)
+              this.deps.onOrchestrationEvent?.({ kind: "speculation_settled", winnerSpeculated: speculated });
           },
           ...(this.deps.cancelQueued
             ? {

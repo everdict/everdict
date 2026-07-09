@@ -36,6 +36,15 @@ authoritative; if absent, upcoming is omitted — cron approximation is the web 
 - HTTP: `GET /queue` (`runs:read`, viewer+)
 - MCP: `get_queue` (same gate)
 
+**Time series (`GET /metrics`)** — the Prometheus half (the snapshot above answers "now"; this answers
+"since when / how often / how long"). Zero-dep text exposition: scrape-time gauges (queue depth, per-backend
+in-flight + memory, per-workspace in-flight/queued, open circuits) + counters at the dispatch seam
+(`everdict_dispatch_total{runtime,outcome}`, spillovers, breaker open transitions, speculation fired/won, OOM
+escalations) + a per-runtime case-duration histogram. UNAUTHENTICATED by design (standard scrape practice —
+firewall the path in deployments). Live: one dead+kind shard batch registered breaker_open 1, spillover_total 3,
+dispatch infra 3 / ok 6, duration count 6 in a single scrape. Every dispatch (runs, batch cases, judges) flows
+through one metered dispatcher wrapper, so coverage needs no per-caller wiring.
+
 **Scheduler observability** (the seeing half of the fairness/envelope machinery — docs/execution-backends.md):
 the snapshot carries a workspace `scheduler` slice (`{queued, inFlight, quota?}` — THIS tenant's numbers only)
 and each workspace lane an `admission` view (`{inFlight, memInFlightMb?, memoryBudgetMb?, maxConcurrent?,

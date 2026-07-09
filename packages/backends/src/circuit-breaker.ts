@@ -14,6 +14,7 @@ export interface CircuitBreakerOpts {
   threshold?: number; // consecutive infra failures that open the circuit
   cooldownMs?: number; // how long an open circuit rejects before allowing a half-open probe
   now?: () => number; // injectable clock (tests)
+  onOpen?: (key: string) => void; // observability hook — fired on every closed→open (and half-open→re-open) transition
 }
 
 interface CircuitState {
@@ -27,7 +28,7 @@ export class CircuitBreaker {
   private readonly clock: () => number;
   private readonly circuits = new Map<string, CircuitState>();
 
-  constructor(opts: CircuitBreakerOpts = {}) {
+  constructor(private readonly opts: CircuitBreakerOpts = {}) {
     this.threshold = opts.threshold ?? 3;
     this.cooldownMs = opts.cooldownMs ?? 30_000;
     this.clock = opts.now ?? (() => Date.now());
@@ -36,7 +37,11 @@ export class CircuitBreaker {
   failure(key: string): void {
     const state = this.circuits.get(key) ?? { consecutive: 0 };
     state.consecutive += 1;
-    if (state.consecutive >= this.threshold) state.openedAt = this.clock();
+    if (state.consecutive >= this.threshold) {
+      const wasOpen = this.isOpen(key);
+      state.openedAt = this.clock();
+      if (!wasOpen) this.opts.onOpen?.(key); // transition only — re-arming an already-open circuit is not a new trip
+    }
     this.circuits.set(key, state);
   }
 

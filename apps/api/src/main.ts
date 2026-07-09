@@ -13,6 +13,7 @@ import {
   BackendRegistry,
   type BudgetLimit,
   CircuitBreaker,
+  type Dispatcher as CoreDispatcher,
   K8sBackend,
   MutableSlots,
   NomadBackend,
@@ -20,7 +21,7 @@ import {
   buildRuntimeBackend,
   inMemoryBudget,
 } from "@everdict/backends";
-import type { CaseResult, RegistryAuth, RuntimeSpec } from "@everdict/core";
+import { type CaseResult, type RegistryAuth, type RuntimeSpec, classifyFailure } from "@everdict/core";
 import {
   type CallbackStore,
   type CommentStore,
@@ -115,6 +116,7 @@ import { defaultJudgeRunner } from "./judge-runner.js";
 import { MattermostCommandService } from "./mattermost-command-service.js";
 import { MattermostService } from "./mattermost-service.js";
 import { MembershipService } from "./membership-service.js";
+import { Metrics } from "./metrics.js";
 import { ModelResolvingDispatcher } from "./model-resolving-dispatcher.js";
 import { NotificationService } from "./notification-service.js";
 import { ProfileService } from "./profile-service.js";
@@ -241,9 +243,35 @@ async function main(): Promise<void> {
     ...(tenantQuotas ? { tenantQuota: (t: string) => tenantQuotas.get(t) ?? Number.POSITIVE_INFINITY } : {}),
     ...(tenantWeights ? { weightFor: (t: string) => tenantWeights.get(t) ?? 1 } : {}),
   });
+  // Prometheus metrics (docs/architecture/work-queue.md — the time-series half; /queue is the snapshot half).
+  const metrics = new Metrics();
   // Per-runtime circuit breaker — shared between the batch spillover (ScorecardService) and the queue view
-  // (observability): one health memory, two consumers.
-  const breaker = new CircuitBreaker();
+  // (observability): one health memory, three consumers (spillover · queue view · metrics).
+  const breaker = new CircuitBreaker({
+    onOpen: (key) =>
+      metrics.counter("everdict_breaker_open_total", "Circuit-breaker open transitions.", { circuit: key }),
+  });
+  // Scrape-time gauges — sampled live so the scrape always reflects the current scheduler state.
+  metrics.gauge("everdict_scheduler_queued", "Jobs waiting in the control-plane scheduler queue.", () => [
+    { labels: {}, value: scheduler.stats().queued },
+  ]);
+  metrics.gauge("everdict_scheduler_inflight", "In-flight dispatches per backend.", () =>
+    Object.entries(scheduler.stats().inFlight).map(([backend, value]) => ({ labels: { backend }, value })),
+  );
+  metrics.gauge("everdict_scheduler_mem_inflight_mb", "In-flight harness-declared memory per backend (Mb).", () =>
+    Object.entries(scheduler.stats().memInFlightMb).map(([backend, value]) => ({ labels: { backend }, value })),
+  );
+  metrics.gauge("everdict_tenant_inflight", "In-flight dispatches per workspace.", () =>
+    Object.entries(scheduler.stats().tenantInFlight).map(([tenant, value]) => ({ labels: { tenant }, value })),
+  );
+  metrics.gauge("everdict_tenant_queued", "Queued jobs per workspace.", () =>
+    Object.entries(scheduler.stats().queuedByTenant).map(([tenant, value]) => ({ labels: { tenant }, value })),
+  );
+  metrics.gauge("everdict_breaker_open", "Currently-open circuits (1 = open).", () =>
+    Object.entries(breaker.stats())
+      .filter(([, st]) => st.open)
+      .map(([circuit]) => ({ labels: { circuit }, value: 1 })),
+  );
   if (autoscale && scalingTargets.length > 0) {
     const autoscaler = new Autoscaler({
       // Demand = this deployment's whole backlog + what the global backends already run (tenant-runtime jobs
@@ -333,6 +361,31 @@ async function main(): Promise<void> {
       buildSelfHostedBackend: (key) => new SelfHostedBackend(key, runnerHub),
     }),
   );
+  // Metered dispatcher — every dispatch (single runs, batch cases, judges) flows through one seam, so outcome
+  // counters and the per-runtime duration histogram cover the whole system without per-caller wiring.
+  const meteredDispatcher: CoreDispatcher = {
+    dispatch: async (job) => {
+      const runtime = job.evalCase.placement?.target ?? "default";
+      const startedAt = Date.now();
+      try {
+        const result = await dispatcher.dispatch(job);
+        metrics.counter("everdict_dispatch_total", "Dispatch outcomes.", { runtime, outcome: "ok" });
+        metrics.observe(
+          "everdict_case_duration_seconds",
+          "Case wall-clock from dispatch to result, per runtime.",
+          { runtime },
+          (Date.now() - startedAt) / 1000,
+        );
+        return result;
+      } catch (err) {
+        metrics.counter("everdict_dispatch_total", "Dispatch outcomes.", {
+          runtime,
+          outcome: classifyFailure(err, "dispatch").class,
+        });
+        throw err;
+      }
+    },
+  };
   // Connection test: build a backend with the same builder + tenant secrets and probe() (reachability/auth with no job). Shared by server/MCP.
   const probeRuntime = makeRuntimeProber({ secretsFor: runtimeSecretsFor, buildBackend: runtimeBuildBackend });
 
@@ -402,7 +455,7 @@ async function main(): Promise<void> {
     );
 
   const service = new RunService({
-    dispatcher,
+    dispatcher: meteredDispatcher,
     store,
     budget,
     requireRuntime: true, // policy (default): a run with no runtime/self target is 400 at submit — the API does not register local
@@ -467,9 +520,21 @@ async function main(): Promise<void> {
   };
 
   const scorecardService = new ScorecardService({
-    dispatcher,
+    dispatcher: meteredDispatcher,
     store: scorecardStore,
     breaker, // shared with the queue view — spillover writes, observability reads
+    onOrchestrationEvent: (event) => {
+      if (event.kind === "spillover")
+        metrics.counter("everdict_spillover_total", "Runtime spillovers.", { from: event.from, to: event.to });
+      else if (event.kind === "speculation_fired")
+        metrics.counter("everdict_speculation_fired_total", "Tail-speculation duplicates fired.", {});
+      else if (event.kind === "speculation_settled")
+        metrics.counter("everdict_speculation_won_total", "Speculated cases settled by a duplicate win.", {
+          winner: event.winnerSpeculated ? "duplicate" : "primary",
+        });
+      else if (event.kind === "oom_escalated")
+        metrics.counter("everdict_oom_escalated_total", "OOM auto-escalations on retry.", {});
+    },
     // Per-batch sink override validation (submit 400s on an unknown sink name; "none" is always allowed).
     sinkExists: async (tenant, name) =>
       ((await settingsStore.get(tenant))?.traceSinks ?? []).some((e) => e.name === name),
@@ -641,6 +706,7 @@ async function main(): Promise<void> {
   const app = buildServer({
     service,
     scorecardService,
+    metrics, // GET /metrics (Prometheus text) — unauthenticated; deployments firewall the scrape path
     usageMeter, // meter-only billing usage — GET /usage
     scheduleService,
     queueService,

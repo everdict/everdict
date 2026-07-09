@@ -41,6 +41,21 @@ describe("CircuitBreaker", () => {
     expect(breaker.isOpen("k")).toBe(false);
   });
 
+  it("onOpen fires on the closed→open transition only (re-arming an open circuit is not a new trip)", () => {
+    let t = 0;
+    const opened: string[] = [];
+    const breaker = new CircuitBreaker({ threshold: 2, cooldownMs: 1000, now: () => t, onOpen: (k) => opened.push(k) });
+    breaker.failure("k");
+    expect(opened).toEqual([]); // below threshold
+    breaker.failure("k");
+    expect(opened).toEqual(["k"]); // transition
+    breaker.failure("k");
+    expect(opened).toEqual(["k"]); // still open — re-arm, not a new trip
+    t = 1000; // half-open
+    breaker.failure("k"); // probe failed → re-open = a NEW trip
+    expect(opened).toEqual(["k", "k"]);
+  });
+
   it("keys are independent", () => {
     const breaker = new CircuitBreaker({ threshold: 1, cooldownMs: 1000, now: () => 0 });
     breaker.failure("a");

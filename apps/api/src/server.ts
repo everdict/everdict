@@ -234,6 +234,7 @@ export interface ServerDeps {
   usageMeter?: UsageMeter; // meter-only billing usage (GET /usage) — never blocks (route disabled if absent)
   scheduleService?: ScheduleService; // scheduled (cron) scorecard CRUD (route disabled if absent)
   queueService?: QueueService; // work-queue snapshot (running/waiting/next-scheduled per runtime lane) (route disabled if absent)
+  metrics?: { render(): string }; // Prometheus text exposition (GET /metrics) (route disabled if absent)
   viewService?: ViewService; // saved scorecard-analysis View CRUD (route disabled if absent)
   benchmarkService?: BenchmarkService; // benchmark catalog + ingest (route disabled if absent)
   bundleService?: BundleService; // bundle apply (one-shot register of harness+benchmark+runtime; route disabled if absent)
@@ -709,6 +710,13 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   });
 
   // --- work queue (workload visibility) — snapshot of running/waiting (FIFO)/next-scheduled fire per runtime lane. viewer+ read-only. ---
+  // Prometheus scrape — UNAUTHENTICATED by design (standard practice; the scrape path is expected to be
+  // firewalled). Counters/histograms accumulate at the dispatch seam; gauges sample live components.
+  app.get("/metrics", async (_req, reply) => {
+    if (!deps.metrics) return reply.code(404).send({ code: "NOT_FOUND", message: "metrics not configured" });
+    return reply.header("content-type", "text/plain; version=0.0.4; charset=utf-8").send(deps.metrics.render());
+  });
+
   app.get("/queue", async (req, reply) => {
     if (!deps.queueService) return reply.code(404).send({ code: "NOT_FOUND", message: "queue service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
@@ -1120,14 +1128,12 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
         parsed.data.imageTemplate ? { imageTemplate: parsed.data.imageTemplate } : {},
       );
       await deps.datasetRegistry.register(principal.workspace, dataset, principal.subject);
-      return reply
-        .code(201)
-        .send({
-          workspace: principal.workspace,
-          id: dataset.id,
-          version: dataset.version,
-          cases: dataset.cases.length,
-        });
+      return reply.code(201).send({
+        workspace: principal.workspace,
+        id: dataset.id,
+        version: dataset.version,
+        cases: dataset.cases.length,
+      });
     } catch (err) {
       return sendError(reply, err); // unresolved image 400 / immutable 409
     }
