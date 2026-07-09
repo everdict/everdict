@@ -2,6 +2,7 @@ import type { Principal } from "@everdict/auth";
 import { type Dispatcher, inMemoryUsageMeter } from "@everdict/backends";
 import type { AgentJob, CaseResult, RuntimeSpec } from "@everdict/core";
 import {
+  InMemoryBudgetStore,
   InMemoryOAuthStateStore,
   InMemoryRunStore,
   InMemoryRunnerStore,
@@ -24,6 +25,7 @@ import {
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { describe, expect, it } from "vitest";
+import { persistentBudget } from "./budget-tracker.js";
 import { BundleService } from "./bundle-service.js";
 import { GithubAppService } from "./github-app-service.js";
 import { MattermostService } from "./mattermost-service.js";
@@ -169,6 +171,25 @@ async function connectRunner(
 }
 
 const text = (r: unknown): string => (r as { content?: Array<{ text?: string }> }).content?.[0]?.text ?? "";
+
+describe("MCP — budget tools", () => {
+  const withBudget = () => ({ ...harness(), budget: persistentBudget(new InMemoryBudgetStore()) });
+
+  it("an admin sets and reads the workspace enforcement budget", async () => {
+    const admin = await connect(withBudget(), ["admin"]);
+    const set = await admin.callTool({ name: "set_budget_limit", arguments: { runs: 100, usd: 25 } });
+    expect(set.isError).toBeFalsy();
+    expect(JSON.parse(text(set))).toMatchObject({ limit: { runs: 100, usd: 25 } });
+    const get = await admin.callTool({ name: "get_budget", arguments: {} });
+    expect(JSON.parse(text(get)).limit).toEqual({ runs: 100, usd: 25 });
+  });
+
+  it("a non-admin cannot set the budget limit (settings:write is admin-only)", async () => {
+    const member = await connect(withBudget(), ["member"]);
+    const res = await member.callTool({ name: "set_budget_limit", arguments: { runs: 1 } });
+    expect(res.isError).toBe(true);
+  });
+});
 
 describe("MCP tools", () => {
   it("tools/list exposes the run/harness tools", async () => {

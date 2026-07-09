@@ -1,5 +1,22 @@
 import { type BudgetLimit, type BudgetTracker, type BudgetUsage, assertWithinBudget } from "@everdict/backends";
 import type { BudgetStore } from "@everdict/db";
+import { z } from "zod";
+
+// A per-tenant limit as set over the API (each dimension optional; an omitted dimension = unlimited). A PUT replaces
+// the whole limit. Shared by the HTTP route and the MCP tool (one validation, two transports).
+export const BudgetLimitInputSchema = z.object({
+  usd: z.number().nonnegative().optional(),
+  tokens: z.number().int().nonnegative().optional(),
+  runs: z.number().int().nonnegative().optional(),
+});
+
+// The read/config surface the budget API needs — a narrow view of PersistentBudget so server.ts/mcp.ts don't take
+// the whole tracker (they never admit/settle; that's the Scheduler's job).
+export interface BudgetAdmin {
+  usage(tenant: string): BudgetUsage;
+  limitOf(tenant: string): BudgetLimit | undefined;
+  setLimit(tenant: string, limit: BudgetLimit): Promise<void>;
+}
 
 // The persistent, per-tenant budget tracker mirrors persistentUsageMeter: the in-memory maps are the runtime source
 // of truth (admit enforces synchronously) with best-effort WRITE-THROUGH to a durable BudgetStore and boot HYDRATION,

@@ -55,6 +55,7 @@ import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest }
 import { WebSocketServer } from "ws";
 import { z } from "zod";
 import { BenchmarkImportBodySchema, BenchmarkPreviewBodySchema, type BenchmarkService } from "./benchmark-service.js";
+import { type BudgetAdmin, BudgetLimitInputSchema } from "./budget-tracker.js";
 import { BundleSchema, type BundleService, requiredActionsForBundle } from "./bundle-service.js";
 import { type CiLinkService, UpsertCiLinkBodySchema } from "./ci-link-service.js";
 import { COMMENT_RESOURCE_TYPES, type CommentService } from "./comment-service.js";
@@ -237,6 +238,7 @@ export interface ServerDeps {
   service: RunService;
   scorecardService?: ScorecardService; // dataset×harness batch eval (route disabled if absent)
   usageMeter?: UsageMeter; // meter-only billing usage (GET /usage) — never blocks (route disabled if absent)
+  budget?: BudgetAdmin; // enforcement budget config (GET/PUT /budget) — usage + per-tenant limit (route disabled if absent)
   scheduleService?: ScheduleService; // scheduled (cron) scorecard CRUD (route disabled if absent)
   queueService?: QueueService; // work-queue snapshot (running/waiting/next-scheduled per runtime lane) (route disabled if absent)
   metrics?: { render(): string }; // Prometheus text exposition (GET /metrics) (route disabled if absent)
@@ -880,6 +882,36 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     try {
       gate(principal, "scorecards:read");
       return reply.send(deps.usageMeter.usage(principal.workspace));
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  // Enforcement budget (blocks runs with 402 when a cap is hit; distinct from the meter-only /usage). GET = committed
+  // usage + the per-tenant limit (member+, settings:read); PUT = replace the limit (admin, settings:write).
+  app.get("/budget", async (req, reply) => {
+    if (!deps.budget) return reply.code(404).send({ code: "NOT_FOUND", message: "budget not configured" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "settings:read");
+      const ws = principal.workspace;
+      return reply.send({ usage: deps.budget.usage(ws), limit: deps.budget.limitOf(ws) ?? null });
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+  app.put("/budget", async (req, reply) => {
+    if (!deps.budget) return reply.code(404).send({ code: "NOT_FOUND", message: "budget not configured" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "settings:write");
+      const parsed = BudgetLimitInputSchema.safeParse(req.body); // a PUT replaces the whole limit (omitted dimension = unlimited)
+      if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
+      const ws = principal.workspace;
+      await deps.budget.setLimit(ws, parsed.data);
+      return reply.send({ usage: deps.budget.usage(ws), limit: deps.budget.limitOf(ws) ?? null });
     } catch (err) {
       return sendError(reply, err);
     }
@@ -3479,6 +3511,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
           service: deps.service,
           scorecardService: deps.scorecardService,
           usageMeter: deps.usageMeter,
+          budget: deps.budget,
           scheduleService: deps.scheduleService,
           queueService: deps.queueService,
           viewService: deps.viewService,

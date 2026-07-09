@@ -3,6 +3,7 @@ import type { Dispatcher } from "@everdict/backends";
 import { inMemoryBudget, inMemoryUsageMeter } from "@everdict/backends";
 import { type CaseResult, DatasetSchema, type EvalCase } from "@everdict/core";
 import {
+  InMemoryBudgetStore,
   InMemoryOAuthStateStore,
   InMemoryRunStore,
   InMemoryRunnerStore,
@@ -27,6 +28,7 @@ import {
 } from "@everdict/registry";
 import { describe, expect, it } from "vitest";
 import { BenchmarkService } from "./benchmark-service.js";
+import { persistentBudget } from "./budget-tracker.js";
 import { BundleService } from "./bundle-service.js";
 import { GithubAppService } from "./github-app-service.js";
 import { ImageRegistryService } from "./image-registry-service.js";
@@ -202,10 +204,12 @@ function server(
     secretsFor: (ws) => secretStore.entries(ws),
   });
   const usageMeter = inMemoryUsageMeter();
+  const budget = persistentBudget(new InMemoryBudgetStore());
   const app = buildServer({
     service: svc,
     scorecardService,
     usageMeter,
+    budget,
     scheduleService,
     benchmarkService,
     bundleService,
@@ -245,8 +249,45 @@ function server(
     harnessTemplates,
     harnessInstances,
     usageMeter,
+    budget,
   };
 }
+
+describe("API — budget (per-tenant enforcement limits)", () => {
+  const h = { authorization: "Bearer x" };
+
+  it("an admin sets the workspace budget limit; GET returns it alongside committed usage", async () => {
+    const { app } = server({ requireAuth: true, authenticator: roleAuth(["admin"]) });
+    const put = await app.inject({ method: "PUT", url: "/budget", headers: h, payload: { runs: 100, usd: 25 } });
+    expect(put.statusCode).toBe(200);
+    expect(put.json()).toMatchObject({ limit: { runs: 100, usd: 25 }, usage: { runs: 0, usd: 0, tokens: 0 } });
+
+    const get = await app.inject({ method: "GET", url: "/budget", headers: h });
+    expect(get.statusCode).toBe(200);
+    expect(get.json().limit).toEqual({ runs: 100, usd: 25 });
+  });
+
+  it("a PUT replaces the whole limit (an omitted dimension becomes unlimited)", async () => {
+    const { app } = server({ requireAuth: true, authenticator: roleAuth(["admin"]) });
+    await app.inject({ method: "PUT", url: "/budget", headers: h, payload: { runs: 100, usd: 25 } });
+    const put = await app.inject({ method: "PUT", url: "/budget", headers: h, payload: { runs: 50 } });
+    expect(put.json().limit).toEqual({ runs: 50 }); // usd dropped → unlimited
+  });
+
+  it("budget config is admin-only (a non-admin gets 403 on read and write)", async () => {
+    const { app } = server({ requireAuth: true, authenticator: roleAuth(["member"]) });
+    expect((await app.inject({ method: "GET", url: "/budget", headers: h })).statusCode).toBe(403);
+    expect((await app.inject({ method: "PUT", url: "/budget", headers: h, payload: { runs: 1 } })).statusCode).toBe(
+      403,
+    );
+  });
+
+  it("rejects a negative limit (validation → 400)", async () => {
+    const { app } = server({ requireAuth: true, authenticator: roleAuth(["admin"]) });
+    const res = await app.inject({ method: "PUT", url: "/budget", headers: h, payload: { runs: -5 } });
+    expect(res.statusCode).toBe(400);
+  });
+});
 
 describe("API — bundles (one-shot bundle install)", () => {
   const BUNDLE = {

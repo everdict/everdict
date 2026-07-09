@@ -859,6 +859,7 @@ async function main(): Promise<void> {
     metrics, // GET /metrics (Prometheus text) — unauthenticated; deployments firewall the scrape path
     schedulingControl, // PUT/GET /internal/scheduling — runtime fairness dials (env stays the boot baseline)
     usageMeter, // meter-only billing usage — GET /usage
+    budget, // enforcement budget config — GET/PUT /budget (usage + per-tenant limit)
     scheduleService,
     queueService,
     viewService,

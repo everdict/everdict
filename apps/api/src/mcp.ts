@@ -32,6 +32,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import { BenchmarkImportBodySchema, BenchmarkPreviewBodySchema, type BenchmarkService } from "./benchmark-service.js";
+import { type BudgetAdmin, BudgetLimitInputSchema } from "./budget-tracker.js";
 import { BundleSchema, type BundleService, requiredActionsForBundle } from "./bundle-service.js";
 import type { CiLinkService } from "./ci-link-service.js";
 import { COMMENT_RESOURCE_TYPES, type CommentService } from "./comment-service.js";
@@ -68,6 +69,7 @@ export interface McpDeps {
   service: RunService;
   scorecardService?: ScorecardService;
   usageMeter?: UsageMeter; // meter-only billing usage (get_usage)
+  budget?: BudgetAdmin; // enforcement budget config (get_budget / set_budget_limit)
   scheduleService?: ScheduleService;
   queueService?: QueueService; // work queue snapshot (running/waiting/next-scheduled per runtime lane)
   viewService?: ViewService; // saved scorecard-analysis Views — create/list/get/update/delete
@@ -214,6 +216,33 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
         inputSchema: {},
       },
       () => run(principal, "scorecards:read", async () => ok(usageMeter.usage(ws))),
+    );
+  }
+
+  if (deps.budget) {
+    const budget = deps.budget;
+    const budgetView = () => ({ usage: budget.usage(ws), limit: budget.limitOf(ws) ?? null });
+    server.registerTool(
+      "get_budget",
+      {
+        description:
+          "The workspace's enforcement budget — committed usage (runs/usd/tokens) plus the per-tenant limit (a null dimension = unlimited). Distinct from get_usage (meter-only): this budget BLOCKS a run with 402 once a cap is hit.",
+        inputSchema: {},
+      },
+      () => run(principal, "settings:read", async () => ok(budgetView())),
+    );
+    server.registerTool(
+      "set_budget_limit",
+      {
+        description:
+          "Set this workspace's enforcement budget limit (admin). Each of usd/tokens/runs is optional; an omitted dimension is unlimited. Replaces the whole limit.",
+        inputSchema: BudgetLimitInputSchema.shape,
+      },
+      (args) =>
+        run(principal, "settings:write", async () => {
+          await budget.setLimit(ws, BudgetLimitInputSchema.parse(args));
+          return ok(budgetView());
+        }),
     );
   }
 
