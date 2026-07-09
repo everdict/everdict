@@ -4,7 +4,7 @@
 > Supersedes the "tray-only companion" idea: the user requirement is **perform identically to the web via
 > the desktop app too** — the desktop must do *everything the web does*, plus what only a native app can do (resident
 > runner, one-click pairing, tray/notifications/autostart).
-> Dev conventions for `apps/desktop` / `packages/runner-core` live in skill `.claude/skills/desktop/`.
+> Dev conventions for `apps/desktop` / `packages/self-hosted-runner` live in skill `.claude/skills/desktop/`.
 > - **D6 — auto-update: detect/download automatic, APPLY is user-consented (LOCKED); ENABLED.**
 >   `electron-updater` in main behind `UpdaterController` (DI): check on launch + every 6h,
 >   `autoDownload`, `autoInstallOnAppQuit`; "Apply" only via the tray restart item — never force-restart
@@ -58,7 +58,7 @@
 >   complex Tailwind v4 app). For a resident dev tool, size is the cheaper sacrifice.
 > - **D3 — the runner rides along, paired one-click from the logged-in session.** The desktop's native
 >   payload is the [self-hosted runner](./self-hosted-runner.md): the runner loop (extracted to
->   `packages/runner-core`) runs in the Electron main process. Pairing needs **zero token copy-paste**:
+>   `packages/self-hosted-runner`) runs in the Electron main process. Pairing needs **zero token copy-paste**:
 >   the account page, when it detects the desktop bridge, offers "Connect this device as a runner" → the web (already
 >   authenticated as the user) calls the existing pair API → hands the `rnr_` token to the bridge → main
 >   process stores it in the OS keychain and starts the runner. Ownership stays personal (self-hosted-runner
@@ -116,7 +116,7 @@ requirement structurally: parity is not a feature to build, it's a property of r
 ```
 ┌─ apps/desktop (Electron) ─────────────────────────────────────────────┐
 │ main process                        renderer (BrowserWindow)          │
-│  ├─ runner host: @everdict/runner-core  │  loads deployed apps/web URL   │
+│  ├─ runner host: @everdict/self-hosted-runner  │  loads deployed apps/web URL   │
 │  │   (lease → runAgentJob → submit)  │  (Keycloak login, all screens, │
 │  ├─ keychain (safeStorage): rnr_     │   session cookies live here)   │
 │  ├─ tray: status / start·stop / quit │                                │
@@ -128,10 +128,10 @@ requirement structurally: parity is not a feature to build, it's a property of r
    control plane (@everdict/api) ◄──── Bearer (web BFF) ──── deployed apps/web
 ```
 
-### `packages/runner-core` — one runner, three consumers
+### `packages/self-hosted-runner` — one runner, three consumers
 
 Move `runner-loop.ts` / `runner-session.ts` / `run-leased-job.ts` (+ their tests) from `apps/cli` into
-`packages/runner-core` (depends on `@everdict/agent`, `@modelcontextprotocol/sdk`; sits at the same layer as
+`packages/self-hosted-runner` (depends on `@everdict/agent`, `@modelcontextprotocol/sdk`; sits at the same layer as
 `apps/*` consumers of `agent`). Exports: `runLeaseWorkers(opts)`, `ResilientMcpSession`, `mcpConnect`,
 plus a small `RunnerHost` facade (start/stop/status events) for GUI embedding. `apps/cli` re-imports and
 behaves identically (pure refactor slice); `apps/desktop` main process embeds `RunnerHost`. (A future CI
@@ -182,15 +182,15 @@ That's the whole API. No generic `invoke`, no fs/shell access, nothing else.
 |---|---|
 | Entire UI (`apps/web` deployed) — all screens, auth, role-gating | **reused verbatim** — the whole point (D1) |
 | Runner protocol (MCP `lease_job`/`submit_job_result`/`heartbeat_job`) + pairing API | **reused, untouched** |
-| Runner loop (`runLeaseWorkers`, `ResilientMcpSession`, `runAgentJob` path) | **extracted** → `packages/runner-core` (pure refactor) |
-| `everdict runner` CLI | **kept** — thin wrapper over `runner-core`, headless/CI answer |
+| Runner loop (`runLeaseWorkers`, `ResilientMcpSession`, `runAgentJob` path) | **extracted** → `packages/self-hosted-runner` (pure refactor) |
+| `everdict runner` CLI | **kept** — thin wrapper over `self-hosted-runner`, headless/CI answer |
 | `apps/desktop` (Electron shell: window, tray, keychain, autostart, updater, IPC) | **new** |
 | `window.everdictDesktop` preload bridge + web desktop-aware pairing branch | **new** (bridge) + **small web edit** |
 | Packaging/signing (linux AppImage/deb · mac dmg+notarize · win nsis) + download links on the account page | **new** |
 
 ## Slices (each lands green: format/lint/typecheck/test/build)
 
-1. ✅ (`bbc7b58`) **`packages/runner-core` extraction** — move loop/session/leased-job + tests out of `apps/cli`;
+1. ✅ (`bbc7b58`) **`packages/self-hosted-runner` extraction** — move loop/session/leased-job + tests out of `apps/cli`;
    CLI re-imports; zero behavior change (CLI live e2e re-run proves it).
 2. ✅ (`e2b903a`) **Shell** — `apps/desktop` Electron app: BrowserWindow on the deployed web URL, persistent session
    (Keycloak login sticks), navigation policy (top-level http/https allowed — OIDC/OAuth redirect flows
@@ -198,7 +198,7 @@ That's the whole API. No generic `invoke`, no fs/shell access, nothing else.
    skeleton, autostart toggle. No runner yet — this alone already *is* "identical to the web".
    (electron-updater moves to slice 5 — it belongs with electron-builder packaging.)
 3. ✅ **Bridge + one-click pairing** — preload `window.everdictDesktop` (origin-gated: preload arg-origin gate +
-   main-side `senderFrame` check), `safeStorage` keychain token store, `RunnerHost` (runner-core facade:
+   main-side `senderFrame` check), `safeStorage` keychain token store, `RunnerHost` (self-hosted-runner facade:
    start/stop/status events over `runLeaseWorkers`) embedded via `RunnerController` (pair/unpair/restore-on-boot);
    web: desktop-aware "Connect this device as a runner" one-click (label=hostname, token never shown — bridge-only) +
    live "this device" status row (running(n)/online) replacing the `lastSeenAt` heuristic for this device.

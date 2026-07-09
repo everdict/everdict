@@ -16,7 +16,7 @@
     "package": "node esbuild.mjs && electron-builder --publish never"
   },
   "dependencies": {
-    "@everdict/runner-core": "workspace:*",
+    "@everdict/self-hosted-runner": "workspace:*",
     "electron-updater": "^6.8.9",
     "zod": "^3.24.1"
   },

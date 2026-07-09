@@ -15,7 +15,7 @@
     "@everdict/backends": "workspace:*",
     "@everdict/core": "workspace:*",
     "@everdict/orchestrator": "workspace:*",
-    "@everdict/runner-core": "workspace:*",
+    "@everdict/self-hosted-runner": "workspace:*",
     "@everdict/suite": "workspace:*",
     "@everdict/topology": "workspace:*",
     "zod": "^3.24.1"

@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node
 import { hostname } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { ResilientMcpSession, RunnerHost, detectCapabilities, mcpConnect } from "@everdict/runner-core";
+import { ResilientMcpSession, RunnerHost, detectCapabilities, mcpConnect } from "@everdict/self-hosted-runner";
 import { BrowserWindow, Menu, Notification, Tray, app, ipcMain, nativeImage, safeStorage, shell } from "electron";
 import electronUpdater from "electron-updater";
 import {

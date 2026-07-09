@@ -33,7 +33,7 @@ See `docs/execution-backends.md` (Backend vs Driver) and `docs/sandbox-auth.md` 
   orchestrator-agnostic `ServiceTopologyBackend` (Nomad/K8s) + `@everdict/trace` (OTel/MLflow). See `docs/service-harness.md`.
 - new scoring signal → new `Grader` (+ registry entry). A model-backed `Grader` is an Agent Judge.
 - run on the *user's own* machine → the push model flips to **pull**: `SelfHostedBackend` parks jobs in an
-  owner-scoped lease queue; `@everdict/runner-core` (shared by the `everdict runner` CLI and the **desktop app**
+  owner-scoped lease queue; `@everdict/self-hosted-runner` (shared by the `everdict runner` CLI and the **desktop app**
   `apps/desktop`, which adds one-click pairing + tray residency) leases → runs the same eval loop locally →
   posts the result back with a provenance tag. See `architecture/self-hosted-runner.md` +
   `architecture/desktop-app.md`.

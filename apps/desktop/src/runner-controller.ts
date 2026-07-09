@@ -1,4 +1,4 @@
-import type { RunnerHostStatus } from "@everdict/runner-core";
+import type { RunnerHostStatus } from "@everdict/self-hosted-runner";
 import type { DesktopRunnerStatus, PairPayload } from "./bridge.js";
 
 // Runner lifecycle controller — persists pair state (token/meta) + starts/stops the RunnerHost + broadcasts status.

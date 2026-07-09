@@ -12,7 +12,7 @@ import {
 } from "@everdict/core";
 import { DockerDriver, type DriverMount, LocalDriver } from "@everdict/drivers";
 import { OsUseEnvironment, PromptEnvironment, RepoEnvironment } from "@everdict/environments";
-import { runCase } from "@everdict/runner";
+import { runCase } from "@everdict/run-case";
 import { runContextFromEnv } from "./env.js";
 import { makeGradersFromEnv, makeHarness } from "./registry.js";
 

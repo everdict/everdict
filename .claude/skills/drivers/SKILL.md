@@ -12,7 +12,7 @@ Isolation/placement is the Backend's job (see skill `backends`) — this is the 
 ## Checklist
 1. Implement `Driver` (`packages/core/src/execution/compute.ts`): `readonly id` + `provision(spec) → ComputeHandle`.
 2. `ComputeHandle` exposes `exec` / `writeFile` / `readFile` / `dispose` — nothing more.
-3. The caller releases in a `finally` — `runCase` provisions once, `await compute.dispose()` always (`packages/runner/src/run-case.ts`).
+3. The caller releases in a `finally` — `runCase` provisions once, `await compute.dispose()` always (`packages/run-case/src/run-case.ts`).
 4. A non-zero exit is a *result* `{exitCode, stdout, stderr}`, never a throw; only infra faults throw.
 5. Remap OS/SDK faults to an `AppError` — `COMPUTE_EXEC_FAILED` / `DRIVER_PROVISION_FAILED`; never leak raw.
 
@@ -28,7 +28,7 @@ paths (`RepoEnvironment`'s `work`) resolve under it and absolute paths (SWE-benc
 `resolve(p)`. `writeFile` streams via stdin (size/escape-safe). Optional `mounts: DriverMount[]` bind host
 paths in (e.g. the runner's `~/.codex` login). Consumed by the managed `DockerBackend`
 (`packages/backends/src/orchestrators/docker-backend.ts`) AND the self-hosted runner's `docker` capability
-(`packages/runner-core/src/run-leased-job.ts`) — one `case.image` definition runs managed OR local identically.
+(`packages/self-hosted-runner/src/run-leased-job.ts`) — one `case.image` definition runs managed OR local identically.
 
 ## Driver vs Backend
 - **Backend** (`@everdict/backends`) = *placement*: dispatches the runner-agent job to an orchestrator; isolation

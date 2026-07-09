@@ -46,7 +46,7 @@ The shipped self-hosted runner nailed pull/lease/provenance/budget, but under th
 - **Pull/lease** — `SelfHostedBackend` + `RunnerHub` (`apps/api/src/runners/runner-hub.ts`): lease queue keyed
   `(owner, runnerId)` = `self:<owner>:<runnerId>` (cross-workspace). `RunnerHub.lease` is single-thread-atomic
   (concurrent `lease_job` never double-hands a job → the basis for many workers/runners sharing a queue).
-- **Worker** — `everdict runner --pair <rnr_…>` (`apps/cli` → `@everdict/runner-core` `runLeaseWorkers`): one process,
+- **Worker** — `everdict runner --pair <rnr_…>` (`apps/cli` → `@everdict/self-hosted-runner` `runLeaseWorkers`): one process,
   `--max-concurrent N` lease workers over one MCP session. `runnerAuthenticator` maps `rnr_` → `Principal{via:"runner"}`.
 - **Ownership precedent** — personal (`owner=subject`, account page, no role gate) mirrors Connected accounts
   (since removed in S6c — see [workspace-scoped-integrations.md](./workspace-scoped-integrations.md)).

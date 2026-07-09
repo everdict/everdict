@@ -99,9 +99,9 @@ importers:
       '@everdict/orchestrator':
         specifier: workspace:*
         version: link:../../packages/orchestrator
-      '@everdict/runner-core':
+      '@everdict/self-hosted-runner':
         specifier: workspace:*
-        version: link:../../packages/runner-core
+        version: link:../../packages/self-hosted-runner
       '@everdict/suite':
         specifier: workspace:*
         version: link:../../packages/suite
@@ -114,9 +114,9 @@ importers:
 
   apps/desktop:
     dependencies:
-      '@everdict/runner-core':
+      '@everdict/self-hosted-runner':
         specifier: workspace:*
-        version: link:../../packages/runner-core
+        version: link:../../packages/self-hosted-runner
       electron-updater:
         specifier: ^6.8.9
         version: 6.8.9
@@ -236,9 +236,9 @@ importers:
       '@everdict/harnesses':
         specifier: workspace:*
         version: link:../harnesses
-      '@everdict/runner':
+      '@everdict/run-case':
         specifier: workspace:*
-        version: link:../runner
+        version: link:../run-case
 
   packages/auth:
     dependencies:
@@ -370,7 +370,7 @@ importers:
         specifier: workspace:*
         version: link:../db
 
-  packages/runner:
+  packages/run-case:
     dependencies:
       '@everdict/core':
         specifier: workspace:*
@@ -388,7 +388,9 @@ importers:
         specifier: workspace:*
         version: link:../harnesses
 
-  packages/runner-core:
+  packages/sdk: {}
+
+  packages/self-hosted-runner:
     dependencies:
       '@everdict/agent':
         specifier: workspace:*
@@ -405,8 +407,6 @@ importers:
       '@modelcontextprotocol/sdk':
         specifier: ^1.29.0
         version: 1.29.0(zod@4.4.3)
-
-  packages/sdk: {}
 
   packages/storage:
     dependencies:

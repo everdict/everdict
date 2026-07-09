@@ -26,7 +26,7 @@ We split "how to build Everdict" knowledge by **how the knowledge fails**:
 - `api-layer/`      — control-plane HTTP (`apps/api`, Fastify): async `POST /runs`/poll/webhook, `RunStore`, flat envelopes.
 - `web/`            — the SaaS web app (`apps/web`): Next.js FSD, pure-HTTP token-courier BFF, `[workspace]` scoping, UI conventions.
 - `evaluation/`     — the eval-first core: graders, judges, scorecards, regression/leaderboard, saved views, trace ingest.
-- `self-hosted-runner/` — `runner-core` lease loop + the runtime/capability model + personal/workspace runner tiers.
+- `self-hosted-runner/` — `self-hosted-runner` lease loop + the runtime/capability model + personal/workspace runner tiers.
 - `desktop/`        — Electron shell (`apps/desktop`): renders the deployed web, origin-gated bridge, embedded runner.
 - `core-contracts/` — the interfaces + Zod schemas + `AppError` model in `packages/core` (the dependency root).
 - `drivers/`        — implementing a Driver (in-sandbox compute; `LocalDriver` + `DockerDriver`).

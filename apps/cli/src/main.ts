@@ -18,7 +18,7 @@ import {
   mcpConnect,
   runLeaseWorkers,
   runLeasedJob,
-} from "@everdict/runner-core";
+} from "@everdict/self-hosted-runner";
 import { diffScorecards, runSuite, summarizeScorecard } from "@everdict/suite";
 import type { DockerTopologyRuntimeOptions } from "@everdict/topology";
 import { imagePushCommand } from "./image-push.js";

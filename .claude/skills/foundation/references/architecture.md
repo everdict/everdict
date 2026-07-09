@@ -8,8 +8,8 @@
 | `@everdict/environments` | `Environment` impls — the world acted on (Repo) | core |
 | `@everdict/harnesses` | `EvaluableHarness` impls — the agent under test | core |
 | `@everdict/graders` | `Grader` impls — scoring | core |
-| `@everdict/runner` | the eval loop (`runCase`) | core, drivers, environments, harnesses, graders |
-| `@everdict/agent` | dispatched unit: a self-contained worker that runs runCase inside a job, emits result | core, runner, drivers, environments, harnesses, graders |
+| `@everdict/run-case` | the eval loop (`runCase`) | core, drivers, environments, harnesses, graders |
+| `@everdict/agent` | dispatched unit: a self-contained worker that runs runCase inside a job, emits result | core, run-case, drivers, environments, harnesses, graders |
 | `@everdict/backends` | `Backend` impls (+ `capacity()`) — placement (Local, Nomad; K8s/Windows later) + `Router` (static) / `Scheduler` (capacity-aware + queue) / `BackendRegistry` | core, agent |
 | `@everdict/orchestrator` | durable control plane (Temporal): Direct/Temporal orchestrators + worker | core, backends, agent |
 | `@everdict/trace` | pull a harness trace from OTel/MLflow → `TraceEvent` | core |

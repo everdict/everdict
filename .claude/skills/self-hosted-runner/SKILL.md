@@ -1,6 +1,6 @@
 ---
 name: self-hosted-runner
-description: Self-hosted runners + the runtime/capability model — packages/runner-core (MCP lease loop, capability probes), personal/workspace runner tiers, RuntimeSpec. Use when editing runner-core, the capability model, RuntimeSpec, or self-hosted execution.
+description: Self-hosted runners + the runtime/capability model — packages/self-hosted-runner (MCP lease loop, capability probes), personal/workspace runner tiers, RuntimeSpec. Use when editing self-hosted-runner, the capability model, RuntimeSpec, or self-hosted execution.
 allowed-tools: Read, Grep, Glob, Edit, Write, Bash
 ---
 # Self-hosted runners (runtime + capability model)
@@ -9,23 +9,23 @@ Design SSOT: `docs/architecture/self-hosted-runtime-and-runners.md`. **Runtime =
 environment/pool a job targets; self-hosted included — "my machine" IS a self-hosted runtime, no
 separate "device" layer). **Runner = the worker process** that joins a runtime, leases one job at a
 time, runs it, reports back — **N runners = N concurrent jobs**. Both Everdict runners and GitHub Actions
-runners are workers co-resident on one self-hosted host. `packages/runner-core` is the GUI-free,
+runners are workers co-resident on one self-hosted host. `packages/self-hosted-runner` is the GUI-free,
 transport-injectable core shared by `apps/cli` + `apps/desktop` (desktop shell = skill `desktop`).
 
 ## Checklist
-1. Read the SSOT doc first. Runner behavior changes go in `packages/runner-core` ONLY (CLI + desktop stay identical) — never fork logic into `apps/cli` or `apps/desktop`.
+1. Read the SSOT doc first. Runner behavior changes go in `packages/self-hosted-runner` ONLY (CLI + desktop stay identical) — never fork logic into `apps/cli` or `apps/desktop`.
 2. Capability vocab is one SSOT (`packages/core/src/infra/capability.ts`) — add a capability = one line in `CAPABILITY_DEFS`; its `kind` auto-routes advertise/match/enforce.
 3. Runners self-advertise via probes (`detectCapabilities`), never user input. Add a probe to `defaultProbes` when you add a functional capability.
 4. Placement gates on **functional** caps only (`functionalGate`); security→trust-zone, auth→budget. Never gate placement on a security/auth cap.
 5. Boundary-validate every leased job with `AgentJobSchema`; release the MCP session in `finally`.
 6. Gates: `pnpm format`(scoped) → `lint` → `typecheck` → `test` → `build` green before commit.
 
-## runner-core (the lease loop)
-- `runLeaseWorkers` (`packages/runner-core/src/runner-loop.ts`) — `maxConcurrent` worker loops over ONE MCP session; each does `lease_job` → `runJob` → `submit_job_result`/`fail_job`, with a `heartbeat_job` interval refreshing the lease. `RunnerLoopDeps` is DI (callJson/runJob injected). Server `RunnerHub.lease` is single-thread-atomic → concurrent leases never double-hand a job.
-- `ResilientMcpSession` + `mcpConnect` (`packages/runner-core/src/runner-session.ts`) — auto re-initializes a dead MCP session (API restart drops the in-memory session id) and retries the call once; app-level `isError` results do NOT trigger reconnect.
-- `runLeasedJob` (`packages/runner-core/src/run-leased-job.ts`) — branches by harness kind: `service` → local Docker topology (`ServiceTopologyBackend` over a lazy-singleton `sharedTopologyRuntime`, so the warm-pool survives across cases) / else → `runAgentJob`. A non-service case with `case.image` + the `docker` capability runs in a local container (`DockerDriver`, `packages/drivers/src/docker.ts`) — same path as managed `DockerBackend`, so one definition runs managed OR local (portable-harness).
-- `RunnerHost` (`packages/runner-core/src/runner-host.ts`) — GUI facade wrapping the loop for the desktop main process; CLI uses `runLeaseWorkers` directly.
-- `detectCapabilities`/`defaultProbes` (`packages/runner-core/src/capabilities.ts`) — probes THIS machine (git/docker/browser/computer-use/sandbox/codex-login/claude-login); `topology` has no local probe (derived, gated by `docker`).
+## self-hosted-runner (the lease loop)
+- `runLeaseWorkers` (`packages/self-hosted-runner/src/runner-loop.ts`) — `maxConcurrent` worker loops over ONE MCP session; each does `lease_job` → `runJob` → `submit_job_result`/`fail_job`, with a `heartbeat_job` interval refreshing the lease. `RunnerLoopDeps` is DI (callJson/runJob injected). Server `RunnerHub.lease` is single-thread-atomic → concurrent leases never double-hand a job.
+- `ResilientMcpSession` + `mcpConnect` (`packages/self-hosted-runner/src/runner-session.ts`) — auto re-initializes a dead MCP session (API restart drops the in-memory session id) and retries the call once; app-level `isError` results do NOT trigger reconnect.
+- `runLeasedJob` (`packages/self-hosted-runner/src/run-leased-job.ts`) — branches by harness kind: `service` → local Docker topology (`ServiceTopologyBackend` over a lazy-singleton `sharedTopologyRuntime`, so the warm-pool survives across cases) / else → `runAgentJob`. A non-service case with `case.image` + the `docker` capability runs in a local container (`DockerDriver`, `packages/drivers/src/docker.ts`) — same path as managed `DockerBackend`, so one definition runs managed OR local (portable-harness).
+- `RunnerHost` (`packages/self-hosted-runner/src/runner-host.ts`) — GUI facade wrapping the loop for the desktop main process; CLI uses `runLeaseWorkers` directly.
+- `detectCapabilities`/`defaultProbes` (`packages/self-hosted-runner/src/capabilities.ts`) — probes THIS machine (git/docker/browser/computer-use/sandbox/codex-login/claude-login); `topology` has no local probe (derived, gated by `docker`).
 
 ## Capability model (`packages/core/src/infra/capability.ts`)
 `CAPABILITY_DEFS` = the vocab SSOT; each name → a `kind` that decides HOW it is matched:

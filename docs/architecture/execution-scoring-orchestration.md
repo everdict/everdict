@@ -52,7 +52,7 @@ Ingest is the existence proof for Concern 3.
 
 ## Two execution *layers* (don't confuse them)
 
-- **In-sandbox** (`@everdict/runner` `runCase`): drive the harness-under-test via a Driver → `CaseResult`, *inside* the
+- **In-sandbox** (`@everdict/run-case` `runCase`): drive the harness-under-test via a Driver → `CaseResult`, *inside* the
   isolated agent job. Untouched by this refactor.
 - **Control plane** (this doc): dispatch a job to a backend, get the `CaseResult` back, record it. This is where the
   three concerns tangle. To avoid a name clash with `runner.runCase`, the control-plane unit is **`materializeRun`**.
@@ -111,7 +111,7 @@ Ingest is the existence proof for Concern 3.
   visibly orchestration.
 - **out of `ScorecardService`**: `applyJudges` → `ScoringService`. `ScorecardService.track` keeps
   only: fan-out (via BatchDriver/`materializeRun`), progress steps, calling the scorer, aggregating (suite), storing.
-- **unchanged**: `@everdict/graders`, `@everdict/suite` (already pure), `@everdict/runner` (in-sandbox), API response shapes,
+- **unchanged**: `@everdict/graders`, `@everdict/suite` (already pure), `@everdict/run-case` (in-sandbox), API response shapes,
   `runIds`/child-run behavior, ingest's embed-only, MCP/HTTP surface.
 
 ## Migration slices
@@ -128,7 +128,7 @@ Ingest is the existence proof for Concern 3.
 - **Do NOT route the batch through `RunService.submit`.** That bundles single-run *delivery* (202/webhook/per-run
   notify/submit-admit) which must not fire per case. The shared unit is `executeCase` (pure execution), not the
   single-run orchestrator. (See [run-as-primitive](./run-as-primitive.md) §"Why not go through RunService".)
-- **In-sandbox `@everdict/runner` untouched.** This is a control-plane decomposition only.
+- **In-sandbox `@everdict/run-case` untouched.** This is a control-plane decomposition only.
 - **No API/MCP/web shape changes.** `GET /scorecards/:id` still returns a hydrated scorecard; `POST /runs` etc.
   unchanged. This is an internal seam refactor.
 - **Ingest stays embed-only** (no dispatched runs) — it scores fetched traces via the same `ScoringService`.

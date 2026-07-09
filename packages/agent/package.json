@@ -18,6 +18,6 @@
     "@everdict/environments": "workspace:*",
     "@everdict/graders": "workspace:*",
     "@everdict/harnesses": "workspace:*",
-    "@everdict/runner": "workspace:*"
+    "@everdict/run-case": "workspace:*"
   }
 }

@@ -41,7 +41,7 @@ flowchart TD
   end
 
   subgraph L2["eval loop"]
-    runner["@everdict/runner"]
+    runner["@everdict/run-case"]
   end
 
   subgraph L3["dispatched unit (self-contained worker)"]
@@ -134,7 +134,7 @@ sequenceDiagram
   participant Caller as Orchestrator / Router / Scheduler
   participant Backend
   participant Agent as @everdict/agent
-  participant Runner as @everdict/runner
+  participant Runner as @everdict/run-case
   participant Driver as LocalDriver
   participant Compute as ComputeHandle
   participant Env as RepoEnvironment
@@ -334,7 +334,7 @@ classDiagram
 
 - **`provision`** → `mkdtemp(/tmp/everdict-…)` → `LocalComputeHandle(root)`.
 - **`exec`** runs via `child_process` (non-zero exit ≠ throw); **`dispose`** = `rm -rf root`.
-- **Called by:** `@everdict/runner` (`runCase`) and therefore `@everdict/agent`.
+- **Called by:** `@everdict/run-case` (`runCase`) and therefore `@everdict/agent`.
 
 ---
 
@@ -360,7 +360,7 @@ classDiagram
 
 - **`seed`** — inline `files` map (`git init` + commit a baseline) **or** `git clone --depth 1` + `checkout ref` + run `setup[]`.
 - **`snapshot`** — `git add -A` → `git diff --cached HEAD` (+ `--name-only`, + `rev-parse HEAD`) → `RepoSnapshot{diff, changedFiles, headSha}`.
-- **Called by:** `@everdict/runner`; instantiated by `@everdict/agent`. Browser/os-use add a new `Environment` variant, no core rewrite.
+- **Called by:** `@everdict/run-case`; instantiated by `@everdict/agent`. Browser/os-use add a new `Environment` variant, no core rewrite.
 
 ---
 
@@ -488,7 +488,7 @@ classDiagram
 
 ---
 
-## `@everdict/runner` — the eval loop
+## `@everdict/run-case` — the eval loop
 
 **Role.** `runCase(evalCase, deps) → CaseResult`. The orchestration of the four in-sandbox concerns, with
 guaranteed `compute.dispose()` in `finally`. No placement, no tenancy.
@@ -523,7 +523,7 @@ flowchart TD
   runAgentJob --> makeGraders["makeGraders(specs)"]
   makeHarness --> H["@everdict/harnesses<br/>Claude / Command / Scripted"]
   makeGraders --> G["@everdict/graders"]
-  runAgentJob --> runCase["@everdict/runner.runCase"]
+  runAgentJob --> runCase["@everdict/run-case.runCase"]
   runCase --> LD["new LocalDriver()"]
   runCase --> RE["new RepoEnvironment()"]
   runCase --> H

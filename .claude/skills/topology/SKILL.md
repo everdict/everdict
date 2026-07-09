@@ -67,7 +67,7 @@ a laptop — a single-user host, so **no `TrustZone`/gVisor/pool-silo** (those s
   (`{timeoutMs,intervalMs}` → the HTTP endpoint readiness-poll budget; absent = the runtime default 60s/1s, also
   overridable globally via `DockerTopologyRuntimeOptions.readyTimeoutMs`/`pollIntervalMs` ↔ runner
   `--ready-timeout-ms`/`--ready-interval-ms`). All readiness polling routes through one `pollReady` helper.
-- **Runner robustness — session re-init (`@everdict/runner-core` `runner-session.ts`).** The control plane holds MCP sessions
+- **Runner robustness — session re-init (`@everdict/self-hosted-runner` `runner-session.ts`).** The control plane holds MCP sessions
   in-memory, so an API restart orphans the runner's `mcp-session-id` (every call → 400/404 → the old loop wedged
   retrying a dead transport forever). `ResilientMcpSession` wraps every tool call: a `callTool` throw (transport/
   session error — app errors come back as `isError` results, no throw) drops the session and re-connects (fresh

@@ -18,8 +18,8 @@ Everdict is a harness-agnostic, infra-agnostic **agent evaluation runtime**. Eva
 
 ## Module dependency (one-way; reverse import = bug)
 ```
-core ← { drivers · environments · harnesses · graders · trace } ← runner ← agent ← backends ← { orchestrator · topology } ← { apps/cli · apps/api }
-(self-hosted pull path)                                    agent · topology · trace  ← runner-core ← { apps/cli · apps/desktop }
+core ← { drivers · environments · harnesses · graders · trace } ← run-case ← agent ← backends ← { orchestrator · topology } ← { apps/cli · apps/api }
+(self-hosted pull path)                                    agent · topology · trace  ← self-hosted-runner ← { apps/cli · apps/desktop }
 ```
 - `core` — contracts only (interfaces + Zod + errors). No I/O, no SDK. Dependency root.
 - `drivers` / `environments` / `harnesses` / `graders` — adapters; depend on `core` only.
@@ -31,7 +31,7 @@ core ← { drivers · environments · harnesses · graders · trace } ← runner
   (multi-service + target env): orchestrator-agnostic `ServiceTopologyBackend` + Nomad/K8s builders.
 - `db` — result stores: `RunStore` (single runs) + `ScorecardStore` (batch evals; `list` omits heavy per-case results) + `ViewStore` (saved scorecard-analysis views, `private|workspace`) (`InMemory*`/`Pg*`) + numbered SQL migrations + idempotent `migrate`/`preflight`.
 - `registry` — versioned SSOT (harnesses + datasets + judges + runtimes): `(tenant, id, version)→HarnessSpec` / `→Dataset` / `→JudgeSpec` / `→RuntimeSpec` (immutable versions, semver `latest`, tenant-owned + `_shared` fallback, file/GitOps loader); backs `ServiceTopologyBackend.specFor`. Datasets = harness-agnostic case bundles; Agent Judges = `model`|`harness`; Runtimes = local|nomad|k8s execution infra (`local` = dev/control-plane-host; "run on my machine" → self-hosted runner) (`docs/datasets.md`, `docs/judges.md`, `docs/runtimes.md`).
-- `runner-core` — self-hosted runner core shared by CLI + desktop (MCP lease loop, resilient session, kind-branch execution). GUI-free, DI-style.
+- `self-hosted-runner` — self-hosted runner core shared by CLI + desktop (MCP lease loop, resilient session, kind-branch execution). GUI-free, DI-style.
 - `apps/cli` — dev control plane (`everdict run`, `everdict worker`, `everdict runner`).
 - `apps/desktop` — Electron shell: renders deployed `apps/web` (web parity by construction) + resident runner. Skill `desktop`. `apps/api` — multi-tenant HTTP surface (Fastify): async `POST /runs`/poll/webhook + `RunStore` + workspace-owned harnesses/datasets/judges + async batch evals (`POST /scorecards`, dataset×harness→`Scorecard`) + agent-facing MCP (full BFF↔MCP parity). Postgres via `DATABASE_URL`.
 

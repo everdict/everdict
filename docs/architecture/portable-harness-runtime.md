@@ -40,7 +40,7 @@ not formulas"). That is not a proper harness; the environment contract leaked.
 
 - **The environment contract already exists as data:** `EvalCase.image` (+ `placement`) — a case names the
   container image that carries its toolchain (`packages/core/src/execution/eval-case.ts`). `runCase` passes it straight to
-  the driver: `driver.provision({ os, needs, image: evalCase.image })` (`packages/runner/src/run-case.ts:25`).
+  the driver: `driver.provision({ os, needs, image: evalCase.image })` (`packages/run-case/src/run-case.ts:25`).
 - **A container driver already exists and is proven:** `DockerDriver` (`packages/drivers/src/docker.ts`) provisions
   `spec.image ?? defaultImage` as a container `ComputeHandle` (`docker run` keep-alive + `docker exec`). The managed
   **`DockerBackend`** runs cases in their image via exactly this: `runAgentJob(job, { driver: new DockerDriver(...) })`
@@ -49,9 +49,9 @@ not formulas"). That is not a proper harness; the environment contract leaked.
 - **`runAgentJob` already accepts an injected driver** (`packages/agent/src/run.ts:13`, default `LocalDriver`).
 - **The gap is only in the self-hosted runner.** `runLeasedJob` branches: `service`(topology) → local Docker
   topology; **everything else → `runAgentJob(job)` with the default `LocalDriver`** — in-process on the bare host,
-  **`case.image` ignored** (`packages/runner-core/src/run-leased-job.ts:32,48`).
+  **`case.image` ignored** (`packages/self-hosted-runner/src/run-leased-job.ts:32,48`).
 - **The runner already knows if Docker is present.** It probes and advertises a `docker` capability
-  (`packages/runner-core/src/capabilities.ts`: `["repo", ...(dockerOk ? ["docker","browser"] : [])]`); the CLI
+  (`packages/self-hosted-runner/src/capabilities.ts`: `["repo", ...(dockerOk ? ["docker","browser"] : [])]`); the CLI
   computes `dockerOk = capabilities.includes("docker")` (`apps/cli/src/main.ts:238`) — but never threads it into
   `runLeasedJob`. So the one missing wire is: *"non-service case declares an image + Docker is available → run it
   in that image via `DockerDriver`, just like the managed docker backend does."*
@@ -78,7 +78,7 @@ artifact-registry) — the platform pulls; the user brings the image.
 Symmetry fix, entirely additive, reusing the existing `DockerDriver`:
 
 ```ts
-// packages/runner-core/src/run-leased-job.ts  (non-service branch)
+// packages/self-hosted-runner/src/run-leased-job.ts  (non-service branch)
 export async function runLeasedJob(job, opts: { ..., dockerAvailable?: boolean } = {}) {
   if (job.harnessSpec?.kind === "service") { /* unchanged: local Docker topology */ }
   const image = job.evalCase.image;
