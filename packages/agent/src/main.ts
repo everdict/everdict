@@ -1,5 +1,5 @@
-import { AgentJobSchema, classifyFailure, stageForError } from "@everdict/core";
-import { RESULT_SENTINEL, runAgentJob } from "./run.js";
+import { type AgentJob, AgentJobSchema } from "@everdict/core";
+import { RESULT_SENTINEL, failureResult, runAgentJob } from "./run.js";
 
 // Runner-agent entrypoint (runs inside the sandbox/alloc).
 // The AgentJob is passed as base64(JSON) in the EVERDICT_AGENT_JOB env.
@@ -11,35 +11,17 @@ async function main(): Promise<void> {
     process.exitCode = 1;
     return;
   }
-  const job = AgentJobSchema.parse(JSON.parse(Buffer.from(raw, "base64").toString("utf8")));
+  // Parse INSIDE the try: a corrupt job (bad base64/JSON, schema mismatch) must still cross the process boundary as
+  // a CLASSIFIED CaseResult behind the sentinel. Parsing outside would let it crash bare — surfacing backend-side as
+  // a mushy "sentinel not found" dispatch error that erases WHERE it died. `job` stays undefined until decoded, so a
+  // parse failure is attributed to the dispatch stage with an unknown identity (see failureResult).
+  let job: AgentJob | undefined;
   try {
+    job = AgentJobSchema.parse(JSON.parse(Buffer.from(raw, "base64").toString("utf8")));
     const result = await runAgentJob(job);
     console.log(RESULT_SENTINEL + JSON.stringify(result));
   } catch (err) {
-    // An in-job failure (harness install/run, grader, driver) still crosses the process boundary as a CLASSIFIED
-    // CaseResult — a bare non-zero exit would surface backend-side as a mushy "sentinel not found" dispatch error,
-    // erasing WHERE the case died. The stage comes from the error code (install|run|grade|dispatch).
-    const failure = classifyFailure(err, stageForError(err));
-    const message = err instanceof Error ? err.message : String(err);
-    console.log(
-      RESULT_SENTINEL +
-        JSON.stringify({
-          caseId: job.evalCase.id,
-          harness: `${job.harness.id}@${job.harness.version}`,
-          trace: [{ t: 0, kind: "error", message }],
-          snapshot: { kind: "prompt", output: "" },
-          scores: [
-            {
-              graderId: failure.stage,
-              metric: "error",
-              value: 0,
-              pass: false,
-              detail: `[${failure.class}] ${message}`,
-            },
-          ],
-          failure,
-        }),
-    );
+    console.log(RESULT_SENTINEL + JSON.stringify(failureResult(err, job)));
   }
 }
 

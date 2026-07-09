@@ -1,4 +1,15 @@
-import { type AgentJob, type CaseResult, type Driver, type Environment, type Grader, judgeEnv } from "@everdict/core";
+import {
+  type AgentJob,
+  BadRequestError,
+  type CaseResult,
+  type Driver,
+  type EnvSpec,
+  type Environment,
+  type Grader,
+  classifyFailure,
+  judgeEnv,
+  stageForError,
+} from "@everdict/core";
 import { DockerDriver, type DriverMount, LocalDriver } from "@everdict/drivers";
 import { OsUseEnvironment, PromptEnvironment, RepoEnvironment } from "@everdict/environments";
 import { runCase } from "@everdict/runner";
@@ -7,6 +18,66 @@ import { makeGradersFromEnv, makeHarness } from "./registry.js";
 
 // Delimiter the agent uses to emit the result to stdout. The backend parses this line from logs.
 export const RESULT_SENTINEL = "__EVERDICT_RESULT__";
+
+// Whether to meter the harness's model usage for this dispatch. The usage-proxy binds 127.0.0.1 on the runner host,
+// unreachable from inside a container — so metering MUST be off whenever the case runs containerized. That is true
+// two ways: the containerize flag (self-hosted runner image-cases) OR an explicitly injected container driver
+// (DockerBackend runs the case in an env-image container WITHOUT setting the flag). Keying only off the flag left
+// the DockerBackend path metered, rewriting the child's model base URL to a dead loopback endpoint and killing every
+// model call — the exact failure this guard exists to prevent. See docs/usage-metering.md.
+export function resolveMeterUsage(requested: boolean, opts: { containerize?: boolean; driver?: Driver }): boolean {
+  const containerized = opts.containerize === true || opts.driver instanceof DockerDriver;
+  return requested && !containerized;
+}
+
+// env.kind → Environment. Exhaustive: prompt (QA), os-use (desktop), repo (coding/seed — authenticated clone with
+// repoToken for a private seed). browser is a service-topology target env provisioned by ServiceTopologyBackend and
+// must never reach this local agent path — fail loud (config, non-retryable) rather than silently mishandling it as
+// a repo. The `never` guard turns a newly added env.kind into a compile error here instead of a silent fall-through.
+function environmentFor(kind: EnvSpec["kind"], repoToken?: string): Environment {
+  switch (kind) {
+    case "prompt":
+      return new PromptEnvironment();
+    case "os-use":
+      return new OsUseEnvironment();
+    case "repo":
+      return new RepoEnvironment(repoToken !== undefined ? { gitToken: repoToken } : {});
+    case "browser":
+      throw new BadRequestError(
+        "BAD_REQUEST",
+        { envKind: kind },
+        "browser env is not runnable on the local agent path (use a service topology backend).",
+      );
+    default: {
+      const exhaustive: never = kind;
+      throw new BadRequestError("BAD_REQUEST", { envKind: exhaustive }, "unsupported env kind.");
+    }
+  }
+}
+
+// The classified CaseResult the agent emits when a job fails to produce a normal eval outcome. Crossing the process
+// boundary as a CLASSIFIED result (not a bare crash) preserves WHERE the case died (dispatch|install|run|grade) — a
+// bare non-zero exit surfaces backend-side as a mushy "sentinel not found" dispatch error. When the job is not yet
+// available (base64/JSON/schema parse failed before it was decoded) the stage is dispatch and the identity unknown;
+// otherwise the stage comes from the error code.
+export function failureResult(
+  err: unknown,
+  job?: { evalCase: { id: string }; harness: { id: string; version: string } },
+): CaseResult {
+  const stage = job ? stageForError(err) : "dispatch";
+  const failure = classifyFailure(err, stage);
+  const message = err instanceof Error ? err.message : String(err);
+  return {
+    caseId: job?.evalCase.id ?? "unknown",
+    harness: job ? `${job.harness.id}@${job.harness.version}` : "unknown@unknown",
+    trace: [{ t: 0, kind: "error", message }],
+    snapshot: { kind: "prompt", output: "" },
+    scores: [
+      { graderId: failure.stage, metric: "error", value: 0, pass: false, detail: `[${failure.class}] ${message}` },
+    ],
+    failure,
+  };
+}
 
 // Runs one AgentJob end to end. Default driver=LocalDriver (in-process); DockerBackend injects a DockerDriver
 // (runs the case in its own env-image container — e.g. SWE-bench prebuilt). If harnessSpec is present, interpret
@@ -21,11 +92,9 @@ export async function runAgentJob(
   // Usage metering (BYO + Everdict-owned budget): the control plane decides from workspace/request policy and sends it via job.meterUsage.
   // If unset, fall back for dev to the EVERDICT_METER_USAGE env (when dispatching directly to LocalBackend without a control plane).
   // When on, the command harness routes model calls through a usage-proxy to recover tokens → carried into the result as synthetic trace events.
-  // Containerized (case.image) jobs are excluded fail-safe: the proxy binds 127.0.0.1 on the RUNNER host, which is
-  // unreachable from inside the container — leaving metering on would rewrite the child's model base URL to a dead
-  // endpoint and kill every model call, far worse than missing cost data. See docs/usage-metering.md.
+  // Containerized jobs are excluded fail-safe (see resolveMeterUsage).
   const requestedMetering = job.meterUsage ?? process.env.EVERDICT_METER_USAGE === "1";
-  const meterUsage = requestedMetering && opts.containerize !== true;
+  const meterUsage = resolveMeterUsage(requestedMetering, opts);
   if (requestedMetering && !meterUsage)
     console.error(
       "⚠ meterUsage requested but the case runs in a container — the loopback usage-proxy is unreachable from a container, so metering is disabled for this case (use trace instrumentation instead).",
@@ -36,16 +105,8 @@ export async function runAgentJob(
   // If unconfigured, only the judge spec gets a skip score (so a normal eval doesn't die).
   const env = { ...process.env, ...judgeEnv(job.judge) };
   const graders: Grader[] = makeGradersFromEnv(job.evalCase.graders, env);
-  // Environment is chosen by the case's env.kind: prompt (QA) → Prompt, os-use (desktop) → OsUse, otherwise → Repo (coding/seed).
-  // (browser topology is handled by ServiceTopologyBackend — outside this local path.)
-  const k = job.evalCase.env.kind;
-  // repo: for a private seed, authenticated clone (http.extraheader) using job.repoToken, which the control plane resolved from the external account connection.
-  const environment: Environment =
-    k === "prompt"
-      ? new PromptEnvironment()
-      : k === "os-use"
-        ? new OsUseEnvironment()
-        : new RepoEnvironment(job.repoToken !== undefined ? { gitToken: job.repoToken } : {});
+  // Environment is chosen by the case's env.kind (browser topology is handled by ServiceTopologyBackend — outside this local path).
+  const environment = environmentFor(job.evalCase.env.kind, job.repoToken);
   return runCase(job.evalCase, {
     // Precedence: explicit driver → containerize (local Docker, case.image, host mounts) → default LocalDriver (in-process).
     // registryAuth (transient on the job) — authenticated pre-pull of workspace-registry images (temporary DOCKER_CONFIG).

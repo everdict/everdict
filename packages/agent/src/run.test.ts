@@ -1,6 +1,7 @@
-import type { AgentJob } from "@everdict/core";
+import { type AgentJob, InternalError } from "@everdict/core";
+import { DockerDriver, LocalDriver } from "@everdict/drivers";
 import { describe, expect, it } from "vitest";
-import { runAgentJob } from "./run.js";
+import { failureResult, resolveMeterUsage, runAgentJob } from "./run.js";
 
 describe("runAgentJob", () => {
   it("runs a scripted job, produces a CaseResult, and tests-pass passes", async () => {
@@ -28,7 +29,73 @@ describe("runAgentJob", () => {
 
 // Metering fail-safe: the usage-proxy binds 127.0.0.1 on the runner host, so a containerized (case.image) child
 // could never reach it — with metering left on, the child's model base URL is rewritten to a dead endpoint and
-// every model call dies. runAgentJob must disable metering when the case is containerized.
+// every model call dies. Containerization happens two ways: the `containerize` flag (self-hosted runner) OR an
+// explicitly injected container driver (DockerBackend). resolveMeterUsage must catch BOTH.
+describe("resolveMeterUsage (metering ⇄ container fail-safe)", () => {
+  it("meters a host-native run (default LocalDriver, no container)", () => {
+    expect(resolveMeterUsage(true, {})).toBe(true);
+  });
+
+  it("does not meter when the containerize flag is set (self-hosted runner image-case)", () => {
+    expect(resolveMeterUsage(true, { containerize: true })).toBe(false);
+  });
+
+  it("does not meter when an explicit DockerDriver runs the case (DockerBackend) even without the flag", () => {
+    // Regression: keying only off `containerize` left this path metered, so the child's model base URL was
+    // rewritten to a loopback proxy unreachable from the container, killing every model call.
+    expect(resolveMeterUsage(true, { driver: new DockerDriver() })).toBe(false);
+  });
+
+  it("meters when an explicit LocalDriver runs the case host-side", () => {
+    expect(resolveMeterUsage(true, { driver: new LocalDriver() })).toBe(true);
+  });
+
+  it("never meters when metering was not requested", () => {
+    expect(resolveMeterUsage(false, { driver: new LocalDriver() })).toBe(false);
+  });
+});
+
+// A failure inside the job — including one before the job is even decoded — must cross the process boundary as a
+// CLASSIFIED CaseResult behind the sentinel, not as a bare crash (which reads backend-side as "sentinel not found").
+describe("failureResult (classified result crosses the process boundary)", () => {
+  it("attributes a pre-decode failure to the dispatch stage with an unknown identity", () => {
+    const result = failureResult(new SyntaxError("Unexpected token in JSON"));
+    expect(result.caseId).toBe("unknown");
+    expect(result.harness).toBe("unknown@unknown");
+    expect(result.failure?.stage).toBe("dispatch");
+    expect(result.scores[0]?.pass).toBe(false);
+  });
+
+  it("preserves the harness identity and the error's stage when the job is known", () => {
+    const job = { evalCase: { id: "c1" }, harness: { id: "scripted", version: "0.0.0" } };
+    const result = failureResult(new InternalError("HARNESS_RUN_FAILED", {}, "exit 127"), job);
+    expect(result.caseId).toBe("c1");
+    expect(result.harness).toBe("scripted@0.0.0");
+    expect(result.failure).toMatchObject({ stage: "run", class: "harness", retryable: false });
+  });
+});
+
+// env.kind selects the Environment on the local agent path. browser is a service-topology target env and must
+// never reach here — it should fail loud, not be silently mishandled as a repo.
+describe("runAgentJob env.kind routing", () => {
+  it("rejects a browser env on the local agent path instead of mishandling it as a repo", async () => {
+    const job: AgentJob = {
+      harness: { id: "scripted", version: "0.0.0" },
+      evalCase: {
+        id: "b1",
+        env: { kind: "browser", startUrl: "https://example.com" },
+        task: "t",
+        graders: [],
+        timeoutSec: 60,
+        tags: [],
+      },
+    };
+    await expect(runAgentJob(job)).rejects.toThrow(/browser env is not runnable/);
+  });
+});
+
+// Metering fail-safe (integration): the guard must key off container execution, and the CommandHarness must honor
+// the resolved decision — rewriting the base URL host-native but leaving it untouched when containerized.
 describe("runAgentJob meterUsage × containerize fail-safe", () => {
   const meteredJob = (): AgentJob => ({
     harness: { id: "probe", version: "1" },
@@ -55,9 +122,8 @@ describe("runAgentJob meterUsage × containerize fail-safe", () => {
   });
 
   it("containerized: metering is disabled so the child keeps the real upstream URL", async () => {
-    const { LocalDriver } = await import("@everdict/drivers");
-    // explicit driver wins over containerize, so the case still executes host-side — but the guard must
-    // key off containerize (what the runner passes for image-cases) and leave the env untouched.
+    // explicit driver wins over containerize, so the case still executes host-side — but the guard must key off
+    // containerize (what the runner passes for image-cases) and leave the env untouched.
     const result = await runAgentJob(meteredJob(), { driver: new LocalDriver(), containerize: true });
     expect(finalText(result.trace)).toContain("base=http://upstream.test/v1");
   });
