@@ -1,5 +1,6 @@
 import { getTranslations } from 'next-intl/server'
 
+import { budgetResponseSchema, type BudgetResponse } from '@/entities/budget'
 import { ciLinksResponseSchema, type CiLink } from '@/entities/ci-link'
 import { githubAppViewSchema, type GithubAppView } from '@/entities/github-app'
 import { imageRegistriesResponseSchema, type ImageRegistryConfig } from '@/entities/image-registry'
@@ -54,6 +55,7 @@ export default async function SettingsPage({
   let traceSinks: TraceSinkConfig[] = []
   let imageRegistries: ImageRegistryConfig[] = []
   let ciLinks: CiLink[] = []
+  let budget: BudgetResponse | undefined
   let workspaceRunners: RunnerMeta[] = []
   let members: Member[] = []
   let invites: Invite[] = []
@@ -73,6 +75,8 @@ export default async function SettingsPage({
       ).registries
       // CI repo link (repo↔harness slot = OIDC trust) — the link's existence is that repo's keyless CI trust. Removal is admin.
       ciLinks = ciLinksResponseSchema.parse(await controlPlane.listCiLinks(ctx)).links
+      // Enforcement budget (per-tenant cost/token/run caps that block runs with 402). Admin config (settings:read|write).
+      budget = budgetResponseSchema.parse(await controlPlane.getBudget(ctx))
     }
     // Workspace-shared runners (owner=ws:<workspace>) — team build server/CI. Register/read/remove are all admin (settings:write).
     if (canWriteSettings) {
@@ -113,6 +117,7 @@ export default async function SettingsPage({
           traceSinks={traceSinks}
           imageRegistries={imageRegistries}
           ciLinks={ciLinks}
+          {...(budget !== undefined ? { budget } : {})}
           workspaceRunners={workspaceRunners}
           members={members}
           invites={invites}

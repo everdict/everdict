@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { useTranslations } from 'next-intl'
 
 import { DeleteWorkspaceCard } from '@/features/delete-workspace'
+import { BudgetManager } from '@/features/manage-budget'
 import { CiLinksSettings } from '@/features/manage-ci-links'
 import type { GithubAppNotice } from '@/features/manage-github-app'
 import { InvitesManager } from '@/features/manage-invites'
@@ -11,6 +12,7 @@ import { MembersManager } from '@/features/manage-members'
 import { WorkspaceRunnersManager } from '@/features/manage-workspace-runners'
 import { SecretsManager } from '@/features/manage-workspace-secrets'
 import { WorkspaceInfoCard } from '@/features/workspace-settings'
+import type { BudgetResponse } from '@/entities/budget'
 import type { CiLink } from '@/entities/ci-link'
 import type { GithubAppView } from '@/entities/github-app'
 import type { ImageRegistryConfig } from '@/entities/image-registry'
@@ -24,7 +26,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/shared/ui/tabs'
 
 import { IntegrationsPanel, type IntegrationKey } from './integrations-panel'
 
-type TabKey = 'general' | 'secrets' | 'integrations' | 'ci' | 'runners' | 'members'
+type TabKey = 'general' | 'secrets' | 'integrations' | 'ci' | 'runners' | 'budget' | 'members'
 
 // For validating the ?app= deep link — the integrations panel's drill-in key (values outside these four are ignored).
 const INTEGRATION_KEYS: IntegrationKey[] = ['github', 'mattermost', 'trace-sink', 'image-registry']
@@ -42,6 +44,7 @@ export function SettingsTabs(props: {
   traceSinks: TraceSinkConfig[] // Workspace trace sinks (multiple — export scorecard detail results to the observability platform, selected per harness)
   imageRegistries: ImageRegistryConfig[] // Workspace image registries (multiple — classification baseline + push publishing)
   ciLinks: CiLink[] // CI repo link (repo↔harness slot = OIDC trust) list
+  budget?: BudgetResponse // Enforcement budget (per-tenant cost/token/run caps that block runs with 402) — only when settings:read
   workspaceRunners: RunnerMeta[] // Workspace-shared runners (owner=ws:<workspace>) — team build server/CI (admin)
   members: Member[]
   invites: Invite[]
@@ -61,6 +64,7 @@ export function SettingsTabs(props: {
     { key: 'integrations', label: t('tabIntegrations'), show: props.canReadSettings },
     { key: 'ci', label: t('tabCi'), show: props.canReadSettings },
     { key: 'runners', label: t('tabRunners'), show: props.canWriteSettings },
+    { key: 'budget', label: t('tabBudget'), show: props.canReadSettings },
     { key: 'members', label: t('tabMembers'), show: props.canReadMembers },
   ]
   const visible = tabs.filter((tab) => tab.show)
@@ -135,6 +139,15 @@ export function SettingsTabs(props: {
           githubApp={props.githubApp}
           onOpenIntegrations={() => setTab('integrations')}
         />
+      </TabsContent>
+      <TabsContent value="budget">
+        {props.budget && (
+          <BudgetManager
+            usage={props.budget.usage}
+            limit={props.budget.limit}
+            canWrite={props.canWriteSettings}
+          />
+        )}
       </TabsContent>
       <TabsContent value="members">
         <div className="space-y-8">

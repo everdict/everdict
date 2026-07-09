@@ -1818,6 +1818,22 @@
     "statSuccessRate": "Success rate",
     "inflight": "{n} in progress"
   },
+  "manageBudget": {
+    "title": "Budget limits",
+    "titleTip": "When a cap is hit, further runs in this workspace are blocked with a 402 until usage is reduced. Distinct from usage metering, which only measures and never blocks.",
+    "description": "Optional per-workspace caps on spend, tokens, and run count. Leave a field blank for no limit on that dimension.",
+    "usdLabel": "Cost limit (USD)",
+    "usdTip": "Maximum cumulative LLM cost (orchestration + verdict) charged to this workspace.",
+    "tokensLabel": "Token limit",
+    "tokensTip": "Maximum cumulative input+output tokens across runs.",
+    "runsLabel": "Run limit",
+    "runsTip": "Maximum number of admitted runs.",
+    "unlimitedPlaceholder": "No limit",
+    "usageNow": "Committed so far: {runs} runs · ${usd} · {tokens} tokens",
+    "save": "Save limits",
+    "saving": "Saving…",
+    "saved": "Saved"
+  },
   "settingsPage": {
     "title": "Workspace settings",
     "description": "Manage policies, keys, and members.",
@@ -1829,6 +1845,7 @@
     "tabIntegrations": "Integrations",
     "tabCi": "CI",
     "tabRunners": "Shared runners",
+    "tabBudget": "Budget",
     "tabMembers": "Members",
     "githubHint": "Connect private clone/CI via org install and selected repositories.",
     "githubConnected": "Connected · {count} orgs",

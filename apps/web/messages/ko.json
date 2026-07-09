@@ -1818,6 +1818,22 @@
     "statSuccessRate": "성공률",
     "inflight": "진행중 {n}"
   },
+  "manageBudget": {
+    "title": "예산 한도",
+    "titleTip": "한도에 도달하면 이 워크스페이스의 이후 실행이 사용량이 줄어들 때까지 402로 차단돼요. 측정만 하고 절대 차단하지 않는 사용량 계량과는 별개예요.",
+    "description": "워크스페이스별 비용·토큰·실행 수 상한(선택). 비워두면 해당 항목은 무제한이에요.",
+    "usdLabel": "비용 한도 (USD)",
+    "usdTip": "이 워크스페이스에 청구되는 누적 LLM 비용(오케스트레이션 + 판정)의 상한이에요.",
+    "tokensLabel": "토큰 한도",
+    "tokensTip": "실행 전체의 누적 입력+출력 토큰 상한이에요.",
+    "runsLabel": "실행 한도",
+    "runsTip": "승인된 실행 수의 상한이에요.",
+    "unlimitedPlaceholder": "제한 없음",
+    "usageNow": "현재까지 사용: 실행 {runs}회 · ${usd} · 토큰 {tokens}",
+    "save": "한도 저장",
+    "saving": "저장 중…",
+    "saved": "저장됨"
+  },
   "settingsPage": {
     "title": "워크스페이스 설정",
     "description": "정책, 키, 멤버를 관리해요.",
@@ -1829,6 +1845,7 @@
     "tabIntegrations": "통합",
     "tabCi": "CI 연동",
     "tabRunners": "공유 러너",
+    "tabBudget": "예산",
     "tabMembers": "멤버",
     "githubHint": "조직 설치·선택 저장소로 비공개 클론/CI 를 연동해요.",
     "githubConnected": "연결됨 · {count}개 조직",

@@ -111,6 +111,11 @@ export const controlPlane = {
   getQueue: <T>(auth: AuthContext) => call<T>(auth, '/queue'),
   // Metered billing usage (LLM cost for orchestration + verdict; own-pays runs excluded) — meter-only, never blocks.
   getUsage: <T>(auth: AuthContext) => call<T>(auth, '/usage'),
+  // Enforcement budget (BLOCKS runs with 402 once a cap is hit; distinct from meter-only /usage). GET = committed
+  // usage + the per-tenant limit; PUT = replace the limit (omitted dimension = unlimited). Both admin (settings:read|write).
+  getBudget: <T>(auth: AuthContext) => call<T>(auth, '/budget'),
+  setBudget: <T>(auth: AuthContext, body: unknown) =>
+    call<T>(auth, '/budget', { method: 'PUT', body: JSON.stringify(body) }),
   submitRun: <T>(auth: AuthContext, body: unknown) =>
     call<T>(auth, '/runs', { method: 'POST', body: JSON.stringify(body) }),
   listHarnesses: <T>(auth: AuthContext) => call<T>(auth, '/harnesses'),
