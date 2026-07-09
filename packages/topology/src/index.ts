@@ -118,3 +118,12 @@ export {
   sentinelObservationSource,
 } from "./front-door/observation-source.js";
 export { captureCdpScreenshot, type CdpSocket, type CaptureCdpOptions } from "./front-door/capture-cdp.js";
+export {
+  openBrowserSession,
+  type BrowserSessionHandle,
+  type BrowserSessionOptions,
+  type ScreencastFrame,
+  type ScreencastMetadata,
+  type MouseInput,
+  type KeyInput,
+} from "./front-door/browser-session.js";
