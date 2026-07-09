@@ -58,39 +58,39 @@ import {
   BenchmarkImportBodySchema,
   BenchmarkPreviewBodySchema,
   type BenchmarkService,
-} from "./catalog/benchmark-service.js";
-import { BundleSchema, type BundleService, requiredActionsForBundle } from "./catalog/bundle-service.js";
-import { deleteDatasetVersion } from "./catalog/dataset-service.js";
-import { RepinBodySchema, repinHarnessImages } from "./catalog/harness-pin-service.js";
-import { deleteHarnessVersion, harnessIsPrivate, harnessVisibleTo } from "./catalog/harness-service.js";
-import { VersionTagsBodySchema, setVersionTags } from "./catalog/version-tag-service.js";
-import type { RunService } from "./execution/run-service.js";
+} from "./benchmark/benchmark-service.js";
+import { BundleSchema, type BundleService, requiredActionsForBundle } from "./bundle/bundle-service.js";
+import { type CiLinkService, UpsertCiLinkBodySchema } from "./ci-link/ci-link-service.js";
+import { COMMENT_RESOURCE_TYPES, type CommentService } from "./comment/comment-service.js";
+import { deleteDatasetVersion } from "./dataset/dataset-service.js";
+import type { GithubAppService } from "./github-app/github-app-service.js";
+import { RepinBodySchema, repinHarnessImages } from "./harness/harness-pin-service.js";
+import { deleteHarnessVersion, harnessIsPrivate, harnessVisibleTo } from "./harness/harness-service.js";
+import type { ImageRegistryService } from "./image-registry/image-registry-service.js";
+import { type BudgetAdmin, BudgetLimitInputSchema } from "./lib/budget-tracker.js";
+import type { TerminalTicketStore } from "./lib/terminal-ticket.js";
+import { VersionTagsBodySchema, setVersionTags } from "./lib/version-tag-service.js";
+import type { MattermostCommandService } from "./mattermost/mattermost-command-service.js";
+import type { MattermostService } from "./mattermost/mattermost-service.js";
+import { buildMcpServer } from "./mcp.js";
+import type { MembershipService } from "./member/membership-service.js";
+import type { NotificationService } from "./notification/notification-service.js";
+import type { RuntimeProbeResult } from "./ops/runtime-probe.js";
+import type { ProfileService } from "./profile/profile-service.js";
+import type { QueueService } from "./queue/queue-service.js";
+import type { RunService } from "./run/run-service.js";
+import { installGithubWorkspaceRunner } from "./runner/github-runner-install.js";
+import type { RunnerHub } from "./runner/runner-hub.js";
+import { PairRunnerBodySchema, RUNNER_CAPABILITIES, type RunnerService } from "./runner/runner-service.js";
+import { type ScheduleService, isValidCron } from "./schedule/schedule-service.js";
 import {
   IngestScorecardBodySchema,
   PullIngestBodySchema,
   type ScorecardService,
   originSource,
-} from "./execution/scorecard-service.js";
-import { type CiLinkService, UpsertCiLinkBodySchema } from "./integrations/ci-link-service.js";
-import type { GithubAppService } from "./integrations/github-app-service.js";
-import type { ImageRegistryService } from "./integrations/image-registry-service.js";
-import type { MattermostCommandService } from "./integrations/mattermost-command-service.js";
-import type { MattermostService } from "./integrations/mattermost-service.js";
-import type { TraceSinkService } from "./integrations/trace-sink-service.js";
-import { type BudgetAdmin, BudgetLimitInputSchema } from "./lib/budget-tracker.js";
-import type { TerminalTicketStore } from "./lib/terminal-ticket.js";
-import { buildMcpServer } from "./mcp.js";
-import type { QueueService } from "./ops/queue-service.js";
-import type { RuntimeProbeResult } from "./ops/runtime-probe.js";
-import { installGithubWorkspaceRunner } from "./runners/github-runner-install.js";
-import type { RunnerHub } from "./runners/runner-hub.js";
-import { PairRunnerBodySchema, RUNNER_CAPABILITIES, type RunnerService } from "./runners/runner-service.js";
-import { type ScheduleService, isValidCron } from "./scheduling/schedule-service.js";
-import { COMMENT_RESOURCE_TYPES, type CommentService } from "./workspace/comment-service.js";
-import type { MembershipService } from "./workspace/membership-service.js";
-import type { NotificationService } from "./workspace/notification-service.js";
-import type { ProfileService } from "./workspace/profile-service.js";
-import type { ViewService } from "./workspace/view-service.js";
+} from "./scorecard/scorecard-service.js";
+import type { TraceSinkService } from "./trace-sink/trace-sink-service.js";
+import type { ViewService } from "./view/view-service.js";
 import type { WorkspaceService } from "./workspace/workspace-service.js";
 
 export interface ServerDeps {

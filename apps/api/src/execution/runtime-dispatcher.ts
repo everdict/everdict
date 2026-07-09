@@ -15,7 +15,7 @@ import {
   imageUsesRegistryHost,
 } from "@everdict/core";
 import type { RuntimeRegistry } from "@everdict/registry";
-import { type SelfHostedKey, poolKeyFor, selfHostedBackendName } from "../runners/runner-hub.js";
+import { type SelfHostedKey, poolKeyFor, selfHostedBackendName } from "../runner/runner-hub.js";
 import { jobImages } from "./execute-case.js";
 
 export interface RuntimeDispatcherDeps {

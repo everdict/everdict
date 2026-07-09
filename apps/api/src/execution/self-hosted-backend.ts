@@ -7,7 +7,7 @@ import {
   dispatchAborted,
 } from "@everdict/backends";
 import type { AgentJob, CaseResult } from "@everdict/core";
-import type { RunnerHub, SelfHostedKey } from "../runners/runner-hub.js";
+import type { RunnerHub, SelfHostedKey } from "../runner/runner-hub.js";
 
 // Personally-owned self-hosted runner backend — pull, not push. dispatch(job) parks the job in the RunnerHub and
 // returns a promise. When the runner client (everdict runner) leases it via MCP, runs it on its own machine, and reports

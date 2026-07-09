@@ -54,55 +54,52 @@ import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
 import { WebSocketServer } from "ws";
 import { z } from "zod";
+import { registerApiKeyRoutes } from "./api-key/api-key.routes.js";
 import {
   BenchmarkImportBodySchema,
   BenchmarkPreviewBodySchema,
   type BenchmarkService,
-} from "./catalog/benchmark-service.js";
-import { registerBenchmarkRoutes } from "./catalog/benchmark.routes.js";
-import { BundleSchema, type BundleService, requiredActionsForBundle } from "./catalog/bundle-service.js";
-import { registerBundleRoutes } from "./catalog/bundle.routes.js";
-import { deleteDatasetVersion } from "./catalog/dataset-service.js";
-import { registerDatasetRoutes } from "./catalog/dataset.routes.js";
-import { RepinBodySchema, repinHarnessImages } from "./catalog/harness-pin-service.js";
-import { deleteHarnessVersion, harnessIsPrivate, harnessVisibleTo } from "./catalog/harness-service.js";
-import { registerHarnessTemplateRoutes } from "./catalog/harness-template.routes.js";
-import { registerHarnessRoutes } from "./catalog/harness.routes.js";
-import { registerJudgeRoutes } from "./catalog/judge.routes.js";
-import { registerModelRoutes } from "./catalog/model.routes.js";
-import { registerRuntimeRoutes } from "./catalog/runtime.routes.js";
-import { VersionTagsBodySchema, setVersionTags } from "./catalog/version-tag-service.js";
+} from "./benchmark/benchmark-service.js";
+import { registerBenchmarkRoutes } from "./benchmark/benchmark.routes.js";
+import { registerBillingRoutes } from "./billing/billing.routes.js";
+import { BundleSchema, type BundleService, requiredActionsForBundle } from "./bundle/bundle-service.js";
+import { registerBundleRoutes } from "./bundle/bundle.routes.js";
+import { type CiLinkService, UpsertCiLinkBodySchema } from "./ci-link/ci-link-service.js";
+import { registerCiLinkRoutes } from "./ci-link/ci-link.routes.js";
+import { COMMENT_RESOURCE_TYPES, type CommentService } from "./comment/comment-service.js";
+import { registerCommentRoutes } from "./comment/comment.routes.js";
+import { deleteDatasetVersion } from "./dataset/dataset-service.js";
+import { registerDatasetRoutes } from "./dataset/dataset.routes.js";
 import { registerFrontdoorCallbackRoutes } from "./execution/frontdoor-callback.routes.js";
-import { registerRunObservabilityRoutes } from "./execution/run-observability.routes.js";
-import type { RunService } from "./execution/run-service.js";
-import { registerRunRoutes } from "./execution/run.routes.js";
-import {
-  IngestScorecardBodySchema,
-  PullIngestBodySchema,
-  type ScorecardService,
-  originSource,
-} from "./execution/scorecard-service.js";
-import { registerScorecardRoutes } from "./execution/scorecard.routes.js";
-import { type CiLinkService, UpsertCiLinkBodySchema } from "./integrations/ci-link-service.js";
-import { registerCiLinkRoutes } from "./integrations/ci-link.routes.js";
-import type { GithubAppService } from "./integrations/github-app-service.js";
-import { registerGithubAppRoutes } from "./integrations/github-app.routes.js";
-import type { ImageRegistryService } from "./integrations/image-registry-service.js";
-import { registerImageRegistryRoutes } from "./integrations/image-registry.routes.js";
-import type { MattermostCommandService } from "./integrations/mattermost-command-service.js";
-import type { MattermostService } from "./integrations/mattermost-service.js";
-import { registerMattermostRoutes } from "./integrations/mattermost.routes.js";
-import type { TraceSinkService } from "./integrations/trace-sink-service.js";
-import { registerTraceSinkRoutes } from "./integrations/trace-sink.routes.js";
+import type { GithubAppService } from "./github-app/github-app-service.js";
+import { registerGithubAppRoutes } from "./github-app/github-app.routes.js";
+import { RepinBodySchema, repinHarnessImages } from "./harness/harness-pin-service.js";
+import { deleteHarnessVersion, harnessIsPrivate, harnessVisibleTo } from "./harness/harness-service.js";
+import { registerHarnessTemplateRoutes } from "./harness/harness-template.routes.js";
+import { registerHarnessRoutes } from "./harness/harness.routes.js";
+import type { ImageRegistryService } from "./image-registry/image-registry-service.js";
+import { registerImageRegistryRoutes } from "./image-registry/image-registry.routes.js";
+import { registerJudgeRoutes } from "./judge/judge.routes.js";
 import { type BudgetAdmin, BudgetLimitInputSchema } from "./lib/budget-tracker.js";
 import type { TerminalTicketStore } from "./lib/terminal-ticket.js";
+import { VersionTagsBodySchema, setVersionTags } from "./lib/version-tag-service.js";
+import type { MattermostCommandService } from "./mattermost/mattermost-command-service.js";
+import type { MattermostService } from "./mattermost/mattermost-service.js";
+import { registerMattermostRoutes } from "./mattermost/mattermost.routes.js";
 import { buildMcpServer } from "./mcp.js";
 import { registerMcpRoutes } from "./mcp.routes.js";
-import { registerBillingRoutes } from "./ops/billing.routes.js";
+import { registerInviteRoutes } from "./member/invite.routes.js";
+import { registerMemberRoutes } from "./member/member.routes.js";
+import type { MembershipService } from "./member/membership-service.js";
+import { registerModelRoutes } from "./model/model.routes.js";
+import type { NotificationService } from "./notification/notification-service.js";
+import { registerNotificationRoutes } from "./notification/notification.routes.js";
 import { registerInternalRoutes } from "./ops/internal.routes.js";
-import type { QueueService } from "./ops/queue-service.js";
-import { registerQueueRoutes } from "./ops/queue.routes.js";
 import type { RuntimeProbeResult } from "./ops/runtime-probe.js";
+import type { ProfileService } from "./profile/profile-service.js";
+import { registerProfileRoutes } from "./profile/profile.routes.js";
+import type { QueueService } from "./queue/queue-service.js";
+import { registerQueueRoutes } from "./queue/queue.routes.js";
 import type { ServerDeps } from "./route-context.js";
 import {
   baseUrl,
@@ -115,27 +112,30 @@ import {
   sendError,
   zodIssues,
 } from "./route-context.js";
-import { installGithubWorkspaceRunner } from "./runners/github-runner-install.js";
-import type { RunnerHub } from "./runners/runner-hub.js";
-import { PairRunnerBodySchema, RUNNER_CAPABILITIES, type RunnerService } from "./runners/runner-service.js";
-import { registerRunnerRoutes } from "./runners/runner.routes.js";
-import { registerWorkspaceRunnerRoutes } from "./runners/workspace-runner.routes.js";
-import { type ScheduleService, isValidCron } from "./scheduling/schedule-service.js";
-import { registerScheduleRoutes } from "./scheduling/schedule.routes.js";
-import { registerApiKeyRoutes } from "./workspace/api-key.routes.js";
-import { COMMENT_RESOURCE_TYPES, type CommentService } from "./workspace/comment-service.js";
-import { registerCommentRoutes } from "./workspace/comment.routes.js";
-import { registerInviteRoutes } from "./workspace/invite.routes.js";
-import { registerMemberRoutes } from "./workspace/member.routes.js";
-import type { MembershipService } from "./workspace/membership-service.js";
-import type { NotificationService } from "./workspace/notification-service.js";
-import { registerNotificationRoutes } from "./workspace/notification.routes.js";
-import type { ProfileService } from "./workspace/profile-service.js";
-import { registerProfileRoutes } from "./workspace/profile.routes.js";
-import { registerSecretRoutes } from "./workspace/secret.routes.js";
+import { registerRunObservabilityRoutes } from "./run/run-observability.routes.js";
+import type { RunService } from "./run/run-service.js";
+import { registerRunRoutes } from "./run/run.routes.js";
+import { installGithubWorkspaceRunner } from "./runner/github-runner-install.js";
+import type { RunnerHub } from "./runner/runner-hub.js";
+import { PairRunnerBodySchema, RUNNER_CAPABILITIES, type RunnerService } from "./runner/runner-service.js";
+import { registerRunnerRoutes } from "./runner/runner.routes.js";
+import { registerWorkspaceRunnerRoutes } from "./runner/workspace-runner.routes.js";
+import { registerRuntimeRoutes } from "./runtime/runtime.routes.js";
+import { type ScheduleService, isValidCron } from "./schedule/schedule-service.js";
+import { registerScheduleRoutes } from "./schedule/schedule.routes.js";
+import {
+  IngestScorecardBodySchema,
+  PullIngestBodySchema,
+  type ScorecardService,
+  originSource,
+} from "./scorecard/scorecard-service.js";
+import { registerScorecardRoutes } from "./scorecard/scorecard.routes.js";
+import { registerSecretRoutes } from "./secret/secret.routes.js";
+import type { TraceSinkService } from "./trace-sink/trace-sink-service.js";
+import { registerTraceSinkRoutes } from "./trace-sink/trace-sink.routes.js";
+import type { ViewService } from "./view/view-service.js";
+import { registerViewRoutes } from "./view/view.routes.js";
 import { registerWorkspaceSettingsRoutes } from "./workspace/settings.routes.js";
-import type { ViewService } from "./workspace/view-service.js";
-import { registerViewRoutes } from "./workspace/view.routes.js";
 import type { WorkspaceService } from "./workspace/workspace-service.js";
 import { registerWorkspaceRoutes } from "./workspace/workspace.routes.js";
 

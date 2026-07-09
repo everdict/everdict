@@ -26,18 +26,18 @@ import {
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { describe, expect, it } from "vitest";
-import { BundleService } from "./catalog/bundle-service.js";
-import { RunService } from "./execution/run-service.js";
-import { ScorecardService } from "./execution/scorecard-service.js";
-import { GithubAppService } from "./integrations/github-app-service.js";
-import { MattermostService } from "./integrations/mattermost-service.js";
-import { TraceSinkService } from "./integrations/trace-sink-service.js";
+import { BundleService } from "./bundle/bundle-service.js";
+import { GithubAppService } from "./github-app/github-app-service.js";
 import { persistentBudget } from "./lib/budget-tracker.js";
+import { MattermostService } from "./mattermost/mattermost-service.js";
 import { buildMcpServer } from "./mcp.js";
-import { RunnerHub } from "./runners/runner-hub.js";
-import { RunnerService } from "./runners/runner-service.js";
-import { ScheduleService } from "./scheduling/schedule-service.js";
-import { MembershipService } from "./workspace/membership-service.js";
+import { MembershipService } from "./member/membership-service.js";
+import { RunService } from "./run/run-service.js";
+import { RunnerHub } from "./runner/runner-hub.js";
+import { RunnerService } from "./runner/runner-service.js";
+import { ScheduleService } from "./schedule/schedule-service.js";
+import { ScorecardService } from "./scorecard/scorecard-service.js";
+import { TraceSinkService } from "./trace-sink/trace-sink-service.js";
 
 const result: CaseResult = {
   caseId: "c1",

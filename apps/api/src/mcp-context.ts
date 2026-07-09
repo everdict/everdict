@@ -11,26 +11,26 @@ import type {
   RuntimeRegistry,
 } from "@everdict/registry";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import type { BenchmarkService } from "./catalog/benchmark-service.js";
-import type { BundleService } from "./catalog/bundle-service.js";
-import type { RunService } from "./execution/run-service.js";
-import type { ScorecardService } from "./execution/scorecard-service.js";
-import type { CiLinkService } from "./integrations/ci-link-service.js";
-import type { GithubAppService } from "./integrations/github-app-service.js";
-import type { ImageRegistryService } from "./integrations/image-registry-service.js";
-import type { MattermostService } from "./integrations/mattermost-service.js";
-import type { TraceSinkService } from "./integrations/trace-sink-service.js";
+import type { BenchmarkService } from "./benchmark/benchmark-service.js";
+import type { BundleService } from "./bundle/bundle-service.js";
+import type { CiLinkService } from "./ci-link/ci-link-service.js";
+import type { CommentService } from "./comment/comment-service.js";
+import type { GithubAppService } from "./github-app/github-app-service.js";
+import type { ImageRegistryService } from "./image-registry/image-registry-service.js";
 import type { BudgetAdmin } from "./lib/budget-tracker.js";
-import type { QueueService } from "./ops/queue-service.js";
+import type { MattermostService } from "./mattermost/mattermost-service.js";
+import type { MembershipService } from "./member/membership-service.js";
+import type { NotificationService } from "./notification/notification-service.js";
 import type { RuntimeProbeResult } from "./ops/runtime-probe.js";
-import type { RunnerHub } from "./runners/runner-hub.js";
-import type { RunnerService } from "./runners/runner-service.js";
-import type { ScheduleService } from "./scheduling/schedule-service.js";
-import type { CommentService } from "./workspace/comment-service.js";
-import type { MembershipService } from "./workspace/membership-service.js";
-import type { NotificationService } from "./workspace/notification-service.js";
-import type { ProfileService } from "./workspace/profile-service.js";
-import type { ViewService } from "./workspace/view-service.js";
+import type { ProfileService } from "./profile/profile-service.js";
+import type { QueueService } from "./queue/queue-service.js";
+import type { RunService } from "./run/run-service.js";
+import type { RunnerHub } from "./runner/runner-hub.js";
+import type { RunnerService } from "./runner/runner-service.js";
+import type { ScheduleService } from "./schedule/schedule-service.js";
+import type { ScorecardService } from "./scorecard/scorecard-service.js";
+import type { TraceSinkService } from "./trace-sink/trace-sink-service.js";
+import type { ViewService } from "./view/view-service.js";
 import type { WorkspaceService } from "./workspace/workspace-service.js";
 
 // MCP tool surface — the "agent transport" sharing the same service core as the HTTP routes.
