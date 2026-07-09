@@ -135,6 +135,7 @@ import { recoverInterrupted } from "./startup-recovery.js";
 import { StoreCallbackRendezvous } from "./store-callback-rendezvous.js";
 import { TemporalBatchDriver } from "./temporal-batch-driver.js";
 import { TemporalScheduleDriver } from "./temporal-schedule-driver.js";
+import { TerminalTicketStore } from "./terminal-ticket.js";
 import { buildTopologyBackend } from "./topology-backend.js";
 import { TraceSinkService } from "./trace-sink-service.js";
 import { persistentUsageMeter } from "./usage-meter.js";
@@ -489,6 +490,7 @@ async function main(): Promise<void> {
     readCaseLogs: (tenant, runtimeList, caseId) => readCaseLogsFn(tenant, runtimeList, caseId),
     execInSandbox: (tenant, runtimeList, caseId, command) => execInSandboxFn(tenant, runtimeList, caseId, command),
     captureBrowserScreen: (tenant, runtimeList, runId) => captureBrowserScreenFn(tenant, runtimeList, runId),
+    openTerminalStream: (tenant, runtimeList, caseId) => openTerminalStreamFn(tenant, runtimeList, caseId),
     dispatcher: meteredDispatcher,
     store,
     budget,
@@ -582,6 +584,17 @@ async function main(): Promise<void> {
       return text !== undefined;
     });
     return text;
+  };
+
+  // Open an interactive shell stream on a case's live sandbox (observability ⑥) — same lane resolution as logs.
+  const openTerminalStreamFn = async (tenant: string, runtimeList: string | undefined, caseId: string) => {
+    let handle: import("@everdict/backends").ExecStreamHandle | undefined;
+    await eachRuntimeBackend(tenant, runtimeList, async (backend) => {
+      if (!backend.execStream) return false;
+      handle = await backend.execStream(caseId).catch(() => undefined);
+      return handle !== undefined;
+    });
+    return handle;
   };
 
   // Live browser frame (observability ⑦) — resolve the run's runtime to a topology backend and capture its
@@ -707,7 +720,16 @@ async function main(): Promise<void> {
     resume: (id) => scorecardService.resume(id),
     // Standalone runs: adopt the still-alive backend job first (zero re-run), else re-dispatch from the
     // persisted caseSpec (mig 0051); legacy records without one keep the tombstone path.
-    resumeRun: async (r) => service.resume(r, await adoptCaseFn(r.tenant, r.runtime, r.caseId).catch(() => undefined)),
+    // Claim the run for resume and adopt IN THE BACKGROUND — adopting a still-running run waits for its alloc to
+    // finish (a long run would otherwise block control-plane startup). The background task settles via adoption
+    // (zero re-run) or falls back to caseSpec re-dispatch. Returning true keeps recovery from tombstoning it.
+    resumeRun: async (r) => {
+      void (async () => {
+        const adopted = await adoptCaseFn(r.tenant, r.runtime, r.caseId).catch(() => undefined);
+        await service.resume(r, adopted).catch(() => {});
+      })();
+      return true;
+    },
   });
   if (recovered.scorecards + recovered.resumed + recovered.runs + recovered.runsResumed > 0)
     console.error(
@@ -807,7 +829,9 @@ async function main(): Promise<void> {
   // Saved scorecard-analysis Views — store/share a named AnalysisConfig (opaque config) on the workspace. Live re-run, so no snapshot.
   const viewService = new ViewService({ store: viewStore });
 
+  const terminalTickets = new TerminalTicketStore();
   const app = buildServer({
+    terminalTickets,
     service,
     scorecardService,
     metrics, // GET /metrics (Prometheus text) — unauthenticated; deployments firewall the scrape path

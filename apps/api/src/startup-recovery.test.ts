@@ -109,6 +109,29 @@ describe("recoverInterrupted (reclaim orphaned jobs at boot)", () => {
     expect((await runs.get("solo-legacy"))?.error?.code).toBe("INTERRUPTED");
   });
 
+  it("does not block startup on a slow adoption — resumeRun claims the run and backgrounds the work", async () => {
+    const scorecards = new InMemoryScorecardStore();
+    const runs = new InMemoryRunStore();
+    await runs.create(runRec("solo-running")); // a long-running run at restart
+    let backgroundSettled = false;
+    const res = await recoverInterrupted({
+      scorecards,
+      runs,
+      // Mirrors main.ts: claim (return true) immediately, do the slow adopt/settle in the background.
+      resumeRun: async () => {
+        void new Promise((r) => setTimeout(r, 200)).then(() => {
+          backgroundSettled = true;
+        });
+        return true;
+      },
+      now: () => "2026-07-09T00:00:00.000Z",
+    });
+    // Recovery returned promptly (before the 200ms background work) — startup is not blocked.
+    expect(backgroundSettled).toBe(false);
+    expect(res).toEqual({ scorecards: 0, resumed: 0, runs: 0, runsResumed: 1 });
+    expect((await runs.get("solo-running"))?.status).toBe("running"); // claimed, not tombstoned
+  });
+
   it("a throwing resumeRun does not crash boot — that run tombstones like a legacy one", async () => {
     const scorecards = new InMemoryScorecardStore();
     const runs = new InMemoryRunStore();
