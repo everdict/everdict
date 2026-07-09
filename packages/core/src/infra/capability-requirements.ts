@@ -1,5 +1,5 @@
+import type { EvalCase } from "../execution/eval-case.js";
 import type { CapabilityName } from "./capability.js";
-import type { EvalCase } from "./eval-case.js";
 import type { RuntimeSpec } from "./runtime-spec.js";
 import { isHardenedRuntime } from "./trust-zone.js";
 

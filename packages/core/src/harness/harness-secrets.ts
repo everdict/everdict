@@ -1,4 +1,4 @@
-import { BadRequestError } from "./errors.js";
+import { BadRequestError } from "../errors.js";
 import type { EnvValue, HarnessSpec } from "./harness-spec.js";
 
 // Flatten an env map to a string map — substitute {secretRef} with its value from lookup.

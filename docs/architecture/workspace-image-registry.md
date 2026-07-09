@@ -90,7 +90,7 @@ No new table, no migration: additive JSONB on `everdict_workspace_settings` + va
 
 ## Classification — `classifyImageRef`
 
-`packages/core/src/image-ref.ts`. Follows the Docker reference grammar: the first path
+`packages/core/src/infra/image-ref.ts`. Follows the Docker reference grammar: the first path
 component is a **registry host iff** it contains `.` or `:` or equals `localhost`.
 
 | Class | Meaning | Examples (registry = `ghcr.io/acme`) |

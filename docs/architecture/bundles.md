@@ -17,7 +17,7 @@ generalization; `codex`+`pinch` is the bundle that plugs into it.
 
 ## Current state — verified (audit)
 
-- **Declarative harness** — `CommandHarnessSpec` (`packages/core/src/harness-spec.ts`) expresses any CLI agent
+- **Declarative harness** — `CommandHarnessSpec` (`packages/core/src/harness/harness-spec.ts`) expresses any CLI agent
   (setup + `command` with `{{task}}`/`{{model}}`/`{{run_id}}`/`{{param}}` + `trace: none|otel|mlflow`) with **no
   code**. codex fits directly (`packages/harnesses/src/command.ts`). Trace/model/cost come from OTel/MLflow pull or
   the usage-proxy fallback.

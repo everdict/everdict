@@ -50,7 +50,7 @@ const cases = runtime
 ```
 `RuntimeDispatcher.dispatch` then resolves `placement.target` → tenant `RuntimeSpec` → `Backend`
 (`apps/api/src/runtime-dispatcher.ts`). `PlacementSchema = { target?, os?, isolation? }`
-(`packages/core/src/eval-case.ts`).
+(`packages/core/src/execution/eval-case.ts`).
 
 ### Co-location gotcha: the judge's `ctx.case` is the *original* case, not the run-placed one
 `applyJudges` (`scorecard-service.ts:446-467`) rebuilds `ctx` from `caseById = new Map(dataset.cases…)` — the
@@ -71,10 +71,10 @@ takes the cheap, correct path (co-locate by *inheriting the producing run's plac
 ### Observation delivery is store-fetch-only on the topology path
 `packages/topology/src/service-backend.ts:132` always does `const snapshot = target ? await target.snapshot() :
 {kind:"prompt"}` — a **pull** from the per-case browser CDP (`reference`). `TopologyTarget.observe[]`
-(`dom/screenshot/url`, `packages/core/src/harness-spec.ts:35`) is **declared but unused**. The `__EVERDICT_RESULT__`
+(`dom/screenshot/url`, `packages/core/src/harness/harness-spec.ts:35`) is **declared but unused**. The `__EVERDICT_RESULT__`
 sentinel (`packages/agent/src/run.ts:9`, parsed in `packages/backends/src/*.ts`) returns the whole `CaseResult` for
 **process** backends, but topology observations never ride it. There is no egress path. Graders/judges consume the
-result via `GradeContext.snapshot` (`packages/core/src/grader.ts`).
+result via `GradeContext.snapshot` (`packages/core/src/execution/grader.ts`).
 
 ## Direction — three decisions
 
@@ -168,8 +168,8 @@ dispatcher already resolves it. D3 is the only new core surface (one optional `J
 
 ## Touch points (for the eventual PRs, per slice)
 
-- `packages/core/src/judge-spec.ts` — `HarnessJudgeSpecSchema.runtime?` (slice 1).
-- `packages/core/src/harness-spec.ts` + `harness-template.ts` — `TopologyTarget.delivery?` + template mirror (slice 2).
+- `packages/core/src/harness/judge-spec.ts` — `HarnessJudgeSpecSchema.runtime?` (slice 1).
+- `packages/core/src/harness/harness-spec.ts` + `harness-template.ts` — `TopologyTarget.delivery?` + template mirror (slice 2).
 - `apps/api/src/scorecard-service.ts` — thread producing-run placement into `applyJudges` (slice 1).
 - `apps/api/src/judge-runner.ts` — co-locate/override placement on the judge `AgentJob` (slice 1).
 - `apps/api/src/server.ts` + `mcp.ts` — judge `runtime` field validated against the runtime registry; **BFF↔MCP

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { AppError } from "./errors.js";
+import { AppError } from "../errors.js";
 
 // Failure taxonomy — WHERE a case died and WHOSE fault it was. At team scale most "failures" are not the agent's:
 // a starved shared store, an OOM-killed alloc, a placement blip, a missing secret. Recovery differs by class

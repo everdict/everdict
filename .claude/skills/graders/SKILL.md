@@ -10,7 +10,7 @@ A grader is a pluggable scorer, **fully separate from the harness**. It reads a 
 case. Same grader scores every harness identically → fair cross-harness/version comparison.
 
 ## Checklist
-1. Implement `Grader` (`packages/core/src/grader.ts`): `readonly id` + `grade(ctx): Promise<Score>`.
+1. Implement `Grader` (`packages/core/src/execution/grader.ts`): `readonly id` + `grade(ctx): Promise<Score>`.
 2. Read from `ctx` only — NEVER mutate the trace/env and NEVER re-run the harness.
 3. `ctx.compute` is OPTIONAL (service/browser harnesses have none) — outcome graders MUST guard it
    (else `BadRequestError`); trace graders read ONLY `ctx.trace`; browser graders require the snapshot `kind`.
@@ -43,7 +43,7 @@ a number, `pass` optional (trace graders like `steps`/`cost`/`latency` emit valu
   → see the **evaluation** skill for transports, `JudgeRunner`, and how it lands under metric `judge:<id>`.
 
 ## GraderSpec reconstruction
-The agent rebuilds graders from `GraderSpec[]` (`packages/core/src/eval-case.ts`) in
+The agent rebuilds graders from `GraderSpec[]` (`packages/core/src/execution/eval-case.ts`) in
 `makeGraders` (`packages/graders/src/make-graders.ts`) — a `switch (s.id)` mapping `{id, config}` to an
 instance (`tests-pass` → `{cmd}`, `answer-match` → `{expect, mode}`, …). Add your no-dep grader as a new
 `case`. The `judge` case is SPECIAL: it needs an injected `Judge`, so it **throws** in `makeGraders`

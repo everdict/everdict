@@ -101,7 +101,7 @@ uses `sync`/provisioned-browser → untouched.
      No MCP parity — a webhook receiver has no tenant-facing BFF analog. (Superseded for deployment: `StoreCallbackRendezvous`, below.)
 
 ## Touch points (for the eventual PR)
-- `packages/core/src/harness-spec.ts` — add `stream` + `callback` variants to `FrontDoorCompletionSchema`
+- `packages/core/src/harness/harness-spec.ts` — add `stream` + `callback` variants to `FrontDoorCompletionSchema`
   (+ mirror nothing else — `frontDoor` already flows through `ServiceTemplateSpecSchema`).
 - `packages/topology/src/front-door/front-door-driver.ts` — `HttpFrontDoorDriverIo.openStream?` + `callbackRendezvous?`;
   `awaitCompletion` grows `stream`/`callback` branches; `drive` peeks the first stream event for `correlate`.

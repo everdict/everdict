@@ -1,5 +1,5 @@
-import type { ComputeHandle } from "./compute.js";
-import type { TraceEvent } from "./trace.js";
+import type { ComputeHandle } from "../execution/compute.js";
+import type { TraceEvent } from "../execution/trace.js";
 
 export interface RunContext {
   // Usually empty — the claude CLI works from the machine's subscription login. Inject the key only in a sandbox without login.

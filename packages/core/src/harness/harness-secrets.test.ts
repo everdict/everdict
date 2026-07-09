@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { BadRequestError } from "./errors.js";
+import { BadRequestError } from "../errors.js";
 import { flattenEnv, referencesUserSecret, resolveHarnessSecrets } from "./harness-secrets.js";
 import { CommandHarnessSpecSchema, ServiceHarnessSpecSchema } from "./harness-spec.js";
 

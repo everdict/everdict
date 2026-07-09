@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { BadRequestError } from "./errors.js";
+import { BadRequestError } from "../errors.js";
 
 // A tenant's trust zone — the multi-tenant isolation policy. Since evaluation runs the user's arbitrary harness code
 // (= arbitrary code execution), isolation is mandatory, not optional. The control plane resolves tenant→TrustZone.

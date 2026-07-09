@@ -1,7 +1,7 @@
 import { z } from "zod";
+import { HarnessSpecSchema } from "../harness/harness-spec.js";
+import { RegistryAuthSchema } from "../infra/image-ref.js";
 import { EvalCaseSchema } from "./eval-case.js";
-import { HarnessSpecSchema } from "./harness-spec.js";
-import { RegistryAuthSchema } from "./image-ref.js";
 
 // per-run judge model config (not a secret). The control plane decides it from workspace/suite policy and loads it into the job.
 // An inline judge grader (e.g. the WebVoyager preset) is judged with this model on the dispatch path. The provider 'key' is a secret (secretEnv).

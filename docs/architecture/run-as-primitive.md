@@ -71,7 +71,7 @@ const cases = runtime
 `RuntimeDispatcher` then routes on `placement.target`. Both `RunService` and `ScorecardService` are injected the
 **same** dispatcher — `ModelResolvingDispatcher(RuntimeDispatcher(scheduler, …))` (`main.ts` ~line 211, comment:
 *"run/judge/scorecard share this one dispatcher"*). `EvalCase.placement.target` is already in the core schema
-(`PlacementSchema`, `packages/core/src/eval-case.ts`).
+(`PlacementSchema`, `packages/core/src/execution/eval-case.ts`).
 
 **So run can already hit any runtime today** — the caller just has to set `case.placement.target`. The gap is
 purely ergonomic surface: no top-level `runtime` convenience on the run API, and `submit_run` never sets it.

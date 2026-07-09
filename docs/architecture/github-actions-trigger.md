@@ -82,9 +82,9 @@ repo↔service wiring. Competing products call this an "integration" and make it
 
 ## Current state — verified
 
-- **Topology slot = `TopologyService.name`** (`packages/core/src/harness-spec.ts`): `ServiceHarnessSpec.services[]`
+- **Topology slot = `TopologyService.name`** (`packages/core/src/harness/harness-spec.ts`): `ServiceHarnessSpec.services[]`
   each carry `name` + `image` (+ env/volumes/readiness/resources).
-- **Template/instance split already models pinning** (`packages/core/src/harness-template.ts`,
+- **Template/instance split already models pinning** (`packages/core/src/harness/harness-template.ts`,
   `packages/registry/src/harness-{template,instance}-registry.ts`): `HarnessInstanceSpec = { template: {id,version},
   id, version, pins: Record<slot, image>, overrides? }`; `resolveHarnessInstance(template, instance)` fills service
   images from pins and throws `BadRequestError` on missing/mismatched pins. `POST /harnesses` registers instance

@@ -10,7 +10,7 @@ A Driver = *compute inside an already-isolated unit*, NOT placement. It `provisi
 Isolation/placement is the Backend's job (see skill `backends`) — this is the other half of that split (the Backend places, the Driver computes).
 
 ## Checklist
-1. Implement `Driver` (`packages/core/src/compute.ts`): `readonly id` + `provision(spec) → ComputeHandle`.
+1. Implement `Driver` (`packages/core/src/execution/compute.ts`): `readonly id` + `provision(spec) → ComputeHandle`.
 2. `ComputeHandle` exposes `exec` / `writeFile` / `readFile` / `dispose` — nothing more.
 3. The caller releases in a `finally` — `runCase` provisions once, `await compute.dispose()` always (`packages/runner/src/run-case.ts`).
 4. A non-zero exit is a *result* `{exitCode, stdout, stderr}`, never a throw; only infra faults throw.

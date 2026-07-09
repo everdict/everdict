@@ -28,8 +28,8 @@ axes**:
 Everything except **model** already exists (`Scorecard = dataset@v × harness@v`, `diffScorecards` for A-vs-B,
 `trendSeries` for experiment-over-time, `summarizeScorecard` for per-metric pass rate). The one gap is that
 **`model` is captured nowhere**: it lives only inside each trace as per-call `llm_call.model`
-(`packages/core/src/trace.ts:18`) and as a spec input (`CommandHarnessSpec.model`,
-`packages/core/src/harness-spec.ts:222`; judge `model`), neither of which survives into the aggregated record.
+(`packages/core/src/execution/trace.ts:18`) and as a spec input (`CommandHarnessSpec.model`,
+`packages/core/src/harness/harness-spec.ts:222`; judge `model`), neither of which survives into the aggregated record.
 
 **Key insight — model is per-run, not per-harness-version.** The same `command` harness version can be re-pinned
 to a different `model`; a `process` harness (Claude Code) uses the machine login and pins **no** model at all

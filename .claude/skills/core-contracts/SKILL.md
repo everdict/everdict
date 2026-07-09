@@ -28,13 +28,13 @@ spine contracts MUST be interfaces — many impls live in adapter packages, the 
 `ComputeHandle` holds a real sandbox: callers always `dispose()` in a `finally` (contract, not impl).
 
 ## The spine, file by file
-- **Harness** — `packages/core/src/harness.ts`: `EvaluableHarness` + `RunContext`. Process-boundary, so
+- **Harness** — `packages/core/src/harness/harness.ts`: `EvaluableHarness` + `RunContext`. Process-boundary, so
   the harness may be any language; its native output is normalized to `TraceEvent`.
-- **Environment** — `packages/core/src/environment.ts`: `EnvSpec` (repo|browser|prompt|os-use) and
+- **Environment** — `packages/core/src/execution/environment.ts`: `EnvSpec` (repo|browser|prompt|os-use) and
   `EnvSnapshot` are **discriminated unions on `kind`** — add a variant, don't rewrite core.
-- **Driver/Compute** — `packages/core/src/compute.ts`: `Driver`, `ComputeHandle`, `ComputeSpec`,
+- **Driver/Compute** — `packages/core/src/execution/compute.ts`: `Driver`, `ComputeHandle`, `ComputeSpec`,
   `ExecResult`, `Capability` (`shell|browser|desktop`). Isolation is the Backend's job, not the Driver's.
-- **Grader** — `packages/core/src/grader.ts`: `Score{graderId,metric,value,pass?}` + `GradeContext`.
+- **Grader** — `packages/core/src/execution/grader.ts`: `Score{graderId,metric,value,pass?}` + `GradeContext`.
 
 ## Error model (`packages/core/src/errors.ts`)
 `AppError` is abstract; each subclass fixes `readonly status` → **HTTP status derives from the subtype**,
@@ -59,10 +59,10 @@ no default-to-first**. Discriminated unions carry the shape variants:
   (only SecretStore key *names* like `authSecret`).
 
 ## Capability & trust-zone vocab
-- `packages/core/src/capability.ts` — SSOT `CAPABILITY_DEFS` keyed by `kind`: **functional**→placement gate
+- `packages/core/src/infra/capability.ts` — SSOT `CAPABILITY_DEFS` keyed by `kind`: **functional**→placement gate
   (`functionalGate`/`runtimeSatisfies`), **security**→trust-zone, **auth**→budget. Adding a capability is
   one line here; the kind's layer then enforces it. `CapabilityNameSchema` rejects vocabulary outsiders.
-- `packages/core/src/trust-zone.ts` — `TrustZone` + `assertHardenedIsolation()`: untrusted tenants (arbitrary
+- `packages/core/src/infra/trust-zone.ts` — `TrustZone` + `assertHardenedIsolation()`: untrusted tenants (arbitrary
   eval code) are forced onto a hardened runtime (never shared-kernel `runc`). Label ≠ enforcement.
 
 See `packages/core/src/index.ts` for the full export list and the `foundation` skill for module

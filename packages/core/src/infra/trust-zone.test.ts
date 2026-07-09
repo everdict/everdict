@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { BadRequestError } from "./errors.js";
+import { BadRequestError } from "../errors.js";
 import { type TrustZone, assertHardenedIsolation, isHardenedRuntime } from "./trust-zone.js";
 
 const zone = (over: Partial<TrustZone>): TrustZone => ({

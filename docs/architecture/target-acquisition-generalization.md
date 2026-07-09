@@ -196,8 +196,8 @@ Each step merges independently; defaults keep current behavior, so no regression
 
 ## Touch points (for the eventual PR)
 
-- `packages/core/src/harness-spec.ts` — `TopologyTargetSchema.acquire` (discriminated union; absence = provision).
-- `packages/core/src/harness-template.ts` — mirror `acquire` in `TemplateServiceSchema`/the service template spec.
+- `packages/core/src/harness/harness-spec.ts` — `TopologyTargetSchema.acquire` (discriminated union; absence = provision).
+- `packages/core/src/harness/harness-template.ts` — mirror `acquire` in `TemplateServiceSchema`/the service template spec.
 - `packages/topology/src/deploy/topology-runtime.ts` — `BrowserEnvHandle` → `TargetEnvHandle` (`cdpUrl` → `wiring`).
 - `packages/topology/src/{docker,nomad,k8s}-runtime.ts` — return `wiring:{ target_cdp_url: cdpUrl }`.
 - `packages/topology/src/front-door/target-acquirer.ts` — **new**: `TargetAcquirer` + `provisionAcquirer` + `serviceAcquirer`

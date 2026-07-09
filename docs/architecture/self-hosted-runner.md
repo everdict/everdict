@@ -64,7 +64,7 @@ box, identity, and bill.
 - **Unit of work** — `runAgentJob(job: AgentJob): Promise<CaseResult>` (`packages/agent/src/run.ts:13`) runs a
   whole case over `LocalDriver` (`opts.driver ?? new LocalDriver()`). `run.ts:15` already documents a dev
   fallback for "when dispatching LocalBackend directly" — exactly the self-hosted shape, minus the pull transport.
-- **Job wire format** — `AgentJob` (`packages/core/src/agent-job.ts`) is Zod-validated and base64-JSON
+- **Job wire format** — `AgentJob` (`packages/core/src/execution/agent-job.ts`) is Zod-validated and base64-JSON
   serializable; it already carries `tenant`, `meterUsage`, transient `repoToken`, etc. `CaseResult` is the
   return contract. The push path scrapes `__EVERDICT_RESULT__` from logs; the pull path posts `CaseResult` JSON
   directly (Zod-validated at the MCP boundary) — cleaner, no sentinel.

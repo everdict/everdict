@@ -1,6 +1,6 @@
 import { z } from "zod";
-import { BadRequestError } from "./errors.js";
-import type { HarnessSpec } from "./harness-spec.js";
+import { BadRequestError } from "../errors.js";
+import type { HarnessSpec } from "../harness/harness-spec.js";
 
 // Image reference classification — from the workspace registry's perspective, "whose" image this is.
 // workspace  = the workspace registry (host+namespace match) — pullable from anywhere with credentials.

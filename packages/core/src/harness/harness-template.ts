@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { BadRequestError } from "./errors.js";
+import { BadRequestError } from "../errors.js";
 import {
   CommandHarnessSpecSchema,
   CommandTraceSpecSchema,

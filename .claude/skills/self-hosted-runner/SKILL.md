@@ -14,7 +14,7 @@ transport-injectable core shared by `apps/cli` + `apps/desktop` (desktop shell =
 
 ## Checklist
 1. Read the SSOT doc first. Runner behavior changes go in `packages/runner-core` ONLY (CLI + desktop stay identical) — never fork logic into `apps/cli` or `apps/desktop`.
-2. Capability vocab is one SSOT (`packages/core/src/capability.ts`) — add a capability = one line in `CAPABILITY_DEFS`; its `kind` auto-routes advertise/match/enforce.
+2. Capability vocab is one SSOT (`packages/core/src/infra/capability.ts`) — add a capability = one line in `CAPABILITY_DEFS`; its `kind` auto-routes advertise/match/enforce.
 3. Runners self-advertise via probes (`detectCapabilities`), never user input. Add a probe to `defaultProbes` when you add a functional capability.
 4. Placement gates on **functional** caps only (`functionalGate`); security→trust-zone, auth→budget. Never gate placement on a security/auth cap.
 5. Boundary-validate every leased job with `AgentJobSchema`; release the MCP session in `finally`.
@@ -27,14 +27,14 @@ transport-injectable core shared by `apps/cli` + `apps/desktop` (desktop shell =
 - `RunnerHost` (`packages/runner-core/src/runner-host.ts`) — GUI facade wrapping the loop for the desktop main process; CLI uses `runLeaseWorkers` directly.
 - `detectCapabilities`/`defaultProbes` (`packages/runner-core/src/capabilities.ts`) — probes THIS machine (git/docker/browser/computer-use/sandbox/codex-login/claude-login); `topology` has no local probe (derived, gated by `docker`).
 
-## Capability model (`packages/core/src/capability.ts`)
+## Capability model (`packages/core/src/infra/capability.ts`)
 `CAPABILITY_DEFS` = the vocab SSOT; each name → a `kind` that decides HOW it is matched:
 - **functional** (`git·docker·browser·computer-use·topology`) → **placement gate** (`functionalGate`/`runtimeSatisfies`: required ⊆ advertised).
 - **security** (`sandbox`) → **trust-zone** enforces (`assertHardenedIsolation`); the label is a hint, **not** enforcement.
 - **auth** (`codex-login·claude-login`) → **budget** (own-pays: the machine's own login, workspace budget untouched).
-`partitionCapabilities` splits requirements by kind → each kind routes to its own layer. `requiredCapabilities(evalCase)` derives a case's needs (image→docker, git source→git, browser/os-use env, isolation→sandbox); `defaultRuntimeCapabilities(spec)` auto-labels a registered runtime (both in `packages/core/src/capability-requirements.ts`).
+`partitionCapabilities` splits requirements by kind → each kind routes to its own layer. `requiredCapabilities(evalCase)` derives a case's needs (image→docker, git source→git, browser/os-use env, isolation→sandbox); `defaultRuntimeCapabilities(spec)` auto-labels a registered runtime (both in `packages/core/src/infra/capability-requirements.ts`).
 
-## Runtime = WHERE (`packages/core/src/runtime-spec.ts`)
+## Runtime = WHERE (`packages/core/src/infra/runtime-spec.ts`)
 Registered `RuntimeSpec` kinds are **`local | nomad | k8s`** only. The `docker` and `topology` KINDS were removed (slice 5b): "single docker host" → the self-hosted runner's local docker (the `docker` capability), and topology → a `nomad|k8s` runtime carrying `traceSource` (the `topology` capability). `local` = control-plane host, dev-only. `authSecret`/`kubeconfigSecret` name a SecretStore key (never the value; stripped from alloc env).
 
 ## Tiers, pairing, dispatch (apps/api)
