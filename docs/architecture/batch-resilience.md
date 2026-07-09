@@ -227,6 +227,21 @@ dropped the same way (`AgentJob.batchId` is the reclaim key). In-flight jobs sta
 fired — one duplicate WON (child runtime=local though assigned tight), one primary won (duplicate discarded),
 8/8 with no double-counted results.
 
+## Chaos scenario suite (repeatable drills)
+
+The recovery invariants above are codified as one repeatable script — `scripts/live/chaos-orchestration.mjs`
+(real control plane on an isolated `everdict_chaos` Postgres database + real Nomad; kill/restart cycles never
+touch the dev control plane's records):
+
+1. **CP SIGKILL mid-batch** → boot resume: finished results kept, in-flight jobs adopted, remainder
+   re-dispatched, batch completes.
+2. **CP SIGKILL mid-single-run** → single-run durability: `runs resumed 1`, adopt or caseSpec re-dispatch,
+   run succeeds.
+3. **Dead shard runtime** → spillover + circuit breaker + adaptive concurrency shrink, batch completes with
+   every case result present.
+
+All three asserted green on 2026-07-09.
+
 ## Shared core
 
 All three paths run through one seeded batch loop (`track` refactored around
