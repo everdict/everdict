@@ -1,18 +1,22 @@
-export { type TraceSource, type Span, spansToTraceEvents } from "./trace-source.js";
-export { OtelTraceSource, type OtelTraceSourceOptions, parseOtlpSpans, parseJaegerSpans } from "./otel.js";
-export { MlflowTraceSource, type MlflowTraceSourceOptions, parseMlflowTrace } from "./mlflow.js";
-export { buildTraceSource, type TraceSourceConfig } from "./build-source.js";
+export { type TraceSource, type Span, spansToTraceEvents } from "./sources/trace-source.js";
+export { OtelTraceSource, type OtelTraceSourceOptions, parseOtlpSpans, parseJaegerSpans } from "./sources/otel.js";
+export { MlflowTraceSource, type MlflowTraceSourceOptions, parseMlflowTrace } from "./sources/mlflow.js";
+export { buildTraceSource, type TraceSourceConfig } from "./sources/build-source.js";
 export {
   LangfuseTraceSource,
   type LangfuseTraceSourceOptions,
   langfuseObservationsToTraceEvents,
-} from "./langfuse-source.js";
+} from "./sources/langfuse-source.js";
 export {
   LangsmithTraceSource,
   type LangsmithTraceSourceOptions,
   langsmithRunsToTraceEvents,
-} from "./langsmith-source.js";
-export { PhoenixTraceSource, type PhoenixTraceSourceOptions, phoenixSpansToTraceEvents } from "./phoenix-source.js";
+} from "./sources/langsmith-source.js";
+export {
+  PhoenixTraceSource,
+  type PhoenixTraceSourceOptions,
+  phoenixSpansToTraceEvents,
+} from "./sources/phoenix-source.js";
 export type {
   TraceSink,
   TraceSinkCase,
@@ -21,28 +25,33 @@ export type {
   TraceSinkContext,
   TraceSinkResult,
   TraceSinkScore,
-} from "./trace-sink.js";
-export { buildTraceSink } from "./build-sink.js";
+} from "./sinks/trace-sink.js";
+export { buildTraceSink } from "./sinks/build-sink.js";
 export {
   MlflowTraceSink,
   type MlflowTraceSinkOptions,
   mlflowAssessmentBody,
   mlflowOtlpSpans,
   mlflowTraceBody,
-} from "./mlflow-sink.js";
+} from "./sinks/mlflow-sink.js";
 export {
   LangfuseTraceSink,
   type LangfuseTraceSinkOptions,
   chunkLangfuseEvents,
   langfuseBatch,
-} from "./langfuse-sink.js";
+} from "./sinks/langfuse-sink.js";
 export {
   LangsmithTraceSink,
   type LangsmithTraceSinkOptions,
   langsmithFeedbackBody,
   langsmithRunBody,
-} from "./langsmith-sink.js";
-export { PhoenixTraceSink, type PhoenixTraceSinkOptions, phoenixAnnotation, phoenixSpans } from "./phoenix-sink.js";
+} from "./sinks/langsmith-sink.js";
+export {
+  PhoenixTraceSink,
+  type PhoenixTraceSinkOptions,
+  phoenixAnnotation,
+  phoenixSpans,
+} from "./sinks/phoenix-sink.js";
 export {
   createUsageProxy,
   startUsageProxy,

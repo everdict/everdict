@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { parseMlflowTrace } from "./mlflow.js";
-import { parseJaegerSpans, parseOtlpSpans } from "./otel.js";
-import { type Span, spansToTraceEvents } from "./trace-source.js";
+import { parseMlflowTrace } from "./sources/mlflow.js";
+import { parseJaegerSpans, parseOtlpSpans } from "./sources/otel.js";
+import { type Span, spansToTraceEvents } from "./sources/trace-source.js";
 
 describe("spansToTraceEvents", () => {
   it("maps llm/tool/message spans to TraceEvents", () => {

@@ -1,9 +1,9 @@
 import { AppError } from "@everdict/core";
 import { describe, expect, it, vi } from "vitest";
-import { buildTraceSource } from "./build-source.js";
-import { LangfuseTraceSource } from "./langfuse-source.js";
-import { LangsmithTraceSource } from "./langsmith-source.js";
-import { PhoenixTraceSource, phoenixSpansToTraceEvents } from "./phoenix-source.js";
+import { buildTraceSource } from "./sources/build-source.js";
+import { LangfuseTraceSource } from "./sources/langfuse-source.js";
+import { LangsmithTraceSource } from "./sources/langsmith-source.js";
+import { PhoenixTraceSource, phoenixSpansToTraceEvents } from "./sources/phoenix-source.js";
 
 // A sequential-response fetch fake — records calls + returns prepared Responses in order (default 200 {}).
 function fakeFetch(responses: Response[] = []) {
