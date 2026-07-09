@@ -39,12 +39,24 @@ export class FairQueue<T> {
     const start = Math.max(this.vclock, this.lastVf.get(tenant) ?? 0);
     const vf = start + 1 / weight;
     this.lastVf.set(tenant, vf);
-    this.nodes.push({ item, tenant, vf, seq: this.seq++ });
+    const node: FairNode<T> = { item, tenant, vf, seq: this.seq++ };
+    // Keep `nodes` sorted by (vf, seq) so ordered() never sorts (it's called once per scheduler placement round).
+    // seq is monotonic, so a new node always sorts AFTER any existing node of equal vf → the insertion point is the
+    // first node with a strictly greater vf (upper bound on vf). Binary search for it.
+    let lo = 0;
+    let hi = this.nodes.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >>> 1;
+      const midNode = this.nodes[mid];
+      if (midNode !== undefined && midNode.vf <= vf) lo = mid + 1;
+      else hi = mid;
+    }
+    this.nodes.splice(lo, 0, node);
   }
 
-  // A snapshot in fair order (ascending vf; ties by input order). The caller attempts placement in this order.
+  // A snapshot in fair order (ascending vf; ties by input order) — `nodes` is maintained sorted, so no sort here.
   ordered(): T[] {
-    return [...this.nodes].sort((a, b) => a.vf - b.vf || a.seq - b.seq).map((n) => n.item);
+    return this.nodes.map((n) => n.item);
   }
 
   // Remove an item and advance the virtual clock to its vf (updating the fairness reference point).

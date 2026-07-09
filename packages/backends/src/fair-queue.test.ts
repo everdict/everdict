@@ -46,6 +46,24 @@ describe("FairQueue (WFQ)", () => {
     expect(ids(fq.ordered())).toEqual(["C0", "A3"]);
   });
 
+  it("stays in (vf, seq) order after removing a middle item and enqueuing more", () => {
+    const fq = q();
+    const a0 = { tenant: "A", id: "A0" }; // vf 1
+    const b0 = { tenant: "B", id: "B0" }; // vf 1
+    const a1 = { tenant: "A", id: "A1" }; // vf 2
+    fq.enqueue(a0);
+    fq.enqueue(b0);
+    fq.enqueue(a1);
+    expect(ids(fq.ordered())).toEqual(["A0", "B0", "A1"]);
+
+    expect(fq.remove(b0)).toBe(true); // remove from the middle → advances the virtual clock to b0.vf
+    expect(ids(fq.ordered())).toEqual(["A0", "A1"]);
+
+    const b1 = { tenant: "B", id: "B1" }; // vf = max(vclock=1, lastVf[B]=1)+1 = 2 → ties A1 (earlier seq) → after it
+    fq.enqueue(b1);
+    expect(ids(fq.ordered())).toEqual(["A0", "A1", "B1"]);
+  });
+
   it("observes per-tenant queue counts via queuedByTenant", () => {
     const fq = q();
     fq.enqueue({ tenant: "A", id: "A0" });

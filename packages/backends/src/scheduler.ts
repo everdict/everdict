@@ -1,5 +1,5 @@
 import { type AgentJob, type CaseResult, InternalError, NotFoundError, RateLimitError } from "@everdict/core";
-import { type DispatchOptions, dispatchAborted } from "./backend.js";
+import { type BackendCapacity, type DispatchOptions, dispatchAborted } from "./backend.js";
 import { type BudgetTracker, costOf } from "./budget.js";
 import { FairQueue } from "./fair-queue.js";
 import type { BackendRegistry } from "./registry.js";
@@ -196,23 +196,35 @@ export class Scheduler {
     return this.opts.eligible ? this.opts.eligible(job, all) : all;
   }
 
-  private async freeSlots(): Promise<Map<string, BackendSlot>> {
-    const slots = new Map<string, BackendSlot>();
+  // Probe every backend's capacity once — the ONLY cluster round-trip in a pump. Nomad/K8s capacity() is a live HTTP
+  // probe, so it must not run per placement: external usage doesn't change within a single drain, and the scheduler's
+  // own placements are tracked locally in inFlight (see freeSlotsFrom). Probing per round was O(rounds) probes/pump.
+  private async probeCapacities(): Promise<Map<string, BackendCapacity>> {
+    const caps = new Map<string, BackendCapacity>();
     await Promise.all(
       this.registry.names().map(async (name) => {
-        const cap = await this.registry.get(name).capacity();
-        const used = Math.max(cap.used, this.inFlight.get(name) ?? 0);
-        const memFreeMb =
-          cap.memoryBudgetMb === undefined
-            ? Number.POSITIVE_INFINITY
-            : Math.max(0, cap.memoryBudgetMb - (this.memInFlight.get(name) ?? 0));
-        const cpuFree =
-          cap.cpuBudget === undefined
-            ? Number.POSITIVE_INFINITY
-            : Math.max(0, cap.cpuBudget - (this.cpuInFlight.get(name) ?? 0));
-        slots.set(name, { name, total: cap.total, free: Math.max(0, cap.total - used), memFreeMb, cpuFree });
+        caps.set(name, await this.registry.get(name).capacity());
       }),
     );
+    return caps;
+  }
+
+  // Free slots from a capacity snapshot + the scheduler's live in-flight counts — pure, recomputed each placement
+  // round with no HTTP. used = max(probe, ownInFlight) so a lagging probe can't let us over-admit our own placements.
+  private freeSlotsFrom(caps: Map<string, BackendCapacity>): Map<string, BackendSlot> {
+    const slots = new Map<string, BackendSlot>();
+    for (const [name, cap] of caps) {
+      const used = Math.max(cap.used, this.inFlight.get(name) ?? 0);
+      const memFreeMb =
+        cap.memoryBudgetMb === undefined
+          ? Number.POSITIVE_INFINITY
+          : Math.max(0, cap.memoryBudgetMb - (this.memInFlight.get(name) ?? 0));
+      const cpuFree =
+        cap.cpuBudget === undefined
+          ? Number.POSITIVE_INFINITY
+          : Math.max(0, cap.cpuBudget - (this.cpuInFlight.get(name) ?? 0));
+      slots.set(name, { name, total: cap.total, free: Math.max(0, cap.total - used), memFreeMb, cpuFree });
+    }
     return slots;
   }
 
@@ -220,10 +232,12 @@ export class Scheduler {
     if (this.pumping) return; // reentrancy guard — when one pump ends, settle calls it again
     this.pumping = true;
     try {
+      if (this.queue.size === 0) return; // nothing to place — don't probe the cluster
       let placedAny = true;
+      const caps = await this.probeCapacities(); // ONE cluster probe per drain, reused across placement rounds
       while (placedAny && this.queue.size > 0) {
         placedAny = false;
-        const slots = await this.freeSlots();
+        const slots = this.freeSlotsFrom(caps); // recompute from the snapshot + live in-flight (no HTTP)
         // Scan in WFQ fair order, but skip jobs that can't be sent now due to quota/capacity (HOL avoidance).
         // Priority classes first: interactive jobs (a person is waiting — single runs) jump ahead of batch
         // fan-out, while the tenant-fair WFQ order is preserved WITHIN each class (stable partition).

@@ -20,16 +20,21 @@ class ControlledBackend implements Backend {
   inFlight = 0;
   maxSeen = 0;
   handled = 0;
+  capacityCalls = 0; // how many times capacity() was probed (asserts the pump probes once per drain, not per placement)
   dispatchedIds: string[] = []; // order of dispatched case ids (for fairness verification)
   memoryBudgetMb: number | undefined;
   cpuBudget: number | undefined;
   private pending: Array<() => void> = [];
   constructor(
     readonly id: string,
-    private readonly total: number,
+    private total: number,
     private readonly used = 0,
   ) {}
+  setTotal(total: number): void {
+    this.total = total;
+  }
   async capacity() {
+    this.capacityCalls++;
     return {
       total: this.total,
       used: this.used,
@@ -518,6 +523,28 @@ describe("Scheduler", () => {
     big.releaseAll();
     await flush();
     await p;
+  });
+});
+
+describe("Scheduler capacity probing", () => {
+  it("probes each backend's capacity once per drain, not once per placement", async () => {
+    const b = new ControlledBackend("a", 0); // start full → jobs queue instead of dispatching
+    const sched = new Scheduler(new BackendRegistry().register("a", b));
+    const p1 = sched.dispatch(tjob("t", "j1"));
+    const p2 = sched.dispatch(tjob("t", "j2"));
+    const p3 = sched.dispatch(tjob("t", "j3"));
+    await flush();
+    expect(sched.stats().queued).toBe(3); // nothing placed yet (no capacity)
+
+    b.setTotal(3); // open enough capacity for all three
+    b.capacityCalls = 0; // count only the drain
+    sched.poke();
+    await flush();
+
+    expect(b.dispatchedIds).toEqual(["j1", "j2", "j3"]); // all three placed in one drain
+    expect(b.capacityCalls).toBeLessThanOrEqual(1); // ONE probe for the whole drain, not one per placement
+    b.releaseAll();
+    await Promise.all([p1, p2, p3]);
   });
 });
 
