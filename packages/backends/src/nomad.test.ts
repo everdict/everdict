@@ -604,3 +604,34 @@ describe("NomadBackend.dispatch cancellation (AbortSignal)", () => {
     expect(deletes.some((p) => p.includes("everdict-c1-"))).toBe(true); // the submitted job was deregistered, not left running
   });
 });
+
+describe("NomadBackend.probe (structured failure classification)", () => {
+  it("classifies a rejected credential as auth, a network failure as unreachable, and success as no reason", async () => {
+    const authFail: NomadHttp = {
+      async request() {
+        return { status: 403, text: "forbidden" };
+      },
+    };
+    const a = await new NomadBackend({ addr: "http://n:4646", image: "i", http: authFail }).probe();
+    expect(a.reachable).toBe(false);
+    expect(a.reason).toBe("auth");
+
+    const down: NomadHttp = {
+      async request() {
+        throw new Error("ECONNREFUSED");
+      },
+    };
+    const d = await new NomadBackend({ addr: "http://n:4646", image: "i", http: down }).probe();
+    expect(d.reachable).toBe(false);
+    expect(d.reason).toBe("unreachable");
+
+    const up: NomadHttp = {
+      async request() {
+        return { status: 200, text: JSON.stringify({ member: { Name: "n1" } }) };
+      },
+    };
+    const o = await new NomadBackend({ addr: "http://n:4646", image: "i", http: up }).probe();
+    expect(o.reachable).toBe(true);
+    expect(o.reason).toBeUndefined();
+  });
+});

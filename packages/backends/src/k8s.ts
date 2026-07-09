@@ -517,7 +517,11 @@ export class K8sBackend implements Backend, Recoverable, Observable, Probeable {
       const version = await this.withApi((api) => api.serverVersion());
       return { reachable: true, detail: `K8s server ${version}` };
     } catch (e) {
-      return { reachable: false, detail: e instanceof Error ? e.message : String(e) };
+      const detail = e instanceof Error ? e.message : String(e);
+      // kubectl surfaces auth failures textually — classify heuristically so a caller can tell "bad credential"
+      // from "cluster unreachable" (the two most common, differently-actionable causes).
+      const reason = /unauthor|forbidden|401|403|credential|token/i.test(detail) ? "auth" : "unreachable";
+      return { reachable: false, reason, detail };
     }
   }
 

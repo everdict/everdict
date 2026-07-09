@@ -31,6 +31,18 @@ Guards live next to the interfaces: `isRecoverable` / `isObservable` / `isShella
 `isProbeable`. A consumer does `if (!isObservable(backend)) return; backend.logs(caseId)` — no `?.`, no `undefined`
 overload for "not implemented". If your new backend can't do a capability, just don't implement its interface.
 
+`Recoverable.adopt` returns a three-valued `AdoptOutcome` (`adopted` | `absent` | `unknown`), NOT `CaseResult |
+undefined` — `absent` (listing succeeded, no job → safe to re-dispatch) must stay distinct from `unknown` (an
+API/parse failure → re-dispatch may double-spend a still-live job). Observability methods return `undefined` for the
+single meaning "no live job" and MUST NOT throw (best-effort).
+
+## Cancellation (AbortSignal)
+`dispatch(job, opts?: DispatchOptions)` carries an optional `signal`. Honor it: pollers (Nomad/K8s) stop the poll the
+moment it aborts (via `abortableDelay`) and reclaim the orchestrator job; in-process/pull backends refuse a
+not-yet-started run. Reject with `dispatchAborted(job)` (the shared `CANCELLED` factory). The `Scheduler` also cancels
+a signal that fires while the job is still QUEUED (removes the entry, no wasted slot) and forwards the signal to the
+backend once in-flight. This is promise-tied cancellation, complementing the id-keyed `kill(caseId)` side channel.
+
 ## Reference impl
 `packages/backends/src/nomad.ts` — `buildNomadJob` (job spec) + `NomadBackend` (submit → poll
 alloc → read logs → parse). `LocalBackend` runs in-process (dev). K8s/Windows mirror this shape.
@@ -38,6 +50,8 @@ alloc → read logs → parse). `LocalBackend` runs in-process (dev). K8s/Window
 Every `Backend` also implements `capacity(): Promise<{total, used}>` — what the `Scheduler` gates on.
 Report a configured `maxConcurrent` as `total` (it may be `number | (() => number)` so the autoscaler
 can move it); live-probe the cluster for `used` where cheap (Nomad counts running `everdict-*` jobs), else 0.
+`used` is reconciled as `free = total − max(used, schedulerInFlight)` (the `max` handles `used` both INCLUDING and
+LAGGING the scheduler's own jobs) — best-effort, so report `0` rather than guess when a live count isn't available.
 
 ## Contracts
 `AgentJob` (`@everdict/core`) = `{ evalCase, harness:{id,version}, tenant? }`. The agent reconstructs the

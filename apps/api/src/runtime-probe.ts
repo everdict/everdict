@@ -6,6 +6,7 @@ export interface RuntimeProbeResult {
   kind: string;
   reachable: boolean;
   detail: string;
+  reason?: ProbeResult["reason"]; // structured failure class ("auth" | "unreachable" | "error"), undefined when reachable
 }
 
 export interface RuntimeProberDeps {
@@ -29,7 +30,8 @@ export function makeRuntimeProber(
     try {
       backend = build(spec, { secretEnv });
     } catch (e) {
-      return { kind: spec.kind, reachable: false, detail: e instanceof Error ? e.message : String(e) };
+      // A spec that can't even be built is a config error, not a reachability failure.
+      return { kind: spec.kind, reachable: false, reason: "error", detail: e instanceof Error ? e.message : String(e) };
     }
     if (!isProbeable(backend))
       return {
@@ -40,11 +42,16 @@ export function makeRuntimeProber(
     // Cap so we don't wait out the TCP timeout (tens of seconds) of an unreachable cluster.
     const timeout = new Promise<ProbeResult>((resolve) => {
       setTimeout(
-        () => resolve({ reachable: false, detail: `Connection test timed out (${timeoutMs / 1000}s)` }),
+        () =>
+          resolve({
+            reachable: false,
+            reason: "unreachable",
+            detail: `Connection test timed out (${timeoutMs / 1000}s)`,
+          }),
         timeoutMs,
       );
     });
     const r = await Promise.race([backend.probe(), timeout]);
-    return { kind: spec.kind, reachable: r.reachable, detail: r.detail };
+    return { kind: spec.kind, reachable: r.reachable, detail: r.detail, ...(r.reason ? { reason: r.reason } : {}) };
   };
 }

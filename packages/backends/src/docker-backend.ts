@@ -40,7 +40,8 @@ export class DockerBackend implements Backend, Probeable {
       const version = stdout.trim();
       return { reachable: true, detail: version ? `docker server ${version}` : "docker daemon responded" };
     } catch (e) {
-      return { reachable: false, detail: e instanceof Error ? e.message : String(e) };
+      // A non-zero `docker version` almost always means the daemon isn't running / no socket permission.
+      return { reachable: false, reason: "unreachable", detail: e instanceof Error ? e.message : String(e) };
     }
   }
 }

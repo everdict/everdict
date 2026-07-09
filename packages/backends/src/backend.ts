@@ -21,7 +21,12 @@ export interface ExecStreamHandle {
 // A backend's concurrent capacity. The scheduler adds its own in-flight to compute free slots.
 export interface BackendCapacity {
   total: number; // upper bound of concurrent slots (static config or live probe)
-  used: number; // external usage observed by the backend (0 if unknown; the scheduler additionally accounts for its own in-flight)
+  // External usage the backend observed at probe time (0 when it can't cheaply tell). NOT the whole story: the
+  // Scheduler computes free = total − max(used, itsOwnInFlight), because `used` may already INCLUDE this scheduler's
+  // jobs (so max avoids double-counting) OR LAG behind them (a just-submitted job the probe hasn't seen yet). The
+  // reconciliation is therefore best-effort — under probe lag a backend can briefly over-admit; acceptable for eval
+  // workloads and self-correcting on the next probe. Report 0 rather than guessing when a live count is unavailable.
+  used: number;
   // Optional memory envelope (declared, e.g. RuntimeSpec.memoryBudgetMb) — caps the SUM of in-flight
   // harness-declared memory the Scheduler admits at once. Absent = slots-only admission (previous behavior).
   memoryBudgetMb?: number;
@@ -35,6 +40,10 @@ export interface BackendCapacity {
 export interface ProbeResult {
   reachable: boolean; // reached the cluster API + (if credentials exist) authenticated successfully
   detail: string; // success: identifying info like version/name; failure: reason (status code/error message)
+  // Structured failure classification (undefined when reachable): "auth" = reached but the credential was rejected,
+  // "unreachable" = couldn't reach the API at all, "error" = reached but returned an unexpected error. Lets a caller
+  // or UI branch ("check your token" vs "check the address") instead of scraping the human-readable `detail`.
+  reason?: "unreachable" | "auth" | "error";
 }
 
 // Per-dispatch options — currently just cooperative cancellation. A backend that cannot interrupt an already-started

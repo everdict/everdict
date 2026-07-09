@@ -295,10 +295,14 @@ export class NomadBackend implements Backend, Recoverable, Observable, Shellable
         return { reachable: true, detail: name ? `Nomad agent: ${name}` : "Nomad agent responded" };
       }
       if (res.status === 401 || res.status === 403)
-        return { reachable: false, detail: `auth failed (${res.status}) — check the ACL token (authSecret).` };
-      return { reachable: false, detail: `Nomad ${res.status}: ${res.text.slice(0, 200)}` };
+        return {
+          reachable: false,
+          reason: "auth",
+          detail: `auth failed (${res.status}) — check the ACL token (authSecret).`,
+        };
+      return { reachable: false, reason: "error", detail: `Nomad ${res.status}: ${res.text.slice(0, 200)}` };
     } catch (e) {
-      return { reachable: false, detail: e instanceof Error ? e.message : String(e) };
+      return { reachable: false, reason: "unreachable", detail: e instanceof Error ? e.message : String(e) };
     }
   }
 

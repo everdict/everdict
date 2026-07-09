@@ -40,6 +40,12 @@ A Backend = placement: dispatch a runner-agent job to an orchestrator. See skill
   there is **no** `EVERDICT_REQUIRE_RUNTIME`-style env flag); the service's `requireRuntime` boolean exists only so
   mock-dispatcher unit tests stay valid. Target existence is still validated later by `RuntimeDispatcher`/`Scheduler`
   (`NOT_FOUND`). In-process single-host dev execution lives in `apps/cli` (`everdict run`). See `docs/execution-backends.md`.
+- **Cancellation is promise-tied, via `dispatch(job, opts?: DispatchOptions)`'s optional `signal`** (not only the
+  id-keyed `kill(caseId)`). Pollers stop the poll on abort (`abortableDelay`) and reclaim the orchestrator job;
+  in-process/pull backends refuse a not-yet-started run. Reject with the shared `dispatchAborted(job)` (`CANCELLED`).
+  Thread `opts` through every `Dispatcher` wrapper (Router/Scheduler + the apps/api chain); the `Scheduler` also
+  drops a signal that aborts while QUEUED. `AdoptOutcome` (`adopted|absent|unknown`) keeps "no job" distinct from
+  "couldn't determine" so boot recovery never re-dispatches (double-spends) a possibly-live job on a transient error.
 - Inject auth via `collectAuthEnv()` (`@everdict/agent`) into the job env; never log or commit it.
 - Map orchestrator failures to `UpstreamError`; never leak a raw HTTP/SDK error.
 - Placement: `Router` = static (pin/default, dev); `Scheduler` = capacity-aware + **tenant-fair** (WFQ via
