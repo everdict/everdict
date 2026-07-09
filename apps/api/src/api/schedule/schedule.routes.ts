@@ -1,7 +1,8 @@
 import type { FastifyInstance } from "fastify";
 import type { z } from "zod";
 import { type ServerDeps, gate, resolvePrincipal, sendError } from "../route-context.js";
-import { CreateScheduleBodySchema, UpdateScheduleBodySchema } from "./schedule.schema.js";
+import { CreateScheduleBodySchema } from "./request/create-schedule.js";
+import { UpdateScheduleBodySchema } from "./request/update-schedule.js";
 
 // scheduled (cron) scorecards — stored RunScorecardInput + cron expression + policy. Firing (Temporal Schedule) is slice 2.
 // The fired run's submittedBy = the creator (principal.subject): budget → tenant, private-repo connection resolution.

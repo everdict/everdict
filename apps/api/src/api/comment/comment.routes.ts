@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { type ServerDeps, gate, resolvePrincipal, sendError, zodIssues } from "../route-context.js";
-import { CreateCommentBodySchema } from "./comment.schema.js";
+import { CreateCommentBodySchema } from "./request/create-comment.js";
 
 // comments (resource comments — collaborative discussion on datasets, etc.; read = viewer+, write = member+, delete = author-or-admin)
 export function registerCommentRoutes(app: FastifyInstance, deps: ServerDeps): void {

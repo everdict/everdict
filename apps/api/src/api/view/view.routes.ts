@@ -1,7 +1,8 @@
 import type { FastifyInstance } from "fastify";
 import type { z } from "zod";
 import { type ServerDeps, gate, resolvePrincipal, sendError } from "../route-context.js";
-import { CreateViewBodySchema, UpdateViewBodySchema } from "./view.schema.js";
+import { CreateViewBodySchema } from "./request/create-view.js";
+import { UpdateViewBodySchema } from "./request/update-view.js";
 
 // Saved scorecard-analysis Views — a named AnalysisConfig (opaque). Read = shared + my private, edit·delete = owner·admin.
 // Reuses scorecard read/run permissions (no new authz action): read = scorecards:read, write = scorecards:run.

@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import type { z } from "zod";
 import { type ServerDeps, gate, resolvePrincipal, sendError } from "../route-context.js";
-import { SubmitBodySchema } from "./run.schema.js";
+import { SubmitBodySchema } from "./request/submit.js";
 
 // runs — the async execution primitive: submit returns a run id; the result arrives by poll or webhook.
 export function registerRunRoutes(app: FastifyInstance, deps: ServerDeps): void {

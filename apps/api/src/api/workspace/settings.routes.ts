@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { type ServerDeps, gate, resolvePrincipal, sendError, zodIssues } from "../route-context.js";
-import { WorkspaceSettingsBodySchema } from "./settings.schema.js";
+import { WorkspaceSettingsBodySchema } from "./request/workspace-settings.js";
 
 // workspace settings (metering policy, default judge, notify target; admin only).
 export function registerWorkspaceSettingsRoutes(app: FastifyInstance, deps: ServerDeps): void {

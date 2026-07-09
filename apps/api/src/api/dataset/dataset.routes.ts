@@ -4,7 +4,8 @@ import type { FastifyInstance } from "fastify";
 import { VersionTagsBodySchema, setVersionTags } from "../../common/version-tag-service.js";
 import { deleteDatasetVersion } from "../../core/dataset/dataset-service.js";
 import { type ServerDeps, gate, resolvePrincipal, sendError, zodIssues } from "../route-context.js";
-import { ImportHarborBodySchema, ImportTerminalBenchBodySchema } from "./dataset.schema.js";
+import { ImportHarborBodySchema } from "./request/import-harbor.js";
+import { ImportTerminalBenchBodySchema } from "./request/import-terminal-bench.js";
 
 // datasets (workspace-owned SSOT, harness-agnostic eval-case bundles)
 export function registerDatasetRoutes(app: FastifyInstance, deps: ServerDeps): void {

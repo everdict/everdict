@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { type ServerDeps, gate, resolvePrincipal, sendError, zodIssues } from "../route-context.js";
-import { ReadNotificationsBodySchema } from "./notification.schema.js";
+import { ReadNotificationsBodySchema } from "./request/read-notifications.js";
 
 // notifications (personal feed — bell inbox; self-scoped, no role gate).
 export function registerNotificationRoutes(app: FastifyInstance, deps: ServerDeps): void {

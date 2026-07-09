@@ -1,14 +1,6 @@
 import { JudgeRunConfigSchema } from "@everdict/core";
 import { z } from "zod";
-
-// Origin coordinates the submitter attaches (commit/PR/CI run) — origin.source is decided server-side from principal.via (client can't forge it).
-export const ScorecardOriginBodySchema = z.object({
-  repo: z.string().optional(), // "owner/name"
-  sha: z.string().optional(),
-  ref: z.string().optional(),
-  prNumber: z.number().int().optional(),
-  runUrl: z.string().optional(),
-});
+import { ScorecardOriginBodySchema } from "./scorecard-origin.js";
 
 // Run-scorecard body — dataset×harness (version defaults to latest, the service resolves a concrete version) + selected judges.
 // harness.pins = submit-time ephemeral pins (slot→image, registry unchanged) — a CI PR trigger swaps just one service image for the eval.

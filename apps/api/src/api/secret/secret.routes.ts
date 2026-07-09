@@ -2,7 +2,7 @@ import { can } from "@everdict/auth";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { type ServerDeps, gate, resolvePrincipal, sendError, zodIssues } from "../route-context.js";
-import { SecretNameSchema } from "./secret.schema.js";
+import { SecretNameSchema } from "./request/secret-name.js";
 
 // secrets (workspace + personal model/provider keys; encrypted at rest, never read back).
 export function registerSecretRoutes(app: FastifyInstance, deps: ServerDeps): void {

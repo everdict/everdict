@@ -6,7 +6,7 @@ import {
   originSource,
 } from "../../core/scorecard/scorecard-service.js";
 import { type ServerDeps, gate, resolvePrincipal, sendError, zodIssues } from "../route-context.js";
-import { RunScorecardBodySchema } from "./scorecard.schema.js";
+import { RunScorecardBodySchema } from "./request/run-scorecard.js";
 
 // scorecards (dataset×harness batch eval → aggregated result): run/retry, push+pull trace ingest,
 // list/get, estimate, baseline↔candidate diff, leaderboard/trend, model backfill.
