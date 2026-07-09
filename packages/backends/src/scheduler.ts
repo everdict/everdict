@@ -74,15 +74,70 @@ export interface SchedulerOptions {
   budget?: BudgetTracker;
 }
 
+// In-flight accounting for the Scheduler: reserve on placement, release on completion. One object keeps the four
+// dimensions (backend slots / memory / cpu, tenant count) in lockstep, so the reserve/release invariant lives in one
+// place instead of four parallel maps diddled at two call sites.
+class Admission {
+  private readonly backendCounts = new Map<string, number>();
+  private readonly backendMemMb = new Map<string, number>();
+  private readonly backendCpu = new Map<string, number>();
+  private readonly tenantCounts = new Map<string, number>();
+
+  reserve(backend: string, tenant: string, memMb: number, cpu: number): void {
+    bump(this.backendCounts, backend, 1);
+    if (memMb > 0) bump(this.backendMemMb, backend, memMb);
+    if (cpu > 0) bump(this.backendCpu, backend, cpu);
+    bump(this.tenantCounts, tenant, 1);
+  }
+
+  release(backend: string, tenant: string, memMb: number, cpu: number): void {
+    bump(this.backendCounts, backend, -1);
+    if (memMb > 0) bump(this.backendMemMb, backend, -memMb);
+    if (cpu > 0) bump(this.backendCpu, backend, -cpu);
+    bump(this.tenantCounts, tenant, -1);
+  }
+
+  countFor(backend: string): number {
+    return this.backendCounts.get(backend) ?? 0;
+  }
+  memMbFor(backend: string): number {
+    return this.backendMemMb.get(backend) ?? 0;
+  }
+  cpuFor(backend: string): number {
+    return this.backendCpu.get(backend) ?? 0;
+  }
+  tenantCountFor(tenant: string): number {
+    return this.tenantCounts.get(tenant) ?? 0;
+  }
+
+  snapshot(): {
+    inFlight: Record<string, number>;
+    memInFlightMb: Record<string, number>;
+    cpuInFlight: Record<string, number>;
+    tenantInFlight: Record<string, number>;
+  } {
+    return {
+      inFlight: Object.fromEntries(this.backendCounts),
+      memInFlightMb: Object.fromEntries(this.backendMemMb),
+      cpuInFlight: Object.fromEntries(this.backendCpu),
+      tenantInFlight: Object.fromEntries(this.tenantCounts),
+    };
+  }
+}
+
+// Add delta to a counter map, clamped at 0 (never negative).
+function bump(map: Map<string, number>, key: string, delta: number): void {
+  map.set(key, Math.max(0, (map.get(key) ?? 0) + delta));
+}
+
 // A capacity-aware + tenant-fair scheduler: place jobs where there's room based on backend free capacity, but pull
 // waiting jobs in WFQ (weighted fair queue) order and don't exceed each tenant's quota. If there's no room/quota,
 // queue and then auto-pump when a slot frees (HOL avoidance). Dispatcher-compatible (drop-in).
 export class Scheduler {
   private readonly policy: PlacementPolicy;
-  private readonly inFlight = new Map<string, number>(); // backend name → in-flight
-  private readonly memInFlight = new Map<string, number>(); // backend name → in-flight harness-declared memory (Mb)
-  private readonly cpuInFlight = new Map<string, number>(); // backend name → in-flight harness-declared cpu (resources.cpu units)
-  private readonly tenantInFlight = new Map<string, number>(); // tenant → in-flight
+  // In-flight accounting across backend slots / memory / cpu and per-tenant count — reserved on placement, released
+  // on completion (see Admission), replacing four parallel maps.
+  private readonly admission = new Admission();
   private readonly queue: FairQueue<QueueEntry>;
   private pumping = false;
 
@@ -183,10 +238,7 @@ export class Scheduler {
   } {
     return {
       queued: this.queue.size,
-      inFlight: Object.fromEntries(this.inFlight),
-      memInFlightMb: Object.fromEntries(this.memInFlight),
-      cpuInFlight: Object.fromEntries(this.cpuInFlight),
-      tenantInFlight: Object.fromEntries(this.tenantInFlight),
+      ...this.admission.snapshot(),
       queuedByTenant: this.queue.queuedByTenant(),
     };
   }
@@ -221,15 +273,15 @@ export class Scheduler {
   private freeSlotsFrom(caps: Map<string, BackendCapacity>): Map<string, BackendSlot> {
     const slots = new Map<string, BackendSlot>();
     for (const [name, cap] of caps) {
-      const used = Math.max(cap.used, this.inFlight.get(name) ?? 0);
+      const used = Math.max(cap.used, this.admission.countFor(name));
       const memFreeMb =
         cap.memoryBudgetMb === undefined
           ? Number.POSITIVE_INFINITY
-          : Math.max(0, cap.memoryBudgetMb - (this.memInFlight.get(name) ?? 0));
+          : Math.max(0, cap.memoryBudgetMb - this.admission.memMbFor(name));
       const cpuFree =
         cap.cpuBudget === undefined
           ? Number.POSITIVE_INFINITY
-          : Math.max(0, cap.cpuBudget - (this.cpuInFlight.get(name) ?? 0));
+          : Math.max(0, cap.cpuBudget - this.admission.cpuFor(name));
       slots.set(name, { name, total: cap.total, free: Math.max(0, cap.total - used), memFreeMb, cpuFree });
     }
     return slots;
@@ -258,7 +310,7 @@ export class Scheduler {
         for (const entry of scan) {
           const tenant = tenantOf(entry.job);
           const quota = this.opts.tenantQuota?.(tenant) ?? Number.POSITIVE_INFINITY;
-          if ((this.tenantInFlight.get(tenant) ?? 0) >= quota) continue; // tenant quota reached
+          if (this.admission.tenantCountFor(tenant) >= quota) continue; // tenant quota reached
 
           let names: string[];
           try {
@@ -296,10 +348,7 @@ export class Scheduler {
             slot.memFreeMb -= memNeed;
             slot.cpuFree -= cpuNeed;
           }
-          this.inFlight.set(chosen, (this.inFlight.get(chosen) ?? 0) + 1);
-          if (memNeed > 0) this.memInFlight.set(chosen, (this.memInFlight.get(chosen) ?? 0) + memNeed);
-          if (cpuNeed > 0) this.cpuInFlight.set(chosen, (this.cpuInFlight.get(chosen) ?? 0) + cpuNeed);
-          this.tenantInFlight.set(tenant, (this.tenantInFlight.get(tenant) ?? 0) + 1);
+          this.admission.reserve(chosen, tenant, memNeed, cpuNeed);
           this.runOne(entry, chosen, tenant, memNeed, cpuNeed);
           placedAny = true;
         }
@@ -324,11 +373,7 @@ export class Scheduler {
         entry.resolve(result);
       }, entry.reject)
       .finally(() => {
-        this.inFlight.set(name, Math.max(0, (this.inFlight.get(name) ?? 1) - 1));
-        if (memNeedMb > 0)
-          this.memInFlight.set(name, Math.max(0, (this.memInFlight.get(name) ?? memNeedMb) - memNeedMb));
-        if (cpuNeed > 0) this.cpuInFlight.set(name, Math.max(0, (this.cpuInFlight.get(name) ?? cpuNeed) - cpuNeed));
-        this.tenantInFlight.set(tenant, Math.max(0, (this.tenantInFlight.get(tenant) ?? 1) - 1));
+        this.admission.release(name, tenant, memNeedMb, cpuNeed);
         void this.pump();
       });
   }
