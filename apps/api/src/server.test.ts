@@ -3002,3 +3002,31 @@ describe("API — GitHub Actions CI principal (via=github-actions, roles=[ci])",
     await app.close();
   });
 });
+
+describe("API — OpenAPI docs (/docs, documentation-only)", () => {
+  it("serves the OpenAPI document listing the registered routes", async () => {
+    const { app } = server();
+    const res = await app.inject({ method: "GET", url: "/docs/json" });
+    expect(res.statusCode).toBe(200);
+    const doc = res.json();
+    expect(doc.openapi).toMatch(/^3\./);
+    expect(doc.info.title).toBe("Everdict control-plane API");
+    // route modules boot after @fastify/swagger, so the whole surface is collected
+    expect(Object.keys(doc.paths)).toEqual(expect.arrayContaining(["/healthz", "/runs", "/scorecards", "/me"]));
+    await app.close();
+  });
+
+  it("attaching doc schemas never changes behavior — invalid bodies still return the flat handler envelope", async () => {
+    const { app } = server();
+    // handler-level safeParse (not fastify ajv) owns validation: flat { code, message } with no ajv artifacts
+    const res = await app.inject({
+      method: "POST",
+      url: "/runs",
+      headers: { "x-everdict-tenant": "acme", "content-type": "application/json" },
+      payload: { nope: true },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().code).toBe("BAD_REQUEST");
+    await app.close();
+  });
+});

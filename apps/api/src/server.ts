@@ -49,6 +49,8 @@ import type {
   RuntimeRegistry,
 } from "@everdict/registry";
 import type { CallbackSink } from "@everdict/topology";
+import fastifySwagger from "@fastify/swagger";
+import fastifySwaggerUi from "@fastify/swagger-ui";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
@@ -166,50 +168,65 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     done(null, out);
   });
 
-  app.get("/healthz", async () => ({ ok: true }));
+  // OpenAPI is documentation-only (rule api-layer): route schemas come from <resource>.docs.ts and must never
+  // change behavior — validation stays in the handlers (safeParse → flat envelope) and responses serialize as
+  // plain JSON, so both compilers are no-ops (a schema-carrying route would otherwise turn on ajv +
+  // fast-json-stringify and change 400 envelopes / drop undeclared response fields).
+  app.setValidatorCompiler(() => () => true);
+  app.setSerializerCompiler(() => (data) => JSON.stringify(data));
+  app.register(fastifySwagger, {
+    openapi: {
+      info: {
+        title: "Everdict control-plane API",
+        description:
+          "Multi-tenant eval control plane — runs, scorecards, harnesses, datasets, judges, runtimes, workspace administration. Flat responses (no envelope); errors are { code, message, data? }.",
+        version: "0.1.0",
+      },
+    },
+  });
+  app.register(fastifySwaggerUi, { routePrefix: "/docs" });
 
-  // --- resource route modules (see .claude/rules/api-layer.md — resource = slice, domain = folder) ---
-  // execution
-  registerFrontdoorCallbackRoutes(app, deps);
-  registerRunRoutes(app, deps);
-  registerRunObservabilityRoutes(app, deps);
-  registerScorecardRoutes(app, deps);
-  // scheduling
-  registerScheduleRoutes(app, deps);
-  // catalog
-  registerHarnessTemplateRoutes(app, deps);
-  registerHarnessRoutes(app, deps);
-  registerDatasetRoutes(app, deps);
-  registerBenchmarkRoutes(app, deps);
-  registerBundleRoutes(app, deps);
-  registerJudgeRoutes(app, deps);
-  registerModelRoutes(app, deps);
-  registerRuntimeRoutes(app, deps);
-  // workspace (membership, personal account surfaces, saved views, discussion)
-  registerProfileRoutes(app, deps);
-  registerWorkspaceRoutes(app, deps);
-  registerMemberRoutes(app, deps);
-  registerInviteRoutes(app, deps);
-  registerWorkspaceSettingsRoutes(app, deps);
-  registerSecretRoutes(app, deps);
-  registerApiKeyRoutes(app, deps);
-  registerNotificationRoutes(app, deps);
-  registerCommentRoutes(app, deps);
-  registerViewRoutes(app, deps);
-  // integrations
-  registerGithubAppRoutes(app, deps);
-  registerMattermostRoutes(app, deps);
-  registerTraceSinkRoutes(app, deps);
-  registerImageRegistryRoutes(app, deps);
-  registerCiLinkRoutes(app, deps);
-  // runners
-  registerRunnerRoutes(app, deps);
-  registerWorkspaceRunnerRoutes(app, deps);
-  // ops + internal + MCP
-  registerQueueRoutes(app, deps);
-  registerBillingRoutes(app, deps);
-  registerInternalRoutes(app, deps);
-  registerMcpRoutes(app, deps);
+  // Route modules register inside a child scope so they boot AFTER @fastify/swagger — its onRoute hook only
+  // sees routes added after the plugin loads (root-level routes would be added too early and vanish from /docs).
+  app.register(async (routes) => {
+    routes.get("/healthz", async () => ({ ok: true }));
+
+    // --- resource route modules (see .claude/rules/api-layer.md — root = layer, inside = domain) ---
+    registerFrontdoorCallbackRoutes(routes, deps);
+    registerRunRoutes(routes, deps);
+    registerRunObservabilityRoutes(routes, deps);
+    registerScorecardRoutes(routes, deps);
+    registerScheduleRoutes(routes, deps);
+    registerHarnessTemplateRoutes(routes, deps);
+    registerHarnessRoutes(routes, deps);
+    registerDatasetRoutes(routes, deps);
+    registerBenchmarkRoutes(routes, deps);
+    registerBundleRoutes(routes, deps);
+    registerJudgeRoutes(routes, deps);
+    registerModelRoutes(routes, deps);
+    registerRuntimeRoutes(routes, deps);
+    registerProfileRoutes(routes, deps);
+    registerWorkspaceRoutes(routes, deps);
+    registerMemberRoutes(routes, deps);
+    registerInviteRoutes(routes, deps);
+    registerWorkspaceSettingsRoutes(routes, deps);
+    registerSecretRoutes(routes, deps);
+    registerApiKeyRoutes(routes, deps);
+    registerNotificationRoutes(routes, deps);
+    registerCommentRoutes(routes, deps);
+    registerViewRoutes(routes, deps);
+    registerGithubAppRoutes(routes, deps);
+    registerMattermostRoutes(routes, deps);
+    registerTraceSinkRoutes(routes, deps);
+    registerImageRegistryRoutes(routes, deps);
+    registerCiLinkRoutes(routes, deps);
+    registerRunnerRoutes(routes, deps);
+    registerWorkspaceRunnerRoutes(routes, deps);
+    registerQueueRoutes(routes, deps);
+    registerBillingRoutes(routes, deps);
+    registerInternalRoutes(routes, deps);
+    registerMcpRoutes(routes, deps);
+  });
 
   // token via the workspace GitHub App. settings:write (admin, since it touches a team resource + repo trust). The tokens in the response are not stored.
 
