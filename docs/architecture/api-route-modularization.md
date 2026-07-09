@@ -1,11 +1,12 @@
 # apps/api route modularization — split the 3676-line server.ts into resource route modules (design)
 
-> **Status: in rollout, green-gated.** Foundation (route-context) + views/schedules/comments/models/judges/
-> runtimes/datasets/benchmarks/bundles extracted (`3929563`…`cf92308`, server.ts 3676→2444); remaining:
-> harnesses, scorecards, runs, workspace/members/invites/secrets, integrations, runners, account, ops, internal,
-> mcp. This realizes the `api-layer` rule's own convention — *"three-file split per resource"* — the services are
-> already domained (`2258302`); the routes move next to them. Public route surface is unchanged, so the 636
-> apps/api tests are the safety net at every step.
+> **Status: SHIPPED.** All 158 routes extracted into **34 resource route modules** (+9 schema files) across
+> `execution/ catalog/ workspace/ integrations/ runners/ scheduling/ ops/` + `mcp.routes.ts`
+> (`3929563`…`07ed7e1`); `server.ts` is a **285-line composition root** (was 3676): app construction, the
+> domain-grouped register-call list, and the WS terminal upgrade. Every slice landed with the full 636-test
+> suite green; final state also passes apps/api build + the full workspace typecheck (42/42). This realizes the
+> `api-layer` rule's own convention — *"three-file split per resource"* — the services were already domained
+> (`2258302`); the routes now live next to them.
 >
 > **Slicing refinement (locked):** the slice unit is the **resource, not the domain**. A domain folder groups
 > several resource modules (`catalog/` = dataset + judge + model + runtime + benchmark + bundle + harness …);
