@@ -120,7 +120,7 @@ export function BudgetManager({
         {t('usageNow', { runs: usage.runs, usd: usage.usd.toFixed(2), tokens: usage.tokens })}
       </p>
 
-      {canWrite && (
+      {canWrite ? (
         <div className="flex items-center gap-3">
           <Button size="sm" disabled={pending} onClick={onSave}>
             {pending ? t('saving') : t('save')}
@@ -129,6 +129,8 @@ export function BudgetManager({
             <span className="text-[12px] text-muted-foreground">{t('saved')}</span>
           )}
         </div>
+      ) : (
+        <p className="text-[12px] text-muted-foreground">{t('readOnly')}</p>
       )}
       {error && (
         <Callout tone="danger" className="py-1.5">

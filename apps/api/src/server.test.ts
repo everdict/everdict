@@ -274,9 +274,9 @@ describe("API — budget (per-tenant enforcement limits)", () => {
     expect(put.json().limit).toEqual({ runs: 50 }); // usd dropped → unlimited
   });
 
-  it("budget config is admin-only (a non-admin gets 403 on read and write)", async () => {
+  it("a member can read the budget but not change the limit (read viewer+, write admin)", async () => {
     const { app } = server({ requireAuth: true, authenticator: roleAuth(["member"]) });
-    expect((await app.inject({ method: "GET", url: "/budget", headers: h })).statusCode).toBe(403);
+    expect((await app.inject({ method: "GET", url: "/budget", headers: h })).statusCode).toBe(200);
     expect((await app.inject({ method: "PUT", url: "/budget", headers: h, payload: { runs: 1 } })).statusCode).toBe(
       403,
     );

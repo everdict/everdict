@@ -48,6 +48,8 @@ export default async function SettingsPage({
   const canWriteSecrets = can(principal?.roles, 'secrets:write')
   const canReadMembers = can(principal?.roles, 'members:read')
   const canWriteMembers = can(principal?.roles, 'members:write')
+  // Budget + usage are readable by members (viewer+, reuses scorecards:read); editing the limit stays admin (settings:write).
+  const canReadUsage = can(principal?.roles, 'scorecards:read')
 
   let workspace: WorkspaceRecord | undefined
   let secrets: SecretMeta[] = []
@@ -77,9 +79,11 @@ export default async function SettingsPage({
       ).registries
       // CI repo link (repo↔harness slot = OIDC trust) — the link's existence is that repo's keyless CI trust. Removal is admin.
       ciLinks = ciLinksResponseSchema.parse(await controlPlane.listCiLinks(ctx)).links
-      // Enforcement budget (per-tenant cost/token/run caps that block runs with 402). Admin config (settings:read|write).
+    }
+    // Budget (enforcement caps + committed usage) + metered billing usage — both readable by members (viewer+). The
+    // limit form is editable only by admins (canWriteSettings); members see it read-only. Consolidated from the old /usage page.
+    if (canReadUsage) {
       budget = budgetResponseSchema.parse(await controlPlane.getBudget(ctx))
-      // Metered billing usage (the LLM cost surface) — shown read-only alongside the budget limits (consolidated here from the old /usage page).
       metered = tenantUsageSchema.parse(await controlPlane.getUsage(ctx))
     }
     // Workspace-shared runners (owner=ws:<workspace>) — team build server/CI. Register/read/remove are all admin (settings:write).
@@ -99,7 +103,7 @@ export default async function SettingsPage({
     error = e instanceof Error ? e.message : String(e)
   }
 
-  const canReadAny = canReadSettings || canReadSecrets || canReadMembers
+  const canReadAny = canReadSettings || canReadSecrets || canReadMembers || canReadUsage
   // Deletion is owner (creator) only — the control plane enforces it ultimately, and the UI exposes the danger zone only when owner.
   const isOwner = workspace !== undefined && workspace.owner === principal?.subject
 
@@ -132,6 +136,7 @@ export default async function SettingsPage({
           canWriteSecrets={canWriteSecrets}
           canReadMembers={canReadMembers}
           canWriteMembers={canWriteMembers}
+          canReadUsage={canReadUsage}
           {...(sp.tab !== undefined ? { initialTab: sp.tab } : {})}
           {...(sp.app !== undefined ? { initialIntegration: sp.app } : {})}
         />

@@ -888,13 +888,14 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   });
 
   // Enforcement budget (blocks runs with 402 when a cap is hit; distinct from the meter-only /usage). GET = committed
-  // usage + the per-tenant limit (member+, settings:read); PUT = replace the limit (admin, settings:write).
+  // usage + the per-tenant limit — readable by members (viewer+, reuses scorecards:read, same as /usage); PUT =
+  // change the limit (admin, settings:write). So members see the caps/usage; only admins edit them.
   app.get("/budget", async (req, reply) => {
     if (!deps.budget) return reply.code(404).send({ code: "NOT_FOUND", message: "budget not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     try {
-      gate(principal, "settings:read");
+      gate(principal, "scorecards:read");
       const ws = principal.workspace;
       return reply.send({ usage: deps.budget.usage(ws), limit: deps.budget.limitOf(ws) ?? null });
     } catch (err) {

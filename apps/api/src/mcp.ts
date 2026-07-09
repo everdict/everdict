@@ -226,10 +226,10 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
       "get_budget",
       {
         description:
-          "The workspace's enforcement budget — committed usage (runs/usd/tokens) plus the per-tenant limit (a null dimension = unlimited). Distinct from get_usage (meter-only): this budget BLOCKS a run with 402 once a cap is hit.",
+          "The workspace's enforcement budget — committed usage (runs/usd/tokens) plus the per-tenant limit (a null dimension = unlimited). Distinct from get_usage (meter-only): this budget BLOCKS a run with 402 once a cap is hit. Readable by members; only admins change the limit (set_budget_limit).",
         inputSchema: {},
       },
-      () => run(principal, "settings:read", async () => ok(budgetView())),
+      () => run(principal, "scorecards:read", async () => ok(budgetView())),
     );
     server.registerTool(
       "set_budget_limit",

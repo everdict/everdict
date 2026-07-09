@@ -56,6 +56,7 @@ export function SettingsTabs(props: {
   canWriteSecrets: boolean
   canReadMembers: boolean
   canWriteMembers: boolean
+  canReadUsage: boolean // budget/usage read (viewer+); gates the Budget & usage tab. Editing the limit stays canWriteSettings.
   initialTab?: string // ?tab=… (e.g. the account→connections tab's "Integration settings →" deep link lands straight on the integrations tab)
   initialIntegration?: string // ?app=… — drill straight into a specific integration's detail within the integrations tab
 }) {
@@ -66,7 +67,7 @@ export function SettingsTabs(props: {
     { key: 'integrations', label: t('tabIntegrations'), show: props.canReadSettings },
     { key: 'ci', label: t('tabCi'), show: props.canReadSettings },
     { key: 'runners', label: t('tabRunners'), show: props.canWriteSettings },
-    { key: 'budget', label: t('tabBudget'), show: props.canReadSettings },
+    { key: 'budget', label: t('tabBudget'), show: props.canReadUsage },
     { key: 'members', label: t('tabMembers'), show: props.canReadMembers },
   ]
   const visible = tabs.filter((tab) => tab.show)

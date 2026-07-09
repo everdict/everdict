@@ -185,10 +185,12 @@ describe("MCP — budget tools", () => {
     expect(JSON.parse(text(get)).limit).toEqual({ runs: 100, usd: 25 });
   });
 
-  it("a non-admin cannot set the budget limit (settings:write is admin-only)", async () => {
+  it("a member can read the budget but not set the limit (read viewer+, write admin)", async () => {
     const member = await connect(withBudget(), ["member"]);
-    const res = await member.callTool({ name: "set_budget_limit", arguments: { runs: 1 } });
-    expect(res.isError).toBe(true);
+    const get = await member.callTool({ name: "get_budget", arguments: {} });
+    expect(get.isError).toBeFalsy();
+    const set = await member.callTool({ name: "set_budget_limit", arguments: { runs: 1 } });
+    expect(set.isError).toBe(true);
   });
 });
 

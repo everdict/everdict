@@ -1833,6 +1833,7 @@
     "save": "Save limits",
     "saving": "Saving…",
     "saved": "Saved",
+    "readOnly": "Only workspace admins can change these limits.",
     "meteredTitle": "Metered usage",
     "meteredTip": "Billable LLM cost for the workspace's runs (orchestration + verdict), measured continuously — this is what the cost/token limits above are checked against. Own-pays self-hosted runs are excluded.",
     "meteredCost": "Cost",
