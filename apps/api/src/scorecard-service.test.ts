@@ -2080,6 +2080,97 @@ describe("ScorecardService — batch resilience (resume · retry-failed)", () =>
     await waitTerminal(store, none.id);
   });
 
+  it("estimate projects per-case medians from recent succeeded batches; no history = honest empty", async () => {
+    const { dispatcher } = capturingDispatcher();
+    const store = new InMemoryScorecardStore();
+    const runs = new InMemoryRunStore();
+    const datasets = new InMemoryDatasetRegistry();
+    await datasets.register("acme", threeCaseDataset);
+    let n = 0;
+    const service = new ScorecardService({ dispatcher, store, datasets, runStore: runs, newId: () => `est-${n++}` });
+
+    // No history yet — honest empty (a guess would be worse than nothing).
+    expect(await service.estimate({ tenant: "acme", dataset: "rd", harness: "h" })).toEqual({
+      basis: { scorecards: 0, samples: 0 },
+    });
+
+    // One past batch: 3 children, durations 10/20/30s, usd 0.01/0.02/0.03 → medians 20s / 0.02.
+    await store.create({
+      id: "sc-hist",
+      tenant: "acme",
+      dataset: { id: "rd", version: "1.0.0" },
+      harness: { id: "h", version: "1" },
+      status: "succeeded",
+      orchestration: { judges: [], concurrency: 3, retries: 0 },
+      createdAt: "2026-07-08T00:00:00.000Z",
+      updatedAt: "2026-07-08T00:10:00.000Z",
+    });
+    const mkChild = async (i: number, sec: number, usd: number) =>
+      runs.create({
+        id: `hist-${i}`,
+        tenant: "acme",
+        harness: { id: "h", version: "1" },
+        caseId: `c${i}`,
+        status: "succeeded",
+        result: {
+          caseId: `c${i}`,
+          harness: "h@1",
+          trace: [{ t: 0, kind: "llm_call", model: "m", cost: { inputTokens: 1, outputTokens: 1, usd } }],
+          snapshot: { kind: "prompt", output: "" },
+          scores: [{ graderId: "tests-pass", metric: "tests-pass", value: 1, pass: true }],
+        },
+        parentScorecardId: "sc-hist",
+        trigger: "scorecard",
+        createdAt: "2026-07-08T00:00:00.000Z",
+        updatedAt: new Date(Date.parse("2026-07-08T00:00:00.000Z") + sec * 1000).toISOString(),
+      });
+    await mkChild(1, 10, 0.01);
+    await mkChild(2, 20, 0.02);
+    await mkChild(3, 30, 0.03);
+
+    const est = await service.estimate({ tenant: "acme", dataset: "rd", harness: "h", cases: 100, concurrency: 10 });
+    expect(est.basis).toEqual({ scorecards: 1, samples: 3 });
+    expect(est.perCase).toEqual({ usdMedian: 0.02, durationSecMedian: 20 });
+    // 100 cases × $0.02 = $2 · ceil(100/10) waves × 20s = 200s.
+    expect(est.estimate).toEqual({ cases: 100, usd: 2, wallSeconds: 200, concurrency: 10 });
+  });
+
+  it("a running batch's get() carries etaSeconds derived from its own finished children", async () => {
+    const { dispatcher } = capturingDispatcher();
+    const store = new InMemoryScorecardStore();
+    const runs = new InMemoryRunStore();
+    const datasets = new InMemoryDatasetRegistry();
+    await datasets.register("acme", threeCaseDataset);
+    const service = new ScorecardService({ dispatcher, store, datasets, runStore: runs, newId: () => "eta-1" });
+    await store.create({
+      id: "sc-eta",
+      tenant: "acme",
+      dataset: { id: "rd", version: "1.0.0" },
+      harness: { id: "h", version: "1" },
+      status: "running",
+      orchestration: { judges: [], concurrency: 1, retries: 0 },
+      createdAt: "2026-07-08T00:00:00.000Z",
+      updatedAt: "2026-07-08T00:00:00.000Z",
+    });
+    // one finished child took 30s → 2 remaining of 3 at concurrency 1 → ETA 60s.
+    await runs.create({
+      id: "eta-child",
+      tenant: "acme",
+      harness: { id: "h", version: "1" },
+      caseId: "c1",
+      status: "succeeded",
+      result: passResult("c1"),
+      parentScorecardId: "sc-eta",
+      trigger: "scorecard",
+      createdAt: "2026-07-08T00:00:00.000Z",
+      updatedAt: "2026-07-08T00:00:30.000Z",
+    });
+    expect((await service.get("sc-eta"))?.etaSeconds).toBe(60);
+    // terminal records never carry an ETA.
+    await store.update("sc-eta", { status: "succeeded", updatedAt: "x" });
+    expect((await service.get("sc-eta"))?.etaSeconds).toBeUndefined();
+  });
+
   it("retryFailed rejects an in-flight source (400) and an all-pass source (nothing to retry)", async () => {
     const { dispatcher } = capturingDispatcher();
     const { store, datasets, service } = build(dispatcher);

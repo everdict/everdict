@@ -1091,6 +1091,42 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
     );
 
     server.registerTool(
+      "estimate_scorecard",
+      {
+        description:
+          "Cost/time preflight for a dataset×harness batch — per-case usd/duration medians from the last few succeeded batches, projected to an estimate (usd, wall seconds). Honest empty when there is no history — HTTP parity (GET /scorecards/estimate).",
+        inputSchema: {
+          dataset_id: z.string(),
+          harness_id: z.string(),
+          cases: z
+            .number()
+            .int()
+            .min(1)
+            .optional()
+            .describe("case count to project (default: the dataset's full size)"),
+          concurrency: z
+            .number()
+            .int()
+            .min(1)
+            .optional()
+            .describe("assumed batch parallelism (default: service default)"),
+        },
+      },
+      ({ dataset_id, harness_id, cases, concurrency }) =>
+        run(principal, "scorecards:read", async () =>
+          ok(
+            await scorecards.estimate({
+              tenant: ws,
+              dataset: dataset_id,
+              harness: harness_id,
+              ...(cases !== undefined ? { cases } : {}),
+              ...(concurrency !== undefined ? { concurrency } : {}),
+            }),
+          ),
+        ),
+    );
+
+    server.registerTool(
       "leaderboard_scorecards",
       {
         description:

@@ -125,6 +125,9 @@ export const ScorecardRecordSchema = z.object({
   // Trial roll-up (pass@k / flakiness) — DERIVED on get() from the scorecard's repeated trials, never stored (like
   // RunRecord.usage). Present only when the batch ran trials>1. docs/architecture/trial-based-verdict.md
   trialSummary: ScorecardTrialSummarySchema.optional(),
+  // Remaining wall-clock estimate (seconds) — DERIVED on get() for a RUNNING batch from its own finished
+  // children (median duration × remaining / concurrency). Never stored. docs/architecture/work-queue.md
+  etaSeconds: z.number().optional(),
   models: ScorecardModelsSchema.optional(), // the models this run used (leaderboard axis, lightweight → included in list too). Unset for past records.
   // The judge model(s) that scored this run — if the model axis is 'the LLM the harness used', this is the 'grader'. Filter/display
   // for fair comparison (same judge). Distinct of inline judge config.model + registered model-judge spec.model. Lightweight → included in list too.

@@ -536,7 +536,33 @@ export class ScorecardService {
         hydrated = { ...record, scorecard: { suiteId: record.dataset.id, harness, results } };
       }
     }
-    return this.withTrialSummary(hydrated);
+    return this.withTrialSummary(await this.withEta(hydrated));
+  }
+
+  // Remaining wall-clock estimate for a RUNNING batch — median duration of its own finished children × remaining
+  // waves at the batch's concurrency. Derived on read, never stored; absent until the first child finishes.
+  private async withEta(record: ScorecardRecord): Promise<ScorecardRecord> {
+    if (record.status !== "running" || !this.deps.runStore || !record.orchestration) return record;
+    try {
+      const children = await this.deps.runStore.list(record.tenant, { scorecardId: record.id });
+      const done = children.filter((c) => c.status === "succeeded" && c.result);
+      if (done.length === 0) return record;
+      const durations = done
+        .map((c) => (new Date(c.updatedAt).getTime() - new Date(c.createdAt).getTime()) / 1000)
+        .filter((d) => d > 0)
+        .sort((a, b) => a - b);
+      const median = durations[Math.floor(durations.length / 2)];
+      if (median === undefined) return record;
+      const total =
+        record.subset?.selected ??
+        (await this.deps.datasets.get(record.tenant, record.dataset.id, record.dataset.version)).cases.length;
+      const remaining = Math.max(0, total - done.length);
+      if (remaining === 0) return record;
+      const concurrency = Math.max(1, record.orchestration.concurrency);
+      return { ...record, etaSeconds: Math.ceil(remaining / concurrency) * Math.ceil(median) };
+    } catch {
+      return record; // the estimate is a convenience — never let it break the read
+    }
   }
 
   // Derive the trial roll-up (pass@k / flakiness) from the scorecard's repeated trials — like RunRecord.usage from the
@@ -550,6 +576,71 @@ export class ScorecardService {
 
   list(tenant?: string): Promise<ScorecardRecord[]> {
     return this.deps.store.list(tenant);
+  }
+
+  // Cost/time preflight — "what will this batch cost, and how long will it run?" answered from HISTORY: the per-case
+  // usd/duration medians of the last few succeeded batches of the same dataset×harness. Honest when there is no
+  // history (basis.samples=0, no estimate) — a guess would be worse than nothing. usd comes from RunRecord.usage
+  // (trace-derived), so non-metered workspaces see a 0 median rather than fiction.
+  async estimate(input: {
+    tenant: string;
+    dataset: string;
+    harness: string;
+    cases?: number;
+    concurrency?: number;
+  }): Promise<{
+    basis: { scorecards: number; samples: number };
+    perCase?: { usdMedian: number; durationSecMedian: number };
+    estimate?: { cases: number; usd: number; wallSeconds: number; concurrency: number };
+  }> {
+    const past = (
+      await this.deps.store.list(input.tenant, {
+        status: "succeeded",
+        dataset: input.dataset,
+        harness: input.harness,
+      })
+    ).slice(0, 3); // the most recent batches carry the most representative cost/latency
+    const usd: number[] = [];
+    const durations: number[] = [];
+    if (this.deps.runStore) {
+      for (const rec of past) {
+        const children = await this.deps.runStore.list(input.tenant, { scorecardId: rec.id });
+        for (const c of children) {
+          if (c.status !== "succeeded" || !c.result) continue;
+          usd.push(c.usage?.usd ?? 0);
+          const d = (new Date(c.updatedAt).getTime() - new Date(c.createdAt).getTime()) / 1000;
+          if (d > 0) durations.push(d);
+        }
+      }
+    }
+    const median = (xs: number[]): number | undefined => {
+      if (xs.length === 0) return undefined;
+      const sorted = [...xs].sort((a, b) => a - b);
+      return sorted[Math.floor(sorted.length / 2)];
+    };
+    const usdMedian = median(usd);
+    const durationSecMedian = median(durations);
+    const basis = { scorecards: past.length, samples: durations.length };
+    if (usdMedian === undefined || durationSecMedian === undefined) return { basis };
+    let cases = input.cases;
+    if (cases === undefined) {
+      try {
+        cases = (await this.deps.datasets.get(input.tenant, input.dataset, "latest")).cases.length;
+      } catch {
+        return { basis, perCase: { usdMedian, durationSecMedian } }; // dataset gone — per-case medians still useful
+      }
+    }
+    const concurrency = Math.max(1, input.concurrency ?? this.concurrency);
+    return {
+      basis,
+      perCase: { usdMedian, durationSecMedian },
+      estimate: {
+        cases,
+        usd: Number((usdMedian * cases).toFixed(4)),
+        wallSeconds: Math.ceil(cases / concurrency) * Math.ceil(durationSecMedian),
+        concurrency,
+      },
+    };
   }
 
   // Restart resume — re-drive an interrupted (queued/running) batch from where it stopped: keep the child runs that

@@ -137,3 +137,15 @@ All workspace-scoped (other-workspace `get` → `404`/`NOT_FOUND`), one service 
   `POST /scorecards/ingest`. **pull**: pick a `source` (OTel/MLflow endpoint + optional auth-secret name) + a
   `runs:[{caseId, runId}]` mapping → `POST /scorecards/ingest/pull`. Both add dataset + harness label + judges.
   `scorecards:run` (member+).
+
+
+## Cost/time preflight + running ETA
+
+`GET /scorecards/estimate?dataset&harness[&cases][&concurrency]` (+ MCP `estimate_scorecard`) answers "what
+will this batch cost and how long will it run" from HISTORY: per-case usd/duration medians over the last few
+succeeded batches of the same dataset×harness, projected to `{usd, wallSeconds}` at the given parallelism.
+Honest when there is no history (`basis.samples: 0`, no estimate) — usd comes from trace-derived usage, so
+non-metered workspaces see a 0 median rather than fiction. A RUNNING batch's `GET /scorecards/:id` carries a
+derived `etaSeconds` (its own finished children's median × remaining waves) once the first child lands.
+Live: 19 historical samples projected a 601-case batch at concurrency 32 to 551s; a mid-run sleep-25 batch
+read `etaSeconds: 27` with one wave remaining.

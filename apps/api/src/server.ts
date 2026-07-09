@@ -2109,6 +2109,35 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   });
 
   // baseline vs candidate comparison (regressions/improvements). Static path → matched before :id. Both must be this workspace's and completed.
+  // Cost/time preflight — history-based estimate for a dataset×harness batch ("what will it cost / how long").
+  // Honest empty when no history (basis.samples=0). Same gate as reading scorecards.
+  app.get<{ Querystring: { dataset?: string; harness?: string; cases?: string; concurrency?: string } }>(
+    "/scorecards/estimate",
+    async (req, reply) => {
+      const principal = await resolvePrincipal(req, reply, deps);
+      if (!principal) return reply;
+      try {
+        gate(principal, "scorecards:read");
+        if (!deps.scorecardService)
+          return reply.code(404).send({ code: "NOT_FOUND", message: "scorecard service not configured" });
+        const { dataset, harness, cases, concurrency } = req.query;
+        if (!dataset || !harness)
+          return reply.code(400).send({ code: "BAD_REQUEST", message: "dataset and harness are required." });
+        return reply.send(
+          await deps.scorecardService.estimate({
+            tenant: principal.workspace,
+            dataset,
+            harness,
+            ...(cases !== undefined ? { cases: Number(cases) } : {}),
+            ...(concurrency !== undefined ? { concurrency: Number(concurrency) } : {}),
+          }),
+        );
+      } catch (err) {
+        return sendError(reply, err);
+      }
+    },
+  );
+
   app.get<{ Querystring: { baseline?: string; candidate?: string; z?: string } }>(
     "/scorecards/diff",
     async (req, reply) => {
