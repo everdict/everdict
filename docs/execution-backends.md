@@ -194,7 +194,7 @@ on Postgres via `DATABASE_URL` — see `docs/api.md`); live `K8sTopologyRuntime`
 `docs/service-harness.md`); the harness version SSOT (`@everdict/registry` + `PgHarnessRegistry`); the tenant access
 layer (API-key auth + tenant-owned harnesses — `docs/tenancy.md`); the SaaS web dashboard (`apps/web` —
 `docs/web.md`).
-Next slices: ClickHouse analytics store behind `RunStore`, MCP toolization of the platform, and the model-B
+Next slices: ClickHouse analytics store behind `RunStore`, MCP toolization of the platform, and the dispatched-worker
 `K8sBackend`/`WindowsBackend` (table above).
 
 ## Nomad (phase 1)

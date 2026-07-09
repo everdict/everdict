@@ -41,7 +41,7 @@ environment that contributes named coordinates + an observation surface*.
 
 ## Root cause — the target axis was never abstracted
 
-`dispatch` already assembles three orthogonal seams (the model-B doctrine, extended in round 1):
+`dispatch` already assembles three orthogonal seams (the placement/compute split, extended in round 1):
 
 | Concern | Axis | Seam | Status |
 | --- | --- | --- | --- |

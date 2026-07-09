@@ -95,7 +95,7 @@ grade(trace, snapshot)
 ```
 
 `ServiceTopologyBackend` becomes the assembler of `{ TopologyRuntime (WHERE), FrontDoorDriver (HOW) }`. This is the
-model-B split extended to the service tier.
+placement/compute split extended to the service tier.
 
 ## The five hardcodes → five declarative knobs
 

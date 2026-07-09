@@ -44,7 +44,7 @@ aider but **not** for a service topology.
 
 ## Direction — three decisions
 
-The model-B insight one level out: the runner **is the user's "cluster."** Today its placement layer is
+The dispatch-a-worker insight one level out: the runner **is the user's "cluster."** Today its placement layer is
 `runAgentJob` (in-process). For topologies it needs a *topology placement* on the same machine — that's
 `DockerTopologyRuntime`. The runner picks the path by harness kind; everything downstream is the existing
 orchestrator-agnostic machinery.
