@@ -24,6 +24,7 @@ import {
   InMemoryHarnessInstanceRegistry,
   InMemoryHarnessTemplateRegistry,
   InMemoryJudgeRegistry,
+  InMemoryRubricRegistry,
   InMemoryRuntimeRegistry,
 } from "@everdict/registry";
 import { describe, expect, it } from "vitest";
@@ -102,6 +103,12 @@ const JUDGE = {
   model: "claude-opus-4-8",
   rubric: "Did the agent complete the task correctly?",
 };
+const RUBRIC = {
+  id: "quality",
+  version: "1.0.0",
+  text: "The agent must complete the task without errors.",
+  criteria: [{ id: "accuracy", description: "is the result correct" }],
+};
 const RUNTIME = {
   kind: "nomad",
   id: "seoul",
@@ -135,6 +142,7 @@ function server(
   const keyStore = new InMemoryTenantKeyStore();
   const datasetRegistry = new InMemoryDatasetRegistry();
   const judgeRegistry = new InMemoryJudgeRegistry();
+  const rubricRegistry = new InMemoryRubricRegistry();
   const svc = new RunService({
     dispatcher: okDispatcher,
     store: new InMemoryRunStore(),
@@ -217,6 +225,7 @@ function server(
     harnessInstances,
     datasetRegistry,
     judgeRegistry,
+    rubricRegistry,
     runtimeRegistry,
     // Connection-test stub — verifies route wiring / role gate only, no real cluster I/O.
     probeRuntime: async (_ws, spec) => ({ kind: spec.kind, reachable: true, detail: "stub-reachable" }),
@@ -2774,6 +2783,80 @@ describe("API — judges (Agent Judge, workspace-owned, member+ write)", () => {
     expect(v1.json()).toMatchObject({ ok: true, kind: "harness", id: "reviewer", versionExists: false });
     await app.inject({ method: "POST", url: "/judges", headers: h, payload: harnessJudge }); // actually register
     const v2 = await app.inject({ method: "POST", url: "/judges/validate", headers: h, payload: harnessJudge });
+    expect(v2.json()).toMatchObject({ ok: true, versionExists: true, existingVersions: ["1.0.0"] });
+    await app.close();
+  });
+});
+
+describe("API — rubrics (HOW to judge, workspace-owned, judging-domain actions reused)", () => {
+  it("viewer can only read (write 403); member can register (judges:write reuse)", async () => {
+    const viewer = server({ requireAuth: true, authenticator: roleAuth(["viewer"]) });
+    const h = { authorization: "Bearer x" };
+    expect((await viewer.app.inject({ method: "GET", url: "/rubrics", headers: h })).statusCode).toBe(200);
+    expect((await viewer.app.inject({ method: "POST", url: "/rubrics", headers: h, payload: RUBRIC })).statusCode).toBe(
+      403,
+    );
+    await viewer.app.close();
+
+    const member = server({ requireAuth: true, authenticator: roleAuth(["member"]) });
+    expect((await member.app.inject({ method: "POST", url: "/rubrics", headers: h, payload: RUBRIC })).statusCode).toBe(
+      201,
+    );
+    await member.app.close();
+  });
+
+  it("register → the owner sees it, other workspaces cannot (get 404); immutability 409", async () => {
+    const { app, keyStore } = server({ requireAuth: true });
+    const acme = `Bearer ${await issueKey(keyStore, "acme")}`;
+    const beta = `Bearer ${await issueKey(keyStore, "beta")}`;
+    expect(
+      (await app.inject({ method: "POST", url: "/rubrics", headers: { authorization: acme }, payload: RUBRIC }))
+        .statusCode,
+    ).toBe(201);
+    const aGet = await app.inject({
+      method: "GET",
+      url: "/rubrics/quality/versions/latest",
+      headers: { authorization: acme },
+    });
+    expect(aGet.statusCode).toBe(200);
+    expect(aGet.json()).toMatchObject({ id: "quality", text: RUBRIC.text });
+    const bGet = await app.inject({
+      method: "GET",
+      url: "/rubrics/quality/versions/latest",
+      headers: { authorization: beta },
+    });
+    expect(bGet.statusCode).toBe(404);
+
+    const mutated = { ...RUBRIC, text: "changed" };
+    const dup = await app.inject({
+      method: "POST",
+      url: "/rubrics",
+      headers: { authorization: acme },
+      payload: mutated,
+    });
+    expect(dup.statusCode).toBe(409);
+    await app.close();
+  });
+
+  it("invalid spec is 400 on register (a rubric with neither text/criteria/promptTemplate)", async () => {
+    const { app, keyStore } = server({ requireAuth: true });
+    const h = { authorization: `Bearer ${await issueKey(keyStore, "acme")}` };
+    const empty = { id: "empty", version: "1.0.0" };
+    expect((await app.inject({ method: "POST", url: "/rubrics", headers: h, payload: empty })).statusCode).toBe(400);
+    // dry-run validate reports the same failure without registering
+    const v = await app.inject({ method: "POST", url: "/rubrics/validate", headers: h, payload: empty });
+    expect(v.statusCode).toBe(200);
+    expect(v.json()).toMatchObject({ ok: false });
+    await app.close();
+  });
+
+  it("validate dry-run: ok + versionExists flag, not registered", async () => {
+    const { app, keyStore } = server({ requireAuth: true });
+    const h = { authorization: `Bearer ${await issueKey(keyStore, "acme")}` };
+    const v1 = await app.inject({ method: "POST", url: "/rubrics/validate", headers: h, payload: RUBRIC });
+    expect(v1.json()).toMatchObject({ ok: true, id: "quality", versionExists: false });
+    await app.inject({ method: "POST", url: "/rubrics", headers: h, payload: RUBRIC }); // actually register
+    const v2 = await app.inject({ method: "POST", url: "/rubrics/validate", headers: h, payload: RUBRIC });
     expect(v2.json()).toMatchObject({ ok: true, versionExists: true, existingVersions: ["1.0.0"] });
     await app.close();
   });

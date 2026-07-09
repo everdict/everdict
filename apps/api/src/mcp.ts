@@ -20,6 +20,7 @@ import { registerModelTools } from "./api/model/model.mcp.js";
 import { registerNotificationTools } from "./api/notification/notification.mcp.js";
 import { registerProfileTools } from "./api/profile/profile.mcp.js";
 import { registerQueueTools } from "./api/queue/queue.mcp.js";
+import { registerRubricTools } from "./api/rubric/rubric.mcp.js";
 import { registerRunTools } from "./api/run/run.mcp.js";
 import { registerRunnerLeaseTools } from "./api/runner/runner-lease.mcp.js";
 import { registerRunnerTools } from "./api/runner/runner.mcp.js";
@@ -53,6 +54,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
   registerHarnessTools(server, ctx);
   registerDatasetTools(server, ctx);
   registerJudgeTools(server, ctx);
+  registerRubricTools(server, ctx);
   registerModelTools(server, ctx);
   registerRuntimeTools(server, ctx);
   registerBenchmarkTools(server, ctx);

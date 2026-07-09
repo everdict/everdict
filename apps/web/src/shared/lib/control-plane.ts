@@ -284,6 +284,24 @@ export const controlPlane = {
     if (params.window) q.set('window', params.window)
     return call<T>(auth, `/scorecards/leaderboard?${q.toString()}`)
   },
+  // Agent Judges (workspace-owned + _shared defaults) — model (LLM/VLM call) | harness (delegate to an agent).
+  // Read judges:read (viewer+), register/validate judges:write (member+) — the control plane enforces.
+  listJudges: <T>(auth: AuthContext) => call<T>(auth, '/judges'),
+  getJudge: <T>(auth: AuthContext, id: string, version: string) =>
+    call<T>(auth, `/judges/${encodeURIComponent(id)}/versions/${encodeURIComponent(version)}`),
+  createJudge: <T>(auth: AuthContext, spec: unknown) =>
+    call<T>(auth, '/judges', { method: 'POST', body: JSON.stringify(spec) }),
+  validateJudge: <T>(auth: AuthContext, spec: unknown) =>
+    call<T>(auth, '/judges/validate', { method: 'POST', body: JSON.stringify(spec) }),
+  // Rubrics (versioned judging criteria) — a judge references {id, version} instead of freezing the text into its
+  // own version. Same gates as judges (judges:read / judges:write) — no new authz action.
+  listRubrics: <T>(auth: AuthContext) => call<T>(auth, '/rubrics'),
+  getRubric: <T>(auth: AuthContext, id: string, version: string) =>
+    call<T>(auth, `/rubrics/${encodeURIComponent(id)}/versions/${encodeURIComponent(version)}`),
+  createRubric: <T>(auth: AuthContext, spec: unknown) =>
+    call<T>(auth, '/rubrics', { method: 'POST', body: JSON.stringify(spec) }),
+  validateRubric: <T>(auth: AuthContext, spec: unknown) =>
+    call<T>(auth, '/rubrics/validate', { method: 'POST', body: JSON.stringify(spec) }),
   listRuntimes: <T>(auth: AuthContext) => call<T>(auth, '/runtimes'),
   getRuntime: <T>(auth: AuthContext, id: string, version: string) =>
     call<T>(auth, `/runtimes/${encodeURIComponent(id)}/versions/${encodeURIComponent(version)}`),

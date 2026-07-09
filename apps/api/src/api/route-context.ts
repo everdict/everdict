@@ -46,6 +46,7 @@ import type {
   HarnessTemplateRegistry,
   JudgeRegistry,
   ModelRegistry,
+  RubricRegistry,
   RuntimeRegistry,
 } from "@everdict/registry";
 import type { CallbackSink } from "@everdict/topology";
@@ -109,6 +110,7 @@ export interface ServerDeps {
 
   datasetRegistry?: DatasetRegistry; // dataset CRUD (route disabled if absent)
   judgeRegistry?: JudgeRegistry; // Agent Judge CRUD (route disabled if absent)
+  rubricRegistry?: RubricRegistry; // Rubric (HOW to judge — referenced by judges) CRUD (route disabled if absent)
   modelRegistry?: ModelRegistry; // Model (inference/judging model) CRUD (route disabled if absent)
   runtimeRegistry?: RuntimeRegistry; // Runtime (execution infra) CRUD (route disabled if absent)
   // Runtime connection test — RuntimeSpec → build a live backend, then probe() (reachability/auth without a job). main injects it with secrets + a builder.

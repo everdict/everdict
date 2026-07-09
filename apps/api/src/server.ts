@@ -89,6 +89,7 @@ import {
   sendError,
   zodIssues,
 } from "./api/route-context.js";
+import { registerRubricRoutes } from "./api/rubric/rubric.routes.js";
 import { registerRunObservabilityRoutes } from "./api/run/run-observability.routes.js";
 import { registerRunRoutes } from "./api/run/run.routes.js";
 import { registerRunnerRoutes } from "./api/runner/runner.routes.js";
@@ -203,6 +204,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     registerBenchmarkRoutes(routes, deps);
     registerBundleRoutes(routes, deps);
     registerJudgeRoutes(routes, deps);
+    registerRubricRoutes(routes, deps);
     registerModelRoutes(routes, deps);
     registerRuntimeRoutes(routes, deps);
     registerProfileRoutes(routes, deps);

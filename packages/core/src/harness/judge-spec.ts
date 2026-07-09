@@ -4,22 +4,11 @@ import { z } from "zod";
 // Two forms: model (a function that calls an LLM/VLM directly) | harness (delegate the verdict to a registered harness agent).
 // Execution is done by the control plane over a trace (next increment) — this contract only declares "what renders the verdict".
 
+import { JudgeCriterionSchema, RubricRefSchema, VERDICT_INSTRUCTION_PLACEHOLDER } from "./rubric-spec.js";
+
 // Verdict input modality — what the verdict is based on (trace=execution record, dom/screenshot=browser result → VLM).
 export const JudgeInputSchema = z.enum(["trace", "dom", "screenshot"]);
 export type JudgeInput = z.infer<typeof JudgeInputSchema>;
-
-// One rubric criterion — a multi-criteria judge scores every criterion in ONE model call; each lands as its own
-// metric (judge:<judge-id>:<criterion-id>) next to the weighted overall (judge:<judge-id>). docs/architecture/eval-domain-model.md
-export const JudgeCriterionSchema = z.object({
-  id: z.string(), // metric suffix — judge:<judge-id>:<criterion-id>
-  description: z.string(), // what to assess
-  weight: z.number().positive().default(1), // weighted overall = Σ(w·score)/Σw when the model gives no overall score
-  passThreshold: z.number().min(0).max(1).optional(), // per-criterion score→pass (absent: the model decides)
-});
-export type JudgeCriterion = z.infer<typeof JudgeCriterionSchema>;
-
-// A custom promptTemplate MUST carry this placeholder — it expands to the JSON verdict instruction the parser relies on.
-export const VERDICT_INSTRUCTION_PLACEHOLDER = "{verdict_instruction}";
 
 // Custom-prompt + criteria fields shared by both judge kinds (the prompt-build path is the same; only the transport differs).
 const judgePromptFields = {
@@ -37,7 +26,7 @@ export const ModelJudgeSpecSchema = z.object({
   description: z.string().optional(),
   provider: z.enum(["anthropic", "openai"]).default("anthropic"),
   model: z.string(), // e.g. "claude-opus-4-8"
-  rubric: z.string(), // the verdict criteria (prompt)
+  rubric: z.union([z.string(), RubricRefSchema]), // inline verdict criteria text OR a registered-rubric reference
   inputs: z.array(JudgeInputSchema).default(["trace"]),
   passThreshold: z.number().min(0).max(1).optional(), // overall score→pass threshold (if absent, the model decides pass directly)
   ...judgePromptFields,
@@ -52,7 +41,7 @@ export const HarnessJudgeSpecSchema = z.object({
   version: z.string(),
   description: z.string().optional(),
   harness: z.object({ id: z.string(), version: z.string() }),
-  rubric: z.string().optional(),
+  rubric: z.union([z.string(), RubricRefSchema]).optional(), // inline text OR a registered-rubric reference
   // Tenant Runtime id to launch the judge agent on (routed via placement.target). If absent, co-locate with the produced run
   // (inherit the placement of the run that created the observation). An unregistered runtime drops the dispatch to a visible skip.
   runtime: z.string().optional(),

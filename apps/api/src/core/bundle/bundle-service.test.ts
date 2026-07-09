@@ -6,6 +6,7 @@ import {
   InMemoryHarnessInstanceRegistry,
   InMemoryHarnessTemplateRegistry,
   InMemoryJudgeRegistry,
+  InMemoryRubricRegistry,
 } from "@everdict/registry";
 import { describe, expect, it } from "vitest";
 import { BenchmarkService } from "../benchmark/benchmark-service.js";
@@ -27,6 +28,7 @@ const JUDGE = {
   inputs: ["trace"],
   tags: [],
 };
+const RUBRIC = { id: "r1", version: "1.0.0", text: "did it work?", tags: [] };
 
 const bundle = (over: Record<string, unknown> = {}) =>
   BundleSchema.parse({ id: "codex-pinch", version: "1.0.0", datasets: [DATASET], judges: [JUDGE], ...over });
@@ -37,6 +39,10 @@ describe("requiredActionsForBundle", () => {
     expect(requiredActionsForBundle(BundleSchema.parse({ id: "x", version: "1", datasets: [DATASET] }))).toEqual([
       "datasets:write",
     ]);
+    // rubrics reuse the judging-domain action (no new authz action)
+    expect(requiredActionsForBundle(BundleSchema.parse({ id: "x", version: "1", rubrics: [RUBRIC] }))).toEqual([
+      "judges:write",
+    ]);
     // empty bundle → no required actions
     expect(requiredActionsForBundle(BundleSchema.parse({ id: "x", version: "1" }))).toEqual([]);
   });
@@ -46,18 +52,21 @@ describe("BundleService.apply", () => {
   it("fans each section out to its existing registry to register, idempotently (re-applying the same content = ok)", async () => {
     const datasets = new InMemoryDatasetRegistry();
     const judges = new InMemoryJudgeRegistry();
-    const svc = new BundleService({ datasets, judges });
+    const rubrics = new InMemoryRubricRegistry();
+    const svc = new BundleService({ datasets, judges, rubrics });
 
-    const first = await svc.apply("acme", "u-alice", bundle());
+    const first = await svc.apply("acme", "u-alice", bundle({ rubrics: [RUBRIC] }));
     expect(first.results.map((r) => [r.kind, r.status])).toEqual([
       ["dataset", "ok"],
       ["judge", "ok"],
+      ["rubric", "ok"],
     ]);
     // actually registered
     expect((await datasets.get("acme", "d", "1.0.0")).id).toBe("d");
+    expect((await rubrics.get("acme", "r1", "1.0.0")).text).toBe("did it work?");
 
     // idempotent: re-applying the same content is ok with no exception (immutable registry).
-    const again = await svc.apply("acme", "u-alice", bundle());
+    const again = await svc.apply("acme", "u-alice", bundle({ rubrics: [RUBRIC] }));
     expect(again.results.every((r) => r.status === "ok")).toBe(true);
   });
 
@@ -75,11 +84,12 @@ describe("BundleService.apply", () => {
 
   it("if a section's registry is absent, that item is skipped (the batch continues)", async () => {
     const datasets = new InMemoryDatasetRegistry();
-    const svc = new BundleService({ datasets }); // no judges registry configured
-    const res = await svc.apply("acme", "u-alice", bundle());
+    const svc = new BundleService({ datasets }); // no judges/rubrics registry configured
+    const res = await svc.apply("acme", "u-alice", bundle({ rubrics: [RUBRIC] }));
     const byKind = Object.fromEntries(res.results.map((r) => [r.kind, r.status]));
     expect(byKind.dataset).toBe("ok");
     expect(byKind.judge).toBe("skipped");
+    expect(byKind.rubric).toBe("skipped");
   });
 });
 

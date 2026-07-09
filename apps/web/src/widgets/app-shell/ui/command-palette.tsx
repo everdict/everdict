@@ -95,6 +95,14 @@ function actionsFor(workspace: string, t: ReturnType<typeof useTranslations>): C
       perform: push('/judges/new'),
     },
     {
+      id: 'new-rubric',
+      label: t('palette.newRubric'),
+      icon: Plus,
+      group,
+      keywords: 'rubric criteria judging',
+      perform: push('/rubrics/new'),
+    },
+    {
       id: 'toggle-theme',
       label: t('palette.toggleTheme'),
       icon: SunMoon,

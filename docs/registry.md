@@ -53,6 +53,18 @@ tenant's own harness and falls back to the **`_shared`** owner for first-party h
 registers under `_shared` by default). `loadHarnessDir(dir, { into, tenant })` chooses the owner. The HTTP
 surface (`POST/GET /harnesses`, authed) exposes this per-tenant — see `docs/tenancy.md`.
 
+## Rubrics (`RubricRegistry`)
+Rubrics — HOW to judge: freeform `text` and/or named `criteria` plus an optional `promptTemplate`
+(`docs/architecture/eval-domain-model.md` S3) — are their own versioned entity, mirroring the judge registry:
+`register / get / has / versions / ownVersions / list`, `(tenant, id, version)` keyed, **immutable** versions
+(different content → `ConflictError`), owner-first + `_shared` fallback, and file seeding via `loadRubricDir`
+(default owner `_shared`; `apps/api` seeds `EVERDICT_RUBRICS_DIR`, default `examples/rubrics`).
+`InMemoryRubricRegistry` (dev/test) + `PgRubricRegistry` (Postgres, `rubric` jsonb, PK `(tenant,id,version)`,
+migration `0053_create_rubrics`). One rubric serves many judges: `JudgeSpec.rubric` accepts `{id, version}` as
+well as the inline string, resolved at judge-run time (see `docs/judges.md`). The HTTP/MCP surface
+(`POST/GET /rubrics`, `create/validate/list/get_rubric`) reuses the **judging-domain** actions
+(`judges:read`/`judges:write` — no new authz action, like views reuse `scorecards:*`).
+
 ## Version tags (mutable registry metadata)
 Version numbers alone are hard to tell apart, so every versioned entity (harness instance / dataset / judge /
 runtime) supports **per-version free-form tags** (e.g. `baseline`, `gpt-5 experiment`). Tags are **registry metadata

@@ -8,6 +8,7 @@ import type {
   HarnessTemplateRegistry,
   JudgeRegistry,
   ModelRegistry,
+  RubricRegistry,
   RuntimeRegistry,
 } from "@everdict/registry";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
@@ -47,6 +48,7 @@ export interface McpDeps {
   harnessInstances?: HarnessInstanceRegistry;
   datasetRegistry?: DatasetRegistry;
   judgeRegistry?: JudgeRegistry;
+  rubricRegistry?: RubricRegistry; // Rubric (HOW to judge) register/read — judges reference it by {id, version}
   modelRegistry?: ModelRegistry; // Model (inference/judgment model) register/read — judge and command harnesses reference it by id
   runtimeRegistry?: RuntimeRegistry;
   probeRuntime?: (workspace: string, spec: RuntimeSpec) => Promise<RuntimeProbeResult>; // runtime connection test

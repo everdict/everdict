@@ -5,6 +5,7 @@ import type {
   GradeContext,
   Grader,
   HarnessSpec,
+  JudgeCriterion,
   JudgeSpec,
   Placement,
   Score,
@@ -18,7 +19,7 @@ import {
   modelJudge,
   openaiComplete,
 } from "@everdict/graders";
-import type { HarnessInstanceRegistry, ModelRegistry } from "@everdict/registry";
+import type { HarnessInstanceRegistry, ModelRegistry, RubricRegistry } from "@everdict/registry";
 
 // Judge runner — JudgeSpec + tenant + GradeContext (trace) → Score[]. The control plane judges from the trace.
 // model (anthropic/openai) and harness are unified via modelJudge (a transport) — only the transport differs (API call / agent dispatch).
@@ -45,9 +46,58 @@ export interface DefaultJudgeRunnerDeps {
   dispatch?: (job: AgentJob) => Promise<CaseResult>; // agent dispatch for harness judges (same path as a single run)
   harnesses?: HarnessInstanceRegistry; // resolve the harness instance a judge references (template+pins→resolved)
   models?: ModelRegistry; // if judge.model is a registered model id, resolve provider/baseUrl/underlying model (else a raw string)
+  rubrics?: RubricRegistry; // if judge.rubric is a {id, version} ref, resolve the registered rubric (owner+_shared fallback)
   fetchImpl?: typeof fetch;
   anthropicBaseUrl?: string;
   openaiBaseUrl?: string;
+}
+
+// The effective judging fields after rubric resolution — what actually reaches the JudgeGrader.
+interface EffectiveRubric {
+  rubricText?: string;
+  criteria?: JudgeCriterion[];
+  promptTemplate?: string;
+}
+
+// Resolve spec.rubric to the effective judging fields. Inline string → as-is; {id, version} ref → registry lookup
+// (owner-first + _shared fallback). The judge's own criteria/promptTemplate override the rubric's (more specific wins).
+// A missing registry dep or unresolved rubric returns a skip reason — a judge the user chose never silently vanishes.
+async function resolveRubric(
+  rubrics: RubricRegistry | undefined,
+  tenant: string,
+  spec: JudgeSpec,
+): Promise<{ effective: EffectiveRubric } | { skipReason: string }> {
+  const ref = spec.rubric;
+  const own: EffectiveRubric = {
+    ...(spec.criteria?.length ? { criteria: spec.criteria } : {}),
+    ...(spec.promptTemplate ? { promptTemplate: spec.promptTemplate } : {}),
+  };
+  if (ref === undefined) return { effective: own };
+  if (typeof ref === "string") return { effective: { rubricText: ref, ...own } };
+  const version = ref.version || "latest";
+  if (!rubrics) return { skipReason: `rubric registry not configured (rubric ref '${ref.id}@${version}')` };
+  try {
+    const resolved = await rubrics.get(tenant, ref.id, version);
+    return {
+      effective: {
+        ...(resolved.text ? { rubricText: resolved.text } : {}),
+        ...(spec.criteria?.length
+          ? { criteria: spec.criteria }
+          : resolved.criteria?.length
+            ? { criteria: resolved.criteria }
+            : {}),
+        ...(spec.promptTemplate
+          ? { promptTemplate: spec.promptTemplate }
+          : resolved.promptTemplate
+            ? { promptTemplate: resolved.promptTemplate }
+            : {}),
+      },
+    };
+  } catch (err) {
+    return {
+      skipReason: `rubric '${ref.id}@${version}' unresolved: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
 }
 
 // Resolve the referenced harness: concrete version + (declarative) spec. Built-in/unregistered are as-given.
@@ -69,7 +119,13 @@ async function resolveJudgeHarness(
 export function defaultJudgeRunner(deps: DefaultJudgeRunnerDeps): JudgeRunner {
   return {
     async run(spec, tenant, ctx, placement) {
-      // 1) Choose the transport. Skip (with a stated reason) if there's no key/dispatcher.
+      // 1) Resolve the rubric first (cheapest gate — no secret read / provider call when it can't resolve).
+      //    Inline string = as-is; {id, version} ref = registry lookup; unresolved → visible skip.
+      const rubricResolution = await resolveRubric(deps.rubrics, tenant, spec);
+      if ("skipReason" in rubricResolution) return skip(spec, rubricResolution.skipReason);
+      const { rubricText, criteria, promptTemplate } = rubricResolution.effective;
+
+      // 2) Choose the transport. Skip (with a stated reason) if there's no key/dispatcher.
       let complete: JudgeCompletion;
       if (spec.kind === "harness") {
         if (!deps.dispatch) return skip(spec, "harness judge dispatch not configured");
@@ -146,15 +202,14 @@ export function defaultJudgeRunner(deps: DefaultJudgeRunnerDeps): JudgeRunner {
         }
       }
 
-      // 2) Unified judging: wrap modelJudge (transport) in JudgeGrader to score the trace → judge:<id> score(s).
+      // 3) Unified judging: wrap modelJudge (transport) in JudgeGrader to score the trace → judge:<id> score(s).
       try {
-        const rubric = spec.rubric;
         const useScreenshot = spec.kind === "model" && (spec.inputs ?? []).includes("screenshot");
         const grader: Grader = new JudgeGrader(modelJudge(complete), {
           id: spec.id,
-          ...(rubric ? { rubric } : {}),
-          ...(spec.criteria?.length ? { criteria: spec.criteria } : {}),
-          ...(spec.promptTemplate ? { promptTemplate: spec.promptTemplate } : {}),
+          ...(rubricText ? { rubric: rubricText } : {}),
+          ...(criteria?.length ? { criteria } : {}),
+          ...(promptTemplate ? { promptTemplate } : {}),
           useScreenshot,
         });
         const graded = toScores(await grader.grade(ctx));

@@ -32,6 +32,10 @@ rule `api-layer`):
 | `get_judge` | `judges:read` | one `JudgeSpec` (`version` opt, default `latest`; other workspace → `NOT_FOUND`) |
 | `validate_judge` | `judges:write` (member+) | dry-run: schema + existing versions/conflict (no write) |
 | `create_judge` | `judges:write` (member+) | register a `JudgeSpec` (immutable → `CONFLICT`) |
+| `list_rubrics` | `judges:read` (viewer+) | workspace-owned + `_shared` Rubrics (judging-domain actions reused — no new action) |
+| `get_rubric` | `judges:read` | one `RubricSpec` (`version` opt, default `latest`; other workspace → `NOT_FOUND`) |
+| `validate_rubric` | `judges:write` (member+) | dry-run: schema + existing versions/conflict (no write) |
+| `create_rubric` | `judges:write` (member+) | register a `RubricSpec` (immutable → `CONFLICT`; referenced by judges as `rubric:{id,version}`) |
 | `list_models` | `models:read` (viewer+) | workspace-owned + `_shared` Models (provider + sub-model + baseUrl) |
 | `get_model` | `models:read` | one `ModelSpec` (`version` opt, default `latest`; other workspace → `NOT_FOUND`) |
 | `validate_model` | `models:write` (member+) | dry-run: schema + existing versions/conflict (no write) |

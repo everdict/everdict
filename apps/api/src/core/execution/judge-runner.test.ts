@@ -1,4 +1,6 @@
 import type { AgentJob, CaseResult, GradeContext, JudgeSpec } from "@everdict/core";
+import { RubricSpecSchema } from "@everdict/core";
+import { InMemoryRubricRegistry } from "@everdict/registry";
 import { describe, expect, it, vi } from "vitest";
 import { defaultJudgeRunner } from "./judge-runner.js";
 
@@ -210,5 +212,100 @@ describe("defaultJudgeRunner", () => {
     const runner = defaultJudgeRunner({ secretsFor: async () => ({}), dispatch });
     await runner.run(harnessSpec, "acme", ctx);
     expect(dispatch.mock.calls[0]?.[0]?.evalCase.placement).toBeUndefined();
+  });
+
+  // --- rubric refs (eval-domain-model S3): JudgeSpec.rubric may reference a registered Rubric ---
+  const verdictFetch = (verdict: string) =>
+    vi.fn((_u: string, _i?: RequestInit) =>
+      Promise.resolve(new Response(JSON.stringify({ content: [{ text: verdict }] }), { status: 200 })),
+    );
+
+  it("rubric ref: the registered rubric's text/criteria/template resolve and reach the judging prompt", async () => {
+    const rubrics = new InMemoryRubricRegistry();
+    await rubrics.register(
+      "acme",
+      RubricSpecSchema.parse({
+        id: "quality",
+        version: "1.0.0",
+        text: "the dashboard must render without errors",
+        criteria: [{ id: "accuracy", description: "is it right" }],
+        promptTemplate: "Custom framing. {task} {rubric} {criteria} {trace} {verdict_instruction}",
+      }),
+    );
+    const fetchImpl = verdictFetch(
+      '{"criteria":{"accuracy":{"score":0.9,"pass":true,"reason":"right"}},"pass":true,"score":0.9,"reason":"ok"}',
+    );
+    const runner = defaultJudgeRunner({
+      secretsFor: async () => ({ ANTHROPIC_API_KEY: "sk" }),
+      fetchImpl: fetchImpl as typeof fetch,
+      rubrics,
+    });
+    const spec: JudgeSpec = { ...modelSpec, rubric: { id: "quality", version: "latest" } };
+    const scores = await runner.run(spec, "acme", ctx);
+    // criteria from the rubric land as judge:<id>:<criterion> next to the overall
+    expect(scores.map((s) => s.metric)).toEqual(["judge:correctness", "judge:correctness:accuracy"]);
+    // the resolved rubric text + custom template reached the prompt (one real transport call)
+    const body = String(fetchImpl.mock.calls[0]?.[1]?.body ?? "");
+    expect(body).toContain("the dashboard must render without errors");
+    expect(body).toContain("Custom framing.");
+  });
+
+  it("rubric ref: the judge's own criteria override the rubric's (more specific wins)", async () => {
+    const rubrics = new InMemoryRubricRegistry();
+    await rubrics.register(
+      "acme",
+      RubricSpecSchema.parse({
+        id: "quality",
+        version: "1.0.0",
+        text: "base rubric",
+        criteria: [{ id: "rubric-crit", description: "from the rubric" }],
+      }),
+    );
+    const fetchImpl = verdictFetch(
+      '{"criteria":{"own-crit":{"score":1,"pass":true,"reason":"ok"}},"pass":true,"score":1,"reason":"ok"}',
+    );
+    const runner = defaultJudgeRunner({
+      secretsFor: async () => ({ ANTHROPIC_API_KEY: "sk" }),
+      fetchImpl: fetchImpl as typeof fetch,
+      rubrics,
+    });
+    const spec: JudgeSpec = {
+      ...modelSpec,
+      rubric: { id: "quality", version: "latest" },
+      criteria: [{ id: "own-crit", description: "from the judge", weight: 1 }],
+    };
+    const scores = await runner.run(spec, "acme", ctx);
+    expect(scores.map((s) => s.metric)).toEqual(["judge:correctness", "judge:correctness:own-crit"]);
+    const body = String(fetchImpl.mock.calls[0]?.[1]?.body ?? "");
+    expect(body).toContain("own-crit");
+    expect(body).not.toContain("rubric-crit");
+  });
+
+  it("rubric ref that doesn't resolve → skip score with the reason (never silent)", async () => {
+    const fetchImpl = vi.fn();
+    const runner = defaultJudgeRunner({
+      secretsFor: async () => ({ ANTHROPIC_API_KEY: "sk" }),
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      rubrics: new InMemoryRubricRegistry(), // registry present, rubric missing
+    });
+    const spec: JudgeSpec = { ...modelSpec, rubric: { id: "nope", version: "latest" } };
+    const [score] = await runner.run(spec, "acme", ctx);
+    expect(score?.metric).toBe("judge:correctness");
+    expect(score?.detail).toContain("skipped");
+    expect(score?.detail).toContain("nope");
+    expect(fetchImpl).not.toHaveBeenCalled(); // no provider call on an unresolved rubric
+  });
+
+  it("rubric ref without a rubric registry dep → skip score (not configured)", async () => {
+    const fetchImpl = vi.fn();
+    const runner = defaultJudgeRunner({
+      secretsFor: async () => ({ ANTHROPIC_API_KEY: "sk" }),
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    const spec: JudgeSpec = { ...modelSpec, rubric: { id: "quality", version: "latest" } };
+    const [score] = await runner.run(spec, "acme", ctx);
+    expect(score?.detail).toContain("skipped");
+    expect(score?.detail).toContain("rubric registry not configured");
+    expect(fetchImpl).not.toHaveBeenCalled();
   });
 });

@@ -21,6 +21,7 @@ import {
   InMemoryHarnessTemplateRegistry,
   InMemoryJudgeRegistry,
   InMemoryModelRegistry,
+  InMemoryRubricRegistry,
   InMemoryRuntimeRegistry,
 } from "@everdict/registry";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -84,6 +85,7 @@ function harness() {
   const harnessTemplates = new InMemoryHarnessTemplateRegistry();
   const harnessInstances = new InMemoryHarnessInstanceRegistry(harnessTemplates);
   const judgeRegistry = new InMemoryJudgeRegistry();
+  const rubricRegistry = new InMemoryRubricRegistry();
   const modelRegistry = new InMemoryModelRegistry();
   const runtimeRegistry = new InMemoryRuntimeRegistry();
   const bundleService = new BundleService({
@@ -113,6 +115,7 @@ function harness() {
     harnessInstances,
     datasetRegistry,
     judgeRegistry,
+    rubricRegistry,
     modelRegistry,
     runtimeRegistry,
     probeRuntime: async (_ws: string, spec: RuntimeSpec) => ({
@@ -208,6 +211,7 @@ describe("MCP tools", () => {
       "create_invite",
       "create_judge",
       "create_model",
+      "create_rubric",
       "create_runtime",
       "create_schedule",
       "delete_dataset",
@@ -223,6 +227,7 @@ describe("MCP tools", () => {
       "get_harness_template",
       "get_judge",
       "get_model",
+      "get_rubric",
       "get_run",
       "get_run_logs",
       "get_runtime",
@@ -245,6 +250,7 @@ describe("MCP tools", () => {
       "list_judges",
       "list_members",
       "list_models",
+      "list_rubrics",
       "list_runners",
       "list_runs",
       "list_runtimes",
@@ -287,6 +293,7 @@ describe("MCP tools", () => {
       "validate_dataset",
       "validate_judge",
       "validate_model",
+      "validate_rubric",
       "validate_runtime",
     ]);
   });
@@ -1120,6 +1127,44 @@ describe("MCP tools", () => {
 
     const beta = await connect(deps, ["member"], "beta");
     const notFound = await beta.callTool({ name: "get_judge", arguments: { id: "correctness" } });
+    expect(notFound.isError).toBe(true);
+    expect(text(notFound)).toContain("NOT_FOUND");
+  });
+
+  it("rubrics: member registers·reads a rubric (judges:write reuse); viewer's write is a permission error", async () => {
+    const deps = harness();
+    const member = await connect(deps, ["member"], "acme");
+    const rubricSpec = JSON.stringify({
+      id: "quality",
+      version: "1.0.0",
+      text: "did it work?",
+      criteria: [{ id: "accuracy", description: "is it right" }],
+    });
+    const created = await member.callTool({ name: "create_rubric", arguments: { rubric: rubricSpec } });
+    expect(created.isError).toBeFalsy();
+    expect(text(created)).toContain("quality");
+    const got = JSON.parse(text(await member.callTool({ name: "get_rubric", arguments: { id: "quality" } })));
+    expect(got).toMatchObject({ id: "quality", text: "did it work?" });
+    expect(text(await member.callTool({ name: "list_rubrics", arguments: {} }))).toContain("quality");
+
+    // dry-run validate: an empty rubric (no text/criteria/template) reports ok:false, never registers
+    const invalid = JSON.parse(
+      text(
+        await member.callTool({
+          name: "validate_rubric",
+          arguments: { rubric: JSON.stringify({ id: "empty", version: "1.0.0" }) },
+        }),
+      ),
+    );
+    expect(invalid.ok).toBe(false);
+
+    const viewer = await connect(deps, ["viewer"], "acme");
+    const denied = await viewer.callTool({ name: "create_rubric", arguments: { rubric: rubricSpec } });
+    expect(denied.isError).toBe(true);
+    expect(text(denied)).toContain("FORBIDDEN");
+
+    const beta = await connect(deps, ["member"], "beta");
+    const notFound = await beta.callTool({ name: "get_rubric", arguments: { id: "quality" } });
     expect(notFound.isError).toBe(true);
     expect(text(notFound)).toContain("NOT_FOUND");
   });

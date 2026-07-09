@@ -6,6 +6,7 @@ import {
   HarnessTemplateSpecSchema,
   JudgeSpecSchema,
   ModelSpecSchema,
+  RubricSpecSchema,
   RuntimeSpecSchema,
 } from "@everdict/core";
 import { BenchmarkAdapterSpecSchema } from "@everdict/datasets";
@@ -15,6 +16,7 @@ import type {
   HarnessTemplateRegistry,
   JudgeRegistry,
   ModelRegistry,
+  RubricRegistry,
   RuntimeRegistry,
 } from "@everdict/registry";
 import { z } from "zod";
@@ -32,6 +34,7 @@ export const BundleSchema = z.object({
   benchmarkRecipes: z.array(BenchmarkAdapterSpecSchema).default([]), // source→dataset adapters (import is separate)
   datasets: z.array(DatasetSchema).default([]), // ready-to-run case bundles
   judges: z.array(JudgeSpecSchema).default([]),
+  rubrics: z.array(RubricSpecSchema).default([]), // HOW to judge — referenced by judges as rubric:{id,version}
   models: z.array(ModelSpecSchema).default([]),
   runtimes: z.array(RuntimeSpecSchema).default([]),
 });
@@ -41,7 +44,7 @@ export type Bundle = z.infer<typeof BundleSchema>;
 export const BundleItemStatusSchema = z.enum(["ok", "conflict", "error", "skipped"]);
 export type BundleItemStatus = z.infer<typeof BundleItemStatusSchema>;
 export interface BundleItemResult {
-  kind: string; // harness-template | harness | benchmark-recipe | dataset | judge | model | runtime
+  kind: string; // harness-template | harness | benchmark-recipe | dataset | judge | rubric | model | runtime
   id: string;
   version: string;
   status: BundleItemStatus;
@@ -61,6 +64,7 @@ export function requiredActionsForBundle(bundle: Bundle): Action[] {
   if (bundle.datasets.length > 0) need.add("datasets:write");
   if (bundle.benchmarkRecipes.length > 0) need.add("datasets:write"); // a recipe = a dataset adapter
   if (bundle.judges.length > 0) need.add("judges:write");
+  if (bundle.rubrics.length > 0) need.add("judges:write"); // rubrics are the judging domain (no new action)
   if (bundle.models.length > 0) need.add("models:write");
   if (bundle.runtimes.length > 0) need.add("runtimes:write");
   return [...need];
@@ -72,6 +76,7 @@ export interface BundleServiceDeps {
   benchmarks?: BenchmarkService; // recipe registration (BenchmarkService.registerRecipe)
   datasets?: DatasetRegistry;
   judges?: JudgeRegistry;
+  rubrics?: RubricRegistry;
   models?: ModelRegistry;
   runtimes?: RuntimeRegistry;
 }
@@ -111,7 +116,7 @@ export class BundleService {
 
   async apply(tenant: string, createdBy: string | undefined, bundle: Bundle): Promise<BundleApplyResult> {
     const results: BundleItemResult[] = [];
-    const { harnessTemplates, harnessInstances, benchmarks, datasets, judges, models, runtimes } = this.deps;
+    const { harnessTemplates, harnessInstances, benchmarks, datasets, judges, rubrics, models, runtimes } = this.deps;
 
     await applySection(
       "harness-template",
@@ -142,6 +147,7 @@ export class BundleService {
       results,
     );
     await applySection("judge", bundle.judges, judges ? (s) => judges.register(tenant, s) : undefined, results);
+    await applySection("rubric", bundle.rubrics, rubrics ? (s) => rubrics.register(tenant, s) : undefined, results);
     await applySection("model", bundle.models, models ? (s) => models.register(tenant, s) : undefined, results);
     await applySection("runtime", bundle.runtimes, runtimes ? (s) => runtimes.register(tenant, s) : undefined, results);
 

@@ -207,6 +207,7 @@ const WORKSPACE_SCOPED_TABLES: ReadonlyArray<readonly [table: string, column: st
   ["everdict_harnesses", "tenant"],
   ["everdict_datasets", "tenant"],
   ["everdict_judges", "tenant"],
+  ["everdict_rubrics", "tenant"],
   ["everdict_runtimes", "tenant"],
   ["everdict_benchmarks", "tenant"],
   ["everdict_models", "tenant"],

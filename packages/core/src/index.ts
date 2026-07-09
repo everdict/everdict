@@ -18,6 +18,7 @@ export * from "./harness/harness-secrets.js";
 export * from "./harness/harness-template.js";
 export * from "./execution/suite.js";
 export * from "./execution/dataset.js";
+export * from "./harness/rubric-spec.js";
 export * from "./harness/judge-spec.js";
 export * from "./harness/model-spec.js";
 export * from "./infra/runtime-spec.js";

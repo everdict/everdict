@@ -9,6 +9,16 @@ same ownership/lifecycle as harnesses and datasets. A judge is one of two kinds:
 - **`harness`** — delegates judging to a **registered harness** (an agent judge): `{ harness: {id, version}, rubric?,
   runtime?, promptTemplate?, criteria? }`.
 
+**`rubric` may be inline text or a reference.** `JudgeSpec.rubric` is `string | {id, version}`: the inline
+string stays valid forever (back-compat); a ref names a registered **Rubric** (its own versioned entity — see
+`docs/registry.md`) so one rubric serves many judges and a wording change is a new *rubric* version, not a new
+judge. Resolution happens at **judge-run time** in the `JudgeRunner` (owner-first + `_shared` fallback):
+- effective rubric text = the resolved rubric's `text` (or the inline string);
+- effective `criteria` = the judge's own `criteria`, else the rubric's (the judge's more specific fields win);
+- effective `promptTemplate` = the judge's own, else the rubric's.
+A rubric ref that can't resolve (missing rubric, or no rubric registry configured) degrades to the same visible
+**skip** score as a missing API key (`detail: "skipped: rubric …"`) — never a silent drop.
+
 Both kinds take the shared prompt fields (`docs/architecture/eval-domain-model.md` S2):
 - **`promptTemplate?`** — a full custom judging prompt replacing the default framing. Placeholders expand to the raw
   evidence: `{task} {rubric} {criteria} {dom} {final_answer} {response} {trace} {verdict_instruction}`. It MUST
@@ -52,6 +62,16 @@ Migration: `packages/db/migrations/0008_create_judges.sql`.
 | `GET /judges/:id/versions/:version` | `get_judge` | `judges:read` |
 
 `version` may be `latest`. Other-workspace reads → `404`/`NOT_FOUND`. One service core, one auth core.
+
+**Rubrics** (the judging domain) mirror the same surface and **reuse the judge actions** (no new authz action,
+like views reuse `scorecards:*`):
+
+| HTTP route | MCP tool | Action |
+|---|---|---|
+| `POST /rubrics` | `create_rubric` | `judges:write` (member+) |
+| `POST /rubrics/validate` (dry-run) | `validate_rubric` | `judges:write` |
+| `GET /rubrics` | `list_rubrics` | `judges:read` (viewer+) |
+| `GET /rubrics/:id/versions/:version` | `get_rubric` | `judges:read` |
 
 ## Web (`apps/web`)
 - **Judge `/dashboard/judges`** — owned vs `_shared` judges (kind + version chips; rows link to detail).

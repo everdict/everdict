@@ -95,6 +95,7 @@ import {
   InMemoryHarnessTemplateRegistry,
   InMemoryJudgeRegistry,
   InMemoryModelRegistry,
+  InMemoryRubricRegistry,
   InMemoryRuntimeRegistry,
   type JudgeRegistry,
   type ModelRegistry,
@@ -104,11 +105,14 @@ import {
   PgHarnessTemplateRegistry,
   PgJudgeRegistry,
   PgModelRegistry,
+  PgRubricRegistry,
   PgRuntimeRegistry,
+  type RubricRegistry,
   type RuntimeRegistry,
   loadHarnessTaxonomyDir,
   loadJudgeDir,
   loadModelDir,
+  loadRubricDir,
 } from "@everdict/registry";
 import { S3ArtifactStore } from "@everdict/storage";
 import { buildTraceSink, buildTraceSource } from "@everdict/trace";
@@ -166,6 +170,7 @@ async function main(): Promise<void> {
     datasetRegistry,
     benchmarkRegistry,
     judgeRegistry,
+    rubricRegistry,
     modelRegistry,
     runtimeRegistry,
     settingsStore,
@@ -197,6 +202,7 @@ async function main(): Promise<void> {
   // Datasets are not auto-seeded — the first-party examples (examples/datasets/*.json) were noise that cluttered
   // the workspace list. The _shared fallback mechanism itself stays (a real shared benchmark registered later shows through).
   await seedSharedJudges(judgeRegistry);
+  await seedSharedRubrics(rubricRegistry);
   await seedSharedModels(modelRegistry);
   // Runtimes are not auto-seeded either — the default _shared docker/local were noise ("whose infra is this?" ambiguity).
   // A runtime is meant to be a workspace registering its own infra (examples/runtimes/*.json kept for reference only).
@@ -286,6 +292,7 @@ async function main(): Promise<void> {
     dispatch: (job) => dispatcher.dispatch(job), // a harness judge also goes through tenant runtime routing
     harnesses: harnessInstanceRegistry,
     models: modelRegistry, // if judge.model is a registered model id, resolve provider/baseUrl/underlying-model (else a raw string)
+    rubrics: rubricRegistry, // if judge.rubric is a {id, version} ref, resolve the registered rubric (text/criteria/template)
     ...(process.env.EVERDICT_JUDGE_OPENAI_BASE_URL
       ? { openaiBaseUrl: process.env.EVERDICT_JUDGE_OPENAI_BASE_URL }
       : {}),
@@ -431,6 +438,7 @@ async function main(): Promise<void> {
     benchmarks: benchmarkService,
     datasets: datasetRegistry,
     judges: judgeRegistry,
+    rubrics: rubricRegistry,
     models: modelRegistry,
     runtimes: runtimeRegistry,
   });
@@ -502,6 +510,7 @@ async function main(): Promise<void> {
     harnessInstances: harnessInstanceRegistry,
     datasetRegistry,
     judgeRegistry,
+    rubricRegistry,
     modelRegistry,
     runtimeRegistry,
     probeRuntime,
@@ -1082,6 +1091,7 @@ interface Persistence {
   datasetRegistry: DatasetRegistry;
   benchmarkRegistry: BenchmarkRegistry;
   judgeRegistry: JudgeRegistry;
+  rubricRegistry: RubricRegistry;
   modelRegistry: ModelRegistry;
   runtimeRegistry: RuntimeRegistry;
   settingsStore: WorkspaceSettingsStore; // workspace settings (metering policy, etc.) — always available
@@ -1132,6 +1142,7 @@ async function makePersistence(): Promise<Persistence> {
       datasetRegistry: new InMemoryDatasetRegistry(),
       benchmarkRegistry: new InMemoryBenchmarkRegistry(),
       judgeRegistry: new InMemoryJudgeRegistry(),
+      rubricRegistry: new InMemoryRubricRegistry(),
       modelRegistry: new InMemoryModelRegistry(),
       runtimeRegistry: new InMemoryRuntimeRegistry(),
       settingsStore: new InMemoryWorkspaceSettingsStore(),
@@ -1163,6 +1174,7 @@ async function makePersistence(): Promise<Persistence> {
     datasetRegistry: new PgDatasetRegistry(client),
     benchmarkRegistry: new PgBenchmarkRegistry(client),
     judgeRegistry: new PgJudgeRegistry(client),
+    rubricRegistry: new PgRubricRegistry(client),
     modelRegistry: new PgModelRegistry(client),
     runtimeRegistry: new PgRuntimeRegistry(client),
     settingsStore: new PgWorkspaceSettingsStore(client),
@@ -1203,6 +1215,17 @@ async function seedSharedJudges(registry: JudgeRegistry): Promise<void> {
   try {
     await loadJudgeDir(dir, { into: registry });
     console.error(`▶ shared judges seeded from ${dir}`);
+  } catch {
+    // A missing/empty directory is normal (boot with no seed).
+  }
+}
+
+// Seed _shared (first-party default rubrics) from the file SSOT — a new tenant can reference the default rubrics from a judge immediately. Best-effort/idempotent.
+async function seedSharedRubrics(registry: RubricRegistry): Promise<void> {
+  const dir = process.env.EVERDICT_RUBRICS_DIR ?? `${process.cwd()}/examples/rubrics`;
+  try {
+    await loadRubricDir(dir, { into: registry });
+    console.error(`▶ shared rubrics seeded from ${dir}`);
   } catch {
     // A missing/empty directory is normal (boot with no seed).
   }
