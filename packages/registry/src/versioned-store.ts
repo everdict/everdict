@@ -1,6 +1,10 @@
 import { ConflictError, NotFoundError } from "@everdict/core";
 import { LATEST, SHARED_TENANT, compareVersions, resolveRef, specsEqual } from "./registry.js";
 
+// The VersionMeta list-metadata type now lives in @everdict/application-control — re-architecture P2d compat re-export (removed in the P4 sweep).
+export type { VersionMeta } from "@everdict/application-control";
+import type { VersionMeta } from "@everdict/application-control";
+
 // Shared in-memory storage/resolution for (tenant, id, version) → T: _shared fallback, latest/semver, immutable versions.
 // Shared by the harness taxonomy registries (template/instance) — a generalization of the former HarnessRegistry machinery.
 interface Entry<T> {
@@ -10,20 +14,6 @@ interface Entry<T> {
   createdBy?: string; // registering subject (absent for seed/file)
   deletedAt?: number; // soft-delete tombstone — once set, excluded from every read (content preserved, same pattern as datasets)
   tags?: string[]; // version tags — free-form labels attached because a version is hard to tell apart by number alone. Mutable metadata (outside content immutability, on par with createdBy)
-}
-
-// List metadata — live-version summary for one id (from registration history). Spec derivations like category/kind are filled in by the upstream registry.
-export interface VersionMeta {
-  id: string;
-  owner: string;
-  versions: string[];
-  latestVersion: string;
-  versionCount: number;
-  createdBy?: string; // subject of the first registered version
-  latestCreatedBy?: string; // subject of the latest (semver) version — the privacy owner for a user-secret harness (visibility follows the version that decides privacy)
-  createdAt?: string; // first registration time (ISO)
-  updatedAt?: string; // most recent registration time (ISO)
-  versionTags?: Record<string, string[]>; // version → tags (empty versions omitted; if no tags at all, the field itself is omitted)
 }
 
 export class VersionedStore<T extends { id: string; version: string }> {

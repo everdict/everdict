@@ -23,3 +23,12 @@ export type { WorkspaceInviteStore } from "./ports/workspace-invite-store.js";
 export type { WorkspaceSettingsStore } from "./ports/workspace-settings-store.js";
 export type { WorkspaceStore } from "./ports/workspace-store.js";
 export type { DispatchOptions, Dispatcher } from "./ports/dispatcher.js";
+
+// Versioned-registry ports (interfaces only) — the impls (InMemory*/Pg*) + loaders live in @everdict/registry, which binds these.
+export type { HarnessTemplateRegistry } from "./ports/harness-template-registry.js";
+export type { HarnessInstanceRegistry, HarnessListEntry, VersionMeta } from "./ports/harness-instance-registry.js";
+export type { DatasetListEntry, DatasetRegistry } from "./ports/dataset-registry.js";
+export type { JudgeListEntry, JudgeRegistry } from "./ports/judge-registry.js";
+export type { RubricListEntry, RubricRegistry } from "./ports/rubric-registry.js";
+export type { ModelRegistry } from "./ports/model-registry.js";
+export type { RuntimeListEntry, RuntimeRegistry } from "./ports/runtime-registry.js";
