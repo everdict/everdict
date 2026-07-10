@@ -1,94 +1,55 @@
-import { ConflictError, type Dataset, DatasetSchema, NotFoundError } from "@everdict/core";
+import { type Dataset, DatasetSchema, NotFoundError } from "@everdict/core";
 import type { SqlClient } from "@everdict/db";
-import { SHARED_TENANT, parseVersionTags, resolveRef, sortVersions, specsEqual } from "../registry.js";
+import { PgVersionedStore } from "../pg-versioned-store.js";
+import { SHARED_TENANT, parseVersionTags, sortVersions } from "../registry.js";
 import type { DatasetListEntry, DatasetRegistry } from "./dataset-registry.js";
 
-interface DatasetRow {
-  dataset: unknown;
-}
-
 // Postgres-backed tenant-owned dataset SSOT. Key (tenant, id, version). Tenant-owned first, else _shared fallback.
-// Schema: @everdict/db/migrations/0005_create_datasets (+ 0018: created_by/deleted_at). Same structure as PgHarnessRegistry.
-// Soft delete: rows with deleted_at set are excluded from every read (WHERE deleted_at IS NULL) — data is preserved (reproducibility).
+// Schema: @everdict/db/migrations/0005_create_datasets (+ 0018 created_by/deleted_at, 0047 tags) — the FULL versioned table.
+// Delegates to the shared PgVersionedStore for the whole surface EXCEPT list(): a DatasetListEntry needs the latest
+// dataset's content (caseCount/tags/description/producedBy) alongside the registration history, and it fetches both in a
+// single per-id query (spec + metadata together). That fused shape is entity-specific — the generic listMeta reads only
+// metadata (no spec column) — so list()/summarize() stay entity-local here rather than forking the shared invariant logic.
 export class PgDatasetRegistry implements DatasetRegistry {
-  constructor(private readonly client: SqlClient) {}
-
-  private async ownsId(tenant: string, id: string): Promise<boolean> {
-    const r = await this.client.query(
-      "SELECT 1 FROM everdict_datasets WHERE tenant = $1 AND id = $2 AND deleted_at IS NULL LIMIT 1",
-      [tenant, id],
-    );
-    return r.rows.length > 0;
-  }
-  private async ownerOf(tenant: string, id: string): Promise<string | undefined> {
-    if (await this.ownsId(tenant, id)) return tenant;
-    if (tenant !== SHARED_TENANT && (await this.ownsId(SHARED_TENANT, id))) return SHARED_TENANT;
-    return undefined;
-  }
-  private async ownerVersions(owner: string, id: string): Promise<string[]> {
-    const r = await this.client.query<{ version: string }>(
-      "SELECT version FROM everdict_datasets WHERE tenant = $1 AND id = $2 AND deleted_at IS NULL",
-      [owner, id],
-    );
-    return sortVersions(r.rows.map((x) => x.version));
+  private readonly store: PgVersionedStore<Dataset>;
+  constructor(private readonly client: SqlClient) {
+    this.store = new PgVersionedStore(client, {
+      table: "everdict_datasets",
+      column: "dataset",
+      label: "Dataset",
+      parse: (v) => DatasetSchema.parse(v),
+      softDelete: true,
+      createdBy: true,
+      tags: true,
+    });
   }
 
-  async register(tenant: string, dataset: Dataset, createdBy?: string): Promise<void> {
-    // raw query — also sees tombstoned slots (version identity is immutable; re-registering identical content revives it).
-    const existing = await this.client.query<DatasetRow & { deleted_at: string | null }>(
-      "SELECT dataset, deleted_at FROM everdict_datasets WHERE tenant = $1 AND id = $2 AND version = $3",
-      [tenant, dataset.id, dataset.version],
-    );
-    const row = existing.rows[0];
-    if (row) {
-      if (!specsEqual(row.dataset, dataset)) {
-        throw new ConflictError(
-          "CONFLICT",
-          { tenant, id: dataset.id, version: dataset.version },
-          `Dataset ${dataset.id}@${dataset.version} is already registered with different content (versions are immutable).`,
-        );
-      }
-      if (row.deleted_at !== null)
-        await this.client.query(
-          "UPDATE everdict_datasets SET deleted_at = NULL WHERE tenant = $1 AND id = $2 AND version = $3",
-          [tenant, dataset.id, dataset.version],
-        ); // re-registering identical content → revive
-      return;
-    }
-    await this.client.query(
-      "INSERT INTO everdict_datasets (tenant, id, version, dataset, created_by, created_at) VALUES ($1, $2, $3, $4, $5, now())",
-      [tenant, dataset.id, dataset.version, JSON.stringify(dataset), createdBy ?? null],
-    );
+  register(tenant: string, dataset: Dataset, createdBy?: string): Promise<void> {
+    return this.store.register(tenant, dataset, createdBy);
   }
-
-  async has(tenant: string, id: string, version: string): Promise<boolean> {
-    const owner = await this.ownerOf(tenant, id);
-    if (!owner) return false;
-    const r = await this.client.query(
-      "SELECT 1 FROM everdict_datasets WHERE tenant = $1 AND id = $2 AND version = $3 AND deleted_at IS NULL",
-      [owner, id, version],
-    );
-    return r.rows.length > 0;
+  has(tenant: string, id: string, version: string): Promise<boolean> {
+    return this.store.has(tenant, id, version);
   }
-
-  async versions(tenant: string, id: string): Promise<string[]> {
-    const owner = await this.ownerOf(tenant, id);
-    return owner ? this.ownerVersions(owner, id) : [];
+  versions(tenant: string, id: string): Promise<string[]> {
+    return this.store.versions(tenant, id);
   }
-
-  async ownVersions(tenant: string, id: string): Promise<string[]> {
-    return this.ownerVersions(tenant, id); // exactly this tenant's owned only (no fallback), live versions only
+  ownVersions(tenant: string, id: string): Promise<string[]> {
+    return this.store.ownVersions(tenant, id);
   }
-
-  async get(tenant: string, id: string, ref = "latest"): Promise<Dataset> {
-    const owner = await this.ownerOf(tenant, id);
-    if (!owner) throw new NotFoundError("NOT_FOUND", { tenant, id }, `Dataset '${id}' not found.`);
-    const version = resolveRef(id, ref, await this.ownerVersions(owner, id));
-    const res = await this.client.query<DatasetRow>(
-      "SELECT dataset FROM everdict_datasets WHERE tenant = $1 AND id = $2 AND version = $3 AND deleted_at IS NULL",
-      [owner, id, version],
-    );
-    return DatasetSchema.parse((res.rows[0] as DatasetRow).dataset);
+  get(tenant: string, id: string, ref?: string): Promise<Dataset> {
+    return this.store.get(tenant, id, ref);
+  }
+  creatorOf(tenant: string, id: string, version: string): Promise<string | undefined> {
+    return this.store.creatorOfVersion(tenant, id, version);
+  }
+  softDelete(tenant: string, id: string, version: string): Promise<void> {
+    return this.store.softDelete(tenant, id, version);
+  }
+  setVersionTags(tenant: string, id: string, version: string, tags: string[]): Promise<void> {
+    return this.store.setVersionTags(tenant, id, version, tags);
+  }
+  versionTags(tenant: string, id: string): Promise<Record<string, string[]>> {
+    return this.store.versionTags(tenant, id);
   }
 
   async list(tenant: string): Promise<DatasetListEntry[]> {
@@ -104,7 +65,22 @@ export class PgDatasetRegistry implements DatasetRegistry {
     return out;
   }
 
-  // Summarizes an id's live versions into list metadata (DatasetListEntry). Parses only the latest version for content, and uses created_at for creation/update times.
+  // Owner resolution reused by list() — tenant-owned live first, else _shared live. (get/has/etc. go through the store.)
+  private async ownsId(tenant: string, id: string): Promise<boolean> {
+    const r = await this.client.query(
+      "SELECT 1 FROM everdict_datasets WHERE tenant = $1 AND id = $2 AND deleted_at IS NULL LIMIT 1",
+      [tenant, id],
+    );
+    return r.rows.length > 0;
+  }
+  private async ownerOf(tenant: string, id: string): Promise<string | undefined> {
+    if (await this.ownsId(tenant, id)) return tenant;
+    if (tenant !== SHARED_TENANT && (await this.ownsId(SHARED_TENANT, id))) return SHARED_TENANT;
+    return undefined;
+  }
+
+  // Summarizes an id's live versions into list metadata (DatasetListEntry). Parses only the latest version for content,
+  // and reads spec + registration metadata in a single query (the fused shape is why list() stays entity-local).
   private async summarize(owner: string, id: string): Promise<DatasetListEntry> {
     const r = await this.client.query<{
       version: string;
@@ -153,50 +129,5 @@ export class PgDatasetRegistry implements DatasetRegistry {
       ...(earliest.created_by !== null ? { createdBy: earliest.created_by } : {}),
       ...(Object.keys(versionTags).length > 0 ? { versionTags } : {}),
     };
-  }
-
-  async creatorOf(tenant: string, id: string, version: string): Promise<string | undefined> {
-    // tenant directly-owned + live versions only (no fallback — _shared can't be deleted).
-    const r = await this.client.query<{ created_by: string | null }>(
-      "SELECT created_by FROM everdict_datasets WHERE tenant = $1 AND id = $2 AND version = $3 AND deleted_at IS NULL",
-      [tenant, id, version],
-    );
-    const row = r.rows[0];
-    if (!row) throw new NotFoundError("NOT_FOUND", { tenant, id, version }, `Dataset ${id}@${version} not found.`);
-    return row.created_by ?? undefined;
-  }
-
-  async softDelete(tenant: string, id: string, version: string): Promise<void> {
-    const r = await this.client.query<{ version: string }>(
-      "UPDATE everdict_datasets SET deleted_at = now() WHERE tenant = $1 AND id = $2 AND version = $3 AND deleted_at IS NULL RETURNING version",
-      [tenant, id, version],
-    );
-    if (r.rows.length === 0)
-      throw new NotFoundError("NOT_FOUND", { tenant, id, version }, `Dataset ${id}@${version} not found.`);
-  }
-
-  // version tag replacement (full-array PUT semantics) — tenant directly-owned + live versions only (same discipline as softDelete). Migration 0047.
-  async setVersionTags(tenant: string, id: string, version: string, tags: string[]): Promise<void> {
-    const r = await this.client.query<{ version: string }>(
-      "UPDATE everdict_datasets SET tags = $4::jsonb WHERE tenant = $1 AND id = $2 AND version = $3 AND deleted_at IS NULL RETURNING version",
-      [tenant, id, version, JSON.stringify(tags)],
-    );
-    if (r.rows.length === 0)
-      throw new NotFoundError("NOT_FOUND", { tenant, id, version }, `Dataset ${id}@${version} not found.`);
-  }
-
-  async versionTags(tenant: string, id: string): Promise<Record<string, string[]>> {
-    const owner = await this.ownerOf(tenant, id);
-    if (!owner) return {};
-    const r = await this.client.query<{ version: string; tags: unknown }>(
-      "SELECT version, tags FROM everdict_datasets WHERE tenant = $1 AND id = $2 AND deleted_at IS NULL",
-      [owner, id],
-    );
-    const out: Record<string, string[]> = {};
-    for (const row of r.rows) {
-      const rowTags = parseVersionTags(row.tags);
-      if (rowTags.length > 0) out[row.version] = rowTags;
-    }
-    return out;
   }
 }

@@ -1,6 +1,5 @@
-import { ConflictError, NotFoundError } from "@everdict/core";
 import type { BenchmarkAdapterSpec } from "@everdict/datasets";
-import { SHARED_TENANT, compareVersions, resolveRef, specsEqual } from "../registry.js";
+import { VersionedStore } from "../versioned-store.js";
 
 // Benchmark definition (recipe) SSOT — (tenant, id, version) → BenchmarkAdapterSpec (data). Versions are immutable.
 // Same ownership model as dataset/harness/judge: tenant-owned first, else _shared (first-party) fallback.
@@ -13,75 +12,26 @@ export interface BenchmarkRegistry {
   list(tenant: string): Promise<Array<{ id: string; versions: string[]; owner: string }>>;
 }
 
-interface Entry {
-  spec: BenchmarkAdapterSpec;
-  seq: number;
-}
-
+// Delegates to the shared VersionedStore and exposes only the benchmark surface (no has/softDelete/createdBy/tags — a
+// benchmark recipe is a plain immutable version). ownerOf here is has-live-version (VersionedStore's model), whereas the
+// former hand-rolled impl keyed on id-existence; equivalent because benchmarks have no tombstones (no softDelete → no
+// deleted versions can exist), so "has a live version" and "the id exists" coincide.
 export class InMemoryBenchmarkRegistry implements BenchmarkRegistry {
-  private readonly byOwner = new Map<string, Map<string, Map<string, Entry>>>();
-  private seq = 0;
-
-  private ownerVersions(owner: string, id: string): string[] {
-    const ids = this.byOwner.get(owner)?.get(id);
-    if (!ids) return [];
-    return [...ids.values()]
-      .sort((a, b) => compareVersions(a.spec.version, b.spec.version) || a.seq - b.seq)
-      .map((e) => e.spec.version);
-  }
-  private ownerOf(tenant: string, id: string): string | undefined {
-    if (this.byOwner.get(tenant)?.has(id)) return tenant;
-    if (this.byOwner.get(SHARED_TENANT)?.has(id)) return SHARED_TENANT;
-    return undefined;
-  }
+  private readonly store = new VersionedStore<BenchmarkAdapterSpec>("Benchmark");
 
   async register(tenant: string, spec: BenchmarkAdapterSpec): Promise<void> {
-    let ids = this.byOwner.get(tenant);
-    if (!ids) {
-      ids = new Map();
-      this.byOwner.set(tenant, ids);
-    }
-    let versions = ids.get(spec.id);
-    if (!versions) {
-      versions = new Map();
-      ids.set(spec.id, versions);
-    }
-    const existing = versions.get(spec.version);
-    if (existing) {
-      if (!specsEqual(existing.spec, spec)) {
-        throw new ConflictError(
-          "CONFLICT",
-          { tenant, id: spec.id, version: spec.version },
-          `Benchmark ${spec.id}@${spec.version} is already registered with different content (versions are immutable).`,
-        );
-      }
-      return;
-    }
-    versions.set(spec.version, { spec, seq: this.seq++ });
+    this.store.register(tenant, spec);
   }
-
   async versions(tenant: string, id: string): Promise<string[]> {
-    const owner = this.ownerOf(tenant, id);
-    return owner ? this.ownerVersions(owner, id) : [];
+    return this.store.versions(tenant, id);
   }
-
   async ownVersions(tenant: string, id: string): Promise<string[]> {
-    return this.ownerVersions(tenant, id);
+    return this.store.ownVersions(tenant, id);
   }
-
-  async get(tenant: string, id: string, ref = "latest"): Promise<BenchmarkAdapterSpec> {
-    const owner = this.ownerOf(tenant, id);
-    if (!owner) throw new NotFoundError("NOT_FOUND", { tenant, id }, `Benchmark '${id}' not found.`);
-    const version = resolveRef(id, ref, this.ownerVersions(owner, id));
-    return (this.byOwner.get(owner)?.get(id)?.get(version) as Entry).spec;
+  async get(tenant: string, id: string, ref?: string): Promise<BenchmarkAdapterSpec> {
+    return this.store.get(tenant, id, ref);
   }
-
   async list(tenant: string): Promise<Array<{ id: string; versions: string[]; owner: string }>> {
-    const ids = new Map<string, string>();
-    for (const id of this.byOwner.get(SHARED_TENANT)?.keys() ?? []) ids.set(id, SHARED_TENANT);
-    for (const id of this.byOwner.get(tenant)?.keys() ?? []) ids.set(id, tenant);
-    return [...ids.entries()]
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([id, owner]) => ({ id, owner, versions: this.ownerVersions(owner, id) }));
+    return this.store.listIds(tenant);
   }
 }

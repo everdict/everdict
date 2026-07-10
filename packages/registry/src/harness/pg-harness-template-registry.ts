@@ -7,9 +7,15 @@ import type { HarnessTemplateRegistry } from "./harness-template-registry.js";
 export class PgHarnessTemplateRegistry implements HarnessTemplateRegistry {
   private readonly store: PgVersionedStore<HarnessTemplateSpec>;
   constructor(client: SqlClient) {
-    this.store = new PgVersionedStore(client, "everdict_harness_templates", "template", (v) =>
-      HarnessTemplateSpecSchema.parse(v),
-    );
+    this.store = new PgVersionedStore(client, {
+      table: "everdict_harness_templates",
+      column: "spec",
+      label: "template",
+      parse: (v) => HarnessTemplateSpecSchema.parse(v),
+      softDelete: true,
+      createdBy: true,
+      tags: true,
+    });
   }
   register(tenant: string, spec: HarnessTemplateSpec, createdBy?: string): Promise<void> {
     return this.store.register(tenant, spec, createdBy);

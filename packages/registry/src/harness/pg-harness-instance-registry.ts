@@ -24,9 +24,15 @@ export class PgHarnessInstanceRegistry implements HarnessInstanceRegistry {
     client: SqlClient,
     private readonly templates: HarnessTemplateRegistry,
   ) {
-    this.store = new PgVersionedStore(client, "everdict_harness_instances", "harness instance", (v) =>
-      HarnessInstanceSpecSchema.parse(v),
-    );
+    this.store = new PgVersionedStore(client, {
+      table: "everdict_harness_instances",
+      column: "spec",
+      label: "harness instance",
+      parse: (v) => HarnessInstanceSpecSchema.parse(v),
+      softDelete: true,
+      createdBy: true,
+      tags: true,
+    });
   }
 
   async register(tenant: string, instance: HarnessInstanceSpec, createdBy?: string): Promise<void> {

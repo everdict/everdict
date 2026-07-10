@@ -1,100 +1,38 @@
-import { ConflictError, type ModelSpec, ModelSpecSchema, NotFoundError } from "@everdict/core";
+import { type ModelSpec, ModelSpecSchema } from "@everdict/core";
 import type { SqlClient } from "@everdict/db";
-import { SHARED_TENANT, resolveRef, sortVersions, specsEqual } from "../registry.js";
+import { PgVersionedStore } from "../pg-versioned-store.js";
 import type { ModelRegistry } from "./model-registry.js";
 
-interface ModelRow {
-  model: unknown;
-}
-
 // Postgres-backed tenant-owned model SSOT. (tenant, id, version) key. Tenant-owned first, else _shared fallback.
-// Schema: @everdict/db/migrations/0013_create_models. Same structure as PgJudgeRegistry.
+// Schema: @everdict/db/migrations/0013_create_models — plain immutable-version table (model column, no created_by/deleted_at/tags).
+// Delegates to the shared PgVersionedStore and exposes only the model surface (has + plain list; no softDelete/createdBy/tags).
 export class PgModelRegistry implements ModelRegistry {
-  constructor(private readonly client: SqlClient) {}
-
-  private async ownsId(tenant: string, id: string): Promise<boolean> {
-    const r = await this.client.query("SELECT 1 FROM everdict_models WHERE tenant = $1 AND id = $2 LIMIT 1", [
-      tenant,
-      id,
-    ]);
-    return r.rows.length > 0;
-  }
-  private async ownerOf(tenant: string, id: string): Promise<string | undefined> {
-    if (await this.ownsId(tenant, id)) return tenant;
-    if (tenant !== SHARED_TENANT && (await this.ownsId(SHARED_TENANT, id))) return SHARED_TENANT;
-    return undefined;
-  }
-  private async ownerVersions(owner: string, id: string): Promise<string[]> {
-    const r = await this.client.query<{ version: string }>(
-      "SELECT version FROM everdict_models WHERE tenant = $1 AND id = $2",
-      [owner, id],
-    );
-    return sortVersions(r.rows.map((x) => x.version));
+  private readonly store: PgVersionedStore<ModelSpec>;
+  constructor(client: SqlClient) {
+    this.store = new PgVersionedStore(client, {
+      table: "everdict_models",
+      column: "model",
+      label: "model",
+      parse: (v) => ModelSpecSchema.parse(v),
+    });
   }
 
-  async register(tenant: string, spec: ModelSpec): Promise<void> {
-    const existing = await this.client.query<ModelRow>(
-      "SELECT model FROM everdict_models WHERE tenant = $1 AND id = $2 AND version = $3",
-      [tenant, spec.id, spec.version],
-    );
-    const row = existing.rows[0];
-    if (row) {
-      if (!specsEqual(row.model, spec)) {
-        throw new ConflictError(
-          "CONFLICT",
-          { tenant, id: spec.id, version: spec.version },
-          `model ${spec.id}@${spec.version} is already registered with different content (versions are immutable).`,
-        );
-      }
-      return;
-    }
-    await this.client.query(
-      "INSERT INTO everdict_models (tenant, id, version, model, created_at) VALUES ($1, $2, $3, $4, now())",
-      [tenant, spec.id, spec.version, JSON.stringify(spec)],
-    );
+  register(tenant: string, spec: ModelSpec): Promise<void> {
+    return this.store.register(tenant, spec);
   }
-
-  async has(tenant: string, id: string, version: string): Promise<boolean> {
-    const owner = await this.ownerOf(tenant, id);
-    if (!owner) return false;
-    const r = await this.client.query("SELECT 1 FROM everdict_models WHERE tenant = $1 AND id = $2 AND version = $3", [
-      owner,
-      id,
-      version,
-    ]);
-    return r.rows.length > 0;
+  has(tenant: string, id: string, version: string): Promise<boolean> {
+    return this.store.has(tenant, id, version);
   }
-
-  async versions(tenant: string, id: string): Promise<string[]> {
-    const owner = await this.ownerOf(tenant, id);
-    return owner ? this.ownerVersions(owner, id) : [];
+  versions(tenant: string, id: string): Promise<string[]> {
+    return this.store.versions(tenant, id);
   }
-
-  async ownVersions(tenant: string, id: string): Promise<string[]> {
-    return this.ownerVersions(tenant, id); // exactly this tenant's own (no fallback)
+  ownVersions(tenant: string, id: string): Promise<string[]> {
+    return this.store.ownVersions(tenant, id);
   }
-
-  async get(tenant: string, id: string, ref = "latest"): Promise<ModelSpec> {
-    const owner = await this.ownerOf(tenant, id);
-    if (!owner) throw new NotFoundError("NOT_FOUND", { tenant, id }, `model '${id}' not found.`);
-    const version = resolveRef(id, ref, await this.ownerVersions(owner, id));
-    const res = await this.client.query<ModelRow>(
-      "SELECT model FROM everdict_models WHERE tenant = $1 AND id = $2 AND version = $3",
-      [owner, id, version],
-    );
-    return ModelSpecSchema.parse((res.rows[0] as ModelRow).model);
+  get(tenant: string, id: string, ref?: string): Promise<ModelSpec> {
+    return this.store.get(tenant, id, ref);
   }
-
-  async list(tenant: string): Promise<Array<{ id: string; versions: string[]; owner: string }>> {
-    const r = await this.client.query<{ id: string }>(
-      "SELECT DISTINCT id FROM everdict_models WHERE tenant = $1 OR tenant = $2 ORDER BY id",
-      [tenant, SHARED_TENANT],
-    );
-    const out: Array<{ id: string; versions: string[]; owner: string }> = [];
-    for (const { id } of r.rows) {
-      const owner = (await this.ownerOf(tenant, id)) as string;
-      out.push({ id, owner, versions: await this.ownerVersions(owner, id) });
-    }
-    return out;
+  list(tenant: string): Promise<Array<{ id: string; versions: string[]; owner: string }>> {
+    return this.store.listIds(tenant);
   }
 }
