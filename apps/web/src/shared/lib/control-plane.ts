@@ -302,6 +302,15 @@ export const controlPlane = {
     call<T>(auth, '/rubrics', { method: 'POST', body: JSON.stringify(spec) }),
   validateRubric: <T>(auth: AuthContext, spec: unknown) =>
     call<T>(auth, '/rubrics/validate', { method: 'POST', body: JSON.stringify(spec) }),
+  setRubricVersionTags: <T>(auth: AuthContext, id: string, version: string, tags: string[]) =>
+    call<T>(
+      auth,
+      `/rubrics/${encodeURIComponent(id)}/versions/${encodeURIComponent(version)}/tags`,
+      {
+        method: 'PUT',
+        body: JSON.stringify({ tags }),
+      }
+    ),
   listRuntimes: <T>(auth: AuthContext) => call<T>(auth, '/runtimes'),
   getRuntime: <T>(auth: AuthContext, id: string, version: string) =>
     call<T>(auth, `/runtimes/${encodeURIComponent(id)}/versions/${encodeURIComponent(version)}`),

@@ -1,7 +1,8 @@
 import { RubricSpecSchema } from "@everdict/core";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { type McpToolContext, fail, ok, run } from "../mcp-context.js";
+import { setVersionTags } from "../../common/version-tag-service.js";
+import { type McpToolContext, fail, ok, plain, run } from "../mcp-context.js";
 
 // Rubric MCP tools — the MCP twin of rubric.routes.ts.
 // AuthZ reuses the judge actions (rubrics are the judging domain — no new action, mirroring how views reuse
@@ -26,6 +27,21 @@ export function registerRubricTools(server: McpServer, ctx: McpToolContext): voi
       },
       ({ id, version }) =>
         run(principal, "judges:read", async () => ok(await rubrics.get(ws, id, version ?? "latest"))),
+    );
+
+    server.registerTool(
+      "set_rubric_version_tags",
+      {
+        description:
+          "Replace all tags on a rubric version (empty array = remove all) — free-form labels to tell versions apart (mutable metadata outside the spec, independent of immutability). Gate: judges:write. _shared / other-workspace versions get NOT_FOUND.",
+        inputSchema: {
+          id: z.string(),
+          version: z.string().describe("exact version (latest not allowed)"),
+          tags: z.array(z.string()).describe("all tags for this version (≤60 chars each, ≤20 per version; replaces)"),
+        },
+      },
+      ({ id, version, tags }) =>
+        plain(async () => ok(await setVersionTags(rubrics, principal, "judges:write", id, version, tags))),
     );
 
     server.registerTool(

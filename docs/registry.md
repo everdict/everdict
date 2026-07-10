@@ -63,23 +63,26 @@ Rubrics — HOW to judge: freeform `text` and/or named `criteria` plus an option
 migration `0053_create_rubrics`). One rubric serves many judges: `JudgeSpec.rubric` accepts `{id, version}` as
 well as the inline string, resolved at judge-run time (see `docs/judges.md`). The HTTP/MCP surface
 (`POST/GET /rubrics`, `create/validate/list/get_rubric`) reuses the **judging-domain** actions
-(`judges:read`/`judges:write` — no new authz action, like views reuse `scorecards:*`).
+(`judges:read`/`judges:write` — no new authz action, like views reuse `scorecards:*`). Rubrics carry
+version tags like the other version entities (see below; `tags` column via migration `0054_rubric_version_tags`).
 
 ## Version tags (mutable registry metadata)
 Version numbers alone are hard to tell apart, so every versioned entity (harness instance / dataset / judge /
-runtime) supports **per-version free-form tags** (e.g. `baseline`, `gpt-5 experiment`). Tags are **registry metadata
-outside the immutable spec** — same layer as `createdBy` — so they can be edited *after* registration (the whole
-point: label versions that already exist) and never participate in `specsEqual`/immutability. Contract on all four
-registries:
+runtime / rubric) supports **per-version free-form tags** (e.g. `baseline`, `gpt-5 experiment`). Tags are **registry
+metadata outside the immutable spec** — same layer as `createdBy` — so they can be edited *after* registration (the
+whole point: label versions that already exist) and never participate in `specsEqual`/immutability. Contract on all
+five registries:
 - `setVersionTags(tenant, id, version, tags)` — full-array replace (empty = remove all). **Tenant-owned live
   versions only** (no `_shared` fallback — first-party versions can't be tagged), else `NotFoundError`; tombstoned
   versions are excluded like every other read/write.
 - `versionTags(tenant, id)` → `Record<version, string[]>` (only versions that have tags). Reads resolve
   owner-first with `_shared` fallback, same visibility as `versions()`.
-- List entries (`HarnessListEntry`/`DatasetListEntry`/`JudgeListEntry`/`RuntimeListEntry`) carry an optional
-  `versionTags` map; `GET /harnesses/:id` includes it too.
-Postgres stores tags in a `tags jsonb NOT NULL DEFAULT '[]'` column (migration `0047_version_tags`). HTTP surface:
-`PUT /{harnesses,datasets,judges,runtimes}/:id/versions/:version/tags` gated by each entity's content-mutation
-action (`harnesses:register` / `datasets:write` / `judges:write` / `runtimes:write` — no new authz action); MCP
+- List entries (`HarnessListEntry`/`DatasetListEntry`/`JudgeListEntry`/`RuntimeListEntry`/`RubricListEntry`) carry
+  an optional `versionTags` map; `GET /harnesses/:id` includes it too.
+Postgres stores tags in a `tags jsonb NOT NULL DEFAULT '[]'` column (migration `0047_version_tags`; rubrics via
+`0054_rubric_version_tags`). HTTP surface:
+`PUT /{harnesses,datasets,judges,runtimes,rubrics}/:id/versions/:version/tags` gated by each entity's
+content-mutation action (`harnesses:register` / `datasets:write` / `judges:write` / `runtimes:write` — rubrics
+reuse `judges:write` like the rest of their surface; no new authz action); MCP
 parity via `set_*_version_tags`. Input is normalized in `apps/api` `version-tag-service.ts` (trim, drop empties,
 order-preserving dedupe; ≤20 tags × ≤60 chars).

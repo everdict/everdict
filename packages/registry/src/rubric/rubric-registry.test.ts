@@ -57,6 +57,20 @@ describe("InMemoryRubricRegistry (tenant-owned)", () => {
     await expect(r.register("acme", rubric("r", "1.0.0", { text: "changed" }))).rejects.toBeInstanceOf(ConflictError);
   });
 
+  it("setVersionTags (version tags) — surfaced via versionTags/list, empty array = remove, _shared/missing version → NotFound", async () => {
+    const r = new InMemoryRubricRegistry();
+    await r.register("acme", rubric("r", "1.0.0"));
+    await r.register("acme", rubric("r", "1.1.0"));
+    await r.setVersionTags("acme", "r", "1.0.0", ["strict wording"]);
+    expect(await r.versionTags("acme", "r")).toEqual({ "1.0.0": ["strict wording"] });
+    expect((await r.list("acme")).find((x) => x.id === "r")?.versionTags).toEqual({ "1.0.0": ["strict wording"] });
+    await r.setVersionTags("acme", "r", "1.0.0", []);
+    expect(await r.versionTags("acme", "r")).toEqual({});
+    await r.register(SHARED_TENANT, rubric("correctness", "1.0.0"));
+    await expect(r.setVersionTags("acme", "correctness", "1.0.0", ["x"])).rejects.toBeInstanceOf(NotFoundError);
+    await expect(r.setVersionTags("acme", "r", "9.9.9", ["x"])).rejects.toBeInstanceOf(NotFoundError);
+  });
+
   it("list shows owned + shared and layers on owner + list metadata (subtitle/versionCount)", async () => {
     const r = new InMemoryRubricRegistry();
     await r.register(SHARED_TENANT, rubric("correctness", "1.0.0"));
@@ -95,13 +109,30 @@ describe("loadRubricDir", () => {
   });
 });
 
-// Fake SqlClient — mimics the tenant-aware everdict_rubrics.
+// Fake SqlClient — mimics the tenant-aware everdict_rubrics (incl. tags[version tags]).
 function fakePg(): SqlClient {
-  const rows: Array<{ tenant: string; id: string; version: string; rubric: unknown }> = [];
+  const rows: Array<{ tenant: string; id: string; version: string; rubric: unknown; tags: unknown }> = [];
   const norm = (t: string) => t.replace(/\s+/g, " ").trim();
   return {
     async query<R>(text: string, p: unknown[] = []): Promise<{ rows: R[] }> {
       const t = norm(text);
+      if (t.startsWith("SELECT version, tags FROM everdict_rubrics WHERE tenant = $1 AND id = $2")) {
+        return {
+          rows: rows
+            .filter((x) => x.tenant === p[0] && x.id === p[1])
+            .map((x) => ({ version: x.version, tags: x.tags })) as R[],
+        };
+      }
+      if (
+        t.startsWith(
+          "UPDATE everdict_rubrics SET tags = $4::jsonb WHERE tenant = $1 AND id = $2 AND version = $3 RETURNING version",
+        )
+      ) {
+        const r = rows.find((x) => x.tenant === p[0] && x.id === p[1] && x.version === p[2]);
+        if (!r) return { rows: [] };
+        r.tags = JSON.parse(p[3] as string);
+        return { rows: [{ version: r.version }] as R[] };
+      }
       if (t.startsWith("SELECT rubric FROM everdict_rubrics WHERE tenant = $1 AND id = $2 AND version = $3")) {
         const r = rows.find((x) => x.tenant === p[0] && x.id === p[1] && x.version === p[2]);
         return { rows: (r ? [{ rubric: r.rubric }] : []) as R[] };
@@ -129,6 +160,7 @@ function fakePg(): SqlClient {
           id: p[1] as string,
           version: p[2] as string,
           rubric: JSON.parse(p[3] as string),
+          tags: [], // migration 0054 default
         });
         return { rows: [] };
       }
@@ -152,5 +184,15 @@ describe("PgRubricRegistry (tenant-owned)", () => {
     await expect(r.register("acme", rubric("mine", "1.0.0", { text: "changed" }))).rejects.toBeInstanceOf(
       ConflictError,
     );
+  });
+
+  it("setVersionTags (version tags) — surfaced via versionTags, missing version → NotFound", async () => {
+    const r = new PgRubricRegistry(fakePg());
+    await r.register("acme", rubric("r", "1.0.0"));
+    await r.setVersionTags("acme", "r", "1.0.0", ["strict wording"]);
+    expect(await r.versionTags("acme", "r")).toEqual({ "1.0.0": ["strict wording"] });
+    await r.setVersionTags("acme", "r", "1.0.0", []);
+    expect(await r.versionTags("acme", "r")).toEqual({});
+    await expect(r.setVersionTags("acme", "r", "9.9.9", ["x"])).rejects.toBeInstanceOf(NotFoundError);
   });
 });

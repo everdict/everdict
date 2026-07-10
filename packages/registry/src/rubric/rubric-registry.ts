@@ -14,6 +14,7 @@ export interface RubricListEntry {
   createdBy?: string; // subject of the first-registered version (absent for seed/_shared)
   createdAt?: string;
   updatedAt?: string;
+  versionTags?: Record<string, string[]>; // version → free-form label (tagged versions only) — mutable registry metadata (outside the spec)
 }
 
 // Latest RubricSpec → list-derived fields. The subtitle names which of the content forms the rubric carries.
@@ -38,6 +39,10 @@ export interface RubricRegistry {
   versions(tenant: string, id: string): Promise<string[]>; // sorted (semver first) — owner-first / _shared fallback
   ownVersions(tenant: string, id: string): Promise<string[]>; // only versions this tenant registered directly (no fallback — for conflict checks)
   list(tenant: string): Promise<RubricListEntry[]>;
+  // Version tags (free-form labels, full replacement) — mutable registry metadata (outside spec immutability). Tenant-owned versions only; _shared → NotFound.
+  setVersionTags(tenant: string, id: string, version: string, tags: string[]): Promise<void>;
+  // version → tag map (tagged versions only). Reads resolve owner like versions() (incl. _shared fallback).
+  versionTags(tenant: string, id: string): Promise<Record<string, string[]>>;
 }
 
 interface Entry {
@@ -45,6 +50,7 @@ interface Entry {
   seq: number;
   createdAt: string;
   createdBy?: string;
+  tags?: string[]; // version tags — mutable registry metadata (outside spec immutability, on par with createdBy)
 }
 
 export class InMemoryRubricRegistry implements RubricRegistry {
@@ -128,6 +134,7 @@ export class InMemoryRubricRegistry implements RubricRegistry {
       const earliest = entries[0];
       const latest = entries.at(-1);
       const latestSpec = this.byOwner.get(owner)?.get(id)?.get(latestVersion)?.spec;
+      const versionTags = await this.versionTags(owner, id);
       out.push({
         id,
         owner,
@@ -138,7 +145,24 @@ export class InMemoryRubricRegistry implements RubricRegistry {
         ...(earliest?.createdBy !== undefined ? { createdBy: earliest.createdBy } : {}),
         ...(earliest ? { createdAt: earliest.createdAt } : {}),
         ...(latest ? { updatedAt: latest.createdAt } : {}),
+        ...(Object.keys(versionTags).length > 0 ? { versionTags } : {}),
       });
+    }
+    return out;
+  }
+
+  async setVersionTags(tenant: string, id: string, version: string, tags: string[]): Promise<void> {
+    const entry = this.byOwner.get(tenant)?.get(id)?.get(version); // directly-owned only (no fallback — _shared can't be tagged)
+    if (!entry) throw new NotFoundError("NOT_FOUND", { tenant, id, version }, `rubric ${id}@${version} not found.`);
+    entry.tags = tags.length > 0 ? tags : undefined; // empty array = remove (same idiom as revive's deletedAt=undefined)
+  }
+
+  async versionTags(tenant: string, id: string): Promise<Record<string, string[]>> {
+    const owner = this.ownerOf(tenant, id);
+    if (!owner) return {};
+    const out: Record<string, string[]> = {};
+    for (const e of this.byOwner.get(owner)?.get(id)?.values() ?? []) {
+      if (e.tags !== undefined && e.tags.length > 0) out[e.spec.version] = e.tags;
     }
     return out;
   }

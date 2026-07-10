@@ -3,8 +3,10 @@ import { redirect } from 'next/navigation'
 import { ChevronLeft } from 'lucide-react'
 import { getTranslations } from 'next-intl/server'
 
+import { VersionTagsEditor } from '@/features/version-tags'
 import { rubricSpecSchema, rubricsSchema, type RubricSpec } from '@/entities/rubric'
-import { authContext } from '@/shared/auth/principal'
+import { can } from '@/shared/auth/can'
+import { currentPrincipal } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
 import { sortSemverDesc } from '@/shared/lib/semver'
 import { Badge } from '@/shared/ui/badge'
@@ -44,7 +46,7 @@ export default async function RubricDetailPage({
 }) {
   const { workspace, id } = await params
   const t = await getTranslations('rubricsPage')
-  const ctx = await authContext()
+  const { principal, ctx } = await currentPrincipal()
 
   // Summary (owner/versions) from the list — back to the list if the rubric doesn't exist or the connection fails.
   let summary
@@ -79,6 +81,11 @@ export default async function RubricDetailPage({
   const criteria = rubric.criteria ?? []
   const tags = rubric.tags ?? []
   const hasThreshold = criteria.some((c) => c.passThreshold !== undefined)
+
+  // This version's tags (shown = latest) (free-form labels) — same gate as registration (judges:write reuse) + editable only in the owning workspace.
+  const currentWorkspace = principal?.workspace ?? workspace
+  const canEditTags = can(principal?.roles, 'judges:write') && summary.owner === currentWorkspace
+  const latestTags = summary.versionTags?.[latest] ?? []
 
   return (
     <div className="space-y-7">
@@ -150,6 +157,21 @@ export default async function RubricDetailPage({
         <section className="space-y-2.5">
           <SectionHeader title={t('promptTemplateSection')} />
           <PreBlock>{rubric.promptTemplate}</PreBlock>
+        </section>
+      )}
+
+      {/* This version's tags (shown = latest) — free-form labels for distinguishing versions, separate from the spec's own content tags in the meta strip.
+          If not editable and there are no tags, hide the section entirely (don't render empty sections). */}
+      {(canEditTags || latestTags.length > 0) && (
+        <section className="space-y-2.5">
+          <SectionHeader title={t('versionTags')} />
+          <VersionTagsEditor
+            entity="rubric"
+            id={id}
+            version={latest}
+            tags={latestTags}
+            canEdit={canEditTags}
+          />
         </section>
       )}
 

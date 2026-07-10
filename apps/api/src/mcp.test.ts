@@ -282,6 +282,7 @@ describe("MCP tools", () => {
       "set_harness_version_tags",
       "set_judge_version_tags",
       "set_member_role",
+      "set_rubric_version_tags",
       "set_runtime_version_tags",
       "set_workspace_mattermost",
       "set_workspace_trace_sink",
@@ -1167,6 +1168,47 @@ describe("MCP tools", () => {
     const notFound = await beta.callTool({ name: "get_rubric", arguments: { id: "quality" } });
     expect(notFound.isError).toBe(true);
     expect(text(notFound)).toContain("NOT_FOUND");
+  });
+
+  it("set_rubric_version_tags — replace version tags (mutable metadata outside the spec), then exposed via list_rubrics.versionTags", async () => {
+    const deps = harness();
+    const member = await connect(deps, ["member"], "acme"); // judges:write is member+ (same gate as create_rubric)
+    const rubricSpec = JSON.stringify({ id: "quality", version: "1.0.0", text: "did it work?" });
+    await member.callTool({ name: "create_rubric", arguments: { rubric: rubricSpec } });
+
+    const set = await member.callTool({
+      name: "set_rubric_version_tags",
+      arguments: { id: "quality", version: "1.0.0", tags: ["baseline", " baseline ", "gpt-5 experiment"] },
+    });
+    expect(set.isError).toBeFalsy();
+    expect(JSON.parse(text(set))).toMatchObject({
+      id: "quality",
+      version: "1.0.0",
+      tags: ["baseline", "gpt-5 experiment"],
+    }); // normalized (dedupe)
+
+    const list = await member.callTool({ name: "list_rubrics", arguments: {} });
+    const entry = (JSON.parse(text(list)) as Array<{ id: string; versionTags?: Record<string, string[]> }>).find(
+      (e) => e.id === "quality",
+    );
+    expect(entry?.versionTags).toEqual({ "1.0.0": ["baseline", "gpt-5 experiment"] });
+
+    // viewer lacks judges:write → FORBIDDEN (isError)
+    const viewer = await connect(deps, ["viewer"], "acme");
+    const denied = await viewer.callTool({
+      name: "set_rubric_version_tags",
+      arguments: { id: "quality", version: "1.0.0", tags: ["x"] },
+    });
+    expect(denied.isError).toBe(true);
+    expect(text(denied)).toContain("FORBIDDEN");
+
+    // missing version → NOT_FOUND (isError)
+    const miss = await member.callTool({
+      name: "set_rubric_version_tags",
+      arguments: { id: "quality", version: "9.9.9", tags: ["x"] },
+    });
+    expect(miss.isError).toBe(true);
+    expect(text(miss)).toContain("NOT_FOUND");
   });
 
   it("models: member registers·validates·reads a Model; viewer's write is a permission error; other workspace is NOT_FOUND", async () => {

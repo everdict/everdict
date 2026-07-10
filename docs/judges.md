@@ -72,6 +72,10 @@ like views reuse `scorecards:*`):
 | `POST /rubrics/validate` (dry-run) | `validate_rubric` | `judges:write` |
 | `GET /rubrics` | `list_rubrics` | `judges:read` (viewer+) |
 | `GET /rubrics/:id/versions/:version` | `get_rubric` | `judges:read` |
+| `PUT /rubrics/:id/versions/:version/tags` | `set_rubric_version_tags` | `judges:write` (member+) |
+
+Rubric **version tags** (the last row) are the same mutable registry metadata as on harnesses/datasets/judges/
+runtimes — free-form labels outside the immutable spec, owned-versions only (see `docs/registry.md`).
 
 ## Web (`apps/web`)
 - **Judge `/dashboard/judges`** — owned vs `_shared` judges (kind + version chips; rows link to detail).

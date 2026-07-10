@@ -2838,6 +2838,54 @@ describe("API — rubrics (HOW to judge, workspace-owned, judging-domain actions
     await app.close();
   });
 
+  it("PUT version tags — viewer 403 (judges:write reuse) / owner replaces (200, normalized) → versionTags exposed in the list / other workspace 404", async () => {
+    // viewer lacks judges:write → 403 (regardless of existence — the gate comes first).
+    const viewer = server({ requireAuth: true, authenticator: roleAuth(["viewer"]) });
+    expect(
+      (
+        await viewer.app.inject({
+          method: "PUT",
+          url: "/rubrics/quality/versions/1.0.0/tags",
+          headers: { authorization: "Bearer x" },
+          payload: { tags: ["x"] },
+        })
+      ).statusCode,
+    ).toBe(403);
+    await viewer.app.close();
+
+    const { app, keyStore } = server({ requireAuth: true });
+    const acme = { authorization: `Bearer ${await issueKey(keyStore, "acme")}` };
+    const beta = { authorization: `Bearer ${await issueKey(keyStore, "beta")}` };
+    await app.inject({ method: "POST", url: "/rubrics", headers: acme, payload: RUBRIC });
+
+    // Replace (PUT the whole array) — normalized by trim + dedupe on return/store.
+    const put = await app.inject({
+      method: "PUT",
+      url: "/rubrics/quality/versions/1.0.0/tags",
+      headers: acme,
+      payload: { tags: [" baseline ", "baseline", "gpt-5 experiment"] },
+    });
+    expect(put.statusCode).toBe(200);
+    expect(put.json()).toMatchObject({ id: "quality", version: "1.0.0", tags: ["baseline", "gpt-5 experiment"] });
+    const list = await app.inject({ method: "GET", url: "/rubrics", headers: acme });
+    expect(list.json().find((x: { id: string }) => x.id === "quality").versionTags).toEqual({
+      "1.0.0": ["baseline", "gpt-5 experiment"],
+    });
+
+    // Other-workspace versions are 404 (existence hidden) — only owned versions' tags are editable.
+    expect(
+      (
+        await app.inject({
+          method: "PUT",
+          url: "/rubrics/quality/versions/1.0.0/tags",
+          headers: beta,
+          payload: { tags: ["x"] },
+        })
+      ).statusCode,
+    ).toBe(404);
+    await app.close();
+  });
+
   it("invalid spec is 400 on register (a rubric with neither text/criteria/promptTemplate)", async () => {
     const { app, keyStore } = server({ requireAuth: true });
     const h = { authorization: `Bearer ${await issueKey(keyStore, "acme")}` };

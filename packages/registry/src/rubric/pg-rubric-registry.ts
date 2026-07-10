@@ -1,6 +1,6 @@
 import { ConflictError, NotFoundError, type RubricSpec, RubricSpecSchema } from "@everdict/core";
 import type { SqlClient } from "@everdict/db";
-import { SHARED_TENANT, resolveRef, sortVersions, specsEqual } from "../registry.js";
+import { SHARED_TENANT, parseVersionTags, resolveRef, sortVersions, specsEqual } from "../registry.js";
 import { type RubricListEntry, type RubricRegistry, rubricDerived } from "./rubric-registry.js";
 
 interface RubricRow {
@@ -8,7 +8,7 @@ interface RubricRow {
 }
 
 // Postgres-backed tenant-owned rubric SSOT. (tenant, id, version) key. Tenant-owned first, else _shared fallback.
-// Schema: @everdict/db/migrations/0053_create_rubrics. Same structure as PgJudgeRegistry.
+// Schema: @everdict/db/migrations/0053_create_rubrics (+ 0054_rubric_version_tags). Same structure as PgJudgeRegistry.
 export class PgRubricRegistry implements RubricRegistry {
   constructor(private readonly client: SqlClient) {}
 
@@ -99,7 +99,8 @@ export class PgRubricRegistry implements RubricRegistry {
           created_at: string | Date;
           created_by: string | null;
           rubric: unknown;
-        }>("SELECT version, created_at, created_by, rubric FROM everdict_rubrics WHERE tenant = $1 AND id = $2", [
+          tags: unknown;
+        }>("SELECT version, created_at, created_by, rubric, tags FROM everdict_rubrics WHERE tenant = $1 AND id = $2", [
           owner,
           id,
         ])
@@ -111,6 +112,11 @@ export class PgRubricRegistry implements RubricRegistry {
       const earliest = byTime[0];
       const latest = byTime.at(-1);
       const latestRow = rows.find((x) => x.version === latestVersion);
+      const versionTags: Record<string, string[]> = {};
+      for (const row of rows) {
+        const rowTags = parseVersionTags(row.tags);
+        if (rowTags.length > 0) versionTags[row.version] = rowTags;
+      }
       out.push({
         id,
         owner,
@@ -121,7 +127,33 @@ export class PgRubricRegistry implements RubricRegistry {
         ...(earliest?.created_by != null ? { createdBy: earliest.created_by } : {}),
         ...(earliest ? { createdAt: new Date(earliest.created_at).toISOString() } : {}),
         ...(latest ? { updatedAt: new Date(latest.created_at).toISOString() } : {}),
+        ...(Object.keys(versionTags).length > 0 ? { versionTags } : {}),
       });
+    }
+    return out;
+  }
+
+  // Version tag replacement (full-array PUT semantics) — tenant directly-owned versions only (_shared → NotFound). Migration 0054.
+  async setVersionTags(tenant: string, id: string, version: string, tags: string[]): Promise<void> {
+    const r = await this.client.query<{ version: string }>(
+      "UPDATE everdict_rubrics SET tags = $4::jsonb WHERE tenant = $1 AND id = $2 AND version = $3 RETURNING version",
+      [tenant, id, version, JSON.stringify(tags)],
+    );
+    if (r.rows.length === 0)
+      throw new NotFoundError("NOT_FOUND", { tenant, id, version }, `rubric ${id}@${version} not found.`);
+  }
+
+  async versionTags(tenant: string, id: string): Promise<Record<string, string[]>> {
+    const owner = await this.ownerOf(tenant, id);
+    if (!owner) return {};
+    const r = await this.client.query<{ version: string; tags: unknown }>(
+      "SELECT version, tags FROM everdict_rubrics WHERE tenant = $1 AND id = $2",
+      [owner, id],
+    );
+    const out: Record<string, string[]> = {};
+    for (const row of r.rows) {
+      const rowTags = parseVersionTags(row.tags);
+      if (rowTags.length > 0) out[row.version] = rowTags;
     }
     return out;
   }

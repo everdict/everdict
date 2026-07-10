@@ -1,12 +1,14 @@
 import { RubricSpecSchema } from "@everdict/core";
 import type { FastifyInstance } from "fastify";
+import { VersionTagsBodySchema, setVersionTags } from "../../common/version-tag-service.js";
 import { type ServerDeps, gate, resolvePrincipal, sendError, zodIssues } from "../route-context.js";
+import { rubricDocs } from "./rubric.docs.js";
 
 // rubrics (workspace-owned SSOT, HOW to judge: text and/or criteria + optional prompt template — referenced by judges)
 // AuthZ reuses the judge actions (rubrics are the judging domain — no new action, mirroring how views reuse
 // scorecards:*): read = judges:read, write = judges:write.
 export function registerRubricRoutes(app: FastifyInstance, deps: ServerDeps): void {
-  app.post("/rubrics", async (req, reply) => {
+  app.post("/rubrics", { schema: rubricDocs.register }, async (req, reply) => {
     if (!deps.rubricRegistry)
       return reply.code(404).send({ code: "NOT_FOUND", message: "rubric registry not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
@@ -27,7 +29,7 @@ export function registerRubricRoutes(app: FastifyInstance, deps: ServerDeps): vo
   });
 
   // dry-run validate — schema + this workspace's existing versions/conflict (does not register).
-  app.post("/rubrics/validate", async (req, reply) => {
+  app.post("/rubrics/validate", { schema: rubricDocs.validate }, async (req, reply) => {
     if (!deps.rubricRegistry)
       return reply.code(404).send({ code: "NOT_FOUND", message: "rubric registry not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
@@ -50,7 +52,7 @@ export function registerRubricRoutes(app: FastifyInstance, deps: ServerDeps): vo
     });
   });
 
-  app.get("/rubrics", async (req, reply) => {
+  app.get("/rubrics", { schema: rubricDocs.list }, async (req, reply) => {
     if (!deps.rubricRegistry)
       return reply.code(404).send({ code: "NOT_FOUND", message: "rubric registry not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
@@ -64,16 +66,48 @@ export function registerRubricRoutes(app: FastifyInstance, deps: ServerDeps): vo
   });
 
   // Full RubricSpec for a specific version. version may be "latest". Other workspace → NOT_FOUND.
-  app.get<{ Params: { id: string; version: string } }>("/rubrics/:id/versions/:version", async (req, reply) => {
-    if (!deps.rubricRegistry)
-      return reply.code(404).send({ code: "NOT_FOUND", message: "rubric registry not configured" });
-    const principal = await resolvePrincipal(req, reply, deps);
-    if (!principal) return reply;
-    try {
-      gate(principal, "judges:read");
-      return reply.send(await deps.rubricRegistry.get(principal.workspace, req.params.id, req.params.version));
-    } catch (err) {
-      return sendError(reply, err); // not found → NotFoundError → 404
-    }
-  });
+  app.get<{ Params: { id: string; version: string } }>(
+    "/rubrics/:id/versions/:version",
+    { schema: rubricDocs.get },
+    async (req, reply) => {
+      if (!deps.rubricRegistry)
+        return reply.code(404).send({ code: "NOT_FOUND", message: "rubric registry not configured" });
+      const principal = await resolvePrincipal(req, reply, deps);
+      if (!principal) return reply;
+      try {
+        gate(principal, "judges:read");
+        return reply.send(await deps.rubricRegistry.get(principal.workspace, req.params.id, req.params.version));
+      } catch (err) {
+        return sendError(reply, err); // not found → NotFoundError → 404
+      }
+    },
+  );
+
+  // Replace version tags (whole-array PUT; empty array = clear) — mutable metadata outside the spec (free labels, to tell versions apart). Reuses judges:write.
+  app.put<{ Params: { id: string; version: string } }>(
+    "/rubrics/:id/versions/:version/tags",
+    { schema: rubricDocs.setVersionTags },
+    async (req, reply) => {
+      if (!deps.rubricRegistry)
+        return reply.code(404).send({ code: "NOT_FOUND", message: "rubric registry not configured" });
+      const principal = await resolvePrincipal(req, reply, deps);
+      if (!principal) return reply;
+      const parsed = VersionTagsBodySchema.safeParse(req.body);
+      if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
+      try {
+        return reply.send(
+          await setVersionTags(
+            deps.rubricRegistry,
+            principal,
+            "judges:write",
+            req.params.id,
+            req.params.version,
+            parsed.data.tags,
+          ),
+        );
+      } catch (err) {
+        return sendError(reply, err); // no permission 403 / not found·non-owned 404
+      }
+    },
+  );
 }

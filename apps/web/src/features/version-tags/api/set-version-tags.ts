@@ -6,8 +6,8 @@ import { authContext } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
 
 // Replace all version tags (empty array = remove all) — free-form labels outside the spec (to tell versions apart). authZ is enforced by the control plane
-// (harnesses:register / datasets:write / runtimes:write; _shared and other workspaces' versions 404).
-export type VersionTagEntity = 'harness' | 'dataset' | 'runtime'
+// (harnesses:register / datasets:write / runtimes:write / judges:write for rubrics; _shared and other workspaces' versions 404).
+export type VersionTagEntity = 'harness' | 'dataset' | 'runtime' | 'rubric'
 
 export async function setVersionTagsAction(input: {
   entity: VersionTagEntity
@@ -21,6 +21,8 @@ export async function setVersionTagsAction(input: {
       await controlPlane.setHarnessVersionTags(ctx, input.id, input.version, input.tags)
     else if (input.entity === 'dataset')
       await controlPlane.setDatasetVersionTags(ctx, input.id, input.version, input.tags)
+    else if (input.entity === 'rubric')
+      await controlPlane.setRubricVersionTags(ctx, input.id, input.version, input.tags)
     else await controlPlane.setRuntimeVersionTags(ctx, input.id, input.version, input.tags)
     // Broad revalidation so the latest tags show up anywhere — detail/list/run forms (same pattern as the comment action).
     revalidatePath('/[workspace]', 'layout')

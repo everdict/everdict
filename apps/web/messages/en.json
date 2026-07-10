@@ -1684,6 +1684,7 @@
     "criterionWeight": "Weight",
     "criterionPassThreshold": "Pass ≥",
     "versions": "Versions",
+    "versionTags": "Version tags",
     "loadError": "Couldn't load the rubric{detail}.",
     "noPermissionTitle": "You don't have permission to register rubrics.",
     "noPermissionHint": "Requires the member role or higher (judges:write). Ask a workspace admin."

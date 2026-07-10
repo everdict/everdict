@@ -25,7 +25,7 @@ infra (no secrets in the spec; `local` = dev/control-plane-host, superseded for 
   `HarnessRegistry` / `DatasetRegistry` / `JudgeRegistry` / `RuntimeRegistry` — add a new versioned entity by
   mirroring this, not a new model.
 - **Version tags are mutable metadata, NOT spec content.** Per-version free-form labels (`setVersionTags` /
-  `versionTags` on all four registries) live beside `createdBy` — outside `specsEqual`, editable after
+  `versionTags` on all five registries — harness/dataset/judge/runtime/rubric) live beside `createdBy` — outside `specsEqual`, editable after
   registration (that's the point: label versions that already exist). Writes hit **tenant-owned live versions
   only** (no `_shared` fallback, tombstones excluded) → `NotFound` otherwise; reads resolve owner-first like
   `versions()`. Never move tags into the spec (that would freeze them behind immutability) and never let them
