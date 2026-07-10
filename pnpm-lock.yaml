@@ -285,11 +285,17 @@ importers:
         specifier: workspace:*
         version: link:../core
 
-  packages/core:
+  packages/contracts:
     dependencies:
       zod:
         specifier: ^3.24.1
         version: 3.25.76
+
+  packages/core:
+    dependencies:
+      '@everdict/contracts':
+        specifier: workspace:*
+        version: link:../contracts
 
   packages/datasets:
     dependencies:

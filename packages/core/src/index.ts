@@ -1,25 +1,5 @@
-// @everdict/core — contracts only. The dependency root.
-// Every contract is paired with a Zod schema (the schema is the source of truth; the type is z.infer).
-export * from "./errors.js";
-export * from "./execution/trace.js";
-export * from "./execution/compute.js";
-export * from "./execution/case-failure.js";
-export * from "./execution/environment.js";
-export * from "./harness/harness.js";
-export * from "./execution/grader.js";
-export * from "./execution/eval-case.js";
-export * from "./execution/agent-job.js";
-export * from "./infra/trust-zone.js";
-export * from "./infra/capability.js";
-export * from "./infra/capability-requirements.js";
-export * from "./harness/harness-spec.js";
-export * from "./infra/image-ref.js";
-export * from "./harness/harness-secrets.js";
-export * from "./harness/harness-template.js";
-export * from "./execution/suite.js";
-export * from "./execution/dataset.js";
-export * from "./harness/rubric-spec.js";
-export * from "./harness/judge-spec.js";
-export * from "./harness/model-spec.js";
-export * from "./infra/runtime-spec.js";
-export * from "./execution/shell.js";
+// L0 재배치(re-architecture P0a, docs/architecture/rearchitecture/00-target-architecture.md):
+// 계약+커널의 실체는 @everdict/contracts 로 이동했다. 이 패키지는 소비자 무파손을 위한 compat 셸 —
+// P1 에서 커널 함수가 @everdict/domain 으로 분리되면 여기서 함께 재수출하고, P4 스윕에서 제거된다.
+// 새 코드는 @everdict/contracts(스키마/에러) 를 직접 임포트할 것.
+export * from "@everdict/contracts";
