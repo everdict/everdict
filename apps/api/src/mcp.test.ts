@@ -38,6 +38,7 @@ import { RunnerService } from "./core/runner/runner-service.js";
 import { ScheduleService } from "./core/schedule/schedule-service.js";
 import { ScorecardService } from "./core/scorecard/scorecard-service.js";
 import { TraceSinkService } from "./core/trace-sink/trace-sink-service.js";
+import { githubAppGateway } from "./infrastructure/github/app-gateway.js";
 import { buildMcpServer } from "./mcp.js";
 
 const result: CaseResult = {
@@ -102,6 +103,7 @@ function harness() {
       states: new InMemoryOAuthStateStore(),
       settings: new InMemoryWorkspaceSettingsStore(),
       secretsFor: async () => ({}),
+      gateway: githubAppGateway(),
       config: {
         webBaseUrl: "http://web.test",
         apiPublicUrl: "http://api.test",

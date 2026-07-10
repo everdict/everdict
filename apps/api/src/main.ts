@@ -151,6 +151,7 @@ import { TemporalBatchDriver } from "./core/scorecard/temporal-batch-driver.js";
 import { TraceSinkService } from "./core/trace-sink/trace-sink-service.js";
 import { ViewService } from "./core/view/view-service.js";
 import { WorkspaceService } from "./core/workspace/workspace-service.js";
+import { githubAppGateway } from "./infrastructure/github/app-gateway.js";
 import { githubRepoWriterFactory } from "./infrastructure/github/repo-writer.js";
 import { mattermostHttpClient } from "./infrastructure/mattermost/mattermost-client.js";
 import { buildServer } from "./server.js";
@@ -910,6 +911,7 @@ function buildIntegrations(deps: {
     states: oauthStateStore,
     settings: settingsStore,
     secretsFor: runtimeSecretsFor,
+    gateway: githubAppGateway(), // outbound App-JWT/installation-token + installation-repos/runner-token adapter (fetch)
     config: {
       webBaseUrl: process.env.WEB_BASE_URL ?? "http://localhost:3001",
       ...(process.env.API_PUBLIC_URL ? { apiPublicUrl: process.env.API_PUBLIC_URL } : {}),

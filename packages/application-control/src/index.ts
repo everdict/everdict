@@ -110,6 +110,23 @@ export {
   type GithubRunnerInstallResult,
   installGithubWorkspaceRunner,
 } from "./runner/github-runner-install.js";
+export type {
+  GithubAppCreds,
+  GithubAppGateway,
+  GithubInstallationRepo,
+} from "./ports/github-app-gateway.js";
+export {
+  type GithubAppDetailView,
+  GithubAppService,
+  type GithubAppServiceConfig,
+  type GithubAppServiceDeps,
+  type GithubAppView,
+  type GithubComAppConfig,
+  type InstallationRepo,
+  type InstallationWithRepos,
+  type ServedRegistration,
+  type StartInstallInput,
+} from "./github-app/github-app-service.js";
 export { createLimiter, type Limiter } from "./concurrency/limiter.js";
 export {
   type CaseExportStream,

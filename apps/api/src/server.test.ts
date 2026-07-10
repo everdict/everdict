@@ -44,6 +44,7 @@ import { ScheduleService } from "./core/schedule/schedule-service.js";
 import { ScorecardService } from "./core/scorecard/scorecard-service.js";
 import { TraceSinkService } from "./core/trace-sink/trace-sink-service.js";
 import { WorkspaceService } from "./core/workspace/workspace-service.js";
+import { githubAppGateway } from "./infrastructure/github/app-gateway.js";
 import { buildServer } from "./server.js";
 
 const result: CaseResult = {
@@ -195,6 +196,7 @@ function server(
     states: new InMemoryOAuthStateStore(),
     settings: settingsStore,
     secretsFor: async () => ({}),
+    gateway: githubAppGateway(),
     config: {
       webBaseUrl: "http://web.test",
       apiPublicUrl: "http://api.test",

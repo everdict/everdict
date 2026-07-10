@@ -2,6 +2,7 @@ import { generateKeyPairSync } from "node:crypto";
 import { BadRequestError, NotFoundError } from "@everdict/core";
 import { InMemoryOAuthStateStore, InMemoryWorkspaceSettingsStore } from "@everdict/db";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { githubAppGateway } from "../../infrastructure/github/app-gateway.js";
 import { GithubAppService } from "./github-app-service.js";
 
 const { privateKey } = generateKeyPairSync("rsa", {
@@ -74,6 +75,7 @@ describe("GithubAppService", () => {
       states,
       settings,
       secretsFor: async (ws) => secrets[ws] ?? {},
+      gateway: githubAppGateway(), // fake fetch (vi.stubGlobal) routes through the real adapter → wire assertions survive
       config: {
         webBaseUrl: "http://web.test",
         apiPublicUrl: "http://api.test",
