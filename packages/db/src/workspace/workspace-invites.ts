@@ -1,4 +1,5 @@
 import { randomBytes, randomUUID } from "node:crypto";
+import type { ConsumeOutcome, CreateInviteInput, WorkspaceInviteMeta } from "@everdict/contracts";
 import type { SqlClient } from "../client.js";
 import { hashKey } from "./tenant-auth.js";
 import type { WorkspaceStore } from "./workspace-store.js";
@@ -7,47 +8,11 @@ import type { WorkspaceStore } from "./workspace-store.js";
 // Invite = join secret: hash-only · expiring · single-use. consume is atomic via a single CTE (since SqlClient has no transactions).
 export { hashKey }; // reused when the service hashes the plaintext token and passes it in
 
-export interface WorkspaceInviteMeta {
-  id: string;
-  workspace: string;
-  role: string;
-  createdBy: string;
-  prefix: string; // inv_abcd… identification hint (not a hash/plaintext)
-  createdAt: string;
-  expiresAt?: string;
-  accepted: boolean;
-  acceptedBy?: string;
-  acceptedAt?: string;
-}
-
-export interface ConsumeResult {
-  workspace: string;
-  role: string;
-}
-
-// Acceptance result — distinguishes the failure reason (the service maps it to an AppError). The reason isn't exposed as-is to the client (preventing existence leaks is the service's job).
-export type ConsumeOutcome =
-  | { ok: true; result: ConsumeResult }
-  | { ok: false; reason: "unknown" | "expired" | "accepted" };
-
-export interface CreateInviteInput {
-  workspace: string;
-  role: string;
-  createdBy: string;
-  tokenHash: string;
-  prefix: string;
-  expiresAt?: string;
-}
-
-export interface WorkspaceInviteStore {
-  createInvite(input: CreateInviteInput): Promise<WorkspaceInviteMeta>;
-  listInvites(workspace: string): Promise<WorkspaceInviteMeta[]>; // meta only — never returns token_hash
-  revokeInvite(workspace: string, id: string): Promise<void>; // tenant-scoped, idempotent (no-op)
-  // Atomic: verify exists+unexpired+unaccepted → create membership/refresh email → mark the invite accepted.
-  consumeInvite(tokenHash: string, subject: string, email?: string): Promise<ConsumeOutcome>;
-  // Non-consuming preview — by token hash, only workspace/role (no membership creation·redeem). Nonexistent/expired/accepted → undefined.
-  previewInvite(tokenHash: string): Promise<{ workspace: string; role: string } | undefined>;
-}
+// The invite meta/consume shapes now live in contracts/records — re-architecture P2c; db keeps compat re-exports (removed in the P4 sweep).
+export type { ConsumeOutcome, ConsumeResult, CreateInviteInput, WorkspaceInviteMeta } from "@everdict/contracts";
+// The store port now lives in @everdict/application-control — re-architecture P2c compat re-export (removed in the P4 sweep).
+export type { WorkspaceInviteStore } from "@everdict/application-control";
+import type { WorkspaceInviteStore } from "@everdict/application-control";
 
 // inv_<random> — plaintext invite token (embedded in the link). Shown once at creation and stored only as a hash.
 export function generateInviteToken(): string {

@@ -9,10 +9,9 @@ export {
   WorkspaceSettingsSchema,
 } from "@everdict/contracts";
 
-export interface WorkspaceSettingsStore {
-  get(workspace: string): Promise<WorkspaceSettings | undefined>;
-  set(workspace: string, patch: WorkspaceSettings): Promise<WorkspaceSettings>; // partial-merge upsert
-}
+// The store port now lives in @everdict/application-control — re-architecture P2c compat re-export (removed in the P4 sweep).
+export type { WorkspaceSettingsStore } from "@everdict/application-control";
+import type { WorkspaceSettingsStore } from "@everdict/application-control";
 
 export class InMemoryWorkspaceSettingsStore implements WorkspaceSettingsStore {
   private readonly byWs = new Map<string, WorkspaceSettings>();

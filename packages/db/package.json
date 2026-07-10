@@ -18,6 +18,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@everdict/application-control": "workspace:*",
     "@everdict/contracts": "workspace:*",
     "@everdict/core": "workspace:*",
     "@everdict/domain": "workspace:*",

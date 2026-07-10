@@ -350,6 +350,9 @@ importers:
 
   packages/db:
     dependencies:
+      '@everdict/application-control':
+        specifier: workspace:*
+        version: link:../application-control
       '@everdict/contracts':
         specifier: workspace:*
         version: link:../contracts

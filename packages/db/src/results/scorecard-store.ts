@@ -1,4 +1,4 @@
-import type { ScorecardRecord, ScorecardStatus } from "@everdict/contracts";
+import type { ScorecardRecord } from "@everdict/contracts";
 
 // Record schemas now live in contracts/records — re-architecture P0c; db keeps compat re-exports (removed in the P4 sweep).
 export {
@@ -23,22 +23,9 @@ export {
   ScorecardTrialSummarySchema,
 } from "@everdict/contracts";
 
-// list filter — narrows dataset/harness/status in the store (SQL) so leaderboard/trend don't scan the whole workspace.
-// If unset, everything (current behavior). Summary-derived axes like model/judgeModel are still filtered in the service/suite (can't narrow in SQL).
-export interface ScorecardListFilter {
-  dataset?: string; // dataset.id
-  harness?: string; // harness.id
-  status?: ScorecardStatus;
-}
-
-// Scorecard store contract. in-memory (dev/test) or Postgres (production) — swapped behind the same interface.
-// Note: list intentionally omits the heavy `scorecard` (trace-included) field (summary only). Get the full thing via get.
-export interface ScorecardStore {
-  create(record: ScorecardRecord): Promise<void>;
-  update(id: string, patch: Partial<ScorecardRecord>): Promise<ScorecardRecord | undefined>;
-  get(id: string): Promise<ScorecardRecord | undefined>;
-  list(tenant?: string, filter?: ScorecardListFilter): Promise<ScorecardRecord[]>;
-}
+// The store port + its list filter now live in @everdict/application-control — re-architecture P2c compat re-export (removed in the P4 sweep).
+export type { ScorecardListFilter, ScorecardStore } from "@everdict/application-control";
+import type { ScorecardListFilter, ScorecardStore } from "@everdict/application-control";
 
 export class InMemoryScorecardStore implements ScorecardStore {
   private readonly cards = new Map<string, ScorecardRecord>();

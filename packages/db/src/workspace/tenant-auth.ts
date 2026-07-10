@@ -1,4 +1,5 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
+import type { ResolvedKey, TenantKeyMeta } from "@everdict/contracts";
 import type { SqlClient } from "../client.js";
 
 // Tenant API key store — never stores the plaintext, keeps only the SHA-256 hash.
@@ -8,35 +9,12 @@ import type { SqlClient } from "../client.js";
 //  - prefix = ak_abcd… (a leading-plaintext identification hint — not a hash/plaintext; used to tell keys apart in a list)
 //  - scopes = per-key permission scope (read|write|admin). Unset (legacy row/full access) → undefined = unrestricted.
 //             The permission matrix (scope→action) is owned by @everdict/auth (this is a dumb string store; avoids a cyclic dependency).
-export interface TenantKeyMeta {
-  id: string;
-  label?: string;
-  prefix: string;
-  scopes?: string[];
-  createdAt: string;
-}
 
-// Key-resolution result on the auth path — workspace + issuer (owner) + per-key scopes (if any).
-// owner="" = legacy workspace machine key (admin), owner=<subject> = that user's personal key (resolved to the issuer's role).
-export interface ResolvedKey {
-  tenant: string;
-  owner: string;
-  scopes?: string[]; // unset (legacy/full access) → undefined = unrestricted
-}
-
-export interface TenantKeyStore {
-  // If meta is unset (test/bootstrap), id is auto-generated, prefix is an empty string, scopes is unrestricted, owner is "" (machine key). issueKey is the formal issuance path.
-  add(
-    tenant: string,
-    keyHash: string,
-    meta?: { id?: string; label?: string; prefix?: string; scopes?: string[]; owner?: string },
-  ): Promise<void>;
-  resolveByHash(keyHash: string): Promise<ResolvedKey | undefined>; // auth path (invariant) — resolve workspace+issuer+scopes by hash
-  // Meta only (no key_hash/plaintext). With owner, only that user's personal keys (self list); unset means the whole workspace (machine-key management).
-  list(tenant: string, owner?: string): Promise<TenantKeyMeta[]>;
-  // Tenant-scoped revoke — a no-op for a different workspace id. With owner, revokes only that owner's key (prevents revoking someone else's key).
-  revoke(tenant: string, id: string, owner?: string): Promise<void>;
-}
+// The key meta/resolution shapes now live in contracts/records — re-architecture P2c; db keeps compat re-exports (removed in the P4 sweep).
+export type { ResolvedKey, TenantKeyMeta } from "@everdict/contracts";
+// The store port now lives in @everdict/application-control — re-architecture P2c compat re-export (removed in the P4 sweep).
+export type { TenantKeyStore } from "@everdict/application-control";
+import type { TenantKeyStore } from "@everdict/application-control";
 
 interface KeyRow {
   tenant: string;

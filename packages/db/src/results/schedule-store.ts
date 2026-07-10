@@ -10,14 +10,9 @@ export {
   ScheduleRunTemplateSchema,
 } from "@everdict/contracts";
 
-// Schedule store contract — workspace (tenant) scoped. Swap in-memory (dev/test) or Postgres (production).
-export interface ScheduleStore {
-  create(record: ScheduleRecord): Promise<void>;
-  get(tenant: string, id: string): Promise<ScheduleRecord | undefined>;
-  list(tenant: string): Promise<ScheduleRecord[]>;
-  update(tenant: string, id: string, patch: Partial<ScheduleRecord>): Promise<ScheduleRecord | undefined>;
-  remove(tenant: string, id: string): Promise<void>;
-}
+// The store port now lives in @everdict/application-control — re-architecture P2c compat re-export (removed in the P4 sweep).
+export type { ScheduleStore } from "@everdict/application-control";
+import type { ScheduleStore } from "@everdict/application-control";
 
 export class InMemoryScheduleStore implements ScheduleStore {
   private readonly byId = new Map<string, ScheduleRecord>();

@@ -5,14 +5,9 @@ import type { SqlClient } from "../client.js";
 // Record schemas now live in contracts/records — re-architecture P0c; db keeps compat re-exports (removed in the P4 sweep).
 export { type ViewRecord, ViewRecordSchema, type ViewVisibility, ViewVisibilitySchema } from "@everdict/contracts";
 
-// Workspace (tenant) scoped. listVisible = my private + workspace-shared (others' private are not visible).
-export interface ViewStore {
-  create(record: ViewRecord): Promise<void>;
-  get(tenant: string, id: string): Promise<ViewRecord | undefined>;
-  listVisible(tenant: string, subject: string): Promise<ViewRecord[]>;
-  update(tenant: string, id: string, patch: Partial<ViewRecord>): Promise<ViewRecord | undefined>;
-  remove(tenant: string, id: string): Promise<void>;
-}
+// The store port now lives in @everdict/application-control — re-architecture P2c compat re-export (removed in the P4 sweep).
+export type { ViewStore } from "@everdict/application-control";
+import type { ViewStore } from "@everdict/application-control";
 
 export class InMemoryViewStore implements ViewStore {
   private readonly byId = new Map<string, ViewRecord>();

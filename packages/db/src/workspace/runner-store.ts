@@ -1,4 +1,5 @@
 import { randomBytes, randomUUID } from "node:crypto";
+import type { PairRunnerInput, PairedRunner, ResolvedRunner, RunnerMeta } from "@everdict/contracts";
 import type { SqlClient } from "../client.js";
 import { hashKey } from "./tenant-auth.js";
 
@@ -7,47 +8,12 @@ import { hashKey } from "./tenant-auth.js";
 // (records the paired workspace → roster). A runner runs the workspace's shared harness/dataset on its own machine "by only swapping the runtime"
 // and returns the result (design: docs/architecture/self-hosted-runner.md). Dispatch/lease are a later slice.
 // No plaintext storage for the pairing token — only the SHA-256 hash is kept (same as a tenant API key) and the plaintext is shown once at pairing.
-export interface RunnerMeta {
-  id: string;
-  label: string; // display device name (e.g. "ho-macbook")
-  os?: string; // linux | darwin | win32 etc. (optional)
-  capabilities: string[]; // repo | browser | os-use | docker — the environments this machine can run
-  pairedAt: string;
-  lastSeenAt?: string; // last lease/heartbeat time (refreshed via touch in a later slice)
-}
 
-// Pairing input — the plaintext token is hashed just before storage. The token is issued by the server (the client doesn't choose it).
-export interface PairRunnerInput {
-  owner: string; // runner owner = principal.subject (OIDC sub / api-key's key:<ws> / dev fallback "dev")
-  workspace: string; // paired workspace — for the roster (listByWorkspace). Ownership is owner.
-  label: string;
-  os?: string;
-  capabilities?: string[];
-}
-
-// Pairing result — token is plaintext (returned once, stored as a hash). The everdict runner authenticates to MCP with this token (later slice).
-export interface PairedRunner {
-  meta: RunnerMeta;
-  token: string;
-}
-
-// Token → runner identification (used in the later slice's MCP auth/lease). Resolves to owner/workspace/runnerId.
-export interface ResolvedRunner {
-  owner: string;
-  workspace: string;
-  runnerId: string;
-}
-
-export interface RunnerStore {
-  pair(input: PairRunnerInput): Promise<PairedRunner>;
-  list(owner: string): Promise<RunnerMeta[]>; // personal (owner) meta only
-  get(owner: string, id: string): Promise<RunnerMeta | null>; // owner-scoped single record (ownership check — dispatch self: routing)
-  listByWorkspace(workspace: string): Promise<RunnerMeta[]>; // workspace roster (meta only)
-  remove(owner: string, id: string): Promise<void>; // owner-scoped, idempotent
-  touch(owner: string, id: string): Promise<void>; // refresh lastSeenAt (idempotent; no-op for a missing runner)
-  setCapabilities(owner: string, id: string, capabilities: string[]): Promise<void>; // runner self-advertise (docker etc.). Idempotent; no-op for a missing runner
-  resolveByToken(token: string): Promise<ResolvedRunner | null>; // resolve a runner by token hash (internal only)
-}
+// The runner meta/pairing shapes now live in contracts/records — re-architecture P2c; db keeps compat re-exports (removed in the P4 sweep).
+export type { PairedRunner, PairRunnerInput, ResolvedRunner, RunnerMeta } from "@everdict/contracts";
+// The store port now lives in @everdict/application-control — re-architecture P2c compat re-export (removed in the P4 sweep).
+export type { RunnerStore } from "@everdict/application-control";
+import type { RunnerStore } from "@everdict/application-control";
 
 // rnr_<random> — plaintext pairing token. Shown once at issuance and stored only as a hash.
 export function generateRunnerToken(): string {

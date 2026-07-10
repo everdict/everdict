@@ -9,18 +9,9 @@ export {
   NotificationRecordSchema,
 } from "@everdict/contracts";
 
-export interface NotificationListOptions {
-  unreadOnly?: boolean;
-  limit?: number; // default 50 — the bell inbox shows only recent ones
-}
-
-export interface NotificationStore {
-  add(record: NotificationRecord): Promise<void>;
-  // Newest first (createdAt DESC). Own (recipient) + workspace scoped.
-  list(recipient: string, workspace: string, opts?: NotificationListOptions): Promise<NotificationRecord[]>;
-  // Mark ids or all as read — returns the number processed (doesn't touch already-read ones).
-  markRead(recipient: string, workspace: string, ids: string[] | "all", readAt: string): Promise<number>;
-}
+// The store port + its list options now live in @everdict/application-control — re-architecture P2c compat re-export (removed in the P4 sweep).
+export type { NotificationListOptions, NotificationStore } from "@everdict/application-control";
+import type { NotificationListOptions, NotificationStore } from "@everdict/application-control";
 
 const DEFAULT_LIMIT = 50;
 

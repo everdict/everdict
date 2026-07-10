@@ -1,3 +1,4 @@
+import type { BudgetLimitRow, BudgetUsageRow } from "@everdict/contracts";
 import type { SqlClient } from "../client.js";
 
 // Durable per-tenant budgets. The in-memory BudgetTracker (@everdict/backends) enforces synchronously and
@@ -5,30 +6,11 @@ import type { SqlClient } from "../client.js";
 // state: usage counters (reserved runs + committed cost) and per-tenant limit config. db depends on core only — the
 // budget vocabulary is mirrored, not imported.
 
-// Accumulated usage for one tenant — the durable form of BudgetUsage. allUsage() hydrates the tracker.
-export interface BudgetUsageRow {
-  tenant: string;
-  runs: number; // reserved+committed run count (admit +1 / release -1), floored at 0
-  usd: number;
-  tokens: number;
-}
-
-// A per-tenant limit; an undefined dimension = unlimited on that axis (a NULL column in Postgres).
-export interface BudgetLimitRow {
-  tenant: string;
-  usd?: number;
-  tokens?: number;
-  runs?: number;
-}
-
-export interface BudgetStore {
-  // Atomic accumulate of a usage delta. `runs` may be negative (a release); usd/tokens only ever grow. runs floors at 0.
-  addUsage(tenant: string, delta: { runs?: number; usd?: number; tokens?: number }): Promise<void>;
-  allUsage(): Promise<BudgetUsageRow[]>; // every accumulated row — hydrates the in-memory tracker at boot
-  // Per-tenant limit config — a PUT replaces the whole limit (unspecified dimensions become unlimited).
-  setLimit(tenant: string, limit: { usd?: number; tokens?: number; runs?: number }): Promise<void>;
-  allLimits(): Promise<BudgetLimitRow[]>; // every configured limit — hydrates limits at boot
-}
+// The row shapes now live in contracts/records — re-architecture P2c; db keeps compat re-exports (removed in the P4 sweep).
+export type { BudgetLimitRow, BudgetUsageRow } from "@everdict/contracts";
+// The store port now lives in @everdict/application-control — re-architecture P2c compat re-export (removed in the P4 sweep).
+export type { BudgetStore } from "@everdict/application-control";
+import type { BudgetStore } from "@everdict/application-control";
 
 function limitRow(tenant: string, limit: { usd?: number; tokens?: number; runs?: number }): BudgetLimitRow {
   return {

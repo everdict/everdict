@@ -1,29 +1,15 @@
+import type { UserProfile, UserProfilePatch } from "@everdict/contracts";
 import type { SqlClient } from "../client.js";
 
 // User profile — mutable display info (name/username/avatar) layered on top of the Keycloak (OIDC) identity. subject (=sub) is the key.
 // email is not kept here — it's an SSO claim (display-only/read-only), so it comes only from the Principal. This store is
 // a mutable profile owned by the control plane (Linear-style): a person edits their own display info directly (no authz bearing).
-export interface UserProfile {
-  subject: string;
-  name?: string;
-  username?: string;
-  avatarUrl?: string;
-  updatedAt: string;
-}
 
-// Partial update. Absent key = keep, null = clear the field, string = set it.
-export interface UserProfilePatch {
-  name?: string | null;
-  username?: string | null;
-  avatarUrl?: string | null;
-}
-
-export interface UserProfileStore {
-  get(subject: string): Promise<UserProfile | undefined>;
-  // Multiple subjects' profiles at once (to enrich a member list with name/avatar). Subjects with no profile are omitted from the result.
-  getMany(subjects: string[]): Promise<UserProfile[]>;
-  upsert(subject: string, patch: UserProfilePatch): Promise<UserProfile>;
-}
+// The profile shapes now live in contracts/records — re-architecture P2c; db keeps compat re-exports (removed in the P4 sweep).
+export type { UserProfile, UserProfilePatch } from "@everdict/contracts";
+// The store port now lives in @everdict/application-control — re-architecture P2c compat re-export (removed in the P4 sweep).
+export type { UserProfileStore } from "@everdict/application-control";
+import type { UserProfileStore } from "@everdict/application-control";
 
 function nowIso(): string {
   return new Date().toISOString();

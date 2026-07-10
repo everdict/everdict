@@ -15,19 +15,9 @@ export function withRunUsage(r: RunRecord): RunRecord {
   return r.result ? { ...r, usage: usageFromTrace(r.result.trace) } : r;
 }
 
-// list options. The default (unset) returns only standalone runs — hides scorecard child runs to prevent activity-list flooding.
-// With scorecardId, returns only that batch's child runs (for the case drill-down in scorecard detail).
-export interface RunListOptions {
-  scorecardId?: string;
-}
-
-// Result store contract. in-memory (dev/test) or Postgres (production) — swapped behind the same interface.
-export interface RunStore {
-  create(record: RunRecord): Promise<void>;
-  update(id: string, patch: Partial<RunRecord>): Promise<RunRecord | undefined>;
-  get(id: string): Promise<RunRecord | undefined>;
-  list(tenant?: string, opts?: RunListOptions): Promise<RunRecord[]>;
-}
+// The store port + its list options now live in @everdict/application-control — re-architecture P2c compat re-export (removed in the P4 sweep).
+export type { RunListOptions, RunStore } from "@everdict/application-control";
+import type { RunListOptions, RunStore } from "@everdict/application-control";
 
 export class InMemoryRunStore implements RunStore {
   private readonly runs = new Map<string, RunRecord>();

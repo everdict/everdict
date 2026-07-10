@@ -1,32 +1,16 @@
+import type { ScopedSecretEntries, SecretMeta } from "@everdict/contracts";
 import type { SqlClient } from "../client.js";
 import type { EncryptedSecret, SecretCipher } from "./secret-cipher.js";
 
 // Workspace secret store — manages model/provider keys (OPENAI_API_KEY etc.) per scope.
 // scope: "workspace" (owner='') = shared (admin-managed) · "user" (owner=subject) = that user's personal (self-managed, invisible to others).
 // Values are AES-GCM encrypted at rest and never returned as plaintext (list has only name+scope). Only entries/scopedEntries decrypt (injection-only).
-export type SecretScope = "user" | "workspace";
 
-export interface SecretMeta {
-  name: string;
-  updatedAt: string;
-  scope: SecretScope;
-}
-
-// The two tiers for dispatch resolution — shared + the submitter's personal. resolveHarnessSecrets picks by the referenced scope.
-export interface ScopedSecretEntries {
-  workspace: Record<string, string>;
-  user: Record<string, string>;
-}
-
-export interface SecretStore {
-  // owner="" = workspace (shared) secret, owner=subject = user personal secret.
-  set(workspace: string, name: string, value: string, owner?: string): Promise<void>;
-  // With subject, also returns that user's personal secrets (scope-tagged). Unset returns shared secrets only.
-  list(workspace: string, subject?: string): Promise<SecretMeta[]>;
-  remove(workspace: string, name: string, owner?: string): Promise<void>;
-  entries(workspace: string): Promise<Record<string, string>>; // shared (owner='') secrets only — existing-consumer compat
-  scopedEntries(workspace: string, subject: string): Promise<ScopedSecretEntries>; // shared + that user's personal
-}
+// The scope/meta/entries shapes now live in contracts/records — re-architecture P2c; db keeps compat re-exports (removed in the P4 sweep).
+export type { ScopedSecretEntries, SecretMeta, SecretScope } from "@everdict/contracts";
+// The store port now lives in @everdict/application-control — re-architecture P2c compat re-export (removed in the P4 sweep).
+export type { SecretStore } from "@everdict/application-control";
+import type { SecretStore } from "@everdict/application-control";
 
 interface MemRow {
   enc: EncryptedSecret;
