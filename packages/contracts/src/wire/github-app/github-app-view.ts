@@ -12,6 +12,12 @@ export const GithubAppRegistrationSchema = z.object({
   privateKeySecretName: z
     .string()
     .describe("SecretStore name reference — the private-key PEM value itself is never stored or returned"),
+  installedAccounts: z
+    .array(z.string())
+    .optional()
+    .describe(
+      "Server-computed (re-architecture P1g): accounts installed on this registration's host (normalized host match) — present only when non-empty",
+    ),
 });
 
 // A workspace-owned installation (github.com or GHE) — one per installed org.

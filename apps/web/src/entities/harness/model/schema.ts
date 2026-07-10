@@ -131,9 +131,20 @@ export const harnessSpecSchema = z
     env: z.record(z.string(), envValueSchema).optional(),
     model: z.string().optional(),
     trace: commandTraceSchema.optional(),
+    // Served provenance classification (P1g) — per image, computed by the control plane against ALL
+    // workspace registries. Replaces the deleted client-side classifyImageRef mirror.
+    imageClasses: z
+      .array(
+        z.object({
+          image: z.string(),
+          class: z.enum(['workspace', 'external', 'local', 'unqualified']),
+        })
+      )
+      .optional(),
   })
   .passthrough()
 export type HarnessSpec = z.infer<typeof harnessSpecSchema>
+export type ImageRefClass = NonNullable<HarnessSpec['imageClasses']>[number]['class']
 export type HarnessKind = HarnessSpec['kind']
 
 // --- raw config (pre-resolve original) — for the detail config view + prefilling new-version edits ---

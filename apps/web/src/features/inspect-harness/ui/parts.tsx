@@ -1,24 +1,18 @@
 import type { ReactNode } from 'react'
 import { useTranslations } from 'next-intl'
 
-import { classifyImageRef, type ImageRegistryCoordinates } from '@/shared/lib/image-ref'
+import type { ImageRefClass } from '@/entities/harness'
 import { cn } from '@/shared/lib/utils'
 import { Badge } from '@/shared/ui/badge'
 
 // Shared primitives for the inspect-harness views — label/value field, mono chip, labeled section.
 
 // Image provenance badge — workspace registry (blue) / local-only·unqualified (warning). external is the default state, so no badge (noise avoidance).
-// The hint is on title (same convention as the image ref, which already uses title). The classification SSOT is the control plane; this is a display-only mirror.
-export function ImageClassBadge({
-  image,
-  registry,
-}: {
-  image: string
-  registry?: ImageRegistryCoordinates | ImageRegistryCoordinates[] // multiple registries — a match on any one means workspace
-}) {
+// The hint is on title (same convention as the image ref, which already uses title). The classification is SERVED
+// by the control plane (spec.imageClasses, re-architecture P1g) — the client-side mirror was deleted.
+export function ImageClassBadge({ cls }: { cls?: ImageRefClass }) {
   const t = useTranslations('lib')
-  const cls = classifyImageRef(image, registry)
-  if (cls === 'external') return null
+  if (!cls || cls === 'external') return null
   // Turn the classification value (workspace/local/unqualified) into a catalog-key suffix: imageClass*/imageHint*.
   const suffix = cls.charAt(0).toUpperCase() + cls.slice(1)
   return (

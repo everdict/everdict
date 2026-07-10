@@ -23,7 +23,6 @@ import {
   type HarnessSpec,
   type HarnessTemplateSpec,
 } from '@/entities/harness'
-import { imageRegistriesResponseSchema } from '@/entities/image-registry'
 import { membersSchema } from '@/entities/member'
 import { traceSinksResponseSchema, type TraceSinksResponse } from '@/entities/trace-sink'
 import { can } from '@/shared/auth/can'
@@ -162,17 +161,6 @@ export default async function HarnessDetailPage({
     can(principal?.roles, 'harnesses:register') &&
     entry !== undefined &&
     entry.owner === currentWorkspace
-
-  // Workspace image registry coordinates (viewer+, multiple) — for the provenance-classification badge of service/command images
-  // (matches any registry → workspace). The detail renders even if it fails.
-  const imageRegistries = await controlPlane
-    .listImageRegistries(ctx)
-    .then((r) => imageRegistriesResponseSchema.parse(r).registries)
-    .catch(() => [])
-  const registryCoords = imageRegistries.map((r) => ({
-    host: r.host,
-    ...(r.namespace ? { namespace: r.namespace } : {}),
-  }))
 
   // Trace sinks (multiple) + this harness's selection (assignment) — which observability platform to load the grading detail into.
   // The detail renders even if it fails (only the selection row is hidden).
@@ -349,10 +337,7 @@ export default async function HarnessDetailPage({
           </h2>
           <p className="text-[12px] text-muted-foreground">{t('configDescription')}</p>
         </div>
-        <HarnessDetail
-          spec={spec}
-          {...(registryCoords.length > 0 ? { registry: registryCoords } : {})}
-        />
+        <HarnessDetail spec={spec} />
         <RawConfigDisclosure {...(config ? { config } : {})} spec={spec} />
       </section>
 

@@ -304,9 +304,9 @@ function GheSection({
       {view.registrations.length > 0 && (
         <SettingsList>
           {view.registrations.map((r) => {
-            // Orgs installed on this GHE server — install status is visible right on the registration row (outline badge when not installed).
-            // Host comparison uses normalized equality (sameHost) — so a trailing-slash/case-only difference isn't misread as 'not installed'.
-            const installedOrgs = view.installations.filter((i) => sameHost(i.host, r.host))
+            // Orgs installed on this GHE server — SERVED by the control plane (installedAccounts, P1g);
+            // host normalization has exactly one owner (the server's sameHost), so the mirror is gone.
+            const installedOrgs = r.installedAccounts ?? []
             return (
               <SettingsRow
                 key={r.host}
@@ -316,7 +316,7 @@ function GheSection({
                     {installedOrgs.length > 0 ? (
                       <Badge tone="success">
                         {t('installedOrgsBadge', {
-                          orgs: installedOrgs.map((i) => i.account).join(', '),
+                          orgs: installedOrgs.join(', '),
                         })}
                       </Badge>
                     ) : (
@@ -396,13 +396,6 @@ function GheSection({
       </Button>
     </div>
   )
-}
-
-// GHE base URL equality — ignores case/trailing-slash differences (mirrors the server github-app-service's sameHost).
-function sameHost(a?: string, b?: string): boolean {
-  if (a === undefined || b === undefined) return a === b
-  const norm = (u: string) => (u.endsWith('/') ? u.slice(0, -1) : u).toLowerCase()
-  return norm(a) === norm(b)
 }
 
 // "https://ghe.example.com" → "ghe.example.com"; a github.com install (no host) is "github.com" — always shown as a chip for consistency.

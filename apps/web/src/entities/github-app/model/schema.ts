@@ -9,6 +9,8 @@ export const githubAppRegistrationSchema = z.object({
   slug: z.string(),
   appId: z.string(),
   privateKeySecretName: z.string(),
+  // Server-computed (P1g): accounts installed on this host (normalized match) — replaces the deleted sameHost mirror.
+  installedAccounts: z.array(z.string()).optional(),
 })
 export type GithubAppRegistration = z.infer<typeof githubAppRegistrationSchema>
 

@@ -2,21 +2,14 @@ import { Boxes, Database, DoorOpen, Globe, Radio } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
 import { envValueText, type HarnessSpec } from '@/entities/harness'
-import type { ImageRegistryCoordinates } from '@/shared/lib/image-ref'
 import { Badge } from '@/shared/ui/badge'
 import { Card } from '@/shared/ui/card'
 
 import { Field, ImageClassBadge, Mono, SubSection } from './parts'
 
 // service (topology) harness config — the text counterpart of the diagram. front-door/services/dependencies/target/trace.
-// registry = workspace registry coordinates — the provenance-classification badge for service images (local-only/unqualified/workspace).
-export function ServiceView({
-  spec,
-  registry,
-}: {
-  spec: HarnessSpec
-  registry?: ImageRegistryCoordinates | ImageRegistryCoordinates[] // supports multiple registries
-}) {
+// The provenance-classification badge reads the served spec.imageClasses (P1g) — no client-side classification.
+export function ServiceView({ spec }: { spec: HarnessSpec }) {
   const t = useTranslations('inspectHarness')
   const services = spec.services ?? []
   const deps = spec.dependencies ?? []
@@ -60,7 +53,9 @@ export function ServiceView({
                   >
                     {s.image}
                   </span>
-                  <ImageClassBadge image={s.image} {...(registry ? { registry } : {})} />
+                  <ImageClassBadge
+                    cls={spec.imageClasses?.find((x) => x.image === s.image)?.class}
+                  />
                 </div>
               )}
               <div className="mt-3 grid grid-cols-2 gap-4">

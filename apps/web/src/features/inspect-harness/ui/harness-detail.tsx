@@ -4,7 +4,6 @@ import { LayoutPanelLeft, Workflow } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
 import type { HarnessSpec } from '@/entities/harness'
-import type { ImageRegistryCoordinates } from '@/shared/lib/image-ref'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/shared/ui/tabs'
 
 import { CommandView } from './command-view'
@@ -14,14 +13,8 @@ import { TopologyGraph } from './topology-graph'
 
 // Harness detail — a clean view of the final (resolved) spec. service uses diagram/config tabs (topology is central),
 // command·process are single-value views. The raw config·JSON are kept separately, collapsible, upstream.
-// registry = workspace image registry coordinates (if any, possibly multiple) — used for the provenance-classification badge on service/command images.
-export function HarnessDetail({
-  spec,
-  registry,
-}: {
-  spec: HarnessSpec
-  registry?: ImageRegistryCoordinates | ImageRegistryCoordinates[]
-}) {
+// The image-provenance badges read the served spec.imageClasses (P1g) — no registry threading.
+export function HarnessDetail({ spec }: { spec: HarnessSpec }) {
   const t = useTranslations('inspectHarness')
   if (spec.kind === 'service') {
     return (
@@ -43,14 +36,13 @@ export function HarnessDetail({
             <TopologyGraph spec={spec} />
           </TabsContent>
           <TabsContent value="structure">
-            <ServiceView spec={spec} {...(registry ? { registry } : {})} />
+            <ServiceView spec={spec} />
           </TabsContent>
         </div>
       </Tabs>
     )
   }
 
-  if (spec.kind === 'command')
-    return <CommandView spec={spec} {...(registry ? { registry } : {})} />
+  if (spec.kind === 'command') return <CommandView spec={spec} />
   return <ProcessView spec={spec} />
 }

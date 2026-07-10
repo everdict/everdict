@@ -33,9 +33,14 @@ export interface GithubAppServiceConfig {
   githubCom?: GithubComAppConfig; // env default github.com App (absent → github.com install disabled)
 }
 
+// A registration as served (re-architecture P1g): carries the accounts installed on its host
+// (normalized sameHost match) so the web doesn't re-implement host normalization — the 748eecb
+// production bug was exactly that mirror drifting.
+export type ServedRegistration = Registration & { installedAccounts?: string[] };
+
 // Workspace App integration status (no secrets — privateKeySecretName is a name reference, not a value, so it's safe to return).
 export interface GithubAppView {
-  registrations: Registration[];
+  registrations: ServedRegistration[];
   installations: Installation[];
 }
 
@@ -43,7 +48,7 @@ export interface GithubAppView {
 // repos lookup is per-install soft-fail: one install's credential/network problem does not kill the other installs or the screen.
 export type InstallationWithRepos = Installation & { repos?: InstallationRepo[]; reposError?: string };
 export interface GithubAppDetailView {
-  registrations: Registration[];
+  registrations: ServedRegistration[];
   installations: InstallationWithRepos[];
 }
 
@@ -136,10 +141,20 @@ export class GithubAppService {
     this.now = deps.now ?? (() => new Date());
   }
 
+  // Serve-time enrichment: each registration carries its host's installed accounts (sameHost is the
+  // one normalization owner — the web reads the served field instead of re-comparing hosts).
+  private serveRegistrations(registrations: Registration[], installations: Installation[]): ServedRegistration[] {
+    return registrations.map((r) => {
+      const accounts = installations.filter((i) => sameHost(i.host, r.host)).map((i) => i.account);
+      return accounts.length > 0 ? { ...r, installedAccounts: accounts } : r;
+    });
+  }
+
   // Workspace App integration status (registrations + installations). No secret values.
   async list(workspace: string): Promise<GithubAppView> {
     const g = (await this.settings.get(workspace))?.githubApp;
-    return { registrations: g?.registrations ?? [], installations: g?.installations ?? [] };
+    const installations = g?.installations ?? [];
+    return { registrations: this.serveRegistrations(g?.registrations ?? [], installations), installations };
   }
 
   // Register/update a GHE App (admin). Upsert by host. Put the private key into SecretStore first, then name it here.
@@ -148,7 +163,8 @@ export class GithubAppService {
     // Upsert host by normalized equality (sameHost) — prevents duplicate registrations differing only in trailing slash/case.
     const registrations = [...(g?.registrations ?? []).filter((r) => !sameHost(r.host, input.host)), input];
     await this.write(workspace, { registrations, installations: g?.installations ?? [] });
-    return { registrations, installations: g?.installations ?? [] };
+    const installations = g?.installations ?? [];
+    return { registrations: this.serveRegistrations(registrations, installations), installations };
   }
 
   // Unregister a GHE App (admin). Existing installation records remain but cannot mint tokens without credentials.
@@ -157,7 +173,7 @@ export class GithubAppService {
     if (!g) return { registrations: [], installations: [] };
     const registrations = g.registrations.filter((r) => !sameHost(r.host, host));
     await this.write(workspace, { registrations, installations: g.installations });
-    return { registrations, installations: g.installations };
+    return { registrations: this.serveRegistrations(registrations, g.installations), installations: g.installations };
   }
 
   // Unlink an installation (admin). The actual uninstall is on GitHub's side — here we just forget the record (idempotent).
@@ -166,7 +182,7 @@ export class GithubAppService {
     if (!g) return { registrations: [], installations: [] };
     const installations = g.installations.filter((i) => i.installationId !== installationId);
     await this.write(workspace, { registrations: g.registrations, installations });
-    return { registrations: g.registrations, installations };
+    return { registrations: this.serveRegistrations(g.registrations, installations), installations };
   }
 
   // Start install → GitHub App install-page URL (includes state). Admin clicks → picks repos on GitHub → callback.
@@ -280,7 +296,7 @@ export class GithubAppService {
         installations.push({ ...install, reposError: "Failed to load the repository list." });
       }
     }
-    return { registrations: g?.registrations ?? [], installations };
+    return { registrations: this.serveRegistrations(g?.registrations ?? [], g?.installations ?? []), installations };
   }
 
   // installation token (specified permissions) + host for an "owner/name" repo. For write work like setup-PR (e.g. contents/pull_requests write).

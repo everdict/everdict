@@ -2,21 +2,14 @@ import { ListOrdered, Variable } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
 import { envValueText, type HarnessSpec } from '@/entities/harness'
-import type { ImageRegistryCoordinates } from '@/shared/lib/image-ref'
 import { Card } from '@/shared/ui/card'
 
 import { DefRow, highlightTemplate, ImageClassBadge, Mono, SubSection } from './parts'
 
 // command (declarative CLI) harness — the core values (command·model·image·working path·trace) as one card's value list,
 // with Setup/env vars below only when present. The pipeline diagram and duplicate grid are dropped (a clean scan view).
-// registry = workspace registry coordinates — the provenance-classification badge for the dispatch image.
-export function CommandView({
-  spec,
-  registry,
-}: {
-  spec: HarnessSpec
-  registry?: ImageRegistryCoordinates | ImageRegistryCoordinates[] // supports multiple registries
-}) {
+// The provenance-classification badge reads the served spec.imageClasses (P1g) — no client-side classification.
+export function CommandView({ spec }: { spec: HarnessSpec }) {
   const t = useTranslations('inspectHarness')
   const setup = spec.setup ?? []
   const env = spec.env ?? {}
@@ -42,7 +35,9 @@ export function CommandView({
           {spec.image ? (
             <span className="inline-flex min-w-0 items-center gap-2">
               <span className="truncate">{spec.image}</span>
-              <ImageClassBadge image={spec.image} {...(registry ? { registry } : {})} />
+              <ImageClassBadge
+                cls={spec.imageClasses?.find((x) => x.image === spec.image)?.class}
+              />
             </span>
           ) : (
             t('defaultAgentImage')

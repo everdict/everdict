@@ -2,6 +2,7 @@ import {
   AppError,
   HarnessInstanceSpecSchema,
   type ImageWarning,
+  classifyImageRef,
   collectHarnessImages,
   imageWarnings,
   resolveHarnessInstance,
@@ -140,7 +141,14 @@ export function registerHarnessRoutes(app: FastifyInstance, deps: ServerDeps): v
         // hidden). Owner semantics live in the one shared helper (latest-version creator) — no inline fork.
         if (!(await harnessVisibleTo(deps.harnessInstances, principal, req.params.id)))
           return reply.code(404).send({ code: "NOT_FOUND", message: "harness not found." });
-        return reply.send(resolved);
+        // Served image classification (re-architecture P1g) — per-image workspace/external/local/unqualified,
+        // computed against ALL workspace registries at serve time so the web badge doesn't re-implement the rule.
+        const coords = await deps.imageRegistryService?.coordinates(principal.workspace);
+        const imageClasses = collectHarnessImages(resolved).map((image) => ({
+          image,
+          class: classifyImageRef(image, coords),
+        }));
+        return reply.send({ ...resolved, ...(imageClasses.length > 0 ? { imageClasses } : {}) });
       } catch (err) {
         return sendError(reply, err);
       }

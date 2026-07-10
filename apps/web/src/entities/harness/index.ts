@@ -20,6 +20,7 @@ export {
   type HarnessVersions,
   type HarnessSpec,
   type HarnessKind,
+  type ImageRefClass,
   type HarnessInstanceSpec,
   type HarnessTemplateSpec,
   type TemplateService,
