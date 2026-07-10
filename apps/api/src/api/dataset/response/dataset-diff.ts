@@ -1,4 +1,2 @@
-import { DatasetDiffSchema } from "@everdict/core";
-
-// GET /datasets/:id/diff 200 — the structural diff of two dataset versions. SSOT: @everdict/core DatasetDiffSchema.
-export const DatasetDiffResponseSchema = DatasetDiffSchema;
+// wire DTO 의 실체는 contracts/wire — re-architecture P0c
+export { DatasetDiffResponseSchema } from "@everdict/contracts/wire";

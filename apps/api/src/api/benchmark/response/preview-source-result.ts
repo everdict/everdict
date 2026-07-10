@@ -1,7 +1,2 @@
-import { z } from "zod";
-
-// POST /benchmarks/preview 200 — N raw rows + detected fields before mapping (wizard field auto-detect).
-export const PreviewSourceResultSchema = z.object({
-  fields: z.array(z.string()).describe("Union of the keys detected across the previewed rows"),
-  rows: z.array(z.record(z.unknown())).describe("Raw source rows (unmapped)"),
-});
+// wire DTO 의 실체는 contracts/wire — re-architecture P0c
+export { PreviewSourceResultSchema } from "@everdict/contracts/wire";

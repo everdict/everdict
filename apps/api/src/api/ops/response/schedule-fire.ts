@@ -1,10 +1,2 @@
-import { z } from "zod";
-
-// POST /internal/schedules/:id/fire — the scorecard the fire submitted (ScheduleService.fire).
-export const ScheduleFireResponseSchema = z.object({
-  scorecardId: z.string().describe("The scorecard submitted by this fire"),
-  previousScorecardId: z
-    .string()
-    .optional()
-    .describe("The previous fire's scorecard (regression-diff reference), if any"),
-});
+// wire DTO 의 실체는 contracts/wire — re-architecture P0c
+export { ScheduleFireResponseSchema } from "@everdict/contracts/wire";

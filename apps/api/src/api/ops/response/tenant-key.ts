@@ -1,7 +1,2 @@
-import { z } from "zod";
-
-// POST /internal/tenant-keys — a freshly issued workspace API key. The plaintext is returned only once here.
-export const TenantKeyResponseSchema = z.object({
-  workspace: z.string(),
-  apiKey: z.string().describe("The plaintext ak_… key — shown only in this response"),
-});
+// wire DTO 의 실체는 contracts/wire — re-architecture P0c
+export { TenantKeyResponseSchema } from "@everdict/contracts/wire";

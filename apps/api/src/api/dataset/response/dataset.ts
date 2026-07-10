@@ -1,4 +1,2 @@
-import { DatasetSchema } from "@everdict/core";
-
-// GET /datasets/:id/versions/:version 200 — the full dataset (cases included). SSOT: @everdict/core.
-export const DatasetResponseSchema = DatasetSchema;
+// wire DTO 의 실체는 contracts/wire — re-architecture P0c
+export { DatasetResponseSchema } from "@everdict/contracts/wire";

@@ -1,4 +1,2 @@
-import { RuntimeSpecSchema } from "@everdict/core";
-
-// GET /runtimes/:id/versions/:version 200 — the full RuntimeSpec. SSOT: @everdict/core.
-export const RuntimeResponseSchema = RuntimeSpecSchema;
+// wire DTO 의 실체는 contracts/wire — re-architecture P0c
+export { RuntimeResponseSchema } from "@everdict/contracts/wire";

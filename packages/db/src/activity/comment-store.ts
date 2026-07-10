@@ -1,20 +1,8 @@
-import { z } from "zod";
+import { type CommentRecord, CommentRecordSchema } from "@everdict/contracts";
 import type { SqlClient } from "../client.js";
 
-// Comments on a resource (dataset etc.) — collaborative discussion, like Linear issue comments. Flows mixed with events in the activity timeline.
-// resourceType is extensible (currently "dataset"). Workspace-scoped + author=author subject.
-export const CommentRecordSchema = z.object({
-  id: z.string(),
-  tenant: z.string(),
-  resourceType: z.string(), // "dataset"|"harness"|"scorecard"|"view"|"schedule"|"run"|"runtime"
-  resourceId: z.string(),
-  parentId: z.string().optional(), // if a reply, the parent comment id (same resource, only top-level can be a parent — one-level thread). Absent = top-level.
-  author: z.string(), // author subject
-  body: z.string(),
-  createdAt: z.string(),
-  updatedAt: z.string(),
-});
-export type CommentRecord = z.infer<typeof CommentRecordSchema>;
+// 레코드 스키마의 실체는 contracts/records — re-architecture P0c, db 는 compat 재수출.
+export { type CommentRecord, CommentRecordSchema } from "@everdict/contracts";
 
 export interface CommentStore {
   add(record: CommentRecord): Promise<void>;

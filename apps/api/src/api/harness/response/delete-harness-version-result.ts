@@ -1,9 +1,2 @@
-import { z } from "zod";
-
-// DELETE /harnesses/:id/versions/:version 200 — soft-delete (tombstone) acknowledgement.
-export const DeleteHarnessVersionResultSchema = z.object({
-  workspace: z.string(),
-  id: z.string(),
-  version: z.string(),
-  deleted: z.literal(true),
-});
+// wire DTO 의 실체는 contracts/wire — re-architecture P0c
+export { DeleteHarnessVersionResultSchema } from "@everdict/contracts/wire";

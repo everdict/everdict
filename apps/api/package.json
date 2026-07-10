@@ -17,6 +17,7 @@
     "@everdict/auth": "workspace:*",
     "@everdict/backends": "workspace:*",
     "@everdict/billing": "workspace:*",
+    "@everdict/contracts": "workspace:*",
     "@everdict/core": "workspace:*",
     "@everdict/datasets": "workspace:*",
     "@everdict/db": "workspace:*",

@@ -38,6 +38,9 @@ importers:
       '@everdict/billing':
         specifier: workspace:*
         version: link:../../packages/billing
+      '@everdict/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
       '@everdict/core':
         specifier: workspace:*
         version: link:../../packages/core
@@ -314,6 +317,9 @@ importers:
 
   packages/db:
     dependencies:
+      '@everdict/contracts':
+        specifier: workspace:*
+        version: link:../contracts
       '@everdict/core':
         specifier: workspace:*
         version: link:../core

@@ -1,4 +1,2 @@
-import { z } from "zod";
-
-// GET /benchmarks/hf/files 200 — repo data file paths (csv/jsonl/json) for datasets the HF viewer doesn't serve.
-export const HfFileListResponseSchema = z.array(z.string());
+// wire DTO 의 실체는 contracts/wire — re-architecture P0c
+export { HfFileListResponseSchema } from "@everdict/contracts/wire";

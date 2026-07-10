@@ -1,6 +1,2 @@
-import { RunRecordSchema } from "@everdict/db";
-import { z } from "zod";
-
-// GET /runs — the workspace's run records. Default view hides scorecard child runs (activity list);
-// with ?scorecardId only that batch's children are returned (case drill-down).
-export const RunListResponseSchema = z.array(RunRecordSchema);
+// wire DTO 의 실체는 contracts/wire — re-architecture P0c
+export { RunListResponseSchema } from "@everdict/contracts/wire";

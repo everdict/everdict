@@ -1,4 +1,2 @@
-import { ModelSpecSchema } from "@everdict/core";
-
-// GET /models/:id/versions/:version 200 — the full ModelSpec. SSOT: @everdict/core.
-export const ModelResponseSchema = ModelSpecSchema;
+// wire DTO 의 실체는 contracts/wire — re-architecture P0c
+export { ModelResponseSchema } from "@everdict/contracts/wire";

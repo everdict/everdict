@@ -1,4 +1,2 @@
-import { z } from "zod";
-
-// Plain acknowledgement for internal finalize bridges (batch finalize / schedule fire finalize).
-export const OkResponseSchema = z.object({ ok: z.literal(true) });
+// wire DTO 의 실체는 contracts/wire — re-architecture P0c
+export { OkResponseSchema } from "@everdict/contracts/wire";

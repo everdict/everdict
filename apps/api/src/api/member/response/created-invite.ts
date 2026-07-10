@@ -1,8 +1,2 @@
-import { z } from "zod";
-import { InviteMetaResponseSchema } from "./invite-meta.js";
-
-// POST /invites response — the invite meta PLUS the plaintext token, returned exactly once here
-// (embedded in the join link). Only the hash is stored; no other endpoint ever returns the token again.
-export const CreatedInviteResponseSchema = InviteMetaResponseSchema.extend({
-  token: z.string().describe("Plaintext invite token (inv_…) — shown only in this response, never again"),
-});
+// wire DTO 의 실체는 contracts/wire — re-architecture P0c
+export { CreatedInviteResponseSchema } from "@everdict/contracts/wire";

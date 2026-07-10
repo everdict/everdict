@@ -1,8 +1,2 @@
-import { z } from "zod";
-
-// POST /models 201 — registered coordinates.
-export const RegisterModelResultSchema = z.object({
-  workspace: z.string(),
-  id: z.string(),
-  version: z.string(),
-});
+// wire DTO 의 실체는 contracts/wire — re-architecture P0c
+export { RegisterModelResultSchema } from "@everdict/contracts/wire";

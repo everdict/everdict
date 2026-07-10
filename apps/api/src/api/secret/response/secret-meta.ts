@@ -1,11 +1,2 @@
-import { z } from "zod";
-
-// Secret metadata (db SecretMeta) — name + scope + last update only. Values are AES-GCM encrypted at rest
-// and NEVER returned by any endpoint (write-only from the API's perspective; only job injection decrypts).
-export const SecretMetaResponseSchema = z.object({
-  name: z.string().describe("Secret name (env-variable format ^[A-Z_][A-Z0-9_]*$ — injected as job env)"),
-  updatedAt: z.string().describe("ISO 8601 last-set time"),
-  scope: z.enum(["user", "workspace"]).describe("workspace = shared (admin-managed) · user = personal (self-managed)"),
-});
-
-export const SecretMetaListResponseSchema = z.array(SecretMetaResponseSchema);
+// wire DTO 의 실체는 contracts/wire — re-architecture P0c
+export { SecretMetaResponseSchema, SecretMetaListResponseSchema } from "@everdict/contracts/wire";

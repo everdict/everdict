@@ -1,4 +1,2 @@
-import { HarnessTemplateSpecSchema } from "@everdict/core";
-
-// GET /harness-templates/:id/:version 200 — the template (category) structure spec. SSOT: @everdict/core.
-export const HarnessTemplateResponseSchema = HarnessTemplateSpecSchema;
+// wire DTO 의 실체는 contracts/wire — re-architecture P0c
+export { HarnessTemplateResponseSchema } from "@everdict/contracts/wire";

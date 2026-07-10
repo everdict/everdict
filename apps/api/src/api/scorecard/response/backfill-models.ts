@@ -1,7 +1,2 @@
-import { z } from "zod";
-
-// POST /scorecards/backfill-models — idempotent model-axis backfill over past succeeded scorecards.
-export const BackfillModelsResponseSchema = z.object({
-  scanned: z.number().int().describe("Succeeded scorecards inspected"),
-  updated: z.number().int().describe("Scorecards that gained a models block from their stored traces"),
-});
+// wire DTO 의 실체는 contracts/wire — re-architecture P0c
+export { BackfillModelsResponseSchema } from "@everdict/contracts/wire";

@@ -1,5 +1,2 @@
-import { ScorecardRecordSchema } from "@everdict/db";
-
-// Response DTO — a scorecard record (batch eval). The @everdict/db ScorecardRecordSchema is the SSOT shape.
-// get() also carries the heavy detail fields (scorecard/steps/runIds/export) — all optional on the record.
-export const ScorecardResponseSchema = ScorecardRecordSchema;
+// wire DTO 의 실체는 contracts/wire — re-architecture P0c
+export { ScorecardResponseSchema } from "@everdict/contracts/wire";

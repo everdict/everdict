@@ -1,5 +1,2 @@
-import { RunRecordSchema } from "@everdict/db";
-
-// Response DTO — a run record. The @everdict/db RunRecordSchema is the SSOT shape (rule api-layer:
-// response/ reuses the record schema, never redefines it).
-export const RunResponseSchema = RunRecordSchema;
+// wire DTO 의 실체는 contracts/wire — re-architecture P0c
+export { RunResponseSchema } from "@everdict/contracts/wire";

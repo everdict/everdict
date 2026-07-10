@@ -1,4 +1,2 @@
-import { z } from "zod";
-
-// POST /frontdoor-callback/:runId — delivery acknowledgement (the payload was handed to the rendezvous).
-export const CallbackAckResponseSchema = z.object({ ok: z.literal(true) });
+// wire DTO 의 실체는 contracts/wire — re-architecture P0c
+export { CallbackAckResponseSchema } from "@everdict/contracts/wire";

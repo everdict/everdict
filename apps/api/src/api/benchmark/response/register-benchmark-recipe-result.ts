@@ -1,8 +1,2 @@
-import { z } from "zod";
-
-// POST /benchmark-recipes 201 — registered recipe coordinates.
-export const RegisterBenchmarkRecipeResultSchema = z.object({
-  workspace: z.string(),
-  id: z.string(),
-  version: z.string(),
-});
+// wire DTO 의 실체는 contracts/wire — re-architecture P0c
+export { RegisterBenchmarkRecipeResultSchema } from "@everdict/contracts/wire";

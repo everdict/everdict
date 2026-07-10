@@ -1,5 +1,2 @@
-import { HarnessInstanceSpecSchema } from "@everdict/core";
-
-// GET /harnesses/:id/:version/instance 200 — the raw instance (template reference + pins) before resolve.
-// SSOT: @everdict/core HarnessInstanceSpecSchema.
-export const HarnessInstanceResponseSchema = HarnessInstanceSpecSchema;
+// wire DTO 의 실체는 contracts/wire — re-architecture P0c
+export { HarnessInstanceResponseSchema } from "@everdict/contracts/wire";

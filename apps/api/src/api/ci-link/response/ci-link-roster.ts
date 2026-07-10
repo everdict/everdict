@@ -1,9 +1,2 @@
-import { WorkspaceCiLinkSchema } from "@everdict/db";
-import { z } from "zod";
-
-// CI repo-link roster — every list/upsert/remove response returns the full roster after the change.
-// The record schema SSOT is @everdict/db WorkspaceCiLinkSchema (a link's existence = trusting that repo's
-// GitHub Actions OIDC token into this workspace).
-export const CiLinkRosterSchema = z.object({
-  links: z.array(WorkspaceCiLinkSchema),
-});
+// wire DTO 의 실체는 contracts/wire — re-architecture P0c
+export { CiLinkRosterSchema } from "@everdict/contracts/wire";
