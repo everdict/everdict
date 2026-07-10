@@ -1,4 +1,4 @@
-import { BadRequestError, type CaseResult, type Scorecard } from "@everdict/core";
+import { BadRequestError, type CaseResult, type Scorecard } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { caseTrialStats, diffTrials, groupTrials, passAtK, summarizeTrials } from "./trials.js";
 

@@ -1,4 +1,4 @@
-import type { CaseResult, Scorecard, TraceEvent } from "@everdict/core";
+import type { CaseResult, Scorecard, TraceEvent } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { scorecardModels } from "./models.js";
 

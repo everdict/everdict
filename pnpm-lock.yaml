@@ -334,6 +334,12 @@ importers:
         specifier: ^8.11.10
         version: 8.20.0
 
+  packages/domain:
+    dependencies:
+      '@everdict/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+
   packages/drivers:
     dependencies:
       '@everdict/core':
@@ -452,6 +458,9 @@ importers:
       '@everdict/core':
         specifier: workspace:*
         version: link:../core
+      '@everdict/domain':
+        specifier: workspace:*
+        version: link:../domain
 
   packages/topology:
     dependencies:
