@@ -1,3 +1,4 @@
+import { scoreObservations } from "@everdict/application-execution";
 import {
   type Backend,
   type BackendCapacity,
@@ -18,7 +19,7 @@ import {
   type TrustZone,
   assertHardenedIsolation,
 } from "@everdict/core";
-import { costGrader, latencyGrader, makeGradersFromEnv, safeGrade, stepsGrader } from "@everdict/graders";
+import { costGrader, latencyGrader, makeGradersFromEnv, stepsGrader } from "@everdict/graders";
 import type { TraceSource } from "@everdict/trace";
 import type { TopologyRuntime } from "./deploy/topology-runtime.js";
 import { keysFor, newRunId, wiringVars } from "./environment-manager.js";
@@ -202,10 +203,9 @@ export class ServiceTopologyBackend implements Backend, ScreenCapturable {
         (job.evalCase.graders.length > 0
           ? makeGradersFromEnv(job.evalCase.graders) // includes the judge grader (env Judge; if unconfigured, only judge is skipped)
           : [stepsGrader, costGrader, latencyGrader]);
-      const scores: Score[] = [];
-      for (const grader of graders) {
-        scores.push(...(await safeGrade(grader, { case: job.evalCase, trace, snapshot })));
-      }
+      // Scoring is the execution layer's job (re-architecture P2b) — this placement adapter only selects
+      // the grader set and hands the observations to the one scoring use-case.
+      const scores: Score[] = await scoreObservations({ evalCase: job.evalCase, trace, snapshot, graders });
 
       return { caseId: job.evalCase.id, harness: `${spec.id}@${spec.version}`, trace, snapshot, scores };
     } finally {

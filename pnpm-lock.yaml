@@ -500,6 +500,9 @@ importers:
 
   packages/topology:
     dependencies:
+      '@everdict/application-execution':
+        specifier: workspace:*
+        version: link:../application-execution
       '@everdict/backends':
         specifier: workspace:*
         version: link:../backends

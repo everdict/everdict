@@ -5,3 +5,4 @@
 // graders/environments) arrive via RunCaseDeps injection.
 export { runCase, type RunCaseDeps } from "./run-case.js";
 export { safeGrade } from "./safe-grade.js";
+export { type ScoreObservationsInput, scoreObservations } from "./score-observations.js";
