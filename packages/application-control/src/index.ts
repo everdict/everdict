@@ -134,3 +134,4 @@ export {
   TraceSinkService,
   type TraceSinkServiceDeps,
 } from "./trace-sink/trace-sink-service.js";
+export { type ArtifactStore, offloadSnapshot } from "./ports/artifact-store.js";
