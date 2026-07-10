@@ -1,8 +1,11 @@
 # Eval domain model — Dataset / Rubric / Grader split
 
-**Status: SHIPPED (all five slices).** S1 `7d1d809` (multi-metric contract) · S2 `59f26fa` (promptTemplate +
-criteria) · S3 `1889fdb` (Rubric entity full stack) · S4 `8b17290` (script grader) · S5 `4edd577` (dataset
-purification). #4 (delivery) shipped earlier as `7d259c1`.
+**Status: SHIPPED (all five slices + follow-ups).** S1 `7d1d809` (multi-metric contract) · S2 `59f26fa`
+(promptTemplate + criteria) · S3 `1889fdb` (Rubric entity full stack) · S4 `8b17290` (script grader) ·
+S5 `4edd577` (dataset purification). #4 (delivery) shipped earlier as `7d259c1`. Follow-ups shipped:
+script grader `image` mode `d120586` · adapters emit `expected` `d633b75` · rubric version tags `e8b4f3f` ·
+**live-verified vs a real model** (multi-criteria one-call + custom template, LiteLLM `chatgpt/gpt-5.4-mini`)
+`68c6adb`.
 Related: `docs/judges.md` · `docs/datasets.md` · `docs/scorecards.md` ·
 `docs/architecture/judge-placement-locality.md` · skills `evaluation` / `graders`.
 
@@ -107,8 +110,8 @@ weighted `judge:<judge-id>` overall, so `caseVerdict` authority ranking and exis
 | **S1 multi-metric contract** | `Grader.grade → Score \| Score[]` + `toScores`; flatten at the collectors (`safeGrade`, `runCase`, topology `service-backend`, control-plane collect, `JudgeRunner`, ingest). No schema/db change. | `7d1d809` |
 | **S2 judge prompt + criteria** | `promptTemplate` + `criteria[]` on BOTH judge kinds (schema superRefine enforces `{verdict_instruction}` + unique ids); custom template = raw-evidence placeholders, default template unchanged; multi-criteria verdict parse → `judge:<id>:<criterion>` + weighted overall. | `59f26fa` |
 | **S3 Rubric entity** | `RubricSpec`/`RubricRef` in core; `RubricRegistry` (in-mem/file/Pg, mig 0053) + `POST/GET /rubrics` + MCP parity + web pages (judge pages restored for the ref UI); `JudgeSpec.rubric: string \| ref` (judge's own fields override the rubric's; unresolved → skip); `BundleSchema.rubrics[]`. | `1889fdb` |
-| **S4 script grader** | `script` kind: python/node, full serialized `GradeContext` as a JSON file arg → last-JSON-on-stdout `Score \| Score[]`; sandboxed in the case compute (`needsCompute`); failures are explicit AppErrors → visible error scores. Dedicated grader image = follow-up. | `8b17290` |
-| **S5 dataset purification** | `EvalCase.expected` (answer-match fallback + judge `EXPECTED OUTPUT`/`{expected}`) + scorecard-time `graders` plan applied at submit AND every re-materialization point, persisted in `orchestration.graders`. Benchmark adapters emitting `expected` = follow-up. | `4edd577` |
+| **S4 script grader** | `script` kind: python/node, full serialized `GradeContext` as a JSON file arg → last-JSON-on-stdout `Score \| Score[]`; sandboxed in the case compute (`needsCompute`); failures are explicit AppErrors → visible error scores. `image` mode (`d120586`): a DEDICATED grader container via `ctx.provision` (runCase-injected), observation-family. | `8b17290` |
+| **S5 dataset purification** | `EvalCase.expected` (answer-match fallback + judge `EXPECTED OUTPUT`/`{expected}`) + scorecard-time `graders` plan applied at submit AND every re-materialization point, persisted in `orchestration.graders`. Adapters emit `expected` from `answerField` (`d633b75`). | `4edd577` |
 
 ## Back-compat invariants
 
