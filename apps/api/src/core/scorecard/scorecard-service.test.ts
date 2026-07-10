@@ -12,6 +12,7 @@ import {
   UpstreamError,
 } from "@everdict/core";
 import { InMemoryRunStore, InMemoryScorecardStore, type ScorecardRecord } from "@everdict/db";
+import { costGrader, latencyGrader, stepsGrader } from "@everdict/graders";
 import {
   InMemoryDatasetRegistry,
   InMemoryHarnessInstanceRegistry,
@@ -20,6 +21,10 @@ import {
 } from "@everdict/registry";
 import type { TraceSource, TraceSourceConfig } from "@everdict/trace";
 import { describe, expect, it } from "vitest";
+
+// Trace-only grader factory injected into the ingest path (re-architecture P2 S4) — the application layer never
+// imports @everdict/graders, so the composition side supplies the steps/cost/latency graders the ingest re-derives.
+const defaultTraceGraders = () => [stepsGrader, costGrader, latencyGrader];
 import type { CaseExportStream } from "../trace-sink/trace-sink-service.js";
 import { ScorecardService } from "./scorecard-service.js";
 
@@ -263,6 +268,7 @@ describe("ScorecardService.ingestPull", () => {
       dispatcher,
       store,
       datasets,
+      defaultTraceGraders,
       buildTraceSource,
       secretsFor: async () => ({ OTEL_TOKEN: "Bearer secret-xyz" }),
     });

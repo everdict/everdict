@@ -1,5 +1,5 @@
-import { CircuitBreaker } from "@everdict/backends";
-import { type AgentJob, type CaseResult, UpstreamError } from "@everdict/core";
+import { type AgentJob, type CaseResult, UpstreamError } from "@everdict/contracts";
+import { CircuitBreaker } from "@everdict/domain";
 import { describe, expect, it } from "vitest";
 import { executeWithSpillover } from "./runtime-spillover.js";
 

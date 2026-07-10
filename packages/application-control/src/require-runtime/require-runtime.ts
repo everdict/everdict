@@ -1,4 +1,4 @@
-import { BadRequestError } from "@everdict/core";
+import { BadRequestError } from "@everdict/contracts";
 
 // Deployment policy (default): a run must state "where it runs" — a registered tenant runtime id or a self-hosted runner
 // (self:<id> / self:ws[:<id>]). A silent fallback to the control-plane host in-process (LocalBackend) is forbidden (so that

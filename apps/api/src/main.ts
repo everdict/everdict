@@ -84,7 +84,7 @@ import {
   migrate,
   sqlClient,
 } from "@everdict/db";
-import { makeGraders } from "@everdict/graders";
+import { costGrader, latencyGrader, makeGraders, stepsGrader } from "@everdict/graders";
 import {
   type BenchmarkRegistry,
   type DatasetRegistry,
@@ -327,6 +327,9 @@ async function main(): Promise<void> {
     store: scorecardStore,
     // Grader factory (@everdict/graders) for executeCase/collectDeferredTrace collection-mode scoring (re-architecture P2 S3).
     makeGraders,
+    // Trace-only graders (@everdict/graders) for the ingest path — re-derive steps/cost/latency so an ingested
+    // scorecard aligns on diff with a live run. The application layer never imports the impls (re-architecture P2 S4).
+    defaultTraceGraders: () => [stepsGrader, costGrader, latencyGrader],
     breaker, // shared with the queue view — spillover writes, observability reads
     onOrchestrationEvent: (event) => {
       if (event.kind === "spillover")

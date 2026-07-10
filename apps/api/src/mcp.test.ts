@@ -15,6 +15,7 @@ import {
   InMemoryWorkspaceSettingsStore,
   InMemoryWorkspaceStore,
 } from "@everdict/db";
+import { costGrader, latencyGrader, stepsGrader } from "@everdict/graders";
 import {
   InMemoryDatasetRegistry,
   InMemoryHarnessInstanceRegistry,
@@ -138,6 +139,8 @@ function harness() {
       dispatcher: okDispatcher,
       store: new InMemoryScorecardStore(),
       datasets: datasetRegistry,
+      // Trace-only graders re-derived on the ingest path (re-architecture P2 S4) — injected from the composition side.
+      defaultTraceGraders: () => [stepsGrader, costGrader, latencyGrader],
       newId: () => `sc-${n++}`,
     }),
     scheduleService: new ScheduleService({ store: new InMemoryScheduleStore(), newId: () => `sch-${n++}` }),

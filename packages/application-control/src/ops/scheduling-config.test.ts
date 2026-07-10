@@ -1,4 +1,4 @@
-import { BadRequestError } from "@everdict/core";
+import { BadRequestError } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { parseAutoscale, parseTenantMap } from "./scheduling-config.js";
 

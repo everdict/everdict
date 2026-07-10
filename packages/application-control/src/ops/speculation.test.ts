@@ -1,5 +1,5 @@
-import { CircuitBreaker } from "@everdict/backends";
-import type { AgentJob, CaseResult } from "@everdict/core";
+import type { AgentJob, CaseResult } from "@everdict/contracts";
+import { CircuitBreaker } from "@everdict/domain";
 import { describe, expect, it } from "vitest";
 import type { SpilloverOutcome } from "./runtime-spillover.js";
 import { SpeculationController } from "./speculation.js";

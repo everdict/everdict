@@ -143,3 +143,72 @@ export type { JudgeRunner } from "./ports/judge-runner.js";
 export { type ExecuteCaseDeps, executeCase, jobImages } from "./execution/execute-case.js";
 export { type CollectTraceDeps, collectDeferredTrace } from "./execution/collect-trace.js";
 export { type JudgeStream, ScoringService, type ScoringServiceDeps } from "./execution/scoring-service.js";
+
+// Batch-orchestration ops machinery (re-architecture P2 S4) — adaptive concurrency, OOM auto-boost, runtime
+// spillover + tail speculation, history-informed shard weights, the scheduling knobs, boot recovery, and the
+// Prometheus metrics registry. runtime-probe stays in apps/api (it composes @everdict/backends placement
+// builders, which are infrastructure the application layer must not import).
+export { type AdaptiveConcurrencyOpts, AdaptiveConcurrencyGate } from "./ops/adaptive-concurrency.js";
+export { OOM_ESCALATION_CAP_MB, type OomBoostOpts, executeWithOomBoost } from "./ops/oom-boost.js";
+export { type SpilloverOpts, type SpilloverOutcome, executeWithSpillover } from "./ops/runtime-spillover.js";
+export { type SpeculationOpts, SpeculationController } from "./ops/speculation.js";
+export { weightedTargets } from "./ops/shard-weights.js";
+export {
+  type AutoscaleConfig,
+  parseAutoscale,
+  parseTenantMap,
+  type TenantValueMap,
+} from "./ops/scheduling-config.js";
+export { type RecoveryDeps, recoverInterrupted } from "./ops/startup-recovery.js";
+export { Metrics } from "./ops/metrics.js";
+export { assertRuntimeTarget } from "./require-runtime/require-runtime.js";
+
+// Run / schedule / queue orchestration services (re-architecture P2 S5) — the standalone-run lifecycle, the
+// cron-schedule lifecycle (Temporal driver stays in apps/api), and the work-queue snapshot.
+export { type LiveTraceRef, RunService, type RunServiceDeps, type SubmitInput } from "./run/run-service.js";
+export {
+  type CreateScheduleInput,
+  type RegressionAlert,
+  type RegressionDelta,
+  type ScheduleDriver,
+  type ScheduleRecordWithNext,
+  ScheduleService,
+  type ScheduleServiceDeps,
+  type ScheduleSpec,
+  type UpdateScheduleInput,
+  isValidCron,
+} from "./schedule/schedule-service.js";
+export {
+  type QueueItem,
+  type QueueLane,
+  type QueueLaneAdmission,
+  QueueService,
+  type QueueServiceDeps,
+  type QueueSnapshot,
+  type QueueUpcoming,
+} from "./queue/queue-service.js";
+
+// Scorecard cluster (re-architecture P2 S4) — the batch-eval facade over its lifecycle collaborators (batch
+// orchestration / ingest / analytics) + the shared plumbing (deps interface, ingest/pull body schemas, subset
+// and grading-plan helpers). The Temporal batch driver stays in apps/api (a Temporal adapter, infrastructure).
+export {
+  IngestScorecardBodySchema,
+  PullIngestBodySchema,
+  type IngestScorecardBody,
+  type IngestScorecardInput,
+  type PullIngestBody,
+  type PullIngestInput,
+  type RunScorecardInput,
+  type ScorecardServiceDeps,
+  applyGradingPlan,
+  caseReason,
+  childKey,
+  exportStepMessage,
+  offloadResults,
+  originSource,
+  selectSubsetCases,
+} from "./scorecard/scorecard-shared.js";
+export { ScorecardService } from "./scorecard/scorecard-service.js";
+export { ScorecardBatchService } from "./scorecard/scorecard-batch-service.js";
+export { ScorecardIngestService } from "./scorecard/scorecard-ingest-service.js";
+export { ScorecardAnalyticsService } from "./scorecard/scorecard-analytics-service.js";

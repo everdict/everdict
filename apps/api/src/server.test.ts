@@ -18,6 +18,7 @@ import {
   aesGcmCipher,
   issueKey,
 } from "@everdict/db";
+import { costGrader, latencyGrader, stepsGrader } from "@everdict/graders";
 import {
   InMemoryBenchmarkRegistry,
   InMemoryDatasetRegistry,
@@ -157,6 +158,8 @@ function server(
     judges: judgeRegistry,
     // No secret → the model judge yields a skip score (verifies wiring without a real model call).
     judgeRunner: defaultJudgeRunner({ secretsFor: async () => ({}) }),
+    // Trace-only graders re-derived on the ingest path (re-architecture P2 S4) — the application layer never imports them.
+    defaultTraceGraders: () => [stepsGrader, costGrader, latencyGrader],
     // Fake trace source + secret for pull ingest (verifies authSecret→header injection).
     buildTraceSource: () => ({ fetch: async () => [{ t: 0, kind: "tool_call", id: "x", name: "bash", args: {} }] }),
     secretsFor: async () => ({ OTEL_TOKEN: "secret-xyz" }),
