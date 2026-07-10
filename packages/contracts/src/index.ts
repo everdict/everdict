@@ -4,6 +4,7 @@ export * from "./errors.js";
 export * from "./job-result-wire.js";
 export * from "./execution/trace.js";
 export * from "./execution/trace-sink.js";
+export * from "./execution/trace-source.js";
 export * from "./execution/compute.js";
 export * from "./execution/case-failure.js";
 export * from "./execution/environment.js";

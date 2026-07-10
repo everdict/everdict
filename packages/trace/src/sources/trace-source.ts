@@ -1,9 +1,8 @@
 import type { TraceEvent } from "@everdict/core";
 
-// Pull one run's trace that the harness exported to OTel/MLflow and return it as normalized TraceEvent[].
-export interface TraceSource {
-  fetch(runId: string): Promise<TraceEvent[]>;
-}
+// The source contract now lives in @everdict/contracts — re-architecture P2 compat re-export
+// (removed in the P4 sweep). The Span IR + GenAI mapping below are parsing internals and stay here.
+export type { TraceSource } from "@everdict/contracts";
 
 // The shared intermediate-representation span for OTel/MLflow.
 export interface Span {
