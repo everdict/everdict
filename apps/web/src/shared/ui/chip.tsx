@@ -2,22 +2,29 @@ import type { ReactNode } from 'react'
 import { Boxes, Cpu, Database, ListFilter, Server, Tag } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
-import { fmtPct } from '@/shared/lib/format'
+import { fmtMetricLabel, fmtPct } from '@/shared/lib/format'
 import { cn } from '@/shared/lib/utils'
 
 // Metric summary chip — name (faint) + mean + optional pass rate. Same across lists/per-harness.
+// Judge metrics render human-readably ('judge <id> › <criterion>'); siblings disambiguate the 2-segment
+// judge form (raw label on hover).
 export function MetricChip({
   metric,
   mean,
   passRate,
+  siblings,
 }: {
   metric: string
   mean: number
   passRate?: number | null
+  siblings?: readonly string[]
 }) {
   return (
-    <code className="inline-flex items-center gap-1 rounded border border-border bg-muted/40 px-1.5 py-0.5 font-mono text-[11px]">
-      <span className="text-faint">{metric}</span>
+    <code
+      title={metric}
+      className="inline-flex items-center gap-1 rounded border border-border bg-muted/40 px-1.5 py-0.5 font-mono text-[11px]"
+    >
+      <span className="text-faint">{fmtMetricLabel(metric, siblings)}</span>
       <span className="tabular-nums text-foreground/85">{mean.toFixed(2)}</span>
       {passRate != null && <span className="tabular-nums text-faint">· {fmtPct(passRate)}</span>}
     </code>

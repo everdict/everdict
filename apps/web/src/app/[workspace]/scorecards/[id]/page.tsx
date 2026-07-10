@@ -5,17 +5,29 @@ import { getTranslations } from 'next-intl/server'
 import { CommentsSection } from '@/features/discuss'
 import { membersSchema } from '@/entities/member'
 import { runsSchema } from '@/entities/run'
-import { scorecardRecordSchema, type ScorecardRecord } from '@/entities/scorecard'
+import {
+  scorecardRecordSchema,
+  type MetricSummary,
+  type ScorecardRecord,
+} from '@/entities/scorecard'
 import { authContext } from '@/shared/auth/principal'
 import { env } from '@/shared/config/env'
 import { controlPlane } from '@/shared/lib/control-plane'
-import { fmtPct, fmtSubject, HEALTH_TEXT, rateHealth } from '@/shared/lib/format'
+import {
+  fmtMetricLabel,
+  fmtPct,
+  fmtSubject,
+  groupMetricRows,
+  HEALTH_TEXT,
+  rateHealth,
+} from '@/shared/lib/format'
 import { cn } from '@/shared/lib/utils'
 import { AutoRefresh } from '@/shared/ui/auto-refresh'
 import { Badge } from '@/shared/ui/badge'
 import { Callout } from '@/shared/ui/callout'
 import { Card } from '@/shared/ui/card'
 import { ModelChip, RuntimeChip } from '@/shared/ui/chip'
+import { CriterionBadge, MetricLabel } from '@/shared/ui/metric-label'
 import { OriginBlock } from '@/shared/ui/origin'
 import { PageHeader } from '@/shared/ui/page-header'
 import { SectionHeader } from '@/shared/ui/section-header'
@@ -49,6 +61,30 @@ function Prop({ label, value }: { label: string; value: string }) {
       <dd className="mt-1 truncate font-mono text-[13px] text-foreground">{value}</dd>
     </div>
   )
+}
+
+// Numeric cells of a metric-summary row — shared by judge-overall rows and their indented criterion sub-rows.
+function SummaryCells({ m }: { m: MetricSummary }) {
+  return (
+    <>
+      <TD className="text-right font-mono text-[12px] tabular-nums">{m.mean.toFixed(2)}</TD>
+      <TD className="text-right font-mono text-[12px] tabular-nums text-muted-foreground">
+        {m.count}
+      </TD>
+      <TD className="text-right font-mono text-[12px] tabular-nums">
+        {m.passRate == null ? (
+          <span className="text-faint">—</span>
+        ) : (
+          <span className={HEALTH_TEXT[rateHealth(m.passRate)]}>{fmtPct(m.passRate)}</span>
+        )}
+      </TD>
+    </>
+  )
+}
+
+// Per-case score badge tone — the judge/grader pass verdict (neutral when the score carries no pass).
+function scoreTone(pass?: boolean): 'neutral' | 'success' | 'danger' {
+  return pass == null ? 'neutral' : pass ? 'success' : 'danger'
 }
 
 function BackLink({ workspace, label }: { workspace: string; label: string }) {
@@ -135,6 +171,7 @@ export default async function ScorecardDetailPage({
   }
 
   const summary = record.summary ?? []
+  const summaryMetrics = summary.map((m) => m.metric) // sibling context for judge-metric disambiguation
   const results = record.scorecard?.results ?? []
   const steps = record.steps ?? []
   const live = record.status === 'queued' || record.status === 'running'
@@ -481,26 +518,35 @@ export default async function ScorecardDetailPage({
               </tr>
             </THead>
             <TBody>
-              {summary.map((m) => (
-                <TR key={m.metric}>
-                  <TD className="font-mono text-[12px] font-[510]">{m.metric}</TD>
-                  <TD className="text-right font-mono text-[12px] tabular-nums">
-                    {m.mean.toFixed(2)}
+              {/* Multi-criteria judges: the overall row first, its criterion metrics indented beneath (stable order). Non-judge metrics unchanged. */}
+              {groupMetricRows(summary).flatMap((g) => [
+                <TR key={g.row.metric}>
+                  <TD className="text-[12px] font-[510]">
+                    <MetricLabel metric={g.row.metric} siblings={summaryMetrics} />
                   </TD>
-                  <TD className="text-right font-mono text-[12px] tabular-nums text-muted-foreground">
-                    {m.count}
-                  </TD>
-                  <TD className="text-right font-mono text-[12px] tabular-nums">
-                    {m.passRate == null ? (
-                      <span className="text-faint">—</span>
-                    ) : (
-                      <span className={HEALTH_TEXT[rateHealth(m.passRate)]}>
-                        {fmtPct(m.passRate)}
+                  <SummaryCells m={g.row} />
+                </TR>,
+                ...g.criteria.map((c) => (
+                  <TR key={c.row.metric}>
+                    <TD className="text-[12px]">
+                      <span
+                        title={c.row.metric}
+                        className="inline-flex min-w-0 items-center gap-1.5 pl-5"
+                      >
+                        <span className="text-faint">└</span>
+                        <CriterionBadge
+                          criterionId={
+                            c.parsed.kind === 'judge-criterion'
+                              ? c.parsed.criterionId
+                              : c.row.metric
+                          }
+                        />
                       </span>
-                    )}
-                  </TD>
-                </TR>
-              ))}
+                    </TD>
+                    <SummaryCells m={c.row} />
+                  </TR>
+                )),
+              ])}
             </TBody>
           </Table>
         )}
@@ -538,100 +584,142 @@ export default async function ScorecardDetailPage({
           </p>
         ) : (
           <div className="space-y-2">
-            {shown.map(({ r, verdict }) => (
-              <Card
-                key={r.caseId}
-                className={cn(
-                  'space-y-2 border-l-2 p-3.5',
-                  verdict === false
-                    ? 'border-l-destructive'
-                    : verdict == null
-                      ? 'border-l-border-strong'
-                      : 'border-l-[var(--color-success)]/60'
-                )}
-              >
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <span className="flex items-center gap-2">
-                    <Badge tone={verdict == null ? 'neutral' : verdict ? 'success' : 'danger'}>
-                      {verdict == null ? 'SKIP' : verdict ? 'PASS' : 'FAIL'}
-                    </Badge>
-                    <span className="font-mono text-[13px] font-[510]">{r.caseId}</span>
-                    {/* This case's child run (if any) — full trace/usage/provenance drilldown. */}
-                    {childRunByCase.get(r.caseId) && (
-                      <Link
-                        href={`/${workspace}/runs/${childRunByCase.get(r.caseId)}`}
-                        className="font-mono text-[11px] text-link transition-colors hover:text-foreground"
-                      >
-                        → run
-                      </Link>
-                    )}
-                    {/* Trace sink deep link (if any) — jump to the original/exported trace on the observability platform. */}
-                    {exportByCase.get(r.caseId)?.url && (
-                      <a
-                        href={exportByCase.get(r.caseId)?.url}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="font-mono text-[11px] text-link transition-colors hover:text-foreground"
-                      >
-                        → {record.export?.sink} ↗
-                      </a>
-                    )}
-                  </span>
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    {r.snapshot?.kind && <Badge tone="neutral">{String(r.snapshot.kind)}</Badge>}
-                    {r.scores.length === 0 ? (
-                      <span className="text-[12px] text-muted-foreground">{t('noScores')}</span>
-                    ) : (
-                      r.scores.map((s) => (
-                        <Badge
-                          key={s.graderId}
-                          tone={s.pass == null ? 'neutral' : s.pass ? 'success' : 'danger'}
+            {shown.map(({ r, verdict }) => {
+              // Sibling context of this case's score labels + judge grouping (criteria under their overall).
+              const caseMetrics = r.scores.map((s) => s.metric)
+              const scoreGroups = groupMetricRows(r.scores)
+              return (
+                <Card
+                  key={r.caseId}
+                  className={cn(
+                    'space-y-2 border-l-2 p-3.5',
+                    verdict === false
+                      ? 'border-l-destructive'
+                      : verdict == null
+                        ? 'border-l-border-strong'
+                        : 'border-l-[var(--color-success)]/60'
+                  )}
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <span className="flex items-center gap-2">
+                      <Badge tone={verdict == null ? 'neutral' : verdict ? 'success' : 'danger'}>
+                        {verdict == null ? 'SKIP' : verdict ? 'PASS' : 'FAIL'}
+                      </Badge>
+                      <span className="font-mono text-[13px] font-[510]">{r.caseId}</span>
+                      {/* This case's child run (if any) — full trace/usage/provenance drilldown. */}
+                      {childRunByCase.get(r.caseId) && (
+                        <Link
+                          href={`/${workspace}/runs/${childRunByCase.get(r.caseId)}`}
+                          className="font-mono text-[11px] text-link transition-colors hover:text-foreground"
                         >
-                          {s.metric} {s.value}
-                        </Badge>
-                      ))
-                    )}
+                          → run
+                        </Link>
+                      )}
+                      {/* Trace sink deep link (if any) — jump to the original/exported trace on the observability platform. */}
+                      {exportByCase.get(r.caseId)?.url && (
+                        <a
+                          href={exportByCase.get(r.caseId)?.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="font-mono text-[11px] text-link transition-colors hover:text-foreground"
+                        >
+                          → {record.export?.sink} ↗
+                        </a>
+                      )}
+                    </span>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      {r.snapshot?.kind && <Badge tone="neutral">{String(r.snapshot.kind)}</Badge>}
+                      {r.scores.length === 0 ? (
+                        <span className="text-[12px] text-muted-foreground">{t('noScores')}</span>
+                      ) : (
+                        // A multi-criteria judge's scores stay together: the overall badge boxed with its criterion badges (each with its own pass tone).
+                        scoreGroups.map((g) =>
+                          g.criteria.length === 0 ? (
+                            <Badge
+                              key={`${g.row.graderId}:${g.row.metric}`}
+                              title={g.row.metric}
+                              tone={scoreTone(g.row.pass)}
+                            >
+                              {fmtMetricLabel(g.row.metric, caseMetrics)} {g.row.value}
+                            </Badge>
+                          ) : (
+                            <span
+                              key={`${g.row.graderId}:${g.row.metric}`}
+                              className="inline-flex flex-wrap items-center gap-1 rounded-lg border border-border/60 bg-muted/20 p-0.5"
+                            >
+                              <Badge title={g.row.metric} tone={scoreTone(g.row.pass)}>
+                                {fmtMetricLabel(g.row.metric, caseMetrics)} {g.row.value}
+                              </Badge>
+                              {g.criteria.map((c) => (
+                                <Badge
+                                  key={c.row.metric}
+                                  title={c.row.metric}
+                                  tone={scoreTone(c.row.pass)}
+                                >
+                                  ›{' '}
+                                  {c.parsed.kind === 'judge-criterion'
+                                    ? c.parsed.criterionId
+                                    : c.row.metric}{' '}
+                                  {c.row.value}
+                                </Badge>
+                              ))}
+                            </span>
+                          )
+                        )
+                      )}
+                    </div>
                   </div>
-                </div>
-                {/* os-use screenshot — base64 embedded (dev) or object storage URL (offload). The very image the VLM scored. */}
-                {osUseShotSrc(r.snapshot) && (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={osUseShotSrc(r.snapshot)}
-                    alt={`${r.caseId} screenshot`}
-                    className="max-h-72 w-auto rounded-lg border"
-                  />
-                )}
-                {/* browser (service-topology: browser-use etc.) — the final URL the agent reached (+ DOM excerpt). */}
-                {r.snapshot?.kind === 'browser' && r.snapshot.url && (
-                  <p className="break-all font-mono text-[12px] text-muted-foreground">
-                    <span className="font-[510] text-foreground">final url</span> · {r.snapshot.url}
-                  </p>
-                )}
-                {/* judge/grader verdict reasoning (VLM rubric reasoning etc.) — shows "why pass/fail" for os-use and the like. */}
-                {r.scores
-                  .filter((s) => s.detail)
-                  .map((s) => (
-                    <p
-                      key={`${s.graderId}-detail`}
-                      className="rounded-lg border border-border bg-muted/40 px-3 py-2 text-[12px] leading-relaxed text-muted-foreground"
-                    >
-                      <span className="font-[510] text-foreground">{s.metric}</span> · {s.detail}
+                  {/* os-use screenshot — base64 embedded (dev) or object storage URL (offload). The very image the VLM scored. */}
+                  {osUseShotSrc(r.snapshot) && (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={osUseShotSrc(r.snapshot)}
+                      alt={`${r.caseId} screenshot`}
+                      className="max-h-72 w-auto rounded-lg border"
+                    />
+                  )}
+                  {/* browser (service-topology: browser-use etc.) — the final URL the agent reached (+ DOM excerpt). */}
+                  {r.snapshot?.kind === 'browser' && r.snapshot.url && (
+                    <p className="break-all font-mono text-[12px] text-muted-foreground">
+                      <span className="font-[510] text-foreground">final url</span> ·{' '}
+                      {r.snapshot.url}
                     </p>
-                  ))}
-                {/* error events from the run trace — how the case failed (harness crash/dispatch error). */}
-                {(r.trace ?? [])
-                  .filter((e) => e.kind === 'error' && typeof e.message === 'string')
-                  .map((e, i) => (
-                    <p
-                      key={`trace-error-${i}`}
-                      className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 font-mono text-[12px] leading-relaxed text-destructive"
-                    >
-                      <span className="font-[560]">error</span> · {e.message}
-                    </p>
-                  ))}
-              </Card>
-            ))}
+                  )}
+                  {/* judge/grader verdict reasoning (VLM rubric reasoning etc.) — shows "why pass/fail" for os-use and the like.
+                    Grouped order (overall first, criteria indented beneath) so a multi-criteria judge's reasons read as one block. */}
+                  {scoreGroups
+                    .flatMap((g) => [{ row: g.row, parsed: g.parsed }, ...g.criteria])
+                    .filter((e) => e.row.detail)
+                    .map((e) => (
+                      <p
+                        key={`${e.row.graderId}:${e.row.metric}-detail`}
+                        className={cn(
+                          'rounded-lg border border-border bg-muted/40 px-3 py-2 text-[12px] leading-relaxed text-muted-foreground',
+                          e.parsed.kind === 'judge-criterion' && 'ml-5'
+                        )}
+                      >
+                        <MetricLabel
+                          metric={e.row.metric}
+                          siblings={caseMetrics}
+                          className="mr-1 max-w-full align-middle font-[510] text-foreground"
+                        />{' '}
+                        · {e.row.detail}
+                      </p>
+                    ))}
+                  {/* error events from the run trace — how the case failed (harness crash/dispatch error). */}
+                  {(r.trace ?? [])
+                    .filter((e) => e.kind === 'error' && typeof e.message === 'string')
+                    .map((e, i) => (
+                      <p
+                        key={`trace-error-${i}`}
+                        className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 font-mono text-[12px] leading-relaxed text-destructive"
+                      >
+                        <span className="font-[560]">error</span> · {e.message}
+                      </p>
+                    ))}
+                </Card>
+              )
+            })}
           </div>
         )}
       </section>

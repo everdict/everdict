@@ -11,6 +11,7 @@ import { controlPlane } from '@/shared/lib/control-plane'
 import { Badge } from '@/shared/ui/badge'
 import { Callout } from '@/shared/ui/callout'
 import { Card } from '@/shared/ui/card'
+import { MetricLabel } from '@/shared/ui/metric-label'
 import { PageHeader } from '@/shared/ui/page-header'
 import { SectionHeader } from '@/shared/ui/section-header'
 import { StatusPill } from '@/shared/ui/status-pill'
@@ -136,8 +137,9 @@ export default async function RunDetailPage({
           <p className="text-[13px] text-muted-foreground">{t('noScores')}</p>
         ) : (
           <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3">
+            {/* key includes the metric — a multi-criteria judge emits several scores under one graderId. */}
             {scores.map((s) => (
-              <Card key={s.graderId} className="p-3.5">
+              <Card key={`${s.graderId}:${s.metric}`} className="p-3.5">
                 <div className="flex items-center justify-between gap-2">
                   <span className="truncate text-[13px] font-[510]">{s.graderId}</span>
                   {s.pass != null && (
@@ -147,7 +149,9 @@ export default async function RunDetailPage({
                 <div className="mt-1.5 font-mono text-2xl font-[560] tabular-nums tracking-tight">
                   {s.value}
                 </div>
-                <div className="text-[12px] text-faint">{s.metric}</div>
+                <div className="text-[12px] text-faint">
+                  <MetricLabel metric={s.metric} siblings={scores.map((x) => x.metric)} />
+                </div>
                 {/* Verdict reasoning (judge rubric reasoning, command output, etc.) — shows the "why" in os-use VLM grading. */}
                 {s.detail && (
                   <p className="mt-2 border-t border-border/60 pt-2 text-[12px] leading-relaxed text-muted-foreground">

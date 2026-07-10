@@ -29,6 +29,77 @@ export const HEALTH_TEXT: Record<Health, string> = {
   none: 'text-foreground',
 }
 
+// ── Hierarchical judge metric labels (docs/architecture/eval-domain-model.md) ────────────────
+// `judge` / `judge:<judgeId>` = a judge's overall verdict; `judge:<judgeId>:<criterionId>` /
+// `judge:<criterionId>` (inline case-embedded judge) = one criterion of a multi-criteria judge.
+// The 2-segment form is ambiguous — disambiguate within one scorecard via siblings:
+// `judge:<x>` alongside `judge:<x>:<y>` is an overall with criteria; alongside a bare `judge`
+// it is an inline-judge criterion; otherwise it is just an overall.
+export type ParsedMetric =
+  | { kind: 'plain'; metric: string }
+  | { kind: 'judge-overall'; metric: string; judgeId?: string }
+  | { kind: 'judge-criterion'; metric: string; judgeId?: string; criterionId: string }
+
+export function parseMetricLabel(metric: string, siblings?: readonly string[]): ParsedMetric {
+  if (metric === 'judge') return { kind: 'judge-overall', metric } // inline judge overall
+  if (!metric.startsWith('judge:')) return { kind: 'plain', metric }
+  const rest = metric.slice('judge:'.length)
+  const sep = rest.indexOf(':')
+  if (sep >= 0) {
+    const judgeId = rest.slice(0, sep)
+    const criterionId = rest.slice(sep + 1)
+    if (!judgeId || !criterionId) return { kind: 'plain', metric } // malformed — keep the raw label
+    return { kind: 'judge-criterion', metric, judgeId, criterionId }
+  }
+  if (!rest) return { kind: 'plain', metric } // malformed 'judge:' — keep the raw label
+  const sib = siblings ?? []
+  if (sib.some((s) => s.startsWith(`${metric}:`)))
+    return { kind: 'judge-overall', metric, judgeId: rest }
+  if (sib.includes('judge')) return { kind: 'judge-criterion', metric, criterionId: rest }
+  return { kind: 'judge-overall', metric, judgeId: rest }
+}
+
+// Text form for string-only slots (combobox options, code chips, table headers) — 'judge <id> › <criterion>'.
+// Plain metrics pass through unchanged.
+export function fmtMetricLabel(metric: string, siblings?: readonly string[]): string {
+  const p = parseMetricLabel(metric, siblings)
+  if (p.kind === 'plain') return p.metric
+  const head = p.judgeId ? `judge ${p.judgeId}` : 'judge'
+  return p.kind === 'judge-criterion' ? `${head} › ${p.criterionId}` : head
+}
+
+// Group metric-keyed rows for display — criterion rows nest under their judge's overall row
+// (overall first, criteria beneath in stable label order). Non-judge rows keep their original order;
+// an orphan criterion (no overall row present) stays top-level.
+export interface MetricRowGroup<T extends { metric: string }> {
+  row: T
+  parsed: ParsedMetric
+  criteria: { row: T; parsed: ParsedMetric }[]
+}
+export function groupMetricRows<T extends { metric: string }>(
+  rows: readonly T[]
+): MetricRowGroup<T>[] {
+  const siblings = rows.map((r) => r.metric)
+  const entries = rows.map((row) => ({ row, parsed: parseMetricLabel(row.metric, siblings) }))
+  const groups: MetricRowGroup<T>[] = []
+  const byMetric = new Map<string, MetricRowGroup<T>>()
+  for (const e of entries) {
+    if (e.parsed.kind === 'judge-criterion') continue
+    const group = { ...e, criteria: [] }
+    groups.push(group)
+    byMetric.set(e.row.metric, group)
+  }
+  for (const e of entries) {
+    if (e.parsed.kind !== 'judge-criterion') continue
+    const parentMetric = e.parsed.judgeId ? `judge:${e.parsed.judgeId}` : 'judge'
+    const parent = byMetric.get(parentMetric)
+    if (parent) parent.criteria.push(e)
+    else groups.push({ ...e, criteria: [] }) // orphan — appended after the regular rows
+  }
+  for (const g of groups) g.criteria.sort((a, b) => a.row.metric.localeCompare(b.row.metric))
+  return groups
+}
+
 // Compact time 'MM-DD HH:mm' (value is UTC — precise/local supplemented via title). If not ISO, pass through.
 export function fmtDateTime(iso: string): string {
   if (!/^\d{4}-\d{2}-\d{2}T/.test(iso)) return iso

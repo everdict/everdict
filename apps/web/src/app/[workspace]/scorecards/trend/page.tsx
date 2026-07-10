@@ -8,7 +8,7 @@ import { datasetsSchema } from '@/entities/dataset'
 import { scorecardTrendSchema, type ScorecardTrend } from '@/entities/scorecard'
 import { authContext } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
-import { fmtDateTime, fmtDateTimeFull, fmtScore } from '@/shared/lib/format'
+import { fmtDateTime, fmtDateTimeFull, fmtMetricLabel, fmtScore } from '@/shared/lib/format'
 import { Badge } from '@/shared/ui/badge'
 import { Callout } from '@/shared/ui/callout'
 import { Card } from '@/shared/ui/card'
@@ -190,8 +190,11 @@ export default async function TrendPage({
                   {trend.dataset}
                 </code>
                 · metric
-                <code className="rounded-md border border-border bg-muted/40 px-1.5 py-0.5 font-mono text-[11px]">
-                  {trend.metric}
+                <code
+                  title={trend.metric}
+                  className="rounded-md border border-border bg-muted/40 px-1.5 py-0.5 font-mono text-[11px]"
+                >
+                  {fmtMetricLabel(trend.metric)}
                 </code>
                 · baseline
                 <code className="rounded-md border border-border bg-muted/40 px-1.5 py-0.5 font-mono text-[11px]">
@@ -221,7 +224,9 @@ export default async function TrendPage({
                   <tr>
                     <TH>{t('thTime')}</TH>
                     <TH>harness</TH>
-                    <TH className="text-right">{trend.metric}</TH>
+                    <TH className="text-right" title={trend.metric}>
+                      {fmtMetricLabel(trend.metric)}
+                    </TH>
                     <TH className="text-right">Δ vs baseline</TH>
                     <TH className="text-right">{t('thStatus')}</TH>
                   </tr>

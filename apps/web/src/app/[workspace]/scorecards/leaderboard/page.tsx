@@ -7,7 +7,7 @@ import { datasetsSchema } from '@/entities/dataset'
 import { leaderboardSchema, type Leaderboard } from '@/entities/scorecard'
 import { authContext } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
-import { fmtDateTime, fmtDateTimeFull } from '@/shared/lib/format'
+import { fmtDateTime, fmtDateTimeFull, fmtMetricLabel } from '@/shared/lib/format'
 import { Callout } from '@/shared/ui/callout'
 import { Card } from '@/shared/ui/card'
 import { ModelChip } from '@/shared/ui/chip'
@@ -112,8 +112,11 @@ export default async function LeaderboardPage({
               {board.dataset}
             </code>
             · metric
-            <code className="rounded-md border border-border bg-muted/40 px-1.5 py-0.5 font-mono text-[11px]">
-              {board.metric}
+            <code
+              title={board.metric}
+              className="rounded-md border border-border bg-muted/40 px-1.5 py-0.5 font-mono text-[11px]"
+            >
+              {fmtMetricLabel(board.metric)}
             </code>
             · {t('aggregationLabel')}
             <code className="rounded-md border border-border bg-muted/40 px-1.5 py-0.5 font-mono text-[11px]">
@@ -133,7 +136,9 @@ export default async function LeaderboardPage({
                     <TH>harness</TH>
                     <TH>model</TH>
                     <TH>judge</TH>
-                    <TH className="text-right">{board.metric}</TH>
+                    <TH className="text-right" title={board.metric}>
+                      {fmtMetricLabel(board.metric)}
+                    </TH>
                     <TH className="text-right">runs</TH>
                     <TH className="text-right">{t('thCreated')}</TH>
                   </tr>

@@ -6,13 +6,14 @@ import { ComparePicker, type CompareOption } from '@/features/compare-scorecards
 import { scorecardDiffSchema, scorecardsSchema, type ScorecardDiff } from '@/entities/scorecard'
 import { authContext } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
-import { fmtPct } from '@/shared/lib/format'
+import { fmtMetricLabel, fmtPct } from '@/shared/lib/format'
 import { cn } from '@/shared/lib/utils'
 import { Badge } from '@/shared/ui/badge'
 import { Callout } from '@/shared/ui/callout'
 import { Card } from '@/shared/ui/card'
 import { ModelChip } from '@/shared/ui/chip'
 import { EmptyState } from '@/shared/ui/empty-state'
+import { MetricLabel } from '@/shared/ui/metric-label'
 import { PageHeader } from '@/shared/ui/page-header'
 import { SectionHeader } from '@/shared/ui/section-header'
 import { Table, TBody, TD, TH, THead, TR } from '@/shared/ui/table'
@@ -148,7 +149,9 @@ export default async function CompareScorecardsPage({
               <TBody>
                 {diff.metrics.map((m) => (
                   <TR key={m.metric}>
-                    <TD className="font-mono text-[12px] font-[510]">{m.metric}</TD>
+                    <TD className="text-[12px] font-[510]">
+                      <MetricLabel metric={m.metric} siblings={diff.metrics.map((x) => x.metric)} />
+                    </TD>
                     <TD className="text-right font-mono text-[12px] tabular-nums text-muted-foreground">
                       {m.baselineMean.toFixed(2)}
                     </TD>
@@ -205,12 +208,14 @@ export default async function CompareScorecardsPage({
                 tone="danger"
                 items={diff.regressions}
                 empty={t('noRegressions')}
+                siblingMetrics={diff.metrics.map((m) => m.metric)}
               />
               <DeltaList
                 title={t('improvementsTitle')}
                 tone="success"
                 items={diff.improvements}
                 empty={t('noImprovements')}
+                siblingMetrics={diff.metrics.map((m) => m.metric)}
               />
             </section>
           )}
@@ -276,11 +281,13 @@ function DeltaList({
   tone,
   items,
   empty,
+  siblingMetrics,
 }: {
   title: string
   tone: 'danger' | 'success'
   items: ScorecardDiff['regressions']
   empty: string
+  siblingMetrics?: readonly string[] // judge-metric disambiguation context (the diff's full metric set)
 }) {
   // Cases with the largest change first — put the notable regressions/improvements on top.
   const sorted = [...items].sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta))
@@ -299,9 +306,9 @@ function DeltaList({
               key={`${d.caseId}:${d.metric}`}
               className="flex items-center justify-between gap-2 py-1.5 first:pt-0 last:pb-0"
             >
-              <span className="min-w-0 truncate font-mono text-[12px]">
+              <span className="min-w-0 truncate font-mono text-[12px]" title={d.metric}>
                 {d.caseId}
-                <span className="text-faint"> · {d.metric}</span>
+                <span className="text-faint"> · {fmtMetricLabel(d.metric, siblingMetrics)}</span>
               </span>
               <span className="flex shrink-0 items-center gap-2 font-mono text-[12px] tabular-nums">
                 <span className="text-muted-foreground">

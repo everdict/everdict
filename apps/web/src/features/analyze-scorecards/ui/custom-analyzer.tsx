@@ -6,7 +6,14 @@ import { useTranslations } from 'next-intl'
 
 import type { ScorecardRecord } from '@/entities/scorecard'
 import type { View } from '@/entities/view'
-import { fmtPct, fmtScore, fmtSubject, HEALTH_TEXT, rateHealth } from '@/shared/lib/format'
+import {
+  fmtMetricLabel,
+  fmtPct,
+  fmtScore,
+  fmtSubject,
+  HEALTH_TEXT,
+  rateHealth,
+} from '@/shared/lib/format'
 import { cn } from '@/shared/lib/utils'
 import { Combobox, type ComboboxOption } from '@/shared/ui/combobox'
 import { EmptyState } from '@/shared/ui/empty-state'
@@ -419,7 +426,8 @@ export function CustomAnalyzer({
           <Combobox
             options={[
               { value: '', label: t('defaultMetric') },
-              ...metrics.map((m) => ({ value: m, label: m })),
+              // Judge metrics render human-readably ('judge <id> › <criterion>') — the full workspace metric list is the disambiguation context.
+              ...metrics.map((m) => ({ value: m, label: fmtMetricLabel(m, metrics) })),
             ]}
             value={config.metric ?? ''}
             onChange={(v) => patch({ metric: v || undefined })}

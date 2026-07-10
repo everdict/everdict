@@ -270,7 +270,12 @@ export function ScorecardList({
                         {shownMetrics.length > 0 ? (
                           shownMetrics.map((m) => (
                             <span key={m.metric} className="shrink-0">
-                              <MetricChip metric={m.metric} mean={m.mean} passRate={m.passRate} />
+                              <MetricChip
+                                metric={m.metric}
+                                mean={m.mean}
+                                passRate={m.passRate}
+                                siblings={metrics.map((x) => x.metric)}
+                              />
                             </span>
                           ))
                         ) : (
