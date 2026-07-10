@@ -14,3 +14,4 @@ export const RunDetailResponseSchema = RunRecordSchema.extend({
     "Live trace deep-link coordinates — present only while the run is observable on the tenant's trace platform",
   ),
 });
+export type RunDetailResponse = z.infer<typeof RunDetailResponseSchema>;

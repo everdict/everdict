@@ -34,7 +34,11 @@ Next.js 16 (App Router) · React 19 · TypeScript · Tailwind v4 (`@theme inline
 (new-york, neutral base, **Linear-style** indigo `#5e6ad2` primary + tight `0.5rem` radius + near-black dark
 surface; light/dark toggle via `shared/ui/theme-toggle`, no-flash inline script in `layout.tsx`) · TanStack
 Query · zod · Auth.js + Keycloak. Self-contained tooling: **eslint + prettier** (import-order plugin) — NOT the repo Biome (apps/web is
-excluded from root Biome). The web is a pure HTTP client of the control plane — **no `@everdict/*` package deps**.
+excluded from root Biome). The web is a pure HTTP client of the control plane — **runtime-decoupled: the only allowed
+`@everdict` dep is TYPE-ONLY `@everdict/contracts`** (wire/record TYPES, re-architecture P4). Local zod v4 schemas keep
+doing all runtime validation; exported types are anchored to the contract types via a compile-time drift guard, so the
+schemas can't silently diverge from the control plane. `import type` only (no value/schema import — zod v3 never runs in
+the web); `@everdict/contracts` is the ONLY permitted `@everdict` dependency.
 
 ## FSD layout (`src/`)
 ```

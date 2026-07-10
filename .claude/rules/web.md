@@ -7,8 +7,18 @@ See `docs/web.md`. This app is SELF-CONTAINED (own eslint+prettier; excluded fro
 
 - **FSD layers** under `src/`: app → widgets → features → entities → shared. Imports go DOWNWARD only
   (a layer never imports a higher one). Barrels (`index.ts`) expose a slice's public surface.
-- **No `@everdict/*` package deps.** The web is a pure HTTP client of the control plane (`@everdict/api`); mirror API
-  shapes with local zod schemas in `entities/*/model/schema.ts`. Keeps web ↔ api decoupled (and zod v4 isolated).
+- **Runtime-decoupled: the only allowed `@everdict` dep is TYPE-ONLY `@everdict/contracts`** (wire/record TYPES —
+  re-architecture P4). The web is a pure HTTP client of the control plane; it keeps its OWN zod v4 schemas in
+  `entities/*/model/schema.ts` doing all runtime boundary validation (`.parse()`), but its EXPORTED TypeScript types are
+  anchored to the contracts wire/record types (`import type { RunRecord } from '@everdict/contracts'` /
+  `import type { RunDetailResponse } from '@everdict/contracts/wire'`) so the local schema can no longer silently drift
+  from the control plane. Rules: (1) `import type` ONLY — NEVER import a value/schema from any `@everdict/*` (the zod v3
+  wire schemas must not run in the web; that would break zod-v4 isolation); (2) every local schema carries a
+  compile-time **drift guard** (`type AssertAssignable<A extends B, B> = A`) binding its inferred output to the contract
+  type, so a wire rename/retype fails the web typecheck; (3) `@everdict/contracts` is the ONLY permitted `@everdict`
+  dependency — no `@everdict/domain`, no `@everdict/api`, etc. Identical-shape entities guard bidirectionally;
+  deliberately-loose consumer views (e.g. `run.result` passthrough) source their FLAT fields from the wire and keep the
+  loose sub-shape local + guarded where it overlaps.
 - **Auth**: the web is a **BFF token courier, not an auth authority**. Auth.js stores/refreshes the Keycloak
   access token (`jwt` callback) in the **server-only httpOnly cookie** — NEVER put it on the `session` (no
   `/api/auth/session` leak); read it server-side via `getAccessToken()` (`getToken`). `control-plane.ts` forwards

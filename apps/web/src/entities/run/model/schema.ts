@@ -1,6 +1,18 @@
+import type { RunUsageSummary, RunStatus as WireRunStatus } from '@everdict/contracts'
+import type { RunDetailResponse } from '@everdict/contracts/wire'
 import { z } from 'zod'
 
-// Client mirror of the control plane RunRecord. The web couples over HTTP only — no backend package dependency.
+// Runtime boundary validation stays here (zod v4). The EXPORTED types are anchored to @everdict/contracts (re-architecture
+// P4): the wire DTO is the type SSOT for the run's FLAT fields, so this local schema can no longer silently drift from
+// the control plane on them. `import type` only — the zod v3 wire schemas never run in the web.
+//
+// Posture: the flat run fields (id/tenant/harness/caseId/status/error/trigger/parentScorecardId/liveTrace/timestamps)
+// are sourced from the wire type and drift-guarded. `result`/`usage`/`Score`/`TraceEvent` stay a DELIBERATELY LOOSE
+// consumer view — the UI parses trace events and snapshots by kind defensively (passthrough) so it survives server-side
+// trace-kind/snapshot-kind additions, and renders `Score.detail` as text. Binding those to the strict wire shapes
+// (`CaseResult`'s discriminated-union trace/snapshot, `Score.detail: unknown`) would force every consumer to re-narrow
+// the unions. So they keep local types, drift-guarded only where they overlap the wire (Score/Usage numeric fields).
+
 export const scoreSchema = z.object({
   graderId: z.string(),
   metric: z.string(),
@@ -62,7 +74,34 @@ export const runSchema = z.object({
   createdAt: z.string(),
   updatedAt: z.string(),
 })
-export type Run = z.infer<typeof runSchema>
-export type RunStatus = Run['status']
 
 export const runsSchema = z.array(runSchema)
+
+// The exported Run = the wire DTO's FLAT fields + the web's loose `result`/`usage` view. Deleting the flat-field mirror
+// is the win: id/harness/status/liveTrace/trigger/… now come from the contract, so a wire rename breaks the web build.
+type WireRunFlat = Omit<RunDetailResponse, 'result' | 'usage'>
+export type Run = WireRunFlat & {
+  result?: z.infer<typeof resultSchema>
+  usage?: z.infer<typeof usageSchema>
+}
+export type RunStatus = WireRunStatus
+
+// Drift guards — the local schema's flat output MUST stay assignable to the wire DTO (minus the loose result/usage).
+// Run is NOT identical-shape: the web deliberately omits some optional wire fields (caseSpec/createdBy/runtime), so the
+// guard can't be a full bidirectional equality like `view`. Instead:
+//   _flatGuard   — web ⊆ wire: catches a required-field retype/rename or an enum widening (the `748eecb` host-bug class).
+//   _webFieldsOnWire — every field the web DOES model must exist on the wire with an assignable type (Pick the wire down
+//                      to the web's keys, require it back-assignable): catches renaming an OPTIONAL wire field the web
+//                      models (which _flatGuard alone misses, since dropping an optional field stays assignable).
+type AssertAssignable<A extends B, B> = A
+type WebRun = z.infer<typeof runSchema>
+type WebRunFlat = Omit<WebRun, 'result' | 'usage'>
+type _flatGuard = AssertAssignable<WebRunFlat, WireRunFlat>
+type _webFieldsOnWire = AssertAssignable<Pick<WireRunFlat, keyof WebRunFlat>, WebRunFlat>
+type _statusGuard = AssertAssignable<WebRun['status'], WireRunStatus>
+// The web Usage stays local (numbers instead of the wire's nonnegative-int brand), but its shape can't drift from the
+// wire summary: the web keys must be exactly the wire keys (record-typed both ways).
+type _usageKeysMatch = AssertAssignable<keyof z.infer<typeof usageSchema>, keyof RunUsageSummary> &
+  AssertAssignable<keyof RunUsageSummary, keyof z.infer<typeof usageSchema>>
+
+export type __runDriftGuard = [_flatGuard, _webFieldsOnWire, _statusGuard, _usageKeysMatch]
