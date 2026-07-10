@@ -8,10 +8,15 @@ import type {
   WorkspaceStore,
 } from "@everdict/db";
 import { generateInviteToken, hashKey } from "@everdict/db";
+import { MembershipPolicy } from "./membership-policy.js";
 
-// Membership management service — a single core (parity) shared by the HTTP routes and MCP tools. Domain rules (last-admin protection, etc.) are enforced here.
+// Membership management service — a single core (parity) shared by the HTTP routes and MCP tools. The last-admin
+// invariant is owned by MembershipPolicy (one implementation, three call sites); the service keeps orchestration
+// (store calls, profile enrichment, the removal hook).
 // Member = the workspace user graph. Invite = token/link redemption (joining). The workspace scope is passed in by the caller (principal.workspace).
 export class MembershipService {
+  private readonly policy = new MembershipPolicy();
+
   constructor(
     private readonly members: WorkspaceStore,
     private readonly invites: WorkspaceInviteStore,
@@ -46,8 +51,7 @@ export class MembershipService {
     const all = await this.members.listMembers(workspace);
     const target = all.find((m) => m.subject === subject);
     if (!target) throw new NotFoundError("NOT_FOUND", { subject }, "Member not found.");
-    if (target.role === "admin" && role !== "admin" && adminCount(all) === 1)
-      throw new ConflictError("CONFLICT", { workspace }, "The last admin cannot be demoted.");
+    this.policy.assertNotLastAdminDemotion(workspace, all, target, role);
     await this.members.setRole(workspace, subject, role);
   }
 
@@ -56,8 +60,7 @@ export class MembershipService {
     const all = await this.members.listMembers(workspace);
     const target = all.find((m) => m.subject === subject);
     if (!target) return;
-    if (target.role === "admin" && adminCount(all) === 1)
-      throw new ConflictError("CONFLICT", { workspace }, "The last admin cannot be removed.");
+    this.policy.assertNotLastAdminRemoval(workspace, all, target);
     await this.members.removeMember(workspace, subject);
     await this.onMemberRemoved?.(workspace, subject).catch(() => {}); // cleanup hook (auto-disable scheduled evals) — best-effort
   }
@@ -68,12 +71,7 @@ export class MembershipService {
     const all = await this.members.listMembers(workspace);
     const me = all.find((m) => m.subject === subject);
     if (!me) return; // not a member — idempotent
-    if (me.role === "admin" && adminCount(all) === 1)
-      throw new ConflictError(
-        "CONFLICT",
-        { workspace },
-        "The last admin cannot leave. Delegate admin to another member or delete the workspace.",
-      );
+    this.policy.assertCanLeave(workspace, all, me);
     await this.members.removeMember(workspace, subject);
     await this.onMemberRemoved?.(workspace, subject).catch(() => {}); // cleanup hook (auto-disable scheduled evals) — best-effort
   }
@@ -138,8 +136,4 @@ export class MembershipService {
       ...(ws.logoUrl !== undefined ? { logoUrl: ws.logoUrl } : {}),
     };
   }
-}
-
-function adminCount(members: MemberRecord[]): number {
-  return members.filter((m) => m.role === "admin").length;
 }
