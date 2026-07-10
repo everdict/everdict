@@ -30,6 +30,7 @@ const ALLOWLIST = new Set([
 
 // Control-plane packages that cone members must never depend on.
 const FORBIDDEN = new Set([
+  "@everdict/application-control", // L2b control-plane use-cases/ports — never inside the agent image
   "@everdict/db",
   "@everdict/auth",
   "@everdict/registry",

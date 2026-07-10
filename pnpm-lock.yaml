@@ -258,6 +258,15 @@ importers:
         specifier: workspace:*
         version: link:../run-case
 
+  packages/application-control:
+    dependencies:
+      '@everdict/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@everdict/domain':
+        specifier: workspace:*
+        version: link:../domain
+
   packages/application-execution:
     dependencies:
       '@everdict/contracts':
@@ -491,6 +500,9 @@ importers:
 
   packages/suite:
     dependencies:
+      '@everdict/application-control':
+        specifier: workspace:*
+        version: link:../application-control
       '@everdict/core':
         specifier: workspace:*
         version: link:../core
