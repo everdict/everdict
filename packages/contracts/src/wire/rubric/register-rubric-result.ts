@@ -6,3 +6,4 @@ export const RegisterRubricResultSchema = z.object({
   id: z.string(),
   version: z.string(),
 });
+export type RegisterRubricResult = z.infer<typeof RegisterRubricResultSchema>;

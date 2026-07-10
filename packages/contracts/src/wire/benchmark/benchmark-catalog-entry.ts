@@ -9,5 +9,7 @@ export const BenchmarkCatalogEntrySchema = z.object({
   defaultVersion: z.string(),
   description: z.string(),
 });
+export type BenchmarkCatalogEntry = z.infer<typeof BenchmarkCatalogEntrySchema>;
 
 export const BenchmarkCatalogResponseSchema = z.array(BenchmarkCatalogEntrySchema);
+export type BenchmarkCatalogResponse = z.infer<typeof BenchmarkCatalogResponseSchema>;

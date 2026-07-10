@@ -15,5 +15,7 @@ export const InviteMetaResponseSchema = z.object({
   acceptedBy: z.string().optional().describe("Accepting subject (once accepted)"),
   acceptedAt: z.string().optional().describe("ISO 8601 acceptance time (once accepted)"),
 });
+export type InviteMetaResponse = z.infer<typeof InviteMetaResponseSchema>;
 
 export const InviteMetaListResponseSchema = z.array(InviteMetaResponseSchema);
+export type InviteMetaListResponse = z.infer<typeof InviteMetaListResponseSchema>;

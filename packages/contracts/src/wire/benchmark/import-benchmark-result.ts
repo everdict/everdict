@@ -7,3 +7,4 @@ export const ImportBenchmarkResultSchema = z.object({
   version: z.string(),
   cases: z.number().int().describe("Number of imported eval cases"),
 });
+export type ImportBenchmarkResult = z.infer<typeof ImportBenchmarkResultSchema>;

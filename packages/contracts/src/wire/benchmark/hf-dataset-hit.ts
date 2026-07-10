@@ -6,5 +6,7 @@ export const HfDatasetHitSchema = z.object({
   likes: z.number(),
   gated: z.boolean(),
 });
+export type HfDatasetHit = z.infer<typeof HfDatasetHitSchema>;
 
 export const HfDatasetSearchResponseSchema = z.array(HfDatasetHitSchema);
+export type HfDatasetSearchResponse = z.infer<typeof HfDatasetSearchResponseSchema>;

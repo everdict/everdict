@@ -8,3 +8,4 @@ export const ScheduleFireResponseSchema = z.object({
     .optional()
     .describe("The previous fire's scorecard (regression-diff reference), if any"),
 });
+export type ScheduleFireResponse = z.infer<typeof ScheduleFireResponseSchema>;

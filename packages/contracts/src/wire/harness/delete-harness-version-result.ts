@@ -7,3 +7,4 @@ export const DeleteHarnessVersionResultSchema = z.object({
   version: z.string(),
   deleted: z.literal(true),
 });
+export type DeleteHarnessVersionResult = z.infer<typeof DeleteHarnessVersionResultSchema>;

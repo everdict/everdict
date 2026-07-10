@@ -17,3 +17,4 @@ export const BudgetResponseSchema = z.object({
     .nullable()
     .describe("The per-tenant limit; null when no limit is set"),
 });
+export type BudgetResponse = z.infer<typeof BudgetResponseSchema>;

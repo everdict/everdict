@@ -6,3 +6,4 @@ export const ImageWarningSchema = z.object({
   image: z.string().describe("The image reference as written in the resolved spec"),
   class: z.enum(["local", "unqualified"]).describe("Classification against the workspace image registries"),
 });
+export type ImageWarning = z.infer<typeof ImageWarningSchema>;

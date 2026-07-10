@@ -11,3 +11,4 @@ export const ImageRegistryViewSchema = z.object({
   pushSecretName: z.string().optional().describe("SecretStore name of the push token/password (never the value)"),
   imagePrefix: z.string().describe('"host[/namespace]/" — for assembling/classifying image refs'),
 });
+export type ImageRegistryView = z.infer<typeof ImageRegistryViewSchema>;

@@ -6,3 +6,4 @@ export const RegisterDatasetResultSchema = z.object({
   id: z.string(),
   version: z.string(),
 });
+export type RegisterDatasetResult = z.infer<typeof RegisterDatasetResultSchema>;

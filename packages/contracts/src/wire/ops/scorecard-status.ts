@@ -4,3 +4,4 @@ import { z } from "zod";
 export const ScorecardStatusResponseSchema = z.object({
   status: z.string().nullable().describe("The fired scorecard's current status; null when unknown"),
 });
+export type ScorecardStatusResponse = z.infer<typeof ScorecardStatusResponseSchema>;

@@ -6,3 +6,4 @@ export const MattermostReplySchema = z.object({
   response_type: z.enum(["ephemeral", "in_channel"]),
   text: z.string().describe("Markdown message Mattermost renders"),
 });
+export type MattermostReply = z.infer<typeof MattermostReplySchema>;

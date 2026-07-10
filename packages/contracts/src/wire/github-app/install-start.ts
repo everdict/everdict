@@ -6,3 +6,4 @@ export const InstallStartResponseSchema = z.object({
     .string()
     .describe("GitHub App installation page URL (carries a single-use state parameter verified by the callback)"),
 });
+export type InstallStartResponse = z.infer<typeof InstallStartResponseSchema>;

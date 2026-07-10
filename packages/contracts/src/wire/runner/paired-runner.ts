@@ -7,3 +7,4 @@ export const PairedRunnerResponseSchema = z.object({
   runner: RunnerMetaSchema,
   token: z.string().describe("Plaintext pairing token (rnr_…) — returned exactly once; only a hash is stored"),
 });
+export type PairedRunnerResponse = z.infer<typeof PairedRunnerResponseSchema>;

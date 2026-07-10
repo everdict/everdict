@@ -8,3 +8,4 @@ export const WorkspaceRecordResponseSchema = z.object({
   logoUrl: z.string().optional().describe("Workspace logo (http(s) URL or data:image base64)"),
   createdAt: z.string().describe("ISO 8601 creation time"),
 });
+export type WorkspaceRecordResponse = z.infer<typeof WorkspaceRecordResponseSchema>;

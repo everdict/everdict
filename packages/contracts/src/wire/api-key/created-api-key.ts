@@ -5,3 +5,4 @@ import { z } from "zod";
 export const CreatedApiKeyResponseSchema = z.object({
   apiKey: z.string().describe("Plaintext API key (ak_…) — shown only in this response, never again"),
 });
+export type CreatedApiKeyResponse = z.infer<typeof CreatedApiKeyResponseSchema>;

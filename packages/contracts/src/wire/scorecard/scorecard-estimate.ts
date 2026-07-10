@@ -22,3 +22,4 @@ export const ScorecardEstimateResponseSchema = z.object({
     })
     .optional(),
 });
+export type ScorecardEstimateResponse = z.infer<typeof ScorecardEstimateResponseSchema>;

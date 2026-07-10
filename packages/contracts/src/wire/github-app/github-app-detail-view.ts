@@ -15,6 +15,7 @@ export const InstallationWithReposSchema = GithubAppInstallationSchema.extend({
     .optional()
     .describe("Repo lookup failed for this installation (soft-fail — the install record itself is still shown)"),
 });
+export type InstallationWithRepos = z.infer<typeof InstallationWithReposSchema>;
 
 export const GithubAppDetailViewSchema = z.object({
   registrations: z.array(GithubAppRegistrationSchema),
@@ -24,3 +25,4 @@ export const GithubAppDetailViewSchema = z.object({
     .optional()
     .describe("The URL to register as the GitHub App Setup URL (present when the server can derive its public base)"),
 });
+export type GithubAppDetailView = z.infer<typeof GithubAppDetailViewSchema>;

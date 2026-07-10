@@ -7,3 +7,4 @@ export const RunExecResponseSchema = z.object({
   stderr: z.string(),
   exitCode: z.number().int().nullable().describe("Command exit code; null when found=false"),
 });
+export type RunExecResponse = z.infer<typeof RunExecResponseSchema>;

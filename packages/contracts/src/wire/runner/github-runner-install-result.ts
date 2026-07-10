@@ -15,3 +15,4 @@ export const GithubRunnerInstallResultSchema = z.object({
   workflowHint: z.string().describe("runs-on/runtime snippet to add to the workflow"),
   registrationExpiresAt: z.string().describe("GitHub registration token expiry (short-lived, about 1 hour)"),
 });
+export type GithubRunnerInstallResult = z.infer<typeof GithubRunnerInstallResultSchema>;

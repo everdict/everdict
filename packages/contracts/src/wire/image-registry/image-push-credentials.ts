@@ -11,7 +11,9 @@ export const ImagePushCredentialsSchema = z.object({
   password: z.string().describe("The push secret value, resolved at mint time — shown here once, never persisted"),
   imagePrefix: z.string().describe('"host[/namespace]/" — prefix for the image ref to push'),
 });
+export type ImagePushCredentials = z.infer<typeof ImagePushCredentialsSchema>;
 
 export const PushCredentialsResponseSchema = z.object({
   credentials: ImagePushCredentialsSchema,
 });
+export type PushCredentialsResponse = z.infer<typeof PushCredentialsResponseSchema>;

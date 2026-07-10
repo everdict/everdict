@@ -6,3 +6,4 @@ export const RegisterBenchmarkRecipeResultSchema = z.object({
   id: z.string(),
   version: z.string(),
 });
+export type RegisterBenchmarkRecipeResult = z.infer<typeof RegisterBenchmarkRecipeResultSchema>;

@@ -15,5 +15,7 @@ export const RubricListEntrySchema = z.object({
   updatedAt: z.string().optional(),
   versionTags: z.record(z.array(z.string())).optional().describe("version → free-form labels (tagged versions only)"),
 });
+export type RubricListEntry = z.infer<typeof RubricListEntrySchema>;
 
 export const RubricListResponseSchema = z.array(RubricListEntrySchema);
+export type RubricListResponse = z.infer<typeof RubricListResponseSchema>;

@@ -6,3 +6,4 @@ export const RunScreenResponseSchema = z.object({
   found: z.boolean().describe("false = no frame captured (no live container or capture failed)"),
   dataUrl: z.string().describe("PNG data URL (empty string when found=false)"),
 });
+export type RunScreenResponse = z.infer<typeof RunScreenResponseSchema>;

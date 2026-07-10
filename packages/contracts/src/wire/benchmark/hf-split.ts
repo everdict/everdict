@@ -5,5 +5,7 @@ export const HfSplitSchema = z.object({
   config: z.string(),
   split: z.string(),
 });
+export type HfSplit = z.infer<typeof HfSplitSchema>;
 
 export const HfSplitsResponseSchema = z.array(HfSplitSchema);
+export type HfSplitsResponse = z.infer<typeof HfSplitsResponseSchema>;

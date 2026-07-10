@@ -6,3 +6,4 @@ import { NotificationRecordSchema } from "../../records/notification.js";
 export const NotificationFeedResponseSchema = z.object({
   notifications: z.array(NotificationRecordSchema).describe("Newest first; default 50, capped at 200 via ?limit"),
 });
+export type NotificationFeedResponse = z.infer<typeof NotificationFeedResponseSchema>;

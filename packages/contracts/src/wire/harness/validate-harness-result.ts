@@ -15,3 +15,4 @@ export const ValidateHarnessResultSchema = z.union([
     errors: z.array(z.string()).describe("Schema issues or the resolve failure message"),
   }),
 ]);
+export type ValidateHarnessResult = z.infer<typeof ValidateHarnessResultSchema>;

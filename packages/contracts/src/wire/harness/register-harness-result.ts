@@ -12,3 +12,4 @@ export const RegisterHarnessResultSchema = z.object({
     .optional()
     .describe("Present (true) only when the spec references a personal secret — visible to the creator only"),
 });
+export type RegisterHarnessResult = z.infer<typeof RegisterHarnessResultSchema>;

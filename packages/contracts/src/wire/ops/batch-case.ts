@@ -6,3 +6,4 @@ export const BatchCaseResponseSchema = z.object({
   settled: z.boolean().describe("The case has a settled result after this call"),
   skipped: z.boolean().optional().describe("true when the case was already settled (idempotent re-drive)"),
 });
+export type BatchCaseResponse = z.infer<typeof BatchCaseResponseSchema>;

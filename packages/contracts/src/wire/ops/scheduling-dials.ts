@@ -5,3 +5,4 @@ export const SchedulingDialsResponseSchema = z.object({
   quotas: z.record(z.number()).describe("Effective per-tenant in-flight quotas"),
   weights: z.record(z.number()).describe("Effective per-tenant WFQ weights"),
 });
+export type SchedulingDialsResponse = z.infer<typeof SchedulingDialsResponseSchema>;

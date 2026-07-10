@@ -11,6 +11,8 @@ export const ImageClassEntrySchema = z.object({
     .enum(["workspace", "external", "local", "unqualified"])
     .describe("workspace = matches a workspace registry; local/unqualified = no pull guarantee"),
 });
+export type ImageClassEntry = z.infer<typeof ImageClassEntrySchema>;
 export const ResolvedHarnessResponseSchema = HarnessSpecSchema.and(
   z.object({ imageClasses: z.array(ImageClassEntrySchema).optional() }),
 );
+export type ResolvedHarnessResponse = z.infer<typeof ResolvedHarnessResponseSchema>;

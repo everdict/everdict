@@ -5,3 +5,4 @@ export const AcceptedInviteResponseSchema = z.object({
   workspace: z.string().describe("Workspace id the caller just joined"),
   role: z.string().describe("Membership role granted by the invite"),
 });
+export type AcceptedInviteResponse = z.infer<typeof AcceptedInviteResponseSchema>;

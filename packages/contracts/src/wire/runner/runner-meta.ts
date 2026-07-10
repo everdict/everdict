@@ -12,3 +12,4 @@ export const RunnerMetaSchema = z.object({
   pairedAt: z.string(),
   lastSeenAt: z.string().optional().describe("Last lease/heartbeat time"),
 });
+export type RunnerMeta = z.infer<typeof RunnerMetaSchema>;

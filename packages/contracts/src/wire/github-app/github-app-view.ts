@@ -19,6 +19,7 @@ export const GithubAppRegistrationSchema = z.object({
       "Server-computed (re-architecture P1g): accounts installed on this registration's host (normalized host match) — present only when non-empty",
     ),
 });
+export type GithubAppRegistration = z.infer<typeof GithubAppRegistrationSchema>;
 
 // A workspace-owned installation (github.com or GHE) — one per installed org.
 export const GithubAppInstallationSchema = z.object({
@@ -28,8 +29,10 @@ export const GithubAppInstallationSchema = z.object({
   connectedBy: z.string().describe("Admin subject who linked the installation (audit only)"),
   connectedAt: z.string(),
 });
+export type GithubAppInstallation = z.infer<typeof GithubAppInstallationSchema>;
 
 export const GithubAppViewSchema = z.object({
   registrations: z.array(GithubAppRegistrationSchema),
   installations: z.array(GithubAppInstallationSchema),
 });
+export type GithubAppView = z.infer<typeof GithubAppViewSchema>;

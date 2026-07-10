@@ -6,3 +6,4 @@ export const RegisterJudgeResultSchema = z.object({
   id: z.string(),
   version: z.string(),
 });
+export type RegisterJudgeResult = z.infer<typeof RegisterJudgeResultSchema>;

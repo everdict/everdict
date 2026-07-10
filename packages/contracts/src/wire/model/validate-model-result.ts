@@ -17,3 +17,4 @@ export const ValidateModelResultSchema = z.union([
     versionExists: z.boolean(),
   }),
 ]);
+export type ValidateModelResult = z.infer<typeof ValidateModelResultSchema>;

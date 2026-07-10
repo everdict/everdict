@@ -21,3 +21,4 @@ export const MeResponseSchema = z.object({
   ),
   profile: UserProfileResponseSchema.optional().describe("Mutable display profile (present when one exists)"),
 });
+export type MeResponse = z.infer<typeof MeResponseSchema>;

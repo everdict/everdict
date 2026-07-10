@@ -16,3 +16,4 @@ export const UsageResponseSchema = UsageTotalsSchema.extend({
     })
     .describe("Per-source breakdown of the totals"),
 });
+export type UsageResponse = z.infer<typeof UsageResponseSchema>;

@@ -6,3 +6,4 @@ export const RegisterRuntimeResultSchema = z.object({
   id: z.string(),
   version: z.string(),
 });
+export type RegisterRuntimeResult = z.infer<typeof RegisterRuntimeResultSchema>;

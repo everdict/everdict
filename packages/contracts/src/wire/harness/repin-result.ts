@@ -9,3 +9,4 @@ export const RepinResultSchema = z.object({
   unchanged: z.boolean().describe("True = the merge equals the base, registration skipped (idempotent, 200)"),
   pins: z.record(z.string()).describe("All slot → image pins after the merge"),
 });
+export type RepinResult = z.infer<typeof RepinResultSchema>;

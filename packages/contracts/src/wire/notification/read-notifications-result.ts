@@ -5,3 +5,4 @@ import { z } from "zod";
 export const ReadNotificationsResultResponseSchema = z.object({
   read: z.number().int().describe("Count of notifications newly marked read"),
 });
+export type ReadNotificationsResultResponse = z.infer<typeof ReadNotificationsResultResponseSchema>;

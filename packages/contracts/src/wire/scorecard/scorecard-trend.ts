@@ -21,3 +21,4 @@ export const ScorecardTrendResponseSchema = z.object({
     )
     .describe("createdAt ascending"),
 });
+export type ScorecardTrendResponse = z.infer<typeof ScorecardTrendResponseSchema>;

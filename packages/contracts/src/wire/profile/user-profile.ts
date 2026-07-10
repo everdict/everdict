@@ -9,3 +9,4 @@ export const UserProfileResponseSchema = z.object({
   avatarUrl: z.string().optional().describe("Avatar (http(s) URL or data:image base64)"),
   updatedAt: z.string().describe("ISO 8601 last-update time"),
 });
+export type UserProfileResponse = z.infer<typeof UserProfileResponseSchema>;

@@ -21,5 +21,7 @@ export const HarnessListEntrySchema = z.object({
   subtitle: z.string().optional().describe("Model/command/service summary for list display"),
   private: z.boolean().optional().describe("True when the latest instance references a personal secret"),
 });
+export type HarnessListEntry = z.infer<typeof HarnessListEntrySchema>;
 
 export const HarnessListResponseSchema = z.array(HarnessListEntrySchema);
+export type HarnessListResponse = z.infer<typeof HarnessListResponseSchema>;

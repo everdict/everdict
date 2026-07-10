@@ -16,3 +16,4 @@ export const ValidateRubricResultSchema = z.union([
     versionExists: z.boolean(),
   }),
 ]);
+export type ValidateRubricResult = z.infer<typeof ValidateRubricResultSchema>;

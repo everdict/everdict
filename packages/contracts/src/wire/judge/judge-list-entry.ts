@@ -18,5 +18,7 @@ export const JudgeListEntrySchema = z.object({
   updatedAt: z.string().optional(),
   versionTags: z.record(z.array(z.string())).optional().describe("version → free-form labels (tagged versions only)"),
 });
+export type JudgeListEntry = z.infer<typeof JudgeListEntrySchema>;
 
 export const JudgeListResponseSchema = z.array(JudgeListEntrySchema);
+export type JudgeListResponse = z.infer<typeof JudgeListResponseSchema>;

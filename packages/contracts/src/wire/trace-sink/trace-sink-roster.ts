@@ -8,3 +8,4 @@ export const TraceSinkRosterSchema = z.object({
     .record(z.string())
     .describe("harness id → sink name. A harness with no entry is not exported (export is opt-in)"),
 });
+export type TraceSinkRoster = z.infer<typeof TraceSinkRosterSchema>;

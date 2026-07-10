@@ -7,3 +7,4 @@ import { WorkspaceCiLinkSchema } from "../../records/workspace-settings.js";
 export const CiLinkRosterSchema = z.object({
   links: z.array(WorkspaceCiLinkSchema),
 });
+export type CiLinkRoster = z.infer<typeof CiLinkRosterSchema>;

@@ -5,3 +5,4 @@ import { CommentRecordSchema } from "../../records/comment.js";
 export const CommentListResponseSchema = z.object({
   comments: z.array(CommentRecordSchema).describe("Oldest first (createdAt ascending) — timeline order"),
 });
+export type CommentListResponse = z.infer<typeof CommentListResponseSchema>;

@@ -8,3 +8,4 @@ export const InvitePreviewResponseSchema = z.object({
   logoUrl: z.string().optional().describe("Workspace logo (when set)"),
   role: z.string().describe("Role the invite grants"),
 });
+export type InvitePreviewResponse = z.infer<typeof InvitePreviewResponseSchema>;

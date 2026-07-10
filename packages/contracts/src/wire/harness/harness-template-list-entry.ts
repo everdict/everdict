@@ -6,5 +6,7 @@ export const HarnessTemplateListEntrySchema = z.object({
   versions: z.array(z.string()).describe("Live versions (semver ascending)"),
   owner: z.string().describe("Owning tenant, or _shared for first-party content"),
 });
+export type HarnessTemplateListEntry = z.infer<typeof HarnessTemplateListEntrySchema>;
 
 export const HarnessTemplateListResponseSchema = z.array(HarnessTemplateListEntrySchema);
+export type HarnessTemplateListResponse = z.infer<typeof HarnessTemplateListResponseSchema>;

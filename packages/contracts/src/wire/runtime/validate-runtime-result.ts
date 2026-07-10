@@ -24,3 +24,4 @@ export const ValidateRuntimeResultSchema = z.union([
     versionExists: z.boolean(),
   }),
 ]);
+export type ValidateRuntimeResult = z.infer<typeof ValidateRuntimeResultSchema>;

@@ -5,3 +5,4 @@ export const TenantKeyResponseSchema = z.object({
   workspace: z.string(),
   apiKey: z.string().describe("The plaintext ak_… key — shown only in this response"),
 });
+export type TenantKeyResponse = z.infer<typeof TenantKeyResponseSchema>;

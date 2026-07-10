@@ -6,3 +6,4 @@ export const RegisterHarnessTemplateResultSchema = z.object({
   id: z.string(),
   version: z.string(),
 });
+export type RegisterHarnessTemplateResult = z.infer<typeof RegisterHarnessTemplateResultSchema>;

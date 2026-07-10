@@ -74,3 +74,4 @@ export const QueueSnapshotResponseSchema = z.object({
   workspace: z.array(QueueLaneSchema).describe("Shared lanes: default backend + registered runtimes"),
   personal: z.array(QueueLaneSchema).describe("The requester's own self-hosted runner lanes (self:<id>)"),
 });
+export type QueueSnapshotResponse = z.infer<typeof QueueSnapshotResponseSchema>;

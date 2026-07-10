@@ -10,3 +10,4 @@ export const ImageRegistryUpsertResultSchema = z.object({
     .optional()
     .describe("Referenced secret names not yet present in the workspace SecretStore (warning, not an error)"),
 });
+export type ImageRegistryUpsertResult = z.infer<typeof ImageRegistryUpsertResultSchema>;

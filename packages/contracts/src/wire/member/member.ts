@@ -9,5 +9,7 @@ export const MemberResponseSchema = z.object({
   avatarUrl: z.string().optional().describe("Avatar from the user profile (joined in, when set)"),
   addedAt: z.string().describe("ISO 8601 join time"),
 });
+export type MemberResponse = z.infer<typeof MemberResponseSchema>;
 
 export const MemberListResponseSchema = z.array(MemberResponseSchema);
+export type MemberListResponse = z.infer<typeof MemberListResponseSchema>;

@@ -13,5 +13,7 @@ export const ApiKeyMetaResponseSchema = z.object({
     .describe("Per-key permission scopes (read|write|admin); absent = Full Access within the issuer's role"),
   createdAt: z.string().describe("ISO 8601 issuance time"),
 });
+export type ApiKeyMetaResponse = z.infer<typeof ApiKeyMetaResponseSchema>;
 
 export const ApiKeyMetaListResponseSchema = z.array(ApiKeyMetaResponseSchema);
+export type ApiKeyMetaListResponse = z.infer<typeof ApiKeyMetaListResponseSchema>;

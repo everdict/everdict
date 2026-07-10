@@ -17,3 +17,4 @@ export const ValidateHarnessTemplateResultSchema = z.union([
     versionExists: z.boolean(),
   }),
 ]);
+export type ValidateHarnessTemplateResult = z.infer<typeof ValidateHarnessTemplateResultSchema>;

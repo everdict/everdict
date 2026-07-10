@@ -18,3 +18,4 @@ export const ValidateBenchmarkRecipeResultSchema = z.union([
     versionExists: z.boolean(),
   }),
 ]);
+export type ValidateBenchmarkRecipeResult = z.infer<typeof ValidateBenchmarkRecipeResultSchema>;

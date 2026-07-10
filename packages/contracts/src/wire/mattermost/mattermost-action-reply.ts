@@ -4,3 +4,4 @@ import { z } from "zod";
 export const MattermostActionReplySchema = z.object({
   ephemeral_text: z.string(),
 });
+export type MattermostActionReply = z.infer<typeof MattermostActionReplySchema>;

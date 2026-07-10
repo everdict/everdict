@@ -7,3 +7,4 @@ export const RunLogsResponseSchema = z.object({
   found: z.boolean().describe("false = nothing to tail yet (queued / GC'd / no backend support)"),
   text: z.string().describe("Current log text (empty string when found=false)"),
 });
+export type RunLogsResponse = z.infer<typeof RunLogsResponseSchema>;

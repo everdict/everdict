@@ -6,5 +6,7 @@ export const BenchmarkRecipeListEntrySchema = z.object({
   versions: z.array(z.string()).describe("Versions (semver ascending)"),
   owner: z.string().describe("Owning tenant, or _shared for first-party recipes"),
 });
+export type BenchmarkRecipeListEntry = z.infer<typeof BenchmarkRecipeListEntrySchema>;
 
 export const BenchmarkRecipeListResponseSchema = z.array(BenchmarkRecipeListEntrySchema);
+export type BenchmarkRecipeListResponse = z.infer<typeof BenchmarkRecipeListResponseSchema>;

@@ -17,6 +17,7 @@ export const ServedCaseResultSchema = CaseResultSchema.extend({
       "Server-computed case verdict (state/tests_pass > answer_match/url_matches/dom_contains > judge); absent = no pass-deciding score",
     ),
 });
+export type ServedCaseResult = z.infer<typeof ServedCaseResultSchema>;
 
 export const ScorecardResponseSchema = ScorecardRecordSchema.extend({
   scorecard: ScorecardSchema.extend({ results: z.array(ServedCaseResultSchema) }).optional(),

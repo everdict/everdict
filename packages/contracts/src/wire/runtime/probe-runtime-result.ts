@@ -10,3 +10,4 @@ export const ProbeRuntimeResultSchema = z.object({
     .optional()
     .describe("Structured failure class — absent when reachable"),
 });
+export type ProbeRuntimeResult = z.infer<typeof ProbeRuntimeResultSchema>;

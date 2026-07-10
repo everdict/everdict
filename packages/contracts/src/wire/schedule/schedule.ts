@@ -9,3 +9,4 @@ export const ScheduleResponseSchema = ScheduleRecordSchema.extend({
     .optional()
     .describe("Upcoming fire times (ISO, Temporal authoritative) — best-effort, absent when the driver is offline"),
 });
+export type ScheduleResponse = z.infer<typeof ScheduleResponseSchema>;

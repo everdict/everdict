@@ -7,3 +7,4 @@ export const SetVersionTagsResultSchema = z.object({
   version: z.string(),
   tags: z.array(z.string()),
 });
+export type SetVersionTagsResult = z.infer<typeof SetVersionTagsResultSchema>;

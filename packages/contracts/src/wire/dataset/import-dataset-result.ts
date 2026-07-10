@@ -7,3 +7,4 @@ export const ImportDatasetResultSchema = z.object({
   version: z.string(),
   cases: z.number().int().describe("Number of eval cases mapped from the task set"),
 });
+export type ImportDatasetResult = z.infer<typeof ImportDatasetResultSchema>;

@@ -4,3 +4,4 @@ import { z } from "zod";
 export const TraceSinkAssignmentsResponseSchema = z.object({
   assignments: z.record(z.string()).describe("harness id → sink name (the whole map after the update)"),
 });
+export type TraceSinkAssignmentsResponse = z.infer<typeof TraceSinkAssignmentsResponseSchema>;

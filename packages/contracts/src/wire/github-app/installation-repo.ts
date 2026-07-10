@@ -10,3 +10,4 @@ export const InstallationRepoSchema = z.object({
   defaultBranch: z.string(),
   pushedAt: z.string().optional().describe("Last push timestamp (only when GitHub reports one)"),
 });
+export type InstallationRepo = z.infer<typeof InstallationRepoSchema>;

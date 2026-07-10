@@ -5,3 +5,4 @@ import { ImageRegistryViewSchema } from "./image-registry-view.js";
 export const ImageRegistryRosterSchema = z.object({
   registries: z.array(ImageRegistryViewSchema),
 });
+export type ImageRegistryRoster = z.infer<typeof ImageRegistryRosterSchema>;

@@ -25,3 +25,4 @@ export const LeaderboardResponseSchema = z.object({
     )
     .describe("Score descending (null last)"),
 });
+export type LeaderboardResponse = z.infer<typeof LeaderboardResponseSchema>;

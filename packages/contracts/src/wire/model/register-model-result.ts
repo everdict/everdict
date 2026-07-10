@@ -6,3 +6,4 @@ export const RegisterModelResultSchema = z.object({
   id: z.string(),
   version: z.string(),
 });
+export type RegisterModelResult = z.infer<typeof RegisterModelResultSchema>;

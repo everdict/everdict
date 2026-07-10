@@ -9,3 +9,4 @@ export const HarnessVersionsResponseSchema = z.object({
     .optional()
     .describe("version → free-form labels (present only when at least one version is tagged)"),
 });
+export type HarnessVersionsResponse = z.infer<typeof HarnessVersionsResponseSchema>;

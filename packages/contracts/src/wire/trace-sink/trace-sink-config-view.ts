@@ -13,8 +13,10 @@ export const TraceSinkConfigViewSchema = z.object({
     .describe("Meaning per kind: mlflow experiment_id / langsmith project / phoenix project / langfuse projectId"),
   webUrl: z.string().optional().describe("UI deep-link base when it differs from the API endpoint"),
 });
+export type TraceSinkConfigView = z.infer<typeof TraceSinkConfigViewSchema>;
 
 // PUT /workspace/trace-sinks — the stored sink after the name-keyed upsert.
 export const TraceSinkUpsertResponseSchema = z.object({
   config: TraceSinkConfigViewSchema,
 });
+export type TraceSinkUpsertResponse = z.infer<typeof TraceSinkUpsertResponseSchema>;

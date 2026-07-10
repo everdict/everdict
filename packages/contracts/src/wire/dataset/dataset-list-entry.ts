@@ -22,5 +22,7 @@ export const DatasetListEntrySchema = z.object({
   updatedAt: z.string().optional().describe("Most recent registration time (ISO)"),
   versionTags: z.record(z.array(z.string())).optional().describe("version → free-form labels (tagged versions only)"),
 });
+export type DatasetListEntry = z.infer<typeof DatasetListEntrySchema>;
 
 export const DatasetListResponseSchema = z.array(DatasetListEntrySchema);
+export type DatasetListResponse = z.infer<typeof DatasetListResponseSchema>;

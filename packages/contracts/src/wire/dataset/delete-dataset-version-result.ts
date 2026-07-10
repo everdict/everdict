@@ -7,3 +7,4 @@ export const DeleteDatasetVersionResultSchema = z.object({
   version: z.string(),
   deleted: z.literal(true),
 });
+export type DeleteDatasetVersionResult = z.infer<typeof DeleteDatasetVersionResultSchema>;

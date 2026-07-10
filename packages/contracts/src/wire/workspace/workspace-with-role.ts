@@ -8,5 +8,7 @@ export const WorkspaceWithRoleResponseSchema = z.object({
   role: z.string().describe("The caller's membership role in this workspace (viewer|member|admin)"),
   logoUrl: z.string().optional().describe("Workspace logo (http(s) URL or data:image base64)"),
 });
+export type WorkspaceWithRoleResponse = z.infer<typeof WorkspaceWithRoleResponseSchema>;
 
 export const WorkspaceWithRoleListResponseSchema = z.array(WorkspaceWithRoleResponseSchema);
+export type WorkspaceWithRoleListResponse = z.infer<typeof WorkspaceWithRoleListResponseSchema>;

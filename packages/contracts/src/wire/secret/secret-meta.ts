@@ -7,5 +7,7 @@ export const SecretMetaResponseSchema = z.object({
   updatedAt: z.string().describe("ISO 8601 last-set time"),
   scope: z.enum(["user", "workspace"]).describe("workspace = shared (admin-managed) · user = personal (self-managed)"),
 });
+export type SecretMetaResponse = z.infer<typeof SecretMetaResponseSchema>;
 
 export const SecretMetaListResponseSchema = z.array(SecretMetaResponseSchema);
+export type SecretMetaListResponse = z.infer<typeof SecretMetaListResponseSchema>;

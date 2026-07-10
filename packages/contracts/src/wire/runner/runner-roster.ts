@@ -5,3 +5,4 @@ import { RunnerMetaSchema } from "./runner-meta.js";
 export const RunnerRosterSchema = z.object({
   runners: z.array(RunnerMetaSchema),
 });
+export type RunnerRoster = z.infer<typeof RunnerRosterSchema>;

@@ -5,3 +5,4 @@ import { z } from "zod";
 export const TerminalTicketResponseSchema = z.object({
   ticket: z.string().describe("Short-lived single-use WebSocket terminal ticket"),
 });
+export type TerminalTicketResponse = z.infer<typeof TerminalTicketResponseSchema>;

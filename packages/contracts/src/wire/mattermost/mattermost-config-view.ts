@@ -23,13 +23,16 @@ export const MattermostConfigViewSchema = z.object({
       "Inbound interactive-action URL to register on the Mattermost side (present when the API public URL is known)",
     ),
 });
+export type MattermostConfigView = z.infer<typeof MattermostConfigViewSchema>;
 
 // GET /workspace/mattermost — config is absent when the workspace has no Mattermost registered.
 export const MattermostStatusResponseSchema = z.object({
   config: MattermostConfigViewSchema.optional(),
 });
+export type MattermostStatusResponse = z.infer<typeof MattermostStatusResponseSchema>;
 
 // PUT /workspace/mattermost — the stored config after the upsert.
 export const MattermostUpsertResponseSchema = z.object({
   config: MattermostConfigViewSchema,
 });
+export type MattermostUpsertResponse = z.infer<typeof MattermostUpsertResponseSchema>;

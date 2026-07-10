@@ -7,5 +7,7 @@ export const RuntimeListEntrySchema = z.object({
   owner: z.string().describe("Owning tenant, or _shared for first-party runtimes"),
   versionTags: z.record(z.array(z.string())).optional().describe("version → free-form labels (tagged versions only)"),
 });
+export type RuntimeListEntry = z.infer<typeof RuntimeListEntrySchema>;
 
 export const RuntimeListResponseSchema = z.array(RuntimeListEntrySchema);
+export type RuntimeListResponse = z.infer<typeof RuntimeListResponseSchema>;

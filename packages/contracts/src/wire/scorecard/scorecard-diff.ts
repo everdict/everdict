@@ -42,3 +42,4 @@ export const ScorecardDiffResponseSchema = z.object({
     .optional()
     .describe("Statistical trial-based gate — present only when either side ran trials"),
 });
+export type ScorecardDiffResponse = z.infer<typeof ScorecardDiffResponseSchema>;

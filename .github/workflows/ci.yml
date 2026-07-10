@@ -29,6 +29,8 @@ jobs:
       - run: pnpm build
       # Slim agent image guard — the @everdict/agent dependency cone must stay control-plane-free.
       - run: pnpm cone
+      # Web runtime-decoupling guard — apps/web may import only TYPE-ONLY @everdict/contracts.
+      - run: pnpm web-imports
       # Self-host minimal-profile contract — the control plane must boot with zero optional env.
       - run: node scripts/live/empty-env-boot.mjs
 

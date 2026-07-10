@@ -8,6 +8,7 @@ export const LiveTraceRefSchema = z.object({
   endpoint: z.string().describe("Platform endpoint from the harness spec (UI entry point, best-effort)"),
   runId: z.string().describe("Correlation value (everdict.run_id tag / trace search key)"),
 });
+export type LiveTraceRef = z.infer<typeof LiveTraceRefSchema>;
 
 export const RunDetailResponseSchema = RunRecordSchema.extend({
   liveTrace: LiveTraceRefSchema.optional().describe(

@@ -17,3 +17,4 @@ export const ValidateJudgeResultSchema = z.union([
     versionExists: z.boolean(),
   }),
 ]);
+export type ValidateJudgeResult = z.infer<typeof ValidateJudgeResultSchema>;
