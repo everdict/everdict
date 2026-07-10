@@ -1,5 +1,5 @@
 import { EventEmitter } from "node:events";
-import { RESULT_SENTINEL } from "@everdict/agent";
+import { RESULT_SENTINEL } from "@everdict/contracts";
 import { type AgentJob, BadRequestError, type CaseResult } from "@everdict/core";
 import { describe, expect, it, vi } from "vitest";
 import { staticSecrets } from "../policy/secrets.js";

@@ -1,6 +1,7 @@
 // @everdict/core — contracts only. The dependency root.
 // Every contract is paired with a Zod schema (the schema is the source of truth; the type is z.infer).
 export * from "./errors.js";
+export * from "./job-result-wire.js";
 export * from "./execution/trace.js";
 export * from "./execution/compute.js";
 export * from "./execution/case-failure.js";

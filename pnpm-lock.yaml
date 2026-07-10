@@ -230,6 +230,9 @@ importers:
 
   packages/agent:
     dependencies:
+      '@everdict/contracts':
+        specifier: workspace:*
+        version: link:../contracts
       '@everdict/core':
         specifier: workspace:*
         version: link:../core
@@ -269,6 +272,9 @@ importers:
       '@everdict/billing':
         specifier: workspace:*
         version: link:../billing
+      '@everdict/contracts':
+        specifier: workspace:*
+        version: link:../contracts
       '@everdict/core':
         specifier: workspace:*
         version: link:../core

@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { parseResult, stripSentinel } from "@everdict/agent";
+import { parseResult, stripSentinel } from "@everdict/contracts";
 import {
   type AgentJob,
   type CaseResult,

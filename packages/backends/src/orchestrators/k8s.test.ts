@@ -1,5 +1,5 @@
 import { stat } from "node:fs/promises";
-import { RESULT_SENTINEL } from "@everdict/agent";
+import { RESULT_SENTINEL } from "@everdict/contracts";
 import { type AgentJob, BadRequestError, type CaseResult, UpstreamError } from "@everdict/core";
 import { describe, expect, it } from "vitest";
 import { staticSecrets } from "../policy/secrets.js";

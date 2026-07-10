@@ -1,6 +1,6 @@
-import type { CaseResult } from "@everdict/core";
 import { describe, expect, it } from "vitest";
-import { RESULT_SENTINEL, encodeResult, parseResult, stripSentinel } from "./sentinel.js";
+import type { CaseResult } from "./execution/eval-case.js";
+import { RESULT_SENTINEL, encodeResult, parseResult, stripSentinel } from "./job-result-wire.js";
 
 const RESULT: CaseResult = {
   caseId: "c1",

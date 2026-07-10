@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { parseResult, stripSentinel } from "@everdict/agent";
+import { parseResult, stripSentinel } from "@everdict/contracts";
 import {
   type AgentJob,
   type CaseResult,
