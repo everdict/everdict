@@ -1,14 +1,12 @@
-import { BadRequestError, ForbiddenError, NotFoundError, classifyFailure } from "@everdict/core";
+import { AppError, BadRequestError, NotFoundError, classifyFailure } from "@everdict/core";
 import type { ScheduleOverlapPolicy, ScheduleRecord, ScheduleRunTemplate, ScheduleStore } from "@everdict/db";
 import type { RunScorecardInput } from "../scorecard/scorecard-service.js";
+import { Schedule, type ScheduleSpec } from "./schedule.js";
 
-// Lightweight structural check of a 5-field cron — firing (Temporal Schedule, slice 2) parses precisely, so here we only reject obviously malformed input.
-// Each field: * | n | n-m, optional step (/k), comma list. (Value-range semantics are enforced by Temporal.)
-const CRON_FIELD = /^(\*|\d+(-\d+)?)(\/\d+)?(,(\*|\d+(-\d+)?)(\/\d+)?)*$/;
-export function isValidCron(expr: string): boolean {
-  const parts = expr.trim().split(/\s+/);
-  return parts.length === 5 && parts.every((p) => CRON_FIELD.test(p));
-}
+// Cron validity and the Temporal spec shape are owned by the domain model (schedule.ts) — re-exported here
+// so existing importers (server.ts, route-context, request DTOs, the Temporal driver) keep their path.
+export { isValidCron } from "./schedule.js";
+export type { ScheduleSpec } from "./schedule.js";
 
 export interface CreateScheduleInput {
   tenant: string;
@@ -28,16 +26,6 @@ export interface UpdateScheduleInput {
   overlapPolicy?: ScheduleOverlapPolicy;
   enabled?: boolean; // pause/resume
   runTemplate?: ScheduleRunTemplate;
-}
-
-// Minimal spec handed to a Temporal Schedule (the driver converts cron→Schedule). The firing workflow's args are (tenant, id).
-export interface ScheduleSpec {
-  id: string;
-  tenant: string;
-  cron: string;
-  timezone: string;
-  overlapPolicy: ScheduleOverlapPolicy;
-  paused: boolean; // = !enabled
 }
 
 // DB↔Temporal sync driver (implementation = @everdict/orchestrator TemporalScheduleDriver). Not injected = DB-only (no firing — dev/Direct).
@@ -100,44 +88,25 @@ export class ScheduleService {
   }
 
   private specOf(record: ScheduleRecord): ScheduleSpec {
-    return {
-      id: record.id,
-      tenant: record.tenant,
-      cron: record.cron,
-      timezone: record.timezone,
-      overlapPolicy: record.overlapPolicy,
-      paused: !record.enabled, // a disabled schedule is paused in Temporal → does not fire
-    };
+    return Schedule.from(record).toTemporalSpec();
   }
 
   async create(input: CreateScheduleInput): Promise<ScheduleRecord> {
-    if (!isValidCron(input.cron))
-      throw new BadRequestError(
-        "BAD_REQUEST",
-        { cron: input.cron },
-        `cron expression is invalid (5 fields required): '${input.cron}'`,
-      );
-    const ts = this.now();
-    const record: ScheduleRecord = {
-      id: this.newId(),
-      tenant: input.tenant,
-      name: input.name,
-      cron: input.cron,
-      timezone: input.timezone ?? "UTC",
-      overlapPolicy: input.overlapPolicy ?? "skip",
-      enabled: input.enabled ?? true,
-      createdBy: input.createdBy,
-      runTemplate: input.runTemplate,
-      createdAt: ts,
-      updatedAt: ts,
-    };
+    // The domain owns the creation shape (defaults UTC/skip/enabled) and the cron-validity 400.
+    const record = Schedule.newRecord({ ...input, id: this.newId(), now: this.now() });
     await this.deps.store.create(record);
     // Temporal sync — on failure, roll back the DB record to stay consistent (avoid a schedule that exists but never fires).
     if (this.deps.driver) {
       try {
         await this.deps.driver.ensure(this.specOf(record));
       } catch (err) {
-        await this.deps.store.remove(record.tenant, record.id).catch(() => {});
+        // If the rollback itself also fails, the record is orphaned (stored in the DB but never fires) —
+        // surface that on the rethrown ensure error instead of swallowing it; never mask the original failure.
+        try {
+          await this.deps.store.remove(record.tenant, record.id);
+        } catch (rollbackErr) {
+          throw markRollbackFailed(err, rollbackErr, record.id);
+        }
         throw err;
       }
     }
@@ -181,21 +150,10 @@ export class ScheduleService {
     patch: UpdateScheduleInput,
     actor?: { subject: string; isAdmin: boolean },
   ): Promise<ScheduleRecord> {
-    if (patch.cron !== undefined && !isValidCron(patch.cron))
-      throw new BadRequestError(
-        "BAD_REQUEST",
-        { cron: patch.cron },
-        `cron expression is invalid (5 fields required): '${patch.cron}'`,
-      );
+    if (patch.cron !== undefined) Schedule.assertValidCron(patch.cron);
     const existing = await this.getRecord(tenant, id); // existence/ownership check (404)
-    // A 'content edit' — changing any field other than enabled — is creator/admin only (because firing runs under the creator's identity). pause is member+.
-    const editsContent = Object.keys(patch).some((k) => k !== "enabled");
-    if (editsContent && actor && existing.createdBy !== actor.subject && !actor.isAdmin)
-      throw new ForbiddenError(
-        "FORBIDDEN",
-        { id, action: "schedules:edit" },
-        "You do not have permission to edit this schedule (schedule creator or workspace admin only).",
-      );
+    // Content edits (any field other than enabled) are creator/admin gated — the domain owns the rule.
+    Schedule.from(existing).assertCanEdit(patch, actor);
     const updated = await this.deps.store.update(tenant, id, { ...patch, updatedAt: this.now() });
     if (!updated) throw new NotFoundError("NOT_FOUND", { id }, `schedule '${id}' not found.`);
     await this.deps.driver?.ensure(this.specOf(updated)); // re-sync cron/timezone/overlap/pause
@@ -212,13 +170,15 @@ export class ScheduleService {
   // under the creator's identity (budget, private-repo connection), so it can no longer be trusted. Also pause in Temporal (driver.ensure). Called from the member-removal hook.
   // Returns = number of schedules disabled.
   async disableByCreator(tenant: string, createdBy: string): Promise<number> {
-    const targets = (await this.deps.store.list(tenant)).filter((s) => s.createdBy === createdBy && s.enabled);
+    const targets = (await this.deps.store.list(tenant)).filter(
+      (s) => s.createdBy === createdBy && Schedule.from(s).isEnabled(),
+    );
     for (const s of targets) {
-      const updated = await this.deps.store.update(tenant, s.id, {
-        enabled: false,
-        lastStatus: "Auto-disabled: creator left the workspace",
-        updatedAt: this.now(),
-      });
+      const updated = await this.deps.store.update(
+        tenant,
+        s.id,
+        Schedule.from(s).autoDisable("creator left the workspace", this.now()),
+      );
       if (updated) await this.deps.driver?.ensure(this.specOf(updated)); // Temporal pause
     }
     return targets.length;
@@ -252,11 +212,11 @@ export class ScheduleService {
       // Transient failures rethrow — the workflow's activity retry owns those.
       const failure = classifyFailure(err, "dispatch");
       if (failure.class === "config") {
-        const updated = await this.deps.store.update(tenant, id, {
-          enabled: false,
-          lastStatus: `Auto-disabled: ${failure.code} — ${failure.message}`.slice(0, 300),
-          updatedAt: this.now(),
-        });
+        const updated = await this.deps.store.update(
+          tenant,
+          id,
+          Schedule.from(schedule).autoDisable(`${failure.code} — ${failure.message}`, this.now()),
+        );
         if (updated) await this.deps.driver?.ensure(this.specOf(updated)); // Temporal pause
       }
       throw err;
@@ -297,4 +257,32 @@ export class ScheduleService {
       createdBy: schedule.createdBy, // schedule creator → personal notification-feed recipient (notifications N2)
     });
   }
+}
+
+// The create-path Temporal sync rolls the DB record back when ensure fails. If the rollback itself fails,
+// the record is orphaned (exists in the DB but never fires) — that must be LOG-able, not `.catch(() => {})`
+// silence. The surfaced error stays the ORIGINAL ensure failure (same class → same HTTP status); the
+// rollback failure rides along: AppError → `rollbackFailed`/`rollbackError` in the envelope data, plain
+// Error → appended to the message (the only surface a raw error reliably exposes).
+function markRollbackFailed(err: unknown, rollbackErr: unknown, scheduleId: string): unknown {
+  const rollback = rollbackErr instanceof Error ? rollbackErr.message : String(rollbackErr);
+  if (err instanceof AppError) {
+    // Every AppError subclass shares the (code, extra, message) constructor — rebuild the same subclass
+    // (extra is readonly on a live instance) with the rollback outcome attached.
+    const rebuild = err.constructor as new (
+      code: AppError["code"],
+      extra?: Record<string, unknown>,
+      message?: string,
+    ) => AppError;
+    return new rebuild(
+      err.code,
+      { ...err.extra, schedule: scheduleId, rollbackFailed: true, rollbackError: rollback },
+      err.message,
+    );
+  }
+  if (err instanceof Error) {
+    err.message = `${err.message} — rollback also failed, schedule '${scheduleId}' is orphaned (stored in the DB but never fires): ${rollback}`;
+    return err;
+  }
+  return err; // a non-Error throw carries no attachable surface — rethrow as-is (pre-existing behavior)
 }

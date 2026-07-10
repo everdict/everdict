@@ -1,5 +1,5 @@
-import { BadRequestError, ForbiddenError, NotFoundError } from "@everdict/core";
-import { InMemoryScheduleStore, type ScheduleRunTemplate } from "@everdict/db";
+import { BadRequestError, ForbiddenError, NotFoundError, UpstreamError } from "@everdict/core";
+import { InMemoryScheduleStore, type ScheduleRunTemplate, type ScheduleStore } from "@everdict/db";
 import { describe, expect, it } from "vitest";
 import type { RunScorecardInput } from "../scorecard/scorecard-service.js";
 import { type ScheduleDriver, ScheduleService, type ScheduleSpec, isValidCron } from "./schedule-service.js";
@@ -126,6 +126,70 @@ describe("ScheduleService — Temporal driver sync (slice 2)", () => {
     const s = new ScheduleService({ store, driver, newId: () => "sch-1", now: () => "t" });
     await expect(s.create(base)).rejects.toThrow("temporal down");
     expect(await store.list("acme")).toEqual([]); // rolled back
+  });
+
+  // Regression (rich-domain-core S4): the rollback used to be `.catch(() => {})` — an orphaned record
+  // (stored in the DB but never firing in Temporal) left zero trace. The ensure failure stays the surfaced
+  // error; the rollback failure must ride along.
+  function failingRemoveStore(): { store: ScheduleStore; inner: InMemoryScheduleStore } {
+    const inner = new InMemoryScheduleStore();
+    const store: ScheduleStore = {
+      create: (r) => inner.create(r),
+      get: (t, i) => inner.get(t, i),
+      list: (t) => inner.list(t),
+      update: (t, i, p) => inner.update(t, i, p),
+      remove: async () => {
+        throw new Error("db down");
+      },
+    };
+    return { store, inner };
+  }
+
+  it("regression: ensure fails AND the rollback remove fails → the original error surfaces the rollback failure (orphan is not silent)", async () => {
+    const { store, inner } = failingRemoveStore();
+    const driver: ScheduleDriver = {
+      async ensure() {
+        throw new Error("temporal down");
+      },
+      async remove() {},
+    };
+    const s = new ScheduleService({ store, driver, newId: () => "sch-1", now: () => "t" });
+    const err = await s.create(base).then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+    expect(err).toBeInstanceOf(Error);
+    // the original ensure failure is still the error — with the rollback failure attached, not swallowed
+    expect((err as Error).message).toContain("temporal down");
+    expect((err as Error).message).toContain("rollback also failed");
+    expect((err as Error).message).toContain("schedule 'sch-1' is orphaned");
+    expect((err as Error).message).toContain("db down");
+    expect(await inner.list("acme")).toHaveLength(1); // the orphan remains in the store
+  });
+
+  it("regression: an AppError ensure failure keeps its class/code/message and gains rollbackFailed in the envelope data", async () => {
+    const { store } = failingRemoveStore();
+    const driver: ScheduleDriver = {
+      async ensure() {
+        throw new UpstreamError("UPSTREAM_ERROR", { address: "temporal:7233" }, "temporal unreachable");
+      },
+      async remove() {},
+    };
+    const s = new ScheduleService({ store, driver, newId: () => "sch-1", now: () => "t" });
+    const err = await s.create(base).then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+    expect(err).toBeInstanceOf(UpstreamError); // same subclass → same HTTP status (502)
+    const app = err as UpstreamError;
+    expect(app.code).toBe("UPSTREAM_ERROR");
+    expect(app.message).toBe("temporal unreachable"); // original message untouched
+    expect(app.extra).toMatchObject({
+      address: "temporal:7233", // original data preserved
+      schedule: "sch-1",
+      rollbackFailed: true,
+      rollbackError: "db down",
+    });
   });
 });
 
