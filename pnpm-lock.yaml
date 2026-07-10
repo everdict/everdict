@@ -296,6 +296,9 @@ importers:
       '@everdict/agent':
         specifier: workspace:*
         version: link:../agent
+      '@everdict/application-control':
+        specifier: workspace:*
+        version: link:../application-control
       '@everdict/billing':
         specifier: workspace:*
         version: link:../billing

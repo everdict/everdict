@@ -50,20 +50,14 @@ export interface ProbeResult {
 // run (in-process / pull) honors `signal` best-effort by rejecting a not-yet-started dispatch; the pollers (Nomad/K8s)
 // additionally stop waiting and reclaim the orchestrator job when the signal aborts mid-run. Ties cancellation to the
 // in-flight promise, complementing the id-keyed kill(caseId) side channel.
-export interface DispatchOptions {
-  signal?: AbortSignal;
-}
+// The port now lives in @everdict/application-control — re-architecture P2c compat re-export (removed in the P4 sweep).
+export type { DispatchOptions, Dispatcher } from "@everdict/application-control";
+import type { DispatchOptions, Dispatcher } from "@everdict/application-control";
 
 // The uniform "this dispatch was cancelled via its AbortSignal" rejection (reuses the CANCELLED code the Scheduler
 // already rejects queued entries with, so callers classify it the same way).
 export function dispatchAborted(job: AgentJob): InternalError {
   return new InternalError("CANCELLED", { caseId: job.evalCase.id }, "dispatch aborted.");
-}
-
-// The (job)→CaseResult dispatch abstraction — satisfied by both Router (static) and Scheduler (capacity-aware).
-// The orchestrator/activity depends on this interface, not the implementation (drop-in swap).
-export interface Dispatcher {
-  dispatch(job: AgentJob, opts?: DispatchOptions): Promise<CaseResult>;
 }
 
 // The CORE placement contract — every backend implements this. "Where does it run": the control plane holds the

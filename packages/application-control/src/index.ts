@@ -22,3 +22,4 @@ export type { UserProfileStore } from "./ports/user-profile-store.js";
 export type { WorkspaceInviteStore } from "./ports/workspace-invite-store.js";
 export type { WorkspaceSettingsStore } from "./ports/workspace-settings-store.js";
 export type { WorkspaceStore } from "./ports/workspace-store.js";
+export type { DispatchOptions, Dispatcher } from "./ports/dispatcher.js";

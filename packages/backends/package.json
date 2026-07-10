@@ -19,6 +19,7 @@
   },
   "dependencies": {
     "@everdict/agent": "workspace:*",
+    "@everdict/application-control": "workspace:*",
     "@everdict/billing": "workspace:*",
     "@everdict/contracts": "workspace:*",
     "@everdict/core": "workspace:*",
