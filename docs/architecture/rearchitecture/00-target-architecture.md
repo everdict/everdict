@@ -1,6 +1,9 @@
 # Everdict re-architecture — the domain is unique, interfaces are adapters (design)
 
-> **Status: PROPOSED — design review in progress. No code moves until this document is approved.**
+> **Status: APPROVED (2026-07-10, maintainer) — migration in progress. Constraint: behavior-preserving
+> at every phase (compat re-exports, wire bytes unchanged, full gates + boot green per commit).**
+> Open questions resolved: §8-1 two packages(proposed 채택) · §8-2 wire v1 네임스페이스는 defer ·
+> §8-3 self-hosted-runner 는 자체 패키지 유지(proposed 채택) · §8-4 기존 스코프명은 P4 스윕까지 유지.**
 > Maintainer directive: interfaces (CLI / web / API / desktop) are delivery mechanisms; the domain is
 > singular. Today domain rules are fragmented across packages and re-implemented inside interfaces. This
 > document is the ground-up target: layer model, package/folder teardown, port design, DTO boundaries,
