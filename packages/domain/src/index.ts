@@ -66,6 +66,26 @@ export {
   type ScheduleTransition,
 } from "./schedule/schedule.js";
 
+// placement — pure multi-tenant placement policies (from @everdict/backends)
+export { FairQueue, type FairQueueOptions } from "./placement/fair-queue.js";
+export { CircuitBreaker, type CircuitBreakerOpts } from "./placement/circuit-breaker.js";
+export {
+  aggregateLoad,
+  type AutoscalePolicy,
+  Autoscaler,
+  type AutoscalerOptions,
+  desiredCapacity,
+  type LoadSignal,
+  MutableSlots,
+  type ScalingTarget,
+} from "./placement/autoscaler.js";
+export {
+  type PerTenantTrustZoneOptions,
+  perTenantTrustZones,
+  staticTrustZones,
+  type TrustZonePolicy,
+} from "./placement/trust-zone.js";
+
 // auth — the role→action matrix + the identity subject shape (from @everdict/auth)
 export {
   type Action,

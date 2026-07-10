@@ -22,6 +22,7 @@
     "@everdict/billing": "workspace:*",
     "@everdict/contracts": "workspace:*",
     "@everdict/core": "workspace:*",
+    "@everdict/domain": "workspace:*",
     "@everdict/drivers": "workspace:*",
     "zod": "^3.24.1"
   }

@@ -287,6 +287,9 @@ importers:
       '@everdict/core':
         specifier: workspace:*
         version: link:../core
+      '@everdict/domain':
+        specifier: workspace:*
+        version: link:../domain
       '@everdict/drivers':
         specifier: workspace:*
         version: link:../drivers
