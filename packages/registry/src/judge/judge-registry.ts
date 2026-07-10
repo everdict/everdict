@@ -1,7 +1,8 @@
 import type { JudgeSpec } from "@everdict/contracts";
 import { VersionedStore } from "../versioned-store.js";
 
-// The port + its list-entry type now live in @everdict/application-control — re-architecture P2d compat re-export (removed in the P4 sweep).
+// The registry port + its list-entry type live in @everdict/application-control; this InMemory impl `implements`
+// the port, so the registry re-exports it here beside the impl as a deliberate convenience (import both together).
 export type { JudgeListEntry, JudgeRegistry } from "@everdict/application-control";
 import type { JudgeListEntry, JudgeRegistry } from "@everdict/application-control";
 

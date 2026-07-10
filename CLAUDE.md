@@ -30,20 +30,22 @@ Quality is non-negotiable: all five must pass before a PR.
 
 ## Architecture — one-way dependency, by concern
 ```
-core ← { drivers · environments · harnesses · graders · trace } ← run-case ← agent ← backends ← { orchestrator · topology · suite } ← self-hosted-runner ← { apps/cli · apps/desktop }
+contracts ← domain ← { application-execution · application-control } ← { drivers · environments · harnesses · graders · trace · db · registry · backends · auth · storage } ← agent ← { orchestrator · topology } ← self-hosted-runner ← { apps/cli · apps/desktop }
 ```
-- `packages/core`         — contracts only (interfaces + Zod schemas + errors). Dependency ROOT. No I/O, no SDKs.
+The **layer spine** is `contracts ← domain ← application-{execution,control}`: contracts is the pure dependency ROOT (interfaces + Zod schemas + errors), domain adds the pure business kernel (aggregates, version algebra, scoring/suite semantics, authz matrix, policy), and the two application layers hold the use-cases + ports the adapter packages bind. (The former `@everdict/{core,suite,run-case,billing}` packages were folded into this spine in the re-architecture.)
+- `packages/contracts`    — contracts only (interfaces + Zod schemas + errors + the job-result wire codec). Dependency ROOT. No I/O, no SDKs. The `@everdict/contracts/wire` subpath is the web's type-only surface.
+- `packages/domain`       — the pure business kernel over contracts: the rich aggregates (Run/ScorecardBatch/Membership/Schedule), version algebra (`compareVersions`/`resolveRef`/`specsEqual`), scoring + suite semantics (`caseVerdict`/`summarizeScorecard`/`diffScorecards`/`classifyFailure`/trials), the role→action authz matrix, and placement policy (FairQueue/CircuitBreaker/Autoscaler/TrustZonePolicy). No I/O.
+- `packages/application-execution` — the in-sandbox eval use-cases: `runCase` (the eval loop), `safeGrade`, trace/observation scoring. Depends only on contracts+domain.
+- `packages/application-control` — the control-plane use-cases + the ports the adapters bind: `runSuite`, store ports (`RunStore`/`ScorecardStore`/…), registry ports, the `Dispatcher` port, `ArtifactStore` + `offloadSnapshot`, the credential primitives (`generateKey`/`hashKey`/`generateInviteToken`), scheduling/ops orchestration, `Metrics`. Impls live in the adapter packages that depend on it.
 - `packages/drivers`      — *in-sandbox compute* (`ComputeHandle`): LocalDriver (dev / inside the agent).
 - `packages/environments` — the world a run acts on (`RepoEnvironment`: seed + git-diff snapshot).
 - `packages/harnesses`    — the agent under test, driven over a process boundary (ClaudeCodeHarness, ScriptedHarness, + declarative `CommandHarness` — any CLI agent from a `HarnessSpec(command)`, no code. See `docs/command-harness.md`).
 - `packages/graders`      — scoring, fully separate from the harness (tests-pass / cost / steps / latency) + Agent Judge (`JudgeGrader` + `modelJudge` over an injected transport: `anthropicComplete` / `openaiComplete` [→LiteLLM] / `harnessComplete` [dispatch an agent, verdict from its trace] — LLM/VLM/agent verdict from a trace). See `docs/judges.md`.
-- `packages/run-case`       — the eval loop (`runCase`).
 - `packages/agent`        — the dispatched unit: a self-contained worker that runs `runCase` inside an isolated job and emits the result (the backend dispatches it, it does not run the harness itself).
 - `packages/backends`     — *placement* (`Backend`): dispatch the agent to an orchestrator (LocalBackend, NomadBackend, K8sBackend [process→K8s Job, `runtimeClassName` isolation]; Windows later) + `Router` (static) / `Scheduler` (capacity-aware + tenant-fair WFQ + queue/backpressure) / `BackendRegistry` + `TrustZonePolicy` (per-tenant isolation: enforced hardened runtime + namespace + warm-pool keying) + `Autoscaler` (queue-depth elastic scaling) + `SecretProvider`/`BudgetTracker` (per-tenant key scoping + cost/run budgets) + `buildRuntimeBackend` (RuntimeSpec→live Backend, for tenant-registered runtimes; control-plane→cluster-API auth via `spec.authSecret`→SecretStore→`X-Nomad-Token`/`kubectl --token`, stripped from alloc env — see `docs/runtimes.md`).
 - `packages/orchestrator` — durable control plane on Temporal: `DirectOrchestrator` / `TemporalOrchestrator` + the worker (workflow=deterministic, activity=`dispatchCase`).
 - `packages/trace`        — pull a harness trace from the tenant's platform → normalized `TraceEvent`; `buildTraceSource(cfg)` (kind: otel|mlflow|langfuse|langsmith|phoenix) powers pull-mode scorecard ingest. + **outbound `TraceSink`** (`buildTraceSink`: mlflow|langfuse|langsmith|phoenix) — export judged case trace+scores to the tenant's observability platform (create-or-attach per case; MLflow incl. best-effort OTLP/JSON spans, live-verified 3.11/3.14). See `docs/architecture/trace-sink.md`.
 - `packages/topology`     — **service-topology** harnesses (multi-service + target env): `HarnessSpec(service)`, orchestrator-agnostic `ServiceTopologyBackend` + Nomad/K8s topology builders + runId-keyed env manager. See `docs/service-harness.md`.
-- `packages/suite`        — suites + **version regression**: `runSuite` / `summarizeScorecard` / `diffScorecards` (over any backend). See `docs/suites.md`.
 - `packages/db`           — result stores: `RunStore` (single runs) + `ScorecardStore` (batch eval = dataset×harness → aggregated `Scorecard`+summary; `list` omits heavy per-case results) + `ViewStore` (saved scorecard-analysis views — config `jsonb`, `private|workspace` visibility) — `InMemory*` / `Pg*` on Postgres + numbered SQL migrations + idempotent `migrate`/`preflight`. See `docs/migration/` + `docs/scorecards.md`.
 - `packages/registry`     — **versioned SSOT** (harnesses + datasets + judges + runtimes): `(tenant, id, version) → HarnessSpec` / `→ Dataset` / `→ JudgeSpec` / `→ RuntimeSpec` (immutable versions, semver `latest`, tenant-owned + `_shared` fallback; in-memory / file-GitOps / Postgres `Pg*Registry` — async interface); `ServiceTopologyBackend.specFor` wires to the harness registry. Datasets are **harness-agnostic**; **Agent Judges** are user-registered `model`|`harness` specs; **Runtimes** are user-registered execution infra (local|nomad|k8s; `local` = dev/control-plane-host, superseded for "my machine" by the self-hosted runner). See `docs/registry.md` + `docs/datasets.md` + `docs/judges.md` + `docs/runtimes.md`.
 - `packages/auth`         — **control-plane auth core**: `Authenticator` → `Principal{subject,workspace,roles,via}` (OIDC/Keycloak JWT via `jose` JWKS + API-key `ak_…`, `compositeAuthenticator`) + role→action authZ (`can`/`authorize`). `workspace=tenant=trust-zone`. See `docs/auth.md`.
@@ -57,24 +59,24 @@ Reverse imports are bugs. The same concern name recurs per package (vertical sli
 **Intra-package layout:** a package's `src/` stays flat until ~15 non-test files; beyond that, group into
 **domain** subdirectories (tests colocated) with the barrel `index.ts` + the package's core contract kept at the
 root. The barrel re-exports the same symbols, so grouping never changes the public surface (consumers are untouched).
-See `packages/backends` (`placement`/`orchestrators`/`scheduling`/`policy`), `core` (`execution`/`harness`/`infra`),
+See `packages/backends` (`placement`/`orchestrators`/`scheduling`/`policy`), `contracts` (`execution`/`harness`/`infra`/`records`),
 `trace` (`sources`/`sinks`); `apps/web` (FSD) is the reference for large apps. Small packages stay flat by design.
 
 ### Two execution layers: Backend (placement) vs Driver (in-sandbox)
 - **Backend** (`@everdict/backends`) = *placement*: dispatch a runner-agent job to an orchestrator
   (Nomad/K8s/Windows) and return the `CaseResult`. Isolation = the orchestrator's runtime.
-- **Driver** (`@everdict/core`/`drivers`) = *in-sandbox compute*: the agent runs the harness via
+- **Driver** (`@everdict/contracts`/`drivers`) = *in-sandbox compute*: the agent runs the harness via
   `LocalDriver` inside its already-isolated job. See `docs/execution-backends.md`.
 
 ### ⚠️ Deliberate deviation: interfaces ARE used
 Single-implementation codebases rightly ban interfaces for DI (exactly one impl per concept).
 Everdict's *whole product* is pluggable adapters (many Backends / Drivers / Harnesses / Graders), so the
-`core` contracts MUST be interfaces. This is the one idiom we intentionally invert —
+`@everdict/contracts` contracts MUST be interfaces. This is the one idiom we intentionally invert —
 everywhere else (null discipline, error model, naming, layering) we keep the strict default.
 
 ## Critical rules (the non-default ones — see `.claude/rules/`)
 - No `any`, no non-null `!`, no silent nullable defaults; validate every boundary with Zod.
-- Errors: throw an `AppError` subclass (`@everdict/core`); HTTP status derives from the subtype.
+- Errors: throw an `AppError` subclass (`@everdict/contracts`); HTTP status derives from the subtype.
 - External/SDK failures are remapped to our `AppError` (never propagated raw) so monitoring blames us, not the user.
 - Cost/tokens come from the harness's own trace (e.g. Claude reports `total_cost_usd`); for LocalDriver the harness uses the machine's existing login (no API key).
 - `ComputeHandle` is always released in a `finally`.

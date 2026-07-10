@@ -1,5 +1,5 @@
-// Principal/AuthContext (the identity subject shape) now live in @everdict/domain — re-architecture
-// P1b compat re-export. The Authenticator port and its composition stay here with the adapters.
+// Principal/AuthContext (the identity subject shape) live in @everdict/domain; @everdict/auth re-exports them
+// here beside the Authenticator port + its composition as a deliberate convenience (identity + auth together).
 export type { AuthContext, Principal } from "@everdict/domain";
 import type { AuthContext, Principal } from "@everdict/domain";
 

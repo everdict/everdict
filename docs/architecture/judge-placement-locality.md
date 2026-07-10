@@ -102,10 +102,10 @@ behind a small `ObservationSource` seam, the sibling of those two.
 ## Contract sketch
 
 ```ts
-// @everdict/core — judge-spec.ts (D1): harness judge gains an optional runtime (tenant RuntimeSpec id).
+// @everdict/contracts — judge-spec.ts (D1): harness judge gains an optional runtime (tenant RuntimeSpec id).
 HarnessJudgeSpecSchema.runtime?: string;   // → placement.target; model judge ignores it (in-process)
 
-// @everdict/core — harness-spec.ts (D3): the target declares how its observation is delivered.
+// @everdict/contracts — harness-spec.ts (D3): the target declares how its observation is delivered.
 TopologyTargetSchema.delivery?:
   | { mode: "reference" }                                   // default = today's snapshot() pull
   | { mode: "sentinel" }                                    // returned inline with the result

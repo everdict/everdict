@@ -1,8 +1,8 @@
 import { BadRequestError, type HarnessSpec, type ServiceHarnessSpec } from "@everdict/contracts";
 
-// The version algebra (semver/latest/immutable content identity) now lives in @everdict/domain —
-// re-architecture P1f compat re-export (removed in the P4 sweep). This file keeps the store-facing
-// helpers (jsonb tag parsing, spec narrowing) used by the registry impls.
+// The version algebra (semver/latest/immutable content identity) lives in @everdict/domain. This file adds
+// the store-facing helpers (jsonb tag parsing, spec narrowing) and re-exports the algebra beside them so the
+// registry impls import both from one intra-package module.
 export { compareVersions, LATEST, resolveRef, SHARED_TENANT, sortVersions, specsEqual } from "@everdict/domain";
 
 // Pg `tags jsonb` column → string[] (version tags). jsonb can hold arbitrary values, so defensively keep only strings.

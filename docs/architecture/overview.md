@@ -5,7 +5,7 @@ human-facing map. For the *collaboration* view — who calls whom, drawn as diag
 levels (whole-mesh + per-module) — see [`collaboration.md`](collaboration.md).
 
 ## The spine: 4 in-sandbox concerns + a placement layer
-| Concern | Interface (`@everdict/core`) | impl |
+| Concern | Interface (`@everdict/contracts`) | impl |
 |---|---|---|
 | Harness (under test) | `EvaluableHarness` | `claude-code`, `scripted` |
 | Environment (world acted on) | `Environment<EnvSnapshot>` | `RepoEnvironment` |

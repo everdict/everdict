@@ -1,6 +1,5 @@
-import { type AgentJob, AgentJobSchema } from "@everdict/contracts";
+import { type AgentJob, AgentJobSchema, encodeResult } from "@everdict/contracts";
 import { failureResult, runAgentJob } from "./run.js";
-import { encodeResult } from "./sentinel.js";
 
 // Runner-agent entrypoint (runs inside the sandbox/alloc).
 // The AgentJob is passed as base64(JSON) in the EVERDICT_AGENT_JOB env.

@@ -40,7 +40,7 @@ paths in (e.g. the runner's `~/.codex` login). Consumed by the managed `DockerBa
 1. New file `packages/drivers/src/<name>.ts`; `class <Name>Driver implements Driver`, `export` it (kebab file, `*Driver` name).
 2. `provision(spec)`: create the sandbox, return a `ComputeHandle` whose `dispose()` tears it down; validate `spec.image` if required (`BadRequestError`).
 3. In `exec`, treat a non-zero exit code as a returned result; wrap only true failures in `InternalError("COMPUTE_EXEC_FAILED", …)`.
-4. Re-export from `packages/drivers/src/index.ts`. No reverse imports (Driver depends only on `@everdict/core`).
+4. Re-export from `packages/drivers/src/index.ts`. No reverse imports (Driver depends only on `@everdict/contracts`).
 
 See `docs/execution-backends.md` (Backend vs Driver) + `docs/architecture/portable-harness-runtime.md`
 (DockerDriver + `case.image` = one definition, managed or self-hosted); rule `drivers.md` has the inlined critical rules.

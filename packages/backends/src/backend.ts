@@ -50,7 +50,8 @@ export interface ProbeResult {
 // run (in-process / pull) honors `signal` best-effort by rejecting a not-yet-started dispatch; the pollers (Nomad/K8s)
 // additionally stop waiting and reclaim the orchestrator job when the signal aborts mid-run. Ties cancellation to the
 // in-flight promise, complementing the id-keyed kill(caseId) side channel.
-// The port now lives in @everdict/application-control — re-architecture P2c compat re-export (removed in the P4 sweep).
+// The Dispatcher port lives in @everdict/application-control; Backend extends it, so backends re-exports it
+// here as a deliberate convenience — a consumer narrowing a Backend gets its supertype from the same module.
 export type { DispatchOptions, Dispatcher } from "@everdict/application-control";
 import type { DispatchOptions, Dispatcher } from "@everdict/application-control";
 

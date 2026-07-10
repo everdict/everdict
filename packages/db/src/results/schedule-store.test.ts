@@ -1,5 +1,6 @@
+import type { ScheduleRecord } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
-import { InMemoryScheduleStore, type ScheduleRecord } from "./schedule-store.js";
+import { InMemoryScheduleStore } from "./schedule-store.js";
 
 const rec = (id: string, tenant: string, createdAt: string): ScheduleRecord => ({
   id,

@@ -6,10 +6,6 @@ import type { SqlClient } from "../client.js";
 // state: usage counters (reserved runs + committed cost) and per-tenant limit config. db depends on core only — the
 // budget vocabulary is mirrored, not imported.
 
-// The row shapes now live in contracts/records — re-architecture P2c; db keeps compat re-exports (removed in the P4 sweep).
-export type { BudgetLimitRow, BudgetUsageRow } from "@everdict/contracts";
-// The store port now lives in @everdict/application-control — re-architecture P2c compat re-export (removed in the P4 sweep).
-export type { BudgetStore } from "@everdict/application-control";
 import type { BudgetStore } from "@everdict/application-control";
 
 function limitRow(tenant: string, limit: { usd?: number; tokens?: number; runs?: number }): BudgetLimitRow {

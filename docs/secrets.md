@@ -37,7 +37,7 @@ the existing per-tenant `SecretProvider` path (now async).
 
 ## Referencing a secret from harness `env` (`{secretRef}`)
 A harness's `env` values are **`string | { secretRef: "NAME", scope?: "user"|"workspace" }`** (`EnvValueSchema`,
-`@everdict/core`) — a literal, or a **reference** to a secret by name in a tier (`scope`, default `workspace`). The
+`@everdict/contracts`) — a literal, or a **reference** to a secret by name in a tier (`scope`, default `workspace`). The
 reference is **content** (part of the immutable spec), so the registry stores **only the name+scope, never the
 plaintext value** — the actual value is injected only at run time. This covers `command` `env`, `service`
 `services[].env`, and instance `overrides.env` (all widened to the union; the resolved `HarnessSpec` env is likewise
@@ -45,7 +45,7 @@ a union until resolution).
 
 ### Private harnesses (referencing a `user` secret)
 A harness whose resolved env references a **`user`-scoped** secret is **private to its creator** — only they can see
-or run it. Two layers enforce it, both **derived** (no extra column): `referencesUserSecret(spec)` (`@everdict/core`)
+or run it. Two layers enforce it, both **derived** (no extra column): `referencesUserSecret(spec)` (`@everdict/contracts`)
 + the instance's `createdBy`.
 - **Can't see** — `GET /harnesses` (+ `list_harnesses`) drops entries for non-owners; `GET /harnesses/:id[/:version]`
   (and the raw `/instance` read) 404 a non-owner. The **owner** is the creator of the *latest* version — the version
@@ -56,7 +56,7 @@ or run it. Two layers enforce it, both **derived** (no extra column): `reference
 - **Can't run** — even if guessed, `resolveHarnessSecrets` for a non-owner fails: a `user` ref resolves against
   **that submitter's** `user` tier only, which lacks the creator's personal secret → `BadRequestError` (the case
   fails with a clear reason). So privacy is enforced by the secret resolution itself, not just the read filter.
-- **Resolution — `resolveHarnessSecrets(spec, {workspace, user})`** (`@everdict/core`, pure): just before dispatch,
+- **Resolution — `resolveHarnessSecrets(spec, {workspace, user})`** (`@everdict/contracts`, pure): just before dispatch,
   both `RunService.track` (single runs) and `ScorecardService.track` (batches, resolved once per batch) swap every
   `{secretRef, scope}` for its value from the matching tier of `scopedSecretsFor(tenant, submitter)`
   (= `secretStore.scopedEntries` = `{workspace: entries(''), user: entries(submitter)}`), for **all** backends

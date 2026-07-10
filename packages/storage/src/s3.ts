@@ -6,7 +6,7 @@ import {
   S3Client,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
-import type { ArtifactStore } from "./artifact-store.js";
+import type { ArtifactStore } from "@everdict/application-control";
 
 export interface S3ArtifactStoreOptions {
   endpoint: string; // S3 API endpoint (e.g. http://localhost:9100 = MinIO)

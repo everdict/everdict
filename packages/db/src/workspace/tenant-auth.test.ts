@@ -1,5 +1,6 @@
+import { generateKey, hashKey } from "@everdict/application-control";
 import { describe, expect, it } from "vitest";
-import { InMemoryTenantKeyStore, generateKey, hashKey, issueKey } from "./tenant-auth.js";
+import { InMemoryTenantKeyStore, issueKey } from "./tenant-auth.js";
 
 describe("tenant key store", () => {
   it("looks up the tenant by the issued key's hash", async () => {

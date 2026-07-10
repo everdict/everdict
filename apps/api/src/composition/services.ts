@@ -7,8 +7,9 @@ import type { RunnerService } from "@everdict/application-control";
 import type { ScheduleService } from "@everdict/application-control";
 import type { ScorecardService } from "@everdict/application-control";
 import { ViewService } from "@everdict/application-control";
-import type { CircuitBreaker, Scheduler } from "@everdict/backends";
+import type { Scheduler } from "@everdict/backends";
 import type { RunStore, ScorecardStore, SecretStore, ViewStore, WorkspaceSettingsStore } from "@everdict/db";
+import type { CircuitBreaker } from "@everdict/domain";
 import type {
   BenchmarkRegistry,
   DatasetRegistry,

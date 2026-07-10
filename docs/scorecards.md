@@ -18,7 +18,7 @@ Dataset → [scorecard run] → trace → agent-judge → scorecard → dashboar
    a case-count limit + tag filter. Omitted ⇒ full dataset, no stamp.
 2. Resolve the **harness version** (`latest → concrete`) via the registry; embed the `HarnessSpec` for
    declarative harnesses (builtins fall back to id). The record stores the **resolved** `harness@version`.
-3. Build a `Suite` on the fly (`{ id: dataset.id, harness: { id }, cases }`) and run it with `@everdict/suite`'s
+3. Build a `Suite` on the fly (`{ id: dataset.id, harness: { id }, cases }`) and run it with `@everdict/application-control`'s
    `runSuite` over the **same dispatcher** single runs use — each case becomes one job (tenant + budget
    admit/settle per case, concurrency-limited). The request's optional **`concurrency`** (1–64) sets how many
    cases dispatch at once (`runSuite` fan-out); omitted ⇒ service default (4). For a **self-hosted** runtime
@@ -84,7 +84,7 @@ See `docs/judges.md` + `docs/architecture/streaming-case-pipeline.md`.
 
 ### Trace ingestion (`POST /scorecards/ingest`)
 The "already-executed traces" path: produce a scorecard from **externally-run traces without dispatching a harness**.
-The seam is the normalized `TraceEvent` (`@everdict/core`) — per-harness trace variance is absorbed at the **edge**
+The seam is the normalized `TraceEvent` (`@everdict/contracts`) — per-harness trace variance is absorbed at the **edge**
 (the harness/SDK uploads already-normalized `TraceEvent[]`; the control plane only validates via `TraceEventSchema`).
 `ScorecardService.ingest` resolves the referenced **dataset** (for `caseId`→task alignment + diff alignment),
 wraps each uploaded trace as a `CaseResult`, **re-derives the trace-only graders** (`steps`/`cost`/`latency` →

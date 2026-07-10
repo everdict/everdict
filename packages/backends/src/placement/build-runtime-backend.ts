@@ -75,7 +75,7 @@ export function k8sRuntimeOptions(
   };
 }
 
-// A tenant-registered RuntimeSpec (@everdict/core) → a live Backend. Model/cluster credentials are injected via secretEnv (the spec holds no secrets).
+// A tenant-registered RuntimeSpec (@everdict/contracts) → a live Backend. Model/cluster credentials are injected via secretEnv (the spec holds no secrets).
 // The cluster API token (authSecret) is used as an auth header and separated from the alloc env (the option builders above).
 // The control plane uses this at dispatch time to build a tenant runtime and register it in the Scheduler registry.
 export function buildRuntimeBackend(spec: RuntimeSpec, opts: { secretEnv?: Record<string, string> } = {}): Backend {

@@ -1,17 +1,5 @@
 import type { ScheduleRecord } from "@everdict/contracts";
 
-// Record schemas now live in contracts/records — re-architecture P0c; db keeps compat re-exports (removed in the P4 sweep).
-export {
-  type ScheduleOverlapPolicy,
-  ScheduleOverlapPolicySchema,
-  type ScheduleRecord,
-  ScheduleRecordSchema,
-  type ScheduleRunTemplate,
-  ScheduleRunTemplateSchema,
-} from "@everdict/contracts";
-
-// The store port now lives in @everdict/application-control — re-architecture P2c compat re-export (removed in the P4 sweep).
-export type { ScheduleStore } from "@everdict/application-control";
 import type { ScheduleStore } from "@everdict/application-control";
 
 export class InMemoryScheduleStore implements ScheduleStore {

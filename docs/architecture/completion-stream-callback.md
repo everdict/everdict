@@ -8,7 +8,7 @@
 
 ## Problem
 
-`FrontDoorCompletion` (`@everdict/core`, `harness-spec.ts`) is `sync | poll`. Both assume a **request/response**
+`FrontDoorCompletion` (`@everdict/contracts`, `harness-spec.ts`) is `sync | poll`. Both assume a **request/response**
 shape: `sync` = the submit response IS the result; `poll` = GET a status endpoint until a terminal `StatusMatch`.
 `HttpFrontDoorDriver` (`front-door-driver.ts`) encodes this — `fetchSubmit` does `res.json()` (one parse), and
 `awaitCompletion` is a GET-poll loop.
@@ -34,7 +34,7 @@ trace correlation (`correlate`) and observation (`delivery` sentinel/egress) are
 surface is *how the terminal signal arrives*.
 
 ```ts
-// @everdict/core — harness-spec.ts: FrontDoorCompletionSchema gains two variants (discriminatedUnion "mode")
+// @everdict/contracts — harness-spec.ts: FrontDoorCompletionSchema gains two variants (discriminatedUnion "mode")
 completion?:
   | { mode: "sync" }                                                              // today (default)
   | { mode: "poll";   statusPath; done; failed?; intervalMs?; timeoutMs? }        // today

@@ -10,9 +10,9 @@ dataset×harness → `Scorecard` + summary via `runSuite`. Regression = `diffSco
 `leaderboard`. Cost/tokens come from the **harness's own trace** (Claude `total_cost_usd`), never measured by us.
 
 ## Checklist
-1. Score = `{graderId, metric, value, pass?, detail?}` (`@everdict/core`). A grader reads trace + snapshot, never mutates.
+1. Score = `{graderId, metric, value, pass?, detail?}` (`@everdict/contracts`). A grader reads trace + snapshot, never mutates.
 2. Batch always through `runSuite` (`packages/suite/src/run-suite.ts`) — per-case isolation: a thrown dispatch becomes a `pass:false` failed `CaseResult`, the batch keeps going. Never route a batch via `RunService.submit`.
-3. Aggregate/compare only via `@everdict/suite` pure fns (`summarizeScorecard`/`diffScorecards`/`leaderboard`/`trendSeries`) — they take the light `ScorecardRecord` shape, no `@everdict/db` dep.
+3. Aggregate/compare only via `@everdict/domain` pure fns (`summarizeScorecard`/`diffScorecards`/`leaderboard`/`trendSeries`) — they take the light `ScorecardRecord` shape, no `@everdict/db` dep.
 4. Judge = a **model grader** (`JudgeGrader`), constructed where a `Judge` is injected — NOT in `makeGraders`. Scores land under metric `judge:<id>`.
 5. External model/HTTP failure in a transport → `UpstreamError` (never raw).
 

@@ -85,7 +85,7 @@ touching `service-backend.ts`'s driving logic.
   **socket idle timeout**: while the server holds the response no data flows, so idle-time *is* the completion deadline.
   Socket errors remap to `UpstreamError`.
 - **#2 completion — DONE (4 modes).** `FrontDoorDriver`/`HttpFrontDoorDriver` (`front-door-driver.ts`) own submit +
-  await; `frontDoor.completion` in `@everdict/core`: `sync` (default) | `poll` (`StatusMatch` done/failed) | `stream`
+  await; `frontDoor.completion` in `@everdict/contracts`: `sync` (default) | `poll` (`StatusMatch` done/failed) | `stream`
   (SSE submit; `OpenStreamFn`/`fetchStream`; terminal event via `StatusMatch`; first-event correlate) | `callback`
   (fire-and-forget → `CallbackRendezvous` awaits the agent's POST to `{{callback_url}}`; in-process rendezvous +
   control-plane `POST /frontdoor-callback/:runId`). dispatch fails a run on completion timeout. See
@@ -134,7 +134,7 @@ seam, fourth sibling of `TopologyRuntime`/`FrontDoorDriver`/`ObservationSource`.
 ## Observation delivery (`HOW-observe`) — pluggable seam
 *How* the observation reaches the grader/judge is now a third axis (sibling of `TopologyRuntime`=WHERE,
 `FrontDoorDriver`=HOW-drive): `ObservationSource` (`observation-source.ts`). `TopologyTarget.delivery`
-(`@everdict/core`, `.optional()`) selects `reference` (store-fetch, default = today's `snapshot()`/prompt) |
+(`@everdict/contracts`, `.optional()`) selects `reference` (store-fetch, default = today's `snapshot()`/prompt) |
 `sentinel` (inline via result channel) | `egress` (push to a `sink`). `dispatch` delegates to
 `observationSourceFor(spec.target?.delivery)` — all three modes wired. **`sentinel`** reads the observation from the
 **result channel** (`DriveOutcome.response` — `sync` = submit response, `poll` = the `done` status body) via

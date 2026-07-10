@@ -1,7 +1,7 @@
+import type { VersionMeta } from "@everdict/application-control";
 import { ConflictError, NotFoundError } from "@everdict/contracts";
 import type { SqlClient } from "@everdict/db";
 import { SHARED_TENANT, parseVersionTags, resolveRef, sortVersions, specsEqual } from "./registry.js";
-import type { VersionMeta } from "./versioned-store.js";
 
 // Per-entity persistence config. Column names and optional-column capabilities diverge across the versioned
 // tables (everdict_datasets stores the jsonb in a `dataset` column with created_by/deleted_at/tags; everdict_models

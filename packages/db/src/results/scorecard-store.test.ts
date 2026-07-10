@@ -1,8 +1,9 @@
 import type { Scorecard } from "@everdict/contracts";
+import type { ScorecardRecord } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import type { SqlClient } from "../client.js";
 import { PgScorecardStore } from "./pg-scorecard-store.js";
-import { InMemoryScorecardStore, type ScorecardRecord } from "./scorecard-store.js";
+import { InMemoryScorecardStore } from "./scorecard-store.js";
 
 const SCORECARD: Scorecard = {
   suiteId: "repo-smoke",

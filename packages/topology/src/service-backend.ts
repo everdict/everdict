@@ -4,7 +4,6 @@ import {
   type BackendCapacity,
   type DispatchOptions,
   type ScreenCapturable,
-  type TrustZonePolicy,
   dispatchAborted,
 } from "@everdict/backends";
 import {
@@ -18,7 +17,7 @@ import {
   type TraceEvent,
   type TrustZone,
 } from "@everdict/contracts";
-import { assertHardenedIsolation } from "@everdict/domain";
+import { type TrustZonePolicy, assertHardenedIsolation } from "@everdict/domain";
 import { costGrader, latencyGrader, makeGradersFromEnv, stepsGrader } from "@everdict/graders";
 import type { TraceSource } from "@everdict/trace";
 import type { TopologyRuntime } from "./deploy/topology-runtime.js";

@@ -1,16 +1,6 @@
 import { type NotificationRecord, NotificationRecordSchema } from "@everdict/contracts";
 import type { SqlClient } from "../client.js";
 
-// Record schemas now live in contracts/records — re-architecture P0c; db keeps compat re-exports (removed in the P4 sweep).
-export {
-  type NotificationKind,
-  NotificationKindSchema,
-  type NotificationRecord,
-  NotificationRecordSchema,
-} from "@everdict/contracts";
-
-// The store port + its list options now live in @everdict/application-control — re-architecture P2c compat re-export (removed in the P4 sweep).
-export type { NotificationListOptions, NotificationStore } from "@everdict/application-control";
 import type { NotificationListOptions, NotificationStore } from "@everdict/application-control";
 
 const DEFAULT_LIMIT = 50;

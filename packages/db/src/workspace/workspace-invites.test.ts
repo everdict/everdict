@@ -1,6 +1,6 @@
+import { generateInviteToken, hashKey } from "@everdict/application-control";
 import { describe, expect, it } from "vitest";
-import { hashKey } from "./tenant-auth.js";
-import { InMemoryWorkspaceInviteStore, generateInviteToken } from "./workspace-invites.js";
+import { InMemoryWorkspaceInviteStore } from "./workspace-invites.js";
 import { InMemoryWorkspaceStore } from "./workspace-store.js";
 
 function setup() {

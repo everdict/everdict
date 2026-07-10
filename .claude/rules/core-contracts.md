@@ -1,11 +1,19 @@
 ---
-paths: "packages/core/**"
+paths: "packages/{contracts,domain}/**"
 ---
-# Core contracts rules (push)
+# Contracts + domain kernel rules (push)
 
-`core` is the dependency ROOT. See skill `core-contracts`.
+`@everdict/contracts` is the dependency ROOT; `@everdict/domain` is the pure business kernel over it.
+See skill `core-contracts`. (These were `@everdict/core` before the re-architecture — `core` split into
+`contracts` [types/schemas/errors] + `domain` [the kernel]. `suite`/`run-case`/`billing` also folded into
+this spine.)
 
-- MUST NOT import from `drivers` / `harnesses` / `graders` / `runner` / `apps/*` or any SDK.
-- No I/O. Pure types, Zod schemas, and error classes only.
+- `@everdict/contracts` MUST NOT import from `domain` / any adapter (`drivers` / `harnesses` / `graders` /
+  `application-*` / `db` / …) / `apps/*` or any SDK. `@everdict/domain` may import ONLY `@everdict/contracts`.
+- No I/O in either. Contracts = pure types, Zod schemas, error classes, and the job-result wire codec.
+  Domain = pure business logic (aggregates, version algebra, scoring/suite semantics, the authz matrix, placement
+  policy) over the contracts — still no I/O, no SDKs.
 - Every contract has a paired **Zod schema** — the schema is the source of truth; derive the type with `z.infer`.
-- Interfaces (`Driver` / `EvaluableHarness` / `Grader` / `Environment`) live HERE; implementations live in adapter packages. (This is the one deliberate inversion of the single-impl "no interfaces" rule — Everdict is a plugin runtime.)
+- Interfaces (`Driver` / `EvaluableHarness` / `Grader` / `Environment`, plus the store/registry/`Dispatcher`
+  ports the application layers own) live in the contract/port root; implementations live in adapter packages.
+  This is the one deliberate inversion of the single-impl "no interfaces" rule — Everdict is a plugin runtime.

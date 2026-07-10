@@ -13,7 +13,7 @@ everdict suite --suite suite.json --harness-version 1.1.0 --baseline v1.0.0-scor
 `--orchestrator`, `--backends-config`, …): it dispatches each case via the chosen orchestrator and
 aggregates into a Scorecard + a per-metric summary.
 
-## API (`@everdict/suite`)
+## API (`@everdict/application-control`)
 - `runSuite(suite, version, dispatch, {concurrency})` → `Scorecard`. `dispatch` is any
   `(job) → CaseResult` (a `Backend` / `Router` / `Orchestrator`).
 - `summarizeScorecard(sc)` → per-metric `{count, mean, passRate}`.

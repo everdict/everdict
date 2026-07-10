@@ -6,10 +6,6 @@ import type { SqlClient } from "../client.js";
 // put on start, take on callback (single-use — consumed and deleted). Expired ones are null. self-hosted (GHE/Mattermost)
 // carries host + clientId (public) + clientSecretName (a SecretStore key name — not the value) to re-resolve the credentials in the callback.
 
-// The pending-state shape now lives in contracts/records — re-architecture P2c; db keeps compat re-exports (removed in the P4 sweep).
-export type { OAuthStatePending } from "@everdict/contracts";
-// The store port now lives in @everdict/application-control — re-architecture P2c compat re-export (removed in the P4 sweep).
-export type { OAuthStateStore } from "@everdict/application-control";
 import type { OAuthStateStore } from "@everdict/application-control";
 
 // An unguessable state nonce. Goes out as the authorize URL's state parameter and comes back as-is in the callback.

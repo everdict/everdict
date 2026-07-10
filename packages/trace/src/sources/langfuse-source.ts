@@ -1,5 +1,4 @@
-import { type TraceEvent, UpstreamError } from "@everdict/contracts";
-import type { TraceSource } from "./trace-source.js";
+import { type TraceEvent, type TraceSource, UpstreamError } from "@everdict/contracts";
 
 // Langfuse observations — TraceWithFullDetails.observations[] in the GET /api/public/traces/{traceId} response.
 // Real-API notes: observations are fully inline (no pagination), fields are present-but-null (not optional),

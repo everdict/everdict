@@ -54,7 +54,7 @@ can move it); live-probe the cluster for `used` where cheap (Nomad counts runnin
 LAGGING the scheduler's own jobs) — best-effort, so report `0` rather than guess when a live count isn't available.
 
 ## Contracts
-`AgentJob` (`@everdict/core`) = `{ evalCase, harness:{id,version}, tenant? }`. The agent reconstructs the
+`AgentJob` (`@everdict/contracts`) = `{ evalCase, harness:{id,version}, tenant? }`. The agent reconstructs the
 harness + graders from a registry (`@everdict/agent` `makeHarness`/`makeGraders`); graders carry
 their config via `GraderSpec` (`{id, config?}`), e.g. tests-pass `{ cmd }`. `tenant` keys all the
 multi-tenant machinery below (the agent ignores it).

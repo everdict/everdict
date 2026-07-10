@@ -5,10 +5,6 @@ import type { SqlClient } from "../client.js";
 // email is not kept here — it's an SSO claim (display-only/read-only), so it comes only from the Principal. This store is
 // a mutable profile owned by the control plane (Linear-style): a person edits their own display info directly (no authz bearing).
 
-// The profile shapes now live in contracts/records — re-architecture P2c; db keeps compat re-exports (removed in the P4 sweep).
-export type { UserProfile, UserProfilePatch } from "@everdict/contracts";
-// The store port now lives in @everdict/application-control — re-architecture P2c compat re-export (removed in the P4 sweep).
-export type { UserProfileStore } from "@everdict/application-control";
 import type { UserProfileStore } from "@everdict/application-control";
 
 function nowIso(): string {

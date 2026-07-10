@@ -241,7 +241,7 @@ src/
 ```
 
 **No `storage/` in apps/api** — the storage layer is the `@everdict/db` + `@everdict/registry` packages: the
-monorepo already implements the module DAG at package level (`@everdict/core` ≈ the contracts/common tier);
+monorepo already implements the module DAG at package level (`@everdict/contracts` ≈ the contracts/common tier);
 services receive stores by injection. Import direction inside the app: `common ← core ← api`; infrastructure
 imports only common; core never imports api. Pure `git mv` + import repointing; same gates as Round 3.
 
@@ -254,7 +254,7 @@ DTO; the DTO code IS the API doc) and splits the swagger documentation from the 
 - **`api/<domain>/request/<dto>.ts`** — the 9 `<resource>.schema.ts` files split into one file per request
   Zod DTO. Registry-backed resources keep validating with the core spec schema directly (no file).
 - **`api/<domain>/response/<dto>.ts`** — response DTO schemas. Response SHAPES stay byte-identical (the
-  636-test suite pins them): reuse the `@everdict/db`/`@everdict/core` record/spec Zod schemas as the SSOT
+  636-test suite pins them): reuse the `@everdict/db`/`@everdict/contracts` record/spec Zod schemas as the SSOT
   and define only what has no schema yet.
 - **`api/<domain>/<resource>.docs.ts`** — the ControllerDocs analog: per-route OpenAPI descriptors
   (`summary`/`tags`/`params`/`querystring`/`body`/`response`) built from request/+response/ schemas via

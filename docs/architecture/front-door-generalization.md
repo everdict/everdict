@@ -7,7 +7,7 @@
 > `request.headers`/`method` knob (`frontDoor.request.headers` + the method honored from `submit`'s verb — landed).
 > No core front-door follow-ups remain.
 > - **#2 completion model — DONE.** `FrontDoorDriver` (the harness-agnostic sibling of `TopologyRuntime`) +
->   `HttpFrontDoorDriver` landed in `@everdict/topology`; `frontDoor.completion` (`sync` | `poll`) in `@everdict/core`;
+>   `HttpFrontDoorDriver` landed in `@everdict/topology`; `frontDoor.completion` (`sync` | `poll`) in `@everdict/contracts`;
 >   `ServiceTopologyBackend.dispatch` now delegates driving to the driver and fails a run on completion timeout.
 >   Default (no `completion`) = `sync` = today. (`stream`/`callback` modes deferred — see #2 below.)
 > - **#3 correlation — DONE.** `frontDoor.correlate` (`injected` | `returned`). `returned` extracts the agent's
@@ -117,7 +117,7 @@ Knob 5 is ~80% built: `resolveHarnessInstance` already maps `pins[slot] → imag
 ## Proposed contract (sketch)
 
 ```ts
-// @everdict/core — harness-spec.ts: frontDoor extension (all optional; absence = today)
+// @everdict/contracts — harness-spec.ts: frontDoor extension (all optional; absence = today)
 frontDoor: {
   service: string; submit: string; trace?: string;
   // #2 DONE — completion is a discriminated union; poll uses a *data* matcher (StatusMatch), not a string
@@ -149,7 +149,7 @@ interface FrontDoorDriver {
 type DriveOutcome = { traceRef: string; status: "done" | "failed" | "timeout" };
 // HttpFrontDoorDriver is the default impl (injectable submit/getJson/sleep/now for deterministic tests).
 
-// @everdict/core — agent-job.ts (#5): per-dispatch image override (NOT on the spec — it's a run input)
+// @everdict/contracts — agent-job.ts (#5): per-dispatch image override (NOT on the spec — it's a run input)
 AgentJob.imagePins?: Record<string /* service name */, string /* image */>;
 // @everdict/topology — image-pins.ts: applyImagePins(spec, pins) overrides images + appends a deterministic
 // `-pin-<hash>` to the effective version, so the warm pool (keyed by id@version) separates pinned variants.

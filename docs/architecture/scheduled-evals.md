@@ -54,7 +54,7 @@ automated regression monitoring with near-zero new analytics code.
   `TemporalOrchestrator` (durable). The worker (`everdict worker` → `runWorker`) holds a `Scheduler` + activities
   (`dispatchCase`); it does **not** hold a `ScorecardService`.
 - **Regression analytics already shipped** — `summarizeScorecard` / `diffScorecards` / `trendSeries`
-  (`@everdict/suite`); `onComplete` notifies (Mattermost). Records are workspace-scoped in `ScorecardStore`.
+  (`@everdict/domain`); `onComplete` notifies (Mattermost). Records are workspace-scoped in `ScorecardStore`.
 - **Auth** — `Principal.via ∈ {oidc, api-key, runner}`; `/internal/**` routes are guarded by `x-internal-token`
   (constant-time, fail-closed) — e.g. `POST /internal/tenant-keys`.
 - **`concurrency` (just shipped)** — `RunScorecardInput.concurrency` flows to `runSuite`; a scheduled run carries

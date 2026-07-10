@@ -1,8 +1,8 @@
+import type { TraceSink, TraceSinkConfig } from "@everdict/contracts";
 import { LangfuseTraceSink } from "./langfuse-sink.js";
 import { LangsmithTraceSink } from "./langsmith-sink.js";
 import { MlflowTraceSink } from "./mlflow-sink.js";
 import { PhoenixTraceSink } from "./phoenix-sink.js";
-import type { TraceSink, TraceSinkConfig } from "./trace-sink.js";
 
 // Config → TraceSink adapter. The control plane builds the workspace sink after scorecard grading completes (credentials via the auth value).
 // Symmetric with buildTraceSource (inbound) — only kind differs, the assembly is identical.

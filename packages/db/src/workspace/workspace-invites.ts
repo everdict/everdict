@@ -1,22 +1,14 @@
 import { randomUUID } from "node:crypto";
+import { hashKey } from "@everdict/application-control";
+import type { WorkspaceStore } from "@everdict/application-control";
 import type { ConsumeOutcome, CreateInviteInput, WorkspaceInviteMeta } from "@everdict/contracts";
 import type { SqlClient } from "../client.js";
-import { hashKey } from "./tenant-auth.js";
-import type { WorkspaceStore } from "./workspace-store.js";
 
 // Workspace invite (token/link redemption) store — never stores the plaintext token, keeps only the SHA-256 hash (same as tenant-keys).
 // Invite = join secret: hash-only · expiring · single-use. consume is atomic via a single CTE (since SqlClient has no transactions).
 export { hashKey }; // reused when the service hashes the plaintext token and passes it in
 
-// The invite meta/consume shapes now live in contracts/records — re-architecture P2c; db keeps compat re-exports (removed in the P4 sweep).
-export type { ConsumeOutcome, ConsumeResult, CreateInviteInput, WorkspaceInviteMeta } from "@everdict/contracts";
-// The store port now lives in @everdict/application-control — re-architecture P2c compat re-export (removed in the P4 sweep).
-export type { WorkspaceInviteStore } from "@everdict/application-control";
 import type { WorkspaceInviteStore } from "@everdict/application-control";
-
-// The invite-token primitive now lives in @everdict/application-control — re-architecture P2d compat
-// re-export (removed in the P4 sweep).
-export { generateInviteToken } from "@everdict/application-control";
 
 interface InviteRow {
   id: string;

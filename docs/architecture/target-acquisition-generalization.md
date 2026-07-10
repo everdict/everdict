@@ -122,7 +122,7 @@ Every knob is optional; its default reproduces today's behavior.
 ## Proposed contract (sketch)
 
 ```ts
-// @everdict/core — harness-spec.ts: TopologyTargetSchema gains `acquire` (optional; absence = provision = today)
+// @everdict/contracts — harness-spec.ts: TopologyTargetSchema gains `acquire` (optional; absence = provision = today)
 target?: {
   kind: "browser"; engine: "chromium";
   extension?: { ref: string };

@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-// GET /scorecards/leaderboard — (harness × model) ranking over one dataset (@everdict/suite Leaderboard).
+// GET /scorecards/leaderboard — (harness × model) ranking over one dataset (@everdict/domain Leaderboard).
 export const LeaderboardResponseSchema = z.object({
   dataset: z.string().describe("Dataset id (the benchmark)"),
   metric: z.string(),

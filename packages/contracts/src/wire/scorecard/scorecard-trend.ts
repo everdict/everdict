@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 // GET /scorecards/trend — one (dataset, metric)'s scorecards in time order + regression vs baseline
-// (@everdict/suite ScorecardTrend).
+// (@everdict/domain ScorecardTrend).
 export const ScorecardTrendResponseSchema = z.object({
   dataset: z.string().describe("Dataset id"),
   metric: z.string(),

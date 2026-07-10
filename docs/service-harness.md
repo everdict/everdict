@@ -244,7 +244,7 @@ end-to-end even when the stand-in front-door emits no GenAI spans and MLflow rej
 
 ### Target acquisition (`target.acquire`) — pluggable (round 2)
 *How* the per-case target env is acquired is the `WHAT-target` seam (`TargetAcquirer`, the fourth sibling of
-`TopologyRuntime`/`FrontDoorDriver`/`ObservationSource`). `TopologyTarget.acquire` (`@everdict/core`) selects it; absent
+`TopologyRuntime`/`FrontDoorDriver`/`ObservationSource`). `TopologyTarget.acquire` (`@everdict/contracts`) selects it; absent
 = **`provision`** (today). The per-case handle is a `TargetEnvHandle { wiring: Record<string,string>; snapshot; dispose }`
 — a **bag of named coordinates** (not one `cdpUrl`), merged into the per-run wiring so a `bodyTemplate` can reference
 any of them (`{{playwright_server_url}}`, `{{session_id}}`, …).
@@ -261,7 +261,7 @@ See `docs/architecture/target-acquisition-generalization.md`.
 
 ### Observation delivery (`target.delivery`) — pluggable
 *How* the observation reaches the grader/judge is a seam (`ObservationSource`, the `HOW-observe` sibling of
-`TopologyRuntime`/`FrontDoorDriver`). `TopologyTarget.delivery` (`@everdict/core`) selects the mode; absent =
+`TopologyRuntime`/`FrontDoorDriver`). `TopologyTarget.delivery` (`@everdict/contracts`) selects the mode; absent =
 **`reference`** (today). `dispatch` calls `observationSourceFor(spec.target?.delivery?.mode ?? "reference")`:
 - **`reference`** (store-fetch) — pull the provisioned target's `snapshot()` (or a `{kind:"prompt"}` snapshot when
   there's no target). The locality-sensitive mode — pairs with judge **co-location** (run the judge near the store).
@@ -336,7 +336,7 @@ to our per-case **CDP browser** (`chromedp/headless-shell`, `BrowserSession(cdp_
 The full eval loop on a **real browser benchmark**, through the **multi-tenant, user-owned dataset path** — since
 in a SaaS the user creates + owns datasets in their workspace.
 
-**Tenant-owned dataset model (already in place):** `Dataset` (`@everdict/core`: id, version, `cases: EvalCase[]`,
+**Tenant-owned dataset model (already in place):** `Dataset` (`@everdict/contracts`: id, version, `cases: EvalCase[]`,
 harness-independent, version-immutable) → `DatasetRegistry` (`@everdict/registry`, InMemory + `PgDatasetRegistry`,
 **tenant-scoped** with `_shared` fallback for first-party benchmarks, version-immutable) → `everdict_datasets(tenant,
 id, version, dataset jsonb)` (migration 0005) → API `POST/GET /datasets` (gated `datasets:write/read`,
@@ -1283,7 +1283,7 @@ Three more, all live:
   harness/infra-agnostic runtime emits a single report over desktop *and* web benchmarks.
 
 Three more, all live:
-- **Authoritative case-pass (`caseVerdict`/`scorecardPassRate`, `@everdict/suite`).** A case's pass shouldn't let
+- **Authoritative case-pass (`caseVerdict`/`scorecardPassRate`, `@everdict/domain`).** A case's pass shouldn't let
   an advisory VLM judge override a ground-truth grader. `caseVerdict` decides by priority — `state`/`tests_pass`
   (ground-truth) > `answer_match`/`url_matches`/`dom_contains` (objective) > `judge` (only when no objective
   grader). `scorecardPassRate` aggregates it. The unified report re-ran with this: the OSWorld case (state PASS

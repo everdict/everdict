@@ -44,7 +44,7 @@ Judges reuse the `HarnessRegistry`/`DatasetRegistry` model (`packages/registry`)
   version. So a scorecard graded by `judge@1.0.0` stays reproducible.
 - **Role-gating** — `judges:read` = viewer+, `judges:write` = **member+** (users self-register their judges).
 
-## Contract (`@everdict/core`)
+## Contract (`@everdict/contracts`)
 `JudgeSpec` = `discriminatedUnion("kind", [ModelJudgeSpec, HarnessJudgeSpec])` (`JudgeSpecSchema`). Both share
 `id, version, description?, tags`.
 

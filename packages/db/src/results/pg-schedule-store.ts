@@ -1,5 +1,6 @@
+import type { ScheduleStore } from "@everdict/application-control";
+import { type ScheduleRecord, ScheduleRecordSchema } from "@everdict/contracts";
 import type { SqlClient } from "../client.js";
-import { type ScheduleRecord, ScheduleRecordSchema, type ScheduleStore } from "./schedule-store.js";
 
 interface ScheduleRow {
   id: string;

@@ -8,12 +8,17 @@ import {
 } from "@everdict/contracts";
 import { referencesUserSecret } from "@everdict/domain";
 import { asService } from "../registry.js";
-import { type VersionMeta, VersionedStore } from "../versioned-store.js";
+import { VersionedStore } from "../versioned-store.js";
 
-// The port + its list-entry/metadata types now live in @everdict/application-control — re-architecture P2d compat re-export (removed in the P4 sweep).
+// The registry port + its list-entry/metadata types live in @everdict/application-control; this InMemory impl
+// `implements` the port, so the registry re-exports it here beside the impl as a deliberate convenience.
 export type { HarnessInstanceRegistry, HarnessListEntry } from "@everdict/application-control";
-import type { HarnessInstanceRegistry, HarnessListEntry } from "@everdict/application-control";
-import type { HarnessTemplateRegistry } from "@everdict/application-control";
+import type {
+  HarnessInstanceRegistry,
+  HarnessListEntry,
+  HarnessTemplateRegistry,
+  VersionMeta,
+} from "@everdict/application-control";
 
 // resolved HarnessSpec → subtitle (for list display). command = model/command, service = service count. undefined if none.
 export function harnessSubtitle(spec: HarnessSpec): string | undefined {

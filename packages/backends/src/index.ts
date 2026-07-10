@@ -29,24 +29,6 @@ export {
   type BackendSlot,
   type SchedulerOptions,
 } from "./scheduling/scheduler.js";
-export { CircuitBreaker, type CircuitBreakerOpts } from "./scheduling/circuit-breaker.js";
-export { FairQueue, type FairQueueOptions } from "./scheduling/fair-queue.js";
-export {
-  Autoscaler,
-  MutableSlots,
-  desiredCapacity,
-  aggregateLoad,
-  type LoadSignal,
-  type AutoscalePolicy,
-  type ScalingTarget,
-  type AutoscalerOptions,
-} from "./scheduling/autoscaler.js";
-export {
-  type TrustZonePolicy,
-  perTenantTrustZones,
-  staticTrustZones,
-  type PerTenantTrustZoneOptions,
-} from "./policy/trust-zone.js";
 export { type SecretProvider, staticSecrets } from "./policy/secrets.js";
 export {
   NomadBackend,

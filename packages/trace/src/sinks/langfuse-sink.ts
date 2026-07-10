@@ -1,5 +1,11 @@
-import { UpstreamError } from "@everdict/contracts";
-import type { TraceSink, TraceSinkCase, TraceSinkCaseResult, TraceSinkContext, TraceSinkResult } from "./trace-sink.js";
+import {
+  type TraceSink,
+  type TraceSinkCase,
+  type TraceSinkCaseResult,
+  type TraceSinkContext,
+  type TraceSinkResult,
+  UpstreamError,
+} from "@everdict/contracts";
 
 // Langfuse sink — all cases via batch ingestion (POST /api/public/ingestion), scores as score-create events.
 // Real-API notes: auth is Basic base64(pk:sk) verbatim, the event envelope id is the dedup key and body.id the entity upsert key,

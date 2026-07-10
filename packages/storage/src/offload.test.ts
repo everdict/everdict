@@ -1,6 +1,7 @@
+import { type ArtifactStore, offloadSnapshot } from "@everdict/application-control";
 import type { EnvSnapshot } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
-import { type ArtifactStore, InMemoryArtifactStore, offloadSnapshot } from "./artifact-store.js";
+import { InMemoryArtifactStore } from "./artifact-store.js";
 
 describe("offloadSnapshot (os-use screenshot → object storage)", () => {
   it("offloads the embedded os-use base64 to the store → screenshotRef=URL, clears screenshot (slim record)", async () => {

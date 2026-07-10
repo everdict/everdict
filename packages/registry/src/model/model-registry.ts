@@ -1,7 +1,8 @@
 import type { ModelSpec } from "@everdict/contracts";
 import { VersionedStore } from "../versioned-store.js";
 
-// The port now lives in @everdict/application-control — re-architecture P2d compat re-export (removed in the P4 sweep).
+// The registry port lives in @everdict/application-control; this InMemory impl `implements` it, so the registry
+// re-exports the port here beside the impl as a deliberate convenience (a consumer imports both together).
 export type { ModelRegistry } from "@everdict/application-control";
 import type { ModelRegistry } from "@everdict/application-control";
 

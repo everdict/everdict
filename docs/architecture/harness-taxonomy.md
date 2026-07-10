@@ -40,7 +40,7 @@ Template (category)         "the shape"          versions unpinned, declares slo
   existing `process | service | command` spec the backends/runtime already consume. **Nothing downstream of
   resolution changes** — `AgentJob.harness:{id,version}` still names a concrete, runnable thing.
 
-## Schemas (`@everdict/core`)
+## Schemas (`@everdict/contracts`)
 
 New authoring schemas. The existing `HarnessSpecSchema` (`process|service|command`) is **demoted to the resolved
 form only** — produced by `resolve()`, consumed by backends/runtime, and no longer accepted as a registration
@@ -163,7 +163,7 @@ All Track A phases land together as the clean break (no dual path is ever shippe
    instance table w/ pin diff) + the two forms.
 6. (later) **Track B**: image-source integrations feeding the per-slot pin picker.
 
-> Blast radius (single change set): `@everdict/core` harness-spec, `@everdict/registry` (in-memory + Pg + loaders +
+> Blast radius (single change set): `@everdict/contracts` harness-spec, `@everdict/registry` (in-memory + Pg + loaders +
 > migration), `@everdict/auth` authz matrix, `apps/api` (server + mcp + run-service), `apps/web` register-harness +
 > harnesses pages, `examples/harnesses/*`, and the tests across all of them.
 
@@ -304,7 +304,7 @@ isolation.
 
 - **Phase 1 — runtime-agnostic, `resolve()`-time only (implemented now):** per-service `env` overlay (service) +
   front-door `request.bodyTemplate` value override (service) + command `env` overlay + command `params` (`{{var}}`).
-  Pure `@everdict/core` schema + `resolveHarnessInstance` merge + `CommandHarness` `{{var}}` substitution. Flows
+  Pure `@everdict/contracts` schema + `resolveHarnessInstance` merge + `CommandHarness` `{{var}}` substitution. Flows
   end-to-end through API/MCP immediately (they validate `HarnessInstanceSpecSchema`, which now accepts `overrides`).
 - **Phase 2 — orchestrator knobs (implemented):** `resources { cpu, memoryMb }` added to `TopologyService` and
   honored by all three runtimes — nomad `Resources.CPU/MemoryMB` (replacing the hardcoded `1000/1024`), k8s
@@ -326,7 +326,7 @@ isolation.
   assembles the spec, `instanceStateFromSpec` round-trips existing overrides back into the fields for
   edit→new-version; the Config panel renders the resolved overrides. MCP/HTTP parity is automatic (schema-driven JSON).
 
-> Blast radius: `@everdict/core` (`harness-spec` `params`/`ServiceResources`/`TopologyService.resources`,
+> Blast radius: `@everdict/contracts` (`harness-spec` `params`/`ServiceResources`/`TopologyService.resources`,
 > `harness-template` `overrides` + resolve), `@everdict/harnesses` (`CommandHarness` `{{var}}`), `@everdict/topology`
 > (nomad/k8s/docker resources + volumes + readiness honoring), `apps/web` (structured override editor), + tests.
 > No registry, auth, or API route changes (the instance JSON round-trips through the validated schema).

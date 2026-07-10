@@ -51,7 +51,7 @@ So two features, one axis:
 - **Secrets are NAME references** (`pullSecretName` / `pushSecretName`), values live in the
   workspace SecretStore — same discipline as `botTokenSecretName` / runtime `authSecret`
   (rule `workspace-integrations`).
-- **Classification is pure and lives in `@everdict/core`** (`classifyImageRef`) — no I/O, callers
+- **Classification is pure and lives in `@everdict/contracts`** (`classifyImageRef`) — no I/O, callers
   pass the workspace registry coordinates. The web mirrors it with a loose client-side copy
   (web is a pure HTTP client; precedent: `harnessInstanceSpecSchema` loose mirror).
 - **Push happens on the user's machine, credentials minted by the control plane.** The control

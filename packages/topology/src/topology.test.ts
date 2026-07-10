@@ -1,5 +1,5 @@
-import { perTenantTrustZones } from "@everdict/backends";
 import type { AgentJob, BrowserSnapshot, Grader, ServiceHarnessSpec, TraceEvent, TrustZone } from "@everdict/contracts";
+import { perTenantTrustZones } from "@everdict/domain";
 import type { TraceSource } from "@everdict/trace";
 import { describe, expect, it } from "vitest";
 import { buildSharedStoreManifests } from "./deploy/dependencies.js";

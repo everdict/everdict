@@ -77,7 +77,7 @@ and no-verdict cases both re-run).
 
 ## Failure taxonomy (WHERE it died × WHOSE fault)
 
-`CaseResult.failure` = `{stage, class, code, message, retryable}` (`@everdict/core` `classifyFailure`):
+`CaseResult.failure` = `{stage, class, code, message, retryable}` (`@everdict/domain` `classifyFailure`):
 **infra** (platform's fault — placement, network, OOM, log race; usually retryable) · **config** (workspace
 setup — missing secret, bad pin; retrying changes nothing) · **harness** (its own install/run crash; same input →
 same failure) · **agent** (a legitimate grader verdict — never a "failure", never auto-retried). Backends stamp

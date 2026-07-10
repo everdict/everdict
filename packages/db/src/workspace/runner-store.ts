@@ -1,7 +1,7 @@
 import { randomBytes, randomUUID } from "node:crypto";
+import { hashKey } from "@everdict/application-control";
 import type { PairRunnerInput, PairedRunner, ResolvedRunner, RunnerMeta } from "@everdict/contracts";
 import type { SqlClient } from "../client.js";
-import { hashKey } from "./tenant-auth.js";
 
 // Self-hosted runner store — a personal device where a user paired their own machine with a workspace.
 // Same model as Connected accounts (ConnectionStore): personally owned (owner=principal.subject) + workspace-visible
@@ -9,10 +9,6 @@ import { hashKey } from "./tenant-auth.js";
 // and returns the result (design: docs/architecture/self-hosted-runner.md). Dispatch/lease are a later slice.
 // No plaintext storage for the pairing token — only the SHA-256 hash is kept (same as a tenant API key) and the plaintext is shown once at pairing.
 
-// The runner meta/pairing shapes now live in contracts/records — re-architecture P2c; db keeps compat re-exports (removed in the P4 sweep).
-export type { PairedRunner, PairRunnerInput, ResolvedRunner, RunnerMeta } from "@everdict/contracts";
-// The store port now lives in @everdict/application-control — re-architecture P2c compat re-export (removed in the P4 sweep).
-export type { RunnerStore } from "@everdict/application-control";
 import type { RunnerStore } from "@everdict/application-control";
 
 // rnr_<random> — plaintext pairing token. Shown once at issuance and stored only as a hash.

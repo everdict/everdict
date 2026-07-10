@@ -1,4 +1,3 @@
-export { LATEST, SHARED_TENANT, compareVersions, sortVersions, specsEqual } from "./registry.js";
 export { type HarnessTemplateRegistry, InMemoryHarnessTemplateRegistry } from "./harness/harness-template-registry.js";
 export { type HarnessInstanceRegistry, InMemoryHarnessInstanceRegistry } from "./harness/harness-instance-registry.js";
 export { PgHarnessTemplateRegistry } from "./harness/pg-harness-template-registry.js";

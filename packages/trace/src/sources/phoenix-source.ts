@@ -1,5 +1,4 @@
-import { type TraceEvent, UpstreamError } from "@everdict/contracts";
-import type { TraceSource } from "./trace-source.js";
+import { type TraceEvent, type TraceSource, UpstreamError } from "@everdict/contracts";
 
 // Arize Phoenix spans — the GET /v1/projects/{p}/spans?trace_id=<hex> response (Span schema, read side).
 // Real-API notes: there is no GET /v1/traces/{id} — cursor-loop the project spans via the trace_id filter (≥13.9.0).

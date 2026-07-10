@@ -5,9 +5,6 @@ import { MlflowTraceSource } from "./mlflow.js";
 import { OtelTraceSource } from "./otel.js";
 import { PhoenixTraceSource } from "./phoenix-source.js";
 
-// The config shape now lives in @everdict/contracts — re-architecture P2 compat re-export (removed in the P4 sweep).
-export type { TraceSourceConfig } from "@everdict/contracts";
-
 // Config → TraceSource adapter. The control plane builds the tenant's trace source on pull-ingest (credentials via headers/auth).
 export function buildTraceSource(cfg: TraceSourceConfig): TraceSource {
   const opts = {

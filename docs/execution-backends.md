@@ -2,7 +2,7 @@
 
 Two layers decide *where a harness run executes*:
 
-- **Driver** (`@everdict/core`, in-sandbox compute): runs the harness as a subprocess INSIDE an
+- **Driver** (`@everdict/contracts`, in-sandbox compute): runs the harness as a subprocess INSIDE an
   already-isolated unit. The runner-agent uses `LocalDriver`.
 - **Backend** (`@everdict/backends`, placement): dispatches a runner-agent job to an orchestrator
   and returns the `CaseResult`. Isolation is the orchestrator's job, not Everdict's.
@@ -134,7 +134,7 @@ Live proof:
 
 ## Tenant isolation (trust zones)
 Eval runs **untrusted code** — a tenant uploads its own harness image/code, which executes arbitrarily.
-So multi-tenancy is a *security* boundary, not just fairness. A `TrustZone` (`@everdict/core`) maps a tenant
+So multi-tenancy is a *security* boundary, not just fairness. A `TrustZone` (`@everdict/contracts`) maps a tenant
 to enforced isolation: `{isolationRuntime, namespace, network, trusted}`. A `TrustZonePolicy`
 (`@everdict/backends`) resolves `tenant → TrustZone`; `perTenantTrustZones()` is the safe default — **every
 tenant gets its own zone** (hardened `runsc`, dedicated `everdict-<tenant>` namespace, `deny-cross-tenant`,

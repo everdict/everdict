@@ -1,12 +1,12 @@
-import { UpstreamError } from "@everdict/contracts";
-import type {
-  TraceSink,
-  TraceSinkCase,
-  TraceSinkCaseResult,
-  TraceSinkContext,
-  TraceSinkResult,
-  TraceSinkScore,
-} from "./trace-sink.js";
+import {
+  type TraceSink,
+  type TraceSinkCase,
+  type TraceSinkCaseResult,
+  type TraceSinkContext,
+  type TraceSinkResult,
+  type TraceSinkScore,
+  UpstreamError,
+} from "@everdict/contracts";
 
 // Arize Phoenix sink — spans go via JSON-only REST (POST /v1/projects/{p}/spans, ≥10.12), scores via trace annotations.
 // Real-API notes: /v1/traces is protobuf-only (doesn't accept OTLP/JSON — the JSON adapter uses projects/{p}/spans),

@@ -11,7 +11,7 @@
 >   [streaming-case-pipeline](./streaming-case-pipeline.md) D4).
 >   No settle/offload/notify (S2 stripped `settle` out). `run` no longer cares about "after".
 > - **Scoring** = `scoring-service.ts` `ScoringService` — judge application over results, independent of how
->   they were produced (S1). Live batch **and** ingest share it. Aggregation stays pure in `@everdict/suite`.
+>   they were produced (S1). Live batch **and** ingest share it. Aggregation stays pure in `@everdict/domain`.
 > - **Orchestration** = `RunService` (single: admit → executeCase → settle → offload → webhook → notify) and
 >   `ScorecardService` (batch: fan-out executeCase + per-case settle/child-run → `ScoringService` → suite aggregate
 >   → store). These *drive* execution and *own* delivery/accounting.
@@ -52,7 +52,7 @@ Ingest is the existence proof for Concern 3.
 
 ## Two execution *layers* (don't confuse them)
 
-- **In-sandbox** (`@everdict/run-case` `runCase`): drive the harness-under-test via a Driver → `CaseResult`, *inside* the
+- **In-sandbox** (`@everdict/application-execution` `runCase`): drive the harness-under-test via a Driver → `CaseResult`, *inside* the
   isolated agent job. Untouched by this refactor.
 - **Control plane** (this doc): dispatch a job to a backend, get the `CaseResult` back, record it. This is where the
   three concerns tangle. To avoid a name clash with `runner.runCase`, the control-plane unit is **`materializeRun`**.
@@ -77,7 +77,7 @@ Ingest is the existence proof for Concern 3.
      · (NO settle/notify)           → settle → offload                 · applyJudges (JudgeRunner)
                                     → webhook → notify (202)
    materializeRun(record, job)                                         → scored results
-     = executeCase + record       BatchDriver (scorecard):          @everdict/suite (pure):
+     = executeCase + record       BatchDriver (scorecard):          @everdict/domain (pure):
        (create→exec→update)         admit/settle per case              summarize · diff · leaderboard
        returns RunRecord            → fan-out materializeRun          @everdict/graders (pure): grade
        "ignores the rest"            → collect → steps
@@ -93,9 +93,9 @@ Ingest is the existence proof for Concern 3.
 | Module | Concern | Responsibility (as shipped) |
 |---|---|---|
 | `execute-case.ts` | Execution | `executeCase(deps, owner, job) → CaseResult` — repo-token resolve+attach + dispatch **only**. No settle/offload/notify. |
-| `scoring-service.ts` | Scoring | `ScoringService` — `applyJudges` + `collectJudgeModels` over results. Used by batch **and** ingest. Aggregation stays pure in `@everdict/suite`. |
+| `scoring-service.ts` | Scoring | `ScoringService` — `applyJudges` + `collectJudgeModels` over results. Used by batch **and** ingest. Aggregation stays pure in `@everdict/domain`. |
 | `run-service.ts` | Orchestration (single) | admit → create → `executeCase` (async) → **settle** → offload → webhook → notify. 202. |
-| `scorecard-service.ts` | Orchestration (batch) + composition | `submit` = fan-out `executeCase` per case (+ per-case settle + child-run lifecycle) → `ScoringService` (judges) → `@everdict/suite` (summarize/models) → store. `ingest` = fetch traces → `ScoringService` → store. Now clearly *scoring/aggregation-focused*, delegating execution + scoring out. |
+| `scorecard-service.ts` | Orchestration (batch) + composition | `submit` = fan-out `executeCase` per case (+ per-case settle + child-run lifecycle) → `ScoringService` (judges) → `@everdict/domain` (summarize/models) → store. `ingest` = fetch traces → `ScoringService` → store. Now clearly *scoring/aggregation-focused*, delegating execution + scoring out. |
 | `notification-service.ts` | Orchestration (delivery) | already separate; a completion hook (run + scorecard). |
 
 > No `materialize-run.ts` / `batch-driver.ts` were created — see the status block. The RunRecord create/update in
@@ -111,7 +111,7 @@ Ingest is the existence proof for Concern 3.
   visibly orchestration.
 - **out of `ScorecardService`**: `applyJudges` → `ScoringService`. `ScorecardService.track` keeps
   only: fan-out (via BatchDriver/`materializeRun`), progress steps, calling the scorer, aggregating (suite), storing.
-- **unchanged**: `@everdict/graders`, `@everdict/suite` (already pure), `@everdict/run-case` (in-sandbox), API response shapes,
+- **unchanged**: `@everdict/graders`, `@everdict/domain` (already pure), `@everdict/application-execution` (in-sandbox), API response shapes,
   `runIds`/child-run behavior, ingest's embed-only, MCP/HTTP surface.
 
 ## Migration slices
@@ -128,7 +128,7 @@ Ingest is the existence proof for Concern 3.
 - **Do NOT route the batch through `RunService.submit`.** That bundles single-run *delivery* (202/webhook/per-run
   notify/submit-admit) which must not fire per case. The shared unit is `executeCase` (pure execution), not the
   single-run orchestrator. (See [run-as-primitive](./run-as-primitive.md) §"Why not go through RunService".)
-- **In-sandbox `@everdict/run-case` untouched.** This is a control-plane decomposition only.
+- **In-sandbox `@everdict/application-execution` untouched.** This is a control-plane decomposition only.
 - **No API/MCP/web shape changes.** `GET /scorecards/:id` still returns a hydrated scorecard; `POST /runs` etc.
   unchanged. This is an internal seam refactor.
 - **Ingest stays embed-only** (no dispatched runs) — it scores fetched traces via the same `ScoringService`.

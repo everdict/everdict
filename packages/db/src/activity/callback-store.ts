@@ -4,8 +4,6 @@ import type { SqlClient } from "../client.js";
 // (docs/architecture/completion-stream-callback.md). With several control planes, the agent's terminal
 // POST /frontdoor-callback/:runId may land on a replica that isn't driving the run: deliver() writes the body
 // here, and the driving replica's wait loop CLAIMS it (atomically — exactly one waiter consumes each body).
-// The store port now lives in @everdict/application-control — re-architecture P2c compat re-export (removed in the P4 sweep).
-export type { CallbackStore } from "@everdict/application-control";
 import type { CallbackStore } from "@everdict/application-control";
 
 export class InMemoryCallbackStore implements CallbackStore {

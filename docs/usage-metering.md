@@ -51,7 +51,7 @@ disables metering fail-safe for `containerize` jobs (warn logged) — meter thos
    does `budget.settle(tenant, costOf(result))` and persists `result` in the `RunStore`. No RunService change.
 5. **Surfaced on the run record:** `RunStore` get/list/update return `RunRecord.usage`
    (`{promptTokens, completionTokens, totalTokens, usd, calls}`), **derived** from `result.trace` via
-   `usageFromTrace` (`@everdict/core`) on read — no column, no migration, always consistent. Clients (API/MCP/web)
+   `usageFromTrace` (`@everdict/domain`) on read — no column, no migration, always consistent. Clients (API/MCP/web)
    read `record.usage` without parsing the trace.
 
 ## Verified

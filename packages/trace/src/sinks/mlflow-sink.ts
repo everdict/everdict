@@ -1,12 +1,12 @@
-import { UpstreamError } from "@everdict/contracts";
-import type {
-  TraceSink,
-  TraceSinkCase,
-  TraceSinkCaseResult,
-  TraceSinkContext,
-  TraceSinkResult,
-  TraceSinkScore,
-} from "./trace-sink.js";
+import {
+  type TraceSink,
+  type TraceSinkCase,
+  type TraceSinkCaseResult,
+  type TraceSinkContext,
+  type TraceSinkResult,
+  type TraceSinkScore,
+  UpstreamError,
+} from "@everdict/contracts";
 
 // MLflow 3.x sink — scores via assessments REST (≥3.2), trace creation via StartTraceV3 (trace_info) + OTLP span upload.
 // Real-API notes: fields are snake_case, the score field name is `assessment_name` (not name), source_type/source_id are required,

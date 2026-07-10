@@ -1,5 +1,5 @@
-import { type TraceEvent, UpstreamError } from "@everdict/contracts";
-import { type Span, type TraceSource, spansToTraceEvents } from "./trace-source.js";
+import { type TraceEvent, type TraceSource, UpstreamError } from "@everdict/contracts";
+import { type Span, spansToTraceEvents } from "./trace-source.js";
 
 // Span attributes in the MLflow 3.x trace REST are an OTLP-style AnyValue (snake_case) array — a format distinct from OTel (camelCase).
 // Also supports nested kvlist/array (spanInputs/Outputs etc. arrive as a kvlist).

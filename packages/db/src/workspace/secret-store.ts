@@ -6,10 +6,6 @@ import type { EncryptedSecret, SecretCipher } from "./secret-cipher.js";
 // scope: "workspace" (owner='') = shared (admin-managed) · "user" (owner=subject) = that user's personal (self-managed, invisible to others).
 // Values are AES-GCM encrypted at rest and never returned as plaintext (list has only name+scope). Only entries/scopedEntries decrypt (injection-only).
 
-// The scope/meta/entries shapes now live in contracts/records — re-architecture P2c; db keeps compat re-exports (removed in the P4 sweep).
-export type { ScopedSecretEntries, SecretMeta, SecretScope } from "@everdict/contracts";
-// The store port now lives in @everdict/application-control — re-architecture P2c compat re-export (removed in the P4 sweep).
-export type { SecretStore } from "@everdict/application-control";
 import type { SecretStore } from "@everdict/application-control";
 
 interface MemRow {

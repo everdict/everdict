@@ -11,10 +11,6 @@ import type { SqlClient } from "../client.js";
 //  - scopes = per-key permission scope (read|write|admin). Unset (legacy row/full access) → undefined = unrestricted.
 //             The permission matrix (scope→action) is owned by @everdict/auth (this is a dumb string store; avoids a cyclic dependency).
 
-// The key meta/resolution shapes now live in contracts/records — re-architecture P2c; db keeps compat re-exports (removed in the P4 sweep).
-export type { ResolvedKey, TenantKeyMeta } from "@everdict/contracts";
-// The store port now lives in @everdict/application-control — re-architecture P2c compat re-export (removed in the P4 sweep).
-export type { TenantKeyStore } from "@everdict/application-control";
 import type { TenantKeyStore } from "@everdict/application-control";
 
 interface KeyRow {
@@ -128,10 +124,6 @@ export class PgTenantKeyStore implements TenantKeyStore {
     );
   }
 }
-
-// The credential primitives now live in @everdict/application-control — re-architecture P2d compat
-// re-export (removed in the P4 sweep).
-export { generateKey, hashKey } from "@everdict/application-control";
 
 // Issue a new key for a tenant → store the hash + non-secret meta (id/label/prefix/scopes), return the plaintext (the caller shows it once and discards it).
 // If scopes is unset, it's stored as unrestricted (full access) — deciding the scope default (e.g. ["admin"]) is the caller's (API/MCP boundary) responsibility.

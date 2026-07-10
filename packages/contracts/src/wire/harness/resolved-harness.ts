@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { HarnessSpecSchema } from "../../harness/harness-spec.js";
 
-// GET /harnesses/:id/:version 200 — the resolved HarnessSpec (template + pins applied). SSOT: @everdict/core.
+// GET /harnesses/:id/:version 200 — the resolved HarnessSpec (template + pins applied). SSOT: @everdict/contracts.
 // The response additionally carries `imageClasses` (re-architecture P1g): per-image provenance
 // classification against ALL workspace registries, computed at serve time so no client re-implements
 // the rule (the apps/web classifyImageRef mirror was deleted).

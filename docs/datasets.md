@@ -129,7 +129,7 @@ gated benchmark end-to-end from the web. The wizard is state-aware: gated + no t
 **BFF↔MCP parity**: MCP tools
 `preview_benchmark_source` + `import_benchmark` mirror the routes. See `docs/mcp.md`.
 
-## Contract (`@everdict/core`)
+## Contract (`@everdict/contracts`)
 `Dataset = { id, version, description?, cases: EvalCase[], tags: string[], producedBy? }` (`DatasetSchema`).
 A case is **rows of inputs/outputs** (docs/architecture/eval-domain-model.md S5): `EvalCase.expected?` carries the
 reference output as case DATA — `answer-match` falls back to it when the grader has no `expect` config, and judges
@@ -171,7 +171,7 @@ Other-workspace reads → `404`/`NOT_FOUND` (no existence leak). See `docs/api.m
 
 ## Version diff (`diffDatasets`, `@everdict/datasets`)
 Because versions are immutable, two versions of the same dataset are a reproducible pair to compare.
-`diffDatasets(base, candidate)` (pure, `@everdict/core` `DatasetDiff` shape) matches cases **by case id** and reports:
+`diffDatasets(base, candidate)` (pure, `@everdict/contracts` `DatasetDiff` shape) matches cases **by case id** and reports:
 - **added** / **removed** — cases present only in candidate / only in base (`{ id, task }`).
 - **changed** — same case id, different content; each lists *which* fields differ (`task` / `env` / `graders` /
   `image` / `timeoutSec` / `tags` / `placement`) with a `before`/`after` string (key-order-stable comparison, so

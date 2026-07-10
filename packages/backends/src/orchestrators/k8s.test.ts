@@ -1,9 +1,9 @@
 import { stat } from "node:fs/promises";
 import { RESULT_SENTINEL } from "@everdict/contracts";
 import { type AgentJob, BadRequestError, type CaseResult, UpstreamError } from "@everdict/contracts";
+import { perTenantTrustZones, staticTrustZones } from "@everdict/domain";
 import { describe, expect, it } from "vitest";
 import { staticSecrets } from "../policy/secrets.js";
-import { perTenantTrustZones, staticTrustZones } from "../policy/trust-zone.js";
 import {
   K8S_REGISTRY_AUTH_SECRET,
   type K8sApi,

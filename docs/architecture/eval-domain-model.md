@@ -47,7 +47,7 @@ Grader   (evaluator binding: judge model/harness/script + rubric ref → Score[]
 ## Contract sketch
 
 ```ts
-// ── @everdict/core ────────────────────────────────────────────────────────────
+// ── @everdict/contracts ────────────────────────────────────────────────────────────
 // (2) Multi-metric: the ONE structural unlock. Everything downstream already copes.
 interface Grader {
   readonly id: string;

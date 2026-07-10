@@ -12,7 +12,7 @@ own runtimes ("bring your own compute") and select one per scorecard run; the co
 > Easiest path: the [desktop app](architecture/desktop-app.md) — one-click "Connect this device as a runner" on the
 > account page (no token copy); headless boxes use `everdict runner --pair <rnr_…>`.
 
-## Contract (`@everdict/core`)
+## Contract (`@everdict/contracts`)
 `RuntimeSpec` = `discriminatedUnion("kind", [...])` (`RuntimeSpecSchema`) with `id, version, description?, tags`:
 - **local** — in-process on the **control-plane host** (**dev only**; *not* the user's machine — see the
   self-hosted runner callout above).

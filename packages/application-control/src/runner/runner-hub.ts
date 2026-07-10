@@ -23,7 +23,7 @@ export function selfHostedBackendName(key: SelfHostedKey): string {
 }
 
 // What the placement gate looks at = the **functional** capabilities the job requires (rejected if the runner can't advertise them).
-// Derived from the case (@everdict/core requiredCapabilities): image→docker · repo-git→git · browser→browser · os-use→computer-use.
+// Derived from the case (@everdict/contracts requiredCapabilities): image→docker · repo-git→git · browser→browser · os-use→computer-use.
 // security(sandbox)/auth(login) are enforced by their own layers (trust-zone/budget), not placement, so here we only look at functional.
 // Leasing an image-required job to a runner without Docker would run it in the wrong environment via host-native fallback → reject explicitly.
 // Design: docs/architecture/self-hosted-runtime-and-runners.md · portable-harness-runtime.md (placement gate).

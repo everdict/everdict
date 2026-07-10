@@ -4,11 +4,18 @@ How the `packages/*` and `apps/*` modules cooperate — first at low zoom (the w
 then at high zoom (one diagram per module). Companion to
 [`overview.md`](overview.md) (the narrative map). Diagrams are Mermaid; GitHub renders them inline.
 
+> **Re-architecture note.** The layer spine is now `@everdict/contracts ← @everdict/domain ←
+> @everdict/application-{execution,control}`. The former packages this doc names map as: `@everdict/core`
+> → `@everdict/contracts` (types/schemas/errors) + `@everdict/domain` (the pure kernel); `@everdict/run-case`
+> → `@everdict/application-execution` (`runCase`); `@everdict/suite` → `@everdict/domain` (the pure
+> aggregation fns `summarizeScorecard`/`diffScorecards`/`caseVerdict`/`leaderboard`) + `@everdict/application-control`
+> (`runSuite`). The **collaboration relationships** below are unchanged; only the package homes moved.
+
 ## How to read these
 
 - **Arrow = "uses / depends on / calls"**, pointing from the consumer to the provider — the same
   direction as the `import`. Reverse imports are bugs (one-way dependency rule).
-- `<<interface>>` = a contract from `@everdict/core` (the dependency root). Concrete classes live in
+- `<<interface>>` = a contract from `@everdict/contracts` (the dependency root). Concrete classes live in
   outer packages and **realize** those contracts (`..|>`).
 - Two cooperating planes share the same `(job) → CaseResult` seam:
   - **in-sandbox eval loop** — `runCase` drives Driver · Environment · Harness · Grader.
@@ -29,7 +36,7 @@ hanging off it (many Drivers / Harnesses / Graders / Backends / Registries).
 ```mermaid
 flowchart TD
   subgraph L0["contracts (root)"]
-    core["@everdict/core<br/><i>interfaces + Zod + errors</i>"]
+    core["@everdict/contracts<br/><i>interfaces + Zod + errors</i>"]
   end
 
   subgraph L1["in-sandbox adapters + trace"]
@@ -41,7 +48,7 @@ flowchart TD
   end
 
   subgraph L2["eval loop"]
-    runner["@everdict/run-case"]
+    runner["@everdict/application-execution"]
   end
 
   subgraph L3["dispatched unit (self-contained worker)"]
@@ -55,7 +62,7 @@ flowchart TD
   subgraph L5["control / execution"]
     orchestrator["@everdict/orchestrator"]
     topology["@everdict/topology"]
-    suite["@everdict/suite"]
+    suite["@everdict/domain"]
   end
 
   subgraph CP["control-plane stores"]
@@ -134,7 +141,7 @@ sequenceDiagram
   participant Caller as Orchestrator / Router / Scheduler
   participant Backend
   participant Agent as @everdict/agent
-  participant Runner as @everdict/run-case
+  participant Runner as @everdict/application-execution
   participant Driver as LocalDriver
   participant Compute as ComputeHandle
   participant Env as RepoEnvironment
@@ -215,7 +222,7 @@ in/out edges that matter.
 
 ---
 
-## `@everdict/core` — contracts (the dependency root)
+## `@everdict/contracts` — contracts (the dependency root)
 
 **Role.** Interfaces + Zod schemas + the `AppError` hierarchy. No I/O, no SDKs. Every other module
 realizes or consumes these. Schema is the source of truth; types are `z.infer`.
@@ -334,7 +341,7 @@ classDiagram
 
 - **`provision`** → `mkdtemp(/tmp/everdict-…)` → `LocalComputeHandle(root)`.
 - **`exec`** runs via `child_process` (non-zero exit ≠ throw); **`dispose`** = `rm -rf root`.
-- **Called by:** `@everdict/run-case` (`runCase`) and therefore `@everdict/agent`.
+- **Called by:** `@everdict/application-execution` (`runCase`) and therefore `@everdict/agent`.
 
 ---
 
@@ -360,7 +367,7 @@ classDiagram
 
 - **`seed`** — inline `files` map (`git init` + commit a baseline) **or** `git clone --depth 1` + `checkout ref` + run `setup[]`.
 - **`snapshot`** — `git add -A` → `git diff --cached HEAD` (+ `--name-only`, + `rev-parse HEAD`) → `RepoSnapshot{diff, changedFiles, headSha}`.
-- **Called by:** `@everdict/run-case`; instantiated by `@everdict/agent`. Browser/os-use add a new `Environment` variant, no core rewrite.
+- **Called by:** `@everdict/application-execution`; instantiated by `@everdict/agent`. Browser/os-use add a new `Environment` variant, no core rewrite.
 
 ---
 
@@ -488,7 +495,7 @@ classDiagram
 
 ---
 
-## `@everdict/run-case` — the eval loop
+## `@everdict/application-execution` — the eval loop
 
 **Role.** `runCase(evalCase, deps) → CaseResult`. The orchestration of the four in-sandbox concerns, with
 guaranteed `compute.dispose()` in `finally`. No placement, no tenancy.
@@ -505,7 +512,7 @@ flowchart LR
   runCase -->|"provision → seed → install → run → snapshot → grade → dispose"| out[CaseResult]
 ```
 
-- **Imports** the `@everdict/core` interfaces plus the concrete adapter *types*; the *instances* are injected
+- **Imports** the `@everdict/contracts` interfaces plus the concrete adapter *types*; the *instances* are injected
   by the caller (`@everdict/agent`). This keeps the runner adapter-agnostic.
 - **Becomes** a Temporal activity unchanged later (pure async, no shared state).
 
@@ -523,7 +530,7 @@ flowchart TD
   runAgentJob --> makeGraders["makeGraders(specs)"]
   makeHarness --> H["@everdict/harnesses<br/>Claude / Command / Scripted"]
   makeGraders --> G["@everdict/graders"]
-  runAgentJob --> runCase["@everdict/run-case.runCase"]
+  runAgentJob --> runCase["@everdict/application-execution.runCase"]
   runCase --> LD["new LocalDriver()"]
   runCase --> RE["new RepoEnvironment()"]
   runCase --> H
@@ -666,10 +673,10 @@ flowchart LR
 
 ---
 
-## `@everdict/suite` — suites & version regression
+## `@everdict/domain` — suites & version regression
 
 **Role.** Fan a `Suite` out over its cases at a given harness version → `Scorecard`; summarize and diff
-scorecards for regression. Depends on `@everdict/core` *only* — `Dispatch` is just `(job) → CaseResult`, so any
+scorecards for regression. Depends on `@everdict/contracts` *only* — `Dispatch` is just `(job) → CaseResult`, so any
 Backend/Router/Scheduler/Orchestrator plugs in.
 
 ```mermaid
@@ -962,13 +969,13 @@ flowchart LR
   run --> job[AgentJob] --> DO
 
   worker["everdict worker"] --> runWorker["@everdict/orchestrator.runWorker"]
-  suite["everdict suite"] --> runSuite["@everdict/suite.runSuite"]
+  suite["everdict suite"] --> runSuite["@everdict/application-control.runSuite"]
   suite --> diff["diffScorecards (--baseline)"]
 ```
 
 - **`everdict run`** builds an `AgentJob` and an `Orchestrator` (Direct over `Router`, or Temporal), calls `run(job)`.
 - **`everdict worker`** → `runWorker` (the durable side). **`everdict suite`** → `runSuite` (+ regression diff).
-- **Depends on:** `@everdict/orchestrator`, `@everdict/backends`, `@everdict/agent`, `@everdict/suite`, `@everdict/core`.
+- **Depends on:** `@everdict/orchestrator`, `@everdict/backends`, `@everdict/agent`, `@everdict/domain`, `@everdict/contracts`.
 
 ---
 

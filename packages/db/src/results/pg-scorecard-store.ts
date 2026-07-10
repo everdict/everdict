@@ -1,10 +1,6 @@
+import type { ScorecardListFilter, ScorecardStore } from "@everdict/application-control";
+import { type ScorecardRecord, ScorecardRecordSchema } from "@everdict/contracts";
 import type { SqlClient } from "../client.js";
-import {
-  type ScorecardListFilter,
-  type ScorecardRecord,
-  ScorecardRecordSchema,
-  type ScorecardStore,
-} from "./scorecard-store.js";
 
 interface ScorecardRow {
   id: string;

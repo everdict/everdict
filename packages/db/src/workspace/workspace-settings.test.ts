@@ -1,10 +1,7 @@
+import { WorkspaceSettingsSchema } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import type { SqlClient } from "../client.js";
-import {
-  InMemoryWorkspaceSettingsStore,
-  PgWorkspaceSettingsStore,
-  WorkspaceSettingsSchema,
-} from "./workspace-settings.js";
+import { InMemoryWorkspaceSettingsStore, PgWorkspaceSettingsStore } from "./workspace-settings.js";
 
 const MM = { host: "https://mm.example.com", botTokenSecretName: "MM_BOT", defaultChannelId: "ch1" };
 

@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-// GET /scorecards/diff — baseline↔candidate comparison (@everdict/suite ScorecardDiff, plus a TrialDiff
+// GET /scorecards/diff — baseline↔candidate comparison (@everdict/domain ScorecardDiff, plus a TrialDiff
 // block when either side ran trials). Regressions/improvements are decided by objective pass transitions.
 const CaseDeltaSchema = z.object({
   caseId: z.string(),

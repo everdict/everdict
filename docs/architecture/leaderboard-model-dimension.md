@@ -62,7 +62,7 @@ At **finalize** (`ScorecardService.track` for live runs, `finishIngest` for push
 `models` object from the completed `Scorecard` + the resolved harness spec, and store it on the record:
 
 ```ts
-// @everdict/suite (pure; core-only dep)
+// @everdict/domain (pure; core-only dep)
 scorecardModels(sc: Scorecard, declared?: string): {
   observed: string[]   // distinct llm_call.model across all cases, sorted
   declared?: string    // spec-declared model (CommandHarnessSpec.model), else undefined
@@ -88,7 +88,7 @@ the stored `scorecard.results[].trace`).
 ### 2. Rank view — `leaderboard` (Slice 2)
 
 ```ts
-// @everdict/suite (pure; consumes the same lightweight card as trendSeries)
+// @everdict/domain (pure; consumes the same lightweight card as trendSeries)
 leaderboard(cards: LeaderboardCard[], opts: { datasetId, metric, harnessId?, model?, window?: "latest"|"best" })
   : { dataset, metric, rows: LeaderboardRow[] /* ranked desc by score */ }
 // row: { harness:{id,version}, model?, scorecardId, createdAt, score, passRate, mean, runs }
@@ -127,9 +127,9 @@ leaderboard(cards: LeaderboardCard[], opts: { datasetId, metric, harnessId?, mod
 |---|---|
 | `ScorecardRecord` / `summary` / `list` / `trendSeries` / `diffScorecards` / `caseVerdict` | **reused verbatim** |
 | `ScorecardService.submit` + `track` + `finishIngest` pipeline | **reused** (add one finalize step) |
-| `scorecardModels` (`@everdict/suite`) + `ScorecardModelsSchema` (`@everdict/db`) | **new** (Slice 1) |
+| `scorecardModels` (`@everdict/domain`) + `ScorecardModelsSchema` (`@everdict/db`) | **new** (Slice 1) |
 | `models jsonb` column + mig 0028 + Pg read/write/list | **new** (Slice 1) |
-| `leaderboard` (`@everdict/suite`) + `ScorecardService.leaderboard` | **new** (Slice 2) |
+| `leaderboard` (`@everdict/domain`) + `ScorecardService.leaderboard` | **new** (Slice 2) |
 | `GET /scorecards/leaderboard` + `leaderboard_scorecards` MCP + `scorecards:read` gate | **new** (Slice 2) |
 | Leaderboard web page + model column on list/detail/compare | **new** (Slice 3) |
 

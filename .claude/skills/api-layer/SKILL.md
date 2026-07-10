@@ -115,7 +115,7 @@ See `docs/architecture/execution-scoring-orchestration.md`.
   settle/offload/notify. `RunService` and `ScorecardService` both call it (never route the batch through
   `RunService.submit`).
 - **Scoring** = `execution/scoring-service.ts` — judge application over results, independent of how they were
-  produced (live batch **and** ingest share it); aggregation stays pure in `@everdict/suite`.
+  produced (live batch **and** ingest share it); aggregation stays pure in `@everdict/domain`.
 - **Orchestration** = the services drive execution and own admit/settle, delivery (202/webhook), notify, progress.
 
 ## Result store (`@everdict/db`)

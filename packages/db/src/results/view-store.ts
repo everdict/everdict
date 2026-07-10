@@ -2,11 +2,6 @@ import { type ViewRecord, ViewRecordSchema } from "@everdict/contracts";
 
 import type { SqlClient } from "../client.js";
 
-// Record schemas now live in contracts/records — re-architecture P0c; db keeps compat re-exports (removed in the P4 sweep).
-export { type ViewRecord, ViewRecordSchema, type ViewVisibility, ViewVisibilitySchema } from "@everdict/contracts";
-
-// The store port now lives in @everdict/application-control — re-architecture P2c compat re-export (removed in the P4 sweep).
-export type { ViewStore } from "@everdict/application-control";
 import type { ViewStore } from "@everdict/application-control";
 
 export class InMemoryViewStore implements ViewStore {

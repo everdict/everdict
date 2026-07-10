@@ -14,7 +14,7 @@ export const ScorecardRunErrorSchema = z.object({
   phase: z.string().optional(),
 });
 
-// Per-metric aggregate (isomorphic to @everdict/suite summarizeScorecard's result). db depends only on core → mirror just the shape here.
+// Per-metric aggregate (isomorphic to @everdict/domain summarizeScorecard's result). The record shape is the SSOT here in contracts; domain computes it.
 export const MetricSummarySchema = z.object({
   metric: z.string(),
   count: z.number(),
@@ -23,7 +23,7 @@ export const MetricSummarySchema = z.object({
 });
 export type MetricSummary = z.infer<typeof MetricSummarySchema>;
 
-// Trial-based verdict roll-up (pass@k / flakiness) — isomorphic to @everdict/suite summarizeTrials's result (shape
+// Trial-based verdict roll-up (pass@k / flakiness) — isomorphic to @everdict/domain summarizeTrials's result (shape
 // mirror only; db depends on core, not suite). DERIVED on read from the scorecard's repeated trials (like
 // RunRecord.usage from the trace) — never persisted; present only on a multi-trial batch's detail. docs/architecture/trial-based-verdict.md
 export const ScorecardTrialSummarySchema = z.object({
@@ -38,7 +38,7 @@ export const ScorecardTrialSummarySchema = z.object({
 });
 export type ScorecardTrialSummary = z.infer<typeof ScorecardTrialSummarySchema>;
 
-// The models this run actually used (leaderboard model axis, isomorphic to @everdict/suite scorecardModels's result — shape mirror only).
+// The models this run actually used (leaderboard model axis, isomorphic to @everdict/domain scorecardModels's result — shape mirror only).
 // observed = observed from the trace · declared = declared in the spec · primary = group key (observed first, else declared). Lightweight, so included in list too.
 export const ScorecardModelsSchema = z.object({
   observed: z.array(z.string()).default([]),

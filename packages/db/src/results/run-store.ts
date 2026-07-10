@@ -1,22 +1,11 @@
 import type { RunRecord } from "@everdict/contracts";
 import { usageFromTrace } from "@everdict/domain";
 
-// Record schemas now live in contracts/records — re-architecture P0c; db keeps compat re-exports (removed in the P4 sweep).
-export {
-  RunErrorSchema,
-  type RunRecord,
-  RunRecordSchema,
-  type RunStatus,
-  RunStatusSchema,
-} from "@everdict/contracts";
-
 // On read, fills the usage summary from result.trace (no stored column → always matches the trace, no migration needed).
 export function withRunUsage(r: RunRecord): RunRecord {
   return r.result ? { ...r, usage: usageFromTrace(r.result.trace) } : r;
 }
 
-// The store port + its list options now live in @everdict/application-control — re-architecture P2c compat re-export (removed in the P4 sweep).
-export type { RunListOptions, RunStore } from "@everdict/application-control";
 import type { RunListOptions, RunStore } from "@everdict/application-control";
 
 export class InMemoryRunStore implements RunStore {

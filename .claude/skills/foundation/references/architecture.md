@@ -1,26 +1,33 @@
 # Architecture reference
 
 ## Packages
+The layer spine is `contracts ← domain ← application-{execution,control}`. The former
+`@everdict/{core,suite,run-case,billing}` packages were folded into it: `core`→`contracts` (+ the
+domain kernel), `run-case`→`application-execution`, `suite`→`application-control`, `billing`→`domain`.
+
 | Package | Role | Depends on |
 |---|---|---|
-| `@everdict/core` | contracts: interfaces + Zod schemas + errors | (none) |
-| `@everdict/drivers` | `Driver` impls — in-sandbox compute (Local) | core |
-| `@everdict/environments` | `Environment` impls — the world acted on (Repo) | core |
-| `@everdict/harnesses` | `EvaluableHarness` impls — the agent under test | core |
-| `@everdict/graders` | `Grader` impls — scoring | core |
-| `@everdict/run-case` | the eval loop (`runCase`) | core, drivers, environments, harnesses, graders |
-| `@everdict/agent` | dispatched unit: a self-contained worker that runs runCase inside a job, emits result | core, run-case, drivers, environments, harnesses, graders |
-| `@everdict/backends` | `Backend` impls (+ `capacity()`) — placement (Local, Nomad; K8s/Windows later) + `Router` (static) / `Scheduler` (capacity-aware + queue) / `BackendRegistry` | core, agent |
-| `@everdict/orchestrator` | durable control plane (Temporal): Direct/Temporal orchestrators + worker | core, backends, agent |
-| `@everdict/trace` | pull a harness trace from OTel/MLflow → `TraceEvent` | core |
-| `@everdict/topology` | service-topology harnesses: `ServiceTopologyBackend` + Nomad/K8s builders + env manager | core, backends, graders, trace |
-| `@everdict/suite` | suites + version regression: `runSuite` / `summarizeScorecard` / `diffScorecards` | core |
-| `apps/cli` | dev control plane (`everdict run`, `everdict worker`, `everdict suite`) | core, agent, backends, orchestrator, suite |
-| `@everdict/db` | result store: `RunStore` (`InMemoryRunStore`/`PgRunStore`) + numbered SQL migrations + `migrate`/`preflight` | core |
-| `@everdict/registry` | harness version SSOT: `(id, version)→HarnessSpec`, immutable versions, file/GitOps loader + `PgHarnessRegistry` | core, db |
-| `apps/api` | multi-tenant control-plane HTTP (Fastify): API-key auth + tenant-owned harnesses + async `POST /runs`/poll/webhook + `RunStore` | core, agent, backends, db, registry |
-| `apps/web` | SaaS web (Next.js 16 FSD, Tailwind v4 + shadcn Toss-style): Keycloak login + per-tenant dashboard | (HTTP client of apps/api; no `@everdict/*` deps) |
-| `@everdict/registry` | harness versioning | (planned) |
+| `@everdict/contracts` | contracts: interfaces + Zod schemas + errors + job-result wire codec (`/wire`, `/records` subpaths) | (none) |
+| `@everdict/domain` | pure business kernel: rich aggregates, version algebra, scoring/suite semantics (`caseVerdict`/`summarizeScorecard`/`diffScorecards`/`classifyFailure`/trials), authz matrix, placement policy (FairQueue/CircuitBreaker/Autoscaler/TrustZonePolicy) | contracts |
+| `@everdict/application-execution` | in-sandbox use-cases: `runCase` (the eval loop), `safeGrade`, observation scoring | contracts, domain |
+| `@everdict/application-control` | control-plane use-cases + ports adapters bind: `runSuite`, store/registry ports, the `Dispatcher` port, `ArtifactStore`/`offloadSnapshot`, credential primitives, scheduling/ops orchestration, `Metrics` | contracts, domain, application-execution |
+| `@everdict/drivers` | `Driver` impls — in-sandbox compute (Local/Docker) | contracts |
+| `@everdict/environments` | `Environment` impls — the world acted on (Repo) | contracts |
+| `@everdict/harnesses` | `EvaluableHarness` impls — the agent under test | contracts |
+| `@everdict/graders` | `Grader` impls — scoring | contracts, application-execution |
+| `@everdict/trace` | pull a harness trace from OTel/MLflow → `TraceEvent` (+ outbound `TraceSink`); re-exports `TraceSource`/`TraceSink` from contracts beside the impls | contracts |
+| `@everdict/db` | result/store impls (`InMemory*`/`Pg*`) + numbered SQL migrations + `migrate`/`preflight`; re-exports record types (contracts) + store ports (application-control) beside the impls | contracts, domain, application-control |
+| `@everdict/registry` | versioned SSOT impls: `(tenant,id,version)→Spec`, immutable versions, file/GitOps + `Pg*Registry`; re-exports registry ports (application-control) beside the impls | contracts, domain, application-control, db, datasets |
+| `@everdict/auth` | control-plane auth core: `Authenticator`→`Principal`, re-exports the authz vocabulary (domain) beside the authenticators | contracts, domain, db |
+| `@everdict/storage` | `ArtifactStore` impls (S3/InMemory); re-exports the port + `offloadSnapshot` (application-control) beside the impls | contracts, application-control |
+| `@everdict/backends` | `Backend` impls (+ `capacity()`) — placement (Local/Docker, Nomad, K8s) + `Router`/`Scheduler`/`BackendRegistry`; re-exports the `Dispatcher` port (application-control) beside `Backend` | contracts, domain, application-control, agent, drivers |
+| `@everdict/agent` | dispatched unit: a self-contained worker that runs `runCase` inside a job, emits result | contracts, domain, application-execution, drivers, environments, harnesses, graders |
+| `@everdict/orchestrator` | durable control plane (Temporal): Direct/Temporal orchestrators + worker | contracts, backends, agent |
+| `@everdict/topology` | service-topology harnesses: `ServiceTopologyBackend` + Nomad/K8s builders + env manager | contracts, domain, application-execution, backends, graders, trace |
+| `@everdict/self-hosted-runner` | self-hosted runner core (MCP lease loop, resilient session, kind-branch execution) | contracts, agent, topology, trace |
+| `apps/cli` | dev control plane (`everdict run`, `everdict worker`, `everdict runner`) | contracts, agent, backends, orchestrator, application-control |
+| `apps/api` | multi-tenant control-plane HTTP (Fastify): auth + tenant-owned harnesses/datasets/judges/runtimes + async runs/scorecards + MCP | contracts, domain, application-{execution,control}, agent, backends, db, registry, auth, storage, trace |
+| `apps/web` | SaaS web (Next.js 16 FSD, Tailwind v4 + shadcn): Keycloak login + per-tenant dashboard | (HTTP client of apps/api; only TYPE-ONLY `@everdict/contracts`) |
 
 ## The eval loop (runs inside the agent)
 ```

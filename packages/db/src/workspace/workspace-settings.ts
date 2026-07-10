@@ -1,16 +1,6 @@
 import { type WorkspaceSettings, WorkspaceSettingsSchema } from "@everdict/contracts";
 import type { SqlClient } from "../client.js";
 
-// Record schemas now live in contracts/records — re-architecture P0c; db keeps compat re-exports (removed in the P4 sweep).
-export {
-  type WorkspaceCiLink,
-  WorkspaceCiLinkSchema,
-  type WorkspaceSettings,
-  WorkspaceSettingsSchema,
-} from "@everdict/contracts";
-
-// The store port now lives in @everdict/application-control — re-architecture P2c compat re-export (removed in the P4 sweep).
-export type { WorkspaceSettingsStore } from "@everdict/application-control";
 import type { WorkspaceSettingsStore } from "@everdict/application-control";
 
 export class InMemoryWorkspaceSettingsStore implements WorkspaceSettingsStore {

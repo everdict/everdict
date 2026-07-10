@@ -5,11 +5,7 @@ import type { SqlClient } from "../client.js";
 // workspace === tenant === trust-zone key. The control plane is the membership SSOT (the token claim is merely a bootstrap default).
 // No plaintext/secrets — a pure membership graph. The role → action mapping is handled by @everdict/auth's authz.
 // email is a cache of OIDC claims (email/preferred_username) — display only, to supplement the opaque subject, no authz bearing.
-// Record shapes now live in contracts/records — re-architecture P1c; db keeps compat re-exports (removed in the P4 sweep).
-export type { MemberRecord, WorkspaceRecord, WorkspaceWithRole } from "@everdict/contracts";
 
-// The store port now lives in @everdict/application-control — re-architecture P2c compat re-export (removed in the P4 sweep).
-export type { WorkspaceStore } from "@everdict/application-control";
 import type { WorkspaceStore } from "@everdict/application-control";
 
 function nowIso(): string {

@@ -1,10 +1,11 @@
 import type { CaseResult, EvalCase } from "@everdict/contracts";
+import type { RunRecord } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { PgCallbackStore } from "./activity/callback-store.js";
 import type { SqlClient } from "./client.js";
 import { migrate, preflight } from "./migrate.js";
 import { PgRunStore } from "./results/pg-run-store.js";
-import { InMemoryRunStore, type RunRecord } from "./results/run-store.js";
+import { InMemoryRunStore } from "./results/run-store.js";
 import { InMemoryWorkspaceSettingsStore, PgWorkspaceSettingsStore } from "./workspace/workspace-settings.js";
 
 // A fake SqlClient that records queries and returns canned rows.

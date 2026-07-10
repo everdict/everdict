@@ -1,11 +1,10 @@
-import { AppError, type TraceEvent } from "@everdict/contracts";
+import { AppError, type TraceEvent, type TraceSinkCase, type TraceSinkContext } from "@everdict/contracts";
 import { describe, expect, it, vi } from "vitest";
 import { buildTraceSink } from "./build-sink.js";
 import { LangfuseTraceSink, chunkLangfuseEvents, langfuseBatch } from "./langfuse-sink.js";
 import { LangsmithTraceSink } from "./langsmith-sink.js";
 import { MlflowTraceSink, mlflowAssessmentBody } from "./mlflow-sink.js";
 import { PhoenixTraceSink, phoenixAnnotation, phoenixSpans } from "./phoenix-sink.js";
-import type { TraceSinkCase, TraceSinkContext } from "./trace-sink.js";
 
 const CTX: TraceSinkContext = { scorecardId: "sc-1", dataset: "d@1.0.0", harness: "h@1" };
 const TRACE: TraceEvent[] = [

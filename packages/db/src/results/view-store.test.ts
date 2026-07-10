@@ -1,5 +1,6 @@
+import type { ViewRecord, ViewVisibility } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
-import { InMemoryViewStore, type ViewRecord, type ViewVisibility } from "./view-store.js";
+import { InMemoryViewStore } from "./view-store.js";
 
 const rec = (
   id: string,

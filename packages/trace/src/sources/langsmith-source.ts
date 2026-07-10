@@ -1,5 +1,4 @@
-import { type TraceEvent, UpstreamError } from "@everdict/contracts";
-import type { TraceSource } from "./trace-source.js";
+import { type TraceEvent, type TraceSource, UpstreamError } from "@everdict/contracts";
 
 // LangSmith run — RunSchema (selected fields only) from the POST /runs/query {trace:<trace_id>} response.
 // Real-API notes: auth is the X-API-Key header (bare path = same as the SDK), full-trace fetch is v1 /runs/query's

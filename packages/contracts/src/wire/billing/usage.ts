@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-// GET /usage — the workspace's metered LLM usage (@everdict/billing TenantUsage). Meter-only: this
+// GET /usage — the workspace's metered LLM usage (@everdict/domain TenantUsage). Meter-only: this
 // never blocks; the billable surface is orchestration + verdict LLM cost (own-pays runs excluded).
 const UsageTotalsSchema = z.object({
   usd: z.number(),

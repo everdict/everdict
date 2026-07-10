@@ -1,12 +1,12 @@
-import { UpstreamError } from "@everdict/contracts";
-import type {
-  TraceSink,
-  TraceSinkCase,
-  TraceSinkCaseResult,
-  TraceSinkContext,
-  TraceSinkResult,
-  TraceSinkScore,
-} from "./trace-sink.js";
+import {
+  type TraceSink,
+  type TraceSinkCase,
+  type TraceSinkCaseResult,
+  type TraceSinkContext,
+  type TraceSinkResult,
+  type TraceSinkScore,
+  UpstreamError,
+} from "@everdict/contracts";
 
 // LangSmith sink — one run per case (POST /runs, a client-generated uuid + outputs in one shot), scores via POST /feedback.
 // Real-API notes: auth is the x-api-key header (not Authorization), paths are bare (/runs·/feedback — same as the SDK),

@@ -9,7 +9,7 @@ Everdict is a harness-agnostic, infra-agnostic **agent evaluation runtime**. Eva
 
 ## Checklist before coding
 1. Confirm which package you're in and its allowed dependencies (one-way, below).
-2. If you touch a contract in `core`, update its Zod schema + the `core-contracts` skill in the same PR.
+2. If you touch a contract in `contracts` (or the domain kernel over it), update its Zod schema + the `core-contracts` skill in the same PR.
 3. Use `AppError` for failures; remap any external/SDK error.
 4. Run `pnpm format && pnpm lint && pnpm typecheck && pnpm test` before finishing.
 5. Layout: `src/` is flat until ~15 non-test files, then grouped into domain subdirs (barrel + core contract at
@@ -18,12 +18,14 @@ Everdict is a harness-agnostic, infra-agnostic **agent evaluation runtime**. Eva
 
 ## Module dependency (one-way; reverse import = bug)
 ```
-core ← { drivers · environments · harnesses · graders · trace } ← run-case ← agent ← backends ← { orchestrator · topology } ← { apps/cli · apps/api }
-(self-hosted pull path)                                    agent · topology · trace  ← self-hosted-runner ← { apps/cli · apps/desktop }
+contracts ← domain ← { application-execution · application-control } ← { drivers · environments · harnesses · graders · trace · db · registry · backends · auth · storage } ← agent ← { orchestrator · topology } ← { apps/cli · apps/api }
+(self-hosted pull path)                                                                                          agent · topology · trace  ← self-hosted-runner ← { apps/cli · apps/desktop }
 ```
-- `core` — contracts only (interfaces + Zod + errors). No I/O, no SDK. Dependency root.
-- `drivers` / `environments` / `harnesses` / `graders` — adapters; depend on `core` only.
-- `runner` — the eval loop (`runCase`); composes adapters.
+The layer spine is `contracts ← domain ← application-{execution,control}` (the former `@everdict/{core,suite,run-case,billing}` were folded into it).
+- `contracts` — contracts only (interfaces + Zod + errors + job-result wire codec). No I/O, no SDK. Dependency root. `@everdict/contracts/wire` = the web's type-only surface.
+- `domain` — the pure business kernel over contracts: rich aggregates, version algebra, scoring/suite semantics (`caseVerdict`/`summarizeScorecard`/`diffScorecards`/`classifyFailure`), the authz matrix, placement policy (FairQueue/CircuitBreaker/Autoscaler/TrustZonePolicy). No I/O.
+- `application-execution` — in-sandbox use-cases: `runCase` (the eval loop), `safeGrade`, observation scoring. `application-control` — control-plane use-cases + the ports adapters bind: `runSuite`, store/registry ports, the `Dispatcher` port, `ArtifactStore`/`offloadSnapshot`, credential primitives, scheduling/ops orchestration, `Metrics`.
+- `drivers` / `environments` / `harnesses` / `graders` — adapters; depend on contracts (+ application-execution for the scoring/run use-cases) only.
 - `agent` — the dispatched unit: a self-contained worker that runs `runCase` over `LocalDriver` inside an isolated job, emits `__EVERDICT_RESULT__`.
 - `backends` — placement + SaaS operational layer: `Backend.dispatch(AgentJob)` + `capacity()` → orchestrator (LocalBackend/NomadBackend; K8s/Windows later); `Router` (static) / `Scheduler` (capacity-aware + tenant-fair WFQ + quotas + backpressure) / `BackendRegistry`; `TrustZonePolicy` (per-tenant isolation), `SecretProvider`, `BudgetTracker`, `Autoscaler`.
 - `orchestrator` — durable control plane (Temporal): `DirectOrchestrator` / `TemporalOrchestrator` + worker.
@@ -49,6 +51,6 @@ A run = provision(Driver) → seed(Environment) → install+run(Harness)→trace
 
 ## Critical rules (also pushed via .claude/rules)
 - No `any` / no `!` / no silent nullable defaults; Zod-validate boundaries.
-- Interfaces live in `core` (deliberate inversion of the single-impl no-interface rule — Everdict is a plugin runtime).
+- Interfaces live in `contracts` (deliberate inversion of the single-impl no-interface rule — Everdict is a plugin runtime).
 - Cost is read from the harness trace (Claude reports `total_cost_usd`); LocalDriver uses the machine's `claude` login (no API key).
 - Backends never run the harness — they dispatch the `@everdict/agent` image and parse its `__EVERDICT_RESULT__` output.

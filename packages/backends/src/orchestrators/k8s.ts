@@ -12,6 +12,7 @@ import {
   judgeEnv,
 } from "@everdict/contracts";
 import { assertHardenedIsolation, dockerAuthConfigJson, imageUsesRegistryHost } from "@everdict/domain";
+import type { TrustZonePolicy } from "@everdict/domain";
 import {
   type AdoptOutcome,
   type Backend,
@@ -24,7 +25,6 @@ import {
   dispatchAborted,
 } from "../backend.js";
 import type { SecretProvider } from "../policy/secrets.js";
-import type { TrustZonePolicy } from "../policy/trust-zone.js";
 import { abortableDelay } from "./abortable-delay.js";
 
 // --- kubectl abstraction (mockable in tests; the K8s version of NomadHttp) ---

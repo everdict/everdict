@@ -5,7 +5,7 @@ paths: "packages/backends/**"
 
 A Backend = placement: dispatch a runner-agent job to an orchestrator. See skill `backends`.
 
-- **Tenant-registered runtimes** (BYO compute): a `RuntimeSpec` (`@everdict/core`, local|nomad|k8s,
+- **Tenant-registered runtimes** (BYO compute): a `RuntimeSpec` (`@everdict/contracts`, local|nomad|k8s,
   no secrets; `local` = dev/control-plane-host, superseded for "my machine" by the self-hosted runner) →
   live `Backend` via `buildRuntimeBackend(spec, {secretEnv})`. The control plane's `RuntimeDispatcher` resolves a
   job's `placement.target` to the tenant's `RuntimeSpec`, builds + registers the backend under
@@ -20,7 +20,7 @@ A Backend = placement: dispatch a runner-agent job to an orchestrator. See skill
   kubeconfig is materialized **per-dispatch** (never in the long-lived backend ctor). See `docs/runtimes.md`.
 
 - Implement `Backend.dispatch(job: AgentJob): Promise<CaseResult>` AND `capacity(): Promise<{total, used}>`
-  (`./backend`, `@everdict/core`). `capacity()` is what the `Scheduler` gates on — report a configured
+  (`./backend`, `@everdict/contracts`). `capacity()` is what the `Scheduler` gates on — report a configured
   `maxConcurrent` as `total`; live-probe the cluster for `used` where cheap (else `used: 0`).
 - **Capabilities are typed, not optional methods.** `Backend` is the CORE (`dispatch`+`capacity`+`id`) — anything
   beyond it (`Recoverable`=adopt/kill, `Observable`=logs/exec, `Shellable`=execStream, `ScreenCapturable`=

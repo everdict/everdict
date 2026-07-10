@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-// GET/PUT /budget — committed usage + the per-tenant enforcement limit (@everdict/billing
+// GET/PUT /budget — committed usage + the per-tenant enforcement limit (@everdict/domain
 // BudgetUsage/BudgetLimit). Distinct from the meter-only /usage: this budget blocks runs with 402 at a cap.
 export const BudgetResponseSchema = z.object({
   usage: z.object({

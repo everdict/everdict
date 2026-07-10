@@ -15,7 +15,7 @@ repository, domain-packaged, one-way call chain). See skill `api-layer` for the 
   `<resource>.routes.ts` (HTTP registration) + `<resource>.mcp.ts` (the same resource's MCP tools) +
   `request/<dto>.ts` (one file per request Zod DTO — only when the resource has bodies; registry-backed
   resources validate with the core spec schema directly, no file) + `response/<dto>.ts` (response DTO
-  schemas — REUSE the `@everdict/db`/`@everdict/core` record/spec Zod schemas as the SSOT, define only
+  schemas — REUSE the `@everdict/db`/`@everdict/contracts` record/spec Zod schemas as the SSOT, define only
   what has no schema yet) + `<resource>.docs.ts` (the OpenAPI route descriptors) + inject-based transport
   tests; `core/<domain>/` holds `<resource>-service.ts` + collaborator services + service tests. A **sub-resource lives in its owner's domain** (harness-template in `harness/`, invite in
   `member/`). **NEVER a concern umbrella** (`catalog/`, `integrations/`) on the domain axis. Engine machinery

@@ -13,7 +13,7 @@ import type { JudgeRunner } from "../ports/judge-runner.js";
 
 // Scoring concern — pure evaluation over results (traces): apply judges · collect judge models.
 // Independent of execution: it scores the same whether the trace is a live batch's output or pulled externally via ingest.
-// (Aggregation summary/diff/leaderboard are already pure functions in @everdict/suite — here we only handle judge 'application'.)
+// (Aggregation summary/diff/leaderboard are already pure functions in @everdict/domain — here we only handle judge 'application'.)
 // Judge application is streamed per case (fired the moment a case completes, case-axis parallel · deterministic order within a case)
 // — docs/architecture/streaming-case-pipeline.md + execution-scoring-orchestration.md
 export interface ScoringServiceDeps {
