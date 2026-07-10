@@ -35,7 +35,11 @@ apps/api/src/
       response/<dto>.ts      ← response DTO schemas (reuse @everdict/db/core record schemas as SSOT)
       (+ inject-based transport tests)
   core/              ← BUSINESS layer (same domain names as api/)
-    <domain>/          ← <resource>-service.ts + collaborator services + service tests
+    <domain>/          ← <entity>.ts (domain model: guard methods + transitions that return store patches;
+                         illegal transition throws from the domain) + <x>-policy.ts (cross-service
+                         read/invariant concerns, batched) + <resource>-service.ts (orchestration ONLY:
+                         idempotency, cross-domain composition, events — never a status literal) +
+                         collaborator services + tests. See docs/architecture/rich-domain-core.md.
     execution/         ← engine machinery: execute-case, scoring-service, judge-runner, dispatchers, backends
     ops/               ← instrumentation/recovery machinery: metrics, speculation, startup-recovery, …
   common/            ← cross-cutting helpers (budget-tracker, usage-meter, version-tag-service, …)

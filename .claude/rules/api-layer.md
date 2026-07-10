@@ -34,6 +34,14 @@ repository, domain-packaged, one-way call chain). See skill `api-layer` for the 
   distinct lifecycles (batch orchestration vs ingest vs analytics), split them into named collaborator services
   in the same domain folder, composed by the facade — the facade keeps the external surface (`deps.<x>`, both
   transports, tests) stable. A service pushing ~500 lines of mixed lifecycles is the smell.
+- **The domain expresses itself — no anemic records.** A domain with a lifecycle gets a model in
+  `core/<domain>/<entity>.ts` (`X.from(record)` + static factory for the initial record): **guard methods**
+  (`isTerminal`/`canResume`/`canAdopt`) are the SSOT for legality, and **transition methods guard and return
+  the store patch** (illegal transition = the DOMAIN throws an `AppError` subclass). Services orchestrate
+  (idempotency, cross-domain composition, events) and never write a `status:` literal or re-derive legality
+  from status fields. Cross-service read/invariant concerns get a **policy class**
+  (`core/<domain>/<x>-policy.ts`, batched lookups) instead of duplicated service checks. See
+  `docs/architecture/rich-domain-core.md`.
 - **No hypothetical surface.** A field, parameter, or endpoint exists only if it has a **current caller**;
   "could be useful later" is removal grounds, not justification.
 - **Routes are thin — the fixed handler shape, zero business logic:** ① feature-gate
