@@ -53,3 +53,42 @@ export { generateInviteToken, generateKey, hashKey } from "./credential/credenti
 export { WorkspaceService } from "./workspace/workspace-service.js";
 export { ProfileService } from "./profile/profile-service.js";
 export { MembershipService } from "./member/membership-service.js";
+export {
+  type RepinBody,
+  RepinBodySchema,
+  type RepinResult,
+  repinHarnessImages,
+} from "./harness/harness-pin-service.js";
+export {
+  type ImagePushCredentials,
+  ImageRegistryService,
+  type ImageRegistryServiceDeps,
+  type ImageRegistryView,
+} from "./image-registry/image-registry-service.js";
+export {
+  type MattermostConfigView,
+  MattermostService,
+  type MattermostServiceConfig,
+} from "./mattermost/mattermost-service.js";
+export {
+  MattermostCommandService,
+  type MattermostCommandServiceDeps,
+  type MattermostReply,
+} from "./mattermost/mattermost-command-service.js";
+export {
+  type EnqueueResult,
+  type LeasedJob,
+  POOL_RUNNER,
+  poolKeyFor,
+  requiredRunnerCapabilities,
+  RunnerHub,
+  type RunnerHubDeps,
+  selfHostedBackendName,
+  type SelfHostedKey,
+} from "./runner/runner-hub.js";
+export {
+  normalizeVersionTags,
+  setVersionTags,
+  type VersionTaggable,
+  VersionTagsBodySchema,
+} from "./version-tag/version-tag-service.js";
