@@ -1,30 +1,3 @@
-// Concurrency util — a minimal semaphore for case-axis parallelism (streaming/parallel judge application).
-// Both streaming (push in arrival order) and batch (mapLimit) are built from this one primitive.
-export type Limiter = <T>(fn: () => Promise<T>) => Promise<T>;
-
-export function createLimiter(max: number): Limiter {
-  const cap = Math.max(1, max);
-  let active = 0;
-  const waiters: Array<() => void> = [];
-  const acquire = async (): Promise<void> => {
-    if (active < cap) {
-      active += 1;
-      return;
-    }
-    await new Promise<void>((resolve) => waiters.push(resolve));
-    active += 1;
-  };
-  const release = (): void => {
-    active -= 1;
-    const next = waiters.shift();
-    if (next) next();
-  };
-  return async (fn) => {
-    await acquire();
-    try {
-      return await fn();
-    } finally {
-      release();
-    }
-  };
-}
+// The concurrency limiter now lives in @everdict/application-control — re-architecture P2d compat
+// re-export (removed in the P4 sweep). New code should import @everdict/application-control directly.
+export { createLimiter, type Limiter } from "@everdict/application-control";

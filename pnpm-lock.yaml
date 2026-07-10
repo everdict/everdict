@@ -545,6 +545,9 @@ importers:
 
   packages/trace:
     dependencies:
+      '@everdict/contracts':
+        specifier: workspace:*
+        version: link:../contracts
       '@everdict/core':
         specifier: workspace:*
         version: link:../core

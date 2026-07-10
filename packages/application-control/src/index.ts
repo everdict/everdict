@@ -110,3 +110,10 @@ export {
   type GithubRunnerInstallResult,
   installGithubWorkspaceRunner,
 } from "./runner/github-runner-install.js";
+export { createLimiter, type Limiter } from "./concurrency/limiter.js";
+export {
+  type CaseExportStream,
+  type TraceSinkConfigView,
+  TraceSinkService,
+  type TraceSinkServiceDeps,
+} from "./trace-sink/trace-sink-service.js";
