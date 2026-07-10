@@ -10,7 +10,17 @@
 > suite semantics · auth matrix + billing · 4 aggregates · placement policies · kernel rules out of
 > contracts [cone invariant: domain deps == {contracts}] · registry version algebra · served computed
 > fields [scorecard verdict/casePass/headline · harness imageClasses · github-app installedAccounts] with
-> the web caseVerdict/classifyImageRef/sameHost mirrors and the SDK headline mirror DELETED). Next: P2.
+> the web caseVerdict/classifyImageRef/sameHost mirrors and the SDK headline mirror DELETED).
+> P2 SHIPPED (`e5feb5f`→`c0c3289` — @everdict/application-execution [runCase + safeGrade +
+> scoreObservations; topology adapters stop scoring; cone deps == {contracts, domain}] +
+> @everdict/application-control [runSuite · 16 store + 7 registry + Dispatcher/JudgeRunner/ExecStream/
+> ArtifactStore ports · 4 outbound gateways (Mattermost, GithubRepoWriter, GithubAppGateway, TraceSink/
+> TraceSource contracts → contracts) · every movable core service + ops + the scorecard cluster +
+> executeCase/collect/scoring — forbidden values become injected factories (makeGraders,
+> defaultTraceGraders)] · apps/api/src/core = adapters + compat shells only · main.ts = 276-line
+> composition root over apps/api/src/composition/ (ScheduleServiceRef makes the schedule cycle explicit)
+> · CLI composes application-control/domain directly). Next: P3 (infrastructure regroup +
+> VersionedStore dedupe behind golden contract tests).
 > Maintainer directive: interfaces (CLI / web / API / desktop) are delivery mechanisms; the domain is
 > singular. Today domain rules are fragmented across packages and re-implemented inside interfaces. This
 > document is the ground-up target: layer model, package/folder teardown, port design, DTO boundaries,
