@@ -420,6 +420,9 @@ importers:
       '@everdict/db':
         specifier: workspace:*
         version: link:../db
+      '@everdict/domain':
+        specifier: workspace:*
+        version: link:../domain
 
   packages/run-case:
     dependencies:

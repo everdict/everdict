@@ -19,7 +19,8 @@
   },
   "dependencies": {
     "@everdict/core": "workspace:*",
+    "@everdict/datasets": "workspace:*",
     "@everdict/db": "workspace:*",
-    "@everdict/datasets": "workspace:*"
+    "@everdict/domain": "workspace:*"
   }
 }

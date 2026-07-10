@@ -102,6 +102,16 @@ export {
 // trace — trace-derived usage summary (from @everdict/core; shapes stay in contracts)
 export { usageFromTrace } from "./trace/usage-from-trace.js";
 
+// registry — the version algebra every versioned registry shares (from @everdict/registry)
+export {
+  compareVersions,
+  LATEST,
+  resolveRef,
+  SHARED_TENANT,
+  sortVersions,
+  specsEqual,
+} from "./registry/version-algebra.js";
+
 // placement — pure multi-tenant placement policies (from @everdict/backends)
 export { FairQueue, type FairQueueOptions } from "./placement/fair-queue.js";
 export { CircuitBreaker, type CircuitBreakerOpts } from "./placement/circuit-breaker.js";
