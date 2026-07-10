@@ -11,6 +11,7 @@ import type { ScorecardRecord } from "@everdict/db";
 import { costGrader, latencyGrader, stepsGrader } from "@everdict/graders";
 import { scorecardModels, summarizeScorecard } from "@everdict/suite";
 import type { ScoringService } from "../execution/scoring-service.js";
+import { ScorecardBatch, type ScorecardTransition } from "./scorecard-batch.js";
 import {
   type IngestScorecardBody,
   type IngestScorecardInput,
@@ -41,21 +42,19 @@ export class ScorecardIngestService {
   async ingest(input: IngestScorecardInput): Promise<ScorecardRecord> {
     const dataset = await this.deps.datasets.get(input.tenant, input.dataset.id, input.dataset.version || "latest");
     const harnessVersion = input.harness.version || "latest";
-    const ts = this.now();
-    const record: ScorecardRecord = {
+    // Record assembly is the domain's job (ScorecardBatch.newQueuedIngest) — the service only orchestrates.
+    const record: ScorecardRecord = ScorecardBatch.newQueuedIngest({
       id: this.newId(),
       tenant: input.tenant,
       dataset: { id: dataset.id, version: dataset.version },
       harness: { id: input.harness.id, version: harnessVersion }, // the harness that produced the trace (label)
-      status: "queued",
       ...(input.origin ? { origin: input.origin } : {}),
       ...(input.submittedBy ? { createdBy: input.submittedBy } : {}),
-      createdAt: ts,
-      updatedAt: ts,
-    };
+      now: this.now(),
+    });
     await this.deps.store.create(record);
     void this.trackIngest(
-      record.id,
+      record,
       input.tenant,
       dataset,
       `${input.harness.id}@${harnessVersion}`,
@@ -69,21 +68,18 @@ export class ScorecardIngestService {
   async ingestPull(input: PullIngestInput): Promise<ScorecardRecord> {
     const dataset = await this.deps.datasets.get(input.tenant, input.dataset.id, input.dataset.version || "latest");
     const harnessVersion = input.harness.version || "latest";
-    const ts = this.now();
-    const record: ScorecardRecord = {
+    const record: ScorecardRecord = ScorecardBatch.newQueuedIngest({
       id: this.newId(),
       tenant: input.tenant,
       dataset: { id: dataset.id, version: dataset.version },
       harness: { id: input.harness.id, version: harnessVersion }, // the harness that produced the trace (label)
-      status: "queued",
       ...(input.origin ? { origin: input.origin } : {}),
       ...(input.submittedBy ? { createdBy: input.submittedBy } : {}),
-      createdAt: ts,
-      updatedAt: ts,
-    };
+      now: this.now(),
+    });
     await this.deps.store.create(record);
     void this.trackPull(
-      record.id,
+      record,
       input.tenant,
       dataset,
       `${input.harness.id}@${harnessVersion}`,
@@ -96,24 +92,24 @@ export class ScorecardIngestService {
 
   // push ingest: pass the uploaded traces straight to finishIngest.
   private async trackIngest(
-    id: string,
+    record: ScorecardRecord,
     tenant: string,
     dataset: Dataset,
     harnessLabel: string,
     traces: IngestScorecardBody["traces"],
     judges: Array<{ id: string; version: string }>,
   ): Promise<void> {
-    await this.deps.store.update(id, { status: "running", updatedAt: this.now() });
+    await this.deps.store.update(record.id, ScorecardBatch.from(record).start(this.now()));
     try {
-      await this.finishIngest(id, tenant, dataset, harnessLabel, traces, judges);
+      await this.finishIngest(record.id, tenant, dataset, harnessLabel, traces, judges);
     } catch (err) {
-      await this.failIngest(id, err);
+      await this.failIngest(record.id, err);
     }
   }
 
   // pull ingest: pull per-runId traces from the tenant's trace source (OTel/MLflow) and pass to finishIngest.
   private async trackPull(
-    id: string,
+    record: ScorecardRecord,
     tenant: string,
     dataset: Dataset,
     harnessLabel: string,
@@ -121,7 +117,8 @@ export class ScorecardIngestService {
     runs: PullIngestBody["runs"],
     judges: Array<{ id: string; version: string }>,
   ): Promise<void> {
-    await this.deps.store.update(id, { status: "running", updatedAt: this.now() });
+    const id = record.id;
+    await this.deps.store.update(id, ScorecardBatch.from(record).start(this.now()));
     try {
       if (!this.deps.buildTraceSource)
         throw new BadRequestError("BAD_REQUEST", {}, "trace source builder is not configured (pull disabled).");
@@ -205,15 +202,18 @@ export class ScorecardIngestService {
     const models = scorecardModels(scorecard);
     // judge axis: ingest has no inline judge, so only the models of the applied registered judges.
     const judgeModels = await this.scoring.collectJudgeModels(tenant, judges, undefined);
-    await this.deps.store.update(id, {
-      status: "succeeded",
-      scorecard,
-      summary,
-      models,
-      ...(judgeModels.length > 0 ? { judgeModels } : {}),
-      ...(exported ? { export: exported } : {}),
-      updatedAt: this.now(),
-    });
+    await this.settleIngest(id, (batch) =>
+      batch.succeed(
+        {
+          scorecard,
+          summary,
+          models,
+          ...(judgeModels.length > 0 ? { judgeModels } : {}),
+          ...(exported ? { export: exported } : {}),
+        },
+        this.now(),
+      ),
+    );
   }
 
   private async failIngest(id: string, err: unknown): Promise<void> {
@@ -221,6 +221,16 @@ export class ScorecardIngestService {
       err instanceof AppError
         ? { code: err.code, message: err.message }
         : { code: "INTERNAL", message: err instanceof Error ? err.message : String(err) };
-    await this.deps.store.update(id, { status: "failed", error, updatedAt: this.now() });
+    await this.settleIngest(id, (batch) => batch.fail(error, {}, this.now()));
+  }
+
+  // Terminal writes go through the domain guard: read the current record and skip when it is already settled
+  // (first terminal write wins — same idiom as RunService.finalize).
+  private async settleIngest(id: string, outcome: (batch: ScorecardBatch) => ScorecardTransition): Promise<void> {
+    const current = await this.deps.store.get(id);
+    if (!current) return;
+    const batch = ScorecardBatch.from(current);
+    if (batch.isTerminal()) return;
+    await this.deps.store.update(id, outcome(batch));
   }
 }

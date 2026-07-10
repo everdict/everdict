@@ -2687,3 +2687,181 @@ describe("ScorecardService.submit — run-time grading plan (dataset stays pure 
     expect((await store.get("sc-noplan"))?.orchestration?.graders).toBeUndefined();
   });
 });
+
+// Rich-domain-core S2 (docs/architecture/rich-domain-core.md): the previously-unguarded terminal re-write races
+// are now read-guarded through the ScorecardBatch model — the first terminal write wins, a late loser is a skip.
+describe("ScorecardService — first terminal write wins (rich domain guards)", () => {
+  // A gating dispatcher — holds every case at the gate until release() so the test can act mid-flight.
+  function gatedDispatcher() {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    const dispatcher: Dispatcher = {
+      async dispatch(job) {
+        await gate;
+        return { ...caseResult(true), caseId: job.evalCase.id };
+      },
+    };
+    return { dispatcher, release: () => release() };
+  }
+  const until = async (cond: () => boolean | Promise<boolean>): Promise<void> => {
+    for (let i = 0; i < 200; i++) {
+      if (await cond()) return;
+      await new Promise((r) => setTimeout(r, 5));
+    }
+    throw new Error("condition not met");
+  };
+
+  it("a late track success cannot overwrite a superseded batch (supersede raced ahead of the abort signal)", async () => {
+    const store = new InMemoryScorecardStore();
+    const datasets = new InMemoryDatasetRegistry();
+    await datasets.register("acme", datasetWithCase());
+    const gate = gatedDispatcher();
+    const completed: string[] = [];
+    const service = new ScorecardService({
+      dispatcher: gate.dispatcher,
+      store,
+      datasets,
+      newId: () => "sc-race-ok",
+      onComplete: async (_tenant, rec) => {
+        completed.push(rec.status);
+      },
+    });
+    await service.submit({
+      tenant: "acme",
+      dataset: { id: "d", version: "1.0.0" },
+      harness: { id: "scripted", version: "0" },
+    });
+    await until(async () => (await store.get("sc-race-ok"))?.status === "running");
+    // Simulate the exact race window: the supersede status write landed, but the in-flight abort has NOT fired.
+    await store.update("sc-race-ok", {
+      status: "superseded",
+      error: { code: "SUPERSEDED", message: "Replaced by a newer fire of the same PR (sc-next)" },
+    });
+    gate.release();
+    await until(() => completed.length === 1); // the track loop has fully settled
+
+    const final = await store.get("sc-race-ok");
+    expect(final?.status).toBe("superseded"); // pre-fix: the unguarded write revived it to succeeded
+    expect(final?.error?.code).toBe("SUPERSEDED");
+    expect(final?.scorecard).toBeUndefined(); // the losing terminal write is a full skip, not a partial merge
+  });
+
+  it("a late track failure cannot overwrite a superseded batch", async () => {
+    const store = new InMemoryScorecardStore();
+    const datasets = new InMemoryDatasetRegistry();
+    await datasets.register("acme", datasetWithCase());
+    const judges = new InMemoryJudgeRegistry();
+    await judges.register("acme", {
+      kind: "model",
+      id: "j1",
+      version: "1.0.0",
+      provider: "anthropic",
+      model: "claude-opus-4-8",
+      rubric: "ok?",
+      inputs: ["trace"],
+      tags: [],
+    });
+    const gate = gatedDispatcher();
+    const completed: string[] = [];
+    const service = new ScorecardService({
+      dispatcher: gate.dispatcher,
+      store,
+      datasets,
+      judges,
+      judgeRunner: {
+        async run() {
+          throw new Error("judge boom"); // fails the batch in the judges phase, after the supersede lands
+        },
+      },
+      newId: () => "sc-race-fail",
+      onComplete: async (_tenant, rec) => {
+        completed.push(rec.status);
+      },
+    });
+    await service.submit({
+      tenant: "acme",
+      dataset: { id: "d", version: "1.0.0" },
+      harness: { id: "scripted", version: "0" },
+      judges: [{ id: "j1", version: "1.0.0" }],
+    });
+    await until(async () => (await store.get("sc-race-fail"))?.status === "running");
+    await store.update("sc-race-fail", {
+      status: "superseded",
+      error: { code: "SUPERSEDED", message: "Replaced by a newer fire of the same PR (sc-next)" },
+    });
+    gate.release();
+    await until(() => completed.length === 1);
+
+    const final = await store.get("sc-race-fail");
+    expect(final?.status).toBe("superseded"); // pre-fix: the unguarded write flipped it to failed
+    expect(final?.error?.code).toBe("SUPERSEDED"); // the judge failure never replaces the supersede marker
+  });
+
+  it("planBatch does not revive a superseded batch to running (Temporal activity racing the workflow cancel)", async () => {
+    const store = new InMemoryScorecardStore();
+    const datasets = new InMemoryDatasetRegistry();
+    await datasets.register("acme", datasetWithCase());
+    const service = new ScorecardService({ dispatcher, store, datasets, runStore: new InMemoryRunStore() });
+    await store.create({
+      id: "sc-plan-sup",
+      tenant: "acme",
+      dataset: { id: "d", version: "1.0.0" },
+      harness: { id: "h", version: "1" },
+      status: "superseded",
+      error: { code: "SUPERSEDED", message: "Replaced by a newer fire of the same PR (sc-next)" },
+      orchestration: { judges: [], concurrency: 2, retries: 0, workflowId: "wf-sup" },
+      createdAt: "2026-07-10T00:00:00.000Z",
+      updatedAt: "2026-07-10T00:00:00.000Z",
+    });
+    const plan = await service.planBatch("sc-plan-sup");
+    expect(plan.caseIds).toEqual(["c1"]); // still answers the workflow (runBatchCase skips per case)
+    expect((await store.get("sc-plan-sup"))?.status).toBe("superseded"); // pre-fix: blindly re-written to running
+  });
+
+  it("finalizeBatch cannot overwrite a superseded batch and skips its completion notification (Temporal)", async () => {
+    const store = new InMemoryScorecardStore();
+    const runs = new InMemoryRunStore();
+    const datasets = new InMemoryDatasetRegistry();
+    await datasets.register("acme", datasetWithCase());
+    const completed: string[] = [];
+    const service = new ScorecardService({
+      dispatcher,
+      store,
+      datasets,
+      runStore: runs,
+      onComplete: async (_tenant, rec) => {
+        completed.push(rec.id);
+      },
+    });
+    await store.create({
+      id: "sc-fin-sup",
+      tenant: "acme",
+      dataset: { id: "d", version: "1.0.0" },
+      harness: { id: "h", version: "1" },
+      status: "superseded",
+      error: { code: "SUPERSEDED", message: "Replaced by a newer fire of the same PR (sc-next)" },
+      orchestration: { judges: [], concurrency: 2, retries: 0, workflowId: "wf-fin" },
+      createdAt: "2026-07-10T00:00:00.000Z",
+      updatedAt: "2026-07-10T00:00:00.000Z",
+    });
+    await runs.create({
+      id: "child-c1",
+      tenant: "acme",
+      harness: { id: "h", version: "1" },
+      caseId: "c1",
+      status: "succeeded",
+      result: { ...caseResult(true), caseId: "c1" },
+      parentScorecardId: "sc-fin-sup",
+      createdAt: "2026-07-10T00:00:01.000Z",
+      updatedAt: "2026-07-10T00:00:02.000Z",
+    });
+
+    await service.finalizeBatch("sc-fin-sup");
+    const final = await store.get("sc-fin-sup");
+    expect(final?.status).toBe("superseded"); // pre-fix: finalize revived it to succeeded
+    expect(final?.summary).toBeUndefined(); // the losing terminal write is a full skip
+    expect(completed).toEqual([]); // a replaced batch's completion notification is noise
+  });
+});

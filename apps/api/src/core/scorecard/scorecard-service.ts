@@ -1,17 +1,12 @@
 import { CircuitBreaker } from "@everdict/backends";
 import { BadRequestError, type CaseResult, type Dataset, type HarnessSpec } from "@everdict/core";
 import type { ScorecardOrigin, ScorecardRecord } from "@everdict/db";
-import {
-  type Leaderboard,
-  type ScorecardDiff,
-  type ScorecardTrend,
-  type TrialDiff,
-  summarizeTrials,
-} from "@everdict/suite";
+import type { Leaderboard, ScorecardDiff, ScorecardTrend, TrialDiff } from "@everdict/suite";
 import { assertRuntimeTarget } from "../../common/require-runtime.js";
 import { ScoringService } from "../execution/scoring-service.js";
 import { ScorecardAnalyticsService } from "./scorecard-analytics-service.js";
 import { ScorecardBatchService } from "./scorecard-batch-service.js";
+import { ScorecardBatch } from "./scorecard-batch.js";
 import { ScorecardIngestService } from "./scorecard-ingest-service.js";
 import {
   type IngestScorecardInput,
@@ -149,19 +144,16 @@ export class ScorecardService {
     // Trials — run each case N times for pass@k / flakiness. Clamp to >=1; 1 keeps single-run behavior byte-identical.
     const trials = input.trials !== undefined ? Math.max(1, Math.floor(input.trials)) : 1;
 
-    const ts = this.now();
-    const record: ScorecardRecord = {
+    // Record assembly is the domain's job (ScorecardBatch.newQueued) — the service only orchestrates.
+    const record: ScorecardRecord = ScorecardBatch.newQueued({
       id: this.newId(),
       tenant: input.tenant,
       dataset: { id: dataset.id, version: dataset.version },
       harness: { id: input.harness.id, version: harnessVersion }, // resolved concrete version (never "latest")
-      status: "queued",
       ...(origin ? { origin } : {}),
-      ...(input.submittedBy ? { createdBy: input.submittedBy } : {}), // the runner — the "who" paired with origin (the "where")
-      ...(input.runtime ? { runtime: input.runtime } : {}), // placed runtime (work-queue axis) — unset = default backend
-      ...(subset ? { subset } : {}), // partial-run marker — consumers know it's "not the whole thing"
-      // Everything a re-drive needs (restart resume / retry-failed) — persisted at submit so the batch can be
-      // reconstructed after a control-plane restart. docs/architecture/batch-resilience.md
+      ...(input.submittedBy ? { createdBy: input.submittedBy } : {}),
+      ...(input.runtime ? { runtime: input.runtime } : {}),
+      ...(subset ? { subset } : {}),
       orchestration: {
         judges: input.judges ?? [],
         ...(input.graders && input.graders.length > 0 ? { graders: input.graders } : {}),
@@ -172,9 +164,8 @@ export class ScorecardService {
         ...(input.traceSink ? { traceSink: input.traceSink } : {}),
         ...(input.oomAutoBoost ? { oomAutoBoost: true } : {}),
       },
-      createdAt: ts,
-      updatedAt: ts,
-    };
+      now: this.now(),
+    });
 
     await this.deps.store.create(record);
     // Server-side supersede — reclaim any in-flight batch for the same PR (origin.repo+prNumber) × same (harness, dataset) and
@@ -233,7 +224,7 @@ export class ScorecardService {
   // complete naturally and are recorded on their child run (not a force-kill). superseded is not succeeded, so baseline/leaderboard stay clean.
   // Cancel a superseded batch's Temporal workflow (cooperative, best-effort — the record is already marked).
   private async cancelWorkflowIfAny(rec: ScorecardRecord | undefined): Promise<void> {
-    if (!rec?.orchestration?.workflowId || !this.deps.temporalBatches?.cancel) return;
+    if (!rec || !ScorecardBatch.from(rec).isWorkflowOwned() || !this.deps.temporalBatches?.cancel) return;
     await this.deps.temporalBatches.cancel(rec.id).catch(() => {});
   }
 
@@ -251,12 +242,9 @@ export class ScorecardService {
     }
     for (const r of candidates) {
       if (r.id === newId) continue;
-      if (r.origin?.repo?.toLowerCase() !== repo.toLowerCase() || r.origin?.prNumber !== prNumber) continue;
-      await this.deps.store.update(r.id, {
-        status: "superseded",
-        error: { code: "SUPERSEDED", message: `Replaced by a newer fire of the same PR (${newId})` },
-        updatedAt: this.now(),
-      });
+      const batch = ScorecardBatch.from(r);
+      if (!batch.canSupersede({ repo, prNumber })) continue;
+      await this.deps.store.update(r.id, batch.supersede(newId, this.now()));
       this.inFlight.get(r.id)?.abort(); // don't fire remaining cases (cooperative) — track attaches partial results and terminates
       await this.cancelWorkflowIfAny(r); // temporal-owned batch → cancel the workflow too (best-effort)
       // Drop this batch's still-QUEUED scheduler entries — they'd dispatch later only to be discarded.
@@ -289,7 +277,8 @@ export class ScorecardService {
         hydrated = { ...record, scorecard: { suiteId: record.dataset.id, harness, results } };
       }
     }
-    return this.withTrialSummary(await this.withEta(hydrated));
+    // Trial roll-up is a pure record derivation — the domain model owns it (ETA stays here: it needs store IO).
+    return ScorecardBatch.from(await this.withEta(hydrated)).withTrialSummary();
   }
 
   // Remaining wall-clock estimate for a RUNNING batch — median duration of its own finished children × remaining
@@ -316,15 +305,6 @@ export class ScorecardService {
     } catch {
       return record; // the estimate is a convenience — never let it break the read
     }
-  }
-
-  // Derive the trial roll-up (pass@k / flakiness) from the scorecard's repeated trials — like RunRecord.usage from the
-  // trace, computed on read and never stored. Attached only when the scorecard actually holds trials (a no-op for a
-  // single-run batch, so the response shape is unchanged there). docs/architecture/trial-based-verdict.md
-  private withTrialSummary(record: ScorecardRecord): ScorecardRecord {
-    const sc = record.scorecard;
-    if (!sc || record.trialSummary || !sc.results.some((r) => r.trial !== undefined)) return record;
-    return { ...record, trialSummary: summarizeTrials(sc) };
   }
 
   list(tenant?: string): Promise<ScorecardRecord[]> {

@@ -17,7 +17,7 @@ import {
   classifyFailure,
   resolveHarnessSecrets,
 } from "@everdict/core";
-import type { ScorecardOrigin, ScorecardRecord, ScorecardStep } from "@everdict/db";
+import type { RunRecord, ScorecardOrigin, ScorecardRecord, ScorecardStep } from "@everdict/db";
 import { type Dispatch, caseVerdict, runSuite, scorecardModels, summarizeScorecard } from "@everdict/suite";
 import { collectDeferredTrace } from "../execution/collect-trace.js";
 import { executeCase } from "../execution/execute-case.js";
@@ -27,6 +27,8 @@ import { OOM_ESCALATION_CAP_MB, executeWithOomBoost } from "../ops/oom-boost.js"
 import { executeWithSpillover } from "../ops/runtime-spillover.js";
 import { weightedTargets } from "../ops/shard-weights.js";
 import { SpeculationController } from "../ops/speculation.js";
+import { Run } from "../run/run.js";
+import { ScorecardBatch, type ScorecardOutcomeExtras } from "./scorecard-batch.js";
 import {
   type ScorecardServiceDeps,
   applyGradingPlan,
@@ -139,13 +141,16 @@ export class ScorecardBatchService {
   // docs/architecture/batch-resilience.md
   async resume(id: string): Promise<boolean> {
     const rec = await this.deps.store.get(id);
-    if (!rec || (rec.status !== "queued" && rec.status !== "running") || !rec.orchestration) return false;
+    if (!rec) return false;
+    const batch = ScorecardBatch.from(rec);
+    const orch = rec.orchestration; // local narrow — canResume() already requires it
+    if (!batch.canResume() || !orch) return false;
     // A Temporal-owned batch owns itself: the workflow's activity retries ride out a control-plane restart, so
     // boot recovery must neither tombstone nor double-drive it.
-    if (rec.orchestration.workflowId) return true;
+    if (batch.isWorkflowOwned()) return true;
     // A multi-trial batch keys child runs by (case, trial); the seed path below dedups by caseId, so a faithful
     // resume needs (case, trial) seeding — not yet supported. Fall back to the INTERRUPTED tombstone. docs/architecture/trial-based-verdict.md
-    if (rec.orchestration.trials && rec.orchestration.trials > 1) return false;
+    if (batch.isMultiTrial()) return false;
     let dataset: Dataset;
     let seed: CaseResult[] = [];
     const seedRunIds: string[] = [];
@@ -158,15 +163,11 @@ export class ScorecardBatchService {
         rec.subset ? { ids: rec.subset.ids, tags: rec.subset.tags, limit: rec.subset.limit } : undefined,
       );
       // Re-apply the recorded grading plan — resume must score exactly like the original submit.
-      dataset = { ...resolved, cases: applyGradingPlan(cases, rec.orchestration.graders) };
+      dataset = { ...resolved, cases: applyGradingPlan(cases, orch.graders) };
       if (this.deps.runStore) {
         const children = await this.deps.runStore.list(rec.tenant, { scorecardId: id });
         // Latest child per case wins (a batch resumed more than once has several children for a re-run case).
-        const latestByCase = new Map<string, (typeof children)[number]>();
-        for (const c of children) {
-          const prev = latestByCase.get(c.caseId);
-          if (!prev || c.updatedAt > prev.updatedAt) latestByCase.set(c.caseId, c);
-        }
+        const latestByCase = ScorecardBatch.latestChildPerCase(children);
         for (const c of latestByCase.values()) {
           if (c.status === "succeeded" && c.result) {
             seed.push(c.result);
@@ -180,19 +181,18 @@ export class ScorecardBatchService {
               : undefined;
             if (adoptable) {
               adopted += 1;
-              await this.deps.runStore.update(c.id, { status: "succeeded", result: adoptable, updatedAt: this.now() });
+              await this.deps.runStore.update(c.id, Run.from(c).adopt(adoptable, this.now()));
               seed.push(adoptable);
               seedRunIds.push(c.id);
               continue;
             }
-            await this.deps.runStore.update(c.id, {
-              status: "failed",
-              error: {
-                code: "INTERRUPTED",
-                message: "Interrupted by a control-plane restart — re-dispatched on resume.",
-              },
-              updatedAt: this.now(),
-            });
+            await this.deps.runStore.update(
+              c.id,
+              Run.from(c).fail(
+                { code: "INTERRUPTED", message: "Interrupted by a control-plane restart — re-dispatched on resume." },
+                this.now(),
+              ),
+            );
           }
         }
         // Only seed cases that are still in the selection (dataset edits between runs shrink, never corrupt).
@@ -227,16 +227,16 @@ export class ScorecardBatchService {
       rec.harness.id,
       rec.harness.version,
       harnessSpec,
-      rec.orchestration.judges,
+      orch.judges,
       rec.runtime,
-      rec.orchestration.judge,
-      rec.orchestration.concurrency,
+      orch.judge,
+      orch.concurrency,
       {
         seed,
         seedRunIds,
-        retries: rec.orchestration.retries,
-        ...(rec.orchestration.traceSink ? { sinkOverride: rec.orchestration.traceSink } : {}),
-        ...(rec.orchestration.oomAutoBoost ? { oomAutoBoost: true } : {}),
+        retries: orch.retries,
+        ...(orch.traceSink ? { sinkOverride: orch.traceSink } : {}),
+        ...(orch.oomAutoBoost ? { oomAutoBoost: true } : {}),
         resumeNote: `Resumed after a control-plane restart — ${seed.length} finished case(s) kept, ${remaining} re-dispatched${adopted > 0 ? ` (${adopted} in-flight job(s) adopted without re-running)` : ""}`,
       },
     );
@@ -320,11 +320,7 @@ export class ScorecardBatchService {
     const doneIds = new Set<string>();
     if (this.deps.runStore) {
       const children = await this.deps.runStore.list(rec.tenant, { scorecardId: id });
-      const latest = new Map<string, (typeof children)[number]>();
-      for (const c of children) {
-        const prev = latest.get(c.caseId);
-        if (!prev || c.updatedAt > prev.updatedAt) latest.set(c.caseId, c);
-      }
+      const latest = ScorecardBatch.latestChildPerCase(children);
       for (const c of latest.values()) if (c.status === "succeeded" && c.result) doneIds.add(c.caseId);
     }
     const ctx = {
@@ -399,7 +395,13 @@ export class ScorecardBatchService {
   async planBatch(id: string): Promise<{ caseIds: string[]; concurrency: number }> {
     const ctx = await this.buildBatchContext(id);
     const remaining = [...ctx.caseIndex.keys()].filter((cid) => !ctx.doneIds.has(cid));
-    await this.deps.store.update(id, { status: "running", updatedAt: this.now() });
+    // Read-guarded start: a re-attached workflow re-plans a running batch (legal), but a settled/superseded
+    // record is never revived to running (first terminal write wins; runBatchCase skips per case anyway).
+    const rec = await this.deps.store.get(id);
+    if (rec) {
+      const batch = ScorecardBatch.from(rec);
+      if (!batch.isTerminal()) await this.deps.store.update(id, batch.start(this.now()));
+    }
     await this.appendBatchStep(id, {
       phase: "dispatch",
       status: "started",
@@ -416,29 +418,26 @@ export class ScorecardBatchService {
     const ctx = this.batchContexts.get(id) ?? (await this.buildBatchContext(id));
     // Superseded mid-flight (a newer fire reclaimed this batch) — don't spend more compute/LLM on it. The workflow
     // is cancelled cooperatively by supersede; this guard covers activities already in the queue.
-    if ((await this.deps.store.get(id))?.status === "superseded") return { settled: true, skipped: true };
+    const current = await this.deps.store.get(id);
+    if (current && ScorecardBatch.from(current).isSuperseded()) return { settled: true, skipped: true };
     if (ctx.doneIds.has(caseId)) return { settled: true, skipped: true };
     const evalCase = ctx.caseIndex.get(caseId);
     if (!evalCase) throw new NotFoundError("NOT_FOUND", { scorecard: id, caseId }, "case not in this batch.");
 
     this.deps.budget?.admit(ctx.tenant);
     const runStore = this.deps.runStore;
-    let childId: string | undefined;
+    let child: RunRecord | undefined;
     if (runStore) {
-      childId = this.newId();
-      const ts = this.now();
-      await runStore.create({
-        id: childId,
+      child = ScorecardBatch.newChildRun({
+        id: this.newId(),
         tenant: ctx.tenant,
         harness: { id: ctx.harnessId, version: ctx.harnessVersion },
         caseId,
-        status: "running",
         parentScorecardId: id,
-        trigger: "scorecard",
         ...(evalCase.placement?.target ? { runtime: evalCase.placement.target } : {}),
-        createdAt: ts,
-        updatedAt: ts,
+        now: this.now(),
       });
+      await runStore.create(child);
     }
     const baseJob: AgentJob = {
       evalCase,
@@ -535,12 +534,11 @@ export class ScorecardBatchService {
     if (ctx.judges.length > 0) {
       await this.scoring.applyJudges(ctx.tenant, ctx.dataset, [result], ctx.judges).catch(() => {});
     }
-    if (runStore && childId)
-      await runStore.update(childId, {
-        status: "succeeded",
-        result,
+    if (runStore && child)
+      await runStore.update(child.id, {
+        ...Run.from(child).succeed(result, this.now()),
+        // Provenance: record the runtime that ACTUALLY ran the case (differs from the assigned one after a spillover).
         ...(ranOn ? { runtime: ranOn } : {}),
-        updatedAt: this.now(),
       });
     ctx.doneIds.add(caseId);
     const v = caseVerdict(result);
@@ -561,11 +559,7 @@ export class ScorecardBatchService {
     const rec = await this.deps.store.get(id);
     if (!rec) throw new NotFoundError("NOT_FOUND", { scorecard: id }, "scorecard not found.");
     const children = this.deps.runStore ? await this.deps.runStore.list(ctx.tenant, { scorecardId: id }) : [];
-    const latest = new Map<string, (typeof children)[number]>();
-    for (const c of children) {
-      const prev = latest.get(c.caseId);
-      if (!prev || c.updatedAt > prev.updatedAt) latest.set(c.caseId, c);
-    }
+    const latest = ScorecardBatch.latestChildPerCase(children);
     const order = new Map([...ctx.caseIndex.keys()].map((cid, i) => [cid, i] as const));
     const results = [...latest.values()]
       .map((c) => c.result)
@@ -596,17 +590,28 @@ export class ScorecardBatchService {
     const judgeModels = await this.scoring.collectJudgeModels(ctx.tenant, ctx.judges, ctx.judge);
     const runIds = [...latest.values()].map((c) => c.id);
     await this.appendBatchStep(id, { phase: "persist", status: "ok", message: "aggregated and persisted (temporal)" });
+    // Read-guarded terminal write: a supersede that raced the workflow's finalize already settled the record —
+    // never revive it to succeeded (first terminal write wins; a replaced batch also skips its notification).
     const final = await this.deps.store.get(id);
-    await this.deps.store.update(id, {
-      status: "succeeded",
-      summary: summarizeScorecard(scorecard),
-      models: scorecardModels(scorecard, declared),
-      ...(judgeModels.length > 0 ? { judgeModels } : {}),
-      ...(exported ? { export: exported } : {}),
-      steps: final?.steps ?? [],
-      ...(runIds.length > 0 ? { runIds } : { scorecard }),
-      updatedAt: this.now(),
-    });
+    const batch = ScorecardBatch.from(final ?? rec);
+    if (batch.isTerminal()) {
+      this.batchContexts.delete(id);
+      return;
+    }
+    await this.deps.store.update(
+      id,
+      batch.succeed(
+        {
+          summary: summarizeScorecard(scorecard),
+          models: scorecardModels(scorecard, declared),
+          ...(judgeModels.length > 0 ? { judgeModels } : {}),
+          ...(exported ? { export: exported } : {}),
+          steps: final?.steps ?? [],
+          ...(runIds.length > 0 ? { runIds } : { scorecard }),
+        },
+        this.now(),
+      ),
+    );
     this.batchContexts.delete(id);
     if (this.deps.onComplete) {
       const done = await this.deps.store.get(id);
@@ -628,19 +633,8 @@ export class ScorecardBatchService {
     const src = await this.getRecord(input.id); // hydrated (results from child runs when stored as references)
     if (!src || src.tenant !== input.tenant)
       throw new NotFoundError("NOT_FOUND", { scorecard: input.id }, "scorecard not found.");
-    if (src.status !== "succeeded" && src.status !== "failed")
-      throw new BadRequestError(
-        "BAD_REQUEST",
-        { scorecard: input.id, status: src.status },
-        "Only a finished batch can be retried — wait for it to finish (or resume handles interruptions).",
-      );
-    // Retrying a multi-trial batch needs per-(case, trial) failure selection (N results per case) — not yet supported.
-    if (src.orchestration?.trials && src.orchestration.trials > 1)
-      throw new BadRequestError(
-        "BAD_REQUEST",
-        { scorecard: input.id },
-        "Retrying a multi-trial (pass@k) batch is not yet supported.",
-      );
+    // Terminal-only + multi-trial gates — the domain throws the exact 400s this route has always returned.
+    ScorecardBatch.from(src).assertCanRetryFailed();
     const results = src.scorecard?.results ?? [];
     if (results.length === 0)
       throw new BadRequestError("BAD_REQUEST", { scorecard: input.id }, "This batch has no per-case results to retry.");
@@ -710,13 +704,11 @@ export class ScorecardBatchService {
 
     // Pre-orchestration source records still retry — with no judges/judge on file, re-run cases get grader scores only.
     const orch = src.orchestration ?? { judges: [], concurrency: this.concurrency, retries: 1 };
-    const ts = this.now();
-    const record: ScorecardRecord = {
+    const record: ScorecardRecord = ScorecardBatch.newQueued({
       id: this.newId(),
       tenant: input.tenant,
       dataset: { id: dataset.id, version: dataset.version },
       harness: src.harness,
-      status: "queued",
       // The boost map is REPLACED per retry (not inherited) — it records what THIS retry ran with; recovered
       // cases drop out, still-OOM cases re-enter with the compounded value.
       origin: {
@@ -729,9 +721,8 @@ export class ScorecardBatchService {
       ...(src.runtime ? { runtime: src.runtime } : {}),
       ...(src.subset ? { subset: src.subset } : {}),
       orchestration: orch,
-      createdAt: ts,
-      updatedAt: ts,
-    };
+      now: this.now(),
+    });
     await this.deps.store.create(record);
     void (async () => {
       // Stage-aware recovery BEFORE the dispatch loop: re-pull each collect-failed case by its traceRef and
@@ -767,20 +758,17 @@ export class ScorecardBatchService {
       // drives only the re-dispatch remainder. Start failure degrades to the in-process loop (same as submit).
       if (this.deps.temporalBatches && this.deps.runStore) {
         for (const r of [...seed, ...recovered]) {
-          const ts2 = this.now();
-          await this.deps.runStore.create({
-            id: this.newId(),
-            tenant: input.tenant,
-            harness: src.harness,
-            caseId: r.caseId,
-            status: "succeeded",
-            result: r,
-            parentScorecardId: record.id,
-            trigger: "scorecard",
-            ...(src.runtime ? { runtime: src.runtime } : {}),
-            createdAt: ts2,
-            updatedAt: ts2,
-          });
+          await this.deps.runStore.create(
+            ScorecardBatch.newSeededChildRun({
+              id: this.newId(),
+              tenant: input.tenant,
+              harness: src.harness,
+              result: r,
+              parentScorecardId: record.id,
+              ...(src.runtime ? { runtime: src.runtime } : {}),
+              now: this.now(),
+            }),
+          );
         }
         const workflowId = this.deps.temporalBatches.workflowIdFor(record.id);
         await this.deps.store.update(record.id, {
@@ -865,12 +853,16 @@ export class ScorecardBatchService {
     } = {},
   ): Promise<void> {
     const trials = opts.trials ?? 1;
-    // If supersede already reclaimed this batch, don't start (prevents reviving queued→superseded back to running).
-    if ((await this.deps.store.get(id))?.status === "superseded") return;
+    // If supersede already reclaimed this batch (or it otherwise settled), don't start — never revive a
+    // terminal record back to running.
+    const opening = await this.deps.store.get(id);
+    if (!opening) return;
+    const openingBatch = ScorecardBatch.from(opening);
+    if (openingBatch.isTerminal()) return;
     // Register the cooperative-cancellation handle — when supersedeInFlight aborts, runSuite stops firing remaining cases.
     const controller = new AbortController();
     this.inFlight.set(id, controller);
-    await this.deps.store.update(id, { status: "running", updatedAt: this.now() });
+    await this.deps.store.update(id, openingBatch.start(this.now()));
     // Progress (step) timeline — append as the run proceeds + persist incrementally so the web shows "how far / what" it's doing.
     const steps: ScorecardStep[] = [];
     const pushStep = (p: string, status: ScorecardStep["status"], message: string, caseId?: string): void => {
@@ -919,23 +911,19 @@ export class ScorecardBatchService {
       };
       const runStore = this.deps.runStore;
       // Child run (if any): create as running. Tagged with parentScorecardId, hidden from the activity list by default.
-      let childId: string | undefined;
+      let child: RunRecord | undefined;
       if (runStore) {
-        childId = this.newId();
-        const ts = this.now();
-        await runStore.create({
-          id: childId,
+        child = ScorecardBatch.newChildRun({
+          id: this.newId(),
           tenant,
           harness: { id: harnessId, version: harnessVersion },
           caseId: job.evalCase.id,
-          status: "running",
           parentScorecardId: id,
-          trigger: "scorecard",
           ...(runtime ? { runtime } : {}), // propagate the batch's runtime to the child too — the queue's runtime-lane axis
-          createdAt: ts,
-          updatedAt: ts,
+          now: this.now(),
         });
-        caseToChild.set(childKey(job.evalCase.id, job.trial), childId);
+        await runStore.create(child);
+        caseToChild.set(childKey(job.evalCase.id, job.trial), child.id);
       }
       try {
         // Resolve env secret references (just before dispatch). If a referenced secret is missing, resolveHarnessSecrets throws → this case is isolated as a failure.
@@ -990,21 +978,19 @@ export class ScorecardBatchService {
         if (bill) this.deps.budget?.settle(bill, costOf(result));
         this.deps.usage?.meterCase(result, tenant); // meter-only billing usage (own-pays runs skip themselves)
         // Provenance: record the runtime that ACTUALLY ran the case (differs from the assigned one after a spillover).
-        if (runStore && childId)
-          await runStore.update(childId, {
-            status: "succeeded",
-            result,
+        if (runStore && child)
+          await runStore.update(child.id, {
+            ...Run.from(child).succeed(result, this.now()),
             ...(ranOn ? { runtime: ranOn } : {}),
-            updatedAt: this.now(),
           });
         return result;
       } catch (err) {
-        if (runStore && childId) {
+        if (runStore && child) {
           const error =
             err instanceof AppError
               ? { code: err.code, message: err.message }
               : { code: "INTERNAL", message: err instanceof Error ? err.message : String(err) };
-          await runStore.update(childId, { status: "failed", error, updatedAt: this.now() });
+          await runStore.update(child.id, Run.from(child).fail(error, this.now()));
         }
         throw err; // rethrow so runSuite isolates the case (freezing it into a failed CaseResult)
       }
@@ -1169,16 +1155,24 @@ export class ScorecardBatchService {
         );
         const hasChildren = caseToChild.size > 0 || seedRunIds.length > 0;
         if (hasChildren) await this.writeBackResults(caseToChild, scorecard.results);
-        await this.deps.store.update(id, {
-          status: "superseded",
-          ...(scorecard.results.length > 0 ? { summary: summarizeScorecard(scorecard) } : {}),
-          ...(exportedPartial?.cases?.length ? { export: exportedPartial } : {}),
-          steps: [...steps],
-          ...(hasChildren && seedChildBacked
-            ? { runIds: [...seedRunIds, ...caseToChild.values()] }
-            : { scorecard, ...(hasChildren ? { runIds: [...seedRunIds, ...caseToChild.values()] } : {}) }),
-          updatedAt: this.now(),
-        });
+        // The record was already marked superseded by supersedeInFlight — settle it with the partial outcome
+        // (a legal re-write of a superseded record; the domain rejects it over succeeded/failed).
+        const reclaimed = await this.deps.store.get(id);
+        if (reclaimed)
+          await this.deps.store.update(
+            id,
+            ScorecardBatch.from(reclaimed).settleSuperseded(
+              {
+                ...(scorecard.results.length > 0 ? { summary: summarizeScorecard(scorecard) } : {}),
+                ...(exportedPartial?.cases?.length ? { export: exportedPartial } : {}),
+                steps: [...steps],
+                ...(hasChildren && seedChildBacked
+                  ? { runIds: [...seedRunIds, ...caseToChild.values()] }
+                  : { scorecard, ...(hasChildren ? { runIds: [...seedRunIds, ...caseToChild.values()] } : {}) }),
+              },
+              this.now(),
+            ),
+          );
         this.inFlight.delete(id);
         return; // completion notification for a replaced batch is noise — skip
       }
@@ -1218,10 +1212,7 @@ export class ScorecardBatchService {
       //  → get hydrates from the children (storage dedup, response shape unchanged). Without children (no runStore), embed as before.
       const hasChildren = caseToChild.size > 0 || seedRunIds.length > 0;
       if (hasChildren) await this.writeBackResults(caseToChild, scorecard.results);
-      await this.deps.store.update(id, {
-        // If supersede arrived mid-pipeline (judge/offload), don't revive to succeeded — all results attach, but
-        // the newer fire is the answer for this PR, so terminate as superseded (leaderboard/baseline see only the new one).
-        status: controller.signal.aborted ? "superseded" : "succeeded",
+      const extras: ScorecardOutcomeExtras = {
         summary,
         models,
         ...(judgeModels.length > 0 ? { judgeModels } : {}),
@@ -1230,8 +1221,20 @@ export class ScorecardBatchService {
         ...(hasChildren && seedChildBacked
           ? { runIds: [...seedRunIds, ...caseToChild.values()] }
           : { scorecard, ...(hasChildren ? { runIds: [...seedRunIds, ...caseToChild.values()] } : {}) }),
-        updatedAt: this.now(),
-      });
+      };
+      const settled = await this.deps.store.get(id);
+      if (settled) {
+        const batch = ScorecardBatch.from(settled);
+        if (controller.signal.aborted) {
+          // If supersede arrived mid-pipeline (judge/offload), don't revive to succeeded — all results attach, but
+          // the newer fire is the answer for this PR, so terminate as superseded (leaderboard/baseline see only the new one).
+          await this.deps.store.update(id, batch.settleSuperseded(extras, this.now()));
+        } else if (!batch.isTerminal()) {
+          await this.deps.store.update(id, batch.succeed(extras, this.now()));
+        }
+        // else: a raced supersede settled the record before the abort signal reached this loop — first
+        // terminal write wins, the late success is a no-op skip.
+      }
     } catch (err) {
       const base =
         err instanceof AppError
@@ -1243,10 +1246,7 @@ export class ScorecardBatchService {
       const hasChildren = caseToChild.size > 0 || seedRunIds.length > 0;
       if (scorecard && hasChildren) await this.writeBackResults(caseToChild, scorecard.results);
       const declared = harnessSpec?.kind === "command" ? harnessSpec.model : undefined;
-      await this.deps.store.update(id, {
-        // A failure after supersede isn't reported as a failure (a reclaimed batch's leftover errors are noise) — keep superseded.
-        status: controller.signal.aborted ? "superseded" : "failed",
-        error: { ...base, phase },
+      const extras: ScorecardOutcomeExtras = {
         steps: [...steps],
         ...(hasChildren ? { runIds: [...seedRunIds, ...caseToChild.values()] } : {}),
         ...(scorecard
@@ -1256,8 +1256,22 @@ export class ScorecardBatchService {
               ...(hasChildren ? {} : { scorecard }), // with children, skip embed (get hydrates)
             }
           : {}),
-        updatedAt: this.now(),
-      });
+      };
+      const settled = await this.deps.store.get(id);
+      if (settled) {
+        const batch = ScorecardBatch.from(settled);
+        if (controller.signal.aborted) {
+          // A failure after supersede isn't reported as a failure (a reclaimed batch's leftover errors are noise) — keep superseded.
+          await this.deps.store.update(
+            id,
+            batch.settleSuperseded({ ...extras, error: { ...base, phase } }, this.now()),
+          );
+        } else if (!batch.isTerminal()) {
+          await this.deps.store.update(id, batch.fail({ ...base, phase }, extras, this.now()));
+        }
+        // else: a raced supersede already settled this record — a late failure never overwrites it (first
+        // terminal write wins).
+      }
     }
     this.inFlight.delete(id);
     // Completion notification (Mattermost etc.) — using the latest record. A failure is independent of the scorecard result (swallow). Replaced batches skip the notification.
