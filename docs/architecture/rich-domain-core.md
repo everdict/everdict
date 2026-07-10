@@ -1,9 +1,20 @@
 # Rich domain core — the domain expresses itself (design)
 
-> **Status: S0 (harness) landing · S1-S4 planned.** Maintainer-directed Round 6 over the api-layer
-> re-architecture: the control-plane core is an anemic domain — records are behavior-less Zod data, state
-> transitions are scattered inline mutations, and invariants live in services. This round gives each domain a
-> model that owns its lifecycle.
+> **Status: S0-S4 SHIPPED** (`466efdc`→`0941840`; 706/706 tests + build + boot contract at every slice).
+> S1 `a3afa12`: **Run** model (newQueued the only construction path; isTerminal/canAdopt/canRedispatch;
+> succeed/fail/adopt/redispatch return store patches; the service's read-guarded `finalize` = first terminal
+> write wins — 2 races sealed by regressions). S2 `30beb3a`: **ScorecardBatch** aggregate (34 inline status
+> sites mapped to factories/guards/transitions; the "latest child per case" seed helper unified across THREE
+> copies; child writes reuse the Run model; trialSummary derivation on the model; 4 races sealed — late
+> success/failure over a raced supersede, planBatch/finalizeBatch superseded-revive). S3 `7bb06c4`:
+> **MembershipPolicy** (last-admin ×3 → intent-named guards over one predicate; invite wrapper deliberately
+> skipped — the store's consume CTE is the atomic SSOT). S4 `0941840`: **Schedule** model (cron at birth,
+> content-vs-pause edit permission, autoDisable transition; bookkeeping stamps deliberately left plain;
+> Temporal rollback failure now surfaces `{rollbackFailed}` instead of a silent swallow).
+>
+> Maintainer-directed Round 6 over the api-layer re-architecture: the control-plane core was an anemic
+> domain — records were behavior-less Zod data, state transitions scattered inline mutations, and invariants
+> lived in services. This round gives each domain a model that owns its lifecycle.
 
 ## Problem — measured
 
