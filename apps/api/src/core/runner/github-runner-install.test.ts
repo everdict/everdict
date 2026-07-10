@@ -1,8 +1,8 @@
+import { CiLinkService, type GithubAppRepoAccess } from "@everdict/application-control";
+import { installGithubWorkspaceRunner } from "@everdict/application-control";
+import { RunnerService } from "@everdict/application-control";
 import { InMemoryRunnerStore, InMemoryWorkspaceSettingsStore } from "@everdict/db";
 import { describe, expect, it } from "vitest";
-import { CiLinkService, type GithubAppRepoAccess } from "../ci-link/ci-link-service.js";
-import { installGithubWorkspaceRunner } from "./github-runner-install.js";
-import { RunnerService } from "./runner-service.js";
 
 // The runner registration token is now issued by the workspace GitHub App (not a personal connection) — stubbed with a fake.
 function fakeGithubApp(): GithubAppRepoAccess {

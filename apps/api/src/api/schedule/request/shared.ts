@@ -1,5 +1,5 @@
+import { isValidCron } from "@everdict/application-control";
 import { z } from "zod";
-import { isValidCron } from "../../../core/schedule/schedule-service.js";
 
 // Scheduled (cron) scorecard request — the definition that flows into ScorecardService.submit on fire (= RunScorecardBody minus the judge override).
 export const ScheduleRunTemplateBodySchema = z.object({

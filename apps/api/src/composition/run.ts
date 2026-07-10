@@ -1,3 +1,7 @@
+import type { GithubAppService } from "@everdict/application-control";
+import type { ImageRegistryService } from "@everdict/application-control";
+import type { NotificationService } from "@everdict/application-control";
+import { RunService } from "@everdict/application-control";
 import type { Dispatcher as CoreDispatcher, ExecStreamHandle } from "@everdict/backends";
 import type { RunStore, WorkspaceSettingsStore } from "@everdict/db";
 import { makeGraders } from "@everdict/graders";
@@ -7,10 +11,6 @@ import { buildTraceSource } from "@everdict/trace";
 import type { PersistentBudget } from "../common/budget-tracker.js";
 import { defaultJudgeRunner } from "../core/execution/judge-runner.js";
 import type { ModelResolvingDispatcher } from "../core/execution/model-resolving-dispatcher.js";
-import type { GithubAppService } from "../core/github-app/github-app-service.js";
-import type { ImageRegistryService } from "../core/image-registry/image-registry-service.js";
-import type { NotificationService } from "../core/notification/notification-service.js";
-import { RunService } from "../core/run/run-service.js";
 import type { RuntimeSecretsFn, ScopedSecretsFn } from "./types.js";
 
 // Live-observability lane readers (from buildRuntimeAccess) — RunService wraps them in lazy closures.

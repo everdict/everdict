@@ -1,10 +1,6 @@
+import { IngestScorecardBodySchema, PullIngestBodySchema, originSource } from "@everdict/application-control";
 import type { FastifyInstance } from "fastify";
 import type { z } from "zod";
-import {
-  IngestScorecardBodySchema,
-  PullIngestBodySchema,
-  originSource,
-} from "../../core/scorecard/scorecard-service.js";
 import { type ServerDeps, gate, resolvePrincipal, sendError, zodIssues } from "../route-context.js";
 import { RunScorecardBodySchema } from "./request/run-scorecard.js";
 import { scorecardDocs } from "./scorecard.docs.js";

@@ -1,3 +1,5 @@
+import { type SelfHostedKey, poolKeyFor, selfHostedBackendName } from "@everdict/application-control";
+import { jobImages } from "@everdict/application-control";
 import {
   type Backend,
   type BackendRegistry,
@@ -15,8 +17,6 @@ import {
   imageUsesRegistryHost,
 } from "@everdict/core";
 import type { RuntimeRegistry } from "@everdict/registry";
-import { type SelfHostedKey, poolKeyFor, selfHostedBackendName } from "../runner/runner-hub.js";
-import { jobImages } from "./execute-case.js";
 
 export interface RuntimeDispatcherDeps {
   inner: Dispatcher; // the global Scheduler — fairness/budget/capacity are delegated to it as-is

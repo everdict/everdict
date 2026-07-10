@@ -1,17 +1,17 @@
+import { VersionTagsBodySchema } from "@everdict/application-control";
+import { RepinBodySchema } from "@everdict/application-control";
+import { DeleteHarnessVersionResultSchema } from "@everdict/contracts/wire";
+import { HarnessInstanceResponseSchema } from "@everdict/contracts/wire";
+import { HarnessListResponseSchema } from "@everdict/contracts/wire";
+import { HarnessVersionsResponseSchema } from "@everdict/contracts/wire";
+import { RegisterHarnessResultSchema } from "@everdict/contracts/wire";
+import { RepinResultSchema } from "@everdict/contracts/wire";
+import { ResolvedHarnessResponseSchema } from "@everdict/contracts/wire";
+import { ValidateHarnessResultSchema } from "@everdict/contracts/wire";
 import { HarnessInstanceSpecSchema } from "@everdict/core";
 import type { FastifySchema } from "fastify";
-import { VersionTagsBodySchema } from "../../common/version-tag-service.js";
-import { RepinBodySchema } from "../../core/harness/harness-pin-service.js";
 import { errorResponses, toJsonSchema } from "../openapi.js";
-import { DeleteHarnessVersionResultSchema } from "./response/delete-harness-version-result.js";
-import { HarnessInstanceResponseSchema } from "./response/harness-instance.js";
-import { HarnessListResponseSchema } from "./response/harness-list-entry.js";
-import { HarnessVersionsResponseSchema } from "./response/harness-versions.js";
-import { RegisterHarnessResultSchema } from "./response/register-harness-result.js";
-import { RepinResultSchema } from "./response/repin-result.js";
-import { ResolvedHarnessResponseSchema } from "./response/resolved-harness.js";
 import { SetVersionTagsResultSchema } from "./response/set-version-tags-result.js";
-import { ValidateHarnessResultSchema } from "./response/validate-harness-result.js";
 
 // OpenAPI descriptors for the harness (instance) routes — doc-only (rule api-layer): the no-op compilers in
 // server.ts make attaching these behavior-free; validation stays in the handlers.

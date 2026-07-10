@@ -1,8 +1,8 @@
+import { ScoringService } from "@everdict/application-control";
 import type { CaseResult, Dataset, GradeContext, JudgeSpec, Placement, Score } from "@everdict/core";
 import { InMemoryJudgeRegistry } from "@everdict/registry";
 import { describe, expect, it } from "vitest";
 import type { JudgeRunner } from "./judge-runner.js";
-import { ScoringService } from "./scoring-service.js";
 
 const DATASET: Dataset = {
   id: "d",

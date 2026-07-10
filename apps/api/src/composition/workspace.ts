@@ -1,8 +1,8 @@
+import { MembershipService } from "@everdict/application-control";
+import { ProfileService } from "@everdict/application-control";
+import { RunnerService } from "@everdict/application-control";
+import { WorkspaceService } from "@everdict/application-control";
 import type { RunnerStore, UserProfileStore, WorkspaceInviteStore, WorkspaceStore } from "@everdict/db";
-import { MembershipService } from "../core/member/membership-service.js";
-import { ProfileService } from "../core/profile/profile-service.js";
-import { RunnerService } from "../core/runner/runner-service.js";
-import { WorkspaceService } from "../core/workspace/workspace-service.js";
 import type { ScheduleServiceRef } from "./schedule.js";
 
 // Early workspace-membership services (workspace/membership/profile/runner). MembershipService's member-removal hook

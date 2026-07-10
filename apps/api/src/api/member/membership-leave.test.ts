@@ -1,7 +1,7 @@
+import { MembershipService } from "@everdict/application-control";
 import { AppError } from "@everdict/core";
 import { InMemoryUserProfileStore, InMemoryWorkspaceInviteStore, InMemoryWorkspaceStore } from "@everdict/db";
 import { describe, expect, it } from "vitest";
-import { MembershipService } from "../../core/member/membership-service.js";
 
 async function seed() {
   const store = new InMemoryWorkspaceStore();

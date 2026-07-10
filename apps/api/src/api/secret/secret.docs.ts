@@ -1,7 +1,7 @@
+import { SecretMetaListResponseSchema } from "@everdict/contracts/wire";
 import type { FastifySchema } from "fastify";
 import { z } from "zod";
 import { errorResponses, toJsonSchema } from "../openapi.js";
-import { SecretMetaListResponseSchema } from "./response/secret-meta.js";
 
 // OpenAPI descriptors for the secret routes (doc-only — never validates/serializes; see api/openapi.ts).
 // Two scopes: workspace (shared, admin-managed via secrets:write) + user (personal, self-serve). Values are

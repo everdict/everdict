@@ -1,9 +1,9 @@
+import { TraceSinkAssignmentsResponseSchema } from "@everdict/contracts/wire";
+import { TraceSinkUpsertResponseSchema } from "@everdict/contracts/wire";
+import { TraceSinkRosterSchema } from "@everdict/contracts/wire";
 import type { FastifySchema } from "fastify";
 import { z } from "zod";
 import { errorResponses, toJsonSchema } from "../openapi.js";
-import { TraceSinkAssignmentsResponseSchema } from "./response/trace-sink-assignments.js";
-import { TraceSinkUpsertResponseSchema } from "./response/trace-sink-config-view.js";
-import { TraceSinkRosterSchema } from "./response/trace-sink-roster.js";
 
 // Doc-only OpenAPI descriptors for workspace trace sinks — export judged scorecard detail to the team's
 // observability platform (rule api-layer: schemas document, never validate/serialize — the compilers are no-ops).

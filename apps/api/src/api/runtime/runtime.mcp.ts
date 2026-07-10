@@ -1,7 +1,7 @@
+import { setVersionTags } from "@everdict/application-control";
 import { RuntimeSpecSchema } from "@everdict/core";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { setVersionTags } from "../../common/version-tag-service.js";
 import { type McpToolContext, fail, ok, plain, run } from "../mcp-context.js";
 
 // Runtime MCP tools — the MCP twin of runtime.routes.ts.

@@ -1,9 +1,9 @@
+import { RunService } from "@everdict/application-control";
 import type { Dispatcher } from "@everdict/backends";
 import { inMemoryBudget } from "@everdict/billing";
 import { type AgentJob, BadRequestError, type CaseResult, type EvalCase } from "@everdict/core";
 import { InMemoryRunStore, type RunRecord } from "@everdict/db";
 import { describe, expect, it, vi } from "vitest";
-import { RunService } from "./run-service.js";
 
 const CASE: EvalCase = {
   id: "c1",

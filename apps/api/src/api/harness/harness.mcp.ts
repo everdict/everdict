@@ -1,9 +1,9 @@
+import { setVersionTags } from "@everdict/application-control";
+import { repinHarnessImages } from "@everdict/application-control";
+import { deleteHarnessVersion, harnessIsPrivate, harnessVisibleTo } from "@everdict/application-control";
 import { HarnessInstanceSpecSchema } from "@everdict/core";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { setVersionTags } from "../../common/version-tag-service.js";
-import { repinHarnessImages } from "../../core/harness/harness-pin-service.js";
-import { deleteHarnessVersion, harnessIsPrivate, harnessVisibleTo } from "../../core/harness/harness-service.js";
 import { type McpToolContext, fail, ok, plain, run } from "../mcp-context.js";
 
 // Harness-instance MCP tools — the MCP twin of harness.routes.ts.

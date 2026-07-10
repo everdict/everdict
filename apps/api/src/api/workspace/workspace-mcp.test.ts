@@ -1,3 +1,5 @@
+import { RunService } from "@everdict/application-control";
+import { WorkspaceService } from "@everdict/application-control";
 import type { Principal } from "@everdict/auth";
 import type { Dispatcher } from "@everdict/backends";
 import type { CaseResult } from "@everdict/core";
@@ -5,8 +7,6 @@ import { InMemoryRunStore, InMemoryWorkspaceStore } from "@everdict/db";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { describe, expect, it } from "vitest";
-import { RunService } from "../../core/run/run-service.js";
-import { WorkspaceService } from "../../core/workspace/workspace-service.js";
 import { type McpDeps, buildMcpServer } from "../../mcp.js";
 
 const result: CaseResult = {

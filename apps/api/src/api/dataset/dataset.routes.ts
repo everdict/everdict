@@ -1,8 +1,8 @@
+import { VersionTagsBodySchema, setVersionTags } from "@everdict/application-control";
+import { deleteDatasetVersion } from "@everdict/application-control";
 import { DatasetSchema } from "@everdict/core";
 import { diffDatasets, harborToDataset, terminalBenchToDataset } from "@everdict/datasets";
 import type { FastifyInstance } from "fastify";
-import { VersionTagsBodySchema, setVersionTags } from "../../common/version-tag-service.js";
-import { deleteDatasetVersion } from "../../core/dataset/dataset-service.js";
 import { type ServerDeps, gate, resolvePrincipal, sendError, zodIssues } from "../route-context.js";
 import { datasetDocs } from "./dataset.docs.js";
 import { ImportHarborBodySchema } from "./request/import-harbor.js";

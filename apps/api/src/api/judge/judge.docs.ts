@@ -1,12 +1,12 @@
+import { VersionTagsBodySchema } from "@everdict/application-control";
+import { JudgeListResponseSchema } from "@everdict/contracts/wire";
+import { JudgeResponseSchema } from "@everdict/contracts/wire";
+import { RegisterJudgeResultSchema } from "@everdict/contracts/wire";
+import { ValidateJudgeResultSchema } from "@everdict/contracts/wire";
 import { JudgeSpecSchema } from "@everdict/core";
 import type { FastifySchema } from "fastify";
-import { VersionTagsBodySchema } from "../../common/version-tag-service.js";
 import { errorResponses, toJsonSchema } from "../openapi.js";
-import { JudgeListResponseSchema } from "./response/judge-list-entry.js";
-import { JudgeResponseSchema } from "./response/judge.js";
-import { RegisterJudgeResultSchema } from "./response/register-judge-result.js";
 import { SetVersionTagsResultSchema } from "./response/set-version-tags-result.js";
-import { ValidateJudgeResultSchema } from "./response/validate-judge-result.js";
 
 // OpenAPI descriptors for the judge routes — doc-only (rule api-layer): the no-op compilers in server.ts
 // make attaching these behavior-free; validation stays in the handlers.

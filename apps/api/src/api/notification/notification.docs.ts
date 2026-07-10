@@ -1,9 +1,9 @@
+import { NotificationFeedResponseSchema } from "@everdict/contracts/wire";
+import { ReadNotificationsResultResponseSchema } from "@everdict/contracts/wire";
 import type { FastifySchema } from "fastify";
 import { z } from "zod";
 import { errorResponses, toJsonSchema } from "../openapi.js";
 import { ReadNotificationsBodySchema } from "./request/read-notifications.js";
-import { NotificationFeedResponseSchema } from "./response/notification-feed.js";
-import { ReadNotificationsResultResponseSchema } from "./response/read-notifications-result.js";
 
 // OpenAPI descriptors for the notification routes (doc-only — never validates/serializes; see api/openapi.ts).
 // Personal feed (bell inbox) — self-scoped to the caller + active workspace, no role gate.

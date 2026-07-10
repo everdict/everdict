@@ -1,7 +1,7 @@
+import type { SelfHostedKey } from "@everdict/application-control";
 import { CaseResultSchema } from "@everdict/core";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import type { SelfHostedKey } from "../../core/runner/runner-hub.js";
 import { type McpToolContext, fail, ok, plain } from "../mcp-context.js";
 
 // Runner-lease MCP tools — the runner protocol (lease/submit/fail/heartbeat) over the MCP transport.

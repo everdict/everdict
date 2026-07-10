@@ -1,6 +1,6 @@
+import { RunnerHub, type SelfHostedKey, poolKeyFor } from "@everdict/application-control";
 import type { AgentJob, CaseResult } from "@everdict/core";
 import { describe, expect, it, vi } from "vitest";
-import { RunnerHub, type SelfHostedKey, poolKeyFor } from "./runner-hub.js";
 
 const result: CaseResult = {
   caseId: "c1",

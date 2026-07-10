@@ -1,7 +1,7 @@
+import { installGithubWorkspaceRunner } from "@everdict/application-control";
+import { RUNNER_CAPABILITIES } from "@everdict/application-control";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { installGithubWorkspaceRunner } from "../../core/runner/github-runner-install.js";
-import { RUNNER_CAPABILITIES } from "../../core/runner/runner-service.js";
 import { type McpToolContext, ok, run } from "../mcp-context.js";
 
 // Workspace-runner MCP tools — the MCP twin of workspace-runner.routes.ts.

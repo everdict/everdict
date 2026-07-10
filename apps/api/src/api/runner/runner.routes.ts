@@ -1,5 +1,5 @@
+import { PairRunnerBodySchema } from "@everdict/application-control";
 import type { FastifyInstance } from "fastify";
-import { PairRunnerBodySchema } from "../../core/runner/runner-service.js";
 import { type ServerDeps, gate, resolvePrincipal, sendError, zodIssues } from "../route-context.js";
 import { runnerDocs } from "./runner.docs.js";
 

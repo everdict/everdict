@@ -1,8 +1,8 @@
+import type { RunScorecardInput } from "@everdict/application-control";
+import { type ScheduleDriver, ScheduleService, type ScheduleSpec, isValidCron } from "@everdict/application-control";
 import { BadRequestError, ForbiddenError, NotFoundError, UpstreamError } from "@everdict/core";
 import { InMemoryScheduleStore, type ScheduleRunTemplate, type ScheduleStore } from "@everdict/db";
 import { describe, expect, it } from "vitest";
-import type { RunScorecardInput } from "../scorecard/scorecard-service.js";
-import { type ScheduleDriver, ScheduleService, type ScheduleSpec, isValidCron } from "./schedule-service.js";
 
 const runTemplate: ScheduleRunTemplate = {
   dataset: { id: "repo-smoke", version: "latest" },

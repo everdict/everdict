@@ -1,10 +1,10 @@
+import { recoverInterrupted } from "@everdict/application-control";
+import type { RunService } from "@everdict/application-control";
+import type { ScorecardService } from "@everdict/application-control";
 import { type Backend, isObservable, isRecoverable, isScreenCapturable, isShellable } from "@everdict/backends";
 import type { CaseResult, RegistryAuth, RuntimeSpec } from "@everdict/core";
 import type { RunStore, ScorecardStore } from "@everdict/db";
 import type { RuntimeRegistry } from "@everdict/registry";
-import { recoverInterrupted } from "../core/ops/startup-recovery.js";
-import type { RunService } from "../core/run/run-service.js";
-import type { ScorecardService } from "../core/scorecard/scorecard-service.js";
 
 // Per-runtime backend access for already-dispatched cases: adoption/kill (boot recovery, supersede) + the
 // live-observability reads (logs / one-shot exec / terminal stream / browser frame). Resolves the recorded

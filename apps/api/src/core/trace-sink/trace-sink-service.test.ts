@@ -1,8 +1,8 @@
+import { TraceSinkService } from "@everdict/application-control";
 import { BadRequestError, type CaseResult } from "@everdict/core";
 import { InMemoryWorkspaceSettingsStore } from "@everdict/db";
 import type { TraceSinkConfig } from "@everdict/trace";
 import { describe, expect, it } from "vitest";
-import { TraceSinkService } from "./trace-sink-service.js";
 
 const RESULT: CaseResult = {
   caseId: "c1",

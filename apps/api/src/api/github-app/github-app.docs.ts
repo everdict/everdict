@@ -1,10 +1,10 @@
+import { GithubAppDetailViewSchema } from "@everdict/contracts/wire";
+import { GithubAppViewSchema } from "@everdict/contracts/wire";
+import { InstallStartResponseSchema } from "@everdict/contracts/wire";
+import { InstallationRepoSchema } from "@everdict/contracts/wire";
 import type { FastifySchema } from "fastify";
 import { z } from "zod";
 import { errorResponses, toJsonSchema } from "../openapi.js";
-import { GithubAppDetailViewSchema } from "./response/github-app-detail-view.js";
-import { GithubAppViewSchema } from "./response/github-app-view.js";
-import { InstallStartResponseSchema } from "./response/install-start.js";
-import { InstallationRepoSchema } from "./response/installation-repo.js";
 
 // Doc-only OpenAPI descriptors for the workspace GitHub App integration (rule api-layer: schemas document,
 // never validate/serialize — the compilers are no-ops). Body/query schemas mirror exactly what the handlers parse.

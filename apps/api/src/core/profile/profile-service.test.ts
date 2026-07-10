@@ -1,7 +1,7 @@
+import { ProfileService } from "@everdict/application-control";
 import { AppError } from "@everdict/core";
 import { InMemoryUserProfileStore } from "@everdict/db";
 import { describe, expect, it } from "vitest";
-import { ProfileService } from "./profile-service.js";
 
 function svc(): ProfileService {
   return new ProfileService(new InMemoryUserProfileStore());

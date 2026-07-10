@@ -1,6 +1,6 @@
+import { CommentService } from "@everdict/application-control";
 import { InMemoryCommentStore } from "@everdict/db";
 import { describe, expect, it } from "vitest";
-import { CommentService } from "./comment-service.js";
 
 function svc() {
   const store = new InMemoryCommentStore();

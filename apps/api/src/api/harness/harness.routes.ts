@@ -1,3 +1,6 @@
+import { VersionTagsBodySchema, setVersionTags } from "@everdict/application-control";
+import { RepinBodySchema, repinHarnessImages } from "@everdict/application-control";
+import { deleteHarnessVersion, harnessIsPrivate, harnessVisibleTo } from "@everdict/application-control";
 import {
   AppError,
   HarnessInstanceSpecSchema,
@@ -8,9 +11,6 @@ import {
   resolveHarnessInstance,
 } from "@everdict/core";
 import type { FastifyInstance } from "fastify";
-import { VersionTagsBodySchema, setVersionTags } from "../../common/version-tag-service.js";
-import { RepinBodySchema, repinHarnessImages } from "../../core/harness/harness-pin-service.js";
-import { deleteHarnessVersion, harnessIsPrivate, harnessVisibleTo } from "../../core/harness/harness-service.js";
 import { type ServerDeps, gate, resolvePrincipal, sendError, zodIssues } from "../route-context.js";
 import { harnessDocs } from "./harness.docs.js";
 

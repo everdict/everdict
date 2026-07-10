@@ -1,10 +1,10 @@
+import { ModelListResponseSchema } from "@everdict/contracts/wire";
+import { ModelResponseSchema } from "@everdict/contracts/wire";
+import { RegisterModelResultSchema } from "@everdict/contracts/wire";
+import { ValidateModelResultSchema } from "@everdict/contracts/wire";
 import { ModelSpecSchema } from "@everdict/core";
 import type { FastifySchema } from "fastify";
 import { errorResponses, toJsonSchema } from "../openapi.js";
-import { ModelListResponseSchema } from "./response/model-list-entry.js";
-import { ModelResponseSchema } from "./response/model.js";
-import { RegisterModelResultSchema } from "./response/register-model-result.js";
-import { ValidateModelResultSchema } from "./response/validate-model-result.js";
 
 // OpenAPI descriptors for the model routes — doc-only (rule api-layer): the no-op compilers in server.ts
 // make attaching these behavior-free; validation stays in the handlers.

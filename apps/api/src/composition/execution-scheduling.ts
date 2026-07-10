@@ -1,4 +1,6 @@
 import { collectAuthEnv } from "@everdict/agent";
+import { Metrics } from "@everdict/application-control";
+import { type AutoscaleConfig, parseAutoscale, parseTenantMap } from "@everdict/application-control";
 import {
   Autoscaler,
   BackendRegistry,
@@ -12,8 +14,6 @@ import type { BudgetLimit } from "@everdict/billing";
 import type { BudgetStore, SecretStore, UsageStore } from "@everdict/db";
 import { persistentBudget } from "../common/budget-tracker.js";
 import { persistentUsageMeter } from "../common/usage-meter.js";
-import { Metrics } from "../core/ops/metrics.js";
-import { type AutoscaleConfig, parseAutoscale, parseTenantMap } from "../core/ops/scheduling-config.js";
 
 // Execution scheduling: the global env backends (Nomad/K8s) + their slot-autoscaling targets + the operator
 // fairness dials (quota/weight/queue-depth), feeding the capacity-aware tenant-fair Scheduler.

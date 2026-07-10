@@ -1,9 +1,9 @@
+import { PairRunnerBodySchema } from "@everdict/application-control";
+import { PairedRunnerResponseSchema } from "@everdict/contracts/wire";
+import { RunnerRosterSchema } from "@everdict/contracts/wire";
 import type { FastifySchema } from "fastify";
 import { z } from "zod";
-import { PairRunnerBodySchema } from "../../core/runner/runner-service.js";
 import { errorResponses, toJsonSchema } from "../openapi.js";
-import { PairedRunnerResponseSchema } from "./response/paired-runner.js";
-import { RunnerRosterSchema } from "./response/runner-roster.js";
 
 // Doc-only OpenAPI descriptors for personal self-hosted runners (rule api-layer: schemas document,
 // never validate/serialize — the compilers are no-ops).

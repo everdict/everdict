@@ -1,17 +1,17 @@
+import { BenchmarkCatalogResponseSchema } from "@everdict/contracts/wire";
+import { BenchmarkRecipeListResponseSchema } from "@everdict/contracts/wire";
+import { HfDatasetSearchResponseSchema } from "@everdict/contracts/wire";
+import { HfFileListResponseSchema } from "@everdict/contracts/wire";
+import { HfSplitsResponseSchema } from "@everdict/contracts/wire";
+import { ImportBenchmarkResultSchema } from "@everdict/contracts/wire";
+import { PreviewSourceResultSchema } from "@everdict/contracts/wire";
+import { RegisterBenchmarkRecipeResultSchema } from "@everdict/contracts/wire";
+import { ValidateBenchmarkRecipeResultSchema } from "@everdict/contracts/wire";
 import { BenchmarkAdapterSpecSchema } from "@everdict/datasets";
 import type { FastifySchema } from "fastify";
 import { BenchmarkImportBodySchema, BenchmarkPreviewBodySchema } from "../../core/benchmark/benchmark-service.js";
 import { errorResponses, toJsonSchema } from "../openapi.js";
-import { BenchmarkCatalogResponseSchema } from "./response/benchmark-catalog-entry.js";
-import { BenchmarkRecipeListResponseSchema } from "./response/benchmark-recipe-list-entry.js";
 import { BenchmarkRecipeResponseSchema } from "./response/benchmark-recipe.js";
-import { HfDatasetSearchResponseSchema } from "./response/hf-dataset-hit.js";
-import { HfFileListResponseSchema } from "./response/hf-file-list.js";
-import { HfSplitsResponseSchema } from "./response/hf-split.js";
-import { ImportBenchmarkResultSchema } from "./response/import-benchmark-result.js";
-import { PreviewSourceResultSchema } from "./response/preview-source-result.js";
-import { RegisterBenchmarkRecipeResultSchema } from "./response/register-benchmark-recipe-result.js";
-import { ValidateBenchmarkRecipeResultSchema } from "./response/validate-benchmark-recipe-result.js";
 
 // OpenAPI descriptors for the benchmark (catalog + HF wizard + recipe) routes — doc-only (rule api-layer):
 // the no-op compilers in server.ts make attaching these behavior-free; validation stays in the handlers.

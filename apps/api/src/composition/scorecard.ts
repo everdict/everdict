@@ -1,3 +1,9 @@
+import type { GithubAppService } from "@everdict/application-control";
+import type { ImageRegistryService } from "@everdict/application-control";
+import type { NotificationService } from "@everdict/application-control";
+import type { Metrics } from "@everdict/application-control";
+import { ScorecardService } from "@everdict/application-control";
+import type { TraceSinkService } from "@everdict/application-control";
 import type { CircuitBreaker, Dispatcher as CoreDispatcher, Scheduler } from "@everdict/backends";
 import type { UsageMeter } from "@everdict/billing";
 import type { CaseResult } from "@everdict/core";
@@ -8,13 +14,7 @@ import type { S3ArtifactStore } from "@everdict/storage";
 import { buildTraceSource } from "@everdict/trace";
 import type { PersistentBudget } from "../common/budget-tracker.js";
 import type { JudgeRunner } from "../core/execution/judge-runner.js";
-import type { GithubAppService } from "../core/github-app/github-app-service.js";
-import type { ImageRegistryService } from "../core/image-registry/image-registry-service.js";
-import type { NotificationService } from "../core/notification/notification-service.js";
-import type { Metrics } from "../core/ops/metrics.js";
-import { ScorecardService } from "../core/scorecard/scorecard-service.js";
 import { TemporalBatchDriver } from "../core/scorecard/temporal-batch-driver.js";
-import type { TraceSinkService } from "../core/trace-sink/trace-sink-service.js";
 import type { RuntimeSecretsFn, ScopedSecretsFn } from "./types.js";
 
 // Per-runtime kill of an already-dispatched case (supersede / speculation loser) — from buildRuntimeAccess.

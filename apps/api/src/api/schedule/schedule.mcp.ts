@@ -1,6 +1,6 @@
+import type { UpdateScheduleInput } from "@everdict/application-control";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import type { UpdateScheduleInput } from "../../core/schedule/schedule-service.js";
 import { type McpToolContext, ok, run } from "../mcp-context.js";
 
 // Schedule resource MCP tools — the MCP twin of schedule.routes.ts (same ScheduleService core, second transport).

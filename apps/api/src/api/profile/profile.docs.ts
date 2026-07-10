@@ -1,8 +1,8 @@
+import { MeResponseSchema } from "@everdict/contracts/wire";
+import { UserProfileResponseSchema } from "@everdict/contracts/wire";
 import type { FastifySchema } from "fastify";
 import { z } from "zod";
 import { errorResponses, toJsonSchema } from "../openapi.js";
-import { MeResponseSchema } from "./response/me.js";
-import { UserProfileResponseSchema } from "./response/user-profile.js";
 
 // OpenAPI descriptors for the profile routes (doc-only — never validates/serializes; see api/openapi.ts).
 // Values are widened to FastifySchema so Fastify does NOT narrow reply.code() to the documented status keys.

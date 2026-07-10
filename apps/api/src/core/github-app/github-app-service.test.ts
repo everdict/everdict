@@ -1,9 +1,9 @@
 import { generateKeyPairSync } from "node:crypto";
+import { GithubAppService } from "@everdict/application-control";
 import { BadRequestError, NotFoundError } from "@everdict/core";
 import { InMemoryOAuthStateStore, InMemoryWorkspaceSettingsStore } from "@everdict/db";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { githubAppGateway } from "../../infrastructure/github/app-gateway.js";
-import { GithubAppService } from "./github-app-service.js";
 
 const { privateKey } = generateKeyPairSync("rsa", {
   modulusLength: 2048,

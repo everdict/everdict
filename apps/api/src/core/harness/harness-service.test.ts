@@ -1,3 +1,4 @@
+import { deleteHarnessVersion, harnessVisibleTo } from "@everdict/application-control";
 import type { Principal } from "@everdict/auth";
 import {
   ConflictError,
@@ -8,7 +9,6 @@ import {
 } from "@everdict/core";
 import { InMemoryHarnessInstanceRegistry, InMemoryHarnessTemplateRegistry } from "@everdict/registry";
 import { beforeEach, describe, expect, it } from "vitest";
-import { deleteHarnessVersion, harnessVisibleTo } from "./harness-service.js";
 
 const TEMPLATE: HarnessTemplateSpec = {
   kind: "command",

@@ -1,9 +1,9 @@
+import { MattermostActionReplySchema } from "@everdict/contracts/wire";
+import { MattermostStatusResponseSchema, MattermostUpsertResponseSchema } from "@everdict/contracts/wire";
+import { MattermostReplySchema } from "@everdict/contracts/wire";
 import type { FastifySchema } from "fastify";
 import { z } from "zod";
 import { errorResponses, toJsonSchema } from "../openapi.js";
-import { MattermostActionReplySchema } from "./response/mattermost-action-reply.js";
-import { MattermostStatusResponseSchema, MattermostUpsertResponseSchema } from "./response/mattermost-config-view.js";
-import { MattermostReplySchema } from "./response/mattermost-reply.js";
 
 // Doc-only OpenAPI descriptors for the workspace Mattermost integration + the public inbound surface
 // (rule api-layer: schemas document, never validate/serialize — the compilers are no-ops).

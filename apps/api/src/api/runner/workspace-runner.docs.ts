@@ -1,10 +1,10 @@
+import { PairRunnerBodySchema, RUNNER_CAPABILITIES } from "@everdict/application-control";
+import { GithubRunnerInstallResultSchema } from "@everdict/contracts/wire";
+import { PairedRunnerResponseSchema } from "@everdict/contracts/wire";
+import { RunnerRosterSchema } from "@everdict/contracts/wire";
 import type { FastifySchema } from "fastify";
 import { z } from "zod";
-import { PairRunnerBodySchema, RUNNER_CAPABILITIES } from "../../core/runner/runner-service.js";
 import { errorResponses, toJsonSchema } from "../openapi.js";
-import { GithubRunnerInstallResultSchema } from "./response/github-runner-install-result.js";
-import { PairedRunnerResponseSchema } from "./response/paired-runner.js";
-import { RunnerRosterSchema } from "./response/runner-roster.js";
 
 // Doc-only OpenAPI descriptors for workspace-shared runners (team tier, owner="ws:<workspace>") —
 // rule api-layer: schemas document, never validate/serialize (the compilers are no-ops).

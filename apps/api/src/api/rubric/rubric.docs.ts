@@ -1,12 +1,12 @@
+import { VersionTagsBodySchema } from "@everdict/application-control";
+import { RegisterRubricResultSchema } from "@everdict/contracts/wire";
+import { RubricListResponseSchema } from "@everdict/contracts/wire";
+import { RubricResponseSchema } from "@everdict/contracts/wire";
+import { ValidateRubricResultSchema } from "@everdict/contracts/wire";
 import { RubricSpecSchema } from "@everdict/core";
 import type { FastifySchema } from "fastify";
-import { VersionTagsBodySchema } from "../../common/version-tag-service.js";
 import { errorResponses, toJsonSchema } from "../openapi.js";
-import { RegisterRubricResultSchema } from "./response/register-rubric-result.js";
-import { RubricListResponseSchema } from "./response/rubric-list-entry.js";
-import { RubricResponseSchema } from "./response/rubric.js";
 import { SetVersionTagsResultSchema } from "./response/set-version-tags-result.js";
-import { ValidateRubricResultSchema } from "./response/validate-rubric-result.js";
 
 // OpenAPI descriptors for the rubric routes — doc-only (rule api-layer): the no-op compilers in server.ts
 // make attaching these behavior-free; validation stays in the handlers.

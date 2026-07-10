@@ -1,7 +1,7 @@
+import { repinHarnessImages } from "@everdict/application-control";
 import { BadRequestError, type HarnessTemplateSpec } from "@everdict/core";
 import { InMemoryHarnessInstanceRegistry, InMemoryHarnessTemplateRegistry } from "@everdict/registry";
 import { beforeEach, describe, expect, it } from "vitest";
-import { repinHarnessImages } from "./harness-pin-service.js";
 
 const template: HarnessTemplateSpec = {
   kind: "service",

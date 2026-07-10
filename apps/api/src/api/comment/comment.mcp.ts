@@ -1,6 +1,6 @@
+import { COMMENT_RESOURCE_TYPES } from "@everdict/application-control";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { COMMENT_RESOURCE_TYPES } from "../../core/comment/comment-service.js";
 import { type McpToolContext, ok, plain, run } from "../mcp-context.js";
 
 export function registerCommentTools(server: McpServer, ctx: McpToolContext): void {

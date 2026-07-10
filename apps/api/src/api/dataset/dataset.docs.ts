@@ -1,17 +1,17 @@
+import { VersionTagsBodySchema } from "@everdict/application-control";
+import { DatasetDiffResponseSchema } from "@everdict/contracts/wire";
+import { DatasetListResponseSchema } from "@everdict/contracts/wire";
+import { DatasetResponseSchema } from "@everdict/contracts/wire";
+import { DeleteDatasetVersionResultSchema } from "@everdict/contracts/wire";
+import { ImportDatasetResultSchema } from "@everdict/contracts/wire";
+import { RegisterDatasetResultSchema } from "@everdict/contracts/wire";
+import { SetVersionTagsResultSchema } from "@everdict/contracts/wire";
+import { ValidateDatasetResultSchema } from "@everdict/contracts/wire";
 import { DatasetSchema } from "@everdict/core";
 import type { FastifySchema } from "fastify";
-import { VersionTagsBodySchema } from "../../common/version-tag-service.js";
 import { errorResponses, toJsonSchema } from "../openapi.js";
 import { ImportHarborBodySchema } from "./request/import-harbor.js";
 import { ImportTerminalBenchBodySchema } from "./request/import-terminal-bench.js";
-import { DatasetDiffResponseSchema } from "./response/dataset-diff.js";
-import { DatasetListResponseSchema } from "./response/dataset-list-entry.js";
-import { DatasetResponseSchema } from "./response/dataset.js";
-import { DeleteDatasetVersionResultSchema } from "./response/delete-dataset-version-result.js";
-import { ImportDatasetResultSchema } from "./response/import-dataset-result.js";
-import { RegisterDatasetResultSchema } from "./response/register-dataset-result.js";
-import { SetVersionTagsResultSchema } from "./response/set-version-tags-result.js";
-import { ValidateDatasetResultSchema } from "./response/validate-dataset-result.js";
 
 // OpenAPI descriptors for the dataset routes — doc-only (rule api-layer): the no-op compilers in server.ts
 // make attaching these behavior-free; validation stays in the handlers.

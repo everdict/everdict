@@ -1,5 +1,5 @@
+import type { ScheduleDriver, ScheduleSpec } from "@everdict/application-control";
 import { Client, Connection } from "@temporalio/client";
-import type { ScheduleDriver, ScheduleSpec } from "./schedule-service.js";
 
 // The control plane syncs schedules into Temporal Schedules (DB is SSOT, this driver reconciles Temporal to it).
 // Uses only @temporalio/client (does not pull the worker's native binding @temporalio/worker into the API process).

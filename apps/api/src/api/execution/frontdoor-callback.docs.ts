@@ -1,7 +1,7 @@
+import { CallbackAckResponseSchema } from "@everdict/contracts/wire";
 import type { FastifySchema } from "fastify";
 import { z } from "zod";
 import { errorResponses, toJsonSchema } from "../openapi.js";
-import { CallbackAckResponseSchema } from "./response/callback-ack.js";
 
 // OpenAPI descriptors for the inbound front-door callback route — documentation only (no-op compilers;
 // rule api-layer). Attached by frontdoor-callback.routes.ts as { schema: frontdoorCallbackDocs.<key> }.

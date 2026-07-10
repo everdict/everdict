@@ -1,6 +1,6 @@
+import type { UpdateViewInput } from "@everdict/application-control";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import type { UpdateViewInput } from "../../core/view/view-service.js";
 import { type McpToolContext, ok, run } from "../mcp-context.js";
 
 export function registerViewTools(server: McpServer, ctx: McpToolContext): void {

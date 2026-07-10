@@ -1,7 +1,7 @@
+import { WorkspaceService } from "@everdict/application-control";
 import { AppError } from "@everdict/core";
 import { InMemoryWorkspaceStore } from "@everdict/db";
 import { describe, expect, it } from "vitest";
-import { WorkspaceService } from "./workspace-service.js";
 
 async function seeded(): Promise<{ svc: WorkspaceService; store: InMemoryWorkspaceStore }> {
   const store = new InMemoryWorkspaceStore();

@@ -1,9 +1,9 @@
+import { PushCredentialsResponseSchema } from "@everdict/contracts/wire";
+import { ImageRegistryRosterSchema } from "@everdict/contracts/wire";
+import { ImageRegistryUpsertResultSchema } from "@everdict/contracts/wire";
 import type { FastifySchema } from "fastify";
 import { z } from "zod";
 import { errorResponses, toJsonSchema } from "../openapi.js";
-import { PushCredentialsResponseSchema } from "./response/image-push-credentials.js";
-import { ImageRegistryRosterSchema } from "./response/image-registry-roster.js";
-import { ImageRegistryUpsertResultSchema } from "./response/image-registry-upsert-result.js";
 
 // Doc-only OpenAPI descriptors for workspace image registries — BYO registries as the image-provenance
 // baseline (rule api-layer: schemas document, never validate/serialize — the compilers are no-ops).

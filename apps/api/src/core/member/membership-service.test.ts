@@ -1,3 +1,4 @@
+import { MembershipService } from "@everdict/application-control";
 import { NotFoundError } from "@everdict/core";
 import {
   InMemoryUserProfileStore,
@@ -7,7 +8,6 @@ import {
   hashKey,
 } from "@everdict/db";
 import { describe, expect, it } from "vitest";
-import { MembershipService } from "./membership-service.js";
 
 function setup() {
   const members = new InMemoryWorkspaceStore();

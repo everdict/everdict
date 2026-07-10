@@ -1,13 +1,13 @@
+import { VersionTagsBodySchema } from "@everdict/application-control";
+import { ProbeRuntimeResultSchema } from "@everdict/contracts/wire";
+import { RegisterRuntimeResultSchema } from "@everdict/contracts/wire";
+import { RuntimeListResponseSchema } from "@everdict/contracts/wire";
+import { RuntimeResponseSchema } from "@everdict/contracts/wire";
+import { ValidateRuntimeResultSchema } from "@everdict/contracts/wire";
 import { RuntimeSpecSchema } from "@everdict/core";
 import type { FastifySchema } from "fastify";
-import { VersionTagsBodySchema } from "../../common/version-tag-service.js";
 import { errorResponses, toJsonSchema } from "../openapi.js";
-import { ProbeRuntimeResultSchema } from "./response/probe-runtime-result.js";
-import { RegisterRuntimeResultSchema } from "./response/register-runtime-result.js";
-import { RuntimeListResponseSchema } from "./response/runtime-list-entry.js";
-import { RuntimeResponseSchema } from "./response/runtime.js";
 import { SetVersionTagsResultSchema } from "./response/set-version-tags-result.js";
-import { ValidateRuntimeResultSchema } from "./response/validate-runtime-result.js";
 
 // OpenAPI descriptors for the runtime routes — doc-only (rule api-layer): the no-op compilers in server.ts
 // make attaching these behavior-free; validation stays in the handlers.

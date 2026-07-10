@@ -1,10 +1,10 @@
+import { ViewListResponseSchema } from "@everdict/contracts/wire";
+import { ViewResponseSchema } from "@everdict/contracts/wire";
 import type { FastifySchema } from "fastify";
 import { z } from "zod";
 import { errorResponses, toJsonSchema } from "../openapi.js";
 import { CreateViewBodySchema } from "./request/create-view.js";
 import { UpdateViewBodySchema } from "./request/update-view.js";
-import { ViewListResponseSchema } from "./response/view-list.js";
-import { ViewResponseSchema } from "./response/view.js";
 
 // OpenAPI descriptors for the saved scorecard-analysis View routes (doc-only — never validates/serializes;
 // see api/openapi.ts). A View is a named, opaque AnalysisConfig re-run live when opened — not a snapshot.

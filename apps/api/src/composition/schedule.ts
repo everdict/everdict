@@ -1,8 +1,8 @@
+import type { NotificationService } from "@everdict/application-control";
+import { ScheduleService } from "@everdict/application-control";
+import type { ScorecardService } from "@everdict/application-control";
 import type { ScheduleStore } from "@everdict/db";
-import type { NotificationService } from "../core/notification/notification-service.js";
-import { ScheduleService } from "../core/schedule/schedule-service.js";
 import { TemporalScheduleDriver } from "../core/schedule/temporal-schedule-driver.js";
-import type { ScorecardService } from "../core/scorecard/scorecard-service.js";
 
 // The one place the schedule↔membership↔scorecard construction cycle is expressed.
 //

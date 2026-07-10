@@ -1,10 +1,10 @@
+import { ScheduleListResponseSchema } from "@everdict/contracts/wire";
+import { ScheduleResponseSchema } from "@everdict/contracts/wire";
 import type { FastifySchema } from "fastify";
 import { z } from "zod";
 import { errorResponses, toJsonSchema } from "../openapi.js";
 import { CreateScheduleBodySchema } from "./request/create-schedule.js";
 import { UpdateScheduleBodySchema } from "./request/update-schedule.js";
-import { ScheduleListResponseSchema } from "./response/schedule-list.js";
-import { ScheduleResponseSchema } from "./response/schedule.js";
 
 const scheduleIdParams = toJsonSchema(z.object({ id: z.string().describe("Schedule id") }));
 

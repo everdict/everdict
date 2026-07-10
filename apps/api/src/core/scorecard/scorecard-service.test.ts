@@ -25,8 +25,8 @@ import { describe, expect, it } from "vitest";
 // Trace-only grader factory injected into the ingest path (re-architecture P2 S4) — the application layer never
 // imports @everdict/graders, so the composition side supplies the steps/cost/latency graders the ingest re-derives.
 const defaultTraceGraders = () => [stepsGrader, costGrader, latencyGrader];
-import type { CaseExportStream } from "../trace-sink/trace-sink-service.js";
-import { ScorecardService } from "./scorecard-service.js";
+import type { CaseExportStream } from "@everdict/application-control";
+import { ScorecardService } from "@everdict/application-control";
 
 const dispatcher: Dispatcher = {
   async dispatch() {

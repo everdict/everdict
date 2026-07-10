@@ -1,9 +1,9 @@
 import { API_KEY_SCOPES } from "@everdict/auth";
+import { ApiKeyMetaListResponseSchema } from "@everdict/contracts/wire";
+import { CreatedApiKeyResponseSchema } from "@everdict/contracts/wire";
 import type { FastifySchema } from "fastify";
 import { z } from "zod";
 import { errorResponses, toJsonSchema } from "../openapi.js";
-import { ApiKeyMetaListResponseSchema } from "./response/api-key-meta.js";
-import { CreatedApiKeyResponseSchema } from "./response/created-api-key.js";
 
 // OpenAPI descriptors for the personal API-key routes (doc-only — never validates/serializes; see api/openapi.ts).
 // Self-serve and self-scoped (no role gate): each user sees/issues/revokes only their own keys; a key acts

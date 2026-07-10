@@ -1,3 +1,20 @@
+import type { CiLinkService } from "@everdict/application-control";
+import type { CommentService } from "@everdict/application-control";
+import type { GithubAppService } from "@everdict/application-control";
+import type { ImageRegistryService } from "@everdict/application-control";
+import type { MattermostService } from "@everdict/application-control";
+import type { MembershipService } from "@everdict/application-control";
+import type { NotificationService } from "@everdict/application-control";
+import type { ProfileService } from "@everdict/application-control";
+import type { QueueService } from "@everdict/application-control";
+import type { RunService } from "@everdict/application-control";
+import type { RunnerHub } from "@everdict/application-control";
+import type { RunnerService } from "@everdict/application-control";
+import type { ScheduleService } from "@everdict/application-control";
+import type { ScorecardService } from "@everdict/application-control";
+import type { TraceSinkService } from "@everdict/application-control";
+import type { ViewService } from "@everdict/application-control";
+import type { WorkspaceService } from "@everdict/application-control";
 import { type Action, type Principal, authorize } from "@everdict/auth";
 import type { UsageMeter } from "@everdict/billing";
 import { AppError, type RuntimeSpec } from "@everdict/core";
@@ -15,24 +32,7 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { BudgetAdmin } from "../common/budget-tracker.js";
 import type { BenchmarkService } from "../core/benchmark/benchmark-service.js";
 import type { BundleService } from "../core/bundle/bundle-service.js";
-import type { CiLinkService } from "../core/ci-link/ci-link-service.js";
-import type { CommentService } from "../core/comment/comment-service.js";
-import type { GithubAppService } from "../core/github-app/github-app-service.js";
-import type { ImageRegistryService } from "../core/image-registry/image-registry-service.js";
-import type { MattermostService } from "../core/mattermost/mattermost-service.js";
-import type { MembershipService } from "../core/member/membership-service.js";
-import type { NotificationService } from "../core/notification/notification-service.js";
 import type { RuntimeProbeResult } from "../core/ops/runtime-probe.js";
-import type { ProfileService } from "../core/profile/profile-service.js";
-import type { QueueService } from "../core/queue/queue-service.js";
-import type { RunService } from "../core/run/run-service.js";
-import type { RunnerHub } from "../core/runner/runner-hub.js";
-import type { RunnerService } from "../core/runner/runner-service.js";
-import type { ScheduleService } from "../core/schedule/schedule-service.js";
-import type { ScorecardService } from "../core/scorecard/scorecard-service.js";
-import type { TraceSinkService } from "../core/trace-sink/trace-sink-service.js";
-import type { ViewService } from "../core/view/view-service.js";
-import type { WorkspaceService } from "../core/workspace/workspace-service.js";
 
 // MCP tool surface — the "agent transport" sharing the same service core as the HTTP routes.
 // Each tool is authorized by the Principal's roles and scoped to workspace (the control plane is the auth/authz authority).

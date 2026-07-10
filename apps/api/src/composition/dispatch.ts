@@ -1,3 +1,6 @@
+import { ImageRegistryService } from "@everdict/application-control";
+import type { Metrics } from "@everdict/application-control";
+import { RunnerHub } from "@everdict/application-control";
 import {
   type BackendRegistry,
   type Dispatcher as CoreDispatcher,
@@ -12,10 +15,7 @@ import { RuntimeDispatcher } from "../core/execution/runtime-dispatcher.js";
 import { SelfHostedBackend } from "../core/execution/self-hosted-backend.js";
 import { StoreCallbackRendezvous } from "../core/execution/store-callback-rendezvous.js";
 import { buildTopologyBackend } from "../core/execution/topology-backend.js";
-import { ImageRegistryService } from "../core/image-registry/image-registry-service.js";
-import type { Metrics } from "../core/ops/metrics.js";
 import { makeRuntimeProber } from "../core/ops/runtime-probe.js";
-import { RunnerHub } from "../core/runner/runner-hub.js";
 
 // Dispatch stack: the self-hosted runner lease hub + the front-door callback rendezvous + tenant runtime routing
 // (RuntimeSpec → live backend) + the one model-resolving/metered dispatcher every path shares + the connection probe.

@@ -1,7 +1,7 @@
+import { ViewService } from "@everdict/application-control";
 import { ForbiddenError, NotFoundError } from "@everdict/core";
 import { InMemoryViewStore } from "@everdict/db";
 import { describe, expect, it } from "vitest";
-import { ViewService } from "./view-service.js";
 
 function svc(): ViewService {
   let n = 0;

@@ -1,7 +1,7 @@
+import { MattermostCommandService } from "@everdict/application-control";
 import { ForbiddenError } from "@everdict/core";
 import { InMemoryWorkspaceSettingsStore } from "@everdict/db";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { MattermostCommandService } from "./mattermost-command-service.js";
 
 const TOKEN = "s3cret-cmd-token";
 

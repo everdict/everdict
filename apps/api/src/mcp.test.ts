@@ -1,3 +1,12 @@
+import { GithubAppService } from "@everdict/application-control";
+import { MattermostService } from "@everdict/application-control";
+import { MembershipService } from "@everdict/application-control";
+import { RunService } from "@everdict/application-control";
+import { RunnerHub } from "@everdict/application-control";
+import { RunnerService } from "@everdict/application-control";
+import { ScheduleService } from "@everdict/application-control";
+import { ScorecardService } from "@everdict/application-control";
+import { TraceSinkService } from "@everdict/application-control";
 import type { Principal } from "@everdict/auth";
 import type { Dispatcher } from "@everdict/backends";
 import { inMemoryUsageMeter } from "@everdict/billing";
@@ -30,15 +39,6 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { describe, expect, it } from "vitest";
 import { persistentBudget } from "./common/budget-tracker.js";
 import { BundleService } from "./core/bundle/bundle-service.js";
-import { GithubAppService } from "./core/github-app/github-app-service.js";
-import { MattermostService } from "./core/mattermost/mattermost-service.js";
-import { MembershipService } from "./core/member/membership-service.js";
-import { RunService } from "./core/run/run-service.js";
-import { RunnerHub } from "./core/runner/runner-hub.js";
-import { RunnerService } from "./core/runner/runner-service.js";
-import { ScheduleService } from "./core/schedule/schedule-service.js";
-import { ScorecardService } from "./core/scorecard/scorecard-service.js";
-import { TraceSinkService } from "./core/trace-sink/trace-sink-service.js";
 import { githubAppGateway } from "./infrastructure/github/app-gateway.js";
 import { buildMcpServer } from "./mcp.js";
 

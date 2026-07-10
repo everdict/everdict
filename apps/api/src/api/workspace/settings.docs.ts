@@ -1,7 +1,7 @@
+import { WorkspaceSettingsViewSchema } from "@everdict/contracts/wire";
 import type { FastifySchema } from "fastify";
 import { errorResponses, toJsonSchema } from "../openapi.js";
 import { WorkspaceSettingsBodySchema } from "./request/workspace-settings.js";
-import { WorkspaceSettingsViewSchema } from "./response/workspace-settings-view.js";
 
 // OpenAPI descriptors for the workspace-settings routes (doc-only — never validates/serializes; see api/openapi.ts).
 // Values are widened to FastifySchema so Fastify does NOT narrow reply.code() to the documented status keys.

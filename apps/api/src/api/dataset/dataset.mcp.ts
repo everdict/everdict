@@ -1,3 +1,5 @@
+import { setVersionTags } from "@everdict/application-control";
+import { deleteDatasetVersion } from "@everdict/application-control";
 import { DatasetSchema } from "@everdict/core";
 import {
   HarborTaskSchema,
@@ -8,8 +10,6 @@ import {
 } from "@everdict/datasets";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { setVersionTags } from "../../common/version-tag-service.js";
-import { deleteDatasetVersion } from "../../core/dataset/dataset-service.js";
 import { type McpToolContext, fail, ok, plain, run } from "../mcp-context.js";
 
 // Dataset MCP tools — the MCP twin of dataset.routes.ts.

@@ -1,6 +1,6 @@
+import { QueueSnapshotResponseSchema } from "@everdict/contracts/wire";
 import type { FastifySchema } from "fastify";
 import { errorResponses, toJsonSchema } from "../openapi.js";
-import { QueueSnapshotResponseSchema } from "./response/queue-snapshot.js";
 
 // OpenAPI descriptors for the workload-visibility routes — documentation only (no-op compilers;
 // rule api-layer). Attached by queue.routes.ts as { schema: queueDocs.<key> }.

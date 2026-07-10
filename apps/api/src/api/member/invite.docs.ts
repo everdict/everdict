@@ -1,11 +1,11 @@
 import { EVERDICT_ROLES } from "@everdict/auth";
+import { AcceptedInviteResponseSchema } from "@everdict/contracts/wire";
+import { CreatedInviteResponseSchema } from "@everdict/contracts/wire";
+import { InviteMetaListResponseSchema } from "@everdict/contracts/wire";
+import { InvitePreviewResponseSchema } from "@everdict/contracts/wire";
 import type { FastifySchema } from "fastify";
 import { z } from "zod";
 import { errorResponses, toJsonSchema } from "../openapi.js";
-import { AcceptedInviteResponseSchema } from "./response/accepted-invite.js";
-import { CreatedInviteResponseSchema } from "./response/created-invite.js";
-import { InviteMetaListResponseSchema } from "./response/invite-meta.js";
-import { InvitePreviewResponseSchema } from "./response/invite-preview.js";
 
 // OpenAPI descriptors for the invite routes (doc-only — never validates/serializes; see api/openapi.ts).
 // An invite is a join secret: issue/list/revoke are admin (members:write); accept needs only an authenticated

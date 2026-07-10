@@ -1,7 +1,7 @@
+import { installGithubWorkspaceRunner } from "@everdict/application-control";
+import { PairRunnerBodySchema, RUNNER_CAPABILITIES } from "@everdict/application-control";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import { installGithubWorkspaceRunner } from "../../core/runner/github-runner-install.js";
-import { PairRunnerBodySchema, RUNNER_CAPABILITIES } from "../../core/runner/runner-service.js";
 import { baseUrl } from "../route-context.js";
 import { type ServerDeps, gate, resolvePrincipal, sendError, zodIssues } from "../route-context.js";
 import { workspaceRunnerDocs } from "./workspace-runner.docs.js";

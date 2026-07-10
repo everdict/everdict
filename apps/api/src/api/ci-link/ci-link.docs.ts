@@ -1,9 +1,9 @@
+import { UpsertCiLinkBodySchema } from "@everdict/application-control";
+import { CiLinkRosterSchema } from "@everdict/contracts/wire";
+import { SetupPrResultSchema } from "@everdict/contracts/wire";
 import type { FastifySchema } from "fastify";
 import { z } from "zod";
-import { UpsertCiLinkBodySchema } from "../../core/ci-link/ci-link-service.js";
 import { errorResponses, toJsonSchema } from "../openapi.js";
-import { CiLinkRosterSchema } from "./response/ci-link-roster.js";
-import { SetupPrResultSchema } from "./response/setup-pr-result.js";
 
 // Doc-only OpenAPI descriptors for CI repo links — repository ↔ harness slot mapping = the GitHub Actions
 // OIDC trust policy (rule api-layer: schemas document, never validate/serialize — the compilers are no-ops).

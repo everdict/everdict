@@ -1,7 +1,7 @@
+import type { ScheduleRecordWithNext } from "@everdict/application-control";
+import { QueueService } from "@everdict/application-control";
 import { InMemoryRunStore, InMemoryScorecardStore, type RunRecord, type ScorecardRecord } from "@everdict/db";
 import { describe, expect, it } from "vitest";
-import type { ScheduleRecordWithNext } from "../schedule/schedule-service.js";
-import { QueueService } from "./queue-service.js";
 
 const card = (id: string, over: Partial<ScorecardRecord> = {}): ScorecardRecord => ({
   id,

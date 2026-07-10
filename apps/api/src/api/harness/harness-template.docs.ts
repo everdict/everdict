@@ -1,11 +1,11 @@
+import { HarnessTemplateListResponseSchema } from "@everdict/contracts/wire";
+import { HarnessTemplateVersionsResponseSchema } from "@everdict/contracts/wire";
+import { HarnessTemplateResponseSchema } from "@everdict/contracts/wire";
+import { RegisterHarnessTemplateResultSchema } from "@everdict/contracts/wire";
+import { ValidateHarnessTemplateResultSchema } from "@everdict/contracts/wire";
 import { HarnessTemplateSpecSchema } from "@everdict/core";
 import type { FastifySchema } from "fastify";
 import { errorResponses, toJsonSchema } from "../openapi.js";
-import { HarnessTemplateListResponseSchema } from "./response/harness-template-list-entry.js";
-import { HarnessTemplateVersionsResponseSchema } from "./response/harness-template-versions.js";
-import { HarnessTemplateResponseSchema } from "./response/harness-template.js";
-import { RegisterHarnessTemplateResultSchema } from "./response/register-harness-template-result.js";
-import { ValidateHarnessTemplateResultSchema } from "./response/validate-harness-template-result.js";
 
 // OpenAPI descriptors for the harness-template (category) routes — doc-only (rule api-layer): the no-op
 // compilers in server.ts make attaching these behavior-free; validation stays in the handlers.

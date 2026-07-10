@@ -1,9 +1,9 @@
+import { CommentListResponseSchema } from "@everdict/contracts/wire";
+import { CommentResponseSchema } from "@everdict/contracts/wire";
 import type { FastifySchema } from "fastify";
 import { z } from "zod";
 import { errorResponses, toJsonSchema } from "../openapi.js";
 import { CreateCommentBodySchema } from "./request/create-comment.js";
-import { CommentListResponseSchema } from "./response/comment-list.js";
-import { CommentResponseSchema } from "./response/comment.js";
 
 // OpenAPI descriptors for the comment routes (doc-only — never validates/serializes; see api/openapi.ts).
 // Resource discussion threads (dataset/harness/scorecard/view/schedule/run/runtime) — read = comments:read

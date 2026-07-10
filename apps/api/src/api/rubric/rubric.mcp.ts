@@ -1,7 +1,7 @@
+import { setVersionTags } from "@everdict/application-control";
 import { RubricSpecSchema } from "@everdict/core";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { setVersionTags } from "../../common/version-tag-service.js";
 import { type McpToolContext, fail, ok, plain, run } from "../mcp-context.js";
 
 // Rubric MCP tools — the MCP twin of rubric.routes.ts.

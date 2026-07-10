@@ -1,4 +1,32 @@
 import { randomUUID, timingSafeEqual } from "node:crypto";
+import { VersionTagsBodySchema, setVersionTags } from "@everdict/application-control";
+import { type CiLinkService, UpsertCiLinkBodySchema } from "@everdict/application-control";
+import { COMMENT_RESOURCE_TYPES, type CommentService } from "@everdict/application-control";
+import { deleteDatasetVersion } from "@everdict/application-control";
+import type { GithubAppService } from "@everdict/application-control";
+import { RepinBodySchema, repinHarnessImages } from "@everdict/application-control";
+import { deleteHarnessVersion, harnessIsPrivate, harnessVisibleTo } from "@everdict/application-control";
+import type { ImageRegistryService } from "@everdict/application-control";
+import type { MattermostCommandService } from "@everdict/application-control";
+import type { MattermostService } from "@everdict/application-control";
+import type { MembershipService } from "@everdict/application-control";
+import type { NotificationService } from "@everdict/application-control";
+import type { ProfileService } from "@everdict/application-control";
+import type { QueueService } from "@everdict/application-control";
+import type { RunService } from "@everdict/application-control";
+import { installGithubWorkspaceRunner } from "@everdict/application-control";
+import type { RunnerHub } from "@everdict/application-control";
+import { PairRunnerBodySchema, RUNNER_CAPABILITIES, type RunnerService } from "@everdict/application-control";
+import { type ScheduleService, isValidCron } from "@everdict/application-control";
+import {
+  IngestScorecardBodySchema,
+  PullIngestBodySchema,
+  type ScorecardService,
+  originSource,
+} from "@everdict/application-control";
+import type { TraceSinkService } from "@everdict/application-control";
+import type { ViewService } from "@everdict/application-control";
+import type { WorkspaceService } from "@everdict/application-control";
 import {
   API_KEY_SCOPES,
   type Action,
@@ -104,41 +132,13 @@ import { registerWorkspaceSettingsRoutes } from "./api/workspace/settings.routes
 import { registerWorkspaceRoutes } from "./api/workspace/workspace.routes.js";
 import { type BudgetAdmin, BudgetLimitInputSchema } from "./common/budget-tracker.js";
 import type { TerminalTicketStore } from "./common/terminal-ticket.js";
-import { VersionTagsBodySchema, setVersionTags } from "./common/version-tag-service.js";
 import {
   BenchmarkImportBodySchema,
   BenchmarkPreviewBodySchema,
   type BenchmarkService,
 } from "./core/benchmark/benchmark-service.js";
 import { BundleSchema, type BundleService, requiredActionsForBundle } from "./core/bundle/bundle-service.js";
-import { type CiLinkService, UpsertCiLinkBodySchema } from "./core/ci-link/ci-link-service.js";
-import { COMMENT_RESOURCE_TYPES, type CommentService } from "./core/comment/comment-service.js";
-import { deleteDatasetVersion } from "./core/dataset/dataset-service.js";
-import type { GithubAppService } from "./core/github-app/github-app-service.js";
-import { RepinBodySchema, repinHarnessImages } from "./core/harness/harness-pin-service.js";
-import { deleteHarnessVersion, harnessIsPrivate, harnessVisibleTo } from "./core/harness/harness-service.js";
-import type { ImageRegistryService } from "./core/image-registry/image-registry-service.js";
-import type { MattermostCommandService } from "./core/mattermost/mattermost-command-service.js";
-import type { MattermostService } from "./core/mattermost/mattermost-service.js";
-import type { MembershipService } from "./core/member/membership-service.js";
-import type { NotificationService } from "./core/notification/notification-service.js";
 import type { RuntimeProbeResult } from "./core/ops/runtime-probe.js";
-import type { ProfileService } from "./core/profile/profile-service.js";
-import type { QueueService } from "./core/queue/queue-service.js";
-import type { RunService } from "./core/run/run-service.js";
-import { installGithubWorkspaceRunner } from "./core/runner/github-runner-install.js";
-import type { RunnerHub } from "./core/runner/runner-hub.js";
-import { PairRunnerBodySchema, RUNNER_CAPABILITIES, type RunnerService } from "./core/runner/runner-service.js";
-import { type ScheduleService, isValidCron } from "./core/schedule/schedule-service.js";
-import {
-  IngestScorecardBodySchema,
-  PullIngestBodySchema,
-  type ScorecardService,
-  originSource,
-} from "./core/scorecard/scorecard-service.js";
-import type { TraceSinkService } from "./core/trace-sink/trace-sink-service.js";
-import type { ViewService } from "./core/view/view-service.js";
-import type { WorkspaceService } from "./core/workspace/workspace-service.js";
 import { buildMcpServer } from "./mcp.js";
 import { registerMcpRoutes } from "./mcp.routes.js";
 

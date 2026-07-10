@@ -1,11 +1,11 @@
+import { CommentService } from "@everdict/application-control";
+import { GithubAppService, type GithubComAppConfig } from "@everdict/application-control";
+import { MattermostService } from "@everdict/application-control";
+import type { MembershipService } from "@everdict/application-control";
+import { NotificationService } from "@everdict/application-control";
+import { TraceSinkService } from "@everdict/application-control";
 import type { CommentStore, NotificationStore, OAuthStateStore, WorkspaceSettingsStore } from "@everdict/db";
 import { buildTraceSink } from "@everdict/trace";
-import { CommentService } from "../core/comment/comment-service.js";
-import { GithubAppService, type GithubComAppConfig } from "../core/github-app/github-app-service.js";
-import { MattermostService } from "../core/mattermost/mattermost-service.js";
-import type { MembershipService } from "../core/member/membership-service.js";
-import { NotificationService } from "../core/notification/notification-service.js";
-import { TraceSinkService } from "../core/trace-sink/trace-sink-service.js";
 import { githubAppGateway } from "../infrastructure/github/app-gateway.js";
 import { mattermostHttpClient } from "../infrastructure/mattermost/mattermost-client.js";
 

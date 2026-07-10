@@ -1,3 +1,12 @@
+import { CiLinkService } from "@everdict/application-control";
+import type { GithubAppService } from "@everdict/application-control";
+import { MattermostCommandService } from "@everdict/application-control";
+import type { TenantValueMap } from "@everdict/application-control";
+import { QueueService } from "@everdict/application-control";
+import type { RunnerService } from "@everdict/application-control";
+import type { ScheduleService } from "@everdict/application-control";
+import type { ScorecardService } from "@everdict/application-control";
+import { ViewService } from "@everdict/application-control";
 import type { CircuitBreaker, Scheduler } from "@everdict/backends";
 import type { RunStore, ScorecardStore, SecretStore, ViewStore, WorkspaceSettingsStore } from "@everdict/db";
 import type {
@@ -12,15 +21,6 @@ import type {
 } from "@everdict/registry";
 import { BenchmarkService } from "../core/benchmark/benchmark-service.js";
 import { BundleService } from "../core/bundle/bundle-service.js";
-import { CiLinkService } from "../core/ci-link/ci-link-service.js";
-import type { GithubAppService } from "../core/github-app/github-app-service.js";
-import { MattermostCommandService } from "../core/mattermost/mattermost-command-service.js";
-import type { TenantValueMap } from "../core/ops/scheduling-config.js";
-import { QueueService } from "../core/queue/queue-service.js";
-import type { RunnerService } from "../core/runner/runner-service.js";
-import type { ScheduleService } from "../core/schedule/schedule-service.js";
-import type { ScorecardService } from "../core/scorecard/scorecard-service.js";
-import { ViewService } from "../core/view/view-service.js";
 import { githubRepoWriterFactory } from "../infrastructure/github/repo-writer.js";
 import type { RuntimeSecretsFn } from "./types.js";
 

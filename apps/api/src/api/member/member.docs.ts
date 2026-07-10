@@ -1,8 +1,8 @@
 import { EVERDICT_ROLES } from "@everdict/auth";
+import { MemberListResponseSchema } from "@everdict/contracts/wire";
 import type { FastifySchema } from "fastify";
 import { z } from "zod";
 import { errorResponses, toJsonSchema } from "../openapi.js";
-import { MemberListResponseSchema } from "./response/member.js";
 
 // OpenAPI descriptors for the member routes (doc-only — never validates/serializes; see api/openapi.ts).
 // Values are widened to FastifySchema so Fastify does NOT narrow reply.code() to the documented status keys.

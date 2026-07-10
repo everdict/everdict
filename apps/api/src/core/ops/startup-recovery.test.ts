@@ -1,6 +1,6 @@
+import { recoverInterrupted } from "@everdict/application-control";
 import { InMemoryRunStore, InMemoryScorecardStore, type RunRecord, type ScorecardRecord } from "@everdict/db";
 import { describe, expect, it } from "vitest";
-import { recoverInterrupted } from "./startup-recovery.js";
 
 const card = (id: string, over: Partial<ScorecardRecord> = {}): ScorecardRecord => ({
   id,

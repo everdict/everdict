@@ -1,13 +1,13 @@
+import { BatchCaseResponseSchema } from "@everdict/contracts/wire";
+import { BatchPlanResponseSchema } from "@everdict/contracts/wire";
+import { OkResponseSchema } from "@everdict/contracts/wire";
+import { ScheduleFireResponseSchema } from "@everdict/contracts/wire";
+import { SchedulingDialsResponseSchema } from "@everdict/contracts/wire";
+import { ScorecardStatusResponseSchema } from "@everdict/contracts/wire";
+import { TenantKeyResponseSchema } from "@everdict/contracts/wire";
 import type { FastifySchema } from "fastify";
 import { z } from "zod";
 import { errorResponses, toJsonSchema } from "../openapi.js";
-import { BatchCaseResponseSchema } from "./response/batch-case.js";
-import { BatchPlanResponseSchema } from "./response/batch-plan.js";
-import { OkResponseSchema } from "./response/ok.js";
-import { ScheduleFireResponseSchema } from "./response/schedule-fire.js";
-import { SchedulingDialsResponseSchema } from "./response/scheduling-dials.js";
-import { ScorecardStatusResponseSchema } from "./response/scorecard-status.js";
-import { TenantKeyResponseSchema } from "./response/tenant-key.js";
 
 const batchIdParams = toJsonSchema(z.object({ id: z.string().describe("Scorecard (batch) id") }));
 const scheduleIdParams = toJsonSchema(z.object({ id: z.string().describe("Schedule id") }));

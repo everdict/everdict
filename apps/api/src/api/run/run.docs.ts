@@ -1,10 +1,10 @@
+import { RunDetailResponseSchema } from "@everdict/contracts/wire";
+import { RunListResponseSchema } from "@everdict/contracts/wire";
+import { RunResponseSchema } from "@everdict/contracts/wire";
 import type { FastifySchema } from "fastify";
 import { z } from "zod";
 import { errorResponses, toJsonSchema } from "../openapi.js";
 import { SubmitBodySchema } from "./request/submit.js";
-import { RunDetailResponseSchema } from "./response/run-detail.js";
-import { RunListResponseSchema } from "./response/run-list.js";
-import { RunResponseSchema } from "./response/run.js";
 
 // OpenAPI descriptors for the run routes — documentation only (the server's validator/serializer compilers
 // are no-ops; rule api-layer). Attached by run.routes.ts as { schema: runDocs.<key> }.

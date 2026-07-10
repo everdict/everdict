@@ -1,5 +1,5 @@
+import { COMMENT_RESOURCE_TYPES } from "@everdict/application-control";
 import { z } from "zod";
-import { COMMENT_RESOURCE_TYPES } from "../../../core/comment/comment-service.js";
 
 // Create-comment body — target (resourceType/resourceId) + body + optional parentId (reply) + @mention subjects.
 export const CreateCommentBodySchema = z.object({

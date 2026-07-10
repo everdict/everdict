@@ -1,6 +1,6 @@
+import { MattermostService } from "@everdict/application-control";
 import { InMemoryWorkspaceSettingsStore } from "@everdict/db";
 import { beforeEach, describe, expect, it } from "vitest";
-import { MattermostService } from "./mattermost-service.js";
 
 describe("MattermostService", () => {
   let settings: InMemoryWorkspaceSettingsStore;

@@ -1,15 +1,15 @@
+import { IngestScorecardBodySchema, PullIngestBodySchema } from "@everdict/application-control";
+import { BackfillModelsResponseSchema } from "@everdict/contracts/wire";
+import { LeaderboardResponseSchema } from "@everdict/contracts/wire";
+import { ScorecardDiffResponseSchema } from "@everdict/contracts/wire";
+import { ScorecardEstimateResponseSchema } from "@everdict/contracts/wire";
+import { ScorecardListResponseSchema } from "@everdict/contracts/wire";
+import { ScorecardTrendResponseSchema } from "@everdict/contracts/wire";
+import { ScorecardResponseSchema } from "@everdict/contracts/wire";
 import type { FastifySchema } from "fastify";
 import { z } from "zod";
-import { IngestScorecardBodySchema, PullIngestBodySchema } from "../../core/scorecard/scorecard-service.js";
 import { errorResponses, toJsonSchema } from "../openapi.js";
 import { RunScorecardBodySchema } from "./request/run-scorecard.js";
-import { BackfillModelsResponseSchema } from "./response/backfill-models.js";
-import { LeaderboardResponseSchema } from "./response/leaderboard.js";
-import { ScorecardDiffResponseSchema } from "./response/scorecard-diff.js";
-import { ScorecardEstimateResponseSchema } from "./response/scorecard-estimate.js";
-import { ScorecardListResponseSchema } from "./response/scorecard-list.js";
-import { ScorecardTrendResponseSchema } from "./response/scorecard-trend.js";
-import { ScorecardResponseSchema } from "./response/scorecard.js";
 
 const scorecardIdParams = toJsonSchema(z.object({ id: z.string().describe("Scorecard id") }));
 

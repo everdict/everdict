@@ -1,7 +1,7 @@
+import { ImageRegistryService } from "@everdict/application-control";
 import { BadRequestError, NotFoundError } from "@everdict/core";
 import { InMemoryWorkspaceSettingsStore } from "@everdict/db";
 import { describe, expect, it } from "vitest";
-import { ImageRegistryService } from "./image-registry-service.js";
 
 function svc(secrets: Record<string, string> = {}) {
   const settings = new InMemoryWorkspaceSettingsStore();

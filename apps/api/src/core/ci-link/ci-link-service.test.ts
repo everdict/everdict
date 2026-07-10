@@ -1,14 +1,14 @@
-import { BadRequestError, NotFoundError, UpstreamError } from "@everdict/core";
-import { InMemoryWorkspaceSettingsStore } from "@everdict/db";
-import { beforeEach, describe, expect, it } from "vitest";
-import { githubRepoWriterFactory } from "../../infrastructure/github/repo-writer.js";
 import {
   CiLinkService,
   type GithubAppRepoAccess,
   type RepoInfo,
   type WorkspaceRunnerRoster,
   renderCiWorkflow,
-} from "./ci-link-service.js";
+} from "@everdict/application-control";
+import { BadRequestError, NotFoundError, UpstreamError } from "@everdict/core";
+import { InMemoryWorkspaceSettingsStore } from "@everdict/db";
+import { beforeEach, describe, expect, it } from "vitest";
+import { githubRepoWriterFactory } from "../../infrastructure/github/repo-writer.js";
 
 // fetch fake — per-URL-pattern response scenarios (to verify setup-PR's GitHub API dance).
 type Handler = (url: string, init?: RequestInit) => Response | undefined;

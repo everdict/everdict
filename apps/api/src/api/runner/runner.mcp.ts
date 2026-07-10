@@ -1,6 +1,6 @@
+import { RUNNER_CAPABILITIES } from "@everdict/application-control";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { RUNNER_CAPABILITIES } from "../../core/runner/runner-service.js";
 import { type McpToolContext, ok, plain } from "../mcp-context.js";
 
 // Personal runner MCP tools — the MCP twin of runner.routes.ts.

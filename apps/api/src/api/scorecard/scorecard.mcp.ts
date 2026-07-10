@@ -1,10 +1,6 @@
+import { IngestScorecardBodySchema, PullIngestBodySchema, originSource } from "@everdict/application-control";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import {
-  IngestScorecardBodySchema,
-  PullIngestBodySchema,
-  originSource,
-} from "../../core/scorecard/scorecard-service.js";
 import { type McpToolContext, fail, ok, run } from "../mcp-context.js";
 import { serveScorecard } from "./serve.js";
 

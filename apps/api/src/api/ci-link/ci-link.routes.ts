@@ -1,6 +1,6 @@
+import { UpsertCiLinkBodySchema } from "@everdict/application-control";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import { UpsertCiLinkBodySchema } from "../../core/ci-link/ci-link-service.js";
 import { baseUrl } from "../route-context.js";
 import { type ServerDeps, gate, resolvePrincipal, sendError, zodIssues } from "../route-context.js";
 import { ciLinkDocs } from "./ci-link.docs.js";

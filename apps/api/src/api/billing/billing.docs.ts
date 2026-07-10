@@ -1,8 +1,8 @@
+import { BudgetResponseSchema } from "@everdict/contracts/wire";
+import { UsageResponseSchema } from "@everdict/contracts/wire";
 import type { FastifySchema } from "fastify";
 import { BudgetLimitInputSchema } from "../../common/budget-tracker.js";
 import { errorResponses, toJsonSchema } from "../openapi.js";
-import { BudgetResponseSchema } from "./response/budget.js";
-import { UsageResponseSchema } from "./response/usage.js";
 
 // OpenAPI descriptors for the billing routes — documentation only (no-op compilers; rule api-layer).
 // Attached by billing.routes.ts as { schema: billingDocs.<key> }.

@@ -1,8 +1,8 @@
+import { NotificationService } from "@everdict/application-control";
 import { InMemoryNotificationStore } from "@everdict/db";
 import type { RunRecord, WorkspaceSettings } from "@everdict/db";
 import { describe, expect, it } from "vitest";
 import { mattermostHttpClient } from "../../infrastructure/mattermost/mattermost-client.js";
-import { NotificationService } from "./notification-service.js";
 
 const runRec = (status: "succeeded" | "failed"): RunRecord => ({
   id: "run-1",

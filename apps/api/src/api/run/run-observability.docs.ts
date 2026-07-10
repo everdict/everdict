@@ -1,10 +1,10 @@
+import { RunExecResponseSchema } from "@everdict/contracts/wire";
+import { RunLogsResponseSchema } from "@everdict/contracts/wire";
+import { RunScreenResponseSchema } from "@everdict/contracts/wire";
+import { TerminalTicketResponseSchema } from "@everdict/contracts/wire";
 import type { FastifySchema } from "fastify";
 import { z } from "zod";
 import { errorResponses, toJsonSchema } from "../openapi.js";
-import { RunExecResponseSchema } from "./response/run-exec.js";
-import { RunLogsResponseSchema } from "./response/run-logs.js";
-import { RunScreenResponseSchema } from "./response/run-screen.js";
-import { TerminalTicketResponseSchema } from "./response/terminal-ticket.js";
 
 const runIdParams = toJsonSchema(z.object({ id: z.string().describe("Run id") }));
 

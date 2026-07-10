@@ -1,11 +1,8 @@
+import { WorkspaceRecordResponseSchema } from "@everdict/contracts/wire";
+import { WorkspaceWithRoleListResponseSchema, WorkspaceWithRoleResponseSchema } from "@everdict/contracts/wire";
 import type { FastifySchema } from "fastify";
 import { z } from "zod";
 import { errorResponses, toJsonSchema } from "../openapi.js";
-import { WorkspaceRecordResponseSchema } from "./response/workspace-record.js";
-import {
-  WorkspaceWithRoleListResponseSchema,
-  WorkspaceWithRoleResponseSchema,
-} from "./response/workspace-with-role.js";
 
 // OpenAPI descriptors for the workspace routes (doc-only — never validates/serializes; see api/openapi.ts).
 // Plural /workspaces = self-serve membership (my list + create); singular /workspace = the active workspace's record.
