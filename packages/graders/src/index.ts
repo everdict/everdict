@@ -17,4 +17,5 @@ export {
 } from "./model-judge.js";
 export { makeGraders } from "./make-graders.js";
 export { judgeFromEnv, makeGradersFromEnv, skipGrader } from "./judge-env.js";
-export { safeGrade } from "./safe-grade.js";
+// safeGrade now lives in @everdict/application-execution — re-architecture P2a compat re-export (removed in the P4 sweep).
+export { safeGrade } from "@everdict/application-execution";

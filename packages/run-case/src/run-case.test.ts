@@ -8,13 +8,15 @@ import type {
   GradeContext,
   Grader,
   Score,
-} from "@everdict/core";
+} from "@everdict/contracts";
 import { LocalDriver } from "@everdict/drivers";
 import { RepoEnvironment } from "@everdict/environments";
 import { TestsPassGrader, costGrader, stepsGrader } from "@everdict/graders";
 import { ScriptedHarness } from "@everdict/harnesses";
 import { describe, expect, it } from "vitest";
-import { runCase } from "./run-case.js";
+// The loop moved to @everdict/application-execution (re-architecture P2a) — this test exercises the
+// compat shell so the public @everdict/run-case surface stays pinned until the P4 sweep.
+import { runCase } from "./index.js";
 
 describe("runCase — real harness execution → trace → scoring (full loop)", () => {
   it("when the scripted harness fixes the bug, the tests-pass grader passes", async () => {

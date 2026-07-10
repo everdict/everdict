@@ -16,6 +16,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 // Every package allowed inside the agent image (unscoped names under packages/<name>).
 const ALLOWLIST = new Set([
   "agent",
+  "application-execution", // L2a agent-safe use-cases (imports contracts + domain only — enforced below)
   "contracts",
   "core", // compat shell over contracts + domain (P1e); removed from the cone in the P4 sweep
   "domain", // L1 pure rules (imports contracts only — enforced below)
@@ -23,7 +24,7 @@ const ALLOWLIST = new Set([
   "environments",
   "graders",
   "harnesses",
-  "run-case",
+  "run-case", // compat shell over application-execution (P2a); removed from the cone in the P4 sweep
   "trace",
 ]);
 
@@ -94,6 +95,14 @@ if (contractsDeps.length !== 1 || contractsDeps[0] !== "zod") {
 const domainDeps = Object.keys(readPackageJson("domain").dependencies ?? {}).sort();
 if (domainDeps.length !== 1 || domainDeps[0] !== "@everdict/contracts") {
   violations.push(`@everdict/domain dependencies = {${domainDeps.join(", ")}} (must be exactly {@everdict/contracts})`);
+}
+
+// (5) The L2a execution layer depends on exactly {contracts, domain} — adapters arrive by injection.
+const appExecDeps = Object.keys(readPackageJson("application-execution").dependencies ?? {}).sort();
+if (appExecDeps.join(",") !== "@everdict/contracts,@everdict/domain") {
+  violations.push(
+    `@everdict/application-execution dependencies = {${appExecDeps.join(", ")}} (must be exactly {@everdict/contracts, @everdict/domain})`,
+  );
 }
 
 if (violations.length > 0) {

@@ -12,9 +12,10 @@ import type {
   RunContext,
   Score,
   TraceEvent,
-} from "@everdict/core";
-import { UpstreamError, classifyFailure } from "@everdict/core";
-import { safeGrade } from "@everdict/graders";
+} from "@everdict/contracts";
+import { UpstreamError } from "@everdict/contracts";
+import { classifyFailure } from "@everdict/domain";
+import { safeGrade } from "./safe-grade.js";
 
 export interface RunCaseDeps {
   driver: Driver;

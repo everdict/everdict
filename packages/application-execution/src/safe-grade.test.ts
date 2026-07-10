@@ -1,4 +1,4 @@
-import type { GradeContext, Grader, Score } from "@everdict/core";
+import type { GradeContext, Grader, Score } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { safeGrade } from "./safe-grade.js";
 

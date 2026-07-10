@@ -1,4 +1,4 @@
-import { type GradeContext, type Grader, type Score, toScores } from "@everdict/core";
+import { type GradeContext, type Grader, type Score, toScores } from "@everdict/contracts";
 
 // Isolate a single grader's run-time failure so it can't sink the whole case (or drop the sibling
 // graders' real scores). A grader that THROWS at scoring time — most often the judge grader on a

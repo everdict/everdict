@@ -258,6 +258,15 @@ importers:
         specifier: workspace:*
         version: link:../run-case
 
+  packages/application-execution:
+    dependencies:
+      '@everdict/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@everdict/domain':
+        specifier: workspace:*
+        version: link:../domain
+
   packages/auth:
     dependencies:
       '@everdict/core':
@@ -372,6 +381,9 @@ importers:
 
   packages/graders:
     dependencies:
+      '@everdict/application-execution':
+        specifier: workspace:*
+        version: link:../application-execution
       '@everdict/core':
         specifier: workspace:*
         version: link:../core
@@ -426,9 +438,12 @@ importers:
 
   packages/run-case:
     dependencies:
-      '@everdict/core':
+      '@everdict/application-execution':
         specifier: workspace:*
-        version: link:../core
+        version: link:../application-execution
+      '@everdict/contracts':
+        specifier: workspace:*
+        version: link:../contracts
       '@everdict/drivers':
         specifier: workspace:*
         version: link:../drivers

@@ -1,5 +1,5 @@
 {
-  "name": "@everdict/graders",
+  "name": "@everdict/application-execution",
   "version": "0.0.0",
   "license": "Apache-2.0",
   "private": true,
@@ -15,10 +15,10 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run --passWithNoTests"
+    "test": "vitest run"
   },
   "dependencies": {
-    "@everdict/application-execution": "workspace:*",
-    "@everdict/core": "workspace:*"
+    "@everdict/contracts": "workspace:*",
+    "@everdict/domain": "workspace:*"
   }
 }
