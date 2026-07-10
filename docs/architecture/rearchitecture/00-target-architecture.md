@@ -19,8 +19,16 @@
 > executeCase/collect/scoring — forbidden values become injected factories (makeGraders,
 > defaultTraceGraders)] · apps/api/src/core = adapters + compat shells only · main.ts = 276-line
 > composition root over apps/api/src/composition/ (ScheduleServiceRef makes the schedule cycle explicit)
-> · CLI composes application-control/domain directly). Next: P3 (infrastructure regroup +
-> VersionedStore dedupe behind golden contract tests).
+> · CLI composes application-control/domain directly).
+> P3 SHIPPED (`7ceb7b4`·`07d7417` — golden contract tests first [registry 78→247 tests: capability
+> matrix incl. ABSENCES, non-semver registration-order rule, ownerOf divergence, Pg deleted_at/
+> specsEqual pins; mutation-verified], then the 12× dedupe: all six hand-rolled registries delegate to
+> the generic VersionedStore/PgVersionedStore via a capability-flag config that gates SQL by omission
+> [byte-identical queries], −797 LOC; PgDataset list/summarize stays local by design [fused query].
+> Compute-adapter policy extraction + persistence consolidation were already satisfied by P1/P2 +
+> construction; per §8-4 no package renames before the P4 sweep. Layer pin (6) added to the cone guard:
+> application-control deps == {application-execution, contracts, domain, zod}). Next: P4 (interface
+> hardening — wire-type imports in web, interface-kit mappers, dependency gates, compat-shell sweep).
 > Maintainer directive: interfaces (CLI / web / API / desktop) are delivery mechanisms; the domain is
 > singular. Today domain rules are fragmented across packages and re-implemented inside interfaces. This
 > document is the ground-up target: layer model, package/folder teardown, port design, DTO boundaries,

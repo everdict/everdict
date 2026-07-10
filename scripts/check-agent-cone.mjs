@@ -106,6 +106,15 @@ if (appExecDeps.join(",") !== "@everdict/contracts,@everdict/domain") {
   );
 }
 
+// (6) The L2b control layer depends on exactly {application-execution, contracts, domain, zod} —
+// stores/registries/transports reach it only through its own ports, bound by composition roots.
+const appControlDeps = Object.keys(readPackageJson("application-control").dependencies ?? {}).sort();
+if (appControlDeps.join(",") !== "@everdict/application-execution,@everdict/contracts,@everdict/domain,zod") {
+  violations.push(
+    `@everdict/application-control dependencies = {${appControlDeps.join(", ")}} (must be exactly {@everdict/application-execution, @everdict/contracts, @everdict/domain, zod})`,
+  );
+}
+
 if (violations.length > 0) {
   console.error("agent cone check FAILED:");
   for (const v of violations) console.error(`  - ${v}`);
