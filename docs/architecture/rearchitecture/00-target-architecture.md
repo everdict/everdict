@@ -1,7 +1,8 @@
 # Everdict re-architecture — the domain is unique, interfaces are adapters (design)
 
-> **Status: APPROVED (2026-07-10, maintainer) — migration in progress. Constraint: behavior-preserving
-> at every phase (compat re-exports, wire bytes unchanged, full gates + boot green per commit).**
+> **Status: SHIPPED (2026-07-10) — the P0–P4 migration is complete. Every phase was
+> behavior-preserving (compat re-exports until the P4 sweep, wire bytes unchanged, full gates + boot
+> green per commit; 50 commits, `caf4c0e`→`bcec7cf`).**
 > Open questions resolved: §8-1 two packages (proposed, adopted) · §8-2 wire v1 namespace deferred ·
 > §8-3 self-hosted-runner stays its own package (proposed, adopted) · §8-4 existing scope names kept until the P4 sweep.
 >
@@ -33,13 +34,16 @@
 > Pick-reverse / run-style split; zod v3/v4 coexist — z.unknown() and z.default() optionality quirks
 > pinned; spec discriminated unions stay honest local views]; 138 wire type exports; enforcement live:
 > check-web-imports.mjs [type-only, contracts-only] + the four layer pins in check-agent-cone.mjs.
-> P4 RESOLUTIONS (2026-07-10, maintainer): ① compat-shell sweep APPROVED — window granted, executing
-> in three passes (A: apps/api internal shells · B: package shells incl. deleting @everdict/core,
-> run-case, suite, billing · C: symbol-level re-exports + docs/skills updates). ② interface-kit
-> posture: OPPORTUNISTIC mappers adopted as policy — a mapper lands where a response needs server-side
-> derivation (the serveScorecard precedent), never as a churn-only pass-through; parity stays
-> structural (one service, two transports). ③ CLI output DTOs + the benchmark/bundle move (blocked on
-> the @everdict/datasets split) stay deferred as recommended.
+> P4 RESOLUTIONS (2026-07-10, maintainer): ① compat-shell sweep APPROVED and EXECUTED
+> (`b5aea48` pass A: 158 apps/api shells deleted · `e60b8cc` pass B: @everdict/{core,run-case,suite,
+> billing} DELETED, 239 core importers split kernel→domain / shapes→contracts, workspace 29→25,
+> turbo 82→70 · `bcec7cf` pass C: symbol shells resolved [six cohesion re-exports kept deliberately:
+> db records+ports, registry port-beside-impl ×7, backends Dispatcher, auth Principal/authz], runSuite
+> regains a colocated 12-case test, CLAUDE.md/skills/rules/34 docs describe the shipped spine).
+> ② interface-kit posture: OPPORTUNISTIC mappers adopted as policy — a mapper lands where a response
+> needs server-side derivation (the serveScorecard precedent), never as a churn-only pass-through;
+> parity stays structural (one service, two transports). ③ CLI output DTOs + the benchmark/bundle move
+> (blocked on the @everdict/datasets split) stay deferred as recommended.
 > Maintainer directive: interfaces (CLI / web / API / desktop) are delivery mechanisms; the domain is
 > singular. Today domain rules are fragmented across packages and re-implemented inside interfaces. This
 > document is the ground-up target: layer model, package/folder teardown, port design, DTO boundaries,
