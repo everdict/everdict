@@ -1,4 +1,5 @@
-import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
+import { generateKey, hashKey } from "@everdict/application-control";
 import type { ResolvedKey, TenantKeyMeta } from "@everdict/contracts";
 import type { SqlClient } from "../client.js";
 
@@ -128,14 +129,9 @@ export class PgTenantKeyStore implements TenantKeyStore {
   }
 }
 
-export function hashKey(key: string): string {
-  return createHash("sha256").update(key).digest("hex");
-}
-
-// ak_<random> — plaintext key. Shown once at issuance, stored only as a hash.
-export function generateKey(): string {
-  return `ak_${randomBytes(24).toString("base64url")}`;
-}
+// The credential primitives now live in @everdict/application-control — re-architecture P2d compat
+// re-export (removed in the P4 sweep).
+export { generateKey, hashKey } from "@everdict/application-control";
 
 // Issue a new key for a tenant → store the hash + non-secret meta (id/label/prefix/scopes), return the plaintext (the caller shows it once and discards it).
 // If scopes is unset, it's stored as unrestricted (full access) — deciding the scope default (e.g. ["admin"]) is the caller's (API/MCP boundary) responsibility.

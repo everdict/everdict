@@ -1,4 +1,4 @@
-import { randomBytes, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import type { ConsumeOutcome, CreateInviteInput, WorkspaceInviteMeta } from "@everdict/contracts";
 import type { SqlClient } from "../client.js";
 import { hashKey } from "./tenant-auth.js";
@@ -14,10 +14,9 @@ export type { ConsumeOutcome, ConsumeResult, CreateInviteInput, WorkspaceInviteM
 export type { WorkspaceInviteStore } from "@everdict/application-control";
 import type { WorkspaceInviteStore } from "@everdict/application-control";
 
-// inv_<random> — plaintext invite token (embedded in the link). Shown once at creation and stored only as a hash.
-export function generateInviteToken(): string {
-  return `inv_${randomBytes(24).toString("base64url")}`;
-}
+// The invite-token primitive now lives in @everdict/application-control — re-architecture P2d compat
+// re-export (removed in the P4 sweep).
+export { generateInviteToken } from "@everdict/application-control";
 
 interface InviteRow {
   id: string;

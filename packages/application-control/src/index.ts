@@ -49,3 +49,4 @@ export {
   RUNNER_CAPABILITIES,
   RunnerService,
 } from "./runner/runner-service.js";
+export { generateInviteToken, generateKey, hashKey } from "./credential/credentials.js";

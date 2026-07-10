@@ -100,6 +100,9 @@ export {
   parseImageRef,
 } from "./image/image-ref.js";
 
+// image — display-image (avatar/logo) validation (from apps/api common)
+export { validateImageRef } from "./image/display-image.js";
+
 // trace — trace-derived usage summary (from @everdict/core; shapes stay in contracts)
 export { usageFromTrace } from "./trace/usage-from-trace.js";
 
