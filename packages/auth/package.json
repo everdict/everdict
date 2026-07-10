@@ -18,7 +18,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@everdict/core": "workspace:*",
+    "@everdict/contracts": "workspace:*",
     "@everdict/db": "workspace:*",
     "@everdict/domain": "workspace:*",
     "jose": "^5.9.6"

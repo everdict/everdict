@@ -1,5 +1,5 @@
 import { RunnerHub, type SelfHostedKey } from "@everdict/application-control";
-import type { AgentJob, CaseResult } from "@everdict/core";
+import type { AgentJob, CaseResult } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { SelfHostedBackend } from "./self-hosted-backend.js";
 

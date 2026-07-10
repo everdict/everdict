@@ -1,4 +1,4 @@
-import type { RubricSpec } from "@everdict/core";
+import type { RubricSpec } from "@everdict/contracts";
 import { VersionedStore } from "../versioned-store.js";
 
 // The port + its list-entry type now live in @everdict/application-control — re-architecture P2d compat re-export (removed in the P4 sweep).

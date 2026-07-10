@@ -1,4 +1,4 @@
-import { BadRequestError, type RuntimeSpec } from "@everdict/core";
+import { BadRequestError, type RuntimeSpec } from "@everdict/contracts";
 import type { Backend } from "../backend.js";
 import { K8sBackend, type K8sBackendOptions } from "../orchestrators/k8s.js";
 import { LocalBackend } from "../orchestrators/local.js";

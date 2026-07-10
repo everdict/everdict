@@ -1,4 +1,4 @@
-import type { GradeContext, Grader, Score } from "@everdict/core";
+import type { GradeContext, Grader, Score } from "@everdict/contracts";
 
 // ⓑ Trajectory — free from the trace (tool-call count).
 export const stepsGrader: Grader = {

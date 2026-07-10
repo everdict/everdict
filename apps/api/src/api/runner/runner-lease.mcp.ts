@@ -1,5 +1,5 @@
 import type { SelfHostedKey } from "@everdict/application-control";
-import { CaseResultSchema } from "@everdict/core";
+import { CaseResultSchema } from "@everdict/contracts";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { type McpToolContext, fail, ok, plain } from "../mcp-context.js";

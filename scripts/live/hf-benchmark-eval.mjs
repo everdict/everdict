@@ -4,6 +4,7 @@
 //
 // Real HF datasets (network): openai/gsm8k(QA, open), osunlp/Mind2Web(web-agent, open). GAIA is gated (needs a token).
 import process from "node:process";
+import { runSuite } from "../../packages/application-control/dist/index.js";
 import {
   BENCHMARK_CATALOG,
   getBenchmark,
@@ -11,9 +12,9 @@ import {
   listBenchmarks,
 } from "../../packages/datasets/dist/index.js";
 import { InMemoryScorecardStore } from "../../packages/db/dist/index.js";
+import { summarizeScorecard } from "../../packages/domain/dist/index.js";
 import { makeGraders } from "../../packages/graders/dist/index.js";
 import { InMemoryDatasetRegistry } from "../../packages/registry/dist/index.js";
-import { runSuite, summarizeScorecard } from "../../packages/suite/dist/index.js";
 
 const TENANT = process.env.TENANT ?? "acme";
 const registry = new InMemoryDatasetRegistry();

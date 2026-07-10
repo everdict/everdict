@@ -1,4 +1,4 @@
-import { HarnessTemplateSpecSchema } from "@everdict/core";
+import { HarnessTemplateSpecSchema } from "@everdict/contracts";
 import type { FastifyInstance } from "fastify";
 import { type ServerDeps, gate, resolvePrincipal, sendError, zodIssues } from "../route-context.js";
 import { harnessTemplateDocs } from "./harness-template.docs.js";

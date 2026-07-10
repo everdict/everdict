@@ -1,4 +1,4 @@
-import type { ServiceHarnessSpec } from "@everdict/core";
+import type { ServiceHarnessSpec } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { DockerTopologyRuntime } from "./docker-runtime.js";
 import { type Docker, type DockerRunSpec, dockerRunArgs, parseHostPort } from "./docker.js";

@@ -1,5 +1,5 @@
 import { MattermostCommandService } from "@everdict/application-control";
-import { ForbiddenError } from "@everdict/core";
+import { ForbiddenError } from "@everdict/contracts";
 import { InMemoryWorkspaceSettingsStore } from "@everdict/db";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 

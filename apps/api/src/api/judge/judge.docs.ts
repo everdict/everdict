@@ -1,9 +1,9 @@
 import { VersionTagsBodySchema } from "@everdict/application-control";
+import { JudgeSpecSchema } from "@everdict/contracts";
 import { JudgeListResponseSchema } from "@everdict/contracts/wire";
 import { JudgeResponseSchema } from "@everdict/contracts/wire";
 import { RegisterJudgeResultSchema } from "@everdict/contracts/wire";
 import { ValidateJudgeResultSchema } from "@everdict/contracts/wire";
-import { JudgeSpecSchema } from "@everdict/core";
 import type { FastifySchema } from "fastify";
 import { errorResponses, toJsonSchema } from "../openapi.js";
 import { SetVersionTagsResultSchema } from "./response/set-version-tags-result.js";

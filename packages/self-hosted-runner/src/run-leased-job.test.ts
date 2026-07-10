@@ -1,4 +1,4 @@
-import type { AgentJob, CaseResult } from "@everdict/core";
+import type { AgentJob, CaseResult } from "@everdict/contracts";
 import type { TopologyRuntime } from "@everdict/topology";
 import { describe, expect, it, vi } from "vitest";
 import {

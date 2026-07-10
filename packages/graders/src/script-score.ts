@@ -1,4 +1,4 @@
-import { BadRequestError, type GradeContext, type Grader, type Score } from "@everdict/core";
+import { BadRequestError, type GradeContext, type Grader, type Score } from "@everdict/contracts";
 
 export interface ScriptScoreConfig {
   cmd: string; // Scoring command to run in the environment — writes a continuous score to stdout (e.g. "python3 .grader/pinch_score.py …")

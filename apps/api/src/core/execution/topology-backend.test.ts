@@ -1,5 +1,5 @@
 import { isScreenCapturable } from "@everdict/backends";
-import { type AgentJob, AppError, type RuntimeSpec, RuntimeSpecSchema } from "@everdict/core";
+import { type AgentJob, AppError, type RuntimeSpec, RuntimeSpecSchema } from "@everdict/contracts";
 import type { HarnessInstanceRegistry } from "@everdict/registry";
 import { describe, expect, it } from "vitest";
 import { buildTopologyBackend } from "./topology-backend.js";

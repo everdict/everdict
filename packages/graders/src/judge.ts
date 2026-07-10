@@ -6,7 +6,7 @@ import type {
   JudgeCriterion,
   Score,
   TraceEvent,
-} from "@everdict/core";
+} from "@everdict/contracts";
 
 export interface CriterionVerdict {
   pass: boolean;

@@ -1,3 +1,8 @@
+// Lives in @everdict/agent because it pins the composed loop end-to-end: runCase (the use-case, in
+// @everdict/application-execution) driven against real adapters (drivers/environments/graders/
+// harnesses). agent is the only package that depends on all of them, so the integration test lands
+// here rather than in application-execution (which by design depends on neither).
+import { runCase } from "@everdict/application-execution";
 import type {
   ComputeHandle,
   Driver,
@@ -14,9 +19,6 @@ import { RepoEnvironment } from "@everdict/environments";
 import { TestsPassGrader, costGrader, stepsGrader } from "@everdict/graders";
 import { ScriptedHarness } from "@everdict/harnesses";
 import { describe, expect, it } from "vitest";
-// The loop moved to @everdict/application-execution (re-architecture P2a) — this test exercises the
-// compat shell so the public @everdict/run-case surface stays pinned until the P4 sweep.
-import { runCase } from "./index.js";
 
 describe("runCase — real harness execution → trace → scoring (full loop)", () => {
   it("when the scripted harness fixes the bug, the tests-pass grader passes", async () => {

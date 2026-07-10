@@ -1,4 +1,4 @@
-import { UpstreamError } from "@everdict/core";
+import { UpstreamError } from "@everdict/contracts";
 import type {
   TraceSink,
   TraceSinkCase,

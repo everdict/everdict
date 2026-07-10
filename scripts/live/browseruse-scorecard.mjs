@@ -10,7 +10,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import process from "node:process";
-import { diffScorecards, summarizeScorecard } from "../../packages/suite/dist/index.js";
+import { diffScorecards, summarizeScorecard } from "../../packages/domain/dist/index.js";
 import { ServiceTopologyBackend } from "../../packages/topology/dist/index.js";
 import { OtelTraceSource } from "../../packages/trace/dist/index.js";
 

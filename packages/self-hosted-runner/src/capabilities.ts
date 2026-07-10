@@ -3,7 +3,7 @@ import { access } from "node:fs/promises";
 import { homedir, platform } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { CAPABILITY_DEFS, type CapabilityName } from "@everdict/core";
+import { CAPABILITY_DEFS, type CapabilityName } from "@everdict/contracts";
 
 const run = promisify(execFile);
 

@@ -1,5 +1,5 @@
 import { ProfileService } from "@everdict/application-control";
-import { AppError } from "@everdict/core";
+import { AppError } from "@everdict/contracts";
 import { InMemoryUserProfileStore } from "@everdict/db";
 import { describe, expect, it } from "vitest";
 

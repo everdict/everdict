@@ -10,8 +10,8 @@ import {
   NomadBackend,
   Scheduler,
 } from "@everdict/backends";
-import type { BudgetLimit } from "@everdict/billing";
 import type { BudgetStore, SecretStore, UsageStore } from "@everdict/db";
+import type { BudgetLimit } from "@everdict/domain";
 import { persistentBudget } from "../common/budget-tracker.js";
 import { persistentUsageMeter } from "../common/usage-meter.js";
 

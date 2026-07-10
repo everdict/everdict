@@ -1,4 +1,4 @@
-import { UpstreamError } from "@everdict/core";
+import { UpstreamError } from "@everdict/contracts";
 import { parseCsv } from "./mapping.js";
 
 // Benchmark source connectors: fetch rows by reference from where the benchmark "lives" (no dependency on local files).

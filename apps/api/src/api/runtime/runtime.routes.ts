@@ -1,5 +1,5 @@
 import { VersionTagsBodySchema, setVersionTags } from "@everdict/application-control";
-import { RuntimeSpecSchema } from "@everdict/core";
+import { RuntimeSpecSchema } from "@everdict/contracts";
 import type { FastifyInstance } from "fastify";
 import { type ServerDeps, gate, resolvePrincipal, sendError, zodIssues } from "../route-context.js";
 import { runtimeDocs } from "./runtime.docs.js";

@@ -1,4 +1,4 @@
-import { BadRequestError, type GradeContext, type Grader, type Score } from "@everdict/core";
+import { BadRequestError, type GradeContext, type Grader, type Score } from "@everdict/contracts";
 
 // Whether the final DOM contains specific text (browser snapshot target).
 export class DomContainsGrader implements Grader {

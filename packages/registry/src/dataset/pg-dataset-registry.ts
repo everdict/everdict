@@ -1,4 +1,4 @@
-import { type Dataset, DatasetSchema, NotFoundError } from "@everdict/core";
+import { type Dataset, DatasetSchema, NotFoundError } from "@everdict/contracts";
 import type { SqlClient } from "@everdict/db";
 import { PgVersionedStore } from "../pg-versioned-store.js";
 import { SHARED_TENANT, parseVersionTags, sortVersions } from "../registry.js";

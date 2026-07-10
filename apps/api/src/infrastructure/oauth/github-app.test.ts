@@ -1,5 +1,5 @@
 import { generateKeyPairSync, verify } from "node:crypto";
-import { UpstreamError } from "@everdict/core";
+import { UpstreamError } from "@everdict/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { getInstallation, githubAppJwt, mintInstallationToken } from "./github-app.js";
 

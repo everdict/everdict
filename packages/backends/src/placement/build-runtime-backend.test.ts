@@ -1,4 +1,4 @@
-import type { RuntimeSpec } from "@everdict/core";
+import type { RuntimeSpec } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { buildRuntimeBackend, k8sRuntimeOptions, nomadRuntimeOptions } from "./build-runtime-backend.js";
 

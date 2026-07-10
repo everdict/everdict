@@ -9,11 +9,9 @@ import {
   InternalError,
   OOM_KILLED,
   UpstreamError,
-  assertHardenedIsolation,
-  dockerAuthConfigJson,
-  imageUsesRegistryHost,
   judgeEnv,
-} from "@everdict/core";
+} from "@everdict/contracts";
+import { assertHardenedIsolation, dockerAuthConfigJson, imageUsesRegistryHost } from "@everdict/domain";
 import {
   type AdoptOutcome,
   type Backend,

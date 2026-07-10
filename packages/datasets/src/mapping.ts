@@ -1,4 +1,4 @@
-import { type Dataset, DatasetSchema, type EnvSpec, type EvalCase, type GraderSpec } from "@everdict/core";
+import { type Dataset, DatasetSchema, type EnvSpec, type EvalCase, type GraderSpec } from "@everdict/contracts";
 
 // Dataset ingest (mapping layer): external benchmark formats (WebVoyager jsonl / arbitrary jsonl / csv) → tenant-owned Everdict
 // `Dataset` (EvalCase[]). In a multi-tenant SaaS, for a user to easily add their dataset to the workspace, a mapping layer that converts

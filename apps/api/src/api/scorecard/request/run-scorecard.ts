@@ -1,4 +1,4 @@
-import { GraderSpecSchema, JudgeRunConfigSchema } from "@everdict/core";
+import { GraderSpecSchema, JudgeRunConfigSchema } from "@everdict/contracts";
 import { z } from "zod";
 import { ScorecardOriginBodySchema } from "./scorecard-origin.js";
 

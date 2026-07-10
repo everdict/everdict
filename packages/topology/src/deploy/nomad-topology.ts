@@ -1,10 +1,5 @@
-import {
-  BadRequestError,
-  type RegistryAuth,
-  type ServiceHarnessSpec,
-  flattenEnv,
-  imageUsesRegistryHost,
-} from "@everdict/core";
+import { BadRequestError, type RegistryAuth, type ServiceHarnessSpec } from "@everdict/contracts";
+import { flattenEnv, imageUsesRegistryHost } from "@everdict/domain";
 import { dependencyStores } from "./dependencies.js";
 import { sanitizeIdent } from "./store-binding.js";
 

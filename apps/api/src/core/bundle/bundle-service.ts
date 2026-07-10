@@ -8,7 +8,7 @@ import {
   ModelSpecSchema,
   RubricSpecSchema,
   RuntimeSpecSchema,
-} from "@everdict/core";
+} from "@everdict/contracts";
 import { BenchmarkAdapterSpecSchema } from "@everdict/datasets";
 import type {
   DatasetRegistry,

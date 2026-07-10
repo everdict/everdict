@@ -13,7 +13,7 @@ import {
   RubricSpecSchema,
   type RuntimeSpec,
   RuntimeSpecSchema,
-} from "@everdict/core";
+} from "@everdict/contracts";
 import { type BenchmarkAdapterSpec, BenchmarkAdapterSpecSchema } from "@everdict/datasets";
 import { describe, expect, it } from "vitest";
 import { InMemoryBenchmarkRegistry } from "./benchmark/benchmark-registry.js";

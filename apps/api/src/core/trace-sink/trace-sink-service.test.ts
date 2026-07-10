@@ -1,5 +1,5 @@
 import { TraceSinkService } from "@everdict/application-control";
-import { BadRequestError, type CaseResult } from "@everdict/core";
+import { BadRequestError, type CaseResult } from "@everdict/contracts";
 import { InMemoryWorkspaceSettingsStore } from "@everdict/db";
 import type { TraceSinkConfig } from "@everdict/trace";
 import { describe, expect, it } from "vitest";

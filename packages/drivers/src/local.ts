@@ -10,7 +10,7 @@ import {
   type ExecOpts,
   type ExecResult,
   InternalError,
-} from "@everdict/core";
+} from "@everdict/contracts";
 
 const pexec = promisify(exec);
 const MAX_BUFFER = 64 * 1024 * 1024;

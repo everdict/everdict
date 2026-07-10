@@ -1,4 +1,4 @@
-import { BadRequestError, type GradeContext, type Grader, type Score } from "@everdict/core";
+import { BadRequestError, type GradeContext, type Grader, type Score } from "@everdict/contracts";
 
 // ⓐ Task success (objective) — runs the test command in the environment and decides by exit code. Requires compute (an environment).
 export class TestsPassGrader implements Grader {

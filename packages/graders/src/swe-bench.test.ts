@@ -1,4 +1,4 @@
-import type { ComputeHandle, ExecResult, GradeContext } from "@everdict/core";
+import type { ComputeHandle, ExecResult, GradeContext } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { SweBenchGrader } from "./swe-bench.js";
 

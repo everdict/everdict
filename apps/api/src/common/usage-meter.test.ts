@@ -1,4 +1,4 @@
-import type { CaseResult } from "@everdict/core";
+import type { CaseResult } from "@everdict/contracts";
 import { InMemoryUsageStore, type UsageStore } from "@everdict/db";
 import { describe, expect, it } from "vitest";
 import { persistentUsageMeter } from "./usage-meter.js";

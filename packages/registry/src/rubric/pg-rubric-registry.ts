@@ -1,4 +1,4 @@
-import { type RubricSpec, RubricSpecSchema } from "@everdict/core";
+import { type RubricSpec, RubricSpecSchema } from "@everdict/contracts";
 import type { SqlClient } from "@everdict/db";
 import { PgVersionedStore } from "../pg-versioned-store.js";
 import { type RubricListEntry, type RubricRegistry, rubricDerived } from "./rubric-registry.js";

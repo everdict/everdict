@@ -1,6 +1,6 @@
 import { generateKeyPairSync } from "node:crypto";
 import { GithubAppService } from "@everdict/application-control";
-import { BadRequestError, NotFoundError } from "@everdict/core";
+import { BadRequestError, NotFoundError } from "@everdict/contracts";
 import { InMemoryOAuthStateStore, InMemoryWorkspaceSettingsStore } from "@everdict/db";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { githubAppGateway } from "../../infrastructure/github/app-gateway.js";

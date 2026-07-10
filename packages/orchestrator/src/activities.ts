@@ -1,5 +1,5 @@
 import type { Dispatcher } from "@everdict/backends";
-import type { AgentJob, CaseResult } from "@everdict/core";
+import type { AgentJob, CaseResult } from "@everdict/contracts";
 import type { Activities } from "./types.js";
 
 // Config for the scheduled-fire activities to call the control-plane internal routes (worker→API HTTP bridge). Without it, the fire activities are disabled.

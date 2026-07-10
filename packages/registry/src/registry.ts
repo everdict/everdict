@@ -1,4 +1,4 @@
-import { BadRequestError, type HarnessSpec, type ServiceHarnessSpec } from "@everdict/core";
+import { BadRequestError, type HarnessSpec, type ServiceHarnessSpec } from "@everdict/contracts";
 
 // The version algebra (semver/latest/immutable content identity) now lives in @everdict/domain —
 // re-architecture P1f compat re-export (removed in the P4 sweep). This file keeps the store-facing

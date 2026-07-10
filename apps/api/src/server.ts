@@ -36,7 +36,6 @@ import {
   authorize,
   can,
 } from "@everdict/auth";
-import type { UsageMeter } from "@everdict/billing";
 import {
   AppError,
   DatasetSchema,
@@ -49,10 +48,8 @@ import {
   ModelSpecSchema,
   type RuntimeSpec,
   RuntimeSpecSchema,
-  collectHarnessImages,
-  imageWarnings,
   resolveHarnessInstance,
-} from "@everdict/core";
+} from "@everdict/contracts";
 import {
   BenchmarkAdapterSpecSchema,
   HarborTaskSchema,
@@ -68,6 +65,8 @@ import {
   type WorkspaceStore,
   issueKey,
 } from "@everdict/db";
+import { collectHarnessImages, imageWarnings } from "@everdict/domain";
+import type { UsageMeter } from "@everdict/domain";
 import type {
   DatasetRegistry,
   HarnessInstanceRegistry,

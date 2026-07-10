@@ -1,4 +1,4 @@
-import { PaymentRequiredError } from "@everdict/core";
+import { PaymentRequiredError } from "@everdict/contracts";
 import type { BudgetLimitRow, BudgetStore, BudgetUsageRow } from "@everdict/db";
 import { describe, expect, it } from "vitest";
 import { persistentBudget } from "./budget-tracker.js";

@@ -1,4 +1,4 @@
-import { type AgentJob, BadRequestError, type CaseResult } from "@everdict/core";
+import { type AgentJob, BadRequestError, type CaseResult } from "@everdict/contracts";
 import type { DispatchOptions } from "../backend.js";
 import type { BackendRegistry } from "./registry.js";
 

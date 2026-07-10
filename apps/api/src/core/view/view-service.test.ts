@@ -1,5 +1,5 @@
 import { ViewService } from "@everdict/application-control";
-import { ForbiddenError, NotFoundError } from "@everdict/core";
+import { ForbiddenError, NotFoundError } from "@everdict/contracts";
 import { InMemoryViewStore } from "@everdict/db";
 import { describe, expect, it } from "vitest";
 

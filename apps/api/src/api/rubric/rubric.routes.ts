@@ -1,5 +1,5 @@
 import { VersionTagsBodySchema, setVersionTags } from "@everdict/application-control";
-import { RubricSpecSchema } from "@everdict/core";
+import { RubricSpecSchema } from "@everdict/contracts";
 import type { FastifyInstance } from "fastify";
 import { type ServerDeps, gate, resolvePrincipal, sendError, zodIssues } from "../route-context.js";
 import { rubricDocs } from "./rubric.docs.js";

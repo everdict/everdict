@@ -1,4 +1,4 @@
-import { type HarnessTemplateSpec, HarnessTemplateSpecSchema } from "@everdict/core";
+import { type HarnessTemplateSpec, HarnessTemplateSpecSchema } from "@everdict/contracts";
 import type { SqlClient } from "@everdict/db";
 import { PgVersionedStore } from "../pg-versioned-store.js";
 import type { HarnessTemplateRegistry } from "./harness-template-registry.js";

@@ -1,4 +1,4 @@
-import { type JudgeSpec, JudgeSpecSchema } from "@everdict/core";
+import { type JudgeSpec, JudgeSpecSchema } from "@everdict/contracts";
 import type { SqlClient } from "@everdict/db";
 import { PgVersionedStore } from "../pg-versioned-store.js";
 import { type JudgeListEntry, type JudgeRegistry, judgeDerived } from "./judge-registry.js";

@@ -1,4 +1,4 @@
-import type { Dataset, DatasetDiff, DatasetFieldChange, EvalCase } from "@everdict/core";
+import type { Dataset, DatasetDiff, DatasetFieldChange, EvalCase } from "@everdict/contracts";
 
 // Key-sorted canonicalization — compares object key order/array equality stably (avoids false changes). undefined has a dedicated sentinel.
 function canonical(v: unknown): string {

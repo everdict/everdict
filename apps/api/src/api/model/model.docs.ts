@@ -1,8 +1,8 @@
+import { ModelSpecSchema } from "@everdict/contracts";
 import { ModelListResponseSchema } from "@everdict/contracts/wire";
 import { ModelResponseSchema } from "@everdict/contracts/wire";
 import { RegisterModelResultSchema } from "@everdict/contracts/wire";
 import { ValidateModelResultSchema } from "@everdict/contracts/wire";
-import { ModelSpecSchema } from "@everdict/core";
 import type { FastifySchema } from "fastify";
 import { errorResponses, toJsonSchema } from "../openapi.js";
 

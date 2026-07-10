@@ -1,4 +1,4 @@
-import { BadRequestError, type GradeContext, type Grader, type Score } from "@everdict/core";
+import { BadRequestError, type GradeContext, type Grader, type Score } from "@everdict/contracts";
 
 export interface CommandConfig {
   cmd: string; // Command to run in the environment (e.g. "python -m pytest -q")

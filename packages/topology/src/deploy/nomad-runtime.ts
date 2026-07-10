@@ -6,7 +6,7 @@ import {
   type ServiceReadiness,
   type TrustZone,
   UpstreamError,
-} from "@everdict/core";
+} from "@everdict/contracts";
 import {
   type ConsulClient,
   buildSharedStoreIntention,

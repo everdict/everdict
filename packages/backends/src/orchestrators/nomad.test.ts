@@ -1,6 +1,6 @@
 import { EventEmitter } from "node:events";
 import { RESULT_SENTINEL } from "@everdict/contracts";
-import { type AgentJob, BadRequestError, type CaseResult } from "@everdict/core";
+import { type AgentJob, BadRequestError, type CaseResult } from "@everdict/contracts";
 import { describe, expect, it, vi } from "vitest";
 import { staticSecrets } from "../policy/secrets.js";
 import { perTenantTrustZones, staticTrustZones } from "../policy/trust-zone.js";

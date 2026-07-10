@@ -11,8 +11,7 @@ import { TraceSinkService } from "@everdict/application-control";
 import { WorkspaceService } from "@everdict/application-control";
 import { type Authenticator, apiKeyAuthenticator, compositeAuthenticator } from "@everdict/auth";
 import type { Dispatcher } from "@everdict/backends";
-import { inMemoryBudget, inMemoryUsageMeter } from "@everdict/billing";
-import { type CaseResult, DatasetSchema, type EvalCase } from "@everdict/core";
+import { type CaseResult, DatasetSchema, type EvalCase } from "@everdict/contracts";
 import {
   InMemoryBudgetStore,
   InMemoryOAuthStateStore,
@@ -29,6 +28,7 @@ import {
   aesGcmCipher,
   issueKey,
 } from "@everdict/db";
+import { inMemoryBudget, inMemoryUsageMeter } from "@everdict/domain";
 import { costGrader, latencyGrader, stepsGrader } from "@everdict/graders";
 import {
   InMemoryBenchmarkRegistry,

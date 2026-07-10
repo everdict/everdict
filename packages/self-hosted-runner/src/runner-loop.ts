@@ -1,4 +1,5 @@
-import { type AgentJob, AgentJobSchema, type CaseResult, classifyFailure, stageForError } from "@everdict/core";
+import { type AgentJob, AgentJobSchema, type CaseResult } from "@everdict/contracts";
+import { classifyFailure, stageForError } from "@everdict/domain";
 
 // Dependencies of the runner lease worker pool — the caller (main.ts) absorbs transport/session via ResilientMcpSession,
 // and here we inject only callJson (already JSON-parsed and retried) and job execution, keeping just the pure lease-loop logic (test-friendly).

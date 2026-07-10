@@ -1,4 +1,4 @@
-import { type JudgeCriterion, type TraceEvent, UpstreamError } from "@everdict/core";
+import { type JudgeCriterion, type TraceEvent, UpstreamError } from "@everdict/contracts";
 import type { CriterionVerdict, Judge, JudgeImage, JudgeVerdict } from "./judge.js";
 
 // Model-call primitive — (prompt[, image]) → raw text. Separates transport from judging logic (injected in tests).

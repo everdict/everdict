@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { DatasetSchema } from "@everdict/core";
+import { DatasetSchema } from "@everdict/contracts";
 import {
   InMemoryBenchmarkRegistry,
   InMemoryDatasetRegistry,

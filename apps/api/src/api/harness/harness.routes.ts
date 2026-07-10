@@ -1,15 +1,8 @@
 import { VersionTagsBodySchema, setVersionTags } from "@everdict/application-control";
 import { RepinBodySchema, repinHarnessImages } from "@everdict/application-control";
 import { deleteHarnessVersion, harnessIsPrivate, harnessVisibleTo } from "@everdict/application-control";
-import {
-  AppError,
-  HarnessInstanceSpecSchema,
-  type ImageWarning,
-  classifyImageRef,
-  collectHarnessImages,
-  imageWarnings,
-  resolveHarnessInstance,
-} from "@everdict/core";
+import { AppError, HarnessInstanceSpecSchema, type ImageWarning, resolveHarnessInstance } from "@everdict/contracts";
+import { classifyImageRef, collectHarnessImages, imageWarnings } from "@everdict/domain";
 import type { FastifyInstance } from "fastify";
 import { type ServerDeps, gate, resolvePrincipal, sendError, zodIssues } from "../route-context.js";
 import { harnessDocs } from "./harness.docs.js";

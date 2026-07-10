@@ -1,9 +1,9 @@
+import { HarnessTemplateSpecSchema } from "@everdict/contracts";
 import { HarnessTemplateListResponseSchema } from "@everdict/contracts/wire";
 import { HarnessTemplateVersionsResponseSchema } from "@everdict/contracts/wire";
 import { HarnessTemplateResponseSchema } from "@everdict/contracts/wire";
 import { RegisterHarnessTemplateResultSchema } from "@everdict/contracts/wire";
 import { ValidateHarnessTemplateResultSchema } from "@everdict/contracts/wire";
-import { HarnessTemplateSpecSchema } from "@everdict/core";
 import type { FastifySchema } from "fastify";
 import { errorResponses, toJsonSchema } from "../openapi.js";
 

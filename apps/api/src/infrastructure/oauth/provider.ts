@@ -1,4 +1,4 @@
-import { UpstreamError } from "@everdict/core";
+import { UpstreamError } from "@everdict/contracts";
 
 // Outbound OAuth client abstraction — Everdict as the OAuth "client" of an external provider (GitHub/GHE/Mattermost).
 // (The opposite direction from inbound Keycloak: we request permission from an external account.)

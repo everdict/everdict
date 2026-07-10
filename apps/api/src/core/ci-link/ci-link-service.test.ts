@@ -5,7 +5,7 @@ import {
   type WorkspaceRunnerRoster,
   renderCiWorkflow,
 } from "@everdict/application-control";
-import { BadRequestError, NotFoundError, UpstreamError } from "@everdict/core";
+import { BadRequestError, NotFoundError, UpstreamError } from "@everdict/contracts";
 import { InMemoryWorkspaceSettingsStore } from "@everdict/db";
 import { beforeEach, describe, expect, it } from "vitest";
 import { githubRepoWriterFactory } from "../../infrastructure/github/repo-writer.js";

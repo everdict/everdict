@@ -1,4 +1,4 @@
-import { type AgentJob, type CaseResult, InternalError } from "@everdict/core";
+import { type AgentJob, type CaseResult, InternalError } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { runLeaseWorkers } from "./runner-loop.js";
 

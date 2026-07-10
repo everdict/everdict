@@ -3,14 +3,15 @@
 // diffScorecards(vA, vB) → regression (pass→fail)/improvement (fail→pass) report. (regression detection uses the objective `pass` transition.)
 //
 // Note: to make the regression reproducible, both versions' dispatch is a **deterministic stand-in** (a real LLM is nondeterministic + slow —
-// unsuitable for a regression demo). The diff (scorecard comparison) is the real @everdict/suite diffScorecards. For real harness evaluation see webvoyager-eval.mjs.
+// unsuitable for a regression demo). The diff (scorecard comparison) is the real @everdict/domain diffScorecards. For real harness evaluation see webvoyager-eval.mjs.
 import { readFileSync } from "node:fs";
 import process from "node:process";
+import { runSuite } from "../../packages/application-control/dist/index.js";
 import { importWebVoyager } from "../../packages/datasets/dist/index.js";
 import { InMemoryScorecardStore } from "../../packages/db/dist/index.js";
+import { diffScorecards, summarizeScorecard } from "../../packages/domain/dist/index.js";
 import { makeGraders } from "../../packages/graders/dist/index.js";
 import { InMemoryDatasetRegistry } from "../../packages/registry/dist/index.js";
-import { diffScorecards, runSuite, summarizeScorecard } from "../../packages/suite/dist/index.js";
 
 const DATASET = process.env.DATASET ?? "datasets/webvoyager-mini.jsonl";
 const TENANT = "acme";

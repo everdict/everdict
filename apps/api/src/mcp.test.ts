@@ -9,8 +9,7 @@ import { ScorecardService } from "@everdict/application-control";
 import { TraceSinkService } from "@everdict/application-control";
 import type { Principal } from "@everdict/auth";
 import type { Dispatcher } from "@everdict/backends";
-import { inMemoryUsageMeter } from "@everdict/billing";
-import type { AgentJob, CaseResult, RuntimeSpec } from "@everdict/core";
+import type { AgentJob, CaseResult, RuntimeSpec } from "@everdict/contracts";
 import {
   InMemoryBudgetStore,
   InMemoryOAuthStateStore,
@@ -24,6 +23,7 @@ import {
   InMemoryWorkspaceSettingsStore,
   InMemoryWorkspaceStore,
 } from "@everdict/db";
+import { inMemoryUsageMeter } from "@everdict/domain";
 import { costGrader, latencyGrader, stepsGrader } from "@everdict/graders";
 import {
   InMemoryDatasetRegistry,

@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { BadRequestError, ConflictError, type HarnessTemplateSpec, NotFoundError } from "@everdict/core";
+import { BadRequestError, ConflictError, type HarnessTemplateSpec, NotFoundError } from "@everdict/contracts";
 import type { SqlClient } from "@everdict/db";
 import { describe, expect, it } from "vitest";
 import { loadHarnessTaxonomyDir } from "./harness/load-harness-taxonomy.js";

@@ -1,4 +1,4 @@
-import { type TraceEvent, UpstreamError } from "@everdict/core";
+import { type TraceEvent, UpstreamError } from "@everdict/contracts";
 import type { TraceSource } from "./trace-source.js";
 
 // LangSmith run — RunSchema (selected fields only) from the POST /runs/query {trace:<trace_id>} response.

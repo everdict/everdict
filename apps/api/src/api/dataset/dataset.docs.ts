@@ -1,4 +1,5 @@
 import { VersionTagsBodySchema } from "@everdict/application-control";
+import { DatasetSchema } from "@everdict/contracts";
 import { DatasetDiffResponseSchema } from "@everdict/contracts/wire";
 import { DatasetListResponseSchema } from "@everdict/contracts/wire";
 import { DatasetResponseSchema } from "@everdict/contracts/wire";
@@ -7,7 +8,6 @@ import { ImportDatasetResultSchema } from "@everdict/contracts/wire";
 import { RegisterDatasetResultSchema } from "@everdict/contracts/wire";
 import { SetVersionTagsResultSchema } from "@everdict/contracts/wire";
 import { ValidateDatasetResultSchema } from "@everdict/contracts/wire";
-import { DatasetSchema } from "@everdict/core";
 import type { FastifySchema } from "fastify";
 import { errorResponses, toJsonSchema } from "../openapi.js";
 import { ImportHarborBodySchema } from "./request/import-harbor.js";

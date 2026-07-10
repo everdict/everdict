@@ -1,4 +1,4 @@
-import { BadRequestError, type GradeContext, type Grader, type Score } from "@everdict/core";
+import { BadRequestError, type GradeContext, type Grader, type Score } from "@everdict/contracts";
 
 // ⓑ Trajectory (trace-family) — recover a numeric metric from the agent's own printed output.
 // A trace:none command harness emits no tool_call/llm_call events, so steps/cost graders read 0 — but the

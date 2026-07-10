@@ -1,5 +1,5 @@
 import { MembershipService } from "@everdict/application-control";
-import { NotFoundError } from "@everdict/core";
+import { NotFoundError } from "@everdict/contracts";
 import {
   InMemoryUserProfileStore,
   InMemoryWorkspaceInviteStore,

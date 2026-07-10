@@ -1,6 +1,6 @@
-import { type UsageMeter, billingTenant, costOf, inMemoryUsageMeter } from "@everdict/billing";
-import type { CaseResult } from "@everdict/core";
+import type { CaseResult } from "@everdict/contracts";
 import type { UsageStore } from "@everdict/db";
+import { type UsageMeter, billingTenant, costOf, inMemoryUsageMeter } from "@everdict/domain";
 
 // A persistent usage meter: in-memory for fast synchronous reads (GET /usage) with a best-effort WRITE-THROUGH to a
 // durable UsageStore, and boot HYDRATION so metered usage survives a restart. Single-process read model (the in-memory

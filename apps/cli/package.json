@@ -16,7 +16,7 @@
     "@everdict/agent": "workspace:*",
     "@everdict/application-control": "workspace:*",
     "@everdict/backends": "workspace:*",
-    "@everdict/core": "workspace:*",
+    "@everdict/contracts": "workspace:*",
     "@everdict/domain": "workspace:*",
     "@everdict/orchestrator": "workspace:*",
     "@everdict/self-hosted-runner": "workspace:*",

@@ -1,4 +1,4 @@
-import type { ServiceHarnessSpec, TrustZone } from "@everdict/core";
+import type { ServiceHarnessSpec, TrustZone } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { planTenantStores, resolveStoreIsolation, sanitizeIdent } from "./store-binding.js";
 

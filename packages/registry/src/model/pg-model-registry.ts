@@ -1,4 +1,4 @@
-import { type ModelSpec, ModelSpecSchema } from "@everdict/core";
+import { type ModelSpec, ModelSpecSchema } from "@everdict/contracts";
 import type { SqlClient } from "@everdict/db";
 import { PgVersionedStore } from "../pg-versioned-store.js";
 import type { ModelRegistry } from "./model-registry.js";

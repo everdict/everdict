@@ -1,4 +1,4 @@
-import { UpstreamError } from "@everdict/core";
+import { UpstreamError } from "@everdict/contracts";
 import type { FetchLike } from "@everdict/datasets";
 import { InMemoryBenchmarkRegistry, InMemoryDatasetRegistry } from "@everdict/registry";
 import { describe, expect, it } from "vitest";

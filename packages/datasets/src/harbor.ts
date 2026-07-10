@@ -1,4 +1,4 @@
-import { BadRequestError, type Dataset, DatasetSchema, type EvalCase } from "@everdict/core";
+import { BadRequestError, type Dataset, DatasetSchema, type EvalCase } from "@everdict/contracts";
 import { z } from "zod";
 
 // Harbor (Anthropic's agent-eval harness) on-ramp: a container task → an Everdict EvalCase. A Harbor task is a

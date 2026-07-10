@@ -4,9 +4,9 @@ import {
   type HarnessSpec,
   type HarnessTemplateSpec,
   type ServiceHarnessSpec,
-  referencesUserSecret,
   resolveHarnessInstance,
-} from "@everdict/core";
+} from "@everdict/contracts";
+import { referencesUserSecret } from "@everdict/domain";
 import { asService } from "../registry.js";
 import { type VersionMeta, VersionedStore } from "../versioned-store.js";
 

@@ -1,4 +1,4 @@
-import type { ServiceHarnessSpec } from "@everdict/core";
+import type { ServiceHarnessSpec } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { wiringVars } from "../environment-manager.js";
 import { dependencyConnEnv, dependencyStores } from "./dependencies.js";

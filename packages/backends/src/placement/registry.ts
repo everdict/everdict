@@ -1,4 +1,4 @@
-import { NotFoundError } from "@everdict/core";
+import { NotFoundError } from "@everdict/contracts";
 import type { Backend } from "../backend.js";
 
 // name → Backend instance. 1 instance = 1 target (cluster/pool).

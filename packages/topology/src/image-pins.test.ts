@@ -1,4 +1,4 @@
-import { BadRequestError, type ServiceHarnessSpec } from "@everdict/core";
+import { BadRequestError, type ServiceHarnessSpec } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { applyImagePins } from "./image-pins.js";
 

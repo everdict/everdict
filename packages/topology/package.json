@@ -20,7 +20,8 @@
   "dependencies": {
     "@everdict/application-execution": "workspace:*",
     "@everdict/backends": "workspace:*",
-    "@everdict/core": "workspace:*",
+    "@everdict/contracts": "workspace:*",
+    "@everdict/domain": "workspace:*",
     "@everdict/graders": "workspace:*",
     "@everdict/trace": "workspace:*"
   }

@@ -6,10 +6,9 @@ import {
   InternalError,
   OOM_KILLED,
   UpstreamError,
-  assertHardenedIsolation,
-  imageUsesRegistryHost,
   judgeEnv,
-} from "@everdict/core";
+} from "@everdict/contracts";
+import { assertHardenedIsolation, imageUsesRegistryHost } from "@everdict/domain";
 import {
   type AdoptOutcome,
   type Backend,

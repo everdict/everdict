@@ -1,5 +1,5 @@
-import { inMemoryBudget } from "@everdict/billing";
-import { type AgentJob, type CaseResult, PaymentRequiredError } from "@everdict/core";
+import { type AgentJob, type CaseResult, PaymentRequiredError } from "@everdict/contracts";
+import { inMemoryBudget } from "@everdict/domain";
 import { describe, expect, it } from "vitest";
 import type { Backend } from "../backend.js";
 import { BackendRegistry } from "../placement/registry.js";

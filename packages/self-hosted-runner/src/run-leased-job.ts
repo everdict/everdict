@@ -1,11 +1,6 @@
 import { type DriverMount, pullWithRegistryAuth, runAgentJob } from "@everdict/agent";
-import {
-  type AgentJob,
-  type CaseResult,
-  type RegistryAuth,
-  type ServiceHarnessSpec,
-  imageUsesRegistryHost,
-} from "@everdict/core";
+import type { AgentJob, CaseResult, RegistryAuth, ServiceHarnessSpec } from "@everdict/contracts";
+import { imageUsesRegistryHost } from "@everdict/domain";
 import {
   DockerTopologyRuntime,
   type DockerTopologyRuntimeOptions,

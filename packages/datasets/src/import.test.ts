@@ -1,4 +1,4 @@
-import { DatasetSchema } from "@everdict/core";
+import { DatasetSchema } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { importBenchmark, importCsv, importJsonl, importWebVoyager, parseCsv } from "./index.js";
 

@@ -3,7 +3,8 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { BadRequestError, UpstreamError, dockerAuthConfigJson, parseImageRef } from "@everdict/core";
+import { BadRequestError, UpstreamError } from "@everdict/contracts";
+import { dockerAuthConfigJson, parseImageRef } from "@everdict/domain";
 import { z } from "zod";
 
 const pexecFile = promisify(execFile);

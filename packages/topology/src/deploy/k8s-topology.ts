@@ -1,11 +1,5 @@
-import {
-  type RegistryAuth,
-  type ServiceHarnessSpec,
-  type ServiceReadiness,
-  type ServiceResources,
-  dockerAuthConfigJson,
-  imageUsesRegistryHost,
-} from "@everdict/core";
+import type { RegistryAuth, ServiceHarnessSpec, ServiceReadiness, ServiceResources } from "@everdict/contracts";
+import { dockerAuthConfigJson, imageUsesRegistryHost } from "@everdict/domain";
 import { dependencyConnEnv, dependencyStores } from "./dependencies.js";
 
 // ServiceResources → k8s container resources (requests=limits). cpu 1000 = 1 core (millicores), memoryMb → Mi. Includes only what is defined.

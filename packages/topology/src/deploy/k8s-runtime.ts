@@ -5,7 +5,7 @@ import {
   type ServiceHarnessSpec,
   type TrustZone,
   UpstreamError,
-} from "@everdict/core";
+} from "@everdict/contracts";
 import { STORE_DEFS, buildSharedStoreManifests, dependencyStores } from "./dependencies.js";
 import { browserDeployName, buildBrowserManifests, buildK8sManifests } from "./k8s-topology.js";
 import { type Kubectl, type PortForward, kubectlCli } from "./kubectl.js";

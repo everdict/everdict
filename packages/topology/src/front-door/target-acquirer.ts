@@ -5,7 +5,7 @@ import {
   type TopologyTarget,
   type TrustZone,
   UpstreamError,
-} from "@everdict/core";
+} from "@everdict/contracts";
 import type { TargetEnvHandle, TopologyRuntime } from "../deploy/topology-runtime.js";
 import { getField, interpolatePath, joinUrl, methodPath } from "./front-door-driver.js";
 

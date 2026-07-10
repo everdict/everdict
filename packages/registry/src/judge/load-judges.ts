@@ -1,5 +1,5 @@
 import { readFileSync, readdirSync } from "node:fs";
-import { JudgeSpecSchema } from "@everdict/core";
+import { JudgeSpecSchema } from "@everdict/contracts";
 import { SHARED_TENANT } from "../registry.js";
 import { InMemoryJudgeRegistry, type JudgeRegistry } from "./judge-registry.js";
 

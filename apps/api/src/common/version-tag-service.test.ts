@@ -1,6 +1,6 @@
 import { VersionTagsBodySchema, normalizeVersionTags, setVersionTags } from "@everdict/application-control";
 import type { Principal } from "@everdict/auth";
-import { BadRequestError, DatasetSchema, ForbiddenError, NotFoundError } from "@everdict/core";
+import { BadRequestError, DatasetSchema, ForbiddenError, NotFoundError } from "@everdict/contracts";
 import { InMemoryDatasetRegistry } from "@everdict/registry";
 import { describe, expect, it } from "vitest";
 

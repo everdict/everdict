@@ -1,4 +1,4 @@
-import { UpstreamError } from "@everdict/core";
+import { UpstreamError } from "@everdict/contracts";
 import type { TraceSink, TraceSinkCase, TraceSinkCaseResult, TraceSinkContext, TraceSinkResult } from "./trace-sink.js";
 
 // Langfuse sink — all cases via batch ingestion (POST /api/public/ingestion), scores as score-create events.

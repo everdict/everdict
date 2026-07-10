@@ -1,5 +1,5 @@
 import type { DispatchOptions, Dispatcher } from "@everdict/backends";
-import type { AgentJob, CaseResult } from "@everdict/core";
+import type { AgentJob, CaseResult } from "@everdict/contracts";
 import type { ModelRegistry } from "@everdict/registry";
 
 // If a command harness's {{model}} slot (CommandHarnessSpec.model) is a registered Model id, resolve it to that underlying model identifier.

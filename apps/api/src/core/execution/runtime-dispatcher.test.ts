@@ -1,5 +1,5 @@
 import { BackendRegistry, type Dispatcher } from "@everdict/backends";
-import type { AgentJob, CaseResult, RuntimeSpec } from "@everdict/core";
+import type { AgentJob, CaseResult, RuntimeSpec } from "@everdict/contracts";
 import { InMemoryRuntimeRegistry } from "@everdict/registry";
 import { describe, expect, it, vi } from "vitest";
 import { RuntimeDispatcher } from "./runtime-dispatcher.js";

@@ -1,4 +1,4 @@
-import { JudgeRunConfigSchema } from "@everdict/core";
+import { JudgeRunConfigSchema } from "@everdict/contracts";
 import { z } from "zod";
 
 // Workspace settings patch (partial). Metering on/off + default judge model + completion-notification target.

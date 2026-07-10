@@ -1,4 +1,4 @@
-import type { TraceEvent } from "@everdict/core";
+import type { TraceEvent } from "@everdict/contracts";
 
 // --- Safe unknown-narrowing helpers (no any) ---
 function rec(v: unknown): Record<string, unknown> | null {

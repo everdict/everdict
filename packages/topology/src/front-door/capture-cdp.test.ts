@@ -1,4 +1,4 @@
-import { UpstreamError } from "@everdict/core";
+import { UpstreamError } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { type CdpSocket, captureCdpScreenshot } from "./capture-cdp.js";
 

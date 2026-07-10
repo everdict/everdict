@@ -18,12 +18,12 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
+    "@everdict/application-execution": "workspace:*",
     "@everdict/contracts": "workspace:*",
-    "@everdict/core": "workspace:*",
+    "@everdict/domain": "workspace:*",
     "@everdict/drivers": "workspace:*",
     "@everdict/environments": "workspace:*",
     "@everdict/graders": "workspace:*",
-    "@everdict/harnesses": "workspace:*",
-    "@everdict/run-case": "workspace:*"
+    "@everdict/harnesses": "workspace:*"
   }
 }

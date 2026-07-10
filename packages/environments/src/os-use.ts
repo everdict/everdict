@@ -4,7 +4,7 @@ import {
   type EnvSpec,
   type Environment,
   type OsUseSnapshot,
-} from "@everdict/core";
+} from "@everdict/contracts";
 
 const DEFAULT_DISPLAY = ":99";
 const DEFAULT_SHOT = "/tmp/everdict-screen.png";

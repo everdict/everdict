@@ -1,4 +1,4 @@
-import { type Dataset, GraderSpecSchema } from "@everdict/core";
+import { type Dataset, GraderSpecSchema } from "@everdict/contracts";
 import { z } from "zod";
 import { type BenchmarkAdapter, type ImportBenchmarkOpts, importBenchmark } from "./catalog.js";
 import { type DatasetMeta, interpolateFields } from "./mapping.js";

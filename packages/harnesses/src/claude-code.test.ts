@@ -1,4 +1,4 @@
-import type { ComputeHandle, ExecOpts, ExecResult, RunContext, TraceEvent } from "@everdict/core";
+import type { ComputeHandle, ExecOpts, ExecResult, RunContext, TraceEvent } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { ClaudeCodeHarness } from "./claude-code.js";
 

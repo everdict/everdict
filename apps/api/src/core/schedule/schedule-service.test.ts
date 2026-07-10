@@ -1,6 +1,6 @@
 import type { RunScorecardInput } from "@everdict/application-control";
 import { type ScheduleDriver, ScheduleService, type ScheduleSpec, isValidCron } from "@everdict/application-control";
-import { BadRequestError, ForbiddenError, NotFoundError, UpstreamError } from "@everdict/core";
+import { BadRequestError, ForbiddenError, NotFoundError, UpstreamError } from "@everdict/contracts";
 import { InMemoryScheduleStore, type ScheduleRunTemplate, type ScheduleStore } from "@everdict/db";
 import { describe, expect, it } from "vitest";
 

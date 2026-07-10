@@ -1,4 +1,4 @@
-import type { TrustZone } from "@everdict/core";
+import type { TrustZone } from "@everdict/contracts";
 
 // Enforce tenant (zone) network isolation via K8s NetworkPolicy. zone.network picks the policy:
 //   deny-cross-tenant = block ingress from outside the same ns (applied symmetrically, so even without egress it blocks cross pod-to-pod reach) — the safe default.

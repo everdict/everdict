@@ -1,5 +1,5 @@
 import { setVersionTags } from "@everdict/application-control";
-import { JudgeSpecSchema } from "@everdict/core";
+import { JudgeSpecSchema } from "@everdict/contracts";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { type McpToolContext, fail, ok, plain, run } from "../mcp-context.js";

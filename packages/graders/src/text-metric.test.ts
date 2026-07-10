@@ -1,5 +1,5 @@
-import type { EvalCase, TraceEvent } from "@everdict/core";
-import { BadRequestError } from "@everdict/core";
+import type { EvalCase, TraceEvent } from "@everdict/contracts";
+import { BadRequestError } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { makeGraders } from "./make-graders.js";
 import { TextMetricGrader } from "./text-metric.js";

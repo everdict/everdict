@@ -12,9 +12,8 @@ import {
   type ExecResult,
   InternalError,
   type RegistryAuth,
-  dockerAuthConfigJson,
-  imageUsesRegistryHost,
-} from "@everdict/core";
+} from "@everdict/contracts";
+import { dockerAuthConfigJson, imageUsesRegistryHost } from "@everdict/domain";
 
 const pexecFile = promisify(execFile);
 const MAX_BUFFER = 64 * 1024 * 1024;

@@ -1,4 +1,4 @@
-import { UpstreamError } from "@everdict/core";
+import { UpstreamError } from "@everdict/contracts";
 import type { CdpSocket, CdpTarget } from "./capture-cdp.js";
 
 // Interactive live browser session over CDP — the bidirectional sibling of capture-cdp's one-shot screenshot.

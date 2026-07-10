@@ -1,4 +1,4 @@
-import { ForbiddenError } from "@everdict/core";
+import { ForbiddenError } from "@everdict/contracts";
 import { InMemoryRunnerStore, InMemoryTenantKeyStore, hashKey } from "@everdict/db";
 import { SignJWT, createLocalJWKSet, exportJWK, generateKeyPair } from "jose";
 import { beforeAll, describe, expect, it } from "vitest";

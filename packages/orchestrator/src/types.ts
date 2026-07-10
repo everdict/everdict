@@ -1,4 +1,4 @@
-import type { AgentJob, CaseResult } from "@everdict/core";
+import type { AgentJob, CaseResult } from "@everdict/contracts";
 
 // Activity signatures the workflow calls (pure types — safely imported into the workflow bundle).
 export interface Activities {

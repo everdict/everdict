@@ -4,7 +4,7 @@ import {
   type EnvSpec,
   type Environment,
   type PromptSnapshot,
-} from "@everdict/core";
+} from "@everdict/contracts";
 
 // Environment-less QA (prompt→answer). With no stage, seed/snapshot are near no-ops — scoring looks at the answer in the trace (answer-match/judge).
 // Expresses gsm8k/GAIA-style as first-class rather than routing through repo/browser. (The agent takes the task and produces only an answer.)

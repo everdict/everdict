@@ -1,4 +1,4 @@
-import type { ComputeHandle, ExecOpts } from "@everdict/core";
+import type { ComputeHandle, ExecOpts } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { RepoEnvironment } from "./repo.js";
 

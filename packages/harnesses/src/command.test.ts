@@ -1,4 +1,4 @@
-import type { CommandHarnessSpec, ComputeHandle, RunContext, TraceEvent } from "@everdict/core";
+import type { CommandHarnessSpec, ComputeHandle, RunContext, TraceEvent } from "@everdict/contracts";
 import type { StartedUsageProxy, TraceSource } from "@everdict/trace";
 import { describe, expect, it } from "vitest";
 import { CommandHarness } from "./command.js";

@@ -1,6 +1,6 @@
 import { setVersionTags } from "@everdict/application-control";
 import { deleteDatasetVersion } from "@everdict/application-control";
-import { DatasetSchema } from "@everdict/core";
+import { DatasetSchema } from "@everdict/contracts";
 import {
   HarborTaskSchema,
   TerminalBenchTaskSchema,

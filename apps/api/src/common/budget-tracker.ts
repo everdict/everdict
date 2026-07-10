@@ -1,5 +1,5 @@
-import { type BudgetLimit, type BudgetTracker, type BudgetUsage, assertWithinBudget } from "@everdict/billing";
 import type { BudgetStore } from "@everdict/db";
+import { type BudgetLimit, type BudgetTracker, type BudgetUsage, assertWithinBudget } from "@everdict/domain";
 import { z } from "zod";
 
 // A per-tenant limit as set over the API (each dimension optional; an omitted dimension = unlimited). A PUT replaces

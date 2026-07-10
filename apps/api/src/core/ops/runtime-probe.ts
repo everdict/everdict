@@ -1,5 +1,5 @@
 import { type Backend, type ProbeResult, buildRuntimeBackend, isProbeable } from "@everdict/backends";
-import type { RuntimeSpec } from "@everdict/core";
+import type { RuntimeSpec } from "@everdict/contracts";
 
 // Connection test result — checks only cluster reachability/auth, no job.
 export interface RuntimeProbeResult {

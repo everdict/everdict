@@ -1,6 +1,6 @@
 import { type ExecuteCaseDeps, executeCase } from "@everdict/application-control";
 import type { Dispatcher } from "@everdict/backends";
-import type { AgentJob, CaseResult } from "@everdict/core";
+import type { AgentJob, CaseResult } from "@everdict/contracts";
 import { makeGraders } from "@everdict/graders";
 import { describe, expect, it } from "vitest";
 

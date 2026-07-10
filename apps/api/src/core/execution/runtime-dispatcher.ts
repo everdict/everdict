@@ -14,8 +14,8 @@ import {
   NotFoundError,
   type RegistryAuth,
   type RuntimeSpec,
-  imageUsesRegistryHost,
-} from "@everdict/core";
+} from "@everdict/contracts";
+import { imageUsesRegistryHost } from "@everdict/domain";
 import type { RuntimeRegistry } from "@everdict/registry";
 
 export interface RuntimeDispatcherDeps {

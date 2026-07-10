@@ -16,9 +16,9 @@ import type { TraceSinkService } from "@everdict/application-control";
 import type { ViewService } from "@everdict/application-control";
 import type { WorkspaceService } from "@everdict/application-control";
 import { type Action, type Principal, authorize } from "@everdict/auth";
-import type { UsageMeter } from "@everdict/billing";
-import { AppError, type RuntimeSpec } from "@everdict/core";
+import { AppError, type RuntimeSpec } from "@everdict/contracts";
 import type { SecretStore, TenantKeyStore, WorkspaceSettingsStore } from "@everdict/db";
+import type { UsageMeter } from "@everdict/domain";
 import type {
   DatasetRegistry,
   HarnessInstanceRegistry,

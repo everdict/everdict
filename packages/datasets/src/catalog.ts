@@ -1,4 +1,4 @@
-import { type Dataset, DatasetSchema, type GraderSpec } from "@everdict/core";
+import { type Dataset, DatasetSchema, type GraderSpec } from "@everdict/contracts";
 // Benchmark adapters + catalog: "adding a new benchmark = one adapter (descriptor), not code".
 // An adapter = {source (where to pull from), mapping (fields→EvalCase), scoring (graders), optional row normalization}. First-party adapters are
 // shipped as a catalog (to seed _shared); users add their own adapter to register a private/new benchmark in their workspace.

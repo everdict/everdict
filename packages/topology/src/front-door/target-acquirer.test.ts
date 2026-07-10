@@ -1,4 +1,4 @@
-import type { ServiceHarnessSpec, TargetAcquire, TopologyTarget } from "@everdict/core";
+import type { ServiceHarnessSpec, TargetAcquire, TopologyTarget } from "@everdict/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { TopologyRuntime } from "../deploy/topology-runtime.js";
 import {

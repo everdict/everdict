@@ -3,7 +3,7 @@ import { ProfileService } from "@everdict/application-control";
 import { RunService } from "@everdict/application-control";
 import type { Principal } from "@everdict/auth";
 import type { Dispatcher } from "@everdict/backends";
-import type { CaseResult } from "@everdict/core";
+import type { CaseResult } from "@everdict/contracts";
 import {
   InMemoryRunStore,
   InMemoryUserProfileStore,

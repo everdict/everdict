@@ -1,4 +1,4 @@
-import type { ModelSpec } from "@everdict/core";
+import type { ModelSpec } from "@everdict/contracts";
 import { VersionedStore } from "../versioned-store.js";
 
 // The port now lives in @everdict/application-control — re-architecture P2d compat re-export (removed in the P4 sweep).

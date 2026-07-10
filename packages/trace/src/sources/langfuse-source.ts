@@ -1,4 +1,4 @@
-import { type TraceEvent, UpstreamError } from "@everdict/core";
+import { type TraceEvent, UpstreamError } from "@everdict/contracts";
 import type { TraceSource } from "./trace-source.js";
 
 // Langfuse observations — TraceWithFullDetails.observations[] in the GET /api/public/traces/{traceId} response.

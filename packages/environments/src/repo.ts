@@ -5,7 +5,7 @@ import {
   type Environment,
   type RepoSnapshot,
   shq,
-} from "@everdict/core";
+} from "@everdict/contracts";
 
 const WORK = "work";
 const GIT_ID = "git -c user.email=everdict@local -c user.name=everdict";

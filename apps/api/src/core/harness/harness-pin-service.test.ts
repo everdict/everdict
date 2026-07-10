@@ -1,5 +1,5 @@
 import { repinHarnessImages } from "@everdict/application-control";
-import { BadRequestError, type HarnessTemplateSpec } from "@everdict/core";
+import { BadRequestError, type HarnessTemplateSpec } from "@everdict/contracts";
 import { InMemoryHarnessInstanceRegistry, InMemoryHarnessTemplateRegistry } from "@everdict/registry";
 import { beforeEach, describe, expect, it } from "vitest";
 

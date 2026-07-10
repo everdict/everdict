@@ -1,4 +1,4 @@
-import { BadRequestError, type GradeContext, type Grader, type Score } from "@everdict/core";
+import { BadRequestError, type GradeContext, type Grader, type Score } from "@everdict/contracts";
 
 export interface SweBenchConfig {
   testPatch: string; // gold test diff (unified) — adds/modifies FAIL_TO_PASS tests

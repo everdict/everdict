@@ -17,8 +17,8 @@ import {
   type ServiceHarnessSpec,
   type TraceEvent,
   type TrustZone,
-  assertHardenedIsolation,
-} from "@everdict/core";
+} from "@everdict/contracts";
+import { assertHardenedIsolation } from "@everdict/domain";
 import { costGrader, latencyGrader, makeGradersFromEnv, stepsGrader } from "@everdict/graders";
 import type { TraceSource } from "@everdict/trace";
 import type { TopologyRuntime } from "./deploy/topology-runtime.js";

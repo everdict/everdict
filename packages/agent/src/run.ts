@@ -1,3 +1,4 @@
+import { runCase } from "@everdict/application-execution";
 import {
   type AgentJob,
   BadRequestError,
@@ -6,13 +7,11 @@ import {
   type EnvSpec,
   type Environment,
   type Grader,
-  classifyFailure,
   judgeEnv,
-  stageForError,
-} from "@everdict/core";
+} from "@everdict/contracts";
+import { classifyFailure, stageForError } from "@everdict/domain";
 import { DockerDriver, type DriverMount, LocalDriver } from "@everdict/drivers";
 import { OsUseEnvironment, PromptEnvironment, RepoEnvironment } from "@everdict/environments";
-import { runCase } from "@everdict/run-case";
 import { runContextFromEnv } from "./env.js";
 import { makeGradersFromEnv, makeHarness } from "./registry.js";
 

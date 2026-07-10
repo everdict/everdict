@@ -1,4 +1,4 @@
-import { type AgentJob, type CaseResult, InternalError } from "@everdict/core";
+import { type AgentJob, type CaseResult, InternalError } from "@everdict/contracts";
 
 // Result of a one-shot in-container exec (Observable.exec) — the sandbox command's stdout/stderr/exit.
 export interface ExecInContainer {

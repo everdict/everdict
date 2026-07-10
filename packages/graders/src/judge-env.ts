@@ -1,5 +1,5 @@
 import process from "node:process";
-import { type Grader, type GraderSpec, JUDGE_MODEL_ENV, JUDGE_PROVIDER_ENV, type Score } from "@everdict/core";
+import { type Grader, type GraderSpec, JUDGE_MODEL_ENV, JUDGE_PROVIDER_ENV, type Score } from "@everdict/contracts";
 import type { Judge } from "./judge.js";
 import { makeGraders } from "./make-graders.js";
 import { anthropicComplete, modelJudge, openaiComplete } from "./model-judge.js";

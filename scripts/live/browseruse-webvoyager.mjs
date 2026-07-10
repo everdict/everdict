@@ -12,7 +12,7 @@ import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import process from "node:process";
 import { importWebVoyager } from "../../packages/datasets/dist/index.js";
-import { summarizeScorecard } from "../../packages/suite/dist/index.js";
+import { summarizeScorecard } from "../../packages/domain/dist/index.js";
 import { ServiceTopologyBackend } from "../../packages/topology/dist/index.js";
 import { OtelTraceSource } from "../../packages/trace/dist/index.js";
 

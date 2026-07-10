@@ -1,5 +1,5 @@
-import type { AgentJob, CaseResult, GradeContext, JudgeSpec } from "@everdict/core";
-import { RubricSpecSchema } from "@everdict/core";
+import type { AgentJob, CaseResult, GradeContext, JudgeSpec } from "@everdict/contracts";
+import { RubricSpecSchema } from "@everdict/contracts";
 import { InMemoryRubricRegistry } from "@everdict/registry";
 import { describe, expect, it, vi } from "vitest";
 import { defaultJudgeRunner } from "./judge-runner.js";

@@ -19,7 +19,7 @@
   },
   "dependencies": {
     "@everdict/application-control": "workspace:*",
-    "@everdict/core": "workspace:*",
+    "@everdict/contracts": "workspace:*",
     "@everdict/datasets": "workspace:*",
     "@everdict/db": "workspace:*",
     "@everdict/domain": "workspace:*"

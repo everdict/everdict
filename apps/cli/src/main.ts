@@ -11,7 +11,7 @@ import {
   Router,
   buildRegistry,
 } from "@everdict/backends";
-import { type AgentJob, AppError, type GraderSpec, ScorecardSchema, SuiteSchema } from "@everdict/core";
+import { type AgentJob, AppError, type GraderSpec, ScorecardSchema, SuiteSchema } from "@everdict/contracts";
 import { diffScorecards, summarizeScorecard } from "@everdict/domain";
 import { DirectOrchestrator, type Orchestrator, TemporalOrchestrator, runWorker } from "@everdict/orchestrator";
 import {

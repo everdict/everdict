@@ -4,7 +4,7 @@ import {
   type HarnessSpec,
   type ServiceHarnessSpec,
   resolveHarnessInstance,
-} from "@everdict/core";
+} from "@everdict/contracts";
 import type { SqlClient } from "@everdict/db";
 import { PgVersionedStore } from "../pg-versioned-store.js";
 import { asService } from "../registry.js";

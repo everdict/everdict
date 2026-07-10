@@ -1,5 +1,5 @@
 import { createHmac } from "node:crypto";
-import type { ServiceHarnessSpec, TrustZone } from "@everdict/core";
+import type { ServiceHarnessSpec, TrustZone } from "@everdict/contracts";
 import { STORE_DEFS, dependencyConnEnv, dependencyStores } from "./dependencies.js";
 
 // Tenant-isolation model for shared stores.

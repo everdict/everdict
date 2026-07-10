@@ -1,4 +1,4 @@
-import type { ServiceHarnessSpec, TrustZone } from "@everdict/core";
+import type { ServiceHarnessSpec, TrustZone } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { buildSharedStoreIntention, buildTenantIntentions, meshServiceName } from "./consul-intentions.js";
 

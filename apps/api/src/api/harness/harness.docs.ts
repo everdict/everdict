@@ -1,5 +1,6 @@
 import { VersionTagsBodySchema } from "@everdict/application-control";
 import { RepinBodySchema } from "@everdict/application-control";
+import { HarnessInstanceSpecSchema } from "@everdict/contracts";
 import { DeleteHarnessVersionResultSchema } from "@everdict/contracts/wire";
 import { HarnessInstanceResponseSchema } from "@everdict/contracts/wire";
 import { HarnessListResponseSchema } from "@everdict/contracts/wire";
@@ -8,7 +9,6 @@ import { RegisterHarnessResultSchema } from "@everdict/contracts/wire";
 import { RepinResultSchema } from "@everdict/contracts/wire";
 import { ResolvedHarnessResponseSchema } from "@everdict/contracts/wire";
 import { ValidateHarnessResultSchema } from "@everdict/contracts/wire";
-import { HarnessInstanceSpecSchema } from "@everdict/core";
 import type { FastifySchema } from "fastify";
 import { errorResponses, toJsonSchema } from "../openapi.js";
 import { SetVersionTagsResultSchema } from "./response/set-version-tags-result.js";

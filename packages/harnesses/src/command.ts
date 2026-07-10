@@ -6,9 +6,9 @@ import {
   InternalError,
   type RunContext,
   type TraceEvent,
-  flattenEnv,
   shq,
-} from "@everdict/core";
+} from "@everdict/contracts";
+import { flattenEnv } from "@everdict/domain";
 import { type StartedUsageProxy, type TraceSource, buildTraceSource, startUsageProxy } from "@everdict/trace";
 
 export interface CommandHarnessOptions {

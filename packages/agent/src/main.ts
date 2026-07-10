@@ -1,4 +1,4 @@
-import { type AgentJob, AgentJobSchema } from "@everdict/core";
+import { type AgentJob, AgentJobSchema } from "@everdict/contracts";
 import { failureResult, runAgentJob } from "./run.js";
 import { encodeResult } from "./sentinel.js";
 

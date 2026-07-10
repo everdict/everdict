@@ -1,4 +1,4 @@
-import { ConflictError, NotFoundError } from "@everdict/core";
+import { ConflictError, NotFoundError } from "@everdict/contracts";
 import type { SqlClient } from "@everdict/db";
 import { SHARED_TENANT, parseVersionTags, resolveRef, sortVersions, specsEqual } from "./registry.js";
 import type { VersionMeta } from "./versioned-store.js";

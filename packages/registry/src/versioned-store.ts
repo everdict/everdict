@@ -1,4 +1,4 @@
-import { ConflictError, NotFoundError } from "@everdict/core";
+import { ConflictError, NotFoundError } from "@everdict/contracts";
 import { LATEST, SHARED_TENANT, compareVersions, resolveRef, specsEqual } from "./registry.js";
 
 // The VersionMeta list-metadata type now lives in @everdict/application-control — re-architecture P2d compat re-export (removed in the P4 sweep).

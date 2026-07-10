@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { BadRequestError, type ServiceHarnessSpec } from "@everdict/core";
+import { BadRequestError, type ServiceHarnessSpec } from "@everdict/contracts";
 
 // Pin map → deterministic string (sorted keys) — same pins yield the same hash, different pins a different hash.
 function stableStringify(pins: Record<string, string>): string {

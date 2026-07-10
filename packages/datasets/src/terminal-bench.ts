@@ -1,4 +1,4 @@
-import { BadRequestError, type Dataset, DatasetSchema, type EvalCase } from "@everdict/core";
+import { BadRequestError, type Dataset, DatasetSchema, type EvalCase } from "@everdict/contracts";
 import { z } from "zod";
 
 // Terminal-Bench (github.com/laude-institute/terminal-bench) on-ramp: a directory-based agent task → an Everdict

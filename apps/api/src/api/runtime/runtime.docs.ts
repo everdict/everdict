@@ -1,10 +1,10 @@
 import { VersionTagsBodySchema } from "@everdict/application-control";
+import { RuntimeSpecSchema } from "@everdict/contracts";
 import { ProbeRuntimeResultSchema } from "@everdict/contracts/wire";
 import { RegisterRuntimeResultSchema } from "@everdict/contracts/wire";
 import { RuntimeListResponseSchema } from "@everdict/contracts/wire";
 import { RuntimeResponseSchema } from "@everdict/contracts/wire";
 import { ValidateRuntimeResultSchema } from "@everdict/contracts/wire";
-import { RuntimeSpecSchema } from "@everdict/core";
 import type { FastifySchema } from "fastify";
 import { errorResponses, toJsonSchema } from "../openapi.js";
 import { SetVersionTagsResultSchema } from "./response/set-version-tags-result.js";

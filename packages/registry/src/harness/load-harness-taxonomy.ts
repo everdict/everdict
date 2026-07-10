@@ -1,5 +1,5 @@
 import { readFileSync, readdirSync } from "node:fs";
-import { HarnessInstanceSpecSchema, HarnessTemplateSpecSchema } from "@everdict/core";
+import { HarnessInstanceSpecSchema, HarnessTemplateSpecSchema } from "@everdict/contracts";
 import { SHARED_TENANT } from "../registry.js";
 import { type HarnessInstanceRegistry, InMemoryHarnessInstanceRegistry } from "./harness-instance-registry.js";
 import { type HarnessTemplateRegistry, InMemoryHarnessTemplateRegistry } from "./harness-template-registry.js";

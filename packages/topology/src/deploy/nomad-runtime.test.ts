@@ -1,4 +1,4 @@
-import type { ServiceHarnessSpec, TrustZone } from "@everdict/core";
+import type { ServiceHarnessSpec, TrustZone } from "@everdict/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ConsulClient, ServiceIntention } from "./consul-intentions.js";
 import { type NomadExec, type NomadHttp, NomadTopologyRuntime } from "./nomad-runtime.js";

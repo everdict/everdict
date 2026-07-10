@@ -6,7 +6,7 @@ import {
   InternalError,
   type StatusMatch,
   UpstreamError,
-} from "@everdict/core";
+} from "@everdict/contracts";
 
 // front-door request options — method (from the submit verb; defaults to POST) + headers (values interpolated) + timeoutMs (socket idle timeout).
 // timeoutMs: for sync completion, no data flows while the server holds the response, so the socket no-flow cap is effectively the completion deadline.

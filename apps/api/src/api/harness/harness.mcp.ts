@@ -1,7 +1,7 @@
 import { setVersionTags } from "@everdict/application-control";
 import { repinHarnessImages } from "@everdict/application-control";
 import { deleteHarnessVersion, harnessIsPrivate, harnessVisibleTo } from "@everdict/application-control";
-import { HarnessInstanceSpecSchema } from "@everdict/core";
+import { HarnessInstanceSpecSchema } from "@everdict/contracts";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { type McpToolContext, fail, ok, plain, run } from "../mcp-context.js";

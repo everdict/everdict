@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { runAgentJob } from "@everdict/agent";
-import type { AgentJob, CaseResult } from "@everdict/core";
+import type { AgentJob, CaseResult } from "@everdict/contracts";
 import { DockerDriver } from "@everdict/drivers";
 import {
   type Backend,

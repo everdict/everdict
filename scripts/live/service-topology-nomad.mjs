@@ -31,7 +31,7 @@ const BROWSER_IMAGE = process.env.BROWSER_IMAGE ?? "chromedp/headless-shell:late
 // docker bridge gateway: the route from an alloc container to the host's shared store (for injection demo).
 const HOST_GW = process.env.HOST_GW ?? "172.17.0.1";
 
-/** @type {import("@everdict/core").ServiceHarnessSpec} */
+/** @type {import("@everdict/contracts").ServiceHarnessSpec} */
 const SPEC = {
   kind: "service",
   id: "browser-use-langgraph",
@@ -61,7 +61,7 @@ const SPEC = {
   traceSource: { kind: "mlflow", endpoint: MLFLOW_ENDPOINT },
 };
 
-/** @type {import("@everdict/core").AgentJob} */
+/** @type {import("@everdict/contracts").AgentJob} */
 const JOB = {
   harness: { id: SPEC.id, version: SPEC.version },
   evalCase: {

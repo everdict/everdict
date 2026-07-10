@@ -1,5 +1,4 @@
 import { CircuitBreaker, type Dispatcher } from "@everdict/backends";
-import { inMemoryUsageMeter } from "@everdict/billing";
 import {
   type AgentJob,
   BadRequestError,
@@ -10,8 +9,9 @@ import {
   type Scorecard,
   type TraceEvent,
   UpstreamError,
-} from "@everdict/core";
+} from "@everdict/contracts";
 import { InMemoryRunStore, InMemoryScorecardStore, type ScorecardRecord } from "@everdict/db";
+import { inMemoryUsageMeter } from "@everdict/domain";
 import { costGrader, latencyGrader, stepsGrader } from "@everdict/graders";
 import {
   InMemoryDatasetRegistry,

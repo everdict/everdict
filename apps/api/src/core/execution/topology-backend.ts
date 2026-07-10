@@ -1,5 +1,5 @@
 import type { Backend } from "@everdict/backends";
-import { BadRequestError, type RegistryAuth, type RuntimeSpec } from "@everdict/core";
+import { BadRequestError, type RegistryAuth, type RuntimeSpec } from "@everdict/contracts";
 import type { HarnessInstanceRegistry } from "@everdict/registry";
 import {
   type CallbackRendezvous,

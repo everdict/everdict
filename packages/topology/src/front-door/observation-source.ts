@@ -1,4 +1,4 @@
-import { type EnvSnapshot, EnvSnapshotSchema, InternalError, type ObservationDelivery } from "@everdict/core";
+import { type EnvSnapshot, EnvSnapshotSchema, InternalError, type ObservationDelivery } from "@everdict/contracts";
 import { getField, interpolatePath } from "./front-door-driver.js";
 
 // Abstraction for retrieving the observation — the sibling (HOW-observe) of TopologyRuntime (WHERE) / FrontDoorDriver (HOW-drive).

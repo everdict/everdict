@@ -1,4 +1,4 @@
-import { AppError } from "@everdict/core";
+import { AppError } from "@everdict/contracts";
 import { describe, expect, it, vi } from "vitest";
 import { buildTraceSource } from "./sources/build-source.js";
 import { LangfuseTraceSource } from "./sources/langfuse-source.js";

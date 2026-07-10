@@ -9,11 +9,12 @@
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import process from "node:process";
+import { runSuite } from "../../packages/application-control/dist/index.js";
 import { importWebVoyager } from "../../packages/datasets/dist/index.js";
 import { InMemoryScorecardStore } from "../../packages/db/dist/index.js";
+import { summarizeScorecard } from "../../packages/domain/dist/index.js";
 import { makeGraders } from "../../packages/graders/dist/index.js";
 import { InMemoryDatasetRegistry } from "../../packages/registry/dist/index.js";
-import { runSuite, summarizeScorecard } from "../../packages/suite/dist/index.js";
 
 const PY = process.env.BU_PY ?? "python3";
 const DATASET = process.env.DATASET ?? "datasets/webvoyager-mini.jsonl";

@@ -1,4 +1,4 @@
-import { BadRequestError, type RunContext } from "@everdict/core";
+import { BadRequestError, type RunContext } from "@everdict/contracts";
 
 // claude auth env vars (confirmed against the claude binary). collectAuthEnv forwards every one that is present; the
 // effective precedence (subscription token → auth token → API key) is enforced by the claude binary itself, not here.

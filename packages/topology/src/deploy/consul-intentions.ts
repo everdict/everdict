@@ -1,4 +1,4 @@
-import type { ServiceHarnessSpec, TrustZone } from "@everdict/core";
+import type { ServiceHarnessSpec, TrustZone } from "@everdict/contracts";
 import { sanitizeIdent } from "./store-binding.js";
 
 // Nomad's network isolation = Consul Connect intentions (service-identity based). The Nomad counterpart of K8s NetworkPolicy.

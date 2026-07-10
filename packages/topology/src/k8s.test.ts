@@ -1,4 +1,4 @@
-import type { ServiceHarnessSpec, TrustZone } from "@everdict/core";
+import type { ServiceHarnessSpec, TrustZone } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { K8sTopologyRuntime } from "./deploy/k8s-runtime.js";
 import {

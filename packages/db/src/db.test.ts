@@ -1,4 +1,4 @@
-import type { CaseResult, EvalCase } from "@everdict/core";
+import type { CaseResult, EvalCase } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { PgCallbackStore } from "./activity/callback-store.js";
 import type { SqlClient } from "./client.js";

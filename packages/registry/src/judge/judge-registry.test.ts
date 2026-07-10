@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ConflictError, type JudgeSpec, JudgeSpecSchema, NotFoundError } from "@everdict/core";
+import { ConflictError, type JudgeSpec, JudgeSpecSchema, NotFoundError } from "@everdict/contracts";
 import type { SqlClient } from "@everdict/db";
 import { describe, expect, it } from "vitest";
 import { SHARED_TENANT } from "../registry.js";

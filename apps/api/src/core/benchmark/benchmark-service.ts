@@ -1,4 +1,9 @@
-import { BadRequestError, type DatasetOrigin, type DatasetProvenance, type DatasetSourceRef } from "@everdict/core";
+import {
+  BadRequestError,
+  type DatasetOrigin,
+  type DatasetProvenance,
+  type DatasetSourceRef,
+} from "@everdict/contracts";
 import {
   type BenchmarkAdapterSpec,
   BenchmarkAdapterSpecSchema,

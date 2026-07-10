@@ -1,4 +1,4 @@
-import { AppError, type TraceEvent } from "@everdict/core";
+import { AppError, type TraceEvent } from "@everdict/contracts";
 import { describe, expect, it, vi } from "vitest";
 import { buildTraceSink } from "./build-sink.js";
 import { LangfuseTraceSink, chunkLangfuseEvents, langfuseBatch } from "./langfuse-sink.js";

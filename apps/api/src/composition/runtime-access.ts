@@ -2,7 +2,7 @@ import { recoverInterrupted } from "@everdict/application-control";
 import type { RunService } from "@everdict/application-control";
 import type { ScorecardService } from "@everdict/application-control";
 import { type Backend, isObservable, isRecoverable, isScreenCapturable, isShellable } from "@everdict/backends";
-import type { CaseResult, RegistryAuth, RuntimeSpec } from "@everdict/core";
+import type { CaseResult, RegistryAuth, RuntimeSpec } from "@everdict/contracts";
 import type { RunStore, ScorecardStore } from "@everdict/db";
 import type { RuntimeRegistry } from "@everdict/registry";
 

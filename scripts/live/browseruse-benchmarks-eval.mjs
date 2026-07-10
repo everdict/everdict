@@ -21,11 +21,13 @@
 //        ONLY=webvoyager-2025,online-mind2web,bu-bench-v1-open (comma list to restrict).
 import { readFileSync } from "node:fs";
 import process from "node:process";
-import { resolveHarnessInstance, resolveHarnessSecrets } from "../../packages/core/dist/index.js";
+import { runSuite } from "../../packages/application-control/dist/index.js";
+import { resolveHarnessInstance } from "../../packages/contracts/dist/index.js";
 import { BenchmarkAdapterSpecSchema, importFromSpec } from "../../packages/datasets/dist/index.js";
 import { InMemoryScorecardStore } from "../../packages/db/dist/index.js";
+import { resolveHarnessSecrets } from "../../packages/domain/dist/index.js";
+import { summarizeScorecard } from "../../packages/domain/dist/index.js";
 import { runLeasedJob } from "../../packages/runner-core/dist/index.js";
-import { runSuite, summarizeScorecard } from "../../packages/suite/dist/index.js";
 
 const MODEL = process.env.MODEL ?? "gpt-5.4-mini";
 const JUDGE_MODEL = process.env.JUDGE_MODEL ?? "gpt-5.4-mini";

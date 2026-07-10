@@ -1,5 +1,5 @@
 import { readFileSync, readdirSync } from "node:fs";
-import { ModelSpecSchema } from "@everdict/core";
+import { ModelSpecSchema } from "@everdict/contracts";
 import { SHARED_TENANT } from "../registry.js";
 import { InMemoryModelRegistry, type ModelRegistry } from "./model-registry.js";
 

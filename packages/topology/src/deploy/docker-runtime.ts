@@ -3,8 +3,8 @@ import {
   type ServiceHarnessSpec,
   type ServiceReadiness,
   UpstreamError,
-  flattenEnv,
-} from "@everdict/core";
+} from "@everdict/contracts";
+import { flattenEnv } from "@everdict/domain";
 import { dependencyConnEnv, dependencyStores } from "./dependencies.js";
 import { type Docker, dockerCli } from "./docker.js";
 import type { TargetEnvHandle, TopologyHandle, TopologyRuntime } from "./topology-runtime.js";

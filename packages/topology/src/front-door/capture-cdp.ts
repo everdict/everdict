@@ -1,4 +1,4 @@
-import { UpstreamError } from "@everdict/core";
+import { UpstreamError } from "@everdict/contracts";
 
 // Live browser frame via CDP (observability ⑦). Given a running Chrome DevTools Protocol HTTP base
 // (e.g. http://host:9222 — the same endpoint the topology runtime discovers per case), find a page

@@ -1,4 +1,4 @@
-import type { Scorecard } from "@everdict/core";
+import type { Scorecard } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import type { SqlClient } from "../client.js";
 import { PgScorecardStore } from "./pg-scorecard-store.js";

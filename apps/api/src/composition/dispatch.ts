@@ -7,8 +7,9 @@ import {
   type Scheduler,
   buildRuntimeBackend,
 } from "@everdict/backends";
-import { type RegistryAuth, type RuntimeSpec, classifyFailure } from "@everdict/core";
+import type { RegistryAuth, RuntimeSpec } from "@everdict/contracts";
 import type { CallbackStore, RunnerStore, SecretStore, WorkspaceSettingsStore } from "@everdict/db";
+import { classifyFailure } from "@everdict/domain";
 import type { HarnessInstanceRegistry, ModelRegistry, RuntimeRegistry } from "@everdict/registry";
 import { ModelResolvingDispatcher } from "../core/execution/model-resolving-dispatcher.js";
 import { RuntimeDispatcher } from "../core/execution/runtime-dispatcher.js";

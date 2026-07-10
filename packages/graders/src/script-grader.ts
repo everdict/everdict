@@ -7,7 +7,7 @@ import {
   ScoreSchema,
   UpstreamError,
   toScores,
-} from "@everdict/core";
+} from "@everdict/contracts";
 
 export interface ScriptGraderConfig {
   language: "python" | "node"; // interpreter inside the grading compute (python3 / node)

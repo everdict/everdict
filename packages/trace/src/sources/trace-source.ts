@@ -1,4 +1,4 @@
-import type { TraceEvent } from "@everdict/core";
+import type { TraceEvent } from "@everdict/contracts";
 
 // The source contract now lives in @everdict/contracts — re-architecture P2 compat re-export
 // (removed in the P4 sweep). The Span IR + GenAI mapping below are parsing internals and stay here.

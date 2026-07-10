@@ -1,4 +1,4 @@
-import { type RuntimeSpec, RuntimeSpecSchema } from "@everdict/core";
+import { type RuntimeSpec, RuntimeSpecSchema } from "@everdict/contracts";
 import type { SqlClient } from "@everdict/db";
 import { PgVersionedStore } from "../pg-versioned-store.js";
 import type { RuntimeListEntry, RuntimeRegistry } from "./runtime-registry.js";

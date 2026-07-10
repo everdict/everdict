@@ -1,4 +1,4 @@
-import { ModelSpecSchema } from "@everdict/core";
+import { ModelSpecSchema } from "@everdict/contracts";
 import type { FastifyInstance } from "fastify";
 import { type ServerDeps, gate, resolvePrincipal, sendError, zodIssues } from "../route-context.js";
 import { modelDocs } from "./model.docs.js";

@@ -1,4 +1,4 @@
-import { type TraceEvent, UpstreamError } from "@everdict/core";
+import { type TraceEvent, UpstreamError } from "@everdict/contracts";
 import { type Span, type TraceSource, spansToTraceEvents } from "./trace-source.js";
 
 // OTLP span (attributes are a {key,value} array) → normalized Span.

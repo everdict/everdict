@@ -1,4 +1,4 @@
-import { type AgentJob, InternalError } from "@everdict/core";
+import { type AgentJob, InternalError } from "@everdict/contracts";
 import { DockerDriver, LocalDriver } from "@everdict/drivers";
 import { describe, expect, it } from "vitest";
 import { failureResult, resolveMeterUsage, runAgentJob } from "./run.js";

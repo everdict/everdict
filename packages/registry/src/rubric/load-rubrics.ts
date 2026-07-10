@@ -1,5 +1,5 @@
 import { readFileSync, readdirSync } from "node:fs";
-import { RubricSpecSchema } from "@everdict/core";
+import { RubricSpecSchema } from "@everdict/contracts";
 import { SHARED_TENANT } from "../registry.js";
 import { InMemoryRubricRegistry, type RubricRegistry } from "./rubric-registry.js";
 

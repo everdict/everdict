@@ -18,13 +18,11 @@ const ALLOWLIST = new Set([
   "agent",
   "application-execution", // L2a agent-safe use-cases (imports contracts + domain only — enforced below)
   "contracts",
-  "core", // compat shell over contracts + domain (P1e); removed from the cone in the P4 sweep
   "domain", // L1 pure rules (imports contracts only — enforced below)
   "drivers",
   "environments",
   "graders",
   "harnesses",
-  "run-case", // compat shell over application-execution (P2a); removed from the cone in the P4 sweep
   "trace",
 ]);
 
@@ -36,10 +34,8 @@ const FORBIDDEN = new Set([
   "@everdict/registry",
   "@everdict/backends",
   "@everdict/orchestrator",
-  "@everdict/suite",
   "@everdict/topology",
   "@everdict/sdk",
-  "@everdict/billing",
   "@everdict/datasets",
   "@everdict/storage",
   "@everdict/self-hosted-runner",

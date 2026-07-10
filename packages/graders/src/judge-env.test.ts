@@ -1,4 +1,4 @@
-import { type GradeContext, type TraceEvent, toScores } from "@everdict/core";
+import { type GradeContext, type TraceEvent, toScores } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { judgeFromEnv, makeGradersFromEnv } from "./judge-env.js";
 

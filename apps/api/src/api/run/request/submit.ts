@@ -1,4 +1,4 @@
-import { EvalCaseSchema, JudgeRunConfigSchema } from "@everdict/core";
+import { EvalCaseSchema, JudgeRunConfigSchema } from "@everdict/contracts";
 import { z } from "zod";
 
 export const SubmitBodySchema = z.object({

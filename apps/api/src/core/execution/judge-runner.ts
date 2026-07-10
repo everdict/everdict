@@ -10,8 +10,8 @@ import type {
   JudgeSpec,
   Placement,
   Score,
-} from "@everdict/core";
-import { toScores } from "@everdict/core";
+} from "@everdict/contracts";
+import { toScores } from "@everdict/contracts";
 import {
   type JudgeCompletion,
   JudgeGrader,

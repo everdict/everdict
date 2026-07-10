@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { TopologyDependency } from "@everdict/core";
+import type { TopologyDependency } from "@everdict/contracts";
 
 // per-run keys — identifiers that logically isolate a shared store per case.
 export interface RunKeys {

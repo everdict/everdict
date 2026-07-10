@@ -1,4 +1,4 @@
-import { BadRequestError, DatasetSchema } from "@everdict/core";
+import { BadRequestError, DatasetSchema } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { harborTaskToCase, harborToDataset } from "./harbor.js";
 

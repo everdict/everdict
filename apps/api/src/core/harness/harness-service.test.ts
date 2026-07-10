@@ -6,7 +6,7 @@ import {
   type HarnessInstanceSpec,
   type HarnessTemplateSpec,
   NotFoundError,
-} from "@everdict/core";
+} from "@everdict/contracts";
 import { InMemoryHarnessInstanceRegistry, InMemoryHarnessTemplateRegistry } from "@everdict/registry";
 import { beforeEach, describe, expect, it } from "vitest";
 

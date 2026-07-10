@@ -1,5 +1,5 @@
 import type { Dispatcher } from "@everdict/backends";
-import type { AgentJob, CaseResult } from "@everdict/core";
+import type { AgentJob, CaseResult } from "@everdict/contracts";
 import { Client, Connection } from "@temporalio/client";
 import { TASK_QUEUE } from "./constants.js";
 

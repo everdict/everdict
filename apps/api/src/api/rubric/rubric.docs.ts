@@ -1,9 +1,9 @@
 import { VersionTagsBodySchema } from "@everdict/application-control";
+import { RubricSpecSchema } from "@everdict/contracts";
 import { RegisterRubricResultSchema } from "@everdict/contracts/wire";
 import { RubricListResponseSchema } from "@everdict/contracts/wire";
 import { RubricResponseSchema } from "@everdict/contracts/wire";
 import { ValidateRubricResultSchema } from "@everdict/contracts/wire";
-import { RubricSpecSchema } from "@everdict/core";
 import type { FastifySchema } from "fastify";
 import { errorResponses, toJsonSchema } from "../openapi.js";
 import { SetVersionTagsResultSchema } from "./response/set-version-tags-result.js";

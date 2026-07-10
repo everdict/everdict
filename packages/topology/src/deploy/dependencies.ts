@@ -1,4 +1,4 @@
-import type { ServiceHarnessSpec } from "@everdict/core";
+import type { ServiceHarnessSpec } from "@everdict/contracts";
 
 // Standard image/port/boot-env for shared stores (spec.dependencies[]). When the whole topology is brought up
 // (provisionDependencies) the runtime deploys PG/Redis alongside the services from these defs and auto-injects the

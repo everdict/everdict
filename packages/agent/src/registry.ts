@@ -1,4 +1,4 @@
-import { BadRequestError, type EvaluableHarness, type HarnessSpec } from "@everdict/core";
+import { BadRequestError, type EvaluableHarness, type HarnessSpec } from "@everdict/contracts";
 import { ClaudeCodeHarness, CommandHarness, ScriptedHarness } from "@everdict/harnesses";
 
 // The grader spec→instance mapping is owned by @everdict/graders (re-exported here).

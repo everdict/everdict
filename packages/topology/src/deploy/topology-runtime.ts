@@ -1,4 +1,4 @@
-import type { EnvSnapshot, ServiceHarnessSpec, TrustZone } from "@everdict/core";
+import type { EnvSnapshot, ServiceHarnessSpec, TrustZone } from "@everdict/contracts";
 
 // warm topology handle: service name → base URL (front-door etc.).
 export interface TopologyHandle {

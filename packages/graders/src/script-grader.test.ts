@@ -1,4 +1,4 @@
-import { AppError, type ComputeHandle, type ExecOpts, type GradeContext } from "@everdict/core";
+import { AppError, type ComputeHandle, type ExecOpts, type GradeContext } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { makeGraders } from "./make-graders.js";
 import { ScriptGrader } from "./script-grader.js";

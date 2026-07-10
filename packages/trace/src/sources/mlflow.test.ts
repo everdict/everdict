@@ -1,4 +1,4 @@
-import { AppError } from "@everdict/core";
+import { AppError } from "@everdict/contracts";
 import { describe, expect, it, vi } from "vitest";
 import { MlflowTraceSource, parseMlflowTrace } from "./mlflow.js";
 

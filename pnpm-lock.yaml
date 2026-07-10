@@ -38,15 +38,9 @@ importers:
       '@everdict/backends':
         specifier: workspace:*
         version: link:../../packages/backends
-      '@everdict/billing':
-        specifier: workspace:*
-        version: link:../../packages/billing
       '@everdict/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
-      '@everdict/core':
-        specifier: workspace:*
-        version: link:../../packages/core
       '@everdict/datasets':
         specifier: workspace:*
         version: link:../../packages/datasets
@@ -65,9 +59,6 @@ importers:
       '@everdict/storage':
         specifier: workspace:*
         version: link:../../packages/storage
-      '@everdict/suite':
-        specifier: workspace:*
-        version: link:../../packages/suite
       '@everdict/topology':
         specifier: workspace:*
         version: link:../../packages/topology
@@ -114,9 +105,9 @@ importers:
       '@everdict/backends':
         specifier: workspace:*
         version: link:../../packages/backends
-      '@everdict/core':
+      '@everdict/contracts':
         specifier: workspace:*
-        version: link:../../packages/core
+        version: link:../../packages/contracts
       '@everdict/domain':
         specifier: workspace:*
         version: link:../../packages/domain
@@ -245,12 +236,15 @@ importers:
 
   packages/agent:
     dependencies:
+      '@everdict/application-execution':
+        specifier: workspace:*
+        version: link:../application-execution
       '@everdict/contracts':
         specifier: workspace:*
         version: link:../contracts
-      '@everdict/core':
+      '@everdict/domain':
         specifier: workspace:*
-        version: link:../core
+        version: link:../domain
       '@everdict/drivers':
         specifier: workspace:*
         version: link:../drivers
@@ -263,9 +257,6 @@ importers:
       '@everdict/harnesses':
         specifier: workspace:*
         version: link:../harnesses
-      '@everdict/run-case':
-        specifier: workspace:*
-        version: link:../run-case
 
   packages/application-control:
     dependencies:
@@ -293,9 +284,9 @@ importers:
 
   packages/auth:
     dependencies:
-      '@everdict/core':
+      '@everdict/contracts':
         specifier: workspace:*
-        version: link:../core
+        version: link:../contracts
       '@everdict/db':
         specifier: workspace:*
         version: link:../db
@@ -314,15 +305,9 @@ importers:
       '@everdict/application-control':
         specifier: workspace:*
         version: link:../application-control
-      '@everdict/billing':
-        specifier: workspace:*
-        version: link:../billing
       '@everdict/contracts':
         specifier: workspace:*
         version: link:../contracts
-      '@everdict/core':
-        specifier: workspace:*
-        version: link:../core
       '@everdict/domain':
         specifier: workspace:*
         version: link:../domain
@@ -333,35 +318,17 @@ importers:
         specifier: ^3.24.1
         version: 3.25.76
 
-  packages/billing:
-    dependencies:
-      '@everdict/core':
-        specifier: workspace:*
-        version: link:../core
-      '@everdict/domain':
-        specifier: workspace:*
-        version: link:../domain
-
   packages/contracts:
     dependencies:
       zod:
         specifier: ^3.24.1
         version: 3.25.76
 
-  packages/core:
+  packages/datasets:
     dependencies:
       '@everdict/contracts':
         specifier: workspace:*
         version: link:../contracts
-      '@everdict/domain':
-        specifier: workspace:*
-        version: link:../domain
-
-  packages/datasets:
-    dependencies:
-      '@everdict/core':
-        specifier: workspace:*
-        version: link:../core
       zod:
         specifier: ^3.24.1
         version: 3.25.76
@@ -374,9 +341,6 @@ importers:
       '@everdict/contracts':
         specifier: workspace:*
         version: link:../contracts
-      '@everdict/core':
-        specifier: workspace:*
-        version: link:../core
       '@everdict/domain':
         specifier: workspace:*
         version: link:../domain
@@ -399,30 +363,36 @@ importers:
 
   packages/drivers:
     dependencies:
-      '@everdict/core':
+      '@everdict/contracts':
         specifier: workspace:*
-        version: link:../core
+        version: link:../contracts
+      '@everdict/domain':
+        specifier: workspace:*
+        version: link:../domain
 
   packages/environments:
     dependencies:
-      '@everdict/core':
+      '@everdict/contracts':
         specifier: workspace:*
-        version: link:../core
+        version: link:../contracts
 
   packages/graders:
     dependencies:
       '@everdict/application-execution':
         specifier: workspace:*
         version: link:../application-execution
-      '@everdict/core':
+      '@everdict/contracts':
         specifier: workspace:*
-        version: link:../core
+        version: link:../contracts
 
   packages/harnesses:
     dependencies:
-      '@everdict/core':
+      '@everdict/contracts':
         specifier: workspace:*
-        version: link:../core
+        version: link:../contracts
+      '@everdict/domain':
+        specifier: workspace:*
+        version: link:../domain
       '@everdict/trace':
         specifier: workspace:*
         version: link:../trace
@@ -435,9 +405,9 @@ importers:
       '@everdict/backends':
         specifier: workspace:*
         version: link:../backends
-      '@everdict/core':
+      '@everdict/contracts':
         specifier: workspace:*
-        version: link:../core
+        version: link:../contracts
       '@temporalio/activity':
         specifier: ^1.18.1
         version: 1.18.1
@@ -456,9 +426,9 @@ importers:
       '@everdict/application-control':
         specifier: workspace:*
         version: link:../application-control
-      '@everdict/core':
+      '@everdict/contracts':
         specifier: workspace:*
-        version: link:../core
+        version: link:../contracts
       '@everdict/datasets':
         specifier: workspace:*
         version: link:../datasets
@@ -469,27 +439,6 @@ importers:
         specifier: workspace:*
         version: link:../domain
 
-  packages/run-case:
-    dependencies:
-      '@everdict/application-execution':
-        specifier: workspace:*
-        version: link:../application-execution
-      '@everdict/contracts':
-        specifier: workspace:*
-        version: link:../contracts
-      '@everdict/drivers':
-        specifier: workspace:*
-        version: link:../drivers
-      '@everdict/environments':
-        specifier: workspace:*
-        version: link:../environments
-      '@everdict/graders':
-        specifier: workspace:*
-        version: link:../graders
-      '@everdict/harnesses':
-        specifier: workspace:*
-        version: link:../harnesses
-
   packages/sdk: {}
 
   packages/self-hosted-runner:
@@ -497,9 +446,12 @@ importers:
       '@everdict/agent':
         specifier: workspace:*
         version: link:../agent
-      '@everdict/core':
+      '@everdict/contracts':
         specifier: workspace:*
-        version: link:../core
+        version: link:../contracts
+      '@everdict/domain':
+        specifier: workspace:*
+        version: link:../domain
       '@everdict/topology':
         specifier: workspace:*
         version: link:../topology
@@ -521,21 +473,9 @@ importers:
       '@everdict/application-control':
         specifier: workspace:*
         version: link:../application-control
-      '@everdict/core':
+      '@everdict/contracts':
         specifier: workspace:*
-        version: link:../core
-
-  packages/suite:
-    dependencies:
-      '@everdict/application-control':
-        specifier: workspace:*
-        version: link:../application-control
-      '@everdict/core':
-        specifier: workspace:*
-        version: link:../core
-      '@everdict/domain':
-        specifier: workspace:*
-        version: link:../domain
+        version: link:../contracts
 
   packages/topology:
     dependencies:
@@ -545,9 +485,12 @@ importers:
       '@everdict/backends':
         specifier: workspace:*
         version: link:../backends
-      '@everdict/core':
+      '@everdict/contracts':
         specifier: workspace:*
-        version: link:../core
+        version: link:../contracts
+      '@everdict/domain':
+        specifier: workspace:*
+        version: link:../domain
       '@everdict/graders':
         specifier: workspace:*
         version: link:../graders
@@ -560,9 +503,6 @@ importers:
       '@everdict/contracts':
         specifier: workspace:*
         version: link:../contracts
-      '@everdict/core':
-        specifier: workspace:*
-        version: link:../core
 
 packages:
 

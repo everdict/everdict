@@ -1,5 +1,5 @@
 import { ImageRegistryService } from "@everdict/application-control";
-import { BadRequestError, NotFoundError } from "@everdict/core";
+import { BadRequestError, NotFoundError } from "@everdict/contracts";
 import { InMemoryWorkspaceSettingsStore } from "@everdict/db";
 import { describe, expect, it } from "vitest";
 

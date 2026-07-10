@@ -1,4 +1,4 @@
-import type { AgentJob, CaseResult } from "@everdict/core";
+import type { AgentJob, CaseResult } from "@everdict/contracts";
 import { continueAsNew, proxyActivities, sleep, workflowInfo } from "@temporalio/workflow";
 import type { Activities } from "./types.js";
 
