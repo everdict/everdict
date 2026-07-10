@@ -1,6 +1,7 @@
 import { InMemoryNotificationStore } from "@everdict/db";
 import type { RunRecord, WorkspaceSettings } from "@everdict/db";
 import { describe, expect, it } from "vitest";
+import { mattermostHttpClient } from "../../infrastructure/mattermost/mattermost-client.js";
 import { NotificationService } from "./notification-service.js";
 
 const runRec = (status: "succeeded" | "failed"): RunRecord => ({
@@ -43,7 +44,7 @@ function build(opts: {
     settingsFor: async () => (opts.mattermost !== undefined ? { mattermost: opts.mattermost } : {}),
     secretsFor: async () => opts.secrets ?? {},
     feed,
-    fetch: opts.fetchImpl ?? recording,
+    mattermost: mattermostHttpClient(opts.fetchImpl ?? recording),
     ...(opts.apiPublicUrl ? { apiPublicUrl: opts.apiPublicUrl } : {}),
   });
   return { svc, calls, feed };

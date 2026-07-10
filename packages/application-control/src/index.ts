@@ -92,3 +92,5 @@ export {
   type VersionTaggable,
   VersionTagsBodySchema,
 } from "./version-tag/version-tag-service.js";
+export type { MattermostClient, MattermostPost } from "./ports/mattermost-client.js";
+export { NotificationService, type NotificationServiceDeps } from "./notification/notification-service.js";

@@ -151,6 +151,7 @@ import { TemporalBatchDriver } from "./core/scorecard/temporal-batch-driver.js";
 import { TraceSinkService } from "./core/trace-sink/trace-sink-service.js";
 import { ViewService } from "./core/view/view-service.js";
 import { WorkspaceService } from "./core/workspace/workspace-service.js";
+import { mattermostHttpClient } from "./infrastructure/mattermost/mattermost-client.js";
 import { buildServer } from "./server.js";
 
 // Multi-tenant control-plane server. tenant is derived from the Bearer API key (dev header fallback if absent).
@@ -863,6 +864,7 @@ function buildIntegrations(deps: {
   // Completion notifications: when workspace notify settings exist (Mattermost connection + channel), post run/scorecard completion to the channel (consumer slice).
   const notificationService = new NotificationService({
     settingsFor: (tenant) => settingsStore.get(tenant),
+    mattermost: mattermostHttpClient(), // outbound channel posting adapter (fetch)
     // Workspace Mattermost (bot token) — resolve settings.mattermost.botTokenSecretName from shared secrets.
     secretsFor: runtimeSecretsFor,
     feed: notificationStore, // personal notification feed (bell inbox) — docs/architecture/notifications.md
