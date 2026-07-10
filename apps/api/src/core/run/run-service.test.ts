@@ -578,3 +578,51 @@ describe("RunService.screen — browser (topology) live frame (observability ⑦
     expect(out).toMatchObject({ supported: true, dataUrl: undefined });
   });
 });
+
+describe("RunService — terminal writes are domain-guarded (first terminal write wins)", () => {
+  it("a late tracker failure does not overwrite a run that was already settled by adoption", async () => {
+    // Given a dispatch that hangs until we release it
+    let release: (() => void) | undefined;
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    const slowFailDispatcher: Dispatcher = {
+      async dispatch() {
+        await gate;
+        throw new Error("late boom");
+      },
+    };
+    const store = new InMemoryRunStore();
+    const svc = new RunService({ dispatcher: slowFailDispatcher, store, newId: ids });
+    const rec = await svc.submit({ tenant: "acme", harness: { id: "scripted", version: "0" }, case: CASE });
+
+    // When boot-recovery adoption settles the run first…
+    const adopted = resultFor({ evalCase: CASE, harness: rec.harness, tenant: "acme" } as AgentJob);
+    await svc.resume((await store.get(rec.id)) as RunRecord, adopted);
+    // …and the in-flight tracker later fails
+    release?.();
+    await flush();
+
+    // Then the adopted success is preserved — the late failure is a no-op, not a blind overwrite
+    const final = await store.get(rec.id);
+    expect(final?.status).toBe("succeeded");
+    expect(final?.result).toEqual(adopted);
+    expect(final?.error).toBeUndefined();
+  });
+
+  it("adoption refuses to rewrite an already-terminal run (resume returns false)", async () => {
+    const store = new InMemoryRunStore();
+    const svc = new RunService({ dispatcher: okDispatcher, store, newId: ids });
+    const rec = await svc.submit({ tenant: "acme", harness: { id: "scripted", version: "0" }, case: CASE });
+    await flush(); // normal completion → succeeded
+
+    const before = await store.get(rec.id);
+    const late = resultFor(
+      { evalCase: CASE, harness: { id: "scripted", version: "0" }, tenant: "acme" } as AgentJob,
+      9,
+    );
+    const outcome = await svc.resume(before as RunRecord, late);
+    expect(outcome).toBe(false);
+    expect(await store.get(rec.id)).toEqual(before); // untouched
+  });
+});

@@ -16,6 +16,7 @@ import { type ArtifactStore, offloadSnapshot } from "@everdict/storage";
 import type { TraceSource, TraceSourceConfig } from "@everdict/trace";
 import { assertRuntimeTarget } from "../../common/require-runtime.js";
 import { executeCase } from "../execution/execute-case.js";
+import { Run, type RunTransition } from "./run.js";
 
 // Where a running case's platform trace is accumulating (derived on read; docs/architecture/live-observability.md).
 export interface LiveTraceRef {
@@ -124,23 +125,18 @@ export class RunService {
       : input;
     // The placed runtime (work-queue axis) — an explicit runtime or the case's own placement.target. If absent, the default backend (unset).
     const placedRuntime = input.runtime ?? input.case.placement?.target;
-    const ts = this.now();
-    const record: RunRecord = {
+    // Record assembly is the domain's job (Run.newQueued) — the service only orchestrates. The persisted
+    // (placement-injected) case body is boot recovery's re-dispatch basis (mig 0051).
+    const record: RunRecord = Run.newQueued({
       id: this.newId(),
       tenant: effective.tenant,
       harness: effective.harness,
-      caseId: effective.case.id,
-      status: "queued",
-      ...(effective.trigger ? { trigger: effective.trigger } : {}), // activity-view source axis (web|mcp|api…)
-      // Executor stamp — notification-feed recipient (notifications N2). Same pattern as scorecard createdBy (0035).
-      ...(effective.submittedBy ? { createdBy: effective.submittedBy } : {}),
+      evalCase: effective.case,
       ...(placedRuntime ? { runtime: placedRuntime } : {}),
-      // Persist the (placement-injected) case body — boot recovery's re-dispatch basis (mig 0051). Without it a
-      // CP restart used to tombstone queued/running standalone runs, since the inline case lived only in memory.
-      caseSpec: effective.case,
-      createdAt: ts,
-      updatedAt: ts,
-    };
+      ...(effective.trigger ? { trigger: effective.trigger } : {}),
+      ...(effective.submittedBy ? { submittedBy: effective.submittedBy } : {}),
+      now: this.now(),
+    });
     await this.deps.store.create(record);
     void this.track(record.id, effective); // fire-and-track
     return record;
@@ -249,16 +245,19 @@ export class RunService {
   // job (settle it directly — zero re-run); else re-drive from the persisted caseSpec; legacy records without
   // one return false and keep the tombstone path. docs/architecture/batch-resilience.md
   async resume(record: RunRecord, adopted?: CaseResult): Promise<boolean> {
+    const run = Run.from(record);
     if (adopted) {
-      await this.deps.store.update(record.id, { status: "succeeded", result: adopted, updatedAt: this.now() });
+      if (!run.canAdopt()) return false; // already settled — never rewrite a terminal record
+      await this.deps.store.update(record.id, run.adopt(adopted, this.now()));
       return true;
     }
-    if (!record.caseSpec) return false;
-    await this.deps.store.update(record.id, { status: "running", updatedAt: this.now() });
+    const spec = record.caseSpec; // local narrow — canRedispatch() already requires it
+    if (!run.canRedispatch() || !spec) return false;
+    await this.deps.store.update(record.id, run.redispatch(this.now()));
     void this.track(record.id, {
       tenant: record.tenant,
       harness: record.harness,
-      case: record.caseSpec, // placement.target was injected before persisting — routes to the same runtime
+      case: spec, // placement.target was injected before persisting — routes to the same runtime
       ...(record.createdBy ? { submittedBy: record.createdBy } : {}),
       ...(record.trigger ? { trigger: record.trigger } : {}),
     });
@@ -312,13 +311,13 @@ export class RunService {
           result.snapshot = await offloadSnapshot(result.snapshot, this.deps.artifacts, `runs/${id}.png`);
         } catch {}
       }
-      await this.deps.store.update(id, { status: "succeeded", result, updatedAt: this.now() });
+      await this.finalize(id, (run) => run.succeed(result, this.now()));
     } catch (err) {
       const error =
         err instanceof AppError
           ? { code: err.code, message: err.message }
           : { code: "INTERNAL", message: err instanceof Error ? err.message : String(err) };
-      await this.deps.store.update(id, { status: "failed", error, updatedAt: this.now() });
+      await this.finalize(id, (run) => run.fail(error, this.now()));
     }
     // Completion notification (Mattermost etc.) — with the latest record. Failure is independent of the run result (swallow). Independent of the webhook.
     if (this.deps.onComplete) {
@@ -326,6 +325,17 @@ export class RunService {
       if (rec) await this.deps.onComplete(input.tenant, rec).catch(() => {});
     }
     if (input.webhookUrl) await this.fireWebhook(input.webhookUrl, id);
+  }
+
+  // Terminal writes go through the domain guard: read the current record and skip when it is already settled
+  // (first terminal write wins — a raced boot-recovery adoption must not be overwritten by a late tracker).
+  // Read-then-update is not atomic, but the tracker and boot recovery share one control-plane process.
+  private async finalize(id: string, outcome: (run: Run) => RunTransition): Promise<void> {
+    const current = await this.deps.store.get(id);
+    if (!current) return;
+    const run = Run.from(current);
+    if (run.isTerminal()) return;
+    await this.deps.store.update(id, outcome(run));
   }
 
   private async fireWebhook(url: string, id: string): Promise<void> {
