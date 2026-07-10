@@ -2,8 +2,15 @@
 
 > **Status: APPROVED (2026-07-10, maintainer) — migration in progress. Constraint: behavior-preserving
 > at every phase (compat re-exports, wire bytes unchanged, full gates + boot green per commit).**
-> Open questions resolved: §8-1 two packages(proposed 채택) · §8-2 wire v1 네임스페이스는 defer ·
-> §8-3 self-hosted-runner 는 자체 패키지 유지(proposed 채택) · §8-4 기존 스코프명은 P4 스윕까지 유지.**
+> Open questions resolved: §8-1 two packages (proposed, adopted) · §8-2 wire v1 namespace deferred ·
+> §8-3 self-hosted-runner stays its own package (proposed, adopted) · §8-4 existing scope names kept until the P4 sweep.
+>
+> **Progress:** P0 SHIPPED (`764ba6a`·`fcdbc1f`·`de95544` — @everdict/contracts [core verbatim + sentinel
+> codec + records + wire DTOs] + agent-cone CI guard). P1 SHIPPED (`16f6b17`→`21be477` — @everdict/domain:
+> suite semantics · auth matrix + billing · 4 aggregates · placement policies · kernel rules out of
+> contracts [cone invariant: domain deps == {contracts}] · registry version algebra · served computed
+> fields [scorecard verdict/casePass/headline · harness imageClasses · github-app installedAccounts] with
+> the web caseVerdict/classifyImageRef/sameHost mirrors and the SDK headline mirror DELETED). Next: P2.
 > Maintainer directive: interfaces (CLI / web / API / desktop) are delivery mechanisms; the domain is
 > singular. Today domain rules are fragmented across packages and re-implemented inside interfaces. This
 > document is the ground-up target: layer model, package/folder teardown, port design, DTO boundaries,
