@@ -33,13 +33,13 @@
 > Pick-reverse / run-style split; zod v3/v4 coexist — z.unknown() and z.default() optionality quirks
 > pinned; spec discriminated unions stay honest local views]; 138 wire type exports; enforcement live:
 > check-web-imports.mjs [type-only, contracts-only] + the four layer pins in check-agent-cone.mjs.
-> REMAINING P4, deliberately deferred: ① the compat-shell sweep (rewrite all imports to the new
-> packages, delete shells) NEEDS A COORDINATION WINDOW — the shared working tree may hold concurrent
-> WIP importing the shells (§7 risk); ② blanket interface-kit mappers on all 154 operations judged
-> lower-value than the plan assumed — routes already return the wire shapes (P0 typed identity) and
-> parity is structural (one service, two transports); the serveScorecard precedent shows mappers should
-> land opportunistically where a response needs server-side derivation, not as churn-only pass-throughs;
-> ③ CLI output DTOs (dev tool, low value). Maintainer call requested on ①'s timing and ②'s posture.
+> P4 RESOLUTIONS (2026-07-10, maintainer): ① compat-shell sweep APPROVED — window granted, executing
+> in three passes (A: apps/api internal shells · B: package shells incl. deleting @everdict/core,
+> run-case, suite, billing · C: symbol-level re-exports + docs/skills updates). ② interface-kit
+> posture: OPPORTUNISTIC mappers adopted as policy — a mapper lands where a response needs server-side
+> derivation (the serveScorecard precedent), never as a churn-only pass-through; parity stays
+> structural (one service, two transports). ③ CLI output DTOs + the benchmark/bundle move (blocked on
+> the @everdict/datasets split) stay deferred as recommended.
 > Maintainer directive: interfaces (CLI / web / API / desktop) are delivery mechanisms; the domain is
 > singular. Today domain rules are fragmented across packages and re-implemented inside interfaces. This
 > document is the ground-up target: layer model, package/folder teardown, port design, DTO boundaries,
