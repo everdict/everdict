@@ -1,7 +1,12 @@
+import type { BenchmarkRecipeListEntry } from '@everdict/contracts/wire'
 import { z } from 'zod'
 
-// Client mirror of the control plane benchmark recipe (BenchmarkAdapterSpec). The web couples over HTTP only — no backend package dependency.
-// A recipe = a reusable adapter that produces a dataset (source + mapping + grading templates). Not a dataset itself.
+// Runtime boundary validation stays here (zod v4); the EXPORTED list type is anchored to @everdict/contracts
+// (re-architecture P4). `import type` only — the zod v3 wire schemas never run in the web.
+// Client mirror of the control plane benchmark recipe (BenchmarkAdapterSpec, in @everdict/datasets — a
+// control-plane package with NO wire DTO for the full spec). A recipe = a reusable adapter that produces a
+// dataset (source + mapping + grading templates). Only the list item has a wire counterpart; the full RecipeSpec
+// and its sub-shapes (source/origin/mapping/graderTemplates) have NO contract type, so they stay LOCAL.
 
 // GET /benchmark-recipes list item (lightweight — id/versions/owner only).
 export const recipeListItemSchema = z.object({
@@ -9,8 +14,16 @@ export const recipeListItemSchema = z.object({
   owner: z.string(),
   versions: z.array(z.string()),
 })
-export type RecipeListItem = z.infer<typeof recipeListItemSchema>
 export const recipeListSchema = z.array(recipeListItemSchema)
+
+// Drift guard — RecipeListItem is identical-shape to the wire list entry (id/owner/versions), so the guard is
+// bidirectional: a renamed/added field on EITHER side fails the web typecheck.
+type AssertAssignable<A extends B, B> = A
+type WebRecipeListItem = z.infer<typeof recipeListItemSchema>
+type _listItemFwd = AssertAssignable<WebRecipeListItem, BenchmarkRecipeListEntry>
+type _listItemBack = AssertAssignable<BenchmarkRecipeListEntry, WebRecipeListItem>
+export type RecipeListItem = BenchmarkRecipeListEntry
+export type __recipeListDriftGuard = [_listItemFwd, _listItemBack]
 
 // source — huggingface (dataset/config/split/gated) or jsonl. passthrough for future extension.
 export const recipeSourceSchema = z

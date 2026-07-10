@@ -1,4 +1,11 @@
+import type { HarnessListEntry, HarnessVersionsResponse } from '@everdict/contracts/wire'
 import { z } from 'zod'
+
+// Runtime boundary validation stays here (zod v4); the EXPORTED list/versions types are anchored to
+// @everdict/contracts (re-architecture P4). `import type` only — the zod v3 wire schemas never run in the web.
+// The full resolved/template/instance HarnessSpec mirrors below stay LOCAL (loose display views — see the note
+// at the resolved-spec section): the contract HarnessSpec / HarnessTemplateSpec are DISCRIMINATED UNIONS and the
+// instance's `overrides` is a structured shape the web flattens to a loose record, so they can't be anchored.
 
 // GET /harnesses response: the instance surface — versions grouped by template id + list meta (registrant/timestamps/derivation).
 // Content (category/kind/subtitle) comes from the latest instance, creator·timestamps from the registration history (control plane HarnessListEntry mirror).
@@ -18,7 +25,6 @@ export const harnessSchema = z.object({
   // version → free-form labels (only versions that have tags) — mutable meta outside the spec. Attached when versions are hard to tell apart by number alone.
   versionTags: z.record(z.string(), z.array(z.string())).optional(),
 })
-export type Harness = z.infer<typeof harnessSchema>
 
 export const harnessesSchema = z.array(harnessSchema)
 
@@ -28,7 +34,25 @@ export const harnessVersionsSchema = z.object({
   versions: z.array(z.string()),
   versionTags: z.record(z.string(), z.array(z.string())).optional(),
 })
-export type HarnessVersions = z.infer<typeof harnessVersionsSchema>
+
+// Drift guards.
+// Harness (list summary) is a NARROWER view of the wire HarnessListEntry: the web models latestVersion/
+// versionCount as OPTIONAL (the wire requires them) and omits latestCreatedBy, so it can't guard forward
+// (web ⊄ wire). The Pick-reverse guard requires every field the web DOES model to exist on the wire with an
+// assignable type — catching a rename/retype of one of those fields.
+// HarnessVersions is identical-shape to the wire versions DTO — bidirectional.
+type AssertAssignable<A extends B, B> = A
+type WebHarness = z.infer<typeof harnessSchema>
+type WebHarnessVersions = z.infer<typeof harnessVersionsSchema>
+type _harnessFieldsOnWire = AssertAssignable<Pick<HarnessListEntry, keyof WebHarness>, WebHarness>
+type _versionsFwd = AssertAssignable<WebHarnessVersions, HarnessVersionsResponse>
+type _versionsBack = AssertAssignable<HarnessVersionsResponse, WebHarnessVersions>
+
+// Harness keeps the web's narrower shape (anchored by the Pick-reverse guard); HarnessVersions aliases the wire.
+export type Harness = WebHarness
+export type HarnessVersions = HarnessVersionsResponse
+
+export type __harnessSummaryDriftGuard = [_harnessFieldsOnWire, _versionsFwd, _versionsBack]
 
 // --- client mirror of the resolved HarnessSpec (GET /harnesses/:id/:version) ---
 // The final form after the control plane resolves template + pins. The web couples over HTTP only (no core package dependency).

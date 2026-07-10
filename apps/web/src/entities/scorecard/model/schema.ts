@@ -1,6 +1,28 @@
+import type {
+  MetricSummary as WireMetricSummary,
+  ScorecardExport as WireScorecardExport,
+  ScorecardModels as WireScorecardModels,
+  ScorecardStatus as WireScorecardStatus,
+  ScorecardStep as WireScorecardStep,
+  ScorecardTrialSummary as WireScorecardTrialSummary,
+} from '@everdict/contracts'
+import type {
+  LeaderboardResponse,
+  ScorecardDiffResponse,
+  ScorecardResponse,
+  ScorecardTrendResponse,
+} from '@everdict/contracts/wire'
 import { z } from 'zod'
 
-// Client mirror of the control plane ScorecardRecord. The web couples over HTTP only — no backend package dependency.
+// Runtime boundary validation stays here (zod v4); the EXPORTED types are anchored to @everdict/contracts
+// (re-architecture P4). `import type` only — the zod v3 wire schemas never run in the web.
+//
+// Posture: the clean aggregate/step/export/status sub-types are IDENTICAL to the record contracts (bidirectional).
+// ScorecardOrigin is a NARROWER view (the web omits retryOf/memoryBoostMb) → Pick-reverse. The full ScorecardRecord
+// is the run-style split: its FLAT fields anchor to the wire ScorecardResponse (which extends the record with the
+// server-computed casePass), while `scorecard`/`orchestration`/`origin`/`caseResult`/`trace` stay DELIBERATELY
+// LOOSE local views (the UI reads case scores/trace/snapshots by kind defensively, and never re-drives a batch).
+// The suite DTOs (diff/trend/leaderboard) are identical to their wire response types (bidirectional).
 export const scorecardStatusSchema = z.enum([
   'queued',
   'running',
@@ -8,7 +30,6 @@ export const scorecardStatusSchema = z.enum([
   'failed',
   'superseded',
 ])
-export type ScorecardStatus = z.infer<typeof scorecardStatusSchema>
 
 // per-metric aggregation (shared by list/detail).
 export const metricSummarySchema = z.object({
@@ -17,7 +38,6 @@ export const metricSummarySchema = z.object({
   mean: z.number(),
   passRate: z.number().optional(),
 })
-export type MetricSummary = z.infer<typeof metricSummarySchema>
 
 // trial roll-up (pass@k / flakiness) — derived on the detail when a batch ran trials>1. Absent on single-run batches.
 export const scorecardTrialSummarySchema = z.object({
@@ -30,9 +50,9 @@ export const scorecardTrialSummarySchema = z.object({
   flakyCases: z.number(), // cases with mixed pass/fail across trials
   flakeRate: z.number(),
 })
-export type ScorecardTrialSummary = z.infer<typeof scorecardTrialSummarySchema>
 
 // per-case scores (loose — display fields only, the rest passthrough). detail = the grader/judge's verdict rationale (VLM rubric reasoning, etc.).
+// Stays LOCAL: the contract Score's `detail` is `unknown` (discriminated), the web renders it as text.
 export const caseScoreSchema = z
   .object({
     graderId: z.string(),
@@ -43,11 +63,12 @@ export const caseScoreSchema = z
   })
   .passthrough()
 
-// trace events (loose) — display only looks at error events (case failure reasons). The rest passthrough.
+// trace events (loose) — display only looks at error events (case failure reasons). The rest passthrough. Stays LOCAL.
 export const traceEventSchema = z
   .object({ kind: z.string(), message: z.string().optional() })
   .passthrough()
 
+// per-case result (loose passthrough) — the discriminated trace/snapshot unions stay a local defensive view. Stays LOCAL.
 export const caseResultSchema = z
   .object({
     caseId: z.string(),
@@ -70,7 +91,7 @@ export const caseResultSchema = z
   })
   .passthrough()
 
-// the full scorecard for GET /scorecards/:id (including per-case results).
+// the full scorecard for GET /scorecards/:id (including per-case results). Loose passthrough — stays LOCAL.
 export const fullScorecardSchema = z
   .object({
     suiteId: z.string(),
@@ -87,7 +108,6 @@ export const scorecardStepSchema = z.object({
   message: z.string(),
   caseId: z.string().optional(),
 })
-export type ScorecardStep = z.infer<typeof scorecardStepSchema>
 
 // the models this run actually used (leaderboard model axis). observed=trace-observed, declared=spec-declared, primary=representative (observed first).
 export const scorecardModelsSchema = z.object({
@@ -95,10 +115,10 @@ export const scorecardModelsSchema = z.object({
   declared: z.string().optional(),
   primary: z.string().optional(),
 })
-export type ScorecardModels = z.infer<typeof scorecardModelsSchema>
 
 // this run's trigger provenance — where it was fired from (github-actions|schedule|api|web) + commit coordinates.
 // A GitHub Actions PR fire records a submit-time ephemeral pin (pinOverrides: slot→image) here (registry unchanged). Lightweight → also included in the list.
+// NARROWER than the record ScorecardOrigin (the web omits retryOf/memoryBoostMb) — Pick-reverse guarded.
 export const scorecardOriginSchema = z.object({
   source: z.string(),
   repo: z.string().optional(), // "owner/name"
@@ -108,7 +128,6 @@ export const scorecardOriginSchema = z.object({
   runUrl: z.string().optional(), // CI run link
   pinOverrides: z.record(z.string(), z.string()).optional(), // submit-time ephemeral pin (slot→image)
 })
-export type ScorecardOrigin = z.infer<typeof scorecardOriginSchema>
 
 // Trace-sink export result — a record of exporting per-case trace+scores to the workspace observability platform after grading.
 // A failure is independent of the scorecard status (shown only via this status). Detail (get) only — not included in the list.
@@ -130,7 +149,6 @@ export const scorecardExportSchema = z.object({
     )
     .optional(),
 })
-export type ScorecardExport = z.infer<typeof scorecardExportSchema>
 
 export const scorecardRecordSchema = z.object({
   id: z.string(),
@@ -168,7 +186,6 @@ export const scorecardRecordSchema = z.object({
   createdAt: z.string(),
   updatedAt: z.string(),
 })
-export type ScorecardRecord = z.infer<typeof scorecardRecordSchema>
 export const scorecardsSchema = z.array(scorecardRecordSchema)
 
 // GET /scorecards/diff response: baseline vs candidate (metric mean delta + case regressions/improvements).
@@ -180,7 +197,6 @@ export const caseDeltaSchema = z.object({
   delta: z.number(),
   passChange: z.enum(['fixed', 'broke']).optional(),
 })
-export type CaseDelta = z.infer<typeof caseDeltaSchema>
 
 // A trial-aware per-case delta — baseline vs candidate pass RATE over N trials + the two-proportion z gate.
 export const trialCaseDeltaSchema = z.object({
@@ -193,7 +209,6 @@ export const trialCaseDeltaSchema = z.object({
   z: z.number(), // two-proportion z of candidate vs baseline (negative = candidate lower)
   significant: z.boolean(), // |z| >= zThreshold
 })
-export type TrialCaseDelta = z.infer<typeof trialCaseDeltaSchema>
 
 // Statistically-gated diff — attached to the diff response when either side ran trials (regressions are the
 // significant pass-rate drops, not single flips). docs/architecture/trial-based-verdict.md
@@ -205,7 +220,6 @@ export const trialDiffSchema = z.object({
   regressions: z.array(trialCaseDeltaSchema),
   improvements: z.array(trialCaseDeltaSchema),
 })
-export type TrialDiff = z.infer<typeof trialDiffSchema>
 
 export const scorecardDiffSchema = z.object({
   baseline: z.string(),
@@ -222,7 +236,6 @@ export const scorecardDiffSchema = z.object({
   improvements: z.array(caseDeltaSchema),
   trials: trialDiffSchema.optional(), // statistical (pass@k) gate — present only when either side ran trials
 })
-export type ScorecardDiff = z.infer<typeof scorecardDiffSchema>
 
 // GET /scorecards/trend response: time-ordered scorecards for one (dataset, metric) + regression vs baseline.
 export const trendPointSchema = z.object({
@@ -235,7 +248,6 @@ export const trendPointSchema = z.object({
   deltaVsBaseline: z.number().nullable(),
   regressed: z.boolean(),
 })
-export type TrendPoint = z.infer<typeof trendPointSchema>
 
 export const scorecardTrendSchema = z.object({
   dataset: z.string(),
@@ -243,7 +255,6 @@ export const scorecardTrendSchema = z.object({
   baseline: z.string(),
   points: z.array(trendPointSchema),
 })
-export type ScorecardTrend = z.infer<typeof scorecardTrendSchema>
 
 // GET /scorecards/leaderboard response: (harness × model) ranking for one dataset (benchmark) (metric descending).
 export const leaderboardRowSchema = z.object({
@@ -258,7 +269,6 @@ export const leaderboardRowSchema = z.object({
   mean: z.number().nullable(),
   runs: z.number(),
 })
-export type LeaderboardRow = z.infer<typeof leaderboardRowSchema>
 
 export const leaderboardSchema = z.object({
   dataset: z.string(),
@@ -266,4 +276,96 @@ export const leaderboardSchema = z.object({
   window: z.enum(['latest', 'best']),
   rows: z.array(leaderboardRowSchema),
 })
-export type Leaderboard = z.infer<typeof leaderboardSchema>
+
+// Drift guards.
+type AssertAssignable<A extends B, B> = A
+type WebScorecardStatus = z.infer<typeof scorecardStatusSchema>
+type WebMetricSummary = z.infer<typeof metricSummarySchema>
+type WebScorecardTrialSummary = z.infer<typeof scorecardTrialSummarySchema>
+type WebScorecardStep = z.infer<typeof scorecardStepSchema>
+type WebScorecardModels = z.infer<typeof scorecardModelsSchema>
+type WebScorecardExport = z.infer<typeof scorecardExportSchema>
+type WebScorecardOrigin = z.infer<typeof scorecardOriginSchema>
+type WebScorecardRecord = z.infer<typeof scorecardRecordSchema>
+type WebScorecardDiff = z.infer<typeof scorecardDiffSchema>
+type WebScorecardTrend = z.infer<typeof scorecardTrendSchema>
+type WebLeaderboard = z.infer<typeof leaderboardSchema>
+
+// Identical-shape sub-types — bidirectional against the record contracts.
+type _statusFwd = AssertAssignable<WebScorecardStatus, WireScorecardStatus>
+type _statusBack = AssertAssignable<WireScorecardStatus, WebScorecardStatus>
+type _metricFwd = AssertAssignable<WebMetricSummary, WireMetricSummary>
+type _metricBack = AssertAssignable<WireMetricSummary, WebMetricSummary>
+type _trialFwd = AssertAssignable<WebScorecardTrialSummary, WireScorecardTrialSummary>
+type _trialBack = AssertAssignable<WireScorecardTrialSummary, WebScorecardTrialSummary>
+type _stepFwd = AssertAssignable<WebScorecardStep, WireScorecardStep>
+type _stepBack = AssertAssignable<WireScorecardStep, WebScorecardStep>
+type _modelsFwd = AssertAssignable<WebScorecardModels, WireScorecardModels>
+type _modelsBack = AssertAssignable<WireScorecardModels, WebScorecardModels>
+type _exportFwd = AssertAssignable<WebScorecardExport, WireScorecardExport>
+type _exportBack = AssertAssignable<WireScorecardExport, WebScorecardExport>
+// ScorecardOrigin is narrower (omits retryOf/memoryBoostMb) — Pick-reverse.
+type _originFieldsOnWire = AssertAssignable<
+  Pick<WireScorecardResponseOrigin, keyof WebScorecardOrigin>,
+  WebScorecardOrigin
+>
+type WireScorecardResponseOrigin = NonNullable<ScorecardResponse['origin']>
+// ScorecardRecord — run-style split: the FLAT fields (excluding the loose scorecard/orchestration/origin) must
+// exist on the wire ScorecardResponse with an assignable type. (casePass is a server-computed field on the
+// response, not the bare record; it anchors here.) `steps` is also excluded: the web applies `.default([])`
+// (always-present) while the wire keeps it optional — a default-driven optionality difference, not a field
+// drift, and its element shape is already guarded bidirectionally by _stepFwd/_stepBack above.
+type WebScorecardFlat = Omit<WebScorecardRecord, 'scorecard' | 'orchestration' | 'origin' | 'steps'>
+type _recordFieldsOnWire = AssertAssignable<
+  Pick<ScorecardResponse, keyof WebScorecardFlat>,
+  WebScorecardFlat
+>
+// Suite DTOs — identical to their wire response types (bidirectional).
+type _diffFwd = AssertAssignable<WebScorecardDiff, ScorecardDiffResponse>
+type _diffBack = AssertAssignable<ScorecardDiffResponse, WebScorecardDiff>
+type _trendFwd = AssertAssignable<WebScorecardTrend, ScorecardTrendResponse>
+type _trendBack = AssertAssignable<ScorecardTrendResponse, WebScorecardTrend>
+type _lbFwd = AssertAssignable<WebLeaderboard, LeaderboardResponse>
+type _lbBack = AssertAssignable<LeaderboardResponse, WebLeaderboard>
+
+// Exported names alias the contract types where identical; the narrower/loose ones keep the web shape (anchored
+// by the guards above). Consumers are untouched (same identifiers).
+export type ScorecardStatus = WireScorecardStatus
+export type MetricSummary = WireMetricSummary
+export type ScorecardTrialSummary = WireScorecardTrialSummary
+export type ScorecardStep = WireScorecardStep
+export type ScorecardModels = WireScorecardModels
+export type ScorecardExport = WireScorecardExport
+export type ScorecardOrigin = WebScorecardOrigin
+export type ScorecardRecord = WebScorecardRecord
+export type CaseDelta = z.infer<typeof caseDeltaSchema>
+export type TrialCaseDelta = z.infer<typeof trialCaseDeltaSchema>
+export type TrialDiff = NonNullable<ScorecardDiffResponse['trials']>
+export type ScorecardDiff = ScorecardDiffResponse
+export type TrendPoint = ScorecardTrendResponse['points'][number]
+export type ScorecardTrend = ScorecardTrendResponse
+export type LeaderboardRow = LeaderboardResponse['rows'][number]
+export type Leaderboard = LeaderboardResponse
+
+export type __scorecardDriftGuard = [
+  _statusFwd,
+  _statusBack,
+  _metricFwd,
+  _metricBack,
+  _trialFwd,
+  _trialBack,
+  _stepFwd,
+  _stepBack,
+  _modelsFwd,
+  _modelsBack,
+  _exportFwd,
+  _exportBack,
+  _originFieldsOnWire,
+  _recordFieldsOnWire,
+  _diffFwd,
+  _diffBack,
+  _trendFwd,
+  _trendBack,
+  _lbFwd,
+  _lbBack,
+]

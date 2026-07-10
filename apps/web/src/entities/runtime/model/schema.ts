@@ -1,6 +1,8 @@
+import type { RuntimeListEntry } from '@everdict/contracts/wire'
 import { z } from 'zod'
 
-// Client mirror of the control plane RuntimeSpec (execution infra). The web couples over HTTP only — no backend package dependency.
+// Runtime boundary validation stays here (zod v4); the EXPORTED list type is anchored to @everdict/contracts
+// (re-architecture P4). `import type` only — the zod v3 wire schemas never run in the web.
 // GET /runtimes response: the runtime list a tenant sees (owned + _shared).
 export const runtimeSummarySchema = z.object({
   id: z.string(),
@@ -9,10 +11,14 @@ export const runtimeSummarySchema = z.object({
   // version → free-form labels (only versions that have tags) — mutable meta outside the spec (for telling versions apart).
   versionTags: z.record(z.string(), z.array(z.string())).optional(),
 })
-export type RuntimeSummary = z.infer<typeof runtimeSummarySchema>
 export const runtimesSchema = z.array(runtimeSummarySchema)
 
-// full RuntimeSpec (local | nomad | k8s) — loose mirror for display (the rest passthrough).
+// full RuntimeSpec (local | nomad | k8s) — DELIBERATELY LOOSE flat display mirror (the rest passthrough).
+// This stays LOCAL and is NOT anchored: the contract RuntimeSpec is a DISCRIMINATED UNION (nomad requires
+// addr/image, k8s requires image, plus a `capabilities` field and a required `tags`), whereas the web flattens
+// every kind-specific field to optional so the detail view can read any field defensively. The two shapes
+// genuinely diverge (flat-optional vs kind-narrowed union), so no assignability guard can bind them — the web
+// only displays fields, it never reconstructs a spec, so the loose local type is correct here.
 export const runtimeSpecSchema = z
   .object({
     kind: z.enum(['local', 'nomad', 'k8s']),
@@ -37,3 +43,15 @@ export const runtimeSpecSchema = z
   })
   .passthrough()
 export type RuntimeSpec = z.infer<typeof runtimeSpecSchema>
+
+// Drift guard — RuntimeSummary is identical-shape to the wire list entry (id/owner/versions/versionTags), so
+// the guard is bidirectional: a renamed/added field on EITHER side fails the web typecheck.
+type AssertAssignable<A extends B, B> = A
+type WebRuntimeSummary = z.infer<typeof runtimeSummarySchema>
+type _summaryFwd = AssertAssignable<WebRuntimeSummary, RuntimeListEntry>
+type _summaryBack = AssertAssignable<RuntimeListEntry, WebRuntimeSummary>
+
+// Exported name aliases the contract type (consumers untouched: same RuntimeSummary identifier).
+export type RuntimeSummary = RuntimeListEntry
+
+export type __runtimeDriftGuard = [_summaryFwd, _summaryBack]

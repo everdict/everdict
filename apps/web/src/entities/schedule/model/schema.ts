@@ -1,9 +1,11 @@
+import type { ScheduleResponse } from '@everdict/contracts/wire'
 import { z } from 'zod'
 
-// Client mirror of the control plane scheduled (cron) scorecard. The web couples over HTTP only — no @everdict/* dependency.
+// Runtime boundary validation stays here (zod v4); the EXPORTED types are anchored to @everdict/contracts
+// (re-architecture P4). `import type` only — the zod v3 wire schemas never run in the web.
+// Client mirror of the control plane scheduled (cron) scorecard.
 // GET /schedules response: the workspace's schedule list. Firing (Temporal) is the control plane's responsibility.
 export const scheduleOverlapPolicySchema = z.enum(['skip', 'bufferOne', 'allowAll'])
-export type ScheduleOverlapPolicy = z.infer<typeof scheduleOverlapPolicySchema>
 
 export const scheduleRunTemplateSchema = z.object({
   dataset: z.object({ id: z.string(), version: z.string() }),
@@ -32,5 +34,19 @@ export const scheduleSchema = z.object({
   createdAt: z.string(),
   updatedAt: z.string(),
 })
-export type Schedule = z.infer<typeof scheduleSchema>
 export const schedulesSchema = z.array(scheduleSchema)
+
+// Drift guard — Schedule is identical-shape (the web models every ScheduleResponse field — including the nested
+// runTemplate and nextFireTimes — and no extra), so the guard is bidirectional: a renamed/added field or a
+// widened overlap policy on EITHER side fails the web typecheck. (The wire's int/min/max-branded numbers still
+// infer `number`, matching the web's plain numbers.)
+type AssertAssignable<A extends B, B> = A
+type WebSchedule = z.infer<typeof scheduleSchema>
+type _scheduleFwd = AssertAssignable<WebSchedule, ScheduleResponse>
+type _scheduleBack = AssertAssignable<ScheduleResponse, WebSchedule>
+
+// Exported names alias the contract types (consumers untouched: same identifiers).
+export type Schedule = ScheduleResponse
+export type ScheduleOverlapPolicy = ScheduleResponse['overlapPolicy']
+
+export type __scheduleDriftGuard = [_scheduleFwd, _scheduleBack]

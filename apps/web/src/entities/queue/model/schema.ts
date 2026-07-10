@@ -1,5 +1,8 @@
+import type { QueueSnapshotResponse } from '@everdict/contracts/wire'
 import { z } from 'zod'
 
+// Runtime boundary validation stays here (zod v4); the EXPORTED types are anchored to @everdict/contracts
+// (re-architecture P4). `import type` only — the zod v3 wire schemas never run in the web.
 // Control plane GET /queue (QueueSnapshot) mirror — work queue: running/queued/next-scheduled per runtime lane.
 // The unit is a batch (scorecard)=1 job (with progress) + a single run=1 job. Child runs collapse into the batch's progress.
 
@@ -18,7 +21,6 @@ export const queueItemSchema = z.object({
     .object({ done: z.number(), active: z.number(), total: z.number().optional() })
     .optional(),
 })
-export type QueueItem = z.infer<typeof queueItemSchema>
 
 export const queueUpcomingSchema = z.object({
   scheduleId: z.string(),
@@ -27,7 +29,6 @@ export const queueUpcomingSchema = z.object({
   dataset: z.string(),
   harness: z.string(),
 })
-export type QueueUpcoming = z.infer<typeof queueUpcomingSchema>
 
 // Scheduler admission view of a lane — in-flight dispatches, the declared memory envelope, and the spillover
 // circuit state (open = the control plane is currently routing around this runtime).
@@ -40,7 +41,6 @@ export const queueLaneAdmissionSchema = z.object({
   maxConcurrent: z.number().optional(),
   circuit: z.object({ open: z.boolean(), consecutive: z.number() }).optional(),
 })
-export type QueueLaneAdmission = z.infer<typeof queueLaneAdmissionSchema>
 
 export const queueLaneSchema = z.object({
   runtime: z.string(), // '' = default backend, 'self:<id>' = self-hosted runner
@@ -51,7 +51,6 @@ export const queueLaneSchema = z.object({
   queued: z.array(queueItemSchema), // FIFO — the front is the next job
   upcoming: z.array(queueUpcomingSchema),
 })
-export type QueueLane = z.infer<typeof queueLaneSchema>
 
 // The queue has two scopes — workspace (shared runtimes: default backend + registered infra) / personal (my self-hosted runners).
 export const queueSnapshotSchema = z.object({
@@ -64,4 +63,22 @@ export const queueSnapshotSchema = z.object({
   workspace: z.array(queueLaneSchema),
   personal: z.array(queueLaneSchema),
 })
-export type QueueSnapshot = z.infer<typeof queueSnapshotSchema>
+
+// Drift guard — QueueSnapshot is identical-shape (the web models every wire field of the snapshot and its
+// nested lanes/items and no extra), so the top-level guard is bidirectional: a renamed/added field or a widened
+// enum anywhere in the tree on EITHER side fails the web typecheck. (int()-branded wire numbers still infer
+// `number`, matching the web's plain numbers.)
+type AssertAssignable<A extends B, B> = A
+type WebQueueSnapshot = z.infer<typeof queueSnapshotSchema>
+type _snapshotFwd = AssertAssignable<WebQueueSnapshot, QueueSnapshotResponse>
+type _snapshotBack = AssertAssignable<QueueSnapshotResponse, WebQueueSnapshot>
+
+// Exported names alias the contract types; the sub-shapes are nested anonymously on the wire snapshot, so they
+// are derived FROM it (consumers untouched: same identifiers).
+export type QueueSnapshot = QueueSnapshotResponse
+export type QueueLane = QueueSnapshotResponse['workspace'][number]
+export type QueueLaneAdmission = NonNullable<QueueLane['admission']>
+export type QueueItem = QueueLane['running'][number]
+export type QueueUpcoming = QueueLane['upcoming'][number]
+
+export type __queueDriftGuard = [_snapshotFwd, _snapshotBack]
