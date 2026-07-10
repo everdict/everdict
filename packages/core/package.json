@@ -18,6 +18,7 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
-    "@everdict/contracts": "workspace:*"
+    "@everdict/contracts": "workspace:*",
+    "@everdict/domain": "workspace:*"
   }
 }

@@ -39,20 +39,4 @@ export const RunUsageSummarySchema = z.object({
 });
 export type RunUsageSummary = z.infer<typeof RunUsageSummarySchema>;
 
-// Trace → usage summary (derived). calls counts every llm_call; tokens/cost sum only those that have a cost.
-export function usageFromTrace(trace: TraceEvent[]): RunUsageSummary {
-  let promptTokens = 0;
-  let completionTokens = 0;
-  let usd = 0;
-  let calls = 0;
-  for (const e of trace) {
-    if (e.kind !== "llm_call") continue;
-    calls += 1;
-    if (e.cost) {
-      promptTokens += e.cost.inputTokens;
-      completionTokens += e.cost.outputTokens;
-      usd += e.cost.usd;
-    }
-  }
-  return { promptTokens, completionTokens, totalTokens: promptTokens + completionTokens, usd, calls };
-}
+// The trace → usage derivation (usageFromTrace) lives in @everdict/domain (trace/) — re-architecture P1e.

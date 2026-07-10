@@ -1,5 +1,7 @@
-import { BadRequestError } from "../errors.js";
-import type { EnvValue, HarnessSpec } from "./harness-spec.js";
+import { BadRequestError, type EnvValue, type HarnessSpec } from "@everdict/contracts";
+
+// Harness secret-resolution semantics — the {secretRef} env vocabulary is defined by the HarnessSpec
+// shape (@everdict/contracts); the resolution/visibility rules live here (single owner).
 
 // Flatten an env map to a string map — substitute {secretRef} with its value from lookup.
 // For narrowing the type at consumption points (CommandHarness / topology runtime): silently drop unresolved references

@@ -17,7 +17,8 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const ALLOWLIST = new Set([
   "agent",
   "contracts",
-  "core",
+  "core", // compat shell over contracts + domain (P1e); removed from the cone in the P4 sweep
+  "domain", // L1 pure rules (imports contracts only — enforced below)
   "drivers",
   "environments",
   "graders",
@@ -87,6 +88,12 @@ while (queue.length > 0) {
 const contractsDeps = Object.keys(readPackageJson("contracts").dependencies ?? {}).sort();
 if (contractsDeps.length !== 1 || contractsDeps[0] !== "zod") {
   violations.push(`@everdict/contracts dependencies = {${contractsDeps.join(", ")}} (must be exactly {zod})`);
+}
+
+// (4) The L1 domain layer depends on exactly one thing: @everdict/contracts — pure by construction.
+const domainDeps = Object.keys(readPackageJson("domain").dependencies ?? {}).sort();
+if (domainDeps.length !== 1 || domainDeps[0] !== "@everdict/contracts") {
+  violations.push(`@everdict/domain dependencies = {${domainDeps.join(", ")}} (must be exactly {@everdict/contracts})`);
 }
 
 if (violations.length > 0) {

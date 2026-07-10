@@ -66,6 +66,42 @@ export {
   type ScheduleTransition,
 } from "./schedule/schedule.js";
 
+// failure — the failure-classification rules (from @everdict/core; the CaseFailure shape stays in contracts)
+export { classifyFailure, stageForError } from "./failure/case-failure.js";
+
+// harness — secret-resolution/visibility rules (from @everdict/core)
+export {
+  flattenEnv,
+  type HarnessSecretMaps,
+  referencesUserSecret,
+  resolveHarnessSecrets,
+} from "./harness/harness-secrets.js";
+
+// runtime — capability gating + trust-zone hardening rules (from @everdict/core)
+export {
+  capabilitiesOfKind,
+  capabilityKind,
+  functionalGate,
+  partitionCapabilities,
+  runtimeSatisfies,
+} from "./runtime/capability.js";
+export { defaultRuntimeCapabilities, requiredCapabilities } from "./runtime/capability-requirements.js";
+export { assertHardenedIsolation, isHardenedRuntime } from "./runtime/trust-zone-hardening.js";
+
+// image — image-reference parse/classify/warn rules (from @everdict/core; shapes stay in contracts)
+export {
+  classifyImageRef,
+  collectHarnessImages,
+  dockerAuthConfigJson,
+  imageRegistryPrefix,
+  imageUsesRegistryHost,
+  imageWarnings,
+  parseImageRef,
+} from "./image/image-ref.js";
+
+// trace — trace-derived usage summary (from @everdict/core; shapes stay in contracts)
+export { usageFromTrace } from "./trace/usage-from-trace.js";
+
 // placement — pure multi-tenant placement policies (from @everdict/backends)
 export { FairQueue, type FairQueueOptions } from "./placement/fair-queue.js";
 export { CircuitBreaker, type CircuitBreakerOpts } from "./placement/circuit-breaker.js";

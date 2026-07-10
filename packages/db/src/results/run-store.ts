@@ -1,4 +1,5 @@
-import { type RunRecord, usageFromTrace } from "@everdict/contracts";
+import type { RunRecord } from "@everdict/contracts";
+import { usageFromTrace } from "@everdict/domain";
 
 // Record schemas now live in contracts/records — re-architecture P0c; db keeps compat re-exports (removed in the P4 sweep).
 export {

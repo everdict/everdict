@@ -1,5 +1,4 @@
 import { z } from "zod";
-import { BadRequestError } from "../errors.js";
 
 // A tenant's trust zone — the multi-tenant isolation policy. Since evaluation runs the user's arbitrary harness code
 // (= arbitrary code execution), isolation is mandatory, not optional. The control plane resolves tenant→TrustZone.
@@ -15,21 +14,4 @@ export const TrustZoneSchema = z.object({
 });
 export type TrustZone = z.infer<typeof TrustZoneSchema>;
 
-// Runtimes accepted as hardened isolation. (Extensible per site — the point is to exclude the shared-kernel runc/none.)
-const HARDENED_RUNTIMES = new Set(["runsc", "gvisor", "kata", "kata-runtime", "firecracker", "fc"]);
-
-export function isHardenedRuntime(runtime: string): boolean {
-  return HARDENED_RUNTIMES.has(runtime);
-}
-
-// An untrusted zone requires a hardened isolation runtime — prevents running arbitrary code on a shared kernel (runc/none).
-export function assertHardenedIsolation(zone: TrustZone): void {
-  if (zone.trusted) return;
-  if (!isHardenedRuntime(zone.isolationRuntime)) {
-    throw new BadRequestError(
-      "BAD_REQUEST",
-      { zone: zone.id, runtime: zone.isolationRuntime },
-      `Untrusted tenant zone '${zone.id}' requires a hardened isolation runtime (currently '${zone.isolationRuntime}').`,
-    );
-  }
-}
+// The hardening rules (isHardenedRuntime/assertHardenedIsolation) live in @everdict/domain (runtime/) — re-architecture P1e.

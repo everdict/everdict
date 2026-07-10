@@ -1,14 +1,12 @@
+import { CAPABILITY_DEFS, CapabilityNameSchema, RuntimeSpecSchema } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import {
-  CAPABILITY_DEFS,
-  CapabilityNameSchema,
   capabilitiesOfKind,
   capabilityKind,
   functionalGate,
   partitionCapabilities,
   runtimeSatisfies,
 } from "./capability.js";
-import { RuntimeSpecSchema } from "./runtime-spec.js";
 
 describe("capability vocabulary — split by kind (functional/security/auth)", () => {
   it("each capability has the correct kind", () => {

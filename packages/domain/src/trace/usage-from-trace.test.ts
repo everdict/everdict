@@ -1,5 +1,6 @@
+import type { TraceEvent } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
-import { type TraceEvent, usageFromTrace } from "./trace.js";
+import { usageFromTrace } from "./usage-from-trace.js";
 
 describe("usageFromTrace", () => {
   it("sums the tokens/cost of llm_calls and counts calls", () => {

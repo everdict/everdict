@@ -317,6 +317,9 @@ importers:
       '@everdict/contracts':
         specifier: workspace:*
         version: link:../contracts
+      '@everdict/domain':
+        specifier: workspace:*
+        version: link:../domain
 
   packages/datasets:
     dependencies:
@@ -335,6 +338,9 @@ importers:
       '@everdict/core':
         specifier: workspace:*
         version: link:../core
+      '@everdict/domain':
+        specifier: workspace:*
+        version: link:../domain
       pg:
         specifier: ^8.13.1
         version: 8.21.0

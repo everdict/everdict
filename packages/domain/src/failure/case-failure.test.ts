@@ -1,6 +1,6 @@
+import { BadRequestError, InternalError, OOM_KILLED, UpstreamError } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
-import { BadRequestError, InternalError, UpstreamError } from "../errors.js";
-import { OOM_KILLED, classifyFailure, stageForError } from "./case-failure.js";
+import { classifyFailure, stageForError } from "./case-failure.js";
 
 describe("classifyFailure (failure taxonomy: where it died × whose fault)", () => {
   it("an upstream/backend error is retryable infra (placement blips, log races, network)", () => {

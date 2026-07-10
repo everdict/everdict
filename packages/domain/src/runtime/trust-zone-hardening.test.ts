@@ -1,6 +1,6 @@
+import { BadRequestError, type TrustZone } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
-import { BadRequestError } from "../errors.js";
-import { type TrustZone, assertHardenedIsolation, isHardenedRuntime } from "./trust-zone.js";
+import { assertHardenedIsolation, isHardenedRuntime } from "./trust-zone-hardening.js";
 
 const zone = (over: Partial<TrustZone>): TrustZone => ({
   id: "t",

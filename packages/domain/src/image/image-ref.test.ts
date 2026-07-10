@@ -1,5 +1,5 @@
+import { BadRequestError } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
-import { BadRequestError } from "../errors.js";
 import {
   classifyImageRef,
   dockerAuthConfigJson,

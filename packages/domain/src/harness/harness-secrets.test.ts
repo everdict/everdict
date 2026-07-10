@@ -1,7 +1,7 @@
+import { BadRequestError } from "@everdict/contracts";
+import { CommandHarnessSpecSchema, ServiceHarnessSpecSchema } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
-import { BadRequestError } from "../errors.js";
 import { flattenEnv, referencesUserSecret, resolveHarnessSecrets } from "./harness-secrets.js";
-import { CommandHarnessSpecSchema, ServiceHarnessSpecSchema } from "./harness-spec.js";
 
 describe("flattenEnv", () => {
   it("passes literals through and resolves refs from lookup", () => {

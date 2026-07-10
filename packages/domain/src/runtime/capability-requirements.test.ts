@@ -1,7 +1,6 @@
+import type { EvalCase, RuntimeSpec } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
-import type { EvalCase } from "../execution/eval-case.js";
 import { defaultRuntimeCapabilities, requiredCapabilities } from "./capability-requirements.js";
-import type { RuntimeSpec } from "./runtime-spec.js";
 
 const base = (over: Partial<EvalCase>): EvalCase => ({
   id: "c",

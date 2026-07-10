@@ -1,7 +1,5 @@
-import type { EvalCase } from "../execution/eval-case.js";
-import type { CapabilityName } from "./capability.js";
-import type { RuntimeSpec } from "./runtime-spec.js";
-import { isHardenedRuntime } from "./trust-zone.js";
+import type { CapabilityName, EvalCase, RuntimeSpec } from "@everdict/contracts";
+import { isHardenedRuntime } from "./trust-zone-hardening.js";
 
 // Derive the capabilities a case requires to run — decided from case fields (image/env.kind/source/placement.isolation).
 // These flow to per-kind enforcement layers: functional → placement gate (functionalGate) · security (sandbox) → trust-zone.
