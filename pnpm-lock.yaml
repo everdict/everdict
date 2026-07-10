@@ -29,6 +29,9 @@ importers:
       '@everdict/agent':
         specifier: workspace:*
         version: link:../../packages/agent
+      '@everdict/application-control':
+        specifier: workspace:*
+        version: link:../../packages/application-control
       '@everdict/auth':
         specifier: workspace:*
         version: link:../../packages/auth
@@ -266,6 +269,9 @@ importers:
       '@everdict/domain':
         specifier: workspace:*
         version: link:../domain
+      zod:
+        specifier: ^3.24.1
+        version: 3.25.76
 
   packages/application-execution:
     dependencies:

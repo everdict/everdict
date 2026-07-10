@@ -32,3 +32,20 @@ export type { JudgeListEntry, JudgeRegistry } from "./ports/judge-registry.js";
 export type { RubricListEntry, RubricRegistry } from "./ports/rubric-registry.js";
 export type { ModelRegistry } from "./ports/model-registry.js";
 export type { RuntimeListEntry, RuntimeRegistry } from "./ports/runtime-registry.js";
+
+// Control-plane use-case services (the api services move here incrementally — re-architecture P2d).
+export { type CreateViewInput, type UpdateViewInput, ViewService, type ViewServiceDeps } from "./view/view-service.js";
+export {
+  COMMENT_RESOURCE_TYPES,
+  type CommentResourceType,
+  CommentService,
+  type CommentServiceDeps,
+} from "./comment/comment-service.js";
+export { deleteDatasetVersion } from "./dataset/dataset-service.js";
+export { deleteHarnessVersion, harnessIsPrivate, harnessVisibleTo } from "./harness/harness-service.js";
+export {
+  type PairRunnerBody,
+  PairRunnerBodySchema,
+  RUNNER_CAPABILITIES,
+  RunnerService,
+} from "./runner/runner-service.js";
