@@ -151,6 +151,7 @@ import { TemporalBatchDriver } from "./core/scorecard/temporal-batch-driver.js";
 import { TraceSinkService } from "./core/trace-sink/trace-sink-service.js";
 import { ViewService } from "./core/view/view-service.js";
 import { WorkspaceService } from "./core/workspace/workspace-service.js";
+import { githubRepoWriterFactory } from "./infrastructure/github/repo-writer.js";
 import { mattermostHttpClient } from "./infrastructure/mattermost/mattermost-client.js";
 import { buildServer } from "./server.js";
 
@@ -447,6 +448,7 @@ async function main(): Promise<void> {
   // The picker/setup-PR use the member's personal GitHub connection token (tokenFor) only server-side.
   const ciLinkService = new CiLinkService({
     settings: settingsStore,
+    repoWriter: githubRepoWriterFactory(), // outbound branch/file/PR adapter (fetch)
     githubApp: githubAppService, // repo picker + setup-PR + runner registration token = the workspace GitHub App (replaces personal connections)
     runners: runnerService, // setup-PR checks the self:ws pool exists (D6 — CI placement is always self-hosted, fail-closed)
     ...(process.env.API_PUBLIC_URL ? { apiPublicUrl: process.env.API_PUBLIC_URL } : {}), // api-url of the generated workflow

@@ -1,6 +1,7 @@
 import { BadRequestError, NotFoundError, UpstreamError } from "@everdict/core";
 import { InMemoryWorkspaceSettingsStore } from "@everdict/db";
 import { beforeEach, describe, expect, it } from "vitest";
+import { githubRepoWriterFactory } from "../../infrastructure/github/repo-writer.js";
 import {
   CiLinkService,
   type GithubAppRepoAccess,
@@ -131,7 +132,7 @@ describe("CiLinkService.openSetupPr — workflow YAML synthesis + branch/commit/
       githubApp: fakeGithubApp(), // token=app_tok
       runners: fakeRunners(), // 1 runner in the self:ws pool (r1) — passes the default placement check
       apiPublicUrl: "https://everdict.example.com",
-      fetchImpl: fakeFetch(handlers, calls),
+      repoWriter: githubRepoWriterFactory(fakeFetch(handlers, calls)),
     });
   }
 
@@ -196,23 +197,25 @@ describe("CiLinkService.openSetupPr — workflow YAML synthesis + branch/commit/
       }),
       runners: fakeRunners(),
       apiPublicUrl: "https://everdict.example.com",
-      fetchImpl: fakeFetch(
-        [
-          (url, init) => {
-            const m = init?.method ?? "GET";
-            if (!url.startsWith("https://ghe.acme.io/api/v3/")) return undefined; // anything but the GHE base → 500
-            if (url.endsWith("/repos/acme/app") && m === "GET") return json({ default_branch: "main" });
-            if (url.endsWith("/git/ref/heads/main")) return json({ object: { sha: "base-sha" } });
-            if (url.endsWith("/git/refs") && m === "POST") return json({}, 201);
-            if (url.includes("/contents/.github/workflows/everdict-eval.yml") && m === "GET")
-              return json({ message: "Not Found" }, 404);
-            if (url.includes("/contents/.github/workflows/everdict-eval.yml") && m === "PUT") return json({}, 201);
-            if (url.endsWith("/pulls") && m === "POST")
-              return json({ html_url: "https://ghe.acme.io/acme/app/pull/3" }, 201);
-            return undefined;
-          },
-        ],
-        calls,
+      repoWriter: githubRepoWriterFactory(
+        fakeFetch(
+          [
+            (url, init) => {
+              const m = init?.method ?? "GET";
+              if (!url.startsWith("https://ghe.acme.io/api/v3/")) return undefined; // anything but the GHE base → 500
+              if (url.endsWith("/repos/acme/app") && m === "GET") return json({ default_branch: "main" });
+              if (url.endsWith("/git/ref/heads/main")) return json({ object: { sha: "base-sha" } });
+              if (url.endsWith("/git/refs") && m === "POST") return json({}, 201);
+              if (url.includes("/contents/.github/workflows/everdict-eval.yml") && m === "GET")
+                return json({ message: "Not Found" }, 404);
+              if (url.includes("/contents/.github/workflows/everdict-eval.yml") && m === "PUT") return json({}, 201);
+              if (url.endsWith("/pulls") && m === "POST")
+                return json({ html_url: "https://ghe.acme.io/acme/app/pull/3" }, 201);
+              return undefined;
+            },
+          ],
+          calls,
+        ),
       ),
     });
     await svc.upsert("acme", "admin", {
@@ -237,7 +240,7 @@ describe("CiLinkService.openSetupPr — workflow YAML synthesis + branch/commit/
       }),
       runners: fakeRunners(),
       apiPublicUrl: "https://everdict.example.com",
-      fetchImpl: fakeFetch([], []),
+      repoWriter: githubRepoWriterFactory(fakeFetch([], [])),
     });
     await svc.upsert("acme", "admin", { repository: "acme/app", harness: "bu", slots: {} });
     await expect(svc.openSetupPr("acme", "acme/app")).rejects.toBeInstanceOf(NotFoundError);
@@ -251,7 +254,7 @@ describe("CiLinkService.openSetupPr — workflow YAML synthesis + branch/commit/
       githubApp: fakeGithubApp(),
       runners: fakeRunners([]), // no workspace-shared runner
       apiPublicUrl: "https://everdict.example.com",
-      fetchImpl: fakeFetch([], calls),
+      repoWriter: githubRepoWriterFactory(fakeFetch([], calls)),
     });
     await svc.upsert("acme", "admin", { repository: "acme/app", harness: "bu", slots: {} });
     await expect(svc.openSetupPr("acme", "acme/app")).rejects.toBeInstanceOf(BadRequestError);
@@ -264,7 +267,7 @@ describe("CiLinkService.openSetupPr — workflow YAML synthesis + branch/commit/
       githubApp: fakeGithubApp(),
       runners: fakeRunners(["r1"]),
       apiPublicUrl: "https://everdict.example.com",
-      fetchImpl: fakeFetch([], []),
+      repoWriter: githubRepoWriterFactory(fakeFetch([], [])),
     });
     await svc.upsert("acme", "admin", { repository: "acme/app", harness: "bu", slots: {}, runtime: "self:ws:gone" });
     await expect(svc.openSetupPr("acme", "acme/app")).rejects.toBeInstanceOf(NotFoundError);
@@ -276,22 +279,24 @@ describe("CiLinkService.openSetupPr — workflow YAML synthesis + branch/commit/
       githubApp: fakeGithubApp(),
       runners: fakeRunners([]), // no shared runner — irrelevant for a managed runtime
       apiPublicUrl: "https://everdict.example.com",
-      fetchImpl: fakeFetch(
-        [
-          (url, init) => {
-            const m = init?.method ?? "GET";
-            if (url.endsWith("/repos/acme/app") && m === "GET") return json({ default_branch: "main" });
-            if (url.endsWith("/git/ref/heads/main")) return json({ object: { sha: "base-sha" } });
-            if (url.endsWith("/git/refs") && m === "POST") return json({}, 201);
-            if (url.includes("/contents/.github/workflows/everdict-eval.yml") && m === "GET")
-              return json({ message: "Not Found" }, 404);
-            if (url.includes("/contents/.github/workflows/everdict-eval.yml") && m === "PUT") return json({}, 201);
-            if (url.endsWith("/pulls") && m === "POST")
-              return json({ html_url: "https://github.com/acme/app/pull/7" }, 201);
-            return undefined;
-          },
-        ],
-        [],
+      repoWriter: githubRepoWriterFactory(
+        fakeFetch(
+          [
+            (url, init) => {
+              const m = init?.method ?? "GET";
+              if (url.endsWith("/repos/acme/app") && m === "GET") return json({ default_branch: "main" });
+              if (url.endsWith("/git/ref/heads/main")) return json({ object: { sha: "base-sha" } });
+              if (url.endsWith("/git/refs") && m === "POST") return json({}, 201);
+              if (url.includes("/contents/.github/workflows/everdict-eval.yml") && m === "GET")
+                return json({ message: "Not Found" }, 404);
+              if (url.includes("/contents/.github/workflows/everdict-eval.yml") && m === "PUT") return json({}, 201);
+              if (url.endsWith("/pulls") && m === "POST")
+                return json({ html_url: "https://github.com/acme/app/pull/7" }, 201);
+              return undefined;
+            },
+          ],
+          [],
+        ),
       ),
     });
     await svc.upsert("acme", "admin", { repository: "acme/app", harness: "bu", slots: {}, runtime: "k8s-prod" });

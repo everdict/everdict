@@ -94,3 +94,19 @@ export {
 } from "./version-tag/version-tag-service.js";
 export type { MattermostClient, MattermostPost } from "./ports/mattermost-client.js";
 export { NotificationService, type NotificationServiceDeps } from "./notification/notification-service.js";
+export type { GithubRepoWriter, GithubRepoWriterFactory } from "./ports/github-repo-writer.js";
+export {
+  CiLinkService,
+  type CiLinkServiceDeps,
+  type GithubAppRepoAccess,
+  renderCiWorkflow,
+  type RepoInfo,
+  type UpsertCiLinkBody,
+  UpsertCiLinkBodySchema,
+  type WorkspaceRunnerRoster,
+} from "./ci-link/ci-link-service.js";
+export {
+  type GithubRunnerInstallInput,
+  type GithubRunnerInstallResult,
+  installGithubWorkspaceRunner,
+} from "./runner/github-runner-install.js";
