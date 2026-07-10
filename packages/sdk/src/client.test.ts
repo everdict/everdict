@@ -50,7 +50,12 @@ describe("EverdictClient.evaluate", () => {
     const { fetch, calls } = fakeFetch([
       res(202, { id: "sc1", status: "queued" }),
       res(200, { id: "sc1", status: "running" }),
-      res(200, { id: "sc1", status: "succeeded", summary: [{ metric: "tests_pass", count: 2, mean: 1, passRate: 1 }] }),
+      res(200, {
+        id: "sc1",
+        status: "succeeded",
+        summary: [{ metric: "tests_pass", count: 2, mean: 1, passRate: 1 }],
+        headlinePassRate: 1, // served by GET /scorecards/:id (re-architecture P1g)
+      }),
     ]);
     const verdict = await client(fetch).evaluate({ harness: "h@1", dataset: "d@2", poll: { intervalMs: 1 } });
 
@@ -102,6 +107,7 @@ describe("EverdictClient.evaluate", () => {
           flakyCases: 1,
           flakeRate: 1,
         },
+        headlinePassRate: 0.6, // served: trial-aware (passAt1)
       }),
     ]);
     const verdict = await client(fetch).evaluate({

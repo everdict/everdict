@@ -8,6 +8,7 @@ import {
 import { type ServerDeps, gate, resolvePrincipal, sendError, zodIssues } from "../route-context.js";
 import { RunScorecardBodySchema } from "./request/run-scorecard.js";
 import { scorecardDocs } from "./scorecard.docs.js";
+import { serveScorecard } from "./serve.js";
 
 // scorecards (dataset×harness batch eval → aggregated result): run/retry, push+pull trace ingest,
 // list/get, estimate, baseline↔candidate diff, leaderboard/trend, model backfill.
@@ -288,7 +289,7 @@ export function registerScorecardRoutes(app: FastifyInstance, deps: ServerDeps):
       const record = await deps.scorecardService.get(req.params.id);
       if (!record || record.tenant !== principal.workspace)
         return reply.code(404).send({ code: "NOT_FOUND", message: "scorecard not found." });
-      return reply.send(record);
+      return reply.send(serveScorecard(record));
     } catch (err) {
       return sendError(reply, err);
     }

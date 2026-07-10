@@ -52,6 +52,7 @@ export const caseResultSchema = z
   .object({
     caseId: z.string(),
     harness: z.string().optional(),
+    verdict: z.boolean().optional(), // server-computed case verdict (authority rank) — served, never recomputed here
     scores: z.array(caseScoreSchema).default([]),
     trace: z.array(traceEventSchema).default([]), // case execution trace — error events expose the failure spans
 
@@ -157,6 +158,8 @@ export const scorecardRecordSchema = z.object({
     })
     .optional(),
   scorecard: fullScorecardSchema.optional(),
+  // Server-computed rollup of per-case verdicts (detail only) — replaces the deleted client-side casePass mirror.
+  casePass: z.object({ pass: z.number().int(), total: z.number().int() }).optional(),
   export: scorecardExportSchema.optional(), // trace-sink export result (detail only)
   error: z
     .object({ code: z.string(), message: z.string(), phase: z.string().optional() })

@@ -6,6 +6,7 @@ import {
   originSource,
 } from "../../core/scorecard/scorecard-service.js";
 import { type McpToolContext, fail, ok, run } from "../mcp-context.js";
+import { serveScorecard } from "./serve.js";
 
 // Scorecard resource MCP tools — the MCP twin of scorecard.routes.ts (same ScorecardService core, second transport).
 export function registerScorecardTools(server: McpServer, ctx: McpToolContext): void {
@@ -203,7 +204,7 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
         run(principal, "scorecards:read", async () => {
           const record = await scorecards.get(id);
           if (!record || record.tenant !== ws) return fail("NOT_FOUND: scorecard not found.");
-          return ok(record);
+          return ok(serveScorecard(record));
         }),
     );
 

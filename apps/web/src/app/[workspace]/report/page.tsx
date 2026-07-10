@@ -3,7 +3,6 @@ import { BarChart3 } from 'lucide-react'
 import { getTranslations } from 'next-intl/server'
 
 import {
-  casePass,
   scorecardRecordSchema,
   scorecardsSchema,
   trackOf,
@@ -54,10 +53,12 @@ export default async function ReportPage({ params }: { params: Promise<{ workspa
   const byTrack: Record<string, ScorecardRecord[]> = { desktop: [], web: [], other: [] }
   for (const r of succeeded) byTrack[trackOf(r)].push(r)
 
+  const casePassOf = (r: ScorecardRecord) => r.casePass ?? { pass: 0, total: 0 }
+
   let combPass = 0
   let combTotal = 0
   for (const r of succeeded) {
-    const cp = casePass(r)
+    const cp = casePassOf(r)
     combPass += cp.pass
     combTotal += cp.total
   }
@@ -78,7 +79,7 @@ export default async function ReportPage({ params }: { params: Promise<{ workspa
         {TRACK_ORDER.filter((track) => byTrack[track].length > 0).map((track) => {
           const p = byTrack[track].reduce(
             (acc, r) => {
-              const cp = casePass(r)
+              const cp = casePassOf(r)
               return { pass: acc.pass + cp.pass, total: acc.total + cp.total }
             },
             { pass: 0, total: 0 }
@@ -100,7 +101,7 @@ export default async function ReportPage({ params }: { params: Promise<{ workspa
           <SectionHeader title={t(`track.${track}`)} />
           <div className="space-y-2">
             {byTrack[track].map((r) => {
-              const cp = casePass(r)
+              const cp = casePassOf(r)
               const allPass = cp.total > 0 && cp.pass === cp.total
               return (
                 <Link

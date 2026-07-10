@@ -37,6 +37,7 @@ export {
   trendSeries,
 } from "./scorecard/trend.js";
 export { type ScorecardModels, scorecardModels } from "./scorecard/models.js";
+export { headlinePassRate } from "./scorecard/headline.js";
 
 // scorecard — the ScorecardBatch aggregate (from apps/api core/scorecard)
 export {

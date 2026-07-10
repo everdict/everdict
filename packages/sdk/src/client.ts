@@ -31,25 +31,10 @@ export interface EverdictClientOptions {
   sleep?: (ms: number) => Promise<void>; // injectable (default: real timer)
 }
 
-// Authoritative-first metric order for a single headline pass rate (mirrors the server's caseVerdict ranking).
-const PASS_RATE_METRICS = ["tests_pass", "state", "answer_match", "url_matches", "dom_contains", "judge"];
-
 function parseRef(ref: Ref): { id: string; version: string } {
   const at = ref.lastIndexOf("@");
   if (at <= 0) return { id: ref, version: "latest" };
   return { id: ref.slice(0, at), version: ref.slice(at + 1) || "latest" };
-}
-
-// Reduce a scorecard record to a single headline pass rate. Trial-aware: prefer the case-weighted trial pass rate;
-// else the highest-authority metric that carries a pass rate; else any; else null (nothing pass-deciding).
-function headlinePassRate(record: ScorecardRecord): number | null {
-  if (record.trialSummary) return record.trialSummary.passAt1;
-  const summary = record.summary ?? [];
-  for (const metric of PASS_RATE_METRICS) {
-    const s = summary.find((x) => x.metric === metric && x.passRate !== undefined);
-    if (s?.passRate !== undefined) return s.passRate;
-  }
-  return summary.find((x) => x.passRate !== undefined)?.passRate ?? null;
 }
 
 // A thin, zero-dependency client for the Everdict control plane. Its evaluate() composes the existing endpoints
@@ -149,7 +134,7 @@ export class EverdictClient {
     return {
       scorecardId: record.id,
       status: record.status,
-      passRate: headlinePassRate(record),
+      passRate: record.headlinePassRate ?? null, // server-computed (re-architecture P1g) — the ranking mirror was deleted
       ...(record.trialSummary
         ? {
             passAt1: record.trialSummary.passAt1,

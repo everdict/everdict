@@ -5,7 +5,7 @@ import { getTranslations } from 'next-intl/server'
 import { CommentsSection } from '@/features/discuss'
 import { membersSchema } from '@/entities/member'
 import { runsSchema } from '@/entities/run'
-import { caseVerdict, scorecardRecordSchema, type ScorecardRecord } from '@/entities/scorecard'
+import { scorecardRecordSchema, type ScorecardRecord } from '@/entities/scorecard'
 import { authContext } from '@/shared/auth/principal'
 import { env } from '@/shared/config/env'
 import { controlPlane } from '@/shared/lib/control-plane'
@@ -139,8 +139,8 @@ export default async function ScorecardDetailPage({
   const steps = record.steps ?? []
   const live = record.status === 'queued' || record.status === 'running'
 
-  // Compute the per-case verdict once and share it across rollup · sort · filter.
-  const cased = results.map((r) => ({ r, verdict: caseVerdict(r.scores) }))
+  // The per-case verdict is server-computed (served field) — shared across rollup · sort · filter.
+  const cased = results.map((r) => ({ r, verdict: r.verdict }))
   const passed = cased.filter((c) => c.verdict === true).length
   const failedCount = cased.filter((c) => c.verdict === false).length
   const skipped = cased.filter((c) => c.verdict == null).length

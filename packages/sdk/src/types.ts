@@ -56,6 +56,8 @@ export interface ScorecardRecord {
   status: string; // queued | running | succeeded | failed | superseded
   summary?: MetricSummary[];
   trialSummary?: TrialSummary;
+  // Server-computed headline (GET /scorecards/:id) — trial-aware passAt1, else the highest-authority metric pass rate.
+  headlinePassRate?: number | null;
   error?: { code: string; message: string };
   [k: string]: unknown;
 }

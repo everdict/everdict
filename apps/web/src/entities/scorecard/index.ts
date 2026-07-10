@@ -33,4 +33,4 @@ export {
   type LeaderboardRow,
   type Leaderboard,
 } from './model/schema'
-export { caseVerdict, trackOf, casePass } from './model/verdict'
+export { trackOf } from './model/verdict'
