@@ -1,6 +1,6 @@
 import type { ScorecardRecord, ScorecardStatus } from "@everdict/contracts";
 
-// 레코드 스키마의 실체는 contracts/records — re-architecture P0c, db 는 compat 재수출.
+// Record schemas now live in contracts/records — re-architecture P0c; db keeps compat re-exports (removed in the P4 sweep).
 export {
   type MetricSummary,
   MetricSummarySchema,

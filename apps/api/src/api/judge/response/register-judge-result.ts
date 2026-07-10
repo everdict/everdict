@@ -1,2 +1,2 @@
-// wire DTO 의 실체는 contracts/wire — re-architecture P0c
+// The wire DTO now lives in contracts/wire — re-architecture P0c compat re-export (removed in the P4 sweep).
 export { RegisterJudgeResultSchema } from "@everdict/contracts/wire";

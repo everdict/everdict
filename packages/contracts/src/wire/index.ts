@@ -1,5 +1,5 @@
-// HTTP wire DTO(응답 스키마) — re-architecture P0c 에서 apps/api 의 api/*/response 로부터 이동.
-// 메인 배럴(index.ts)에는 넣지 않는다 — "@everdict/contracts/wire" 서브패스로만 노출.
+// HTTP wire DTOs (response schemas) — moved from apps/api's api/*/response in re-architecture P0c.
+// Not part of the main barrel (index.ts) — exposed only via the "@everdict/contracts/wire" subpath.
 export * from "./api-key/api-key-meta.js";
 export * from "./api-key/created-api-key.js";
 export * from "./benchmark/benchmark-catalog-entry.js";
