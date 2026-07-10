@@ -108,21 +108,24 @@ importers:
       '@everdict/agent':
         specifier: workspace:*
         version: link:../../packages/agent
+      '@everdict/application-control':
+        specifier: workspace:*
+        version: link:../../packages/application-control
       '@everdict/backends':
         specifier: workspace:*
         version: link:../../packages/backends
       '@everdict/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@everdict/domain':
+        specifier: workspace:*
+        version: link:../../packages/domain
       '@everdict/orchestrator':
         specifier: workspace:*
         version: link:../../packages/orchestrator
       '@everdict/self-hosted-runner':
         specifier: workspace:*
         version: link:../../packages/self-hosted-runner
-      '@everdict/suite':
-        specifier: workspace:*
-        version: link:../../packages/suite
       '@everdict/topology':
         specifier: workspace:*
         version: link:../../packages/topology

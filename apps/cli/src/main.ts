@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { type DriverMount, collectAuthEnv, hasClaudeAuth } from "@everdict/agent";
+import { runSuite } from "@everdict/application-control";
 import {
   BackendRegistry,
   BackendsConfigSchema,
@@ -11,6 +12,7 @@ import {
   buildRegistry,
 } from "@everdict/backends";
 import { type AgentJob, AppError, type GraderSpec, ScorecardSchema, SuiteSchema } from "@everdict/core";
+import { diffScorecards, summarizeScorecard } from "@everdict/domain";
 import { DirectOrchestrator, type Orchestrator, TemporalOrchestrator, runWorker } from "@everdict/orchestrator";
 import {
   ResilientMcpSession,
@@ -19,7 +21,6 @@ import {
   runLeaseWorkers,
   runLeasedJob,
 } from "@everdict/self-hosted-runner";
-import { diffScorecards, runSuite, summarizeScorecard } from "@everdict/suite";
 import type { DockerTopologyRuntimeOptions } from "@everdict/topology";
 import { imagePushCommand } from "./image-push.js";
 
