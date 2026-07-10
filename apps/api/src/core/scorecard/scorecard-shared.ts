@@ -26,6 +26,7 @@ import type { DatasetRegistry, HarnessInstanceRegistry, JudgeRegistry } from "@e
 import { type ArtifactStore, offloadSnapshot } from "@everdict/storage";
 import type { TraceSource, TraceSourceConfig } from "@everdict/trace";
 import { z } from "zod";
+import type { ExecuteCaseDeps } from "../execution/execute-case.js";
 import type { JudgeRunner } from "../execution/judge-runner.js";
 import type { CaseExportStream } from "../trace-sink/trace-sink-service.js";
 
@@ -199,6 +200,10 @@ export interface RunScorecardInput {
 export interface ScorecardServiceDeps {
   dispatcher: Dispatcher; // dispatch a case as a job (same path as a single run)
   store: ScorecardStore;
+  // Grader factory (@everdict/graders) injected into executeCase/collectDeferredTrace collection-mode scoring — the
+  // application layer never imports the grader impls, so apps/api supplies makeGraders here (re-architecture P2 S3).
+  // Optional: a mock dispatcher (unit tests) never reaches the collection path; main.ts always supplies it.
+  makeGraders?: ExecuteCaseDeps["makeGraders"];
   datasets: DatasetRegistry; // dataset resolution (owner/_shared fallback) + case loading
   harnesses?: HarnessInstanceRegistry; // instance resolution (template+pins→resolved HarnessSpec). Built-ins fall back.
   judges?: JudgeRegistry; // judge resolution (owner/_shared fallback)

@@ -84,6 +84,7 @@ import {
   migrate,
   sqlClient,
 } from "@everdict/db";
+import { makeGraders } from "@everdict/graders";
 import {
   type BenchmarkRegistry,
   type DatasetRegistry,
@@ -267,6 +268,9 @@ async function main(): Promise<void> {
     openTerminalStream: (tenant, runtimeList, caseId) => openTerminalStreamFn(tenant, runtimeList, caseId),
     dispatcher: meteredDispatcher,
     store,
+    // Grader factory (@everdict/graders) for executeCase's control-plane collection-mode scoring — the application
+    // layer never imports the grader impls, so the composition root supplies it (re-architecture P2 S3).
+    makeGraders,
     budget,
     requireRuntime: true, // policy (default): a run with no runtime/self target is 400 at submit — the API does not register local
     ...(artifacts ? { artifacts } : {}),
@@ -321,6 +325,8 @@ async function main(): Promise<void> {
   const scorecardService = new ScorecardService({
     dispatcher: meteredDispatcher,
     store: scorecardStore,
+    // Grader factory (@everdict/graders) for executeCase/collectDeferredTrace collection-mode scoring (re-architecture P2 S3).
+    makeGraders,
     breaker, // shared with the queue view — spillover writes, observability reads
     onOrchestrationEvent: (event) => {
       if (event.kind === "spillover")

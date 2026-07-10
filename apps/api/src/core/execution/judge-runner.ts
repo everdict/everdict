@@ -1,3 +1,4 @@
+import type { JudgeRunner } from "@everdict/application-control";
 import type {
   AgentJob,
   CaseResult,
@@ -24,10 +25,10 @@ import type { HarnessInstanceRegistry, ModelRegistry, RubricRegistry } from "@ev
 // Judge runner — JudgeSpec + tenant + GradeContext (trace) → Score[]. The control plane judges from the trace.
 // model (anthropic/openai) and harness are unified via modelJudge (a transport) — only the transport differs (API call / agent dispatch).
 // One judge usually yields one score; a multi-criteria judge yields one per criterion plus the overall (multi-metric contract).
-export interface JudgeRunner {
-  // placement = the source run's placement (where the observations are). A harness judge prefers spec.runtime, else inherits this (co-locate).
-  run(spec: JudgeSpec, tenant: string, ctx: GradeContext, placement?: Placement): Promise<Score[]>;
-}
+// The JudgeRunner interface (the port ScoringService depends on) now lives in @everdict/application-control; this file
+// is its default impl (defaultJudgeRunner) — kept in apps/api because it composes @everdict/graders transports the
+// application layer must not import (re-architecture P2 S3 skip-valve). Re-exported for the compat surface.
+export type { JudgeRunner };
 
 // The metric key that distinguishes multiple judges in the summary.
 const metricOf = (spec: JudgeSpec): string => `judge:${spec.id}`;

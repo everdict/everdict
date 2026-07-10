@@ -1,7 +1,12 @@
+import { type ExecuteCaseDeps, executeCase } from "@everdict/application-control";
 import type { Dispatcher } from "@everdict/backends";
 import type { AgentJob, CaseResult } from "@everdict/core";
+import { makeGraders } from "@everdict/graders";
 import { describe, expect, it } from "vitest";
-import { executeCase } from "./execute-case.js";
+
+// makeGraders is injected into the execution deps now (the application layer never imports @everdict/graders);
+// apps/api supplies the real factory. Spread it into every deps object so the collection-mode scoring path is exercised.
+const deps = (d: Omit<ExecuteCaseDeps, "makeGraders">): ExecuteCaseDeps => ({ makeGraders, ...d });
 
 const JOB: AgentJob = {
   evalCase: {
@@ -50,10 +55,10 @@ describe("executeCase — pure execution (token resolve+attach → dispatch)", (
       },
     };
     await executeCase(
-      {
+      deps({
         dispatcher: cap.dispatcher,
         repoTokenFor: async (owner, cid) => (owner === "alice" && cid === "conn1" ? "tok" : undefined),
-      },
+      }),
       "alice",
       gitJob,
     );
@@ -71,11 +76,11 @@ describe("executeCase — pure execution (token resolve+attach → dispatch)", (
       },
     };
     await executeCase(
-      {
+      deps({
         dispatcher: cap.dispatcher,
         installationTokenFor: async (ws, git) => (ws === "acme" && git.includes("acme/api") ? "app-tok" : undefined),
         repoTokenFor: async () => "personal-tok",
-      },
+      }),
       "alice",
       gitJob,
     );
@@ -93,11 +98,11 @@ describe("executeCase — pure execution (token resolve+attach → dispatch)", (
       },
     };
     await executeCase(
-      {
+      deps({
         dispatcher: cap.dispatcher,
         installationTokenFor: async () => undefined,
         repoTokenFor: async (owner, cid) => (owner === "alice" && cid === "conn1" ? "personal-tok" : undefined),
-      },
+      }),
       "alice",
       gitJob,
     );
@@ -106,13 +111,13 @@ describe("executeCase — pure execution (token resolve+attach → dispatch)", (
 
   it("public/non-repo cases attach no token (even when repoTokenFor exists)", async () => {
     const cap = capture();
-    await executeCase({ dispatcher: cap.dispatcher, repoTokenFor: async () => "tok" }, "alice", JOB);
+    await executeCase(deps({ dispatcher: cap.dispatcher, repoTokenFor: async () => "tok" }), "alice", JOB);
     expect(cap.seen()?.repoToken).toBeUndefined();
   });
 
   it("returns the result as-is — no settlement/notification/offload (that's the orchestrator's job)", async () => {
     const cap = capture();
-    const result = await executeCase({ dispatcher: cap.dispatcher }, "u", JOB);
+    const result = await executeCase(deps({ dispatcher: cap.dispatcher }), "u", JOB);
     expect(result.caseId).toBe("c1");
     expect(cap.seen()?.evalCase.id).toBe("c1");
   });
@@ -125,7 +130,7 @@ describe("executeCase — attach workspace-registry pull credentials (job.regist
     const cap = capture();
     const job: AgentJob = { ...JOB, evalCase: { ...JOB.evalCase, image: "ghcr.io/acme/sbench:v1" } };
     await executeCase(
-      { dispatcher: cap.dispatcher, registryAuthsFor: async (ws) => (ws === "acme" ? [AUTH] : []) },
+      deps({ dispatcher: cap.dispatcher, registryAuthsFor: async (ws) => (ws === "acme" ? [AUTH] : []) }),
       "u",
       job,
     );
@@ -135,7 +140,7 @@ describe("executeCase — attach workspace-registry pull credentials (job.regist
   it("when the job image isn't on that registry's host, no credentials are attached (avoids needless leakage)", async () => {
     const cap = capture();
     const job: AgentJob = { ...JOB, evalCase: { ...JOB.evalCase, image: "spreadsheetbench:v1" } };
-    await executeCase({ dispatcher: cap.dispatcher, registryAuthsFor: async () => [AUTH] }, "u", job);
+    await executeCase(deps({ dispatcher: cap.dispatcher, registryAuthsFor: async () => [AUTH] }), "u", job);
     expect(cap.seen()?.registryAuth).toBeUndefined();
   });
 
@@ -154,7 +159,7 @@ describe("executeCase — attach workspace-registry pull credentials (job.regist
     };
     // the spec image is external, but the pin overrides to a workspace registry → attach.
     const job: AgentJob = { ...JOB, harnessSpec: serviceSpec, imagePins: { agent: "ghcr.io/acme/agent:pr-1" } };
-    await executeCase({ dispatcher: cap.dispatcher, registryAuthsFor: async () => [AUTH] }, "u", job);
+    await executeCase(deps({ dispatcher: cap.dispatcher, registryAuthsFor: async () => [AUTH] }), "u", job);
     expect(cap.seen()?.registryAuth).toEqual(AUTH);
   });
 });
@@ -174,7 +179,7 @@ describe("executeCase — command-harness image promotion (evalCase.image ??= ha
 
   it("when a case specifies no image, promotes the command harness's image (the CI re-pin target) as the execution container", async () => {
     const cap = capture();
-    await executeCase({ dispatcher: cap.dispatcher }, "u", { ...JOB, harnessSpec: commandSpec("codex:v2") });
+    await executeCase(deps({ dispatcher: cap.dispatcher }), "u", { ...JOB, harnessSpec: commandSpec("codex:v2") });
     expect(cap.seen()?.evalCase.image).toBe("codex:v2");
   });
 
@@ -185,13 +190,13 @@ describe("executeCase — command-harness image promotion (evalCase.image ??= ha
       evalCase: { ...JOB.evalCase, image: "case:v9" },
       harnessSpec: commandSpec("codex:v2"),
     };
-    await executeCase({ dispatcher: cap.dispatcher }, "u", jobWithImage);
+    await executeCase(deps({ dispatcher: cap.dispatcher }), "u", jobWithImage);
     expect(cap.seen()?.evalCase.image).toBe("case:v9");
   });
 
   it("for a harness with no image, the case image stays as-is with no promotion (host-native preserved)", async () => {
     const cap = capture();
-    await executeCase({ dispatcher: cap.dispatcher }, "u", { ...JOB, harnessSpec: commandSpec() });
+    await executeCase(deps({ dispatcher: cap.dispatcher }), "u", { ...JOB, harnessSpec: commandSpec() });
     expect(cap.seen()?.evalCase.image).toBeUndefined();
   });
 });
@@ -222,7 +227,7 @@ describe("executeCase — out-of-job trace collection (traceRef completion)", ()
   it("with a traceRef, pulls from the platform to complete the trace and scores only the deferred observation grader (steps)", async () => {
     let fetchedBy = "";
     const result = await executeCase(
-      {
+      deps({
         dispatcher: dispatcherOf(deferredResult),
         buildTraceSource: (cfg) => ({
           async fetch(runId) {
@@ -233,7 +238,7 @@ describe("executeCase — out-of-job trace collection (traceRef completion)", ()
             ];
           },
         }),
-      },
+      }),
       "u",
       jobWithGraders,
     );
@@ -248,14 +253,14 @@ describe("executeCase — out-of-job trace collection (traceRef completion)", ()
 
   it("a pull failure classifies the case {collect, infra, retryable} while execution output (ground-truth scores) is preserved", async () => {
     const result = await executeCase(
-      {
+      deps({
         dispatcher: dispatcherOf(deferredResult),
         buildTraceSource: () => ({
           async fetch() {
             throw new Error("collector down");
           },
         }),
-      },
+      }),
       "u",
       jobWithGraders,
     );
@@ -284,14 +289,14 @@ describe("executeCase — out-of-job trace collection (traceRef completion)", ()
       },
     });
     const result = await executeCase(
-      {
+      deps({
         dispatcher: dispatcherOf(failedInJob),
         buildTraceSource: () => ({
           async fetch() {
             return [{ t: 1, kind: "tool_call", id: "x", name: "bash", args: {} }];
           },
         }),
-      },
+      }),
       "u",
       jobWithGraders,
     );
@@ -311,7 +316,7 @@ describe("executeCase — out-of-job trace collection (traceRef completion)", ()
       },
     });
     const result = await executeCase(
-      {
+      deps({
         dispatcher: dispatcherOf(failedInJob),
         sleep: async () => {},
         buildTraceSource: () => ({
@@ -319,7 +324,7 @@ describe("executeCase — out-of-job trace collection (traceRef completion)", ()
             return []; // reachable but nothing correlated — the failed case is NOT healed by an empty pull
           },
         }),
-      },
+      }),
       "u",
       jobWithGraders,
     );
@@ -341,7 +346,7 @@ describe("executeCase — out-of-job trace collection (traceRef completion)", ()
     });
     let seenCfg: { headers?: Record<string, string>; correlate?: string; project?: string } | undefined;
     const result = await executeCase(
-      {
+      deps({
         dispatcher: dispatcherOf(authedRef),
         secretsFor: async (tenant): Promise<Record<string, string>> =>
           tenant === "acme" ? { MLFLOW_AUTH: "Basic abc" } : {},
@@ -353,7 +358,7 @@ describe("executeCase — out-of-job trace collection (traceRef completion)", ()
             },
           };
         },
-      },
+      }),
       "u",
       jobWithGraders,
     );
@@ -367,7 +372,7 @@ describe("executeCase — out-of-job trace collection (traceRef completion)", ()
     let fetches = 0;
     const slept: number[] = [];
     const retried = await executeCase(
-      {
+      deps({
         dispatcher: dispatcherOf(deferredResult),
         sleep: async (ms) => void slept.push(ms),
         buildTraceSource: () => ({
@@ -376,7 +381,7 @@ describe("executeCase — out-of-job trace collection (traceRef completion)", ()
             return fetches < 3 ? [] : [{ t: 1, kind: "llm_call", model: "m" }];
           },
         }),
-      },
+      }),
       "u",
       jobWithGraders,
     );
@@ -386,7 +391,7 @@ describe("executeCase — out-of-job trace collection (traceRef completion)", ()
 
     // authSecret reference + unregistered secret → execution output preserved + an error event (reason it couldn't collect).
     const missing = await executeCase(
-      {
+      deps({
         dispatcher: dispatcherOf((job) => ({
           ...deferredResult(job),
           traceRef: { kind: "otel", endpoint: "http://j", runId: "r", authSecret: "NOPE" },
@@ -397,7 +402,7 @@ describe("executeCase — out-of-job trace collection (traceRef completion)", ()
             throw new Error("must not be called — auth resolution fails first");
           },
         }),
-      },
+      }),
       "u",
       jobWithGraders,
     );
@@ -407,9 +412,9 @@ describe("executeCase — out-of-job trace collection (traceRef completion)", ()
   });
 
   it("a result with no traceRef (default job collection) passes through unchanged (no regression) + an unset buildTraceSource is surfaced", async () => {
-    const plain = await executeCase({ dispatcher: dispatcherOf(resultFor) }, "u", jobWithGraders);
+    const plain = await executeCase(deps({ dispatcher: dispatcherOf(resultFor) }), "u", jobWithGraders);
     expect(plain.trace).toEqual([]); // untouched
-    const noSource = await executeCase({ dispatcher: dispatcherOf(deferredResult) }, "u", JOB);
+    const noSource = await executeCase(deps({ dispatcher: dispatcherOf(deferredResult) }), "u", JOB);
     expect(noSource.trace.some((e) => e.kind === "error" && e.message.includes("buildTraceSource"))).toBe(true);
   });
 });

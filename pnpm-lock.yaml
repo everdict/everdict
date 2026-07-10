@@ -263,6 +263,9 @@ importers:
 
   packages/application-control:
     dependencies:
+      '@everdict/application-execution':
+        specifier: workspace:*
+        version: link:../application-execution
       '@everdict/contracts':
         specifier: workspace:*
         version: link:../contracts

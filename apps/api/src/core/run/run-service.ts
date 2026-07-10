@@ -15,7 +15,7 @@ import type { RunRecord, RunStore } from "@everdict/db";
 import { type ArtifactStore, offloadSnapshot } from "@everdict/storage";
 import type { TraceSource, TraceSourceConfig } from "@everdict/trace";
 import { assertRuntimeTarget } from "../../common/require-runtime.js";
-import { executeCase } from "../execution/execute-case.js";
+import { type ExecuteCaseDeps, executeCase } from "../execution/execute-case.js";
 import { Run, type RunTransition } from "./run.js";
 
 // Where a running case's platform trace is accumulating (derived on read; docs/architecture/live-observability.md).
@@ -43,6 +43,10 @@ export interface SubmitInput {
 export interface RunServiceDeps {
   dispatcher: Dispatcher; // Scheduler (recommended) or Router — placement/fairness/autoscaling live there
   store: RunStore;
+  // Grader factory (@everdict/graders) injected into executeCase's collection-mode scoring — the application layer
+  // never imports the grader impls, so apps/api supplies makeGraders here (re-architecture P2 S3). Optional: a mock
+  // dispatcher (unit tests) never reaches the collection path, so it may be omitted there; main.ts always supplies it.
+  makeGraders?: ExecuteCaseDeps["makeGraders"];
   // Source factory for out-of-job trace collection (collect="control-plane") — used by executeCase to complete a traceRef result.
   buildTraceSource?: (cfg: TraceSourceConfig) => TraceSource;
   // Auth for the collection pull (re-resolving the traceRef.authSecret name) — the workspace SecretStore's decrypted value. Same as scorecard.
