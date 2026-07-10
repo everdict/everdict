@@ -6,4 +6,5 @@ export * from "./run.js";
 export * from "./schedule.js";
 export * from "./scorecard.js";
 export * from "./view.js";
+export * from "./workspace.js";
 export * from "./workspace-settings.js";

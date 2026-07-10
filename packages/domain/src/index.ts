@@ -38,6 +38,34 @@ export {
 } from "./scorecard/trend.js";
 export { type ScorecardModels, scorecardModels } from "./scorecard/models.js";
 
+// scorecard — the ScorecardBatch aggregate (from apps/api core/scorecard)
+export {
+  type NewChildRunInput,
+  type NewQueuedBatchInput,
+  type NewQueuedIngestInput,
+  ScorecardBatch,
+  type ScorecardOrchestration,
+  type ScorecardOutcomeExtras,
+  type ScorecardRunError,
+  type ScorecardTransition,
+} from "./scorecard/scorecard-batch.js";
+
+// run — the Run aggregate (from apps/api core/run)
+export { type NewQueuedRunInput, Run, type RunTransition } from "./run/run.js";
+
+// member — the last-admin invariant (from apps/api core/member)
+export { MembershipPolicy } from "./member/membership-policy.js";
+
+// schedule — the Schedule aggregate + cron validity (from apps/api core/schedule)
+export {
+  isValidCron,
+  type NewScheduleInput,
+  Schedule,
+  type ScheduleActor,
+  type ScheduleSpec,
+  type ScheduleTransition,
+} from "./schedule/schedule.js";
+
 // auth — the role→action matrix + the identity subject shape (from @everdict/auth)
 export {
   type Action,

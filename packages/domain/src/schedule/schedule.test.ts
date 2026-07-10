@@ -1,5 +1,5 @@
-import { BadRequestError, ForbiddenError } from "@everdict/core";
-import { type ScheduleRecord, ScheduleRecordSchema, type ScheduleRunTemplate } from "@everdict/db";
+import { BadRequestError, ForbiddenError } from "@everdict/contracts";
+import { type ScheduleRecord, ScheduleRecordSchema, type ScheduleRunTemplate } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { Schedule, isValidCron } from "./schedule.js";
 

@@ -21,6 +21,7 @@
     "@everdict/core": "workspace:*",
     "@everdict/datasets": "workspace:*",
     "@everdict/db": "workspace:*",
+    "@everdict/domain": "workspace:*",
     "@everdict/graders": "workspace:*",
     "@everdict/registry": "workspace:*",
     "@everdict/storage": "workspace:*",

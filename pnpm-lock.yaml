@@ -50,6 +50,9 @@ importers:
       '@everdict/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@everdict/domain':
+        specifier: workspace:*
+        version: link:../../packages/domain
       '@everdict/graders':
         specifier: workspace:*
         version: link:../../packages/graders

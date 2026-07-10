@@ -1,5 +1,5 @@
-import { BadRequestError, type CaseResult, ConflictError } from "@everdict/core";
-import { RunRecordSchema, type ScorecardRecord, ScorecardRecordSchema } from "@everdict/db";
+import { BadRequestError, type CaseResult, ConflictError } from "@everdict/contracts";
+import { RunRecordSchema, type ScorecardRecord, ScorecardRecordSchema } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { ScorecardBatch } from "./scorecard-batch.js";
 

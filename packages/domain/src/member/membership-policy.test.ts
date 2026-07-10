@@ -1,5 +1,5 @@
-import { ConflictError } from "@everdict/core";
-import type { MemberRecord } from "@everdict/db";
+import { ConflictError } from "@everdict/contracts";
+import type { MemberRecord } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { MembershipPolicy } from "./membership-policy.js";
 

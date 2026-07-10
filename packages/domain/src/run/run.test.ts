@@ -1,5 +1,5 @@
-import { ConflictError } from "@everdict/core";
-import { RunRecordSchema } from "@everdict/db";
+import { ConflictError } from "@everdict/contracts";
+import { RunRecordSchema } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { Run } from "./run.js";
 
