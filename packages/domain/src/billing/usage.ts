@@ -1,4 +1,4 @@
-import type { CaseResult } from "@everdict/core";
+import type { CaseResult } from "@everdict/contracts";
 import { billingTenant, costOf } from "./cost.js";
 
 // Usage metering for billing — the pricing surface. Meter-only: it NEVER blocks (distinct from the enforcement

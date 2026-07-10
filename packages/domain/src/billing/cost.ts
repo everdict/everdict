@@ -1,4 +1,4 @@
-import type { CaseResult, TraceEvent } from "@everdict/core";
+import type { CaseResult, TraceEvent } from "@everdict/contracts";
 
 // Cost attribution — the shared vocabulary of the billing domain (enforcement budget + metered usage both use it).
 

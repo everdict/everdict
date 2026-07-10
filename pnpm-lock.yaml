@@ -263,6 +263,9 @@ importers:
       '@everdict/db':
         specifier: workspace:*
         version: link:../db
+      '@everdict/domain':
+        specifier: workspace:*
+        version: link:../domain
       jose:
         specifier: ^5.9.6
         version: 5.10.0
@@ -293,6 +296,9 @@ importers:
       '@everdict/core':
         specifier: workspace:*
         version: link:../core
+      '@everdict/domain':
+        specifier: workspace:*
+        version: link:../domain
 
   packages/contracts:
     dependencies:

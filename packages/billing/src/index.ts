@@ -1,19 +1,21 @@
-// @everdict/billing — the cost/billing domain: cost attribution + enforcement budget + metered usage.
-export { billingTenant, costOf, sumCost } from "./cost.js";
+// @everdict/billing — the cost/billing domain rules now live in @everdict/domain (re-architecture
+// P1b); this package is a compat re-export shell (removed in the P4 sweep). The persistent
+// control-plane impls (PersistentBudget/PersistentUsageMeter) stay in apps/api as adapters.
 export {
+  assertWithinBudget,
+  billingTenant,
   type BudgetLimit,
   type BudgetTracker,
   type BudgetUsage,
-  type InMemoryBudgetOptions,
-  assertWithinBudget,
+  costOf,
   inMemoryBudget,
-} from "./budget.js";
-export {
+  type InMemoryBudgetOptions,
+  inMemoryUsageMeter,
+  sumCost,
   type TenantUsage,
+  totalUsage,
+  USAGE_SOURCES,
   type UsageMeter,
   type UsageSource,
   type UsageTotals,
-  USAGE_SOURCES,
-  inMemoryUsageMeter,
-  totalUsage,
-} from "./usage.js";
+} from "@everdict/domain";

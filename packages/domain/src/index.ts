@@ -37,3 +37,35 @@ export {
   trendSeries,
 } from "./scorecard/trend.js";
 export { type ScorecardModels, scorecardModels } from "./scorecard/models.js";
+
+// auth — the role→action matrix + the identity subject shape (from @everdict/auth)
+export {
+  type Action,
+  API_KEY_SCOPES,
+  type ApiKeyScope,
+  authorize,
+  can,
+  EVERDICT_ROLES,
+  type EverdictRole,
+} from "./auth/authz.js";
+export type { AuthContext, Principal } from "./auth/principal.js";
+
+// billing — cost attribution + enforcement budget + metered usage (from @everdict/billing)
+export { billingTenant, costOf, sumCost } from "./billing/cost.js";
+export {
+  assertWithinBudget,
+  type BudgetLimit,
+  type BudgetTracker,
+  type BudgetUsage,
+  inMemoryBudget,
+  type InMemoryBudgetOptions,
+} from "./billing/budget.js";
+export {
+  inMemoryUsageMeter,
+  type TenantUsage,
+  totalUsage,
+  USAGE_SOURCES,
+  type UsageMeter,
+  type UsageSource,
+  type UsageTotals,
+} from "./billing/usage.js";

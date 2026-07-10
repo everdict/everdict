@@ -1,4 +1,4 @@
-import { PaymentRequiredError } from "@everdict/core";
+import { PaymentRequiredError } from "@everdict/contracts";
 
 // Enforcement budget — the blocking half of the billing domain (admit() throws 402; distinct from meter-only usage).
 
