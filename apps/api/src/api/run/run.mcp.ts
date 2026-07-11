@@ -53,12 +53,12 @@ export function registerRunTools(server: McpServer, ctx: McpToolContext): void {
     "get_run_logs",
     {
       description:
-        "Current raw stdout of a run's job (live progress — poll while running; sentinel-stripped). found=false = nothing to tail yet",
-      inputSchema: { id: z.string() },
+        "Current raw output of a run's job (live progress — poll while running; sentinel-stripped). stream: stdout (default, the result stream) | stderr (harness progress logs). found=false = nothing to tail yet",
+      inputSchema: { id: z.string(), stream: z.enum(["stdout", "stderr"]).optional() },
     },
-    ({ id }) =>
+    ({ id, stream }) =>
       run(principal, "runs:read", async () => {
-        const out = await deps.service.logs(id);
+        const out = await deps.service.logs(id, stream);
         if (!out || out.record.tenant !== ws) return fail("NOT_FOUND: run not found.");
         return ok({ status: out.record.status, found: out.text !== undefined, text: out.text ?? "" });
       }),

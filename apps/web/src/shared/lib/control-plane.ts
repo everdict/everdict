@@ -93,8 +93,12 @@ export const controlPlane = {
     ),
   getRun: <T>(auth: AuthContext, id: string) => call<T>(auth, `/runs/${encodeURIComponent(id)}`),
   // Live-progress log snapshot (the LiveLogs widget polls; found=false = nothing to tail yet).
-  getRunLogs: <T>(auth: AuthContext, id: string) =>
-    call<T>(auth, `/runs/${encodeURIComponent(id)}/logs`),
+  // stream: stdout (default, the result stream) | stderr (harness progress logs).
+  getRunLogs: <T>(auth: AuthContext, id: string, stream?: 'stdout' | 'stderr') =>
+    call<T>(
+      auth,
+      `/runs/${encodeURIComponent(id)}/logs${stream ? `?stream=${encodeURIComponent(stream)}` : ''}`
+    ),
   // One-shot exec inside a run's live sandbox (SandboxTerminal). Creator-or-admin, enforced by the control plane.
   execInRun: <T>(auth: AuthContext, id: string, body: unknown) =>
     call<T>(auth, `/runs/${encodeURIComponent(id)}/exec`, {

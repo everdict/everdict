@@ -7,6 +7,14 @@ import { z } from "zod";
 import { errorResponses, toJsonSchema } from "../openapi.js";
 
 const runIdParams = toJsonSchema(z.object({ id: z.string().describe("Run id") }));
+const logStreamQuery = toJsonSchema(
+  z.object({
+    stream: z
+      .enum(["stdout", "stderr"])
+      .optional()
+      .describe("Job output stream to tail — stdout (default, the result stream) | stderr (harness progress logs)"),
+  }),
+);
 
 // OpenAPI descriptors for the run observability routes (live logs / exec / terminal ticket / screen) —
 // documentation only (no-op compilers; rule api-layer). Attached by run-observability.routes.ts.
@@ -14,11 +22,13 @@ const docs = {
   logs: {
     summary: "Get a run's live log snapshot",
     description:
-      "Snapshot of the case job's current stdout (sentinel-stripped) for poll-and-diff clients. " +
-      "Workspace-scoped (other workspace = 404); requires runs:read (viewer+). found=false means there is " +
-      "nothing to tail yet (queued / GC'd / no backend support).",
+      "Snapshot of the case job's current output (sentinel-stripped) for poll-and-diff clients. " +
+      "?stream=stdout (default) | stderr — many harnesses log progress to stderr while stdout carries only " +
+      "the result block (K8s pods merge both). Workspace-scoped (other workspace = 404); requires runs:read " +
+      "(viewer+). found=false means there is nothing to tail yet (queued / GC'd / no backend support).",
     tags: ["run"],
     params: runIdParams,
+    querystring: logStreamQuery,
     response: {
       200: { description: "Log snapshot", ...toJsonSchema(RunLogsResponseSchema) },
       ...errorResponses(401, 403, 404),
@@ -70,9 +80,11 @@ const docs = {
     description:
       "Server-sent events tail of the run's logs: emits appended chunks as JSON-encoded strings (data events) " +
       "every ~2s until the run reaches a terminal status, then `event: end` with the final status. Heartbeat " +
-      "comments keep proxies alive. Workspace-scoped; requires runs:read (viewer+).",
+      "comments keep proxies alive. ?stream=stdout (default) | stderr selects the tailed job stream. " +
+      "Workspace-scoped; requires runs:read (viewer+).",
     tags: ["run"],
     params: runIdParams,
+    querystring: logStreamQuery,
     produces: ["text/event-stream"],
     response: {
       200: {

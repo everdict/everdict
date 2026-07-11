@@ -1,7 +1,14 @@
 import { recoverInterrupted } from "@everdict/application-control";
 import type { RunService } from "@everdict/application-control";
 import type { ScorecardService } from "@everdict/application-control";
-import { type Backend, isObservable, isRecoverable, isScreenCapturable, isShellable } from "@everdict/backends";
+import {
+  type Backend,
+  type LogStream,
+  isObservable,
+  isRecoverable,
+  isScreenCapturable,
+  isShellable,
+} from "@everdict/backends";
 import type { CaseResult, RegistryAuth, RuntimeSpec } from "@everdict/contracts";
 import type { RunStore, ScorecardStore } from "@everdict/db";
 import type { RuntimeRegistry } from "@everdict/registry";
@@ -66,15 +73,17 @@ export function buildRuntimeAccess(deps: {
   };
 
   // Live-progress log read — same lane resolution as adoption; the first backend with a readable log wins.
+  // stream=stderr reads the job's stderr (harness progress); default stdout (the result stream).
   const readCaseLogsFn = async (
     tenant: string,
     runtimeList: string | undefined,
     caseId: string,
+    stream?: LogStream,
   ): Promise<string | undefined> => {
     let text: string | undefined;
     await eachRuntimeBackend(tenant, runtimeList, async (backend) => {
       if (!isObservable(backend)) return false;
-      text = await backend.logs(caseId).catch(() => undefined);
+      text = await backend.logs(caseId, stream).catch(() => undefined);
       return text !== undefined;
     });
     return text;

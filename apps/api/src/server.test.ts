@@ -1327,6 +1327,34 @@ describe("API — run live logs (observability: snapshot + SSE tail)", () => {
     expect(other.statusCode).toBe(404); // another workspace's run is invisible, not forbidden
   });
 
+  it("?stream=stderr tails the job's stderr; a bogus stream value is 400", async () => {
+    const keyStore = new InMemoryTenantKeyStore();
+    const store = new InMemoryRunStore();
+    const seen: Array<string | undefined> = [];
+    const svc = new RunService({
+      dispatcher: okDispatcher,
+      store,
+      readCaseLogs: async (_t, _r, _c, stream) => {
+        seen.push(stream);
+        return stream === "stderr" ? "INFO agent progress" : "result block";
+      },
+    });
+    const app = buildServer({
+      service: svc,
+      authenticator: compositeAuthenticator([apiKeyAuthenticator({ keyStore })]),
+      keyStore,
+    });
+    const rec = await svc.submit({ tenant: "acme", harness: { id: "s", version: "0" }, case: CASE });
+    const h = { "x-everdict-tenant": "acme" };
+    const err = await app.inject({ method: "GET", url: `/runs/${rec.id}/logs?stream=stderr`, headers: h });
+    expect(err.json()).toMatchObject({ found: true, text: "INFO agent progress" });
+    const out = await app.inject({ method: "GET", url: `/runs/${rec.id}/logs`, headers: h });
+    expect(out.json()).toMatchObject({ found: true, text: "result block" });
+    expect(seen).toEqual(["stderr", "stdout"]);
+    const bad = await app.inject({ method: "GET", url: `/runs/${rec.id}/logs?stream=both`, headers: h });
+    expect(bad.statusCode).toBe(400);
+  });
+
   it("GET /runs/:id/logs/stream emits SSE chunks and closes with event:end once the run is terminal", async () => {
     const keyStore = new InMemoryTenantKeyStore();
     const store = new InMemoryRunStore();

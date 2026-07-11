@@ -82,7 +82,14 @@ export interface RunServiceDeps {
   registryAuthsFor?: (workspace: string) => Promise<RegistryAuth[]>;
   // Live-progress log read (observability ②): resolve the run's runtime lane to a live backend and read the
   // case job's current stdout (Backend.logs). Best-effort — absent/miss = no logs, never an error.
-  readCaseLogs?: (tenant: string, runtimeList: string | undefined, caseId: string) => Promise<string | undefined>;
+  // stream: stdout (default, the result stream) | stderr (harness progress logs) — structural twin of the
+  // backends LogStream union (this layer can't import from @everdict/backends).
+  readCaseLogs?: (
+    tenant: string,
+    runtimeList: string | undefined,
+    caseId: string,
+    stream?: "stdout" | "stderr",
+  ) => Promise<string | undefined>;
   // Open an interactive shell stream inside a run's live sandbox (observability ⑥). undefined = no live container.
   openTerminalStream?: (
     tenant: string,
@@ -240,13 +247,17 @@ export class RunService {
     return { record, stream };
   }
 
-  // Live-progress logs (observability ②) — the record plus the case job's current raw stdout. text=undefined
+  // Live-progress logs (observability ②) — the record plus the case job's current raw output. text=undefined
   // when there is no job to read (queued, GC'd, or the backend can't tail); the record still scopes/authorizes.
-  async logs(id: string): Promise<{ record: RunRecord; text: string | undefined } | undefined> {
+  // stream=stderr tails the job's stderr — harnesses often log progress there while stdout carries only the result.
+  async logs(
+    id: string,
+    stream?: "stdout" | "stderr",
+  ): Promise<{ record: RunRecord; text: string | undefined } | undefined> {
     const record = await this.deps.store.get(id);
     if (!record) return undefined;
     const text = this.deps.readCaseLogs
-      ? await this.deps.readCaseLogs(record.tenant, record.runtime, record.caseId).catch(() => undefined)
+      ? await this.deps.readCaseLogs(record.tenant, record.runtime, record.caseId, stream).catch(() => undefined)
       : undefined;
     return { record, text };
   }

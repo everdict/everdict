@@ -15,7 +15,12 @@ import type { RuntimeSecretsFn, ScopedSecretsFn } from "./types.js";
 
 // Live-observability lane readers (from buildRuntimeAccess) — RunService wraps them in lazy closures.
 export interface RuntimeAccessReaders {
-  readCaseLogsFn: (tenant: string, runtimeList: string | undefined, caseId: string) => Promise<string | undefined>;
+  readCaseLogsFn: (
+    tenant: string,
+    runtimeList: string | undefined,
+    caseId: string,
+    stream?: "stdout" | "stderr",
+  ) => Promise<string | undefined>;
   execInSandboxFn: (
     tenant: string,
     runtimeList: string | undefined,
@@ -75,7 +80,7 @@ export function buildRun(deps: {
 
   const service = new RunService({
     // Lazy — the lane-resolving closure is built further down (after the runtime registry wiring).
-    readCaseLogs: (tenant, runtimeList, caseId) => readCaseLogsFn(tenant, runtimeList, caseId),
+    readCaseLogs: (tenant, runtimeList, caseId, stream) => readCaseLogsFn(tenant, runtimeList, caseId, stream),
     execInSandbox: (tenant, runtimeList, caseId, command) => execInSandboxFn(tenant, runtimeList, caseId, command),
     captureBrowserScreen: (tenant, runtimeList, runId) => captureBrowserScreenFn(tenant, runtimeList, runId),
     openTerminalStream: (tenant, runtimeList, caseId) => openTerminalStreamFn(tenant, runtimeList, caseId),

@@ -2182,6 +2182,8 @@
   "liveLogs": {
     "streaming": "Running — following the job log every 3s",
     "finished": "Finished — final log",
-    "waiting": "Nothing to tail yet (job queued)"
+    "waiting": "Nothing to tail yet (job queued)",
+    "stdoutHint": "Job stdout — the result stream",
+    "stderrHint": "Job stderr — harness progress logs"
   }
 }

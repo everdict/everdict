@@ -12,6 +12,7 @@ export {
   isRecoverable,
   isScreenCapturable,
   isShellable,
+  type LogStream,
   type Observable,
   type Probeable,
   type ProbeResult,

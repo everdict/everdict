@@ -2182,6 +2182,8 @@
   "liveLogs": {
     "streaming": "실행 중 — 잡 로그를 3초마다 따라가요",
     "finished": "실행 종료 — 마지막 로그",
-    "waiting": "아직 테일링할 로그가 없어요 (잡 대기 중)"
+    "waiting": "아직 테일링할 로그가 없어요 (잡 대기 중)",
+    "stdoutHint": "잡 stdout — 최종 결과 스트림",
+    "stderrHint": "잡 stderr — 하네스 진행 로그"
   }
 }

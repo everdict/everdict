@@ -18,6 +18,7 @@ import {
   type Backend,
   type BackendCapacity,
   type DispatchOptions,
+  type LogStream,
   type Observable,
   type ProbeResult,
   type Probeable,
@@ -475,9 +476,11 @@ export class K8sBackend implements Backend, Recoverable, Observable, Probeable {
   // per-dispatch materialized kubeconfig, so a long-lived interactive stream needs the temp file kept open for the
   // stream's lifetime — a follow-up. One-shot exec above already works. The WS route degrades gracefully.)
 
-  // Current stdout of the case's newest job pod — live-progress tail (a pending pod reads as undefined and the
-  // caller polls again). Sentinel payload stripped. Best-effort, never throws.
-  async logs(caseId: string): Promise<string | undefined> {
+  // Current output of the case's newest job pod — live-progress tail (a pending pod reads as undefined and the
+  // caller polls again). Sentinel payload stripped. Best-effort, never throws. The stream parameter is accepted
+  // but ignored: a K8s pod log interleaves stdout and stderr in one stream (kubelet doesn't separate them), so
+  // both selections read the same combined text.
+  async logs(caseId: string, _stream?: LogStream): Promise<string | undefined> {
     try {
       return await this.withApi(async (api) => {
         const jobs = await api.jobsByLabel(`everdict.dev/case=${caseSlug(caseId)}`);

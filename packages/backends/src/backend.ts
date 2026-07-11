@@ -1,5 +1,9 @@
 import { type AgentJob, type CaseResult, InternalError } from "@everdict/contracts";
 
+// Which job output stream a log read targets (Observable.logs). Harnesses often log progress to stderr
+// while stdout carries only the final result block — the live tail needs both to be reachable.
+export type LogStream = "stdout" | "stderr";
+
 // Result of a one-shot in-container exec (Observable.exec) — the sandbox command's stdout/stderr/exit.
 export interface ExecInContainer {
   stdout: string;
@@ -95,9 +99,11 @@ export interface Recoverable {
 // Observable — live-progress introspection into a case's running sandbox (logs + one-shot exec). The sandbox is
 // already untrusted+isolated, so the control plane gates WHO may call these (run creator / workspace admin).
 export interface Observable {
-  // Current stdout of the case's newest orchestrator job (live-progress observability). Raw text with the result
+  // Current output of the case's newest orchestrator job (live-progress observability). Raw text with the result
   // sentinel stripped; undefined = no job / logs unreadable. Snapshot semantics — callers poll and diff for a tail.
-  logs(caseId: string): Promise<string | undefined>;
+  // stream selects stdout (default) or stderr — agents/harnesses often log progress to stderr while stdout carries
+  // only the final result block. K8s merges both streams in the pod log, so it accepts and ignores the parameter.
+  logs(caseId: string, stream?: LogStream): Promise<string | undefined>;
   // Run a one-shot command INSIDE the case's live sandbox container (web terminal / live-screen capture). The
   // command is passed to `sh -c`. undefined = no live container to exec into. Best-effort.
   exec(caseId: string, command: string): Promise<ExecInContainer | undefined>;

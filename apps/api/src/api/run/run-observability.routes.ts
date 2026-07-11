@@ -4,22 +4,36 @@ import { runObservabilityDocs } from "./run-observability.docs.js";
 
 // run observability — live progress into a run's sandbox: logs snapshot/stream, one-shot exec,
 // the WS-terminal ticket mint, and the live screen frame. Creator-or-admin gated per route.
+
+// ?stream= → the job output stream to tail. Default stdout; stderr = harness progress logs (many harnesses
+// log there while stdout carries only the result block). Anything else = undefined (caller 400s if it was set).
+function parseLogStream(raw: string | undefined): "stdout" | "stderr" | undefined {
+  if (raw === undefined) return "stdout";
+  return raw === "stdout" || raw === "stderr" ? raw : undefined;
+}
 export function registerRunObservabilityRoutes(app: FastifyInstance, deps: ServerDeps): void {
   // --- live-progress logs (observability ②) — the case job's current stdout, sentinel-stripped ---
   // Snapshot: poll-and-diff clients (web) read this. found=false = nothing to tail yet (queued / GC'd / no backend support).
-  app.get<{ Params: { id: string } }>("/runs/:id/logs", { schema: runObservabilityDocs.logs }, async (req, reply) => {
-    const principal = await resolvePrincipal(req, reply, deps);
-    if (!principal) return reply;
-    try {
-      gate(principal, "runs:read");
-      const out = await deps.service.logs(req.params.id);
-      if (!out || out.record.tenant !== principal.workspace)
-        return reply.code(404).send({ code: "NOT_FOUND", message: "run not found." });
-      return reply.send({ status: out.record.status, found: out.text !== undefined, text: out.text ?? "" });
-    } catch (err) {
-      return sendError(reply, err);
-    }
-  });
+  app.get<{ Params: { id: string }; Querystring: { stream?: string } }>(
+    "/runs/:id/logs",
+    { schema: runObservabilityDocs.logs },
+    async (req, reply) => {
+      const principal = await resolvePrincipal(req, reply, deps);
+      if (!principal) return reply;
+      try {
+        gate(principal, "runs:read");
+        const stream = parseLogStream(req.query.stream);
+        if (stream === undefined && req.query.stream !== undefined)
+          return reply.code(400).send({ code: "BAD_REQUEST", message: "stream must be stdout or stderr." });
+        const out = await deps.service.logs(req.params.id, stream);
+        if (!out || out.record.tenant !== principal.workspace)
+          return reply.code(404).send({ code: "NOT_FOUND", message: "run not found." });
+        return reply.send({ status: out.record.status, found: out.text !== undefined, text: out.text ?? "" });
+      } catch (err) {
+        return sendError(reply, err);
+      }
+    },
+  );
 
   // One-shot exec into a run's live sandbox (observability ④ — web terminal). Runs `sh -c command` in the case
   // container. The sandbox is untrusted+isolated, so WHO may exec is tightened beyond runs:read: the run's
@@ -103,7 +117,7 @@ export function registerRunObservabilityRoutes(app: FastifyInstance, deps: Serve
 
   // SSE tail: emits appended log chunks (JSON-encoded strings — newline-safe) every ~2s until the run is
   // terminal, then `event: end` with the final status. Heartbeat comments keep proxies from idling out.
-  app.get<{ Params: { id: string } }>(
+  app.get<{ Params: { id: string }; Querystring: { stream?: string } }>(
     "/runs/:id/logs/stream",
     { schema: runObservabilityDocs.logsStream },
     async (req, reply) => {
@@ -114,7 +128,10 @@ export function registerRunObservabilityRoutes(app: FastifyInstance, deps: Serve
       } catch (err) {
         return sendError(reply, err);
       }
-      let out = await deps.service.logs(req.params.id);
+      const stream = parseLogStream(req.query.stream);
+      if (stream === undefined && req.query.stream !== undefined)
+        return reply.code(400).send({ code: "BAD_REQUEST", message: "stream must be stdout or stderr." });
+      let out = await deps.service.logs(req.params.id, stream);
       if (!out || out.record.tenant !== principal.workspace)
         return reply.code(404).send({ code: "NOT_FOUND", message: "run not found." });
       reply.hijack();
@@ -140,7 +157,7 @@ export function registerRunObservabilityRoutes(app: FastifyInstance, deps: Serve
       const TERMINAL = new Set(["succeeded", "failed", "superseded"]);
       while (!closed && !TERMINAL.has(out.record.status)) {
         await new Promise((r) => setTimeout(r, 2000));
-        const next = await deps.service.logs(req.params.id).catch(() => undefined);
+        const next = await deps.service.logs(req.params.id, stream).catch(() => undefined);
         if (!next) break;
         out = next;
         emit(out.text ?? "");

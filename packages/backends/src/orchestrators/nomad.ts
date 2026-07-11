@@ -16,6 +16,7 @@ import {
   type BackendCapacity,
   type DispatchOptions,
   type ExecStreamHandle,
+  type LogStream,
   type Observable,
   type ProbeResult,
   type Probeable,
@@ -508,9 +509,11 @@ export class NomadBackend implements Backend, Recoverable, Observable, Shellable
     }
   }
 
-  // Current stdout of the case's newest job — live-progress tail (no waiting: a job with no alloc yet reads as
+  // Current output of the case's newest job — live-progress tail (no waiting: a job with no alloc yet reads as
   // undefined and the caller polls again). Sentinel payload stripped (it's the machine result, not progress).
-  async logs(caseId: string): Promise<string | undefined> {
+  // stream=stderr reads the alloc's stderr file — harnesses often log progress there while stdout carries only
+  // the final result block (stripSentinel is a no-op on stderr, harmless).
+  async logs(caseId: string, stream: LogStream = "stdout"): Promise<string | undefined> {
     try {
       const prefix = `everdict-${caseId}-`;
       const res = await this.http.request("GET", `/v1/jobs?prefix=${encodeURIComponent(prefix)}&namespace=*`);
@@ -529,7 +532,7 @@ export class NomadBackend implements Backend, Recoverable, Observable, Shellable
       const nsq2 = ns ? `&namespace=${encodeURIComponent(ns)}` : "";
       const logs = await this.http.request(
         "GET",
-        `/v1/client/fs/logs/${alloc.ID}?task=agent&type=stdout&plain=true${nsq2}`,
+        `/v1/client/fs/logs/${alloc.ID}?task=agent&type=${stream}&plain=true${nsq2}`,
       );
       if (logs.status >= 300) return undefined;
       return stripSentinel(logs.text);

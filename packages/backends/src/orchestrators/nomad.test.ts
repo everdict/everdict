@@ -708,3 +708,26 @@ describe("summarizeAllocFailure / eventsIndicateOom (task-event cause extraction
     expect(eventsIndicateOom([{ Type: "Driver Failure", DisplayMessage: "pull denied" }])).toBe(false);
   });
 });
+
+describe("NomadBackend.logs (live tail stream selection)", () => {
+  const tailHttp = (calls: string[]): NomadHttp => ({
+    async request(method, path) {
+      calls.push(`${method} ${path}`);
+      if (path.startsWith("/v1/jobs?prefix="))
+        return { status: 200, text: JSON.stringify([{ ID: "everdict-c1-abc", SubmitTime: 1 }]) };
+      if (path.includes("/allocations")) return { status: 200, text: JSON.stringify([{ ID: "a1" }]) };
+      if (path.includes("/logs/")) return { status: 200, text: "INFO progress line" };
+      return { status: 404, text: "" };
+    },
+  });
+
+  it("defaults to stdout; stream=stderr reads the alloc's stderr file", async () => {
+    const calls: string[] = [];
+    const backend = new NomadBackend({ addr: "http://nomad:4646", image: "img", http: tailHttp(calls) });
+    await backend.logs("c1");
+    expect(calls.some((c) => c.includes("type=stdout"))).toBe(true);
+    const text = await backend.logs("c1", "stderr");
+    expect(text).toBe("INFO progress line");
+    expect(calls.some((c) => c.includes("type=stderr"))).toBe(true);
+  });
+});
