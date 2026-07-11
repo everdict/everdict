@@ -63,45 +63,96 @@ export default async function SettingsPage({
   let workspaceRunners: RunnerMeta[] = []
   let members: Member[] = []
   let invites: Invite[] = []
-  let error: string | undefined
-  try {
-    if (canReadSettings) {
-      workspace = workspaceRecordSchema.parse(await controlPlane.getWorkspace(ctx))
-      // Workspace-owned GitHub App integration (org installation→selected repos). settings:read (admin).
-      githubApp = githubAppViewSchema.parse(await controlPlane.getGithubApp(ctx))
-      // Workspace-owned Mattermost integration (completion/regression notifications). Replaces personal-connection notifications. settings:read (admin).
-      mattermost = mattermostResponseSchema.parse(await controlPlane.getMattermost(ctx)).config
-      // Workspace trace sinks (multiple — selected per harness). The read itself is viewer+, but the management UI is this tab.
-      traceSinks = traceSinksResponseSchema.parse(await controlPlane.listTraceSinks(ctx)).sinks
-      // Workspace image registries (multiple — classification baseline + everdict image push target). The read itself is viewer+, but the management UI is this tab.
-      imageRegistries = imageRegistriesResponseSchema.parse(
-        await controlPlane.listImageRegistries(ctx)
-      ).registries
-      // CI repo link (repo↔harness slot = OIDC trust) — the link's existence is that repo's keyless CI trust. Removal is admin.
-      ciLinks = ciLinksResponseSchema.parse(await controlPlane.listCiLinks(ctx)).links
+  // Per-section soft-fail: one failing fetch (a missing route on a stale control plane, one misbehaving
+  // integration) must not nuke the whole settings page — the failed sections are named in a callout and
+  // everything else renders. Only when EVERY attempted section failed do we show the full-page error.
+  const failedSections: string[] = []
+  let attempted = 0
+  let firstError: string | undefined
+  const attempt = async <T,>(section: string, fn: () => Promise<T>): Promise<T | undefined> => {
+    attempted += 1
+    try {
+      return await fn()
+    } catch (e) {
+      failedSections.push(section)
+      firstError ??= e instanceof Error ? e.message : String(e)
+      return undefined
     }
-    // Budget (enforcement caps + committed usage) + metered billing usage — both readable by members (viewer+). The
-    // limit form is editable only by admins (canWriteSettings); members see it read-only. Consolidated from the old /usage page.
-    if (canReadUsage) {
-      budget = budgetResponseSchema.parse(await controlPlane.getBudget(ctx))
-      metered = tenantUsageSchema.parse(await controlPlane.getUsage(ctx))
-    }
-    // Workspace-shared runners (owner=ws:<workspace>) — team build server/CI. Register/read/remove are all admin (settings:write).
-    if (canWriteSettings) {
-      workspaceRunners = runnersResponseSchema.parse(
-        await controlPlane.listWorkspaceOwnedRunners(ctx)
-      ).runners
-    }
-    // Workspace settings show only shared (workspace) secrets — my personal (user) secrets that GET /secrets mixes in are managed on the account page.
-    if (canReadSecrets)
-      secrets = secretsSchema
-        .parse(await controlPlane.listSecrets(ctx))
-        .filter((s) => s.scope === 'workspace')
-    if (canReadMembers) members = membersSchema.parse(await controlPlane.listMembers(ctx))
-    if (canWriteMembers) invites = invitesSchema.parse(await controlPlane.listInvites(ctx))
-  } catch (e) {
-    error = e instanceof Error ? e.message : String(e)
   }
+  if (canReadSettings) {
+    workspace = await attempt('workspace', async () =>
+      workspaceRecordSchema.parse(await controlPlane.getWorkspace(ctx))
+    )
+    // Workspace-owned GitHub App integration (org installation→selected repos). settings:read (admin).
+    githubApp =
+      (await attempt('github-app', async () =>
+        githubAppViewSchema.parse(await controlPlane.getGithubApp(ctx))
+      )) ?? githubApp
+    // Workspace-owned Mattermost integration (completion/regression notifications). Replaces personal-connection notifications. settings:read (admin).
+    mattermost = await attempt(
+      'mattermost',
+      async () => mattermostResponseSchema.parse(await controlPlane.getMattermost(ctx)).config
+    )
+    // Workspace trace sinks (multiple — selected per harness). The read itself is viewer+, but the management UI is this tab.
+    traceSinks =
+      (await attempt(
+        'trace-sinks',
+        async () => traceSinksResponseSchema.parse(await controlPlane.listTraceSinks(ctx)).sinks
+      )) ?? []
+    // Workspace image registries (multiple — classification baseline + everdict image push target). The read itself is viewer+, but the management UI is this tab.
+    imageRegistries =
+      (await attempt(
+        'image-registries',
+        async () =>
+          imageRegistriesResponseSchema.parse(await controlPlane.listImageRegistries(ctx))
+            .registries
+      )) ?? []
+    // CI repo link (repo↔harness slot = OIDC trust) — the link's existence is that repo's keyless CI trust. Removal is admin.
+    ciLinks =
+      (await attempt(
+        'ci-links',
+        async () => ciLinksResponseSchema.parse(await controlPlane.listCiLinks(ctx)).links
+      )) ?? []
+  }
+  // Budget (enforcement caps + committed usage) + metered billing usage — both readable by members (viewer+). The
+  // limit form is editable only by admins (canWriteSettings); members see it read-only. Consolidated from the old /usage page.
+  if (canReadUsage) {
+    budget = await attempt('budget', async () =>
+      budgetResponseSchema.parse(await controlPlane.getBudget(ctx))
+    )
+    metered = await attempt('usage', async () =>
+      tenantUsageSchema.parse(await controlPlane.getUsage(ctx))
+    )
+  }
+  // Workspace-shared runners (owner=ws:<workspace>) — team build server/CI. Register/read/remove are all admin (settings:write).
+  if (canWriteSettings) {
+    workspaceRunners =
+      (await attempt(
+        'runners',
+        async () =>
+          runnersResponseSchema.parse(await controlPlane.listWorkspaceOwnedRunners(ctx)).runners
+      )) ?? []
+  }
+  // Workspace settings show only shared (workspace) secrets — my personal (user) secrets that GET /secrets mixes in are managed on the account page.
+  if (canReadSecrets)
+    secrets =
+      (await attempt('secrets', async () =>
+        secretsSchema
+          .parse(await controlPlane.listSecrets(ctx))
+          .filter((s) => s.scope === 'workspace')
+      )) ?? []
+  if (canReadMembers)
+    members =
+      (await attempt('members', async () =>
+        membersSchema.parse(await controlPlane.listMembers(ctx))
+      )) ?? []
+  if (canWriteMembers)
+    invites =
+      (await attempt('invites', async () =>
+        invitesSchema.parse(await controlPlane.listInvites(ctx))
+      )) ?? []
+  const allFailed = attempted > 0 && failedSections.length === attempted
+  const error = allFailed ? firstError : undefined
 
   const canReadAny = canReadSettings || canReadSecrets || canReadMembers || canReadUsage
   // Deletion is owner (creator) only — the control plane enforces it ultimately, and the UI exposes the danger zone only when owner.
@@ -112,34 +163,41 @@ export default async function SettingsPage({
       <PageHeader title={t('title')} description={t('description')} />
       {!canReadAny ? (
         <EmptyState title={t('noPermissionTitle')} hint={t('noPermissionHint')} />
-      ) : error ? (
+      ) : error !== undefined ? (
         <Callout tone="danger">{t('connectError', { error })}</Callout>
       ) : (
-        <SettingsTabs
-          isOwner={isOwner}
-          {...(workspace !== undefined ? { workspace } : {})}
-          secrets={secrets}
-          githubApp={githubApp}
-          {...(githubAppNotice !== undefined ? { githubAppNotice } : {})}
-          {...(mattermost !== undefined ? { mattermost } : {})}
-          traceSinks={traceSinks}
-          imageRegistries={imageRegistries}
-          ciLinks={ciLinks}
-          {...(budget !== undefined ? { budget } : {})}
-          {...(metered !== undefined ? { metered } : {})}
-          workspaceRunners={workspaceRunners}
-          members={members}
-          invites={invites}
-          canReadSettings={canReadSettings}
-          canWriteSettings={canWriteSettings}
-          canReadSecrets={canReadSecrets}
-          canWriteSecrets={canWriteSecrets}
-          canReadMembers={canReadMembers}
-          canWriteMembers={canWriteMembers}
-          canReadUsage={canReadUsage}
-          {...(sp.tab !== undefined ? { initialTab: sp.tab } : {})}
-          {...(sp.app !== undefined ? { initialIntegration: sp.app } : {})}
-        />
+        <>
+          {failedSections.length > 0 && (
+            <Callout tone="danger">
+              {t('partialError', { sections: failedSections.join(', '), error: firstError ?? '' })}
+            </Callout>
+          )}
+          <SettingsTabs
+            isOwner={isOwner}
+            {...(workspace !== undefined ? { workspace } : {})}
+            secrets={secrets}
+            githubApp={githubApp}
+            {...(githubAppNotice !== undefined ? { githubAppNotice } : {})}
+            {...(mattermost !== undefined ? { mattermost } : {})}
+            traceSinks={traceSinks}
+            imageRegistries={imageRegistries}
+            ciLinks={ciLinks}
+            {...(budget !== undefined ? { budget } : {})}
+            {...(metered !== undefined ? { metered } : {})}
+            workspaceRunners={workspaceRunners}
+            members={members}
+            invites={invites}
+            canReadSettings={canReadSettings}
+            canWriteSettings={canWriteSettings}
+            canReadSecrets={canReadSecrets}
+            canWriteSecrets={canWriteSecrets}
+            canReadMembers={canReadMembers}
+            canWriteMembers={canWriteMembers}
+            canReadUsage={canReadUsage}
+            {...(sp.tab !== undefined ? { initialTab: sp.tab } : {})}
+            {...(sp.app !== undefined ? { initialIntegration: sp.app } : {})}
+          />
+        </>
       )}
     </div>
   )

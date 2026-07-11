@@ -2003,7 +2003,8 @@
     "notRegistered": "등록 안 됨",
     "imageRegistryLabel": "이미지 레지스트리",
     "imageRegistryHint": "이미지 분류 기준이자 everdict image push 대상이에요.",
-    "manage": "관리"
+    "manage": "관리",
+    "partialError": "일부 설정 정보를 불러오지 못했습니다 ({sections}): {error}"
   },
   "shell": {
     "searchPlaceholder": "검색·이동",

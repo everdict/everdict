@@ -2003,7 +2003,8 @@
     "notRegistered": "Not registered",
     "imageRegistryLabel": "Image registries",
     "imageRegistryHint": "The baseline for image classification and the target for everdict image push.",
-    "manage": "Manage"
+    "manage": "Manage",
+    "partialError": "Some settings sections failed to load ({sections}): {error}"
   },
   "shell": {
     "searchPlaceholder": "Search…",
