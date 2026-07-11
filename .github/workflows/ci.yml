@@ -46,6 +46,8 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      # apps/web type-anchors to @everdict/contracts (type-only) — its d.ts must exist before next build's tsc.
+      - run: pnpm -F @everdict/contracts build
       - run: pnpm -F @everdict/web lint
       - run: pnpm -F @everdict/web build
 
