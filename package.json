@@ -14,6 +14,7 @@
     "build": "turbo run build",
     "cone": "node scripts/check-agent-cone.mjs",
     "web-imports": "node scripts/check-web-imports.mjs",
+    "ci:local": "node scripts/ci-local.mjs",
     "everdict": "node --env-file-if-exists=.env apps/cli/dist/main.js",
     "api": "node --env-file-if-exists=apps/api/.env apps/api/dist/main.js",
     "api:dev": "node --watch --env-file-if-exists=apps/api/.env apps/api/dist/main.js",

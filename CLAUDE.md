@@ -27,6 +27,11 @@ Read the matching `<area>/SKILL.md` first, then pull `references/*.md` on demand
 4. `pnpm test`     — Vitest across packages (turbo)
 5. `pnpm build`    — turbo build
 Quality is non-negotiable: all five must pass before a PR.
+**Before ANY `git push`: `pnpm ci:local`** — mirrors the FULL GitHub Actions CI (the five commands
+above PLUS `pnpm cone` + `pnpm web-imports` + empty-env boot + the self-contained web job + full-history
+gitleaks) and stamps `.git/everdict-ci-ok` on a clean green tree; a PreToolUse hook denies unstamped
+pushes. `.github/workflows/ci.yml` is the SSOT; see rule `.claude/rules/ci.md` + skill `ci`. Never push
+red; after pushing, confirm the run went green (`gh run watch … --exit-status`).
 
 ## Architecture — one-way dependency, by concern
 ```

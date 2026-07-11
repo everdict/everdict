@@ -9,7 +9,7 @@ We split "how to build Everdict" knowledge by **how the knowledge fails**:
 - Keep each file thin (~20 lines): inlined critical rules + a pointer to the matching skill.
 - Current rules: `typescript`, `core-contracts`, `drivers`, `harnesses`, `graders`, `agent`,
   `backends`, `orchestrator`, `trace`, `topology`, `api-layer`, `mcp`, `auth`, `db`, `registry`,
-  `web`, `datasets`, `suite`, `workspace-integrations`, `testing`, `infra-deploy`.
+  `web`, `datasets`, `suite`, `workspace-integrations`, `testing`, `infra-deploy`, `ci`.
 
 ## PULL layer — `.claude/skills/*/`
 - Model-driven: matched via frontmatter `description`, or invoked explicitly as `/name`.
@@ -33,6 +33,7 @@ We split "how to build Everdict" knowledge by **how the knowledge fails**:
 - `harnesses/`      — implementing an EvaluableHarness (the agent under test) + trace normalization.
 - `graders/`        — implementing a single Grader (recipe); the scoring *domain* lives in `evaluation`.
 - `testing/`        — Vitest, fake-injection units, `buildServer`+`inject`, env-gated live E2E (no Testcontainers).
+- `ci/`             — local CI parity: mirror `.github/workflows/ci.yml` before ANY push (5 gates + cone/web-imports/boot + web job + gitleaks), confirm green after.
 - `infra-deploy/`   — Docker/K8s/Helm, IaC, secrets, GitOps (planned — `deploy/` is dev compose so far).
 - `docs-update`     — `/docs-update` command: audit drift between code and skill references (planned).
 

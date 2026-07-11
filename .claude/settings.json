@@ -11,5 +11,20 @@
       "Edit(.claude/skills/**)",
       "Edit(docs/**)"
     ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/scripts/hooks/pre-push-gate.mjs\"",
+            "timeout": 10,
+            "statusMessage": "pre-push CI parity gate"
+          }
+        ]
+      }
+    ]
   }
 }
