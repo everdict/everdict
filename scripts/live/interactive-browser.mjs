@@ -8,14 +8,14 @@
 //
 // Requires: a chrome binary (google-chrome / chromium) on PATH. Build topology first: pnpm --filter @everdict/topology build
 import { spawn } from "node:child_process";
-import http from "node:http";
 import { mkdtempSync } from "node:fs";
+import http from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openBrowserSession } from "../../packages/topology/dist/index.js";
 
 const CHROME = ["google-chrome", "google-chrome-stable", "chromium", "chromium-browser"];
-const PORT = 9222 + Math.floor(process.uptime() * 7) % 200; // avoid clashes across runs (no Math.random policy is fine here — a script)
+const PORT = 9222 + (Math.floor(process.uptime() * 7) % 200); // avoid clashes across runs (no Math.random policy is fine here — a script)
 const CDP = `http://127.0.0.1:${PORT}`;
 
 function launchChrome() {
@@ -59,18 +59,29 @@ async function waitCdp(timeoutMs = 15000) {
 // Raw CDP Runtime.evaluate (independent of the session) — used by the self-check to read the real DOM back.
 async function rawEval(expression) {
   const targets = await (await fetch(`${CDP}/json`)).json();
-  const wsUrl = (targets.find((t) => t.type === "page" && t.webSocketDebuggerUrl) ?? targets.find((t) => t.webSocketDebuggerUrl))?.webSocketDebuggerUrl;
+  const wsUrl = (
+    targets.find((t) => t.type === "page" && t.webSocketDebuggerUrl) ?? targets.find((t) => t.webSocketDebuggerUrl)
+  )?.webSocketDebuggerUrl;
   return await new Promise((resolve, reject) => {
     const ws = new WebSocket(wsUrl);
-    const t = setTimeout(() => { ws.close(); reject(new Error("eval timeout")); }, 5000);
-    ws.addEventListener("open", () => ws.send(JSON.stringify({ id: 1, method: "Runtime.evaluate", params: { expression, returnByValue: true } })));
+    const t = setTimeout(() => {
+      ws.close();
+      reject(new Error("eval timeout"));
+    }, 5000);
+    ws.addEventListener("open", () =>
+      ws.send(JSON.stringify({ id: 1, method: "Runtime.evaluate", params: { expression, returnByValue: true } })),
+    );
     ws.addEventListener("message", (ev) => {
       const m = JSON.parse(String(ev.data));
       if (m.id !== 1) return;
-      clearTimeout(t); ws.close();
+      clearTimeout(t);
+      ws.close();
       m.error ? reject(new Error(m.error.message)) : resolve(m.result?.result?.value);
     });
-    ws.addEventListener("error", () => { clearTimeout(t); reject(new Error("eval ws error")); });
+    ws.addEventListener("error", () => {
+      clearTimeout(t);
+      reject(new Error("eval ws error"));
+    });
   });
 }
 
@@ -79,9 +90,13 @@ const TYPED = "everdict-login-ok";
 
 async function selfCheck(session) {
   let frames = 0;
-  session.onFrame(() => { frames += 1; });
+  session.onFrame(() => {
+    frames += 1;
+  });
   // A page with a text input we can type into.
-  session.navigate("data:text/html,<body style='margin:0'><input id=q autofocus style='font-size:40px;width:95%25;margin-top:20px'>");
+  session.navigate(
+    "data:text/html,<body style='margin:0'><input id=q autofocus style='font-size:40px;width:95%25;margin-top:20px'>",
+  );
   await sleep(1500); // load + let the screencast stream a few frames
 
   // INPUT IN: click the field to focus, then type each char as a CDP char event.
@@ -93,8 +108,12 @@ async function selfCheck(session) {
   const value = await rawEval("document.querySelector('#q') && document.querySelector('#q').value");
   const ok = frames > 0 && value === TYPED;
   console.log(`\n  screencast frames received : ${frames}   ${frames > 0 ? "✅ (frames stream OUT)" : "❌"}`);
-  console.log(`  typed via CDP → real DOM   : ${JSON.stringify(value)}   ${value === TYPED ? "✅ (input reaches IN)" : "❌ expected " + JSON.stringify(TYPED)}`);
-  console.log(`\n  ${ok ? "PASS — interactive live browser session works end-to-end (frames out + input in + navigate)." : "FAIL"}\n`);
+  console.log(
+    `  typed via CDP → real DOM   : ${JSON.stringify(value)}   ${value === TYPED ? "✅ (input reaches IN)" : `❌ expected ${JSON.stringify(TYPED)}`}`,
+  );
+  console.log(
+    `\n  ${ok ? "PASS — interactive live browser session works end-to-end (frames out + input in + navigate)." : "FAIL"}\n`,
+  );
   return ok;
 }
 
@@ -122,23 +141,45 @@ function go(){P('/navigate',{url:document.getElementById('u').value})}
 document.getElementById('u').addEventListener('keydown',e=>{if(e.key==='Enter')go()});
 </script>`;
   const srv = http.createServer((req, res) => {
-    if (req.url === "/") { res.writeHead(200, { "content-type": "text/html" }); return res.end(page); }
+    if (req.url === "/") {
+      res.writeHead(200, { "content-type": "text/html" });
+      return res.end(page);
+    }
     if (req.url === "/frames") {
-      res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "keep-alive" });
-      clients.add(res); req.on("close", () => clients.delete(res)); return;
+      res.writeHead(200, {
+        "content-type": "text/event-stream",
+        "cache-control": "no-cache",
+        connection: "keep-alive",
+      });
+      clients.add(res);
+      req.on("close", () => clients.delete(res));
+      return;
     }
     if (req.method === "POST") {
-      let body = ""; req.on("data", (d) => { body += d; }); req.on("end", () => {
+      let body = "";
+      req.on("data", (d) => {
+        body += d;
+      });
+      req.on("end", () => {
         const b = JSON.parse(body || "{}");
         if (req.url === "/navigate") session.navigate(b.url);
-        else if (req.url === "/input") { const { kind, ...rest } = b; kind === "mouse" ? session.mouse(rest) : session.key(rest); }
-        res.writeHead(204); res.end();
+        else if (req.url === "/input") {
+          const { kind, ...rest } = b;
+          kind === "mouse" ? session.mouse(rest) : session.key(rest);
+        }
+        res.writeHead(204);
+        res.end();
       });
       return;
     }
-    res.writeHead(404); res.end();
+    res.writeHead(404);
+    res.end();
   });
-  srv.listen(port, () => console.log(`\n  ▶ open http://localhost:${port} and drive the real browser (navigate, click, type, log in). Ctrl-C to stop.\n`));
+  srv.listen(port, () =>
+    console.log(
+      `\n  ▶ open http://localhost:${port} and drive the real browser (navigate, click, type, log in). Ctrl-C to stop.\n`,
+    ),
+  );
 }
 
 async function main() {
@@ -158,10 +199,17 @@ async function main() {
       session.close();
     }
   } finally {
-    if (!serveMode) { try { chrome.kill("SIGKILL"); } catch {} }
+    if (!serveMode) {
+      try {
+        chrome.kill("SIGKILL");
+      } catch {}
+    }
   }
   if (!serveMode) process.exit(ok ? 0 : 1);
 }
 
 process.on("SIGINT", () => process.exit(0));
-main().catch((e) => { console.error("ERROR:", e.message); process.exit(1); });
+main().catch((e) => {
+  console.error("ERROR:", e.message);
+  process.exit(1);
+});

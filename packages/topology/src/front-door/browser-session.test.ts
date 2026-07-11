@@ -15,7 +15,7 @@ class FakeSocket {
     this.closed = true;
   }
   addEventListener(type: string, cb: (ev?: unknown) => void): void {
-    (this.handlers[type] ??= []).push(cb);
+    this.handlers[type] = [...(this.handlers[type] ?? []), cb];
   }
   emit(type: string, ev?: unknown): void {
     for (const cb of this.handlers[type] ?? []) cb(ev);
