@@ -87,6 +87,23 @@ describe("buildNomadJob", () => {
     const spec = buildNomadJob(JOB, { addr: "http://nomad:4646", image: "i" });
     expect(spec.Job.TaskGroups[0]?.Tasks[0]?.Env.EVERDICT_JUDGE_MODEL).toBeUndefined();
   });
+  it("job.judgeAuth (per-job resolved credential) wins over the backend's baked secretEnv", () => {
+    const spec = buildNomadJob(
+      {
+        ...JOB,
+        judge: { provider: "openai", model: "gpt-5.4-mini" },
+        judgeAuth: { apiKey: "personal-key", baseUrl: "http://litellm:4000/v1" },
+      },
+      {
+        addr: "http://nomad:4646",
+        image: "i",
+        secretEnv: { OPENAI_API_KEY: "stale-workspace-key" },
+      },
+    );
+    const env = spec.Job.TaskGroups[0]?.Tasks[0]?.Env;
+    expect(env?.OPENAI_API_KEY).toBe("personal-key"); // job-level explicit wins
+    expect(env?.OPENAI_BASE_URL).toBe("http://litellm:4000/v1");
+  });
   it("with evalCase.image, override with the per-case image (e.g. SWE-bench prebuilt)", () => {
     const withImage = { ...JOB, evalCase: { ...JOB.evalCase, image: "swebench/sweb.eval.x86_64.x_1776_y-1:latest" } };
     const on = buildNomadJob(withImage, { addr: "http://nomad:4646", image: "reg/agent:1" });

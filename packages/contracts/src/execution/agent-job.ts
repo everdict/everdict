@@ -15,10 +15,23 @@ export type JudgeRunConfig = z.infer<typeof JudgeRunConfigSchema>;
 export const JUDGE_MODEL_ENV = "EVERDICT_JUDGE_MODEL";
 export const JUDGE_PROVIDER_ENV = "EVERDICT_JUDGE_PROVIDER";
 
-// JudgeRunConfig → env map. Empty map if unset (judge disabled). The key itself is injected separately by secretEnv.
+// JudgeRunConfig → env map. Empty map if unset (judge disabled). The key itself is injected separately by secretEnv
+// (workspace tier, baked into the backend) or the job's transient judgeAuth (below).
 export function judgeEnv(j?: JudgeRunConfig): Record<string, string> {
   if (!j) return {};
   return { [JUDGE_MODEL_ENV]: j.model, ...(j.provider ? { [JUDGE_PROVIDER_ENV]: j.provider } : {}) };
+}
+
+// Transient judgeAuth → the judge provider's key/base-url env for the job. Spread AFTER secretEnv in the task env
+// so a job-level resolved credential wins over the backend's baked workspace tier. Provider defaults to openai
+// (matches judgeFromEnv on the agent side).
+export function judgeAuthEnv(j?: JudgeRunConfig, auth?: { apiKey: string; baseUrl?: string }): Record<string, string> {
+  if (!j || !auth) return {};
+  const anthropic = j.provider === "anthropic";
+  return {
+    [anthropic ? "ANTHROPIC_API_KEY" : "OPENAI_API_KEY"]: auth.apiKey,
+    ...(auth.baseUrl ? { [anthropic ? "ANTHROPIC_BASE_URL" : "OPENAI_BASE_URL"]: auth.baseUrl } : {}),
+  };
 }
 
 // A single unit of work passed from the control plane → runner agent.
@@ -39,8 +52,14 @@ export const AgentJobSchema = z.object({
   // The agent prefers this value (falling back to the EVERDICT_METER_USAGE env in dev if unspecified). Only meaningful for command harnesses.
   meterUsage: z.boolean().optional(),
   // per-run judge model config — which model judges an inline judge grader present on the evalCase (not a secret).
-  // The backend injects it via alloc env (EVERDICT_JUDGE_MODEL/PROVIDER); the provider key is secretEnv. If unset, judge is skipped.
+  // The backend injects it via alloc env (EVERDICT_JUDGE_MODEL/PROVIDER); the provider key is secretEnv or judgeAuth. If unset, judge is skipped.
   judge: JudgeRunConfigSchema.optional(),
+  // Transient judge provider credential — resolved at dispatch from the tenant's scoped secret tiers (workspace
+  // first, the submitter's personal key as fallback) so a personal-only key still judges on MANAGED runtimes
+  // (the backend-level secretEnv carries only the workspace tier). Same discipline as repoToken/registryAuth:
+  // never persisted to records. Backends map it to the provider env (OPENAI_/ANTHROPIC_ API_KEY + BASE_URL);
+  // self-hosted runner dispatch never carries it (the runner judges with its own env — own-pays).
+  judgeAuth: z.object({ apiKey: z.string(), baseUrl: z.string().optional() }).optional(),
   // Transient credential for private repo clone — the control plane resolves evalCase.env.source.connectionId to the token of the external
   // account connection (Connected accounts) and loads it here. RepoEnvironment uses it only for authenticated clone (http.extraheader) and
   // it is not persisted to the RunRecord/dataset (only the connectionId reference stays on the case).

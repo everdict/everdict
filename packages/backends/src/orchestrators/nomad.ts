@@ -6,6 +6,7 @@ import {
   InternalError,
   OOM_KILLED,
   UpstreamError,
+  judgeAuthEnv,
   judgeEnv,
 } from "@everdict/contracts";
 import { assertHardenedIsolation, imageUsesRegistryHost } from "@everdict/domain";
@@ -159,8 +160,11 @@ function dispatchSuffix(): string {
 export function buildNomadJob(job: AgentJob, opts: NomadBackendOptions, jobId?: string): NomadJobSpec {
   const env: Record<string, string> = {
     EVERDICT_AGENT_JOB: Buffer.from(JSON.stringify(job)).toString("base64"),
-    ...judgeEnv(job.judge), // per-run judge model config (keys via secretEnv). The inline judge grader judges with this model.
+    ...judgeEnv(job.judge), // per-run judge model config. The inline judge grader judges with this model.
     ...opts.secretEnv,
+    // Judge provider key resolved per-job at dispatch (workspace tier → submitter personal fallback) — AFTER
+    // secretEnv so the job-level credential wins over the backend's baked workspace tier.
+    ...judgeAuthEnv(job.judge, job.judgeAuth),
   };
   // Prefer the per-case image (e.g. the official SWE-bench prebuilt = deps+repo bundled), otherwise the default agent image.
   const image = job.evalCase.image ?? opts.image;

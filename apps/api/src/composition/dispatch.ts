@@ -11,6 +11,7 @@ import type { RegistryAuth, RuntimeSpec } from "@everdict/contracts";
 import type { CallbackStore, RunnerStore, SecretStore, WorkspaceSettingsStore } from "@everdict/db";
 import { classifyFailure } from "@everdict/domain";
 import type { HarnessInstanceRegistry, ModelRegistry, RuntimeRegistry } from "@everdict/registry";
+import { JudgeAuthDispatcher } from "../core/execution/judge-auth-dispatcher.js";
 import { ModelResolvingDispatcher } from "../core/execution/model-resolving-dispatcher.js";
 import { RuntimeDispatcher } from "../core/execution/runtime-dispatcher.js";
 import { SelfHostedBackend } from "../core/execution/self-hosted-backend.js";
@@ -104,7 +105,11 @@ export function buildDispatch(deps: {
     poolHasRunners: async (owner) => (await runnerStore.list(owner)).length > 0,
     buildSelfHostedBackend: (key) => new SelfHostedBackend(key, runnerHub),
   });
-  const dispatcher = new ModelResolvingDispatcher(modelRegistry, runtimeDispatcher);
+  // Judge provider key resolved per job (workspace tier → submitter personal fallback; fail-fast when a judge
+  // is configured with no resolvable key on a managed target). MUST wrap OUTSIDE RuntimeDispatcher — it keys off
+  // the ORIGINAL placement.target (self:* exemption) before the target is rewritten to a backend name.
+  const judgeAuthDispatcher = new JudgeAuthDispatcher({ inner: runtimeDispatcher, scopedSecretsFor });
+  const dispatcher = new ModelResolvingDispatcher(modelRegistry, judgeAuthDispatcher);
   // Workspace secrets feed the cached runtime backends' secretEnv — a secret change must drop that tenant's
   // cache so the next dispatch rebuilds with fresh values (previously only a CP restart picked them up).
   const invalidateTenantBackends = (tenant: string) => runtimeDispatcher.invalidateTenant(tenant);

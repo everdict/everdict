@@ -1035,6 +1035,17 @@ separately via `secretEnv`), and `runAgentJob` — taking the model **only from 
 judge (`pass=true`, 1.00, "A tool call executed `echo hello > out.txt`…"). So a per-run judge config reaches a remote
 alloc end-to-end, with the credential kept on the separate secret channel.
 
+**Per-job key resolution (`AgentJob.judgeAuth`) + dispatch preflight.** The backend-level `secretEnv` channel carries
+only the WORKSPACE secret tier (it is baked into the cached backend), so a submitter whose provider key was a
+*personal* secret used to get a working harness but a silently skipped judge on managed runtimes. `JudgeAuthDispatcher`
+(`apps/api/core/execution`, wrapping the shared dispatcher OUTSIDE `RuntimeDispatcher`) now resolves the credential
+per job at dispatch — **workspace tier first, the submitter's personal key as fallback** — onto the transient
+`AgentJob.judgeAuth {apiKey, baseUrl?}` (never persisted, same discipline as `repoToken`/`registryAuth`); both
+backends spread `judgeAuthEnv(job.judge, job.judgeAuth)` AFTER `secretEnv` so the job-level credential wins. When a
+judge is configured and NO key is resolvable on a managed target, dispatch **fails fast as a config error** instead
+of running the harness and skipping the judge. Self-hosted lanes (`self`/`self:*`) are exempt on both counts: the
+runner judges with its own machine env (own-pays), and workspace keys are never shipped to user machines.
+
 #### Workspace-default judge config (control plane fills `job.judge`) ✅
 A user shouldn't repeat the judge model on every run — they set it once on the workspace and the control plane fills
 `job.judge` automatically (mirroring the existing `meterUsage` policy). `WorkspaceSettings.judge` (`{provider?, model}`,
