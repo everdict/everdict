@@ -15,4 +15,7 @@ regexes = [
   '''(label|desc|hint|title)Key:\s*'[a-zA-Z][a-zA-Z0-9]*'"?''',
   # Documentation of the secret ownership sentinel in comments (owner=subject / owner="").
   '''owner\s*=\s*("")|owner=subject''',
+  # Architecture docs listing application-control responsibilities — "credential primitives, scheduling/ops
+  # orchestration" trips generic-api-key ("credential" keyword + a path-like token). Doc prose, not a secret.
+  '''credential primitives, scheduling/ops orchestration''',
 ]
