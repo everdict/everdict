@@ -102,6 +102,17 @@ A 100+-case batch leaves that many dead jobs/allocs behind per run. Two operatio
 - **Do not enable `purgeDeadJobs`** unless the cluster is known to tolerate it: purging a job whose alloc a client
   still tracks panics the client's alloc watcher (nil deref in Allocation.Canonicalize) — fatal on a dev-mode agent,
   a lost client on a real cluster. Rely on server job GC (`job_gc_threshold`) plus a sized `gc_max_allocs` instead.
+- **Nomad's docker driver GARBAGE-COLLECTS images** a few minutes after their last alloc exits (plugin `docker`
+  `gc.image`, default ON with a short `image_delay`). A LOCAL-TAG image (never pushed — e.g. an agent-baked eval
+  image on a single-host dev cluster) is deleted from the daemon and the next dispatch tries to PULL it from a
+  registry → `alloc failed — Driver Failure: Failed to pull …: pull access denied` (the task-event cause is now
+  named in the error). Hit live twice. Countermeasures, in order of preference:
+  1. **Configure the driver**: `plugin "docker" { config { gc { image_delay = "72h" } } }` (or `image = false`
+     on a dedicated eval host) — the real fix on clusters you operate.
+  2. **Push the image to a registry** the runtime can pull from (a workspace image registry — `everdict image push`).
+  3. **Keeper containers** (dev convenience): `docker create --name keeper-<image> <image> true` pins the image
+     against GC (the driver's remove fails while a container references it). Recreate the keeper after every
+     rebuild — it pins the OLD sha, not the tag.
 
 **Agent image per runtime**: `RuntimeSpec.image` is tenant-chosen, so pure-command/BYO-image workloads can run the
 **slim agent** (`packages/agent/Dockerfile.slim`, ~330MB — node+git, no claude/aider batteries) — 3× faster alloc
