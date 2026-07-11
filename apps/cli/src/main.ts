@@ -22,6 +22,7 @@ import {
   runLeasedJob,
 } from "@everdict/self-hosted-runner";
 import type { DockerTopologyRuntimeOptions } from "@everdict/topology";
+import { imageBakeCommand } from "./image-bake.js";
 import { imagePushCommand } from "./image-push.js";
 
 function parseFlags(argv: string[]): Map<string, string> {
@@ -62,6 +63,10 @@ function usage(): void {
       "everdict image push <local-ref> [--name <n>] [--tag <t>] [--api-url <url>] [--api-key <ak_…>]",
       "  publish a locally built image to the workspace image registry (docker tag+push,",
       "  credentials minted by the control plane, isolated temp DOCKER_CONFIG) → prints the ref to pin",
+      "",
+      "everdict image bake <base-ref> [--agent-image <ref>] [--tag <target-ref>]",
+      "  wrap a BYO eval image with the everdict in-job agent (entrypoint) so it runs on MANAGED",
+      "  runtimes (nomad/k8s run the case.image AS the task — it must boot the agent itself)",
       "",
       "everdict runner --pair <rnr_…> [--api-url <url>] [--wait-ms N] [--heartbeat-ms N] [--max-concurrent N]",
       "  self-hosted runner: pull workspace jobs to THIS machine, run locally (your login), report back",
@@ -328,6 +333,11 @@ async function main(): Promise<void> {
       // the positional arg (local ref) is not consumed by the flag parser, so handle it directly — image push <ref> [--flags]
       const positional = argv[2] && !argv[2].startsWith("--") ? argv[2] : undefined;
       await imagePushCommand(positional, parseFlags(argv.slice(2)));
+      return;
+    }
+    if (cmd === "image" && argv[1] === "bake") {
+      const positional = argv[2] && !argv[2].startsWith("--") ? argv[2] : undefined;
+      await imageBakeCommand(positional, parseFlags(argv.slice(2)));
       return;
     }
     usage();

@@ -1,5 +1,11 @@
 # Portable harness/runtime — one definition, runs whole anywhere (managed **or** the user's laptop)
 
+> ⚠️ **Managed-lane caveat (2026-07-11):** nomad/k8s honor `case.image` by making it the TASK image with no
+> entrypoint injection — so on managed runtimes the image must boot the everdict agent itself. A plain BYO image
+> works on the self-hosted lane (DockerDriver) but dies with "sentinel not found" on managed ones. Wrap it with
+> `everdict image bake` — see `docs/architecture/managed-case-image.md` (agent artifact injection is the planned
+> no-bake endgame).
+
 > **Status: Slices 1 + 2 SHIPPED + live-verified.** Slice 1 (`bb1df4d`) = self-hosted runner honors `case.image`
 > via local Docker (`DockerDriver`) — proven with an image-only marker file the grader found (impossible on the
 > host). Slice 2 = `examples/bundles/spreadsheetbench/Dockerfile` (`spreadsheetbench:v1` = python + libreoffice +
