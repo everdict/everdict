@@ -115,6 +115,7 @@ export interface ServerDeps {
   // Runtime connection test — RuntimeSpec → build a live backend, then probe() (reachability/auth without a job). main injects it with secrets + a builder.
   probeRuntime?: (workspace: string, spec: RuntimeSpec) => Promise<RuntimeProbeResult>;
   secretStore?: SecretStore; // workspace secret management — main always injects it (ON by default; auto-generates an ephemeral key if no KEK). Disabled only when not injected
+  invalidateTenantBackends?: (tenant: string) => void; // drop the tenant's cached runtime backends after a WORKSPACE secret change (their secretEnv is baked at build)
   githubAppService?: GithubAppService; // workspace-owned GitHub App integration (org install→selected repos) (route disabled if absent)
   mattermostService?: MattermostService; // workspace-owned Mattermost integration (register→bot notifications) (route disabled if absent)
   mattermostCommandService?: MattermostCommandService; // Mattermost inbound (slash commands/buttons) (route disabled if absent)

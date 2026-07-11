@@ -102,6 +102,7 @@ async function main(): Promise<void> {
     dispatcher,
     meteredDispatcher,
     probeRuntime,
+    invalidateTenantBackends,
   } = buildDispatch({
     callbackStore,
     secretStore,
@@ -243,6 +244,7 @@ async function main(): Promise<void> {
     membershipService,
     profileService,
     secretStore,
+    invalidateTenantBackends, // workspace secret change → drop the tenant's cached runtime backends (stale secretEnv)
     githubAppService,
     mattermostService,
     mattermostCommandService,

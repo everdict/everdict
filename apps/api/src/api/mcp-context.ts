@@ -53,6 +53,7 @@ export interface McpDeps {
   runtimeRegistry?: RuntimeRegistry;
   probeRuntime?: (workspace: string, spec: RuntimeSpec) => Promise<RuntimeProbeResult>; // runtime connection test
   secretStore?: SecretStore;
+  invalidateTenantBackends?: (tenant: string) => void; // workspace secret change → drop cached runtime backends (route parity)
   githubAppService?: GithubAppService; // workspace-owned GitHub App integration (org install → selected repos)
   mattermostService?: MattermostService; // workspace-owned Mattermost integration (register → bot notifications)
   traceSinkService?: TraceSinkService; // workspace trace sinks (export to an observability platform)

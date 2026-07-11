@@ -58,6 +58,39 @@ describe("RuntimeDispatcher", () => {
     expect(backends.get("rt:acme:mylocal@1.0.0")).toBe(built);
   });
 
+  it("invalidateTenant drops ONLY that tenant's cached backends — the next dispatch rebuilds with fresh secrets", async () => {
+    const { inner } = innerSpy();
+    const backends = new BackendRegistry();
+    const runtimes = new InMemoryRuntimeRegistry();
+    await runtimes.register("acme", localRuntime);
+    let secrets: Record<string, string> = {}; // a workspace secret is set between the two dispatches
+    const seenEnvs: Array<Record<string, string> | undefined> = [];
+    const d = new RuntimeDispatcher({
+      inner,
+      backends,
+      runtimes,
+      secretsFor: async () => secrets,
+      buildBackend: (_spec, opts) => {
+        seenEnvs.push(opts.secretEnv);
+        return { capacity: async () => ({ total: 1, used: 0 }), dispatch: async () => result };
+      },
+    });
+    backends.register("rt:other:x@1", { capacity: async () => ({ total: 1, used: 0 }), dispatch: async () => result });
+
+    await d.dispatch(job("mylocal"));
+    secrets = { OPENAI_API_KEY: "fresh" };
+    await d.dispatch(job("mylocal")); // still the stale cached instance — no rebuild yet
+    expect(seenEnvs).toHaveLength(1);
+
+    d.invalidateTenant("acme");
+    expect(backends.has("rt:acme:mylocal@1.0.0")).toBe(false);
+    expect(backends.has("rt:other:x@1")).toBe(true); // another tenant's backend untouched
+
+    await d.dispatch(job("mylocal"));
+    expect(seenEnvs).toHaveLength(2);
+    expect(seenEnvs[1]).toEqual({ OPENAI_API_KEY: "fresh" }); // rebuilt with the new secret
+  });
+
   it("when target is already a global backend, pass through unchanged (no runtime resolution)", async () => {
     const { inner, seen } = innerSpy();
     const backends = new BackendRegistry();

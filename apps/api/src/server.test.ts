@@ -139,6 +139,7 @@ function server(
       effective(): { quotas: Record<string, number>; weights: Record<string, number> };
       set(patch: { quotas?: Record<string, number | null>; weights?: Record<string, number | null> }): void;
     };
+    invalidateTenantBackends?: (tenant: string) => void;
   } = {},
 ) {
   const keyStore = new InMemoryTenantKeyStore();
@@ -252,6 +253,7 @@ function server(
     ...(opts.authorizationServers ? { authorizationServers: opts.authorizationServers } : {}),
     ...(opts.callbackSink ? { callbackSink: opts.callbackSink } : {}),
     ...(opts.schedulingControl ? { schedulingControl: opts.schedulingControl } : {}),
+    ...(opts.invalidateTenantBackends ? { invalidateTenantBackends: opts.invalidateTenantBackends } : {}),
   });
   return {
     app,
@@ -2484,6 +2486,26 @@ describe("API — secrets (workspace model/provider keys)", () => {
     expect(
       (await app.inject({ method: "PUT", url: "/secrets/bad-name", headers: h, payload: { value: "x" } })).statusCode,
     ).toBe(400);
+    await app.close();
+  });
+
+  it("a WORKSPACE secret change invalidates the tenant's cached runtime backends; a personal one doesn't", async () => {
+    const invalidated: string[] = [];
+    const { app, keyStore } = server({ requireAuth: true, invalidateTenantBackends: (t) => invalidated.push(t) });
+    const h = { authorization: `Bearer ${await issueKey(keyStore, "acme")}` };
+    // Workspace-scope set + delete → invalidate (secretEnv is baked into cached backends at build)
+    await app.inject({ method: "PUT", url: "/secrets/OPENAI_API_KEY", headers: h, payload: { value: "sk" } });
+    await app.inject({ method: "DELETE", url: "/secrets/OPENAI_API_KEY", headers: h });
+    expect(invalidated).toEqual(["acme", "acme"]);
+    // Personal (user) scope doesn't feed runtime secretEnv → no invalidation
+    await app.inject({
+      method: "PUT",
+      url: "/secrets/MY_KEY",
+      headers: h,
+      payload: { value: "p", scope: "user" },
+    });
+    await app.inject({ method: "DELETE", url: "/secrets/MY_KEY?scope=user", headers: h });
+    expect(invalidated).toEqual(["acme", "acme"]);
     await app.close();
   });
 

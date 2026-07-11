@@ -24,4 +24,10 @@ export class BackendRegistry {
   names(): string[] {
     return [...this.map.keys()];
   }
+
+  // Drop a registered backend so the next dispatch rebuilds it (e.g. a tenant's secrets changed and the
+  // instance has stale secretEnv baked in). In-flight dispatches keep their reference — this only unkeys it.
+  unregister(name: string): boolean {
+    return this.map.delete(name);
+  }
 }

@@ -42,6 +42,8 @@ export function registerSecretRoutes(app: FastifyInstance, deps: ServerDeps): vo
       const owner = body.data.scope === "user" ? principal.subject : "";
       if (body.data.scope === "workspace") gate(principal, "secrets:write"); // only shared secrets are admin
       await deps.secretStore.set(principal.workspace, name.data, body.data.value, owner);
+      // Workspace secrets feed cached runtime backends (secretEnv baked at build) — drop the cache so the next dispatch sees the new value.
+      if (body.data.scope === "workspace") deps.invalidateTenantBackends?.(principal.workspace);
       return reply.code(204).send(); // the value is never returned again
     } catch (err) {
       return sendError(reply, err);
@@ -59,6 +61,7 @@ export function registerSecretRoutes(app: FastifyInstance, deps: ServerDeps): vo
         const owner = req.query.scope === "user" ? principal.subject : "";
         if (req.query.scope !== "user") gate(principal, "secrets:write"); // only shared secrets are admin
         await deps.secretStore.remove(principal.workspace, req.params.name, owner);
+        if (req.query.scope !== "user") deps.invalidateTenantBackends?.(principal.workspace);
         return reply.code(204).send();
       } catch (err) {
         return sendError(reply, err);

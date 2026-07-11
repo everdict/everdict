@@ -46,6 +46,16 @@ export interface RuntimeDispatcherDeps {
 export class RuntimeDispatcher implements Dispatcher {
   constructor(private readonly deps: RuntimeDispatcherDeps) {}
 
+  // Drop this tenant's cached runtime backends so the next dispatch rebuilds them with fresh secrets.
+  // Without this, a backend built once per (tenant, runtime@version) keeps its secretEnv until a CP restart —
+  // a workspace secret change (e.g. the judge's provider key) silently never reached running deployments.
+  invalidateTenant(tenant: string): void {
+    const prefix = `rt:${tenant}:`;
+    for (const name of this.deps.backends.names()) {
+      if (name.startsWith(prefix)) this.deps.backends.unregister(name);
+    }
+  }
+
   async dispatch(job: AgentJob, opts?: DispatchOptions): Promise<CaseResult> {
     const tenant = job.tenant ?? "default";
     const target = job.evalCase.placement?.target;

@@ -90,23 +90,24 @@ export function buildDispatch(deps: {
       : buildRuntimeBackend(spec, opts);
   // Resolve a command harness's {{model}} to a registered Model id (else raw), then delegate to RuntimeDispatcher (placement).
   // run/judge/scorecard share this one dispatcher, so every path runs with the identically-resolved model.
-  const dispatcher = new ModelResolvingDispatcher(
-    modelRegistry,
-    new RuntimeDispatcher({
-      inner: scheduler,
-      backends,
-      runtimes: runtimeRegistry,
-      secretsFor: runtimeSecretsFor,
-      buildBackend: runtimeBuildBackend,
-      // Workspace registry pull credentials — carried into the topology backend build to authenticate service-image pulls.
-      registryAuthsFor: (tenant) => imageRegistryService.pullAuths(tenant),
-      // self:<runnerId> — personally-owned runner. Confirm ownership (not owned = undefined) + return that runner's capabilities (for the service gate).
-      resolveSelfRunner: async (owner, runnerId) => (await runnerStore.get(owner, runnerId))?.capabilities,
-      // self:ws — workspace pool. Whether that owner (=ws:<tenant>) has any runner at all (lease any runner).
-      poolHasRunners: async (owner) => (await runnerStore.list(owner)).length > 0,
-      buildSelfHostedBackend: (key) => new SelfHostedBackend(key, runnerHub),
-    }),
-  );
+  const runtimeDispatcher = new RuntimeDispatcher({
+    inner: scheduler,
+    backends,
+    runtimes: runtimeRegistry,
+    secretsFor: runtimeSecretsFor,
+    buildBackend: runtimeBuildBackend,
+    // Workspace registry pull credentials — carried into the topology backend build to authenticate service-image pulls.
+    registryAuthsFor: (tenant) => imageRegistryService.pullAuths(tenant),
+    // self:<runnerId> — personally-owned runner. Confirm ownership (not owned = undefined) + return that runner's capabilities (for the service gate).
+    resolveSelfRunner: async (owner, runnerId) => (await runnerStore.get(owner, runnerId))?.capabilities,
+    // self:ws — workspace pool. Whether that owner (=ws:<tenant>) has any runner at all (lease any runner).
+    poolHasRunners: async (owner) => (await runnerStore.list(owner)).length > 0,
+    buildSelfHostedBackend: (key) => new SelfHostedBackend(key, runnerHub),
+  });
+  const dispatcher = new ModelResolvingDispatcher(modelRegistry, runtimeDispatcher);
+  // Workspace secrets feed the cached runtime backends' secretEnv — a secret change must drop that tenant's
+  // cache so the next dispatch rebuilds with fresh values (previously only a CP restart picked them up).
+  const invalidateTenantBackends = (tenant: string) => runtimeDispatcher.invalidateTenant(tenant);
   // Metered dispatcher — every dispatch (single runs, batch cases, judges) flows through one seam, so outcome
   // counters and the per-runtime duration histogram cover the whole system without per-caller wiring.
   const meteredDispatcher: CoreDispatcher = {
@@ -144,5 +145,6 @@ export function buildDispatch(deps: {
     dispatcher,
     meteredDispatcher,
     probeRuntime,
+    invalidateTenantBackends,
   };
 }

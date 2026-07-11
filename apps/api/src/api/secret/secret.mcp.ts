@@ -32,6 +32,8 @@ export function registerSecretTools(server: McpServer, ctx: McpToolContext): voi
           if (!/^[A-Z_][A-Z0-9_]*$/.test(name)) return fail("BAD_REQUEST: secret name must match ^[A-Z_][A-Z0-9_]*$");
           const owner = scope === "user" ? principal.subject : "";
           await secrets.set(ws, name, value, owner);
+          // Workspace secrets feed cached runtime backends (secretEnv baked at build) — drop the cache (route parity).
+          if (owner === "") deps.invalidateTenantBackends?.(ws);
           return ok({ workspace: ws, name, scope: scope ?? "workspace", set: true });
         }),
     );
@@ -45,6 +47,7 @@ export function registerSecretTools(server: McpServer, ctx: McpToolContext): voi
         run(principal, "secrets:write", async () => {
           const owner = scope === "user" ? principal.subject : "";
           await secrets.remove(ws, name, owner);
+          if (owner === "") deps.invalidateTenantBackends?.(ws);
           return ok({ workspace: ws, name, scope: scope ?? "workspace", deleted: true });
         }),
     );
