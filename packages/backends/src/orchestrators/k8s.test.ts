@@ -266,6 +266,20 @@ describe("K8sBackend.dispatch", () => {
     expect(deleted[0]).toMatch(/^everdict-c1-[a-z0-9]{1,5}$/);
   });
 
+  it("a failed Job's error message carries the pod reason — not a mushy 'K8s Job failed'", async () => {
+    const { api } = mockApi({ failed: true, failureReason: "ContainerCannotRun" });
+    const backend = new K8sBackend({ image: "img", api, pollIntervalMs: 1 });
+    await expect(backend.dispatch(JOB)).rejects.toThrow(/K8s Job failed — pod: ContainerCannotRun/);
+  });
+
+  it("a Job that never progresses times out WITH the waiting pod's reason (e.g. ImagePullBackOff)", async () => {
+    const { api } = mockApi({ failureReason: "ImagePullBackOff" });
+    // never succeeds nor fails — jobStatus stays 0/0
+    api.jobStatus = async () => ({ succeeded: 0, failed: 0 });
+    const backend = new K8sBackend({ image: "img", api, pollIntervalMs: 1, maxPolls: 2 });
+    await expect(backend.dispatch(JOB)).rejects.toThrow(/timed out .* — pod: ImagePullBackOff/);
+  });
+
   it("two dispatches of the SAME case get different Job names — concurrent same-dataset batches must not collide", async () => {
     const { api, deleted } = mockApi();
     const backend = new K8sBackend({ image: "img", api, pollIntervalMs: 1 });

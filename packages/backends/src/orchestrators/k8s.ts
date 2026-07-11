@@ -147,7 +147,9 @@ export function kubectlApi(
         "-l",
         `job-name=${name}`,
         "-o",
-        'jsonpath={range .items[*]}{.status.containerStatuses[*].state.terminated.reason}{" "}{.status.containerStatuses[*].lastState.terminated.reason}{end}',
+        // waiting.reason last — a pod that never starts (ImagePullBackOff/ErrImagePull) has no terminated state,
+        // and it's what the TIMEOUT path needs to explain a job that never progressed.
+        'jsonpath={range .items[*]}{.status.containerStatuses[*].state.terminated.reason}{" "}{.status.containerStatuses[*].lastState.terminated.reason}{" "}{.status.containerStatuses[*].state.waiting.reason}{end}',
       ]);
       if (res.code !== 0) return undefined;
       const reason = res.stdout.trim().split(/\s+/).find(Boolean);
@@ -573,10 +575,21 @@ export class K8sBackend implements Backend, Recoverable, Observable, Probeable {
             { name, ns, signal: OOM_KILLED },
             "task OOM-killed — raise the harness's resources.memoryMb (infra, not an agent failure)",
           );
-        throw new UpstreamError("UPSTREAM_ERROR", { name, ns, ...(reason ? { reason } : {}) }, "K8s Job failed");
+        // Carry the pod's termination reason so the CaseResult explains itself (e.g. Error, ContainerCannotRun).
+        throw new UpstreamError(
+          "UPSTREAM_ERROR",
+          { name, ns, ...(reason ? { reason } : {}) },
+          `K8s Job failed${reason ? ` — pod: ${reason}` : ""}`,
+        );
       }
       await abortableDelay(interval, signal);
     }
-    throw new UpstreamError("UPSTREAM_ERROR", { name, ns }, "timed out waiting for K8s Job completion");
+    // A job that never progressed usually has a waiting pod (ImagePullBackOff, …) — name the cause, best-effort.
+    const stuck = await api.podFailureReason(name, ns).catch(() => undefined);
+    throw new UpstreamError(
+      "UPSTREAM_ERROR",
+      { name, ns, ...(stuck ? { reason: stuck } : {}) },
+      `timed out waiting for K8s Job completion${stuck ? ` — pod: ${stuck}` : ""}`,
+    );
   }
 }

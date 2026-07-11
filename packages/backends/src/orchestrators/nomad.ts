@@ -115,6 +115,37 @@ export function nomadJobId(job: AgentJob, suffix?: string): string {
   return `everdict-${job.evalCase.id}${suffix ? `-${suffix}` : ""}`;
 }
 
+// One task event as the alloc API reports it (Type = short phase, DisplayMessage = the human cause).
+export interface NomadTaskEvent {
+  Type?: string;
+  DisplayMessage?: string;
+  Details?: Record<string, string>;
+}
+
+export function eventsIndicateOom(events: NomadTaskEvent[]): boolean {
+  // Details.oom_killed carries "true"/"false" — the docker driver may report the kill ONLY there
+  // (Type "Terminated", message "Exit Code: 137"), so a text match on "oom" alone misses it.
+  return events.some(
+    (e) =>
+      e.Details?.oom_killed === "true" || `${e.Type ?? ""} ${e.DisplayMessage ?? ""}`.toLowerCase().includes("oom"),
+  );
+}
+
+// The human cause of an alloc failure, from its task events — so "alloc failed" carries WHY (an image pull
+// denial reads as an image problem, not a mushy infra shrug). Prefer the FIRST event that looks like a failure —
+// the root cause precedes its policy consequences ("Not Restarting", "Killing"); fall back to the last event
+// with any message. Truncated — this lands inside an error message.
+export function summarizeAllocFailure(events: NomadTaskEvent[]): string | undefined {
+  const described = events.filter((e) => (e.DisplayMessage ?? "").trim().length > 0);
+  const failureLike = described.filter((e) =>
+    /fail|error|denied|not restart|kill|exceed|timeout/i.test(`${e.Type ?? ""} ${e.DisplayMessage ?? ""}`),
+  );
+  const cause = failureLike[0] ?? described.at(-1);
+  if (!cause) return undefined;
+  const text = `${cause.Type ? `${cause.Type}: ` : ""}${cause.DisplayMessage ?? ""}`.trim();
+  return text.length > 300 ? `${text.slice(0, 300)}…` : text;
+}
+
 // Per-dispatch uniqueness — two concurrent batches over the same dataset (or a retry of a finished one) would
 // otherwise submit the SAME job id: Nomad treats that as a job update, and waitForAlloc's allocs[0] can then read
 // the PREVIOUS dead alloc's logs as this case's result. A fresh id per dispatch removes both hazards; the
@@ -525,27 +556,19 @@ export class NomadBackend implements Backend, Recoverable, Observable, Shellable
     }
   }
 
-  // Scan the alloc's task events for an OOM kill (docker driver reports "OOM Killed"/oom notifications).
-  private async allocWasOomKilled(allocId: string): Promise<boolean> {
+  // The alloc's task events, flattened across tasks (one fetch feeds OOM detection AND the failure summary).
+  private async allocTaskEvents(allocId: string): Promise<NomadTaskEvent[]> {
     try {
       const res = await this.http.request("GET", `/v1/allocation/${allocId}`);
-      if (res.status >= 300) return false;
+      if (res.status >= 300) return [];
       const detail = JSON.parse(res.text) as {
-        TaskStates?: Record<
-          string,
-          { Events?: Array<{ Type?: string; DisplayMessage?: string; Details?: Record<string, string> }> }
-        >;
+        TaskStates?: Record<string, { Events?: NomadTaskEvent[] }>;
       };
-      for (const st of Object.values(detail.TaskStates ?? {})) {
-        for (const e of st.Events ?? []) {
-          const text = `${e.Type ?? ""} ${e.DisplayMessage ?? ""} ${e.Details?.oom_killed ?? ""}`.toLowerCase();
-          if (text.includes("oom")) return true;
-        }
-      }
+      return Object.values(detail.TaskStates ?? {}).flatMap((st) => st.Events ?? []);
     } catch {
       /* detection is best-effort — fall through to the generic alloc-failed error */
+      return [];
     }
-    return false;
   }
 
   private readonly purgeQueue: Array<{ jobId: string; ns: string | undefined; at: number }> = [];
@@ -573,15 +596,22 @@ export class NomadBackend implements Backend, Recoverable, Observable, Shellable
         if (alloc) {
           if (alloc.ClientStatus === "complete") return alloc.ID;
           if (alloc.ClientStatus === "failed" || alloc.ClientStatus === "lost") {
+            const events = await this.allocTaskEvents(alloc.ID);
             // OOM-killed reads as fatal infra (raise the harness resources), never as an agent failure.
-            if (await this.allocWasOomKilled(alloc.ID)) {
+            if (eventsIndicateOom(events)) {
               throw new UpstreamError(
                 "UPSTREAM_ERROR",
                 { alloc: alloc.ID, signal: OOM_KILLED },
                 "task OOM-killed — raise the harness's resources.memoryMb (infra, not an agent failure)",
               );
             }
-            throw new UpstreamError("UPSTREAM_ERROR", { alloc: alloc.ID, status: alloc.ClientStatus }, "alloc failed");
+            // Carry the task-event cause (image pull denial, driver failure, …) so the CaseResult explains itself.
+            const cause = summarizeAllocFailure(events);
+            throw new UpstreamError(
+              "UPSTREAM_ERROR",
+              { alloc: alloc.ID, status: alloc.ClientStatus },
+              `alloc failed${cause ? ` — ${cause}` : ""}`,
+            );
           }
         }
       }

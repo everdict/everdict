@@ -4,7 +4,16 @@ import { type AgentJob, BadRequestError, type CaseResult } from "@everdict/contr
 import { perTenantTrustZones, staticTrustZones } from "@everdict/domain";
 import { describe, expect, it, vi } from "vitest";
 import { staticSecrets } from "../policy/secrets.js";
-import { NomadBackend, type NomadHttp, type StreamChild, buildNomadJob, fetchHttp, streamHandleFor } from "./nomad.js";
+import {
+  NomadBackend,
+  type NomadHttp,
+  type StreamChild,
+  buildNomadJob,
+  eventsIndicateOom,
+  fetchHttp,
+  streamHandleFor,
+  summarizeAllocFailure,
+} from "./nomad.js";
 
 const JOB: AgentJob = {
   harness: { id: "claude-code", version: "latest" },
@@ -207,6 +216,37 @@ describe("NomadBackend.dispatch", () => {
     await new Promise((r) => setTimeout(r, 60));
     await backend.dispatch(JOB); // the next dispatch sweeps the aged entry
     expect(calls.filter((c) => c.startsWith("DELETE /v1/job/everdict-c1"))).toHaveLength(1);
+  });
+
+  it("a failed alloc's error message carries the task-event cause (image pull denial is not a mushy 'alloc failed')", async () => {
+    const http: NomadHttp = {
+      async request(_method, path) {
+        if (path === "/v1/jobs") return { status: 200, text: "{}" };
+        if (path.includes("/allocations"))
+          return { status: 200, text: JSON.stringify([{ ID: "alloc1", ClientStatus: "failed" }]) };
+        if (path.startsWith("/v1/allocation/alloc1"))
+          return {
+            status: 200,
+            text: JSON.stringify({
+              TaskStates: {
+                agent: {
+                  Events: [
+                    { Type: "Received", DisplayMessage: "Task received by client" },
+                    {
+                      Type: "Driver Failure",
+                      DisplayMessage: "Failed to pull `browseruse-eval:0.13.3-agent`: pull access denied",
+                    },
+                    { Type: "Not Restarting", DisplayMessage: "Policy allows no restarts" },
+                  ],
+                },
+              },
+            }),
+          };
+        return { status: 200, text: "{}" };
+      },
+    };
+    const backend = new NomadBackend({ addr: "http://nomad:4646", image: "img", http, pollIntervalMs: 1 });
+    await expect(backend.dispatch(JOB)).rejects.toThrow(/alloc failed — .*Failed to pull/);
   });
 
   it("trustZones: applies the tenant zone per job (namespace + strong-isolation runtime)", async () => {
@@ -633,5 +673,38 @@ describe("NomadBackend.probe (structured failure classification)", () => {
     const o = await new NomadBackend({ addr: "http://n:4646", image: "i", http: up }).probe();
     expect(o.reachable).toBe(true);
     expect(o.reason).toBeUndefined();
+  });
+});
+
+describe("summarizeAllocFailure / eventsIndicateOom (task-event cause extraction)", () => {
+  it("prefers the failure-like event over later benign ones", () => {
+    const cause = summarizeAllocFailure([
+      { Type: "Received", DisplayMessage: "Task received by client" },
+      { Type: "Driver Failure", DisplayMessage: "Failed to pull `x`: denied" },
+      { Type: "Killing", DisplayMessage: "" },
+    ]);
+    expect(cause).toBe("Driver Failure: Failed to pull `x`: denied");
+  });
+
+  it("falls back to the last described event when nothing looks like a failure", () => {
+    const cause = summarizeAllocFailure([
+      { Type: "Received", DisplayMessage: "Task received by client" },
+      { Type: "Started", DisplayMessage: "Task started by client" },
+    ]);
+    expect(cause).toBe("Started: Task started by client");
+  });
+
+  it("returns undefined with no described events, truncates very long messages", () => {
+    expect(summarizeAllocFailure([])).toBeUndefined();
+    expect(summarizeAllocFailure([{ Type: "X", DisplayMessage: "" }])).toBeUndefined();
+    const long = summarizeAllocFailure([{ Type: "Driver Failure", DisplayMessage: "e".repeat(500) }]);
+    expect(long?.length).toBeLessThanOrEqual(301); // 300 + ellipsis
+  });
+
+  it("detects OOM from type, message, or details", () => {
+    expect(eventsIndicateOom([{ Type: "OOM Killed" }])).toBe(true);
+    expect(eventsIndicateOom([{ DisplayMessage: "container oom-killed" }])).toBe(true);
+    expect(eventsIndicateOom([{ Details: { oom_killed: "true" } }])).toBe(true);
+    expect(eventsIndicateOom([{ Type: "Driver Failure", DisplayMessage: "pull denied" }])).toBe(false);
   });
 });
