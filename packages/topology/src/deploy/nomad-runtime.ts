@@ -120,7 +120,13 @@ export class NomadTopologyRuntime implements TopologyRuntime {
   readonly id = "nomad";
   private readonly http: NomadHttp;
   private readonly execImpl: NomadExec;
-  private readonly warm = new Map<string, TopologyHandle>(); // key: id@version
+  private readonly warm = new Map<string, TopologyHandle>(); // key: id@version@zone
+  // In-progress deploy (single-flight). The topology job ID is deterministic (everdict-harness-<id>-<version>-<zone>),
+  // so under case-level parallelism a second ensure while the warm entry is still empty would re-POST the SAME job →
+  // Nomad treats that as a job UPDATE and churns the alloc, so the services never stabilize ("many cases of the same
+  // dataset+harness don't all come up at once"). Concurrent ensures of the same key share the first deploy promise so
+  // the job is registered exactly once. (The self-hosted DockerTopologyRuntime already does this; keep them isomorphic.)
+  private readonly inFlight = new Map<string, Promise<TopologyHandle>>();
   // pool shared store: deployed once per cluster → discover host:port + allocId (used as the endpoint for the tenant's scoped creds).
   private readonly sharedStores = new Map<string, { hostPort: string; allocId: string; task: string }>();
 
@@ -134,7 +140,17 @@ export class NomadTopologyRuntime implements TopologyRuntime {
     const key = `${spec.id}@${spec.version}@${zone?.id ?? "default"}`;
     const cached = this.warm.get(key);
     if (cached) return cached; // warm: deployed only once per (version, zone)
+    const inflight = this.inFlight.get(key);
+    if (inflight) return inflight; // concurrent ensures join the first deploy — see the inFlight field comment
 
+    // Register the deploy promise so concurrent callers share it; drop it on completion (success/failure) so a failed
+    // deploy retries fresh (a broken topology is never cached in warm).
+    const p = this.deploy(spec, key, zone).finally(() => this.inFlight.delete(key));
+    this.inFlight.set(key, p);
+    return p;
+  }
+
+  private async deploy(spec: ServiceHarnessSpec, key: string, zone?: TrustZone): Promise<TopologyHandle> {
     const ns = zone?.namespace ?? this.opts.namespace;
     // pool: shared store (once per cluster) → mint per-tenant DB/role/ACL (alloc exec) → scoped creds into the service env.
     // (Nomad has no DNS without Consul, so unlike K8s it discovers host:port at runtime and injects it.)

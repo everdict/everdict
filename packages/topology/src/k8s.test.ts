@@ -151,6 +151,23 @@ describe("K8sTopologyRuntime", () => {
     expect(calls.filter((c) => c === "ns:everdict-acme")).toHaveLength(1);
   });
 
+  it("single-flight: concurrent ensures of the same harness deploy the manifests only once", async () => {
+    // Regression: the cache above only guards SEQUENTIAL re-ensures — the warm entry is written after rollout. Under
+    // case-level parallelism (many cases of the same dataset+harness at once) concurrent ensures used to each re-apply
+    // the SAME fixed-name Deployments and churn the rollout, so the services never came up together. Concurrent ensures
+    // must share ONE deploy (the manifests are applied once).
+    const { kubectl, calls } = fakeKubectl();
+    const rt = new K8sTopologyRuntime({ kubectl, fetchImpl: okFetch, pollIntervalMs: 1 });
+    const [a, b, c] = await Promise.all([
+      rt.ensureTopology(SPEC, ZONE("acme")),
+      rt.ensureTopology(SPEC, ZONE("acme")),
+      rt.ensureTopology(SPEC, ZONE("acme")),
+    ]);
+    expect(calls.filter((c) => c === "ns:everdict-acme")).toHaveLength(1); // one deploy, not one-per-caller
+    expect(a).toBe(b); // all three callers share the single deploy's handle
+    expect(b).toBe(c);
+  });
+
   const POOL_ZONE = (id: string): TrustZone => ({
     id,
     isolationRuntime: "runc",

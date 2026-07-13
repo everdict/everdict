@@ -52,6 +52,11 @@ export class K8sTopologyRuntime implements TopologyRuntime {
   private readonly kubectl: Kubectl;
   private readonly fetchImpl: typeof fetch;
   private readonly warm = new Map<string, WarmEntry>();
+  // In-progress deploy (single-flight). The manifests use fixed names (everdict-<id>-<svc>), so under case-level
+  // parallelism a second ensure while the warm entry is still empty would re-apply the SAME Deployments concurrently
+  // and churn the rollout, so the services never stabilize. Concurrent ensures of the same key share the first deploy
+  // promise so the manifests are applied once. (Isomorphic to Nomad + the self-hosted DockerTopologyRuntime.)
+  private readonly inFlight = new Map<string, Promise<TopologyHandle>>();
   private readonly sharedStoresReady = new Set<string>(); // pool shared-store deploy happens only once per cluster (deploy-once)
 
   constructor(private readonly opts: K8sTopologyRuntimeOptions = {}) {
@@ -69,7 +74,17 @@ export class K8sTopologyRuntime implements TopologyRuntime {
     const key = `${spec.id}@${spec.version}@${zone?.id ?? "default"}`;
     const cached = this.warm.get(key);
     if (cached) return cached.handle;
+    const inflight = this.inFlight.get(key);
+    if (inflight) return inflight; // concurrent ensures join the first deploy — see the inFlight field comment
 
+    // Register the deploy promise so concurrent callers share it; drop it on completion (success/failure) so a failed
+    // deploy retries fresh (a broken topology is never cached in warm).
+    const p = this.deploy(spec, key, zone).finally(() => this.inFlight.delete(key));
+    this.inFlight.set(key, p);
+    return p;
+  }
+
+  private async deploy(spec: ServiceHarnessSpec, key: string, zone?: TrustZone): Promise<TopologyHandle> {
     const ns = this.nsFor(zone);
     await this.kubectl.ensureNamespace(ns, { [MANAGED_LABEL.key]: MANAGED_LABEL.value });
     const readySec = Math.floor((this.opts.readyTimeoutMs ?? 120_000) / 1000);

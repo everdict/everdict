@@ -147,6 +147,44 @@ describe("NomadTopologyRuntime — pool store isolation", () => {
   });
 });
 
+describe("NomadTopologyRuntime — single-flight (concurrent ensures)", () => {
+  // Regression: the topology job ID is deterministic (everdict-harness-<id>-<version>), so under case-level parallelism
+  // (many cases of the same dataset+harness dispatched at once) concurrent ensureTopology calls used to each re-POST the
+  // SAME job while the warm entry was still empty — Nomad treats that as a job UPDATE and churns the alloc, so "many
+  // cases don't all come up at once". Concurrent ensures must share ONE deploy → the job is registered exactly once.
+  it("registers the topology job only once when the same harness is ensured concurrently", async () => {
+    const { registered, http, exec } = fakes();
+    const rt = new NomadTopologyRuntime({ addr: "http://nomad", http, exec, pollIntervalMs: 1, maxPolls: 5 });
+
+    const [a, b, c] = await Promise.all([rt.ensureTopology(SPEC), rt.ensureTopology(SPEC), rt.ensureTopology(SPEC)]);
+
+    const topoRegs = registered.filter((j) => j.Job.ID === topologyJobId(SPEC));
+    expect(topoRegs).toHaveLength(1); // one POST, not one-per-caller
+    expect(a).toBe(b); // all three callers share the single deploy's handle
+    expect(b).toBe(c);
+  });
+
+  it("re-ensures fresh after a failed deploy (a broken topology is not cached in single-flight)", async () => {
+    let firstPost = true;
+    const http: NomadHttp = {
+      async request(method, path, body) {
+        if (method === "POST" && path.startsWith("/v1/jobs")) {
+          if (firstPost) {
+            firstPost = false;
+            return { status: 500, text: "boom" }; // first deploy's registration fails
+          }
+          return { status: 200, text: "{}" };
+        }
+        if (path.includes("/allocations")) return { status: 200, text: "[]" };
+        return { status: 200, text: "[]" };
+      },
+    };
+    const rt = new NomadTopologyRuntime({ addr: "http://nomad", http, pollIntervalMs: 1, maxPolls: 5 });
+    await expect(rt.ensureTopology(SPEC)).rejects.toThrow(); // inFlight must clear on failure
+    await expect(rt.ensureTopology(SPEC)).resolves.toBeDefined(); // else it would fail forever
+  });
+});
+
 describe("NomadTopologyRuntime — co-located endpoint discovery", () => {
   afterEach(() => vi.unstubAllGlobals());
 
