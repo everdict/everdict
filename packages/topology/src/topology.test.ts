@@ -13,6 +13,9 @@ import {
   buildDedicatedStoreJob,
   buildNomadTopologyJob,
   buildSharedStoreJob,
+  needsPerServiceGroups,
+  nomadServiceName,
+  peerEnvName,
   resolvePort,
   servicePortLabel,
   topologyJobId,
@@ -190,6 +193,85 @@ describe("buildNomadTopologyJob", () => {
     // each task references its own port label.
     expect(group?.Tasks[0]?.Config.ports).toEqual(["agent_server"]);
     expect(group?.Tasks[1]?.Config.ports).toEqual(["browser_mcp"]);
+  });
+});
+
+describe("buildNomadTopologyJob — heterogeneous / scaled → per-service groups (K8s-style)", () => {
+  // A mixed-OS topology: a Linux Selenium hub + a Windows browser node that must talk to it directly. The canonical
+  // "requires both Ubuntu and Windows" open-source topology.
+  const MIXED: ServiceHarnessSpec = {
+    kind: "service",
+    id: "grid",
+    version: "1.0.0",
+    services: [
+      { name: "hub", image: "selenium/hub:4", port: 4444, needs: [], perRun: [], replicas: 1, env: {} },
+      {
+        name: "win-node",
+        image: "selenium/node-edge:4",
+        port: 5555,
+        needs: ["hub"],
+        perRun: [],
+        replicas: 1,
+        env: {},
+        requires: { os: "windows" },
+      },
+    ],
+    dependencies: [],
+    frontDoor: { service: "hub", submit: "POST /session" },
+    traceSource: { kind: "otel", endpoint: "http://x" },
+  };
+
+  it("needsPerServiceGroups: false for a homogeneous single-instance Linux topology (stays co-located, no regression)", () => {
+    expect(needsPerServiceGroups(SPEC)).toBe(false);
+    expect(needsPerServiceGroups(MIXED)).toBe(true); // a Windows service forces the split
+    const scaled: ServiceHarnessSpec = {
+      ...SPEC,
+      services: SPEC.services.map((s, i) => (i === 0 ? { ...s, replicas: 2 } : s)),
+    };
+    expect(needsPerServiceGroups(scaled)).toBe(true); // replicas>1 also forces it (can't bind a port twice in one netns)
+  });
+
+  it("emits one group per service, each placed by its OS constraint (${attr.kernel.name})", () => {
+    const job = buildNomadTopologyJob(MIXED);
+    expect(job.Job.TaskGroups.map((g) => g.Name)).toEqual(["everdict-svc-hub", "everdict-svc-win_node"]);
+    const hub = job.Job.TaskGroups[0];
+    const win = job.Job.TaskGroups[1];
+    expect(hub?.Constraints).toEqual([{ LTarget: "${attr.kernel.name}", Operand: "=", RTarget: "linux" }]);
+    expect(win?.Constraints).toEqual([{ LTarget: "${attr.kernel.name}", Operand: "=", RTarget: "windows" }]);
+    // Linux service uses the bridge netns; the Windows one can't, so no bridge Mode.
+    expect(hub?.Networks?.[0]?.Mode).toBe("bridge");
+    expect(win?.Networks?.[0]?.Mode).toBeUndefined();
+  });
+
+  it("registers each ported service in Nomad-native discovery (provider nomad, no Consul needed)", () => {
+    const job = buildNomadTopologyJob(MIXED);
+    expect(job.Job.TaskGroups[0]?.Services).toEqual([
+      { Name: nomadServiceName(MIXED, "hub"), PortLabel: "hub", Provider: "nomad" },
+    ]);
+    expect(nomadServiceName(MIXED, "hub")).toBe("everdict-grid-hub");
+  });
+
+  it("injects the peer address from the catalog as EVERDICT_SVC_<PEER> env (the no-DNS Service-DNS analog)", () => {
+    const job = buildNomadTopologyJob(MIXED);
+    const win = job.Job.TaskGroups[1];
+    const tmpl = win?.Tasks[0]?.Templates?.[0];
+    expect(tmpl?.Envvars).toBe(true);
+    expect(tmpl?.ChangeMode).toBe("restart"); // re-resolve on a peer reschedule (no stale address)
+    expect(tmpl?.EmbeddedTmpl).toContain(`nomadService "everdict-grid-hub"`); // camelCase — the render-time func name (snake_case is "not defined", proven live)
+    expect(tmpl?.EmbeddedTmpl).toContain(`${peerEnvName("hub")}=http://`);
+    expect(peerEnvName("hub")).toBe("EVERDICT_SVC_HUB");
+  });
+
+  it("per-service groups allow a reused port across services (separate netns — no co-located port-collision throw)", () => {
+    const spec: ServiceHarnessSpec = {
+      ...MIXED,
+      services: [
+        { name: "a", image: "i:1", port: 8000, needs: [], perRun: [], replicas: 2, env: {} }, // replicas>1 → per-service
+        { name: "b", image: "i:1", port: 8000, needs: [], perRun: [], replicas: 1, env: {} },
+      ],
+    };
+    expect(() => buildNomadTopologyJob(spec)).not.toThrow();
+    expect(buildNomadTopologyJob(spec).Job.TaskGroups[0]?.Count).toBe(2); // replicas → group Count
   });
 });
 
