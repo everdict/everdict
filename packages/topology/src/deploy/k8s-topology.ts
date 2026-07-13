@@ -152,6 +152,13 @@ export function buildK8sManifests(spec: ServiceHarnessSpec, opts: K8sTopologyOpt
           metadata: { labels },
           spec: {
             runtimeClassName: opts.runtimeClass,
+            // Intrinsic OS placement (requires.os) → the standard nodeSelector (kubernetes.io/os = GOOS). This is
+            // the K8s realization of the portable os-<x> capability; the whole cross-service data plane (Service DNS)
+            // is unchanged, so a Windows service just lands on a Windows node. Cluster taints (if Windows nodes are
+            // tainted) are a runtime-side binding, not a harness concern.
+            ...(svc.requires?.os
+              ? { nodeSelector: { "kubernetes.io/os": svc.requires.os === "macos" ? "darwin" : svc.requires.os } }
+              : {}),
             // Workspace-registry image auth — reference it (the Secret above) only when this service image's host matches.
             ...(auth && imageUsesRegistryHost(svc.image, auth.host)
               ? { imagePullSecrets: [{ name: REGISTRY_AUTH_SECRET_NAME }] }

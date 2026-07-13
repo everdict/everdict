@@ -75,27 +75,36 @@ own way:
 - **K8s** — already one Deployment+Service per service wired by Service DNS. `requires.os` →
   `nodeSelector: { "kubernetes.io/os": "windows" }` + the standard Windows toleration. **No data-plane change**;
   the mixed-OS gap on K8s is purely the missing field this contract adds. Lowest-risk realization.
-- **Nomad** — partition services by their required OS into placement **cells**: same-OS services co-locate as
-  today (one group, loopback — the recent stale-address fix preserved *within* a cell); a differing-OS service
-  becomes its own group placed via `constraint ${attr.kernel.name}`. Cross-cell edges use the **cluster's native
-  discovery** (Consul is present here → Consul service registration + `template` resolution / Connect, wired *by
-  the adapter*). `replicas>1` → the promoted group's `Count`. **This adapter reproduces the operator's
-  already-working Windows-Playwright + Linux + Consul harness** — that proven wiring is the Nomad adapter's
-  reference implementation, and it stays entirely inside the adapter.
+- **Nomad — the K8s model, natively (preferred).** Make Nomad **isomorphic to K8s**: **one Consul-registered
+  group per service** (the Deployment+Service analog). Peers resolve `<svc.name>` via **Consul service DNS**
+  (re-resolving + health-gated — the Service-DNS analog, replacing loopback `extra_hosts`); placement via
+  `constraint ${attr.kernel.name}` from `requires.os` (the `nodeSelector` analog); scale via group `Count =
+  replicas`. Per-service groups = per-service netns, so the co-location unique-port constraint disappears. This is
+  the **old per-service-group shape done right**: the addresses that used to go stale (dynamic host ports baked in)
+  are now re-resolved through Consul. **It reproduces the operator's already-working Windows-Playwright + Linux +
+  Consul harness** — that proven wiring is the Nomad adapter's reference implementation, entirely inside the
+  adapter.
+  - **Fallback (no Consul).** Everdict cannot hard-require Consul, so a Nomad runtime **without** a service-discovery
+    substrate falls back to the current single co-located group (loopback) — degraded to **single-OS, single
+    instance** (today's behavior, no regression). Gate it: heterogeneous / replicated topologies need a
+    `service-discovery`-capable Nomad runtime; without it they're excluded (grey), exactly like any unmet
+    capability. Co-location code is retained as this fallback path, not deleted.
 - **Docker (self-hosted, single host)** — provides only the host OS, so a mixed-OS topology simply doesn't match
   the gate and is declined cleanly (a second-OS daemon is a later runner capability, not a contract change).
 
 ## Co-location & scale-out are runtime optimizations, not contract guarantees
 
-The only portable guarantee is name-reachability. Whether an adapter co-locates a cell (loopback latency, atomic
-lifecycle) or spreads services across nodes, and how it scales, is its own call. So the **co-location
-bottleneck** is an adapter concern, resolved without any harness change:
+The only portable guarantee is name-reachability. Whether an adapter co-locates services (loopback latency,
+atomic lifecycle) or spreads them per-service (the K8s model), and how it scales, is its own call. Under the
+K8s-style Nomad realization (one Consul-registered group per service) the **co-location bottleneck** dissolves
+with no harness change:
 
-- **Bin-packing** — a promoted (foreign-OS or replicated) service is packed per its own group, not summed into one
-  fat node.
-- **Throughput ceiling** — honoring the existing `replicas` on a promoted group (own netns) lifts the `Count 1`
-  single-instance cap; cross-cell callers load-balance over the discovered replicas (Consul returns N).
-- **Blast radius** — per-group reschedule instead of the whole alloc.
+- **Bin-packing** — each service is packed as its own group, never summed into one fat node.
+- **Throughput ceiling** — the existing `replicas` maps to the service group's `Count`; callers load-balance over
+  the discovered instances (Consul returns N, health-gated), lifting the old `Count 1` single-instance cap.
+- **Blast radius** — per-service reschedule instead of the whole-topology alloc.
+
+(The co-location fallback keeps today's single-instance behavior when no service-discovery substrate is available.)
 
 Warm-pool-of-N instances (whole-topology horizontal scale) remains a separate, adapter-level follow-up; per-run
 isolation is logical (`thread_id`/key-prefix/object-prefix), so N stateless instances are equivalent.
@@ -110,11 +119,12 @@ golden assertions unchanged. New paths engage only when a service declares a non
 
 - **P1 — capability + gate (infra-agnostic core, mixed-OS placement).** `TopologyService.requires.os` +
   `os-windows`/`os-macos` in `CAPABILITY_DEFS` + `requiredCapabilities`(topology)/`defaultRuntimeCapabilities`
-  wiring + web grey-badge on unmet. Realizations: **K8s `nodeSelector`** (lowest risk, land first) → **Nomad cell
-  partition + `${attr.kernel.name}` + Consul cross-cell** (reproducing the operator's working harness) → **Docker
-  decline**. Homogeneous topologies untouched.
-- **P2 — honor `replicas` on promoted groups (throughput/bottleneck).** Nomad group `Count`, cross-cell LB over
-  discovered replicas; K8s already honors replicas.
+  wiring + web grey-badge on unmet. Realizations: **K8s `nodeSelector`** (lowest risk, land first — it *is* the
+  model) → **Nomad K8s-style** (per-service Consul-registered group + `${attr.kernel.name}` + Consul service DNS,
+  reproducing the operator's working harness; co-location kept as the no-Consul fallback) → **Docker decline**.
+  Homogeneous topologies untouched.
+- **P2 — honor `replicas` per service (throughput/bottleneck).** Nomad service group `Count` + Consul LB over
+  discovered instances; K8s already honors replicas.
 - **P3 — warm-pool-of-N + case load-balancing (whole-topology scale).** Adapter-level.
 
 ## Files
@@ -124,8 +134,9 @@ golden assertions unchanged. New paths engage only when a service declares a non
 - `packages/domain/src/runtime/capability-requirements.ts` — topology OS → required capabilities; runtime OS
   advertisement (self-probe hook).
 - `packages/topology/src/deploy/{k8s-topology,nomad-topology,nomad-runtime,docker-runtime}.ts` — native
-  realizations (nodeSelector / cell partition + constraint + Consul discovery / single-host decline). **All infra
-  specifics confined here, behind `TopologyRuntime`.**
-- Supersedes the "one group, whole topology" invariant in `nomad-colocated-topology.md` (co-location is now
-  per-OS-cell) — update that doc + the `topology`/`self-hosted-runner` skill references when code lands.
+  realizations (nodeSelector / per-service Consul group + constraint + Consul service DNS / single-host decline).
+  **All infra specifics confined here, behind `TopologyRuntime`.**
+- Supersedes the "one group, whole topology" invariant in `nomad-colocated-topology.md`: the default Nomad model
+  becomes the **K8s-style per-service Consul** one, and co-location is demoted to the no-Consul fallback — update
+  that doc + the `topology`/`self-hosted-runner` skill references when code lands.
 ```

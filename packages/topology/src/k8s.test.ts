@@ -104,6 +104,44 @@ describe("buildK8sManifests — workspace-registry pull auth (registryAuth)", ()
   });
 });
 
+describe("buildK8sManifests — OS placement (requires.os → nodeSelector, the portable os-<x> capability)", () => {
+  type DeploySpec = { spec: { template: { spec: { nodeSelector?: Record<string, string> } } } };
+  const deployNamed = (manifests: ReturnType<typeof buildK8sManifests>, name: string) =>
+    manifests.find((m) => m.kind === "Deployment" && m.metadata.name === `bu-${name}`) as unknown as DeploySpec;
+
+  it("emits kubernetes.io/os for a service that requires an OS; a service with no requirement stays ungated", () => {
+    const spec: ServiceHarnessSpec = {
+      ...SPEC,
+      services: [
+        { name: "agent", image: "a:1", port: 8000, needs: [], perRun: [], replicas: 1, env: {} },
+        {
+          name: "pw",
+          image: "pw:1",
+          port: 4444,
+          needs: [],
+          perRun: [],
+          replicas: 1,
+          env: {},
+          requires: { os: "windows" },
+        },
+      ],
+    };
+    const manifests = buildK8sManifests(spec);
+    expect(deployNamed(manifests, "pw").spec.template.spec.nodeSelector).toEqual({ "kubernetes.io/os": "windows" });
+    expect(deployNamed(manifests, "agent").spec.template.spec.nodeSelector).toBeUndefined();
+  });
+
+  it("maps macos → darwin (GOOS, the K8s node OS label value)", () => {
+    const spec: ServiceHarnessSpec = {
+      ...SPEC,
+      services: [{ name: "mac", image: "m:1", needs: [], perRun: [], replicas: 1, env: {}, requires: { os: "macos" } }],
+    };
+    expect(deployNamed(buildK8sManifests(spec), "mac").spec.template.spec.nodeSelector).toEqual({
+      "kubernetes.io/os": "darwin",
+    });
+  });
+});
+
 describe("buildBrowserManifests (K8s)", () => {
   it("renders a headless Chromium Deployment + Service into the namespace", () => {
     const m = buildBrowserManifests("r1", { namespace: "everdict-acme" });
