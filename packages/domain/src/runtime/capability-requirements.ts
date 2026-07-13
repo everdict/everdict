@@ -1,4 +1,4 @@
-import type { CapabilityName, EvalCase, RuntimeSpec } from "@everdict/contracts";
+import type { CapabilityName, EvalCase, RuntimeSpec, ServiceHarnessSpec } from "@everdict/contracts";
 import { isHardenedRuntime } from "./trust-zone-hardening.js";
 
 // Derive the capabilities a case requires to run — decided from case fields (image/env.kind/source/placement.isolation).
@@ -17,6 +17,28 @@ export function requiredCapabilities(evalCase: EvalCase): CapabilityName[] {
     req.add("computer-use"); // OS GUI control
   }
   if (evalCase.placement?.isolation) req.add("sandbox"); // isolation requirement (security — enforced by trust-zone)
+  return [...req];
+}
+
+// Map a service's intrinsic OS need to its placement capability. linux is the implicit default (no capability, no
+// gate), so it — and an unset os — derive nothing.
+function osCapability(os: "linux" | "windows" | "macos" | undefined): CapabilityName | undefined {
+  if (os === "windows") return "os-windows";
+  if (os === "macos") return "os-macos";
+  return undefined;
+}
+
+// Derive the placement capabilities a service topology requires from its services' intrinsic OS needs — the
+// heterogeneous-placement axis. A Windows service → os-windows, so functionalGate excludes runtimes whose node pool
+// has no Windows node (shown grey in the web). Infra-agnostic: the harness declares WHAT (os), each TopologyRuntime
+// realizes WHERE natively. Unioned by the caller with the run's other requirements (docker/topology/…).
+// Pure/deterministic. Design: docs/architecture/heterogeneous-topology-placement.md.
+export function requiredCapabilitiesForTopology(spec: ServiceHarnessSpec): CapabilityName[] {
+  const req = new Set<CapabilityName>();
+  for (const svc of spec.services) {
+    const cap = osCapability(svc.requires?.os);
+    if (cap) req.add(cap);
+  }
   return [...req];
 }
 

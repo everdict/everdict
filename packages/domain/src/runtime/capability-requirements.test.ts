@@ -1,6 +1,10 @@
-import type { EvalCase, RuntimeSpec } from "@everdict/contracts";
+import type { EvalCase, RuntimeSpec, ServiceHarnessSpec } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
-import { defaultRuntimeCapabilities, requiredCapabilities } from "./capability-requirements.js";
+import {
+  defaultRuntimeCapabilities,
+  requiredCapabilities,
+  requiredCapabilitiesForTopology,
+} from "./capability-requirements.js";
 
 const base = (over: Partial<EvalCase>): EvalCase => ({
   id: "c",
@@ -33,6 +37,38 @@ describe("requiredCapabilities — derive execution requirements from the case (
 
   it("adds sandbox when placement.isolation is set (security — enforced by trust-zone)", () => {
     expect(requiredCapabilities(base({ placement: { isolation: "gvisor" } }))).toContain("sandbox");
+  });
+});
+
+describe("requiredCapabilitiesForTopology — heterogeneous placement (service OS → capability)", () => {
+  const svc = (name: string, os?: "linux" | "windows" | "macos"): ServiceHarnessSpec["services"][number] => ({
+    name,
+    image: `${name}:1`,
+    needs: [],
+    perRun: [],
+    replicas: 1,
+    env: {},
+    ...(os ? { requires: { os } } : {}),
+  });
+  const topo = (services: ServiceHarnessSpec["services"]): ServiceHarnessSpec => ({
+    kind: "service",
+    id: "t",
+    version: "1.0.0",
+    services,
+    dependencies: [],
+    frontDoor: { service: services[0]?.name ?? "s", submit: "POST /runs" },
+    traceSource: { kind: "otel", endpoint: "http://x" },
+  });
+
+  it("a Windows service requires os-windows; linux/unset services add no gate", () => {
+    expect(requiredCapabilitiesForTopology(topo([svc("agent"), svc("pw", "windows")]))).toEqual(["os-windows"]);
+    expect(requiredCapabilitiesForTopology(topo([svc("agent"), svc("db", "linux")]))).toEqual([]);
+    expect(requiredCapabilitiesForTopology(topo([svc("agent")]))).toEqual([]);
+  });
+
+  it("maps macos and dedupes repeated OS requirements", () => {
+    expect(requiredCapabilitiesForTopology(topo([svc("a", "macos")]))).toEqual(["os-macos"]);
+    expect(requiredCapabilitiesForTopology(topo([svc("a", "windows"), svc("b", "windows")]))).toEqual(["os-windows"]);
   });
 });
 

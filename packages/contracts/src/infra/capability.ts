@@ -20,6 +20,11 @@ export const CAPABILITY_DEFS = {
   browser: { kind: "functional" }, // Playwright browser automation (not an extension)
   "computer-use": { kind: "functional" }, // OS GUI control (screenshot/click/type)
   topology: { kind: "functional" }, // multi-service topology orchestration (service harness; nomad/k8s + traceSource)
+  // Node-OS placement (heterogeneous topology): a service's image intrinsically needs this OS (portable capability,
+  // NOT a cluster node label). linux is the implicit default — no capability, no gate. A runtime advertises
+  // os-windows/os-macos (via RuntimeSpec.capabilities / self-probe) only when its node pool actually has such nodes.
+  "os-windows": { kind: "functional" },
+  "os-macos": { kind: "functional" },
   sandbox: { kind: "security" }, // hardened isolation (gVisor/Kata/Firecracker/Hyper-V/KVM)
   "codex-login": { kind: "auth" }, // machine codex login (own-pays)
   "claude-login": { kind: "auth" }, // machine claude login (own-pays)

@@ -50,6 +50,14 @@ export const TopologyServiceSchema = z.object({
   volumes: z.array(z.string()).optional(),
   readiness: ServiceReadinessSchema.optional(),
   resources: ServiceResourcesSchema.optional(), // cpu/memory request — interpreted by nomad/k8s/docker (unset = runtime default)
+  // Intrinsic execution requirement — WHAT the service's image needs, never WHERE (no node label / cluster specifics).
+  // os = the OS the image genuinely requires (a Windows Playwright server needs Windows on ANY infra). Portable: it
+  // derives to an os-<x> capability, so the placement gate excludes runtimes without such a node; each TopologyRuntime
+  // realizes it natively (k8s nodeSelector / nomad ${attr.kernel.name} / docker declines). Unset / linux = no gate.
+  requires: z
+    .object({ os: z.enum(["linux", "windows", "macos"]).optional() })
+    .strict()
+    .optional(),
 });
 export type TopologyService = z.infer<typeof TopologyServiceSchema>;
 

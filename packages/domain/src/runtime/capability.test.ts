@@ -16,6 +16,15 @@ describe("capability vocabulary — split by kind (functional/security/auth)", (
     expect(capabilityKind("codex-login")).toBe("auth");
   });
 
+  it("os-windows / os-macos are functional placement capabilities (heterogeneous topology)", () => {
+    expect(capabilityKind("os-windows")).toBe("functional");
+    expect(capabilityKind("os-macos")).toBe("functional");
+    expect(CapabilityNameSchema.safeParse("os-windows").success).toBe(true);
+    // A topology needing Windows is placed only on a runtime advertising os-windows.
+    expect(functionalGate(["os-windows"], ["docker", "topology"])).toBe(false); // linux-only cluster excluded
+    expect(functionalGate(["os-windows"], ["docker", "topology", "os-windows"])).toBe(true); // mixed cluster admits it
+  });
+
   it("rejects strings outside the vocabulary (no arbitrary labels)", () => {
     expect(CapabilityNameSchema.safeParse("docker").success).toBe(true);
     expect(CapabilityNameSchema.safeParse("repo").success).toBe(false); // old name — now git
