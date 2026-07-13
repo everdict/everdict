@@ -2,7 +2,7 @@ import { VersionTagsBodySchema, setVersionTags } from "@everdict/application-con
 import { RepinBodySchema, repinHarnessImages } from "@everdict/application-control";
 import { deleteHarnessVersion, harnessIsPrivate, harnessVisibleTo } from "@everdict/application-control";
 import { AppError, HarnessInstanceSpecSchema, type ImageWarning, resolveHarnessInstance } from "@everdict/contracts";
-import { classifyImageRef, collectHarnessImages, imageWarnings } from "@everdict/domain";
+import { classifyImageRef, collectHarnessImages, diffHarnessSpecs, imageWarnings } from "@everdict/domain";
 import type { FastifyInstance } from "fastify";
 import { type ServerDeps, gate, resolvePrincipal, sendError, zodIssues } from "../route-context.js";
 import { harnessDocs } from "./harness.docs.js";
@@ -117,6 +117,37 @@ export function registerHarnessRoutes(app: FastifyInstance, deps: ServerDeps): v
       return sendError(reply, err);
     }
   });
+
+  // Structural config diff between two versions — resolved spec (template + pins applied), leaf field changes by path.
+  // Both refs may be "latest". Immutable-version premise → reproducible. Static "diff" segment resolves ahead of :version.
+  app.get<{ Params: { id: string }; Querystring: { base?: string; candidate?: string } }>(
+    "/harnesses/:id/diff",
+    { schema: harnessDocs.diff },
+    async (req, reply) => {
+      if (!deps.harnessInstances)
+        return reply.code(404).send({ code: "NOT_FOUND", message: "harness instance registry not configured" });
+      const principal = await resolvePrincipal(req, reply, deps);
+      if (!principal) return reply;
+      const { base, candidate } = req.query;
+      if (!base || !candidate)
+        return reply
+          .code(400)
+          .send({ code: "BAD_REQUEST", message: "base and candidate query parameters are required." });
+      try {
+        gate(principal, "harnesses:read");
+        // A private harness (references a personal secret) is owner-only — existence hidden from others (404, same as the reads).
+        if (!(await harnessVisibleTo(deps.harnessInstances, principal, req.params.id)))
+          return reply.code(404).send({ code: "NOT_FOUND", message: "harness not found." });
+        const [baseSpec, candidateSpec] = await Promise.all([
+          deps.harnessInstances.get(principal.workspace, req.params.id, base),
+          deps.harnessInstances.get(principal.workspace, req.params.id, candidate),
+        ]);
+        return reply.send(diffHarnessSpecs(baseSpec, candidateSpec));
+      } catch (err) {
+        return sendError(reply, err); // version not found → 404
+      }
+    },
+  );
 
   app.get<{ Params: { id: string; version: string } }>(
     "/harnesses/:id/:version",

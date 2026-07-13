@@ -223,6 +223,7 @@ describe("MCP tools", () => {
       "delete_harness",
       "delete_schedule",
       "diff_datasets",
+      "diff_harness_versions",
       "diff_scorecards",
       "estimate_scorecard",
       "exec_in_run",
@@ -402,6 +403,38 @@ describe("MCP tools", () => {
     // missing version → error.
     const miss = await viewer.callTool({ name: "get_harness_instance", arguments: { id: "bu", version: "nope" } });
     expect(miss.isError).toBe(true);
+  });
+
+  it("diff_harness_versions: resolved-spec config diff between two versions (HTTP parity) — viewer allowed", async () => {
+    const deps = harness();
+    const viewer = await connect(deps, ["viewer"]);
+    await viewer.callTool({ name: "register_harness_template", arguments: { spec: HARNESS_TEMPLATE } });
+    await viewer.callTool({ name: "register_harness", arguments: { spec: HARNESS_INSTANCE } }); // 1.0.0: agent-server → img
+    await viewer.callTool({
+      name: "register_harness",
+      arguments: {
+        spec: JSON.stringify({
+          template: { id: "bu", version: "1" },
+          id: "bu",
+          version: "2.0.0",
+          pins: { "agent-server": "img2" },
+        }),
+      },
+    });
+
+    const diff = await viewer.callTool({
+      name: "diff_harness_versions",
+      arguments: { id: "bu", base: "1.0.0", candidate: "2.0.0" },
+    });
+    expect(diff.isError).toBeFalsy();
+    expect(JSON.parse(text(diff))).toMatchObject({
+      id: "bu",
+      base: "1.0.0",
+      candidate: "2.0.0",
+      kindChanged: false,
+      changes: [{ path: "services[agent-server].image", before: "img", after: "img2", change: "changed" }],
+      summary: { added: 0, removed: 0, changed: 1 },
+    });
   });
 
   it("workspace github app: admin can start install · register GHE · list, member lacks settings:write → denied", async () => {

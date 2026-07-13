@@ -417,6 +417,17 @@
     "summaryCommand": "CLI 에이전트 · {tool} · 설치 {setup}",
     "summaryProcess": "단일 프로세스로 실행 (Claude Code · Codex)",
     "newVersion": "새 버전 만들기",
+    "compareVersions": "버전 비교",
+    "compareDescription": "두 하네스 버전의 설정이 어떻게 달라졌는지 봐요.",
+    "needTwoVersionsTitle": "버전이 2개 이상 있어야 비교할 수 있어요.",
+    "needTwoVersionsHint": "새 버전을 만들면 버전끼리 비교할 수 있어요.",
+    "compareError": "비교하지 못했어요: {error}",
+    "diffAddedBadge": "+{count} 추가",
+    "diffRemovedBadge": "−{count} 삭제",
+    "diffChangedBadge": "~{count} 변경",
+    "changesTitle": "설정 변경",
+    "noChanges": "설정 변경이 없어요.",
+    "kindChangedNote": "하네스 종류가 바뀌었어요 — 스펙 전체가 재구성됐어요.",
     "versionChangeNote": "이 버전의 변경 내역",
     "metaKind": "종류",
     "metaCategory": "분류",
@@ -475,7 +486,8 @@
     "lastRunAt": "최근 실행 {at}"
   },
   "harnessVersions": {
-    "versionsAria": "버전 ({count})"
+    "versionsAria": "버전 ({count})",
+    "compare": "비교"
   },
   "importBenchmark": {
     "modeBuild": "소스에서 만들기",

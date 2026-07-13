@@ -1096,6 +1096,46 @@ describe("API — harness taxonomy (template category + instance)", () => {
     ).toBe(404);
     await app.close();
   });
+
+  it("GET /harnesses/:id/diff → resolved-spec config diff between two versions; identical = empty; missing param 400", async () => {
+    const { app, keyStore } = server({ requireAuth: true });
+    const h = { authorization: `Bearer ${await issueKey(keyStore, "acme")}` };
+    await app.inject({ method: "POST", url: "/harness-templates", headers: h, payload: TEMPLATE });
+    await app.inject({ method: "POST", url: "/harnesses", headers: h, payload: INSTANCE }); // pr-1: agent → :abc
+    await app.inject({
+      method: "POST",
+      url: "/harnesses",
+      headers: h,
+      payload: { ...INSTANCE, version: "pr-2", pins: { agent: "ghcr.io/x/agent:def" } }, // pr-2: agent → :def
+    });
+
+    // The pinned-image swap surfaces at the resolved path services[agent].image (keyed by service name).
+    const diff = await app.inject({ method: "GET", url: "/harnesses/bu/diff?base=pr-1&candidate=pr-2", headers: h });
+    expect(diff.statusCode).toBe(200);
+    expect(diff.json()).toMatchObject({
+      id: "bu",
+      base: "pr-1",
+      candidate: "pr-2",
+      kindChanged: false,
+      changes: [
+        {
+          path: "services[agent].image",
+          before: "ghcr.io/x/agent:abc",
+          after: "ghcr.io/x/agent:def",
+          change: "changed",
+        },
+      ],
+      summary: { added: 0, removed: 0, changed: 1 },
+    });
+
+    // Same version on both sides → no changes (description lives on the raw instance, not the resolved spec).
+    const same = await app.inject({ method: "GET", url: "/harnesses/bu/diff?base=pr-1&candidate=pr-1", headers: h });
+    expect(same.json().changes).toEqual([]);
+
+    // Missing candidate query param → 400.
+    expect((await app.inject({ method: "GET", url: "/harnesses/bu/diff?base=pr-1", headers: h })).statusCode).toBe(400);
+    await app.close();
+  });
 });
 
 describe("API — interactive terminal ticket (observability ⑥)", () => {

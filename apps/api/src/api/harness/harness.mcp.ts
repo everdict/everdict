@@ -2,6 +2,7 @@ import { setVersionTags } from "@everdict/application-control";
 import { repinHarnessImages } from "@everdict/application-control";
 import { deleteHarnessVersion, harnessIsPrivate, harnessVisibleTo } from "@everdict/application-control";
 import { HarnessInstanceSpecSchema } from "@everdict/contracts";
+import { diffHarnessSpecs } from "@everdict/domain";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { type McpToolContext, fail, ok, plain, run } from "../mcp-context.js";
@@ -33,6 +34,29 @@ export function registerHarnessTools(server: McpServer, ctx: McpToolContext): vo
       },
       ({ id, version }) =>
         run(principal, "harnesses:read", async () => ok(await instances.getInstance(ws, id, version))),
+    );
+
+    server.registerTool(
+      "diff_harness_versions",
+      {
+        description:
+          'Structural config diff between two versions of the same harness id, on the resolved spec (template + pins applied) — leaf field changes by path (services keyed by name), e.g. services[backend].image / env.MODEL / command. Both refs accept "latest". Requires harnesses:read (viewer+). Reproducible by the immutable-version guarantee.',
+        inputSchema: {
+          id: z.string(),
+          base: z.string().describe('base version ref (accepts "latest")'),
+          candidate: z.string().describe('candidate version ref (accepts "latest")'),
+        },
+      },
+      ({ id, base, candidate }) =>
+        run(principal, "harnesses:read", async () => {
+          // A private harness (references a personal secret) is owner-only — its existence is hidden from others (same as the HTTP route).
+          if (!(await harnessVisibleTo(instances, principal, id))) return fail("NOT_FOUND: harness not found.");
+          const [baseSpec, candidateSpec] = await Promise.all([
+            instances.get(ws, id, base),
+            instances.get(ws, id, candidate),
+          ]);
+          return ok(diffHarnessSpecs(baseSpec, candidateSpec));
+        }),
     );
 
     server.registerTool(

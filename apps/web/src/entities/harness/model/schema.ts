@@ -1,4 +1,8 @@
-import type { HarnessListEntry, HarnessVersionsResponse } from '@everdict/contracts/wire'
+import type {
+  HarnessListEntry,
+  HarnessSpecDiffResponse,
+  HarnessVersionsResponse,
+} from '@everdict/contracts/wire'
 import { z } from 'zod'
 
 // Runtime boundary validation stays here (zod v4); the EXPORTED list/versions types are anchored to
@@ -35,6 +39,29 @@ export const harnessVersionsSchema = z.object({
   versionTags: z.record(z.string(), z.array(z.string())).optional(),
 })
 
+// GET /harnesses/:id/diff response: structural config diff of two resolved versions — one leaf field change per path.
+// change = added (only in candidate) | removed (only in base) | changed (value differs). before/after are display strings.
+export const harnessFieldChangeSchema = z.object({
+  path: z.string(),
+  before: z.string(),
+  after: z.string(),
+  change: z.enum(['added', 'removed', 'changed']),
+})
+export type HarnessFieldChange = z.infer<typeof harnessFieldChangeSchema>
+
+export const harnessSpecDiffSchema = z.object({
+  id: z.string(),
+  base: z.string(),
+  candidate: z.string(),
+  kindChanged: z.boolean(), // process ↔ command ↔ service kind change (whole-spec restructure)
+  changes: z.array(harnessFieldChangeSchema),
+  summary: z.object({
+    added: z.number(),
+    removed: z.number(),
+    changed: z.number(),
+  }),
+})
+
 // Drift guards.
 // Harness (list summary) is a NARROWER view of the wire HarnessListEntry: the web models latestVersion/
 // versionCount as OPTIONAL (the wire requires them) and omits latestCreatedBy, so it can't guard forward
@@ -44,15 +71,26 @@ export const harnessVersionsSchema = z.object({
 type AssertAssignable<A extends B, B> = A
 type WebHarness = z.infer<typeof harnessSchema>
 type WebHarnessVersions = z.infer<typeof harnessVersionsSchema>
+type WebHarnessSpecDiff = z.infer<typeof harnessSpecDiffSchema>
 type _harnessFieldsOnWire = AssertAssignable<Pick<HarnessListEntry, keyof WebHarness>, WebHarness>
 type _versionsFwd = AssertAssignable<WebHarnessVersions, HarnessVersionsResponse>
 type _versionsBack = AssertAssignable<HarnessVersionsResponse, WebHarnessVersions>
+// HarnessSpecDiff is identical-shape to the wire diff DTO — guarded bidirectionally.
+type _diffFwd = AssertAssignable<WebHarnessSpecDiff, HarnessSpecDiffResponse>
+type _diffBack = AssertAssignable<HarnessSpecDiffResponse, WebHarnessSpecDiff>
 
-// Harness keeps the web's narrower shape (anchored by the Pick-reverse guard); HarnessVersions aliases the wire.
+// Harness keeps the web's narrower shape (anchored by the Pick-reverse guard); HarnessVersions/HarnessSpecDiff alias the wire.
 export type Harness = WebHarness
 export type HarnessVersions = HarnessVersionsResponse
+export type HarnessSpecDiff = HarnessSpecDiffResponse
 
-export type __harnessSummaryDriftGuard = [_harnessFieldsOnWire, _versionsFwd, _versionsBack]
+export type __harnessSummaryDriftGuard = [
+  _harnessFieldsOnWire,
+  _versionsFwd,
+  _versionsBack,
+  _diffFwd,
+  _diffBack,
+]
 
 // --- client mirror of the resolved HarnessSpec (GET /harnesses/:id/:version) ---
 // The final form after the control plane resolves template + pins. The web couples over HTTP only (no core package dependency).

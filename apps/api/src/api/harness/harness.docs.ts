@@ -3,6 +3,7 @@ import { RepinBodySchema } from "@everdict/application-control";
 import { HarnessInstanceSpecSchema } from "@everdict/contracts";
 import { DeleteHarnessVersionResultSchema } from "@everdict/contracts/wire";
 import { HarnessInstanceResponseSchema } from "@everdict/contracts/wire";
+import { HarnessSpecDiffResponseSchema } from "@everdict/contracts/wire";
 import { HarnessListResponseSchema } from "@everdict/contracts/wire";
 import { HarnessVersionsResponseSchema } from "@everdict/contracts/wire";
 import { RegisterHarnessResultSchema } from "@everdict/contracts/wire";
@@ -86,6 +87,28 @@ const docs = {
     response: {
       200: { description: "Versions + tags", ...toJsonSchema(HarnessVersionsResponseSchema) },
       ...errorResponses(401, 403, 404),
+    },
+  },
+  diff: {
+    summary: "Diff two harness versions",
+    description:
+      "Structural config diff between base and candidate versions of the same harness id, computed on the resolved " +
+      'spec (template + pins applied). Reports leaf field changes by path (services keyed by name). Both refs may be "latest". ' +
+      "Requires harnesses:read (viewer+). Reproducible by the immutable-version guarantee. Missing base/candidate query " +
+      "parameters are 400; an unknown version or a private (non-owned) harness is 404.",
+    tags: ["harness"],
+    params: idParams,
+    querystring: {
+      type: "object",
+      properties: {
+        base: { type: "string", description: 'Base version ref (accepts "latest")' },
+        candidate: { type: "string", description: 'Candidate version ref (accepts "latest")' },
+      },
+      required: ["base", "candidate"],
+    },
+    response: {
+      200: { description: "Structural spec diff (base ↔ candidate)", ...toJsonSchema(HarnessSpecDiffResponseSchema) },
+      ...errorResponses(400, 401, 403, 404),
     },
   },
   resolved: {

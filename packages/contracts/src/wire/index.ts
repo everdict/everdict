@@ -31,6 +31,7 @@ export * from "./github-app/github-app-view.js";
 export * from "./github-app/install-start.js";
 export * from "./github-app/installation-repo.js";
 export * from "./harness/delete-harness-version-result.js";
+export * from "./harness/harness-diff.js";
 export * from "./harness/harness-instance.js";
 export * from "./harness/harness-list-entry.js";
 export * from "./harness/harness-template-list-entry.js";

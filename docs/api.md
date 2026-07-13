@@ -54,7 +54,8 @@ resolved `workspace` (= tenant = trust-zone) keys fairness, quotas, isolation, s
 scopes every read; roles gate every route (`viewer/member/admin`). See [auth.md](auth.md). Harness registration
 (`POST/GET /harnesses` instances + `POST/GET /harness-templates` top-level categories; raw config reads
 `GET /harnesses/:id/:version/instance` [template ref + pins] and `GET /harness-templates/:id/:version` [structure]
-power the web Config panel + new-version prefill — `harnesses:read`), datasets (`POST/GET /datasets`, workspace-owned + `_shared`, see
+power the web Config panel + new-version prefill; `GET /harnesses/:id/diff?base=&candidate=` diffs two versions'
+resolved specs [config changes by field path — e.g. `services[x].image`; `base`/`candidate` may be `latest`] — `harnesses:read`), datasets (`POST/GET /datasets`, workspace-owned + `_shared`, see
 [datasets.md](datasets.md)) and key issuance (admin self-serve `POST/GET/DELETE /keys` — issued keys carry
 workspace admin role, narrowable by per-key `scopes` (`read|write|admin`, omitted = Full Access), plaintext shown
 once, hash-only at rest; bootstrap `POST /internal/tenant-keys`) are covered in [tenancy.md](tenancy.md).

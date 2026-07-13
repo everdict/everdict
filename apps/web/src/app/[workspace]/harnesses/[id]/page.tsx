@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 import Link from 'next/link'
-import { ChevronLeft, FileText, GitBranchPlus, Lock } from 'lucide-react'
+import { ChevronLeft, FileText, GitBranchPlus, GitCompare, Lock } from 'lucide-react'
 import { getTranslations } from 'next-intl/server'
 
 import { CommentsSection } from '@/features/discuss'
@@ -233,6 +233,15 @@ export default async function HarnessDetailPage({
                 />
               ) : (
                 <Badge tone="neutral">v{active} · latest</Badge>
+              )}
+              {versions.length > 1 && (
+                <Link
+                  href={`/${workspace}/harnesses/${encodeURIComponent(id)}/diff`}
+                  className={buttonVariants({ variant: 'secondary', size: 'sm' })}
+                >
+                  <GitCompare className="size-3.5" />
+                  {t('compareVersions')}
+                </Link>
               )}
               <Link
                 href={`/${workspace}/harnesses/${encodeURIComponent(id)}/new-version?v=${encodeURIComponent(active ?? '')}`}

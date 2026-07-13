@@ -15,6 +15,7 @@ export * from "./execution/agent-job.js";
 export * from "./infra/trust-zone.js";
 export * from "./infra/capability.js";
 export * from "./harness/harness-spec.js";
+export * from "./harness/harness-diff.js";
 export * from "./infra/image-ref.js";
 export * from "./harness/harness-template.js";
 export * from "./execution/suite.js";

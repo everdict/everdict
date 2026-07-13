@@ -417,6 +417,17 @@
     "summaryCommand": "CLI agent · {tool} · {setup} setup steps",
     "summaryProcess": "Single process (Claude Code · Codex)",
     "newVersion": "New version",
+    "compareVersions": "Compare versions",
+    "compareDescription": "See how the config differs between two harness versions.",
+    "needTwoVersionsTitle": "You need at least 2 versions to compare.",
+    "needTwoVersionsHint": "Create a new version to compare versions.",
+    "compareError": "Couldn't compare: {error}",
+    "diffAddedBadge": "+{count} added",
+    "diffRemovedBadge": "−{count} removed",
+    "diffChangedBadge": "~{count} changed",
+    "changesTitle": "Config changes",
+    "noChanges": "No config changes.",
+    "kindChangedNote": "The harness kind changed — the whole spec was restructured.",
     "versionChangeNote": "What changed in this version",
     "metaKind": "Kind",
     "metaCategory": "Category",
@@ -475,7 +486,8 @@
     "lastRunAt": "Last run {at}"
   },
   "harnessVersions": {
-    "versionsAria": "Versions ({count})"
+    "versionsAria": "Versions ({count})",
+    "compare": "Compare"
   },
   "importBenchmark": {
     "modeBuild": "Build from source",

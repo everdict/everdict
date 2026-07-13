@@ -155,6 +155,12 @@ export const controlPlane = {
   // GET /harnesses/:id/:version — resolved HarnessSpec (template + pins). For detail/diagramming.
   getHarnessSpec: <T>(auth: AuthContext, id: string, version: string) =>
     call<T>(auth, `/harnesses/${encodeURIComponent(id)}/${encodeURIComponent(version)}`),
+  // GET /harnesses/:id/diff — resolved-spec config diff between two versions (base↔candidate). version can be "latest".
+  diffHarness: <T>(auth: AuthContext, id: string, base: string, candidate: string) =>
+    call<T>(
+      auth,
+      `/harnesses/${encodeURIComponent(id)}/diff?base=${encodeURIComponent(base)}&candidate=${encodeURIComponent(candidate)}`
+    ),
   // GET /harnesses/:id/:version/instance — raw instance (template reference + pins). For config view / new-version prefill.
   getHarnessInstance: <T>(auth: AuthContext, id: string, version: string) =>
     call<T>(auth, `/harnesses/${encodeURIComponent(id)}/${encodeURIComponent(version)}/instance`),

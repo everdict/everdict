@@ -78,6 +78,9 @@ export {
   resolveHarnessSecrets,
 } from "./harness/harness-secrets.js";
 
+// harness — resolved-spec version diff (base ↔ candidate)
+export { diffHarnessSpecs } from "./harness/harness-diff.js";
+
 // runtime — capability gating + trust-zone hardening rules (from @everdict/core)
 export {
   capabilitiesOfKind,
