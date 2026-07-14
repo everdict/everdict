@@ -89,6 +89,28 @@ export const WorkspaceSettingsSchema = z.object({
   // Per-harness sink selection (harness id → sink name). A harness with no selection is not exported (opt-in).
   // nullable value: deselection replaces the whole map with a new one rather than deleting a key, due to the nature of jsonb merge (service-managed).
   traceSinkByHarness: z.record(z.string()).optional(),
+  // Workspace trace sources (plural) — the INBOUND mirror of traceSinks. Register a dev-cluster observability endpoint
+  // (OTel/MLflow/Langfuse/LangSmith/Phoenix) by name; a service harness picks one 'per harness' so that AFTER a case runs
+  // on that cluster, everdict pulls the correlated trace from here and grades/judges it (pull-after-run). Secrets are
+  // SecretStore name-refs (values never stored/returned). Design: docs/architecture/trace-sink.md (inbound) + docs/service-harness.md.
+  traceSources: z
+    .array(
+      z.object({
+        name: z.string().min(1), // source name (reference key — a harness selection points at this name)
+        kind: z.enum(["otel", "mlflow", "langfuse", "langsmith", "phoenix"]),
+        endpoint: z.string().url(), // platform query API base URL (reachable from the control plane at pull time)
+        authSecretName: z.string().min(1).optional(), // SecretStore key — verbatim auth-header value (omitted for an unauthenticated dev server)
+        // How this run's trace is found in the platform: id = the everdict runId IS the trace id (the agent honored the
+        // injected id) | tag = the deployed agent minted its own id but tagged it everdict.run_id → search by that tag.
+        correlate: z.enum(["id", "tag"]).default("id"),
+        service: z.string().min(1).optional(), // otel/jaeger tag-search scope (the agent's service.name) — required for otel correlate:"tag"
+        project: z.string().min(1).optional(), // scope per kind: mlflow experiment_id (tag search) · phoenix project (span query)
+      }),
+    )
+    .optional(),
+  // Per-harness source selection (harness id → source name). A harness with no selection falls back to its inline spec
+  // traceSource (or none). Same jsonb-merge / service-managed replace semantics as traceSinkByHarness.
+  traceSourceByHarness: z.record(z.string()).optional(),
   // CI integration (GitHub Actions) — the repo-link list (repo↔harness-slot mapping = OIDC trust policy). See WorkspaceCiLinkSchema above.
   ci: z.object({ links: z.array(WorkspaceCiLinkSchema).default([]) }).optional(),
   // Workspace-owned GitHub App integration (replaces personal connections) — org install→selected repos→workspace-owned installation.
