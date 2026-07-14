@@ -8,15 +8,22 @@ import { GithubAppManager, type GithubAppNotice } from '@/features/manage-github
 import { ImageRegistryManager } from '@/features/manage-image-registry'
 import { MattermostManager } from '@/features/manage-mattermost'
 import { TraceSinkManager } from '@/features/manage-trace-sink'
+import { TraceSourceManager } from '@/features/manage-trace-source'
 import type { GithubAppView } from '@/entities/github-app'
 import type { ImageRegistryConfig } from '@/entities/image-registry'
 import type { MattermostConfig } from '@/entities/mattermost'
 import type { TraceSinkConfig } from '@/entities/trace-sink'
+import type { TraceSourceConfig } from '@/entities/trace-source'
 import { Badge } from '@/shared/ui/badge'
 import { Button } from '@/shared/ui/button'
 import { SettingsList, SettingsRow } from '@/shared/ui/settings-list'
 
-export type IntegrationKey = 'github' | 'mattermost' | 'trace-sink' | 'image-registry'
+export type IntegrationKey =
+  | 'github'
+  | 'mattermost'
+  | 'trace-sink'
+  | 'trace-source'
+  | 'image-registry'
 
 // Integrations tab — instead of stacking all four managers expanded, a list of one-line per-integration summaries (connection-status badge)
 // drills into just that integration via "Manage". If there's a GitHub App installation callback just fired (githubAppNotice) or a ?app= deep link,
@@ -26,6 +33,7 @@ export function IntegrationsPanel({
   githubAppNotice,
   mattermost,
   traceSinks,
+  traceSources,
   imageRegistries,
   canWrite,
   secretNames,
@@ -35,6 +43,7 @@ export function IntegrationsPanel({
   githubAppNotice?: GithubAppNotice
   mattermost?: MattermostConfig
   traceSinks: TraceSinkConfig[]
+  traceSources: TraceSourceConfig[]
   imageRegistries: ImageRegistryConfig[]
   canWrite: boolean
   secretNames: string[]
@@ -76,6 +85,17 @@ export function IntegrationsPanel({
       status:
         traceSinks.length > 0 ? (
           <Badge tone="success">{t('registeredCount', { count: traceSinks.length })}</Badge>
+        ) : (
+          <Badge tone="outline">{t('notRegistered')}</Badge>
+        ),
+    },
+    {
+      key: 'trace-source',
+      label: t('traceSourceLabel'),
+      hint: t('traceSourceHint'),
+      status:
+        traceSources.length > 0 ? (
+          <Badge tone="success">{t('registeredCount', { count: traceSources.length })}</Badge>
         ) : (
           <Badge tone="outline">{t('notRegistered')}</Badge>
         ),
@@ -145,6 +165,13 @@ export function IntegrationsPanel({
       )}
       {active === 'trace-sink' && (
         <TraceSinkManager sinks={traceSinks} canWrite={canWrite} secretNames={secretNames} />
+      )}
+      {active === 'trace-source' && (
+        <TraceSourceManager
+          sources={traceSources}
+          canWrite={canWrite}
+          secretNames={secretNames}
+        />
       )}
       {active === 'image-registry' && (
         <ImageRegistryManager

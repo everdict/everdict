@@ -394,6 +394,21 @@ export const controlPlane = {
       method: 'PUT',
       body: JSON.stringify(body),
     }),
+  // Workspace trace sources (multiple) — pull a dev-cluster-deployed harness's trace from the team's observability platform (OTel/MLflow etc.) to score it.
+  // Read harnesses:read (viewer+ — for showing the per-harness selection) / register (upsert by name)·delete settings:write.
+  // Auth values live only in the SecretStore (only name references pass through).
+  listTraceSources: <T>(auth: AuthContext) => call<T>(auth, '/workspace/trace-sources'),
+  upsertTraceSource: <T>(auth: AuthContext, body: unknown) =>
+    call<T>(auth, '/workspace/trace-sources', { method: 'PUT', body: JSON.stringify(body) }),
+  removeTraceSource: (auth: AuthContext, name: string) =>
+    callVoid(auth, `/workspace/trace-sources/${encodeURIComponent(name)}`, { method: 'DELETE' }),
+  // Per-harness source selection (assignment) — body { source: name | null }, null clears the selection (no pull).
+  // harnesses:register (member+) — the source itself (register/delete) is admin, but which one to pull from is the harness owner's call.
+  assignHarnessTraceSource: <T>(auth: AuthContext, harnessId: string, body: unknown) =>
+    call<T>(auth, `/harnesses/${encodeURIComponent(harnessId)}/trace-source`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
   // Workspace image registries (BYO, multiple) — the harness image classification baseline + the everdict image push publish target.
   // Read harnesses:read (viewer+ — for classification badges) / register (upsert by name)·delete settings:write. Secrets pass through as name references only.
   listImageRegistries: <T>(auth: AuthContext) => call<T>(auth, '/workspace/image-registries'),

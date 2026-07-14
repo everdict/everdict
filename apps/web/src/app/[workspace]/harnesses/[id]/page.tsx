@@ -8,6 +8,7 @@ import { HarnessVersionSwitcher } from '@/features/harness-versions'
 import { HarnessDetail, RawConfigDisclosure } from '@/features/inspect-harness'
 import { CiLinkPanel } from '@/features/manage-ci-links'
 import { HarnessSinkSelect } from '@/features/manage-trace-sink'
+import { HarnessSourceSelect } from '@/features/manage-trace-source'
 import { VersionTagsEditor } from '@/features/version-tags'
 import { ciLinksResponseSchema, type CiLink } from '@/entities/ci-link'
 import { datasetsSchema } from '@/entities/dataset'
@@ -25,6 +26,7 @@ import {
 } from '@/entities/harness'
 import { membersSchema } from '@/entities/member'
 import { traceSinksResponseSchema, type TraceSinksResponse } from '@/entities/trace-sink'
+import { traceSourcesResponseSchema, type TraceSourcesResponse } from '@/entities/trace-source'
 import { can } from '@/shared/auth/can'
 import { currentPrincipal } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
@@ -169,6 +171,14 @@ export default async function HarnessDetailPage({
     .then((r) => traceSinksResponseSchema.parse(r))
     .catch(() => ({ sinks: [], assignments: {} }))
   const assignedSink: string | undefined = traceSinks.assignments[id]
+
+  // Trace sources (multiple) + this harness's selection (assignment) — which observability platform to pull this
+  // dev-cluster-deployed harness's trace from for evaluation. The detail renders even if it fails (only the selection row is hidden).
+  const traceSources: TraceSourcesResponse = await controlPlane
+    .listTraceSources(ctx)
+    .then((r) => traceSourcesResponseSchema.parse(r))
+    .catch(() => ({ sources: [], assignments: {} }))
+  const assignedSource: string | undefined = traceSources.assignments[id]
 
   // CI integration (repo link) — links matched to this harness + my GitHub connection needed for the repo picker + dataset candidates.
   // The detail keeps rendering even if all three fail (only the panel is empty). Save/unlink is admin (settings:write) — the control plane is the final enforcer.
@@ -325,6 +335,17 @@ export default async function HarnessDetailPage({
               harnessId={id}
               sinks={traceSinks.sinks.map((s) => ({ name: s.name, kind: s.kind }))}
               {...(assignedSink !== undefined ? { current: assignedSink } : {})}
+              canAssign={can(principal?.roles, 'harnesses:register')}
+            />
+          </MetaItem>
+        )}
+        {/* Per-harness trace source selection — hide the row itself if the workspace has no sources and no selection (don't render empty sections). */}
+        {(traceSources.sources.length > 0 || assignedSource !== undefined) && (
+          <MetaItem label={t('metaTraceSource')}>
+            <HarnessSourceSelect
+              harnessId={id}
+              sources={traceSources.sources.map((s) => ({ name: s.name, kind: s.kind }))}
+              {...(assignedSource !== undefined ? { current: assignedSource } : {})}
               canAssign={can(principal?.roles, 'harnesses:register')}
             />
           </MetaItem>

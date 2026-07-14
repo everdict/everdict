@@ -9,6 +9,7 @@ import { invitesSchema, membersSchema, type Invite, type Member } from '@/entiti
 import { runnersResponseSchema, type RunnerMeta } from '@/entities/runner'
 import { secretsSchema, type SecretMeta } from '@/entities/secret'
 import { traceSinksResponseSchema, type TraceSinkConfig } from '@/entities/trace-sink'
+import { traceSourcesResponseSchema, type TraceSourceConfig } from '@/entities/trace-source'
 import { tenantUsageSchema, type TenantUsage } from '@/entities/usage'
 import { workspaceRecordSchema, type WorkspaceRecord } from '@/entities/workspace'
 import { can } from '@/shared/auth/can'
@@ -56,6 +57,7 @@ export default async function SettingsPage({
   let githubApp: GithubAppView = { registrations: [], installations: [] }
   let mattermost: MattermostConfig | undefined
   let traceSinks: TraceSinkConfig[] = []
+  let traceSources: TraceSourceConfig[] = []
   let imageRegistries: ImageRegistryConfig[] = []
   let ciLinks: CiLink[] = []
   let budget: BudgetResponse | undefined
@@ -98,6 +100,13 @@ export default async function SettingsPage({
       (await attempt(
         'trace-sinks',
         async () => traceSinksResponseSchema.parse(await controlPlane.listTraceSinks(ctx)).sinks
+      )) ?? []
+    // Workspace trace sources (multiple — selected per harness). The read itself is viewer+, but the management UI is this tab.
+    traceSources =
+      (await attempt(
+        'trace-sources',
+        async () =>
+          traceSourcesResponseSchema.parse(await controlPlane.listTraceSources(ctx)).sources
       )) ?? []
     // Workspace image registries (multiple — classification baseline + everdict image push target). The read itself is viewer+, but the management UI is this tab.
     imageRegistries =
@@ -180,6 +189,7 @@ export default async function SettingsPage({
             {...(githubAppNotice !== undefined ? { githubAppNotice } : {})}
             {...(mattermost !== undefined ? { mattermost } : {})}
             traceSinks={traceSinks}
+            traceSources={traceSources}
             imageRegistries={imageRegistries}
             ciLinks={ciLinks}
             {...(budget !== undefined ? { budget } : {})}

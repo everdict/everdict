@@ -21,6 +21,7 @@ import type { Invite, Member } from '@/entities/member'
 import type { RunnerMeta } from '@/entities/runner'
 import type { SecretMeta } from '@/entities/secret'
 import type { TraceSinkConfig } from '@/entities/trace-sink'
+import type { TraceSourceConfig } from '@/entities/trace-source'
 import type { TenantUsage } from '@/entities/usage'
 import type { WorkspaceRecord } from '@/entities/workspace'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/shared/ui/tabs'
@@ -30,7 +31,13 @@ import { IntegrationsPanel, type IntegrationKey } from './integrations-panel'
 type TabKey = 'general' | 'secrets' | 'integrations' | 'ci' | 'runners' | 'budget' | 'members'
 
 // For validating the ?app= deep link — the integrations panel's drill-in key (values outside these four are ignored).
-const INTEGRATION_KEYS: IntegrationKey[] = ['github', 'mattermost', 'trace-sink', 'image-registry']
+const INTEGRATION_KEYS: IntegrationKey[] = [
+  'github',
+  'mattermost',
+  'trace-sink',
+  'trace-source',
+  'image-registry',
+]
 
 // Workspace settings tabs: general (info/policy/delete) · secrets · integrations (GitHub App/Mattermost/trace sink/image registry) · CI · shared runners · members.
 // Tabs without permission are hidden. The "integrations" tab manages each integration via a summary list → "Manage" drill-in (IntegrationsPanel).
@@ -43,6 +50,7 @@ export function SettingsTabs(props: {
   githubAppNotice?: GithubAppNotice // Notice right after the installation callback redirect (?githubApp=installed / ?error=…)
   mattermost?: MattermostConfig // Workspace-owned Mattermost integration (completion/regression notifications)
   traceSinks: TraceSinkConfig[] // Workspace trace sinks (multiple — export scorecard detail results to the observability platform, selected per harness)
+  traceSources: TraceSourceConfig[] // Workspace trace sources (multiple — pull a dev-cluster-deployed harness's trace to evaluate, selected per harness)
   imageRegistries: ImageRegistryConfig[] // Workspace image registries (multiple — classification baseline + push publishing)
   ciLinks: CiLink[] // CI repo link (repo↔harness slot = OIDC trust) list
   budget?: BudgetResponse // Enforcement budget (per-tenant cost/token/run caps that block runs with 402) — only when settings:read
@@ -125,6 +133,7 @@ export function SettingsTabs(props: {
             : {})}
           {...(props.mattermost !== undefined ? { mattermost: props.mattermost } : {})}
           traceSinks={props.traceSinks}
+          traceSources={props.traceSources}
           imageRegistries={props.imageRegistries}
           canWrite={props.canWriteSettings}
           secretNames={props.secrets.map((s) => s.name)}
