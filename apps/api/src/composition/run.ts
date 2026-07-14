@@ -11,6 +11,7 @@ import { buildTraceSource } from "@everdict/trace";
 import type { PersistentBudget } from "../common/budget-tracker.js";
 import { defaultJudgeRunner } from "../core/execution/judge-runner.js";
 import type { ModelResolvingDispatcher } from "../core/execution/model-resolving-dispatcher.js";
+import type { PlacementPreflight } from "../core/execution/placement-preflight.js";
 import type { RuntimeSecretsFn, ScopedSecretsFn } from "./types.js";
 
 // Live-observability lane readers (from buildRuntimeAccess) — RunService wraps them in lazy closures.
@@ -56,6 +57,7 @@ export function buildRun(deps: {
   imageRegistryService: ImageRegistryService;
   notificationService: NotificationService;
   envMeterPolicy: (tenant: string) => boolean;
+  preflightPlacement: PlacementPreflight;
   readers: RuntimeAccessReaders;
 }) {
   const {
@@ -74,6 +76,7 @@ export function buildRun(deps: {
     imageRegistryService,
     notificationService,
     envMeterPolicy,
+    preflightPlacement,
     readers,
   } = deps;
   const { readCaseLogsFn, execInSandboxFn, captureBrowserScreenFn, openTerminalStreamFn } = readers;
@@ -91,6 +94,7 @@ export function buildRun(deps: {
     makeGraders,
     budget,
     requireRuntime: true, // policy (default): a run with no runtime/self target is 400 at submit — the API does not register local
+    preflightPlacement, // submit-time capability gate: reject a harness/runtime mismatch (e.g. Windows topology → Linux cluster) at 400
     ...(artifacts ? { artifacts } : {}),
     // Declarative harness: resolve template+pins from the instance registry and embed the spec in the job (built-in fallback if absent).
     resolveHarness: (tenant, id, version) => harnessInstanceRegistry.get(tenant, id, version),

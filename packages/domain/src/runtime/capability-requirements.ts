@@ -1,4 +1,11 @@
-import type { AgentJob, CapabilityName, EvalCase, RuntimeSpec, ServiceHarnessSpec } from "@everdict/contracts";
+import type {
+  AgentJob,
+  CapabilityName,
+  EvalCase,
+  HarnessSpec,
+  RuntimeSpec,
+  ServiceHarnessSpec,
+} from "@everdict/contracts";
 import { isHardenedRuntime } from "./trust-zone-hardening.js";
 
 // Derive the capabilities a case requires to run — decided from case fields (image/env.kind/source/placement.isolation).
@@ -55,6 +62,15 @@ export function requiredCapabilitiesForJob(job: AgentJob): CapabilityName[] {
     for (const c of requiredCapabilitiesForTopology(job.harnessSpec)) caps.add(c);
   }
   return [...caps];
+}
+
+// The capabilities a HARNESS requires independent of any single case — the submit-time placement-gate input (a run
+// can be rejected the instant it's submitted, before any case is dispatched). A service/topology harness needs docker
+// + its services' OS caps; a process/command harness declares none here (its case-level needs are gated at dispatch).
+// Pure. Design: docs/architecture/heterogeneous-topology-placement.md.
+export function requiredCapabilitiesForHarness(spec: HarnessSpec): CapabilityName[] {
+  if (spec.kind !== "service") return [];
+  return ["docker", ...requiredCapabilitiesForTopology(spec)];
 }
 
 // Derive the capabilities a registered runtime "provides" by default — the app auto-labels from the spec (like the runner's

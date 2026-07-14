@@ -62,6 +62,16 @@ export interface RunServiceDeps {
   // Policy gate: if true, submitting a run with no runtime/self target is 400 (no silent local fallback). The API (main.ts) is always true.
   // Unset (test: a mock dispatcher injected directly) = no gate. Not an env toggle — a fixed deployment policy.
   requireRuntime?: boolean;
+  // Submit-time placement preflight — reject a run whose chosen runtime can't run the harness (e.g. a Windows-service
+  // topology on a Linux-only cluster) at SUBMIT (400), before any case is dispatched. Wired by apps/api from the
+  // harness + runtime registries (runtimeSatisfies vs requiredCapabilitiesForHarness); absent in unit tests (mock
+  // dispatcher). Throws a BadRequestError when the runtime can't satisfy the harness. self:* targets are skipped
+  // (the runner lease gate handles those). The RuntimeDispatcher still gates per-case at dispatch as the backstop.
+  preflightPlacement?: (input: {
+    tenant: string;
+    target: string;
+    harness: { id: string; version: string };
+  }) => Promise<void>;
   budget?: BudgetTracker; // the API owns the admission gate (402 when exceeded) and cost settle
   // Resolve a declarative harness spec from the registry and embed it in the job (if absent, built-in id branching). An unknown harness is rejected → undefined fallback.
   resolveHarness?: (tenant: string, id: string, version: string) => Promise<HarnessSpec | undefined>;
@@ -136,7 +146,10 @@ export class RunService {
   // Synchronous admission (throws → 402 if over budget). On pass, create the record then dispatch asynchronously (no await).
   async submit(input: SubmitInput): Promise<RunRecord> {
     // Deployment policy: the execution location (registered runtime or self:<runner>) must be specified — if absent, 400 (block silent local fallback).
-    assertRuntimeTarget(this.deps.requireRuntime, input.runtime ?? input.case.placement?.target);
+    const target = input.runtime ?? input.case.placement?.target;
+    assertRuntimeTarget(this.deps.requireRuntime, target);
+    // Placement capability preflight: reject at submit (400) if the chosen runtime can't run this harness (before any dispatch).
+    if (target) await this.deps.preflightPlacement?.({ tenant: input.tenant, target, harness: input.harness });
     this.deps.budget?.admit(input.tenant); // PaymentRequiredError (402) when exceeded — no run created
     // When a runtime is chosen, inject it as the case's placement.target → RuntimeDispatcher routes to the tenant runtime (same symmetry as scorecard).
     const effective: SubmitInput = input.runtime

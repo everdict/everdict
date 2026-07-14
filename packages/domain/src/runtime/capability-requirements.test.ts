@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   defaultRuntimeCapabilities,
   requiredCapabilities,
+  requiredCapabilitiesForHarness,
   requiredCapabilitiesForJob,
   requiredCapabilitiesForTopology,
 } from "./capability-requirements.js";
@@ -109,6 +110,16 @@ describe("requiredCapabilitiesForJob — case ∪ topology (the shared placement
       "docker",
       "os-windows",
     ]);
+  });
+
+  it("requiredCapabilitiesForHarness — the submit-time (case-independent) input", () => {
+    expect(requiredCapabilitiesForHarness(topo([svc("hub")]))).toEqual(["docker"]); // linux topology
+    expect(requiredCapabilitiesForHarness(topo([svc("hub"), svc("win", "windows")])).sort()).toEqual([
+      "docker",
+      "os-windows",
+    ]);
+    // a non-topology (process/command) harness declares nothing at submit — case-level caps gate at dispatch.
+    expect(requiredCapabilitiesForHarness({ kind: "process", id: "cli", version: "1" })).toEqual([]);
   });
 });
 

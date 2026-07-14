@@ -14,6 +14,7 @@ import type { S3ArtifactStore } from "@everdict/storage";
 import { buildTraceSource } from "@everdict/trace";
 import type { PersistentBudget } from "../common/budget-tracker.js";
 import type { JudgeRunner } from "../core/execution/judge-runner.js";
+import type { PlacementPreflight } from "../core/execution/placement-preflight.js";
 import { TemporalBatchDriver } from "../core/scorecard/temporal-batch-driver.js";
 import type { RuntimeSecretsFn, ScopedSecretsFn } from "./types.js";
 
@@ -46,6 +47,7 @@ export function buildScorecard(deps: {
   imageRegistryService: ImageRegistryService;
   notificationService: NotificationService;
   traceSinkService: TraceSinkService;
+  preflightPlacement: PlacementPreflight;
   killCase: ScorecardRuntimeAccess["killCase"];
   adoptCaseFn: ScorecardRuntimeAccess["adoptCaseFn"];
 }): ScorecardService {
@@ -71,6 +73,7 @@ export function buildScorecard(deps: {
     imageRegistryService,
     notificationService,
     traceSinkService,
+    preflightPlacement,
     killCase,
     adoptCaseFn,
   } = deps;
@@ -137,6 +140,7 @@ export function buildScorecard(deps: {
     // runtime:"auto" — expand to every registered runtime id for the tenant (sharding across all of them).
     runtimesFor: async (tenant) => (await runtimeRegistry.list(tenant)).map((r) => r.id),
     requireRuntime: true, // policy (default): a batch with no runtime is 400 at submit — the API does not register local
+    preflightPlacement, // submit-time capability gate: reject a harness/runtime mismatch (per runtime in the shard list) at 400
     // Fan out a child run per case (sharing the same RunStore as a single run) — each case becomes an addressable run, hidden by default in the activity list.
     runStore,
     datasets: datasetRegistry,

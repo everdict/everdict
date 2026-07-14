@@ -92,6 +92,7 @@ export {
 export {
   defaultRuntimeCapabilities,
   requiredCapabilities,
+  requiredCapabilitiesForHarness,
   requiredCapabilitiesForJob,
   requiredCapabilitiesForTopology,
 } from "./runtime/capability-requirements.js";

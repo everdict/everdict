@@ -14,6 +14,7 @@ import { buildRun } from "./composition/run.js";
 import { buildRuntimeAccess, runStartupRecovery } from "./composition/runtime-access.js";
 import { ScheduleServiceRef, wireScheduleService } from "./composition/schedule.js";
 import { buildScorecard } from "./composition/scorecard.js";
+import { buildPlacementPreflight } from "./core/execution/placement-preflight.js";
 import {
   seedSharedHarnessTaxonomy,
   seedSharedJudges,
@@ -137,6 +138,14 @@ async function main(): Promise<void> {
   const { adoptCaseFn, readCaseLogsFn, openTerminalStreamFn, captureBrowserScreenFn, execInSandboxFn, killCase } =
     buildRuntimeAccess({ runtimeRegistry, runtimeSecretsFor, runtimeBuildBackend });
 
+  // Submit-time placement capability gate — reject a run/scorecard (400) whose chosen runtime can't run the harness
+  // (e.g. a Windows-service topology on a Linux-only cluster) before any case is dispatched (RuntimeDispatcher is the
+  // per-case backstop). Resolves the harness spec + runtime spec from the registries; a no-op for self:* / unlabeled runtimes.
+  const preflightPlacement = buildPlacementPreflight({
+    resolveHarness: (tenant, id, version) => harnessInstanceRegistry.get(tenant, id, version),
+    resolveRuntime: (tenant, id) => runtimeRegistry.get(tenant, id),
+  });
+
   const { service, judgeRunner } = buildRun({
     store,
     meteredDispatcher,
@@ -153,6 +162,7 @@ async function main(): Promise<void> {
     imageRegistryService,
     notificationService,
     envMeterPolicy,
+    preflightPlacement,
     readers: { readCaseLogsFn, execInSandboxFn, captureBrowserScreenFn, openTerminalStreamFn },
   });
 
@@ -178,6 +188,7 @@ async function main(): Promise<void> {
     imageRegistryService,
     notificationService,
     traceSinkService,
+    preflightPlacement,
     killCase,
     adoptCaseFn,
   });

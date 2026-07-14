@@ -102,6 +102,15 @@ export class ScorecardService {
         );
       input = { ...input, runtime: ids.join(",") };
     }
+    // Placement capability preflight: reject at submit (400) if a chosen runtime can't run this harness — checked per
+    // runtime in the comma-list (sharding), before any case is dispatched. self:* targets are skipped inside the preflight.
+    if (input.runtime && this.deps.preflightPlacement) {
+      for (const target of input.runtime
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean))
+        await this.deps.preflightPlacement({ tenant: input.tenant, target, harness: input.harness });
+    }
     // Per-batch sink override must name a configured sink ("none" = suppress export for this batch only).
     if (input.traceSink && input.traceSink !== "none" && this.deps.sinkExists) {
       if (!(await this.deps.sinkExists(input.tenant, input.traceSink)))

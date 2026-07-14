@@ -293,6 +293,15 @@ export interface ScorecardServiceDeps {
   // Policy gate: if true, a batch without a runtime is rejected 400 at submit (no local fallback). The API (main.ts) always sets true.
   // Unset (tests: inject a mock dispatcher directly) = no gate. Not an env toggle — a deployment's fixed policy.
   requireRuntime?: boolean;
+  // Submit-time placement preflight — reject a batch (400) whose chosen runtime(s) can't run the harness (e.g. a
+  // Windows-service topology on a Linux-only cluster), before any case is dispatched. Called per runtime in the
+  // comma-list (sharding). Wired by apps/api (harness + runtime registries); absent in unit tests. Throws BadRequestError.
+  // self:* targets are skipped (the runner lease gate handles those); RuntimeDispatcher is the per-case backstop.
+  preflightPlacement?: (input: {
+    tenant: string;
+    target: string;
+    harness: { id: string; version: string };
+  }) => Promise<void>;
   newId?: () => string;
   now?: () => string;
 }
