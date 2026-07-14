@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { TopologyDependency } from "@everdict/contracts";
+import { BadRequestError, type TopologyDependency } from "@everdict/contracts";
 
 // per-run keys — identifiers that logically isolate a shared store per case.
 export interface RunKeys {
@@ -46,6 +46,39 @@ export function wiringVars(
     vars[name] = value;
   }
   return vars;
+}
+
+// The complete per-run vocabulary a front-door request can inject by name via perRun: the isolateBy-derived wiring
+// (run_id + task + target coordinates + isolation vars) UNION the keysFor-derived default-body names (thread_id /
+// stream_channel / minio_prefix). Both name systems coexist historically; perRun spans both so a harness can request
+// any of them (e.g. bu.template's ["thread_id", "stream_channel"]) without writing a full bodyTemplate.
+export function perRunVocabulary(keys: RunKeys, wiring: Record<string, string>): Record<string, string> {
+  return {
+    ...wiring,
+    thread_id: keys.threadId,
+    stream_channel: keys.streamChannel,
+    minio_prefix: keys.minioPrefix,
+  };
+}
+
+// The front-door service's declared per-run inputs (perRun) resolved to { name: value } from the per-run vocabulary,
+// to inject into the front-door REQUEST body. Warm-pool-safe by design — a per-version-warm service cannot take per-run
+// env, so per-run coordinates travel through the request, not a redeploy. A declared name the vocabulary has no value
+// for is a config error (fail-fast) rather than a silent drop — realizing perRun (previously declared-but-unconsumed)
+// as a validated contract: "you asked for this per-run coordinate; here it is, or you're told it can't be delivered."
+export function perRunFields(perRun: string[], vocab: Record<string, string>, service: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const key of perRun) {
+    const value = vocab[key];
+    if (value === undefined)
+      throw new BadRequestError(
+        "BAD_REQUEST",
+        { service, key, available: Object.keys(vocab) },
+        `front-door service "${service}" declares per-run input "${key}", but everdict has no per-run value for it.`,
+      );
+    out[key] = value;
+  }
+  return out;
 }
 
 export function newRunId(): string {

@@ -186,9 +186,23 @@ export class DockerDriver implements Driver {
     // Bind-mount args (-v source:target[:ro]) — come before the image.
     const mountArgs = this.mounts.flatMap((m) => ["-v", `${m.source}:${m.target}${m.readOnly ? ":ro" : ""}`]);
     // Ignore the image ENTRYPOINT/CMD + ensure the base directory + keep-alive. Commands run inside via docker exec.
+    // host.docker.internal → the docker host gateway (Docker 20.10+), so a case that calls a host-local model gateway
+    // (LiteLLM etc.) reaches it portably on Linux too, matching Docker Desktop's built-in alias. Just a hostname alias —
+    // harmless if unused. This is the reachability escape hatch for BYO model endpoints from inside an isolated case.
     const { stdout } = await pexecFile(
       "docker",
-      ["run", "-d", ...mountArgs, "--entrypoint", "sh", image, "-c", `mkdir -p ${this.base} && exec sleep ${keep}`],
+      [
+        "run",
+        "-d",
+        "--add-host",
+        "host.docker.internal:host-gateway",
+        ...mountArgs,
+        "--entrypoint",
+        "sh",
+        image,
+        "-c",
+        `mkdir -p ${this.base} && exec sleep ${keep}`,
+      ],
       { maxBuffer: MAX_BUFFER },
     ).catch((err) => {
       const e = err as { stderr?: string; message?: string };

@@ -309,6 +309,10 @@ function serviceConfig(
   if (auth && imageUsesRegistryHost(svc.image, auth.host))
     config.auth = [{ username: auth.username ?? "everdict", password: auth.password }];
   if (svc.volumes && svc.volumes.length > 0) config.volumes = svc.volumes;
+  // host.docker.internal → the docker host gateway (Docker 20.10+), so a service that calls a host-local model gateway
+  // (LiteLLM etc.) reaches it — parity with the Docker/DockerDriver paths. Both topology group builders start from this;
+  // the co-located builder appends peer loopback aliases on top.
+  config.extra_hosts = ["host.docker.internal:host-gateway"];
   return config;
 }
 
@@ -334,7 +338,8 @@ function buildColocatedGroup(spec: ServiceHarnessSpec, opts: NomadTopologyOption
   const dynamicPorts: NomadDynamicPort[] = [];
   const tasks: NomadTopoTask[] = spec.services.map((svc) => {
     const config = serviceConfig(svc, opts);
-    if (extraHosts.length > 0) config.extra_hosts = extraHosts;
+    // Append peer loopback aliases to the host-gateway alias already set by serviceConfig (don't clobber it).
+    config.extra_hosts = [...(config.extra_hosts ?? []), ...extraHosts];
     if (svc.port !== undefined) {
       const label = servicePortLabel(svc.name);
       dynamicPorts.push({ Label: label, To: svc.port });

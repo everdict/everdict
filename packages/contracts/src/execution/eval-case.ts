@@ -32,7 +32,10 @@ export const EvalCaseSchema = z.object({
   // the same dataset differently never edits the dataset.
   graders: z.array(GraderSpecSchema),
   image: z.string().optional(),
-  timeoutSec: z.number().default(1800),
+  // Per-case execution budget (seconds). int+positive so it can be forwarded verbatim as the run-context timeout
+  // (the dispatched agent plumbs it → EVERDICT_TIMEOUT_SEC-parity default). Dataset adapters set it from the task's
+  // own max-agent-timeout; a long agent case (many LLM calls) is honored instead of clipped to a short default.
+  timeoutSec: z.number().int().positive().default(1800),
   tags: z.array(z.string()).default([]),
   placement: PlacementSchema.optional(),
 });

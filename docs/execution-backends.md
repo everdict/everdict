@@ -23,6 +23,18 @@ sentinel → the Backend parses it.
 Cloud vs on-prem K8s is the **same** `K8sBackend` — differences are config (kubeconfig/context/
 registry/runtimeClass/namespace).
 
+**Per-case timeout.** The run-context timeout is `EvalCase.timeoutSec` (int+positive, dataset default 1800s; dataset
+adapters set it from the task's own max-agent-timeout), plumbed by the dispatched agent into `runContextFromEnv` — so a
+long agent case (a real ReAct loop = many sequential LLM calls) is honored instead of clipped to a short default. The
+`EVERDICT_TIMEOUT_SEC` env var still overrides (operator escape hatch). Previously the per-case value was captured by
+the adapters but dropped at execution, so every case ran with the hardcoded 300s.
+
+**Model auth + endpoint injection.** `collectAuthEnv` forwards the harness's model auth/endpoint env present on the job:
+the claude vars (`CLAUDE_CODE_OAUTH_TOKEN` / `ANTHROPIC_AUTH_TOKEN` / `ANTHROPIC_API_KEY`) **and** the OpenAI-compatible
+vars (`OPENAI_API_KEY` / `OPENAI_BASE_URL` / `ANTHROPIC_BASE_URL`) — so a non-claude agent (aider/codex/a custom
+OpenAI-SDK agent) reaches its gateway, not just claude. Without the base URL an OpenAI-based agent got a key but pointed
+at `api.openai.com`. The tenant sets these as workspace/personal secrets; the control plane injects them into the job.
+
 ### The control-plane API never uses `LocalBackend` (default, no toggle)
 `LocalBackend` runs the job **in-process on the control-plane host with no isolation** — fine for a
 single-dev CLI, unacceptable for the control-plane API (untrusted eval code on the control plane). So the

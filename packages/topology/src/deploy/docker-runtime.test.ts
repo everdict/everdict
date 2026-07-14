@@ -86,6 +86,9 @@ describe("dockerRunArgs / parseHostPort (pure)", () => {
       "c",
       "--network",
       "net",
+      // host.docker.internal → host gateway: a service can reach a host-local model gateway (LiteLLM etc.).
+      "--add-host",
+      "host.docker.internal:host-gateway",
       "--network-alias",
       "svc",
       "-e",
@@ -113,6 +116,8 @@ describe("dockerRunArgs / parseHostPort (pure)", () => {
       "c",
       "--network",
       "net",
+      "--add-host",
+      "host.docker.internal:host-gateway",
       "-v",
       "data:/var/lib/x",
       "-v",

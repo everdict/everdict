@@ -21,7 +21,7 @@ import { type TrustZonePolicy, assertHardenedIsolation } from "@everdict/domain"
 import { costGrader, latencyGrader, makeGradersFromEnv, stepsGrader } from "@everdict/graders";
 import type { TraceSource } from "@everdict/trace";
 import type { TopologyRuntime } from "./deploy/topology-runtime.js";
-import { keysFor, newRunId, wiringVars } from "./environment-manager.js";
+import { keysFor, newRunId, perRunFields, perRunVocabulary, wiringVars } from "./environment-manager.js";
 import { captureCdpScreenshot } from "./front-door/capture-cdp.js";
 import {
   type CallbackRendezvous,
@@ -34,6 +34,7 @@ import {
   interpolateHeaders,
   interpolateTemplate,
 } from "./front-door/front-door-driver.js";
+import { extractInlineTrace } from "./front-door/inline-trace.js";
 import { observationSourceFor } from "./front-door/observation-source.js";
 import { type AcquireRequestFn, targetAcquirerFor } from "./front-door/target-acquirer.js";
 import { applyImagePins } from "./image-pins.js";
@@ -141,6 +142,11 @@ export class ServiceTopologyBackend implements Backend, ScreenCapturable {
       });
       // Body (#1): if request.bodyTemplate is present, interpolate it with wiring, otherwise the current browser-use 5-field body (no regression).
       // With no target, omit browser_cdp_url (there's no browser). The current body uses the provision target's target_cdp_url.
+      // perRun (#): when there is NO bodyTemplate, the front-door service declares which per-run coordinates the default
+      // body should carry by name (e.g. ["thread_id", "key_prefix", "target_cdp_url"]) — realized here instead of being
+      // declared-but-unconsumed. Warm-pool-safe (request, not a per-run service env: a per-version-warm service can't take
+      // per-run env). Fail-fast on a name the vocabulary can't deliver (no silent drop). A bodyTemplate is explicit — the
+      // author controls the body directly, so perRun is not additionally injected there.
       const payload = spec.frontDoor.request?.bodyTemplate
         ? interpolateTemplate(spec.frontDoor.request.bodyTemplate, wiring)
         : {
@@ -149,6 +155,11 @@ export class ServiceTopologyBackend implements Backend, ScreenCapturable {
             stream_channel: keys.streamChannel,
             minio_prefix: keys.minioPrefix,
             ...(target ? { browser_cdp_url: target.wiring.target_cdp_url } : {}),
+            ...perRunFields(
+              spec.services.find((s) => s.name === spec.frontDoor.service)?.perRun ?? [],
+              perRunVocabulary(keys, wiring),
+              spec.frontDoor.service,
+            ),
           };
       // Request headers (optional): interpolate {{var}} in the declared headers with wiring (Authorization etc.). Unset = none.
       const headers = spec.frontDoor.request?.headers
@@ -173,14 +184,21 @@ export class ServiceTopologyBackend implements Backend, ScreenCapturable {
         );
       }
 
-      // A trace-source failure (auth / transient down / not emitted) does not kill the run — record it as an error event and proceed with snapshot + grading.
-      // (The primary signal of a service topology is the browser snapshot; the trace is secondary. Surface it instead of losing it silently.)
+      // Trace acquisition. Unset traceInline = pull from the platform traceSource (otel/mlflow — current). traceInline =
+      // the agent returned a normalized TraceEvent[] in the front-door response (no observability platform needed) → the
+      // judge sees the action steps directly instead of only the final snapshot. Either failure (auth / transient down /
+      // not emitted / malformed inline body) does NOT kill the run — record it as an error event and proceed with
+      // snapshot + grading (the browser snapshot is the primary signal; the trace is secondary — surface, don't lose it).
+      const inline = spec.frontDoor.traceInline;
       let trace: TraceEvent[];
       try {
-        trace = await this.opts.traceSource.fetch(outcome.traceRef);
+        trace = inline
+          ? extractInlineTrace(outcome.response, inline.path)
+          : await this.opts.traceSource.fetch(outcome.traceRef);
       } catch (err) {
+        const how = inline ? "extract" : "fetch";
         trace = [
-          { t: 0, kind: "error", message: `trace fetch failed: ${err instanceof Error ? err.message : String(err)}` },
+          { t: 0, kind: "error", message: `trace ${how} failed: ${err instanceof Error ? err.message : String(err)}` },
         ];
       }
       // Observation (#4 + delivery): retrieve the observation via the per-delivery.mode ObservationSource. Unset = reference (store-fetch, no regression)

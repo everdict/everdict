@@ -203,6 +203,14 @@ export const FrontDoorRequestSchema = z.object({
 });
 export type FrontDoorRequest = z.infer<typeof FrontDoorRequestSchema>;
 
+// Where the agent's step trace comes from — the sibling of correlate (which id) for the "no platform" case.
+// Unset = pull it from the platform traceSource (otel/mlflow — current). inline = the agent returned a NORMALIZED
+// TraceEvent[] in the front-door response body (the sentinel/result channel), mirroring the sentinel observation.
+// path = dot-path to the array (unset = the whole body). No observability platform required — the judge then sees the
+// agent's action steps directly, instead of only the final snapshot. Design: docs/service-harness.md (inline trace).
+export const FrontDoorTraceInlineSchema = z.object({ path: z.string().optional() }).strict();
+export type FrontDoorTraceInline = z.infer<typeof FrontDoorTraceInlineSchema>;
+
 // Front-door contract — the task submit entry point (service/submit) + (optional) request body + completion-wait model + trace correlation + trace path.
 export const FrontDoorSpecSchema = z.object({
   service: z.string(),
@@ -211,6 +219,7 @@ export const FrontDoorSpecSchema = z.object({
   request: FrontDoorRequestSchema.optional(), // unset = current 5-field body
   completion: FrontDoorCompletionSchema.optional(), // unset = sync (current)
   correlate: FrontDoorCorrelateSchema.optional(), // unset = injected (current)
+  traceInline: FrontDoorTraceInlineSchema.optional(), // unset = pull from traceSource; set = extract TraceEvent[] from the response
 });
 export type FrontDoorSpec = z.infer<typeof FrontDoorSpecSchema>;
 

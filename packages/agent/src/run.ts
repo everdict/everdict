@@ -118,6 +118,9 @@ export async function runAgentJob(
     environment,
     harness,
     graders,
-    runCtx: { ...runContextFromEnv(), ...(job.runId ? { runId: job.runId } : {}) },
+    // Per-case timeout (EvalCase.timeoutSec) flows into the run context so a long agent case is not killed at the old
+    // hardcoded default; EVERDICT_TIMEOUT_SEC still overrides. Dataset adapters (terminal-bench/harbor) capture the
+    // task's own timeout here, previously dropped at execution.
+    runCtx: { ...runContextFromEnv(job.evalCase.timeoutSec), ...(job.runId ? { runId: job.runId } : {}) },
   });
 }

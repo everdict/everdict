@@ -24,6 +24,16 @@ Service env precedence: store `connEnv` (conventional) < `service.env` (author) 
 - browser(+extension) → **per-case** fresh instance (headful + xvfb) — the only per-case unit
 - per-run wiring (`thread_id` / `stream_channel` / `minio_prefix` / `browser_cdp_url`) is injected via the
   front-door `POST /runs` to the **warm** agent — not a redeploy.
+- **`perRun` = which per-run coordinates the default body carries by name.** A per-version-warm service cannot take
+  per-run **env** (no redeploy per case), so per-run coordinates travel through the front-door request, never the
+  service env. When there is no `bodyTemplate`, the front-door service's `perRun` names are resolved from the per-run
+  vocabulary (`run_id` / `task` / `thread_id` / `stream_channel` / `minio_prefix` / isolateBy vars / `target_cdp_url` …)
+  and injected into the default body; a declared name the vocabulary can't deliver is a fail-fast config error (never a
+  silent drop). A `bodyTemplate` is explicit — the author controls the body directly, so `perRun` is not injected there.
+- **Host model-gateway reachability.** Every service container gets the `host.docker.internal → host-gateway` alias
+  (Docker/DockerDriver `--add-host`; Nomad docker `extra_hosts`), so an agent that calls a host-local model gateway
+  (LiteLLM etc.) reaches it portably on Linux too — matching Docker Desktop's built-in alias (the docker0 gateway
+  `172.17.0.1` is often blocked by the host firewall). Point the agent at `http://host.docker.internal:<port>`.
 
 ## Orchestrator-agnostic (Nomad AND K8s)
 `ServiceTopologyBackend` (a `Backend`) is orchestrator-agnostic; only `TopologyRuntime` differs:
@@ -229,6 +239,15 @@ with `scripts/live/otel-trace-ingest.mjs` (+ `otel-emit-trace.py`, real OTel SDK
 browser-use-shaped trace → `OtelTraceSource.fetch(trace_id)` → `llm_call(gpt-5.4-mini, 42/7 tokens, $)` +
 `tool_call(browser.navigate)` → `steps`/`cost` graded. So both trace backends — **MLflow 3.x and OTel/Jaeger** —
 are live-validated for ingestion + grading.
+
+### Inline trace (no observability platform) — `frontDoor.traceInline`
+Not every agent emits to OTel/MLflow. When a service harness sets `frontDoor.traceInline: { path?: "trace" }`, the
+agent returned its step trace as a **normalized `TraceEvent[]` inside the front-door response body** (the sentinel /
+result channel — the trace sibling of the `sentinel` observation), and `ServiceTopologyBackend` extracts it from
+`outcome.response` (dot-`path`, or the whole body) via `extractInlineTrace` instead of pulling from `traceSource`. So a
+simple agent that returns `{ output, trace: [...] }` gives the judge its **action steps** with zero platform wiring;
+each element is validated against `TraceEventSchema`, and a malformed body is downgraded to a non-fatal `error` event
+(same "trace is secondary" policy as a fetch failure). Unset = pull from the platform `traceSource` (current).
 
 ## Grading (browser/service)
 Over `{trace, snapshot}` (no `ComputeHandle`): trace-based (`steps`/`cost`/`latency`), browser-outcome

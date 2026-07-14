@@ -21,7 +21,19 @@ export interface DockerRunSpec {
 
 // Assemble docker run args (pure) — deterministically testable.
 export function dockerRunArgs(s: DockerRunSpec): string[] {
-  const args = ["run", "-d", "--name", s.name, "--network", s.network];
+  // host.docker.internal → the docker host gateway (Docker 20.10+): a topology service (e.g. the agent-under-test)
+  // that calls a host-local model gateway (LiteLLM etc.) reaches it portably on Linux too, matching Docker Desktop's
+  // built-in alias. Just a hostname alias — harmless if unused.
+  const args = [
+    "run",
+    "-d",
+    "--name",
+    s.name,
+    "--network",
+    s.network,
+    "--add-host",
+    "host.docker.internal:host-gateway",
+  ];
   if (s.alias) args.push("--network-alias", s.alias);
   for (const [k, v] of Object.entries(s.env ?? {})) args.push("-e", `${k}=${v}`);
   for (const v of s.volumes ?? []) args.push("-v", v); // named volume / bind mount
