@@ -1,0 +1,8 @@
+{
+  "manifest_version": 3,
+  "name": "everdict-extractor-ext",
+  "version": "1.0",
+  "description": "Client extension that reveals a masked access code — the agent depends on its output.",
+  "background": { "service_worker": "bg.js" },
+  "content_scripts": [{ "matches": ["<all_urls>"], "js": ["content.js"], "run_at": "document_idle" }]
+}

@@ -31,3 +31,20 @@ Note: for a clean cross-container CDP link the browsers run as docker containers
 on 127.0.0.1 only, so cross-alloc CDP isn't reachable there — a dev-cluster networking limit, not a scale limit). The
 Nomad per-case-browser provisioning of the same extension image is verified separately in
 `scripts/live/browser-extension-nomad.mjs`; a real multi-node cluster with routable ports runs the same at scale.
+
+## Complex multi-step task where the extension is genuinely REQUIRED
+
+`tasksite/` (Flask) serves a **search form → results** page whose access code is **masked** (`••••••••`, the real value
+only in `data-code`). `agent-task/` does the multi-step interaction (open → type a query → click Search → results) and
+reads the code that `examples/browser-extensions/extractor-ext` **unmasks** into `#__ext_extracted`. Run with
+`node scripts/live/browser-ext-task-e2e.mjs`.
+
+**Verified by ablation** (gpt-5.4-mini):
+
+| browser | steps | code on page | agent answer | judge |
+|---|---|---|---|---|
+| **with** extractor extension | goto → fill → click → results → read `#__ext_extracted` | `EVDX-4242` (unmasked) | `EVDX-4242` | **1 PASS** |
+| **without** it (control) | same 4 steps | `••••••••` (masked) | "can't reveal the code" | **0 FAIL** |
+
+So the task is a real multi-step web interaction, and the client extension is **essential** (with=PASS, without=FAIL) —
+not merely loaded.
