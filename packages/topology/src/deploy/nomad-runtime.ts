@@ -25,6 +25,8 @@ import {
   buildSharedStoreJob,
   dedicatedStoreGroup,
   dedicatedStoreJobId,
+  needsPerServiceGroups,
+  perServiceGroupName,
   resolvePort,
   servicePortLabel,
   topologyJobId,
@@ -182,12 +184,28 @@ export class NomadTopologyRuntime implements TopologyRuntime {
 
     const jobId = topologyJobId(spec, zone?.id);
     const endpoints: Record<string, string> = {};
-    // All services share ONE co-located group ⇒ one alloc whose shared ports carry every service's port (labeled per
-    // service). Wait for it once, then resolve each ported service's host:port by its label. (Peers reach each other
-    // over loopback, so only the front-door / target services actually need a host endpoint — but discovering all
-    // keeps handle.endpoints complete for the control plane.)
     const portedServices = spec.services.filter((svc) => svc.port !== undefined);
-    if (portedServices.length > 0) {
+    // Endpoint discovery differs by deploy shape:
+    // - co-located (homogeneous single-instance): ONE group whose one alloc carries EVERY service's port (labeled per
+    //   service) — wait once, resolve all by label.
+    // - per-service (heterogeneous/scaled): each service is its OWN group/alloc — wait for and resolve each separately
+    //   (a Windows-node service's alloc discovers on its own node; peers reach it via the injected discovery address).
+    if (needsPerServiceGroups(spec)) {
+      for (const svc of portedServices) {
+        const alloc = await this.waitForGroupRunning(jobId, perServiceGroupName(svc.name), ns);
+        const p = resolvePort(alloc, servicePortLabel(svc.name));
+        if (!p) {
+          throw new UpstreamError(
+            "UPSTREAM_ERROR",
+            { service: svc.name },
+            "Could not find the service port in the alloc.",
+          );
+        }
+        const url = `http://${p.hostIp}:${p.port}`;
+        await this.waitForHttp(url, svc.readiness);
+        endpoints[svc.name] = url;
+      }
+    } else if (portedServices.length > 0) {
       const alloc = await this.waitForGroupRunning(jobId, SERVICE_GROUP_NAME, ns);
       for (const svc of portedServices) {
         const p = resolvePort(alloc, servicePortLabel(svc.name));

@@ -205,6 +205,12 @@ export function servicePortLabel(name: string): string {
   return name.replace(/[^a-zA-Z0-9_]/g, "_");
 }
 
+// The Nomad group name for a service in the per-service (heterogeneous/scaled) model — one group per service, so the
+// runtime waits for and discovers each independently (unlike the co-located SERVICE_GROUP_NAME single group).
+export function perServiceGroupName(name: string): string {
+  return `everdict-svc-${servicePortLabel(name)}`;
+}
+
 // Group placement constraint for a service's intrinsic OS — the Nomad realization of the os-<x> capability.
 function osConstraint(os: "linux" | "windows" | "macos" | undefined): NomadConstraint {
   return {
@@ -353,7 +359,7 @@ function buildPerServiceGroups(spec: ServiceHarnessSpec, opts: NomadTopologyOpti
         ? { ...(kernel === "linux" ? { Mode: "bridge" } : {}), DynamicPorts: [{ Label: label, To: svc.port }] }
         : undefined;
     return {
-      Name: `everdict-svc-${label}`,
+      Name: perServiceGroupName(svc.name),
       Count: svc.replicas,
       Constraints: [osConstraint(svc.requires?.os)],
       ...(network ? { Networks: [network] } : {}),

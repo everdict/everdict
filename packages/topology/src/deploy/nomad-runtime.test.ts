@@ -258,3 +258,74 @@ describe("NomadTopologyRuntime — co-located endpoint discovery", () => {
     expect(new Set(groupsPolled)).toEqual(new Set(["alloc-svc"]));
   });
 });
+
+describe("NomadTopologyRuntime — per-service endpoint discovery (heterogeneous / scaled)", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  // When the topology is heterogeneous (or scaled), each service is its OWN group/alloc — so discovery must wait for
+  // and resolve EACH per-service group separately (everdict-svc-<name>), not one co-located alloc. (A Windows-node
+  // service's alloc discovers on its own node; peers reach it via the injected discovery address.)
+  it("waits for each service's own group and merges the endpoints", async () => {
+    vi.stubGlobal("fetch", async () => ({ status: 200 }) as unknown as Response);
+    const groupsWaited: string[] = [];
+    const http: NomadHttp = {
+      async request(method, path) {
+        if (method === "POST" && path.startsWith("/v1/jobs")) return { status: 200, text: "{}" };
+        if (path.includes("/allocations")) {
+          // each service is its own group with its own alloc.
+          return {
+            status: 200,
+            text: JSON.stringify([
+              { TaskGroup: "everdict-svc-a", ClientStatus: "running", ID: "alloc-a" },
+              { TaskGroup: "everdict-svc-b", ClientStatus: "running", ID: "alloc-b" },
+            ]),
+          };
+        }
+        if (path.startsWith("/v1/allocation/")) {
+          const id = path.split("/v1/allocation/")[1]?.split("?")[0] ?? "";
+          groupsWaited.push(id);
+          const port =
+            id === "alloc-a"
+              ? { Label: "a", Value: 21000, HostIP: "10.0.0.1" }
+              : { Label: "b", Value: 21001, HostIP: "10.0.0.2" };
+          return {
+            status: 200,
+            text: JSON.stringify({
+              ID: id,
+              TaskGroup: id === "alloc-a" ? "everdict-svc-a" : "everdict-svc-b",
+              AllocatedResources: { Shared: { Ports: [port] } },
+            }),
+          };
+        }
+        return { status: 200, text: "[]" };
+      },
+    };
+    // replicas>1 on `a` makes the topology take the per-service path (heterogeneity trigger, no Windows node needed in the test).
+    const spec: ServiceHarnessSpec = {
+      kind: "service",
+      id: "grid",
+      version: "1.0.0",
+      services: [
+        { name: "a", image: "a:1", port: 8000, needs: [], perRun: [], replicas: 2, env: {} },
+        { name: "b", image: "b:1", port: 9000, needs: ["a"], perRun: [], replicas: 1, env: {} },
+      ],
+      dependencies: [],
+      frontDoor: { service: "a", submit: "POST /runs" },
+      traceSource: { kind: "otel", endpoint: "http://unused" },
+    };
+    const rt = new NomadTopologyRuntime({
+      addr: "http://nomad",
+      http,
+      pollIntervalMs: 1,
+      maxPolls: 5,
+      readyTimeoutMs: 10,
+    });
+
+    const handle = await rt.ensureTopology(spec);
+
+    // endpoints resolved from each service's OWN alloc (different host IPs — different nodes).
+    expect(handle.endpoints).toEqual({ a: "http://10.0.0.1:21000", b: "http://10.0.0.2:21001" });
+    // both per-service allocs were read (not a single co-located one).
+    expect(new Set(groupsWaited)).toEqual(new Set(["alloc-a", "alloc-b"]));
+  });
+});
