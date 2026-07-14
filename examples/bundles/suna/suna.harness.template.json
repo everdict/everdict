@@ -1,0 +1,56 @@
+{
+  "kind": "service",
+  "category": "topology",
+  "id": "suna",
+  "version": "1",
+  "services": [
+    {
+      "name": "backend",
+      "slot": "backend",
+      "port": 8000,
+      "needs": [],
+      "perRun": ["thread_id"],
+      "replicas": 1,
+      "env": {
+        "REDIS_HOST": "redis",
+        "REDIS_PORT": "6379"
+      }
+    },
+    {
+      "name": "worker",
+      "slot": "worker",
+      "needs": ["backend"],
+      "replicas": 1,
+      "env": {
+        "REDIS_HOST": "redis",
+        "REDIS_PORT": "6379"
+      }
+    },
+    {
+      "name": "frontend",
+      "slot": "frontend",
+      "port": 3000,
+      "needs": ["backend"],
+      "replicas": 1
+    }
+  ],
+  "dependencies": [
+    { "store": "redis", "role": "agent-run-stream", "isolateBy": "key-prefix" },
+    { "store": "postgres", "role": "supabase", "isolateBy": "external", "service": "backend" }
+  ],
+  "frontDoor": {
+    "service": "backend",
+    "submit": "POST /api/agent/initiate",
+    "correlate": { "mode": "returned", "path": "agent_run_id" },
+    "completion": {
+      "mode": "stream",
+      "done": { "field": "status", "equals": "completed" },
+      "failed": { "field": "status", "equals": "failed" },
+      "timeoutMs": 600000
+    },
+    "request": {
+      "bodyTemplate": { "prompt": "{{task}}", "thread_id": "{{thread_id}}" }
+    }
+  },
+  "traceSource": { "kind": "otel", "endpoint": "http://placeholder-see-readme" }
+}
