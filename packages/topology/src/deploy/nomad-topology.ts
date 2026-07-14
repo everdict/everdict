@@ -1,4 +1,4 @@
-import { BadRequestError, type RegistryAuth, type ServiceHarnessSpec } from "@everdict/contracts";
+import { BadRequestError, type RegistryAuth, type ServiceHarnessSpec, type TopologyService } from "@everdict/contracts";
 import { flattenEnv, imageUsesRegistryHost } from "@everdict/domain";
 import { dependencyStores } from "./dependencies.js";
 import { sanitizeIdent } from "./store-binding.js";
@@ -245,6 +245,43 @@ export function peerEnvName(svc: string): string {
   return `EVERDICT_SVC_${svc.toUpperCase().replace(/[^A-Z0-9]/g, "_")}`;
 }
 
+// Static peer-coordinate env (TopologyService.wiring) for runtimes where a peer's address is known at build time:
+// co-located Nomad/Docker (loopback/alias) and K8s (Service DNS). `hostFor` maps a peer → its build-time host.
+export function staticWiringEnv(
+  svc: TopologyService,
+  services: TopologyService[],
+  hostFor: (peer: TopologyService) => string,
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const w of svc.wiring ?? []) {
+    const peer = services.find((s) => s.name === w.service);
+    if (!peer || peer.port === undefined) continue;
+    const host = hostFor(peer);
+    if (w.hostEnv) out[w.hostEnv] = host;
+    if (w.portEnv) out[w.portEnv] = String(peer.port);
+    if (w.urlEnv) out[w.urlEnv] = `http://${host}:${peer.port}`;
+  }
+  return out;
+}
+
+// The per-service discovery template body: for each `needs` peer the default EVERDICT_SVC_<PEER>, plus each `wiring`
+// entry's BYO env names — all rendered from the Nomad-native catalog (host/port resolved at runtime, re-resolving).
+function discoveryTemplateBody(svc: TopologyService, spec: ServiceHarnessSpec, zoneId?: string): string {
+  const range = (peer: string, body: string): string =>
+    `{{ range nomadService "${nomadServiceName(spec, peer, zoneId)}" }}${body}{{ end }}\n`;
+  const lines: string[] = [];
+  for (const p of spec.services.filter((p) => svc.needs.includes(p.name) && p.port !== undefined))
+    lines.push(range(p.name, `${peerEnvName(p.name)}=http://{{ .Address }}:{{ .Port }}`));
+  for (const w of svc.wiring ?? []) {
+    const peer = spec.services.find((s) => s.name === w.service);
+    if (!peer || peer.port === undefined) continue;
+    if (w.hostEnv) lines.push(range(peer.name, `${w.hostEnv}={{ .Address }}`));
+    if (w.portEnv) lines.push(range(peer.name, `${w.portEnv}={{ .Port }}`));
+    if (w.urlEnv) lines.push(range(peer.name, `${w.urlEnv}=http://{{ .Address }}:{{ .Port }}`));
+  }
+  return lines.join("");
+}
+
 export function buildNomadTopologyJob(spec: ServiceHarnessSpec, opts: NomadTopologyOptions = {}): NomadTopologyJobSpec {
   const serviceGroups = needsPerServiceGroups(spec)
     ? buildPerServiceGroups(spec, opts)
@@ -307,7 +344,8 @@ function buildColocatedGroup(spec: ServiceHarnessSpec, opts: NomadTopologyOption
       Name: svc.name,
       Driver: "docker",
       Config: config,
-      Env: { ...flattenEnv(svc.env), ...opts.storeEnv },
+      // Peer wiring (co-located = loopback alias <peer>) < service static env < operational storeEnv.
+      Env: { ...staticWiringEnv(svc, spec.services, (p) => p.name), ...flattenEnv(svc.env), ...opts.storeEnv },
       Resources: { CPU: svc.resources?.cpu ?? 1000, MemoryMB: svc.resources?.memoryMb ?? 1024 },
     };
   });
@@ -326,24 +364,13 @@ function buildPerServiceGroups(spec: ServiceHarnessSpec, opts: NomadTopologyOpti
     const config = serviceConfig(svc, opts);
     const label = servicePortLabel(svc.name);
     if (svc.port !== undefined) config.ports = [label];
-    // Peer discovery: render each declared `needs` peer's address into env from the native catalog (ChangeMode restart
-    // so a peer reschedule re-resolves). Only `needs` edges — a service with no needs gets no template. The no-DNS
-    // Nomad analog of K8s Service DNS.
-    const peers = spec.services.filter((p) => svc.needs.includes(p.name) && p.port !== undefined);
-    const template: NomadTemplate | undefined =
-      peers.length > 0
-        ? {
-            EmbeddedTmpl: peers
-              .map(
-                (p) =>
-                  `{{ range nomadService "${nomadServiceName(spec, p.name, opts.zoneId)}" }}${peerEnvName(p.name)}=http://{{ .Address }}:{{ .Port }}{{ end }}\n`,
-              )
-              .join(""),
-            DestPath: "local/peers.env",
-            Envvars: true,
-            ChangeMode: "restart",
-          }
-        : undefined;
+    // Peer discovery: render each declared `needs` peer's address (default EVERDICT_SVC_<PEER>) + each `wiring` entry's
+    // BYO env name into env from the native catalog (ChangeMode restart so a peer reschedule re-resolves). A service
+    // with no needs and no wiring gets no template. The no-DNS Nomad analog of K8s Service DNS.
+    const body = discoveryTemplateBody(svc, spec, opts.zoneId);
+    const template: NomadTemplate | undefined = body
+      ? { EmbeddedTmpl: body, DestPath: "local/peers.env", Envvars: true, ChangeMode: "restart" }
+      : undefined;
     const task: NomadTopoTask = {
       Name: svc.name,
       Driver: "docker",

@@ -48,6 +48,13 @@ requires: z.object({
 specifics (node class, datacenter, pool, GPU) are **NOT** here — those are runtime-owned (a runtime-side binding
 set by whoever operates the cluster), out of the harness. Unset / `linux` adds **no gate** (today's behavior).
 
+**Peer wiring for BYO images (`TopologyService.wiring`).** Once a service is on another node, `<svc.name>` no longer
+resolves for free (Nomad has no DNS without Consul). A third-party image also expects its peers under ITS own env
+names (Selenium's `SE_EVENT_BUS_HOST`, …). `wiring: [{ service, hostEnv?, portEnv?, urlEnv? }]` declares "inject
+peer `service`'s coordinates under these env names" — portable: each runtime fills them natively (co-located
+Nomad/Docker = the peer loopback/alias + declared port, static; per-service Nomad = the discovery template,
+re-resolving; K8s = Service DNS). The default `EVERDICT_SVC_<PEER>` is always injected for `needs` peers too.
+
 ## Capability wiring (existing gate, one new vocabulary line)
 
 1. **Vocabulary** (`capability.ts`, `CAPABILITY_DEFS`): add `"os-windows": { kind: "functional" }` and

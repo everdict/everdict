@@ -275,6 +275,76 @@ describe("buildNomadTopologyJob — heterogeneous / scaled → per-service group
   });
 });
 
+describe("peer wiring — inject a peer's coordinates under BYO env names (third-party images)", () => {
+  const hub = { name: "hub", image: "selenium/hub:4", port: 4444, needs: [], perRun: [], replicas: 1, env: {} };
+  const node = (extra: Partial<ServiceHarnessSpec["services"][number]> = {}) => ({
+    name: "node",
+    image: "selenium/node:4",
+    needs: ["hub"],
+    perRun: [],
+    replicas: 1,
+    env: {},
+    wiring: [{ service: "hub", hostEnv: "SE_HUB_HOST", portEnv: "SE_HUB_PORT", urlEnv: "SE_HUB_URL" }],
+    ...extra,
+  });
+  const gridSpec = (over: Partial<ServiceHarnessSpec> = {}): ServiceHarnessSpec => ({
+    kind: "service",
+    id: "grid",
+    version: "1.0.0",
+    services: [hub, node()],
+    dependencies: [],
+    frontDoor: { service: "hub", submit: "POST /session" },
+    traceSource: { kind: "otel", endpoint: "http://x" },
+    ...over,
+  });
+
+  it("Nomad co-located: injects static wiring env (peer loopback alias + declared port)", () => {
+    const job = buildNomadTopologyJob(gridSpec());
+    const nodeTask = job.Job.TaskGroups[0]?.Tasks.find((t) => t.Name === "node");
+    expect(nodeTask?.Env.SE_HUB_HOST).toBe("hub"); // loopback alias (extra_hosts → 127.0.0.1)
+    expect(nodeTask?.Env.SE_HUB_PORT).toBe("4444");
+    expect(nodeTask?.Env.SE_HUB_URL).toBe("http://hub:4444");
+  });
+
+  it("Nomad per-service: renders the wiring env from the discovery catalog (dynamic host/port)", () => {
+    // a Windows peer forces the per-service path
+    const job = buildNomadTopologyJob(
+      gridSpec({
+        services: [
+          hub,
+          node(),
+          {
+            name: "win",
+            image: "w:1",
+            port: 5555,
+            needs: [],
+            perRun: [],
+            replicas: 1,
+            env: {},
+            requires: { os: "windows" },
+          },
+        ],
+      }),
+    );
+    const tmpl =
+      job.Job.TaskGroups.find((g) => g.Name === "everdict-svc-node")?.Tasks[0]?.Templates?.[0]?.EmbeddedTmpl ?? "";
+    expect(tmpl).toContain(`nomadService "everdict-grid-hub"`);
+    expect(tmpl).toContain("SE_HUB_HOST={{ .Address }}");
+    expect(tmpl).toContain("SE_HUB_PORT={{ .Port }}");
+    expect(tmpl).toContain("SE_HUB_URL=http://{{ .Address }}:{{ .Port }}");
+  });
+
+  it("K8s: injects static wiring env resolving to the peer's Service DNS name", () => {
+    const manifests = buildK8sManifests(gridSpec());
+    const dep = manifests.find((m) => m.kind === "Deployment" && m.metadata.name === "grid-node") as unknown as {
+      spec: { template: { spec: { containers: Array<{ env: Array<{ name: string; value: string }> }> } } };
+    };
+    const env = Object.fromEntries((dep.spec.template.spec.containers[0]?.env ?? []).map((e) => [e.name, e.value]));
+    expect(env.SE_HUB_HOST).toBe("grid-hub"); // <id>-<svc> Service DNS
+    expect(env.SE_HUB_URL).toBe("http://grid-hub:4444");
+  });
+});
+
 describe("buildNomadTopologyJob — workspace-registry pull auth (registryAuth)", () => {
   const AUTH = { host: "ghcr.io", username: "bot", password: "pull-tok" };
 

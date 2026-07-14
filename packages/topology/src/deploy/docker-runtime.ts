@@ -7,6 +7,7 @@ import {
 import { flattenEnv } from "@everdict/domain";
 import { dependencyConnEnv, dependencyStores } from "./dependencies.js";
 import { type Docker, dockerCli } from "./docker.js";
+import { staticWiringEnv } from "./nomad-topology.js";
 import type { TargetEnvHandle, TopologyHandle, TopologyRuntime } from "./topology-runtime.js";
 
 export interface DockerTopologyRuntimeOptions {
@@ -95,7 +96,13 @@ export class DockerTopologyRuntime implements TopologyRuntime {
           image: svc.image,
           network,
           alias: svc.name,
-          env: { ...connEnv, ...flattenEnv(svc.env), ...this.opts.storeEnv },
+          // Peer wiring (BYO env names) resolves to the peer's network alias (svc.name). connEnv < wiring < service env < storeEnv.
+          env: {
+            ...connEnv,
+            ...staticWiringEnv(svc, spec.services, (p) => p.name),
+            ...flattenEnv(svc.env),
+            ...this.opts.storeEnv,
+          },
           ...(svc.volumes && svc.volumes.length > 0 ? { volumes: svc.volumes } : {}),
           ...(svc.port !== undefined ? { publish: svc.port } : {}),
           // Resource request: cpu 1000 = 1 core → --cpus cores (=cpu/1000), memoryMb → --memory. Only what is defined.

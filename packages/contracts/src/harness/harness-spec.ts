@@ -58,8 +58,25 @@ export const TopologyServiceSchema = z.object({
     .object({ os: z.enum(["linux", "windows", "macos"]).optional() })
     .strict()
     .optional(),
+  // Inject a `needs` peer's runtime coordinates under BYO env var names, so an unmodified third-party image finds its
+  // peers under the names IT expects (e.g. Selenium's SE_EVENT_BUS_HOST). Portable: each runtime fills these its own
+  // way — co-located Nomad/Docker = the peer's loopback/alias + declared port (static); per-service Nomad = the
+  // discovery template (runtime, re-resolving); K8s = Service DNS (static). hostEnv←host, portEnv←port, urlEnv←http://host:port.
+  wiring: z
+    .array(
+      z
+        .object({
+          service: z.string(), // a peer service name (should be in `needs`)
+          hostEnv: z.string().optional(),
+          portEnv: z.string().optional(),
+          urlEnv: z.string().optional(),
+        })
+        .strict(),
+    )
+    .optional(),
 });
 export type TopologyService = z.infer<typeof TopologyServiceSchema>;
+export type ServiceWiring = NonNullable<TopologyService["wiring"]>[number];
 
 // Dependency store (shared + per-case logical isolation). isolateBy = the isolation key kind.
 // isolateBy="external" = BYO external/shared store (another cluster etc.) — Everdict does not deploy/isolate it, the service just connects.
