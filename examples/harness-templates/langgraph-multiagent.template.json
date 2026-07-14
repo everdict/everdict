@@ -1,0 +1,46 @@
+{
+  "kind": "service",
+  "category": "topology",
+  "id": "langgraph-multiagent",
+  "version": "1",
+  "services": [
+    {
+      "name": "postgres",
+      "slot": "postgres",
+      "needs": [],
+      "perRun": [],
+      "replicas": 1,
+      "env": { "POSTGRES_USER": "everdict", "POSTGRES_PASSWORD": "everdict", "POSTGRES_DB": "everdict" }
+    },
+    { "name": "redis", "slot": "redis", "needs": [], "perRun": [], "replicas": 1 },
+    {
+      "name": "agent",
+      "slot": "agent",
+      "port": 8000,
+      "needs": ["postgres", "redis"],
+      "perRun": ["thread_id"],
+      "replicas": 1,
+      "env": {
+        "DATABASE_URL": "postgresql://everdict:everdict@localhost:5432/everdict",
+        "REDIS_URL": "redis://localhost:6379"
+      }
+    },
+    {
+      "name": "web",
+      "slot": "web",
+      "port": 8080,
+      "needs": ["agent"],
+      "perRun": [],
+      "replicas": 1,
+      "wiring": [{ "service": "agent", "urlEnv": "AGENT_URL" }]
+    }
+  ],
+  "dependencies": [],
+  "frontDoor": {
+    "service": "agent",
+    "submit": "POST /runs",
+    "completion": { "mode": "sync" },
+    "request": { "bodyTemplate": { "task": "{{task}}", "thread_id": "{{run_id}}" } }
+  },
+  "traceSource": { "kind": "otel", "endpoint": "http://unused" }
+}
