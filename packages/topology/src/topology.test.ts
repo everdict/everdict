@@ -379,8 +379,12 @@ describe("buildNomadTopologyJob — Connect mesh obviated by co-location", () =>
 });
 
 describe("buildBrowserJob", () => {
-  it("renders a per-case headless Chromium (service) + a CDP dynamic port", () => {
-    const job = buildBrowserJob(SPEC, "abc", { runtime: "runsc" });
+  it("no client extension → the default headless Chromium (service) + a CDP dynamic port + allow-origins arg", () => {
+    const noExt: ServiceHarnessSpec = {
+      ...SPEC,
+      target: { kind: "browser", engine: "chromium", lifecycle: "per-case-instance", observe: ["dom", "url"] },
+    };
+    const job = buildBrowserJob(noExt, "abc", { runtime: "runsc" });
     expect(job.Job.ID).toBe(browserJobId("abc"));
     expect(job.Job.Type).toBe("service");
     const g = job.Job.TaskGroups[0];
@@ -393,6 +397,14 @@ describe("buildBrowserJob", () => {
     // headless-shell exposes CDP itself on 9222 → don't override the port, add only allow-origins.
     expect(task?.Config.args).toEqual(["--remote-allow-origins=*"]);
     expect(task?.Env.EVERDICT_RUN_ID).toBe("abc");
+  });
+
+  it("client extension (target.extension.ref) → runs the headful browser+extension image AS-IS (no CMD override)", () => {
+    // SPEC declares target.extension = { ref: "reg/lupin-ext:1" } — a headful Chromium that loads the extension + serves CDP.
+    const task = buildBrowserJob(SPEC, "abc").Job.TaskGroups[0]?.Tasks[0];
+    expect(task?.Config.image).toBe("reg/lupin-ext:1"); // the extension image, NOT headless-shell
+    expect(task?.Config.args).toBeUndefined(); // don't override the image's own launch (headful + --load-extension)
+    expect(task?.Config.ports).toEqual(["cdp"]); // still exposes CDP for the driver to attach
   });
 });
 

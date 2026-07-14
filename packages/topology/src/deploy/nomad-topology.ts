@@ -399,7 +399,10 @@ function buildPerServiceGroups(spec: ServiceHarnessSpec, opts: NomadTopologyOpti
 }
 
 // --- per-case browser (target env II): a fresh headful/headless Chromium + CDP. ---
-// Real extension loading (--load-extension) needs headful + an extension image → Phase 2 (user images).
+// Client extension (target.extension.ref): a browser image with the extension baked + LOADED — a headful Chromium
+// (Xvfb) whose entrypoint runs `--load-extension` and exposes CDP on 9222. Extensions don't load in headless-shell,
+// so when an extension is declared we run that user image AS-IS (its own CMD drives Chromium) instead of the default
+// headless-shell (which can't load extensions). This closes the former Phase-2 stub. See docs/service-harness.md.
 export interface BrowserJobOptions {
   datacenters?: string[];
   runtime?: string;
@@ -418,12 +421,16 @@ export function buildBrowserJob(
   runId: string,
   opts: BrowserJobOptions = {},
 ): NomadTopologyJobSpec {
-  const image = opts.image ?? "chromedp/headless-shell:latest";
+  // A declared client extension → the user's headful browser+extension image (it loads the extension + serves CDP).
+  const extensionImage = spec.target?.extension?.ref;
+  const image = extensionImage ?? opts.image ?? "chromedp/headless-shell:latest";
   const cdpPort = opts.cdpPort ?? 9222;
-  // chromedp/headless-shell already exposes CDP on 9222 (socat → internal 9223).
-  // Overriding the port/address directly collides with the socat listener → CDP won't come up. Add only allow-origins (permit ws connections).
-  const args = opts.args ?? ["--remote-allow-origins=*"];
-  const config: NomadTopoTask["Config"] = { image, ports: ["cdp"], args };
+  // chromedp/headless-shell already exposes CDP on 9222 (socat → internal 9223): override only allow-origins (permit ws
+  // connections). An extension image drives Chromium via its OWN entrypoint (headful + --load-extension), so DON'T
+  // override its CMD with args here (that would replace the entrypoint's launch).
+  const args = opts.args ?? (extensionImage ? undefined : ["--remote-allow-origins=*"]);
+  const config: NomadTopoTask["Config"] = { image, ports: ["cdp"] };
+  if (args) config.args = args;
   if (opts.runtime) config.runtime = opts.runtime;
   return {
     Job: {
