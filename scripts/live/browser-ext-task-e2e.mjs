@@ -1,16 +1,22 @@
-// Complex, extension-DEPENDENT judged e2e:
-//  (a) multi-step web task — the agent opens the portal, types a query into the search form, clicks Search, lands on
-//      the results page;
-//  (b) the results page MASKS the access code (shows only ••••••••); a client extension unmasks it into #__ext_extracted.
-//      The agent reads the extension's output and answers; an LLM judge scores it.
-// Ablation proves the extension is genuinely required: the SAME task runs with the extractor extension (PASS) and with a
-// non-extractor browser (the code stays masked → FAIL).
+// A REAL LLM-driven browser agent, judged end-to-end, with an ablation that proves the client extension is required.
 //
-// Prereqs: LiteLLM(:4000). Build the images:
-//   docker build -t everdict-extractor-ext:1  examples/browser-extensions/extractor-ext
-//   docker build -t everdict-hello-ext:1       examples/browser-extensions/hello-ext           (the no-extractor control)
-//   docker build -t everdict-bxa-agent-task:1  examples/bundles/browser-ext-agent/agent-task
-//   docker build -t everdict-bxa-tasksite:1    examples/bundles/browser-ext-agent/tasksite
+// The agent (examples/bundles/browser-ext-agent/agent-real) is a genuine ReAct loop: the LLM observes the page's
+// interactive elements + visible text, DECIDES one browser action (goto / type / click / read / finish), the agent
+// executes it over CDP, re-observes, and repeats. NOTHING about the task steps is scripted — the model drives the
+// browser itself. We send it a task, print its decision TRACE (proof it controls the browser), and an LLM judge scores
+// the answer.
+//
+// Ablation (proves the extension is genuinely used, not merely loaded):
+//   (A) WITH the extractor extension — the results page's masked access code is unmasked into #__ext_extracted; the
+//       agent reads it and answers EVDX-4242 → judge=1.
+//   (B) WITHOUT it (control) — the code stays masked (••••••••); the honest agent reports it cannot find the code →
+//       judge=0. Different agent behaviour driven by the real page state = not scripted, not hallucinated.
+//
+// Prereqs: LiteLLM(:4000). Images are built by this script if missing:
+//   examples/browser-extensions/extractor-ext   -> everdict-extractor-ext:1  (unmasks the code)
+//   examples/browser-extensions/hello-ext        -> everdict-hello-ext:1       (no-extractor control)
+//   examples/bundles/browser-ext-agent/agent-real -> everdict-bxa-agent-real:1 (the real agent)
+//   examples/bundles/browser-ext-agent/tasksite   -> everdict-bxa-tasksite:1   (search form -> masked results)
 // Run:  node scripts/live/browser-ext-task-e2e.mjs
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
@@ -21,12 +27,21 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const docker = (a) => execFileSync("docker", a, { encoding: "utf8" }).trim();
 const dtry = (a) => {
   try {
-    return docker(a);
+    // stderr piped (not inherited) so best-effort cleanups don't spam "No such container".
+    return execFileSync("docker", a, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
   } catch {
     return "";
   }
 };
 const ip = (name) => docker(["inspect", name, "-f", "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}"]);
+const haveImage = (t) => dtry(["image", "inspect", t]) !== "";
+const buildIfMissing = (tag, ctx) => {
+  if (!haveImage(tag)) {
+    console.log(`  building ${tag} …`);
+    docker(["build", "-q", "-t", tag, ctx]);
+  }
+};
+
 function llmKey() {
   if (process.env.OPENAI_API_KEY) return process.env.OPENAI_API_KEY;
   try {
@@ -39,7 +54,7 @@ function llmKey() {
 }
 const KEY = llmKey();
 if (!KEY) {
-  console.error("no LLM key");
+  console.error("no LLM key (set OPENAI_API_KEY or infra/litellm/.env)");
   process.exit(2);
 }
 
@@ -61,6 +76,17 @@ async function judge(answer) {
   return /1/.test((await r.json()).choices?.[0]?.message?.content ?? "0") ? 1 : 0;
 }
 
+function printTrace(trace) {
+  for (const t of trace ?? []) {
+    const a = t.action ?? {};
+    const detail = a.url ?? a.text ?? (a.index !== undefined ? `idx ${a.index}` : "") ?? a.answer ?? "";
+    const thought = String(a.thought ?? "").slice(0, 58);
+    console.log(
+      `     step ${t.step}: ${String(a.action ?? "").padEnd(7)} ${String(detail).slice(0, 24).padEnd(24)} | ${thought}`,
+    );
+  }
+}
+
 async function runWith(browserImage, label, agentUrl, siteUrl) {
   const name = `bxt-br-${label}`;
   dtry(["rm", "-f", name]);
@@ -72,7 +98,7 @@ async function runWith(browserImage, label, agentUrl, siteUrl) {
     } catch {}
     await sleep(2000);
   }
-  const task = `Go to ${siteUrl}, search for 'everdict', then report the access code shown on the results page.`;
+  const task = `Go to ${siteUrl} , search for 'everdict', then tell me the access code shown on the results page.`;
   let out = {};
   try {
     const r = await fetch(`${agentUrl}/runs`, {
@@ -90,41 +116,52 @@ async function runWith(browserImage, label, agentUrl, siteUrl) {
 }
 
 async function main() {
-  console.log("\n\x1b[1mExtension-dependent multi-step web task — judged e2e + ablation\x1b[0m");
+  console.log("\n\x1b[1mReal LLM-driven browser agent — judged e2e + extension ablation\x1b[0m");
+  buildIfMissing("everdict-bxa-agent-real:1", "examples/bundles/browser-ext-agent/agent-real");
+  buildIfMissing("everdict-bxa-tasksite:1", "examples/bundles/browser-ext-agent/tasksite");
+  buildIfMissing("everdict-extractor-ext:1", "examples/browser-extensions/extractor-ext");
+  buildIfMissing("everdict-hello-ext:1", "examples/browser-extensions/hello-ext");
+
   dtry(["rm", "-f", "bxt-site", "bxt-agent"]);
   docker(["run", "-d", "--name", "bxt-site", "everdict-bxa-tasksite:1"]);
   const siteUrl = `http://${ip("bxt-site")}:8080`;
+  // The agent container reaches host LiteLLM via host.docker.internal (docker0 gateway 172.17.0.1 is blocked by ufw here).
   docker([
     "run",
     "-d",
     "--name",
     "bxt-agent",
+    "--add-host=host.docker.internal:host-gateway",
     "-e",
     `OPENAI_API_KEY=${KEY}`,
     "-e",
-    "OPENAI_BASE_URL=http://172.17.0.1:4000/v1",
+    "OPENAI_BASE_URL=http://host.docker.internal:4000/v1",
     "-e",
     `MODEL=${MODEL}`,
-    "everdict-bxa-agent-task:1",
+    "-e",
+    "MAX_STEPS=10",
+    "everdict-bxa-agent-real:1",
   ]);
   const agentUrl = `http://${ip("bxt-agent")}:8000`;
   console.log(`site=${siteUrl} agent=${agentUrl} ; warming up…`);
-  await sleep(12000);
+  await sleep(8000);
 
-  console.log("\n(A) WITH the extractor extension — the task should succeed");
+  console.log("\n(A) WITH the extractor extension — the agent should drive the browser and answer the code");
   const a = await runWith("everdict-extractor-ext:1", "ext", agentUrl, siteUrl);
-  console.log(`   steps: ${JSON.stringify(a.out.steps)}${a.out.error ? ` | err=${a.out.error}` : ""}`);
-  console.log(`   masked_on_page="${a.out.masked_on_page}"  ext_extracted="${a.out.ext_extracted}"`);
+  if (a.out.error) console.log(`   err=${a.out.error}`);
+  console.log(`   decision trace (${a.out.steps} steps, LLM-driven):`);
+  printTrace(a.out.trace);
   console.log(
     `   answer="${String(a.out.output ?? "")
       .slice(0, 80)
       .replace(/\n/g, " ")}"  judge=${a.score}`,
   );
 
-  console.log("\n(B) WITHOUT the extractor extension (control) — the code stays masked, so the task should FAIL");
+  console.log("\n(B) WITHOUT the extractor extension (control) — the code stays masked, so the agent should FAIL");
   const b = await runWith("everdict-hello-ext:1", "noext", agentUrl, siteUrl);
-  console.log(`   steps: ${JSON.stringify(b.out.steps)}${b.out.error ? ` | err=${b.out.error}` : ""}`);
-  console.log(`   masked_on_page="${b.out.masked_on_page}"  ext_extracted="${b.out.ext_extracted}"`);
+  if (b.out.error) console.log(`   err=${b.out.error}`);
+  console.log(`   decision trace (${b.out.steps} steps, LLM-driven):`);
+  printTrace(b.out.trace);
   console.log(
     `   answer="${String(b.out.output ?? "")
       .slice(0, 80)
@@ -132,16 +169,22 @@ async function main() {
   );
 
   dtry(["rm", "-f", "bxt-site", "bxt-agent"]);
-  const proven = a.score === 1 && b.score === 0;
+
+  // Evidence the agent genuinely controlled the browser (not scripted): the trace shows a real multi-step interaction.
+  const acts = (a.out.trace ?? []).map((t) => t.action?.action);
+  const droveBrowser = acts.includes("goto") && acts.includes("type") && acts.includes("click");
+  const proven = a.score === 1 && b.score === 0 && droveBrowser;
+
   console.log("\n\x1b[1m=== RESULT ===\x1b[0m");
-  console.log(`  multi-step (form fill → click → results): ${a.out.steps?.length >= 4 ? "✓ performed" : "✗"}`);
+  console.log(`  agent drove the browser (goto→type→click, LLM-decided): ${droveBrowser ? "✓" : "✗"}`);
+  console.log(`  answer correct WITH extension (judge=1):                 ${a.score === 1 ? "✓" : "✗"}`);
   console.log(
-    `  extension REQUIRED (with=PASS, without=FAIL): ${proven ? "✓ proven by ablation" : `✗ (with=${a.score}, without=${b.score})`}`,
+    `  extension REQUIRED — control FAILS WITHOUT (judge=0):    ${b.score === 0 ? "✓ proven by ablation" : "✗"}`,
   );
   console.log(
     proven
-      ? "\n\x1b[32m✅ Real multi-step web task, and the client extension is genuinely required (ablation).\x1b[0m"
-      : "\n\x1b[31m⚠️ inconclusive — see per-case above\x1b[0m",
+      ? "\n\x1b[32m✅ A real agent controlled the extension-loaded browser end-to-end to produce the result, and it was judged. The extension is genuinely required (ablation).\x1b[0m"
+      : `\n\x1b[31m⚠️ inconclusive (with=${a.score}, without=${b.score}, drove=${droveBrowser})\x1b[0m`,
   );
   process.exit(proven ? 0 : 1);
 }
