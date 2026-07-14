@@ -156,7 +156,7 @@ async function main() {
   const wall = (Date.now() - t0) / 1000;
   const peakBrowsers =
     Number(
-      docker(["ps", "-q", "--filter", "ancestor=" + EXT_IMAGE])
+      docker(["ps", "-q", "--filter", `ancestor=${EXT_IMAGE}`])
         .split("\n")
         .filter(Boolean).length,
     ) || 0;
@@ -166,7 +166,7 @@ async function main() {
   console.log("\n\x1b[1m=== SCORECARD (browser-ext-agent × judge) ===\x1b[0m");
   for (const r of results)
     console.log(
-      `  ${r.id.padEnd(5)} judge=${r.score} ${(r.ms / 1000).toFixed(0).padStart(3)}s ${r.err ? "ERR:" + r.err.slice(0, 40) : `"${r.answer}"`}`,
+      `  ${r.id.padEnd(5)} judge=${r.score} ${(r.ms / 1000).toFixed(0).padStart(3)}s ${r.err ? `ERR:${r.err.slice(0, 40)}` : `"${r.answer}"`}`,
     );
   console.log("  ----");
   console.log(
