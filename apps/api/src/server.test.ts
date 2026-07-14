@@ -8,6 +8,7 @@ import { RunnerService } from "@everdict/application-control";
 import { ScheduleService } from "@everdict/application-control";
 import { ScorecardService } from "@everdict/application-control";
 import { TraceSinkService } from "@everdict/application-control";
+import { TraceSourceService } from "@everdict/application-control";
 import { WorkspaceService } from "@everdict/application-control";
 import { type Authenticator, apiKeyAuthenticator, compositeAuthenticator } from "@everdict/auth";
 import type { Dispatcher } from "@everdict/backends";
@@ -209,6 +210,7 @@ function server(
   });
   const mattermostService = new MattermostService(settingsStore);
   const traceSinkService = new TraceSinkService(settingsStore);
+  const traceSourceService = new TraceSourceService(settingsStore, { secretsFor: (ws) => secretStore.entries(ws) });
   const mattermostCommandService = new MattermostCommandService({
     settings: settingsStore,
     secretsFor: async () => ({}),
@@ -240,6 +242,7 @@ function server(
     mattermostService,
     mattermostCommandService,
     traceSinkService,
+    traceSourceService,
     imageRegistryService,
     runnerService: new RunnerService(new InMemoryRunnerStore()),
     settingsStore,
@@ -569,6 +572,81 @@ describe("API — workspace integrations (GitHub App / Mattermost)", () => {
       payload: { host: "https://mm.corp.io", botTokenSecretName: "MM_BOT" },
     });
     expect(denied.statusCode).toBe(403);
+    await viewer.app.close();
+  });
+
+  it("trace sources (multiple): admin registers/removes by name, member selects per harness, tag-correlation is validated, viewer read-only", async () => {
+    const h = { authorization: "Bearer x" };
+    const { app } = server({ requireAuth: true, authenticator: roleAuth(["admin"]) });
+    // Given/When: admin registers an inbound source (dev-cluster MLflow) with tag correlation (project required).
+    const put = await app.inject({
+      method: "PUT",
+      url: "/workspace/trace-sources",
+      headers: h,
+      payload: {
+        name: "dev-mlflow",
+        kind: "mlflow",
+        endpoint: "http://mlflow.corp.io:5000",
+        authSecretName: "MLFLOW_AUTH",
+        correlate: "tag",
+        project: "7",
+      },
+    });
+    expect(put.statusCode).toBe(200);
+    expect(put.json().config).toMatchObject({ name: "dev-mlflow", correlate: "tag", project: "7" });
+    // An incoherent tag config (otel tag without service) is rejected at registration, not at pull time.
+    expect(
+      (
+        await app.inject({
+          method: "PUT",
+          url: "/workspace/trace-sources",
+          headers: h,
+          payload: { name: "j", kind: "otel", endpoint: "http://jaeger", correlate: "tag" },
+        })
+      ).statusCode,
+    ).toBe(400);
+    // Per-harness selection accepts only registered sources (unknown → 400).
+    expect(
+      (
+        await app.inject({
+          method: "PUT",
+          url: "/harnesses/h1/trace-source",
+          headers: h,
+          payload: { source: "ghost" },
+        })
+      ).statusCode,
+    ).toBe(400);
+    const assign = await app.inject({
+      method: "PUT",
+      url: "/harnesses/h1/trace-source",
+      headers: h,
+      payload: { source: "dev-mlflow" },
+    });
+    expect(assign.json().assignments).toEqual({ h1: "dev-mlflow" });
+    // Removing the source drops it and cleans dangling selections.
+    expect(
+      (await app.inject({ method: "DELETE", url: "/workspace/trace-sources/dev-mlflow", headers: h })).statusCode,
+    ).toBe(204);
+    const after = await app.inject({ method: "GET", url: "/workspace/trace-sources", headers: h });
+    expect(after.json().sources).toEqual([]);
+    expect(after.json().assignments).toEqual({});
+    await app.close();
+
+    // viewer: read allowed (harnesses:read), register 403 (settings:write).
+    const viewer = server({ requireAuth: true, authenticator: roleAuth(["viewer"]) });
+    expect((await viewer.app.inject({ method: "GET", url: "/workspace/trace-sources", headers: h })).statusCode).toBe(
+      200,
+    );
+    expect(
+      (
+        await viewer.app.inject({
+          method: "PUT",
+          url: "/workspace/trace-sources",
+          headers: h,
+          payload: { name: "x", kind: "otel", endpoint: "http://j" },
+        })
+      ).statusCode,
+    ).toBe(403);
     await viewer.app.close();
   });
 

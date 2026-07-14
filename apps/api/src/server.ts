@@ -126,6 +126,7 @@ import { registerScheduleRoutes } from "./api/schedule/schedule.routes.js";
 import { registerScorecardRoutes } from "./api/scorecard/scorecard.routes.js";
 import { registerSecretRoutes } from "./api/secret/secret.routes.js";
 import { registerTraceSinkRoutes } from "./api/trace-sink/trace-sink.routes.js";
+import { registerTraceSourceRoutes } from "./api/trace-source/trace-source.routes.js";
 import { registerViewRoutes } from "./api/view/view.routes.js";
 import { registerWorkspaceSettingsRoutes } from "./api/workspace/settings.routes.js";
 import { registerWorkspaceRoutes } from "./api/workspace/workspace.routes.js";
@@ -219,6 +220,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     registerGithubAppRoutes(routes, deps);
     registerMattermostRoutes(routes, deps);
     registerTraceSinkRoutes(routes, deps);
+    registerTraceSourceRoutes(routes, deps);
     registerImageRegistryRoutes(routes, deps);
     registerCiLinkRoutes(routes, deps);
     registerRunnerRoutes(routes, deps);

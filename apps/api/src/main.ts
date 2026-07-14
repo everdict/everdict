@@ -123,15 +123,21 @@ async function main(): Promise<void> {
   if (artifacts) console.log("▶ artifact store: S3/MinIO offload enabled (os-use screenshots)");
 
   const envMeterPolicy = meterUsagePolicyFromEnv(); // default policy when the workspace has no DB setting
-  const { notificationService, mattermostService, traceSinkService, commentService, githubAppService } =
-    buildIntegrations({
-      settingsStore,
-      notificationStore,
-      commentStore,
-      oauthStateStore,
-      membershipService,
-      runtimeSecretsFor,
-    });
+  const {
+    notificationService,
+    mattermostService,
+    traceSinkService,
+    traceSourceService,
+    commentService,
+    githubAppService,
+  } = buildIntegrations({
+    settingsStore,
+    notificationStore,
+    commentStore,
+    oauthStateStore,
+    membershipService,
+    runtimeSecretsFor,
+  });
 
   // Per-runtime backend access for already-dispatched cases (adoption/kill + live-observability lane reads). Built
   // before run/scorecard because their live-observability + supersede-kill wiring closes over these functions.
@@ -260,6 +266,7 @@ async function main(): Promise<void> {
     mattermostService,
     mattermostCommandService,
     traceSinkService,
+    traceSourceService,
     imageRegistryService,
     ciLinkService,
     runnerService,

@@ -25,6 +25,7 @@ import {
   originSource,
 } from "@everdict/application-control";
 import type { TraceSinkService } from "@everdict/application-control";
+import type { TraceSourceService } from "@everdict/application-control";
 import type { ViewService } from "@everdict/application-control";
 import type { WorkspaceService } from "@everdict/application-control";
 import {
@@ -120,6 +121,7 @@ export interface ServerDeps {
   mattermostService?: MattermostService; // workspace-owned Mattermost integration (register→bot notifications) (route disabled if absent)
   mattermostCommandService?: MattermostCommandService; // Mattermost inbound (slash commands/buttons) (route disabled if absent)
   traceSinkService?: TraceSinkService; // workspace trace sinks (export to observability platform) (route disabled if absent)
+  traceSourceService?: TraceSourceService; // workspace trace sources (pull from observability platform) (route disabled if absent)
   imageRegistryService?: ImageRegistryService; // workspace image registries (classification baseline + push mint) (route disabled if absent)
   ciLinkService?: CiLinkService; // CI repo links (repo↔harness slot + OIDC trust) + picker/setup-PR (route disabled if absent)
   runnerService?: RunnerService; // self-hosted runners (personal device pairing) (route disabled if absent)

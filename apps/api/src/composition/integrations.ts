@@ -4,6 +4,7 @@ import { MattermostService } from "@everdict/application-control";
 import type { MembershipService } from "@everdict/application-control";
 import { NotificationService } from "@everdict/application-control";
 import { TraceSinkService } from "@everdict/application-control";
+import { TraceSourceService } from "@everdict/application-control";
 import type { CommentStore, NotificationStore, OAuthStateStore, WorkspaceSettingsStore } from "@everdict/db";
 import { buildTraceSink } from "@everdict/trace";
 import { githubAppGateway } from "../infrastructure/github/app-gateway.js";
@@ -39,6 +40,11 @@ export function buildIntegrations(deps: {
   const traceSinkService = new TraceSinkService(settingsStore, {
     secretsFor: runtimeSecretsFor, // authSecretName → shared (workspace) secret value
     buildSink: buildTraceSink,
+  });
+  // Workspace trace sources (inbound mirror) — register a dev-cluster observability endpoint by name; a service harness
+  // selects one so everdict pulls that case's trace from it after the run. resolve() reads the auth value here (transient).
+  const traceSourceService = new TraceSourceService(settingsStore, {
+    secretsFor: runtimeSecretsFor, // authSecretName → shared (workspace) secret value (pull-time only)
   });
   // Resource comments (datasets, etc.) for collaborative discussion + @mention notifications. On a mention, resolve the mentioner's name from profile/membership into the personal feed.
   const commentService = new CommentService({
@@ -81,7 +87,14 @@ export function buildIntegrations(deps: {
     console.warn(
       "▶ github-app: GITHUB_APP_* unset — github.com App install disabled (GHE still works when an admin registers it on the workspace).",
     );
-  return { notificationService, mattermostService, traceSinkService, commentService, githubAppService };
+  return {
+    notificationService,
+    mattermostService,
+    traceSinkService,
+    traceSourceService,
+    commentService,
+    githubAppService,
+  };
 }
 
 // External account-connection provider registry.
