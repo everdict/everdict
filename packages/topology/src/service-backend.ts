@@ -44,7 +44,10 @@ export type { SubmitFn } from "./front-door/front-door-driver.js";
 
 export interface ServiceTopologyBackendOptions {
   runtime: TopologyRuntime;
-  traceSource: TraceSource;
+  traceSource: TraceSource; // fixed fallback source (built from the runtime spec) — used when the harness selects no workspace source
+  // Per-dispatch resolver for the harness's selected WORKSPACE-registered trace source (auth + correlate + scope). When
+  // it returns a source, the pull uses it instead of the fixed `traceSource`; undefined = no selection → fall back.
+  traceSourceFor?: (tenant: string, harnessId: string) => Promise<TraceSource | undefined>;
   specFor: (tenant: string, id: string, version: string) => ServiceHarnessSpec | Promise<ServiceHarnessSpec>;
   graders?: Grader[]; // default: trace-based (steps/cost/latency). Browser graders (dom/vlm) are Phase 2.
   submit?: SubmitFn; // the POST primitive of the default HttpFrontDoorDriver (fetch if absent)
@@ -184,17 +187,24 @@ export class ServiceTopologyBackend implements Backend, ScreenCapturable {
         );
       }
 
-      // Trace acquisition. Unset traceInline = pull from the platform traceSource (otel/mlflow — current). traceInline =
-      // the agent returned a normalized TraceEvent[] in the front-door response (no observability platform needed) → the
-      // judge sees the action steps directly instead of only the final snapshot. Either failure (auth / transient down /
-      // not emitted / malformed inline body) does NOT kill the run — record it as an error event and proceed with
-      // snapshot + grading (the browser snapshot is the primary signal; the trace is secondary — surface, don't lose it).
+      // Trace acquisition. Unset traceInline = pull from the platform traceSource. traceInline = the agent returned a
+      // normalized TraceEvent[] in the front-door response (no observability platform needed) → the judge sees the action
+      // steps directly instead of only the final snapshot. For the pull path, traceSourceFor resolves the harness's
+      // selected WORKSPACE-REGISTERED source (auth + correlate + scope) per-dispatch — so a dev-cluster-deployed harness
+      // pulls from its team's platform; it falls back to the fixed runtime traceSource when no source is selected. Either
+      // failure (auth / transient down / not emitted / malformed inline / unresolved source secret) does NOT kill the run
+      // — record it as an error event and proceed with snapshot + grading (the browser snapshot is the primary signal).
       const inline = spec.frontDoor.traceInline;
       let trace: TraceEvent[];
       try {
-        trace = inline
-          ? extractInlineTrace(outcome.response, inline.path)
-          : await this.opts.traceSource.fetch(outcome.traceRef);
+        if (inline) {
+          trace = extractInlineTrace(outcome.response, inline.path);
+        } else {
+          const selected = this.opts.traceSourceFor
+            ? await this.opts.traceSourceFor(job.tenant ?? "default", job.harness.id)
+            : undefined;
+          trace = await (selected ?? this.opts.traceSource).fetch(outcome.traceRef);
+        }
       } catch (err) {
         const how = inline ? "extract" : "fetch";
         trace = [

@@ -1,4 +1,12 @@
-import type { AgentJob, BrowserSnapshot, Grader, ServiceHarnessSpec, TraceEvent, TrustZone } from "@everdict/contracts";
+import type {
+  AgentJob,
+  BrowserSnapshot,
+  CaseResult,
+  Grader,
+  ServiceHarnessSpec,
+  TraceEvent,
+  TrustZone,
+} from "@everdict/contracts";
 import { perTenantTrustZones } from "@everdict/domain";
 import type { TraceSource } from "@everdict/trace";
 import { describe, expect, it } from "vitest";
@@ -721,6 +729,79 @@ describe("ServiceTopologyBackend (orchestrator-agnostic, mock runtime)", () => {
     expect(recorded[0]?.thread_id).toBe(keysFor("fixed").threadId);
     expect(recorded[0]?.browser_cdp_url).toBe("ws://browser/ctx");
     expect(recorded[0]?.minio_prefix).toBe("runs/fixed/");
+  });
+
+  it("traceSourceFor: the harness's selected workspace source is pulled instead of the fixed runtime source; falls back when none is selected", async () => {
+    const browser: TargetEnvHandle = {
+      wiring: { target_cdp_url: "ws://browser/ctx" },
+      async snapshot() {
+        return { kind: "browser", url: "https://x", dom: "<html/>", console: [] } satisfies BrowserSnapshot;
+      },
+      async dispose() {},
+    };
+    const runtime: TopologyRuntime = {
+      id: "mock",
+      async ensureTopology() {
+        return { endpoints: { "agent-server": "http://agent-server:8000" } };
+      },
+      async provisionBrowserEnv() {
+        return browser;
+      },
+    };
+    const submit: SubmitFn = async () => {};
+    const fixed: TraceSource = {
+      async fetch() {
+        return [{ t: 0, kind: "message", role: "assistant", text: "from FIXED runtime source" }];
+      },
+    };
+    // The per-harness resolved source (a dev-cluster observability endpoint) — receives the run's traceRef (runId).
+    let pulledRef: string | undefined;
+    const selected: TraceSource = {
+      async fetch(ref) {
+        pulledRef = ref;
+        return [{ t: 0, kind: "message", role: "assistant", text: "from SELECTED workspace source" }];
+      },
+    };
+    const job: AgentJob = {
+      harness: { id: "browser-use-langgraph", version: "1.0.0" },
+      tenant: "acme",
+      evalCase: {
+        id: "c1",
+        env: { kind: "browser", startUrl: "https://x" },
+        task: "do it",
+        graders: [],
+        timeoutSec: 60,
+        tags: [],
+      },
+    };
+    const answer = (r: CaseResult) =>
+      r.trace
+        .filter((e): e is Extract<TraceEvent, { kind: "message" }> => e.kind === "message" && e.role === "assistant")
+        .at(-1)?.text ?? "";
+
+    // Selected → the pull uses it (with the runId as the traceRef), not the fixed source.
+    const withSelection = new ServiceTopologyBackend({
+      runtime,
+      traceSource: fixed,
+      traceSourceFor: async (tenant, harnessId) =>
+        tenant === "acme" && harnessId === "browser-use-langgraph" ? selected : undefined,
+      specFor: () => SPEC,
+      submit,
+      newRunId: () => "fixed",
+    });
+    expect(answer(await withSelection.dispatch(job))).toBe("from SELECTED workspace source");
+    expect(pulledRef).toBe("fixed"); // the run's id is the pull ref (correlation)
+
+    // No selection (resolver returns undefined) → fall back to the fixed runtime source.
+    const noSelection = new ServiceTopologyBackend({
+      runtime,
+      traceSource: fixed,
+      traceSourceFor: async () => undefined,
+      specFor: () => SPEC,
+      submit,
+      newRunId: () => "fixed",
+    });
+    expect(answer(await noSelection.dispatch(job))).toBe("from FIXED runtime source");
   });
 
   it("delivery sentinel: retrieves the observation inline from the front-door response (result channel), not a browser pull", async () => {

@@ -1,5 +1,5 @@
 import type { Backend } from "@everdict/backends";
-import { BadRequestError, type RegistryAuth, type RuntimeSpec } from "@everdict/contracts";
+import { BadRequestError, type RegistryAuth, type RuntimeSpec, type TraceSourceConfig } from "@everdict/contracts";
 import type { HarnessInstanceRegistry } from "@everdict/registry";
 import {
   type CallbackRendezvous,
@@ -22,6 +22,10 @@ export function buildTopologyBackend(
     // Workspace image-registry pull credentials (resolved at build time) — for authenticated service-image pulls
     // (nomad docker auth / k8s dockerconfigjson Secret + imagePullSecrets).
     registryAuth?: RegistryAuth;
+    // Per-dispatch resolver for the harness's selected WORKSPACE-registered trace source (TraceSourceService.resolve:
+    // name → config with the auth value + correlate + scope). When it yields a config, the pull uses that source
+    // (a dev-cluster observability endpoint) instead of the fixed runtime traceSource; undefined = fall back.
+    resolveTraceSource?: (tenant: string, harnessId: string) => Promise<TraceSourceConfig | undefined>;
   },
 ): Backend {
   const ts = spec.traceSource;
@@ -47,9 +51,18 @@ export function buildTopologyBackend(
           ...(deps.registryAuth ? { registryAuth: deps.registryAuth } : {}),
         });
   const traceSource = buildTraceSource({ kind: ts.kind, endpoint: ts.endpoint });
+  // Resolve the harness's selected workspace source per-dispatch → build a full TraceSource (auth/correlate/scope).
+  const resolve = deps.resolveTraceSource;
+  const traceSourceFor = resolve
+    ? async (tenant: string, harnessId: string) => {
+        const cfg = await resolve(tenant, harnessId);
+        return cfg ? buildTraceSource(cfg) : undefined;
+      }
+    : undefined;
   return new ServiceTopologyBackend({
     runtime,
     traceSource,
+    ...(traceSourceFor ? { traceSourceFor } : {}),
     // Rendezvous for the callback completion model (if present) — issues {{callback_url}} + awaits inbound. The control-plane route delivers to the same instance.
     ...(deps.callbackRendezvous ? { callbackRendezvous: deps.callbackRendezvous } : {}),
     // The topology shape (services/dependencies/target) comes from the harness (kind:"service"). Reject if it's not a service harness.

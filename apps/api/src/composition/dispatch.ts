@@ -1,6 +1,7 @@
 import { ImageRegistryService } from "@everdict/application-control";
 import type { Metrics } from "@everdict/application-control";
 import { RunnerHub } from "@everdict/application-control";
+import { TraceSourceService } from "@everdict/application-control";
 import {
   type BackendRegistry,
   type Dispatcher as CoreDispatcher,
@@ -74,6 +75,9 @@ export function buildDispatch(deps: {
     settings: settingsStore,
     secretsFor: runtimeSecretsFor, // push/pull credentials + registration warnings resolve from the shared (workspace) secret tier
   });
+  // Workspace trace-source resolution for the topology pull — a service harness's selected source (name → config with the
+  // auth value + correlate + scope) so a dev-cluster-deployed harness's trace is pulled from its team's platform after a case.
+  const traceSourceForDispatch = new TraceSourceService(settingsStore, { secretsFor: runtimeSecretsFor });
   // RuntimeSpec → live backend. nomad/k8s with a traceSource (= topology-capable) → ServiceTopologyBackend,
   // everything else → buildRuntimeBackend (local/nomad/k8s). (The old topology kind was folded into nomad/k8s + traceSource in slice 5b-2.)
   // Defined in one place so dispatch and the connection test (probe) share the same builder/auth path.
@@ -87,6 +91,8 @@ export function buildDispatch(deps: {
           ...(callbackRendezvous ? { callbackRendezvous } : {}),
           // Workspace registry pull credentials — the topology runtime authenticates when pulling service images (nomad auth / k8s imagePullSecrets).
           ...(opts.registryAuth ? { registryAuth: opts.registryAuth } : {}),
+          // Per-dispatch: the harness's selected workspace trace source (pull from the dev-cluster observability platform).
+          resolveTraceSource: (tenant, harnessId) => traceSourceForDispatch.resolve(tenant, harnessId),
         })
       : buildRuntimeBackend(spec, opts);
   // Resolve a command harness's {{model}} to a registered Model id (else raw), then delegate to RuntimeDispatcher (placement).
