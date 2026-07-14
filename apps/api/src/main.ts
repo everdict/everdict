@@ -14,7 +14,6 @@ import { buildRun } from "./composition/run.js";
 import { buildRuntimeAccess, runStartupRecovery } from "./composition/runtime-access.js";
 import { ScheduleServiceRef, wireScheduleService } from "./composition/schedule.js";
 import { buildScorecard } from "./composition/scorecard.js";
-import { buildPlacementPreflight } from "./core/execution/placement-preflight.js";
 import {
   seedSharedHarnessTaxonomy,
   seedSharedJudges,
@@ -23,6 +22,7 @@ import {
 } from "./composition/seed.js";
 import { buildCatalog, buildCiLink, buildMattermostCommand, buildQueue, buildView } from "./composition/services.js";
 import { buildWorkspace } from "./composition/workspace.js";
+import { buildPlacementPreflight } from "./core/execution/placement-preflight.js";
 import { buildServer } from "./server.js";
 
 // Multi-tenant control-plane server. tenant is derived from the Bearer API key (dev header fallback if absent).
