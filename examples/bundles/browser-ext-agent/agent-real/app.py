@@ -72,9 +72,16 @@ def health():
 @app.post("/runs")
 def run(req: Req):
     run_id = req.thread_id or uuid.uuid4().hex
-    trace, answer, err = [], None, None
+    # trace = raw ReAct steps (human-readable). events = NORMALIZED everdict TraceEvent[] so the engine's frontDoor
+    # traceInline can extract the agent's action steps for the judge WITHOUT an external observability platform.
+    trace, events, answer, err = [], [], None, None
+
+    def ev(**kw):
+        events.append({"t": len(events), **kw})  # t = monotonic index — ordering is enough for the judge
+
+    ev(kind="message", role="user", text=req.task)
     if not req.browser_cdp_url:
-        return {"run_id": run_id, "output": "", "error": "no browser", "trace": trace}
+        return {"run_id": run_id, "output": "", "error": "no browser", "trace": trace, "events": events}
     try:
         log(f"run {run_id}: connecting CDP {req.browser_cdp_url}")
         with sync_playwright() as pw:
@@ -94,8 +101,15 @@ def run(req: Req):
                 act = json.loads(m.group(0)) if m else {"action": "finish", "answer": raw[:200]}
                 log(f"step {step}: decided {json.dumps(act)[:120]}")
                 trace.append({"step": step, "url": page.url, "action": act})
+                ev(kind="llm_call", model=MODEL)  # so steps/cost graders see one model call per decision
                 a = act.get("action")
                 obs_note = ""
+                if a == "finish":
+                    answer = act.get("answer", "")
+                    ev(kind="message", role="assistant", text=answer)  # last assistant message = the judged final answer
+                    break
+                tcid = str(step)
+                ev(kind="tool_call", id=tcid, name=a or "unknown", args=act)  # each browser action = a tool call
                 if a == "goto":
                     page.goto(act["url"], wait_until="load", timeout=30000)
                     obs_note = f'You navigated to {page.url}.'
@@ -110,12 +124,11 @@ def run(req: Req):
                     obs_note = f'You clicked element [{act["index"]}]. The page is now at {page.url}.'
                 elif a == "read":
                     obs_note = f'You read element [{act["index"]}]: "{handles[act["index"]].inner_text()}"'
-                elif a == "finish":
-                    answer = act.get("answer", "")
-                    break
+                ev(kind="tool_result", id=tcid, ok=True, output=obs_note)
             browser.close()
         log(f"run {run_id}: done answer={answer!r} steps={len(trace)}")
     except Exception as e:
         err = str(e)[:300]
+        events.append({"t": len(events), "kind": "error", "message": str(e)[:300]})
         log(f"run {run_id}: ERROR {err}")
-    return {"run_id": run_id, "output": answer or "", "steps": len(trace), "trace": trace, "error": err}
+    return {"run_id": run_id, "output": answer or "", "steps": len(trace), "trace": trace, "events": events, "error": err}

@@ -58,3 +58,19 @@ extension is **essential** (with=PASS, without=FAIL), not merely loaded.
 Note: the agent container reaches the host LiteLLM via `host.docker.internal` (`--add-host=…:host-gateway`); on this box
 ufw blocks the docker0 gateway `172.17.0.1:4000` directly. `agent-task/` remains as the earlier *scripted* baseline for
 contrast — `agent-real/` is the actual agent.
+
+## Through the everdict ENGINE (not scripts) — inline trace + engine judge
+
+The two scripts above drive the agent with raw `docker`+`curl` and a raw judge call. `scripts/live/browser-ext-agent-engine.mjs`
+instead runs the agent **through `ServiceTopologyBackend`** — the real dispatch+grade engine:
+
+- `agent-real` also returns a **normalized `TraceEvent[]`** under `events` (each ReAct step → `tool_call`/`tool_result`,
+  the final answer → an assistant `message`).
+- the harness spec sets `frontDoor.traceInline: { path: "events" }`, so the engine **extracts the agent's action steps
+  from the response** into `CaseResult.trace` — **no OTel/MLflow platform** (the `traceInline` fix). The front-door
+  injects `{{target_cdp_url}}` for the per-case extension browser the engine provisions.
+- a real `JudgeGrader` (modelJudge → LiteLLM) and `stepsGrader` then score the case; the judge **sees the agent's steps**.
+
+Verified live (gpt-5.4-mini): `12 events (message/llm_call/tool_call/tool_result)` extracted, steps `goto → type → click`,
+answer `EVDX-4242`, engine snapshot `results?q=everdict`, **`steps=3`, `judge=1 PASS`**. So the agent is evaluated
+**by the engine end to end**, not by a bespoke script — the judge scores what the agent actually did.
