@@ -1,8 +1,9 @@
-import type { EvalCase, RuntimeSpec, ServiceHarnessSpec } from "@everdict/contracts";
+import type { AgentJob, EvalCase, RuntimeSpec, ServiceHarnessSpec } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import {
   defaultRuntimeCapabilities,
   requiredCapabilities,
+  requiredCapabilitiesForJob,
   requiredCapabilitiesForTopology,
 } from "./capability-requirements.js";
 
@@ -69,6 +70,45 @@ describe("requiredCapabilitiesForTopology — heterogeneous placement (service O
   it("maps macos and dedupes repeated OS requirements", () => {
     expect(requiredCapabilitiesForTopology(topo([svc("a", "macos")]))).toEqual(["os-macos"]);
     expect(requiredCapabilitiesForTopology(topo([svc("a", "windows"), svc("b", "windows")]))).toEqual(["os-windows"]);
+  });
+});
+
+describe("requiredCapabilitiesForJob — case ∪ topology (the shared placement-gate input)", () => {
+  const svc = (name: string, os?: "linux" | "windows" | "macos"): ServiceHarnessSpec["services"][number] => ({
+    name,
+    image: `${name}:1`,
+    needs: [],
+    perRun: [],
+    replicas: 1,
+    env: {},
+    ...(os ? { requires: { os } } : {}),
+  });
+  const topo = (services: ServiceHarnessSpec["services"]): ServiceHarnessSpec => ({
+    kind: "service",
+    id: "grid",
+    version: "1.0.0",
+    services,
+    dependencies: [],
+    frontDoor: { service: services[0]?.name ?? "s", submit: "POST /runs" },
+    traceSource: { kind: "otel", endpoint: "http://x" },
+  });
+  const job = (over: Partial<AgentJob>): AgentJob => ({
+    evalCase: base({}),
+    harness: { id: "h", version: "1.0.0" },
+    ...over,
+  });
+
+  it("a plain (non-topology) job → just its case caps", () => {
+    expect(requiredCapabilitiesForJob(job({ evalCase: base({ image: "x:1" }) }))).toEqual(["docker"]);
+    expect(requiredCapabilitiesForJob(job({}))).toEqual([]); // repo/files case → nothing
+  });
+
+  it("a service harness adds docker; a Windows service also adds os-windows (the gate input)", () => {
+    expect(requiredCapabilitiesForJob(job({ harnessSpec: topo([svc("hub")]) }))).toEqual(["docker"]); // linux topology → docker only
+    expect(requiredCapabilitiesForJob(job({ harnessSpec: topo([svc("hub"), svc("win", "windows")]) })).sort()).toEqual([
+      "docker",
+      "os-windows",
+    ]);
   });
 });
 

@@ -92,6 +92,7 @@ export {
 export {
   defaultRuntimeCapabilities,
   requiredCapabilities,
+  requiredCapabilitiesForJob,
   requiredCapabilitiesForTopology,
 } from "./runtime/capability-requirements.js";
 export { assertHardenedIsolation, isHardenedRuntime } from "./runtime/trust-zone-hardening.js";

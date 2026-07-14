@@ -130,6 +130,75 @@ describe("RuntimeDispatcher", () => {
     expect(secretsFor).toHaveBeenCalledWith("acme");
   });
 
+  // Capability placement gate — reject a job the registered runtime can't run BEFORE dispatching (else the
+  // orchestrator accepts it and the mismatched service sits pending forever). See heterogeneous-topology-placement.md.
+  const winSvcJob = (target: string): AgentJob => ({
+    ...job(target),
+    harnessSpec: {
+      kind: "service",
+      id: "grid",
+      version: "1",
+      services: [
+        { name: "hub", image: "h:1", port: 4444, needs: [], perRun: [], replicas: 1, env: {} },
+        {
+          name: "win",
+          image: "w:1",
+          port: 5555,
+          needs: [],
+          perRun: [],
+          replicas: 1,
+          env: {},
+          requires: { os: "windows" },
+        },
+      ],
+      dependencies: [],
+      frontDoor: { service: "hub", submit: "POST /s" },
+      traceSource: { kind: "otel", endpoint: "http://x" },
+    },
+  });
+  const nomad = (capabilities?: string[]): RuntimeSpec => ({
+    kind: "nomad",
+    id: "cluster",
+    version: "1.0.0",
+    addr: "http://nomad:4646",
+    image: "agent:1",
+    tags: [],
+    ...(capabilities ? { capabilities: capabilities as RuntimeSpec["capabilities"] } : {}),
+  });
+  const gateSetup = async (spec: RuntimeSpec) => {
+    const { inner, seen } = innerSpy();
+    const backends = new BackendRegistry();
+    const runtimes = new InMemoryRuntimeRegistry();
+    await runtimes.register("acme", spec);
+    const stub = { capacity: async () => ({ total: 1, used: 0 }), dispatch: async () => result };
+    const d = new RuntimeDispatcher({
+      inner,
+      backends,
+      runtimes,
+      secretsFor: async () => ({}),
+      buildBackend: () => stub,
+    });
+    return { d, seen };
+  };
+
+  it("rejects a Windows-service topology on a runtime that doesn't advertise os-windows (before dispatch)", async () => {
+    const { d, seen } = await gateSetup(nomad(["docker"])); // labeled, but no os-windows
+    await expect(d.dispatch(winSvcJob("cluster"))).rejects.toMatchObject({ code: "BAD_REQUEST", status: 400 });
+    expect(seen).toHaveLength(0); // never reaches the scheduler / the orchestrator
+  });
+
+  it("routes when the runtime advertises os-windows", async () => {
+    const { d, seen } = await gateSetup(nomad(["docker", "os-windows"]));
+    await d.dispatch(winSvcJob("cluster"));
+    expect(seen).toHaveLength(1);
+  });
+
+  it("backward-compat: a runtime that declares NO capabilities is not gated (passes as before)", async () => {
+    const { d, seen } = await gateSetup(nomad()); // capabilities undefined
+    await d.dispatch(winSvcJob("cluster"));
+    expect(seen).toHaveLength(1);
+  });
+
   // self:<runnerId> — personally-owned self-hosted runner routing (Slice 2: ownership check + backend build/routing).
   const selfJob = (target: string, submittedBy?: string): AgentJob => ({
     ...job(target),

@@ -1,4 +1,4 @@
-import type { CapabilityName, EvalCase, RuntimeSpec, ServiceHarnessSpec } from "@everdict/contracts";
+import type { AgentJob, CapabilityName, EvalCase, RuntimeSpec, ServiceHarnessSpec } from "@everdict/contracts";
 import { isHardenedRuntime } from "./trust-zone-hardening.js";
 
 // Derive the capabilities a case requires to run — decided from case fields (image/env.kind/source/placement.isolation).
@@ -40,6 +40,21 @@ export function requiredCapabilitiesForTopology(spec: ServiceHarnessSpec): Capab
     if (cap) req.add(cap);
   }
   return [...req];
+}
+
+// The full set of capabilities a JOB requires = its case requirements ∪ (for a service/topology harness) the
+// topology's needs: docker (it stands up containers) + each service's intrinsic OS (os-windows/os-macos). This is the
+// single "what does this job need" function the placement gates use — the registered-runtime dispatcher
+// (runtimeSatisfies vs RuntimeSpec.capabilities) and the self-hosted runner hub (vs a runner's probed capabilities) —
+// so both reject a job a target can't run BEFORE placing it (e.g. a Windows-service topology on a Linux-only target,
+// which would otherwise sit constraint-filtered / pending forever). Pure. Design: docs/architecture/heterogeneous-topology-placement.md.
+export function requiredCapabilitiesForJob(job: AgentJob): CapabilityName[] {
+  const caps = new Set<CapabilityName>(requiredCapabilities(job.evalCase));
+  if (job.harnessSpec?.kind === "service") {
+    caps.add("docker"); // a topology stands up containers even when the case carries no image
+    for (const c of requiredCapabilitiesForTopology(job.harnessSpec)) caps.add(c);
+  }
+  return [...caps];
 }
 
 // Derive the capabilities a registered runtime "provides" by default — the app auto-labels from the spec (like the runner's

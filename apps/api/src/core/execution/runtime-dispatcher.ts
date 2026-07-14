@@ -15,7 +15,7 @@ import {
   type RegistryAuth,
   type RuntimeSpec,
 } from "@everdict/contracts";
-import { imageUsesRegistryHost } from "@everdict/domain";
+import { imageUsesRegistryHost, requiredCapabilitiesForJob, runtimeSatisfies } from "@everdict/domain";
 import type { RuntimeRegistry } from "@everdict/registry";
 
 export interface RuntimeDispatcherDeps {
@@ -136,6 +136,18 @@ export class RuntimeDispatcher implements Dispatcher {
     if (target && !this.deps.backends.has(target)) {
       const spec = await this.deps.runtimes.get(tenant, target).catch(() => undefined);
       if (spec) {
+        // Capability placement gate: reject a job the runtime can't run BEFORE dispatching. Without it a mismatch
+        // (e.g. a Windows-service topology on a Linux-only cluster) is accepted by the orchestrator and the service
+        // sits constraint-filtered / pending forever. runtimeSatisfies is a no-op for a runtime that declared no
+        // capabilities (backward-compat); it bites only once the operator labels the runtime (e.g. with os-windows).
+        const required = requiredCapabilitiesForJob(job);
+        if (!runtimeSatisfies(spec.capabilities, required)) {
+          throw new BadRequestError(
+            "BAD_REQUEST",
+            { runtime: `${spec.id}@${spec.version}`, need: required, have: spec.capabilities ?? [] },
+            `Runtime "${spec.id}" can't run this job — it lacks required capabilities [${required.join(", ")}] (it advertises [${(spec.capabilities ?? []).join(", ")}]). Choose a runtime whose nodes provide them (e.g. an os-windows-capable cluster for a Windows service).`,
+          );
+        }
         const name = `rt:${tenant}:${spec.id}@${spec.version}`; // one backend instance per tenant·version (reused)
         if (!this.deps.backends.has(name)) {
           const secretEnv = await this.deps.secretsFor(tenant).catch(() => ({}) as Record<string, string>);

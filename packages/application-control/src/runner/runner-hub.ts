@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { type AgentJob, type CaseResult, UpstreamError } from "@everdict/contracts";
-import { capabilityKind, requiredCapabilities } from "@everdict/domain";
+import { capabilityKind, requiredCapabilitiesForJob } from "@everdict/domain";
 
 // Self-hosted runner dispatch key — the identity of the runner a job will flow to. The lease queue is keyed by (owner, runnerId) (D3).
 // ⚠️ The workspace (tenant) is NOT part of the key — a runner receives jobs from all of its owner's workspaces on a single queue
@@ -23,16 +23,13 @@ export function selfHostedBackendName(key: SelfHostedKey): string {
 }
 
 // What the placement gate looks at = the **functional** capabilities the job requires (rejected if the runner can't advertise them).
-// Derived from the case (@everdict/contracts requiredCapabilities): image→docker · repo-git→git · browser→browser · os-use→computer-use.
-// security(sandbox)/auth(login) are enforced by their own layers (trust-zone/budget), not placement, so here we only look at functional.
-// Leasing an image-required job to a runner without Docker would run it in the wrong environment via host-native fallback → reject explicitly.
-// Design: docs/architecture/self-hosted-runtime-and-runners.md · portable-harness-runtime.md (placement gate).
+// The full job requirement set (case caps ∪ topology docker/OS) is the shared requiredCapabilitiesForJob; here we keep
+// only the functional subset — security(sandbox)/auth(login) are enforced by their own layers (trust-zone/budget), not
+// placement. So a service (topology) harness needs docker, and a Windows service needs os-windows (a Linux runner that
+// doesn't advertise it is correctly skipped; a Linux topology adds no OS cap → unaffected).
+// Design: docs/architecture/self-hosted-runtime-and-runners.md · heterogeneous-topology-placement.md (placement gate).
 export function requiredRunnerCapabilities(job: AgentJob): string[] {
-  const caps = requiredCapabilities(job.evalCase).filter((c) => capabilityKind(c) === "functional");
-  // A service (topology) harness stands up a local Docker topology, so it needs docker (even if the case has no image) — the pool lease gate
-  // uses this to skip non-docker runners and route to a docker runner. The specific-runner path is rejected earlier with BadRequest by the dispatcher.
-  if (job.harnessSpec?.kind === "service" && !caps.includes("docker")) caps.push("docker");
-  return caps;
+  return requiredCapabilitiesForJob(job).filter((c) => capabilityKind(c) === "functional");
 }
 
 // A single job the runner leases (the core of the MCP lease_job response).
