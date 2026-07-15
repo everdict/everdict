@@ -69,6 +69,35 @@ describe("UpdaterController", () => {
     expect(c.state()).toEqual({ kind: "ready", version: "9.9.9" });
   });
 
+  it("autoDownload=false (deb/rpm) — onAvailable fires but there is no downloading/ready (detect-only)", () => {
+    const { u } = fakeUpdater();
+    const { states, onStatus } = collect();
+    const seen: string[] = [];
+    const c = new UpdaterController({
+      updater: u,
+      onStatus,
+      autoDownload: false,
+      onAvailable: (v) => seen.push(v),
+      schedule: () => () => {},
+    });
+    c.start();
+    expect(u.autoDownload).toBe(false);
+    u.emit("update-available", { version: "9.9.9" });
+    expect(seen).toEqual(["9.9.9"]); // caller gets the detect signal (→ manual-download prompt)
+    expect(states.map((s) => s.kind)).not.toContain("downloading"); // no in-place download attempted
+    expect(c.state()).toEqual({ kind: "idle" });
+  });
+
+  it("autoDownload=true — onAvailable still fires alongside the downloading transition", () => {
+    const { u } = fakeUpdater();
+    const seen: string[] = [];
+    const c = new UpdaterController({ updater: u, onAvailable: (v) => seen.push(v), schedule: () => () => {} });
+    c.start();
+    u.emit("update-available", { version: "2.0.0" });
+    expect(seen).toEqual(["2.0.0"]);
+    expect(c.state()).toEqual({ kind: "downloading", version: "2.0.0" });
+  });
+
   it("not-available→idle, error→error (retries on the next cycle)", () => {
     const { u, checkForUpdates } = fakeUpdater();
     let tick: (() => void) | undefined;

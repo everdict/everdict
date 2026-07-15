@@ -3,7 +3,19 @@ import { cpus, hostname } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { ResilientMcpSession, RunnerHost, detectCapabilities, mcpConnect } from "@everdict/self-hosted-runner";
-import { BrowserWindow, Menu, Notification, Tray, app, ipcMain, nativeImage, safeStorage, shell } from "electron";
+import {
+  BrowserWindow,
+  Menu,
+  Notification,
+  Tray,
+  app,
+  dialog,
+  ipcMain,
+  nativeImage,
+  safeStorage,
+  session,
+  shell,
+} from "electron";
 import electronUpdater from "electron-updater";
 import {
   BRIDGE_CHANNELS,
@@ -21,6 +33,7 @@ import { buildTrayMenuTemplate, runnerStatusLabel } from "./tray-menu.js";
 import { type AutoUpdaterLike, UpdaterController, type UpdaterState } from "./updater.js";
 import { WINDOW_CHANNELS, registerWindowChrome } from "./window-chrome.js";
 import { allowTopLevelNavigation, decideWindowOpen, shouldRecoverToSetup, webOriginOf } from "./window-policy.js";
+import { registerZoomShortcuts } from "./zoom.js";
 
 // Desktop shell — renders the deployed web as-is (D1: UI SSOT = apps/web), stays resident in the tray, and
 // embeds the self-hosted runner (@everdict/runner-core) in the main process (D3: one-click pairing).
@@ -255,6 +268,7 @@ const supervisor = new RunnerSupervisor({
     // Independent notifications (N6): watch while ≥1 runner is paired, stop at zero — the feed flows regardless of any web session.
     if (status.runners.length > 0) startNotifyWatcher();
     else stopNotifyWatcher();
+    maybeApplyOnIdle(); // a deferred update applies the moment the last runner job finishes (never mid-job)
     refreshTrayMenu(); // sync the status row · unpair item · tooltip (no-op if no tray)
     for (const win of BrowserWindow.getAllWindows()) {
       if (webOrigin !== null && senderAllowed(win.webContents.getURL(), webOrigin))
@@ -284,30 +298,25 @@ function resolveAutoUpdater(): AutoUpdaterLike | null {
   return null;
 }
 
+// Non-AppImage Linux (deb/rpm) can't be swapped in place by electron-updater → detect-only + a manual-download prompt.
+const canApplyInPlace = !(process.platform === "linux" && !process.env.APPIMAGE);
+const RELEASES_URL = "https://github.com/everdict/everdict/releases/latest";
+
 let updaterState: UpdaterState = { kind: "disabled" };
 const updater = new UpdaterController({
   updater: resolveAutoUpdater(),
+  autoDownload: canApplyInPlace,
+  // deb/rpm: no in-place apply — point the user at the download page instead of silently doing nothing.
+  onAvailable: (version) => {
+    if (!canApplyInPlace) void promptManualDownload(version);
+  },
   onStatus: (state) => {
     const prev = updaterState;
     updaterState = state;
     if (state.kind !== prev.kind)
       console.error(`Update status: ${state.kind}${"version" in state ? ` v${state.version}` : ""}`);
     refreshTrayMenu();
-    // One notification on entering ready — applying it (restart) is the user's decision from the tray (no forced abort of runner jobs).
-    if (state.kind === "ready" && prev.kind !== "ready") {
-      try {
-        if (Notification.isSupported()) {
-          const n = new Notification({
-            title: "Everdict update ready",
-            body: `Restarting will update to v${state.version}. Apply it from the tray menu.`,
-          });
-          n.on("click", () => createOrFocusWindow());
-          n.show();
-        }
-      } catch {
-        /* environment without notification support — ignore */
-      }
-    }
+    if (state.kind === "ready" && prev.kind !== "ready") void onUpdateReady(state.version);
   },
   log: (m) => console.error(m),
 });
@@ -321,6 +330,77 @@ function applyUpdateNow(): void {
     .shutdown()
     .catch(() => {})
     .finally(() => updater.quitAndInstall());
+}
+
+// --- D6 auto-update UX: a prominent dialog + apply-when-idle (never abort a running case) ---
+// A ready update is easy to miss when it only lives in the tray, so users get stranded on an old version (which then
+// can't reach the newer control plane). Policy: on ready, show a modal dialog; if deferred, keep it applied by (a) a
+// periodic re-prompt and (b) auto-applying once every runner on this device is idle — a running job is never killed.
+let readyVersion: string | null = null;
+let updateDeferred = false;
+let repromptTimer: ReturnType<typeof setInterval> | null = null;
+const REPROMPT_MS = 60 * 60 * 1000; // re-nudge a deferred update hourly
+
+async function onUpdateReady(version: string): Promise<void> {
+  readyVersion = version;
+  updateDeferred = false;
+  await promptUpdateDialog(version);
+}
+
+// The prominent consent dialog. "Update now" applies immediately; "Later" defers to the idle/quit/re-prompt paths.
+async function promptUpdateDialog(version: string): Promise<void> {
+  const busy = totalActiveJobs(latestRunnersStatus) > 0;
+  const opts: Electron.MessageBoxOptions = {
+    type: "info",
+    title: "Everdict update ready",
+    message: `Everdict v${version} is ready to install.`,
+    detail: busy
+      ? "Restarting updates the app. A runner is currently working — choose Later and it will update automatically once the runner is idle (or apply now to stop the job and update)."
+      : "Restart now to update. If you choose Later, it will apply the next time the app is idle or on quit.",
+    buttons: ["Update now", "Later"],
+    defaultId: 0,
+    cancelId: 1,
+    noLink: true,
+  };
+  const win = mainWindow;
+  const { response } = win ? await dialog.showMessageBox(win, opts) : await dialog.showMessageBox(opts);
+  if (response === 0) {
+    applyUpdateNow();
+    return;
+  }
+  updateDeferred = true;
+  if (!repromptTimer) {
+    repromptTimer = setInterval(() => {
+      if (readyVersion && updateDeferred) void promptUpdateDialog(readyVersion);
+    }, REPROMPT_MS);
+    (repromptTimer as { unref?: () => void }).unref?.();
+  }
+  maybeApplyOnIdle(); // it may already be idle
+}
+
+// Deb/rpm manual path — electron-updater can't swap the package in place, so open the release download.
+async function promptManualDownload(version: string): Promise<void> {
+  const win = mainWindow;
+  const opts: Electron.MessageBoxOptions = {
+    type: "info",
+    title: "Everdict update available",
+    message: `Everdict v${version} is available.`,
+    detail: "This install type updates from the download page (the in-app auto-update needs the AppImage build).",
+    buttons: ["Download", "Later"],
+    defaultId: 0,
+    cancelId: 1,
+    noLink: true,
+  };
+  const { response } = win ? await dialog.showMessageBox(win, opts) : await dialog.showMessageBox(opts);
+  if (response === 0) void shell.openExternal(RELEASES_URL);
+}
+
+// Called on every runner-status change: if an update is downloaded + deferred and no runner is working, apply it.
+function maybeApplyOnIdle(): void {
+  if (readyVersion && updateDeferred && totalActiveJobs(latestRunnersStatus) === 0) {
+    updateDeferred = false;
+    applyUpdateNow();
+  }
 }
 
 // appInfo — source of the one-click pairing label (hostname)/OS/capability. The capability probe is cached once.
@@ -396,6 +476,10 @@ function createOrFocusWindow(): void {
   };
   win.on("maximize", pushMaximizeState);
   win.on("unmaximize", pushMaximizeState);
+  // Ctrl/Cmd +/−/0 page zoom (D10 frameless windows have no menu bar, and the default menu's zoom-in accelerator
+  // never matches Ctrl+= on common layouts — see zoom.ts). Cover the in-app child windows opened via window.open too.
+  registerZoomShortcuts(win.webContents);
+  win.webContents.on("did-create-window", (child) => registerZoomShortcuts(child.webContents));
   // Recovery (D8): the pinned server URL might be wrong/unreachable. On a successful load, clear the failed flag; on the
   // initial top-level load failure, mark it and pop the setup screen so the user can fix the address without the tray.
   let everLoaded = false;
@@ -472,7 +556,7 @@ if (!app.requestSingleInstanceLock()) {
 } else {
   app.on("second-instance", () => createOrFocusWindow());
 
-  void app.whenReady().then(() => {
+  void app.whenReady().then(async () => {
     // No Linux keyring (headless, etc.): if safeStorage falls back to the basic_text backend, then without an explicit opt-in
     // isEncryptionAvailable()=false → one-click pairing becomes impossible. We take the same fallback as VSCode —
     // warn that it is only obfuscation-level and opt in. With a GNOME/KDE keyring present, it is a real encryption backend and does not take this path.
@@ -483,6 +567,19 @@ if (!app.requestSingleInstanceLock()) {
       );
     }
     config = loadConfig(configIo());
+    // D6 auto-update robustness: if the binary version changed since last run (= just updated), purge the web cache
+    // BEFORE loading so the updated shell always renders current web content — the stale-cache class of bug that made an
+    // updated app still look like the old one. Awaited so the first load is clean; packaged-only (dev reloads anyway).
+    if (app.isPackaged) {
+      const version = app.getVersion();
+      if (config.lastVersion !== version) {
+        console.error(`Version ${config.lastVersion ?? "?"} → ${version} — purging the web cache for a clean load.`);
+        await session.defaultSession.clearCache().catch(() => {});
+        await session.defaultSession.clearStorageData({ storages: ["cachestorage", "serviceworkers"] }).catch(() => {});
+        config = { ...config, lastVersion: version };
+        saveConfig(configIo(), config);
+      }
+    }
     // Resolve the server URL (D8): env (dev/e2e) > user config > CI-injected default. If none, the setup screen appears.
     applyWebUrl(
       resolveWebUrl({

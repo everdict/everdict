@@ -5,18 +5,24 @@
 > the desktop app too** — the desktop must do *everything the web does*, plus what only a native app can do (resident
 > runner, one-click pairing, tray/notifications/autostart).
 > Dev conventions for `apps/desktop` / `packages/self-hosted-runner` live in skill `.claude/skills/desktop/`.
-> - **D6 — auto-update: detect/download automatic, APPLY is user-consented (LOCKED); ENABLED.**
+> - **D6 — auto-update: detect/download automatic, APPLY is user-consented but not tray-buried (LOCKED); ENABLED.**
 >   `electron-updater` in main behind `UpdaterController` (DI): check on launch + every 6h,
->   `autoDownload`, `autoInstallOnAppQuit`; "Apply" only via the tray restart item — never force-restart
->   a runner mid-job (apply = graceful runner shutdown → `quitAndInstall`). Activation gate:
->   `app.isPackaged` && (packaged `app-update.yml` [shipped by electron-builder's `publish` block] ||
->   `EVERDICT_UPDATE_FEED_URL` env → generic feed via a userData config injected through
->   `autoUpdater.updateConfigPath` — `setFeedURL` alone is insufficient: AppImageUpdater reads the
->   on-disk config during download). **Feed = GitHub Releases of the public `everdict/everdict` repo**
+>   `autoDownload`, `autoInstallOnAppQuit`. On ready, main shows a **prominent modal dialog**
+>   ("Update now / Later") — the tray-only prompt stranded users on an old version (which then can't reach a
+>   newer control plane). "Later" is not a dead end: it **re-prompts hourly** and **auto-applies the moment
+>   every runner on the device goes idle** (`totalActiveJobs === 0`), so a running case is never killed
+>   (apply = graceful runner shutdown → `quitAndInstall`). On startup, if `app.getVersion()` differs from the
+>   stored `config.lastVersion` (= the binary just updated) the **web session cache is purged**
+>   (`clearCache` + `clearStorageData` for cachestorage/serviceworkers) BEFORE the first load, so an updated
+>   shell never renders stale web UI. Activation gate: `app.isPackaged` && (packaged `app-update.yml` [shipped
+>   by electron-builder's `publish` block] || `EVERDICT_UPDATE_FEED_URL` env → generic feed via a userData
+>   config injected through `autoUpdater.updateConfigPath` — `setFeedURL` alone is insufficient: AppImageUpdater
+>   reads the on-disk config during download). **Feed = GitHub Releases of the public `everdict/everdict` repo**
 >   (`electron-builder.yml` `publish: {provider: github, owner: everdict, repo: everdict}`; public repo →
 >   read without a token). Ship an update by pushing a `desktop-v*` tag (release workflow attaches the
->   installers + `latest*.yml`). mac auto-update stays inert until code signing exists; deb installs don't
->   auto-update (AppImage/NSIS/mac-zip do).
+>   installers + `latest*.yml`). mac auto-update stays inert until code signing exists. **Linux non-AppImage
+>   (deb/rpm) can't be swapped in place** → `autoDownload:false` (detect-only) + an `onAvailable` "Download"
+>   dialog that opens the releases page (AppImage/NSIS/mac-zip do apply in place).
 > - **D7 — the desktop fully absorbs the pairing surface (LOCKED 2026-07-03).** The browser web no longer
 >   offers manual device pairing (the token-shown-once modal is removed): personal-machine pairing is the
 >   desktop's one-click only, and the browser account page becomes **manage-only** (list · live status ·

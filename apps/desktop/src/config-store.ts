@@ -21,6 +21,9 @@ export const DesktopConfigSchema = z.object({
   apiUrl: z.string().url().optional(),
   // Independent notifications (N6) cursor — the last OS-fired createdAt (ISO). Prevents re-firing the backlog on restart.
   notifyCursor: z.string().optional(),
+  // The app version last seen running (D6 auto-update). On a mismatch at startup (= the binary was just updated) the
+  // stale web cache is purged so the freshly-updated shell always loads current web content, then this is rewritten.
+  lastVersion: z.string().optional(),
 });
 export type DesktopConfig = z.infer<typeof DesktopConfigSchema>;
 

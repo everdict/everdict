@@ -22,6 +22,11 @@ export interface UpdaterControllerOpts {
   updater: AutoUpdaterLike | null; // null → disabled
   intervalMs?: number; // re-check interval (default 6 hours)
   onStatus?: (state: UpdaterState) => void;
+  // Background-download the moment an update is detected (default true). false = detect-only — the caller applies the
+  // update itself (e.g. a non-AppImage Linux install, where electron-updater cannot swap in place, prompts a download).
+  autoDownload?: boolean;
+  // Fires when an update is detected (before any download), regardless of autoDownload — the seam for the detect-only path.
+  onAvailable?: (version: string) => void;
   log?: (msg: string) => void;
   // Test injection point — defaults to setInterval (+unref). Returns a stop function.
   schedule?: (fn: () => void, ms: number) => () => void;
@@ -48,10 +53,15 @@ export class UpdaterController {
       return;
     }
     this.started = true;
-    u.autoDownload = true; // background download the moment one is detected
+    const autoDownload = this.opts.autoDownload ?? true;
+    u.autoDownload = autoDownload; // background download the moment one is detected (false = detect-only, caller applies)
     u.autoInstallOnAppQuit = true; // even if the user just quits, the next launch is the new version
     u.on("checking-for-update", () => this.set({ kind: "checking" }));
-    u.on("update-available", (info: { version: string }) => this.set({ kind: "downloading", version: info.version }));
+    u.on("update-available", (info: { version: string }) => {
+      this.opts.onAvailable?.(info.version); // detect-only seam (manual download prompt) — fires regardless of autoDownload
+      // With autoDownload off there is no download/ready to come, so stay idle (the caller drives the manual path).
+      if (autoDownload) this.set({ kind: "downloading", version: info.version });
+    });
     u.on("download-progress", (progress: { percent: number }) => {
       if (this.current.kind === "downloading") this.set({ ...this.current, percent: Math.round(progress.percent) });
     });

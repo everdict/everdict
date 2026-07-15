@@ -77,12 +77,17 @@ logged-in web session over a minimal preload bridge.
   `apps/desktop/package.json` stays `0.0.0` — CI injects the tag version at build time; do NOT bump
   it in commits. deb metadata requires `author` (with email) + `homepage` in package.json — keep them.
 - Auto-update (D6): all logic goes through `UpdaterController` (`updater.ts`, DI — tests never import
-  electron-updater). Detect/download automatic; APPLY only via tray (graceful runner shutdown first —
-  set `quitting`+`shuttingDown` before `quitAndInstall` or before-quit's preventDefault cancels the
-  install). Activation gate lives in `resolveAutoUpdater()` (main.ts): packaged app-update.yml (future
-  `publish` config) or `EVERDICT_UPDATE_FEED_URL` → userData config via `updateConfigPath` (`setFeedURL`
-  alone breaks at download). Do NOT add a `publish` block to electron-builder.yml until the public
-  feed location is decided (repo is private — apps can't read its releases).
+  electron-updater). Detect/download automatic. On ready → a **prominent modal dialog** (main.ts
+  `promptUpdateDialog`, not a tray-only nudge — users got stranded on old versions). "Later" re-prompts
+  hourly AND **auto-applies once every runner is idle** (`totalActiveJobs === 0`, hooked in the status
+  broadcast) — never kill a running case. Apply = set `quitting`+`shuttingDown` before `quitAndInstall`
+  (else before-quit's preventDefault cancels the install). On startup, purge the web cache when
+  `app.getVersion() !== config.lastVersion` (a just-updated binary must not render stale web UI). Activation
+  gate lives in `resolveAutoUpdater()` (main.ts): packaged `app-update.yml` (shipped by electron-builder.yml's
+  `publish` block) or `EVERDICT_UPDATE_FEED_URL` → userData config via `updateConfigPath` (`setFeedURL` alone
+  breaks at download). **Feed = the PUBLIC `everdict/everdict` GitHub Releases** (`publish` block is present;
+  ship via a `desktop-v*` tag). **Linux non-AppImage (deb/rpm)** can't swap in place → `autoDownload:false`
+  (detect-only) + an `onAvailable` "Download" dialog opening the releases page.
 
 ## Checklist
 1. Read `docs/architecture/desktop-app.md` first; slice order is binding.
