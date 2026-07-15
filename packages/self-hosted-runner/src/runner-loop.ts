@@ -7,7 +7,9 @@ export interface RunnerLoopDeps {
   // MCP tool call → JSON result. App-level errors (isError) surface as a throw (the caller wrapper's contract).
   callJson: (name: string, args: Record<string, unknown>) => Promise<Record<string, unknown>>;
   // Run a leased job (service→Docker topology / otherwise→LocalDriver). The caller closes over runtimeOptions etc.
-  runJob: (job: AgentJob) => Promise<CaseResult>;
+  // reportScreen (when the harness declares liveScreen) pushes each captured frame of the case's screen back to the
+  // control plane for live viewing.
+  runJob: (job: AgentJob, opts?: { reportScreen?: (frameBase64: string) => Promise<void> }) => Promise<CaseResult>;
   log?: (msg: string) => void; // default no-op (tests stay quiet)
   sleep?: (ms: number) => Promise<void>; // default setTimeout
   // Hook that sets up lease renewal while running — returns a cleanup function. Default is setInterval(heartbeat_job). Tests inject a fake.
@@ -77,8 +79,14 @@ export async function runLeaseWorkers(deps: RunnerLoopDeps, opts: RunnerLoopOpts
       log(`▶ running job ${jobId} (case ${parsed.data.evalCase.id}) …`);
       // Renew the lease via periodic heartbeat so a long-running job isn't requeued by the server.
       const stopHeartbeat = setHeartbeat(jobId);
+      // Live-screen frames: push each captured frame to the control plane keyed by the CP-minted runId. Only wired when
+      // the job carries a runId (control-plane dispatch); runJob only calls it when the harness declares liveScreen.
+      const runId = parsed.data.runId;
+      const reportScreen = runId
+        ? (frame: string): Promise<void> => deps.callJson("report_case_screen", { runId, frame }).then(() => {})
+        : undefined;
       try {
-        const result = await deps.runJob(parsed.data);
+        const result = await deps.runJob(parsed.data, reportScreen ? { reportScreen } : undefined);
         await deps.callJson("submit_job_result", { jobId, result });
         log(`✓ job ${jobId} done → replied`);
       } catch (e) {

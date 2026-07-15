@@ -8,6 +8,7 @@ import {
   type Environment,
   type Grader,
   judgeEnv,
+  type LiveScreenCapture,
 } from "@everdict/contracts";
 import { classifyFailure, stageForError } from "@everdict/domain";
 import { DockerDriver, type DriverMount, LocalDriver } from "@everdict/drivers";
@@ -83,7 +84,14 @@ export function failureResult(
 // codex login directory → codex in the container uses the machine login). Design: docs/architecture/portable-harness-runtime.md.
 export async function runAgentJob(
   job: AgentJob,
-  opts: { driver?: Driver; containerize?: boolean; mounts?: DriverMount[] } = {},
+  opts: {
+    driver?: Driver;
+    containerize?: boolean;
+    mounts?: DriverMount[];
+    // Live-screen frame reporter (self-hosted runner). When present AND the command harness declares liveScreen,
+    // runCase execs the harness's captureCmd periodically and pushes each base64 PNG frame here. Absent = no live screen.
+    reportScreen?: (frameBase64: string) => Promise<void>;
+  } = {},
 ): Promise<CaseResult> {
   // Usage metering (BYO + Everdict-owned budget): the control plane decides from workspace/request policy and sends it via job.meterUsage.
   // If unset, fall back for dev to the EVERDICT_METER_USAGE env (when dispatching directly to LocalBackend without a control plane).
@@ -103,6 +111,17 @@ export async function runAgentJob(
   const graders: Grader[] = makeGradersFromEnv(job.evalCase.graders, env);
   // Environment is chosen by the case's env.kind (browser topology is handled by ServiceTopologyBackend — outside this local path).
   const environment = environmentFor(job.evalCase.env.kind, job.repoToken);
+  // Opt-in live screen: a command harness that drives a browser/GUI in its own container declares a captureCmd; when the
+  // caller (self-hosted runner) also supplies a frame reporter, runCase runs the capture loop against the case compute.
+  const liveScreenSpec = job.harnessSpec?.kind === "command" ? job.harnessSpec.liveScreen : undefined;
+  const liveScreen: LiveScreenCapture | undefined =
+    liveScreenSpec && opts.reportScreen
+      ? {
+          captureCmd: liveScreenSpec.captureCmd,
+          report: opts.reportScreen,
+          ...(liveScreenSpec.intervalMs !== undefined ? { intervalMs: liveScreenSpec.intervalMs } : {}),
+        }
+      : undefined;
   return runCase(job.evalCase, {
     // Precedence: explicit driver → containerize (local Docker, case.image, host mounts) → default LocalDriver (in-process).
     // registryAuth (transient on the job) — authenticated pre-pull of workspace-registry images (temporary DOCKER_CONFIG).
@@ -121,6 +140,10 @@ export async function runAgentJob(
     // Per-case timeout (EvalCase.timeoutSec) flows into the run context so a long agent case is not killed at the old
     // hardcoded default; EVERDICT_TIMEOUT_SEC still overrides. Dataset adapters (terminal-bench/harbor) capture the
     // task's own timeout here, previously dropped at execution.
-    runCtx: { ...runContextFromEnv(job.evalCase.timeoutSec), ...(job.runId ? { runId: job.runId } : {}) },
+    runCtx: {
+      ...runContextFromEnv(job.evalCase.timeoutSec),
+      ...(job.runId ? { runId: job.runId } : {}),
+      ...(liveScreen ? { liveScreen } : {}),
+    },
   });
 }

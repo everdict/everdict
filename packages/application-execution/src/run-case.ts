@@ -9,6 +9,7 @@ import type {
   EvalCase,
   EvaluableHarness,
   Grader,
+  LiveScreenCapture,
   RunContext,
   Score,
   TraceEvent,
@@ -47,6 +48,36 @@ async function materializeScreenshot(
   return { ...snapshot, screenshot: base64 };
 }
 
+// Live-screen capture loop (opt-in) — while the harness runs, exec the capture command in the compute every
+// intervalMs and hand the base64 PNG frame to the reporter (the self-hosted runner pushes it to the control plane).
+// Overlap-guarded (a slow capture never stacks) and entirely best-effort: any capture/report failure is swallowed so
+// live observability can never affect the eval outcome. Returns stop() — runCase calls it (via release) before the
+// compute is disposed, so no frame grab ever races the teardown.
+function startLiveScreenCapture(compute: ComputeHandle, hook: LiveScreenCapture): () => void {
+  const intervalMs = hook.intervalMs ?? 2000;
+  let stopped = false;
+  let inFlight = false;
+  const tick = async (): Promise<void> => {
+    if (stopped || inFlight) return;
+    inFlight = true;
+    try {
+      const out = await compute.exec(hook.captureCmd);
+      const frame = out.stdout.trim();
+      if (!stopped && out.exitCode === 0 && frame) await hook.report(frame);
+    } catch {
+      // best-effort — a capture/report failure never touches the run
+    } finally {
+      inFlight = false;
+    }
+  };
+  const timer = setInterval(() => void tick(), intervalMs);
+  (timer as { unref?: () => void }).unref?.();
+  return () => {
+    stopped = true;
+    clearInterval(timer);
+  };
+}
+
 // Runs one EvalCase end to end:
 // provision → seed → install → run (harness) → snapshot → grade → (trace collection).
 // Scoring is two-phase — compute-bound graders (run commands in the environment: tests-pass etc., declared via needsCompute)
@@ -60,14 +91,20 @@ async function materializeScreenshot(
 export async function runCase(evalCase: EvalCase, deps: RunCaseDeps): Promise<CaseResult> {
   const compute = await deps.driver.provision({ os: "linux", needs: ["shell"], image: evalCase.image });
   let released = false;
+  // Live-screen capture loop handle (opt-in) — started after install, stopped inside release() so the frame grab is
+  // always halted before the compute is disposed. Undefined when the run has no liveScreen hook.
+  let stopLiveScreen: (() => void) | undefined;
   const release = async (): Promise<void> => {
     if (released) return;
     released = true;
+    stopLiveScreen?.();
     await compute.dispose();
   };
   try {
     await deps.environment.seed(compute, evalCase.env);
     await deps.harness.install(compute);
+    // Opt-in live screen: push periodic frames of the case's screen (e.g. browser-use's Chromium over CDP) while it runs.
+    if (deps.runCtx.liveScreen) stopLiveScreen = startLiveScreenCapture(compute, deps.runCtx.liveScreen);
 
     const runId = deps.runCtx.runId ?? newRunId();
     const runCtx: RunContext = { ...deps.runCtx, runId };

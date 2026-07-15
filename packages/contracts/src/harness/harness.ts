@@ -8,6 +8,21 @@ export interface RunContext {
   // Trace correlation key — runCase fills it so the same value flows to both run (the harness injects it as EVERDICT_RUN_ID/everdict.run_id)
   // and collectTrace (platform pull). If unspecified, the harness mints its own (backward-compat).
   runId?: string;
+  // Live in-run screen capture (opt-in, in-process only — never crosses the wire). When set, runCase runs a background
+  // loop that execs `captureCmd` in the compute every `intervalMs` and hands the resulting base64 PNG frame to `report`.
+  // The self-hosted runner supplies `report` (pushes the frame to the control plane's live-frame store, keyed by runId);
+  // runAgentJob supplies `captureCmd` from the harness's declared liveScreen. Best-effort: capture/report failures are
+  // swallowed and never affect the eval result. Absent = no live screen.
+  liveScreen?: LiveScreenCapture;
+}
+
+// The in-process live-screen capture hook carried on RunContext. captureCmd is exec'd in the case compute and must
+// print a base64 PNG to stdout and exit 0 (e.g. browser-use's headless Chromium screenshotted over CDP); report ships
+// that frame to the observer (self-hosted runner → control plane). Interval defaults to 2000ms when unset.
+export interface LiveScreenCapture {
+  captureCmd: string;
+  report: (frameBase64: string) => Promise<void>;
+  intervalMs?: number;
 }
 
 // The external platform coordinates where the harness trace is stored + the collection location.

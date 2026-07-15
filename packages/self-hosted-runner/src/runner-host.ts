@@ -35,7 +35,10 @@ export interface RunnerHostOpts {
   log?: (msg: string) => void;
   // Test injection points
   connect?: ConnectClient; // default mcpConnect(new URL("/mcp", apiUrl), token)
-  runJob?: (job: AgentJob) => Promise<CaseResult>; // default runLeasedJob
+  runJob?: (
+    job: AgentJob,
+    opts?: { reportScreen?: (frameBase64: string) => Promise<void> },
+  ) => Promise<CaseResult>; // default runLeasedJob (reportScreen = live-screen frames)
   detect?: () => Promise<string[]>; // default detectCapabilities
   sleep?: (ms: number) => Promise<void>;
 }
@@ -71,13 +74,23 @@ export class RunnerHost {
     };
     // An image-case runs on local Docker (DockerDriver) when this runner has Docker — pass dockerAvailable from the capabilities.
     const dockerAvailable = this.capabilities.includes("docker");
-    const baseRun = this.opts.runJob ?? ((job: AgentJob) => runLeasedJob(job, { dockerAvailable, log: this.opts.log }));
+    const baseRun =
+      this.opts.runJob ??
+      ((job: AgentJob, opts?: { reportScreen?: (frameBase64: string) => Promise<void> }) =>
+        runLeasedJob(job, {
+          dockerAvailable,
+          log: this.opts.log,
+          ...(opts?.reportScreen ? { reportScreen: opts.reportScreen } : {}),
+        }));
     // Wrap job start/finish to track activeJobs (the basis for running/idle events) + emit a completion notice.
-    const runJob = async (job: AgentJob): Promise<CaseResult> => {
+    const runJob = async (
+      job: AgentJob,
+      opts?: { reportScreen?: (frameBase64: string) => Promise<void> },
+    ): Promise<CaseResult> => {
       this.activeJobs++;
       this.emit();
       try {
-        const result = await baseRun(job);
+        const result = await baseRun(job, opts);
         this.opts.onJobDone?.({ job, result });
         return result;
       } catch (e) {

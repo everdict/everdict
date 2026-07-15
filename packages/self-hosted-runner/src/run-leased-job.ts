@@ -38,12 +38,22 @@ export async function runLeasedJob(
   job: AgentJob,
   opts: {
     runService?: (job: AgentJob) => Promise<CaseResult>; // test injection
-    runProcess?: (job: AgentJob, runOpts: { containerize?: boolean; mounts?: DriverMount[] }) => Promise<CaseResult>;
+    runProcess?: (
+      job: AgentJob,
+      runOpts: {
+        containerize?: boolean;
+        mounts?: DriverMount[];
+        reportScreen?: (frameBase64: string) => Promise<void>;
+      },
+    ) => Promise<CaseResult>;
     runtimeOptions?: DockerTopologyRuntimeOptions; // service topology runtime tuning (readiness timeout etc.)
     dockerAvailable?: boolean; // whether this runner has a Docker daemon (capability) — the gate for running image-cases in a container
     mounts?: DriverMount[]; // host resources to bind into the container when containerizing (e.g. codex login) — runner opt-in
     log?: (msg: string) => void; // notify the reason (e.g. image required but no Docker) — no silent failure
     pullImage?: (image: string, auth: RegistryAuth) => Promise<void>; // test injection (default pullWithRegistryAuth)
+    // Live-screen frame reporter — the runner pushes each captured frame to the control plane. Only meaningful for a
+    // containerized command harness that declares liveScreen (host-native execution has no isolated screen to capture).
+    reportScreen?: (frameBase64: string) => Promise<void>;
   } = {},
 ): Promise<CaseResult> {
   const spec = job.harnessSpec;
@@ -67,9 +77,11 @@ export async function runLeasedJob(
       `case ${job.evalCase.id} requires image '${image}' but this runner has no Docker → host-native execution (the host must provide the toolchain).`,
     );
   // Pass host mounts only for container execution (host-native LocalDriver has no mount concept).
+  // Live-screen capture is passed only for containerized runs — the capture command targets the case container.
   return (opts.runProcess ?? runAgentJob)(job, {
     containerize,
     ...(containerize && opts.mounts?.length ? { mounts: opts.mounts } : {}),
+    ...(containerize && opts.reportScreen ? { reportScreen: opts.reportScreen } : {}),
   });
 }
 
