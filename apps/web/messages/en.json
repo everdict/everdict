@@ -1702,7 +1702,15 @@
     "memoryBudgetLabel": "Memory budget Mb (optional)",
     "memoryBudgetHint": "Cap on the sum of in-flight harness-declared memory. When full, heavy jobs wait even with free slots.",
     "cpuBudgetLabel": "CPU budget (optional)",
-    "cpuBudgetHint": "Cap on the sum of in-flight harness-declared cpu (1000 = 1 vCPU). When full, cpu-declaring jobs wait even with free slots."
+    "cpuBudgetHint": "Cap on the sum of in-flight harness-declared cpu (1000 = 1 vCPU). When full, cpu-declaring jobs wait even with free slots.",
+    "validate": "Dry run",
+    "validationOk": "✓ Valid configuration",
+    "validationFailed": "Check failed: {error}",
+    "validationErrors": "Invalid: {errors}",
+    "missingSecrets": "Referenced secrets not found: {names}",
+    "saveEdit": "Save changes",
+    "updated": "Updated {id}",
+    "lockedIdentityHint": "ID and kind can't be changed."
   },
   "reportPage": {
     "title": "Combined report",
@@ -1854,7 +1862,19 @@
     "discuss": "Discussion",
     "specMaxConcurrent": "Concurrent slots",
     "specMemoryBudget": "Memory budget",
-    "specCpuBudget": "CPU budget"
+    "specCpuBudget": "CPU budget",
+    "specServer": "API server",
+    "specAuthSecret": "Auth secret",
+    "specKubeconfigSecret": "Kubeconfig secret",
+    "specCapabilities": "Capabilities",
+    "specTraceSource": "Trace source",
+    "specBrowserImage": "Browser image",
+    "edit": "Edit",
+    "editTitle": "Edit runtime",
+    "editDescription": "{id} — update the configuration.",
+    "editNoPermTitle": "You don't have permission to edit this runtime.",
+    "editNoPermHint": "Only the owning workspace can edit it (runtimes:write).",
+    "notEditableLocal": "Local runtimes are dev-only and can't be edited here."
   },
   "schedulesPage": {
     "title": "Schedules",

@@ -32,10 +32,22 @@ export const runtimeSpecSchema = z
     // k8s
     context: z.string().optional(),
     runtimeClass: z.string().optional(),
+    server: z.string().optional(),
+    kubeconfigSecret: z.string().optional(),
     // common (nomad/k8s)
     image: z.string().optional(),
     namespace: z.string().optional(),
     tags: z.array(z.string()).optional(),
+    // SecretStore key NAME (never the value) — safe to display; the control plane resolves the value at dispatch.
+    authSecret: z.string().optional(),
+    // Auto-labeled capabilities the runtime advertises (docker/sandbox/topology). Read-only.
+    capabilities: z.array(z.string()).optional(),
+    // topology config — kept loose (passthrough) so the full source (authSecret/correlate/scope) round-trips on edit/probe.
+    traceSource: z
+      .object({ kind: z.string(), endpoint: z.string().optional() })
+      .passthrough()
+      .optional(),
+    browserImage: z.string().optional(),
     // admission envelope — how much the control plane may pack onto this runtime concurrently
     maxConcurrent: z.number().optional(),
     memoryBudgetMb: z.number().optional(),

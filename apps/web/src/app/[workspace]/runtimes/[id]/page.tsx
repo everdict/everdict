@@ -1,10 +1,9 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
-import { ChevronLeft } from 'lucide-react'
+import { ChevronLeft, Pencil } from 'lucide-react'
 import { getTranslations } from 'next-intl/server'
 
 import { CommentsSection } from '@/features/discuss'
-import { VersionTagsEditor } from '@/features/version-tags'
 import {
   runtimeSpecSchema,
   runtimesSchema,
@@ -16,25 +15,34 @@ import { currentPrincipal } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
 import { sortSemverDesc } from '@/shared/lib/semver'
 import { Badge } from '@/shared/ui/badge'
+import { buttonVariants } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
 import { Card } from '@/shared/ui/card'
 import { PageHeader } from '@/shared/ui/page-header'
 
+import { RuntimeHealthActions } from './runtime-health-actions'
+
 export const dynamic = 'force-dynamic'
 
-// RuntimeSpec's per-kind config fields → display label/value rows (only those with a value).
+// RuntimeSpec's config fields → display label/value rows (only those with a value). Secrets are shown by NAME (a reference, not the value).
 function specRows(
   spec: RuntimeSpec,
   labels: {
     addr: string
-    datacenters: string
-    nomadRuntime: string
+    server: string
     k8sContext: string
     image: string
     namespace: string
+    nomadRuntime: string
+    authSecret: string
+    kubeconfigSecret: string
     maxConcurrent: string
     memoryBudget: string
     cpuBudget: string
+    capabilities: string
+    traceSource: string
+    browserImage: string
+    datacenters: string
     tags: string
   }
 ): { label: string; value: string }[] {
@@ -48,12 +56,14 @@ function specRows(
     }
   }
   add(labels.addr, spec.addr)
-  add(labels.datacenters, spec.datacenters)
-  add(labels.nomadRuntime, spec.runtime)
+  add(labels.server, spec.server)
   add(labels.k8sContext, spec.context)
-  add('RuntimeClass', spec.runtimeClass)
   add(labels.image, spec.image)
   add(labels.namespace, spec.namespace)
+  add(labels.nomadRuntime, spec.runtime)
+  add('RuntimeClass', spec.runtimeClass)
+  add(labels.authSecret, spec.authSecret)
+  add(labels.kubeconfigSecret, spec.kubeconfigSecret)
   // Admission envelope — what the scheduler may pack onto this runtime concurrently.
   add(
     labels.maxConcurrent,
@@ -64,6 +74,15 @@ function specRows(
     spec.memoryBudgetMb !== undefined ? `${spec.memoryBudgetMb}Mb` : undefined
   )
   add(labels.cpuBudget, spec.cpuBudget !== undefined ? String(spec.cpuBudget) : undefined)
+  add(labels.capabilities, spec.capabilities)
+  add(
+    labels.traceSource,
+    spec.traceSource
+      ? `${spec.traceSource.kind}${spec.traceSource.endpoint ? ` · ${spec.traceSource.endpoint}` : ''}`
+      : undefined
+  )
+  add(labels.browserImage, spec.browserImage)
+  add(labels.datacenters, spec.datacenters)
   add(labels.tags, spec.tags)
   return rows
 }
@@ -86,8 +105,8 @@ export default async function RuntimeDetailPage({
   }
   if (!summary) redirect(`/${workspace}/runtimes`)
 
-  const versions = sortSemverDesc(summary.versions)
-  const latest = versions[0] ?? summary.versions[0]
+  // Versioning is an implementation detail here — always show/edit the latest; the version list is not surfaced.
+  const latest = sortSemverDesc(summary.versions)[0] ?? summary.versions[0]
   let spec: RuntimeSpec | undefined
   let error: string | undefined
   try {
@@ -99,22 +118,32 @@ export default async function RuntimeDetailPage({
   const rows = spec
     ? specRows(spec, {
         addr: t('specAddr'),
-        datacenters: t('specDatacenters'),
-        nomadRuntime: t('specNomadRuntime'),
+        server: t('specServer'),
         k8sContext: t('specK8sContext'),
         image: t('specImage'),
         namespace: t('specNamespace'),
+        nomadRuntime: t('specNomadRuntime'),
+        authSecret: t('specAuthSecret'),
+        kubeconfigSecret: t('specKubeconfigSecret'),
         maxConcurrent: t('specMaxConcurrent'),
         memoryBudget: t('specMemoryBudget'),
         cpuBudget: t('specCpuBudget'),
+        capabilities: t('specCapabilities'),
+        traceSource: t('specTraceSource'),
+        browserImage: t('specBrowserImage'),
+        datacenters: t('specDatacenters'),
         tags: t('specTags'),
       })
     : []
 
-  // This version's tags (shown = latest) (free-form labels) — same gate as registration (runtimes:write) + editable only in the owning workspace.
+  // Edit — same gate as registration (runtimes:write) + only in the owning workspace; local runtimes are dev-only (not editable here).
   const currentWorkspace = principal?.workspace ?? workspace
-  const canEditTags = can(principal?.roles, 'runtimes:write') && summary.owner === currentWorkspace
-  const latestTags = summary.versionTags?.[latest] ?? []
+  const editable =
+    can(principal?.roles, 'runtimes:write') &&
+    summary.owner === currentWorkspace &&
+    spec !== undefined &&
+    spec.kind !== 'local'
+  const cluster = spec?.kind === 'nomad' || spec?.kind === 'k8s'
 
   return (
     <div className="space-y-6">
@@ -125,7 +154,21 @@ export default async function RuntimeDetailPage({
         <ChevronLeft className="size-3.5" />
         {t('title')}
       </Link>
-      <PageHeader title={id} description={t('detailDescription')} />
+      <PageHeader
+        title={id}
+        description={t('detailDescription')}
+        actions={
+          editable ? (
+            <Link
+              href={`/${workspace}/runtimes/${encodeURIComponent(id)}/edit`}
+              className={buttonVariants({ variant: 'secondary', size: 'sm' })}
+            >
+              <Pencil className="size-3.5" />
+              {t('edit')}
+            </Link>
+          ) : undefined
+        }
+      />
       {error || !spec ? (
         <Callout tone="danger">{t('loadError', { detail: error ? `: ${error}` : '' })}</Callout>
       ) : (
@@ -135,7 +178,6 @@ export default async function RuntimeDetailPage({
             <Badge tone={summary.owner === '_shared' ? 'info' : 'neutral'}>
               {summary.owner === '_shared' ? t('sharedBadge') : t('workspaceBadge')}
             </Badge>
-            <span className="font-mono text-[12px] text-faint">v{spec.version}</span>
           </div>
           {spec.description ? (
             <p className="text-[13px] leading-relaxed text-muted-foreground">{spec.description}</p>
@@ -154,37 +196,12 @@ export default async function RuntimeDetailPage({
               {t('noExtraConfig')}
             </p>
           )}
-          {/* This version's tags (shown = latest) — free-form labels for distinguishing versions, separate from the placement tags (the 'tag' in the rows above).
-              If not editable and there are no tags, hide the block entirely (don't render empty sections). */}
-          {(canEditTags || latestTags.length > 0) && (
+          {/* Health checks — connect to the cluster (connection) / validate the spec + referenced secrets (dry run), without running a job. */}
+          {cluster && (
             <div className="border-t border-border pt-4">
-              <p className="mb-1.5 text-[11px] font-[510] uppercase tracking-wide text-faint">
-                {t('versionTags')}
-              </p>
-              <VersionTagsEditor
-                entity="runtime"
-                id={id}
-                version={latest}
-                tags={latestTags}
-                canEdit={canEditTags}
-              />
+              <RuntimeHealthActions spec={spec} />
             </div>
           )}
-          <div className="border-t border-border pt-4">
-            <p className="mb-1.5 text-[11px] font-[510] uppercase tracking-wide text-faint">
-              {t('versions')}
-            </p>
-            <div className="flex flex-wrap gap-1.5">
-              {versions.map((v) => (
-                <code
-                  key={v}
-                  className="rounded bg-secondary px-1.5 py-0.5 font-mono text-[11px] text-secondary-foreground"
-                >
-                  {v}
-                </code>
-              ))}
-            </div>
-          </div>
         </Card>
       )}
 
