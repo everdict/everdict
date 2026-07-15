@@ -1,44 +1,17 @@
 @import 'tailwindcss';
 @plugin 'tailwindcss-animate';
 
-/* Self-hosted fonts (public/fonts) — no external CDN dependency (offline·no-FOUC·privacy·speed). variable woff2.
-   · Body·display = Pretendard (Latin + Hangul) — the app-wide default font.
-     Applies negative letter-spacing:-0.02em to body (Korean tightening convention).
-   · Inter Variable / Bricolage @font-face are kept but dropped from the font chain so they aren't downloaded (legacy assets —
-     previously Latin=Inter [Linear letterforms], replaced by the full switch to Pretendard). Code/id still uses --font-mono. */
-@font-face {
-  font-family: 'Inter Variable';
-  font-style: normal;
-  font-weight: 100 900;
-  font-display: swap;
-  src: url('/fonts/inter-latin.woff2') format('woff2');
-  unicode-range:
-    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329,
-    U+2000-206F, U+2074, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
-}
-@font-face {
-  font-family: 'Inter Variable';
-  font-style: normal;
-  font-weight: 100 900;
-  font-display: swap;
-  src: url('/fonts/inter-latin-ext.woff2') format('woff2');
-  unicode-range:
-    U+0100-02AF, U+0304, U+0308, U+0329, U+1E00-1EFF, U+2020, U+20A0-20AB, U+20AD-20CF, U+2113,
-    U+2C60-2C7F, U+A720-A7FF;
-}
+/* Self-hosted font (public/fonts) — no external CDN dependency (offline·no-FOUC·privacy·speed). variable woff2.
+   Pretendard is the SINGLE app-wide font for ALL text (Latin + Hangul): body, display, and code/id alike
+   (`--font-mono` below points at it too). Body applies negative letter-spacing:-0.02em (Korean tightening
+   convention); code/id resets it to normal for readability. The former Inter/Bricolage @font-face blocks were
+   removed in the full switch to Pretendard (their woff2 assets are now unused). */
 @font-face {
   font-family: 'Pretendard';
   font-style: normal;
   font-weight: 45 920;
   font-display: swap;
   src: url('/fonts/PretendardVariable.woff2') format('woff2');
-}
-@font-face {
-  font-family: 'Bricolage Grotesque';
-  font-style: normal;
-  font-weight: 200 800;
-  font-display: swap;
-  src: url('/fonts/BricolageGrotesque.woff2') format('woff2');
 }
 
 @custom-variant dark (&:is(.dark *));
@@ -123,7 +96,8 @@ samp {
   --color-border-strong: var(--border-strong);
   --color-input: var(--input);
   --color-ring: var(--ring);
-  --font-mono: 'Geist Mono', 'JetBrains Mono', ui-monospace, 'SF Mono', 'Menlo', monospace;
+  /* Unified to Pretendard — code/id (the `font-mono` utility) render in the same single app font, no monospace. */
+  --font-mono: 'Pretendard', system-ui, -apple-system, 'Segoe UI', sans-serif;
   --shadow-pop: var(--pop-shadow);
   --shadow-raise: var(--raise-shadow);
   --ease-out-quart: cubic-bezier(0.165, 0.84, 0.44, 1);
