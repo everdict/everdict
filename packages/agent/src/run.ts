@@ -7,8 +7,8 @@ import {
   type EnvSpec,
   type Environment,
   type Grader,
-  judgeEnv,
   type LiveScreenCapture,
+  judgeEnv,
 } from "@everdict/contracts";
 import { classifyFailure, stageForError } from "@everdict/domain";
 import { DockerDriver, type DriverMount, LocalDriver } from "@everdict/drivers";
@@ -88,6 +88,7 @@ export async function runAgentJob(
     driver?: Driver;
     containerize?: boolean;
     mounts?: DriverMount[];
+    signal?: AbortSignal;
     // Live-screen frame reporter (self-hosted runner). When present AND the command harness declares liveScreen,
     // runCase execs the harness's captureCmd periodically and pushes each base64 PNG frame here. Absent = no live screen.
     reportScreen?: (frameBase64: string) => Promise<void>;
@@ -140,9 +141,12 @@ export async function runAgentJob(
     // Per-case timeout (EvalCase.timeoutSec) flows into the run context so a long agent case is not killed at the old
     // hardcoded default; EVERDICT_TIMEOUT_SEC still overrides. Dataset adapters (terminal-bench/harbor) capture the
     // task's own timeout here, previously dropped at execution.
+    // signal (self-hosted lease cancel): threaded into the run context so runCase aborts mid-case and disposes the
+    // compute (frees the runtime). Absent for managed dispatch (the backend kills the whole alloc instead).
     runCtx: {
       ...runContextFromEnv(job.evalCase.timeoutSec),
       ...(job.runId ? { runId: job.runId } : {}),
+      ...(opts.signal ? { signal: opts.signal } : {}),
       ...(liveScreen ? { liveScreen } : {}),
     },
   });

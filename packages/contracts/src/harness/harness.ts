@@ -8,11 +8,15 @@ export interface RunContext {
   // Trace correlation key — runCase fills it so the same value flows to both run (the harness injects it as EVERDICT_RUN_ID/everdict.run_id)
   // and collectTrace (platform pull). If unspecified, the harness mints its own (backward-compat).
   runId?: string;
-  // Live in-run screen capture (opt-in, in-process only — never crosses the wire). When set, runCase runs a background
-  // loop that execs `captureCmd` in the compute every `intervalMs` and hands the resulting base64 PNG frame to `report`.
-  // The self-hosted runner supplies `report` (pushes the frame to the control plane's live-frame store, keyed by runId);
-  // runAgentJob supplies `captureCmd` from the harness's declared liveScreen. Best-effort: capture/report failures are
-  // swallowed and never affect the eval result. Absent = no live screen.
+  // Cooperative cancellation — when it aborts, runCase stops consuming the harness trace and disposes the compute
+  // (which force-kills the container / process), so a user "stop scorecard" frees the runtime mid-case. In-process
+  // only (never crosses the wire): the self-hosted runner mints it locally on a heartbeat cancel signal. Absent = no cancellation.
+  signal?: AbortSignal;
+  // Live in-run screen capture (opt-in, in-process only — never crosses the wire, like `signal`). When set, runCase
+  // runs a background loop that execs `captureCmd` in the compute every `intervalMs` and hands the resulting base64
+  // PNG frame to `report`. The self-hosted runner supplies `report` (pushes the frame to the control plane's live-frame
+  // store, keyed by runId); runAgentJob supplies `captureCmd` from the harness's declared liveScreen. Best-effort:
+  // capture/report failures are swallowed and never affect the eval result. Absent = no live screen.
   liveScreen?: LiveScreenCapture;
 }
 

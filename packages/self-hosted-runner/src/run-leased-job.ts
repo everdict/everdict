@@ -43,6 +43,7 @@ export async function runLeasedJob(
       runOpts: {
         containerize?: boolean;
         mounts?: DriverMount[];
+        signal?: AbortSignal;
         reportScreen?: (frameBase64: string) => Promise<void>;
       },
     ) => Promise<CaseResult>;
@@ -51,6 +52,9 @@ export async function runLeasedJob(
     mounts?: DriverMount[]; // host resources to bind into the container when containerizing (e.g. codex login) — runner opt-in
     log?: (msg: string) => void; // notify the reason (e.g. image required but no Docker) — no silent failure
     pullImage?: (image: string, auth: RegistryAuth) => Promise<void>; // test injection (default pullWithRegistryAuth)
+    // Cooperative cancellation (lease cancel): when it aborts, the case run stops and its compute/topology is torn
+    // down — the runtime is freed mid-case. The runner mints it locally on a heartbeat 'cancelled' signal.
+    signal?: AbortSignal;
     // Live-screen frame reporter — the runner pushes each captured frame to the control plane. Only meaningful for a
     // containerized command harness that declares liveScreen (host-native execution has no isolated screen to capture).
     reportScreen?: (frameBase64: string) => Promise<void>;
@@ -66,7 +70,8 @@ export async function runLeasedJob(
         await (opts.pullImage ?? pullWithRegistryAuth)(image, job.registryAuth);
       }
     }
-    const runService = opts.runService ?? ((j: AgentJob) => defaultRunService(j, spec, opts.runtimeOptions));
+    const runService =
+      opts.runService ?? ((j: AgentJob) => defaultRunService(j, spec, opts.runtimeOptions, opts.signal));
     return runService(job);
   }
   // process/command. If image is declared + Docker is present, run in that image's container (toolchain bundled — same as managed). Otherwise in-process on the host.
@@ -81,6 +86,7 @@ export async function runLeasedJob(
   return (opts.runProcess ?? runAgentJob)(job, {
     containerize,
     ...(containerize && opts.mounts?.length ? { mounts: opts.mounts } : {}),
+    ...(opts.signal ? { signal: opts.signal } : {}),
     ...(containerize && opts.reportScreen ? { reportScreen: opts.reportScreen } : {}),
   });
 }
@@ -102,11 +108,13 @@ function defaultRunService(
   job: AgentJob,
   spec: ServiceHarnessSpec,
   runtimeOptions?: DockerTopologyRuntimeOptions,
+  signal?: AbortSignal,
 ): Promise<CaseResult> {
   const backend = new ServiceTopologyBackend({
     runtime: sharedTopologyRuntime(runtimeOptions), // reused across cases → keeps the warm-pool (topology deployed once per version)
     traceSource: buildTraceSource(spec.traceSource),
     specFor: () => spec,
   });
-  return backend.dispatch(job);
+  // Thread cancellation into the topology dispatch — it refuses a pre-aborted run and stops waiting on abort.
+  return backend.dispatch(job, signal ? { signal } : undefined);
 }

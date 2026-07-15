@@ -32,6 +32,22 @@ function newRunId(): string {
   return `everdict-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+// Cancellation error — thrown when runCtx.signal aborts mid-run (a user stopped the scorecard). The self-hosted
+// runner discards this result (the control plane already settled the batch); the point of throwing is to end the
+// run so the finally disposes the compute — which force-kills the container (docker rm -f) / process and frees the
+// runtime mid-case. Managed backends never pass a signal (they kill the whole alloc via killCase instead).
+function cancelledRun(runId: string): UpstreamError {
+  return new UpstreamError("CANCELLED", { runId }, "Run cancelled — the batch was stopped.");
+}
+
+// A promise that rejects the moment `signal` aborts; the listener is detached when `cleanup` aborts (so a normal
+// completion doesn't leave a dangling listener that later rejects an unobserved promise).
+function rejectOnAbort(signal: AbortSignal, cleanup: AbortSignal, runId: string): Promise<never> {
+  return new Promise<never>((_, reject) => {
+    signal.addEventListener("abort", () => reject(cancelledRun(runId)), { once: true, signal: cleanup });
+  });
+}
+
 // If an os-use snapshot's screenshot is only a reference (ref), materialize it as base64 before releasing compute —
 // so a judge (VLM) scored after release (or on the control plane) can use the screenshot without environment access.
 // A capture failure is soft — the original snapshot is kept (same as the current judge's "no screenshot" behavior).
@@ -109,8 +125,30 @@ export async function runCase(evalCase: EvalCase, deps: RunCaseDeps): Promise<Ca
     const runId = deps.runCtx.runId ?? newRunId();
     const runCtx: RunContext = { ...deps.runCtx, runId };
     const trace: TraceEvent[] = [];
-    for await (const ev of deps.harness.run(compute, evalCase.task, runCtx)) {
-      trace.push(ev);
+    // Cooperative cancellation (self-hosted "stop scorecard"): if the signal aborts, stop consuming the harness
+    // trace and let the finally dispose the compute — which frees the runtime mid-case (the container/process dies).
+    const signal = deps.runCtx.signal;
+    if (signal?.aborted) throw cancelledRun(runId);
+    const drain = (async () => {
+      for await (const ev of deps.harness.run(compute, evalCase.task, runCtx)) {
+        if (signal?.aborted) return; // about to dispose the compute out from under the run — stop accumulating
+        trace.push(ev);
+      }
+    })();
+    if (signal) {
+      // The abandoned drain rejects once the compute is torn out from under it (post-abort) — swallow that; the
+      // race below still surfaces a *real* harness error (both handlers observe the same rejection).
+      drain.catch(() => {});
+      const listenerCleanup = new AbortController();
+      const aborted = rejectOnAbort(signal, listenerCleanup.signal, runId);
+      aborted.catch(() => {});
+      try {
+        await Promise.race([drain, aborted]);
+      } finally {
+        listenerCleanup.abort(); // detach the abort listener when the drain wins (no dangling late reject)
+      }
+    } else {
+      await drain;
     }
 
     let snapshot = await deps.environment.snapshot(compute);

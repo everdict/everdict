@@ -37,8 +37,8 @@ export interface RunnerHostOpts {
   connect?: ConnectClient; // default mcpConnect(new URL("/mcp", apiUrl), token)
   runJob?: (
     job: AgentJob,
-    opts?: { reportScreen?: (frameBase64: string) => Promise<void> },
-  ) => Promise<CaseResult>; // default runLeasedJob (reportScreen = live-screen frames)
+    opts?: { signal?: AbortSignal; reportScreen?: (frameBase64: string) => Promise<void> },
+  ) => Promise<CaseResult>; // default runLeasedJob (signal = lease cancel; reportScreen = live-screen frames)
   detect?: () => Promise<string[]>; // default detectCapabilities
   sleep?: (ms: number) => Promise<void>;
 }
@@ -76,16 +76,17 @@ export class RunnerHost {
     const dockerAvailable = this.capabilities.includes("docker");
     const baseRun =
       this.opts.runJob ??
-      ((job: AgentJob, opts?: { reportScreen?: (frameBase64: string) => Promise<void> }) =>
+      ((job: AgentJob, opts?: { signal?: AbortSignal; reportScreen?: (frameBase64: string) => Promise<void> }) =>
         runLeasedJob(job, {
           dockerAvailable,
           log: this.opts.log,
+          ...(opts?.signal ? { signal: opts.signal } : {}),
           ...(opts?.reportScreen ? { reportScreen: opts.reportScreen } : {}),
         }));
     // Wrap job start/finish to track activeJobs (the basis for running/idle events) + emit a completion notice.
     const runJob = async (
       job: AgentJob,
-      opts?: { reportScreen?: (frameBase64: string) => Promise<void> },
+      opts?: { signal?: AbortSignal; reportScreen?: (frameBase64: string) => Promise<void> },
     ): Promise<CaseResult> => {
       this.activeJobs++;
       this.emit();

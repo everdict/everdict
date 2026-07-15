@@ -272,3 +272,54 @@ describe("runLeaseWorkers — classified failure submission", () => {
     });
   });
 });
+
+// Lease cancellation — the control plane piggybacks a cancel decision on the heartbeat reply; the worker aborts the
+// in-flight run (which frees the runtime mid-case) and settles it back so the batch isn't left hanging.
+describe("runLeaseWorkers — heartbeat-delivered cancellation", () => {
+  it("aborts the in-flight run when the heartbeat asks to cancel, then submits the classified result", async () => {
+    let aborted = false;
+    const submitted: string[] = [];
+    let stop = false;
+    const queue: Array<Record<string, unknown>> = [{ jobId: "j1", job: job("c1") }];
+    const callJson = async (name: string, args: Record<string, unknown>): Promise<Record<string, unknown>> => {
+      if (name === "lease_job") {
+        const next = queue.shift();
+        if (!next) stop = true;
+        return next ?? {};
+      }
+      if (name === "submit_job_result") {
+        submitted.push(String(args.jobId));
+        stop = true;
+        return {};
+      }
+      if (name === "fail_job") {
+        stop = true;
+        return {};
+      }
+      return {};
+    };
+    // A hanging run that ends only when its cancellation signal aborts.
+    const runJob = (_j: AgentJob, o?: { signal?: AbortSignal }): Promise<CaseResult> =>
+      new Promise<CaseResult>((_, reject) => {
+        o?.signal?.addEventListener(
+          "abort",
+          () => {
+            aborted = true;
+            reject(new Error("cancelled")); // any throw — the loop classifies it into a failed CaseResult
+          },
+          { once: true },
+        );
+      });
+    // The heartbeat requests a cancel on the next tick (as if the control plane returned {cancelled:true}).
+    const setHeartbeat = (_jobId: string, onCancel: () => void) => {
+      const t = setTimeout(onCancel, 0);
+      return () => clearTimeout(t);
+    };
+    await runLeaseWorkers(
+      { callJson, runJob, setHeartbeat, sleep: () => new Promise((r) => setTimeout(r, 0)) },
+      opts(1, () => stop),
+    );
+    expect(aborted).toBe(true); // the cancel signal reached the run
+    expect(submitted).toEqual(["j1"]); // the classified (interrupted) result was submitted so the batch settles
+  });
+});

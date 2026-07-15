@@ -7,13 +7,18 @@ export interface RunnerLoopDeps {
   // MCP tool call → JSON result. App-level errors (isError) surface as a throw (the caller wrapper's contract).
   callJson: (name: string, args: Record<string, unknown>) => Promise<Record<string, unknown>>;
   // Run a leased job (service→Docker topology / otherwise→LocalDriver). The caller closes over runtimeOptions etc.
-  // reportScreen (when the harness declares liveScreen) pushes each captured frame of the case's screen back to the
-  // control plane for live viewing.
-  runJob: (job: AgentJob, opts?: { reportScreen?: (frameBase64: string) => Promise<void> }) => Promise<CaseResult>;
+  // signal aborts the run when the control plane cancels this job (heartbeat-delivered) — the run tears down its
+  // compute/topology and frees the runtime mid-case. reportScreen (when the harness declares liveScreen) pushes each
+  // captured frame of the case's screen back to the control plane for live viewing.
+  runJob: (
+    job: AgentJob,
+    opts?: { signal?: AbortSignal; reportScreen?: (frameBase64: string) => Promise<void> },
+  ) => Promise<CaseResult>;
   log?: (msg: string) => void; // default no-op (tests stay quiet)
   sleep?: (ms: number) => Promise<void>; // default setTimeout
-  // Hook that sets up lease renewal while running — returns a cleanup function. Default is setInterval(heartbeat_job). Tests inject a fake.
-  setHeartbeat?: (jobId: string) => () => void;
+  // Hook that sets up lease renewal while running — returns a cleanup function. Default is setInterval(heartbeat_job).
+  // onCancel fires when the control plane's heartbeat response asks to stop this job (→ abort the local run). Tests inject a fake.
+  setHeartbeat?: (jobId: string, onCancel: () => void) => () => void;
 }
 
 export interface RunnerLoopOpts {
@@ -34,9 +39,15 @@ export async function runLeaseWorkers(deps: RunnerLoopDeps, opts: RunnerLoopOpts
   const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
   const setHeartbeat =
     deps.setHeartbeat ??
-    ((jobId: string) => {
+    ((jobId: string, onCancel: () => void) => {
       const t = setInterval(() => {
-        void deps.callJson("heartbeat_job", { jobId }).catch(() => {});
+        void deps
+          .callJson("heartbeat_job", { jobId })
+          .then((r) => {
+            // The control plane piggybacks a cancel decision on the liveness reply — stop the local run on request.
+            if (r.cancelled === true) onCancel();
+          })
+          .catch(() => {});
       }, opts.heartbeatMs);
       (t as { unref?: () => void }).unref?.();
       return () => clearInterval(t);
@@ -77,8 +88,11 @@ export async function runLeaseWorkers(deps: RunnerLoopDeps, opts: RunnerLoopOpts
         continue;
       }
       log(`▶ running job ${jobId} (case ${parsed.data.evalCase.id}) …`);
+      // Cancellation: the control plane signals a stop via the heartbeat reply → abort the run (its compute/topology
+      // is torn down, freeing the runtime mid-case). The run then throws and the classified-failure path replies.
+      const controller = new AbortController();
       // Renew the lease via periodic heartbeat so a long-running job isn't requeued by the server.
-      const stopHeartbeat = setHeartbeat(jobId);
+      const stopHeartbeat = setHeartbeat(jobId, () => controller.abort());
       // Live-screen frames: push each captured frame to the control plane keyed by the CP-minted runId. Only wired when
       // the job carries a runId (control-plane dispatch); runJob only calls it when the harness declares liveScreen.
       const runId = parsed.data.runId;
@@ -86,7 +100,10 @@ export async function runLeaseWorkers(deps: RunnerLoopDeps, opts: RunnerLoopOpts
         ? (frame: string): Promise<void> => deps.callJson("report_case_screen", { runId, frame }).then(() => {})
         : undefined;
       try {
-        const result = await deps.runJob(parsed.data, reportScreen ? { reportScreen } : undefined);
+        const result = await deps.runJob(parsed.data, {
+          signal: controller.signal,
+          ...(reportScreen ? { reportScreen } : {}),
+        });
         await deps.callJson("submit_job_result", { jobId, result });
         log(`✓ job ${jobId} done → replied`);
       } catch (e) {

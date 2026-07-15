@@ -300,13 +300,14 @@ async function runnerCommand(flags: Map<string, string>): Promise<void> {
     {
       callJson,
       // service→Docker topology / image-case→local Docker (DockerDriver, dockerOk gate, host mounts) / else→host LocalDriver
-      // reportScreen (live-screen frames) is threaded from the worker into the run.
+      // signal (lease cancel) + reportScreen (live-screen frames) are threaded from the worker into the run.
       runJob: (job, o) =>
         runLeasedJob(job, {
           runtimeOptions,
           dockerAvailable: dockerOk,
           mounts,
           log: (m) => console.error(m),
+          ...(o?.signal ? { signal: o.signal } : {}),
           ...(o?.reportScreen ? { reportScreen: o.reportScreen } : {}),
         }),
       log: (m) => console.error(m),
