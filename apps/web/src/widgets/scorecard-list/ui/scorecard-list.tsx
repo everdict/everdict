@@ -49,6 +49,7 @@ export function ScorecardList({
     { value: 'queued', label: t('statusQueued') },
     { value: 'failed', label: t('statusFailed') },
     { value: 'superseded', label: t('statusSuperseded') },
+    { value: 'cancelled', label: t('statusCancelled') },
   ]
   const [query, setQuery] = useState('')
   const [sort, setSort] = useState<Sort>('recent')

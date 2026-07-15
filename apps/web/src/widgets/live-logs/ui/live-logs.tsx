@@ -5,7 +5,7 @@ import { useTranslations } from 'next-intl'
 
 import { cn } from '@/shared/lib/utils'
 
-const TERMINAL = new Set(['succeeded', 'failed', 'superseded'])
+const TERMINAL = new Set(['succeeded', 'failed', 'superseded', 'cancelled'])
 const POLL_MS = 3000
 const STREAMS = ['stdout', 'stderr'] as const
 type Stream = (typeof STREAMS)[number]

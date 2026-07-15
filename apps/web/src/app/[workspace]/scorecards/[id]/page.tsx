@@ -1,23 +1,27 @@
 import Link from 'next/link'
 import { ChevronLeft } from 'lucide-react'
-import { getTranslations } from 'next-intl/server'
+import { getLocale, getTranslations } from 'next-intl/server'
 
 import { CommentsSection } from '@/features/discuss'
 import { RetryFailedButton } from '@/features/retry-failed-cases'
+import { StopScorecardButton } from '@/features/stop-scorecard'
 import { membersSchema } from '@/entities/member'
-import { runsSchema } from '@/entities/run'
+import { runsSchema, type RunStatus } from '@/entities/run'
+import { runnersResponseSchema, type RunnerMeta } from '@/entities/runner'
 import {
   scorecardRecordSchema,
   type MetricSummary,
   type ScorecardRecord,
 } from '@/entities/scorecard'
-import { authContext } from '@/shared/auth/principal'
+import { can } from '@/shared/auth/can'
+import { currentPrincipal } from '@/shared/auth/principal'
 import { env } from '@/shared/config/env'
 import { controlPlane } from '@/shared/lib/control-plane'
 import {
   fmtMetricLabel,
   fmtPct,
   fmtSubject,
+  fmtTimeAgo,
   groupMetricRows,
   HEALTH_TEXT,
   rateHealth,
@@ -138,7 +142,7 @@ export default async function ScorecardDetailPage({
 }) {
   const { workspace, id } = await params
   const { cases } = await searchParams
-  const ctx = await authContext()
+  const { principal, ctx } = await currentPrincipal()
   const t = await getTranslations('scorecardsPage')
 
   let record: ScorecardRecord | undefined
@@ -195,15 +199,37 @@ export default async function ScorecardDetailPage({
   const exportByCase = new Map((record.export?.cases ?? []).map((c) => [c.caseId, c]))
 
   // Case drilldown: child runs this scorecard fanned out (if any) → caseId→runId. Old/ingest scorecards have no children, so an empty map.
+  // Fetched when there are results (completed-case drilldown) OR while the batch is live (in-flight cases → watch-live links).
   const childRunByCase = new Map<string, string>()
-  if (results.length > 0) {
+  let liveCases: { caseId: string; runId: string; status: RunStatus }[] = []
+  if (results.length > 0 || live) {
     try {
       const children = runsSchema.parse(await controlPlane.listRuns(ctx, { scorecardId: id }))
       for (const c of children) childRunByCase.set(c.caseId, c.id)
+      // 실행 중(queued/running)인 케이스 — 그 run 상세 페이지가 실행 중 화면·로그를 라이브로 스트리밍한다.
+      liveCases = children
+        .filter((c) => c.status === 'queued' || c.status === 'running')
+        .map((c) => ({ caseId: c.caseId, runId: c.id, status: c.status }))
     } catch {
       // Child run lookup fails/missing → render without drilldown links (keep current behavior)
     }
   }
+
+  // Runner health for self-hosted case failures — a no_runner case names its runner (failure.runnerId); map it to the
+  // roster (the workspace roster includes personal runners) so a failed case can show whether that runner is online.
+  // Fetched only when some case actually failed on a specific runner; on failure the case falls back to the static hint.
+  const runnerById = new Map<string, RunnerMeta>()
+  if (results.some((r) => r.failure?.runnerId && r.failure.runnerId !== '*')) {
+    try {
+      const roster = runnersResponseSchema.parse(await controlPlane.listWorkspaceRunners(ctx))
+      for (const m of roster.runners) runnerById.set(m.id, m)
+    } catch {
+      // roster fetch failed → no live badge; the static hint still renders
+    }
+  }
+  const locale = await getLocale()
+  const runnerOnline = (lastSeenAt?: string) =>
+    !!lastSeenAt && Date.now() - new Date(lastSeenAt).getTime() < 90_000
 
   return (
     <div className="space-y-7">
@@ -216,6 +242,10 @@ export default async function ScorecardDetailPage({
           description={`${record.dataset.id}@${record.dataset.version} → ${record.harness.id}@${record.harness.version}`}
           actions={
             <div className="flex items-center gap-2">
+              {/* Stop is offered only while the batch is live and the viewer can run scorecards. */}
+              {live && can(principal?.roles, 'scorecards:run') && (
+                <StopScorecardButton id={record.id} />
+              )}
               {/* Retry is offered once the batch is terminal and some cases failed — re-run just those (e.g. after a
                   runner was down) as a new scorecard; passing cases carry over. The control plane enforces scorecards:run. */}
               {!live && failedCount > 0 && (
@@ -226,6 +256,32 @@ export default async function ScorecardDetailPage({
           }
         />
       </div>
+
+      {/* 실행 중인 케이스 (라이브) — 지금 실행 중인 자식 run들. 열면 실행 중 화면(browser-use 크롬 등)·로그를 라이브로 볼 수 있다. */}
+      {live && liveCases.length > 0 && (
+        <section className="space-y-2.5">
+          <SectionHeader
+            title={t('liveCasesTitle')}
+            action={<InfoTip content={t('liveCasesHint')} />}
+          />
+          <div className="space-y-2">
+            {liveCases.map((c) => (
+              <Card key={c.runId} className="flex items-center justify-between gap-3 p-3.5">
+                <span className="flex min-w-0 items-center gap-2">
+                  <StatusPill status={c.status} />
+                  <span className="truncate font-mono text-[13px] font-[510]">{c.caseId}</span>
+                </span>
+                <Link
+                  href={`/${workspace}/runs/${encodeURIComponent(c.runId)}`}
+                  className="shrink-0 font-mono text-[12px] text-link transition-colors hover:text-foreground"
+                >
+                  {t('watchLive')} →
+                </Link>
+              </Card>
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* Case rollup — the headline result of this run (pass/fail at a glance). Only when there are results. */}
       {results.length > 0 && (
@@ -727,13 +783,29 @@ export default async function ScorecardDetailPage({
                         <span className="font-[560]">error</span> · {e.message}
                       </p>
                     ))}
-                  {/* Self-hosted runner failure (no_runner/capability) — point the user at the recovery path: check the
-                      runner is online, then use "Retry failed cases" above. failure.runnerId is set only for self-hosted. */}
-                  {r.failure?.runnerId && (
-                    <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[12px] leading-relaxed text-amber-700 dark:text-amber-400">
-                      {t('failedOnRunnerHint')}
-                    </p>
-                  )}
+                  {/* Self-hosted runner failure (no_runner/capability) — show the runner's live health when we can resolve
+                      it from the roster (online now / offline · last seen …), else a static hint, both pointing at the
+                      "Retry failed cases" recovery above. failure.runnerId is set only for self-hosted ("*" = the pool). */}
+                  {r.failure?.runnerId &&
+                    (() => {
+                      const rid = r.failure?.runnerId
+                      const meta = rid && rid !== '*' ? runnerById.get(rid) : undefined
+                      const text = !meta
+                        ? t('failedOnRunnerHint')
+                        : runnerOnline(meta.lastSeenAt)
+                          ? t('failedOnRunnerOnline', { label: meta.label })
+                          : t('failedOnRunnerOffline', {
+                              label: meta.label,
+                              ago: meta.lastSeenAt
+                                ? fmtTimeAgo(meta.lastSeenAt, locale)
+                                : t('runnerNeverSeen'),
+                            })
+                      return (
+                        <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[12px] leading-relaxed text-amber-700 dark:text-amber-400">
+                          {text}
+                        </p>
+                      )
+                    })()}
                 </Card>
               )
             })}

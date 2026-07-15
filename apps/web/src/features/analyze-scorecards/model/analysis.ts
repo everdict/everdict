@@ -176,7 +176,10 @@ function passesFilters(
   const f = c.filters
   if (
     !c.includeIncomplete &&
-    (sc.status === 'superseded' || sc.status === 'queued' || sc.status === 'running')
+    (sc.status === 'superseded' ||
+      sc.status === 'cancelled' ||
+      sc.status === 'queued' ||
+      sc.status === 'running')
   )
     return false
   const inList = (list: string[] | undefined, v: string) =>

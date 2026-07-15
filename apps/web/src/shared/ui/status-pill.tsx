@@ -6,8 +6,9 @@ import { cn } from '@/shared/lib/utils'
 import { Badge } from '@/shared/ui/badge'
 import { Tooltip } from '@/shared/ui/tooltip'
 
-// superseded is a scorecard-only terminal state (a newer launch on the same PR recalls·replaces it) — neither failure nor success, but neutral.
-type PillStatus = RunStatus | 'superseded'
+// superseded (a newer launch on the same PR recalls·replaces it) and cancelled (a user stopped it) are scorecard-only
+// terminal states — neither failure nor success, so both are neutral.
+type PillStatus = RunStatus | 'superseded' | 'cancelled'
 
 const MAP: Record<
   PillStatus,
@@ -18,6 +19,7 @@ const MAP: Record<
   running: { tone: 'info', labelKey: 'statusRunning', pulse: true },
   queued: { tone: 'neutral', labelKey: 'statusQueued' },
   superseded: { tone: 'neutral', labelKey: 'statusSuperseded' },
+  cancelled: { tone: 'neutral', labelKey: 'statusCancelled' },
 }
 
 export function StatusPill({ status }: { status: PillStatus }) {
@@ -43,6 +45,7 @@ const ICON_CLASS: Record<PillStatus, string> = {
   running: 'text-primary',
   queued: 'text-muted-foreground',
   superseded: 'text-faint',
+  cancelled: 'text-faint',
 }
 
 export function StatusIcon({ status, className }: { status: PillStatus; className?: string }) {

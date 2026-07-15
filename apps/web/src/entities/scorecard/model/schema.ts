@@ -29,6 +29,7 @@ export const scorecardStatusSchema = z.enum([
   'succeeded',
   'failed',
   'superseded',
+  'cancelled',
 ])
 
 // per-metric aggregation (shared by list/detail).

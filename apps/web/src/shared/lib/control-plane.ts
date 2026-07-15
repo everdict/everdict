@@ -256,6 +256,9 @@ export const controlPlane = {
     call<T>(auth, '/scorecards', { method: 'POST', body: JSON.stringify(body) }),
   retryScorecard: <T>(auth: AuthContext, id: string) =>
     call<T>(auth, `/scorecards/${encodeURIComponent(id)}/retry`, { method: 'POST' }),
+  // Stop a running/queued batch — marks it cancelled and force-frees the runtime of the in-flight cases.
+  cancelScorecard: <T>(auth: AuthContext, id: string) =>
+    call<T>(auth, `/scorecards/${encodeURIComponent(id)}/cancel`, { method: 'POST' }),
   ingestScorecard: <T>(auth: AuthContext, body: unknown) =>
     call<T>(auth, '/scorecards/ingest', { method: 'POST', body: JSON.stringify(body) }),
   ingestScorecardPull: <T>(auth: AuthContext, body: unknown) =>

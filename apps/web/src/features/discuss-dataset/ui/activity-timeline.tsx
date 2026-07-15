@@ -37,8 +37,9 @@ const STATUS_TONE: Record<string, string> = {
   running: 'text-[var(--color-warning)]',
   queued: 'text-muted-foreground',
   superseded: 'text-faint',
+  cancelled: 'text-faint',
 }
-const STATUS_KEYS = ['succeeded', 'failed', 'running', 'queued', 'superseded']
+const STATUS_KEYS = ['succeeded', 'failed', 'running', 'queued', 'superseded', 'cancelled']
 
 // Dataset activity history (events) — chronological, only the latest 10 + 'show earlier history'. Comments/discussion are a separate thread.
 export function ActivityTimeline({
