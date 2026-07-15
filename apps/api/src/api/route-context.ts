@@ -15,7 +15,7 @@ import type { ProfileService } from "@everdict/application-control";
 import type { QueueService } from "@everdict/application-control";
 import type { RunService } from "@everdict/application-control";
 import { installGithubWorkspaceRunner } from "@everdict/application-control";
-import type { RunnerHub } from "@everdict/application-control";
+import type { RunnerHubLike } from "@everdict/application-control";
 import { PairRunnerBodySchema, RUNNER_CAPABILITIES, type RunnerService } from "@everdict/application-control";
 import { type ScheduleService, isValidCron } from "@everdict/application-control";
 import {
@@ -128,7 +128,7 @@ export interface ServerDeps {
   runnerService?: RunnerService; // self-hosted runners (personal device pairing) (route disabled if absent)
   notificationService?: NotificationService; // personal notification feed (bell inbox) — self-scoped (route disabled if absent)
   commentService?: CommentService; // resource comments (datasets, etc.) — collaborative discussion (route disabled if absent)
-  runnerHub?: RunnerHub; // self-hosted runner lease hub — used by the MCP lease/result/heartbeat tools (disabled if absent)
+  runnerHub?: RunnerHubLike; // self-hosted runner lease hub — used by the MCP lease/result/heartbeat tools (disabled if absent)
   settingsStore?: WorkspaceSettingsStore; // workspace settings (metering policy, etc.) (route disabled if absent)
   workspaceStore?: WorkspaceStore; // workspace membership — active-workspace resolution/bootstrap (single-workspace behavior if absent)
   workspaceService?: WorkspaceService; // workspace self-serve list/create (/workspaces route disabled if absent)

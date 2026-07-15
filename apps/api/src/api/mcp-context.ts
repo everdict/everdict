@@ -8,7 +8,7 @@ import type { NotificationService } from "@everdict/application-control";
 import type { ProfileService } from "@everdict/application-control";
 import type { QueueService } from "@everdict/application-control";
 import type { RunService } from "@everdict/application-control";
-import type { RunnerHub } from "@everdict/application-control";
+import type { RunnerHubLike } from "@everdict/application-control";
 import type { RunnerService } from "@everdict/application-control";
 import type { ScheduleService } from "@everdict/application-control";
 import type { ScorecardService } from "@everdict/application-control";
@@ -65,7 +65,7 @@ export interface McpDeps {
   runnerService?: RunnerService; // self-hosted runners (personal device pairing) — pair/list/revoke + workspace roster
   notificationService?: NotificationService; // personal notification feed (bell inbox) — list/read (self-scoped)
   commentService?: CommentService; // resource comments (datasets, etc.) — list/create/delete
-  runnerHub?: RunnerHub; // runner lease hub — lease_job/submit_job_result/fail_job/heartbeat_job (runner token only)
+  runnerHub?: RunnerHubLike; // runner lease hub — lease_job/submit_job_result/fail_job/heartbeat_job (runner token only)
   liveFrames?: LiveFrameStore; // latest live-screen frame per run, pushed by a self-hosted runner (report_case_screen)
   settingsStore?: WorkspaceSettingsStore;
   benchmarkService?: BenchmarkService; // benchmark preview + import (source → dataset)

@@ -2,7 +2,7 @@ import type { GithubAppService } from "@everdict/application-control";
 import type { ImageRegistryService } from "@everdict/application-control";
 import type { NotificationService } from "@everdict/application-control";
 import type { Metrics } from "@everdict/application-control";
-import type { RunnerHub } from "@everdict/application-control";
+import type { RunnerHubLike } from "@everdict/application-control";
 import { ScorecardService } from "@everdict/application-control";
 import type { TraceSinkService } from "@everdict/application-control";
 import type { Dispatcher as CoreDispatcher, Scheduler } from "@everdict/backends";
@@ -32,7 +32,7 @@ export function buildScorecard(deps: {
   meteredDispatcher: CoreDispatcher;
   scheduler: Scheduler;
   // Self-hosted lease hub — cancel/supersede reclaims a batch's in-flight lease jobs through it (requestCancel).
-  runnerHub: RunnerHub;
+  runnerHub: RunnerHubLike;
   breaker: CircuitBreaker;
   metrics: Metrics;
   settingsStore: WorkspaceSettingsStore;

@@ -1,4 +1,4 @@
-import type { RunnerHub, SelfHostedKey } from "@everdict/application-control";
+import type { RunnerHubLike, SelfHostedKey } from "@everdict/application-control";
 import {
   type Backend,
   type BackendCapacity,
@@ -16,7 +16,7 @@ import type { AgentJob, CaseResult } from "@everdict/contracts";
 export class SelfHostedBackend implements Backend, Probeable {
   constructor(
     private readonly key: SelfHostedKey,
-    private readonly hub: RunnerHub,
+    private readonly hub: RunnerHubLike,
     // Per-runner concurrent-park ceiling — for scheduler gating (parking uses no real resources, so keep it generous; the real serialization is done by lease availability).
     private readonly maxConcurrent = 8,
   ) {}
@@ -34,7 +34,7 @@ export class SelfHostedBackend implements Backend, Probeable {
   // There's no way (as of Slice 3) to assert "is a runner attached" without a job — in the pull model, connection state only shows through lease polling.
   // Report only the number of waiting jobs (they drain quickly if a runner is attached). Precise presence/heartbeat is Slice 6.
   async probe(): Promise<ProbeResult> {
-    const pending = this.hub.pending(this.key);
+    const pending = await this.hub.pending(this.key);
     return { reachable: true, detail: `self-hosted runner (pull); pending jobs: ${pending}` };
   }
 }

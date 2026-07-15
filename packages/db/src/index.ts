@@ -81,6 +81,7 @@ export type {
   TenantKeyStore,
   SecretStore,
   OAuthStateStore,
+  RunnerJobStore,
   RunnerStore,
   WorkspaceSettingsStore,
   WorkspaceStore,

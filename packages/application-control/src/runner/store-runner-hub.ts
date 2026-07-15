@@ -1,7 +1,13 @@
 import { randomUUID } from "node:crypto";
 import { type AgentJob, type CaseResult, UpstreamError } from "@everdict/contracts";
 import type { RunnerJobStore } from "../ports/runner-job-store.js";
-import { type EnqueueResult, type LeasedJob, type SelfHostedKey, requiredRunnerCapabilities } from "./runner-hub.js";
+import {
+  type EnqueueResult,
+  type LeasedJob,
+  type RunnerHub,
+  type SelfHostedKey,
+  requiredRunnerCapabilities,
+} from "./runner-hub.js";
 
 export interface StoreRunnerHubDeps {
   queueTimeoutMs?: number; // idle timeout — no lease/heartbeat activity for this long → no_runner (default 5 min)
@@ -126,3 +132,8 @@ export class StoreRunnerHub {
     return this.store.pending(key.owner, key.runnerId);
   }
 }
+
+// The lease-hub abstraction the control plane holds — the in-memory RunnerHub (single-process) or the store-backed
+// StoreRunnerHub (multi-replica), chosen at composition. Callers await its methods, which works against both (await on
+// the in-memory hub's synchronous return is a no-op), so this union is the only surface the dispatch/MCP layer needs.
+export type RunnerHubLike = RunnerHub | StoreRunnerHub;

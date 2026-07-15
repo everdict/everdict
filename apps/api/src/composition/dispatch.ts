@@ -1,6 +1,6 @@
 import { ImageRegistryService } from "@everdict/application-control";
 import type { Metrics } from "@everdict/application-control";
-import { RunnerHub } from "@everdict/application-control";
+import { RunnerHub, type RunnerHubLike, type RunnerJobStore, StoreRunnerHub } from "@everdict/application-control";
 import { TraceSourceService } from "@everdict/application-control";
 import {
   type BackendRegistry,
@@ -30,6 +30,7 @@ export function buildDispatch(deps: {
   modelRegistry: ModelRegistry;
   runtimeRegistry: RuntimeRegistry;
   runnerStore: RunnerStore;
+  runnerJobStore: RunnerJobStore;
   scheduler: Scheduler;
   backends: BackendRegistry;
   metrics: Metrics;
@@ -42,17 +43,22 @@ export function buildDispatch(deps: {
     modelRegistry,
     runtimeRegistry,
     runnerStore,
+    runnerJobStore,
     scheduler,
     backends,
     metrics,
   } = deps;
   // Self-hosted runner lease hub — parks self:<runnerId> jobs; the runner protocol (MCP, slice 4) leases/returns them.
   // A single instance shared by the dispatcher (park) and the MCP lease/result tools (lease/complete).
-  const runnerHub = new RunnerHub(
-    process.env.EVERDICT_SELF_HOSTED_QUEUE_TIMEOUT_MS
-      ? { queueTimeoutMs: Number(process.env.EVERDICT_SELF_HOSTED_QUEUE_TIMEOUT_MS) }
-      : {},
-  );
+  const hubTimeout = process.env.EVERDICT_SELF_HOSTED_QUEUE_TIMEOUT_MS
+    ? { queueTimeoutMs: Number(process.env.EVERDICT_SELF_HOSTED_QUEUE_TIMEOUT_MS) }
+    : {};
+  // EVERDICT_SELF_HOSTED_STORE_HUB=1 → the store-backed hub (a job parked on one control-plane replica is leased +
+  // completed from another via the shared Pg queue). Default = the in-memory hub (single-process, no polling).
+  const runnerHub: RunnerHubLike =
+    process.env.EVERDICT_SELF_HOSTED_STORE_HUB === "1"
+      ? new StoreRunnerHub(runnerJobStore, hubTimeout)
+      : new RunnerHub(hubTimeout);
 
   // Front-door callback completion model: when a public base URL is set, build one in-process rendezvous shared by the topology
   // backend (outbound: {{callback_url}}/wait) and the /frontdoor-callback route (inbound: deliver). If unset, the callback model

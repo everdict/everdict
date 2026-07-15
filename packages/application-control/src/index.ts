@@ -86,7 +86,7 @@ export {
   selfHostedBackendName,
   type SelfHostedKey,
 } from "./runner/runner-hub.js";
-export { StoreRunnerHub, type StoreRunnerHubDeps } from "./runner/store-runner-hub.js";
+export { type RunnerHubLike, StoreRunnerHub, type StoreRunnerHubDeps } from "./runner/store-runner-hub.js";
 export type {
   ClaimInput,
   ParkInput,

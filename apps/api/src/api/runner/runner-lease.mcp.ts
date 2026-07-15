@@ -52,7 +52,7 @@ export function registerRunnerLeaseTools(server: McpServer, ctx: McpToolContext)
         plain(async () => {
           const key = runnerKey();
           if (!key) return fail(NEED_RUNNER);
-          return ok({ jobId, accepted: hub.complete(key, jobId, result) });
+          return ok({ jobId, accepted: await hub.complete(key, jobId, result) });
         }),
     );
     server.registerTool(
@@ -65,14 +65,14 @@ export function registerRunnerLeaseTools(server: McpServer, ctx: McpToolContext)
         plain(async () => {
           const key = runnerKey();
           if (!key) return fail(NEED_RUNNER);
-          return ok({ jobId, accepted: hub.fail(key, jobId, message) });
+          return ok({ jobId, accepted: await hub.fail(key, jobId, message) });
         }),
     );
     server.registerTool(
       "heartbeat_job",
       {
         description:
-          "Runner liveness signal — refresh lastSeenAt. Passing jobId also renews that job's lease to prevent requeue during long runs.",
+          "Runner liveness signal — refresh lastSeenAt. Passing jobId also renews that job's lease to prevent requeue during long runs, and carries back a `cancelled` flag: when true the control plane has stopped this job (a user cancelled / superseded the scorecard) → abort the local run and free the runtime.",
         inputSchema: { jobId: z.string().optional() },
       },
       ({ jobId }) =>
@@ -80,8 +80,8 @@ export function registerRunnerLeaseTools(server: McpServer, ctx: McpToolContext)
           const key = runnerKey();
           if (!key) return fail(NEED_RUNNER);
           if (deps.runnerService) await deps.runnerService.touch(key.owner, key.runnerId);
-          const extended = jobId ? hub.heartbeat(key, jobId) : false;
-          return ok({ ok: true, ...(jobId ? { extended } : {}) });
+          const hb = jobId ? await hub.heartbeat(key, jobId) : undefined;
+          return ok({ ok: true, ...(hb ? { extended: hb.extended, cancelled: hb.cancelled } : {}) });
         }),
     );
     // Live screen: for a command harness that declares liveScreen (e.g. browser-use's headless Chromium), the runner

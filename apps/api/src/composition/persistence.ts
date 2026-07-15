@@ -8,6 +8,7 @@ import {
   InMemoryNotificationStore,
   InMemoryOAuthStateStore,
   InMemoryRunStore,
+  InMemoryRunnerJobStore,
   InMemoryRunnerStore,
   InMemoryScheduleStore,
   InMemoryScorecardStore,
@@ -27,6 +28,7 @@ import {
   PgNotificationStore,
   PgOAuthStateStore,
   PgRunStore,
+  PgRunnerJobStore,
   PgRunnerStore,
   PgScheduleStore,
   PgScorecardStore,
@@ -39,6 +41,7 @@ import {
   PgWorkspaceSettingsStore,
   PgWorkspaceStore,
   type RunStore,
+  type RunnerJobStore,
   type RunnerStore,
   type ScheduleStore,
   type ScorecardStore,
@@ -103,6 +106,7 @@ export interface Persistence {
   secretStore: SecretStore; // always available (on by default) — KEK is EVERDICT_SECRETS_KEY, else an ephemeral key is auto-generated
   oauthStateStore: OAuthStateStore; // one-shot pending state for OAuth authorize→callback
   runnerStore: RunnerStore; // self-hosted runners (personal device pairing) — only the SHA-256 hash of the pairing token is stored
+  runnerJobStore: RunnerJobStore; // store-backed self-hosted lease queue (multi-replica StoreRunnerHub); unused by the in-memory hub
   scheduleStore: ScheduleStore; // scheduled (cron) scorecards — stored RunScorecardInput + cron expression (SSOT, mutable)
   notificationStore: NotificationStore; // personal notification feed (bell inbox) — records run/scorecard completion with recipient=subject
   commentStore: CommentStore; // resource comments (datasets, etc.) — collaborative discussion
@@ -154,6 +158,7 @@ export async function makePersistence(): Promise<Persistence> {
       secretStore: new InMemorySecretStore(cipher),
       oauthStateStore: new InMemoryOAuthStateStore(),
       runnerStore: new InMemoryRunnerStore(),
+      runnerJobStore: new InMemoryRunnerJobStore(),
       scheduleStore: new InMemoryScheduleStore(),
       notificationStore: new InMemoryNotificationStore(),
       commentStore: new InMemoryCommentStore(),
@@ -186,6 +191,7 @@ export async function makePersistence(): Promise<Persistence> {
     secretStore: new PgSecretStore(client, cipher),
     oauthStateStore: new PgOAuthStateStore(client),
     runnerStore: new PgRunnerStore(client),
+    runnerJobStore: new PgRunnerJobStore(client),
     scheduleStore: new PgScheduleStore(client),
     notificationStore: new PgNotificationStore(client),
     commentStore: new PgCommentStore(client),
