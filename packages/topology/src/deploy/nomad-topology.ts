@@ -1,6 +1,7 @@
 import { BadRequestError, type RegistryAuth, type ServiceHarnessSpec, type TopologyService } from "@everdict/contracts";
 import { flattenEnv, imageUsesRegistryHost } from "@everdict/domain";
 import { dependencyStores } from "./dependencies.js";
+import { aliasPeerHost } from "./peer-resolver.js";
 import { sanitizeIdent } from "./store-binding.js";
 
 // Render the warm topology as a Nomad service job. All of a topology's service tasks are CO-LOCATED in ONE task
@@ -439,8 +440,8 @@ function buildColocatedGroup(spec: ServiceHarnessSpec, opts: NomadTopologyOption
       Config: config,
       // Peer wiring (co-located = loopback alias <peer>) < service static env (with {{peer}} refs → loopback URL) < operational storeEnv.
       Env: {
-        ...staticWiringEnv(svc, spec.services, (p) => p.name),
-        ...interpolateServiceEnv(svc, spec.services, (p) => p.name),
+        ...staticWiringEnv(svc, spec.services, aliasPeerHost),
+        ...interpolateServiceEnv(svc, spec.services, aliasPeerHost),
         ...opts.storeEnv,
       },
       Resources: { CPU: svc.resources?.cpu ?? 1000, MemoryMB: svc.resources?.memoryMb ?? 1024 },

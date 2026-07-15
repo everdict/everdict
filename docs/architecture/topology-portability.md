@@ -100,24 +100,22 @@ Each issue names the exact field. The shipped example bundles (langgraph / brows
 The lint is the L0-lint rung of the validation ladder (`docs/architecture/` — harness smoke/validation): it is
 pure, cheap, and runs before any bytes are pulled.
 
-### L2 — single resolution authority (`AddressResolver`)
+### L2 — single resolution authority (`peer-resolver`) — SHIPPED (S3)
 
-Formalize today's `hostFor` callback + `topo.endpoints` into one small interface each backend implements — the
-*only* place logical→physical happens:
+The load-bearing divergence is **peer-host** resolution (a `needs` service → its physical build-time host). It is
+now centralized in `packages/topology/src/deploy/peer-resolver.ts` as named strategies — `aliasPeerHost` (docker
+network alias + co-located Nomad loopback name) and `k8sPeerHost(id)` (`<id>-<service>` Service DNS) — that the
+call sites (`docker-runtime`, `nomad-topology`, `k8s-topology`) pass into the already-parameterized
+`staticWiringEnv` / `interpolateServiceEnv`. So the whole cross-runtime divergence for peer addressing is auditable
+in **one file**, and `peer-resolver.test.ts` **locks each form** (same wiring spec → each backend's correct URL
+through one seam) so a change to any resolver is caught. Per-service Nomad resolves at RUNTIME via a
+consul-template render (a different mechanism, staying in `nomad-topology`'s `peerTemplateEnv`).
 
-```
-interface AddressResolver {
-  peerHost(peer: TopologyService): string          // alias | loopback | catalog-template | Service DNS
-  frontDoorBase(service: string): string            // from topo.endpoints
-  storeEndpoint(store: StoreRef): string            // connEnv host
-}
-```
-
-Interpolation (`interpolateServiceEnv`), wiring (`wiringVars`), and the front-door driver call **only** through
-it; no backend-specific string appears anywhere else. This turns "audit portability" into "review four
-`AddressResolver` impls + one shared caller," and any new runtime is one impl. (Largely a refactor of existing
-code — `staticWiringEnv`/`interpolatePeerTokens` already parameterize `hostFor`; per-service Nomad's
-catalog-template mode becomes one resolver variant.)
+The other two addresses are **runtime-discovered**, not build-time computable, so they are not part of this pure
+resolver: the **front-door base** (`topo.endpoints[service]`) and **store host:port** (store `connEnv`) are produced
+by each runtime's `ensureTopology` (docker published port / Nomad alloc host:port / K8s port-forward) and already
+flow through one channel (`topo.endpoints` / `storeEnv`). No behavior change — the resolvers emit byte-identical
+strings to the former inline lambdas; the deterministic builder tests are the net (217 topology tests green).
 
 ### L3 — cross-runtime conformance suite (the proof)
 
@@ -145,7 +143,7 @@ scenario harnesses already (`scripts/live/service-topology-{nomad,k8s}.mjs`) to 
 
 1. **S1 — portability lint (L1).** `checkPortability` + wire into `/harnesses/validate` and register/resolve; web surfaces issues inline (the delivery-mode badge is the precedent). *Biggest leverage, cheapest, no runtime.*
 2. **S2 — `{{peer}}` canonicalization + migration (L0/L1).** Literal inter-service/`localhost`/IP → hard error; migrate the example bundles + any registered specs off hardcodes (now that `e6c76c5` makes `{{peer}}` work on all four paths).
-3. **S3 — `AddressResolver` (L2).** Refactor `hostFor`/endpoint/store resolution into one interface + four impls; no behavior change (deterministic builder tests as the net).
+3. **S3 — peer-resolver centralization (L2) — SHIPPED.** The four inline `hostFor` lambdas → named strategies in `peer-resolver.ts` + a parity test that locks each backend's peer-host form; no behavior change (217 topology tests green).
 4. **S4 — conformance suite (L3).** Golden canary spec + per-backend scenario assertions of identical behavior.
 5. **S5 — reachability preflight + cross-runtime smoke (L4).** Generalize `waitForHttp` to a driving-endpoint reachability check; smoke-on-target-runtime + portability-diff mode; Nomad hostIP-fallback guard.
 

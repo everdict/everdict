@@ -7,6 +7,7 @@ import {
 import { dependencyConnEnv, dependencyStores } from "./dependencies.js";
 import { type Docker, dockerCli } from "./docker.js";
 import { interpolateServiceEnv, staticWiringEnv } from "./nomad-topology.js";
+import { aliasPeerHost } from "./peer-resolver.js";
 import type { TargetEnvHandle, TopologyHandle, TopologyRuntime } from "./topology-runtime.js";
 
 export interface DockerTopologyRuntimeOptions {
@@ -99,8 +100,8 @@ export class DockerTopologyRuntime implements TopologyRuntime {
           // (with {{peer}} refs → the peer's alias URL) < storeEnv.
           env: {
             ...connEnv,
-            ...staticWiringEnv(svc, spec.services, (p) => p.name),
-            ...interpolateServiceEnv(svc, spec.services, (p) => p.name),
+            ...staticWiringEnv(svc, spec.services, aliasPeerHost),
+            ...interpolateServiceEnv(svc, spec.services, aliasPeerHost),
             ...this.opts.storeEnv,
           },
           ...(svc.volumes && svc.volumes.length > 0 ? { volumes: svc.volumes } : {}),
