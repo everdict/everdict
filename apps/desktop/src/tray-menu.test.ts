@@ -1,17 +1,20 @@
 import { describe, expect, it, vi } from "vitest";
-import type { DesktopRunnerStatus } from "./bridge.js";
+import type { DesktopRunnerStatus, DesktopRunnersStatus } from "./bridge.js";
 import { type TrayMenuActions, buildTrayMenuTemplate, runnerStatusLabel } from "./tray-menu.js";
 import type { UpdaterState } from "./updater.js";
 
-const OFF: DesktopRunnerStatus = { paired: false, state: "off", activeJobs: 0, capabilities: [] };
-const IDLE: DesktopRunnerStatus = {
+const runner = (over: Partial<DesktopRunnerStatus> = {}): DesktopRunnerStatus => ({
   paired: true,
   runnerId: "r1",
   state: "idle",
   activeJobs: 0,
   capabilities: ["repo"],
-};
-const BUSY: DesktopRunnerStatus = { ...IDLE, state: "running", activeJobs: 2 };
+  ...over,
+});
+
+const OFF: DesktopRunnersStatus = { runners: [] };
+const IDLE: DesktopRunnersStatus = { runners: [runner()] };
+const BUSY: DesktopRunnersStatus = { runners: [runner({ state: "running", activeJobs: 2 })] };
 const NO_UPDATE: UpdaterState = { kind: "disabled" };
 
 function actions(): TrayMenuActions & { openApp: ReturnType<typeof vi.fn> } {
@@ -31,10 +34,24 @@ function click(item: { click?: unknown }): void {
 }
 
 describe("runnerStatusLabel", () => {
-  it("distinguishes unpaired/idle/running(n)", () => {
+  it("distinguishes unpaired/idle/running(n) for a single runner (unchanged phrasing)", () => {
     expect(runnerStatusLabel(OFF)).toContain("unpaired");
     expect(runnerStatusLabel(IDLE)).toBe("Runner: online, idle");
     expect(runnerStatusLabel(BUSY)).toBe("Runner: running (2)");
+  });
+
+  it("aggregates several runners (D9) — pool count + summed active jobs", () => {
+    const pool: DesktopRunnersStatus = {
+      runners: [runner({ runnerId: "r1", state: "idle" }), runner({ runnerId: "r2", state: "off" })],
+    };
+    expect(runnerStatusLabel(pool)).toBe("Runner: 1/2 online, idle");
+    const busyPool: DesktopRunnersStatus = {
+      runners: [
+        runner({ runnerId: "r1", state: "running", activeJobs: 1 }),
+        runner({ runnerId: "r2", state: "running", activeJobs: 2 }),
+      ],
+    };
+    expect(runnerStatusLabel(busyPool)).toBe("Runner: running (3) · 2/2 online");
   });
 });
 

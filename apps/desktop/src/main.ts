@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { hostname } from "node:os";
+import { cpus, hostname } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { ResilientMcpSession, RunnerHost, detectCapabilities, mcpConnect } from "@everdict/self-hosted-runner";
@@ -8,15 +8,15 @@ import electronUpdater from "electron-updater";
 import {
   BRIDGE_CHANNELS,
   type DesktopAppInfo,
-  type DesktopRunnerStatus,
+  type DesktopRunnersStatus,
   registerBridge,
   senderAllowed,
 } from "./bridge.js";
 import { type ConfigIo, type DesktopConfig, loadConfig, saveConfig } from "./config-store.js";
 import { NotificationWatcher, type WatcherNotification } from "./notification-watcher.js";
-import { RunnerController } from "./runner-controller.js";
+import { RunnerSupervisor } from "./runner-supervisor.js";
 import { normalizeWebUrl, resolveWebUrl } from "./server-url.js";
-import { type TokenIo, clearToken, loadToken, saveToken } from "./token-store.js";
+import { type TokenIo, clearToken, loadToken, loadTokens, saveTokens } from "./token-store.js";
 import { buildTrayMenuTemplate, runnerStatusLabel } from "./tray-menu.js";
 import { type AutoUpdaterLike, UpdaterController, type UpdaterState } from "./updater.js";
 import { allowTopLevelNavigation, decideWindowOpen, shouldRecoverToSetup, webOriginOf } from "./window-policy.js";
@@ -72,10 +72,10 @@ function configIo(): ConfigIo {
   };
 }
 
-// safeStorage ciphertext file IO for the rnr_ token — token-store handles encrypt/decrypt.
-function tokenIo(): TokenIo {
+// safeStorage ciphertext file IO helper — token-store handles encrypt/decrypt.
+function binIo(fileName: string): TokenIo {
   const dir = app.getPath("userData");
-  const file = path.join(dir, "runner-token.bin");
+  const file = path.join(dir, fileName);
   return {
     read: () => (existsSync(file) ? readFileSync(file) : null),
     write: (data) => {
@@ -84,6 +84,14 @@ function tokenIo(): TokenIo {
     },
     remove: () => rmSync(file, { force: true }),
   };
+}
+// The multi-runner token map (D9) — { runnerId: rnr_token } encrypted at rest.
+function tokensIo(): TokenIo {
+  return binIo("runner-tokens.bin");
+}
+// Legacy single-runner token file (pre-D9) — read once to migrate an older desktop's pairing, then removed.
+function legacyTokenIo(): TokenIo {
+  return binIo("runner-token.bin");
 }
 
 let config: DesktopConfig;
@@ -96,15 +104,22 @@ function applyAutostart(next: boolean): void {
   refreshTrayMenu();
 }
 
-// Latest runner status referenced by the tray/notifications — updated by broadcast.
-let latestRunnerStatus: DesktopRunnerStatus = { paired: false, state: "off", activeJobs: 0, capabilities: [] };
-// Counters for the drain (running→idle) notification — notifying per case would spam in a batch.
+// Latest aggregate runner status (every runner on this device, D9) referenced by the tray/notifications — updated by broadcast.
+let latestRunnersStatus: DesktopRunnersStatus = { runners: [] };
+// Counters for the drain (running→idle) notification — notifying per case would spam in a batch. Aggregated across all runners.
 let doneSinceIdle = 0;
 let failedSinceIdle = 0;
 
-// One notification on the running→idle transition (success/failure tally) — the local counterpart of the Mattermost completion notification.
-function notifyDrainIfNeeded(prev: DesktopRunnerStatus, next: DesktopRunnerStatus): void {
-  if (prev.state !== "running" || next.state !== "idle" || doneSinceIdle + failedSinceIdle === 0) return;
+// Total in-flight jobs across every runner on this device — the basis for the aggregate running/idle transition.
+function totalActiveJobs(status: DesktopRunnersStatus): number {
+  return status.runners.reduce((sum, r) => sum + r.activeJobs, 0);
+}
+
+// One notification when the device drains (any-running → none-running), tallying success/failure — the local counterpart of the Mattermost completion notification.
+function notifyDrainIfNeeded(prev: DesktopRunnersStatus, next: DesktopRunnersStatus): void {
+  const wasRunning = totalActiveJobs(prev) > 0;
+  const stillRunning = totalActiveJobs(next) > 0;
+  if (!wasRunning || stillRunning || doneSinceIdle + failedSinceIdle === 0) return;
   const body = `${doneSinceIdle} succeeded · ${failedSinceIdle} failed`;
   doneSinceIdle = 0;
   failedSinceIdle = 0;
@@ -149,10 +164,13 @@ function fireOsNotification(row: WatcherNotification): void {
 
 function startNotifyWatcher(): void {
   if (notifyWatcher) return;
-  const token = loadToken(safeStorage, tokenIo());
-  if (token === null) return;
+  // The notification feed is per-subject; every runner on this device belongs to the signed-in account, so one watcher (any
+  // runner's token) covers them all. Use the first paired runner's token + its control-plane URL.
+  const token = Object.values(loadTokens(safeStorage, tokensIo()))[0];
+  if (token === undefined) return;
   const conf = loadConfig(configIo());
-  const session = new ResilientMcpSession(mcpConnect(new URL("/mcp", conf.apiUrl ?? defaultApiUrl), token));
+  const apiUrl = conf.runners[0]?.apiUrl ?? conf.apiUrl ?? defaultApiUrl;
+  const session = new ResilientMcpSession(mcpConnect(new URL("/mcp", apiUrl), token));
   notifySession = session;
   notifyWatcher = new NotificationWatcher({
     callJson: async (name, args) => {
@@ -180,23 +198,30 @@ function stopNotifyWatcher(): void {
   if (s) void s.close().catch(() => {});
 }
 
-// Runner controller — persists pair state + RunnerHost lifecycle. Status is pushed only to web-origin windows (the same boundary as invariant 4).
-const controller = new RunnerController({
-  loadToken: () => loadToken(safeStorage, tokenIo()),
-  saveToken: (token) => saveToken(safeStorage, tokenIo(), token),
-  clearToken: () => clearToken(tokenIo()),
-  loadMeta: () => {
+// Runner supervisor — persists pair state (token map + config roster) + drives one RunnerHost per paired runner (D9: multiple runners
+// on this device). Status is pushed only to web-origin windows (the same boundary as invariant 4).
+const supervisor = new RunnerSupervisor({
+  loadTokens: () => loadTokens(safeStorage, tokensIo()),
+  saveTokens: (tokens) => saveTokens(safeStorage, tokensIo(), tokens),
+  clearTokens: () => clearToken(tokensIo()),
+  loadRunners: () => loadConfig(configIo()).runners,
+  saveRunners: (runners) => {
+    // Persist the roster; drop the legacy single-runner scalars once they have been migrated into it.
+    const { runnerId: _r, apiUrl: _a, ...rest } = loadConfig(configIo());
+    config = { ...rest, runners };
+    saveConfig(configIo(), config);
+  },
+  loadLegacy: () => {
+    const token = loadToken(safeStorage, legacyTokenIo());
+    if (token === null) return null;
     const c = loadConfig(configIo());
     return {
+      token,
       ...(c.runnerId !== undefined ? { runnerId: c.runnerId } : {}),
       ...(c.apiUrl !== undefined ? { apiUrl: c.apiUrl } : {}),
     };
   },
-  saveMeta: (meta) => {
-    const { runnerId: _r, apiUrl: _a, ...rest } = loadConfig(configIo());
-    config = { ...rest, ...meta };
-    saveConfig(configIo(), config);
-  },
+  clearLegacy: () => clearToken(legacyTokenIo()),
   makeHost: ({ token, apiUrl, onStatus }) =>
     new RunnerHost({
       token,
@@ -212,10 +237,10 @@ const controller = new RunnerController({
     }),
   defaultApiUrl,
   broadcast: (status) => {
-    notifyDrainIfNeeded(latestRunnerStatus, status);
-    latestRunnerStatus = status;
-    // Independent notifications (N6): start the watcher when paired, stop it when unpaired — the feed flows regardless of any web session.
-    if (status.paired) startNotifyWatcher();
+    notifyDrainIfNeeded(latestRunnersStatus, status);
+    latestRunnersStatus = status;
+    // Independent notifications (N6): watch while ≥1 runner is paired, stop at zero — the feed flows regardless of any web session.
+    if (status.runners.length > 0) startNotifyWatcher();
     else stopNotifyWatcher();
     refreshTrayMenu(); // sync the status row · unpair item · tooltip (no-op if no tray)
     for (const win of BrowserWindow.getAllWindows()) {
@@ -279,7 +304,7 @@ const updater = new UpdaterController({
 function applyUpdateNow(): void {
   quitting = true;
   shuttingDown = true;
-  void controller
+  void supervisor
     .shutdown()
     .catch(() => {})
     .finally(() => updater.quitAndInstall());
@@ -294,6 +319,8 @@ async function appInfo(): Promise<DesktopAppInfo> {
     platform: process.platform,
     hostname: hostname(),
     capabilities: await capabilitiesPromise,
+    // Soft-cap reference (D9): the web warns when the user pairs more runners on this device than there are logical cores.
+    cpuCount: cpus().length,
   };
 }
 
@@ -385,17 +412,17 @@ function createOrFocusWindow(): void {
 
 function refreshTrayMenu(): void {
   if (!tray) return;
-  tray.setToolTip(`Everdict — ${runnerStatusLabel(latestRunnerStatus)}`);
+  tray.setToolTip(`Everdict — ${runnerStatusLabel(latestRunnersStatus)}`);
   tray.setContextMenu(
     Menu.buildFromTemplate(
       buildTrayMenuTemplate(
-        { autostart: config.autostart, runner: latestRunnerStatus, updater: updaterState },
+        { autostart: config.autostart, runner: latestRunnersStatus, updater: updaterState },
         {
           openApp: () => createOrFocusWindow(),
           setAutostart: (next) => applyAutostart(next),
           changeServerUrl: () => openSetupWindow(),
-          // Local unpair (discard the token + stop) — the web account page is authoritative for revoking the server record.
-          unpairRunner: () => void controller.unpair().catch((e) => console.error(`Runner unpair failed: ${e}`)),
+          // Local unpair-all (discard the tokens + stop) — the web account page is authoritative for revoking the server records.
+          unpairRunner: () => void supervisor.unpair().catch((e) => console.error(`Runner unpair failed: ${e}`)),
           applyUpdate: () => applyUpdateNow(),
           quit: () => {
             quitting = true;
@@ -470,14 +497,14 @@ if (!app.requestSingleInstanceLock()) {
     registerBridge(ipcMain, {
       webOrigin: () => webOrigin,
       appInfo,
-      pair: (payload) => controller.pair(payload),
-      unpair: () => controller.unpair(),
-      status: () => controller.status(),
+      pair: (payload) => supervisor.pair(payload),
+      unpair: (runnerId) => supervisor.unpair(runnerId),
+      status: () => supervisor.status(),
     });
     createTray();
     createOrFocusWindow();
-    // If there is a saved pair, silently restore the runner (resident regardless of login/window).
-    void controller.startFromStore().catch((e) => console.error(`Runner restore failed: ${e}`));
+    // If there are saved pairings, silently restore every runner (resident regardless of login/window).
+    void supervisor.startFromStore().catch((e) => console.error(`Runner restore failed: ${e}`));
     // Auto-update — one check at startup + every 6 hours (no-op if no feed configured, status disabled).
     updater.start();
   });
@@ -493,6 +520,6 @@ if (!app.requestSingleInstanceLock()) {
     if (shuttingDown) return;
     shuttingDown = true;
     event.preventDefault();
-    void controller.shutdown().finally(() => app.quit());
+    void supervisor.shutdown().finally(() => app.quit());
   });
 }

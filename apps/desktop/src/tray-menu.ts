@@ -1,11 +1,11 @@
 import type { MenuItemConstructorOptions } from "electron";
-import type { DesktopRunnerStatus } from "./bridge.js";
+import type { DesktopRunnersStatus } from "./bridge.js";
 import type { UpdaterState } from "./updater.js";
 
 // Tray menu template — a pure builder (no electron value import, easy to test). State and actions are injected by main.
 export interface TrayMenuState {
   autostart: boolean;
-  runner: DesktopRunnerStatus;
+  runner: DesktopRunnersStatus; // every runner paired on this device (D9)
   updater: UpdaterState;
 }
 
@@ -18,11 +18,16 @@ export interface TrayMenuActions {
   quit(): void;
 }
 
-// One-line summary of the runner status — shared by the tray status row/tooltip.
-export function runnerStatusLabel(runner: DesktopRunnerStatus): string {
-  if (!runner.paired) return "Runner: unpaired (connect from the account page)";
-  if (runner.state === "running") return `Runner: running (${runner.activeJobs})`;
-  if (runner.state === "idle") return "Runner: online, idle";
+// One-line summary of the aggregate runner status (D9) — shared by the tray status row/tooltip. With a single runner it reads exactly
+// as before; with several it adds a pool count.
+export function runnerStatusLabel(status: DesktopRunnersStatus): string {
+  const count = status.runners.length;
+  if (count === 0) return "Runner: unpaired (connect from the account page)";
+  const online = status.runners.filter((r) => r.state !== "off").length;
+  const jobs = status.runners.reduce((sum, r) => sum + r.activeJobs, 0);
+  const pool = count > 1 ? ` · ${online}/${count} online` : "";
+  if (jobs > 0) return `Runner: running (${jobs})${pool}`;
+  if (online > 0) return count > 1 ? `Runner: ${online}/${count} online, idle` : "Runner: online, idle";
   return "Runner: off";
 }
 
@@ -55,10 +60,14 @@ export function buildTrayMenuTemplate(state: TrayMenuState, actions: TrayMenuAct
       click: () => actions.setAutostart(!state.autostart),
     },
     { label: "Change server address…", click: () => actions.changeServerUrl() },
-    // Local unpair — discard this device's token + stop the runner. The web account page is authoritative for revoking the server-side runner record.
-    ...(state.runner.paired
+    // Local unpair — discard this device's token(s) + stop the runner(s). The web account page is authoritative for revoking the server-side records.
+    ...(state.runner.runners.length > 0
       ? ([
-          { label: "Unpair this device's runner", click: () => actions.unpairRunner() },
+          {
+            label:
+              state.runner.runners.length === 1 ? "Unpair this device's runner" : "Unpair all runners on this device",
+            click: () => actions.unpairRunner(),
+          },
         ] satisfies MenuItemConstructorOptions[])
       : []),
     { type: "separator" },

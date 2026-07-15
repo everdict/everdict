@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { type CipherLike, type TokenIo, clearToken, loadToken, saveToken } from "./token-store.js";
+import {
+  type CipherLike,
+  type TokenIo,
+  clearToken,
+  loadToken,
+  loadTokens,
+  saveToken,
+  saveTokens,
+} from "./token-store.js";
 
 // A fake cipher at the XOR level — substitutes the real safeStorage (verifies the path, not cryptographic strength).
 function fakeCipher(available = true): CipherLike {
@@ -58,5 +66,31 @@ describe("token-store", () => {
     saveToken(fakeCipher(), io, "rnr_abc");
     clearToken(io);
     expect(loadToken(fakeCipher(), io)).toBeNull();
+  });
+});
+
+describe("token-store (multi-runner map)", () => {
+  it("save → load round-trip preserves the whole { runnerId: token } map as ciphertext", () => {
+    const io = memoryIo();
+    saveTokens(fakeCipher(), io, { r1: "rnr_a", r2: "rnr_b" });
+    expect(io.data?.toString().startsWith("enc:")).toBe(true);
+    expect(loadTokens(fakeCipher(), io)).toEqual({ r1: "rnr_a", r2: "rnr_b" });
+  });
+
+  it("rejects saving a map with a non-rnr_ token", () => {
+    expect(() => saveTokens(fakeCipher(), memoryIo(), { r1: "rnr_a", r2: "ak_bad" })).toThrow(/rnr_/);
+  });
+
+  it("rejects saving when safeStorage is unavailable (no plaintext fallback)", () => {
+    expect(() => saveTokens(fakeCipher(false), memoryIo(), { r1: "rnr_a" })).toThrow(/safeStorage/);
+  });
+
+  it("returns an empty map on a missing file / corrupt data / unavailable environment (treated as no pairings)", () => {
+    const io = memoryIo();
+    expect(loadTokens(fakeCipher(), io)).toEqual({});
+    io.write(Buffer.from("garbage"));
+    expect(loadTokens(fakeCipher(), io)).toEqual({});
+    saveTokens(fakeCipher(), io, { r1: "rnr_a" });
+    expect(loadTokens(fakeCipher(false), io)).toEqual({});
   });
 });

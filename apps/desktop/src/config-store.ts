@@ -1,12 +1,22 @@
 import { z } from "zod";
 
+// Non-secret meta of one paired runner on this device (skill desktop D9 — multiple runners). The token is never here (token-store/safeStorage).
+export const runnerConfigEntrySchema = z.object({
+  runnerId: z.string().min(1),
+  apiUrl: z.string().url().optional(),
+  label: z.string().optional(),
+});
+export type RunnerConfigEntry = z.infer<typeof runnerConfigEntrySchema>;
+
 // The desktop app's non-secret settings (autostart, etc.). The rnr_ pairing token is never kept here —
 // it lives only in safeStorage encrypted storage (slice 3, skill desktop invariant 5).
 export const DesktopConfigSchema = z.object({
   autostart: z.boolean().default(false),
   // The web (server) URL to connect to — saved from the first-run screen / tray 'change server address' (D8). Precedence vs env/CI defaults is in server-url.ts.
   webUrl: z.string().url().optional(),
-  // Non-secret meta of the paired runner — the token is never here (token-store/safeStorage).
+  // Non-secret meta of the paired runners on this device — tokens are never here (token-store/safeStorage).
+  runners: z.array(runnerConfigEntrySchema).default([]),
+  // Legacy single-runner meta (pre-D9) — read once for migration into `runners`, then dropped on the next write.
   runnerId: z.string().min(1).optional(),
   apiUrl: z.string().url().optional(),
   // Independent notifications (N6) cursor — the last OS-fired createdAt (ISO). Prevents re-firing the backlog on restart.

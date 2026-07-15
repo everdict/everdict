@@ -19,13 +19,19 @@ function fakeIpc(): IpcMainLike & {
   };
 }
 
-function deps(): BridgeDeps & { pair: ReturnType<typeof vi.fn> } {
+function deps(): BridgeDeps & { pair: ReturnType<typeof vi.fn>; unpair: ReturnType<typeof vi.fn> } {
   return {
     webOrigin: () => WEB,
-    appInfo: async () => ({ version: "0", platform: "linux", hostname: "host", capabilities: ["repo"] }),
+    appInfo: async () => ({
+      version: "0",
+      platform: "linux",
+      hostname: "host",
+      capabilities: ["repo"],
+      cpuCount: 8,
+    }),
     pair: vi.fn(async () => {}),
-    unpair: async () => {},
-    status: () => ({ paired: false, state: "off", activeJobs: 0, capabilities: [] }),
+    unpair: vi.fn(async () => {}),
+    status: () => ({ runners: [] }),
   };
 }
 
@@ -62,10 +68,23 @@ describe("registerBridge", () => {
     expect(d.pair).toHaveBeenCalledWith({ token: "rnr_x", runnerId: "r1", apiUrl: "http://localhost:8787" });
   });
 
-  it("returns status/appInfo for a web-origin call", async () => {
+  it("returns the aggregate runner list + appInfo (with cpuCount) for a web-origin call", async () => {
     const ipc = fakeIpc();
     registerBridge(ipc, deps());
-    expect(ipc.invoke(BRIDGE_CHANNELS.status, `${WEB}/a`)).toMatchObject({ paired: false, state: "off" });
-    await expect(ipc.invoke(BRIDGE_CHANNELS.appInfo, `${WEB}/a`)).resolves.toMatchObject({ hostname: "host" });
+    expect(ipc.invoke(BRIDGE_CHANNELS.status, `${WEB}/a`)).toEqual({ runners: [] });
+    await expect(ipc.invoke(BRIDGE_CHANNELS.appInfo, `${WEB}/a`)).resolves.toMatchObject({
+      hostname: "host",
+      cpuCount: 8,
+    });
+  });
+
+  it("unpairRunner forwards a specific runnerId, and (omitted) forwards undefined for unpair-all", async () => {
+    const ipc = fakeIpc();
+    const d = deps();
+    registerBridge(ipc, d);
+    await ipc.invoke(BRIDGE_CHANNELS.unpair, `${WEB}/a`, "r7");
+    expect(d.unpair).toHaveBeenCalledWith("r7");
+    await ipc.invoke(BRIDGE_CHANNELS.unpair, `${WEB}/a`);
+    expect(d.unpair).toHaveBeenCalledWith(undefined);
   });
 });

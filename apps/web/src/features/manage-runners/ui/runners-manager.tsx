@@ -13,7 +13,8 @@ import {
 } from '@/entities/runner'
 import {
   getEverdictDesktop,
-  type DesktopRunnerStatus,
+  normalizeRunnersStatus,
+  type DesktopRunnersStatus,
   type EverdictDesktopBridge,
 } from '@/shared/lib/desktop-bridge'
 import { cn } from '@/shared/lib/utils'
@@ -39,6 +40,7 @@ function isRunnerCapability(value: string): value is RunnerCapability {
 // The desktop app owns the pairing surface (one-click; design D7): the browser doesn't offer manual pairing
 // (token shown once) and only lists/shows live status/revokes — instead it suggests the desktop download. A headless
 // server uses an API key to `POST /runners` → `everdict runner --pair` (docs/architecture/self-hosted-runner.md).
+// A device can be paired as SEVERAL independent runners (D9) — the desktop supervises them; each is its own row here.
 export function RunnersManager({
   runners,
   downloadHref,
@@ -53,18 +55,36 @@ export function RunnersManager({
   const [pending, startTransition] = useTransition()
   // Detect the desktop shell — if the bridge exists, enable one-click pairing + this device's live status (only after mount; avoids SSR mismatch).
   const [bridge, setBridge] = useState<EverdictDesktopBridge | null>(null)
-  const [desktop, setDesktop] = useState<DesktopRunnerStatus | null>(null)
+  const [desktop, setDesktop] = useState<DesktopRunnersStatus | null>(null)
+  const [cpuCount, setCpuCount] = useState(0) // this device's logical cores — the soft-cap reference (D9)
 
   useEffect(() => {
     const b = getEverdictDesktop()
     if (!b) return
     setBridge(b)
     void b
-      .runnerStatus()
-      .then(setDesktop)
+      .appInfo()
+      .then((i) => setCpuCount(i.cpuCount ?? 0))
       .catch(() => {})
-    return b.onRunnerStatus(setDesktop)
+    void b
+      .runnerStatus()
+      .then((s) => setDesktop(normalizeRunnersStatus(s)))
+      .catch(() => {})
+    return b.onRunnerStatus((s) => setDesktop(normalizeRunnersStatus(s)))
   }, [])
+
+  // Runners paired on THIS device (from the live bridge), and the set of their ids for row matching.
+  const deviceRunners = (desktop?.runners ?? []).filter((r) => r.paired)
+  const deviceRunnerIds = new Set(
+    deviceRunners.map((r) => r.runnerId).filter((id): id is string => id !== undefined)
+  )
+  const deviceCount = deviceRunners.length
+  // Soft cap (D9): warn — but never block — once this device hosts at least as many runners as it has cores.
+  const overSoftCap = cpuCount > 0 && deviceCount >= cpuCount
+  // Local pairings on this device that are no longer in the account roster (revoked on the server, or another account).
+  const staleLocal = deviceRunners.filter(
+    (d) => d.runnerId !== undefined && !runners.some((r) => r.id === d.runnerId)
+  )
 
   function onRevoke(id: string) {
     setError(undefined)
@@ -75,12 +95,23 @@ export function RunnersManager({
         setError(r.error)
         return
       }
-      // If we revoked this device, also clean up the desktop-side token/runner (the server revoke is authoritative — ignore bridge failures).
-      if (bridge && desktop?.runnerId === id) await bridge.unpairRunner().catch(() => {})
+      // If we revoked a runner paired to THIS device, also clean up its desktop-side token (the server revoke is authoritative — ignore bridge failures).
+      if (bridge && deviceRunnerIds.has(id)) await bridge.unpairRunner(id).catch(() => {})
     })
   }
 
-  // One-click — pair using appInfo (hostname/OS/capability), and hand the token down via the bridge only, never showing it on screen.
+  // Clean up local pairings that no longer exist server-side — discard their desktop-side tokens.
+  function onCleanupStale() {
+    const b = bridge
+    if (!b) return
+    startTransition(async () => {
+      for (const d of staleLocal) if (d.runnerId) await b.unpairRunner(d.runnerId).catch(() => {})
+      setDesktop(normalizeRunnersStatus(await b.runnerStatus().catch(() => ({ runners: [] }))))
+    })
+  }
+
+  // One-click — mint a NEW runner and hand its token down via the bridge only (never shown). Additive: each click adds one more
+  // runner on this device (D9), labeled with a suffix so several runners on one host stay distinguishable.
   function onConnectThisDevice() {
     const b = bridge
     if (!b) return
@@ -89,8 +120,9 @@ export function RunnersManager({
       try {
         const info = await b.appInfo()
         const caps = info.capabilities.filter(isRunnerCapability)
+        const label = deviceCount === 0 ? info.hostname : `${info.hostname} #${deviceCount + 1}`
         const r = await pairRunnerAction({
-          label: info.hostname,
+          label,
           os: info.platform,
           ...(caps.length > 0 ? { capabilities: caps } : {}),
         })
@@ -103,23 +135,29 @@ export function RunnersManager({
           ...(r.runner ? { runnerId: r.runner.id } : {}),
           ...(r.apiUrl ? { apiUrl: r.apiUrl } : {}),
         })
-        setDesktop(await b.runnerStatus())
+        setDesktop(normalizeRunnersStatus(await b.runnerStatus()))
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e))
       }
     })
   }
 
+  const connectLabel = pending
+    ? t('connecting')
+    : deviceCount === 0
+      ? t('connectThisDevice')
+      : t('connectAnother')
+
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between gap-4">
         <p className="text-[13px] text-muted-foreground">{t('ownedByYou')}</p>
         <span className="flex shrink-0 items-center gap-2">
-          {/* The desktop owns the pairing surface (D7) — the browser shows only a download CTA. */}
-          {bridge && !desktop?.paired && (
+          {/* The desktop owns the pairing surface (D7) — the browser shows only a download CTA. Connecting is additive (D9). */}
+          {bridge && (
             <Button size="sm" onClick={onConnectThisDevice} disabled={pending}>
               <Laptop />
-              {pending ? t('connecting') : t('connectThisDevice')}
+              {connectLabel}
             </Button>
           )}
           {!bridge && (
@@ -137,27 +175,25 @@ export function RunnersManager({
         </Callout>
       )}
 
-      {/* Account-switch/revoke mismatch: this desktop is paired to a runner not in my list — either another account's
-          pairing or a pairing revoked on the server. Reconnecting replaces the local pairing with a new runner owned by this account. */}
-      {bridge &&
-        desktop?.paired === true &&
-        desktop.runnerId !== undefined &&
-        !runners.some((r) => r.id === desktop.runnerId) && (
-          <Callout tone="warning">
-            <span className="flex flex-wrap items-center justify-between gap-2">
-              <span>{t('otherAccountWarning')}</span>
-              <Button
-                size="xs"
-                variant="secondary"
-                onClick={onConnectThisDevice}
-                disabled={pending}
-              >
-                <Laptop />
-                {pending ? t('connecting') : t('reconnectThisAccount')}
-              </Button>
-            </span>
-          </Callout>
-        )}
+      {/* Soft cap (D9): more runners than cores may slow this PC — warn, but pairing stays allowed. */}
+      {bridge && overSoftCap && (
+        <Callout tone="warning" className="py-1.5">
+          {t('softCapWarning', { cpus: cpuCount })}
+        </Callout>
+      )}
+
+      {/* Stale local pairings: this device holds runner tokens no longer in the roster (revoked/another account). Offer to clean them up. */}
+      {bridge && staleLocal.length > 0 && (
+        <Callout tone="warning">
+          <span className="flex flex-wrap items-center justify-between gap-2">
+            <span>{t('staleLocalWarning', { count: staleLocal.length })}</span>
+            <Button size="xs" variant="secondary" onClick={onCleanupStale} disabled={pending}>
+              <Laptop />
+              {t('cleanUpStale')}
+            </Button>
+          </span>
+        </Callout>
+      )}
 
       {runners.length === 0 ? (
         <EmptyState
@@ -184,16 +220,16 @@ export function RunnersManager({
       ) : (
         <ul className="divide-y divide-border rounded-lg border bg-card shadow-raise">
           {runners.map((r) => {
-            // For this device (the runner paired to the desktop shell), use the bridge's live status instead of the lastSeenAt estimate.
-            const thisDevice = desktop?.paired === true && desktop.runnerId === r.id
-            const online = thisDevice ? desktop.state !== 'off' : isOnline(r.lastSeenAt)
+            // For a runner paired to this device, use the bridge's live status instead of the lastSeenAt estimate.
+            const live = deviceRunners.find((d) => d.runnerId === r.id)
+            const thisDevice = live !== undefined
+            const online = live ? live.state !== 'off' : isOnline(r.lastSeenAt)
             // Capabilities also prefer live — if the docker daemon stopped after pairing, it's reflected immediately.
-            const caps =
-              thisDevice && desktop.capabilities.length > 0 ? desktop.capabilities : r.capabilities
-            const statusText = thisDevice
-              ? desktop.state === 'running'
-                ? t('running', { count: desktop.activeJobs })
-                : desktop.state === 'idle'
+            const caps = live && live.capabilities.length > 0 ? live.capabilities : r.capabilities
+            const statusText = live
+              ? live.state === 'running'
+                ? t('running', { count: live.activeJobs })
+                : live.state === 'idle'
                   ? t('online')
                   : t('offline')
               : online

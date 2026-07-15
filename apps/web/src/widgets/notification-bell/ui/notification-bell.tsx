@@ -6,7 +6,11 @@ import { Bell, BellOff, BellRing, Check } from 'lucide-react'
 import { useLocale, useTranslations } from 'next-intl'
 
 import { notificationsResponseSchema, type NotificationItem } from '@/entities/notification'
-import { getEverdictDesktop } from '@/shared/lib/desktop-bridge'
+import {
+  desktopHasPairedRunner,
+  getEverdictDesktop,
+  normalizeRunnersStatus,
+} from '@/shared/lib/desktop-bridge'
 import { fmtTimeAgo } from '@/shared/lib/format'
 import { cn } from '@/shared/lib/utils'
 import { DropdownItem, DropdownLabel, DropdownMenu } from '@/shared/ui/dropdown-menu'
@@ -110,15 +114,16 @@ export function NotificationBell({ workspace }: { workspace: string }) {
   useEffect(() => {
     const bridge = getEverdictDesktop()
     if (bridge) {
+      // The desktop owns native OS notifications while ≥1 runner is paired (any of this device's runners, D9).
       void bridge
         .runnerStatus()
         .then((s) => {
-          desktopHandlesNative.current = s.paired
+          desktopHandlesNative.current = desktopHasPairedRunner(normalizeRunnersStatus(s))
         })
         .catch(() => {})
       // Unsubscription happens in the cleanup below, together with the polling timer.
       const off = bridge.onRunnerStatus((s) => {
-        desktopHandlesNative.current = s.paired
+        desktopHandlesNative.current = desktopHasPairedRunner(normalizeRunnersStatus(s))
       })
       cleanupBridge.current = off
     }

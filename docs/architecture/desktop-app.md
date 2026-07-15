@@ -44,6 +44,19 @@
 >   yet loaded — `shouldRecoverToSetup`) auto-opens the setup screen, and `createOrFocusWindow` routes to
 >   setup while that failed state holds (reset when a fresh address is saved / the server loads). Recovery
 >   no longer depends on the tray.
+> - **D9 — one device, several runners (LOCKED 2026-07-15).** The desktop supervises *multiple* independent runner
+>   registrations, not one. The server already models a personal `self` pool keyed by `(owner, runnerId)` — several
+>   runners under one account simply widen that pool — so this is purely a client change. Each pairing is its own `rnr_`
+>   identity; the account page's "Connect this device as a runner" becomes **additive** ("Connect another runner"), and
+>   every runner is an independent row (own live status, own revoke). Per-runner concurrency stays 1 (`maxConcurrent`
+>   unchanged) — **adding runners is how a user widens their pool**; the scorecard's own concurrency drives parallelism.
+>   Resource guard = **soft cap + warning**: the bridge reports `appInfo().cpuCount` and the web warns once this device
+>   hosts ≥ cores runners, but never blocks (the user opts in). Persistence moves from a single `runner-token.bin` +
+>   scalar config meta to an encrypted **token map** (`runner-tokens.bin`, `{ runnerId: rnr_token }`) + a config
+>   **`runners[]`** roster; an older desktop's single pairing is **migrated once** on startup. The bridge shape grows to
+>   match (invariant 3): `runnerStatus()` returns `{ runners: DesktopRunnerStatus[] }`, `unpairRunner(runnerId?)` takes an
+>   optional id (omitted = all), `pairRunner` is additive, `appInfo()` gains `cpuCount`. A newly-deployed web stays
+>   version-skew tolerant against a not-yet-updated desktop by **normalizing** a bare `DesktopRunnerStatus` into the list.
 >
 > - **D1 — the UI is the deployed web, not a rebuild.** The desktop shell renders the SaaS web
 >   (`apps/web`) at its deployed URL inside the app window — the Linear/Slack/Notion model. `apps/web`
@@ -141,15 +154,17 @@ runner would be the third consumer.)
 
 Preload-exposed, only when `new URL(window.location).origin === configuredWebOrigin`:
 
-- `pairRunner({ token, apiUrl, label }): Promise<void>` — web hands the freshly-minted `rnr_` token down;
-  main stores it (keychain) and starts the runner. The token crosses the bridge once, is never persisted
-  by the web, and never comes *back* up.
-- `runnerStatus(): Promise<{ state: "off"|"idle"|"running"; runnerId?, label?, capabilities?, activeJobs? }>`
-  + a `subscribe` event for live updates — lets the account page's connected-runners roster show *this device*
-  truthfully instead of `lastSeenAt` guessing.
-- `unpairRunner(): Promise<void>` — stop + forget keychain entry (web still calls the revoke API — the
-  authority stays server-side).
-- `appInfo(): { version, platform }` — for the account page to render "this device" affordances at all.
+- `pairRunner({ token, runnerId?, apiUrl? }): Promise<void>` — web hands a freshly-minted `rnr_` token down;
+  main stores it (keychain token map, keyed by `runnerId`) and starts that runner. **Additive** (D9): each call
+  registers one more runner; a re-pair of the same `runnerId` replaces just its host. The token crosses the bridge
+  once, is never persisted by the web, and never comes *back* up.
+- `runnerStatus(): Promise<{ runners: DesktopRunnerStatus[] }>` + a `subscribe` event for live updates — the
+  aggregate over **every** runner paired on this device (D9), so the roster shows each *this device* row truthfully
+  instead of `lastSeenAt` guessing. (An older desktop returns a bare `DesktopRunnerStatus`; the web normalizes it.)
+- `unpairRunner(runnerId?): Promise<void>` — stop + forget one runner's keychain entry, or (omitted) all of them
+  (web still calls the revoke API — the authority stays server-side).
+- `appInfo(): { version, platform, hostname, capabilities, cpuCount }` — for the account page to render "this device"
+  affordances, and `cpuCount` for the soft-cap warning (D9).
 
 That's the whole API. No generic `invoke`, no fs/shell access, nothing else.
 
@@ -250,6 +265,18 @@ That's the whole API. No generic `invoke`, no fs/shell access, nothing else.
    env activation writes `userData/app-update.yml` and injects it via `updateConfigPath`.
    **Open**: flip the feed on — user decision (a) public `everdict-releases` + CI PAT vs (b) repo
    public; then add the `publish` block to `electron-builder.yml` (nothing else changes).
+9. ✅ **Multiple runners per device** (D9) — the single-runner client became a **supervisor** of many. Persistence:
+   `token-store` gained an encrypted map (`runner-tokens.bin`, `{ runnerId: rnr_token }`) + `config.runners[]`, with a
+   one-time startup migration of the legacy `runner-token.bin` + scalar meta. `RunnerSupervisor` (replaces
+   `RunnerController`) owns a `Map<runnerId, RunnerHost>`: `pair` is additive (a re-pair of the same id replaces just
+   that host), `unpair(runnerId?)` drops one or all, `status()` aggregates `{ runners: [] }`, `shutdown()` stops every
+   host. The bridge grew to match (invariant 3): `runnerStatus()` → list, `unpairRunner(runnerId?)`, `appInfo().cpuCount`.
+   Web: the runners page connects **additively** ("Connect another runner"), each runner is its own live row + revoke,
+   a **soft-cap** warning shows once this device hosts ≥ `cpuCount` runners (never blocks), and a "clean up" callout
+   discards local tokens for pairings no longer in the roster. Version-skew: a new web **normalizes** an old desktop's
+   bare status object. `RunnerHost` / the MCP lease protocol / the server `self` pool are untouched — additive by
+   construction. Gates green (desktop 63 tests + web lint/typecheck). **Open**: live multi-runner e2e (extend
+   `scripts/live/desktop-runner.mjs` to pair two runners and confirm both lease).
 
 ## Decisions / non-goals
 

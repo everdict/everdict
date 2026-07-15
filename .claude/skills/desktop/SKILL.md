@@ -29,6 +29,12 @@ logged-in web session over a minimal preload bridge.
 2. `contextIsolation: true`, `nodeIntegration: false`, `sandbox: true` — always.
 3. The bridge is **exactly** `pairRunner` / `runnerStatus` (+ status events) / `unpairRunner` /
    `appInfo`. No generic `invoke`, no fs/shell exposure. New methods need a locked design decision.
+   The four methods are **multi-runner** (D9 — a device hosts several runners via `RunnerSupervisor`):
+   `pairRunner({token, runnerId?, apiUrl?})` is **additive** (each call adds one runner, keyed by `runnerId`);
+   `runnerStatus()`/its event return the aggregate `{ runners: DesktopRunnerStatus[] }` (a new web must **normalize**
+   an older desktop's bare `DesktopRunnerStatus`); `unpairRunner(runnerId?)` drops one runner or (omitted) all;
+   `appInfo()` includes `cpuCount` (the soft-cap reference). Tokens persist as an encrypted map
+   (`runner-tokens.bin`, `{runnerId: rnr_token}`) + `config.runners[]`, never a single file.
    One separate surface exists (D8): `window.everdictSetup` (`getServerUrl`/`setServerUrl`) — exposed only
    with the `--everdict-setup` argv flag (setup window), and main-side IPC accepts only the local
    `setup.html` `file://` senderFrame. Never merge it into `everdictDesktop`.

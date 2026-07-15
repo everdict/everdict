@@ -23,8 +23,10 @@ if (process.argv.includes("--everdict-setup")) {
 if (expectedOrigin !== undefined && location.origin === expectedOrigin) {
   electron.contextBridge.exposeInMainWorld("everdictDesktop", {
     appInfo: () => electron.ipcRenderer.invoke("everdict:app-info"),
+    // Additive pairing (D9): each call registers one more runner keyed by runnerId.
     pairRunner: (payload: unknown) => electron.ipcRenderer.invoke("everdict:pair-runner", payload),
-    unpairRunner: () => electron.ipcRenderer.invoke("everdict:unpair-runner"),
+    // unpairRunner(runnerId?) — a specific runner, or (omitted) all runners on this device.
+    unpairRunner: (runnerId?: string) => electron.ipcRenderer.invoke("everdict:unpair-runner", runnerId),
     runnerStatus: () => electron.ipcRenderer.invoke("everdict:runner-status"),
     onRunnerStatus: (callback: (status: unknown) => void) => {
       const listener = (_event: electron.IpcRendererEvent, status: unknown) => callback(status);

@@ -12,6 +12,7 @@ export const BRIDGE_CHANNELS = {
 } as const;
 
 // The pairing payload the web (bridge caller) passes — boundary Zod validation. The token arrives via this path and is stored only in the keychain.
+// Pairing is additive (skill desktop D9): each call adds/starts one more runner keyed by runnerId (a re-pair of the same runnerId replaces its token/host).
 export const PairPayloadSchema = z.object({
   token: z.string().startsWith("rnr_"),
   runnerId: z.string().min(1).optional(),
@@ -19,7 +20,10 @@ export const PairPayloadSchema = z.object({
 });
 export type PairPayload = z.infer<typeof PairPayloadSchema>;
 
-// The runner status shown to the web — manually kept in sync with the apps/web `shared/lib/desktop-bridge.ts` mirror (the web does not depend on @everdict/*).
+// unpairRunner(runnerId?) — a specific runner by id, or (omitted) all runners on this device. Boundary-validated.
+export const UnpairPayloadSchema = z.string().min(1).optional();
+
+// The status of ONE paired runner — manually kept in sync with the apps/web `shared/lib/desktop-bridge.ts` mirror (the web does not depend on @everdict/*).
 export interface DesktopRunnerStatus {
   paired: boolean;
   runnerId?: string;
@@ -28,11 +32,19 @@ export interface DesktopRunnerStatus {
   capabilities: string[];
 }
 
+// The aggregate status pushed to the web — every runner paired on this device (skill desktop D9).
+// An older desktop returned a bare DesktopRunnerStatus; the web mirror normalizes both shapes (version-skew tolerant).
+export interface DesktopRunnersStatus {
+  runners: DesktopRunnerStatus[];
+}
+
 export interface DesktopAppInfo {
   version: string;
   platform: string;
   hostname: string;
   capabilities: string[];
+  // Logical CPU count — the soft-cap reference the web warns against when pairing more runners than cores (D9).
+  cpuCount: number;
 }
 
 // Validate the IPC sender frame origin — the real boundary of bridge permission (enforced here, not by the navigation policy).
@@ -58,8 +70,8 @@ export interface BridgeDeps {
   webOrigin(): string | null;
   appInfo(): Promise<DesktopAppInfo>;
   pair(payload: PairPayload): Promise<void>;
-  unpair(): Promise<void>;
-  status(): DesktopRunnerStatus;
+  unpair(runnerId?: string): Promise<void>;
+  status(): DesktopRunnersStatus;
 }
 
 export function registerBridge(ipc: IpcMainLike, deps: BridgeDeps): void {
@@ -81,7 +93,7 @@ export function registerBridge(ipc: IpcMainLike, deps: BridgeDeps): void {
   );
   ipc.handle(
     BRIDGE_CHANNELS.unpair,
-    guarded(() => deps.unpair()),
+    guarded((payload) => deps.unpair(UnpairPayloadSchema.parse(payload))),
   );
   ipc.handle(
     BRIDGE_CHANNELS.status,
