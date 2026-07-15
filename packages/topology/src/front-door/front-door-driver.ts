@@ -8,12 +8,50 @@ import {
   UpstreamError,
 } from "@everdict/contracts";
 
+// A resolved multipart file part (G2) — the field name + filename + the raw content (resolved from the case env by the backend).
+export interface FrontDoorFilePart {
+  field: string;
+  filename: string;
+  content: string;
+}
+
 // front-door request options — method (from the submit verb; defaults to POST) + headers (values interpolated) + timeoutMs (socket idle timeout).
 // timeoutMs: for sync completion, no data flows while the server holds the response, so the socket no-flow cap is effectively the completion deadline.
+// encoding/files (G2): "form" sends multipart/form-data (payload → text parts, files → file parts) instead of JSON — for agents whose submit is multipart with attachments.
 export interface FrontDoorRequestOpts {
   method?: string;
   headers?: Record<string, string>;
   timeoutMs?: number;
+  encoding?: "json" | "form";
+  files?: FrontDoorFilePart[];
+}
+
+// Encode the request body per the encoding: JSON (default) or multipart/form-data (payload fields → text parts, files →
+// file parts). Returns the body buffer + the content-type header to set. Pure/deterministic — the boundary is derived
+// from the content so tests are stable (no random/time).
+export function encodeBody(
+  payload: Record<string, unknown>,
+  opts?: FrontDoorRequestOpts,
+): { body: Buffer; contentType: string } {
+  const multipart = opts?.encoding === "form" || (opts?.files?.length ?? 0) > 0;
+  if (!multipart) return { body: Buffer.from(JSON.stringify(payload)), contentType: "application/json" };
+  const boundary = `----everdictFormBoundary${Buffer.from(JSON.stringify(payload)).length.toString(36)}`;
+  const parts: Buffer[] = [];
+  const push = (s: string): number => parts.push(Buffer.from(s, "utf8"));
+  for (const [k, v] of Object.entries(payload)) {
+    push(`--${boundary}\r\nContent-Disposition: form-data; name="${k}"\r\n\r\n`);
+    push(`${typeof v === "string" ? v : JSON.stringify(v)}\r\n`);
+  }
+  for (const f of opts?.files ?? []) {
+    push(
+      `--${boundary}\r\nContent-Disposition: form-data; name="${f.field}"; filename="${f.filename}"\r\n` +
+        "Content-Type: application/octet-stream\r\n\r\n",
+    );
+    parts.push(Buffer.from(f.content, "utf8"));
+    push("\r\n");
+  }
+  push(`--${boundary}--\r\n`);
+  return { body: Buffer.concat(parts), contentType: `multipart/form-data; boundary=${boundary}` };
 }
 // Function that POSTs task+wiring to the front-door — returns the response body (JSON) (for extracting a trace-id in returned correlation).
 // Injectable in tests. (injected correlation doesn't need the body, so a void return is also allowed.)
@@ -40,11 +78,11 @@ export type OpenStreamFn = (
 const fetchSubmit: SubmitFn = (url, payload, opts) =>
   new Promise<unknown>((resolve, reject) => {
     const target = new URL(url);
-    const body = JSON.stringify(payload);
+    const { body, contentType } = encodeBody(payload, opts); // JSON (default) or multipart/form-data (G2)
     const options: RequestOptions = {
       method: opts?.method ?? "POST", // from the submit verb ("POST /runs") — defaults to POST
       // Declared headers (Authorization etc.) go above content-type; content-length is always exact, based on the actual body.
-      headers: { "content-type": "application/json", ...opts?.headers, "content-length": Buffer.byteLength(body) },
+      headers: { "content-type": contentType, ...opts?.headers, "content-length": Buffer.byteLength(body) },
     };
     const onResponse = (res: IncomingMessage): void => {
       const chunks: Buffer[] = [];
@@ -96,10 +134,11 @@ export const fetchStream: OpenStreamFn = async function* (url, payload, opts) {
   const ctrl = new AbortController();
   const timer = opts?.timeoutMs !== undefined ? setTimeout(() => ctrl.abort(), opts.timeoutMs) : undefined;
   try {
+    const { body, contentType } = encodeBody(payload, opts); // JSON (default) or multipart/form-data (G2)
     const res = await fetch(url, {
       method: opts?.method ?? "POST",
-      headers: { "content-type": "application/json", accept: "text/event-stream", ...opts?.headers },
-      body: JSON.stringify(payload),
+      headers: { "content-type": contentType, accept: "text/event-stream", ...opts?.headers },
+      body,
       signal: ctrl.signal,
     });
     if (!res.body) return;
@@ -233,6 +272,8 @@ export interface FrontDoorDriveRequest {
   wiring: Record<string, string>; // statusPath interpolation variables ({run_id} etc.)
   traceRef: string; // default correlation key for injected correlation (= everdict runId)
   headers?: Record<string, string>; // submit/stream/callback request headers (interpolated; unset = none)
+  encoding?: "json" | "form"; // body encoding (G2) — "form" = multipart/form-data (for attachment submits)
+  files?: FrontDoorFilePart[]; // resolved attachments (from the case env) for the multipart submit (G2)
 }
 
 // Abstraction for front-door driving (HOW) — submit then wait per the completion model. The sibling of the infra-agnostic TopologyRuntime (WHERE).
@@ -286,6 +327,8 @@ export class HttpFrontDoorDriver implements FrontDoorDriver {
     const response = await this.submit(joinUrl(req.base, mp.path), req.payload, {
       method: mp.method,
       headers: req.headers,
+      ...(req.encoding ? { encoding: req.encoding } : {}),
+      ...(req.files ? { files: req.files } : {}),
       ...(timeoutMs !== undefined ? { timeoutMs } : {}),
     });
     // Correlation (#3): injected = the injected runId (current), returned = the agent's own id returned in the response.
@@ -313,6 +356,8 @@ export class HttpFrontDoorDriver implements FrontDoorDriver {
       timeoutMs: completion.timeoutMs,
       method: mp.method,
       headers: req.headers,
+      ...(req.encoding ? { encoding: req.encoding } : {}),
+      ...(req.files ? { files: req.files } : {}),
     })) {
       if (!correlated) {
         // Correlate on the first event — A2A issues Task.id up front, so the first event carries its own id (returned). injected is a no-op.
@@ -348,6 +393,8 @@ export class HttpFrontDoorDriver implements FrontDoorDriver {
     const response = await this.submit(joinUrl(req.base, mp.path), req.payload, {
       method: mp.method,
       headers: req.headers,
+      ...(req.encoding ? { encoding: req.encoding } : {}),
+      ...(req.files ? { files: req.files } : {}),
       timeoutMs: completion.timeoutMs, // fire-and-forget submit — a socket cap to avoid a hang (the response comes right back)
     });
     const traceRef = resolveTraceRef(req.correlate, req.traceRef, response);

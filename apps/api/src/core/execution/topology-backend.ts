@@ -26,6 +26,8 @@ export function buildTopologyBackend(
     // name → config with the auth value + correlate + scope). When it yields a config, the pull uses that source
     // (a dev-cluster observability endpoint) instead of the fixed runtime traceSource; undefined = fall back.
     resolveTraceSource?: (tenant: string, harnessId: string) => Promise<TraceSourceConfig | undefined>;
+    // Resolved tenant secrets (SecretStore.entries) — used to resolve the runtime traceSource's authSecret (G1).
+    secretEnv?: Record<string, string>;
   },
 ): Backend {
   const ts = spec.traceSource;
@@ -50,7 +52,18 @@ export function buildTopologyBackend(
           ...(spec.browserImage ? { browserImage: spec.browserImage } : {}),
           ...(deps.registryAuth ? { registryAuth: deps.registryAuth } : {}),
         });
-  const traceSource = buildTraceSource({ kind: ts.kind, endpoint: ts.endpoint });
+  // Build the full fixed source from the runtime spec (G1: 5 kinds + auth/correlate/scope). authSecret → the verbatim
+  // auth-header value from the tenant SecretStore; otel/mlflow read it from headers.authorization and the newer three
+  // inherit it as `auth` (buildTraceSource), so the single headers.authorization mapping covers all five kinds.
+  const tsAuth = ts.authSecret ? deps.secretEnv?.[ts.authSecret] : undefined;
+  const traceSource = buildTraceSource({
+    kind: ts.kind,
+    endpoint: ts.endpoint,
+    ...(tsAuth ? { headers: { authorization: tsAuth } } : {}),
+    ...(ts.correlate ? { correlate: ts.correlate } : {}),
+    ...(ts.service ? { service: ts.service } : {}),
+    ...(ts.project ? { project: ts.project } : {}),
+  });
   // Resolve the harness's selected workspace source per-dispatch → build a full TraceSource (auth/correlate/scope).
   const resolve = deps.resolveTraceSource;
   const traceSourceFor = resolve

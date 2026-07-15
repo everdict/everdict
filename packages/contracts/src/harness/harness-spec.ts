@@ -1,9 +1,18 @@
 import { z } from "zod";
 
-// Trace source — evaluation pulls the trace the harness exported to OTel/MLflow.
+// Trace source — evaluation pulls the trace the harness/runtime exported to its observability platform. 5 kinds at
+// parity with CommandTraceSpec + the workspace trace-source registry (real agents export to Langfuse/LangSmith/Phoenix,
+// not just OTel/MLflow). authSecret = a SecretStore name (resolved to the verbatim auth-header value at dispatch — never
+// plaintext in the spec). correlate = how this run's trace is found: id (runId IS the trace id) | tag (search the
+// everdict.run_id the deployed agent tagged). service = otel/jaeger tag-search scope; project = mlflow experiment /
+// phoenix project. Design: docs/service-harness.md + docs/architecture/suna-harness-gaps.md (G1).
 export const TraceSourceSpecSchema = z.object({
-  kind: z.enum(["otel", "mlflow"]),
+  kind: z.enum(["otel", "mlflow", "langfuse", "langsmith", "phoenix"]),
   endpoint: z.string(),
+  authSecret: z.string().optional(),
+  correlate: z.enum(["id", "tag"]).optional(),
+  service: z.string().optional(),
+  project: z.string().optional(),
 });
 export type TraceSourceSpec = z.infer<typeof TraceSourceSpecSchema>;
 
@@ -197,9 +206,22 @@ export type FrontDoorCorrelate = z.infer<typeof FrontDoorCorrelateSchema>;
 // Substitute {{var}} tokens inside bodyTemplate's string values with per-run wiring (task/run_id/thread_id/object_prefix/target_cdp_url…)
 // — the same convention as CommandHarness {{task}}. Wiring names are derived from dependencies[].isolateBy.
 // headers: headers to attach to the submit/stream/callback request (values also {{var}}-interpolated — e.g. Authorization). method comes from submit's verb ("POST /runs").
+// A front-door attachment (G2): carry a file from the case's repo-env files into a multipart submit. `field` = the
+// multipart part name the agent expects; `from` = a path key in the case env's source.files (the attachment content);
+// `filename` = the sent filename (defaults to `from`). Used only with encoding:"form". Design: docs/architecture/suna-harness-gaps.md.
+export const FrontDoorFileSchema = z
+  .object({ field: z.string(), from: z.string(), filename: z.string().optional() })
+  .strict();
+export type FrontDoorFile = z.infer<typeof FrontDoorFileSchema>;
+
 export const FrontDoorRequestSchema = z.object({
   bodyTemplate: z.record(z.unknown()).optional(),
   headers: z.record(z.string()).optional(),
+  // How the body is sent: "json" (default, application/json) | "form" (multipart/form-data — bodyTemplate fields as
+  // text parts + `files` as file parts). Needed for agents whose submit is multipart with file attachments (e.g. Suna's
+  // /api/agent/initiate). Design: docs/architecture/suna-harness-gaps.md (G2).
+  encoding: z.enum(["json", "form"]).optional(),
+  files: z.array(FrontDoorFileSchema).optional(), // attachments carried from the case env into the multipart submit
 });
 export type FrontDoorRequest = z.infer<typeof FrontDoorRequestSchema>;
 

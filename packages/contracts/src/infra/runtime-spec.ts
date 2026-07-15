@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { TraceSourceSpecSchema } from "../harness/harness-spec.js";
 import { CapabilityNameSchema } from "./capability.js";
 
 // Runtime — an execution-infra definition a tenant registers ("where the eval runs"). local | nomad | k8s.
@@ -39,7 +40,10 @@ export const LocalRuntimeSpecSchema = z.object({ kind: z.literal("local"), ...ba
 // e.g. browser-use) (→ apps/api routes it via ServiceTopologyBackend; as a capability it is `topology`).
 // Without a traceSource it is a plain compute runtime. (The old topology kind was removed in slice 5b-2 — the orchestrator is implied by kind [nomad|k8s].)
 const topologyConfig = {
-  traceSource: z.object({ kind: z.enum(["otel", "mlflow"]), endpoint: z.string() }).optional(),
+  // 5 kinds + auth/correlate/scope (G1) — a runtime can point its topology harnesses at Langfuse/LangSmith/Phoenix, not
+  // just OTel/MLflow. authSecret resolves from the tenant SecretStore at dispatch; per-harness selection can still
+  // override this fixed source via the workspace trace-source registry.
+  traceSource: TraceSourceSpecSchema.optional(),
   browserImage: z.string().optional(), // per-case browser image (falls back to the runtime default)
 };
 

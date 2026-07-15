@@ -71,8 +71,16 @@ visibility/isolation guarantee over where Suna's tools actually run. (A delibera
 - **Model endpoint** — Suna runs its own litellm; if a harness subprocess needed a gateway, `collectAuthEnv` now forwards `OPENAI_BASE_URL` (the earlier G3 fix).
 
 ## Prioritized fixes
-1. **GAP 1 (small, high-value):** widen `ServiceHarnessSpec.traceSource` to 5 kinds + auth/correlate/scope → Langfuse (and langsmith/phoenix) work on the inline path, at parity with the workspace registry. Directly unblocks Suna's trace pull without requiring the registry.
-2. **GAP 2 (medium):** front-door `request.encoding` + a `files` channel → submit multipart / attachment-bearing tasks. Generalizes to any upload-first agent.
+1. **GAP 1 — SHIPPED.** `TraceSourceSpecSchema` (shared by `ServiceHarnessSpec.traceSource` and
+   `RuntimeSpec.topologyConfig.traceSource`) is widened to the 5 kinds + `authSecret`/`correlate`/`service`/`project`;
+   `buildTopologyBackend` builds the full config and resolves `authSecret` from the tenant SecretStore (`secretEnv`), so
+   the inline runtime/harness trace source can point at **Langfuse** (and langsmith/phoenix) with auth + tag correlation —
+   at parity with the workspace registry. The Suna template now sets `traceSource: {kind:"langfuse", correlate:"tag", …}`.
+2. **GAP 2 — SHIPPED.** `FrontDoorRequest` gains `encoding: "json" | "form"` + a `files` channel
+   (`{field, from, filename?}`, resolved from the case env's inline repo files into multipart parts by
+   `resolveFrontDoorFiles`); the front-door driver's `encodeBody` sends `multipart/form-data` (payload → text parts, files
+   → file parts) on both the submit and stream paths. So Suna's multipart `/api/agent/initiate` with **attachments** is
+   expressible (`request.encoding:"form"` + `files`). Generalizes to any upload-first agent.
 3. **GAP 3 (non-goal for now):** external tier already connects Supabase; Daytona sandbox stays agent-managed.
 
 The bundle (`examples/bundles/suna/`) is declarative: Suna needs an external Supabase + Daytona + provider keys, so it is

@@ -35,11 +35,13 @@ Suna deployment:
 ## What this exposes in everdict
 
 Building this harness surfaced concrete everdict gaps — see **`docs/architecture/suna-harness-gaps.md`** for the grounded
-analysis. In short:
+analysis. Two of them are now **fixed** (and the template above uses them):
 
-- **GAP 1 (small):** the harness's INLINE `traceSource` is `otel|mlflow` only — Suna uses **Langfuse**. The workspace
-  trace-source registry (5 kinds, incl. langfuse) already pulls it; widening the inline field to parity is the clean fix.
-- **GAP 2 (medium):** the front-door submits JSON only, but Suna's initiate is `multipart/form-data` with **file
-  attachments** — everdict needs a `request.encoding` + a `files` channel to submit upload-bearing tasks.
+- **GAP 1 — SHIPPED:** the inline `traceSource` is widened to 5 kinds + auth/correlate/scope, so it can point at
+  **Langfuse** with tag correlation (`traceSource: {kind:"langfuse", correlate:"tag", authSecret:…}`), at parity with the
+  workspace trace-source registry.
+- **GAP 2 — SHIPPED:** the front-door gains `request.encoding: "form"` + a `files` channel, so Suna's
+  `multipart/form-data` initiate with **file attachments** is expressible (`files: [{field, from}]`, resolved from the
+  case's inline repo files).
 - **GAP 3 (non-goal):** Supabase connects via the `external` dependency tier; Daytona (the agent's per-run sandbox) stays
   agent-managed — everdict doesn't model an agent-owned remote sandbox.

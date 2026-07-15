@@ -49,8 +49,10 @@
       "timeoutMs": 600000
     },
     "request": {
-      "bodyTemplate": { "prompt": "{{task}}", "thread_id": "{{thread_id}}" }
+      "encoding": "form",
+      "bodyTemplate": { "prompt": "{{task}}", "thread_id": "{{thread_id}}" },
+      "files": [{ "field": "files", "from": "attachment.txt" }]
     }
   },
-  "traceSource": { "kind": "otel", "endpoint": "http://placeholder-see-readme" }
+  "traceSource": { "kind": "langfuse", "endpoint": "https://cloud.langfuse.com", "authSecret": "langfuse-key", "correlate": "tag" }
 }

@@ -91,6 +91,8 @@ export function buildDispatch(deps: {
           ...(callbackRendezvous ? { callbackRendezvous } : {}),
           // Workspace registry pull credentials — the topology runtime authenticates when pulling service images (nomad auth / k8s imagePullSecrets).
           ...(opts.registryAuth ? { registryAuth: opts.registryAuth } : {}),
+          // Resolved tenant secrets — for the runtime traceSource's authSecret (G1, langfuse/authenticated endpoints).
+          ...(opts.secretEnv ? { secretEnv: opts.secretEnv } : {}),
           // Per-dispatch: the harness's selected workspace trace source (pull from the dev-cluster observability platform).
           resolveTraceSource: (tenant, harnessId) => traceSourceForDispatch.resolve(tenant, harnessId),
         })

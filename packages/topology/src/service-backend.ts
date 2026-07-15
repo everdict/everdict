@@ -8,8 +8,10 @@ import {
 } from "@everdict/backends";
 import {
   type AgentJob,
+  BadRequestError,
   type CaseResult,
   type EnvSnapshot,
+  type FrontDoorFile,
   type Grader,
   InternalError,
   type Score,
@@ -26,6 +28,7 @@ import { captureCdpScreenshot } from "./front-door/capture-cdp.js";
 import {
   type CallbackRendezvous,
   type FrontDoorDriver,
+  type FrontDoorFilePart,
   type GetJsonFn,
   HttpFrontDoorDriver,
   type OpenStreamFn,
@@ -41,6 +44,25 @@ import { applyImagePins } from "./image-pins.js";
 
 // Backward-compatible re-export — keep existing `import { type SubmitFn } from "./service-backend.js"`.
 export type { SubmitFn } from "./front-door/front-door-driver.js";
+
+// Resolve declared front-door attachments (frontDoor.request.files, G2) from the case env's inline repo files into
+// multipart parts. A declared attachment whose `from` is not present is a config error (fail-fast) — never a silently
+// missing file. Only repo-env inline `source.files` are supported today (the attachment content lives in the case data).
+export function resolveFrontDoorFiles(files: FrontDoorFile[], evalCase: AgentJob["evalCase"]): FrontDoorFilePart[] {
+  const env = evalCase.env;
+  const source = env.kind === "repo" ? env.source : undefined;
+  const map = source && "files" in source ? source.files : undefined;
+  return files.map((f) => {
+    const content = map?.[f.from];
+    if (content === undefined)
+      throw new BadRequestError(
+        "BAD_REQUEST",
+        { field: f.field, from: f.from },
+        `front-door attachment "${f.from}" is not in the case env files (only repo-env inline source.files are supported).`,
+      );
+    return { field: f.field, filename: f.filename ?? f.from, content };
+  });
+}
 
 export interface ServiceTopologyBackendOptions {
   runtime: TopologyRuntime;
@@ -168,6 +190,11 @@ export class ServiceTopologyBackend implements Backend, ScreenCapturable {
       const headers = spec.frontDoor.request?.headers
         ? interpolateHeaders(spec.frontDoor.request.headers, wiring)
         : undefined;
+      // Attachments (#G2): resolve each declared front-door file from the case env's repo files into a multipart part.
+      const encoding = spec.frontDoor.request?.encoding;
+      const files = spec.frontDoor.request?.files?.length
+        ? resolveFrontDoorFiles(spec.frontDoor.request.files, job.evalCase)
+        : undefined;
       const outcome = await driver.drive({
         base,
         submit: spec.frontDoor.submit,
@@ -177,6 +204,8 @@ export class ServiceTopologyBackend implements Backend, ScreenCapturable {
         wiring,
         traceRef: runId,
         ...(headers ? { headers } : {}),
+        ...(encoding ? { encoding } : {}),
+        ...(files ? { files } : {}),
       });
       // Completion deadline exceeded = the eval result can't be confirmed (grading a half-done state misleads) → make it an explicit run failure.
       if (outcome.status === "timeout") {
