@@ -6,7 +6,7 @@ import {
   type ServiceHarnessSpec,
   resolveHarnessInstance,
 } from "@everdict/contracts";
-import { modelBindingLabel, referencesUserSecret } from "@everdict/domain";
+import { assertPortable, modelBindingLabel, referencesUserSecret } from "@everdict/domain";
 import { asService } from "../registry.js";
 import { VersionedStore } from "../versioned-store.js";
 
@@ -89,7 +89,9 @@ export class InMemoryHarnessInstanceRegistry implements HarnessInstanceRegistry 
   // On register, validate template existence + pin validity via resolve (reject on failure — fail fast).
   async register(tenant: string, instance: HarnessInstanceSpec, createdBy?: string): Promise<void> {
     const template = await this.templates.get(tenant, instance.template.id, instance.template.version);
-    resolveHarnessInstance(template, instance); // throws BadRequest on missing/mismatched pins
+    // Resolve validates pins; assertPortable then hard-blocks a service spec that would resolve to different addresses
+    // per runtime (structural errors only — host-literal warnings are surfaced by the caller). docs/architecture/topology-portability.md.
+    assertPortable(resolveHarnessInstance(template, instance));
     this.store.register(tenant, instance, createdBy);
   }
   async has(tenant: string, id: string, version: string): Promise<boolean> {

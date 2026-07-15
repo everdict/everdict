@@ -49,6 +49,33 @@ describe("HarnessInstanceRegistry", () => {
     );
   });
 
+  it("register() hard-blocks a structurally non-portable service (a peer addressed by its literal name)", async () => {
+    const bad: HarnessTemplateSpec = {
+      ...buTemplate,
+      services: [
+        { name: "planner", needs: ["browser"], perRun: [], replicas: 1, env: { BROWSER_URL: "http://browser:9222" } },
+        { name: "browser", port: 9222, needs: [], perRun: [], replicas: 1, env: {} },
+      ],
+    };
+    await templates.register("acme", bad);
+    await expect(
+      instances.register("acme", instance("pr-1", { planner: "p:1", browser: "b:1" })),
+    ).rejects.toBeInstanceOf(BadRequestError);
+  });
+
+  it("register() does NOT block a host-literal-only service (a warning is surfaced elsewhere, not blocked)", async () => {
+    const warn: HarnessTemplateSpec = {
+      ...buTemplate,
+      services: [
+        { name: "planner", port: 8080, needs: [], perRun: [], replicas: 1, env: { MLFLOW: "http://localhost:5000" } },
+        { name: "browser", needs: [], perRun: [], replicas: 1, env: {} },
+      ],
+    };
+    await templates.register("acme", warn);
+    await instances.register("acme", instance("pr-2", { planner: "p:1", browser: "b:1" })); // succeeds despite the warning
+    expect((await instances.get("acme", "bu", "pr-2")).kind).toBe("service");
+  });
+
   it("instance register with a missing slot pin → BadRequestError (register rejected)", async () => {
     await templates.register("acme", buTemplate);
     await expect(instances.register("acme", instance("x", { planner: "p" }))).rejects.toBeInstanceOf(BadRequestError);

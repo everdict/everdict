@@ -9,6 +9,10 @@ export const ValidateHarnessResultSchema = z.union([
     id: z.string(),
     version: z.string(),
     imageWarnings: z.array(ImageWarningSchema).optional().describe("Present only when non-empty (warn-not-block)"),
+    portabilityWarnings: z
+      .array(z.string())
+      .optional()
+      .describe("Cross-runtime portability warnings (host literals) — present only when non-empty (warn-not-block)"),
   }),
   z.object({
     ok: z.literal(false),

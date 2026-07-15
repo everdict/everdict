@@ -82,7 +82,13 @@ export {
 export { diffHarnessSpecs } from "./harness/harness-diff.js";
 
 // harness — cross-runtime portability lint (reject a service spec that resolves to different addresses per runtime)
-export { type PortabilityIssue, type PortabilityRule, checkPortability } from "./harness/portability.js";
+export {
+  type PortabilityIssue,
+  type PortabilityRule,
+  assertPortable,
+  checkPortability,
+  portabilityErrors,
+} from "./harness/portability.js";
 
 // harness — Model-binding → connection env (provider-standard names + per-binding override; apiKeySecret resolution)
 export {

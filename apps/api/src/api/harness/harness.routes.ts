@@ -2,7 +2,13 @@ import { VersionTagsBodySchema, setVersionTags } from "@everdict/application-con
 import { RepinBodySchema, repinHarnessImages } from "@everdict/application-control";
 import { deleteHarnessVersion, harnessIsPrivate, harnessVisibleTo } from "@everdict/application-control";
 import { AppError, HarnessInstanceSpecSchema, type ImageWarning, resolveHarnessInstance } from "@everdict/contracts";
-import { classifyImageRef, collectHarnessImages, diffHarnessSpecs, imageWarnings } from "@everdict/domain";
+import {
+  checkPortability,
+  classifyImageRef,
+  collectHarnessImages,
+  diffHarnessSpecs,
+  imageWarnings,
+} from "@everdict/domain";
 import type { FastifyInstance } from "fastify";
 import { type ServerDeps, gate, resolvePrincipal, sendError, zodIssues } from "../route-context.js";
 import { harnessDocs } from "./harness.docs.js";
@@ -21,6 +27,22 @@ export function registerHarnessRoutes(app: FastifyInstance, deps: ServerDeps): v
     if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
     try {
       gate(principal, "harnesses:register");
+      // Structural portability errors are hard-blocked inside the registry's register (the single chokepoint every path
+      // — route/bundle/MCP — flows through). Host-literal warnings do NOT block; surface them so the author can migrate.
+      // docs/architecture/topology-portability.md.
+      let portabilityWarnings: string[] = [];
+      if (deps.harnessTemplates) {
+        const template = await deps.harnessTemplates.get(
+          principal.workspace,
+          parsed.data.template.id,
+          parsed.data.template.version,
+        );
+        const resolved = resolveHarnessInstance(template, parsed.data);
+        if (resolved.kind === "service")
+          portabilityWarnings = checkPortability(resolved)
+            .filter((i) => i.severity === "warning")
+            .map((i) => i.message);
+      }
       await deps.harnessInstances.register(principal.workspace, parsed.data, principal.subject);
       // Image-classification warnings (warn-not-block) — local/unqualified images have no pull guarantee (risky to run off the build machine).
       const warnings = await harnessImageWarnings(deps, principal.workspace, parsed.data.id, parsed.data.version);
@@ -36,6 +58,7 @@ export function registerHarnessRoutes(app: FastifyInstance, deps: ServerDeps): v
         id: parsed.data.id,
         version: parsed.data.version,
         ...(warnings.length > 0 ? { imageWarnings: warnings } : {}),
+        ...(portabilityWarnings.length > 0 ? { portabilityWarnings } : {}),
         ...(isPrivate ? { private: true } : {}),
       });
     } catch (err) {
@@ -63,6 +86,15 @@ export function registerHarnessRoutes(app: FastifyInstance, deps: ServerDeps): v
         parsed.data.template.version,
       );
       const resolved = resolveHarnessInstance(template, parsed.data); // throws on missing/mismatched pin or missing template
+      // Portability lint — structural errors fail the dry-run (ok:false) like a schema/pin failure (register hard-blocks
+      // the same); host-literal warnings are surfaced (non-blocking) so the author can migrate. docs/architecture/topology-portability.md.
+      let portabilityWarnings: string[] = [];
+      if (resolved.kind === "service") {
+        const portabilityIssues = checkPortability(resolved);
+        const errors = portabilityIssues.filter((i) => i.severity === "error");
+        if (errors.length > 0) return reply.send({ ok: false, errors: errors.map((i) => i.message) });
+        portabilityWarnings = portabilityIssues.filter((i) => i.severity === "warning").map((i) => i.message);
+      }
       // Image-classification warnings (warn-not-block) — the pre-registration check surfaces local/unqualified images.
       // Classification runs against *all* registered registries — belonging to any one makes it the workspace class.
       const coords = await deps.imageRegistryService?.coordinates(principal.workspace);
@@ -73,6 +105,7 @@ export function registerHarnessRoutes(app: FastifyInstance, deps: ServerDeps): v
         id: parsed.data.id,
         version: parsed.data.version,
         ...(warnings.length > 0 ? { imageWarnings: warnings } : {}),
+        ...(portabilityWarnings.length > 0 ? { portabilityWarnings } : {}),
       });
     } catch (err) {
       return reply.send({ ok: false, errors: [err instanceof AppError ? err.message : String(err)] });

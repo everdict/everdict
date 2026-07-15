@@ -6,6 +6,7 @@ import {
   resolveHarnessInstance,
 } from "@everdict/contracts";
 import type { SqlClient } from "@everdict/db";
+import { assertPortable } from "@everdict/domain";
 import { PgVersionedStore } from "../pg-versioned-store.js";
 import { asService } from "../registry.js";
 import {
@@ -37,7 +38,9 @@ export class PgHarnessInstanceRegistry implements HarnessInstanceRegistry {
 
   async register(tenant: string, instance: HarnessInstanceSpec, createdBy?: string): Promise<void> {
     const template = await this.templates.get(tenant, instance.template.id, instance.template.version);
-    resolveHarnessInstance(template, instance); // validate pin validity before register (reject on failure)
+    // Resolve validates pins; assertPortable then hard-blocks a non-portable service spec (structural errors only —
+    // host-literal warnings are surfaced by the caller). docs/architecture/topology-portability.md.
+    assertPortable(resolveHarnessInstance(template, instance));
     await this.store.register(tenant, instance, createdBy);
   }
   has(tenant: string, id: string, version: string): Promise<boolean> {
