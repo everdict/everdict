@@ -149,7 +149,9 @@ export class RunnerHub {
         new UpstreamError(
           "UPSTREAM_ERROR",
           { runnerId: key.runnerId, reason: "no_runner" },
-          "No self-hosted runner activity — no runner is connected, or it is idle/dead.",
+          "No self-hosted runner activity — the runner is not connected, is idle/dead, or (if the control plane runs " +
+            "multiple replicas) it is attached to a different replica than the one holding this job. Check the runner is " +
+            "online; for a multi-replica deployment, pin self-hosted dispatch to one replica (the lease hub is in-process).",
         ),
       );
     }, this.queueTimeoutMs);
