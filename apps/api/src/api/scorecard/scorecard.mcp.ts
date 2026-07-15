@@ -185,6 +185,17 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
     );
 
     server.registerTool(
+      "cancel_scorecard",
+      {
+        description:
+          "Stop a running/queued batch (user cancel): mark it cancelled (terminal, excluded from baseline/diff/leaderboard), stop firing the remaining cases, and force-free the runtime of the in-flight ones (managed backends killed; self-hosted lease jobs aborted on the runner's next heartbeat). Already-terminal → conflict; other workspace / missing → NOT_FOUND.",
+        inputSchema: { id: z.string().describe("scorecard id to stop (must be queued/running)") },
+      },
+      ({ id }) =>
+        run(principal, "scorecards:run", async () => ok(serveScorecard(await scorecards.cancel({ tenant: ws, id })))),
+    );
+
+    server.registerTool(
       "list_scorecards",
       { description: "This workspace's scorecards (summary only — excludes heavy per-case results)", inputSchema: {} },
       () => run(principal, "scorecards:read", async () => ok(await scorecards.list(ws))),

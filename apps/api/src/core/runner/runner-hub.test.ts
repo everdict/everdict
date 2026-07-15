@@ -143,7 +143,7 @@ describe("RunnerHub", () => {
       // Even well past queueTimeoutMs (100), a heartbeat every 30ms resets it → not rejected (300ms elapsed total).
       for (let i = 0; i < 10; i++) {
         await vi.advanceTimersByTimeAsync(30);
-        expect(hub.heartbeat(keyA, "j-long")).toBe(true);
+        expect(hub.heartbeat(keyA, "j-long").extended).toBe(true);
       }
       expect(rejected).toBe(false);
       expect(hub.complete(keyA, "j-long", result)).toBe(true);
@@ -170,7 +170,7 @@ describe("RunnerHub", () => {
       // The runner spends >queueTimeoutMs on c1, heartbeating it every 30ms; c2 sits un-leased the whole time (300ms total).
       for (let i = 0; i < 10; i++) {
         await vi.advanceTimersByTimeAsync(30);
-        expect(hub.heartbeat(keyA, "j-0")).toBe(true);
+        expect(hub.heartbeat(keyA, "j-0").extended).toBe(true);
       }
       expect(rejected2).toBe(false); // pre-fix: c2's idle timer never resets → wrongly rejected; post-fix: kept alive
       // Runner finishes c1, then leases c2 and completes it normally.
@@ -238,10 +238,10 @@ describe("RunnerHub", () => {
     hub.enqueue(keyA, job("c1"));
     hub.lease(keyA); // t=0
     t = 80;
-    expect(hub.heartbeat(keyA, "j1")).toBe(true); // renew lease (leasedAt=80)
+    expect(hub.heartbeat(keyA, "j1").extended).toBe(true); // renew lease (leasedAt=80)
     t = 150; // expired against the first lease but not against the heartbeat (80) → not requeued
     expect(hub.lease(keyA)).toBeNull();
-    expect(hub.heartbeat(keyA, "nope")).toBe(false); // unknown jobId
+    expect(hub.heartbeat(keyA, "nope").extended).toBe(false); // unknown jobId
   });
 });
 
@@ -295,7 +295,7 @@ describe("RunnerHub — workspace pool (N runners drain)", () => {
       expect(hub.lease(r1)?.jobId).toBe("p-0"); // r1 takes p1 from the pool (serial)
       for (let i = 0; i < 10; i++) {
         await vi.advanceTimersByTimeAsync(30);
-        expect(hub.heartbeat(r1, "p-0")).toBe(true); // heartbeat on the running pool job (r1's own key)
+        expect(hub.heartbeat(r1, "p-0").extended).toBe(true); // heartbeat on the running pool job (r1's own key)
       }
       expect(rejected).toBe(false); // p2 kept alive via the runner's proof-of-life across the owner pool
       hub.complete(r1, "p-0", result);
@@ -378,5 +378,46 @@ describe("RunnerHub — workspace pool (N runners drain)", () => {
     hub.enqueue(poolKeyFor(OWNER), job("p2")); // wake cursor=1 → r2 first → r2 processes (rotation)
     await workers;
     expect([...seen].sort()).toEqual(["r1", "r2"]); // one each across the two runners (no monopoly)
+  });
+});
+
+// Cancellation — a user stops a scorecard (or supersede reclaims it); the hub cancels that batch's in-flight jobs.
+describe("RunnerHub — requestCancel (user stop / supersede)", () => {
+  const withBatch = (id: string, batchId: string): AgentJob => ({ ...job(id), batchId });
+
+  it("rejects a leased job's promise now and tells the runner to abort on its next heartbeat", async () => {
+    let n = 0;
+    const hub = new RunnerHub({ newJobId: () => `j-${n++}` });
+    const dispatched = hub.enqueue(keyA, withBatch("c1", "sc-1"));
+    const settled = dispatched.then(
+      () => ({ ok: true as const }),
+      (e: unknown) => ({ ok: false as const, e }),
+    );
+    expect(hub.lease(keyA)?.jobId).toBe("j-0"); // runner took it (running)
+
+    // A user stops scorecard sc-1 → cancel its in-flight jobs (keyed by batchId).
+    expect(hub.requestCancel((j) => j.batchId === "sc-1")).toBe(1);
+
+    // The dispatch promise is rejected NOW (the batch settles without waiting on the runner).
+    const r = await settled;
+    expect(r.ok).toBe(false);
+    expect(r).toMatchObject({ e: { code: "UPSTREAM_ERROR", extra: { reason: "cancelled" } } });
+
+    // The runner's next heartbeat is told to abort the local run (freeing the runtime mid-case).
+    expect(hub.heartbeat(keyA, "j-0")).toMatchObject({ cancelled: true });
+  });
+
+  it("drops an un-leased (parked) cancelled job so a runner never picks it up", async () => {
+    const hub = new RunnerHub({ newJobId: () => "j-parked" });
+    const dispatched = hub.enqueue(keyA, withBatch("c1", "sc-2"));
+    dispatched.catch(() => {}); // rejected by cancel — prevent an unhandled rejection
+    expect(hub.requestCancel((j) => j.batchId === "sc-2")).toBe(1);
+    expect(hub.lease(keyA)).toBeNull(); // the cancelled parked job is never leased
+  });
+
+  it("returns 0 and no-ops when nothing matches the predicate", () => {
+    const hub = new RunnerHub({ newJobId: () => "j" });
+    hub.enqueue(keyA, withBatch("c1", "sc-3")).catch(() => {});
+    expect(hub.requestCancel((j) => j.batchId === "other")).toBe(0);
   });
 });

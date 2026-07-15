@@ -238,6 +238,7 @@ describe("MCP tools", () => {
       "apply_bundle",
       "assign_harness_trace_sink",
       "backfill_scorecard_models",
+      "cancel_scorecard",
       "create_api_key",
       "create_dataset",
       "create_invite",

@@ -2,6 +2,7 @@ import type { GithubAppService } from "@everdict/application-control";
 import type { ImageRegistryService } from "@everdict/application-control";
 import type { NotificationService } from "@everdict/application-control";
 import type { Metrics } from "@everdict/application-control";
+import type { RunnerHub } from "@everdict/application-control";
 import { ScorecardService } from "@everdict/application-control";
 import type { TraceSinkService } from "@everdict/application-control";
 import type { Dispatcher as CoreDispatcher, Scheduler } from "@everdict/backends";
@@ -30,6 +31,8 @@ export function buildScorecard(deps: {
   runStore: RunStore;
   meteredDispatcher: CoreDispatcher;
   scheduler: Scheduler;
+  // Self-hosted lease hub — cancel/supersede reclaims a batch's in-flight lease jobs through it (requestCancel).
+  runnerHub: RunnerHub;
   breaker: CircuitBreaker;
   metrics: Metrics;
   settingsStore: WorkspaceSettingsStore;
@@ -56,6 +59,7 @@ export function buildScorecard(deps: {
     runStore,
     meteredDispatcher,
     scheduler,
+    runnerHub,
     breaker,
     metrics,
     settingsStore,
@@ -120,6 +124,9 @@ export function buildScorecard(deps: {
       ((await settingsStore.get(tenant))?.traceSinks ?? []).some((e) => e.name === name),
     // Queued-entry reclaim (supersede / speculation loser) — in-flight jobs stay Backend.kill's concern.
     cancelQueued: (predicate) => scheduler.cancelQueued(predicate),
+    // Self-hosted lease reclaim (supersede / user cancel) — rejects the parked/leased dispatch and tells the runner
+    // to abort the in-flight run (freeing the runtime mid-case); the managed force-kill is killCase below.
+    cancelLeased: (predicate) => runnerHub.requestCancel(predicate),
     adoptCase: adoptCaseFn,
     killCase,
     ...(temporalBatchAddress

@@ -69,6 +69,28 @@ export function registerScorecardRoutes(app: FastifyInstance, deps: ServerDeps):
     }
   });
 
+  // Stop a running (or queued) batch — a user-initiated cancel. Marks it `cancelled` (terminal, not counted in
+  // baseline/diff/leaderboard), stops firing the remaining cases, and force-frees the runtime of the in-flight ones
+  // (managed backends via kill, self-hosted lease jobs via the runner's next heartbeat). Same gate as submit.
+  // Already-terminal → 409; another workspace's / a missing scorecard → 404 (no existence leak).
+  app.post<{ Params: { id: string } }>(
+    "/scorecards/:id/cancel",
+    { schema: scorecardDocs.cancel },
+    async (req, reply) => {
+      if (!deps.scorecardService)
+        return reply.code(404).send({ code: "NOT_FOUND", message: "scorecard service not configured" });
+      const principal = await resolvePrincipal(req, reply, deps);
+      if (!principal) return reply;
+      try {
+        gate(principal, "scorecards:run");
+        const record = await deps.scorecardService.cancel({ tenant: principal.workspace, id: req.params.id });
+        return reply.send(serveScorecard(record));
+      } catch (err) {
+        return sendError(reply, err); // not found 404 / already terminal 409
+      }
+    },
+  );
+
   // Trace ingest — upload traces already produced externally (TraceEvent[]) and turn them into a scorecard (no harness run). Validated at the boundary.
   app.post("/scorecards/ingest", { schema: scorecardDocs.ingest }, async (req, reply) => {
     if (!deps.scorecardService)

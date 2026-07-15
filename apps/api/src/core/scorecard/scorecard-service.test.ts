@@ -2954,3 +2954,93 @@ describe("ScorecardService — first terminal write wins (rich domain guards)", 
     expect(completed).toEqual([]); // a replaced batch's completion notification is noise
   });
 });
+
+// User stop — cancel a running batch and free its runtime (cooperative abort + cancelQueued + cancelLeased + killCase).
+describe("ScorecardService.cancel — user stop", () => {
+  it("marks a running batch cancelled and requests both reclaim paths (queued scheduler + self-hosted lease), keyed by batch id", async () => {
+    const store = new InMemoryScorecardStore();
+    await store.create(record("sc-run", { status: "running" }));
+    let queuedPred: ((j: AgentJob) => boolean) | undefined;
+    let leasedPred: ((j: AgentJob) => boolean) | undefined;
+    const service = new ScorecardService({
+      dispatcher,
+      store,
+      datasets: new InMemoryDatasetRegistry(),
+      cancelQueued: (p) => {
+        queuedPred = p;
+        return 0;
+      },
+      cancelLeased: (p) => {
+        leasedPred = p;
+        return 1;
+      },
+    });
+
+    const stopped = await service.cancel({ tenant: "acme", id: "sc-run" });
+
+    expect(stopped.status).toBe("cancelled");
+    expect(stopped.error).toEqual({ code: "CANCELLED", message: "Stopped by user" });
+    // Both reclaim predicates target THIS batch (and only this batch).
+    expect(queuedPred?.({ batchId: "sc-run" } as AgentJob)).toBe(true);
+    expect(leasedPred?.({ batchId: "sc-run" } as AgentJob)).toBe(true);
+    expect(leasedPred?.({ batchId: "other" } as AgentJob)).toBe(false);
+  });
+
+  it("force-kills only the RUNNING managed child runs, targeting each child's runtime", async () => {
+    const store = new InMemoryScorecardStore();
+    const runStore = new InMemoryRunStore();
+    await store.create(record("sc-k", { status: "running", runtime: "nomad-1" }));
+    await runStore.create({
+      id: "r1",
+      tenant: "acme",
+      harness: { id: "h", version: "1" },
+      caseId: "c1",
+      status: "running",
+      parentScorecardId: "sc-k",
+      trigger: "scorecard",
+      runtime: "nomad-1",
+      createdAt: "t",
+      updatedAt: "t",
+    });
+    await runStore.create({
+      id: "r2",
+      tenant: "acme",
+      harness: { id: "h", version: "1" },
+      caseId: "c2",
+      status: "succeeded",
+      parentScorecardId: "sc-k",
+      trigger: "scorecard",
+      createdAt: "t",
+      updatedAt: "t",
+    });
+    const killed: Array<{ runtime?: string; caseId: string }> = [];
+    const service = new ScorecardService({
+      dispatcher,
+      store,
+      runStore,
+      datasets: new InMemoryDatasetRegistry(),
+      killCase: async (_tenant, runtime, caseId) => {
+        killed.push({ runtime, caseId });
+      },
+    });
+
+    await service.cancel({ tenant: "acme", id: "sc-k" });
+
+    expect(killed).toEqual([{ runtime: "nomad-1", caseId: "c1" }]); // finished c2 is left alone
+  });
+
+  it("a missing or cross-workspace scorecard is a NotFound (no existence leak)", async () => {
+    const store = new InMemoryScorecardStore();
+    await store.create(record("sc-other", { tenant: "other", status: "running" }));
+    const service = svc(store);
+    await expect(service.cancel({ tenant: "acme", id: "nope" })).rejects.toBeInstanceOf(NotFoundError);
+    await expect(service.cancel({ tenant: "acme", id: "sc-other" })).rejects.toBeInstanceOf(NotFoundError);
+  });
+
+  it("stopping an already-finished batch is a ConflictError (the domain rejects a terminal transition)", async () => {
+    const store = new InMemoryScorecardStore();
+    await store.create(record("sc-done", { status: "succeeded" }));
+    const service = svc(store);
+    await expect(service.cancel({ tenant: "acme", id: "sc-done" })).rejects.toMatchObject({ code: "CONFLICT" });
+  });
+});

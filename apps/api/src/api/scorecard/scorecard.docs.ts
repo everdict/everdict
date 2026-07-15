@@ -53,6 +53,21 @@ const docs = {
       ...errorResponses(400, 401, 403, 404),
     },
   },
+  cancel: {
+    summary: "Stop a running scorecard",
+    description:
+      "User-initiated stop of a queued/running batch: marks it `cancelled` (terminal, and — like superseded — " +
+      "excluded from baseline/diff/leaderboard), stops firing the remaining cases, and force-frees the runtime of " +
+      "the in-flight ones (managed backends are killed; self-hosted lease jobs are aborted on the runner's next " +
+      "heartbeat). Requires scorecards:run (member+), workspace-scoped. 409 if the batch is already terminal; 404 " +
+      "for a missing / other-workspace scorecard.",
+    tags: ["scorecard"],
+    params: scorecardIdParams,
+    response: {
+      200: { description: "The cancelled scorecard record", ...toJsonSchema(ScorecardResponseSchema) },
+      ...errorResponses(401, 403, 404, 409),
+    },
+  },
   ingest: {
     summary: "Ingest external traces (push)",
     description:

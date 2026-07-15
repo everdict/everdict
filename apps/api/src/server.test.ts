@@ -2608,6 +2608,45 @@ describe("API — scorecards (dataset×harness batch eval)", () => {
     expect(badTrace.statusCode).toBe(400); // TraceEventSchema boundary validation
     await app.close();
   });
+
+  it("POST /scorecards/:id/cancel: member stops a run — a finished batch is a 409 (already terminal)", async () => {
+    const { app } = server({ requireAuth: true, authenticator: roleAuth(["member"]) });
+    const h = { authorization: "Bearer x" };
+    await app.inject({ method: "POST", url: "/datasets", headers: h, payload: DATASET });
+    const post = await app.inject({
+      method: "POST",
+      url: "/scorecards",
+      headers: h,
+      payload: { dataset: { id: "smoke" }, harness: { id: "scripted" } },
+    });
+    const id = post.json().id;
+    await pollScorecard(app, id, h); // let it settle (succeeded)
+    const cancel = await app.inject({ method: "POST", url: `/scorecards/${id}/cancel`, headers: h });
+    expect(cancel.statusCode).toBe(409); // the domain rejects cancelling a terminal batch
+    await app.close();
+  });
+
+  it("POST /scorecards/:id/cancel: a missing scorecard is 404 (no existence leak)", async () => {
+    const { app } = server({ requireAuth: true, authenticator: roleAuth(["member"]) });
+    const res = await app.inject({
+      method: "POST",
+      url: "/scorecards/nope/cancel",
+      headers: { authorization: "Bearer x" },
+    });
+    expect(res.statusCode).toBe(404);
+    await app.close();
+  });
+
+  it("POST /scorecards/:id/cancel: viewer → 403 (gated before the service runs)", async () => {
+    const { app } = server({ requireAuth: true, authenticator: roleAuth(["viewer"]) });
+    const res = await app.inject({
+      method: "POST",
+      url: "/scorecards/any/cancel",
+      headers: { authorization: "Bearer x" },
+    });
+    expect(res.statusCode).toBe(403); // scorecards:run required
+    await app.close();
+  });
 });
 
 describe("API — secrets (workspace model/provider keys)", () => {
