@@ -86,6 +86,14 @@ export {
   selfHostedBackendName,
   type SelfHostedKey,
 } from "./runner/runner-hub.js";
+export { StoreRunnerHub, type StoreRunnerHubDeps } from "./runner/store-runner-hub.js";
+export type {
+  ClaimInput,
+  ParkInput,
+  RunnerJobLease,
+  RunnerJobOutcome,
+  RunnerJobStore,
+} from "./ports/runner-job-store.js";
 export {
   normalizeVersionTags,
   setVersionTags,
