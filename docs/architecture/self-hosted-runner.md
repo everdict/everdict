@@ -204,21 +204,26 @@ Self-hosted:   member's `everdict runner` → MCP lease_job (long-call) → runA
 
 ## Multi-replica / high availability
 
-The lease hub (`RunnerHub`) is **in-process**: jobs are parked in a per-replica in-memory queue, and the
-dispatch promise a runner resolves lives in the replica that parked it. This is correct for a single
+The default lease hub (`RunnerHub`) is **in-process**: jobs are parked in a per-replica in-memory queue, and
+the dispatch promise a runner resolves lives in the replica that parked it. This is correct for a single
 control-plane process (dev, and most self-hosted deployments). With **multiple API replicas**, though, a
 runner long-polling replica A cannot lease a job parked on replica B — that job idle-times-out and the case
 fails as `no_runner` even though a runner is connected. The timeout error names this cause so it is not silent.
 
-Until the hub is store-backed, either run self-hosted dispatch on a **single replica**, or make the load
-balancer **pin a runner's lease/heartbeat and its matching dispatch to the same replica** (session affinity
-keyed by the runner owner). Managed backends (nomad/k8s) are unaffected — they place through the orchestrator,
-not the in-memory hub, so only the self-hosted pull path has this constraint.
+**Store-backed hub (`EVERDICT_SELF_HOSTED_STORE_HUB=1`):** the fix — `StoreRunnerHub` over a shared
+`RunnerJobStore` (Pg migration 0055 `everdict_runner_jobs`), the same cross-replica shape as
+`StoreCallbackRendezvous`: `park`/`claim` (FOR UPDATE SKIP LOCKED, so two replicas never double-claim) /
+`complete` persist to Postgres, and the parking replica claims the result by polling the row; the idle timeout
+is enforced off `activity_at` (kept fresh cross-replica by lease/heartbeat, so a busy runner's heartbeat still
+protects the jobs queued behind it). Capability gating is stored at park and filtered on claim. The lease-hub
+surface is `RunnerHubLike = RunnerHub | StoreRunnerHub`; callers `await` the methods (a no-op against the
+in-memory hub's synchronous returns). Opt in only for a genuinely multi-replica deployment — the store hub
+polls Postgres, so single-process runs should stay on the default in-memory hub.
 
-**Follow-up (store-backed hub):** the same shape as `StoreCallbackRendezvous` — the front-door callback
-already survives across replicas via a shared store — applied to the hub: park/lease/complete persist to
-Postgres and the parking replica claims the result from the store. That removes the single-replica
-constraint. It is a deliberate, scoped follow-up, not done here.
+Without the store hub, either run self-hosted dispatch on a **single replica**, or make the load balancer
+**pin a runner's lease/heartbeat and its matching dispatch to the same replica** (session affinity keyed by the
+runner owner). Managed backends (nomad/k8s) are unaffected — they place through the orchestrator, not the
+in-memory hub, so only the self-hosted pull path has this constraint.
 
 ## See also
 
