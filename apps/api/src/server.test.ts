@@ -1867,6 +1867,50 @@ describe("API — datasets (workspace-owned, member+ write)", () => {
     await app.close();
   });
 
+  it("DELETE dataset (bulk) — a versions[] subset tombstones only those; a body-less DELETE removes the whole dataset; missing/other-workspace 404", async () => {
+    const { app, keyStore } = server({ requireAuth: true });
+    const acme = { authorization: `Bearer ${await issueKey(keyStore, "acme")}` };
+    const beta = { authorization: `Bearer ${await issueKey(keyStore, "beta")}` };
+    // Two immutable versions of the same id.
+    await app.inject({ method: "POST", url: "/datasets", headers: acme, payload: DATASET });
+    await app.inject({ method: "POST", url: "/datasets", headers: acme, payload: { ...DATASET, version: "2.0.0" } });
+
+    // Subset — only the listed version is tombstoned; the other stays readable.
+    const subset = await app.inject({
+      method: "DELETE",
+      url: "/datasets/smoke",
+      headers: acme,
+      payload: { versions: ["1.0.0"] },
+    });
+    expect(subset.statusCode).toBe(200);
+    expect(subset.json()).toMatchObject({ id: "smoke", deleted: ["1.0.0"] });
+    expect((await app.inject({ method: "GET", url: "/datasets/smoke/versions/1.0.0", headers: acme })).statusCode).toBe(
+      404,
+    );
+    expect((await app.inject({ method: "GET", url: "/datasets/smoke/versions/2.0.0", headers: acme })).statusCode).toBe(
+      200,
+    );
+
+    // Body-less DELETE = the whole dataset (all remaining own live versions) → the dataset then reads 404.
+    const all = await app.inject({ method: "DELETE", url: "/datasets/smoke", headers: acme });
+    expect(all.statusCode).toBe(200);
+    expect(all.json()).toMatchObject({ id: "smoke", deleted: ["2.0.0"] });
+    expect((await app.inject({ method: "GET", url: "/datasets/smoke/versions/2.0.0", headers: acme })).statusCode).toBe(
+      404,
+    );
+
+    // Already-fully-deleted / unknown dataset → 404 (no existence leak).
+    expect((await app.inject({ method: "DELETE", url: "/datasets/smoke", headers: acme })).statusCode).toBe(404);
+
+    // Another workspace cannot delete acme's dataset (and can't tell it exists) → 404.
+    await app.inject({ method: "POST", url: "/datasets", headers: acme, payload: DATASET });
+    expect(
+      (await app.inject({ method: "DELETE", url: "/datasets/smoke", headers: beta, payload: { versions: ["1.0.0"] } }))
+        .statusCode,
+    ).toBe(404);
+    await app.close();
+  });
+
   it("PUT version tags — viewer 403 / owner replaces (200, normalized) → versionTags exposed in the list / other workspace 404", async () => {
     // viewer lacks datasets:write → 403 (regardless of existence — the gate comes first).
     const viewer = server({ requireAuth: true, authenticator: roleAuth(["viewer"]) });

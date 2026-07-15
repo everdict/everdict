@@ -4,12 +4,14 @@ import { DatasetDiffResponseSchema } from "@everdict/contracts/wire";
 import { DatasetListResponseSchema } from "@everdict/contracts/wire";
 import { DatasetResponseSchema } from "@everdict/contracts/wire";
 import { DeleteDatasetVersionResultSchema } from "@everdict/contracts/wire";
+import { DeleteDatasetVersionsResultSchema } from "@everdict/contracts/wire";
 import { ImportDatasetResultSchema } from "@everdict/contracts/wire";
 import { RegisterDatasetResultSchema } from "@everdict/contracts/wire";
 import { SetVersionTagsResultSchema } from "@everdict/contracts/wire";
 import { ValidateDatasetResultSchema } from "@everdict/contracts/wire";
 import type { FastifySchema } from "fastify";
 import { errorResponses, toJsonSchema } from "../openapi.js";
+import { DeleteDatasetVersionsBodySchema } from "./request/delete-dataset-versions.js";
 import { ImportHarborBodySchema } from "./request/import-harbor.js";
 import { ImportTerminalBenchBodySchema } from "./request/import-terminal-bench.js";
 
@@ -120,6 +122,21 @@ const docs = {
     response: {
       200: { description: "Deleted (tombstoned)", ...toJsonSchema(DeleteDatasetVersionResultSchema) },
       ...errorResponses(401, 403, 404),
+    },
+  },
+  deleteVersions: {
+    summary: "Soft-delete several dataset versions or the whole dataset",
+    description:
+      "Bulk tombstone — pass `versions` to delete specific versions, or omit the body to delete the whole dataset " +
+      "(all of its own live versions). Every target is checked creator-or-admin (datasets:delete) BEFORE any delete, " +
+      "so a single forbidden/absent version rejects the whole request (403/404) with nothing deleted. Data is " +
+      "preserved (past scorecards stay reproducible). An unknown / already-fully-deleted dataset is 404.",
+    tags: ["dataset"],
+    params: idParams,
+    body: toJsonSchema(DeleteDatasetVersionsBodySchema),
+    response: {
+      200: { description: "Deleted (tombstoned) versions", ...toJsonSchema(DeleteDatasetVersionsResultSchema) },
+      ...errorResponses(400, 401, 403, 404),
     },
   },
   setVersionTags: {

@@ -1,10 +1,11 @@
 import { VersionTagsBodySchema, setVersionTags } from "@everdict/application-control";
-import { deleteDatasetVersion } from "@everdict/application-control";
+import { deleteDatasetVersion, deleteDatasetVersions } from "@everdict/application-control";
 import { DatasetSchema } from "@everdict/contracts";
 import { diffDatasets, harborToDataset, terminalBenchToDataset } from "@everdict/datasets";
 import type { FastifyInstance } from "fastify";
 import { type ServerDeps, gate, resolvePrincipal, sendError, zodIssues } from "../route-context.js";
 import { datasetDocs } from "./dataset.docs.js";
+import { DeleteDatasetVersionsBodySchema } from "./request/delete-dataset-versions.js";
 import { ImportHarborBodySchema } from "./request/import-harbor.js";
 import { ImportTerminalBenchBodySchema } from "./request/import-terminal-bench.js";
 
@@ -173,6 +174,29 @@ export function registerDatasetRoutes(app: FastifyInstance, deps: ServerDeps): v
       try {
         return reply.send(
           await deleteDatasetVersion(deps.datasetRegistry, principal, req.params.id, req.params.version),
+        );
+      } catch (err) {
+        return sendError(reply, err); // no permission 403 / not found 404
+      }
+    },
+  );
+
+  // Bulk soft-delete — several selected versions (body `{versions}`) or the whole dataset (body-less = all own live versions).
+  // deleteDatasetVersions gates each target creator-or-admin and fails fast (nothing deleted if any is forbidden/absent).
+  app.delete<{ Params: { id: string }; Body: { versions?: string[] } }>(
+    "/datasets/:id",
+    { schema: datasetDocs.deleteVersions },
+    async (req, reply) => {
+      if (!deps.datasetRegistry)
+        return reply.code(404).send({ code: "NOT_FOUND", message: "dataset registry not configured" });
+      const principal = await resolvePrincipal(req, reply, deps);
+      if (!principal) return reply;
+      // Body is optional (body-less DELETE = delete all). Only validate when one was sent.
+      const parsed = DeleteDatasetVersionsBodySchema.safeParse(req.body ?? {});
+      if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
+      try {
+        return reply.send(
+          await deleteDatasetVersions(deps.datasetRegistry, principal, req.params.id, parsed.data.versions),
         );
       } catch (err) {
         return sendError(reply, err); // no permission 403 / not found 404

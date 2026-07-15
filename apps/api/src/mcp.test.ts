@@ -248,6 +248,7 @@ describe("MCP tools", () => {
       "create_runtime",
       "create_schedule",
       "delete_dataset",
+      "delete_dataset_versions",
       "delete_harness",
       "delete_schedule",
       "diff_datasets",
@@ -951,6 +952,45 @@ describe("MCP tools", () => {
     const missing = await creator.callTool({ name: "delete_dataset", arguments: { id: "smoke", version: "9.9.9" } });
     expect(missing.isError).toBe(true);
     expect(text(missing)).toContain("NOT_FOUND");
+  });
+
+  it("delete_dataset_versions: subset deletes only the listed versions; omitting versions deletes the whole dataset", async () => {
+    const deps = harness();
+    const creator = await connect(deps, ["member"], "acme", "alice");
+    await creator.callTool({ name: "create_dataset", arguments: { dataset: DATASET } }); // smoke 1.0.0
+    await creator.callTool({
+      name: "create_dataset",
+      arguments: { dataset: JSON.stringify({ ...JSON.parse(DATASET), version: "2.0.0" }) },
+    });
+
+    // subset — only 1.0.0 is tombstoned; 2.0.0 stays readable
+    const subset = await creator.callTool({
+      name: "delete_dataset_versions",
+      arguments: { id: "smoke", versions: ["1.0.0"] },
+    });
+    expect(subset.isError).toBeFalsy();
+    expect(JSON.parse(text(subset))).toMatchObject({ id: "smoke", deleted: ["1.0.0"] });
+    expect(
+      (await creator.callTool({ name: "get_dataset", arguments: { id: "smoke", version: "2.0.0" } })).isError,
+    ).toBeFalsy();
+
+    // whole dataset (versions omitted) — the remaining version goes too; the dataset disappears from the list
+    const all = await creator.callTool({ name: "delete_dataset_versions", arguments: { id: "smoke" } });
+    expect(all.isError).toBeFalsy();
+    expect(JSON.parse(text(all))).toMatchObject({ id: "smoke", deleted: ["2.0.0"] });
+    expect(JSON.parse(text(await creator.callTool({ name: "list_datasets", arguments: {} })))).toEqual([]);
+  });
+
+  it("delete_dataset_versions: a non-creator non-admin is FORBIDDEN and nothing is deleted", async () => {
+    const deps = harness();
+    const creator = await connect(deps, ["member"], "acme", "alice");
+    await creator.callTool({ name: "create_dataset", arguments: { dataset: DATASET } });
+
+    const other = await connect(deps, ["member"], "acme", "bob");
+    const denied = await other.callTool({ name: "delete_dataset_versions", arguments: { id: "smoke" } });
+    expect(denied.isError).toBe(true);
+    expect(text(denied)).toContain("FORBIDDEN");
+    expect((await creator.callTool({ name: "get_dataset", arguments: { id: "smoke" } })).isError).toBeFalsy(); // untouched
   });
 
   it("scorecards: member runs a dataset and aggregates (run→poll succeeded); viewer's run is a permission error; other ws is NOT_FOUND", async () => {

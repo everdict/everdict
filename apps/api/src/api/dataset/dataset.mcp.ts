@@ -1,5 +1,5 @@
 import { setVersionTags } from "@everdict/application-control";
-import { deleteDatasetVersion } from "@everdict/application-control";
+import { deleteDatasetVersion, deleteDatasetVersions } from "@everdict/application-control";
 import { DatasetSchema } from "@everdict/contracts";
 import {
   HarborTaskSchema,
@@ -224,6 +224,23 @@ export function registerDatasetTools(server: McpServer, ctx: McpToolContext): vo
         },
       },
       ({ id, version }) => plain(async () => ok(await deleteDatasetVersion(datasets, principal, id, version))),
+    );
+
+    server.registerTool(
+      "delete_dataset_versions",
+      {
+        description:
+          "Bulk soft-delete (tombstone) — several selected versions, or the WHOLE dataset when versions is omitted (deletes every one of this workspace's own live versions). Convenience over delete_dataset for cleaning up many versions at once. Fail-fast: every target is checked ('creator' or 'workspace admin') before anything is deleted, so one forbidden/absent version rejects the whole call (FORBIDDEN/NOT_FOUND) with nothing removed. Confirm in order: which workspace (fixed by credential) → which id → which versions (or all). An unknown / already-fully-deleted dataset is NOT_FOUND. Data is preserved so past scorecards stay reproducible.",
+        inputSchema: {
+          id: z.string().describe("dataset id"),
+          versions: z
+            .array(z.string())
+            .min(1)
+            .optional()
+            .describe("exact versions to delete; omit to delete the whole dataset (all own live versions)"),
+        },
+      },
+      ({ id, versions }) => plain(async () => ok(await deleteDatasetVersions(datasets, principal, id, versions))),
     );
 
     server.registerTool(
