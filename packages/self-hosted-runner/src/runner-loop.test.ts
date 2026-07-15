@@ -171,6 +171,53 @@ describe("runLeaseWorkers — case-level parallelism (maxConcurrent)", () => {
     expect(submitted).toEqual([]);
     expect(ran).toBe(false); // a malformed job isn't run
   });
+
+  it("a harnessSpec discriminator mismatch (e.g. target.delivery.mode) → the fail message hints at a version skew", async () => {
+    const failMessages: string[] = [];
+    let leased = false;
+    let stop = false;
+    const callJson = async (name: string, args: Record<string, unknown>): Promise<Record<string, unknown>> => {
+      if (name === "lease_job") {
+        if (leased) return {};
+        leased = true;
+        // A service harnessSpec whose target.delivery.mode is not reference|sentinel|egress — the exact shape a newer
+        // runner rejects when the control plane embedded a spec its own (older/looser) schema accepted.
+        return {
+          jobId: "skew",
+          job: {
+            harnessSpec: {
+              kind: "service",
+              target: { kind: "browser", engine: "chromium", observe: [], delivery: { mode: "bogus" } },
+            },
+          },
+        };
+      }
+      if (name === "fail_job") {
+        failMessages.push(String(args.message));
+        stop = true;
+        return {};
+      }
+      return {};
+    };
+    await runLeaseWorkers(
+      {
+        callJson,
+        runJob: async () => ({
+          caseId: "x",
+          harness: "h",
+          trace: [],
+          snapshot: { kind: "prompt", output: "" },
+          scores: [],
+        }),
+        sleep: () => new Promise((r) => setTimeout(r, 0)),
+        setHeartbeat: () => () => {},
+      },
+      opts(1, () => stop),
+    );
+    expect(failMessages).toHaveLength(1);
+    expect(failMessages[0]).toContain("malformed job:");
+    expect(failMessages[0]).toContain("different everdict versions"); // the version-skew hint, not just an opaque dump
+  });
 });
 
 // Classified-failure parity with the agent sentinel — the self-hosted path has no sentinel, so a runJob throw

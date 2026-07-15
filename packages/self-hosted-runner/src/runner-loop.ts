@@ -58,8 +58,20 @@ export async function runLeaseWorkers(deps: RunnerLoopDeps, opts: RunnerLoopOpts
       const jobId = String(leased.jobId);
       const parsed = AgentJobSchema.safeParse(leased.job); // boundary validation
       if (!parsed.success) {
+        // A discriminator/enum mismatch on the embedded harnessSpec (e.g. target.delivery.mode) almost always means
+        // this self-hosted runner and the control plane are on different everdict versions — the job schema was
+        // tightened on one side. Say so, otherwise a bare "malformed job" can't be told apart from a genuinely bad
+        // spec and the user has no next step. (Any harnessSpec-scoped issue is treated the same way.)
+        const versionSkew = parsed.error.issues.some(
+          (i) => i.code === "invalid_union_discriminator" || i.path[0] === "harnessSpec",
+        );
+        const hint = versionSkew
+          ? " — this usually means the runner and the control plane are on different everdict versions; update the self-hosted runner (or re-pin the harness) so both match"
+          : "";
         log(`✗ job ${jobId} malformed → replying fail`);
-        await deps.callJson("fail_job", { jobId, message: `malformed job: ${parsed.error.message}` }).catch(() => {});
+        await deps
+          .callJson("fail_job", { jobId, message: `malformed job: ${parsed.error.message}${hint}` })
+          .catch(() => {});
         continue;
       }
       log(`▶ running job ${jobId} (case ${parsed.data.evalCase.id}) …`);
