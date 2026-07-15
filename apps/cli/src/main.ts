@@ -18,8 +18,8 @@ import {
   ResilientMcpSession,
   detectCapabilities,
   mcpConnect,
-  runLeaseWorkers,
   runLeasedJob,
+  superviseLease,
 } from "@everdict/self-hosted-runner";
 import type { DockerTopologyRuntimeOptions } from "@everdict/topology";
 import { imageBakeCommand } from "./image-bake.js";
@@ -295,7 +295,8 @@ async function runnerCommand(flags: Map<string, string>): Promise<void> {
   });
 
   // maxConcurrent workers share the same session and lease/run/report concurrently — one runner achieves case-level parallelism.
-  await runLeaseWorkers(
+  // superviseLease restarts the pool if it ever ends unexpectedly (crash) so `everdict runner` self-heals until Ctrl-C.
+  await superviseLease(
     {
       callJson,
       // service→Docker topology / image-case→local Docker (DockerDriver, dockerOk gate, host mounts) / else→host LocalDriver

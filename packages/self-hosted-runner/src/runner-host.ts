@@ -1,8 +1,8 @@
 import type { AgentJob, CaseResult } from "@everdict/contracts";
 import { detectCapabilities } from "./capabilities.js";
 import { runLeasedJob } from "./run-leased-job.js";
-import { runLeaseWorkers } from "./runner-loop.js";
 import { type ConnectClient, ResilientMcpSession, mcpConnect } from "./runner-session.js";
+import { superviseLease } from "./runner-supervisor.js";
 
 // A runner facade for GUI embedding — wraps the lease loop with start/stop/status events (consumed by the desktop main process).
 // The CLI uses runLeaseWorkers directly; desktop uses this facade — the execution behavior itself is identical (runLeasedJob).
@@ -89,7 +89,9 @@ export class RunnerHost {
       }
     };
 
-    this.loop = runLeaseWorkers(
+    // superviseLease (not runLeaseWorkers directly) so a pool that ends unexpectedly self-heals — the resident runner
+    // restarts itself instead of going silently dead. Only stop() (stopFlag) ends it. See runner-supervisor.ts.
+    this.loop = superviseLease(
       { callJson, runJob, log: this.opts.log, sleep: this.opts.sleep },
       {
         maxConcurrent: Math.max(1, this.opts.maxConcurrent ?? 1),

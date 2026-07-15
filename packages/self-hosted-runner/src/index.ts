@@ -10,6 +10,7 @@ export {
   type RunnerJobDone,
 } from "./runner-host.js";
 export { type RunnerLoopDeps, type RunnerLoopOpts, runLeaseWorkers } from "./runner-loop.js";
+export { type SuperviseOpts, superviseLease } from "./runner-supervisor.js";
 export {
   type ConnectClient,
   ResilientMcpSession,
