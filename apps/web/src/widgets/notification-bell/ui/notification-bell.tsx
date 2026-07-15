@@ -175,25 +175,25 @@ export function NotificationBell({ workspace }: { workspace: string }) {
 
   return (
     <div className="relative">
+      {/* 아이콘 전용 트리거(오른쪽 상단 클러스터용) — 미읽음 개수는 코너 배지로. */}
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-label={t('bellAria', { unread })}
         className={cn(
-          'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-[13px] transition-colors',
+          'relative grid size-8 place-items-center rounded-md transition-colors',
           open
             ? 'bg-accent text-foreground'
             : 'text-muted-foreground hover:bg-accent hover:text-foreground'
         )}
       >
         {unread > 0 ? (
-          <BellRing className="size-4 text-primary" strokeWidth={1.75} />
+          <BellRing className="size-[18px] text-primary" strokeWidth={1.75} />
         ) : (
-          <Bell className="size-4" strokeWidth={1.75} />
+          <Bell className="size-[18px]" strokeWidth={1.75} />
         )}
-        <span className="flex-1 text-left">{t('bell')}</span>
         {unread > 0 && (
-          <span className="grid min-w-5 place-items-center rounded-full bg-primary px-1 text-[11px] font-[560] leading-4 text-primary-foreground">
+          <span className="absolute -right-1 -top-1 grid min-w-[15px] place-items-center rounded-full bg-primary px-1 text-[10px] font-[560] leading-[15px] text-primary-foreground">
             {unread > 9 ? '9+' : unread}
           </span>
         )}
@@ -208,7 +208,7 @@ export function NotificationBell({ workspace }: { workspace: string }) {
             className="fixed inset-0 z-40 cursor-default"
             onClick={() => setOpen(false)}
           />
-          <div className="absolute left-0 top-full z-50 mt-1 w-[320px] rounded-lg border border-border bg-card shadow-pop">
+          <div className="absolute right-0 top-full z-50 mt-1 w-[320px] rounded-lg border border-border bg-card shadow-pop">
             {/* Header — controls only, no title: native-notification status icon (click → status-change dropdown) + mark all read. */}
             <div className="flex items-center justify-end gap-1 border-b border-border px-2 py-1.5">
               {unread > 0 && (

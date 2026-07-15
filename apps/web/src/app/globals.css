@@ -198,6 +198,10 @@ summary {
 
 html {
   scroll-behavior: smooth;
+  /* Default = no Electron title bar; the desktop shell overrides this to 2.25rem (html.desktop-shell below).
+     Fixed top-right chrome (the TopControls cluster, the work-panel drawer) offsets its top by this var so it
+     sits below the frameless title bar in the desktop shell and flush to the top in a normal browser. */
+  --titlebar-h: 0px;
 }
 
 /* Top glow — fixed behind the content */

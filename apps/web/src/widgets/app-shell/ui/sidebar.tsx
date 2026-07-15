@@ -6,7 +6,6 @@ import { usePathname } from 'next/navigation'
 import { LogIn, LogOut, Menu, Moon, Search, Settings, Sun, UserCog, X } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
-import { NotificationBell } from '@/widgets/notification-bell'
 import { WorkspaceSwitcher } from '@/widgets/workspace-switcher'
 import { LocaleSwitcher } from '@/features/switch-locale'
 import type { Workspace } from '@/entities/workspace'
@@ -202,10 +201,6 @@ function SidebarBody({ onNavigate, ...props }: SidebarProps & { onNavigate?: () 
         <Kbd>{mac ? '⌘' : 'Ctrl'} K</Kbd>
       </button>
 
-      {/* Notification inbox (personal feed) — Linear's Inbox slot. The [workspace] layout already validated the principal, so
-          no separate gate (dev fallback included — authed is unsuitable since it's a real-OIDC-only flag). */}
-      <NotificationBell workspace={props.workspace} />
-
       <div className="-mr-1 flex-1 overflow-y-auto pr-1">
         <NavLinks workspace={props.workspace} onNavigate={onNavigate} />
       </div>
@@ -228,8 +223,8 @@ export function Sidebar(props: SidebarProps) {
   const workspaceLabel = activeWorkspace?.name ?? props.workspace
   return (
     <>
-      {/* Mobile top bar */}
-      <div className="sticky top-0 z-30 flex h-12 items-center gap-2 border-b border-border bg-background/80 px-3 backdrop-blur-xl md:hidden">
+      {/* Mobile top bar — pr-24 reserves the top-right corner for the floating control cluster (TopControls), so the search sits to its left. */}
+      <div className="sticky top-0 z-30 flex h-12 items-center gap-2 border-b border-border bg-background/80 pl-3 pr-24 backdrop-blur-xl md:hidden">
         <button
           type="button"
           aria-label={t('openMenu')}

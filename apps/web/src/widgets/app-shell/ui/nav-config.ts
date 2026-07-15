@@ -1,5 +1,4 @@
 import {
-  Activity,
   BarChart3,
   Bookmark,
   Boxes,
@@ -27,7 +26,8 @@ export interface NavSection {
 }
 
 // First-class concepts of the SaaS surface: harness (what) · benchmark (with what) · scorecard (result) · runtime (where — execution
-// infra the workspace registers itself, no default seed) + flows (views/schedules/queue) + home (overview).
+// infra the workspace registers itself, no default seed) + flows (views/schedules) + home (overview).
+// The work queue is no longer a nav page — it's the always-present floating work panel (widgets/work-panel) in the top-right cluster.
 // judge/metric/model/recipe/bundle are engine parts/advanced options — excluded from the nav (routes remain, reachable via URL).
 export const NAV_SECTIONS: NavSection[] = [
   {
@@ -68,12 +68,6 @@ export const NAV_SECTIONS: NavSection[] = [
         labelKey: 'schedules',
         icon: CalendarClock,
         keywords: 'schedule cron recurring regression',
-      },
-      {
-        href: '/queue',
-        labelKey: 'queue',
-        icon: Activity,
-        keywords: 'queue job workload running waiting runtime',
       },
       {
         href: '/runtimes',
