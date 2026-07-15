@@ -44,6 +44,7 @@ import {
   applyGradingPlan,
   caseReason,
   childKey,
+  embedHarnessSpec,
   exportStepMessage,
   offloadResults,
   selectSubsetCases,
@@ -219,14 +220,16 @@ export class ScorecardBatchService {
     let harnessSpec: HarnessSpec | undefined;
     const pins = rec.origin?.pinOverrides;
     if (this.deps.harnesses) {
-      try {
-        harnessSpec =
+      const harnesses = this.deps.harnesses;
+      // Registered → embed the resolved spec; unregistered/built-in (NotFound) → no spec embedded (as at submit). A
+      // registered-but-invalid spec throws rather than re-dispatching specless (resume's caller absorbs the throw).
+      harnessSpec = await embedHarnessSpec(
+        () =>
           pins && Object.keys(pins).length > 0
-            ? await this.deps.harnesses.resolveWithPins(rec.tenant, rec.harness.id, rec.harness.version, pins)
-            : await this.deps.harnesses.get(rec.tenant, rec.harness.id, rec.harness.version);
-      } catch {
-        // unregistered/built-in → no spec embedded (same as submit)
-      }
+            ? harnesses.resolveWithPins(rec.tenant, rec.harness.id, rec.harness.version, pins)
+            : harnesses.get(rec.tenant, rec.harness.id, rec.harness.version),
+        { id: rec.harness.id, version: rec.harness.version },
+      );
     }
     const remaining = dataset.cases.length - seed.length;
     void this.track(
@@ -315,14 +318,16 @@ export class ScorecardBatchService {
     let harnessSpec: HarnessSpec | undefined;
     const pins = rec.origin?.pinOverrides;
     if (this.deps.harnesses) {
-      try {
-        harnessSpec =
+      const harnesses = this.deps.harnesses;
+      // Registered → embed the resolved spec; unregistered/built-in (NotFound) → no spec embedded (as at submit). A
+      // registered-but-invalid spec throws rather than re-dispatching specless (resume's caller absorbs the throw).
+      harnessSpec = await embedHarnessSpec(
+        () =>
           pins && Object.keys(pins).length > 0
-            ? await this.deps.harnesses.resolveWithPins(rec.tenant, rec.harness.id, rec.harness.version, pins)
-            : await this.deps.harnesses.get(rec.tenant, rec.harness.id, rec.harness.version);
-      } catch {
-        // unregistered/built-in → no spec embedded (same as submit)
-      }
+            ? harnesses.resolveWithPins(rec.tenant, rec.harness.id, rec.harness.version, pins)
+            : harnesses.get(rec.tenant, rec.harness.id, rec.harness.version),
+        { id: rec.harness.id, version: rec.harness.version },
+      );
     }
     const owner = rec.createdBy ?? rec.tenant;
     const secretMap =
@@ -686,14 +691,16 @@ export class ScorecardBatchService {
     let harnessSpec: HarnessSpec | undefined;
     const pins = src.origin?.pinOverrides;
     if (this.deps.harnesses) {
-      try {
-        harnessSpec =
+      const harnesses = this.deps.harnesses;
+      // Registered → embed the resolved spec; unregistered/built-in (NotFound) → no spec embedded (as at submit); a
+      // registered-but-invalid spec fails the retry with a clear 400 rather than re-dispatching a malformed job.
+      harnessSpec = await embedHarnessSpec(
+        () =>
           pins && Object.keys(pins).length > 0
-            ? await this.deps.harnesses.resolveWithPins(input.tenant, src.harness.id, src.harness.version, pins)
-            : await this.deps.harnesses.get(input.tenant, src.harness.id, src.harness.version);
-      } catch {
-        // unregistered/built-in → no spec embedded (same as submit)
-      }
+            ? harnesses.resolveWithPins(input.tenant, src.harness.id, src.harness.version, pins)
+            : harnesses.get(input.tenant, src.harness.id, src.harness.version),
+        { id: src.harness.id, version: src.harness.version },
+      );
     }
 
     // OOM auto-escalation: a case killed for memory dies the same way on an as-is retry, so its re-dispatch runs

@@ -89,6 +89,89 @@ describe("ScorecardService.submit — requireRuntime policy (no local fallback)"
   });
 });
 
+// A harnesses port whose get() rejects — models a REGISTERED harness whose stored spec fails to resolve (a malformed
+// target/delivery, a bad pin). Such a spec can't be created through the real registry (it validates on register), so
+// the fake throws directly. Extends the in-memory impl to satisfy the whole port with a one-method override.
+class ThrowingHarnessRegistry extends InMemoryHarnessInstanceRegistry {
+  constructor(private readonly err: Error) {
+    super(new InMemoryHarnessTemplateRegistry());
+  }
+  override get() {
+    return Promise.reject(this.err);
+  }
+}
+
+describe("ScorecardService.submit — registered harness spec resolution (regression)", () => {
+  const okDispatch: Dispatcher = {
+    async dispatch(job) {
+      return {
+        caseId: job.evalCase.id,
+        harness: `${job.harness.id}@${job.harness.version}`,
+        trace: [],
+        snapshot: { kind: "repo", diff: "", changedFiles: [], headSha: "h" },
+        scores: [],
+      };
+    },
+  };
+
+  it("a registered harness whose spec fails to resolve → 400 (BadRequest), not a silent spec-less dispatch", async () => {
+    const datasets = new InMemoryDatasetRegistry();
+    await datasets.register("acme", datasetWithCase());
+    const store = new InMemoryScorecardStore();
+    const service = new ScorecardService({
+      dispatcher,
+      store,
+      datasets,
+      harnesses: new ThrowingHarnessRegistry(
+        new BadRequestError("BAD_REQUEST", {}, "Invalid discriminator value at target.delivery.mode."),
+      ),
+      newId: () => "sc-badspec",
+    });
+    // Pre-fix: the resolve error was swallowed (treated as built-in), the batch ran with NO spec embedded, no error.
+    await expect(
+      service.submit({ tenant: "acme", dataset: { id: "d", version: "1.0.0" }, harness: { id: "svc", version: "1" } }),
+    ).rejects.toBeInstanceOf(BadRequestError);
+    expect(await store.get("sc-badspec")).toBeUndefined(); // failed fast — before a queued record was even persisted
+  });
+
+  it("a raw (non-AppError) resolve failure is remapped into our error model (never propagated bare)", async () => {
+    const datasets = new InMemoryDatasetRegistry();
+    await datasets.register("acme", datasetWithCase());
+    const service = new ScorecardService({
+      dispatcher,
+      store: new InMemoryScorecardStore(),
+      datasets,
+      harnesses: new ThrowingHarnessRegistry(
+        new Error("Invalid discriminator value. Expected 'reference' | 'sentinel' | 'egress'"),
+      ),
+      newId: () => "sc-raw",
+    });
+    await expect(
+      service.submit({ tenant: "acme", dataset: { id: "d", version: "1.0.0" }, harness: { id: "svc", version: "1" } }),
+    ).rejects.toBeInstanceOf(BadRequestError);
+  });
+
+  it("an unregistered/built-in harness (NotFound) still dispatches as-given, no spec embedded", async () => {
+    const datasets = new InMemoryDatasetRegistry();
+    await datasets.register("acme", datasetWithCase());
+    const store = new InMemoryScorecardStore();
+    const service = new ScorecardService({
+      dispatcher: okDispatch,
+      store,
+      datasets,
+      harnesses: new ThrowingHarnessRegistry(new NotFoundError("NOT_FOUND", {}, "harness 'scripted' not found.")),
+      newId: () => "sc-builtin",
+    });
+    await service.submit({
+      tenant: "acme",
+      dataset: { id: "d", version: "1.0.0" },
+      harness: { id: "scripted", version: "0" },
+    });
+    const rec = await waitTerminal(store, "sc-builtin");
+    expect(rec.status).toBe("succeeded"); // NotFound stays swallowed — the built-in fall-through is preserved
+  });
+});
+
 describe("ScorecardService.diff", () => {
   it("reports pass transitions as regression/improvement", async () => {
     const store = new InMemoryScorecardStore();

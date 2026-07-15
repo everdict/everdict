@@ -25,6 +25,7 @@ import {
   type RunScorecardInput,
   type ScorecardServiceDeps,
   applyGradingPlan,
+  embedHarnessSpec,
   selectSubsetCases,
 } from "./scorecard-shared.js";
 
@@ -142,12 +143,16 @@ export class ScorecardService {
       harnessVersion = spec.version; // the base instance's concrete version (an ephemeral pin does not create a version)
       harnessSpec = spec;
     } else if (this.deps.harnesses) {
-      try {
-        const spec = await this.deps.harnesses.get(input.tenant, input.harness.id, harnessVersion);
+      const harnesses = this.deps.harnesses;
+      // Registered → embed the resolved spec. Unregistered/built-in (NotFound) → as-given, no spec embedded; a
+      // registered-but-invalid spec fails fast here (400) instead of dispatching a specless or malformed job.
+      const spec = await embedHarnessSpec(() => harnesses.get(input.tenant, input.harness.id, harnessVersion), {
+        id: input.harness.id,
+        version: harnessVersion,
+      });
+      if (spec) {
         harnessVersion = spec.version;
         harnessSpec = spec;
-      } catch {
-        // unregistered/built-in → as-given, no spec embedded
       }
     }
 
