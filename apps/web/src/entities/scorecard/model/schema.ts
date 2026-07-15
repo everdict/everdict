@@ -76,6 +76,12 @@ export const caseResultSchema = z
     verdict: z.boolean().optional(), // server-computed case verdict (authority rank) — served, never recomputed here
     scores: z.array(caseScoreSchema).default([]),
     trace: z.array(traceEventSchema).default([]), // case execution trace — error events expose the failure spans
+    // classified failure (loose) — runnerId links a self-hosted no_runner/capability_mismatch case to the runner it
+    // waited on ("*" = the owner pool); used to hint "check that runner is online" on the case. Stays LOCAL.
+    failure: z
+      .object({ class: z.string().optional(), runnerId: z.string().optional() })
+      .passthrough()
+      .optional(),
 
     // os-use=desktop snapshot (screenshot/screenshotRef → <img>). browser=service-topology snapshot (url=final URL, dom=excerpt).
     snapshot: z

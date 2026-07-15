@@ -1960,6 +1960,7 @@
     "retryButton": "실패 케이스 재시도",
     "retrying": "재시도 중…",
     "retryError": "실패 케이스를 재시도하지 못했어요",
+    "failedOnRunnerHint": "이 케이스는 셀프호스티드 러너에서 실패했어요. 러너가 온라인인지 확인한 뒤 위의 '실패 케이스 재시도'를 눌러보세요.",
     "connectError": "서버에 연결하지 못했어요: {error}",
     "emptyTitle": "아직 스코어카드가 없어요.",
     "emptyHint": "'스코어카드 실행'으로 하니스를 평가해보세요.",

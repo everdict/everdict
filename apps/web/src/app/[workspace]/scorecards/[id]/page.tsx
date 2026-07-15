@@ -727,6 +727,13 @@ export default async function ScorecardDetailPage({
                         <span className="font-[560]">error</span> · {e.message}
                       </p>
                     ))}
+                  {/* Self-hosted runner failure (no_runner/capability) — point the user at the recovery path: check the
+                      runner is online, then use "Retry failed cases" above. failure.runnerId is set only for self-hosted. */}
+                  {r.failure?.runnerId && (
+                    <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[12px] leading-relaxed text-amber-700 dark:text-amber-400">
+                      {t('failedOnRunnerHint')}
+                    </p>
+                  )}
                 </Card>
               )
             })}

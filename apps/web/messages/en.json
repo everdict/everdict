@@ -1960,6 +1960,7 @@
     "retryButton": "Retry failed cases",
     "retrying": "Retrying…",
     "retryError": "Couldn't retry the failed cases",
+    "failedOnRunnerHint": "This case failed on a self-hosted runner. Check the runner is online, then use \"Retry failed cases\" above.",
     "connectError": "Couldn't reach the server: {error}",
     "emptyTitle": "No scorecards yet.",
     "emptyHint": "Use \"Run scorecard\" to evaluate a harness.",
