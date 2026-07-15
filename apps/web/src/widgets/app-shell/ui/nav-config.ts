@@ -47,9 +47,9 @@ export const NAV_SECTIONS: NavSection[] = [
       },
       {
         href: '/datasets',
-        labelKey: 'benchmarks',
+        labelKey: 'datasets',
         icon: Database,
-        keywords: 'benchmark dataset case pinch',
+        keywords: 'benchmark dataset case pinch', // keep "benchmark" as a search alias
       },
       {
         href: '/scorecards',

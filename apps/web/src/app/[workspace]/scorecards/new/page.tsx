@@ -5,6 +5,7 @@ import { getTranslations } from 'next-intl/server'
 import { RunScorecardForm } from '@/features/run-scorecard'
 import { datasetsSchema } from '@/entities/dataset'
 import { harnessesSchema } from '@/entities/harness'
+import { judgesSchema } from '@/entities/judge'
 import { runnersResponseSchema } from '@/entities/runner'
 import { runtimesSchema } from '@/entities/runtime'
 import { can } from '@/shared/auth/can'
@@ -28,6 +29,7 @@ export default async function NewScorecardPage({
 
   let datasets: { id: string; versions: string[]; versionTags?: Record<string, string[]> }[] = []
   let harnesses: { id: string; versions: string[]; versionTags?: Record<string, string[]> }[] = []
+  let judges: { id: string }[] = []
   let runtimes: { id: string }[] = []
   let runners: { id: string; label: string }[] = []
   let hasWorkspaceRunners = false
@@ -37,6 +39,12 @@ export default async function NewScorecardPage({
       harnesses = harnessesSchema.parse(await controlPlane.listHarnesses(ctx))
     } catch {
       // Even if the list fails, the form still works (just empty choices)
+    }
+    // Agent Judges — optional model/harness judges to score each case's trace (→ judge:<id> metrics). Not shown if it fails/is empty.
+    try {
+      judges = judgesSchema.parse(await controlPlane.listJudges(ctx))
+    } catch {
+      // Even if the judge list fails, the form still works (judge picker just empty → control-plane default scoring)
     }
     // Runtime picker — where it runs is required (control-plane-host fallback is forbidden by policy). Registered runtimes + runner pools as choices.
     try {
@@ -74,6 +82,7 @@ export default async function NewScorecardPage({
           <RunScorecardForm
             datasets={datasets}
             harnesses={harnesses}
+            judges={judges}
             runtimes={runtimes}
             runners={runners}
             hasWorkspaceRunners={hasWorkspaceRunners}

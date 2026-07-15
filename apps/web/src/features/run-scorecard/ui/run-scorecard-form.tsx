@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
+import { X } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 import { Controller, useForm } from 'react-hook-form'
 
@@ -43,6 +44,7 @@ interface Values {
   datasetVersion: string
   harnessId: string
   harnessVersion: string
+  judgeIds: string[] // Optional Agent Judges to score each case's trace → judge:<id> metrics (empty = control-plane default scoring).
   runtime: string // Execution location (registered runtime id or self runner target). The control plane 400s an unspecified placement — required.
   concurrency: string // Parallelism (empty = control plane default). Parsed to a number on submit.
   trials: string // Run each case N times for pass@k / flakiness (empty = 1). Parsed to a number on submit.
@@ -50,16 +52,19 @@ interface Values {
   caseTags: string // Partial run — tag filter (comma-separated, any-match; empty = all)
 }
 
-// Pick a benchmark × harness and run a batch evaluation. Scoring is built into the benchmark — judge defaults to the control plane default.
+// Pick a harness × dataset × judge(s) and run a batch evaluation. The selected judges score each case's trace → their
+// scores aggregate as judge:<id> metrics (mean + pass-rate) alongside the dataset's own graders on the detail page.
 export function RunScorecardForm({
   datasets,
   harnesses,
+  judges = [],
   runtimes = [],
   runners = [],
   hasWorkspaceRunners = false,
 }: {
   datasets: { id: string; versions: string[]; versionTags?: Record<string, string[]> }[]
   harnesses: { id: string; versions: string[]; versionTags?: Record<string, string[]> }[]
+  judges?: { id: string }[] // Registered Agent Judges (model|harness) selectable to score each case
   runtimes?: { id: string }[]
   runners?: { id: string; label: string }[]
   hasWorkspaceRunners?: boolean // Expose the self:ws pool option when team shared runners exist
@@ -81,6 +86,7 @@ export function RunScorecardForm({
       datasetVersion: 'latest',
       harnessId: harnesses[0]?.id ?? 'scripted',
       harnessVersion: 'latest',
+      judgeIds: [],
       runtime: '',
       concurrency: '',
       trials: '',
@@ -113,7 +119,9 @@ export function RunScorecardForm({
 
   async function onSubmit(values: Values) {
     setServerError(undefined)
-    const { concurrency, trials, caseLimit, caseTags, ...rest } = values
+    const { concurrency, trials, caseLimit, caseTags, judgeIds, ...rest } = values
+    // Selected judges → the API's judges:[{id,version}] (version latest); omitted when none picked.
+    const judgeRefs = judgeIds.map((id) => ({ id, version: 'latest' }))
     const n = Number.parseInt(concurrency, 10) // empty/invalid → omit (use control plane default)
     const tn = Number.parseInt(trials, 10) // empty/invalid → omit (1 trial)
     // Partial run — limit (first N) / tags (comma-separated). If both are empty, run all (omit cases).
@@ -128,6 +136,7 @@ export function RunScorecardForm({
     }
     const res = await runScorecardAction({
       ...rest,
+      ...(judgeRefs.length > 0 ? { judges: judgeRefs } : {}),
       ...(Number.isFinite(n) && n > 0 ? { concurrency: n } : {}),
       ...(Number.isFinite(tn) && tn > 1 ? { trials: tn } : {}),
       ...(Object.keys(cases).length > 0 ? { cases } : {}),
@@ -218,6 +227,58 @@ export function RunScorecardForm({
             )}
           />
         </div>
+      </div>
+
+      {/* Agent Judges (optional) — model/harness judges that score each case's trace; each pick aggregates as a judge:<id> metric. */}
+      <div className="space-y-1.5">
+        <div className="flex items-center gap-1">
+          <Label htmlFor="judges">{t('judgesLabel')}</Label>
+          <InfoTip content={t('judgesTip')} />
+        </div>
+        <Controller
+          control={control}
+          name="judgeIds"
+          render={({ field }) => {
+            const available = judges
+              .filter((j) => !field.value.includes(j.id))
+              .map((j) => ({ value: j.id }))
+            return (
+              <div className="space-y-2">
+                <Combobox
+                  id="judges"
+                  options={available}
+                  value=""
+                  onChange={(v) => {
+                    if (v && !field.value.includes(v)) field.onChange([...field.value, v])
+                  }}
+                  placeholder={t('judgesPlaceholder')}
+                  emptyText={t('judgesEmpty')}
+                />
+                {field.value.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5">
+                    {field.value.map((id) => (
+                      <span
+                        key={id}
+                        className="inline-flex items-center gap-1 rounded bg-secondary px-2 py-0.5 font-mono text-[12px] font-[510] text-secondary-foreground ring-1 ring-inset ring-border"
+                      >
+                        {id}
+                        <button
+                          type="button"
+                          aria-label={t('judgesRemove', { id })}
+                          onClick={() => field.onChange(field.value.filter((x) => x !== id))}
+                          className="text-faint transition-colors hover:text-destructive"
+                        >
+                          <X className="size-3" />
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )
+          }}
+        />
+        <p className="text-[12px] text-muted-foreground">{t('judgesHelp')}</p>
       </div>
 
       <div className="space-y-1.5">

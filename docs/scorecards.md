@@ -156,8 +156,12 @@ All workspace-scoped (other-workspace `get` → `404`/`NOT_FOUND`), one service 
 - **Scorecards `/dashboard/scorecards`** — runs list (dataset@v → harness@v, status, per-metric summary chips).
 - **Detail `/dashboard/scorecards/[id]`** — status, meta, per-metric **stat cards** (mean + pass-rate), per-case
   scores, error.
-- **Run `/dashboard/scorecards/new`** — pick dataset + harness (datalist) + optional judges → `runScorecardAction`
-  → `POST /scorecards`. Role-gated off `/me` (`scorecards:run` = member+).
+- **Run `/dashboard/scorecards/new`** — pick **harness × dataset × judge(s)**: dataset + harness comboboxes (with a
+  version picker each) and an optional **judge multi-select** (a combobox that appends registered Agent Judges as
+  removable chips, each at `latest`) → `runScorecardAction` → `POST /scorecards` `{dataset, harness, judges?}`. The
+  selected judges score each case's trace, so the detail page's per-metric stat cards gain a `judge:<id>` metric (mean +
+  pass-rate) alongside the dataset's own graders. No judges picked = the dataset's graders only. Role-gated off `/me`
+  (`scorecards:run` = member+).
 - **Compare `/dashboard/scorecards/compare?baseline=&candidate=`** — pick two succeeded scorecards → per-metric
   mean Δ table + **regressions (pass→fail) / improvements (fail→pass)** via `diffScorecards`. This is the
   baseline-vs-candidate payoff. `scorecards:read`.

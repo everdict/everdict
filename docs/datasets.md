@@ -160,13 +160,20 @@ workspace-scoped reads, `datasets:write` gating, `409`/`CONFLICT` on the immutab
 | `GET /datasets` | `list_datasets` | `datasets:read` |
 | `GET /datasets/:id/versions/:version` | `get_dataset` | `datasets:read` |
 | `DELETE /datasets/:id/versions/:version` | `delete_dataset` | creator **or** `datasets:delete` (admin) |
+| `DELETE /datasets/:id` (body `{versions?}`; omit = all) | `delete_dataset_versions` | creator **or** `datasets:delete`, **fail-fast** per version |
 | `GET /datasets/:id/diff?base=&candidate=` | `diff_datasets` | `datasets:read` |
 
 `validate` is a dry-run: schema + this workspace's existing versions/conflict, no write. `version` may be
-`latest` (except `delete`, which **requires an exact version** — it removes exactly one). The shared
-`deleteDatasetVersion` (`apps/api/src/catalog/dataset-service.ts`) is the single authz core both transports call (no
-fork): `creatorOf` → `404` if not owned/live, then creator-or-admin gate → `403`/`FORBIDDEN`, then `softDelete`.
-Other-workspace reads → `404`/`NOT_FOUND` (no existence leak). See `docs/api.md`, `docs/mcp.md`,
+`latest` (except single `delete`, which **requires an exact version** — it removes exactly one). The shared
+`deleteDatasetVersion` (`@everdict/application-control` `dataset/dataset-service.ts`) is the single authz core both
+transports call (no fork): `creatorOf` → `404` if not owned/live, then creator-or-admin gate → `403`/`FORBIDDEN`, then
+`softDelete`. **Bulk delete** (`deleteDatasetVersions`, same file) reuses that per-version gate to remove several
+selected versions — or, with `versions` omitted, the **whole dataset** (all of this workspace's own live versions) — and
+is **fail-fast**: every target is authorized *before* any tombstone is written, so one forbidden/absent version rejects
+the whole request (`403`/`404`) with nothing deleted (an admin can always delete all; an author can bulk-delete versions
+they registered). An unknown / already-fully-deleted dataset is `404`. Other-workspace reads → `404`/`NOT_FOUND` (no
+existence leak). The web deletes from the dataset detail's danger dialog (single = check one, several = check several,
+whole = select all), gated to a workspace admin or the dataset's author. See `docs/api.md`, `docs/mcp.md`,
 `docs/web.md`, `docs/tenancy.md`.
 
 ## Version diff (`diffDatasets`, `@everdict/datasets`)

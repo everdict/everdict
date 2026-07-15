@@ -13,6 +13,8 @@ export interface RunScorecardInput {
   // Tenant Runtime id to run on (placement.target) or a self runner target (self / self:<id> / self:ws).
   // The control plane 400s an unspecified placement (requireRuntime — no host fallback).
   runtime?: string
+  // Optional Agent Judges to score each case's trace → judge:<id> metrics in the summary. Unset = control-plane default scoring.
+  judges?: { id: string; version: string }[]
   concurrency?: number // Number of cases dispatched concurrently within the batch (parallelism). Unset uses the control plane default.
   trials?: number // Run each case N times for pass@k / flakiness. Unset = 1 (single run).
   cases?: { limit?: number; tags?: string[] } // Partial run — only a subset of the full dataset (unset = all)
@@ -33,6 +35,8 @@ export async function runScorecardAction(input: RunScorecardInput): Promise<RunS
     harness: { id: input.harnessId, version: input.harnessVersion || 'latest' },
     // When runtime is selected the control plane injects it as each case's placement.target → RuntimeDispatcher routing.
     ...(input.runtime ? { runtime: input.runtime } : {}),
+    // Selected Agent Judges → applied to each case's trace, adding judge:<id> scores to the aggregated summary.
+    ...(input.judges && input.judges.length > 0 ? { judges: input.judges } : {}),
     ...(input.concurrency ? { concurrency: input.concurrency } : {}),
     ...(input.trials && input.trials > 1 ? { trials: input.trials } : {}),
     ...(input.cases ? { cases: input.cases } : {}),
