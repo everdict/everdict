@@ -254,6 +254,8 @@ export const controlPlane = {
     call<T>(auth, `/scorecards/${encodeURIComponent(id)}`),
   runScorecard: <T>(auth: AuthContext, body: unknown) =>
     call<T>(auth, '/scorecards', { method: 'POST', body: JSON.stringify(body) }),
+  retryScorecard: <T>(auth: AuthContext, id: string) =>
+    call<T>(auth, `/scorecards/${encodeURIComponent(id)}/retry`, { method: 'POST' }),
   ingestScorecard: <T>(auth: AuthContext, body: unknown) =>
     call<T>(auth, '/scorecards/ingest', { method: 'POST', body: JSON.stringify(body) }),
   ingestScorecardPull: <T>(auth: AuthContext, body: unknown) =>

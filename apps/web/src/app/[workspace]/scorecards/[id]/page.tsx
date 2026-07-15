@@ -3,6 +3,7 @@ import { ChevronLeft } from 'lucide-react'
 import { getTranslations } from 'next-intl/server'
 
 import { CommentsSection } from '@/features/discuss'
+import { RetryFailedButton } from '@/features/retry-failed-cases'
 import { membersSchema } from '@/entities/member'
 import { runsSchema } from '@/entities/run'
 import {
@@ -213,7 +214,16 @@ export default async function ScorecardDetailPage({
         <PageHeader
           title={<span className="font-mono">scorecard {record.id.slice(0, 8)}</span>}
           description={`${record.dataset.id}@${record.dataset.version} → ${record.harness.id}@${record.harness.version}`}
-          actions={<StatusPill status={record.status} />}
+          actions={
+            <div className="flex items-center gap-2">
+              {/* Retry is offered once the batch is terminal and some cases failed — re-run just those (e.g. after a
+                  runner was down) as a new scorecard; passing cases carry over. The control plane enforces scorecards:run. */}
+              {!live && failedCount > 0 && (
+                <RetryFailedButton id={record.id} workspace={workspace} />
+              )}
+              <StatusPill status={record.status} />
+            </div>
+          }
         />
       </div>
 
