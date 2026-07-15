@@ -44,8 +44,7 @@ export function encodeBody(
   }
   for (const f of opts?.files ?? []) {
     push(
-      `--${boundary}\r\nContent-Disposition: form-data; name="${f.field}"; filename="${f.filename}"\r\n` +
-        "Content-Type: application/octet-stream\r\n\r\n",
+      `--${boundary}\r\nContent-Disposition: form-data; name="${f.field}"; filename="${f.filename}"\r\nContent-Type: application/octet-stream\r\n\r\n`,
     );
     parts.push(Buffer.from(f.content, "utf8"));
     push("\r\n");

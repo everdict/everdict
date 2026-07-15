@@ -54,5 +54,10 @@
       "files": [{ "field": "files", "from": "attachment.txt" }]
     }
   },
-  "traceSource": { "kind": "langfuse", "endpoint": "https://cloud.langfuse.com", "authSecret": "langfuse-key", "correlate": "tag" }
+  "traceSource": {
+    "kind": "langfuse",
+    "endpoint": "https://cloud.langfuse.com",
+    "authSecret": "langfuse-key",
+    "correlate": "tag"
+  }
 }
