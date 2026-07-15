@@ -25,6 +25,9 @@
       },
       "trace": {
         "kind": "none"
+      },
+      "liveScreen": {
+        "captureCmd": "python /app/bu_screenshot.py"
       }
     }
   ],

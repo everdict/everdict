@@ -14,11 +14,14 @@ RUN pip install --no-cache-dir browser-use==0.13.3 playwright \
 ENV BROWSER_USE_EXECUTABLE_PATH=/usr/local/bin/bu-chromium
 
 COPY run_bu.py /app/run_bu.py
+# Live-screen capture helper — Everdict's runner execs it to screenshot the running Chromium over CDP (best-effort).
+COPY bu_screenshot.py /app/bu_screenshot.py
 
-# Sanity: entry parses + browser-use API surface imports (catches API drift at build time).
+# Sanity: entries parse + browser-use API surface imports (catches API drift at build time).
 RUN python - <<'PY'
 import ast
 ast.parse(open('/app/run_bu.py').read())
+ast.parse(open('/app/bu_screenshot.py').read())
 from browser_use import Agent, ChatOpenAI
 from browser_use.browser.profile import BrowserProfile
 print('browser-use import surface OK')

@@ -29,11 +29,21 @@ def build_profile():
     from browser_use.browser.profile import BrowserProfile
 
     executable = os.environ.get("BROWSER_USE_EXECUTABLE_PATH", "/usr/bin/chromium")
+    # --remote-debugging-port exposes a KNOWN CDP endpoint (127.0.0.1:9222) inside the container so Everdict's live
+    # screen (bu_screenshot.py, exec'd by the self-hosted runner) can attach and screenshot the running page. CDP allows
+    # multiple clients, so a read-only screenshot never disturbs the agent's own control. Best-effort: if browser-use
+    # assigns its own port, live screen is simply blank — the eval is unaffected. Overridable via BU_CDP_PORT.
+    cdp_port = os.environ.get("BU_CDP_PORT", "9222")
     return BrowserProfile(
         executable_path=executable,
         headless=True,
         chromium_sandbox=False,  # root inside the eval container
-        args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"],
+        args=[
+            "--no-sandbox",
+            "--disable-dev-shm-usage",
+            "--disable-gpu",
+            f"--remote-debugging-port={cdp_port}",
+        ],
     )
 
 
