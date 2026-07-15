@@ -486,6 +486,22 @@
     "latestResult": "최근 결과",
     "lastRunAt": "최근 실행 {at}"
   },
+  "deleteDataset": {
+    "triggerButton": "삭제",
+    "title": "데이터셋 버전 삭제",
+    "close": "닫기",
+    "explain": "선택한 버전을 이 워크스페이스에서 소프트 삭제해요. 지난 스코어카드 결과는 그대로 남지만(실행 시점 데이터가 스냅샷으로 보존돼요), 삭제된 버전을 참조하는 재실행·예약은 확인에 실패해요.",
+    "selectAll": "전체 버전 선택",
+    "selectedOfTotal": "{selected} / {total}",
+    "latest": "최신",
+    "entireWarning": "모든 버전이 선택됐어요 — 데이터셋 전체({count}개 버전)가 삭제돼요.",
+    "deleteFailed": "삭제하지 못했어요.",
+    "cancel": "취소",
+    "confirmVersions": "{count}개 버전 삭제",
+    "confirmEntire": "데이터셋 삭제",
+    "deletedVersions": "{id}의 {count}개 버전을 삭제했어요",
+    "deletedDataset": "데이터셋 {id} 삭제했어요"
+  },
   "deleteHarness": {
     "triggerButton": "삭제",
     "rowDeleteTitle": "하니스 삭제",
@@ -2012,6 +2028,8 @@
     "metaRunBy": "실행자",
     "metaRuntime": "런타임",
     "runtimeDetailTitle": "런타임 상세",
+    "runtimePoolPersonal": "내 러너 (아무거나)",
+    "runtimePoolWorkspace": "팀 공유 러너 (아무거나)",
     "metaSubset": "케이스 선택 (부분 실행)",
     "subsetIds": "지정 {n}개",
     "subsetTags": "태그 {tags}",

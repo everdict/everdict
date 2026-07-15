@@ -486,6 +486,22 @@
     "latestResult": "Latest result",
     "lastRunAt": "Last run {at}"
   },
+  "deleteDataset": {
+    "triggerButton": "Delete",
+    "title": "Delete dataset versions",
+    "close": "Close",
+    "explain": "Soft-delete removes the selected versions from this workspace. Past scorecards keep their results (each run snapshots the dataset), but re-runs and schedules that reference a deleted version will fail to resolve.",
+    "selectAll": "Select all versions",
+    "selectedOfTotal": "{selected} / {total}",
+    "latest": "latest",
+    "entireWarning": "Every version is selected — this deletes the entire dataset ({count, plural, one {# version} other {# versions}}).",
+    "deleteFailed": "Couldn't delete.",
+    "cancel": "Cancel",
+    "confirmVersions": "Delete {count, plural, one {# version} other {# versions}}",
+    "confirmEntire": "Delete dataset",
+    "deletedVersions": "Deleted {count, plural, one {# version} other {# versions}} of {id}",
+    "deletedDataset": "Deleted dataset {id}"
+  },
   "deleteHarness": {
     "triggerButton": "Delete",
     "rowDeleteTitle": "Delete harness",
@@ -2012,6 +2028,8 @@
     "metaRunBy": "Run by",
     "metaRuntime": "Runtime",
     "runtimeDetailTitle": "Runtime detail",
+    "runtimePoolPersonal": "My runner (any)",
+    "runtimePoolWorkspace": "Shared team runner (any)",
     "metaSubset": "Case selection (partial run)",
     "subsetIds": "{n} selected",
     "subsetTags": "tags {tags}",

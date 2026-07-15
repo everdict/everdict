@@ -59,6 +59,36 @@ function osUseShotSrc(snapshot?: {
   return undefined
 }
 
+// The runtime a batch ran on → a display name + optional detail link.
+// - Registered runtime: the id IS its name → links to the runtime detail page.
+// - Self-hosted runner (self / self:<id> / self:ws:<id>): show the runner's friendly device name (resolved from the
+//   workspace roster; pools get an "(any)" label) but NEVER link out. This is a multi-tenant service — a batch may
+//   have run on another member's personal runner, which has no screen the viewer can (or should) navigate to.
+function runtimeDisplay(
+  target: string,
+  opts: {
+    workspace: string
+    runnerLabelOf: (id: string) => string | undefined
+    poolPersonalLabel: string
+    poolWorkspaceLabel: string
+  }
+): { label: string; href?: string } {
+  const { workspace, runnerLabelOf, poolPersonalLabel, poolWorkspaceLabel } = opts
+  const isSelfHosted = target === 'self' || target.startsWith('self:')
+  if (!isSelfHosted) {
+    return { label: target, href: `/${workspace}/runtimes/${encodeURIComponent(target)}` }
+  }
+  const label =
+    target === 'self'
+      ? poolPersonalLabel
+      : target === 'self:ws'
+        ? poolWorkspaceLabel
+        : target.startsWith('self:ws:')
+          ? (runnerLabelOf(target.slice('self:ws:'.length)) ?? target)
+          : (runnerLabelOf(target.slice('self:'.length)) ?? target)
+  return { label }
+}
+
 function Prop({ label, value }: { label: string; value: string }) {
   return (
     <div className="min-w-0">
@@ -217,9 +247,17 @@ export default async function ScorecardDetailPage({
 
   // Runner health for self-hosted case failures — a no_runner case names its runner (failure.runnerId); map it to the
   // roster (the workspace roster includes personal runners) so a failed case can show whether that runner is online.
-  // Fetched only when some case actually failed on a specific runner; on failure the case falls back to the static hint.
+  // Also fetched when the batch's runtime names a specific self-hosted runner (self:<id> / self:ws:<id>) so we can show
+  // its friendly device name instead of the raw id. Bare pools (self / self:ws) carry no id, so they need no lookup.
+  const runtimeNeedsRoster =
+    record.runtime !== undefined &&
+    record.runtime.startsWith('self:') &&
+    record.runtime !== 'self:ws'
   const runnerById = new Map<string, RunnerMeta>()
-  if (results.some((r) => r.failure?.runnerId && r.failure.runnerId !== '*')) {
+  if (
+    runtimeNeedsRoster ||
+    results.some((r) => r.failure?.runnerId && r.failure.runnerId !== '*')
+  ) {
     try {
       const roster = runnersResponseSchema.parse(await controlPlane.listWorkspaceRunners(ctx))
       for (const m of roster.runners) runnerById.set(m.id, m)
@@ -365,27 +403,40 @@ export default async function ScorecardDetailPage({
         <Prop label="created" value={new Date(record.createdAt).toLocaleString()} />
         <Prop label="updated" value={new Date(record.updatedAt).toLocaleString()} />
         {authorName && <Prop label={t('metaRunBy')} value={authorName} />}
-        {/* The runtime this batch ran on — a registered runtime links to its detail, self:* runners get only a chip (runners have no runtime detail page). Hidden if unset (legacy · ingest). */}
-        {record.runtime && (
-          <div className="min-w-0">
-            <dt className="text-[11px] font-[510] uppercase tracking-wide text-faint">
-              {t('metaRuntime')}
-            </dt>
-            <dd className="mt-1">
-              {record.runtime.startsWith('self:') ? (
-                <RuntimeChip label={record.runtime} />
-              ) : (
-                <Link
-                  href={`/${workspace}/runtimes/${encodeURIComponent(record.runtime)}`}
-                  className="rounded-sm hover:underline"
-                  title={t('runtimeDetailTitle')}
-                >
-                  <RuntimeChip label={record.runtime} />
-                </Link>
-              )}
-            </dd>
-          </div>
-        )}
+        {/* The runtime this batch ran on — shown by name (a self-hosted runner's device name, resolved from the roster).
+            A registered runtime and a reachable self-hosted runner (mine · team-shared) link out; another member's
+            personal runner shows the name only (no page you can reach). Hidden if unset (legacy · ingest). */}
+        {record.runtime &&
+          (() => {
+            const rd = runtimeDisplay(record.runtime, {
+              workspace,
+              ...(principal?.subject !== undefined ? { subject: principal.subject } : {}),
+              ...(record.createdBy !== undefined ? { createdBy: record.createdBy } : {}),
+              runnerLabelOf: (rid) => runnerById.get(rid)?.label,
+              poolPersonalLabel: t('runtimePoolPersonal'),
+              poolWorkspaceLabel: t('runtimePoolWorkspace'),
+            })
+            return (
+              <div className="min-w-0">
+                <dt className="text-[11px] font-[510] uppercase tracking-wide text-faint">
+                  {t('metaRuntime')}
+                </dt>
+                <dd className="mt-1">
+                  {rd.href ? (
+                    <Link
+                      href={rd.href}
+                      className="rounded-sm hover:underline"
+                      title={t('runtimeDetailTitle')}
+                    >
+                      <RuntimeChip label={rd.label} />
+                    </Link>
+                  ) : (
+                    <RuntimeChip label={rd.label} />
+                  )}
+                </dd>
+              </div>
+            )
+          })()}
         {/* Temporal-owned batch — the durable workflow's id; deep-links to the Temporal UI when TEMPORAL_UI_URL is set. */}
         {record.orchestration?.workflowId && (
           <div className="min-w-0">

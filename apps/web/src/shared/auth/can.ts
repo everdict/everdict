@@ -8,6 +8,7 @@ export type WebAction =
   | 'harnesses:delete'
   | 'datasets:read'
   | 'datasets:write'
+  | 'datasets:delete'
   | 'scorecards:read'
   | 'scorecards:run'
   | 'schedules:read'
@@ -73,6 +74,7 @@ const PERMS: Record<string, WebAction[]> = {
     'harnesses:delete', // harness version/whole-harness soft-delete = admin (creator exception is server-side)
     'datasets:read',
     'datasets:write',
+    'datasets:delete', // dataset version/whole-dataset soft-delete = admin (creator exception is server-side)
     'scorecards:read',
     'scorecards:run',
     'schedules:read',

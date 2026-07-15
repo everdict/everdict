@@ -204,6 +204,14 @@ export const controlPlane = {
     call<T>(auth, '/datasets/terminal-bench', { method: 'POST', body: JSON.stringify(body) }),
   validateDataset: <T>(auth: AuthContext, dataset: unknown) =>
     call<T>(auth, '/datasets/validate', { method: 'POST', body: JSON.stringify(dataset) }),
+  // Bulk soft-delete (tombstone) — pass `versions` to delete specific versions, or omit them to delete the whole dataset
+  // (all own live versions). The control plane checks each target creator-or-admin and fails fast (nothing deleted if any
+  // is forbidden/absent). A body is sent only when versions are given, so the whole-dataset delete is a bodyless DELETE.
+  deleteDatasetVersions: <T>(auth: AuthContext, id: string, versions?: string[]) =>
+    call<T>(auth, `/datasets/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+      ...(versions && versions.length > 0 ? { body: JSON.stringify({ versions }) } : {}),
+    }),
   listBenchmarks: <T>(auth: AuthContext) => call<T>(auth, '/benchmarks'),
   // HF Hub dataset search + config/split — so the wizard searches/selects instead of typing a raw id directly.
   searchHfDatasets: <T>(auth: AuthContext, query: string, limit?: number) =>
