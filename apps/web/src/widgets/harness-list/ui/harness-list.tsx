@@ -2,9 +2,10 @@
 
 import { useMemo, useState } from 'react'
 import Link from 'next/link'
-import { Boxes, Clock, Layers, Lock, Waypoints } from 'lucide-react'
+import { Boxes, Clock, Layers, Lock, Trash2, Waypoints } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
+import { DeleteHarnessDialog } from '@/features/delete-harness'
 import type { Harness } from '@/entities/harness'
 import { fmtDateTime, fmtDateTimeFull, fmtSubject } from '@/shared/lib/format'
 import type { HarnessRelation } from '@/shared/lib/harness-relations'
@@ -48,13 +49,19 @@ export function HarnessList({
   harnesses,
   relations,
   authors,
+  canDelete = false,
 }: {
   workspace: string
   harnesses: Harness[]
   relations: Record<string, HarnessRelation>
   authors: Record<string, Author>
+  // Admin — reveal a per-row delete (removes the whole harness); all listed harnesses are workspace-owned (delete-eligible).
+  canDelete?: boolean
 }) {
   const t = useTranslations('harnessList')
+  const dt = useTranslations('deleteHarness')
+  // The harness currently pending deletion (opens the shared delete dialog).
+  const [deleting, setDeleting] = useState<Harness | null>(null)
   const sorts: { value: Sort; label: string }[] = [
     { value: 'name', label: t('sortName') },
     { value: 'updated', label: t('sortUpdated') },
@@ -235,14 +242,27 @@ export function HarnessList({
                       </div>
                     </div>
                   </div>
-                  {author.known && (
-                    <UserAvatar
-                      name={author.name}
-                      url={author.avatarUrl}
-                      label={t('creator')}
-                      className="shrink-0"
-                    />
-                  )}
+                  <div className="flex shrink-0 items-center gap-1">
+                    {canDelete && (
+                      <button
+                        type="button"
+                        aria-label={dt('rowDeleteAria', { id: h.id })}
+                        title={dt('rowDeleteTitle')}
+                        onClick={(e) => {
+                          // The whole card is a Link — stop it so the trash click doesn't navigate.
+                          e.preventDefault()
+                          e.stopPropagation()
+                          setDeleting(h)
+                        }}
+                        className="grid size-7 place-items-center rounded-md text-faint opacity-0 outline-none transition-[opacity,color,background] hover:bg-destructive/10 hover:text-destructive focus-visible:opacity-100 group-hover:opacity-100"
+                      >
+                        <Trash2 className="size-4" />
+                      </button>
+                    )}
+                    {author.known && (
+                      <UserAvatar name={author.name} url={author.avatarUrl} label={t('creator')} />
+                    )}
+                  </div>
                 </div>
 
                 {/* Meta line — versions · benchmarks run · latest result (+time) */}
@@ -290,6 +310,18 @@ export function HarnessList({
             )
           })}
         </div>
+      )}
+
+      {deleting && (
+        <DeleteHarnessDialog
+          onClose={() => setDeleting(null)}
+          id={deleting.id}
+          versions={deleting.versions}
+          latest={deleting.latestVersion ?? deleting.versions[deleting.versions.length - 1] ?? ''}
+          workspace={workspace}
+          {...(deleting.versionTags ? { versionTags: deleting.versionTags } : {})}
+          defaultAllSelected
+        />
       )}
     </div>
   )

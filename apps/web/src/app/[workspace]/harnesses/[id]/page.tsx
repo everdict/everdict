@@ -3,6 +3,7 @@ import Link from 'next/link'
 import { ChevronLeft, FileText, GitBranchPlus, GitCompare, Lock } from 'lucide-react'
 import { getTranslations } from 'next-intl/server'
 
+import { DeleteHarnessButton } from '@/features/delete-harness'
 import { CommentsSection } from '@/features/discuss'
 import { HarnessVersionSwitcher } from '@/features/harness-versions'
 import { HarnessDetail, RawConfigDisclosure } from '@/features/inspect-harness'
@@ -164,6 +165,13 @@ export default async function HarnessDetailPage({
     entry !== undefined &&
     entry.owner === currentWorkspace
 
+  // Delete (versions / whole harness) — admin only (the creator exception is server-side) + workspace-owned
+  // (_shared/first-party delete 404s at the control plane, so the affordance is hidden for them).
+  const canDeleteHarness =
+    can(principal?.roles, 'harnesses:delete') &&
+    entry !== undefined &&
+    entry.owner === currentWorkspace
+
   // Trace sinks (multiple) + this harness's selection (assignment) — which observability platform to load the grading detail into.
   // The detail renders even if it fails (only the selection row is hidden).
   const traceSinks: TraceSinksResponse = await controlPlane
@@ -260,6 +268,15 @@ export default async function HarnessDetailPage({
                 <GitBranchPlus className="size-3.5" />
                 {t('newVersion')}
               </Link>
+              {canDeleteHarness && (
+                <DeleteHarnessButton
+                  id={id}
+                  versions={versions}
+                  latest={versions[versions.length - 1] ?? active ?? ''}
+                  workspace={workspace}
+                  versionTags={versionTags}
+                />
+              )}
             </div>
           }
         />

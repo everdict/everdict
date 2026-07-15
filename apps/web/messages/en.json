@@ -486,6 +486,24 @@
     "latestResult": "Latest result",
     "lastRunAt": "Last run {at}"
   },
+  "deleteHarness": {
+    "triggerButton": "Delete",
+    "rowDeleteTitle": "Delete harness",
+    "rowDeleteAria": "Delete harness {id}",
+    "title": "Delete harness versions",
+    "close": "Close",
+    "explain": "Soft-delete removes the selected versions from this workspace. Past scorecards keep their results (each run snapshots the harness), but re-runs, schedules, and CI that reference a deleted version will fail to resolve.",
+    "selectAll": "Select all versions",
+    "selectedOfTotal": "{selected} / {total}",
+    "latest": "latest",
+    "entireWarning": "Every version is selected — this deletes the entire harness ({count, plural, one {# version} other {# versions}}).",
+    "failedSome": "Couldn't delete {count, plural, one {# version} other {# versions}}.",
+    "cancel": "Cancel",
+    "confirmVersions": "Delete {count, plural, one {# version} other {# versions}}",
+    "confirmEntire": "Delete harness",
+    "deletedVersions": "Deleted {count, plural, one {# version} other {# versions}} of {id}",
+    "deletedHarness": "Deleted harness {id}"
+  },
   "harnessVersions": {
     "versionsAria": "Versions ({count})",
     "compare": "Compare"

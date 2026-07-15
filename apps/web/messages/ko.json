@@ -486,6 +486,24 @@
     "latestResult": "최근 결과",
     "lastRunAt": "최근 실행 {at}"
   },
+  "deleteHarness": {
+    "triggerButton": "삭제",
+    "rowDeleteTitle": "하니스 삭제",
+    "rowDeleteAria": "하니스 {id} 삭제",
+    "title": "하니스 버전 삭제",
+    "close": "닫기",
+    "explain": "선택한 버전을 이 워크스페이스에서 소프트 삭제해요. 지난 스코어카드 결과는 그대로 남지만(실행 시점의 하니스가 스냅샷으로 보존돼요), 삭제된 버전을 참조하는 재실행·예약·CI는 확인에 실패해요.",
+    "selectAll": "전체 버전 선택",
+    "selectedOfTotal": "{selected} / {total}",
+    "latest": "최신",
+    "entireWarning": "모든 버전이 선택됐어요 — 하니스 전체({count}개 버전)가 삭제돼요.",
+    "failedSome": "{count}개 버전을 삭제하지 못했어요.",
+    "cancel": "취소",
+    "confirmVersions": "{count}개 버전 삭제",
+    "confirmEntire": "하니스 삭제",
+    "deletedVersions": "{id}의 {count}개 버전을 삭제했어요",
+    "deletedHarness": "하니스 {id} 삭제했어요"
+  },
   "harnessVersions": {
     "versionsAria": "버전 ({count})",
     "compare": "비교"

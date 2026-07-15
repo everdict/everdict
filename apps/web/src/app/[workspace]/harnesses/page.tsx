@@ -79,6 +79,7 @@ export default async function HarnessesPage({
           harnesses={ownHarnesses}
           relations={relations}
           authors={authors}
+          canDelete={can(principal?.roles, 'harnesses:delete')}
         />
       )}
     </div>

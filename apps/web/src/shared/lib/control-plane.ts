@@ -152,6 +152,13 @@ export const controlPlane = {
         body: JSON.stringify({ tags }),
       }
     ),
+  // Soft-delete a harness version (tombstone — past scorecard history preserved, future runs fail to resolve). Only the
+  // version's registrant or a workspace admin (the control plane enforces). Returns { deleted: true } (a body, so call not callVoid).
+  // Whole-harness delete = fan out over every live version in the web (there is no /harnesses/:id endpoint — same per-version-only model as datasets).
+  deleteHarnessVersion: <T>(auth: AuthContext, id: string, version: string) =>
+    call<T>(auth, `/harnesses/${encodeURIComponent(id)}/versions/${encodeURIComponent(version)}`, {
+      method: 'DELETE',
+    }),
   // GET /harnesses/:id/:version — resolved HarnessSpec (template + pins). For detail/diagramming.
   getHarnessSpec: <T>(auth: AuthContext, id: string, version: string) =>
     call<T>(auth, `/harnesses/${encodeURIComponent(id)}/${encodeURIComponent(version)}`),
