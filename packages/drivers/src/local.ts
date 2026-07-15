@@ -18,6 +18,10 @@ const MAX_BUFFER = 64 * 1024 * 1024;
 // A dev Driver that runs on the local host (temp directory + child_process).
 // Isolation is weak (shared host) — for dev/test and inside the agent. Real isolation is the Backend's job (Nomad/K8s/Windows).
 class LocalComputeHandle implements ComputeHandle {
+  // The in-flight echo child (if any) — kept so dispose() can kill it: a cancelled run disposes the compute, and a
+  // host-native child would otherwise linger orphaned (unlike the container path where docker rm -f ends everything).
+  private activeChild: ReturnType<typeof spawn> | undefined;
+
   constructor(
     private readonly root: string,
     private readonly echo: boolean = false,
@@ -33,7 +37,9 @@ class LocalComputeHandle implements ComputeHandle {
       // job log then carries the harness's output AS IT RUNS, which is what the live log tail reads
       // (Backend.logs). The quiet path stays on the battle-tested buffered exec.
       if (this.echo)
-        return await execEcho(cmd, cwd, { ...process.env, ...opts?.env }, (opts?.timeoutSec ?? 600) * 1000);
+        return await execEcho(cmd, cwd, { ...process.env, ...opts?.env }, (opts?.timeoutSec ?? 600) * 1000, (child) => {
+          this.activeChild = child;
+        });
       const { stdout, stderr } = await pexec(cmd, {
         cwd,
         env: { ...process.env, ...opts?.env },
@@ -62,17 +68,36 @@ class LocalComputeHandle implements ComputeHandle {
   }
 
   async dispose(): Promise<void> {
+    // Kill any still-running child (a cancelled run tears down its compute mid-exec) so the host process doesn't
+    // linger orphaned; a settled/already-dead child throws ESRCH → swallowed. Then remove the sandbox directory.
+    const child = this.activeChild;
+    if (child?.pid !== undefined) {
+      try {
+        process.kill(-child.pid, "SIGKILL"); // the whole detached group (execEcho spawns detached)
+      } catch {
+        try {
+          child.kill("SIGKILL");
+        } catch {}
+      }
+    }
     await rm(this.root, { recursive: true, force: true });
   }
 }
 
 // Buffered + teed spawn — same result contract as the pexec path (non-zero exit resolves, never throws).
 // On timeout the child is killed and the captured output is returned with exit 124 (GNU-timeout convention).
-function execEcho(cmd: string, cwd: string, env: NodeJS.ProcessEnv, timeoutMs: number): Promise<ExecResult> {
+function execEcho(
+  cmd: string,
+  cwd: string,
+  env: NodeJS.ProcessEnv,
+  timeoutMs: number,
+  register?: (child: ReturnType<typeof spawn>) => void,
+): Promise<ExecResult> {
   return new Promise((resolve) => {
     // detached → own process group, so a timeout kill reaches the shell's children too (a lingering child
     // like `sleep` also holds the stdio pipes open — which is why settlement is on 'exit', not 'close').
     const child = spawn(cmd, { cwd, env, shell: true, detached: true });
+    register?.(child); // hand the child to the handle so dispose() can kill it on cancellation
     let stdout = "";
     let stderr = "";
     let timedOut = false;

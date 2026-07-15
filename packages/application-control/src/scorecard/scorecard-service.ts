@@ -3,6 +3,7 @@ import {
   type CaseResult,
   type Dataset,
   type HarnessSpec,
+  NotFoundError,
   type ScorecardOrigin,
   type ScorecardRecord,
 } from "@everdict/contracts";
@@ -270,20 +271,42 @@ export class ScorecardService {
       const batch = ScorecardBatch.from(r);
       if (!batch.canSupersede({ repo, prNumber })) continue;
       await this.deps.store.update(r.id, batch.supersede(newId, this.now()));
-      this.inFlight.get(r.id)?.abort(); // don't fire remaining cases (cooperative) — track attaches partial results and terminates
-      await this.cancelWorkflowIfAny(r); // temporal-owned batch → cancel the workflow too (best-effort)
-      // Drop this batch's still-QUEUED scheduler entries — they'd dispatch later only to be discarded.
-      this.deps.cancelQueued?.((j) => j.batchId === r.id);
-      // Force-kill the already-fired backend jobs (best-effort) — the abort above only stops the un-fired
-      // remainder; without this, a superseded 601-case batch keeps burning cluster compute to the end.
-      if (this.deps.killCase && this.deps.runStore) {
-        const children = await this.deps.runStore.list(tenant, { scorecardId: r.id }).catch(() => []);
-        for (const c of children) {
-          if (c.status !== "running") continue;
-          void this.deps.killCase(tenant, c.runtime ?? r.runtime, c.caseId).catch(() => {});
-        }
+      await this.stopInFlight(r);
+    }
+  }
+
+  // Stop an aborted batch's live work — shared by supersede (auto) and cancel (user stop). The caller has ALREADY
+  // marked the record terminal (superseded|cancelled) so the track loop's abort branch settles it correctly; here we
+  // just tear the work down: (1) cooperative abort so runSuite stops firing the remaining cases (already-fired ones
+  // drain into their child runs), (2) cancel a Temporal-owned workflow, (3) drop still-queued scheduler entries and
+  // self-hosted lease jobs (they'd otherwise dispatch/run only to be discarded), (4) force-kill the already-fired
+  // managed backend jobs (killCase) — so a reclaimed 601-case batch stops burning cluster compute instead of running
+  // to the end. self-hosted lease jobs are force-freed by (3)'s cancelLeased (which aborts the run on the runner).
+  private async stopInFlight(rec: ScorecardRecord): Promise<void> {
+    this.inFlight.get(rec.id)?.abort();
+    await this.cancelWorkflowIfAny(rec);
+    this.deps.cancelQueued?.((j) => j.batchId === rec.id);
+    this.deps.cancelLeased?.((j) => j.batchId === rec.id);
+    if (this.deps.killCase && this.deps.runStore) {
+      const children = await this.deps.runStore.list(rec.tenant, { scorecardId: rec.id }).catch(() => []);
+      for (const c of children) {
+        if (c.status !== "running") continue;
+        void this.deps.killCase(rec.tenant, c.runtime ?? rec.runtime, c.caseId).catch(() => {});
       }
     }
+  }
+
+  // User stop — terminate a queued/running batch as cancelled and free its runtime. Mark the record cancelled first
+  // (the domain rejects a terminal batch → 409 ConflictError, so a double-stop or a stop-after-finish is a clean
+  // conflict) so the track loop's abort branch settles it as cancelled (not superseded); then stop the live work.
+  // Workspace-scoped: another workspace's batch (or a missing id) is a NotFound (no existence leak), same as get.
+  async cancel(input: { tenant: string; id: string }): Promise<ScorecardRecord> {
+    const rec = await this.deps.store.get(input.id);
+    if (!rec || rec.tenant !== input.tenant)
+      throw new NotFoundError("NOT_FOUND", { scorecard: input.id }, "Scorecard not found.");
+    await this.deps.store.update(rec.id, ScorecardBatch.from(rec).cancel(this.now()));
+    await this.stopInFlight(rec);
+    return (await this.get(rec.id)) ?? rec;
   }
 
   // A dispatched scorecard doesn't embed the heavy scorecard (case results), storing only runIds (storage dedup) →

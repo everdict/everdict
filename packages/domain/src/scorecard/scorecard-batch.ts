@@ -2,7 +2,7 @@ import { BadRequestError, type CaseResult, ConflictError } from "@everdict/contr
 import type { RunRecord, ScorecardOrigin, ScorecardRecord, ScorecardSubset } from "@everdict/contracts";
 import { summarizeTrials } from "./trials.js";
 
-// The domain model for a scorecard batch's lifecycle (queued → running → succeeded | failed | superseded).
+// The domain model for a scorecard batch's lifecycle (queued → running → succeeded | failed | superseded | cancelled).
 // Wraps the persistence record (@everdict/db ScorecardRecord — shapes unchanged); guard methods are the SSOT
 // for what is legal, and transition methods guard then return the store patch. Illegal transitions throw from
 // the domain. docs/architecture/rich-domain-core.md
@@ -146,7 +146,12 @@ export class ScorecardBatch {
 
   // Terminal = the batch's outcome is settled; nothing may rewrite it (first terminal write wins).
   isTerminal(): boolean {
-    return this.record.status === "succeeded" || this.record.status === "failed" || this.record.status === "superseded";
+    return (
+      this.record.status === "succeeded" ||
+      this.record.status === "failed" ||
+      this.record.status === "superseded" ||
+      this.record.status === "cancelled"
+    );
   }
 
   // Reclaimed by a newer fire of the same PR — live drivers skip further work on it.
@@ -204,6 +209,11 @@ export class ScorecardBatch {
     );
   }
 
+  // A user may stop any batch that has not yet settled (queued or running). A terminal batch is a no-op stop.
+  canCancel(): boolean {
+    return !this.isTerminal();
+  }
+
   // Trial roll-up (pass@k / flakiness) — derived on read from the scorecard's repeated trials, never stored
   // (like RunRecord.usage). A no-op for a single-run batch, so the response shape is unchanged there.
   withTrialSummary(): ScorecardRecord {
@@ -241,18 +251,33 @@ export class ScorecardBatch {
     };
   }
 
-  // The track loop settling a reclaimed batch: attach whatever partial outcome exists (results that fired,
-  // partial export, the failure that surfaced mid-abort) while KEEPING superseded. Legal over a record already
-  // marked superseded (supersede writes the status first, then aborts the loop) — but never over a batch that
-  // settled as succeeded/failed.
-  settleSuperseded(extras: ScorecardOutcomeExtras & { error?: ScorecardRunError }, now: string): ScorecardTransition {
+  // queued|running → cancelled — a user explicitly stopped this batch. cancelled is terminal but neither success
+  // nor failure, so baseline/diff/leaderboard stay clean (same posture as superseded). The service aborts the
+  // in-flight run and force-kills the runtime jobs after writing this status.
+  cancel(now: string): ScorecardTransition {
+    this.assertNotTerminal("cancel");
+    return {
+      status: "cancelled",
+      error: { code: "CANCELLED", message: "Stopped by user" },
+      updatedAt: now,
+    };
+  }
+
+  // The track loop settling an aborted batch (supersede OR user cancel): attach whatever partial outcome exists
+  // (results that fired, partial export, the failure that surfaced mid-abort) while KEEPING the aborted status.
+  // Legal over a record already marked superseded/cancelled (the abort writes the status first, then aborts the
+  // loop — the settlement PRESERVES it) — but never over a batch that settled as succeeded/failed.
+  settleAborted(extras: ScorecardOutcomeExtras & { error?: ScorecardRunError }, now: string): ScorecardTransition {
     if (this.record.status === "succeeded" || this.record.status === "failed")
       throw new ConflictError(
         "CONFLICT",
         { scorecard: this.record.id, status: this.record.status },
-        `scorecard batch already settled (${this.record.status}) — supersede settlement rejected`,
+        `scorecard batch already settled (${this.record.status}) — abort settlement rejected`,
       );
-    return { status: "superseded", ...extras, updatedAt: now };
+    // Preserve whichever aborted-terminal status the record already carries (cancel vs supersede); default to
+    // superseded for the (unreached) case where the settlement runs over a still-queued/running record.
+    const status = this.record.status === "cancelled" ? "cancelled" : "superseded";
+    return { status, ...extras, updatedAt: now };
   }
 
   private assertNotTerminal(transition: string): void {

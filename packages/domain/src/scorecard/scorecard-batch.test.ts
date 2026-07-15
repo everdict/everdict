@@ -97,11 +97,19 @@ describe("ScorecardBatch — factories", () => {
 });
 
 describe("ScorecardBatch — guards (the SSOT for legality)", () => {
-  it("isTerminal is true exactly for succeeded, failed, and superseded", () => {
+  it("isTerminal is true exactly for succeeded, failed, superseded, and cancelled", () => {
     expect(ScorecardBatch.from(queued()).isTerminal()).toBe(false);
     expect(ScorecardBatch.from({ ...queued(), status: "running" }).isTerminal()).toBe(false);
-    for (const status of ["succeeded", "failed", "superseded"] as const) {
+    for (const status of ["succeeded", "failed", "superseded", "cancelled"] as const) {
       expect(ScorecardBatch.from({ ...queued(), status }).isTerminal()).toBe(true);
+    }
+  });
+
+  it("canCancel is true exactly while unsettled (queued or running), false once terminal", () => {
+    expect(ScorecardBatch.from(queued()).canCancel()).toBe(true);
+    expect(ScorecardBatch.from({ ...queued(), status: "running" }).canCancel()).toBe(true);
+    for (const status of ["succeeded", "failed", "superseded", "cancelled"] as const) {
+      expect(ScorecardBatch.from({ ...queued(), status }).canCancel()).toBe(false);
     }
   });
 
@@ -195,14 +203,25 @@ describe("ScorecardBatch — transitions (guard, then return the store patch)", 
     });
   });
 
-  it("every terminal state rejects succeed/fail/start/supersede — first terminal write wins", () => {
-    for (const status of ["succeeded", "failed", "superseded"] as const) {
+  it("every terminal state rejects succeed/fail/start/supersede/cancel — first terminal write wins", () => {
+    for (const status of ["succeeded", "failed", "superseded", "cancelled"] as const) {
       const settled = ScorecardBatch.from({ ...queued(), status });
       expect(() => settled.succeed({}, "t")).toThrow(ConflictError);
       expect(() => settled.fail({ code: "INTERNAL", message: "late" }, {}, "t")).toThrow(ConflictError);
       expect(() => settled.start("t")).toThrow(ConflictError);
       expect(() => settled.supersede("sc-new", "t")).toThrow(ConflictError);
+      expect(() => settled.cancel("t")).toThrow(ConflictError);
     }
+  });
+
+  it("cancel stops a live batch with the CANCELLED error", () => {
+    const live = ScorecardBatch.from({ ...queued(), status: "running" });
+    expect(live.cancel("t3")).toEqual({
+      status: "cancelled",
+      error: { code: "CANCELLED", message: "Stopped by user" },
+      updatedAt: "t3",
+    });
+    expect(ScorecardBatch.from(queued()).cancel("t3")).toMatchObject({ status: "cancelled" });
   });
 
   it("supersede reclaims a live batch with the SUPERSEDED error naming the replacement", () => {
@@ -214,20 +233,29 @@ describe("ScorecardBatch — transitions (guard, then return the store patch)", 
     });
   });
 
-  it("settleSuperseded legally re-writes an already-superseded record with the partial outcome, but never a settled one", () => {
+  it("settleAborted legally re-writes an already-superseded record with the partial outcome, but never a settled one", () => {
     const reclaimed = ScorecardBatch.from({ ...queued(), status: "superseded" });
-    expect(reclaimed.settleSuperseded({ runIds: ["r1"] }, "t4")).toEqual({
+    expect(reclaimed.settleAborted({ runIds: ["r1"] }, "t4")).toEqual({
       status: "superseded",
       runIds: ["r1"],
       updatedAt: "t4",
     });
     // Also legal mid-race from a still-running record (supersede status write and abort are not atomic).
-    expect(ScorecardBatch.from({ ...queued(), status: "running" }).settleSuperseded({}, "t4")).toMatchObject({
+    expect(ScorecardBatch.from({ ...queued(), status: "running" }).settleAborted({}, "t4")).toMatchObject({
       status: "superseded",
     });
     for (const status of ["succeeded", "failed"] as const) {
-      expect(() => ScorecardBatch.from({ ...queued(), status }).settleSuperseded({}, "t4")).toThrow(ConflictError);
+      expect(() => ScorecardBatch.from({ ...queued(), status }).settleAborted({}, "t4")).toThrow(ConflictError);
     }
+  });
+
+  it("settleAborted PRESERVES a cancelled record's status (user stop settles as cancelled, not superseded)", () => {
+    const cancelled = ScorecardBatch.from({ ...queued(), status: "cancelled" });
+    expect(cancelled.settleAborted({ runIds: ["r1"] }, "t4")).toEqual({
+      status: "cancelled",
+      runIds: ["r1"],
+      updatedAt: "t4",
+    });
   });
 });
 

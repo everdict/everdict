@@ -2,9 +2,10 @@ import { z } from "zod";
 import { GraderSpecSchema, ScorecardSchema } from "../execution/eval-case.js";
 
 // Scorecard run lifecycle: accept a dataset×harness batch eval → run → success/failure.
-// superseded = a terminal state where a newer fire of the same (origin.repo, prNumber, harness, dataset) reclaimed (cancelled·replaced) this batch —
-// neither failure nor success, so it's not counted in baseline/diff/leaderboard (succeeded only). The store keeps this record.
-export const ScorecardStatusSchema = z.enum(["queued", "running", "succeeded", "failed", "superseded"]);
+// superseded = a terminal state where a newer fire of the same (origin.repo, prNumber, harness, dataset) reclaimed (cancelled·replaced) this batch.
+// cancelled = a terminal state where a user explicitly stopped this batch (remaining cases not fired, in-flight runtime jobs force-killed) — a deliberate stop, not a newer fire.
+// Both are neither failure nor success, so neither is counted in baseline/diff/leaderboard (succeeded only). The store keeps the record.
+export const ScorecardStatusSchema = z.enum(["queued", "running", "succeeded", "failed", "superseded", "cancelled"]);
 export type ScorecardStatus = z.infer<typeof ScorecardStatusSchema>;
 
 // phase = the failed pipeline stage (dispatch|judges|metrics|offload|persist) — for "at which stage" diagnosis (jsonb, so no migration needed).

@@ -51,6 +51,9 @@ interface PendingEntry {
   resolve: (r: EnqueueResult) => void;
   reject: (e: Error) => void;
   leasedAt?: number; // time the runner took it (undefined = waiting). Slice 6's expiry/requeue looks at this.
+  // The control plane asked to stop this job (user cancel / supersede). Its promise is already rejected; the entry
+  // lingers ONLY so the runner's next heartbeat is told to abort (freeing the runtime). Never leasable/requeuable.
+  cancelRequested?: boolean;
   timer: ReturnType<typeof setTimeout>;
 }
 
@@ -176,7 +179,7 @@ export class RunnerHub {
     this.requeueExpired(arr, now);
     // 1) Own queue (jobs targeted at a specific runner) — on capability mismatch, reject immediately (this runner was explicitly named, so avoid the wrong environment).
     for (;;) {
-      const entry = arr.find((e) => e.leasedAt === undefined);
+      const entry = arr.find((e) => e.leasedAt === undefined && !e.cancelRequested); // a cancelled job is never handed out
       if (!entry) break;
       const missing = capabilities
         ? requiredRunnerCapabilities(entry.job).filter((c) => !capabilities.includes(c))
@@ -209,7 +212,7 @@ export class RunnerHub {
     const poolArr = this.q(poolKey);
     this.requeueExpired(poolArr, now);
     for (const entry of poolArr) {
-      if (entry.leasedAt !== undefined) continue;
+      if (entry.leasedAt !== undefined || entry.cancelRequested) continue; // skip leased + cancelled
       const missing = capabilities
         ? requiredRunnerCapabilities(entry.job).filter((c) => !capabilities.includes(c))
         : [];
@@ -225,7 +228,8 @@ export class RunnerHub {
   // Requeue expired leases (runner dead/disconnected) — clear leasedAt to make them leasable again. Shared by the own queue and the pool queue.
   private requeueExpired(arr: PendingEntry[], now: number): void {
     for (const e of arr) {
-      if (e.leasedAt !== undefined && now - e.leasedAt > this.leaseTtlMs) e.leasedAt = undefined;
+      // A cancelled entry is never requeued (it's on its way out — the runner is being told to abort it).
+      if (e.leasedAt !== undefined && !e.cancelRequested && now - e.leasedAt > this.leaseTtlMs) e.leasedAt = undefined;
     }
   }
 
@@ -267,16 +271,43 @@ export class RunnerHub {
     });
   }
 
-  // Runner liveness signal — renew the lease (update leasedAt) so a long-running job isn't requeued. false if not in a queue (own/pool).
-  heartbeat(key: SelfHostedKey, jobId: string): boolean {
+  // Runner liveness signal — renew the lease (update leasedAt) so a long-running job isn't requeued. It also carries
+  // the control plane's cancel decision back to the runner: `cancelled` = stop this job now (→ the runner aborts the
+  // local run, freeing the runtime mid-case). `extended` is false if the job isn't in a queue (own/pool).
+  heartbeat(key: SelfHostedKey, jobId: string): { extended: boolean; cancelled: boolean } {
     // A heartbeat is proof the runner is alive — refresh the idle timeout of everything else it could still take too
     // (a maxConcurrent=1 runner heartbeats only the job it is running; the jobs queued behind it must not expire meanwhile).
     this.touchByRunner(key);
     const loc = this.locate(key, jobId);
-    if (!loc) return false;
+    if (!loc) return { extended: false, cancelled: false };
     loc.entry.leasedAt = this.now();
     this.rearm(loc.key, loc.entry); // liveness signal → reset idle timeout (so a long-running job isn't wrongly rejected)
-    return true;
+    return { extended: true, cancelled: loc.entry.cancelRequested === true };
+  }
+
+  // Cancel matching in-flight/parked jobs (a user stopped the scorecard, or supersede reclaimed it). The parked/leased
+  // promise is rejected NOW so the batch settles without waiting on the runner (cooperative — a cancelled case becomes
+  // an interrupted failure in the partial). The entry lingers (marked cancelRequested → neither leasable nor requeuable)
+  // ONLY so the runner's next heartbeat returns cancelled and it aborts the local run + frees the runtime; the runner's
+  // submit (or the idle timeout) then removes it. Returns how many jobs were signalled. Single-process, best-effort —
+  // the same assumption as the lease hub itself. Predicate keys on the job (e.g. j.batchId === scorecardId).
+  requestCancel(predicate: (job: AgentJob) => boolean): number {
+    let count = 0;
+    for (const arr of this.queues.values()) {
+      for (const entry of arr) {
+        if (entry.cancelRequested || !predicate(entry.job)) continue;
+        entry.cancelRequested = true;
+        entry.reject(
+          new UpstreamError(
+            "UPSTREAM_ERROR",
+            { jobId: entry.jobId, reason: "cancelled" },
+            "Run cancelled — the scorecard was stopped.",
+          ),
+        );
+        count++;
+      }
+    }
+    return count;
   }
 
   // Proof-of-life fan-out — a heartbeat, or a lease that actually TAKES a job, proves the owner has a LIVE runner doing
@@ -296,7 +327,7 @@ export class RunnerHub {
   }
 
   private rearmWaiting(key: SelfHostedKey, arr: PendingEntry[]): void {
-    for (const e of arr) if (e.leasedAt === undefined) this.rearm(key, e);
+    for (const e of arr) if (e.leasedAt === undefined && !e.cancelRequested) this.rearm(key, e);
   }
 
   // Runner reports a result → resolve the parked promise. false if not in a queue (own/pool) (already completed/expired/unknown).

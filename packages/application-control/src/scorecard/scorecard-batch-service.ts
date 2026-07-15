@@ -1179,7 +1179,7 @@ export class ScorecardBatchService {
         if (reclaimed)
           await this.deps.store.update(
             id,
-            ScorecardBatch.from(reclaimed).settleSuperseded(
+            ScorecardBatch.from(reclaimed).settleAborted(
               {
                 ...(scorecard.results.length > 0 ? { summary: summarizeScorecard(scorecard) } : {}),
                 ...(exportedPartial?.cases?.length ? { export: exportedPartial } : {}),
@@ -1246,7 +1246,7 @@ export class ScorecardBatchService {
         if (controller.signal.aborted) {
           // If supersede arrived mid-pipeline (judge/offload), don't revive to succeeded — all results attach, but
           // the newer fire is the answer for this PR, so terminate as superseded (leaderboard/baseline see only the new one).
-          await this.deps.store.update(id, batch.settleSuperseded(extras, this.now()));
+          await this.deps.store.update(id, batch.settleAborted(extras, this.now()));
         } else if (!batch.isTerminal()) {
           await this.deps.store.update(id, batch.succeed(extras, this.now()));
         }
@@ -1280,10 +1280,7 @@ export class ScorecardBatchService {
         const batch = ScorecardBatch.from(settled);
         if (controller.signal.aborted) {
           // A failure after supersede isn't reported as a failure (a reclaimed batch's leftover errors are noise) — keep superseded.
-          await this.deps.store.update(
-            id,
-            batch.settleSuperseded({ ...extras, error: { ...base, phase } }, this.now()),
-          );
+          await this.deps.store.update(id, batch.settleAborted({ ...extras, error: { ...base, phase } }, this.now()));
         } else if (!batch.isTerminal()) {
           await this.deps.store.update(id, batch.fail({ ...base, phase }, extras, this.now()));
         }
