@@ -153,6 +153,36 @@ describe("RunnerHub", () => {
     }
   });
 
+  // Regression: a busy maxConcurrent=1 runner draining a scorecard serially — the jobs queued behind the running one
+  // must NOT be rejected as "no runner connected" while the runner is alive and heartbeating the job it is on.
+  it("a job waiting behind a busy runner is kept alive by that runner's heartbeat on the running job (not wrongly rejected)", async () => {
+    vi.useFakeTimers();
+    try {
+      let n = 0;
+      const hub = new RunnerHub({ queueTimeoutMs: 100, newJobId: () => `j-${n++}` });
+      hub.enqueue(keyA, job("c1")); // j-0 — leased & run first
+      const d2 = hub.enqueue(keyA, job("c2")); // j-1 — waits behind c1
+      let rejected2 = false;
+      d2.catch(() => {
+        rejected2 = true; // mark if wrongly rejected (also prevents unhandled)
+      });
+      expect(hub.lease(keyA)?.jobId).toBe("j-0"); // runner takes c1 (serial); c2 stays queued
+      // The runner spends >queueTimeoutMs on c1, heartbeating it every 30ms; c2 sits un-leased the whole time (300ms total).
+      for (let i = 0; i < 10; i++) {
+        await vi.advanceTimersByTimeAsync(30);
+        expect(hub.heartbeat(keyA, "j-0")).toBe(true);
+      }
+      expect(rejected2).toBe(false); // pre-fix: c2's idle timer never resets → wrongly rejected; post-fix: kept alive
+      // Runner finishes c1, then leases c2 and completes it normally.
+      hub.complete(keyA, "j-0", result);
+      expect(hub.lease(keyA)?.jobId).toBe("j-1");
+      hub.complete(keyA, "j-1", result);
+      await expect(d2).resolves.toMatchObject({ result });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("if the heartbeat stops after leasing (runner death), reject as no_runner after the idle timeout", async () => {
     vi.useFakeTimers();
     try {
@@ -247,6 +277,60 @@ describe("RunnerHub — workspace pool (N runners drain)", () => {
     );
     expect(hub.complete({ owner: OWNER, runnerId: "has-docker" }, "j-img", result)).toBe(true);
     await expect(d).resolves.toMatchObject({ result });
+  });
+
+  // Regression (pool variant): a single pool runner draining the pool serially — the pool jobs queued behind the one it
+  // is running must not expire; the runner's heartbeat (with its own key) proves the owner has a live runner for the pool.
+  it("pool: jobs waiting behind a busy pool runner are kept alive by its heartbeat (serial drain doesn't spuriously reject)", async () => {
+    vi.useFakeTimers();
+    try {
+      let n = 0;
+      const hub = new RunnerHub({ queueTimeoutMs: 100, newJobId: () => `p-${n++}` });
+      hub.enqueue(poolKeyFor(OWNER), job("p1")); // p-0 — leased & run first
+      const d2 = hub.enqueue(poolKeyFor(OWNER), job("p2")); // p-1 — waits behind p1 in the pool
+      let rejected = false;
+      d2.catch(() => {
+        rejected = true;
+      });
+      expect(hub.lease(r1)?.jobId).toBe("p-0"); // r1 takes p1 from the pool (serial)
+      for (let i = 0; i < 10; i++) {
+        await vi.advanceTimersByTimeAsync(30);
+        expect(hub.heartbeat(r1, "p-0")).toBe(true); // heartbeat on the running pool job (r1's own key)
+      }
+      expect(rejected).toBe(false); // p2 kept alive via the runner's proof-of-life across the owner pool
+      hub.complete(r1, "p-0", result);
+      expect(hub.lease(r1)?.jobId).toBe("p-1");
+      hub.complete(r1, "p-1", result);
+      await expect(d2).resolves.toMatchObject({ result });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // Guard the proof-of-life refinement: only a heartbeat / a lease that TAKES a job refreshes the queue — an empty/skip
+  // poll must NOT. Otherwise a job no connected runner can run (needs docker, only non-docker runners poll) would be kept
+  // alive forever by their skip-polls and hang the batch instead of failing. It must still time out at ~queueTimeoutMs.
+  it("pool: a job no connected runner can run still times out — an incapable runner's skip-polls don't keep it alive forever", async () => {
+    vi.useFakeTimers();
+    try {
+      const hub = new RunnerHub({ queueTimeoutMs: 100, newJobId: () => "j-img" });
+      const d = hub.enqueue(poolKeyFor(OWNER), imageJob("needs-docker")); // requires docker
+      let rejected = false;
+      let reason: unknown;
+      d.catch((e: unknown) => {
+        rejected = true;
+        reason = (e as { extra?: { reason?: string } }).extra?.reason;
+      });
+      // A non-docker runner keeps polling every 40ms (< the 100ms idle window) and skipping the docker job.
+      for (let i = 0; i < 8; i++) {
+        expect(hub.lease({ owner: OWNER, runnerId: "no-docker" }, ["git"])).toBeNull(); // skipped, not taken → no touch
+        await vi.advanceTimersByTimeAsync(40);
+      }
+      expect(rejected).toBe(true); // fired at ~queueTimeoutMs despite continuous skip-polls (not kept alive indefinitely)
+      expect(reason).toBe("no_runner");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("pool: own-queue jobs are taken before pool jobs", () => {

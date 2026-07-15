@@ -196,6 +196,7 @@ export class RunnerHub {
       }
       entry.leasedAt = now;
       this.rearm(key, entry); // runner took it → reset idle timeout (heartbeat now keeps it alive)
+      this.touchByRunner(key); // taking a job proves the runner is alive → keep the jobs queued behind it from expiring
       return { jobId: entry.jobId, job: entry.job };
     }
     // 2) Owner pool queue (jobs submitted as self:ws, no specific runner) — on capability mismatch **skip, don't reject**
@@ -213,6 +214,7 @@ export class RunnerHub {
       if (missing.length > 0) continue; // this runner can't run it → skip and leave it for another runner (not a rejection)
       entry.leasedAt = now;
       this.rearm(poolKey, entry); // the timer is keyed to the pool queue (so remove finds it in the pool)
+      this.touchByRunner(key); // draining one pool job proves the runner is alive → keep the rest of the pool from expiring
       return { jobId: entry.jobId, job: entry.job };
     }
     return null;
@@ -265,11 +267,34 @@ export class RunnerHub {
 
   // Runner liveness signal — renew the lease (update leasedAt) so a long-running job isn't requeued. false if not in a queue (own/pool).
   heartbeat(key: SelfHostedKey, jobId: string): boolean {
+    // A heartbeat is proof the runner is alive — refresh the idle timeout of everything else it could still take too
+    // (a maxConcurrent=1 runner heartbeats only the job it is running; the jobs queued behind it must not expire meanwhile).
+    this.touchByRunner(key);
     const loc = this.locate(key, jobId);
     if (!loc) return false;
     loc.entry.leasedAt = this.now();
     this.rearm(loc.key, loc.entry); // liveness signal → reset idle timeout (so a long-running job isn't wrongly rejected)
     return true;
+  }
+
+  // Proof-of-life fan-out — a heartbeat, or a lease that actually TAKES a job, proves the owner has a LIVE runner doing
+  // work, so it keeps alive not just the touched job but every un-leased job that runner could still take (its own queue +
+  // the owner pool). Without this, a busy maxConcurrent=1 runner draining a scorecard serially lets the jobs queued behind
+  // the running one hit the idle timeout and get wrongly rejected as "no runner connected" while the runner is alive and
+  // working. Deliberately NOT called on an empty/skip poll: an idle runner that keeps skipping a job it can't run (e.g. a
+  // non-docker runner passing over an image job in the pool) must not refresh that job forever — it still times out so an
+  // unsatisfiable job fails instead of hanging. Leased jobs are left untouched — each is kept alive by its own heartbeat,
+  // so a genuinely dead runner's in-flight job still expires.
+  private touchByRunner(key: SelfHostedKey): void {
+    this.rearmWaiting(key, this.q(key));
+    if (key.runnerId !== POOL_RUNNER) {
+      const poolKey = poolKeyFor(key.owner);
+      this.rearmWaiting(poolKey, this.q(poolKey));
+    }
+  }
+
+  private rearmWaiting(key: SelfHostedKey, arr: PendingEntry[]): void {
+    for (const e of arr) if (e.leasedAt === undefined) this.rearm(key, e);
   }
 
   // Runner reports a result → resolve the parked promise. false if not in a queue (own/pool) (already completed/expired/unknown).
