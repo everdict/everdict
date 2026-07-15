@@ -16,6 +16,11 @@ export function ServiceView({ spec }: { spec: HarnessSpec }) {
   const target = spec.target
   const traceSource = spec.traceSource
   const frontDoor = spec.frontDoor
+  // The delivery mode must be one of reference|sentinel|egress (the control-plane contract). The served spec is a loose
+  // display view, so an out-of-contract value still renders — flag it: it's the shape that fails at the runner boundary
+  // (a "malformed job"), most often a control-plane/runner version skew.
+  const deliveryUnknownMode =
+    target?.delivery !== undefined && !['reference', 'sentinel', 'egress'].includes(target.delivery.mode)
 
   return (
     <div className="space-y-7">
@@ -150,12 +155,20 @@ export function ServiceView({ spec }: { spec: HarnessSpec }) {
               {target.extension && <Field label={t('extension')} value={target.extension.ref} />}
               <Field
                 label={t('deliveryLabel')}
+                mono={false}
                 value={
-                  target.delivery
-                    ? target.delivery.mode +
-                      (target.delivery.path ? ` (${target.delivery.path})` : '') +
-                      (target.delivery.sink ? ` → ${target.delivery.sink}` : '')
-                    : 'reference (store-fetch)'
+                  target.delivery ? (
+                    <span className="inline-flex flex-wrap items-center gap-1.5">
+                      <span className="font-mono text-[12.5px]">
+                        {target.delivery.mode +
+                          (target.delivery.path ? ` (${target.delivery.path})` : '') +
+                          (target.delivery.sink ? ` → ${target.delivery.sink}` : '')}
+                      </span>
+                      {deliveryUnknownMode && <Badge tone="warning">{t('deliveryUnknownMode')}</Badge>}
+                    </span>
+                  ) : (
+                    'reference (store-fetch)'
+                  )
                 }
               />
             </dl>

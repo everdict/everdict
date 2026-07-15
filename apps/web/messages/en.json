@@ -660,6 +660,7 @@
     "lifecycle": "Lifecycle",
     "extension": "Extension",
     "deliveryLabel": "Observation delivery",
+    "deliveryUnknownMode": "unknown mode",
     "endpoint": "Endpoint",
     "perRunKeyTip": "per-run injected key",
     "noDependencyInfra": "No dependency infra",

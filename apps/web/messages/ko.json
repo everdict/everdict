@@ -660,6 +660,7 @@
     "lifecycle": "수명주기",
     "extension": "익스텐션",
     "deliveryLabel": "관측물 전달",
+    "deliveryUnknownMode": "알 수 없는 모드",
     "endpoint": "엔드포인트",
     "perRunKeyTip": "per-run 주입 키",
     "noDependencyInfra": "의존 인프라 없음",
