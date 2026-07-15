@@ -12,6 +12,7 @@ import type {
   Score,
 } from "@everdict/contracts";
 import { toScores } from "@everdict/contracts";
+import { modelApiKeySecretName } from "@everdict/domain";
 import {
   type JudgeCompletion,
   JudgeGrader,
@@ -166,23 +167,28 @@ export function defaultJudgeRunner(deps: DefaultJudgeRunnerDeps): JudgeRunner {
         } catch (err) {
           return skip(spec, `secret decryption failed: ${err instanceof Error ? err.message : String(err)}`);
         }
-        // If judge.model is a registered model id, resolve it via that spec (provider/underlying model/baseUrl) — else use the raw model string.
+        // If judge.model is a registered model id, resolve it via that spec (provider/underlying model/baseUrl + apiKeySecret) — else use the raw model string.
         let provider: "anthropic" | "openai" = spec.provider;
         let model = spec.model;
         let modelBaseUrl: string | undefined;
+        // The secret NAME holding this judge's API key: a registered model's apiKeySecret (honored like a harness model
+        // binding), else the provider default (ANTHROPIC_API_KEY/OPENAI_API_KEY). Keeps the judge consistent with the
+        // agent-server binding — one model definition carries its own key everywhere it's referenced.
+        let keyName = provider === "anthropic" ? ANTHROPIC_KEY : OPENAI_KEY;
         if (deps.models) {
           try {
             const m = await deps.models.get(tenant, spec.model, "latest");
             provider = m.provider;
             model = m.model;
             modelBaseUrl = m.baseUrl;
+            keyName = modelApiKeySecretName(m);
           } catch {
-            // Not a registered model id → use spec.model as a raw model string.
+            // Not a registered model id → use spec.model as a raw model string with the provider-default key.
           }
         }
         if (provider === "anthropic") {
-          const apiKey = secrets[ANTHROPIC_KEY];
-          if (!apiKey) return skip(spec, `${ANTHROPIC_KEY} secret not configured`);
+          const apiKey = secrets[keyName];
+          if (!apiKey) return skip(spec, `${keyName} secret not configured`);
           const baseUrl = modelBaseUrl ?? deps.anthropicBaseUrl;
           complete = anthropicComplete({
             apiKey,
@@ -191,8 +197,8 @@ export function defaultJudgeRunner(deps: DefaultJudgeRunnerDeps): JudgeRunner {
             ...(deps.fetchImpl ? { fetchImpl: deps.fetchImpl } : {}),
           });
         } else {
-          const apiKey = secrets[OPENAI_KEY];
-          if (!apiKey) return skip(spec, `${OPENAI_KEY} secret not configured`);
+          const apiKey = secrets[keyName];
+          if (!apiKey) return skip(spec, `${keyName} secret not configured`);
           const baseUrl = secrets[OPENAI_BASE_URL] ?? modelBaseUrl ?? deps.openaiBaseUrl;
           complete = openaiComplete({
             apiKey,

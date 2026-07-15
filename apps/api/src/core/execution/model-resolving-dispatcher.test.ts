@@ -184,7 +184,7 @@ describe("resolveJobModel — connection env injection", () => {
       }),
     ]);
     const resolved = await resolveJobModel(models, job(spec), secretsFor({ MY_LITELLM_KEY: "sk-live" }));
-    expect((resolved.harnessSpec as ServiceHarnessSpec).services[0].env).toEqual({
+    expect((resolved.harnessSpec as ServiceHarnessSpec).services[0]?.env).toEqual({
       LLM_MODEL: "gpt-5.4-mini",
       LLM_URL: "https://litellm.internal/v1",
       LLM_KEY: "sk-live",

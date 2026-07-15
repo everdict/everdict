@@ -1,6 +1,6 @@
 import type { AgentJob, CaseResult, GradeContext, JudgeSpec } from "@everdict/contracts";
 import { RubricSpecSchema } from "@everdict/contracts";
-import { InMemoryRubricRegistry } from "@everdict/registry";
+import { InMemoryModelRegistry, InMemoryRubricRegistry } from "@everdict/registry";
 import { describe, expect, it, vi } from "vitest";
 import { defaultJudgeRunner } from "./judge-runner.js";
 
@@ -159,6 +159,48 @@ describe("defaultJudgeRunner", () => {
     const url = fetchImpl.mock.calls[0]?.[0];
     expect(url).toMatch(/\/chat\/completions$/);
     expect(url).toContain("litellm"); // OPENAI_BASE_URL (LiteLLM, etc.) applied
+  });
+
+  it("model+registered apiKeySecret: reads the model's linked secret, not the provider default (judge↔harness consistency)", async () => {
+    const models = new InMemoryModelRegistry();
+    await models.register("acme", {
+      id: "team-opus",
+      version: "1.0.0",
+      provider: "anthropic",
+      model: "claude-opus-4-8",
+      apiKeySecret: "MY_JUDGE_KEY",
+      tags: [],
+    });
+    const fetchImpl = vi.fn((_u: string, _i?: RequestInit) =>
+      Promise.resolve(
+        new Response(JSON.stringify({ content: [{ text: '{"pass":true,"score":0.9,"reason":"ok"}' }] }), {
+          status: 200,
+        }),
+      ),
+    );
+    const runner = defaultJudgeRunner({
+      // ONLY the model's linked secret is set — the provider default (ANTHROPIC_API_KEY) is absent.
+      secretsFor: async () => ({ MY_JUDGE_KEY: "sk-team" }),
+      models,
+      fetchImpl: fetchImpl as typeof fetch,
+    });
+    const [score] = await runner.run({ ...modelSpec, model: "team-opus" }, "acme", ctx);
+    expect(score).toMatchObject({ metric: "judge:correctness", value: 0.9, pass: true });
+    expect(fetchImpl).toHaveBeenCalledOnce(); // resolved via apiKeySecret, not skipped as "not configured"
+  });
+
+  it("model+registered without apiKeySecret: falls back to the provider default key name", async () => {
+    const models = new InMemoryModelRegistry();
+    await models.register("acme", {
+      id: "shared-opus",
+      version: "1.0.0",
+      provider: "anthropic",
+      model: "claude-opus-4-8",
+      tags: [],
+    });
+    const runner = defaultJudgeRunner({ secretsFor: async () => ({}), models }); // neither key set
+    const [score] = await runner.run({ ...modelSpec, model: "shared-opus" }, "acme", ctx);
+    expect(score?.detail).toContain("ANTHROPIC_API_KEY secret not configured");
   });
 
   it("harness kind + dispatch: spins up the referenced agent and extracts the verdict from its trace", async () => {
