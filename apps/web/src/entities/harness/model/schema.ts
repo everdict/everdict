@@ -121,6 +121,10 @@ export type ServiceReadiness = z.infer<typeof serviceReadinessSchema>
 
 // topology service — perRun = per-case key names injected at runtime. env = static env (non-store config),
 // volumes = docker -v mounts, readiness = polling ceiling. All three are info the harness actually uses, so exposed in the detail view.
+// A service's agent-server model binding — a bare registered-Model id (the web wizard writes only this shape;
+// object ModelRef bindings come via API/MCP). Loose display mirror; the connection env is injected at dispatch.
+export const modelBindingSchema = z.union([z.string(), z.object({ ref: z.string() }).passthrough()])
+
 export const topologyServiceSchema = z.object({
   name: z.string(),
   image: z.string(),
@@ -128,6 +132,7 @@ export const topologyServiceSchema = z.object({
   needs: z.array(z.string()).default([]),
   perRun: z.array(z.string()).default([]),
   replicas: z.number().default(1),
+  model: modelBindingSchema.optional(),
   env: z.record(z.string(), envValueSchema).default({}),
   volumes: z.array(z.string()).optional(),
   readiness: serviceReadinessSchema.optional(),
@@ -236,6 +241,7 @@ export const templateServiceSchema = z.object({
   needs: z.array(z.string()).default([]),
   perRun: z.array(z.string()).default([]),
   replicas: z.number().default(1),
+  model: modelBindingSchema.optional(),
   env: z.record(z.string(), envValueSchema).default({}),
   volumes: z.array(z.string()).optional(),
   readiness: serviceReadinessSchema.optional(),

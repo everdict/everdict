@@ -142,8 +142,10 @@ type Tab = 'template' | 'instance'
 
 export function RegisterHarnessWizard({
   secrets = EMPTY_SECRETS,
+  modelIds = [],
 }: {
   secrets?: ScopedSecretNames
+  modelIds?: string[] // registered Model ids — offered as options for a command/service model binding
 }) {
   const { workspace } = useParams<{ workspace: string }>()
   const t = useTranslations('registerHarness')
@@ -163,7 +165,12 @@ export function RegisterHarnessWizard({
         {tab === 'template' ? t('tabTemplateHint') : t('tabInstanceHint')}
       </p>
       {tab === 'template' ? (
-        <TemplateForm workspace={workspace} existingVersions={[]} secrets={secrets} />
+        <TemplateForm
+          workspace={workspace}
+          existingVersions={[]}
+          secrets={secrets}
+          modelIds={modelIds}
+        />
       ) : (
         <InstanceForm workspace={workspace} existingVersions={[]} secrets={secrets} />
       )}
@@ -181,6 +188,7 @@ export function TemplateForm({
   onRegistered,
   existingVersions,
   secrets = EMPTY_SECRETS,
+  modelIds = [],
 }: {
   workspace: string
   initial?: TemplateState
@@ -188,6 +196,7 @@ export function TemplateForm({
   onRegistered?: (version: string) => void
   existingVersions?: string[]
   secrets?: ScopedSecretNames
+  modelIds?: string[] // registered Model ids — options for the command/service model binding
 }) {
   const router = useRouter()
   const t = useTranslations('registerHarness')
@@ -318,6 +327,7 @@ export function TemplateForm({
                     needs: '',
                     perRun: '',
                     replicas: '1',
+                    model: '',
                     env: [],
                     volumes: '',
                     readinessTimeout: '',
@@ -375,6 +385,14 @@ export function TemplateForm({
                     placeholder="thread_id"
                   />
                 </div>
+                <LabeledModel
+                  label={t('svcModelLabel')}
+                  tip={t('svcModelTip')}
+                  value={sv.model}
+                  onChange={(v) => setService(i, { model: v })}
+                  options={modelIds}
+                  placeholder="gpt-5.4-mini"
+                />
                 <EnvEditor
                   label="env"
                   tip={t.rich('svcEnvTip', { b: (c) => <b>{c}</b> })}
@@ -558,7 +576,7 @@ export function TemplateForm({
               onChange={(v) => set({ image: v })}
               placeholder="ghcr.io/…"
             />
-            <LabeledInput
+            <LabeledModel
               label={t('modelLabel')}
               tip={
                 <>
@@ -567,6 +585,7 @@ export function TemplateForm({
               }
               value={s.model}
               onChange={(v) => set({ model: v })}
+              options={modelIds}
               placeholder="claude-opus-4-8"
             />
             <LabeledInput
@@ -1214,6 +1233,37 @@ function Section({
         )}
       </div>
       <div className="space-y-2">{children}</div>
+    </div>
+  )
+}
+
+// Labeled model picker — a combobox over the workspace's registered Model ids (a free-typed value is still surfaced
+// verbatim, so an unregistered literal keeps working). The chosen id resolves to its connection env at dispatch.
+function LabeledModel({
+  label,
+  tip,
+  value,
+  onChange,
+  options,
+  placeholder,
+}: {
+  label: string
+  tip?: React.ReactNode
+  value: string
+  onChange: (v: string) => void
+  options: string[]
+  placeholder?: string
+}) {
+  return (
+    <div className="space-y-1">
+      <FieldLabel tip={tip}>{label}</FieldLabel>
+      <Combobox
+        value={value}
+        onChange={onChange}
+        options={options.map((id) => ({ value: id }))}
+        {...(placeholder ? { placeholder } : {})}
+        aria-label={label}
+      />
     </div>
   )
 }

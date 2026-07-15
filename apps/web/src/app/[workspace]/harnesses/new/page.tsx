@@ -3,6 +3,7 @@ import { ChevronLeft, Lock } from 'lucide-react'
 import { getTranslations } from 'next-intl/server'
 
 import { RegisterHarnessWizard } from '@/features/register-harness'
+import { modelsSchema } from '@/entities/model'
 import { secretsSchema } from '@/entities/secret'
 import { can } from '@/shared/auth/can'
 import { currentPrincipal } from '@/shared/auth/principal'
@@ -25,6 +26,8 @@ export default async function NewHarnessPage({
 
   // For the env secret reference picker — shared (workspace) + my personal (user) secret names (no values). Empty list on failure/no permission.
   let secrets = { workspace: [] as string[], user: [] as string[] }
+  // Registered Model ids — offered in the command/service model binding picker (best-effort; empty on failure/no models).
+  let modelIds: string[] = []
   if (allowed) {
     try {
       const metas = secretsSchema.parse(await controlPlane.listSecrets(ctx))
@@ -34,6 +37,11 @@ export default async function NewHarnessPage({
       }
     } catch {
       secrets = { workspace: [], user: [] }
+    }
+    try {
+      modelIds = modelsSchema.parse(await controlPlane.listModels(ctx)).map((m) => m.id)
+    } catch {
+      modelIds = []
     }
   }
 
@@ -49,7 +57,7 @@ export default async function NewHarnessPage({
       <PageHeader title={t('registerTitle')} description={t('registerDescription')} />
       {allowed ? (
         <Card className="p-5">
-          <RegisterHarnessWizard secrets={secrets} />
+          <RegisterHarnessWizard secrets={secrets} modelIds={modelIds} />
         </Card>
       ) : (
         <EmptyState icon={<Lock />} title={t('noPermTitle')} hint={t('noPermHint')} />

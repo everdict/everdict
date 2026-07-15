@@ -1552,6 +1552,8 @@
     "svcOverrideEnvTip": "이 서비스의 env 를 덮어써요. 비밀은 <b>시크릿</b>으로 참조하세요.",
     "svcOverrideTitle": "서비스 변주 (service 하니스)",
     "svcPerRunTip": "케이스마다 런타임이 주입하는 키 이름들이에요(격리용). 콤마 구분. 예: thread_id.",
+    "svcModelLabel": "model (선택)",
+    "svcModelTip": "이 서비스의 에이전트가 쓸 등록된 모델이에요. 디스패치 시 모델의 연결정보(base URL + 실제 모델 + apiKeySecret 의 API 키)가 이 서비스 env 로 주입돼요 — OPENAI_BASE_URL/OPENAI_API_KEY 를 손으로 넣을 필요가 없어요. 에이전트가 아닌 서비스(DB·프록시·브라우저)는 비워 두세요.",
     "svcPortTip": "이 서비스가 여는 포트예요. 에이전트 서버라면 front-door 가 이 포트로 케이스를 보내요.",
     "svcReadinessIntervalTip": "준비됐는지 확인하는 간격이에요(ms). 비우면 런타임 기본값.",
     "svcReadinessTimeoutTip": "이 서비스가 준비될 때까지 기다리는 최대 시간이에요(ms). 비우면 런타임 기본값.",

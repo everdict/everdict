@@ -1552,6 +1552,8 @@
     "svcOverrideEnvTip": "Override this service's env. Reference secrets via <b>Secret</b>.",
     "svcOverrideTitle": "Service overrides (service harness)",
     "svcPerRunTip": "Key names the runtime injects per case (for isolation). Comma-separated. e.g. thread_id.",
+    "svcModelLabel": "model (optional)",
+    "svcModelTip": "The registered Model this service's agent uses. Its connection (base URL + underlying model + the API key from the model's apiKeySecret) is injected into this service's env at dispatch — no need to hand-wire OPENAI_BASE_URL/OPENAI_API_KEY. Leave empty for non-agent services (DB, proxy, browser).",
     "svcPortTip": "The port this service opens. For an agent server, the front-door sends cases to this port.",
     "svcReadinessIntervalTip": "Interval for readiness checks (ms). Empty = runtime default.",
     "svcReadinessTimeoutTip": "Max time to wait for this service to become ready (ms). Empty = runtime default.",

@@ -11,6 +11,7 @@ export interface ServiceRow {
   needs: string // comma-separated
   perRun: string // comma-separated
   replicas: string
+  model: string // agent-server model — a registered Model id (its connection env is injected at dispatch); empty = none
   env: EnvRow[] // static env (non-store config) — literal or secret reference
   volumes: string // docker -v mounts, newline-separated ("vol:/data" · "/host:/c:ro")
   readinessTimeout: string // readiness polling ceiling (ms) — if left empty, unset
@@ -156,6 +157,7 @@ export function buildTemplate(s: TemplateState): Record<string, unknown> {
         needs: csv(sv.needs),
         perRun: csv(sv.perRun),
         replicas: sv.replicas.trim() ? Number(sv.replicas) : 1,
+        ...(sv.model.trim() ? { model: sv.model.trim() } : {}), // registered Model id → connection env injected at dispatch
         ...(Object.keys(env).length ? { env } : {}),
         ...(volumes.length ? { volumes } : {}),
         ...(hasReadiness
@@ -209,6 +211,7 @@ export function templateStateFromSpec(t: HarnessTemplateSpec): TemplateState {
       needs: (s.needs ?? []).join(', '),
       perRun: (s.perRun ?? []).join(', '),
       replicas: s.replicas !== undefined ? String(s.replicas) : '1',
+      model: typeof s.model === 'string' ? s.model : '', // only a bare-id binding round-trips into the form (object bindings via API)
       env: envRowsFromSpec(s.env),
       volumes: (s.volumes ?? []).join('\n'),
       readinessTimeout: s.readiness?.timeoutMs !== undefined ? String(s.readiness.timeoutMs) : '',
@@ -386,6 +389,7 @@ export const INITIAL_TEMPLATE: TemplateState = {
       needs: '',
       perRun: '',
       replicas: '1',
+      model: '',
       env: [],
       volumes: '',
       readinessTimeout: '',
