@@ -41,7 +41,7 @@ export {
   CommentService,
   type CommentServiceDeps,
 } from "./comment/comment-service.js";
-export { deleteDatasetVersion } from "./dataset/dataset-service.js";
+export { deleteDatasetVersion, deleteDatasetVersions } from "./dataset/dataset-service.js";
 export { deleteHarnessVersion, harnessIsPrivate, harnessVisibleTo } from "./harness/harness-service.js";
 export {
   type PairRunnerBody,

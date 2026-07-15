@@ -21,6 +21,7 @@ export * from "./dataset/dataset-diff.js";
 export * from "./dataset/dataset-list-entry.js";
 export * from "./dataset/dataset.js";
 export * from "./dataset/delete-dataset-version-result.js";
+export * from "./dataset/delete-dataset-versions-result.js";
 export * from "./dataset/import-dataset-result.js";
 export * from "./dataset/register-dataset-result.js";
 export * from "./dataset/set-version-tags-result.js";

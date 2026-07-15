@@ -22,6 +22,7 @@ import { useTranslations } from 'next-intl'
 import { getTranslations } from 'next-intl/server'
 
 import { VersionSwitcher } from '@/features/dataset-versions'
+import { DeleteDatasetButton } from '@/features/delete-dataset'
 import { CommentsSection } from '@/features/discuss'
 import { ActivityTimeline, type ActivityItem, type Actor } from '@/features/discuss-dataset'
 import { CaseList } from '@/features/inspect-dataset'
@@ -116,6 +117,12 @@ export default async function DatasetDetailPage({
   })()
   // Edit = deploy a new version — only for datasets owned by this workspace (shared/first-party excluded).
   const canPublish = can(principal?.roles, 'datasets:write') && summary?.owner === currentWorkspace
+  // Delete (versions / whole dataset) — a workspace admin OR the dataset's original author (the per-version creator
+  // exception is server-side), and only workspace-owned datasets (_shared/first-party delete 404s, so the affordance is hidden).
+  const canDelete =
+    summary?.owner === currentWorkspace &&
+    (can(principal?.roles, 'datasets:delete') ||
+      (principal?.subject !== undefined && principal.subject === summary?.createdBy))
 
   let dataset: Dataset | undefined
   let error: string | undefined
@@ -223,6 +230,15 @@ export default async function DatasetDetailPage({
                   <GitBranchPlus className="size-3.5" />
                   {t('newVersion')}
                 </Link>
+              )}
+              {canDelete && versions.length > 0 && (
+                <DeleteDatasetButton
+                  id={dataset.id}
+                  versions={versions}
+                  latest={versions[0] ?? dataset.version}
+                  workspace={workspace}
+                  {...(summary?.versionTags ? { versionTags: summary.versionTags } : {})}
+                />
               )}
             </div>
           }
