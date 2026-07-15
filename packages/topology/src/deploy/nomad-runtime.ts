@@ -31,6 +31,7 @@ import {
   servicePortLabel,
   topologyJobId,
 } from "./nomad-topology.js";
+import { endpointUnreachableError } from "./reachability.js";
 import { type StorePlan, planTenantStores, resolveStoreIsolation } from "./store-binding.js";
 import type { TargetEnvHandle, TopologyHandle, TopologyRuntime } from "./topology-runtime.js";
 
@@ -488,6 +489,6 @@ export class NomadTopologyRuntime implements TopologyRuntime {
       }
       await new Promise((r) => setTimeout(r, interval));
     }
-    throw new UpstreamError("UPSTREAM_ERROR", { url }, "Timed out waiting for the endpoint to become ready");
+    throw endpointUnreachableError(url);
   }
 }

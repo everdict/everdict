@@ -15,6 +15,7 @@ import {
   buildZoneNetworkPolicies,
   resolveEgressCidrs,
 } from "./network-policy.js";
+import { endpointUnreachableError } from "./reachability.js";
 import { DEFAULT_POOL_NS, type StorePlan, planTenantStores } from "./store-binding.js";
 import type { TargetEnvHandle, TopologyHandle, TopologyRuntime } from "./topology-runtime.js";
 
@@ -311,6 +312,6 @@ export class K8sTopologyRuntime implements TopologyRuntime {
       }
       await new Promise((r) => setTimeout(r, interval));
     }
-    throw new UpstreamError("UPSTREAM_ERROR", { url }, "Timed out waiting for the endpoint to become ready");
+    throw endpointUnreachableError(url);
   }
 }

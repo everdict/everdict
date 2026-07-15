@@ -129,10 +129,14 @@ scenario harnesses already (`scripts/live/service-topology-{nomad,k8s}.mjs`) to 
 
 ### L4 — reachability preflight + cross-runtime smoke parity (per-run backstop)
 
-- **Bring-up preflight:** after `ensureTopology`, the runtime pings each resolved endpoint it will drive
-  (front door, target). Unreachable → a precise `UPSTREAM_ERROR`/`HARNESS_RUN_FAILED` ("control plane cannot
-  reach `<service>` on runtime `<x>`"), never a silent wrong result. (`waitForHttp` already polls readiness —
-  this generalizes it to a *reachability contract check* on the driving endpoints.)
+- **Bring-up reachability preflight — SHIPPED.** Each runtime's `waitForHttp` already polls the resolved endpoint
+  during `ensureTopology` before it is added to `topo.endpoints`, so readiness polling *is* the control-plane-side
+  reachability check. The three copies now throw ONE shared `endpointUnreachableError(url)`
+  (`reachability.ts`) — "the control plane cannot reach it on this runtime" — so an unroutable address fails the
+  same, clear way everywhere instead of a bare "not ready". (`service-backend` additionally guards front-door
+  presence.) Remaining: **cross-runtime smoke parity** (run the single-case smoke on the ACTUAL target runtime +
+  a canary-diff mode — needs the smoke-run affordance) and the **Nomad hostIP `127.0.0.1` fallback guard** (warn
+  when a multi-node alloc reports no routable host).
 - **Cross-runtime smoke parity:** the single-case smoke run (validation ladder L2) runs on the **actual target
   runtime**, and a "portability check" mode brings the canary up on a second backend and diffs bring-up +
   reachability. "Passed on self-hosted" must never be read as "passes on Nomad."
@@ -144,8 +148,8 @@ scenario harnesses already (`scripts/live/service-topology-{nomad,k8s}.mjs`) to 
 1. **S1 — portability lint (L1).** `checkPortability` + wire into `/harnesses/validate` and register/resolve; web surfaces issues inline (the delivery-mode badge is the precedent). *Biggest leverage, cheapest, no runtime.*
 2. **S2 — `{{peer}}` canonicalization + migration (L0/L1).** Literal inter-service/`localhost`/IP → hard error; migrate the example bundles + any registered specs off hardcodes (now that `e6c76c5` makes `{{peer}}` work on all four paths).
 3. **S3 — peer-resolver centralization (L2) — SHIPPED.** The four inline `hostFor` lambdas → named strategies in `peer-resolver.ts` + a parity test that locks each backend's peer-host form; no behavior change (217 topology tests green).
-4. **S4 — conformance suite (L3).** Golden canary spec + per-backend scenario assertions of identical behavior.
-5. **S5 — reachability preflight + cross-runtime smoke (L4).** Generalize `waitForHttp` to a driving-endpoint reachability check; smoke-on-target-runtime + portability-diff mode; Nomad hostIP-fallback guard.
+4. **S4 — conformance suite (L3) — deterministic slice SHIPPED.** A golden canary through the pure builders asserts each backend's correct peer host (`topology-conformance.test.ts`: Nomad plain alias vs K8s `<id>-<service>` DNS, via wiring AND `{{peer}}`). Follow-up: the env-gated live 3-backend scenario (real bring-up + identical `CaseResult`).
+5. **S5 — reachability preflight (L4) — SHIPPED.** The runtimes' readiness poll is the reachability check; unified into one `endpointUnreachableError` for a clear, consistent "cannot reach it on this runtime". Follow-up: cross-runtime smoke-on-target + the Nomad hostIP-fallback guard.
 
 S1+S2 alone close the reported failure mode at authoring time; S3–S5 make it *provably* robust and keep it
 that way.

@@ -378,7 +378,7 @@ describe("DockerTopologyRuntime", () => {
       ],
     };
     const rt = new DockerTopologyRuntime({ docker: f.docker, fetchImpl: never });
-    await expect(rt.ensureTopology(spec)).rejects.toThrow(/Timed out waiting for the endpoint/);
+    await expect(rt.ensureTopology(spec)).rejects.toThrow(/never became reachable/);
   });
 
   it("teardown: removes the topology containers + network", async () => {

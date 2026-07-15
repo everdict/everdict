@@ -8,6 +8,7 @@ import { dependencyConnEnv, dependencyStores } from "./dependencies.js";
 import { type Docker, dockerCli } from "./docker.js";
 import { interpolateServiceEnv, staticWiringEnv } from "./nomad-topology.js";
 import { aliasPeerHost } from "./peer-resolver.js";
+import { endpointUnreachableError } from "./reachability.js";
 import type { TargetEnvHandle, TopologyHandle, TopologyRuntime } from "./topology-runtime.js";
 
 export interface DockerTopologyRuntimeOptions {
@@ -255,7 +256,7 @@ export class DockerTopologyRuntime implements TopologyRuntime {
       readiness?.intervalMs ?? this.defaultIntervalMs,
       async () => (await this.fetchImpl(url)).status < 500,
       () => {
-        throw new UpstreamError("UPSTREAM_ERROR", { url }, "Timed out waiting for the endpoint to become ready");
+        throw endpointUnreachableError(url);
       },
     );
   }
