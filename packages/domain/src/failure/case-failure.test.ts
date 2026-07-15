@@ -8,6 +8,21 @@ describe("classifyFailure (failure taxonomy: where it died × whose fault)", () 
     expect(f).toMatchObject({ stage: "dispatch", class: "infra", code: "UPSTREAM_ERROR", retryable: true });
   });
 
+  it("carries the self-hosted runnerId from a no_runner dispatch failure so the result links to that runner", () => {
+    const err = new UpstreamError(
+      "UPSTREAM_ERROR",
+      { runnerId: "laptop", reason: "no_runner" },
+      "No self-hosted runner activity — no runner is connected, or it is idle/dead.",
+    );
+    const f = classifyFailure(err, "dispatch");
+    expect(f).toMatchObject({ stage: "dispatch", class: "infra", code: "UPSTREAM_ERROR", runnerId: "laptop" });
+  });
+
+  it("omits runnerId for a managed-backend failure that names no runner", () => {
+    const f = classifyFailure(new UpstreamError("UPSTREAM_ERROR", {}, "Nomad job submission failed"), "dispatch");
+    expect(f.runnerId).toBeUndefined();
+  });
+
   it("an OOM-killed alloc is FATAL infra — retrying with the same limits fails again", () => {
     const err = new UpstreamError("UPSTREAM_ERROR", { signal: OOM_KILLED }, "task OOM-killed (raise resources)");
     const f = classifyFailure(err, "run");

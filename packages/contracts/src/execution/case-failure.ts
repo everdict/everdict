@@ -17,6 +17,10 @@ export const CaseFailureSchema = z.object({
   code: z.string(), // ErrorCode when known (UPSTREAM_ERROR, HARNESS_RUN_FAILED, …) or a signal marker (OOM_KILLED)
   message: z.string(),
   retryable: z.boolean(), // whether an automatic as-is retry has a chance (drives runSuite's transient retry)
+  // The self-hosted runner this case was assigned to / waited on when it died at dispatch (from the runner-hub's
+  // UpstreamError extra.runnerId). Present for no_runner / capability_mismatch failures so the UI can link the failure
+  // to that runner's health (online? last seen?); "*" = the owner pool (no specific runner). Absent for managed backends.
+  runnerId: z.string().optional(),
 });
 export type CaseFailure = z.infer<typeof CaseFailureSchema>;
 

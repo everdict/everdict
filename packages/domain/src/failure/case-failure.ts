@@ -40,11 +40,14 @@ export function classifyFailure(err: unknown, stage: CaseFailure["stage"]): Case
     // OOM stamped by a backend rides in extra.signal (the code stays UPSTREAM_ERROR for the HTTP envelope).
     const signal = typeof err.extra?.signal === "string" ? err.extra.signal : undefined;
     const code = signal ?? err.code;
-    if (INFRA_FATAL.has(code)) return { stage, class: "infra", code, message, retryable: false };
-    if (INFRA_RETRYABLE.has(code)) return { stage, class: "infra", code, message, retryable: true };
-    if (CONFIG.has(code)) return { stage, class: "config", code, message, retryable: false };
-    if (HARNESS.has(code)) return { stage, class: "harness", code, message, retryable: false };
-    return { stage, class: "infra", code, message, retryable: true };
+    // A self-hosted dispatch failure (no_runner / capability_mismatch) names the runner it waited on in extra.runnerId —
+    // carry it onto the failure so the result links to that runner's health. Absent for managed backends.
+    const runner = typeof err.extra?.runnerId === "string" ? { runnerId: err.extra.runnerId } : {};
+    if (INFRA_FATAL.has(code)) return { stage, class: "infra", code, message, retryable: false, ...runner };
+    if (INFRA_RETRYABLE.has(code)) return { stage, class: "infra", code, message, retryable: true, ...runner };
+    if (CONFIG.has(code)) return { stage, class: "config", code, message, retryable: false, ...runner };
+    if (HARNESS.has(code)) return { stage, class: "harness", code, message, retryable: false, ...runner };
+    return { stage, class: "infra", code, message, retryable: true, ...runner };
   }
   return { stage, class: "infra", code: "INTERNAL", message, retryable: true };
 }
