@@ -404,14 +404,13 @@ export default async function ScorecardDetailPage({
         <Prop label="updated" value={new Date(record.updatedAt).toLocaleString()} />
         {authorName && <Prop label={t('metaRunBy')} value={authorName} />}
         {/* The runtime this batch ran on — shown by name (a self-hosted runner's device name, resolved from the roster).
-            A registered runtime and a reachable self-hosted runner (mine · team-shared) link out; another member's
-            personal runner shows the name only (no page you can reach). Hidden if unset (legacy · ingest). */}
+            Only a registered runtime links to its detail page; self-hosted runners show the name only (multi-tenant —
+            a batch may have run on another member's personal runner, which has no screen to navigate to). Hidden if
+            unset (legacy · ingest). */}
         {record.runtime &&
           (() => {
             const rd = runtimeDisplay(record.runtime, {
               workspace,
-              ...(principal?.subject !== undefined ? { subject: principal.subject } : {}),
-              ...(record.createdBy !== undefined ? { createdBy: record.createdBy } : {}),
               runnerLabelOf: (rid) => runnerById.get(rid)?.label,
               poolPersonalLabel: t('runtimePoolPersonal'),
               poolWorkspaceLabel: t('runtimePoolWorkspace'),
