@@ -2141,6 +2141,12 @@
     "search": "Search",
     "close": "Close"
   },
+  "titleBar": {
+    "minimize": "Minimize",
+    "maximize": "Maximize",
+    "restore": "Restore",
+    "close": "Close"
+  },
   "submitRun": {
     "submitError": "Couldn't start the run",
     "harnessLabel": "Harness",

@@ -2141,6 +2141,12 @@
     "search": "검색",
     "close": "닫기"
   },
+  "titleBar": {
+    "minimize": "최소화",
+    "maximize": "최대화",
+    "restore": "이전 크기로",
+    "close": "닫기"
+  },
   "submitRun": {
     "submitError": "실행하지 못했어요",
     "harnessLabel": "하니스",

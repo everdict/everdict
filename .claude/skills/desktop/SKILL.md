@@ -27,9 +27,16 @@ logged-in web session over a minimal preload bridge.
    `shell.openExternal`; anything else denied. Local power is never guarded by navigation policy —
    only by the IPC-layer origin check (invariant 4).
 2. `contextIsolation: true`, `nodeIntegration: false`, `sandbox: true` — always.
-3. The bridge is **exactly** `pairRunner` / `runnerStatus` (+ status events) / `unpairRunner` /
+3. The runner bridge is **exactly** `pairRunner` / `runnerStatus` (+ status events) / `unpairRunner` /
    `appInfo`. No generic `invoke`, no fs/shell exposure. New methods need a locked design decision.
-   The four methods are **multi-runner** (D9 — a device hosts several runners via `RunnerSupervisor`):
+   One sibling namespace rides on `everdictDesktop` (D10 — custom frameless title bar): `window` =
+   `minimize`/`toggleMaximize`/`close`/`isMaximized`/`onMaximizeChange`, registered by `registerWindowChrome`
+   (`window-chrome.ts`) — kept **separate** from the runner bridge (distinct concern; it needs the *sending* window)
+   but under the SAME `senderFrame` origin gate. Benign window management only (no fs/shell/Node power); `close` = hide
+   to tray (runner stays resident). The OS window is frameless (`frame:false` on Win/Linux; `titleBarStyle:"hidden"` +
+   inset traffic lights on macOS) and the bar is drawn in `apps/web` (`widgets/desktop-titlebar`, gated on `window`
+   being present so an older native-frame desktop shows no double bar). Any OTHER new method still needs a locked decision.
+   The four runner methods are **multi-runner** (D9 — a device hosts several runners via `RunnerSupervisor`):
    `pairRunner({token, runnerId?, apiUrl?})` is **additive** (each call adds one runner, keyed by `runnerId`);
    `runnerStatus()`/its event return the aggregate `{ runners: DesktopRunnerStatus[] }` (a new web must **normalize**
    an older desktop's bare `DesktopRunnerStatus`); `unpairRunner(runnerId?)` drops one runner or (omitted) all;

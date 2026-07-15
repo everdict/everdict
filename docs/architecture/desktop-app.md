@@ -58,6 +58,22 @@
 >   optional id (omitted = all), `pairRunner` is additive, `appInfo()` gains `cpuCount`. A newly-deployed web stays
 >   version-skew tolerant against a not-yet-updated desktop by **normalizing** a bare `DesktopRunnerStatus` into the list.
 >
+> - **D10 — custom frameless title bar, not the native chrome (LOCKED 2026-07-15).** The native OS window buttons
+>   (minimize/maximize/close) read as legacy and off-brand, so the desktop goes **frameless** and the web draws its own
+>   theme-aware title bar. Platform split: **Windows/Linux** → `frame: false` (the web draws all three buttons);
+>   **macOS** → `titleBarStyle: "hidden"` + inset traffic lights (Mac users expect them, and they survive a web-bar
+>   failure), the web draws the rest. Because the renderer is the *remote* web (D1), the bar lives in `apps/web` as a
+>   `window.everdictDesktop.window`-gated branch (`widgets/desktop-titlebar`, styled with the app's own theme tokens so
+>   it matches light+dark) — it renders **only** when the bridge exposes `window`, so an older native-frame desktop shows
+>   **no** bar (no double title bar); the residual skew is that the frameless-window change and the web title-bar slice
+>   must ship together (the tray remains the safety net for quit either way). The bridge grows to match (invariant 3) with
+>   a window-chrome surface `everdictDesktop.window = { minimize, toggleMaximize, close, isMaximized, onMaximizeChange }`
+>   driven over origin-gated IPC (`registerWindowChrome`, kept **separate** from the runner bridge — a distinct concern
+>   that needs the *sending* window — under the same `senderFrame` origin gate, invariant 4). `close` routes through the
+>   window's close handler = **hide to tray** (the runner stays resident, unchanged). Content is offset below the fixed
+>   bar by a scoped `globals.css` rule (`html.desktop-shell`, added by the widget on mount); the window is moved via
+>   `-webkit-app-region: drag`. Window controls are **benign** — no fs/shell/Node power — so the security posture is unchanged.
+>
 > - **D1 — the UI is the deployed web, not a rebuild.** The desktop shell renders the SaaS web
 >   (`apps/web`) at its deployed URL inside the app window — the Linear/Slack/Notion model. `apps/web`
 >   stays the **single UI SSOT**; the desktop has feature parity *by construction* (every web deploy
@@ -166,7 +182,10 @@ Preload-exposed, only when `new URL(window.location).origin === configuredWebOri
 - `appInfo(): { version, platform, hostname, capabilities, cpuCount }` — for the account page to render "this device"
   affordances, and `cpuCount` for the soft-cap warning (D9).
 
-That's the whole API. No generic `invoke`, no fs/shell access, nothing else.
+That's the whole *runner* API. No generic `invoke`, no fs/shell access, nothing else. The one sibling surface is the
+**window-chrome** namespace `window` (D10 — custom frameless title bar): `minimize()` / `toggleMaximize()` / `close()` /
+`isMaximized()` / `onMaximizeChange(cb)`, benign window management under the same origin gate. Absent on an older
+native-frame desktop, so the web gates its custom title bar on `window` being defined.
 
 ### One-click pairing flow (D3)
 

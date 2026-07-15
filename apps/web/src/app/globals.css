@@ -283,3 +283,26 @@ body > *:not(.fixed):not(:has([data-sonner-toaster])) {
 :focus-visible {
   outline: none;
 }
+
+/* ── Desktop shell (Electron) — custom frameless title bar ──────────────────────
+   Active ONLY inside the desktop shell: widgets/desktop-titlebar adds `.desktop-shell` to <html> when the OS window is
+   frameless (the bridge exposes window controls, desktop D10). The bar is a fixed ~36px header; offset the app content
+   below it and shrink full-height shells so no extra scroll appears. The drag regions let the frameless window be moved
+   (buttons opt back out with .titlebar-no-drag). No effect in a normal browser (the class is never added there). */
+html.desktop-shell {
+  --titlebar-h: 2.25rem;
+}
+html.desktop-shell body {
+  padding-top: var(--titlebar-h);
+}
+html.desktop-shell body .min-h-screen {
+  min-height: calc(100vh - var(--titlebar-h));
+}
+.titlebar-drag {
+  -webkit-app-region: drag;
+  app-region: drag;
+}
+.titlebar-no-drag {
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}

@@ -19,6 +19,7 @@ import { normalizeWebUrl, resolveWebUrl } from "./server-url.js";
 import { type TokenIo, clearToken, loadToken, loadTokens, saveTokens } from "./token-store.js";
 import { buildTrayMenuTemplate, runnerStatusLabel } from "./tray-menu.js";
 import { type AutoUpdaterLike, UpdaterController, type UpdaterState } from "./updater.js";
+import { WINDOW_CHANNELS, registerWindowChrome } from "./window-chrome.js";
 import { allowTopLevelNavigation, decideWindowOpen, shouldRecoverToSetup, webOriginOf } from "./window-policy.js";
 
 // Desktop shell — renders the deployed web as-is (D1: UI SSOT = apps/web), stays resident in the tray, and
@@ -49,6 +50,18 @@ function securePreferences(origin: string): Electron.WebPreferences {
     preload: path.join(import.meta.dirname, "preload.cjs"),
     additionalArguments: [`--everdict-web-origin=${origin}`],
   };
+}
+
+// Frameless custom title bar (D10) — the web draws the whole bar (brand · drag · window controls) via
+// window.everdictDesktop.window. Windows/Linux → fully frameless (the web draws minimize/maximize/close). macOS →
+// keep the native traffic lights (Mac users expect them + they survive a web-bar failure) but hide the bar and inset
+// the lights so they sit centered in our ~36px bar; the web draws the rest. The setup window keeps its native frame.
+function titleBarPreferences(): Pick<
+  Electron.BrowserWindowConstructorOptions,
+  "frame" | "titleBarStyle" | "trafficLightPosition"
+> {
+  if (process.platform === "darwin") return { titleBarStyle: "hidden", trafficLightPosition: { x: 14, y: 11 } };
+  return { frame: false };
 }
 
 let mainWindow: BrowserWindow | null = null;
@@ -372,8 +385,17 @@ function createOrFocusWindow(): void {
   const win = new BrowserWindow({
     width: 1280,
     height: 800,
+    ...titleBarPreferences(),
     webPreferences: securePreferences(origin),
   });
+  // Frameless custom title bar (D10): tell the web when the maximized state changes so it can toggle the maximize/restore
+  // glyph. Same origin boundary as the status broadcast — only push to a frame still on the web origin.
+  const pushMaximizeState = (): void => {
+    if (senderAllowed(win.webContents.getURL(), origin))
+      win.webContents.send(WINDOW_CHANNELS.maximizeEvent, win.isMaximized());
+  };
+  win.on("maximize", pushMaximizeState);
+  win.on("unmaximize", pushMaximizeState);
   // Recovery (D8): the pinned server URL might be wrong/unreachable. On a successful load, clear the failed flag; on the
   // initial top-level load failure, mark it and pop the setup screen so the user can fix the address without the tray.
   let everLoaded = false;
@@ -391,7 +413,10 @@ function createOrFocusWindow(): void {
     const decision = decideWindowOpen(target, origin);
     if (decision === "external") void shell.openExternal(target);
     if (decision !== "in-app") return { action: "deny" };
-    return { action: "allow", overrideBrowserWindowOptions: { webPreferences: securePreferences(origin) } };
+    return {
+      action: "allow",
+      overrideBrowserWindowOptions: { ...titleBarPreferences(), webPreferences: securePreferences(origin) },
+    };
   });
   // Top-level navigation: allow only http/https (for OIDC/OAuth redirects); block other schemes.
   win.webContents.on("will-navigate", (event, url) => {
@@ -500,6 +525,12 @@ if (!app.requestSingleInstanceLock()) {
       pair: (payload) => supervisor.pair(payload),
       unpair: (runnerId) => supervisor.unpair(runnerId),
       status: () => supervisor.status(),
+    });
+    // Frameless custom title bar (D10) — window controls act on the window that sent the call. Same origin gate as the
+    // runner bridge (invariant 4); `close` routes through the window's close handler (= hide to tray, keeping the runner resident).
+    registerWindowChrome(ipcMain, {
+      webOrigin: () => webOrigin,
+      windowForSender: (sender) => BrowserWindow.fromWebContents(sender as Electron.WebContents),
     });
     createTray();
     createOrFocusWindow();

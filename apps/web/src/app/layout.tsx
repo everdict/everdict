@@ -2,6 +2,7 @@ import type { Metadata } from 'next'
 import { NextIntlClientProvider } from 'next-intl'
 import { getLocale, getMessages } from 'next-intl/server'
 
+import { DesktopTitlebar } from '@/widgets/desktop-titlebar'
 import { QueryProvider } from '@/shared/providers/query-provider'
 import { Toaster } from '@/shared/ui/toaster'
 
@@ -28,6 +29,8 @@ export default async function RootLayout({ children }: { children: React.ReactNo
       <body className="min-h-screen bg-background text-foreground antialiased">
         <script dangerouslySetInnerHTML={{ __html: themeScript }} />
         <NextIntlClientProvider messages={messages}>
+          {/* Custom frameless title bar — renders only inside the desktop shell (desktop D10); nothing in a browser. */}
+          <DesktopTitlebar />
           <QueryProvider>{children}</QueryProvider>
           <Toaster />
         </NextIntlClientProvider>

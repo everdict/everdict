@@ -24,6 +24,18 @@ export interface DesktopAppInfo {
   cpuCount: number
 }
 
+// Custom frameless title bar window controls (desktop D10). The web draws the whole bar and drives the OS window through these.
+export interface DesktopWindowControls {
+  minimize(): Promise<void>
+  // Maximize when restored / restore when maximized.
+  toggleMaximize(): Promise<void>
+  // Close = hide to tray on the desktop (the runner stays resident) — same as the old native close button.
+  close(): Promise<void>
+  isMaximized(): Promise<boolean>
+  // Subscribe to maximize/restore changes — returns an unsubscribe function.
+  onMaximizeChange(callback: (maximized: boolean) => void): () => void
+}
+
 export interface EverdictDesktopBridge {
   appInfo(): Promise<DesktopAppInfo>
   // One-click pairing — additive (D9): each call registers one more runner. The token is passed down only via this call and stored in the OS keychain (no screen exposure / read-back).
@@ -33,6 +45,9 @@ export interface EverdictDesktopBridge {
   runnerStatus(): Promise<DesktopRunnersStatus>
   // Subscribe to status — returns an unsubscribe function.
   onRunnerStatus(callback: (status: DesktopRunnersStatus) => void): () => void
+  // Present ONLY when the OS window is frameless (desktop D10). Absent on an older desktop with a native frame — the web then
+  // renders NO custom title bar (avoids a double bar), so gate the title bar on this being defined (version-skew tolerant).
+  window?: DesktopWindowControls
 }
 
 // Present only when rendering inside the desktop shell — null in a regular browser.

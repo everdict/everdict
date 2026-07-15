@@ -33,5 +33,19 @@ if (expectedOrigin !== undefined && location.origin === expectedOrigin) {
       electron.ipcRenderer.on("everdict:runner-status-event", listener);
       return () => electron.ipcRenderer.removeListener("everdict:runner-status-event", listener);
     },
+    // Frameless custom title bar (D10) — the web draws the bar and drives the OS window through these. Channel strings
+    // are manually kept in sync with window-chrome.ts WINDOW_CHANNELS (this file is sandbox CJS and cannot import ESM).
+    // Present only when the OS window is frameless (see main.ts), so the web renders NO custom bar on an older/native shell.
+    window: {
+      minimize: () => electron.ipcRenderer.invoke("everdict:window-minimize"),
+      toggleMaximize: () => electron.ipcRenderer.invoke("everdict:window-toggle-maximize"),
+      close: () => electron.ipcRenderer.invoke("everdict:window-close"),
+      isMaximized: () => electron.ipcRenderer.invoke("everdict:window-is-maximized"),
+      onMaximizeChange: (callback: (maximized: unknown) => void) => {
+        const listener = (_event: electron.IpcRendererEvent, maximized: unknown) => callback(maximized);
+        electron.ipcRenderer.on("everdict:window-maximize-event", listener);
+        return () => electron.ipcRenderer.removeListener("everdict:window-maximize-event", listener);
+      },
+    },
   });
 }
