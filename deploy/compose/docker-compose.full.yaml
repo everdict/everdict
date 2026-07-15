@@ -1,0 +1,207 @@
+# Everdict FULL production-shaped stack — nothing in-memory, Temporal-backed.
+#
+#   cp deploy/compose/.env.full.example deploy/compose/.env
+#   # edit .env: at minimum POSTGRES_PASSWORD, EVERDICT_INTERNAL_TOKEN, EVERDICT_SECRETS_KEY
+#   docker compose -f deploy/compose/docker-compose.full.yaml --env-file deploy/compose/.env up -d --build
+#
+#     web          : http://localhost:3001
+#     API          : http://localhost:8787   (/healthz, /docs)
+#     Temporal UI  : http://localhost:8233
+#
+# What this stack turns on (vs docker-compose.prod.yaml, which is single-node + in-memory hub + no Temporal):
+#   • Postgres for EVERY control-plane store (DATABASE_URL) — runs/scorecards/secrets/runners/queue/callbacks all
+#     persist; DB migrations apply automatically on API startup. Nothing resets on restart.
+#   • Store-backed self-hosted runner hub (EVERDICT_SELF_HOSTED_STORE_HUB=1) — a job parked on one API replica is
+#     leased + completed from another via the shared Pg queue. This is the fix for "no self-hosted runner activity"
+#     when the control plane is scaled out: with the in-memory hub the job is stranded on the parking replica.
+#   • Store-backed front-door callback rendezvous (EVERDICT_CALLBACK_BASE_URL) — topology/A2A completion callbacks
+#     survive across replicas.
+#   • Temporal — durable scorecard BATCHES (TemporalBatchDriver → /internal/batches bridge; execution stays in the
+#     API, so self-hosted runners keep working) + durable scheduled/cron evals (TemporalScheduleDriver). Temporal
+#     itself is persistent (auto-setup on Postgres), NOT the in-memory `start-dev` server.
+#   • A dedicated Temporal WORKER process (apps/cli `everdict worker`) polling the task queue.
+#   • Secret-at-rest encryption (EVERDICT_SECRETS_KEY) + /internal token (EVERDICT_INTERNAL_TOKEN).
+#
+# Auth: OFF by default (single tenant=default, trusted network). For real multi-tenant SSO add Keycloak:
+#   docker compose -f deploy/compose/docker-compose.full.yaml --profile auth up -d --build
+#   then set EVERDICT_REQUIRE_AUTH=1 + the KEYCLOAK_*/PUBLIC_HOST values in .env (see the .env template).
+#   ⚠️ Keycloak issuer must be reachable at the SAME URL from BOTH the browser and the API/web containers — set
+#      PUBLIC_HOST to a real host/IP (not `localhost`) and update realm-everdict.json redirectUris to that origin.
+name: everdict-full
+
+services:
+  # ── Postgres — shared by the control-plane stores AND Temporal (separate databases in one instance) ──────────
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-everdict}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-everdict}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-everdict} -d ${POSTGRES_DB:-everdict}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  # ── Temporal server (auto-setup: creates + upgrades the schema, then runs) — persisted on Postgres ───────────
+  temporal:
+    image: temporalio/auto-setup:${TEMPORAL_VERSION:-1.27.2}
+    environment:
+      DB: postgres12
+      DB_PORT: "5432"
+      POSTGRES_USER: ${POSTGRES_USER:-everdict}
+      POSTGRES_PWD: ${POSTGRES_PASSWORD}
+      POSTGRES_SEEDS: postgres
+      # The `default` namespace is created by auto-setup; the eval task queue lives inside it.
+      # (Dynamic config is left at the image default — no external file to mount.)
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "${TEMPORAL_PORT:-7233}:7233"
+    healthcheck:
+      test: ["CMD-SHELL", "tctl --address 127.0.0.1:7233 cluster health | grep -q SERVING"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+    restart: unless-stopped
+
+  # ── Temporal Web UI (workflow visibility) ────────────────────────────────────────────────────────────────────
+  temporal-ui:
+    image: temporalio/ui:${TEMPORAL_UI_VERSION:-2.34.0}
+    environment:
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_CORS_ORIGINS: http://localhost:${TEMPORAL_UI_PORT:-8233}
+    depends_on:
+      temporal:
+        condition: service_healthy
+    ports:
+      - "${TEMPORAL_UI_PORT:-8233}:8080"
+    restart: unless-stopped
+
+  # ── Control-plane API (Fastify :8787) — owns stores, dispatch, the runner lease hub, and the /internal bridge ─
+  api:
+    image: ghcr.io/everdict/everdict-api:${EVERDICT_VERSION:-latest}
+    build:
+      context: ../..
+      dockerfile: apps/api/Dockerfile
+      target: runtime
+    environment:
+      PORT: "8787"
+      # ── Persistence: every store on Postgres; migrations apply at startup ──
+      DATABASE_URL: postgresql://${POSTGRES_USER:-everdict}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-everdict}
+      # ── No in-memory: store-backed self-hosted runner hub (multi-replica safe) ──
+      EVERDICT_SELF_HOSTED_STORE_HUB: "1"
+      # Idle timeout for a parked self-hosted job with no lease/heartbeat activity (ms). Default 300000 (5 min).
+      EVERDICT_SELF_HOSTED_QUEUE_TIMEOUT_MS: ${EVERDICT_SELF_HOSTED_QUEUE_TIMEOUT_MS:-300000}
+      # ── Temporal: durable scorecard batches + scheduled/cron evals ──
+      EVERDICT_TEMPORAL_ADDRESS: temporal:7233
+      # ── Store-backed front-door callback rendezvous (topology/A2A completion across replicas) ──
+      # Must be an API base URL reachable from the deployed harness / self-hosted runner (host-reachable, not the compose-internal name, if runners are off-host).
+      EVERDICT_CALLBACK_BASE_URL: ${API_PUBLIC_URL:-http://api:8787}
+      # ── Secrets + internal bridge ──
+      # Secret at-rest encryption KEK (base64, 32B). Required for the workspace SecretStore (model/provider keys, integrations).
+      EVERDICT_SECRETS_KEY: ${EVERDICT_SECRETS_KEY:?set EVERDICT_SECRETS_KEY (openssl rand -base64 32)}
+      # Guards /internal/** — the Temporal worker → API bridge (schedules/batches) AND tenant-key minting. Required for Temporal firing.
+      EVERDICT_INTERNAL_TOKEN: ${EVERDICT_INTERNAL_TOKEN:?set EVERDICT_INTERNAL_TOKEN (openssl rand -hex 32)}
+      # ── Externally reachable URLs (GitHub App callback · Mattermost inbound · live trace deep-links) ──
+      API_PUBLIC_URL: ${API_PUBLIC_URL:-}
+      WEB_BASE_URL: ${WEB_BASE_URL:-}
+      # ── Auth (enable with the `auth` profile; leave unset for single tenant=default) ──
+      EVERDICT_REQUIRE_AUTH: ${EVERDICT_REQUIRE_AUTH:-}
+      KEYCLOAK_ISSUER: ${KEYCLOAK_ISSUER:-}
+      OIDC_AUDIENCE: ${OIDC_AUDIENCE:-}
+      WORKSPACE_CLAIM: ${WORKSPACE_CLAIM:-}
+      # ── Optional: per-tenant run ceiling; managed-backend agent image; local claude-code run auth ──
+      EVERDICT_TENANT_RUNS: ${EVERDICT_TENANT_RUNS:-}
+      EVERDICT_AGENT_IMAGE: ${EVERDICT_AGENT_IMAGE:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
+      # ── Optional: workspace GitHub App (github.com) ──
+      GITHUB_APP_ID: ${GITHUB_APP_ID:-}
+      GITHUB_APP_PRIVATE_KEY: ${GITHUB_APP_PRIVATE_KEY:-}
+      GITHUB_APP_SLUG: ${GITHUB_APP_SLUG:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    extra_hosts:
+      # Reach host-side services (a self-hosted runner or a LiteLLM proxy running on the Docker host).
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "${API_PORT:-8787}:8787"
+    restart: unless-stopped
+
+  # ── Temporal worker — polls the task queue; batch/schedule activities bridge back to the API over /internal ──
+  worker:
+    image: everdict-worker:${EVERDICT_VERSION:-latest}
+    build:
+      context: ../..
+      dockerfile: apps/cli/Dockerfile
+      target: runtime
+    command: ["node", "apps/cli/dist/main.js", "worker", "--temporal-address", "temporal:7233"]
+    environment:
+      # The worker→API bridge for scheduled fires + Temporal batches (must match the API's EVERDICT_INTERNAL_TOKEN).
+      EVERDICT_API_URL: http://api:8787
+      EVERDICT_INTERNAL_TOKEN: ${EVERDICT_INTERNAL_TOKEN}
+    depends_on:
+      temporal:
+        condition: service_healthy
+      api:
+        condition: service_started
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+  # ── SaaS web (Next.js :3001) — pure HTTP client of the API; token courier for Keycloak when auth is on ───────
+  web:
+    image: ghcr.io/everdict/everdict-web:${EVERDICT_VERSION:-latest}
+    build:
+      context: ../..
+      dockerfile: apps/web/Dockerfile
+      target: runtime
+    environment:
+      CONTROL_PLANE_URL: http://api:8787
+      TEMPORAL_UI_URL: ${TEMPORAL_UI_URL:-http://localhost:${TEMPORAL_UI_PORT:-8233}}
+      # Auth (enable with the `auth` profile). Unset → the web runs in dev mode (no login, tenant=default).
+      AUTH_SECRET: ${AUTH_SECRET:-}
+      AUTH_URL: ${WEB_BASE_URL:-}
+      KEYCLOAK_ISSUER: ${KEYCLOAK_ISSUER:-}
+      KEYCLOAK_CLIENT_ID: ${KEYCLOAK_CLIENT_ID:-}
+      KEYCLOAK_CLIENT_SECRET: ${KEYCLOAK_CLIENT_SECRET:-}
+      DESKTOP_DOWNLOAD_URL: ${DESKTOP_DOWNLOAD_URL:-}
+    depends_on:
+      - api
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "${WEB_PORT:-3001}:3001"
+    restart: unless-stopped
+
+  # ── Keycloak (OIDC human login) — only with `--profile auth`. Imports realm-everdict.json on first boot ───────
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.0
+    profiles: ["auth"]
+    command: ["start-dev", "--import-realm"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN:-admin}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin}
+      KC_HTTP_ENABLED: "true"
+      # Issuer host — must match what BOTH the browser and the API/web containers use. Set PUBLIC_HOST to a real host/IP.
+      KC_HOSTNAME: ${KC_HOSTNAME:-http://${PUBLIC_HOST:-localhost}:${KEYCLOAK_PORT:-8080}}
+      KC_HOSTNAME_STRICT: "false"
+    volumes:
+      - ../keycloak/realm-everdict.json:/opt/keycloak/data/import/realm-everdict.json:ro
+      - keycloak-data:/opt/keycloak/data
+    ports:
+      - "${KEYCLOAK_PORT:-8080}:8080"
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  keycloak-data:
