@@ -1841,7 +1841,8 @@
     "snapshot": "Snapshot ({kind})",
     "discuss": "Discussion",
     "liveLogs": "Live logs",
-    "liveTrace": "The trace is accumulating on the {kind} platform right now:"
+    "liveTrace": "The trace is accumulating on the {kind} platform right now:",
+    "sandbox": "Sandbox terminal"
   },
   "runsTable": {
     "sourceWeb": "Web",
@@ -1978,6 +1979,9 @@
     "statPassed": "Passed",
     "statFailed": "Failed",
     "statPassRate": "Pass rate",
+    "liveCasesTitle": "Cases running now",
+    "liveCasesHint": "Cases dispatched and running right now. Open one to watch its live screen (e.g. the browser-use Chrome) and logs.",
+    "watchLive": "Watch live",
     "metaRunBy": "Run by",
     "metaRuntime": "Runtime",
     "runtimeDetailTitle": "Runtime detail",
@@ -2303,5 +2307,22 @@
     "waiting": "Nothing to tail yet (job queued)",
     "stdoutHint": "Job stdout — the result stream",
     "stderrHint": "Job stderr — harness progress logs"
+  },
+  "liveScreen": {
+    "label": "Live screen",
+    "waiting": "Waiting for the first frame…"
+  },
+  "sandboxTerminal": {
+    "hint": "Run a command inside the live sandbox (ls · cat · ps · env …)",
+    "noContainer": "No live container to attach to",
+    "exit": "exit {code}",
+    "placeholder": "Type a command, then Enter"
+  },
+  "liveTerminal": {
+    "connecting": "Connecting…",
+    "open": "Connected",
+    "closed": "Disconnected",
+    "hint": "Interactive shell into the running sandbox (cd · env persist)",
+    "placeholder": "Type a command, then Enter"
   }
 }

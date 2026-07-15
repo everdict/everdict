@@ -1841,7 +1841,8 @@
     "snapshot": "스냅샷 ({kind})",
     "discuss": "논의",
     "liveLogs": "라이브 로그",
-    "liveTrace": "트레이스가 {kind} 플랫폼에 실시간 적재 중이에요:"
+    "liveTrace": "트레이스가 {kind} 플랫폼에 실시간 적재 중이에요:",
+    "sandbox": "샌드박스 터미널"
   },
   "runsTable": {
     "sourceWeb": "웹",
@@ -1978,6 +1979,9 @@
     "statPassed": "통과",
     "statFailed": "실패",
     "statPassRate": "통과율",
+    "liveCasesTitle": "실행 중인 케이스",
+    "liveCasesHint": "지금 디스패치되어 실행 중인 케이스예요. 열면 실행 중인 화면(예: browser-use 크롬)과 로그를 라이브로 볼 수 있어요.",
+    "watchLive": "라이브 보기",
     "metaRunBy": "실행자",
     "metaRuntime": "런타임",
     "runtimeDetailTitle": "런타임 상세",
@@ -2303,5 +2307,22 @@
     "waiting": "아직 테일링할 로그가 없어요 (잡 대기 중)",
     "stdoutHint": "잡 stdout — 최종 결과 스트림",
     "stderrHint": "잡 stderr — 하네스 진행 로그"
+  },
+  "liveScreen": {
+    "label": "라이브 화면",
+    "waiting": "첫 프레임을 기다리는 중…"
+  },
+  "sandboxTerminal": {
+    "hint": "실행 중인 샌드박스에서 명령을 실행해요 (ls · cat · ps · env …)",
+    "noContainer": "붙을 실행 중인 컨테이너가 없어요",
+    "exit": "종료 코드 {code}",
+    "placeholder": "명령을 입력하고 Enter"
+  },
+  "liveTerminal": {
+    "connecting": "연결 중…",
+    "open": "연결됨",
+    "closed": "연결 종료",
+    "hint": "실행 중인 샌드박스로 들어가는 대화형 셸 (cd · env 유지)",
+    "placeholder": "명령을 입력하고 Enter"
   }
 }

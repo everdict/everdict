@@ -3,6 +3,7 @@ import { ChevronLeft } from 'lucide-react'
 import { getTranslations } from 'next-intl/server'
 
 import { LiveLogs } from '@/widgets/live-logs'
+import { LiveScreen, SandboxTerminal } from '@/widgets/sandbox-terminal'
 import { TraceTimeline } from '@/widgets/trace-timeline'
 import { CommentsSection } from '@/features/discuss'
 import { runSchema, type Run } from '@/entities/run'
@@ -109,8 +110,7 @@ export default async function RunDetailPage({
       )}
 
       {(run.status === 'queued' || run.status === 'running') && (
-        <section className="space-y-2.5">
-          <SectionHeader title={t('liveLogs')} />
+        <section className="space-y-4">
           {/* live trace deep-link — the platform trace is accumulating under this correlation id right now */}
           {run.liveTrace && (
             <Callout tone="info" hint={`everdict.run_id=${run.liveTrace.runId}`}>
@@ -125,9 +125,22 @@ export default async function RunDetailPage({
               </a>
             </Callout>
           )}
-          <Card className="p-4">
-            <LiveLogs runId={run.id} initialStatus={run.status} />
-          </Card>
+          {/* 라이브 화면 — browser(browser-use 등)/os-use 케이스면 실행 중 화면을 CDP/scrot/러너-푸시 프레임으로
+              2초마다 폴링; 라이브 화면이 없는 run이면 위젯이 self-null (빈 섹션 없음) */}
+          <LiveScreen runId={run.id} initialStatus={run.status} />
+          <div className="space-y-2.5">
+            <SectionHeader title={t('liveLogs')} />
+            <Card className="p-4">
+              <LiveLogs runId={run.id} initialStatus={run.status} />
+            </Card>
+          </div>
+          {/* 샌드박스 터미널 — 실행 중인 케이스 컨테이너로 한 번씩 exec (creator/admin, 컨트롤플레인이 강제) */}
+          <div className="space-y-2.5">
+            <SectionHeader title={t('sandbox')} />
+            <Card className="p-4">
+              <SandboxTerminal runId={run.id} />
+            </Card>
+          </div>
         </section>
       )}
 
