@@ -6,7 +6,7 @@ import {
   type ServiceHarnessSpec,
   resolveHarnessInstance,
 } from "@everdict/contracts";
-import { referencesUserSecret } from "@everdict/domain";
+import { modelBindingLabel, referencesUserSecret } from "@everdict/domain";
 import { asService } from "../registry.js";
 import { VersionedStore } from "../versioned-store.js";
 
@@ -22,7 +22,7 @@ import type {
 
 // resolved HarnessSpec → subtitle (for list display). command = model/command, service = service count. undefined if none.
 export function harnessSubtitle(spec: HarnessSpec): string | undefined {
-  if (spec.kind === "command") return spec.model ?? spec.command;
+  if (spec.kind === "command") return modelBindingLabel(spec.model) ?? spec.command;
   if (spec.kind === "service") return `${spec.services.length} services`;
   return undefined;
 }

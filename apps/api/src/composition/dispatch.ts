@@ -117,7 +117,9 @@ export function buildDispatch(deps: {
   // is configured with no resolvable key on a managed target). MUST wrap OUTSIDE RuntimeDispatcher — it keys off
   // the ORIGINAL placement.target (self:* exemption) before the target is rewritten to a backend name.
   const judgeAuthDispatcher = new JudgeAuthDispatcher({ inner: runtimeDispatcher, scopedSecretsFor });
-  const dispatcher = new ModelResolvingDispatcher(modelRegistry, judgeAuthDispatcher);
+  // scopedSecretsFor: a harness Model binding injects its baseUrl + underlying model + API key (from the model's
+  // apiKeySecret, workspace→personal tiers) into the agent server's env — the same secret seam the judge uses.
+  const dispatcher = new ModelResolvingDispatcher(modelRegistry, judgeAuthDispatcher, scopedSecretsFor);
   // Workspace secrets feed the cached runtime backends' secretEnv — a secret change must drop that tenant's
   // cache so the next dispatch rebuilds with fresh values (previously only a CP restart picked them up).
   const invalidateTenantBackends = (tenant: string) => runtimeDispatcher.invalidateTenant(tenant);

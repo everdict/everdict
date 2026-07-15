@@ -1,11 +1,13 @@
 import { getTranslations } from 'next-intl/server'
 
+import type { ModelEntry } from '@/features/manage-models'
 import { budgetResponseSchema, type BudgetResponse } from '@/entities/budget'
 import { ciLinksResponseSchema, type CiLink } from '@/entities/ci-link'
 import { githubAppViewSchema, type GithubAppView } from '@/entities/github-app'
 import { imageRegistriesResponseSchema, type ImageRegistryConfig } from '@/entities/image-registry'
 import { mattermostResponseSchema, type MattermostConfig } from '@/entities/mattermost'
 import { invitesSchema, membersSchema, type Invite, type Member } from '@/entities/member'
+import { modelSpecSchema, modelsSchema } from '@/entities/model'
 import { runnersResponseSchema, type RunnerMeta } from '@/entities/runner'
 import { secretsSchema, type SecretMeta } from '@/entities/secret'
 import { traceSinksResponseSchema, type TraceSinkConfig } from '@/entities/trace-sink'
@@ -47,6 +49,8 @@ export default async function SettingsPage({
   const canWriteSettings = can(principal?.roles, 'settings:write')
   const canReadSecrets = can(principal?.roles, 'secrets:read')
   const canWriteSecrets = can(principal?.roles, 'secrets:write')
+  const canReadModels = can(principal?.roles, 'models:read')
+  const canWriteModels = can(principal?.roles, 'models:write')
   const canReadMembers = can(principal?.roles, 'members:read')
   const canWriteMembers = can(principal?.roles, 'members:write')
   // Budget + usage are readable by members (viewer+, reuses scorecards:read); editing the limit stays admin (settings:write).
@@ -54,6 +58,7 @@ export default async function SettingsPage({
 
   let workspace: WorkspaceRecord | undefined
   let secrets: SecretMeta[] = []
+  let models: ModelEntry[] = []
   let githubApp: GithubAppView = { registrations: [], installations: [] }
   let mattermost: MattermostConfig | undefined
   let traceSinks: TraceSinkConfig[] = []
@@ -150,6 +155,23 @@ export default async function SettingsPage({
           .parse(await controlPlane.listSecrets(ctx))
           .filter((s) => s.scope === 'workspace')
       )) ?? []
+  // Workspace models (owned + _shared) — enrich each id with its latest spec (provider/model/baseUrl/apiKeySecret)
+  // so the card shows the connection + linked-key state. A per-model detail fetch failure drops only that detail.
+  if (canReadModels)
+    models =
+      (await attempt('models', async () => {
+        const summaries = modelsSchema.parse(await controlPlane.listModels(ctx))
+        return Promise.all(
+          summaries.map(async (s): Promise<ModelEntry> => {
+            try {
+              const spec = modelSpecSchema.parse(await controlPlane.getModel(ctx, s.id, 'latest'))
+              return { id: s.id, owner: s.owner, versions: s.versions, spec }
+            } catch {
+              return { id: s.id, owner: s.owner, versions: s.versions }
+            }
+          })
+        )
+      })) ?? []
   if (canReadMembers)
     members =
       (await attempt('members', async () =>
@@ -163,7 +185,8 @@ export default async function SettingsPage({
   const allFailed = attempted > 0 && failedSections.length === attempted
   const error = allFailed ? firstError : undefined
 
-  const canReadAny = canReadSettings || canReadSecrets || canReadMembers || canReadUsage
+  const canReadAny =
+    canReadSettings || canReadSecrets || canReadModels || canReadMembers || canReadUsage
   // Deletion is owner (creator) only — the control plane enforces it ultimately, and the UI exposes the danger zone only when owner.
   const isOwner = workspace !== undefined && workspace.owner === principal?.subject
 
@@ -185,6 +208,7 @@ export default async function SettingsPage({
             isOwner={isOwner}
             {...(workspace !== undefined ? { workspace } : {})}
             secrets={secrets}
+            models={models}
             githubApp={githubApp}
             {...(githubAppNotice !== undefined ? { githubAppNotice } : {})}
             {...(mattermost !== undefined ? { mattermost } : {})}
@@ -201,6 +225,8 @@ export default async function SettingsPage({
             canWriteSettings={canWriteSettings}
             canReadSecrets={canReadSecrets}
             canWriteSecrets={canWriteSecrets}
+            canReadModels={canReadModels}
+            canWriteModels={canWriteModels}
             canReadMembers={canReadMembers}
             canWriteMembers={canWriteMembers}
             canReadUsage={canReadUsage}

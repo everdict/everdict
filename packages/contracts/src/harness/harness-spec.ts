@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ModelBindingSchema } from "./model-spec.js";
 
 // Trace source — evaluation pulls the trace the harness/runtime exported to its observability platform. 5 kinds at
 // parity with CommandTraceSpec + the workspace trace-source registry (real agents export to Langfuse/LangSmith/Phoenix,
@@ -56,6 +57,12 @@ export const TopologyServiceSchema = z.object({
   perRun: z.array(z.string()).default([]),
   replicas: z.number().int().default(1),
   env: z.record(EnvValueSchema).default({}), // literal or { secretRef } — resolved just before execution
+  // The agent-server model: a registered Model reference (id string or ModelRef) → the runtime injects that model's
+  // connection (baseUrl + underlying model + API key from its apiKeySecret) into THIS service's env just before
+  // dispatch, replacing a hand-wired OPENAI_BASE_URL/OPENAI_API_KEY/MODEL combination. Only the service that runs the
+  // agent sets this; other services (DB, proxy, browser) leave it unset. Provider-standard env names by default,
+  // overridable via ModelRef.env. Injected on top of `env` (the model binding wins for the keys it sets).
+  model: ModelBindingSchema.optional(),
   volumes: z.array(z.string()).optional(),
   readiness: ServiceReadinessSchema.optional(),
   resources: ServiceResourcesSchema.optional(), // cpu/memory request — interpreted by nomad/k8s/docker (unset = runtime default)
@@ -326,7 +333,11 @@ export const CommandHarnessSpecSchema = z.object({
   setup: z.array(z.string()).default([]), // run once in the sandbox (e.g. "pip install aider-chat==0.74.0")
   command: z.string(), // e.g. "aider --yes --message {{task}} --model {{model}} --edit-format {{edit_format}} ."
   env: z.record(EnvValueSchema).default({}), // literal or { secretRef } — resolved just before execution
-  model: z.string().optional(),
+  // The model that fills the command's {{model}} slot AND (when it resolves to a registered Model) supplies the agent's
+  // connection env (baseUrl + API key from apiKeySecret), injected into `env` at dispatch. A bare string keeps the legacy
+  // behavior (registered id → underlying model for {{model}}; an unregistered string stays a literal CLI value, no key
+  // injection). A ModelRef object always resolves a registered model and injects its connection env. See docs/models.md.
+  model: ModelBindingSchema.optional(),
   // Generic {{var}} substitution values — fill command's {{key}} from params[key] (excluding the reserved {{task}}/{{model}}/{{run_id}}).
   // The channel by which a variation of the same template (an instance's overrides.params) changes CLI flags. Values are not shell-escaped (author-trusted, same as {{model}}).
   params: z.record(z.string()).default({}),

@@ -9,9 +9,14 @@ A harness can be a process (Claude Code) or a **deployed multi-service topology 
 (browser/OS). See `docs/service-harness.md`.
 
 ## The model
-- `HarnessSpec(kind:"service")`: `services[]` (each `{image, port?, needs, env?}`; `env` = per-service static
+- `HarnessSpec(kind:"service")`: `services[]` (each `{image, port?, needs, env?, model?}`; `env` = per-service static
   config — precedence store `connEnv` < `service.env` < runtime `storeEnv`) + `dependencies[]` (shared stores) +
   `target` (browser+ext) + `frontDoor` + `traceSource`.
+- **`service.model` = a registered-Model binding** (`string | ModelRef`, `docs/models.md`). Set it on the service
+  that runs the agent → `ModelResolvingDispatcher` (`apps/api`) injects that model's connection (baseUrl + underlying
+  model + the API key from its `apiKeySecret`) into **that** service's env at dispatch, wins over a same-name literal,
+  replacing a hand-wired `OPENAI_BASE_URL`/`OPENAI_API_KEY`/`MODEL` combo. Provider-standard var names by default,
+  overridable per binding (`ModelRef.env`). Peers (DB/proxy/browser) leave it unset.
 - **Peer env interpolation (`interpolateServiceEnv`, `nomad-topology.ts`).** A `service.env` value may reference a
   `needs` peer with a `{{peer}}`/`{{peer.host}}`/`{{peer.port}}`/`{{peer.url}}` token. On the static-address runtimes —
   docker (alias), co-located Nomad (loopback), K8s (Service DNS) — it resolves **one pass at deploy time** (no waves:
@@ -21,6 +26,9 @@ A harness can be a process (Claude Code) or a **deployed multi-service topology 
   of `service.wiring` (BYO env names) — both use the same per-runtime `hostFor`. See `docs/service-harness.md`.
 - A run = ensure warm topology → per-case browser → drive (front-door `POST /runs` with per-run wiring) →
   collect trace (OTel/MLflow) → observe (browser snapshot) → grade.
+- **Cancellable**: `DispatchOptions.signal` threads into `dispatch` → the front-door driver, so a user "stop
+  scorecard" aborts the in-flight submit/poll/stream/callback mid-flight (`CANCELLED`, freeing the socket) instead
+  of draining the run; `dispatch`'s finally tears down the per-case browser (warm services stay). See `docs/scorecards.md`.
 
 ## Efficiency (the whole point)
 stateless services = per-version warm; stores = shared + per-case logical isolation

@@ -9,6 +9,10 @@ export const ValidateModelResultSchema = z.union([
     version: z.string(),
     existingVersions: z.array(z.string()).describe("Versions this workspace registered directly (no _shared fallback)"),
     versionExists: z.boolean().describe("True when the submitted version collides with an existing one"),
+    missingSecrets: z
+      .array(z.string())
+      .optional()
+      .describe("Referenced apiKeySecret name(s) not yet set in this workspace's SecretStore (warning, not a failure)"),
   }),
   z.object({
     ok: z.literal(false),

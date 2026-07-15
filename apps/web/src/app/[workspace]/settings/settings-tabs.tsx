@@ -9,6 +9,7 @@ import { CiLinksSettings } from '@/features/manage-ci-links'
 import type { GithubAppNotice } from '@/features/manage-github-app'
 import { InvitesManager } from '@/features/manage-invites'
 import { MembersManager } from '@/features/manage-members'
+import { ModelsManager, type ModelEntry } from '@/features/manage-models'
 import { WorkspaceRunnersManager } from '@/features/manage-workspace-runners'
 import { SecretsManager } from '@/features/manage-workspace-secrets'
 import { WorkspaceInfoCard } from '@/features/workspace-settings'
@@ -28,7 +29,15 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/shared/ui/tabs'
 
 import { IntegrationsPanel, type IntegrationKey } from './integrations-panel'
 
-type TabKey = 'general' | 'secrets' | 'integrations' | 'ci' | 'runners' | 'budget' | 'members'
+type TabKey =
+  | 'general'
+  | 'secrets'
+  | 'models'
+  | 'integrations'
+  | 'ci'
+  | 'runners'
+  | 'budget'
+  | 'members'
 
 // For validating the ?app= deep link — the integrations panel's drill-in key (values outside these four are ignored).
 const INTEGRATION_KEYS: IntegrationKey[] = [
@@ -46,6 +55,7 @@ export function SettingsTabs(props: {
   workspace?: WorkspaceRecord // Active workspace record (name/logo/owner) — only when settings:read
   isOwner: boolean // If owner, expose the danger zone (delete)
   secrets: SecretMeta[]
+  models: ModelEntry[] // Workspace-owned + _shared LLM models (provider + model + baseUrl + apiKeySecret name) — latest spec per id
   githubApp: GithubAppView // Workspace-owned GitHub App integration (org installation→selected repos)
   githubAppNotice?: GithubAppNotice // Notice right after the installation callback redirect (?githubApp=installed / ?error=…)
   mattermost?: MattermostConfig // Workspace-owned Mattermost integration (completion/regression notifications)
@@ -62,6 +72,8 @@ export function SettingsTabs(props: {
   canWriteSettings: boolean
   canReadSecrets: boolean
   canWriteSecrets: boolean
+  canReadModels: boolean
+  canWriteModels: boolean
   canReadMembers: boolean
   canWriteMembers: boolean
   canReadUsage: boolean // budget/usage read (viewer+); gates the Budget & usage tab. Editing the limit stays canWriteSettings.
@@ -72,6 +84,7 @@ export function SettingsTabs(props: {
   const tabs: { key: TabKey; label: string; show: boolean }[] = [
     { key: 'general', label: t('tabGeneral'), show: props.canReadSettings },
     { key: 'secrets', label: t('tabSecrets'), show: props.canReadSecrets },
+    { key: 'models', label: t('tabModels'), show: props.canReadModels },
     { key: 'integrations', label: t('tabIntegrations'), show: props.canReadSettings },
     { key: 'ci', label: t('tabCi'), show: props.canReadSettings },
     { key: 'runners', label: t('tabRunners'), show: props.canWriteSettings },
@@ -122,6 +135,14 @@ export function SettingsTabs(props: {
           variant="workspace"
           secrets={props.secrets}
           canWrite={props.canWriteSecrets}
+        />
+      </TabsContent>
+      <TabsContent value="models">
+        {/* apiKeySecret picker draws from workspace secret names (values never come through) — props.secrets is workspace-scoped only. */}
+        <ModelsManager
+          models={props.models}
+          secretNames={props.secrets.map((s) => s.name)}
+          canWrite={props.canWriteModels}
         />
       </TabsContent>
       <TabsContent value="integrations">

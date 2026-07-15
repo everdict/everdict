@@ -45,6 +45,11 @@ plus any `{{key}}` from `params` (reserved tokens substituted first so params ca
 `compute.exec`s it (cwd `spec.workDir ?? "work"`, with `EVERDICT_RUN_ID` + resolved `spec.env`). The control plane
 resolves the spec from the registry and embeds it in the `AgentJob`; `makeHarness` builds the generic
 `CommandHarness`. Full spec + tokens: `docs/command-harness.md`.
+- **`model` = a registered-Model binding** (`string | ModelRef`, `docs/models.md`), not just the `{{model}}` slot.
+  When it resolves to a registered Model, `ModelResolvingDispatcher` (`apps/api`) injects that model's connection
+  (`OPENAI_BASE_URL`/`OPENAI_API_KEY`/`OPENAI_MODEL` etc. — the key from the model's `apiKeySecret`) into `env` at
+  dispatch, so the agent server gets its whole connection from one id instead of a hand-wired env combo. An
+  unregistered bare string stays a literal (legacy). `command.ts` only ever sees the resolved `{{model}}` string.
 
 ## Trace normalization (`stream-json.ts`)
 Graders only read the normalized event stream, so every harness converts its native output to `TraceEvent[]`

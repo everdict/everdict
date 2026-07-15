@@ -26,6 +26,7 @@ import {
   caseVerdict,
   classifyFailure,
   costOf,
+  modelBindingLabel,
   resolveHarnessSecrets,
   scorecardModels,
   summarizeScorecard,
@@ -601,7 +602,7 @@ export class ScorecardBatchService {
           )
           .catch(() => undefined)
       : undefined;
-    const declared = ctx.harnessSpec?.kind === "command" ? ctx.harnessSpec.model : undefined;
+    const declared = modelBindingLabel(ctx.harnessSpec?.kind === "command" ? ctx.harnessSpec.model : undefined);
     const judgeModels = await this.scoring.collectJudgeModels(ctx.tenant, ctx.judges, ctx.judge);
     const runIds = [...latest.values()].map((c) => c.id);
     await this.appendBatchStep(id, { phase: "persist", status: "ok", message: "aggregated and persisted (temporal)" });
@@ -1220,7 +1221,7 @@ export class ScorecardBatchService {
       phase = "persist";
       const summary = summarizeScorecard(scorecard);
       // leaderboard model axis: trace observation preferred + spec declaration (command harness only) fallback.
-      const declared = harnessSpec?.kind === "command" ? harnessSpec.model : undefined;
+      const declared = modelBindingLabel(harnessSpec?.kind === "command" ? harnessSpec.model : undefined);
       const models = scorecardModels(scorecard, declared);
       // leaderboard judge axis: the judge model(s) that scored this run — inline config + registered model-judge spec.
       const judgeModels = await this.scoring.collectJudgeModels(tenant, judges, judge);
@@ -1262,7 +1263,7 @@ export class ScorecardBatchService {
       // With child runs, mirror the success path: runIds references (partial) instead of embed + write back results to the children.
       const hasChildren = caseToChild.size > 0 || seedRunIds.length > 0;
       if (scorecard && hasChildren) await this.writeBackResults(caseToChild, scorecard.results);
-      const declared = harnessSpec?.kind === "command" ? harnessSpec.model : undefined;
+      const declared = modelBindingLabel(harnessSpec?.kind === "command" ? harnessSpec.model : undefined);
       const extras: ScorecardOutcomeExtras = {
         steps: [...steps],
         ...(hasChildren ? { runIds: [...seedRunIds, ...caseToChild.values()] } : {}),

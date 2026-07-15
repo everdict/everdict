@@ -333,6 +333,16 @@ export const controlPlane = {
   // Connection test (live) — verify cluster reachability/auth only, with no job. Credentials are resolved by the control plane from secrets.
   probeRuntime: <T>(auth: AuthContext, spec: unknown) =>
     call<T>(auth, '/runtimes/probe', { method: 'POST', body: JSON.stringify(spec) }),
+  // Models (workspace-owned + _shared) — a first-class LLM model (provider + underlying model + baseUrl + apiKeySecret
+  // NAME), referenced by id from a judge/harness so the agent server gets its whole connection (incl. the linked key)
+  // injected instead of a hand-wired env combo. Read models:read (viewer+), register/validate models:write (member+).
+  listModels: <T>(auth: AuthContext) => call<T>(auth, '/models'),
+  getModel: <T>(auth: AuthContext, id: string, version: string) =>
+    call<T>(auth, `/models/${encodeURIComponent(id)}/versions/${encodeURIComponent(version)}`),
+  createModel: <T>(auth: AuthContext, spec: unknown) =>
+    call<T>(auth, '/models', { method: 'POST', body: JSON.stringify(spec) }),
+  validateModel: <T>(auth: AuthContext, spec: unknown) =>
+    call<T>(auth, '/models/validate', { method: 'POST', body: JSON.stringify(spec) }),
   getWorkspaceSettings: <T>(auth: AuthContext) => call<T>(auth, '/workspace/settings'),
   setWorkspaceSettings: <T>(auth: AuthContext, patch: unknown) =>
     call<T>(auth, '/workspace/settings', { method: 'PUT', body: JSON.stringify(patch) }),

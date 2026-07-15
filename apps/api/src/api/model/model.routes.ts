@@ -40,6 +40,14 @@ export function registerModelRoutes(app: FastifyInstance, deps: ServerDeps): voi
     if (!parsed.success)
       return reply.send({ ok: false, errors: zodIssues(parsed.error), existingVersions: [], versionExists: false });
     const existingVersions = await deps.modelRegistry.ownVersions(principal.workspace, parsed.data.id);
+    // Referenced-secret existence check (warning): whether the model's apiKeySecret (the NAME of the key its agent
+    // server / judge will use) already exists in this workspace's SecretStore. Surfaces before registration what would
+    // otherwise fail only at dispatch — not a hard failure (the secret can be added later).
+    let missingSecrets: string[] | undefined;
+    if (deps.secretStore && parsed.data.apiKeySecret) {
+      const have = new Set((await deps.secretStore.list(principal.workspace)).map((s) => s.name));
+      missingSecrets = have.has(parsed.data.apiKeySecret) ? [] : [parsed.data.apiKeySecret];
+    }
     return reply.send({
       ok: true,
       provider: parsed.data.provider,
@@ -47,6 +55,7 @@ export function registerModelRoutes(app: FastifyInstance, deps: ServerDeps): voi
       version: parsed.data.version,
       existingVersions,
       versionExists: existingVersions.includes(parsed.data.version),
+      ...(missingSecrets ? { missingSecrets } : {}),
     });
   });
 

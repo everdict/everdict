@@ -12,6 +12,7 @@
 - [registry.md](registry.md) — versioned SSOT (`@everdict/registry`): harnesses **· datasets · judges · runtimes**, `(tenant, id, version)`, immutable versions, `_shared` fallback
 - [datasets.md](datasets.md) — harness-agnostic eval-case bundles (import, provenance, recipes)
 - [judges.md](judges.md) — Agent Judges: `model` (LLM/VLM call) | `harness` (delegate an agent), applied per-trace on scorecards
+- [models.md](models.md) — workspace-registered LLM models (provider · model · baseUrl · `apiKeySecret` name); referenced by id from a judge/harness → connection env (incl. the linked key) injected instead of a raw env combo
 - [runtimes.md](runtimes.md) — tenant-registered execution infra (docker/nomad/k8s/topology); "my machine" → self-hosted runner
 - [scorecards.md](scorecards.md) — batch evals (dataset×harness → `Scorecard`+summary), baseline↔candidate diff, push/pull trace ingest, leaderboard
 - [suites.md](suites.md) — suites & version regression (`everdict suite`, scorecard diff)

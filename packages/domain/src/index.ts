@@ -81,6 +81,17 @@ export {
 // harness — resolved-spec version diff (base ↔ candidate)
 export { diffHarnessSpecs } from "./harness/harness-diff.js";
 
+// harness — cross-runtime portability lint (reject a service spec that resolves to different addresses per runtime)
+export { type PortabilityIssue, type PortabilityRule, checkPortability } from "./harness/portability.js";
+
+// harness — Model-binding → connection env (provider-standard names + per-binding override; apiKeySecret resolution)
+export {
+  modelApiKeySecretName,
+  modelBindingLabel,
+  modelConnectionEnv,
+  normalizeModelBinding,
+} from "./harness/model-binding.js";
+
 // runtime — capability gating + trust-zone hardening rules (from @everdict/core)
 export {
   capabilitiesOfKind,

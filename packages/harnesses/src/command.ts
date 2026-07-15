@@ -143,11 +143,15 @@ export class CommandHarness implements EvaluableHarness {
       env[meterVar] = proxy.url; // The child (aider etc.) goes to the proxy → the proxy passes through to upstream + recovers usage
     }
 
+    // The {{model}} slot is a plain string: the control plane's ModelResolvingDispatcher normalizes spec.model to the
+    // underlying model identifier before dispatch. Coerce defensively for un-dispatched paths (a ModelRef object → its
+    // ref id, an acceptable literal fallback for the CLI flag).
+    const modelSlot = typeof this.spec.model === "string" ? this.spec.model : (this.spec.model?.ref ?? "");
     // {{task}} is quoted to prevent shell injection (do not wrap it in quotes yourself). {{model}}/{{run_id}} are token substitutions.
     // Other {{var}} are substituted from params[var] (the CLI-flag channel for instance variation) — substitute the reserved words first so params can't override them.
     let cmd = this.spec.command
       .replaceAll("{{task}}", shq(task))
-      .replaceAll("{{model}}", this.spec.model ?? "")
+      .replaceAll("{{model}}", modelSlot)
       .replaceAll("{{run_id}}", runId);
     for (const [key, value] of Object.entries(this.spec.params ?? {})) {
       cmd = cmd.replaceAll(`{{${key}}}`, value);
@@ -181,7 +185,7 @@ export class CommandHarness implements EvaluableHarness {
           yield {
             t: Date.now(),
             kind: "llm_call",
-            model: this.spec.model ?? "",
+            model: modelSlot,
             cost: { inputTokens: u.promptTokens, outputTokens: u.completionTokens, usd: u.usd },
           };
       }
