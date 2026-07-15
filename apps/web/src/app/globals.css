@@ -272,6 +272,16 @@ html.desktop-shell body {
 html.desktop-shell body .min-h-screen {
   min-height: calc(100vh - var(--titlebar-h));
 }
+/* Full-height shells (`h-screen`, e.g. the desktop sidebar) must reserve the title-bar strip too — otherwise a
+   100vh flex child added to body's `padding-top` overflows the viewport by exactly the bar height, producing a
+   whole-window vertical scrollbar. Sticky top-0 rails (sidebar · mobile bar · page headers) likewise pin to the
+   bar's bottom edge, not under it. Together these keep the app filling the frame with no extra outer scroll. */
+html.desktop-shell body .h-screen {
+  height: calc(100vh - var(--titlebar-h));
+}
+html.desktop-shell body .sticky.top-0 {
+  top: var(--titlebar-h);
+}
 .titlebar-drag {
   -webkit-app-region: drag;
   app-region: drag;
