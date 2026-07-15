@@ -1,12 +1,33 @@
 import { type IncomingMessage, type RequestOptions, request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
 import {
+  AppError,
   type FrontDoorCompletion,
   type FrontDoorCorrelate,
   InternalError,
   type StatusMatch,
   UpstreamError,
 } from "@everdict/contracts";
+
+// A cancelled front-door drive (a user stopped the scorecard mid-run). "CANCELLED" matches backends `dispatchAborted`,
+// so the runner-loop classifies it the same way. Thrown by the loops/primitives the moment the drive signal aborts.
+function driveCancelled(): InternalError {
+  return new InternalError("CANCELLED", { reason: "front-door-aborted" }, "Front-door drive aborted (run cancelled).");
+}
+function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (signal?.aborted) throw driveCancelled();
+}
+// Reject `p` the moment `signal` aborts (for a primitive that can't itself be aborted, e.g. a rendezvous wait) — so a
+// cancelled drive returns promptly instead of waiting out the completion deadline. Detaches the listener on settle.
+function raceAbort<T>(p: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
+  if (!signal) return p;
+  if (signal.aborted) return Promise.reject(driveCancelled());
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = (): void => reject(driveCancelled());
+    signal.addEventListener("abort", onAbort, { once: true });
+    p.then(resolve, reject).finally(() => signal.removeEventListener("abort", onAbort));
+  });
+}
 
 // A resolved multipart file part (G2) — the field name + filename + the raw content (resolved from the case env by the backend).
 export interface FrontDoorFilePart {
@@ -24,6 +45,9 @@ export interface FrontDoorRequestOpts {
   timeoutMs?: number;
   encoding?: "json" | "form";
   files?: FrontDoorFilePart[];
+  // Cancellation — when it aborts, the in-flight request is destroyed/aborted (frees the held socket) and the call
+  // rejects with a CANCELLED error. Threaded from the dispatch signal so a user stop ends the drive mid-flight.
+  signal?: AbortSignal;
 }
 
 // Encode the request body per the encoding: JSON (default) or multipart/form-data (payload fields → text parts, files →
@@ -76,6 +100,7 @@ export type OpenStreamFn = (
 // effectively becomes the completion deadline (only no-flow is cut; normal waiting is allowed indefinitely). Unset = no idle timeout (the parent run timeout is the cap).
 const fetchSubmit: SubmitFn = (url, payload, opts) =>
   new Promise<unknown>((resolve, reject) => {
+    if (opts?.signal?.aborted) return reject(driveCancelled()); // pre-cancelled — don't even open the socket
     const target = new URL(url);
     const { body, contentType } = encodeBody(payload, opts); // JSON (default) or multipart/form-data (G2)
     const options: RequestOptions = {
@@ -111,10 +136,18 @@ const fetchSubmit: SubmitFn = (url, payload, opts) =>
         );
       });
     }
-    // Remap node socket errors (ECONNREFUSED / socket timeout etc.) to our AppError — don't let a raw error escape the boundary.
+    // Cancellation — a sync-completion submit holds the response for minutes; on abort destroy the request (freeing
+    // the socket) with a CANCELLED error so the drive rejects promptly instead of waiting out the run.
+    const onAbort = (): void => {
+      req.destroy(driveCancelled());
+    };
+    opts?.signal?.addEventListener("abort", onAbort, { once: true });
+    // Remap node socket errors (ECONNREFUSED / socket timeout etc.) to our AppError — don't let a raw error escape the
+    // boundary. An AppError (our timeout / the cancelled destroy) is preserved as-is.
     req.on("error", (err: Error) => {
+      opts?.signal?.removeEventListener("abort", onAbort);
       reject(
-        err instanceof UpstreamError
+        err instanceof AppError
           ? err
           : new UpstreamError("UPSTREAM_ERROR", { url }, `front-door submit failed: ${err.message}`),
       );
@@ -132,6 +165,9 @@ export const fetchJson: GetJsonFn = async (url) => {
 export const fetchStream: OpenStreamFn = async function* (url, payload, opts) {
   const ctrl = new AbortController();
   const timer = opts?.timeoutMs !== undefined ? setTimeout(() => ctrl.abort(), opts.timeoutMs) : undefined;
+  // Cancellation — a user stop aborts the SSE fetch (frees the stream socket); the driver loop then throws CANCELLED.
+  const onAbort = (): void => ctrl.abort();
+  opts?.signal?.addEventListener("abort", onAbort, { once: true });
   try {
     const { body, contentType } = encodeBody(payload, opts); // JSON (default) or multipart/form-data (G2)
     const res = await fetch(url, {
@@ -169,6 +205,7 @@ export const fetchStream: OpenStreamFn = async function* (url, payload, opts) {
     }
   } finally {
     if (timer !== undefined) clearTimeout(timer);
+    opts?.signal?.removeEventListener("abort", onAbort);
   }
 };
 
@@ -273,6 +310,9 @@ export interface FrontDoorDriveRequest {
   headers?: Record<string, string>; // submit/stream/callback request headers (interpolated; unset = none)
   encoding?: "json" | "form"; // body encoding (G2) — "form" = multipart/form-data (for attachment submits)
   files?: FrontDoorFilePart[]; // resolved attachments (from the case env) for the multipart submit (G2)
+  // Cancellation — aborts the in-flight submit/poll/stream/callback so a user stop ends the drive mid-flight
+  // (throws CANCELLED, freeing the socket where the primitive supports it). Threaded from the dispatch signal.
+  signal?: AbortSignal;
 }
 
 // Abstraction for front-door driving (HOW) — submit then wait per the completion model. The sibling of the infra-agnostic TopologyRuntime (WHERE).
@@ -329,12 +369,14 @@ export class HttpFrontDoorDriver implements FrontDoorDriver {
       ...(req.encoding ? { encoding: req.encoding } : {}),
       ...(req.files ? { files: req.files } : {}),
       ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+      ...(req.signal ? { signal: req.signal } : {}),
     });
+    throwIfAborted(req.signal); // cancelled while the submit was held (sync completion) → stop before polling/trace work
     // Correlation (#3): injected = the injected runId (current), returned = the agent's own id returned in the response.
     const traceRef = resolveTraceRef(req.correlate, req.traceRef, response);
     // For returned, overwrite run_id with that id so the poll statusPath is also interpolated with the agent id (for injected it's the same value → no-op).
     const wiring = { ...req.wiring, run_id: traceRef };
-    const completion = await this.awaitCompletion(req.completion, req.base, wiring);
+    const completion = await this.awaitCompletion(req.completion, req.base, wiring, req.signal);
     // Result-channel body: for poll the completed status body, for sync the submit response. sentinel retrieval reads this.
     return { traceRef, status: completion.status, response: completion.body ?? response };
   }
@@ -351,23 +393,31 @@ export class HttpFrontDoorDriver implements FrontDoorDriver {
     let traceRef = req.traceRef;
     let correlated = false;
     let last: unknown;
-    for await (const event of this.openStream(url, req.payload, {
-      timeoutMs: completion.timeoutMs,
-      method: mp.method,
-      headers: req.headers,
-      ...(req.encoding ? { encoding: req.encoding } : {}),
-      ...(req.files ? { files: req.files } : {}),
-    })) {
-      if (!correlated) {
-        // Correlate on the first event — A2A issues Task.id up front, so the first event carries its own id (returned). injected is a no-op.
-        traceRef = resolveTraceRef(req.correlate, req.traceRef, event);
-        correlated = true;
+    try {
+      for await (const event of this.openStream(url, req.payload, {
+        timeoutMs: completion.timeoutMs,
+        method: mp.method,
+        headers: req.headers,
+        ...(req.encoding ? { encoding: req.encoding } : {}),
+        ...(req.files ? { files: req.files } : {}),
+        ...(req.signal ? { signal: req.signal } : {}),
+      })) {
+        throwIfAborted(req.signal); // cancelled mid-stream → stop consuming events (the fetch is already aborting)
+        if (!correlated) {
+          // Correlate on the first event — A2A issues Task.id up front, so the first event carries its own id (returned). injected is a no-op.
+          traceRef = resolveTraceRef(req.correlate, req.traceRef, event);
+          correlated = true;
+        }
+        last = event;
+        if (completion.failed && statusMatches(completion.failed, event))
+          return { traceRef, status: "failed", response: event };
+        if (statusMatches(completion.done, event)) return { traceRef, status: "done", response: event };
+        if (this.now() - start >= completion.timeoutMs) return { traceRef, status: "timeout", response: last };
       }
-      last = event;
-      if (completion.failed && statusMatches(completion.failed, event))
-        return { traceRef, status: "failed", response: event };
-      if (statusMatches(completion.done, event)) return { traceRef, status: "done", response: event };
-      if (this.now() - start >= completion.timeoutMs) return { traceRef, status: "timeout", response: last };
+    } catch (err) {
+      // A cancel aborts the SSE fetch, so the reader throws — surface it as our CANCELLED, not a raw abort DOMException.
+      if (req.signal?.aborted) throw driveCancelled();
+      throw err;
     }
     // The stream ended with no terminal match → completion can't be confirmed (treated as timeout → dispatch fails the run).
     return { traceRef, status: "timeout", response: last };
@@ -395,11 +445,17 @@ export class HttpFrontDoorDriver implements FrontDoorDriver {
       ...(req.encoding ? { encoding: req.encoding } : {}),
       ...(req.files ? { files: req.files } : {}),
       timeoutMs: completion.timeoutMs, // fire-and-forget submit — a socket cap to avoid a hang (the response comes right back)
+      ...(req.signal ? { signal: req.signal } : {}),
     });
     const traceRef = resolveTraceRef(req.correlate, req.traceRef, response);
     const start = this.now();
     while (this.now() - start < completion.timeoutMs) {
-      const result = await this.callbackRendezvous.wait(runKey, completion.timeoutMs - (this.now() - start));
+      throwIfAborted(req.signal); // cancelled between callbacks → stop waiting
+      // Race the rendezvous wait against the cancel signal so a stop ends promptly instead of waiting out the deadline.
+      const result = await raceAbort(
+        this.callbackRendezvous.wait(runKey, completion.timeoutMs - (this.now() - start)),
+        req.signal,
+      );
       if (!result) return { traceRef, status: "timeout", response: undefined };
       const body = result.body;
       if (completion.failed && statusMatches(completion.failed, body))
@@ -414,6 +470,7 @@ export class HttpFrontDoorDriver implements FrontDoorDriver {
     completion: FrontDoorCompletion | undefined,
     base: string,
     wiring: Record<string, string>,
+    signal?: AbortSignal,
   ): Promise<{ status: DriveStatus; body: unknown }> {
     // If not poll (sync/unset): the submit response is completion — current behavior. The result body uses the caller's submit response (body=undefined).
     // (stream is handled by drive() on a separate path, so it never reaches here.)
@@ -422,6 +479,7 @@ export class HttpFrontDoorDriver implements FrontDoorDriver {
     const statusUrl = joinUrl(base, interpolatePath(methodPath(completion.statusPath).path, wiring));
     const start = this.now();
     while (this.now() - start < completion.timeoutMs) {
+      throwIfAborted(signal); // cancelled between polls → stop promptly (the status GET is short-lived)
       const body = await this.getJson(statusUrl);
       if (statusMatches(completion.done, body)) return { status: "done", body };
       if (completion.failed && statusMatches(completion.failed, body)) return { status: "failed", body };

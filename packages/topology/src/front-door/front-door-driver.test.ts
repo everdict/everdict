@@ -512,3 +512,81 @@ describe("HttpFrontDoorDriver default submit (node http)", () => {
     }
   });
 });
+
+// Cancellation — a user stops the scorecard mid-run; the drive aborts promptly (CANCELLED) instead of draining the
+// topology run to completion. dispatch's finally then tears down the per-case browser (freeing the runtime).
+describe("HttpFrontDoorDriver.drive — cancellation (user stop)", () => {
+  it("sync: an already-aborted signal throws CANCELLED right after submit (no trace/observe work)", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const driver = new HttpFrontDoorDriver({ submit: async () => ({ ok: true }), getJson: async () => ({}) });
+    await expect(driver.drive(baseReq({ completion: undefined, signal: controller.signal }))).rejects.toMatchObject({
+      code: "CANCELLED",
+    });
+  });
+
+  it("poll: aborting stops the poll loop and throws CANCELLED (doesn't keep polling to the deadline)", async () => {
+    const controller = new AbortController();
+    let polls = 0;
+    const completion: FrontDoorCompletion = {
+      mode: "poll",
+      statusPath: "GET /runs/{run_id}",
+      done: { field: "status", equals: "done" },
+      intervalMs: 10,
+      timeoutMs: 10_000,
+    };
+    const driver = new HttpFrontDoorDriver({
+      submit: async () => {},
+      getJson: async () => {
+        polls++;
+        controller.abort(); // control plane cancels after the first status check
+        return { status: "running" };
+      },
+      sleep: async () => {},
+      now: steppingClock(10),
+    });
+    await expect(driver.drive(baseReq({ completion, signal: controller.signal }))).rejects.toMatchObject({
+      code: "CANCELLED",
+    });
+    expect(polls).toBe(1); // stopped on the next iteration's abort check, not run to timeout
+  });
+
+  it("stream: aborting mid-stream throws CANCELLED (stops consuming events)", async () => {
+    const controller = new AbortController();
+    const completion: FrontDoorCompletion = {
+      mode: "stream",
+      done: { field: "status", equals: "done" },
+      timeoutMs: 10_000,
+    };
+    async function* stream(): AsyncIterable<unknown> {
+      yield { status: "working" };
+      controller.abort(); // cancel arrives between events
+      yield { status: "still-working" };
+    }
+    const driver = new HttpFrontDoorDriver({ openStream: () => stream(), now: steppingClock(10) });
+    await expect(driver.drive(baseReq({ completion, signal: controller.signal }))).rejects.toMatchObject({
+      code: "CANCELLED",
+    });
+  });
+
+  it("callback: aborting rejects promptly with CANCELLED instead of waiting out the deadline", async () => {
+    const controller = new AbortController();
+    const completion: FrontDoorCompletion = {
+      mode: "callback",
+      done: { field: "status", equals: "done" },
+      timeoutMs: 10_000,
+    };
+    const rendezvous: CallbackRendezvous = {
+      url: (id) => `http://cp/callback/${id}`,
+      wait: () => new Promise(() => {}), // never resolves — only the cancel can end the wait
+    };
+    const driver = new HttpFrontDoorDriver({
+      submit: async () => ({}),
+      callbackRendezvous: rendezvous,
+      now: steppingClock(10),
+    });
+    const p = driver.drive(baseReq({ completion, signal: controller.signal }));
+    controller.abort();
+    await expect(p).rejects.toMatchObject({ code: "CANCELLED" });
+  });
+});

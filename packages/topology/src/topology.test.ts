@@ -7,6 +7,7 @@ import type {
   TraceEvent,
   TrustZone,
 } from "@everdict/contracts";
+import { InternalError } from "@everdict/contracts";
 import { perTenantTrustZones } from "@everdict/domain";
 import type { TraceSource } from "@everdict/trace";
 import { describe, expect, it } from "vitest";
@@ -1176,6 +1177,36 @@ describe("ServiceTopologyBackend (orchestrator-agnostic, mock runtime)", () => {
     expect(err).toBeInstanceOf(Error);
     expect((err as { code?: string }).code).toBe("HARNESS_RUN_FAILED");
     expect(b.disposed()).toBe(true); // per-case browser cleaned up via finally
+  });
+
+  it("a user cancel: dispatch threads opts.signal into the front-door drive and tears down the per-case browser on abort", async () => {
+    const b = mockBrowser();
+    const controller = new AbortController();
+    let threaded: AbortSignal | undefined;
+    const driver: FrontDoorDriver = {
+      async drive(req) {
+        threaded = req.signal; // dispatch must pass the cancel signal through to the drive
+        controller.abort(); // the drive aborts mid-flight (as the front-door primitives do on a real cancel)
+        throw new InternalError("CANCELLED", { reason: "front-door-aborted" }, "aborted");
+      },
+    };
+    const backend = new ServiceTopologyBackend({
+      runtime: mockRuntime(b.handle),
+      traceSource: {
+        async fetch() {
+          return [];
+        },
+      },
+      specFor: () => SPEC,
+      frontDoorDriver: driver,
+      newRunId: () => "fixed",
+    });
+
+    const err = await backend.dispatch(job, { signal: controller.signal }).catch((e: unknown) => e);
+
+    expect(threaded).toBe(controller.signal); // the cancel signal reached the drive
+    expect((err as { code?: string }).code).toBe("CANCELLED");
+    expect(b.disposed()).toBe(true); // the runtime is freed — per-case browser torn down via the dispatch finally
   });
 
   it("the target (browser) is released right after observation retrieval — before grading — (not held during grading)", async () => {

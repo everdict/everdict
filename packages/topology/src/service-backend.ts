@@ -206,7 +206,12 @@ export class ServiceTopologyBackend implements Backend, ScreenCapturable {
         ...(headers ? { headers } : {}),
         ...(encoding ? { encoding } : {}),
         ...(files ? { files } : {}),
+        // Cancellation — a user stop aborts the front-door drive mid-flight (frees the socket + the per-case browser
+        // is torn down by the finally below). Without this the topology run would drain to completion, result discarded.
+        ...(opts?.signal ? { signal: opts.signal } : {}),
       });
+      // Cancelled between drive completing and the (relatively quick) trace/observe/grade steps → stop here too.
+      if (opts?.signal?.aborted) throw dispatchAborted(job);
       // Completion deadline exceeded = the eval result can't be confirmed (grading a half-done state misleads) → make it an explicit run failure.
       if (outcome.status === "timeout") {
         throw new InternalError(
