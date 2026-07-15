@@ -11,6 +11,18 @@ Chromium loading a client browser extension (the extension drives the browser).
 (browser+extension, per-case) · `frontDoor` ({service, submit, trace}) · `traceSource` ({kind: otel|mlflow, endpoint}).
 Service env precedence: store `connEnv` (conventional) < `service.env` (author) < runtime `storeEnv` (operator override).
 
+**Peer env interpolation.** A `service.env` value may reference a `needs` peer's endpoint with a `{{peer}}` token —
+`{{planner}}` / `{{planner.url}}` → `http://planner:8000`, `{{planner.host}}` → the host, `{{planner.port}}` → the port
+(double-brace, same convention as the front-door `bodyTemplate`). `interpolateServiceEnv` resolves them **one pass at
+deploy time** where a peer's address is static — docker (network alias), co-located Nomad (loopback name), K8s (Service
+DNS) — since `alias:port` is known before deploy (no waves needed). Per-service (heterogeneous/scaled) Nomad has dynamic
+host ports, so a `{{peer}}` value is rendered into the discovery **template** file instead (consul-template resolves it
+from the Nomad-native catalog at runtime, re-resolving on reschedule — the same mechanism as `EVERDICT_SVC_<PEER>`).
+Referencing a peer not declared in `needs` (or one with no port) is a **fail-fast** `BadRequestError`; a `{{token}}` that
+names no declared service is left verbatim (it is the harness's own template). This is the *declarative* sibling of
+`service.wiring` (BYO env names): `{{peer}}` inlines the address into an author-controlled value, `wiring` fills a
+third-party image's expected var names. Both resolve to the same static address per runtime.
+
 > **Planned — front-door generalization (design).** Today `ServiceTopologyBackend.dispatch` is hardcoded to one
 > protocol (browser-use-langgraph) in five places (fixed payload, fire-and-forget submit, trace-by-Everdict-runId,
 > always-provisioned browser, fixed image). The direction to make the front-door **harness-agnostic** — a

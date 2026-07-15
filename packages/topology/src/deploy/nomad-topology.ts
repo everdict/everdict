@@ -264,6 +264,94 @@ export function staticWiringEnv(
   return out;
 }
 
+// Peer-reference tokens in a service's env values: {{peer}} / {{peer.url}} → the peer's http://host:port URL,
+// {{peer.host}} → host, {{peer.port}} → port. Service names may contain dashes but no dots, so a trailing
+// .host/.port/.url is the field and everything before it is the peer name. A token that names no declared service is
+// left verbatim (it is the harness's own template, not a peer reference). Double-brace convention — same as the
+// front-door bodyTemplate / CommandHarness {{task}}. See docs/service-harness.md (peer env interpolation).
+const PEER_TOKEN_RE = /\{\{\s*([a-zA-Z0-9_.-]+)\s*\}\}/g;
+type PeerField = "host" | "port" | "url";
+function parsePeerToken(token: string): { peer: string; field: PeerField } {
+  const dot = token.lastIndexOf(".");
+  if (dot > 0) {
+    const suffix = token.slice(dot + 1);
+    if (suffix === "host" || suffix === "port" || suffix === "url") return { peer: token.slice(0, dot), field: suffix };
+  }
+  return { peer: token, field: "url" };
+}
+// Replace every peer token in one env value. `render` produces the substitution for a validated peer service (given its
+// guaranteed port); a token that names no service is left verbatim. Shared by the static (build-time address) and
+// per-service Nomad (runtime catalog template) modes so the needs/port validation never diverges.
+// Fail-fast (no silent pass-through) when a token names a real service that the service does NOT declare in `needs`, or a
+// peer that exposes no port — that is a misconfiguration the harness author must fix.
+function interpolatePeerTokens(
+  value: string,
+  svc: TopologyService,
+  services: TopologyService[],
+  render: (peer: TopologyService, field: PeerField, port: number) => string,
+): string {
+  return value.replace(PEER_TOKEN_RE, (whole, token: string) => {
+    const { peer, field } = parsePeerToken(token);
+    const target = services.find((s) => s.name === peer);
+    if (!target) return whole; // not a peer reference — leave the harness's own template intact
+    if (!svc.needs.includes(peer))
+      throw new BadRequestError(
+        "BAD_REQUEST",
+        { service: svc.name, peer },
+        `Service "${svc.name}" env references peer "${peer}" but does not declare it in needs.`,
+      );
+    if (target.port === undefined)
+      throw new BadRequestError(
+        "BAD_REQUEST",
+        { service: svc.name, peer },
+        `Service "${svc.name}" env references peer "${peer}", which exposes no port.`,
+      );
+    return render(target, field, target.port);
+  });
+}
+
+// Static peer-endpoint interpolation of a service's env — for runtimes where a peer's address is known at BUILD time:
+// docker (network alias), co-located Nomad (loopback name via extra_hosts) and K8s (Service DNS). `hostFor` maps a peer
+// service → that build-time host (the SAME mapping staticWiringEnv uses). One pass, no waves: alias+port are static.
+// Per-service Nomad (dynamic host ports) resolves peers via its runtime catalog template instead — peerTemplateEnv below.
+export function interpolateServiceEnv(
+  svc: TopologyService,
+  services: TopologyService[],
+  hostFor: (peer: TopologyService) => string,
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(flattenEnv(svc.env)))
+    out[k] = interpolatePeerTokens(v, svc, services, (peer, field, port) => {
+      const host = hostFor(peer);
+      return field === "host" ? host : field === "port" ? String(port) : `http://${host}:${port}`;
+    });
+  return out;
+}
+
+// Per-service Nomad: split a service's env into the plain values (no peer token → the task Env, set directly) and the
+// values that reference a peer (→ a peers.env template line, so consul-template resolves the peer's host:port from the
+// native catalog at runtime — the same re-resolving mechanism the EVERDICT_SVC_<PEER>/wiring lines use). A peer token
+// renders to the catalog range for that service; the needs/port validation is shared with the static path.
+function peerTemplateEnv(
+  svc: TopologyService,
+  spec: ServiceHarnessSpec,
+  zoneId?: string,
+): { staticEnv: Record<string, string>; templateLines: string[] } {
+  const staticEnv: Record<string, string> = {};
+  const templateLines: string[] = [];
+  for (const [k, v] of Object.entries(flattenEnv(svc.env))) {
+    const rendered = interpolatePeerTokens(v, svc, spec.services, (peer, field) => {
+      const inner =
+        field === "host" ? "{{ .Address }}" : field === "port" ? "{{ .Port }}" : "http://{{ .Address }}:{{ .Port }}";
+      return `{{ range nomadService "${nomadServiceName(spec, peer.name, zoneId)}" }}${inner}{{ end }}`;
+    });
+    if (rendered === v)
+      staticEnv[k] = v; // no peer token — a plain static env var
+    else templateLines.push(`${k}=${rendered}`); // ≥1 peer token — runtime-resolved via the template file
+  }
+  return { staticEnv, templateLines };
+}
+
 // The per-service discovery template body: for each `needs` peer the default EVERDICT_SVC_<PEER>, plus each `wiring`
 // entry's BYO env names — all rendered from the Nomad-native catalog (host/port resolved at runtime, re-resolving).
 function discoveryTemplateBody(svc: TopologyService, spec: ServiceHarnessSpec, zoneId?: string): string {
@@ -349,8 +437,12 @@ function buildColocatedGroup(spec: ServiceHarnessSpec, opts: NomadTopologyOption
       Name: svc.name,
       Driver: "docker",
       Config: config,
-      // Peer wiring (co-located = loopback alias <peer>) < service static env < operational storeEnv.
-      Env: { ...staticWiringEnv(svc, spec.services, (p) => p.name), ...flattenEnv(svc.env), ...opts.storeEnv },
+      // Peer wiring (co-located = loopback alias <peer>) < service static env (with {{peer}} refs → loopback URL) < operational storeEnv.
+      Env: {
+        ...staticWiringEnv(svc, spec.services, (p) => p.name),
+        ...interpolateServiceEnv(svc, spec.services, (p) => p.name),
+        ...opts.storeEnv,
+      },
       Resources: { CPU: svc.resources?.cpu ?? 1000, MemoryMB: svc.resources?.memoryMb ?? 1024 },
     };
   });
@@ -370,9 +462,10 @@ function buildPerServiceGroups(spec: ServiceHarnessSpec, opts: NomadTopologyOpti
     const label = servicePortLabel(svc.name);
     if (svc.port !== undefined) config.ports = [label];
     // Peer discovery: render each declared `needs` peer's address (default EVERDICT_SVC_<PEER>) + each `wiring` entry's
-    // BYO env name into env from the native catalog (ChangeMode restart so a peer reschedule re-resolves). A service
-    // with no needs and no wiring gets no template. The no-DNS Nomad analog of K8s Service DNS.
-    const body = discoveryTemplateBody(svc, spec, opts.zoneId);
+    // BYO env name + any {{peer}}-referencing svc.env value into env from the native catalog (ChangeMode restart so a
+    // peer reschedule re-resolves). A service with no such reference gets no template. The no-DNS Nomad analog of K8s DNS.
+    const { staticEnv, templateLines } = peerTemplateEnv(svc, spec, opts.zoneId);
+    const body = discoveryTemplateBody(svc, spec, opts.zoneId) + templateLines.map((l) => `${l}\n`).join("");
     const template: NomadTemplate | undefined = body
       ? { EmbeddedTmpl: body, DestPath: "local/peers.env", Envvars: true, ChangeMode: "restart" }
       : undefined;
@@ -380,7 +473,7 @@ function buildPerServiceGroups(spec: ServiceHarnessSpec, opts: NomadTopologyOpti
       Name: svc.name,
       Driver: "docker",
       Config: config,
-      Env: { ...flattenEnv(svc.env), ...opts.storeEnv },
+      Env: { ...staticEnv, ...opts.storeEnv },
       Resources: { CPU: svc.resources?.cpu ?? 1000, MemoryMB: svc.resources?.memoryMb ?? 1024 },
       ...(template ? { Templates: [template] } : {}),
     };

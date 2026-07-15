@@ -193,6 +193,32 @@ describe("DockerTopologyRuntime", () => {
     expect(agent?.env?.DATABASE_URL).toBe("postgresql://store"); // storeEnv wins over svc.env (and connEnv)
   });
 
+  it("ensureTopology: interpolates a {{peer}} env ref to the peer's network-alias URL (one pass, static)", async () => {
+    const f = fakeDocker();
+    const spec: ServiceHarnessSpec = {
+      ...SPEC,
+      dependencies: [],
+      services: [
+        {
+          name: "agent-server",
+          image: "reg/bu-agent:1",
+          port: 8000,
+          needs: ["mcp"],
+          perRun: [],
+          replicas: 1,
+          env: { MCP_URL: "{{mcp}}", MCP_HOST: "{{mcp.host}}", MCP_PORT: "{{mcp.port}}" },
+        },
+        { name: "mcp", image: "reg/mcp:1", port: 9000, needs: [], perRun: [], replicas: 1, env: {} },
+      ],
+    };
+    const rt = new DockerTopologyRuntime({ docker: f.docker, fetchImpl: okFetch });
+    await rt.ensureTopology(spec);
+    const agent = f.runs.find((r) => r.alias === "agent-server");
+    expect(agent?.env?.MCP_URL).toBe("http://mcp:9000"); // bare token = the peer's alias URL
+    expect(agent?.env?.MCP_HOST).toBe("mcp");
+    expect(agent?.env?.MCP_PORT).toBe("9000");
+  });
+
   it("ensureTopology: runner redeploy — succeeds without a collision by pre-removing leftover fixed-name containers via rm", async () => {
     // Like a real daemon, docker run (--name) is non-idempotent: a live same-name container collides (throws). Reproduce a leftover container from a prior deploy.
     const live = new Set<string>(["everdict-bu-1.0.0-bu-postgres", "everdict-bu-1.0.0-agent-server"]);

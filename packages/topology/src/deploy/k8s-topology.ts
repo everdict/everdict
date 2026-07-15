@@ -1,7 +1,7 @@
 import type { RegistryAuth, ServiceHarnessSpec, ServiceReadiness, ServiceResources } from "@everdict/contracts";
 import { dockerAuthConfigJson, imageUsesRegistryHost } from "@everdict/domain";
 import { dependencyConnEnv, dependencyStores } from "./dependencies.js";
-import { staticWiringEnv } from "./nomad-topology.js";
+import { interpolateServiceEnv, staticWiringEnv } from "./nomad-topology.js";
 
 // ServiceResources → k8s container resources (requests=limits). cpu 1000 = 1 core (millicores), memoryMb → Mi. Includes only what is defined.
 function k8sResources(r: ServiceResources): { requests: Record<string, string>; limits: Record<string, string> } {
@@ -137,9 +137,10 @@ export function buildK8sManifests(spec: ServiceHarnessSpec, opts: K8sTopologyOpt
   if (opts.provisionDependencies) out.push(...buildDependencyManifests(spec, opts));
   for (const svc of spec.services) {
     const labels = { app: svc.name, "everdict/harness": spec.id, "everdict/version": spec.version };
-    // Peer wiring (BYO env names) resolves to the peer's stable Service DNS name (<id>-<svc>) — < service env < storeEnv.
+    // Peer wiring (BYO env names) + {{peer}} refs in svc.env resolve to the peer's stable Service DNS name (<id>-<svc>) — < service env < storeEnv.
     const wiringEnv = staticWiringEnv(svc, spec.services, (p) => `${spec.id}-${p.name}`);
-    const env = Object.entries({ ...wiringEnv, ...depEnv, ...svc.env, ...(opts.storeEnv ?? {}) }).map(
+    const svcEnv = interpolateServiceEnv(svc, spec.services, (p) => `${spec.id}-${p.name}`);
+    const env = Object.entries({ ...wiringEnv, ...depEnv, ...svcEnv, ...(opts.storeEnv ?? {}) }).map(
       ([name, value]) => ({
         name,
         value,

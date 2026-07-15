@@ -355,6 +355,92 @@ describe("peer wiring — inject a peer's coordinates under BYO env names (third
   });
 });
 
+describe("peer env interpolation — {{peer}} refs in svc.env resolve to a needs peer's endpoint", () => {
+  const hub = { name: "hub", image: "selenium/hub:4", port: 4444, needs: [], perRun: [], replicas: 1, env: {} };
+  const node = (env: Record<string, string>, extra: Partial<ServiceHarnessSpec["services"][number]> = {}) => ({
+    name: "node",
+    image: "selenium/node:4",
+    needs: ["hub"],
+    perRun: [],
+    replicas: 1,
+    env,
+    ...extra,
+  });
+  const gridSpec = (nodeEnv: Record<string, string>, over: Partial<ServiceHarnessSpec> = {}): ServiceHarnessSpec => ({
+    kind: "service",
+    id: "grid",
+    version: "1.0.0",
+    services: [hub, node(nodeEnv)],
+    dependencies: [],
+    frontDoor: { service: "hub", submit: "POST /session" },
+    traceSource: { kind: "otel", endpoint: "http://x" },
+    ...over,
+  });
+
+  it("Nomad co-located: {{hub}} → the peer's loopback URL, .host/.port variants resolve too (one pass, static)", () => {
+    const job = buildNomadTopologyJob(
+      gridSpec({ HUB_URL: "{{hub}}", HUB_HOST: "{{hub.host}}", HUB_PORT: "{{hub.port}}", TASK: "call {{hub}}/run" }),
+    );
+    const nodeTask = job.Job.TaskGroups[0]?.Tasks.find((t) => t.Name === "node");
+    expect(nodeTask?.Env.HUB_URL).toBe("http://hub:4444"); // bare token = full URL
+    expect(nodeTask?.Env.HUB_HOST).toBe("hub"); // loopback alias (extra_hosts → 127.0.0.1)
+    expect(nodeTask?.Env.HUB_PORT).toBe("4444");
+    expect(nodeTask?.Env.TASK).toBe("call http://hub:4444/run"); // token embedded mid-value
+  });
+
+  it("K8s: {{hub}} resolves to the peer's Service DNS URL (<id>-<svc>)", () => {
+    const manifests = buildK8sManifests(gridSpec({ HUB_URL: "{{hub}}", HUB_HOST: "{{hub.host}}" }));
+    const dep = manifests.find((m) => m.kind === "Deployment" && m.metadata.name === "grid-node") as unknown as {
+      spec: { template: { spec: { containers: Array<{ env: Array<{ name: string; value: string }> }> } } };
+    };
+    const env = Object.fromEntries((dep.spec.template.spec.containers[0]?.env ?? []).map((e) => [e.name, e.value]));
+    expect(env.HUB_URL).toBe("http://grid-hub:4444");
+    expect(env.HUB_HOST).toBe("grid-hub");
+  });
+
+  it("Nomad per-service: a {{hub}} env value is runtime-resolved via the catalog template (not a static Env literal)", () => {
+    // a Windows peer forces the per-service (dynamic host-port) path
+    const job = buildNomadTopologyJob(
+      gridSpec(
+        { HUB_URL: "{{hub}}", PLAIN: "x" },
+        {
+          services: [hub, node({ HUB_URL: "{{hub}}", PLAIN: "x" }, { requires: { os: "windows" } })],
+        },
+      ),
+    );
+    const nodeGroup = job.Job.TaskGroups.find((g) => g.Name === "everdict-svc-node");
+    const task = nodeGroup?.Tasks[0];
+    // the {{peer}} value moves to the template file (consul-template resolves it from the catalog at runtime)…
+    const tmpl = task?.Templates?.[0]?.EmbeddedTmpl ?? "";
+    // the key stays outside the range (so an unresolved peer yields HUB_URL= rather than dropping the whole line); the URL is inside.
+    expect(tmpl).toContain(
+      `HUB_URL={{ range nomadService "everdict-grid-hub" }}http://{{ .Address }}:{{ .Port }}{{ end }}`,
+    );
+    // …and is therefore NOT set as a static literal (would ship {{hub}} verbatim to the container).
+    expect(task?.Env.HUB_URL).toBeUndefined();
+    expect(task?.Env.PLAIN).toBe("x"); // a value with no peer token stays a plain static env var
+  });
+
+  it("fails fast when env references a peer not declared in needs (misconfiguration, not a silent pass-through)", () => {
+    const spec = gridSpec({ HUB_URL: "{{hub}}" }, { services: [hub, node({ HUB_URL: "{{hub}}" }, { needs: [] })] });
+    expect(() => buildNomadTopologyJob(spec)).toThrowError(/does not declare it in needs/);
+    const err = ((): unknown => {
+      try {
+        buildNomadTopologyJob(spec);
+      } catch (e) {
+        return e;
+      }
+    })();
+    expect((err as { code?: string }).code).toBe("BAD_REQUEST");
+  });
+
+  it("leaves a token that names no declared service verbatim (the harness's own template, not a peer ref)", () => {
+    const job = buildNomadTopologyJob(gridSpec({ SELF: "{{run_id}} and {{hub}}" }));
+    const nodeTask = job.Job.TaskGroups[0]?.Tasks.find((t) => t.Name === "node");
+    expect(nodeTask?.Env.SELF).toBe("{{run_id}} and http://hub:4444"); // unknown left as-is, peer resolved
+  });
+});
+
 describe("buildNomadTopologyJob — workspace-registry pull auth (registryAuth)", () => {
   const AUTH = { host: "ghcr.io", username: "bot", password: "pull-tok" };
 

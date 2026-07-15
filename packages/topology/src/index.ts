@@ -28,6 +28,7 @@ export {
   type NomadConnectUpstream,
   SERVICE_GROUP_NAME,
   servicePortLabel,
+  interpolateServiceEnv,
   dedicatedStoreJobId,
   dedicatedStoreGroup,
   SHARED_STORE_JOB_ID,

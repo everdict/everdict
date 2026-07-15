@@ -12,6 +12,13 @@ A harness can be a process (Claude Code) or a **deployed multi-service topology 
 - `HarnessSpec(kind:"service")`: `services[]` (each `{image, port?, needs, env?}`; `env` = per-service static
   config — precedence store `connEnv` < `service.env` < runtime `storeEnv`) + `dependencies[]` (shared stores) +
   `target` (browser+ext) + `frontDoor` + `traceSource`.
+- **Peer env interpolation (`interpolateServiceEnv`, `nomad-topology.ts`).** A `service.env` value may reference a
+  `needs` peer with a `{{peer}}`/`{{peer.host}}`/`{{peer.port}}`/`{{peer.url}}` token. On the static-address runtimes —
+  docker (alias), co-located Nomad (loopback), K8s (Service DNS) — it resolves **one pass at deploy time** (no waves:
+  `alias:port` is known up front). Per-service Nomad (dynamic host ports) renders the token into the discovery **template**
+  file so consul-template resolves it from the catalog at runtime (re-resolving, like `EVERDICT_SVC_<PEER>`). A peer not in
+  `needs` / with no port → fail-fast `BadRequestError`; a token naming no service is left verbatim. The declarative sibling
+  of `service.wiring` (BYO env names) — both use the same per-runtime `hostFor`. See `docs/service-harness.md`.
 - A run = ensure warm topology → per-case browser → drive (front-door `POST /runs` with per-run wiring) →
   collect trace (OTel/MLflow) → observe (browser snapshot) → grade.
 
