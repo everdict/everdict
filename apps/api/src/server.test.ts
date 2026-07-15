@@ -1743,6 +1743,54 @@ describe("API — harness validate (instance dry-run)", () => {
     expect(res.json()).toMatchObject({ ok: true });
     await app.close();
   });
+
+  it("template validate surfaces portability issues anchored to the offending service/field (authoring-time lint)", async () => {
+    const { app, keyStore } = server({ requireAuth: true });
+    const h = { authorization: `Bearer ${await issueKey(keyStore, "acme")}` };
+    // A peer addressed by its literal name (should be a {{peer}} token) — the structural lint runs on the template
+    // structure, so the non-portable topology surfaces before the template lands (ok stays true; the block is at instance).
+    const nonPortable = {
+      kind: "service",
+      category: "topology",
+      id: "np",
+      version: "1",
+      services: [
+        {
+          name: "web",
+          slot: "web",
+          port: 3000,
+          needs: ["api"],
+          perRun: [],
+          replicas: 1,
+          env: { API_URL: "http://api:4000" },
+        },
+        { name: "api", slot: "api", port: 4000, needs: [], perRun: [], replicas: 1 },
+      ],
+      dependencies: [],
+      frontDoor: { service: "web", submit: "POST /runs" },
+      traceSource: { kind: "mlflow", endpoint: "http://m:5000" },
+    };
+    const res = await app.inject({
+      method: "POST",
+      url: "/harness-templates/validate",
+      headers: h,
+      payload: nonPortable,
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.ok).toBe(true);
+    const issues = body.portabilityIssues as Array<{ rule: string; severity: string; service?: string; field: string }>;
+    expect(issues.some((i) => i.rule === "peer-by-literal" && i.service === "web")).toBe(true);
+    // A clean template returns no portabilityIssues field at all.
+    const clean = await app.inject({
+      method: "POST",
+      url: "/harness-templates/validate",
+      headers: h,
+      payload: HARNESS_TEMPLATE,
+    });
+    expect(clean.json().portabilityIssues).toBeUndefined();
+    await app.close();
+  });
 });
 
 describe("API — datasets (workspace-owned, member+ write)", () => {

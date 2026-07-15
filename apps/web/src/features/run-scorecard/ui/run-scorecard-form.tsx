@@ -6,6 +6,7 @@ import { X } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 import { Controller, useForm } from 'react-hook-form'
 
+import { CapabilityBadge, capabilityFit, CapabilityFitNote } from '@/entities/runtime'
 import { sortSemverDesc } from '@/shared/lib/semver'
 import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
@@ -63,9 +64,15 @@ export function RunScorecardForm({
   hasWorkspaceRunners = false,
 }: {
   datasets: { id: string; versions: string[]; versionTags?: Record<string, string[]> }[]
-  harnesses: { id: string; versions: string[]; versionTags?: Record<string, string[]> }[]
+  // kind drives the submit-time capability-fit preview against each runtime (a service harness needs a container runtime).
+  harnesses: {
+    id: string
+    versions: string[]
+    versionTags?: Record<string, string[]>
+    kind?: string
+  }[]
   judges?: { id: string }[] // Registered Agent Judges (model|harness) selectable to score each case
-  runtimes?: { id: string }[]
+  runtimes?: { id: string; capabilities?: string[] }[] // capabilities = latest version's declared caps (for fit preview)
   runners?: { id: string; label: string }[]
   hasWorkspaceRunners?: boolean // Expose the self:ws pool option when team shared runners exist
 }) {
@@ -108,6 +115,8 @@ export function RunScorecardForm({
   }))
   const datasetEntry = datasets.find((d) => d.id === datasetId)
   const harnessEntry = harnesses.find((h) => h.id === harnessId)
+  // Drives the runtime capability-fit preview (a service/topology harness needs a container-capable runtime).
+  const harnessKind = harnessEntry?.kind
   const datasetVersionOptions = versionOptions(
     datasetEntry?.versions ?? [],
     datasetEntry?.versionTags
@@ -289,35 +298,57 @@ export function RunScorecardForm({
           name="runtime"
           rules={{ required: t('runtimeRequired') }}
           render={({ field }) => (
-            <Combobox
-              id="runtime"
-              options={[
-                ...runtimes.map((r) => ({ value: r.id })),
-                // Team shared runner pool — takes any registered team runner that meets capability (multiple runners = concurrency).
-                ...(hasWorkspaceRunners
-                  ? [
-                      {
-                        value: 'self:ws',
-                        label: t('poolWorkspaceLabel'),
-                        hint: t('poolWorkspaceHint'),
-                      },
-                    ]
-                  : []),
-                // My runner pool — any of my runners (there may be several). A specific runner is an individual item below.
-                ...(runners.length > 0
-                  ? [{ value: 'self', label: t('poolSelfLabel'), hint: t('poolSelfHint') }]
-                  : []),
-                ...runners.map((r) => ({
-                  value: `self:${r.id}`,
-                  label: r.label,
-                  hint: t('poolSelfHint'),
-                })),
-              ]}
-              value={field.value}
-              onChange={field.onChange}
-              placeholder={t('runtimePlaceholder')}
-              emptyText={t('runtimeEmpty')}
-            />
+            <>
+              <Combobox
+                id="runtime"
+                options={[
+                  // Registered runtimes — a capability-fit badge shows when there's a definite verdict for this harness.
+                  ...runtimes.map((r) => {
+                    const fit = capabilityFit(r.capabilities, harnessKind)
+                    return {
+                      value: r.id,
+                      ...(fit === 'fit' || fit === 'unfit'
+                        ? {
+                            hint: (
+                              <CapabilityBadge
+                                harnessKind={harnessKind}
+                                capabilities={r.capabilities}
+                              />
+                            ),
+                          }
+                        : {}),
+                    }
+                  }),
+                  // Team shared runner pool — takes any registered team runner that meets capability (multiple runners = concurrency).
+                  ...(hasWorkspaceRunners
+                    ? [
+                        {
+                          value: 'self:ws',
+                          label: t('poolWorkspaceLabel'),
+                          hint: t('poolWorkspaceHint'),
+                        },
+                      ]
+                    : []),
+                  // My runner pool — any of my runners (there may be several). A specific runner is an individual item below.
+                  ...(runners.length > 0
+                    ? [{ value: 'self', label: t('poolSelfLabel'), hint: t('poolSelfHint') }]
+                    : []),
+                  ...runners.map((r) => ({
+                    value: `self:${r.id}`,
+                    label: r.label,
+                    hint: t('poolSelfHint'),
+                  })),
+                ]}
+                value={field.value}
+                onChange={field.onChange}
+                placeholder={t('runtimePlaceholder')}
+                emptyText={t('runtimeEmpty')}
+              />
+              <CapabilityFitNote
+                harnessKind={harnessKind}
+                capabilities={runtimes.find((r) => r.id === field.value)?.capabilities}
+              />
+            </>
           )}
         />
         <FieldError message={errors.runtime?.message} />

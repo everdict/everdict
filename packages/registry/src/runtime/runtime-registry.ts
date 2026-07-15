@@ -34,16 +34,18 @@ export class InMemoryRuntimeRegistry implements RuntimeRegistry {
     return this.store.versionTags(tenant, id);
   }
 
-  // RuntimeListEntry = version summary + version tags only (no spec derivations). Built per-id from listIds + versionTags.
+  // RuntimeListEntry = version summary + version tags + the latest version's declared capabilities (for submit-time fit preview).
   async list(tenant: string): Promise<RuntimeListEntry[]> {
     const out: RuntimeListEntry[] = [];
     for (const { id, owner, versions } of this.store.listIds(tenant)) {
       const versionTags = this.store.versionTags(owner, id);
+      const capabilities = this.store.get(owner, id).capabilities; // latest (default ref)
       out.push({
         id,
         owner,
         versions,
         ...(Object.keys(versionTags).length > 0 ? { versionTags } : {}),
+        ...(capabilities && capabilities.length > 0 ? { capabilities } : {}),
       });
     }
     return out;

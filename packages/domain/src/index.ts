@@ -85,6 +85,7 @@ export { diffHarnessSpecs } from "./harness/harness-diff.js";
 export {
   type PortabilityIssue,
   type PortabilityRule,
+  type PortabilityServiceSpec,
   assertPortable,
   checkPortability,
   portabilityErrors,

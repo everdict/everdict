@@ -1563,6 +1563,9 @@
     "portabilityHint": "Addresses must resolve the same on every runtime (self-hosted Docker · Nomad · K8s). Errors block a service instance at registration — fix them by wiring peers instead of hardcoding addresses.",
     "severityError": "error",
     "severityWarning": "warning",
+    "previewTitle": "Topology preview",
+    "previewTip": "A live diagram of the topology you're defining — services, needs edges, stores, the front door and target. It updates as you edit; the same view appears on the harness detail page.",
+    "previewEmpty": "Name a service to see the topology diagram.",
     "svcOverrideEmpty": "Override per-service settings like env and replicas. Swap images in Pins above; the service name must exist in the template.",
     "svcOverrideEnvTip": "Override this service's env. Reference secrets via <b>Secret</b>.",
     "svcOverrideTitle": "Service overrides (service harness)",
@@ -1844,6 +1847,11 @@
     "help": "Evaluates every case in the benchmark with this harness and collects the scores. When it finishes, view results on the detail page.",
     "submitting": "Running…",
     "submit": "Run scorecard"
+  },
+  "runtimeFit": {
+    "fits": "runs this",
+    "missing": "needs {caps}",
+    "note": "The selected runtime doesn't advertise {caps}, which this service (topology) harness needs — the control plane will reject it at dispatch. Pick a container-capable runtime."
   },
   "runsPage": {
     "title": "Activity",

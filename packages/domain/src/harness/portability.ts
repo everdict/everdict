@@ -14,6 +14,15 @@ export type PortabilityRule =
   | "reference-not-address" // front-door / target references a service that is not declared
   | "unique-ports"; // two services share a port — the co-located Nomad shared netns forbids it
 
+// Portability is a purely STRUCTURAL check over a service topology's addressing (service names/ports/needs/env/wiring +
+// front-door/target/trace references) — it never reads a service `image`. So a template (image-less services) is checked
+// with the SAME function as a resolved instance: this is the minimal structural input both a ServiceHarnessSpec and a
+// ServiceTemplateSpec satisfy, which lets the /harness-templates/validate route lint the topology at AUTHORING time
+// (where the structure lives) rather than only at instance resolution.
+export type PortabilityServiceSpec = Omit<ServiceHarnessSpec, "services"> & {
+  services: Array<Omit<TopologyService, "image">>;
+};
+
 export interface PortabilityIssue {
   rule: PortabilityRule;
   // error = the construct resolves DIFFERENTLY (or not at all) on another runtime — no legitimate exception, so a new
@@ -91,13 +100,14 @@ function referencesServiceLiterally(value: string, name: string): boolean {
   return new RegExp(`(?:\\/\\/${n}(?=[:/\\s"']|$))|(?:(?:^|[\\s"'@/])${n}:\\d)`).test(value);
 }
 
-export function checkPortability(spec: ServiceHarnessSpec): PortabilityIssue[] {
+export function checkPortability(spec: PortabilityServiceSpec): PortabilityIssue[] {
   const issues: Omit<PortabilityIssue, "severity">[] = [];
   const names = new Set(spec.services.map((s) => s.name));
   const byName = new Map(spec.services.map((s) => [s.name, s]));
 
   // A referenced peer must be declared in `needs` (per-service Nomad wires only needs) and must expose a `port`.
-  const checkPeerRef = (svc: TopologyService, peer: string, field: string): void => {
+  // svc is the structural (image-agnostic) service — the same shape a template's image-less service satisfies.
+  const checkPeerRef = (svc: Omit<TopologyService, "image">, peer: string, field: string): void => {
     if (!svc.needs.includes(peer))
       issues.push({
         rule: "needs-complete",

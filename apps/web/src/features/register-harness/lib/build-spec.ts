@@ -4,6 +4,16 @@ import type { HarnessTemplateSpec } from '@/entities/harness'
 
 export type Kind = 'process' | 'service' | 'command'
 
+// Peer wiring row — inject a needs-peer's resolved address into this service's env under BYO variable names. The
+// portable alternative to a hardcoded host: the runtime fills the per-backend address, so a spec never bakes in
+// "db:5432". At least one of host/port/url env must be set; the peer is auto-kept in needs by the editor.
+export interface WiringRow {
+  service: string // peer service name (a declared topology service)
+  hostEnv: string // env var to receive the peer host (empty = skip)
+  portEnv: string // env var to receive the peer port (empty = skip)
+  urlEnv: string // env var to receive the peer url (empty = skip)
+}
+
 export interface ServiceRow {
   name: string
   slot: string // slot name the instance pins (if left empty, name)
@@ -13,6 +23,7 @@ export interface ServiceRow {
   replicas: string
   model: string // agent-server model — a registered Model id (its connection env is injected at dispatch); empty = none
   env: EnvRow[] // static env (non-store config) — literal or secret reference
+  wiring: WiringRow[] // peer address → BYO env injection (portable; the runtime fills the per-backend address)
   volumes: string // docker -v mounts, newline-separated ("vol:/data" · "/host:/c:ro")
   readinessTimeout: string // readiness polling ceiling (ms) — if left empty, unset
   readinessInterval: string // readiness polling interval (ms)
@@ -84,6 +95,43 @@ export interface EnvRow {
 }
 export type EnvValue = string | { secretRef: string; scope?: SecretRefScope }
 
+// wiring rows → spec wiring[] (drop rows with no peer or no env target). Each kept row emits only the env names set.
+export function wiringToSpec(rows: WiringRow[]): Record<string, string>[] {
+  const out: Record<string, string>[] = []
+  for (const r of rows) {
+    const service = r.service.trim()
+    const hostEnv = r.hostEnv.trim()
+    const portEnv = r.portEnv.trim()
+    const urlEnv = r.urlEnv.trim()
+    if (!service || (!hostEnv && !portEnv && !urlEnv)) continue
+    out.push({
+      service,
+      ...(hostEnv ? { hostEnv } : {}),
+      ...(portEnv ? { portEnv } : {}),
+      ...(urlEnv ? { urlEnv } : {}),
+    })
+  }
+  return out
+}
+
+// spec wiring[] → wiring rows (prefill inverse). Non-object entries are skipped.
+export function wiringFromSpec(wiring: unknown): WiringRow[] {
+  if (!Array.isArray(wiring)) return []
+  return wiring.flatMap((w) => {
+    if (typeof w !== 'object' || w === null) return []
+    const o = w as Record<string, unknown>
+    if (typeof o.service !== 'string') return []
+    return [
+      {
+        service: o.service,
+        hostEnv: typeof o.hostEnv === 'string' ? o.hostEnv : '',
+        portEnv: typeof o.portEnv === 'string' ? o.portEnv : '',
+        urlEnv: typeof o.urlEnv === 'string' ? o.urlEnv : '',
+      },
+    ]
+  })
+}
+
 // env rows → spec env map (excluding empty keys). Literal=string, secret=reference object (+scope; workspace is the default so it's omitted).
 export function envRowsToSpec(rows: EnvRow[]): Record<string, EnvValue> {
   const out: Record<string, EnvValue> = {}
@@ -149,6 +197,7 @@ export function buildTemplate(s: TemplateState): Record<string, unknown> {
     services: s.services.map((sv) => {
       const env = envRowsToSpec(sv.env)
       const volumes = lines(sv.volumes)
+      const wiring = wiringToSpec(sv.wiring)
       const hasReadiness = sv.readinessTimeout.trim() !== '' || sv.readinessInterval.trim() !== ''
       return {
         name: sv.name,
@@ -159,6 +208,7 @@ export function buildTemplate(s: TemplateState): Record<string, unknown> {
         replicas: sv.replicas.trim() ? Number(sv.replicas) : 1,
         ...(sv.model.trim() ? { model: sv.model.trim() } : {}), // registered Model id → connection env injected at dispatch
         ...(Object.keys(env).length ? { env } : {}),
+        ...(wiring.length ? { wiring } : {}),
         ...(volumes.length ? { volumes } : {}),
         ...(hasReadiness
           ? {
@@ -213,6 +263,7 @@ export function templateStateFromSpec(t: HarnessTemplateSpec): TemplateState {
       replicas: s.replicas !== undefined ? String(s.replicas) : '1',
       model: typeof s.model === 'string' ? s.model : '', // only a bare-id binding round-trips into the form (object bindings via API)
       env: envRowsFromSpec(s.env),
+      wiring: wiringFromSpec(s.wiring),
       volumes: (s.volumes ?? []).join('\n'),
       readinessTimeout: s.readiness?.timeoutMs !== undefined ? String(s.readiness.timeoutMs) : '',
       readinessInterval:
@@ -391,6 +442,7 @@ export const INITIAL_TEMPLATE: TemplateState = {
       replicas: '1',
       model: '',
       env: [],
+      wiring: [],
       volumes: '',
       readinessTimeout: '',
       readinessInterval: '',

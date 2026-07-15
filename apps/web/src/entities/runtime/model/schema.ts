@@ -10,6 +10,9 @@ export const runtimeSummarySchema = z.object({
   versions: z.array(z.string()),
   // version → free-form labels (only versions that have tags) — mutable meta outside the spec (for telling versions apart).
   versionTags: z.record(z.string(), z.array(z.string())).optional(),
+  // Latest version's declared capabilities (docker/topology/…) — surfaced so the submit-time picker can preview whether
+  // the runtime can run the chosen harness. Absent = the runtime declares none (treated as unchecked, no badge).
+  capabilities: z.array(z.string()).optional(),
 })
 export const runtimesSchema = z.array(runtimeSummarySchema)
 

@@ -44,6 +44,7 @@ export * from "./harness/register-harness-result.js";
 export * from "./harness/register-harness-template-result.js";
 export * from "./harness/repin-result.js";
 export * from "./harness/resolved-harness.js";
+export * from "./harness/portability-issue.js";
 export * from "./harness/validate-harness-result.js";
 export * from "./harness/validate-harness-template-result.js";
 export * from "./image-registry/image-push-credentials.js";

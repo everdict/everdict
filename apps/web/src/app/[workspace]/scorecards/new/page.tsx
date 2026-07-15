@@ -28,9 +28,14 @@ export default async function NewScorecardPage({
   const allowed = can(principal?.roles, 'scorecards:run')
 
   let datasets: { id: string; versions: string[]; versionTags?: Record<string, string[]> }[] = []
-  let harnesses: { id: string; versions: string[]; versionTags?: Record<string, string[]> }[] = []
+  let harnesses: {
+    id: string
+    versions: string[]
+    versionTags?: Record<string, string[]>
+    kind?: string
+  }[] = []
   let judges: { id: string }[] = []
-  let runtimes: { id: string }[] = []
+  let runtimes: { id: string; capabilities?: string[] }[] = []
   let runners: { id: string; label: string }[] = []
   let hasWorkspaceRunners = false
   if (allowed) {

@@ -1,4 +1,4 @@
-import type { RuntimeSpec } from "@everdict/contracts";
+import type { CapabilityName, RuntimeSpec } from "@everdict/contracts";
 
 // Runtime (execution infra) version SSOT — (tenant, id, version) → RuntimeSpec. Versions are immutable. "latest" = newest by semver/registration order.
 // Same ownership model as harness/dataset/judge: tenant-owned first, else SHARED_TENANT (first-party shared runtime) fallback.
@@ -9,6 +9,9 @@ export interface RuntimeListEntry {
   versions: string[];
   owner: string;
   versionTags?: Record<string, string[]>; // version → free-form label — mutable registry metadata (outside the spec)
+  // The latest version's declared capabilities — surfaced so a submit-time picker can preview runtime↔harness fit
+  // (a service harness needs `docker`, etc.) before dispatch. Absent = the runtime declares none (treated unchecked).
+  capabilities?: CapabilityName[];
 }
 
 export interface RuntimeRegistry {

@@ -65,6 +65,16 @@ describe("InMemoryRuntimeRegistry (tenant-owned)", () => {
     ]);
   });
 
+  it("list surfaces the latest version's declared capabilities (submit-time fit preview); omits when none", async () => {
+    const r = new InMemoryRuntimeRegistry();
+    await r.register("acme", rt("cap", "1.0.0", { capabilities: ["docker"] }));
+    await r.register("acme", rt("cap", "2.0.0", { capabilities: ["docker", "topology"] }));
+    await r.register("acme", rt("plain", "1.0.0"));
+    const list = await r.list("acme");
+    expect(list.find((x) => x.id === "cap")?.capabilities).toEqual(["docker", "topology"]); // latest, not 1.0.0
+    expect(list.find((x) => x.id === "plain")?.capabilities).toBeUndefined(); // capability-less → field omitted
+  });
+
   it("setVersionTags (version tags) — surfaced via versionTags/list, empty array = removal, _shared/missing version → NotFound", async () => {
     const r = new InMemoryRuntimeRegistry();
     await r.register("acme", rt("mine", "1.0.0"));

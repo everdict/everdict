@@ -97,6 +97,24 @@ describe("checkPortability", () => {
     expect(rules(s)).toContain("needs-complete");
   });
 
+  it("lints a template-shaped (image-less) service spec identically — so authoring-time validation catches it", () => {
+    // A ServiceTemplateSpec's services omit `image`; portability is purely structural over addressing, so the same
+    // function accepts it. This is what /harness-templates/validate calls to surface issues before the template lands.
+    const templateSpec: import("./portability.js").PortabilityServiceSpec = {
+      kind: "service",
+      id: "h",
+      version: "1",
+      services: [
+        { name: "web", port: 3000, needs: ["api"], perRun: [], replicas: 1, env: { API_URL: "http://api:4000" } },
+        { name: "api", port: 4000, needs: [], perRun: [], replicas: 1, env: {} },
+      ],
+      dependencies: [],
+      frontDoor: { service: "web", submit: "POST /runs" },
+      traceSource: { kind: "otel", endpoint: "http://otel.example.com" },
+    };
+    expect(checkPortability(templateSpec).map((i) => i.rule)).toContain("peer-by-literal");
+  });
+
   it("classifies a structural violation as error and a host literal as warning", () => {
     const structural = spec([
       svc({ name: "web", port: 3000, needs: [], env: { API_URL: "http://{{api}}" } }),

@@ -2,10 +2,14 @@
 
 import { useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
+import type { PortabilityIssue } from '@everdict/contracts/wire'
 import { ChevronDown, Plus, SlidersHorizontal, Trash2 } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
+import { TopologyGraph } from '@/features/inspect-harness'
+import type { HarnessSpec } from '@/entities/harness'
 import { cn } from '@/shared/lib/utils'
+import { Badge } from '@/shared/ui/badge'
 import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
 import { Combobox, type ComboboxOption } from '@/shared/ui/combobox'
@@ -35,6 +39,7 @@ import {
   type ServiceOverrideRow,
   type ServiceRow,
   type TemplateState,
+  type WiringRow,
 } from '../lib/build-spec'
 import { EnvEditor, type ScopedSecretNames } from './env-editor'
 
@@ -329,6 +334,7 @@ export function TemplateForm({
                     replicas: '1',
                     model: '',
                     env: [],
+                    wiring: [],
                     volumes: '',
                     readinessTimeout: '',
                     readinessInterval: '',
@@ -370,21 +376,22 @@ export function TemplateForm({
                     placeholder="1"
                     inputMode="numeric"
                   />
-                  <LabeledInput
-                    label="needs"
-                    tip={t('svcNeedsTip')}
-                    value={sv.needs}
-                    onChange={(v) => setService(i, { needs: v })}
-                    placeholder="db, redis"
-                  />
-                  <LabeledInput
-                    label="perRun"
-                    tip={t('svcPerRunTip')}
-                    value={sv.perRun}
-                    onChange={(v) => setService(i, { perRun: v })}
-                    placeholder="thread_id"
-                  />
                 </div>
+                <PeerNeedsField
+                  tip={t('svcNeedsTip')}
+                  value={sv.needs}
+                  peers={s.services
+                    .map((o) => o.name.trim())
+                    .filter((n) => n && n !== sv.name.trim())}
+                  onChange={(needs) => setService(i, { needs })}
+                />
+                <LabeledInput
+                  label="perRun"
+                  tip={t('svcPerRunTip')}
+                  value={sv.perRun}
+                  onChange={(v) => setService(i, { perRun: v })}
+                  placeholder="thread_id"
+                />
                 <LabeledModel
                   label={t('svcModelLabel')}
                   tip={t('svcModelTip')}
@@ -399,6 +406,13 @@ export function TemplateForm({
                   rows={sv.env}
                   onChange={(env) => setService(i, { env })}
                   secrets={secrets}
+                />
+                <PeerWiringEditor
+                  rows={sv.wiring}
+                  peers={s.services
+                    .map((o) => o.name.trim())
+                    .filter((n) => n && n !== sv.name.trim())}
+                  onChange={(wiring) => setService(i, wiringPatch(sv, wiring))}
                 />
                 <LabeledTextarea
                   label="volumes"
@@ -563,6 +577,7 @@ export function TemplateForm({
               </div>
             </div>
           </div>
+          <TopologyPreview s={s} />
         </div>
       )}
 
@@ -1332,6 +1347,252 @@ function LabeledTextarea({
   )
 }
 
+// A wiring change also keeps each referenced peer in `needs` (never auto-removes): the portability lint requires a
+// wired peer to be a declared need, so the editor maintains that invariant for the author.
+function wiringPatch(sv: ServiceRow, wiring: WiringRow[]): Partial<ServiceRow> {
+  const needs = new Set(
+    sv.needs
+      .split(',')
+      .map((x) => x.trim())
+      .filter(Boolean)
+  )
+  for (const w of wiring) {
+    const svc = w.service.trim()
+    if (svc) needs.add(svc)
+  }
+  return { wiring, needs: [...needs].join(', ') }
+}
+
+// needs (peer edges) as a toggle-chip multiselect over the OTHER declared services — you can only pick a declared
+// peer, so its address is always resolvable per runtime (portable by construction, no typed "db:5432"). A stale need
+// (a service since renamed/removed) shows as a struck-through chip that can be cleared.
+function PeerNeedsField({
+  value,
+  peers,
+  onChange,
+  tip,
+}: {
+  value: string
+  peers: string[]
+  onChange: (needs: string) => void
+  tip?: React.ReactNode
+}) {
+  const t = useTranslations('registerHarness')
+  const current = value
+    .split(',')
+    .map((x) => x.trim())
+    .filter(Boolean)
+  const set = new Set(current)
+  const toggle = (name: string) => {
+    const next = new Set(current)
+    if (next.has(name)) next.delete(name)
+    else next.add(name)
+    onChange([...next].join(', '))
+  }
+  const stale = current.filter((n) => !peers.includes(n))
+  return (
+    <div className="space-y-1">
+      <span className="flex items-center gap-1">
+        <span className="text-[11px] font-[510] text-muted-foreground">needs</span>
+        {tip != null && <InfoTip content={tip} />}
+      </span>
+      {peers.length === 0 && stale.length === 0 ? (
+        <p className="text-[12px] text-muted-foreground">{t('needsNoPeers')}</p>
+      ) : (
+        <div className="flex flex-wrap gap-1.5">
+          {peers.map((name) => (
+            <button
+              key={name}
+              type="button"
+              onClick={() => toggle(name)}
+              aria-pressed={set.has(name)}
+              className={cn(
+                'rounded-md px-2 py-0.5 text-[12px] font-[510] ring-1 ring-inset transition-colors',
+                set.has(name)
+                  ? 'bg-primary/12 text-[var(--color-accent-foreground)] ring-primary/25'
+                  : 'bg-secondary text-muted-foreground ring-border hover:text-foreground'
+              )}
+            >
+              {name}
+            </button>
+          ))}
+          {stale.map((name) => (
+            <button
+              key={name}
+              type="button"
+              onClick={() => toggle(name)}
+              title={t('needsStaleTip')}
+              className="rounded-md bg-transparent px-2 py-0.5 text-[12px] text-muted-foreground line-through ring-1 ring-inset ring-border hover:text-destructive"
+            >
+              {name} ✕
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// Peer wiring — the portable way to hand a service its peer's address: pick a declared peer and name the env var(s)
+// that receive its host/port/url; the runtime fills the per-backend address at deploy. Selecting a peer keeps it in
+// needs (wiringPatch). For freeform composite URLs, an env value may instead use a {{peer.url}} token (env editor).
+function PeerWiringEditor({
+  rows,
+  peers,
+  onChange,
+}: {
+  rows: WiringRow[]
+  peers: string[]
+  onChange: (rows: WiringRow[]) => void
+}) {
+  const t = useTranslations('registerHarness')
+  const setRow = (i: number, patch: Partial<WiringRow>) =>
+    onChange(rows.map((r, j) => (j === i ? { ...r, ...patch } : r)))
+  const add = () =>
+    onChange([...rows, { service: peers[0] ?? '', hostEnv: '', portEnv: '', urlEnv: '' }])
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between">
+        <span className="flex items-center gap-1">
+          <span className="text-[11px] font-[510] text-muted-foreground">{t('wiringLabel')}</span>
+          <InfoTip
+            content={t.rich('wiringTip', { b: (c) => <b>{c}</b>, code: (c) => <code>{c}</code> })}
+          />
+        </span>
+        <button
+          type="button"
+          onClick={add}
+          disabled={peers.length === 0}
+          className="flex items-center gap-1 text-[12px] font-[510] text-link transition-colors hover:text-foreground disabled:opacity-40"
+        >
+          <Plus className="size-3.5" /> {t('add')}
+        </button>
+      </div>
+      {rows.length === 0 ? (
+        <p className="text-[11px] text-muted-foreground">
+          {peers.length === 0 ? t('wiringNoPeers') : t('wiringEmpty')}
+        </p>
+      ) : (
+        rows.map((r, i) => (
+          <div key={i} className="space-y-2 rounded-md border bg-muted/30 p-2.5">
+            <div className="flex items-center gap-2">
+              <Combobox
+                value={r.service}
+                onChange={(v) => setRow(i, { service: v })}
+                options={peers.map((p) => ({ value: p }))}
+                className="w-44"
+                aria-label={t('wiringPeerAria')}
+                placeholder={t('wiringPeerPlaceholder')}
+              />
+              <RemoveBtn onClick={() => onChange(rows.filter((_, j) => j !== i))} />
+            </div>
+            <div className="grid grid-cols-3 gap-2">
+              <WiringEnvField
+                label={t('wiringUrlEnv')}
+                value={r.urlEnv}
+                onChange={(v) => setRow(i, { urlEnv: v })}
+                placeholder="API_BASE_URL"
+              />
+              <WiringEnvField
+                label={t('wiringHostEnv')}
+                value={r.hostEnv}
+                onChange={(v) => setRow(i, { hostEnv: v })}
+                placeholder="DB_HOST"
+              />
+              <WiringEnvField
+                label={t('wiringPortEnv')}
+                value={r.portEnv}
+                onChange={(v) => setRow(i, { portEnv: v })}
+                placeholder="DB_PORT"
+              />
+            </div>
+          </div>
+        ))
+      )}
+    </div>
+  )
+}
+
+function WiringEnvField({
+  label,
+  value,
+  onChange,
+  placeholder,
+}: {
+  label: string
+  value: string
+  onChange: (v: string) => void
+  placeholder?: string
+}) {
+  return (
+    <div className="space-y-1">
+      <span className="block text-[11px] text-muted-foreground">{label}</span>
+      <Input
+        aria-label={label}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        className="font-mono text-[12px]"
+      />
+    </div>
+  )
+}
+
+// Live topology preview — the same read-only graph the harness detail shows, fed from the in-progress form state so
+// authors SEE the structure (services · needs edges · stores · front-door · target) form as they type. Image-less
+// (pins come later); the graph never reads image. Named services only (an unnamed row is noise).
+function previewSpec(s: TemplateState): HarnessSpec {
+  return {
+    kind: 'service',
+    id: s.id.trim() || 'preview',
+    version: s.version.trim() || '1',
+    services: s.services
+      .filter((sv) => sv.name.trim())
+      .map((sv) => ({
+        name: sv.name.trim(),
+        image: '',
+        ...(sv.port.trim() ? { port: Number(sv.port) } : {}),
+        needs: sv.needs
+          .split(',')
+          .map((x) => x.trim())
+          .filter(Boolean),
+        perRun: [],
+        replicas: sv.replicas.trim() ? Number(sv.replicas) : 1,
+        env: {},
+      })),
+    dependencies: s.deps
+      .filter((d) => d.store.trim())
+      .map((d) => ({
+        store: d.store,
+        role: d.role,
+        isolateBy: d.isolateBy,
+        ...(d.service.trim() ? { service: d.service.trim() } : {}),
+      })),
+    ...(s.targetEnabled ? { target: { kind: 'browser', observe: [] } } : {}),
+    frontDoor: { service: s.frontDoorService, submit: s.frontDoorSubmit },
+    // The trace-kind combobox only offers otel/mlflow; narrow to the mirror's enum (default mlflow).
+    traceSource: { kind: s.traceKind === 'otel' ? 'otel' : 'mlflow', endpoint: s.traceEndpoint },
+  }
+}
+
+function TopologyPreview({ s }: { s: TemplateState }) {
+  const t = useTranslations('registerHarness')
+  const named = s.services.filter((sv) => sv.name.trim())
+  return (
+    <div className="space-y-3">
+      <h3 className="flex items-center gap-1 text-[13px] font-[560] text-foreground">
+        {t('previewTitle')}
+        <InfoTip content={t('previewTip')} />
+      </h3>
+      {named.length === 0 ? (
+        <p className="text-[12px] text-muted-foreground">{t('previewEmpty')}</p>
+      ) : (
+        <TopologyGraph spec={previewSpec(s)} />
+      )}
+    </div>
+  )
+}
+
 function RemoveBtn({ onClick }: { onClick: () => void }) {
   const t = useTranslations('registerHarness')
   return (
@@ -1347,44 +1608,82 @@ function RemoveBtn({ onClick }: { onClick: () => void }) {
 
 function ValidateBanner({ result }: { result: ValidateHarnessResult }) {
   const t = useTranslations('registerHarness')
-  if (result.error)
-    return <Callout tone="danger">{t('validateRunFailed', { error: result.error })}</Callout>
-  if (!result.ok)
-    return (
-      <Callout tone="danger">
-        <div className="font-[560]">{t('validateFailed')}</div>
-        <ul className="mt-1 list-disc pl-5">
-          {result.errors?.map((e) => (
-            <li key={e}>{e}</li>
-          ))}
-        </ul>
-      </Callout>
-    )
+  const issues = result.portabilityIssues ?? []
   return (
-    <Callout tone="info">
+    <div className="space-y-2">
+      {result.error ? (
+        <Callout tone="danger">{t('validateRunFailed', { error: result.error })}</Callout>
+      ) : !result.ok ? (
+        <Callout tone="danger">
+          <div className="font-[560]">{t('validateFailed')}</div>
+          <ul className="mt-1 list-disc pl-5">
+            {result.errors?.map((e) => (
+              <li key={e}>{e}</li>
+            ))}
+          </ul>
+        </Callout>
+      ) : (
+        <Callout tone="info">
+          <div className="font-[560]">
+            {t('validatePassed')} {result.kind ? `${result.kind} ` : ''}
+            {result.id}@{result.version}
+          </div>
+          {result.existingVersions !== undefined && (
+            <div className="mt-1 text-[12px] text-muted-foreground">
+              {t('existingVersionsLabel')}{' '}
+              {result.existingVersions.length > 0 ? result.existingVersions.join(', ') : t('none')}
+              {result.versionExists && ` — ${t('versionExistsNote')}`}
+            </div>
+          )}
+          {/* Image provenance warning — locally built/unqualified images can't be pulled from another runtime (registration is still allowed). */}
+          {result.imageWarnings && result.imageWarnings.length > 0 && (
+            <div className="mt-1 text-[12px] text-muted-foreground">
+              {t('imageWarningsLabel')}{' '}
+              {result.imageWarnings.map((w) => (
+                <code key={w.image} className="mr-1 font-mono">
+                  {w.image}(
+                  {w.class === 'local' ? t('imageClassLocal') : t('imageClassUnqualified')})
+                </code>
+              ))}
+              — <code className="font-mono">everdict image push</code> {t('imagePushHint')}
+            </div>
+          )}
+        </Callout>
+      )}
+      {issues.length > 0 && <PortabilityIssues issues={issues} />}
+    </div>
+  )
+}
+
+// Cross-runtime portability findings, anchored to the offending service/field (not a raw error blob). Errors mean a
+// service instance built on this template will be hard-blocked at registration (address differs per runtime); warnings
+// are migratable host literals. Ordered errors-first.
+function PortabilityIssues({ issues }: { issues: PortabilityIssue[] }) {
+  const t = useTranslations('registerHarness')
+  const errors = issues.filter((i) => i.severity === 'error')
+  const warnings = issues.filter((i) => i.severity === 'warning')
+  return (
+    <Callout tone={errors.length > 0 ? 'danger' : 'warning'}>
       <div className="font-[560]">
-        {t('validatePassed')} {result.kind ? `${result.kind} ` : ''}
-        {result.id}@{result.version}
+        {errors.length > 0 ? t('portabilityErrorsTitle') : t('portabilityWarningsTitle')}
       </div>
-      {result.existingVersions !== undefined && (
-        <div className="mt-1 text-[12px] text-muted-foreground">
-          {t('existingVersionsLabel')}{' '}
-          {result.existingVersions.length > 0 ? result.existingVersions.join(', ') : t('none')}
-          {result.versionExists && ` — ${t('versionExistsNote')}`}
-        </div>
-      )}
-      {/* Image provenance warning — locally built/unqualified images can't be pulled from another runtime (registration is still allowed). */}
-      {result.imageWarnings && result.imageWarnings.length > 0 && (
-        <div className="mt-1 text-[12px] text-muted-foreground">
-          {t('imageWarningsLabel')}{' '}
-          {result.imageWarnings.map((w) => (
-            <code key={w.image} className="mr-1 font-mono">
-              {w.image}({w.class === 'local' ? t('imageClassLocal') : t('imageClassUnqualified')})
-            </code>
-          ))}
-          — <code className="font-mono">everdict image push</code> {t('imagePushHint')}
-        </div>
-      )}
+      <p className="mt-0.5 text-[12px] text-muted-foreground">{t('portabilityHint')}</p>
+      <ul className="mt-2 space-y-1.5">
+        {[...errors, ...warnings].map((issue, idx) => (
+          <li key={`${issue.field}-${idx}`} className="flex items-start gap-2 text-[12px]">
+            <Badge tone={issue.severity === 'error' ? 'danger' : 'warning'}>
+              {issue.severity === 'error' ? t('severityError') : t('severityWarning')}
+            </Badge>
+            <div className="min-w-0">
+              <code className="font-mono text-[11px] text-foreground">
+                {issue.service ? `${issue.service} · ` : ''}
+                {issue.field}
+              </code>
+              <p className="text-muted-foreground">{issue.message}</p>
+            </div>
+          </li>
+        ))}
+      </ul>
     </Callout>
   )
 }

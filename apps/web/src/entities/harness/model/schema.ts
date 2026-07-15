@@ -125,6 +125,17 @@ export type ServiceReadiness = z.infer<typeof serviceReadinessSchema>
 // object ModelRef bindings come via API/MCP). Loose display mirror; the connection env is injected at dispatch.
 export const modelBindingSchema = z.union([z.string(), z.object({ ref: z.string() }).passthrough()])
 
+// Peer wiring — inject a needs-peer's resolved address into a service's env under BYO variable names (for third-party
+// images that expect a specific env var). The one PORTABLE alternative to a hardcoded host; the runtime fills the
+// per-backend address. service must be a declared peer in needs (portability lint enforces).
+export const serviceWiringSchema = z.object({
+  service: z.string(),
+  hostEnv: z.string().optional(),
+  portEnv: z.string().optional(),
+  urlEnv: z.string().optional(),
+})
+export type ServiceWiring = z.infer<typeof serviceWiringSchema>
+
 export const topologyServiceSchema = z.object({
   name: z.string(),
   image: z.string(),
@@ -136,6 +147,7 @@ export const topologyServiceSchema = z.object({
   env: z.record(z.string(), envValueSchema).default({}),
   volumes: z.array(z.string()).optional(),
   readiness: serviceReadinessSchema.optional(),
+  wiring: z.array(serviceWiringSchema).optional(),
 })
 export type TopologyService = z.infer<typeof topologyServiceSchema>
 
@@ -245,6 +257,7 @@ export const templateServiceSchema = z.object({
   env: z.record(z.string(), envValueSchema).default({}),
   volumes: z.array(z.string()).optional(),
   readiness: serviceReadinessSchema.optional(),
+  wiring: z.array(serviceWiringSchema).optional(),
 })
 export type TemplateService = z.infer<typeof templateServiceSchema>
 

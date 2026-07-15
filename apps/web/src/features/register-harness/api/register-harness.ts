@@ -1,6 +1,7 @@
 'use server'
 
 import { revalidatePath } from 'next/cache'
+import type { PortabilityIssue } from '@everdict/contracts/wire'
 
 import { authContext } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
@@ -16,6 +17,9 @@ export interface ValidateHarnessResult {
   error?: string
   // Image provenance warning (warn-not-block) — local/unqualified images have no pull guarantee (registration still succeeds).
   imageWarnings?: { image: string; class: 'local' | 'unqualified' }[]
+  // Cross-runtime portability findings on the service topology — anchored per service/field in the wizard. Template
+  // validate returns these at authoring time (errors + warnings); the instance path folds errors into `errors` instead.
+  portabilityIssues?: PortabilityIssue[]
 }
 
 export interface RegisterHarnessResult {

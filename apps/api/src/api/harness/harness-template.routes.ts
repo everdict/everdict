@@ -1,4 +1,5 @@
 import { HarnessTemplateSpecSchema } from "@everdict/contracts";
+import { checkPortability } from "@everdict/domain";
 import type { FastifyInstance } from "fastify";
 import { type ServerDeps, gate, resolvePrincipal, sendError, zodIssues } from "../route-context.js";
 import { harnessTemplateDocs } from "./harness-template.docs.js";
@@ -36,6 +37,11 @@ export function registerHarnessTemplateRoutes(app: FastifyInstance, deps: Server
     if (!parsed.success)
       return reply.send({ ok: false, errors: zodIssues(parsed.error), existingVersions: [], versionExists: false });
     const existingVersions = await deps.harnessTemplates.ownVersions(principal.workspace, parsed.data.id);
+    // Portability lint runs on the template STRUCTURE (addressing is image-agnostic), so a non-portable topology
+    // surfaces at authoring time — anchored to the offending service/field — instead of only failing later at
+    // instance resolution (by which point the template is already an immutable version). Non-blocking for the
+    // template (the hard block stays at instance register); the wizard renders errors/warnings inline.
+    const portabilityIssues = parsed.data.kind === "service" ? checkPortability(parsed.data) : [];
     return reply.send({
       ok: true,
       kind: parsed.data.kind,
@@ -43,6 +49,7 @@ export function registerHarnessTemplateRoutes(app: FastifyInstance, deps: Server
       version: parsed.data.version,
       existingVersions,
       versionExists: existingVersions.includes(parsed.data.version),
+      ...(portabilityIssues.length > 0 ? { portabilityIssues } : {}),
     });
   });
 

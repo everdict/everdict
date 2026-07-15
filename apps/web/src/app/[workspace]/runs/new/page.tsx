@@ -21,7 +21,7 @@ export default async function NewRunPage({ params }: { params: Promise<{ workspa
   const allowed = can(principal?.roles, 'runs:submit')
 
   let harnesses: Harness[] = []
-  let runtimes: { id: string }[] = []
+  let runtimes: { id: string; capabilities?: string[] }[] = []
   let runners: { id: string; label: string }[] = []
   let hasWorkspaceRunners = false
   if (allowed) {
