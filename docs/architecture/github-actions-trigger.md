@@ -16,8 +16,11 @@
 > cooperatively (`runSuite` `signal` — remaining cases are never dispatched; already-dispatched cases drain
 > naturally into child runs, partial results preserved, completion notification skipped). GH-side workflow
 > `concurrency` cancels only the *workflow*; this reclaims the already-submitted batch (orphan-eval fix).
-> Merge/dev fires (no `prNumber`) are never superseded. Limits: cooperative only (no backend job kill);
-> single-control-plane-process assumption (in-memory AbortController map, same as the callback rendezvous).
+> Merge/dev fires (no `prNumber`) are never superseded. Force-kill of the already-fired in-flight jobs IS wired
+> (shared `stopInFlight`, also used by user cancel — see `docs/scorecards.md`): managed Nomad/K8s jobs via
+> `killCase`, self-hosted lease jobs via `cancelLeased` (`RunnerHub.requestCancel` → the runner aborts on its next
+> heartbeat). Limit: single-control-plane-process assumption (in-memory AbortController map + lease hub, same as
+> the callback rendezvous).
 >
 > **GitHub Enterprise (GHES) support — SHIPPED (2026-07-06).** The repo connect flow is host-aware
 > end-to-end: the picker (`GET /workspace/github-app/repos`) carries each repo's installation `host`
@@ -55,8 +58,8 @@
 > **Open:** live E2E vs real GitHub (github.com + GHES, incl. an `/evaluate` comment fire); GitHub App (S4,
 > demand-driven — would give webhook-fired `/evaluate` with instant reactions and no workflow file, but no
 > image build: it would reuse the PR's last-built digests or re-dispatch the workflow); personal-runner
-> `allowCi` gate; Track B pull-secrets for private GHCR; backend job force-kill for superseded in-flight
-> cases; `/evaluate` argument parsing (`dataset=… runtime=…` → action inputs).
+> `allowCi` gate; Track B pull-secrets for private GHCR; `/evaluate` argument parsing (`dataset=… runtime=…` →
+> action inputs). (Backend job force-kill for superseded in-flight cases — DONE, via the shared `stopInFlight`.)
 >
 > Direction locked with the user (2026-07-03):
 > **(1) Action-as-client, not webhook-receiver** — a first-party GitHub Action calls the Everdict API outbound;

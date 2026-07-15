@@ -18,12 +18,20 @@ dataset×harness → `Scorecard` + summary via `runSuite`. Regression = `diffSco
 
 ## Reference impl
 `apps/api/src/execution/scorecard-service.ts` — the batch lifecycle: dataset resolve (404) → `queued` record (202)
-→ `runSuite` (per-case child runs, admit/settle budget, cooperative `AbortSignal` supersede) with **streaming
+→ `runSuite` (per-case child runs, admit/settle budget, cooperative `AbortSignal` supersede/**user cancel**) with **streaming
 judges** (each case is pushed into `ScoringService.createJudgeStream` from `onResult` the moment it completes —
 bounded case-axis parallelism, deterministic per-case judge order; the `judges` phase after dispatch is just
 `settle()`, the join) → offload → aggregate (`summarizeScorecard`+`scorecardModels`) → persist. Scoring is
 split out to `apps/api/src/execution/scoring-service.ts` (`ScoringService.createJudgeStream`/`applyJudges`(=push-all+settle,
 used by ingest)/`collectJudgeModels`). See `docs/architecture/streaming-case-pipeline.md`.
+
+**Stop/cancel.** `ScorecardService.cancel(tenant,id)` (`POST /scorecards/:id/cancel` + `cancel_scorecard`) stops a
+queued/running batch → new terminal `cancelled` status (domain `ScorecardBatch.cancel`/`canCancel`; like
+`superseded`, excluded from baseline/diff/leaderboard/trend, which positively filter `succeeded`). It shares the
+supersede `stopInFlight` seam: cooperative abort (no more cases fire) + `cancelQueued`/`cancelLeased`/`killCase`, so
+managed Nomad/K8s jobs are force-killed and **self-hosted lease jobs abort on the runner's next heartbeat**
+(`RunnerHub.requestCancel` → `heartbeat_job {cancelled}` → an `AbortSignal` down runner-loop→`runLeasedJob`→`runCase`
+→ `compute.dispose()` = `docker rm -f` / process-group kill). Terminal → 409, cross-workspace/missing → 404. See `docs/scorecards.md`.
 
 ## Scoring model — Grader-only (recently consolidated — IMPORTANT)
 Scoring is unified to **Graders**. There is no separate "scorer", and the **Metric(threshold) entity is

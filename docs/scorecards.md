@@ -67,6 +67,7 @@ Migrations: `packages/db/migrations/0006_create_scorecards.sql`, `0035_add_score
 | HTTP route | MCP tool | Action |
 |---|---|---|
 | `POST /scorecards` `{dataset, harness, judges?, runtime?, concurrency?, cases?{ids,tags,limit}}` → 202 | `run_scorecard` | `scorecards:run` (member+) |
+| `POST /scorecards/:id/cancel` → 200 (the cancelled record) | `cancel_scorecard` | `scorecards:run` (member+) |
 | `POST /scorecards/ingest` `{dataset, harness, traces[], judges?}` → 202 | `ingest_scorecard` | `scorecards:run` (member+) |
 | `POST /scorecards/ingest/pull` `{dataset, harness, source{kind,endpoint,authSecret?}, runs[], judges?}` → 202 | `pull_scorecard` | `scorecards:run` (member+) |
 | `GET /scorecards` (summary only) | `list_scorecards` | `scorecards:read` (viewer+) |
@@ -81,6 +82,30 @@ Optional `judges:[{id,version?}]` applies registered **Agent Judges** to each ca
 judged as soon as it completes (bounded case-axis parallelism, deterministic per-case judge order), overlapping
 the LLM-bound judge phase with dispatch; the `judges` step after dispatch is just the join of remaining tasks.
 See `docs/judges.md` + `docs/architecture/streaming-case-pipeline.md`.
+
+### Stopping a running scorecard (`POST /scorecards/:id/cancel`)
+A user (or agent, via MCP) can **stop** a queued/running batch — `ScorecardService.cancel`. It reuses the
+supersede machinery (a batch is a `running` aggregate with a live driver), so cancel and the CI-fired supersede
+share one `stopInFlight` helper. The steps:
+1. **Mark `cancelled`** — a new terminal `ScorecardStatus` (domain `ScorecardBatch.cancel`, guard `canCancel`). Like
+   `superseded`, it is neither success nor failure, so baseline/diff/leaderboard/trend (which positively filter
+   `status === "succeeded"`) ignore it. Marked FIRST so the track loop's abort branch settles it as cancelled
+   (`settleAborted` preserves the pre-set aborted status) rather than reviving it. A terminal batch → `409` (the
+   domain rejects the transition); another workspace's / a missing id → `404` (no existence leak).
+2. **Stop the live work** (`stopInFlight`): cooperative `AbortSignal` so `runSuite` fires no more cases; cancel a
+   Temporal-owned workflow; drop still-queued scheduler entries (`cancelQueued`) **and** self-hosted lease jobs
+   (`cancelLeased`); force-kill the already-fired **managed** backend jobs (`killCase` → Nomad alloc-stop / K8s
+   Job-delete) so a 601-case batch stops burning cluster compute.
+3. **Free the runtime mid-case** — the self-hosted path: `cancelLeased` = `RunnerHub.requestCancel`, which rejects
+   the parked/leased dispatch (the batch settles without waiting on the runner) and marks the lease
+   `cancelRequested`; the runner learns of it on its next `heartbeat_job` reply (`{cancelled:true}`), aborts the
+   in-flight run (an `AbortSignal` threaded runner-loop → `runLeasedJob` → `runAgentJob` → `runCase`), and disposes
+   the compute — `docker rm -f` for a containerised case, or a process-group kill for host-native `LocalDriver` — so
+   the work actually stops on the machine. (Latency = one heartbeat interval.) For a **service-topology** run the
+   same `AbortSignal` threads into `ServiceTopologyBackend.dispatch` → the front-door driver: the in-flight
+   submit/poll/stream/callback is aborted mid-flight (`CANCELLED`, freeing the held socket) instead of draining the
+   topology run to completion, and the `dispatch` finally tears down the per-case browser (the shared warm services
+   stay — they belong to other cases).
 
 ### Trace ingestion (`POST /scorecards/ingest`)
 The "already-executed traces" path: produce a scorecard from **externally-run traces without dispatching a harness**.
