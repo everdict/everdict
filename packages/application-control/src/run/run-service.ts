@@ -113,6 +113,11 @@ export interface RunServiceDeps {
     runtimeList: string | undefined,
     runId: string,
   ) => Promise<string | undefined>;
+  // Latest live-screen frame PUSHED by a self-hosted runner (report_case_screen), by CP-minted runId. base64 PNG (no
+  // data: prefix) or undefined. Takes precedence over the env-kind pull paths: a self-hosted container is unreachable
+  // from the control plane, so a self-driven-browser command harness (e.g. browser-use, env.kind "prompt") relies on
+  // the runner pushing frames rather than the CP pulling them.
+  liveFrame?: (runId: string) => string | undefined;
   // One-shot exec inside the case's live sandbox (observability ④ web terminal / ⑤ screen capture). Resolves the
   // run's runtime to a live backend and runs `sh -c command`. undefined = no live container.
   execInSandbox?: (
@@ -226,13 +231,19 @@ export class RunService {
   ): Promise<{ record: RunRecord; dataUrl: string | undefined; supported: boolean } | undefined> {
     const record = await this.deps.store.get(id);
     if (!record) return undefined;
+    // CP-minted correlation id — the same derivation the dispatch stamps on AgentJob.runId (evd-run-<id> for a single
+    // run, evd-<batchId>-<caseId> for a scorecard child). Shared by the pushed-frame lookup and the CDP pull below.
+    const runId = record.parentScorecardId
+      ? `evd-${record.parentScorecardId}-${record.caseId}`
+      : `evd-run-${record.id}`;
+    // Pushed frame (self-hosted runner) wins — the control plane can't reach a self-hosted container to pull one. This
+    // is how a browser-use command harness (env.kind "prompt", self-driven Chromium) surfaces its live screen.
+    const pushed = this.deps.liveFrame?.(runId);
+    if (pushed) return { record, dataUrl: `data:image/png;base64,${pushed}`, supported: true };
     const env = record.caseSpec?.env;
     // browser (topology) — capture the per-case browser via CDP, keyed by the CP-minted runId derivable from the record.
     if (env?.kind === "browser") {
       if (!this.deps.captureBrowserScreen) return { record, dataUrl: undefined, supported: false };
-      const runId = record.parentScorecardId
-        ? `evd-${record.parentScorecardId}-${record.caseId}`
-        : `evd-run-${record.id}`;
       const b64 = await this.deps.captureBrowserScreen(record.tenant, record.runtime, runId).catch(() => undefined);
       return { record, dataUrl: b64 ? `data:image/png;base64,${b64}` : undefined, supported: true };
     }

@@ -1394,7 +1394,7 @@ describe("API — sandbox exec + live screen (observability ④/⑤)", () => {
       url: `/runs/${os.id}/screen`,
       headers: { "x-everdict-tenant": "acme" },
     });
-    expect(res.json()).toEqual({ supported: true, found: true, dataUrl: `data:image/png;base64,${png1x1}` });
+    expect(res.json()).toMatchObject({ supported: true, found: true, dataUrl: `data:image/png;base64,${png1x1}` });
 
     const repo = await svc.submit({ tenant: "acme", harness: { id: "s", version: "0" }, case: CASE2 });
     const res2 = await app.inject({

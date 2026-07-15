@@ -38,6 +38,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { describe, expect, it } from "vitest";
 import { persistentBudget } from "./common/budget-tracker.js";
+import { LiveFrameStore } from "./common/live-frame-store.js";
 import { BundleService } from "./core/bundle/bundle-service.js";
 import { githubAppGateway } from "./infrastructure/github/app-gateway.js";
 import { buildMcpServer } from "./mcp.js";
@@ -199,6 +200,32 @@ describe("MCP — budget tools", () => {
     expect(get.isError).toBeFalsy();
     const set = await member.callTool({ name: "set_budget_limit", arguments: { runs: 1 } });
     expect(set.isError).toBe(true);
+  });
+});
+
+describe("MCP — live screen (report_case_screen)", () => {
+  const withFrames = (frames: LiveFrameStore) => ({ ...harness(), liveFrames: frames });
+
+  it("a runner pushes a frame; it is stored under the run id (served later by RunService.screen())", async () => {
+    const frames = new LiveFrameStore();
+    const runner = await connectRunner(withFrames(frames), "laptop");
+    const res = await runner.callTool({
+      name: "report_case_screen",
+      arguments: { runId: "evd-run-42", frame: "AAAAframe" },
+    });
+    expect(res.isError).toBeFalsy();
+    expect(frames.get("evd-run-42")?.frameBase64).toBe("AAAAframe");
+  });
+
+  it("regular (non-runner) credentials cannot push a frame — FORBIDDEN", async () => {
+    const frames = new LiveFrameStore();
+    const admin = await connect(withFrames(frames), ["admin"]); // via=oidc, no runnerId
+    const res = await admin.callTool({
+      name: "report_case_screen",
+      arguments: { runId: "evd-run-42", frame: "AAAA" },
+    });
+    expect(res.isError).toBe(true);
+    expect(frames.get("evd-run-42")).toBeUndefined();
   });
 });
 

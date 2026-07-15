@@ -31,6 +31,7 @@ import type {
 } from "@everdict/registry";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { BudgetAdmin } from "../common/budget-tracker.js";
+import type { LiveFrameStore } from "../common/live-frame-store.js";
 import type { BenchmarkService } from "../core/benchmark/benchmark-service.js";
 import type { BundleService } from "../core/bundle/bundle-service.js";
 import type { RuntimeProbeResult } from "../core/ops/runtime-probe.js";
@@ -65,6 +66,7 @@ export interface McpDeps {
   notificationService?: NotificationService; // personal notification feed (bell inbox) — list/read (self-scoped)
   commentService?: CommentService; // resource comments (datasets, etc.) — list/create/delete
   runnerHub?: RunnerHub; // runner lease hub — lease_job/submit_job_result/fail_job/heartbeat_job (runner token only)
+  liveFrames?: LiveFrameStore; // latest live-screen frame per run, pushed by a self-hosted runner (report_case_screen)
   settingsStore?: WorkspaceSettingsStore;
   benchmarkService?: BenchmarkService; // benchmark preview + import (source → dataset)
   bundleService?: BundleService; // bundle one-shot apply (harness + benchmark + runtime, etc.)

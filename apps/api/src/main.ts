@@ -1,3 +1,4 @@
+import { LiveFrameStore } from "./common/live-frame-store.js";
 import { TerminalTicketStore } from "./common/terminal-ticket.js";
 import { buildAuthenticator } from "./composition/authenticator.js";
 import { buildDispatch } from "./composition/dispatch.js";
@@ -152,6 +153,8 @@ async function main(): Promise<void> {
     resolveRuntime: (tenant, id) => runtimeRegistry.get(tenant, id),
   });
 
+  // Latest live-screen frame per run, pushed by a self-hosted runner (report_case_screen) → served by RunService.screen().
+  const liveFrames = new LiveFrameStore();
   const { service, judgeRunner } = buildRun({
     store,
     meteredDispatcher,
@@ -170,6 +173,7 @@ async function main(): Promise<void> {
     envMeterPolicy,
     preflightPlacement,
     readers: { readCaseLogsFn, execInSandboxFn, captureBrowserScreenFn, openTerminalStreamFn },
+    liveFrames,
   });
 
   const scorecardService = buildScorecard({
@@ -177,6 +181,7 @@ async function main(): Promise<void> {
     runStore: store,
     meteredDispatcher,
     scheduler,
+    runnerHub,
     breaker,
     metrics,
     settingsStore,
@@ -236,6 +241,7 @@ async function main(): Promise<void> {
   const terminalTickets = new TerminalTicketStore();
   const app = buildServer({
     terminalTickets,
+    liveFrames, // live-screen frames pushed by self-hosted runners (report_case_screen MCP tool)
     service,
     scorecardService,
     metrics, // GET /metrics (Prometheus text) — unauthenticated; deployments firewall the scrape path

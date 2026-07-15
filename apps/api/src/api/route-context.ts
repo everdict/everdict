@@ -84,6 +84,7 @@ import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest }
 import { WebSocketServer } from "ws";
 import type { z } from "zod";
 import { type BudgetAdmin, BudgetLimitInputSchema } from "../common/budget-tracker.js";
+import type { LiveFrameStore } from "../common/live-frame-store.js";
 import type { TerminalTicketStore } from "../common/terminal-ticket.js";
 import {
   BenchmarkImportBodySchema,
@@ -147,6 +148,7 @@ export interface ServerDeps {
   logLevel?: string; // pino log level (info/debug/warn/…). Absent = logging disabled (silent tests). main injects it via EVERDICT_LOG_LEVEL.
   callbackSink?: CallbackSink; // inbound receiver for the front-door callback completion model (/frontdoor-callback disabled if absent)
   terminalTickets?: TerminalTicketStore; // WS terminal (observability ⑥) — mints/consumes short-lived tickets (WS routes disabled if absent)
+  liveFrames?: LiveFrameStore; // live-screen frames pushed by a self-hosted runner (report_case_screen) — served by RunService.screen()
 }
 
 // Resolve identity (subject + default workspace + roles): Bearer (JWT or ak_) → Authenticator. Unauthenticated dev = header workspace + admin.

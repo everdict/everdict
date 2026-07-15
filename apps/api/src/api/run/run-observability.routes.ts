@@ -108,7 +108,13 @@ export function registerRunObservabilityRoutes(app: FastifyInstance, deps: Serve
           return reply
             .code(403)
             .send({ code: "FORBIDDEN", message: "only the run's creator or an admin can view the screen." });
-        return reply.send({ supported: out.supported, found: out.dataUrl !== undefined, dataUrl: out.dataUrl ?? "" });
+        // status lets the client stop polling once the run is terminal (a live screen only exists while it runs).
+        return reply.send({
+          status: out.record.status,
+          supported: out.supported,
+          found: out.dataUrl !== undefined,
+          dataUrl: out.dataUrl ?? "",
+        });
       } catch (err) {
         return sendError(reply, err);
       }

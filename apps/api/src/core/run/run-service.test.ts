@@ -577,6 +577,58 @@ describe("RunService.screen — browser (topology) live frame (observability ⑦
     const out = await svc.screen(rec.id);
     expect(out).toMatchObject({ supported: true, dataUrl: undefined });
   });
+
+  it("serves a frame PUSHED by a self-hosted runner for a run whose env has no single-container screen (browser-use)", async () => {
+    const store = new InMemoryRunStore();
+    const frames = new Map<string, string>();
+    const svc = new RunService({
+      dispatcher: okDispatcher,
+      store,
+      newId: ids,
+      liveFrame: (runId) => frames.get(runId),
+    });
+    const promptCase: EvalCase = {
+      id: "p1",
+      env: { kind: "prompt" },
+      task: "t",
+      graders: [],
+      timeoutSec: 60,
+      tags: [],
+    };
+    const rec = await svc.submit({
+      tenant: "t",
+      harness: { id: "s", version: "0" },
+      case: promptCase,
+      runtime: "self:x",
+    });
+    await store.update(rec.id, { status: "running" });
+    // env.kind "prompt" has no CDP/scrot capture path → not supported until the runner pushes a frame.
+    expect((await svc.screen(rec.id))?.supported).toBe(false);
+    frames.set(`evd-run-${rec.id}`, "PUSHEDB64"); // the runner captured + pushed a frame
+    expect(await svc.screen(rec.id)).toMatchObject({ supported: true, dataUrl: "data:image/png;base64,PUSHEDB64" });
+  });
+
+  it("a pushed frame short-circuits the env-kind CDP pull (a self-hosted container is unreachable to pull from)", async () => {
+    const store = new InMemoryRunStore();
+    const frames = new Map<string, string>();
+    let pulled = false;
+    const svc = new RunService({
+      dispatcher: okDispatcher,
+      store,
+      newId: ids,
+      liveFrame: (runId) => frames.get(runId),
+      captureBrowserScreen: async () => {
+        pulled = true;
+        return "PULLED";
+      },
+    });
+    const rec = await svc.submit({ tenant: "t", harness: { id: "s", version: "0" }, case: browserCase, runtime: "rt" });
+    await store.update(rec.id, { status: "running" });
+    frames.set(`evd-run-${rec.id}`, "PUSHEDB64");
+    const out = await svc.screen(rec.id);
+    expect(out?.dataUrl).toBe("data:image/png;base64,PUSHEDB64");
+    expect(pulled).toBe(false); // the pushed frame wins — the CDP pull is never attempted
+  });
 });
 
 describe("RunService — terminal writes are domain-guarded (first terminal write wins)", () => {

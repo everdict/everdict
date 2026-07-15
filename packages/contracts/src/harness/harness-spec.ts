@@ -317,6 +317,16 @@ export const CommandTraceSpecSchema = z.discriminatedUnion("kind", [
 ]);
 export type CommandTraceSpec = z.infer<typeof CommandTraceSpecSchema>;
 
+// Live in-run screen capture declaration — an opt-in for command harnesses that drive a browser/GUI inside their own
+// container (e.g. browser-use's headless Chromium). When present, the self-hosted runner execs `captureCmd` in the case
+// container every ~intervalMs and pushes the base64 PNG frame to the control plane, so the run detail page can render
+// the live screen. `captureCmd` MUST print a base64 PNG to stdout and exit 0. Absent = no live screen (default).
+export const LiveScreenSpecSchema = z.object({
+  captureCmd: z.string(), // exec'd in the case container; prints a base64 PNG to stdout (exit 0)
+  intervalMs: z.number().int().positive().optional(), // capture cadence in ms (default 2000)
+});
+export type LiveScreenSpec = z.infer<typeof LiveScreenSpecSchema>;
+
 // command harness: a declarative process — register any CLI agent (aider etc.) with just a spec, no code adapter.
 // setup (install) → run command (template {{task}}/{{model}}/{{run_id}}) → extract trace (none/otel/mlflow).
 // The generic CommandHarness (@everdict/harnesses) interprets it. Since it runs arbitrary code, trust-zone isolation is enforced.
@@ -342,6 +352,8 @@ export const CommandHarnessSpecSchema = z.object({
   // The channel by which a variation of the same template (an instance's overrides.params) changes CLI flags. Values are not shell-escaped (author-trusted, same as {{model}}).
   params: z.record(z.string()).default({}),
   trace: CommandTraceSpecSchema.default({ kind: "none" }),
+  // Opt-in live in-run screen capture (self-driven browser/GUI in the case container — e.g. browser-use over CDP).
+  liveScreen: LiveScreenSpecSchema.optional(),
 });
 export type CommandHarnessSpec = z.infer<typeof CommandHarnessSpecSchema>;
 

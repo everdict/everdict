@@ -6,6 +6,7 @@ import {
   EnvValueSchema,
   FrontDoorSpecSchema,
   type HarnessSpec,
+  LiveScreenSpecSchema,
   ProcessHarnessSpecSchema,
   ServiceHarnessSpecSchema,
   ServiceReadinessSchema,
@@ -60,6 +61,7 @@ export const CommandTemplateSpecSchema = z.object({
   model: z.string().optional(), // default when pins.model is absent
   params: z.record(z.string()).default({}), // {{var}} defaults (an instance's overrides.params overrides them)
   trace: CommandTraceSpecSchema.default({ kind: "none" }),
+  liveScreen: LiveScreenSpecSchema.optional(), // opt-in live in-run screen capture (self-driven browser/GUI in the container)
 });
 
 // --- process template --- a single process (Claude Code/Codex). Nothing to pin (template version = structure).
@@ -246,6 +248,7 @@ export function resolveHarnessInstance(template: HarnessTemplateSpec, instance: 
         ...(template.workDir !== undefined ? { workDir: template.workDir } : {}),
         ...(model !== undefined ? { model } : {}),
         ...(template.resources !== undefined ? { resources: template.resources } : {}),
+        ...(template.liveScreen !== undefined ? { liveScreen: template.liveScreen } : {}),
       });
     }
     case "process":

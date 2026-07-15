@@ -84,5 +84,27 @@ export function registerRunnerLeaseTools(server: McpServer, ctx: McpToolContext)
           return ok({ ok: true, ...(jobId ? { extended } : {}) });
         }),
     );
+    // Live screen: for a command harness that declares liveScreen (e.g. browser-use's headless Chromium), the runner
+    // captures a frame in the case container and pushes it here so the run detail page can show the live screen. A
+    // self-hosted container is unreachable from the control plane, so the frame is PUSHED (not pulled). Keyed by the
+    // CP-minted runId; the store serves the latest frame from RunService.screen(). Runner token only, best-effort.
+    if (deps.liveFrames) {
+      const frames = deps.liveFrames;
+      server.registerTool(
+        "report_case_screen",
+        {
+          description:
+            "Push the latest live-screen frame (base64 PNG) for a running case, keyed by its runId — the run detail page serves it as the live screen. Only meaningful for a harness that declares liveScreen; best-effort (drop failures).",
+          inputSchema: { runId: z.string().min(1), frame: z.string().min(1).max(12_000_000) },
+        },
+        ({ runId, frame }) =>
+          plain(async () => {
+            const key = runnerKey();
+            if (!key) return fail(NEED_RUNNER);
+            frames.put(runId, frame);
+            return ok({ ok: true });
+          }),
+      );
+    }
   }
 }
