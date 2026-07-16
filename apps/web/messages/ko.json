@@ -1613,7 +1613,7 @@
     "providerLabel": "프로바이더",
     "modelLabel": "모델",
     "modelPickerPlaceholder": "등록된 모델 선택",
-    "modelPickerHint": "이 워크스페이스에 등록된 모델에서 골라요.",
+    "modelPickerHint": "등록된 모델을 고르면 저지가 그 모델을 참조해요 — 엔드포인트·키는 실행 시점에 해석돼요.",
     "modelNoneHint": "등록된 모델이 없어요. 직접 입력하거나",
     "registerModelCta": "모델을 등록하세요",
     "harnessIdLabel": "하니스 ID",

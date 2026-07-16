@@ -203,6 +203,69 @@ describe("defaultJudgeRunner", () => {
     expect(score?.detail).toContain("ANTHROPIC_API_KEY secret not configured");
   });
 
+  it("model as an explicit ModelRef {ref}: resolves the registered model's baseUrl + underlying model + params + linked key", async () => {
+    const models = new InMemoryModelRegistry();
+    await models.register("acme", {
+      id: "team-opus",
+      version: "1.0.0",
+      provider: "anthropic",
+      model: "claude-opus-4-8",
+      baseUrl: "https://litellm.acme.internal",
+      apiKeySecret: "MY_JUDGE_KEY",
+      params: { maxTokens: 2048 },
+      tags: [],
+    });
+    const fetchImpl = vi.fn((_u: string, _i?: RequestInit) =>
+      Promise.resolve(
+        new Response(JSON.stringify({ content: [{ text: '{"pass":true,"score":0.9,"reason":"ok"}' }] }), { status: 200 }),
+      ),
+    );
+    const runner = defaultJudgeRunner({
+      secretsFor: async () => ({ MY_JUDGE_KEY: "sk-team" }), // ONLY the model's linked key (provider default absent)
+      models,
+      fetchImpl: fetchImpl as typeof fetch,
+    });
+    const [score] = await runner.run({ ...modelSpec, model: { ref: "team-opus" } }, "acme", ctx);
+    expect(score).toMatchObject({ metric: "judge:correctness", value: 0.9, pass: true });
+    const [url, init] = fetchImpl.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("https://litellm.acme.internal/v1/messages"); // the model's baseUrl, not the provider default
+    const body = JSON.parse(String(init.body));
+    expect(body.model).toBe("claude-opus-4-8"); // the underlying model, not the ref id "team-opus"
+    expect(body.max_tokens).toBe(2048); // model.params honored
+  });
+
+  it("model as an explicit ModelRef {ref} that is not registered: visible skip, never sent as a literal model name", async () => {
+    const models = new InMemoryModelRegistry();
+    const fetchImpl = vi.fn();
+    const runner = defaultJudgeRunner({
+      secretsFor: async () => ({ ANTHROPIC_API_KEY: "sk" }), // provider default key IS set — a raw string would still call
+      models,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    const [score] = await runner.run({ ...modelSpec, model: { ref: "ghost" } }, "acme", ctx);
+    expect(score?.detail).toContain("not a registered model");
+    expect(fetchImpl).not.toHaveBeenCalled(); // an explicit ref MUST resolve — no provider call
+  });
+
+  it("model as a ModelRef with a pinned version: resolves that exact version, not latest", async () => {
+    const models = new InMemoryModelRegistry();
+    await models.register("acme", { id: "team", version: "1.0.0", provider: "anthropic", model: "claude-opus-4-8", tags: [] });
+    await models.register("acme", { id: "team", version: "2.0.0", provider: "anthropic", model: "claude-next", tags: [] });
+    const fetchImpl = vi.fn((_u: string, _i?: RequestInit) =>
+      Promise.resolve(
+        new Response(JSON.stringify({ content: [{ text: '{"pass":true,"score":1,"reason":"ok"}' }] }), { status: 200 }),
+      ),
+    );
+    const runner = defaultJudgeRunner({
+      secretsFor: async () => ({ ANTHROPIC_API_KEY: "sk" }),
+      models,
+      fetchImpl: fetchImpl as typeof fetch,
+    });
+    await runner.run({ ...modelSpec, model: { ref: "team", version: "1.0.0" } }, "acme", ctx);
+    const [, init] = fetchImpl.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(String(init.body)).model).toBe("claude-opus-4-8"); // v1.0.0's model, not v2's "claude-next"
+  });
+
   it("harness kind + dispatch: spins up the referenced agent and extracts the verdict from its trace", async () => {
     const result: CaseResult = {
       caseId: "judge",

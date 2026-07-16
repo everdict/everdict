@@ -8,11 +8,12 @@ import type {
   HarnessSpec,
   JudgeCriterion,
   JudgeSpec,
+  ModelSpec,
   Placement,
   Score,
 } from "@everdict/contracts";
 import { toScores } from "@everdict/contracts";
-import { modelApiKeySecretName } from "@everdict/domain";
+import { modelApiKeySecretName, normalizeModelBinding } from "@everdict/domain";
 import {
   type JudgeCompletion,
   JudgeGrader,
@@ -167,24 +168,37 @@ export function defaultJudgeRunner(deps: DefaultJudgeRunnerDeps): JudgeRunner {
         } catch (err) {
           return skip(spec, `secret decryption failed: ${err instanceof Error ? err.message : String(err)}`);
         }
-        // If judge.model is a registered model id, resolve it via that spec (provider/underlying model/baseUrl + apiKeySecret) — else use the raw model string.
+        // judge.model is a Model BINDING (registered id/ref | raw string). Resolve a registered Model exactly like a
+        // harness does: its provider/underlying model/baseUrl/apiKeySecret + params carry the whole connection, so one
+        // model definition is the single source of "what to call + how to authenticate" everywhere it's referenced.
+        // A bare string that is not a registered id stays a raw model name (provider-default key, back-compat); an
+        // EXPLICIT ref that can't resolve is a visible skip — never silently sent to the provider as a literal model name.
+        const { ref, version } = normalizeModelBinding(spec.model);
+        const explicitRef = typeof spec.model !== "string";
         let provider: "anthropic" | "openai" = spec.provider;
-        let model = spec.model;
+        let model = ref;
         let modelBaseUrl: string | undefined;
-        // The secret NAME holding this judge's API key: a registered model's apiKeySecret (honored like a harness model
-        // binding), else the provider default (ANTHROPIC_API_KEY/OPENAI_API_KEY). Keeps the judge consistent with the
-        // agent-server binding — one model definition carries its own key everywhere it's referenced.
+        let maxTokens: number | undefined;
         let keyName = provider === "anthropic" ? ANTHROPIC_KEY : OPENAI_KEY;
+        let resolvedModel: ModelSpec | undefined;
         if (deps.models) {
           try {
-            const m = await deps.models.get(tenant, spec.model, "latest");
-            provider = m.provider;
-            model = m.model;
-            modelBaseUrl = m.baseUrl;
-            keyName = modelApiKeySecretName(m);
+            resolvedModel = await deps.models.get(tenant, ref, version);
           } catch {
-            // Not a registered model id → use spec.model as a raw model string with the provider-default key.
+            resolvedModel = undefined; // not a registered id
           }
+        }
+        if (resolvedModel) {
+          provider = resolvedModel.provider;
+          model = resolvedModel.model;
+          modelBaseUrl = resolvedModel.baseUrl;
+          maxTokens = resolvedModel.params?.maxTokens;
+          keyName = modelApiKeySecretName(resolvedModel);
+        } else if (explicitRef) {
+          return skip(
+            spec,
+            `model '${ref}${version === "latest" ? "" : `@${version}`}' is not a registered model in this workspace`,
+          );
         }
         if (provider === "anthropic") {
           const apiKey = secrets[keyName];
@@ -194,6 +208,7 @@ export function defaultJudgeRunner(deps: DefaultJudgeRunnerDeps): JudgeRunner {
             apiKey,
             model,
             ...(baseUrl ? { baseUrl } : {}),
+            ...(maxTokens ? { maxTokens } : {}),
             ...(deps.fetchImpl ? { fetchImpl: deps.fetchImpl } : {}),
           });
         } else {
@@ -204,6 +219,7 @@ export function defaultJudgeRunner(deps: DefaultJudgeRunnerDeps): JudgeRunner {
             apiKey,
             model,
             ...(baseUrl ? { baseUrl } : {}),
+            ...(maxTokens ? { maxTokens } : {}),
             ...(deps.fetchImpl ? { fetchImpl: deps.fetchImpl } : {}),
           });
         }

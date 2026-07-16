@@ -130,11 +130,14 @@ export function RegisterJudgeForm({
       tags: [] as string[],
     }
     if (kind === 'model') {
+      // A picked registered model → a ModelRef {ref:id} (its connection resolves at judge-run time); a free-typed
+      // value that isn't a registered id stays a raw model string (provider + provider-default key).
+      const picked = models.find((m) => m.id === model.trim())
       return {
         ...common,
         kind: 'model',
         provider,
-        model: model.trim(),
+        model: picked ? { ref: picked.id } : model.trim(),
         rubric,
         inputs,
         ...(passThreshold.trim() ? { passThreshold: Number(passThreshold) } : {}),
@@ -193,11 +196,9 @@ export function RegisterJudgeForm({
 
   const busy = validating || saving
   const rubricRequired = kind === 'model'
-  // Registered models for the currently-selected provider (de-duped by the underlying model string; id ≠ model).
-  // Selecting one fills the judge's `model` field with that provider model string — the provider key still authenticates the call.
-  const providerModels = Array.from(
-    new Map(models.filter((m) => m.provider === provider).map((m) => [m.model, m])).values()
-  )
+  // Registered models for the currently-selected provider. Picking one references it by id (a ModelRef) — its whole
+  // connection (underlying model / baseUrl / apiKeySecret) resolves from that one definition at judge-run time.
+  const providerModels = models.filter((m) => m.provider === provider)
 
   return (
     <div className="max-w-2xl space-y-6">
@@ -258,7 +259,7 @@ export function RegisterJudgeForm({
                 value={model}
                 onChange={setModel}
                 placeholder={t('modelPickerPlaceholder')}
-                options={providerModels.map((m) => ({ value: m.model, label: m.id, hint: m.model }))}
+                options={providerModels.map((m) => ({ value: m.id, label: m.id, hint: m.model }))}
                 aria-label={t('modelLabel')}
               />
             ) : (
@@ -276,7 +277,7 @@ export function RegisterJudgeForm({
                 <>
                   {t('modelNoneHint')}{' '}
                   <Link
-                    href={`/${workspace}/settings?tab=models`}
+                    href={`/${workspace}/settings/models`}
                     className="font-[510] text-foreground underline underline-offset-2"
                   >
                     {t('registerModelCta')}

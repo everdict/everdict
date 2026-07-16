@@ -3,7 +3,13 @@ import { redirect } from 'next/navigation'
 import { ChevronLeft, GitCompare } from 'lucide-react'
 import { getTranslations } from 'next-intl/server'
 
-import { isRubricRef, judgeSpecSchema, judgesSchema, type JudgeSpec } from '@/entities/judge'
+import {
+  isRubricRef,
+  judgeModelLabel,
+  judgeSpecSchema,
+  judgesSchema,
+  type JudgeSpec,
+} from '@/entities/judge'
 import { authContext } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
 import { sortSemverDesc } from '@/shared/lib/semver'
@@ -99,7 +105,9 @@ export default async function JudgeDetailPage({
           <span className="font-mono text-[12px] text-faint">
             {t('latestVersion', { version: judge.version })}
           </span>
-          {judge.kind === 'model' && judge.model && <ModelChip>{judge.model}</ModelChip>}
+          {judge.kind === 'model' && judge.model && (
+            <ModelChip>{judgeModelLabel(judge.model)}</ModelChip>
+          )}
           {judge.kind === 'model' && judge.provider && (
             <code className="rounded border border-border bg-muted/40 px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground">
               {judge.provider}

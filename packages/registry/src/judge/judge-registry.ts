@@ -1,4 +1,5 @@
 import type { JudgeSpec } from "@everdict/contracts";
+import { modelBindingLabel } from "@everdict/domain";
 import { VersionedStore } from "../versioned-store.js";
 
 // The registry port + its list-entry type live in @everdict/application-control; this InMemory impl `implements`
@@ -11,12 +12,15 @@ export function judgeDerived(
   spec: JudgeSpec,
 ): Pick<JudgeListEntry, "kind" | "provider" | "model" | "description" | "subtitle"> {
   if (spec.kind === "model") {
+    // model is a Model binding — its label is the registered-model id/ref or the raw model string (resolution to the
+    // underlying model happens at judge-run time; the list shows the reference the judge declares).
+    const modelLabel = modelBindingLabel(spec.model);
     return {
       kind: "model",
       provider: spec.provider,
-      model: spec.model,
+      ...(modelLabel !== undefined ? { model: modelLabel } : {}),
       ...(spec.description !== undefined ? { description: spec.description } : {}),
-      subtitle: `${spec.provider}/${spec.model}`,
+      subtitle: `${spec.provider}/${modelLabel ?? "?"}`,
     };
   }
   return {

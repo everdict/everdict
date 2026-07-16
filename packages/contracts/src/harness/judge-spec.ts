@@ -4,6 +4,7 @@ import { z } from "zod";
 // Two forms: model (a function that calls an LLM/VLM directly) | harness (delegate the verdict to a registered harness agent).
 // Execution is done by the control plane over a trace (next increment) — this contract only declares "what renders the verdict".
 
+import { ModelBindingSchema } from "./model-spec.js";
 import { JudgeCriterionSchema, RubricRefSchema, VERDICT_INSTRUCTION_PLACEHOLDER } from "./rubric-spec.js";
 
 // Verdict input modality — what the verdict is based on (trace=execution record, dom/screenshot=browser result → VLM).
@@ -24,8 +25,11 @@ export const ModelJudgeSpecSchema = z.object({
   id: z.string(),
   version: z.string(),
   description: z.string().optional(),
-  provider: z.enum(["anthropic", "openai"]).default("anthropic"),
-  model: z.string(), // e.g. "claude-opus-4-8"
+  provider: z.enum(["anthropic", "openai"]).default("anthropic"), // fallback provider for a RAW-STRING model; a registered-model ref derives it from the ModelSpec
+  // A registered Model reference (id string | {ref, version?, env?}) — the SAME first-class binding a harness uses. A ref
+  // resolves the workspace Model's provider/underlying model/baseUrl/apiKeySecret at judge-run time (one definition carries
+  // its own connection everywhere); a bare string that is not a registered id stays a raw model name (e.g. "claude-opus-4-8").
+  model: ModelBindingSchema,
   rubric: z.union([z.string(), RubricRefSchema]), // inline verdict criteria text OR a registered-rubric reference
   inputs: z.array(JudgeInputSchema).default(["trace"]),
   passThreshold: z.number().min(0).max(1).optional(), // overall score→pass threshold (if absent, the model decides pass directly)

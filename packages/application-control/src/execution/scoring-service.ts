@@ -7,6 +7,7 @@ import type {
   JudgeSpec,
   Placement,
 } from "@everdict/contracts";
+import { modelBindingLabel } from "@everdict/domain";
 import { createLimiter } from "../concurrency/limiter.js";
 import type { JudgeRegistry } from "../ports/judge-registry.js";
 import type { JudgeRunner } from "../ports/judge-runner.js";
@@ -116,8 +117,9 @@ export class ScoringService {
     await stream.settle();
   }
 
-  // The judge model(s) used in this scoring — distinct (sorted) of inline judge config.model + registered model-judge spec.model.
-  // For filtering/display on the leaderboard judge axis (fair comparison: same judge). Harness judges have no model, so excluded.
+  // The judge model(s) used in this scoring — distinct (sorted) of inline judge config.model + registered model-judge spec.model
+  // (a Model binding → its id/ref or raw label). For filtering/display on the leaderboard judge axis (fair comparison: same
+  // judge). Harness judges have no model, so excluded.
   async collectJudgeModels(
     tenant: string,
     judges: Array<{ id: string; version: string }>,
@@ -129,7 +131,10 @@ export class ScoringService {
       for (const sel of judges) {
         try {
           const spec = await this.deps.judges.get(tenant, sel.id, sel.version || "latest");
-          if (spec.kind === "model") models.add(spec.model);
+          if (spec.kind === "model") {
+            const label = modelBindingLabel(spec.model);
+            if (label) models.add(label);
+          }
         } catch {
           // skip a missing judge (same as applyJudges)
         }

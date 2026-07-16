@@ -1613,7 +1613,7 @@
     "providerLabel": "Provider",
     "modelLabel": "Model",
     "modelPickerPlaceholder": "Select a registered model",
-    "modelPickerHint": "Pick from your workspace's registered models.",
+    "modelPickerHint": "Pick a registered model — the judge references it, resolving its endpoint and key at run time.",
     "modelNoneHint": "No registered models. Type one, or",
     "registerModelCta": "register a model",
     "harnessIdLabel": "Harness ID",

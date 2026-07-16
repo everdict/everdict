@@ -20,6 +20,14 @@ export type JudgeRubricRef = z.infer<typeof judgeRubricRefSchema>
 export const judgeRubricSchema = z.union([z.string(), judgeRubricRefSchema])
 export type JudgeRubric = z.infer<typeof judgeRubricSchema>
 
+// A model judge's model: a raw model string OR a reference to a registered workspace Model ({ref, version?}) — the
+// SAME first-class binding a harness uses. Inline sub-shape of the JudgeSpec union (no standalone wire counterpart), so
+// it stays LOCAL. The web only DISPLAYS it (the ref id or the raw name); the connection resolves at judge-run time.
+export const judgeModelRefSchema = z.object({ ref: z.string(), version: z.string().optional() }).passthrough()
+export type JudgeModelRef = z.infer<typeof judgeModelRefSchema>
+export const judgeModelSchema = z.union([z.string(), judgeModelRefSchema])
+export type JudgeModel = z.infer<typeof judgeModelSchema>
+
 // Full JudgeSpec (model | harness) — DELIBERATELY LOOSE flat display mirror (the rest passthrough). Stays LOCAL,
 // NOT anchored: the contract JudgeSpec is a DISCRIMINATED UNION (model requires model/rubric; harness requires
 // harness) with per-kind required fields, whereas the web flattens every kind-specific field to optional so the
@@ -33,7 +41,7 @@ export const judgeSpecSchema = z
     description: z.string().optional(),
     // model kind
     provider: z.string().optional(),
-    model: z.string().optional(),
+    model: judgeModelSchema.optional(),
     rubric: judgeRubricSchema.optional(), // model: required (server enforces) / harness: optional
     inputs: z.array(z.string()).optional(),
     passThreshold: z.number().optional(),
@@ -48,6 +56,15 @@ export type JudgeSpec = z.infer<typeof judgeSpecSchema>
 // Narrowing helper — the two rubric shapes render differently (text block vs link chip).
 export function isRubricRef(rubric: JudgeRubric): rubric is JudgeRubricRef {
   return typeof rubric !== 'string'
+}
+
+// Narrowing + label for a judge's model binding: a registered-Model ref renders as its id; a raw string as-is.
+export function isJudgeModelRef(model: JudgeModel): model is JudgeModelRef {
+  return typeof model !== 'string'
+}
+export function judgeModelLabel(model: JudgeModel | undefined): string | undefined {
+  if (model === undefined) return undefined
+  return typeof model === 'string' ? model : model.ref
 }
 
 // GET /judges/:id/diff — a single leaf change (field path before → after) between two judge versions.
