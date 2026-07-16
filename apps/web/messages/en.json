@@ -1114,7 +1114,17 @@
     "saving": "Saving…",
     "update": "Update",
     "register": "Register",
-    "cancel": "Cancel"
+    "cancel": "Cancel",
+    "testConnection": "Test connection",
+    "testing": "Testing…",
+    "probeConnected": "Connected",
+    "mustTest": "Test the connection to enable Save",
+    "probeAuthFailed": "Authentication failed — check the secret.",
+    "probeUnreachable": "Unreachable — check the base URL.",
+    "probeError": "Connection error.",
+    "scopeSelectLabel": "Select scope",
+    "scopeEmpty": "This platform returned nothing to select here — cannot register.",
+    "scopeNone": "None"
   },
   "manageTraceSource": {
     "notSelected": "Not selected",
@@ -1158,7 +1168,17 @@
     "saving": "Saving…",
     "update": "Update",
     "register": "Register",
-    "cancel": "Cancel"
+    "cancel": "Cancel",
+    "testConnection": "Test connection",
+    "testing": "Testing…",
+    "probeConnected": "Connected",
+    "mustTest": "Test the connection to enable Save",
+    "probeAuthFailed": "Authentication failed — check the secret.",
+    "probeUnreachable": "Unreachable — check the base URL.",
+    "probeError": "Connection error.",
+    "scopeSelectLabel": "Select scope",
+    "scopeEmpty": "This platform returned nothing to select here — cannot register.",
+    "scopeNone": "None"
   },
   "manageWorkspaceRunners": {
     "title": "Shared runners",
@@ -1669,7 +1689,9 @@
     "validateNewVersion": "(new version)",
     "validateExisting": "Existing versions: {versions}",
     "validateNone": "none",
-    "validateConflictNote": "Identical content is a no-op; different content is rejected with 409."
+    "validateConflictNote": "Identical content is a no-op; different content is rejected with 409.",
+    "requiresHeading": "Required evidence",
+    "requiresSubtitle": "Declare what this judge needs from a run. The preview checks it against a sample trace."
   },
   "judgePreview": {
     "heading": "Preview",
@@ -1687,7 +1709,11 @@
     "absent": "absent",
     "truncated": "truncated",
     "requirements": "Required evidence",
-    "renderedPrompt": "Rendered prompt"
+    "renderedPrompt": "Rendered prompt",
+    "tryButton": "Run once",
+    "tryHint": "Runs the judge on this one case (uses a model call).",
+    "scores": "Scores",
+    "noScores": "No scores were produced."
   },
   "registerRubric": {
     "idLabel": "ID",
@@ -2494,5 +2520,18 @@
     "closed": "Disconnected",
     "hint": "Interactive shell into the running sandbox (cd · env persist)",
     "placeholder": "Type a command, then Enter"
+  },
+  "judgeRequires": {
+    "kind_final_answer": "Final answer",
+    "kind_tool_call": "Tool call",
+    "kind_dom": "Browser DOM",
+    "kind_screenshot": "Screenshot",
+    "kind_artifact": "Artifact",
+    "kind_span": "Span",
+    "namePlaceholder": "name (optional)",
+    "rolePlaceholder": "role (optional)",
+    "add": "Add",
+    "remove": "Remove",
+    "empty": "No required evidence declared."
   }
 }
