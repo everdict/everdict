@@ -2,25 +2,20 @@
 
 import { useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
+import { X } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 import { Controller, useForm } from 'react-hook-form'
 
-import { sortSemverDesc } from '@/shared/lib/semver'
+import { CapabilityBadge, capabilityFit, CapabilityFitNote } from '@/entities/runtime'
+import { versionOptions } from '@/shared/lib/version-options'
 import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
 import { Combobox, type ComboboxOption } from '@/shared/ui/combobox'
 import { FieldError, Input, Label } from '@/shared/ui/input'
+import { InfoTip } from '@/shared/ui/tooltip'
 
 import { createScheduleAction } from '../api/create-schedule'
 import { updateScheduleAction } from '../api/update-schedule'
-
-function versionOptions(versions: string[]): ComboboxOption[] {
-  const sorted = sortSemverDesc(versions)
-  return [
-    { value: 'latest', label: 'latest', hint: sorted[0] ? `→ ${sorted[0]}` : undefined },
-    ...sorted.map((v) => ({ value: v })),
-  ]
-}
 
 // cron presets — common cadences in one click instead of raw entry. Direct editing is also possible (input below).
 const CRON_PRESETS: { labelKey: string; value: string }[] = [
@@ -40,23 +35,39 @@ interface Values {
   datasetVersion: string
   harnessId: string
   harnessVersion: string
+  judgeIds: string[] // Agent Judges to score each fire's traces → judge:<id> metrics (empty = control-plane default scoring).
   runtime: string
   concurrency: string
+  trials: string // pass@k / flakiness — run each case N times per fire (empty = 1). Parsed on submit.
+  caseLimit: string // partial run — only the first N (empty = all). Parsed on submit.
+  caseTags: string // partial run — tag filter (comma-separated, any-match; empty = all)
 }
 
 // Create/edit a schedule that runs dataset×harness periodically via cron. Firing/interpretation is done by the control plane (Temporal Schedule).
-// If scheduleId is present, it's edit mode (PATCH) — prefill from initial, preserve existing judges via initialJudges.
+// If scheduleId is present, it's edit mode (PATCH) — prefill from initial + initialJudges. The firing run mirrors a one-off scorecard's config.
 export function CreateScheduleForm({
   datasets,
   harnesses,
   runtimes,
+  judges = [],
+  runners = [],
+  hasWorkspaceRunners = false,
   initial,
   scheduleId,
   initialJudges = [],
 }: {
-  datasets: { id: string; versions: string[] }[]
-  harnesses: { id: string; versions: string[] }[]
-  runtimes: { id: string }[]
+  datasets: { id: string; versions: string[]; versionTags?: Record<string, string[]> }[]
+  // kind drives the runtime capability-fit preview (a service harness needs a container runtime).
+  harnesses: {
+    id: string
+    versions: string[]
+    versionTags?: Record<string, string[]>
+    kind?: string
+  }[]
+  runtimes: { id: string; capabilities?: string[] }[]
+  judges?: { id: string }[]
+  runners?: { id: string; label: string }[]
+  hasWorkspaceRunners?: boolean // Expose the self:ws pool option when team shared runners exist
   initial?: Partial<Values>
   scheduleId?: string
   initialJudges?: { id: string; version: string }[]
@@ -82,8 +93,12 @@ export function CreateScheduleForm({
       datasetVersion: 'latest',
       harnessId: harnesses[0]?.id ?? 'scripted',
       harnessVersion: 'latest',
+      judgeIds: initialJudges.map((j) => j.id),
       runtime: '',
       concurrency: '',
+      trials: '',
+      caseLimit: '',
+      caseTags: '',
       ...initial,
     },
   })
@@ -99,20 +114,37 @@ export function CreateScheduleForm({
     value: h.id,
     hint: t('versionsCount', { count: h.versions.length }),
   }))
-  const datasetVersionOptions = versionOptions(
-    datasets.find((d) => d.id === datasetId)?.versions ?? []
-  )
-  const harnessVersionOptions = versionOptions(
-    harnesses.find((h) => h.id === harnessId)?.versions ?? []
-  )
+  const datasetEntry = datasets.find((d) => d.id === datasetId)
+  const harnessEntry = harnesses.find((h) => h.id === harnessId)
+  // Drives the runtime capability-fit preview (a service/topology harness needs a container-capable runtime).
+  const harnessKind = harnessEntry?.kind
+  const datasetVersionOptions = versionOptions(datasetEntry?.versions ?? [], datasetEntry?.versionTags)
+  const harnessVersionOptions = versionOptions(harnessEntry?.versions ?? [], harnessEntry?.versionTags)
 
   async function onSubmit(values: Values) {
     setServerError(undefined)
-    const { concurrency, ...rest } = values
+    const { concurrency, trials, caseLimit, caseTags, judgeIds, ...rest } = values
     const n = Number.parseInt(concurrency, 10)
-    const input = { ...rest, ...(Number.isFinite(n) && n > 0 ? { concurrency: n } : {}) }
+    const tn = Number.parseInt(trials, 10)
+    const limit = Number.parseInt(caseLimit, 10)
+    const tags = caseTags
+      .split(',')
+      .map((x) => x.trim())
+      .filter(Boolean)
+    const cases = {
+      ...(Number.isFinite(limit) && limit > 0 ? { limit } : {}),
+      ...(tags.length > 0 ? { tags } : {}),
+    }
+    const input = {
+      ...rest,
+      // Selected judges → the API's judges:[{id,version}] (version latest); omitted when none picked.
+      judges: judgeIds.map((id) => ({ id, version: 'latest' })),
+      ...(Number.isFinite(n) && n > 0 ? { concurrency: n } : {}),
+      ...(Number.isFinite(tn) && tn > 1 ? { trials: tn } : {}),
+      ...(Object.keys(cases).length > 0 ? { cases } : {}),
+    }
     const res = scheduleId
-      ? await updateScheduleAction(scheduleId, input, initialJudges)
+      ? await updateScheduleAction(scheduleId, input)
       : await createScheduleAction(input)
     if (res.ok) router.push(`/${workspace}/schedules`)
     else setServerError(res.error ?? (scheduleId ? t('updateFailed') : t('createFailed')))
@@ -255,6 +287,57 @@ export function CreateScheduleForm({
         </div>
       </div>
 
+      {/* Agent Judges (optional) — model/harness judges that score each fire's traces; each pick aggregates as a judge:<id> metric. */}
+      <div className="space-y-1.5">
+        <div className="flex items-center gap-1">
+          <Label htmlFor="judges">{t('judgesLabel')}</Label>
+          <InfoTip content={t('judgesTip')} />
+        </div>
+        <Controller
+          control={control}
+          name="judgeIds"
+          render={({ field }) => {
+            const available = judges
+              .filter((j) => !field.value.includes(j.id))
+              .map((j) => ({ value: j.id }))
+            return (
+              <div className="space-y-2">
+                <Combobox
+                  id="judges"
+                  options={available}
+                  value=""
+                  onChange={(v) => {
+                    if (v && !field.value.includes(v)) field.onChange([...field.value, v])
+                  }}
+                  placeholder={t('judgesPlaceholder')}
+                  emptyText={t('judgesEmpty')}
+                />
+                {field.value.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5">
+                    {field.value.map((id) => (
+                      <span
+                        key={id}
+                        className="inline-flex items-center gap-1 rounded bg-secondary px-2 py-0.5 font-mono text-[12px] font-[510] text-secondary-foreground ring-1 ring-inset ring-border"
+                      >
+                        {id}
+                        <button
+                          type="button"
+                          aria-label={t('judgesRemove', { id })}
+                          onClick={() => field.onChange(field.value.filter((x) => x !== id))}
+                          className="text-faint transition-colors hover:text-destructive"
+                        >
+                          <X className="size-3" />
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )
+          }}
+        />
+      </div>
+
       <div className="grid grid-cols-2 gap-3">
         <div className="space-y-1.5">
           <Label htmlFor="overlapPolicy">{t('overlapLabel')}</Label>
@@ -288,22 +371,81 @@ export function CreateScheduleForm({
         </div>
       </div>
 
+      {/* Trials + partial run — same knobs as a one-off scorecard, so a nightly regression can pass@k / smoke-run a subset. */}
+      <div className="grid grid-cols-3 gap-3">
+        <div className="space-y-1.5">
+          <div className="flex items-center gap-1">
+            <Label htmlFor="trials">{t('trialsLabel')}</Label>
+            <InfoTip content={t('trialsTip')} />
+          </div>
+          <Input id="trials" type="number" min={1} max={100} placeholder={t('trialsPlaceholder')} {...register('trials')} />
+        </div>
+        <div className="space-y-1.5">
+          <div className="flex items-center gap-1">
+            <Label htmlFor="caseLimit">{t('caseLimitLabel')}</Label>
+            <InfoTip content={t('caseLimitTip')} />
+          </div>
+          <Input id="caseLimit" type="number" min={1} placeholder={t('caseLimitPlaceholder')} {...register('caseLimit')} />
+        </div>
+        <div className="space-y-1.5">
+          <div className="flex items-center gap-1">
+            <Label htmlFor="caseTags">{t('caseTagsLabel')}</Label>
+            <InfoTip content={t('caseTagsTip')} />
+          </div>
+          <Input id="caseTags" placeholder={t('caseTagsPlaceholder')} {...register('caseTags')} />
+        </div>
+      </div>
+
       <div className="space-y-1.5">
         <Label htmlFor="runtime">{t('runtimeLabel')}</Label>
-        {/* Runtime is required — the control-plane host fallback is disallowed (requireRuntime), so a schedule with no runtime fails 400 on every firing. */}
+        {/* Runtime is required — the control-plane host fallback is disallowed (requireRuntime), so a schedule with no runtime fails 400 on every firing. Same options as the scorecard form. */}
         <Controller
           control={control}
           name="runtime"
           rules={{ required: t('runtimeRequired') }}
           render={({ field }) => (
-            <Combobox
-              id="runtime"
-              options={runtimes.map((r) => ({ value: r.id }))}
-              value={field.value}
-              onChange={field.onChange}
-              placeholder={t('runtimePlaceholder')}
-              emptyText={t('runtimeEmpty')}
-            />
+            <>
+              <Combobox
+                id="runtime"
+                options={[
+                  // Registered runtimes — a capability-fit badge shows when there's a definite verdict for this harness.
+                  ...runtimes.map((r) => {
+                    const fit = capabilityFit(r.capabilities, harnessKind)
+                    return {
+                      value: r.id,
+                      ...(fit === 'fit' || fit === 'unfit'
+                        ? {
+                            hint: (
+                              <CapabilityBadge harnessKind={harnessKind} capabilities={r.capabilities} />
+                            ),
+                          }
+                        : {}),
+                    }
+                  }),
+                  // Team shared runner pool.
+                  ...(hasWorkspaceRunners
+                    ? [{ value: 'self:ws', label: t('poolWorkspaceLabel'), hint: t('poolWorkspaceHint') }]
+                    : []),
+                  // My runner pool + specific runners.
+                  ...(runners.length > 0
+                    ? [{ value: 'self', label: t('poolSelfLabel'), hint: t('poolSelfHint') }]
+                    : []),
+                  ...runners.map((r) => ({
+                    value: `self:${r.id}`,
+                    label: r.label,
+                    hint: t('poolSelfHint'),
+                  })),
+                ]}
+                value={field.value}
+                onChange={field.onChange}
+                placeholder={t('runtimePlaceholder')}
+                emptyText={t('runtimeEmpty')}
+              />
+              <CapabilityFitNote
+                harnessKind={harnessKind}
+                capabilities={runtimes.find((r) => r.id === field.value)?.capabilities}
+              />
+            </>
           )}
         />
         <FieldError message={errors.runtime?.message} />

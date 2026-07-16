@@ -55,6 +55,7 @@ export interface AnalysisFilters {
   dataset?: string[]
   harness?: string[]
   model?: string[]
+  judgeModel?: string[] // the judge's own model (a groupable dim; also filterable so a View can pin one judge model)
   status?: string[]
   owner?: string[]
   originSource?: string[]
@@ -187,6 +188,7 @@ function passesFilters(
   if (!inList(f.dataset, sc.dataset.id)) return false
   if (!inList(f.harness, sc.harness.id)) return false
   if (!inList(f.model, dimValue(sc, 'model'))) return false
+  if (!inList(f.judgeModel, dimValue(sc, 'judgeModel'))) return false
   if (!inList(f.status, sc.status)) return false
   if (!inList(f.owner, sc.createdBy ?? UNKNOWN)) return false
   if (!inList(f.originSource, dimValue(sc, 'originSource'))) return false
@@ -342,6 +344,7 @@ export function configToParams(c: AnalysisConfig): URLSearchParams {
   csv('dataset', f.dataset)
   csv('harness', f.harness)
   csv('model', f.model)
+  csv('judgeModel', f.judgeModel)
   csv('status', f.status)
   csv('owner', f.owner)
   csv('origin', f.originSource)
@@ -380,6 +383,7 @@ export function paramsToConfig(params: Record<string, string | undefined>): Anal
     dataset: list(params.dataset),
     harness: list(params.harness),
     model: list(params.model),
+    judgeModel: list(params.judgeModel),
     status: list(params.status),
     owner: list(params.owner),
     originSource: list(params.origin),

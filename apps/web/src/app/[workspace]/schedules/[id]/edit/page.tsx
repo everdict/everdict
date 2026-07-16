@@ -7,6 +7,8 @@ import { CreateScheduleForm } from '@/features/create-schedule'
 import { CommentsSection } from '@/features/discuss'
 import { datasetsSchema } from '@/entities/dataset'
 import { harnessesSchema } from '@/entities/harness'
+import { judgesSchema } from '@/entities/judge'
+import { runnersResponseSchema } from '@/entities/runner'
 import { runtimesSchema } from '@/entities/runtime'
 import { scheduleSchema, type Schedule } from '@/entities/schedule'
 import { currentPrincipal } from '@/shared/auth/principal'
@@ -38,15 +40,39 @@ export default async function EditSchedulePage({
   const isCreator = principal?.subject === schedule.createdBy
   if (!isCreator && !isAdmin) redirect(`/${workspace}/schedules`)
 
-  let datasets: { id: string; versions: string[] }[] = []
-  let harnesses: { id: string; versions: string[] }[] = []
-  let runtimes: { id: string }[] = []
+  let datasets: { id: string; versions: string[]; versionTags?: Record<string, string[]> }[] = []
+  let harnesses: {
+    id: string
+    versions: string[]
+    versionTags?: Record<string, string[]>
+    kind?: string
+  }[] = []
+  let runtimes: { id: string; capabilities?: string[] }[] = []
+  let judges: { id: string }[] = []
+  let runners: { id: string; label: string }[] = []
+  let hasWorkspaceRunners = false
   try {
     datasets = datasetsSchema.parse(await controlPlane.listDatasets(ctx))
     harnesses = harnessesSchema.parse(await controlPlane.listHarnesses(ctx))
     runtimes = runtimesSchema.parse(await controlPlane.listRuntimes(ctx))
   } catch {
     // Even if the list fails, the form still works (keeps the current values)
+  }
+  try {
+    judges = judgesSchema.parse(await controlPlane.listJudges(ctx))
+  } catch {
+    // Even if the judge list fails, the form still works
+  }
+  try {
+    runners = runnersResponseSchema.parse(await controlPlane.listRunners(ctx)).runners
+  } catch {
+    // Even if the runner list fails, the form still works
+  }
+  try {
+    hasWorkspaceRunners =
+      runnersResponseSchema.parse(await controlPlane.listWorkspaceRunners(ctx)).runners.length > 0
+  } catch {
+    // Even if the roster fails, the form still works (only the pool option is hidden)
   }
 
   const tmpl = schedule.runTemplate
@@ -61,6 +87,9 @@ export default async function EditSchedulePage({
     harnessVersion: tmpl.harness.version,
     runtime: tmpl.runtime ?? '',
     concurrency: tmpl.concurrency != null ? String(tmpl.concurrency) : '',
+    trials: tmpl.trials != null ? String(tmpl.trials) : '',
+    caseLimit: tmpl.cases?.limit != null ? String(tmpl.cases.limit) : '',
+    caseTags: (tmpl.cases?.tags ?? []).join(', '),
   }
 
   return (
@@ -78,6 +107,9 @@ export default async function EditSchedulePage({
           datasets={datasets}
           harnesses={harnesses}
           runtimes={runtimes}
+          judges={judges}
+          runners={runners}
+          hasWorkspaceRunners={hasWorkspaceRunners}
           initial={initial}
           scheduleId={schedule.id}
           initialJudges={tmpl.judges}

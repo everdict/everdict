@@ -16,6 +16,10 @@ export interface CreateScheduleInput {
   harnessVersion: string
   runtime: string
   concurrency?: number
+  // Agent Judges to score each case's trace → judge:<id> metrics (empty = control-plane default scoring).
+  judges?: { id: string; version: string }[]
+  trials?: number // pass@k / flakiness — run each case N times per fire (empty = 1)
+  cases?: { limit?: number; tags?: string[] } // partial run each fire — first N / tag filter (empty = all)
 }
 
 export interface CreateScheduleResult {
@@ -38,8 +42,11 @@ export async function createScheduleAction(
     runTemplate: {
       dataset: { id: input.datasetId, version: input.datasetVersion || 'latest' },
       harness: { id: input.harnessId, version: input.harnessVersion || 'latest' },
+      ...(input.judges && input.judges.length > 0 ? { judges: input.judges } : {}),
       ...(input.runtime ? { runtime: input.runtime } : {}),
       ...(input.concurrency ? { concurrency: input.concurrency } : {}),
+      ...(input.trials ? { trials: input.trials } : {}),
+      ...(input.cases ? { cases: input.cases } : {}),
     },
   }
   try {

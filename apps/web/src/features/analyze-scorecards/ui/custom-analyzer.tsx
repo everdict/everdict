@@ -45,6 +45,7 @@ const GROUP_DIMS: Dimension[] = [
   'judgeModel',
   'status',
   'originSource',
+  'repo',
   'owner',
   'day',
   'week',
@@ -228,6 +229,7 @@ export function CustomAnalyzer({
       dataset: uniq((s) => s.dataset.id),
       harness: uniq((s) => s.harness.id),
       model: uniq((s) => dimValue(s, 'model')),
+      judgeModel: uniq((s) => dimValue(s, 'judgeModel')),
       status: uniq((s) => s.status),
       origin: uniq((s) => dimValue(s, 'originSource')),
       owner: [...new Set(scorecards.map((s) => s.createdBy ?? '').filter(Boolean))],
@@ -352,6 +354,8 @@ export function CustomAnalyzer({
         {filterCombo(t('filterBenchmark'), 'dataset', opts.dataset)}
         {filterCombo(t('harness'), 'harness', opts.harness)}
         {filterCombo(t('filterModel'), 'model', opts.model)}
+        {opts.judgeModel.length > 0 &&
+          filterCombo(t('filterJudgeModel'), 'judgeModel', opts.judgeModel)}
         {filterCombo(t('filterStatus'), 'status', opts.status)}
         {opts.owner.length > 0 && filterCombo(t('filterOwner'), 'owner', opts.owner, resolveOwner)}
         {opts.origin.length > 0 && filterCombo(t('filterOrigin'), 'originSource', opts.origin)}
@@ -376,6 +380,18 @@ export function CustomAnalyzer({
           className="w-[140px]"
           aria-label={t('dateTo')}
         />
+        {/* Include superseded/incomplete cards (excluded by default) — round-trips into a saved View. */}
+        <label className="flex cursor-pointer items-center gap-1.5 text-[12px] font-[510] text-muted-foreground">
+          <input
+            type="checkbox"
+            className="accent-primary"
+            checked={config.includeIncomplete ?? false}
+            onChange={(e) =>
+              setConfig((c) => ({ ...c, includeIncomplete: e.target.checked || undefined }))
+            }
+          />
+          {t('includeIncomplete')}
+        </label>
       </div>
 
       {/* shape (group·pivot·measure·sort·visualization) */}
