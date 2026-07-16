@@ -1,19 +1,7 @@
 'use client'
 
 import { useState, useTransition, type ReactNode } from 'react'
-import {
-  Ban,
-  Boxes,
-  Cpu,
-  Database,
-  Loader2,
-  MemoryStick,
-  Play,
-  RefreshCw,
-  Server,
-  Square,
-  Trash2,
-} from 'lucide-react'
+import { Ban, Loader2, Play, RefreshCw, Server, Trash2, X } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
 import {
@@ -22,7 +10,7 @@ import {
   type InspectRuntimeActionResult,
 } from '@/features/register-runtime'
 import type { RuntimeControlCommand, RuntimeInspection } from '@/entities/runtime'
-import { Badge } from '@/shared/ui/badge'
+import { cn } from '@/shared/lib/utils'
 import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
 import { Dialog } from '@/shared/ui/dialog'
@@ -33,25 +21,25 @@ type InspectWorkload = NonNullable<RuntimeInspection['workload']>[number]
 // A running/pending unit older than this reads as an idle-reclaim candidate. Stores are long-lived by design, so they're excluded.
 const LONG_RUNNING_SECONDS = 30 * 60
 
-// Compact duration (seconds → "45s"/"12m"/"3h"/"2d"). Display-only, best-effort.
 function formatAge(seconds: number): string {
   if (seconds < 60) return `${seconds}s`
   if (seconds < 3600) return `${Math.floor(seconds / 60)}m`
   if (seconds < 86400) return `${Math.floor(seconds / 3600)}h`
   return `${Math.floor(seconds / 86400)}d`
 }
-
-// CPU is in the runtime's native unit — Nomad MHz, K8s millicores (shown as cores). Memory is always MiB (→ GiB when large).
+// CPU is in the runtime's native unit — Nomad MHz, K8s millicores. Both /1000 for display (GHz-equivalent / cores).
 function formatCpu(n: number, kind: string): string {
-  if (kind === 'k8s') {
-    const cores = n / 1000
-    return `${cores % 1 === 0 ? cores : cores.toFixed(1)} cores`
-  }
-  return `${n} MHz`
+  const v = n / 1000
+  const s = v % 1 === 0 ? String(v) : v.toFixed(1)
+  return kind === 'k8s' ? `${s} cores` : `${s} GHz`
 }
 function formatMem(mb: number): string {
-  return mb >= 1024 ? `${(mb / 1024).toFixed(1)} GiB` : `${mb} MiB`
+  if (mb < 1024) return `${mb} MiB`
+  const g = mb / 1024
+  return `${g % 1 === 0 ? g : g.toFixed(1)} GiB`
 }
+const idleUnit = (w: InspectWorkload) =>
+  w.role !== 'store' && (w.ageSeconds ?? 0) >= LONG_RUNNING_SECONDS
 
 // A pending confirm — a destructive command plus the copy the modal shows for it.
 interface Pending {
@@ -60,39 +48,123 @@ interface Pending {
   body: string
 }
 
-// A labeled usage bar (allocated / total). Renders nothing useful without a total, so callers guard on it.
-function ResourceBar({
-  icon,
+// A radial usage gauge (allocated / total) — the Lens signature. Colour shifts to amber/rose as load climbs.
+function RadialGauge({
+  label,
   used,
   total,
   render,
 }: {
-  icon: ReactNode
+  label: string
   used: number
   total: number
   render: (n: number) => string
 }) {
   const pct = total > 0 ? Math.min(100, Math.round((used / total) * 100)) : 0
-  const hot = pct >= 85
+  const r = 20
+  const c = 2 * Math.PI * r
+  const color = pct >= 85 ? 'text-rose-500' : pct >= 65 ? 'text-amber-500' : 'text-primary'
   return (
-    <div className="flex items-center gap-2 text-[11px]">
-      <span className="text-muted-foreground">{icon}</span>
-      <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-secondary">
-        <div
-          className={`h-full rounded-full ${hot ? 'bg-amber-500' : 'bg-primary'}`}
-          style={{ width: `${pct}%` }}
+    <div className="flex flex-1 items-center gap-2.5">
+      <svg width="52" height="52" viewBox="0 0 52 52" className="-rotate-90">
+        <circle
+          cx="26"
+          cy="26"
+          r={r}
+          fill="none"
+          strokeWidth="5"
+          stroke="currentColor"
+          className="text-muted-foreground/15"
         />
+        <circle
+          cx="26"
+          cy="26"
+          r={r}
+          fill="none"
+          strokeWidth="5"
+          strokeLinecap="round"
+          stroke="currentColor"
+          className={cn('transition-[stroke-dashoffset] duration-700 ease-out', color)}
+          strokeDasharray={c}
+          strokeDashoffset={c * (1 - pct / 100)}
+        />
+      </svg>
+      <div className="min-w-0">
+        <div className={cn('font-mono text-[14px] font-[560] leading-none', color)}>{pct}%</div>
+        <div className="mt-0.5 text-[9px] uppercase tracking-wider text-faint">{label}</div>
+        <div className="font-mono text-[10px] text-muted-foreground">
+          {render(used)} / {render(total)}
+        </div>
       </div>
-      <span className="shrink-0 font-mono text-faint">
-        {render(used)} / {render(total)}
-      </span>
     </div>
   )
 }
 
-// The live cluster view for a registered nomad/k8s runtime — a node-centric topology (each node card shows its
-// resource usage + the workloads placed on it), loaded on demand (live I/O). When canControl (admin, runtimes:control)
-// the destructive actions appear, each behind a confirm modal. A partial-cluster failure comes back in warnings.
+// One workload as a role-coloured chip with a hover tooltip (role/status/age/resources) + an inline stop for eval units.
+function WorkloadChip({
+  w,
+  kind,
+  canControl,
+  onStop,
+  stopLabel,
+  idleTitle,
+}: {
+  w: InspectWorkload
+  kind: string
+  canControl: boolean
+  onStop: () => void
+  stopLabel: string
+  idleTitle: string
+}) {
+  const idle = idleUnit(w)
+  const dot = w.role === 'store' ? 'bg-cyan-400' : w.role === 'eval' ? 'bg-primary' : 'bg-faint'
+  const tv =
+    w.role === 'store' ? 'text-cyan-400' : w.role === 'eval' ? 'text-primary' : 'text-faint'
+  return (
+    <span className="group relative inline-flex items-center gap-1.5 rounded-md border border-border bg-secondary py-1 pl-2 pr-1 transition-colors hover:border-border-strong">
+      <span className={cn('size-1.5 shrink-0 rounded-[2px]', dot)} />
+      <span
+        className={cn('max-w-[120px] truncate font-mono text-[11px]', idle && 'text-amber-500')}
+        title={idle ? idleTitle : undefined}
+      >
+        {w.name}
+      </span>
+      {canControl && w.role !== 'store' ? (
+        <button
+          type="button"
+          title={stopLabel}
+          onClick={onStop}
+          className="hidden size-4 place-items-center rounded text-faint transition-colors hover:bg-rose-500/10 hover:text-rose-500 group-hover:grid"
+        >
+          <X className="size-2.5" />
+        </button>
+      ) : null}
+      <span className="pointer-events-none absolute bottom-[calc(100%+7px)] left-1/2 z-20 w-max max-w-[220px] -translate-x-1/2 translate-y-1 space-y-1 rounded-lg border border-border-strong bg-popover p-2 opacity-0 shadow-pop transition-all duration-150 group-hover:translate-y-0 group-hover:opacity-100">
+        <TipRow k="role" v={<span className={tv}>{w.role}</span>} />
+        <TipRow k="status" v={idle ? `${w.status} · idle?` : w.status} />
+        {w.ageSeconds !== undefined ? <TipRow k="age" v={formatAge(w.ageSeconds)} /> : null}
+        {w.cpu !== undefined || w.memoryMb !== undefined ? (
+          <TipRow
+            k="cpu · mem"
+            v={`${w.cpu !== undefined ? formatCpu(w.cpu, kind) : '—'} · ${w.memoryMb !== undefined ? formatMem(w.memoryMb) : '—'}`}
+          />
+        ) : null}
+      </span>
+    </span>
+  )
+}
+function TipRow({ k, v }: { k: string; v: ReactNode }) {
+  return (
+    <span className="flex justify-between gap-4 whitespace-nowrap">
+      <span className="text-[9px] uppercase tracking-wide text-faint">{k}</span>
+      <span className="font-mono text-[10.5px]">{v}</span>
+    </span>
+  )
+}
+
+// The live cluster console for a registered nomad/k8s runtime — a Lens-style node topology (per-node usage gauges +
+// the workloads placed on it), loaded on demand (live I/O). When canControl (admin) the destructive actions appear,
+// each behind a confirm modal. A partial-cluster failure comes back in warnings.
 export function RuntimeClusterStatus({
   id,
   version,
@@ -139,7 +211,6 @@ export function RuntimeClusterStatus({
 
   const insp: RuntimeInspection | undefined = result?.ok ? result.inspection : undefined
 
-  // Stop / cordon confirm builders (shared by node cards + unscheduled).
   const askStop = (w: InspectWorkload) =>
     setPending({
       command: { action: 'stopWorkload', name: w.name },
@@ -155,7 +226,7 @@ export function RuntimeClusterStatus({
         : t('clusterConfirmUncordon', { node: n.name }),
     })
 
-  // Group the workload by node (Lens-style): each node card lists its own units; node-less units → "unscheduled".
+  // Group the workload by node (Lens-style); node-less units → "unscheduled".
   const nodes = insp?.nodes?.items ?? []
   const workloads = insp?.workload ?? []
   const nodeNames = new Set(nodes.map((n) => n.name))
@@ -167,37 +238,10 @@ export function RuntimeClusterStatus({
   }
   const sum = (ws: InspectWorkload[], k: 'cpu' | 'memoryMb') =>
     ws.reduce((a, w) => a + (w[k] ?? 0), 0)
-
-  const workloadRow = (w: InspectWorkload) => {
-    const idle = w.role !== 'store' && (w.ageSeconds ?? 0) >= LONG_RUNNING_SECONDS
-    return (
-      <div key={w.id} className="flex items-center gap-2 px-2.5 py-1">
-        <span className="flex-1 truncate font-mono text-[11px]">{w.name}</span>
-        <Badge tone={w.role === 'store' ? 'info' : 'neutral'}>{t(`clusterRole_${w.role}`)}</Badge>
-        <span className="w-14 shrink-0 text-right text-[11px] text-muted-foreground">
-          {w.status}
-        </span>
-        <span
-          className={`w-9 shrink-0 text-right font-mono text-[11px] ${idle ? 'text-amber-500' : 'text-faint'}`}
-          title={idle ? t('clusterLongRunning') : undefined}
-        >
-          {w.ageSeconds !== undefined ? formatAge(w.ageSeconds) : '—'}
-        </span>
-        {canControl && w.role !== 'store' ? (
-          <button
-            type="button"
-            className="shrink-0 text-muted-foreground transition-colors hover:text-destructive"
-            title={t('clusterActionStop')}
-            onClick={() => askStop(w)}
-          >
-            <Square className="size-3" />
-          </button>
-        ) : (
-          canControl && <span className="w-3 shrink-0" />
-        )}
-      </div>
-    )
-  }
+  const evalCount = workloads.filter((w) => w.role === 'eval').length
+  const storeCount = workloads.filter((w) => w.role === 'store').length
+  const idleCount = workloads.filter(idleUnit).length
+  const reclaimable = canControl && workloads.some((w) => w.role !== 'store')
 
   return (
     <div className="space-y-3">
@@ -207,7 +251,7 @@ export function RuntimeClusterStatus({
           {t('clusterStatus')}
         </span>
         <div className="flex items-center gap-2">
-          {canControl && insp?.reachable && (
+          {canControl && insp?.reachable ? (
             <Button
               variant="secondary"
               size="sm"
@@ -223,7 +267,7 @@ export function RuntimeClusterStatus({
               <Trash2 className="size-3.5" />
               {t('clusterActionPurge')}
             </Button>
-          )}
+          ) : null}
           <Button
             variant="secondary"
             size="sm"
@@ -241,186 +285,253 @@ export function RuntimeClusterStatus({
         </div>
       </div>
 
-      {actionMessage && (
+      {actionMessage ? (
         <Callout tone="info" className="py-1.5">
           {actionMessage}
         </Callout>
-      )}
-      {result && !result.ok && (
+      ) : null}
+      {result && !result.ok ? (
         <Callout tone="danger" className="py-1.5">
           {t('clusterError', { error: result.error ?? '' })}
         </Callout>
-      )}
-      {insp && !insp.reachable && (
+      ) : null}
+      {insp && !insp.reachable ? (
         <Callout tone="warning">
           {t('clusterUnreachable')}
           {insp.detail ? ` — ${insp.detail}` : ''}
         </Callout>
-      )}
+      ) : null}
 
-      {insp?.reachable && (
-        <div className="space-y-3 text-[13px]">
-          <p className="text-muted-foreground">{insp.detail}</p>
-
-          {/* Capacity — does this cluster have room to run jobs right now (concurrent eval slots). */}
-          {insp.capacity && (
-            <div className="flex flex-wrap items-center gap-x-5 gap-y-1 rounded-md border border-border px-3 py-2">
-              <span className="flex items-center gap-1.5 text-muted-foreground">
-                <Cpu className="size-3.5" />
-                {t('clusterCapacity')}
-              </span>
-              <span>
-                <span className="font-mono">{insp.capacity.free}</span>{' '}
-                <span className="text-muted-foreground">{t('clusterFree')}</span>
-              </span>
-              <span className="text-faint">
-                {t('clusterUsedOfTotal', { used: insp.capacity.used, total: insp.capacity.total })}
-              </span>
-            </div>
-          )}
-
-          {/* Node-centric topology — one card per node: resource usage bars + the workloads placed on it + cordon. */}
-          {insp.nodes && (
-            <div className="space-y-2">
-              <div className="flex items-center gap-1.5 text-muted-foreground">
-                <Boxes className="size-3.5" />
-                {t('clusterNodes', { ready: insp.nodes.ready, total: insp.nodes.total })}
-                {insp.cluster?.datacenters && insp.cluster.datacenters.length > 0 ? (
-                  <span className="text-faint">· {insp.cluster.datacenters.join(', ')}</span>
-                ) : null}
+      {insp?.reachable ? (
+        <div className="space-y-3">
+          {/* Overview strip — summary first: hero capacity donut + node health + workload/idle summary. */}
+          {insp.capacity ? (
+            <div className="flex flex-wrap items-center gap-x-8 gap-y-4 rounded-xl border border-border bg-gradient-to-b from-secondary/50 to-transparent px-5 py-4">
+              <div className="flex items-center gap-3.5">
+                <CapacityDonut free={insp.capacity.free} total={insp.capacity.total} />
+                <div className="space-y-0.5">
+                  <div className="font-mono text-[22px] font-[600] leading-none tracking-tight">
+                    {insp.capacity.free}
+                    <span className="ml-1 text-[13px] font-normal text-muted-foreground">
+                      / {insp.capacity.total}
+                    </span>
+                  </div>
+                  <div className="text-[9.5px] uppercase tracking-[0.08em] text-faint">
+                    {t('clusterFreeSlots')}
+                  </div>
+                  <div className="font-mono text-[11px] text-muted-foreground">
+                    {t('clusterUsedOfTotal', {
+                      used: insp.capacity.used,
+                      total: insp.capacity.total,
+                    })}
+                  </div>
+                </div>
               </div>
-              <div className="grid gap-2 md:grid-cols-2">
-                {insp.nodes.items.map((n) => {
-                  const units = byNode.get(n.name) ?? []
-                  return (
-                    <div key={n.name} className="space-y-2 rounded-md border border-border p-2.5">
-                      <div className="flex items-center gap-2">
-                        <span
-                          className={`size-1.5 rounded-full ${n.ready ? 'bg-emerald-500' : 'bg-amber-500'}`}
-                        />
-                        <span className="flex-1 truncate font-mono text-[12px]">{n.name}</span>
-                        {n.datacenter ? (
-                          <span className="text-[11px] text-faint">{n.datacenter}</span>
+
+              {insp.nodes ? (
+                <OverviewStat
+                  value={
+                    <>
+                      {insp.nodes.ready}
+                      <span className="text-faint">/{insp.nodes.total}</span>
+                    </>
+                  }
+                  label={t('clusterNodesReady')}
+                  chips={insp.cluster?.datacenters}
+                />
+              ) : null}
+              <OverviewStat
+                value={workloads.length}
+                label={t('clusterWorkloadShort')}
+                chips={[t('clusterEvalStore', { eval: evalCount, store: storeCount })]}
+              />
+              {idleCount > 0 ? (
+                <OverviewStat
+                  value={<span className="text-amber-500">{idleCount}</span>}
+                  label={t('clusterIdleCandidate')}
+                  chips={[t('clusterRunningOver', { minutes: LONG_RUNNING_SECONDS / 60 })]}
+                  warn
+                />
+              ) : null}
+            </div>
+          ) : null}
+
+          {insp.detail ? <p className="text-[12px] text-muted-foreground">{insp.detail}</p> : null}
+
+          {/* Node topology — one card per node: usage gauges + the workloads placed on it + cordon toggle. */}
+          {insp.nodes ? (
+            <div className="grid gap-3 md:grid-cols-2">
+              {insp.nodes.items.map((n) => {
+                const units = byNode.get(n.name) ?? []
+                return (
+                  <div
+                    key={n.name}
+                    className={cn(
+                      'space-y-3 rounded-xl border border-border bg-card p-4 transition-colors hover:border-border-strong',
+                      n.schedulable === false && 'bg-amber-500/[0.03]'
+                    )}
+                  >
+                    <div className="flex items-center gap-2">
+                      <span
+                        className={cn(
+                          'size-2 shrink-0 rounded-full',
+                          n.ready
+                            ? 'bg-emerald-500 shadow-[0_0_8px_rgba(52,211,153,0.5)]'
+                            : 'bg-rose-500'
+                        )}
+                      />
+                      <span className="flex-1 truncate font-mono text-[12.5px] font-[510]">
+                        {n.name}
+                      </span>
+                      {n.datacenter ? (
+                        <span className="font-mono text-[10.5px] text-faint">{n.datacenter}</span>
+                      ) : null}
+                      {n.dockerHealthy === false ? (
+                        <span className="text-[10px] text-rose-500">{t('clusterDockerDown')}</span>
+                      ) : null}
+                      {n.schedulable === false ? (
+                        <span className="rounded border border-amber-500/25 bg-amber-500/10 px-1.5 py-0.5 text-[9px] font-[600] uppercase tracking-wide text-amber-500">
+                          {t('clusterCordoned')}
+                        </span>
+                      ) : null}
+                      {canControl && n.schedulable !== undefined ? (
+                        <button
+                          type="button"
+                          title={
+                            n.schedulable ? t('clusterActionCordon') : t('clusterActionUncordon')
+                          }
+                          onClick={() => askCordon(n)}
+                          className="grid size-6 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                        >
+                          {n.schedulable ? (
+                            <Ban className="size-3.5" />
+                          ) : (
+                            <Play className="size-3.5" />
+                          )}
+                        </button>
+                      ) : null}
+                    </div>
+
+                    {n.cpuTotal !== undefined || n.memoryMbTotal !== undefined ? (
+                      <div className="flex gap-4">
+                        {n.cpuTotal !== undefined ? (
+                          <RadialGauge
+                            label={t('clusterCpu')}
+                            used={sum(units, 'cpu')}
+                            total={n.cpuTotal}
+                            render={(v) => formatCpu(v, insp.kind)}
+                          />
                         ) : null}
-                        {n.dockerHealthy === false ? (
-                          <span className="text-[11px] text-amber-500">
-                            {t('clusterDockerDown')}
-                          </span>
-                        ) : null}
-                        {n.schedulable === false ? (
-                          <span className="text-[11px] text-faint">{t('clusterCordoned')}</span>
-                        ) : null}
-                        {canControl && n.schedulable !== undefined ? (
-                          <button
-                            type="button"
-                            className="text-muted-foreground transition-colors hover:text-foreground"
-                            title={
-                              n.schedulable ? t('clusterActionCordon') : t('clusterActionUncordon')
-                            }
-                            onClick={() => askCordon(n)}
-                          >
-                            {n.schedulable ? (
-                              <Ban className="size-3" />
-                            ) : (
-                              <Play className="size-3" />
-                            )}
-                          </button>
+                        {n.memoryMbTotal !== undefined ? (
+                          <RadialGauge
+                            label={t('clusterMemory')}
+                            used={sum(units, 'memoryMb')}
+                            total={n.memoryMbTotal}
+                            render={formatMem}
+                          />
                         ) : null}
                       </div>
-                      {n.cpuTotal !== undefined ? (
-                        <ResourceBar
-                          icon={<Cpu className="size-3" />}
-                          used={sum(units, 'cpu')}
-                          total={n.cpuTotal}
-                          render={(v) => formatCpu(v, insp.kind)}
-                        />
-                      ) : null}
-                      {n.memoryMbTotal !== undefined ? (
-                        <ResourceBar
-                          icon={<MemoryStick className="size-3" />}
-                          used={sum(units, 'memoryMb')}
-                          total={n.memoryMbTotal}
-                          render={formatMem}
-                        />
-                      ) : null}
+                    ) : null}
+
+                    <div className="flex flex-wrap gap-1.5">
                       {units.length > 0 ? (
-                        <div className="divide-y divide-border/60 rounded border border-border/60">
-                          {units.map(workloadRow)}
-                        </div>
+                        units.map((w) => (
+                          <WorkloadChip
+                            key={w.id}
+                            w={w}
+                            kind={insp.kind}
+                            canControl={canControl}
+                            onStop={() => askStop(w)}
+                            stopLabel={t('clusterActionStop')}
+                            idleTitle={t('clusterLongRunning')}
+                          />
+                        ))
                       ) : (
-                        <p className="text-[11px] text-faint">{t('clusterNodeEmpty')}</p>
+                        <span className="text-[11px] italic text-faint">
+                          {t('clusterNodeEmpty')}
+                        </span>
                       )}
                     </div>
-                  )
-                })}
-              </div>
-              {/* Node-less units (pending placement / no node info) + a bulk reclaim of idle eval units. */}
-              {(unscheduled.length > 0 ||
-                (canControl && workloads.some((w) => w.role !== 'store'))) && (
-                <div className="space-y-1.5 rounded-md border border-dashed border-border p-2.5">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-[12px] text-muted-foreground">
-                      {t('clusterUnscheduled', { count: unscheduled.length })}
-                    </span>
-                    {canControl && workloads.some((w) => w.role !== 'store') && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-6 gap-1 px-1.5 text-[12px]"
-                        onClick={() =>
-                          setPending({
-                            command: {
-                              action: 'reclaimIdle',
-                              olderThanSeconds: LONG_RUNNING_SECONDS,
-                            },
-                            title: t('clusterActionReclaim'),
-                            body: t('clusterConfirmReclaim', {
-                              minutes: LONG_RUNNING_SECONDS / 60,
-                            }),
-                          })
-                        }
-                      >
-                        <Ban className="size-3" />
-                        {t('clusterActionReclaim')}
-                      </Button>
-                    )}
                   </div>
-                  {unscheduled.length > 0 && (
-                    <div className="divide-y divide-border/60 rounded border border-border/60">
-                      {unscheduled.map(workloadRow)}
-                    </div>
-                  )}
-                </div>
-              )}
+                )
+              })}
             </div>
-          )}
+          ) : null}
 
-          {/* When node listing degraded, fall back to a flat workload list so the units are still visible. */}
-          {!insp.nodes && insp.workload && (
-            <div className="space-y-1.5">
-              <div className="text-muted-foreground">
-                {t('clusterWorkload', { count: insp.workload.length })}
+          {/* Node-less units (pending / no node info) + the bulk reclaim-idle action. */}
+          {insp.nodes && (unscheduled.length > 0 || reclaimable) ? (
+            <div className="space-y-2 rounded-xl border border-dashed border-border-strong px-4 py-3">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[12px] text-muted-foreground">
+                  {t('clusterUnscheduled', { count: unscheduled.length })}
+                </span>
+                {reclaimable ? (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-6 gap-1 px-1.5 text-[12px]"
+                    onClick={() =>
+                      setPending({
+                        command: { action: 'reclaimIdle', olderThanSeconds: LONG_RUNNING_SECONDS },
+                        title: t('clusterActionReclaim'),
+                        body: t('clusterConfirmReclaim', { minutes: LONG_RUNNING_SECONDS / 60 }),
+                      })
+                    }
+                  >
+                    <Ban className="size-3" />
+                    {t('clusterActionReclaim')}
+                  </Button>
+                ) : null}
               </div>
-              {insp.workload.length > 0 ? (
-                <div className="divide-y divide-border rounded-md border border-border">
-                  {insp.workload.map(workloadRow)}
+              {unscheduled.length > 0 ? (
+                <div className="flex flex-wrap gap-1.5">
+                  {unscheduled.map((w) => (
+                    <WorkloadChip
+                      key={w.id}
+                      w={w}
+                      kind={insp.kind}
+                      canControl={canControl}
+                      onStop={() => askStop(w)}
+                      stopLabel={t('clusterActionStop')}
+                      idleTitle={t('clusterLongRunning')}
+                    />
+                  ))}
                 </div>
+              ) : null}
+            </div>
+          ) : null}
+
+          {/* Fallback flat list when node listing degraded. */}
+          {!insp.nodes && insp.workload ? (
+            <div className="flex flex-wrap gap-1.5">
+              {insp.workload.length > 0 ? (
+                insp.workload.map((w) => (
+                  <WorkloadChip
+                    key={w.id}
+                    w={w}
+                    kind={insp.kind}
+                    canControl={canControl}
+                    onStop={() => askStop(w)}
+                    stopLabel={t('clusterActionStop')}
+                    idleTitle={t('clusterLongRunning')}
+                  />
+                ))
               ) : (
-                <p className="text-[12px] text-faint">{t('clusterNoWorkload')}</p>
+                <span className="text-[12px] text-faint">{t('clusterNoWorkload')}</span>
               )}
             </div>
-          )}
+          ) : null}
 
-          {/* Shared stores standing on the cluster — with their connection address where known. */}
-          {insp.stores && insp.stores.length > 0 && (
+          {/* Shared stores — their connection address where known. */}
+          {insp.stores && insp.stores.length > 0 ? (
             <div className="space-y-1.5">
-              <div className="flex items-center gap-1.5 text-muted-foreground">
-                <Database className="size-3.5" />
+              <div className="text-[11px] uppercase tracking-wide text-faint">
                 {t('clusterStores')}
               </div>
-              <div className="divide-y divide-border rounded-md border border-border">
+              <div className="divide-y divide-border rounded-lg border border-border">
                 {insp.stores.map((s) => (
                   <div key={s.name} className="flex items-center gap-3 px-3 py-1.5">
+                    <span className="size-1.5 shrink-0 rounded-[2px] bg-cyan-400" />
                     <span className="font-mono text-[12px]">{s.name}</span>
                     <span className="flex-1 truncate text-right font-mono text-[12px] text-muted-foreground">
                       {s.address ?? t('clusterAddressDynamic')}
@@ -429,15 +540,15 @@ export function RuntimeClusterStatus({
                 ))}
               </div>
             </div>
-          )}
+          ) : null}
 
-          {insp.warnings.length > 0 && (
+          {insp.warnings.length > 0 ? (
             <Callout tone="warning" className="py-1.5">
               {t('clusterWarnings', { warnings: insp.warnings.join('; ') })}
             </Callout>
-          )}
+          ) : null}
         </div>
-      )}
+      ) : null}
 
       {/* Confirm modal — every destructive action passes through here (hard-to-reverse cluster ops). */}
       <Dialog
@@ -469,6 +580,73 @@ export function RuntimeClusterStatus({
           </div>
         </div>
       </Dialog>
+    </div>
+  )
+}
+
+// Hero capacity donut — free eval slots as a fraction of total (indigo brand accent, distinct from node load colour).
+function CapacityDonut({ free, total }: { free: number; total: number }) {
+  const pct = total > 0 ? Math.min(100, Math.round((free / total) * 100)) : 0
+  const r = 30
+  const c = 2 * Math.PI * r
+  return (
+    <svg width="72" height="72" viewBox="0 0 72 72" className="-rotate-90">
+      <circle
+        cx="36"
+        cy="36"
+        r={r}
+        fill="none"
+        strokeWidth="6"
+        stroke="currentColor"
+        className="text-muted-foreground/12"
+      />
+      <circle
+        cx="36"
+        cy="36"
+        r={r}
+        fill="none"
+        strokeWidth="6"
+        strokeLinecap="round"
+        stroke="currentColor"
+        className="text-primary transition-[stroke-dashoffset] duration-700 ease-out"
+        strokeDasharray={c}
+        strokeDashoffset={c * (1 - pct / 100)}
+      />
+    </svg>
+  )
+}
+
+// A labelled overview metric (big number + caption + one or more context chips).
+function OverviewStat({
+  value,
+  label,
+  chips,
+  warn,
+}: {
+  value: ReactNode
+  label: string
+  chips?: string[]
+  warn?: boolean
+}) {
+  return (
+    <div>
+      <div className="font-mono text-[18px] font-[560] leading-none tracking-tight">{value}</div>
+      <div className="mt-1 text-[9.5px] uppercase tracking-[0.08em] text-faint">{label}</div>
+      {chips && chips.length > 0 ? (
+        <div className="mt-1.5 flex flex-wrap gap-1.5">
+          {chips.map((ch) => (
+            <span
+              key={ch}
+              className={cn(
+                'rounded border border-border px-1.5 py-px font-mono text-[10.5px] text-muted-foreground',
+                warn && 'border-amber-500/25 text-amber-500'
+              )}
+            >
+              {ch}
+            </span>
+          ))}
+        </div>
+      ) : null}
     </div>
   )
 }
