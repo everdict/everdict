@@ -1,5 +1,6 @@
-import type { GradeContext, TraceEvent } from "@everdict/contracts";
+import type { EvidenceRequirement, GradeContext, TraceEvent } from "@everdict/contracts";
 import { describe, expect, it, vi } from "vitest";
+import { assessEvidence } from "./assess-evidence.js";
 import { assembleJudgeInput } from "./judge.js";
 import { modelJudge, previewJudge } from "./model-judge.js";
 
@@ -103,5 +104,45 @@ describe("previewJudge", () => {
     expect(withImg.evidence.screenshot?.present).toBe(true);
     const without = previewJudge({ task: "t" });
     expect(without.evidence.screenshot?.present).toBe(false);
+  });
+});
+
+describe("assessEvidence", () => {
+  it("satisfies final_answer + tool_call requirements decidable from today's trace", () => {
+    const a = assessEvidence(
+      [{ kind: "final_answer" }, { kind: "tool_call", name: "search" }],
+      promptCtx([
+        { t: 0, kind: "tool_call", id: "1", name: "search", args: {} },
+        { t: 1, kind: "message", role: "assistant", text: "42" },
+      ]),
+    );
+    expect(a.missing).toHaveLength(0);
+    expect(a.satisfied).toHaveLength(2);
+  });
+
+  it("reports a missing tool_call (wrong name) with a warning", () => {
+    const a = assessEvidence([{ kind: "tool_call", name: "browse" }], promptCtx(TRACE));
+    expect(a.missing).toEqual([{ kind: "tool_call", name: "browse" }]);
+    expect(a.warnings.some((w) => w.includes("browse"))).toBe(true);
+  });
+
+  it("marks artifact/span requirements unmet — they have no carrier in the current trace (the ingest gap)", () => {
+    const reqs: EvidenceRequirement[] = [
+      { kind: "artifact", role: "report" },
+      { kind: "span", name: "retriever" },
+    ];
+    const a = assessEvidence(reqs, promptCtx(TRACE));
+    expect(a.missing).toHaveLength(2);
+    expect(a.warnings.some((w) => w.includes("ingest generalization"))).toBe(true);
+  });
+
+  it("satisfies a dom requirement from a browser snapshot", () => {
+    const browser: GradeContext = {
+      case: { id: "c", env: { kind: "browser", startUrl: "u" }, task: "t", graders: [], timeoutSec: 1, tags: [] },
+      trace: [],
+      snapshot: { kind: "browser", url: "u", dom: "<h1>ok</h1>", console: [] },
+    };
+    expect(assessEvidence([{ kind: "dom" }], browser).missing).toHaveLength(0);
+    expect(assessEvidence([{ kind: "dom" }], promptCtx(TRACE)).missing).toHaveLength(1); // prompt snapshot has no dom
   });
 });

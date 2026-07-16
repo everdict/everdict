@@ -18,6 +18,7 @@ import { RuntimeDispatcher } from "../core/execution/runtime-dispatcher.js";
 import { SelfHostedBackend } from "../core/execution/self-hosted-backend.js";
 import { StoreCallbackRendezvous } from "../core/execution/store-callback-rendezvous.js";
 import { buildTopologyBackend } from "../core/execution/topology-backend.js";
+import { makeRuntimeInspector } from "../core/ops/runtime-inspect.js";
 import { makeRuntimeProber } from "../core/ops/runtime-probe.js";
 
 // Dispatch stack: the self-hosted runner lease hub + the front-door callback rendezvous + tenant runtime routing
@@ -160,6 +161,8 @@ export function buildDispatch(deps: {
   };
   // Connection test: build a backend with the same builder + tenant secrets and probe() (reachability/auth with no job). Shared by server/MCP.
   const probeRuntime = makeRuntimeProber({ secretsFor: runtimeSecretsFor, buildBackend: runtimeBuildBackend });
+  // Live inspection: same builder + secrets, but inspect() (read-only cluster view). Shared by server/MCP.
+  const inspectRuntime = makeRuntimeInspector({ secretsFor: runtimeSecretsFor, buildBackend: runtimeBuildBackend });
   return {
     runnerHub,
     callbackRendezvous,
@@ -170,6 +173,7 @@ export function buildDispatch(deps: {
     dispatcher,
     meteredDispatcher,
     probeRuntime,
+    inspectRuntime,
     invalidateTenantBackends,
   };
 }

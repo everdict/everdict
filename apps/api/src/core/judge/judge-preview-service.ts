@@ -10,7 +10,13 @@ import {
   type Score,
   type TraceEvent,
 } from "@everdict/contracts";
-import { type JudgePreview, assembleJudgeInput, previewJudge } from "@everdict/graders";
+import {
+  type EvidenceAssessment,
+  type JudgePreview,
+  assembleJudgeInput,
+  assessEvidence,
+  previewJudge,
+} from "@everdict/graders";
 import type { RubricRegistry } from "@everdict/registry";
 import { resolveRubric } from "../execution/judge-runner.js";
 
@@ -24,6 +30,7 @@ export type JudgeEvidenceInput =
 // A preview = the exact prompt + coverage the judge would see, plus any rubric-resolution warning. No model call.
 export interface JudgePreviewResult extends JudgePreview {
   kind: JudgeSpec["kind"];
+  requirements?: EvidenceAssessment; // present when the judge declares `requires` — which needs are met by this run
 }
 
 // A dry-run = the real judge scores (one model call) PLUS the rendered prompt/coverage for transparency.
@@ -105,10 +112,14 @@ export class JudgePreviewService {
       ...(useScreenshot ? { useScreenshot: true } : {}),
     });
     const preview = previewJudge(input);
+    // If the judge declares required evidence, check it against THIS run — the missing set is what the user must
+    // fix (a different harness, or the ingest generalization) before this judge is sound on this evidence.
+    const requirements = spec.requires?.length ? assessEvidence(spec.requires, ctx) : undefined;
     return {
       kind: spec.kind,
       ...preview,
       warnings: rubricWarning ? [`rubric: ${rubricWarning}`, ...preview.warnings] : preview.warnings,
+      ...(requirements ? { requirements } : {}),
     };
   }
 

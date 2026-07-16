@@ -121,4 +121,23 @@ export function registerRuntimeTools(server: McpServer, ctx: McpToolContext): vo
         }),
     );
   }
+
+  if (deps.inspectRuntime && deps.runtimeRegistry) {
+    const inspectRuntime = deps.inspectRuntime;
+    const runtimes = deps.runtimeRegistry;
+    server.registerTool(
+      "inspect_runtime",
+      {
+        description:
+          "Live cluster view of a REGISTERED nomad/k8s runtime (by id) — nodes/datacenters, concurrent capacity, the live everdict workload, and pool shared stores. Read-only, no job. version defaults to latest. A local runtime (no cluster) reads as not-reachable; another workspace's runtime is NOT_FOUND. Gate: runtimes:read.",
+        inputSchema: { id: z.string(), version: z.string().optional() },
+      },
+      ({ id, version }) =>
+        run(principal, "runtimes:read", async () => {
+          // get() resolves the registered spec (NOT_FOUND on non-owned/missing) before any live I/O.
+          const spec = await runtimes.get(ws, id, version ?? "latest");
+          return ok(await inspectRuntime(ws, spec));
+        }),
+    );
+  }
 }

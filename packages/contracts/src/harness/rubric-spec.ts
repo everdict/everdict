@@ -16,6 +16,20 @@ export type JudgeCriterion = z.infer<typeof JudgeCriterionSchema>;
 // A custom promptTemplate MUST carry this placeholder — it expands to the JSON verdict instruction the parser relies on.
 export const VERDICT_INSTRUCTION_PLACEHOLDER = "{verdict_instruction}";
 
+// What evidence a judge NEEDS from a run to render a sound verdict — declared, not coded (multi-tenant). assessEvidence
+// checks a run's GradeContext against these, so a user learns BEFORE committing whether a given harness produces them.
+// `final_answer`/`tool_call`/`dom`/`screenshot` are satisfiable from today's TraceEvent + snapshot; `artifact`/`span`
+// depend on the ingest generalization (they read as unmet until a harness's trace carries them) — that gap is the point.
+export const EvidenceRequirementSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("final_answer") }), // an assistant final message must exist
+  z.object({ kind: z.literal("tool_call"), name: z.string().optional() }), // ≥1 tool_call (optionally a named one)
+  z.object({ kind: z.literal("dom") }), // a browser snapshot with DOM
+  z.object({ kind: z.literal("screenshot") }), // a screenshot for VLM judging
+  z.object({ kind: z.literal("artifact"), role: z.string().optional() }), // a produced artifact (ingest-generalization channel)
+  z.object({ kind: z.literal("span"), name: z.string() }), // a structural span preserved through ingest
+]);
+export type EvidenceRequirement = z.infer<typeof EvidenceRequirementSchema>;
+
 // Rubric — its own versioned registry entity: freeform text and/or named criteria plus an optional custom prompt
 // template. One rubric serves many judges (a judge references it as rubric: {id, version} instead of freezing the
 // text into its own version) and many datasets — changing the wording is a new rubric version, not a new judge.

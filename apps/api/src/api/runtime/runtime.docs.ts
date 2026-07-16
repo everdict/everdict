@@ -1,5 +1,6 @@
 import { VersionTagsBodySchema } from "@everdict/application-control";
 import { RuntimeSpecSchema } from "@everdict/contracts";
+import { InspectRuntimeResultSchema } from "@everdict/contracts/wire";
 import { ProbeRuntimeResultSchema } from "@everdict/contracts/wire";
 import { RegisterRuntimeResultSchema } from "@everdict/contracts/wire";
 import { RuntimeListResponseSchema } from "@everdict/contracts/wire";
@@ -89,6 +90,25 @@ const docs = {
     params: idVersionParams,
     response: {
       200: { description: "RuntimeSpec", ...toJsonSchema(RuntimeResponseSchema) },
+      ...errorResponses(401, 403, 404),
+    },
+  },
+  inspect: {
+    summary: "Inspect a runtime (live cluster view)",
+    description:
+      "A read-only live view of the cluster behind a registered nomad/k8s runtime: composition (nodes/" +
+      "datacenters), concurrent capacity, the live everdict workload placed on it, and any pool shared stores. " +
+      "Unlike probe (reachability only) this enumerates the cluster; it still runs no job and mutates nothing. " +
+      "Credentials are resolved from the workspace's secrets and used only as auth headers. A partial-cluster " +
+      "failure degrades to `warnings` rather than an error. Requires runtimes:read (viewer+). A local runtime or " +
+      "another workspace's runtime is 404.",
+    tags: ["runtime"],
+    params: idVersionParams,
+    response: {
+      200: {
+        description: "Live cluster view (reachable, or a classified failure)",
+        ...toJsonSchema(InspectRuntimeResultSchema),
+      },
       ...errorResponses(401, 403, 404),
     },
   },

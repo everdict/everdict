@@ -111,6 +111,29 @@ export function registerRuntimeRoutes(app: FastifyInstance, deps: ServerDeps): v
     },
   );
 
+  // Live cluster view (read) — resolve the registered spec, then inspect() the cluster behind it (nodes/capacity/
+  // workload/stores). Read-only (runtimes:read), no job run. A non-inspectable kind (local) returns a not-reachable
+  // result, not a 4xx. Credentials are resolved server-side from the workspace's secrets (never sent by the client).
+  app.get<{ Params: { id: string; version: string } }>(
+    "/runtimes/:id/versions/:version/inspect",
+    { schema: runtimeDocs.inspect },
+    async (req, reply) => {
+      if (!deps.runtimeRegistry)
+        return reply.code(404).send({ code: "NOT_FOUND", message: "runtime registry not configured" });
+      if (!deps.inspectRuntime) return reply.code(404).send({ code: "NOT_FOUND", message: "inspect not configured" });
+      const principal = await resolvePrincipal(req, reply, deps);
+      if (!principal) return reply;
+      try {
+        gate(principal, "runtimes:read");
+        // get() 404s a non-owned / missing runtime (no existence leak) before any live I/O.
+        const spec = await deps.runtimeRegistry.get(principal.workspace, req.params.id, req.params.version);
+        return reply.send(await deps.inspectRuntime(principal.workspace, spec));
+      } catch (err) {
+        return sendError(reply, err);
+      }
+    },
+  );
+
   // Replace version tags (whole-array PUT; empty array = clear) — mutable metadata outside the spec (free labels, to tell versions apart). Reuses runtimes:write.
   app.put<{ Params: { id: string; version: string } }>(
     "/runtimes/:id/versions/:version/tags",

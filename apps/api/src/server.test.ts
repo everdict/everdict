@@ -758,6 +758,66 @@ describe("API — workspace integrations (GitHub App / Mattermost)", () => {
     await viewer.app.close();
   });
 
+  it("trace source/sink probe: admin gets a reachable result + discovered scopes; bad body 400; viewer 403", async () => {
+    const h = { authorization: "Bearer x" };
+    const { app } = server({ requireAuth: true, authenticator: roleAuth(["admin"]) });
+    // Source probe (mlflow, unauthenticated dev server) → reachable + experiment scopes, returned verbatim (no {config} wrapper).
+    const src = await app.inject({
+      method: "POST",
+      url: "/workspace/trace-sources/probe",
+      headers: h,
+      payload: { kind: "mlflow", endpoint: "http://mlflow.corp.io:5000" },
+    });
+    expect(src.statusCode).toBe(200);
+    expect(src.json()).toMatchObject({ kind: "mlflow", reachable: true, scopeKind: "experiment" });
+    expect(src.json().scopes).toEqual([{ id: "s1", name: "scope-one" }]);
+    // Sink probe (langfuse) → reachable + project scopes.
+    const sink = await app.inject({
+      method: "POST",
+      url: "/workspace/trace-sinks/probe",
+      headers: h,
+      payload: { kind: "langfuse", endpoint: "https://langfuse.corp.io" },
+    });
+    expect(sink.statusCode).toBe(200);
+    expect(sink.json()).toMatchObject({ reachable: true, scopeKind: "project" });
+    // Bad body (missing endpoint, otel not a sink kind) → 400.
+    expect(
+      (
+        await app.inject({
+          method: "POST",
+          url: "/workspace/trace-sources/probe",
+          headers: h,
+          payload: { kind: "mlflow" },
+        })
+      ).statusCode,
+    ).toBe(400);
+    expect(
+      (
+        await app.inject({
+          method: "POST",
+          url: "/workspace/trace-sinks/probe",
+          headers: h,
+          payload: { kind: "otel", endpoint: "http://x" },
+        })
+      ).statusCode,
+    ).toBe(400);
+    await app.close();
+
+    // viewer: probe is settings:write → 403.
+    const viewer = server({ requireAuth: true, authenticator: roleAuth(["viewer"]) });
+    expect(
+      (
+        await viewer.app.inject({
+          method: "POST",
+          url: "/workspace/trace-sources/probe",
+          headers: h,
+          payload: { kind: "mlflow", endpoint: "http://mlflow" },
+        })
+      ).statusCode,
+    ).toBe(403);
+    await viewer.app.close();
+  });
+
   it("Mattermost inbound: form-urlencoded parsing + ws routing + unconfigured workspace fails verification → 403 (fail-closed)", async () => {
     const { app } = server({ requireAuth: true, authenticator: roleAuth(["admin"]) });
     // no ws → 400.
@@ -1050,6 +1110,35 @@ describe("API — runtimes probe (connection test, role-agnostic)", () => {
       payload: { kind: "nomad" }, // addr/image missing
     });
     expect(res.statusCode).toBe(400);
+    await app.close();
+  });
+});
+
+describe("API — runtimes inspect (live cluster view, read gate)", () => {
+  it("a viewer can inspect a registered runtime (runtimes:read) → 200 + cluster view", async () => {
+    const { app, keyStore } = server({ requireAuth: true });
+    const h = { authorization: `Bearer ${await issueKey(keyStore, "acme")}` };
+    await app.inject({ method: "POST", url: "/runtimes", headers: h, payload: RUNTIME }); // register first
+    const res = await app.inject({ method: "GET", url: "/runtimes/seoul/versions/1.0.0/inspect", headers: h });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({ kind: "nomad", reachable: true, capacity: { total: 4, used: 1, free: 3 } });
+    await app.close();
+  });
+  it('resolves "latest" to the newest version', async () => {
+    const { app, keyStore } = server({ requireAuth: true });
+    const h = { authorization: `Bearer ${await issueKey(keyStore, "acme")}` };
+    await app.inject({ method: "POST", url: "/runtimes", headers: h, payload: RUNTIME });
+    const res = await app.inject({ method: "GET", url: "/runtimes/seoul/versions/latest/inspect", headers: h });
+    expect(res.statusCode).toBe(200);
+    await app.close();
+  });
+  it("another workspace's / a missing runtime is 404 (no existence leak) — before any live I/O", async () => {
+    const { app, keyStore } = server({ requireAuth: true });
+    const acme = { authorization: `Bearer ${await issueKey(keyStore, "acme")}` };
+    await app.inject({ method: "POST", url: "/runtimes", headers: acme, payload: RUNTIME });
+    const other = { authorization: `Bearer ${await issueKey(keyStore, "other")}` };
+    const res = await app.inject({ method: "GET", url: "/runtimes/seoul/versions/1.0.0/inspect", headers: other });
+    expect(res.statusCode).toBe(404);
     await app.close();
   });
 });
@@ -3251,6 +3340,30 @@ describe("API — judges (Agent Judge, workspace-owned, member+ write)", () => {
     expect(body.evidence.trace.present).toBe(true);
     expect(body.evidence.expected.present).toBe(true);
     expect(body.evidence.dom.present).toBe(false);
+    await app.close();
+  });
+
+  it("preview assesses a judge's declared `requires` against the trace (met + unmet-with-reason)", async () => {
+    const { app } = server({ requireAuth: true, authenticator: roleAuth(["member"]) });
+    const h = { authorization: "Bearer x" };
+    const spec = {
+      ...JUDGE,
+      requires: [{ kind: "final_answer" }, { kind: "artifact", role: "report" }],
+    };
+    const res = await app.inject({
+      method: "POST",
+      url: "/judges/preview",
+      headers: h,
+      payload: {
+        spec,
+        evidence: { source: "trace", trace: [{ t: 0, kind: "message", role: "assistant", text: "done" }] },
+      },
+    });
+    expect(res.statusCode).toBe(200);
+    const req = res.json().requirements;
+    expect(req.satisfied).toEqual([{ kind: "final_answer" }]); // decidable from the trace
+    expect(req.missing).toEqual([{ kind: "artifact", role: "report" }]); // no artifact channel yet (ingest gap)
+    expect((req.warnings as string[]).some((w) => w.includes("ingest generalization"))).toBe(true);
     await app.close();
   });
 

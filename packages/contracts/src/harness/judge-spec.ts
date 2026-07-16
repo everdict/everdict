@@ -5,7 +5,12 @@ import { z } from "zod";
 // Execution is done by the control plane over a trace (next increment) — this contract only declares "what renders the verdict".
 
 import { ModelBindingSchema } from "./model-spec.js";
-import { JudgeCriterionSchema, RubricRefSchema, VERDICT_INSTRUCTION_PLACEHOLDER } from "./rubric-spec.js";
+import {
+  EvidenceRequirementSchema,
+  JudgeCriterionSchema,
+  RubricRefSchema,
+  VERDICT_INSTRUCTION_PLACEHOLDER,
+} from "./rubric-spec.js";
 
 // Verdict input modality — what the verdict is based on (trace=execution record, dom/screenshot=browser result → VLM).
 export const JudgeInputSchema = z.enum(["trace", "dom", "screenshot"]);
@@ -17,6 +22,9 @@ const judgePromptFields = {
   // {verdict_instruction}. Absent → the default template (identical to the previous hardcoded prompt).
   promptTemplate: z.string().optional(),
   criteria: z.array(JudgeCriterionSchema).min(1).optional(), // multi-criteria: one score per criterion + overall
+  // What this judge NEEDS from a run's evidence — assessEvidence checks it in the preview/dry-run so a user knows
+  // (before committing) whether the target harness produces it. Optional; absent → today's coarse `inputs` behavior.
+  requires: z.array(EvidenceRequirementSchema).optional(),
 };
 
 // model judge: calls an LLM/VLM directly. Renders a verdict from the rubric (criteria) + input modality → {pass, score, reason}.

@@ -127,6 +127,13 @@ function harness() {
       reachable: true,
       detail: "stub-reachable",
     }),
+    inspectRuntime: async (_ws: string, spec: RuntimeSpec) => ({
+      kind: spec.kind,
+      reachable: true,
+      detail: "stub-cluster",
+      capacity: { total: 4, used: 1, free: 3 },
+      warnings: [],
+    }),
     keyStore: new InMemoryTenantKeyStore(),
     runnerService: new RunnerService(new InMemoryRunnerStore()),
     runnerHub: new RunnerHub(),
@@ -277,6 +284,7 @@ describe("MCP tools", () => {
       "import_harbor",
       "import_terminal_bench",
       "ingest_scorecard",
+      "inspect_runtime",
       "leaderboard_scorecards",
       "lease_job",
       "leave_workspace",
@@ -302,6 +310,7 @@ describe("MCP tools", () => {
       "pair_workspace_runner",
       "pin_harness_images",
       "probe_runtime",
+      "probe_workspace_trace_sink",
       "pull_scorecard",
       "register_harness",
       "register_harness_template",
@@ -1540,6 +1549,25 @@ describe("MCP tools", () => {
     const viewer = await connect(harness(), ["viewer"], "acme");
     const res = JSON.parse(text(await viewer.callTool({ name: "probe_runtime", arguments: { runtime } })));
     expect(res).toMatchObject({ kind: "local", reachable: true });
+  });
+
+  it("inspect_runtime: a viewer inspects a REGISTERED runtime by id (runtimes:read); a missing one is NOT_FOUND", async () => {
+    const deps = harness();
+    const admin = await connect(deps, ["admin"], "acme");
+    const runtime = JSON.stringify({
+      kind: "nomad",
+      id: "seoul",
+      version: "1.0.0",
+      tags: [],
+      addr: "http://n:4646",
+      image: "i",
+    });
+    await admin.callTool({ name: "create_runtime", arguments: { runtime } });
+    const viewer = await connect(deps, ["viewer"], "acme");
+    const res = JSON.parse(text(await viewer.callTool({ name: "inspect_runtime", arguments: { id: "seoul" } })));
+    expect(res).toMatchObject({ kind: "nomad", reachable: true, capacity: { total: 4, used: 1, free: 3 } });
+    // An unregistered id resolves to a registry NOT_FOUND (surfaced as a tool error), before any live I/O.
+    expect((await viewer.callTool({ name: "inspect_runtime", arguments: { id: "ghost" } })).isError).toBe(true);
   });
 
   it("workspace settings: admin get (empty)→{} / set merges in; member is a permission error", async () => {
