@@ -18,13 +18,14 @@ import {
   type ValidateDatasetResult,
 } from '../api/register-dataset'
 
-// Sample to help fill in cases (one repo empty-seed case).
+// Sample to help fill in cases. Grading is chosen at run time (the scorecard's graders/judges), so a case is
+// usually pure data: id · env · task · expected. For an LLM judge, `expected` holds the evaluation criteria.
 const SAMPLE_CASES = `[
   {
     "id": "case-1",
-    "env": { "kind": "repo", "source": { "files": {} } },
-    "task": "create ok.txt with the text done",
-    "graders": [{ "id": "steps" }, { "id": "cost" }]
+    "env": { "kind": "prompt" },
+    "task": "Write an email declining a refund request.",
+    "expected": "Polite tone; states the reason clearly; offers at least one alternative."
   }
 ]`
 

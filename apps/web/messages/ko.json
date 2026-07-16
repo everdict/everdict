@@ -1447,7 +1447,7 @@
     "tagsLabel": "태그 (선택 — 콤마 구분)",
     "tagsHelp": "목록에서 카테고리 필터로 써요 (예: coding, browser, qa).",
     "casesLabel": "케이스 (EvalCase[] JSON)",
-    "casesHelp": "각 케이스는 id · env · task · graders 로 이뤄져요. 어떤 하니스든 같은 케이스로 평가해요.",
+    "casesHelp": "각 케이스는 id · env · task · expected 예요. 채점(grader · judge)은 스코어카드를 돌릴 때 정해요 — 같은 케이스로 어떤 하니스든 평가해요.",
     "immutableNote": "버전은 바꿀 수 없어요. 같은 버전을 다른 내용으로 다시 올리면 등록되지 않아요.",
     "validate": "검증하기",
     "processing": "처리 중…",

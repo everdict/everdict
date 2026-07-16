@@ -29,9 +29,10 @@ export const EvalCaseSchema = z.object({
   // Reference output/answer — case DATA (rows of inputs/outputs), not grader config. answer-match falls back to it
   // and judges receive it as EXPECTED OUTPUT evidence. docs/architecture/eval-domain-model.md S5
   expected: z.string().optional(),
-  // The case's DEFAULT grading plan — a scorecard run may override it (`POST /scorecards` `graders`), so re-scoring
-  // the same dataset differently never edits the dataset.
-  graders: z.array(GraderSpecSchema),
+  // The case's OPTIONAL default grading plan (defaults to []). Grading is typically chosen at RUN time, not per case:
+  // a scorecard run's `graders` replaces every case's plan (`applyGradingPlan`) and its `judges` score the trace — so a
+  // dataset case is usually pure {id, env, task, expected} data with no per-case graders. Re-scoring never edits the dataset.
+  graders: z.array(GraderSpecSchema).default([]),
   image: z.string().optional(),
   // Per-case execution budget (seconds). int+positive so it can be forwarded verbatim as the run-context timeout
   // (the dispatched agent plumbs it → EVERDICT_TIMEOUT_SEC-parity default). Dataset adapters set it from the task's

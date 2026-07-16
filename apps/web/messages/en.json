@@ -1447,7 +1447,7 @@
     "tagsLabel": "Tags (optional — comma-separated)",
     "tagsHelp": "Used as category filters in the list (e.g. coding, browser, qa).",
     "casesLabel": "Cases (EvalCase[] JSON)",
-    "casesHelp": "Each case is id · env · task · graders. Any harness is evaluated on the same cases.",
+    "casesHelp": "Each case is id · env · task · expected. Grading (graders · judges) is set when you run a scorecard — the same cases evaluate any harness.",
     "immutableNote": "Versions are immutable. Re-uploading the same version with different content won't register.",
     "validate": "Validate",
     "processing": "Working…",
