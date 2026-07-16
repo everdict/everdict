@@ -1,8 +1,8 @@
 export { ModelsManager, type ModelEntry } from './ui/models-manager'
 export {
-  createModelAction,
-  validateModelAction,
+  testModelConnectionAction,
+  saveModelAction,
   deleteModelAction,
-  type CreateModelResult,
-  type ValidateModelResult,
+  type TestConnectionActionResult,
+  type SaveModelActionResult,
 } from './api/manage-models'

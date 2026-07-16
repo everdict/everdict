@@ -61,14 +61,35 @@ A model judge (`JudgeSpec kind:"model"`) resolves `judge.model` through the same
 the provider key is read from the `SecretStore` at grade time (`judge-runner.ts` / `JudgeAuthDispatcher`).
 
 ## Surface (BFF ↔ MCP parity)
-`POST /models` (register) · `POST /models/validate` (dry-run: schema + version conflict + `missingSecrets` warning)
-· `GET /models` · `GET /models/:id/versions/:version` · `DELETE /models/:id/versions/:version` (one version) ·
+`POST /models` (register — explicit-version, programmatic/bundle path) · `POST /models/validate` (dry-run: schema +
+version conflict + `missingSecrets` warning) · `PUT /models/:id` (interactive **save/edit** upsert, version-free) ·
+`POST /models/test-connection` (fire a dummy completion → response preview) · `GET /models` ·
+`GET /models/:id/versions/:version` · `DELETE /models/:id/versions/:version` (one version) ·
 `DELETE /models/:id` (bulk — `{versions}` or body-less = the whole model) — `models:read` (viewer+) /
-`models:write` (member+) / delete = creator-or-admin (`models:delete`). MCP twins: `list_models` / `get_model` /
-`validate_model` / `create_model` / `delete_model` / `delete_model_versions`. Web: **Settings → Models** (register
-with a `SecretPicker` for `apiKeySecret`; each row shows provider · model · baseUrl and the linked-key state, plus a
-delete control on workspace-owned rows for the creator or an admin). No first-party models are auto-seeded — a
-workspace starts empty and registers its own; the `_shared` fallback tier still resolves any shared model registered later.
+`models:write` (member+ — register/save/test) / delete = creator-or-admin (`models:delete`). MCP twins: `list_models` /
+`get_model` / `validate_model` / `create_model` / `save_model` / `test_model_connection` / `delete_model` /
+`delete_model_versions`. Web: **Settings → Models** — the version field is hidden (immutable versions still exist under
+the hood); a register/edit form with a `SecretPicker` for `apiKeySecret` requires a passing **connection test** (a
+dummy completion, response previewed) before Save is enabled, and any connection-field edit re-arms that gate. Each row
+shows provider · model · baseUrl and the linked-key state, plus a per-row **connection-check** button (dummy call →
+✓/✗ with the response/error in a tooltip), an **edit** control (workspace-owned rows), and a delete control (workspace-owned
+rows, creator or admin). No first-party models are auto-seeded — a workspace starts empty and registers its own; the
+`_shared` fallback tier still resolves any shared model registered later.
+
+### Connection test (`POST /models/test-connection`, `ModelService.testConnection`)
+Resolves the connection's `apiKeySecret` from the tenant's secret tiers (workspace first, personal fallback — the same
+source dispatch uses) and fires **one** minimal dummy completion through the shared judge transport
+(`anthropicComplete` / `openaiComplete`, a tiny prompt). The outcome is the payload, never a 4xx: `ok:true` with a
+response-text preview + latency, or `ok:false` with a reason (missing key, upstream status, network error). A test with
+no resolvable key returns `ok:false` (a probe can't run own-pays). Powers both the register/edit gate and each row's
+reachability check; the row check sends the row's already-loaded `ModelSpec` connection.
+
+### Save / edit (`PUT /models/:id`, `ModelService.saveConnection`)
+The version-free upsert the web uses. A brand-new id registers `1.0.0`; a **changed** connection auto patch-bumps to a
+**new immutable version** (mirrors `repinHarnessImages` — `latest` moves so references pick up the new endpoint, while
+scorecards that pinned an older version stay reproducible); an **unchanged** connection is an idempotent no-op
+(`created:false`, no version written — no version spam). `POST /models` stays the explicit-version path (bundles/CI pin
+an exact version).
 
 ## Deletion (soft delete / tombstone)
 Deleting a model is a **tombstone**, mirroring datasets/harnesses (see `.claude/rules/registry.md`): the version(s)

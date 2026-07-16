@@ -419,6 +419,17 @@ export const controlPlane = {
     call<T>(auth, '/models', { method: 'POST', body: JSON.stringify(spec) }),
   validateModel: <T>(auth: AuthContext, spec: unknown) =>
     call<T>(auth, '/models/validate', { method: 'POST', body: JSON.stringify(spec) }),
+  // Fire a dummy completion against a connection (provider/model/baseUrl/apiKeySecret NAME) → response preview or reason.
+  // Gates a register/edit and powers the per-row reachability check. models:write.
+  testModelConnection: <T>(auth: AuthContext, connection: unknown) =>
+    call<T>(auth, '/models/test-connection', { method: 'POST', body: JSON.stringify(connection) }),
+  // Version-free save/edit upsert (PUT /models/:id): a new id → 1.0.0; a changed connection auto patch-bumps a new
+  // immutable version; an unchanged one is a no-op. The id is the path; the version is assigned server-side. models:write.
+  saveModel: <T>(auth: AuthContext, id: string, body: unknown) =>
+    call<T>(auth, `/models/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
   // Bulk soft-delete (tombstone) — pass `versions` to delete specific versions, or omit them to delete the whole model
   // (all own live versions). The control plane checks each target creator-or-admin and fails fast (nothing deleted if any
   // is forbidden/absent). A body is sent only when versions are given, so the whole-model delete is a bodyless DELETE.

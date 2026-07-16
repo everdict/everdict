@@ -99,6 +99,7 @@ import type { BrowserProfileCaptureService } from "../core/browser-profile/brows
 import type { BrowserSessionService } from "../core/browser-session/browser-session-service.js";
 import { BundleSchema, type BundleService, requiredActionsForBundle } from "../core/bundle/bundle-service.js";
 import type { JudgePreviewService } from "../core/judge/judge-preview-service.js";
+import type { ModelService } from "../core/model/model-service.js";
 import type { RuntimeProbeResult } from "../core/ops/runtime-probe.js";
 import { buildMcpServer } from "../mcp.js";
 
@@ -121,6 +122,7 @@ export interface ServerDeps {
   judgePreviewService?: JudgePreviewService; // zero-cost judge preview + one-case dry-run (route disabled if absent)
   rubricRegistry?: RubricRegistry; // Rubric (HOW to judge — referenced by judges) CRUD (route disabled if absent)
   modelRegistry?: ModelRegistry; // Model (inference/judging model) CRUD (route disabled if absent)
+  modelService?: ModelService; // Model connection test (dummy completion) + version-free save/edit upsert (routes disabled if absent)
   runtimeRegistry?: RuntimeRegistry; // Runtime (execution infra) CRUD (route disabled if absent)
   // Runtime connection test — RuntimeSpec → build a live backend, then probe() (reachability/auth without a job). main injects it with secrets + a builder.
   probeRuntime?: (workspace: string, spec: RuntimeSpec) => Promise<RuntimeProbeResult>;

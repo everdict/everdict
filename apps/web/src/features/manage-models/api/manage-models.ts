@@ -2,43 +2,48 @@
 
 import { revalidatePath } from 'next/cache'
 
+import { saveModelResultSchema, testModelConnectionResultSchema } from '@/entities/model'
 import { authContext } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
 
-// 컨트롤플레인 /models/validate 응답(느슨한 미러). ok=false 면 스키마 오류를 보여준다.
-// missingSecrets = apiKeySecret 로 지정한 시크릿이 아직 워크스페이스에 없음(경고 — 등록은 막지 않음).
-export interface ValidateModelResult {
+// 커넥션 테스트(더미콜) 결과의 평탄한 뷰 — UI 는 ok/응답텍스트/사유만 쓴다. throw(네트워크/403)도 ok:false 로 흡수.
+export interface TestConnectionActionResult {
   ok: boolean
-  errors?: string[]
-  versionExists?: boolean
-  missingSecrets?: string[]
+  text?: string
   error?: string
+  latencyMs?: number
 }
 
-// 스키마 + 이 워크스페이스의 기존 버전/충돌 + apiKeySecret 존재 확인(등록하지 않음). 실패 시 {ok:false} 로 폼을 살려둔다.
-export async function validateModelAction(spec: unknown): Promise<ValidateModelResult> {
+// provider/model/baseUrl/apiKeySecret(이름) 로 최소 더미콜을 날려 응답이 오는지 확인. 실패는 4xx 가 아니라 ok:false 로 온다.
+export async function testModelConnectionAction(
+  connection: unknown
+): Promise<TestConnectionActionResult> {
   const ctx = await authContext()
   try {
-    return await controlPlane.validateModel<ValidateModelResult>(ctx, spec)
+    const r = testModelConnectionResultSchema.parse(await controlPlane.testModelConnection(ctx, connection))
+    return r.ok
+      ? { ok: true, text: r.text, latencyMs: r.latencyMs }
+      : { ok: false, error: r.error }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }
   }
 }
 
-export interface CreateModelResult {
+export interface SaveModelActionResult {
   ok: boolean
-  id?: string
   version?: string
+  created?: boolean
   error?: string
 }
 
-// 등록(POST /models). authZ(models:write)는 컨트롤플레인이 강제. 버전은 불변이라 같은 버전 재등록은 서버가 409 로 막는다.
-export async function createModelAction(spec: unknown): Promise<CreateModelResult> {
+// 버전 없는 저장(PUT /models/:id). 새 id → 1.0.0, 커넥션 변경 → 내부 patch 자동 증가(새 불변 버전), 동일 → 멱등 no-op.
+// authZ(models:write)/버전 배정은 컨트롤플레인이 담당.
+export async function saveModelAction(id: string, body: unknown): Promise<SaveModelActionResult> {
   const ctx = await authContext()
   try {
-    const r = await controlPlane.createModel<{ id: string; version: string }>(ctx, spec)
+    const r = saveModelResultSchema.parse(await controlPlane.saveModel(ctx, id, body))
     revalidatePath('/[workspace]/settings')
-    return { ok: true, id: r.id, version: r.version }
+    return { ok: true, version: r.version, created: r.created }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }
   }

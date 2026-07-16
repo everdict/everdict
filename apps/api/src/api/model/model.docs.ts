@@ -4,10 +4,14 @@ import { DeleteModelVersionsResultSchema } from "@everdict/contracts/wire";
 import { ModelListResponseSchema } from "@everdict/contracts/wire";
 import { ModelResponseSchema } from "@everdict/contracts/wire";
 import { RegisterModelResultSchema } from "@everdict/contracts/wire";
+import { SaveModelResultSchema } from "@everdict/contracts/wire";
+import { TestModelConnectionResultSchema } from "@everdict/contracts/wire";
 import { ValidateModelResultSchema } from "@everdict/contracts/wire";
 import type { FastifySchema } from "fastify";
 import { errorResponses, toJsonSchema } from "../openapi.js";
 import { DeleteModelVersionsBodySchema } from "./request/delete-model-versions.js";
+import { SaveModelBodySchema } from "./request/save-model.js";
+import { TestModelConnectionBodySchema } from "./request/test-connection.js";
 
 // OpenAPI descriptors for the model routes — doc-only (rule api-layer): the no-op compilers in server.ts
 // make attaching these behavior-free; validation stays in the handlers.
@@ -49,6 +53,35 @@ const docs = {
         ...toJsonSchema(ValidateModelResultSchema),
       },
       ...errorResponses(401, 403, 404),
+    },
+  },
+  testConnection: {
+    summary: "Test a model connection (dummy completion)",
+    description:
+      "Resolves the connection's apiKeySecret from the workspace/personal secret tiers and fires ONE minimal dummy " +
+      "completion to prove the model is reachable and responding. Requires models:write (member+ — it makes a real " +
+      "billable call). The probe outcome (ok:true + response text preview | ok:false + reason) is returned as a 200; " +
+      "a missing key / upstream error / network failure is ok:false, not a 4xx.",
+    tags: ["model"],
+    body: toJsonSchema(TestModelConnectionBodySchema),
+    response: {
+      200: { description: "Probe outcome", ...toJsonSchema(TestModelConnectionResultSchema) },
+      ...errorResponses(400, 401, 403, 404),
+    },
+  },
+  save: {
+    summary: "Save (upsert) a model connection",
+    description:
+      "The interactive edit path: a new id registers version 1.0.0; a changed connection auto patch-bumps to a NEW " +
+      "immutable version (so `latest` moves while past-pinned scorecards stay reproducible); an unchanged connection " +
+      "is an idempotent no-op (created:false). The id is the path param and the version is assigned server-side, so " +
+      "neither is in the body. Requires models:write (member+). POST /models remains the explicit-version programmatic path.",
+    tags: ["model"],
+    params: { type: "object", properties: { id: { type: "string", description: "Model id" } }, required: ["id"] },
+    body: toJsonSchema(SaveModelBodySchema),
+    response: {
+      200: { description: "Saved (created:true) or unchanged (created:false)", ...toJsonSchema(SaveModelResultSchema) },
+      ...errorResponses(400, 401, 403, 404, 409),
     },
   },
   list: {

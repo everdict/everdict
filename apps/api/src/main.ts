@@ -29,6 +29,7 @@ import { BrowserProfileCaptureService } from "./core/browser-profile/browser-pro
 import { BrowserSessionService } from "./core/browser-session/browser-session-service.js";
 import { buildPlacementPreflight } from "./core/execution/placement-preflight.js";
 import { JudgePreviewService } from "./core/judge/judge-preview-service.js";
+import { ModelService } from "./core/model/model-service.js";
 import { LocalChromeProvisioner } from "./infrastructure/browser-session/local-chrome-provisioner.js";
 import { buildServer } from "./server.js";
 
@@ -294,6 +295,13 @@ async function main(): Promise<void> {
     }),
     rubricRegistry,
     modelRegistry,
+    // Model connection test (dummy completion) + version-free save/edit upsert. Reuses the same secret tiers (scopedSecretsFor)
+    // and OpenAI base default (LiteLLM etc.) the judge runner uses, so a probe reflects exactly what a real dispatch resolves.
+    modelService: new ModelService({
+      models: modelRegistry,
+      scopedSecretsFor,
+      ...(process.env.EVERDICT_JUDGE_OPENAI_BASE_URL ? { openaiBaseUrl: process.env.EVERDICT_JUDGE_OPENAI_BASE_URL } : {}),
+    }),
     runtimeRegistry,
     probeRuntime,
     inspectRuntime,

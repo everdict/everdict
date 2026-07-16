@@ -3,6 +3,8 @@ import { ModelSpecSchema } from "@everdict/contracts";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { type McpToolContext, fail, ok, plain, run } from "../mcp-context.js";
+import { SaveModelBodySchema } from "./request/save-model.js";
+import { TestModelConnectionBodySchema } from "./request/test-connection.js";
 
 // Model MCP tools — the MCP twin of model.routes.ts.
 export function registerModelTools(server: McpServer, ctx: McpToolContext): void {
@@ -111,6 +113,55 @@ export function registerModelTools(server: McpServer, ctx: McpToolContext): void
         },
       },
       ({ id, versions }) => plain(async () => ok(await deleteModelVersions(models, principal, id, versions))),
+    );
+  }
+
+  if (deps.modelService) {
+    const modelService = deps.modelService;
+
+    server.registerTool(
+      "test_model_connection",
+      {
+        description:
+          "Fire ONE minimal dummy completion against a model connection (JSON: provider + model + baseUrl? + apiKeySecret? + params?) to prove it is reachable and responding. Resolves apiKeySecret from the workspace/personal secret tiers. Requires models:write (makes a real billable call). Returns ok:true + a response-text preview, or ok:false + reason (missing key / upstream error) — a failed connection is a result, not an error.",
+        inputSchema: { connection: z.string().describe("Connection JSON (provider, model, baseUrl?, apiKeySecret?, params?)") },
+      },
+      ({ connection }) =>
+        run(principal, "models:write", async () => {
+          let parsed: unknown;
+          try {
+            parsed = JSON.parse(connection);
+          } catch {
+            return fail("BAD_REQUEST: connection is not valid JSON.");
+          }
+          const result = TestModelConnectionBodySchema.safeParse(parsed);
+          if (!result.success) return fail(`BAD_REQUEST: ${result.error.message}`);
+          return ok(await modelService.testConnection(ws, principal.subject, result.data));
+        }),
+    );
+
+    server.registerTool(
+      "save_model",
+      {
+        description:
+          "Save (upsert) a model connection by id (the interactive edit path). A new id registers version 1.0.0; a changed connection auto patch-bumps to a NEW immutable version (so `latest` moves while past-pinned scorecards stay reproducible); an unchanged connection is an idempotent no-op (created:false). The version is assigned server-side, so `model` JSON carries no id/version (provider + model + baseUrl? + apiKeySecret? + params? + description? + tags?). Requires models:write. create_model remains the explicit-version programmatic path.",
+        inputSchema: {
+          id: z.string().describe("model id (the connection's stable identity)"),
+          model: z.string().describe("ModelSpec JSON minus id/version"),
+        },
+      },
+      ({ id, model }) =>
+        run(principal, "models:write", async () => {
+          let parsed: unknown;
+          try {
+            parsed = JSON.parse(model);
+          } catch {
+            return fail("BAD_REQUEST: not a valid model JSON.");
+          }
+          const result = SaveModelBodySchema.safeParse(parsed);
+          if (!result.success) return fail(`BAD_REQUEST: ${result.error.message}`);
+          return ok(await modelService.saveConnection(ws, principal.subject, id, result.data));
+        }),
     );
   }
 }

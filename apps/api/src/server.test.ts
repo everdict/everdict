@@ -48,6 +48,7 @@ import { BenchmarkService } from "./core/benchmark/benchmark-service.js";
 import { BundleService } from "./core/bundle/bundle-service.js";
 import { defaultJudgeRunner } from "./core/execution/judge-runner.js";
 import { JudgePreviewService } from "./core/judge/judge-preview-service.js";
+import { ModelService } from "./core/model/model-service.js";
 import { githubAppGateway } from "./infrastructure/github/app-gateway.js";
 import { buildServer } from "./server.js";
 
@@ -143,6 +144,9 @@ function server(
       set(patch: { quotas?: Record<string, number | null>; weights?: Record<string, number | null> }): void;
     };
     invalidateTenantBackends?: (tenant: string) => void;
+    // Model connection-test controls: the secret tiers scopedSecretsFor resolves + the fetch the probe transport uses.
+    modelSecrets?: { workspace: Record<string, string>; user: Record<string, string> };
+    modelFetch?: typeof fetch;
   } = {},
 ) {
   const keyStore = new InMemoryTenantKeyStore();
@@ -250,6 +254,11 @@ function server(
   });
   const usageMeter = inMemoryUsageMeter();
   const budget = persistentBudget(new InMemoryBudgetStore());
+  const modelService = new ModelService({
+    models: modelRegistry,
+    scopedSecretsFor: async () => opts.modelSecrets ?? { workspace: {}, user: {} },
+    ...(opts.modelFetch ? { fetchImpl: opts.modelFetch } : {}),
+  });
   const app = buildServer({
     service: svc,
     scorecardService,
@@ -273,6 +282,7 @@ function server(
     }),
     rubricRegistry,
     modelRegistry,
+    modelService,
     runtimeRegistry,
     // Connection-test stub — verifies route wiring / role gate only, no real cluster I/O.
     probeRuntime: async (_ws, spec) => ({ kind: spec.kind, reachable: true, detail: "stub-reachable" }),
@@ -2488,6 +2498,127 @@ describe("API — models (workspace-owned, soft delete)", () => {
       (await app.inject({ method: "DELETE", url: "/models/gpt", headers: beta, payload: { versions: ["1.0.0"] } }))
         .statusCode,
     ).toBe(404);
+    await app.close();
+  });
+});
+
+describe("API — models (connection test + version-free save/edit)", () => {
+  // An OpenAI-compatible fetch stub the probe transport calls — success returns a chat-completion body; failure a 401.
+  const okFetch = (async () =>
+    new Response(JSON.stringify({ choices: [{ message: { content: "OK" } }] }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    })) as unknown as typeof fetch;
+  const failFetch = (async () => new Response("nope", { status: 401 })) as unknown as typeof fetch;
+  const CONN = { provider: "openai", model: "gpt-5.4-mini", apiKeySecret: "MY_KEY" };
+
+  it("test-connection: a reachable model returns ok:true with the response text preview", async () => {
+    const { app, keyStore } = server({
+      requireAuth: true,
+      modelSecrets: { workspace: { MY_KEY: "sk-live" }, user: {} },
+      modelFetch: okFetch,
+    });
+    const acme = { authorization: `Bearer ${await issueKey(keyStore, "acme")}` };
+    const res = await app.inject({ method: "POST", url: "/models/test-connection", headers: acme, payload: CONN });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({ ok: true, provider: "openai", model: "gpt-5.4-mini", text: "OK" });
+    expect(res.json().latencyMs).toBeGreaterThanOrEqual(0);
+    await app.close();
+  });
+
+  it("test-connection: a named-but-unset apiKeySecret returns ok:false (not a 4xx) naming the key", async () => {
+    const { app, keyStore } = server({ requireAuth: true, modelFetch: okFetch });
+    const acme = { authorization: `Bearer ${await issueKey(keyStore, "acme")}` };
+    const res = await app.inject({ method: "POST", url: "/models/test-connection", headers: acme, payload: CONN });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().ok).toBe(false);
+    expect(res.json().error).toContain("MY_KEY");
+    await app.close();
+  });
+
+  it("test-connection: an upstream failure returns ok:false with the status in the reason", async () => {
+    const { app, keyStore } = server({
+      requireAuth: true,
+      modelSecrets: { workspace: { MY_KEY: "sk-live" }, user: {} },
+      modelFetch: failFetch,
+    });
+    const acme = { authorization: `Bearer ${await issueKey(keyStore, "acme")}` };
+    const res = await app.inject({ method: "POST", url: "/models/test-connection", headers: acme, payload: CONN });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().ok).toBe(false);
+    expect(res.json().error).toContain("401");
+    await app.close();
+  });
+
+  it("test-connection: viewer is forbidden (403) and a missing bearer is 401", async () => {
+    const viewer = server({ requireAuth: true, authenticator: roleAuth(["viewer"]) });
+    expect(
+      (
+        await viewer.app.inject({
+          method: "POST",
+          url: "/models/test-connection",
+          headers: { authorization: "Bearer x" },
+          payload: CONN,
+        })
+      ).statusCode,
+    ).toBe(403);
+    await viewer.app.close();
+    const anon = server({ requireAuth: true });
+    expect((await anon.app.inject({ method: "POST", url: "/models/test-connection", payload: CONN })).statusCode).toBe(
+      401,
+    );
+    await anon.app.close();
+  });
+
+  it("save (PUT): a new id registers 1.0.0; a changed connection auto patch-bumps; an unchanged one is a no-op", async () => {
+    const { app, keyStore } = server({ requireAuth: true });
+    const acme = { authorization: `Bearer ${await issueKey(keyStore, "acme")}` };
+
+    // New id → 1.0.0 (created:true).
+    const create = await app.inject({
+      method: "PUT",
+      url: "/models/gpt",
+      headers: acme,
+      payload: { provider: "openai", model: "gpt-5.4-mini" },
+    });
+    expect(create.statusCode).toBe(200);
+    expect(create.json()).toMatchObject({ id: "gpt", version: "1.0.0", created: true });
+
+    // Same connection again → idempotent no-op (created:false, version unchanged) — no version spam.
+    const same = await app.inject({
+      method: "PUT",
+      url: "/models/gpt",
+      headers: acme,
+      payload: { provider: "openai", model: "gpt-5.4-mini" },
+    });
+    expect(same.json()).toMatchObject({ id: "gpt", version: "1.0.0", created: false });
+
+    // Changed endpoint → a NEW immutable version (1.0.1), and `latest` now resolves to it.
+    const edit = await app.inject({
+      method: "PUT",
+      url: "/models/gpt",
+      headers: acme,
+      payload: { provider: "openai", model: "gpt-5.4-mini", baseUrl: "https://litellm.internal/v1" },
+    });
+    expect(edit.json()).toMatchObject({ id: "gpt", version: "1.0.1", created: true });
+    const latest = await app.inject({ method: "GET", url: "/models/gpt/versions/latest", headers: acme });
+    expect(latest.json()).toMatchObject({ version: "1.0.1", baseUrl: "https://litellm.internal/v1" });
+    // The prior version stays reproducible (still readable at its pin).
+    expect((await app.inject({ method: "GET", url: "/models/gpt/versions/1.0.0", headers: acme })).statusCode).toBe(
+      200,
+    );
+    await app.close();
+  });
+
+  it("save (PUT): viewer is forbidden (403)", async () => {
+    const { app } = server({ requireAuth: true, authenticator: roleAuth(["viewer"]) });
+    const res = await app.inject({
+      method: "PUT",
+      url: "/models/gpt",
+      headers: { authorization: "Bearer x" },
+      payload: { provider: "openai", model: "gpt-5.4-mini" },
+    });
+    expect(res.statusCode).toBe(403);
     await app.close();
   });
 });

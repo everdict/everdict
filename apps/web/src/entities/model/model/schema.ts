@@ -1,5 +1,9 @@
 import type { ModelSpec as ContractModelSpec } from '@everdict/contracts'
-import type { ModelListEntry } from '@everdict/contracts/wire'
+import type {
+  ModelListEntry,
+  SaveModelResult as ContractSaveModelResult,
+  TestModelConnectionResult as ContractTestModelConnectionResult,
+} from '@everdict/contracts/wire'
 import { z } from 'zod'
 
 // 모델(추론/판정용 LLM) 경계 검증은 여기 zod v4 에서만 하고, EXPORT 타입은 @everdict/contracts 에 고정(재아키텍처 P4).
@@ -36,9 +40,40 @@ export const modelSpecSchema = z.object({
 })
 export type ModelSpec = z.infer<typeof modelSpecSchema>
 
+// POST /models/test-connection 200 — 더미콜 결과. ok:true 면 응답 텍스트 프리뷰, ok:false 면 실패 사유(4xx 아님).
+export const testModelConnectionResultSchema = z.union([
+  z.object({
+    ok: z.literal(true),
+    provider: z.string(),
+    model: z.string(),
+    text: z.string(),
+    latencyMs: z.number(),
+  }),
+  z.object({
+    ok: z.literal(false),
+    provider: z.string(),
+    model: z.string(),
+    error: z.string(),
+  }),
+])
+export type TestModelConnectionResult = z.infer<typeof testModelConnectionResultSchema>
+
+// PUT /models/:id 200 — 버전 없는 저장(업서트). created=false 면 기존 latest 와 동일해 새 버전 안 씀(멱등).
+export const saveModelResultSchema = z.object({
+  workspace: z.string(),
+  id: z.string(),
+  version: z.string(),
+  created: z.boolean(),
+})
+export type SaveModelResult = z.infer<typeof saveModelResultSchema>
+
 // 드리프트 가드 — 요약은 wire 리스트 엔트리와 동일 형태라 양방향(어느 쪽 필드 변경도 웹 타입체크를 깨뜨린다);
 // 스펙은 web→contract 단방향(웹은 표시/등록만, wire 계약이 SSOT).
 type AssertAssignable<A extends B, B> = A
 type _SummaryFwd = AssertAssignable<ModelSummary, ModelListEntry>
 type _SummaryBack = AssertAssignable<ModelListEntry, ModelSummary>
 type _SpecFwd = AssertAssignable<ModelSpec, ContractModelSpec>
+type _TestConnFwd = AssertAssignable<TestModelConnectionResult, ContractTestModelConnectionResult>
+type _TestConnBack = AssertAssignable<ContractTestModelConnectionResult, TestModelConnectionResult>
+type _SaveFwd = AssertAssignable<SaveModelResult, ContractSaveModelResult>
+type _SaveBack = AssertAssignable<ContractSaveModelResult, SaveModelResult>

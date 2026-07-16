@@ -1314,7 +1314,21 @@
     "deleteWarning": "Judges or harnesses that reference this model by id will fail to resolve on future runs. Re-register the same spec to restore it.",
     "deleteConfirm": "Delete model",
     "deleteFailed": "Couldn't delete the model.",
-    "deletedModel": "Deleted {id}."
+    "deletedModel": "Deleted {id}.",
+    "testConnection": "Test connection",
+    "testing": "Testing…",
+    "testOk": "Connection OK — the model responded:",
+    "testFailed": "Connection failed: {error}",
+    "testFirst": "Test the connection to enable saving.",
+    "saveEdit": "Save changes",
+    "savedNew": "Registered {id}.",
+    "savedEdit": "Saved {id}.",
+    "editTitle": "Edit {id}",
+    "editModel": "Edit model {id}",
+    "checkConnection": "Check connection for {id}",
+    "checkHint": "Send a test call to check this connection.",
+    "checkOk": "Connection OK: {text}",
+    "checkFailed": "Connection failed: {error}"
   },
   "manageWorkspaceSecrets": {
     "workspace": {

@@ -70,6 +70,8 @@ export * from "./model/delete-model-versions-result.js";
 export * from "./model/model-list-entry.js";
 export * from "./model/model.js";
 export * from "./model/register-model-result.js";
+export * from "./model/save-model-result.js";
+export * from "./model/test-connection-result.js";
 export * from "./model/validate-model-result.js";
 export * from "./notification/notification-feed.js";
 export * from "./notification/read-notifications-result.js";

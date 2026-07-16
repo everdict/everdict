@@ -4,6 +4,8 @@ import type { FastifyInstance } from "fastify";
 import { type ServerDeps, gate, resolvePrincipal, sendError, zodIssues } from "../route-context.js";
 import { modelDocs } from "./model.docs.js";
 import { DeleteModelVersionsBodySchema } from "./request/delete-model-versions.js";
+import { SaveModelBodySchema } from "./request/save-model.js";
+import { TestModelConnectionBodySchema } from "./request/test-connection.js";
 
 // models (workspace-owned SSOT, inference/judging model: provider + underlying model + baseUrl)
 export function registerModelRoutes(app: FastifyInstance, deps: ServerDeps): void {
@@ -59,6 +61,54 @@ export function registerModelRoutes(app: FastifyInstance, deps: ServerDeps): voi
       versionExists: existingVersions.includes(parsed.data.version),
       ...(missingSecrets ? { missingSecrets } : {}),
     });
+  });
+
+  // Fire ONE dummy completion against a connection (provider + model + baseUrl + resolved apiKeySecret) so the caller
+  // can preview the response before registering/editing, and so a list row can show a live reachability check. The probe
+  // outcome (ok + preview text, or ok:false + reason) is the 200 payload — a failed connection is not a 4xx. models:write
+  // (member+ — it fires a real billable call and reads the workspace/personal secret tiers).
+  app.post("/models/test-connection", { schema: modelDocs.testConnection }, async (req, reply) => {
+    if (!deps.modelService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "model service not configured" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "models:write");
+    } catch (err) {
+      return sendError(reply, err);
+    }
+    const parsed = TestModelConnectionBodySchema.safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
+    try {
+      return reply.send(await deps.modelService.testConnection(principal.workspace, principal.subject, parsed.data));
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  // Human "save" upsert (the version-free path the web uses). A new id registers 1.0.0; a changed connection auto
+  // patch-bumps to a NEW immutable version (so `latest` moves, past-pinned scorecards stay reproducible); an unchanged
+  // connection is an idempotent no-op (created:false). models:write (member+). POST /models stays the explicit-version
+  // programmatic path (bundles/CI); this is the interactive edit path.
+  app.put<{ Params: { id: string } }>("/models/:id", { schema: modelDocs.save }, async (req, reply) => {
+    if (!deps.modelService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "model service not configured" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "models:write");
+    } catch (err) {
+      return sendError(reply, err);
+    }
+    const parsed = SaveModelBodySchema.safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
+    try {
+      return reply.send(
+        await deps.modelService.saveConnection(principal.workspace, principal.subject, req.params.id, parsed.data),
+      );
+    } catch (err) {
+      return sendError(reply, err); // immutable conflict (concurrent same-version write) → 409
+    }
   });
 
   app.get("/models", { schema: modelDocs.list }, async (req, reply) => {

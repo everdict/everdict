@@ -41,6 +41,7 @@ import type { BrowserProfileCaptureService } from "../core/browser-profile/brows
 import type { BrowserSessionService } from "../core/browser-session/browser-session-service.js";
 import type { BundleService } from "../core/bundle/bundle-service.js";
 import type { JudgePreviewService } from "../core/judge/judge-preview-service.js";
+import type { ModelService } from "../core/model/model-service.js";
 import type { RuntimeProbeResult } from "../core/ops/runtime-probe.js";
 
 // MCP tool surface — the "agent transport" sharing the same service core as the HTTP routes.
@@ -60,6 +61,7 @@ export interface McpDeps {
   judgePreviewService?: JudgePreviewService; // zero-cost judge preview (preview_judge) + one-case dry-run
   rubricRegistry?: RubricRegistry; // Rubric (HOW to judge) register/read — judges reference it by {id, version}
   modelRegistry?: ModelRegistry; // Model (inference/judgment model) register/read — judge and command harnesses reference it by id
+  modelService?: ModelService; // Model connection test (dummy completion) + version-free save/edit upsert
   runtimeRegistry?: RuntimeRegistry;
   probeRuntime?: (workspace: string, spec: RuntimeSpec) => Promise<RuntimeProbeResult>; // runtime connection test
   inspectRuntime?: (workspace: string, spec: RuntimeSpec) => Promise<InspectRuntimeResult>; // runtime live cluster view
