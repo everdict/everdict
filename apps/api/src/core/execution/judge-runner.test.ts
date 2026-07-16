@@ -217,7 +217,9 @@ describe("defaultJudgeRunner", () => {
     });
     const fetchImpl = vi.fn((_u: string, _i?: RequestInit) =>
       Promise.resolve(
-        new Response(JSON.stringify({ content: [{ text: '{"pass":true,"score":0.9,"reason":"ok"}' }] }), { status: 200 }),
+        new Response(JSON.stringify({ content: [{ text: '{"pass":true,"score":0.9,"reason":"ok"}' }] }), {
+          status: 200,
+        }),
       ),
     );
     const runner = defaultJudgeRunner({
@@ -249,8 +251,20 @@ describe("defaultJudgeRunner", () => {
 
   it("model as a ModelRef with a pinned version: resolves that exact version, not latest", async () => {
     const models = new InMemoryModelRegistry();
-    await models.register("acme", { id: "team", version: "1.0.0", provider: "anthropic", model: "claude-opus-4-8", tags: [] });
-    await models.register("acme", { id: "team", version: "2.0.0", provider: "anthropic", model: "claude-next", tags: [] });
+    await models.register("acme", {
+      id: "team",
+      version: "1.0.0",
+      provider: "anthropic",
+      model: "claude-opus-4-8",
+      tags: [],
+    });
+    await models.register("acme", {
+      id: "team",
+      version: "2.0.0",
+      provider: "anthropic",
+      model: "claude-next",
+      tags: [],
+    });
     const fetchImpl = vi.fn((_u: string, _i?: RequestInit) =>
       Promise.resolve(
         new Response(JSON.stringify({ content: [{ text: '{"pass":true,"score":1,"reason":"ok"}' }] }), { status: 200 }),
