@@ -272,6 +272,13 @@ function server(
       capacity: { total: 4, used: 1, free: 3 },
       warnings: [],
     }),
+    // Destructive-control stub — verifies route wiring / admin gate only; echoes the action + a stub count.
+    controlRuntime: async (_ws, _spec, command) => ({
+      action: command.action,
+      ok: true,
+      ...(command.action === "reclaimIdle" ? { stopped: 2 } : {}),
+      ...(command.action === "purgeTerminal" ? { purged: 5 } : {}),
+    }),
     secretStore,
     githubAppService,
     mattermostService,
@@ -1138,6 +1145,62 @@ describe("API — runtimes inspect (live cluster view, read gate)", () => {
     await app.inject({ method: "POST", url: "/runtimes", headers: acme, payload: RUNTIME });
     const other = { authorization: `Bearer ${await issueKey(keyStore, "other")}` };
     const res = await app.inject({ method: "GET", url: "/runtimes/seoul/versions/1.0.0/inspect", headers: other });
+    expect(res.statusCode).toBe(404);
+    await app.close();
+  });
+});
+
+describe("API — runtimes control (destructive, admin-only)", () => {
+  it("admin can purge terminal jobs → 200 + count", async () => {
+    const { app } = server({ requireAuth: true, authenticator: roleAuth(["admin"]) });
+    await app.inject({ method: "POST", url: "/runtimes", headers: { authorization: "Bearer x" }, payload: RUNTIME });
+    const res = await app.inject({
+      method: "POST",
+      url: "/runtimes/seoul/versions/1.0.0/control",
+      headers: { authorization: "Bearer x" },
+      payload: { action: "purgeTerminal" },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({ action: "purgeTerminal", ok: true, purged: 5 });
+    await app.close();
+  });
+
+  it("a member/viewer is 403 (runtimes:control is admin-only)", async () => {
+    for (const role of ["viewer", "member"] as const) {
+      const { app } = server({ requireAuth: true, authenticator: roleAuth([role]) });
+      await app.inject({ method: "POST", url: "/runtimes", headers: { authorization: "Bearer x" }, payload: RUNTIME });
+      const res = await app.inject({
+        method: "POST",
+        url: "/runtimes/seoul/versions/1.0.0/control",
+        headers: { authorization: "Bearer x" },
+        payload: { action: "purgeTerminal" },
+      });
+      expect(res.statusCode, `${role} must be forbidden`).toBe(403);
+      await app.close();
+    }
+  });
+
+  it("a malformed command (stopWorkload without name) → 400", async () => {
+    const { app } = server({ requireAuth: true, authenticator: roleAuth(["admin"]) });
+    await app.inject({ method: "POST", url: "/runtimes", headers: { authorization: "Bearer x" }, payload: RUNTIME });
+    const res = await app.inject({
+      method: "POST",
+      url: "/runtimes/seoul/versions/1.0.0/control",
+      headers: { authorization: "Bearer x" },
+      payload: { action: "stopWorkload" }, // name missing
+    });
+    expect(res.statusCode).toBe(400);
+    await app.close();
+  });
+
+  it("an admin targeting a runtime that isn't registered in their workspace is 404 (before any mutation)", async () => {
+    const { app } = server({ requireAuth: true, authenticator: roleAuth(["admin"]) });
+    const res = await app.inject({
+      method: "POST",
+      url: "/runtimes/does-not-exist/versions/1.0.0/control",
+      headers: { authorization: "Bearer x" },
+      payload: { action: "purgeTerminal" },
+    });
     expect(res.statusCode).toBe(404);
     await app.close();
   });

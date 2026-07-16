@@ -18,7 +18,7 @@ import type { ViewService } from "@everdict/application-control";
 import type { WorkspaceService } from "@everdict/application-control";
 import { type Action, type Principal, authorize } from "@everdict/auth";
 import { AppError, type RuntimeSpec } from "@everdict/contracts";
-import type { InspectRuntimeResult } from "@everdict/contracts/wire";
+import type { InspectRuntimeResult, RuntimeControlCommand, RuntimeControlResult } from "@everdict/contracts/wire";
 import type { SecretStore, TenantKeyStore, WorkspaceSettingsStore } from "@everdict/db";
 import type { UsageMeter } from "@everdict/domain";
 import type {
@@ -58,6 +58,11 @@ export interface McpDeps {
   runtimeRegistry?: RuntimeRegistry;
   probeRuntime?: (workspace: string, spec: RuntimeSpec) => Promise<RuntimeProbeResult>; // runtime connection test
   inspectRuntime?: (workspace: string, spec: RuntimeSpec) => Promise<InspectRuntimeResult>; // runtime live cluster view
+  controlRuntime?: (
+    workspace: string,
+    spec: RuntimeSpec,
+    command: RuntimeControlCommand,
+  ) => Promise<RuntimeControlResult>; // runtime destructive control (stop/reclaim/purge/cordon)
   secretStore?: SecretStore;
   invalidateTenantBackends?: (tenant: string) => void; // workspace secret change → drop cached runtime backends (route parity)
   githubAppService?: GithubAppService; // workspace-owned GitHub App integration (org install → selected repos)

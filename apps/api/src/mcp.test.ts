@@ -134,6 +134,11 @@ function harness() {
       capacity: { total: 4, used: 1, free: 3 },
       warnings: [],
     }),
+    controlRuntime: async (_ws: string, _spec: RuntimeSpec, command: { action: string }) => ({
+      action: command.action,
+      ok: true,
+      ...(command.action === "purgeTerminal" ? { purged: 5 } : {}),
+    }),
     keyStore: new InMemoryTenantKeyStore(),
     runnerService: new RunnerService(new InMemoryRunnerStore()),
     runnerHub: new RunnerHub(),
@@ -246,6 +251,7 @@ describe("MCP tools", () => {
       "assign_harness_trace_sink",
       "backfill_scorecard_models",
       "cancel_scorecard",
+      "control_runtime",
       "create_api_key",
       "create_dataset",
       "create_invite",
@@ -1568,6 +1574,31 @@ describe("MCP tools", () => {
     expect(res).toMatchObject({ kind: "nomad", reachable: true, capacity: { total: 4, used: 1, free: 3 } });
     // An unregistered id resolves to a registry NOT_FOUND (surfaced as a tool error), before any live I/O.
     expect((await viewer.callTool({ name: "inspect_runtime", arguments: { id: "ghost" } })).isError).toBe(true);
+  });
+
+  it("control_runtime: an admin purges a registered runtime; a member is a permission error (runtimes:control)", async () => {
+    const deps = harness();
+    const admin = await connect(deps, ["admin"], "acme");
+    const runtime = JSON.stringify({
+      kind: "nomad",
+      id: "seoul",
+      version: "1.0.0",
+      tags: [],
+      addr: "http://n:4646",
+      image: "i",
+    });
+    await admin.callTool({ name: "create_runtime", arguments: { runtime } });
+    const purged = JSON.parse(
+      text(await admin.callTool({ name: "control_runtime", arguments: { id: "seoul", action: "purgeTerminal" } })),
+    );
+    expect(purged).toMatchObject({ action: "purgeTerminal", ok: true, purged: 5 });
+    // A member lacks runtimes:control → tool error (admin-only).
+    const member = await connect(deps, ["member"], "acme");
+    const denied = await member.callTool({
+      name: "control_runtime",
+      arguments: { id: "seoul", action: "purgeTerminal" },
+    });
+    expect(denied.isError).toBe(true);
   });
 
   it("workspace settings: admin get (empty)→{} / set merges in; member is a permission error", async () => {

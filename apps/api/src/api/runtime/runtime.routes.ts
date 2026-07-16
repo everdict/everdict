@@ -1,5 +1,6 @@
 import { VersionTagsBodySchema, setVersionTags } from "@everdict/application-control";
 import { RuntimeSpecSchema } from "@everdict/contracts";
+import { RuntimeControlCommandSchema } from "@everdict/contracts/wire";
 import type { FastifyInstance } from "fastify";
 import { type ServerDeps, gate, resolvePrincipal, sendError, zodIssues } from "../route-context.js";
 import { runtimeDocs } from "./runtime.docs.js";
@@ -128,6 +129,35 @@ export function registerRuntimeRoutes(app: FastifyInstance, deps: ServerDeps): v
         // get() 404s a non-owned / missing runtime (no existence leak) before any live I/O.
         const spec = await deps.runtimeRegistry.get(principal.workspace, req.params.id, req.params.version);
         return reply.send(await deps.inspectRuntime(principal.workspace, spec));
+      } catch (err) {
+        return sendError(reply, err);
+      }
+    },
+  );
+
+  // Destructive live-cluster control (admin) — stop a running workload / reclaim idle / purge terminal jobs / cordon
+  // a node. Resolves the registered spec, then runs the Reclaimable action. Gated runtimes:control (admin-only, unlike
+  // runtimes:write registration). Credentials resolved server-side; the action is best-effort/idempotent.
+  app.post<{ Params: { id: string; version: string } }>(
+    "/runtimes/:id/versions/:version/control",
+    { schema: runtimeDocs.control },
+    async (req, reply) => {
+      if (!deps.runtimeRegistry)
+        return reply.code(404).send({ code: "NOT_FOUND", message: "runtime registry not configured" });
+      if (!deps.controlRuntime) return reply.code(404).send({ code: "NOT_FOUND", message: "control not configured" });
+      const principal = await resolvePrincipal(req, reply, deps);
+      if (!principal) return reply;
+      try {
+        gate(principal, "runtimes:control");
+      } catch (err) {
+        return sendError(reply, err); // no permission 403 (gate before any live mutation)
+      }
+      const parsed = RuntimeControlCommandSchema.safeParse(req.body);
+      if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
+      try {
+        // get() 404s a non-owned / missing runtime (no existence leak) before touching the cluster.
+        const spec = await deps.runtimeRegistry.get(principal.workspace, req.params.id, req.params.version);
+        return reply.send(await deps.controlRuntime(principal.workspace, spec, parsed.data));
       } catch (err) {
         return sendError(reply, err);
       }

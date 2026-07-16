@@ -1,5 +1,6 @@
 import { setVersionTags } from "@everdict/application-control";
 import { RuntimeSpecSchema } from "@everdict/contracts";
+import { RuntimeControlCommandSchema } from "@everdict/contracts/wire";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { type McpToolContext, fail, ok, plain, run } from "../mcp-context.js";
@@ -137,6 +138,35 @@ export function registerRuntimeTools(server: McpServer, ctx: McpToolContext): vo
           // get() resolves the registered spec (NOT_FOUND on non-owned/missing) before any live I/O.
           const spec = await runtimes.get(ws, id, version ?? "latest");
           return ok(await inspectRuntime(ws, spec));
+        }),
+    );
+  }
+
+  if (deps.controlRuntime && deps.runtimeRegistry) {
+    const controlRuntime = deps.controlRuntime;
+    const runtimes = deps.runtimeRegistry;
+    server.registerTool(
+      "control_runtime",
+      {
+        description:
+          "DESTRUCTIVE live-cluster control of a REGISTERED nomad/k8s runtime (admin, runtimes:control). action=stopWorkload{name} force-stops one running eval unit; reclaimIdle{olderThanSeconds} bulk-stops non-store units past that age; purgeTerminal GCs dead/completed jobs; cordonNode{node,schedulable} cordons(false)/uncordons(true) a node (reversible). Idempotent; re-inspect after. version defaults to latest; local/other-workspace → error.",
+        inputSchema: {
+          id: z.string(),
+          version: z.string().optional(),
+          action: z.enum(["stopWorkload", "reclaimIdle", "purgeTerminal", "cordonNode"]),
+          name: z.string().optional().describe("stopWorkload: the workload unit name (InspectWorkload.name)"),
+          olderThanSeconds: z.number().int().positive().optional().describe("reclaimIdle: age threshold in seconds"),
+          node: z.string().optional().describe("cordonNode: the node name"),
+          schedulable: z.boolean().optional().describe("cordonNode: false = cordon, true = uncordon"),
+        },
+      },
+      ({ id, version, action, name, olderThanSeconds, node, schedulable }) =>
+        run(principal, "runtimes:control", async () => {
+          // Validate the per-action fields into the discriminated command (the enum above is loose across actions).
+          const parsed = RuntimeControlCommandSchema.safeParse({ action, name, olderThanSeconds, node, schedulable });
+          if (!parsed.success) return fail(`BAD_REQUEST: ${parsed.error.message}`);
+          const spec = await runtimes.get(ws, id, version ?? "latest"); // NOT_FOUND on non-owned/missing
+          return ok(await controlRuntime(ws, spec, parsed.data));
         }),
     );
   }

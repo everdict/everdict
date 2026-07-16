@@ -1,6 +1,7 @@
 import { VersionTagsBodySchema } from "@everdict/application-control";
 import { RuntimeSpecSchema } from "@everdict/contracts";
 import { InspectRuntimeResultSchema } from "@everdict/contracts/wire";
+import { RuntimeControlCommandSchema, RuntimeControlResultSchema } from "@everdict/contracts/wire";
 import { ProbeRuntimeResultSchema } from "@everdict/contracts/wire";
 import { RegisterRuntimeResultSchema } from "@everdict/contracts/wire";
 import { RuntimeListResponseSchema } from "@everdict/contracts/wire";
@@ -110,6 +111,25 @@ const docs = {
         ...toJsonSchema(InspectRuntimeResultSchema),
       },
       ...errorResponses(401, 403, 404),
+    },
+  },
+  control: {
+    summary: "Control a runtime's live cluster (destructive)",
+    description:
+      "Destructive live-cluster control for a registered nomad/k8s runtime: stopWorkload (force-stop one running " +
+      "eval unit — aborts that eval), reclaimIdle (bulk-stop non-store units older than a threshold), purgeTerminal " +
+      "(GC dead/completed jobs), cordonNode (schedulable:false = cordon / true = uncordon; reversible, no eviction). " +
+      "Admin-only (runtimes:control) — distinct from runtimes:write registration. Actions are best-effort/idempotent; " +
+      "re-inspect to see the effect. A local runtime (no cluster) is 400; another workspace's runtime is 404.",
+    tags: ["runtime"],
+    params: idVersionParams,
+    body: toJsonSchema(RuntimeControlCommandSchema),
+    response: {
+      200: {
+        description: "Control outcome (ok + optional stopped/purged count)",
+        ...toJsonSchema(RuntimeControlResultSchema),
+      },
+      ...errorResponses(400, 401, 403, 404),
     },
   },
   setVersionTags: {

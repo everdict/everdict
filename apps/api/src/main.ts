@@ -107,6 +107,7 @@ async function main(): Promise<void> {
     meteredDispatcher,
     probeRuntime,
     inspectRuntime,
+    controlRuntime,
     invalidateTenantBackends,
   } = buildDispatch({
     callbackStore,
@@ -274,6 +275,7 @@ async function main(): Promise<void> {
     runtimeRegistry,
     probeRuntime,
     inspectRuntime,
+    controlRuntime,
     settingsStore,
     workspaceStore,
     workspaceService,

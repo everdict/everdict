@@ -51,7 +51,7 @@ import {
   RuntimeSpecSchema,
   resolveHarnessInstance,
 } from "@everdict/contracts";
-import type { InspectRuntimeResult } from "@everdict/contracts/wire";
+import type { InspectRuntimeResult, RuntimeControlCommand, RuntimeControlResult } from "@everdict/contracts/wire";
 import {
   BenchmarkAdapterSpecSchema,
   HarborTaskSchema,
@@ -121,6 +121,12 @@ export interface ServerDeps {
   probeRuntime?: (workspace: string, spec: RuntimeSpec) => Promise<RuntimeProbeResult>;
   // Runtime live inspection — RuntimeSpec → build a live backend, then inspect() (read-only cluster view: nodes/capacity/workload/stores). Same secrets+builder as probe.
   inspectRuntime?: (workspace: string, spec: RuntimeSpec) => Promise<InspectRuntimeResult>;
+  // Runtime destructive control — RuntimeSpec + command → build a live backend, run a Reclaimable action (stop/reclaim/purge/cordon). Gated runtimes:control.
+  controlRuntime?: (
+    workspace: string,
+    spec: RuntimeSpec,
+    command: RuntimeControlCommand,
+  ) => Promise<RuntimeControlResult>;
   secretStore?: SecretStore; // workspace secret management — main always injects it (ON by default; auto-generates an ephemeral key if no KEK). Disabled only when not injected
   invalidateTenantBackends?: (tenant: string) => void; // drop the tenant's cached runtime backends after a WORKSPACE secret change (their secretEnv is baked at build)
   githubAppService?: GithubAppService; // workspace-owned GitHub App integration (org install→selected repos) (route disabled if absent)
