@@ -1,5 +1,6 @@
 import { UpstreamError } from "@everdict/contracts";
 import type { CdpSocket, CdpTarget } from "./capture-cdp.js";
+import { reachableWsUrl } from "./cdp-ws.js";
 
 // Interactive live browser session over CDP — the bidirectional sibling of capture-cdp's one-shot screenshot.
 // Given a running Chrome DevTools Protocol HTTP base (the same endpoint the topology runtime discovers per case), it
@@ -82,7 +83,7 @@ export async function openBrowserSession(
   )?.webSocketDebuggerUrl;
   if (!wsUrl) throw new UpstreamError("UPSTREAM_ERROR", undefined, "No CDP page target for an interactive session.");
 
-  const ws = connect(wsUrl);
+  const ws = connect(reachableWsUrl(wsUrl, cdpHttpBase));
   const frameCbs: Array<(f: ScreencastFrame) => void> = [];
   const errCbs: Array<(e: Error) => void> = [];
   const closeCbs: Array<() => void> = [];

@@ -1,4 +1,5 @@
 import { ProxyService } from "@everdict/application-control";
+import type { BrowserSessionProvisioner } from "./common/browser-session-provisioner.js";
 import { LiveFrameStore } from "./common/live-frame-store.js";
 import { TerminalTicketStore } from "./common/terminal-ticket.js";
 import { TicketStore } from "./common/ticket-store.js";
@@ -32,6 +33,7 @@ import { buildPlacementPreflight } from "./core/execution/placement-preflight.js
 import { JudgePreviewService } from "./core/judge/judge-preview-service.js";
 import { ModelService } from "./core/model/model-service.js";
 import { SecretUsageService } from "./core/secret/secret-usage-service.js";
+import { DockerBrowserProvisioner } from "./infrastructure/browser-session/docker-browser-provisioner.js";
 import { LocalChromeProvisioner } from "./infrastructure/browser-session/local-chrome-provisioner.js";
 import { buildServer } from "./server.js";
 
@@ -263,15 +265,25 @@ async function main(): Promise<void> {
   const browserProfileService = buildBrowserProfile({ browserProfileStore });
 
   const terminalTickets = new TerminalTicketStore();
-  // Interactive browser sessions (browser-profiles S1) — env-gated because the S1 provisioner launches a host
-  // Chrome (self-hosted / local reachable path); managed Docker/K8s provisioners are a later slice.
+  // Interactive browser sessions (browser-profiles S1) — env-gated. The provisioner (S6) is selectable:
+  // EVERDICT_BROWSER_PROVISIONER=docker runs a headless-Chromium CONTAINER (no host Chrome needed — decoupled from
+  // the local environment), else the host-Chrome LocalChromeProvisioner (dev / self-hosted). Managed K8s = follow-up.
   const browserSessionsEnabled = process.env.EVERDICT_BROWSER_SESSIONS === "1";
   const browserTickets = browserSessionsEnabled ? new TicketStore() : undefined;
   const browserChromeBin = process.env.EVERDICT_BROWSER_CHROME_BIN; // override the launched binary (e.g. chromium)
   // Workspace BYO egress proxy pool (browser-profiles S4) — a country resolves to the login browser's --proxy-server.
   const proxyService = new ProxyService({ settings: settingsStore, secretsFor: runtimeSecretsFor });
+  const browserProvisioner: BrowserSessionProvisioner =
+    process.env.EVERDICT_BROWSER_PROVISIONER === "docker"
+      ? new DockerBrowserProvisioner({
+          ...(process.env.EVERDICT_BROWSER_IMAGE ? { image: process.env.EVERDICT_BROWSER_IMAGE } : {}),
+          ...(process.env.EVERDICT_BROWSER_DOCKER_NETWORK
+            ? { network: process.env.EVERDICT_BROWSER_DOCKER_NETWORK }
+            : {}),
+        })
+      : new LocalChromeProvisioner(browserChromeBin ? { binary: browserChromeBin } : {});
   const browserSessionService = browserSessionsEnabled
-    ? new BrowserSessionService(new LocalChromeProvisioner(browserChromeBin ? { binary: browserChromeBin } : {}), {
+    ? new BrowserSessionService(browserProvisioner, {
         resolveProxy: (ws, country) => proxyService.resolve(ws, country),
       })
     : undefined;

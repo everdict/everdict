@@ -1,4 +1,5 @@
 import { UpstreamError } from "@everdict/contracts";
+import { reachableWsUrl } from "./cdp-ws.js";
 
 // Live browser frame via CDP (observability ⑦). Given a running Chrome DevTools Protocol HTTP base
 // (e.g. http://host:9222 — the same endpoint the topology runtime discovers per case), find a page
@@ -42,7 +43,7 @@ export async function captureCdpScreenshot(cdpHttpBase: string, opts: CaptureCdp
   if (!wsUrl) throw new UpstreamError("UPSTREAM_ERROR", undefined, "No CDP page target to capture.");
 
   return await new Promise<string>((resolve, reject) => {
-    const ws = connect(wsUrl);
+    const ws = connect(reachableWsUrl(wsUrl, cdpHttpBase));
     const timer = setTimeout(() => {
       ws.close();
       reject(new UpstreamError("UPSTREAM_ERROR", undefined, "CDP screenshot timed out."));

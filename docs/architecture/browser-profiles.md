@@ -1,6 +1,6 @@
 # Authenticated browser profiles — a real interactive remote browser, cookies reused in eval (design)
 
-> **Status: S0–S5 SHIPPED (S1 transport + web canvas · S2 profile entity · S3 cookie capture · S4 proxy/geo login browser · S5 cookie injection into evals). Follow-ups: eval-browser proxy, localStorage, web harness profile-picker.** S0 = the interactive live browser
+> **Status: S0–S6 SHIPPED (S1 transport + web canvas · S2 profile entity · S3 cookie capture · S4 proxy/geo login browser · S5 cookie injection into evals · S6 containerized provisioner — no host-Chrome dependency). Follow-ups: managed-K8s reachability, eval-browser proxy, localStorage, web harness profile-picker.** S0 = the interactive live browser
 > session primitive (`openBrowserSession`, `@everdict/topology`, `a168b5b`): CDP screencast (frames OUT, each
 > acked) + input (mouse/keyboard/navigate IN), transport-injectable, live-proven against real Chrome via
 > `scripts/live/interactive-browser.mjs`. **S1 productizes the transport end-to-end**: a personal / self-scoped
@@ -143,7 +143,16 @@ short-lived container/pod per active login; self-hosted = the user's own local b
 5. **S3 — cookie capture** on session save (`Network.getAllCookies` → storageState → encrypt → store). ✅ SHIPPED.
 6. **S4 — proxy / geo** (`ProxyProvider`, `--proxy-server`). ✅ SHIPPED for the login browser (eval-browser proxy = S5).
 7. **S5 — injection into eval** (seed cookies before the agent connects). ✅ SHIPPED (cookies; proxy-at-eval-launch is a follow-up).
-8. **S6 — managed K8s reachability** (port-forward/ingress to the pod CDP) — lifts S1 from local-Docker to the SaaS.
+8. **S6 — containerized provisioner (decouple from host Chrome).** ✅ SHIPPED. `DockerBrowserProvisioner`
+   (`apps/api infrastructure`, reuses the topology `Docker` adapter / `dockerCli`) runs a `chromedp/headless-shell`
+   CONTAINER with CDP published to a host port — the control-plane host needs Docker + a pulled image but **no host
+   Chrome install** (removes the local-environment dependency of `LocalChromeProvisioner`). Selected by
+   `EVERDICT_BROWSER_PROVISIONER=docker` (+ `EVERDICT_BROWSER_IMAGE`/`_DOCKER_NETWORK`); the host-Chrome provisioner
+   stays the default for dev/self-hosted. The CDP-in-container reported-WS-host ≠ published-host-port mismatch is
+   fixed by `reachableWsUrl` (rewrites the reported `webSocketDebuggerUrl` authority to the reachable CDP base — a
+   no-op for host Chrome), applied in `openBrowserSession`/`captureCdpScreenshot`/`captureStorageState`/`seedStorageState`.
+   Follow-up: managed **K8s** reachability (per-session `kubectl port-forward` / ingress to the pod CDP) — lifts this
+   from a control-plane-host Docker daemon to the SaaS cluster.
 
 ## Non-goals / risks
 

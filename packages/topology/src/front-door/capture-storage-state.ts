@@ -1,5 +1,6 @@
 import { UpstreamError } from "@everdict/contracts";
 import type { CaptureCdpOptions, CdpSocket, CdpTarget } from "./capture-cdp.js";
+import { reachableWsUrl } from "./cdp-ws.js";
 
 // Capture the login state of a running browser over CDP (browser-profiles S3) — the sibling of capture-cdp's
 // screenshot. Given a running Chrome DevTools Protocol HTTP base (the interactive session's browser), read every
@@ -49,7 +50,7 @@ export async function captureStorageState(cdpHttpBase: string, opts: CaptureCdpO
   if (!wsUrl) throw new UpstreamError("UPSTREAM_ERROR", undefined, "No CDP page target to capture cookies from.");
 
   return await new Promise<StorageState>((resolve, reject) => {
-    const ws = connect(wsUrl);
+    const ws = connect(reachableWsUrl(wsUrl, cdpHttpBase));
     const timer = setTimeout(() => {
       ws.close();
       reject(new UpstreamError("UPSTREAM_ERROR", undefined, "CDP cookie capture timed out."));
@@ -125,7 +126,7 @@ export async function seedStorageState(
   if (!wsUrl) throw new UpstreamError("UPSTREAM_ERROR", undefined, "No CDP page target to seed cookies into.");
 
   await new Promise<void>((resolve, reject) => {
-    const ws = connect(wsUrl);
+    const ws = connect(reachableWsUrl(wsUrl, cdpHttpBase));
     const timer = setTimeout(() => {
       ws.close();
       reject(new UpstreamError("UPSTREAM_ERROR", undefined, "CDP cookie seed timed out."));
