@@ -220,21 +220,22 @@ export function RunnersManager({
       ) : (
         <ul className="divide-y divide-border rounded-lg border bg-card shadow-raise">
           {runners.map((r) => {
-            // For a runner paired to this device, use the bridge's live status instead of the lastSeenAt estimate.
+            // The desktop bridge exposes a runner paired to THIS device (its capabilities + active-job count).
             const live = deviceRunners.find((d) => d.runnerId === r.id)
             const thisDevice = live !== undefined
-            const online = live ? live.state !== 'off' : isOnline(r.lastSeenAt)
-            // Capabilities also prefer live — if the docker daemon stopped after pairing, it's reflected immediately.
+            // "Connected" is authoritative from the server: a runner refreshes lastSeenAt on every successful
+            // lease/heartbeat. The desktop's local loop can be running (live.state === 'idle') yet unable to reach
+            // the control plane — it then never refreshes lastSeenAt — so a bridge-only check would over-report it
+            // as online. Gate online on server-observed freshness so the desktop and the browser stay consistent.
+            const online = isOnline(r.lastSeenAt)
+            // Capabilities still prefer live — if the docker daemon stopped after pairing, it's reflected immediately.
             const caps = live && live.capabilities.length > 0 ? live.capabilities : r.capabilities
-            const statusText = live
-              ? live.state === 'running'
+            // Online/offline is server-driven; the live bridge only refines it to "running (N)" when a job is in flight.
+            const statusText = !online
+              ? t('offline')
+              : live && live.activeJobs > 0
                 ? t('running', { count: live.activeJobs })
-                : live.state === 'idle'
-                  ? t('online')
-                  : t('offline')
-              : online
-                ? t('online')
-                : t('offline')
+                : t('online')
             return (
               <li key={r.id} className="flex items-center gap-3 px-3.5 py-3">
                 <span className="relative grid size-8 shrink-0 place-items-center rounded-md bg-elevated text-muted-foreground">
