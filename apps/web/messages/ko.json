@@ -1315,16 +1315,6 @@
         "provider": "HuggingFace",
         "usedFor": "gated 데이터셋(벤치마크) 가져오기",
         "help": "fine-grained 토큰에 대상 데이터셋 저장소 읽기 권한이면 충분해요. gated 데이터셋은 HF 계정의 약관 동의도 필요해요. 개인 토큰이 워크스페이스 공유보다 우선해요."
-      },
-      "ANTHROPIC_API_KEY": {
-        "provider": "Anthropic",
-        "usedFor": "모델 judge 채점 호출",
-        "help": "judge 로 Anthropic 모델을 쓸 때 이 워크스페이스의 채점 호출에 사용돼요."
-      },
-      "OPENAI_API_KEY": {
-        "provider": "OpenAI · 호환",
-        "usedFor": "모델 judge 채점 호출 (LiteLLM 등 호환 게이트웨이 포함)",
-        "help": "judge 로 OpenAI(또는 OpenAI 호환 게이트웨이) 모델을 쓸 때 사용돼요."
       }
     },
     "savedAsName": "시크릿 이름 <code>{name}</code> 으로 저장돼요.",

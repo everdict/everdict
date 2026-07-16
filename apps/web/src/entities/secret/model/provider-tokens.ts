@@ -11,21 +11,14 @@ export interface ProviderTokenDef {
   scopes: SecretScope[] // the scopes consumed — a key with no personal consumption isn't shown on the personal (account) screen
 }
 
+// Model provider keys (ANTHROPIC_API_KEY / OPENAI_API_KEY) are NOT curated here — they're managed on the
+// workspace Models tab (per-model apiKeySecret binding). They still work as a raw workspace secret and as the
+// unset-model provider default; this list is only the curated convenience UI, not where the keys are consumed.
 export const PROVIDER_TOKENS: ProviderTokenDef[] = [
   {
     name: 'HF_TOKEN',
     helpUrl: 'https://huggingface.co/settings/tokens',
     scopes: ['user', 'workspace'],
-  },
-  {
-    name: 'ANTHROPIC_API_KEY',
-    helpUrl: 'https://console.anthropic.com/settings/keys',
-    scopes: ['workspace'],
-  },
-  {
-    name: 'OPENAI_API_KEY',
-    helpUrl: 'https://platform.openai.com/api-keys',
-    scopes: ['workspace'],
   },
 ]
 

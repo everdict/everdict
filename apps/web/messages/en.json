@@ -1315,16 +1315,6 @@
         "provider": "HuggingFace",
         "usedFor": "Fetch gated datasets (benchmarks)",
         "help": "A fine-grained token with read access to the target dataset repo is enough. Gated datasets also need you to accept the terms on your HF account. A personal token takes precedence over the workspace's shared one."
-      },
-      "ANTHROPIC_API_KEY": {
-        "provider": "Anthropic",
-        "usedFor": "Model judge grading calls",
-        "help": "Used for this workspace's grading calls when a judge uses an Anthropic model."
-      },
-      "OPENAI_API_KEY": {
-        "provider": "OpenAI · compatible",
-        "usedFor": "Model judge grading calls (incl. LiteLLM and other compatible gateways)",
-        "help": "Used when a judge uses an OpenAI (or OpenAI-compatible gateway) model."
       }
     },
     "savedAsName": "Saved as secret name <code>{name}</code>.",
