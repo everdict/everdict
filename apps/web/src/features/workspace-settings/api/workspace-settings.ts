@@ -5,10 +5,10 @@ import { revalidatePath } from 'next/cache'
 import { authContext } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
 
-// Workspace settings (control plane policy). Currently usage metering on/off.
-export interface WorkspaceSettings {
-  meterUsage?: boolean
-}
+import type { WorkspaceSettings } from '../model/settings-schema'
+
+// NB: this is a `'use server'` module — every export is treated as a server action, so the WorkspaceSettings TYPE is
+// imported for the signature but NOT re-exported here. Consumers import the type from '../model/settings-schema'.
 
 export interface UpdateSettingsResult {
   ok: boolean

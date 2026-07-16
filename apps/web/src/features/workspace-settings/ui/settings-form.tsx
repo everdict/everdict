@@ -6,7 +6,8 @@ import { useTranslations } from 'next-intl'
 import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
 
-import { updateWorkspaceSettingsAction, type WorkspaceSettings } from '../api/workspace-settings'
+import { updateWorkspaceSettingsAction } from '../api/workspace-settings'
+import type { WorkspaceSettings } from '../model/settings-schema'
 
 // Workspace policy form. Currently a usage-metering toggle. Non-admins are read-only (the control plane does the final enforcement).
 export function SettingsForm({
