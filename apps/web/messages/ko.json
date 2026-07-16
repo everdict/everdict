@@ -2026,6 +2026,8 @@
     "clusterStopped": "{count}개 단위를 정지했어요.",
     "clusterPurged": "{count}개 작업을 정리했어요.",
     "clusterActionFailed": "작업 실패: {error}",
+    "clusterNodeEmpty": "이 노드에 워크로드가 없어요.",
+    "clusterUnscheduled": "미배치 ({count})",
     "edit": "편집",
     "editTitle": "런타임 편집",
     "editDescription": "{id} — 설정을 수정해요.",

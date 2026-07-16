@@ -2026,6 +2026,8 @@
     "clusterStopped": "Stopped {count} unit(s).",
     "clusterPurged": "Purged {count} job(s).",
     "clusterActionFailed": "Action failed: {error}",
+    "clusterNodeEmpty": "No workloads on this node.",
+    "clusterUnscheduled": "Unscheduled ({count})",
     "edit": "Edit",
     "editTitle": "Edit runtime",
     "editDescription": "{id} — update the configuration.",

@@ -73,6 +73,8 @@ const inspectNodeSchema = z.object({
   datacenter: z.string().optional(),
   dockerHealthy: z.boolean().optional(),
   schedulable: z.boolean().optional(),
+  cpuTotal: z.number().optional(),
+  memoryMbTotal: z.number().optional(),
 })
 const inspectWorkloadSchema = z.object({
   id: z.string(),
@@ -81,6 +83,8 @@ const inspectWorkloadSchema = z.object({
   ageSeconds: z.number().optional(),
   node: z.string().optional(),
   role: z.enum(['eval', 'store', 'other']),
+  cpu: z.number().optional(),
+  memoryMb: z.number().optional(),
 })
 const inspectStoreSchema = z.object({
   name: z.string(),
