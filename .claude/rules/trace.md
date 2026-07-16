@@ -44,6 +44,16 @@ docs/service-harness.md + docs/architecture/trace-sink.md.
   a 10s `Promise.race`). It lives here (IO) and is **injected** into the trace-sink/source services, so
   `application-control` never imports `@everdict/trace`. Web gates Save on it; `upsert` stays pure. See
   docs/architecture/trace-sink.md.
+- **Browse + inspect + the conversion overlay** (`BrowsableTraceSource extends TraceSource`, what
+  `buildTraceSource` now returns): `listTraces(opts)` enumerates a source's recent traces + observability metrics
+  (started/duration/tokens/cost/status/tags — pure per-kind summary parsers) and `inspect(traceId, mapping)`
+  returns the raw span attributes (span-based kinds) + events normalized with the SUPPLIED mapping — powering the
+  Settings › Observability browser and the judge wizard's live conversion authoring. The wizard-authored
+  `SpanAttrMapping` is stored as a per-harness **overlay** (`WorkspaceSettings.spanAttrMappingByHarness`), the
+  mutable conversion layer between a harness version and a judge version; `resolveHarnessTraceMapping` (overlay >
+  spec) applies it at both production seams — `TraceSourceService.resolve` (dispatch-after-judge collect) and
+  `ScorecardIngestService.trackPull`'s `spanMappingFor` (periodic pull-eval). See
+  docs/architecture/judge-input-contract.md.
 - **Sinks (`*-sink.ts`, `buildTraceSink`)** mirror the source discipline with three deltas: ① auth is a single
   resolved `auth` value and the **adapter owns the header name** (mlflow/langfuse/phoenix → verbatim
   `Authorization`; langsmith → `x-api-key`); ② per-case failures are isolated into `cases[].error` (only

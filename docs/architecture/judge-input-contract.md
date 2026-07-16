@@ -148,6 +148,36 @@ pre-build ingest generality that no registered judge requires (no-hypothetical-s
 badges, `7f8b1751`), and the harness form (`register-harness`) carries the per-harness `SpanAttrMapping`
 editor (`4dc62145`).
 
+## Trace-source sampling + the conversion overlay (shipped)
+
+The judge wizard no longer asks for a pasted trace. It samples a **real trace from a connected observability
+platform**, authors the span→TraceEvent conversion against it, and the conversion is a mutable per-harness
+overlay applied in production — closing the author → save → apply loop.
+
+- **`BrowsableTraceSource`** (`@everdict/contracts`, impls in `@everdict/trace`) widens `TraceSource` with
+  `listTraces(opts)` (recent traces + observability metrics: started/duration/tokens/cost/status/tags) and
+  `inspect(traceId, mapping)` (raw span attributes for span-based kinds + events normalized with the SUPPLIED
+  mapping). Five kinds: mlflow `traces/search`, otel[jaeger] find-traces, phoenix/langfuse/langsmith list.
+  `buildTraceSource` returns it; pull-only consumers keep the narrower `TraceSource`.
+- **Routes/MCP**: `GET /workspace/trace-sources/:name/traces`, `POST .../:traceId/inspect`,
+  `GET/PUT /harnesses/:id/span-attr-mapping` (+ `list_trace_source_traces` / `inspect_trace` /
+  `get·set_harness_span_attr_mapping`). Read = `harnesses:read`, overlay write = `harnesses:register`.
+- **Overlay storage**: `WorkspaceSettings.spanAttrMappingByHarness` (harness id → `SpanAttrMapping`) — the
+  mutable conversion layer BETWEEN a harness version and a judge version, independently editable without bumping
+  either immutable spec. `resolveHarnessTraceMapping(settings, harnessId, specMapping)` = overlay > spec.
+- **Two production consumers** (the `resolveHarnessTraceMapping` seam): dispatch-after-judge collect
+  (`TraceSourceService.resolve` merges the overlay into the workspace-selected source config) and periodic
+  pull-eval over already-produced production traces (`ScorecardIngestService.trackPull` → `spanMappingFor`
+  → `buildTraceSource`). Span-based (otel/mlflow) only; native kinds normalize with fixed converters.
+- **Web**: Settings › Observability (`features/browse-traces` `TraceBrowser`) is the product-quality trace
+  browser; the judge wizard reuses it (`onPick`) as its sample picker + a live `SpanMappingEditor`
+  (`entities/trace`) that re-inspects on each edit and feeds the converted events to the existing
+  `POST /judges/preview` · `/judges/try`. A raw-JSON paste remains behind an Advanced toggle.
+
+Follow-ups: live e2e vs a real MLflow/OTel (env-gated); per-platform `listTraces` fidelity is unit-tested but
+not yet live-verified for all five kinds; inline-spec harnesses keep their agent-baked mapping (overriding that
+at dispatch is deferred).
+
 ## Back-compat invariants
 
 - `previewJudge` with no custom template renders byte-identically to the default `buildPrompt` (the pure
