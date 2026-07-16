@@ -16,6 +16,8 @@ export interface SubmitRunInput {
   sourceKind?: 'files' | 'git'
   gitUrl?: string
   gitRef?: string
+  // Per-run wall-clock budget in seconds. Omitted → the control plane applies the EvalCase default (1800s).
+  timeoutSec?: number
 }
 export interface SubmitRunResult {
   ok: boolean
@@ -44,7 +46,8 @@ export async function submitRunAction(input: SubmitRunInput): Promise<SubmitRunR
       env: { kind: 'repo', source: repoSource(input) },
       task: input.task,
       graders: [{ id: 'steps' }, { id: 'cost' }, { id: 'latency' }],
-      timeoutSec: 300,
+      // Only send a timeout when the user set one; otherwise the EvalCase default (1800s) applies instead of the old hardcoded 300s cap.
+      ...(input.timeoutSec ? { timeoutSec: input.timeoutSec } : {}),
       tags: ['web'],
     },
     // When runtime is selected the control plane injects it as case.placement.target (same as scorecard). Empty means the default backend.

@@ -17,7 +17,14 @@ export interface RunScorecardInput {
   judges?: { id: string; version: string }[]
   concurrency?: number // Number of cases dispatched concurrently within the batch (parallelism). Unset uses the control plane default.
   trials?: number // Run each case N times for pass@k / flakiness. Unset = 1 (single run).
-  cases?: { limit?: number; tags?: string[] } // Partial run — only a subset of the full dataset (unset = all)
+  // Partial run — a subset of the full dataset (unset = all). ids (explicit) re-runs specific cases (e.g. the failing ones).
+  cases?: { ids?: string[]; limit?: number; tags?: string[] }
+  // Run-time grading-plan override — replaces every case's default graders for THIS batch only (the dataset stays pure data). Unset = the dataset's graders.
+  graders?: { id: string; config?: Record<string, unknown> }[]
+  // Per-batch trace-sink override — a configured workspace sink name, or "none" to suppress export. Unset = the harness's own selection.
+  traceSink?: string
+  // Inline judge scoring-model override — a registered Model id for the inline judge grader. Unset = the workspace default.
+  judgeModel?: string
 }
 
 export interface RunScorecardResult {
@@ -40,6 +47,11 @@ export async function runScorecardAction(input: RunScorecardInput): Promise<RunS
     ...(input.concurrency ? { concurrency: input.concurrency } : {}),
     ...(input.trials && input.trials > 1 ? { trials: input.trials } : {}),
     ...(input.cases ? { cases: input.cases } : {}),
+    // Run-time grading plan — re-score this batch with different graders without touching the dataset.
+    ...(input.graders && input.graders.length > 0 ? { graders: input.graders } : {}),
+    // Per-batch sink override ("none" suppresses export); inline judge model override (a registered Model id).
+    ...(input.traceSink ? { traceSink: input.traceSink } : {}),
+    ...(input.judgeModel ? { judge: { model: input.judgeModel } } : {}),
   }
   try {
     const rec = await controlPlane.runScorecard<{ id: string }>(ctx, body)

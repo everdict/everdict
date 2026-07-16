@@ -7,6 +7,7 @@ import { Controller, useForm } from 'react-hook-form'
 
 import type { Harness } from '@/entities/harness'
 import { CapabilityBadge, capabilityFit, CapabilityFitNote } from '@/entities/runtime'
+import { versionOptions } from '@/shared/lib/version-options'
 import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
 import { Combobox } from '@/shared/ui/combobox'
@@ -19,6 +20,7 @@ interface Values {
   version: string
   task: string
   runtime: string
+  timeoutMinutes: string // Per-run timeout (empty = the control-plane default of 30 min). Parsed to seconds on submit.
   sourceKind: 'files' | 'git'
   gitUrl: string
   gitRef: string
@@ -44,6 +46,7 @@ export function SubmitRunForm({
     register,
     handleSubmit,
     watch,
+    setValue,
     formState: { errors, isSubmitting },
   } = useForm<Values>({
     defaultValues: {
@@ -51,18 +54,27 @@ export function SubmitRunForm({
       version: 'latest',
       task: '',
       runtime: '',
+      timeoutMinutes: '',
       sourceKind: 'files',
       gitUrl: '',
       gitRef: 'main',
     },
   })
   const sourceKind = watch('sourceKind')
+  const harnessEntry = harnesses.find((h) => h.id === watch('harnessId'))
   // Drives the runtime capability-fit preview (a service/topology harness needs a container-capable runtime).
-  const harnessKind = harnesses.find((h) => h.id === watch('harnessId'))?.kind
+  const harnessKind = harnessEntry?.kind
+  // Version picker options — the harness list already carries versions/tags (no extra request), same as the scorecard form.
+  const harnessVersionOptions = versionOptions(harnessEntry?.versions ?? [], harnessEntry?.versionTags)
 
   async function onSubmit(values: Values) {
     setServerError(undefined)
-    const res = await submitRunAction(values)
+    // Empty/invalid timeout → omit so the control plane applies the EvalCase default (1800s); otherwise minutes → seconds.
+    const mins = Number.parseInt(values.timeoutMinutes, 10)
+    const res = await submitRunAction({
+      ...values,
+      ...(Number.isFinite(mins) && mins > 0 ? { timeoutSec: mins * 60 } : {}),
+    })
     if (res.ok && res.id) router.push(`/${workspace}/runs/${res.id}`)
     else setServerError(res.error ?? t('submitError'))
   }
@@ -80,7 +92,10 @@ export function SubmitRunForm({
               id="harnessId"
               options={harnesses.map((h) => ({ value: h.id }))}
               value={field.value}
-              onChange={field.onChange}
+              onChange={(v) => {
+                field.onChange(v)
+                setValue('version', 'latest') // reset to latest when the harness changes (the prior version may not exist for the new id)
+              }}
               placeholder={t('harnessPlaceholder')}
               emptyText={t('harnessEmpty')}
             />
@@ -91,7 +106,19 @@ export function SubmitRunForm({
 
       <div className="space-y-1.5">
         <Label htmlFor="version">{t('versionLabel')}</Label>
-        <Input id="version" placeholder="latest" {...register('version')} />
+        <Controller
+          control={control}
+          name="version"
+          render={({ field }) => (
+            <Combobox
+              id="version"
+              options={harnessVersionOptions}
+              value={field.value}
+              onChange={field.onChange}
+              searchable={false}
+            />
+          )}
+        />
       </div>
 
       <div className="space-y-1.5">
@@ -168,6 +195,19 @@ export function SubmitRunForm({
         />
         <FieldError message={errors.runtime?.message} />
         <p className="text-[12px] text-faint">{t('runtimeHelp')}</p>
+      </div>
+
+      {/* Per-run timeout — empty falls back to the control-plane default (30 min); a long agent case (many LLM calls) can raise it. */}
+      <div className="space-y-1.5">
+        <Label htmlFor="timeoutMinutes">{t('timeoutLabel')}</Label>
+        <Input
+          id="timeoutMinutes"
+          type="number"
+          min={1}
+          placeholder={t('timeoutPlaceholder')}
+          {...register('timeoutMinutes')}
+        />
+        <p className="text-[12px] text-faint">{t('timeoutHelp')}</p>
       </div>
 
       <div className="space-y-1.5">
