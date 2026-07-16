@@ -85,12 +85,17 @@ unreachable address. The credential is used only for the probe's auth header (ne
 
 ## Web (`apps/web`)
 - **Runtimes `/dashboard/runtimes`** — owned vs `_shared` runtimes (kind + version chips).
-- **Detail `/dashboard/runtimes/[id]`** — kind + connection fields. **Register `/dashboard/runtimes/new`** — a
-  **kind-toggle form** (local | nomad | k8s) with a validate (dry-run) step → `POST /runtimes` (role-agnostic — any member
-  can register). The form takes secret **names** (`authSecret`/`kubeconfigSecret`), never values; `validate` returns `missingSecrets`
-  (names referenced but not yet in the SecretStore) as a non-blocking warning. Store the values in Workspace settings
-  → Secrets. A **Connection test** button (nomad/k8s) runs the live probe (`POST /runtimes/probe`) and shows
-  reachable/detail before you commit.
+- **Detail `/dashboard/runtimes/[id]`** — kind + connection fields, plus the live **Cluster status** panel
+  (`docs/architecture/runtime-inspection.md`). The detail screen carries **no** connection-test / dry-run buttons —
+  those belong on the register/edit form, where they gate saving.
+- **Register `/dashboard/runtimes/new`** (and **Edit**) — a **kind-toggle form** (local | nomad | k8s) with a
+  **Connection test** (live probe, `POST /runtimes/probe`) and a **Dry run** (validate, `POST /runtimes/validate`)
+  → `POST /runtimes` (role-agnostic — any member can register). The form takes secret **names**
+  (`authSecret`/`kubeconfigSecret`), never values; `validate` returns `missingSecrets` (names referenced but not yet
+  in the SecretStore) as a non-blocking warning — store the values in Workspace settings → Secrets. **Saving is
+  gated**: the submit/save button stays disabled until either the connection test reports reachable **or** the dry
+  run passes, and any field edit clears the gate (so the tested spec always equals the saved one) — you cannot
+  register/save a runtime that was never checked.
 - The scorecard **Run** form gains a **Runtime** selector (defaults to the global backend).
 
 ## Sizing a Nomad runtime for eval batch churn (live-verified)

@@ -76,6 +76,8 @@ export interface K8sApi {
     | undefined
   >; // live everdict pods (app=everdict), running/pending, with their resource requests
   inspectStores(namespace: string): Promise<Array<{ name: string; port?: number }> | undefined>; // pool shared-store Services in the pool namespace
+  // Committed resources per node across ALL pods (every namespace, not just everdict) — the real node load. keyed by node name.
+  inspectNodeUsage(): Promise<Record<string, { cpuUsed?: number; memoryMbUsed?: number }> | undefined>;
   // --- Destructive control (runtimes:control). Best-effort/idempotent — acting on a gone target is a no-op. ---
   stopWorkloadJob(name: string): Promise<void>; // find the everdict job named `name` across namespaces and delete it
   purgeCompletedJobs(): Promise<number>; // delete completed (succeeded/failed) app=everdict jobs; returns the count
@@ -341,6 +343,17 @@ export function kubectlApi(
         return undefined;
       }
     },
+    async inspectNodeUsage() {
+      // Every pod across all namespaces — not just app=everdict — so the per-node load reflects other platforms' work too.
+      const res = await run(bin, [...ctx, "get", "pods", "-A", "-o", "json"]);
+      if (res.code !== 0) return undefined;
+      try {
+        const items = (JSON.parse(res.stdout).items ?? []) as Parameters<typeof podRequestsByNode>[0];
+        return podRequestsByNode(items);
+      } catch {
+        return undefined;
+      }
+    },
     async stopWorkloadJob(name) {
       // Resolve the job's namespace by name (across namespaces), then delete it. A missing job is a silent no-op.
       const res = await run(bin, [...ctx, "get", "jobs", "-A", "-o", "json"]);
@@ -491,6 +504,36 @@ export function k8sMemToMiB(q: string | undefined): number | undefined {
   };
   const f = factor[unit];
   return f !== undefined ? Math.round(val * f) : undefined;
+}
+
+// Sum container requests (millicores + MiB) per node across a pod list — the node's committed load from ALL workloads
+// (every namespace/platform, not just everdict), so the usage gauge reflects true node commitment. Only running/pending
+// pods with a nodeName count; a node with zero requests is omitted (so the fields stay absent). Pure, for unit testing.
+export function podRequestsByNode(
+  pods: Array<{
+    spec?: { nodeName?: string; containers?: Array<{ resources?: { requests?: { cpu?: string; memory?: string } } }> };
+    status?: { phase?: string };
+  }>,
+): Record<string, { cpuUsed?: number; memoryMbUsed?: number }> {
+  const acc: Record<string, { cpu: number; mem: number }> = {};
+  for (const p of pods) {
+    if (p.status?.phase !== "Running" && p.status?.phase !== "Pending") continue;
+    const node = p.spec?.nodeName;
+    if (!node) continue;
+    let a = acc[node];
+    if (!a) {
+      a = { cpu: 0, mem: 0 };
+      acc[node] = a;
+    }
+    for (const c of p.spec?.containers ?? []) {
+      a.cpu += k8sCpuToMillicores(c.resources?.requests?.cpu) ?? 0;
+      a.mem += k8sMemToMiB(c.resources?.requests?.memory) ?? 0;
+    }
+  }
+  const out: Record<string, { cpuUsed?: number; memoryMbUsed?: number }> = {};
+  for (const [node, v] of Object.entries(acc))
+    out[node] = { ...(v.cpu > 0 ? { cpuUsed: v.cpu } : {}), ...(v.mem > 0 ? { memoryMbUsed: v.mem } : {}) };
+  return out;
 }
 
 export function k8sJobName(job: AgentJob, suffix?: string): string {
@@ -771,12 +814,15 @@ export class K8sBackend implements Backend, Recoverable, Observable, Probeable, 
           ...(this.opts.namespace ? { namespace: this.opts.namespace } : {}),
         };
 
-        // Nodes (best-effort).
+        // Nodes (best-effort) + each node's real committed load (all pods across every namespace, not just everdict).
         let nodes: InspectRuntimeResult["nodes"];
         const rawNodes = await api.inspectNodes();
-        if (rawNodes)
-          nodes = { total: rawNodes.length, ready: rawNodes.filter((n) => n.ready).length, items: rawNodes };
-        else warnings.push("node listing failed");
+        if (rawNodes) {
+          const usage = await api.inspectNodeUsage();
+          if (!usage) warnings.push("node usage unavailable");
+          const items = rawNodes.map((n) => ({ ...n, ...(usage?.[n.name] ?? {}) }));
+          nodes = { total: items.length, ready: items.filter((n) => n.ready).length, items };
+        } else warnings.push("node listing failed");
 
         // Capacity (the same live count the scheduler gates on).
         let capacity: InspectRuntimeResult["capacity"];

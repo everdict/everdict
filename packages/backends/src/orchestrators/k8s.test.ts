@@ -16,6 +16,7 @@ import {
   kubectlArgs,
   materializeKubeconfig,
   parseJobStatusOutput,
+  podRequestsByNode,
 } from "./k8s.js";
 
 const JOB: AgentJob = {
@@ -63,6 +64,7 @@ function mockApi(
     nodes?: Array<{ name: string; ready: boolean; status: string }> | undefined;
     workloadPods?: Array<{ name: string; status: string; node?: string; creationTimestamp?: string }> | undefined;
     stores?: Array<{ name: string; port?: number }> | undefined;
+    nodeUsage?: Record<string, { cpuUsed?: number; memoryMbUsed?: number }> | undefined;
     purged?: number;
   } = {},
 ) {
@@ -114,6 +116,9 @@ function mockApi(
     },
     async inspectStores() {
       return "stores" in opts ? opts.stores : [];
+    },
+    async inspectNodeUsage() {
+      return "nodeUsage" in opts ? opts.nodeUsage : {};
     },
     async stopWorkloadJob(name) {
       control.push(`stop:${name}`);
@@ -518,6 +523,8 @@ describe("K8sBackend.inspect (live cluster view)", () => {
         { name: "everdict-c1-abc", status: "Running", node: "n1", creationTimestamp: "2020-01-01T00:00:00Z" },
       ],
       stores: [{ name: "everdict-shared-postgres", port: 5432 }],
+      // n1's real load includes non-everdict pods — merged onto the node so the gauge isn't limited to everdict units.
+      nodeUsage: { n1: { cpuUsed: 3500, memoryMbUsed: 6144 } },
     });
     const backend = new K8sBackend({ image: "i", api, maxConcurrent: 10, namespace: "everdict-shared" });
     const r = await backend.inspect();
@@ -525,6 +532,7 @@ describe("K8sBackend.inspect (live cluster view)", () => {
     expect(r.detail).toContain("v1.31.2");
     expect(r.cluster).toMatchObject({ version: "v1.31.2", namespace: "everdict-shared" });
     expect(r.nodes).toMatchObject({ total: 2, ready: 1 });
+    expect(r.nodes?.items.find((n) => n.name === "n1")).toMatchObject({ cpuUsed: 3500, memoryMbUsed: 6144 });
     expect(r.capacity).toEqual({ total: 10, used: 4, free: 6 });
     expect(r.workload?.[0]).toMatchObject({ name: "everdict-c1-abc", role: "eval", node: "n1" });
     expect(r.workload?.[0]?.ageSeconds).toBeGreaterThan(0);
@@ -606,5 +614,34 @@ describe("k8s quantity parsers (pure)", () => {
     expect(k8sMemToMiB("1048576")).toBe(1); // bytes → 1 MiB
     expect(k8sMemToMiB(undefined)).toBeUndefined();
     expect(k8sMemToMiB("nope")).toBeUndefined();
+  });
+  it("podRequestsByNode sums container requests per node across ALL pods (not just everdict), running/pending only", () => {
+    const pods = [
+      // an everdict pod
+      {
+        spec: { nodeName: "n1", containers: [{ resources: { requests: { cpu: "500m", memory: "1Gi" } } }] },
+        status: { phase: "Running" },
+      },
+      // a foreign platform's pod on the same node still counts toward the node's real load
+      {
+        spec: {
+          nodeName: "n1",
+          containers: [
+            { resources: { requests: { cpu: "1", memory: "512Mi" } } },
+            { resources: { requests: { cpu: "250m", memory: "256Mi" } } },
+          ],
+        },
+        status: { phase: "Running" },
+      },
+      // a finished pod no longer occupies the node → excluded
+      {
+        spec: { nodeName: "n1", containers: [{ resources: { requests: { cpu: "8", memory: "16Gi" } } }] },
+        status: { phase: "Succeeded" },
+      },
+      // a pod not yet scheduled onto a node → skipped (no nodeName)
+      { spec: { containers: [{ resources: { requests: { cpu: "1" } } }] }, status: { phase: "Pending" } },
+    ];
+    expect(podRequestsByNode(pods)).toEqual({ n1: { cpuUsed: 1750, memoryMbUsed: 1792 } });
+    expect(podRequestsByNode([])).toEqual({});
   });
 });

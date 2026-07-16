@@ -21,7 +21,6 @@ import { Card } from '@/shared/ui/card'
 import { PageHeader } from '@/shared/ui/page-header'
 
 import { RuntimeClusterStatus } from './runtime-cluster-status'
-import { RuntimeHealthActions } from './runtime-health-actions'
 
 export const dynamic = 'force-dynamic'
 
@@ -199,13 +198,8 @@ export default async function RuntimeDetailPage({
               {t('noExtraConfig')}
             </p>
           )}
-          {/* Health checks — connect to the cluster (connection) / validate the spec + referenced secrets (dry run), without running a job. */}
-          {cluster && (
-            <div className="border-t border-border pt-4">
-              <RuntimeHealthActions spec={spec} />
-            </div>
-          )}
-          {/* Live cluster view — composition/capacity/workload/stores (read); admin gets destructive control actions. */}
+          {/* Live cluster view — composition/capacity/workload/stores (read); admin gets destructive control actions.
+              Health checks (connection test / dry run) live only on the register/edit form now, where they gate saving. */}
           {cluster && (
             <div className="border-t border-border pt-4">
               <RuntimeClusterStatus id={id} version={latest} canControl={canControl} />

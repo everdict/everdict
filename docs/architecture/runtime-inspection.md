@@ -24,7 +24,11 @@ cluster behind a nomad/k8s runtime, answering four operator questions the spec c
   `GET /runtimes/:id/versions/:version/inspect` **and** the `inspect_runtime` MCP tool, both gated `runtimes:read`
   (it is a read — unlike probe's `runtimes:write`), both resolving the registered spec by id before any live I/O
   (a non-owned/missing runtime is 404, no existence leak). The web calls it via the `inspectRuntimeAction`
-  token-courier BFF and renders the "Cluster status" panel on demand.
+  token-courier BFF and renders the "Cluster status" panel. The panel **loads on entering the detail screen and
+  re-polls on a cadence** (`CLUSTER_REFRESH_MS`, 20s) so the view stays live without a manual click; the poll pauses
+  while the tab is hidden or the operator is mid-action (a confirm modal is open / a control action or a prior fetch
+  is in flight — a `busyRef` guard), and a refresh keeps the current view on screen instead of blanking it. A manual
+  "Refresh" button remains for an on-demand re-read.
 
 ## Degrade contract (important)
 
@@ -78,12 +82,20 @@ workloads placed on it (with inline stop + a per-node cordon toggle). The data:
 - `InspectNode` carries `cpuTotal` / `memoryMbTotal` (total schedulable, in the runtime's NATIVE unit — Nomad CPU
   MHz, K8s CPU millicores; memory MiB) and `schedulable`. Nomad reads `/v1/node/:id` `NodeResources` (per node,
   capped at 30 to bound the calls); K8s parses node `status.allocatable` (`k8sCpuToMillicores` / `k8sMemToMiB`).
+- `InspectNode` **also carries `cpuUsed` / `memoryMbUsed` — the node's REAL committed load across EVERY workload on
+  it, not just everdict.** A shared cluster runs other platforms' jobs; a gauge fed only by the everdict units the
+  view can see understates a busy node. So the backend reads the node's true commitment: **Nomad** sums the
+  `AllocatedResources` of every running/pending alloc on the node (`/v1/node/:id/allocations` → `nomadNodeAllocated`);
+  **K8s** sums the container `requests` of every running/pending pod across all namespaces grouped by node
+  (`get pods -A` → `podRequestsByNode`). Same native units as the totals. Best-effort — an unavailable read simply
+  omits the field.
 - `InspectWorkload` carries `cpu` / `memoryMb` (its resource ask, same units) + its `node`. Nomad sums the alloc's
-  `AllocatedResources.Tasks`; K8s sums the pod's container `requests`.
-- The **web derives per-node allocation** by grouping workloads by node and summing their asks (allocated / total →
-  the bar). Units are native-per-kind (the web labels MHz vs cores from `insp.kind`); memory MiB→GiB. All best-effort:
-  a node/alloc that omits resources simply has no bar. Node-less units fall into an "unscheduled" group; if node
-  listing degrades, the panel falls back to the flat workload list.
+  `AllocatedResources.Tasks`; K8s sums the pod's container `requests` — these size the everdict workload chips.
+- The web's per-node usage bar uses `cpuUsed` / `memoryMbUsed` when present (true node load), and only falls back to
+  the sum of the visible everdict units' asks when the cluster didn't report the node's committed load. Units are
+  native-per-kind (the web labels MHz vs cores from `insp.kind`); memory MiB→GiB. All best-effort: a node that omits
+  resources simply has no bar. Node-less units fall into an "unscheduled" group; if node listing degrades, the panel
+  falls back to the flat workload list.
 
 ## Deliberate non-goals (v1)
 

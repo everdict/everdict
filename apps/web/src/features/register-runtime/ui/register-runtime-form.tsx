@@ -239,7 +239,14 @@ export function RegisterRuntimeForm({
   const [validating, startValidate] = useTransition()
   const [saving, startSave] = useTransition()
 
-  const set = <K extends keyof Fields>(k: K, v: Fields[K]) => setF((p) => ({ ...p, [k]: v }))
+  // Any edit invalidates a prior connection test / dry run — clear the gate so the tested spec always equals the saved one.
+  const set = <K extends keyof Fields>(k: K, v: Fields[K]) => {
+    setF((p) => ({ ...p, [k]: v }))
+    setProbe(undefined)
+    setValidation(undefined)
+  }
+  // Saving is gated on a passing health check: a successful connection test (reachable) OR a successful dry run.
+  const gatePassed = probe?.reachable === true || validation?.ok === true
   const kindMeta = useMemo(() => KINDS.find((k) => k.value === f.kind), [f.kind])
   const secretHint = t('secretHint')
 
@@ -288,6 +295,11 @@ export function RegisterRuntimeForm({
     const errKey = requiredErrorKey(f)
     if (errKey) {
       setError(t(errKey))
+      return
+    }
+    // Enforced: a run/save requires a passing connection test or dry run (the button is disabled until then; this guards the path).
+    if (!gatePassed) {
+      setError(t('gateHint'))
       return
     }
     startSave(async () => {
@@ -593,8 +605,13 @@ export function RegisterRuntimeForm({
         </Callout>
       )}
 
+      {/* Gate hint — saving stays disabled until a connection test or dry run passes (enforced, not advisory). */}
+      {!gatePassed && (
+        <p className="text-[12px] text-muted-foreground">{t('gateHint')}</p>
+      )}
+
       <div className="flex items-center gap-2.5 border-t border-border pt-5">
-        <Button onClick={onSubmit} disabled={saving} className="gap-1.5">
+        <Button onClick={onSubmit} disabled={saving || !gatePassed} className="gap-1.5">
           {saving ? (
             <Loader2 className="size-4 animate-spin" />
           ) : (

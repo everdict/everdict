@@ -1869,6 +1869,7 @@
     "validationFailed": "Check failed: {error}",
     "validationErrors": "Invalid: {errors}",
     "missingSecrets": "Referenced secrets not found: {names}",
+    "gateHint": "You can only save once a connection test or dry run succeeds — run one below first.",
     "saveEdit": "Save changes",
     "updated": "Updated {id}",
     "lockedIdentityHint": "ID and kind can't be changed."
@@ -2044,7 +2045,8 @@
     "specTraceSource": "Trace source",
     "specBrowserImage": "Browser image",
     "clusterStatus": "Cluster status",
-    "clusterLoad": "Load cluster status",
+    "clusterLive": "Live · every {seconds}s",
+    "clusterLoading": "Loading cluster status…",
     "clusterRefresh": "Refresh",
     "clusterError": "Couldn't inspect the cluster: {error}",
     "clusterUnreachable": "Cluster not reachable",

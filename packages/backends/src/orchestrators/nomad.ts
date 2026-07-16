@@ -221,6 +221,26 @@ export function nomadAllocResources(a: NomadAllocStub): { cpu?: number; memoryMb
   return { ...(cpu > 0 ? { cpu } : {}), ...(memoryMb > 0 ? { memoryMb } : {}) };
 }
 
+// /v1/node/:id/allocations → the node's committed resources across EVERY alloc on it (all jobs/namespaces, not just
+// everdict): the sum of running/pending AllocatedResources. This is the true node load — a node packed with other
+// platforms' jobs reads busy even with no everdict units on it. Best-effort: an unparseable body yields {}.
+export function nomadNodeAllocated(text: string): { cpuUsed?: number; memoryMbUsed?: number } {
+  try {
+    const allocs = JSON.parse(text) as NomadAllocStub[];
+    let cpu = 0;
+    let memoryMb = 0;
+    for (const a of allocs) {
+      if (a.ClientStatus !== "running" && a.ClientStatus !== "pending") continue;
+      const r = nomadAllocResources(a);
+      cpu += r.cpu ?? 0;
+      memoryMb += r.memoryMb ?? 0;
+    }
+    return { ...(cpu > 0 ? { cpuUsed: cpu } : {}), ...(memoryMb > 0 ? { memoryMbUsed: memoryMb } : {}) };
+  } catch {
+    return {};
+  }
+}
+
 // Alloc age in whole seconds. CreateTime is nanoseconds; nowMs is Date.now(). undefined when unknown/nonsensical.
 export function nomadAllocAgeSeconds(createTimeNs: number | undefined, nowMs: number): number | undefined {
   if (createTimeNs === undefined || createTimeNs <= 0) return undefined;
@@ -476,13 +496,21 @@ export class NomadBackend implements Backend, Recoverable, Observable, Shellable
         const items: InspectNode[] = [];
         for (const [i, stub] of stubs.entries()) {
           const node = nomadNodeToInspect(stub);
-          // Per-node total resources (for the usage bar) — one extra call per node, capped so a big cluster stays bounded.
+          // Per-node total + committed resources (for the usage bar) — two extra calls per node, capped so a big
+          // cluster stays bounded. Totals from /v1/node/:id; the real load (all jobs) from the node's alloc list.
           if (stub.ID && i < NODE_DETAIL_CAP) {
+            const nodeId = encodeURIComponent(stub.ID);
             try {
-              const d = await this.http.request("GET", `/v1/node/${encodeURIComponent(stub.ID)}`);
+              const d = await this.http.request("GET", `/v1/node/${nodeId}`);
               if (d.status < 300) Object.assign(node, nomadNodeResources(d.text));
             } catch {
               // omit this node's totals
+            }
+            try {
+              const a = await this.http.request("GET", `/v1/node/${nodeId}/allocations`);
+              if (a.status < 300) Object.assign(node, nomadNodeAllocated(a.text));
+            } catch {
+              // omit this node's committed load
             }
           }
           items.push(node);

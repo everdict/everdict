@@ -82,6 +82,9 @@ const inspectNodeSchema = z.object({
   schedulable: z.boolean().optional(),
   cpuTotal: z.number().optional(),
   memoryMbTotal: z.number().optional(),
+  // Real committed load across ALL workloads on the node (not just everdict) — the gauge prefers this over the everdict-unit sum.
+  cpuUsed: z.number().optional(),
+  memoryMbUsed: z.number().optional(),
 })
 const inspectWorkloadSchema = z.object({
   id: z.string(),

@@ -18,9 +18,15 @@ export const InspectNodeSchema = z.object({
   // cordon/uncordon toggle. Absent when the list endpoint doesn't carry it.
   schedulable: z.boolean().optional(),
   // Total schedulable resources in the runtime's native unit (Nomad: CPU MHz; K8s: CPU millicores) / memory in MiB.
-  // The web draws a per-node usage bar (allocated = the sum of the workloads placed on this node / this total).
+  // The web draws a per-node usage bar (used / total).
   cpuTotal: z.number().optional(),
   memoryMbTotal: z.number().optional(),
+  // Resources committed on this node by ALL workloads — every tenant/platform, not just everdict (Nomad: the sum of
+  // every alloc's AllocatedResources on the node; K8s: the sum of every pod's container requests). This is the real
+  // node load: a node full of non-everdict jobs reads as busy even with no everdict units on it. The web prefers this
+  // over the sum of the everdict units it can see, so the gauge reflects true node commitment. Absent when unavailable.
+  cpuUsed: z.number().optional(),
+  memoryMbUsed: z.number().optional(),
 });
 export type InspectNode = z.infer<typeof InspectNodeSchema>;
 

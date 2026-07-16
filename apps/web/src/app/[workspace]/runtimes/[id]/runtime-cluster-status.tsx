@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useTransition, type ReactNode } from 'react'
+import { useEffect, useRef, useState, useTransition, type ReactNode } from 'react'
 import { Ban, Loader2, Play, RefreshCw, Server, Trash2, X } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
@@ -20,6 +20,8 @@ type InspectWorkload = NonNullable<RuntimeInspection['workload']>[number]
 
 // A running/pending unit older than this reads as an idle-reclaim candidate. Stores are long-lived by design, so they're excluded.
 const LONG_RUNNING_SECONDS = 30 * 60
+// The detail screen keeps the cluster view live — it reloads on entry and re-polls the cluster on this cadence.
+const CLUSTER_REFRESH_MS = 20_000
 
 function formatAge(seconds: number): string {
   if (seconds < 60) return `${seconds}s`
@@ -181,11 +183,35 @@ export function RuntimeClusterStatus({
   const [actionMessage, setActionMessage] = useState<string>()
   const [running, startAction] = useTransition()
 
-  function load() {
+  // A poll must not fire while the user is mid-action (confirm modal open / control running) or a fetch is already
+  // in flight; the ref keeps the interval callback reading the latest flags without re-arming the timer each render.
+  const busyRef = useRef(false)
+  busyRef.current = loading || running || pending !== undefined
+
+  // Manual refresh (button) — unlike the first load it keeps the current view on screen while re-fetching (no flicker).
+  function refresh() {
     setActionMessage(undefined)
-    setResult(undefined)
     start(async () => setResult(await inspectRuntimeAction(id, version)))
   }
+
+  // Load on entering the detail screen, then keep the view live by re-polling the cluster on a cadence. The poll pauses
+  // while the tab is hidden or the user is mid-action, and never stacks a second fetch on an in-flight one.
+  useEffect(() => {
+    let cancelled = false
+    const tick = () => {
+      if (cancelled || busyRef.current || (typeof document !== 'undefined' && document.hidden)) return
+      start(async () => {
+        const r = await inspectRuntimeAction(id, version)
+        if (!cancelled) setResult(r)
+      })
+    }
+    tick()
+    const iv = setInterval(tick, CLUSTER_REFRESH_MS)
+    return () => {
+      cancelled = true
+      clearInterval(iv)
+    }
+  }, [id, version, start])
 
   function confirmRun() {
     const p = pending
@@ -249,6 +275,11 @@ export function RuntimeClusterStatus({
         <span className="flex items-center gap-1.5 text-[13px] font-[510]">
           <Server className="size-3.5 text-muted-foreground" />
           {t('clusterStatus')}
+          {/* Live badge — the view auto-refreshes on a cadence; a soft pulse signals it's kept current. */}
+          <span className="ml-1 inline-flex items-center gap-1 text-[10.5px] font-normal text-faint">
+            <span className="size-1.5 animate-pulse rounded-full bg-emerald-500" />
+            {t('clusterLive', { seconds: CLUSTER_REFRESH_MS / 1000 })}
+          </span>
         </span>
         <div className="flex items-center gap-2">
           {canControl && insp?.reachable ? (
@@ -271,7 +302,7 @@ export function RuntimeClusterStatus({
           <Button
             variant="secondary"
             size="sm"
-            onClick={load}
+            onClick={refresh}
             disabled={loading}
             className="gap-1.5"
           >
@@ -280,10 +311,18 @@ export function RuntimeClusterStatus({
             ) : (
               <RefreshCw className="size-3.5" />
             )}
-            {result ? t('clusterRefresh') : t('clusterLoad')}
+            {t('clusterRefresh')}
           </Button>
         </div>
       </div>
+
+      {/* First load on entering the screen — nothing to show yet, so a lightweight loading line stands in. */}
+      {loading && !result ? (
+        <div className="flex items-center gap-2 py-2 text-[12px] text-muted-foreground">
+          <Loader2 className="size-3.5 animate-spin" />
+          {t('clusterLoading')}
+        </div>
+      ) : null}
 
       {actionMessage ? (
         <Callout tone="info" className="py-1.5">
@@ -417,7 +456,9 @@ export function RuntimeClusterStatus({
                         {n.cpuTotal !== undefined ? (
                           <RadialGauge
                             label={t('clusterCpu')}
-                            used={sum(units, 'cpu')}
+                            // Real node load (all workloads on the node) when the cluster reports it; otherwise fall
+                            // back to the sum of the everdict units we can see (understates a node shared with other work).
+                            used={n.cpuUsed ?? sum(units, 'cpu')}
                             total={n.cpuTotal}
                             render={(v) => formatCpu(v, insp.kind)}
                           />
@@ -425,7 +466,7 @@ export function RuntimeClusterStatus({
                         {n.memoryMbTotal !== undefined ? (
                           <RadialGauge
                             label={t('clusterMemory')}
-                            used={sum(units, 'memoryMb')}
+                            used={n.memoryMbUsed ?? sum(units, 'memoryMb')}
                             total={n.memoryMbTotal}
                             render={formatMem}
                           />

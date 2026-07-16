@@ -13,6 +13,7 @@ import {
   fetchHttp,
   nomadAllocAgeSeconds,
   nomadAllocResources,
+  nomadNodeAllocated,
   nomadNodeResources,
   nomadNodeToInspect,
   parseNomadSelf,
@@ -843,6 +844,45 @@ describe("NomadBackend.inspect (live cluster view)", () => {
     expect(r.warnings).toEqual([]);
   });
 
+  it("reads each node's real committed load (all jobs) from /v1/node/:id + its allocations", async () => {
+    const backend = new NomadBackend({
+      addr: "http://n:4646",
+      image: "i",
+      http: clusterHttp({
+        "/v1/nodes": {
+          status: 200,
+          text: JSON.stringify([{ ID: "id-n1", Name: "n1", Status: "ready", Datacenter: "dc1" }]),
+        },
+        "/v1/node/id-n1": {
+          status: 200,
+          text: JSON.stringify({ NodeResources: { Cpu: { CpuShares: 8000 }, Memory: { MemoryMB: 16000 } } }),
+        },
+        // The node runs an everdict alloc AND a foreign job — both count toward its real load.
+        "/v1/node/id-n1/allocations": {
+          status: 200,
+          text: JSON.stringify([
+            {
+              ClientStatus: "running",
+              AllocatedResources: { Tasks: { a: { Cpu: { CpuShares: 500 }, Memory: { MemoryMB: 2048 } } } },
+            },
+            {
+              ClientStatus: "running",
+              AllocatedResources: { Tasks: { b: { Cpu: { CpuShares: 1500 }, Memory: { MemoryMB: 4096 } } } },
+            },
+          ]),
+        },
+      }),
+    });
+    const r = await backend.inspect();
+    expect(r.nodes?.items[0]).toMatchObject({
+      name: "n1",
+      cpuTotal: 8000,
+      memoryMbTotal: 16000,
+      cpuUsed: 2000,
+      memoryMbUsed: 6144,
+    });
+  });
+
   it("degrades a failed node listing to a warning but still returns the rest", async () => {
     const backend = new NomadBackend({
       addr: "http://n:4646",
@@ -963,5 +1003,27 @@ describe("nomad resource parse helpers (pure)", () => {
       }),
     ).toEqual({ cpu: 600, memoryMb: 1280 });
     expect(nomadAllocResources({})).toEqual({}); // no AllocatedResources → omitted
+  });
+
+  it("nomadNodeAllocated sums committed CPU + memory across ALL running/pending allocs on the node", () => {
+    const text = JSON.stringify([
+      {
+        ClientStatus: "running",
+        AllocatedResources: { Tasks: { a: { Cpu: { CpuShares: 500 }, Memory: { MemoryMB: 1024 } } } },
+      },
+      // a non-everdict job on the node still counts toward the node's real load
+      {
+        ClientStatus: "pending",
+        AllocatedResources: { Tasks: { b: { Cpu: { CpuShares: 200 }, Memory: { MemoryMB: 512 } } } },
+      },
+      // a finished alloc no longer occupies the node → excluded
+      {
+        ClientStatus: "complete",
+        AllocatedResources: { Tasks: { c: { Cpu: { CpuShares: 999 }, Memory: { MemoryMB: 9999 } } } },
+      },
+    ]);
+    expect(nomadNodeAllocated(text)).toEqual({ cpuUsed: 700, memoryMbUsed: 1536 });
+    expect(nomadNodeAllocated("not json")).toEqual({});
+    expect(nomadNodeAllocated(JSON.stringify([]))).toEqual({});
   });
 });
