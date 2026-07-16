@@ -147,7 +147,6 @@ export {
 export { createLimiter, type Limiter } from "./concurrency/limiter.js";
 export {
   type CaseExportStream,
-  type TraceSinkConfigView,
   TraceSinkService,
   type TraceSinkServiceDeps,
 } from "./trace-sink/trace-sink-service.js";
@@ -155,6 +154,7 @@ export {
   type TraceSourceConfigView,
   TraceSourceService,
   type TraceSourceServiceDeps,
+  unifiedTraceSources,
 } from "./trace-source/trace-source-service.js";
 export { resolveHarnessTraceMapping } from "./trace-source/resolve-harness-mapping.js";
 export { SpanAttrMappingService } from "./trace-source/span-attr-mapping-service.js";

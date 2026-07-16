@@ -29,6 +29,7 @@ describe("TraceSourceService", () => {
       authSecretName: "mlflow-token",
       correlate: "tag",
       project: "12",
+      webUrl: "https://mlflow.acme.dev/ui",
     });
     const { sources } = await svc.list(WS);
     expect(sources).toEqual([
@@ -39,36 +40,74 @@ describe("TraceSourceService", () => {
         authSecretName: "mlflow-token", // a NAME reference, never the value
         correlate: "tag",
         project: "12",
+        webUrl: "https://mlflow.acme.dev/ui", // export deep-link base, round-trips
       },
     ]);
   });
 
-  it("rejects an incoherent tag-correlation config (otel tag without service, mlflow tag without project)", async () => {
+  it("requires a scope for mlflow/phoenix regardless of correlate (traces live inside an experiment/project)", async () => {
+    const svc = new TraceSourceService(fakeSettings());
+    // mlflow default correlate:'id' still needs the experiment — the meaningful-test fix.
+    await expect(svc.upsert(WS, { name: "m", kind: "mlflow", endpoint: "http://mlflow" })).rejects.toThrow(/experiment/);
+    await expect(svc.upsert(WS, { name: "p", kind: "phoenix", endpoint: "http://phoenix" })).rejects.toThrow(/project/);
+  });
+
+  it("rejects an incoherent otel tag-correlation config (tag without service)", async () => {
     const svc = new TraceSourceService(fakeSettings());
     await expect(
       svc.upsert(WS, { name: "j", kind: "otel", endpoint: "http://jaeger", correlate: "tag" }),
     ).rejects.toThrow(/service/);
-    await expect(
-      svc.upsert(WS, { name: "m", kind: "mlflow", endpoint: "http://mlflow", correlate: "tag" }),
-    ).rejects.toThrow(/project/);
   });
 
-  it("selects a source per harness and rejects an unknown source name", async () => {
+  it("selects a PULL source per harness and rejects an unknown source name", async () => {
     const svc = new TraceSourceService(fakeSettings());
     await svc.upsert(WS, { name: "s1", kind: "otel", endpoint: "http://jaeger" });
-    await svc.assign(WS, "harness-a", "s1");
+    await svc.assignSource(WS, "harness-a", "s1");
     expect((await svc.list(WS)).assignments).toEqual({ "harness-a": "s1" });
-    await expect(svc.assign(WS, "harness-a", "ghost")).rejects.toThrow(/Unregistered source/);
+    await expect(svc.assignSource(WS, "harness-a", "ghost")).rejects.toThrow(/Unregistered source/);
   });
 
-  it("removing a source also clears harness selections that pointed at it (no dangling reference)", async () => {
+  it("selects an EXPORT target per harness, rejecting an unknown name or an otel source (pull-only)", async () => {
     const svc = new TraceSourceService(fakeSettings());
-    await svc.upsert(WS, { name: "s1", kind: "otel", endpoint: "http://jaeger" });
-    await svc.assign(WS, "harness-a", "s1");
-    await svc.remove(WS, "s1");
-    const { sources, assignments } = await svc.list(WS);
+    await svc.upsert(WS, { name: "lf", kind: "langfuse", endpoint: "http://lf" });
+    await svc.upsert(WS, { name: "jg", kind: "otel", endpoint: "http://jaeger" });
+    await svc.assignSink(WS, "harness-a", "lf");
+    expect((await svc.list(WS)).sinkAssignments).toEqual({ "harness-a": "lf" });
+    await expect(svc.assignSink(WS, "harness-a", "ghost")).rejects.toThrow(/Unregistered source/);
+    await expect(svc.assignSink(WS, "harness-a", "jg")).rejects.toThrow(/otel/);
+  });
+
+  it("removing a source clears BOTH pull and export selections that pointed at it (no dangling reference)", async () => {
+    const svc = new TraceSourceService(fakeSettings());
+    await svc.upsert(WS, { name: "lf", kind: "langfuse", endpoint: "http://lf" });
+    await svc.assignSource(WS, "harness-a", "lf");
+    await svc.assignSink(WS, "harness-b", "lf");
+    await svc.remove(WS, "lf");
+    const { sources, assignments, sinkAssignments } = await svc.list(WS);
     expect(sources).toEqual([]);
     expect(assignments).toEqual({});
+    expect(sinkAssignments).toEqual({});
+  });
+
+  it("surfaces a legacy trace sink in the unified source pool and migrates it on the next write", async () => {
+    const store = fakeSettings({
+      traceSinks: [{ name: "legacy-lf", kind: "langfuse", endpoint: "http://lf", project: "p1" }],
+      traceSinkByHarness: { "harness-a": "legacy-lf" },
+    });
+    const svc = new TraceSourceService(store);
+    // The legacy sink shows up as a trace source (correlate defaults to "id").
+    let roster = await svc.list(WS);
+    expect(roster.sources).toEqual([
+      { name: "legacy-lf", kind: "langfuse", endpoint: "http://lf", correlate: "id", project: "p1" },
+    ]);
+    expect(roster.sinkAssignments).toEqual({ "harness-a": "legacy-lf" });
+    // A write migrates it into traceSources and clears the legacy field.
+    await svc.upsert(WS, { name: "new-src", kind: "otel", endpoint: "http://jaeger" });
+    const state = await store.get(WS);
+    expect(state?.traceSinks).toEqual([]);
+    expect((state?.traceSources ?? []).map((e) => e.name).sort()).toEqual(["legacy-lf", "new-src"]);
+    roster = await svc.list(WS);
+    expect(roster.sources.map((e) => e.name).sort()).toEqual(["legacy-lf", "new-src"]);
   });
 
   it("resolve() builds the full TraceSourceConfig for the harness's selection with the auth value from the SecretStore", async () => {
@@ -83,7 +122,7 @@ describe("TraceSourceService", () => {
       correlate: "tag",
       project: "12",
     });
-    await svc.assign(WS, "harness-a", "dev-mlflow");
+    await svc.assignSource(WS, "harness-a", "dev-mlflow");
     const cfg = await svc.resolve(WS, "harness-a");
     expect(cfg).toEqual({
       kind: "mlflow",
@@ -104,7 +143,7 @@ describe("TraceSourceService", () => {
       fakeSettings({ spanAttrMappingByHarness: { "harness-a": { model: ["my.llm.model"] } } }),
     );
     await svc.upsert(WS, { name: "s1", kind: "otel", endpoint: "http://jaeger" });
-    await svc.assign(WS, "harness-a", "s1");
+    await svc.assignSource(WS, "harness-a", "s1");
     const cfg = await svc.resolve(WS, "harness-a");
     expect(cfg?.mapping).toEqual({ model: ["my.llm.model"] });
   });
@@ -112,7 +151,7 @@ describe("TraceSourceService", () => {
   it("resolve() fails fast when the referenced auth secret is not in the SecretStore", async () => {
     const svc = new TraceSourceService(fakeSettings(), { secretsFor: async () => ({}) });
     await svc.upsert(WS, { name: "s1", kind: "langfuse", endpoint: "http://lf", authSecretName: "missing" });
-    await svc.assign(WS, "harness-a", "s1");
+    await svc.assignSource(WS, "harness-a", "s1");
     await expect(svc.resolve(WS, "harness-a")).rejects.toThrow(/not registered|No value/);
   });
 
@@ -181,7 +220,7 @@ describe("TraceSourceService", () => {
 
   it("inspect() passes the supplied mapping through to the source (wizard live-authoring loop)", async () => {
     const svc = new TraceSourceService(fakeSettings(), { buildSource: () => fakeBrowsable });
-    await svc.upsert(WS, { name: "s1", kind: "mlflow", endpoint: "http://mlflow" });
+    await svc.upsert(WS, { name: "s1", kind: "mlflow", endpoint: "http://mlflow", project: "0" });
     const r = await svc.inspect(WS, "s1", "tid", { model: ["custom.model"] });
     expect(r.rawAttributes?.[0]).toEqual({ spanName: "tid", attrs: { mappedModel: "custom.model" } });
   });
