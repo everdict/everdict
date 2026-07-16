@@ -8,12 +8,14 @@ import { useLocale, useTranslations } from 'next-intl'
 import type { Schedule } from '@/entities/schedule'
 import { describeCron, fireDayLabel, fireTimeLabel } from '@/shared/lib/cron'
 import { fmtDateTimeFull } from '@/shared/lib/format'
+import { usePersistentFilters } from '@/shared/lib/use-persistent-filters'
 import { cn } from '@/shared/lib/utils'
 import { Avatar } from '@/shared/ui/avatar'
 import { Callout } from '@/shared/ui/callout'
 import { Combobox } from '@/shared/ui/combobox'
 import { EmptyState } from '@/shared/ui/empty-state'
 import { Input } from '@/shared/ui/input'
+import { ResetFiltersButton } from '@/shared/ui/reset-filters-button'
 import { StatCard } from '@/shared/ui/stat-card'
 
 import { deleteScheduleAction, setScheduleEnabledAction } from '../api/schedule-actions'
@@ -36,6 +38,9 @@ const VIEWS: { value: View; labelKey: string }[] = [
 
 const UPCOMING_HORIZON_DAYS = 7
 const UPCOMING_LIMIT = 24
+
+// Filter defaults that persist across page navigation (query, owner, status, runtime). view is excluded — it deep-links via the URL.
+const FILTER_DEFAULTS = { query: '', owner: '', status: '', runtime: '' }
 
 // Schedule list — a workspace's cron jobs across multiple users, shown with owner · runtime · benchmark→harness.
 // View switch (list / by owner / calendar) + owner · status · runtime filters + an 'upcoming runs' timeline.
@@ -72,10 +77,12 @@ export function ScheduleList({
   const [pending, startTransition] = useTransition()
   const [error, setError] = useState<string>()
   const [view, setView] = useState<View>(initialView)
-  const [query, setQuery] = useState('')
-  const [owner, setOwner] = useState('') // owner (createdBy) filter
-  const [status, setStatus] = useState('') // '' | 'enabled' | 'paused'
-  const [runtime, setRuntime] = useState('') // runtime filter
+  // Filter/search state is remembered per workspace (persists across navigation) — show the reset button when dirty.
+  const { values, set, reset, dirty } = usePersistentFilters(
+    `schedules:${workspace}`,
+    FILTER_DEFAULTS
+  )
+  const { query, owner, status, runtime } = values
 
   function act(fn: () => Promise<{ ok: boolean; error?: string }>): void {
     setError(undefined)
@@ -219,7 +226,7 @@ export function ScheduleList({
           <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
           <Input
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            onChange={(e) => set('query', e.target.value)}
             placeholder={t('searchPlaceholder')}
             className="pl-8"
             aria-label={t('searchAria')}
@@ -229,7 +236,7 @@ export function ScheduleList({
           <Combobox
             options={ownerOptions}
             value={owner}
-            onChange={setOwner}
+            onChange={(v) => set('owner', v)}
             placeholder={t('ownerPlaceholder')}
             className="w-[160px]"
           />
@@ -237,7 +244,7 @@ export function ScheduleList({
         <Combobox
           options={statusOptions}
           value={status}
-          onChange={setStatus}
+          onChange={(v) => set('status', v)}
           placeholder={t('statusPlaceholder')}
           className="w-[130px]"
           searchable={false}
@@ -246,11 +253,12 @@ export function ScheduleList({
           <Combobox
             options={runtimeOptions}
             value={runtime}
-            onChange={setRuntime}
+            onChange={(v) => set('runtime', v)}
             placeholder={t('runtimePlaceholder')}
             className="w-[150px]"
           />
         )}
+        {dirty && <ResetFiltersButton onClick={reset} />}
       </div>
 
       {visible.length === 0 ? (

@@ -9,16 +9,21 @@ import { DeleteHarnessDialog } from '@/features/delete-harness'
 import type { Harness } from '@/entities/harness'
 import { fmtDateTime, fmtDateTimeFull, fmtSubject } from '@/shared/lib/format'
 import type { HarnessRelation } from '@/shared/lib/harness-relations'
+import { usePersistentFilters } from '@/shared/lib/use-persistent-filters'
 import { cn } from '@/shared/lib/utils'
 import { UserAvatar } from '@/shared/ui/avatar'
 import { Combobox } from '@/shared/ui/combobox'
 import { EmptyState } from '@/shared/ui/empty-state'
 import { Input } from '@/shared/ui/input'
+import { ResetFiltersButton } from '@/shared/ui/reset-filters-button'
 import { Score } from '@/shared/ui/score'
 import { StatCard } from '@/shared/ui/stat-card'
 
 type Sort = 'name' | 'updated' | 'versions'
 type Author = { name: string; avatarUrl?: string }
+
+// Filter defaults that persist across page navigation (query, sort, category, creator).
+const FILTER_DEFAULTS = { query: '', sort: 'name' as Sort, category: '', user: '' }
 
 const STATUS_KEY: Record<string, string> = {
   succeeded: 'statusSucceeded',
@@ -67,10 +72,12 @@ export function HarnessList({
     { value: 'updated', label: t('sortUpdated') },
     { value: 'versions', label: t('sortVersions') },
   ]
-  const [query, setQuery] = useState('')
-  const [sort, setSort] = useState<Sort>('name')
-  const [category, setCategory] = useState('') // category filter
-  const [user, setUser] = useState('') // registrant (createdBy) filter
+  // Filter/search state is remembered per workspace (persists across navigation) — show the reset button when dirty.
+  const { values, set, reset, dirty } = usePersistentFilters(
+    `harnesses:${workspace}`,
+    FILTER_DEFAULTS
+  )
+  const { query, sort, category, user } = values
 
   const catCount = useMemo(
     () => new Set(harnesses.map((h) => h.category).filter(Boolean)).size,
@@ -147,7 +154,7 @@ export function HarnessList({
           <Layers className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
           <Input
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            onChange={(e) => set('query', e.target.value)}
             placeholder={t('searchPlaceholder')}
             className="pl-8"
             aria-label={t('searchAria')}
@@ -156,7 +163,7 @@ export function HarnessList({
         <Combobox
           options={categoryOptions}
           value={category}
-          onChange={setCategory}
+          onChange={(v) => set('category', v)}
           placeholder={t('categoryPlaceholder')}
           className="w-[150px]"
         />
@@ -164,7 +171,7 @@ export function HarnessList({
           <Combobox
             options={userOptions}
             value={user}
-            onChange={setUser}
+            onChange={(v) => set('user', v)}
             placeholder={t('userPlaceholder')}
             className="w-[150px]"
           />
@@ -172,11 +179,12 @@ export function HarnessList({
         <Combobox
           options={sorts.map((s) => ({ value: s.value, label: s.label }))}
           value={sort}
-          onChange={(v) => setSort(v as Sort)}
+          onChange={(v) => set('sort', v as Sort)}
           className="w-[130px]"
           align="end"
           aria-label={t('sortAria')}
         />
+        {dirty && <ResetFiltersButton onClick={reset} />}
       </div>
 
       {visible.length === 0 ? (

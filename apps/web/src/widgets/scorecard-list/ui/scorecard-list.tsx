@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import Link from 'next/link'
 import { Search } from 'lucide-react'
 import { useLocale, useTranslations } from 'next-intl'
@@ -14,17 +14,29 @@ import {
   fmtSubject,
   fmtTimeOnly,
 } from '@/shared/lib/format'
+import { usePersistentFilters } from '@/shared/lib/use-persistent-filters'
 import { UserAvatar } from '@/shared/ui/avatar'
 import { EntityRef, MetricChip, ModelChip, SubsetChip } from '@/shared/ui/chip'
 import { Combobox } from '@/shared/ui/combobox'
 import { EmptyState } from '@/shared/ui/empty-state'
 import { Input } from '@/shared/ui/input'
 import { OriginChip } from '@/shared/ui/origin'
+import { ResetFiltersButton } from '@/shared/ui/reset-filters-button'
 import { StatCard } from '@/shared/ui/stat-card'
 import { StatusIcon } from '@/shared/ui/status-pill'
 
 type Sort = 'recent' | 'name'
 type Author = { name: string; avatarUrl?: string }
+
+// Filter defaults that persist across page navigation (query, sort, dataset, harness, status, runner).
+const FILTER_DEFAULTS = {
+  query: '',
+  sort: 'recent' as Sort,
+  dataset: '',
+  harness: '',
+  status: '',
+  user: '',
+}
 
 // Scorecard list — same pattern as the dataset list (search + Combobox filter + sort + runner avatar).
 export function ScorecardList({
@@ -51,12 +63,12 @@ export function ScorecardList({
     { value: 'superseded', label: t('statusSuperseded') },
     { value: 'cancelled', label: t('statusCancelled') },
   ]
-  const [query, setQuery] = useState('')
-  const [sort, setSort] = useState<Sort>('recent')
-  const [dataset, setDataset] = useState('') // dataset filter ('' = all)
-  const [harness, setHarness] = useState('') // harness filter ('' = all)
-  const [status, setStatus] = useState('') // status filter ('' = all)
-  const [user, setUser] = useState('') // runner (createdBy) filter ('' = all)
+  // Filter/search state is remembered per workspace (persists across navigation) — show the reset button when dirty.
+  const { values, set, reset, dirty } = usePersistentFilters(
+    `scorecards:${workspace}`,
+    FILTER_DEFAULTS
+  )
+  const { query, sort, dataset, harness, status, user } = values
 
   const total = scorecards.length
   const succeeded = scorecards.filter((s) => s.status === 'succeeded').length
@@ -156,7 +168,7 @@ export function ScorecardList({
           <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
           <Input
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            onChange={(e) => set('query', e.target.value)}
             placeholder={t('searchPlaceholder')}
             className="pl-8"
             aria-label={t('searchAria')}
@@ -165,21 +177,21 @@ export function ScorecardList({
         <Combobox
           options={datasetOptions}
           value={dataset}
-          onChange={setDataset}
+          onChange={(v) => set('dataset', v)}
           placeholder={t('datasetPlaceholder')}
           className="w-[150px]"
         />
         <Combobox
           options={harnessOptions}
           value={harness}
-          onChange={setHarness}
+          onChange={(v) => set('harness', v)}
           placeholder={t('harnessPlaceholder')}
           className="w-[150px]"
         />
         <Combobox
           options={statusOptions}
           value={status}
-          onChange={setStatus}
+          onChange={(v) => set('status', v)}
           placeholder={t('statusPlaceholder')}
           className="w-[130px]"
         />
@@ -187,7 +199,7 @@ export function ScorecardList({
           <Combobox
             options={userOptions}
             value={user}
-            onChange={setUser}
+            onChange={(v) => set('user', v)}
             placeholder={t('userPlaceholder')}
             className="w-[150px]"
           />
@@ -195,11 +207,12 @@ export function ScorecardList({
         <Combobox
           options={sorts.map((s) => ({ value: s.value, label: s.label }))}
           value={sort}
-          onChange={(v) => setSort(v as Sort)}
+          onChange={(v) => set('sort', v as Sort)}
           className="w-[130px]"
           align="end"
           aria-label={t('sortAria')}
         />
+        {dirty && <ResetFiltersButton onClick={reset} />}
       </div>
 
       {visible.length === 0 ? (

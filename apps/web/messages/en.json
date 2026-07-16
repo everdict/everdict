@@ -2396,7 +2396,9 @@
     "infoTipAria": "Help",
     "versionSystemManaged": "System managed",
     "versionBump": "Existing {existing} · latest <code>{latest}</code> → new version <codeNew>{value}</codeNew>",
-    "versionFirstHint": "First version — bump patch/minor/major from here on."
+    "versionFirstHint": "First version — bump patch/minor/major from here on.",
+    "resetFilters": "Reset",
+    "resetFiltersAria": "Reset all filters"
   },
   "updateProfile": {
     "choosePhotoFile": "Choose profile photo file",

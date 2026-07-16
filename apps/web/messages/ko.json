@@ -2396,7 +2396,9 @@
     "infoTipAria": "도움말",
     "versionSystemManaged": "시스템 관리",
     "versionBump": "기존 {existing} · 최신 <code>{latest}</code> → 새 버전 <codeNew>{value}</codeNew>",
-    "versionFirstHint": "첫 버전 — 다음부터 patch/minor/major 로 올립니다."
+    "versionFirstHint": "첫 버전 — 다음부터 patch/minor/major 로 올립니다.",
+    "resetFilters": "초기화",
+    "resetFiltersAria": "모든 필터 초기화"
   },
   "updateProfile": {
     "choosePhotoFile": "프로필 사진 파일 선택",
