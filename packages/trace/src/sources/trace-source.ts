@@ -31,22 +31,30 @@ const DEFAULT_KEYS = {
   messageText: ["message.content", "output.value"],
 } as const;
 
+// Conventional attribute keys for the artifact channel (fixed, not part of the per-field SpanAttrMapping override).
+const ARTIFACT_KEYS = {
+  ref: ["artifact.ref", "artifact.uri", "mlflow.artifact.uri"],
+  name: ["artifact.name"],
+  mediaType: ["artifact.media_type", "artifact.mediaType"],
+  role: ["artifact.role"],
+} as const;
+
 // First defined string among a field's mapping-override keys then its defaults.
-function pickStr(a: Record<string, unknown>, keys: string[]): string | undefined {
+function pickStr(a: Record<string, unknown>, keys: readonly string[]): string | undefined {
   for (const k of keys) {
     const v = str(a[k]);
     if (v !== undefined) return v;
   }
   return undefined;
 }
-function pickNum(a: Record<string, unknown>, keys: string[]): number | undefined {
+function pickNum(a: Record<string, unknown>, keys: readonly string[]): number | undefined {
   for (const k of keys) {
     const v = num(a[k]);
     if (v !== undefined) return v;
   }
   return undefined;
 }
-function firstDefined(a: Record<string, unknown>, keys: string[]): unknown {
+function firstDefined(a: Record<string, unknown>, keys: readonly string[]): unknown {
   for (const k of keys) if (a[k] !== undefined) return a[k];
   return undefined;
 }
@@ -82,6 +90,22 @@ export function spansToTraceEvents(spans: Span[], mapping?: SpanAttrMapping): Tr
     const outTok = pickNum(a, keys.outputTokens) ?? num(tu.output_tokens);
     const toolName = pickStr(a, keys.toolName);
 
+    // Artifact channel — a span that references a produced artifact surfaces it as its own event (a fetchable ref,
+    // not the bytes), regardless of how the span classifies below. Conventional keys (artifact.* / mlflow.artifact.uri).
+    const artifactRef = pickStr(a, ARTIFACT_KEYS.ref);
+    if (artifactRef !== undefined) {
+      const mediaType = pickStr(a, ARTIFACT_KEYS.mediaType);
+      const role = pickStr(a, ARTIFACT_KEYS.role);
+      out.push({
+        t,
+        kind: "artifact",
+        name: pickStr(a, ARTIFACT_KEYS.name) ?? s.name,
+        ref: artifactRef,
+        ...(mediaType ? { mediaType } : {}),
+        ...(role ? { role } : {}),
+      });
+    }
+
     if (model !== undefined || inTok !== undefined || outTok !== undefined) {
       out.push({
         t,
@@ -102,6 +126,9 @@ export function spansToTraceEvents(spans: Span[], mapping?: SpanAttrMapping): Tr
     } else {
       const text = pickStr(a, keys.messageText);
       if (text !== undefined) out.push({ t, kind: "message", role: "assistant", text });
+      // Structural span (chain/agent/retriever etc.) — preserved instead of dropped, so a `span` judge requirement is
+      // satisfiable and non-LLM steps aren't silently lost. Skip a bare artifact-only span (already emitted above).
+      else if (artifactRef === undefined) out.push({ t, kind: "span", name: s.name, attributes: a });
     }
   }
   return out;

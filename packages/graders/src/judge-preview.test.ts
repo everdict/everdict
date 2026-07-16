@@ -126,14 +126,31 @@ describe("assessEvidence", () => {
     expect(a.warnings.some((w) => w.includes("browse"))).toBe(true);
   });
 
-  it("marks artifact/span requirements unmet — they have no carrier in the current trace (the ingest gap)", () => {
+  it("marks artifact/span requirements unmet when the trace has no such events", () => {
     const reqs: EvidenceRequirement[] = [
       { kind: "artifact", role: "report" },
       { kind: "span", name: "retriever" },
     ];
     const a = assessEvidence(reqs, promptCtx(TRACE));
     expect(a.missing).toHaveLength(2);
-    expect(a.warnings.some((w) => w.includes("ingest generalization"))).toBe(true);
+  });
+
+  it("satisfies artifact/span requirements once the trace carries those events (ingest channel)", () => {
+    const trace: TraceEvent[] = [
+      { t: 0, kind: "artifact", name: "out.xlsx", ref: "s3://b/out.xlsx", role: "report" },
+      { t: 1, kind: "span", name: "retriever" },
+    ];
+    const a = assessEvidence(
+      [
+        { kind: "artifact", role: "report" },
+        { kind: "span", name: "retriever" },
+      ],
+      promptCtx(trace),
+    );
+    expect(a.missing).toHaveLength(0);
+    expect(a.satisfied).toHaveLength(2);
+    // A different role/name is still unmet.
+    expect(assessEvidence([{ kind: "artifact", role: "other" }], promptCtx(trace)).missing).toHaveLength(1);
   });
 
   it("satisfies a dom requirement from a browser snapshot", () => {

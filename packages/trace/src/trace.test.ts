@@ -61,8 +61,11 @@ describe("spansToTraceEvents", () => {
       { name: "act", startMs: 6, endMs: 7, attrs: { "act.name": "run_query", "act.id": "a1", "act.out": "rows=3" } },
       { name: "say", startMs: 8, endMs: 8, attrs: { "my.text": "finished" } },
     ];
-    // Without a mapping the custom keys are invisible → no events.
-    expect(spansToTraceEvents(spans)).toHaveLength(0);
+    // Without a mapping the custom keys aren't classified → the spans are preserved as structural `span` events
+    // (not dropped), so no llm_call/tool_call is derived.
+    const bare = spansToTraceEvents(spans);
+    expect(bare.every((e) => e.kind === "span")).toBe(true);
+    expect(bare.some((e) => e.kind === "llm_call" || e.kind === "tool_call")).toBe(false);
     // With a mapping the same spans normalize to the standard TraceEvents.
     const events = spansToTraceEvents(spans, {
       model: ["my.model"],
@@ -87,6 +90,30 @@ describe("spansToTraceEvents", () => {
     ];
     const events = spansToTraceEvents(spans, { model: ["my.model"] });
     expect(events.map((e) => e.kind === "llm_call" && e.model)).toEqual(["x", "y"]);
+  });
+
+  it("preserves a structural (non-LLM/non-tool) span as a `span` event instead of dropping it", () => {
+    const spans: Span[] = [{ name: "retriever.search", startMs: 0, endMs: 5, attrs: { "db.query": "select 1" } }];
+    const e = spansToTraceEvents(spans)[0];
+    expect(e?.kind).toBe("span");
+    expect(e?.kind === "span" && e.name).toBe("retriever.search");
+    expect(e?.kind === "span" && e.attributes?.["db.query"]).toBe("select 1");
+  });
+
+  it("surfaces a span's artifact reference as a first-class `artifact` event", () => {
+    const spans: Span[] = [
+      {
+        name: "produce-report",
+        startMs: 0,
+        endMs: 5,
+        attrs: { "artifact.ref": "s3://bucket/report.xlsx", "artifact.role": "report", "artifact.media_type": "xlsx" },
+      },
+    ];
+    const events = spansToTraceEvents(spans);
+    const art = events.find((e) => e.kind === "artifact");
+    expect(art?.kind === "artifact" && art.ref).toBe("s3://bucket/report.xlsx");
+    expect(art?.kind === "artifact" && art.role).toBe("report");
+    expect(art?.kind === "artifact" && art.mediaType).toBe("xlsx");
   });
 });
 

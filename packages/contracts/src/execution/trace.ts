@@ -26,6 +26,25 @@ export const TraceEventSchema = z.discriminatedUnion("kind", [
   // Raw process output (evidence fallback for black-box harnesses) — stderr progress logs and oversized stdout
   // that don't fit the message/tool vocabulary. Tail-capped by the emitter; judges/sinks may ignore it.
   z.object({ t: z.number(), kind: z.literal("log"), stream: z.enum(["stdout", "stderr"]), text: z.string() }),
+  // A produced artifact (file/attachment the agent emitted) — `ref` is a fetchable pointer (URL/path), not the bytes.
+  // The ingest-generalization channel: platforms that carry attachments surface them here so an `artifact` judge
+  // requirement is satisfiable. Judges/sinks that don't need it may ignore it. `role` = the artifact's purpose (e.g. "report").
+  z.object({
+    t: z.number(),
+    kind: z.literal("artifact"),
+    name: z.string(),
+    ref: z.string(),
+    mediaType: z.string().optional(),
+    role: z.string().optional(),
+  }),
+  // A structural (non-LLM/non-tool) span preserved through ingest — chain/agent/retriever steps a harness emits that
+  // the GenAI-convention normalizer would otherwise drop. `attributes` carries the raw span attributes verbatim.
+  z.object({
+    t: z.number(),
+    kind: z.literal("span"),
+    name: z.string(),
+    attributes: z.record(z.string(), z.unknown()).optional(),
+  }),
 ]);
 export type TraceEvent = z.infer<typeof TraceEventSchema>;
 

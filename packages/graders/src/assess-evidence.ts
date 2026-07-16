@@ -15,6 +15,14 @@ function hasToolCall(trace: TraceEvent[], name?: string): boolean {
   return trace.some((e) => e.kind === "tool_call" && (name === undefined || e.name === name));
 }
 
+function hasArtifact(trace: TraceEvent[], role?: string): boolean {
+  return trace.some((e) => e.kind === "artifact" && (role === undefined || e.role === role));
+}
+
+function hasSpan(trace: TraceEvent[], name: string): boolean {
+  return trace.some((e) => e.kind === "span" && e.name === name);
+}
+
 // Check a judge's declared evidence requirements against a run's GradeContext. `final_answer`/`tool_call`/`dom`/
 // `screenshot` are decidable from today's TraceEvent + snapshot; `artifact`/`span` have no carrier in the current
 // TraceEvent, so they read as unmet with a warning that names the ingest-generalization gap (that is the signal).
@@ -47,18 +55,13 @@ export function assessEvidence(requires: EvidenceRequirement[], ctx: GradeContex
         if (!ok) warnings.push("This run carries no screenshot.");
         break;
       case "artifact":
-        // No artifact channel in the current TraceEvent — unmet until the ingest generalization adds one.
-        warnings.push(
-          req.role
-            ? `Artifact "${req.role}" is not available: the trace has no artifact channel yet (ingest generalization).`
-            : "Artifacts are not available: the trace has no artifact channel yet (ingest generalization).",
-        );
+        ok = hasArtifact(ctx.trace, req.role);
+        if (!ok)
+          warnings.push(req.role ? `No artifact with role "${req.role}" in the trace.` : "No artifact in the trace.");
         break;
       case "span":
-        // Structural spans are dropped at ingest today — unmet until they are preserved.
-        warnings.push(
-          `Span "${req.name}" is not available: structural spans are dropped at ingest (ingest generalization).`,
-        );
+        ok = hasSpan(ctx.trace, req.name);
+        if (!ok) warnings.push(`No structural span named "${req.name}" in the trace.`);
         break;
     }
     (ok ? satisfied : missing).push(req);

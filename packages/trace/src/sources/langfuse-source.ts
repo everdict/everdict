@@ -54,8 +54,11 @@ export function langfuseObservationsToTraceEvents(observations: LangfuseObservat
         ok: o.level !== "ERROR",
         output: typeof o.output === "string" ? o.output : o.output === undefined ? "" : JSON.stringify(o.output),
       });
+    } else {
+      // Structural observation (SPAN/CHAIN/AGENT etc., no model) — preserved as a `span` event instead of dropped,
+      // so a `span` judge requirement is satisfiable and non-LLM steps aren't silently lost.
+      out.push({ t, kind: "span", name: o.name ?? o.type ?? "span" });
     }
-    // Structural observations other than GENERATION (SPAN/CHAIN/AGENT etc., no model) are skipped — they don't contribute to metric derivation.
   }
   return out;
 }

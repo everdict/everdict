@@ -63,6 +63,9 @@ export function phoenixSpansToTraceEvents(spans: PhoenixSpan[]): TraceEvent[] {
         ok: s.status_code !== "ERROR",
         output: str(attr(s.attributes, "output.value")) ?? s.status_message ?? "",
       });
+    } else {
+      // Structural span (CHAIN/AGENT/RETRIEVER etc.) — preserved as a `span` event instead of dropped.
+      out.push({ t, kind: "span", name: s.name ?? s.span_kind ?? "span" });
     }
   }
   return out;

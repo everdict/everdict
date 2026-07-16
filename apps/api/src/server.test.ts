@@ -3425,8 +3425,8 @@ describe("API — judges (Agent Judge, workspace-owned, member+ write)", () => {
     expect(res.statusCode).toBe(200);
     const req = res.json().requirements;
     expect(req.satisfied).toEqual([{ kind: "final_answer" }]); // decidable from the trace
-    expect(req.missing).toEqual([{ kind: "artifact", role: "report" }]); // no artifact channel yet (ingest gap)
-    expect((req.warnings as string[]).some((w) => w.includes("ingest generalization"))).toBe(true);
+    expect(req.missing).toEqual([{ kind: "artifact", role: "report" }]); // no artifact event in this sample trace
+    expect((req.warnings as string[]).some((w) => w.includes("artifact"))).toBe(true);
     await app.close();
   });
 

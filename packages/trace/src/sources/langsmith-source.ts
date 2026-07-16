@@ -53,6 +53,9 @@ export function langsmithRunsToTraceEvents(runs: LangsmithRun[]): TraceEvent[] {
         ok: !r.error,
         output: r.error ?? (r.outputs === null || r.outputs === undefined ? "" : JSON.stringify(r.outputs)),
       });
+    } else {
+      // Structural run (chain/retriever/embedding/prompt/parser) — preserved as a `span` event instead of dropped.
+      out.push({ t, kind: "span", name: r.name ?? r.run_type ?? "span" });
     }
   }
   return out;
