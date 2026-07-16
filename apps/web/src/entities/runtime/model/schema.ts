@@ -50,9 +50,16 @@ export const runtimeSpecSchema = z
     authSecret: z.string().optional(),
     // Auto-labeled capabilities the runtime advertises (docker/sandbox/topology). Read-only.
     capabilities: z.array(z.string()).optional(),
-    // topology config — kept loose (passthrough) so the full source (authSecret/correlate/scope) round-trips on edit/probe.
+    // topology config — the full trace source (5 kinds + authSecret/correlate/scope). passthrough keeps any extra field on round-trip.
     traceSource: z
-      .object({ kind: z.string(), endpoint: z.string().optional() })
+      .object({
+        kind: z.string(),
+        endpoint: z.string().optional(),
+        authSecret: z.string().optional(),
+        correlate: z.string().optional(),
+        service: z.string().optional(),
+        project: z.string().optional(),
+      })
       .passthrough()
       .optional(),
     browserImage: z.string().optional(),

@@ -105,10 +105,16 @@ export type EnvValue = z.infer<typeof envValueSchema>
 export const envValueText = (v: EnvValue, secretLabel: string = '시크릿'): string =>
   typeof v === 'string' ? v : `${v.secretRef} · ${secretLabel}`
 
-// trace source — the eval pulls the trace the harness exported to OTel/MLflow.
+// trace source — the eval pulls the trace the harness exported to its observability platform (5 kinds).
+// Loose display mirror (kind is a plain string; the control plane validates the exact enum). authSecret is a
+// SecretStore key NAME; correlate/service/project are how the platform locates this run's trace.
 export const traceSourceSchema = z.object({
-  kind: z.enum(['otel', 'mlflow']),
+  kind: z.string(),
   endpoint: z.string(),
+  authSecret: z.string().optional(),
+  correlate: z.string().optional(),
+  service: z.string().optional(),
+  project: z.string().optional(),
   // Per-harness span→TraceEvent attribute overrides (SpanAttrMapping): field name → the harness's own attr keys.
   // Loose record here (the control plane validates the exact SpanAttrMapping shape); absent = OTel GenAI conventions.
   mapping: z.record(z.string(), z.array(z.string())).optional(),

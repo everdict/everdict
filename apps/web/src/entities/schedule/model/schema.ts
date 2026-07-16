@@ -13,6 +13,14 @@ export const scheduleRunTemplateSchema = z.object({
   judges: z.array(z.object({ id: z.string(), version: z.string() })).default([]),
   runtime: z.string().optional(),
   concurrency: z.number().optional(),
+  trials: z.number().optional(),
+  cases: z
+    .object({
+      ids: z.array(z.string()).optional(),
+      tags: z.array(z.string()).optional(),
+      limit: z.number().optional(),
+    })
+    .optional(),
 })
 
 export const scheduleSchema = z.object({
