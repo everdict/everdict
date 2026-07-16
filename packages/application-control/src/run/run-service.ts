@@ -309,8 +309,9 @@ export class RunService {
     return true;
   }
 
-  // Default is standalone runs (activity list) — when scorecardId is given, only that batch's child runs (scorecard-detail case drilldown).
-  list(tenant?: string, opts?: { scorecardId?: string }): Promise<RunRecord[]> {
+  // Default is standalone runs (activity list); scorecardId → only that batch's child runs (scorecard-detail case
+  // drilldown); includeChildren → all runs (standalone + children) for the activity console's "all executions" view.
+  list(tenant?: string, opts?: { scorecardId?: string; includeChildren?: boolean }): Promise<RunRecord[]> {
     return this.deps.store.list(tenant, opts);
   }
 

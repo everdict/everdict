@@ -40,16 +40,22 @@ export function registerRunRoutes(app: FastifyInstance, deps: ServerDeps): void 
     }
   });
 
-  app.get<{ Querystring: { scorecardId?: string } }>("/runs", { schema: runDocs.list }, async (req, reply) => {
-    const principal = await resolvePrincipal(req, reply, deps);
-    if (!principal) return reply;
-    try {
-      gate(principal, "runs:read");
-      // When scorecardId is given, the child runs of that batch (case drill-down); otherwise the standalone activity list (children hidden).
-      const scorecardId = req.query.scorecardId;
-      return reply.send(await deps.service.list(principal.workspace, scorecardId ? { scorecardId } : undefined));
-    } catch (err) {
-      return sendError(reply, err);
-    }
-  });
+  app.get<{ Querystring: { scorecardId?: string; scope?: string } }>(
+    "/runs",
+    { schema: runDocs.list },
+    async (req, reply) => {
+      const principal = await resolvePrincipal(req, reply, deps);
+      if (!principal) return reply;
+      try {
+        gate(principal, "runs:read");
+        // scorecardId → that batch's child runs (case drill-down); scope=all → standalone + scorecard children
+        // (activity console's "all executions", grouped in the UI); otherwise the standalone activity list.
+        const { scorecardId, scope } = req.query;
+        const opts = scorecardId ? { scorecardId } : scope === "all" ? { includeChildren: true } : undefined;
+        return reply.send(await deps.service.list(principal.workspace, opts));
+      } catch (err) {
+        return sendError(reply, err);
+      }
+    },
+  );
 }

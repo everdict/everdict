@@ -114,13 +114,17 @@ export class PgRunStore implements RunStore {
   }
 
   async list(tenant?: string, opts?: RunListOptions): Promise<RunRecord[]> {
-    // scorecardId given → that batch's children only; otherwise standalone (parentless) runs only (children hidden → prevents activity-list flooding).
+    // scorecardId given → that batch's children only; else includeChildren ($3) → all runs (standalone + children);
+    // otherwise standalone (parentless) runs only (children hidden → prevents activity-list flooding).
     const res = await this.client.query<RunRow>(
       `SELECT * FROM everdict_runs
        WHERE ($1::text IS NULL OR tenant = $1)
-         AND (($2::text IS NULL AND parent_scorecard_id IS NULL) OR parent_scorecard_id = $2)
+         AND (
+           ($2::text IS NOT NULL AND parent_scorecard_id = $2)
+           OR ($2::text IS NULL AND ($3::bool OR parent_scorecard_id IS NULL))
+         )
        ORDER BY created_at DESC, id DESC`,
-      [tenant ?? null, opts?.scorecardId ?? null],
+      [tenant ?? null, opts?.scorecardId ?? null, opts?.includeChildren ?? false],
     );
     return res.rows.map(rowToRecord);
   }

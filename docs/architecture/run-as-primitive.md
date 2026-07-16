@@ -27,6 +27,16 @@
 >   `scorecard` embed); `track` writes final (post-judge/offload) results back to child runs, and
 >   `ScorecardService.get` hydrates `scorecard` from them → response shape, web, and diff are all unchanged.
 >   `no-runStore` / ingest / old records keep the embed (get returns it as-is).
+> - **#4 activity console shows every execution (children un-hidden, grouped).** The run list was the ONE surface
+>   still hiding scorecard children — which contradicts its purpose as the low-level *execution/operations* view
+>   (which runtime a case landed on, live status; the substrate future replay/live-connection features attach to).
+>   Decided with the user: the **run list is the execution lens, the scorecard is the eval lens** — the same child
+>   runs belong in both. `RunStore.list` gains an `includeChildren` opt (**default stays standalone** — the queue,
+>   the dashboard's recent-runs, and boot recovery all rely on the parentless default; only the `/runs` page opts
+>   in). `GET /runs?scope=all` + MCP `list_runs scope:"all"` expose it; the web `/runs` page requests `scope=all`
+>   and `RunsTable` **groups** children under their scorecard (a header row with the batch's rollup status + case
+>   count, then indented case rows) so a 100-case batch reads as one block, not a flood. The original flooding
+>   mitigation (below) is preserved as the *default*, now overridable for the console.
 >
 > **Fully done + verified (CLOSED).** Ingest paths (`/scorecards/ingest{,/pull}`) keep embed-only (no dispatched
 > run) by design. **Verification:** api 310 unit/integration tests green; **live-verified against real Postgres 16

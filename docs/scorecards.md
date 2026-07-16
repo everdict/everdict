@@ -31,8 +31,11 @@ Dataset → [scorecard run] → trace → agent-judge → scorecard → dashboar
 — when a `runStore` is wired — each case also becomes an addressable child `RunRecord`
 (`parentScorecardId` = this scorecard, `trigger: "scorecard"`, full trace/usage/provenance). The scorecard
 records their ids in `runIds`. Child runs are **hidden from the default run/activity list**
-(`RunStore.list` filters `parentScorecardId IS NULL`); fetch a batch's children with `list(tenant, {scorecardId})`
-(`GET /runs?scorecardId=` / MCP `list_runs scorecard_id`), which powers the scorecard detail's case→run drill-down.
+(`RunStore.list` filters `parentScorecardId IS NULL`) so a batch doesn't flood it; fetch a batch's children with
+`list(tenant, {scorecardId})` (`GET /runs?scorecardId=` / MCP `list_runs scorecard_id`), which powers the scorecard
+detail's case→run drill-down. The activity console can also show **all executions at once** —
+`list(tenant, {includeChildren})` (`GET /runs?scope=all` / MCP `list_runs scope:"all"`), where the web groups
+children under their scorecard. The scorecard is the eval lens; the run list is the execution lens over the same runs.
 **Storage is deduped**: a dispatched scorecard stores `runIds` only (not the heavy `scorecard` embed) — `track`
 writes the final (post-judge/offload) results back to the child runs, and `ScorecardService.get` **hydrates**
 the `scorecard` from them, so the response shape, web, and diff are unchanged. `no-runStore` runs, ingest paths, and

@@ -21,9 +21,9 @@ export default async function RunsPage({ params }: { params: Promise<{ workspace
   let error: string | undefined
   let runs = runsSchema.parse([])
   try {
-    // Runs list — individual executions in this workspace. Scorecard child runs are excluded by the control plane;
-    // batch evals live on their own /scorecards page, so this stays runs-only.
-    runs = await controlPlane.listRuns(ctx).then((r) => runsSchema.parse(r))
+    // Runs list — every execution in this workspace (the activity console). scope=all folds in scorecard child runs;
+    // the table groups children under their scorecard so a batch reads as one block, not a flood of individual rows.
+    runs = await controlPlane.listRuns(ctx, { all: true }).then((r) => runsSchema.parse(r))
   } catch (e) {
     error = e instanceof Error ? e.message : String(e)
   }

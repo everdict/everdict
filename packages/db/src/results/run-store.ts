@@ -31,10 +31,13 @@ export class InMemoryRunStore implements RunStore {
   async list(tenant?: string, opts?: RunListOptions): Promise<RunRecord[]> {
     const all = [...this.runs.values()];
     const scoped = tenant ? all.filter((r) => r.tenant === tenant) : all;
-    // scorecardId given → that batch's children only; otherwise standalone (parentless) runs only (children hidden).
+    // scorecardId given → that batch's children only; includeChildren → all runs (standalone + children);
+    // otherwise standalone (parentless) runs only (children hidden → prevents activity-list flooding).
     const filtered = opts?.scorecardId
       ? scoped.filter((r) => r.parentScorecardId === opts.scorecardId)
-      : scoped.filter((r) => r.parentScorecardId == null);
+      : opts?.includeChildren
+        ? scoped
+        : scoped.filter((r) => r.parentScorecardId == null);
     return filtered.map(withRunUsage);
   }
 }

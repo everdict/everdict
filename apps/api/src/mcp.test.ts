@@ -9,7 +9,7 @@ import { ScorecardService } from "@everdict/application-control";
 import { TraceSinkService } from "@everdict/application-control";
 import type { Principal } from "@everdict/auth";
 import type { Dispatcher } from "@everdict/backends";
-import type { AgentJob, CaseResult, RuntimeSpec } from "@everdict/contracts";
+import type { AgentJob, CaseResult, RunRecord, RuntimeSpec } from "@everdict/contracts";
 import {
   InMemoryBudgetStore,
   InMemoryOAuthStateStore,
@@ -749,6 +749,37 @@ describe("MCP tools", () => {
     expect(sub.isError).toBeFalsy();
     await new Promise((r) => setTimeout(r, 0));
     expect(seen?.evalCase.placement?.target).toBe("nomad-seoul");
+  });
+
+  it("list_runs: scope=all returns standalone + scorecard children; default hides children (BFF↔MCP parity)", async () => {
+    const store = new InMemoryRunStore();
+    const deps = { service: new RunService({ dispatcher: okDispatcher, store, newId: () => `run-${n++}` }) };
+    const mk = (id: string, extra: Partial<RunRecord>): RunRecord => ({
+      id,
+      tenant: "acme",
+      harness: { id: "s", version: "0" },
+      caseId: "c1",
+      status: "succeeded",
+      createdAt: "t",
+      updatedAt: "t",
+      ...extra,
+    });
+    await store.create(mk("run-solo", { trigger: "web" }));
+    await store.create(mk("run-child", { parentScorecardId: "sc1", trigger: "scorecard" }));
+
+    const principal: Principal = { subject: "u", workspace: "acme", roles: ["member"], via: "oidc" };
+    const server = buildMcpServer(deps, principal);
+    const [clientT, serverT] = InMemoryTransport.createLinkedPair();
+    const client = new Client({ name: "test", version: "0" });
+    await server.connect(serverT);
+    await client.connect(clientT);
+
+    const standalone = JSON.parse(text(await client.callTool({ name: "list_runs", arguments: {} }))) as RunRecord[];
+    expect(standalone.map((r) => r.id)).toEqual(["run-solo"]);
+    const all = JSON.parse(
+      text(await client.callTool({ name: "list_runs", arguments: { scope: "all" } })),
+    ) as RunRecord[];
+    expect(all.map((r) => r.id).sort()).toEqual(["run-child", "run-solo"]);
   });
 
   it("viewer: read only — submit_run is a permission error", async () => {

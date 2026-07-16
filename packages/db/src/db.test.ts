@@ -124,6 +124,17 @@ describe("PgRunStore", () => {
     expect(calls[0]?.text).toMatch(/ORDER BY created_at DESC, id DESC/);
     expect(calls[0]?.params?.[0]).toBe("acme");
   });
+
+  it("list scope: default hides children ($3 false); includeChildren = all ($3 true); scorecardId = one batch ($2)", async () => {
+    const { client, calls } = fakeClient(() => ({ rows: [ROW] }));
+    const store = new PgRunStore(client);
+    await store.list("acme");
+    expect(calls[0]?.params).toEqual(["acme", null, false]);
+    await store.list("acme", { includeChildren: true });
+    expect(calls[1]?.params).toEqual(["acme", null, true]);
+    await store.list("acme", { scorecardId: "sc1" });
+    expect(calls[2]?.params).toEqual(["acme", "sc1", false]);
+  });
 });
 
 describe("WorkspaceSettingsStore", () => {
@@ -197,6 +208,10 @@ describe("InMemoryRunStore — scorecard child-run filter", () => {
     // The case drill-down in scorecard detail: that batch's children only.
     const sc1 = await store.list("acme", { scorecardId: "sc1" });
     expect(sc1.map((r) => r.id).sort()).toEqual(["run-child-a", "run-child-b"]);
+
+    // The activity console's all-executions view: standalone runs AND scorecard children together.
+    const all = await store.list("acme", { includeChildren: true });
+    expect(all.map((r) => r.id).sort()).toEqual(["run-child-a", "run-child-b", "run-child-c", "run-solo"]);
 
     // A child record round-trips parentScorecardId/trigger.
     const child = await store.get("run-child-a");

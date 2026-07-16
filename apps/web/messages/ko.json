@@ -1998,7 +1998,10 @@
     "colSource": "출처",
     "colStatus": "상태",
     "colCost": "비용",
-    "colUpdated": "업데이트"
+    "colUpdated": "업데이트",
+    "batchGroup": "스코어카드",
+    "batchCount": "케이스 {n}개",
+    "caseCell": "케이스 {id}"
   },
   "runtimesPage": {
     "title": "런타임",

@@ -41,11 +41,16 @@ const docs = {
     description:
       "Lists the workspace's runs. Requires runs:read (viewer+). Without a query, scorecard child runs are " +
       "hidden (standalone activity list); with ?scorecardId only that batch's child runs are returned " +
-      "(case drill-down).",
+      "(case drill-down); with ?scope=all, standalone runs and scorecard children are returned together " +
+      "(the activity console's all-executions view, grouped by scorecard in the UI).",
     tags: ["run"],
     querystring: toJsonSchema(
       z.object({
         scorecardId: z.string().optional().describe("Return only this scorecard batch's child runs"),
+        scope: z
+          .enum(["standalone", "all"])
+          .optional()
+          .describe("standalone (default) = children hidden; all = standalone runs + scorecard children"),
       }),
     ),
     response: {

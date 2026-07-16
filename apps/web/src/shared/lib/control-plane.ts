@@ -85,11 +85,16 @@ export const controlPlane = {
   updateWorkspace: <T>(auth: AuthContext, patch: unknown) =>
     call<T>(auth, '/workspace', { method: 'PATCH', body: JSON.stringify(patch) }),
   deleteWorkspace: (auth: AuthContext) => callVoid(auth, '/workspace', { method: 'DELETE' }),
-  // When scorecardId is given, that scorecard's per-case child runs (drilldown); otherwise the standalone activity list (children hidden).
-  listRuns: <T>(auth: AuthContext, opts?: { scorecardId?: string }) =>
+  // scorecardId → that scorecard's per-case child runs (drilldown); all → standalone runs + scorecard children
+  // (activity console's all-executions view, grouped in the UI); otherwise the standalone activity list (children hidden).
+  listRuns: <T>(auth: AuthContext, opts?: { scorecardId?: string; all?: boolean }) =>
     call<T>(
       auth,
-      opts?.scorecardId ? `/runs?scorecardId=${encodeURIComponent(opts.scorecardId)}` : '/runs'
+      opts?.scorecardId
+        ? `/runs?scorecardId=${encodeURIComponent(opts.scorecardId)}`
+        : opts?.all
+          ? '/runs?scope=all'
+          : '/runs'
     ),
   getRun: <T>(auth: AuthContext, id: string) => call<T>(auth, `/runs/${encodeURIComponent(id)}`),
   // Live-progress log snapshot (the LiveLogs widget polls; found=false = nothing to tail yet).
@@ -111,6 +116,13 @@ export const controlPlane = {
   // Interactive-terminal ticket (LiveTerminal — observability ⑥). Creator-or-admin, enforced by the control plane.
   terminalTicket: <T>(auth: AuthContext, id: string) =>
     call<T>(auth, `/runs/${encodeURIComponent(id)}/terminal-ticket`, { method: 'POST' }),
+  // Interactive browser sessions (browser-profiles S1) — personal / self-scoped (owner=subject), enforced by the control plane.
+  createBrowserSession: <T>(auth: AuthContext) => call<T>(auth, '/browser-sessions', { method: 'POST' }),
+  listBrowserSessions: <T>(auth: AuthContext) => call<T>(auth, '/browser-sessions'),
+  closeBrowserSession: <T>(auth: AuthContext, id: string) =>
+    call<T>(auth, `/browser-sessions/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  browserSessionTicket: <T>(auth: AuthContext, id: string) =>
+    call<T>(auth, `/browser-sessions/${encodeURIComponent(id)}/ticket`, { method: 'POST' }),
   // Work queue snapshot — per-runtime-lane running / waiting (FIFO) / next scheduled fire.
   getQueue: <T>(auth: AuthContext) => call<T>(auth, '/queue'),
   // Metered billing usage (LLM cost for orchestration + verdict; own-pays runs excluded) — meter-only, never blocks.

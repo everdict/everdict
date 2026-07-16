@@ -12,7 +12,7 @@ import { SpanAttrMappingService, TraceSourceService } from "@everdict/applicatio
 import { WorkspaceService } from "@everdict/application-control";
 import { type Authenticator, apiKeyAuthenticator, compositeAuthenticator } from "@everdict/auth";
 import type { Dispatcher } from "@everdict/backends";
-import { type CaseResult, DatasetSchema, type EvalCase } from "@everdict/contracts";
+import { type CaseResult, DatasetSchema, type EvalCase, type RunRecord } from "@everdict/contracts";
 import {
   InMemoryBudgetStore,
   InMemoryOAuthStateStore,
@@ -1531,6 +1531,41 @@ describe("API — interactive terminal ticket (observability ⑥)", () => {
       headers: { authorization: "Bearer x" },
     });
     expect(res.statusCode).toBe(403);
+  });
+});
+
+describe("API — GET /runs scope (activity console: standalone vs all executions)", () => {
+  const mkRun = (id: string, extra: Partial<RunRecord>): RunRecord => ({
+    id,
+    tenant: "acme",
+    harness: { id: "s", version: "0" },
+    caseId: "c1",
+    status: "succeeded",
+    createdAt: "t",
+    updatedAt: "t",
+    ...extra,
+  });
+
+  it("default hides scorecard children; scope=all returns standalone + children; scorecardId drills one batch", async () => {
+    const keyStore = new InMemoryTenantKeyStore();
+    const store = new InMemoryRunStore();
+    const svc = new RunService({ dispatcher: okDispatcher, store });
+    const app = buildServer({ service: svc, authenticator: roleAuth(["member"], "acme"), keyStore });
+    await store.create(mkRun("run-solo", { trigger: "web" }));
+    await store.create(mkRun("run-child", { parentScorecardId: "sc1", trigger: "scorecard" }));
+    const headers = { authorization: "Bearer x" };
+
+    // Default = the standalone activity list (children hidden → no batch flooding).
+    const standalone = await app.inject({ method: "GET", url: "/runs", headers });
+    expect((standalone.json() as RunRecord[]).map((r) => r.id)).toEqual(["run-solo"]);
+
+    // scope=all = every execution (the UI groups children under their scorecard).
+    const all = await app.inject({ method: "GET", url: "/runs?scope=all", headers });
+    expect((all.json() as RunRecord[]).map((r) => r.id).sort()).toEqual(["run-child", "run-solo"]);
+
+    // scorecardId = one batch's children (the case drill-down).
+    const drill = await app.inject({ method: "GET", url: "/runs?scorecardId=sc1", headers });
+    expect((drill.json() as RunRecord[]).map((r) => r.id)).toEqual(["run-child"]);
   });
 });
 

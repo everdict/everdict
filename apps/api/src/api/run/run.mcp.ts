@@ -11,12 +11,18 @@ export function registerRunTools(server: McpServer, ctx: McpToolContext): void {
     "list_runs",
     {
       description:
-        "This workspace's run list (standalone activity). With scorecard_id, the case child-runs of that scorecard.",
-      inputSchema: { scorecard_id: z.string().optional() },
+        "This workspace's run list (standalone activity). With scorecard_id, the case child-runs of that scorecard. " +
+        'With scope="all", standalone runs AND scorecard child runs together (the "all executions" view).',
+      inputSchema: { scorecard_id: z.string().optional(), scope: z.enum(["standalone", "all"]).optional() },
     },
-    ({ scorecard_id }) =>
+    ({ scorecard_id, scope }) =>
       run(principal, "runs:read", async () =>
-        ok(await deps.service.list(ws, scorecard_id ? { scorecardId: scorecard_id } : undefined)),
+        ok(
+          await deps.service.list(
+            ws,
+            scorecard_id ? { scorecardId: scorecard_id } : scope === "all" ? { includeChildren: true } : undefined,
+          ),
+        ),
       ),
   );
 
