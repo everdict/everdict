@@ -1,7 +1,21 @@
 'use client'
 
 import { useState, useTransition } from 'react'
-import { Eye, EyeOff, KeyRound, Plus } from 'lucide-react'
+import Link from 'next/link'
+import { useParams } from 'next/navigation'
+import {
+  Activity,
+  Boxes,
+  Cpu,
+  Eye,
+  EyeOff,
+  Globe,
+  KeyRound,
+  MessageSquare,
+  Package,
+  Plus,
+  Server,
+} from 'lucide-react'
 import { useLocale, useTranslations } from 'next-intl'
 
 import {
@@ -10,7 +24,10 @@ import {
   type ProviderTokenDef,
   type SecretMeta,
   type SecretScope,
+  type SecretUsageMetaRef,
 } from '@/entities/secret'
+import { cn } from '@/shared/lib/utils'
+import { Badge } from '@/shared/ui/badge'
 import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
 import { FieldError, Input, Label, Textarea } from '@/shared/ui/input'
@@ -20,6 +37,90 @@ import { InfoTip } from '@/shared/ui/tooltip'
 import { deleteSecretAction, setSecretAction } from '../api/manage-secrets'
 
 const NAME_RE = /^[A-Z_][A-Z0-9_]*$/
+
+// A secret row optionally carries its live reference sites (workspace variant only; personal secrets pass none).
+type SecretRow = SecretMeta & { refs?: SecretUsageMetaRef[] }
+
+// Per-kind icon + the workspace-relative deep-link target for a usage site (proxy has no dedicated page → no link).
+const USAGE_KIND_ICON = {
+  harness: Boxes,
+  runtime: Server,
+  model: Cpu,
+  mattermost: MessageSquare,
+  imageRegistry: Package,
+  traceSource: Activity,
+  proxy: Globe,
+} as const
+
+function usageHref(ref: SecretUsageMetaRef, workspace: string): string | undefined {
+  switch (ref.kind) {
+    case 'harness':
+      return ref.resourceId
+        ? `/${workspace}/harnesses/${encodeURIComponent(ref.resourceId)}`
+        : undefined
+    case 'runtime':
+      return ref.resourceId
+        ? `/${workspace}/runtimes/${encodeURIComponent(ref.resourceId)}`
+        : undefined
+    case 'model':
+      return `/${workspace}/settings/models`
+    case 'mattermost':
+    case 'imageRegistry':
+    case 'traceSource':
+      return `/${workspace}/settings/integrations`
+    default:
+      return undefined
+  }
+}
+
+// The live reference sites of one secret — chips (linked where the resource has a page), or an "unused" badge when
+// the secret is referenced nowhere. Computed by the control plane per request, so a removed reference is already gone.
+function UsageSites({ refs }: { refs: SecretUsageMetaRef[] }) {
+  const t = useTranslations('manageWorkspaceSecrets')
+  const { workspace } = useParams<{ workspace: string }>()
+  if (refs.length === 0)
+    return (
+      <Badge tone="outline" className="mt-1">
+        {t('unused')}
+      </Badge>
+    )
+  return (
+    <span className="mt-1 flex flex-wrap items-center gap-1">
+      <span className="text-[11px] text-faint">{t('usedBy')}</span>
+      {refs.map((ref) => {
+        const Icon = USAGE_KIND_ICON[ref.kind]
+        const href = usageHref(ref, workspace)
+        const key = `${ref.kind}:${ref.resourceId ?? ref.label}:${ref.field}:${ref.detail ?? ''}`
+        const chip =
+          'inline-flex items-center gap-1 rounded border border-border bg-muted/40 px-1.5 py-0.5 text-[11px]'
+        const body = (
+          <>
+            <Icon className="size-3 shrink-0 text-muted-foreground/70" />
+            <span className="font-mono text-foreground/80">{ref.label}</span>
+            <span className="text-faint">
+              {t(`usageField.${ref.field}`)}
+              {ref.detail ? ` ${ref.detail}` : ''}
+            </span>
+          </>
+        )
+        return href ? (
+          <Link
+            key={key}
+            href={href}
+            title={t(`usageKind.${ref.kind}`)}
+            className={cn(chip, 'transition-colors hover:border-primary/40 hover:bg-muted')}
+          >
+            {body}
+          </Link>
+        ) : (
+          <span key={key} title={t(`usageKind.${ref.kind}`)} className={chip}>
+            {body}
+          </span>
+        )
+      })}
+    </span>
+  )
+}
 
 // workspace = workspace (shared) secrets — the store is a single flat namespace with no categories, so the UI is one list too
 // (splitting model keys vs cluster credentials would double-expose the same secret on both sides). personal = my personal secrets (account screen, self-managed).
@@ -35,7 +136,7 @@ export function SecretsManager({
   canWrite,
 }: {
   variant: 'workspace' | 'personal'
-  secrets: SecretMeta[]
+  secrets: SecretRow[]
   canWrite: boolean
 }) {
   const t = useTranslations('manageWorkspaceSecrets')
@@ -247,7 +348,7 @@ function SecretRows({
   namePlaceholder,
   sectionLabel,
 }: {
-  secrets: SecretMeta[]
+  secrets: SecretRow[]
   canWrite: boolean
   scope: SecretScope
   namePlaceholder: string
@@ -317,7 +418,14 @@ function SecretRows({
             <SettingsRow
               key={s.name}
               label={<code className="font-mono text-[13px] text-foreground">{s.name}</code>}
-              hint={t('updatedHint', { date: new Date(s.updatedAt).toLocaleString(locale) })}
+              hint={
+                <>
+                  <span className="block">
+                    {t('updatedHint', { date: new Date(s.updatedAt).toLocaleString(locale) })}
+                  </span>
+                  {s.refs !== undefined && <UsageSites refs={s.refs} />}
+                </>
+              }
             >
               {canWrite &&
                 (confirmName === s.name ? (

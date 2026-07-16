@@ -52,4 +52,17 @@ export function registerSecretTools(server: McpServer, ctx: McpToolContext): voi
         }),
     );
   }
+
+  if (deps.secretUsageService) {
+    const usage = deps.secretUsageService;
+    server.registerTool(
+      "list_secret_usage",
+      {
+        description:
+          "List workspace (shared) secrets, each with the live sites that reference it by name — harness env/trace, runtime auth, model api-key, and settings integrations. Computed fresh (a removed reference disappears); refs=[] means the secret is referenced nowhere (orphan). Admin-only (secrets:read). Values are never returned.",
+        inputSchema: {},
+      },
+      () => run(principal, "secrets:read", async () => ok(await usage.list(ws))),
+    );
+  }
 }

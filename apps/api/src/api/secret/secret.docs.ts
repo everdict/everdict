@@ -1,4 +1,4 @@
-import { SecretMetaListResponseSchema } from "@everdict/contracts/wire";
+import { SecretMetaListResponseSchema, SecretUsageListResponseSchema } from "@everdict/contracts/wire";
 import type { FastifySchema } from "fastify";
 import { z } from "zod";
 import { errorResponses, toJsonSchema } from "../openapi.js";
@@ -7,7 +7,7 @@ import { errorResponses, toJsonSchema } from "../openapi.js";
 // Two scopes: workspace (shared, admin-managed via secrets:write) + user (personal, self-serve). Values are
 // encrypted at rest and never read back — every response carries names/metadata only.
 // Values are widened to FastifySchema so Fastify does NOT narrow reply.code() to the documented status keys.
-export const secretDocs: Record<"list" | "set" | "remove", FastifySchema> = {
+export const secretDocs: Record<"list" | "usage" | "set" | "remove", FastifySchema> = {
   list: {
     summary: "List secret names",
     description:
@@ -20,6 +20,22 @@ export const secretDocs: Record<"list" | "set" | "remove", FastifySchema> = {
         ...toJsonSchema(SecretMetaListResponseSchema),
       },
       ...errorResponses(401, 404),
+    },
+  },
+  usage: {
+    summary: "List workspace secrets with their usage sites",
+    description:
+      "Each workspace (shared) secret annotated with the live sites that reference it by name — harness env/trace, " +
+      "runtime cluster/kubeconfig auth, a model's api-key, and settings integrations (Mattermost / image registries / " +
+      "trace sources / egress proxies). Computed fresh from the current registry specs + settings (nothing cached), so a " +
+      "removed reference disappears; a secret referenced nowhere returns refs=[] (an orphan). Admin-only (secrets:read).",
+    tags: ["secret"],
+    response: {
+      200: {
+        description: "Workspace secrets, each with its reference sites (no values)",
+        ...toJsonSchema(SecretUsageListResponseSchema),
+      },
+      ...errorResponses(401, 403, 404),
     },
   },
   set: {

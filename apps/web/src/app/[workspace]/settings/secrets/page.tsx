@@ -1,7 +1,7 @@
 import { getTranslations } from 'next-intl/server'
 
-import { secretsSchema, type SecretMeta } from '@/entities/secret'
 import { SecretsManager } from '@/features/manage-workspace-secrets'
+import { secretUsagesSchema, type SecretUsageMeta } from '@/entities/secret'
 import { can } from '@/shared/auth/can'
 import { currentPrincipal } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
@@ -29,12 +29,11 @@ export default async function SecretsPage() {
     )
   }
 
-  let secrets: SecretMeta[] = []
+  // The usage endpoint returns workspace (shared) secrets already, each annotated with its live reference sites.
+  let secrets: SecretUsageMeta[] = []
   let error: string | undefined
   try {
-    secrets = secretsSchema
-      .parse(await controlPlane.listSecrets(ctx))
-      .filter((secret) => secret.scope === 'workspace')
+    secrets = secretUsagesSchema.parse(await controlPlane.listSecretUsage(ctx))
   } catch (e) {
     error = e instanceof Error ? e.message : String(e)
   }

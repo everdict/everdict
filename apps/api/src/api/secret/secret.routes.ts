@@ -24,6 +24,22 @@ export function registerSecretRoutes(app: FastifyInstance, deps: ServerDeps): vo
     }
   });
 
+  // Reverse-usage index — each workspace secret + the live sites that reference it (harness env/trace, runtime auth,
+  // model api-key, settings integrations). Computed fresh per request, so a removed reference disappears. Admin-only
+  // (secrets:read) since it reveals workspace configuration; unused secrets come back with refs=[] (orphans).
+  app.get("/secrets/usage", { schema: secretDocs.usage }, async (req, reply) => {
+    if (!deps.secretUsageService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "secret usage not configured" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "secrets:read");
+      return reply.send(await deps.secretUsageService.list(principal.workspace));
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
   // A workspace-scope set is admin (secrets:write); a user-scope set is self-serve (no gate, owner=subject).
   app.put<{ Params: { name: string } }>("/secrets/:name", { schema: secretDocs.set }, async (req, reply) => {
     if (!deps.secretStore) return reply.code(404).send({ code: "NOT_FOUND", message: "secret store not configured" });

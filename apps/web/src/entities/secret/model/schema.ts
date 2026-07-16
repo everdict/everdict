@@ -1,4 +1,8 @@
-import type { SecretMetaResponse } from '@everdict/contracts/wire'
+import type {
+  SecretMetaResponse,
+  SecretUsageRef,
+  SecretUsageResponse,
+} from '@everdict/contracts/wire'
 import { z } from 'zod'
 
 // Runtime boundary validation stays here (zod v4); the EXPORTED types are anchored to @everdict/contracts
@@ -27,4 +31,48 @@ type _metaBack = AssertAssignable<SecretMetaResponse, WebSecretMeta>
 export type SecretMeta = SecretMetaResponse
 export type SecretScope = SecretMetaResponse['scope']
 
-export type __secretDriftGuard = [_metaFwd, _metaBack]
+// --- secret usage (reverse index) — GET /secrets/usage: each workspace secret + its live reference sites ---
+// kind = the referencing resource (drives the link target + a translated noun); field = which use holds the ref.
+export const secretUsageKindSchema = z.enum([
+  'harness',
+  'runtime',
+  'model',
+  'mattermost',
+  'imageRegistry',
+  'traceSource',
+  'proxy',
+])
+export const secretUsageFieldSchema = z.enum([
+  'env',
+  'trace-auth',
+  'api-key',
+  'cluster-token',
+  'kubeconfig',
+  'bot-token',
+  'command-token',
+  'registry-pull',
+  'registry-push',
+  'proxy-auth',
+])
+export const secretUsageRefSchema = z.object({
+  kind: secretUsageKindSchema,
+  field: secretUsageFieldSchema,
+  label: z.string(),
+  resourceId: z.string().optional(),
+  version: z.string().optional(),
+  detail: z.string().optional(),
+})
+// A workspace secret + its usage sites (refs=[] = referenced nowhere = orphan).
+export const secretUsageSchema = secretMetaSchema.extend({ refs: z.array(secretUsageRefSchema) })
+export const secretUsagesSchema = z.array(secretUsageSchema)
+
+// Drift guards — bind the inferred outputs to the contract wire types (a rename/retype on either side fails typecheck).
+type _refFwd = AssertAssignable<z.infer<typeof secretUsageRefSchema>, SecretUsageRef>
+type _refBack = AssertAssignable<SecretUsageRef, z.infer<typeof secretUsageRefSchema>>
+type _usageFwd = AssertAssignable<z.infer<typeof secretUsageSchema>, SecretUsageResponse>
+type _usageBack = AssertAssignable<SecretUsageResponse, z.infer<typeof secretUsageSchema>>
+
+export type SecretUsageMetaRef = SecretUsageRef
+export type SecretUsageMeta = SecretUsageResponse
+
+export type __secretDriftGuard = [_metaFwd, _metaBack, _refFwd, _refBack, _usageFwd, _usageBack]
