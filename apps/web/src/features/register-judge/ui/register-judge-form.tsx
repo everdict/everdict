@@ -76,14 +76,17 @@ function Field({
 // Agent Judge registration form — kind (model | harness) toggle + conditional fields; dry-run validate, then register.
 // runtimes = this workspace's runtimes (harness-judge execution infra; empty = co-locate only).
 // rubrics = registered rubrics (owned + shared) for the registered-rubric mode selector.
+// models = this workspace's registered LLM models — the model-kind judge picks its provider model from these (id ≠ model string).
 export function RegisterJudgeForm({
   workspace,
   runtimes = [],
   rubrics = [],
+  models = [],
 }: {
   workspace: string
   runtimes?: { id: string }[]
   rubrics?: { id: string; owner: string }[]
+  models?: { id: string; provider: string; model: string }[]
 }) {
   const router = useRouter()
   const t = useTranslations('registerJudge')
@@ -190,6 +193,11 @@ export function RegisterJudgeForm({
 
   const busy = validating || saving
   const rubricRequired = kind === 'model'
+  // Registered models for the currently-selected provider (de-duped by the underlying model string; id ≠ model).
+  // Selecting one fills the judge's `model` field with that provider model string — the provider key still authenticates the call.
+  const providerModels = Array.from(
+    new Map(models.filter((m) => m.provider === provider).map((m) => [m.model, m])).values()
+  )
 
   return (
     <div className="max-w-2xl space-y-6">
@@ -242,14 +250,41 @@ export function RegisterJudgeForm({
               ]}
             />
           </Field>
-          <Field label={t('modelLabel')}>
-            <Input
-              value={model}
-              onChange={(e) => setModel(e.target.value)}
-              placeholder="claude-opus-4-8"
-              autoComplete="off"
-            />
-          </Field>
+          {/* Model — pick from the workspace's registered models for this provider; falls back to free text when none are registered. */}
+          <div className="space-y-1.5">
+            <Label>{t('modelLabel')}</Label>
+            {providerModels.length > 0 ? (
+              <Combobox
+                value={model}
+                onChange={setModel}
+                placeholder={t('modelPickerPlaceholder')}
+                options={providerModels.map((m) => ({ value: m.model, label: m.id, hint: m.model }))}
+                aria-label={t('modelLabel')}
+              />
+            ) : (
+              <Input
+                value={model}
+                onChange={(e) => setModel(e.target.value)}
+                placeholder="claude-opus-4-8"
+                autoComplete="off"
+              />
+            )}
+            <p className="text-[12px] text-faint">
+              {providerModels.length > 0 ? (
+                t('modelPickerHint')
+              ) : (
+                <>
+                  {t('modelNoneHint')}{' '}
+                  <Link
+                    href={`/${workspace}/settings?tab=models`}
+                    className="font-[510] text-foreground underline underline-offset-2"
+                  >
+                    {t('registerModelCta')}
+                  </Link>
+                </>
+              )}
+            </p>
+          </div>
         </div>
       )}
 

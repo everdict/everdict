@@ -501,6 +501,9 @@
     "versionsAria": "버전 ({count})",
     "compare": "비교"
   },
+  "judgeVersions": {
+    "compare": "비교"
+  },
   "importBenchmark": {
     "modeBuild": "소스에서 만들기",
     "modeImport": "카탈로그 · 레시피",
@@ -702,6 +705,17 @@
     "rubricSection": "루브릭",
     "rubricRefBadge": "등록 루브릭",
     "versions": "버전",
+    "compareVersions": "버전 비교",
+    "compareDescription": "두 저지 버전의 설정이 어떻게 달라졌는지 봐요.",
+    "needTwoVersionsTitle": "버전이 2개 이상 있어야 비교할 수 있어요.",
+    "needTwoVersionsHint": "새 버전을 등록하면 버전끼리 비교할 수 있어요.",
+    "compareError": "비교하지 못했어요: {error}",
+    "diffAddedBadge": "+{count} 추가",
+    "diffRemovedBadge": "−{count} 삭제",
+    "diffChangedBadge": "~{count} 변경",
+    "changesTitle": "설정 변경",
+    "noChanges": "설정 변경이 없어요.",
+    "kindChangedNote": "저지 종류가 바뀌었어요 — 스펙 전체가 재구성됐어요.",
     "loadError": "Judge 를 불러오지 못했어요{detail}.",
     "noPermissionTitle": "Judge 등록 권한이 없어요.",
     "noPermissionHint": "member 이상 역할이 필요해요(judges:write). 워크스페이스 관리자에게 문의하세요."
@@ -1298,6 +1312,7 @@
     "harnesses": "하니스",
     "datasets": "데이터셋",
     "scorecards": "스코어카드",
+    "judges": "Judge",
     "views": "뷰",
     "schedules": "예약",
     "runtimes": "런타임",
@@ -1589,6 +1604,10 @@
     "descriptionPlaceholder": "트레이스로 정답 여부를 판정",
     "providerLabel": "프로바이더",
     "modelLabel": "모델",
+    "modelPickerPlaceholder": "등록된 모델 선택",
+    "modelPickerHint": "이 워크스페이스에 등록된 모델에서 골라요.",
+    "modelNoneHint": "등록된 모델이 없어요. 직접 입력하거나",
+    "registerModelCta": "모델을 등록하세요",
     "harnessIdLabel": "하니스 ID",
     "harnessVersionLabel": "하니스 버전",
     "rubricLabel": "루브릭",

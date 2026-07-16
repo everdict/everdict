@@ -81,6 +81,9 @@ export {
 // harness — resolved-spec version diff (base ↔ candidate)
 export { diffHarnessSpecs } from "./harness/harness-diff.js";
 
+// judge — spec version diff (base ↔ candidate); shares the spec-diff engine with the harness diff
+export { diffJudgeSpecs } from "./judge/judge-diff.js";
+
 // harness — cross-runtime portability lint (reject a service spec that resolves to different addresses per runtime)
 export {
   type PortabilityIssue,

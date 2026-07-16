@@ -501,6 +501,9 @@
     "versionsAria": "Versions ({count})",
     "compare": "Compare"
   },
+  "judgeVersions": {
+    "compare": "Compare"
+  },
   "importBenchmark": {
     "modeBuild": "Build from source",
     "modeImport": "Catalog · recipes",
@@ -702,6 +705,17 @@
     "rubricSection": "Rubric",
     "rubricRefBadge": "Registered rubric",
     "versions": "Versions",
+    "compareVersions": "Compare versions",
+    "compareDescription": "See how the configuration changed between two judge versions.",
+    "needTwoVersionsTitle": "You need at least two versions to compare.",
+    "needTwoVersionsHint": "Register a new version to compare versions.",
+    "compareError": "Couldn't compare: {error}",
+    "diffAddedBadge": "+{count} added",
+    "diffRemovedBadge": "−{count} removed",
+    "diffChangedBadge": "~{count} changed",
+    "changesTitle": "Field changes",
+    "noChanges": "No field changes.",
+    "kindChangedNote": "The judge kind changed — the whole spec was restructured.",
     "loadError": "Couldn't load the judge{detail}.",
     "noPermissionTitle": "You don't have permission to register judges.",
     "noPermissionHint": "Requires the member role or higher (judges:write). Ask a workspace admin."
@@ -1298,6 +1312,7 @@
     "harnesses": "Harnesses",
     "datasets": "Datasets",
     "scorecards": "Scorecards",
+    "judges": "Judges",
     "views": "Views",
     "schedules": "Schedules",
     "runtimes": "Runtimes",
@@ -1589,6 +1604,10 @@
     "descriptionPlaceholder": "Judges correctness from the trace",
     "providerLabel": "Provider",
     "modelLabel": "Model",
+    "modelPickerPlaceholder": "Select a registered model",
+    "modelPickerHint": "Pick from your workspace's registered models.",
+    "modelNoneHint": "No registered models. Type one, or",
+    "registerModelCta": "register a model",
     "harnessIdLabel": "Harness ID",
     "harnessVersionLabel": "Harness version",
     "rubricLabel": "Rubric",

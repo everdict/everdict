@@ -3090,6 +3090,34 @@ describe("API — judges (Agent Judge, workspace-owned, member+ write)", () => {
     expect(v2.json()).toMatchObject({ ok: true, versionExists: true, existingVersions: ["1.0.0"] });
     await app.close();
   });
+
+  it("diff two versions: leaf field changes by path; missing base/candidate is 400", async () => {
+    const { app, keyStore } = server({ requireAuth: true });
+    const h = { authorization: `Bearer ${await issueKey(keyStore, "acme")}` };
+    await app.inject({ method: "POST", url: "/judges", headers: h, payload: JUDGE }); // model correctness@1.0.0
+    await app.inject({
+      method: "POST",
+      url: "/judges",
+      headers: h,
+      payload: { ...JUDGE, version: "1.1.0", model: "gpt-5.4-mini", provider: "openai", passThreshold: 0.8 },
+    });
+
+    const diff = await app.inject({
+      method: "GET",
+      url: "/judges/correctness/diff?base=1.0.0&candidate=1.1.0",
+      headers: h,
+    });
+    expect(diff.statusCode).toBe(200);
+    const body = diff.json();
+    expect(body).toMatchObject({ id: "correctness", base: "1.0.0", candidate: "1.1.0", kindChanged: false });
+    const paths = (body.changes as { path: string }[]).map((c) => c.path);
+    expect(paths).toEqual(expect.arrayContaining(["model", "provider", "passThreshold"]));
+
+    // missing query params → 400
+    const bad = await app.inject({ method: "GET", url: "/judges/correctness/diff?base=1.0.0", headers: h });
+    expect(bad.statusCode).toBe(400);
+    await app.close();
+  });
 });
 
 describe("API — rubrics (HOW to judge, workspace-owned, judging-domain actions reused)", () => {

@@ -1,6 +1,6 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
-import { ChevronLeft } from 'lucide-react'
+import { ChevronLeft, GitCompare } from 'lucide-react'
 import { getTranslations } from 'next-intl/server'
 
 import { isRubricRef, judgeSpecSchema, judgesSchema, type JudgeSpec } from '@/entities/judge'
@@ -8,6 +8,7 @@ import { authContext } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
 import { sortSemverDesc } from '@/shared/lib/semver'
 import { Badge } from '@/shared/ui/badge'
+import { buttonVariants } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
 import { EntityRef, ModelChip, RuntimeChip } from '@/shared/ui/chip'
 import { PageHeader } from '@/shared/ui/page-header'
@@ -74,7 +75,21 @@ export default async function JudgeDetailPage({
     <div className="space-y-7">
       <div className="space-y-3">
         <BackLink workspace={workspace} label={t('title')} />
-        <PageHeader title={judge.id} description={judge.description} />
+        <PageHeader
+          title={judge.id}
+          description={judge.description}
+          actions={
+            versions.length > 1 ? (
+              <Link
+                href={`/${workspace}/judges/${encodeURIComponent(judge.id)}/diff`}
+                className={buttonVariants({ variant: 'secondary', size: 'sm' })}
+              >
+                <GitCompare className="size-3.5" />
+                {t('compareVersions')}
+              </Link>
+            ) : null
+          }
+        />
         {/* Meta strip — kind · ownership · version · kind-specific facts. Absent facts are simply not rendered. */}
         <div className="flex flex-wrap items-center gap-2">
           <Badge tone="info">{judge.kind}</Badge>

@@ -1,4 +1,4 @@
-import type { JudgeListEntry } from '@everdict/contracts/wire'
+import type { JudgeListEntry, JudgeSpecDiffResponse } from '@everdict/contracts/wire'
 import { z } from 'zod'
 
 // Runtime boundary validation stays here (zod v4); the EXPORTED list type is anchored to @everdict/contracts
@@ -50,6 +50,30 @@ export function isRubricRef(rubric: JudgeRubric): rubric is JudgeRubricRef {
   return typeof rubric !== 'string'
 }
 
+// GET /judges/:id/diff — a single leaf change (field path before → after) between two judge versions.
+export const judgeFieldChangeSchema = z.object({
+  path: z.string(),
+  before: z.string(),
+  after: z.string(),
+  change: z.enum(['added', 'removed', 'changed']),
+})
+export type JudgeFieldChange = z.infer<typeof judgeFieldChangeSchema>
+
+// The structural diff of two judge versions (base ↔ candidate). kindChanged flags a model↔harness restructure.
+export const judgeSpecDiffSchema = z.object({
+  id: z.string(),
+  base: z.string(),
+  candidate: z.string(),
+  kindChanged: z.boolean(),
+  changes: z.array(judgeFieldChangeSchema),
+  summary: z.object({
+    added: z.number(),
+    removed: z.number(),
+    changed: z.number(),
+  }),
+})
+export type JudgeSpecDiff = z.infer<typeof judgeSpecDiffSchema>
+
 // Drift guard — JudgeSummary is a NARROWER view of the wire list entry: the web models only id/owner/versions/
 // versionTags and deliberately omits the entry's other fields (including its REQUIRED latestVersion/versionCount),
 // so it can't guard forward (web ⊄ wire). Instead the Pick-reverse guard requires every field the web DOES model
@@ -61,7 +85,12 @@ type _summaryFieldsOnWire = AssertAssignable<
   WebJudgeSummary
 >
 
+// JudgeSpecDiff is identical-shape to the wire diff DTO — guarded bidirectionally (a wire rename/retype fails the web typecheck).
+type WebJudgeSpecDiff = z.infer<typeof judgeSpecDiffSchema>
+type _diffFwd = AssertAssignable<WebJudgeSpecDiff, JudgeSpecDiffResponse>
+type _diffBack = AssertAssignable<JudgeSpecDiffResponse, WebJudgeSpecDiff>
+
 // Exported name keeps the web's narrower shape (anchored by the guard above).
 export type JudgeSummary = WebJudgeSummary
 
-export type __judgeDriftGuard = [_summaryFieldsOnWire]
+export type __judgeDriftGuard = [_summaryFieldsOnWire, _diffFwd, _diffBack]

@@ -2,6 +2,7 @@ import { VersionTagsBodySchema } from "@everdict/application-control";
 import { JudgeSpecSchema } from "@everdict/contracts";
 import { JudgeListResponseSchema } from "@everdict/contracts/wire";
 import { JudgeResponseSchema } from "@everdict/contracts/wire";
+import { JudgeSpecDiffResponseSchema } from "@everdict/contracts/wire";
 import { RegisterJudgeResultSchema } from "@everdict/contracts/wire";
 import { ValidateJudgeResultSchema } from "@everdict/contracts/wire";
 import type { FastifySchema } from "fastify";
@@ -71,6 +72,32 @@ const docs = {
     response: {
       200: { description: "JudgeSpec", ...toJsonSchema(JudgeResponseSchema) },
       ...errorResponses(401, 403, 404),
+    },
+  },
+  diff: {
+    summary: "Diff two judge versions",
+    description:
+      "Structural field-level diff between base and candidate versions of the same judge id — leaf changes by path " +
+      '(model/provider/rubric/inputs/passThreshold/criteria/…). Both refs may be "latest". Requires judges:read ' +
+      "(viewer+). Reproducible by the immutable-version guarantee. Missing base/candidate query parameters are 400; " +
+      "an unknown version or another workspace's judge is 404.",
+    tags: ["judge"],
+    params: {
+      type: "object",
+      properties: { id: { type: "string", description: "Judge id" } },
+      required: ["id"],
+    },
+    querystring: {
+      type: "object",
+      properties: {
+        base: { type: "string", description: 'Base version ref (accepts "latest")' },
+        candidate: { type: "string", description: 'Candidate version ref (accepts "latest")' },
+      },
+      required: ["base", "candidate"],
+    },
+    response: {
+      200: { description: "Judge version diff", ...toJsonSchema(JudgeSpecDiffResponseSchema) },
+      ...errorResponses(400, 401, 403, 404),
     },
   },
   setVersionTags: {

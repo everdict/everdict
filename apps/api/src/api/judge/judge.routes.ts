@@ -1,5 +1,6 @@
 import { VersionTagsBodySchema, setVersionTags } from "@everdict/application-control";
 import { JudgeSpecSchema } from "@everdict/contracts";
+import { diffJudgeSpecs } from "@everdict/domain";
 import type { FastifyInstance } from "fastify";
 import { type ServerDeps, gate, resolvePrincipal, sendError, zodIssues } from "../route-context.js";
 import { judgeDocs } from "./judge.docs.js";
@@ -78,6 +79,34 @@ export function registerJudgeRoutes(app: FastifyInstance, deps: ServerDeps): voi
         return reply.send(await deps.judgeRegistry.get(principal.workspace, req.params.id, req.params.version));
       } catch (err) {
         return sendError(reply, err); // not found → NotFoundError → 404
+      }
+    },
+  );
+
+  // Structural field-level diff between two judge versions (base ↔ candidate). Both refs may be "latest".
+  // Immutable-version premise → reproducible. Static "diff" segment resolves ahead of ":id/versions/:version".
+  app.get<{ Params: { id: string }; Querystring: { base?: string; candidate?: string } }>(
+    "/judges/:id/diff",
+    { schema: judgeDocs.diff },
+    async (req, reply) => {
+      if (!deps.judgeRegistry)
+        return reply.code(404).send({ code: "NOT_FOUND", message: "judge registry not configured" });
+      const principal = await resolvePrincipal(req, reply, deps);
+      if (!principal) return reply;
+      const { base, candidate } = req.query;
+      if (!base || !candidate)
+        return reply
+          .code(400)
+          .send({ code: "BAD_REQUEST", message: "base and candidate query parameters are required." });
+      try {
+        gate(principal, "judges:read");
+        const [baseSpec, candidateSpec] = await Promise.all([
+          deps.judgeRegistry.get(principal.workspace, req.params.id, base),
+          deps.judgeRegistry.get(principal.workspace, req.params.id, candidate),
+        ]);
+        return reply.send(diffJudgeSpecs(baseSpec, candidateSpec));
+      } catch (err) {
+        return sendError(reply, err); // version not found / other workspace → 404
       }
     },
   );

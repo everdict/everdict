@@ -3,6 +3,7 @@ import { ChevronLeft } from 'lucide-react'
 import { getTranslations } from 'next-intl/server'
 
 import { RegisterJudgeForm } from '@/features/register-judge'
+import { modelSpecSchema, modelsSchema } from '@/entities/model'
 import { rubricsSchema } from '@/entities/rubric'
 import { runtimesSchema } from '@/entities/runtime'
 import { can } from '@/shared/auth/can'
@@ -36,6 +37,27 @@ export default async function NewJudgePage({ params }: { params: Promise<{ works
     rubrics = []
   }
 
+  // For the model-judge model picker — registered models with their provider + underlying model string (id ≠ model).
+  // Best-effort per-model spec fetch (the list summary carries only ids); empty = the form falls back to a free-text model input.
+  type PickModel = { id: string; provider: string; model: string }
+  let models: PickModel[] = []
+  try {
+    const summaries = modelsSchema.parse(await controlPlane.listModels(ctx))
+    const specs = await Promise.all(
+      summaries.map(async (m): Promise<PickModel | null> => {
+        try {
+          const s = modelSpecSchema.parse(await controlPlane.getModel(ctx, m.id, 'latest'))
+          return { id: s.id, provider: s.provider, model: s.model }
+        } catch {
+          return null
+        }
+      })
+    )
+    models = specs.filter((s): s is PickModel => s !== null)
+  } catch {
+    models = []
+  }
+
   return (
     <div className="space-y-6">
       <div className="space-y-3">
@@ -50,7 +72,12 @@ export default async function NewJudgePage({ params }: { params: Promise<{ works
       </div>
       {allowed ? (
         <Card className="p-5">
-          <RegisterJudgeForm workspace={workspace} runtimes={runtimes} rubrics={rubrics} />
+          <RegisterJudgeForm
+            workspace={workspace}
+            runtimes={runtimes}
+            rubrics={rubrics}
+            models={models}
+          />
         </Card>
       ) : (
         <EmptyState title={t('noPermissionTitle')} hint={t('noPermissionHint')} />

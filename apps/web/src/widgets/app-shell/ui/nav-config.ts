@@ -4,6 +4,7 @@ import {
   Boxes,
   CalendarClock,
   Database,
+  Gavel,
   LayoutDashboard,
   Play,
   Server,
@@ -26,10 +27,10 @@ export interface NavSection {
 }
 
 // First-class concepts of the SaaS surface: home (overview) · run (individual execution/activity) · harness (what) · benchmark
-// (with what) · scorecard (result) · runtime (where — execution infra the workspace registers itself, no default seed) + flows
-// (views/schedules).
+// (with what) · scorecard (result) · judge (who scores the result) · runtime (where — execution infra the workspace registers
+// itself, no default seed) + flows (views/schedules).
 // The work queue is no longer a nav page — it's the always-present floating work panel (widgets/work-panel) in the top-right cluster.
-// judge/metric/model/recipe/bundle are engine parts/advanced options — excluded from the nav (routes remain, reachable via URL).
+// metric/model/recipe/bundle are engine parts/advanced options — excluded from the nav (routes remain, reachable via URL).
 export const NAV_SECTIONS: NavSection[] = [
   {
     items: [
@@ -63,6 +64,12 @@ export const NAV_SECTIONS: NavSection[] = [
         labelKey: 'scorecards',
         icon: BarChart3,
         keywords: 'scorecard batch evaluate compare leaderboard trend',
+      },
+      {
+        href: '/judges',
+        labelKey: 'judges',
+        icon: Gavel,
+        keywords: 'judge grader model harness rubric verdict score',
       },
       {
         href: '/views',

@@ -4,9 +4,13 @@ export {
   judgeRubricRefSchema,
   judgeRubricSchema,
   judgeSpecSchema,
+  judgeFieldChangeSchema,
+  judgeSpecDiffSchema,
   isRubricRef,
   type JudgeSummary,
   type JudgeRubricRef,
   type JudgeRubric,
   type JudgeSpec,
+  type JudgeFieldChange,
+  type JudgeSpecDiff,
 } from './model/schema'

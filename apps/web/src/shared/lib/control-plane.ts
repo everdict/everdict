@@ -319,6 +319,12 @@ export const controlPlane = {
   listJudges: <T>(auth: AuthContext) => call<T>(auth, '/judges'),
   getJudge: <T>(auth: AuthContext, id: string, version: string) =>
     call<T>(auth, `/judges/${encodeURIComponent(id)}/versions/${encodeURIComponent(version)}`),
+  // GET /judges/:id/diff — field-level diff between two judge versions (base↔candidate). version can be "latest".
+  diffJudge: <T>(auth: AuthContext, id: string, base: string, candidate: string) =>
+    call<T>(
+      auth,
+      `/judges/${encodeURIComponent(id)}/diff?base=${encodeURIComponent(base)}&candidate=${encodeURIComponent(candidate)}`
+    ),
   createJudge: <T>(auth: AuthContext, spec: unknown) =>
     call<T>(auth, '/judges', { method: 'POST', body: JSON.stringify(spec) }),
   validateJudge: <T>(auth: AuthContext, spec: unknown) =>

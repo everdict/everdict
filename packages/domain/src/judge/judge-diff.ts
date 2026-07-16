@@ -1,13 +1,13 @@
-import type { HarnessSpec, HarnessSpecDiff } from "@everdict/contracts";
+import type { JudgeSpec, JudgeSpecDiff } from "@everdict/contracts";
 import { diffSpecFields, summarizeSpecChanges } from "../spec-diff.js";
 
 // Top-level keys excluded from the diff — id is identical by construction, version differs trivially between two versions.
 const IGNORED_TOP_LEVEL = new Set(["id", "version"]);
 
-// base ↔ candidate resolved-harness-spec diff. Reports leaf field changes by path (services keyed by name),
-// excluding the trivially-differing id/version keys. kindChanged flags a whole-spec restructure (process ↔ command
-// ↔ service). Uses the shared spec-diff engine (see spec-diff.ts) — the field-walk logic is entity-agnostic.
-export function diffHarnessSpecs(base: HarnessSpec, candidate: HarnessSpec): HarnessSpecDiff {
+// base ↔ candidate JudgeSpec diff. Reports leaf field changes by path (model/provider/rubric/inputs/passThreshold/
+// criteria/promptTemplate/harness/runtime), excluding the trivially-differing id/version keys. kindChanged flags a
+// model↔harness restructure. Uses the shared spec-diff engine (see spec-diff.ts).
+export function diffJudgeSpecs(base: JudgeSpec, candidate: JudgeSpec): JudgeSpecDiff {
   const changes = diffSpecFields(
     base as Record<string, unknown>,
     candidate as Record<string, unknown>,

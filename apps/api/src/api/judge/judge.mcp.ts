@@ -1,5 +1,6 @@
 import { setVersionTags } from "@everdict/application-control";
 import { JudgeSpecSchema } from "@everdict/contracts";
+import { diffJudgeSpecs } from "@everdict/domain";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { type McpToolContext, fail, ok, plain, run } from "../mcp-context.js";
@@ -23,6 +24,24 @@ export function registerJudgeTools(server: McpServer, ctx: McpToolContext): void
         inputSchema: { id: z.string(), version: z.string().optional() },
       },
       ({ id, version }) => run(principal, "judges:read", async () => ok(await judges.get(ws, id, version ?? "latest"))),
+    );
+
+    server.registerTool(
+      "diff_judge_versions",
+      {
+        description:
+          'Structural field-level diff between two versions of the same judge id — leaf changes by path (model/provider/rubric/inputs/passThreshold/criteria/…). Both refs accept "latest". Requires judges:read (viewer+). Reproducible by the immutable-version guarantee.',
+        inputSchema: {
+          id: z.string(),
+          base: z.string().describe('base version ref (accepts "latest")'),
+          candidate: z.string().describe('candidate version ref (accepts "latest")'),
+        },
+      },
+      ({ id, base, candidate }) =>
+        run(principal, "judges:read", async () => {
+          const [baseSpec, candidateSpec] = await Promise.all([judges.get(ws, id, base), judges.get(ws, id, candidate)]);
+          return ok(diffJudgeSpecs(baseSpec, candidateSpec));
+        }),
     );
 
     server.registerTool(

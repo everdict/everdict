@@ -53,6 +53,7 @@ export * from "./image-registry/image-registry-upsert-result.js";
 export * from "./image-registry/image-registry-view.js";
 export * from "./judge/judge-list-entry.js";
 export * from "./judge/judge.js";
+export * from "./judge/judge-diff.js";
 export * from "./judge/register-judge-result.js";
 export * from "./judge/validate-judge-result.js";
 export * from "./mattermost/mattermost-action-reply.js";

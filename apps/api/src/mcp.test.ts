@@ -253,6 +253,7 @@ describe("MCP tools", () => {
       "delete_schedule",
       "diff_datasets",
       "diff_harness_versions",
+      "diff_judge_versions",
       "diff_scorecards",
       "estimate_scorecard",
       "exec_in_run",
@@ -1236,6 +1237,30 @@ describe("MCP tools", () => {
     const notFound = await beta.callTool({ name: "get_judge", arguments: { id: "correctness" } });
     expect(notFound.isError).toBe(true);
     expect(text(notFound)).toContain("NOT_FOUND");
+  });
+
+  it("diff_judge_versions: field-level diff between two judge versions (HTTP parity) — viewer allowed", async () => {
+    const deps = harness();
+    const member = await connect(deps, ["member"], "acme");
+    const base = { kind: "model", id: "correctness", version: "1.0.0", model: "claude-opus-4-8", rubric: "did it work?" };
+    await member.callTool({ name: "create_judge", arguments: { judge: JSON.stringify(base) } });
+    await member.callTool({
+      name: "create_judge",
+      arguments: { judge: JSON.stringify({ ...base, version: "1.1.0", model: "gpt-5.4-mini", provider: "openai" }) },
+    });
+
+    // viewer (read-only) can diff — judges:read gate.
+    const viewer = await connect(deps, ["viewer"], "acme");
+    const diff = await viewer.callTool({
+      name: "diff_judge_versions",
+      arguments: { id: "correctness", base: "1.0.0", candidate: "1.1.0" },
+    });
+    expect(diff.isError).toBeFalsy();
+    const body = JSON.parse(text(diff));
+    expect(body).toMatchObject({ id: "correctness", base: "1.0.0", candidate: "1.1.0", kindChanged: false });
+    expect((body.changes as { path: string }[]).map((c) => c.path)).toEqual(
+      expect.arrayContaining(["model", "provider"]),
+    );
   });
 
   it("rubrics: member registers·reads a rubric (judges:write reuse); viewer's write is a permission error", async () => {
