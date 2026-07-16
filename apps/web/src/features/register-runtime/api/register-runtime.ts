@@ -2,6 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 
+import { runtimeInspectionSchema, type RuntimeInspection } from '@/entities/runtime'
 import { authContext } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
 
@@ -38,6 +39,27 @@ export async function probeRuntimeAction(spec: unknown): Promise<ProbeRuntimeRes
   try {
     const r = await controlPlane.probeRuntime<{ reachable: boolean; detail?: string }>(ctx, spec)
     return { ok: true, reachable: r.reachable, detail: r.detail }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
+}
+
+// Live cluster view of a REGISTERED runtime (by id/version) — nodes/capacity/workload/stores, no job. Read gate
+// (runtimes:read) is the control plane's; a partial-cluster failure comes back inside inspection.warnings, not here.
+export interface InspectRuntimeActionResult {
+  ok: boolean
+  inspection?: RuntimeInspection
+  error?: string
+}
+
+export async function inspectRuntimeAction(
+  id: string,
+  version: string
+): Promise<InspectRuntimeActionResult> {
+  const ctx = await authContext()
+  try {
+    const raw = await controlPlane.inspectRuntime<unknown>(ctx, id, version)
+    return { ok: true, inspection: runtimeInspectionSchema.parse(raw) }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }
   }

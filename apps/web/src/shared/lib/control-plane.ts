@@ -357,6 +357,12 @@ export const controlPlane = {
   // Connection test (live) — verify cluster reachability/auth only, with no job. Credentials are resolved by the control plane from secrets.
   probeRuntime: <T>(auth: AuthContext, spec: unknown) =>
     call<T>(auth, '/runtimes/probe', { method: 'POST', body: JSON.stringify(spec) }),
+  // Live cluster view (read) — nodes/capacity/workload/stores of a registered nomad/k8s runtime; no job. Credentials resolved server-side.
+  inspectRuntime: <T>(auth: AuthContext, id: string, version: string) =>
+    call<T>(
+      auth,
+      `/runtimes/${encodeURIComponent(id)}/versions/${encodeURIComponent(version)}/inspect`
+    ),
   // Models (workspace-owned + _shared) — a first-class LLM model (provider + underlying model + baseUrl + apiKeySecret
   // NAME), referenced by id from a judge/harness so the agent server gets its whole connection (incl. the linked key)
   // injected instead of a hand-wired env combo. Read models:read (viewer+), register/validate models:write (member+).
@@ -429,6 +435,10 @@ export const controlPlane = {
   listTraceSinks: <T>(auth: AuthContext) => call<T>(auth, '/workspace/trace-sinks'),
   upsertTraceSink: <T>(auth: AuthContext, body: unknown) =>
     call<T>(auth, '/workspace/trace-sinks', { method: 'PUT', body: JSON.stringify(body) }),
+  // Connection test + scope discovery before registering — validate the base URL + resolved secret and list the
+  // platform's selectable scopes. settings:write (the probe resolves the workspace secret). A classified failure is still a 200.
+  probeTraceSink: <T>(auth: AuthContext, body: unknown) =>
+    call<T>(auth, '/workspace/trace-sinks/probe', { method: 'POST', body: JSON.stringify(body) }),
   removeTraceSink: (auth: AuthContext, name: string) =>
     callVoid(auth, `/workspace/trace-sinks/${encodeURIComponent(name)}`, { method: 'DELETE' }),
   // Per-harness sink selection (assignment) — body { sink: name | null }, null clears the selection (no export).
@@ -444,6 +454,10 @@ export const controlPlane = {
   listTraceSources: <T>(auth: AuthContext) => call<T>(auth, '/workspace/trace-sources'),
   upsertTraceSource: <T>(auth: AuthContext, body: unknown) =>
     call<T>(auth, '/workspace/trace-sources', { method: 'PUT', body: JSON.stringify(body) }),
+  // Connection test + scope discovery before registering — validate the base URL + resolved secret and list the
+  // platform's selectable scopes. settings:write (the probe resolves the workspace secret). A classified failure is still a 200.
+  probeTraceSource: <T>(auth: AuthContext, body: unknown) =>
+    call<T>(auth, '/workspace/trace-sources/probe', { method: 'POST', body: JSON.stringify(body) }),
   removeTraceSource: (auth: AuthContext, name: string) =>
     callVoid(auth, `/workspace/trace-sources/${encodeURIComponent(name)}`, { method: 'DELETE' }),
   // Per-harness source selection (assignment) — body { source: name | null }, null clears the selection (no pull).

@@ -20,6 +20,7 @@ import { Callout } from '@/shared/ui/callout'
 import { Card } from '@/shared/ui/card'
 import { PageHeader } from '@/shared/ui/page-header'
 
+import { RuntimeClusterStatus } from './runtime-cluster-status'
 import { RuntimeHealthActions } from './runtime-health-actions'
 
 export const dynamic = 'force-dynamic'
@@ -200,6 +201,12 @@ export default async function RuntimeDetailPage({
           {cluster && (
             <div className="border-t border-border pt-4">
               <RuntimeHealthActions spec={spec} />
+            </div>
+          )}
+          {/* Live cluster view — composition/capacity/workload/stores of the registered cluster (read-only, on demand). */}
+          {cluster && (
+            <div className="border-t border-border pt-4">
+              <RuntimeClusterStatus id={id} version={latest} />
             </div>
           )}
         </Card>

@@ -1,4 +1,4 @@
-import type { RuntimeListEntry } from '@everdict/contracts/wire'
+import type { InspectRuntimeResult, RuntimeListEntry } from '@everdict/contracts/wire'
 import { z } from 'zod'
 
 // Runtime boundary validation stays here (zod v4); the EXPORTED list type is anchored to @everdict/contracts
@@ -59,14 +59,62 @@ export const runtimeSpecSchema = z
   .passthrough()
 export type RuntimeSpec = z.infer<typeof runtimeSpecSchema>
 
-// Drift guard — RuntimeSummary is identical-shape to the wire list entry (id/owner/versions/versionTags), so
-// the guard is bidirectional: a renamed/added field on EITHER side fails the web typecheck.
+// GET /runtimes/:id/versions/:version/inspect — the live cluster view (read-only). Identical-shape to the wire
+// DTO (not a discriminated union), so the boundary schema is anchored bidirectionally like the summary.
+const inspectNodeSchema = z.object({
+  name: z.string(),
+  status: z.string(),
+  ready: z.boolean(),
+  datacenter: z.string().optional(),
+  dockerHealthy: z.boolean().optional(),
+})
+const inspectWorkloadSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  status: z.string(),
+  ageSeconds: z.number().optional(),
+  node: z.string().optional(),
+  role: z.enum(['eval', 'store', 'other']),
+})
+const inspectStoreSchema = z.object({
+  name: z.string(),
+  status: z.string().optional(),
+  address: z.string().optional(),
+})
+export const runtimeInspectionSchema = z.object({
+  kind: z.string(),
+  reachable: z.boolean(),
+  detail: z.string(),
+  reason: z.enum(['auth', 'unreachable', 'error']).optional(),
+  cluster: z
+    .object({
+      name: z.string().optional(),
+      version: z.string().optional(),
+      datacenters: z.array(z.string()).optional(),
+      namespace: z.string().optional(),
+    })
+    .optional(),
+  nodes: z
+    .object({ total: z.number(), ready: z.number(), items: z.array(inspectNodeSchema) })
+    .optional(),
+  capacity: z.object({ total: z.number(), used: z.number(), free: z.number() }).optional(),
+  workload: z.array(inspectWorkloadSchema).optional(),
+  stores: z.array(inspectStoreSchema).optional(),
+  warnings: z.array(z.string()).default([]),
+})
+
+// Drift guard — RuntimeSummary + RuntimeInspection are identical-shape to their wire DTOs, so each guard is
+// bidirectional: a renamed/added field on EITHER side fails the web typecheck.
 type AssertAssignable<A extends B, B> = A
 type WebRuntimeSummary = z.infer<typeof runtimeSummarySchema>
 type _summaryFwd = AssertAssignable<WebRuntimeSummary, RuntimeListEntry>
 type _summaryBack = AssertAssignable<RuntimeListEntry, WebRuntimeSummary>
+type WebRuntimeInspection = z.infer<typeof runtimeInspectionSchema>
+type _inspectFwd = AssertAssignable<WebRuntimeInspection, InspectRuntimeResult>
+type _inspectBack = AssertAssignable<InspectRuntimeResult, WebRuntimeInspection>
 
 // Exported name aliases the contract type (consumers untouched: same RuntimeSummary identifier).
 export type RuntimeSummary = RuntimeListEntry
+export type RuntimeInspection = InspectRuntimeResult
 
-export type __runtimeDriftGuard = [_summaryFwd, _summaryBack]
+export type __runtimeDriftGuard = [_summaryFwd, _summaryBack, _inspectFwd, _inspectBack]
