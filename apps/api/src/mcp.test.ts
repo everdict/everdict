@@ -6,7 +6,7 @@ import { RunnerHub } from "@everdict/application-control";
 import { RunnerService } from "@everdict/application-control";
 import { ScheduleService } from "@everdict/application-control";
 import { ScorecardService } from "@everdict/application-control";
-import { TraceSinkService } from "@everdict/application-control";
+import { TraceSourceService } from "@everdict/application-control";
 import type { Principal } from "@everdict/auth";
 import type { Dispatcher } from "@everdict/backends";
 import type { AgentJob, CaseResult, RunRecord, RuntimeSpec } from "@everdict/contracts";
@@ -104,16 +104,27 @@ function harness() {
     githubAppService: new GithubAppService({
       states: new InMemoryOAuthStateStore(),
       settings: new InMemoryWorkspaceSettingsStore(),
-      secretsFor: async () => ({}),
       gateway: githubAppGateway(),
       config: {
         webBaseUrl: "http://web.test",
         apiPublicUrl: "http://api.test",
         githubCom: { appId: "111", privateKeyPem: "-----BEGIN TEST-----", slug: "everdict-eval" },
+        githubEnterprise: {
+          host: "https://ghe.acme.io",
+          appId: "222",
+          privateKeyPem: "-----BEGIN TEST-----",
+          slug: "everdict-ghe",
+        },
       },
     }),
-    mattermostService: new MattermostService(new InMemoryWorkspaceSettingsStore()),
-    traceSinkService: new TraceSinkService(new InMemoryWorkspaceSettingsStore()),
+    // Mattermost host is operator env (config.host); verify stubbed reachable so the MCP tool wiring is testable.
+    mattermostService: new MattermostService({
+      settings: new InMemoryWorkspaceSettingsStore(),
+      client: { post: async () => {}, verify: async () => ({ reachable: true, detail: "stub" }) },
+      secretsFor: async () => ({ MM_BOT: "xoxb-test" }),
+      config: { host: "https://mm.corp.io" },
+    }),
+    traceSourceService: new TraceSourceService(new InMemoryWorkspaceSettingsStore()),
     service: new RunService({ dispatcher: okDispatcher, store: new InMemoryRunStore(), newId: () => `run-${n++}` }),
     harnessTemplates,
     harnessInstances,
@@ -249,6 +260,7 @@ describe("MCP tools", () => {
       "accept_invite",
       "apply_bundle",
       "assign_harness_trace_sink",
+      "assign_harness_trace_source",
       "backfill_scorecard_models",
       "cancel_scorecard",
       "control_runtime",
@@ -292,6 +304,7 @@ describe("MCP tools", () => {
       "import_terminal_bench",
       "ingest_scorecard",
       "inspect_runtime",
+      "inspect_trace",
       "leaderboard_scorecards",
       "lease_job",
       "leave_workspace",
@@ -309,23 +322,23 @@ describe("MCP tools", () => {
       "list_runtimes",
       "list_schedules",
       "list_scorecards",
+      "list_trace_source_traces",
       "list_workspace_github_app",
       "list_workspace_owned_runners",
       "list_workspace_runners",
-      "list_workspace_trace_sinks",
+      "list_workspace_trace_sources",
       "pair_runner",
       "pair_workspace_runner",
       "pin_harness_images",
       "probe_runtime",
-      "probe_workspace_trace_sink",
+      "probe_workspace_mattermost",
+      "probe_workspace_trace_source",
       "pull_scorecard",
       "register_harness",
       "register_harness_template",
-      "register_workspace_github_app",
       "remove_member",
-      "remove_workspace_github_app_registration",
       "remove_workspace_mattermost",
-      "remove_workspace_trace_sink",
+      "remove_workspace_trace_source",
       "retry_scorecard",
       "revoke_api_key",
       "revoke_invite",
@@ -339,7 +352,7 @@ describe("MCP tools", () => {
       "set_rubric_version_tags",
       "set_runtime_version_tags",
       "set_workspace_mattermost",
-      "set_workspace_trace_sink",
+      "set_workspace_trace_source",
       "start_workspace_github_app_install",
       "submit_job_result",
       "submit_run",
@@ -485,7 +498,7 @@ describe("MCP tools", () => {
     });
   });
 
-  it("workspace github app: admin can start install · register GHE · list, member lacks settings:write → denied", async () => {
+  it("workspace github app: admin can start github.com + enterprise install (both operator env), member lacks settings:write → denied", async () => {
     const deps = harness();
     const admin = await connect(deps, ["admin"]);
     const member = await connect(deps, ["member"]);
@@ -497,13 +510,21 @@ describe("MCP tools", () => {
     const start = JSON.parse(text(await admin.callTool({ name: "start_workspace_github_app_install", arguments: {} })));
     expect(start.installUrl).toContain("https://github.com/apps/everdict-eval/installations/new");
 
-    // admin registers a GHE App → one in the list + the callbackUrl to register as the App Setup URL.
-    await admin.callTool({
-      name: "register_workspace_github_app",
-      arguments: { host: "https://ghe.acme.io", slug: "everdict-ghe", appId: "222", privateKeySecretName: "ghe-key" },
-    });
+    // admin install start on the enterprise host → GHE installation-page URL (same env-single-App flow as github.com).
+    const gheStart = JSON.parse(
+      text(
+        await admin.callTool({
+          name: "start_workspace_github_app_install",
+          arguments: { host: "https://ghe.acme.io" },
+        }),
+      ),
+    );
+    expect(gheStart.installUrl).toContain("https://ghe.acme.io/github-apps/everdict-ghe/installations/new");
+
+    // list → configured providers (both env) + the callbackUrl to register as the App Setup URL. No per-workspace registrations.
     const view = JSON.parse(text(await admin.callTool({ name: "list_workspace_github_app", arguments: {} })));
-    expect(view.registrations).toHaveLength(1);
+    expect(view.providers).toEqual({ githubCom: true, enterprise: { host: "https://ghe.acme.io" } });
+    expect(view.registrations).toBeUndefined();
     expect(view.callbackUrl).toBe("http://api.test/workspace/github-app/callback");
   });
 
@@ -512,23 +533,24 @@ describe("MCP tools", () => {
     const admin = await connect(deps, ["admin"]);
     const member = await connect(deps, ["member"]);
 
-    // member lacks settings:write → cannot register.
+    // member lacks settings:write → cannot register. (host is operator env — never in the arguments.)
     expect(
       (
         await member.callTool({
           name: "set_workspace_mattermost",
-          arguments: { host: "https://mm.corp.io", botTokenSecretName: "MM_BOT", defaultChannelId: "ch" },
+          arguments: { botTokenSecretName: "MM_BOT", defaultChannelId: "ch" },
         })
       ).isError,
     ).toBe(true);
 
-    // admin registers → visible on read (no secret values).
+    // admin registers → visible on read (no secret values). host rides at the status top level (operator env).
     await admin.callTool({
       name: "set_workspace_mattermost",
-      arguments: { host: "https://mm.corp.io", botTokenSecretName: "MM_BOT", defaultChannelId: "ch" },
+      arguments: { botTokenSecretName: "MM_BOT", defaultChannelId: "ch" },
     });
     const got = JSON.parse(text(await admin.callTool({ name: "get_workspace_mattermost", arguments: {} })));
-    expect(got.config).toEqual({ host: "https://mm.corp.io", botTokenSecretName: "MM_BOT", defaultChannelId: "ch" });
+    expect(got.host).toBe("https://mm.corp.io");
+    expect(got.config).toEqual({ botTokenSecretName: "MM_BOT", defaultChannelId: "ch" });
 
     // unregister → disappears from read.
     await admin.callTool({ name: "remove_workspace_mattermost", arguments: {} });
@@ -536,48 +558,59 @@ describe("MCP tools", () => {
     expect(after.config).toBeUndefined();
   });
 
-  it("workspace trace sinks: admin registers/removes multiple, member can only select per harness (no settings:write)", async () => {
+  it("workspace trace sources: admin registers the pool, member selects pull/export per harness over the SAME pool", async () => {
     const deps = harness();
     const admin = await connect(deps, ["admin"]);
     const member = await connect(deps, ["member"]);
 
-    // member lacks settings:write → cannot register a sink.
+    // member lacks settings:write → cannot register a source.
     expect(
       (
         await member.callTool({
-          name: "set_workspace_trace_sink",
+          name: "set_workspace_trace_source",
           arguments: { name: "lf", kind: "langfuse", endpoint: "https://langfuse.corp.io", authSecretName: "LF_AUTH" },
         })
       ).isError,
     ).toBe(true);
 
-    // admin registers two sinks → visible in the list (no secret values).
+    // admin registers the pool: a sink-capable mlflow (needs project) + an otel (pull-only).
     await admin.callTool({
-      name: "set_workspace_trace_sink",
-      arguments: { name: "lf", kind: "langfuse", endpoint: "https://langfuse.corp.io", authSecretName: "LF_AUTH" },
-    });
-    await admin.callTool({
-      name: "set_workspace_trace_sink",
+      name: "set_workspace_trace_source",
       arguments: { name: "mlf", kind: "mlflow", endpoint: "http://mlflow.corp.io:5000", project: "7" },
     });
-    const got = JSON.parse(text(await admin.callTool({ name: "list_workspace_trace_sinks", arguments: {} })));
-    expect(got.sinks.map((s: { name: string }) => s.name).sort()).toEqual(["lf", "mlf"]);
+    await admin.callTool({
+      name: "set_workspace_trace_source",
+      arguments: { name: "jg", kind: "otel", endpoint: "http://jaeger" },
+    });
+    const got = JSON.parse(text(await admin.callTool({ name: "list_workspace_trace_sources", arguments: {} })));
+    expect(got.sources.map((s: { name: string }) => s.name).sort()).toEqual(["jg", "mlf"]);
 
-    // member selects per harness (harnesses:register) — an unregistered sink is an error.
+    // member selects a source to PULL from (harnesses:register) — an unregistered name is an error.
     expect(
-      (await member.callTool({ name: "assign_harness_trace_sink", arguments: { harness: "h1", sink: "no-such-sink" } }))
+      (await member.callTool({ name: "assign_harness_trace_source", arguments: { harness: "h1", source: "ghost" } }))
         .isError,
     ).toBe(true);
-    const assigned = JSON.parse(
-      text(await member.callTool({ name: "assign_harness_trace_sink", arguments: { harness: "h1", sink: "mlf" } })),
+    const pulled = JSON.parse(
+      text(await member.callTool({ name: "assign_harness_trace_source", arguments: { harness: "h1", source: "mlf" } })),
     );
-    expect(assigned.assignments).toEqual({ h1: "mlf" });
+    expect(pulled.assignments).toEqual({ h1: "mlf" });
 
-    // unregister a sink → it disappears from the list and any selection pointing at it is cleaned up.
-    await admin.callTool({ name: "remove_workspace_trace_sink", arguments: { name: "mlf" } });
-    const after = JSON.parse(text(await admin.callTool({ name: "list_workspace_trace_sinks", arguments: {} })));
-    expect(after.sinks.map((s: { name: string }) => s.name)).toEqual(["lf"]);
+    // member selects a source to EXPORT to over the same pool — an otel source is rejected (pull-only).
+    expect(
+      (await member.callTool({ name: "assign_harness_trace_sink", arguments: { harness: "h1", source: "jg" } }))
+        .isError,
+    ).toBe(true);
+    const exported = JSON.parse(
+      text(await member.callTool({ name: "assign_harness_trace_sink", arguments: { harness: "h1", source: "mlf" } })),
+    );
+    expect(exported.assignments).toEqual({ h1: "mlf" });
+
+    // unregister the source → it disappears and BOTH selections pointing at it are cleaned up.
+    await admin.callTool({ name: "remove_workspace_trace_source", arguments: { name: "mlf" } });
+    const after = JSON.parse(text(await admin.callTool({ name: "list_workspace_trace_sources", arguments: {} })));
+    expect(after.sources.map((s: { name: string }) => s.name)).toEqual(["jg"]);
     expect(after.assignments).toEqual({});
+    expect(after.sinkAssignments).toEqual({});
   });
 
   it("runners: personally owned — pair/list/revoke your own runner with no role gate, roster is members:read, token shown once", async () => {
@@ -1752,24 +1785,32 @@ describe("MCP tools", () => {
     ).toBe(true);
   });
 
-  it("invites: admin issues (token once) → someone else accepts → appears in list_members; member cannot issue", async () => {
+  it("invites: admin issues a reusable link → multiple people accept → all appear in list_members; member cannot issue", async () => {
     const deps = harness();
     const admin = await connect(deps, ["admin"], "acme");
     const created = JSON.parse(text(await admin.callTool({ name: "create_invite", arguments: { role: "member" } })));
     const token = created.token as string;
     expect(token.startsWith("inv_")).toBe(true);
 
-    // A different principal (the invitee) accepts — no workspace gate.
-    const invitee = await connect(deps, ["viewer"], "other-ws");
+    // A different principal (the first invitee) accepts — no workspace gate.
+    const invitee = await connect(deps, ["viewer"], "other-ws", "u");
     const accepted = await invitee.callTool({ name: "accept_invite", arguments: { token } });
     expect(JSON.parse(text(accepted))).toEqual({ workspace: "acme", role: "member" });
-    // re-accepting is an error (single use)
-    expect((await invitee.callTool({ name: "accept_invite", arguments: { token } })).isError).toBe(true);
-    // The invitee (subject "u") appears in the admin's member list
+    // The link is reusable: a second, different person joins with the SAME token.
+    const invitee2 = await connect(deps, ["viewer"], "other-ws", "v");
+    const accepted2 = await invitee2.callTool({ name: "accept_invite", arguments: { token } });
+    expect(JSON.parse(text(accepted2))).toEqual({ workspace: "acme", role: "member" });
+    // Both invitees (subjects "u" and "v") appear in the admin's member list.
     const members = JSON.parse(text(await admin.callTool({ name: "list_members", arguments: {} }))) as Array<{
       subject: string;
     }>;
     expect(members.some((m) => m.subject === "u")).toBe(true);
+    expect(members.some((m) => m.subject === "v")).toBe(true);
+    // The invite reflects both joins.
+    const invites = JSON.parse(text(await admin.callTool({ name: "list_invites", arguments: {} }))) as Array<{
+      acceptedCount: number;
+    }>;
+    expect(invites[0]?.acceptedCount).toBe(2);
 
     const member = await connect(deps, ["member"], "acme");
     expect((await member.callTool({ name: "create_invite", arguments: { role: "member" } })).isError).toBe(true);

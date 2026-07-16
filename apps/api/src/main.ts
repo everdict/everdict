@@ -1,3 +1,4 @@
+import { ProxyService } from "@everdict/application-control";
 import { LiveFrameStore } from "./common/live-frame-store.js";
 import { TerminalTicketStore } from "./common/terminal-ticket.js";
 import { TicketStore } from "./common/ticket-store.js";
@@ -30,6 +31,7 @@ import { BrowserSessionService } from "./core/browser-session/browser-session-se
 import { buildPlacementPreflight } from "./core/execution/placement-preflight.js";
 import { JudgePreviewService } from "./core/judge/judge-preview-service.js";
 import { ModelService } from "./core/model/model-service.js";
+import { SecretUsageService } from "./core/secret/secret-usage-service.js";
 import { LocalChromeProvisioner } from "./infrastructure/browser-session/local-chrome-provisioner.js";
 import { buildServer } from "./server.js";
 
@@ -247,6 +249,15 @@ async function main(): Promise<void> {
     tenantQuotas,
   });
   const viewService = buildView({ viewStore });
+  // Reverse secret-usage index (GET /secrets/usage) — reads the registries + settings to annotate each workspace
+  // secret with its live reference sites. Read-only; scans latest specs per request (nothing cached).
+  const secretUsageService = new SecretUsageService({
+    secrets: secretStore,
+    harnesses: harnessInstanceRegistry,
+    models: modelRegistry,
+    runtimes: runtimeRegistry,
+    settings: settingsStore,
+  });
   const browserProfileService = buildBrowserProfile({ browserProfileStore });
 
   const terminalTickets = new TerminalTicketStore();
@@ -255,8 +266,12 @@ async function main(): Promise<void> {
   const browserSessionsEnabled = process.env.EVERDICT_BROWSER_SESSIONS === "1";
   const browserTickets = browserSessionsEnabled ? new TicketStore() : undefined;
   const browserChromeBin = process.env.EVERDICT_BROWSER_CHROME_BIN; // override the launched binary (e.g. chromium)
+  // Workspace BYO egress proxy pool (browser-profiles S4) — a country resolves to the login browser's --proxy-server.
+  const proxyService = new ProxyService({ settings: settingsStore, secretsFor: runtimeSecretsFor });
   const browserSessionService = browserSessionsEnabled
-    ? new BrowserSessionService(new LocalChromeProvisioner(browserChromeBin ? { binary: browserChromeBin } : {}))
+    ? new BrowserSessionService(new LocalChromeProvisioner(browserChromeBin ? { binary: browserChromeBin } : {}), {
+        resolveProxy: (ws, country) => proxyService.resolve(ws, country),
+      })
     : undefined;
   if (browserSessionService) setInterval(() => browserSessionService.sweep(), 60_000).unref(); // TTL teardown
   // Capture a session login into a profile (browser-profiles S3) — only when interactive sessions exist (it needs
@@ -269,6 +284,7 @@ async function main(): Promise<void> {
     ...(browserSessionService && browserTickets ? { browserSessionService, browserTickets } : {}),
     browserProfileService, // saved authenticated browser profiles (browser-profiles S2) — personal metadata CRUD
     ...(browserProfileCaptureService ? { browserProfileCaptureService } : {}), // S3 capture (needs browser sessions)
+    proxyService, // workspace BYO egress proxies (browser-profiles S4) — per-country pool + session geo
     liveFrames, // live-screen frames pushed by self-hosted runners (report_case_screen MCP tool)
     service,
     scorecardService,

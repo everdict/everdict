@@ -117,7 +117,9 @@ export const controlPlane = {
   terminalTicket: <T>(auth: AuthContext, id: string) =>
     call<T>(auth, `/runs/${encodeURIComponent(id)}/terminal-ticket`, { method: 'POST' }),
   // Interactive browser sessions (browser-profiles S1) — personal / self-scoped (owner=subject), enforced by the control plane.
-  createBrowserSession: <T>(auth: AuthContext) => call<T>(auth, '/browser-sessions', { method: 'POST' }),
+  // body carries an optional { country } (browser-profiles S4) selecting the workspace's egress proxy for the login browser.
+  createBrowserSession: <T>(auth: AuthContext, body?: unknown) =>
+    call<T>(auth, '/browser-sessions', { method: 'POST', body: JSON.stringify(body ?? {}) }),
   listBrowserSessions: <T>(auth: AuthContext) => call<T>(auth, '/browser-sessions'),
   closeBrowserSession: <T>(auth: AuthContext, id: string) =>
     call<T>(auth, `/browser-sessions/${encodeURIComponent(id)}`, { method: 'DELETE' }),
@@ -128,7 +130,10 @@ export const controlPlane = {
     call<T>(auth, '/browser-profiles', { method: 'POST', body: JSON.stringify(body) }),
   listBrowserProfiles: <T>(auth: AuthContext) => call<T>(auth, '/browser-profiles'),
   updateBrowserProfile: <T>(auth: AuthContext, id: string, body: unknown) =>
-    call<T>(auth, `/browser-profiles/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(body) }),
+    call<T>(auth, `/browser-profiles/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    }),
   deleteBrowserProfile: (auth: AuthContext, id: string) =>
     callVoid(auth, `/browser-profiles/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   // Capture an interactive session's login (cookies) into a profile (browser-profiles S3).
@@ -137,6 +142,12 @@ export const controlPlane = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
+  // Workspace BYO egress proxies (browser-profiles S4) — per-country pool. List = workspace read, register/remove = admin.
+  listProxies: <T>(auth: AuthContext) => call<T>(auth, '/workspace/proxies'),
+  upsertProxy: <T>(auth: AuthContext, body: unknown) =>
+    call<T>(auth, '/workspace/proxies', { method: 'PUT', body: JSON.stringify(body) }),
+  deleteProxy: (auth: AuthContext, name: string) =>
+    callVoid(auth, `/workspace/proxies/${encodeURIComponent(name)}`, { method: 'DELETE' }),
   // Work queue snapshot — per-runtime-lane running / waiting (FIFO) / next scheduled fire.
   getQueue: <T>(auth: AuthContext) => call<T>(auth, '/queue'),
   // Metered billing usage (LLM cost for orchestration + verdict; own-pays runs excluded) — meter-only, never blocks.
@@ -444,6 +455,9 @@ export const controlPlane = {
   // Workspace secrets (model/provider keys + cluster credentials) — values are never returned (list = name + updatedAt).
   // At-rest encryption is the control plane's SecretStore. set/delete return 204 (no body) → callVoid.
   listSecrets: <T>(auth: AuthContext) => call<T>(auth, '/secrets'),
+  // Workspace secrets + their live usage sites (which registry specs / settings integrations reference each by name).
+  // Admin-only (secrets:read); refs=[] = an orphan (referenced nowhere). Computed fresh — a removed reference disappears.
+  listSecretUsage: <T>(auth: AuthContext) => call<T>(auth, '/secrets/usage'),
   setSecret: (
     auth: AuthContext,
     name: string,
@@ -456,23 +470,14 @@ export const controlPlane = {
     }),
   deleteSecret: (auth: AuthContext, name: string, scope: 'user' | 'workspace' = 'workspace') =>
     callVoid(auth, `/secrets/${encodeURIComponent(name)}?scope=${scope}`, { method: 'DELETE' }),
-  // Workspace-owned GitHub App integration (org install → selected repos). Read/install-start/register/unlink are all settings:read|write (admin).
-  // Private-key/token values are never sent down — an installation issues tokens on demand, so only metadata (no secrets).
+  // Workspace-owned GitHub App integration (org install → selected repos). Both github.com AND GitHub Enterprise are
+  // operator env — the admin only installs + picks repos (no per-workspace App registration). Read/install-start/unlink
+  // are settings:read|write (admin). Private-key/token values are never sent down — installation tokens are minted on demand.
   getGithubApp: <T>(auth: AuthContext) => call<T>(auth, '/workspace/github-app'),
   startGithubAppInstall: <T>(auth: AuthContext, body?: unknown) =>
     call<T>(auth, '/workspace/github-app/install/start', {
       method: 'POST',
       body: JSON.stringify(body ?? {}),
-    }),
-  registerGithubApp: <T>(auth: AuthContext, body: unknown) =>
-    call<T>(auth, '/workspace/github-app/registrations', {
-      method: 'POST',
-      body: JSON.stringify(body),
-    }),
-  // host is a URL (contains slashes/colons), so pass it as a query instead of a path.
-  removeGithubAppRegistration: <T>(auth: AuthContext, host: string) =>
-    call<T>(auth, `/workspace/github-app/registrations?host=${encodeURIComponent(host)}`, {
-      method: 'DELETE',
     }),
   unlinkGithubAppInstallation: <T>(auth: AuthContext, installationId: number) =>
     call<T>(auth, `/workspace/github-app/installations/${encodeURIComponent(installationId)}`, {
@@ -480,32 +485,24 @@ export const controlPlane = {
     }),
   // Repos the workspace App installation can access (CI repo link picker). Only those chosen at install time. settings:read.
   getGithubAppRepos: <T>(auth: AuthContext) => call<T>(auth, '/workspace/github-app/repos'),
-  // Workspace-owned Mattermost integration (register → bot notifications). Read settings:read / register·delete settings:write. The bot token value lives only in the SecretStore.
+  // Workspace-owned Mattermost integration (register → bot notifications). The server URL is operator env (MATTERMOST_HOST),
+  // not sent in the body. Read settings:read / register·probe·delete settings:write. The bot token value lives only in the SecretStore.
   getMattermost: <T>(auth: AuthContext) => call<T>(auth, '/workspace/mattermost'),
   setMattermost: <T>(auth: AuthContext, body: unknown) =>
     call<T>(auth, '/workspace/mattermost', { method: 'PUT', body: JSON.stringify(body) }),
+  probeMattermost: <T>(auth: AuthContext, body: unknown) =>
+    call<T>(auth, '/workspace/mattermost/probe', { method: 'POST', body: JSON.stringify(body) }),
   removeMattermost: (auth: AuthContext) =>
     callVoid(auth, '/workspace/mattermost', { method: 'DELETE' }),
-  // Workspace trace sinks (multiple) — export judged scorecard detail results to the team's observability platform (MLflow etc.).
-  // Read harnesses:read (viewer+ — for showing the per-harness selection) / register (upsert by name)·delete settings:write.
-  // Auth values live only in the SecretStore (only name references pass through).
-  listTraceSinks: <T>(auth: AuthContext) => call<T>(auth, '/workspace/trace-sinks'),
-  upsertTraceSink: <T>(auth: AuthContext, body: unknown) =>
-    call<T>(auth, '/workspace/trace-sinks', { method: 'PUT', body: JSON.stringify(body) }),
-  // Connection test + scope discovery before registering — validate the base URL + resolved secret and list the
-  // platform's selectable scopes. settings:write (the probe resolves the workspace secret). A classified failure is still a 200.
-  probeTraceSink: <T>(auth: AuthContext, body: unknown) =>
-    call<T>(auth, '/workspace/trace-sinks/probe', { method: 'POST', body: JSON.stringify(body) }),
-  removeTraceSink: (auth: AuthContext, name: string) =>
-    callVoid(auth, `/workspace/trace-sinks/${encodeURIComponent(name)}`, { method: 'DELETE' }),
-  // Per-harness sink selection (assignment) — body { sink: name | null }, null clears the selection (no export).
-  // harnesses:register (member+) — the sink itself (register/delete) is admin, but where to export is the harness owner's call.
+  // Per-harness EXPORT selection (assignment) — body { source: name | null }, null clears it (no export). The referenced
+  // name is a registered trace SOURCE (sink-capable kind). harnesses:register (member+) — where to export is the harness owner's call.
   assignHarnessTraceSink: <T>(auth: AuthContext, harnessId: string, body: unknown) =>
     call<T>(auth, `/harnesses/${encodeURIComponent(harnessId)}/trace-sink`, {
       method: 'PUT',
       body: JSON.stringify(body),
     }),
-  // Workspace trace sources (multiple) — pull a dev-cluster-deployed harness's trace from the team's observability platform (OTel/MLflow etc.) to score it.
+  // Workspace trace sources (multiple) — the ONE registration pool for observability platforms (OTel/MLflow/Langfuse/…).
+  // A harness uses a source to PULL its trace from and/or to EXPORT judged results to (per-harness use-site choice).
   // Read harnesses:read (viewer+ — for showing the per-harness selection) / register (upsert by name)·delete settings:write.
   // Auth values live only in the SecretStore (only name references pass through).
   listTraceSources: <T>(auth: AuthContext) => call<T>(auth, '/workspace/trace-sources'),

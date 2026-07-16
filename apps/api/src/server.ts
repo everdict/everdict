@@ -105,6 +105,7 @@ import { registerModelRoutes } from "./api/model/model.routes.js";
 import { registerNotificationRoutes } from "./api/notification/notification.routes.js";
 import { registerInternalRoutes } from "./api/ops/internal.routes.js";
 import { registerProfileRoutes } from "./api/profile/profile.routes.js";
+import { registerProxyRoutes } from "./api/proxy/proxy.routes.js";
 import { registerQueueRoutes } from "./api/queue/queue.routes.js";
 import type { ServerDeps } from "./api/route-context.js";
 import {
@@ -229,6 +230,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     registerBillingRoutes(routes, deps);
     registerBrowserSessionRoutes(routes, deps);
     registerBrowserProfileRoutes(routes, deps);
+    registerProxyRoutes(routes, deps);
     registerInternalRoutes(routes, deps);
     registerMcpRoutes(routes, deps);
   });

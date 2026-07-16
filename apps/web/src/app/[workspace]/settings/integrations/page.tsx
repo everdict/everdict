@@ -2,10 +2,8 @@ import { getTranslations } from 'next-intl/server'
 
 import { githubAppViewSchema, type GithubAppView } from '@/entities/github-app'
 import { imageRegistriesResponseSchema, type ImageRegistryConfig } from '@/entities/image-registry'
-import { mattermostResponseSchema, type MattermostConfig } from '@/entities/mattermost'
+import { mattermostResponseSchema, type MattermostResponse } from '@/entities/mattermost'
 import { secretsSchema } from '@/entities/secret'
-import { traceSinksResponseSchema, type TraceSinkConfig } from '@/entities/trace-sink'
-import { traceSourcesResponseSchema, type TraceSourceConfig } from '@/entities/trace-source'
 import type { GithubAppNotice } from '@/features/manage-github-app'
 import { can } from '@/shared/auth/can'
 import { currentPrincipal } from '@/shared/auth/principal'
@@ -18,13 +16,7 @@ import { IntegrationsPanel, type IntegrationKey } from '../integrations-panel'
 export const dynamic = 'force-dynamic'
 
 // Each integration is a per-integration summary row → "Manage" drill-in inside this one page (not a sidebar item).
-const INTEGRATION_KEYS: IntegrationKey[] = [
-  'github',
-  'mattermost',
-  'trace-sink',
-  'trace-source',
-  'image-registry',
-]
+const INTEGRATION_KEYS: IntegrationKey[] = ['github', 'mattermost', 'image-registry']
 
 // Per-section soft-fail: one misbehaving integration must not blank the page. Each read falls back to a default.
 async function soft<T>(fn: () => Promise<T>, fallback: T): Promise<T> {
@@ -68,19 +60,12 @@ export default async function IntegrationsPage({
 
   const githubApp: GithubAppView = await soft(
     async () => githubAppViewSchema.parse(await controlPlane.getGithubApp(ctx)),
-    { registrations: [], installations: [] }
+    { installations: [], providers: { githubCom: false } }
   )
-  const mattermost: MattermostConfig | undefined = await soft(
-    async () => mattermostResponseSchema.parse(await controlPlane.getMattermost(ctx)).config,
-    undefined
-  )
-  const traceSinks: TraceSinkConfig[] = await soft(
-    async () => traceSinksResponseSchema.parse(await controlPlane.listTraceSinks(ctx)).sinks,
-    []
-  )
-  const traceSources: TraceSourceConfig[] = await soft(
-    async () => traceSourcesResponseSchema.parse(await controlPlane.listTraceSources(ctx)).sources,
-    []
+  // Mattermost status: host = operator env server URL (absent = unavailable), config = the workspace registration.
+  const mattermost: MattermostResponse = await soft(
+    async () => mattermostResponseSchema.parse(await controlPlane.getMattermost(ctx)),
+    {}
   )
   const imageRegistries: ImageRegistryConfig[] = await soft(
     async () =>
@@ -106,8 +91,6 @@ export default async function IntegrationsPage({
         githubApp={githubApp}
         {...(githubAppNotice !== undefined ? { githubAppNotice } : {})}
         {...(mattermost !== undefined ? { mattermost } : {})}
-        traceSinks={traceSinks}
-        traceSources={traceSources}
         imageRegistries={imageRegistries}
         canWrite={canWrite}
         secretNames={secretNames}

@@ -2,6 +2,7 @@ import type { CiLinkService } from "@everdict/application-control";
 import type { CommentService } from "@everdict/application-control";
 import type { GithubAppService } from "@everdict/application-control";
 import type { ImageRegistryService } from "@everdict/application-control";
+import type { ProxyService } from "@everdict/application-control";
 import type { MattermostService } from "@everdict/application-control";
 import type { MembershipService } from "@everdict/application-control";
 import type { NotificationService } from "@everdict/application-control";
@@ -42,6 +43,7 @@ import type { BundleService } from "../core/bundle/bundle-service.js";
 import type { JudgePreviewService } from "../core/judge/judge-preview-service.js";
 import type { ModelService } from "../core/model/model-service.js";
 import type { RuntimeProbeResult } from "../core/ops/runtime-probe.js";
+import type { SecretUsageService } from "../core/secret/secret-usage-service.js";
 
 // MCP tool surface — the "agent transport" sharing the same service core as the HTTP routes.
 // Each tool is authorized by the Principal's roles and scoped to workspace (the control plane is the auth/authz authority).
@@ -95,6 +97,7 @@ export interface McpDeps {
   browserTickets?: TicketStore; // WS ticket store for interactive browser sessions
   browserProfileService?: BrowserProfileService; // saved authenticated browser profiles (browser-profiles S2) — self-scoped
   browserProfileCaptureService?: BrowserProfileCaptureService; // capture a session login into a profile (browser-profiles S3)
+  proxyService?: ProxyService; // workspace BYO egress proxies (browser-profiles S4) — per-country pool for the login browser
 }
 
 // The per-session context a resource's registerXTools(server, ctx) receives — the MCP twin of route-context.

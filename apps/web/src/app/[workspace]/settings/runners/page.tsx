@@ -32,7 +32,7 @@ export default async function RunnersPage({ params }: { params: Promise<{ worksp
 
   let runners: RunnerMeta[] = []
   // GitHub App installation snapshot for the Actions runner-registration picker (same snapshot as Integrations).
-  let githubApp: GithubAppView = { registrations: [], installations: [] }
+  let githubApp: GithubAppView = { installations: [], providers: { githubCom: false } }
   let error: string | undefined
   try {
     runners = runnersResponseSchema.parse(await controlPlane.listWorkspaceOwnedRunners(ctx)).runners

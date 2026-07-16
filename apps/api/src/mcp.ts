@@ -21,6 +21,7 @@ import { registerMemberTools } from "./api/member/member.mcp.js";
 import { registerModelTools } from "./api/model/model.mcp.js";
 import { registerNotificationTools } from "./api/notification/notification.mcp.js";
 import { registerProfileTools } from "./api/profile/profile.mcp.js";
+import { registerProxyTools } from "./api/proxy/proxy.mcp.js";
 import { registerQueueTools } from "./api/queue/queue.mcp.js";
 import { registerRubricTools } from "./api/rubric/rubric.mcp.js";
 import { registerRunTools } from "./api/run/run.mcp.js";
@@ -67,6 +68,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
   registerNotificationTools(server, ctx);
   registerBrowserSessionTools(server, ctx);
   registerBrowserProfileTools(server, ctx);
+  registerProxyTools(server, ctx);
   registerCommentTools(server, ctx);
   registerApiKeyTools(server, ctx);
   registerMemberTools(server, ctx);

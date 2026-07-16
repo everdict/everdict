@@ -26,12 +26,20 @@ feature entirely.
 ## Decisions (locked)
 
 - **Scope:** GitHub App installations are **workspace-owned** (org install), not personal.
-- **GHE parity:** GitHub Enterprise works identically — same install→select-repos→workspace-owned
-  model, **host-aware**. Difference is *where the App is registered* (see below), not the UX.
-- **Mattermost (full two-way):** workspace-registered corporate Mattermost (host + **bot token** +
-  slash-command token, all SecretStore name-refs) → **outbound** notifications *and* **inbound**
-  slash commands + interactive buttons. An admin registers it once per workspace (self-serve web
-  form); every member's runs/notifications in that workspace use it. This adds Everdict's **first
+- **GHE parity:** GitHub Enterprise works **identically to github.com** — one operator-**env** App
+  (`GITHUB_ENTERPRISE_APP_*`) for the whole deployment, install-only (no per-workspace App
+  registration). The admin just clicks *Install → pick repos*, exactly like github.com. The only
+  difference is *which env block holds the App creds* (see the table below), not the UX. (This
+  supersedes the earlier per-workspace GHE registration design — the `githubApp.registrations` field
+  and its routes/MCP tools/web form were removed.)
+- **Mattermost (full two-way):** the corporate Mattermost **server URL is an operator env
+  (`MATTERMOST_HOST`)**, shared across the deployment — the self-hosted operator registers it once,
+  so workspaces never input a host. A workspace admin then registers only the **bot token** (+
+  channel + slash-command token, all SecretStore name-refs) → **outbound** notifications *and*
+  **inbound** slash commands + interactive buttons. **Registration is verified against the live
+  server (strict):** the bot token must authenticate (`/api/v4/users/me`) and, when a channel is
+  given, the channel must be accessible (`/api/v4/channels/{id}`) — a failed connection blocks the
+  save (there is also an explicit `POST /workspace/mattermost/probe`). This is Everdict's **first
   inbound integration surface** (verified, workspace-scoped) — a deliberate, contained exception to
   the "no inbound webhooks" stance (which still holds for GitHub App push triggers).
 - **Remove personal Connected accounts entirely** (github, github-enterprise, mattermost personal
@@ -42,18 +50,22 @@ feature entirely.
   is the deliberate exception** — full two-way needs a verified inbound surface (see the Mattermost
   section below).
 
-## App registration: two homes, one UX
+## App registration: two homes (both env), one UX
 
-A GitHub App is registered **per GitHub host**. We mirror today's github.com-in-env / GHE-in-workspace
-split, but with **App** credentials (App ID + PEM private key) instead of OAuth client id/secret:
+A GitHub App is registered **per GitHub host**, and **both hosts are operator env** — one App per host
+for the whole deployment. There is **no per-workspace App registration**; the admin only installs.
 
-| Host | App registration (App ID + private key) | Analogous to today |
+| Host | App credentials (App ID + slug + PEM private key), operator env | PEM encoding |
 |---|---|---|
-| **github.com** | operator **env** — one App for the deployment: `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY` (PEM), `GITHUB_APP_SLUG` | `GITHUB_OAUTH_CLIENT_ID/SECRET` env |
-| **GHE `https://ghe.host`** | **workspace-registered** by an admin: `{ host, appId, privateKeySecretName }` — private key stored in the workspace SecretStore (name-ref, value never returned) | `WorkspaceSettings.integrations[ghe]` OAuth app |
+| **github.com** | `GITHUB_APP_ID`, `GITHUB_APP_SLUG`, `GITHUB_APP_PRIVATE_KEY` | base64(PEM) or raw PEM (`\n` restored) |
+| **GitHub Enterprise `https://ghe.host`** | `GITHUB_ENTERPRISE_HOST`, `GITHUB_ENTERPRISE_APP_ID`, `GITHUB_ENTERPRISE_APP_SLUG`, `GITHUB_ENTERPRISE_APP_PRIVATE_KEY` | base64(PEM) or raw PEM |
 
-The **installation** (the thing that grants repo access) is workspace-owned in both cases. From the
-member's perspective the flow is identical: *install on org → pick repos → workspace can clone them.*
+Credential resolution (`GithubAppService.resolveAppCreds`/`resolveInstallTarget`) keys off the install
+host: no host → the github.com env App; a host matching `GITHUB_ENTERPRISE_HOST` (normalized `sameHost`)
+→ the enterprise env App; any other host → `BadRequest`. The **installation** (the thing that grants
+repo access) is workspace-owned in both cases. From the member's perspective the flow is identical:
+*install on org → pick repos → workspace can clone them.* The status view exposes `providers:
+{ githubCom: boolean, enterprise?: { host } }` so the web renders one install button per configured host.
 
 ## Target data model
 
@@ -61,17 +73,12 @@ Everything non-secret lives in `WorkspaceSettings` JSONB (like `integrations` an
 the only secret (GHE App private key, Mattermost webhook URL) is a **SecretStore name-ref**.
 
 ```ts
-// packages/db/src/workspace/workspace-settings.ts — WorkspaceSettingsSchema additions
+// packages/contracts/src/records/workspace-settings.ts — WorkspaceSettingsSchema additions
 githubApp: z.object({
-  // GHE App registrations (github.com uses operator env → not listed here). Admin-registered.
-  registrations: z.array(z.object({
-    host: z.string().url(),                 // GHE base URL (github.com omitted — env)
-    appId: z.string().min(1),
-    privateKeySecretName: z.string().min(1),// SecretStore key holding the PEM (value never returned)
-  })).default([]),
+  // Both github.com AND GitHub Enterprise App creds are operator env → NOT stored here (no registrations field).
   // Workspace-owned installations (github.com + GHE). One per installed org.
   installations: z.array(z.object({
-    host: z.string().url().optional(),      // omitted = github.com
+    host: z.string().url().optional(),      // omitted = github.com; set = the enterprise host (GITHUB_ENTERPRISE_HOST)
     installationId: z.number().int(),       // GitHub installation id
     account: z.string().min(1),             // org/user login the app is installed on
     connectedBy: z.string(),                // audit — principal.subject of the admin who linked
@@ -79,21 +86,22 @@ githubApp: z.object({
   })).default([]),
 }).optional(),
 
-// mattermost: personal connection → workspace-registered corporate Mattermost (full two-way).
-// Replaces the old notify { connectionId, channelId, ownerSubject } entirely (migrated in S5/M1).
+// mattermost: the server URL is operator env (MATTERMOST_HOST) → NOT stored here (host is legacy-optional).
+// A workspace stores only the bot/channel/command name-refs; the host is sourced from env at read/post time.
 mattermost: z.object({
-  host: z.string().url(),                        // corporate Mattermost base URL
+  host: z.string().url().optional(),             // legacy/optional — no longer written (env-sourced)
   botTokenSecretName: z.string().min(1),         // SecretStore key — bot access token (outbound posts, threads, DMs, interactive)
   commandTokenSecretName: z.string().optional(), // SecretStore key — slash-command/action token (inbound verification)
   defaultChannelId: z.string().optional(),       // default notify channel
-  inboundToken: z.string().optional(),           // Everdict-minted opaque token embedded in the registered command/action URL → routes inbound to this workspace
-}).optional(),
+  inboundToken: z.string().optional(),           // vestigial (ws-in-URL routing superseded it)
+}).nullable().optional(),
 ```
 
 Installation records hold **no long-lived token** — installation tokens are minted on demand from the
-App private key (env for github.com, SecretStore for GHE) and are short-lived (~1h). So no new
-encrypted store is needed; JSONB + SecretStore name-refs suffice. `everdict_connections` is **dropped**
-in S6.
+operator-env App private key (github.com or enterprise) and are short-lived (~1h). So no new encrypted
+store is needed; JSONB + SecretStore name-refs suffice. `everdict_connections` is **dropped** in S6.
+Removing `githubApp.registrations` / stored `mattermost.host` needs no migration — the JSONB fields are
+simply no longer read/written (old rows parse and are rewritten without them).
 
 ## Token minting (the core)
 
@@ -104,8 +112,8 @@ in S6.
    `{ repositories: [name], permissions: { contents: "read" } }` → GitHub returns a token **restricted
    to those repos + permissions**, expiring in ~1h.
 3. `installationTokenForRepo(workspace, { host?, owner, repo })` resolves the workspace installation
-   for that host+owner, loads the App private key (env for github.com, SecretStore name-ref for GHE),
-   mints a token scoped to `owner/repo`, returns it.
+   for that host+owner, loads the App private key from operator env (github.com or, when the host
+   matches `GITHUB_ENTERPRISE_HOST`, the enterprise App), mints a token scoped to `owner/repo`, returns it.
 
 This is the **workspace analog of `repoTokenFor`** — resolved by **workspace** (not submitter
 subject), so any member's run in the workspace uses it. The transient plumbing is unchanged: the
@@ -131,8 +139,9 @@ picker (`ci-link-service.ts listRepos`) switches from the personal token to the 
 
 ## Auth / authz
 
-- **Install / register-GHE-app / unlink / set-mattermost** = admin (`settings:write`), same gate as
-  today's `integrations` (workspace app config). Reads = `members:read` / `settings:read`.
+- **Install / unlink / set-mattermost / probe-mattermost** = admin (`settings:write`), same gate as
+  today's `integrations` (workspace app config). Reads = `members:read` / `settings:read`. (There is no
+  GHE-app-registration route anymore — both GitHub hosts are operator env.)
 - No new `Authenticator` — we are the outbound client. (Contrast: GitHub Actions OIDC federation in
   `github-actions-trigger.md` stays as-is.)
 - **Mattermost registration = admin (`settings:write`).** "Self-serve from the web" is satisfied by
@@ -147,23 +156,27 @@ picker (`ci-link-service.ts listRepos`) switches from the personal token to the 
   Admin clicks → GitHub install page → **picks repos** → GitHub redirects to our callback.
 - public `GET /workspace/github-app/callback?installation_id&setup_action&state` → verify state →
   append an installation record to the workspace → 302 to `/{ws}/settings?tab=integrations`.
-- `GET /workspace/github-app` → registrations + installations + each installation's selected repos
-  (via installation token → `/installation/repositories`). No secrets returned.
-- `DELETE /workspace/github-app/installations/{id}` → forget the record (actual uninstall is on
-  GitHub). `POST /workspace/github-app/registrations` (GHE App creds) + `DELETE …/{host}`.
+- `GET /workspace/github-app` → installations + `providers` (github.com / enterprise, both env) + each
+  installation's selected repos (via installation token → `/installation/repositories`). No secrets returned.
+- `DELETE /workspace/github-app/installations/{id}` → forget the record (actual uninstall is on GitHub).
+  (No registration routes — both GitHub hosts are operator env.)
 - **BFF↔MCP parity:** every route has an MCP tool twin (`*_workspace_github_app`), one shared service
-  core (`apps/api/src/integrations/github-app-service.ts`).
+  core (`packages/application-control` `GithubAppService`, thin `apps/api/src/api/github-app/*` transports).
 
 ## Mattermost integration (full two-way)
 
-Structurally parallel to the GHE App: a **workspace-registered** corporate Mattermost, admin sets it
-up once, all members use it. Difference: Mattermost is bidirectional, so it needs both outbound bot
-calls and **inbound endpoints**.
+A corporate Mattermost whose **server URL is operator env (`MATTERMOST_HOST`)**, shared across the
+deployment; a workspace admin registers only the workspace's bot + channel. Mattermost is bidirectional,
+so it needs both outbound bot calls and **inbound endpoints**.
 
-**Registration (admin, `settings:write`, self-serve web form).** The admin pastes: MM `host`, a
-**bot access token**, and (for inbound) a **slash-command token**. Everdict stores the tokens as
-SecretStore name-refs and, in return, **shows the admin the URLs/commands to register on the MM
-side** (same pattern as showing the OAuth callback URL today):
+**Registration (admin, `settings:write`, self-serve web form).** The server URL is shown read-only (env).
+The admin picks the **bot access token** (SecretStore name-ref) + channel + (for inbound) a
+**slash-command token**. **Registration is strict — verified against the live server before saving**
+(`MattermostClient.verify`: `/api/v4/users/me` for the token + `/api/v4/channels/{id}` for the channel; a
+failed connection is a `BadRequest`). There is also an explicit `POST /workspace/mattermost/probe`
+(`probe_workspace_mattermost`) that returns a classified `{ reachable, reason?, botUsername?, channelName? }`
+— the web's "Test connection" gates Save on a reachable probe. On success Everdict **shows the admin the
+URLs/commands to register on the MM side**:
 - Slash command `/everdict` → `POST {API_PUBLIC_URL}/integrations/mattermost/command?t={inboundToken}`
 - Interactive actions → `{API_PUBLIC_URL}/integrations/mattermost/action?t={inboundToken}`
 

@@ -38,10 +38,10 @@ arrives by polling or webhook.
 | `GET`  | `/members` | workspace members `{ subject, role, email?, addedAt }[]` (`members:read`, viewer+) |
 | `PATCH` | `/members/:subject` | change a member's `{ role }` → **204** (404 if not a member; **409** last-admin) (`members:write`, admin) |
 | `DELETE` | `/members/:subject` | remove a member → **204** (idempotent; **409** last-admin) (`members:write`, admin) |
-| `POST` | `/invites` | mint a join token `{ role, expiresInHours? }` → **201** `{ …, token }` (plaintext `inv_…` **once**) (`members:write`, admin) |
-| `GET`  | `/invites` | pending invites (meta only, no token/hash) (`members:write`, admin) |
-| `DELETE` | `/invites/:id` | revoke an invite → **204** (tenant-scoped) (`members:write`, admin) |
-| `POST` | `/invites/accept` | redeem `{ token }` → `{ workspace, role }` (authenticated **human** only, not workspace-gated; single-use/expirable) |
+| `POST` | `/invites` | mint a reusable join link `{ role, expiresInHours? }` → **201** `{ …, token }` (plaintext `inv_…` **once**) (`members:write`, admin) |
+| `GET`  | `/invites` | active invite links (meta only, no token/hash; incl. `acceptedCount`) (`members:write`, admin) |
+| `DELETE` | `/invites/:id` | revoke an invite link → **204** (tenant-scoped) (`members:write`, admin) |
+| `POST` | `/invites/accept` | redeem `{ token }` → `{ workspace, role }` (authenticated **human** only, not workspace-gated; reusable until expired/revoked) |
 | `GET`  | `/healthz` | `{ ok: true }` |
 
 Scorecards are **batch evals** (a dataset × a `harness@version` → aggregated `Scorecard` + per-metric summary),

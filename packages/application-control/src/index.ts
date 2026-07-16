@@ -42,6 +42,7 @@ export {
   type CreateBrowserProfileInput,
   type UpdateBrowserProfileInput,
 } from "./browser-profile/browser-profile-service.js";
+export { ProxyService, type ProxyServiceDeps, type ProxyView } from "./proxy/proxy-service.js";
 export {
   COMMENT_RESOURCE_TYPES,
   type CommentResourceType,
@@ -78,6 +79,8 @@ export {
   type MattermostConfigView,
   MattermostService,
   type MattermostServiceConfig,
+  type MattermostServiceDeps,
+  type MattermostStatus,
 } from "./mattermost/mattermost-service.js";
 export {
   MattermostCommandService,
@@ -109,7 +112,7 @@ export {
   type VersionTaggable,
   VersionTagsBodySchema,
 } from "./version-tag/version-tag-service.js";
-export type { MattermostClient, MattermostPost } from "./ports/mattermost-client.js";
+export type { MattermostClient, MattermostPost, MattermostProbeResult } from "./ports/mattermost-client.js";
 export { NotificationService, type NotificationServiceDeps } from "./notification/notification-service.js";
 export type { GithubRepoWriter, GithubRepoWriterFactory } from "./ports/github-repo-writer.js";
 export {
@@ -134,14 +137,15 @@ export type {
 } from "./ports/github-app-gateway.js";
 export {
   type GithubAppDetailView,
+  type GithubAppProviders,
   GithubAppService,
   type GithubAppServiceConfig,
   type GithubAppServiceDeps,
   type GithubAppView,
   type GithubComAppConfig,
+  type GithubEnterpriseAppConfig,
   type InstallationRepo,
   type InstallationWithRepos,
-  type ServedRegistration,
   type StartInstallInput,
 } from "./github-app/github-app-service.js";
 export { createLimiter, type Limiter } from "./concurrency/limiter.js";

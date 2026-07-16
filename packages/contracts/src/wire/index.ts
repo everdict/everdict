@@ -59,6 +59,7 @@ export * from "./judge/validate-judge-result.js";
 export * from "./judge/delete-judge-version-result.js";
 export * from "./mattermost/mattermost-action-reply.js";
 export * from "./mattermost/mattermost-config-view.js";
+export * from "./mattermost/mattermost-probe-result.js";
 export * from "./mattermost/mattermost-reply.js";
 export * from "./member/accepted-invite.js";
 export * from "./member/created-invite.js";

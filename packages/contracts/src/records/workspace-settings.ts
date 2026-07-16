@@ -24,6 +24,18 @@ export const WorkspaceCiLinkSchema = z.object({
 });
 export type WorkspaceCiLink = z.infer<typeof WorkspaceCiLinkSchema>;
 
+// A BYO egress proxy the workspace registers per country (browser-profiles S4). A profile / interactive session picks
+// a country → the control plane resolves it to this proxy and launches the browser with --proxy-server=<url>, so the
+// login (and later the eval, S5) run from that geo. authSecretName is a SecretStore key holding "user:pass" (values
+// never stored/returned). Design: docs/architecture/browser-profiles.md.
+export const WorkspaceProxySchema = z.object({
+  name: z.string().min(1), // proxy name (reference key)
+  country: z.string().min(1), // country code/label a profile or session picks by (e.g. "US", "DE")
+  url: z.string().min(1), // proxy server URL — host:port or scheme://host:port (fed to Chrome --proxy-server)
+  authSecretName: z.string().min(1).optional(), // SecretStore key — the proxy "user:pass" (omitted for an open proxy)
+});
+export type WorkspaceProxy = z.infer<typeof WorkspaceProxySchema>;
+
 // Per-workspace settings (control-plane policy). Stored as JSONB for easy extension later.
 // Per-request overrides (POST /runs·/scorecards body.*) take precedence over this; this value overrides the env default policy.
 export const WorkspaceSettingsSchema = z.object({
@@ -37,7 +49,10 @@ export const WorkspaceSettingsSchema = z.object({
   // Design: docs/architecture/workspace-scoped-integrations.md
   mattermost: z
     .object({
-      host: z.string().url(), // in-house Mattermost base URL
+      // (legacy, optional) the in-house Mattermost base URL is now an operator env (MATTERMOST_HOST), shared across
+      // the deployment — the self-hosted operator registers the server URL once, workspaces never input it. Kept
+      // optional so pre-env rows still parse; no longer written (the service sources the host from env).
+      host: z.string().url().optional(),
       botTokenSecretName: z.string().min(1), // SecretStore key name of the bot access token (the value itself is never stored/returned)
       defaultChannelId: z.string().min(1).optional(), // default channel for completion/regression notifications
       commandTokenSecretName: z.string().min(1).optional(), // slash-command/action verification token name (S7/S8)
@@ -125,25 +140,19 @@ export const WorkspaceSettingsSchema = z.object({
   // against a real picked trace; applied at the control-plane trace-collection seams (dispatch-after judge + pull-eval).
   // Same jsonb-merge / service-managed replace semantics as traceSourceByHarness. Design: docs/architecture/judge-input-contract.md
   spanAttrMappingByHarness: z.record(SpanAttrMappingSchema).optional(),
+  // BYO egress proxies (browser-profiles S4) — per-country proxy pool for the interactive login browser (and eval
+  // browsers, S5). Register by name; a session/profile selects a country → resolve to --proxy-server. Secrets are
+  // SecretStore name-refs (values never stored/returned). Design: docs/architecture/browser-profiles.md.
+  proxies: z.array(WorkspaceProxySchema).optional(),
   // CI integration (GitHub Actions) — the repo-link list (repo↔harness-slot mapping = OIDC trust policy). See WorkspaceCiLinkSchema above.
   ci: z.object({ links: z.array(WorkspaceCiLinkSchema).default([]) }).optional(),
   // Workspace-owned GitHub App integration (replaces personal connections) — org install→selected repos→workspace-owned installation.
-  // github.com App = operator env (GITHUB_APP_*); GHE App = admin registers host+App credentials (private key=SecretStore name-ref).
-  // The installation issues short-lived tokens on demand with the App private key, so there's no secret here — all safe to return (host/appId/installationId).
+  // Both github.com AND GitHub Enterprise are operator env (GITHUB_APP_* / GITHUB_ENTERPRISE_APP_*) — one App per host for
+  // the whole deployment; the admin only installs+picks repos (no per-workspace App registration). The installation issues
+  // short-lived tokens on demand with the App private key, so there's no secret here — all safe to return (host/installationId).
   // Design: docs/architecture/workspace-scoped-integrations.md
   githubApp: z
     .object({
-      // GHE App registration (github.com is env → not here). Admin registers it once per workspace.
-      registrations: z
-        .array(
-          z.object({
-            host: z.string().url(), // GHE base URL
-            slug: z.string().min(1), // App slug (used in the install URL /github-apps/{slug}/installations/new)
-            appId: z.string().min(1),
-            privateKeySecretName: z.string().min(1), // SecretStore key — the PEM value itself is never stored/returned
-          }),
-        )
-        .default([]),
       // Workspace-owned installation (github.com + GHE). One per installed org.
       installations: z
         .array(

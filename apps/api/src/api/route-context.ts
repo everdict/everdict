@@ -7,6 +7,7 @@ import type { GithubAppService } from "@everdict/application-control";
 import { RepinBodySchema, repinHarnessImages } from "@everdict/application-control";
 import { deleteHarnessVersion, harnessIsPrivate, harnessVisibleTo } from "@everdict/application-control";
 import type { ImageRegistryService } from "@everdict/application-control";
+import type { ProxyService } from "@everdict/application-control";
 import type { MattermostCommandService } from "@everdict/application-control";
 import type { MattermostService } from "@everdict/application-control";
 import type { MembershipService } from "@everdict/application-control";
@@ -100,6 +101,7 @@ import { BundleSchema, type BundleService, requiredActionsForBundle } from "../c
 import type { JudgePreviewService } from "../core/judge/judge-preview-service.js";
 import type { ModelService } from "../core/model/model-service.js";
 import type { RuntimeProbeResult } from "../core/ops/runtime-probe.js";
+import type { SecretUsageService } from "../core/secret/secret-usage-service.js";
 import { buildMcpServer } from "../mcp.js";
 
 export interface ServerDeps {
@@ -171,6 +173,7 @@ export interface ServerDeps {
   browserTickets?: TicketStore; // WS ticket store for interactive browser sessions (browser-session WS disabled if absent)
   browserProfileService?: BrowserProfileService; // saved authenticated browser profiles (browser-profiles S2) — self-scoped (routes disabled if absent)
   browserProfileCaptureService?: BrowserProfileCaptureService; // capture a session login into a profile (browser-profiles S3) — needs browser sessions (route disabled if absent)
+  proxyService?: ProxyService; // workspace BYO egress proxies (browser-profiles S4) — per-country pool for the login browser (route disabled if absent)
 }
 
 // Resolve identity (subject + default workspace + roles): Bearer (JWT or ak_) → Authenticator. Unauthenticated dev = header workspace + admin.

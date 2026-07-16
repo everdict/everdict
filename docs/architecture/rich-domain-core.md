@@ -25,7 +25,7 @@
 - `RunRecord.status` is written at 5 sites; the track loop's succeeded/failed writes are unguarded (a race
   lets the later write win).
 - 13 business invariants live inline in services/routes (last-admin protection ×3 duplicate sites,
-  retry-failed terminal gate, resume eligibility, invite single-use/expiry, cron validity, …).
+  retry-failed terminal gate, resume eligibility, invite expiry/revocation, cron validity, …).
 - Every record type is pure data (`z.infer`); services assemble them with object literals.
 
 ## The idiom (reinterpreted from the proven layered-service source)

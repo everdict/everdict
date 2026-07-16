@@ -1,5 +1,9 @@
 import { CommentService } from "@everdict/application-control";
-import { GithubAppService, type GithubComAppConfig } from "@everdict/application-control";
+import {
+  GithubAppService,
+  type GithubComAppConfig,
+  type GithubEnterpriseAppConfig,
+} from "@everdict/application-control";
 import { MattermostService } from "@everdict/application-control";
 import type { MembershipService } from "@everdict/application-control";
 import { NotificationService } from "@everdict/application-control";
@@ -23,19 +27,31 @@ export function buildIntegrations(deps: {
 }) {
   const { settingsStore, notificationStore, commentStore, oauthStateStore, membershipService, runtimeSecretsFor } =
     deps;
-  // Completion notifications: when workspace notify settings exist (Mattermost connection + channel), post run/scorecard completion to the channel (consumer slice).
+  // Mattermost server URL is an operator env (MATTERMOST_HOST), shared across the deployment — the self-hosted
+  // operator registers the server URL once, workspaces never input a host. Unset → Mattermost integration unavailable.
+  const mattermostHost = process.env.MATTERMOST_HOST;
+  const mattermostClient = mattermostHttpClient(); // outbound posting + connection verify (fetch)
+  // Completion notifications: when workspace notify settings exist (Mattermost bot + channel), post run/scorecard completion to the channel (consumer slice).
   const notificationService = new NotificationService({
     settingsFor: (tenant) => settingsStore.get(tenant),
-    mattermost: mattermostHttpClient(), // outbound channel posting adapter (fetch)
+    mattermost: mattermostClient, // outbound channel posting adapter (fetch)
     // Workspace Mattermost (bot token) — resolve settings.mattermost.botTokenSecretName from shared secrets.
     secretsFor: runtimeSecretsFor,
+    ...(mattermostHost ? { mattermostHost } : {}), // operator server URL (MATTERMOST_HOST) — host is no longer stored per workspace
     feed: notificationStore, // personal notification feed (bell inbox) — docs/architecture/notifications.md
     // Rerun button on completion posts — only attaches when Mattermost can reach us back (public URL known).
     ...(process.env.API_PUBLIC_URL ? { apiPublicUrl: process.env.API_PUBLIC_URL } : {}),
   });
-  // Workspace-owned Mattermost integration (register → bot notifications + inbound slash commands/buttons). apiPublicUrl exposes the inbound URL.
-  const mattermostService = new MattermostService(settingsStore, {
-    ...(process.env.API_PUBLIC_URL ? { apiPublicUrl: process.env.API_PUBLIC_URL } : {}),
+  // Workspace-owned Mattermost integration (register → bot notifications + inbound slash commands/buttons). host = operator env;
+  // set() verifies the bot token (+ channel) against the live server (strict); apiPublicUrl exposes the inbound URL.
+  const mattermostService = new MattermostService({
+    settings: settingsStore,
+    client: mattermostClient,
+    secretsFor: runtimeSecretsFor, // botTokenSecretName → value for the connection verify (never returned)
+    config: {
+      ...(mattermostHost ? { host: mattermostHost } : {}),
+      ...(process.env.API_PUBLIC_URL ? { apiPublicUrl: process.env.API_PUBLIC_URL } : {}),
+    },
   });
   // Trace-sink EXPORT executor — export scorecard detail results to the source a harness selected as an export target
   // (registration lives on TraceSourceService now). docs/architecture/trace-sink.md
@@ -74,26 +90,29 @@ export function buildIntegrations(deps: {
     },
   });
   // Workspace-owned GitHub App integration — org install → selected repos → workspace-owned installation (replaces personal connections).
-  // github.com App = operator env (GITHUB_APP_*); GHE App = admin registers it on the workspace (private key = SecretStore name-ref).
-  // RunService/ScorecardService's installationTokenFor calls this, so create it beforehand.
+  // BOTH github.com AND GitHub Enterprise are operator env (GITHUB_APP_* / GITHUB_ENTERPRISE_APP_*) — one App per host for
+  // the whole deployment; the admin only installs + picks repos. RunService/ScorecardService's installationTokenFor calls this, so create it beforehand.
   const githubComApp = githubComAppConfig();
+  const githubEnterpriseApp = githubEnterpriseAppConfig();
   const githubAppService = new GithubAppService({
     states: oauthStateStore,
     settings: settingsStore,
-    secretsFor: runtimeSecretsFor,
     gateway: githubAppGateway(), // outbound App-JWT/installation-token + installation-repos/runner-token adapter (fetch)
     config: {
       webBaseUrl: process.env.WEB_BASE_URL ?? "http://localhost:3001",
       ...(process.env.API_PUBLIC_URL ? { apiPublicUrl: process.env.API_PUBLIC_URL } : {}),
       ...(githubComApp ? { githubCom: githubComApp } : {}),
+      ...(githubEnterpriseApp ? { githubEnterprise: githubEnterpriseApp } : {}),
     },
   });
   if (githubComApp)
     console.error("▶ github-app: github.com App enabled (GITHUB_APP_ID/SLUG) — org install → selected-repo one-click");
-  else
-    console.warn(
-      "▶ github-app: GITHUB_APP_* unset — github.com App install disabled (GHE still works when an admin registers it on the workspace).",
+  else console.warn("▶ github-app: GITHUB_APP_* unset — github.com App install disabled.");
+  if (githubEnterpriseApp)
+    console.error(
+      `▶ github-app: GitHub Enterprise App enabled for ${githubEnterpriseApp.host} (GITHUB_ENTERPRISE_APP_*) — same one-click install as github.com`,
     );
+  else console.warn("▶ github-app: GITHUB_ENTERPRISE_APP_* unset — GitHub Enterprise install disabled.");
   return {
     notificationService,
     mattermostService,
@@ -105,18 +124,28 @@ export function buildIntegrations(deps: {
   };
 }
 
-// External account-connection provider registry.
-//  - github (github.com): one-click (default) if the env default OAuth App exists. Otherwise it registers but doesn't appear in the connectable list.
-//  - github-enterprise: same github impl + self-hosted (on connect, enter host + clientId + clientSecretName).
-//  - mattermost: self-hosted only.
-// A self-hosted client_secret value is resolved by NAME from the workspace SecretStore (the value is never stored in the spec/state).
-// github.com operator App credentials (env) — all three required to enable. For the private key (PEM), for single-line env-file safety,
-// base64(PEM) is recommended; if it contains "BEGIN", raw PEM (with \n escape restoration) is also accepted. Unset → github.com App install disabled.
+// PEM decode for env-supplied App private keys: base64(PEM) is recommended for single-line env-file safety;
+// if the value contains "BEGIN", raw PEM (with \n escape restoration) is accepted too.
+function decodePrivateKeyPem(key: string): string {
+  return key.includes("BEGIN") ? key.replace(/\\n/g, "\n") : Buffer.from(key, "base64").toString("utf8");
+}
+
+// github.com operator App credentials (env) — all three required to enable. Unset → github.com App install disabled.
 function githubComAppConfig(): GithubComAppConfig | undefined {
   const appId = process.env.GITHUB_APP_ID;
   const key = process.env.GITHUB_APP_PRIVATE_KEY;
   const slug = process.env.GITHUB_APP_SLUG;
   if (!appId || !key || !slug) return undefined;
-  const privateKeyPem = key.includes("BEGIN") ? key.replace(/\\n/g, "\n") : Buffer.from(key, "base64").toString("utf8");
-  return { appId, slug, privateKeyPem };
+  return { appId, slug, privateKeyPem: decodePrivateKeyPem(key) };
+}
+
+// GitHub Enterprise operator App credentials (env) — the single enterprise host for this deployment, handled
+// identically to github.com (one env App, install-only). All four required to enable. Unset → GHE install disabled.
+function githubEnterpriseAppConfig(): GithubEnterpriseAppConfig | undefined {
+  const host = process.env.GITHUB_ENTERPRISE_HOST;
+  const appId = process.env.GITHUB_ENTERPRISE_APP_ID;
+  const key = process.env.GITHUB_ENTERPRISE_APP_PRIVATE_KEY;
+  const slug = process.env.GITHUB_ENTERPRISE_APP_SLUG;
+  if (!host || !appId || !key || !slug) return undefined;
+  return { host, appId, slug, privateKeyPem: decodePrivateKeyPem(key) };
 }

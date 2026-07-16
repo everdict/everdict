@@ -61,14 +61,15 @@ Managing **who** is in a workspace and **how they join** — one service core, H
   addedAt}`; `PATCH /members/:subject {role}` and `DELETE /members/:subject` (`members:write`, **admin**) change a
   role / remove. The **last admin can't be demoted or removed** (409) — no workspace is left admin-less. MCP:
   `list_members` / `set_member_role` / `remove_member`.
-- **Invites (token/link redemption)** — `POST /invites {role, expiresInHours?}` (`members:write`, admin) mints a
-  one-time token `inv_…` (returned **once**, hash-only at rest like API keys); share the link. `GET /invites`
-  (admin) lists pending invites (meta only); `DELETE /invites/:id` revokes. **`POST /invites/accept {token}`** is
-  authenticated-only (NOT workspace-role-gated, like `POST /workspaces`) — a logged-in **human** (api-key principals
-  rejected) redeems it to join with the invite's role and is returned `{workspace, role}`. Invites are **single-use**
-  (atomic CTE consume — concurrent double-redeem → 409), **expirable**, and an existing member who redeems keeps their
-  current role (a shared link can't change privileges). Revoked == unknown (404, no existence leak). MCP:
-  `create_invite` / `list_invites` / `revoke_invite` / `accept_invite`.
+- **Invites (reusable join link)** — `POST /invites {role, expiresInHours?}` (`members:write`, admin) mints a
+  token `inv_…` (returned **once**, hash-only at rest like API keys); share the link. `GET /invites`
+  (admin) lists active invite links (meta only, incl. `acceptedCount`); `DELETE /invites/:id` revokes.
+  **`POST /invites/accept {token}`** is authenticated-only (NOT workspace-role-gated, like `POST /workspaces`) — a
+  logged-in **human** (api-key principals rejected) redeems it to join with the invite's role and is returned
+  `{workspace, role}`. A link is **reusable** — anyone with it can join (each acceptance bumps `acceptedCount`
+  via an atomic CTE consume) until it **expires** or an admin **revokes** it; an existing member who redeems keeps
+  their current role (a shared link can't change privileges). Revoked/expired/unknown all read as an error with no
+  existence leak. MCP: `create_invite` / `list_invites` / `revoke_invite` / `accept_invite`.
 
 ## Tenant-owned harnesses (`@everdict/registry`)
 The harness registry is keyed by **`(tenant, id, version)`**. A tenant registers and lists only its own

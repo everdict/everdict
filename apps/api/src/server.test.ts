@@ -206,15 +206,29 @@ function server(
   const githubAppService = new GithubAppService({
     states: new InMemoryOAuthStateStore(),
     settings: settingsStore,
-    secretsFor: async () => ({}),
     gateway: githubAppGateway(),
     config: {
       webBaseUrl: "http://web.test",
       apiPublicUrl: "http://api.test",
       githubCom: { appId: "111", privateKeyPem: "-----BEGIN TEST KEY-----", slug: "everdict-eval" },
+      githubEnterprise: {
+        host: "https://ghe.corp.io",
+        appId: "222",
+        privateKeyPem: "-----BEGIN TEST KEY-----",
+        slug: "everdict-eval-ghe",
+      },
     },
   });
-  const mattermostService = new MattermostService(settingsStore);
+  // Mattermost server URL is operator env (config.host); verify is stubbed reachable so route wiring is testable without a live server.
+  const mattermostService = new MattermostService({
+    settings: settingsStore,
+    client: {
+      post: async () => {},
+      verify: async () => ({ reachable: true, detail: "stub", botUsername: "everdict-bot" }),
+    },
+    secretsFor: async () => ({ MM_BOT: "xoxb-test" }),
+    config: { host: "https://mm.corp.io", apiPublicUrl: "http://api.test" },
+  });
   // Connection-probe stub — verifies route wiring / role gate + scope discovery, no real platform I/O.
   const probeConnection = async (cfg: { kind: string; endpoint: string; auth?: string }) => ({
     kind: cfg.kind,
@@ -603,23 +617,22 @@ describe("API — authorization (roles)", () => {
 });
 
 describe("API — workspace integrations (GitHub App / Mattermost)", () => {
-  it("Mattermost: admin can register/read/unregister, viewer lacks settings:write → 403", async () => {
+  it("Mattermost: admin registers (host from operator env, not the body) + reads + unregisters; viewer lacks settings:write → 403", async () => {
     const h = { authorization: "Bearer x" };
     const { app } = server({ requireAuth: true, authenticator: roleAuth(["admin"]) });
+    // The server URL is operator env — the body carries only bot/channel/command names; host is never accepted from the client.
     const put = await app.inject({
       method: "PUT",
       url: "/workspace/mattermost",
       headers: h,
-      payload: { host: "https://mm.corp.io", botTokenSecretName: "MM_BOT", defaultChannelId: "ch" },
+      payload: { botTokenSecretName: "MM_BOT", defaultChannelId: "ch" },
     });
     expect(put.statusCode).toBe(200);
-    expect(put.json().config).toEqual({
-      host: "https://mm.corp.io",
-      botTokenSecretName: "MM_BOT",
-      defaultChannelId: "ch",
-    });
+    expect(put.json().config).toEqual({ botTokenSecretName: "MM_BOT", defaultChannelId: "ch" });
     const get = await app.inject({ method: "GET", url: "/workspace/mattermost", headers: h });
-    expect(get.json().config.host).toBe("https://mm.corp.io");
+    // host rides at the status top level (operator env), config holds only the workspace registration.
+    expect(get.json().host).toBe("https://mm.corp.io");
+    expect(get.json().config.botTokenSecretName).toBe("MM_BOT");
     expect((await app.inject({ method: "DELETE", url: "/workspace/mattermost", headers: h })).statusCode).toBe(204);
     expect(
       (await app.inject({ method: "GET", url: "/workspace/mattermost", headers: h })).json().config,
@@ -631,10 +644,24 @@ describe("API — workspace integrations (GitHub App / Mattermost)", () => {
       method: "PUT",
       url: "/workspace/mattermost",
       headers: h,
-      payload: { host: "https://mm.corp.io", botTokenSecretName: "MM_BOT" },
+      payload: { botTokenSecretName: "MM_BOT" },
     });
     expect(denied.statusCode).toBe(403);
     await viewer.app.close();
+  });
+
+  it("Mattermost: /probe returns the connection-test outcome (settings:write)", async () => {
+    const h = { authorization: "Bearer x" };
+    const { app } = server({ requireAuth: true, authenticator: roleAuth(["admin"]) });
+    const probe = await app.inject({
+      method: "POST",
+      url: "/workspace/mattermost/probe",
+      headers: h,
+      payload: { botTokenSecretName: "MM_BOT", defaultChannelId: "ch" },
+    });
+    expect(probe.statusCode).toBe(200);
+    expect(probe.json().reachable).toBe(true);
+    await app.close();
   });
 
   it("trace sources (multiple): admin registers/removes by name, member selects per harness, tag-correlation is validated, viewer read-only", async () => {
@@ -728,7 +755,7 @@ describe("API — workspace integrations (GitHub App / Mattermost)", () => {
           method: "PUT",
           url: "/workspace/trace-sources",
           headers: h,
-          payload: { name: "dev-mlflow", kind: "mlflow", endpoint: "http://mlflow:5000" },
+          payload: { name: "dev-mlflow", kind: "mlflow", endpoint: "http://mlflow:5000", project: "exp1" },
         })
       ).statusCode,
     ).toBe(200);
@@ -880,7 +907,7 @@ describe("API — workspace integrations (GitHub App / Mattermost)", () => {
     await app.close();
   });
 
-  it("GitHub App: admin can get the install-start URL / list / register GHE, viewer lacks settings:write → 403", async () => {
+  it("GitHub App: admin can get the github.com + enterprise install-start URLs / list providers, viewer lacks settings:write → 403", async () => {
     const h = { authorization: "Bearer x" };
     const { app } = server({ requireAuth: true, authenticator: roleAuth(["admin"]) });
     // Install start → github.com App installation page URL.
@@ -892,20 +919,24 @@ describe("API — workspace integrations (GitHub App / Mattermost)", () => {
     });
     expect(start.statusCode).toBe(200);
     expect(start.json().installUrl).toContain("https://github.com/apps/everdict-eval/installations/new");
-    // List — empty, exposes the callbackUrl to register as the App Setup URL.
+    // Install start on the enterprise host (operator env) → GHE installation page URL — same one-click flow.
+    const gheStart = await app.inject({
+      method: "POST",
+      url: "/workspace/github-app/install/start",
+      headers: h,
+      payload: { host: "https://ghe.corp.io" },
+    });
+    expect(gheStart.statusCode).toBe(200);
+    expect(gheStart.json().installUrl).toContain("https://ghe.corp.io/github-apps/everdict-eval-ghe/installations/new");
+    // List — no installations yet; providers reflect the operator env (github.com + enterprise); exposes the callbackUrl.
     const list = await app.inject({ method: "GET", url: "/workspace/github-app", headers: h });
     expect(list.statusCode).toBe(200);
-    expect(list.json()).toMatchObject({ registrations: [], installations: [] });
-    expect(list.json().callbackUrl).toBe("http://api.test/workspace/github-app/callback");
-    // Register a GHE App (admin) → one entry in the list.
-    const reg = await app.inject({
-      method: "POST",
-      url: "/workspace/github-app/registrations",
-      headers: h,
-      payload: { host: "https://ghe.acme.io", slug: "everdict-ghe", appId: "222", privateKeySecretName: "ghe-key" },
+    expect(list.json()).toMatchObject({
+      installations: [],
+      providers: { githubCom: true, enterprise: { host: "https://ghe.corp.io" } },
     });
-    expect(reg.statusCode).toBe(200);
-    expect(reg.json().registrations).toHaveLength(1);
+    expect(list.json().registrations).toBeUndefined();
+    expect(list.json().callbackUrl).toBe("http://api.test/workspace/github-app/callback");
     await app.close();
 
     const viewer = server({ requireAuth: true, authenticator: roleAuth(["viewer"]) });
