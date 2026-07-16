@@ -2,6 +2,7 @@ import { z } from "zod";
 import { CaseFailureSchema } from "./case-failure.js";
 import { EnvSnapshotSchema, EnvSpecSchema } from "./environment.js";
 import { ScoreSchema } from "./grader.js";
+import { SpanAttrMappingSchema } from "./trace-source.js";
 import { TraceEventSchema } from "./trace.js";
 
 // Grader spec: id + optional config (e.g. tests-pass's { cmd }).
@@ -64,6 +65,7 @@ export const TraceRefSchema = z.object({
   experiment: z.string().optional(), // search scope for mlflow tag correlation (experiment id)
   project: z.string().optional(), // phoenix only — the project on the span lookup path
   service: z.string().optional(), // search scope for otel tag correlation (Jaeger service — the agent's service.name)
+  mapping: SpanAttrMappingSchema.optional(), // per-harness span→TraceEvent attribute overrides (carried to control-plane collect)
 });
 export type TraceRef = z.infer<typeof TraceRefSchema>;
 

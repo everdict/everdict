@@ -84,6 +84,7 @@ export async function collectDeferredTrace(
         ...(ref.correlate ? { correlate: ref.correlate } : {}),
         ...(project ? { project } : {}),
         ...(ref.service ? { service: ref.service } : {}),
+        ...(ref.mapping ? { mapping: ref.mapping } : {}),
       });
       const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
       let events: Awaited<ReturnType<TraceSource["fetch"]>> = [];

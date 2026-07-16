@@ -53,6 +53,41 @@ describe("spansToTraceEvents", () => {
     expect(e?.kind === "llm_call" && e.cost?.outputTokens).toBe(7);
     expect(e?.kind === "llm_call" && e.cost?.usd).toBe(6.3e-5);
   });
+
+  it("a per-harness mapping normalizes NON-GenAI-convention attribute keys (the harness-specific escape hatch)", () => {
+    // A harness that emits its own attribute names, none of which are OTel GenAI conventions.
+    const spans: Span[] = [
+      { name: "gen", startMs: 0, endMs: 5, attrs: { "my.model": "custom-llm", "my.tok.in": 12, "my.tok.out": 4 } },
+      { name: "act", startMs: 6, endMs: 7, attrs: { "act.name": "run_query", "act.id": "a1", "act.out": "rows=3" } },
+      { name: "say", startMs: 8, endMs: 8, attrs: { "my.text": "finished" } },
+    ];
+    // Without a mapping the custom keys are invisible → no events.
+    expect(spansToTraceEvents(spans)).toHaveLength(0);
+    // With a mapping the same spans normalize to the standard TraceEvents.
+    const events = spansToTraceEvents(spans, {
+      model: ["my.model"],
+      inputTokens: ["my.tok.in"],
+      outputTokens: ["my.tok.out"],
+      toolName: ["act.name"],
+      toolCallId: ["act.id"],
+      toolResult: ["act.out"],
+      messageText: ["my.text"],
+    });
+    expect(events.map((e) => e.kind)).toEqual(["llm_call", "tool_call", "tool_result", "message"]);
+    expect(events[0]?.kind === "llm_call" && events[0].model).toBe("custom-llm");
+    expect(events[0]?.kind === "llm_call" && events[0].cost?.inputTokens).toBe(12);
+    expect(events[1]?.kind === "tool_call" && events[1].name).toBe("run_query");
+    expect(events[3]?.kind === "message" && events[3].text).toBe("finished");
+  });
+
+  it("mapping keys take priority but fall back to the GenAI defaults (a mixed-convention harness)", () => {
+    const spans: Span[] = [
+      { name: "a", startMs: 0, endMs: 1, attrs: { "my.model": "x" } }, // custom key
+      { name: "b", startMs: 2, endMs: 3, attrs: { "gen_ai.request.model": "y" } }, // default key still works
+    ];
+    const events = spansToTraceEvents(spans, { model: ["my.model"] });
+    expect(events.map((e) => e.kind === "llm_call" && e.model)).toEqual(["x", "y"]);
+  });
 });
 
 describe("parseOtlpSpans", () => {

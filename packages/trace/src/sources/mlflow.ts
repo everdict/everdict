@@ -1,4 +1,4 @@
-import { type TraceEvent, type TraceSource, UpstreamError } from "@everdict/contracts";
+import { type SpanAttrMapping, type TraceEvent, type TraceSource, UpstreamError } from "@everdict/contracts";
 import { type Span, spansToTraceEvents } from "./trace-source.js";
 
 // Span attributes in the MLflow 3.x trace REST are an OTLP-style AnyValue (snake_case) array — a format distinct from OTel (camelCase).
@@ -70,6 +70,7 @@ export interface MlflowTraceSourceOptions {
   // where the id is minted by the server and so can't equal the everdict runId) — search requires locations, so experimentIds is required.
   correlate?: "id" | "tag";
   experimentIds?: string[]; // search scope for tag correlation (MLflow 3.x traces/search requires locations)
+  mapping?: SpanAttrMapping; // per-harness span-attribute overrides (non-GenAI-convention instrumentation)
 }
 
 const RUN_ID_TAG = "everdict.run_id"; // the correlation tag the instrumented agent writes (same value as the injected env EVERDICT_RUN_ID)
@@ -142,6 +143,6 @@ export class MlflowTraceSource implements TraceSource {
     } catch {
       return [];
     }
-    return spansToTraceEvents(parseMlflowTrace(body.trace ?? {}));
+    return spansToTraceEvents(parseMlflowTrace(body.trace ?? {}), this.opts.mapping);
   }
 }

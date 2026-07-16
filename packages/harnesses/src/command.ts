@@ -82,6 +82,7 @@ export class CommandHarness implements EvaluableHarness {
       ...(trace.kind === "mlflow" && trace.experiment ? { experiment: trace.experiment } : {}),
       ...(trace.kind === "phoenix" ? { project: trace.project } : {}),
       ...(trace.kind === "otel" && trace.service ? { service: trace.service } : {}),
+      ...((trace.kind === "otel" || trace.kind === "mlflow") && trace.mapping ? { mapping: trace.mapping } : {}),
     };
   }
 

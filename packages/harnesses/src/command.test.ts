@@ -180,6 +180,7 @@ describe("CommandHarness", () => {
           correlate: "tag",
           experiment: "7",
           authSecret: "MLFLOW_AUTH",
+          mapping: { model: ["my.model"], inputTokens: ["my.tok.in"] },
         },
       }),
       { runId: () => "self-minted" },
@@ -187,6 +188,7 @@ describe("CommandHarness", () => {
     await collect(h.run(compute, "t", { ...ctx, runId: "from-runcase" }));
     expect(execs[0]?.env?.EVERDICT_RUN_ID).toBe("from-runcase"); // runCase correlation key takes precedence
     // authSecret exposes only the 'name' (the value trace.auth must not leak); for mlflow, correlate/experiment are also in the coordinates.
+    // A per-harness span-attribute mapping (non-GenAI-convention instrumentation) is carried through to the trace source.
     expect(h.traceSource()).toEqual({
       kind: "mlflow",
       endpoint: "http://m",
@@ -194,6 +196,7 @@ describe("CommandHarness", () => {
       correlate: "tag",
       experiment: "7",
       authSecret: "MLFLOW_AUTH",
+      mapping: { model: ["my.model"], inputTokens: ["my.tok.in"] },
     });
     expect(new CommandHarness(spec()).traceSource()).toBeUndefined(); // trace:none
   });

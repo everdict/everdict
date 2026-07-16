@@ -1,4 +1,4 @@
-import { type TraceEvent, type TraceSource, UpstreamError } from "@everdict/contracts";
+import { type SpanAttrMapping, type TraceEvent, type TraceSource, UpstreamError } from "@everdict/contracts";
 import { type Span, spansToTraceEvents } from "./trace-source.js";
 
 // OTLP span (attributes are a {key,value} array) → normalized Span.
@@ -72,6 +72,7 @@ export interface OtelTraceSourceOptions {
   // service required). OTLP-native backends (no search API) stay id-correlated.
   correlate?: "id" | "tag";
   service?: string; // search scope for tag correlation (Jaeger requires the service parameter) — the agent's service.name
+  mapping?: SpanAttrMapping; // per-harness span-attribute overrides (non-GenAI-convention instrumentation)
 }
 
 const RUN_ID_ATTR = "everdict.run_id"; // the correlation resource attribute the instrumented agent writes (same value as the injected env)
@@ -116,8 +117,8 @@ export class OtelTraceSource implements TraceSource {
     // A tag search miss is data=[] → degrade to 0 events (flush lag — retry is the caller's job).
     const body = (await res.json()) as { spans?: OtlpSpan[]; data?: Array<{ spans?: JaegerSpan[] }> };
     if (Array.isArray(body.data)) {
-      return spansToTraceEvents(parseJaegerSpans(body.data.flatMap((t) => t.spans ?? [])));
+      return spansToTraceEvents(parseJaegerSpans(body.data.flatMap((t) => t.spans ?? [])), this.opts.mapping);
     }
-    return spansToTraceEvents(parseOtlpSpans(body.spans ?? []));
+    return spansToTraceEvents(parseOtlpSpans(body.spans ?? []), this.opts.mapping);
   }
 }

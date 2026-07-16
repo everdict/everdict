@@ -220,6 +220,7 @@ export async function runCase(evalCase: EvalCase, deps: RunCaseDeps): Promise<Ca
               ...(source.experiment ? { experiment: source.experiment } : {}),
               ...(source.project ? { project: source.project } : {}),
               ...(source.service ? { service: source.service } : {}),
+              ...(source.mapping ? { mapping: source.mapping } : {}),
             },
           }
         : {}),

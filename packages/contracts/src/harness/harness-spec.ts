@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { SpanAttrMappingSchema } from "../execution/trace-source.js";
 import { ModelBindingSchema } from "./model-spec.js";
 
 // Trace source — evaluation pulls the trace the harness/runtime exported to its observability platform. 5 kinds at
@@ -14,6 +15,8 @@ export const TraceSourceSpecSchema = z.object({
   correlate: z.enum(["id", "tag"]).optional(),
   service: z.string().optional(),
   project: z.string().optional(),
+  // Per-harness span→TraceEvent attribute overrides for a harness that doesn't emit the OTel GenAI conventions (otel/mlflow).
+  mapping: SpanAttrMappingSchema.optional(),
 });
 export type TraceSourceSpec = z.infer<typeof TraceSourceSpecSchema>;
 
@@ -295,6 +298,7 @@ export const CommandTraceSpecSchema = z.discriminatedUnion("kind", [
     // (the injected env OTEL_RESOURCE_ATTRIBUTES verbatim — Jaeger query API only, service required).
     correlate: z.enum(["id", "tag"]).default("id"),
     service: z.string().optional(), // search scope for tag correlation (the agent's service.name)
+    mapping: SpanAttrMappingSchema.optional(), // span→TraceEvent attribute overrides for non-GenAI-convention instrumentation
   }),
   z.object({
     kind: z.literal("mlflow"),
@@ -304,6 +308,7 @@ export const CommandTraceSpecSchema = z.discriminatedUnion("kind", [
     // everdict.run_id tag the instrumented agent left on its own trace (id is server-minted — the real agent path). tag requires experiment.
     correlate: z.enum(["id", "tag"]).default("id"),
     experiment: z.string().optional(), // search scope for tag correlation (MLflow traces/search requires locations)
+    mapping: SpanAttrMappingSchema.optional(), // span→TraceEvent attribute overrides for non-GenAI-convention instrumentation
   }),
   z.object({ kind: z.literal("langfuse"), endpoint: z.string(), ...commandTraceAuth }),
   z.object({ kind: z.literal("langsmith"), endpoint: z.string(), ...commandTraceAuth }),

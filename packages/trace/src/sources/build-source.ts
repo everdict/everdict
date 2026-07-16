@@ -25,12 +25,14 @@ export function buildTraceSource(cfg: TraceSourceConfig): TraceSource {
         ...opts,
         ...(cfg.correlate ? { correlate: cfg.correlate } : {}),
         ...(cfg.service ? { service: cfg.service } : {}),
+        ...(cfg.mapping ? { mapping: cfg.mapping } : {}),
       });
     case "mlflow":
       return new MlflowTraceSource({
         ...opts,
         ...(cfg.correlate ? { correlate: cfg.correlate } : {}),
         ...(cfg.project ? { experimentIds: [cfg.project] } : {}),
+        ...(cfg.mapping ? { mapping: cfg.mapping } : {}),
       });
     case "langfuse":
       return new LangfuseTraceSource(authOpts);

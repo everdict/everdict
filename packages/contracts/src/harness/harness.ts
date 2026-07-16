@@ -1,4 +1,5 @@
 import type { ComputeHandle } from "../execution/compute.js";
+import type { SpanAttrMapping } from "../execution/trace-source.js";
 import type { TraceEvent } from "../execution/trace.js";
 
 export interface RunContext {
@@ -42,6 +43,7 @@ export interface HarnessTraceSource {
   experiment?: string; // search scope for mlflow tag correlation (experiment id)
   project?: string; // phoenix only — the project on the span lookup path (required API form)
   service?: string; // search scope for otel tag correlation (Jaeger service parameter — the agent's service.name)
+  mapping?: SpanAttrMapping; // per-harness span→TraceEvent attribute overrides for non-GenAI-convention instrumentation
 }
 
 // The subject under test. Driven inside a ComputeHandle (sandbox), it converts native output
