@@ -87,3 +87,12 @@ export function defaultRuntimeCapabilities(spec: RuntimeSpec): CapabilityName[] 
   }
   return [...caps];
 }
+
+// The register-time SSOT for a runtime's capabilities: the auto-derived set UNION any the operator explicitly
+// declared (e.g. os-windows/os-macos, which can't be inferred from the spec). Filling this server-side keeps the
+// hardened-runtime set from being recomputed in every client (the web wizard used to duplicate isHardenedRuntime).
+// Idempotent — re-running on a filled spec adds nothing new.
+export function runtimeSpecWithCapabilities(spec: RuntimeSpec): RuntimeSpec {
+  const merged = new Set<CapabilityName>([...defaultRuntimeCapabilities(spec), ...(spec.capabilities ?? [])]);
+  return { ...spec, capabilities: [...merged] };
+}

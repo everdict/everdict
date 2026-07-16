@@ -6,6 +6,7 @@ import {
   requiredCapabilitiesForHarness,
   requiredCapabilitiesForJob,
   requiredCapabilitiesForTopology,
+  runtimeSpecWithCapabilities,
 } from "./capability-requirements.js";
 
 const base = (over: Partial<EvalCase>): EvalCase => ({
@@ -140,5 +141,26 @@ describe("defaultRuntimeCapabilities — auto-label what a registered runtime pr
       ).sort(),
     ).toEqual(["docker", "topology"]);
     expect(defaultRuntimeCapabilities(rt({ kind: "local" }))).toEqual([]);
+  });
+});
+
+describe("runtimeSpecWithCapabilities — the register-time SSOT (declared ∪ derived)", () => {
+  const rt = (over: Partial<RuntimeSpec> & { kind: RuntimeSpec["kind"] }): RuntimeSpec =>
+    ({ id: "a", version: "1.0.0", tags: [], ...over }) as RuntimeSpec;
+
+  it("fills the auto-derived capabilities when the spec declares none", () => {
+    const filled = runtimeSpecWithCapabilities(rt({ kind: "k8s", image: "x", runtimeClass: "gvisor" }));
+    expect([...(filled.capabilities ?? [])].sort()).toEqual(["docker", "sandbox"]);
+  });
+
+  it("keeps operator-declared capabilities the spec can't derive (os-windows) and unions them with the derived set", () => {
+    const filled = runtimeSpecWithCapabilities(rt({ kind: "k8s", image: "x", capabilities: ["os-windows"] }));
+    expect([...(filled.capabilities ?? [])].sort()).toEqual(["docker", "os-windows"]);
+  });
+
+  it("is idempotent — re-running on a filled spec adds nothing new", () => {
+    const once = runtimeSpecWithCapabilities(rt({ kind: "nomad", addr: "http://x:4646", image: "x" }));
+    const twice = runtimeSpecWithCapabilities(once);
+    expect(twice.capabilities).toEqual(once.capabilities);
   });
 });

@@ -1,6 +1,7 @@
 import { setVersionTags } from "@everdict/application-control";
 import { RuntimeSpecSchema } from "@everdict/contracts";
 import { RuntimeControlCommandSchema } from "@everdict/contracts/wire";
+import { runtimeSpecWithCapabilities } from "@everdict/domain";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { type McpToolContext, fail, ok, plain, run } from "../mcp-context.js";
@@ -93,8 +94,10 @@ export function registerRuntimeTools(server: McpServer, ctx: McpToolContext): vo
           }
           const result = RuntimeSpecSchema.safeParse(parsed);
           if (!result.success) return fail(`BAD_REQUEST: ${result.error.message}`);
-          await runtimes.register(ws, result.data);
-          return ok({ workspace: ws, id: result.data.id, version: result.data.version });
+          // Fill capabilities server-side (declared ∪ auto-derived) — same SSOT as the HTTP route.
+          const spec = runtimeSpecWithCapabilities(result.data);
+          await runtimes.register(ws, spec);
+          return ok({ workspace: ws, id: spec.id, version: spec.version });
         }),
     );
   }

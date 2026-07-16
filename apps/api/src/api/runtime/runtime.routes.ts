@@ -1,6 +1,7 @@
 import { VersionTagsBodySchema, setVersionTags } from "@everdict/application-control";
 import { RuntimeSpecSchema } from "@everdict/contracts";
 import { RuntimeControlCommandSchema } from "@everdict/contracts/wire";
+import { runtimeSpecWithCapabilities } from "@everdict/domain";
 import type { FastifyInstance } from "fastify";
 import { type ServerDeps, gate, resolvePrincipal, sendError, zodIssues } from "../route-context.js";
 import { runtimeDocs } from "./runtime.docs.js";
@@ -19,9 +20,11 @@ export function registerRuntimeRoutes(app: FastifyInstance, deps: ServerDeps): v
     }
     const parsed = RuntimeSpecSchema.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
+    // Fill capabilities server-side (declared ∪ auto-derived) so the client never recomputes the hardened-runtime set.
+    const spec = runtimeSpecWithCapabilities(parsed.data);
     try {
-      await deps.runtimeRegistry.register(principal.workspace, parsed.data);
-      return reply.code(201).send({ workspace: principal.workspace, id: parsed.data.id, version: parsed.data.version });
+      await deps.runtimeRegistry.register(principal.workspace, spec);
+      return reply.code(201).send({ workspace: principal.workspace, id: spec.id, version: spec.version });
     } catch (err) {
       return sendError(reply, err); // immutable 409
     }
