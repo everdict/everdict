@@ -20,7 +20,6 @@ const NO_UPDATE: UpdaterState = { kind: "disabled" };
 function actions(): TrayMenuActions & { openApp: ReturnType<typeof vi.fn> } {
   return {
     openApp: vi.fn(),
-    openPanel: vi.fn(),
     setAutostart: vi.fn(),
     changeServerUrl: vi.fn(),
     reconnectRunner: vi.fn(),
@@ -58,11 +57,9 @@ describe("runnerStatusLabel", () => {
 });
 
 describe("buildTrayMenuTemplate", () => {
-  it("leads with the popover launcher, then the status row (disabled)/open/autostart/quit — no unpair item when unpaired", () => {
+  it("leads with the status row (disabled), then open/autostart/change-server/quit — no popover launcher, no unpair when unpaired", () => {
     const t = buildTrayMenuTemplate({ autostart: false, runner: OFF, updater: NO_UPDATE }, actions());
     expect(t.map((i) => i.label ?? i.type)).toEqual([
-      "Open Everdict panel",
-      "separator",
       runnerStatusLabel(OFF),
       "separator",
       "Open Everdict",
@@ -72,16 +69,10 @@ describe("buildTrayMenuTemplate", () => {
       "separator",
       "Quit",
     ]);
+    // No launcher item — the styled popover (D11) is a macOS/Windows-only surface; the Linux native menu is the full tray UI.
+    expect(t.some((i) => i.label === "Open Everdict panel")).toBe(false);
     // The status row stays a disabled (informational) item.
     expect(t.find((i) => i.label === runnerStatusLabel(OFF))).toMatchObject({ enabled: false });
-  });
-
-  it("the leading 'Open Everdict panel' item opens the popover (D11)", () => {
-    const a = actions();
-    const t = buildTrayMenuTemplate({ autostart: false, runner: OFF, updater: NO_UPDATE }, a);
-    expect(t[0]).toMatchObject({ label: "Open Everdict panel" });
-    click(t[0] ?? {});
-    expect(a.openPanel).toHaveBeenCalledOnce();
   });
 
   it("when paired, 'Unpair this device's runner' appears and clicking it calls unpairRunner", () => {

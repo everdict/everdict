@@ -538,12 +538,12 @@ function currentTrayState(): TrayMenuState {
   return { autostart: config.autostart, runner: latestRunnersStatus, updater: updaterState };
 }
 
-// The tray/popover actions — one set shared by the native menu items and the popover bridge. `openPanel` opens the popover
-// (D11): on Linux the AppIndicator forces a native menu, so its top item leads into the readable popover.
+// The tray/popover actions — one set shared by the native menu items (Linux) and the popover bridge (macOS/Windows).
+// The styled popover is reached only by the tray click on macOS/Windows (`toggleTrayPopover`); the Linux native menu has no
+// launcher item, so it does not open the popover — the menu itself is the full tray UI there.
 function trayActions(): TrayMenuActions {
   return {
     openApp: () => createOrFocusWindow(),
-    openPanel: () => showTrayPopover(),
     setAutostart: (next) => applyAutostart(next),
     changeServerUrl: () => openSetupWindow(),
     // Reconnect-all — force every runner on this device to reopen its session and resume leasing (recovers an offline runner).

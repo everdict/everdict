@@ -11,7 +11,6 @@ export interface TrayMenuState {
 
 export interface TrayMenuActions {
   openApp(): void;
-  openPanel(): void; // open the rich popover (D11) — on Linux the native menu is kept (AppIndicator forces one) but leads into the readable popover
   setAutostart(next: boolean): void;
   changeServerUrl(): void; // open the setup window (setup.html) — D8
   reconnectRunner(): void; // force every runner on this device to reconnect (recover an offline runner without re-pairing)
@@ -50,10 +49,8 @@ function updaterItems(updater: UpdaterState, actions: TrayMenuActions): MenuItem
 
 export function buildTrayMenuTemplate(state: TrayMenuState, actions: TrayMenuActions): MenuItemConstructorOptions[] {
   return [
-    // The native menu's text is at the mercy of the OS/GTK theme (unstylable, low-contrast on some Linux themes — the reason
-    // D11 exists). Its first, always-legible job is to open the fully-styled popover; the rest stays as a complete fallback.
-    { label: "Open Everdict panel", click: () => actions.openPanel() },
-    { type: "separator" },
+    // Linux is the only platform that sets this native menu (AppIndicator forces one), so here it IS the complete tray UI.
+    // The fully-styled popover (D11) is reached by clicking the tray icon on macOS/Windows only — Linux does not surface it.
     ...updaterItems(state.updater, actions),
     { label: runnerStatusLabel(state.runner), enabled: false },
     { type: "separator" },

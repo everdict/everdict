@@ -86,8 +86,10 @@
 >   transparent BrowserWindow** rendering a local page (`assets/tray-popover.html`) we style fully (Toss/Linear dark,
 >   readable) with runner-status **reactions** (idle = a breathing dot, running = a pulse ring, job-done = a brief ✦ tick).
 >   Trigger is platform-split: **macOS/Windows** emit a tray `click` → the click toggles the popover (no native menu is
->   set); **Linux** AppIndicator swallows the click and *requires* a context menu, so there the native menu stays as a
->   complete fallback but its **first item opens the popover** (the always-legible way in). The popover gets its **own
+>   set); **Linux** AppIndicator swallows the click and *requires* a context menu, so there the native menu is the
+>   **complete tray UI** and the styled popover is **not surfaced** — an earlier "Open Everdict panel" launcher item was
+>   dropped (2026-07-16) as a confusing duplicate of the menu it lived in (the native menu already carries every action).
+>   The popover gets its **own
 >   local-file bridge** `window.everdictTray` (`getState` / `onState` / `action` / `resize` / `hide`) behind a
 >   `--everdict-tray` argv flag, gated **exactly like the setup window (D8)**: main-side IPC accepts only the popover's
 >   `file://` senderFrame — never the web or an external page (`registerTrayBridge`). Actions are the same **benign** set
