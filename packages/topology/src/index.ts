@@ -120,6 +120,12 @@ export {
 } from "./front-door/observation-source.js";
 export { captureCdpScreenshot, type CdpSocket, type CaptureCdpOptions } from "./front-door/capture-cdp.js";
 export {
+  captureStorageState,
+  storageStateDomains,
+  type StorageState,
+  type StoredCookie,
+} from "./front-door/capture-storage-state.js";
+export {
   openBrowserSession,
   type BrowserSessionHandle,
   type BrowserSessionOptions,

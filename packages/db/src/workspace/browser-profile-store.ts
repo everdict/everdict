@@ -4,11 +4,12 @@ import type { BrowserProfileStore } from "@everdict/application-control";
 
 import type { SqlClient } from "../client.js";
 
-// Saved authenticated browser profiles (browser-profiles S2) — personal / self-scoped metadata. Same contract,
-// InMemory (dev/tests) + Pg (DATABASE_URL). The encrypted storageState blob (S3) lives in @everdict/storage, keyed
-// by (tenant, profileId); this store holds only the metadata.
+// Saved authenticated browser profiles (browser-profiles S2/S3) — personal / self-scoped metadata + the captured
+// login blob (S3). Same contract, InMemory (dev/tests) + Pg (DATABASE_URL). The state_cipher is the OPAQUE encrypted
+// storageState (the apps/api capture service does the crypto) — server-only, never in the returned record.
 export class InMemoryBrowserProfileStore implements BrowserProfileStore {
   private readonly byId = new Map<string, BrowserProfileRecord>();
+  private readonly ciphers = new Map<string, string>(); // id → opaque encrypted storageState (server-only)
 
   async create(record: BrowserProfileRecord): Promise<void> {
     this.byId.set(record.id, record);
@@ -39,7 +40,31 @@ export class InMemoryBrowserProfileStore implements BrowserProfileStore {
 
   async remove(tenant: string, id: string): Promise<void> {
     const r = this.byId.get(id);
-    if (r && r.tenant === tenant) this.byId.delete(id);
+    if (r && r.tenant === tenant) {
+      this.byId.delete(id);
+      this.ciphers.delete(id);
+    }
+  }
+
+  async saveState(
+    tenant: string,
+    id: string,
+    stateCipher: string,
+    capturedAt: string,
+    cookieDomains: string[],
+  ): Promise<BrowserProfileRecord | undefined> {
+    const r = this.byId.get(id);
+    if (!r || r.tenant !== tenant) return undefined;
+    const next = { ...r, capturedAt, cookieDomains, updatedAt: capturedAt };
+    this.byId.set(id, next);
+    this.ciphers.set(id, stateCipher);
+    return next;
+  }
+
+  async loadState(tenant: string, id: string): Promise<string | undefined> {
+    const r = this.byId.get(id);
+    if (!r || r.tenant !== tenant) return undefined;
+    return this.ciphers.get(id);
   }
 }
 
@@ -48,6 +73,7 @@ interface BrowserProfileRow {
   tenant: string;
   name: string;
   cookie_domains: unknown;
+  captured_at: string | Date | null;
   created_by: string;
   created_at: string | Date;
   updated_at: string | Date;
@@ -61,13 +87,14 @@ function rowToRecord(row: BrowserProfileRow): BrowserProfileRecord {
     tenant: row.tenant,
     name: row.name,
     cookieDomains: row.cookie_domains,
+    capturedAt: row.captured_at ? iso(row.captured_at) : null,
     createdBy: row.created_by,
     createdAt: iso(row.created_at),
     updatedAt: iso(row.updated_at),
   });
 }
 
-// Postgres browser-profile store — same contract as in-memory. cookie_domains is jsonb.
+// Postgres browser-profile store — same contract as in-memory. cookie_domains is jsonb; state_cipher is opaque text.
 export class PgBrowserProfileStore implements BrowserProfileStore {
   constructor(private readonly client: SqlClient) {}
 
@@ -122,5 +149,31 @@ export class PgBrowserProfileStore implements BrowserProfileStore {
 
   async remove(tenant: string, id: string): Promise<void> {
     await this.client.query("DELETE FROM everdict_browser_profiles WHERE tenant=$1 AND id=$2", [tenant, id]);
+  }
+
+  async saveState(
+    tenant: string,
+    id: string,
+    stateCipher: string,
+    capturedAt: string,
+    cookieDomains: string[],
+  ): Promise<BrowserProfileRecord | undefined> {
+    const current = await this.get(tenant, id);
+    if (!current) return undefined;
+    await this.client.query(
+      `UPDATE everdict_browser_profiles
+       SET state_cipher=$3, captured_at=$4, cookie_domains=$5, updated_at=$4
+       WHERE tenant=$1 AND id=$2`,
+      [tenant, id, stateCipher, capturedAt, JSON.stringify(cookieDomains)],
+    );
+    return { ...current, capturedAt, cookieDomains, updatedAt: capturedAt };
+  }
+
+  async loadState(tenant: string, id: string): Promise<string | undefined> {
+    const { rows } = await this.client.query<{ state_cipher: string | null }>(
+      "SELECT state_cipher FROM everdict_browser_profiles WHERE tenant=$1 AND id=$2",
+      [tenant, id],
+    );
+    return rows[0]?.state_cipher ?? undefined;
   }
 }

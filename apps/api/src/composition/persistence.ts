@@ -120,6 +120,7 @@ export interface Persistence {
   callbackStore: CallbackStore;
   usageStore: UsageStore; // durable meter-only billing usage — the in-memory UsageMeter write-throughs + hydrates from it
   budgetStore: BudgetStore; // durable per-tenant budget (usage + limits) — the in-memory BudgetTracker write-throughs + hydrates from it
+  cipher: SecretCipher; // at-rest AES-256-GCM cipher (EVERDICT_SECRETS_KEY KEK) — shared by secrets + the browser-profile login blob (S3)
 }
 
 // At-rest encryption KEK: use EVERDICT_SECRETS_KEY (base64 32B) if present, otherwise auto-generate an ephemeral key
@@ -171,6 +172,7 @@ export async function makePersistence(): Promise<Persistence> {
       callbackStore: new InMemoryCallbackStore(),
       usageStore: new InMemoryUsageStore(),
       budgetStore: new InMemoryBudgetStore(),
+      cipher,
     };
   }
   const client = sqlClient(makePool(url));
@@ -205,5 +207,6 @@ export async function makePersistence(): Promise<Persistence> {
     callbackStore: new PgCallbackStore(client),
     usageStore: new PgUsageStore(client),
     budgetStore: new PgBudgetStore(client),
+    cipher,
   };
 }

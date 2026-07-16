@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import type { z } from "zod";
 import { type ServerDeps, resolvePrincipal, sendError } from "../route-context.js";
 import { browserProfileDocs } from "./browser-profile.docs.js";
+import { CaptureBrowserProfileBodySchema } from "./request/capture-browser-profile.js";
 import { CreateBrowserProfileBodySchema } from "./request/create-browser-profile.js";
 import { UpdateBrowserProfileBodySchema } from "./request/update-browser-profile.js";
 
@@ -97,6 +98,37 @@ export function registerBrowserProfileRoutes(app: FastifyInstance, deps: ServerD
       try {
         await deps.browserProfileService.remove(principal.workspace, req.params.id, principal.subject);
         return reply.code(204).send();
+      } catch (err) {
+        return sendError(reply, err);
+      }
+    },
+  );
+
+  // Capture the caller's active session login (cookies) into this profile (browser-profiles S3). Needs the interactive
+  // browser session subsystem (env-gated); 404 when it isn't configured.
+  app.post<{ Params: { id: string } }>(
+    "/browser-profiles/:id/capture",
+    { schema: browserProfileDocs.capture },
+    async (req, reply) => {
+      if (!deps.browserProfileCaptureService)
+        return reply.code(404).send({ code: "NOT_FOUND", message: "browser profile capture not configured" });
+      const principal = await resolvePrincipal(req, reply, deps);
+      if (!principal) return reply;
+      let body: z.infer<typeof CaptureBrowserProfileBodySchema>;
+      try {
+        body = CaptureBrowserProfileBodySchema.parse(req.body);
+      } catch (err) {
+        return reply.code(400).send({ code: "BAD_REQUEST", message: (err as Error).message });
+      }
+      try {
+        return reply.send(
+          await deps.browserProfileCaptureService.captureInto({
+            tenant: principal.workspace,
+            profileId: req.params.id,
+            sessionId: body.sessionId,
+            subject: principal.subject,
+          }),
+        );
       } catch (err) {
         return sendError(reply, err);
       }

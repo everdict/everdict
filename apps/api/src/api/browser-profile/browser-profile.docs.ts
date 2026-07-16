@@ -2,6 +2,7 @@ import { BrowserProfileRecordSchema } from "@everdict/contracts";
 import type { FastifySchema } from "fastify";
 import { z } from "zod";
 import { errorResponses, toJsonSchema } from "../openapi.js";
+import { CaptureBrowserProfileBodySchema } from "./request/capture-browser-profile.js";
 import { CreateBrowserProfileBodySchema } from "./request/create-browser-profile.js";
 import { UpdateBrowserProfileBodySchema } from "./request/update-browser-profile.js";
 
@@ -55,12 +56,26 @@ const docs = {
   },
   remove: {
     summary: "Delete a saved browser profile",
-    description: "Deletes the profile (and, from S3 on, its stored login blob). Owner-only (404 otherwise).",
+    description: "Deletes the profile and its stored login blob. Owner-only (404 otherwise).",
     tags: ["browser-profile"],
     params: profileIdParams,
     response: {
       204: { description: "Deleted" },
       ...errorResponses(401, 404),
+    },
+  },
+  capture: {
+    summary: "Capture a session's login into a profile",
+    description:
+      "Reads the cookies from the caller's active interactive browser session (S1) and stores them (encrypted) on " +
+      "this profile, refreshing cookieDomains + capturedAt. Owner-only for both the profile and the session. 404 " +
+      "when the profile isn't the caller's / not configured; 400 when the session isn't active.",
+    tags: ["browser-profile"],
+    params: profileIdParams,
+    body: toJsonSchema(CaptureBrowserProfileBodySchema),
+    response: {
+      200: { description: "The updated profile (capturedAt set)", ...profileResponse },
+      ...errorResponses(400, 401, 404),
     },
   },
 } satisfies Record<string, FastifySchema>;

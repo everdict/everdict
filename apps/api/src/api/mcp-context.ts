@@ -37,6 +37,7 @@ import type { BudgetAdmin } from "../common/budget-tracker.js";
 import type { LiveFrameStore } from "../common/live-frame-store.js";
 import type { TicketStore } from "../common/ticket-store.js";
 import type { BenchmarkService } from "../core/benchmark/benchmark-service.js";
+import type { BrowserProfileCaptureService } from "../core/browser-profile/browser-profile-capture-service.js";
 import type { BrowserSessionService } from "../core/browser-session/browser-session-service.js";
 import type { BundleService } from "../core/bundle/bundle-service.js";
 import type { JudgePreviewService } from "../core/judge/judge-preview-service.js";
@@ -92,6 +93,7 @@ export interface McpDeps {
   browserSessionService?: BrowserSessionService; // interactive browser sessions (browser-profiles S1) — self-scoped
   browserTickets?: TicketStore; // WS ticket store for interactive browser sessions
   browserProfileService?: BrowserProfileService; // saved authenticated browser profiles (browser-profiles S2) — self-scoped
+  browserProfileCaptureService?: BrowserProfileCaptureService; // capture a session login into a profile (browser-profiles S3)
 }
 
 // The per-session context a resource's registerXTools(server, ctx) receives — the MCP twin of route-context.

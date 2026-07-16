@@ -39,6 +39,7 @@ export class BrowserProfileService {
       tenant: input.tenant,
       name: input.name,
       cookieDomains: input.cookieDomains ?? [],
+      capturedAt: null, // no login captured yet — S3 sets it via saveState
       createdBy: input.createdBy,
       createdAt: ts,
       updatedAt: ts,

@@ -10,6 +10,9 @@ export const BrowserProfileRecordSchema = z.object({
   name: z.string(),
   // Domains this profile logs into — declared by the owner; refined from the captured cookies in S3.
   cookieDomains: z.array(z.string()),
+  // When the login (cookies) was last captured into this profile (S3), or null if none captured yet. Display only —
+  // the encrypted storageState blob itself is server-only and never crosses the wire.
+  capturedAt: z.string().nullable(),
   createdBy: z.string(), // owner subject (self-scoped)
   createdAt: z.string(),
   updatedAt: z.string(),

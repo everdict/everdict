@@ -25,6 +25,7 @@ import {
   buildView,
 } from "./composition/services.js";
 import { buildWorkspace } from "./composition/workspace.js";
+import { BrowserProfileCaptureService } from "./core/browser-profile/browser-profile-capture-service.js";
 import { BrowserSessionService } from "./core/browser-session/browser-session-service.js";
 import { buildPlacementPreflight } from "./core/execution/placement-preflight.js";
 import { JudgePreviewService } from "./core/judge/judge-preview-service.js";
@@ -68,6 +69,7 @@ async function main(): Promise<void> {
     callbackStore,
     usageStore,
     budgetStore,
+    cipher,
   } = await makePersistence();
 
   // The schedule↔membership↔scorecard construction cycle: MembershipService's member-removal hook needs the
@@ -256,10 +258,16 @@ async function main(): Promise<void> {
     ? new BrowserSessionService(new LocalChromeProvisioner(browserChromeBin ? { binary: browserChromeBin } : {}))
     : undefined;
   if (browserSessionService) setInterval(() => browserSessionService.sweep(), 60_000).unref(); // TTL teardown
+  // Capture a session login into a profile (browser-profiles S3) — only when interactive sessions exist (it needs
+  // a session's reachable CDP base). Encrypts the storageState blob with the shared at-rest cipher.
+  const browserProfileCaptureService = browserSessionService
+    ? new BrowserProfileCaptureService({ store: browserProfileStore, sessions: browserSessionService, cipher })
+    : undefined;
   const app = buildServer({
     terminalTickets,
     ...(browserSessionService && browserTickets ? { browserSessionService, browserTickets } : {}),
     browserProfileService, // saved authenticated browser profiles (browser-profiles S2) — personal metadata CRUD
+    ...(browserProfileCaptureService ? { browserProfileCaptureService } : {}), // S3 capture (needs browser sessions)
     liveFrames, // live-screen frames pushed by self-hosted runners (report_case_screen MCP tool)
     service,
     scorecardService,

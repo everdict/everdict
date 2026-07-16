@@ -1,6 +1,6 @@
 # Authenticated browser profiles — a real interactive remote browser, cookies reused in eval (design)
 
-> **Status: S0 + S1 (transport + web canvas) + S2 (profile entity) SHIPPED. S3+ in slices.** S0 = the interactive live browser
+> **Status: S0 + S1 (transport + web canvas) + S2 (profile entity) + S3 (cookie capture) SHIPPED. S4+ in slices.** S0 = the interactive live browser
 > session primitive (`openBrowserSession`, `@everdict/topology`, `a168b5b`): CDP screencast (frames OUT, each
 > acked) + input (mouse/keyboard/navigate IN), transport-injectable, live-proven against real Chrome via
 > `scripts/live/interactive-browser.mjs`. **S1 productizes the transport end-to-end**: a personal / self-scoped
@@ -88,8 +88,14 @@ short-lived container/pod per active login; self-hosted = the user's own local b
   updatedAt }`. Owner = subject (self-scoped, like connected accounts); optional workspace share later.
 - **`BrowserProfileStore`** (`db`): the metadata; the `storageState` blob lives in `storage` (S3), **encrypted**
   (`secret-cipher`), keyed `(workspace|subject, profileId)`.
-- **Capture** (S3): on "save", CDP `Network.getAllCookies` (+ localStorage via `Runtime.evaluate` / `Storage`) →
-  Playwright-style `storageState` → encrypt → store; record `cookieDomains`.
+- **Capture** (S3): ✅ SHIPPED. `captureStorageState(cdpBase)` (`@everdict/topology`) reads the session's cookies
+  via CDP `Network.getAllCookies` → a Playwright-style `storageState`; the apps/api `BrowserProfileCaptureService`
+  (`core/browser-profile`) encrypts it (AES-256-GCM, the shared `SecretCipher`) → `store.saveState` persists the
+  opaque blob (`state_cipher`, migration `0059`) + `capturedAt` + the refined `cookieDomains`. Owner-gated on both
+  the profile and the session; the blob is **server-only** (`loadState` reads it back for S5). Route
+  `POST /browser-profiles/:id/capture {sessionId}` + MCP `capture_browser_profile`. Web: "Save login" on the
+  interactive-session panel (create profile → capture) + a `capturedAt` badge on the profiles list. (localStorage
+  capture via `Runtime.evaluate` is deferred — cookies are the login material for most sites.)
 - **Proxy / geo** (S4): a `ProxyProvider` (BYO proxy pool registered per workspace, like image-registries/trace
   sinks; country → proxy URL + auth) → `--proxy-server` on both the login browser and eval browsers.
 - **Injection** (S5): a browser eval whose case/target references `profileId` → at `provisionBrowserEnv`, **before
@@ -120,7 +126,7 @@ short-lived container/pod per active login; self-hosted = the user's own local b
    `apps/web` `features/manage-browser-profiles` manager (Settings › Account › Browser profiles: create/rename/delete)
    + `entities/browser-profile` drift-guarded schema + ko/en i18n. A profile is a login placeholder until S3 captures
    cookies into it.
-5. **S3 — cookie capture** on session save (`Network.getAllCookies` → storageState → encrypt → store).
+5. **S3 — cookie capture** on session save (`Network.getAllCookies` → storageState → encrypt → store). ✅ SHIPPED.
 6. **S4 — proxy / geo** (`ProxyProvider`, `--proxy-server`).
 7. **S5 — injection into eval** (seed cookies + proxy before the agent connects).
 8. **S6 — managed K8s reachability** (port-forward/ingress to the pod CDP) — lifts S1 from local-Docker to the SaaS.

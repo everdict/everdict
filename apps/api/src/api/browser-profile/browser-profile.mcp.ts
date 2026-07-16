@@ -75,4 +75,31 @@ export function registerBrowserProfileTools(server: McpServer, ctx: McpToolConte
         return ok({ ok: true });
       }),
   );
+
+  if (deps.browserProfileCaptureService) {
+    const capture = deps.browserProfileCaptureService;
+    server.registerTool(
+      "capture_browser_profile",
+      {
+        description:
+          "Capture the cookies of my active interactive browser session into a profile (browser-profiles S3) — " +
+          "stores the login encrypted so it can be reused in browser evals. Owner-only.",
+        inputSchema: {
+          id: z.string().describe("Browser profile id"),
+          sessionId: z.string().describe("The interactive browser session to capture cookies from"),
+        },
+      },
+      ({ id, sessionId }) =>
+        plain(async () =>
+          ok(
+            await capture.captureInto({
+              tenant: principal.workspace,
+              profileId: id,
+              sessionId,
+              subject: principal.subject,
+            }),
+          ),
+        ),
+    );
+  }
 }

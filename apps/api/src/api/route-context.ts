@@ -95,6 +95,7 @@ import {
   BenchmarkPreviewBodySchema,
   type BenchmarkService,
 } from "../core/benchmark/benchmark-service.js";
+import type { BrowserProfileCaptureService } from "../core/browser-profile/browser-profile-capture-service.js";
 import type { BrowserSessionService } from "../core/browser-session/browser-session-service.js";
 import { BundleSchema, type BundleService, requiredActionsForBundle } from "../core/bundle/bundle-service.js";
 import type { JudgePreviewService } from "../core/judge/judge-preview-service.js";
@@ -168,6 +169,7 @@ export interface ServerDeps {
   browserSessionService?: BrowserSessionService; // interactive browser sessions (browser-profiles S1) — self-scoped (routes disabled if absent)
   browserTickets?: TicketStore; // WS ticket store for interactive browser sessions (browser-session WS disabled if absent)
   browserProfileService?: BrowserProfileService; // saved authenticated browser profiles (browser-profiles S2) — self-scoped (routes disabled if absent)
+  browserProfileCaptureService?: BrowserProfileCaptureService; // capture a session login into a profile (browser-profiles S3) — needs browser sessions (route disabled if absent)
 }
 
 // Resolve identity (subject + default workspace + roles): Bearer (JWT or ak_) → Authenticator. Unauthenticated dev = header workspace + admin.
