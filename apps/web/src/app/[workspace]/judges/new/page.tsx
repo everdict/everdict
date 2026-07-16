@@ -6,6 +6,7 @@ import { RegisterJudgeForm } from '@/features/register-judge'
 import { modelSpecSchema, modelsSchema } from '@/entities/model'
 import { rubricsSchema } from '@/entities/rubric'
 import { runtimesSchema } from '@/entities/runtime'
+import { traceSourcesResponseSchema, type TraceSourceConfig } from '@/entities/trace-source'
 import { can } from '@/shared/auth/can'
 import { currentPrincipal } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
@@ -58,6 +59,19 @@ export default async function NewJudgePage({ params }: { params: Promise<{ works
     models = []
   }
 
+  // For the preview panel's sample-trace picker — the workspace's registered trace sources + per-harness selections
+  // (used to reverse-look-up which harness a conversion mapping should save onto). Empty = manual JSON paste only.
+  let sources: TraceSourceConfig[] = []
+  let assignments: Record<string, string> = {}
+  try {
+    const roster = traceSourcesResponseSchema.parse(await controlPlane.listTraceSources(ctx))
+    sources = roster.sources
+    assignments = roster.assignments
+  } catch {
+    sources = []
+    assignments = {}
+  }
+
   return (
     <div className="space-y-6">
       <div className="space-y-3">
@@ -77,6 +91,8 @@ export default async function NewJudgePage({ params }: { params: Promise<{ works
             runtimes={runtimes}
             rubrics={rubrics}
             models={models}
+            sources={sources}
+            assignments={assignments}
           />
         </Card>
       ) : (

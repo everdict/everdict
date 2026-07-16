@@ -7,6 +7,7 @@ import { CheckCircle2, Loader2, ShieldCheck } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 import { toast } from 'sonner'
 
+import type { TraceSourceConfig } from '@/entities/trace-source'
 import { cn } from '@/shared/lib/utils'
 import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
@@ -84,11 +85,15 @@ export function RegisterJudgeForm({
   runtimes = [],
   rubrics = [],
   models = [],
+  sources = [],
+  assignments = {},
 }: {
   workspace: string
   runtimes?: { id: string }[]
   rubrics?: { id: string; owner: string }[]
   models?: { id: string; provider: string; model: string }[]
+  sources?: TraceSourceConfig[]
+  assignments?: Record<string, string>
 }) {
   const router = useRouter()
   const t = useTranslations('registerJudge')
@@ -431,7 +436,7 @@ export function RegisterJudgeForm({
       </div>
 
       <div className="border-t border-border pt-5">
-        <JudgePreviewPanel getSpec={buildSpec} />
+        <JudgePreviewPanel getSpec={buildSpec} sources={sources} assignments={assignments} />
       </div>
 
       <div className="flex items-center gap-2.5 border-t border-border pt-5">
