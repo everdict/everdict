@@ -34,6 +34,7 @@ import {
   type DatasetProvenance,
   type DatasetSummary,
 } from '@/entities/dataset'
+import { harnessesSchema } from '@/entities/harness'
 import { membersSchema } from '@/entities/member'
 import { scorecardsSchema } from '@/entities/scorecard'
 import { can } from '@/shared/auth/can'
@@ -98,7 +99,15 @@ export default async function DatasetDetailPage({
     .listMembers(ctx)
     .then((r) => membersSchema.parse(r))
     .catch(() => [])
-  const relation = buildDatasetRelations(scorecards)[id]
+  // Live harness ids (soft-deleted tombstones excluded by GET /harnesses) — so the "evaluated harnesses" chips
+  // don't surface a harness that was retired after the scorecard ran (the scorecard record keeps a historical ref).
+  // On fetch failure fall back to undefined (no filtering) rather than an empty set, so a transient error doesn't
+  // blank out every chip.
+  const liveHarnessIds = await controlPlane
+    .listHarnesses(ctx)
+    .then((r) => new Set(harnessesSchema.parse(r).map((h) => h.id)))
+    .catch(() => undefined)
+  const relation = buildDatasetRelations(scorecards, liveHarnessIds)[id]
   const currentWorkspace = principal?.workspace ?? workspace
   // Creator — profile name+avatar (if any). Seed/_shared are shown as first-party (no avatar).
   const author = (() => {

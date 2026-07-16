@@ -4,6 +4,7 @@ import { getTranslations } from 'next-intl/server'
 
 import { DatasetList } from '@/widgets/dataset-list'
 import { datasetsSchema } from '@/entities/dataset'
+import { harnessesSchema } from '@/entities/harness'
 import { membersSchema } from '@/entities/member'
 import { scorecardsSchema } from '@/entities/scorecard'
 import { can } from '@/shared/auth/can'
@@ -39,8 +40,15 @@ export default async function DatasetsPage({ params }: { params: Promise<{ works
     .listMembers(ctx)
     .then((r) => membersSchema.parse(r))
     .catch(() => [])
+  // Live harness ids (soft-deleted tombstones excluded by GET /harnesses) — keep retired harnesses out of the
+  // per-dataset "related harnesses" chips, matching the detail view. On fetch failure fall back to undefined
+  // (no filtering) rather than an empty set, so a transient error doesn't blank out every chip.
+  const liveHarnessIds = await controlPlane
+    .listHarnesses(ctx)
+    .then((r) => new Set(harnessesSchema.parse(r).map((h) => h.id)))
+    .catch(() => undefined)
 
-  const relations = buildDatasetRelations(scorecards)
+  const relations = buildDatasetRelations(scorecards, liveHarnessIds)
   // For displaying the creator — subject → name + avatar (if any). Name is profile name > email local part > subject fallback.
   const authors: Record<string, { name: string; avatarUrl?: string }> = {}
   for (const m of members)
