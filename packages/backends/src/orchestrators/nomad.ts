@@ -154,8 +154,12 @@ export function summarizeAllocFailure(events: NomadTaskEvent[]): string | undefi
 
 // --- Runtime inspection (read-only cluster view) parse helpers — pure, so they unit-test without a live Nomad. ---
 
+// How many nodes we fetch per-node detail (/v1/node/:id, for total resources) for — bounds the N extra calls on a big cluster.
+const NODE_DETAIL_CAP = 30;
+
 // A Nomad node list stub — only the fields inspect reads (all optional; the list endpoint omits full resources).
 export interface NomadNodeStub {
+  ID?: string;
   Name?: string;
   Status?: string; // "ready" | "down" | "initializing" | "disconnected"
   Datacenter?: string;
@@ -176,6 +180,22 @@ export function nomadNodeToInspect(n: NomadNodeStub): InspectNode {
   };
 }
 
+// /v1/node/:id → the node's total schedulable resources (CPU MHz, memory MiB). Best-effort: an unparseable/absent
+// body yields {}. Feeds the per-node usage bar's denominator.
+export function nomadNodeResources(text: string): { cpuTotal?: number; memoryMbTotal?: number } {
+  try {
+    const d = JSON.parse(text) as { NodeResources?: { Cpu?: { CpuShares?: number }; Memory?: { MemoryMB?: number } } };
+    const cpu = d.NodeResources?.Cpu?.CpuShares;
+    const mem = d.NodeResources?.Memory?.MemoryMB;
+    return {
+      ...(typeof cpu === "number" ? { cpuTotal: cpu } : {}),
+      ...(typeof mem === "number" ? { memoryMbTotal: mem } : {}),
+    };
+  } catch {
+    return {};
+  }
+}
+
 // A Nomad alloc list stub — inspect reads these to list the live everdict workload.
 export interface NomadAllocStub {
   ID?: string;
@@ -184,6 +204,21 @@ export interface NomadAllocStub {
   ClientStatus?: string; // "running" | "pending" | "complete" | "failed" | ...
   NodeName?: string;
   CreateTime?: number; // int64 NANOSECONDS since epoch
+  // Summed across the alloc's tasks (CPU MHz + memory MiB) — the alloc's resource ask, for the per-node usage bar.
+  AllocatedResources?: { Tasks?: Record<string, { Cpu?: { CpuShares?: number }; Memory?: { MemoryMB?: number } }> };
+}
+
+// Sum an alloc's per-task CPU (MHz) + memory (MiB). undefined when the list stub omits AllocatedResources.
+export function nomadAllocResources(a: NomadAllocStub): { cpu?: number; memoryMb?: number } {
+  const tasks = a.AllocatedResources?.Tasks;
+  if (!tasks) return {};
+  let cpu = 0;
+  let memoryMb = 0;
+  for (const t of Object.values(tasks)) {
+    cpu += t.Cpu?.CpuShares ?? 0;
+    memoryMb += t.Memory?.MemoryMB ?? 0;
+  }
+  return { ...(cpu > 0 ? { cpu } : {}), ...(memoryMb > 0 ? { memoryMb } : {}) };
 }
 
 // Alloc age in whole seconds. CreateTime is nanoseconds; nowMs is Date.now(). undefined when unknown/nonsensical.
@@ -437,7 +472,21 @@ export class NomadBackend implements Backend, Recoverable, Observable, Shellable
     try {
       const res = await this.http.request("GET", "/v1/nodes");
       if (res.status < 300) {
-        const items = (JSON.parse(res.text) as NomadNodeStub[]).map(nomadNodeToInspect);
+        const stubs = JSON.parse(res.text) as NomadNodeStub[];
+        const items: InspectNode[] = [];
+        for (const [i, stub] of stubs.entries()) {
+          const node = nomadNodeToInspect(stub);
+          // Per-node total resources (for the usage bar) — one extra call per node, capped so a big cluster stays bounded.
+          if (stub.ID && i < NODE_DETAIL_CAP) {
+            try {
+              const d = await this.http.request("GET", `/v1/node/${encodeURIComponent(stub.ID)}`);
+              if (d.status < 300) Object.assign(node, nomadNodeResources(d.text));
+            } catch {
+              // omit this node's totals
+            }
+          }
+          items.push(node);
+        }
         nodes = { total: items.length, ready: items.filter((n) => n.ready).length, items };
         const dcs = [...new Set(items.map((n) => n.datacenter).filter((d): d is string => Boolean(d)))];
         if (dcs.length > 0) cluster = { ...cluster, datacenters: dcs };
@@ -478,6 +527,7 @@ export class NomadBackend implements Backend, Recoverable, Observable, Shellable
               role: classifyWorkloadRole(name),
               ...(age !== undefined ? { ageSeconds: age } : {}),
               ...(a.NodeName ? { node: a.NodeName } : {}),
+              ...nomadAllocResources(a),
             };
           });
         if (rows.length > WORKLOAD_CAP) warnings.push(`workload truncated to ${WORKLOAD_CAP} of ${rows.length} units`);

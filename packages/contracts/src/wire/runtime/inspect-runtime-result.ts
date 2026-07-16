@@ -17,6 +17,10 @@ export const InspectNodeSchema = z.object({
   // Whether the node accepts new placements (Nomad eligibility / k8s !unschedulable). false = cordoned. Drives the
   // cordon/uncordon toggle. Absent when the list endpoint doesn't carry it.
   schedulable: z.boolean().optional(),
+  // Total schedulable resources in the runtime's native unit (Nomad: CPU MHz; K8s: CPU millicores) / memory in MiB.
+  // The web draws a per-node usage bar (allocated = the sum of the workloads placed on this node / this total).
+  cpuTotal: z.number().optional(),
+  memoryMbTotal: z.number().optional(),
 });
 export type InspectNode = z.infer<typeof InspectNodeSchema>;
 
@@ -33,6 +37,10 @@ export const InspectWorkloadSchema = z.object({
   role: z
     .enum(["eval", "store", "other"])
     .describe("Classified from the name: an everdict eval job, a shared topology store, or other"),
+  // This unit's resource ask, same units as InspectNode (Nomad CPU MHz / K8s CPU millicores; memory MiB). Lets the
+  // web size each unit's block inside its node and sum the per-node allocation. Absent when the source omits it.
+  cpu: z.number().optional(),
+  memoryMb: z.number().optional(),
 });
 export type InspectWorkload = z.infer<typeof InspectWorkloadSchema>;
 

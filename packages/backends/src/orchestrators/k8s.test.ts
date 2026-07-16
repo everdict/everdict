@@ -9,7 +9,9 @@ import {
   type K8sApi,
   K8sBackend,
   buildK8sJob,
+  k8sCpuToMillicores,
   k8sJobName,
+  k8sMemToMiB,
   k8sRegistryAuthSecret,
   kubectlArgs,
   materializeKubeconfig,
@@ -585,5 +587,24 @@ describe("K8sBackend.reclaimable (destructive control)", () => {
     await backend.setNodeSchedulable("n1", false);
     await backend.setNodeSchedulable("n1", true);
     expect(control).toEqual(["cordon:n1", "uncordon:n1"]);
+  });
+});
+
+describe("k8s quantity parsers (pure)", () => {
+  it("k8sCpuToMillicores: cores, millicores, fractions", () => {
+    expect(k8sCpuToMillicores("4")).toBe(4000);
+    expect(k8sCpuToMillicores("3800m")).toBe(3800);
+    expect(k8sCpuToMillicores("0.5")).toBe(500);
+    expect(k8sCpuToMillicores(undefined)).toBeUndefined();
+    expect(k8sCpuToMillicores("abc")).toBeUndefined();
+  });
+  it("k8sMemToMiB: binary + decimal + bytes suffixes → MiB", () => {
+    expect(k8sMemToMiB("8Gi")).toBe(8192);
+    expect(k8sMemToMiB("512Mi")).toBe(512);
+    expect(k8sMemToMiB("1048576Ki")).toBe(1024);
+    expect(k8sMemToMiB("1G")).toBe(954); // 1e9 bytes / 1048576 = 953.67 → 954
+    expect(k8sMemToMiB("1048576")).toBe(1); // bytes → 1 MiB
+    expect(k8sMemToMiB(undefined)).toBeUndefined();
+    expect(k8sMemToMiB("nope")).toBeUndefined();
   });
 });

@@ -12,6 +12,8 @@ import {
   eventsIndicateOom,
   fetchHttp,
   nomadAllocAgeSeconds,
+  nomadAllocResources,
+  nomadNodeResources,
   nomadNodeToInspect,
   parseNomadSelf,
   streamHandleFor,
@@ -937,5 +939,29 @@ describe("NomadBackend.reclaimable (destructive control)", () => {
     await backend.setNodeSchedulable("n1", false);
     expect(posts[0]?.path).toBe("/v1/node/node-uuid/eligibility");
     expect(posts[0]?.body).toEqual({ NodeID: "node-uuid", Eligibility: "ineligible" });
+  });
+});
+
+describe("nomad resource parse helpers (pure)", () => {
+  it("nomadNodeResources reads NodeResources CPU MHz + memory MiB", () => {
+    expect(
+      nomadNodeResources(JSON.stringify({ NodeResources: { Cpu: { CpuShares: 8000 }, Memory: { MemoryMB: 16000 } } })),
+    ).toEqual({ cpuTotal: 8000, memoryMbTotal: 16000 });
+    expect(nomadNodeResources("not json")).toEqual({});
+    expect(nomadNodeResources(JSON.stringify({}))).toEqual({});
+  });
+
+  it("nomadAllocResources sums CPU + memory across tasks (omits zero)", () => {
+    expect(
+      nomadAllocResources({
+        AllocatedResources: {
+          Tasks: {
+            agent: { Cpu: { CpuShares: 500 }, Memory: { MemoryMB: 1024 } },
+            side: { Cpu: { CpuShares: 100 }, Memory: { MemoryMB: 256 } },
+          },
+        },
+      }),
+    ).toEqual({ cpu: 600, memoryMb: 1280 });
+    expect(nomadAllocResources({})).toEqual({}); // no AllocatedResources → omitted
   });
 });

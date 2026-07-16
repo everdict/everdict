@@ -53,10 +53,28 @@ export interface K8sApi {
   countActiveJobs(): Promise<number | undefined>; // capacity probe (in-flight app=everdict jobs across all namespaces)
   serverVersion(): Promise<string>; // connection test — API server /version (gitVersion). Throws on reachability/auth failure.
   // --- Read-only inspection (runtime detail screen). Each returns undefined when the query itself fails (best-effort). ---
-  inspectNodes(): Promise<Array<{ name: string; ready: boolean; status: string; schedulable?: boolean }> | undefined>; // cluster composition
+  inspectNodes(): Promise<
+    | Array<{
+        name: string;
+        ready: boolean;
+        status: string;
+        schedulable?: boolean;
+        cpuTotal?: number;
+        memoryMbTotal?: number;
+      }>
+    | undefined
+  >; // cluster composition + allocatable resources
   inspectWorkload(): Promise<
-    Array<{ name: string; status: string; node?: string; creationTimestamp?: string }> | undefined
-  >; // live everdict pods (app=everdict), running/pending
+    | Array<{
+        name: string;
+        status: string;
+        node?: string;
+        creationTimestamp?: string;
+        cpu?: number;
+        memoryMb?: number;
+      }>
+    | undefined
+  >; // live everdict pods (app=everdict), running/pending, with their resource requests
   inspectStores(namespace: string): Promise<Array<{ name: string; port?: number }> | undefined>; // pool shared-store Services in the pool namespace
   // --- Destructive control (runtimes:control). Best-effort/idempotent — acting on a gone target is a no-op. ---
   stopWorkloadJob(name: string): Promise<void>; // find the everdict job named `name` across namespaces and delete it
@@ -246,15 +264,22 @@ export function kubectlApi(
         const items = (JSON.parse(res.stdout).items ?? []) as Array<{
           metadata?: { name?: string };
           spec?: { unschedulable?: boolean };
-          status?: { conditions?: Array<{ type?: string; status?: string }> };
+          status?: {
+            conditions?: Array<{ type?: string; status?: string }>;
+            allocatable?: { cpu?: string; memory?: string };
+          };
         }>;
         return items.map((n) => {
           const ready = (n.status?.conditions ?? []).some((c) => c.type === "Ready" && c.status === "True");
+          const cpuTotal = k8sCpuToMillicores(n.status?.allocatable?.cpu);
+          const memoryMbTotal = k8sMemToMiB(n.status?.allocatable?.memory);
           return {
             name: n.metadata?.name ?? "node",
             ready,
             status: ready ? "Ready" : "NotReady",
             schedulable: !n.spec?.unschedulable,
+            ...(cpuTotal !== undefined ? { cpuTotal } : {}),
+            ...(memoryMbTotal !== undefined ? { memoryMbTotal } : {}),
           };
         });
       } catch {
@@ -268,18 +293,32 @@ export function kubectlApi(
       try {
         const items = (JSON.parse(res.stdout).items ?? []) as Array<{
           metadata?: { name?: string; labels?: Record<string, string>; creationTimestamp?: string };
-          spec?: { nodeName?: string };
+          spec?: {
+            nodeName?: string;
+            containers?: Array<{ resources?: { requests?: { cpu?: string; memory?: string } } }>;
+          };
           status?: { phase?: string };
         }>;
         return items
           .filter((p) => p.status?.phase === "Running" || p.status?.phase === "Pending")
-          .map((p) => ({
-            // The job-name label reads more meaningfully than the pod's random suffix; fall back to the pod name.
-            name: p.metadata?.labels?.["job-name"] ?? p.metadata?.name ?? "everdict-pod",
-            status: p.status?.phase ?? "Unknown",
-            ...(p.spec?.nodeName ? { node: p.spec.nodeName } : {}),
-            ...(p.metadata?.creationTimestamp ? { creationTimestamp: p.metadata.creationTimestamp } : {}),
-          }));
+          .map((p) => {
+            // Sum the pod's container requests (millicores + MiB) — its resource ask, for the per-node usage bar.
+            let cpu = 0;
+            let memoryMb = 0;
+            for (const c of p.spec?.containers ?? []) {
+              cpu += k8sCpuToMillicores(c.resources?.requests?.cpu) ?? 0;
+              memoryMb += k8sMemToMiB(c.resources?.requests?.memory) ?? 0;
+            }
+            return {
+              // The job-name label reads more meaningfully than the pod's random suffix; fall back to the pod name.
+              name: p.metadata?.labels?.["job-name"] ?? p.metadata?.name ?? "everdict-pod",
+              status: p.status?.phase ?? "Unknown",
+              ...(p.spec?.nodeName ? { node: p.spec.nodeName } : {}),
+              ...(p.metadata?.creationTimestamp ? { creationTimestamp: p.metadata.creationTimestamp } : {}),
+              ...(cpu > 0 ? { cpu } : {}),
+              ...(memoryMb > 0 ? { memoryMb } : {}),
+            };
+          });
       } catch {
         return undefined;
       }
@@ -416,6 +455,42 @@ export function k8sAgeSeconds(creationTimestamp: string | undefined, nowMs: numb
   if (Number.isNaN(created)) return undefined;
   const seconds = Math.round((nowMs - created) / 1000);
   return seconds >= 0 ? seconds : undefined;
+}
+
+// K8s CPU quantity → millicores ("4"→4000, "3800m"→3800, "0.5"→500). undefined when absent/unparseable.
+export function k8sCpuToMillicores(q: string | undefined): number | undefined {
+  if (!q) return undefined;
+  const s = q.trim();
+  if (s.endsWith("m")) {
+    const n = Number(s.slice(0, -1));
+    return Number.isFinite(n) ? Math.round(n) : undefined;
+  }
+  const n = Number(s);
+  return Number.isFinite(n) ? Math.round(n * 1000) : undefined;
+}
+
+// K8s memory quantity → MiB ("8Gi"→8192, "512Mi"→512, "8000000Ki"→7812, "1G"→953, bytes→/1048576). undefined when unparseable.
+export function k8sMemToMiB(q: string | undefined): number | undefined {
+  if (!q) return undefined;
+  const m = q.trim().match(/^([0-9.]+)([A-Za-z]*)$/);
+  if (!m) return undefined;
+  const val = Number(m[1]);
+  if (!Number.isFinite(val)) return undefined;
+  const unit = m[2] ?? "";
+  const MiB = 1024 * 1024;
+  const factor: Record<string, number> = {
+    "": 1 / MiB, // bytes
+    Ki: 1024 / MiB,
+    Mi: 1,
+    Gi: 1024,
+    Ti: 1024 * 1024,
+    K: 1000 / MiB,
+    M: 1e6 / MiB,
+    G: 1e9 / MiB,
+    T: 1e12 / MiB,
+  };
+  const f = factor[unit];
+  return f !== undefined ? Math.round(val * f) : undefined;
 }
 
 export function k8sJobName(job: AgentJob, suffix?: string): string {
@@ -726,6 +801,8 @@ export class K8sBackend implements Backend, Recoverable, Observable, Probeable, 
               role: classifyWorkloadRole(p.name),
               ...(age !== undefined ? { ageSeconds: age } : {}),
               ...(p.node ? { node: p.node } : {}),
+              ...(p.cpu !== undefined ? { cpu: p.cpu } : {}),
+              ...(p.memoryMb !== undefined ? { memoryMb: p.memoryMb } : {}),
             };
           });
           if (rows.length > WORKLOAD_CAP)
