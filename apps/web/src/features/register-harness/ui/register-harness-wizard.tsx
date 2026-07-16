@@ -8,6 +8,7 @@ import { useTranslations } from 'next-intl'
 
 import { TopologyGraph } from '@/features/inspect-harness'
 import type { HarnessSpec } from '@/entities/harness'
+import { TraceSourceFields } from '@/entities/trace-source'
 import { cn } from '@/shared/lib/utils'
 import { Badge } from '@/shared/ui/badge'
 import { Button } from '@/shared/ui/button'
@@ -550,33 +551,10 @@ export function TemplateForm({
               Trace source
               <InfoTip content={t('traceSourceTip')} />
             </h3>
-            <div className="grid grid-cols-3 gap-2.5">
-              <div className="space-y-1">
-                <span className="flex items-center gap-1">
-                  <span className="text-[11px] font-[510] text-muted-foreground">kind</span>
-                  <InfoTip content={t('traceKindTip')} />
-                </span>
-                <Combobox
-                  value={s.traceKind}
-                  onChange={(v) => set({ traceKind: v })}
-                  options={[
-                    { value: 'mlflow', description: t('traceMlflowDesc') },
-                    { value: 'otel', description: 'OpenTelemetry' },
-                  ]}
-                  className="w-full"
-                  aria-label="trace source kind"
-                />
-              </div>
-              <div className="col-span-2">
-                <LabeledInput
-                  label="endpoint"
-                  tip={t('traceEndpointTip')}
-                  value={s.traceEndpoint}
-                  onChange={(v) => set({ traceEndpoint: v })}
-                  placeholder="http://…:5501"
-                />
-              </div>
-            </div>
+            <TraceSourceFields
+              value={s.traceSource}
+              onChange={(patch) => set({ traceSource: { ...s.traceSource, ...patch } })}
+            />
             <SpanMappingEditor
               mapping={s.traceMapping}
               onChange={(traceMapping) => set({ traceMapping })}
@@ -1575,8 +1553,7 @@ function previewSpec(s: TemplateState): HarnessSpec {
       })),
     ...(s.targetEnabled ? { target: { kind: 'browser', observe: [] } } : {}),
     frontDoor: { service: s.frontDoorService, submit: s.frontDoorSubmit },
-    // The trace-kind combobox only offers otel/mlflow; narrow to the mirror's enum (default mlflow).
-    traceSource: { kind: s.traceKind === 'otel' ? 'otel' : 'mlflow', endpoint: s.traceEndpoint },
+    traceSource: { kind: s.traceSource.kind, endpoint: s.traceSource.endpoint },
   }
 }
 

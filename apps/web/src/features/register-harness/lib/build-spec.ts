@@ -1,6 +1,7 @@
 // Assemble wizard form state → HarnessTemplateSpec / HarnessInstanceSpec (pure). The control plane does the final schema/conflict validation.
 // Template (top-level category) = shape/slots (version not pinned); Instance = template reference + pins (slot→image/value).
 import type { HarnessTemplateSpec } from '@/entities/harness'
+import { type TraceSourceValue, traceSourceToSpec } from '@/entities/trace-source'
 
 export type Kind = 'process' | 'service' | 'command'
 
@@ -47,9 +48,9 @@ export interface TemplateState {
   frontDoorService: string
   frontDoorSubmit: string
   frontDoorTrace: string
-  traceKind: string
-  traceEndpoint: string
-  // Per-harness span→TraceEvent attribute overrides (otel/mlflow) — field name → comma-separated attribute keys.
+  // Trace source (5 kinds + endpoint + authSecret/correlate/service/project) — the shared subform's value shape.
+  traceSource: TraceSourceValue
+  // Per-harness span→TraceEvent attribute overrides — field name → comma-separated attribute keys.
   // Empty for a GenAI-convention harness; a non-standard harness maps its own keys. See SpanAttrMapping.
   traceMapping: Record<string, string>
   targetEnabled: boolean
@@ -63,8 +64,6 @@ export interface TemplateState {
   command: string
   model: string
   envRows: EnvRow[] // command env — literal or secret reference
-  cmdTraceKind: string // none | otel | mlflow
-  cmdTraceEndpoint: string
 }
 
 const csv = (s: string): string[] =>
@@ -217,10 +216,6 @@ export function buildTemplate(s: TemplateState): Record<string, unknown> {
       command: s.command,
       env: envRowsToSpec(s.envRows),
       ...(s.model.trim() ? { model: s.model } : {}),
-      trace:
-        s.cmdTraceKind === 'none' || !s.cmdTraceKind
-          ? { kind: 'none' }
-          : { kind: s.cmdTraceKind, endpoint: s.cmdTraceEndpoint },
     }
   }
   const spec: Record<string, unknown> = {
@@ -264,8 +259,7 @@ export function buildTemplate(s: TemplateState): Record<string, unknown> {
       ...(s.frontDoorTrace.trim() ? { trace: s.frontDoorTrace } : {}),
     },
     traceSource: {
-      kind: s.traceKind,
-      endpoint: s.traceEndpoint,
+      ...traceSourceToSpec(s.traceSource),
       ...(recordToMapping(s.traceMapping) ? { mapping: recordToMapping(s.traceMapping) } : {}),
     },
   }
@@ -314,8 +308,14 @@ export function templateStateFromSpec(t: HarnessTemplateSpec): TemplateState {
     frontDoorService: t.frontDoor?.service ?? '',
     frontDoorSubmit: t.frontDoor?.submit ?? '',
     frontDoorTrace: t.frontDoor?.trace ?? '',
-    traceKind: t.traceSource?.kind ?? 'mlflow',
-    traceEndpoint: t.traceSource?.endpoint ?? '',
+    traceSource: {
+      kind: t.traceSource?.kind ?? 'mlflow',
+      endpoint: t.traceSource?.endpoint ?? '',
+      authSecret: t.traceSource?.authSecret ?? '',
+      correlate: t.traceSource?.correlate ?? '',
+      service: t.traceSource?.service ?? '',
+      project: t.traceSource?.project ?? '',
+    },
     traceMapping: mappingToRecord(t.traceSource?.mapping),
     targetEnabled: t.target !== undefined,
     targetLifecycle: t.target?.lifecycle ?? 'per-case-instance',
@@ -327,8 +327,6 @@ export function templateStateFromSpec(t: HarnessTemplateSpec): TemplateState {
     command: t.command ?? '',
     model: t.model ?? '',
     envRows: envRowsFromSpec(env),
-    cmdTraceKind: t.trace?.kind ?? 'none',
-    cmdTraceEndpoint: t.trace?.endpoint ?? '',
   }
 }
 
@@ -489,8 +487,14 @@ export const INITIAL_TEMPLATE: TemplateState = {
   frontDoorService: 'agent-server',
   frontDoorSubmit: 'POST /runs',
   frontDoorTrace: '',
-  traceKind: 'mlflow',
-  traceEndpoint: '',
+  traceSource: {
+    kind: 'mlflow',
+    endpoint: '',
+    authSecret: '',
+    correlate: '',
+    service: '',
+    project: '',
+  },
   traceMapping: {},
   targetEnabled: false,
   targetLifecycle: 'per-case-instance',
@@ -502,8 +506,6 @@ export const INITIAL_TEMPLATE: TemplateState = {
   command: '',
   model: '',
   envRows: [],
-  cmdTraceKind: 'none',
-  cmdTraceEndpoint: '',
 }
 
 export const INITIAL_INSTANCE: InstanceState = {

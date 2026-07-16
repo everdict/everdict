@@ -7,6 +7,12 @@ import { useTranslations } from 'next-intl'
 import { toast } from 'sonner'
 
 import type { RuntimeSpec } from '@/entities/runtime'
+import {
+  EMPTY_TRACE_SOURCE,
+  TraceSourceFields,
+  type TraceSourceValue,
+  traceSourceToSpec,
+} from '@/entities/trace-source'
 import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
 import { Combobox } from '@/shared/ui/combobox'
@@ -48,8 +54,7 @@ interface Fields {
   cpuBudget: string
   supportsTopology: boolean
   browserImage: string
-  traceKind: 'otel' | 'mlflow'
-  traceEndpoint: string
+  traceSource: TraceSourceValue
 }
 
 const INITIAL: Fields = {
@@ -73,8 +78,7 @@ const INITIAL: Fields = {
   cpuBudget: '',
   supportsTopology: false,
   browserImage: '',
-  traceKind: 'otel',
-  traceEndpoint: '',
+  traceSource: EMPTY_TRACE_SOURCE,
 }
 
 // RuntimeSpec (GET /runtimes/:id/versions/:v) → editable form Fields — the inverse of buildSpec. Arrays/nested config flatten back to
@@ -104,8 +108,16 @@ function fieldsFromSpec(spec: RuntimeSpec): Fields {
     cpuBudget: num(spec.cpuBudget),
     supportsTopology: trace !== undefined,
     browserImage: str(spec.browserImage),
-    traceKind: trace?.kind === 'mlflow' ? 'mlflow' : 'otel',
-    traceEndpoint: str(trace?.endpoint),
+    traceSource: trace
+      ? {
+          kind: trace.kind,
+          endpoint: str(trace.endpoint),
+          authSecret: str(trace.authSecret),
+          correlate: str(trace.correlate),
+          service: str(trace.service),
+          project: str(trace.project),
+        }
+      : EMPTY_TRACE_SOURCE,
   }
 }
 
@@ -115,19 +127,8 @@ const csv = (s: string): string[] =>
     .map((x) => x.trim())
     .filter(Boolean)
 
-// Hardened (strong-isolation) runtime names — mirrors core trust-zone HARDENED_RUNTIMES (nomad runtime / k8s runtimeClass).
-const HARDENED = new Set(['runsc', 'gvisor', 'kata', 'kata-runtime', 'firecracker', 'fc'])
-
-// Capabilities this runtime provides automatically — the app labels them from the spec (no manual user input; mirrors core defaultRuntimeCapabilities).
-function runtimeCaps(f: Fields): string[] {
-  const caps = ['docker'] // nomad/k8s run container images
-  const iso = (f.kind === 'nomad' ? f.runtime : f.runtimeClass).trim()
-  if (iso && HARDENED.has(iso)) caps.push('sandbox') // strong-isolation runtime
-  if (f.supportsTopology) caps.push('topology')
-  return caps
-}
-
-// Form → RuntimeSpec. Empty optionals are excluded to fit the server schema (discriminatedUnion). capabilities are auto-labeled by the app.
+// Form → RuntimeSpec. Empty optionals are excluded to fit the server schema (discriminatedUnion). Capabilities are NOT
+// sent — the control plane fills them (declared ∪ auto-derived) at register time, so the hardened-runtime set has one owner.
 // submitVersion (edit mode) overrides the (hidden) version field — the caller computes the next version so an edit registers a fresh immutable one.
 function buildSpec(f: Fields, submitVersion?: string): Record<string, unknown> {
   const t = (v: string) => v.trim()
@@ -151,11 +152,10 @@ function buildSpec(f: Fields, submitVersion?: string): Record<string, unknown> {
   }
   const topology = f.supportsTopology
     ? {
-        traceSource: { kind: f.traceKind, endpoint: t(f.traceEndpoint) },
+        traceSource: traceSourceToSpec(f.traceSource),
         ...opt('browserImage', f.browserImage),
       }
     : {}
-  const capabilities = runtimeCaps(f)
   if (f.kind === 'nomad')
     return {
       ...base,
@@ -167,7 +167,6 @@ function buildSpec(f: Fields, submitVersion?: string): Record<string, unknown> {
       ...opt('authSecret', f.authSecret),
       ...envelope,
       ...topology,
-      capabilities,
     }
   // k8s
   return {
@@ -181,7 +180,6 @@ function buildSpec(f: Fields, submitVersion?: string): Record<string, unknown> {
     ...opt('kubeconfigSecret', f.kubeconfigSecret),
     ...envelope,
     ...topology,
-    capabilities,
   }
 }
 
@@ -191,7 +189,7 @@ function requiredErrorKey(f: Fields): string | null {
   if (!f.version.trim()) return 'errorVersionRequired'
   if (f.kind === 'nomad' && (!f.addr.trim() || !f.image.trim())) return 'errorNomadRequired'
   if (f.kind === 'k8s' && !f.image.trim()) return 'errorK8sImageRequired'
-  if (f.supportsTopology && !f.traceEndpoint.trim()) return 'errorTopologyEndpointRequired'
+  if (f.supportsTopology && !f.traceSource.endpoint.trim()) return 'errorTopologyEndpointRequired'
   return null
 }
 
@@ -526,26 +524,10 @@ export function RegisterRuntimeForm({
         </label>
         {f.supportsTopology && (
           <div className="space-y-4 pl-[26px]">
-            <div className="grid grid-cols-2 gap-4">
-              <Field label={t('traceSourceLabel')}>
-                <Combobox
-                  value={f.traceKind}
-                  onChange={(v) => set('traceKind', v as 'otel' | 'mlflow')}
-                  options={[
-                    { value: 'otel', label: 'OTel' },
-                    { value: 'mlflow', label: 'MLflow' },
-                  ]}
-                />
-              </Field>
-              <Field label={t('traceEndpointLabel')} hint={t('traceEndpointHint')}>
-                <Input
-                  value={f.traceEndpoint}
-                  onChange={(e) => set('traceEndpoint', e.target.value)}
-                  placeholder="http://mlflow.internal:5000"
-                  autoComplete="off"
-                />
-              </Field>
-            </div>
+            <TraceSourceFields
+              value={f.traceSource}
+              onChange={(patch) => set('traceSource', { ...f.traceSource, ...patch })}
+            />
             <Field label={t('browserImageLabel')} hint={t('browserImageHint')}>
               <Input
                 value={f.browserImage}
