@@ -32,9 +32,15 @@ a runtime `backend.logs?.()` returning `undefined` on backends that never had it
   the SSOT `InspectRuntimeResult` in `@everdict/contracts/wire`, reused type-only by the interface (no drift). apps/api
   wraps it (`makeRuntimeInspector`, like the prober) behind `GET /runtimes/:id/versions/:version/inspect` +
   `inspect_runtime` MCP (both `runtimes:read`).
+- `Reclaimable` (`stopWorkload` / `reclaimIdle` / `purgeTerminal` / `setNodeSchedulable`) — DESTRUCTIVE control paired
+  with Inspectable, for the runtime detail screen's admin actions. Best-effort/idempotent (a gone target is a no-op;
+  shared stores are never reclaimed). apps/api wraps it (`makeRuntimeController`) behind
+  `POST /runtimes/:id/versions/:version/control` + `control_runtime` MCP, gated the NEW admin-only `runtimes:control`
+  action (distinct from `runtimes:write` viewer+ registration). Command/result SSOT = `RuntimeControlCommand` /
+  `RuntimeControlResult` in `@everdict/contracts/wire`. See `docs/architecture/runtime-inspection.md`.
 
 Guards live next to the interfaces: `isRecoverable` / `isObservable` / `isShellable` / `isScreenCapturable` /
-`isProbeable` / `isInspectable`. A consumer does `if (!isObservable(backend)) return; backend.logs(caseId)` — no `?.`, no `undefined`
+`isProbeable` / `isInspectable` / `isReclaimable`. A consumer does `if (!isObservable(backend)) return; backend.logs(caseId)` — no `?.`, no `undefined`
 overload for "not implemented". If your new backend can't do a capability, just don't implement its interface.
 
 `Recoverable.adopt` returns a three-valued `AdoptOutcome` (`adopted` | `absent` | `unknown`), NOT `CaseResult |

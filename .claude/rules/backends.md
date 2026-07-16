@@ -25,7 +25,9 @@ A Backend = placement: dispatch a runner-agent job to an orchestrator. See skill
 - **Capabilities are typed, not optional methods.** `Backend` is the CORE (`dispatch`+`capacity`+`id`) — anything
   beyond it (`Recoverable`=adopt/kill, `Observable`=logs/exec, `Shellable`=execStream, `ScreenCapturable`=
   captureScreen, `Probeable`=probe, `Inspectable`=inspect [read-only live cluster view: nodes/capacity/workload/
-  stores, best-effort→`warnings`]) is a SEPARATE interface the backend also `implements`, and consumers narrow
+  stores, best-effort→`warnings`], `Reclaimable`=stopWorkload/reclaimIdle/purgeTerminal/setNodeSchedulable
+  [DESTRUCTIVE control, admin-only `runtimes:control`, best-effort/idempotent, stores never reclaimed]) is a SEPARATE
+  interface the backend also `implements`, and consumers narrow
   with the matching guard (`isObservable(backend)`), never a `backend.logs?.()` feature-detect. Don't add a new
   optional method to `Backend`; add/extend a capability interface + its `is*` guard. If a backend can't do a
   capability, it simply doesn't implement that interface (e.g. K8s is not `Shellable` — no interactive stream exec).

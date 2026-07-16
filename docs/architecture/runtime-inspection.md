@@ -50,9 +50,30 @@ Inspection therefore surfaces what is *actually standing on the cluster now*, di
   unknown (honest omission over a wrong guess). A harness's own external/BYO store address lives in its
   `HarnessSpec` (`storeEnv`), viewed on the harness detail — not here.
 
+## Control actions (Reclaimable)
+
+Inspection is paired with **destructive control** — the `Reclaimable` capability
+(`stopWorkload` / `reclaimIdle` / `purgeTerminal` / `setNodeSchedulable`), wrapped by apps/api
+(`makeRuntimeController`, mirroring the prober) behind `POST /runtimes/:id/versions/:version/control`
++ the `control_runtime` MCP tool, and surfaced as confirm-gated buttons on the panel.
+
+- **Gate.** A NEW admin-only action `runtimes:control` (packages/domain authz), distinct from `runtimes:write`
+  (viewer+ registration) and admin-scope-only for API keys. Aborting an in-flight eval or taking a node out of
+  scheduling is operator governance, not authoring. Unlike inspect (soft), a build/kind failure THROWS an AppError
+  (mutating action → real 4xx/5xx); a `local` runtime is 400.
+- **The four actions.** `stopWorkload(name)` force-stops one live everdict unit (deregister/delete its job) — a
+  BLUNT infra reclaim of a stuck/orphaned unit, *distinct from the graceful run/scorecard cancel*; `reclaimIdle`
+  bulk-stops non-store units older than a threshold; `purgeTerminal` GCs dead/completed jobs (no live impact);
+  `setNodeSchedulable(node, schedulable)` cordons/uncordons a node (reversible, no eviction — Nomad eligibility /
+  `kubectl cordon`). Each is best-effort/idempotent; **shared stores are never reclaimed**; the UI re-inspects after.
+- **State-aware cordon.** `InspectNode.schedulable` (Nomad eligibility / k8s `!unschedulable`) lets the panel show
+  the right toggle. The web gates the buttons on the `can.ts` mirror (`runtimes:control`) — enforcement is still the
+  control plane's (403).
+
 ## Deliberate non-goals (v1)
 
-- **No mutating actions** (kill idle allocs / scale down) — visibility only; reclaim is a possible follow-up.
+- **No auto-scaling from the panel** — the Autoscaler already drives capacity from queue depth; a manual scale knob
+  here would fight it. Cordon (take a node out of rotation) is the maintenance lever offered instead.
 - **No per-node resource totals** — the cheap list endpoints don't give clean, comparable CPU/memory across
   nomad and k8s; node count + readiness + docker-driver health + the slot `capacity` answer "has it room" without
   a misleading number. Add per-node resources when a live endpoint justifies it.
