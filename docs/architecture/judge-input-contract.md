@@ -1,9 +1,11 @@
 # Judge input contract — declare, preview, dry-run
 
-**Status: DESIGN (not yet sliced).** Related: `docs/judges.md` · `docs/architecture/eval-domain-model.md`
-(Rubric/criteria split this builds on) · `docs/architecture/trace-sink.md` (the pull/ingest mapping this
-generalizes) · `docs/architecture/streaming-case-pipeline.md` (`collectDeferredTrace`) · skills
-`evaluation` / `graders`.
+**Status: SHIPPED (S1–S5, control plane + MCP). Web UI pending.** S1 core seam · S2 preview surface ·
+S3 dry-run surface · S4 evidence requirements · S5 span-attribute mapping override. The artifact/span
+evidence *channel* (new TraceEvent kinds) is deferred as genuinely demand-driven — S4's `requires` now
+measures the need. Related: `docs/judges.md` · `docs/architecture/eval-domain-model.md` (Rubric/criteria
+split this builds on) · `docs/architecture/trace-sink.md` (the pull/ingest mapping this generalizes) ·
+`docs/architecture/streaming-case-pipeline.md` (`collectDeferredTrace`) · skills `evaluation` / `graders`.
 
 ## Why
 
@@ -130,13 +132,17 @@ pre-build ingest generality that no registered judge requires (no-hypothetical-s
 
 ## Slices (each independently shippable)
 
-| Slice | Contents |
-| --- | --- |
-| **S1 core seam** | Extract `assembleJudgeInput` from `JudgeGrader.grade`; add pure `previewJudge` (reusing `buildPrompt`) + `assessEvidence`; re-express `grade()` over the assembler. Unit tests with fabricated `GradeContext`. No schema/DB/route change. |
-| **S2 preview surface** | `POST /judges/preview` + MCP `preview_judge` (both over the S1 core) + web wizard live preview. Evidence **source B** first (paste a trace → instant value, zero infra). Rubric-ref resolution reused from the runner. |
-| **S3 dry-run surface** | `POST /judges/:id/try` + `/judges/try` (draft) + MCP parity, over the EXISTING `JudgeRunner.run`. Evidence loaders for **source A** (RunStore/ScorecardStore + `collectDeferredTrace`) and **source C** (`executeCase`). Returns `{scores, prompt, verdictRaw}`. |
-| **S4 requirement declaration** | `JudgeSpec.requires` + `assessEvidence` coverage in preview/wizard (green/red badges); registration-time validation that `requires` and `promptTemplate` placeholders are consistent. |
-| **S5 ingest generalization** | Only what S4's observed `missing[]` justifies: artifact channel, structural-span preservation, `TraceSourceConfig` attr-mapping override. Each with a pull round-trip test. |
+| Slice | Contents | Status |
+| --- | --- | --- |
+| **S1 core seam** | Extract `assembleJudgeInput` from `JudgeGrader.grade`; add pure `previewJudge` (reusing `buildPrompt`); re-express `grade()` over the assembler. Unit tests with fabricated `GradeContext`. No schema/DB/route change. (`assessEvidence` moved to S4 with its schema.) | ✅ `16c97156` |
+| **S2 preview surface** | `POST /judges/preview` + MCP `preview_judge` (both over the S1 core). Evidence **source B** (paste a trace). Rubric-ref resolution reused from the runner (`resolveRubric` exported). Gate `judges:read`. | ✅ `6653f259` |
+| **S3 dry-run surface** | `POST /judges/try` + MCP `try_judge`, over the EXISTING `JudgeRunner.run`. Evidence loader for **source A** (a prior run's stored `CaseResult` by `runId`) joins source B; a live round-trip is `POST /runs` → try source "run" (no redundant sync-dispatch path). Gate `scorecards:run`. | ✅ `8e412574` |
+| **S4 requirement declaration** | `JudgeSpec.requires: EvidenceRequirement[]` + pure `assessEvidence` (in graders); preview/dry-run surface the satisfied/missing split. `final_answer`/`tool_call`/`dom`/`screenshot` decidable today; `artifact`/`span` read as unmet with a reason → the ingest signal. | ✅ `ba66ef05` |
+| **S5 ingest generalization** | The demand-justified piece: `SpanAttrMapping` on `TraceSourceConfig`/`TraceSourceSpec`/`CommandTraceSpec`/`TraceRef` → `spansToTraceEvents(spans, mapping)` (keys tried first, GenAI defaults fallback). Realizes the "keys are adjustable" comment. The artifact/span *channel* (new TraceEvent kinds) stays deferred (high blast radius; not yet demanded by a real judge). | ✅ `464f9336` |
+
+**Web UI (pending):** the wizard live-preview panel, the dry-run button, and the requirement coverage
+badges over the shipped `POST /judges/preview` + `/judges/try`. The control-plane + MCP surfaces are complete,
+so preview/dry-run/requirements are usable via API/MCP today.
 
 ## Back-compat invariants
 
