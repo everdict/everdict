@@ -2311,6 +2311,8 @@
     "apiKeysDesc": "Personal keys that act with your permissions.",
     "personalSecrets": "Personal secrets",
     "personalSecretsDesc": "Secrets only you can see.",
+    "browserSessions": "Browser sessions",
+    "browserSessionsDesc": "A live browser you drive to log into sites.",
     "general": "General",
     "generalDesc": "Workspace name and deletion.",
     "members": "Members",
@@ -2654,5 +2656,20 @@
     "closed": "Disconnected",
     "hint": "Interactive shell into the running sandbox (cd · env persist)",
     "placeholder": "Type a command, then Enter"
+  },
+  "interactiveBrowser": {
+    "title": "Browser sessions",
+    "description": "Start a live browser and drive it to log into a site. Personal to you; one active session at a time.",
+    "start": "Start a browser",
+    "starting": "Starting…",
+    "startHint": "A dedicated browser opens that you control in real time — navigate, click, and log in.",
+    "close": "Close",
+    "connecting": "Connecting…",
+    "live": "Live",
+    "closed": "Disconnected",
+    "disconnected": "The session ended. Close it and start a new one.",
+    "urlPlaceholder": "https://… (Enter to go)",
+    "go": "Go",
+    "canvasHint": "Click, type, and navigate — you are driving the real browser."
   }
 }

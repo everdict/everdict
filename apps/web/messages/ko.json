@@ -2311,6 +2311,8 @@
     "apiKeysDesc": "내 권한으로 동작하는 개인 키.",
     "personalSecrets": "개인 시크릿",
     "personalSecretsDesc": "나만 볼 수 있는 시크릿.",
+    "browserSessions": "브라우저 세션",
+    "browserSessionsDesc": "사이트 로그인을 위해 직접 조종하는 라이브 브라우저.",
     "general": "일반",
     "generalDesc": "워크스페이스 이름과 삭제.",
     "members": "멤버",
@@ -2654,5 +2656,20 @@
     "closed": "연결 종료",
     "hint": "실행 중인 샌드박스로 들어가는 대화형 셸 (cd · env 유지)",
     "placeholder": "명령을 입력하고 Enter"
+  },
+  "interactiveBrowser": {
+    "title": "브라우저 세션",
+    "description": "라이브 브라우저를 열어 사이트에 직접 로그인하세요. 나만 사용하며, 한 번에 하나의 세션만 활성화됩니다.",
+    "start": "브라우저 시작",
+    "starting": "시작 중…",
+    "startHint": "전용 브라우저가 열리고 실시간으로 조종합니다 — 이동·클릭·로그인.",
+    "close": "닫기",
+    "connecting": "연결 중…",
+    "live": "라이브",
+    "closed": "연결 종료",
+    "disconnected": "세션이 종료되었습니다. 닫고 새로 시작하세요.",
+    "urlPlaceholder": "https://… (Enter로 이동)",
+    "go": "이동",
+    "canvasHint": "클릭·입력·이동 — 실제 브라우저를 직접 조종하고 있습니다."
   }
 }

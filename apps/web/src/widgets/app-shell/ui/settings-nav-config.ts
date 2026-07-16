@@ -1,4 +1,5 @@
 import {
+  AppWindow,
   Building2,
   Cpu,
   GitBranch,
@@ -43,6 +44,7 @@ export const SETTINGS_NAV_GROUPS: SettingsNavGroup[] = [
       { href: '/preferences', labelKey: 'preferences', icon: SlidersHorizontal },
       { href: '/api-keys', labelKey: 'apiKeys', icon: KeyRound },
       { href: '/personal-secrets', labelKey: 'personalSecrets', icon: Lock },
+      { href: '/browser-sessions', labelKey: 'browserSessions', icon: AppWindow },
     ],
   },
   {
