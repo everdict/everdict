@@ -26,9 +26,15 @@ a runtime `backend.logs?.()` returning `undefined` on backends that never had it
 - `Shellable` (`execStream`) — interactive PTY-over-WS. **Nomad only** (`nomad alloc exec -i`); K8s has no stream exec.
 - `ScreenCapturable` (`captureScreen(runId)`) — topology backends' per-RUN browser frame (keyed by runId, not caseId).
 - `Probeable` (`probe`) — connection test without a job.
+- `Inspectable` (`inspect`) — read-only live cluster view for the runtime detail screen: composition (nodes/DCs),
+  concurrent capacity, the live everdict workload placed on it, and pool shared stores. A superset of probe (Nomad +
+  K8s). TOTAL/best-effort — a partial-cluster failure lands in the result's `warnings`, never throws. Result schema =
+  the SSOT `InspectRuntimeResult` in `@everdict/contracts/wire`, reused type-only by the interface (no drift). apps/api
+  wraps it (`makeRuntimeInspector`, like the prober) behind `GET /runtimes/:id/versions/:version/inspect` +
+  `inspect_runtime` MCP (both `runtimes:read`).
 
 Guards live next to the interfaces: `isRecoverable` / `isObservable` / `isShellable` / `isScreenCapturable` /
-`isProbeable`. A consumer does `if (!isObservable(backend)) return; backend.logs(caseId)` — no `?.`, no `undefined`
+`isProbeable` / `isInspectable`. A consumer does `if (!isObservable(backend)) return; backend.logs(caseId)` — no `?.`, no `undefined`
 overload for "not implemented". If your new backend can't do a capability, just don't implement its interface.
 
 `Recoverable.adopt` returns a three-valued `AdoptOutcome` (`adopted` | `absent` | `unknown`), NOT `CaseResult |
