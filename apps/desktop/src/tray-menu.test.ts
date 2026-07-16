@@ -20,6 +20,7 @@ const NO_UPDATE: UpdaterState = { kind: "disabled" };
 function actions(): TrayMenuActions & { openApp: ReturnType<typeof vi.fn> } {
   return {
     openApp: vi.fn(),
+    openPanel: vi.fn(),
     setAutostart: vi.fn(),
     changeServerUrl: vi.fn(),
     unpairRunner: vi.fn(),
@@ -56,10 +57,11 @@ describe("runnerStatusLabel", () => {
 });
 
 describe("buildTrayMenuTemplate", () => {
-  it("shows the status row (disabled)/open/autostart/quit — no unpair item when unpaired", () => {
+  it("leads with the popover launcher, then the status row (disabled)/open/autostart/quit — no unpair item when unpaired", () => {
     const t = buildTrayMenuTemplate({ autostart: false, runner: OFF, updater: NO_UPDATE }, actions());
-    expect(t[0]).toMatchObject({ enabled: false });
     expect(t.map((i) => i.label ?? i.type)).toEqual([
+      "Open Everdict panel",
+      "separator",
       runnerStatusLabel(OFF),
       "separator",
       "Open Everdict",
@@ -69,6 +71,16 @@ describe("buildTrayMenuTemplate", () => {
       "separator",
       "Quit",
     ]);
+    // The status row stays a disabled (informational) item.
+    expect(t.find((i) => i.label === runnerStatusLabel(OFF))).toMatchObject({ enabled: false });
+  });
+
+  it("the leading 'Open Everdict panel' item opens the popover (D11)", () => {
+    const a = actions();
+    const t = buildTrayMenuTemplate({ autostart: false, runner: OFF, updater: NO_UPDATE }, a);
+    expect(t[0]).toMatchObject({ label: "Open Everdict panel" });
+    click(t[0] ?? {});
+    expect(a.openPanel).toHaveBeenCalledOnce();
   });
 
   it("when paired, 'Unpair this device's runner' appears and clicking it calls unpairRunner", () => {
@@ -95,7 +107,10 @@ describe("buildTrayMenuTemplate", () => {
       { autostart: false, runner: OFF, updater: { kind: "downloading", version: "9.9.9", percent: 42 } },
       a,
     );
-    expect(downloading[0]).toMatchObject({ label: "Downloading update… (42%)", enabled: false });
+    expect(downloading.find((i) => i.label?.startsWith("Downloading update"))).toMatchObject({
+      label: "Downloading update… (42%)",
+      enabled: false,
+    });
 
     const ready = buildTrayMenuTemplate(
       { autostart: false, runner: OFF, updater: { kind: "ready", version: "9.9.9" } },

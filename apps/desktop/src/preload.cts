@@ -20,6 +20,23 @@ if (process.argv.includes("--everdict-setup")) {
   });
 }
 
+// Tray popover bridge (D11) — the rich, readable replacement for the native tray menu. Exposed only under the
+// --everdict-tray flag (the popover window). Like everdictSetup, the real gate is main's senderFrame exact-file-URL
+// check (tray-popover.ts registerTrayBridge). Channel strings are kept in sync with tray-popover.ts TRAY_CHANNELS.
+if (process.argv.includes("--everdict-tray")) {
+  electron.contextBridge.exposeInMainWorld("everdictTray", {
+    getState: () => electron.ipcRenderer.invoke("everdict:tray-state"),
+    action: (payload: unknown) => electron.ipcRenderer.invoke("everdict:tray-action", payload),
+    resize: (height: number) => electron.ipcRenderer.invoke("everdict:tray-resize", height),
+    hide: () => electron.ipcRenderer.invoke("everdict:tray-hide"),
+    onState: (callback: (state: unknown) => void) => {
+      const listener = (_event: electron.IpcRendererEvent, state: unknown) => callback(state);
+      electron.ipcRenderer.on("everdict:tray-state-event", listener);
+      return () => electron.ipcRenderer.removeListener("everdict:tray-state-event", listener);
+    },
+  });
+}
+
 if (expectedOrigin !== undefined && location.origin === expectedOrigin) {
   electron.contextBridge.exposeInMainWorld("everdictDesktop", {
     appInfo: () => electron.ipcRenderer.invoke("everdict:app-info"),

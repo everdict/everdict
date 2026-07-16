@@ -13,6 +13,7 @@ import {
   ipcMain,
   nativeImage,
   safeStorage,
+  screen,
   session,
   shell,
 } from "electron";
@@ -29,7 +30,14 @@ import { NotificationWatcher, type WatcherNotification } from "./notification-wa
 import { RunnerSupervisor } from "./runner-supervisor.js";
 import { normalizeWebUrl, resolveWebUrl } from "./server-url.js";
 import { type TokenIo, clearToken, loadToken, loadTokens, saveTokens } from "./token-store.js";
-import { buildTrayMenuTemplate, runnerStatusLabel } from "./tray-menu.js";
+import { type TrayMenuActions, type TrayMenuState, buildTrayMenuTemplate, runnerStatusLabel } from "./tray-menu.js";
+import {
+  TRAY_CHANNELS,
+  type TrayAction,
+  buildTrayPopoverViewModel,
+  popoverPosition,
+  registerTrayBridge,
+} from "./tray-popover.js";
 import { type AutoUpdaterLike, UpdaterController, type UpdaterState } from "./updater.js";
 import { WINDOW_CHANNELS, registerWindowChrome } from "./window-chrome.js";
 import { allowTopLevelNavigation, decideWindowOpen, shouldRecoverToSetup, webOriginOf } from "./window-policy.js";
@@ -79,6 +87,12 @@ function titleBarPreferences(): Pick<
 
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
+// Custom tray popover (D11) — a frameless, transparent window rendering assets/tray-popover.html, replacing the native
+// tray menu whose text the OS theme rendered unreadable. Pre-created hidden so the first open is instant + already measured.
+let popoverWindow: BrowserWindow | null = null;
+let popoverContentHeight = 232; // the renderer reports its measured height; this is only the pre-measure default
+let popoverHiddenAt = 0; // guards the tray-click-right-after-blur reopen race (blur hides first, then the click would re-show)
+const POPOVER_WIDTH = 288;
 let quitting = false;
 let shuttingDown = false;
 // D8 recovery: set when the pinned web URL fails its initial load (wrong/unreachable server). While true, the app window
@@ -519,34 +533,162 @@ function createOrFocusWindow(): void {
   mainWindow = win;
 }
 
+// The current tray/popover state snapshot — shared by the native menu (Linux fallback), the popover view model, and the tooltip.
+function currentTrayState(): TrayMenuState {
+  return { autostart: config.autostart, runner: latestRunnersStatus, updater: updaterState };
+}
+
+// The tray/popover actions — one set shared by the native menu items and the popover bridge. `openPanel` opens the popover
+// (D11): on Linux the AppIndicator forces a native menu, so its top item leads into the readable popover.
+function trayActions(): TrayMenuActions {
+  return {
+    openApp: () => createOrFocusWindow(),
+    openPanel: () => showTrayPopover(),
+    setAutostart: (next) => applyAutostart(next),
+    changeServerUrl: () => openSetupWindow(),
+    // Local unpair-all (discard the tokens + stop) — the web account page is authoritative for revoking the server records.
+    unpairRunner: () => void supervisor.unpair().catch((e) => console.error(`Runner unpair failed: ${e}`)),
+    applyUpdate: () => applyUpdateNow(),
+    quit: () => {
+      quitting = true;
+      app.quit();
+    },
+  };
+}
+
+function trayPopoverPageUrl(): string {
+  return pathToFileURL(path.join(app.getAppPath(), "assets", "tray-popover.html")).toString();
+}
+
+// Lazily create (once) the frameless/transparent popover window. Loaded hidden and kept resident so opening is instant and
+// the height is already measured. Dismisses on blur (menu semantics). Its bridge is --everdict-tray, file-URL gated by main.
+function ensurePopoverWindow(): BrowserWindow {
+  if (popoverWindow && !popoverWindow.isDestroyed()) return popoverWindow;
+  const win = new BrowserWindow({
+    width: POPOVER_WIDTH,
+    height: popoverContentHeight,
+    show: false,
+    frame: false,
+    transparent: true,
+    resizable: false,
+    movable: false,
+    minimizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    skipTaskbar: true,
+    alwaysOnTop: true,
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      preload: path.join(import.meta.dirname, "preload.cjs"),
+      additionalArguments: ["--everdict-tray"],
+    },
+  });
+  win.setMenuBarVisibility(false);
+  // Click-away dismiss. Record the hide time so a tray click that immediately follows (the blur fires first) is treated as
+  // "close", not "open again" (see toggleTrayPopover).
+  win.on("blur", () => {
+    if (win.isDestroyed() || !win.isVisible()) return;
+    popoverHiddenAt = Date.now();
+    win.hide();
+  });
+  win.on("closed", () => {
+    popoverWindow = null;
+  });
+  void win.loadURL(trayPopoverPageUrl());
+  popoverWindow = win;
+  return win;
+}
+
+// Anchor the popover to the tray icon on the display under the cursor, sized to the last measured content height.
+function placePopover(win: BrowserWindow, display: Electron.Display): void {
+  const bounds = tray?.getBounds() ?? { x: 0, y: 0, width: 0, height: 0 };
+  const { x, y } = popoverPosition({
+    tray: bounds,
+    size: { width: POPOVER_WIDTH, height: popoverContentHeight },
+    workArea: display.workArea,
+  });
+  win.setBounds({ x, y, width: POPOVER_WIDTH, height: popoverContentHeight });
+}
+
+function showTrayPopover(): void {
+  const win = ensurePopoverWindow();
+  placePopover(win, screen.getDisplayNearestPoint(screen.getCursorScreenPoint()));
+  win.show();
+  win.focus();
+}
+
+// Tray click (macOS/Windows) — toggle. If the window is visible, hide it; if a click lands right after a click-away blur
+// (which already hid it), treat that as the toggle-off and do not reopen.
+function toggleTrayPopover(): void {
+  const win = ensurePopoverWindow();
+  if (win.isVisible()) {
+    win.hide();
+    return;
+  }
+  if (Date.now() - popoverHiddenAt < 250) return;
+  showTrayPopover();
+}
+
+function dispatchTrayAction(action: TrayAction): void {
+  switch (action.type) {
+    case "openApp":
+      createOrFocusWindow();
+      break;
+    case "setAutostart":
+      applyAutostart(action.value);
+      break;
+    case "changeServer":
+      openSetupWindow();
+      break;
+    case "unpair":
+      void supervisor.unpair().catch((e) => console.error(`Runner unpair failed: ${e}`));
+      break;
+    case "applyUpdate":
+      applyUpdateNow();
+      break;
+    case "quit":
+      quitting = true;
+      app.quit();
+      break;
+  }
+}
+
+// Push a fresh view model to the popover so it updates live while open (runner status, autostart, update state).
+function pushTrayState(): void {
+  const win = popoverWindow;
+  if (win && !win.isDestroyed())
+    win.webContents.send(TRAY_CHANNELS.stateEvent, buildTrayPopoverViewModel(currentTrayState()));
+}
+
+// The renderer reports its content height → size the frameless window to fit; if it is open, re-anchor to keep it in place.
+function setPopoverContentHeight(height: number): void {
+  popoverContentHeight = height;
+  const win = popoverWindow;
+  if (win && !win.isDestroyed() && win.isVisible()) placePopover(win, screen.getDisplayMatching(win.getBounds()));
+}
+
 function refreshTrayMenu(): void {
   if (!tray) return;
   tray.setToolTip(`Everdict — ${runnerStatusLabel(latestRunnersStatus)}`);
-  tray.setContextMenu(
-    Menu.buildFromTemplate(
-      buildTrayMenuTemplate(
-        { autostart: config.autostart, runner: latestRunnersStatus, updater: updaterState },
-        {
-          openApp: () => createOrFocusWindow(),
-          setAutostart: (next) => applyAutostart(next),
-          changeServerUrl: () => openSetupWindow(),
-          // Local unpair-all (discard the tokens + stop) — the web account page is authoritative for revoking the server records.
-          unpairRunner: () => void supervisor.unpair().catch((e) => console.error(`Runner unpair failed: ${e}`)),
-          applyUpdate: () => applyUpdateNow(),
-          quit: () => {
-            quitting = true;
-            app.quit();
-          },
-        },
-      ),
-    ),
-  );
+  // Linux: the AppIndicator swallows tray clicks and requires a context menu, so keep the native menu (its top item opens
+  // the readable popover, D11). macOS/Windows: the tray click opens the popover directly — no native menu is set.
+  if (process.platform === "linux")
+    tray.setContextMenu(Menu.buildFromTemplate(buildTrayMenuTemplate(currentTrayState(), trayActions())));
+  pushTrayState();
 }
 
 function createTray(): void {
   const icon = nativeImage.createFromPath(path.join(app.getAppPath(), "assets", "tray.png"));
   tray = new Tray(icon);
-  tray.on("click", () => createOrFocusWindow());
+  // macOS/Windows emit tray click events → open the rich popover directly. On Linux the click is swallowed by the
+  // AppIndicator (only the context menu shows), so there the popover is reached from the native menu's launcher item.
+  if (process.platform !== "linux") {
+    tray.on("click", () => toggleTrayPopover());
+    tray.on("right-click", () => toggleTrayPopover());
+  }
+  ensurePopoverWindow(); // pre-load hidden so the first open is instant and already sized
   refreshTrayMenu();
 }
 
@@ -628,6 +770,18 @@ if (!app.requestSingleInstanceLock()) {
     registerWindowChrome(ipcMain, {
       webOrigin: () => webOrigin,
       windowForSender: (sender) => BrowserWindow.fromWebContents(sender as Electron.WebContents),
+    });
+    // Tray popover bridge (D11) — like the setup window (D8), the permission boundary is an exact local file:// match: only
+    // the popover page's frame may drive it (never the web or an external page). Benign tray-menu actions only.
+    const trayPageUrl = trayPopoverPageUrl();
+    registerTrayBridge(ipcMain, {
+      fromTrayPage: (frameUrl) => frameUrl === trayPageUrl,
+      getState: () => currentTrayState(),
+      performAction: (action) => dispatchTrayAction(action),
+      setContentHeight: (height) => setPopoverContentHeight(height),
+      hide: () => {
+        if (popoverWindow && !popoverWindow.isDestroyed()) popoverWindow.hide();
+      },
     });
     createTray();
     createOrFocusWindow();

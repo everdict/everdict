@@ -1,0 +1,175 @@
+<!doctype html>
+<!-- Custom tray popover (desktop decision D11) — the readable, reactive replacement for the native tray menu. Communicates
+     only via window.everdictTray (the tray-window-only bridge, --everdict-tray flag). Toss/Linear clean dark, with runner
+     status reactions: idle = a gentle breathing dot, running = an activity pulse ring, job-done = a brief ✦ celebration. -->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Everdict</title>
+    <style>
+      :root { color-scheme: dark; }
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      html, body { background: transparent; }
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        padding: 8px; color: #e6e6e6; overflow: hidden;
+        -webkit-user-select: none; user-select: none;
+      }
+      .card {
+        background: #0d0e10; border: 1px solid #1e1f22; border-radius: 12px;
+        box-shadow: 0 14px 34px rgba(0, 0, 0, 0.5), 0 2px 8px rgba(0, 0, 0, 0.35);
+        padding: 6px; animation: pop 0.14s ease-out;
+      }
+      @keyframes pop { from { opacity: 0; transform: translateY(-4px) scale(0.98); } to { opacity: 1; transform: none; } }
+
+      /* Header — the runner status line + the reactive dot */
+      .head { display: flex; align-items: center; gap: 9px; padding: 9px 10px 11px; }
+      .dot { position: relative; width: 9px; height: 9px; border-radius: 50%; background: #6b6c72; flex: none; }
+      .dot .ring { position: absolute; inset: 0; border-radius: 50%; }
+      .dot.idle { background: #5e6ad2; animation: breathe 3.2s ease-in-out infinite; }
+      .dot.running { background: #3fb950; }
+      .dot.running .ring { border: 1.5px solid #3fb950; animation: pulse 1.5s ease-out infinite; }
+      @keyframes breathe { 0%, 100% { opacity: 0.5; } 50% { opacity: 1; } }
+      @keyframes pulse { 0% { transform: scale(1); opacity: 0.7; } 100% { transform: scale(3); opacity: 0; } }
+      .runner { font-size: 12px; font-weight: 500; color: #9a9ba1; letter-spacing: 0.1px; }
+
+      /* Update callout (downloading progress / ready-to-apply) */
+      .update { margin: 0 4px 6px; padding: 9px 11px; border-radius: 8px;
+        background: rgba(94, 106, 210, 0.1); border: 1px solid rgba(94, 106, 210, 0.25); }
+      .update .u-label { font-size: 12px; color: #c7ccf5; line-height: 1.4; }
+      .update.ready { cursor: pointer; }
+      .update.ready:hover { background: rgba(94, 106, 210, 0.16); }
+      .update .bar { height: 3px; margin-top: 7px; border-radius: 2px; background: #26272b; overflow: hidden; }
+      .update .bar > i { display: block; height: 100%; background: #5e6ad2; transition: width 0.25s ease; }
+
+      /* Menu rows */
+      .menu { display: flex; flex-direction: column; }
+      .row {
+        display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%;
+        font: inherit; font-size: 13px; color: #e6e6e6; text-align: left;
+        background: none; border: 0; border-radius: 8px; padding: 8px 10px; cursor: pointer;
+        transition: background 0.1s;
+      }
+      .row:hover { background: #17181b; }
+      .row:active { background: #1d1e22; }
+      .row.danger:hover { background: rgba(235, 87, 87, 0.12); color: #ff6b6b; }
+
+      .switch { position: relative; width: 30px; height: 18px; border-radius: 9px; background: #2a2b2e; flex: none; transition: background 0.16s; }
+      .switch .knob { position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: #e6e6e6; transition: transform 0.16s; }
+      .switch.on { background: #5e6ad2; }
+      .switch.on .knob { transform: translateX(12px); }
+
+      .sep { height: 1px; margin: 6px 8px; background: #1a1b1e; }
+      .hidden { display: none !important; }
+
+      /* Job-done celebration */
+      .spark { position: fixed; font-size: 12px; color: #3fb950; pointer-events: none; animation: spark 0.9s ease-out forwards; }
+      @keyframes spark {
+        0% { opacity: 0; transform: translateY(0) scale(0.6); }
+        25% { opacity: 1; }
+        100% { opacity: 0; transform: translateY(-16px) scale(1.15); }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="card" class="card">
+      <header class="head">
+        <span id="dot" class="dot"><span class="ring"></span></span>
+        <span id="runnerLabel" class="runner">Runner…</span>
+      </header>
+      <div id="update" class="update hidden"></div>
+      <nav id="menu" class="menu">
+        <button class="row" type="button" data-act="openApp"><span>Open Everdict</span></button>
+        <button class="row" type="button" data-act="autostart">
+          <span>Start at login</span>
+          <span id="switch" class="switch"><span class="knob"></span></span>
+        </button>
+        <button class="row" type="button" data-act="changeServer"><span>Change server…</span></button>
+        <button id="unpairRow" class="row hidden" type="button" data-act="unpair"><span id="unpairLabel">Unpair</span></button>
+        <div class="sep"></div>
+        <button class="row danger" type="button" data-act="quit"><span>Quit Everdict</span></button>
+      </nav>
+    </div>
+    <script>
+      const bridge = window.everdictTray
+      const byId = (id) => document.getElementById(id)
+      let prevActive = 0
+
+      const esc = (s) =>
+        String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c])
+
+      // Report the rendered height so main can fit the frameless window (+ the 8px body padding on each side).
+      function reportHeight() {
+        const h = Math.ceil(byId('card').getBoundingClientRect().height) + 16
+        bridge?.resize(h)
+      }
+
+      function celebrate() {
+        const r = byId('dot').getBoundingClientRect()
+        const s = document.createElement('span')
+        s.className = 'spark'
+        s.textContent = '✦'
+        s.style.left = r.left + 3 + 'px'
+        s.style.top = r.top - 3 + 'px'
+        document.body.appendChild(s)
+        setTimeout(() => s.remove(), 900)
+      }
+
+      function renderUpdate(u) {
+        const el = byId('update')
+        if (!u || u.kind === 'none') {
+          el.className = 'update hidden'
+          el.onclick = null
+          el.innerHTML = ''
+          return
+        }
+        if (u.kind === 'ready') {
+          el.className = 'update ready'
+          el.innerHTML = '<div class="u-label">' + esc(u.label || 'Update ready') + ' — click to restart</div>'
+          el.onclick = () => bridge?.action({ type: 'applyUpdate' })
+        } else {
+          el.className = 'update'
+          el.onclick = null
+          const pct = typeof u.percent === 'number' ? u.percent : null
+          el.innerHTML =
+            '<div class="u-label">' + esc(u.label || 'Downloading update…') + '</div>' +
+            (pct !== null ? '<div class="bar"><i style="width:' + pct + '%"></i></div>' : '')
+        }
+      }
+
+      function render(vm) {
+        if (!vm) return
+        byId('dot').className = 'dot ' + vm.runnerState
+        byId('runnerLabel').textContent = vm.runnerLabel
+        if (prevActive > 0 && vm.activeJobs === 0) celebrate()
+        prevActive = vm.activeJobs
+        byId('switch').classList.toggle('on', !!vm.autostart)
+        byId('unpairRow').classList.toggle('hidden', !vm.canUnpair)
+        byId('unpairLabel').textContent = vm.unpairLabel
+        renderUpdate(vm.update)
+        reportHeight()
+      }
+
+      byId('menu').addEventListener('click', (e) => {
+        const row = e.target.closest('.row')
+        if (!row) return
+        const act = row.dataset.act
+        if (act === 'openApp') bridge?.action({ type: 'openApp' })
+        else if (act === 'autostart')
+          bridge?.action({ type: 'setAutostart', value: !byId('switch').classList.contains('on') })
+        else if (act === 'changeServer') bridge?.action({ type: 'changeServer' })
+        else if (act === 'unpair') bridge?.action({ type: 'unpair' })
+        else if (act === 'quit') bridge?.action({ type: 'quit' })
+      })
+
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') bridge?.hide()
+      })
+
+      bridge?.onState(render)
+      bridge?.getState().then(render).catch(() => {})
+      window.addEventListener('resize', reportHeight)
+      requestAnimationFrame(reportHeight)
+    </script>
+  </body>
+</html>

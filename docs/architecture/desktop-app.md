@@ -80,6 +80,23 @@
 >   bar by a scoped `globals.css` rule (`html.desktop-shell`, added by the widget on mount); the window is moved via
 >   `-webkit-app-region: drag`. Window controls are **benign** — no fs/shell/Node power — so the security posture is unchanged.
 >
+> - **D11 — a custom tray popover, not the native menu (LOCKED 2026-07-16).** The native tray context menu
+>   (`Menu.buildFromTemplate`) is OS-rendered and **unstylable** — on some Linux GTK themes its text sits at near-zero
+>   contrast against the menu background (the reason this decision exists). So the tray menu becomes a **frameless,
+>   transparent BrowserWindow** rendering a local page (`assets/tray-popover.html`) we style fully (Toss/Linear dark,
+>   readable) with runner-status **reactions** (idle = a breathing dot, running = a pulse ring, job-done = a brief ✦ tick).
+>   Trigger is platform-split: **macOS/Windows** emit a tray `click` → the click toggles the popover (no native menu is
+>   set); **Linux** AppIndicator swallows the click and *requires* a context menu, so there the native menu stays as a
+>   complete fallback but its **first item opens the popover** (the always-legible way in). The popover gets its **own
+>   local-file bridge** `window.everdictTray` (`getState` / `onState` / `action` / `resize` / `hide`) behind a
+>   `--everdict-tray` argv flag, gated **exactly like the setup window (D8)**: main-side IPC accepts only the popover's
+>   `file://` senderFrame — never the web or an external page (`registerTrayBridge`). Actions are the same **benign** set
+>   the menu had (open app · autostart · change server · unpair · apply update · quit) — the token/keychain surfaces are
+>   untouched, so the security posture is unchanged. The window is pre-created hidden (instant first open) and dismisses on
+>   blur; main sizes the frameless window from the renderer's measured height and anchors it to the tray icon
+>   (`popoverPosition`, top-right fallback when the OS reports no tray geometry). The pure half (`tray-popover.ts`: view
+>   model · placement · action schema · bridge) is unit-tested; `main.ts` owns the window/screen/IPC glue.
+>
 > - **D1 — the UI is the deployed web, not a rebuild.** The desktop shell renders the SaaS web
 >   (`apps/web`) at its deployed URL inside the app window — the Linear/Slack/Notion model. `apps/web`
 >   stays the **single UI SSOT**; the desktop has feature parity *by construction* (every web deploy
@@ -192,6 +209,11 @@ That's the whole *runner* API. No generic `invoke`, no fs/shell access, nothing 
 **window-chrome** namespace `window` (D10 — custom frameless title bar): `minimize()` / `toggleMaximize()` / `close()` /
 `isMaximized()` / `onMaximizeChange(cb)`, benign window management under the same origin gate. Absent on an older
 native-frame desktop, so the web gates its custom title bar on `window` being defined.
+
+Two further bridges are **not** web-origin surfaces but local trusted pages, each behind its own argv flag and gated by an
+exact `file://` senderFrame match (never the web, never an external page): `window.everdictSetup` (D8 — the setup window,
+`--everdict-setup`) and `window.everdictTray` (D11 — the tray popover, `--everdict-tray`: `getState` / `onState` /
+`action` / `resize` / `hide`). Never merge either into `everdictDesktop`.
 
 ### One-click pairing flow (D3)
 

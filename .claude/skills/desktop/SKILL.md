@@ -42,9 +42,12 @@ logged-in web session over a minimal preload bridge.
    an older desktop's bare `DesktopRunnerStatus`); `unpairRunner(runnerId?)` drops one runner or (omitted) all;
    `appInfo()` includes `cpuCount` (the soft-cap reference). Tokens persist as an encrypted map
    (`runner-tokens.bin`, `{runnerId: rnr_token}`) + `config.runners[]`, never a single file.
-   One separate surface exists (D8): `window.everdictSetup` (`getServerUrl`/`setServerUrl`) — exposed only
-   with the `--everdict-setup` argv flag (setup window), and main-side IPC accepts only the local
-   `setup.html` `file://` senderFrame. Never merge it into `everdictDesktop`.
+   Two separate local-file surfaces exist (NOT web-origin bridges — trusted local pages, each behind its own
+   argv flag, main-side IPC accepting only that page's exact `file://` senderFrame; never merge either into
+   `everdictDesktop`): `window.everdictSetup` (D8 — `getServerUrl`/`setServerUrl`, `--everdict-setup`, the
+   setup window) and `window.everdictTray` (D11 — the custom tray popover that replaces the unstylable native
+   menu: `getState`/`onState`/`action`/`resize`/`hide`, `--everdict-tray`; benign tray-menu actions only —
+   `tray-popover.ts` is the tested pure half, `main.ts` owns the frameless window/positioning/IPC glue).
 4. Preload is attached only when loading the configured web origin; IPC handlers verify
    `senderFrame` origin before acting.
 5. The `rnr_` pairing token is persisted **only** `safeStorage`-encrypted under `app.getPath("userData")`;
