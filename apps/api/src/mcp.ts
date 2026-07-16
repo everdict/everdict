@@ -31,7 +31,6 @@ import { registerRuntimeTools } from "./api/runtime/runtime.mcp.js";
 import { registerScheduleTools } from "./api/schedule/schedule.mcp.js";
 import { registerScorecardTools } from "./api/scorecard/scorecard.mcp.js";
 import { registerSecretTools } from "./api/secret/secret.mcp.js";
-import { registerTraceSinkTools } from "./api/trace-sink/trace-sink.mcp.js";
 import { registerTraceSourceTools } from "./api/trace-source/trace-source.mcp.js";
 import { registerViewTools } from "./api/view/view.mcp.js";
 import { registerSettingsTools } from "./api/workspace/settings.mcp.js";
@@ -77,7 +76,6 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
   registerSettingsTools(server, ctx);
   registerGithubAppTools(server, ctx);
   registerMattermostTools(server, ctx);
-  registerTraceSinkTools(server, ctx);
   registerTraceSourceTools(server, ctx);
   registerImageRegistryTools(server, ctx);
   registerCiLinkTools(server, ctx);

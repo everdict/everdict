@@ -25,7 +25,6 @@ import {
   type ScorecardService,
   originSource,
 } from "@everdict/application-control";
-import type { TraceSinkService } from "@everdict/application-control";
 import type { TraceSourceService } from "@everdict/application-control";
 import type { ViewService } from "@everdict/application-control";
 import type { BrowserProfileService } from "@everdict/application-control";
@@ -135,12 +134,12 @@ export interface ServerDeps {
     command: RuntimeControlCommand,
   ) => Promise<RuntimeControlResult>;
   secretStore?: SecretStore; // workspace secret management — main always injects it (ON by default; auto-generates an ephemeral key if no KEK). Disabled only when not injected
+  secretUsageService?: SecretUsageService; // reverse index: which registry specs / settings integrations reference each workspace secret (GET /secrets/usage) (route disabled if absent)
   invalidateTenantBackends?: (tenant: string) => void; // drop the tenant's cached runtime backends after a WORKSPACE secret change (their secretEnv is baked at build)
   githubAppService?: GithubAppService; // workspace-owned GitHub App integration (org install→selected repos) (route disabled if absent)
   mattermostService?: MattermostService; // workspace-owned Mattermost integration (register→bot notifications) (route disabled if absent)
   mattermostCommandService?: MattermostCommandService; // Mattermost inbound (slash commands/buttons) (route disabled if absent)
-  traceSinkService?: TraceSinkService; // workspace trace sinks (export to observability platform) (route disabled if absent)
-  traceSourceService?: TraceSourceService; // workspace trace sources (pull from observability platform) (route disabled if absent)
+  traceSourceService?: TraceSourceService; // workspace trace sources (register + pull/export selection + browse) (route disabled if absent)
   spanAttrMappingService?: SpanAttrMappingService; // per-harness span-attr mapping overlay (the conversion layer between a harness and a judge) (route disabled if absent)
   imageRegistryService?: ImageRegistryService; // workspace image registries (classification baseline + push mint) (route disabled if absent)
   ciLinkService?: CiLinkService; // CI repo links (repo↔harness slot + OIDC trust) + picker/setup-PR (route disabled if absent)

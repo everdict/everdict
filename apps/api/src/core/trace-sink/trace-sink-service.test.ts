@@ -1,8 +1,11 @@
-import { TraceSinkService } from "@everdict/application-control";
-import { BadRequestError, type CaseResult } from "@everdict/contracts";
+import { TraceSinkService, TraceSourceService } from "@everdict/application-control";
+import type { CaseResult, TraceSink } from "@everdict/contracts";
 import { InMemoryWorkspaceSettingsStore } from "@everdict/db";
 import type { TraceSinkConfig } from "@everdict/trace";
 import { describe, expect, it } from "vitest";
+
+// The export executor reads the per-harness EXPORT selection (traceSinkByHarness) against the ONE unified trace-source
+// pool. Registration + selection are owned by TraceSourceService (see its own test); here we exercise the export half.
 
 const RESULT: CaseResult = {
   caseId: "c1",
@@ -16,44 +19,7 @@ const RESULT: CaseResult = {
 };
 const CTX = { scorecardId: "sc-1", dataset: "d@1", harness: "h@1" };
 
-describe("TraceSinkService — multiple-sink CRUD + per-harness selection", () => {
-  it("upsert by name registers/updates multiple sinks and lists them", async () => {
-    const svc = new TraceSinkService(new InMemoryWorkspaceSettingsStore());
-    await svc.upsert("acme", { name: "mlf", kind: "mlflow", endpoint: "http://mlflow:5000", project: "7" });
-    await svc.upsert("acme", { name: "lf", kind: "langfuse", endpoint: "https://lf.corp.io" });
-    // upsert with the same name = replace (declarative).
-    await svc.upsert("acme", { name: "mlf", kind: "mlflow", endpoint: "http://mlflow2:5000" });
-    const { sinks } = await svc.list("acme");
-    expect(sinks.map((s) => s.name).sort()).toEqual(["lf", "mlf"]);
-    expect(sinks.find((s) => s.name === "mlf")?.endpoint).toBe("http://mlflow2:5000");
-    expect(sinks.find((s) => s.name === "mlf")?.project).toBeUndefined(); // full replace — the previous project is not carried over
-  });
-
-  it("per-harness selection: can only point to a registered sink (400 if missing), null clears the selection", async () => {
-    const svc = new TraceSinkService(new InMemoryWorkspaceSettingsStore());
-    await svc.upsert("acme", { name: "mlf", kind: "mlflow", endpoint: "http://mlflow:5000" });
-    await expect(svc.assign("acme", "h1", "no-such-sink")).rejects.toBeInstanceOf(BadRequestError);
-    expect(await svc.assign("acme", "h1", "mlf")).toEqual({ h1: "mlf" });
-    expect(await svc.assign("acme", "h2", "mlf")).toEqual({ h1: "mlf", h2: "mlf" });
-    expect(await svc.assign("acme", "h1", null)).toEqual({ h2: "mlf" }); // cleared
-  });
-
-  it("removing a sink also clears harness selections that pointed to it (prevents dangling) + workspace isolation", async () => {
-    const svc = new TraceSinkService(new InMemoryWorkspaceSettingsStore());
-    await svc.upsert("acme", { name: "mlf", kind: "mlflow", endpoint: "http://mlflow:5000" });
-    await svc.upsert("acme", { name: "lf", kind: "langfuse", endpoint: "https://lf" });
-    await svc.assign("acme", "h1", "mlf");
-    await svc.assign("acme", "h2", "lf");
-    await svc.upsert("globex", { name: "mlf", kind: "mlflow", endpoint: "http://other:5000" });
-    await svc.remove("acme", "mlf");
-    const acme = await svc.list("acme");
-    expect(acme.sinks.map((s) => s.name)).toEqual(["lf"]);
-    expect(acme.assignments).toEqual({ h2: "lf" }); // only h1, which pointed to mlf, is cleared
-    expect((await svc.list("globex")).sinks).toHaveLength(1); // tenant isolation
-  });
-});
-
-// service with harness h having selected the mlf sink + a capturing fake buildSink.
+// A harness h that has selected the mlf trace source AS AN EXPORT TARGET + a capturing fake buildSink.
 async function exportHarness(over: {
   sinkResult?: { url?: string; cases: Array<{ caseId: string; externalId?: string; error?: string }> };
   throwOnExport?: boolean;
@@ -62,6 +28,17 @@ async function exportHarness(over: {
   assignTo?: string | null; // defaults to "h" (the id of CTX.harness). null = no selection
 }) {
   const store = new InMemoryWorkspaceSettingsStore();
+  // Register the platform once as a trace SOURCE; the harness uses it as an export target.
+  const sources = new TraceSourceService(store);
+  await sources.upsert("acme", {
+    name: "mlf",
+    kind: "mlflow",
+    endpoint: "http://mlflow:5000",
+    project: "7",
+    ...(over.authSecretName ? { authSecretName: over.authSecretName } : {}),
+  });
+  if (over.assignTo !== null) await sources.assignSink("acme", over.assignTo ?? "h", "mlf");
+
   const captured: { cfg?: TraceSinkConfig; cases?: Array<{ caseId: string; externalId?: string }> } = {};
   const svc = new TraceSinkService(store, {
     secretsFor: async () => over.secrets ?? {},
@@ -86,19 +63,11 @@ async function exportHarness(over: {
     },
     now: () => "2026-07-06T00:00:00.000Z",
   });
-  await svc.upsert("acme", {
-    name: "mlf",
-    kind: "mlflow",
-    endpoint: "http://mlflow:5000",
-    project: "7",
-    ...(over.authSecretName ? { authSecretName: over.authSecretName } : {}),
-  });
-  if (over.assignTo !== null) await svc.assign("acme", over.assignTo ?? "h", "mlf");
   return { svc, captured };
 }
 
-describe("TraceSinkService.exportScorecard — resolving the per-harness selection", () => {
-  it("resolves the sink selected by ctx.harness's id, exports, and records the sink name in the outcome", async () => {
+describe("TraceSinkService.exportScorecard — resolving the per-harness export selection over the source pool", () => {
+  it("resolves the source selected by ctx.harness's id, exports, and records the name in the outcome", async () => {
     const { svc, captured } = await exportHarness({
       authSecretName: "MLFLOW_AUTH",
       secrets: { MLFLOW_AUTH: "Basic x" },
@@ -111,16 +80,16 @@ describe("TraceSinkService.exportScorecard — resolving the per-harness selecti
       project: "7",
     });
     expect(out?.status).toBe("succeeded");
-    expect(out?.name).toBe("mlf"); // records which sink it was
+    expect(out?.name).toBe("mlf"); // records which source it exported to
     expect(out?.cases?.[0]?.externalId).toBe("ext-c1");
   });
 
-  it("if the harness has selected no sink, it is a no-op (undefined) — export is opt-in", async () => {
+  it("if the harness has selected no export target, it is a no-op (undefined) — export is opt-in", async () => {
     const { svc } = await exportHarness({ assignTo: null });
     expect(await svc.exportScorecard("acme", CTX, [RESULT])).toBeUndefined();
   });
 
-  it("a per-batch sinkOverride selects the named sink even when the harness selected nothing", async () => {
+  it("a per-batch sinkOverride selects the named source even when the harness selected nothing", async () => {
     const { svc, captured } = await exportHarness({ assignTo: null }); // no harness selection at all
     const out = await svc.exportScorecard("acme", { ...CTX, sinkOverride: "mlf" }, [RESULT]);
     expect(out?.status).toBe("succeeded");
@@ -128,7 +97,7 @@ describe("TraceSinkService.exportScorecard — resolving the per-harness selecti
     expect(captured.cases?.[0]?.caseId).toBe("c1");
   });
 
-  it('a per-batch sinkOverride of "none" suppresses export even when the harness selected a sink', async () => {
+  it('a per-batch sinkOverride of "none" suppresses export even when the harness selected a target', async () => {
     const { svc } = await exportHarness({}); // harness h HAS mlf selected
     expect(await svc.exportScorecard("acme", { ...CTX, sinkOverride: "none" }, [RESULT])).toBeUndefined();
   });
@@ -181,26 +150,28 @@ describe("TraceSinkService.exportScorecard — resolving the per-harness selecti
 });
 
 describe("TraceSinkService.exportStream — case streaming (D5)", () => {
-  it("push fires per case immediately without waiting for settle, and settle aggregates into the existing outcome shape", async () => {
+  async function streamingSvc(buildSink: (cfg: TraceSinkConfig) => TraceSink) {
     const store = new InMemoryWorkspaceSettingsStore();
+    const sources = new TraceSourceService(store);
+    await sources.upsert("acme", { name: "mlf", kind: "mlflow", endpoint: "http://mlflow:5000", project: "7" });
+    await sources.assignSink("acme", "h", "mlf");
+    return new TraceSinkService(store, { buildSink, now: () => "2026-07-07T00:00:00.000Z" });
+  }
+
+  it("push fires per case immediately without waiting for settle, and settle aggregates into the existing outcome shape", async () => {
     const calls: string[][] = []; // case composition per call — must be an individual call per case
-    const svc = new TraceSinkService(store, {
-      buildSink: () => ({
-        async export(_ctx, cases) {
-          calls.push(cases.map((c) => c.caseId));
-          return {
-            url: "http://mlflow/#/experiments/7",
-            cases: cases.map((c) => ({ caseId: c.caseId, externalId: `ext-${c.caseId}` })),
-          };
-        },
-      }),
-      now: () => "2026-07-07T00:00:00.000Z",
-    });
-    await svc.upsert("acme", { name: "mlf", kind: "mlflow", endpoint: "http://mlflow:5000" });
-    await svc.assign("acme", "h", "mlf");
+    const svc = await streamingSvc(() => ({
+      async export(_ctx, cases) {
+        calls.push(cases.map((c) => c.caseId));
+        return {
+          url: "http://mlflow/#/experiments/7",
+          cases: cases.map((c) => ({ caseId: c.caseId, externalId: `ext-${c.caseId}` })),
+        };
+      },
+    }));
 
     const stream = await svc.exportStream("acme", CTX);
-    if (!stream) throw new Error("a sink is selected, so a stream must exist");
+    if (!stream) throw new Error("a source is selected, so a stream must exist");
     stream.push(RESULT);
     await new Promise((r) => setTimeout(r, 0)); // task-fire tick
     expect(calls).toEqual([["c1"]]); // already sent before settle — the essence of streaming
@@ -215,19 +186,13 @@ describe("TraceSinkService.exportStream — case streaming (D5)", () => {
   });
 
   it("per-case failures are isolated — one case's upstream error does not block others and aggregates to partial", async () => {
-    const store = new InMemoryWorkspaceSettingsStore();
-    const svc = new TraceSinkService(store, {
-      buildSink: () => ({
-        async export(_ctx, cases) {
-          const id = cases[0]?.caseId ?? "?";
-          if (id === "c1") throw new Error("c1 only: upstream 500");
-          return { cases: cases.map((c) => ({ caseId: c.caseId, externalId: `ext-${c.caseId}` })) };
-        },
-      }),
-      now: () => "2026-07-07T00:00:00.000Z",
-    });
-    await svc.upsert("acme", { name: "mlf", kind: "mlflow", endpoint: "http://mlflow:5000" });
-    await svc.assign("acme", "h", "mlf");
+    const svc = await streamingSvc(() => ({
+      async export(_ctx, cases) {
+        const id = cases[0]?.caseId ?? "?";
+        if (id === "c1") throw new Error("c1 only: upstream 500");
+        return { cases: cases.map((c) => ({ caseId: c.caseId, externalId: `ext-${c.caseId}` })) };
+      },
+    }));
 
     const stream = await svc.exportStream("acme", CTX);
     if (!stream) throw new Error("expected a stream");
@@ -239,48 +204,5 @@ describe("TraceSinkService.exportStream — case streaming (D5)", () => {
     expect(out.message).toContain("1/2");
     expect(out.cases?.find((c) => c.caseId === "c1")?.error).toContain("upstream 500");
     expect(out.cases?.find((c) => c.caseId === "c2")?.externalId).toBe("ext-c2");
-  });
-});
-
-describe("TraceSinkService — connection probe", () => {
-  it("resolves the auth secret and delegates to the injected probe engine", async () => {
-    const calls: unknown[] = [];
-    const svc = new TraceSinkService(new InMemoryWorkspaceSettingsStore(), {
-      secretsFor: async () => ({ "lf-key": "Basic xyz" }),
-      probeConnection: async (cfg) => {
-        calls.push(cfg);
-        return {
-          kind: cfg.kind,
-          reachable: true,
-          scopeKind: "project",
-          scopes: [{ id: "p1", name: "prod" }],
-          detail: "ok",
-        };
-      },
-    });
-    const res = await svc.probe("acme", { kind: "langfuse", endpoint: "https://lf.corp.io", authSecretName: "lf-key" });
-    expect(res).toMatchObject({ reachable: true, scopeKind: "project" });
-    expect(calls[0]).toEqual({ kind: "langfuse", endpoint: "https://lf.corp.io", auth: "Basic xyz" });
-  });
-
-  it("returns reason:'auth' (not a throw) when the referenced secret has no value", async () => {
-    let probed = false;
-    const svc = new TraceSinkService(new InMemoryWorkspaceSettingsStore(), {
-      secretsFor: async () => ({}),
-      probeConnection: async (cfg) => {
-        probed = true;
-        return { kind: cfg.kind, reachable: true, detail: "unexpected" };
-      },
-    });
-    const res = await svc.probe("acme", { kind: "mlflow", endpoint: "http://mlflow:5000", authSecretName: "missing" });
-    expect(res).toMatchObject({ reachable: false, reason: "auth" });
-    expect(probed).toBe(false);
-  });
-
-  it("throws when connection testing is not configured (no probe engine injected)", async () => {
-    const svc = new TraceSinkService(new InMemoryWorkspaceSettingsStore());
-    await expect(svc.probe("acme", { kind: "mlflow", endpoint: "http://mlflow:5000" })).rejects.toBeInstanceOf(
-      BadRequestError,
-    );
   });
 });

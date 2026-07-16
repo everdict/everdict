@@ -7,7 +7,6 @@ import { RunService, type RunServiceDeps } from "@everdict/application-control";
 import { RunnerService } from "@everdict/application-control";
 import { ScheduleService } from "@everdict/application-control";
 import { ScorecardService } from "@everdict/application-control";
-import { TraceSinkService } from "@everdict/application-control";
 import { SpanAttrMappingService, TraceSourceService } from "@everdict/application-control";
 import { WorkspaceService } from "@everdict/application-control";
 import { type Authenticator, apiKeyAuthenticator, compositeAuthenticator } from "@everdict/auth";
@@ -227,7 +226,6 @@ function server(
       | "project",
     scopes: [{ id: "s1", name: "scope-one" }],
   });
-  const traceSinkService = new TraceSinkService(settingsStore, { probeConnection });
   const traceSourceService = new TraceSourceService(settingsStore, {
     secretsFor: (ws) => secretStore.entries(ws),
     probeConnection,
@@ -305,7 +303,6 @@ function server(
     githubAppService,
     mattermostService,
     mattermostCommandService,
-    traceSinkService,
     traceSourceService,
     spanAttrMappingService,
     imageRegistryService,
@@ -655,10 +652,16 @@ describe("API — workspace integrations (GitHub App / Mattermost)", () => {
         authSecretName: "MLFLOW_AUTH",
         correlate: "tag",
         project: "7",
+        webUrl: "http://mlflow.corp.io:5000/ui",
       },
     });
     expect(put.statusCode).toBe(200);
-    expect(put.json().config).toMatchObject({ name: "dev-mlflow", correlate: "tag", project: "7" });
+    expect(put.json().config).toMatchObject({
+      name: "dev-mlflow",
+      correlate: "tag",
+      project: "7",
+      webUrl: "http://mlflow.corp.io:5000/ui",
+    });
     // An incoherent tag config (otel tag without service) is rejected at registration, not at pull time.
     expect(
       (
@@ -770,80 +773,52 @@ describe("API — workspace integrations (GitHub App / Mattermost)", () => {
     await app.close();
   });
 
-  it("trace sinks (multiple): admin registers/removes by name, member selects per harness, viewer read-only (register 403)", async () => {
+  it("export target (trace sink) is a per-harness selection over the SAME source pool: register a source, select it for export, otel rejected", async () => {
     const h = { authorization: "Bearer x" };
     const { app } = server({ requireAuth: true, authenticator: roleAuth(["admin"]) });
-    // Given/When: admin registers two sinks by name (secrets referenced by name only).
-    const put = await app.inject({
-      method: "PUT",
-      url: "/workspace/trace-sinks",
-      headers: h,
-      payload: {
-        name: "mlf",
-        kind: "mlflow",
-        endpoint: "http://mlflow.corp.io:5000",
-        authSecretName: "MLFLOW_AUTH",
-        project: "7",
-      },
-    });
-    expect(put.statusCode).toBe(200);
-    expect(put.json().config.name).toBe("mlf");
+    // Register one source pool: a sink-capable mlflow (export-usable) + an otel (pull-only).
     await app.inject({
       method: "PUT",
-      url: "/workspace/trace-sinks",
+      url: "/workspace/trace-sources",
       headers: h,
-      payload: { name: "lf", kind: "langfuse", endpoint: "https://langfuse.corp.io" },
+      payload: { name: "mlf", kind: "mlflow", endpoint: "http://mlflow.corp.io:5000", project: "7" },
     });
-    // Then: both appear in the list + per-harness selection accepts only registered sinks (unknown name → 400).
-    const list = await app.inject({ method: "GET", url: "/workspace/trace-sinks", headers: h });
+    await app.inject({
+      method: "PUT",
+      url: "/workspace/trace-sources",
+      headers: h,
+      payload: { name: "jg", kind: "otel", endpoint: "http://jaeger" },
+    });
+    // Export selection accepts only a registered source (unknown → 400) and refuses an otel source (pull-only → 400).
     expect(
-      list
-        .json()
-        .sinks.map((s: { name: string }) => s.name)
-        .sort(),
-    ).toEqual(["lf", "mlf"]);
+      (await app.inject({ method: "PUT", url: "/harnesses/h1/trace-sink", headers: h, payload: { source: "ghost" } }))
+        .statusCode,
+    ).toBe(400);
     expect(
-      (
-        await app.inject({
-          method: "PUT",
-          url: "/harnesses/h1/trace-sink",
-          headers: h,
-          payload: { sink: "no-such-sink" },
-        })
-      ).statusCode,
+      (await app.inject({ method: "PUT", url: "/harnesses/h1/trace-sink", headers: h, payload: { source: "jg" } }))
+        .statusCode,
     ).toBe(400);
     const assign = await app.inject({
       method: "PUT",
       url: "/harnesses/h1/trace-sink",
       headers: h,
-      payload: { sink: "mlf" },
+      payload: { source: "mlf" },
     });
     expect(assign.json().assignments).toEqual({ h1: "mlf" });
-    // Removing a sink → it drops from the list and dangling selections are cleaned up.
-    expect((await app.inject({ method: "DELETE", url: "/workspace/trace-sinks/mlf", headers: h })).statusCode).toBe(
+    // The roster surfaces the export selection separately from the pull selection.
+    const roster = await app.inject({ method: "GET", url: "/workspace/trace-sources", headers: h });
+    expect(roster.json().sinkAssignments).toEqual({ h1: "mlf" });
+    // Removing the source cleans up the export selection (no dangling reference).
+    expect((await app.inject({ method: "DELETE", url: "/workspace/trace-sources/mlf", headers: h })).statusCode).toBe(
       204,
     );
-    const after = await app.inject({ method: "GET", url: "/workspace/trace-sinks", headers: h });
-    expect(after.json().sinks.map((s: { name: string }) => s.name)).toEqual(["lf"]);
-    expect(after.json().assignments).toEqual({});
+    expect(
+      (await app.inject({ method: "GET", url: "/workspace/trace-sources", headers: h })).json().sinkAssignments,
+    ).toEqual({});
     await app.close();
-
-    // viewer: read is allowed (harnesses:read), register is 403 (settings:write).
-    const viewer = server({ requireAuth: true, authenticator: roleAuth(["viewer"]) });
-    expect((await viewer.app.inject({ method: "GET", url: "/workspace/trace-sinks", headers: h })).statusCode).toBe(
-      200,
-    );
-    const denied = await viewer.app.inject({
-      method: "PUT",
-      url: "/workspace/trace-sinks",
-      headers: h,
-      payload: { name: "lf", kind: "langfuse", endpoint: "https://langfuse.corp.io" },
-    });
-    expect(denied.statusCode).toBe(403);
-    await viewer.app.close();
   });
 
-  it("trace source/sink probe: admin gets a reachable result + discovered scopes; bad body 400; viewer 403", async () => {
+  it("trace source probe: admin gets a reachable result + discovered scopes; bad body 400; viewer 403", async () => {
     const h = { authorization: "Bearer x" };
     const { app } = server({ requireAuth: true, authenticator: roleAuth(["admin"]) });
     // Source probe (mlflow, unauthenticated dev server) → reachable + experiment scopes, returned verbatim (no {config} wrapper).
@@ -856,16 +831,7 @@ describe("API — workspace integrations (GitHub App / Mattermost)", () => {
     expect(src.statusCode).toBe(200);
     expect(src.json()).toMatchObject({ kind: "mlflow", reachable: true, scopeKind: "experiment" });
     expect(src.json().scopes).toEqual([{ id: "s1", name: "scope-one" }]);
-    // Sink probe (langfuse) → reachable + project scopes.
-    const sink = await app.inject({
-      method: "POST",
-      url: "/workspace/trace-sinks/probe",
-      headers: h,
-      payload: { kind: "langfuse", endpoint: "https://langfuse.corp.io" },
-    });
-    expect(sink.statusCode).toBe(200);
-    expect(sink.json()).toMatchObject({ reachable: true, scopeKind: "project" });
-    // Bad body (missing endpoint, otel not a sink kind) → 400.
+    // Bad body (missing endpoint) → 400.
     expect(
       (
         await app.inject({
@@ -873,16 +839,6 @@ describe("API — workspace integrations (GitHub App / Mattermost)", () => {
           url: "/workspace/trace-sources/probe",
           headers: h,
           payload: { kind: "mlflow" },
-        })
-      ).statusCode,
-    ).toBe(400);
-    expect(
-      (
-        await app.inject({
-          method: "POST",
-          url: "/workspace/trace-sinks/probe",
-          headers: h,
-          payload: { kind: "otel", endpoint: "http://x" },
         })
       ).statusCode,
     ).toBe(400);

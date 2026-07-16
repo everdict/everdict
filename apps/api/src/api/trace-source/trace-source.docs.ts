@@ -29,8 +29,9 @@ const docs = {
     summary: "Register or update a trace source",
     description:
       "Name-keyed upsert (declarative full replace). Put the auth token value into the SecretStore first and pass " +
-      "only its name. correlate:'tag' (search the everdict.run_id the deployed agent tagged) needs `service` for " +
-      "otel and `project` for mlflow/phoenix. Requires settings:write (admin) — per-harness selection is separate.",
+      "only its name. `project` is required for mlflow (experiment) and phoenix (both to pull AND to export — traces " +
+      "live inside it); otel correlate:'tag' needs `service`. correlate is a pull-only detail (default id). Requires " +
+      "settings:write (admin) — per-harness pull/export selection is separate.",
     tags: ["trace-source"],
     body: toJsonSchema(
       z.object({
@@ -38,9 +39,10 @@ const docs = {
         kind: z.enum(["otel", "mlflow", "langfuse", "langsmith", "phoenix"]),
         endpoint: z.string().url().describe("Platform query API base URL"),
         authSecretName: z.string().min(1).optional().describe("SecretStore name of the auth-header value"),
-        correlate: z.enum(["id", "tag"]).optional().describe("How this run's trace is found (default id)"),
+        correlate: z.enum(["id", "tag"]).optional().describe("How a pulled trace is found (default id)"),
         service: z.string().min(1).optional().describe("otel/jaeger tag-search scope (the agent's service.name)"),
-        project: z.string().min(1).optional().describe("mlflow experiment_id / phoenix project (tag/span scope)"),
+        project: z.string().min(1).optional().describe("mlflow experiment_id / phoenix|langfuse|langsmith project"),
+        webUrl: z.string().url().optional().describe("export deep-link base when it differs from the endpoint"),
       }),
     ),
     response: {
@@ -78,7 +80,7 @@ const docs = {
     response: { 204: { description: "Removed", type: "null" }, ...errorResponses(401, 403, 404) },
   },
   assign: {
-    summary: "Select a trace source for a harness",
+    summary: "Select a PULL trace source for a harness",
     description:
       "Per-harness opt-in: chooses which registered source everdict pulls this harness's case traces from. " +
       "source:null clears the selection (fall back to inline / no pull); an unregistered name is 400. Requires " +
@@ -87,7 +89,21 @@ const docs = {
     params: toJsonSchema(z.object({ id: z.string().describe("Harness id (selection is version-independent)") })),
     body: toJsonSchema(z.object({ source: z.string().min(1).nullable().describe("Source name, or null to deselect") })),
     response: {
-      200: { description: "Updated per-harness selection map", ...toJsonSchema(TraceSourceAssignmentsResponseSchema) },
+      200: { description: "Updated per-harness PULL selection map", ...toJsonSchema(TraceSourceAssignmentsResponseSchema) },
+      ...errorResponses(400, 401, 403, 404),
+    },
+  },
+  assignSink: {
+    summary: "Select an EXPORT target (trace source) for a harness",
+    description:
+      "Per-harness opt-in: chooses which registered source this harness's judged scorecards export to (the source used " +
+      "as an export target). source:null clears it (export off); an unregistered name or an otel source (pull-only) is " +
+      "400. Same source pool as the pull selection — the direction is the use-site choice. Requires harnesses:register.",
+    tags: ["trace-source"],
+    params: toJsonSchema(z.object({ id: z.string().describe("Harness id (selection is version-independent)") })),
+    body: toJsonSchema(z.object({ source: z.string().min(1).nullable().describe("Source name, or null to deselect") })),
+    response: {
+      200: { description: "Updated per-harness EXPORT selection map", ...toJsonSchema(TraceSourceAssignmentsResponseSchema) },
       ...errorResponses(400, 401, 403, 404),
     },
   },

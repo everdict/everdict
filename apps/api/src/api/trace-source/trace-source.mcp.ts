@@ -24,7 +24,7 @@ export function registerTraceSourceTools(server: McpServer, ctx: McpToolContext)
       "set_workspace_trace_source",
       {
         description:
-          "Register/update a trace source (admin, upsert by name). When a harness selects this source, everdict pulls that case's trace from this platform after the run and grades/judges it. Put the auth token (value) in the SecretStore first and pass its name as authSecretName. correlate:'tag' needs service (otel) or project (mlflow/phoenix).",
+          "Register/update a trace source (admin, upsert by name). One pool: a harness uses it to PULL its trace from and/or to EXPORT judged results to (that direction is a per-harness choice). Put the auth token (value) in the SecretStore first and pass its name as authSecretName. `project` is required for mlflow (experiment) and phoenix; otel correlate:'tag' needs service.",
         inputSchema: {
           name: z.string().min(1).describe("source name (reference key — per-harness selection points at this name)"),
           kind: z.enum(["otel", "mlflow", "langfuse", "langsmith", "phoenix"]).describe("observability platform kind"),
@@ -38,10 +38,11 @@ export function registerTraceSourceTools(server: McpServer, ctx: McpToolContext)
             .enum(["id", "tag"])
             .optional()
             .describe(
-              "id = runId IS the trace id (default) | tag = search the everdict.run_id the deployed agent tagged",
+              "pull-only: id = runId IS the trace id (default) | tag = search the everdict.run_id the deployed agent tagged",
             ),
           service: z.string().min(1).optional().describe("otel/jaeger tag-search scope (the agent's service.name)"),
-          project: z.string().min(1).optional().describe("mlflow experiment_id / phoenix project (tag/span scope)"),
+          project: z.string().min(1).optional().describe("mlflow experiment_id / phoenix|langfuse|langsmith project"),
+          webUrl: z.string().url().optional().describe("export deep-link base when it differs from the endpoint"),
         },
       },
       (input) => run(principal, "settings:write", async () => ok({ config: await source.upsert(ws, input) })),
@@ -80,7 +81,7 @@ export function registerTraceSourceTools(server: McpServer, ctx: McpToolContext)
       "assign_harness_trace_source",
       {
         description:
-          "Per-harness trace source selection (member+) — which registered source everdict pulls this harness's case traces from. Omit source to clear the selection (fall back to inline / no pull).",
+          "Per-harness PULL selection (member+) — which registered source everdict pulls this harness's case traces from. Omit source to clear the selection (fall back to inline / no pull).",
         inputSchema: {
           harness: z.string().min(1).describe("harness id"),
           source: z.string().min(1).optional().describe("source name (omit = clear selection)"),
@@ -88,7 +89,22 @@ export function registerTraceSourceTools(server: McpServer, ctx: McpToolContext)
       },
       ({ harness, source: sourceName }) =>
         run(principal, "harnesses:register", async () =>
-          ok({ assignments: await source.assign(ws, harness, sourceName ?? null) }),
+          ok({ assignments: await source.assignSource(ws, harness, sourceName ?? null) }),
+        ),
+    );
+    server.registerTool(
+      "assign_harness_trace_sink",
+      {
+        description:
+          "Per-harness EXPORT selection (member+) — which registered source this harness's judged scorecards export to (the source used as an export target; a sink-capable kind, not otel). Same pool as the pull selection. Omit source to clear (export off).",
+        inputSchema: {
+          harness: z.string().min(1).describe("harness id"),
+          source: z.string().min(1).optional().describe("source name used as an export target (omit = clear selection)"),
+        },
+      },
+      ({ harness, source: sourceName }) =>
+        run(principal, "harnesses:register", async () =>
+          ok({ assignments: await source.assignSink(ws, harness, sourceName ?? null) }),
         ),
     );
     server.registerTool(

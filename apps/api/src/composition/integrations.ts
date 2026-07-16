@@ -37,16 +37,16 @@ export function buildIntegrations(deps: {
   const mattermostService = new MattermostService(settingsStore, {
     ...(process.env.API_PUBLIC_URL ? { apiPublicUrl: process.env.API_PUBLIC_URL } : {}),
   });
-  // Workspace trace sinks — export scorecard detail results to the team's observability platform. docs/architecture/trace-sink.md
+  // Trace-sink EXPORT executor — export scorecard detail results to the source a harness selected as an export target
+  // (registration lives on TraceSourceService now). docs/architecture/trace-sink.md
   const traceSinkService = new TraceSinkService(settingsStore, {
     secretsFor: runtimeSecretsFor, // authSecretName → shared (workspace) secret value
     buildSink: buildTraceSink,
-    probeConnection: probeTraceConnection, // connection test + scope discovery before registering
   });
-  // Workspace trace sources (inbound mirror) — register a dev-cluster observability endpoint by name; a service harness
-  // selects one so everdict pulls that case's trace from it after the run. resolve() reads the auth value here (transient).
+  // Workspace trace sources — the ONE registration pool for observability platforms. A harness selects one to PULL its
+  // trace from and/or to EXPORT judged results to (use-site choice). resolve() reads the auth value here (transient).
   const traceSourceService = new TraceSourceService(settingsStore, {
-    secretsFor: runtimeSecretsFor, // authSecretName → shared (workspace) secret value (pull-time only)
+    secretsFor: runtimeSecretsFor, // authSecretName → shared (workspace) secret value (point-of-use only)
     probeConnection: probeTraceConnection, // connection test + scope discovery before registering
     buildSource: buildTraceSource, // config → BrowsableTraceSource — powers the observability browser (listTraces/inspect)
   });

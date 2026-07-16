@@ -312,11 +312,11 @@ async function main(): Promise<void> {
     membershipService,
     profileService,
     secretStore,
+    secretUsageService,
     invalidateTenantBackends, // workspace secret change → drop the tenant's cached runtime backends (stale secretEnv)
     githubAppService,
     mattermostService,
     mattermostCommandService,
-    traceSinkService,
     traceSourceService,
     spanAttrMappingService,
     imageRegistryService,
