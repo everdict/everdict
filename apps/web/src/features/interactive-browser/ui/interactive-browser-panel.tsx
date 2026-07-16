@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useTranslations } from 'next-intl'
 
 import { Button } from '@/shared/ui/button'
@@ -16,17 +16,42 @@ interface SessionView {
 
 // Interactive browser session panel (browser-profiles S1) — starts a dedicated browser and hands it to the canvas
 // so the owner drives it live (navigate, click, type, log in). Personal / self-scoped; one active session at a time.
+// A country (browser-profiles S4) routes the login browser through the workspace's egress proxy for that geo.
 export function InteractiveBrowserPanel({ initialSession }: { initialSession: SessionView | null }) {
   const t = useTranslations('interactiveBrowser')
   const [session, setSession] = useState<SessionView | null>(initialSession)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [countries, setCountries] = useState<string[]>([])
+  const [country, setCountry] = useState('')
+
+  // Load the workspace's proxy countries (S4) for the geo picker — empty (no proxies) hides the picker.
+  useEffect(() => {
+    let stopped = false
+    ;(async () => {
+      try {
+        const res = await fetch('/api/workspace/proxies')
+        if (!res.ok) return
+        const { proxies } = (await res.json()) as { proxies?: Array<{ country: string }> }
+        if (!stopped && proxies) setCountries([...new Set(proxies.map((p) => p.country))].sort())
+      } catch {
+        // no proxies configured — the picker stays hidden
+      }
+    })()
+    return () => {
+      stopped = true
+    }
+  }, [])
 
   const start = async () => {
     setBusy(true)
     setError(null)
     try {
-      const res = await fetch('/api/browser-sessions', { method: 'POST' })
+      const res = await fetch('/api/browser-sessions', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(country ? { country } : {}),
+      })
       const body = (await res.json()) as SessionView & { error?: string }
       if (!res.ok || body.error) throw new Error(body.error ?? `HTTP ${res.status}`)
       setSession({ id: body.id, status: body.status })
@@ -68,6 +93,23 @@ export function InteractiveBrowserPanel({ initialSession }: { initialSession: Se
       ) : (
         <div className="flex flex-col items-start gap-3 rounded-xl border border-border bg-card p-6">
           <p className="text-[13px] text-muted-foreground">{t('startHint')}</p>
+          {countries.length > 0 && (
+            <label className="flex items-center gap-2 text-[12px] text-muted-foreground">
+              {t('geoLabel')}
+              <select
+                value={country}
+                onChange={(e) => setCountry(e.target.value)}
+                className="h-8 rounded-md border border-border bg-background px-2 text-[12px]"
+              >
+                <option value="">{t('geoDirect')}</option>
+                {countries.map((c) => (
+                  <option key={c} value={c}>
+                    {c}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
           <Button onClick={start} disabled={busy}>
             {busy ? t('starting') : t('start')}
           </Button>

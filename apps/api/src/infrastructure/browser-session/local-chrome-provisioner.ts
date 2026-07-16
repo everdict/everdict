@@ -4,7 +4,11 @@ import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { UpstreamError } from "@everdict/contracts";
-import type { BrowserSessionProvisioner, ProvisionedBrowser } from "../../common/browser-session-provisioner.js";
+import type {
+  BrowserSessionProvisioner,
+  ProvisionBrowserOptions,
+  ProvisionedBrowser,
+} from "../../common/browser-session-provisioner.js";
 
 // Candidate Chrome/Chromium binaries, in preference order (same set the S0 live proof uses). `as const` so the
 // [0] default is a non-undefined literal under noUncheckedIndexedAccess.
@@ -58,7 +62,7 @@ export class LocalChromeProvisioner implements BrowserSessionProvisioner {
     this.windowSize = opts.windowSize ?? "1280,800";
   }
 
-  async provision(): Promise<ProvisionedBrowser> {
+  async provision(opts: ProvisionBrowserOptions = {}): Promise<ProvisionedBrowser> {
     const port = await this.freePort();
     const cdpBase = `http://127.0.0.1:${port}`;
     const userDataDir = mkdtempSync(join(tmpdir(), "evd-browser-session-"));
@@ -71,6 +75,7 @@ export class LocalChromeProvisioner implements BrowserSessionProvisioner {
       `--remote-debugging-port=${port}`,
       "--remote-allow-origins=*",
       `--user-data-dir=${userDataDir}`,
+      ...(opts.proxyServer ? [`--proxy-server=${opts.proxyServer}`] : []),
       "about:blank",
     ];
     const proc = this.spawnImpl(this.binary ?? CHROME_BINARIES[0], args);

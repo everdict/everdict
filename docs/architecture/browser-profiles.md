@@ -1,6 +1,6 @@
 # Authenticated browser profiles — a real interactive remote browser, cookies reused in eval (design)
 
-> **Status: S0 + S1 (transport + web canvas) + S2 (profile entity) + S3 (cookie capture) SHIPPED. S4+ in slices.** S0 = the interactive live browser
+> **Status: S0 + S1 (transport + web canvas) + S2 (profile entity) + S3 (cookie capture) + S4 (proxy/geo, login browser) SHIPPED. S5 (eval injection) next.** S0 = the interactive live browser
 > session primitive (`openBrowserSession`, `@everdict/topology`, `a168b5b`): CDP screencast (frames OUT, each
 > acked) + input (mouse/keyboard/navigate IN), transport-injectable, live-proven against real Chrome via
 > `scripts/live/interactive-browser.mjs`. **S1 productizes the transport end-to-end**: a personal / self-scoped
@@ -96,8 +96,15 @@ short-lived container/pod per active login; self-hosted = the user's own local b
   `POST /browser-profiles/:id/capture {sessionId}` + MCP `capture_browser_profile`. Web: "Save login" on the
   interactive-session panel (create profile → capture) + a `capturedAt` badge on the profiles list. (localStorage
   capture via `Runtime.evaluate` is deferred — cookies are the login material for most sites.)
-- **Proxy / geo** (S4): a `ProxyProvider` (BYO proxy pool registered per workspace, like image-registries/trace
-  sinks; country → proxy URL + auth) → `--proxy-server` on both the login browser and eval browsers.
+- **Proxy / geo** (S4): ✅ SHIPPED (login browser). `WorkspaceSettings.proxies` (BYO per-country pool, like
+  image-registries/trace sinks; `{name, country, url, authSecretName?}`, the auth secret a SecretStore name-ref) +
+  `ProxyService` (`@everdict/application-control`: list/upsert/remove admin (settings:write) + `resolve(country)` →
+  the `--proxy-server` value, folding the auth secret into the URL). Routes `GET /workspace/proxies` (workspace read,
+  no role gate — the session geo picker consumes it) + `PUT`/`DELETE` (admin) + MCP parity. The interactive session
+  (`BrowserSessionService.create({country})`) resolves the country → the `LocalChromeProvisioner` launches Chrome
+  with `--proxy-server`; web adds a Settings › Proxies admin card + a geo picker on the session panel. **Eval-browser
+  proxy is S5.** Known limit: headless Chrome doesn't honor inline proxy *auth* — full authed-proxy support needs CDP
+  `Fetch.continueWithAuth` (a follow-up); open proxies + inline-cred setups work today.
 - **Injection** (S5): a browser eval whose case/target references `profileId` → at `provisionBrowserEnv`, **before
   the agent connects**: launch with the profile's proxy, then seed cookies via CDP `Network.setCookies` (+
   localStorage) from the decrypted `storageState`. The agent (browser-use) receives an already-authenticated browser.
@@ -127,7 +134,7 @@ short-lived container/pod per active login; self-hosted = the user's own local b
    + `entities/browser-profile` drift-guarded schema + ko/en i18n. A profile is a login placeholder until S3 captures
    cookies into it.
 5. **S3 — cookie capture** on session save (`Network.getAllCookies` → storageState → encrypt → store). ✅ SHIPPED.
-6. **S4 — proxy / geo** (`ProxyProvider`, `--proxy-server`).
+6. **S4 — proxy / geo** (`ProxyProvider`, `--proxy-server`). ✅ SHIPPED for the login browser (eval-browser proxy = S5).
 7. **S5 — injection into eval** (seed cookies + proxy before the agent connects).
 8. **S6 — managed K8s reachability** (port-forward/ingress to the pod CDP) — lifts S1 from local-Docker to the SaaS.
 

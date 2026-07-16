@@ -6,16 +6,19 @@ import { browserSessionDocs } from "./browser-session.docs.js";
 // into a site. Personal / self-scoped (owner = subject, like connected accounts): authenticated, NO role gate; the
 // service enforces owner-only (a cross-owner id 404s, no existence leak). See docs/architecture/browser-profiles.md.
 export function registerBrowserSessionRoutes(app: FastifyInstance, deps: ServerDeps): void {
-  // Start a session — provisions a dedicated browser and returns its handle (at most one active per owner).
-  app.post("/browser-sessions", { schema: browserSessionDocs.create }, async (req, reply) => {
+  // Start a session — provisions a dedicated browser and returns its handle (at most one active per owner). An
+  // optional { country } selects the workspace's egress proxy for the login browser (browser-profiles S4).
+  app.post<{ Body: { country?: string } }>("/browser-sessions", { schema: browserSessionDocs.create }, async (req, reply) => {
     if (!deps.browserSessionService)
       return reply.code(404).send({ code: "NOT_FOUND", message: "browser sessions not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
+    const country = typeof req.body?.country === "string" && req.body.country ? req.body.country : undefined;
     try {
       const session = await deps.browserSessionService.create({
         tenant: principal.workspace,
         createdBy: principal.subject,
+        ...(country ? { country } : {}),
       });
       return reply.send(session);
     } catch (err) {

@@ -10,7 +10,13 @@ export interface ProvisionedBrowser {
   dispose(): Promise<void>;
 }
 
+export interface ProvisionBrowserOptions {
+  // Egress proxy for the login browser (Chrome --proxy-server) — resolved from the workspace's per-country pool
+  // (browser-profiles S4). Absent = a direct connection.
+  proxyServer?: string;
+}
+
 export interface BrowserSessionProvisioner {
   // Bring up a dedicated interactive browser and return its reachable CDP base + a disposer.
-  provision(): Promise<ProvisionedBrowser>;
+  provision(opts?: ProvisionBrowserOptions): Promise<ProvisionedBrowser>;
 }

@@ -6,12 +6,15 @@ import { type BrowserSessionEntry, type BrowserSessionView, toBrowserSessionView
 export interface CreateBrowserSessionCommand {
   tenant: string;
   createdBy: string;
+  country?: string; // geo (browser-profiles S4) — resolved to the workspace's proxy for the login browser
 }
 
 export interface BrowserSessionServiceOptions {
   ttlMs?: number; // session lifetime (default 15m) — the browser is torn down after this
   now?: () => number;
   newId?: () => string;
+  // Resolve a country → the Chrome --proxy-server value (browser-profiles S4). Absent / undefined return = direct.
+  resolveProxy?: (tenant: string, country: string) => Promise<string | undefined>;
 }
 
 // Owns the lifecycle of interactive browser sessions: provision a dedicated browser, hold its reachable CDP base
@@ -22,6 +25,7 @@ export class BrowserSessionService {
   private readonly ttlMs: number;
   private readonly now: () => number;
   private readonly newId: () => string;
+  private readonly resolveProxy?: (tenant: string, country: string) => Promise<string | undefined>;
 
   constructor(
     private readonly provisioner: BrowserSessionProvisioner,
@@ -30,14 +34,17 @@ export class BrowserSessionService {
     this.ttlMs = opts.ttlMs ?? 15 * 60_000;
     this.now = opts.now ?? (() => Date.now());
     this.newId = opts.newId ?? (() => randomUUID());
+    this.resolveProxy = opts.resolveProxy;
   }
 
   // Bring up a dedicated interactive browser for the owner. Enforces a single active session per owner (the
-  // browser is a scarce resource; the doc gates to one live session): any existing session is closed first.
+  // browser is a scarce resource; the doc gates to one live session): any existing session is closed first. A
+  // country resolves to the workspace's egress proxy (S4) so the login runs from that geo.
   async create(cmd: CreateBrowserSessionCommand): Promise<BrowserSessionView> {
     this.sweep();
     await this.closeOwned(cmd.createdBy);
-    const browser = await this.provisioner.provision();
+    const proxyServer = cmd.country && this.resolveProxy ? await this.resolveProxy(cmd.tenant, cmd.country) : undefined;
+    const browser = await this.provisioner.provision(proxyServer ? { proxyServer } : undefined);
     const id = this.newId();
     const createdAt = new Date(this.now()).toISOString();
     const entry: BrowserSessionEntry = {

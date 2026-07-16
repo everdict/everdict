@@ -3,14 +3,16 @@ import { describe, expect, it } from "vitest";
 import type { BrowserSessionProvisioner, ProvisionedBrowser } from "../../common/browser-session-provisioner.js";
 import { BrowserSessionService } from "./browser-session-service.js";
 
-// A fake browser provisioner — records disposals so we can assert teardown without a real Chrome.
+// A fake browser provisioner — records disposals + the proxy option so we can assert teardown/geo without a real Chrome.
 class FakeProvisioner implements BrowserSessionProvisioner {
   readonly provisioned: string[] = [];
   readonly disposed: string[] = [];
+  readonly proxies: Array<string | undefined> = [];
   private n = 0;
-  async provision(): Promise<ProvisionedBrowser> {
+  async provision(opts?: { proxyServer?: string }): Promise<ProvisionedBrowser> {
     const cdpBase = `http://127.0.0.1:${9000 + this.n++}`;
     this.provisioned.push(cdpBase);
+    this.proxies.push(opts?.proxyServer);
     return {
       cdpBase,
       dispose: async () => {
@@ -37,6 +39,19 @@ describe("BrowserSessionService", () => {
     expect(view).toMatchObject({ id: "bs-0", status: "active", createdBy: "alice" });
     // the reachable CDP endpoint must never appear in the client-facing view.
     expect(JSON.stringify(view)).not.toContain("127.0.0.1");
+  });
+
+  it("resolves a country to the workspace proxy and launches the browser through it (S4)", async () => {
+    const p = new FakeProvisioner();
+    const s = new BrowserSessionService(p, {
+      newId: () => "bs-0",
+      resolveProxy: async (ws, country) => (ws === "acme" && country === "US" ? "http://user:pass@proxy:8080" : undefined),
+    });
+    await s.create({ tenant: "acme", createdBy: "alice", country: "US" });
+    expect(p.proxies).toEqual(["http://user:pass@proxy:8080"]);
+    // a country with no registered proxy launches direct (undefined)
+    await s.create({ tenant: "acme", createdBy: "alice", country: "JP" });
+    expect(p.proxies[1]).toBeUndefined();
   });
 
   it("enforces a single active session per owner — a new session closes the previous one", async () => {
