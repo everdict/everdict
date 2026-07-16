@@ -88,11 +88,13 @@ import type { z } from "zod";
 import { type BudgetAdmin, BudgetLimitInputSchema } from "../common/budget-tracker.js";
 import type { LiveFrameStore } from "../common/live-frame-store.js";
 import type { TerminalTicketStore } from "../common/terminal-ticket.js";
+import type { TicketStore } from "../common/ticket-store.js";
 import {
   BenchmarkImportBodySchema,
   BenchmarkPreviewBodySchema,
   type BenchmarkService,
 } from "../core/benchmark/benchmark-service.js";
+import type { BrowserSessionService } from "../core/browser-session/browser-session-service.js";
 import { BundleSchema, type BundleService, requiredActionsForBundle } from "../core/bundle/bundle-service.js";
 import type { JudgePreviewService } from "../core/judge/judge-preview-service.js";
 import type { RuntimeProbeResult } from "../core/ops/runtime-probe.js";
@@ -162,6 +164,8 @@ export interface ServerDeps {
   callbackSink?: CallbackSink; // inbound receiver for the front-door callback completion model (/frontdoor-callback disabled if absent)
   terminalTickets?: TerminalTicketStore; // WS terminal (observability ⑥) — mints/consumes short-lived tickets (WS routes disabled if absent)
   liveFrames?: LiveFrameStore; // live-screen frames pushed by a self-hosted runner (report_case_screen) — served by RunService.screen()
+  browserSessionService?: BrowserSessionService; // interactive browser sessions (browser-profiles S1) — self-scoped (routes disabled if absent)
+  browserTickets?: TicketStore; // WS ticket store for interactive browser sessions (browser-session WS disabled if absent)
 }
 
 // Resolve identity (subject + default workspace + roles): Bearer (JWT or ak_) → Authenticator. Unauthenticated dev = header workspace + admin.

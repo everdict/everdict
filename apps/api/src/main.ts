@@ -1,5 +1,6 @@
 import { LiveFrameStore } from "./common/live-frame-store.js";
 import { TerminalTicketStore } from "./common/terminal-ticket.js";
+import { TicketStore } from "./common/ticket-store.js";
 import { buildAuthenticator } from "./composition/authenticator.js";
 import { buildDispatch } from "./composition/dispatch.js";
 import { artifactStoreFromEnv, meterUsagePolicyFromEnv } from "./composition/env-policy.js";
@@ -17,8 +18,10 @@ import { ScheduleServiceRef, wireScheduleService } from "./composition/schedule.
 import { buildScorecard } from "./composition/scorecard.js";
 import { buildCatalog, buildCiLink, buildMattermostCommand, buildQueue, buildView } from "./composition/services.js";
 import { buildWorkspace } from "./composition/workspace.js";
+import { BrowserSessionService } from "./core/browser-session/browser-session-service.js";
 import { buildPlacementPreflight } from "./core/execution/placement-preflight.js";
 import { JudgePreviewService } from "./core/judge/judge-preview-service.js";
+import { LocalChromeProvisioner } from "./infrastructure/browser-session/local-chrome-provisioner.js";
 import { buildServer } from "./server.js";
 
 // Multi-tenant control-plane server. tenant is derived from the Bearer API key (dev header fallback if absent).
@@ -235,8 +238,18 @@ async function main(): Promise<void> {
   const viewService = buildView({ viewStore });
 
   const terminalTickets = new TerminalTicketStore();
+  // Interactive browser sessions (browser-profiles S1) — env-gated because the S1 provisioner launches a host
+  // Chrome (self-hosted / local reachable path); managed Docker/K8s provisioners are a later slice.
+  const browserSessionsEnabled = process.env.EVERDICT_BROWSER_SESSIONS === "1";
+  const browserTickets = browserSessionsEnabled ? new TicketStore() : undefined;
+  const browserChromeBin = process.env.EVERDICT_BROWSER_CHROME_BIN; // override the launched binary (e.g. chromium)
+  const browserSessionService = browserSessionsEnabled
+    ? new BrowserSessionService(new LocalChromeProvisioner(browserChromeBin ? { binary: browserChromeBin } : {}))
+    : undefined;
+  if (browserSessionService) setInterval(() => browserSessionService.sweep(), 60_000).unref(); // TTL teardown
   const app = buildServer({
     terminalTickets,
+    ...(browserSessionService && browserTickets ? { browserSessionService, browserTickets } : {}),
     liveFrames, // live-screen frames pushed by self-hosted runners (report_case_screen MCP tool)
     service,
     scorecardService,

@@ -1,12 +1,17 @@
 # Authenticated browser profiles — a real interactive remote browser, cookies reused in eval (design)
 
-> **Status: S0 SHIPPED + live-proven (`a168b5b`). S1+ in slices.** S0 = the interactive live browser session
-> primitive (`openBrowserSession`, `@everdict/topology`): CDP screencast (frames OUT, each acked) + input
-> (mouse/keyboard/navigate IN), transport-injectable. Proven end-to-end against real Chrome via
-> `scripts/live/interactive-browser.mjs` (3 frames streamed + text typed via CDP read back from the real DOM;
-> `--serve` renders a canvas so a human drives the browser). The hardest risk — "can we actually serve a real
-> interactive browser?" — is retired. What remains is wiring (transport through the control plane), the profile
-> entity, cookie capture, geo proxy, and injection into eval runs.
+> **Status: S0 + S1 (S1a transport + S1b web canvas) SHIPPED. S2+ in slices.** S0 = the interactive live browser
+> session primitive (`openBrowserSession`, `@everdict/topology`, `a168b5b`): CDP screencast (frames OUT, each
+> acked) + input (mouse/keyboard/navigate IN), transport-injectable, live-proven against real Chrome via
+> `scripts/live/interactive-browser.mjs`. **S1 productizes the transport end-to-end**: a personal / self-scoped
+> `BrowserSession` resource (`apps/api` `core/browser-session` + `api/browser-session`, in-memory, single active
+> session per owner, TTL) provisioned by a `BrowserSessionProvisioner` port (S1 impl = `LocalChromeProvisioner`,
+> a host Chrome on the reachable local path; env-gated `EVERDICT_BROWSER_SESSIONS`), a WS relay
+> `/browser-sessions/:id?ticket=…` (generic `TicketStore` + the terminal-WS upgrade pattern; frames OUT + validated
+> input IN via `browser-session-ws.ts`), BFF↔MCP parity, and the `apps/web` canvas
+> (`features/interactive-browser`, Settings › Account › Browser sessions). The reachable CDP base is **server-only**
+> (never crosses the wire — the client gets a one-shot ticket). What remains: the profile entity, cookie capture,
+> geo proxy, injection into eval runs, and managed-runtime (Docker/K8s) provisioners.
 
 ## The feature (browser-use cloud parity)
 
@@ -94,11 +99,18 @@ short-lived container/pod per active login; self-hosted = the user's own local b
 ## Slices
 
 1. **S0 — interactive session primitive.** ✅ SHIPPED (`a168b5b`), live-proven.
-2. **S1a — WS transport through apps/api (local-Docker reachable).** Generic ticket store + `WS
-   /browser-sessions/:id` relay (terminal-WS pattern) + a dedicated-interactive-browser provisioner (docker). Live
-   scenario: open the WS, drive a real browser, capture nothing yet — proves the productized transport.
-3. **S1b — apps/web canvas feature.** `manage-browser-profiles` + the interactive canvas component (the `--serve`
-   page, productized: WS instead of SSE/POST). Users drive the browser inside the app.
+2. **S1a — WS transport through apps/api.** ✅ SHIPPED. Generic `TicketStore` (`common/ticket-store.ts`) + the
+   `BrowserSession` resource slice (`core/browser-session` service — in-memory, owner-scoped, one active session
+   per owner, TTL sweep; `api/browser-session` routes + docs + MCP parity) + the `WS /browser-sessions/:id?ticket=…`
+   relay (`browser-session-ws.ts` — CDP frames OUT as JSON + Zod-validated mouse/keyboard/navigate IN, early-input
+   buffered like the terminal WS) + a `BrowserSessionProvisioner` port with a host-Chrome `LocalChromeProvisioner`
+   (the reachable local/self-hosted path; managed Docker/K8s provisioners = a later slice, folds into S6). The
+   reachable CDP base is **server-only**. Env-gated `EVERDICT_BROWSER_SESSIONS` (the S1 provisioner launches a host
+   Chrome). Note: the terminal path keeps its own `TerminalTicketStore` (unchanged) — unifying it onto `TicketStore`
+   is a deferred cleanup.
+3. **S1b — apps/web canvas feature.** ✅ SHIPPED. `features/interactive-browser` (the `--serve` page productized:
+   one WS instead of SSE/POST) + BFF proxy routes (`/api/browser-sessions*`, ticket route injects the WS base) +
+   Settings › Account › Browser sessions page + ko/en i18n. Users start a browser and drive it inside the app.
 4. **S2 — profile entity** (`BrowserProfileSpec` + `BrowserProfileStore` + encrypted `storageState` blob).
 5. **S3 — cookie capture** on session save (`Network.getAllCookies` → storageState → encrypt → store).
 6. **S4 — proxy / geo** (`ProxyProvider`, `--proxy-server`).

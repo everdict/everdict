@@ -86,6 +86,8 @@ import { z } from "zod";
 import { registerApiKeyRoutes } from "./api/api-key/api-key.routes.js";
 import { registerBenchmarkRoutes } from "./api/benchmark/benchmark.routes.js";
 import { registerBillingRoutes } from "./api/billing/billing.routes.js";
+import { attachBrowserSessionWs } from "./api/browser-session/browser-session-ws.js";
+import { registerBrowserSessionRoutes } from "./api/browser-session/browser-session.routes.js";
 import { registerBundleRoutes } from "./api/bundle/bundle.routes.js";
 import { registerCiLinkRoutes } from "./api/ci-link/ci-link.routes.js";
 import { registerCommentRoutes } from "./api/comment/comment.routes.js";
@@ -227,6 +229,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     registerWorkspaceRunnerRoutes(routes, deps);
     registerQueueRoutes(routes, deps);
     registerBillingRoutes(routes, deps);
+    registerBrowserSessionRoutes(routes, deps);
     registerInternalRoutes(routes, deps);
     registerMcpRoutes(routes, deps);
   });
@@ -298,6 +301,40 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
           pending.length = 0;
         })();
       });
+    });
+  }
+
+  // Interactive browser-session WebSocket (browser-profiles S1) — a second noServer WS handling upgrades for
+  // /browser-sessions/:id?ticket=… . The ticket (minted by the authenticated owner-only POST above) is the auth;
+  // on a valid ticket, resolve the session's reachable CDP base and relay the screencast/input over the socket.
+  if (deps.browserSessionService && deps.browserTickets) {
+    const sessions = deps.browserSessionService;
+    const tickets = deps.browserTickets;
+    const wss = new WebSocketServer({ noServer: true });
+    app.server.on("upgrade", (request, socket, head) => {
+      let url: URL;
+      try {
+        url = new URL(request.url ?? "", "http://localhost");
+      } catch {
+        return; // let the terminal/other upgrade handler decide (it destroys a genuinely malformed socket)
+      }
+      const match = /^\/browser-sessions\/([^/]+)$/.exec(url.pathname);
+      if (!match) return; // not our path
+      const sessionId = decodeURIComponent(match[1] ?? "");
+      const ticket = url.searchParams.get("ticket") ?? "";
+      const binding = tickets.consume(ticket, sessionId);
+      if (!binding) {
+        socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
+        socket.destroy();
+        return;
+      }
+      const cdpBase = sessions.cdpBaseFor(sessionId, binding.subject);
+      if (!cdpBase) {
+        socket.write("HTTP/1.1 404 Not Found\r\n\r\n");
+        socket.destroy();
+        return;
+      }
+      wss.handleUpgrade(request, socket, head, (ws) => attachBrowserSessionWs(ws, cdpBase));
     });
   }
 

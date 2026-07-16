@@ -34,7 +34,9 @@ import type {
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { BudgetAdmin } from "../common/budget-tracker.js";
 import type { LiveFrameStore } from "../common/live-frame-store.js";
+import type { TicketStore } from "../common/ticket-store.js";
 import type { BenchmarkService } from "../core/benchmark/benchmark-service.js";
+import type { BrowserSessionService } from "../core/browser-session/browser-session-service.js";
 import type { BundleService } from "../core/bundle/bundle-service.js";
 import type { JudgePreviewService } from "../core/judge/judge-preview-service.js";
 import type { RuntimeProbeResult } from "../core/ops/runtime-probe.js";
@@ -86,6 +88,8 @@ export interface McpDeps {
   profileService?: ProfileService; // my profile (name/username/avatar) read/edit (self-serve)
   keyStore?: TenantKeyStore; // API key self-serve issue/list/revoke (admin)
   apiPublicUrl?: string; // control-plane public base — the everdict runner --api-url in github_install_workspace_runner (falls back to the request base)
+  browserSessionService?: BrowserSessionService; // interactive browser sessions (browser-profiles S1) — self-scoped
+  browserTickets?: TicketStore; // WS ticket store for interactive browser sessions
 }
 
 // The per-session context a resource's registerXTools(server, ctx) receives — the MCP twin of route-context.
