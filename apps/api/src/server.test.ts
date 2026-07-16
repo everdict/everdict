@@ -3381,6 +3381,54 @@ describe("API — judges (Agent Judge, workspace-owned, member+ write)", () => {
     await app.close();
   });
 
+  it("DELETE version — the registrant soft-deletes (200, get 404 afterward); other workspaces cannot delete it (404)", async () => {
+    const { app, keyStore } = server({ requireAuth: true });
+    const acme = `Bearer ${await issueKey(keyStore, "acme")}`;
+    const beta = `Bearer ${await issueKey(keyStore, "beta")}`;
+    await app.inject({ method: "POST", url: "/judges", headers: { authorization: acme }, payload: JUDGE });
+
+    // Not the owner (other workspace) → 404 (does not reveal existence)
+    expect(
+      (
+        await app.inject({
+          method: "DELETE",
+          url: "/judges/correctness/versions/1.0.0",
+          headers: { authorization: beta },
+        })
+      ).statusCode,
+    ).toBe(404);
+
+    // Registrant delete → 200 + tombstone, get 404 afterward (data preserved but excluded from reads)
+    const del = await app.inject({
+      method: "DELETE",
+      url: "/judges/correctness/versions/1.0.0",
+      headers: { authorization: acme },
+    });
+    expect(del.statusCode).toBe(200);
+    expect(del.json()).toMatchObject({ id: "correctness", version: "1.0.0", deleted: true });
+    expect(
+      (
+        await app.inject({
+          method: "GET",
+          url: "/judges/correctness/versions/1.0.0",
+          headers: { authorization: acme },
+        })
+      ).statusCode,
+    ).toBe(404);
+
+    // Already-deleted version → 404 (no existence leak, no double-delete).
+    expect(
+      (
+        await app.inject({
+          method: "DELETE",
+          url: "/judges/correctness/versions/1.0.0",
+          headers: { authorization: acme },
+        })
+      ).statusCode,
+    ).toBe(404);
+    await app.close();
+  });
+
   it("preview renders the exact prompt + evidence coverage for a draft judge against a pasted trace (no model call)", async () => {
     const { app } = server({ requireAuth: true, authenticator: roleAuth(["member"]) });
     const h = { authorization: "Bearer x" };

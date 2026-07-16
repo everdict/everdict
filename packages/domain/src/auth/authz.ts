@@ -22,6 +22,7 @@ export type Action =
   | "schedules:write"
   | "judges:read"
   | "judges:write"
+  | "judges:delete"
   | "models:read"
   | "models:write"
   | "models:delete"
@@ -101,6 +102,7 @@ const ROLE_PERMISSIONS: Record<string, ReadonlySet<Action>> = {
     "datasets:delete", // dataset version soft-delete — admin-only (the creator is separately overridden in the service). member/viewer don't have it
     "harnesses:delete", // harness version soft-delete — same pattern (admin-only + creator exception in the service layer)
     "models:delete", // model version soft-delete — same pattern (admin-only + creator exception in the service layer)
+    "judges:delete", // judge version soft-delete — same pattern (admin-only + creator exception in the service layer)
     "scorecards:read",
     "scorecards:run",
     "schedules:read",

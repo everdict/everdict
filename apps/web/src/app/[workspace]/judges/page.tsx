@@ -2,10 +2,12 @@ import Link from 'next/link'
 import { Gavel } from 'lucide-react'
 import { getTranslations } from 'next-intl/server'
 
+import { DeleteJudgeRowButton } from '@/features/delete-judge'
 import { judgesSchema } from '@/entities/judge'
 import { can } from '@/shared/auth/can'
 import { currentPrincipal } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
+import { sortSemverDesc } from '@/shared/lib/semver'
 import { Badge } from '@/shared/ui/badge'
 import { buttonVariants } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
@@ -29,6 +31,9 @@ export default async function JudgesPage({ params }: { params: Promise<{ workspa
   }
 
   const currentWorkspace = principal?.workspace ?? workspace
+  // Delete = admin only (the creator exception is server-side); the affordance shows only on workspace-owned judges
+  // (_shared/first-party delete 404s at the control plane).
+  const canDeleteJudges = can(principal?.roles, 'judges:delete')
 
   return (
     <div className="space-y-6">
@@ -57,7 +62,7 @@ export default async function JudgesPage({ params }: { params: Promise<{ workspa
             <Link
               key={j.id}
               href={`/${workspace}/judges/${encodeURIComponent(j.id)}`}
-              className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-card p-3.5 shadow-raise transition-colors hover:border-border-strong hover:bg-elevated"
+              className="group flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-card p-3.5 shadow-raise transition-colors hover:border-border-strong hover:bg-elevated"
             >
               <div className="flex min-w-0 items-center gap-3">
                 <span className="grid size-8 shrink-0 place-items-center rounded-md bg-elevated text-muted-foreground ring-1 ring-inset ring-border">
@@ -79,9 +84,20 @@ export default async function JudgesPage({ params }: { params: Promise<{ workspa
                   </div>
                 </div>
               </div>
-              <Badge tone={j.owner === currentWorkspace ? 'success' : 'neutral'}>
-                {j.owner === currentWorkspace ? t('workspaceBadge') : t('sharedBadge')}
-              </Badge>
+              <div className="flex shrink-0 items-center gap-2">
+                <Badge tone={j.owner === currentWorkspace ? 'success' : 'neutral'}>
+                  {j.owner === currentWorkspace ? t('workspaceBadge') : t('sharedBadge')}
+                </Badge>
+                {canDeleteJudges && j.owner === currentWorkspace && (
+                  <DeleteJudgeRowButton
+                    id={j.id}
+                    versions={[...sortSemverDesc(j.versions)].reverse()}
+                    latest={sortSemverDesc(j.versions)[0] ?? j.versions[0] ?? ''}
+                    workspace={workspace}
+                    versionTags={j.versionTags ?? {}}
+                  />
+                )}
+              </div>
             </Link>
           ))}
         </div>

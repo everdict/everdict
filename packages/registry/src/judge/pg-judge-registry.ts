@@ -4,8 +4,8 @@ import { PgVersionedStore } from "../pg-versioned-store.js";
 import { type JudgeListEntry, type JudgeRegistry, judgeDerived } from "./judge-registry.js";
 
 // Postgres-backed tenant-owned judge SSOT. (tenant, id, version) key. Tenant-owned first, else _shared fallback.
-// Schema: @everdict/db/migrations/0008_create_judges (+ 0032 created_by, 0047 tags) — judge column, created_by + tags, no deleted_at.
-// Delegates to the shared PgVersionedStore and exposes the judge surface (has/ownVersions/rich list/createdBy/tags; NO softDelete).
+// Schema: @everdict/db/migrations/0008_create_judges (+ 0032 created_by, 0047 tags, 0057 deleted_at) — judge column, created_by + tags + deleted_at.
+// Delegates to the shared PgVersionedStore and exposes the judge surface (has/ownVersions/rich list/createdBy/tags + softDelete).
 export class PgJudgeRegistry implements JudgeRegistry {
   private readonly store: PgVersionedStore<JudgeSpec>;
   constructor(client: SqlClient) {
@@ -16,6 +16,7 @@ export class PgJudgeRegistry implements JudgeRegistry {
       parse: (v) => JudgeSpecSchema.parse(v),
       createdBy: true,
       tags: true,
+      softDelete: true,
     });
   }
 
@@ -33,6 +34,12 @@ export class PgJudgeRegistry implements JudgeRegistry {
   }
   get(tenant: string, id: string, ref?: string): Promise<JudgeSpec> {
     return this.store.get(tenant, id, ref);
+  }
+  creatorOfVersion(tenant: string, id: string, version: string): Promise<string | undefined> {
+    return this.store.creatorOfVersion(tenant, id, version);
+  }
+  softDelete(tenant: string, id: string, version: string): Promise<void> {
+    return this.store.softDelete(tenant, id, version);
   }
   setVersionTags(tenant: string, id: string, version: string, tags: string[]): Promise<void> {
     return this.store.setVersionTags(tenant, id, version, tags);

@@ -327,6 +327,13 @@ export const controlPlane = {
     ),
   createJudge: <T>(auth: AuthContext, spec: unknown) =>
     call<T>(auth, '/judges', { method: 'POST', body: JSON.stringify(spec) }),
+  // Soft-delete a judge version (tombstone — past scorecard history preserved, future scorecards fail to resolve). Only the
+  // version's registrant or a workspace admin (the control plane enforces). Returns { deleted: true } (a body, so call not callVoid).
+  // Whole-judge delete = fan out over every live version in the web (there is no /judges/:id endpoint — same per-version-only model as harnesses).
+  deleteJudgeVersion: <T>(auth: AuthContext, id: string, version: string) =>
+    call<T>(auth, `/judges/${encodeURIComponent(id)}/versions/${encodeURIComponent(version)}`, {
+      method: 'DELETE',
+    }),
   validateJudge: <T>(auth: AuthContext, spec: unknown) =>
     call<T>(auth, '/judges/validate', { method: 'POST', body: JSON.stringify(spec) }),
   // Preview a (draft) judge against sample evidence — the exact prompt + coverage, NO model call (judges:read).

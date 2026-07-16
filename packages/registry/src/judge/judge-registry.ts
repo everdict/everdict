@@ -30,10 +30,8 @@ export function judgeDerived(
   };
 }
 
-// Delegates to the shared VersionedStore and exposes the judge surface (has/ownVersions/rich list/createdBy/tags; NO softDelete).
-// ownerOf is has-live-version (VersionedStore's model) — equivalent to the former id-existence check because judges have no
-// tombstones (no softDelete → no deleted versions can exist). The list-entry derivation (judgeDerived over the latest spec)
-// is the legitimate per-entity part built on top of the shared listMeta.
+// Delegates to the shared VersionedStore and exposes the judge surface (has/ownVersions/rich list/createdBy/tags + softDelete).
+// The list-entry derivation (judgeDerived over the latest spec) is the legitimate per-entity part built on top of the shared listMeta.
 export class InMemoryJudgeRegistry implements JudgeRegistry {
   private readonly store = new VersionedStore<JudgeSpec>("judge");
 
@@ -51,6 +49,12 @@ export class InMemoryJudgeRegistry implements JudgeRegistry {
   }
   async get(tenant: string, id: string, ref?: string): Promise<JudgeSpec> {
     return this.store.get(tenant, id, ref);
+  }
+  async creatorOfVersion(tenant: string, id: string, version: string): Promise<string | undefined> {
+    return this.store.creatorOfVersion(tenant, id, version);
+  }
+  async softDelete(tenant: string, id: string, version: string): Promise<void> {
+    this.store.softDelete(tenant, id, version);
   }
   async setVersionTags(tenant: string, id: string, version: string, tags: string[]): Promise<void> {
     this.store.setVersionTags(tenant, id, version, tags);

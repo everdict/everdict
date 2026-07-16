@@ -44,6 +44,7 @@ export {
 export { deleteDatasetVersion, deleteDatasetVersions } from "./dataset/dataset-service.js";
 export { deleteModelVersion, deleteModelVersions } from "./model/model-service.js";
 export { deleteHarnessVersion, harnessIsPrivate, harnessVisibleTo } from "./harness/harness-service.js";
+export { deleteJudgeVersion } from "./judge/judge-service.js";
 export {
   type PairRunnerBody,
   PairRunnerBodySchema,

@@ -263,6 +263,7 @@ describe("MCP tools", () => {
       "delete_dataset",
       "delete_dataset_versions",
       "delete_harness",
+      "delete_judge",
       "delete_model",
       "delete_model_versions",
       "delete_schedule",
@@ -1284,6 +1285,45 @@ describe("MCP tools", () => {
     expect((body.changes as { path: string }[]).map((c) => c.path)).toEqual(
       expect.arrayContaining(["model", "provider"]),
     );
+  });
+
+  it("delete_judge: the creator soft-deletes their own version (disappears from get/list afterward)", async () => {
+    const deps = harness();
+    const creator = await connect(deps, ["member"], "acme", "alice");
+    const spec = { kind: "model", id: "correctness", version: "1.0.0", model: "claude-opus-4-8", rubric: "ok?" };
+    await creator.callTool({ name: "create_judge", arguments: { judge: JSON.stringify(spec) } });
+
+    const del = await creator.callTool({ name: "delete_judge", arguments: { id: "correctness", version: "1.0.0" } });
+    expect(del.isError).toBeFalsy();
+    expect(text(del)).toContain("deleted");
+    // tombstone — get is NOT_FOUND, disappears from list (data preserved but excluded from reads).
+    const got = await creator.callTool({ name: "get_judge", arguments: { id: "correctness" } });
+    expect(got.isError).toBe(true);
+    expect(text(got)).toContain("NOT_FOUND");
+    expect(JSON.parse(text(await creator.callTool({ name: "list_judges", arguments: {} })))).toEqual([]);
+  });
+
+  it("delete_judge: FORBIDDEN if neither creator nor admin; admin can delete others' versions; already-deleted is NOT_FOUND", async () => {
+    const deps = harness();
+    const creator = await connect(deps, ["member"], "acme", "alice");
+    const spec = { kind: "model", id: "correctness", version: "1.0.0", model: "claude-opus-4-8", rubric: "ok?" };
+    await creator.callTool({ name: "create_judge", arguments: { judge: JSON.stringify(spec) } });
+
+    // Another member in the same workspace (not the creator) → FORBIDDEN, nothing deleted.
+    const other = await connect(deps, ["member"], "acme", "bob");
+    const denied = await other.callTool({ name: "delete_judge", arguments: { id: "correctness", version: "1.0.0" } });
+    expect(denied.isError).toBe(true);
+    expect(text(denied)).toContain("FORBIDDEN");
+    expect((await creator.callTool({ name: "get_judge", arguments: { id: "correctness" } })).isError).toBeFalsy();
+
+    // admin (not the creator) → can delete others' versions too.
+    const admin = await connect(deps, ["admin"], "acme", "carol");
+    const del = await admin.callTool({ name: "delete_judge", arguments: { id: "correctness", version: "1.0.0" } });
+    expect(del.isError).toBeFalsy();
+    // second delete → already a tombstone → NOT_FOUND.
+    const again = await admin.callTool({ name: "delete_judge", arguments: { id: "correctness", version: "1.0.0" } });
+    expect(again.isError).toBe(true);
+    expect(text(again)).toContain("NOT_FOUND");
   });
 
   it("rubrics: member registers·reads a rubric (judges:write reuse); viewer's write is a permission error", async () => {

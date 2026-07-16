@@ -1,4 +1,4 @@
-import { VersionTagsBodySchema, setVersionTags } from "@everdict/application-control";
+import { VersionTagsBodySchema, deleteJudgeVersion, setVersionTags } from "@everdict/application-control";
 import { JudgeSpecSchema } from "@everdict/contracts";
 import { diffJudgeSpecs } from "@everdict/domain";
 import type { FastifyInstance } from "fastify";
@@ -163,6 +163,26 @@ export function registerJudgeRoutes(app: FastifyInstance, deps: ServerDeps): voi
         return reply.send(diffJudgeSpecs(baseSpec, candidateSpec));
       } catch (err) {
         return sendError(reply, err); // version not found / other workspace → 404
+      }
+    },
+  );
+
+  // Soft-delete a judge version — only that version's own creator or a workspace admin (deleteJudgeVersion gates it).
+  // Deletion is a tombstone (data preserved, excluded from reads) → past scorecard history·aggregates are unaffected
+  // (the judge coordinates are snapshotted in the record). Future scorecards referencing that judge fail to resolve.
+  // Missing/already-deleted/_shared/non-owned version = 404.
+  app.delete<{ Params: { id: string; version: string } }>(
+    "/judges/:id/versions/:version",
+    { schema: judgeDocs.deleteVersion },
+    async (req, reply) => {
+      if (!deps.judgeRegistry)
+        return reply.code(404).send({ code: "NOT_FOUND", message: "judge registry not configured" });
+      const principal = await resolvePrincipal(req, reply, deps);
+      if (!principal) return reply;
+      try {
+        return reply.send(await deleteJudgeVersion(deps.judgeRegistry, principal, req.params.id, req.params.version));
+      } catch (err) {
+        return sendError(reply, err); // no permission 403 / not found 404
       }
     },
   );

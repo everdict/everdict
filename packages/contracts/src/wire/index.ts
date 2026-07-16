@@ -56,6 +56,7 @@ export * from "./judge/judge.js";
 export * from "./judge/judge-diff.js";
 export * from "./judge/register-judge-result.js";
 export * from "./judge/validate-judge-result.js";
+export * from "./judge/delete-judge-version-result.js";
 export * from "./mattermost/mattermost-action-reply.js";
 export * from "./mattermost/mattermost-config-view.js";
 export * from "./mattermost/mattermost-reply.js";

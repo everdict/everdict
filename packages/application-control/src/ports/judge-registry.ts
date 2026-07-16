@@ -29,6 +29,10 @@ export interface JudgeRegistry {
   versions(tenant: string, id: string): Promise<string[]>; // sorted (semver first) — owner-first / _shared fallback
   ownVersions(tenant: string, id: string): Promise<string[]>; // only versions this tenant registered directly (no fallback — for conflict checks)
   list(tenant: string): Promise<JudgeListEntry[]>;
+  // The registrant subject of this "version" — for delete authz (creator-or-admin). Non-owned/deleted/absent → NotFound (same as harnesses/datasets).
+  creatorOfVersion(tenant: string, id: string, version: string): Promise<string | undefined>;
+  // Version soft-delete (tombstone) — data is preserved (past scorecard reproducibility), excluded from every read, re-registering identical content revives it.
+  softDelete(tenant: string, id: string, version: string): Promise<void>;
   // Version tags (free-form labels, full replacement) — mutable registry metadata (outside spec immutability). Tenant-owned versions only; _shared → NotFound.
   setVersionTags(tenant: string, id: string, version: string, tags: string[]): Promise<void>;
   // version → tag map (tagged versions only). Reads resolve owner like versions() (incl. _shared fallback).

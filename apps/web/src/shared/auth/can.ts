@@ -15,6 +15,7 @@ export type WebAction =
   | 'schedules:write'
   | 'judges:read'
   | 'judges:write'
+  | 'judges:delete'
   | 'models:read'
   | 'models:write'
   | 'models:delete'
@@ -83,6 +84,7 @@ const PERMS: Record<string, WebAction[]> = {
     'schedules:write',
     'judges:read',
     'judges:write',
+    'judges:delete', // judge version/whole-judge soft-delete = admin (creator exception is server-side)
     'models:read',
     'models:write',
     'models:delete', // model version/whole-model soft-delete = admin (creator exception is server-side)

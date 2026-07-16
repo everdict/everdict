@@ -3,6 +3,7 @@ import { JudgeSpecSchema } from "@everdict/contracts";
 import { JudgeListResponseSchema } from "@everdict/contracts/wire";
 import { JudgeResponseSchema } from "@everdict/contracts/wire";
 import { JudgeSpecDiffResponseSchema } from "@everdict/contracts/wire";
+import { DeleteJudgeVersionResultSchema } from "@everdict/contracts/wire";
 import { RegisterJudgeResultSchema } from "@everdict/contracts/wire";
 import { ValidateJudgeResultSchema } from "@everdict/contracts/wire";
 import type { FastifySchema } from "fastify";
@@ -128,6 +129,19 @@ const docs = {
     response: {
       200: { description: "Judge scores + rendered prompt + coverage", ...toJsonSchema(JudgeTryResultSchema) },
       ...errorResponses(400, 401, 403, 404),
+    },
+  },
+  deleteVersion: {
+    summary: "Soft-delete a judge version",
+    description:
+      "Tombstones one judge version — data preserved (past scorecards keep their judge snapshot), excluded from " +
+      "all reads; future scorecards referencing it fail to resolve. Allowed for that version's creator or a " +
+      "workspace admin (judges:delete) — enforced in the service. Missing/already-deleted/non-owned versions are 404.",
+    tags: ["judge"],
+    params: idVersionParams,
+    response: {
+      200: { description: "Deleted (tombstoned)", ...toJsonSchema(DeleteJudgeVersionResultSchema) },
+      ...errorResponses(401, 403, 404),
     },
   },
   setVersionTags: {

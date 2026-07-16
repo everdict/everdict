@@ -1,4 +1,4 @@
-import { setVersionTags } from "@everdict/application-control";
+import { deleteJudgeVersion, setVersionTags } from "@everdict/application-control";
 import { JudgeSpecSchema, TraceEventSchema } from "@everdict/contracts";
 import { diffJudgeSpecs } from "@everdict/domain";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -45,6 +45,19 @@ export function registerJudgeTools(server: McpServer, ctx: McpToolContext): void
           ]);
           return ok(diffJudgeSpecs(baseSpec, candidateSpec));
         }),
+    );
+
+    server.registerTool(
+      "delete_judge",
+      {
+        description:
+          "Soft-delete a judge version (tombstone — past scorecard history is preserved, future scorecards fail to resolve). Only that version's creator or a workspace admin.",
+        inputSchema: {
+          id: z.string(),
+          version: z.string().describe("judge version to delete (exact version — latest not allowed)"),
+        },
+      },
+      ({ id, version }) => plain(async () => ok(await deleteJudgeVersion(judges, principal, id, version))),
     );
 
     server.registerTool(

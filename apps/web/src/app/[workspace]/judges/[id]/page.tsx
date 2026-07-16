@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation'
 import { ChevronLeft, GitCompare } from 'lucide-react'
 import { getTranslations } from 'next-intl/server'
 
+import { DeleteJudgeButton } from '@/features/delete-judge'
 import {
   isRubricRef,
   judgeModelLabel,
@@ -10,7 +11,8 @@ import {
   judgesSchema,
   type JudgeSpec,
 } from '@/entities/judge'
-import { authContext } from '@/shared/auth/principal'
+import { can } from '@/shared/auth/can'
+import { currentPrincipal } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
 import { sortSemverDesc } from '@/shared/lib/semver'
 import { Badge } from '@/shared/ui/badge'
@@ -43,7 +45,7 @@ export default async function JudgeDetailPage({
 }) {
   const { workspace, id } = await params
   const t = await getTranslations('judgesPage')
-  const ctx = await authContext()
+  const { principal, ctx } = await currentPrincipal()
 
   // Summary (owner/versions) from the list — back to the list if the judge doesn't exist or the connection fails.
   let summary
@@ -56,6 +58,12 @@ export default async function JudgeDetailPage({
 
   const versions = sortSemverDesc(summary.versions)
   const latest = versions[0] ?? summary.versions[0] ?? 'latest'
+
+  // Delete (versions / whole judge) — admin only (the creator exception is server-side) + workspace-owned
+  // (_shared/first-party delete 404s at the control plane, so the affordance is hidden for them).
+  const currentWorkspace = principal?.workspace ?? workspace
+  const canDeleteJudge =
+    can(principal?.roles, 'judges:delete') && summary.owner === currentWorkspace
 
   let judge: JudgeSpec | undefined
   let error: string | undefined
@@ -85,14 +93,27 @@ export default async function JudgeDetailPage({
           title={judge.id}
           description={judge.description}
           actions={
-            versions.length > 1 ? (
-              <Link
-                href={`/${workspace}/judges/${encodeURIComponent(judge.id)}/diff`}
-                className={buttonVariants({ variant: 'secondary', size: 'sm' })}
-              >
-                <GitCompare className="size-3.5" />
-                {t('compareVersions')}
-              </Link>
+            canDeleteJudge || versions.length > 1 ? (
+              <div className="flex flex-wrap items-center justify-end gap-2">
+                {versions.length > 1 && (
+                  <Link
+                    href={`/${workspace}/judges/${encodeURIComponent(judge.id)}/diff`}
+                    className={buttonVariants({ variant: 'secondary', size: 'sm' })}
+                  >
+                    <GitCompare className="size-3.5" />
+                    {t('compareVersions')}
+                  </Link>
+                )}
+                {canDeleteJudge && (
+                  <DeleteJudgeButton
+                    id={judge.id}
+                    versions={[...versions].reverse()}
+                    latest={latest}
+                    workspace={workspace}
+                    versionTags={summary.versionTags ?? {}}
+                  />
+                )}
+              </div>
             ) : null
           }
         />

@@ -164,7 +164,23 @@ const harnessTemplate: RegistryContract<HarnessTemplateSpec> = {
 
 const judge: RegistryContract<JudgeSpec> = {
   name: "judge",
-  make: () => new InMemoryJudgeRegistry(),
+  // The registry's creator probe is named creatorOfVersion (like harness-instance) — map it onto the contract's creatorOf.
+  make: () => {
+    const judges = new InMemoryJudgeRegistry();
+    return {
+      register: (tenant: string, spec: JudgeSpec, createdBy?: string) => judges.register(tenant, spec, createdBy),
+      get: (tenant: string, id: string, ref?: string) => judges.get(tenant, id, ref),
+      versions: (tenant: string, id: string) => judges.versions(tenant, id),
+      has: (tenant: string, id: string, version: string) => judges.has(tenant, id, version),
+      ownVersions: (tenant: string, id: string) => judges.ownVersions(tenant, id),
+      list: (tenant: string) => judges.list(tenant),
+      softDelete: (tenant: string, id: string, version: string) => judges.softDelete(tenant, id, version),
+      creatorOf: (tenant: string, id: string, version: string) => judges.creatorOfVersion(tenant, id, version),
+      setVersionTags: (tenant: string, id: string, version: string, tags: string[]) =>
+        judges.setVersionTags(tenant, id, version, tags),
+      versionTags: (tenant: string, id: string) => judges.versionTags(tenant, id),
+    };
+  },
   sample: (id, version) =>
     JudgeSpecSchema.parse({ kind: "model", id, version, model: "claude-opus-4-8", rubric: "did it work?" }),
   mutate: (id, version) =>
@@ -175,9 +191,9 @@ const judge: RegistryContract<JudgeSpec> = {
     has: true,
     ownVersions: true,
     list: true,
-    softDelete: false,
+    softDelete: true,
     createdBy: true,
-    creatorOf: false,
+    creatorOf: true,
     versionTags: true,
   },
 };

@@ -499,6 +499,24 @@
     "deletedVersions": "Deleted {count, plural, one {# version} other {# versions}} of {id}",
     "deletedHarness": "Deleted harness {id}"
   },
+  "deleteJudge": {
+    "triggerButton": "Delete",
+    "rowDeleteTitle": "Delete judge",
+    "rowDeleteAria": "Delete judge {id}",
+    "title": "Delete judge versions",
+    "close": "Close",
+    "explain": "Soft-delete removes the selected versions from this workspace. Past scorecards keep their results (each run snapshots the judge), but scorecards and schedules that reference a deleted version will fail to resolve.",
+    "selectAll": "Select all versions",
+    "selectedOfTotal": "{selected} / {total}",
+    "latest": "latest",
+    "entireWarning": "Every version is selected — this deletes the entire judge ({count, plural, one {# version} other {# versions}}).",
+    "failedSome": "Couldn't delete {count, plural, one {# version} other {# versions}}.",
+    "cancel": "Cancel",
+    "confirmVersions": "Delete {count, plural, one {# version} other {# versions}}",
+    "confirmEntire": "Delete judge",
+    "deletedVersions": "Deleted {count, plural, one {# version} other {# versions}} of {id}",
+    "deletedJudge": "Deleted judge {id}"
+  },
   "harnessVersions": {
     "versionsAria": "Versions ({count})",
     "compare": "Compare"
@@ -694,7 +712,7 @@
   },
   "judgesPage": {
     "title": "Judges",
-    "description": "Agent judges — model (direct LLM/VLM call) or harness (delegate to an agent). Workspace-owned plus shared defaults.",
+    "description": "Evaluators that score each run — score directly with an LLM or delegate to an agent.",
     "register": "Register judge",
     "registerDescription": "Register an agent judge (model | harness) owned by this workspace.",
     "connectError": "Couldn't reach the server: {error}",
