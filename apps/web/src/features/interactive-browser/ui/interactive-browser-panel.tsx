@@ -5,6 +5,7 @@ import { useTranslations } from 'next-intl'
 
 import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
+import { Input } from '@/shared/ui/input'
 
 import { BrowserCanvas } from './browser-canvas'
 
@@ -62,6 +63,7 @@ export function InteractiveBrowserPanel({ initialSession }: { initialSession: Se
             </Button>
           </div>
           <BrowserCanvas sessionId={session.id} />
+          <SaveLogin sessionId={session.id} />
         </div>
       ) : (
         <div className="flex flex-col items-start gap-3 rounded-xl border border-border bg-card p-6">
@@ -70,6 +72,65 @@ export function InteractiveBrowserPanel({ initialSession }: { initialSession: Se
             {busy ? t('starting') : t('start')}
           </Button>
         </div>
+      )}
+    </div>
+  )
+}
+
+// Save the current session's login (cookies) as a reusable browser profile (browser-profiles S3): create a profile,
+// then capture the session's cookies into it. Log into a site in the canvas above first.
+function SaveLogin({ sessionId }: { sessionId: string }) {
+  const t = useTranslations('interactiveBrowser')
+  const [name, setName] = useState('')
+  const [state, setState] = useState<'idle' | 'saving' | 'saved'>('idle')
+  const [error, setError] = useState<string | null>(null)
+
+  const save = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!name.trim()) return
+    setState('saving')
+    setError(null)
+    try {
+      const created = await fetch('/api/browser-profiles', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name: name.trim() }),
+      })
+      const profile = (await created.json()) as { id: string; error?: string }
+      if (!created.ok || profile.error) throw new Error(profile.error ?? `HTTP ${created.status}`)
+      const captured = await fetch(`/api/browser-profiles/${encodeURIComponent(profile.id)}/capture`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ sessionId }),
+      })
+      const body = (await captured.json()) as { error?: string }
+      if (!captured.ok || body.error) throw new Error(body.error ?? `HTTP ${captured.status}`)
+      setState('saved')
+      setName('')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+      setState('idle')
+    }
+  }
+
+  return (
+    <div className="space-y-2 border-t border-border pt-3">
+      <p className="text-[11.5px] text-faint">{t('saveLoginHint')}</p>
+      {error && <Callout tone="danger">{error}</Callout>}
+      {state === 'saved' ? (
+        <p className="text-[12px] text-[var(--color-success)]">{t('saveLoginDone')}</p>
+      ) : (
+        <form onSubmit={save} className="flex items-center gap-2">
+          <Input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder={t('saveLoginPlaceholder')}
+            className="text-[12px]"
+          />
+          <Button type="submit" size="sm" variant="secondary" disabled={state === 'saving' || !name.trim()}>
+            {state === 'saving' ? t('saveLoginSaving') : t('saveLogin')}
+          </Button>
+        </form>
       )}
     </div>
   )

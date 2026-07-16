@@ -144,7 +144,16 @@ function ProfileRow({
           </form>
         ) : (
           <>
-            <div className="truncate text-[13px] font-medium">{profile.name}</div>
+            <div className="flex items-center gap-2">
+              <span className="truncate text-[13px] font-medium">{profile.name}</span>
+              {profile.capturedAt ? (
+                <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-[var(--color-success)]/10 px-1.5 py-0.5 text-[10.5px] font-medium text-[var(--color-success)]">
+                  {t('loginSaved')}
+                </span>
+              ) : (
+                <span className="shrink-0 text-[10.5px] text-faint">{t('noLogin')}</span>
+              )}
+            </div>
             <div className="truncate text-[11.5px] text-faint">
               {profile.cookieDomains.length > 0 ? profile.cookieDomains.join(', ') : t('noDomains')}
             </div>

@@ -2677,6 +2677,8 @@
     "save": "저장",
     "delete": "삭제",
     "noDomains": "선언된 도메인 없음",
+    "loginSaved": "로그인 저장됨",
+    "noLogin": "로그인 미캡처",
     "emptyTitle": "아직 브라우저 프로필이 없습니다",
     "emptyHint": "브라우저 평가용 재사용 로그인을 저장하려면 프로필을 만드세요."
   },
@@ -2693,6 +2695,11 @@
     "disconnected": "세션이 종료되었습니다. 닫고 새로 시작하세요.",
     "urlPlaceholder": "https://… (Enter로 이동)",
     "go": "이동",
-    "canvasHint": "클릭·입력·이동 — 실제 브라우저를 직접 조종하고 있습니다."
+    "canvasHint": "클릭·입력·이동 — 실제 브라우저를 직접 조종하고 있습니다.",
+    "saveLoginHint": "위에서 로그인하셨나요? 이 세션의 쿠키를 재사용 프로필로 저장하세요.",
+    "saveLoginPlaceholder": "프로필 이름 (예: GitHub)",
+    "saveLogin": "로그인 저장",
+    "saveLoginSaving": "저장 중…",
+    "saveLoginDone": "로그인을 프로필로 저장했습니다. 브라우저 평가에서 재사용하세요."
   }
 }

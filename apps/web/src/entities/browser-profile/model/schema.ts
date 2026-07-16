@@ -9,6 +9,7 @@ export const browserProfileSchema = z.object({
   tenant: z.string(),
   name: z.string(),
   cookieDomains: z.array(z.string()),
+  capturedAt: z.string().nullable(), // when the login was last captured (S3), or null if none yet
   createdBy: z.string(),
   createdAt: z.string(),
   updatedAt: z.string(),

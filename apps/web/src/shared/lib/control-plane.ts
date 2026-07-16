@@ -131,6 +131,12 @@ export const controlPlane = {
     call<T>(auth, `/browser-profiles/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(body) }),
   deleteBrowserProfile: (auth: AuthContext, id: string) =>
     callVoid(auth, `/browser-profiles/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  // Capture an interactive session's login (cookies) into a profile (browser-profiles S3).
+  captureBrowserProfile: <T>(auth: AuthContext, id: string, body: unknown) =>
+    call<T>(auth, `/browser-profiles/${encodeURIComponent(id)}/capture`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
   // Work queue snapshot — per-runtime-lane running / waiting (FIFO) / next scheduled fire.
   getQueue: <T>(auth: AuthContext) => call<T>(auth, '/queue'),
   // Metered billing usage (LLM cost for orchestration + verdict; own-pays runs excluded) — meter-only, never blocks.
