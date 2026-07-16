@@ -39,7 +39,10 @@ export function registerJudgeTools(server: McpServer, ctx: McpToolContext): void
       },
       ({ id, base, candidate }) =>
         run(principal, "judges:read", async () => {
-          const [baseSpec, candidateSpec] = await Promise.all([judges.get(ws, id, base), judges.get(ws, id, candidate)]);
+          const [baseSpec, candidateSpec] = await Promise.all([
+            judges.get(ws, id, base),
+            judges.get(ws, id, candidate),
+          ]);
           return ok(diffJudgeSpecs(baseSpec, candidateSpec));
         }),
     );

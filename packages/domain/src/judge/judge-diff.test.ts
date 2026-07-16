@@ -61,10 +61,7 @@ describe("diffJudgeSpecs", () => {
   });
 
   it("surfaces a rubric text change as a leaf path", () => {
-    const diff = diffJudgeSpecs(
-      model({ rubric: "old rubric" }),
-      model({ version: "1.1.0", rubric: "new rubric" }),
-    );
+    const diff = diffJudgeSpecs(model({ rubric: "old rubric" }), model({ version: "1.1.0", rubric: "new rubric" }));
     expect(diff.changes).toContainEqual({
       path: "rubric",
       before: "old rubric",
