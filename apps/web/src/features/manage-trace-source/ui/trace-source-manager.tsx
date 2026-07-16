@@ -4,6 +4,7 @@ import { useState, useTransition } from 'react'
 import { useTranslations } from 'next-intl'
 
 import { SecretPicker } from '@/features/pick-secret'
+import { type TraceScopeOption } from '@/entities/trace-probe'
 import type { TraceSourceConfig, TraceSourceKind } from '@/entities/trace-source'
 import { Badge } from '@/shared/ui/badge'
 import { Button } from '@/shared/ui/button'
@@ -13,32 +14,47 @@ import { Input, Label } from '@/shared/ui/input'
 import { SettingsList, SettingsRow } from '@/shared/ui/settings-list'
 import { InfoTip } from '@/shared/ui/tooltip'
 
-import { removeTraceSourceAction, upsertTraceSourceAction } from '../api/manage-trace-source'
+import {
+  probeTraceSourceAction,
+  removeTraceSourceAction,
+  upsertTraceSourceAction,
+} from '../api/manage-trace-source'
 
-// Meaning of the project field per kind — align the label/placeholder to the platform's terminology (one field, per-kind coordinate).
-// label is the product name (not translated); project/placeholder are message keys resolved at runtime.
-const KIND_META: Record<
-  TraceSourceKind,
-  { label: string; projectKey: string; placeholderKey: string }
-> = {
-  otel: { label: 'OTel', projectKey: 'projectOtel', placeholderKey: 'placeholderOtel' },
-  mlflow: { label: 'MLflow', projectKey: 'projectMlflow', placeholderKey: 'placeholderMlflow' },
-  langfuse: {
-    label: 'Langfuse',
-    projectKey: 'projectLangfuse',
-    placeholderKey: 'placeholderLangfuse',
-  },
-  langsmith: {
-    label: 'LangSmith',
-    projectKey: 'projectLangsmith',
-    placeholderKey: 'placeholderLangsmith',
-  },
-  phoenix: { label: 'Phoenix', projectKey: 'projectPhoenix', placeholderKey: 'placeholderPhoenix' },
+// Meaning of the project field per kind — align the label to the platform's terminology (one field, per-kind coordinate).
+const KIND_META: Record<TraceSourceKind, { label: string; projectKey: string }> = {
+  otel: { label: 'OTel', projectKey: 'projectOtel' },
+  mlflow: { label: 'MLflow', projectKey: 'projectMlflow' },
+  langfuse: { label: 'Langfuse', projectKey: 'projectLangfuse' },
+  langsmith: { label: 'LangSmith', projectKey: 'projectLangsmith' },
+  phoenix: { label: 'Phoenix', projectKey: 'projectPhoenix' },
 }
 
-// Workspace trace sources (multiple) — register several observability platforms (OTel/MLflow/Langfuse/LangSmith/Phoenix), and
-// when a harness deployed on the dev cluster is evaluated, its trace is pulled from the source selected per harness so the pulled
-// trace can be scored. Which source to pull from is chosen per harness on the harness detail page.
+// Which config field a discovered scope binds to (and whether it is required to register), given kind + correlate.
+//  - otel: correlate:'tag' needs `service` (the Jaeger search scope); correlate:'id' needs nothing.
+//  - mlflow: correlate:'tag' needs `project` (experiment_id search scope); correlate:'id' needs nothing.
+//  - phoenix: always needs `project` (the span-query path).
+//  - langfuse/langsmith: the source doesn't consume a scope — the probe is validation-only.
+function scopeRequirement(
+  kind: TraceSourceKind,
+  correlate: 'id' | 'tag'
+): { field: 'service' | 'project'; required: boolean } | null {
+  if (kind === 'otel') return correlate === 'tag' ? { field: 'service', required: true } : null
+  if (kind === 'mlflow') return correlate === 'tag' ? { field: 'project', required: true } : null
+  if (kind === 'phoenix') return { field: 'project', required: true }
+  return null // langfuse, langsmith
+}
+
+type ProbeState = {
+  status: 'idle' | 'testing' | 'ok' | 'fail'
+  key?: string // the (kind|endpoint|authName) fingerprint the probe ran against — a change invalidates it
+  detail?: string
+  reason?: 'auth' | 'unreachable' | 'error'
+  scopes: TraceScopeOption[]
+}
+
+// Workspace trace sources (multiple) — register several observability platforms and pull a dev-cluster-deployed
+// harness's trace after a case runs so it can be scored. Registration is gated on a successful "Test connection"
+// that also discovers the platform's selectable scopes (experiment/project/service) — no raw scope typing.
 // Auth values are stored only as workspace secret references (names).
 export function TraceSourceManager({
   sources,
@@ -62,8 +78,19 @@ export function TraceSourceManager({
   const [service, setService] = useState('')
   const [project, setProject] = useState('')
   const [created, setCreated] = useState<string[]>([])
+  const [probe, setProbe] = useState<ProbeState>({ status: 'idle', scopes: [] })
   const names = [...new Set([...secretNames, ...created])]
   const meta = KIND_META[kind]
+
+  // The connection fingerprint the probe must match — editing kind/endpoint/secret invalidates a prior probe (re-test).
+  const probeKey = `${kind}|${endpoint.trim()}|${authName.trim()}`
+  const probeFresh = probe.key === probeKey
+  const reachable = probe.status === 'ok' && probeFresh
+  const req = scopeRequirement(kind, correlate)
+  const scopeValue = req?.field === 'service' ? service : req?.field === 'project' ? project : ''
+  // Strict select-only: a required scope must be chosen from the discovered list; an empty list blocks registration.
+  const scopeMissing = req?.required === true && !scopeValue
+  const canSave = reachable && !scopeMissing && !pending
 
   function resetForm() {
     setEditing(undefined)
@@ -74,6 +101,7 @@ export function TraceSourceManager({
     setCorrelate('id')
     setService('')
     setProject('')
+    setProbe({ status: 'idle', scopes: [] })
   }
 
   function startEdit(s: TraceSourceConfig) {
@@ -86,16 +114,48 @@ export function TraceSourceManager({
     setCorrelate(s.correlate)
     setService(s.service ?? '')
     setProject(s.project ?? '')
+    setProbe({ status: 'idle', scopes: [] }) // editing requires re-testing (stored scope may not be in the fresh list)
+  }
+
+  function onTest() {
+    setError(undefined)
+    if (!endpoint.trim()) {
+      setError(t('endpointRequired'))
+      return
+    }
+    const key = probeKey
+    setProbe({ status: 'testing', key, scopes: [] })
+    startTransition(async () => {
+      const r = await probeTraceSourceAction({
+        kind,
+        endpoint: endpoint.trim(),
+        ...(authName.trim() ? { authSecretName: authName.trim() } : {}),
+      })
+      if (!r.ok) {
+        setProbe({ status: 'fail', key, reason: 'error', detail: r.error, scopes: [] })
+        return
+      }
+      const res = r.result
+      setProbe({
+        status: res.reachable ? 'ok' : 'fail',
+        key,
+        detail: res.detail,
+        reason: res.reason,
+        scopes: res.scopes ?? [],
+      })
+      // Clear a stale scope selection that is no longer offered by this platform.
+      if (res.reachable) {
+        const ids = new Set((res.scopes ?? []).map((s) => s.id))
+        if (service && !ids.has(service)) setService('')
+        if (project && !ids.has(project)) setProject('')
+      }
+    })
   }
 
   function onSave() {
     setError(undefined)
     if (!name.trim()) {
       setError(t('nameRequired'))
-      return
-    }
-    if (!endpoint.trim()) {
-      setError(t('endpointRequired'))
       return
     }
     startTransition(async () => {
@@ -253,32 +313,64 @@ export function TraceSourceManager({
                 aria-label={t('correlateLabel')}
               />
             </div>
-            {/* service.name — meaningful for otel/jaeger tag search; always rendered so it can be set for any tag-correlated source. */}
-            <div className="space-y-1">
-              <Label htmlFor="tsrc-service" className="flex items-center gap-1.5">
-                {t('service')}
-                <InfoTip content={t('serviceInfoTip')} />
-              </Label>
-              <Input
-                id="tsrc-service"
-                placeholder="e.g. my-agent"
-                value={service}
-                onChange={(e) => setService(e.target.value)}
-              />
+          </div>
+
+          {/* Test connection — validates the base URL + resolved secret AND discovers the selectable scopes. Save is gated on it. */}
+          <div className="space-y-2 rounded-md border border-dashed bg-muted/30 p-3">
+            <div className="flex items-center gap-3">
+              <Button
+                size="sm"
+                variant="secondary"
+                disabled={pending || !endpoint.trim()}
+                onClick={onTest}
+              >
+                {probe.status === 'testing' ? t('testing') : t('testConnection')}
+              </Button>
+              {reachable ? (
+                <span className="text-[12px] font-[510] text-success">{t('probeConnected')}</span>
+              ) : (
+                <span className="text-[12px] text-muted-foreground">{t('mustTest')}</span>
+              )}
             </div>
-            <div className="space-y-1">
-              <Label htmlFor="tsrc-project">{t(meta.projectKey)}</Label>
-              <Input
-                id="tsrc-project"
-                placeholder={t(meta.placeholderKey)}
-                value={project}
-                onChange={(e) => setProject(e.target.value)}
-              />
-            </div>
+            {probe.status === 'fail' && probeFresh && (
+              <Callout tone="danger" className="py-1.5">
+                {probe.reason === 'auth'
+                  ? t('probeAuthFailed')
+                  : probe.reason === 'unreachable'
+                    ? t('probeUnreachable')
+                    : t('probeError')}
+                {probe.detail && (
+                  <span className="mt-0.5 block break-all font-mono text-[11px] opacity-80">
+                    {probe.detail}
+                  </span>
+                )}
+              </Callout>
+            )}
+            {/* Strict select-only scope picker — options come ONLY from the probe. Shown when the config needs a scope. */}
+            {reachable && req && (
+              <div className="space-y-1">
+                <Label htmlFor="tsrc-scope">
+                  {req.field === 'service' ? t('service') : t(meta.projectKey)}
+                </Label>
+                {probe.scopes.length > 0 ? (
+                  <Combobox
+                    id="tsrc-scope"
+                    options={probe.scopes.map((s) => ({ value: s.id, label: s.name }))}
+                    value={scopeValue}
+                    onChange={(v) => (req.field === 'service' ? setService(v) : setProject(v))}
+                    aria-label={t('scopeSelectLabel')}
+                  />
+                ) : (
+                  <Callout tone="warning" className="py-1.5">
+                    {t('scopeEmpty')}
+                  </Callout>
+                )}
+              </div>
+            )}
           </div>
 
           <div className="flex items-center gap-3">
-            <Button size="sm" disabled={pending} onClick={onSave}>
+            <Button size="sm" disabled={!canSave} onClick={onSave}>
               {pending ? t('saving') : editing ? t('update') : t('register')}
             </Button>
             {editing && (

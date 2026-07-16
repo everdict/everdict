@@ -47,6 +47,23 @@ export function registerTraceSinkTools(server: McpServer, ctx: McpToolContext): 
       (input) => run(principal, "settings:write", async () => ok({ config: await sink.upsert(ws, input) })),
     );
     server.registerTool(
+      "probe_workspace_trace_sink",
+      {
+        description:
+          "Test a trace sink connection (base URL + resolved secret) and list the platform's selectable scopes in one authed call — validates before registering. Returns {kind, reachable, detail, reason?('auth'|'unreachable'|'error'), scopeKind?('experiment'|'project'), scopes?:[{id,name}]}. mlflow→experiments, langfuse/langsmith/phoenix→projects. Put the auth value in the SecretStore first and pass its name.",
+        inputSchema: {
+          kind: z.enum(["mlflow", "langfuse", "langsmith", "phoenix"]).describe("observability platform kind"),
+          endpoint: z.string().url().describe("platform API base URL"),
+          authSecretName: z
+            .string()
+            .min(1)
+            .optional()
+            .describe("SecretStore key name holding the auth-header 'value' (omit for an unauthenticated dev server)"),
+        },
+      },
+      (input) => run(principal, "settings:write", async () => ok(await sink.probe(ws, input))),
+    );
+    server.registerTool(
       "remove_workspace_trace_sink",
       {
         description:

@@ -47,6 +47,30 @@ export function registerTraceSinkRoutes(app: FastifyInstance, deps: ServerDeps):
     }
   });
 
+  // Connection test + scope discovery before registering — validate the base URL + resolved secret and list the
+  // platform's selectable scopes (mlflow experiments / langfuse|langsmith|phoenix projects). settings:write (same as
+  // register — the probe resolves the workspace secret). A classified failure is still a 200.
+  app.post("/workspace/trace-sinks/probe", { schema: traceSinkDocs.probe }, async (req, reply) => {
+    if (!deps.traceSinkService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "trace sink service not configured" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    const body = z
+      .object({
+        kind: z.enum(["mlflow", "langfuse", "langsmith", "phoenix"]),
+        endpoint: z.string().url(),
+        authSecretName: z.string().min(1).optional(),
+      })
+      .safeParse(req.body ?? {});
+    if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: zodIssues(body.error).join("; ") });
+    try {
+      gate(principal, "settings:write");
+      return reply.send(await deps.traceSinkService.probe(principal.workspace, body.data));
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
   app.delete("/workspace/trace-sinks/:name", { schema: traceSinkDocs.remove }, async (req, reply) => {
     if (!deps.traceSinkService)
       return reply.code(404).send({ code: "NOT_FOUND", message: "trace sink service not configured" });

@@ -46,6 +46,23 @@ export function registerTraceSourceTools(server: McpServer, ctx: McpToolContext)
       (input) => run(principal, "settings:write", async () => ok({ config: await source.upsert(ws, input) })),
     );
     server.registerTool(
+      "probe_workspace_trace_source",
+      {
+        description:
+          "Test a trace source connection (base URL + resolved secret) and list the platform's selectable scopes in one authed call — validates before registering. Returns {kind, reachable, detail, reason?('auth'|'unreachable'|'error'), scopeKind?('experiment'|'project'|'service'), scopes?:[{id,name}]}. mlflow→experiments, phoenix/langfuse/langsmith→projects, otel→jaeger services (OTLP-native collectors return reachable with no list). Put the auth value in the SecretStore first and pass its name.",
+        inputSchema: {
+          kind: z.enum(["otel", "mlflow", "langfuse", "langsmith", "phoenix"]).describe("observability platform kind"),
+          endpoint: z.string().url().describe("platform query API base URL"),
+          authSecretName: z
+            .string()
+            .min(1)
+            .optional()
+            .describe("SecretStore key name holding the auth-header 'value' (omit for an unauthenticated dev server)"),
+        },
+      },
+      (input) => run(principal, "settings:write", async () => ok(await source.probe(ws, input))),
+    );
+    server.registerTool(
       "remove_workspace_trace_source",
       {
         description:

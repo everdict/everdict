@@ -181,10 +181,39 @@ Call sites (both share it — same seam as `ScoringService`):
 | `GET /workspace/trace-sinks` → `{sinks, assignments}` | `list_workspace_trace_sinks` | `harnesses:read` (viewer+) |
 | `PUT /workspace/trace-sinks` (name upsert) | `set_workspace_trace_sink` | `settings:write` (admin) |
 | `DELETE /workspace/trace-sinks/:name` | `remove_workspace_trace_sink` | `settings:write` (admin) |
+| `POST /workspace/trace-sinks/probe` → `TraceProbeResult` | `probe_workspace_trace_sink` | `settings:write` (admin) |
 | `PUT /harnesses/:id/trace-sink` `{sink\|null}` | `assign_harness_trace_sink` | `harnesses:register` (member+) |
+
+The trace-source slice mirrors these exactly (`…/trace-sources`, `…_trace_source`, `otel` added to the kind
+enum), including `POST /workspace/trace-sources/probe` / `probe_workspace_trace_source`.
 
 The export outcome rides the existing scorecard surfaces (`GET /scorecards/:id` /
 `get_scorecard`) — no new read route.
+
+## Connection probe + scope discovery (register-time validation)
+
+Registration used to be a blind config write — a bad base URL / wrong secret / mistyped `experiment_id`
+only surfaced at export/pull time (a silent 0-event pull). The **probe** closes that: one lightweight
+authenticated call per platform that BOTH validates the connection (base URL + resolved secret) AND lists
+the platform's selectable scopes, so the scope field is a **picker over real data**, never raw text.
+
+- **Engine** `probeTraceConnection(cfg) → TraceProbeResult` (`packages/trace/src/discovery/probe-connection.ts`).
+  Per kind, one call: mlflow `POST /api/2.0/mlflow/experiments/search` (→ experiments), phoenix
+  `GET /v1/projects` · langfuse `GET /api/public/projects` · langsmith `GET /sessions` (→ projects), otel
+  Jaeger `GET /api/services` (→ services). Auth discipline is the adapter's (langsmith `x-api-key`, the rest
+  verbatim `Authorization`). Errors map to a classified `reason` (`auth` 401/403 · `unreachable`
+  network/timeout · `error` other non-2xx); an OTLP-native collector with no service-list API is
+  `reachable` with an empty scope list (so `correlate:"id"` stays registerable). Pure per-kind parsers +
+  a 10s `Promise.race`; never throws for reachability. It lives in `@everdict/trace` and is **injected** into
+  both services (`probeConnection` dep) — `application-control` stays free of `@everdict/trace` (cone).
+- **Service** `TraceSink/SourceService.probe(ws, {kind, endpoint, authSecretName?})` resolves the secret like
+  `resolve()`/`exportStream()`, but a missing secret returns a friendly `{reachable:false, reason:"auth"}`
+  instead of throwing (a probe classifies). `upsert` stays **pure** — it never probes.
+- **Web** gates Save on a successful probe (a `(kind,endpoint,authSecretName)` fingerprint invalidates a
+  stale probe → re-test), and the scope field is a **select-only** combobox fed from `result.scopes`
+  (no free text). A required scope with an empty list blocks registration (mlflow `correlate:tag`,
+  phoenix, otel `correlate:tag`). This strict select-only guarantee is a **web-UI property**: MCP /
+  programmatic `upsert` is unchanged and can still register an unprobed config.
 
 ## Web (apps/web)
 

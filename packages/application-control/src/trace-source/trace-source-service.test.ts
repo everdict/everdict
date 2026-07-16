@@ -1,5 +1,5 @@
-import type { WorkspaceSettings } from "@everdict/contracts";
-import { describe, expect, it } from "vitest";
+import type { TraceProbeConfig, TraceProbeResult, WorkspaceSettings } from "@everdict/contracts";
+import { describe, expect, it, vi } from "vitest";
 import type { WorkspaceSettingsStore } from "../ports/workspace-settings-store.js";
 import { TraceSourceService } from "./trace-source-service.js";
 
@@ -104,5 +104,49 @@ describe("TraceSourceService", () => {
     await svc.upsert(WS, { name: "s1", kind: "langfuse", endpoint: "http://lf", authSecretName: "missing" });
     await svc.assign(WS, "harness-a", "s1");
     await expect(svc.resolve(WS, "harness-a")).rejects.toThrow(/not registered|No value/);
+  });
+
+  it("probe() resolves the auth secret to a value and passes it into the injected probe engine", async () => {
+    const ok: TraceProbeResult = { kind: "mlflow", reachable: true, scopeKind: "experiment", scopes: [], detail: "ok" };
+    const probeConnection = vi.fn<(cfg: TraceProbeConfig) => Promise<TraceProbeResult>>().mockResolvedValue(ok);
+    const svc = new TraceSourceService(fakeSettings(), {
+      secretsFor: async () => ({ "mlflow-token": "Basic abc123" }),
+      probeConnection,
+    });
+    const res = await svc.probe(WS, {
+      kind: "mlflow",
+      endpoint: "https://mlflow.acme.dev",
+      authSecretName: "mlflow-token",
+    });
+    expect(res).toBe(ok);
+    expect(probeConnection).toHaveBeenCalledWith({
+      kind: "mlflow",
+      endpoint: "https://mlflow.acme.dev",
+      auth: "Basic abc123",
+    });
+  });
+
+  it("probe() returns a friendly reason:'auth' (not a throw) when the referenced secret has no value", async () => {
+    const probeConnection = vi.fn<(cfg: TraceProbeConfig) => Promise<TraceProbeResult>>();
+    const svc = new TraceSourceService(fakeSettings(), { secretsFor: async () => ({}), probeConnection });
+    const res = await svc.probe(WS, { kind: "phoenix", endpoint: "http://phoenix", authSecretName: "missing" });
+    expect(res).toMatchObject({ reachable: false, reason: "auth" });
+    expect(probeConnection).not.toHaveBeenCalled(); // never reaches the platform without a credential
+  });
+
+  it("probe() calls the engine with no auth when there is no authSecretName (unauthenticated dev server)", async () => {
+    const probeConnection = vi
+      .fn<(cfg: TraceProbeConfig) => Promise<TraceProbeResult>>()
+      .mockResolvedValue({ kind: "otel", reachable: true, scopeKind: "service", scopes: [], detail: "ok" });
+    const svc = new TraceSourceService(fakeSettings(), { probeConnection });
+    await svc.probe(WS, { kind: "otel", endpoint: "http://jaeger:16686" });
+    expect(probeConnection).toHaveBeenCalledWith({ kind: "otel", endpoint: "http://jaeger:16686" });
+  });
+
+  it("upsert() never invokes the probe engine — registration stays pure (web-only gating)", async () => {
+    const probeConnection = vi.fn<(cfg: TraceProbeConfig) => Promise<TraceProbeResult>>();
+    const svc = new TraceSourceService(fakeSettings(), { probeConnection });
+    await svc.upsert(WS, { name: "s1", kind: "otel", endpoint: "http://jaeger" });
+    expect(probeConnection).not.toHaveBeenCalled();
   });
 });

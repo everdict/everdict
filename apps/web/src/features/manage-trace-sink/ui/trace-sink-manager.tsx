@@ -4,6 +4,7 @@ import { useState, useTransition } from 'react'
 import { useTranslations } from 'next-intl'
 
 import { SecretPicker } from '@/features/pick-secret'
+import { type TraceScopeOption } from '@/entities/trace-probe'
 import type { TraceSinkConfig, TraceSinkKind } from '@/entities/trace-sink'
 import { Badge } from '@/shared/ui/badge'
 import { Button } from '@/shared/ui/button'
@@ -13,32 +14,31 @@ import { Input, Label } from '@/shared/ui/input'
 import { SettingsList, SettingsRow } from '@/shared/ui/settings-list'
 import { InfoTip } from '@/shared/ui/tooltip'
 
-import { removeTraceSinkAction, upsertTraceSinkAction } from '../api/manage-trace-sink'
+import {
+  probeTraceSinkAction,
+  removeTraceSinkAction,
+  upsertTraceSinkAction,
+} from '../api/manage-trace-sink'
 
-// Meaning of the project field per kind — align the label/placeholder to the platform's terminology (one field, per-kind coordinate).
-// label is the product name (not translated); project/placeholder are message keys resolved at runtime.
-const KIND_META: Record<
-  TraceSinkKind,
-  { label: string; projectKey: string; placeholderKey: string }
-> = {
-  mlflow: { label: 'MLflow', projectKey: 'projectMlflow', placeholderKey: 'placeholderMlflow' },
-  langfuse: {
-    label: 'Langfuse',
-    projectKey: 'projectLangfuse',
-    placeholderKey: 'placeholderLangfuse',
-  },
-  langsmith: {
-    label: 'LangSmith',
-    projectKey: 'projectLangsmith',
-    placeholderKey: 'placeholderLangsmith',
-  },
-  phoenix: { label: 'Phoenix', projectKey: 'projectPhoenix', placeholderKey: 'placeholderPhoenix' },
+// Meaning of the project field per kind — align the label to the platform's terminology (one field, per-kind coordinate).
+const KIND_META: Record<TraceSinkKind, { label: string; projectKey: string }> = {
+  mlflow: { label: 'MLflow', projectKey: 'projectMlflow' },
+  langfuse: { label: 'Langfuse', projectKey: 'projectLangfuse' },
+  langsmith: { label: 'LangSmith', projectKey: 'projectLangsmith' },
+  phoenix: { label: 'Phoenix', projectKey: 'projectPhoenix' },
 }
 
-// Workspace trace sinks (multiple) — register several observability platforms (MLflow/Langfuse/LangSmith/Phoenix), and
-// when scorecard grading finishes, each case's trace+scores are exported to the sink selected per harness, while the scorecard
-// keeps only a summary and external deep links. Which sink to export to is chosen per harness on the harness detail page.
-// Auth values are stored only as workspace secret references (names).
+type ProbeState = {
+  status: 'idle' | 'testing' | 'ok' | 'fail'
+  key?: string // the (kind|endpoint|authName) fingerprint the probe ran against — a change invalidates it
+  detail?: string
+  reason?: 'auth' | 'unreachable' | 'error'
+  scopes: TraceScopeOption[]
+}
+
+// Workspace trace sinks (multiple) — register several observability platforms and export each case's trace+scores after
+// scorecard grading. Registration is gated on a successful "Test connection" that also discovers the platform's selectable
+// project scopes (optional for a sink) — no raw scope typing. Auth values are stored only as workspace secret references.
 export function TraceSinkManager({
   sinks,
   canWrite,
@@ -60,8 +60,16 @@ export function TraceSinkManager({
   const [project, setProject] = useState('')
   const [webUrl, setWebUrl] = useState('')
   const [created, setCreated] = useState<string[]>([])
+  const [probe, setProbe] = useState<ProbeState>({ status: 'idle', scopes: [] })
   const names = [...new Set([...secretNames, ...created])]
   const meta = KIND_META[kind]
+
+  // The connection fingerprint the probe must match — editing kind/endpoint/secret invalidates a prior probe (re-test).
+  const probeKey = `${kind}|${endpoint.trim()}|${authName.trim()}`
+  const probeFresh = probe.key === probeKey
+  const reachable = probe.status === 'ok' && probeFresh
+  // project is optional for a sink — Save only needs a reachable connection.
+  const canSave = reachable && !pending
 
   function resetForm() {
     setEditing(undefined)
@@ -71,6 +79,7 @@ export function TraceSinkManager({
     setAuthName('')
     setProject('')
     setWebUrl('')
+    setProbe({ status: 'idle', scopes: [] })
   }
 
   function startEdit(s: TraceSinkConfig) {
@@ -82,16 +91,46 @@ export function TraceSinkManager({
     setAuthName(s.authSecretName ?? '')
     setProject(s.project ?? '')
     setWebUrl(s.webUrl ?? '')
+    setProbe({ status: 'idle', scopes: [] }) // editing requires re-testing (stored scope may not be in the fresh list)
+  }
+
+  function onTest() {
+    setError(undefined)
+    if (!endpoint.trim()) {
+      setError(t('endpointRequired'))
+      return
+    }
+    const key = probeKey
+    setProbe({ status: 'testing', key, scopes: [] })
+    startTransition(async () => {
+      const r = await probeTraceSinkAction({
+        kind,
+        endpoint: endpoint.trim(),
+        ...(authName.trim() ? { authSecretName: authName.trim() } : {}),
+      })
+      if (!r.ok) {
+        setProbe({ status: 'fail', key, reason: 'error', detail: r.error, scopes: [] })
+        return
+      }
+      const res = r.result
+      setProbe({
+        status: res.reachable ? 'ok' : 'fail',
+        key,
+        detail: res.detail,
+        reason: res.reason,
+        scopes: res.scopes ?? [],
+      })
+      if (res.reachable) {
+        const ids = new Set((res.scopes ?? []).map((s) => s.id))
+        if (project && !ids.has(project)) setProject('')
+      }
+    })
   }
 
   function onSave() {
     setError(undefined)
     if (!name.trim()) {
       setError(t('nameRequired'))
-      return
-    }
-    if (!endpoint.trim()) {
-      setError(t('endpointRequired'))
       return
     }
     startTransition(async () => {
@@ -232,15 +271,6 @@ export function TraceSinkManager({
               />
             </div>
             <div className="space-y-1">
-              <Label htmlFor="ts-project">{t(meta.projectKey)}</Label>
-              <Input
-                id="ts-project"
-                placeholder={t(meta.placeholderKey)}
-                value={project}
-                onChange={(e) => setProject(e.target.value)}
-              />
-            </div>
-            <div className="space-y-1">
               <Label htmlFor="ts-web" className="flex items-center gap-1.5">
                 {t('webUrlBase')}
                 <InfoTip content={t('webUrlInfoTip')} />
@@ -254,8 +284,57 @@ export function TraceSinkManager({
             </div>
           </div>
 
+          {/* Test connection — validates the base URL + resolved secret AND discovers the selectable scopes. Save is gated on it. */}
+          <div className="space-y-2 rounded-md border border-dashed bg-muted/30 p-3">
+            <div className="flex items-center gap-3">
+              <Button
+                size="sm"
+                variant="secondary"
+                disabled={pending || !endpoint.trim()}
+                onClick={onTest}
+              >
+                {probe.status === 'testing' ? t('testing') : t('testConnection')}
+              </Button>
+              {reachable ? (
+                <span className="text-[12px] font-[510] text-success">{t('probeConnected')}</span>
+              ) : (
+                <span className="text-[12px] text-muted-foreground">{t('mustTest')}</span>
+              )}
+            </div>
+            {probe.status === 'fail' && probeFresh && (
+              <Callout tone="danger" className="py-1.5">
+                {probe.reason === 'auth'
+                  ? t('probeAuthFailed')
+                  : probe.reason === 'unreachable'
+                    ? t('probeUnreachable')
+                    : t('probeError')}
+                {probe.detail && (
+                  <span className="mt-0.5 block break-all font-mono text-[11px] opacity-80">
+                    {probe.detail}
+                  </span>
+                )}
+              </Callout>
+            )}
+            {/* Optional project scope — strict select-only from the probe (a "none" option leaves it unset). */}
+            {reachable && probe.scopes.length > 0 && (
+              <div className="space-y-1">
+                <Label htmlFor="ts-project">{t(meta.projectKey)}</Label>
+                <Combobox
+                  id="ts-project"
+                  options={[
+                    { value: '', label: t('scopeNone') },
+                    ...probe.scopes.map((s) => ({ value: s.id, label: s.name })),
+                  ]}
+                  value={project}
+                  onChange={setProject}
+                  aria-label={t('scopeSelectLabel')}
+                />
+              </div>
+            )}
+          </div>
+
           <div className="flex items-center gap-3">
-            <Button size="sm" disabled={pending} onClick={onSave}>
+            <Button size="sm" disabled={!canSave} onClick={onSave}>
               {pending ? t('saving') : editing ? t('update') : t('register')}
             </Button>
             {editing && (

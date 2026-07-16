@@ -1112,7 +1112,17 @@
     "saving": "저장 중…",
     "update": "갱신",
     "register": "등록",
-    "cancel": "취소"
+    "cancel": "취소",
+    "testConnection": "연결 테스트",
+    "testing": "테스트 중…",
+    "probeConnected": "연결됨",
+    "mustTest": "저장하려면 연결을 테스트하세요",
+    "probeAuthFailed": "인증 실패 — 시크릿을 확인하세요.",
+    "probeUnreachable": "도달 불가 — 기본 URL을 확인하세요.",
+    "probeError": "연결 오류.",
+    "scopeSelectLabel": "스코프 선택",
+    "scopeEmpty": "이 플랫폼이 선택할 항목을 반환하지 않아 등록할 수 없습니다.",
+    "scopeNone": "없음"
   },
   "manageTraceSource": {
     "notSelected": "선택 안 함",
@@ -1156,7 +1166,17 @@
     "saving": "저장 중…",
     "update": "갱신",
     "register": "등록",
-    "cancel": "취소"
+    "cancel": "취소",
+    "testConnection": "연결 테스트",
+    "testing": "테스트 중…",
+    "probeConnected": "연결됨",
+    "mustTest": "저장하려면 연결을 테스트하세요",
+    "probeAuthFailed": "인증 실패 — 시크릿을 확인하세요.",
+    "probeUnreachable": "도달 불가 — 기본 URL을 확인하세요.",
+    "probeError": "연결 오류.",
+    "scopeSelectLabel": "스코프 선택",
+    "scopeEmpty": "이 플랫폼이 선택할 항목을 반환하지 않아 등록할 수 없습니다.",
+    "scopeNone": "없음"
   },
   "manageWorkspaceRunners": {
     "title": "공유 러너",

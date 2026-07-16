@@ -1,6 +1,7 @@
 import { TraceSinkAssignmentsResponseSchema } from "@everdict/contracts/wire";
 import { TraceSinkUpsertResponseSchema } from "@everdict/contracts/wire";
 import { TraceSinkRosterSchema } from "@everdict/contracts/wire";
+import { TraceProbeResultSchema } from "@everdict/contracts/wire";
 import type { FastifySchema } from "fastify";
 import { z } from "zod";
 import { errorResponses, toJsonSchema } from "../openapi.js";
@@ -40,6 +41,26 @@ const docs = {
     ),
     response: {
       200: { description: "Stored sink", ...toJsonSchema(TraceSinkUpsertResponseSchema) },
+      ...errorResponses(400, 401, 403, 404),
+    },
+  },
+  probe: {
+    summary: "Test a trace sink connection and discover its scopes",
+    description:
+      "Validate the base URL + resolved secret and list the platform's selectable scopes in one authed call " +
+      "(mlflow experiments / langfuse|langsmith|phoenix projects) — used by the web form to gate Save and populate " +
+      "the scope picker. A classified failure (reason set) is still a 200. Requires settings:write (the probe " +
+      "resolves the workspace secret).",
+    tags: ["trace-sink"],
+    body: toJsonSchema(
+      z.object({
+        kind: z.enum(["mlflow", "langfuse", "langsmith", "phoenix"]),
+        endpoint: z.string().url().describe("Platform API base URL"),
+        authSecretName: z.string().min(1).optional().describe("SecretStore name of the auth-header value"),
+      }),
+    ),
+    response: {
+      200: { description: "Probe outcome + discovered scopes", ...toJsonSchema(TraceProbeResultSchema) },
       ...errorResponses(400, 401, 403, 404),
     },
   },

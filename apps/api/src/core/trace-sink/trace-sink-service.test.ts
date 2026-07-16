@@ -241,3 +241,46 @@ describe("TraceSinkService.exportStream — case streaming (D5)", () => {
     expect(out.cases?.find((c) => c.caseId === "c2")?.externalId).toBe("ext-c2");
   });
 });
+
+describe("TraceSinkService — connection probe", () => {
+  it("resolves the auth secret and delegates to the injected probe engine", async () => {
+    const calls: unknown[] = [];
+    const svc = new TraceSinkService(new InMemoryWorkspaceSettingsStore(), {
+      secretsFor: async () => ({ "lf-key": "Basic xyz" }),
+      probeConnection: async (cfg) => {
+        calls.push(cfg);
+        return {
+          kind: cfg.kind,
+          reachable: true,
+          scopeKind: "project",
+          scopes: [{ id: "p1", name: "prod" }],
+          detail: "ok",
+        };
+      },
+    });
+    const res = await svc.probe("acme", { kind: "langfuse", endpoint: "https://lf.corp.io", authSecretName: "lf-key" });
+    expect(res).toMatchObject({ reachable: true, scopeKind: "project" });
+    expect(calls[0]).toEqual({ kind: "langfuse", endpoint: "https://lf.corp.io", auth: "Basic xyz" });
+  });
+
+  it("returns reason:'auth' (not a throw) when the referenced secret has no value", async () => {
+    let probed = false;
+    const svc = new TraceSinkService(new InMemoryWorkspaceSettingsStore(), {
+      secretsFor: async () => ({}),
+      probeConnection: async (cfg) => {
+        probed = true;
+        return { kind: cfg.kind, reachable: true, detail: "unexpected" };
+      },
+    });
+    const res = await svc.probe("acme", { kind: "mlflow", endpoint: "http://mlflow:5000", authSecretName: "missing" });
+    expect(res).toMatchObject({ reachable: false, reason: "auth" });
+    expect(probed).toBe(false);
+  });
+
+  it("throws when connection testing is not configured (no probe engine injected)", async () => {
+    const svc = new TraceSinkService(new InMemoryWorkspaceSettingsStore());
+    await expect(svc.probe("acme", { kind: "mlflow", endpoint: "http://mlflow:5000" })).rejects.toBeInstanceOf(
+      BadRequestError,
+    );
+  });
+});

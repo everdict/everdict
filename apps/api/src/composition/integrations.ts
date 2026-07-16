@@ -6,7 +6,7 @@ import { NotificationService } from "@everdict/application-control";
 import { TraceSinkService } from "@everdict/application-control";
 import { TraceSourceService } from "@everdict/application-control";
 import type { CommentStore, NotificationStore, OAuthStateStore, WorkspaceSettingsStore } from "@everdict/db";
-import { buildTraceSink } from "@everdict/trace";
+import { buildTraceSink, probeTraceConnection } from "@everdict/trace";
 import { githubAppGateway } from "../infrastructure/github/app-gateway.js";
 import { mattermostHttpClient } from "../infrastructure/mattermost/mattermost-client.js";
 
@@ -40,11 +40,13 @@ export function buildIntegrations(deps: {
   const traceSinkService = new TraceSinkService(settingsStore, {
     secretsFor: runtimeSecretsFor, // authSecretName → shared (workspace) secret value
     buildSink: buildTraceSink,
+    probeConnection: probeTraceConnection, // connection test + scope discovery before registering
   });
   // Workspace trace sources (inbound mirror) — register a dev-cluster observability endpoint by name; a service harness
   // selects one so everdict pulls that case's trace from it after the run. resolve() reads the auth value here (transient).
   const traceSourceService = new TraceSourceService(settingsStore, {
     secretsFor: runtimeSecretsFor, // authSecretName → shared (workspace) secret value (pull-time only)
+    probeConnection: probeTraceConnection, // connection test + scope discovery before registering
   });
   // Resource comments (datasets, etc.) for collaborative discussion + @mention notifications. On a mention, resolve the mentioner's name from profile/membership into the personal feed.
   const commentService = new CommentService({

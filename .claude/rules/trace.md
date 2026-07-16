@@ -35,6 +35,15 @@ docs/service-harness.md + docs/architecture/trace-sink.md.
   request). OTLP-native backends (no search API) stay id-correlated. Verified live against Jaeger 1.62.0.
 - Remap upstream failures to our error model: a non-2xx → `UpstreamError` (so a pull run fails honestly), EXCEPT
   `404` → `[]` (trace not present yet; service-harness path scores 0 events).
+- **Connection probe + scope discovery** (`packages/trace/src/discovery/probe-connection.ts`,
+  `probeTraceConnection(cfg) → TraceProbeResult`) sits beside push/pull: one authed call per kind that
+  validates the base URL + credential AND lists the platform's selectable scopes (mlflow experiments · phoenix/
+  langfuse/langsmith projects · otel[jaeger] services) for the register-time picker. Same auth discipline (value
+  injected, adapter owns the header). Unlike push/pull it **never throws** for reachability — it returns a
+  classified `{reachable, reason?('auth'|'unreachable'|'error'), scopeKind?, scopes?}` (pure per-kind parsers +
+  a 10s `Promise.race`). It lives here (IO) and is **injected** into the trace-sink/source services, so
+  `application-control` never imports `@everdict/trace`. Web gates Save on it; `upsert` stays pure. See
+  docs/architecture/trace-sink.md.
 - **Sinks (`*-sink.ts`, `buildTraceSink`)** mirror the source discipline with three deltas: ① auth is a single
   resolved `auth` value and the **adapter owns the header name** (mlflow/langfuse/phoenix → verbatim
   `Authorization`; langsmith → `x-api-key`); ② per-case failures are isolated into `cases[].error` (only

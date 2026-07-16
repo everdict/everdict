@@ -58,6 +58,17 @@ export {
   phoenixAnnotation,
   phoenixSpans,
 } from "./sinks/phoenix-sink.js";
+// Connection probe + scope discovery — validate a trace source/sink (base URL + resolved credential) and list
+// the platform's selectable scopes before registering. Types re-exported from contracts; parsers exposed for tests.
+export type { TraceProbeConfig, TraceProbeResult, TraceScopeKind, TraceScopeOption } from "@everdict/contracts";
+export {
+  probeTraceConnection,
+  parseMlflowExperiments,
+  parsePhoenixProjects,
+  parseLangfuseProjects,
+  parseLangsmithSessions,
+  parseJaegerServices,
+} from "./discovery/probe-connection.js";
 export {
   createUsageProxy,
   startUsageProxy,

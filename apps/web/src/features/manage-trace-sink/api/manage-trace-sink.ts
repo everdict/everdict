@@ -2,12 +2,29 @@
 
 import { revalidatePath } from 'next/cache'
 
+import { traceProbeResultSchema, type TraceProbeResult } from '@/entities/trace-probe'
 import { authContext } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
 
 export interface TraceSinkMutationResult {
   ok: boolean
   error?: string
+}
+
+// Connection test + scope discovery (before registering) — the web form gates Save on a reachable result and
+// populates the (optional) project picker from result.scopes. authZ (settings:write) is enforced by the control plane.
+export async function probeTraceSinkAction(input: {
+  kind: 'mlflow' | 'langfuse' | 'langsmith' | 'phoenix'
+  endpoint: string
+  authSecretName?: string
+}): Promise<{ ok: true; result: TraceProbeResult } | { ok: false; error: string }> {
+  const ctx = await authContext()
+  try {
+    const raw = await controlPlane.probeTraceSink(ctx, input)
+    return { ok: true, result: traceProbeResultSchema.parse(raw) }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
 }
 
 // Register/update a trace sink (admin, upsert keyed by name). Put the auth token (value) into a workspace secret first and specify only its name.

@@ -1112,7 +1112,17 @@
     "saving": "Saving…",
     "update": "Update",
     "register": "Register",
-    "cancel": "Cancel"
+    "cancel": "Cancel",
+    "testConnection": "Test connection",
+    "testing": "Testing…",
+    "probeConnected": "Connected",
+    "mustTest": "Test the connection to enable Save",
+    "probeAuthFailed": "Authentication failed — check the secret.",
+    "probeUnreachable": "Unreachable — check the base URL.",
+    "probeError": "Connection error.",
+    "scopeSelectLabel": "Select scope",
+    "scopeEmpty": "This platform returned nothing to select here — cannot register.",
+    "scopeNone": "None"
   },
   "manageTraceSource": {
     "notSelected": "Not selected",
@@ -1156,7 +1166,17 @@
     "saving": "Saving…",
     "update": "Update",
     "register": "Register",
-    "cancel": "Cancel"
+    "cancel": "Cancel",
+    "testConnection": "Test connection",
+    "testing": "Testing…",
+    "probeConnected": "Connected",
+    "mustTest": "Test the connection to enable Save",
+    "probeAuthFailed": "Authentication failed — check the secret.",
+    "probeUnreachable": "Unreachable — check the base URL.",
+    "probeError": "Connection error.",
+    "scopeSelectLabel": "Select scope",
+    "scopeEmpty": "This platform returned nothing to select here — cannot register.",
+    "scopeNone": "None"
   },
   "manageWorkspaceRunners": {
     "title": "Shared runners",

@@ -1,4 +1,10 @@
-import { BadRequestError, type TraceSourceConfig, type WorkspaceSettings } from "@everdict/contracts";
+import {
+  BadRequestError,
+  type TraceProbeConfig,
+  type TraceProbeResult,
+  type TraceSourceConfig,
+  type WorkspaceSettings,
+} from "@everdict/contracts";
 import type { WorkspaceSettingsStore } from "../ports/workspace-settings-store.js";
 
 // Workspace trace-source integration — the INBOUND mirror of TraceSinkService. A trace source is a dev-cluster
@@ -22,7 +28,10 @@ export interface TraceSourceConfigView {
 type TraceSourceEntry = NonNullable<WorkspaceSettings["traceSources"]>[number];
 
 export interface TraceSourceServiceDeps {
-  secretsFor?: (tenant: string) => Promise<Record<string, string>>; // authSecretName → value resolve (workspace SecretStore) — used only in resolve()
+  secretsFor?: (tenant: string) => Promise<Record<string, string>>; // authSecretName → value resolve (workspace SecretStore) — used in resolve()/probe()
+  // Connection-test + scope-discovery engine (@everdict/trace probeTraceConnection), injected so application-control
+  // stays free of @everdict/trace. Absent = the probe route/tool is feature-disabled.
+  probeConnection?: (cfg: TraceProbeConfig) => Promise<TraceProbeResult>;
 }
 
 const toView = (s: TraceSourceEntry): TraceSourceConfigView => ({
@@ -116,6 +125,35 @@ export class TraceSourceService {
     else assignments[harnessId] = source;
     await this.settings.set(workspace, { traceSourceByHarness: assignments });
     return assignments;
+  }
+
+  // Connection test + scope discovery BEFORE registering (the web form gates Save on this). Resolves authSecretName
+  // to a value like resolve() does, but a missing secret is a friendly {reachable:false, reason:"auth"} result rather
+  // than a throw (a probe classifies, it doesn't error). correlate/service/project aren't needed here — the probe
+  // discovers them. The API upsert stays pure; only the web flow requires a successful probe.
+  async probe(
+    workspace: string,
+    input: {
+      kind: "otel" | "mlflow" | "langfuse" | "langsmith" | "phoenix";
+      endpoint: string;
+      authSecretName?: string;
+    },
+  ): Promise<TraceProbeResult> {
+    if (!this.deps.probeConnection)
+      throw new BadRequestError("BAD_REQUEST", {}, "Connection testing is not configured.");
+    let auth: string | undefined;
+    if (input.authSecretName) {
+      const secrets = await (this.deps.secretsFor?.(workspace) ?? Promise.resolve<Record<string, string>>({}));
+      auth = secrets[input.authSecretName];
+      if (!auth)
+        return {
+          kind: input.kind,
+          reachable: false,
+          reason: "auth",
+          detail: `No value for '${input.authSecretName}' in the SecretStore — save the secret first.`,
+        };
+    }
+    return this.deps.probeConnection({ kind: input.kind, endpoint: input.endpoint, ...(auth ? { auth } : {}) });
   }
 
   // Resolve the source a harness selected → a fully-built TraceSourceConfig (auth value pulled from the SecretStore),

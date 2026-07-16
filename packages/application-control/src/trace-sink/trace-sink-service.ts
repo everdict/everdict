@@ -1,6 +1,8 @@
 import { BadRequestError, type CaseResult } from "@everdict/contracts";
 import type {
   ScorecardExport,
+  TraceProbeConfig,
+  TraceProbeResult,
   TraceSink,
   TraceSinkCase,
   TraceSinkConfig,
@@ -30,6 +32,9 @@ type TraceSinkEntry = NonNullable<WorkspaceSettings["traceSinks"]>[number];
 export interface TraceSinkServiceDeps {
   secretsFor?: (tenant: string) => Promise<Record<string, string>>; // authSecretName → value resolve (workspace SecretStore)
   buildSink?: (cfg: TraceSinkConfig) => TraceSink; // config → adapter (@everdict/trace buildTraceSink). If not injected, export is disabled
+  // Connection-test + scope-discovery engine (@everdict/trace probeTraceConnection), injected so application-control
+  // stays free of @everdict/trace. Absent = the probe route/tool is feature-disabled.
+  probeConnection?: (cfg: TraceProbeConfig) => Promise<TraceProbeResult>;
   exportConcurrency?: number; // concurrency cap for the case-axis export (default 2) — protects the sink's rate limit
   now?: () => string;
 }
@@ -116,6 +121,30 @@ export class TraceSinkService {
     else assignments[harnessId] = sink;
     await this.settings.set(workspace, { traceSinkByHarness: assignments });
     return assignments;
+  }
+
+  // Connection test + scope discovery BEFORE registering (the web form gates Save on this). Resolves authSecretName to
+  // a value like exportStream does, but a missing secret is a friendly {reachable:false, reason:"auth"} result rather
+  // than a stream init-error. project isn't needed here — the probe discovers the platform's selectable scopes.
+  async probe(
+    workspace: string,
+    input: { kind: "mlflow" | "langfuse" | "langsmith" | "phoenix"; endpoint: string; authSecretName?: string },
+  ): Promise<TraceProbeResult> {
+    if (!this.deps.probeConnection)
+      throw new BadRequestError("BAD_REQUEST", {}, "Connection testing is not configured.");
+    let auth: string | undefined;
+    if (input.authSecretName) {
+      const secrets = await (this.deps.secretsFor?.(workspace) ?? Promise.resolve<Record<string, string>>({}));
+      auth = secrets[input.authSecretName];
+      if (!auth)
+        return {
+          kind: input.kind,
+          reachable: false,
+          reason: "auth",
+          detail: `No value for '${input.authSecretName}' in the SecretStore — save the secret first.`,
+        };
+    }
+    return this.deps.probeConnection({ kind: input.kind, endpoint: input.endpoint, ...(auth ? { auth } : {}) });
   }
 
   // Case streaming export — the batch pushes each case as soon as it completes (after judging) so cases appear on the team's
