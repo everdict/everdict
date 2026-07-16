@@ -26,9 +26,19 @@ integration that configures it and the pipeline step that drives it.
 
 ## Decisions (locked)
 
-- **Multiple named sinks per workspace, selected per harness.** Sinks are registered as a
-  workspace-scoped integration (`WorkspaceSettings.traceSinks[]`, name-keyed upsert,
-  `settings:write`) — a team runs more than one observability platform. **Which sink a scorecard
+> **Update — registration unified into the Trace Source pool.** There is no longer a separate "trace sink"
+> registration. A workspace registers ONE pool of observability platforms — `WorkspaceSettings.traceSources[]`,
+> owned by `TraceSourceService` (Settings › **Observability**, `POST/GET/PUT /workspace/trace-sources` + `…/probe`).
+> Whether a harness uses a source to **pull** its trace (`traceSourceByHarness`, `PUT /harnesses/:id/trace-source`)
+> or to **export** judged results (`traceSinkByHarness`, `PUT /harnesses/:id/trace-sink`) is a per-harness use-site
+> choice — the "sink" is a trace source used as an export target (otel excluded, pull-only). `TraceSinkService`
+> keeps only the **export executor** (`exportStream`/`exportScorecard` + `buildTraceSink`), resolving the selection
+> against `unifiedTraceSources` (which legacy-merges the retired `traceSinks[]`). The rest of this doc's flows and
+> per-platform adapter facts are unchanged; the "sink registration" surface below is historical.
+
+- **Registration is per-workspace, selected per harness.** A team runs more than one observability platform; each
+  is registered once in the Trace Source pool (`settings:write`), then selected per harness (pull and/or export).
+  *(Historical: sinks were once a separate `WorkspaceSettings.traceSinks[]` roster — now folded into the source pool.)* **Which sink a scorecard
   exports to is a per-harness choice** (`WorkspaceSettings.traceSinkByHarness`:
   harness id → sink name, `PUT /harnesses/:id/trace-sink`, `harnesses:register` = member+;
   no selection = no export, opt-in). Removing a sink also clears assignments pointing at it

@@ -47,13 +47,20 @@ docs/service-harness.md + docs/architecture/trace-sink.md.
 - **Browse + inspect + the conversion overlay** (`BrowsableTraceSource extends TraceSource`, what
   `buildTraceSource` now returns): `listTraces(opts)` enumerates a source's recent traces + observability metrics
   (started/duration/tokens/cost/status/tags — pure per-kind summary parsers) and `inspect(traceId, mapping)`
-  returns the raw span attributes (span-based kinds) + events normalized with the SUPPLIED mapping — powering the
-  Settings › Observability browser and the judge wizard's live conversion authoring. The wizard-authored
+  returns the raw span attributes (span-based kinds) + events normalized with the SUPPLIED mapping + (best-effort) a
+  structured `detail` (trace rollups + a span waterfall via `spansToSpanNodes` — offset/duration/type/io/tokens/cost,
+  parentId nesting where the platform exposes it) — powering the Settings › Observability browser (a row-click opens
+  the observability-grade detail dialog that renders the waterfall) and the judge wizard's live conversion authoring. The wizard-authored
   `SpanAttrMapping` is stored as a per-harness **overlay** (`WorkspaceSettings.spanAttrMappingByHarness`), the
   mutable conversion layer between a harness version and a judge version; `resolveHarnessTraceMapping` (overlay >
   spec) applies it at both production seams — `TraceSourceService.resolve` (dispatch-after-judge collect) and
   `ScorecardIngestService.trackPull`'s `spanMappingFor` (periodic pull-eval). See
   docs/architecture/judge-input-contract.md.
+- **Sink = a trace source used as an export target (NO separate registration).** A workspace registers ONE pool
+  (`WorkspaceSettings.traceSources[]`, owned by `TraceSourceService`); "export to X" is a per-harness selection
+  (`traceSinkByHarness` → a source name; otel excluded — pull-only). `TraceSinkService` is the export EXECUTOR only:
+  it resolves the selection against the pool (`unifiedTraceSources`, which legacy-merges the retired `traceSinks[]`)
+  and builds a `TraceSinkConfig` at point of use. There is no `/workspace/trace-sinks` registration surface.
 - **Sinks (`*-sink.ts`, `buildTraceSink`)** mirror the source discipline with three deltas: ① auth is a single
   resolved `auth` value and the **adapter owns the header name** (mlflow/langfuse/phoenix → verbatim
   `Authorization`; langsmith → `x-api-key`); ② per-case failures are isolated into `cases[].error` (only
