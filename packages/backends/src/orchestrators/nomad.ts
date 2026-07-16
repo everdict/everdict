@@ -23,6 +23,7 @@ import {
   type Observable,
   type ProbeResult,
   type Probeable,
+  type Reclaimable,
   type Recoverable,
   type Shellable,
   dispatchAborted,
@@ -333,7 +334,7 @@ export function streamHandleFor(child: StreamChild): ExecStreamHandle {
 
 // Launch the runner-agent as a Nomad batch alloc, poll for completion, then
 // parse the CaseResult from the sentinel in the stdout log.
-export class NomadBackend implements Backend, Recoverable, Observable, Shellable, Probeable, Inspectable {
+export class NomadBackend implements Backend, Recoverable, Observable, Shellable, Probeable, Inspectable, Reclaimable {
   private readonly http: NomadHttp;
 
   constructor(private readonly opts: NomadBackendOptions) {
@@ -727,6 +728,88 @@ export class NomadBackend implements Backend, Recoverable, Observable, Shellable
         const nsq = j.Namespace && j.Namespace !== "default" ? `?namespace=${encodeURIComponent(j.Namespace)}` : "";
         await this.http.request("DELETE", `/v1/job/${encodeURIComponent(j.ID)}${nsq}`);
       }
+    } catch {
+      // best-effort
+    }
+  }
+
+  // --- Reclaimable (destructive live-cluster control; runtimes:control-gated at the control plane) ---
+
+  // Deregister one everdict job by its exact id (the InspectWorkload.name). Resolves the job's namespace first so
+  // a namespaced job is stopped correctly. Best-effort/idempotent — a job that is already gone is a silent no-op.
+  async stopWorkload(name: string): Promise<void> {
+    try {
+      const res = await this.http.request("GET", `/v1/jobs?prefix=${encodeURIComponent(name)}&namespace=*`);
+      if (res.status >= 300) return;
+      const job = (JSON.parse(res.text) as Array<{ ID?: string; Namespace?: string }>).find((j) => j.ID === name);
+      if (!job?.ID) return; // already gone
+      const nsq = job.Namespace && job.Namespace !== "default" ? `?namespace=${encodeURIComponent(job.Namespace)}` : "";
+      await this.http.request("DELETE", `/v1/job/${encodeURIComponent(job.ID)}${nsq}`);
+    } catch {
+      // best-effort — the caller re-inspects
+    }
+  }
+
+  // Stop every running/pending everdict EVAL unit older than the threshold (shared stores are excluded — they are
+  // long-lived by design). Deregisters the distinct job ids. Returns how many jobs it stopped.
+  async reclaimIdle(olderThanSeconds: number): Promise<{ stopped: number }> {
+    try {
+      const res = await this.http.request("GET", "/v1/allocations?namespace=*");
+      if (res.status >= 300) return { stopped: 0 };
+      const now = Date.now();
+      const jobs = new Set<string>();
+      for (const a of JSON.parse(res.text) as NomadAllocStub[]) {
+        const name = a.JobID ?? a.Name ?? "";
+        if (!name.startsWith(EVERDICT_PREFIX)) continue;
+        if (classifyWorkloadRole(name) === "store") continue; // never reclaim a shared store
+        if (a.ClientStatus !== "running" && a.ClientStatus !== "pending") continue;
+        const age = nomadAllocAgeSeconds(a.CreateTime, now);
+        if (age !== undefined && age >= olderThanSeconds) jobs.add(name);
+      }
+      for (const name of jobs) await this.stopWorkload(name);
+      return { stopped: jobs.size };
+    } catch {
+      return { stopped: 0 };
+    }
+  }
+
+  // GC dead everdict jobs (purge=true) — reclaims the dead-job records the client tracks. Only DEAD jobs are purged
+  // (their allocs are terminal, so the alloc-watcher panic that gates the dispatch-path purge doesn't apply here).
+  async purgeTerminal(): Promise<{ purged: number }> {
+    try {
+      const res = await this.http.request("GET", "/v1/jobs?prefix=everdict-&namespace=*");
+      if (res.status >= 300) return { purged: 0 };
+      const dead = (JSON.parse(res.text) as Array<{ ID?: string; Namespace?: string; Status?: string }>).filter(
+        (j) => j.ID?.startsWith(EVERDICT_PREFIX) && j.Status === "dead",
+      );
+      let purged = 0;
+      for (const j of dead) {
+        if (!j.ID) continue;
+        const nsq =
+          j.Namespace && j.Namespace !== "default"
+            ? `?purge=true&namespace=${encodeURIComponent(j.Namespace)}`
+            : "?purge=true";
+        const r = await this.http.request("DELETE", `/v1/job/${encodeURIComponent(j.ID)}${nsq}`);
+        if (r.status < 300) purged++;
+      }
+      return { purged };
+    } catch {
+      return { purged: 0 };
+    }
+  }
+
+  // Cordon (ineligible) / uncordon (eligible) a node by name — takes it out of / back into scheduling for maintenance
+  // WITHOUT evicting its running allocs (reversible). Resolves the node id from its name first.
+  async setNodeSchedulable(node: string, schedulable: boolean): Promise<void> {
+    try {
+      const res = await this.http.request("GET", "/v1/nodes");
+      if (res.status >= 300) return;
+      const match = (JSON.parse(res.text) as Array<{ ID?: string; Name?: string }>).find((n) => n.Name === node);
+      if (!match?.ID) return;
+      await this.http.request("POST", `/v1/node/${encodeURIComponent(match.ID)}/eligibility`, {
+        NodeID: match.ID,
+        Eligibility: schedulable ? "eligible" : "ineligible",
+      });
     } catch {
       // best-effort
     }

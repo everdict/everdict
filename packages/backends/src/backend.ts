@@ -141,6 +141,19 @@ export interface Inspectable {
   inspect(): Promise<InspectRuntimeResult>;
 }
 
+// Reclaimable — DESTRUCTIVE live-cluster control paired with Inspectable, for the runtime detail screen's admin
+// actions (gated runtimes:control at the control plane). Nomad/K8s implement it; local does not. Each method is
+// best-effort and idempotent (acting on an already-gone target is a no-op, not an error) — the caller re-inspects
+// after. stopWorkload aborts one in-flight eval (a blunt infra reclaim, distinct from the graceful run/scorecard
+// cancel); reclaimIdle stops long-running NON-store units in bulk; purgeTerminal GCs dead/completed everdict jobs
+// (reclaims slots/disk); setNodeSchedulable cordons/uncordons a node (reversible) for maintenance.
+export interface Reclaimable {
+  stopWorkload(name: string): Promise<void>; // force-stop one live everdict unit by its InspectWorkload.name (job id / job-name)
+  reclaimIdle(olderThanSeconds: number): Promise<{ stopped: number }>; // stop non-store units running longer than the threshold
+  purgeTerminal(): Promise<{ purged: number }>; // deregister/delete dead/completed everdict jobs
+  setNodeSchedulable(node: string, schedulable: boolean): Promise<void>; // cordon (false) / uncordon (true) a node by name
+}
+
 // --- Narrowing guards: express capability at the type level. Prefer these over `if (backend.method)` feature detection. ---
 
 export function isRecoverable(backend: Backend): backend is Backend & Recoverable {
@@ -167,4 +180,14 @@ export function isProbeable(backend: Backend): backend is Backend & Probeable {
 
 export function isInspectable(backend: Backend): backend is Backend & Inspectable {
   return typeof (backend as Partial<Inspectable>).inspect === "function";
+}
+
+export function isReclaimable(backend: Backend): backend is Backend & Reclaimable {
+  const b = backend as Partial<Reclaimable>;
+  return (
+    typeof b.stopWorkload === "function" &&
+    typeof b.reclaimIdle === "function" &&
+    typeof b.purgeTerminal === "function" &&
+    typeof b.setNodeSchedulable === "function"
+  );
 }

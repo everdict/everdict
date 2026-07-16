@@ -45,6 +45,10 @@ describe("authz", () => {
     expect(can(p(["viewer"]), "runtimes:write")).toBe(true);
     expect(can(p(["member"]), "runtimes:write")).toBe(true);
     expect(can(p(["admin"]), "runtimes:write")).toBe(true);
+    // runtimes:control (destructive live-cluster ops) is admin-only — unlike registration.
+    expect(can(p(["viewer"]), "runtimes:control")).toBe(false);
+    expect(can(p(["member"]), "runtimes:control")).toBe(false);
+    expect(can(p(["admin"]), "runtimes:control")).toBe(true);
 
     // Connected accounts are personally owned — not in the authz matrix (self-scoped by subject, the route scopes directly).
 

@@ -27,6 +27,10 @@ export type Action =
   | "models:delete"
   | "runtimes:read"
   | "runtimes:write"
+  // Destructive live-cluster control (stop a running workload / reclaim idle / purge terminal jobs / cordon a node) —
+  // admin-only, unlike runtimes:write (viewer+ registration). Aborting an in-flight eval or taking a node out of
+  // scheduling is operator governance, not authoring; also admin-scope-only for keys (not in read/write scope).
+  | "runtimes:control"
   | "secrets:read"
   | "secrets:write"
   | "keys:read"
@@ -107,6 +111,7 @@ const ROLE_PERMISSIONS: Record<string, ReadonlySet<Action>> = {
     "models:write",
     "runtimes:read",
     "runtimes:write", // runtime registration is role-independent (viewer/member have it too) — the credential 'value' is separately protected by secrets:write (admin)
+    "runtimes:control", // destructive live-cluster control (stop workload / reclaim idle / purge / cordon) — admin-only
     "secrets:read", // secrets (provider keys) are powerful → admin-only
     "secrets:write",
     "keys:read", // an API key holds workspace admin permission at issuance → issue/revoke is admin-only (same rationale as secrets)

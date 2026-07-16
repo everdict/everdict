@@ -61,10 +61,12 @@ function mockApi(
     nodes?: Array<{ name: string; ready: boolean; status: string }> | undefined;
     workloadPods?: Array<{ name: string; status: string; node?: string; creationTimestamp?: string }> | undefined;
     stores?: Array<{ name: string; port?: number }> | undefined;
+    purged?: number;
   } = {},
 ) {
   const applied: JobManifest[] = [];
   const deleted: string[] = [];
+  const control: string[] = [];
   let polls = 0;
   const api: K8sApi = {
     async ensureNamespace() {},
@@ -111,8 +113,18 @@ function mockApi(
     async inspectStores() {
       return "stores" in opts ? opts.stores : [];
     },
+    async stopWorkloadJob(name) {
+      control.push(`stop:${name}`);
+    },
+    async purgeCompletedJobs() {
+      control.push("purge");
+      return opts.purged ?? 0;
+    },
+    async setNodeSchedulable(node, schedulable) {
+      control.push(`${schedulable ? "uncordon" : "cordon"}:${node}`);
+    },
   };
-  return { api, applied, deleted };
+  return { api, applied, deleted, control };
 }
 
 describe("buildK8sJob / k8sJobName", () => {
@@ -534,5 +546,44 @@ describe("K8sBackend.inspect (live cluster view)", () => {
     expect(r.stores).toBeUndefined();
     expect(r.warnings).toContain("node listing failed");
     expect(r.warnings).toContain("shared-store listing failed");
+  });
+});
+
+describe("K8sBackend.reclaimable (destructive control)", () => {
+  it("stopWorkload deletes the named job (via the api)", async () => {
+    const { api, control } = mockApi();
+    const backend = new K8sBackend({ image: "i", api });
+    await backend.stopWorkload("everdict-c1-abc");
+    expect(control).toContain("stop:everdict-c1-abc");
+  });
+
+  it("purgeTerminal returns the count of completed jobs the api reaped", async () => {
+    const { api } = mockApi({ purged: 3 });
+    const backend = new K8sBackend({ image: "i", api });
+    expect(await backend.purgeTerminal()).toEqual({ purged: 3 });
+  });
+
+  it("reclaimIdle stops only non-store eval units older than the threshold", async () => {
+    const { api, control } = mockApi({
+      workloadPods: [
+        { name: "everdict-old-1", status: "Running", creationTimestamp: "2000-01-01T00:00:00Z" }, // ancient → stop
+        { name: "everdict-young-1", status: "Running", creationTimestamp: new Date(Date.now() - 60_000).toISOString() }, // 1m → keep
+        { name: "everdict-shared-postgres", status: "Running", creationTimestamp: "2000-01-01T00:00:00Z" }, // store → never
+      ],
+    });
+    const backend = new K8sBackend({ image: "i", api });
+    const r = await backend.reclaimIdle(30 * 60);
+    expect(r.stopped).toBe(1);
+    expect(control).toContain("stop:everdict-old-1");
+    expect(control).not.toContain("stop:everdict-shared-postgres");
+    expect(control).not.toContain("stop:everdict-young-1");
+  });
+
+  it("setNodeSchedulable cordons (false) / uncordons (true) by node name", async () => {
+    const { api, control } = mockApi();
+    const backend = new K8sBackend({ image: "i", api });
+    await backend.setNodeSchedulable("n1", false);
+    await backend.setNodeSchedulable("n1", true);
+    expect(control).toEqual(["cordon:n1", "uncordon:n1"]);
   });
 });

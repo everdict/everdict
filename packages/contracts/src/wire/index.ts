@@ -97,6 +97,7 @@ export * from "./runner/github-runner-install-result.js";
 export * from "./runner/paired-runner.js";
 export * from "./runner/runner-meta.js";
 export * from "./runner/runner-roster.js";
+export * from "./runtime/control-runtime.js";
 export * from "./runtime/inspect-runtime-result.js";
 export * from "./runtime/probe-runtime-result.js";
 export * from "./runtime/register-runtime-result.js";

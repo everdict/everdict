@@ -854,3 +854,88 @@ describe("NomadBackend.inspect (live cluster view)", () => {
     expect(r.workload).toBeDefined(); // other reads unaffected
   });
 });
+
+describe("NomadBackend.reclaimable (destructive control)", () => {
+  it("stopWorkload resolves the job's namespace by exact id and deregisters it", async () => {
+    const calls: string[] = [];
+    const http: NomadHttp = {
+      async request(method, path) {
+        calls.push(`${method} ${path}`);
+        if (path.startsWith("/v1/jobs?prefix="))
+          return { status: 200, text: JSON.stringify([{ ID: "everdict-c1-abc", Namespace: "eval" }]) };
+        return { status: 200, text: "{}" };
+      },
+    };
+    const backend = new NomadBackend({ addr: "http://n:4646", image: "i", http });
+    await backend.stopWorkload("everdict-c1-abc");
+    expect(calls).toContain("DELETE /v1/job/everdict-c1-abc?namespace=eval");
+  });
+
+  it("reclaimIdle stops non-store eval jobs older than the threshold, never a shared store", async () => {
+    const deleted: string[] = [];
+    const now = Date.now();
+    const http: NomadHttp = {
+      async request(method, path) {
+        if (method === "DELETE") deleted.push(path);
+        if (path === "/v1/allocations?namespace=*")
+          return {
+            status: 200,
+            text: JSON.stringify([
+              { ID: "a1", JobID: "everdict-old", ClientStatus: "running", CreateTime: (now / 1000 - 3600) * 1e9 }, // 1h → stop
+              { ID: "a2", JobID: "everdict-young", ClientStatus: "running", CreateTime: (now / 1000 - 60) * 1e9 }, // 1m → keep
+              { ID: "a3", JobID: "everdict-shared-postgres", ClientStatus: "running", CreateTime: 1e6 }, // store → never
+            ]),
+          };
+        if (path.startsWith("/v1/jobs?prefix="))
+          return {
+            status: 200,
+            text: JSON.stringify([{ ID: path.split("prefix=")[1]?.split("&")[0], Namespace: "default" }]),
+          };
+        return { status: 200, text: "{}" };
+      },
+    };
+    const backend = new NomadBackend({ addr: "http://n:4646", image: "i", http });
+    const r = await backend.reclaimIdle(30 * 60);
+    expect(r.stopped).toBe(1);
+    expect(deleted.some((p) => p.includes("everdict-old"))).toBe(true);
+    expect(deleted.some((p) => p.includes("everdict-shared-postgres"))).toBe(false);
+    expect(deleted.some((p) => p.includes("everdict-young"))).toBe(false);
+  });
+
+  it("purgeTerminal purges only DEAD everdict jobs (purge=true)", async () => {
+    const deleted: string[] = [];
+    const http: NomadHttp = {
+      async request(method, path) {
+        if (method === "DELETE") deleted.push(path);
+        if (path === "/v1/jobs?prefix=everdict-&namespace=*")
+          return {
+            status: 200,
+            text: JSON.stringify([
+              { ID: "everdict-dead-1", Status: "dead" },
+              { ID: "everdict-live-1", Status: "running" }, // not purged
+            ]),
+          };
+        return { status: 200, text: "{}" };
+      },
+    };
+    const backend = new NomadBackend({ addr: "http://n:4646", image: "i", http });
+    const r = await backend.purgeTerminal();
+    expect(r.purged).toBe(1);
+    expect(deleted).toEqual(["/v1/job/everdict-dead-1?purge=true"]);
+  });
+
+  it("setNodeSchedulable resolves the node id by name and posts eligibility", async () => {
+    const posts: Array<{ path: string; body: unknown }> = [];
+    const http: NomadHttp = {
+      async request(method, path, body) {
+        if (path === "/v1/nodes") return { status: 200, text: JSON.stringify([{ ID: "node-uuid", Name: "n1" }]) };
+        if (method === "POST") posts.push({ path, body });
+        return { status: 200, text: "{}" };
+      },
+    };
+    const backend = new NomadBackend({ addr: "http://n:4646", image: "i", http });
+    await backend.setNodeSchedulable("n1", false);
+    expect(posts[0]?.path).toBe("/v1/node/node-uuid/eligibility");
+    expect(posts[0]?.body).toEqual({ NodeID: "node-uuid", Eligibility: "ineligible" });
+  });
+});

@@ -25,6 +25,7 @@ import {
   type Observable,
   type ProbeResult,
   type Probeable,
+  type Reclaimable,
   type Recoverable,
   dispatchAborted,
 } from "../backend.js";
@@ -57,6 +58,10 @@ export interface K8sApi {
     Array<{ name: string; status: string; node?: string; creationTimestamp?: string }> | undefined
   >; // live everdict pods (app=everdict), running/pending
   inspectStores(namespace: string): Promise<Array<{ name: string; port?: number }> | undefined>; // pool shared-store Services in the pool namespace
+  // --- Destructive control (runtimes:control). Best-effort/idempotent — acting on a gone target is a no-op. ---
+  stopWorkloadJob(name: string): Promise<void>; // find the everdict job named `name` across namespaces and delete it
+  purgeCompletedJobs(): Promise<number>; // delete completed (succeeded/failed) app=everdict jobs; returns the count
+  setNodeSchedulable(node: string, schedulable: boolean): Promise<void>; // kubectl cordon (false) / uncordon (true)
 }
 
 interface RunResult {
@@ -291,6 +296,69 @@ export function kubectlApi(
         return undefined;
       }
     },
+    async stopWorkloadJob(name) {
+      // Resolve the job's namespace by name (across namespaces), then delete it. A missing job is a silent no-op.
+      const res = await run(bin, [...ctx, "get", "jobs", "-A", "-o", "json"]);
+      if (res.code !== 0) return;
+      let ns: string | undefined;
+      try {
+        const items = (JSON.parse(res.stdout).items ?? []) as Array<{
+          metadata?: { name?: string; namespace?: string };
+        }>;
+        ns = items.find((j) => j.metadata?.name === name)?.metadata?.namespace;
+      } catch {
+        return;
+      }
+      if (!ns) return;
+      await run(bin, [
+        ...ctx,
+        "-n",
+        ns,
+        "delete",
+        "job",
+        name,
+        "--ignore-not-found",
+        "--cascade=background",
+        "--wait=false",
+      ]);
+    },
+    async purgeCompletedJobs() {
+      const res = await run(bin, [...ctx, "get", "jobs", "-A", "-l", "app=everdict", "-o", "json"]);
+      if (res.code !== 0) return 0;
+      let completed: Array<{ name: string; namespace: string }> = [];
+      try {
+        const items = (JSON.parse(res.stdout).items ?? []) as Array<{
+          metadata?: { name?: string; namespace?: string };
+          status?: { succeeded?: number; failed?: number };
+        }>;
+        completed = items
+          .filter((j) => (j.status?.succeeded ?? 0) > 0 || (j.status?.failed ?? 0) > 0)
+          .filter((j) => j.metadata?.name && j.metadata.namespace)
+          .map((j) => ({ name: j.metadata?.name as string, namespace: j.metadata?.namespace as string }));
+      } catch {
+        return 0;
+      }
+      let purged = 0;
+      for (const j of completed) {
+        const del = await run(bin, [
+          ...ctx,
+          "-n",
+          j.namespace,
+          "delete",
+          "job",
+          j.name,
+          "--ignore-not-found",
+          "--cascade=background",
+          "--wait=false",
+        ]);
+        if (del.code === 0) purged++;
+      }
+      return purged;
+    },
+    async setNodeSchedulable(node, schedulable) {
+      // cordon = mark unschedulable (no new pods land); uncordon reverses it. Neither evicts running pods (reversible).
+      await run(bin, [...ctx, schedulable ? "uncordon" : "cordon", node]);
+    },
   };
 }
 
@@ -470,7 +538,7 @@ export async function materializeKubeconfig(yaml: string): Promise<{ path: strin
 
 // Launch the runner-agent as a K8s Job, poll for completion, then parse the CaseResult from the sentinel in the pod log.
 // Isolation is namespace (per-tenant) + runtimeClassName (gVisor/kata). The K8s counterpart of NomadBackend.
-export class K8sBackend implements Backend, Recoverable, Observable, Probeable, Inspectable {
+export class K8sBackend implements Backend, Recoverable, Observable, Probeable, Inspectable, Reclaimable {
   // A long-lived api from an injected api (test) or non-kubeconfig auth (context/server/token).
   // With kubeconfig auth, build a fresh api from a temp kubeconfig per dispatch so the credential isn't left on disk for long (withApi).
   private readonly staticApi?: K8sApi;
@@ -692,6 +760,56 @@ export class K8sBackend implements Backend, Recoverable, Observable, Probeable, 
         detail: e instanceof Error ? e.message : String(e),
         warnings,
       };
+    }
+  }
+
+  // --- Reclaimable (destructive live-cluster control; runtimes:control-gated at the control plane) ---
+
+  // Delete one everdict job by its name (the InspectWorkload.name). Best-effort/idempotent — a gone job is a no-op.
+  async stopWorkload(name: string): Promise<void> {
+    try {
+      await this.withApi((api) => api.stopWorkloadJob(name));
+    } catch {
+      // best-effort — the caller re-inspects
+    }
+  }
+
+  // Delete every running/pending everdict EVAL pod's job older than the threshold (shared stores excluded). Returns the count.
+  async reclaimIdle(olderThanSeconds: number): Promise<{ stopped: number }> {
+    try {
+      return await this.withApi(async (api) => {
+        const pods = await api.inspectWorkload();
+        if (!pods) return { stopped: 0 };
+        const now = Date.now();
+        const names = new Set<string>();
+        for (const p of pods) {
+          if (classifyWorkloadRole(p.name) === "store") continue; // never reclaim a shared store
+          const age = k8sAgeSeconds(p.creationTimestamp, now);
+          if (age !== undefined && age >= olderThanSeconds) names.add(p.name);
+        }
+        for (const name of names) await api.stopWorkloadJob(name);
+        return { stopped: names.size };
+      });
+    } catch {
+      return { stopped: 0 };
+    }
+  }
+
+  // GC completed (succeeded/failed) everdict jobs — reclaims what ttlSecondsAfterFinished hasn't swept yet.
+  async purgeTerminal(): Promise<{ purged: number }> {
+    try {
+      return { purged: await this.withApi((api) => api.purgeCompletedJobs()) };
+    } catch {
+      return { purged: 0 };
+    }
+  }
+
+  // Cordon (schedulable=false) / uncordon (true) a node — no new pods land there; running pods are not evicted (reversible).
+  async setNodeSchedulable(node: string, schedulable: boolean): Promise<void> {
+    try {
+      await this.withApi((api) => api.setNodeSchedulable(node, schedulable));
+    } catch {
+      // best-effort
     }
   }
 
