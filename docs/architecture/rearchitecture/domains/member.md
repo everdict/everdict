@@ -83,10 +83,10 @@ classDiagram
     MembershipService --> WorkspaceInviteStore : consume is delegated whole
     MembershipService --> MemberRecord : orchestrates
     WorkspaceService --> Workspace
-    WorkspaceInviteStore --> Invite : single CTE claims + inserts member
+    WorkspaceInviteStore --> Invite : single CTE bumps count + inserts member
     WorkspaceInviteStore --> MemberRecord : ON CONFLICT preserves role
     ActiveWorkspaceResolver --> MemberRecord : membership lookup + bootstrap
-    note for WorkspaceInviteStore "Store-atomic SQL is the sanctioned home:\nthe CTE IS the single-use lock.\nDomain declares semantics, contract tests pin them."
+    note for WorkspaceInviteStore "Store-atomic SQL is the sanctioned home:\nthe CTE IS the atomic consume (reusable - no single-use lock).\nDomain declares semantics, contract tests pin them."
 ```
 
 Target placement (00 §4): `MembershipPolicy` + invite-outcome semantics + the workspace slug/owner
@@ -100,14 +100,13 @@ Invite lifecycle (the only real state machine in this domain):
 
 ```mermaid
 stateDiagram-v2
-    [*] --> pending : createInvite (hash stored, plaintext shown once)
-    pending --> accepted : consumeInvite CTE claims row (accepted_at set)
-    pending --> expired : expires_at passes (lazy - checked in the CTE WHERE)
-    pending --> revoked : revokeInvite (row deleted)
-    accepted --> [*]
+    [*] --> active : createInvite (hash stored, plaintext shown once)
+    active --> active : consumeInvite CTE joins a member + bumps accepted_count (reusable, not single-use)
+    active --> expired : expires_at passes (lazy - checked in the CTE WHERE)
+    active --> revoked : revokeInvite (row deleted)
     expired --> [*] : maps to 400
     revoked --> [*] : indistinguishable from unknown - 404, no existence leak
-    note right of accepted : concurrent redeem - second caller gets 0 rows, reason classified by read-only follow-up
+    note right of active : concurrent redeem - every caller joins; the row lock serializes accepted_count. A failed consume (expired/unknown) is classified by a read-only follow-up
 ```
 
 Workspace: `created (creator=admin, exactly once via ON CONFLICT DO NOTHING)` → mutable display
@@ -129,12 +128,10 @@ sequenceDiagram
     S->>S: reject via != oidc (machine keys cannot join)
     S->>S: hashKey(token)
     S->>ST: consumeInvite(tokenHash, subject, email)
-    Note over ST,M: ONE CTE: UPDATE invites SET accepted_at WHERE accepted_at IS NULL AND unexpired RETURNING → INSERT member ON CONFLICT DO UPDATE SET email=COALESCE(...) — role never clobbered
-    ST-->>S: ConsumeOutcome ok | unknown | expired | accepted
+    Note over ST,M: ONE CTE: UPDATE invites SET accepted_count = accepted_count + 1 WHERE unexpired RETURNING → INSERT member ON CONFLICT DO UPDATE SET email=COALESCE(...) — reusable; role never clobbered
+    ST-->>S: ConsumeOutcome ok | unknown | expired
     alt ok
         S-->>T: workspace + role (actual role read back, not the invite role)
-    else accepted
-        S-->>T: ConflictError 409
     else expired
         S-->>T: BadRequestError 400
     else unknown (revoked folds in)
@@ -190,7 +187,7 @@ From the apps-api survey catalog (§1.9, #83–96):
 | Port | Today | Target owner |
 |---|---|---|
 | `WorkspaceStore` (workspaces + members, `ensureMembership`, `roleFor`) | `@everdict/db` interface | `application/control` port; Pg impl in `persistence-pg` |
-| `WorkspaceInviteStore` (`consumeInvite` CTE, `previewInvite`) | `@everdict/db` | same — store stays the single-use invariant owner |
+| `WorkspaceInviteStore` (`consumeInvite` CTE, `previewInvite`) | `@everdict/db` | same — store stays the consume/reuse invariant owner |
 | `UserProfileStore` (`getMany` join) | `@everdict/db` | port |
 | `onMemberRemoved(ws, subject)` hook | late-bound closure in `main.ts` (→ `ScheduleService.disableByCreator`) | typed domain-event port (`MemberRemoved`) |
 | Token primitives: `generateInviteToken` (`inv_`), `hashKey` | values exported from `@everdict/db` | `domain/member` (issuance recipe) over a hash contract in `contracts` |
@@ -202,7 +199,7 @@ From the apps-api survey catalog (§1.9, #83–96):
 |---|---|---|
 | Last-admin invariant | ONE owner already: `apps/api/src/core/member/membership-policy.ts` (3 intent-named guards over a passed-in member list) | moves verbatim to `domain/member` — the model example of a policy object |
 | Last-admin race | acknowledged read-modify-write race, `apps/api/src/core/member/membership-service.ts:49` ("admin counts are small, allowed for v1") | either keep + document, or add a store-atomic guard (`UPDATE … WHERE (SELECT count(*) FROM members WHERE role='admin' AND …) > 1`) — decide in review |
-| Invite single-use + role preservation | `packages/db/src/workspace/workspace-invites.ts:202-232` (`PgWorkspaceInviteStore.consumeInvite` CTE) **and** re-implemented in TS in `InMemoryWorkspaceInviteStore.consumeInvite` (:116-127) | store-atomic SQL is the sanctioned home; the InMemory copy becomes the contract-test double, pinned by a shared contract-test suite |
+| Invite reuse (multi-use join link) + role preservation | `packages/db/src/workspace/workspace-invites.ts` (`PgWorkspaceInviteStore.consumeInvite` CTE — reusable, bumps `accepted_count`) **and** re-implemented in TS in `InMemoryWorkspaceInviteStore.consumeInvite` | store-atomic SQL is the sanctioned home; the InMemory copy becomes the contract-test double, pinned by a shared contract-test suite |
 | Membership bootstrap + active-workspace switch | `apps/api/src/api/route-context.ts:201-237` `applyActiveWorkspace` — auth-domain policy in the transport-shared module (rule-sanctioned single owner today), incl. the role-capping rule (OIDC join to an existing workspace capped to `member`, :217-226) | `application/control` request-context resolver (one use-case decorator), consumed by HTTP + MCP identically; the capping rule is `domain/member` policy |
 | Creator-admin exactly once + no role clobber | `packages/db/src/workspace/workspace-store.ts:226-232, 289-297` (`ON CONFLICT DO NOTHING` / email `COALESCE`) duplicated in the InMemory impl | store-atomic; semantics declared in `domain/member`, pinned by contract tests |
 | Owner-only workspace delete | `apps/api/src/core/workspace/workspace-service.ts:55-65` — deliberately **not** in the role matrix (`.claude/rules/auth.md`) | stays a domain rule (`Workspace.assertOwner`) in `domain/member`; never enters the matrix |

@@ -55,7 +55,8 @@ export function InvitesManager({ invites, canWrite }: { invites: Invite[]; canWr
     })
   }
 
-  const pending2 = invites.filter((i) => !i.accepted)
+  // A reusable link stays listed until it's revoked (there's no "accepted" terminal state).
+  const activeInvites = invites
 
   return (
     <div className="space-y-5">
@@ -89,12 +90,12 @@ export function InvitesManager({ invites, canWrite }: { invites: Invite[]; canWr
         </Callout>
       )}
 
-      {/* Pending invites list */}
-      {pending2.length === 0 ? (
+      {/* Active invite links */}
+      {activeInvites.length === 0 ? (
         <p className="text-[13px] text-muted-foreground">{t('noPending')}</p>
       ) : (
         <ul className="divide-y rounded-lg border bg-card shadow-raise">
-          {pending2.map((i) => (
+          {activeInvites.map((i) => (
             <li key={i.id} className="flex items-center justify-between gap-3 px-3 py-2.5">
               <div className="min-w-0">
                 <span className="font-mono text-[13px]">{i.prefix}…</span>
@@ -103,6 +104,9 @@ export function InvitesManager({ invites, canWrite }: { invites: Invite[]; canWr
                   {i.expiresAt
                     ? t('expiresAt', { date: new Date(i.expiresAt).toLocaleString(locale) })
                     : t('noExpiry')}
+                </span>
+                <span className="ml-2 text-[12px] text-faint">
+                  {t('joinedCount', { count: i.acceptedCount })}
                 </span>
               </div>
               {canWrite &&

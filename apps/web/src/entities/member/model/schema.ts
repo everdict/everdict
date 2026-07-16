@@ -21,8 +21,8 @@ export const memberSchema = z.object({
 })
 export const membersSchema = z.array(memberSchema)
 
-// Pending invite (meta only — no token/hash). Mirror of GET /invites. NARROWER than the wire InviteMetaResponse:
-// the web omits the optional acceptedBy/acceptedAt fields (not shown), so it guards forward + Pick-reverse.
+// Active invite link (meta only — no token/hash). Mirror of GET /invites. Reusable: acceptedCount = joins so far;
+// the link works until it expires or an admin revokes it. Identical shape to the wire InviteMetaResponse.
 export const inviteSchema = z.object({
   id: z.string(),
   workspace: z.string(),
@@ -31,7 +31,7 @@ export const inviteSchema = z.object({
   prefix: z.string(),
   createdAt: z.string(),
   expiresAt: z.string().optional(),
-  accepted: z.boolean(),
+  acceptedCount: z.number(),
 })
 export type Invite = z.infer<typeof inviteSchema>
 export const invitesSchema = z.array(inviteSchema)
@@ -52,13 +52,11 @@ export const invitePreviewSchema = z.object({
 })
 
 // Drift guards.
-// Member/AcceptedInvite/InvitePreview are identical-shape — bidirectional.
-// Invite is NARROWER (omits optional wire fields acceptedBy/acceptedAt), so it uses the run-style split:
-//   _inviteFwd      — web ⊆ wire: a required-field retype/rename fails here.
-//   _inviteFieldsOnWire — every field the web DOES model must exist on the wire with an assignable type (Pick the
-//                         wire down to the web keys, require it back-assignable): catches renaming an OPTIONAL
-//                         wire field the web models (which _inviteFwd alone misses — dropping an optional stays
-//                         assignable). CreatedInvite (Invite + token) rides the same guards via extension.
+// Member/AcceptedInvite/InvitePreview/Invite are identical-shape to their wire types, so they guard bidirectionally.
+//   _inviteFwd          — web ⊆ wire: a required-field retype/rename fails here.
+//   _inviteFieldsOnWire — every field the web models must exist on the wire with an assignable type (Pick the wire
+//                         down to the web keys, require it back-assignable): catches a wire field rename the web
+//                         still models. CreatedInvite (Invite + token) rides the same guards via extension.
 type AssertAssignable<A extends B, B> = A
 type WebMember = z.infer<typeof memberSchema>
 type WebInvite = z.infer<typeof inviteSchema>

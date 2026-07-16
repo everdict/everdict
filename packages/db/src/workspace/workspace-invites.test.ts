@@ -33,22 +33,38 @@ describe("WorkspaceInviteStore — invite token (redemption)", () => {
     const [m] = await invites.listInvites("acme");
     expect(m?.prefix).toBe(token.slice(0, 12)); // inv_… identification hint
     expect(m?.role).toBe("member");
-    expect(m?.accepted).toBe(false);
+    expect(m?.acceptedCount).toBe(0);
     // no field equals the plaintext/hash
     const values = Object.values(m ?? {});
     expect(values).not.toContain(token);
     expect(values).not.toContain(hashKey(token));
   });
 
-  it("accept → becomes a member, and re-accepting the same token is 'accepted' (single-use)", async () => {
+  it("a reusable link: many people can join with the same token, and each join bumps acceptedCount", async () => {
     const { members, invites } = setup();
-    const { token } = await issue(invites, { workspace: "acme", role: "member", createdBy: "alice" });
+    const { token, meta } = await issue(invites, { workspace: "acme", role: "member", createdBy: "alice" });
     const r1 = await invites.consumeInvite(hashKey(token), "bob", "bob@corp.com");
     expect(r1).toEqual({ ok: true, result: { workspace: "acme", role: "member" } });
     expect(await members.roleFor("acme", "bob")).toBe("member");
     expect((await members.listMembers("acme")).find((m) => m.subject === "bob")?.email).toBe("bob@corp.com");
-    // can't re-accept
-    expect(await invites.consumeInvite(hashKey(token), "carol")).toEqual({ ok: false, reason: "accepted" });
+    // the SAME link works for a second, different person (no single-use lock)
+    const r2 = await invites.consumeInvite(hashKey(token), "carol", "carol@corp.com");
+    expect(r2).toEqual({ ok: true, result: { workspace: "acme", role: "member" } });
+    expect(await members.roleFor("acme", "carol")).toBe("member");
+    // acceptedCount reflects both joins; the link stays listed (not consumed)
+    const [after] = (await invites.listInvites("acme")).filter((i) => i.id === meta.id);
+    expect(after?.acceptedCount).toBe(2);
+  });
+
+  it("a revoked link stops working — reusable does not mean permanent", async () => {
+    const { members, invites } = setup();
+    const { token, meta } = await issue(invites, { workspace: "acme", role: "member", createdBy: "alice" });
+    expect(await invites.consumeInvite(hashKey(token), "bob")).toEqual({
+      ok: true,
+      result: { workspace: "acme", role: "member" },
+    });
+    await invites.revokeInvite("acme", meta.id);
+    expect(await invites.consumeInvite(hashKey(token), "carol")).toEqual({ ok: false, reason: "unknown" });
     expect(await members.roleFor("acme", "carol")).toBeUndefined();
   });
 
@@ -86,7 +102,7 @@ describe("WorkspaceInviteStore — invite token (redemption)", () => {
     expect((await invites.listInvites("acme")).length).toBe(1);
   });
 
-  it("previewInvite: non-consuming, only workspace/role; expired·accepted·nonexistent are undefined", async () => {
+  it("previewInvite: non-consuming, only workspace/role; a used-but-valid link still previews; expired·nonexistent are undefined", async () => {
     const { invites } = setup();
     const { token } = await issue(invites, { workspace: "acme", role: "member", createdBy: "alice" });
     // valid → workspace/role. Re-querying returns the same (it doesn't consume, so a later accept is still possible).
@@ -96,8 +112,8 @@ describe("WorkspaceInviteStore — invite token (redemption)", () => {
       ok: true,
       result: { workspace: "acme", role: "member" },
     });
-    // after acceptance → undefined
-    expect(await invites.previewInvite(hashKey(token))).toBeUndefined();
+    // reusable → still previews after a prior acceptance (so the next person sees the landing page)
+    expect(await invites.previewInvite(hashKey(token))).toEqual({ workspace: "acme", role: "member" });
     // expired → undefined
     const { token: expired } = await issue(invites, {
       workspace: "acme",

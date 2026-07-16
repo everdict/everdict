@@ -5,7 +5,8 @@ import type { ConsumeOutcome, CreateInviteInput, WorkspaceInviteMeta } from "@ev
 import type { SqlClient } from "../client.js";
 
 // Workspace invite (token/link redemption) store — never stores the plaintext token, keeps only the SHA-256 hash (same as tenant-keys).
-// Invite = join secret: hash-only · expiring · single-use. consume is atomic via a single CTE (since SqlClient has no transactions).
+// Invite = reusable join secret: hash-only · expiring · multi-use. A link stays valid until it expires or an admin
+// revokes it; each acceptance bumps accepted_count. consume is atomic via a single CTE (since SqlClient has no transactions).
 export { hashKey }; // reused when the service hashes the plaintext token and passes it in
 
 import type { WorkspaceInviteStore } from "@everdict/application-control";
@@ -18,8 +19,7 @@ interface InviteRow {
   prefix: string;
   createdAt: string;
   expiresAt?: string;
-  acceptedAt?: string;
-  acceptedBy?: string;
+  acceptedCount: number;
 }
 
 function meta(r: InviteRow): WorkspaceInviteMeta {
@@ -30,10 +30,8 @@ function meta(r: InviteRow): WorkspaceInviteMeta {
     createdBy: r.createdBy,
     prefix: r.prefix,
     createdAt: r.createdAt,
-    accepted: r.acceptedAt !== undefined,
+    acceptedCount: r.acceptedCount,
     ...(r.expiresAt !== undefined ? { expiresAt: r.expiresAt } : {}),
-    ...(r.acceptedAt !== undefined ? { acceptedAt: r.acceptedAt } : {}),
-    ...(r.acceptedBy !== undefined ? { acceptedBy: r.acceptedBy } : {}),
   };
 }
 
@@ -52,6 +50,7 @@ export class InMemoryWorkspaceInviteStore implements WorkspaceInviteStore {
       createdBy: input.createdBy,
       prefix: input.prefix,
       createdAt: this.now(),
+      acceptedCount: 0,
       ...(input.expiresAt !== undefined ? { expiresAt: input.expiresAt } : {}),
     };
     this.byHash.set(input.tokenHash, row);
@@ -72,10 +71,9 @@ export class InMemoryWorkspaceInviteStore implements WorkspaceInviteStore {
   async consumeInvite(tokenHash: string, subject: string, email?: string): Promise<ConsumeOutcome> {
     const row = this.byHash.get(tokenHash);
     if (!row) return { ok: false, reason: "unknown" };
-    if (row.acceptedAt !== undefined) return { ok: false, reason: "accepted" };
     if (row.expiresAt !== undefined && row.expiresAt <= this.now()) return { ok: false, reason: "expired" };
-    row.acceptedAt = this.now();
-    row.acceptedBy = subject;
+    // Reusable: every acceptance joins and bumps the count; the link is not locked after the first use.
+    row.acceptedCount += 1;
     await this.members.ensureMembership(row.workspace, subject, row.role, email);
     // If already a member, the role is kept, so read back the actual role (prevents a shared link from changing permissions).
     const finalRole = (await this.members.roleFor(row.workspace, subject)) ?? row.role;
@@ -84,7 +82,7 @@ export class InMemoryWorkspaceInviteStore implements WorkspaceInviteStore {
 
   async previewInvite(tokenHash: string): Promise<{ workspace: string; role: string } | undefined> {
     const row = this.byHash.get(tokenHash);
-    if (!row || row.acceptedAt !== undefined) return undefined;
+    if (!row) return undefined;
     if (row.expiresAt !== undefined && row.expiresAt <= this.now()) return undefined;
     return { workspace: row.workspace, role: row.role };
   }
@@ -98,8 +96,7 @@ interface InviteMetaRow {
   prefix: string;
   created_at: string | Date;
   expires_at: string | Date | null;
-  accepted_at: string | Date | null;
-  accepted_by: string | null;
+  accepted_count: number | string;
 }
 
 function rowToMeta(r: InviteMetaRow): WorkspaceInviteMeta {
@@ -110,10 +107,8 @@ function rowToMeta(r: InviteMetaRow): WorkspaceInviteMeta {
     createdBy: r.created_by,
     prefix: r.prefix,
     createdAt: new Date(r.created_at).toISOString(),
-    accepted: r.accepted_at !== null,
+    acceptedCount: Number(r.accepted_count),
     ...(r.expires_at !== null ? { expiresAt: new Date(r.expires_at).toISOString() } : {}),
-    ...(r.accepted_at !== null ? { acceptedAt: new Date(r.accepted_at).toISOString() } : {}),
-    ...(r.accepted_by !== null ? { acceptedBy: r.accepted_by } : {}),
   };
 }
 
@@ -136,7 +131,7 @@ export class PgWorkspaceInviteStore implements WorkspaceInviteStore {
       createdBy: input.createdBy,
       prefix: input.prefix,
       createdAt: new Date(r.created_at).toISOString(),
-      accepted: false,
+      acceptedCount: 0,
       ...(input.expiresAt !== undefined ? { expiresAt: input.expiresAt } : {}),
     };
   }
@@ -144,7 +139,7 @@ export class PgWorkspaceInviteStore implements WorkspaceInviteStore {
   async listInvites(workspace: string): Promise<WorkspaceInviteMeta[]> {
     // Don't select token_hash (never expose it).
     const res = await this.client.query<InviteMetaRow>(
-      `SELECT id, workspace, role, created_by, prefix, created_at, expires_at, accepted_at, accepted_by
+      `SELECT id, workspace, role, created_by, prefix, created_at, expires_at, accepted_count
        FROM everdict_workspace_invites WHERE workspace = $1 ORDER BY created_at DESC`,
       [workspace],
     );
@@ -156,12 +151,13 @@ export class PgWorkspaceInviteStore implements WorkspaceInviteStore {
   }
 
   async consumeInvite(tokenHash: string, subject: string, email?: string): Promise<ConsumeOutcome> {
-    // Single CTE = atomic. accepted_at IS NULL is the single-use lock (concurrent redeem: the second gets 0 rows).
+    // Single CTE = atomic. Reusable: no accepted_at lock — the link can be redeemed until it expires or is revoked;
+    // each acceptance bumps accepted_count (row lock serializes concurrent redeems so the count is exact).
     // An existing member keeps their role (only email is COALESCE-refreshed) — so a shared link doesn't change permissions.
     const res = await this.client.query<{ workspace: string; role: string }>(
       `WITH claimed AS (
-         UPDATE everdict_workspace_invites SET accepted_at = now(), accepted_by = $2
-          WHERE token_hash = $1 AND accepted_at IS NULL AND (expires_at IS NULL OR expires_at > now())
+         UPDATE everdict_workspace_invites SET accepted_count = accepted_count + 1
+          WHERE token_hash = $1 AND (expires_at IS NULL OR expires_at > now())
          RETURNING workspace, role
        ),
        member AS (
@@ -177,21 +173,20 @@ export class PgWorkspaceInviteStore implements WorkspaceInviteStore {
     const row = res.rows[0];
     if (row) return { ok: true, result: { workspace: row.workspace, role: row.role } };
     // Failure — a read-only follow-up classification (unrelated to the success-path atomicity).
-    const why = await this.client.query<{ accepted_at: string | Date | null; expires_at: string | Date | null }>(
-      "SELECT accepted_at, expires_at FROM everdict_workspace_invites WHERE token_hash = $1",
+    // A row that exists and is unexpired always succeeds above, so the only failures are absent (revoked) or expired.
+    const why = await this.client.query<{ token_hash: string }>(
+      "SELECT token_hash FROM everdict_workspace_invites WHERE token_hash = $1",
       [tokenHash],
     );
-    const w = why.rows[0];
-    if (!w) return { ok: false, reason: "unknown" }; // absent == revoked (not distinguished)
-    if (w.accepted_at !== null) return { ok: false, reason: "accepted" };
+    if (!why.rows[0]) return { ok: false, reason: "unknown" }; // absent == revoked (not distinguished)
     return { ok: false, reason: "expired" };
   }
 
   async previewInvite(tokenHash: string): Promise<{ workspace: string; role: string } | undefined> {
-    // Looks up by token_hash only and doesn't redeem. Unaccepted·unexpired rows only.
+    // Looks up by token_hash only and doesn't redeem. Unexpired rows only (a reusable link previews even after use).
     const res = await this.client.query<{ workspace: string; role: string }>(
       `SELECT workspace, role FROM everdict_workspace_invites
-        WHERE token_hash = $1 AND accepted_at IS NULL AND (expires_at IS NULL OR expires_at > now())`,
+        WHERE token_hash = $1 AND (expires_at IS NULL OR expires_at > now())`,
       [tokenHash],
     );
     const row = res.rows[0];

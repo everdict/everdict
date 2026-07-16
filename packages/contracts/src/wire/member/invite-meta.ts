@@ -11,9 +11,11 @@ export const InviteMetaResponseSchema = z.object({
   prefix: z.string().describe("inv_abcd… identification hint (not a hash or the plaintext)"),
   createdAt: z.string().describe("ISO 8601 creation time"),
   expiresAt: z.string().optional().describe("ISO 8601 expiry — absent means no expiry"),
-  accepted: z.boolean(),
-  acceptedBy: z.string().optional().describe("Accepting subject (once accepted)"),
-  acceptedAt: z.string().optional().describe("ISO 8601 acceptance time (once accepted)"),
+  acceptedCount: z
+    .number()
+    .int()
+    .nonnegative()
+    .describe("How many people have joined via this reusable link (0 = unused). Valid until it expires or is revoked."),
 });
 export type InviteMetaResponse = z.infer<typeof InviteMetaResponseSchema>;
 

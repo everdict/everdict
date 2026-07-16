@@ -54,13 +54,24 @@ describe("MembershipService.previewInvite — link landing (non-consuming)", () 
     expect("logoUrl" in preview).toBe(false);
   });
 
-  it("invalid/accepted/revoked token → NotFound (no existence leak)", async () => {
+  it("invalid/revoked token → NotFound (no existence leak)", async () => {
     const { members, invites, svc } = setup();
     await members.create({ id: "acme", name: "Acme", owner: "alice" });
     await expect(svc.previewInvite("inv_nope")).rejects.toBeInstanceOf(NotFoundError);
-    // an already-accepted token cannot be previewed either.
+    // a revoked token → NotFound.
+    const token = await issueToken(invites, "acme", "member");
+    const [meta] = await invites.listInvites("acme");
+    if (!meta) throw new Error("expected an invite");
+    await invites.revokeInvite("acme", meta.id);
+    await expect(svc.previewInvite(token)).rejects.toBeInstanceOf(NotFoundError);
+  });
+
+  it("a reusable token still previews after someone has already joined with it", async () => {
+    const { members, invites, svc } = setup();
+    await members.create({ id: "acme", name: "Acme", owner: "alice" });
     const token = await issueToken(invites, "acme", "member");
     await invites.consumeInvite(hashKey(token), "bob");
-    await expect(svc.previewInvite(token)).rejects.toBeInstanceOf(NotFoundError);
+    // the link is not single-use — the next person can still land on the preview.
+    expect(await svc.previewInvite(token)).toEqual({ workspace: "acme", name: "Acme", role: "member" });
   });
 });

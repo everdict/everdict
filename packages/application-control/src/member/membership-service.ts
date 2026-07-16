@@ -1,4 +1,4 @@
-import { BadRequestError, ConflictError, NotFoundError } from "@everdict/contracts";
+import { BadRequestError, NotFoundError } from "@everdict/contracts";
 import type { MemberRecord, WorkspaceInviteMeta } from "@everdict/contracts";
 import { MembershipPolicy } from "@everdict/domain";
 import type { EverdictRole, Principal } from "@everdict/domain";
@@ -74,7 +74,8 @@ export class MembershipService {
   }
 
   // --- Invites ---
-  // Create an invite — returns the plaintext token exactly once (embedded in the link). Only the hash is stored (in the store).
+  // Create a reusable invite link — returns the plaintext token exactly once (embedded in the link). Only the hash is stored (in the store).
+  // The link works for anyone who has it until it expires or an admin revokes it (not single-use).
   async createInvite(input: {
     workspace: string;
     role: EverdictRole;
@@ -105,7 +106,8 @@ export class MembershipService {
     return this.invites.revokeInvite(workspace, id);
   }
 
-  // Accept an invite — no workspace-role gate (this precedes joining). Only an authenticated human (OIDC) subject; a machine key (via !== 'oidc') is rejected.
+  // Accept a reusable invite — no workspace-role gate (this precedes joining). Only an authenticated human (OIDC) subject; a machine key (via !== 'oidc') is rejected.
+  // The link can be redeemed by many people until it expires or is revoked; re-accepting as an existing member is idempotent (role kept).
   async acceptInvite(
     principal: { subject: string; via: Principal["via"]; email?: string },
     token: string,
@@ -114,7 +116,6 @@ export class MembershipService {
       throw new BadRequestError("BAD_REQUEST", undefined, "Sign in with a human account (OIDC) to accept the invite.");
     const r = await this.invites.consumeInvite(hashKey(token), principal.subject, principal.email);
     if (r.ok) return r.result;
-    if (r.reason === "accepted") throw new ConflictError("CONFLICT", undefined, "This invite has already been used.");
     if (r.reason === "expired") throw new BadRequestError("BAD_REQUEST", undefined, "This invite has expired.");
     throw new NotFoundError("NOT_FOUND", undefined, "This invite is invalid."); // unknown == revoked (no existence leak)
   }

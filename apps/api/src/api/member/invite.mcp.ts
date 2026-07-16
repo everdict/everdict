@@ -10,14 +10,18 @@ export function registerInviteTools(server: McpServer, ctx: McpToolContext): voi
     const membership = deps.membershipService;
     server.registerTool(
       "list_invites",
-      { description: "This workspace's pending invites (metadata only — no token/hash)", inputSchema: {} },
+      {
+        description:
+          "This workspace's active invite links (metadata only — no token/hash; acceptedCount = joins so far)",
+        inputSchema: {},
+      },
       () => run(principal, "members:write", async () => ok(await membership.listInvites(ws))),
     );
     server.registerTool(
       "create_invite",
       {
         description:
-          "Issue an invite token. The response token (inv_…) is shown once — share it as a link, and accepting joins with that role.",
+          "Issue a reusable invite link. The response token (inv_…) is shown once — share it, and anyone with the link joins with that role until it expires or you revoke it.",
         inputSchema: { role: z.enum(EVERDICT_ROLES), expiresInHours: z.number().int().positive().max(8760).optional() },
       },
       ({ role, expiresInHours }) =>
@@ -33,7 +37,10 @@ export function registerInviteTools(server: McpServer, ctx: McpToolContext): voi
     );
     server.registerTool(
       "revoke_invite",
-      { description: "Cancel a pending invite (id is the id from list_invites)", inputSchema: { id: z.string() } },
+      {
+        description: "Revoke an invite link so it can no longer be used (id is the id from list_invites)",
+        inputSchema: { id: z.string() },
+      },
       ({ id }) =>
         run(principal, "members:write", async () => {
           await membership.revokeInvite(ws, id);
@@ -44,7 +51,7 @@ export function registerInviteTools(server: McpServer, ctx: McpToolContext): voi
       "accept_invite",
       {
         description:
-          "Accept an invite token → join that workspace (no role gate; human accounts only). Expired/used/invalid → error.",
+          "Accept an invite token → join that workspace (no role gate; human accounts only). Expired/invalid → error.",
         inputSchema: { token: z.string() },
       },
       ({ token }) => plain(async () => ok(await membership.acceptInvite(principal, token))),

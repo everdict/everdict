@@ -26,7 +26,8 @@ export const inviteDocs: Record<"list" | "create" | "revoke" | "accept" | "previ
     summary: "Create an invite",
     description:
       "Admin only (members:write). Returns the invite meta plus the plaintext token — shown exactly once in this response " +
-      "(embed it in the join link); only the hash is stored and no other endpoint returns it again.",
+      "(embed it in the join link); only the hash is stored and no other endpoint returns it again. " +
+      "The link is reusable: anyone with it can join until it expires or an admin revokes it (accepted_count tracks joins).",
     tags: ["member"],
     body: toJsonSchema(
       z.object({
@@ -54,19 +55,20 @@ export const inviteDocs: Record<"list" | "create" | "revoke" | "accept" | "previ
     summary: "Accept an invite",
     description:
       "Redeems the token and joins the workspace — no workspace role gate (this precedes membership) and independent of the active workspace. " +
-      "Human (OIDC) subjects only: a machine key is rejected with 400. Already-used = 409, expired = 400, unknown/revoked = 404 (no existence leak).",
+      "The link is reusable, so it can be accepted repeatedly (re-accepting as an existing member keeps the role). " +
+      "Human (OIDC) subjects only: a machine key is rejected with 400. Expired = 400, unknown/revoked = 404 (no existence leak).",
     tags: ["member"],
     body: toJsonSchema(z.object({ token: z.string().min(1).describe("Plaintext invite token (inv_…)") })),
     response: {
       200: { description: "Joined — workspace and granted role", ...toJsonSchema(AcceptedInviteResponseSchema) },
-      ...errorResponses(400, 401, 404, 409),
+      ...errorResponses(400, 401, 404),
     },
   },
   preview: {
     summary: "Preview an invite",
     description:
       "Unauthenticated, non-consuming — the token is the secret. Returns only workspace name/logo/role for the link landing page; " +
-      "does not redeem or create a membership. Expired/accepted/revoked/invalid all fold into 404 (no existence leak).",
+      "does not redeem or create a membership. Expired/revoked/invalid all fold into 404 (no existence leak); a reusable link previews even after prior use.",
     tags: ["member"],
     querystring: toJsonSchema(z.object({ token: z.string().describe("Plaintext invite token (required)") })),
     response: {
