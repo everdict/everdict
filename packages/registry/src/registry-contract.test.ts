@@ -193,9 +193,9 @@ const model: RegistryContract<ModelSpec> = {
     has: true,
     ownVersions: true,
     list: true,
-    softDelete: false,
-    createdBy: false,
-    creatorOf: false,
+    softDelete: true,
+    createdBy: true,
+    creatorOf: true,
     versionTags: false,
   },
 };

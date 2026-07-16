@@ -37,6 +37,7 @@ import {
   InMemoryHarnessInstanceRegistry,
   InMemoryHarnessTemplateRegistry,
   InMemoryJudgeRegistry,
+  InMemoryModelRegistry,
   InMemoryRubricRegistry,
   InMemoryRuntimeRegistry,
 } from "@everdict/registry";
@@ -147,6 +148,7 @@ function server(
   const datasetRegistry = new InMemoryDatasetRegistry();
   const judgeRegistry = new InMemoryJudgeRegistry();
   const rubricRegistry = new InMemoryRubricRegistry();
+  const modelRegistry = new InMemoryModelRegistry();
   const svc = new RunService({
     dispatcher: okDispatcher,
     store: new InMemoryRunStore(),
@@ -234,6 +236,7 @@ function server(
     datasetRegistry,
     judgeRegistry,
     rubricRegistry,
+    modelRegistry,
     runtimeRegistry,
     // Connection-test stub — verifies route wiring / role gate only, no real cluster I/O.
     probeRuntime: async (_ws, spec) => ({ kind: spec.kind, reachable: true, detail: "stub-reachable" }),
@@ -2126,6 +2129,81 @@ async function pollScorecard(
   }
   throw new Error("scorecard did not settle");
 }
+
+describe("API — models (workspace-owned, soft delete)", () => {
+  const MODEL = { id: "gpt", version: "1.0.0", provider: "openai", model: "gpt-5.4-mini" };
+
+  it("DELETE version — the registrant soft-deletes (200, get 404 afterward); other workspaces cannot delete it (404)", async () => {
+    const { app, keyStore } = server({ requireAuth: true });
+    const acme = `Bearer ${await issueKey(keyStore, "acme")}`;
+    const beta = `Bearer ${await issueKey(keyStore, "beta")}`;
+    await app.inject({ method: "POST", url: "/models", headers: { authorization: acme }, payload: MODEL });
+
+    // Not the owner (other workspace) → 404 (does not reveal existence)
+    expect(
+      (await app.inject({ method: "DELETE", url: "/models/gpt/versions/1.0.0", headers: { authorization: beta } }))
+        .statusCode,
+    ).toBe(404);
+
+    // Registrant delete → 200 + tombstone, get 404 afterward (data preserved but excluded from reads)
+    const del = await app.inject({
+      method: "DELETE",
+      url: "/models/gpt/versions/1.0.0",
+      headers: { authorization: acme },
+    });
+    expect(del.statusCode).toBe(200);
+    expect(del.json()).toMatchObject({ id: "gpt", version: "1.0.0", deleted: true });
+    expect(
+      (await app.inject({ method: "GET", url: "/models/gpt/versions/1.0.0", headers: { authorization: acme } }))
+        .statusCode,
+    ).toBe(404);
+    await app.close();
+  });
+
+  it("DELETE model (bulk) — a versions[] subset tombstones only those; a body-less DELETE removes the whole model; missing/other-workspace 404", async () => {
+    const { app, keyStore } = server({ requireAuth: true });
+    const acme = { authorization: `Bearer ${await issueKey(keyStore, "acme")}` };
+    const beta = { authorization: `Bearer ${await issueKey(keyStore, "beta")}` };
+    // Two immutable versions of the same id.
+    await app.inject({ method: "POST", url: "/models", headers: acme, payload: MODEL });
+    await app.inject({ method: "POST", url: "/models", headers: acme, payload: { ...MODEL, version: "2.0.0" } });
+
+    // Subset — only the listed version is tombstoned; the other stays readable.
+    const subset = await app.inject({
+      method: "DELETE",
+      url: "/models/gpt",
+      headers: acme,
+      payload: { versions: ["1.0.0"] },
+    });
+    expect(subset.statusCode).toBe(200);
+    expect(subset.json()).toMatchObject({ id: "gpt", deleted: ["1.0.0"] });
+    expect((await app.inject({ method: "GET", url: "/models/gpt/versions/1.0.0", headers: acme })).statusCode).toBe(
+      404,
+    );
+    expect((await app.inject({ method: "GET", url: "/models/gpt/versions/2.0.0", headers: acme })).statusCode).toBe(
+      200,
+    );
+
+    // Body-less DELETE = the whole model (all remaining own live versions) → the model then reads 404.
+    const all = await app.inject({ method: "DELETE", url: "/models/gpt", headers: acme });
+    expect(all.statusCode).toBe(200);
+    expect(all.json()).toMatchObject({ id: "gpt", deleted: ["2.0.0"] });
+    expect((await app.inject({ method: "GET", url: "/models/gpt/versions/2.0.0", headers: acme })).statusCode).toBe(
+      404,
+    );
+
+    // Already-fully-deleted / unknown model → 404 (no existence leak).
+    expect((await app.inject({ method: "DELETE", url: "/models/gpt", headers: acme })).statusCode).toBe(404);
+
+    // Another workspace cannot delete acme's model (and can't tell it exists) → 404.
+    await app.inject({ method: "POST", url: "/models", headers: acme, payload: MODEL });
+    expect(
+      (await app.inject({ method: "DELETE", url: "/models/gpt", headers: beta, payload: { versions: ["1.0.0"] } }))
+        .statusCode,
+    ).toBe(404);
+    await app.close();
+  });
+});
 
 describe("API — benchmarks (catalog → tenant dataset import)", () => {
   it("viewer: read the catalog (datasets:read), includes known first-party benchmarks", async () => {

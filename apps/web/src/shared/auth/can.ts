@@ -17,6 +17,7 @@ export type WebAction =
   | 'judges:write'
   | 'models:read'
   | 'models:write'
+  | 'models:delete'
   | 'runtimes:read'
   | 'runtimes:write'
   | 'secrets:read'
@@ -83,6 +84,7 @@ const PERMS: Record<string, WebAction[]> = {
     'judges:write',
     'models:read',
     'models:write',
+    'models:delete', // model version/whole-model soft-delete = admin (creator exception is server-side)
     'runtimes:read',
     'runtimes:write', // runtime registration is role-agnostic (credential values are split out to secrets:write=admin)
     'secrets:read', // secret management = admin

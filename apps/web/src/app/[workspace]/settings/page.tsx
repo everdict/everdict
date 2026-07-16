@@ -51,6 +51,7 @@ export default async function SettingsPage({
   const canWriteSecrets = can(principal?.roles, 'secrets:write')
   const canReadModels = can(principal?.roles, 'models:read')
   const canWriteModels = can(principal?.roles, 'models:write')
+  const canDeleteModels = can(principal?.roles, 'models:delete')
   const canReadMembers = can(principal?.roles, 'members:read')
   const canWriteMembers = can(principal?.roles, 'members:write')
   // Budget + usage are readable by members (viewer+, reuses scorecards:read); editing the limit stays admin (settings:write).
@@ -163,11 +164,17 @@ export default async function SettingsPage({
         const summaries = modelsSchema.parse(await controlPlane.listModels(ctx))
         return Promise.all(
           summaries.map(async (s): Promise<ModelEntry> => {
+            const base = {
+              id: s.id,
+              owner: s.owner,
+              versions: s.versions,
+              ...(s.createdBy !== undefined ? { createdBy: s.createdBy } : {}),
+            }
             try {
               const spec = modelSpecSchema.parse(await controlPlane.getModel(ctx, s.id, 'latest'))
-              return { id: s.id, owner: s.owner, versions: s.versions, spec }
+              return { ...base, spec }
             } catch {
-              return { id: s.id, owner: s.owner, versions: s.versions }
+              return base
             }
           })
         )
@@ -227,6 +234,8 @@ export default async function SettingsPage({
             canWriteSecrets={canWriteSecrets}
             canReadModels={canReadModels}
             canWriteModels={canWriteModels}
+            canDeleteModels={canDeleteModels}
+            {...(principal?.subject !== undefined ? { currentSubject: principal.subject } : {})}
             canReadMembers={canReadMembers}
             canWriteMembers={canWriteMembers}
             canReadUsage={canReadUsage}

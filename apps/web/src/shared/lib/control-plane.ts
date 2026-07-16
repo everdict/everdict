@@ -367,6 +367,14 @@ export const controlPlane = {
     call<T>(auth, '/models', { method: 'POST', body: JSON.stringify(spec) }),
   validateModel: <T>(auth: AuthContext, spec: unknown) =>
     call<T>(auth, '/models/validate', { method: 'POST', body: JSON.stringify(spec) }),
+  // Bulk soft-delete (tombstone) — pass `versions` to delete specific versions, or omit them to delete the whole model
+  // (all own live versions). The control plane checks each target creator-or-admin and fails fast (nothing deleted if any
+  // is forbidden/absent). A body is sent only when versions are given, so the whole-model delete is a bodyless DELETE.
+  deleteModelVersions: <T>(auth: AuthContext, id: string, versions?: string[]) =>
+    call<T>(auth, `/models/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+      ...(versions && versions.length > 0 ? { body: JSON.stringify({ versions }) } : {}),
+    }),
   getWorkspaceSettings: <T>(auth: AuthContext) => call<T>(auth, '/workspace/settings'),
   setWorkspaceSettings: <T>(auth: AuthContext, patch: unknown) =>
     call<T>(auth, '/workspace/settings', { method: 'PUT', body: JSON.stringify(patch) }),

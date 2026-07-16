@@ -71,6 +71,45 @@ describe("InMemoryModelRegistry (tenant-owned)", () => {
       { id: "opus", owner: SHARED_TENANT, versions: ["1.0.0"] },
     ]);
   });
+
+  it("records createdBy and returns it via creatorOf + list (seed is undefined)", async () => {
+    const r = new InMemoryModelRegistry();
+    await r.register("acme", model("m", "1.0.0"), "alice");
+    await r.register("acme", model("m", "1.1.0")); // no creator recorded (seed)
+    expect(await r.creatorOf("acme", "m", "1.0.0")).toBe("alice");
+    expect(await r.creatorOf("acme", "m", "1.1.0")).toBeUndefined();
+    expect((await r.list("acme")).find((x) => x.id === "m")?.createdBy).toBe("alice"); // creator of the first-registered version
+  });
+
+  it("softDelete is a tombstone — excludes the version from every read; re-registering identical content revives", async () => {
+    const r = new InMemoryModelRegistry();
+    await r.register("acme", model("m", "1.0.0"), "alice");
+    await r.register("acme", model("m", "1.1.0"), "alice");
+
+    await r.softDelete("acme", "m", "1.0.0");
+    expect(await r.versions("acme", "m")).toEqual(["1.1.0"]); // deleted version dropped
+    expect(await r.ownVersions("acme", "m")).toEqual(["1.1.0"]);
+    expect(await r.has("acme", "m", "1.0.0")).toBe(false);
+    await expect(r.creatorOf("acme", "m", "1.0.0")).rejects.toBeInstanceOf(NotFoundError);
+
+    await r.softDelete("acme", "m", "1.1.0"); // all versions deleted → the id itself disappears
+    await expect(r.get("acme", "m")).rejects.toBeInstanceOf(NotFoundError);
+    expect(await r.list("acme")).toEqual([]);
+
+    await r.register("acme", model("m", "1.0.0"), "alice"); // re-registering identical content → revive
+    expect((await r.get("acme", "m")).version).toBe("1.0.0");
+  });
+
+  it("softDelete/creatorOf act on this tenant's directly-owned versions only — _shared/other tenants → NotFound (no fallback)", async () => {
+    const r = new InMemoryModelRegistry();
+    await r.register(SHARED_TENANT, model("opus", "1.0.0"), "sys");
+    await r.register("acme", model("mine", "1.0.0"), "alice");
+    // A _shared model visible via fallback can't be deleted.
+    await expect(r.softDelete("acme", "opus", "1.0.0")).rejects.toBeInstanceOf(NotFoundError);
+    await expect(r.creatorOf("acme", "opus", "1.0.0")).rejects.toBeInstanceOf(NotFoundError);
+    // Another tenant's owned model can't be deleted either.
+    await expect(r.softDelete("beta", "mine", "1.0.0")).rejects.toBeInstanceOf(NotFoundError);
+  });
 });
 
 describe("loadModelDir", () => {
@@ -86,33 +125,112 @@ describe("loadModelDir", () => {
   });
 });
 
-// Fake SqlClient — mimics the tenant-aware everdict_models.
+// Fake SqlClient — mimics a tenant-aware everdict_models (including created_by + deleted_at tombstone; no version tags).
+interface FakeRow {
+  tenant: string;
+  id: string;
+  version: string;
+  model: unknown;
+  created_at: string;
+  created_by: string | null;
+  deleted_at: number | null;
+}
 function fakePg(): SqlClient {
-  const rows: Array<{ tenant: string; id: string; version: string; model: unknown }> = [];
+  const rows: FakeRow[] = [];
   const norm = (t: string) => t.replace(/\s+/g, " ").trim();
+  const live = (x: FakeRow) => x.deleted_at === null;
+  // Deterministic created_at — incremented 1 second per INSERT (for verifying creation/update time order).
+  const base = 1_700_000_000_000;
+  let clock = 0;
   return {
     async query<R>(text: string, p: unknown[] = []): Promise<{ rows: R[] }> {
       const t = norm(text);
-      if (t.startsWith("SELECT model FROM everdict_models WHERE tenant = $1 AND id = $2 AND version = $3")) {
+      // register's raw query — also sees tombstoned rows.
+      if (
+        t.startsWith("SELECT model, deleted_at FROM everdict_models WHERE tenant = $1 AND id = $2 AND version = $3")
+      ) {
         const r = rows.find((x) => x.tenant === p[0] && x.id === p[1] && x.version === p[2]);
+        return { rows: (r ? [{ model: r.model, deleted_at: r.deleted_at }] : []) as R[] };
+      }
+      // get — live versions only.
+      if (
+        t.startsWith(
+          "SELECT model FROM everdict_models WHERE tenant = $1 AND id = $2 AND version = $3 AND deleted_at IS NULL",
+        )
+      ) {
+        const r = rows.find((x) => x.tenant === p[0] && x.id === p[1] && x.version === p[2] && live(x));
         return { rows: (r ? [{ model: r.model }] : []) as R[] };
       }
-      if (t.startsWith("SELECT 1 FROM everdict_models WHERE tenant = $1 AND id = $2 AND version = $3")) {
-        const r = rows.find((x) => x.tenant === p[0] && x.id === p[1] && x.version === p[2]);
+      // creatorOf — live versions only.
+      if (
+        t.startsWith(
+          "SELECT created_by FROM everdict_models WHERE tenant = $1 AND id = $2 AND version = $3 AND deleted_at IS NULL",
+        )
+      ) {
+        const r = rows.find((x) => x.tenant === p[0] && x.id === p[1] && x.version === p[2] && live(x));
+        return { rows: (r ? [{ created_by: r.created_by }] : []) as R[] };
+      }
+      // has — live versions only.
+      if (
+        t.startsWith(
+          "SELECT 1 FROM everdict_models WHERE tenant = $1 AND id = $2 AND version = $3 AND deleted_at IS NULL",
+        )
+      ) {
+        const r = rows.find((x) => x.tenant === p[0] && x.id === p[1] && x.version === p[2] && live(x));
         return { rows: (r ? [{}] : []) as R[] };
       }
-      if (t.startsWith("SELECT 1 FROM everdict_models WHERE tenant = $1 AND id = $2 LIMIT 1")) {
-        const r = rows.some((x) => x.tenant === p[0] && x.id === p[1]);
+      // ownsId — live versions only.
+      if (t.startsWith("SELECT 1 FROM everdict_models WHERE tenant = $1 AND id = $2 AND deleted_at IS NULL LIMIT 1")) {
+        const r = rows.some((x) => x.tenant === p[0] && x.id === p[1] && live(x));
         return { rows: (r ? [{}] : []) as R[] };
       }
-      if (t.startsWith("SELECT version FROM everdict_models WHERE tenant = $1 AND id = $2")) {
+      // listMeta per-id — version/created_at/created_by of live versions (no tags column on models).
+      if (
+        t.startsWith(
+          "SELECT version, created_at, created_by FROM everdict_models WHERE tenant = $1 AND id = $2 AND deleted_at IS NULL",
+        )
+      ) {
         return {
-          rows: rows.filter((x) => x.tenant === p[0] && x.id === p[1]).map((x) => ({ version: x.version })) as R[],
+          rows: rows
+            .filter((x) => x.tenant === p[0] && x.id === p[1] && live(x))
+            .map((x) => ({ version: x.version, created_at: x.created_at, created_by: x.created_by })) as R[],
         };
       }
-      if (t.startsWith("SELECT DISTINCT id FROM everdict_models WHERE tenant = $1 OR tenant = $2")) {
-        const ids = [...new Set(rows.filter((x) => x.tenant === p[0] || x.tenant === p[1]).map((x) => x.id))].sort();
+      // ownerVersions — live versions only.
+      if (t.startsWith("SELECT version FROM everdict_models WHERE tenant = $1 AND id = $2 AND deleted_at IS NULL")) {
+        return {
+          rows: rows
+            .filter((x) => x.tenant === p[0] && x.id === p[1] && live(x))
+            .map((x) => ({ version: x.version })) as R[],
+        };
+      }
+      // list — only ids that have a live version.
+      if (
+        t.startsWith(
+          "SELECT DISTINCT id FROM everdict_models WHERE (tenant = $1 OR tenant = $2) AND deleted_at IS NULL",
+        )
+      ) {
+        const ids = [
+          ...new Set(rows.filter((x) => (x.tenant === p[0] || x.tenant === p[1]) && live(x)).map((x) => x.id)),
+        ].sort();
         return { rows: ids.map((id) => ({ id })) as R[] };
+      }
+      // revive — clears the tombstone when identical content is re-registered.
+      if (t.startsWith("UPDATE everdict_models SET deleted_at = NULL WHERE tenant = $1 AND id = $2 AND version = $3")) {
+        const r = rows.find((x) => x.tenant === p[0] && x.id === p[1] && x.version === p[2]);
+        if (r) r.deleted_at = null;
+        return { rows: [] };
+      }
+      // softDelete — live versions only; RETURNING decides whether it matched.
+      if (
+        t.startsWith(
+          "UPDATE everdict_models SET deleted_at = now() WHERE tenant = $1 AND id = $2 AND version = $3 AND deleted_at IS NULL RETURNING version",
+        )
+      ) {
+        const r = rows.find((x) => x.tenant === p[0] && x.id === p[1] && x.version === p[2] && live(x));
+        if (!r) return { rows: [] };
+        r.deleted_at = Date.now();
+        return { rows: [{ version: r.version }] as R[] };
       }
       if (t.startsWith("INSERT INTO everdict_models")) {
         rows.push({
@@ -120,6 +238,9 @@ function fakePg(): SqlClient {
           id: p[1] as string,
           version: p[2] as string,
           model: JSON.parse(p[3] as string),
+          created_at: new Date(base + clock++ * 1000).toISOString(),
+          created_by: (p[4] as string | null) ?? null,
+          deleted_at: null,
         });
         return { rows: [] };
       }
@@ -143,5 +264,22 @@ describe("PgModelRegistry (tenant-owned)", () => {
     await expect(r.register("acme", model("mine", "1.0.0", { description: "changed" }))).rejects.toBeInstanceOf(
       ConflictError,
     );
+  });
+
+  it("createdBy + softDelete (tombstone) — creatorOf/list expose it, delete excludes it from reads, re-registration revives", async () => {
+    const r = new PgModelRegistry(fakePg());
+    await r.register("acme", model("m", "1.0.0"), "alice");
+    expect(await r.creatorOf("acme", "m", "1.0.0")).toBe("alice");
+    expect((await r.list("acme")).find((x) => x.id === "m")?.createdBy).toBe("alice");
+
+    await r.softDelete("acme", "m", "1.0.0"); // tombstone
+    await expect(r.get("acme", "m")).rejects.toBeInstanceOf(NotFoundError); // disappears from reads
+    expect(await r.has("acme", "m", "1.0.0")).toBe(false);
+    expect(await r.list("acme")).toEqual([]);
+    await expect(r.creatorOf("acme", "m", "1.0.0")).rejects.toBeInstanceOf(NotFoundError);
+    await expect(r.softDelete("acme", "m", "1.0.0")).rejects.toBeInstanceOf(NotFoundError); // already deleted → NotFound
+
+    await r.register("acme", model("m", "1.0.0")); // re-registering identical content → revive
+    expect((await r.get("acme", "m")).version).toBe("1.0.0");
   });
 });

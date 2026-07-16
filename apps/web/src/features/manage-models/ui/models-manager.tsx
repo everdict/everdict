@@ -1,38 +1,48 @@
 'use client'
 
 import { useState, useTransition } from 'react'
-import { Plus } from 'lucide-react'
+import { useRouter } from 'next/navigation'
+import { Loader2, Plus, Trash2, TriangleAlert, X } from 'lucide-react'
 import { useTranslations } from 'next-intl'
+import { toast } from 'sonner'
 
 import { SecretPicker } from '@/features/pick-secret'
 import type { ModelSpec } from '@/entities/model'
 import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
 import { Combobox } from '@/shared/ui/combobox'
+import { Dialog } from '@/shared/ui/dialog'
 import { Input, Label } from '@/shared/ui/input'
 import { SettingsList, SettingsRow } from '@/shared/ui/settings-list'
 import { InfoTip } from '@/shared/ui/tooltip'
 
-import { createModelAction, validateModelAction } from '../api/manage-models'
+import { createModelAction, deleteModelAction, validateModelAction } from '../api/manage-models'
 
 // 한 모델 id 의 최신 스펙 + 소유/버전 (설정 카드 표시용). spec 은 상세 페치 실패 시 없을 수 있다.
+// createdBy = 최초 등록 버전의 등록자(seed/_shared 는 없음) — 삭제 버튼 노출(등록자-or-admin) 판단용.
 export interface ModelEntry {
   id: string
   owner: string
   versions: string[]
+  createdBy?: string
   spec?: ModelSpec
 }
 
 // 워크스페이스 모델 관리 카드 — 지원 LLM 모델을 raw env 조합이 아니라 일급 엔티티로 등록/조회.
 // 각 모델은 provider·모델식별자·baseUrl 과, 에이전트 서버/저지가 쓸 때 연결할 API 키 시크릿(apiKeySecret) 이름을 갖는다.
+// canDelete = 이 워크스페이스의 admin(models:delete). currentSubject = 로그인 subject — admin 이 아니어도 자기가 등록한 모델은 삭제 가능.
 export function ModelsManager({
   models,
   secretNames,
   canWrite,
+  canDelete,
+  currentSubject,
 }: {
   models: ModelEntry[]
   secretNames: string[]
   canWrite: boolean
+  canDelete: boolean
+  currentSubject?: string
 }) {
   const t = useTranslations('manageModels')
   const [adding, setAdding] = useState(false)
@@ -87,14 +97,110 @@ export function ModelsManager({
               }
               hint={<ModelHint entry={m} secretNames={secretNames} />}
             >
-              <span className="text-[12px] text-faint">
-                {t('versions', { count: m.versions.length })}
+              <span className="flex items-center gap-2">
+                <span className="text-[12px] text-faint">
+                  {t('versions', { count: m.versions.length })}
+                </span>
+                {/* 삭제는 워크스페이스 소유 모델만(_shared 는 불가) + admin 또는 등록자 본인일 때만 노출. 최종 강제는 컨트롤플레인. */}
+                {m.owner !== '_shared' &&
+                  (canDelete || (currentSubject !== undefined && m.createdBy === currentSubject)) && (
+                    <DeleteModelControl id={m.id} />
+                  )}
               </span>
             </SettingsRow>
           ))}
         </SettingsList>
       )}
     </div>
+  )
+}
+
+// 행별 삭제 트리거(휴지통 아이콘) + 확인 다이얼로그. 모델 전체(모든 소유 버전)를 소프트-딜리트한다.
+function DeleteModelControl({ id }: { id: string }) {
+  const t = useTranslations('manageModels')
+  const [open, setOpen] = useState(false)
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        aria-label={t('deleteModel', { id })}
+        className="grid size-7 shrink-0 place-items-center rounded-md text-faint transition-colors hover:bg-destructive/10 hover:text-destructive"
+      >
+        <Trash2 className="size-3.5" />
+      </button>
+      {open && <DeleteModelDialog id={id} onClose={() => setOpen(false)} />}
+    </>
+  )
+}
+
+// 모델 삭제 확인 다이얼로그 — 툼스톤(과거 스코어카드는 재현 보존, 이후 참조 실행은 해석 실패). 컨트롤플레인이 등록자-or-admin 을 강제.
+function DeleteModelDialog({ id, onClose }: { id: string; onClose: () => void }) {
+  const t = useTranslations('manageModels')
+  const router = useRouter()
+  const [pending, startTransition] = useTransition()
+  const [error, setError] = useState<string>()
+  const titleId = `delete-model-${id}`
+
+  function onConfirm() {
+    if (pending) return
+    setError(undefined)
+    startTransition(async () => {
+      const res = await deleteModelAction(id)
+      if (!res.ok) {
+        setError(res.error ?? t('deleteFailed'))
+        return
+      }
+      toast.success(t('deletedModel', { id }))
+      onClose()
+      router.refresh()
+    })
+  }
+
+  return (
+    <Dialog open onClose={onClose} className="max-w-md" labelledBy={titleId}>
+      <div className="flex items-start gap-3 border-b border-border px-5 py-4">
+        <span className="mt-0.5 grid size-9 shrink-0 place-items-center rounded-lg bg-destructive/10 text-destructive ring-1 ring-inset ring-destructive/20">
+          <TriangleAlert className="size-[18px]" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <h2 id={titleId} className="text-[14px] font-[560] tracking-[-0.01em] text-foreground">
+            {t('deleteTitle')}
+          </h2>
+          <p className="mt-0.5 truncate font-mono text-[12px] text-muted-foreground">{id}</p>
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label={t('close')}
+          className="-mr-1 -mt-1 grid size-7 shrink-0 place-items-center rounded-md text-faint transition-colors hover:bg-accent hover:text-foreground"
+        >
+          <X className="size-4" />
+        </button>
+      </div>
+
+      <div className="space-y-3 px-5 py-4">
+        <p className="text-[12.5px] leading-relaxed text-muted-foreground">{t('deleteExplain')}</p>
+        <Callout tone="danger" className="py-2">
+          {t('deleteWarning')}
+        </Callout>
+        {error && (
+          <Callout tone="danger" className="py-2">
+            {error}
+          </Callout>
+        )}
+      </div>
+
+      <div className="flex items-center justify-end gap-2 border-t border-border px-5 py-3.5">
+        <Button variant="ghost" size="sm" onClick={onClose} disabled={pending}>
+          {t('cancel')}
+        </Button>
+        <Button variant="destructive" size="sm" onClick={onConfirm} disabled={pending}>
+          {pending && <Loader2 className="size-3.5 animate-spin" />}
+          {t('deleteConfirm')}
+        </Button>
+      </div>
+    </Dialog>
   )
 }
 

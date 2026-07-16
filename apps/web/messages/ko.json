@@ -1245,7 +1245,15 @@
     "save": "등록",
     "cancel": "취소",
     "invalid": "모델을 등록하지 못했습니다.",
-    "versionExists": "버전 {version} 이(가) 이미 있습니다 — 버전을 올리세요."
+    "versionExists": "버전 {version} 이(가) 이미 있습니다 — 버전을 올리세요.",
+    "deleteModel": "모델 {id} 삭제",
+    "deleteTitle": "모델 삭제",
+    "close": "닫기",
+    "deleteExplain": "모델을 툼스톤 처리합니다 — 이 워크스페이스에서 사라지지만, 이 모델을 참조했던 과거 스코어카드는 재현 가능하게 보존됩니다(하드 삭제가 아니라 데이터는 남습니다).",
+    "deleteWarning": "이 모델을 id 로 참조하는 저지·하네스는 이후 실행에서 해석에 실패합니다. 같은 스펙을 다시 등록하면 복구됩니다.",
+    "deleteConfirm": "모델 삭제",
+    "deleteFailed": "모델을 삭제하지 못했습니다.",
+    "deletedModel": "{id} 을(를) 삭제했습니다."
   },
   "manageWorkspaceSecrets": {
     "workspace": {

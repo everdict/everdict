@@ -64,6 +64,8 @@ export * from "./member/created-invite.js";
 export * from "./member/invite-meta.js";
 export * from "./member/invite-preview.js";
 export * from "./member/member.js";
+export * from "./model/delete-model-version-result.js";
+export * from "./model/delete-model-versions-result.js";
 export * from "./model/model-list-entry.js";
 export * from "./model/model.js";
 export * from "./model/register-model-result.js";

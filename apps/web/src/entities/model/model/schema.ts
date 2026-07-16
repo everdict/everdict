@@ -6,10 +6,12 @@ import { z } from 'zod'
 // `import type` 만 — zod v3 wire 스키마는 웹에서 실행되지 않는다.
 
 // GET /models 200 — 모델 id 당 한 항목(워크스페이스 소유 + _shared 폴백).
+// createdBy = 최초 등록 버전의 등록자 subject(seed/_shared 는 없음) — 누가 삭제할 수 있는지(등록자-or-admin) 판단용.
 export const modelSummarySchema = z.object({
   id: z.string(),
   versions: z.array(z.string()),
   owner: z.string(),
+  createdBy: z.string().optional(),
 })
 export const modelsSchema = z.array(modelSummarySchema)
 export type ModelSummary = z.infer<typeof modelSummarySchema>

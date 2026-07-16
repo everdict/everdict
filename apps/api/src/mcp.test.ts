@@ -250,6 +250,8 @@ describe("MCP tools", () => {
       "delete_dataset",
       "delete_dataset_versions",
       "delete_harness",
+      "delete_model",
+      "delete_model_versions",
       "delete_schedule",
       "diff_datasets",
       "diff_harness_versions",
@@ -1242,7 +1244,13 @@ describe("MCP tools", () => {
   it("diff_judge_versions: field-level diff between two judge versions (HTTP parity) — viewer allowed", async () => {
     const deps = harness();
     const member = await connect(deps, ["member"], "acme");
-    const base = { kind: "model", id: "correctness", version: "1.0.0", model: "claude-opus-4-8", rubric: "did it work?" };
+    const base = {
+      kind: "model",
+      id: "correctness",
+      version: "1.0.0",
+      model: "claude-opus-4-8",
+      rubric: "did it work?",
+    };
     await member.callTool({ name: "create_judge", arguments: { judge: JSON.stringify(base) } });
     await member.callTool({
       name: "create_judge",
@@ -1375,6 +1383,60 @@ describe("MCP tools", () => {
     const notFound = await beta.callTool({ name: "get_model", arguments: { id: "opus" } });
     expect(notFound.isError).toBe(true);
     expect(text(notFound)).toContain("NOT_FOUND");
+  });
+
+  it("delete_model: the creator soft-deletes; a non-creator non-admin is FORBIDDEN; an admin can delete others'", async () => {
+    const deps = harness();
+    const modelSpec = JSON.stringify({ id: "opus", version: "1.0.0", provider: "anthropic", model: "claude-opus-4-8" });
+    const creator = await connect(deps, ["member"], "acme", "alice");
+    await creator.callTool({ name: "create_model", arguments: { model: modelSpec } });
+
+    // Another member in the same workspace (not the creator) → FORBIDDEN, nothing deleted.
+    const other = await connect(deps, ["member"], "acme", "bob");
+    const denied = await other.callTool({ name: "delete_model", arguments: { id: "opus", version: "1.0.0" } });
+    expect(denied.isError).toBe(true);
+    expect(text(denied)).toContain("FORBIDDEN");
+    expect((await creator.callTool({ name: "get_model", arguments: { id: "opus" } })).isError).toBeFalsy(); // still alive
+
+    // The creator deletes → tombstone (get NOT_FOUND, gone from the list).
+    const del = await creator.callTool({ name: "delete_model", arguments: { id: "opus", version: "1.0.0" } });
+    expect(del.isError).toBeFalsy();
+    expect(text(del)).toContain("deleted");
+    expect((await creator.callTool({ name: "get_model", arguments: { id: "opus" } })).isError).toBe(true);
+    expect(JSON.parse(text(await creator.callTool({ name: "list_models", arguments: {} })))).toEqual([]);
+
+    // An admin (not the creator) can delete someone else's version.
+    await creator.callTool({ name: "create_model", arguments: { model: modelSpec } }); // revive
+    const admin = await connect(deps, ["admin"], "acme", "carol");
+    expect(
+      (await admin.callTool({ name: "delete_model", arguments: { id: "opus", version: "1.0.0" } })).isError,
+    ).toBeFalsy();
+  });
+
+  it("delete_model_versions: subset deletes only the listed versions; omitting versions deletes the whole model", async () => {
+    const deps = harness();
+    const v = (version: string) =>
+      JSON.stringify({ id: "opus", version, provider: "anthropic", model: "claude-opus-4-8" });
+    const creator = await connect(deps, ["member"], "acme", "alice");
+    await creator.callTool({ name: "create_model", arguments: { model: v("1.0.0") } });
+    await creator.callTool({ name: "create_model", arguments: { model: v("2.0.0") } });
+
+    // subset — only 1.0.0 is tombstoned; 2.0.0 stays readable.
+    const subset = await creator.callTool({
+      name: "delete_model_versions",
+      arguments: { id: "opus", versions: ["1.0.0"] },
+    });
+    expect(subset.isError).toBeFalsy();
+    expect(JSON.parse(text(subset))).toMatchObject({ id: "opus", deleted: ["1.0.0"] });
+    expect(
+      (await creator.callTool({ name: "get_model", arguments: { id: "opus", version: "2.0.0" } })).isError,
+    ).toBeFalsy();
+
+    // whole model (versions omitted) — the remaining version goes too; the model disappears from the list.
+    const all = await creator.callTool({ name: "delete_model_versions", arguments: { id: "opus" } });
+    expect(all.isError).toBeFalsy();
+    expect(JSON.parse(text(all))).toMatchObject({ id: "opus", deleted: ["2.0.0"] });
+    expect(JSON.parse(text(await creator.callTool({ name: "list_models", arguments: {} })))).toEqual([]);
   });
 
   it("diff_scorecards: a missing scorecard is NOT_FOUND (workspace-scoped)", async () => {

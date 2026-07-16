@@ -1,10 +1,13 @@
 import { ModelSpecSchema } from "@everdict/contracts";
+import { DeleteModelVersionResultSchema } from "@everdict/contracts/wire";
+import { DeleteModelVersionsResultSchema } from "@everdict/contracts/wire";
 import { ModelListResponseSchema } from "@everdict/contracts/wire";
 import { ModelResponseSchema } from "@everdict/contracts/wire";
 import { RegisterModelResultSchema } from "@everdict/contracts/wire";
 import { ValidateModelResultSchema } from "@everdict/contracts/wire";
 import type { FastifySchema } from "fastify";
 import { errorResponses, toJsonSchema } from "../openapi.js";
+import { DeleteModelVersionsBodySchema } from "./request/delete-model-versions.js";
 
 // OpenAPI descriptors for the model routes — doc-only (rule api-layer): the no-op compilers in server.ts
 // make attaching these behavior-free; validation stays in the handlers.
@@ -69,6 +72,34 @@ const docs = {
     response: {
       200: { description: "ModelSpec", ...toJsonSchema(ModelResponseSchema) },
       ...errorResponses(401, 403, 404),
+    },
+  },
+  deleteVersion: {
+    summary: "Soft-delete a model version",
+    description:
+      "Tombstones one model version (data preserved, excluded from reads → past scorecards that referenced it stay " +
+      "reproducible). Allowed for that version's creator or a workspace admin (models:delete) — enforced in the " +
+      "service. Missing/already-deleted/non-owned versions are 404.",
+    tags: ["model"],
+    params: idVersionParams,
+    response: {
+      200: { description: "Deleted (tombstoned)", ...toJsonSchema(DeleteModelVersionResultSchema) },
+      ...errorResponses(401, 403, 404),
+    },
+  },
+  deleteVersions: {
+    summary: "Soft-delete several model versions or the whole model",
+    description:
+      "Bulk tombstone — pass `versions` to delete specific versions, or omit the body to delete the whole model " +
+      "(all of its own live versions). Every target is checked creator-or-admin (models:delete) BEFORE any delete, " +
+      "so a single forbidden/absent version rejects the whole request (403/404) with nothing deleted. Data is " +
+      "preserved (past scorecards stay reproducible). An unknown / already-fully-deleted model is 404.",
+    tags: ["model"],
+    params: { type: "object", properties: { id: { type: "string", description: "Model id" } }, required: ["id"] },
+    body: toJsonSchema(DeleteModelVersionsBodySchema),
+    response: {
+      200: { description: "Deleted (tombstoned) versions", ...toJsonSchema(DeleteModelVersionsResultSchema) },
+      ...errorResponses(400, 401, 403, 404),
     },
   },
 } satisfies Record<string, FastifySchema>;

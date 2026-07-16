@@ -43,3 +43,17 @@ export async function createModelAction(spec: unknown): Promise<CreateModelResul
     return { ok: false, error: e instanceof Error ? e.message : String(e) }
   }
 }
+
+// 모델 전체 소프트-딜리트(DELETE /models/:id, versions 생략 = 이 워크스페이스 소유의 모든 라이브 버전). 툼스톤이라 이 모델을
+// 참조했던 과거 스코어카드는 재현 가능하게 보존되지만, 이후 이 모델을 참조하는 실행은 해석에 실패한다. authZ(등록자-or-admin)는
+// 컨트롤플레인이 강제 — fail-fast(하나라도 금지/부재면 아무것도 삭제 안 함).
+export async function deleteModelAction(id: string): Promise<{ ok: boolean; error?: string }> {
+  const ctx = await authContext()
+  try {
+    await controlPlane.deleteModelVersions<{ deleted: string[] }>(ctx, id)
+    revalidatePath('/[workspace]/settings')
+    return { ok: true }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
+}

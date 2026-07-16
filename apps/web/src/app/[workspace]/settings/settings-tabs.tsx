@@ -74,6 +74,8 @@ export function SettingsTabs(props: {
   canWriteSecrets: boolean
   canReadModels: boolean
   canWriteModels: boolean
+  canDeleteModels: boolean // admin (models:delete) — surfaces the model delete control (creator exception handled per-row via currentSubject)
+  currentSubject?: string // logged-in subject — a non-admin can still delete models they registered
   canReadMembers: boolean
   canWriteMembers: boolean
   canReadUsage: boolean // budget/usage read (viewer+); gates the Budget & usage tab. Editing the limit stays canWriteSettings.
@@ -143,6 +145,8 @@ export function SettingsTabs(props: {
           models={props.models}
           secretNames={props.secrets.map((s) => s.name)}
           canWrite={props.canWriteModels}
+          canDelete={props.canDeleteModels}
+          {...(props.currentSubject !== undefined ? { currentSubject: props.currentSubject } : {})}
         />
       </TabsContent>
       <TabsContent value="integrations">

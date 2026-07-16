@@ -1245,7 +1245,15 @@
     "save": "Register",
     "cancel": "Cancel",
     "invalid": "Couldn't register the model.",
-    "versionExists": "Version {version} already exists — bump the version."
+    "versionExists": "Version {version} already exists — bump the version.",
+    "deleteModel": "Delete model {id}",
+    "deleteTitle": "Delete model",
+    "close": "Close",
+    "deleteExplain": "This tombstones the model — it disappears from this workspace, but past scorecards that referenced it stay reproducible (the data is preserved, not hard-deleted).",
+    "deleteWarning": "Judges or harnesses that reference this model by id will fail to resolve on future runs. Re-register the same spec to restore it.",
+    "deleteConfirm": "Delete model",
+    "deleteFailed": "Couldn't delete the model.",
+    "deletedModel": "Deleted {id}."
   },
   "manageWorkspaceSecrets": {
     "workspace": {

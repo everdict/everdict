@@ -62,9 +62,21 @@ the provider key is read from the `SecretStore` at grade time (`judge-runner.ts`
 
 ## Surface (BFF ↔ MCP parity)
 `POST /models` (register) · `POST /models/validate` (dry-run: schema + version conflict + `missingSecrets` warning)
-· `GET /models` · `GET /models/:id/versions/:version` — `models:read` (viewer+) / `models:write` (member+). MCP
-twins: `list_models` / `get_model` / `validate_model` / `create_model`. Web: **Settings → Models** (register with a
-`SecretPicker` for `apiKeySecret`; each row shows provider · model · baseUrl and the linked-key state). Seeded
-`_shared` defaults live in `examples/models/`.
+· `GET /models` · `GET /models/:id/versions/:version` · `DELETE /models/:id/versions/:version` (one version) ·
+`DELETE /models/:id` (bulk — `{versions}` or body-less = the whole model) — `models:read` (viewer+) /
+`models:write` (member+) / delete = creator-or-admin (`models:delete`). MCP twins: `list_models` / `get_model` /
+`validate_model` / `create_model` / `delete_model` / `delete_model_versions`. Web: **Settings → Models** (register
+with a `SecretPicker` for `apiKeySecret`; each row shows provider · model · baseUrl and the linked-key state, plus a
+delete control on workspace-owned rows for the creator or an admin). Seeded `_shared` defaults live in `examples/models/`.
+
+## Deletion (soft delete / tombstone)
+Deleting a model is a **tombstone**, mirroring datasets/harnesses (see `.claude/rules/registry.md`): the version(s)
+disappear from every read (`get`/`list`/`versions`), but the data is **preserved** so past scorecards that referenced
+the model stay reproducible (re-registering the identical spec revives it). `everdict_models` gained `created_by` +
+`deleted_at` in migration `0056` so the shared `PgVersionedStore` can expose `softDelete`/`creatorOf`. Authz is
+**creator-or-admin** (`model-service.deleteModelVersion(s)`): the version's registrant (`createdBy`) or a workspace
+admin (`models:delete`); `_shared` first-party models and other workspaces' models are `NOT_FOUND` (never deletable /
+no existence leak). Bulk delete is **fail-fast** — every target is authorized before anything is tombstoned. Note a
+judge/harness that still references a deleted model by id will **fail to resolve** on future runs.
 
 See `docs/registry.md` (versioning) · `docs/judges.md` · `docs/secrets.md` · `docs/service-harness.md`.
