@@ -14,6 +14,10 @@ const schema = z.object({
   DESKTOP_DOWNLOAD_URL: z.string().url().optional(),
   // Temporal Web UI base (e.g. http://localhost:8233) — when set, a Temporal-owned batch's workflow chip deep-links there.
   TEMPORAL_UI_URL: z.string().url().optional(),
+  // Canonical base for the workspace URL shown read-only in Settings › General. Unset → derived from the actual
+  // request origin (`<origin>/<workspace-id>`), so a self-hosted deployment shows its own server address with zero
+  // config. Set (verbatim, e.g. `workspace.acme.io`) only to pin a vanity/canonical domain that differs from the host.
+  WORKSPACE_URL_BASE: z.string().optional(),
   // Public WebSocket base of the control plane for the interactive terminal (observability ⑥) — the BROWSER
   // connects here directly with a short-lived ticket. Unset → derived from CONTROL_PLANE_URL (http→ws), which is
   // reachable in dev (localhost) but should be set to the public wss:// origin in a deployed setup.
@@ -31,6 +35,7 @@ export const env = schema.parse({
   DESKTOP_RELEASES_TOKEN: process.env.DESKTOP_RELEASES_TOKEN,
   DESKTOP_DOWNLOAD_URL: process.env.DESKTOP_DOWNLOAD_URL,
   TEMPORAL_UI_URL: process.env.TEMPORAL_UI_URL,
+  WORKSPACE_URL_BASE: process.env.WORKSPACE_URL_BASE,
   CONTROL_PLANE_WS_URL: process.env.CONTROL_PLANE_WS_URL,
   AUTH_SECRET: process.env.AUTH_SECRET,
   KEYCLOAK_ISSUER: process.env.KEYCLOAK_ISSUER,

@@ -3,7 +3,7 @@ import { getTranslations } from 'next-intl/server'
 
 import { workspaceRecordSchema, type WorkspaceRecord } from '@/entities/workspace'
 import { DeleteWorkspaceCard } from '@/features/delete-workspace'
-import { WorkspaceInfoCard } from '@/features/workspace-settings'
+import { resolveWorkspaceUrlBase, WorkspaceInfoCard } from '@/features/workspace-settings'
 import { can } from '@/shared/auth/can'
 import { currentPrincipal } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
@@ -73,6 +73,8 @@ export default async function SettingsGeneralPage({
   }
   // Deletion is owner (creator) only — the control plane enforces it; the UI exposes the danger zone only when owner.
   const isOwner = workspaceRecord !== undefined && workspaceRecord.owner === principal?.subject
+  // Derive the workspace's canonical URL base from the actual request origin (or the WORKSPACE_URL_BASE override).
+  const urlBase = await resolveWorkspaceUrlBase()
 
   return (
     <div className="space-y-6">
@@ -85,6 +87,7 @@ export default async function SettingsGeneralPage({
             <WorkspaceInfoCard
               id={workspaceRecord.id}
               name={workspaceRecord.name}
+              urlBase={urlBase}
               canWrite={canWrite}
               {...(workspaceRecord.logoUrl !== undefined ? { logoUrl: workspaceRecord.logoUrl } : {})}
             />

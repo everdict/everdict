@@ -4,5 +4,4 @@ export {
   workspaceRecordSchema,
   workspaceSchema,
   workspacesSchema,
-  workspaceUrlBase,
 } from './model/schema'

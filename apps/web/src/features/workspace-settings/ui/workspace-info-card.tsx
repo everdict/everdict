@@ -5,7 +5,6 @@ import { useRouter } from 'next/navigation'
 import { Check, Copy, Loader2, Trash2, Upload } from 'lucide-react'
 import { useLocale, useTranslations } from 'next-intl'
 
-import { workspaceUrlBase } from '@/entities/workspace'
 import { copyText } from '@/shared/lib/clipboard'
 import { fileToImageDataUrl, MAX_IMAGE_UPLOAD_BYTES } from '@/shared/lib/image-resize'
 import { cn } from '@/shared/lib/utils'
@@ -45,11 +44,14 @@ export function WorkspaceInfoCard({
   id,
   name,
   logoUrl,
+  urlBase,
   canWrite,
 }: {
   id: string
   name: string
   logoUrl?: string
+  // Canonical base for this workspace's URL — resolved server-side from the request origin (or WORKSPACE_URL_BASE).
+  urlBase: string
   canWrite: boolean
 }) {
   const t = useTranslations('workspaceSettings')
@@ -63,7 +65,7 @@ export function WorkspaceInfoCard({
   const [copied, setCopied] = useState(false)
   const [error, setError] = useState<string | undefined>(undefined)
 
-  const url = `${workspaceUrlBase}/${id}`
+  const url = `${urlBase}/${id}`
   const dirty = n !== name || logo !== (logoUrl ?? '')
 
   async function onPickFile(e: React.ChangeEvent<HTMLInputElement>) {

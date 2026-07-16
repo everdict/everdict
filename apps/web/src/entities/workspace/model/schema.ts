@@ -24,7 +24,8 @@ export const workspaceRecordSchema = z.object({
   createdAt: z.string(),
 })
 
-export const workspaceUrlBase = 'workspace.everdict.io' // for read-only URL display (slug = id)
+// The read-only workspace URL (slug = id) is `<base>/<id>`, where the base is resolved server-side from the
+// request origin (or the WORKSPACE_URL_BASE override) — see features/workspace-settings resolveWorkspaceUrlBase.
 
 // Drift guards — both are identical-shape entities (the web models every wire field and no extra), so the
 // guard is bidirectional: a renamed/dropped/added field or a widened enum on EITHER side stops one binding

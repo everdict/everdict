@@ -6,3 +6,4 @@ export {
   type UpdateSettingsResult,
 } from './api/workspace-settings'
 export { updateWorkspaceAction, type UpdateWorkspaceResult } from './api/workspace-meta'
+export { resolveWorkspaceUrlBase } from './api/workspace-url-base'
