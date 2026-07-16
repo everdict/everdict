@@ -121,6 +121,7 @@ export {
 export { captureCdpScreenshot, type CdpSocket, type CaptureCdpOptions } from "./front-door/capture-cdp.js";
 export {
   captureStorageState,
+  seedStorageState,
   storageStateDomains,
   type StorageState,
   type StoredCookie,

@@ -127,6 +127,8 @@ async function main(): Promise<void> {
     scheduler,
     backends,
     metrics,
+    browserProfileStore, // browser-profiles S5 — eval-browser profile injection (resolve + owner-gate)
+    cipher, // browser-profiles S5 — decrypt the profile's captured storageState
   });
 
   // Artifact store (when env-configured): offload os-use screenshots to S3/MinIO → result records carry only a presigned URL (no base64 inline).

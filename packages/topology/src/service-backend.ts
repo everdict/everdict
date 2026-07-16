@@ -81,6 +81,11 @@ export interface ServiceTopologyBackendOptions {
   newRunId?: () => string;
   maxConcurrent?: number | (() => number); // cap on concurrent per-case browsers (a function lets the autoscaler adjust it dynamically)
   trustZones?: TrustZonePolicy; // per-tenant isolation — separate the warm pool per zone (no sharing)
+  // Saved-profile injection (browser-profiles S5) — when spec.target.profile is set, seed that profile's captured
+  // login (cookies) into the per-case browser BEFORE the agent connects, so the eval runs already authenticated. The
+  // control plane implements it (resolve + owner-gate + decrypt + seedStorageState). Best-effort — the topology
+  // backend swallows a failure so injection never fails the run. cdpBase = the control-plane-reachable CDP.
+  seedProfile?: (profileId: string, cdpBase: string, job: AgentJob) => Promise<void>;
 }
 
 // The orchestrator-agnostic service-topology backend (a Backend implementation).
@@ -141,6 +146,14 @@ export class ServiceTopologyBackend implements Backend, ScreenCapturable {
       await target.dispose();
     };
     try {
+      // Saved-profile injection (browser-profiles S5) — seed the profile's cookies into the per-case browser before
+      // the agent drives it, so the eval runs already logged-in. Best-effort: a seed failure leaves the eval
+      // unauthenticated but never fails the run (like the trace-source/export seams).
+      if (spec.target?.profile && this.opts.seedProfile) {
+        const cdpBase = await this.opts.runtime.browserCdpBase?.(runId, zone).catch(() => undefined);
+        if (cdpBase) await this.opts.seedProfile(spec.target.profile, cdpBase, job).catch(() => undefined);
+      }
+
       const base = topo.endpoints[spec.frontDoor.service];
       if (!base) {
         throw new InternalError("HARNESS_RUN_FAILED", { service: spec.frontDoor.service }, "No front-door endpoint.");

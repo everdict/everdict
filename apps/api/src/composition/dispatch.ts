@@ -2,6 +2,7 @@ import { ImageRegistryService } from "@everdict/application-control";
 import type { Metrics } from "@everdict/application-control";
 import { RunnerHub, type RunnerHubLike, type RunnerJobStore, StoreRunnerHub } from "@everdict/application-control";
 import { TraceSourceService } from "@everdict/application-control";
+import type { BrowserProfileStore } from "@everdict/application-control";
 import {
   type BackendRegistry,
   type Dispatcher as CoreDispatcher,
@@ -9,9 +10,10 @@ import {
   buildRuntimeBackend,
 } from "@everdict/backends";
 import type { RegistryAuth, RuntimeSpec } from "@everdict/contracts";
-import type { CallbackStore, RunnerStore, SecretStore, WorkspaceSettingsStore } from "@everdict/db";
+import type { CallbackStore, RunnerStore, SecretCipher, SecretStore, WorkspaceSettingsStore } from "@everdict/db";
 import { classifyFailure } from "@everdict/domain";
 import type { HarnessInstanceRegistry, ModelRegistry, RuntimeRegistry } from "@everdict/registry";
+import { makeProfileSeeder } from "../core/browser-profile/browser-profile-injector.js";
 import { JudgeAuthDispatcher } from "../core/execution/judge-auth-dispatcher.js";
 import { ModelResolvingDispatcher } from "../core/execution/model-resolving-dispatcher.js";
 import { RuntimeDispatcher } from "../core/execution/runtime-dispatcher.js";
@@ -36,6 +38,8 @@ export function buildDispatch(deps: {
   scheduler: Scheduler;
   backends: BackendRegistry;
   metrics: Metrics;
+  browserProfileStore?: BrowserProfileStore; // browser-profiles S5 — resolve a referenced profile for eval injection
+  cipher?: SecretCipher; // browser-profiles S5 — decrypt the profile's captured storageState blob
 }) {
   const {
     callbackStore,
@@ -49,7 +53,13 @@ export function buildDispatch(deps: {
     scheduler,
     backends,
     metrics,
+    browserProfileStore,
+    cipher,
   } = deps;
+  // Saved-profile injection for browser evals (browser-profiles S5) — seed a referenced profile's login into the
+  // per-case topology browser before the agent connects. Only when both the store + cipher are wired.
+  const seedProfile =
+    browserProfileStore && cipher ? makeProfileSeeder({ store: browserProfileStore, cipher }) : undefined;
   // Self-hosted runner lease hub — parks self:<runnerId> jobs; the runner protocol (MCP, slice 4) leases/returns them.
   // A single instance shared by the dispatcher (park) and the MCP lease/result tools (lease/complete).
   const hubTimeout = process.env.EVERDICT_SELF_HOSTED_QUEUE_TIMEOUT_MS
@@ -103,6 +113,8 @@ export function buildDispatch(deps: {
           ...(opts.secretEnv ? { secretEnv: opts.secretEnv } : {}),
           // Per-dispatch: the harness's selected workspace trace source (pull from the dev-cluster observability platform).
           resolveTraceSource: (tenant, harnessId) => traceSourceForDispatch.resolve(tenant, harnessId),
+          // Browser-profiles S5 — seed a referenced saved profile's login into the per-case eval browser.
+          ...(seedProfile ? { seedProfile } : {}),
         })
       : buildRuntimeBackend(spec, opts);
   // Resolve a command harness's {{model}} to a registered Model id (else raw), then delegate to RuntimeDispatcher (placement).

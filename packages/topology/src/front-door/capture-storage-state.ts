@@ -101,3 +101,60 @@ export async function captureStorageState(cdpHttpBase: string, opts: CaptureCdpO
 export function storageStateDomains(state: StorageState): string[] {
   return [...new Set(state.cookies.map((c) => c.domain.replace(/^\./, "")).filter(Boolean))].sort();
 }
+
+// Seed a captured storageState INTO a running browser over CDP (browser-profiles S5) — the inverse of
+// captureStorageState. Given a running Chrome's CDP HTTP base and a Playwright-style storageState, set every cookie
+// via `Network.setCookies` so a browser eval that attaches afterwards is already logged-in. A no-op for an empty
+// state. Throws UpstreamError on any CDP failure. Transport-injectable (fetch/connect) for unit tests.
+export async function seedStorageState(
+  cdpHttpBase: string,
+  state: StorageState,
+  opts: CaptureCdpOptions = {},
+): Promise<void> {
+  if (state.cookies.length === 0) return;
+  const fetchImpl = opts.fetch ?? fetch;
+  const connect = opts.connect ?? ((url: string) => new WebSocket(url) as unknown as CdpSocket);
+  const timeoutMs = opts.timeoutMs ?? 10_000;
+
+  const listRes = await fetchImpl(`${cdpHttpBase}/json`);
+  if (!listRes.ok) throw new UpstreamError("UPSTREAM_ERROR", { status: listRes.status }, "CDP /json unreachable.");
+  const targets = (await listRes.json()) as CdpTarget[];
+  const wsUrl = (
+    targets.find((t) => t.type === "page" && t.webSocketDebuggerUrl) ?? targets.find((t) => t.webSocketDebuggerUrl)
+  )?.webSocketDebuggerUrl;
+  if (!wsUrl) throw new UpstreamError("UPSTREAM_ERROR", undefined, "No CDP page target to seed cookies into.");
+
+  await new Promise<void>((resolve, reject) => {
+    const ws = connect(wsUrl);
+    const timer = setTimeout(() => {
+      ws.close();
+      reject(new UpstreamError("UPSTREAM_ERROR", undefined, "CDP cookie seed timed out."));
+    }, timeoutMs);
+    const done = (fn: () => void): void => {
+      clearTimeout(timer);
+      try {
+        ws.close();
+      } catch {
+        // closing best-effort
+      }
+      fn();
+    };
+    ws.addEventListener("open", () => {
+      ws.send(JSON.stringify({ id: 1, method: "Network.setCookies", params: { cookies: state.cookies } }));
+    });
+    ws.addEventListener("message", (ev) => {
+      try {
+        const msg = JSON.parse(String(ev.data)) as { id?: number; error?: { message?: string } };
+        if (msg.id !== 1) return; // ignore CDP events; wait for our reply
+        if (msg.error)
+          return done(() => reject(new UpstreamError("UPSTREAM_ERROR", undefined, msg.error?.message ?? "CDP error")));
+        done(() => resolve());
+      } catch (e) {
+        done(() => reject(new UpstreamError("UPSTREAM_ERROR", undefined, e instanceof Error ? e.message : String(e))));
+      }
+    });
+    ws.addEventListener("error", () =>
+      done(() => reject(new UpstreamError("UPSTREAM_ERROR", undefined, "CDP socket error."))),
+    );
+  });
+}

@@ -1,6 +1,6 @@
 # Authenticated browser profiles — a real interactive remote browser, cookies reused in eval (design)
 
-> **Status: S0 + S1 (transport + web canvas) + S2 (profile entity) + S3 (cookie capture) + S4 (proxy/geo, login browser) SHIPPED. S5 (eval injection) next.** S0 = the interactive live browser
+> **Status: S0–S5 SHIPPED (S1 transport + web canvas · S2 profile entity · S3 cookie capture · S4 proxy/geo login browser · S5 cookie injection into evals). Follow-ups: eval-browser proxy, localStorage, web harness profile-picker.** S0 = the interactive live browser
 > session primitive (`openBrowserSession`, `@everdict/topology`, `a168b5b`): CDP screencast (frames OUT, each
 > acked) + input (mouse/keyboard/navigate IN), transport-injectable, live-proven against real Chrome via
 > `scripts/live/interactive-browser.mjs`. **S1 productizes the transport end-to-end**: a personal / self-scoped
@@ -105,9 +105,16 @@ short-lived container/pod per active login; self-hosted = the user's own local b
   with `--proxy-server`; web adds a Settings › Proxies admin card + a geo picker on the session panel. **Eval-browser
   proxy is S5.** Known limit: headless Chrome doesn't honor inline proxy *auth* — full authed-proxy support needs CDP
   `Fetch.continueWithAuth` (a follow-up); open proxies + inline-cred setups work today.
-- **Injection** (S5): a browser eval whose case/target references `profileId` → at `provisionBrowserEnv`, **before
-  the agent connects**: launch with the profile's proxy, then seed cookies via CDP `Network.setCookies` (+
-  localStorage) from the decrypted `storageState`. The agent (browser-use) receives an already-authenticated browser.
+- **Injection** (S5): ✅ SHIPPED (cookies). A service harness's `target.profile` (an id) → `seedStorageState(cdpBase,
+  state)` (`@everdict/topology`, the inverse of capture: CDP `Network.setCookies`) seeds the profile's decrypted
+  cookies into the per-case browser **before the agent connects** (`ServiceTopologyBackend.seedProfile` hook, called
+  after target-acquire + before the front-door drive, using the control-plane-reachable `runtime.browserCdpBase`).
+  The `makeProfileSeeder` injector (`apps/api core/browser-profile`, wired in `buildDispatch`) resolves the profile by
+  `(tenant, id)`, **owner-gates it against `job.submittedBy`** (a mismatch/absence skips injection — no cookie theft),
+  decrypts the blob (the shared `SecretCipher`), and seeds. **Best-effort** — a seed failure never fails the run (the
+  eval just runs unauthenticated). Follow-ups: eval-browser **proxy** at launch (the login browser has it via S4;
+  `provisionBrowserEnv --proxy-server` across the 3 runtimes is the increment), localStorage seeding, self-hosted-runner
+  path wiring, and a web profile-picker in the harness target form (`target.profile` is API/MCP/raw-JSON-settable today).
 
 ## Slices
 
@@ -135,7 +142,7 @@ short-lived container/pod per active login; self-hosted = the user's own local b
    cookies into it.
 5. **S3 — cookie capture** on session save (`Network.getAllCookies` → storageState → encrypt → store). ✅ SHIPPED.
 6. **S4 — proxy / geo** (`ProxyProvider`, `--proxy-server`). ✅ SHIPPED for the login browser (eval-browser proxy = S5).
-7. **S5 — injection into eval** (seed cookies + proxy before the agent connects).
+7. **S5 — injection into eval** (seed cookies before the agent connects). ✅ SHIPPED (cookies; proxy-at-eval-launch is a follow-up).
 8. **S6 — managed K8s reachability** (port-forward/ingress to the pod CDP) — lifts S1 from local-Docker to the SaaS.
 
 ## Non-goals / risks

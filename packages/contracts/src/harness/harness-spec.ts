@@ -159,6 +159,11 @@ export const TopologyTargetSchema = z.object({
   observe: z.array(z.enum(["dom", "screenshot", "url"])).default(["dom", "screenshot", "url"]),
   delivery: ObservationDeliverySchema.optional(), // unset = reference (current, no regression)
   acquire: TargetAcquireSchema.optional(), // unset = provision (current). service = acquire via session API (B2)
+  // Saved browser profile (browser-profiles S5) to inject into the per-case browser BEFORE the agent connects — its
+  // captured cookies are seeded via CDP so the eval runs already logged-in. The control plane resolves it by
+  // (tenant, id) gated on the run submitter's ownership; a mismatch/absence skips injection (the eval runs
+  // unauthenticated). Design: docs/architecture/browser-profiles.md.
+  profile: z.string().optional(),
 });
 export type TopologyTarget = z.infer<typeof TopologyTargetSchema>;
 

@@ -1,5 +1,11 @@
 import type { Backend } from "@everdict/backends";
-import { BadRequestError, type RegistryAuth, type RuntimeSpec, type TraceSourceConfig } from "@everdict/contracts";
+import {
+  type AgentJob,
+  BadRequestError,
+  type RegistryAuth,
+  type RuntimeSpec,
+  type TraceSourceConfig,
+} from "@everdict/contracts";
 import type { HarnessInstanceRegistry } from "@everdict/registry";
 import {
   type CallbackRendezvous,
@@ -28,6 +34,9 @@ export function buildTopologyBackend(
     resolveTraceSource?: (tenant: string, harnessId: string) => Promise<TraceSourceConfig | undefined>;
     // Resolved tenant secrets (SecretStore.entries) — used to resolve the runtime traceSource's authSecret (G1).
     secretEnv?: Record<string, string>;
+    // Saved-profile injection (browser-profiles S5) — seed a referenced profile's login into the per-case browser
+    // before the agent connects. Built in the composition (BrowserProfileStore + cipher); undefined = no injection.
+    seedProfile?: (profileId: string, cdpBase: string, job: AgentJob) => Promise<void>;
   },
 ): Backend {
   const ts = spec.traceSource;
@@ -78,6 +87,7 @@ export function buildTopologyBackend(
     ...(traceSourceFor ? { traceSourceFor } : {}),
     // Rendezvous for the callback completion model (if present) — issues {{callback_url}} + awaits inbound. The control-plane route delivers to the same instance.
     ...(deps.callbackRendezvous ? { callbackRendezvous: deps.callbackRendezvous } : {}),
+    ...(deps.seedProfile ? { seedProfile: deps.seedProfile } : {}), // browser-profiles S5 — inject a saved login into the eval browser
     // The topology shape (services/dependencies/target) comes from the harness (kind:"service"). Reject if it's not a service harness.
     specFor: async (tenant, id, version) => {
       const h = await deps.harnesses.get(tenant, id, version);

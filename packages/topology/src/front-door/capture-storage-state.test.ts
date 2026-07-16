@@ -1,7 +1,7 @@
 import { UpstreamError } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import type { CdpSocket } from "./capture-cdp.js";
-import { captureStorageState, storageStateDomains } from "./capture-storage-state.js";
+import { captureStorageState, seedStorageState, storageStateDomains } from "./capture-storage-state.js";
 
 // A fake CDP WebSocket — replays open then a scripted reply to the sent command (mirrors capture-cdp.test).
 function fakeSocket(reply: (sent: unknown) => unknown): { connect: (url: string) => CdpSocket; opened: string[] } {
@@ -83,6 +83,44 @@ describe("captureStorageState", () => {
         connect,
       }),
     ).rejects.toThrow(/Target closed/);
+  });
+});
+
+describe("seedStorageState", () => {
+  const STATE = { cookies: [{ name: "sid", value: "s", domain: ".github.com", path: "/" }] };
+
+  it("sends Network.setCookies with the storageState cookies to a page target", async () => {
+    let sent: unknown;
+    const { connect, opened } = fakeSocket((s) => {
+      sent = s;
+      return { id: 1, result: {} };
+    });
+    await seedStorageState("http://browser:9222", STATE, {
+      fetch: jsonList([{ type: "page", webSocketDebuggerUrl: "ws://browser:9222/page/1" }]),
+      connect,
+    });
+    expect(sent).toMatchObject({ id: 1, method: "Network.setCookies", params: { cookies: STATE.cookies } });
+    expect(opened).toEqual(["ws://browser:9222/page/1"]);
+  });
+
+  it("is a no-op for an empty storageState (no CDP call)", async () => {
+    let fetched = false;
+    const fetchImpl = (async () => {
+      fetched = true;
+      return new Response("[]");
+    }) as unknown as typeof fetch;
+    await seedStorageState("http://b:9222", { cookies: [] }, { fetch: fetchImpl });
+    expect(fetched).toBe(false);
+  });
+
+  it("surfaces a CDP protocol error as UpstreamError", async () => {
+    const { connect } = fakeSocket(() => ({ id: 1, error: { message: "Invalid cookie" } }));
+    await expect(
+      seedStorageState("http://b:9222", STATE, {
+        fetch: jsonList([{ type: "page", webSocketDebuggerUrl: "ws://b/p" }]),
+        connect,
+      }),
+    ).rejects.toThrow(/Invalid cookie/);
   });
 });
 
