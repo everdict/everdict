@@ -123,6 +123,14 @@ export const controlPlane = {
     call<T>(auth, `/browser-sessions/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   browserSessionTicket: <T>(auth: AuthContext, id: string) =>
     call<T>(auth, `/browser-sessions/${encodeURIComponent(id)}/ticket`, { method: 'POST' }),
+  // Saved authenticated browser profiles (browser-profiles S2) — personal / self-scoped, enforced by the control plane.
+  createBrowserProfile: <T>(auth: AuthContext, body: unknown) =>
+    call<T>(auth, '/browser-profiles', { method: 'POST', body: JSON.stringify(body) }),
+  listBrowserProfiles: <T>(auth: AuthContext) => call<T>(auth, '/browser-profiles'),
+  updateBrowserProfile: <T>(auth: AuthContext, id: string, body: unknown) =>
+    call<T>(auth, `/browser-profiles/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(body) }),
+  deleteBrowserProfile: (auth: AuthContext, id: string) =>
+    callVoid(auth, `/browser-profiles/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   // Work queue snapshot — per-runtime-lane running / waiting (FIFO) / next scheduled fire.
   getQueue: <T>(auth: AuthContext) => call<T>(auth, '/queue'),
   // Metered billing usage (LLM cost for orchestration + verdict; own-pays runs excluded) — meter-only, never blocks.

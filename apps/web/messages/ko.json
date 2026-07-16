@@ -2316,6 +2316,8 @@
     "personalSecretsDesc": "나만 볼 수 있는 시크릿.",
     "browserSessions": "브라우저 세션",
     "browserSessionsDesc": "사이트 로그인을 위해 직접 조종하는 라이브 브라우저.",
+    "browserProfiles": "브라우저 프로필",
+    "browserProfilesDesc": "브라우저 평가에서 재사용할 저장된 로그인.",
     "general": "일반",
     "generalDesc": "워크스페이스 이름과 삭제.",
     "members": "멤버",
@@ -2659,6 +2661,22 @@
     "closed": "연결 종료",
     "hint": "실행 중인 샌드박스로 들어가는 대화형 셸 (cd · env 유지)",
     "placeholder": "명령을 입력하고 Enter"
+  },
+  "browserProfiles": {
+    "title": "브라우저 프로필",
+    "description": "브라우저 평가에서 재사용할 인증된 로그인을 저장합니다. 나만 사용합니다. 프로필을 만든 뒤 브라우저 세션에서 사이트에 로그인해 쿠키를 캡처하세요.",
+    "nameLabel": "이름",
+    "namePlaceholder": "예: GitHub (업무)",
+    "domainsLabel": "도메인 (선택)",
+    "domainsPlaceholder": "github.com, google.com",
+    "create": "프로필 생성",
+    "creating": "생성 중…",
+    "rename": "이름 변경",
+    "save": "저장",
+    "delete": "삭제",
+    "noDomains": "선언된 도메인 없음",
+    "emptyTitle": "아직 브라우저 프로필이 없습니다",
+    "emptyHint": "브라우저 평가용 재사용 로그인을 저장하려면 프로필을 만드세요."
   },
   "interactiveBrowser": {
     "title": "브라우저 세션",

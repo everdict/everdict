@@ -2316,6 +2316,8 @@
     "personalSecretsDesc": "Secrets only you can see.",
     "browserSessions": "Browser sessions",
     "browserSessionsDesc": "A live browser you drive to log into sites.",
+    "browserProfiles": "Browser profiles",
+    "browserProfilesDesc": "Saved logins to reuse in browser evals.",
     "general": "General",
     "generalDesc": "Workspace name and deletion.",
     "members": "Members",
@@ -2659,6 +2661,22 @@
     "closed": "Disconnected",
     "hint": "Interactive shell into the running sandbox (cd · env persist)",
     "placeholder": "Type a command, then Enter"
+  },
+  "browserProfiles": {
+    "title": "Browser profiles",
+    "description": "Saved authenticated logins you can reuse in browser evals. Personal to you. Create one, then log into a site from a browser session to capture its cookies.",
+    "nameLabel": "Name",
+    "namePlaceholder": "e.g. GitHub (work)",
+    "domainsLabel": "Domains (optional)",
+    "domainsPlaceholder": "github.com, google.com",
+    "create": "Create profile",
+    "creating": "Creating…",
+    "rename": "Rename",
+    "save": "Save",
+    "delete": "Delete",
+    "noDomains": "No domains declared yet",
+    "emptyTitle": "No browser profiles yet",
+    "emptyHint": "Create a profile to save a reusable login for browser evals."
   },
   "interactiveBrowser": {
     "title": "Browser sessions",
