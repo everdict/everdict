@@ -8,6 +8,7 @@ import {
   Server,
   Shield,
   SlidersHorizontal,
+  Telescope,
   UserCircle,
   Users,
   Wallet,
@@ -47,11 +48,28 @@ export const SETTINGS_NAV_GROUPS: SettingsNavGroup[] = [
   {
     headingKey: 'groupWorkspace',
     items: [
-      { href: '', labelKey: 'general', icon: Building2, requiredAction: 'settings:read', exact: true },
+      {
+        href: '',
+        labelKey: 'general',
+        icon: Building2,
+        requiredAction: 'settings:read',
+        exact: true,
+      },
       { href: '/members', labelKey: 'members', icon: Users, requiredAction: 'members:read' },
       { href: '/secrets', labelKey: 'secrets', icon: Shield, requiredAction: 'secrets:read' },
       { href: '/models', labelKey: 'models', icon: Cpu, requiredAction: 'models:read' },
-      { href: '/integrations', labelKey: 'integrations', icon: Plug, requiredAction: 'settings:read' },
+      {
+        href: '/integrations',
+        labelKey: 'integrations',
+        icon: Plug,
+        requiredAction: 'settings:read',
+      },
+      {
+        href: '/observability',
+        labelKey: 'observability',
+        icon: Telescope,
+        requiredAction: 'harnesses:read',
+      },
       { href: '/ci', labelKey: 'ci', icon: GitBranch, requiredAction: 'settings:read' },
       { href: '/runners', labelKey: 'runners', icon: Server, requiredAction: 'settings:write' },
       { href: '/budget', labelKey: 'budget', icon: Wallet, requiredAction: 'scorecards:read' },

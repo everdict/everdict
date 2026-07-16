@@ -487,6 +487,40 @@ export const controlPlane = {
       method: 'PUT',
       body: JSON.stringify(body),
     }),
+  // Observability browser: enumerate a source's recent traces + metrics (the settings traces view + judge-wizard picker).
+  // Read harnesses:read (viewer+). scope defaults to the source's configured scope; limit/since are optional.
+  listTraceSourceTraces: <T>(
+    auth: AuthContext,
+    name: string,
+    query: { scope?: string; limit?: number; since?: string } = {}
+  ) => {
+    const qs = new URLSearchParams()
+    if (query.scope) qs.set('scope', query.scope)
+    if (query.limit !== undefined) qs.set('limit', String(query.limit))
+    if (query.since) qs.set('since', query.since)
+    const suffix = qs.toString()
+    return call<T>(
+      auth,
+      `/workspace/trace-sources/${encodeURIComponent(name)}/traces${suffix ? `?${suffix}` : ''}`
+    )
+  },
+  // Inspect one trace by id — raw span attributes (span-based kinds) + events normalized with the supplied mapping.
+  // Powers the wizard's live conversion-authoring loop. Nothing is persisted.
+  inspectTrace: <T>(auth: AuthContext, name: string, traceId: string, body: unknown) =>
+    call<T>(
+      auth,
+      `/workspace/trace-sources/${encodeURIComponent(name)}/traces/${encodeURIComponent(traceId)}/inspect`,
+      { method: 'POST', body: JSON.stringify(body) }
+    ),
+  // Per-harness span-attribute mapping overlay (the conversion layer between a harness and a judge). Read harnesses:read.
+  getHarnessSpanMapping: <T>(auth: AuthContext, harnessId: string) =>
+    call<T>(auth, `/harnesses/${encodeURIComponent(harnessId)}/span-attr-mapping`),
+  // Set/clear the overlay (member+, harnesses:register). body { mapping: SpanAttrMapping | null }.
+  setHarnessSpanMapping: <T>(auth: AuthContext, harnessId: string, body: unknown) =>
+    call<T>(auth, `/harnesses/${encodeURIComponent(harnessId)}/span-attr-mapping`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
   // Workspace image registries (BYO, multiple) — the harness image classification baseline + the everdict image push publish target.
   // Read harnesses:read (viewer+ — for classification badges) / register (upsert by name)·delete settings:write. Secrets pass through as name references only.
   listImageRegistries: <T>(auth: AuthContext) => call<T>(auth, '/workspace/image-registries'),

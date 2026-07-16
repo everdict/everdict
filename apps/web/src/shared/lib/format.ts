@@ -108,6 +108,29 @@ export function fmtDateTime(iso: string): string {
     .replace(/\.\d+Z?$/, '')
     .slice(5, 16)
 }
+// Trace/observability duration — sub-second in ms, else s / m·s (compact, tabular). '–' for unknown.
+export function fmtDurationMs(ms: number | null | undefined): string {
+  if (ms == null || !Number.isFinite(ms)) return '–'
+  if (ms < 1000) return `${Math.round(ms)}ms`
+  const s = ms / 1000
+  if (s < 60) return `${s.toFixed(s < 10 ? 2 : 1)}s`
+  const m = Math.floor(s / 60)
+  return `${m}m ${Math.round(s - m * 60)}s`
+}
+// Compact token count for a metrics column (1_234 → 1.2k). '–' for unknown.
+export function fmtTokens(n: number | null | undefined): string {
+  if (n == null || !Number.isFinite(n)) return '–'
+  if (n < 1000) return String(Math.round(n))
+  return `${(n / 1000).toFixed(n < 10_000 ? 1 : 0)}k`
+}
+// USD cost, 3-4 significant places for the small numbers eval traces produce. '–' for unknown.
+export function fmtUsd(n: number | null | undefined): string {
+  if (n == null || !Number.isFinite(n)) return '–'
+  if (n === 0) return '$0'
+  if (n < 0.01) return `$${n.toFixed(4)}`
+  return `$${n.toFixed(2)}`
+}
+
 // Local full rendering for title= (exact time on hover).
 export function fmtDateTimeFull(iso: string): string {
   try {
