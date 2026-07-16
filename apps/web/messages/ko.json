@@ -1013,8 +1013,6 @@
     "notConfigured": "아직 Mattermost 알림이 설정되지 않았어요."
   },
   "manageMembers": {
-    "title": "사람",
-    "description": "이 워크스페이스에 참여한 사람들이에요. 역할 변경과 제거는 관리자만 할 수 있고, 마지막 관리자는 내보내거나 강등할 수 없어요. 새 멤버는 초대 링크로 추가하세요.",
     "empty": "멤버가 없어요.",
     "roleAria": "역할",
     "removeConfirm": "제거 확인",
@@ -2271,7 +2269,7 @@
     "general": "일반",
     "generalDesc": "워크스페이스 이름과 삭제.",
     "members": "멤버",
-    "membersDesc": "이 워크스페이스의 멤버와 초대.",
+    "membersDesc": "이 워크스페이스에 참여한 사람들이에요.",
     "secrets": "시크릿",
     "secretsDesc": "이 워크스페이스의 공유 자격 증명.",
     "models": "모델",

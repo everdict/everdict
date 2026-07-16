@@ -1013,8 +1013,6 @@
     "notConfigured": "Mattermost notifications aren’t set up yet."
   },
   "manageMembers": {
-    "title": "People",
-    "description": "The people in this workspace. Only admins can change roles or remove members, and the last admin can’t be removed or demoted. Add new members with an invite link.",
     "empty": "No members.",
     "roleAria": "Role",
     "removeConfirm": "Confirm remove",
@@ -2271,7 +2269,7 @@
     "general": "General",
     "generalDesc": "Workspace name and deletion.",
     "members": "Members",
-    "membersDesc": "People and invitations in this workspace.",
+    "membersDesc": "The people in this workspace.",
     "secrets": "Secrets",
     "secretsDesc": "Shared credentials for this workspace.",
     "models": "Models",

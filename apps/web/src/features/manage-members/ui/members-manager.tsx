@@ -43,14 +43,6 @@ export function MembersManager({ members, canWrite }: { members: Member[]; canWr
 
   return (
     <div className="space-y-5">
-      <div className="space-y-1">
-        <h3 className="flex items-center gap-2 text-[13px] font-[560] text-foreground">
-          {t('title')}
-          <span className="text-[12px] font-normal text-faint">{members.length}</span>
-        </h3>
-        <p className="text-[13px] leading-relaxed text-muted-foreground">{t('description')}</p>
-      </div>
-
       {members.length === 0 ? (
         <p className="text-[13px] text-muted-foreground">{t('empty')}</p>
       ) : (
