@@ -6,6 +6,8 @@
     "description": "Accept the invite to become a member of this workspace.",
     "accepting": "Accepting…",
     "accept": "Accept invite",
+    "signInToAccept": "Sign in to accept",
+    "signInDescription": "Sign in to join this workspace — after login you'll return here and the invite is accepted automatically.",
     "cancel": "Cancel"
   },
   "accountPage": {

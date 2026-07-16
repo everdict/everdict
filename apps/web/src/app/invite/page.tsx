@@ -2,7 +2,9 @@ import { getTranslations } from 'next-intl/server'
 
 import { AcceptInviteCard } from '@/features/accept-invite'
 import { invitePreviewSchema, type InvitePreview } from '@/entities/member'
+import { getAccessToken } from '@/shared/auth/access-token'
 import { authContext } from '@/shared/auth/principal'
+import { keycloakConfigured } from '@/shared/config/env'
 import { controlPlane } from '@/shared/lib/control-plane'
 import { Card } from '@/shared/ui/card'
 import { EmptyState } from '@/shared/ui/empty-state'
@@ -11,8 +13,9 @@ import { PageHeader } from '@/shared/ui/page-header'
 export const dynamic = 'force-dynamic'
 
 // Invite-accept page — the entry point for the shared link `/invite?token=…` (before joining there's no workspace slug, so a top-level route).
-// Doesn't auto-accept on GET (avoids burning the one-time token on prefetch); redeem only via the card's button (POST action).
-// Auth is enforced by the action (human account / OIDC only) — on a successful accept, enter that workspace (/{workspace}).
+// Doesn't auto-accept on a plain GET (avoids burning the one-time token on prefetch); redeem only via the card's button (POST action).
+// A signed-out visitor is sent to login by the card (not a dead-end 401): the sign-in callbackUrl returns here with `autoAccept=1`,
+// so login lands back and the token is redeemed automatically — on a successful accept, enter that workspace (/{workspace}).
 export default async function InvitePage({
   searchParams,
 }: {
@@ -21,6 +24,10 @@ export default async function InvitePage({
   const sp = await searchParams
   const t = await getTranslations('invitePage')
   const token = typeof sp.token === 'string' ? sp.token : undefined
+  // Only the post-login callbackUrl carries this marker (never the shared link), so a plain visit / prefetch never auto-redeems.
+  const autoAccept = sp.autoAccept === '1'
+  // Is the visitor signed in? Dev (no Keycloak) has no login concept → always true; otherwise a Keycloak token cookie must be present.
+  const authenticated = !keycloakConfigured || (await getAccessToken()) !== undefined
 
   // Non-consuming preview — shows "which workspace" (name/thumbnail) even before login (the server only validates the token).
   // On failure (invalid/expired/revoked or a transient error) show only the accept card without the header — the real reason is delivered by the accept action.
@@ -49,7 +56,7 @@ export default async function InvitePage({
             <PageHeader title={t('title')} description={t('description')} />
           )}
           <Card className="p-4">
-            <AcceptInviteCard token={token} />
+            <AcceptInviteCard token={token} authenticated={authenticated} autoAccept={autoAccept} />
           </Card>
         </>
       )}

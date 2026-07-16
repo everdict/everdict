@@ -6,6 +6,8 @@
     "description": "초대를 수락하면 이 워크스페이스의 멤버가 돼요.",
     "accepting": "수락 중…",
     "accept": "초대 수락",
+    "signInToAccept": "로그인하고 수락하기",
+    "signInDescription": "로그인하면 이 워크스페이스에 참여할 수 있어요. 로그인 후 이 화면으로 돌아와 초대가 자동으로 수락돼요.",
     "cancel": "취소"
   },
   "accountPage": {

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useCallback, useEffect, useRef, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { useTranslations } from 'next-intl'
 
@@ -10,14 +10,24 @@ import { Callout } from '@/shared/ui/callout'
 import { acceptInviteAction } from '../api/accept-invite'
 
 // Invite acceptance card. To avoid auto-accepting on GET, redeem only via an explicit button (POST server action) — so a prefetch never consumes the single-use token.
-export function AcceptInviteCard({ token }: { token: string }) {
+// Signed out → the primary action becomes "sign in" (a full-page redirect to Keycloak) carrying a callbackUrl back to this page with `autoAccept=1`,
+// so login returns here and the token is redeemed automatically — a friendly one-hop flow instead of a dead-end 401.
+export function AcceptInviteCard({
+  token,
+  authenticated,
+  autoAccept,
+}: {
+  token: string
+  authenticated: boolean
+  autoAccept: boolean
+}) {
   const t = useTranslations('acceptInvite')
   const router = useRouter()
   const [error, setError] = useState<string>()
   const [done, setDone] = useState<{ workspace: string; role: string }>()
   const [pending, startTransition] = useTransition()
 
-  function onAccept() {
+  const accept = useCallback(() => {
     setError(undefined)
     startTransition(async () => {
       const r = await acceptInviteAction(token)
@@ -28,7 +38,17 @@ export function AcceptInviteCard({ token }: { token: string }) {
         setError(r.error ?? t('acceptFailed'))
       }
     })
-  }
+  }, [token, router, t])
+
+  // Post-login landing: the sign-in callbackUrl carried `autoAccept=1`, so redeem once, automatically.
+  // Strip the marker first (history.replaceState — a shallow URL rewrite, no navigation) so a manual refresh doesn't re-submit a now-consumed token.
+  const autoFired = useRef(false)
+  useEffect(() => {
+    if (!autoAccept || !authenticated || autoFired.current) return
+    autoFired.current = true
+    window.history.replaceState(null, '', `/invite?token=${encodeURIComponent(token)}`)
+    accept()
+  }, [autoAccept, authenticated, token, accept])
 
   if (done) {
     return (
@@ -47,11 +67,34 @@ export function AcceptInviteCard({ token }: { token: string }) {
     )
   }
 
+  // Signed out → send to Keycloak login, returning here with the autoAccept marker so the invite is redeemed right after login.
+  if (!authenticated) {
+    const callbackUrl = `/invite?token=${encodeURIComponent(token)}&autoAccept=1`
+    const signInHref = `/api/auth/signin?callbackUrl=${encodeURIComponent(callbackUrl)}`
+    return (
+      <div className="space-y-4">
+        <p className="text-[13px] leading-relaxed text-muted-foreground">{t('signInDescription')}</p>
+        <div className="flex items-center gap-2.5">
+          <Button
+            onClick={() => {
+              window.location.href = signInHref
+            }}
+          >
+            {t('signInToAccept')}
+          </Button>
+          <Button variant="secondary" onClick={() => router.push('/')}>
+            {t('cancel')}
+          </Button>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="space-y-4">
       <p className="text-[13px] leading-relaxed text-muted-foreground">{t('description')}</p>
       <div className="flex items-center gap-2.5">
-        <Button onClick={onAccept} disabled={pending}>
+        <Button onClick={accept} disabled={pending}>
           {pending ? t('accepting') : t('accept')}
         </Button>
         <Button variant="secondary" onClick={() => router.push('/')} disabled={pending}>
