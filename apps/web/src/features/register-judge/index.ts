@@ -4,7 +4,9 @@ export {
   validateJudgeAction,
   createJudgeAction,
   previewJudgeAction,
+  tryJudgeAction,
   type ValidateJudgeResult,
   type CreateJudgeResult,
   type PreviewJudgeResult,
+  type TryJudgeResult,
 } from './api/register-judge'

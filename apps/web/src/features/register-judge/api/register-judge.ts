@@ -71,6 +71,40 @@ export async function previewJudgeAction(
   }
 }
 
+// One judge score (loose mirror of the control plane's Score).
+export interface JudgeScore {
+  graderId: string
+  metric: string
+  value: number
+  pass?: boolean
+  detail?: unknown
+}
+export interface TryJudgeResult extends PreviewJudgeResult {
+  scores?: JudgeScore[]
+}
+
+// Dry-run a draft judge — ACTUALLY runs it (one model call, one case) over a pasted trace and returns the real
+// scores plus the rendered prompt. A missing key/unresolved rubric surfaces as a skip score with a reason.
+export async function tryJudgeAction(
+  spec: unknown,
+  trace: unknown,
+  meta?: { task?: string; expected?: string },
+): Promise<TryJudgeResult> {
+  const ctx = await authContext()
+  try {
+    const evidence = {
+      source: 'trace' as const,
+      trace,
+      ...(meta?.task ? { task: meta.task } : {}),
+      ...(meta?.expected ? { expected: meta.expected } : {}),
+    }
+    const r = await controlPlane.tryJudge<Omit<TryJudgeResult, 'ok'>>(ctx, { spec, evidence })
+    return { ok: true, ...r }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
+}
+
 export interface CreateJudgeResult {
   ok: boolean
   id?: string

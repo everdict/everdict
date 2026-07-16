@@ -19,6 +19,7 @@ import {
   type ValidateJudgeResult,
 } from '../api/register-judge'
 import { JudgePreviewPanel } from './judge-preview-panel'
+import { RequiresEditor, type Requirement } from './requires-editor'
 
 const INPUTS = ['trace', 'dom', 'screenshot'] as const
 type Kind = 'model' | 'harness'
@@ -100,6 +101,8 @@ export function RegisterJudgeForm({
   const [model, setModel] = useState('claude-opus-4-8')
   const [inputs, setInputs] = useState<string[]>(['trace'])
   const [passThreshold, setPassThreshold] = useState('')
+  // Declared evidence requirements (both kinds) — the preview checks them against a sample trace (satisfied/missing).
+  const [requires, setRequires] = useState<Requirement[]>([])
   // rubric (both kinds — model: required, harness: optional)
   const [rubricMode, setRubricMode] = useState<RubricMode>('inline')
   const [rubricText, setRubricText] = useState('')
@@ -128,6 +131,7 @@ export function RegisterJudgeForm({
       id: id.trim(),
       version: version.trim() || '1.0.0',
       ...(description.trim() ? { description: description.trim() } : {}),
+      ...(requires.length ? { requires } : {}),
       tags: [] as string[],
     }
     if (kind === 'model') {
@@ -417,6 +421,14 @@ export function RegisterJudgeForm({
           {error}
         </Callout>
       )}
+
+      <div className="space-y-2 border-t border-border pt-5">
+        <div>
+          <h3 className="text-sm font-medium">{t('requiresHeading')}</h3>
+          <p className="text-[12px] text-muted-foreground">{t('requiresSubtitle')}</p>
+        </div>
+        <RequiresEditor value={requires} onChange={setRequires} />
+      </div>
 
       <div className="border-t border-border pt-5">
         <JudgePreviewPanel getSpec={buildSpec} />

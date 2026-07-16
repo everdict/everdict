@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useTransition } from 'react'
-import { Eye, Loader2 } from 'lucide-react'
+import { Eye, Loader2, Play } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
 import { cn } from '@/shared/lib/utils'
@@ -9,7 +9,7 @@ import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
 import { Input, Label, Textarea } from '@/shared/ui/input'
 
-import { previewJudgeAction, type PreviewJudgeResult } from '../api/register-judge'
+import { previewJudgeAction, tryJudgeAction, type TryJudgeResult } from '../api/register-judge'
 
 // Live judge preview — renders the EXACT judging prompt + per-placeholder evidence coverage for the current draft
 // judge against a pasted trace, with NO model call. Lets a user verify what the judge will see before registering.
@@ -19,30 +19,40 @@ export function JudgePreviewPanel({ getSpec }: { getSpec: () => unknown }) {
   const [trace, setTrace] = useState('')
   const [task, setTask] = useState('')
   const [expected, setExpected] = useState('')
-  const [result, setResult] = useState<PreviewJudgeResult | undefined>()
+  const [result, setResult] = useState<TryJudgeResult | undefined>()
   const [parseError, setParseError] = useState<string | undefined>()
   const [busy, start] = useTransition()
 
-  function onPreview() {
+  // Parse the pasted trace once; empty is a valid empty trace. Returns undefined on a JSON error (and sets the message).
+  function parseTrace(): unknown | undefined {
     setParseError(undefined)
     setResult(undefined)
-    let parsed: unknown = []
-    if (trace.trim()) {
-      try {
-        parsed = JSON.parse(trace)
-      } catch {
-        setParseError(t('invalidTrace'))
-        return
-      }
+    if (!trace.trim()) return []
+    try {
+      return JSON.parse(trace)
+    } catch {
+      setParseError(t('invalidTrace'))
+      return undefined
     }
-    start(async () => {
-      setResult(
-        await previewJudgeAction(getSpec(), parsed, {
-          ...(task.trim() ? { task: task.trim() } : {}),
-          ...(expected.trim() ? { expected: expected.trim() } : {}),
-        }),
-      )
-    })
+  }
+
+  function meta() {
+    return {
+      ...(task.trim() ? { task: task.trim() } : {}),
+      ...(expected.trim() ? { expected: expected.trim() } : {}),
+    }
+  }
+
+  function onPreview() {
+    const parsed = parseTrace()
+    if (parsed === undefined) return
+    start(async () => setResult(await previewJudgeAction(getSpec(), parsed, meta())))
+  }
+
+  function onTry() {
+    const parsed = parseTrace()
+    if (parsed === undefined) return
+    start(async () => setResult(await tryJudgeAction(getSpec(), parsed, meta())))
   }
 
   return (
@@ -74,16 +84,59 @@ export function JudgePreviewPanel({ getSpec }: { getSpec: () => unknown }) {
         </div>
       </div>
 
-      <Button variant="secondary" onClick={onPreview} disabled={busy} className="gap-1.5">
-        {busy ? <Loader2 className="size-4 animate-spin" /> : <Eye className="size-4" />}
-        {t('previewButton')}
-      </Button>
+      <div className="flex flex-wrap items-center gap-2">
+        <Button variant="secondary" onClick={onPreview} disabled={busy} className="gap-1.5">
+          {busy ? <Loader2 className="size-4 animate-spin" /> : <Eye className="size-4" />}
+          {t('previewButton')}
+        </Button>
+        <Button variant="ghost" onClick={onTry} disabled={busy} className="gap-1.5">
+          <Play className="size-4" />
+          {t('tryButton')}
+        </Button>
+        <span className="text-[12px] text-muted-foreground">{t('tryHint')}</span>
+      </div>
 
       {parseError ? <Callout tone="danger">{parseError}</Callout> : null}
       {result && !result.ok ? <Callout tone="danger">{result.error ?? t('failed')}</Callout> : null}
 
       {result?.ok ? (
         <div className="space-y-3">
+          {result.scores ? (
+            <div className="space-y-1.5">
+              <p className="text-[12px] font-medium text-muted-foreground">{t('scores')}</p>
+              {result.scores.length === 0 ? (
+                <p className="text-[12px] text-muted-foreground">{t('noScores')}</p>
+              ) : (
+                <div className="flex flex-col gap-1.5">
+                  {result.scores.map((s) => (
+                    <div
+                      key={s.metric}
+                      className={cn(
+                        'rounded-md border px-2.5 py-1.5 text-[12px]',
+                        s.pass === true
+                          ? 'border-[var(--color-success)]/30 bg-[var(--color-success)]/8'
+                          : s.pass === false
+                            ? 'border-destructive/30 bg-destructive/8'
+                            : 'border-border bg-muted/40',
+                      )}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-mono">{s.metric}</span>
+                        <span className="tabular-nums">
+                          {s.value.toFixed(2)}
+                          {s.pass === true ? ' · ✓' : s.pass === false ? ' · ✗' : ''}
+                        </span>
+                      </div>
+                      {typeof s.detail === 'string' && s.detail ? (
+                        <p className="mt-0.5 text-muted-foreground">{s.detail}</p>
+                      ) : null}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          ) : null}
+
           {result.warnings && result.warnings.length > 0 ? (
             <Callout tone="warning">
               <ul className="list-disc space-y-0.5 pl-4">

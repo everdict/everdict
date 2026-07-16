@@ -332,6 +332,9 @@ export const controlPlane = {
   // Preview a (draft) judge against sample evidence — the exact prompt + coverage, NO model call (judges:read).
   previewJudge: <T>(auth: AuthContext, body: unknown) =>
     call<T>(auth, '/judges/preview', { method: 'POST', body: JSON.stringify(body) }),
+  // Dry-run a (draft) judge — actually runs it (one model call, one case) and returns the real scores (scorecards:run).
+  tryJudge: <T>(auth: AuthContext, body: unknown) =>
+    call<T>(auth, '/judges/try', { method: 'POST', body: JSON.stringify(body) }),
   // Rubrics (versioned judging criteria) — a judge references {id, version} instead of freezing the text into its
   // own version. Same gates as judges (judges:read / judges:write) — no new authz action.
   listRubrics: <T>(auth: AuthContext) => call<T>(auth, '/rubrics'),

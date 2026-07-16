@@ -1673,7 +1673,22 @@
     "validateNewVersion": "(new version)",
     "validateExisting": "Existing versions: {versions}",
     "validateNone": "none",
-    "validateConflictNote": "Identical content is a no-op; different content is rejected with 409."
+    "validateConflictNote": "Identical content is a no-op; different content is rejected with 409.",
+    "requiresHeading": "Required evidence",
+    "requiresSubtitle": "Declare what this judge needs from a run. The preview checks it against a sample trace."
+  },
+  "judgeRequires": {
+    "kind_final_answer": "Final answer",
+    "kind_tool_call": "Tool call",
+    "kind_dom": "Browser DOM",
+    "kind_screenshot": "Screenshot",
+    "kind_artifact": "Artifact",
+    "kind_span": "Span",
+    "namePlaceholder": "name (optional)",
+    "rolePlaceholder": "role (optional)",
+    "add": "Add",
+    "remove": "Remove",
+    "empty": "No required evidence declared."
   },
   "judgePreview": {
     "heading": "Preview",
@@ -1684,6 +1699,10 @@
     "taskLabel": "Task (optional)",
     "expectedLabel": "Expected output (optional)",
     "previewButton": "Preview",
+    "tryButton": "Run once",
+    "tryHint": "Runs the judge on this one case (uses a model call).",
+    "scores": "Scores",
+    "noScores": "No scores were produced.",
     "invalidTrace": "The trace is not valid JSON.",
     "failed": "Preview failed.",
     "coverage": "Evidence coverage",
