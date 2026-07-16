@@ -5,6 +5,7 @@
 export { type Dispatch, runSuite } from "./run-suite.js";
 
 // Store ports (interfaces only) — the impls (InMemory*/Pg*) live in @everdict/db, which binds these.
+export type { BrowserProfileStore } from "./ports/browser-profile-store.js";
 export type { CallbackStore } from "./ports/callback-store.js";
 export type { CommentStore } from "./ports/comment-store.js";
 export type { NotificationListOptions, NotificationStore } from "./ports/notification-store.js";
@@ -35,6 +36,12 @@ export type { RuntimeListEntry, RuntimeRegistry } from "./ports/runtime-registry
 
 // Control-plane use-case services (the api services move here incrementally — re-architecture P2d).
 export { type CreateViewInput, type UpdateViewInput, ViewService, type ViewServiceDeps } from "./view/view-service.js";
+export {
+  BrowserProfileService,
+  type BrowserProfileServiceDeps,
+  type CreateBrowserProfileInput,
+  type UpdateBrowserProfileInput,
+} from "./browser-profile/browser-profile-service.js";
 export {
   COMMENT_RESOURCE_TYPES,
   type CommentResourceType,

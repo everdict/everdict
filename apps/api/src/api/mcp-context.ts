@@ -16,6 +16,7 @@ import type { SpanAttrMappingService } from "@everdict/application-control";
 import type { TraceSinkService } from "@everdict/application-control";
 import type { TraceSourceService } from "@everdict/application-control";
 import type { ViewService } from "@everdict/application-control";
+import type { BrowserProfileService } from "@everdict/application-control";
 import type { WorkspaceService } from "@everdict/application-control";
 import { type Action, type Principal, authorize } from "@everdict/auth";
 import { AppError, type RuntimeSpec } from "@everdict/contracts";
@@ -90,6 +91,7 @@ export interface McpDeps {
   apiPublicUrl?: string; // control-plane public base — the everdict runner --api-url in github_install_workspace_runner (falls back to the request base)
   browserSessionService?: BrowserSessionService; // interactive browser sessions (browser-profiles S1) — self-scoped
   browserTickets?: TicketStore; // WS ticket store for interactive browser sessions
+  browserProfileService?: BrowserProfileService; // saved authenticated browser profiles (browser-profiles S2) — self-scoped
 }
 
 // The per-session context a resource's registerXTools(server, ctx) receives — the MCP twin of route-context.

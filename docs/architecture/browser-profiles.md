@@ -1,6 +1,6 @@
 # Authenticated browser profiles — a real interactive remote browser, cookies reused in eval (design)
 
-> **Status: S0 + S1 (S1a transport + S1b web canvas) SHIPPED. S2+ in slices.** S0 = the interactive live browser
+> **Status: S0 + S1 (transport + web canvas) + S2 (profile entity) SHIPPED. S3+ in slices.** S0 = the interactive live browser
 > session primitive (`openBrowserSession`, `@everdict/topology`, `a168b5b`): CDP screencast (frames OUT, each
 > acked) + input (mouse/keyboard/navigate IN), transport-injectable, live-proven against real Chrome via
 > `scripts/live/interactive-browser.mjs`. **S1 productizes the transport end-to-end**: a personal / self-scoped
@@ -111,7 +111,15 @@ short-lived container/pod per active login; self-hosted = the user's own local b
 3. **S1b — apps/web canvas feature.** ✅ SHIPPED. `features/interactive-browser` (the `--serve` page productized:
    one WS instead of SSE/POST) + BFF proxy routes (`/api/browser-sessions*`, ticket route injects the WS base) +
    Settings › Account › Browser sessions page + ko/en i18n. Users start a browser and drive it inside the app.
-4. **S2 — profile entity** (`BrowserProfileSpec` + `BrowserProfileStore` + encrypted `storageState` blob).
+4. **S2 — profile entity.** ✅ SHIPPED. `BrowserProfileRecord` (`@everdict/contracts`) — personal / self-scoped
+   `{ id, tenant, name, cookieDomains[], createdBy, createdAt, updatedAt }` (the `storageStateRef`/`country`/`proxyRef`
+   fields are deferred to the slices that populate them — S3/S4 — per no-hypothetical-surface); `BrowserProfileStore`
+   port (`@everdict/application-control`) + `InMemory`/`Pg` impls (`@everdict/db`, migration `0058`,
+   `everdict_browser_profiles`) + `BrowserProfileService` (owner-scoped CRUD, no admin override — a profile holds
+   personal login material) + `api/browser-profile` routes/docs/MCP parity (self-scoped, no role gate) + the
+   `apps/web` `features/manage-browser-profiles` manager (Settings › Account › Browser profiles: create/rename/delete)
+   + `entities/browser-profile` drift-guarded schema + ko/en i18n. A profile is a login placeholder until S3 captures
+   cookies into it.
 5. **S3 — cookie capture** on session save (`Network.getAllCookies` → storageState → encrypt → store).
 6. **S4 — proxy / geo** (`ProxyProvider`, `--proxy-server`).
 7. **S5 — injection into eval** (seed cookies + proxy before the agent connects).

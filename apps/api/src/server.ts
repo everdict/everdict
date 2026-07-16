@@ -86,6 +86,7 @@ import { z } from "zod";
 import { registerApiKeyRoutes } from "./api/api-key/api-key.routes.js";
 import { registerBenchmarkRoutes } from "./api/benchmark/benchmark.routes.js";
 import { registerBillingRoutes } from "./api/billing/billing.routes.js";
+import { registerBrowserProfileRoutes } from "./api/browser-profile/browser-profile.routes.js";
 import { attachBrowserSessionWs } from "./api/browser-session/browser-session-ws.js";
 import { registerBrowserSessionRoutes } from "./api/browser-session/browser-session.routes.js";
 import { registerBundleRoutes } from "./api/bundle/bundle.routes.js";
@@ -230,6 +231,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     registerQueueRoutes(routes, deps);
     registerBillingRoutes(routes, deps);
     registerBrowserSessionRoutes(routes, deps);
+    registerBrowserProfileRoutes(routes, deps);
     registerInternalRoutes(routes, deps);
     registerMcpRoutes(routes, deps);
   });

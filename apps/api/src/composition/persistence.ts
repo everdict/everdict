@@ -1,7 +1,9 @@
 import {
+  type BrowserProfileStore,
   type BudgetStore,
   type CallbackStore,
   type CommentStore,
+  InMemoryBrowserProfileStore,
   InMemoryBudgetStore,
   InMemoryCallbackStore,
   InMemoryCommentStore,
@@ -22,6 +24,7 @@ import {
   InMemoryWorkspaceStore,
   type NotificationStore,
   type OAuthStateStore,
+  PgBrowserProfileStore,
   PgBudgetStore,
   PgCallbackStore,
   PgCommentStore,
@@ -111,6 +114,7 @@ export interface Persistence {
   notificationStore: NotificationStore; // personal notification feed (bell inbox) — records run/scorecard completion with recipient=subject
   commentStore: CommentStore; // resource comments (datasets, etc.) — collaborative discussion
   viewStore: ViewStore; // saved scorecard-analysis Views (named AnalysisConfig, private|workspace) — live re-run
+  browserProfileStore: BrowserProfileStore; // saved authenticated browser profiles (browser-profiles S2) — personal metadata
   // Front-door callback bodies (multi-replica rendezvous) — Pg-backed when DATABASE_URL is set, else in-memory
   // (single process; the in-process rendezvous is equivalent there). docs/architecture/completion-stream-callback.md
   callbackStore: CallbackStore;
@@ -163,6 +167,7 @@ export async function makePersistence(): Promise<Persistence> {
       notificationStore: new InMemoryNotificationStore(),
       commentStore: new InMemoryCommentStore(),
       viewStore: new InMemoryViewStore(),
+      browserProfileStore: new InMemoryBrowserProfileStore(),
       callbackStore: new InMemoryCallbackStore(),
       usageStore: new InMemoryUsageStore(),
       budgetStore: new InMemoryBudgetStore(),
@@ -196,6 +201,7 @@ export async function makePersistence(): Promise<Persistence> {
     notificationStore: new PgNotificationStore(client),
     commentStore: new PgCommentStore(client),
     viewStore: new PgViewStore(client),
+    browserProfileStore: new PgBrowserProfileStore(client),
     callbackStore: new PgCallbackStore(client),
     usageStore: new PgUsageStore(client),
     budgetStore: new PgBudgetStore(client),

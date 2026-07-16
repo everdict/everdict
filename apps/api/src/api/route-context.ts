@@ -28,6 +28,7 @@ import {
 import type { TraceSinkService } from "@everdict/application-control";
 import type { TraceSourceService } from "@everdict/application-control";
 import type { ViewService } from "@everdict/application-control";
+import type { BrowserProfileService } from "@everdict/application-control";
 import type { WorkspaceService } from "@everdict/application-control";
 import {
   API_KEY_SCOPES,
@@ -166,6 +167,7 @@ export interface ServerDeps {
   liveFrames?: LiveFrameStore; // live-screen frames pushed by a self-hosted runner (report_case_screen) — served by RunService.screen()
   browserSessionService?: BrowserSessionService; // interactive browser sessions (browser-profiles S1) — self-scoped (routes disabled if absent)
   browserTickets?: TicketStore; // WS ticket store for interactive browser sessions (browser-session WS disabled if absent)
+  browserProfileService?: BrowserProfileService; // saved authenticated browser profiles (browser-profiles S2) — self-scoped (routes disabled if absent)
 }
 
 // Resolve identity (subject + default workspace + roles): Bearer (JWT or ak_) → Authenticator. Unauthenticated dev = header workspace + admin.

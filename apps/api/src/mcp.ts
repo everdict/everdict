@@ -3,6 +3,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { registerApiKeyTools } from "./api/api-key/api-key.mcp.js";
 import { registerBenchmarkTools } from "./api/benchmark/benchmark.mcp.js";
 import { registerBillingTools } from "./api/billing/billing.mcp.js";
+import { registerBrowserProfileTools } from "./api/browser-profile/browser-profile.mcp.js";
 import { registerBrowserSessionTools } from "./api/browser-session/browser-session.mcp.js";
 import { registerBundleTools } from "./api/bundle/bundle.mcp.js";
 import { registerCiLinkTools } from "./api/ci-link/ci-link.mcp.js";
@@ -66,6 +67,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
   registerSecretTools(server, ctx);
   registerNotificationTools(server, ctx);
   registerBrowserSessionTools(server, ctx);
+  registerBrowserProfileTools(server, ctx);
   registerCommentTools(server, ctx);
   registerApiKeyTools(server, ctx);
   registerMemberTools(server, ctx);

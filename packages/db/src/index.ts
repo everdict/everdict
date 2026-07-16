@@ -73,6 +73,7 @@ export type {
   ScorecardListFilter,
   ScheduleStore,
   ViewStore,
+  BrowserProfileStore,
   UsageStore,
   BudgetStore,
   NotificationStore,
@@ -96,6 +97,7 @@ export { InMemoryRunStore } from "./results/run-store.js";
 export { InMemoryScorecardStore } from "./results/scorecard-store.js";
 export { InMemoryScheduleStore } from "./results/schedule-store.js";
 export { InMemoryViewStore, PgViewStore } from "./results/view-store.js";
+export { InMemoryBrowserProfileStore, PgBrowserProfileStore } from "./workspace/browser-profile-store.js";
 export { type SqlClient, type PgPool, makePool, sqlClient } from "./client.js";
 export {
   type UsageRow,

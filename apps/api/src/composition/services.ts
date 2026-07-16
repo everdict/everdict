@@ -7,8 +7,16 @@ import type { RunnerService } from "@everdict/application-control";
 import type { ScheduleService } from "@everdict/application-control";
 import type { ScorecardService } from "@everdict/application-control";
 import { ViewService } from "@everdict/application-control";
+import { BrowserProfileService } from "@everdict/application-control";
 import type { Scheduler } from "@everdict/backends";
-import type { RunStore, ScorecardStore, SecretStore, ViewStore, WorkspaceSettingsStore } from "@everdict/db";
+import type {
+  BrowserProfileStore,
+  RunStore,
+  ScorecardStore,
+  SecretStore,
+  ViewStore,
+  WorkspaceSettingsStore,
+} from "@everdict/db";
 import type { CircuitBreaker } from "@everdict/domain";
 import type {
   BenchmarkRegistry,
@@ -173,4 +181,8 @@ export function buildQueue(deps: {
 // Saved scorecard-analysis Views — store/share a named AnalysisConfig (opaque config) on the workspace. Live re-run, so no snapshot.
 export function buildView(deps: { viewStore: ViewStore }): ViewService {
   return new ViewService({ store: deps.viewStore });
+}
+
+export function buildBrowserProfile(deps: { browserProfileStore: BrowserProfileStore }): BrowserProfileService {
+  return new BrowserProfileService({ store: deps.browserProfileStore });
 }

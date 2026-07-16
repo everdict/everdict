@@ -16,7 +16,14 @@ import { buildRun } from "./composition/run.js";
 import { buildRuntimeAccess, runStartupRecovery } from "./composition/runtime-access.js";
 import { ScheduleServiceRef, wireScheduleService } from "./composition/schedule.js";
 import { buildScorecard } from "./composition/scorecard.js";
-import { buildCatalog, buildCiLink, buildMattermostCommand, buildQueue, buildView } from "./composition/services.js";
+import {
+  buildBrowserProfile,
+  buildCatalog,
+  buildCiLink,
+  buildMattermostCommand,
+  buildQueue,
+  buildView,
+} from "./composition/services.js";
 import { buildWorkspace } from "./composition/workspace.js";
 import { BrowserSessionService } from "./core/browser-session/browser-session-service.js";
 import { buildPlacementPreflight } from "./core/execution/placement-preflight.js";
@@ -57,6 +64,7 @@ async function main(): Promise<void> {
     notificationStore,
     commentStore,
     viewStore,
+    browserProfileStore,
     callbackStore,
     usageStore,
     budgetStore,
@@ -236,6 +244,7 @@ async function main(): Promise<void> {
     tenantQuotas,
   });
   const viewService = buildView({ viewStore });
+  const browserProfileService = buildBrowserProfile({ browserProfileStore });
 
   const terminalTickets = new TerminalTicketStore();
   // Interactive browser sessions (browser-profiles S1) — env-gated because the S1 provisioner launches a host
@@ -250,6 +259,7 @@ async function main(): Promise<void> {
   const app = buildServer({
     terminalTickets,
     ...(browserSessionService && browserTickets ? { browserSessionService, browserTickets } : {}),
+    browserProfileService, // saved authenticated browser profiles (browser-profiles S2) — personal metadata CRUD
     liveFrames, // live-screen frames pushed by self-hosted runners (report_case_screen MCP tool)
     service,
     scorecardService,
