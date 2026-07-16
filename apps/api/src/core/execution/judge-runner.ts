@@ -56,7 +56,7 @@ export interface DefaultJudgeRunnerDeps {
 }
 
 // The effective judging fields after rubric resolution — what actually reaches the JudgeGrader.
-interface EffectiveRubric {
+export interface EffectiveRubric {
   rubricText?: string;
   criteria?: JudgeCriterion[];
   promptTemplate?: string;
@@ -65,7 +65,8 @@ interface EffectiveRubric {
 // Resolve spec.rubric to the effective judging fields. Inline string → as-is; {id, version} ref → registry lookup
 // (owner-first + _shared fallback). The judge's own criteria/promptTemplate override the rubric's (more specific wins).
 // A missing registry dep or unresolved rubric returns a skip reason — a judge the user chose never silently vanishes.
-async function resolveRubric(
+// Exported so the preview/dry-run surfaces resolve the effective rubric IDENTICALLY to a real grade (no duplication).
+export async function resolveRubric(
   rubrics: RubricRegistry | undefined,
   tenant: string,
   spec: JudgeSpec,

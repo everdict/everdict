@@ -24,6 +24,7 @@ import {
 import { buildCatalog, buildCiLink, buildMattermostCommand, buildQueue, buildView } from "./composition/services.js";
 import { buildWorkspace } from "./composition/workspace.js";
 import { buildPlacementPreflight } from "./core/execution/placement-preflight.js";
+import { JudgePreviewService } from "./core/judge/judge-preview-service.js";
 import { buildServer } from "./server.js";
 
 // Multi-tenant control-plane server. tenant is derived from the Bearer API key (dev header fallback if absent).
@@ -259,6 +260,7 @@ async function main(): Promise<void> {
     harnessInstances: harnessInstanceRegistry,
     datasetRegistry,
     judgeRegistry,
+    judgePreviewService: new JudgePreviewService({ rubrics: rubricRegistry }),
     rubricRegistry,
     modelRegistry,
     runtimeRegistry,

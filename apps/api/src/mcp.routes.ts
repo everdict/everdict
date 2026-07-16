@@ -58,6 +58,7 @@ export function registerMcpRoutes(app: FastifyInstance, deps: ServerDeps): void 
           harnessInstances: deps.harnessInstances,
           datasetRegistry: deps.datasetRegistry,
           judgeRegistry: deps.judgeRegistry,
+          judgePreviewService: deps.judgePreviewService,
           modelRegistry: deps.modelRegistry,
           runtimeRegistry: deps.runtimeRegistry,
           probeRuntime: deps.probeRuntime,

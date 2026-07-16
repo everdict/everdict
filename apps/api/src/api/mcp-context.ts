@@ -34,6 +34,7 @@ import type { BudgetAdmin } from "../common/budget-tracker.js";
 import type { LiveFrameStore } from "../common/live-frame-store.js";
 import type { BenchmarkService } from "../core/benchmark/benchmark-service.js";
 import type { BundleService } from "../core/bundle/bundle-service.js";
+import type { JudgePreviewService } from "../core/judge/judge-preview-service.js";
 import type { RuntimeProbeResult } from "../core/ops/runtime-probe.js";
 
 // MCP tool surface — the "agent transport" sharing the same service core as the HTTP routes.
@@ -50,6 +51,7 @@ export interface McpDeps {
   harnessInstances?: HarnessInstanceRegistry;
   datasetRegistry?: DatasetRegistry;
   judgeRegistry?: JudgeRegistry;
+  judgePreviewService?: JudgePreviewService; // zero-cost judge preview (preview_judge) + one-case dry-run
   rubricRegistry?: RubricRegistry; // Rubric (HOW to judge) register/read — judges reference it by {id, version}
   modelRegistry?: ModelRegistry; // Model (inference/judgment model) register/read — judge and command harnesses reference it by id
   runtimeRegistry?: RuntimeRegistry;

@@ -47,6 +47,7 @@ import { TerminalTicketStore } from "./common/terminal-ticket.js";
 import { BenchmarkService } from "./core/benchmark/benchmark-service.js";
 import { BundleService } from "./core/bundle/bundle-service.js";
 import { defaultJudgeRunner } from "./core/execution/judge-runner.js";
+import { JudgePreviewService } from "./core/judge/judge-preview-service.js";
 import { githubAppGateway } from "./infrastructure/github/app-gateway.js";
 import { buildServer } from "./server.js";
 
@@ -235,6 +236,7 @@ function server(
     harnessInstances,
     datasetRegistry,
     judgeRegistry,
+    judgePreviewService: new JudgePreviewService({ rubrics: rubricRegistry }),
     rubricRegistry,
     modelRegistry,
     runtimeRegistry,
@@ -3195,6 +3197,61 @@ describe("API — judges (Agent Judge, workspace-owned, member+ write)", () => {
     const bad = await app.inject({ method: "GET", url: "/judges/correctness/diff?base=1.0.0", headers: h });
     expect(bad.statusCode).toBe(400);
     await app.close();
+  });
+
+  it("preview renders the exact prompt + evidence coverage for a draft judge against a pasted trace (no model call)", async () => {
+    const { app } = server({ requireAuth: true, authenticator: roleAuth(["member"]) });
+    const h = { authorization: "Bearer x" };
+    const trace = [
+      { t: 0, kind: "tool_call", id: "1", name: "search", args: {} },
+      { t: 1, kind: "message", role: "assistant", text: "the answer is 42" },
+    ];
+    const res = await app.inject({
+      method: "POST",
+      url: "/judges/preview",
+      headers: h,
+      payload: { spec: JUDGE, evidence: { source: "trace", trace, task: "solve it", expected: "42" } },
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.kind).toBe("model");
+    expect(body.prompt).toContain("solve it"); // {task}
+    expect(body.prompt).toContain("Did the agent complete the task correctly?"); // {rubric}
+    expect(body.prompt).toContain("the answer is 42"); // final answer section
+    expect(body.evidence.trace.present).toBe(true);
+    expect(body.evidence.expected.present).toBe(true);
+    expect(body.evidence.dom.present).toBe(false);
+    await app.close();
+  });
+
+  it("preview warns when a custom template references evidence the trace does not carry", async () => {
+    const { app } = server({ requireAuth: true, authenticator: roleAuth(["member"]) });
+    const h = { authorization: "Bearer x" };
+    const spec = { ...JUDGE, promptTemplate: "Judge the page DOM: {dom}\n{verdict_instruction}" };
+    const res = await app.inject({
+      method: "POST",
+      url: "/judges/preview",
+      headers: h,
+      payload: {
+        spec,
+        evidence: { source: "trace", trace: [{ t: 0, kind: "message", role: "assistant", text: "x" }] },
+      },
+    });
+    expect(res.statusCode).toBe(200);
+    expect((res.json().warnings as string[]).some((w) => w.includes("{dom}"))).toBe(true);
+    await app.close();
+  });
+
+  it("preview requires only judges:read (a viewer can preview)", async () => {
+    const viewer = server({ requireAuth: true, authenticator: roleAuth(["viewer"]) });
+    const res = await viewer.app.inject({
+      method: "POST",
+      url: "/judges/preview",
+      headers: { authorization: "Bearer x" },
+      payload: { spec: JUDGE, evidence: { source: "trace", trace: [] } },
+    });
+    expect(res.statusCode).toBe(200);
+    await viewer.app.close();
   });
 });
 

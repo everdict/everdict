@@ -1,5 +1,5 @@
 import { setVersionTags } from "@everdict/application-control";
-import { JudgeSpecSchema } from "@everdict/contracts";
+import { JudgeSpecSchema, TraceEventSchema } from "@everdict/contracts";
 import { diffJudgeSpecs } from "@everdict/domain";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
@@ -114,6 +114,52 @@ export function registerJudgeTools(server: McpServer, ctx: McpToolContext): void
           if (!result.success) return fail(`BAD_REQUEST: ${result.error.message}`);
           await judges.register(ws, result.data, principal.subject); // creator stamp — HTTP parity
           return ok({ workspace: ws, id: result.data.id, version: result.data.version });
+        }),
+    );
+  }
+
+  if (deps.judgePreviewService) {
+    const preview = deps.judgePreviewService;
+    server.registerTool(
+      "preview_judge",
+      {
+        description:
+          "Preview what a judge would see on a sample trace — renders the exact judging prompt + per-placeholder " +
+          "evidence coverage (present/chars/truncated) + warnings, with NO model call. Verify a judge before " +
+          "committing it to a scorecard. Requires judges:read.",
+        inputSchema: {
+          judge: z.string().describe("JudgeSpec JSON (kind: model | harness)"),
+          trace: z.string().describe("TraceEvent[] JSON — the sample execution trace to judge over"),
+          task: z.string().optional().describe("the task the agent was given (evidence context)"),
+          expected: z.string().optional().describe("reference/expected output, if any"),
+        },
+      },
+      ({ judge, trace, task, expected }) =>
+        run(principal, "judges:read", async () => {
+          let specJson: unknown;
+          let traceJson: unknown;
+          try {
+            specJson = JSON.parse(judge);
+            traceJson = JSON.parse(trace);
+          } catch {
+            return fail("BAD_REQUEST: judge and trace must be valid JSON.");
+          }
+          const spec = JudgeSpecSchema.safeParse(specJson);
+          if (!spec.success) return fail(`BAD_REQUEST: ${spec.error.message}`);
+          const events = TraceEventSchema.array().safeParse(traceJson);
+          if (!events.success) return fail(`BAD_REQUEST: ${events.error.message}`);
+          return ok(
+            await preview.preview({
+              tenant: ws,
+              spec: spec.data,
+              evidence: {
+                source: "trace",
+                trace: events.data,
+                ...(task ? { task } : {}),
+                ...(expected ? { expected } : {}),
+              },
+            }),
+          );
         }),
     );
   }

@@ -7,6 +7,8 @@ import { RegisterJudgeResultSchema } from "@everdict/contracts/wire";
 import { ValidateJudgeResultSchema } from "@everdict/contracts/wire";
 import type { FastifySchema } from "fastify";
 import { errorResponses, toJsonSchema } from "../openapi.js";
+import { PreviewJudgeBodySchema } from "./request/judge-evidence.js";
+import { JudgePreviewResultSchema } from "./response/preview-judge-result.js";
 import { SetVersionTagsResultSchema } from "./response/set-version-tags-result.js";
 
 // OpenAPI descriptors for the judge routes — doc-only (rule api-layer): the no-op compilers in server.ts
@@ -97,6 +99,19 @@ const docs = {
     },
     response: {
       200: { description: "Judge version diff", ...toJsonSchema(JudgeSpecDiffResponseSchema) },
+      ...errorResponses(400, 401, 403, 404),
+    },
+  },
+  preview: {
+    summary: "Preview a judge against sample evidence",
+    description:
+      "Renders the exact judging prompt plus per-placeholder evidence coverage (present/chars/truncated) and " +
+      "warnings for a (draft) JudgeSpec against a sample trace — with NO model call. The registration wizard " +
+      "calls this live. Requires judges:read (viewer+).",
+    tags: ["judge"],
+    body: toJsonSchema(PreviewJudgeBodySchema),
+    response: {
+      200: { description: "Rendered prompt + evidence coverage + warnings", ...toJsonSchema(JudgePreviewResultSchema) },
       ...errorResponses(400, 401, 403, 404),
     },
   },

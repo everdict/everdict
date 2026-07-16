@@ -92,6 +92,7 @@ import {
   type BenchmarkService,
 } from "../core/benchmark/benchmark-service.js";
 import { BundleSchema, type BundleService, requiredActionsForBundle } from "../core/bundle/bundle-service.js";
+import type { JudgePreviewService } from "../core/judge/judge-preview-service.js";
 import type { RuntimeProbeResult } from "../core/ops/runtime-probe.js";
 import { buildMcpServer } from "../mcp.js";
 
@@ -111,6 +112,7 @@ export interface ServerDeps {
 
   datasetRegistry?: DatasetRegistry; // dataset CRUD (route disabled if absent)
   judgeRegistry?: JudgeRegistry; // Agent Judge CRUD (route disabled if absent)
+  judgePreviewService?: JudgePreviewService; // zero-cost judge preview + one-case dry-run (route disabled if absent)
   rubricRegistry?: RubricRegistry; // Rubric (HOW to judge — referenced by judges) CRUD (route disabled if absent)
   modelRegistry?: ModelRegistry; // Model (inference/judging model) CRUD (route disabled if absent)
   runtimeRegistry?: RuntimeRegistry; // Runtime (execution infra) CRUD (route disabled if absent)
