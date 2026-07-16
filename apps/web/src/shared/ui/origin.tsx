@@ -56,8 +56,9 @@ export function OriginChip({ origin, className }: { origin: OriginLike; classNam
   )
 }
 
-// Full provenance block (for detail) — commit/PR/CI run links + ephemeral-pins (pinOverrides) table. Anchors are fine here.
-export function OriginBlock({ origin }: { origin: OriginLike }) {
+// Inline provenance (for a detail meta row) — source label + commit/PR/CI run links, no heading/card of its own
+// (the surrounding meta item supplies the "Origin" label). Anchors are fine here.
+export function OriginInline({ origin }: { origin: OriginLike }) {
   const t = useTranslations('ui')
   const meta = SOURCE_META[origin.source]
   const Icon = meta?.icon ?? Cog
@@ -68,77 +69,77 @@ export function OriginBlock({ origin }: { origin: OriginLike }) {
     origin.repo && origin.prNumber != null
       ? `https://github.com/${origin.repo}/pull/${origin.prNumber}`
       : undefined
-  const pins = Object.entries(origin.pinOverrides ?? {})
 
   return (
-    <div className="space-y-3 rounded-lg border bg-card p-4 shadow-raise">
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-        <span className="inline-flex items-center gap-1.5">
-          <Icon className="size-3.5 text-muted-foreground/70" />
-          <span className="text-[10.5px] font-[560] uppercase tracking-wide text-faint">
-            {t('originHeading')}
-          </span>
-          <span className="text-[13px] font-[510] text-foreground">{label}</span>
-        </span>
-        {commitUrl ? (
-          <a
-            href={commitUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center gap-1 font-mono text-[12px] text-link transition-colors hover:text-foreground"
-          >
-            {origin.repo}@{origin.sha && shortSha(origin.sha)}
-            <ExternalLink className="size-3" />
-          </a>
-        ) : (
-          origin.repo && (
-            <span className="font-mono text-[12px] text-muted-foreground">{origin.repo}</span>
-          )
-        )}
-        {prUrl && (
-          <a
-            href={prUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center gap-1 font-mono text-[12px] text-link transition-colors hover:text-foreground"
-          >
-            #{origin.prNumber}
-            <ExternalLink className="size-3" />
-          </a>
-        )}
-        {origin.ref && <span className="font-mono text-[11px] text-faint">{origin.ref}</span>}
-        {origin.runUrl && (
-          <a
-            href={origin.runUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center gap-1 text-[12px] text-link transition-colors hover:text-foreground"
-          >
-            CI run
-            <ExternalLink className="size-3" />
-          </a>
-        )}
-      </div>
-
-      {pins.length > 0 && (
-        <div className="space-y-1.5">
-          <p className="text-[11px] font-[510] uppercase tracking-wide text-faint">
-            {t('pinOverridesLabel')}
-          </p>
-          <div className="divide-y divide-border/70 overflow-hidden rounded-md border">
-            {pins.map(([slot, image]) => (
-              <div key={slot} className="flex items-center gap-3 px-3 py-1.5">
-                <span className="shrink-0 font-mono text-[12px] font-[510] text-foreground">
-                  {slot}
-                </span>
-                <span className="min-w-0 flex-1 truncate text-right font-mono text-[11px] text-muted-foreground">
-                  {image}
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
+    <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
+      <span className="inline-flex items-center gap-1 text-[13px] font-[510] text-foreground">
+        <Icon className="size-3.5 text-muted-foreground/70" />
+        {label}
+      </span>
+      {commitUrl ? (
+        <a
+          href={commitUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-0.5 font-mono text-[12px] text-link transition-colors hover:text-foreground"
+        >
+          {origin.repo}@{origin.sha && shortSha(origin.sha)}
+          <ExternalLink className="size-3" />
+        </a>
+      ) : (
+        origin.repo && (
+          <span className="font-mono text-[12px] text-muted-foreground">{origin.repo}</span>
+        )
       )}
+      {prUrl && (
+        <a
+          href={prUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-0.5 font-mono text-[12px] text-link transition-colors hover:text-foreground"
+        >
+          #{origin.prNumber}
+          <ExternalLink className="size-3" />
+        </a>
+      )}
+      {origin.ref && <span className="font-mono text-[11px] text-faint">{origin.ref}</span>}
+      {origin.runUrl && (
+        <a
+          href={origin.runUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-0.5 text-[12px] text-link transition-colors hover:text-foreground"
+        >
+          CI run
+          <ExternalLink className="size-3" />
+        </a>
+      )}
+    </div>
+  )
+}
+
+// Ephemeral submit-time pins (slot→image) a CI PR fire recorded — a full-width sub-block of the meta card. Null when none.
+export function OriginPins({ origin }: { origin: OriginLike }) {
+  const t = useTranslations('ui')
+  const pins = Object.entries(origin.pinOverrides ?? {})
+  if (pins.length === 0) return null
+  return (
+    <div className="space-y-1.5">
+      <p className="text-[11px] font-[510] uppercase tracking-wide text-faint">
+        {t('pinOverridesLabel')}
+      </p>
+      <div className="divide-y divide-border/70 overflow-hidden rounded-md border">
+        {pins.map(([slot, image]) => (
+          <div key={slot} className="flex items-center gap-3 px-3 py-1.5">
+            <span className="shrink-0 font-mono text-[12px] font-[510] text-foreground">
+              {slot}
+            </span>
+            <span className="min-w-0 flex-1 truncate text-right font-mono text-[11px] text-muted-foreground">
+              {image}
+            </span>
+          </div>
+        ))}
+      </div>
     </div>
   )
 }

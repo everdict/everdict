@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { Boxes, Cpu, Database, ListFilter, Server, Tag } from 'lucide-react'
+import { Boxes, Cpu, Database, Gavel, ListFilter, Server, Tag } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
 import { fmtMetricLabel, fmtPct } from '@/shared/lib/format'
@@ -91,11 +91,12 @@ export function VersionTagChip({
   )
 }
 
-// id@version reference — identifies datasets/harnesses in the same format (@version is faint).
-// If kind is given, prefix a type icon for visual distinction (dataset=Database blue, harness=Boxes indigo).
+// id@version reference — identifies datasets/harnesses/judges in the same format (@version is faint).
+// If kind is given, prefix a type icon for visual distinction (dataset=Database blue, harness=Boxes indigo, judge=Gavel gold).
 const ENTITY_META = {
   dataset: { icon: Database, tint: 'text-[#7cc0ff]' },
   harness: { icon: Boxes, tint: 'text-[#9aa2ec]' },
+  judge: { icon: Gavel, tint: 'text-[#d9a55f]' },
 } as const
 
 export function EntityRef({

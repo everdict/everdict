@@ -2133,6 +2133,7 @@
     "watchLive": "Watch live",
     "metaRunBy": "Run by",
     "metaRuntime": "Runtime",
+    "metaSource": "Origin",
     "runtimeDetailTitle": "Runtime detail",
     "runtimePoolPersonal": "My runner (any)",
     "runtimePoolWorkspace": "Shared team runner (any)",

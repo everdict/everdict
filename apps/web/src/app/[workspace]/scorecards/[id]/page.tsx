@@ -31,9 +31,9 @@ import { AutoRefresh } from '@/shared/ui/auto-refresh'
 import { Badge } from '@/shared/ui/badge'
 import { Callout } from '@/shared/ui/callout'
 import { Card } from '@/shared/ui/card'
-import { ModelChip, RuntimeChip } from '@/shared/ui/chip'
+import { EntityRef, ModelChip, RuntimeChip } from '@/shared/ui/chip'
 import { CriterionBadge, MetricLabel } from '@/shared/ui/metric-label'
-import { OriginBlock } from '@/shared/ui/origin'
+import { OriginInline, OriginPins } from '@/shared/ui/origin'
 import { PageHeader } from '@/shared/ui/page-header'
 import { SectionHeader } from '@/shared/ui/section-header'
 import { StatCard } from '@/shared/ui/stat-card'
@@ -89,12 +89,34 @@ function runtimeDisplay(
   return { label }
 }
 
-function Prop({ label, value }: { label: string; value: string }) {
+// One labeled cell of the meta card (dt/dd). Rich cells (entity links, origin, chips) pass `children`;
+// `Prop` is the plain-text convenience over it (created/updated/run-by/…).
+function MetaItem({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="min-w-0">
       <dt className="text-[11px] font-[510] uppercase tracking-wide text-faint">{label}</dt>
-      <dd className="mt-1 truncate font-mono text-[13px] text-foreground">{value}</dd>
+      <dd className="mt-1">{children}</dd>
     </div>
+  )
+}
+
+function Prop({ label, value }: { label: string; value: string }) {
+  return (
+    <MetaItem label={label}>
+      <span className="block truncate font-mono text-[13px] text-foreground">{value}</span>
+    </MetaItem>
+  )
+}
+
+// A clickable entity reference in the meta card — the entity chip (icon + id@version), links to its detail page.
+function EntityMetaLink({ href, children }: { href: string; children: React.ReactNode }) {
+  return (
+    <Link
+      href={href}
+      className="inline-flex max-w-full rounded-sm text-[13px] text-foreground transition-colors hover:underline"
+    >
+      {children}
+    </Link>
   )
 }
 
@@ -207,6 +229,7 @@ export default async function ScorecardDetailPage({
 
   const summary = record.summary ?? []
   const summaryMetrics = summary.map((m) => m.metric) // sibling context for judge-metric disambiguation
+  const judges = record.orchestration?.judges ?? [] // Agent Judges applied to this batch → entity links in the meta card
   const results = record.scorecard?.results ?? []
   const steps = record.steps ?? []
   const live = record.status === 'queued' || record.status === 'running'
@@ -398,11 +421,36 @@ export default async function ScorecardDetailPage({
       )}
 
       <Card className="grid grid-cols-2 gap-4 p-4 sm:grid-cols-4">
-        <Prop label="dataset" value={`${record.dataset.id}@${record.dataset.version}`} />
-        <Prop label="harness" value={`${record.harness.id}@${record.harness.version}`} />
-        <Prop label="created" value={new Date(record.createdAt).toLocaleString()} />
-        <Prop label="updated" value={new Date(record.updatedAt).toLocaleString()} />
-        {authorName && <Prop label={t('metaRunBy')} value={authorName} />}
+        {/* dataset · harness · judge are real entities — shown as their chip (icon + id@version), linking to the entity detail. */}
+        <MetaItem label="dataset">
+          <EntityMetaLink
+            href={`/${workspace}/datasets/${encodeURIComponent(record.dataset.id)}?version=${encodeURIComponent(record.dataset.version)}`}
+          >
+            <EntityRef id={record.dataset.id} version={record.dataset.version} kind="dataset" />
+          </EntityMetaLink>
+        </MetaItem>
+        <MetaItem label="harness">
+          <EntityMetaLink
+            href={`/${workspace}/harnesses/${encodeURIComponent(record.harness.id)}?v=${encodeURIComponent(record.harness.version)}`}
+          >
+            <EntityRef id={record.harness.id} version={record.harness.version} kind="harness" />
+          </EntityMetaLink>
+        </MetaItem>
+        {/* The Agent Judge(s) that scored this batch — each links to its detail page (detail resolves the latest version). */}
+        {judges.length > 0 && (
+          <MetaItem label="judge">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+              {judges.map((j) => (
+                <EntityMetaLink
+                  key={`${j.id}@${j.version}`}
+                  href={`/${workspace}/judges/${encodeURIComponent(j.id)}`}
+                >
+                  <EntityRef id={j.id} version={j.version} kind="judge" />
+                </EntityMetaLink>
+              ))}
+            </div>
+          </MetaItem>
+        )}
         {/* The runtime this batch ran on — shown by name (a self-hosted runner's device name, resolved from the roster).
             Only a registered runtime links to its detail page; self-hosted runners show the name only (multi-tenant —
             a batch may have run on another member's personal runner, which has no screen to navigate to). Hidden if
@@ -416,33 +464,34 @@ export default async function ScorecardDetailPage({
               poolWorkspaceLabel: t('runtimePoolWorkspace'),
             })
             return (
-              <div className="min-w-0">
-                <dt className="text-[11px] font-[510] uppercase tracking-wide text-faint">
-                  {t('metaRuntime')}
-                </dt>
-                <dd className="mt-1">
-                  {rd.href ? (
-                    <Link
-                      href={rd.href}
-                      className="rounded-sm hover:underline"
-                      title={t('runtimeDetailTitle')}
-                    >
-                      <RuntimeChip label={rd.label} />
-                    </Link>
-                  ) : (
+              <MetaItem label={t('metaRuntime')}>
+                {rd.href ? (
+                  <Link
+                    href={rd.href}
+                    className="rounded-sm hover:underline"
+                    title={t('runtimeDetailTitle')}
+                  >
                     <RuntimeChip label={rd.label} />
-                  )}
-                </dd>
-              </div>
+                  </Link>
+                ) : (
+                  <RuntimeChip label={rd.label} />
+                )}
+              </MetaItem>
             )
           })()}
+        {/* Trigger provenance (origin/출처) — CI/schedule/API/web + commit · PR · CI run links, folded into the meta card. */}
+        {record.origin && (
+          <MetaItem label={t('metaSource')}>
+            <OriginInline origin={record.origin} />
+          </MetaItem>
+        )}
+        <Prop label="created" value={new Date(record.createdAt).toLocaleString()} />
+        <Prop label="updated" value={new Date(record.updatedAt).toLocaleString()} />
+        {authorName && <Prop label={t('metaRunBy')} value={authorName} />}
         {/* Temporal-owned batch — the durable workflow's id; deep-links to the Temporal UI when TEMPORAL_UI_URL is set. */}
         {record.orchestration?.workflowId && (
-          <div className="min-w-0">
-            <dt className="text-[11px] font-[510] uppercase tracking-wide text-faint">
-              {t('metaWorkflow')}
-            </dt>
-            <dd className="mt-1 truncate font-mono text-[13px] text-foreground">
+          <MetaItem label={t('metaWorkflow')}>
+            <span className="block truncate font-mono text-[13px] text-foreground">
               {env.TEMPORAL_UI_URL ? (
                 <a
                   href={`${env.TEMPORAL_UI_URL}/namespaces/default/workflows/${encodeURIComponent(record.orchestration.workflowId)}`}
@@ -455,8 +504,8 @@ export default async function ScorecardDetailPage({
               ) : (
                 record.orchestration.workflowId
               )}
-            </dd>
-          </div>
+            </span>
+          </MetaItem>
         )}
         {record.subset && (
           <Prop
@@ -473,10 +522,13 @@ export default async function ScorecardDetailPage({
             })()}`}
           />
         )}
+        {/* CI PR ephemeral pins (slot→image) — a full-width sub-row of the same meta card (origin's detail, not a separate block). */}
+        {record.origin && Object.keys(record.origin.pinOverrides ?? {}).length > 0 && (
+          <div className="col-span-2 sm:col-span-4">
+            <OriginPins origin={record.origin} />
+          </div>
+        )}
       </Card>
-
-      {/* Trigger provenance — CI/schedule/API/web + commit · PR · CI run links + PR ephemeral pins (pinOverrides). */}
-      {record.origin && <OriginBlock origin={record.origin} />}
 
       {/* Trace sink export — signals that the detailed results live on the team's observability platform and gives a shortcut (unset records are hidden entirely). */}
       {record.export && (

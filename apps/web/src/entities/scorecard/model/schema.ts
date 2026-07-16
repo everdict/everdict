@@ -171,7 +171,14 @@ export const scorecardRecordSchema = z.object({
   createdBy: z.string().optional(), // the runner (submitter subject) — the 'who' paired with origin (the 'where'). Unset on legacy records.
   runtime: z.string().optional(), // the runtime the batch ran on (placement.target: registered runtime id | self:* runner). Unset = legacy·ingest records. Lightweight → also included in the list.
   // Batch-on-Temporal ownership — when set, a durable workflow drives this batch (shown as a chip on the detail).
-  orchestration: z.object({ workflowId: z.string().optional() }).passthrough().optional(),
+  orchestration: z
+    .object({
+      workflowId: z.string().optional(),
+      // The Agent Judges (entity refs) applied to this batch — surfaced as clickable entity links on the detail.
+      judges: z.array(z.object({ id: z.string(), version: z.string() })).optional(),
+    })
+    .passthrough()
+    .optional(),
   // Partial-run (subset) marker — this batch ran only a subset of the dataset ({selected}/{total}). Unset = full run.
   subset: z
     .object({
