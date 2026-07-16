@@ -27,20 +27,25 @@ export interface JudgeImage {
   mediaType: string; // e.g. "image/png"
 }
 
+// The assembled evidence a judge renders its verdict from — the ONE unit shared by the transport (Judge.judge),
+// the prompt builder (buildPrompt), and the zero-cost preview. assembleJudgeInput is its sole constructor from a
+// GradeContext, so a preview sees byte-identical input to a real grade.
+export interface JudgeInput {
+  task: string;
+  trace?: TraceEvent[];
+  dom?: string;
+  screenshotRef?: string; // External ref such as a browser snapshot (model transport uses screenshot)
+  screenshot?: JudgeImage; // Image bytes resolved for VLM input
+  response?: string; // Final response from the result channel (prompt snapshot output) — the only evidence when the trace has no assistant message
+  expected?: string; // the case's reference output (EvalCase.expected) — EXPECTED OUTPUT evidence
+  rubric?: string;
+  criteria?: JudgeCriterion[]; // multi-criteria: the verdict must score every listed criterion
+  promptTemplate?: string; // custom judging prompt (must carry {verdict_instruction}) — absent: the default template
+}
+
 // Model-based judging abstraction (LLM/VLM). The concrete implementation (real model call) is injected.
 export interface Judge {
-  judge(input: {
-    task: string;
-    trace?: TraceEvent[];
-    dom?: string;
-    screenshotRef?: string; // External ref such as a browser snapshot (model transport uses screenshot)
-    screenshot?: JudgeImage; // Image bytes resolved for VLM input
-    response?: string; // Final response from the result channel (prompt snapshot output) — the only evidence when the trace has no assistant message
-    expected?: string; // the case's reference output (EvalCase.expected) — EXPECTED OUTPUT evidence
-    rubric?: string;
-    criteria?: JudgeCriterion[]; // multi-criteria: the verdict must score every listed criterion
-    promptTemplate?: string; // custom judging prompt (must carry {verdict_instruction}) — absent: the default template
-  }): Promise<JudgeVerdict>;
+  judge(input: JudgeInput): Promise<JudgeVerdict>;
 }
 
 function mediaTypeFor(path: string): string {
@@ -64,6 +69,32 @@ async function resolveScreenshot(snap: EnvSnapshot, compute?: ComputeHandle): Pr
   return { base64, mediaType: mediaTypeFor(ref) };
 }
 
+// Assemble the JudgeInput a judge sees from a finished run's GradeContext + the judge's own knobs. The SOLE
+// constructor of JudgeInput — JudgeGrader.grade and the preview/dry-run surfaces all go through it, so a
+// preview cannot diverge from a real grade. Screenshot resolution reads embedded base64 (no compute) or, for
+// os-use with only a ref, the compute file; in a preview (no compute) an os-use ref simply resolves to absent.
+export async function assembleJudgeInput(
+  ctx: GradeContext,
+  opts: { rubric?: string; criteria?: JudgeCriterion[]; promptTemplate?: string; useScreenshot?: boolean } = {},
+): Promise<JudgeInput> {
+  const snap = ctx.snapshot;
+  const screenshot = opts.useScreenshot ? await resolveScreenshot(snap, ctx.compute) : undefined;
+  return {
+    task: ctx.case.task,
+    trace: ctx.trace,
+    ...(snap.kind === "browser" ? { dom: snap.dom } : {}),
+    ...(snap.kind === "browser" && opts.useScreenshot && snap.screenshotRef
+      ? { screenshotRef: snap.screenshotRef }
+      : {}),
+    ...(screenshot ? { screenshot } : {}),
+    ...(snap.kind === "prompt" && snap.output ? { response: snap.output } : {}),
+    ...(ctx.case.expected ? { expected: ctx.case.expected } : {}),
+    ...(opts.rubric ? { rubric: opts.rubric } : {}),
+    ...(opts.criteria?.length ? { criteria: opts.criteria } : {}),
+    ...(opts.promptTemplate ? { promptTemplate: opts.promptTemplate } : {}),
+  };
+}
+
 // LLM/VLM judge grader. When useScreenshot, passes the snapshot's screenshot as vision input (browser=ref, os-use=read from the environment as bytes).
 // With criteria it is a multi-metric grader: ONE model call → the overall Score (metric "judge") followed by one Score
 // per criterion (metric "judge:<criterion-id>"). The judge runner rewrites the "judge" prefix to "judge:<judge-id>".
@@ -83,20 +114,13 @@ export class JudgeGrader implements Grader {
   }
 
   async grade(ctx: GradeContext): Promise<Score | Score[]> {
-    const snap = ctx.snapshot;
-    const screenshot = this.opts.useScreenshot ? await resolveScreenshot(snap, ctx.compute) : undefined;
-    const verdict = await this.judge.judge({
-      task: ctx.case.task,
-      trace: ctx.trace,
-      dom: snap.kind === "browser" ? snap.dom : undefined,
-      screenshotRef: snap.kind === "browser" && this.opts.useScreenshot ? snap.screenshotRef : undefined,
-      ...(screenshot ? { screenshot } : {}),
-      ...(snap.kind === "prompt" && snap.output ? { response: snap.output } : {}),
-      ...(ctx.case.expected ? { expected: ctx.case.expected } : {}),
-      rubric: this.opts.rubric,
+    const input = await assembleJudgeInput(ctx, {
+      ...(this.opts.rubric ? { rubric: this.opts.rubric } : {}),
       ...(this.opts.criteria?.length ? { criteria: this.opts.criteria } : {}),
       ...(this.opts.promptTemplate ? { promptTemplate: this.opts.promptTemplate } : {}),
+      ...(this.opts.useScreenshot ? { useScreenshot: true } : {}),
     });
+    const verdict = await this.judge.judge(input);
     const overall: Score = {
       graderId: this.id,
       metric: "judge",

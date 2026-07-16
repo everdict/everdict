@@ -6,10 +6,20 @@ export { ScriptGrader, type ScriptGraderConfig } from "./script-grader.js";
 export { stepsGrader, costGrader, latencyGrader } from "./trace-graders.js";
 export { DomContainsGrader, UrlMatchesGrader, AnswerMatchGrader } from "./browser-graders.js";
 export { TextMetricGrader } from "./text-metric.js";
-export { type Judge, type JudgeVerdict, type CriterionVerdict, JudgeGrader } from "./judge.js";
+export {
+  type Judge,
+  type JudgeInput,
+  type JudgeVerdict,
+  type CriterionVerdict,
+  JudgeGrader,
+  assembleJudgeInput,
+} from "./judge.js";
 export {
   type JudgeCompletion,
+  type EvidenceCoverage,
+  type JudgePreview,
   modelJudge,
+  previewJudge,
   anthropicComplete,
   openaiComplete,
   harnessComplete,

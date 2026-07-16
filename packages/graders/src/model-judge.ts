@@ -1,23 +1,11 @@
 import { type JudgeCriterion, type TraceEvent, UpstreamError } from "@everdict/contracts";
-import type { CriterionVerdict, Judge, JudgeImage, JudgeVerdict } from "./judge.js";
+import type { CriterionVerdict, Judge, JudgeImage, JudgeInput, JudgeVerdict } from "./judge.js";
 
 // Model-call primitive — (prompt[, image]) → raw text. Separates transport from judging logic (injected in tests).
 // If an image is given, sends multimodally to a vision model (VLM) (e.g. os-use screenshot judging).
 export type JudgeCompletion = (prompt: string, image?: JudgeImage) => Promise<string>;
 
 const MAX_CHARS = 6000; // Trace/DOM can be large, so truncate to protect the context.
-
-interface JudgeInput {
-  task: string;
-  trace?: TraceEvent[];
-  dom?: string;
-  screenshot?: JudgeImage;
-  response?: string; // result-channel final response (prompt snapshot output)
-  expected?: string; // the case's reference output (EvalCase.expected)
-  rubric?: string;
-  criteria?: JudgeCriterion[]; // multi-criteria: the verdict must score every listed criterion
-  promptTemplate?: string; // custom prompt (must carry {verdict_instruction}); absent → the default template
-}
 
 // Agent final answer = the text of the last assistant message in the trace. The final answer is usually at the very end of the trace array,
 // so truncating with JSON.stringify(trace).slice(0, MAX) cuts it off → the judge misjudges it as "no final answer". Extract it into a dedicated section.
@@ -94,6 +82,58 @@ function buildPrompt(input: JudgeInput): string {
   ]
     .filter(Boolean)
     .join("\n\n");
+}
+
+// Per-placeholder evidence coverage for a preview: is this evidence present, how large, will it be truncated?
+export interface EvidenceCoverage {
+  present: boolean;
+  chars: number; // untruncated length (0 = absent). For screenshot, 0 with present=true (image, not text).
+  truncated: boolean; // length > MAX_CHARS → the prompt cuts it
+}
+
+export interface JudgePreview {
+  prompt: string; // buildPrompt(input) — byte-identical to what the transport would send
+  evidence: Record<string, EvidenceCoverage>; // keyed by placeholder name
+  warnings: string[]; // template references missing evidence, truncation, etc.
+}
+
+// Text placeholders that carry run evidence (task/verdict_instruction are structural, always present).
+const EVIDENCE_PLACEHOLDERS = ["rubric", "criteria", "expected", "final_answer", "response", "trace", "dom"] as const;
+
+// Zero-cost preview: render the exact judging prompt for an assembled input and report per-placeholder coverage
+// + warnings, WITHOUT calling the model. buildPrompt is reused verbatim, so the preview is what the judge sees.
+export function previewJudge(input: JudgeInput): JudgePreview {
+  const finalAnswer = finalAnswerOf(input.trace) ?? "";
+  const traceJson = input.trace ? JSON.stringify(input.trace) : "";
+  const coverage = (text: string): EvidenceCoverage => ({
+    present: text.length > 0,
+    chars: text.length,
+    truncated: text.length > MAX_CHARS,
+  });
+  const evidence: Record<string, EvidenceCoverage> = {
+    task: coverage(input.task),
+    rubric: coverage(input.rubric ?? ""),
+    criteria: coverage(criteriaText(input.criteria)),
+    expected: coverage(input.expected ?? ""),
+    final_answer: coverage(finalAnswer),
+    response: coverage(input.response ?? ""),
+    trace: coverage(traceJson),
+    dom: coverage(input.dom ?? ""),
+    screenshot: { present: input.screenshot !== undefined, chars: 0, truncated: false },
+  };
+  const warnings: string[] = [];
+  if (input.promptTemplate) {
+    for (const key of EVIDENCE_PLACEHOLDERS) {
+      if (input.promptTemplate.includes(`{${key}}`) && !evidence[key]?.present) {
+        warnings.push(`Template references {${key}} but this run carries no ${key} evidence.`);
+      }
+    }
+  }
+  for (const key of EVIDENCE_PLACEHOLDERS) {
+    const c = evidence[key];
+    if (c?.truncated) warnings.push(`${key} is truncated to ${MAX_CHARS} chars in the prompt (${c.chars} total).`);
+  }
+  return { prompt: buildPrompt(input), evidence, warnings };
 }
 
 // Extracts the JSON verdict from the model response (surrounding prose allowed). Format errors → UpstreamError (blame the external dependency).
