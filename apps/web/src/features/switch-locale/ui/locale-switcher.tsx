@@ -11,9 +11,17 @@ import { DropdownItem, DropdownMenu } from '@/shared/ui/dropdown-menu'
 
 import { setLocale } from '../api/set-locale'
 
-// Language switcher — status icon + click dropdown convention (next to the theme toggle, sidebar footer row style).
+// Language switcher — status icon + click dropdown convention. Two shapes:
+//  - 'row' (default): a full-width sidebar-footer row (icon + label + current).
+//  - 'compact': a bordered pill (icon + current) for a settings-list row's right-side control, where the row already labels it.
 // The choice is stored in a cookie and applied immediately, down to server component strings, via router.refresh.
-export function LocaleSwitcher({ rowClassName }: { rowClassName?: string }) {
+export function LocaleSwitcher({
+  rowClassName,
+  variant = 'row',
+}: {
+  rowClassName?: string
+  variant?: 'row' | 'compact'
+}) {
   const t = useTranslations('locale')
   const locale = useLocale()
   const router = useRouter()
@@ -24,6 +32,36 @@ export function LocaleSwitcher({ rowClassName }: { rowClassName?: string }) {
       await setLocale(next)
       router.refresh()
     })
+  }
+
+  if (variant === 'compact') {
+    return (
+      <DropdownMenu
+        side="bottom"
+        align="end"
+        contentClassName="min-w-[160px]"
+        trigger={({ toggle }) => (
+          <button
+            type="button"
+            onClick={toggle}
+            className="inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-[13px] text-foreground transition-colors hover:bg-accent"
+          >
+            <Languages className="size-4 shrink-0 text-muted-foreground" strokeWidth={1.75} />
+            {t(locale)}
+          </button>
+        )}
+      >
+        {LOCALES.map((l) => (
+          <DropdownItem
+            key={l}
+            onSelect={() => choose(l)}
+            trailing={l === locale ? <Check /> : undefined}
+          >
+            {t(l)}
+          </DropdownItem>
+        ))}
+      </DropdownMenu>
+    )
   }
 
   return (

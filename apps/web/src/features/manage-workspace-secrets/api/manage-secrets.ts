@@ -15,9 +15,11 @@ export interface SecretMutationResult {
 // env-format name (same as the control plane's SecretNameSchema) — first-pass validation at the form; final enforcement is the control plane.
 const NAME_RE = /^[A-Z_][A-Z0-9_]*$/
 
-// Revalidate after a per-scope change — user (personal) = account screen, workspace (shared) = workspace settings.
+// Revalidate after a per-scope change — user (personal) = the account personal-secrets page, workspace (shared) = the workspace secrets page.
 function revalidateFor(scope: SecretScope): void {
-  revalidatePath(scope === 'user' ? '/[workspace]/account' : '/[workspace]/settings')
+  revalidatePath(
+    scope === 'user' ? '/[workspace]/settings/personal-secrets' : '/[workspace]/settings/secrets'
+  )
 }
 
 // Set/update a secret (encrypted at rest; the value is never shown again). scope = workspace (admin) | user (self). authZ is enforced by the control plane.

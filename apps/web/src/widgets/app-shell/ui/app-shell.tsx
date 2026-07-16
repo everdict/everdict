@@ -18,6 +18,8 @@ export function AppShell({
   roles,
   authed,
   showLogin,
+  email,
+  profile,
   children,
 }: {
   workspace: string
@@ -26,6 +28,8 @@ export function AppShell({
   roles: string[]
   authed: boolean
   showLogin: boolean
+  email?: string
+  profile?: { name?: string; username?: string; avatarUrl?: string }
   children: ReactNode
 }) {
   return (
@@ -37,6 +41,8 @@ export function AppShell({
         roles={roles}
         authed={authed}
         showLogin={showLogin}
+        {...(email !== undefined ? { email } : {})}
+        {...(profile !== undefined ? { profile } : {})}
       />
       <main className="flex min-w-0 flex-1 flex-col">
         {/* md:pt-12 = 데스크톱에서 떠 있는 우상단 클러스터가 페이지 헤더의 우측 액션과 겹치지 않도록 상단 여백 확보(모바일은 상단 바가 이미 아래로 밀어줌). */}

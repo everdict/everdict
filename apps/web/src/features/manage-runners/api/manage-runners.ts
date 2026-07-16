@@ -37,7 +37,7 @@ export async function pairRunnerAction(input: PairRunnerInput): Promise<PairRunn
         : {}),
     })
     const res = pairedRunnerSchema.parse(await controlPlane.pairRunner(ctx, body))
-    revalidatePath('/[workspace]/account')
+    revalidatePath('/[workspace]/runtimes')
     return { ok: true, token: res.token, runner: res.runner, apiUrl: env.CONTROL_PLANE_URL }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }
@@ -49,7 +49,7 @@ export async function revokeRunnerAction(id: string): Promise<RunnerMutationResu
   const ctx = await authContext()
   try {
     await controlPlane.revokeRunner(ctx, id)
-    revalidatePath('/[workspace]/account')
+    revalidatePath('/[workspace]/runtimes')
     return { ok: true }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }

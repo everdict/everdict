@@ -2,18 +2,20 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
-import { usePathname } from 'next/navigation'
-import { LogIn, LogOut, Menu, Moon, Search, Settings, Sun, UserCog, X } from 'lucide-react'
+import { usePathname, useRouter } from 'next/navigation'
+import { ArrowLeft, LogIn, LogOut, Menu, Search, Settings, X } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
 import { WorkspaceSwitcher } from '@/widgets/workspace-switcher'
-import { LocaleSwitcher } from '@/features/switch-locale'
 import type { Workspace } from '@/entities/workspace'
 import { can } from '@/shared/auth/can'
 import { cn } from '@/shared/lib/utils'
+import { Avatar } from '@/shared/ui/avatar'
+import { DropdownItem, DropdownMenu } from '@/shared/ui/dropdown-menu'
 import { Kbd } from '@/shared/ui/kbd'
 
 import { NAV_SECTIONS } from './nav-config'
+import { SETTINGS_NAV_GROUPS } from './settings-nav-config'
 
 export interface SidebarProps {
   workspace: string
@@ -22,6 +24,8 @@ export interface SidebarProps {
   roles: string[]
   authed: boolean
   showLogin: boolean
+  email?: string
+  profile?: { name?: string; username?: string; avatarUrl?: string }
 }
 
 // Open the Cmd+K palette — a module-level custom event (wires the search button ↔ palette without context plumbing).
@@ -33,20 +37,20 @@ function isMac() {
   return typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform)
 }
 
-function setTheme(dark: boolean) {
-  document.documentElement.classList.toggle('dark', dark)
-  document.documentElement.style.colorScheme = dark ? 'dark' : 'light'
-  try {
-    localStorage.setItem('theme', dark ? 'dark' : 'light')
-  } catch {
-    /* localStorage-blocked environment */
-  }
-}
-
 const rowClass =
   'group flex items-center gap-2.5 rounded-md px-2 py-[7px] text-[13px] font-[510] text-secondary-foreground transition-colors duration-100 hover:bg-accent/60 hover:text-foreground'
 const iconClass =
   'size-[17px] shrink-0 text-muted-foreground transition-colors group-hover:text-foreground'
+
+// Active nav-row markup (shared by the app nav + the settings nav): indigo active bar + accent fill.
+function navRowClass(active: boolean) {
+  return cn(
+    'group relative flex items-center gap-2.5 rounded-md px-2 py-[7px] text-[13px] font-[510] transition-colors duration-100',
+    active
+      ? 'bg-accent text-foreground'
+      : 'text-secondary-foreground hover:bg-accent/60 hover:text-foreground'
+  )
+}
 
 function NavLinks({ workspace, onNavigate }: { workspace: string; onNavigate?: () => void }) {
   const pathname = usePathname()
@@ -72,12 +76,7 @@ function NavLinks({ workspace, onNavigate }: { workspace: string; onNavigate?: (
                 href={href}
                 onClick={onNavigate}
                 aria-current={active ? 'page' : undefined}
-                className={cn(
-                  'group relative flex items-center gap-2.5 rounded-md px-2 py-[7px] text-[13px] font-[510] transition-colors duration-100',
-                  active
-                    ? 'bg-accent text-foreground'
-                    : 'text-secondary-foreground hover:bg-accent/60 hover:text-foreground'
-                )}
+                className={navRowClass(active)}
               >
                 <span
                   className={cn(
@@ -102,91 +101,181 @@ function NavLinks({ workspace, onNavigate }: { workspace: string; onNavigate?: (
   )
 }
 
-// Bottom footer — direct links to account/settings/theme/logout. Visually separated from the workspace chip (dedup),
-// and not dependent on a dropdown so it's always visible and always clickable.
-function SidebarFooter({
+// Settings secondary-nav — replaces the app nav when inside /settings (Linear-style takeover). "Back to app" at the top,
+// then grouped Account (always) + Workspace (role-gated: items the role can't access are hidden; an empty group is dropped).
+function SettingsNav({
   workspace,
   roles,
+  onNavigate,
+}: {
+  workspace: string
+  roles: string[]
+  onNavigate?: () => void
+}) {
+  const pathname = usePathname()
+  const t = useTranslations('settingsNav')
+  const base = `/${workspace}/settings`
+  return (
+    <>
+      <Link href={`/${workspace}`} onClick={onNavigate} className={rowClass}>
+        <ArrowLeft className={iconClass} strokeWidth={1.75} />
+        {t('backToApp')}
+      </Link>
+      <div className="-mr-1 mt-1 flex-1 overflow-y-auto pr-1">
+        <nav className="flex flex-col gap-4">
+          {SETTINGS_NAV_GROUPS.map((group) => {
+            const items = group.items.filter(
+              (item) => !item.requiredAction || can(roles, item.requiredAction)
+            )
+            if (items.length === 0) return null
+            return (
+              <div key={group.headingKey} className="flex flex-col gap-0.5">
+                <p className="px-2 pb-1 text-[11px] font-[510] tracking-wide text-faint">
+                  {t(group.headingKey)}
+                </p>
+                {items.map((item) => {
+                  const href = `${base}${item.href}`
+                  const active = item.exact
+                    ? pathname === href
+                    : pathname === href || pathname.startsWith(`${href}/`)
+                  const Icon = item.icon
+                  return (
+                    <Link
+                      key={item.href || 'general'}
+                      href={href}
+                      onClick={onNavigate}
+                      aria-current={active ? 'page' : undefined}
+                      className={navRowClass(active)}
+                    >
+                      <span
+                        className={cn(
+                          'absolute left-0 top-1/2 h-3.5 w-0.5 -translate-y-1/2 rounded-full bg-primary transition-opacity',
+                          active ? 'opacity-100' : 'opacity-0'
+                        )}
+                      />
+                      <Icon
+                        className={cn(
+                          'size-[17px] shrink-0 transition-colors',
+                          active
+                            ? 'text-foreground'
+                            : 'text-muted-foreground group-hover:text-foreground'
+                        )}
+                        strokeWidth={1.75}
+                      />
+                      {t(item.labelKey)}
+                    </Link>
+                  )
+                })}
+              </div>
+            )
+          })}
+        </nav>
+      </div>
+    </>
+  )
+}
+
+// Bottom footer — a single user entry (avatar + name) → dropdown {Settings, Log out}. Consolidates the former
+// account/settings/theme/language/logout rows (theme + language now live in Settings › Preferences).
+function SidebarFooter({
+  workspace,
+  subject,
+  email,
+  profile,
   authed,
   showLogin,
   onNavigate,
 }: {
   workspace: string
-  roles: string[]
+  subject: string
+  email?: string
+  profile?: { name?: string; username?: string; avatarUrl?: string }
   authed: boolean
   showLogin: boolean
   onNavigate?: () => void
 }) {
-  const pathname = usePathname()
   const t = useTranslations('shell')
-  const accountActive = pathname === `/${workspace}/account`
-  const settingsActive = pathname.startsWith(`/${workspace}/settings`)
-  return (
-    <div className="flex flex-col gap-0.5 border-t border-border pt-2">
-      <Link
-        href={`/${workspace}/account`}
-        onClick={onNavigate}
-        aria-current={accountActive ? 'page' : undefined}
-        className={cn(rowClass, accountActive && 'bg-accent text-foreground')}
-      >
-        <UserCog className={cn(iconClass, accountActive && 'text-foreground')} strokeWidth={1.75} />
-        {t('account')}
-      </Link>
-      {can(roles, 'settings:read') && (
-        <Link
-          href={`/${workspace}/settings`}
-          onClick={onNavigate}
-          aria-current={settingsActive ? 'page' : undefined}
-          className={cn(rowClass, settingsActive && 'bg-accent text-foreground')}
+  const router = useRouter()
+  const displayName = profile?.name ?? profile?.username ?? email ?? subject
+
+  // Keycloak configured but signed out → a plain login button (no user menu to show).
+  if (showLogin && !authed) {
+    return (
+      <div className="border-t border-border pt-2">
+        <button
+          type="button"
+          onClick={() => {
+            window.location.href = '/api/auth/signin'
+          }}
+          className={cn(rowClass, 'w-full text-left')}
         >
-          <Settings
-            className={cn(iconClass, settingsActive && 'text-foreground')}
-            strokeWidth={1.75}
-          />
-          {t('workspaceSettings')}
-        </Link>
-      )}
-      <button
-        type="button"
-        onClick={() => setTheme(!document.documentElement.classList.contains('dark'))}
-        className={cn(rowClass, 'w-full text-left')}
+          <LogIn className={iconClass} strokeWidth={1.75} />
+          {t('login')}
+        </button>
+      </div>
+    )
+  }
+
+  return (
+    <div className="border-t border-border pt-2">
+      <DropdownMenu
+        side="top"
+        className="w-full"
+        contentClassName="w-[204px]"
+        trigger={({ toggle }) => (
+          <button type="button" onClick={toggle} className={cn(rowClass, 'w-full text-left')}>
+            <Avatar
+              name={displayName}
+              {...(profile?.avatarUrl !== undefined ? { url: profile.avatarUrl } : {})}
+              size="sm"
+              className="rounded-full"
+            />
+            <span className="min-w-0 flex-1 truncate">{displayName}</span>
+          </button>
+        )}
       >
-        <Sun className={cn(iconClass, 'hidden dark:block')} strokeWidth={1.75} />
-        <Moon className={cn(iconClass, 'block dark:hidden')} strokeWidth={1.75} />
-        {t('toggleTheme')}
-      </button>
-      <LocaleSwitcher rowClassName={rowClass} />
-      {showLogin &&
-        (authed ? (
-          <button
-            type="button"
-            onClick={() => {
+        <DropdownItem
+          icon={<Settings />}
+          onSelect={() => {
+            onNavigate?.()
+            router.push(`/${workspace}/settings/profile`)
+          }}
+        >
+          {t('settings')}
+        </DropdownItem>
+        {authed && (
+          <DropdownItem
+            icon={<LogOut />}
+            tone="danger"
+            onSelect={() => {
               window.location.href = '/api/auth/signout'
             }}
-            className="group flex w-full items-center gap-2.5 rounded-md px-2 py-[7px] text-left text-[13px] font-[510] text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
           >
-            <LogOut className="size-[17px] shrink-0" strokeWidth={1.75} />
             {t('logout')}
-          </button>
-        ) : (
-          <button
-            type="button"
-            onClick={() => {
-              window.location.href = '/api/auth/signin'
-            }}
-            className={cn(rowClass, 'w-full text-left')}
-          >
-            <LogIn className={iconClass} strokeWidth={1.75} />
-            {t('login')}
-          </button>
-        ))}
+          </DropdownItem>
+        )}
+      </DropdownMenu>
     </div>
   )
 }
 
 function SidebarBody({ onNavigate, ...props }: SidebarProps & { onNavigate?: () => void }) {
+  const pathname = usePathname()
+  const inSettings =
+    pathname === `/${props.workspace}/settings` ||
+    pathname.startsWith(`/${props.workspace}/settings/`)
   const mac = isMac()
   const t = useTranslations('shell')
+
+  // Settings takeover — the whole sidebar becomes the settings nav (back-to-app + grouped sections).
+  if (inSettings) {
+    return (
+      <div className="flex h-full flex-col gap-3 px-3 py-3.5">
+        <SettingsNav workspace={props.workspace} roles={props.roles} onNavigate={onNavigate} />
+      </div>
+    )
+  }
+
   return (
     <div className="flex h-full flex-col gap-3 px-3 py-3.5">
       <WorkspaceSwitcher current={props.workspace} workspaces={props.workspaces} />
@@ -207,7 +296,9 @@ function SidebarBody({ onNavigate, ...props }: SidebarProps & { onNavigate?: () 
 
       <SidebarFooter
         workspace={props.workspace}
-        roles={props.roles}
+        subject={props.subject}
+        {...(props.email !== undefined ? { email: props.email } : {})}
+        {...(props.profile !== undefined ? { profile: props.profile } : {})}
         authed={props.authed}
         showLogin={props.showLogin}
         onNavigate={onNavigate}

@@ -19,7 +19,7 @@ export async function updateProfileAction(input: {
   const ctx = await authContext()
   try {
     await controlPlane.updateProfile(ctx, input)
-    revalidatePath('/[workspace]/account')
+    revalidatePath('/[workspace]/settings/profile')
     return { ok: true }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }

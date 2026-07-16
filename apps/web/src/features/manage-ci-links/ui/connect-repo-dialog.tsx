@@ -195,7 +195,7 @@ export function ConnectRepoDialog({
             {t('noReposCallout')}
             <div className="mt-2">
               <Link
-                href={`/${encodeURIComponent(workspace)}/settings?tab=integrations`}
+                href={`/${encodeURIComponent(workspace)}/settings/integrations`}
                 className="text-[12px] font-[510] text-primary hover:underline"
               >
                 {t('installGithubAppLink')}
@@ -417,7 +417,7 @@ export function ConnectRepoDialog({
                     {t('noRunnersCallout')}
                     <div className="mt-1.5">
                       <Link
-                        href={`/${encodeURIComponent(workspace)}/settings?tab=runners`}
+                        href={`/${encodeURIComponent(workspace)}/settings/runners`}
                         className="text-[12px] font-[510] text-primary hover:underline"
                       >
                         {t('registerRunnerLink')}

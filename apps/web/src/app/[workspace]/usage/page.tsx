@@ -8,5 +8,5 @@ export default async function UsageRedirect({
   params: Promise<{ workspace: string }>
 }) {
   const { workspace } = await params
-  redirect(`/${workspace}/settings?tab=budget`)
+  redirect(`/${workspace}/settings/budget`)
 }

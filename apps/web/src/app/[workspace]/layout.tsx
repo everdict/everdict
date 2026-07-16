@@ -38,6 +38,8 @@ export default async function WorkspaceLayout({
       roles={principal.roles}
       authed={principal.via === 'oidc'}
       showLogin={keycloakConfigured}
+      {...(principal.email !== undefined ? { email: principal.email } : {})}
+      {...(principal.profile !== undefined ? { profile: principal.profile } : {})}
     >
       {children}
     </AppShell>

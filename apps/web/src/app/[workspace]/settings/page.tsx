@@ -1,19 +1,9 @@
+import { redirect } from 'next/navigation'
 import { getTranslations } from 'next-intl/server'
 
-import type { ModelEntry } from '@/features/manage-models'
-import { budgetResponseSchema, type BudgetResponse } from '@/entities/budget'
-import { ciLinksResponseSchema, type CiLink } from '@/entities/ci-link'
-import { githubAppViewSchema, type GithubAppView } from '@/entities/github-app'
-import { imageRegistriesResponseSchema, type ImageRegistryConfig } from '@/entities/image-registry'
-import { mattermostResponseSchema, type MattermostConfig } from '@/entities/mattermost'
-import { invitesSchema, membersSchema, type Invite, type Member } from '@/entities/member'
-import { modelSpecSchema, modelsSchema } from '@/entities/model'
-import { runnersResponseSchema, type RunnerMeta } from '@/entities/runner'
-import { secretsSchema, type SecretMeta } from '@/entities/secret'
-import { traceSinksResponseSchema, type TraceSinkConfig } from '@/entities/trace-sink'
-import { traceSourcesResponseSchema, type TraceSourceConfig } from '@/entities/trace-source'
-import { tenantUsageSchema, type TenantUsage } from '@/entities/usage'
 import { workspaceRecordSchema, type WorkspaceRecord } from '@/entities/workspace'
+import { DeleteWorkspaceCard } from '@/features/delete-workspace'
+import { WorkspaceInfoCard } from '@/features/workspace-settings'
 import { can } from '@/shared/auth/can'
 import { currentPrincipal } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
@@ -21,228 +11,86 @@ import { Callout } from '@/shared/ui/callout'
 import { EmptyState } from '@/shared/ui/empty-state'
 import { PageHeader } from '@/shared/ui/page-header'
 
-import { SettingsTabs } from './settings-tabs'
-
 export const dynamic = 'force-dynamic'
 
-// Workspace settings — policy · secrets · members (+ the roster of applications connected to this workspace, read-only).
-// Connecting/disconnecting (managing) external account connections is personally-owned, so it lives on the account page. This roster is by the workspace as created (members:read).
-// searchParams.tab — received so the account→connections tab's "Integration settings →" deep link lands straight on the integrations tab.
-// searchParams.app — drills straight into a specific integration's detail (github/mattermost/trace-sink/image-registry) within the integrations tab.
-// searchParams.githubApp/error — result notice from the GitHub App installation callback redirect (shown on the integrations tab).
-export default async function SettingsPage({
+// Old ?tab= deep links (from the former tabbed settings page + the GitHub App install callback that lands on
+// ?tab=integrations&githubApp=installed) → the matching section route. model/cluster = the old split secret tabs.
+const TAB_ROUTES: Record<string, string> = {
+  secrets: 'secrets',
+  model: 'secrets',
+  cluster: 'secrets',
+  models: 'models',
+  integrations: 'integrations',
+  ci: 'ci',
+  runners: 'runners',
+  budget: 'budget',
+  members: 'members',
+}
+
+// Settings index = Workspace › General (workspace info + delete). Also the back-compat entry for legacy ?tab= links.
+export default async function SettingsGeneralPage({
+  params,
   searchParams,
 }: {
+  params: Promise<{ workspace: string }>
   searchParams: Promise<{ tab?: string; app?: string; githubApp?: string; error?: string }>
 }) {
+  const { workspace } = await params
   const sp = await searchParams
-  const t = await getTranslations('settingsPage')
-  const githubAppNotice =
-    sp.githubApp === 'installed' || sp.error !== undefined
-      ? {
-          ...(sp.githubApp === 'installed' ? { installed: true } : {}),
-          ...(sp.error !== undefined ? { error: sp.error } : {}),
-        }
-      : undefined
-  const { principal, ctx } = await currentPrincipal()
-  const canReadSettings = can(principal?.roles, 'settings:read')
-  const canWriteSettings = can(principal?.roles, 'settings:write')
-  const canReadSecrets = can(principal?.roles, 'secrets:read')
-  const canWriteSecrets = can(principal?.roles, 'secrets:write')
-  const canReadModels = can(principal?.roles, 'models:read')
-  const canWriteModels = can(principal?.roles, 'models:write')
-  const canDeleteModels = can(principal?.roles, 'models:delete')
-  const canReadMembers = can(principal?.roles, 'members:read')
-  const canWriteMembers = can(principal?.roles, 'members:write')
-  // Budget + usage are readable by members (viewer+, reuses scorecards:read); editing the limit stays admin (settings:write).
-  const canReadUsage = can(principal?.roles, 'scorecards:read')
-
-  let workspace: WorkspaceRecord | undefined
-  let secrets: SecretMeta[] = []
-  let models: ModelEntry[] = []
-  let githubApp: GithubAppView = { registrations: [], installations: [] }
-  let mattermost: MattermostConfig | undefined
-  let traceSinks: TraceSinkConfig[] = []
-  let traceSources: TraceSourceConfig[] = []
-  let imageRegistries: ImageRegistryConfig[] = []
-  let ciLinks: CiLink[] = []
-  let budget: BudgetResponse | undefined
-  let metered: TenantUsage | undefined
-  let workspaceRunners: RunnerMeta[] = []
-  let members: Member[] = []
-  let invites: Invite[] = []
-  // Per-section soft-fail: one failing fetch (a missing route on a stale control plane, one misbehaving
-  // integration) must not nuke the whole settings page — the failed sections are named in a callout and
-  // everything else renders. Only when EVERY attempted section failed do we show the full-page error.
-  const failedSections: string[] = []
-  let attempted = 0
-  let firstError: string | undefined
-  const attempt = async <T,>(section: string, fn: () => Promise<T>): Promise<T | undefined> => {
-    attempted += 1
-    try {
-      return await fn()
-    } catch (e) {
-      failedSections.push(section)
-      firstError ??= e instanceof Error ? e.message : String(e)
-      return undefined
+  if (sp.tab !== undefined && sp.tab !== 'general') {
+    const section = TAB_ROUTES[sp.tab]
+    if (section) {
+      const qs = new URLSearchParams()
+      if (sp.app !== undefined) qs.set('app', sp.app)
+      if (sp.githubApp !== undefined) qs.set('githubApp', sp.githubApp)
+      if (sp.error !== undefined) qs.set('error', sp.error)
+      const query = qs.toString()
+      redirect(`/${workspace}/settings/${section}${query ? `?${query}` : ''}`)
     }
   }
-  if (canReadSettings) {
-    workspace = await attempt('workspace', async () =>
-      workspaceRecordSchema.parse(await controlPlane.getWorkspace(ctx))
-    )
-    // Workspace-owned GitHub App integration (org installation→selected repos). settings:read (admin).
-    githubApp =
-      (await attempt('github-app', async () =>
-        githubAppViewSchema.parse(await controlPlane.getGithubApp(ctx))
-      )) ?? githubApp
-    // Workspace-owned Mattermost integration (completion/regression notifications). Replaces personal-connection notifications. settings:read (admin).
-    mattermost = await attempt(
-      'mattermost',
-      async () => mattermostResponseSchema.parse(await controlPlane.getMattermost(ctx)).config
-    )
-    // Workspace trace sinks (multiple — selected per harness). The read itself is viewer+, but the management UI is this tab.
-    traceSinks =
-      (await attempt(
-        'trace-sinks',
-        async () => traceSinksResponseSchema.parse(await controlPlane.listTraceSinks(ctx)).sinks
-      )) ?? []
-    // Workspace trace sources (multiple — selected per harness). The read itself is viewer+, but the management UI is this tab.
-    traceSources =
-      (await attempt(
-        'trace-sources',
-        async () =>
-          traceSourcesResponseSchema.parse(await controlPlane.listTraceSources(ctx)).sources
-      )) ?? []
-    // Workspace image registries (multiple — classification baseline + everdict image push target). The read itself is viewer+, but the management UI is this tab.
-    imageRegistries =
-      (await attempt(
-        'image-registries',
-        async () =>
-          imageRegistriesResponseSchema.parse(await controlPlane.listImageRegistries(ctx))
-            .registries
-      )) ?? []
-    // CI repo link (repo↔harness slot = OIDC trust) — the link's existence is that repo's keyless CI trust. Removal is admin.
-    ciLinks =
-      (await attempt(
-        'ci-links',
-        async () => ciLinksResponseSchema.parse(await controlPlane.listCiLinks(ctx)).links
-      )) ?? []
-  }
-  // Budget (enforcement caps + committed usage) + metered billing usage — both readable by members (viewer+). The
-  // limit form is editable only by admins (canWriteSettings); members see it read-only. Consolidated from the old /usage page.
-  if (canReadUsage) {
-    budget = await attempt('budget', async () =>
-      budgetResponseSchema.parse(await controlPlane.getBudget(ctx))
-    )
-    metered = await attempt('usage', async () =>
-      tenantUsageSchema.parse(await controlPlane.getUsage(ctx))
-    )
-  }
-  // Workspace-shared runners (owner=ws:<workspace>) — team build server/CI. Register/read/remove are all admin (settings:write).
-  if (canWriteSettings) {
-    workspaceRunners =
-      (await attempt(
-        'runners',
-        async () =>
-          runnersResponseSchema.parse(await controlPlane.listWorkspaceOwnedRunners(ctx)).runners
-      )) ?? []
-  }
-  // Workspace settings show only shared (workspace) secrets — my personal (user) secrets that GET /secrets mixes in are managed on the account page.
-  if (canReadSecrets)
-    secrets =
-      (await attempt('secrets', async () =>
-        secretsSchema
-          .parse(await controlPlane.listSecrets(ctx))
-          .filter((s) => s.scope === 'workspace')
-      )) ?? []
-  // Workspace models (owned + _shared) — enrich each id with its latest spec (provider/model/baseUrl/apiKeySecret)
-  // so the card shows the connection + linked-key state. A per-model detail fetch failure drops only that detail.
-  if (canReadModels)
-    models =
-      (await attempt('models', async () => {
-        const summaries = modelsSchema.parse(await controlPlane.listModels(ctx))
-        return Promise.all(
-          summaries.map(async (s): Promise<ModelEntry> => {
-            const base = {
-              id: s.id,
-              owner: s.owner,
-              versions: s.versions,
-              ...(s.createdBy !== undefined ? { createdBy: s.createdBy } : {}),
-            }
-            try {
-              const spec = modelSpecSchema.parse(await controlPlane.getModel(ctx, s.id, 'latest'))
-              return { ...base, spec }
-            } catch {
-              return base
-            }
-          })
-        )
-      })) ?? []
-  if (canReadMembers)
-    members =
-      (await attempt('members', async () =>
-        membersSchema.parse(await controlPlane.listMembers(ctx))
-      )) ?? []
-  if (canWriteMembers)
-    invites =
-      (await attempt('invites', async () =>
-        invitesSchema.parse(await controlPlane.listInvites(ctx))
-      )) ?? []
-  const allFailed = attempted > 0 && failedSections.length === attempted
-  const error = allFailed ? firstError : undefined
 
-  const canReadAny =
-    canReadSettings || canReadSecrets || canReadModels || canReadMembers || canReadUsage
-  // Deletion is owner (creator) only — the control plane enforces it ultimately, and the UI exposes the danger zone only when owner.
-  const isOwner = workspace !== undefined && workspace.owner === principal?.subject
+  const t = await getTranslations('settingsNav')
+  const s = await getTranslations('settingsPage')
+  const { principal, ctx } = await currentPrincipal()
+  const canRead = can(principal?.roles, 'settings:read')
+  const canWrite = can(principal?.roles, 'settings:write')
+  const header = <PageHeader title={t('general')} description={t('generalDesc')} />
+  if (!canRead) {
+    return (
+      <div className="space-y-6">
+        {header}
+        <EmptyState title={s('noPermissionTitle')} hint={s('noPermissionHint')} />
+      </div>
+    )
+  }
+
+  let workspaceRecord: WorkspaceRecord | undefined
+  let error: string | undefined
+  try {
+    workspaceRecord = workspaceRecordSchema.parse(await controlPlane.getWorkspace(ctx))
+  } catch (e) {
+    error = e instanceof Error ? e.message : String(e)
+  }
+  // Deletion is owner (creator) only — the control plane enforces it; the UI exposes the danger zone only when owner.
+  const isOwner = workspaceRecord !== undefined && workspaceRecord.owner === principal?.subject
 
   return (
     <div className="space-y-6">
-      <PageHeader title={t('title')} description={t('description')} />
-      {!canReadAny ? (
-        <EmptyState title={t('noPermissionTitle')} hint={t('noPermissionHint')} />
-      ) : error !== undefined ? (
-        <Callout tone="danger">{t('connectError', { error })}</Callout>
+      {header}
+      {error !== undefined ? (
+        <Callout tone="danger">{s('connectError', { error })}</Callout>
       ) : (
-        <>
-          {failedSections.length > 0 && (
-            <Callout tone="danger">
-              {t('partialError', { sections: failedSections.join(', '), error: firstError ?? '' })}
-            </Callout>
+        <div className="space-y-6">
+          {workspaceRecord && (
+            <WorkspaceInfoCard
+              id={workspaceRecord.id}
+              name={workspaceRecord.name}
+              canWrite={canWrite}
+              {...(workspaceRecord.logoUrl !== undefined ? { logoUrl: workspaceRecord.logoUrl } : {})}
+            />
           )}
-          <SettingsTabs
-            isOwner={isOwner}
-            {...(workspace !== undefined ? { workspace } : {})}
-            secrets={secrets}
-            models={models}
-            githubApp={githubApp}
-            {...(githubAppNotice !== undefined ? { githubAppNotice } : {})}
-            {...(mattermost !== undefined ? { mattermost } : {})}
-            traceSinks={traceSinks}
-            traceSources={traceSources}
-            imageRegistries={imageRegistries}
-            ciLinks={ciLinks}
-            {...(budget !== undefined ? { budget } : {})}
-            {...(metered !== undefined ? { metered } : {})}
-            workspaceRunners={workspaceRunners}
-            members={members}
-            invites={invites}
-            canReadSettings={canReadSettings}
-            canWriteSettings={canWriteSettings}
-            canReadSecrets={canReadSecrets}
-            canWriteSecrets={canWriteSecrets}
-            canReadModels={canReadModels}
-            canWriteModels={canWriteModels}
-            canDeleteModels={canDeleteModels}
-            {...(principal?.subject !== undefined ? { currentSubject: principal.subject } : {})}
-            canReadMembers={canReadMembers}
-            canWriteMembers={canWriteMembers}
-            canReadUsage={canReadUsage}
-            {...(sp.tab !== undefined ? { initialTab: sp.tab } : {})}
-            {...(sp.app !== undefined ? { initialIntegration: sp.app } : {})}
-          />
-        </>
+          {isOwner && workspaceRecord && <DeleteWorkspaceCard workspaceName={workspaceRecord.name} />}
+        </div>
       )}
     </div>
   )

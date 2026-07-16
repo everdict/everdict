@@ -498,7 +498,7 @@ export function BuildFromSourceWizard({
                       <span className="inline-flex items-center gap-1 text-[12px] text-[var(--color-warning)]">
                         <Lock className="size-3" /> gated · {t('gatedTokenNeeded')}
                         <Link
-                          href={`/${workspace}/account?tab=secrets`}
+                          href={`/${workspace}/settings/personal-secrets`}
                           className="font-[510] text-primary underline-offset-2 hover:underline"
                         >
                           {t('registerInAccount')}
