@@ -149,6 +149,8 @@ export {
   TraceSourceService,
   type TraceSourceServiceDeps,
 } from "./trace-source/trace-source-service.js";
+export { resolveHarnessTraceMapping } from "./trace-source/resolve-harness-mapping.js";
+export { SpanAttrMappingService } from "./trace-source/span-attr-mapping-service.js";
 export { type ArtifactStore, offloadSnapshot } from "./ports/artifact-store.js";
 
 // Control-plane execution machinery (re-architecture P2 S3) — the pure execution unit, out-of-job trace

@@ -1,4 +1,4 @@
-import type { TraceSource, TraceSourceConfig } from "@everdict/contracts";
+import type { BrowsableTraceSource, TraceSourceConfig } from "@everdict/contracts";
 import { LangfuseTraceSource } from "./langfuse-source.js";
 import { LangsmithTraceSource } from "./langsmith-source.js";
 import { MlflowTraceSource } from "./mlflow.js";
@@ -6,7 +6,8 @@ import { OtelTraceSource } from "./otel.js";
 import { PhoenixTraceSource } from "./phoenix-source.js";
 
 // Config → TraceSource adapter. The control plane builds the tenant's trace source on pull-ingest (credentials via headers/auth).
-export function buildTraceSource(cfg: TraceSourceConfig): TraceSource {
+// Returns a BrowsableTraceSource (fetch + listTraces + inspect); pull-only consumers keep using the narrower TraceSource.
+export function buildTraceSource(cfg: TraceSourceConfig): BrowsableTraceSource {
   const opts = {
     endpoint: cfg.endpoint,
     ...(cfg.headers ? { headers: cfg.headers } : {}),

@@ -18,6 +18,7 @@ import { installGithubWorkspaceRunner } from "@everdict/application-control";
 import type { RunnerHubLike } from "@everdict/application-control";
 import { PairRunnerBodySchema, RUNNER_CAPABILITIES, type RunnerService } from "@everdict/application-control";
 import { type ScheduleService, isValidCron } from "@everdict/application-control";
+import type { SpanAttrMappingService } from "@everdict/application-control";
 import {
   IngestScorecardBodySchema,
   PullIngestBodySchema,
@@ -134,6 +135,7 @@ export interface ServerDeps {
   mattermostCommandService?: MattermostCommandService; // Mattermost inbound (slash commands/buttons) (route disabled if absent)
   traceSinkService?: TraceSinkService; // workspace trace sinks (export to observability platform) (route disabled if absent)
   traceSourceService?: TraceSourceService; // workspace trace sources (pull from observability platform) (route disabled if absent)
+  spanAttrMappingService?: SpanAttrMappingService; // per-harness span-attr mapping overlay (the conversion layer between a harness and a judge) (route disabled if absent)
   imageRegistryService?: ImageRegistryService; // workspace image registries (classification baseline + push mint) (route disabled if absent)
   ciLinkService?: CiLinkService; // CI repo links (repo↔harness slot + OIDC trust) + picker/setup-PR (route disabled if absent)
   runnerService?: RunnerService; // self-hosted runners (personal device pairing) (route disabled if absent)

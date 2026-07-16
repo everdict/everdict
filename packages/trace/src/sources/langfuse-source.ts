@@ -1,4 +1,12 @@
-import { type TraceEvent, type TraceSource, UpstreamError } from "@everdict/contracts";
+import {
+  type BrowsableTraceSource,
+  type ListTracesOptions,
+  type SpanAttrMapping,
+  type TraceEvent,
+  type TraceInspectResult,
+  type TraceSummary,
+  UpstreamError,
+} from "@everdict/contracts";
 
 // Langfuse observations — TraceWithFullDetails.observations[] in the GET /api/public/traces/{traceId} response.
 // Real-API notes: observations are fully inline (no pagination), fields are present-but-null (not optional),
@@ -63,6 +71,37 @@ export function langfuseObservationsToTraceEvents(observations: LangfuseObservat
   return out;
 }
 
+// Langfuse GET /api/public/traces list item (selected fields — the paginated { data, meta } response).
+interface LangfuseTraceListItem {
+  id?: string;
+  name?: string | null;
+  timestamp?: string | null; // ISO-8601 start
+  latency?: number | null; // seconds (float)
+  totalCost?: number | null;
+  tags?: string[] | null;
+}
+// Pure: Langfuse trace list items → summaries. scope = the project listed under (informational).
+export function langfuseTracesToSummaries(items: LangfuseTraceListItem[], scope?: string): TraceSummary[] {
+  const out: TraceSummary[] = [];
+  for (const it of items) {
+    if (!it.id) continue;
+    const durationMs = typeof it.latency === "number" ? Math.max(0, Math.round(it.latency * 1000)) : undefined;
+    const costUsd = typeof it.totalCost === "number" ? Math.max(0, it.totalCost) : undefined;
+    const tags =
+      Array.isArray(it.tags) && it.tags.length > 0 ? Object.fromEntries(it.tags.map((t) => [t, ""])) : undefined;
+    out.push({
+      id: it.id,
+      ...(it.name ? { name: it.name } : {}),
+      ...(it.timestamp ? { startedAt: it.timestamp } : {}),
+      ...(durationMs !== undefined ? { durationMs } : {}),
+      ...(costUsd !== undefined ? { costUsd } : {}),
+      ...(tags ? { tags } : {}),
+      ...(scope ? { scope } : {}),
+    });
+  }
+  return out;
+}
+
 export interface LangfuseTraceSourceOptions {
   endpoint: string;
   auth?: string; // the Authorization header 'value' verbatim ("Basic <base64(pk:sk)>"). Injected from the SecretStore.
@@ -70,7 +109,7 @@ export interface LangfuseTraceSourceOptions {
 }
 
 // Fetch the trace detail from Langfuse by runId (=traceId) and normalize to TraceEvents (observations fully inline — no cursor).
-export class LangfuseTraceSource implements TraceSource {
+export class LangfuseTraceSource implements BrowsableTraceSource {
   constructor(private readonly opts: LangfuseTraceSourceOptions) {}
   async fetch(runId: string): Promise<TraceEvent[]> {
     const f = this.opts.fetchImpl ?? fetch;
@@ -94,5 +133,30 @@ export class LangfuseTraceSource implements TraceSource {
       return [];
     }
     return langfuseObservationsToTraceEvents(body.observations ?? []);
+  }
+
+  // Native kind: fixed converter, no per-harness SpanAttrMapping — mapping ignored, no rawAttributes.
+  async inspect(traceId: string, _mapping?: SpanAttrMapping): Promise<TraceInspectResult> {
+    return { events: await this.fetch(traceId) };
+  }
+
+  async listTraces(opts?: ListTracesOptions): Promise<TraceSummary[]> {
+    const f = this.opts.fetchImpl ?? fetch;
+    const base = this.opts.endpoint.replace(/\/$/, "");
+    const qs = new URLSearchParams({ limit: String(opts?.limit ?? 50), page: "1" });
+    if (opts?.since) qs.set("fromTimestamp", opts.since);
+    const res = await f(`${base}/api/public/traces?${qs.toString()}`, {
+      ...(this.opts.auth ? { headers: { authorization: this.opts.auth } } : {}),
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new UpstreamError(
+        "UPSTREAM_ERROR",
+        { status: res.status },
+        `Langfuse trace list ${res.status}: ${text.slice(0, 200)}`,
+      );
+    }
+    const body = (await res.json().catch(() => ({}))) as { data?: LangfuseTraceListItem[] };
+    return langfuseTracesToSummaries(body.data ?? [], opts?.scope);
   }
 }

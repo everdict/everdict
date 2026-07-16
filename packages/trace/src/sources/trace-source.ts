@@ -1,4 +1,4 @@
-import type { SpanAttrMapping, TraceEvent } from "@everdict/contracts";
+import type { SpanAttrMapping, SpanAttrSample, TraceEvent, TraceSummary } from "@everdict/contracts";
 
 // The shared intermediate-representation span for OTel/MLflow.
 export interface Span {
@@ -6,6 +6,45 @@ export interface Span {
   startMs: number;
   endMs: number;
   attrs: Record<string, unknown>;
+}
+
+// Span[] → the raw-attribute samples inspect() surfaces so a SpanAttrMapping can be authored against real keys.
+export function spansToRawAttributes(spans: Span[]): SpanAttrSample[] {
+  return spans.map((s) => ({ spanName: s.name, attrs: s.attrs }));
+}
+
+// Span[] → the metric fields of a TraceSummary (id/scope/status/tags are added by the per-source caller).
+// Pure: derives name/time/duration from the spans and tokens/cost/model from the normalized llm_call events.
+export function summarizeSpans(spans: Span[]): Omit<TraceSummary, "id"> {
+  if (spans.length === 0) return {};
+  const sorted = [...spans].sort((a, b) => a.startMs - b.startMs);
+  const startMs = sorted[0]?.startMs ?? 0;
+  const endMs = spans.reduce((m, s) => Math.max(m, s.endMs), startMs);
+  const events = spansToTraceEvents(spans);
+  let input = 0;
+  let output = 0;
+  let usd = 0;
+  let model: string | undefined;
+  let hasLlm = false;
+  for (const e of events) {
+    if (e.kind !== "llm_call") continue;
+    hasLlm = true;
+    if (model === undefined && e.model) model = e.model;
+    if (e.cost) {
+      input += e.cost.inputTokens;
+      output += e.cost.outputTokens;
+      usd += e.cost.usd;
+    }
+  }
+  const name = sorted[0]?.name;
+  return {
+    ...(name ? { name } : {}),
+    ...(startMs > 0 ? { startedAt: new Date(startMs).toISOString() } : {}),
+    durationMs: Math.max(0, endMs - startMs),
+    spanCount: spans.length,
+    ...(hasLlm ? { tokens: { input, output }, costUsd: usd } : {}),
+    ...(model ? { llmModel: model } : {}),
+  };
 }
 
 function num(v: unknown): number | undefined {

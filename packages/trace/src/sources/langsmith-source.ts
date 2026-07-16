@@ -1,4 +1,12 @@
-import { type TraceEvent, type TraceSource, UpstreamError } from "@everdict/contracts";
+import {
+  type BrowsableTraceSource,
+  type ListTracesOptions,
+  type SpanAttrMapping,
+  type TraceEvent,
+  type TraceInspectResult,
+  type TraceSummary,
+  UpstreamError,
+} from "@everdict/contracts";
 
 // LangSmith run — RunSchema (selected fields only) from the POST /runs/query {trace:<trace_id>} response.
 // Real-API notes: auth is the X-API-Key header (bare path = same as the SDK), full-trace fetch is v1 /runs/query's
@@ -6,6 +14,7 @@ import { type TraceEvent, type TraceSource, UpstreamError } from "@everdict/cont
 // feeding cursors.next back as body.cursor, and total_cost is a 'decimal string', not a JSON number (needs Number() parsing).
 interface LangsmithRun {
   id?: string;
+  trace_id?: string; // for a root run, equals the trace id (the id to inspect/pull the whole trace by)
   name?: string;
   run_type?: string; // tool|chain|llm|retriever|embedding|prompt|parser
   start_time?: string | null;
@@ -61,6 +70,33 @@ export function langsmithRunsToTraceEvents(runs: LangsmithRun[]): TraceEvent[] {
   return out;
 }
 
+// Pure: LangSmith root runs → summaries. scope = the session (project) listed under.
+export function langsmithRunsToSummaries(runs: LangsmithRun[], scope?: string): TraceSummary[] {
+  const out: TraceSummary[] = [];
+  for (const r of runs) {
+    const id = r.trace_id ?? r.id;
+    if (!id) continue;
+    const startMs = ms(r.start_time);
+    const endMs = ms(r.end_time);
+    const metaModel = r.extra?.metadata?.ls_model_name;
+    const model = typeof metaModel === "string" ? metaModel : undefined;
+    const hasTokens = r.prompt_tokens != null || r.completion_tokens != null;
+    const cost = r.total_cost != null && r.total_cost !== "" ? Number(r.total_cost) : undefined;
+    out.push({
+      id,
+      ...(r.name ? { name: r.name } : {}),
+      ...(r.start_time ? { startedAt: r.start_time } : {}),
+      ...(endMs > startMs ? { durationMs: endMs - startMs } : {}),
+      status: r.error ? "error" : "ok",
+      ...(hasTokens ? { tokens: { input: r.prompt_tokens ?? 0, output: r.completion_tokens ?? 0 } } : {}),
+      ...(cost !== undefined && !Number.isNaN(cost) ? { costUsd: Math.max(0, cost) } : {}),
+      ...(model ? { llmModel: model } : {}),
+      ...(scope ? { scope } : {}),
+    });
+  }
+  return out;
+}
+
 export interface LangsmithTraceSourceOptions {
   endpoint: string; // e.g. https://api.smith.langchain.com
   auth?: string; // the API key value verbatim — sent as the x-api-key header (not Authorization)
@@ -68,8 +104,53 @@ export interface LangsmithTraceSourceOptions {
 }
 
 // Fetch all runs of the trace from LangSmith by runId (=trace_id uuid) via a cursor loop and normalize to TraceEvents.
-export class LangsmithTraceSource implements TraceSource {
+export class LangsmithTraceSource implements BrowsableTraceSource {
   constructor(private readonly opts: LangsmithTraceSourceOptions) {}
+
+  // Native kind: fixed converter, no per-harness SpanAttrMapping — mapping ignored, no rawAttributes.
+  async inspect(traceId: string, _mapping?: SpanAttrMapping): Promise<TraceInspectResult> {
+    return { events: await this.fetch(traceId) };
+  }
+
+  async listTraces(opts?: ListTracesOptions): Promise<TraceSummary[]> {
+    const session = opts?.scope;
+    if (!session) {
+      throw new UpstreamError("UPSTREAM_ERROR", {}, "LangSmith trace listing requires a project (session) scope.");
+    }
+    const f = this.opts.fetchImpl ?? fetch;
+    const base = this.opts.endpoint.replace(/\/$/, "");
+    const res = await f(`${base}/runs/query`, {
+      method: "POST",
+      headers: { "content-type": "application/json", ...(this.opts.auth ? { "x-api-key": this.opts.auth } : {}) },
+      body: JSON.stringify({
+        session: [session],
+        is_root: true,
+        select: [
+          "id",
+          "trace_id",
+          "name",
+          "start_time",
+          "end_time",
+          "error",
+          "prompt_tokens",
+          "completion_tokens",
+          "total_cost",
+          "extra",
+        ],
+        limit: opts?.limit ?? 50,
+      }),
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new UpstreamError(
+        "UPSTREAM_ERROR",
+        { status: res.status },
+        `LangSmith trace list ${res.status}: ${text.slice(0, 200)}`,
+      );
+    }
+    const body = (await res.json().catch(() => ({}))) as { runs?: LangsmithRun[] };
+    return langsmithRunsToSummaries(body.runs ?? [], session);
+  }
   async fetch(runId: string): Promise<TraceEvent[]> {
     const f = this.opts.fetchImpl ?? fetch;
     const base = this.opts.endpoint.replace(/\/$/, "");

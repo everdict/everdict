@@ -1,3 +1,4 @@
+import { SpanAttrMappingSchema } from "@everdict/contracts";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { type ServerDeps, gate, resolvePrincipal, sendError, zodIssues } from "../route-context.js";
@@ -99,6 +100,89 @@ export function registerTraceSourceRoutes(app: FastifyInstance, deps: ServerDeps
       gate(principal, "harnesses:register");
       const assignments = await deps.traceSourceService.assign(principal.workspace, id, body.data.source);
       return reply.send({ assignments });
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  // Observability browser: enumerate a registered source's recent traces + their metrics (the list the judge wizard
+  // picks a sample from, and the settings traces view). Read-scoped (harnesses:read).
+  app.get("/workspace/trace-sources/:name/traces", { schema: traceSourceDocs.listTraces }, async (req, reply) => {
+    if (!deps.traceSourceService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "trace source service not configured" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    const { name } = req.params as { name: string };
+    const query = z
+      .object({
+        scope: z.string().min(1).optional(),
+        limit: z.coerce.number().int().positive().max(500).optional(),
+        since: z.string().min(1).optional(),
+      })
+      .safeParse(req.query ?? {});
+    if (!query.success)
+      return reply.code(400).send({ code: "BAD_REQUEST", message: zodIssues(query.error).join("; ") });
+    try {
+      gate(principal, "harnesses:read");
+      const traces = await deps.traceSourceService.listTraces(principal.workspace, name, query.data);
+      return reply.send({ traces });
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  // Inspect one trace by id — raw span attributes (span-based kinds) + events normalized with the SUPPLIED mapping.
+  // Powers the wizard's live conversion-authoring loop. Read-scoped (a supplied mapping is transient, not persisted here).
+  app.post(
+    "/workspace/trace-sources/:name/traces/:traceId/inspect",
+    { schema: traceSourceDocs.inspect },
+    async (req, reply) => {
+      if (!deps.traceSourceService)
+        return reply.code(404).send({ code: "NOT_FOUND", message: "trace source service not configured" });
+      const principal = await resolvePrincipal(req, reply, deps);
+      if (!principal) return reply;
+      const { name, traceId } = req.params as { name: string; traceId: string };
+      const body = z.object({ mapping: SpanAttrMappingSchema.optional() }).safeParse(req.body ?? {});
+      if (!body.success)
+        return reply.code(400).send({ code: "BAD_REQUEST", message: zodIssues(body.error).join("; ") });
+      try {
+        gate(principal, "harnesses:read");
+        return reply.send(await deps.traceSourceService.inspect(principal.workspace, name, traceId, body.data.mapping));
+      } catch (err) {
+        return sendError(reply, err);
+      }
+    },
+  );
+
+  // Per-harness span-attribute mapping overlay (the conversion layer between a harness and a judge). Read = harnesses:read.
+  app.get("/harnesses/:id/span-attr-mapping", { schema: traceSourceDocs.getMapping }, async (req, reply) => {
+    if (!deps.spanAttrMappingService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "span-attr mapping service not configured" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    const { id } = req.params as { id: string };
+    try {
+      gate(principal, "harnesses:read");
+      const mapping = await deps.spanAttrMappingService.get(principal.workspace, id);
+      return reply.send({ mapping: mapping ?? null });
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  // Set/clear the overlay (member+, part of the harness config — same gate as trace-source selection). mapping:null clears.
+  app.put("/harnesses/:id/span-attr-mapping", { schema: traceSourceDocs.setMapping }, async (req, reply) => {
+    if (!deps.spanAttrMappingService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "span-attr mapping service not configured" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    const { id } = req.params as { id: string };
+    const body = z.object({ mapping: SpanAttrMappingSchema.nullable() }).safeParse(req.body ?? {});
+    if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: zodIssues(body.error).join("; ") });
+    try {
+      gate(principal, "harnesses:register");
+      const mappings = await deps.spanAttrMappingService.assign(principal.workspace, id, body.data.mapping);
+      return reply.send({ mappings });
     } catch (err) {
       return sendError(reply, err);
     }

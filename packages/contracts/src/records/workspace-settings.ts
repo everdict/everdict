@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { JudgeRunConfigSchema } from "../execution/agent-job.js";
+import { SpanAttrMappingSchema } from "../execution/trace-source.js";
 
 // CI repo link — a single record that doubles as the repository ↔ harness service-slot mapping + the GitHub Actions OIDC trust policy.
 // The "existence" of a link trusts that repo's GitHub OIDC token into this workspace (no separate policy screen — zero-input).
@@ -111,6 +112,13 @@ export const WorkspaceSettingsSchema = z.object({
   // Per-harness source selection (harness id → source name). A harness with no selection falls back to its inline spec
   // traceSource (or none). Same jsonb-merge / service-managed replace semantics as traceSinkByHarness.
   traceSourceByHarness: z.record(z.string()).optional(),
+  // Per-harness span-attribute mapping overlay (harness id → SpanAttrMapping). The mutable conversion layer that sits
+  // BETWEEN a harness (which produces spans in its own instrumentation shape) and a judge (which consumes normalized
+  // TraceEvents) — independently editable without bumping the immutable harness/judge version. Overrides the harness
+  // spec's traceSource.mapping when resolving a trace source (resolveHarnessTraceMapping). Authored in the judge wizard
+  // against a real picked trace; applied at the control-plane trace-collection seams (dispatch-after judge + pull-eval).
+  // Same jsonb-merge / service-managed replace semantics as traceSourceByHarness. Design: docs/architecture/judge-input-contract.md
+  spanAttrMappingByHarness: z.record(SpanAttrMappingSchema).optional(),
   // CI integration (GitHub Actions) — the repo-link list (repo↔harness-slot mapping = OIDC trust policy). See WorkspaceCiLinkSchema above.
   ci: z.object({ links: z.array(WorkspaceCiLinkSchema).default([]) }).optional(),
   // Workspace-owned GitHub App integration (replaces personal connections) — org install→selected repos→workspace-owned installation.

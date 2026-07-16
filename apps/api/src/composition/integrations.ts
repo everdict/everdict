@@ -3,10 +3,11 @@ import { GithubAppService, type GithubComAppConfig } from "@everdict/application
 import { MattermostService } from "@everdict/application-control";
 import type { MembershipService } from "@everdict/application-control";
 import { NotificationService } from "@everdict/application-control";
+import { SpanAttrMappingService } from "@everdict/application-control";
 import { TraceSinkService } from "@everdict/application-control";
 import { TraceSourceService } from "@everdict/application-control";
 import type { CommentStore, NotificationStore, OAuthStateStore, WorkspaceSettingsStore } from "@everdict/db";
-import { buildTraceSink, probeTraceConnection } from "@everdict/trace";
+import { buildTraceSink, buildTraceSource, probeTraceConnection } from "@everdict/trace";
 import { githubAppGateway } from "../infrastructure/github/app-gateway.js";
 import { mattermostHttpClient } from "../infrastructure/mattermost/mattermost-client.js";
 
@@ -47,7 +48,11 @@ export function buildIntegrations(deps: {
   const traceSourceService = new TraceSourceService(settingsStore, {
     secretsFor: runtimeSecretsFor, // authSecretName → shared (workspace) secret value (pull-time only)
     probeConnection: probeTraceConnection, // connection test + scope discovery before registering
+    buildSource: buildTraceSource, // config → BrowsableTraceSource — powers the observability browser (listTraces/inspect)
   });
+  // Per-harness span-attribute mapping overlay — the mutable conversion layer between a harness and a judge, authored
+  // in the judge wizard against a real trace and applied at the trace-collection seams (resolveHarnessTraceMapping).
+  const spanAttrMappingService = new SpanAttrMappingService(settingsStore);
   // Resource comments (datasets, etc.) for collaborative discussion + @mention notifications. On a mention, resolve the mentioner's name from profile/membership into the personal feed.
   const commentService = new CommentService({
     store: commentStore,
@@ -94,6 +99,7 @@ export function buildIntegrations(deps: {
     mattermostService,
     traceSinkService,
     traceSourceService,
+    spanAttrMappingService,
     commentService,
     githubAppService,
   };

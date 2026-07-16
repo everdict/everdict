@@ -1,24 +1,45 @@
 // TraceSource is the contract root's adapter interface (the repo's deliberate inversion); the trace package
 // owns the fetch-backed impls and re-exports the contract here so an adapter consumer imports both together.
-export type { TraceSource } from "@everdict/contracts";
-export { type Span, spansToTraceEvents } from "./sources/trace-source.js";
-export { OtelTraceSource, type OtelTraceSourceOptions, parseOtlpSpans, parseJaegerSpans } from "./sources/otel.js";
-export { MlflowTraceSource, type MlflowTraceSourceOptions, parseMlflowTrace } from "./sources/mlflow.js";
+export type {
+  BrowsableTraceSource,
+  ListTracesOptions,
+  SpanAttrSample,
+  TraceInspectResult,
+  TraceSource,
+  TraceSummary,
+} from "@everdict/contracts";
+export { type Span, spansToRawAttributes, spansToTraceEvents, summarizeSpans } from "./sources/trace-source.js";
+export {
+  jaegerTracesToSummaries,
+  OtelTraceSource,
+  type OtelTraceSourceOptions,
+  parseJaegerSpans,
+  parseOtlpSpans,
+} from "./sources/otel.js";
+export {
+  MlflowTraceSource,
+  type MlflowTraceSourceOptions,
+  mlflowTracesToSummaries,
+  parseMlflowTrace,
+} from "./sources/mlflow.js";
 export type { TraceSourceConfig } from "@everdict/contracts";
 export { buildTraceSource } from "./sources/build-source.js";
 export {
   LangfuseTraceSource,
   type LangfuseTraceSourceOptions,
   langfuseObservationsToTraceEvents,
+  langfuseTracesToSummaries,
 } from "./sources/langfuse-source.js";
 export {
   LangsmithTraceSource,
   type LangsmithTraceSourceOptions,
+  langsmithRunsToSummaries,
   langsmithRunsToTraceEvents,
 } from "./sources/langsmith-source.js";
 export {
   PhoenixTraceSource,
   type PhoenixTraceSourceOptions,
+  phoenixSpansToSummaries,
   phoenixSpansToTraceEvents,
 } from "./sources/phoenix-source.js";
 // TraceSink + its case/score shapes are contract-root adapter interfaces; the trace package owns the

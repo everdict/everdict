@@ -8,7 +8,7 @@ import { RunnerService } from "@everdict/application-control";
 import { ScheduleService } from "@everdict/application-control";
 import { ScorecardService } from "@everdict/application-control";
 import { TraceSinkService } from "@everdict/application-control";
-import { TraceSourceService } from "@everdict/application-control";
+import { SpanAttrMappingService, TraceSourceService } from "@everdict/application-control";
 import { WorkspaceService } from "@everdict/application-control";
 import { type Authenticator, apiKeyAuthenticator, compositeAuthenticator } from "@everdict/auth";
 import type { Dispatcher } from "@everdict/backends";
@@ -227,7 +227,19 @@ function server(
   const traceSourceService = new TraceSourceService(settingsStore, {
     secretsFor: (ws) => secretStore.entries(ws),
     probeConnection,
+    // Browse engine stub — echoes the scope/trace id so list/inspect route wiring is verifiable without cluster I/O.
+    buildSource: (cfg) => ({
+      fetch: async () => [],
+      listTraces: async (opts) => [
+        { id: "trace-1", name: `${cfg.kind}-root`, ...(opts?.scope ? { scope: opts.scope } : {}) },
+      ],
+      inspect: async (traceId, mapping) => ({
+        events: [{ t: 0, kind: "message", role: "assistant", text: "hi" }],
+        rawAttributes: [{ spanName: traceId, attrs: { mappedModel: mapping?.model?.[0] ?? null } }],
+      }),
+    }),
   });
+  const spanAttrMappingService = new SpanAttrMappingService(settingsStore);
   const mattermostCommandService = new MattermostCommandService({
     settings: settingsStore,
     secretsFor: async () => ({}),
@@ -285,6 +297,7 @@ function server(
     mattermostCommandService,
     traceSinkService,
     traceSourceService,
+    spanAttrMappingService,
     imageRegistryService,
     runnerService: new RunnerService(new InMemoryRunnerStore()),
     settingsStore,
@@ -690,6 +703,61 @@ describe("API — workspace integrations (GitHub App / Mattermost)", () => {
       ).statusCode,
     ).toBe(403);
     await viewer.app.close();
+  });
+
+  it("observability browser: list a source's traces, inspect one with a mapping, and store the per-harness overlay", async () => {
+    const h = { authorization: "Bearer x" };
+    const { app } = server({ requireAuth: true, authenticator: roleAuth(["admin"]) });
+    // Register a source to browse (settings:write).
+    expect(
+      (
+        await app.inject({
+          method: "PUT",
+          url: "/workspace/trace-sources",
+          headers: h,
+          payload: { name: "dev-mlflow", kind: "mlflow", endpoint: "http://mlflow:5000" },
+        })
+      ).statusCode,
+    ).toBe(200);
+    // List its recent traces (the wizard/browser surface) — scope forwarded through.
+    const list = await app.inject({
+      method: "GET",
+      url: "/workspace/trace-sources/dev-mlflow/traces?scope=exp1&limit=10",
+      headers: h,
+    });
+    expect(list.statusCode).toBe(200);
+    expect(list.json().traces).toEqual([{ id: "trace-1", name: "mlflow-root", scope: "exp1" }]);
+    // Inspect one trace with a supplied mapping — raw attributes reflect the mapping (wizard live-authoring).
+    const inspect = await app.inject({
+      method: "POST",
+      url: "/workspace/trace-sources/dev-mlflow/traces/trace-1/inspect",
+      headers: h,
+      payload: { mapping: { model: ["custom.model"] } },
+    });
+    expect(inspect.statusCode).toBe(200);
+    expect(inspect.json().rawAttributes[0]).toEqual({ spanName: "trace-1", attrs: { mappedModel: "custom.model" } });
+    expect(inspect.json().events).toHaveLength(1);
+    // Store the per-harness overlay and read it back.
+    const putMap = await app.inject({
+      method: "PUT",
+      url: "/harnesses/h1/span-attr-mapping",
+      headers: h,
+      payload: { mapping: { model: ["custom.model"], inputTokens: ["custom.in"] } },
+    });
+    expect(putMap.statusCode).toBe(200);
+    expect(putMap.json().mappings).toEqual({ h1: { model: ["custom.model"], inputTokens: ["custom.in"] } });
+    const getMap = await app.inject({ method: "GET", url: "/harnesses/h1/span-attr-mapping", headers: h });
+    expect(getMap.json().mapping).toEqual({ model: ["custom.model"], inputTokens: ["custom.in"] });
+    // Clear it (mapping:null).
+    await app.inject({ method: "PUT", url: "/harnesses/h1/span-attr-mapping", headers: h, payload: { mapping: null } });
+    expect(
+      (await app.inject({ method: "GET", url: "/harnesses/h1/span-attr-mapping", headers: h })).json().mapping,
+    ).toBeNull();
+    // Listing an unregistered source name is a 404 (no dangling browse).
+    expect(
+      (await app.inject({ method: "GET", url: "/workspace/trace-sources/ghost/traces", headers: h })).statusCode,
+    ).toBe(404);
+    await app.close();
   });
 
   it("trace sinks (multiple): admin registers/removes by name, member selects per harness, viewer read-only (register 403)", async () => {

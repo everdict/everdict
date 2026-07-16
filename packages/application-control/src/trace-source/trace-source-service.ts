@@ -1,8 +1,14 @@
 import {
   BadRequestError,
+  type BrowsableTraceSource,
+  type ListTracesOptions,
+  NotFoundError,
+  type SpanAttrMapping,
+  type TraceInspectResult,
   type TraceProbeConfig,
   type TraceProbeResult,
   type TraceSourceConfig,
+  type TraceSummary,
   type WorkspaceSettings,
 } from "@everdict/contracts";
 import type { WorkspaceSettingsStore } from "../ports/workspace-settings-store.js";
@@ -32,6 +38,10 @@ export interface TraceSourceServiceDeps {
   // Connection-test + scope-discovery engine (@everdict/trace probeTraceConnection), injected so application-control
   // stays free of @everdict/trace. Absent = the probe route/tool is feature-disabled.
   probeConnection?: (cfg: TraceProbeConfig) => Promise<TraceProbeResult>;
+  // Config → BrowsableTraceSource adapter (@everdict/trace buildTraceSource), injected so application-control stays free
+  // of @everdict/trace. Powers listTraces()/inspect() (the observability browser + judge-wizard sampling). Absent =
+  // those routes/tools are feature-disabled.
+  buildSource?: (cfg: TraceSourceConfig) => BrowsableTraceSource;
 }
 
 const toView = (s: TraceSourceEntry): TraceSourceConfigView => ({
@@ -156,14 +166,10 @@ export class TraceSourceService {
     return this.deps.probeConnection({ kind: input.kind, endpoint: input.endpoint, ...(auth ? { auth } : {}) });
   }
 
-  // Resolve the source a harness selected → a fully-built TraceSourceConfig (auth value pulled from the SecretStore),
-  // for the dispatch path to build a TraceSource and pull the case's trace after the run. undefined = no selection (the
-  // caller falls back to the harness's inline spec.traceSource or no pull). The auth VALUE lives only here, transiently.
-  async resolve(tenant: string, harnessId: string): Promise<TraceSourceConfig | undefined> {
-    const s = await this.settings.get(tenant);
-    const name = s?.traceSourceByHarness?.[harnessId];
-    const source = name ? (s?.traceSources ?? []).find((e) => e.name === name) : undefined;
-    if (!source) return undefined;
+  // A registered source entry → a fully-built TraceSourceConfig (auth value pulled from the SecretStore). The auth
+  // VALUE lives only here, transiently. otel/mlflow read it from headers.authorization; langfuse/langsmith/phoenix
+  // inherit it as `auth` (buildTraceSource). So the single headers.authorization mapping covers all five kinds.
+  private async buildConfig(tenant: string, source: TraceSourceEntry): Promise<TraceSourceConfig> {
     let auth: string | undefined;
     if (source.authSecretName) {
       const secrets = await (this.deps.secretsFor?.(tenant) ?? Promise.resolve<Record<string, string>>({}));
@@ -175,8 +181,6 @@ export class TraceSourceService {
           `No value for '${source.authSecretName}' in the SecretStore — register the secret first.`,
         );
     }
-    // otel/mlflow read auth from headers.authorization; langfuse/langsmith/phoenix inherit it as `auth` (buildTraceSource).
-    // So the single headers.authorization mapping covers all five kinds (the adapter owns the actual header name).
     return {
       kind: source.kind,
       endpoint: source.endpoint,
@@ -185,5 +189,38 @@ export class TraceSourceService {
       ...(source.service ? { service: source.service } : {}),
       ...(source.project ? { project: source.project } : {}),
     };
+  }
+
+  // Resolve the source a harness selected → a fully-built TraceSourceConfig, for the dispatch path to build a
+  // TraceSource and pull the case's trace after the run. undefined = no selection (the caller falls back to the
+  // harness's inline spec.traceSource or no pull).
+  async resolve(tenant: string, harnessId: string): Promise<TraceSourceConfig | undefined> {
+    const s = await this.settings.get(tenant);
+    const name = s?.traceSourceByHarness?.[harnessId];
+    const source = name ? (s?.traceSources ?? []).find((e) => e.name === name) : undefined;
+    if (!source) return undefined;
+    return this.buildConfig(tenant, source);
+  }
+
+  // Build a browsable source for a registered source name (observability browser + judge-wizard sampling). 404 if the
+  // name isn't registered; 400 if the browse engine isn't configured (buildSource dep absent).
+  private async browsableFor(tenant: string, name: string): Promise<BrowsableTraceSource> {
+    if (!this.deps.buildSource) throw new BadRequestError("BAD_REQUEST", {}, "Trace browsing is not configured.");
+    const s = await this.settings.get(tenant);
+    const source = (s?.traceSources ?? []).find((e) => e.name === name);
+    if (!source) throw new NotFoundError("NOT_FOUND", { name }, `Unregistered trace source: ${name}`);
+    return this.deps.buildSource(await this.buildConfig(tenant, source));
+  }
+
+  // Enumerate a registered source's recent traces (the browser/wizard list). scope defaults to the source's configured
+  // scope (experiment/project/service) when omitted.
+  async listTraces(tenant: string, name: string, opts?: ListTracesOptions): Promise<TraceSummary[]> {
+    return (await this.browsableFor(tenant, name)).listTraces(opts);
+  }
+
+  // Inspect one trace by id — raw span attributes (span-based kinds) + the events normalized with the SUPPLIED mapping.
+  // Powers the wizard's live mapping-authoring loop against a real picked trace.
+  async inspect(tenant: string, name: string, traceId: string, mapping?: SpanAttrMapping): Promise<TraceInspectResult> {
+    return (await this.browsableFor(tenant, name)).inspect(traceId, mapping);
   }
 }

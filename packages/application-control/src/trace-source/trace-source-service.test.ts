@@ -1,4 +1,4 @@
-import type { TraceProbeConfig, TraceProbeResult, WorkspaceSettings } from "@everdict/contracts";
+import type { BrowsableTraceSource, TraceProbeConfig, TraceProbeResult, WorkspaceSettings } from "@everdict/contracts";
 import { describe, expect, it, vi } from "vitest";
 import type { WorkspaceSettingsStore } from "../ports/workspace-settings-store.js";
 import { TraceSourceService } from "./trace-source-service.js";
@@ -148,5 +148,42 @@ describe("TraceSourceService", () => {
     const svc = new TraceSourceService(fakeSettings(), { probeConnection });
     await svc.upsert(WS, { name: "s1", kind: "otel", endpoint: "http://jaeger" });
     expect(probeConnection).not.toHaveBeenCalled();
+  });
+
+  // The observability browser + judge-wizard sampling — list/inspect over an injected buildSource.
+  const fakeBrowsable: BrowsableTraceSource = {
+    fetch: async () => [],
+    listTraces: async (opts) => [{ id: "t1", ...(opts?.scope ? { scope: opts.scope } : {}) }],
+    inspect: async (traceId, mapping) => ({
+      events: [],
+      rawAttributes: [{ spanName: traceId, attrs: { mappedModel: mapping?.model?.[0] ?? null } }],
+    }),
+  };
+
+  it("listTraces() builds the source for a registered name and returns its traces", async () => {
+    const buildSource = vi.fn(() => fakeBrowsable);
+    const svc = new TraceSourceService(fakeSettings(), { buildSource });
+    await svc.upsert(WS, { name: "s1", kind: "otel", endpoint: "http://jaeger", service: "svc" });
+    const traces = await svc.listTraces(WS, "s1", { scope: "svc" });
+    expect(traces).toEqual([{ id: "t1", scope: "svc" }]);
+    expect(buildSource).toHaveBeenCalledWith(expect.objectContaining({ kind: "otel", endpoint: "http://jaeger" }));
+  });
+
+  it("inspect() passes the supplied mapping through to the source (wizard live-authoring loop)", async () => {
+    const svc = new TraceSourceService(fakeSettings(), { buildSource: () => fakeBrowsable });
+    await svc.upsert(WS, { name: "s1", kind: "mlflow", endpoint: "http://mlflow" });
+    const r = await svc.inspect(WS, "s1", "tid", { model: ["custom.model"] });
+    expect(r.rawAttributes?.[0]).toEqual({ spanName: "tid", attrs: { mappedModel: "custom.model" } });
+  });
+
+  it("listTraces() 404s an unregistered source name", async () => {
+    const svc = new TraceSourceService(fakeSettings(), { buildSource: () => fakeBrowsable });
+    await expect(svc.listTraces(WS, "ghost")).rejects.toThrow(/Unregistered trace source/);
+  });
+
+  it("listTraces() 400s when the browse engine (buildSource) is not configured", async () => {
+    const svc = new TraceSourceService(fakeSettings());
+    await svc.upsert(WS, { name: "s1", kind: "otel", endpoint: "http://jaeger" });
+    await expect(svc.listTraces(WS, "s1")).rejects.toThrow(/not configured/);
   });
 });

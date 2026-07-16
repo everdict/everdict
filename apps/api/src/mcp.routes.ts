@@ -68,6 +68,8 @@ export function registerMcpRoutes(app: FastifyInstance, deps: ServerDeps): void 
           githubAppService: deps.githubAppService,
           mattermostService: deps.mattermostService,
           traceSinkService: deps.traceSinkService,
+          traceSourceService: deps.traceSourceService,
+          spanAttrMappingService: deps.spanAttrMappingService,
           imageRegistryService: deps.imageRegistryService,
           ciLinkService: deps.ciLinkService,
           runnerService: deps.runnerService,

@@ -1,5 +1,13 @@
-import { type SpanAttrMapping, type TraceEvent, type TraceSource, UpstreamError } from "@everdict/contracts";
-import { type Span, spansToTraceEvents } from "./trace-source.js";
+import {
+  type BrowsableTraceSource,
+  type ListTracesOptions,
+  type SpanAttrMapping,
+  type TraceEvent,
+  type TraceInspectResult,
+  type TraceSummary,
+  UpstreamError,
+} from "@everdict/contracts";
+import { type Span, spansToRawAttributes, spansToTraceEvents, summarizeSpans } from "./trace-source.js";
 
 // OTLP span (attributes are a {key,value} array) → normalized Span.
 interface OtlpAttr {
@@ -62,6 +70,22 @@ export function parseJaegerSpans(spans: JaegerSpan[]): Span[] {
   });
 }
 
+// Jaeger find-traces (`GET /api/traces?service=…`) doc — one entry per trace, spans embedded.
+interface JaegerTraceDoc {
+  traceID?: string;
+  spans?: JaegerSpan[];
+}
+// Pure: Jaeger trace docs → summaries (metrics derived from the embedded spans). scope = the service listed under.
+export function jaegerTracesToSummaries(traces: JaegerTraceDoc[], scope?: string): TraceSummary[] {
+  const out: TraceSummary[] = [];
+  for (const tr of traces) {
+    if (!tr.traceID) continue;
+    const spans = parseJaegerSpans(tr.spans ?? []);
+    out.push({ id: tr.traceID, ...summarizeSpans(spans), ...(scope ? { scope } : {}) });
+  }
+  return out;
+}
+
 export interface OtelTraceSourceOptions {
   endpoint: string;
   headers?: Record<string, string>; // tenant credentials etc. (e.g. Authorization). Injected from the SecretStore.
@@ -79,7 +103,7 @@ const RUN_ID_ATTR = "everdict.run_id"; // the correlation resource attribute the
 
 // Fetch spans from an OTLP/Jaeger-compatible HTTP endpoint by runId (=trace id) and normalize to TraceEvents.
 // With correlate="tag", find it via a Jaeger search (service+tags) — the search response embeds the spans, so it's one request.
-export class OtelTraceSource implements TraceSource {
+export class OtelTraceSource implements BrowsableTraceSource {
   constructor(private readonly opts: OtelTraceSourceOptions) {}
 
   private url(runId: string): string {
@@ -100,11 +124,10 @@ export class OtelTraceSource implements TraceSource {
     return `${base}/api/traces?${qs.toString()}`;
   }
 
-  async fetch(runId: string): Promise<TraceEvent[]> {
+  // GET the URL and parse to Span[], auto-detecting Jaeger (`{data:[{spans}]}`) vs OTLP-native (`{spans:[...]}`).
+  private async getSpans(url: string): Promise<Span[]> {
     const f = this.opts.fetchImpl ?? fetch;
-    const res = await f(this.url(runId), {
-      ...(this.opts.headers ? { headers: this.opts.headers } : {}),
-    });
+    const res = await f(url, { ...(this.opts.headers ? { headers: this.opts.headers } : {}) });
     if (!res.ok) {
       const text = await res.text().catch(() => "");
       throw new UpstreamError(
@@ -113,12 +136,49 @@ export class OtelTraceSource implements TraceSource {
         `OTel trace fetch ${res.status}: ${text.slice(0, 200)}`,
       );
     }
-    // Auto-detect the response shape: Jaeger query (`{data:[{spans}]}`) vs OTLP-native (`{spans:[...]}`).
-    // A tag search miss is data=[] → degrade to 0 events (flush lag — retry is the caller's job).
     const body = (await res.json()) as { spans?: OtlpSpan[]; data?: Array<{ spans?: JaegerSpan[] }> };
-    if (Array.isArray(body.data)) {
-      return spansToTraceEvents(parseJaegerSpans(body.data.flatMap((t) => t.spans ?? [])), this.opts.mapping);
+    // A tag search miss is data=[] → 0 spans (flush lag — retry is the caller's job).
+    if (Array.isArray(body.data)) return parseJaegerSpans(body.data.flatMap((t) => t.spans ?? []));
+    return parseOtlpSpans(body.spans ?? []);
+  }
+
+  async fetch(runId: string): Promise<TraceEvent[]> {
+    return spansToTraceEvents(await this.getSpans(this.url(runId)), this.opts.mapping);
+  }
+
+  async inspect(traceId: string, mapping?: SpanAttrMapping): Promise<TraceInspectResult> {
+    const base = this.opts.endpoint.replace(/\/$/, "");
+    const spans = await this.getSpans(`${base}/api/traces/${encodeURIComponent(traceId)}`);
+    return {
+      rawAttributes: spansToRawAttributes(spans),
+      events: spansToTraceEvents(spans, mapping ?? this.opts.mapping),
+    };
+  }
+
+  async listTraces(opts?: ListTracesOptions): Promise<TraceSummary[]> {
+    const base = this.opts.endpoint.replace(/\/$/, "");
+    const scope = opts?.scope ?? this.opts.service;
+    if (!scope) {
+      throw new UpstreamError(
+        "UPSTREAM_ERROR",
+        {},
+        "OTel (Jaeger) trace listing requires a service scope (the Jaeger service parameter).",
+      );
     }
-    return spansToTraceEvents(parseOtlpSpans(body.spans ?? []), this.opts.mapping);
+    const f = this.opts.fetchImpl ?? fetch;
+    const qs = new URLSearchParams({ service: scope, limit: String(opts?.limit ?? 50) });
+    const res = await f(`${base}/api/traces?${qs.toString()}`, {
+      ...(this.opts.headers ? { headers: this.opts.headers } : {}),
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new UpstreamError(
+        "UPSTREAM_ERROR",
+        { status: res.status },
+        `OTel trace list ${res.status}: ${text.slice(0, 200)}`,
+      );
+    }
+    const body = (await res.json().catch(() => ({}))) as { data?: JaegerTraceDoc[] };
+    return jaegerTracesToSummaries(body.data ?? [], scope);
   }
 }

@@ -1,4 +1,12 @@
-import { type TraceEvent, type TraceSource, UpstreamError } from "@everdict/contracts";
+import {
+  type BrowsableTraceSource,
+  type ListTracesOptions,
+  type SpanAttrMapping,
+  type TraceEvent,
+  type TraceInspectResult,
+  type TraceSummary,
+  UpstreamError,
+} from "@everdict/contracts";
 
 // Arize Phoenix spans — the GET /v1/projects/{p}/spans?trace_id=<hex> response (Span schema, read side).
 // Real-API notes: there is no GET /v1/traces/{id} — cursor-loop the project spans via the trace_id filter (≥13.9.0).
@@ -71,6 +79,66 @@ export function phoenixSpansToTraceEvents(spans: PhoenixSpan[]): TraceEvent[] {
   return out;
 }
 
+// Phoenix has no first-class "list traces" REST endpoint — group the most recent project spans by trace_id (best-effort).
+// LLM spans contribute tokens/model; the earliest span's name/time seed the summary. scope = the project listed under.
+const phMs = (iso: string | null | undefined): number => (iso ? Date.parse(iso) : 0);
+function phAttr(attrs: Record<string, unknown> | undefined, path: string): unknown {
+  if (!attrs) return undefined;
+  if (path in attrs) return attrs[path];
+  let cur: unknown = attrs;
+  for (const key of path.split(".")) {
+    if (typeof cur !== "object" || cur === null || !(key in cur)) return undefined;
+    cur = (cur as Record<string, unknown>)[key];
+  }
+  return cur;
+}
+const phNum = (v: unknown): number => (typeof v === "number" ? v : typeof v === "string" ? Number(v) || 0 : 0);
+const phStr = (v: unknown): string | undefined => (typeof v === "string" ? v : undefined);
+
+export function phoenixSpansToSummaries(spans: PhoenixSpan[], scope?: string): TraceSummary[] {
+  const byTrace = new Map<string, PhoenixSpan[]>();
+  for (const s of spans) {
+    const tid = s.context?.trace_id;
+    if (!tid) continue;
+    const arr = byTrace.get(tid) ?? [];
+    arr.push(s);
+    byTrace.set(tid, arr);
+  }
+  const out: TraceSummary[] = [];
+  for (const [id, group] of byTrace) {
+    const sorted = [...group].sort((a, b) => phMs(a.start_time) - phMs(b.start_time));
+    const first = sorted[0];
+    const startMs = phMs(first?.start_time);
+    const endMs = group.reduce((m, s) => Math.max(m, phMs(s.end_time)), startMs);
+    let input = 0;
+    let output = 0;
+    let hasLlm = false;
+    let model: string | undefined;
+    let hasError = false;
+    for (const s of group) {
+      if (s.span_kind === "LLM") {
+        hasLlm = true;
+        input += phNum(phAttr(s.attributes, "llm.token_count.prompt"));
+        output += phNum(phAttr(s.attributes, "llm.token_count.completion"));
+        if (model === undefined) model = phStr(phAttr(s.attributes, "llm.model_name"));
+      }
+      if (s.status_code === "ERROR") hasError = true;
+    }
+    out.push({
+      id,
+      ...(first?.name ? { name: first.name } : {}),
+      ...(startMs > 0 ? { startedAt: new Date(startMs).toISOString() } : {}),
+      durationMs: Math.max(0, endMs - startMs),
+      spanCount: group.length,
+      status: hasError ? "error" : "ok",
+      ...(hasLlm ? { tokens: { input, output } } : {}),
+      ...(model ? { llmModel: model } : {}),
+      ...(scope ? { scope } : {}),
+    });
+  }
+  return out;
+}
+
 export interface PhoenixTraceSourceOptions {
   endpoint: string;
   auth?: string; // the Authorization header 'value' verbatim ("Bearer <key>")
@@ -79,9 +147,10 @@ export interface PhoenixTraceSourceOptions {
 }
 
 // Fetch spans from Phoenix by runId (=OTel hex trace id) via a cursor loop and normalize to TraceEvents.
-export class PhoenixTraceSource implements TraceSource {
+export class PhoenixTraceSource implements BrowsableTraceSource {
   constructor(private readonly opts: PhoenixTraceSourceOptions) {}
-  async fetch(runId: string): Promise<TraceEvent[]> {
+
+  private async spansForTrace(traceId: string): Promise<PhoenixSpan[]> {
     if (!this.opts.project)
       throw new UpstreamError("UPSTREAM_ERROR", {}, "A phoenix trace fetch requires the project setting.");
     const f = this.opts.fetchImpl ?? fetch;
@@ -89,7 +158,7 @@ export class PhoenixTraceSource implements TraceSource {
     const spans: PhoenixSpan[] = [];
     let cursor: string | undefined;
     do {
-      const qs = new URLSearchParams({ trace_id: runId, limit: "1000" });
+      const qs = new URLSearchParams({ trace_id: traceId, limit: "1000" });
       if (cursor) qs.set("cursor", cursor);
       const res = await f(`${base}/v1/projects/${encodeURIComponent(this.opts.project)}/spans?${qs.toString()}`, {
         ...(this.opts.auth ? { headers: { authorization: this.opts.auth } } : {}),
@@ -112,6 +181,39 @@ export class PhoenixTraceSource implements TraceSource {
       spans.push(...(body.data ?? []));
       cursor = body.next_cursor ?? undefined;
     } while (cursor);
-    return phoenixSpansToTraceEvents(spans);
+    return spans;
+  }
+
+  async fetch(runId: string): Promise<TraceEvent[]> {
+    return phoenixSpansToTraceEvents(await this.spansForTrace(runId));
+  }
+
+  // Native kind: no per-harness SpanAttrMapping (fixed OpenInference converter) — mapping is ignored, no rawAttributes.
+  async inspect(traceId: string, _mapping?: SpanAttrMapping): Promise<TraceInspectResult> {
+    return { events: phoenixSpansToTraceEvents(await this.spansForTrace(traceId)) };
+  }
+
+  async listTraces(opts?: ListTracesOptions): Promise<TraceSummary[]> {
+    const project = opts?.scope ?? this.opts.project;
+    if (!project) throw new UpstreamError("UPSTREAM_ERROR", {}, "Phoenix trace listing requires a project scope.");
+    const f = this.opts.fetchImpl ?? fetch;
+    const base = this.opts.endpoint.replace(/\/$/, "");
+    const limit = opts?.limit ?? 50;
+    // Best-effort: one recent-spans page, grouped by trace_id (Phoenix REST has no list-traces endpoint).
+    const res = await f(`${base}/v1/projects/${encodeURIComponent(project)}/spans?limit=1000`, {
+      ...(this.opts.auth ? { headers: { authorization: this.opts.auth } } : {}),
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new UpstreamError(
+        "UPSTREAM_ERROR",
+        { status: res.status },
+        `Phoenix trace list ${res.status}: ${text.slice(0, 200)}`,
+      );
+    }
+    const body = (await res.json().catch(() => ({}))) as { data?: PhoenixSpan[] };
+    const summaries = phoenixSpansToSummaries(body.data ?? [], project);
+    summaries.sort((a, b) => (b.startedAt ?? "").localeCompare(a.startedAt ?? ""));
+    return summaries.slice(0, limit);
   }
 }

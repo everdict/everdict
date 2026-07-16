@@ -1,5 +1,13 @@
-import { type SpanAttrMapping, type TraceEvent, type TraceSource, UpstreamError } from "@everdict/contracts";
-import { type Span, spansToTraceEvents } from "./trace-source.js";
+import {
+  type BrowsableTraceSource,
+  type ListTracesOptions,
+  type SpanAttrMapping,
+  type TraceEvent,
+  type TraceInspectResult,
+  type TraceSummary,
+  UpstreamError,
+} from "@everdict/contracts";
+import { type Span, spansToRawAttributes, spansToTraceEvents } from "./trace-source.js";
 
 // Span attributes in the MLflow 3.x trace REST are an OTLP-style AnyValue (snake_case) array — a format distinct from OTel (camelCase).
 // Also supports nested kvlist/array (spanInputs/Outputs etc. arrive as a kvlist).
@@ -61,6 +69,88 @@ export function parseMlflowTrace(trace: MlflowTrace): Span[] {
   });
 }
 
+// MLflow 3.x TraceInfo (the traces/search response element). Fields shift across versions — parse defensively.
+interface MlflowTraceInfo {
+  trace_id?: string;
+  request_time?: string | number; // ms epoch (string|number) or ISO
+  timestamp_ms?: number; // older field
+  execution_duration_ms?: number;
+  execution_time_ms?: number;
+  state?: string; // OK|ERROR|IN_PROGRESS|STATE_UNSPECIFIED
+  status?: string; // older
+  tags?: Record<string, string> | Array<{ key?: string; value?: string }>;
+  trace_metadata?: Record<string, string>;
+}
+
+function mlflowStartedAt(info: MlflowTraceInfo): string | undefined {
+  const rt = info.request_time;
+  if (typeof rt === "number") return new Date(rt).toISOString();
+  if (typeof rt === "string" && rt.trim() !== "") {
+    const n = Number(rt);
+    if (!Number.isNaN(n)) return new Date(n).toISOString();
+    const parsed = Date.parse(rt);
+    if (!Number.isNaN(parsed)) return new Date(parsed).toISOString();
+  }
+  if (typeof info.timestamp_ms === "number") return new Date(info.timestamp_ms).toISOString();
+  return undefined;
+}
+
+function mlflowTags(info: MlflowTraceInfo): Record<string, string> | undefined {
+  const t = info.tags;
+  if (!t) return undefined;
+  if (Array.isArray(t)) {
+    const out: Record<string, string> = {};
+    for (const kv of t) if (kv.key) out[kv.key] = kv.value ?? "";
+    return Object.keys(out).length > 0 ? out : undefined;
+  }
+  return Object.keys(t).length > 0 ? t : undefined;
+}
+
+function mlflowStatus(info: MlflowTraceInfo): "ok" | "error" | "unset" | undefined {
+  const s = (info.state ?? info.status ?? "").toUpperCase();
+  if (s === "OK") return "ok";
+  if (s === "ERROR") return "error";
+  if (s === "") return undefined;
+  return "unset";
+}
+
+function mlflowTokens(info: MlflowTraceInfo): { input?: number; output?: number } | undefined {
+  const raw = info.trace_metadata?.["mlflow.trace.tokenUsage"];
+  if (typeof raw !== "string") return undefined;
+  try {
+    const u = JSON.parse(raw) as Record<string, unknown>;
+    const input = typeof u.input_tokens === "number" ? u.input_tokens : undefined;
+    const output = typeof u.output_tokens === "number" ? u.output_tokens : undefined;
+    if (input === undefined && output === undefined) return undefined;
+    return { ...(input !== undefined ? { input } : {}), ...(output !== undefined ? { output } : {}) };
+  } catch {
+    return undefined;
+  }
+}
+
+// Pure: MLflow TraceInfo[] → summaries. scope = the experiment id listed under.
+export function mlflowTracesToSummaries(traces: MlflowTraceInfo[], scope?: string): TraceSummary[] {
+  const out: TraceSummary[] = [];
+  for (const info of traces) {
+    if (!info.trace_id) continue;
+    const startedAt = mlflowStartedAt(info);
+    const durationRaw = info.execution_duration_ms ?? info.execution_time_ms;
+    const status = mlflowStatus(info);
+    const tags = mlflowTags(info);
+    const tokens = mlflowTokens(info);
+    out.push({
+      id: info.trace_id,
+      ...(startedAt ? { startedAt } : {}),
+      ...(typeof durationRaw === "number" ? { durationMs: Math.max(0, durationRaw) } : {}),
+      ...(status ? { status } : {}),
+      ...(tags ? { tags } : {}),
+      ...(tokens ? { tokens } : {}),
+      ...(scope ? { scope } : {}),
+    });
+  }
+  return out;
+}
+
 export interface MlflowTraceSourceOptions {
   endpoint: string;
   headers?: Record<string, string>; // tenant credentials etc. (e.g. Authorization). Injected from the SecretStore.
@@ -78,7 +168,7 @@ const RUN_ID_TAG = "everdict.run_id"; // the correlation tag the instrumented ag
 // Fetch the trace from the MLflow 3.x tracing REST (`GET /api/3.0/mlflow/traces/get?trace_id=`) and normalize to TraceEvents.
 // With correlate="tag", first find the trace_id via `POST /api/3.0/mlflow/traces/search` (tags.`everdict.run_id` filter, verified on real 3.14)
 // — not found → degrade to 0 events (same as id mode's 404).
-export class MlflowTraceSource implements TraceSource {
+export class MlflowTraceSource implements BrowsableTraceSource {
   constructor(private readonly opts: MlflowTraceSourceOptions) {}
 
   private async traceIdByTag(runId: string): Promise<string | undefined> {
@@ -116,19 +206,14 @@ export class MlflowTraceSource implements TraceSource {
     return body.traces?.[0]?.trace_id;
   }
 
-  async fetch(runId: string): Promise<TraceEvent[]> {
+  // GET the trace by its (server-minted) trace_id and parse to Span[]. Absent/unparseable → 0 spans (flush lag).
+  private async getSpansById(traceId: string): Promise<Span[]> {
     const f = this.opts.fetchImpl ?? fetch;
     const base = this.opts.endpoint.replace(/\/$/, "");
-    let traceId = runId;
-    if (this.opts.correlate === "tag") {
-      const found = await this.traceIdByTag(runId);
-      if (!found) return []; // tag not found — not arrived/tagged yet (flush lag) → degrade to 0 events
-      traceId = found;
-    }
     const res = await f(`${base}/api/3.0/mlflow/traces/get?trace_id=${encodeURIComponent(traceId)}`, {
       ...(this.opts.headers ? { headers: this.opts.headers } : {}),
     });
-    if (res.status === 404) return []; // if the trace isn't present yet, degrade to 0 events (the service-harness path)
+    if (res.status === 404) return []; // if the trace isn't present yet, degrade to 0 spans (the service-harness path)
     if (!res.ok) {
       const text = await res.text().catch(() => "");
       throw new UpstreamError(
@@ -143,6 +228,55 @@ export class MlflowTraceSource implements TraceSource {
     } catch {
       return [];
     }
-    return spansToTraceEvents(parseMlflowTrace(body.trace ?? {}), this.opts.mapping);
+    return parseMlflowTrace(body.trace ?? {});
+  }
+
+  async fetch(runId: string): Promise<TraceEvent[]> {
+    let traceId = runId;
+    if (this.opts.correlate === "tag") {
+      const found = await this.traceIdByTag(runId);
+      if (!found) return []; // tag not found — not arrived/tagged yet (flush lag) → degrade to 0 events
+      traceId = found;
+    }
+    return spansToTraceEvents(await this.getSpansById(traceId), this.opts.mapping);
+  }
+
+  async inspect(traceId: string, mapping?: SpanAttrMapping): Promise<TraceInspectResult> {
+    const spans = await this.getSpansById(traceId);
+    return {
+      rawAttributes: spansToRawAttributes(spans),
+      events: spansToTraceEvents(spans, mapping ?? this.opts.mapping),
+    };
+  }
+
+  async listTraces(opts?: ListTracesOptions): Promise<TraceSummary[]> {
+    const f = this.opts.fetchImpl ?? fetch;
+    const base = this.opts.endpoint.replace(/\/$/, "");
+    const experiments = opts?.scope ? [opts.scope] : (this.opts.experimentIds ?? []);
+    if (experiments.length === 0) {
+      throw new UpstreamError(
+        "UPSTREAM_ERROR",
+        {},
+        "MLflow trace listing requires an experiment scope (traces/search requires locations).",
+      );
+    }
+    const res = await f(`${base}/api/3.0/mlflow/traces/search`, {
+      method: "POST",
+      headers: { "content-type": "application/json", ...(this.opts.headers ?? {}) },
+      body: JSON.stringify({
+        locations: experiments.map((id) => ({ type: "MLFLOW_EXPERIMENT", mlflow_experiment: { experiment_id: id } })),
+        max_results: opts?.limit ?? 50,
+      }),
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new UpstreamError(
+        "UPSTREAM_ERROR",
+        { status: res.status },
+        `MLflow trace list ${res.status}: ${text.slice(0, 200)}`,
+      );
+    }
+    const body = (await res.json().catch(() => ({}))) as { traces?: MlflowTraceInfo[] };
+    return mlflowTracesToSummaries(body.traces ?? [], experiments[0]);
   }
 }

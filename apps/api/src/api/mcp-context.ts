@@ -12,6 +12,7 @@ import type { RunnerHubLike } from "@everdict/application-control";
 import type { RunnerService } from "@everdict/application-control";
 import type { ScheduleService } from "@everdict/application-control";
 import type { ScorecardService } from "@everdict/application-control";
+import type { SpanAttrMappingService } from "@everdict/application-control";
 import type { TraceSinkService } from "@everdict/application-control";
 import type { TraceSourceService } from "@everdict/application-control";
 import type { ViewService } from "@everdict/application-control";
@@ -68,7 +69,8 @@ export interface McpDeps {
   githubAppService?: GithubAppService; // workspace-owned GitHub App integration (org install → selected repos)
   mattermostService?: MattermostService; // workspace-owned Mattermost integration (register → bot notifications)
   traceSinkService?: TraceSinkService; // workspace trace sinks (export to an observability platform)
-  traceSourceService?: TraceSourceService; // workspace trace sources (pull from an observability platform)
+  traceSourceService?: TraceSourceService; // workspace trace sources (pull from an observability platform) + list/inspect (observability browser)
+  spanAttrMappingService?: SpanAttrMappingService; // per-harness span-attr mapping overlay (the conversion layer between a harness and a judge)
   imageRegistryService?: ImageRegistryService; // workspace image registry (classification baseline + push publishing)
   ciLinkService?: CiLinkService; // CI repo link (repo↔harness slot + OIDC trust) + picker/setup-PR
   runnerService?: RunnerService; // self-hosted runners (personal device pairing) — pair/list/revoke + workspace roster
