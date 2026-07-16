@@ -18,6 +18,7 @@ import {
   validateJudgeAction,
   type ValidateJudgeResult,
 } from '../api/register-judge'
+import { JudgePreviewPanel } from './judge-preview-panel'
 
 const INPUTS = ['trace', 'dom', 'screenshot'] as const
 type Kind = 'model' | 'harness'
@@ -416,6 +417,10 @@ export function RegisterJudgeForm({
           {error}
         </Callout>
       )}
+
+      <div className="border-t border-border pt-5">
+        <JudgePreviewPanel getSpec={buildSpec} />
+      </div>
 
       <div className="flex items-center gap-2.5 border-t border-border pt-5">
         <Button onClick={onSubmit} disabled={busy} className="gap-1.5">

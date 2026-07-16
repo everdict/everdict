@@ -1655,6 +1655,24 @@
     "validateNone": "none",
     "validateConflictNote": "Identical content is a no-op; different content is rejected with 409."
   },
+  "judgePreview": {
+    "heading": "Preview",
+    "subtitle": "See the exact prompt and evidence this judge would receive on a sample trace — no model call.",
+    "traceLabel": "Sample trace",
+    "tracePlaceholder": "[{ \"t\": 0, \"kind\": \"message\", \"role\": \"assistant\", \"text\": \"the answer is 42\" }]",
+    "traceHint": "Paste a TraceEvent[] JSON array (or leave empty). Nothing is executed and no model is called.",
+    "taskLabel": "Task (optional)",
+    "expectedLabel": "Expected output (optional)",
+    "previewButton": "Preview",
+    "invalidTrace": "The trace is not valid JSON.",
+    "failed": "Preview failed.",
+    "coverage": "Evidence coverage",
+    "chars": "{n} chars",
+    "absent": "absent",
+    "truncated": "truncated",
+    "requirements": "Required evidence",
+    "renderedPrompt": "Rendered prompt"
+  },
   "registerRubric": {
     "idLabel": "ID",
     "idHint": "How judges reference this rubric (e.g. code-quality).",

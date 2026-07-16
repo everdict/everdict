@@ -1655,6 +1655,24 @@
     "validateNone": "없음",
     "validateConflictNote": "동일 내용이면 no-op, 다르면 409 로 거부돼요."
   },
+  "judgePreview": {
+    "heading": "미리보기",
+    "subtitle": "샘플 트레이스로 이 저지가 실제로 받게 될 프롬프트와 근거를 그대로 확인합니다 — 모델 호출 없음.",
+    "traceLabel": "샘플 트레이스",
+    "tracePlaceholder": "[{ \"t\": 0, \"kind\": \"message\", \"role\": \"assistant\", \"text\": \"정답은 42\" }]",
+    "traceHint": "TraceEvent[] JSON 배열을 붙여넣으세요(비워도 됨). 아무것도 실행하지 않고 모델도 호출하지 않습니다.",
+    "taskLabel": "태스크 (선택)",
+    "expectedLabel": "기대 출력 (선택)",
+    "previewButton": "미리보기",
+    "invalidTrace": "트레이스가 올바른 JSON이 아닙니다.",
+    "failed": "미리보기에 실패했습니다.",
+    "coverage": "근거 커버리지",
+    "chars": "{n}자",
+    "absent": "없음",
+    "truncated": "잘림",
+    "requirements": "필요 근거",
+    "renderedPrompt": "렌더된 프롬프트"
+  },
   "registerRubric": {
     "idLabel": "ID",
     "idHint": "Judge 가 이 루브릭을 부르는 이름 (예: code-quality).",

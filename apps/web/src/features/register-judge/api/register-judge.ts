@@ -28,6 +28,49 @@ export async function validateJudgeAction(spec: unknown): Promise<ValidateJudgeR
   }
 }
 
+// Control plane /judges/preview response (loose mirror). No model call — renders the exact prompt + coverage.
+export interface EvidenceCoverage {
+  present: boolean
+  chars: number
+  truncated: boolean
+}
+export interface EvidenceRequirement {
+  kind: string
+  name?: string
+  role?: string
+}
+export interface PreviewJudgeResult {
+  ok: boolean
+  kind?: 'model' | 'harness'
+  prompt?: string
+  evidence?: Record<string, EvidenceCoverage>
+  warnings?: string[]
+  requirements?: { satisfied: EvidenceRequirement[]; missing: EvidenceRequirement[]; warnings: string[] }
+  error?: string
+}
+
+// Preview a draft judge against a pasted trace — the exact judging prompt + per-placeholder coverage, NO model call.
+// On transport/validation failure return {ok:false, error} so the form stays alive (the control plane enforces authZ).
+export async function previewJudgeAction(
+  spec: unknown,
+  trace: unknown,
+  meta?: { task?: string; expected?: string },
+): Promise<PreviewJudgeResult> {
+  const ctx = await authContext()
+  try {
+    const evidence = {
+      source: 'trace' as const,
+      trace,
+      ...(meta?.task ? { task: meta.task } : {}),
+      ...(meta?.expected ? { expected: meta.expected } : {}),
+    }
+    const r = await controlPlane.previewJudge<Omit<PreviewJudgeResult, 'ok'>>(ctx, { spec, evidence })
+    return { ok: true, ...r }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
+}
+
 export interface CreateJudgeResult {
   ok: boolean
   id?: string
