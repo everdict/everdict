@@ -8,6 +8,16 @@ export const ScheduleRunTemplateBodySchema = z.object({
   judges: z.array(z.object({ id: z.string(), version: z.string().default("latest") })).default([]),
   runtime: z.string().optional(),
   concurrency: z.number().int().min(1).max(64).optional(),
+  // pass@k / flakiness — run each case N times per fire (unset = 1). Same knob as a one-off scorecard.
+  trials: z.number().int().min(1).max(100).optional(),
+  // partial run each fire — a subset of the dataset (cost/smoke). Applied in order: ids → tags → limit.
+  cases: z
+    .object({
+      ids: z.array(z.string().min(1)).min(1).optional(),
+      tags: z.array(z.string().min(1)).min(1).optional(),
+      limit: z.number().int().min(1).max(10_000).optional(),
+    })
+    .optional(),
 });
 export const cronExpr = z
   .string()

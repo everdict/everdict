@@ -211,6 +211,8 @@ export class ScheduleService {
         judges: t.judges,
         ...(t.runtime !== undefined ? { runtime: t.runtime } : {}),
         ...(t.concurrency !== undefined ? { concurrency: t.concurrency } : {}),
+        ...(t.trials !== undefined ? { trials: t.trials } : {}),
+        ...(t.cases !== undefined ? { cases: t.cases } : {}),
       });
     } catch (err) {
       // A CONFIG-class submit failure is deterministic — the same fire fails the same way on every tick (deleted
