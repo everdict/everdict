@@ -14,11 +14,18 @@ export function registerMattermostRoutes(app: FastifyInstance, deps: ServerDeps)
     if (!principal) return reply;
     try {
       gate(principal, "settings:read");
-      const config = await deps.mattermostService.get(principal.workspace);
-      return reply.send({ ...(config ? { config } : {}) });
+      // { host? (operator MATTERMOST_HOST env), config? (workspace registration) }
+      return reply.send(await deps.mattermostService.get(principal.workspace));
     } catch (err) {
       return sendError(reply, err);
     }
+  });
+
+  // Register/update body — the server URL is operator env (MATTERMOST_HOST), not accepted here. set() verifies the bot token (+ channel) against the live server (strict).
+  const upsertBody = z.object({
+    botTokenSecretName: z.string().min(1),
+    defaultChannelId: z.string().min(1).optional(),
+    commandTokenSecretName: z.string().min(1).optional(), // SecretStore name of the inbound (slash command/button) verification token
   });
 
   app.put("/workspace/mattermost", { schema: mattermostDocs.upsert }, async (req, reply) => {
@@ -26,19 +33,11 @@ export function registerMattermostRoutes(app: FastifyInstance, deps: ServerDeps)
       return reply.code(404).send({ code: "NOT_FOUND", message: "mattermost service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
-    const body = z
-      .object({
-        host: z.string().url(),
-        botTokenSecretName: z.string().min(1),
-        defaultChannelId: z.string().min(1).optional(),
-        commandTokenSecretName: z.string().min(1).optional(), // SecretStore name of the inbound (slash command/button) verification token
-      })
-      .safeParse(req.body ?? {});
+    const body = upsertBody.safeParse(req.body ?? {});
     if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: zodIssues(body.error).join("; ") });
     try {
       gate(principal, "settings:write");
       const config = await deps.mattermostService.set(principal.workspace, {
-        host: body.data.host,
         botTokenSecretName: body.data.botTokenSecretName,
         ...(body.data.defaultChannelId !== undefined ? { defaultChannelId: body.data.defaultChannelId } : {}),
         ...(body.data.commandTokenSecretName !== undefined
@@ -46,6 +45,29 @@ export function registerMattermostRoutes(app: FastifyInstance, deps: ServerDeps)
           : {}),
       });
       return reply.send({ config });
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  // Connection test (admin) — verify a bot token (+ optional channel) against the operator server before saving. A classified failure is still a 200.
+  app.post("/workspace/mattermost/probe", { schema: mattermostDocs.probe }, async (req, reply) => {
+    if (!deps.mattermostService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "mattermost service not configured" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    const body = z
+      .object({ botTokenSecretName: z.string().min(1), defaultChannelId: z.string().min(1).optional() })
+      .safeParse(req.body ?? {});
+    if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: zodIssues(body.error).join("; ") });
+    try {
+      gate(principal, "settings:write");
+      return reply.send(
+        await deps.mattermostService.probe(principal.workspace, {
+          botTokenSecretName: body.data.botTokenSecretName,
+          ...(body.data.defaultChannelId !== undefined ? { defaultChannelId: body.data.defaultChannelId } : {}),
+        }),
+      );
     } catch (err) {
       return sendError(reply, err);
     }

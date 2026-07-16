@@ -45,6 +45,8 @@ function build(opts: {
     secretsFor: async () => opts.secrets ?? {},
     feed,
     mattermost: mattermostHttpClient(opts.fetchImpl ?? recording),
+    // Server URL is now operator env (mattermostHost), no longer read from the per-workspace settings — thread the fixture's host through.
+    ...(opts.mattermost?.host ? { mattermostHost: opts.mattermost.host } : {}),
     ...(opts.apiPublicUrl ? { apiPublicUrl: opts.apiPublicUrl } : {}),
   });
   return { svc, calls, feed };

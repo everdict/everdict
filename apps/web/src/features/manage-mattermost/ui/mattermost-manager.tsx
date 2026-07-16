@@ -1,49 +1,102 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useEffect, useState, useTransition } from 'react'
 import { useTranslations } from 'next-intl'
 
 import { SecretPicker } from '@/features/pick-secret'
 import type { MattermostConfig } from '@/entities/mattermost'
+import { Badge } from '@/shared/ui/badge'
 import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
 import { Input, Label } from '@/shared/ui/input'
 import { InfoTip } from '@/shared/ui/tooltip'
 
-import { removeMattermostAction, setMattermostAction } from '../api/manage-mattermost'
+import {
+  probeMattermostAction,
+  removeMattermostAction,
+  setMattermostAction,
+} from '../api/manage-mattermost'
 
-// Workspace-owned Mattermost integration — once an admin registers the company Mattermost, run and scorecard completion/regression
-// notifications are posted to a channel with a bot token (replaces personal connections). The bot token value is stored only as a workspace secret reference (name).
-// secretNames = workspace secret names (for the token picker — values not included). Both pickers share the list, so
-// inline-created ones are merged in via created.
+// Workspace-owned Mattermost integration — the server URL is operator env (MATTERMOST_HOST), shown read-only. An admin
+// registers the workspace's bot token + channel; run/scorecard completion & regression notifications are posted to the
+// channel with the bot token (replaces personal connections). The bot token value is stored only as a workspace secret (name).
+// Registration requires a verified connection first (Test connection → the control plane also re-verifies strictly on save).
+// serverHost = the operator-configured Mattermost URL (absent = operator hasn't set MATTERMOST_HOST). secretNames = token picker.
 export function MattermostManager({
+  serverHost,
   config,
   canWrite,
   secretNames,
 }: {
+  serverHost?: string
   config?: MattermostConfig
   canWrite: boolean
   secretNames: string[]
 }) {
   const t = useTranslations('manageMattermost')
   const [pending, startTransition] = useTransition()
+  const [probing, startProbing] = useTransition()
   const [error, setError] = useState<string>()
-  const [host, setHost] = useState(config?.host ?? '')
   const [tokenName, setTokenName] = useState(config?.botTokenSecretName ?? '')
   const [channel, setChannel] = useState(config?.defaultChannelId ?? '')
   const [cmdName, setCmdName] = useState(config?.commandTokenSecretName ?? '')
   const [created, setCreated] = useState<string[]>([])
+  // Verified-connection gate — Save is enabled only after a reachable probe for the CURRENT token+channel. Editing resets it.
+  const [verified, setVerified] = useState<{ botUsername?: string; channelName?: string }>()
+  const [probeReason, setProbeReason] = useState<string>()
   const names = [...new Set([...secretNames, ...created])]
+
+  // Any change to what we'd verify (bot token or channel) invalidates a prior probe → re-gate Save.
+  useEffect(() => {
+    setVerified(undefined)
+    setProbeReason(undefined)
+  }, [tokenName, channel])
+
+  // Operator hasn't configured a Mattermost server — nothing to register a bot against.
+  if (!serverHost) {
+    return (
+      <div className="space-y-3">
+        <Header t={t} />
+        <Callout tone="warning" className="py-1.5">
+          {t('serverNotConfigured')}
+        </Callout>
+      </div>
+    )
+  }
+
+  function onTest() {
+    setError(undefined)
+    if (!tokenName.trim()) {
+      setError(t('validationToken'))
+      return
+    }
+    startProbing(async () => {
+      const r = await probeMattermostAction({
+        botTokenSecretName: tokenName.trim(),
+        ...(channel.trim() ? { defaultChannelId: channel.trim() } : {}),
+      })
+      if (!r.ok) {
+        setVerified(undefined)
+        setError(r.error)
+        return
+      }
+      if (r.probe?.reachable) {
+        setVerified({
+          ...(r.probe.botUsername ? { botUsername: r.probe.botUsername } : {}),
+          ...(r.probe.channelName ? { channelName: r.probe.channelName } : {}),
+        })
+        setProbeReason(undefined)
+      } else {
+        setVerified(undefined)
+        setProbeReason(r.probe?.detail ?? t('probeFailed'))
+      }
+    })
+  }
 
   function onSave() {
     setError(undefined)
-    if (!host.trim() || !tokenName.trim()) {
-      setError(t('validationServerToken'))
-      return
-    }
     startTransition(async () => {
       const r = await setMattermostAction({
-        host: host.trim(),
         botTokenSecretName: tokenName.trim(),
         ...(channel.trim() ? { defaultChannelId: channel.trim() } : {}),
         ...(cmdName.trim() ? { commandTokenSecretName: cmdName.trim() } : {}),
@@ -56,35 +109,28 @@ export function MattermostManager({
     startTransition(async () => {
       const r = await removeMattermostAction()
       if (r.ok) {
-        setHost('')
         setTokenName('')
         setChannel('')
+        setCmdName('')
+        setVerified(undefined)
       } else setError(r.error)
     })
   }
 
   return (
     <div className="space-y-3">
-      <div className="space-y-1">
-        <h3 className="flex items-center gap-1.5 text-[13px] font-[560] text-foreground">
-          {t('title')}
-          <InfoTip content={t('titleTip')} />
-        </h3>
-        <p className="text-[13px] leading-relaxed text-muted-foreground">{t('description')}</p>
-      </div>
+      <Header t={t} />
 
       {canWrite ? (
         <div className="space-y-3 rounded-lg border bg-card p-4 shadow-raise">
+          {/* The server URL is operator env — read-only, never an input. */}
+          <div className="flex flex-wrap items-center gap-2 rounded-md border bg-elevated px-3 py-2 text-[12px]">
+            <span className="font-[510] text-foreground">{t('serverUrl')}</span>
+            <code className="break-all text-muted-foreground">{serverHost}</code>
+            <InfoTip content={t('serverUrlTip')} />
+          </div>
+
           <div className="grid gap-3 sm:grid-cols-2">
-            <div className="space-y-1">
-              <Label htmlFor="mm-host">{t('serverUrl')}</Label>
-              <Input
-                id="mm-host"
-                placeholder="https://mattermost.corp.io"
-                value={host}
-                onChange={(e) => setHost(e.target.value)}
-              />
-            </div>
             {/* The bot token is a workspace secret reference, not free text — choose or create inline. */}
             <div className="space-y-1">
               <Label htmlFor="mm-token">{t('botTokenSecret')}</Label>
@@ -130,6 +176,28 @@ export function MattermostManager({
             </div>
           </div>
 
+          {/* Connection verification — Save is gated on a reachable probe for the current bot token + channel. */}
+          <div className="flex flex-wrap items-center gap-2">
+            <Button variant="secondary" size="sm" disabled={probing} onClick={onTest}>
+              {probing ? t('testing') : t('testConnection')}
+            </Button>
+            {verified && (
+              <Badge tone="success">
+                {verified.channelName
+                  ? t('verifiedWithChannel', {
+                      bot: verified.botUsername ?? t('bot'),
+                      channel: verified.channelName,
+                    })
+                  : t('verifiedBot', { bot: verified.botUsername ?? t('bot') })}
+              </Badge>
+            )}
+          </div>
+          {probeReason && (
+            <Callout tone="danger" className="py-1.5">
+              {t('probeFailedDetail', { detail: probeReason })}
+            </Callout>
+          )}
+
           {config?.commandUrl && (
             <div className="space-y-1 rounded-md border bg-elevated px-3 py-2 text-[12px]">
               <p className="font-[510] text-foreground">{t('inboundUrlTitle')}</p>
@@ -147,9 +215,10 @@ export function MattermostManager({
           )}
 
           <div className="flex items-center gap-3">
-            <Button size="sm" disabled={pending} onClick={onSave}>
+            <Button size="sm" disabled={pending || !verified} onClick={onSave}>
               {pending ? t('saving') : config ? t('update') : t('register')}
             </Button>
+            {!verified && <span className="text-[12px] text-faint">{t('verifyFirst')}</span>}
             {config && (
               <button
                 type="button"
@@ -163,9 +232,7 @@ export function MattermostManager({
           </div>
         </div>
       ) : config ? (
-        <p className="text-[13px] text-muted-foreground">
-          {t('connectedTo', { host: config.host })}
-        </p>
+        <p className="text-[13px] text-muted-foreground">{t('connectedTo', { host: serverHost })}</p>
       ) : (
         <p className="text-[13px] text-muted-foreground">{t('notConfigured')}</p>
       )}
@@ -175,6 +242,18 @@ export function MattermostManager({
           {error}
         </Callout>
       )}
+    </div>
+  )
+}
+
+function Header({ t }: { t: ReturnType<typeof useTranslations> }) {
+  return (
+    <div className="space-y-1">
+      <h3 className="flex items-center gap-1.5 text-[13px] font-[560] text-foreground">
+        {t('title')}
+        <InfoTip content={t('titleTip')} />
+      </h3>
+      <p className="text-[13px] leading-relaxed text-muted-foreground">{t('description')}</p>
     </div>
   )
 }

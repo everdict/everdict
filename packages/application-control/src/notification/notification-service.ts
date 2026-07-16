@@ -10,6 +10,9 @@ export interface NotificationServiceDeps {
   settingsFor: (tenant: string) => Promise<WorkspaceSettings | undefined>;
   // Workspace Mattermost (bot token) — resolves settings.mattermost.botTokenSecretName from the workspace SecretStore.
   secretsFor?: (tenant: string) => Promise<Record<string, string>>;
+  // Operator-configured Mattermost server URL (MATTERMOST_HOST env), shared across the deployment — the host is no
+  // longer stored per workspace. If unset, channel posting is silently skipped (feed still writes).
+  mattermostHost?: string;
   // Control-plane public base URL (API_PUBLIC_URL) — the interactive Rerun button posts back to
   // /integrations/mattermost/action, so it only attaches when Mattermost can actually reach us.
   apiPublicUrl?: string;
@@ -161,8 +164,9 @@ export class NotificationService {
   private async post(tenant: string, message: string, rerun?: { dataset: string; harness: string }): Promise<void> {
     try {
       const mm = (await this.deps.settingsFor(tenant))?.mattermost;
-      // Only posts if there's a transport + a defaultChannelId + a bot token in the SecretStore.
-      if (!this.deps.mattermost || !mm?.defaultChannelId || !this.deps.secretsFor) return;
+      const host = this.deps.mattermostHost;
+      // Only posts if the operator configured a server URL + there's a transport + a defaultChannelId + a bot token in the SecretStore.
+      if (!host || !this.deps.mattermost || !mm?.defaultChannelId || !this.deps.secretsFor) return;
       const secrets = await this.deps.secretsFor(tenant);
       const token = secrets[mm.botTokenSecretName];
       if (!token) return;
@@ -185,7 +189,7 @@ export class NotificationService {
               },
             ]
           : undefined;
-      await this.deps.mattermost.post(mm.host, token, {
+      await this.deps.mattermost.post(host, token, {
         channelId: mm.defaultChannelId,
         message,
         ...(attachments ? { attachments } : {}),

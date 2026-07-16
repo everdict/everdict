@@ -1,4 +1,5 @@
 import { MattermostActionReplySchema } from "@everdict/contracts/wire";
+import { MattermostProbeResultSchema } from "@everdict/contracts/wire";
 import { MattermostStatusResponseSchema, MattermostUpsertResponseSchema } from "@everdict/contracts/wire";
 import { MattermostReplySchema } from "@everdict/contracts/wire";
 import type { FastifySchema } from "fastify";
@@ -12,25 +13,29 @@ const docs = {
   status: {
     summary: "Workspace Mattermost integration status",
     description:
-      "Workspace-owned integration (an admin registers the company Mattermost once — replaces personal " +
-      "connected-account notifications). config is absent when nothing is registered. All secret fields are " +
-      "SecretStore name references, never values. Requires settings:read.",
+      "Workspace-owned integration (an admin registers the workspace's bot + channel once — replaces personal " +
+      "connected-account notifications). host is the operator-configured server URL (MATTERMOST_HOST env; absent = " +
+      "unavailable); config is absent when the workspace hasn't registered a bot. All secret fields are SecretStore " +
+      "name references, never values. Requires settings:read.",
     tags: ["mattermost"],
     response: {
-      200: { description: "Current config (or empty object)", ...toJsonSchema(MattermostStatusResponseSchema) },
+      200: {
+        description: "Operator server URL + workspace registration",
+        ...toJsonSchema(MattermostStatusResponseSchema),
+      },
       ...errorResponses(401, 403, 404),
     },
   },
   upsert: {
     summary: "Register or update the workspace Mattermost",
     description:
-      "Put the bot token (and optionally the inbound verification token) into the SecretStore first, then pass " +
-      "only their names here. Setting commandTokenSecretName activates the /everdict slash command and buttons. " +
-      "Requires settings:write (admin).",
+      "The server URL is operator env (MATTERMOST_HOST), not accepted here. Put the bot token (and optionally the " +
+      "inbound verification token) into the SecretStore first, then pass only their names. The bot token (+ channel) " +
+      "is verified against the live server before saving (strict — a failed connection is a 400). Setting " +
+      "commandTokenSecretName activates the /everdict slash command and buttons. Requires settings:write (admin).",
     tags: ["mattermost"],
     body: toJsonSchema(
       z.object({
-        host: z.string().url().describe("In-house Mattermost base URL"),
         botTokenSecretName: z.string().min(1).describe("SecretStore name of the bot access token"),
         defaultChannelId: z.string().min(1).optional(),
         commandTokenSecretName: z
@@ -42,6 +47,24 @@ const docs = {
     ),
     response: {
       200: { description: "Stored config", ...toJsonSchema(MattermostUpsertResponseSchema) },
+      ...errorResponses(400, 401, 403, 404),
+    },
+  },
+  probe: {
+    summary: "Test a Mattermost bot token + channel",
+    description:
+      "Connection test run before registration: the bot token authenticates against the operator server and, when a " +
+      "channel is given, the channel's accessibility is checked. A classified failure (reason set, reachable=false) " +
+      "is still a 200 — the web gates Save on reachable=true. No secrets echoed. Requires settings:write (admin).",
+    tags: ["mattermost"],
+    body: toJsonSchema(
+      z.object({
+        botTokenSecretName: z.string().min(1).describe("SecretStore name of the bot access token"),
+        defaultChannelId: z.string().min(1).optional().describe("Channel to verify accessibility of"),
+      }),
+    ),
+    response: {
+      200: { description: "Connection-test outcome", ...toJsonSchema(MattermostProbeResultSchema) },
       ...errorResponses(400, 401, 403, 404),
     },
   },

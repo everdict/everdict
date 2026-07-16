@@ -13,22 +13,17 @@ export function registerMattermostTools(server: McpServer, ctx: McpToolContext):
       "get_workspace_mattermost",
       {
         description:
-          "This workspace's Mattermost integration settings — host/botTokenSecretName/defaultChannelId (not secret values). If unset, no config.",
+          "This workspace's Mattermost integration — host (operator-configured server URL, MATTERMOST_HOST env; absent = unavailable) + config (botTokenSecretName/defaultChannelId, not secret values; absent = not registered).",
         inputSchema: {},
       },
-      () =>
-        run(principal, "settings:read", async () => {
-          const config = await mm.get(ws);
-          return ok({ ...(config ? { config } : {}) });
-        }),
+      () => run(principal, "settings:read", async () => ok(await mm.get(ws))),
     );
     server.registerTool(
       "set_workspace_mattermost",
       {
         description:
-          "Register/update the Mattermost integration (admin). Put the bot token (value) in the SecretStore first and pass its name as botTokenSecretName. defaultChannelId = the completion/regression alert channel.",
+          "Register/update the Mattermost integration (admin). The server URL is operator env (MATTERMOST_HOST), not passed here. Put the bot token (value) in the SecretStore first and pass its name as botTokenSecretName. The bot token (+ channel) is verified against the live server before saving (a failed connection is an error). defaultChannelId = the completion/regression alert channel.",
         inputSchema: {
-          host: z.string().url().describe("internal Mattermost base URL"),
           botTokenSecretName: z.string().min(1).describe("SecretStore key name holding the bot access token"),
           defaultChannelId: z
             .string()
@@ -44,16 +39,30 @@ export function registerMattermostTools(server: McpServer, ctx: McpToolContext):
             ),
         },
       },
-      ({ host, botTokenSecretName, defaultChannelId, commandTokenSecretName }) =>
+      ({ botTokenSecretName, defaultChannelId, commandTokenSecretName }) =>
         run(principal, "settings:write", async () =>
           ok({
             config: await mm.set(ws, {
-              host,
               botTokenSecretName,
               ...(defaultChannelId ? { defaultChannelId } : {}),
               ...(commandTokenSecretName ? { commandTokenSecretName } : {}),
             }),
           }),
+        ),
+    );
+    server.registerTool(
+      "probe_workspace_mattermost",
+      {
+        description:
+          "Test a Mattermost bot token (+ optional channel) against the operator server before registering (admin). Returns a classified result (reachable/reason). Put the bot token in the SecretStore first and pass its name.",
+        inputSchema: {
+          botTokenSecretName: z.string().min(1).describe("SecretStore key name holding the bot access token"),
+          defaultChannelId: z.string().min(1).optional().describe("channel to verify accessibility of"),
+        },
+      },
+      ({ botTokenSecretName, defaultChannelId }) =>
+        run(principal, "settings:write", async () =>
+          ok(await mm.probe(ws, { botTokenSecretName, ...(defaultChannelId ? { defaultChannelId } : {}) })),
         ),
     );
     server.registerTool(
