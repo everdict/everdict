@@ -106,6 +106,7 @@ async function main(): Promise<void> {
     dispatcher,
     meteredDispatcher,
     probeRuntime,
+    inspectRuntime,
     invalidateTenantBackends,
   } = buildDispatch({
     callbackStore,
@@ -260,11 +261,19 @@ async function main(): Promise<void> {
     harnessInstances: harnessInstanceRegistry,
     datasetRegistry,
     judgeRegistry,
-    judgePreviewService: new JudgePreviewService({ rubrics: rubricRegistry }),
+    judgePreviewService: new JudgePreviewService({
+      rubrics: rubricRegistry,
+      judgeRunner,
+      getRun: async (tenant, runId) => {
+        const rec = await service.get(runId);
+        return rec?.tenant === tenant ? rec : undefined; // workspace-scope the re-score
+      },
+    }),
     rubricRegistry,
     modelRegistry,
     runtimeRegistry,
     probeRuntime,
+    inspectRuntime,
     settingsStore,
     workspaceStore,
     workspaceService,

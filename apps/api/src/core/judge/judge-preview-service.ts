@@ -1,24 +1,40 @@
-import type { EnvSnapshot, GradeContext, JudgeSpec, TraceEvent } from "@everdict/contracts";
+import type { JudgeRunner } from "@everdict/application-control";
+import {
+  BadRequestError,
+  type EnvSnapshot,
+  type EvalCase,
+  type GradeContext,
+  type JudgeSpec,
+  NotFoundError,
+  type RunRecord,
+  type Score,
+  type TraceEvent,
+} from "@everdict/contracts";
 import { type JudgePreview, assembleJudgeInput, previewJudge } from "@everdict/graders";
 import type { RubricRegistry } from "@everdict/registry";
 import { resolveRubric } from "../execution/judge-runner.js";
 
-// Sample evidence to preview/dry-run a judge over — resolves to ONE GradeContext. S2 = the "trace" (paste) source.
-export type JudgeEvidenceInput = {
-  source: "trace";
-  trace: TraceEvent[];
-  task?: string;
-  expected?: string;
-  snapshot?: EnvSnapshot;
-};
+// Sample evidence to preview/dry-run a judge over — resolves to ONE GradeContext.
+// - "trace" (source B): a pasted/uploaded trace + a synthetic environment-free snapshot.
+// - "run"   (source A): a real prior standalone run's stored trace+snapshot+EvalCase (re-score).
+export type JudgeEvidenceInput =
+  | { source: "trace"; trace: TraceEvent[]; task?: string; expected?: string; snapshot?: EnvSnapshot }
+  | { source: "run"; runId: string };
 
 // A preview = the exact prompt + coverage the judge would see, plus any rubric-resolution warning. No model call.
 export interface JudgePreviewResult extends JudgePreview {
   kind: JudgeSpec["kind"];
 }
 
+// A dry-run = the real judge scores (one model call) PLUS the rendered prompt/coverage for transparency.
+export interface JudgeTryResult extends JudgePreviewResult {
+  scores: Score[];
+}
+
 export interface JudgePreviewServiceDeps {
   rubrics?: RubricRegistry; // resolve a {id, version} rubric ref exactly as a real grade does (own fields override)
+  judgeRunner?: JudgeRunner; // dry-run (try) transport — actually runs the judge (one model call). Absent → try disabled.
+  getRun?: (tenant: string, runId: string) => Promise<RunRecord | undefined>; // source "run" — workspace-scoped
 }
 
 export interface PreviewCommand {
@@ -27,9 +43,8 @@ export interface PreviewCommand {
   evidence: JudgeEvidenceInput;
 }
 
-// Build the GradeContext a judge scores over from sample evidence. S2: a pasted/uploaded trace + a synthetic,
-// environment-free prompt snapshot (unless a snapshot is provided). S3 adds run/scorecard re-score + live dispatch.
-export function gradeContextFromEvidence(evidence: JudgeEvidenceInput): GradeContext {
+// Build a GradeContext from a pasted trace + a synthetic, environment-free prompt snapshot (unless one is provided).
+export function gradeContextFromTrace(evidence: Extract<JudgeEvidenceInput, { source: "trace" }>): GradeContext {
   return {
     case: {
       id: "preview",
@@ -45,16 +60,33 @@ export function gradeContextFromEvidence(evidence: JudgeEvidenceInput): GradeCon
   };
 }
 
-// Zero-cost preview of what a judge would see on given evidence — used by the registration wizard and previews.
+// Zero-cost preview + one-case dry-run of what a judge sees on given evidence — the registration wizard and previews.
 export class JudgePreviewService {
   constructor(private readonly deps: JudgePreviewServiceDeps) {}
 
-  async preview(cmd: PreviewCommand): Promise<JudgePreviewResult> {
-    const { tenant, spec, evidence } = cmd;
-    const ctx = gradeContextFromEvidence(evidence);
+  // Resolve any evidence source to the ONE GradeContext all surfaces judge over.
+  private async loadContext(tenant: string, evidence: JudgeEvidenceInput): Promise<GradeContext> {
+    if (evidence.source === "trace") return gradeContextFromTrace(evidence);
+    // source === "run" — re-score a real prior standalone run (workspace-scoped; cross-workspace/missing → 404).
+    if (!this.deps.getRun) throw new BadRequestError("BAD_REQUEST", {}, "run re-score is not configured");
+    const record = await this.deps.getRun(tenant, evidence.runId);
+    if (!record) throw new NotFoundError("NOT_FOUND", { runId: evidence.runId }, "run not found");
+    if (!record.result)
+      throw new BadRequestError("BAD_REQUEST", { runId: evidence.runId }, "run has no result to re-score yet");
+    // caseSpec is present for standalone runs (mig 0051); a batch child re-plans from its dataset, so synthesize a minimal case.
+    const evalCase: EvalCase = record.caseSpec ?? {
+      id: record.caseId,
+      env: { kind: "prompt" },
+      task: "(unknown — batch child run)",
+      graders: [],
+      timeoutSec: 1,
+      tags: [],
+    };
+    return { case: evalCase, trace: record.result.trace, snapshot: record.result.snapshot };
+  }
 
-    // Resolve the rubric via the SAME path a real grade uses. On an unresolved ref, fall back to the judge's own
-    // fields and surface the reason as a warning (the wizard still renders — never a silent empty preview).
+  // Resolve the rubric via the SAME path a real grade uses, then render the prompt + coverage (no model call).
+  private async render(tenant: string, spec: JudgeSpec, ctx: GradeContext): Promise<JudgePreviewResult> {
     const resolution = await resolveRubric(this.deps.rubrics, tenant, spec);
     const rubricWarning = "skipReason" in resolution ? resolution.skipReason : undefined;
     const effective =
@@ -72,12 +104,28 @@ export class JudgePreviewService {
       ...(effective.promptTemplate ? { promptTemplate: effective.promptTemplate } : {}),
       ...(useScreenshot ? { useScreenshot: true } : {}),
     });
-
     const preview = previewJudge(input);
     return {
       kind: spec.kind,
       ...preview,
       warnings: rubricWarning ? [`rubric: ${rubricWarning}`, ...preview.warnings] : preview.warnings,
     };
+  }
+
+  // Zero model-call preview — render the exact prompt + coverage for a (draft) judge against sample evidence.
+  async preview(cmd: PreviewCommand): Promise<JudgePreviewResult> {
+    const ctx = await this.loadContext(cmd.tenant, cmd.evidence);
+    return this.render(cmd.tenant, cmd.spec, ctx);
+  }
+
+  // One-case dry-run — actually run the judge (one model call) over sample evidence via the SAME JudgeRunner a
+  // scorecard uses, and return its scores alongside the rendered prompt. A skip (no key/unresolved) surfaces as a
+  // skip Score with a stated reason (never a silent failure), exactly as in a real batch.
+  async try(cmd: PreviewCommand): Promise<JudgeTryResult> {
+    if (!this.deps.judgeRunner) throw new BadRequestError("BAD_REQUEST", {}, "judge dry-run is not configured");
+    const ctx = await this.loadContext(cmd.tenant, cmd.evidence);
+    const rendered = await this.render(cmd.tenant, cmd.spec, ctx);
+    const scores = await this.deps.judgeRunner.run(cmd.spec, cmd.tenant, ctx);
+    return { ...rendered, scores };
   }
 }

@@ -212,8 +212,22 @@ function server(
     },
   });
   const mattermostService = new MattermostService(settingsStore);
-  const traceSinkService = new TraceSinkService(settingsStore);
-  const traceSourceService = new TraceSourceService(settingsStore, { secretsFor: (ws) => secretStore.entries(ws) });
+  // Connection-probe stub — verifies route wiring / role gate + scope discovery, no real platform I/O.
+  const probeConnection = async (cfg: { kind: string; endpoint: string; auth?: string }) => ({
+    kind: cfg.kind,
+    reachable: true,
+    detail: "stub-reachable",
+    scopeKind: (cfg.kind === "otel" ? "service" : cfg.kind === "mlflow" ? "experiment" : "project") as
+      | "service"
+      | "experiment"
+      | "project",
+    scopes: [{ id: "s1", name: "scope-one" }],
+  });
+  const traceSinkService = new TraceSinkService(settingsStore, { probeConnection });
+  const traceSourceService = new TraceSourceService(settingsStore, {
+    secretsFor: (ws) => secretStore.entries(ws),
+    probeConnection,
+  });
   const mattermostCommandService = new MattermostCommandService({
     settings: settingsStore,
     secretsFor: async () => ({}),
@@ -236,12 +250,28 @@ function server(
     harnessInstances,
     datasetRegistry,
     judgeRegistry,
-    judgePreviewService: new JudgePreviewService({ rubrics: rubricRegistry }),
+    judgePreviewService: new JudgePreviewService({
+      rubrics: rubricRegistry,
+      // No secret → the model judge yields a visible skip score (verifies dry-run wiring without a real model call).
+      judgeRunner: defaultJudgeRunner({ secretsFor: async () => ({}) }),
+      getRun: async (tenant, runId) => {
+        const rec = await svc.get(runId);
+        return rec?.tenant === tenant ? rec : undefined;
+      },
+    }),
     rubricRegistry,
     modelRegistry,
     runtimeRegistry,
     // Connection-test stub — verifies route wiring / role gate only, no real cluster I/O.
     probeRuntime: async (_ws, spec) => ({ kind: spec.kind, reachable: true, detail: "stub-reachable" }),
+    // Live-inspection stub — same purpose (route wiring / read gate), returns a minimal cluster view.
+    inspectRuntime: async (_ws, spec) => ({
+      kind: spec.kind,
+      reachable: true,
+      detail: "stub-cluster",
+      capacity: { total: 4, used: 1, free: 3 },
+      warnings: [],
+    }),
     secretStore,
     githubAppService,
     mattermostService,
@@ -3252,6 +3282,77 @@ describe("API — judges (Agent Judge, workspace-owned, member+ write)", () => {
     });
     expect(res.statusCode).toBe(200);
     await viewer.app.close();
+  });
+
+  it("try actually runs the judge over a pasted trace — returns scores (a visible skip with no key) + the prompt", async () => {
+    const { app } = server({ requireAuth: true, authenticator: roleAuth(["member"]) });
+    const h = { authorization: "Bearer x" };
+    const res = await app.inject({
+      method: "POST",
+      url: "/judges/try",
+      headers: h,
+      payload: {
+        spec: JUDGE,
+        evidence: { source: "trace", trace: [{ t: 0, kind: "message", role: "assistant", text: "done" }], task: "t" },
+      },
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.prompt).toContain("t"); // rendered prompt included for transparency
+    expect(Array.isArray(body.scores)).toBe(true);
+    // No ANTHROPIC key wired in the test → a visible skip score (never a silent failure), same as a real batch.
+    expect(body.scores[0].metric).toBe("judge:correctness");
+    expect(String(body.scores[0].detail)).toContain("skipped");
+    await app.close();
+  });
+
+  it("try requires scorecards:run — a viewer is 403 (it consumes tenant keys/budget)", async () => {
+    const viewer = server({ requireAuth: true, authenticator: roleAuth(["viewer"]) });
+    const res = await viewer.app.inject({
+      method: "POST",
+      url: "/judges/try",
+      headers: { authorization: "Bearer x" },
+      payload: { spec: JUDGE, evidence: { source: "trace", trace: [] } },
+    });
+    expect(res.statusCode).toBe(403);
+    await viewer.app.close();
+  });
+
+  it("try over a missing run is 404", async () => {
+    const { app } = server({ requireAuth: true, authenticator: roleAuth(["member"]) });
+    const res = await app.inject({
+      method: "POST",
+      url: "/judges/try",
+      headers: { authorization: "Bearer x" },
+      payload: { spec: JUDGE, evidence: { source: "run", runId: "nope" } },
+    });
+    expect(res.statusCode).toBe(404);
+    await app.close();
+  });
+
+  it("try re-scores a real prior run (source A): submit → run → judge its stored trace by runId", async () => {
+    const { app } = server({ requireAuth: true, authenticator: roleAuth(["member"]) });
+    const h = { authorization: "Bearer x" };
+    const post = await app.inject({ method: "POST", url: "/runs", headers: h, payload: BODY });
+    expect(post.statusCode).toBe(202);
+    const runId = post.json().id as string;
+    // Wait for the run to settle (svc.track dispatches async after the 202).
+    let status = "";
+    for (let i = 0; i < 100 && status !== "succeeded" && status !== "failed"; i++) {
+      const g = await app.inject({ method: "GET", url: `/runs/${runId}`, headers: h });
+      status = g.json().status;
+      if (status !== "succeeded" && status !== "failed") await new Promise((r) => setTimeout(r, 5));
+    }
+    expect(status).toBe("succeeded");
+    const res = await app.inject({
+      method: "POST",
+      url: "/judges/try",
+      headers: h,
+      payload: { spec: JUDGE, evidence: { source: "run", runId } },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().scores[0].metric).toBe("judge:correctness");
+    await app.close();
   });
 });
 

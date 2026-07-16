@@ -162,5 +162,55 @@ export function registerJudgeTools(server: McpServer, ctx: McpToolContext): void
           );
         }),
     );
+
+    server.registerTool(
+      "try_judge",
+      {
+        description:
+          "Dry-run a judge — ACTUALLY runs it (one model call, one case) over a pasted trace OR a prior run's " +
+          "re-scored trace (pass runId), returning the real scores + rendered prompt. A missing key/unresolved " +
+          "rubric surfaces as a skip score with a reason. Requires scorecards:run (consumes tenant keys/budget).",
+        inputSchema: {
+          judge: z.string().describe("JudgeSpec JSON (kind: model | harness)"),
+          runId: z.string().optional().describe("re-score this prior run's trace (source A). Omit to use `trace`."),
+          trace: z.string().optional().describe("TraceEvent[] JSON (source B). Used when runId is omitted."),
+          task: z.string().optional().describe("the task the agent was given (trace source only)"),
+          expected: z.string().optional().describe("reference/expected output, if any (trace source only)"),
+        },
+      },
+      ({ judge, runId, trace, task, expected }) =>
+        run(principal, "scorecards:run", async () => {
+          let specJson: unknown;
+          try {
+            specJson = JSON.parse(judge);
+          } catch {
+            return fail("BAD_REQUEST: judge must be valid JSON.");
+          }
+          const spec = JudgeSpecSchema.safeParse(specJson);
+          if (!spec.success) return fail(`BAD_REQUEST: ${spec.error.message}`);
+          if (runId) return ok(await preview.try({ tenant: ws, spec: spec.data, evidence: { source: "run", runId } }));
+          if (!trace) return fail("BAD_REQUEST: provide runId or trace.");
+          let traceJson: unknown;
+          try {
+            traceJson = JSON.parse(trace);
+          } catch {
+            return fail("BAD_REQUEST: trace must be valid JSON.");
+          }
+          const events = TraceEventSchema.array().safeParse(traceJson);
+          if (!events.success) return fail(`BAD_REQUEST: ${events.error.message}`);
+          return ok(
+            await preview.try({
+              tenant: ws,
+              spec: spec.data,
+              evidence: {
+                source: "trace",
+                trace: events.data,
+                ...(task ? { task } : {}),
+                ...(expected ? { expected } : {}),
+              },
+            }),
+          );
+        }),
+    );
   }
 }

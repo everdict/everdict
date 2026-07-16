@@ -4,7 +4,7 @@ import { diffJudgeSpecs } from "@everdict/domain";
 import type { FastifyInstance } from "fastify";
 import { type ServerDeps, gate, resolvePrincipal, sendError, zodIssues } from "../route-context.js";
 import { judgeDocs } from "./judge.docs.js";
-import { PreviewJudgeBodySchema } from "./request/judge-evidence.js";
+import { PreviewJudgeBodySchema, TryJudgeBodySchema } from "./request/judge-evidence.js";
 
 // judges (workspace-owned SSOT, Agent Judge: model | harness)
 export function registerJudgeRoutes(app: FastifyInstance, deps: ServerDeps): void {
@@ -77,6 +77,34 @@ export function registerJudgeRoutes(app: FastifyInstance, deps: ServerDeps): voi
       );
     } catch (err) {
       return sendError(reply, err);
+    }
+  });
+
+  // Dry-run — ACTUALLY run the judge (one model call, one case) over sample evidence via the same JudgeRunner a
+  // scorecard uses. Returns the real scores + the rendered prompt. A missing key/unresolved rubric surfaces as a
+  // skip score with a stated reason (same as a real batch). Gate scorecards:run (it consumes tenant keys/budget).
+  app.post("/judges/try", { schema: judgeDocs.try }, async (req, reply) => {
+    if (!deps.judgePreviewService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "judge dry-run not configured" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "scorecards:run");
+    } catch (err) {
+      return sendError(reply, err);
+    }
+    const parsed = TryJudgeBodySchema.safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
+    try {
+      return reply.send(
+        await deps.judgePreviewService.try({
+          tenant: principal.workspace,
+          spec: parsed.data.spec,
+          evidence: parsed.data.evidence,
+        }),
+      );
+    } catch (err) {
+      return sendError(reply, err); // run not found → 404 / no result → 400 / not configured → 400
     }
   });
 

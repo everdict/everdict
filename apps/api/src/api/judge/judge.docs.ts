@@ -7,8 +7,8 @@ import { RegisterJudgeResultSchema } from "@everdict/contracts/wire";
 import { ValidateJudgeResultSchema } from "@everdict/contracts/wire";
 import type { FastifySchema } from "fastify";
 import { errorResponses, toJsonSchema } from "../openapi.js";
-import { PreviewJudgeBodySchema } from "./request/judge-evidence.js";
-import { JudgePreviewResultSchema } from "./response/preview-judge-result.js";
+import { PreviewJudgeBodySchema, TryJudgeBodySchema } from "./request/judge-evidence.js";
+import { JudgePreviewResultSchema, JudgeTryResultSchema } from "./response/preview-judge-result.js";
 import { SetVersionTagsResultSchema } from "./response/set-version-tags-result.js";
 
 // OpenAPI descriptors for the judge routes — doc-only (rule api-layer): the no-op compilers in server.ts
@@ -112,6 +112,21 @@ const docs = {
     body: toJsonSchema(PreviewJudgeBodySchema),
     response: {
       200: { description: "Rendered prompt + evidence coverage + warnings", ...toJsonSchema(JudgePreviewResultSchema) },
+      ...errorResponses(400, 401, 403, 404),
+    },
+  },
+  try: {
+    summary: "Dry-run a judge against sample evidence",
+    description:
+      "ACTUALLY runs the judge (one model call, one case) over sample evidence — a pasted trace or a prior run's " +
+      "re-scored trace — via the same JudgeRunner a scorecard uses, returning the real scores plus the rendered " +
+      "prompt. A missing key/unresolved rubric surfaces as a skip score with a reason (never a silent failure). " +
+      "Requires scorecards:run (member+; it consumes tenant keys/budget). A missing run is 404; a run with no " +
+      "result is 400.",
+    tags: ["judge"],
+    body: toJsonSchema(TryJudgeBodySchema),
+    response: {
+      200: { description: "Judge scores + rendered prompt + coverage", ...toJsonSchema(JudgeTryResultSchema) },
       ...errorResponses(400, 401, 403, 404),
     },
   },
