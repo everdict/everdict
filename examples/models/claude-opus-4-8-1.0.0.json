@@ -1,8 +1,0 @@
-{
-  "id": "claude-opus-4-8",
-  "version": "1.0.0",
-  "description": "first-party shared model — Anthropic Claude Opus 4.8. Referenced by id from a judge/harness. The API key comes from the tenant SecretStore (ANTHROPIC_API_KEY).",
-  "provider": "anthropic",
-  "model": "claude-opus-4-8",
-  "tags": ["shared", "anthropic"]
-}

@@ -2,8 +2,9 @@ import { fileURLToPath } from "node:url";
 import { loadDatasetDir, loadHarnessTaxonomyDir, loadRuntimeDir } from "@everdict/registry";
 import { describe, expect, it } from "vitest";
 
-// Guards that the first-party harness taxonomy (examples/harness-templates) loads into _shared — that templates+instances
-// match the schema and resolve (guarding against broken presets) + identical to what main.ts seedSharedHarnessTaxonomy serves.
+// Guards the first-party harness taxonomy presets (examples/harness-templates) — that templates+instances match the
+// schema and resolve (guarding against broken presets). These are reference presets a workspace can register; they are
+// no longer auto-seeded into _shared on boot, so this guards their validity directly (loadHarnessTaxonomyDir defaults owner to _shared).
 const HARNESS_DIR = fileURLToPath(new URL("../../../../../examples/harness-templates", import.meta.url));
 const DATASET_DIR = fileURLToPath(new URL("../../../../../examples/datasets", import.meta.url));
 const RUNTIME_DIR = fileURLToPath(new URL("../../../../../examples/runtimes", import.meta.url));
@@ -34,7 +35,7 @@ describe("first-party harness taxonomy seed", () => {
   });
 });
 
-// Guards that the first-party dataset/runtime catalogs also load schema-valid (served by seedSharedDatasets/Runtimes).
+// Guards that the first-party dataset/runtime example catalogs also load schema-valid (reference files — not auto-seeded).
 describe("first-party dataset·runtime catalog seed", () => {
   it("examples/datasets parses and the os-use benchmark (hermes-desktop-ssh, multi-case) is in _shared", async () => {
     const reg = await loadDatasetDir(DATASET_DIR);

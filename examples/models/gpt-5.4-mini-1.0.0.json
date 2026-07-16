@@ -1,8 +1,0 @@
-{
-  "id": "gpt-5.4-mini",
-  "version": "1.0.0",
-  "description": "first-party shared model — OpenAI-compatible (e.g. a LiteLLM proxy) gpt-5.4-mini. When baseUrl is unset, uses the OPENAI_BASE_URL secret/default. The API key comes from the tenant SecretStore (OPENAI_API_KEY).",
-  "provider": "openai",
-  "model": "gpt-5.4-mini",
-  "tags": ["shared", "openai"]
-}

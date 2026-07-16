@@ -67,7 +67,8 @@ the provider key is read from the `SecretStore` at grade time (`judge-runner.ts`
 `models:write` (member+) / delete = creator-or-admin (`models:delete`). MCP twins: `list_models` / `get_model` /
 `validate_model` / `create_model` / `delete_model` / `delete_model_versions`. Web: **Settings → Models** (register
 with a `SecretPicker` for `apiKeySecret`; each row shows provider · model · baseUrl and the linked-key state, plus a
-delete control on workspace-owned rows for the creator or an admin). Seeded `_shared` defaults live in `examples/models/`.
+delete control on workspace-owned rows for the creator or an admin). No first-party models are auto-seeded — a
+workspace starts empty and registers its own; the `_shared` fallback tier still resolves any shared model registered later.
 
 ## Deletion (soft delete / tombstone)
 Deleting a model is a **tombstone**, mirroring datasets/harnesses (see `.claude/rules/registry.md`): the version(s)

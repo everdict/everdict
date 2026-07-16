@@ -15,12 +15,6 @@ import { buildRun } from "./composition/run.js";
 import { buildRuntimeAccess, runStartupRecovery } from "./composition/runtime-access.js";
 import { ScheduleServiceRef, wireScheduleService } from "./composition/schedule.js";
 import { buildScorecard } from "./composition/scorecard.js";
-import {
-  seedSharedHarnessTaxonomy,
-  seedSharedJudges,
-  seedSharedModels,
-  seedSharedRubrics,
-} from "./composition/seed.js";
 import { buildCatalog, buildCiLink, buildMattermostCommand, buildQueue, buildView } from "./composition/services.js";
 import { buildWorkspace } from "./composition/workspace.js";
 import { buildPlacementPreflight } from "./core/execution/placement-preflight.js";
@@ -77,14 +71,10 @@ async function main(): Promise<void> {
     scheduleRef,
   });
 
-  await seedSharedHarnessTaxonomy(harnessTemplateRegistry, harnessInstanceRegistry);
-  // Datasets are not auto-seeded — the first-party examples (examples/datasets/*.json) were noise that cluttered
-  // the workspace list. The _shared fallback mechanism itself stays (a real shared benchmark registered later shows through).
-  await seedSharedJudges(judgeRegistry);
-  await seedSharedRubrics(rubricRegistry);
-  await seedSharedModels(modelRegistry);
-  // Runtimes are not auto-seeded either — the default _shared docker/local were noise ("whose infra is this?" ambiguity).
-  // A runtime is meant to be a workspace registering its own infra (examples/runtimes/*.json kept for reference only).
+  // No first-party defaults are auto-seeded into _shared. The first-party harness/judge/rubric/model examples were
+  // noise that cluttered every workspace's list and — being _shared-owned — couldn't be deleted from a workspace.
+  // (Datasets/runtimes already followed this rule.) The _shared fallback mechanism itself stays, so a real shared
+  // entity registered later still shows through; a workspace registers what it needs.
 
   const { backends, scheduler, schedulingControl, autoscale, scalingTargets, tenantQuotas } = buildExecutionScheduling({
     nomadAddr,
@@ -134,6 +124,7 @@ async function main(): Promise<void> {
     mattermostService,
     traceSinkService,
     traceSourceService,
+    spanAttrMappingService,
     commentService,
     githubAppService,
   } = buildIntegrations({
@@ -288,6 +279,7 @@ async function main(): Promise<void> {
     mattermostCommandService,
     traceSinkService,
     traceSourceService,
+    spanAttrMappingService,
     imageRegistryService,
     ciLinkService,
     runnerService,

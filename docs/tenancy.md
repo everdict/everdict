@@ -102,7 +102,7 @@ See `docs/datasets.md`.
 
 ## Agent Judges (`@everdict/registry`)
 Judges reuse the identical ownership model — `(tenant, id, version)`, owner-first with `_shared` fallback
-(first-party default judges from `examples/judges`), immutable versions. A judge is `model` (LLM/VLM call) or
+(no first-party judges are auto-seeded; a workspace registers its own), immutable versions. A judge is `model` (LLM/VLM call) or
 `harness` (delegate to a registered harness). Writes are **member+** (users self-register their judges).
 
 | Method | Path | Action (role) | Effect |
