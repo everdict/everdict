@@ -1,11 +1,8 @@
 export { SettingsForm } from './ui/settings-form'
 export { WorkspaceInfoCard } from './ui/workspace-info-card'
-export { DefaultJudgeCard } from './ui/default-judge-card'
-export { updateWorkspaceSettingsAction, type UpdateSettingsResult } from './api/workspace-settings'
 export {
-  workspaceSettingsSchema,
-  defaultJudgeModelValue,
+  updateWorkspaceSettingsAction,
   type WorkspaceSettings,
-  type WorkspaceJudge,
-} from './model/settings-schema'
+  type UpdateSettingsResult,
+} from './api/workspace-settings'
 export { updateWorkspaceAction, type UpdateWorkspaceResult } from './api/workspace-meta'

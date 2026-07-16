@@ -2371,17 +2371,6 @@
     "personalQueue": "내 개인 큐 (셀프호스티드)",
     "personalEmpty": "연결된 내 러너가 없어요 — <link>런타임에서 내 머신을 연결</link>해보세요."
   },
-  "defaultJudge": {
-    "title": "기본 저지 모델",
-    "hint": "실행이나 스코어카드가 저지를 명시하지 않았을 때 인라인 저지 그레이더를 채점해요. 등록된 모델을 고르면 그 모델의 연결정보(엔드포인트·키)를 실행 시점에 사용해요.",
-    "modelLabel": "모델",
-    "placeholder": "등록된 모델 선택",
-    "noModels": "등록된 모델이 없어요 — 아래에서 먼저 등록하면 기본 저지로 쓸 수 있어요.",
-    "save": "저장",
-    "saving": "저장 중…",
-    "saved": "저장됨",
-    "adminRequired": "관리자 권한이 필요해요 (settings:write)."
-  },
   "workspaceSettings": {
     "meterUsage": "사용량 계측",
     "meterUsageHint": "이 워크스페이스의 실행에서 쓴 토큰과 비용을 예산에 반영해요.",

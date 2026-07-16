@@ -2371,17 +2371,6 @@
     "personalQueue": "My personal queue (self-hosted)",
     "personalEmpty": "No runner connected — <link>connect your machine in Runtimes</link>."
   },
-  "defaultJudge": {
-    "title": "Default judge model",
-    "hint": "Scores inline judge graders when a run or scorecard selects no explicit judge. Picking a registered model uses its connection (endpoint & key) at judge-run time.",
-    "modelLabel": "Model",
-    "placeholder": "Select a registered model",
-    "noModels": "No registered models yet — register one below to use it as the default judge.",
-    "save": "Save",
-    "saving": "Saving…",
-    "saved": "Saved",
-    "adminRequired": "Requires the admin role (settings:write)."
-  },
   "workspaceSettings": {
     "meterUsage": "Meter usage",
     "meterUsageHint": "Count tokens and cost from this workspace’s runs toward the budget.",

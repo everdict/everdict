@@ -3,11 +3,6 @@ import { getTranslations } from 'next-intl/server'
 import { modelSpecSchema, modelsSchema } from '@/entities/model'
 import { secretsSchema } from '@/entities/secret'
 import { ModelsManager, type ModelEntry } from '@/features/manage-models'
-import {
-  DefaultJudgeCard,
-  workspaceSettingsSchema,
-  type WorkspaceJudge,
-} from '@/features/workspace-settings'
 import { can } from '@/shared/auth/can'
 import { currentPrincipal } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
@@ -73,40 +68,19 @@ export default async function ModelsPage() {
     // Secret store unconfigured — the apiKeySecret picker just shows no existing names.
   }
 
-  // Workspace default judge model (references a registered model; resolved at judge-run time). Setting = settings:write (admin).
-  // An unreadable settings response just drops the prefill — the picker still lets an admin set it.
-  let defaultJudge: WorkspaceJudge | undefined
-  try {
-    defaultJudge = workspaceSettingsSchema.parse(await controlPlane.getWorkspaceSettings(ctx)).judge
-  } catch {
-    // settings unreadable / store unconfigured — no prefill
-  }
-  const canWriteSettings = can(principal?.roles, 'settings:write')
-  // Picker source: registered models with a resolved spec (provider/model).
-  const pickModels = models.flatMap((m) =>
-    m.spec ? [{ id: m.id, provider: m.spec.provider, model: m.spec.model }] : []
-  )
-
   return (
     <div className="space-y-6">
       {header}
       {error !== undefined ? (
         <Callout tone="danger">{s('connectError', { error })}</Callout>
       ) : (
-        <>
-          <DefaultJudgeCard
-            {...(defaultJudge ? { initialJudge: defaultJudge } : {})}
-            models={pickModels}
-            canWrite={canWriteSettings}
-          />
-          <ModelsManager
-            models={models}
-            secretNames={secretNames}
-            canWrite={canWrite}
-            canDelete={canDelete}
-            {...(principal?.subject !== undefined ? { currentSubject: principal.subject } : {})}
-          />
-        </>
+        <ModelsManager
+          models={models}
+          secretNames={secretNames}
+          canWrite={canWrite}
+          canDelete={canDelete}
+          {...(principal?.subject !== undefined ? { currentSubject: principal.subject } : {})}
+        />
       )}
     </div>
   )
