@@ -14,6 +14,9 @@ export const InspectNodeSchema = z.object({
   ready: z.boolean().describe("Normalized readiness so the UI can count healthy nodes without parsing status text"),
   datacenter: z.string().optional().describe("Nomad datacenter (k8s has none)"),
   dockerHealthy: z.boolean().optional().describe("Nomad: the docker task-driver's health on this node"),
+  // Whether the node accepts new placements (Nomad eligibility / k8s !unschedulable). false = cordoned. Drives the
+  // cordon/uncordon toggle. Absent when the list endpoint doesn't carry it.
+  schedulable: z.boolean().optional(),
 });
 export type InspectNode = z.infer<typeof InspectNodeSchema>;
 

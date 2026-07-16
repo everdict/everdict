@@ -53,7 +53,7 @@ export interface K8sApi {
   countActiveJobs(): Promise<number | undefined>; // capacity probe (in-flight app=everdict jobs across all namespaces)
   serverVersion(): Promise<string>; // connection test — API server /version (gitVersion). Throws on reachability/auth failure.
   // --- Read-only inspection (runtime detail screen). Each returns undefined when the query itself fails (best-effort). ---
-  inspectNodes(): Promise<Array<{ name: string; ready: boolean; status: string }> | undefined>; // cluster composition
+  inspectNodes(): Promise<Array<{ name: string; ready: boolean; status: string; schedulable?: boolean }> | undefined>; // cluster composition
   inspectWorkload(): Promise<
     Array<{ name: string; status: string; node?: string; creationTimestamp?: string }> | undefined
   >; // live everdict pods (app=everdict), running/pending
@@ -245,11 +245,17 @@ export function kubectlApi(
       try {
         const items = (JSON.parse(res.stdout).items ?? []) as Array<{
           metadata?: { name?: string };
+          spec?: { unschedulable?: boolean };
           status?: { conditions?: Array<{ type?: string; status?: string }> };
         }>;
         return items.map((n) => {
           const ready = (n.status?.conditions ?? []).some((c) => c.type === "Ready" && c.status === "True");
-          return { name: n.metadata?.name ?? "node", ready, status: ready ? "Ready" : "NotReady" };
+          return {
+            name: n.metadata?.name ?? "node",
+            ready,
+            status: ready ? "Ready" : "NotReady",
+            schedulable: !n.spec?.unschedulable,
+          };
         });
       } catch {
         return undefined;

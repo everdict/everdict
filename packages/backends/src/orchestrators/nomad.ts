@@ -160,6 +160,7 @@ export interface NomadNodeStub {
   Status?: string; // "ready" | "down" | "initializing" | "disconnected"
   Datacenter?: string;
   Drivers?: Record<string, { Healthy?: boolean } | undefined>;
+  SchedulingEligibility?: string; // "eligible" | "ineligible" (cordoned)
 }
 
 export function nomadNodeToInspect(n: NomadNodeStub): InspectNode {
@@ -171,6 +172,7 @@ export function nomadNodeToInspect(n: NomadNodeStub): InspectNode {
     ready: status === "ready",
     ...(n.Datacenter ? { datacenter: n.Datacenter } : {}),
     ...(docker && typeof docker.Healthy === "boolean" ? { dockerHealthy: docker.Healthy } : {}),
+    ...(n.SchedulingEligibility ? { schedulable: n.SchedulingEligibility === "eligible" } : {}),
   };
 }
 
