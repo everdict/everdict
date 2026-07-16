@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { GithubAppInstallationSchema, GithubAppRegistrationSchema } from "./github-app-view.js";
+import { GithubAppInstallationSchema, GithubAppProvidersSchema } from "./github-app-view.js";
 import { InstallationRepoSchema } from "./installation-repo.js";
 
 // GET /workspace/github-app — install status with each installation's allowed repos bundled
@@ -18,8 +18,8 @@ export const InstallationWithReposSchema = GithubAppInstallationSchema.extend({
 export type InstallationWithRepos = z.infer<typeof InstallationWithReposSchema>;
 
 export const GithubAppDetailViewSchema = z.object({
-  registrations: z.array(GithubAppRegistrationSchema),
   installations: z.array(InstallationWithReposSchema),
+  providers: GithubAppProvidersSchema,
   callbackUrl: z
     .string()
     .optional()

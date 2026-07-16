@@ -3,18 +3,14 @@
 import { useState, useTransition } from 'react'
 import { useLocale, useTranslations } from 'next-intl'
 
-import { SecretPicker } from '@/features/pick-secret'
 import type { GithubAppInstallation, GithubAppView } from '@/entities/github-app'
 import { Badge } from '@/shared/ui/badge'
 import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
-import { Input, Label } from '@/shared/ui/input'
 import { SettingsList, SettingsRow } from '@/shared/ui/settings-list'
 import { InfoTip } from '@/shared/ui/tooltip'
 
 import {
-  registerGithubAppAction,
-  removeGithubAppRegistrationAction,
   startGithubAppInstallAction,
   unlinkGithubAppInstallationAction,
 } from '../api/manage-github-app'
@@ -33,25 +29,23 @@ const INSTALL_ERROR_KEYS: Record<string, string> = {
 }
 
 // Workspace-owned GitHub App integration — org install → selected repos → workspace-owned installation (replaces personal connections).
-// github.com is one-click install (operator env App); GHE requires an admin to register each server's App, then install. authZ is enforced by the control plane.
+// BOTH github.com and GitHub Enterprise are operator env (one App per host) — the admin only clicks "Install" and picks repos on GitHub.
 // The install list shows github.com and GHE in the same shape (account + host chip + installed badge + allowed-repo chips) — consistency.
-// secretNames = workspace secret names (for the GHE private-key picker — values are not sent).
 export function GithubAppManager({
   view,
   canWrite,
-  secretNames,
   notice,
 }: {
   view: GithubAppView
   canWrite: boolean
-  secretNames: string[]
   notice?: GithubAppNotice
 }) {
   const t = useTranslations('manageGithubApp')
   const [pending, startTransition] = useTransition()
   const [error, setError] = useState<string>()
-  const [showGhe, setShowGhe] = useState(view.registrations.length > 0)
   const noticeErrorKey = notice?.error ? INSTALL_ERROR_KEYS[notice.error] : undefined
+  const { githubCom, enterprise } = view.providers
+  const noProviderConfigured = !githubCom && !enterprise
 
   function onInstall(host?: string) {
     setError(undefined)
@@ -92,7 +86,12 @@ export function GithubAppManager({
         </Callout>
       )}
 
-      {view.installations.length === 0 ? (
+      {noProviderConfigured ? (
+        // Neither github.com nor GitHub Enterprise is configured by the operator (env) — nothing to install against.
+        <Callout tone="warning" className="py-1.5">
+          {t('noProviderConfigured')}
+        </Callout>
+      ) : view.installations.length === 0 ? (
         <div className="rounded-lg border border-dashed bg-card/40 px-4 py-5">
           <p className="text-[13px] text-muted-foreground">{t('emptyTitle')}</p>
           <p className="mt-1 text-[12px] text-faint">
@@ -113,29 +112,25 @@ export function GithubAppManager({
         </SettingsList>
       )}
 
-      {canWrite && (
-        <div className="flex items-center gap-3">
-          <Button variant="secondary" size="sm" disabled={pending} onClick={() => onInstall()}>
-            {t('installButton')}
-          </Button>
-          <button
-            type="button"
-            className="text-[12px] font-[510] text-primary hover:underline"
-            onClick={() => setShowGhe((v) => !v)}
-          >
-            {t('gheToggle')}
-          </button>
+      {/* One-click install per configured provider — github.com and GitHub Enterprise are handled identically (operator env App). */}
+      {canWrite && !noProviderConfigured && (
+        <div className="flex flex-wrap items-center gap-2">
+          {githubCom && (
+            <Button variant="secondary" size="sm" disabled={pending} onClick={() => onInstall()}>
+              {t('installGithubCom')}
+            </Button>
+          )}
+          {enterprise && (
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={pending}
+              onClick={() => onInstall(enterprise.host)}
+            >
+              {t('installEnterprise', { host: hostLabel(enterprise.host) })}
+            </Button>
+          )}
         </div>
-      )}
-
-      {canWrite && showGhe && (
-        <GheSection
-          view={view}
-          secretNames={secretNames}
-          pending={pending}
-          onInstall={onInstall}
-          onError={setError}
-        />
       )}
 
       {error && (
@@ -228,173 +223,6 @@ function InstallationRow({
         </button>
       )}
     </SettingsRow>
-  )
-}
-
-// GitHub Enterprise — create an App on each GHE server and register it (host+slug+appId+private-key SecretStore name), then install.
-// The registration row shows install status (installed/not installed) to carry the same "status-visible" flow as github.com.
-function GheSection({
-  view,
-  secretNames,
-  pending,
-  onInstall,
-  onError,
-}: {
-  view: GithubAppView
-  secretNames: string[]
-  pending: boolean
-  onInstall: (host: string) => void
-  onError: (msg?: string) => void
-}) {
-  const t = useTranslations('manageGithubApp')
-  const [saving, startSaving] = useTransition()
-  const [host, setHost] = useState('')
-  const [slug, setSlug] = useState('')
-  const [appId, setAppId] = useState('')
-  const [keyName, setKeyName] = useState('')
-
-  function onRegister() {
-    onError(undefined)
-    if (!host.trim() || !slug.trim() || !appId.trim() || !keyName.trim()) {
-      onError(t('allFieldsRequired'))
-      return
-    }
-    startSaving(async () => {
-      const r = await registerGithubAppAction({
-        host: host.trim(),
-        slug: slug.trim(),
-        appId: appId.trim(),
-        privateKeySecretName: keyName.trim(),
-      })
-      if (r.ok) {
-        setHost('')
-        setSlug('')
-        setAppId('')
-        setKeyName('')
-      } else onError(r.error)
-    })
-  }
-  function onRemove(h: string) {
-    onError(undefined)
-    startSaving(async () => {
-      const r = await removeGithubAppRegistrationAction(h)
-      if (!r.ok) onError(r.error)
-    })
-  }
-
-  return (
-    <div className="space-y-3 rounded-lg border bg-card p-4 shadow-raise">
-      <h4 className="flex items-center gap-1.5 text-[13px] font-[560] text-foreground">
-        {t('gheServerTitle')}
-        <InfoTip
-          content={
-            <>
-              {t('gheTip')}
-              {view.callbackUrl && (
-                <>
-                  <br />
-                  {t('gheSetupUrl')} <code>{view.callbackUrl}</code>
-                </>
-              )}
-            </>
-          }
-        />
-      </h4>
-
-      {view.registrations.length > 0 && (
-        <SettingsList>
-          {view.registrations.map((r) => {
-            // Orgs installed on this GHE server — SERVED by the control plane (installedAccounts, P1g);
-            // host normalization has exactly one owner (the server's sameHost), so the mirror is gone.
-            const installedOrgs = r.installedAccounts ?? []
-            return (
-              <SettingsRow
-                key={r.host}
-                label={
-                  <span className="flex flex-wrap items-center gap-2">
-                    {hostLabel(r.host)}
-                    {installedOrgs.length > 0 ? (
-                      <Badge tone="success">
-                        {t('installedOrgsBadge', {
-                          orgs: installedOrgs.join(', '),
-                        })}
-                      </Badge>
-                    ) : (
-                      <Badge tone="outline">{t('notInstalledBadge')}</Badge>
-                    )}
-                  </span>
-                }
-                hint={t('gheRegHint', { appId: r.appId, slug: r.slug })}
-              >
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  disabled={pending}
-                  onClick={() => onInstall(r.host)}
-                >
-                  {t('installShort')}
-                </Button>
-                <button
-                  type="button"
-                  className="text-[12px] font-[510] text-destructive hover:underline"
-                  disabled={saving}
-                  onClick={() => onRemove(r.host)}
-                >
-                  {t('delete')}
-                </button>
-              </SettingsRow>
-            )
-          })}
-        </SettingsList>
-      )}
-
-      <div className="grid gap-3 sm:grid-cols-2">
-        <div className="space-y-1">
-          <Label htmlFor="ghe-host">{t('serverUrl')}</Label>
-          <Input
-            id="ghe-host"
-            placeholder="https://ghe.example.com"
-            value={host}
-            onChange={(e) => setHost(e.target.value)}
-          />
-        </div>
-        <div className="space-y-1">
-          <Label htmlFor="ghe-slug">App slug</Label>
-          <Input
-            id="ghe-slug"
-            placeholder="everdict-eval"
-            value={slug}
-            onChange={(e) => setSlug(e.target.value)}
-          />
-        </div>
-        <div className="space-y-1">
-          <Label htmlFor="ghe-appid">App ID</Label>
-          <Input
-            id="ghe-appid"
-            placeholder="123456"
-            value={appId}
-            onChange={(e) => setAppId(e.target.value)}
-          />
-        </div>
-        {/* The private key (PEM) is a workspace secret reference, not free-text input — pick one or create inline (multiline by default). */}
-        <div className="space-y-1 sm:col-span-2">
-          <Label htmlFor="ghe-key">{t('privateKeySecret')}</Label>
-          <SecretPicker
-            id="ghe-key"
-            value={keyName}
-            onChange={setKeyName}
-            names={secretNames}
-            scope="workspace"
-            defaultMultiline
-            createValuePlaceholder={t('privateKeyPlaceholder')}
-            aria-label={t('privateKeyAria')}
-          />
-        </div>
-      </div>
-      <Button size="sm" disabled={saving} onClick={onRegister}>
-        {saving ? t('saving') : t('registerApp')}
-      </Button>
-    </div>
   )
 }
 

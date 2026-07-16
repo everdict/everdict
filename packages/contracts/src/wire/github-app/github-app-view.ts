@@ -1,25 +1,21 @@
 import { z } from "zod";
 
 // Workspace GitHub App integration status (GithubAppService.GithubAppView). No secret values ever leave:
-// privateKeySecretName is a SecretStore name reference (never the PEM), and installation tokens are minted
-// on demand — nothing token-shaped is stored or returned here.
+// installation tokens are minted on demand from the operator-env App private key — nothing token-shaped is
+// stored or returned here.
 
-// A GHE App the workspace registered (the github.com App comes from operator env and is not listed here).
-export const GithubAppRegistrationSchema = z.object({
-  host: z.string().describe("GHE base URL the App is registered for"),
-  slug: z.string().describe("App slug — used in the install URL /github-apps/{slug}/installations/new"),
-  appId: z.string(),
-  privateKeySecretName: z
-    .string()
-    .describe("SecretStore name reference — the private-key PEM value itself is never stored or returned"),
-  installedAccounts: z
-    .array(z.string())
+// Which App install targets the operator configured (env) — github.com and/or one GitHub Enterprise host.
+// Both are operator env now (GITHUB_APP_* / GITHUB_ENTERPRISE_APP_*); the admin just installs + picks repos.
+export const GithubAppProvidersSchema = z.object({
+  githubCom: z.boolean().describe("github.com App configured via operator env (GITHUB_APP_*) — install available"),
+  enterprise: z
+    .object({ host: z.string().describe("GitHub Enterprise base URL configured via operator env") })
     .optional()
     .describe(
-      "Server-computed (re-architecture P1g): accounts installed on this registration's host (normalized host match) — present only when non-empty",
+      "GitHub Enterprise App configured via operator env (GITHUB_ENTERPRISE_APP_*) — install available when present",
     ),
 });
-export type GithubAppRegistration = z.infer<typeof GithubAppRegistrationSchema>;
+export type GithubAppProviders = z.infer<typeof GithubAppProvidersSchema>;
 
 // A workspace-owned installation (github.com or GHE) — one per installed org.
 export const GithubAppInstallationSchema = z.object({
@@ -32,7 +28,7 @@ export const GithubAppInstallationSchema = z.object({
 export type GithubAppInstallation = z.infer<typeof GithubAppInstallationSchema>;
 
 export const GithubAppViewSchema = z.object({
-  registrations: z.array(GithubAppRegistrationSchema),
   installations: z.array(GithubAppInstallationSchema),
+  providers: GithubAppProvidersSchema,
 });
 export type GithubAppView = z.infer<typeof GithubAppViewSchema>;

@@ -5,15 +5,15 @@ import type { OAuthStateStore } from "../ports/oauth-state-store.js";
 import type { WorkspaceSettingsStore } from "../ports/workspace-settings-store.js";
 
 // Workspace-owned GitHub App integration service — replaces personal Connected accounts (OAuth tokens).
-// Org install → chosen repos → a workspace-owned installation. github.com App = operator env (config.githubCom);
-// GHE App = admin registers it on the workspace with host+slug+appId+privateKeySecretName (private key = SecretStore name-ref).
-// The HTTP route and the MCP tool share this core (BFF↔MCP parity). Private-key/token values never leave for the browser.
-// This use-case owns the sameHost/installation-selection/upsert/state semantics + credential resolution; the GitHub REST
-// protocol (URLs, App-JWT/token plumbing, headers, response parsing, error remapping) moved behind GithubAppGateway
-// in re-architecture P2d. Design: docs/architecture/workspace-scoped-integrations.md
+// Org install → chosen repos → a workspace-owned installation. BOTH github.com and GitHub Enterprise are
+// operator env now (config.githubCom / config.githubEnterprise): one App per host for the whole deployment,
+// the admin only installs + picks repos (no per-workspace App registration — the two hosts are handled
+// identically). The installation issues short-lived tokens on demand from the App private key, so nothing
+// secret is stored on the workspace. The HTTP route and the MCP tool share this core (BFF↔MCP parity). The
+// GitHub REST protocol (URLs, App-JWT/token plumbing, headers, response parsing, error remapping) lives behind
+// GithubAppGateway. Design: docs/architecture/workspace-scoped-integrations.md
 
 type GithubAppSettings = NonNullable<WorkspaceSettings["githubApp"]>;
-type Registration = GithubAppSettings["registrations"][number];
 type Installation = GithubAppSettings["installations"][number];
 
 // An unguessable state nonce. Goes out as the authorize URL's state parameter and comes back as-is in the callback.
@@ -21,11 +21,20 @@ function generateOAuthState(): string {
   return randomBytes(24).toString("base64url");
 }
 
-// Operator github.com App credentials (env). If unset, the github.com App is disabled (GHE is still available via workspace registration).
+// Operator github.com App credentials (env). If unset, the github.com App is disabled.
 export interface GithubComAppConfig {
   appId: string;
   privateKeyPem: string;
   slug: string; // used in the install URL github.com/apps/{slug}/installations/new
+}
+
+// Operator GitHub Enterprise App credentials (env) — the ONE enterprise host for this deployment, handled
+// identically to github.com (env single App). If unset, GHE install is disabled.
+export interface GithubEnterpriseAppConfig {
+  host: string; // GHE base URL (e.g. https://ghe.acme.io) — the install target + credential-resolution key
+  appId: string;
+  privateKeyPem: string;
+  slug: string; // used in the install URL {host}/github-apps/{slug}/installations/new
 }
 
 export interface GithubAppServiceConfig {
@@ -33,17 +42,19 @@ export interface GithubAppServiceConfig {
   apiPublicUrl?: string; // install-callback (App Setup URL) base. Falls back to the request base if unset.
   stateTtlSec?: number; // pending state expiry (default 600s)
   githubCom?: GithubComAppConfig; // env default github.com App (absent → github.com install disabled)
+  githubEnterprise?: GithubEnterpriseAppConfig; // env GitHub Enterprise App (absent → GHE install disabled)
 }
 
-// A registration as served (re-architecture P1g): carries the accounts installed on its host
-// (normalized sameHost match) so the web doesn't re-implement host normalization — the 748eecb
-// production bug was exactly that mirror drifting.
-export type ServedRegistration = Registration & { installedAccounts?: string[] };
+// Which App install targets the operator configured (env) — mirrors the wire GithubAppProviders.
+export interface GithubAppProviders {
+  githubCom: boolean;
+  enterprise?: { host: string };
+}
 
-// Workspace App integration status (no secrets — privateKeySecretName is a name reference, not a value, so it's safe to return).
+// Workspace App integration status (no secrets — installation tokens are minted on demand, nothing token-shaped is stored).
 export interface GithubAppView {
-  registrations: ServedRegistration[];
   installations: Installation[];
+  providers: GithubAppProviders;
 }
 
 // One picker row — a thin normalization of the repos the installation can access (GET /installation/repositories).
@@ -59,14 +70,14 @@ export interface InstallationRepo {
 // repos lookup is per-install soft-fail: one install's credential/network problem does not kill the other installs or the screen.
 export type InstallationWithRepos = Installation & { repos?: InstallationRepo[]; reposError?: string };
 export interface GithubAppDetailView {
-  registrations: ServedRegistration[];
   installations: InstallationWithRepos[];
+  providers: GithubAppProviders;
 }
 
 export interface StartInstallInput {
   workspace: string;
   createdBy: string;
-  host?: string; // absent = github.com (env App), set = that GHE registration
+  host?: string; // absent = github.com (env App), set = the enterprise host (env App)
 }
 
 function trimSlash(url: string): string {
@@ -101,7 +112,6 @@ function parseGitRepo(gitUrl: string): { host?: string; owner: string; repo: str
 export interface GithubAppServiceDeps {
   states: OAuthStateStore;
   settings: WorkspaceSettingsStore;
-  secretsFor: (workspace: string) => Promise<Record<string, string>>;
   gateway: GithubAppGateway;
   config: GithubAppServiceConfig;
   now?: () => Date;
@@ -110,66 +120,51 @@ export interface GithubAppServiceDeps {
 export class GithubAppService {
   private readonly states: OAuthStateStore;
   private readonly settings: WorkspaceSettingsStore;
-  private readonly secretsFor: (workspace: string) => Promise<Record<string, string>>;
   private readonly gateway: GithubAppGateway;
   private readonly config: GithubAppServiceConfig;
   private readonly now: () => Date;
   constructor(deps: GithubAppServiceDeps) {
     this.states = deps.states;
     this.settings = deps.settings;
-    this.secretsFor = deps.secretsFor;
     this.gateway = deps.gateway;
     this.config = deps.config;
     this.now = deps.now ?? (() => new Date());
   }
 
-  // Serve-time enrichment: each registration carries its host's installed accounts (sameHost is the
-  // one normalization owner — the web reads the served field instead of re-comparing hosts).
-  private serveRegistrations(registrations: Registration[], installations: Installation[]): ServedRegistration[] {
-    return registrations.map((r) => {
-      const accounts = installations.filter((i) => sameHost(i.host, r.host)).map((i) => i.account);
-      return accounts.length > 0 ? { ...r, installedAccounts: accounts } : r;
-    });
+  // Which App install targets the operator configured via env (github.com and/or the enterprise host).
+  private providers(): GithubAppProviders {
+    const e = this.config.githubEnterprise;
+    return {
+      githubCom: this.config.githubCom !== undefined,
+      ...(e ? { enterprise: { host: e.host } } : {}),
+    };
   }
 
-  // Workspace App integration status (registrations + installations). No secret values.
+  // The env App (github.com or enterprise) that owns this host — undefined host = github.com. No match = undefined.
+  private appFor(host?: string): GithubComAppConfig | GithubEnterpriseAppConfig | undefined {
+    if (!host) return this.config.githubCom;
+    const e = this.config.githubEnterprise;
+    return e && sameHost(host, e.host) ? e : undefined;
+  }
+
+  // Workspace App integration status (installations + configured providers). No secret values.
   async list(workspace: string): Promise<GithubAppView> {
     const g = (await this.settings.get(workspace))?.githubApp;
-    const installations = g?.installations ?? [];
-    return { registrations: this.serveRegistrations(g?.registrations ?? [], installations), installations };
-  }
-
-  // Register/update a GHE App (admin). Upsert by host. Put the private key into SecretStore first, then name it here.
-  async registerGheApp(workspace: string, input: Registration): Promise<GithubAppView> {
-    const g = (await this.settings.get(workspace))?.githubApp;
-    // Upsert host by normalized equality (sameHost) — prevents duplicate registrations differing only in trailing slash/case.
-    const registrations = [...(g?.registrations ?? []).filter((r) => !sameHost(r.host, input.host)), input];
-    await this.write(workspace, { registrations, installations: g?.installations ?? [] });
-    const installations = g?.installations ?? [];
-    return { registrations: this.serveRegistrations(registrations, installations), installations };
-  }
-
-  // Unregister a GHE App (admin). Existing installation records remain but cannot mint tokens without credentials.
-  async removeRegistration(workspace: string, host: string): Promise<GithubAppView> {
-    const g = (await this.settings.get(workspace))?.githubApp;
-    if (!g) return { registrations: [], installations: [] };
-    const registrations = g.registrations.filter((r) => !sameHost(r.host, host));
-    await this.write(workspace, { registrations, installations: g.installations });
-    return { registrations: this.serveRegistrations(registrations, g.installations), installations: g.installations };
+    return { installations: g?.installations ?? [], providers: this.providers() };
   }
 
   // Unlink an installation (admin). The actual uninstall is on GitHub's side — here we just forget the record (idempotent).
   async unlinkInstallation(workspace: string, installationId: number): Promise<GithubAppView> {
     const g = (await this.settings.get(workspace))?.githubApp;
-    if (!g) return { registrations: [], installations: [] };
+    if (!g) return { installations: [], providers: this.providers() };
     const installations = g.installations.filter((i) => i.installationId !== installationId);
-    await this.write(workspace, { registrations: g.registrations, installations });
-    return { registrations: this.serveRegistrations(g.registrations, installations), installations };
+    await this.write(workspace, { installations });
+    return { installations, providers: this.providers() };
   }
 
   // Start install → GitHub App install-page URL (includes state). Admin clicks → picks repos on GitHub → callback.
   async startInstall(input: StartInstallInput): Promise<{ installUrl: string }> {
-    const target = await this.resolveInstallTarget(input.workspace, input.host);
+    const target = this.resolveInstallTarget(input.host);
     const state = generateOAuthState();
     const expiresAt = new Date(this.now().getTime() + (this.config.stateTtlSec ?? 600) * 1000).toISOString();
     await this.states.put(
@@ -196,7 +191,7 @@ export class GithubAppService {
     if (input.installationId === undefined)
       return { redirectTo: this.errorRedirect(pending.workspace, "missing_installation") };
     try {
-      const creds = await this.resolveAppCreds(pending.workspace, pending.host);
+      const creds = this.resolveAppCreds(pending.host);
       const { account } = await this.gateway.installationAccount(creds, input.installationId, pending.host);
       const g = (await this.settings.get(pending.workspace))?.githubApp;
       const record: Installation = {
@@ -210,7 +205,7 @@ export class GithubAppService {
         ...(g?.installations ?? []).filter((i) => i.installationId !== input.installationId),
         record,
       ];
-      await this.write(pending.workspace, { registrations: g?.registrations ?? [], installations });
+      await this.write(pending.workspace, { installations });
       return { redirectTo: this.successRedirect(pending.workspace) };
     } catch {
       // Credential resolve / installation lookup failed — show the browser an error callout (never expose the raw error).
@@ -232,12 +227,12 @@ export class GithubAppService {
     if (!parsed) return undefined;
     const install = await this.installationForOwner(workspace, parsed.owner, parsed.host);
     if (!install) return undefined;
-    return this.mintFor(workspace, install, { repositories: [parsed.repo], permissions: { contents: "read" } });
+    return this.mintFor(install, { repositories: [parsed.repo], permissions: { contents: "read" } });
   }
 
   // The repos one installation can access (only the ones chosen at install time) — GET /installation/repositories.
-  private async reposFor(workspace: string, install: Installation): Promise<InstallationRepo[]> {
-    const token = await this.mintFor(workspace, install, {}); // no restriction → list every installed repo
+  private async reposFor(install: Installation): Promise<InstallationRepo[]> {
+    const token = await this.mintFor(install, {}); // no restriction → list every installed repo
     const repos = await this.gateway.listInstallationRepos(token, install.host);
     return repos.map((r) => ({
       fullName: r.fullName,
@@ -253,7 +248,7 @@ export class GithubAppService {
   async listRepos(workspace: string): Promise<InstallationRepo[]> {
     const g = (await this.settings.get(workspace))?.githubApp;
     const out: InstallationRepo[] = [];
-    for (const install of g?.installations ?? []) out.push(...(await this.reposFor(workspace, install)));
+    for (const install of g?.installations ?? []) out.push(...(await this.reposFor(install)));
     return out;
   }
 
@@ -264,13 +259,13 @@ export class GithubAppService {
     const installations: InstallationWithRepos[] = [];
     for (const install of g?.installations ?? []) {
       try {
-        installations.push({ ...install, repos: await this.reposFor(workspace, install) });
+        installations.push({ ...install, repos: await this.reposFor(install) });
       } catch {
         // Never leak a raw GitHub error to the screen — show only a "lookup failed" state (the install record itself is still visible).
         installations.push({ ...install, reposError: "Failed to load the repository list." });
       }
     }
-    return { registrations: this.serveRegistrations(g?.registrations ?? [], g?.installations ?? []), installations };
+    return { installations, providers: this.providers() };
   }
 
   // installation token (specified permissions) + host for an "owner/name" repo. For write work like setup-PR (e.g. contents/pull_requests write).
@@ -292,7 +287,7 @@ export class GithubAppService {
         { repository, ...(host ? { host } : {}) },
         `No workspace GitHub App is installed on '${repository}'${host ? `(${host})` : ""}.`,
       );
-    const token = await this.mintFor(workspace, install, { repositories: [repo], permissions });
+    const token = await this.mintFor(install, { repositories: [repo], permissions });
     return { token, ...(install.host ? { host: install.host } : {}) };
   }
 
@@ -316,7 +311,7 @@ export class GithubAppService {
         { owner, ...(host !== undefined ? { host } : {}) },
         `No workspace GitHub App is installed on '${owner}'${host !== undefined ? `(${host})` : ""}.`,
       );
-    const appToken = await this.mintFor(workspace, install, { permissions: { administration: "write" } });
+    const appToken = await this.mintFor(install, { permissions: { administration: "write" } });
     const data = await this.gateway.runnerRegistrationToken(appToken, target, install.host);
     return { token: data.token, expiresAt: data.expiresAt, ...(install.host ? { host: install.host } : {}) };
   }
@@ -340,13 +335,12 @@ export class GithubAppService {
     return mine.find((i) => sameHost(i.host, undefined)) ?? mine[0];
   }
 
-  // Mint an installation token for one installation (narrowed by repositories/permissions). Credentials from env (github.com) or the GHE registration.
+  // Mint an installation token for one installation (narrowed by repositories/permissions). Credentials from the env App for its host.
   private async mintFor(
-    workspace: string,
     install: Installation,
     opts: { repositories?: string[]; permissions?: Record<string, string> },
   ): Promise<string> {
-    const creds = await this.resolveAppCreds(workspace, install.host);
+    const creds = this.resolveAppCreds(install.host);
     const tok = await this.gateway.mintInstallationToken(creds, install.installationId, opts, install.host);
     return tok.token;
   }
@@ -356,45 +350,39 @@ export class GithubAppService {
   }
 
   private async write(workspace: string, githubApp: GithubAppSettings): Promise<void> {
-    // settings.set is a top-level shallow merge → always write the whole githubApp (registrations + installations) together.
+    // settings.set is a top-level shallow merge → write the whole githubApp (installations) together.
     await this.settings.set(workspace, { githubApp });
   }
 
-  private async resolveInstallTarget(
-    workspace: string,
-    host?: string,
-  ): Promise<{ slug: string; webBase: string; installPath: string }> {
+  // The install-page target for a host — github.com (env) or the enterprise host (env). No env App for the host = BadRequest.
+  private resolveInstallTarget(host?: string): { slug: string; webBase: string; installPath: string } {
     if (!host) {
       const gc = this.config.githubCom;
       if (!gc) throw new BadRequestError("BAD_REQUEST", {}, "github.com App is not configured (GITHUB_APP_* env).");
       return { slug: gc.slug, webBase: "https://github.com", installPath: "/apps" };
     }
-    const reg = (await this.settings.get(workspace))?.githubApp?.registrations.find((r) => sameHost(r.host, host));
-    if (!reg) throw new BadRequestError("BAD_REQUEST", { host }, `Unregistered GHE App host: ${host}`);
-    return { slug: reg.slug, webBase: trimSlash(host), installPath: "/github-apps" };
+    const e = this.config.githubEnterprise;
+    if (e && sameHost(host, e.host)) return { slug: e.slug, webBase: trimSlash(e.host), installPath: "/github-apps" };
+    throw new BadRequestError(
+      "BAD_REQUEST",
+      { host },
+      `GitHub Enterprise App is not configured for host: ${host} (GITHUB_ENTERPRISE_APP_* env).`,
+    );
   }
 
-  // Resolve App credentials (appId + private key) + the App-JWT clock (nowSec) for the gateway. github.com = env; GHE = registration's SecretStore key.
-  private async resolveAppCreds(
-    workspace: string,
-    host?: string,
-  ): Promise<{ appId: string; privateKeyPem: string; nowSec: number }> {
+  // Resolve App credentials (appId + private key) + the App-JWT clock (nowSec) for the gateway. github.com/enterprise both = env.
+  private resolveAppCreds(host?: string): { appId: string; privateKeyPem: string; nowSec: number } {
     const nowSec = this.nowSec();
-    if (!host) {
-      const gc = this.config.githubCom;
-      if (!gc) throw new BadRequestError("BAD_REQUEST", {}, "github.com App is not configured (GITHUB_APP_* env).");
-      return { appId: gc.appId, privateKeyPem: gc.privateKeyPem, nowSec };
-    }
-    const reg = (await this.settings.get(workspace))?.githubApp?.registrations.find((r) => sameHost(r.host, host));
-    if (!reg) throw new BadRequestError("BAD_REQUEST", { host }, `Unregistered GHE App host: ${host}`);
-    const pem = (await this.secretsFor(workspace))[reg.privateKeySecretName];
-    if (!pem)
+    const app = this.appFor(host);
+    if (!app)
       throw new BadRequestError(
         "BAD_REQUEST",
-        { name: reg.privateKeySecretName },
-        `App private key not found in SecretStore: ${reg.privateKeySecretName}`,
+        { ...(host ? { host } : {}) },
+        host
+          ? `GitHub Enterprise App is not configured for host: ${host} (GITHUB_ENTERPRISE_APP_* env).`
+          : "github.com App is not configured (GITHUB_APP_* env).",
       );
-    return { appId: reg.appId, privateKeyPem: pem, nowSec };
+    return { appId: app.appId, privateKeyPem: app.privateKeyPem, nowSec };
   }
 
   private settingsUrl(workspace: string): string {

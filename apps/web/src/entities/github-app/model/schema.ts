@@ -1,25 +1,22 @@
 import type {
   GithubAppDetailView,
+  GithubAppProviders as WireGithubAppProviders,
   InstallationRepo,
   InstallationWithRepos,
   InstallStartResponse,
-  GithubAppRegistration as WireGithubAppRegistration,
 } from '@everdict/contracts/wire'
 import { z } from 'zod'
 
 // Runtime boundary validation stays here (zod v4); the EXPORTED types are anchored to @everdict/contracts
 // (re-architecture P4). `import type` only — the zod v3 wire schemas never run in the web.
 // Client mirror of the control plane GET /workspace/github-app response — workspace-owned GitHub App integration.
-// No secrets: privateKeySecretName is a SecretStore name reference, not the value; installation tokens are minted on-demand so not stored.
+// No secrets: installation tokens are minted on-demand so not stored. BOTH github.com and GitHub Enterprise are
+// operator env now (providers) — the admin only installs + picks repos (no per-workspace App registration).
 
-// GHE App registration (github.com comes from operator env → not here). An admin registers once per workspace.
-export const githubAppRegistrationSchema = z.object({
-  host: z.string(),
-  slug: z.string(),
-  appId: z.string(),
-  privateKeySecretName: z.string(),
-  // Server-computed (P1g): accounts installed on this host (normalized match) — replaces the deleted sameHost mirror.
-  installedAccounts: z.array(z.string()).optional(),
+// Which App install targets the operator configured via env (github.com and/or one GitHub Enterprise host).
+export const githubAppProvidersSchema = z.object({
+  githubCom: z.boolean(),
+  enterprise: z.object({ host: z.string() }).optional(),
 })
 
 // Repositories the installation was granted access to (chosen on GitHub at install time) — GET /workspace/github-app bundles them per installation.
@@ -43,10 +40,10 @@ export const githubAppInstallationSchema = z.object({
   reposError: z.string().optional(), // human-readable message when the lookup fails
 })
 
-// GET /workspace/github-app response — registrations + installations + the callbackUrl to register via the App Setup URL.
+// GET /workspace/github-app response — installations + configured providers + the callbackUrl to register via the App Setup URL.
 export const githubAppViewSchema = z.object({
-  registrations: z.array(githubAppRegistrationSchema),
   installations: z.array(githubAppInstallationSchema),
+  providers: githubAppProvidersSchema,
   callbackUrl: z.string().optional(),
 })
 
@@ -56,15 +53,15 @@ export const githubAppInstallStartSchema = z.object({ installUrl: z.string() })
 // Drift guards — all identical-shape (int()-branded installationId still infers `number`), so all guard
 // bidirectionally. NOTE the wire mapping: the web installation (which carries repos/reposError) maps to the
 // wire InstallationWithRepos (not the bare GithubAppInstallation), the web repo maps to InstallationRepo, and
-// the web view maps to GithubAppDetailView (registrations + installations-with-repos + callbackUrl).
+// the web view maps to GithubAppDetailView (installations-with-repos + providers + callbackUrl).
 type AssertAssignable<A extends B, B> = A
-type WebGithubAppRegistration = z.infer<typeof githubAppRegistrationSchema>
+type WebGithubAppProviders = z.infer<typeof githubAppProvidersSchema>
 type WebGithubAppRepo = z.infer<typeof githubAppRepoSchema>
 type WebGithubAppInstallation = z.infer<typeof githubAppInstallationSchema>
 type WebGithubAppView = z.infer<typeof githubAppViewSchema>
 type WebGithubAppInstallStart = z.infer<typeof githubAppInstallStartSchema>
-type _registrationFwd = AssertAssignable<WebGithubAppRegistration, WireGithubAppRegistration>
-type _registrationBack = AssertAssignable<WireGithubAppRegistration, WebGithubAppRegistration>
+type _providersFwd = AssertAssignable<WebGithubAppProviders, WireGithubAppProviders>
+type _providersBack = AssertAssignable<WireGithubAppProviders, WebGithubAppProviders>
 type _repoFwd = AssertAssignable<WebGithubAppRepo, InstallationRepo>
 type _repoBack = AssertAssignable<InstallationRepo, WebGithubAppRepo>
 type _installationFwd = AssertAssignable<WebGithubAppInstallation, InstallationWithRepos>
@@ -75,15 +72,15 @@ type _installStartFwd = AssertAssignable<WebGithubAppInstallStart, InstallStartR
 type _installStartBack = AssertAssignable<InstallStartResponse, WebGithubAppInstallStart>
 
 // Exported names alias the contract types (consumers untouched: same identifiers).
-export type GithubAppRegistration = WireGithubAppRegistration
+export type GithubAppProviders = WireGithubAppProviders
 export type GithubAppRepo = InstallationRepo
 export type GithubAppInstallation = InstallationWithRepos
 export type GithubAppView = GithubAppDetailView
 export type GithubAppInstallStart = InstallStartResponse
 
 export type __githubAppDriftGuard = [
-  _registrationFwd,
-  _registrationBack,
+  _providersFwd,
+  _providersBack,
   _repoFwd,
   _repoBack,
   _installationFwd,

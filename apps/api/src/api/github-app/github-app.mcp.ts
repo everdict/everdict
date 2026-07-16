@@ -13,7 +13,7 @@ export function registerGithubAppTools(server: McpServer, ctx: McpToolContext): 
       "list_workspace_github_app",
       {
         description:
-          "This workspace's GitHub App integration — GHE App registrations + workspace-owned installations (host/installationId/account + allowed repos) + the callbackUrl to register as the App Setup URL. No secret values.",
+          "This workspace's GitHub App integration — workspace-owned installations (host/installationId/account + allowed repos), the configured providers (github.com / GitHub Enterprise, both operator env), and the callbackUrl to register as the App Setup URL. No secret values.",
         inputSchema: {},
       },
       () =>
@@ -27,39 +27,15 @@ export function registerGithubAppTools(server: McpServer, ctx: McpToolContext): 
       "start_workspace_github_app_install",
       {
         description:
-          "Start a GitHub App install (admin) → returns the GitHub installation-page URL (admin opens it and selects repos). host unset=github.com (env App), set=a registered GHE App.",
-        inputSchema: { host: z.string().url().optional().describe("GHE base URL (unset=github.com)") },
+          "Start a GitHub App install (admin) → returns the GitHub installation-page URL (admin opens it and selects repos). host unset=github.com (env App), set=the GitHub Enterprise host (env App). Both providers are operator env — no per-workspace App registration.",
+        inputSchema: {
+          host: z.string().url().optional().describe("GitHub Enterprise base URL (unset=github.com)"),
+        },
       },
       ({ host }) =>
         run(principal, "settings:write", async () =>
           ok(await gh.startInstall({ workspace: ws, createdBy: principal.subject, ...(host ? { host } : {}) })),
         ),
-    );
-    server.registerTool(
-      "register_workspace_github_app",
-      {
-        description:
-          "Register/update a GHE App (admin). Upsert by host. Put the App private key (PEM) in the SecretStore first and pass its name as privateKeySecretName.",
-        inputSchema: {
-          host: z.string().url().describe("GHE base URL"),
-          slug: z.string().min(1).describe("App slug (used in the install URL)"),
-          appId: z.string().min(1).describe("GitHub App ID"),
-          privateKeySecretName: z.string().min(1).describe("SecretStore key name holding the App private key (PEM)"),
-        },
-      },
-      ({ host, slug, appId, privateKeySecretName }) =>
-        run(principal, "settings:write", async () =>
-          ok(await gh.registerGheApp(ws, { host, slug, appId, privateKeySecretName })),
-        ),
-    );
-    server.registerTool(
-      "remove_workspace_github_app_registration",
-      {
-        description:
-          "Unregister a GHE App (admin). Existing installation records remain but no token can be minted without credentials.",
-        inputSchema: { host: z.string().url().describe("GHE base URL") },
-      },
-      ({ host }) => run(principal, "settings:write", async () => ok(await gh.removeRegistration(ws, host))),
     );
     server.registerTool(
       "unlink_workspace_github_app_installation",

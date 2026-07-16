@@ -72,47 +72,6 @@ export function registerGithubAppRoutes(app: FastifyInstance, deps: ServerDeps):
     return reply.redirect(redirectTo);
   });
 
-  app.post("/workspace/github-app/registrations", { schema: githubAppDocs.registerGheApp }, async (req, reply) => {
-    if (!deps.githubAppService)
-      return reply.code(404).send({ code: "NOT_FOUND", message: "github app service not configured" });
-    const principal = await resolvePrincipal(req, reply, deps);
-    if (!principal) return reply;
-    const body = z
-      .object({
-        host: z.string().url(),
-        slug: z.string().min(1),
-        appId: z.string().min(1),
-        privateKeySecretName: z.string().min(1),
-      })
-      .safeParse(req.body ?? {});
-    if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: zodIssues(body.error).join("; ") });
-    try {
-      gate(principal, "settings:write");
-      return reply.send(await deps.githubAppService.registerGheApp(principal.workspace, body.data));
-    } catch (err) {
-      return sendError(reply, err);
-    }
-  });
-
-  app.delete(
-    "/workspace/github-app/registrations",
-    { schema: githubAppDocs.removeRegistration },
-    async (req, reply) => {
-      if (!deps.githubAppService)
-        return reply.code(404).send({ code: "NOT_FOUND", message: "github app service not configured" });
-      const principal = await resolvePrincipal(req, reply, deps);
-      if (!principal) return reply;
-      const q = z.object({ host: z.string().url() }).safeParse(req.query ?? {});
-      if (!q.success) return reply.code(400).send({ code: "BAD_REQUEST", message: zodIssues(q.error).join("; ") });
-      try {
-        gate(principal, "settings:write");
-        return reply.send(await deps.githubAppService.removeRegistration(principal.workspace, q.data.host));
-      } catch (err) {
-        return sendError(reply, err);
-      }
-    },
-  );
-
   app.delete<{ Params: { id: string } }>(
     "/workspace/github-app/installations/:id",
     { schema: githubAppDocs.unlinkInstallation },

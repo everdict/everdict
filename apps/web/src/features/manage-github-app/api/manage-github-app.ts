@@ -15,8 +15,8 @@ export interface GithubAppInstallResult extends GithubAppMutationResult {
   installUrl?: string
 }
 
-// Start GitHub App install (admin) → returns the GitHub install-page URL (the client navigates). host unset = github.com.
-// authZ (admin = settings:write) is enforced by the control plane.
+// Start GitHub App install (admin) → returns the GitHub install-page URL (the client navigates). host unset = github.com,
+// host set = the operator-configured GitHub Enterprise host (both env — install-only). authZ (settings:write) is enforced by the control plane.
 export async function startGithubAppInstallAction(host?: string): Promise<GithubAppInstallResult> {
   const ctx = await authContext()
   try {
@@ -24,37 +24,6 @@ export async function startGithubAppInstallAction(host?: string): Promise<Github
       await controlPlane.startGithubAppInstall(ctx, host ? { host } : {})
     )
     return { ok: true, installUrl: out.installUrl }
-  } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : String(e) }
-  }
-}
-
-// Register/update GHE App (admin). Put the App private key (PEM) in the SecretStore first and specify only its name.
-export async function registerGithubAppAction(input: {
-  host: string
-  slug: string
-  appId: string
-  privateKeySecretName: string
-}): Promise<GithubAppMutationResult> {
-  const ctx = await authContext()
-  try {
-    await controlPlane.registerGithubApp(ctx, input)
-    revalidatePath('/[workspace]/settings')
-    return { ok: true }
-  } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : String(e) }
-  }
-}
-
-// Deregister GHE App (admin).
-export async function removeGithubAppRegistrationAction(
-  host: string
-): Promise<GithubAppMutationResult> {
-  const ctx = await authContext()
-  try {
-    await controlPlane.removeGithubAppRegistration(ctx, host)
-    revalidatePath('/[workspace]/settings')
-    return { ok: true }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }
   }

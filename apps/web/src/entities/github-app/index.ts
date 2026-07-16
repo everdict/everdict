@@ -1,12 +1,12 @@
 export {
   githubAppInstallStartSchema,
   githubAppInstallationSchema,
-  githubAppRegistrationSchema,
+  githubAppProvidersSchema,
   githubAppRepoSchema,
   githubAppViewSchema,
   type GithubAppInstallStart,
   type GithubAppInstallation,
-  type GithubAppRegistration,
+  type GithubAppProviders,
   type GithubAppRepo,
   type GithubAppView,
 } from './model/schema'

@@ -12,6 +12,8 @@ const { privateKey } = generateKeyPairSync("rsa", {
 });
 
 const NOW = new Date("2026-07-05T00:00:00Z");
+// The operator env GitHub Enterprise App — one App per host for the whole deployment (handled identically to github.com).
+const ENTERPRISE_HOST = "https://ghe.acme.io";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -64,25 +66,30 @@ function stubApi(repos: string[], runnerTok = "RUNNERTOK"): void {
 describe("GithubAppService", () => {
   let states: InMemoryOAuthStateStore;
   let settings: InMemoryWorkspaceSettingsStore;
-  let secrets: Record<string, Record<string, string>>;
   let svc: GithubAppService;
 
   beforeEach(() => {
     states = new InMemoryOAuthStateStore(() => NOW.toISOString());
     settings = new InMemoryWorkspaceSettingsStore();
-    secrets = {};
     svc = new GithubAppService({
       states,
       settings,
-      secretsFor: async (ws) => secrets[ws] ?? {},
       gateway: githubAppGateway(), // fake fetch (vi.stubGlobal) routes through the real adapter → wire assertions survive
       config: {
         webBaseUrl: "http://web.test",
         apiPublicUrl: "http://api.test",
+        // Both providers are operator env — one App per host, install-only (no per-workspace App registration).
         githubCom: { appId: "111", privateKeyPem: privateKey, slug: "everdict-eval" },
+        githubEnterprise: { host: ENTERPRISE_HOST, appId: "222", privateKeyPem: privateKey, slug: "everdict-ghe" },
       },
       now: () => NOW,
     });
+  });
+
+  it("list reports the configured providers (github.com + enterprise, both operator env) with no per-workspace registrations", async () => {
+    const view = await svc.list("acme");
+    expect(view.providers).toEqual({ githubCom: true, enterprise: { host: ENTERPRISE_HOST } });
+    expect(view.installations).toEqual([]);
   });
 
   it("starting a github.com install makes a /apps/{slug}/installations/new URL + state", async () => {
@@ -92,50 +99,23 @@ describe("GithubAppService", () => {
     expect(u.searchParams.get("state")).toBeTruthy();
   });
 
-  it("starting an install for an unregistered GHE host → BadRequestError", async () => {
-    await expect(
-      svc.startInstall({ workspace: "acme", createdBy: "u", host: "https://ghe.acme.io" }),
-    ).rejects.toBeInstanceOf(BadRequestError);
-  });
-
-  it("after registering a GHE App, starting an install → {host}/github-apps/{slug}/installations/new URL", async () => {
-    await svc.registerGheApp("acme", {
-      host: "https://ghe.acme.io",
-      slug: "everdict-ghe",
-      appId: "222",
-      privateKeySecretName: "ghe-app-key",
-    });
-    const { installUrl } = await svc.startInstall({ workspace: "acme", createdBy: "u", host: "https://ghe.acme.io" });
+  it("starting an enterprise install (the operator env host) → {host}/github-apps/{slug}/installations/new URL", async () => {
+    const { installUrl } = await svc.startInstall({ workspace: "acme", createdBy: "u", host: ENTERPRISE_HOST });
     expect(new URL(installUrl).origin + new URL(installUrl).pathname).toBe(
       "https://ghe.acme.io/github-apps/everdict-ghe/installations/new",
     );
   });
 
-  it("GHE host uses normalized equality — a re-registration differing only in trailing slash/case is an upsert (no duplicate row), and unlink/install URLs treat it the same", async () => {
-    // Given: registered with a trailing-slash host.
-    await svc.registerGheApp("acme", {
-      host: "https://ghe.acme.io/",
-      slug: "app-v1",
-      appId: "111",
-      privateKeySecretName: "k1",
-    });
-    // When: re-registered without the slash + mixed case — it's the same server.
-    await svc.registerGheApp("acme", {
-      host: "https://GHE.Acme.io",
-      slug: "app-v2",
-      appId: "222",
-      privateKeySecretName: "k2",
-    });
-    // Then: not a duplicate row but a single updated record (before the fix, a string mismatch made it 2 — the root of the 'not installed' misread).
-    const view = await svc.list("acme");
-    expect(view.registrations).toHaveLength(1);
-    expect(view.registrations[0]?.slug).toBe("app-v2");
-    // Install URL resolution also passes despite the differing notation.
-    const { installUrl } = await svc.startInstall({ workspace: "acme", createdBy: "u", host: "https://ghe.acme.io/" });
-    expect(installUrl).toContain("/github-apps/app-v2/");
-    // Unlink also removes it despite the differing notation.
-    await svc.removeRegistration("acme", "HTTPS://ghe.acme.io");
-    expect((await svc.list("acme")).registrations).toEqual([]);
+  it("starting an install for a host that isn't the configured enterprise host → BadRequestError", async () => {
+    await expect(
+      svc.startInstall({ workspace: "acme", createdBy: "u", host: "https://other-ghe.example.com" }),
+    ).rejects.toBeInstanceOf(BadRequestError);
+  });
+
+  it("the enterprise host is matched with normalized equality — trailing-slash/case differences still resolve the install URL", async () => {
+    const { installUrl } = await svc.startInstall({ workspace: "acme", createdBy: "u", host: "https://GHE.Acme.io/" });
+    // The install URL uses the configured host form (not the caller's notation).
+    expect(installUrl).toContain("https://ghe.acme.io/github-apps/everdict-ghe/installations/new");
   });
 
   it("the callback: installation_id+state → confirm account, then record the install on the workspace", async () => {
@@ -159,29 +139,18 @@ describe("GithubAppService", () => {
     expect((await svc.list("acme")).installations).toEqual([]);
   });
 
-  it("a GHE callback confirms the account with the App private key from SecretStore", async () => {
+  it("an enterprise callback confirms the account with the operator env enterprise App creds (no SecretStore)", async () => {
     stubInstallation("ghe-team");
-    secrets.acme = { "ghe-app-key": privateKey };
-    await svc.registerGheApp("acme", {
-      host: "https://ghe.acme.io",
-      slug: "everdict-ghe",
-      appId: "222",
-      privateKeySecretName: "ghe-app-key",
-    });
     const future = new Date(NOW.getTime() + 60_000).toISOString();
     await states.put(
       "st-ghe",
-      { workspace: "acme", provider: "github-app", createdBy: "u", host: "https://ghe.acme.io" },
+      { workspace: "acme", provider: "github-app", createdBy: "u", host: ENTERPRISE_HOST },
       future,
     );
 
     await svc.callback({ installationId: 7, state: "st-ghe" });
     const view = await svc.list("acme");
-    expect(view.installations[0]).toMatchObject({
-      installationId: 7,
-      account: "ghe-team",
-      host: "https://ghe.acme.io",
-    });
+    expect(view.installations[0]).toMatchObject({ installationId: 7, account: "ghe-team", host: ENTERPRISE_HOST });
   });
 
   it("unlinking an installation removes the record idempotently", async () => {
@@ -210,7 +179,7 @@ describe("GithubAppService", () => {
     expect(await svc.tokenForRepo("acme", "https://github.com/other-org/api")).toBeUndefined();
   });
 
-  // App capabilities (S6a) — replacing personal connections: picker / write token / runner registration token.
+  // App capabilities — replacing personal connections: picker / write token / runner registration token.
   async function installOrg(): Promise<void> {
     const future = new Date(NOW.getTime() + 60_000).toISOString();
     await states.put("st-x", { workspace: "acme", provider: "github-app", createdBy: "u" }, future);
@@ -248,8 +217,8 @@ describe("GithubAppService", () => {
     expect(out.token).toBe("RUNNERTOK");
   });
 
-  // GHE host threading — even if the same org name is on both github.com/GHE, picks the exact installation by host.
-  describe("GHE host threading", () => {
+  // Enterprise host threading — even if the same org name is on both github.com/GHE, picks the exact installation by host.
+  describe("enterprise host threading", () => {
     // stubApi + record the call URLs (observe which host's installation minted the token).
     function stubApiRecording(repos: string[]): string[] {
       const urls: string[] = [];
@@ -278,43 +247,36 @@ describe("GithubAppService", () => {
       return urls;
     }
 
-    // Install both github.com (id 42) + GHE (id 7, same account) — the ambiguity scenario.
+    // Install both github.com (id 42) + enterprise (id 7, same account) — the ambiguity scenario. Both creds are operator env.
     async function installBothHosts(): Promise<void> {
-      secrets.acme = { "ghe-app-key": privateKey };
-      await svc.registerGheApp("acme", {
-        host: "https://ghe.acme.io",
-        slug: "everdict-ghe",
-        appId: "222",
-        privateKeySecretName: "ghe-app-key",
-      });
       const future = new Date(NOW.getTime() + 60_000).toISOString();
       await states.put("st-com", { workspace: "acme", provider: "github-app", createdBy: "u" }, future);
       await svc.callback({ installationId: 42, state: "st-com" });
       await states.put(
         "st-ghe2",
-        { workspace: "acme", provider: "github-app", createdBy: "u", host: "https://ghe.acme.io" },
+        { workspace: "acme", provider: "github-app", createdBy: "u", host: ENTERPRISE_HOST },
         future,
       );
       await svc.callback({ installationId: 7, state: "st-ghe2" });
     }
 
-    it("listRepos carries host on the GHE installation's repos (github.com is unmarked)", async () => {
+    it("listRepos carries host on the enterprise installation's repos (github.com is unmarked)", async () => {
       stubApiRecording([]);
       await installBothHosts();
       stubApiRecording(["acme-org/api"]);
       const repos = await svc.listRepos("acme");
       expect(repos).toHaveLength(2); // one from each of the two installations
       expect(repos.find((r) => r.host === undefined)?.fullName).toBe("acme-org/api");
-      expect(repos.find((r) => r.host === "https://ghe.acme.io")?.fullName).toBe("acme-org/api");
+      expect(repos.find((r) => r.host === ENTERPRISE_HOST)?.fullName).toBe("acme-org/api");
     });
 
-    it("tokenForRepository picks the installation by host — GHE (id 7) when the GHE host is given, github.com (id 42) when absent", async () => {
+    it("tokenForRepository picks the installation by host — enterprise (id 7) when the enterprise host is given, github.com (id 42) when absent", async () => {
       stubApiRecording([]);
       await installBothHosts();
 
       let urls = stubApiRecording([]);
-      const ghe = await svc.tokenForRepository("acme", "acme-org/api", {}, "https://ghe.acme.io");
-      expect(ghe.host).toBe("https://ghe.acme.io");
+      const ghe = await svc.tokenForRepository("acme", "acme-org/api", {}, ENTERPRISE_HOST);
+      expect(ghe.host).toBe(ENTERPRISE_HOST);
       expect(urls.some((u) => u.startsWith("https://ghe.acme.io/api/v3/app/installations/7/access_tokens"))).toBe(true);
 
       urls = stubApiRecording([]);
@@ -323,14 +285,14 @@ describe("GithubAppService", () => {
       expect(urls.some((u) => u.startsWith("https://api.github.com/app/installations/42/access_tokens"))).toBe(true);
     });
 
-    it("runnerRegistrationToken picks the installation by host — GHE (id 7) when a GHE host is given, github.com (id 42) preferred when unset", async () => {
+    it("runnerRegistrationToken picks the installation by host — enterprise (id 7) when a host is given, github.com (id 42) preferred when unset", async () => {
       stubApiRecording([]);
       await installBothHosts();
 
-      // host given → mint only from that GHE installation (host-strict).
+      // host given → mint only from that enterprise installation (host-strict).
       let urls = stubApiRecording([]);
-      const ghe = await svc.runnerRegistrationToken("acme", { org: "acme-org" }, "https://ghe.acme.io");
-      expect(ghe.host).toBe("https://ghe.acme.io");
+      const ghe = await svc.runnerRegistrationToken("acme", { org: "acme-org" }, ENTERPRISE_HOST);
+      expect(ghe.host).toBe(ENTERPRISE_HOST);
       expect(urls.some((u) => u.startsWith("https://ghe.acme.io/api/v3/app/installations/7/access_tokens"))).toBe(true);
       expect(urls.some((u) => u.includes("/orgs/acme-org/actions/runners/registration-token"))).toBe(true);
 
@@ -351,19 +313,41 @@ describe("GithubAppService", () => {
 
     it("viewWithRepos bundles the allowed repos into each installation and soft-fails only the failed installation with reposError", async () => {
       stubApiRecording([]);
-      await installBothHosts(); // github.com(42) + GHE(7) — both account=acme-org
-      stubApiRecording(["acme-org/api"]);
-      secrets.acme = {}; // GHE App private key lost → only the GHE installation's repo lookup should fail
+      await installBothHosts(); // github.com(42) + enterprise(7) — both account=acme-org
+      // Enterprise installation's repo lookup fails (500) → only that entry gets reposError; github.com stays fine.
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (url: string | URL) => {
+          const s = String(url);
+          if (s.startsWith("https://ghe.acme.io") && s.includes("/installation/repositories"))
+            return new Response("upstream boom", { status: 500 });
+          const body = s.endsWith("/access_tokens")
+            ? { token: "ghs_inst", expires_at: "2026-07-05T12:00:00Z" }
+            : s.includes("/installation/repositories")
+              ? {
+                  repositories: [
+                    {
+                      full_name: "acme-org/api",
+                      private: true,
+                      default_branch: "main",
+                      pushed_at: "2026-07-01T00:00:00Z",
+                    },
+                  ],
+                }
+              : { id: 1, account: { login: "acme-org" } };
+          return new Response(JSON.stringify(body), { status: 200 });
+        }),
+      );
       const view = await svc.viewWithRepos("acme");
       const com = view.installations.find((i) => i.host === undefined);
-      const ghe = view.installations.find((i) => i.host === "https://ghe.acme.io");
+      const ghe = view.installations.find((i) => i.host === ENTERPRISE_HOST);
       expect(com?.repos?.map((r) => r.fullName)).toEqual(["acme-org/api"]);
       expect(com?.reposError).toBeUndefined();
       expect(ghe?.repos).toBeUndefined();
       expect(ghe?.reposError).toBeTruthy(); // a human-readable status only, not a raw GitHub/credential error
     });
 
-    it("tokenForRepo regression: a GHE git URL does not mint a token from a github.com installation (host-strict)", async () => {
+    it("tokenForRepo regression: an enterprise git URL does not mint a token from a github.com installation (host-strict)", async () => {
       stubGithub("acme-org", "ghs_repo");
       const future = new Date(NOW.getTime() + 60_000).toISOString();
       await states.put("st-y", { workspace: "acme", provider: "github-app", createdBy: "u" }, future);

@@ -13,9 +13,9 @@ const docs = {
   view: {
     summary: "Workspace GitHub App integration status",
     description:
-      "Registrations + installations with each installation's allowed repos (per-install soft-fail via reposError), " +
-      "plus the callback URL to register as the App Setup URL. Workspace-owned integration (replaces personal " +
-      "connections): the github.com App comes from operator env, GHE Apps are workspace-registered. Requires settings:read.",
+      "Installations with each installation's allowed repos (per-install soft-fail via reposError), the configured " +
+      "providers (github.com / GitHub Enterprise — both operator env), plus the callback URL to register as the App " +
+      "Setup URL. Workspace-owned integration (replaces personal connections). Requires settings:read.",
     tags: ["github-app"],
     response: {
       200: { description: "Install status with allowed repos", ...toJsonSchema(GithubAppDetailViewSchema) },
@@ -40,11 +40,17 @@ const docs = {
     summary: "Start a GitHub App install",
     description:
       "Returns the GitHub App install-page URL (with a single-use state). host absent = the operator github.com App; " +
-      "host set = that workspace-registered GHE App. The admin picks repos on GitHub, which then redirects to the " +
-      "public callback. Requires settings:write (admin).",
+      "host set = the operator GitHub Enterprise App (that host). The admin picks repos on GitHub, which then " +
+      "redirects to the public callback. Requires settings:write (admin).",
     tags: ["github-app"],
     body: toJsonSchema(
-      z.object({ host: z.string().url().optional().describe("GHE base URL — absent = github.com (operator env App)") }),
+      z.object({
+        host: z
+          .string()
+          .url()
+          .optional()
+          .describe("GitHub Enterprise base URL — absent = github.com (operator env App)"),
+      }),
     ),
     response: {
       200: { description: "Install page URL", ...toJsonSchema(InstallStartResponseSchema) },
@@ -66,37 +72,6 @@ const docs = {
     ),
     response: { 302: { description: "Redirect back to the workspace settings screen", type: "null" } },
   },
-  registerGheApp: {
-    summary: "Register a GHE App on the workspace",
-    description:
-      "Upserts a GitHub Enterprise App registration by host (github.com needs no registration — it is operator env). " +
-      "Put the App private key into the SecretStore first; only its name is stored here. Requires settings:write (admin).",
-    tags: ["github-app"],
-    body: toJsonSchema(
-      z.object({
-        host: z.string().url().describe("GHE base URL"),
-        slug: z.string().min(1).describe("App slug (install URL segment)"),
-        appId: z.string().min(1),
-        privateKeySecretName: z.string().min(1).describe("SecretStore name of the App private-key PEM"),
-      }),
-    ),
-    response: {
-      200: { description: "Updated registrations + installations", ...toJsonSchema(GithubAppViewSchema) },
-      ...errorResponses(400, 401, 403, 404),
-    },
-  },
-  removeRegistration: {
-    summary: "Unregister a GHE App",
-    description:
-      "Removes the GHE App registration for the given host. Existing installation records remain but can no longer " +
-      "mint tokens without credentials. Requires settings:write (admin).",
-    tags: ["github-app"],
-    querystring: toJsonSchema(z.object({ host: z.string().url().describe("GHE base URL of the registration") })),
-    response: {
-      200: { description: "Updated registrations + installations", ...toJsonSchema(GithubAppViewSchema) },
-      ...errorResponses(400, 401, 403, 404),
-    },
-  },
   unlinkInstallation: {
     summary: "Unlink a GitHub App installation",
     description:
@@ -105,7 +80,7 @@ const docs = {
     tags: ["github-app"],
     params: toJsonSchema(z.object({ id: z.string().describe("Installation id (numeric)") })),
     response: {
-      200: { description: "Updated registrations + installations", ...toJsonSchema(GithubAppViewSchema) },
+      200: { description: "Updated installations + providers", ...toJsonSchema(GithubAppViewSchema) },
       ...errorResponses(400, 401, 403, 404),
     },
   },
