@@ -160,12 +160,14 @@ export function buildDispatch(deps: {
       }
     },
   };
-  // Connection test: build a backend with the same builder + tenant secrets and probe() (reachability/auth with no job). Shared by server/MCP.
-  const probeRuntime = makeRuntimeProber({ secretsFor: runtimeSecretsFor, buildBackend: runtimeBuildBackend });
-  // Live inspection: same builder + secrets, but inspect() (read-only cluster view). Shared by server/MCP.
-  const inspectRuntime = makeRuntimeInspector({ secretsFor: runtimeSecretsFor, buildBackend: runtimeBuildBackend });
-  // Destructive control: same builder + secrets, runs a Reclaimable action (stop/reclaim/purge/cordon). Shared by server/MCP.
-  const controlRuntime = makeRuntimeController({ secretsFor: runtimeSecretsFor, buildBackend: runtimeBuildBackend });
+  // Connection test / live inspection / destructive control all target the BASE cluster (nomad/k8s reachability,
+  // nodes/capacity/workload, stop/purge/cordon) — NOT the topology-deploy layer. So they build the base backend
+  // (buildRuntimeBackend → NomadBackend/K8sBackend, which are Probeable/Inspectable/Reclaimable), NOT runtimeBuildBackend:
+  // a topology-configured runtime (nomad/k8s + traceSource) would otherwise route to ServiceTopologyBackend, which
+  // implements none of those capabilities → probe/inspect/control would falsely report "not supported / no live cluster".
+  const probeRuntime = makeRuntimeProber({ secretsFor: runtimeSecretsFor, buildBackend: buildRuntimeBackend });
+  const inspectRuntime = makeRuntimeInspector({ secretsFor: runtimeSecretsFor, buildBackend: buildRuntimeBackend });
+  const controlRuntime = makeRuntimeController({ secretsFor: runtimeSecretsFor, buildBackend: buildRuntimeBackend });
   return {
     runnerHub,
     callbackRendezvous,
