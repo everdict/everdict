@@ -145,6 +145,8 @@ export default async function RuntimeDetailPage({
     spec !== undefined &&
     spec.kind !== 'local'
   const cluster = spec?.kind === 'nomad' || spec?.kind === 'k8s'
+  // Destructive live-cluster control (stop/reclaim/purge/cordon) = admin-only, and only in the owning workspace.
+  const canControl = can(principal?.roles, 'runtimes:control') && summary.owner === currentWorkspace
 
   return (
     <div className="space-y-6">
@@ -203,10 +205,10 @@ export default async function RuntimeDetailPage({
               <RuntimeHealthActions spec={spec} />
             </div>
           )}
-          {/* Live cluster view — composition/capacity/workload/stores of the registered cluster (read-only, on demand). */}
+          {/* Live cluster view — composition/capacity/workload/stores (read); admin gets destructive control actions. */}
           {cluster && (
             <div className="border-t border-border pt-4">
-              <RuntimeClusterStatus id={id} version={latest} />
+              <RuntimeClusterStatus id={id} version={latest} canControl={canControl} />
             </div>
           )}
         </Card>

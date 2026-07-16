@@ -2,7 +2,13 @@
 
 import { revalidatePath } from 'next/cache'
 
-import { runtimeInspectionSchema, type RuntimeInspection } from '@/entities/runtime'
+import {
+  runtimeControlResultSchema,
+  runtimeInspectionSchema,
+  type RuntimeControlCommand,
+  type RuntimeControlResult,
+  type RuntimeInspection,
+} from '@/entities/runtime'
 import { authContext } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
 
@@ -60,6 +66,27 @@ export async function inspectRuntimeAction(
   try {
     const raw = await controlPlane.inspectRuntime<unknown>(ctx, id, version)
     return { ok: true, inspection: runtimeInspectionSchema.parse(raw) }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
+}
+
+// Destructive live-cluster control (admin, runtimes:control) — stop/reclaim/purge/cordon. authZ is the control plane's.
+export interface ControlRuntimeActionResult {
+  ok: boolean
+  result?: RuntimeControlResult
+  error?: string
+}
+
+export async function controlRuntimeAction(
+  id: string,
+  version: string,
+  command: RuntimeControlCommand
+): Promise<ControlRuntimeActionResult> {
+  const ctx = await authContext()
+  try {
+    const raw = await controlPlane.controlRuntime<unknown>(ctx, id, version, command)
+    return { ok: true, result: runtimeControlResultSchema.parse(raw) }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }
   }

@@ -20,6 +20,7 @@ export type WebAction =
   | 'models:delete'
   | 'runtimes:read'
   | 'runtimes:write'
+  | 'runtimes:control'
   | 'secrets:read'
   | 'secrets:write'
   | 'keys:read'
@@ -87,6 +88,7 @@ const PERMS: Record<string, WebAction[]> = {
     'models:delete', // model version/whole-model soft-delete = admin (creator exception is server-side)
     'runtimes:read',
     'runtimes:write', // runtime registration is role-agnostic (credential values are split out to secrets:write=admin)
+    'runtimes:control', // destructive live-cluster control (stop/reclaim/purge/cordon) = admin-only
     'secrets:read', // secret management = admin
     'secrets:write',
     'keys:read', // API key issue/revoke = admin (a key holds workspace admin permission)

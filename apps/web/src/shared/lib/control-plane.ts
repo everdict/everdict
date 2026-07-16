@@ -369,6 +369,13 @@ export const controlPlane = {
       auth,
       `/runtimes/${encodeURIComponent(id)}/versions/${encodeURIComponent(version)}/inspect`
     ),
+  // Destructive live-cluster control (admin, runtimes:control) — stop/reclaim/purge/cordon. The command is a discriminated action.
+  controlRuntime: <T>(auth: AuthContext, id: string, version: string, command: unknown) =>
+    call<T>(
+      auth,
+      `/runtimes/${encodeURIComponent(id)}/versions/${encodeURIComponent(version)}/control`,
+      { method: 'POST', body: JSON.stringify(command) }
+    ),
   // Models (workspace-owned + _shared) — a first-class LLM model (provider + underlying model + baseUrl + apiKeySecret
   // NAME), referenced by id from a judge/harness so the agent server gets its whole connection (incl. the linked key)
   // injected instead of a hand-wired env combo. Read models:read (viewer+), register/validate models:write (member+).

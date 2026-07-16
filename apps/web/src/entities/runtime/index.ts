@@ -3,9 +3,12 @@ export {
   runtimesSchema,
   runtimeSpecSchema,
   runtimeInspectionSchema,
+  runtimeControlResultSchema,
   type RuntimeSummary,
   type RuntimeSpec,
   type RuntimeInspection,
+  type RuntimeControlResult,
+  type RuntimeControlCommand,
 } from './model/schema'
 export {
   type CapabilityFit,

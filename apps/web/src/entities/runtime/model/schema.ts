@@ -1,4 +1,9 @@
-import type { InspectRuntimeResult, RuntimeListEntry } from '@everdict/contracts/wire'
+import type {
+  InspectRuntimeResult,
+  RuntimeListEntry,
+  RuntimeControlCommand as WireRuntimeControlCommand,
+  RuntimeControlResult as WireRuntimeControlResult,
+} from '@everdict/contracts/wire'
 import { z } from 'zod'
 
 // Runtime boundary validation stays here (zod v4); the EXPORTED list type is anchored to @everdict/contracts
@@ -67,6 +72,7 @@ const inspectNodeSchema = z.object({
   ready: z.boolean(),
   datacenter: z.string().optional(),
   dockerHealthy: z.boolean().optional(),
+  schedulable: z.boolean().optional(),
 })
 const inspectWorkloadSchema = z.object({
   id: z.string(),
@@ -103,6 +109,14 @@ export const runtimeInspectionSchema = z.object({
   warnings: z.array(z.string()).default([]),
 })
 
+// POST …/control result — a destructive-action outcome (ok + optional stopped/purged count). Identical-shape to the wire DTO.
+export const runtimeControlResultSchema = z.object({
+  action: z.string(),
+  ok: z.boolean(),
+  stopped: z.number().optional(),
+  purged: z.number().optional(),
+})
+
 // Drift guard — RuntimeSummary + RuntimeInspection are identical-shape to their wire DTOs, so each guard is
 // bidirectional: a renamed/added field on EITHER side fails the web typecheck.
 type AssertAssignable<A extends B, B> = A
@@ -112,9 +126,22 @@ type _summaryBack = AssertAssignable<RuntimeListEntry, WebRuntimeSummary>
 type WebRuntimeInspection = z.infer<typeof runtimeInspectionSchema>
 type _inspectFwd = AssertAssignable<WebRuntimeInspection, InspectRuntimeResult>
 type _inspectBack = AssertAssignable<InspectRuntimeResult, WebRuntimeInspection>
+type WebRuntimeControlResult = z.infer<typeof runtimeControlResultSchema>
+type _controlFwd = AssertAssignable<WebRuntimeControlResult, WireRuntimeControlResult>
+type _controlBack = AssertAssignable<WireRuntimeControlResult, WebRuntimeControlResult>
 
 // Exported name aliases the contract type (consumers untouched: same RuntimeSummary identifier).
 export type RuntimeSummary = RuntimeListEntry
 export type RuntimeInspection = InspectRuntimeResult
+export type RuntimeControlResult = WireRuntimeControlResult
+// The command the UI builds and sends (discriminated action) — type-only from the contract.
+export type RuntimeControlCommand = WireRuntimeControlCommand
 
-export type __runtimeDriftGuard = [_summaryFwd, _summaryBack, _inspectFwd, _inspectBack]
+export type __runtimeDriftGuard = [
+  _summaryFwd,
+  _summaryBack,
+  _inspectFwd,
+  _inspectBack,
+  _controlFwd,
+  _controlBack,
+]
