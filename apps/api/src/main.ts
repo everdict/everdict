@@ -316,7 +316,9 @@ async function main(): Promise<void> {
     modelService: new ModelService({
       models: modelRegistry,
       scopedSecretsFor,
-      ...(process.env.EVERDICT_JUDGE_OPENAI_BASE_URL ? { openaiBaseUrl: process.env.EVERDICT_JUDGE_OPENAI_BASE_URL } : {}),
+      ...(process.env.EVERDICT_JUDGE_OPENAI_BASE_URL
+        ? { openaiBaseUrl: process.env.EVERDICT_JUDGE_OPENAI_BASE_URL }
+        : {}),
     }),
     runtimeRegistry,
     probeRuntime,

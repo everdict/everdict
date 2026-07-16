@@ -40,7 +40,12 @@ describe("ProxyService", () => {
     const s = svc({}); // no secrets
     const res = await s.upsert("acme", { name: "us-1", country: "US", url: "p:1", authSecretName: "missing" });
     expect(res.missingSecrets).toEqual(["missing"]);
-    const ok = await svc({ present: "x" }).upsert("acme", { name: "u", country: "US", url: "p:1", authSecretName: "present" });
+    const ok = await svc({ present: "x" }).upsert("acme", {
+      name: "u",
+      country: "US",
+      url: "p:1",
+      authSecretName: "present",
+    });
     expect(ok.missingSecrets).toBeUndefined();
   });
 

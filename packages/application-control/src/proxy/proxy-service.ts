@@ -54,10 +54,7 @@ export class ProxyService {
 
   // Register/update (admin, upsert by name — declarative full replace). Surfaces a missing referenced secret as a
   // warning (the secret can be added later) rather than rejecting.
-  async upsert(
-    workspace: string,
-    input: WorkspaceProxy,
-  ): Promise<{ config: ProxyView; missingSecrets?: string[] }> {
+  async upsert(workspace: string, input: WorkspaceProxy): Promise<{ config: ProxyView; missingSecrets?: string[] }> {
     const entry: ProxyEntry = {
       name: input.name,
       country: input.country,

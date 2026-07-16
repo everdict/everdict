@@ -45,7 +45,8 @@ describe("BrowserSessionService", () => {
     const p = new FakeProvisioner();
     const s = new BrowserSessionService(p, {
       newId: () => "bs-0",
-      resolveProxy: async (ws, country) => (ws === "acme" && country === "US" ? "http://user:pass@proxy:8080" : undefined),
+      resolveProxy: async (ws, country) =>
+        ws === "acme" && country === "US" ? "http://user:pass@proxy:8080" : undefined,
     });
     await s.create({ tenant: "acme", createdBy: "alice", country: "US" });
     expect(p.proxies).toEqual(["http://user:pass@proxy:8080"]);

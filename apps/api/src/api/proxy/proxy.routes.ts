@@ -8,8 +8,7 @@ import { proxyDocs } from "./proxy.docs.js";
 // register/remove are admin (settings:write). See docs/architecture/browser-profiles.md.
 export function registerProxyRoutes(app: FastifyInstance, deps: ServerDeps): void {
   app.get("/workspace/proxies", { schema: proxyDocs.list }, async (req, reply) => {
-    if (!deps.proxyService)
-      return reply.code(404).send({ code: "NOT_FOUND", message: "proxies not configured" });
+    if (!deps.proxyService) return reply.code(404).send({ code: "NOT_FOUND", message: "proxies not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     try {
@@ -20,8 +19,7 @@ export function registerProxyRoutes(app: FastifyInstance, deps: ServerDeps): voi
   });
 
   app.put("/workspace/proxies", { schema: proxyDocs.upsert }, async (req, reply) => {
-    if (!deps.proxyService)
-      return reply.code(404).send({ code: "NOT_FOUND", message: "proxies not configured" });
+    if (!deps.proxyService) return reply.code(404).send({ code: "NOT_FOUND", message: "proxies not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     try {
@@ -38,21 +36,24 @@ export function registerProxyRoutes(app: FastifyInstance, deps: ServerDeps): voi
     }
   });
 
-  app.delete<{ Params: { name: string } }>("/workspace/proxies/:name", { schema: proxyDocs.remove }, async (req, reply) => {
-    if (!deps.proxyService)
-      return reply.code(404).send({ code: "NOT_FOUND", message: "proxies not configured" });
-    const principal = await resolvePrincipal(req, reply, deps);
-    if (!principal) return reply;
-    try {
-      gate(principal, "settings:write");
-    } catch (err) {
-      return sendError(reply, err);
-    }
-    try {
-      await deps.proxyService.remove(principal.workspace, req.params.name);
-      return reply.code(204).send();
-    } catch (err) {
-      return sendError(reply, err);
-    }
-  });
+  app.delete<{ Params: { name: string } }>(
+    "/workspace/proxies/:name",
+    { schema: proxyDocs.remove },
+    async (req, reply) => {
+      if (!deps.proxyService) return reply.code(404).send({ code: "NOT_FOUND", message: "proxies not configured" });
+      const principal = await resolvePrincipal(req, reply, deps);
+      if (!principal) return reply;
+      try {
+        gate(principal, "settings:write");
+      } catch (err) {
+        return sendError(reply, err);
+      }
+      try {
+        await deps.proxyService.remove(principal.workspace, req.params.name);
+        return reply.code(204).send();
+      } catch (err) {
+        return sendError(reply, err);
+      }
+    },
+  );
 }

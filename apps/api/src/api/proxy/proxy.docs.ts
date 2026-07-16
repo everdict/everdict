@@ -22,7 +22,11 @@ const docs = {
       "browser-session geo picker; the auth secret value is never returned.",
     tags: ["proxy"],
     response: {
-      200: { description: "Registered proxies", type: "object", properties: { proxies: { type: "array", items: proxyView } } },
+      200: {
+        description: "Registered proxies",
+        type: "object",
+        properties: { proxies: { type: "array", items: proxyView } },
+      },
       ...errorResponses(401),
     },
   },
