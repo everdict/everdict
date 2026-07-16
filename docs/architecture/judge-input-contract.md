@@ -1,9 +1,10 @@
 # Judge input contract — declare, preview, dry-run
 
-**Status: SHIPPED (S1–S5, control plane + MCP). Web UI pending.** S1 core seam · S2 preview surface ·
-S3 dry-run surface · S4 evidence requirements · S5 span-attribute mapping override. The artifact/span
-evidence *channel* (new TraceEvent kinds) is deferred as genuinely demand-driven — S4's `requires` now
-measures the need. Related: `docs/judges.md` · `docs/architecture/eval-domain-model.md` (Rubric/criteria
+**Status: SHIPPED (S1–S5 control plane + MCP, and the judge-registration web UI).** S1 core seam · S2
+preview surface · S3 dry-run surface · S4 evidence requirements · S5 span-attribute mapping override; the
+web registration form now carries a live preview panel, a "Run once" dry-run button, and a requirement
+editor. The artifact/span evidence *channel* (new TraceEvent kinds) is deferred as genuinely demand-driven —
+S4's `requires` now measures the need. Related: `docs/judges.md` · `docs/architecture/eval-domain-model.md` (Rubric/criteria
 split this builds on) · `docs/architecture/trace-sink.md` (the pull/ingest mapping this generalizes) ·
 `docs/architecture/streaming-case-pipeline.md` (`collectDeferredTrace`) · skills `evaluation` / `graders`.
 
@@ -140,9 +141,11 @@ pre-build ingest generality that no registered judge requires (no-hypothetical-s
 | **S4 requirement declaration** | `JudgeSpec.requires: EvidenceRequirement[]` + pure `assessEvidence` (in graders); preview/dry-run surface the satisfied/missing split. `final_answer`/`tool_call`/`dom`/`screenshot` decidable today; `artifact`/`span` read as unmet with a reason → the ingest signal. | ✅ `ba66ef05` |
 | **S5 ingest generalization** | The demand-justified piece: `SpanAttrMapping` on `TraceSourceConfig`/`TraceSourceSpec`/`CommandTraceSpec`/`TraceRef` → `spansToTraceEvents(spans, mapping)` (keys tried first, GenAI defaults fallback). Realizes the "keys are adjustable" comment. The artifact/span *channel* (new TraceEvent kinds) stays deferred (high blast radius; not yet demanded by a real judge). | ✅ `464f9336` |
 
-**Web UI (pending):** the wizard live-preview panel, the dry-run button, and the requirement coverage
-badges over the shipped `POST /judges/preview` + `/judges/try`. The control-plane + MCP surfaces are complete,
-so preview/dry-run/requirements are usable via API/MCP today.
+**Web UI (shipped):** the judge registration form (`features/register-judge`) carries a live preview panel
+(paste a trace → exact prompt + evidence-coverage chips + warnings), a "Run once" dry-run button (real
+scores over `POST /judges/try`), and a requirement editor (`JudgeSpec.requires` → satisfied/missing badges).
+The per-harness `SpanAttrMapping` editor on the harness form is the remaining UI (the field is registrable
+via API/MCP today).
 
 ## Back-compat invariants
 
