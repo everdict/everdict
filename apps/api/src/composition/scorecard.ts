@@ -161,6 +161,10 @@ export function buildScorecard(deps: {
     judgeFor: async (tenant) => (await settingsStore.get(tenant))?.judge,
     // Pull ingest: pull traces from the tenant's OTel/MLflow and score them. Credentials come from the tenant SecretStore (authSecret name).
     buildTraceSource,
+    // Per-harness span-attribute mapping overlay (judge-wizard-authored) — applied to the pull-eval trace source so
+    // production traces normalize the way this harness/judge expect (WorkspaceSettings.spanAttrMappingByHarness).
+    spanMappingFor: async (tenant, harnessId) =>
+      (await settingsStore.get(tenant))?.spanAttrMappingByHarness?.[harnessId],
     secretsFor: runtimeSecretsFor, // judge model key (shared secret)
     scopedSecretsFor, // resolve harness env {secretRef} (shared + submitter's personal)
     // Private-repo dataset (preferred): if the case git URL owner matches the workspace GitHub App installation, use that App token (same as a single run).

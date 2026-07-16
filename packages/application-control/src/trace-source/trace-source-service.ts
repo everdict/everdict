@@ -193,13 +193,17 @@ export class TraceSourceService {
 
   // Resolve the source a harness selected → a fully-built TraceSourceConfig, for the dispatch path to build a
   // TraceSource and pull the case's trace after the run. undefined = no selection (the caller falls back to the
-  // harness's inline spec.traceSource or no pull).
+  // harness's inline spec.traceSource or no pull). The per-harness span-attribute mapping overlay (judge-wizard-
+  // authored) is merged in here so the dispatch-after-judge collect normalizes the harness/judge's way — the same
+  // conversion the pull-eval path applies.
   async resolve(tenant: string, harnessId: string): Promise<TraceSourceConfig | undefined> {
     const s = await this.settings.get(tenant);
     const name = s?.traceSourceByHarness?.[harnessId];
     const source = name ? (s?.traceSources ?? []).find((e) => e.name === name) : undefined;
     if (!source) return undefined;
-    return this.buildConfig(tenant, source);
+    const config = await this.buildConfig(tenant, source);
+    const mapping = s?.spanAttrMappingByHarness?.[harnessId];
+    return mapping ? { ...config, mapping } : config;
   }
 
   // Build a browsable source for a registered source name (observability browser + judge-wizard sampling). 404 if the

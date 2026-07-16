@@ -99,6 +99,16 @@ describe("TraceSourceService", () => {
     expect(await svc.resolve(WS, "harness-a")).toBeUndefined();
   });
 
+  it("resolve() merges the per-harness conversion overlay into the dispatch-after-judge config", async () => {
+    const svc = new TraceSourceService(
+      fakeSettings({ spanAttrMappingByHarness: { "harness-a": { model: ["my.llm.model"] } } }),
+    );
+    await svc.upsert(WS, { name: "s1", kind: "otel", endpoint: "http://jaeger" });
+    await svc.assign(WS, "harness-a", "s1");
+    const cfg = await svc.resolve(WS, "harness-a");
+    expect(cfg?.mapping).toEqual({ model: ["my.llm.model"] });
+  });
+
   it("resolve() fails fast when the referenced auth secret is not in the SecretStore", async () => {
     const svc = new TraceSourceService(fakeSettings(), { secretsFor: async () => ({}) });
     await svc.upsert(WS, { name: "s1", kind: "langfuse", endpoint: "http://lf", authSecretName: "missing" });

@@ -81,6 +81,7 @@ export class ScorecardIngestService {
       input.tenant,
       dataset,
       `${input.harness.id}@${harnessVersion}`,
+      input.harness.id,
       input.source,
       input.runs,
       input.judges ?? [],
@@ -111,6 +112,7 @@ export class ScorecardIngestService {
     tenant: string,
     dataset: Dataset,
     harnessLabel: string,
+    harnessId: string,
     source: PullIngestBody["source"],
     runs: PullIngestBody["runs"],
     judges: Array<{ id: string; version: string }>,
@@ -128,6 +130,9 @@ export class ScorecardIngestService {
         const token = secrets[source.authSecret];
         if (token) headers = { authorization: token };
       }
+      // Per-harness conversion overlay (judge-wizard-authored) — production traces normalize the way this harness/judge
+      // expect. This is the periodic-eval consumer of the same SpanAttrMapping the dispatch-after-judge path bakes.
+      const mapping = await this.deps.spanMappingFor?.(tenant, harnessId);
       const src = this.deps.buildTraceSource({
         kind: source.kind,
         endpoint: source.endpoint,
@@ -135,6 +140,7 @@ export class ScorecardIngestService {
         // credential 'value' for the newer sources (langfuse/langsmith/phoenix) — the adapter owns the header name.
         ...(headers?.authorization ? { auth: headers.authorization } : {}),
         ...(source.project ? { project: source.project } : {}),
+        ...(mapping ? { mapping } : {}),
       });
       const perCase: IngestScorecardBody["traces"] = [];
       for (const r of runs) {

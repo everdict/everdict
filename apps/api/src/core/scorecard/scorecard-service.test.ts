@@ -373,6 +373,37 @@ describe("ScorecardService.ingestPull", () => {
     expect(captured?.headers?.authorization).toBe("Bearer secret-xyz");
   });
 
+  it("applies the per-harness conversion overlay (spanMappingFor) to the pull-eval trace source", async () => {
+    const store = new InMemoryScorecardStore();
+    const datasets = new InMemoryDatasetRegistry();
+    await datasets.register("acme", datasetWithCase());
+
+    let captured: TraceSourceConfig | undefined;
+    const service = new ScorecardService({
+      dispatcher,
+      store,
+      datasets,
+      defaultTraceGraders,
+      buildTraceSource: (cfg): TraceSource => {
+        captured = cfg;
+        return { fetch: async (): Promise<TraceEvent[]> => [{ t: 0, kind: "llm_call", model: "m" }] };
+      },
+      // The judge-wizard-authored overlay, keyed by the producing harness id — the periodic-eval consumer.
+      spanMappingFor: async (_tenant, harnessId) => (harnessId === "h" ? { model: ["my.llm.model"] } : undefined),
+    });
+    const created = await service.ingestPull({
+      tenant: "acme",
+      dataset: { id: "d", version: "latest" },
+      harness: { id: "h", version: "1.0.0" },
+      source: { kind: "otel", endpoint: "http://jaeger:16686" },
+      runs: [{ caseId: "c1", runId: "trace-1" }],
+      judges: [],
+    });
+    await waitTerminal(store, created.id);
+    // The overlay flows through to the trace source so production traces normalize the harness/judge's way.
+    expect(captured?.mapping).toEqual({ model: ["my.llm.model"] });
+  });
+
   it("missing dataset → NotFoundError (404)", async () => {
     const store = new InMemoryScorecardStore();
     const service = new ScorecardService({

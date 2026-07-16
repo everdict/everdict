@@ -17,6 +17,7 @@ import {
   type ScorecardOrigin,
   type ScorecardRecord,
   type ScorecardSubset,
+  type SpanAttrMapping,
   TraceEventSchema,
   type TraceSource,
   type TraceSourceConfig,
@@ -292,6 +293,10 @@ export interface ScorecardServiceDeps {
   queueDepth?: () => number;
   queuePressure?: number; // queued entries above this = pressure (default 64)
   buildTraceSource?: (cfg: TraceSourceConfig) => TraceSource; // trace source factory for pull-ingest (@everdict/trace)
+  // Per-harness span-attribute mapping overlay (the conversion layer authored in the judge wizard, WorkspaceSettings
+  // .spanAttrMappingByHarness) — applied to the pull-eval trace source so production traces normalize the way the
+  // harness/judge expect. Absent = no overlay (span→TraceEvent uses the source config / OTel GenAI defaults).
+  spanMappingFor?: (tenant: string, harnessId: string) => Promise<SpanAttrMapping | undefined>;
   secretsFor?: (tenant: string) => Promise<Record<string, string>>; // tenant SecretStore values (inject judge-model keys)
   // For resolving {secretRef} in harness env — two tiers: shared + submitter (owner) personal secrets. Injected by scope.
   scopedSecretsFor?: (tenant: string, subject?: string) => Promise<HarnessSecretMaps>;
