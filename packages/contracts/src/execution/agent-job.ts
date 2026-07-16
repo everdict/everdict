@@ -1,13 +1,17 @@
 import { z } from "zod";
 import { HarnessSpecSchema } from "../harness/harness-spec.js";
+import { ModelBindingSchema } from "../harness/model-spec.js";
 import { RegistryAuthSchema } from "../infra/image-ref.js";
 import { EvalCaseSchema } from "./eval-case.js";
 
 // per-run judge model config (not a secret). The control plane decides it from workspace/suite policy and loads it into the job.
 // An inline judge grader (e.g. the WebVoyager preset) is judged with this model on the dispatch path. The provider 'key' is a secret (secretEnv).
+// model is a Model BINDING (registered id/ref | raw string) — the SAME first-class binding a harness/registered judge uses.
+// The dispatch seam (JudgeAuthDispatcher) resolves a registered Model to its provider/underlying model/baseUrl/apiKeySecret
+// and rewrites this to the resolved underlying model string + provider before the env is built; a raw string passes through.
 export const JudgeRunConfigSchema = z.object({
   provider: z.enum(["openai", "anthropic"]).optional(),
-  model: z.string(),
+  model: ModelBindingSchema,
 });
 export type JudgeRunConfig = z.infer<typeof JudgeRunConfigSchema>;
 
@@ -19,7 +23,10 @@ export const JUDGE_PROVIDER_ENV = "EVERDICT_JUDGE_PROVIDER";
 // (workspace tier, baked into the backend) or the job's transient judgeAuth (below).
 export function judgeEnv(j?: JudgeRunConfig): Record<string, string> {
   if (!j) return {};
-  return { [JUDGE_MODEL_ENV]: j.model, ...(j.provider ? { [JUDGE_PROVIDER_ENV]: j.provider } : {}) };
+  // On the real dispatch path JudgeAuthDispatcher rewrites model to the resolved underlying string; extract it
+  // defensively (a still-bound ref falls back to its id) so the env value is always a string.
+  const model = typeof j.model === "string" ? j.model : j.model.ref;
+  return { [JUDGE_MODEL_ENV]: model, ...(j.provider ? { [JUDGE_PROVIDER_ENV]: j.provider } : {}) };
 }
 
 // Transient judgeAuth → the judge provider's key/base-url env for the job. Spread AFTER secretEnv in the task env

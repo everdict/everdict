@@ -126,7 +126,8 @@ export class ScoringService {
     inlineJudge: JudgeRunConfig | undefined,
   ): Promise<string[]> {
     const models = new Set<string>();
-    if (inlineJudge?.model) models.add(inlineJudge.model);
+    const inlineLabel = modelBindingLabel(inlineJudge?.model); // inline judge model is a binding → its id/ref or raw label
+    if (inlineLabel) models.add(inlineLabel);
     if (this.deps.judges) {
       for (const sel of judges) {
         try {

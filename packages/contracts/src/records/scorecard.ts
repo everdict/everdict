@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { JudgeRunConfigSchema } from "../execution/agent-job.js";
 import { GraderSpecSchema, ScorecardSchema } from "../execution/eval-case.js";
 
 // Scorecard run lifecycle: accept a dataset×harness batch eval → run → success/failure.
@@ -149,7 +150,7 @@ export const ScorecardRecordSchema = z.object({
       // Run-time grading plan — replaced every case's default graders at submit; persisted so resume/retry/
       // workflow re-plans score exactly like the original. docs/architecture/eval-domain-model.md S5
       graders: z.array(GraderSpecSchema).optional(),
-      judge: z.object({ provider: z.enum(["openai", "anthropic"]).optional(), model: z.string() }).optional(),
+      judge: JudgeRunConfigSchema.optional(), // inline judge model = a Model binding (ref | raw string), same as the job/settings shape
       concurrency: z.number().int().positive(),
       retries: z.number().int().min(0).default(0),
       // Run each case N times for pass@k / flakiness. Absent = 1 (single run). Persisted so a re-drive keeps the

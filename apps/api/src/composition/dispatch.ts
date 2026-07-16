@@ -122,7 +122,11 @@ export function buildDispatch(deps: {
   // Judge provider key resolved per job (workspace tier → submitter personal fallback; fail-fast when a judge
   // is configured with no resolvable key on a managed target). MUST wrap OUTSIDE RuntimeDispatcher — it keys off
   // the ORIGINAL placement.target (self:* exemption) before the target is rewritten to a backend name.
-  const judgeAuthDispatcher = new JudgeAuthDispatcher({ inner: runtimeDispatcher, scopedSecretsFor });
+  const judgeAuthDispatcher = new JudgeAuthDispatcher({
+    inner: runtimeDispatcher,
+    scopedSecretsFor,
+    models: modelRegistry,
+  });
   // scopedSecretsFor: a harness Model binding injects its baseUrl + underlying model + API key (from the model's
   // apiKeySecret, workspace→personal tiers) into the agent server's env — the same secret seam the judge uses.
   const dispatcher = new ModelResolvingDispatcher(modelRegistry, judgeAuthDispatcher, scopedSecretsFor);

@@ -1,5 +1,6 @@
 import type { Dispatcher } from "@everdict/backends";
 import type { AgentJob, CaseResult } from "@everdict/contracts";
+import { InMemoryModelRegistry } from "@everdict/registry";
 import { describe, expect, it } from "vitest";
 import { JudgeAuthDispatcher, type ScopedSecretTiers } from "./judge-auth-dispatcher.js";
 
@@ -108,5 +109,61 @@ describe("JudgeAuthDispatcher (per-job judge credential resolution)", () => {
     await d.dispatch(preResolved);
     expect(seen[0]?.judgeAuth).toBeUndefined();
     expect(seen[1]?.judgeAuth).toEqual({ apiKey: "already" });
+  });
+
+  it("a judge model that is a registered {ref}: resolves the Model's underlying id/baseUrl + its linked key, and rewrites job.judge", async () => {
+    const models = new InMemoryModelRegistry();
+    await models.register("acme", {
+      id: "team-4o",
+      version: "1.0.0",
+      provider: "openai",
+      model: "gpt-4o",
+      baseUrl: "https://litellm.acme",
+      apiKeySecret: "TEAM_JUDGE_KEY",
+      tags: [],
+    });
+    const { inner, seen } = innerSpy();
+    const d = new JudgeAuthDispatcher({
+      inner,
+      models,
+      scopedSecretsFor: tiers({ workspace: { TEAM_JUDGE_KEY: "sk-team" }, user: {} }), // ONLY the model's linked key
+    });
+    await d.dispatch(job({ judge: { model: { ref: "team-4o" } } }));
+    expect(seen[0]?.judge).toEqual({ provider: "openai", model: "gpt-4o" }); // rewritten to the underlying model + resolved provider
+    expect(seen[0]?.judgeAuth).toEqual({ apiKey: "sk-team", baseUrl: "https://litellm.acme" }); // the model's key + baseUrl
+  });
+
+  it("an explicit {ref} to an unregistered model fails fast (config), never dispatched", async () => {
+    const { inner, seen } = innerSpy();
+    const d = new JudgeAuthDispatcher({
+      inner,
+      models: new InMemoryModelRegistry(),
+      scopedSecretsFor: tiers({ workspace: { OPENAI_API_KEY: "k" }, user: {} }),
+    });
+    await expect(d.dispatch(job({ judge: { model: { ref: "ghost" } } }))).rejects.toThrow(
+      /no such model is registered/,
+    );
+    expect(seen).toHaveLength(0);
+  });
+
+  it("self-hosted {ref}: the model still resolves (the runner judges with the real model) but no workspace key is shipped", async () => {
+    const models = new InMemoryModelRegistry();
+    await models.register("acme", {
+      id: "team-4o",
+      version: "1.0.0",
+      provider: "openai",
+      model: "gpt-4o",
+      apiKeySecret: "TEAM_JUDGE_KEY",
+      tags: [],
+    });
+    const { inner, seen } = innerSpy();
+    const d = new JudgeAuthDispatcher({
+      inner,
+      models,
+      scopedSecretsFor: tiers({ workspace: { TEAM_JUDGE_KEY: "sk" }, user: {} }),
+    });
+    await d.dispatch(job({ judge: { model: { ref: "team-4o" } } }, "self:ws"));
+    expect(seen[0]?.judge).toEqual({ provider: "openai", model: "gpt-4o" }); // resolved for the runner
+    expect(seen[0]?.judgeAuth).toBeUndefined(); // own-pays — no key shipped to the user's machine
   });
 });

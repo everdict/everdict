@@ -1,5 +1,7 @@
 import type { DispatchOptions, Dispatcher } from "@everdict/backends";
-import { type AgentJob, BadRequestError, type CaseResult } from "@everdict/contracts";
+import { type AgentJob, BadRequestError, type CaseResult, type ModelSpec } from "@everdict/contracts";
+import { modelApiKeySecretName, normalizeModelBinding } from "@everdict/domain";
+import type { ModelRegistry } from "@everdict/registry";
 
 // The two secret tiers the control plane can resolve for a submitter (SecretStore.scopedEntries).
 export interface ScopedSecretTiers {
@@ -10,10 +12,16 @@ export interface ScopedSecretTiers {
 export interface JudgeAuthDispatcherDeps {
   inner: Dispatcher;
   scopedSecretsFor: (tenant: string, subject?: string) => Promise<ScopedSecretTiers>;
+  // Resolve a judge's Model binding (ref → provider / underlying model / baseUrl / apiKeySecret), the same registry the
+  // harness ModelResolvingDispatcher + the in-process JudgeRunner use. Absent → raw-string models only (an explicit ref
+  // then fails fast, since it can't be resolved).
+  models?: ModelRegistry;
 }
 
-// Resolves the inline judge's provider credential PER JOB at dispatch — the one seam every path shares
-// (single runs, scorecard cases, retries, the Temporal bridge). Fixes two live gaps:
+// Resolves the inline judge's Model binding + provider credential PER JOB at dispatch — the one seam every path shares
+// (single runs, scorecard cases, retries, the Temporal bridge). The judge's `model` is a first-class Model binding
+// (ref | raw string): a registered Model contributes provider / underlying model / baseUrl / apiKeySecret, resolved the
+// same way as a harness model, then job.judge is rewritten to the resolved form. On top of that it fixes two live gaps:
 //  - tier asymmetry: the backend-level secretEnv carries only the WORKSPACE tier, so a submitter whose
 //    provider key is a personal secret got a working harness but a silently skipped judge on managed runtimes.
 //    Resolution order: workspace (the team's judge key) first, the submitter's personal key as fallback.
@@ -25,23 +33,66 @@ export class JudgeAuthDispatcher implements Dispatcher {
   constructor(private readonly deps: JudgeAuthDispatcherDeps) {}
 
   async dispatch(job: AgentJob, opts?: DispatchOptions): Promise<CaseResult> {
+    if (!job.judge) return this.deps.inner.dispatch(job, opts);
+    const tenant = job.tenant ?? "default";
+
+    // 1) Resolve the judge's Model BINDING → provider / underlying model / baseUrl / apiKeySecret, the same first-class
+    //    way a harness (ModelResolvingDispatcher) and the in-process JudgeRunner do. This (non-secret) resolution runs
+    //    for ALL lanes so the agent always judges with the real underlying model; the job.judge is rewritten to the
+    //    resolved form so judgeEnv emits it. A bare string that isn't a registered id stays a raw model name; an
+    //    EXPLICIT ref that can't resolve is a fail-fast config error (never dispatched with an unresolved model).
+    const binding = job.judge.model;
+    const { ref, version } = normalizeModelBinding(binding);
+    const explicitRef = typeof binding !== "string";
+    let provider: "anthropic" | "openai" = job.judge.provider ?? "openai";
+    let model = ref;
+    let modelBaseUrl: string | undefined;
+    let keyName = provider === "anthropic" ? "ANTHROPIC_API_KEY" : "OPENAI_API_KEY";
+    let resolved: ModelSpec | undefined;
+    if (this.deps.models) {
+      try {
+        resolved = await this.deps.models.get(tenant, ref, version);
+      } catch {
+        resolved = undefined; // not a registered id
+      }
+    }
+    if (resolved) {
+      provider = resolved.provider;
+      model = resolved.model;
+      modelBaseUrl = resolved.baseUrl;
+      keyName = modelApiKeySecretName(resolved);
+    } else if (explicitRef) {
+      throw new BadRequestError(
+        "BAD_REQUEST",
+        { model: ref },
+        `judge references model '${ref}${version === "latest" ? "" : `@${version}`}' but no such model is registered in this workspace.`,
+      );
+    }
+    // Rewrite job.judge to the resolved underlying model + provider (judgeEnv reads it downstream).
+    const resolvedJudge = { provider, model };
+
+    // 2) Key injection — managed lanes only. Self-hosted lanes (self / self:*) judge with the runner's own machine env
+    //    (own-pays) and the control plane cannot see it — never ship workspace keys to user machines. A job that already
+    //    carries judgeAuth (a retry) keeps it. Both still get the resolved model on job.judge.
     const target = job.evalCase.placement?.target;
     const selfHosted = target === "self" || target?.startsWith("self:") === true;
-    if (!job.judge || job.judgeAuth !== undefined || selfHosted) return this.deps.inner.dispatch(job, opts);
-    const tenant = job.tenant ?? "default";
+    if (job.judgeAuth !== undefined || selfHosted) {
+      return this.deps.inner.dispatch({ ...job, judge: resolvedJudge }, opts);
+    }
+    const baseName = provider === "anthropic" ? "ANTHROPIC_BASE_URL" : "OPENAI_BASE_URL";
     // A secret-store failure propagates as-is (infra) — only a MISSING key is a config error.
     const scoped = await this.deps.scopedSecretsFor(tenant, job.submittedBy);
-    const anthropic = job.judge.provider === "anthropic";
-    const keyName = anthropic ? "ANTHROPIC_API_KEY" : "OPENAI_API_KEY";
-    const baseName = anthropic ? "ANTHROPIC_BASE_URL" : "OPENAI_BASE_URL";
-    const apiKey = scoped.workspace[keyName] ?? scoped.user[keyName];
-    const baseUrl = scoped.workspace[baseName] ?? scoped.user[baseName];
+    const apiKey = scoped.workspace[keyName] ?? scoped.user[keyName]; // workspace (the team's key) first, personal fallback
+    const baseUrl = modelBaseUrl ?? scoped.workspace[baseName] ?? scoped.user[baseName]; // the model's baseUrl wins
     if (apiKey === undefined)
       throw new BadRequestError(
         "BAD_REQUEST",
-        { judgeModel: job.judge.model, secret: keyName },
-        `judge model '${job.judge.model}' is configured but no ${keyName} secret is resolvable (workspace or personal) — set the secret or submit without a judge.`,
+        { judgeModel: model, secret: keyName },
+        `judge model '${model}' is configured but no ${keyName} secret is resolvable (workspace or personal) — set the secret or submit without a judge.`,
       );
-    return this.deps.inner.dispatch({ ...job, judgeAuth: { apiKey, ...(baseUrl ? { baseUrl } : {}) } }, opts);
+    return this.deps.inner.dispatch(
+      { ...job, judge: resolvedJudge, judgeAuth: { apiKey, ...(baseUrl ? { baseUrl } : {}) } },
+      opts,
+    );
   }
 }
