@@ -11,6 +11,7 @@ import { InternalError } from "@everdict/contracts";
 import { perTenantTrustZones } from "@everdict/domain";
 import type { TraceSource } from "@everdict/trace";
 import { describe, expect, it } from "vitest";
+import { DEFAULT_BROWSER_IMAGE } from "./deploy/browser-image.js";
 import { buildSharedStoreManifests } from "./deploy/dependencies.js";
 import { buildK8sManifests } from "./deploy/k8s-topology.js";
 import {
@@ -488,7 +489,7 @@ describe("buildBrowserJob", () => {
     expect(g?.Name).toBe("browser");
     expect(g?.Networks?.[0]?.DynamicPorts?.[0]).toEqual({ Label: "cdp", To: 9222 });
     const task = g?.Tasks[0];
-    expect(task?.Config.image).toBe("chromedp/headless-shell:latest");
+    expect(task?.Config.image).toBe(DEFAULT_BROWSER_IMAGE);
     expect(task?.Config.runtime).toBe("runsc");
     expect(task?.Config.ports).toEqual(["cdp"]);
     // headless-shell exposes CDP itself on 9222 → don't override the port, add only allow-origins.

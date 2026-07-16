@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { UpstreamError } from "@everdict/contracts";
-import { type Docker, dockerCli } from "@everdict/topology";
+import { DEFAULT_BROWSER_IMAGE, type Docker, dockerCli } from "@everdict/topology";
 import type {
   BrowserSessionProvisioner,
   ProvisionBrowserOptions,
@@ -16,7 +16,7 @@ import type {
 export interface DockerBrowserOptions {
   docker?: Docker;
   fetch?: typeof fetch;
-  image?: string; // default chromedp/headless-shell:latest (EVERDICT_BROWSER_IMAGE)
+  image?: string; // default = DEFAULT_BROWSER_IMAGE (the pinned headless-shell); override via EVERDICT_BROWSER_IMAGE
   network?: string; // docker network (default "bridge" — a standalone browser, published to the host)
   readyTimeoutMs?: number; // wait for CDP /json/version (default 20s — a container cold-start incl. image pull)
   newName?: () => string; // container-name suffix (tests inject a fixed value)
@@ -33,7 +33,7 @@ export class DockerBrowserProvisioner implements BrowserSessionProvisioner {
   constructor(opts: DockerBrowserOptions = {}) {
     this.docker = opts.docker ?? dockerCli();
     this.fetchImpl = opts.fetch ?? fetch;
-    this.image = opts.image ?? "chromedp/headless-shell:latest";
+    this.image = opts.image ?? DEFAULT_BROWSER_IMAGE;
     this.network = opts.network ?? "bridge";
     this.readyTimeoutMs = opts.readyTimeoutMs ?? 20_000;
     this.newName = opts.newName ?? (() => randomUUID().slice(0, 8));

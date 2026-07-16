@@ -1,5 +1,6 @@
 import { BadRequestError, type RegistryAuth, type ServiceHarnessSpec, type TopologyService } from "@everdict/contracts";
 import { flattenEnv, imageUsesRegistryHost } from "@everdict/domain";
+import { DEFAULT_BROWSER_IMAGE } from "./browser-image.js";
 import { dependencyStores } from "./dependencies.js";
 import { aliasPeerHost } from "./peer-resolver.js";
 import { sanitizeIdent } from "./store-binding.js";
@@ -522,7 +523,7 @@ export function buildBrowserJob(
 ): NomadTopologyJobSpec {
   // A declared client extension → the user's headful browser+extension image (it loads the extension + serves CDP).
   const extensionImage = spec.target?.extension?.ref;
-  const image = extensionImage ?? opts.image ?? "chromedp/headless-shell:latest";
+  const image = extensionImage ?? opts.image ?? DEFAULT_BROWSER_IMAGE;
   const cdpPort = opts.cdpPort ?? 9222;
   // chromedp/headless-shell already exposes CDP on 9222 (socat → internal 9223): override only allow-origins (permit ws
   // connections). An extension image drives Chromium via its OWN entrypoint (headful + --load-extension), so DON'T

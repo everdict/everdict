@@ -4,6 +4,7 @@ import {
   type ServiceReadiness,
   UpstreamError,
 } from "@everdict/contracts";
+import { DEFAULT_BROWSER_IMAGE } from "./browser-image.js";
 import { dependencyConnEnv, dependencyStores } from "./dependencies.js";
 import { type Docker, dockerCli } from "./docker.js";
 import { interpolateServiceEnv, staticWiringEnv } from "./nomad-topology.js";
@@ -13,7 +14,7 @@ import type { TargetEnvHandle, TopologyHandle, TopologyRuntime } from "./topolog
 
 export interface DockerTopologyRuntimeOptions {
   docker?: Docker; // injectable (tests pass a fake Docker). Default execFile("docker", …)
-  browserImage?: string; // per-case browser image (default chromedp/headless-shell:latest)
+  browserImage?: string; // per-case browser image (default = DEFAULT_BROWSER_IMAGE, the pinned headless-shell)
   storeEnv?: Record<string, string>; // explicit connection env (overrides the automatic connEnv — per-harness variable names)
   readyTimeoutMs?: number;
   pollIntervalMs?: number;
@@ -138,7 +139,7 @@ export class DockerTopologyRuntime implements TopologyRuntime {
     const cname = `${network}-${alias}`;
     await this.docker.run({
       name: cname,
-      image: this.opts.browserImage ?? "chromedp/headless-shell:latest",
+      image: this.opts.browserImage ?? DEFAULT_BROWSER_IMAGE,
       network,
       alias,
       publish: 9222,

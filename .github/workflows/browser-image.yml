@@ -1,0 +1,41 @@
+# Mirror the third-party headless-browser image (chromedp/headless-shell) to GHCR (ghcr.io/everdict/headless-shell).
+# browser-profiles S6 uses chromedp/headless-shell for the interactive session + eval browsers; this is a THIRD-PARTY
+# public Docker Hub image we do not build. Mirroring it to our registry lets managed / air-gapped deployments drop the
+# Docker Hub dependency by pointing EVERDICT_BROWSER_IMAGE / RuntimeSpec.browserImage at ghcr.io/everdict/headless-shell.
+#
+# `imagetools create` copies the multi-arch manifest by reference (no local pull) and PRESERVES the content digest, so
+# ghcr.io/everdict/headless-shell@<same digest> resolves to the identical image. Manual (on-demand): run this whenever
+# the pinned digest in packages/topology/src/deploy/browser-image.ts is bumped.
+name: browser-image
+
+on:
+  workflow_dispatch:
+    inputs:
+      source:
+        description: "Source image reference to mirror (pin by digest)"
+        default: "chromedp/headless-shell@sha256:7f8ec4782f1b138c30900e65ae53795d5966fbf52168b8fc062843db3e6d5be5"
+      tag:
+        description: "GHCR tag to publish under (the digest is preserved regardless)"
+        default: "pinned"
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Mirror to GHCR (digest-preserving)
+        run: |
+          docker buildx imagetools create \
+            --tag ghcr.io/everdict/headless-shell:${{ inputs.tag }} \
+            "${{ inputs.source }}"
+          echo "Mirrored ${{ inputs.source }} → ghcr.io/everdict/headless-shell:${{ inputs.tag }}"
+          docker buildx imagetools inspect ghcr.io/everdict/headless-shell:${{ inputs.tag }} | head -20

@@ -1,4 +1,4 @@
-import type { Docker, DockerRunSpec } from "@everdict/topology";
+import { DEFAULT_BROWSER_IMAGE, type Docker, type DockerRunSpec } from "@everdict/topology";
 import { describe, expect, it } from "vitest";
 import { DockerBrowserProvisioner } from "./docker-browser-provisioner.js";
 
@@ -38,7 +38,7 @@ describe("DockerBrowserProvisioner (browser-profiles S6)", () => {
     expect(runs).toHaveLength(1);
     expect(runs[0]).toMatchObject({
       name: "evd-browser-session-abcd",
-      image: "chromedp/headless-shell:latest",
+      image: DEFAULT_BROWSER_IMAGE,
       publish: 9222,
     });
     expect(runs[0]?.args).toContain("--remote-allow-origins=*");

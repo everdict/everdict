@@ -1,5 +1,6 @@
 import type { RegistryAuth, ServiceHarnessSpec, ServiceReadiness, ServiceResources } from "@everdict/contracts";
 import { dockerAuthConfigJson, imageUsesRegistryHost } from "@everdict/domain";
+import { DEFAULT_BROWSER_IMAGE } from "./browser-image.js";
 import { dependencyConnEnv, dependencyStores } from "./dependencies.js";
 import { interpolateServiceEnv, staticWiringEnv } from "./nomad-topology.js";
 import { k8sPeerHost } from "./peer-resolver.js";
@@ -224,7 +225,7 @@ export interface K8sBrowserOptions {
 // per-case browser (target env II): a headless Chromium Deployment + Service. Exposes the CDP port.
 export function buildBrowserManifests(runId: string, opts: K8sBrowserOptions = {}): K8sManifest[] {
   const ns = opts.namespace ?? "default";
-  const image = opts.image ?? "chromedp/headless-shell:latest";
+  const image = opts.image ?? DEFAULT_BROWSER_IMAGE;
   const cdpPort = opts.cdpPort ?? 9222;
   const name = browserDeployName(runId);
   const labels = { app: name, "everdict/runId": runId };

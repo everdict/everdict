@@ -120,6 +120,7 @@ export {
 } from "./front-door/observation-source.js";
 export { captureCdpScreenshot, type CdpSocket, type CaptureCdpOptions } from "./front-door/capture-cdp.js";
 export { reachableWsUrl } from "./front-door/cdp-ws.js";
+export { DEFAULT_BROWSER_IMAGE } from "./deploy/browser-image.js";
 export {
   captureStorageState,
   seedStorageState,

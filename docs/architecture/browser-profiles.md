@@ -151,8 +151,15 @@ short-lived container/pod per active login; self-hosted = the user's own local b
    stays the default for dev/self-hosted. The CDP-in-container reported-WS-host ≠ published-host-port mismatch is
    fixed by `reachableWsUrl` (rewrites the reported `webSocketDebuggerUrl` authority to the reachable CDP base — a
    no-op for host Chrome), applied in `openBrowserSession`/`captureCdpScreenshot`/`captureStorageState`/`seedStorageState`.
-   Follow-up: managed **K8s** reachability (per-session `kubectl port-forward` / ingress to the pod CDP) — lifts this
-   from a control-plane-host Docker daemon to the SaaS cluster.
+   The browser image is a **third-party** dependency (`chromedp/headless-shell`, the chromedp project on Docker Hub —
+   we do not build it). It is **pinned by digest** in ONE place — `DEFAULT_BROWSER_IMAGE`
+   (`packages/topology/src/deploy/browser-image.ts`, used by the docker/nomad/k8s per-case browsers **and** the S6
+   interactive provisioner) — per the infra rule (ban `:latest`, reproducible). `.github/workflows/browser-image.yml`
+   mirrors the pinned upstream to `ghcr.io/everdict/headless-shell` (digest-preserving `imagetools create`), so a
+   managed / air-gapped deployment can drop the Docker Hub dependency by pointing `EVERDICT_BROWSER_IMAGE` /
+   `RuntimeSpec.browserImage` at the mirror. To bump: re-resolve the digest, update `browser-image.ts`, re-run the
+   mirror workflow. Follow-up: managed **K8s** reachability (per-session `kubectl port-forward` / ingress to the pod
+   CDP) — lifts this from a control-plane-host Docker daemon to the SaaS cluster.
 
 ## Non-goals / risks
 
