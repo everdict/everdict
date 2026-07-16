@@ -18,8 +18,8 @@ export const VERDICT_INSTRUCTION_PLACEHOLDER = "{verdict_instruction}";
 
 // What evidence a judge NEEDS from a run to render a sound verdict — declared, not coded (multi-tenant). assessEvidence
 // checks a run's GradeContext against these, so a user learns BEFORE committing whether a given harness produces them.
-// `final_answer`/`tool_call`/`dom`/`screenshot` are satisfiable from today's TraceEvent + snapshot; `artifact`/`span`
-// depend on the ingest generalization (they read as unmet until a harness's trace carries them) — that gap is the point.
+// All kinds are satisfiable from the TraceEvent + snapshot: `final_answer`/`tool_call`/`dom`/`screenshot` from the
+// classic channels, `artifact`/`span` from the ingest-preserved artifact + structural-span TraceEvent kinds.
 export const EvidenceRequirementSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("final_answer") }), // an assistant final message must exist
   z.object({ kind: z.literal("tool_call"), name: z.string().optional() }), // ≥1 tool_call (optionally a named one)

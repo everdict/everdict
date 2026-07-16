@@ -1,10 +1,10 @@
 # Judge input contract — declare, preview, dry-run
 
-**Status: SHIPPED (S1–S5 control plane + MCP, and the judge-registration web UI).** S1 core seam · S2
-preview surface · S3 dry-run surface · S4 evidence requirements · S5 span-attribute mapping override; the
-web registration form now carries a live preview panel, a "Run once" dry-run button, and a requirement
-editor. The artifact/span evidence *channel* (new TraceEvent kinds) is deferred as genuinely demand-driven —
-S4's `requires` now measures the need. Related: `docs/judges.md` · `docs/architecture/eval-domain-model.md` (Rubric/criteria
+**Status: SHIPPED end-to-end (S1–S5 + artifact/span channel, control plane + MCP + web UI).** S1 core seam ·
+S2 preview surface · S3 dry-run surface · S4 evidence requirements · S5 span-attribute mapping override · the
+artifact/span evidence channel (new `artifact`/`span` TraceEvent kinds emitted by all five sources, so those
+`requires` are now satisfiable). The web registration form carries a live preview panel, a "Run once" dry-run
+button, a requirement editor, and (harness form) the per-harness span-attribute mapping editor. Related: `docs/judges.md` · `docs/architecture/eval-domain-model.md` (Rubric/criteria
 split this builds on) · `docs/architecture/trace-sink.md` (the pull/ingest mapping this generalizes) ·
 `docs/architecture/streaming-case-pipeline.md` (`collectDeferredTrace`) · skills `evaluation` / `graders`.
 
@@ -139,13 +139,14 @@ pre-build ingest generality that no registered judge requires (no-hypothetical-s
 | **S2 preview surface** | `POST /judges/preview` + MCP `preview_judge` (both over the S1 core). Evidence **source B** (paste a trace). Rubric-ref resolution reused from the runner (`resolveRubric` exported). Gate `judges:read`. | ✅ `6653f259` |
 | **S3 dry-run surface** | `POST /judges/try` + MCP `try_judge`, over the EXISTING `JudgeRunner.run`. Evidence loader for **source A** (a prior run's stored `CaseResult` by `runId`) joins source B; a live round-trip is `POST /runs` → try source "run" (no redundant sync-dispatch path). Gate `scorecards:run`. | ✅ `8e412574` |
 | **S4 requirement declaration** | `JudgeSpec.requires: EvidenceRequirement[]` + pure `assessEvidence` (in graders); preview/dry-run surface the satisfied/missing split. `final_answer`/`tool_call`/`dom`/`screenshot` decidable today; `artifact`/`span` read as unmet with a reason → the ingest signal. | ✅ `ba66ef05` |
-| **S5 ingest generalization** | The demand-justified piece: `SpanAttrMapping` on `TraceSourceConfig`/`TraceSourceSpec`/`CommandTraceSpec`/`TraceRef` → `spansToTraceEvents(spans, mapping)` (keys tried first, GenAI defaults fallback). Realizes the "keys are adjustable" comment. The artifact/span *channel* (new TraceEvent kinds) stays deferred (high blast radius; not yet demanded by a real judge). | ✅ `464f9336` |
+| **S5 ingest generalization** | `SpanAttrMapping` on `TraceSourceConfig`/`TraceSourceSpec`/`CommandTraceSpec`/`TraceRef` → `spansToTraceEvents(spans, mapping)` (keys tried first, GenAI defaults fallback). Realizes the "keys are adjustable" comment. | ✅ `464f9336` |
+| **artifact/span channel** | New `artifact` (name + fetchable ref + mediaType/role) and `span` (name + attributes) TraceEvent kinds — a fully back-compatible union widening (no exhaustive trace-kind switch exists). `spansToTraceEvents` preserves otherwise-dropped structural spans + surfaces `artifact.ref`; langfuse/langsmith/phoenix preserve structural observations; `assessEvidence` checks them → the `artifact`/`span` requirements are now satisfiable. | ✅ `14e4360f` |
 
 **Web UI (shipped):** the judge registration form (`features/register-judge`) carries a live preview panel
-(paste a trace → exact prompt + evidence-coverage chips + warnings), a "Run once" dry-run button (real
-scores over `POST /judges/try`), and a requirement editor (`JudgeSpec.requires` → satisfied/missing badges).
-The per-harness `SpanAttrMapping` editor on the harness form is the remaining UI (the field is registrable
-via API/MCP today).
+(paste a trace → exact prompt + evidence-coverage chips + warnings, `fa718c9`), a "Run once" dry-run button
+(real scores over `POST /judges/try`) + a requirement editor (`JudgeSpec.requires` → satisfied/missing
+badges, `7f8b1751`), and the harness form (`register-harness`) carries the per-harness `SpanAttrMapping`
+editor (`4dc62145`).
 
 ## Back-compat invariants
 
