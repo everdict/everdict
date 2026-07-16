@@ -23,6 +23,7 @@ function actions(): TrayMenuActions & { openApp: ReturnType<typeof vi.fn> } {
     openPanel: vi.fn(),
     setAutostart: vi.fn(),
     changeServerUrl: vi.fn(),
+    reconnectRunner: vi.fn(),
     unpairRunner: vi.fn(),
     applyUpdate: vi.fn(),
     quit: vi.fn(),
@@ -90,6 +91,23 @@ describe("buildTrayMenuTemplate", () => {
     expect(unpair).toBeDefined();
     click(unpair ?? {});
     expect(a.unpairRunner).toHaveBeenCalledOnce();
+  });
+
+  it("when paired, 'Reconnect this device's runner' appears (before unpair) and clicking it calls reconnectRunner", () => {
+    const a = actions();
+    const t = buildTrayMenuTemplate({ autostart: false, runner: IDLE, updater: NO_UPDATE }, a);
+    const labels = t.map((i) => i.label);
+    const reconnectAt = labels.indexOf("Reconnect this device's runner");
+    const unpairAt = labels.indexOf("Unpair this device's runner");
+    expect(reconnectAt).toBeGreaterThanOrEqual(0);
+    expect(reconnectAt).toBeLessThan(unpairAt); // reconnect (recover) is offered before the destructive unpair
+    click(t[reconnectAt] ?? {});
+    expect(a.reconnectRunner).toHaveBeenCalledOnce();
+  });
+
+  it("no reconnect item when unpaired (nothing to reconnect)", () => {
+    const t = buildTrayMenuTemplate({ autostart: false, runner: OFF, updater: NO_UPDATE }, actions());
+    expect(t.some((i) => i.label?.startsWith("Reconnect"))).toBe(false);
   });
 
   it("reflects the autostart checked state, and a click calls setAutostart with the inverted value", () => {

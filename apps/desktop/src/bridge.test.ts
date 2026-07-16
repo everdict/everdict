@@ -19,7 +19,11 @@ function fakeIpc(): IpcMainLike & {
   };
 }
 
-function deps(): BridgeDeps & { pair: ReturnType<typeof vi.fn>; unpair: ReturnType<typeof vi.fn> } {
+function deps(): BridgeDeps & {
+  pair: ReturnType<typeof vi.fn>;
+  unpair: ReturnType<typeof vi.fn>;
+  reconnect: ReturnType<typeof vi.fn>;
+} {
   return {
     webOrigin: () => WEB,
     appInfo: async () => ({
@@ -31,6 +35,7 @@ function deps(): BridgeDeps & { pair: ReturnType<typeof vi.fn>; unpair: ReturnTy
     }),
     pair: vi.fn(async () => {}),
     unpair: vi.fn(async () => {}),
+    reconnect: vi.fn(async () => {}),
     status: () => ({ runners: [] }),
   };
 }
@@ -48,7 +53,13 @@ describe("registerBridge", () => {
   it("blocks all channels for calls from another origin (e.g. an OAuth page)", () => {
     const ipc = fakeIpc();
     registerBridge(ipc, deps());
-    for (const ch of [BRIDGE_CHANNELS.appInfo, BRIDGE_CHANNELS.pair, BRIDGE_CHANNELS.unpair, BRIDGE_CHANNELS.status]) {
+    for (const ch of [
+      BRIDGE_CHANNELS.appInfo,
+      BRIDGE_CHANNELS.pair,
+      BRIDGE_CHANNELS.unpair,
+      BRIDGE_CHANNELS.reconnect,
+      BRIDGE_CHANNELS.status,
+    ]) {
       expect(() => ipc.invoke(ch, "https://github.com/login")).toThrow(/origin/);
       expect(() => ipc.invoke(ch, undefined)).toThrow(/origin/);
     }
@@ -86,5 +97,15 @@ describe("registerBridge", () => {
     expect(d.unpair).toHaveBeenCalledWith("r7");
     await ipc.invoke(BRIDGE_CHANNELS.unpair, `${WEB}/a`);
     expect(d.unpair).toHaveBeenCalledWith(undefined);
+  });
+
+  it("reconnectRunner forwards a specific runnerId, and (omitted) forwards undefined for reconnect-all", async () => {
+    const ipc = fakeIpc();
+    const d = deps();
+    registerBridge(ipc, d);
+    await ipc.invoke(BRIDGE_CHANNELS.reconnect, `${WEB}/a`, "r7");
+    expect(d.reconnect).toHaveBeenCalledWith("r7");
+    await ipc.invoke(BRIDGE_CHANNELS.reconnect, `${WEB}/a`);
+    expect(d.reconnect).toHaveBeenCalledWith(undefined);
   });
 });

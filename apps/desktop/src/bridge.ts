@@ -7,6 +7,7 @@ export const BRIDGE_CHANNELS = {
   appInfo: "everdict:app-info",
   pair: "everdict:pair-runner",
   unpair: "everdict:unpair-runner",
+  reconnect: "everdict:reconnect-runner",
   status: "everdict:runner-status",
   statusEvent: "everdict:runner-status-event",
 } as const;
@@ -22,6 +23,10 @@ export type PairPayload = z.infer<typeof PairPayloadSchema>;
 
 // unpairRunner(runnerId?) — a specific runner by id, or (omitted) all runners on this device. Boundary-validated.
 export const UnpairPayloadSchema = z.string().min(1).optional();
+
+// reconnectRunner(runnerId?) — force a specific runner, or (omitted) every runner on this device, to reconnect. The recovery
+// lever for a runner that shows "offline" (its lease loop can't reach the control plane) — no re-pairing required. Same shape as unpair.
+export const ReconnectPayloadSchema = z.string().min(1).optional();
 
 // The status of ONE paired runner — manually kept in sync with the apps/web `shared/lib/desktop-bridge.ts` mirror (the web does not depend on @everdict/*).
 export interface DesktopRunnerStatus {
@@ -71,6 +76,7 @@ export interface BridgeDeps {
   appInfo(): Promise<DesktopAppInfo>;
   pair(payload: PairPayload): Promise<void>;
   unpair(runnerId?: string): Promise<void>;
+  reconnect(runnerId?: string): Promise<void>;
   status(): DesktopRunnersStatus;
 }
 
@@ -94,6 +100,10 @@ export function registerBridge(ipc: IpcMainLike, deps: BridgeDeps): void {
   ipc.handle(
     BRIDGE_CHANNELS.unpair,
     guarded((payload) => deps.unpair(UnpairPayloadSchema.parse(payload))),
+  );
+  ipc.handle(
+    BRIDGE_CHANNELS.reconnect,
+    guarded((payload) => deps.reconnect(ReconnectPayloadSchema.parse(payload))),
   );
   ipc.handle(
     BRIDGE_CHANNELS.status,

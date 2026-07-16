@@ -85,6 +85,7 @@
           <span id="switch" class="switch"><span class="knob"></span></span>
         </button>
         <button class="row" type="button" data-act="changeServer"><span>Change server…</span></button>
+        <button id="reconnectRow" class="row hidden" type="button" data-act="reconnect"><span id="reconnectLabel">Reconnect</span></button>
         <button id="unpairRow" class="row hidden" type="button" data-act="unpair"><span id="unpairLabel">Unpair</span></button>
         <div class="sep"></div>
         <button class="row danger" type="button" data-act="quit"><span>Quit Everdict</span></button>
@@ -144,6 +145,8 @@
         if (prevActive > 0 && vm.activeJobs === 0) celebrate()
         prevActive = vm.activeJobs
         byId('switch').classList.toggle('on', !!vm.autostart)
+        byId('reconnectRow').classList.toggle('hidden', !vm.canReconnect)
+        byId('reconnectLabel').textContent = vm.reconnectLabel
         byId('unpairRow').classList.toggle('hidden', !vm.canUnpair)
         byId('unpairLabel').textContent = vm.unpairLabel
         renderUpdate(vm.update)
@@ -158,6 +161,7 @@
         else if (act === 'autostart')
           bridge?.action({ type: 'setAutostart', value: !byId('switch').classList.contains('on') })
         else if (act === 'changeServer') bridge?.action({ type: 'changeServer' })
+        else if (act === 'reconnect') bridge?.action({ type: 'reconnect' })
         else if (act === 'unpair') bridge?.action({ type: 'unpair' })
         else if (act === 'quit') bridge?.action({ type: 'quit' })
       })

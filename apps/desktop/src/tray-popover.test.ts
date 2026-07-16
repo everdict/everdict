@@ -63,6 +63,15 @@ describe("buildTrayPopoverViewModel", () => {
     expect(buildTrayPopoverViewModel(state({ runner: pool })).unpairLabel).toBe("Unpair all runners on this device");
   });
 
+  it("offers reconnect only when paired, phrased singular vs plural (matching the native menu)", () => {
+    expect(buildTrayPopoverViewModel(state({ runner: OFF })).canReconnect).toBe(false);
+    expect(buildTrayPopoverViewModel(state({ runner: IDLE })).reconnectLabel).toBe("Reconnect this device's runner");
+    const pool: DesktopRunnersStatus = { runners: [runner({ runnerId: "r1" }), runner({ runnerId: "r2" })] };
+    const vm = buildTrayPopoverViewModel(state({ runner: pool }));
+    expect(vm.canReconnect).toBe(true);
+    expect(vm.reconnectLabel).toBe("Reconnect all runners on this device");
+  });
+
   it("sums active jobs and reflects the running state", () => {
     const vm = buildTrayPopoverViewModel(state({ runner: BUSY }));
     expect(vm.runnerState).toBe("running");
@@ -138,6 +147,7 @@ describe("TrayActionSchema", () => {
     });
     expect(() => TrayActionSchema.parse({ type: "setAutostart" })).toThrow();
     expect(() => TrayActionSchema.parse({ type: "nope" })).toThrow();
+    expect(TrayActionSchema.parse({ type: "reconnect" })).toEqual({ type: "reconnect" });
   });
 });
 

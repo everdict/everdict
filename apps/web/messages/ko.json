@@ -1062,7 +1062,10 @@
     "lastSeenAt": "최근 접속 {date}",
     "revokeConfirm": "해제 확인",
     "close": "닫기",
-    "revokeRunnerAria": "{name} 러너 해제"
+    "revokeRunnerAria": "{name} 러너 해제",
+    "reconnect": "다시 연결",
+    "reconnecting": "다시 연결 중…",
+    "statusMenuAria": "{name} 러너 상태 및 작업"
   },
   "manageSchedules": {
     "runtimeDefault": "기본 백엔드",

@@ -1,5 +1,5 @@
 import type { AgentJob, CaseResult } from "@everdict/contracts";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { RunnerHost, type RunnerHostStatus, type RunnerJobDone } from "./runner-host.js";
 import type { RunnerClient } from "./runner-session.js";
 
@@ -93,6 +93,44 @@ describe("RunnerHost", () => {
     await host.start();
     await host.start(); // idempotent
     expect(host.status().capabilities).toEqual(["repo", "docker"]);
+    await host.stop();
+    expect(host.status().state).toBe("off");
+  });
+
+  it("restart tears down the loop and resumes leasing on a fresh session (recovers an offline runner)", async () => {
+    // connect() opens a session lazily on the first lease; restart must open a NEW one (not reuse the torn-down session).
+    // lease_job parks briefly each poll so the idle loop can't busy-spin the microtask queue (real timers, no sleep override).
+    let connectCount = 0;
+    const idleSession = (): RunnerClient => ({
+      async callTool(name) {
+        if (name === "lease_job") {
+          await new Promise((r) => setTimeout(r, 5));
+          return { text: JSON.stringify({}), isError: false };
+        }
+        return { text: JSON.stringify({ ok: true }), isError: false };
+      },
+      async close() {},
+    });
+    const host = new RunnerHost({
+      apiUrl: "http://localhost:8787",
+      token: "rnr_x",
+      capabilities: ["repo"],
+      connect: async () => {
+        connectCount++;
+        return idleSession();
+      },
+      runJob: async () => RESULT,
+      waitMs: 10,
+      pollMs: 1,
+    });
+
+    await host.start();
+    await vi.waitFor(() => expect(connectCount).toBe(1)); // the loop opened its session
+    expect(host.status().state).not.toBe("off");
+    await host.restart();
+    // A brand-new session was opened (the first was torn down) → the runner resumes leasing → lastSeenAt refreshes again.
+    await vi.waitFor(() => expect(connectCount).toBe(2));
+    expect(host.status().state).not.toBe("off");
     await host.stop();
     expect(host.status().state).toBe("off");
   });

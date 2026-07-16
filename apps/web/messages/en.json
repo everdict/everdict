@@ -1062,7 +1062,10 @@
     "lastSeenAt": "Last seen {date}",
     "revokeConfirm": "Confirm remove",
     "close": "Close",
-    "revokeRunnerAria": "Remove runner {name}"
+    "revokeRunnerAria": "Remove runner {name}",
+    "reconnect": "Reconnect",
+    "reconnecting": "Reconnecting…",
+    "statusMenuAria": "Runner {name} status and actions"
   },
   "manageSchedules": {
     "runtimeDefault": "Default backend",

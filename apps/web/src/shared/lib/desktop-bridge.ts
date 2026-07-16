@@ -42,6 +42,10 @@ export interface EverdictDesktopBridge {
   pairRunner(payload: { token: string; runnerId?: string; apiUrl?: string }): Promise<void>
   // Unpair a specific runner by id, or (omitted) every runner on this device.
   unpairRunner(runnerId?: string): Promise<void>
+  // Force a specific runner by id, or (omitted) every runner on this device, to reconnect — recovers a runner that shows
+  // "offline" (its lease loop can't reach the control plane, so lastSeenAt goes stale) without a full unpair/re-pair.
+  // Present only on a desktop new enough to expose it (version-skew tolerant — gate on `typeof bridge.reconnectRunner === 'function'`).
+  reconnectRunner?(runnerId?: string): Promise<void>
   runnerStatus(): Promise<DesktopRunnersStatus>
   // Subscribe to status — returns an unsubscribe function.
   onRunnerStatus(callback: (status: DesktopRunnersStatus) => void): () => void

@@ -546,6 +546,8 @@ function trayActions(): TrayMenuActions {
     openPanel: () => showTrayPopover(),
     setAutostart: (next) => applyAutostart(next),
     changeServerUrl: () => openSetupWindow(),
+    // Reconnect-all — force every runner on this device to reopen its session and resume leasing (recovers an offline runner).
+    reconnectRunner: () => void supervisor.reconnect().catch((e) => console.error(`Runner reconnect failed: ${e}`)),
     // Local unpair-all (discard the tokens + stop) — the web account page is authoritative for revoking the server records.
     unpairRunner: () => void supervisor.unpair().catch((e) => console.error(`Runner unpair failed: ${e}`)),
     applyUpdate: () => applyUpdateNow(),
@@ -641,6 +643,9 @@ function dispatchTrayAction(action: TrayAction): void {
       break;
     case "changeServer":
       openSetupWindow();
+      break;
+    case "reconnect":
+      void supervisor.reconnect().catch((e) => console.error(`Runner reconnect failed: ${e}`));
       break;
     case "unpair":
       void supervisor.unpair().catch((e) => console.error(`Runner unpair failed: ${e}`));
@@ -763,6 +768,7 @@ if (!app.requestSingleInstanceLock()) {
       appInfo,
       pair: (payload) => supervisor.pair(payload),
       unpair: (runnerId) => supervisor.unpair(runnerId),
+      reconnect: (runnerId) => supervisor.reconnect(runnerId),
       status: () => supervisor.status(),
     });
     // Frameless custom title bar (D10) — window controls act on the window that sent the call. Same origin gate as the

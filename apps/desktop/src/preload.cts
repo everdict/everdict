@@ -44,6 +44,8 @@ if (expectedOrigin !== undefined && location.origin === expectedOrigin) {
     pairRunner: (payload: unknown) => electron.ipcRenderer.invoke("everdict:pair-runner", payload),
     // unpairRunner(runnerId?) — a specific runner, or (omitted) all runners on this device.
     unpairRunner: (runnerId?: string) => electron.ipcRenderer.invoke("everdict:unpair-runner", runnerId),
+    // reconnectRunner(runnerId?) — force a specific runner, or (omitted) all runners on this device, to reconnect (recovers an offline runner).
+    reconnectRunner: (runnerId?: string) => electron.ipcRenderer.invoke("everdict:reconnect-runner", runnerId),
     runnerStatus: () => electron.ipcRenderer.invoke("everdict:runner-status"),
     onRunnerStatus: (callback: (status: unknown) => void) => {
       const listener = (_event: electron.IpcRendererEvent, status: unknown) => callback(status);

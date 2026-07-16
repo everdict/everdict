@@ -8,8 +8,10 @@ interface FakeHost {
   runnerId: string;
   started: boolean;
   stopped: boolean;
+  restarts: number;
   start(): Promise<void>;
   stop(): Promise<void>;
+  restart(): Promise<void>;
 }
 
 function makeDeps(
@@ -41,12 +43,17 @@ function makeDeps(
         runnerId,
         started: false,
         stopped: false,
+        restarts: 0,
         start: async () => {
           host.started = true;
           onStatus({ state: "idle", activeJobs: 0, capabilities: ["repo"] });
         },
         stop: async () => {
           host.stopped = true;
+        },
+        restart: async () => {
+          host.restarts++;
+          onStatus({ state: "idle", activeJobs: 0, capabilities: ["repo"] });
         },
       };
       hosts.push(host);
@@ -158,6 +165,56 @@ describe("RunnerSupervisor", () => {
     expect(getTokens()).toEqual({});
     expect(getRunners()).toEqual([]);
     expect(broadcasts.at(-1)).toEqual({ runners: [] });
+  });
+
+  it("reconnect(id) — restarts a live host in place (fresh session), leaving the others untouched", async () => {
+    const { deps, hosts } = makeDeps({
+      tokens: { r1: "rnr_1", r2: "rnr_2" },
+      runners: [{ runnerId: "r1" }, { runnerId: "r2" }],
+    });
+    const s = new RunnerSupervisor(deps);
+    await s.startFromStore();
+    await s.reconnect("r1");
+    expect(hosts.find((h) => h.runnerId === "r1")?.restarts).toBe(1);
+    expect(hosts.find((h) => h.runnerId === "r2")?.restarts).toBe(0);
+    // Same host object stays registered (restart is in place — no host swap, no status race).
+    expect(hosts.filter((h) => h.runnerId === "r1")).toHaveLength(1);
+    expect(ids(s.status())).toEqual(["r1", "r2"]);
+  });
+
+  it("reconnect() — omitted id reconnects every runner on this device", async () => {
+    const { deps, hosts } = makeDeps({
+      tokens: { r1: "rnr_1", r2: "rnr_2" },
+      runners: [{ runnerId: "r1" }, { runnerId: "r2" }],
+    });
+    const s = new RunnerSupervisor(deps);
+    await s.startFromStore();
+    await s.reconnect();
+    expect(hosts.map((h) => h.restarts).sort()).toEqual([1, 1]);
+  });
+
+  it("reconnect(id) — (re)starts a runner whose host wasn't running once its token is available (keychain recovered)", async () => {
+    // r2's token was missing at startFromStore (keychain lost) so it has no live host; reconnect starts it now that the token is back.
+    const store = makeDeps({
+      tokens: { r1: "rnr_1" },
+      runners: [{ runnerId: "r1" }, { runnerId: "r2" }],
+    });
+    const s = new RunnerSupervisor(store.deps);
+    await s.startFromStore();
+    expect(ids(s.status())).toEqual(["r1"]); // r2 skipped (no token)
+    store.deps.saveTokens({ ...store.getTokens(), r2: "rnr_2" }); // keychain recovered
+    await s.reconnect("r2");
+    expect(store.hosts.find((h) => h.runnerId === "r2")?.started).toBe(true);
+    expect(ids(s.status())).toEqual(["r1", "r2"]);
+  });
+
+  it("reconnect(id) — a runner with no host and no token is a no-op (must be re-paired)", async () => {
+    const { deps, hosts } = makeDeps({ runners: [{ runnerId: "gone" }] });
+    const s = new RunnerSupervisor(deps);
+    await s.startFromStore();
+    await s.reconnect("gone");
+    expect(hosts).toHaveLength(0);
+    expect(s.status()).toEqual({ runners: [] });
   });
 
   it("startFromStore — migrates a legacy single pairing into the multi store, then clears the legacy record", async () => {

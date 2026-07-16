@@ -2,7 +2,8 @@
 
 import { useEffect, useState, useTransition } from 'react'
 import Link from 'next/link'
-import { Download, Laptop, Trash2 } from 'lucide-react'
+import { useRouter } from 'next/navigation'
+import { ChevronDown, Download, Laptop, RefreshCw, Trash2 } from 'lucide-react'
 import { useLocale, useTranslations } from 'next-intl'
 
 import {
@@ -21,6 +22,7 @@ import { cn } from '@/shared/lib/utils'
 import { Badge } from '@/shared/ui/badge'
 import { Button, buttonVariants } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
+import { DropdownItem, DropdownMenu } from '@/shared/ui/dropdown-menu'
 import { EmptyState } from '@/shared/ui/empty-state'
 
 import { pairRunnerAction, revokeRunnerAction } from '../api/manage-runners'
@@ -50,7 +52,9 @@ export function RunnersManager({
 }) {
   const t = useTranslations('manageRunners')
   const locale = useLocale()
+  const router = useRouter()
   const [confirmId, setConfirmId] = useState<string>()
+  const [reconnectingId, setReconnectingId] = useState<string>()
   const [error, setError] = useState<string>()
   const [pending, startTransition] = useTransition()
   // Detect the desktop shell — if the bridge exists, enable one-click pairing + this device's live status (only after mount; avoids SSR mismatch).
@@ -97,6 +101,29 @@ export function RunnersManager({
       }
       // If we revoked a runner paired to THIS device, also clean up its desktop-side token (the server revoke is authoritative — ignore bridge failures).
       if (bridge && deviceRunnerIds.has(id)) await bridge.unpairRunner(id).catch(() => {})
+    })
+  }
+
+  // Force an offline runner paired to THIS device to reconnect (fresh session → lease → lastSeenAt refreshes → back online) —
+  // the lightweight recovery so a stalled runner needn't be revoked + re-paired. Only the desktop that holds the token can do it.
+  function onReconnect(id: string) {
+    const b = bridge
+    const reconnect = b?.reconnectRunner
+    if (!b || typeof reconnect !== 'function') return
+    setError(undefined)
+    setReconnectingId(id)
+    startTransition(async () => {
+      try {
+        await reconnect(id)
+        setDesktop(normalizeRunnersStatus(await b.runnerStatus()))
+        // `online` is server-driven (lastSeenAt), so refetch the roster once the runner has resumed leasing — the dot flips
+        // to green as soon as the control plane sees the fresh lease/heartbeat (a re-render on load, not live).
+        router.refresh()
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e))
+      } finally {
+        setReconnectingId(undefined)
+      }
     })
   }
 
@@ -230,12 +257,19 @@ export function RunnersManager({
             const online = isOnline(r.lastSeenAt)
             // Capabilities still prefer live — if the docker daemon stopped after pairing, it's reflected immediately.
             const caps = live && live.capabilities.length > 0 ? live.capabilities : r.capabilities
+            const reconnecting = reconnectingId === r.id
+            // Only THIS device holds the runner's token, so only its desktop can force a reconnect (recover an offline runner
+            // without re-pairing). Needs a desktop new enough to expose reconnectRunner (older shells omit it — version-skew tolerant).
+            const canReconnect =
+              bridge !== null && typeof bridge.reconnectRunner === 'function' && thisDevice
             // Online/offline is server-driven; the live bridge only refines it to "running (N)" when a job is in flight.
-            const statusText = !online
-              ? t('offline')
-              : live && live.activeJobs > 0
-                ? t('running', { count: live.activeJobs })
-                : t('online')
+            const statusText = reconnecting
+              ? t('reconnecting')
+              : !online
+                ? t('offline')
+                : live && live.activeJobs > 0
+                  ? t('running', { count: live.activeJobs })
+                  : t('online')
             return (
               <li key={r.id} className="flex items-center gap-3 px-3.5 py-3">
                 <span className="relative grid size-8 shrink-0 place-items-center rounded-md bg-elevated text-muted-foreground">
@@ -255,14 +289,41 @@ export function RunnersManager({
                       {r.label}
                     </span>
                     {thisDevice && <Badge>{t('thisDevice')}</Badge>}
-                    <span
-                      className={cn(
-                        'text-[12px]',
-                        online ? 'text-[var(--color-success)]' : 'text-faint'
-                      )}
-                    >
-                      {statusText}
-                    </span>
+                    {/* Status = icon + click-dropdown of state actions (state-controls convention). Only THIS device can
+                        reconnect (it holds the token); other rows show a static status label. */}
+                    {canReconnect ? (
+                      <DropdownMenu
+                        align="start"
+                        trigger={({ toggle }) => (
+                          <button
+                            type="button"
+                            onClick={toggle}
+                            disabled={reconnecting}
+                            aria-label={t('statusMenuAria', { name: r.label })}
+                            className={cn(
+                              'inline-flex items-center gap-1 rounded text-[12px] hover:opacity-80 disabled:opacity-60',
+                              online ? 'text-[var(--color-success)]' : 'text-faint'
+                            )}
+                          >
+                            {statusText}
+                            <ChevronDown className="size-3 opacity-60" />
+                          </button>
+                        )}
+                      >
+                        <DropdownItem icon={<RefreshCw />} onSelect={() => onReconnect(r.id)}>
+                          {t('reconnect')}
+                        </DropdownItem>
+                      </DropdownMenu>
+                    ) : (
+                      <span
+                        className={cn(
+                          'text-[12px]',
+                          online ? 'text-[var(--color-success)]' : 'text-faint'
+                        )}
+                      >
+                        {statusText}
+                      </span>
+                    )}
                     {r.os && <Badge tone="outline">{r.os}</Badge>}
                   </div>
                   {/* Capability self-labels — green (supported)/grey (unsupported). The runner probes its own machine and advertises them. */}

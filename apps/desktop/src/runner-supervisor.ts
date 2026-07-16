@@ -10,6 +10,8 @@ import type { RunnerTokens } from "./token-store.js";
 export interface RunnerHostLike {
   start(): Promise<void>;
   stop(): Promise<void>;
+  // Force a fresh reconnect on a running host (recovers a runner that shows offline) — see RunnerHost.restart.
+  restart(): Promise<void>;
 }
 
 // Legacy (pre-D9) single-runner pairing, read once for migration into the multi-runner store.
@@ -105,6 +107,31 @@ export class RunnerSupervisor {
     else this.deps.saveTokens(tokens);
     this.deps.saveRunners(this.deps.loadRunners().filter((r) => r.runnerId !== runnerId));
     this.stopRunnerInBackground(runnerId);
+    this.emit();
+  }
+
+  // Force a paired runner (or, id omitted, every runner on this device) to reconnect — the recovery lever for a runner that
+  // shows "offline" (its lease loop can't reach the control plane, so lastSeenAt goes stale) without discarding the pairing.
+  // A live host is restarted in place (fresh MCP session → re-advertise → lease → lastSeenAt refreshes). A runner that has no
+  // live host (e.g. its token was recovered after a keychain loss that made startFromStore skip it) is (re)started from the
+  // stored token; a still-missing token can't be recovered here (the row must be re-paired) and is skipped.
+  async reconnect(runnerId?: string): Promise<void> {
+    const targets =
+      runnerId !== undefined
+        ? [runnerId]
+        : [...new Set([...this.entries.keys(), ...this.deps.loadRunners().map((r) => r.runnerId)])];
+    const tokens = this.deps.loadTokens();
+    for (const id of targets) {
+      const entry = this.entries.get(id);
+      if (entry !== undefined) {
+        await entry.host.restart();
+        continue;
+      }
+      const token = tokens[id];
+      const cfg = this.deps.loadRunners().find((r) => r.runnerId === id);
+      if (token === undefined || cfg === undefined) continue; // keychain lost — can't reconnect; the row must be re-paired
+      await this.startRunner(id, token, cfg.apiUrl ?? this.deps.defaultApiUrl, cfg.label);
+    }
     this.emit();
   }
 

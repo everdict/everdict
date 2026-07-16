@@ -14,6 +14,7 @@ export interface TrayMenuActions {
   openPanel(): void; // open the rich popover (D11) — on Linux the native menu is kept (AppIndicator forces one) but leads into the readable popover
   setAutostart(next: boolean): void;
   changeServerUrl(): void; // open the setup window (setup.html) — D8
+  reconnectRunner(): void; // force every runner on this device to reconnect (recover an offline runner without re-pairing)
   unpairRunner(): void;
   applyUpdate(): void; // shown only in the ready state — cleaning up the runner then restarting/applying is main's responsibility
   quit(): void;
@@ -65,6 +66,19 @@ export function buildTrayMenuTemplate(state: TrayMenuState, actions: TrayMenuAct
       click: () => actions.setAutostart(!state.autostart),
     },
     { label: "Change server address…", click: () => actions.changeServerUrl() },
+    // Reconnect — force this device's runner(s) to reopen their session and resume leasing. The recovery for a runner that
+    // shows "offline" (its lease loop can't reach the control plane), avoiding a full unpair + re-pair.
+    ...(state.runner.runners.length > 0
+      ? ([
+          {
+            label:
+              state.runner.runners.length === 1
+                ? "Reconnect this device's runner"
+                : "Reconnect all runners on this device",
+            click: () => actions.reconnectRunner(),
+          },
+        ] satisfies MenuItemConstructorOptions[])
+      : []),
     // Local unpair — discard this device's token(s) + stop the runner(s). The web account page is authoritative for revoking the server-side records.
     ...(state.runner.runners.length > 0
       ? ([

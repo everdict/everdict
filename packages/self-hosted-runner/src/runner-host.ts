@@ -132,6 +132,15 @@ export class RunnerHost {
     if (s) await s.close();
   }
 
+  // Force a fresh reconnect — tear the session/loop down and start it anew. Recovers a runner that is paired but whose lease
+  // loop can't reach the control plane (so it never refreshes lastSeenAt and the roster shows it "offline"), without a full
+  // unpair/re-pair. stop() is graceful (in-flight jobs finish and reply first); start() then opens a NEW MCP session,
+  // re-detects capabilities, and resumes leasing — the next successful lease/heartbeat refreshes lastSeenAt → back online.
+  async restart(): Promise<void> {
+    await this.stop();
+    await this.start();
+  }
+
   private emit(): void {
     this.opts.onStatus?.(this.status());
   }

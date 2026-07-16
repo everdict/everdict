@@ -91,11 +91,25 @@
 >   local-file bridge** `window.everdictTray` (`getState` / `onState` / `action` / `resize` / `hide`) behind a
 >   `--everdict-tray` argv flag, gated **exactly like the setup window (D8)**: main-side IPC accepts only the popover's
 >   `file://` senderFrame — never the web or an external page (`registerTrayBridge`). Actions are the same **benign** set
->   the menu had (open app · autostart · change server · unpair · apply update · quit) — the token/keychain surfaces are
+>   the menu had (open app · autostart · change server · reconnect [D12] · unpair · apply update · quit) — the token/keychain surfaces are
 >   untouched, so the security posture is unchanged. The window is pre-created hidden (instant first open) and dismisses on
 >   blur; main sizes the frameless window from the renderer's measured height and anchors it to the tray icon
 >   (`popoverPosition`, top-right fallback when the OS reports no tray geometry). The pure half (`tray-popover.ts`: view
 >   model · placement · action schema · bridge) is unit-tested; `main.ts` owns the window/screen/IPC glue.
+> - **D12 — reactivate an offline runner without re-pairing (LOCKED 2026-07-16).** A runner is shown "offline" when the
+>   control plane's `lastSeenAt` for it goes stale (>90s) — which happens when its lease loop can't reach the control plane
+>   (network blip / API restart / a stuck long-poll) or its host stopped; an offline runner leases no work. The only prior
+>   remedy was **revoke + re-pair** (heavy-handed, and the token is shown once). D12 adds a **reconnect** lever:
+>   `RunnerHost.restart()` (graceful `stop()`→`start()`, so a fresh MCP session re-advertises capabilities and resumes
+>   leasing → the next lease/heartbeat refreshes `lastSeenAt` → back online; in-flight jobs finish first),
+>   `RunnerSupervisor.reconnect(runnerId?)` (restart a live host in place — no host swap, no status race — or (re)start a
+>   token-present runner that has no live host, e.g. one skipped at startup after a keychain loss; a still-tokenless runner
+>   is a no-op, it must be re-paired), and the bridge method `reconnectRunner(runnerId?)`. Surfaced two ways: the **web
+>   runtimes page** (`RunnersManager`) turns each *this device* row's status into a status-icon **dropdown** with a
+>   **Reconnect** action (state-controls convention; only *this device* holds the token, so only its desktop can reconnect),
+>   and the **tray** (native menu + popover `reconnect` action) reconnects all runners on the device. Bridge-additive and
+>   optional on the web mirror, so an older shell just doesn't show the affordance. No control-plane change — this is pure
+>   local device control (the server already refreshes `lastSeenAt` on the resulting lease).
 >
 > - **D1 — the UI is the deployed web, not a rebuild.** The desktop shell renders the SaaS web
 >   (`apps/web`) at its deployed URL inside the app window — the Linear/Slack/Notion model. `apps/web`
@@ -202,6 +216,10 @@ Preload-exposed, only when `new URL(window.location).origin === configuredWebOri
   instead of `lastSeenAt` guessing. (An older desktop returns a bare `DesktopRunnerStatus`; the web normalizes it.)
 - `unpairRunner(runnerId?): Promise<void>` — stop + forget one runner's keychain entry, or (omitted) all of them
   (web still calls the revoke API — the authority stays server-side).
+- `reconnectRunner(runnerId?): Promise<void>` (D12) — force one runner (or, omitted, all) to reopen its MCP session and
+  resume leasing. The recovery lever for a runner shown "offline" (its lease loop can't reach the control plane, so it
+  never refreshes `lastSeenAt`), without discarding the pairing. **Optional** on the web mirror
+  (`typeof bridge.reconnectRunner === 'function'`) so an older shell degrades gracefully.
 - `appInfo(): { version, platform, hostname, capabilities, cpuCount }` — for the account page to render "this device"
   affordances, and `cpuCount` for the soft-cap warning (D9).
 

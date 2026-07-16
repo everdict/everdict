@@ -44,6 +44,8 @@ export interface TrayPopoverViewModel {
   runnerState: "off" | "idle" | "running";
   activeJobs: number;
   autostart: boolean;
+  canReconnect: boolean;
+  reconnectLabel: string;
   canUnpair: boolean;
   unpairLabel: string;
   update: TrayPopoverUpdate;
@@ -56,6 +58,9 @@ export function buildTrayPopoverViewModel(state: TrayMenuState): TrayPopoverView
     runnerState: aggregateRunnerState(state.runner),
     activeJobs: state.runner.runners.reduce((sum, r) => sum + r.activeJobs, 0),
     autostart: state.autostart,
+    canReconnect: count > 0,
+    // Same phrasing as the native menu's reconnect item (tray-menu.ts) so the two entry points read identically.
+    reconnectLabel: count === 1 ? "Reconnect this device's runner" : "Reconnect all runners on this device",
     canUnpair: count > 0,
     // Same phrasing as the native menu's unpair item (tray-menu.ts) so the two entry points read identically.
     unpairLabel: count === 1 ? "Unpair this device's runner" : "Unpair all runners on this device",
@@ -121,6 +126,7 @@ export const TrayActionSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("openApp") }),
   z.object({ type: z.literal("setAutostart"), value: z.boolean() }),
   z.object({ type: z.literal("changeServer") }),
+  z.object({ type: z.literal("reconnect") }),
   z.object({ type: z.literal("unpair") }),
   z.object({ type: z.literal("applyUpdate") }),
   z.object({ type: z.literal("quit") }),

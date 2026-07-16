@@ -28,7 +28,7 @@ logged-in web session over a minimal preload bridge.
    only by the IPC-layer origin check (invariant 4).
 2. `contextIsolation: true`, `nodeIntegration: false`, `sandbox: true` — always.
 3. The runner bridge is **exactly** `pairRunner` / `runnerStatus` (+ status events) / `unpairRunner` /
-   `appInfo`. No generic `invoke`, no fs/shell exposure. New methods need a locked design decision.
+   `reconnectRunner` / `appInfo`. No generic `invoke`, no fs/shell exposure. New methods need a locked design decision.
    One sibling namespace rides on `everdictDesktop` (D10 — custom frameless title bar): `window` =
    `minimize`/`toggleMaximize`/`close`/`isMaximized`/`onMaximizeChange`, registered by `registerWindowChrome`
    (`window-chrome.ts`) — kept **separate** from the runner bridge (distinct concern; it needs the *sending* window)
@@ -36,10 +36,15 @@ logged-in web session over a minimal preload bridge.
    to tray (runner stays resident). The OS window is frameless (`frame:false` on Win/Linux; `titleBarStyle:"hidden"` +
    inset traffic lights on macOS) and the bar is drawn in `apps/web` (`widgets/desktop-titlebar`, gated on `window`
    being present so an older native-frame desktop shows no double bar). Any OTHER new method still needs a locked decision.
-   The four runner methods are **multi-runner** (D9 — a device hosts several runners via `RunnerSupervisor`):
+   The runner methods are **multi-runner** (D9 — a device hosts several runners via `RunnerSupervisor`):
    `pairRunner({token, runnerId?, apiUrl?})` is **additive** (each call adds one runner, keyed by `runnerId`);
    `runnerStatus()`/its event return the aggregate `{ runners: DesktopRunnerStatus[] }` (a new web must **normalize**
    an older desktop's bare `DesktopRunnerStatus`); `unpairRunner(runnerId?)` drops one runner or (omitted) all;
+   `reconnectRunner(runnerId?)` (D12) forces one runner (or, omitted, all) to reopen its MCP session and resume leasing —
+   the recovery lever for a runner shown "offline" (its lease loop can't reach the control plane, so `lastSeenAt` goes
+   stale), without a full unpair/re-pair (`RunnerHost.restart` = graceful stop→start; supervisor (re)starts a token-present
+   runner that has no live host). It is **optional** on the web mirror (`typeof bridge.reconnectRunner === 'function'`) so an
+   older shell degrades gracefully; the same recovery also rides the tray (native menu + popover `reconnect` action).
    `appInfo()` includes `cpuCount` (the soft-cap reference). Tokens persist as an encrypted map
    (`runner-tokens.bin`, `{runnerId: rnr_token}`) + `config.runners[]`, never a single file.
    Two separate local-file surfaces exist (NOT web-origin bridges — trusted local pages, each behind its own
