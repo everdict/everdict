@@ -90,10 +90,33 @@ export const spanAttrSampleSchema = z.object({
   attrs: z.record(z.string(), z.unknown()),
 })
 
-// inspect(traceId, mapping) result — normalized events (with the supplied mapping) + raw span attributes.
+// One waterfall node — the structured span the detail dialog renders (offset/duration/type/io/tokens/cost).
+export const traceSpanNodeSchema = z.object({
+  id: z.string(),
+  parentId: z.string().optional(),
+  name: z.string(),
+  type: z.enum(['agent', 'llm', 'tool', 'retriever', 'chain', 'span']),
+  startOffsetMs: z.number(),
+  durationMs: z.number(),
+  attributes: z.record(z.string(), z.unknown()),
+  input: z.string().optional(),
+  output: z.string().optional(),
+  model: z.string().optional(),
+  tokens: z.object({ input: z.number().optional(), output: z.number().optional() }).optional(),
+  costUsd: z.number().optional(),
+})
+
+// inspect(traceId, mapping) result — normalized events (with the supplied mapping) + raw span attributes + (best-effort)
+// the structured `detail` (rollups + span waterfall) the observability-grade detail dialog renders.
 export const traceInspectResultSchema = z.object({
   rawAttributes: z.array(spanAttrSampleSchema).optional(),
   events: z.array(traceEventSchema),
+  detail: z
+    .object({
+      rollup: traceSummarySchema.omit({ id: true }).optional(),
+      spans: z.array(traceSpanNodeSchema),
+    })
+    .optional(),
 })
 
 // The per-field span-attribute mapping — the conversion layer between a harness's spans and the judge's TraceEvents.

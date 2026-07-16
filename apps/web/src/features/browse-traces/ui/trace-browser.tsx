@@ -17,7 +17,7 @@ import { EmptyState } from '@/shared/ui/empty-state'
 import { Table, TBody, TD, TH, THead, TR } from '@/shared/ui/table'
 
 import { listTracesAction } from '../api/browse-traces'
-import { TraceDetail } from './trace-detail'
+import { TraceDetailDialog } from './trace-detail-dialog'
 
 type StatusFilter = 'all' | 'ok' | 'error'
 
@@ -47,7 +47,7 @@ export function TraceBrowser({
   const [traces, setTraces] = useState<TraceSummary[]>([])
   const [error, setError] = useState<string | undefined>()
   const [loaded, setLoaded] = useState(false)
-  const [expandedId, setExpandedId] = useState<string | undefined>()
+  const [openTrace, setOpenTrace] = useState<TraceSummary | undefined>()
   const [pending, start] = useTransition()
 
   const load = useCallback(
@@ -55,7 +55,7 @@ export function TraceBrowser({
       if (!name) return
       start(async () => {
         setError(undefined)
-        setExpandedId(undefined)
+        setOpenTrace(undefined)
         const res = await listTracesAction(name, scopeValue ? { scope: scopeValue } : {})
         if (res.ok) {
           setTraces(res.traces)
@@ -103,7 +103,7 @@ export function TraceBrowser({
 
   const rowClick = (tr: TraceSummary) => {
     if (onPick) onPick(tr, sourceName)
-    else setExpandedId((id) => (id === tr.id ? undefined : tr.id))
+    else setOpenTrace(tr)
   }
 
   return (
@@ -207,13 +207,12 @@ export function TraceBrowser({
           </THead>
           <TBody>
             {shown.map((tr) => {
-              const isPicked = selectedTraceId === tr.id
-              const isExpanded = expandedId === tr.id
+              const isPicked = selectedTraceId === tr.id || openTrace?.id === tr.id
               return (
                 <Fragment key={tr.id}>
                   <TR
                     onClick={() => rowClick(tr)}
-                    className={cn('cursor-pointer', (isPicked || isExpanded) && 'bg-elevated/70')}
+                    className={cn('cursor-pointer', isPicked && 'bg-elevated/70')}
                   >
                     <TD>
                       <div className="truncate font-[510] text-foreground">
@@ -257,18 +256,21 @@ export function TraceBrowser({
                       </Badge>
                     </TD>
                   </TR>
-                  {isExpanded && !onPick && (
-                    <tr className="border-b border-border/60 bg-elevated/30">
-                      <td colSpan={7} className="px-3 py-3">
-                        <TraceDetail sourceName={sourceName} traceId={tr.id} />
-                      </td>
-                    </tr>
-                  )}
                 </Fragment>
               )
             })}
           </TBody>
         </Table>
+      )}
+
+      {/* Row click opens the observability-grade detail dialog (the wizard uses onPick instead and never opens it). */}
+      {openTrace && !onPick && (
+        <TraceDetailDialog
+          open
+          onClose={() => setOpenTrace(undefined)}
+          sourceName={sourceName}
+          trace={openTrace}
+        />
       )}
     </div>
   )

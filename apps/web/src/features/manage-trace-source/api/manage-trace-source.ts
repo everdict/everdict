@@ -37,6 +37,7 @@ export async function upsertTraceSourceAction(input: {
   correlate?: 'id' | 'tag'
   service?: string
   project?: string
+  webUrl?: string
 }): Promise<TraceSourceMutationResult> {
   const ctx = await authContext()
   try {
@@ -60,7 +61,7 @@ export async function removeTraceSourceAction(name: string): Promise<TraceSource
   }
 }
 
-// Per-harness source selection (member, harnesses:register). source=null clears the selection (no pull).
+// Per-harness PULL selection (member, harnesses:register). source=null clears the selection (no pull).
 export async function assignHarnessTraceSourceAction(
   harnessId: string,
   source: string | null
@@ -68,6 +69,23 @@ export async function assignHarnessTraceSourceAction(
   const ctx = await authContext()
   try {
     await controlPlane.assignHarnessTraceSource(ctx, harnessId, { source })
+    revalidatePath('/[workspace]/settings')
+    revalidatePath('/[workspace]/harnesses/[id]', 'page')
+    return { ok: true }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
+}
+
+// Per-harness EXPORT selection (member, harnesses:register) — which registered source to export judged results to
+// (a sink-capable source; otel is rejected server-side). source=null clears it (no export). Same pool as the pull selection.
+export async function assignHarnessTraceSinkAction(
+  harnessId: string,
+  source: string | null
+): Promise<TraceSourceMutationResult> {
+  const ctx = await authContext()
+  try {
+    await controlPlane.assignHarnessTraceSink(ctx, harnessId, { source })
     revalidatePath('/[workspace]/settings')
     revalidatePath('/[workspace]/harnesses/[id]', 'page')
     return { ok: true }

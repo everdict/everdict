@@ -20,7 +20,7 @@ import {
   upsertTraceSourceAction,
 } from '../api/manage-trace-source'
 
-// Meaning of the project field per kind — align the label to the platform's terminology (one field, per-kind coordinate).
+// Meaning of the scope field per kind — align the label to the platform's terminology (one field, per-kind coordinate).
 const KIND_META: Record<TraceSourceKind, { label: string; projectKey: string }> = {
   otel: { label: 'OTel', projectKey: 'projectOtel' },
   mlflow: { label: 'MLflow', projectKey: 'projectMlflow' },
@@ -29,19 +29,34 @@ const KIND_META: Record<TraceSourceKind, { label: string; projectKey: string }> 
   phoenix: { label: 'Phoenix', projectKey: 'projectPhoenix' },
 }
 
-// Which config field a discovered scope binds to (and whether it is required to register), given kind + correlate.
-//  - otel: correlate:'tag' needs `service` (the Jaeger search scope); correlate:'id' needs nothing.
-//  - mlflow: correlate:'tag' needs `project` (experiment_id search scope); correlate:'id' needs nothing.
-//  - phoenix: always needs `project` (the span-query path).
-//  - langfuse/langsmith: the source doesn't consume a scope — the probe is validation-only.
+// Kinds that can be an EXPORT target (a sink-capable platform) — otel is pull-only. Used to caption the register form.
+const SINK_CAPABLE: Record<TraceSourceKind, boolean> = {
+  otel: false,
+  mlflow: true,
+  langfuse: true,
+  langsmith: true,
+  phoenix: true,
+}
+
+// correlate is a PULL-only detail and only otel has a genuine id-vs-tag choice; every other kind is fixed.
+//  - otel: the user chooses id | tag · mlflow: always tag (MLflow mints its own trace ids, so id-correlation is impractical)
+//  - langfuse/langsmith/phoenix: id (pulled by trace id / native correlation)
+function effectiveCorrelate(kind: TraceSourceKind, otelCorrelate: 'id' | 'tag'): 'id' | 'tag' {
+  if (kind === 'otel') return otelCorrelate
+  return kind === 'mlflow' ? 'tag' : 'id'
+}
+
+// Which config field a discovered scope binds to, and whether it is REQUIRED to register.
+//  - mlflow/phoenix: `project` is REQUIRED — traces live inside an experiment/project (to pull AND to export).
+//  - otel: `service` is required only for tag correlation (the Jaeger search scope).
+//  - langfuse/langsmith: `project` is optional (the source doesn't consume a scope — the picker is a convenience).
 function scopeRequirement(
   kind: TraceSourceKind,
   correlate: 'id' | 'tag'
 ): { field: 'service' | 'project'; required: boolean } | null {
+  if (kind === 'mlflow' || kind === 'phoenix') return { field: 'project', required: true }
   if (kind === 'otel') return correlate === 'tag' ? { field: 'service', required: true } : null
-  if (kind === 'mlflow') return correlate === 'tag' ? { field: 'project', required: true } : null
-  if (kind === 'phoenix') return { field: 'project', required: true }
-  return null // langfuse, langsmith
+  return { field: 'project', required: false } // langfuse, langsmith
 }
 
 type ProbeState = {
@@ -52,10 +67,10 @@ type ProbeState = {
   scopes: TraceScopeOption[]
 }
 
-// Workspace trace sources (multiple) — register several observability platforms and pull a dev-cluster-deployed
-// harness's trace after a case runs so it can be scored. Registration is gated on a successful "Test connection"
-// that also discovers the platform's selectable scopes (experiment/project/service) — no raw scope typing.
-// Auth values are stored only as workspace secret references (names).
+// Workspace trace sources (the ONE pool) — register several observability platforms once; each harness picks one to
+// PULL its trace from and/or to EXPORT judged results to (that direction is a per-harness use-site choice). Registration
+// is gated on a successful "Test connection" that also discovers the platform's selectable scopes (experiment/project/
+// service) — no raw scope typing. Auth values are stored only as workspace secret references (names).
 export function TraceSourceManager({
   sources,
   canWrite,
@@ -71,16 +86,18 @@ export function TraceSourceManager({
   // name being edited — clicking a row prefills the form (saving is an upsert keyed by name). undefined = add a new source.
   const [editing, setEditing] = useState<string>()
   const [name, setName] = useState('')
-  const [kind, setKind] = useState<TraceSourceKind>('otel')
+  const [kind, setKind] = useState<TraceSourceKind>('mlflow')
   const [endpoint, setEndpoint] = useState('')
   const [authName, setAuthName] = useState('')
-  const [correlate, setCorrelate] = useState<'id' | 'tag'>('id')
+  const [otelCorrelate, setOtelCorrelate] = useState<'id' | 'tag'>('tag')
   const [service, setService] = useState('')
   const [project, setProject] = useState('')
+  const [webUrl, setWebUrl] = useState('')
   const [created, setCreated] = useState<string[]>([])
   const [probe, setProbe] = useState<ProbeState>({ status: 'idle', scopes: [] })
   const names = [...new Set([...secretNames, ...created])]
   const meta = KIND_META[kind]
+  const correlate = effectiveCorrelate(kind, otelCorrelate)
 
   // The connection fingerprint the probe must match — editing kind/endpoint/secret invalidates a prior probe (re-test).
   const probeKey = `${kind}|${endpoint.trim()}|${authName.trim()}`
@@ -88,19 +105,20 @@ export function TraceSourceManager({
   const reachable = probe.status === 'ok' && probeFresh
   const req = scopeRequirement(kind, correlate)
   const scopeValue = req?.field === 'service' ? service : req?.field === 'project' ? project : ''
-  // Strict select-only: a required scope must be chosen from the discovered list; an empty list blocks registration.
+  // Strict select-only: a REQUIRED scope must be chosen from the discovered list; an empty list blocks registration.
   const scopeMissing = req?.required === true && !scopeValue
   const canSave = reachable && !scopeMissing && !pending
 
   function resetForm() {
     setEditing(undefined)
     setName('')
-    setKind('otel')
+    setKind('mlflow')
     setEndpoint('')
     setAuthName('')
-    setCorrelate('id')
+    setOtelCorrelate('tag')
     setService('')
     setProject('')
+    setWebUrl('')
     setProbe({ status: 'idle', scopes: [] })
   }
 
@@ -111,9 +129,10 @@ export function TraceSourceManager({
     setKind(s.kind)
     setEndpoint(s.endpoint)
     setAuthName(s.authSecretName ?? '')
-    setCorrelate(s.correlate)
+    setOtelCorrelate(s.correlate)
     setService(s.service ?? '')
     setProject(s.project ?? '')
+    setWebUrl(s.webUrl ?? '')
     setProbe({ status: 'idle', scopes: [] }) // editing requires re-testing (stored scope may not be in the fresh list)
   }
 
@@ -167,6 +186,7 @@ export function TraceSourceManager({
         ...(authName.trim() ? { authSecretName: authName.trim() } : {}),
         ...(service.trim() ? { service: service.trim() } : {}),
         ...(project.trim() ? { project: project.trim() } : {}),
+        ...(webUrl.trim() ? { webUrl: webUrl.trim() } : {}),
       })
       if (!r.ok) setError(r.error)
       else resetForm()
@@ -296,23 +316,40 @@ export function TraceSourceManager({
                 aria-label={t('authSecretSelectLabel')}
               />
             </div>
-            {/* Correlation strategy — how the pulled trace is matched to the everdict run (the everdict runId IS the trace id, or search a tag the agent set). */}
-            <div className="space-y-1">
-              <Label htmlFor="tsrc-correlate" className="flex items-center gap-1.5">
-                {t('correlate')}
-                <InfoTip content={t('correlateInfoTip')} />
-              </Label>
-              <Combobox
-                id="tsrc-correlate"
-                options={[
-                  { value: 'id', label: t('correlateId') },
-                  { value: 'tag', label: t('correlateTag') },
-                ]}
-                value={correlate}
-                onChange={(v) => setCorrelate(v === 'tag' ? 'tag' : 'id')}
-                aria-label={t('correlateLabel')}
-              />
-            </div>
+            {/* Correlation strategy — pull-only, and only otel has a genuine id-vs-tag choice (the others are fixed). */}
+            {kind === 'otel' && (
+              <div className="space-y-1">
+                <Label htmlFor="tsrc-correlate" className="flex items-center gap-1.5">
+                  {t('correlate')}
+                  <InfoTip content={t('correlateInfoTip')} />
+                </Label>
+                <Combobox
+                  id="tsrc-correlate"
+                  options={[
+                    { value: 'id', label: t('correlateId') },
+                    { value: 'tag', label: t('correlateTag') },
+                  ]}
+                  value={otelCorrelate}
+                  onChange={(v) => setOtelCorrelate(v === 'tag' ? 'tag' : 'id')}
+                  aria-label={t('correlateLabel')}
+                />
+              </div>
+            )}
+            {/* Export deep-link base — used when this source is chosen as an export target (optional). */}
+            {SINK_CAPABLE[kind] && (
+              <div className="space-y-1">
+                <Label htmlFor="tsrc-web" className="flex items-center gap-1.5">
+                  {t('webUrlBase')}
+                  <InfoTip content={t('webUrlInfoTip')} />
+                </Label>
+                <Input
+                  id="tsrc-web"
+                  placeholder="https://…"
+                  value={webUrl}
+                  onChange={(e) => setWebUrl(e.target.value)}
+                />
+              </div>
+            )}
           </div>
 
           {/* Test connection — validates the base URL + resolved secret AND discovers the selectable scopes. Save is gated on it. */}
@@ -346,25 +383,30 @@ export function TraceSourceManager({
                 )}
               </Callout>
             )}
-            {/* Strict select-only scope picker — options come ONLY from the probe. Shown when the config needs a scope. */}
+            {/* Strict select-only scope picker — options come ONLY from the probe. Shown when the config takes a scope. */}
             {reachable && req && (
               <div className="space-y-1">
-                <Label htmlFor="tsrc-scope">
+                <Label htmlFor="tsrc-scope" className="flex items-center gap-1.5">
                   {req.field === 'service' ? t('service') : t(meta.projectKey)}
+                  {req.required && <span className="text-[10px] font-[600] text-primary">{t('required')}</span>}
                 </Label>
                 {probe.scopes.length > 0 ? (
                   <Combobox
                     id="tsrc-scope"
-                    options={probe.scopes.map((s) => ({ value: s.id, label: s.name }))}
+                    options={[
+                      // A required scope must be chosen; an optional one offers a "none" entry.
+                      ...(req.required ? [] : [{ value: '', label: t('scopeNone') }]),
+                      ...probe.scopes.map((s) => ({ value: s.id, label: s.name })),
+                    ]}
                     value={scopeValue}
                     onChange={(v) => (req.field === 'service' ? setService(v) : setProject(v))}
                     aria-label={t('scopeSelectLabel')}
                   />
-                ) : (
+                ) : req.required ? (
                   <Callout tone="warning" className="py-1.5">
                     {t('scopeEmpty')}
                   </Callout>
-                )}
+                ) : null}
               </div>
             )}
           </div>

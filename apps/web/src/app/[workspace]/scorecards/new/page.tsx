@@ -9,7 +9,7 @@ import { judgesSchema } from '@/entities/judge'
 import { modelsSchema } from '@/entities/model'
 import { runnersResponseSchema } from '@/entities/runner'
 import { runtimesSchema } from '@/entities/runtime'
-import { traceSinksResponseSchema } from '@/entities/trace-sink'
+import { traceSourcesResponseSchema } from '@/entities/trace-source'
 import { can } from '@/shared/auth/can'
 import { currentPrincipal } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
@@ -74,11 +74,15 @@ export default async function NewScorecardPage({
     } catch {
       // Even if the roster fails, the form still works (only the pool option is hidden)
     }
-    // Advanced overrides — configured workspace trace sinks (per-batch export override) + registered models (inline judge model override). Both optional.
+    // Advanced overrides — the per-batch export override lists sink-capable trace sources (otel is pull-only) +
+    // registered models (inline judge model override). Both optional.
     try {
-      sinks = traceSinksResponseSchema.parse(await controlPlane.listTraceSinks(ctx)).sinks
+      sinks = traceSourcesResponseSchema
+        .parse(await controlPlane.listTraceSources(ctx))
+        .sources.filter((s) => s.kind !== 'otel')
+        .map((s) => ({ name: s.name, kind: s.kind }))
     } catch {
-      // Even if the sink list fails, the form still works (traceSink override just unavailable)
+      // Even if the source list fails, the form still works (traceSink override just unavailable)
     }
     try {
       models = modelsSchema.parse(await controlPlane.listModels(ctx))

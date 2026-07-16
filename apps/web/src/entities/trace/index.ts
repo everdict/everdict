@@ -23,5 +23,6 @@ export type {
   SpanAttrSample,
   TraceEvent,
   TraceInspectResult,
+  TraceSpanNode,
   TraceSummary,
 } from '@everdict/contracts'

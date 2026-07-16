@@ -8,8 +8,7 @@ import { CommentsSection } from '@/features/discuss'
 import { HarnessVersionSwitcher } from '@/features/harness-versions'
 import { HarnessDetail, RawConfigDisclosure } from '@/features/inspect-harness'
 import { CiLinkPanel } from '@/features/manage-ci-links'
-import { HarnessSinkSelect } from '@/features/manage-trace-sink'
-import { HarnessSourceSelect } from '@/features/manage-trace-source'
+import { HarnessSinkSelect, HarnessSourceSelect } from '@/features/manage-trace-source'
 import { VersionTagsEditor } from '@/features/version-tags'
 import { ciLinksResponseSchema, type CiLink } from '@/entities/ci-link'
 import { datasetsSchema } from '@/entities/dataset'
@@ -26,7 +25,6 @@ import {
   type HarnessTemplateSpec,
 } from '@/entities/harness'
 import { membersSchema } from '@/entities/member'
-import { traceSinksResponseSchema, type TraceSinksResponse } from '@/entities/trace-sink'
 import { traceSourcesResponseSchema, type TraceSourcesResponse } from '@/entities/trace-source'
 import { can } from '@/shared/auth/can'
 import { currentPrincipal } from '@/shared/auth/principal'
@@ -172,21 +170,16 @@ export default async function HarnessDetailPage({
     entry !== undefined &&
     entry.owner === currentWorkspace
 
-  // Trace sinks (multiple) + this harness's selection (assignment) — which observability platform to load the grading detail into.
-  // The detail renders even if it fails (only the selection row is hidden).
-  const traceSinks: TraceSinksResponse = await controlPlane
-    .listTraceSinks(ctx)
-    .then((r) => traceSinksResponseSchema.parse(r))
-    .catch(() => ({ sinks: [], assignments: {} }))
-  const assignedSink: string | undefined = traceSinks.assignments[id]
-
-  // Trace sources (multiple) + this harness's selection (assignment) — which observability platform to pull this
-  // dev-cluster-deployed harness's trace from for evaluation. The detail renders even if it fails (only the selection row is hidden).
+  // Trace sources (the ONE registered pool) + this harness's two use-site selections — which source to PULL its trace
+  // from (grading input) and which to EXPORT judged results to. The detail renders even if it fails (only the rows hide).
   const traceSources: TraceSourcesResponse = await controlPlane
     .listTraceSources(ctx)
     .then((r) => traceSourcesResponseSchema.parse(r))
-    .catch(() => ({ sources: [], assignments: {} }))
+    .catch(() => ({ sources: [], assignments: {}, sinkAssignments: {} }))
   const assignedSource: string | undefined = traceSources.assignments[id]
+  const assignedSink: string | undefined = traceSources.sinkAssignments[id]
+  // Export targets are sink-capable sources only (otel is pull-only — it can't be an export target).
+  const exportTargets = traceSources.sources.filter((s) => s.kind !== 'otel')
 
   // CI integration (repo link) — links matched to this harness + my GitHub connection needed for the repo picker + dataset candidates.
   // The detail keeps rendering even if all three fail (only the panel is empty). Save/unlink is admin (settings:write) — the control plane is the final enforcer.
@@ -345,24 +338,24 @@ export default async function HarnessDetailPage({
           {author.known && <Avatar name={author.name} url={author.avatarUrl} size="sm" />}
           <span>{author.name}</span>
         </MetaItem>
-        {/* Per-harness trace sink selection — hide the row itself if the workspace has no sinks and no selection (don't render empty sections). */}
-        {(traceSinks.sinks.length > 0 || assignedSink !== undefined) && (
-          <MetaItem label={t('metaTraceSink')}>
-            <HarnessSinkSelect
-              harnessId={id}
-              sinks={traceSinks.sinks.map((s) => ({ name: s.name, kind: s.kind }))}
-              {...(assignedSink !== undefined ? { current: assignedSink } : {})}
-              canAssign={can(principal?.roles, 'harnesses:register')}
-            />
-          </MetaItem>
-        )}
-        {/* Per-harness trace source selection — hide the row itself if the workspace has no sources and no selection (don't render empty sections). */}
+        {/* Per-harness PULL source — hide the row if there are no sources and no selection (don't render empty sections). */}
         {(traceSources.sources.length > 0 || assignedSource !== undefined) && (
           <MetaItem label={t('metaTraceSource')}>
             <HarnessSourceSelect
               harnessId={id}
               sources={traceSources.sources.map((s) => ({ name: s.name, kind: s.kind }))}
               {...(assignedSource !== undefined ? { current: assignedSource } : {})}
+              canAssign={can(principal?.roles, 'harnesses:register')}
+            />
+          </MetaItem>
+        )}
+        {/* Per-harness EXPORT target (a sink-capable trace source) — hide the row if there are no eligible sources and no selection. */}
+        {(exportTargets.length > 0 || assignedSink !== undefined) && (
+          <MetaItem label={t('metaTraceSink')}>
+            <HarnessSinkSelect
+              harnessId={id}
+              sinks={exportTargets.map((s) => ({ name: s.name, kind: s.kind }))}
+              {...(assignedSink !== undefined ? { current: assignedSink } : {})}
               canAssign={can(principal?.roles, 'harnesses:register')}
             />
           </MetaItem>
