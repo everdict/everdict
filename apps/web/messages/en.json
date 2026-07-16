@@ -19,29 +19,6 @@
     "tabKeys": "API keys",
     "keysLoadError": "Couldn't load keys: {error}"
   },
-  "activityFeed": {
-    "sourceWeb": "Web",
-    "sourceMcp": "Agent",
-    "sourceApi": "API",
-    "sourceScorecard": "Scorecard",
-    "sourceSchedule": "Schedule",
-    "sourceFrontDoor": "front-door",
-    "sourceDirect": "Direct",
-    "passPercent": "{pct}% pass",
-    "metricCount": "{n} metrics",
-    "justNow": "just now",
-    "minutesAgo": "{m}m ago",
-    "hoursAgo": "{h}h ago",
-    "daysAgo": "{days}d ago",
-    "emptyTitle": "No activity yet.",
-    "emptyHint": "Runs and scorecards show up here once you run them.",
-    "colKind": "Kind",
-    "colTarget": "Target",
-    "colStatus": "Status",
-    "colSummary": "Summary",
-    "colUpdated": "Updated",
-    "scorecardBadge": "Scorecard"
-  },
   "analyzeScorecards": {
     "all": "All",
     "descFilters": "Filters {count}",
@@ -1324,7 +1301,7 @@
     "views": "Views",
     "schedules": "Schedules",
     "runtimes": "Runtimes",
-    "report": "Report",
+    "runs": "Runs",
     "usage": "Usage"
   },
   "usagePage": {
@@ -1762,24 +1739,6 @@
     "updated": "Updated {id}",
     "lockedIdentityHint": "ID and kind can't be changed."
   },
-  "reportPage": {
-    "title": "Combined report",
-    "description": "Evaluations from desktop and web at a glance.",
-    "loadError": "Couldn't load scorecards: {error}",
-    "overallPassRate": "Overall pass rate",
-    "casesHint": "{pass}/{total} cases",
-    "trackHint": "{pass}/{total} · {count} scorecards",
-    "passLabel": "Pass",
-    "allPassed": "All passed",
-    "someFailed": "{count} failed",
-    "emptyTitle": "No completed scorecards yet.",
-    "emptyHint": "Run a scorecard and results collect here.",
-    "track": {
-      "desktop": "Desktop · OSWorld",
-      "web": "Web · WebVoyager",
-      "other": "Other"
-    }
-  },
   "rubricsPage": {
     "title": "Rubrics",
     "description": "Judging criteria as a versioned entity — one rubric serves many judges and benchmarks; editing the wording is a new rubric version, not a new judge.",
@@ -1854,8 +1813,8 @@
     "note": "The selected runtime doesn't advertise {caps}, which this service (topology) harness needs — the control plane will reject it at dispatch. Pick a container-capable runtime."
   },
   "runsPage": {
-    "title": "Activity",
-    "description": "{runs} runs · {scorecards} scorecards",
+    "title": "Runs",
+    "description": "{runs, plural, one {# run} other {# runs}}",
     "newRun": "New run",
     "connectError": "Couldn't reach the server: {error}",
     "newRunDescription": "Pick a harness and run it once.",

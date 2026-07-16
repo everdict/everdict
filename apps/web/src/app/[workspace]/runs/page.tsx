@@ -2,9 +2,8 @@ import Link from 'next/link'
 import { Plus } from 'lucide-react'
 import { getTranslations } from 'next-intl/server'
 
-import { ActivityFeed } from '@/widgets/activity-feed'
+import { RunsTable } from '@/widgets/runs-table'
 import { runsSchema } from '@/entities/run'
-import { scorecardsSchema } from '@/entities/scorecard'
 import { can } from '@/shared/auth/can'
 import { currentPrincipal } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
@@ -21,28 +20,23 @@ export default async function RunsPage({ params }: { params: Promise<{ workspace
   const { principal, ctx } = await currentPrincipal()
   let error: string | undefined
   let runs = runsSchema.parse([])
-  let scorecards = scorecardsSchema.parse([])
   try {
-    // Unified activity feed: standalone runs + scorecard batches on one timeline. Both are workspace-scoped.
-    ;[runs, scorecards] = await Promise.all([
-      controlPlane.listRuns(ctx).then((r) => runsSchema.parse(r)),
-      controlPlane.listScorecards(ctx).then((s) => scorecardsSchema.parse(s)),
-    ])
+    // Runs list — individual executions in this workspace. Scorecard child runs are excluded by the control plane;
+    // batch evals live on their own /scorecards page, so this stays runs-only.
+    runs = await controlPlane.listRuns(ctx).then((r) => runsSchema.parse(r))
   } catch (e) {
     error = e instanceof Error ? e.message : String(e)
   }
 
-  // If there are running/pending runs or scorecards, refresh live (activity console).
-  const active = [...runs, ...scorecards].some(
-    (x) => x.status === 'queued' || x.status === 'running'
-  )
+  // If any run is still queued/running, refresh live (activity console).
+  const active = runs.some((x) => x.status === 'queued' || x.status === 'running')
 
   return (
     <div className="space-y-6">
       <AutoRefresh enabled={active} />
       <PageHeader
         title={t('title')}
-        description={t('description', { runs: runs.length, scorecards: scorecards.length })}
+        description={t('description', { runs: runs.length })}
         actions={
           can(principal?.roles, 'runs:submit') ? (
             <Link href={`/${workspace}/runs/new`} className={buttonVariants({ size: 'sm' })}>
@@ -55,7 +49,7 @@ export default async function RunsPage({ params }: { params: Promise<{ workspace
       {error ? (
         <Callout tone="danger">{t('connectError', { error })}</Callout>
       ) : (
-        <ActivityFeed runs={runs} scorecards={scorecards} workspace={workspace} />
+        <RunsTable runs={runs} workspace={workspace} />
       )}
     </div>
   )

@@ -4,8 +4,8 @@ import {
   Boxes,
   CalendarClock,
   Database,
-  FileText,
   LayoutDashboard,
+  Play,
   Server,
   type LucideIcon,
 } from 'lucide-react'
@@ -25,8 +25,9 @@ export interface NavSection {
   items: NavItem[]
 }
 
-// First-class concepts of the SaaS surface: harness (what) · benchmark (with what) · scorecard (result) · runtime (where — execution
-// infra the workspace registers itself, no default seed) + flows (views/schedules) + home (overview).
+// First-class concepts of the SaaS surface: home (overview) · run (individual execution/activity) · harness (what) · benchmark
+// (with what) · scorecard (result) · runtime (where — execution infra the workspace registers itself, no default seed) + flows
+// (views/schedules).
 // The work queue is no longer a nav page — it's the always-present floating work panel (widgets/work-panel) in the top-right cluster.
 // judge/metric/model/recipe/bundle are engine parts/advanced options — excluded from the nav (routes remain, reachable via URL).
 export const NAV_SECTIONS: NavSection[] = [
@@ -38,6 +39,12 @@ export const NAV_SECTIONS: NavSection[] = [
         icon: LayoutDashboard,
         exact: true,
         keywords: 'overview home',
+      },
+      {
+        href: '/runs',
+        labelKey: 'runs',
+        icon: Play,
+        keywords: 'run runs activity execution history',
       },
       {
         href: '/harnesses',
@@ -74,12 +81,6 @@ export const NAV_SECTIONS: NavSection[] = [
         labelKey: 'runtimes',
         icon: Server,
         keywords: 'runtime execution infra docker k8s nomad runner',
-      },
-      {
-        href: '/report',
-        labelKey: 'report',
-        icon: FileText,
-        keywords: 'report regression trend',
       },
     ],
   },

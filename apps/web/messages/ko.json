@@ -19,29 +19,6 @@
     "tabKeys": "API 키",
     "keysLoadError": "키를 불러오지 못했어요: {error}"
   },
-  "activityFeed": {
-    "sourceWeb": "웹",
-    "sourceMcp": "에이전트",
-    "sourceApi": "API",
-    "sourceScorecard": "스코어카드",
-    "sourceSchedule": "예약",
-    "sourceFrontDoor": "front-door",
-    "sourceDirect": "직접",
-    "passPercent": "{pct}% 통과",
-    "metricCount": "{n}개 메트릭",
-    "justNow": "방금",
-    "minutesAgo": "{m}분 전",
-    "hoursAgo": "{h}시간 전",
-    "daysAgo": "{days}일 전",
-    "emptyTitle": "아직 활동이 없어요.",
-    "emptyHint": "run 이나 스코어카드를 실행하면 여기에 표시돼요.",
-    "colKind": "종류",
-    "colTarget": "대상",
-    "colStatus": "상태",
-    "colSummary": "요약",
-    "colUpdated": "업데이트",
-    "scorecardBadge": "스코어카드"
-  },
   "analyzeScorecards": {
     "all": "전체",
     "descFilters": "필터 {count}",
@@ -1324,7 +1301,7 @@
     "views": "뷰",
     "schedules": "예약",
     "runtimes": "런타임",
-    "report": "리포트",
+    "runs": "실행",
     "usage": "사용량"
   },
   "usagePage": {
@@ -1762,24 +1739,6 @@
     "updated": "{id} 수정됨",
     "lockedIdentityHint": "ID와 종류는 바꿀 수 없어요."
   },
-  "reportPage": {
-    "title": "통합 리포트",
-    "description": "데스크탑과 웹에서 실행한 평가를 한눈에 봐요.",
-    "loadError": "스코어카드를 불러오지 못했어요: {error}",
-    "overallPassRate": "전체 통과율",
-    "casesHint": "{pass}/{total} 케이스",
-    "trackHint": "{pass}/{total} · 스코어카드 {count}",
-    "passLabel": "통과",
-    "allPassed": "전체 통과",
-    "someFailed": "{count}건 실패",
-    "emptyTitle": "아직 완료된 스코어카드가 없어요.",
-    "emptyHint": "스코어카드를 실행하면 결과가 여기에 모여요.",
-    "track": {
-      "desktop": "데스크탑 · OSWorld",
-      "web": "웹 · WebVoyager",
-      "other": "기타"
-    }
-  },
   "rubricsPage": {
     "title": "루브릭",
     "description": "판정 기준을 버전 있는 엔티티로 — 루브릭 하나를 여러 Judge·벤치마크가 공유하고, 문구 수정은 새 루브릭 버전이 돼요.",
@@ -1854,8 +1813,8 @@
     "note": "선택한 런타임은 이 서비스(토폴로지) 하니스에 필요한 {caps}을(를) 광고하지 않아요 — 디스패치 시 컨트롤 플레인이 거부해요. 컨테이너 실행이 가능한 런타임을 고르세요."
   },
   "runsPage": {
-    "title": "활동",
-    "description": "실행 {runs}건 · 스코어카드 {scorecards}건",
+    "title": "실행",
+    "description": "실행 {runs}건",
     "newRun": "새 실행",
     "connectError": "서버에 연결하지 못했어요: {error}",
     "newRunDescription": "하니스를 골라 한 번 실행해보세요.",
