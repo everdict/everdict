@@ -1601,6 +1601,20 @@
     "workDirLabel": "workDir (선택)",
     "workDirTip": "명령을 실행할 작업 디렉터리예요. 예: /tmp."
   },
+  "spanMapping": {
+    "heading": "속성 매핑 (고급)",
+    "subtitle": "OTel GenAI 컨벤션을 따르지 않는 하네스용: 각 필드에 이 하네스의 span 속성 키를 쉼표로 나열하세요. 비우면 GenAI/MLflow 기본값을 씁니다.",
+    "placeholder": "예: my.model, llm.name",
+    "field_model": "모델",
+    "field_inputTokens": "입력 토큰",
+    "field_outputTokens": "출력 토큰",
+    "field_costUsd": "비용 (usd)",
+    "field_toolName": "도구 이름",
+    "field_toolCallId": "도구 호출 id",
+    "field_toolArgs": "도구 인자",
+    "field_toolResult": "도구 결과",
+    "field_messageText": "메시지 텍스트"
+  },
   "registerJudge": {
     "kindModelLabel": "model (LLM/VLM 호출)",
     "kindHarnessLabel": "harness (에이전트 위임)",

@@ -1601,6 +1601,20 @@
     "workDirLabel": "workDir (optional)",
     "workDirTip": "Working directory to run the command in. e.g. /tmp."
   },
+  "spanMapping": {
+    "heading": "Attribute mapping (advanced)",
+    "subtitle": "For a harness that doesn't emit the OTel GenAI conventions: list this harness's own span-attribute keys per field (comma-separated). Empty = use the GenAI/MLflow defaults.",
+    "placeholder": "e.g. my.model, llm.name",
+    "field_model": "model",
+    "field_inputTokens": "input tokens",
+    "field_outputTokens": "output tokens",
+    "field_costUsd": "cost (usd)",
+    "field_toolName": "tool name",
+    "field_toolCallId": "tool call id",
+    "field_toolArgs": "tool args",
+    "field_toolResult": "tool result",
+    "field_messageText": "message text"
+  },
   "registerJudge": {
     "kindModelLabel": "model (LLM/VLM call)",
     "kindHarnessLabel": "harness (delegate to an agent)",

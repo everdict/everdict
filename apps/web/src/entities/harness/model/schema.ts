@@ -109,6 +109,9 @@ export const envValueText = (v: EnvValue, secretLabel: string = '시크릿'): st
 export const traceSourceSchema = z.object({
   kind: z.enum(['otel', 'mlflow']),
   endpoint: z.string(),
+  // Per-harness span→TraceEvent attribute overrides (SpanAttrMapping): field name → the harness's own attr keys.
+  // Loose record here (the control plane validates the exact SpanAttrMapping shape); absent = OTel GenAI conventions.
+  mapping: z.record(z.string(), z.array(z.string())).optional(),
 })
 export type TraceSource = z.infer<typeof traceSourceSchema>
 

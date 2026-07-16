@@ -42,6 +42,7 @@ import {
   type WiringRow,
 } from '../lib/build-spec'
 import { EnvEditor, type ScopedSecretNames } from './env-editor'
+import { SpanMappingEditor } from './span-mapping-editor'
 
 const EMPTY_SECRETS: ScopedSecretNames = { workspace: [], user: [] }
 
@@ -576,6 +577,10 @@ export function TemplateForm({
                 />
               </div>
             </div>
+            <SpanMappingEditor
+              mapping={s.traceMapping}
+              onChange={(traceMapping) => set({ traceMapping })}
+            />
           </div>
           <TopologyPreview s={s} />
         </div>

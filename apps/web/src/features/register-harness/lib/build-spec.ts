@@ -49,6 +49,9 @@ export interface TemplateState {
   frontDoorTrace: string
   traceKind: string
   traceEndpoint: string
+  // Per-harness span→TraceEvent attribute overrides (otel/mlflow) — field name → comma-separated attribute keys.
+  // Empty for a GenAI-convention harness; a non-standard harness maps its own keys. See SpanAttrMapping.
+  traceMapping: Record<string, string>
   targetEnabled: boolean
   targetLifecycle: string
   targetObserve: string[]
@@ -80,6 +83,35 @@ const kvLines = (s: string): Record<string, string> => {
     const i = ln.indexOf('=')
     if (i > 0) out[ln.slice(0, i).trim()] = ln.slice(i + 1).trim()
   }
+  return out
+}
+
+// The SpanAttrMapping fields — each maps a TraceEvent field to the harness's own span-attribute keys (otel/mlflow).
+export const SPAN_MAPPING_FIELDS = [
+  'model',
+  'inputTokens',
+  'outputTokens',
+  'costUsd',
+  'toolName',
+  'toolCallId',
+  'toolArgs',
+  'toolResult',
+  'messageText',
+] as const
+
+// comma-text record → SpanAttrMapping (only non-empty fields); undefined when nothing is mapped (a GenAI-convention harness).
+const recordToMapping = (rec: Record<string, string>): Record<string, string[]> | undefined => {
+  const out: Record<string, string[]> = {}
+  for (const f of SPAN_MAPPING_FIELDS) {
+    const keys = csv(rec[f] ?? '')
+    if (keys.length) out[f] = keys
+  }
+  return Object.keys(out).length ? out : undefined
+}
+// SpanAttrMapping → comma-text record (prefill an existing spec into the editor).
+const mappingToRecord = (m: Record<string, string[]> | undefined): Record<string, string> => {
+  const out: Record<string, string> = {}
+  if (m) for (const f of SPAN_MAPPING_FIELDS) if (Array.isArray(m[f])) out[f] = m[f].join(', ')
   return out
 }
 
@@ -231,7 +263,11 @@ export function buildTemplate(s: TemplateState): Record<string, unknown> {
       submit: s.frontDoorSubmit,
       ...(s.frontDoorTrace.trim() ? { trace: s.frontDoorTrace } : {}),
     },
-    traceSource: { kind: s.traceKind, endpoint: s.traceEndpoint },
+    traceSource: {
+      kind: s.traceKind,
+      endpoint: s.traceEndpoint,
+      ...(recordToMapping(s.traceMapping) ? { mapping: recordToMapping(s.traceMapping) } : {}),
+    },
   }
   if (s.targetEnabled) {
     spec.target = {
@@ -280,6 +316,7 @@ export function templateStateFromSpec(t: HarnessTemplateSpec): TemplateState {
     frontDoorTrace: t.frontDoor?.trace ?? '',
     traceKind: t.traceSource?.kind ?? 'mlflow',
     traceEndpoint: t.traceSource?.endpoint ?? '',
+    traceMapping: mappingToRecord(t.traceSource?.mapping),
     targetEnabled: t.target !== undefined,
     targetLifecycle: t.target?.lifecycle ?? 'per-case-instance',
     targetObserve: t.target?.observe ?? ['dom', 'screenshot', 'url'],
@@ -454,6 +491,7 @@ export const INITIAL_TEMPLATE: TemplateState = {
   frontDoorTrace: '',
   traceKind: 'mlflow',
   traceEndpoint: '',
+  traceMapping: {},
   targetEnabled: false,
   targetLifecycle: 'per-case-instance',
   targetObserve: ['dom', 'screenshot', 'url'],
