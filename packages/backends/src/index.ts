@@ -7,6 +7,8 @@ export {
   dispatchAborted,
   type ExecInContainer,
   type ExecStreamHandle,
+  type Inspectable,
+  isInspectable,
   isObservable,
   isProbeable,
   isRecoverable,

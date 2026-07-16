@@ -58,6 +58,9 @@ function mockApi(
     unreachable?: boolean;
     failureReason?: string;
     labeledJobs?: Array<{ selector: string; name: string; namespace: string; creationTimestamp?: string }>;
+    nodes?: Array<{ name: string; ready: boolean; status: string }> | undefined;
+    workloadPods?: Array<{ name: string; status: string; node?: string; creationTimestamp?: string }> | undefined;
+    stores?: Array<{ name: string; port?: number }> | undefined;
   } = {},
 ) {
   const applied: JobManifest[] = [];
@@ -97,6 +100,16 @@ function mockApi(
     async serverVersion() {
       if (opts.unreachable) throw new Error("dial tcp: connection refused");
       return opts.version ?? "v1.30.0";
+    },
+    // Inspection reads — `"key" in opts` lets a test force undefined (query failed) vs. omit for a sensible default.
+    async inspectNodes() {
+      return "nodes" in opts ? opts.nodes : [{ name: "node-1", ready: true, status: "Ready" }];
+    },
+    async inspectWorkload() {
+      return "workloadPods" in opts ? opts.workloadPods : [];
+    },
+    async inspectStores() {
+      return "stores" in opts ? opts.stores : [];
     },
   };
   return { api, applied, deleted };
@@ -460,5 +473,66 @@ describe("K8sBackend.exec — one-shot exec into a live case pod", () => {
     const { api } = mockApi({ labeledJobs: [] });
     const backend = new K8sBackend({ image: "img", api });
     expect(await backend.exec("gone", "ls")).toBeUndefined();
+  });
+});
+
+describe("K8sBackend.inspect (live cluster view)", () => {
+  it("returns not-reachable (with a reason) when the API server can't be reached", async () => {
+    const { api } = mockApi({ unreachable: true });
+    const backend = new K8sBackend({ image: "i", api });
+    const r = await backend.inspect();
+    expect(r).toMatchObject({ kind: "k8s", reachable: false, reason: "unreachable" });
+    expect(r.nodes).toBeUndefined(); // no cluster sections when unreachable
+  });
+
+  it("classifies a rejected credential as an auth failure", async () => {
+    const brokenApi = { ...mockApi().api, serverVersion: async () => Promise.reject(new Error("error: Unauthorized")) };
+    const backend = new K8sBackend({ image: "i", api: brokenApi });
+    const r = await backend.inspect();
+    expect(r).toMatchObject({ reachable: false, reason: "auth" });
+  });
+
+  it("reports version, node readiness, capacity, live workload, and pool stores", async () => {
+    const { api } = mockApi({
+      version: "v1.31.2",
+      active: 4,
+      nodes: [
+        { name: "n1", ready: true, status: "Ready" },
+        { name: "n2", ready: false, status: "NotReady" },
+      ],
+      workloadPods: [
+        { name: "everdict-c1-abc", status: "Running", node: "n1", creationTimestamp: "2020-01-01T00:00:00Z" },
+      ],
+      stores: [{ name: "everdict-shared-postgres", port: 5432 }],
+    });
+    const backend = new K8sBackend({ image: "i", api, maxConcurrent: 10, namespace: "everdict-shared" });
+    const r = await backend.inspect();
+    expect(r.reachable).toBe(true);
+    expect(r.detail).toContain("v1.31.2");
+    expect(r.cluster).toMatchObject({ version: "v1.31.2", namespace: "everdict-shared" });
+    expect(r.nodes).toMatchObject({ total: 2, ready: 1 });
+    expect(r.capacity).toEqual({ total: 10, used: 4, free: 6 });
+    expect(r.workload?.[0]).toMatchObject({ name: "everdict-c1-abc", role: "eval", node: "n1" });
+    expect(r.workload?.[0]?.ageSeconds).toBeGreaterThan(0);
+    // The pool store's address is its deterministic Service DNS.
+    expect(r.stores).toEqual([
+      {
+        name: "everdict-shared-postgres",
+        status: "ready",
+        address: "everdict-shared-postgres.everdict-shared.svc.cluster.local:5432",
+      },
+    ]);
+    expect(r.warnings).toEqual([]);
+  });
+
+  it("degrades a failed sub-read to a warning instead of throwing", async () => {
+    const { api } = mockApi({ version: "v1.30.0", nodes: undefined, stores: undefined });
+    const backend = new K8sBackend({ image: "i", api });
+    const r = await backend.inspect();
+    expect(r.reachable).toBe(true); // still renders
+    expect(r.nodes).toBeUndefined();
+    expect(r.stores).toBeUndefined();
+    expect(r.warnings).toContain("node listing failed");
+    expect(r.warnings).toContain("shared-store listing failed");
   });
 });

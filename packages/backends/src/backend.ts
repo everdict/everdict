@@ -1,4 +1,7 @@
 import { type AgentJob, type CaseResult, InternalError } from "@everdict/contracts";
+// Type-only reuse of the inspection wire schema as the SSOT for Inspectable.inspect's return (no drift, no runtime
+// edge). backends → contracts is the allowed direction; /wire is the same package's DTO surface.
+import type { InspectRuntimeResult } from "@everdict/contracts/wire";
 
 // Which job output stream a log read targets (Observable.logs). Harnesses often log progress to stderr
 // while stdout carries only the final result block — the live tail needs both to be reachable.
@@ -129,6 +132,15 @@ export interface Probeable {
   probe(): Promise<ProbeResult>;
 }
 
+// Inspectable — a read-only live view of the cluster behind a runtime: its composition (nodes/datacenters),
+// concurrent capacity, the everdict workload currently placed on it, and any shared topology stores. A superset of
+// probe (it establishes reachability first, then enumerates) for the runtime detail screen. TOTAL/best-effort: a
+// partial-cluster failure never throws — the failed sub-read is recorded in the result's `warnings` and its section
+// omitted, so a degraded cluster still renders. Only nomad/k8s implement it; local (no cluster) does not.
+export interface Inspectable {
+  inspect(): Promise<InspectRuntimeResult>;
+}
+
 // --- Narrowing guards: express capability at the type level. Prefer these over `if (backend.method)` feature detection. ---
 
 export function isRecoverable(backend: Backend): backend is Backend & Recoverable {
@@ -151,4 +163,8 @@ export function isScreenCapturable(backend: Backend): backend is Backend & Scree
 
 export function isProbeable(backend: Backend): backend is Backend & Probeable {
   return typeof (backend as Partial<Probeable>).probe === "function";
+}
+
+export function isInspectable(backend: Backend): backend is Backend & Inspectable {
+  return typeof (backend as Partial<Inspectable>).inspect === "function";
 }

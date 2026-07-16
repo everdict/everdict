@@ -12,6 +12,7 @@ import {
   judgeAuthEnv,
   judgeEnv,
 } from "@everdict/contracts";
+import type { InspectRuntimeResult, InspectStore, InspectWorkload } from "@everdict/contracts/wire";
 import { assertHardenedIsolation, dockerAuthConfigJson, imageUsesRegistryHost } from "@everdict/domain";
 import type { TrustZonePolicy } from "@everdict/domain";
 import {
@@ -19,6 +20,7 @@ import {
   type Backend,
   type BackendCapacity,
   type DispatchOptions,
+  type Inspectable,
   type LogStream,
   type Observable,
   type ProbeResult,
@@ -28,6 +30,7 @@ import {
 } from "../backend.js";
 import type { SecretProvider } from "../policy/secrets.js";
 import { abortableDelay } from "./abortable-delay.js";
+import { WORKLOAD_CAP, classifyWorkloadRole } from "./inspect-common.js";
 
 // --- kubectl abstraction (mockable in tests; the K8s version of NomadHttp) ---
 export interface K8sApi {
@@ -48,6 +51,12 @@ export interface K8sApi {
   podFailureReason(name: string, ns: string): Promise<string | undefined>;
   countActiveJobs(): Promise<number | undefined>; // capacity probe (in-flight app=everdict jobs across all namespaces)
   serverVersion(): Promise<string>; // connection test — API server /version (gitVersion). Throws on reachability/auth failure.
+  // --- Read-only inspection (runtime detail screen). Each returns undefined when the query itself fails (best-effort). ---
+  inspectNodes(): Promise<Array<{ name: string; ready: boolean; status: string }> | undefined>; // cluster composition
+  inspectWorkload(): Promise<
+    Array<{ name: string; status: string; node?: string; creationTimestamp?: string }> | undefined
+  >; // live everdict pods (app=everdict), running/pending
+  inspectStores(namespace: string): Promise<Array<{ name: string; port?: number }> | undefined>; // pool shared-store Services in the pool namespace
 }
 
 interface RunResult {
@@ -225,6 +234,63 @@ export function kubectlApi(
         return res.stdout.trim().slice(0, 200);
       }
     },
+    async inspectNodes() {
+      const res = await run(bin, [...ctx, "get", "nodes", "-o", "json"]);
+      if (res.code !== 0) return undefined;
+      try {
+        const items = (JSON.parse(res.stdout).items ?? []) as Array<{
+          metadata?: { name?: string };
+          status?: { conditions?: Array<{ type?: string; status?: string }> };
+        }>;
+        return items.map((n) => {
+          const ready = (n.status?.conditions ?? []).some((c) => c.type === "Ready" && c.status === "True");
+          return { name: n.metadata?.name ?? "node", ready, status: ready ? "Ready" : "NotReady" };
+        });
+      } catch {
+        return undefined;
+      }
+    },
+    async inspectWorkload() {
+      // Eval pods carry app=everdict (buildK8sJob template labels); shared-store pods are discovered separately (inspectStores).
+      const res = await run(bin, [...ctx, "get", "pods", "-A", "-l", "app=everdict", "-o", "json"]);
+      if (res.code !== 0) return undefined;
+      try {
+        const items = (JSON.parse(res.stdout).items ?? []) as Array<{
+          metadata?: { name?: string; labels?: Record<string, string>; creationTimestamp?: string };
+          spec?: { nodeName?: string };
+          status?: { phase?: string };
+        }>;
+        return items
+          .filter((p) => p.status?.phase === "Running" || p.status?.phase === "Pending")
+          .map((p) => ({
+            // The job-name label reads more meaningfully than the pod's random suffix; fall back to the pod name.
+            name: p.metadata?.labels?.["job-name"] ?? p.metadata?.name ?? "everdict-pod",
+            status: p.status?.phase ?? "Unknown",
+            ...(p.spec?.nodeName ? { node: p.spec.nodeName } : {}),
+            ...(p.metadata?.creationTimestamp ? { creationTimestamp: p.metadata.creationTimestamp } : {}),
+          }));
+      } catch {
+        return undefined;
+      }
+    },
+    async inspectStores(namespace) {
+      const res = await run(bin, [...ctx, "get", "svc", "-n", namespace, "-o", "json"]);
+      if (res.code !== 0) return undefined;
+      try {
+        const items = (JSON.parse(res.stdout).items ?? []) as Array<{
+          metadata?: { name?: string };
+          spec?: { ports?: Array<{ port?: number }> };
+        }>;
+        return items
+          .filter((s) => (s.metadata?.name ?? "").startsWith("everdict-shared-"))
+          .map((s) => {
+            const port = s.spec?.ports?.[0]?.port;
+            return { name: s.metadata?.name ?? "everdict-shared", ...(port !== undefined ? { port } : {}) };
+          });
+      } catch {
+        return undefined;
+      }
+    },
   };
 }
 
@@ -264,6 +330,18 @@ const RUNTIME_CLASS: Record<string, string> = { runsc: "gvisor", kata: "kata", "
 export function parseJobStatusOutput(stdout: string): { succeeded: number; failed: number } {
   const [su = "", fa = ""] = stdout.trim().split("/");
   return { succeeded: Number(su) || 0, failed: Number(fa) || 0 };
+}
+
+// Default namespace the pool-tier shared stores live in (topology store-binding DEFAULT_POOL_NS) — where inspect looks for them.
+export const DEFAULT_POOL_NAMESPACE = "everdict-shared";
+
+// Age in whole seconds from a pod's RFC3339 creationTimestamp. undefined when absent/unparseable/negative.
+export function k8sAgeSeconds(creationTimestamp: string | undefined, nowMs: number): number | undefined {
+  if (!creationTimestamp) return undefined;
+  const created = Date.parse(creationTimestamp);
+  if (Number.isNaN(created)) return undefined;
+  const seconds = Math.round((nowMs - created) / 1000);
+  return seconds >= 0 ? seconds : undefined;
 }
 
 export function k8sJobName(job: AgentJob, suffix?: string): string {
@@ -392,7 +470,7 @@ export async function materializeKubeconfig(yaml: string): Promise<{ path: strin
 
 // Launch the runner-agent as a K8s Job, poll for completion, then parse the CaseResult from the sentinel in the pod log.
 // Isolation is namespace (per-tenant) + runtimeClassName (gVisor/kata). The K8s counterpart of NomadBackend.
-export class K8sBackend implements Backend, Recoverable, Observable, Probeable {
+export class K8sBackend implements Backend, Recoverable, Observable, Probeable, Inspectable {
   // A long-lived api from an injected api (test) or non-kubeconfig auth (context/server/token).
   // With kubeconfig auth, build a fresh api from a temp kubeconfig per dispatch so the credential isn't left on disk for long (withApi).
   private readonly staticApi?: K8sApi;
@@ -520,6 +598,100 @@ export class K8sBackend implements Backend, Recoverable, Observable, Probeable {
       // from "cluster unreachable" (the two most common, differently-actionable causes).
       const reason = /unauthor|forbidden|401|403|credential|token/i.test(detail) ? "auth" : "unreachable";
       return { reachable: false, reason, detail };
+    }
+  }
+
+  // Live cluster view (read-only): reachability + version via the API server, then nodes, capacity, the live
+  // everdict workload, and the pool shared-store Services. Each sub-read best-effort — a failure degrades to a
+  // warning, never a throw. No job, no mutation. (A kubeconfig-auth cluster materializes the temp file once for all reads.)
+  async inspect(): Promise<InspectRuntimeResult> {
+    const warnings: string[] = [];
+    try {
+      return await this.withApi(async (api): Promise<InspectRuntimeResult> => {
+        // Reachability + version (same call as probe) — a failure here is the whole-cluster verdict.
+        let version: string;
+        try {
+          version = await api.serverVersion();
+        } catch (e) {
+          const detail = e instanceof Error ? e.message : String(e);
+          const reason = /unauthor|forbidden|401|403|credential|token/i.test(detail) ? "auth" : "unreachable";
+          return { kind: "k8s", reachable: false, reason, detail, warnings };
+        }
+        const cluster = {
+          version,
+          ...(this.opts.namespace ? { namespace: this.opts.namespace } : {}),
+        };
+
+        // Nodes (best-effort).
+        let nodes: InspectRuntimeResult["nodes"];
+        const rawNodes = await api.inspectNodes();
+        if (rawNodes)
+          nodes = { total: rawNodes.length, ready: rawNodes.filter((n) => n.ready).length, items: rawNodes };
+        else warnings.push("node listing failed");
+
+        // Capacity (the same live count the scheduler gates on).
+        let capacity: InspectRuntimeResult["capacity"];
+        try {
+          const c = await this.capacity();
+          capacity = { total: c.total, used: c.used, free: Math.max(0, c.total - c.used) };
+        } catch {
+          warnings.push("capacity probe failed");
+        }
+
+        // Live everdict workload (running/pending pods).
+        let workload: InspectWorkload[] | undefined;
+        const rawWorkload = await api.inspectWorkload();
+        if (rawWorkload) {
+          const now = Date.now();
+          const rows: InspectWorkload[] = rawWorkload.map((p) => {
+            const age = k8sAgeSeconds(p.creationTimestamp, now);
+            return {
+              id: p.name,
+              name: p.name,
+              status: p.status,
+              role: classifyWorkloadRole(p.name),
+              ...(age !== undefined ? { ageSeconds: age } : {}),
+              ...(p.node ? { node: p.node } : {}),
+            };
+          });
+          if (rows.length > WORKLOAD_CAP)
+            warnings.push(`workload truncated to ${WORKLOAD_CAP} of ${rows.length} units`);
+          workload = rows.slice(0, WORKLOAD_CAP);
+        } else warnings.push("workload listing failed");
+
+        // Pool shared stores — a Service per store in the pool namespace, address = its stable Service DNS.
+        let stores: InspectStore[] | undefined;
+        const poolNs = this.opts.namespace ?? DEFAULT_POOL_NAMESPACE;
+        const rawStores = await api.inspectStores(poolNs);
+        if (rawStores)
+          stores = rawStores.map((s) => ({
+            name: s.name,
+            status: "ready",
+            ...(s.port !== undefined ? { address: `${s.name}.${poolNs}.svc.cluster.local:${s.port}` } : {}),
+          }));
+        else warnings.push("shared-store listing failed");
+
+        return {
+          kind: "k8s",
+          reachable: true,
+          detail: `K8s server ${version}`,
+          cluster,
+          ...(nodes ? { nodes } : {}),
+          ...(capacity ? { capacity } : {}),
+          ...(workload ? { workload } : {}),
+          ...(stores ? { stores } : {}),
+          warnings,
+        };
+      });
+    } catch (e) {
+      // withApi failed to even build the client (e.g. missing kubeconfig) — a config error, surfaced as unreachable.
+      return {
+        kind: "k8s",
+        reachable: false,
+        reason: "unreachable",
+        detail: e instanceof Error ? e.message : String(e),
+        warnings,
+      };
     }
   }
 

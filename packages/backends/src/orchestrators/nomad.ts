@@ -9,6 +9,7 @@ import {
   judgeAuthEnv,
   judgeEnv,
 } from "@everdict/contracts";
+import type { InspectNode, InspectRuntimeResult, InspectStore, InspectWorkload } from "@everdict/contracts/wire";
 import { assertHardenedIsolation, imageUsesRegistryHost } from "@everdict/domain";
 import type { TrustZonePolicy } from "@everdict/domain";
 import {
@@ -17,6 +18,7 @@ import {
   type BackendCapacity,
   type DispatchOptions,
   type ExecStreamHandle,
+  type Inspectable,
   type LogStream,
   type Observable,
   type ProbeResult,
@@ -27,6 +29,7 @@ import {
 } from "../backend.js";
 import type { SecretProvider } from "../policy/secrets.js";
 import { abortableDelay } from "./abortable-delay.js";
+import { EVERDICT_PREFIX, WORKLOAD_CAP, classifyWorkloadRole } from "./inspect-common.js";
 
 // --- Nomad HTTP abstraction (mockable in tests) ---
 export interface NomadHttp {
@@ -146,6 +149,63 @@ export function summarizeAllocFailure(events: NomadTaskEvent[]): string | undefi
   if (!cause) return undefined;
   const text = `${cause.Type ? `${cause.Type}: ` : ""}${cause.DisplayMessage ?? ""}`.trim();
   return text.length > 300 ? `${text.slice(0, 300)}…` : text;
+}
+
+// --- Runtime inspection (read-only cluster view) parse helpers — pure, so they unit-test without a live Nomad. ---
+
+// A Nomad node list stub — only the fields inspect reads (all optional; the list endpoint omits full resources).
+export interface NomadNodeStub {
+  Name?: string;
+  Status?: string; // "ready" | "down" | "initializing" | "disconnected"
+  Datacenter?: string;
+  Drivers?: Record<string, { Healthy?: boolean } | undefined>;
+}
+
+export function nomadNodeToInspect(n: NomadNodeStub): InspectNode {
+  const status = n.Status ?? "unknown";
+  const docker = n.Drivers?.docker;
+  return {
+    name: n.Name ?? "node",
+    status,
+    ready: status === "ready",
+    ...(n.Datacenter ? { datacenter: n.Datacenter } : {}),
+    ...(docker && typeof docker.Healthy === "boolean" ? { dockerHealthy: docker.Healthy } : {}),
+  };
+}
+
+// A Nomad alloc list stub — inspect reads these to list the live everdict workload.
+export interface NomadAllocStub {
+  ID?: string;
+  JobID?: string;
+  Name?: string;
+  ClientStatus?: string; // "running" | "pending" | "complete" | "failed" | ...
+  NodeName?: string;
+  CreateTime?: number; // int64 NANOSECONDS since epoch
+}
+
+// Alloc age in whole seconds. CreateTime is nanoseconds; nowMs is Date.now(). undefined when unknown/nonsensical.
+export function nomadAllocAgeSeconds(createTimeNs: number | undefined, nowMs: number): number | undefined {
+  if (createTimeNs === undefined || createTimeNs <= 0) return undefined;
+  const seconds = Math.round(nowMs / 1000 - createTimeNs / 1e9);
+  return seconds >= 0 ? seconds : undefined;
+}
+
+// /v1/agent/self → the cluster identity fields (name/version). Best-effort: an unparseable body yields {} (it did reach).
+export function parseNomadSelf(text: string): { name?: string; version?: string } {
+  let self: {
+    member?: { Name?: string };
+    config?: { Version?: { Version?: string } | string };
+    stats?: { nomad?: { version?: string } };
+  } = {};
+  try {
+    self = JSON.parse(text);
+  } catch {
+    return {};
+  }
+  const name = self.member?.Name;
+  const version =
+    self.stats?.nomad?.version ?? (typeof self.config?.Version === "object" ? self.config.Version?.Version : undefined);
+  return { ...(name ? { name } : {}), ...(version ? { version } : {}) };
 }
 
 // Per-dispatch uniqueness — two concurrent batches over the same dataset (or a retry of a finished one) would
@@ -273,7 +333,7 @@ export function streamHandleFor(child: StreamChild): ExecStreamHandle {
 
 // Launch the runner-agent as a Nomad batch alloc, poll for completion, then
 // parse the CaseResult from the sentinel in the stdout log.
-export class NomadBackend implements Backend, Recoverable, Observable, Shellable, Probeable {
+export class NomadBackend implements Backend, Recoverable, Observable, Shellable, Probeable, Inspectable {
   private readonly http: NomadHttp;
 
   constructor(private readonly opts: NomadBackendOptions) {
@@ -331,6 +391,115 @@ export class NomadBackend implements Backend, Recoverable, Observable, Shellable
     } catch (e) {
       return { reachable: false, reason: "unreachable", detail: e instanceof Error ? e.message : String(e) };
     }
+  }
+
+  // Live cluster view (read-only): reachability + identity via /v1/agent/self, then nodes, capacity, and the live
+  // everdict workload (+ shared stores) — each sub-read best-effort so a partial-cluster failure degrades to a
+  // warning instead of a throw. No job, no mutation.
+  async inspect(): Promise<InspectRuntimeResult> {
+    const warnings: string[] = [];
+    // Reachability + identity (same call as probe) — a failure here is the whole-cluster verdict.
+    let cluster: { name?: string; version?: string; datacenters?: string[]; namespace?: string };
+    try {
+      const res = await this.http.request("GET", "/v1/agent/self");
+      if (res.status === 401 || res.status === 403)
+        return {
+          kind: "nomad",
+          reachable: false,
+          reason: "auth",
+          detail: `auth failed (${res.status}) — check the ACL token (authSecret).`,
+          warnings,
+        };
+      if (res.status >= 300)
+        return {
+          kind: "nomad",
+          reachable: false,
+          reason: "error",
+          detail: `Nomad ${res.status}: ${res.text.slice(0, 200)}`,
+          warnings,
+        };
+      cluster = { ...parseNomadSelf(res.text), ...(this.opts.namespace ? { namespace: this.opts.namespace } : {}) };
+    } catch (e) {
+      return {
+        kind: "nomad",
+        reachable: false,
+        reason: "unreachable",
+        detail: e instanceof Error ? e.message : String(e),
+        warnings,
+      };
+    }
+
+    // Nodes (best-effort) — also the source of the cluster's datacenter set.
+    let nodes: InspectRuntimeResult["nodes"];
+    try {
+      const res = await this.http.request("GET", "/v1/nodes");
+      if (res.status < 300) {
+        const items = (JSON.parse(res.text) as NomadNodeStub[]).map(nomadNodeToInspect);
+        nodes = { total: items.length, ready: items.filter((n) => n.ready).length, items };
+        const dcs = [...new Set(items.map((n) => n.datacenter).filter((d): d is string => Boolean(d)))];
+        if (dcs.length > 0) cluster = { ...cluster, datacenters: dcs };
+      } else warnings.push(`node listing failed (Nomad ${res.status})`);
+    } catch {
+      warnings.push("node listing failed");
+    }
+
+    // Capacity (the same live count the scheduler gates on).
+    let capacity: InspectRuntimeResult["capacity"];
+    try {
+      const c = await this.capacity();
+      capacity = { total: c.total, used: c.used, free: Math.max(0, c.total - c.used) };
+    } catch {
+      warnings.push("capacity probe failed");
+    }
+
+    // Live everdict workload + shared stores from the alloc list (running/pending only).
+    let workload: InspectWorkload[] | undefined;
+    let stores: InspectStore[] | undefined;
+    try {
+      const res = await this.http.request("GET", "/v1/allocations?namespace=*");
+      if (res.status < 300) {
+        const now = Date.now();
+        const rows: InspectWorkload[] = (JSON.parse(res.text) as NomadAllocStub[])
+          .filter(
+            (a) =>
+              (a.JobID ?? a.Name ?? "").startsWith(EVERDICT_PREFIX) &&
+              (a.ClientStatus === "running" || a.ClientStatus === "pending"),
+          )
+          .map((a) => {
+            const name = a.JobID ?? a.Name ?? "everdict-job";
+            const age = nomadAllocAgeSeconds(a.CreateTime, now);
+            return {
+              id: a.ID ?? name,
+              name,
+              status: a.ClientStatus ?? "unknown",
+              role: classifyWorkloadRole(name),
+              ...(age !== undefined ? { ageSeconds: age } : {}),
+              ...(a.NodeName ? { node: a.NodeName } : {}),
+            };
+          });
+        if (rows.length > WORKLOAD_CAP) warnings.push(`workload truncated to ${WORKLOAD_CAP} of ${rows.length} units`);
+        workload = rows.slice(0, WORKLOAD_CAP);
+        // Shared stores = the store-role units (deduped by name). Nomad ports are dynamic, so address is left unknown.
+        const byName = new Map<string, InspectStore>();
+        for (const r of workload)
+          if (r.role === "store" && !byName.has(r.name)) byName.set(r.name, { name: r.name, status: r.status });
+        stores = [...byName.values()];
+      } else warnings.push(`workload listing failed (Nomad ${res.status})`);
+    } catch {
+      warnings.push("workload listing failed");
+    }
+
+    return {
+      kind: "nomad",
+      reachable: true,
+      detail: cluster.name ? `Nomad agent: ${cluster.name}` : "Nomad reachable",
+      ...(Object.keys(cluster).length > 0 ? { cluster } : {}),
+      ...(nodes ? { nodes } : {}),
+      ...(capacity ? { capacity } : {}),
+      ...(workload ? { workload } : {}),
+      ...(stores ? { stores } : {}),
+      warnings,
+    };
   }
 
   // Apply/enforce the tenant zone/secrets per job: untrusted requires strong isolation, a dedicated namespace, and inject only that tenant's keys.

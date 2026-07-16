@@ -11,6 +11,9 @@ import {
   buildNomadJob,
   eventsIndicateOom,
   fetchHttp,
+  nomadAllocAgeSeconds,
+  nomadNodeToInspect,
+  parseNomadSelf,
   streamHandleFor,
   summarizeAllocFailure,
 } from "./nomad.js";
@@ -746,5 +749,108 @@ describe("NomadBackend.logs (live tail stream selection)", () => {
     const text = await backend.logs("c1", "stderr");
     expect(text).toBe("INFO progress line");
     expect(calls.some((c) => c.includes("type=stderr"))).toBe(true);
+  });
+});
+
+describe("nomad inspect parse helpers (pure)", () => {
+  it("nomadNodeToInspect maps status→ready and reads the docker driver health", () => {
+    expect(
+      nomadNodeToInspect({ Name: "n1", Status: "ready", Datacenter: "dc1", Drivers: { docker: { Healthy: true } } }),
+    ).toEqual({ name: "n1", status: "ready", ready: true, datacenter: "dc1", dockerHealthy: true });
+    expect(nomadNodeToInspect({ Name: "n2", Status: "down" })).toEqual({ name: "n2", status: "down", ready: false });
+  });
+
+  it("nomadAllocAgeSeconds converts nanosecond CreateTime to whole seconds (and rejects nonsense)", () => {
+    const nowMs = 1_000_000_000_000; // 2001-09-09
+    expect(nomadAllocAgeSeconds(nowMs * 1e6 - 30 * 1e9, nowMs)).toBe(30); // 30s ago
+    expect(nomadAllocAgeSeconds(undefined, nowMs)).toBeUndefined();
+    expect(nomadAllocAgeSeconds(nowMs * 1e6 + 5 * 1e9, nowMs)).toBeUndefined(); // future → undefined
+  });
+
+  it("parseNomadSelf pulls name + version, tolerating an unparseable body", () => {
+    expect(
+      parseNomadSelf(JSON.stringify({ member: { Name: "nomad-1" }, stats: { nomad: { version: "1.7.2" } } })),
+    ).toEqual({
+      name: "nomad-1",
+      version: "1.7.2",
+    });
+    expect(parseNomadSelf("<html>not json")).toEqual({});
+  });
+});
+
+describe("NomadBackend.inspect (live cluster view)", () => {
+  const clusterHttp = (over: Partial<Record<string, { status: number; text: string }>> = {}): NomadHttp => ({
+    async request(_m, path) {
+      const routes: Record<string, { status: number; text: string }> = {
+        "/v1/agent/self": { status: 200, text: JSON.stringify({ member: { Name: "nomad-1" } }) },
+        "/v1/nodes": {
+          status: 200,
+          text: JSON.stringify([
+            { Name: "n1", Status: "ready", Datacenter: "dc1", Drivers: { docker: { Healthy: true } } },
+            { Name: "n2", Status: "down", Datacenter: "dc2" },
+          ]),
+        },
+        "/v1/jobs?prefix=everdict-&namespace=*": {
+          status: 200,
+          text: JSON.stringify([{ Status: "running" }, { Status: "running" }]),
+        },
+        "/v1/allocations?namespace=*": {
+          status: 200,
+          text: JSON.stringify([
+            { ID: "a1", JobID: "everdict-c1-x", ClientStatus: "running", NodeName: "n1", CreateTime: 1e15 },
+            { ID: "s1", JobID: "everdict-shared-postgres", ClientStatus: "running", NodeName: "n1" },
+            { ID: "z9", JobID: "some-other-job", ClientStatus: "running" }, // not everdict → excluded
+          ]),
+        },
+        ...over,
+      };
+      return routes[path] ?? { status: 404, text: "" };
+    },
+  });
+
+  it("returns not-reachable with an auth reason on a 403 from agent/self", async () => {
+    const backend = new NomadBackend({
+      addr: "http://n:4646",
+      image: "i",
+      http: clusterHttp({ "/v1/agent/self": { status: 403, text: "denied" } }),
+    });
+    const r = await backend.inspect();
+    expect(r).toMatchObject({ kind: "nomad", reachable: false, reason: "auth" });
+    expect(r.nodes).toBeUndefined();
+  });
+
+  it("reports identity, datacenters (from nodes), capacity, workload, and shared stores", async () => {
+    const backend = new NomadBackend({
+      addr: "http://n:4646",
+      image: "i",
+      http: clusterHttp(),
+      maxConcurrent: 5,
+      namespace: "eval",
+    });
+    const r = await backend.inspect();
+    expect(r.reachable).toBe(true);
+    expect(r.detail).toContain("nomad-1");
+    expect(r.cluster).toMatchObject({ name: "nomad-1", namespace: "eval", datacenters: ["dc1", "dc2"] });
+    expect(r.nodes).toMatchObject({ total: 2, ready: 1 });
+    expect(r.nodes?.items[0]).toMatchObject({ dockerHealthy: true });
+    expect(r.capacity).toEqual({ total: 5, used: 2, free: 3 });
+    // only the two everdict-* allocs, and the store is classified + surfaced separately
+    expect(r.workload?.map((w) => w.name)).toEqual(["everdict-c1-x", "everdict-shared-postgres"]);
+    expect(r.workload?.find((w) => w.name === "everdict-c1-x")).toMatchObject({ role: "eval", node: "n1" });
+    expect(r.stores).toEqual([{ name: "everdict-shared-postgres", status: "running" }]);
+    expect(r.warnings).toEqual([]);
+  });
+
+  it("degrades a failed node listing to a warning but still returns the rest", async () => {
+    const backend = new NomadBackend({
+      addr: "http://n:4646",
+      image: "i",
+      http: clusterHttp({ "/v1/nodes": { status: 500, text: "boom" } }),
+    });
+    const r = await backend.inspect();
+    expect(r.reachable).toBe(true);
+    expect(r.nodes).toBeUndefined();
+    expect(r.warnings).toContain("node listing failed (Nomad 500)");
+    expect(r.workload).toBeDefined(); // other reads unaffected
   });
 });
