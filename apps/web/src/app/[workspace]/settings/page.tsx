@@ -1,15 +1,16 @@
 import { redirect } from 'next/navigation'
 import { getTranslations } from 'next-intl/server'
 
-import { workspaceRecordSchema, type WorkspaceRecord } from '@/entities/workspace'
 import { DeleteWorkspaceCard } from '@/features/delete-workspace'
 import { resolveWorkspaceUrlBase, WorkspaceInfoCard } from '@/features/workspace-settings'
+import { workspaceRecordSchema, type WorkspaceRecord } from '@/entities/workspace'
 import { can } from '@/shared/auth/can'
 import { currentPrincipal } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
 import { Callout } from '@/shared/ui/callout'
 import { EmptyState } from '@/shared/ui/empty-state'
 import { PageHeader } from '@/shared/ui/page-header'
+import { SettingsColumn } from '@/shared/ui/settings-column'
 
 export const dynamic = 'force-dynamic'
 
@@ -57,10 +58,10 @@ export default async function SettingsGeneralPage({
   const header = <PageHeader title={t('general')} description={t('generalDesc')} />
   if (!canRead) {
     return (
-      <div className="space-y-6">
+      <SettingsColumn>
         {header}
         <EmptyState title={s('noPermissionTitle')} hint={s('noPermissionHint')} />
-      </div>
+      </SettingsColumn>
     )
   }
 
@@ -77,7 +78,7 @@ export default async function SettingsGeneralPage({
   const urlBase = await resolveWorkspaceUrlBase()
 
   return (
-    <div className="space-y-6">
+    <SettingsColumn>
       {header}
       {error !== undefined ? (
         <Callout tone="danger">{s('connectError', { error })}</Callout>
@@ -89,12 +90,16 @@ export default async function SettingsGeneralPage({
               name={workspaceRecord.name}
               urlBase={urlBase}
               canWrite={canWrite}
-              {...(workspaceRecord.logoUrl !== undefined ? { logoUrl: workspaceRecord.logoUrl } : {})}
+              {...(workspaceRecord.logoUrl !== undefined
+                ? { logoUrl: workspaceRecord.logoUrl }
+                : {})}
             />
           )}
-          {isOwner && workspaceRecord && <DeleteWorkspaceCard workspaceName={workspaceRecord.name} />}
+          {isOwner && workspaceRecord && (
+            <DeleteWorkspaceCard workspaceName={workspaceRecord.name} />
+          )}
         </div>
       )}
-    </div>
+    </SettingsColumn>
   )
 }

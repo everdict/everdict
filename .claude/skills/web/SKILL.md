@@ -56,7 +56,11 @@ near-black `#08090a` dark surface). Light+dark via the `.dark` class (`@custom-v
 - **Format atoms**: score/model/version/time formatting goes through `shared/lib/format.ts` +
   `shared/ui/{score,chip}.tsx`, NEVER per-page inline.
 - **Settings UIs** = Linear settings-list (`shared/ui/settings-list.tsx`, label-left / compact-control-right
-  divided rows), not stacked full-width forms.
+  divided rows), not stacked full-width forms. **Settings content width is two-tier**: form/account pages
+  (General · Profile · Preferences · API keys · Personal secrets) wrap in `SettingsColumn`
+  (`shared/ui/settings-column.tsx`, centered `max-w-3xl` readable column — never an inline left-hugging
+  `max-w-2xl`); data-dense pages (Members · Secrets · Models · Integrations · Observability · CI · Runners ·
+  Budget) skip it and fill the full content width.
 - **Guide/help copy is never inline** — render an info icon via `shared/ui/tooltip.tsx` (`InfoTip`), reveal
   on hover. Field-level `<p>` hints under inputs are fine; panel/list guidance is not.
 - **Detail views**: hide empty sections entirely (no "none" placeholder); entities show a meta strip, not a
