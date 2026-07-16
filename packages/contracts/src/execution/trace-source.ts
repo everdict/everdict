@@ -42,11 +42,40 @@ export const SpanAttrSampleSchema = z.object({
 });
 export type SpanAttrSample = z.infer<typeof SpanAttrSampleSchema>;
 
+// One node of the trace's structured span tree — the observability-grade detail a platform UI shows (waterfall + I/O).
+// Best-effort per platform (span-based kinds populate it fully; native kinds may omit it): the offsets/durations drive
+// the waterfall, parentId the nesting (flat when the platform doesn't expose it), and input/output/tokens/cost the
+// selected-span pane. `attributes` is the raw span attribute bag (for the attributes table).
+export const TraceSpanNodeSchema = z.object({
+  id: z.string(),
+  parentId: z.string().optional(), // absent = a root (or the platform doesn't expose parentage → flat waterfall)
+  name: z.string(),
+  type: z.enum(["agent", "llm", "tool", "retriever", "chain", "span"]),
+  startOffsetMs: z.number().nonnegative(), // start relative to the trace's first span
+  durationMs: z.number().nonnegative(),
+  attributes: z.record(z.string(), z.unknown()),
+  input: z.string().optional(),
+  output: z.string().optional(),
+  model: z.string().optional(),
+  tokens: z
+    .object({ input: z.number().int().nonnegative().optional(), output: z.number().int().nonnegative().optional() })
+    .optional(),
+  costUsd: z.number().nonnegative().optional(),
+});
+export type TraceSpanNode = z.infer<typeof TraceSpanNodeSchema>;
+
 // The result of inspect(traceId, mapping): the normalized events (with the SUPPLIED mapping applied for span-based
-// kinds) plus, for span-based kinds, the raw span attributes so a mapping can be authored/iterated live.
+// kinds) plus, for span-based kinds, the raw span attributes so a mapping can be authored/iterated live, plus (best-
+// effort) the structured `detail` (rollups + span tree) the observability-grade detail dialog renders as a waterfall.
 export const TraceInspectResultSchema = z.object({
   rawAttributes: z.array(SpanAttrSampleSchema).optional(), // span-based (otel/mlflow) only; native kinds omit it.
   events: z.array(TraceEventSchema),
+  detail: z
+    .object({
+      rollup: TraceSummarySchema.omit({ id: true }).optional(), // trace-level totals (duration/spanCount/tokens/cost/model/status/startedAt)
+      spans: z.array(TraceSpanNodeSchema), // the waterfall nodes (ordered; empty when the platform gives no spans)
+    })
+    .optional(),
 });
 export type TraceInspectResult = z.infer<typeof TraceInspectResultSchema>;
 

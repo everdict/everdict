@@ -7,7 +7,13 @@ import {
   type TraceSummary,
   UpstreamError,
 } from "@everdict/contracts";
-import { type Span, spansToRawAttributes, spansToTraceEvents, summarizeSpans } from "./trace-source.js";
+import {
+  type Span,
+  spansToRawAttributes,
+  spansToSpanNodes,
+  spansToTraceEvents,
+  summarizeSpans,
+} from "./trace-source.js";
 
 // OTLP span (attributes are a {key,value} array) → normalized Span.
 interface OtlpAttr {
@@ -149,9 +155,11 @@ export class OtelTraceSource implements BrowsableTraceSource {
   async inspect(traceId: string, mapping?: SpanAttrMapping): Promise<TraceInspectResult> {
     const base = this.opts.endpoint.replace(/\/$/, "");
     const spans = await this.getSpans(`${base}/api/traces/${encodeURIComponent(traceId)}`);
+    const m = mapping ?? this.opts.mapping;
     return {
       rawAttributes: spansToRawAttributes(spans),
-      events: spansToTraceEvents(spans, mapping ?? this.opts.mapping),
+      events: spansToTraceEvents(spans, m),
+      detail: { rollup: summarizeSpans(spans), spans: spansToSpanNodes(spans, m) },
     };
   }
 

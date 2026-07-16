@@ -7,7 +7,7 @@ import {
   type TraceSummary,
   UpstreamError,
 } from "@everdict/contracts";
-import { type Span, spansToRawAttributes, spansToTraceEvents } from "./trace-source.js";
+import { type Span, spansToRawAttributes, spansToSpanNodes, spansToTraceEvents, summarizeSpans } from "./trace-source.js";
 
 // Span attributes in the MLflow 3.x trace REST are an OTLP-style AnyValue (snake_case) array — a format distinct from OTel (camelCase).
 // Also supports nested kvlist/array (spanInputs/Outputs etc. arrive as a kvlist).
@@ -24,9 +24,12 @@ interface MlflowKeyValue {
   key: string;
   value?: MlflowAnyValue;
 }
-// MLflow 3.x span: times are ns (number|string), attributes are an OTLP keyvalue array.
+// MLflow 3.x span: times are ns (number|string), attributes are an OTLP keyvalue array. span_id/parent_span_id are
+// hex strings (OTLP) that drive the waterfall nesting.
 interface MlflowSpan {
   name?: string;
+  span_id?: string;
+  parent_span_id?: string;
   start_time_unix_nano?: number | string;
   end_time_unix_nano?: number | string;
   attributes?: MlflowKeyValue[];
@@ -65,6 +68,8 @@ export function parseMlflowTrace(trace: MlflowTrace): Span[] {
       startMs: nanoToMs(s.start_time_unix_nano),
       endMs: nanoToMs(s.end_time_unix_nano),
       attrs,
+      ...(s.span_id ? { spanId: s.span_id } : {}),
+      ...(s.parent_span_id ? { parentId: s.parent_span_id } : {}),
     };
   });
 }
@@ -243,9 +248,11 @@ export class MlflowTraceSource implements BrowsableTraceSource {
 
   async inspect(traceId: string, mapping?: SpanAttrMapping): Promise<TraceInspectResult> {
     const spans = await this.getSpansById(traceId);
+    const m = mapping ?? this.opts.mapping;
     return {
       rawAttributes: spansToRawAttributes(spans),
-      events: spansToTraceEvents(spans, mapping ?? this.opts.mapping),
+      events: spansToTraceEvents(spans, m),
+      detail: { rollup: summarizeSpans(spans), spans: spansToSpanNodes(spans, m) },
     };
   }
 

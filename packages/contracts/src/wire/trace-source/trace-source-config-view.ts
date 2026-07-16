@@ -11,7 +11,11 @@ export const TraceSourceConfigViewSchema = z.object({
     .enum(["id", "tag"])
     .describe("id = the everdict runId IS the trace id | tag = search the everdict.run_id the deployed agent tagged"),
   service: z.string().optional().describe("otel/jaeger tag-search scope (the agent's service.name)"),
-  project: z.string().optional().describe("scope per kind: mlflow experiment_id (tag search) / phoenix project"),
+  project: z
+    .string()
+    .optional()
+    .describe("scope per kind: mlflow experiment_id / phoenix|langfuse|langsmith project (required for mlflow/phoenix)"),
+  webUrl: z.string().optional().describe("export deep-link base when it differs from the endpoint (export-target use)"),
 });
 export type TraceSourceConfigView = z.infer<typeof TraceSourceConfigViewSchema>;
 

@@ -1,4 +1,4 @@
-import type { SpanAttrMapping, SpanAttrSample, TraceEvent, TraceSummary } from "@everdict/contracts";
+import type { SpanAttrMapping, SpanAttrSample, TraceEvent, TraceSpanNode, TraceSummary } from "@everdict/contracts";
 
 // The shared intermediate-representation span for OTel/MLflow.
 export interface Span {
@@ -6,6 +6,8 @@ export interface Span {
   startMs: number;
   endMs: number;
   attrs: Record<string, unknown>;
+  spanId?: string; // platform span id (drives the waterfall node id + parentage) — absent = fall back to a name-index id
+  parentId?: string; // parent span id (waterfall nesting) — absent = a root / the platform doesn't expose parentage
 }
 
 // Span[] → the raw-attribute samples inspect() surfaces so a SpanAttrMapping can be authored against real keys.
@@ -46,6 +48,19 @@ export function summarizeSpans(spans: Span[]): Omit<TraceSummary, "id"> {
     ...(model ? { llmModel: model } : {}),
   };
 }
+
+// Span-kind attribute keys per platform (MLflow `mlflow.spanType`: LLM/CHAT_MODEL/TOOL/AGENT/CHAIN/RETRIEVER/… ·
+// OpenInference/Phoenix `openinference.span.kind` · a generic `span.kind`). Classifies a span into a waterfall type.
+const SPAN_KIND_KEYS = ["mlflow.spanType", "openinference.span.kind", "span.kind", "traceloop.span.kind"] as const;
+// I/O channels a platform records on a span (best-effort — first defined wins; objects are stringified).
+const IO_INPUT_KEYS = ["mlflow.spanInputs", "input.value", "gen_ai.prompt", "llm.input_messages", "input"] as const;
+const IO_OUTPUT_KEYS = [
+  "mlflow.spanOutputs",
+  "output.value",
+  "gen_ai.completion",
+  "llm.output_messages",
+  "output",
+] as const;
 
 function num(v: unknown): number | undefined {
   if (typeof v === "number") return v;
@@ -171,4 +186,75 @@ export function spansToTraceEvents(spans: Span[], mapping?: SpanAttrMapping): Tr
     }
   }
   return out;
+}
+
+// First defined I/O value as a display string (an object/array is JSON-stringified; a string passes through).
+function pickIo(a: Record<string, unknown>, keys: readonly string[]): string | undefined {
+  for (const k of keys) {
+    const v = a[k];
+    if (v === undefined || v === null) continue;
+    if (typeof v === "string") return v;
+    try {
+      return JSON.stringify(v);
+    } catch {
+      return String(v);
+    }
+  }
+  return undefined;
+}
+
+// Classify a span into a waterfall type — the platform's declared span kind first, then infer from GenAI attrs.
+function classifySpan(a: Record<string, unknown>, model: string | undefined, toolName: string | undefined): TraceSpanNode["type"] {
+  const declared = pickStr(a, SPAN_KIND_KEYS)?.toUpperCase();
+  if (declared) {
+    if (declared.includes("AGENT")) return "agent";
+    if (declared.includes("TOOL") || declared.includes("FUNCTION")) return "tool";
+    if (declared.includes("RETRIEV")) return "retriever";
+    if (declared.includes("LLM") || declared.includes("CHAT") || declared.includes("COMPLETION")) return "llm";
+    if (declared.includes("CHAIN")) return "chain";
+  }
+  if (model !== undefined) return "llm";
+  if (toolName !== undefined) return "tool";
+  return "span";
+}
+
+// Span[] → the structured waterfall nodes the observability-grade detail dialog renders. Reuses the same attribute-key
+// resolution as spansToTraceEvents (mapping override then GenAI/MLflow defaults) for model/tokens/cost, and captures
+// the span's declared kind + I/O. Offsets are relative to the trace's earliest span. Pure/deterministic.
+export function spansToSpanNodes(spans: Span[], mapping?: SpanAttrMapping): TraceSpanNode[] {
+  if (spans.length === 0) return [];
+  const modelKeys = [...(mapping?.model ?? []), ...DEFAULT_KEYS.model];
+  const inKeys = [...(mapping?.inputTokens ?? []), ...DEFAULT_KEYS.inputTokens];
+  const outKeys = [...(mapping?.outputTokens ?? []), ...DEFAULT_KEYS.outputTokens];
+  const costKeys = [...(mapping?.costUsd ?? []), ...DEFAULT_KEYS.costUsd];
+  const toolKeys = [...(mapping?.toolName ?? []), ...DEFAULT_KEYS.toolName];
+  const sorted = [...spans].sort((a, b) => a.startMs - b.startMs);
+  const base = sorted[0]?.startMs ?? 0;
+  return sorted.map((s, i) => {
+    const a = s.attrs;
+    const tu = (a["mlflow.chat.tokenUsage"] ?? {}) as Record<string, unknown>;
+    const llmCost = (a["mlflow.llm.cost"] ?? {}) as Record<string, unknown>;
+    const model = pickStr(a, modelKeys);
+    const inTok = pickNum(a, inKeys) ?? num(tu.input_tokens);
+    const outTok = pickNum(a, outKeys) ?? num(tu.output_tokens);
+    const usd = pickNum(a, costKeys) ?? num(llmCost.total_cost);
+    const input = pickIo(a, IO_INPUT_KEYS);
+    const output = pickIo(a, IO_OUTPUT_KEYS);
+    return {
+      id: s.spanId ?? `${s.name}-${i}`,
+      ...(s.parentId ? { parentId: s.parentId } : {}),
+      name: s.name,
+      type: classifySpan(a, model, pickStr(a, toolKeys)),
+      startOffsetMs: Math.max(0, s.startMs - base),
+      durationMs: Math.max(0, s.endMs - s.startMs),
+      attributes: a,
+      ...(input !== undefined ? { input } : {}),
+      ...(output !== undefined ? { output } : {}),
+      ...(model !== undefined ? { model } : {}),
+      ...(inTok !== undefined || outTok !== undefined
+        ? { tokens: { ...(inTok !== undefined ? { input: inTok } : {}), ...(outTok !== undefined ? { output: outTok } : {}) } }
+        : {}),
+      ...(usd !== undefined ? { costUsd: usd } : {}),
+    };
+  });
 }

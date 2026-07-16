@@ -72,9 +72,11 @@ export const WorkspaceSettingsSchema = z.object({
       }),
     )
     .optional(),
-  // Workspace trace sinks (plural) — export judged scorecard detail results (trace+scores) to the team observability platform (outbound).
-  // The mirror of TraceSource (inbound pull). Register several by name and pick one 'per harness' (not one per workspace).
-  // Secrets are SecretStore name-refs (values never stored/returned). Design: docs/architecture/trace-sink.md
+  // (legacy, read-only compat) workspace trace sinks — superseded by traceSources (unified "Trace Source" pool).
+  // Registration is now ONE pool: a trace source is used to pull (traceSourceByHarness) OR to export
+  // (traceSinkByHarness) at the per-harness use-site. On read, a legacy sink is merged into the source pool by name
+  // (kind/endpoint/auth/project/webUrl, correlate default "id"); the next write persists into traceSources and clears
+  // this to null. Design: docs/architecture/trace-sink.md
   traceSinks: z
     .array(
       z.object({
@@ -87,13 +89,15 @@ export const WorkspaceSettingsSchema = z.object({
       }),
     )
     .optional(),
-  // Per-harness sink selection (harness id → sink name). A harness with no selection is not exported (opt-in).
+  // Per-harness EXPORT selection (harness id → trace-source name used as an export target). A harness with no selection
+  // is not exported (opt-in). The referenced name is a traceSources[] entry (a sink-capable kind, i.e. not otel).
   // nullable value: deselection replaces the whole map with a new one rather than deleting a key, due to the nature of jsonb merge (service-managed).
   traceSinkByHarness: z.record(z.string()).optional(),
-  // Workspace trace sources (plural) — the INBOUND mirror of traceSinks. Register a dev-cluster observability endpoint
-  // (OTel/MLflow/Langfuse/LangSmith/Phoenix) by name; a service harness picks one 'per harness' so that AFTER a case runs
-  // on that cluster, everdict pulls the correlated trace from here and grades/judges it (pull-after-run). Secrets are
-  // SecretStore name-refs (values never stored/returned). Design: docs/architecture/trace-sink.md (inbound) + docs/service-harness.md.
+  // Workspace trace sources (plural) — the ONE registration pool for observability platforms
+  // (OTel/MLflow/Langfuse/LangSmith/Phoenix). Register a platform by name; a harness picks one 'per harness' to PULL its
+  // trace from after a case runs (traceSourceByHarness) and/or to EXPORT judged results to (traceSinkByHarness). Whether a
+  // source is used to pull or to export is a use-site (per-harness) decision, not a registration one. Secrets are
+  // SecretStore name-refs (values never stored/returned). Design: docs/architecture/trace-sink.md + docs/service-harness.md.
   traceSources: z
     .array(
       z.object({
@@ -101,11 +105,13 @@ export const WorkspaceSettingsSchema = z.object({
         kind: z.enum(["otel", "mlflow", "langfuse", "langsmith", "phoenix"]),
         endpoint: z.string().url(), // platform query API base URL (reachable from the control plane at pull time)
         authSecretName: z.string().min(1).optional(), // SecretStore key — verbatim auth-header value (omitted for an unauthenticated dev server)
-        // How this run's trace is found in the platform: id = the everdict runId IS the trace id (the agent honored the
+        // How a pulled trace is found in the platform: id = the everdict runId IS the trace id (the agent honored the
         // injected id) | tag = the deployed agent minted its own id but tagged it everdict.run_id → search by that tag.
+        // Pull-only detail; ignored when the source is used as an export target.
         correlate: z.enum(["id", "tag"]).default("id"),
         service: z.string().min(1).optional(), // otel/jaeger tag-search scope (the agent's service.name) — required for otel correlate:"tag"
-        project: z.string().min(1).optional(), // scope per kind: mlflow experiment_id (tag search) · phoenix project (span query)
+        project: z.string().min(1).optional(), // scope per kind: mlflow experiment_id · phoenix/langfuse/langsmith project — required for mlflow/phoenix
+        webUrl: z.string().url().optional(), // export deep-link base when it differs from the API endpoint (used when the source is an export target)
       }),
     )
     .optional(),
