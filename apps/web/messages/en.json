@@ -1693,6 +1693,19 @@
     "requiresHeading": "Required evidence",
     "requiresSubtitle": "Declare what this judge needs from a run. The preview checks it against a sample trace."
   },
+  "judgeRequires": {
+    "kind_final_answer": "Final answer",
+    "kind_tool_call": "Tool call",
+    "kind_dom": "Browser DOM",
+    "kind_screenshot": "Screenshot",
+    "kind_artifact": "Artifact",
+    "kind_span": "Span",
+    "namePlaceholder": "name (optional)",
+    "rolePlaceholder": "role (optional)",
+    "add": "Add",
+    "remove": "Remove",
+    "empty": "No required evidence declared."
+  },
   "judgePreview": {
     "heading": "Preview",
     "subtitle": "See the exact prompt and evidence this judge would receive on a sample trace — no model call.",
@@ -1702,6 +1715,10 @@
     "taskLabel": "Task (optional)",
     "expectedLabel": "Expected output (optional)",
     "previewButton": "Preview",
+    "tryButton": "Run once",
+    "tryHint": "Runs the judge on this one case (uses a model call).",
+    "scores": "Scores",
+    "noScores": "No scores were produced.",
     "invalidTrace": "The trace is not valid JSON.",
     "failed": "Preview failed.",
     "coverage": "Evidence coverage",
@@ -1709,11 +1726,7 @@
     "absent": "absent",
     "truncated": "truncated",
     "requirements": "Required evidence",
-    "renderedPrompt": "Rendered prompt",
-    "tryButton": "Run once",
-    "tryHint": "Runs the judge on this one case (uses a model call).",
-    "scores": "Scores",
-    "noScores": "No scores were produced."
+    "renderedPrompt": "Rendered prompt"
   },
   "registerRubric": {
     "idLabel": "ID",
@@ -2390,15 +2403,15 @@
     "statusQueued": "Queued",
     "statusSuperseded": "Superseded",
     "statusCancelled": "Cancelled",
+    "resetFilters": "Reset",
+    "resetFiltersAria": "Reset all filters",
     "themeToggleAria": "Toggle theme",
     "lightMode": "Light mode",
     "darkMode": "Dark mode",
     "infoTipAria": "Help",
     "versionSystemManaged": "System managed",
     "versionBump": "Existing {existing} · latest <code>{latest}</code> → new version <codeNew>{value}</codeNew>",
-    "versionFirstHint": "First version — bump patch/minor/major from here on.",
-    "resetFilters": "Reset",
-    "resetFiltersAria": "Reset all filters"
+    "versionFirstHint": "First version — bump patch/minor/major from here on."
   },
   "updateProfile": {
     "choosePhotoFile": "Choose profile photo file",
@@ -2440,8 +2453,8 @@
   },
   "workPanel": {
     "title": "Work",
-    "trigger": "Work queue{active, plural, =0 {} other { (# active)}}",
-    "close": "Close",
+    "summaryAria": "Work — {running} running, {queued} queued, {upcoming} scheduled",
+    "collapse": "Collapse work panel",
     "loading": "Loading…",
     "empty": "Nothing running or queued",
     "running": "Running",
@@ -2522,18 +2535,5 @@
     "closed": "Disconnected",
     "hint": "Interactive shell into the running sandbox (cd · env persist)",
     "placeholder": "Type a command, then Enter"
-  },
-  "judgeRequires": {
-    "kind_final_answer": "Final answer",
-    "kind_tool_call": "Tool call",
-    "kind_dom": "Browser DOM",
-    "kind_screenshot": "Screenshot",
-    "kind_artifact": "Artifact",
-    "kind_span": "Span",
-    "namePlaceholder": "name (optional)",
-    "rolePlaceholder": "role (optional)",
-    "add": "Add",
-    "remove": "Remove",
-    "empty": "No required evidence declared."
   }
 }
