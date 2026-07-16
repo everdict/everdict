@@ -70,10 +70,24 @@ Inspection is paired with **destructive control** — the `Reclaimable` capabili
   the right toggle. The web gates the buttons on the `can.ts` mirror (`runtimes:control`) — enforcement is still the
   control plane's (403).
 
+## Node-centric topology view
+
+The panel renders a **Lens-style node topology**: one card per node with a CPU + memory usage bar and the
+workloads placed on it (with inline stop + a per-node cordon toggle). The data:
+
+- `InspectNode` carries `cpuTotal` / `memoryMbTotal` (total schedulable, in the runtime's NATIVE unit — Nomad CPU
+  MHz, K8s CPU millicores; memory MiB) and `schedulable`. Nomad reads `/v1/node/:id` `NodeResources` (per node,
+  capped at 30 to bound the calls); K8s parses node `status.allocatable` (`k8sCpuToMillicores` / `k8sMemToMiB`).
+- `InspectWorkload` carries `cpu` / `memoryMb` (its resource ask, same units) + its `node`. Nomad sums the alloc's
+  `AllocatedResources.Tasks`; K8s sums the pod's container `requests`.
+- The **web derives per-node allocation** by grouping workloads by node and summing their asks (allocated / total →
+  the bar). Units are native-per-kind (the web labels MHz vs cores from `insp.kind`); memory MiB→GiB. All best-effort:
+  a node/alloc that omits resources simply has no bar. Node-less units fall into an "unscheduled" group; if node
+  listing degrades, the panel falls back to the flat workload list.
+
 ## Deliberate non-goals (v1)
 
 - **No auto-scaling from the panel** — the Autoscaler already drives capacity from queue depth; a manual scale knob
   here would fight it. Cordon (take a node out of rotation) is the maintenance lever offered instead.
-- **No per-node resource totals** — the cheap list endpoints don't give clean, comparable CPU/memory across
-  nomad and k8s; node count + readiness + docker-driver health + the slot `capacity` answer "has it room" without
-  a misleading number. Add per-node resources when a live endpoint justifies it.
+- **No force-graph layout** — the node-card grid is the Lens/Nomad-topology idiom; a force-directed SVG graph would
+  add a heavy layout dependency for little operator value over sized cards + resource bars.
