@@ -2,8 +2,10 @@ import { spawn } from "node:child_process";
 import { parseResult, stripSentinel } from "@everdict/contracts";
 import {
   type AgentJob,
+  BadRequestError,
   type CaseResult,
   InternalError,
+  NotFoundError,
   OOM_KILLED,
   UpstreamError,
   judgeAuthEnv,
@@ -30,7 +32,7 @@ import {
 } from "../backend.js";
 import type { SecretProvider } from "../policy/secrets.js";
 import { abortableDelay } from "./abortable-delay.js";
-import { EVERDICT_PREFIX, WORKLOAD_CAP, classifyWorkloadRole } from "./inspect-common.js";
+import { EVERDICT_PREFIX, NODE_DETAIL_CAP, WORKLOAD_CAP, classifyWorkloadRole } from "./inspect-common.js";
 
 // --- Nomad HTTP abstraction (mockable in tests) ---
 export interface NomadHttp {
@@ -154,9 +156,6 @@ export function summarizeAllocFailure(events: NomadTaskEvent[]): string | undefi
 
 // --- Runtime inspection (read-only cluster view) parse helpers — pure, so they unit-test without a live Nomad. ---
 
-// How many nodes we fetch per-node detail (/v1/node/:id, for total resources) for — bounds the N extra calls on a big cluster.
-const NODE_DETAIL_CAP = 30;
-
 // A Nomad node list stub — only the fields inspect reads (all optional; the list endpoint omits full resources).
 export interface NomadNodeStub {
   ID?: string;
@@ -180,27 +179,68 @@ export function nomadNodeToInspect(n: NomadNodeStub): InspectNode {
   };
 }
 
-// /v1/node/:id → the node's total schedulable resources (CPU MHz, memory MiB). Best-effort: an unparseable/absent
-// body yields {}. Feeds the per-node usage bar's denominator.
-export function nomadNodeResources(text: string): { cpuTotal?: number; memoryMbTotal?: number } {
+// /v1/node/:id → the node's total schedulable resources (CPU MHz, memory MiB) + host identity from the
+// fingerprinted Attributes (OS, arch, kernel, docker version, Nomad client version, IP, local storage).
+// Best-effort: an unparseable/absent body yields {}, and each absent attribute just stays off the node.
+export function nomadNodeResources(
+  text: string,
+): Pick<
+  InspectNode,
+  | "cpuTotal"
+  | "memoryMbTotal"
+  | "os"
+  | "arch"
+  | "kernel"
+  | "containerRuntime"
+  | "agentVersion"
+  | "address"
+  | "diskMbTotal"
+  | "diskMbUsed"
+> {
   try {
-    const d = JSON.parse(text) as { NodeResources?: { Cpu?: { CpuShares?: number }; Memory?: { MemoryMB?: number } } };
+    const d = JSON.parse(text) as {
+      NodeResources?: { Cpu?: { CpuShares?: number }; Memory?: { MemoryMB?: number } };
+      Attributes?: Record<string, string | undefined>;
+    };
     const cpu = d.NodeResources?.Cpu?.CpuShares;
     const mem = d.NodeResources?.Memory?.MemoryMB;
+    const attr = d.Attributes ?? {};
+    const os = [attr["os.name"], attr["os.version"]].filter(Boolean).join(" ");
+    const kernel = [attr["kernel.name"], attr["kernel.version"]].filter(Boolean).join(" ");
+    const dockerVersion = attr["driver.docker.version"];
+    // unique.storage.* are byte counts fingerprinted as strings; used = total − free (only when both parse sanely).
+    const bytesTotal = Number(attr["unique.storage.bytestotal"]);
+    const bytesFree = Number(attr["unique.storage.bytesfree"]);
+    const MiB = 1024 * 1024;
+    const diskMbTotal = Number.isFinite(bytesTotal) && bytesTotal > 0 ? Math.round(bytesTotal / MiB) : undefined;
+    const diskMbUsed =
+      diskMbTotal !== undefined && Number.isFinite(bytesFree) && bytesFree >= 0 && bytesTotal >= bytesFree
+        ? Math.round((bytesTotal - bytesFree) / MiB)
+        : undefined;
     return {
       ...(typeof cpu === "number" ? { cpuTotal: cpu } : {}),
       ...(typeof mem === "number" ? { memoryMbTotal: mem } : {}),
+      ...(os ? { os } : {}),
+      ...(attr["cpu.arch"] ? { arch: attr["cpu.arch"] } : {}),
+      ...(kernel ? { kernel } : {}),
+      ...(dockerVersion ? { containerRuntime: `docker ${dockerVersion}` } : {}),
+      ...(attr["nomad.version"] ? { agentVersion: attr["nomad.version"] } : {}),
+      ...(attr["unique.network.ip-address"] ? { address: attr["unique.network.ip-address"] } : {}),
+      ...(diskMbTotal !== undefined ? { diskMbTotal } : {}),
+      ...(diskMbUsed !== undefined ? { diskMbUsed } : {}),
     };
   } catch {
     return {};
   }
 }
 
-// A Nomad alloc list stub — inspect reads these to list the live everdict workload.
+// A Nomad alloc list stub — inspect reads these to list the live workload (everdict units + external jobs).
 export interface NomadAllocStub {
   ID?: string;
   JobID?: string;
   Name?: string;
+  Namespace?: string;
+  JobType?: string; // "service" | "batch" | "system" — surfaced as the unit's ownerKind
   ClientStatus?: string; // "running" | "pending" | "complete" | "failed" | ...
   NodeName?: string;
   CreateTime?: number; // int64 NANOSECONDS since epoch
@@ -532,7 +572,8 @@ export class NomadBackend implements Backend, Recoverable, Observable, Shellable
       warnings.push("capacity probe failed");
     }
 
-    // Live everdict workload + shared stores from the alloc list (running/pending only).
+    // Live workload from the alloc list (running/pending only) — every unit on the cluster, everdict-placed AND
+    // external (other platforms' jobs), so the node view shows what actually occupies each node + shared stores.
     let workload: InspectWorkload[] | undefined;
     let stores: InspectStore[] | undefined;
     try {
@@ -540,11 +581,7 @@ export class NomadBackend implements Backend, Recoverable, Observable, Shellable
       if (res.status < 300) {
         const now = Date.now();
         const rows: InspectWorkload[] = (JSON.parse(res.text) as NomadAllocStub[])
-          .filter(
-            (a) =>
-              (a.JobID ?? a.Name ?? "").startsWith(EVERDICT_PREFIX) &&
-              (a.ClientStatus === "running" || a.ClientStatus === "pending"),
-          )
+          .filter((a) => a.ClientStatus === "running" || a.ClientStatus === "pending")
           .map((a) => {
             const name = a.JobID ?? a.Name ?? "everdict-job";
             const age = nomadAllocAgeSeconds(a.CreateTime, now);
@@ -555,9 +592,13 @@ export class NomadBackend implements Backend, Recoverable, Observable, Shellable
               role: classifyWorkloadRole(name),
               ...(age !== undefined ? { ageSeconds: age } : {}),
               ...(a.NodeName ? { node: a.NodeName } : {}),
+              ...(a.Namespace ? { namespace: a.Namespace } : {}),
+              ...(a.JobType ? { ownerKind: a.JobType } : {}),
               ...nomadAllocResources(a),
             };
           });
+        // Under the cap, everdict units win over external ones (stable sort keeps each group's own order).
+        rows.sort((a, b) => Number(a.role === "other") - Number(b.role === "other"));
         if (rows.length > WORKLOAD_CAP) warnings.push(`workload truncated to ${WORKLOAD_CAP} of ${rows.length} units`);
         workload = rows.slice(0, WORKLOAD_CAP);
         // Shared stores = the store-role units (deduped by name). Nomad ports are dynamic, so address is left unknown.
@@ -815,19 +856,77 @@ export class NomadBackend implements Backend, Recoverable, Observable, Shellable
 
   // --- Reclaimable (destructive live-cluster control; runtimes:control-gated at the control plane) ---
 
-  // Deregister one everdict job by its exact id (the InspectWorkload.name). Resolves the job's namespace first so
-  // a namespaced job is stopped correctly. Best-effort/idempotent — a job that is already gone is a silent no-op.
-  async stopWorkload(name: string): Promise<void> {
+  // Deregister one job by its exact id (the InspectWorkload.name) — everdict units and external jobs alike (the
+  // operator's blunt terminate; a service job stays deregistered, it is not rescheduled). Resolves the job's
+  // namespace first so a namespaced job is stopped correctly; when the caller passes the unit's namespace, only
+  // that namespace's job matches (two namespaces may reuse one job id). Best-effort/idempotent — a job that is
+  // already gone is a silent no-op.
+  async stopWorkload(name: string, namespace?: string): Promise<void> {
     try {
-      const res = await this.http.request("GET", `/v1/jobs?prefix=${encodeURIComponent(name)}&namespace=*`);
-      if (res.status >= 300) return;
-      const job = (JSON.parse(res.text) as Array<{ ID?: string; Namespace?: string }>).find((j) => j.ID === name);
+      const job = await this.findJob(name, namespace);
       if (!job?.ID) return; // already gone
       const nsq = job.Namespace && job.Namespace !== "default" ? `?namespace=${encodeURIComponent(job.Namespace)}` : "";
       await this.http.request("DELETE", `/v1/job/${encodeURIComponent(job.ID)}${nsq}`);
     } catch {
       // best-effort — the caller re-inspects
     }
+  }
+
+  // Exact-id job lookup across namespaces (optionally pinned to one namespace). undefined = not found.
+  private async findJob(name: string, namespace?: string): Promise<{ ID?: string; Namespace?: string } | undefined> {
+    const res = await this.http.request("GET", `/v1/jobs?prefix=${encodeURIComponent(name)}&namespace=*`);
+    if (res.status >= 300) return undefined;
+    return (JSON.parse(res.text) as Array<{ ID?: string; Namespace?: string }>).find(
+      (j) => j.ID === name && (!namespace || (j.Namespace ?? "default") === namespace),
+    );
+  }
+
+  // Change a single-task job's resource ask (CPU MHz / memory MiB) by read-modify-resubmit — Nomad has no in-place
+  // alloc resize, so the register replaces the alloc (a service job rolls, a batch task restarts). Multi-task jobs
+  // are refused (which task would the numbers mean?) — a clear 400, never a silent no-op (see Reclaimable).
+  async resizeWorkload(
+    name: string,
+    resources: { cpu?: number; memoryMb?: number },
+    namespace?: string,
+  ): Promise<{ detail: string }> {
+    if (resources.cpu === undefined && resources.memoryMb === undefined)
+      throw new BadRequestError("BAD_REQUEST", { name }, "resize needs cpu and/or memoryMb.");
+    let stub: { ID?: string; Namespace?: string } | undefined;
+    try {
+      stub = await this.findJob(name, namespace);
+    } catch (e) {
+      throw new UpstreamError("UPSTREAM_ERROR", { name }, `job lookup failed: ${e instanceof Error ? e.message : e}`);
+    }
+    if (!stub?.ID) throw new NotFoundError("NOT_FOUND", { name }, "workload not found on the cluster.");
+    const ns = stub.Namespace && stub.Namespace !== "default" ? stub.Namespace : undefined;
+    const nsq = ns ? `?namespace=${encodeURIComponent(ns)}` : "";
+    const jobRes = await this.http.request("GET", `/v1/job/${encodeURIComponent(stub.ID)}${nsq}`);
+    if (jobRes.status >= 300)
+      throw new UpstreamError("UPSTREAM_ERROR", { status: jobRes.status }, "job read failed for resize");
+    const job = JSON.parse(jobRes.text) as {
+      TaskGroups?: Array<{ Tasks?: Array<{ Name?: string; Resources?: { CPU?: number; MemoryMB?: number } }> }>;
+    };
+    const tasks = (job.TaskGroups ?? []).flatMap((g) => g.Tasks ?? []);
+    const task = tasks[0];
+    if (tasks.length !== 1 || task === undefined)
+      throw new BadRequestError(
+        "BAD_REQUEST",
+        { name, tasks: tasks.length },
+        "only single-task jobs can be resized (ambiguous target otherwise).",
+      );
+    task.Resources = {
+      ...(task.Resources ?? {}),
+      ...(resources.cpu !== undefined ? { CPU: resources.cpu } : {}),
+      ...(resources.memoryMb !== undefined ? { MemoryMB: resources.memoryMb } : {}),
+    };
+    const submit = await this.http.request("POST", `/v1/job/${encodeURIComponent(stub.ID)}${nsq}`, { Job: job });
+    if (submit.status >= 300)
+      throw new UpstreamError("UPSTREAM_ERROR", { status: submit.status }, "job resize submission failed");
+    const parts = [
+      ...(resources.cpu !== undefined ? [`cpu ${resources.cpu} MHz`] : []),
+      ...(resources.memoryMb !== undefined ? [`memory ${resources.memoryMb} MiB`] : []),
+    ];
+    return { detail: `job ${stub.ID} resized to ${parts.join(", ")} (alloc replaced)` };
   }
 
   // Stop every running/pending everdict EVAL unit older than the threshold (shared stores are excluded — they are

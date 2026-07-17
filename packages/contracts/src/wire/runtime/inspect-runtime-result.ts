@@ -27,13 +27,29 @@ export const InspectNodeSchema = z.object({
   // over the sum of the everdict units it can see, so the gauge reflects true node commitment. Absent when unavailable.
   cpuUsed: z.number().optional(),
   memoryMbUsed: z.number().optional(),
+  // Host identity — what machine this node actually is (all best-effort; a source that omits a field just leaves it
+  // absent). Nomad reads the fingerprinted node Attributes; K8s reads status.nodeInfo.
+  os: z.string().optional().describe("Operating system, human-readable (e.g. 'Ubuntu 22.04.4 LTS')"),
+  arch: z.string().optional().describe("CPU architecture (e.g. 'amd64', 'arm64')"),
+  kernel: z.string().optional().describe("Kernel name/version (e.g. 'linux 6.8.0-45-generic')"),
+  containerRuntime: z
+    .string()
+    .optional()
+    .describe("Container runtime + version (e.g. 'docker 27.1.1', 'containerd://1.7.18')"),
+  agentVersion: z.string().optional().describe("The node agent's version (Nomad client version / kubelet version)"),
+  address: z.string().optional().describe("The node's primary (internal) IP address"),
+  // Local storage in MiB (Nomad: the fingerprinted unique.storage.* volume; K8s: the node fs via the kubelet stats
+  // summary, falling back to allocatable ephemeral-storage for the total). Used may be absent when only a total is known.
+  diskMbTotal: z.number().optional(),
+  diskMbUsed: z.number().optional(),
 });
 export type InspectNode = z.infer<typeof InspectNodeSchema>;
 
-// One live everdict workload unit (a running/pending alloc or pod the control plane placed on this cluster).
+// One live workload unit on the cluster (a running/pending alloc or pod) — everdict-placed units AND external
+// (non-everdict) services co-resident on the same nodes, so the node view shows the cluster's real occupancy.
 export const InspectWorkloadSchema = z.object({
   id: z.string(),
-  name: z.string().describe("The orchestrator job/alloc name (e.g. everdict-<caseId>-<suffix>)"),
+  name: z.string().describe("The orchestrator job/alloc/pod name (e.g. everdict-<caseId>-<suffix>)"),
   status: z.string(),
   ageSeconds: z
     .number()
@@ -42,7 +58,14 @@ export const InspectWorkloadSchema = z.object({
   node: z.string().optional().describe("The node it is placed on"),
   role: z
     .enum(["eval", "store", "other"])
-    .describe("Classified from the name: an everdict eval job, a shared topology store, or other"),
+    .describe("An everdict eval job, a shared topology store, or 'other' = an external (non-everdict) unit"),
+  namespace: z.string().optional().describe("Orchestrator namespace the unit lives in (targets external control)"),
+  ownerKind: z
+    .string()
+    .optional()
+    .describe(
+      "What owns/shapes the unit — K8s controller kind (Deployment/StatefulSet/DaemonSet/Job/Pod) or Nomad job type (service/batch/system)",
+    ),
   // This unit's resource ask, same units as InspectNode (Nomad CPU MHz / K8s CPU millicores; memory MiB). Lets the
   // web size each unit's block inside its node and sum the per-node allocation. Absent when the source omits it.
   cpu: z.number().optional(),

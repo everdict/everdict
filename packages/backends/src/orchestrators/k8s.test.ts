@@ -16,7 +16,7 @@ import {
   kubectlArgs,
   materializeKubeconfig,
   parseJobStatusOutput,
-  podRequestsByNode,
+  usageByNode,
 } from "./k8s.js";
 
 const JOB: AgentJob = {
@@ -61,10 +61,25 @@ function mockApi(
     unreachable?: boolean;
     failureReason?: string;
     labeledJobs?: Array<{ selector: string; name: string; namespace: string; creationTimestamp?: string }>;
-    nodes?: Array<{ name: string; ready: boolean; status: string }> | undefined;
-    workloadPods?: Array<{ name: string; status: string; node?: string; creationTimestamp?: string }> | undefined;
+    nodes?: Array<{ name: string; ready: boolean; status: string; os?: string; diskMbTotal?: number }> | undefined;
+    workloadPods?:
+      | Array<{
+          name: string;
+          status: string;
+          node?: string;
+          creationTimestamp?: string;
+          namespace?: string;
+          cpu?: number;
+          memoryMb?: number;
+          everdict?: boolean; // default true — the pre-existing tests model everdict units
+          ownerKind?: string;
+        }>
+      | undefined;
     stores?: Array<{ name: string; port?: number }> | undefined;
-    nodeUsage?: Record<string, { cpuUsed?: number; memoryMbUsed?: number }> | undefined;
+    nodeFs?: Record<string, { capacityBytes?: number; usedBytes?: number }>;
+    // kind/ns/name → the resource JSON getResourceJson returns (external-unit owner resolution / resize reads).
+    resources?: Record<string, Record<string, unknown>>;
+    patchFails?: string;
     purged?: number;
   } = {},
 ) {
@@ -111,14 +126,15 @@ function mockApi(
     async inspectNodes() {
       return "nodes" in opts ? opts.nodes : [{ name: "node-1", ready: true, status: "Ready" }];
     },
+    async nodeFsStats(node) {
+      return opts.nodeFs?.[node];
+    },
     async inspectWorkload() {
-      return "workloadPods" in opts ? opts.workloadPods : [];
+      const pods = "workloadPods" in opts ? opts.workloadPods : [];
+      return pods?.map((p) => ({ everdict: true, ...p }));
     },
     async inspectStores() {
       return "stores" in opts ? opts.stores : [];
-    },
-    async inspectNodeUsage() {
-      return "nodeUsage" in opts ? opts.nodeUsage : {};
     },
     async stopWorkloadJob(name) {
       control.push(`stop:${name}`);
@@ -129,6 +145,16 @@ function mockApi(
     },
     async setNodeSchedulable(node, schedulable) {
       control.push(`${schedulable ? "uncordon" : "cordon"}:${node}`);
+    },
+    async getResourceJson(kind, name, ns) {
+      return opts.resources?.[`${kind}/${ns}/${name}`];
+    },
+    async deleteResource(kind, name, ns) {
+      control.push(`delete:${kind}/${ns}/${name}`);
+    },
+    async patchResource(kind, name, ns, patch) {
+      control.push(`patch:${kind}/${ns}/${name}:${JSON.stringify(patch)}`);
+      return opts.patchFails ? { ok: false, message: opts.patchFails } : { ok: true };
     },
   };
   return { api, applied, deleted, control };
@@ -511,20 +537,39 @@ describe("K8sBackend.inspect (live cluster view)", () => {
     expect(r).toMatchObject({ reachable: false, reason: "auth" });
   });
 
-  it("reports version, node readiness, capacity, live workload, and pool stores", async () => {
+  it("reports version, node readiness, capacity, live workload (everdict AND external), and pool stores", async () => {
     const { api } = mockApi({
       version: "v1.31.2",
       active: 4,
       nodes: [
-        { name: "n1", ready: true, status: "Ready" },
+        { name: "n1", ready: true, status: "Ready", os: "Ubuntu 22.04.4 LTS", diskMbTotal: 100_000 },
         { name: "n2", ready: false, status: "NotReady" },
       ],
       workloadPods: [
-        { name: "everdict-c1-abc", status: "Running", node: "n1", creationTimestamp: "2020-01-01T00:00:00Z" },
+        {
+          name: "everdict-c1-abc",
+          status: "Running",
+          node: "n1",
+          creationTimestamp: "2020-01-01T00:00:00Z",
+          cpu: 500,
+          memoryMb: 1024,
+        },
+        // An external service on the same node — listed as role "other" (pod name + namespace + owner kind), and
+        // its ask still counts toward the node's committed load.
+        {
+          name: "nginx-7bf8c-x2q",
+          namespace: "web",
+          status: "Running",
+          node: "n1",
+          cpu: 3000,
+          memoryMb: 5120,
+          everdict: false,
+          ownerKind: "Deployment",
+        },
       ],
       stores: [{ name: "everdict-shared-postgres", port: 5432 }],
-      // n1's real load includes non-everdict pods — merged onto the node so the gauge isn't limited to everdict units.
-      nodeUsage: { n1: { cpuUsed: 3500, memoryMbUsed: 6144 } },
+      // n1's kubelet stats summary refines the disk figures (real fs capacity/usage).
+      nodeFs: { n1: { capacityBytes: 200 * 1024 * 1024 * 1024, usedBytes: 50 * 1024 * 1024 * 1024 } },
     });
     const backend = new K8sBackend({ image: "i", api, maxConcurrent: 10, namespace: "everdict-shared" });
     const r = await backend.inspect();
@@ -532,10 +577,25 @@ describe("K8sBackend.inspect (live cluster view)", () => {
     expect(r.detail).toContain("v1.31.2");
     expect(r.cluster).toMatchObject({ version: "v1.31.2", namespace: "everdict-shared" });
     expect(r.nodes).toMatchObject({ total: 2, ready: 1 });
-    expect(r.nodes?.items.find((n) => n.name === "n1")).toMatchObject({ cpuUsed: 3500, memoryMbUsed: 6144 });
+    // Node load = the sum over EVERY pod on the node (everdict + external), computed from the one pod listing.
+    expect(r.nodes?.items.find((n) => n.name === "n1")).toMatchObject({
+      cpuUsed: 3500,
+      memoryMbUsed: 6144,
+      os: "Ubuntu 22.04.4 LTS",
+      diskMbTotal: 200 * 1024, // the kubelet summary's real capacity beats the allocatable fallback
+      diskMbUsed: 50 * 1024,
+    });
     expect(r.capacity).toEqual({ total: 10, used: 4, free: 6 });
+    // Everdict units sort before external ones; the external pod carries namespace + ownerKind.
     expect(r.workload?.[0]).toMatchObject({ name: "everdict-c1-abc", role: "eval", node: "n1" });
     expect(r.workload?.[0]?.ageSeconds).toBeGreaterThan(0);
+    expect(r.workload?.[1]).toMatchObject({
+      id: "web/nginx-7bf8c-x2q",
+      name: "nginx-7bf8c-x2q",
+      role: "other",
+      namespace: "web",
+      ownerKind: "Deployment",
+    });
     // The pool store's address is its deterministic Service DNS.
     expect(r.stores).toEqual([
       {
@@ -573,12 +633,20 @@ describe("K8sBackend.reclaimable (destructive control)", () => {
     expect(await backend.purgeTerminal()).toEqual({ purged: 3 });
   });
 
-  it("reclaimIdle stops only non-store eval units older than the threshold", async () => {
+  it("reclaimIdle stops only non-store everdict eval units older than the threshold — external pods are never swept", async () => {
     const { api, control } = mockApi({
       workloadPods: [
         { name: "everdict-old-1", status: "Running", creationTimestamp: "2000-01-01T00:00:00Z" }, // ancient → stop
         { name: "everdict-young-1", status: "Running", creationTimestamp: new Date(Date.now() - 60_000).toISOString() }, // 1m → keep
         { name: "everdict-shared-postgres", status: "Running", creationTimestamp: "2000-01-01T00:00:00Z" }, // store → never
+        // an ancient EXTERNAL service — present in the listing now, but an idle sweep must not touch it
+        {
+          name: "nginx-old",
+          namespace: "web",
+          status: "Running",
+          creationTimestamp: "2000-01-01T00:00:00Z",
+          everdict: false,
+        },
       ],
     });
     const backend = new K8sBackend({ image: "i", api });
@@ -587,6 +655,96 @@ describe("K8sBackend.reclaimable (destructive control)", () => {
     expect(control).toContain("stop:everdict-old-1");
     expect(control).not.toContain("stop:everdict-shared-postgres");
     expect(control).not.toContain("stop:everdict-young-1");
+    expect(control).not.toContain("stop:nginx-old");
+  });
+
+  it("stopWorkload with a namespace resolves the pod's ROOT controller and deletes IT (ReplicaSet → Deployment)", async () => {
+    const { api, control } = mockApi({
+      resources: {
+        "pod/web/nginx-7bf8c-x2q": {
+          metadata: { ownerReferences: [{ kind: "ReplicaSet", name: "nginx-7bf8c" }] },
+        },
+        "replicaset/web/nginx-7bf8c": {
+          metadata: { ownerReferences: [{ kind: "Deployment", name: "nginx" }] },
+        },
+      },
+    });
+    const backend = new K8sBackend({ image: "i", api });
+    await backend.stopWorkload("nginx-7bf8c-x2q", "web");
+    expect(control).toEqual(["delete:deployment/web/nginx"]); // the controller, not the (respawning) pod
+  });
+
+  it("stopWorkload with a namespace falls back to a job of that name when the name isn't a pod", async () => {
+    const { api, control } = mockApi(); // no resources → pod lookup comes back absent
+    const backend = new K8sBackend({ image: "i", api });
+    await backend.stopWorkload("everdict-c1-abc", "everdict-acme");
+    expect(control).toEqual(["delete:job/everdict-acme/everdict-c1-abc"]);
+  });
+
+  it("workload control refuses cluster-infra namespaces loudly (kube-system is not a silent no-op)", async () => {
+    const backend = new K8sBackend({ image: "i", api: mockApi().api });
+    await expect(backend.stopWorkload("kube-proxy-abc", "kube-system")).rejects.toBeInstanceOf(BadRequestError);
+    await expect(backend.resizeWorkload("coredns-abc", { cpu: 100 }, "kube-system")).rejects.toBeInstanceOf(
+      BadRequestError,
+    );
+  });
+
+  it("resizeWorkload patches the owning Deployment's single container (requests set, low limits raised)", async () => {
+    const { api, control } = mockApi({
+      resources: {
+        "pod/web/nginx-7bf8c-x2q": { metadata: { ownerReferences: [{ kind: "ReplicaSet", name: "nginx-7bf8c" }] } },
+        "replicaset/web/nginx-7bf8c": { metadata: { ownerReferences: [{ kind: "Deployment", name: "nginx" }] } },
+        "deployment/web/nginx": {
+          spec: {
+            template: {
+              spec: {
+                // cpu limit (200m) sits below the new request (500m) → raised with it; memory limit (4Gi) is high enough → untouched.
+                containers: [
+                  { name: "nginx", resources: { requests: { cpu: "100m" }, limits: { cpu: "200m", memory: "4Gi" } } },
+                ],
+              },
+            },
+          },
+        },
+      },
+    });
+    const backend = new K8sBackend({ image: "i", api });
+    const r = await backend.resizeWorkload("nginx-7bf8c-x2q", { cpu: 500, memoryMb: 2048 }, "web");
+    expect(r.detail).toContain("Deployment nginx");
+    const patchCall = control.find((c) => c.startsWith("patch:deployment/web/nginx:"));
+    expect(patchCall).toBeDefined();
+    const patch = JSON.parse((patchCall ?? "").slice("patch:deployment/web/nginx:".length));
+    expect(patch).toEqual({
+      spec: {
+        template: {
+          spec: {
+            containers: [
+              { name: "nginx", resources: { requests: { cpu: "500m", memory: "2048Mi" }, limits: { cpu: "500m" } } },
+            ],
+          },
+        },
+      },
+    });
+  });
+
+  it("resizeWorkload is loud on unsupported targets — never a silent no-op", async () => {
+    const { api } = mockApi({
+      resources: {
+        "pod/web/bare-pod": { metadata: {} }, // no owner → a bare pod
+        "pod/web/job-pod": { metadata: { ownerReferences: [{ kind: "Job", name: "batch-1" }] } },
+        "pod/web/multi-pod": { metadata: { ownerReferences: [{ kind: "StatefulSet", name: "db" }] } },
+        "statefulset/web/db": {
+          spec: { template: { spec: { containers: [{ name: "a" }, { name: "b" }] } } }, // two containers → ambiguous
+        },
+      },
+    });
+    const backend = new K8sBackend({ image: "i", api });
+    await expect(backend.resizeWorkload("gone-pod", { cpu: 100 }, "web")).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(backend.resizeWorkload("bare-pod", { cpu: 100 }, "web")).rejects.toBeInstanceOf(BadRequestError);
+    await expect(backend.resizeWorkload("job-pod", { cpu: 100 }, "web")).rejects.toBeInstanceOf(BadRequestError);
+    await expect(backend.resizeWorkload("multi-pod", { cpu: 100 }, "web")).rejects.toBeInstanceOf(BadRequestError);
+    await expect(backend.resizeWorkload("bare-pod", {}, "web")).rejects.toBeInstanceOf(BadRequestError); // no numbers
+    await expect(backend.resizeWorkload("nginx-x", { cpu: 100 })).rejects.toBeInstanceOf(BadRequestError); // no namespace
   });
 
   it("setNodeSchedulable cordons (false) / uncordons (true) by node name", async () => {
@@ -615,33 +773,14 @@ describe("k8s quantity parsers (pure)", () => {
     expect(k8sMemToMiB(undefined)).toBeUndefined();
     expect(k8sMemToMiB("nope")).toBeUndefined();
   });
-  it("podRequestsByNode sums container requests per node across ALL pods (not just everdict), running/pending only", () => {
-    const pods = [
-      // an everdict pod
-      {
-        spec: { nodeName: "n1", containers: [{ resources: { requests: { cpu: "500m", memory: "1Gi" } } }] },
-        status: { phase: "Running" },
-      },
-      // a foreign platform's pod on the same node still counts toward the node's real load
-      {
-        spec: {
-          nodeName: "n1",
-          containers: [
-            { resources: { requests: { cpu: "1", memory: "512Mi" } } },
-            { resources: { requests: { cpu: "250m", memory: "256Mi" } } },
-          ],
-        },
-        status: { phase: "Running" },
-      },
-      // a finished pod no longer occupies the node → excluded
-      {
-        spec: { nodeName: "n1", containers: [{ resources: { requests: { cpu: "8", memory: "16Gi" } } }] },
-        status: { phase: "Succeeded" },
-      },
-      // a pod not yet scheduled onto a node → skipped (no nodeName)
-      { spec: { containers: [{ resources: { requests: { cpu: "1" } } }] }, status: { phase: "Pending" } },
+  it("usageByNode sums the workload rows' asks per node across ALL units (everdict + external)", () => {
+    const rows = [
+      { node: "n1", cpu: 500, memoryMb: 1024 }, // an everdict pod
+      { node: "n1", cpu: 1250, memoryMb: 768 }, // a foreign platform's pod on the same node still counts
+      { cpu: 1000 }, // a pod not yet scheduled onto a node → skipped (no node)
+      { node: "n2" }, // no requests declared → the node stays absent (fields omitted)
     ];
-    expect(podRequestsByNode(pods)).toEqual({ n1: { cpuUsed: 1750, memoryMbUsed: 1792 } });
-    expect(podRequestsByNode([])).toEqual({});
+    expect(usageByNode(rows)).toEqual({ n1: { cpuUsed: 1750, memoryMbUsed: 1792 }, n2: {} });
+    expect(usageByNode([])).toEqual({});
   });
 });

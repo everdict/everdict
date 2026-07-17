@@ -5,14 +5,16 @@ import { join } from "node:path";
 import { parseResult, stripSentinel } from "@everdict/contracts";
 import {
   type AgentJob,
+  BadRequestError,
   type CaseResult,
   InternalError,
+  NotFoundError,
   OOM_KILLED,
   UpstreamError,
   judgeAuthEnv,
   judgeEnv,
 } from "@everdict/contracts";
-import type { InspectRuntimeResult, InspectStore, InspectWorkload } from "@everdict/contracts/wire";
+import type { InspectNode, InspectRuntimeResult, InspectStore, InspectWorkload } from "@everdict/contracts/wire";
 import { assertHardenedIsolation, dockerAuthConfigJson, imageUsesRegistryHost } from "@everdict/domain";
 import type { TrustZonePolicy } from "@everdict/domain";
 import {
@@ -31,7 +33,7 @@ import {
 } from "../backend.js";
 import type { SecretProvider } from "../policy/secrets.js";
 import { abortableDelay } from "./abortable-delay.js";
-import { WORKLOAD_CAP, classifyWorkloadRole } from "./inspect-common.js";
+import { NODE_DETAIL_CAP, SHARED_STORE_PREFIX, WORKLOAD_CAP, classifyWorkloadRole } from "./inspect-common.js";
 
 // --- kubectl abstraction (mockable in tests; the K8s version of NomadHttp) ---
 export interface K8sApi {
@@ -61,27 +63,43 @@ export interface K8sApi {
         schedulable?: boolean;
         cpuTotal?: number;
         memoryMbTotal?: number;
+        // Host identity (status.nodeInfo + addresses + allocatable ephemeral-storage) — all best-effort per field.
+        os?: string;
+        arch?: string;
+        kernel?: string;
+        containerRuntime?: string;
+        agentVersion?: string;
+        address?: string;
+        diskMbTotal?: number;
       }>
     | undefined
-  >; // cluster composition + allocatable resources
+  >; // cluster composition + allocatable resources + node identity
+  // The node's real filesystem stats via the kubelet stats summary (get --raw .../proxy/stats/summary) — capacity
+  // and used bytes of the node fs. undefined when the summary is unavailable (RBAC / managed clusters may deny it).
+  nodeFsStats(node: string): Promise<{ capacityBytes?: number; usedBytes?: number } | undefined>;
   inspectWorkload(): Promise<
     | Array<{
         name: string;
+        namespace?: string;
         status: string;
         node?: string;
         creationTimestamp?: string;
         cpu?: number;
         memoryMb?: number;
+        everdict: boolean; // carries the app=everdict label (an everdict-placed unit) vs an external pod
+        ownerKind?: string; // owning controller kind for display (ReplicaSet already read as Deployment); "Pod" = bare
       }>
     | undefined
-  >; // live everdict pods (app=everdict), running/pending, with their resource requests
+  >; // ALL running/pending pods across namespaces (everdict units and external services), with their resource requests
   inspectStores(namespace: string): Promise<Array<{ name: string; port?: number }> | undefined>; // pool shared-store Services in the pool namespace
-  // Committed resources per node across ALL pods (every namespace, not just everdict) — the real node load. keyed by node name.
-  inspectNodeUsage(): Promise<Record<string, { cpuUsed?: number; memoryMbUsed?: number }> | undefined>;
   // --- Destructive control (runtimes:control). Best-effort/idempotent — acting on a gone target is a no-op. ---
   stopWorkloadJob(name: string): Promise<void>; // find the everdict job named `name` across namespaces and delete it
   purgeCompletedJobs(): Promise<number>; // delete completed (succeeded/failed) app=everdict jobs; returns the count
   setNodeSchedulable(node: string, schedulable: boolean): Promise<void>; // kubectl cordon (false) / uncordon (true)
+  // --- Generic namespaced reads/mutations (external-unit control: owner-chain resolve, terminate, resize). ---
+  getResourceJson(kind: string, name: string, ns: string): Promise<Record<string, unknown> | undefined>; // undefined = absent/unreadable
+  deleteResource(kind: string, name: string, ns: string): Promise<void>; // --ignore-not-found, no wait
+  patchResource(kind: string, name: string, ns: string, patch: unknown): Promise<{ ok: boolean; message?: string }>; // strategic merge
 }
 
 interface RunResult {
@@ -268,13 +286,25 @@ export function kubectlApi(
           spec?: { unschedulable?: boolean };
           status?: {
             conditions?: Array<{ type?: string; status?: string }>;
-            allocatable?: { cpu?: string; memory?: string };
+            allocatable?: { cpu?: string; memory?: string; "ephemeral-storage"?: string };
+            nodeInfo?: {
+              osImage?: string;
+              architecture?: string;
+              kernelVersion?: string;
+              containerRuntimeVersion?: string;
+              kubeletVersion?: string;
+            };
+            addresses?: Array<{ type?: string; address?: string }>;
           };
         }>;
         return items.map((n) => {
           const ready = (n.status?.conditions ?? []).some((c) => c.type === "Ready" && c.status === "True");
           const cpuTotal = k8sCpuToMillicores(n.status?.allocatable?.cpu);
           const memoryMbTotal = k8sMemToMiB(n.status?.allocatable?.memory);
+          const info = n.status?.nodeInfo;
+          // Allocatable ephemeral-storage as the disk-total fallback; nodeFsStats (kubelet summary) refines it.
+          const diskMbTotal = k8sMemToMiB(n.status?.allocatable?.["ephemeral-storage"]);
+          const address = (n.status?.addresses ?? []).find((a) => a.type === "InternalIP")?.address;
           return {
             name: n.metadata?.name ?? "node",
             ready,
@@ -282,19 +312,51 @@ export function kubectlApi(
             schedulable: !n.spec?.unschedulable,
             ...(cpuTotal !== undefined ? { cpuTotal } : {}),
             ...(memoryMbTotal !== undefined ? { memoryMbTotal } : {}),
+            ...(info?.osImage ? { os: info.osImage } : {}),
+            ...(info?.architecture ? { arch: info.architecture } : {}),
+            ...(info?.kernelVersion ? { kernel: info.kernelVersion } : {}),
+            ...(info?.containerRuntimeVersion ? { containerRuntime: info.containerRuntimeVersion } : {}),
+            ...(info?.kubeletVersion ? { agentVersion: info.kubeletVersion } : {}),
+            ...(address ? { address } : {}),
+            ...(diskMbTotal !== undefined ? { diskMbTotal } : {}),
           };
         });
       } catch {
         return undefined;
       }
     },
+    async nodeFsStats(node) {
+      // The kubelet stats summary through the API-server node proxy — the node's REAL fs capacity/usage. Managed
+      // clusters / tight RBAC may deny the proxy subresource; that simply reads as undefined (best-effort).
+      const res = await run(bin, [...ctx, "get", "--raw", `/api/v1/nodes/${node}/proxy/stats/summary`]);
+      if (res.code !== 0) return undefined;
+      try {
+        const s = JSON.parse(res.stdout) as { node?: { fs?: { capacityBytes?: number; usedBytes?: number } } };
+        const fs = s.node?.fs;
+        if (!fs) return undefined;
+        return {
+          ...(typeof fs.capacityBytes === "number" ? { capacityBytes: fs.capacityBytes } : {}),
+          ...(typeof fs.usedBytes === "number" ? { usedBytes: fs.usedBytes } : {}),
+        };
+      } catch {
+        return undefined;
+      }
+    },
     async inspectWorkload() {
-      // Eval pods carry app=everdict (buildK8sJob template labels); shared-store pods are discovered separately (inspectStores).
-      const res = await run(bin, [...ctx, "get", "pods", "-A", "-l", "app=everdict", "-o", "json"]);
+      // ALL running/pending pods across namespaces — everdict units (label app=everdict, from the buildK8sJob
+      // template) AND external services co-resident on the cluster. One listing feeds the workload view AND the
+      // per-node committed-load gauge (summed by the backend), so no second all-pods call is needed.
+      const res = await run(bin, [...ctx, "get", "pods", "-A", "-o", "json"]);
       if (res.code !== 0) return undefined;
       try {
         const items = (JSON.parse(res.stdout).items ?? []) as Array<{
-          metadata?: { name?: string; labels?: Record<string, string>; creationTimestamp?: string };
+          metadata?: {
+            name?: string;
+            namespace?: string;
+            labels?: Record<string, string>;
+            creationTimestamp?: string;
+            ownerReferences?: Array<{ kind?: string }>;
+          };
           spec?: {
             nodeName?: string;
             containers?: Array<{ resources?: { requests?: { cpu?: string; memory?: string } } }>;
@@ -311,10 +373,18 @@ export function kubectlApi(
               cpu += k8sCpuToMillicores(c.resources?.requests?.cpu) ?? 0;
               memoryMb += k8sMemToMiB(c.resources?.requests?.memory) ?? 0;
             }
+            const everdict = p.metadata?.labels?.app === "everdict";
+            // Display kind: a ReplicaSet-owned pod is a Deployment in practice (control resolves the real chain).
+            const rawOwner = (p.metadata?.ownerReferences ?? []).find((o) => o.kind)?.kind;
+            const ownerKind = rawOwner === "ReplicaSet" ? "Deployment" : (rawOwner ?? "Pod");
             return {
-              // The job-name label reads more meaningfully than the pod's random suffix; fall back to the pod name.
-              name: p.metadata?.labels?.["job-name"] ?? p.metadata?.name ?? "everdict-pod",
+              // Everdict unit: the job-name label reads more meaningfully than the pod's random suffix. External
+              // unit: the POD name — it is what namespace-scoped control (owner resolve) targets.
+              name: (everdict ? p.metadata?.labels?.["job-name"] : undefined) ?? p.metadata?.name ?? "everdict-pod",
               status: p.status?.phase ?? "Unknown",
+              everdict,
+              ownerKind,
+              ...(p.metadata?.namespace ? { namespace: p.metadata.namespace } : {}),
               ...(p.spec?.nodeName ? { node: p.spec.nodeName } : {}),
               ...(p.metadata?.creationTimestamp ? { creationTimestamp: p.metadata.creationTimestamp } : {}),
               ...(cpu > 0 ? { cpu } : {}),
@@ -339,17 +409,6 @@ export function kubectlApi(
             const port = s.spec?.ports?.[0]?.port;
             return { name: s.metadata?.name ?? "everdict-shared", ...(port !== undefined ? { port } : {}) };
           });
-      } catch {
-        return undefined;
-      }
-    },
-    async inspectNodeUsage() {
-      // Every pod across all namespaces — not just app=everdict — so the per-node load reflects other platforms' work too.
-      const res = await run(bin, [...ctx, "get", "pods", "-A", "-o", "json"]);
-      if (res.code !== 0) return undefined;
-      try {
-        const items = (JSON.parse(res.stdout).items ?? []) as Parameters<typeof podRequestsByNode>[0];
-        return podRequestsByNode(items);
       } catch {
         return undefined;
       }
@@ -416,6 +475,33 @@ export function kubectlApi(
     async setNodeSchedulable(node, schedulable) {
       // cordon = mark unschedulable (no new pods land); uncordon reverses it. Neither evicts running pods (reversible).
       await run(bin, [...ctx, schedulable ? "uncordon" : "cordon", node]);
+    },
+    async getResourceJson(kind, name, ns) {
+      const res = await run(bin, [...ctx, "-n", ns, "get", kind, name, "-o", "json"]);
+      if (res.code !== 0) return undefined; // absent or unreadable — the caller decides how loud to be
+      try {
+        return JSON.parse(res.stdout) as Record<string, unknown>;
+      } catch {
+        return undefined;
+      }
+    },
+    async deleteResource(kind, name, ns) {
+      await run(bin, [...ctx, "-n", ns, "delete", kind, name, "--ignore-not-found", "--wait=false"]);
+    },
+    async patchResource(kind, name, ns, patch) {
+      // Strategic merge — containers merge by name, so a single-container resources patch touches nothing else.
+      const res = await run(bin, [
+        ...ctx,
+        "-n",
+        ns,
+        "patch",
+        kind,
+        name,
+        "--type=strategic",
+        "-p",
+        JSON.stringify(patch),
+      ]);
+      return res.code === 0 ? { ok: true } : { ok: false, message: (res.stderr || res.stdout).trim().slice(0, 300) };
     },
   };
 }
@@ -506,34 +592,61 @@ export function k8sMemToMiB(q: string | undefined): number | undefined {
   return f !== undefined ? Math.round(val * f) : undefined;
 }
 
-// Sum container requests (millicores + MiB) per node across a pod list — the node's committed load from ALL workloads
-// (every namespace/platform, not just everdict), so the usage gauge reflects true node commitment. Only running/pending
-// pods with a nodeName count; a node with zero requests is omitted (so the fields stay absent). Pure, for unit testing.
-export function podRequestsByNode(
-  pods: Array<{
-    spec?: { nodeName?: string; containers?: Array<{ resources?: { requests?: { cpu?: string; memory?: string } } }> };
-    status?: { phase?: string };
-  }>,
+// Sum the committed load (cpu millicores / memory MiB ask) per node over the inspected workload rows — every
+// namespace/platform, not just everdict, so the usage gauge reflects true node commitment (the rows are already
+// running/pending only). A node with zero requests is omitted (so the fields stay absent). Pure, for unit testing.
+export function usageByNode(
+  rows: Array<{ node?: string; cpu?: number; memoryMb?: number }>,
 ): Record<string, { cpuUsed?: number; memoryMbUsed?: number }> {
   const acc: Record<string, { cpu: number; mem: number }> = {};
-  for (const p of pods) {
-    if (p.status?.phase !== "Running" && p.status?.phase !== "Pending") continue;
-    const node = p.spec?.nodeName;
-    if (!node) continue;
-    let a = acc[node];
+  for (const r of rows) {
+    if (!r.node) continue;
+    let a = acc[r.node];
     if (!a) {
       a = { cpu: 0, mem: 0 };
-      acc[node] = a;
+      acc[r.node] = a;
     }
-    for (const c of p.spec?.containers ?? []) {
-      a.cpu += k8sCpuToMillicores(c.resources?.requests?.cpu) ?? 0;
-      a.mem += k8sMemToMiB(c.resources?.requests?.memory) ?? 0;
-    }
+    a.cpu += r.cpu ?? 0;
+    a.mem += r.memoryMb ?? 0;
   }
   const out: Record<string, { cpuUsed?: number; memoryMbUsed?: number }> = {};
   for (const [node, v] of Object.entries(acc))
     out[node] = { ...(v.cpu > 0 ? { cpuUsed: v.cpu } : {}), ...(v.mem > 0 ? { memoryMbUsed: v.mem } : {}) };
   return out;
+}
+
+// Cluster-infra namespaces are protected from workload control — deleting kube-system's DaemonSets (CNI,
+// kube-proxy, …) would take the cluster down, admin gate or not. A loud refusal, never a silent no-op.
+const PROTECTED_NAMESPACES = new Set(["kube-system", "kube-public", "kube-node-lease"]);
+export function assertMutableNamespace(ns: string): void {
+  if (PROTECTED_NAMESPACES.has(ns))
+    throw new BadRequestError(
+      "BAD_REQUEST",
+      { namespace: ns },
+      `namespace '${ns}' is cluster infrastructure — workload control is refused.`,
+    );
+}
+
+// A pod's ROOT controller — what terminate/resize must target (deleting a Deployment's pod just respawns it).
+// ReplicaSet resolves one more hop to its Deployment; a pod with no owner is its own target ("Pod").
+// undefined = the pod itself is absent/unreadable.
+export async function resolveWorkloadOwner(
+  api: Pick<K8sApi, "getResourceJson">,
+  pod: string,
+  ns: string,
+): Promise<{ kind: string; name: string } | undefined> {
+  type Owned = { metadata?: { ownerReferences?: Array<{ kind?: string; name?: string }> } };
+  const obj = (await api.getResourceJson("pod", pod, ns)) as Owned | undefined;
+  if (!obj) return undefined;
+  const ref = (obj.metadata?.ownerReferences ?? []).find((r) => r.kind && r.name);
+  if (!ref?.kind || !ref.name) return { kind: "Pod", name: pod };
+  if (ref.kind === "ReplicaSet") {
+    const rs = (await api.getResourceJson("replicaset", ref.name, ns)) as Owned | undefined;
+    const rsRef = (rs?.metadata?.ownerReferences ?? []).find((r) => r.kind === "Deployment" && r.name);
+    if (rsRef?.name) return { kind: "Deployment", name: rsRef.name };
+    return { kind: "ReplicaSet", name: ref.name };
+  }
+  return { kind: ref.kind, name: ref.name };
 }
 
 export function k8sJobName(job: AgentJob, suffix?: string): string {
@@ -814,13 +927,30 @@ export class K8sBackend implements Backend, Recoverable, Observable, Probeable, 
           ...(this.opts.namespace ? { namespace: this.opts.namespace } : {}),
         };
 
-        // Nodes (best-effort) + each node's real committed load (all pods across every namespace, not just everdict).
+        // ALL running/pending pods across namespaces (everdict units + external services) — the ONE listing that
+        // feeds both the workload view and the per-node committed-load gauges.
+        const rawWorkload = await api.inspectWorkload();
+
+        // Nodes (best-effort): allocatable totals + identity from the node list, real committed load summed from
+        // the pod listing, and fs capacity/usage via the kubelet stats summary (per-node calls, capped).
         let nodes: InspectRuntimeResult["nodes"];
         const rawNodes = await api.inspectNodes();
         if (rawNodes) {
-          const usage = await api.inspectNodeUsage();
+          const usage = rawWorkload ? usageByNode(rawWorkload) : undefined;
           if (!usage) warnings.push("node usage unavailable");
-          const items = rawNodes.map((n) => ({ ...n, ...(usage?.[n.name] ?? {}) }));
+          const MiB = 1024 * 1024;
+          const items: InspectNode[] = [];
+          for (const [i, n] of rawNodes.entries()) {
+            const merged: InspectNode = { ...n, ...(usage?.[n.name] ?? {}) };
+            if (i < NODE_DETAIL_CAP) {
+              const fs = await api.nodeFsStats(n.name);
+              // The summary's real fs capacity beats the allocatable ephemeral-storage fallback from the node list.
+              if (fs?.capacityBytes !== undefined && fs.capacityBytes > 0)
+                merged.diskMbTotal = Math.round(fs.capacityBytes / MiB);
+              if (fs?.usedBytes !== undefined && fs.usedBytes >= 0) merged.diskMbUsed = Math.round(fs.usedBytes / MiB);
+            }
+            items.push(merged);
+          }
           nodes = { total: items.length, ready: items.filter((n) => n.ready).length, items };
         } else warnings.push("node listing failed");
 
@@ -833,24 +963,35 @@ export class K8sBackend implements Backend, Recoverable, Observable, Probeable, 
           warnings.push("capacity probe failed");
         }
 
-        // Live everdict workload (running/pending pods).
+        // Live workload rows — everdict units by their app label (name = job-name), external pods as "other"
+        // (name = pod name, which is what namespace-scoped control targets).
         let workload: InspectWorkload[] | undefined;
-        const rawWorkload = await api.inspectWorkload();
         if (rawWorkload) {
           const now = Date.now();
           const rows: InspectWorkload[] = rawWorkload.map((p) => {
             const age = k8sAgeSeconds(p.creationTimestamp, now);
+            // The app=everdict label is the k8s-native signal; a shared-store pod (deployed without it) still
+            // classifies by the everdict-shared- naming convention.
+            const role = p.everdict
+              ? classifyWorkloadRole(p.name)
+              : p.name.startsWith(SHARED_STORE_PREFIX)
+                ? ("store" as const)
+                : ("other" as const);
             return {
-              id: p.name,
+              id: p.namespace ? `${p.namespace}/${p.name}` : p.name,
               name: p.name,
               status: p.status,
-              role: classifyWorkloadRole(p.name),
+              role,
               ...(age !== undefined ? { ageSeconds: age } : {}),
               ...(p.node ? { node: p.node } : {}),
+              ...(p.namespace ? { namespace: p.namespace } : {}),
+              ...(p.ownerKind ? { ownerKind: p.ownerKind } : {}),
               ...(p.cpu !== undefined ? { cpu: p.cpu } : {}),
               ...(p.memoryMb !== undefined ? { memoryMb: p.memoryMb } : {}),
             };
           });
+          // Under the cap, everdict units win over external ones (stable sort keeps each group's own order).
+          rows.sort((a, b) => Number(a.role === "other") - Number(b.role === "other"));
           if (rows.length > WORKLOAD_CAP)
             warnings.push(`workload truncated to ${WORKLOAD_CAP} of ${rows.length} units`);
           workload = rows.slice(0, WORKLOAD_CAP);
@@ -894,16 +1035,27 @@ export class K8sBackend implements Backend, Recoverable, Observable, Probeable, 
 
   // --- Reclaimable (destructive live-cluster control; runtimes:control-gated at the control plane) ---
 
-  // Delete one everdict job by its name (the InspectWorkload.name). Best-effort/idempotent — a gone job is a no-op.
-  async stopWorkload(name: string): Promise<void> {
+  // Force-stop one unit by its InspectWorkload.name. Without a namespace: the legacy everdict-Job lookup across
+  // namespaces. With one (external units carry it): resolve the pod's ROOT controller and delete IT — deleting a
+  // Deployment's pod would just respawn (a restart, not a terminate); a name that isn't a pod falls back to a job
+  // of that name in the namespace (an everdict unit addressed with its namespace). Best-effort/idempotent — but a
+  // protected cluster-infra namespace (kube-system, …) is refused loudly, never silently skipped.
+  async stopWorkload(name: string, namespace?: string): Promise<void> {
+    if (namespace) assertMutableNamespace(namespace);
     try {
-      await this.withApi((api) => api.stopWorkloadJob(name));
+      await this.withApi(async (api) => {
+        if (!namespace) return api.stopWorkloadJob(name);
+        const owner = await resolveWorkloadOwner(api, name, namespace);
+        if (!owner) return api.deleteResource("job", name, namespace);
+        return api.deleteResource(owner.kind.toLowerCase(), owner.name, namespace);
+      });
     } catch {
       // best-effort — the caller re-inspects
     }
   }
 
-  // Delete every running/pending everdict EVAL pod's job older than the threshold (shared stores excluded). Returns the count.
+  // Delete every running/pending everdict EVAL pod's job older than the threshold (shared stores excluded, and
+  // EXTERNAL pods — now present in the listing — are never swept). Returns the count.
   async reclaimIdle(olderThanSeconds: number): Promise<{ stopped: number }> {
     try {
       return await this.withApi(async (api) => {
@@ -912,6 +1064,7 @@ export class K8sBackend implements Backend, Recoverable, Observable, Probeable, 
         const now = Date.now();
         const names = new Set<string>();
         for (const p of pods) {
+          if (!p.everdict) continue; // an idle sweep must never touch external services
           if (classifyWorkloadRole(p.name) === "store") continue; // never reclaim a shared store
           const age = k8sAgeSeconds(p.creationTimestamp, now);
           if (age !== undefined && age >= olderThanSeconds) names.add(p.name);
@@ -922,6 +1075,102 @@ export class K8sBackend implements Backend, Recoverable, Observable, Probeable, 
     } catch {
       return { stopped: 0 };
     }
+  }
+
+  // Change an external unit's resource ask (cpu millicores / memory MiB) by patching its ROOT controller's pod
+  // template (a rolling replace). Deliberately loud (see Reclaimable): unsupported targets — an everdict Job (its
+  // pod template is immutable), a bare pod (no in-place resize), a multi-container pod (ambiguous) — are a clear
+  // 4xx, never a silent no-op. Limits sitting below the new request are raised with it (K8s rejects request>limit).
+  async resizeWorkload(
+    name: string,
+    resources: { cpu?: number; memoryMb?: number },
+    namespace?: string,
+  ): Promise<{ detail: string }> {
+    if (resources.cpu === undefined && resources.memoryMb === undefined)
+      throw new BadRequestError("BAD_REQUEST", { name }, "resize needs cpu and/or memoryMb.");
+    if (!namespace)
+      throw new BadRequestError(
+        "BAD_REQUEST",
+        { name },
+        "K8s resize targets an external unit — pass the unit's namespace (everdict eval Jobs are sized by the harness spec).",
+      );
+    assertMutableNamespace(namespace);
+    return await this.withApi(async (api) => {
+      const owner = await resolveWorkloadOwner(api, name, namespace);
+      if (!owner) throw new NotFoundError("NOT_FOUND", { name, namespace }, "workload pod not found.");
+      if (owner.kind === "Pod")
+        throw new BadRequestError(
+          "BAD_REQUEST",
+          { name },
+          "a bare pod cannot be resized in place — recreate it with new resources.",
+        );
+      if (owner.kind === "Job")
+        throw new BadRequestError(
+          "BAD_REQUEST",
+          { name },
+          "a K8s Job's pod template is immutable — resize is not supported.",
+        );
+      const kind = owner.kind.toLowerCase();
+      const obj = await api.getResourceJson(kind, owner.name, namespace);
+      if (!obj)
+        throw new UpstreamError(
+          "UPSTREAM_ERROR",
+          { kind: owner.kind, name: owner.name },
+          "controller read failed for resize",
+        );
+      type Container = {
+        name?: string;
+        resources?: { requests?: Record<string, string>; limits?: Record<string, string> };
+      };
+      const containers =
+        (obj as { spec?: { template?: { spec?: { containers?: Container[] } } } }).spec?.template?.spec?.containers ??
+        [];
+      const container = containers[0];
+      if (containers.length !== 1 || container?.name === undefined)
+        throw new BadRequestError(
+          "BAD_REQUEST",
+          { name, containers: containers.length },
+          "only single-container workloads can be resized (ambiguous target otherwise).",
+        );
+      const requests: Record<string, string> = {};
+      const limits: Record<string, string> = {};
+      if (resources.cpu !== undefined) {
+        requests.cpu = `${resources.cpu}m`;
+        const limit = k8sCpuToMillicores(container.resources?.limits?.cpu);
+        if (limit !== undefined && limit < resources.cpu) limits.cpu = `${resources.cpu}m`;
+      }
+      if (resources.memoryMb !== undefined) {
+        requests.memory = `${resources.memoryMb}Mi`;
+        const limit = k8sMemToMiB(container.resources?.limits?.memory);
+        if (limit !== undefined && limit < resources.memoryMb) limits.memory = `${resources.memoryMb}Mi`;
+      }
+      const patch = {
+        spec: {
+          template: {
+            spec: {
+              containers: [
+                {
+                  name: container.name,
+                  resources: { requests, ...(Object.keys(limits).length > 0 ? { limits } : {}) },
+                },
+              ],
+            },
+          },
+        },
+      };
+      const result = await api.patchResource(kind, owner.name, namespace, patch);
+      if (!result.ok)
+        throw new UpstreamError(
+          "UPSTREAM_ERROR",
+          { kind: owner.kind, name: owner.name },
+          `resize patch failed${result.message ? `: ${result.message}` : ""}`,
+        );
+      const parts = [
+        ...(resources.cpu !== undefined ? [`cpu ${resources.cpu}m`] : []),
+        ...(resources.memoryMb !== undefined ? [`memory ${resources.memoryMb}Mi`] : []),
+      ];
+      return { detail: `${owner.kind} ${owner.name} resized to ${parts.join(", ")} (rolling update)` };
+    });
   }
 
   // GC completed (succeeded/failed) everdict jobs — reclaims what ttlSecondsAfterFinished hasn't swept yet.

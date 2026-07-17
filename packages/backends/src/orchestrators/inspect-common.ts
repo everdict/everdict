@@ -9,6 +9,9 @@ export const SHARED_STORE_PREFIX = "everdict-shared-";
 export const EVERDICT_PREFIX = "everdict-";
 // Cap on the live-workload list so a busy cluster can't balloon the response; the overflow is surfaced as a warning.
 export const WORKLOAD_CAP = 100;
+// Cap on per-node detail reads (Nomad /v1/node/:id + allocations; K8s kubelet fs-stats summary) — bounds the extra
+// calls per inspect poll on a big cluster. Nodes past the cap simply omit the detail fields.
+export const NODE_DETAIL_CAP = 30;
 
 // Classify a workload unit from its orchestrator name. A shared store (everdict-shared-*) is checked before the
 // generic everdict-* eval prefix (the store prefix is a superset); anything else on the cluster is "other".

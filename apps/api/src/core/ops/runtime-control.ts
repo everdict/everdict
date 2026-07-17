@@ -30,7 +30,7 @@ export function makeRuntimeController(
     const act = async (): Promise<RuntimeControlResult> => {
       switch (command.action) {
         case "stopWorkload":
-          await backend.stopWorkload(command.name);
+          await backend.stopWorkload(command.name, command.namespace);
           return { action: command.action, ok: true };
         case "reclaimIdle": {
           const r = await backend.reclaimIdle(command.olderThanSeconds);
@@ -43,6 +43,21 @@ export function makeRuntimeController(
         case "cordonNode":
           await backend.setNodeSchedulable(command.node, command.schedulable);
           return { action: command.action, ok: true };
+        case "resizeWorkload": {
+          // The schema can't enforce "at least one number" (zod v3 discriminated-union members can't refine) — the
+          // controller does, so an empty resize is a 400 here, not a backend-specific error.
+          if (command.cpu === undefined && command.memoryMb === undefined)
+            throw new BadRequestError("BAD_REQUEST", { action: command.action }, "resize needs cpu and/or memoryMb.");
+          const r = await backend.resizeWorkload(
+            command.name,
+            {
+              ...(command.cpu !== undefined ? { cpu: command.cpu } : {}),
+              ...(command.memoryMb !== undefined ? { memoryMb: command.memoryMb } : {}),
+            },
+            command.namespace,
+          );
+          return { action: command.action, ok: true, detail: r.detail };
+        }
       }
     };
     const timeout = new Promise<RuntimeControlResult>((_, reject) => {

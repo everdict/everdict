@@ -133,7 +133,7 @@ export function registerRuntimeTools(server: McpServer, ctx: McpToolContext): vo
       "inspect_runtime",
       {
         description:
-          "Live cluster view of a REGISTERED nomad/k8s runtime (by id) — nodes/datacenters, concurrent capacity, the live everdict workload, and pool shared stores. Read-only, no job. version defaults to latest. A local runtime (no cluster) reads as not-reachable; another workspace's runtime is NOT_FOUND. Gate: runtimes:read.",
+          "Live cluster view of a REGISTERED nomad/k8s runtime (by id) — nodes (readiness, CPU/memory/disk, OS/arch/kernel/runtime versions, IP), datacenters, concurrent capacity, the live workload (everdict units AND external role='other' services co-resident on the nodes), and pool shared stores. Read-only, no job. version defaults to latest. A local runtime (no cluster) reads as not-reachable; another workspace's runtime is NOT_FOUND. Gate: runtimes:read.",
         inputSchema: { id: z.string(), version: z.string().optional() },
       },
       ({ id, version }) =>
@@ -152,21 +152,46 @@ export function registerRuntimeTools(server: McpServer, ctx: McpToolContext): vo
       "control_runtime",
       {
         description:
-          "DESTRUCTIVE live-cluster control of a REGISTERED nomad/k8s runtime (admin, runtimes:control). action=stopWorkload{name} force-stops one running eval unit; reclaimIdle{olderThanSeconds} bulk-stops non-store units past that age; purgeTerminal GCs dead/completed jobs; cordonNode{node,schedulable} cordons(false)/uncordons(true) a node (reversible). Idempotent; re-inspect after. version defaults to latest; local/other-workspace → error.",
+          "DESTRUCTIVE live-cluster control of a REGISTERED nomad/k8s runtime (admin, runtimes:control). action=stopWorkload{name,namespace?} force-stops one running unit — an everdict eval, or with its namespace an EXTERNAL unit (K8s deletes the pod's owning controller; Nomad deregisters the job; kube-system is refused); reclaimIdle{olderThanSeconds} bulk-stops non-store everdict units past that age (external untouched); purgeTerminal GCs dead/completed jobs; cordonNode{node,schedulable} cordons(false)/uncordons(true) a node (reversible); resizeWorkload{name,namespace?,cpu?,memoryMb?} changes a unit's resources in NATIVE units (Nomad MHz / K8s millicores; MiB) — replaces the unit (job resubmit / rolling update), unsupported targets are a clear error. Idempotent (resize is loud); re-inspect after. version defaults to latest; local/other-workspace → error.",
         inputSchema: {
           id: z.string(),
           version: z.string().optional(),
-          action: z.enum(["stopWorkload", "reclaimIdle", "purgeTerminal", "cordonNode"]),
-          name: z.string().optional().describe("stopWorkload: the workload unit name (InspectWorkload.name)"),
+          action: z.enum(["stopWorkload", "reclaimIdle", "purgeTerminal", "cordonNode", "resizeWorkload"]),
+          name: z
+            .string()
+            .optional()
+            .describe("stopWorkload/resizeWorkload: the workload unit name (InspectWorkload.name)"),
+          namespace: z
+            .string()
+            .optional()
+            .describe(
+              "stopWorkload/resizeWorkload: the unit's namespace (InspectWorkload.namespace) — targets an external unit",
+            ),
           olderThanSeconds: z.number().int().positive().optional().describe("reclaimIdle: age threshold in seconds"),
           node: z.string().optional().describe("cordonNode: the node name"),
           schedulable: z.boolean().optional().describe("cordonNode: false = cordon, true = uncordon"),
+          cpu: z
+            .number()
+            .int()
+            .positive()
+            .optional()
+            .describe("resizeWorkload: new CPU ask (Nomad MHz / K8s millicores)"),
+          memoryMb: z.number().int().positive().optional().describe("resizeWorkload: new memory ask (MiB)"),
         },
       },
-      ({ id, version, action, name, olderThanSeconds, node, schedulable }) =>
+      ({ id, version, action, name, namespace, olderThanSeconds, node, schedulable, cpu, memoryMb }) =>
         run(principal, "runtimes:control", async () => {
           // Validate the per-action fields into the discriminated command (the enum above is loose across actions).
-          const parsed = RuntimeControlCommandSchema.safeParse({ action, name, olderThanSeconds, node, schedulable });
+          const parsed = RuntimeControlCommandSchema.safeParse({
+            action,
+            name,
+            namespace,
+            olderThanSeconds,
+            node,
+            schedulable,
+            cpu,
+            memoryMb,
+          });
           if (!parsed.success) return fail(`BAD_REQUEST: ${parsed.error.message}`);
           const spec = await runtimes.get(ws, id, version ?? "latest"); // NOT_FOUND on non-owned/missing
           return ok(await controlRuntime(ws, spec, parsed.data));

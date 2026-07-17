@@ -142,16 +142,27 @@ export interface Inspectable {
 }
 
 // Reclaimable — DESTRUCTIVE live-cluster control paired with Inspectable, for the runtime detail screen's admin
-// actions (gated runtimes:control at the control plane). Nomad/K8s implement it; local does not. Each method is
-// best-effort and idempotent (acting on an already-gone target is a no-op, not an error) — the caller re-inspects
-// after. stopWorkload aborts one in-flight eval (a blunt infra reclaim, distinct from the graceful run/scorecard
-// cancel); reclaimIdle stops long-running NON-store units in bulk; purgeTerminal GCs dead/completed everdict jobs
-// (reclaims slots/disk); setNodeSchedulable cordons/uncordons a node (reversible) for maintenance.
+// actions (gated runtimes:control at the control plane). Nomad/K8s implement it; local does not. The reclaim
+// methods are best-effort and idempotent (acting on an already-gone target is a no-op, not an error) — the caller
+// re-inspects after. stopWorkload force-stops one unit — an everdict unit (aborts that one eval, distinct from the
+// graceful run/scorecard cancel) or, with its namespace, an EXTERNAL unit (K8s: deletes the pod's owning controller;
+// Nomad: deregisters the job); reclaimIdle stops long-running NON-store everdict units in bulk (external units are
+// never swept); purgeTerminal GCs dead/completed everdict jobs (reclaims slots/disk); setNodeSchedulable cordons/
+// uncordons a node (reversible) for maintenance. resizeWorkload is the one DELIBERATE exception to best-effort:
+// changing a unit's resources on an unsupported target must not read as done, so it THROWS an AppError
+// (BadRequestError/NotFoundError/UpstreamError) instead of silently no-oping.
 export interface Reclaimable {
-  stopWorkload(name: string): Promise<void>; // force-stop one live everdict unit by its InspectWorkload.name (job id / job-name)
-  reclaimIdle(olderThanSeconds: number): Promise<{ stopped: number }>; // stop non-store units running longer than the threshold
+  stopWorkload(name: string, namespace?: string): Promise<void>; // force-stop one live unit by its InspectWorkload.name (+namespace for external units)
+  reclaimIdle(olderThanSeconds: number): Promise<{ stopped: number }>; // stop non-store everdict units running longer than the threshold
   purgeTerminal(): Promise<{ purged: number }>; // deregister/delete dead/completed everdict jobs
   setNodeSchedulable(node: string, schedulable: boolean): Promise<void>; // cordon (false) / uncordon (true) a node by name
+  // Change a unit's resource ask in the runtime's NATIVE units (cpu MHz|millicores, memory MiB). Replaces the unit
+  // (Nomad job resubmit / K8s controller rolling update). Throws on unsupported targets — see the contract above.
+  resizeWorkload(
+    name: string,
+    resources: { cpu?: number; memoryMb?: number },
+    namespace?: string,
+  ): Promise<{ detail: string }>;
 }
 
 // --- Narrowing guards: express capability at the type level. Prefer these over `if (backend.method)` feature detection. ---
@@ -188,6 +199,7 @@ export function isReclaimable(backend: Backend): backend is Backend & Reclaimabl
     typeof b.stopWorkload === "function" &&
     typeof b.reclaimIdle === "function" &&
     typeof b.purgeTerminal === "function" &&
-    typeof b.setNodeSchedulable === "function"
+    typeof b.setNodeSchedulable === "function" &&
+    typeof b.resizeWorkload === "function"
   );
 }

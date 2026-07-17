@@ -85,6 +85,15 @@ const inspectNodeSchema = z.object({
   // Real committed load across ALL workloads on the node (not just everdict) — the gauge prefers this over the everdict-unit sum.
   cpuUsed: z.number().optional(),
   memoryMbUsed: z.number().optional(),
+  // Host identity (all best-effort) — what machine this node is.
+  os: z.string().optional(),
+  arch: z.string().optional(),
+  kernel: z.string().optional(),
+  containerRuntime: z.string().optional(),
+  agentVersion: z.string().optional(),
+  address: z.string().optional(),
+  diskMbTotal: z.number().optional(),
+  diskMbUsed: z.number().optional(),
 })
 const inspectWorkloadSchema = z.object({
   id: z.string(),
@@ -95,6 +104,9 @@ const inspectWorkloadSchema = z.object({
   role: z.enum(['eval', 'store', 'other']),
   cpu: z.number().optional(),
   memoryMb: z.number().optional(),
+  // Orchestrator namespace + owning-controller/job kind — present for external (role 'other') units, targets their control.
+  namespace: z.string().optional(),
+  ownerKind: z.string().optional(),
 })
 const inspectStoreSchema = z.object({
   name: z.string(),
@@ -123,12 +135,13 @@ export const runtimeInspectionSchema = z.object({
   warnings: z.array(z.string()).default([]),
 })
 
-// POST …/control result — a destructive-action outcome (ok + optional stopped/purged count). Identical-shape to the wire DTO.
+// POST …/control result — a destructive-action outcome (ok + optional stopped/purged count or resize detail). Identical-shape to the wire DTO.
 export const runtimeControlResultSchema = z.object({
   action: z.string(),
   ok: z.boolean(),
   stopped: z.number().optional(),
   purged: z.number().optional(),
+  detail: z.string().optional(),
 })
 
 // Drift guard — RuntimeSummary + RuntimeInspection are identical-shape to their wire DTOs, so each guard is

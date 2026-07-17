@@ -97,12 +97,13 @@ const docs = {
   inspect: {
     summary: "Inspect a runtime (live cluster view)",
     description:
-      "A read-only live view of the cluster behind a registered nomad/k8s runtime: composition (nodes/" +
-      "datacenters), concurrent capacity, the live everdict workload placed on it, and any pool shared stores. " +
-      "Unlike probe (reachability only) this enumerates the cluster; it still runs no job and mutates nothing. " +
-      "Credentials are resolved from the workspace's secrets and used only as auth headers. A partial-cluster " +
-      "failure degrades to `warnings` rather than an error. Requires runtimes:read (viewer+). A local runtime or " +
-      "another workspace's runtime is 404.",
+      "A read-only live view of the cluster behind a registered nomad/k8s runtime: composition (nodes with " +
+      "readiness, CPU/memory/disk totals+usage, OS/arch/kernel, container-runtime + node-agent versions, IP; " +
+      "datacenters), concurrent capacity, the live workload placed on it — everdict units AND external " +
+      "(role='other') services co-resident on the nodes — and any pool shared stores. Unlike probe (reachability " +
+      "only) this enumerates the cluster; it still runs no job and mutates nothing. Credentials are resolved from " +
+      "the workspace's secrets and used only as auth headers. A partial-cluster failure degrades to `warnings` " +
+      "rather than an error. Requires runtimes:read (viewer+). A local runtime or another workspace's runtime is 404.",
     tags: ["runtime"],
     params: idVersionParams,
     response: {
@@ -117,16 +118,21 @@ const docs = {
     summary: "Control a runtime's live cluster (destructive)",
     description:
       "Destructive live-cluster control for a registered nomad/k8s runtime: stopWorkload (force-stop one running " +
-      "eval unit — aborts that eval), reclaimIdle (bulk-stop non-store units older than a threshold), purgeTerminal " +
-      "(GC dead/completed jobs), cordonNode (schedulable:false = cordon / true = uncordon; reversible, no eviction). " +
-      "Admin-only (runtimes:control) — distinct from runtimes:write registration. Actions are best-effort/idempotent; " +
-      "re-inspect to see the effect. A local runtime (no cluster) is 400; another workspace's runtime is 404.",
+      "unit — an everdict eval, or with its namespace an external unit: K8s deletes the pod's owning controller, " +
+      "Nomad deregisters the job; cluster-infra namespaces like kube-system are refused), reclaimIdle (bulk-stop " +
+      "non-store everdict units older than a threshold; external units untouched), purgeTerminal (GC dead/completed " +
+      "jobs), cordonNode (schedulable:false = cordon / true = uncordon; reversible, no eviction), resizeWorkload " +
+      "(change a unit's cpu/memoryMb ask in the runtime's native units — replaces the unit via job resubmit / " +
+      "rolling update; unsupported targets such as multi-task/multi-container units, K8s Jobs, and bare pods are a " +
+      "clear 400). Admin-only (runtimes:control) — distinct from runtimes:write registration. Actions are " +
+      "best-effort/idempotent (resize is deliberately loud); re-inspect to see the effect. A local runtime (no " +
+      "cluster) is 400; another workspace's runtime is 404.",
     tags: ["runtime"],
     params: idVersionParams,
     body: toJsonSchema(RuntimeControlCommandSchema),
     response: {
       200: {
-        description: "Control outcome (ok + optional stopped/purged count)",
+        description: "Control outcome (ok + optional stopped/purged count or resize detail)",
         ...toJsonSchema(RuntimeControlResultSchema),
       },
       ...errorResponses(400, 401, 403, 404),

@@ -802,7 +802,9 @@ describe("NomadBackend.inspect (live cluster view)", () => {
           text: JSON.stringify([
             { ID: "a1", JobID: "everdict-c1-x", ClientStatus: "running", NodeName: "n1", CreateTime: 1e15 },
             { ID: "s1", JobID: "everdict-shared-postgres", ClientStatus: "running", NodeName: "n1" },
-            { ID: "z9", JobID: "some-other-job", ClientStatus: "running" }, // not everdict → excluded
+            // not everdict → an EXTERNAL unit, listed as role "other" (with its namespace + job type)
+            { ID: "z9", JobID: "some-other-job", Namespace: "infra", JobType: "service", ClientStatus: "running" },
+            { ID: "z8", JobID: "finished-job", ClientStatus: "complete" }, // terminal → excluded
           ]),
         },
         ...over,
@@ -837,9 +839,15 @@ describe("NomadBackend.inspect (live cluster view)", () => {
     expect(r.nodes).toMatchObject({ total: 2, ready: 1 });
     expect(r.nodes?.items[0]).toMatchObject({ dockerHealthy: true });
     expect(r.capacity).toEqual({ total: 5, used: 2, free: 3 });
-    // only the two everdict-* allocs, and the store is classified + surfaced separately
-    expect(r.workload?.map((w) => w.name)).toEqual(["everdict-c1-x", "everdict-shared-postgres"]);
+    // Every live alloc is listed — everdict units first, then the external job (role "other"); the store is
+    // classified + surfaced separately, and the terminal alloc is excluded.
+    expect(r.workload?.map((w) => w.name)).toEqual(["everdict-c1-x", "everdict-shared-postgres", "some-other-job"]);
     expect(r.workload?.find((w) => w.name === "everdict-c1-x")).toMatchObject({ role: "eval", node: "n1" });
+    expect(r.workload?.find((w) => w.name === "some-other-job")).toMatchObject({
+      role: "other",
+      namespace: "infra",
+      ownerKind: "service",
+    });
     expect(r.stores).toEqual([{ name: "everdict-shared-postgres", status: "running" }]);
     expect(r.warnings).toEqual([]);
   });
@@ -980,6 +988,83 @@ describe("NomadBackend.reclaimable (destructive control)", () => {
     expect(posts[0]?.path).toBe("/v1/node/node-uuid/eligibility");
     expect(posts[0]?.body).toEqual({ NodeID: "node-uuid", Eligibility: "ineligible" });
   });
+
+  it("stopWorkload with a namespace only matches THAT namespace's job (two namespaces may reuse one job id)", async () => {
+    const deleted: string[] = [];
+    const http: NomadHttp = {
+      async request(method, path) {
+        if (method === "DELETE") deleted.push(path);
+        if (path.startsWith("/v1/jobs?prefix="))
+          return {
+            status: 200,
+            text: JSON.stringify([
+              { ID: "web-api", Namespace: "team-a" },
+              { ID: "web-api", Namespace: "team-b" },
+            ]),
+          };
+        return { status: 200, text: "{}" };
+      },
+    };
+    const backend = new NomadBackend({ addr: "http://n:4646", image: "i", http });
+    await backend.stopWorkload("web-api", "team-b");
+    expect(deleted).toEqual(["/v1/job/web-api?namespace=team-b"]);
+  });
+
+  it("resizeWorkload rewrites a single-task job's Resources and resubmits it (external service jobs included)", async () => {
+    const submitted: Array<{ path: string; body: unknown }> = [];
+    const jobSpec = {
+      ID: "web-api",
+      TaskGroups: [{ Name: "g", Tasks: [{ Name: "t", Resources: { CPU: 500, MemoryMB: 512 } }] }],
+    };
+    const http: NomadHttp = {
+      async request(method, path, body) {
+        if (path.startsWith("/v1/jobs?prefix="))
+          return { status: 200, text: JSON.stringify([{ ID: "web-api", Namespace: "infra" }]) };
+        if (method === "GET" && path.startsWith("/v1/job/web-api"))
+          return { status: 200, text: JSON.stringify(jobSpec) };
+        if (method === "POST") {
+          submitted.push({ path, body });
+          return { status: 200, text: "{}" };
+        }
+        return { status: 404, text: "" };
+      },
+    };
+    const backend = new NomadBackend({ addr: "http://n:4646", image: "i", http });
+    const r = await backend.resizeWorkload("web-api", { cpu: 2000, memoryMb: 4096 });
+    expect(r.detail).toContain("web-api");
+    expect(submitted[0]?.path).toBe("/v1/job/web-api?namespace=infra");
+    const resubmitted = submitted[0]?.body as { Job: typeof jobSpec };
+    expect(resubmitted.Job.TaskGroups[0]?.Tasks[0]?.Resources).toEqual({ CPU: 2000, MemoryMB: 4096 });
+  });
+
+  it("resizeWorkload is loud — a missing job is NOT_FOUND, a multi-task job and an empty resize are 400", async () => {
+    const multiTask = {
+      ID: "multi",
+      TaskGroups: [
+        {
+          Name: "g",
+          Tasks: [
+            { Name: "a", Resources: {} },
+            { Name: "b", Resources: {} },
+          ],
+        },
+      ],
+    };
+    const http: NomadHttp = {
+      async request(method, path) {
+        if (path.startsWith("/v1/jobs?prefix=multi"))
+          return { status: 200, text: JSON.stringify([{ ID: "multi", Namespace: "default" }]) };
+        if (path.startsWith("/v1/jobs?prefix=")) return { status: 200, text: "[]" };
+        if (method === "GET" && path.startsWith("/v1/job/multi"))
+          return { status: 200, text: JSON.stringify(multiTask) };
+        return { status: 200, text: "{}" };
+      },
+    };
+    const backend = new NomadBackend({ addr: "http://n:4646", image: "i", http });
+    await expect(backend.resizeWorkload("ghost", { cpu: 100 })).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(backend.resizeWorkload("multi", { cpu: 100 })).rejects.toBeInstanceOf(BadRequestError);
+    await expect(backend.resizeWorkload("multi", {})).rejects.toBeInstanceOf(BadRequestError);
+  });
 });
 
 describe("nomad resource parse helpers (pure)", () => {
@@ -989,6 +1074,42 @@ describe("nomad resource parse helpers (pure)", () => {
     ).toEqual({ cpuTotal: 8000, memoryMbTotal: 16000 });
     expect(nomadNodeResources("not json")).toEqual({});
     expect(nomadNodeResources(JSON.stringify({}))).toEqual({});
+  });
+
+  it("nomadNodeResources reads host identity + storage from the fingerprinted Attributes (each field best-effort)", () => {
+    const GiB = 1024 * 1024 * 1024;
+    expect(
+      nomadNodeResources(
+        JSON.stringify({
+          NodeResources: { Cpu: { CpuShares: 8000 }, Memory: { MemoryMB: 16000 } },
+          Attributes: {
+            "os.name": "ubuntu",
+            "os.version": "22.04",
+            "cpu.arch": "amd64",
+            "kernel.name": "linux",
+            "kernel.version": "6.8.0-45-generic",
+            "driver.docker.version": "27.1.1",
+            "nomad.version": "1.9.3",
+            "unique.network.ip-address": "10.0.0.5",
+            "unique.storage.bytestotal": String(200 * GiB),
+            "unique.storage.bytesfree": String(150 * GiB),
+          },
+        }),
+      ),
+    ).toEqual({
+      cpuTotal: 8000,
+      memoryMbTotal: 16000,
+      os: "ubuntu 22.04",
+      arch: "amd64",
+      kernel: "linux 6.8.0-45-generic",
+      containerRuntime: "docker 27.1.1",
+      agentVersion: "1.9.3",
+      address: "10.0.0.5",
+      diskMbTotal: 200 * 1024,
+      diskMbUsed: 50 * 1024, // total − free
+    });
+    // Partial attributes: what's absent just stays off the node — no invented values.
+    expect(nomadNodeResources(JSON.stringify({ Attributes: { "os.name": "ubuntu" } }))).toEqual({ os: "ubuntu" });
   });
 
   it("nomadAllocResources sums CPU + memory across tasks (omits zero)", () => {

@@ -312,6 +312,7 @@ function server(
       ok: true,
       ...(command.action === "reclaimIdle" ? { stopped: 2 } : {}),
       ...(command.action === "purgeTerminal" ? { purged: 5 } : {}),
+      ...(command.action === "resizeWorkload" ? { detail: `stub-resized ${command.name}` } : {}),
     }),
     secretStore,
     githubAppService,
@@ -1255,6 +1256,20 @@ describe("API — runtimes control (destructive, admin-only)", () => {
       payload: { action: "stopWorkload" }, // name missing
     });
     expect(res.statusCode).toBe(400);
+    await app.close();
+  });
+
+  it("admin can resize an external unit (namespace-scoped) → 200 + detail", async () => {
+    const { app } = server({ requireAuth: true, authenticator: roleAuth(["admin"]) });
+    await app.inject({ method: "POST", url: "/runtimes", headers: { authorization: "Bearer x" }, payload: RUNTIME });
+    const res = await app.inject({
+      method: "POST",
+      url: "/runtimes/seoul/versions/1.0.0/control",
+      headers: { authorization: "Bearer x" },
+      payload: { action: "resizeWorkload", name: "nginx-x", namespace: "web", cpu: 500, memoryMb: 1024 },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({ action: "resizeWorkload", ok: true, detail: "stub-resized nginx-x" });
     await app.close();
   });
 

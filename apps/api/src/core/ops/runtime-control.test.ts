@@ -12,7 +12,7 @@ function reclaimableBackend(spy: (call: string) => void): Backend & Reclaimable 
     dispatch: async () => {
       throw new Error("not used");
     },
-    stopWorkload: async (name) => spy(`stop:${name}`),
+    stopWorkload: async (name, namespace) => spy(`stop:${name}${namespace ? `@${namespace}` : ""}`),
     reclaimIdle: async (s) => {
       spy(`reclaim:${s}`);
       return { stopped: 3 };
@@ -22,6 +22,10 @@ function reclaimableBackend(spy: (call: string) => void): Backend & Reclaimable 
       return { purged: 7 };
     },
     setNodeSchedulable: async (node, schedulable) => spy(`cordon:${node}:${schedulable}`),
+    resizeWorkload: async (name, resources, namespace) => {
+      spy(`resize:${name}${namespace ? `@${namespace}` : ""}:${resources.cpu ?? "-"}/${resources.memoryMb ?? "-"}`);
+      return { detail: `resized ${name}` };
+    },
   };
 }
 
@@ -50,7 +54,38 @@ describe("makeRuntimeController", () => {
       action: "cordonNode",
       ok: true,
     });
-    expect(calls).toEqual(["stop:everdict-c1", "reclaim:1800", "purge", "cordon:n1:false"]);
+    // stopWorkload threads the namespace so an external unit is targeted precisely.
+    expect(await control("acme", NOMAD, { action: "stopWorkload", name: "nginx-x", namespace: "web" })).toEqual({
+      action: "stopWorkload",
+      ok: true,
+    });
+    expect(
+      await control("acme", NOMAD, { action: "resizeWorkload", name: "nginx-x", namespace: "web", cpu: 500 }),
+    ).toEqual({
+      action: "resizeWorkload",
+      ok: true,
+      detail: "resized nginx-x",
+    });
+    expect(calls).toEqual([
+      "stop:everdict-c1",
+      "reclaim:1800",
+      "purge",
+      "cordon:n1:false",
+      "stop:nginx-x@web",
+      "resize:nginx-x@web:500/-",
+    ]);
+  });
+
+  it("an empty resize (no cpu, no memoryMb) is a 400 at the controller, before any cluster call", async () => {
+    const calls: string[] = [];
+    const control = makeRuntimeController({
+      secretsFor: async () => ({}),
+      buildBackend: () => reclaimableBackend((c) => calls.push(c)),
+    });
+    await expect(control("acme", NOMAD, { action: "resizeWorkload", name: "nginx-x" })).rejects.toBeInstanceOf(
+      BadRequestError,
+    );
+    expect(calls).toEqual([]); // never reached the backend
   });
 
   it("throws BadRequest for a non-controllable kind (local — no live cluster), never a soft result", async () => {

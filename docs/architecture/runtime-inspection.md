@@ -7,8 +7,9 @@ cluster behind a nomad/k8s runtime, answering four operator questions the spec c
 | Question | Facet | Source |
 |---|---|---|
 | How is this cluster composed / is it healthy? | `nodes` (+ `cluster.datacenters`) | Nomad `/v1/nodes` · K8s `get nodes` |
+| What machine is each node (OS/arch/kernel/runtime/agent/IP/disk)? | `nodes[].{os,arch,kernel,containerRuntime,agentVersion,address,diskMbTotal,diskMbUsed}` | Nomad `/v1/node/:id` Attributes · K8s node `status.nodeInfo`+`addresses`+`allocatable`, kubelet stats summary |
 | Does it have room to run jobs right now? | `capacity` (total/used/free) | the same live count `Backend.capacity()` gates on |
-| What is running here / should anything be reclaimed? | `workload` (running/pending everdict units + age) | Nomad `/v1/allocations` · K8s `get pods -l app=everdict` |
+| What is running here (everdict AND external) / should anything be reclaimed? | `workload` (running/pending units + age + `role`/`namespace`/`ownerKind`) | Nomad `/v1/allocations` (all) · K8s `get pods -A` |
 | Are there shared stores, and at what address? | `stores` | Nomad `everdict-shared-*` allocs · K8s `get svc -n everdict-shared` |
 
 ## Shape & layering
@@ -41,6 +42,38 @@ Inspection is **TOTAL / best-effort**, like probe:
 - A build/config error (bad spec, missing secret) is distinct — the service returns `reason:"error"`.
 - The workload list is capped (`WORKLOAD_CAP`); an overflow is disclosed in `warnings` (no silent truncation).
 
+## The whole cluster, not just everdict (workload occupancy)
+
+The workload list is **every** running/pending unit on the cluster, not only the units everdict placed — because the
+detail screen answers "what actually occupies this node right now", and a node's real tenants include other platforms'
+services. Each `InspectWorkload` carries a `role`:
+
+- `eval` — an everdict eval job (Nomad `everdict-*` alloc / K8s pod labelled `app=everdict`).
+- `store` — a pool-tier shared store (`everdict-shared-*`).
+- `other` — an **external** unit: any non-everdict alloc/pod co-resident on the nodes.
+
+External units also carry `namespace` (the orchestrator namespace) and `ownerKind` (K8s controller kind —
+Deployment/StatefulSet/DaemonSet/Job/Pod, resolving a pod's ReplicaSet up to its Deployment; Nomad job type —
+service/batch/system). The `name` of an external K8s unit is the **pod** name (what namespace-scoped control targets);
+an everdict unit keeps its job/job-name. Under `WORKLOAD_CAP` (100), everdict units are kept ahead of external ones so
+a busy external cluster can't crowd out the eval view; the overflow is disclosed in `warnings`.
+
+Because the one pod/alloc listing now covers every unit, the per-node **committed load** (`cpuUsed`/`memoryMbUsed`) is
+summed from those same rows (K8s: `usageByNode` over the inspected rows, no second `get pods -A`; Nomad still reads each
+node's `/v1/node/:id/allocations` for the true all-jobs figure).
+
+## Node identity (what machine is this?)
+
+Beyond CPU/memory totals, `InspectNode` carries best-effort host identity so the node card reads like a real machine:
+`os` / `arch` / `kernel` / `containerRuntime` / `agentVersion` (Nomad client / kubelet) / `address` (internal IP) /
+`diskMbTotal` + `diskMbUsed` (local storage). Sources: **Nomad** the fingerprinted node `Attributes`
+(`os.name`+`os.version`, `cpu.arch`, `kernel.*`, `driver.docker.version`, `nomad.version`, `unique.network.ip-address`,
+`unique.storage.bytes{total,free}`); **K8s** node `status.nodeInfo` (`osImage`/`architecture`/`kernelVersion`/
+`containerRuntimeVersion`/`kubeletVersion`) + `addresses` InternalIP + `allocatable.ephemeral-storage` as the disk-total
+fallback, **refined** by the kubelet stats summary (`/nodes/:node/proxy/stats/summary` → real fs capacity/used) where the
+API server permits the proxy subresource (managed clusters / tight RBAC simply omit it — every field is independently
+best-effort). Per-node detail reads are capped (`NODE_DETAIL_CAP`, 30) to bound the calls on a big cluster.
+
 ## The shared-store nuance
 
 Shared stores are **not** a persistent property of a runtime — they belong to *topology harnesses*
@@ -57,7 +90,7 @@ Inspection therefore surfaces what is *actually standing on the cluster now*, di
 ## Control actions (Reclaimable)
 
 Inspection is paired with **destructive control** — the `Reclaimable` capability
-(`stopWorkload` / `reclaimIdle` / `purgeTerminal` / `setNodeSchedulable`), wrapped by apps/api
+(`stopWorkload` / `reclaimIdle` / `purgeTerminal` / `setNodeSchedulable` / `resizeWorkload`), wrapped by apps/api
 (`makeRuntimeController`, mirroring the prober) behind `POST /runtimes/:id/versions/:version/control`
 + the `control_runtime` MCP tool, and surfaced as confirm-gated buttons on the panel.
 
@@ -65,14 +98,24 @@ Inspection is paired with **destructive control** — the `Reclaimable` capabili
   (viewer+ registration) and admin-scope-only for API keys. Aborting an in-flight eval or taking a node out of
   scheduling is operator governance, not authoring. Unlike inspect (soft), a build/kind failure THROWS an AppError
   (mutating action → real 4xx/5xx); a `local` runtime is 400.
-- **The four actions.** `stopWorkload(name)` force-stops one live everdict unit (deregister/delete its job) — a
-  BLUNT infra reclaim of a stuck/orphaned unit, *distinct from the graceful run/scorecard cancel*; `reclaimIdle`
-  bulk-stops non-store units older than a threshold; `purgeTerminal` GCs dead/completed jobs (no live impact);
-  `setNodeSchedulable(node, schedulable)` cordons/uncordons a node (reversible, no eviction — Nomad eligibility /
-  `kubectl cordon`). Each is best-effort/idempotent; **shared stores are never reclaimed**; the UI re-inspects after.
+- **The actions.** `stopWorkload(name, namespace?)` force-stops one live unit — an everdict unit (deregister/delete
+  its job — a BLUNT infra reclaim, *distinct from the graceful run/scorecard cancel*), or with the unit's
+  `namespace` an **external** service (K8s: resolve the pod's ROOT controller and delete IT — deleting a
+  Deployment's pod just respawns; Nomad: deregister the namespaced job). `reclaimIdle` bulk-stops non-store
+  **everdict** units older than a threshold (external units are never swept); `purgeTerminal` GCs dead/completed
+  jobs (no live impact); `setNodeSchedulable(node, schedulable)` cordons/uncordons a node (reversible, no eviction —
+  Nomad eligibility / `kubectl cordon`); `resizeWorkload(name, {cpu?,memoryMb?}, namespace?)` changes a unit's
+  resource ask in the runtime's NATIVE units (Nomad CPU MHz / K8s millicores; memory MiB) by **replacing** the unit
+  (Nomad: rewrite a single-task job's Resources and resubmit — the alloc is replaced; K8s: patch the pod's owning
+  controller template — a rolling update). These four are best-effort/idempotent; **shared stores are never
+  reclaimed**, and **cluster-infra namespaces** (kube-system/kube-public/kube-node-lease) are refused for
+  stop/resize. `resizeWorkload` is the one **deliberately loud** action — an unsupported target (multi-task /
+  multi-container unit, a K8s Job whose pod template is immutable, a bare pod with no controller, or an empty
+  resize) THROWS a 4xx rather than silently no-op, so "done" always means the resize took. The UI re-inspects after.
 - **State-aware cordon.** `InspectNode.schedulable` (Nomad eligibility / k8s `!unschedulable`) lets the panel show
   the right toggle. The web gates the buttons on the `can.ts` mirror (`runtimes:control`) — enforcement is still the
-  control plane's (403).
+  control plane's (403). Resize (needs input) opens a small dialog with cpu/memory number fields prefilled from the
+  unit's current ask; stop of an external unit reads as "terminate this service" with a namespace-aware confirm.
 
 ## Node-centric topology view
 
@@ -86,20 +129,29 @@ workloads placed on it (with inline stop + a per-node cordon toggle). The data:
   it, not just everdict.** A shared cluster runs other platforms' jobs; a gauge fed only by the everdict units the
   view can see understates a busy node. So the backend reads the node's true commitment: **Nomad** sums the
   `AllocatedResources` of every running/pending alloc on the node (`/v1/node/:id/allocations` → `nomadNodeAllocated`);
-  **K8s** sums the container `requests` of every running/pending pod across all namespaces grouped by node
-  (`get pods -A` → `podRequestsByNode`). Same native units as the totals. Best-effort — an unavailable read simply
-  omits the field.
+  **K8s** sums the container `requests` of the inspected all-namespace pod rows grouped by node (`usageByNode` over the
+  one `get pods -A` listing that also feeds the workload view). Same native units as the totals. Best-effort — an
+  unavailable read simply omits the field.
 - `InspectWorkload` carries `cpu` / `memoryMb` (its resource ask, same units) + its `node`. Nomad sums the alloc's
-  `AllocatedResources.Tasks`; K8s sums the pod's container `requests` — these size the everdict workload chips.
+  `AllocatedResources.Tasks`; K8s sums the pod's container `requests` — these size the workload chips (everdict and
+  external alike).
 - The web's per-node usage bar uses `cpuUsed` / `memoryMbUsed` when present (true node load), and only falls back to
-  the sum of the visible everdict units' asks when the cluster didn't report the node's committed load. Units are
-  native-per-kind (the web labels MHz vs cores from `insp.kind`); memory MiB→GiB. All best-effort: a node that omits
-  resources simply has no bar. Node-less units fall into an "unscheduled" group; if node listing degrades, the panel
-  falls back to the flat workload list.
+  the sum of the visible units' asks when the cluster didn't report the node's committed load. A **third disk gauge**
+  (`diskMbUsed` / `diskMbTotal`) renders when both are known (else a plain "Disk: <total>" line when only the capacity
+  is). Units are native-per-kind (the web labels MHz vs cores from `insp.kind`); memory/disk MiB→GiB→TiB. A compact
+  identity strip under the node name shows OS/arch, container-runtime + node-agent versions, and IP (only the reported
+  fields). All best-effort: a node that omits resources simply has no bar/strip. Node-less units fall into an
+  "unscheduled" group; if node listing degrades, the panel falls back to the flat workload list. External units render
+  identically with an "external" badge (+ namespace/owner in the hover) and expose stop (terminate) and, where
+  supported, resize.
 
 ## Deliberate non-goals (v1)
 
-- **No auto-scaling from the panel** — the Autoscaler already drives capacity from queue depth; a manual scale knob
-  here would fight it. Cordon (take a node out of rotation) is the maintenance lever offered instead.
+- **No auto-scaling of the everdict eval pool from the panel** — the Autoscaler already drives that capacity from
+  queue depth; a manual knob for it would fight it. Cordon (take a node out of rotation) is the node-level lever, and
+  `resizeWorkload` targets an *individual* external service or Nomad job, not the eval pool's autoscaled envelope.
 - **No force-graph layout** — the node-card grid is the Lens/Nomad-topology idiom; a force-directed SVG graph would
   add a heavy layout dependency for little operator value over sized cards + resource bars.
+- **No in-place K8s eval-Job resize** — a K8s Job's pod template is immutable, and an eval job's resources are the
+  harness spec's job (sized at registration), so resize is refused there (a clear 400). It targets external
+  controllers (Deployment/StatefulSet/DaemonSet) and Nomad single-task jobs.

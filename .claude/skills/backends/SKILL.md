@@ -26,15 +26,21 @@ a runtime `backend.logs?.()` returning `undefined` on backends that never had it
 - `Shellable` (`execStream`) — interactive PTY-over-WS. **Nomad only** (`nomad alloc exec -i`); K8s has no stream exec.
 - `ScreenCapturable` (`captureScreen(runId)`) — topology backends' per-RUN browser frame (keyed by runId, not caseId).
 - `Probeable` (`probe`) — connection test without a job.
-- `Inspectable` (`inspect`) — read-only live cluster view for the runtime detail screen: composition (nodes/DCs),
-  concurrent capacity, the live everdict workload placed on it, and pool shared stores. A superset of probe (Nomad +
-  K8s). TOTAL/best-effort — a partial-cluster failure lands in the result's `warnings`, never throws. Result schema =
-  the SSOT `InspectRuntimeResult` in `@everdict/contracts/wire`, reused type-only by the interface (no drift). apps/api
-  wraps it (`makeRuntimeInspector`, like the prober) behind `GET /runtimes/:id/versions/:version/inspect` +
-  `inspect_runtime` MCP (both `runtimes:read`).
-- `Reclaimable` (`stopWorkload` / `reclaimIdle` / `purgeTerminal` / `setNodeSchedulable`) — DESTRUCTIVE control paired
-  with Inspectable, for the runtime detail screen's admin actions. Best-effort/idempotent (a gone target is a no-op;
-  shared stores are never reclaimed). apps/api wraps it (`makeRuntimeController`) behind
+- `Inspectable` (`inspect`) — read-only live cluster view for the runtime detail screen: composition (nodes/DCs, plus
+  each node's OS/arch/kernel/container-runtime/agent-version/IP/disk, best-effort), concurrent capacity, the live
+  workload placed on it — everdict units AND external (`role:"other"`) services co-resident on the nodes, with
+  `namespace`/`ownerKind` — and pool shared stores. A superset of probe (Nomad + K8s). TOTAL/best-effort — a
+  partial-cluster failure lands in the result's `warnings`, never throws. Result schema = the SSOT
+  `InspectRuntimeResult` in `@everdict/contracts/wire`, reused type-only by the interface (no drift). apps/api wraps it
+  (`makeRuntimeInspector`, like the prober) behind `GET /runtimes/:id/versions/:version/inspect` + `inspect_runtime`
+  MCP (both `runtimes:read`).
+- `Reclaimable` (`stopWorkload` / `reclaimIdle` / `purgeTerminal` / `setNodeSchedulable` / `resizeWorkload`) —
+  DESTRUCTIVE control paired with Inspectable, for the runtime detail screen's admin actions. The first four are
+  best-effort/idempotent (a gone target is a no-op; shared stores never reclaimed; cluster-infra namespaces refused).
+  `stopWorkload(name, namespace?)` and `resizeWorkload(name, {cpu?,memoryMb?}, namespace?)` take the unit's namespace
+  to target an EXTERNAL unit (K8s: delete/patch the pod's ROOT controller; Nomad: the namespaced job). `resizeWorkload`
+  is the ONE deliberately loud method — an unsupported target (multi-task/multi-container, K8s Job, bare pod, empty
+  resize) THROWS an AppError, never a silent no-op. apps/api wraps it (`makeRuntimeController`) behind
   `POST /runtimes/:id/versions/:version/control` + `control_runtime` MCP, gated the NEW admin-only `runtimes:control`
   action (distinct from `runtimes:write` viewer+ registration). Command/result SSOT = `RuntimeControlCommand` /
   `RuntimeControlResult` in `@everdict/contracts/wire`. See `docs/architecture/runtime-inspection.md`.

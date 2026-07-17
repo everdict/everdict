@@ -1,7 +1,17 @@
 'use client'
 
 import { useEffect, useRef, useState, useTransition, type ReactNode } from 'react'
-import { Ban, Loader2, Play, RefreshCw, Server, Trash2, X } from 'lucide-react'
+import {
+  Ban,
+  HardDrive,
+  Loader2,
+  Play,
+  RefreshCw,
+  Server,
+  SlidersHorizontal,
+  Trash2,
+  X,
+} from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
 import {
@@ -14,6 +24,7 @@ import { cn } from '@/shared/lib/utils'
 import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
 import { Dialog } from '@/shared/ui/dialog'
+import { Input, Label } from '@/shared/ui/input'
 
 type InspectNode = NonNullable<RuntimeInspection['nodes']>['items'][number]
 type InspectWorkload = NonNullable<RuntimeInspection['workload']>[number]
@@ -38,10 +49,18 @@ function formatCpu(n: number, kind: string): string {
 function formatMem(mb: number): string {
   if (mb < 1024) return `${mb} MiB`
   const g = mb / 1024
-  return `${g % 1 === 0 ? g : g.toFixed(1)} GiB`
+  if (g < 1024) return `${g % 1 === 0 ? g : g.toFixed(1)} GiB`
+  const t = g / 1024
+  return `${t % 1 === 0 ? t : t.toFixed(1)} TiB`
 }
 const idleUnit = (w: InspectWorkload) =>
   w.role !== 'store' && (w.ageSeconds ?? 0) >= LONG_RUNNING_SECONDS
+// An external (non-everdict) service co-resident on the cluster — targeted for control by its namespace.
+const isExternal = (w: InspectWorkload) => w.role === 'other'
+// Which units expose a resize control: stores never; K8s only external units (eval Jobs can't be resized), Nomad
+// any non-store single-task unit (the backend refuses a multi-task job with a clear error).
+const canResizeUnit = (w: InspectWorkload, kind: string) =>
+  w.role !== 'store' && (kind === 'k8s' ? isExternal(w) : true)
 
 // A pending confirm — a destructive command plus the copy the modal shows for it.
 interface Pending {
@@ -102,23 +121,36 @@ function RadialGauge({
   )
 }
 
-// One workload as a role-coloured chip with a hover tooltip (role/status/age/resources) + an inline stop for eval units.
+// One workload as a role-coloured chip with a hover tooltip (role/ns/owner/status/age/resources) + inline controls:
+// stop/terminate for non-store units, and a resize button where the unit supports it. An external (role 'other')
+// unit carries an "external" badge so it reads distinctly from the everdict eval/store units on the same node.
 function WorkloadChip({
   w,
   kind,
   canControl,
   onStop,
+  onResize,
   stopLabel,
+  resizeLabel,
+  externalLabel,
   idleTitle,
+  nsLabel,
+  ownerLabel,
 }: {
   w: InspectWorkload
   kind: string
   canControl: boolean
   onStop: () => void
+  onResize: () => void
   stopLabel: string
+  resizeLabel: string
+  externalLabel: string
   idleTitle: string
+  nsLabel: string
+  ownerLabel: string
 }) {
   const idle = idleUnit(w)
+  const external = isExternal(w)
   const dot = w.role === 'store' ? 'bg-cyan-400' : w.role === 'eval' ? 'bg-primary' : 'bg-faint'
   const tv =
     w.role === 'store' ? 'text-cyan-400' : w.role === 'eval' ? 'text-primary' : 'text-faint'
@@ -131,6 +163,21 @@ function WorkloadChip({
       >
         {w.name}
       </span>
+      {external ? (
+        <span className="shrink-0 rounded border border-border px-1 py-px text-[8.5px] font-[600] uppercase tracking-wide text-faint">
+          {externalLabel}
+        </span>
+      ) : null}
+      {canControl && canResizeUnit(w, kind) ? (
+        <button
+          type="button"
+          title={resizeLabel}
+          onClick={onResize}
+          className="hidden size-4 place-items-center rounded text-faint transition-colors hover:bg-primary/10 hover:text-primary group-hover:grid"
+        >
+          <SlidersHorizontal className="size-2.5" />
+        </button>
+      ) : null}
       {canControl && w.role !== 'store' ? (
         <button
           type="button"
@@ -142,7 +189,9 @@ function WorkloadChip({
         </button>
       ) : null}
       <span className="pointer-events-none absolute bottom-[calc(100%+7px)] left-1/2 z-20 w-max max-w-[220px] -translate-x-1/2 translate-y-1 space-y-1 rounded-lg border border-border-strong bg-popover p-2 opacity-0 shadow-pop transition-all duration-150 group-hover:translate-y-0 group-hover:opacity-100">
-        <TipRow k="role" v={<span className={tv}>{w.role}</span>} />
+        <TipRow k="role" v={<span className={tv}>{external ? externalLabel : w.role}</span>} />
+        {w.namespace ? <TipRow k={nsLabel} v={w.namespace} /> : null}
+        {w.ownerKind ? <TipRow k={ownerLabel} v={w.ownerKind} /> : null}
         <TipRow k="status" v={idle ? `${w.status} · idle?` : w.status} />
         {w.ageSeconds !== undefined ? <TipRow k="age" v={formatAge(w.ageSeconds)} /> : null}
         {w.cpu !== undefined || w.memoryMb !== undefined ? (
@@ -180,13 +229,14 @@ export function RuntimeClusterStatus({
   const [result, setResult] = useState<InspectRuntimeActionResult>()
   const [loading, start] = useTransition()
   const [pending, setPending] = useState<Pending>()
+  const [resizing, setResizing] = useState<InspectWorkload>()
   const [actionMessage, setActionMessage] = useState<string>()
   const [running, startAction] = useTransition()
 
-  // A poll must not fire while the user is mid-action (confirm modal open / control running) or a fetch is already
-  // in flight; the ref keeps the interval callback reading the latest flags without re-arming the timer each render.
+  // A poll must not fire while the user is mid-action (confirm modal open / resize modal open / control running) or
+  // a fetch is already in flight; the ref keeps the interval callback reading the latest flags without re-arming.
   const busyRef = useRef(false)
-  busyRef.current = loading || running || pending !== undefined
+  busyRef.current = loading || running || pending !== undefined || resizing !== undefined
 
   // Manual refresh (button) — unlike the first load it keeps the current view on screen while re-fetching (no flicker).
   function refresh() {
@@ -199,7 +249,8 @@ export function RuntimeClusterStatus({
   useEffect(() => {
     let cancelled = false
     const tick = () => {
-      if (cancelled || busyRef.current || (typeof document !== 'undefined' && document.hidden)) return
+      if (cancelled || busyRef.current || (typeof document !== 'undefined' && document.hidden))
+        return
       start(async () => {
         const r = await inspectRuntimeAction(id, version)
         if (!cancelled) setResult(r)
@@ -213,12 +264,12 @@ export function RuntimeClusterStatus({
     }
   }, [id, version, start])
 
-  function confirmRun() {
-    const p = pending
-    if (!p) return
+  // Run a control command, surface its outcome, and re-inspect. Shared by the confirm modal and the resize modal.
+  function runCommand(command: RuntimeControlCommand) {
     startAction(async () => {
-      const r = await controlRuntimeAction(id, version, p.command)
+      const r = await controlRuntimeAction(id, version, command)
       setPending(undefined)
+      setResizing(undefined)
       if (!r.ok) {
         setActionMessage(t('clusterActionFailed', { error: r.error ?? '' }))
         return
@@ -229,20 +280,40 @@ export function RuntimeClusterStatus({
           ? t('clusterStopped', { count: res.stopped })
           : res?.purged !== undefined
             ? t('clusterPurged', { count: res.purged })
-            : t('clusterActionDone')
+            : res?.detail !== undefined
+              ? t('clusterResized', { detail: res.detail })
+              : t('clusterActionDone')
       )
       setResult(await inspectRuntimeAction(id, version)) // refresh
     })
   }
 
+  function confirmRun() {
+    if (pending) runCommand(pending.command)
+  }
+
   const insp: RuntimeInspection | undefined = result?.ok ? result.inspection : undefined
 
+  // An external unit terminate carries its namespace (targets the pod's owning controller / the namespaced job) and
+  // reads as a "terminate a service", distinct from aborting an everdict eval.
   const askStop = (w: InspectWorkload) =>
-    setPending({
-      command: { action: 'stopWorkload', name: w.name },
-      title: t('clusterActionStop'),
-      body: t('clusterConfirmStop', { name: w.name }),
-    })
+    setPending(
+      isExternal(w)
+        ? {
+            command: {
+              action: 'stopWorkload',
+              name: w.name,
+              ...(w.namespace ? { namespace: w.namespace } : {}),
+            },
+            title: t('clusterActionTerminate'),
+            body: t('clusterConfirmTerminate', { name: w.name, namespace: w.namespace ?? '' }),
+          }
+        : {
+            command: { action: 'stopWorkload', name: w.name },
+            title: t('clusterActionStop'),
+            body: t('clusterConfirmStop', { name: w.name }),
+          }
+    )
   const askCordon = (n: InspectNode) =>
     setPending({
       command: { action: 'cordonNode', node: n.name, schedulable: !n.schedulable },
@@ -251,6 +322,25 @@ export function RuntimeClusterStatus({
         ? t('clusterConfirmCordon', { node: n.name })
         : t('clusterConfirmUncordon', { node: n.name }),
     })
+
+  // One chip renderer shared by every workload list (node cards / unscheduled / degraded fallback), so the control
+  // wiring + labels stay in one place. kind is passed explicitly (the reachable-block narrowing doesn't reach here).
+  const chip = (w: InspectWorkload, kind: string) => (
+    <WorkloadChip
+      key={w.id}
+      w={w}
+      kind={kind}
+      canControl={canControl}
+      onStop={() => askStop(w)}
+      onResize={() => setResizing(w)}
+      stopLabel={isExternal(w) ? t('clusterActionTerminate') : t('clusterActionStop')}
+      resizeLabel={t('clusterActionResize')}
+      externalLabel={t('clusterExternal')}
+      idleTitle={t('clusterLongRunning')}
+      nsLabel={t('clusterTipNamespace')}
+      ownerLabel={t('clusterTipOwner')}
+    />
+  )
 
   // Group the workload by node (Lens-style); node-less units → "unscheduled".
   const nodes = insp?.nodes?.items ?? []
@@ -266,8 +356,9 @@ export function RuntimeClusterStatus({
     ws.reduce((a, w) => a + (w[k] ?? 0), 0)
   const evalCount = workloads.filter((w) => w.role === 'eval').length
   const storeCount = workloads.filter((w) => w.role === 'store').length
+  const externalCount = workloads.filter(isExternal).length
   const idleCount = workloads.filter(idleUnit).length
-  const reclaimable = canControl && workloads.some((w) => w.role !== 'store')
+  const reclaimable = canControl && workloads.some((w) => w.role === 'eval')
 
   return (
     <div className="space-y-3">
@@ -382,7 +473,12 @@ export function RuntimeClusterStatus({
               <OverviewStat
                 value={workloads.length}
                 label={t('clusterWorkloadShort')}
-                chips={[t('clusterEvalStore', { eval: evalCount, store: storeCount })]}
+                chips={[
+                  t('clusterEvalStore', { eval: evalCount, store: storeCount }),
+                  ...(externalCount > 0
+                    ? [t('clusterExternalCount', { count: externalCount })]
+                    : []),
+                ]}
               />
               {idleCount > 0 ? (
                 <OverviewStat
@@ -451,8 +547,12 @@ export function RuntimeClusterStatus({
                       ) : null}
                     </div>
 
-                    {n.cpuTotal !== undefined || n.memoryMbTotal !== undefined ? (
-                      <div className="flex gap-4">
+                    <NodeMetaStrip node={n} t={t} />
+
+                    {n.cpuTotal !== undefined ||
+                    n.memoryMbTotal !== undefined ||
+                    n.diskMbTotal !== undefined ? (
+                      <div className="flex flex-wrap gap-4">
                         {n.cpuTotal !== undefined ? (
                           <RadialGauge
                             label={t('clusterCpu')}
@@ -471,22 +571,28 @@ export function RuntimeClusterStatus({
                             render={formatMem}
                           />
                         ) : null}
+                        {n.diskMbTotal !== undefined && n.diskMbUsed !== undefined ? (
+                          <RadialGauge
+                            label={t('clusterDisk')}
+                            used={n.diskMbUsed}
+                            total={n.diskMbTotal}
+                            render={formatMem}
+                          />
+                        ) : null}
+                      </div>
+                    ) : null}
+
+                    {/* A disk total with no usage figure (only the capacity is known) — show it as a plain line. */}
+                    {n.diskMbTotal !== undefined && n.diskMbUsed === undefined ? (
+                      <div className="flex items-center gap-1.5 font-mono text-[10.5px] text-muted-foreground">
+                        <HardDrive className="size-3 text-faint" />
+                        {t('clusterDisk')}: {formatMem(n.diskMbTotal)}
                       </div>
                     ) : null}
 
                     <div className="flex flex-wrap gap-1.5">
                       {units.length > 0 ? (
-                        units.map((w) => (
-                          <WorkloadChip
-                            key={w.id}
-                            w={w}
-                            kind={insp.kind}
-                            canControl={canControl}
-                            onStop={() => askStop(w)}
-                            stopLabel={t('clusterActionStop')}
-                            idleTitle={t('clusterLongRunning')}
-                          />
-                        ))
+                        units.map((w) => chip(w, insp.kind))
                       ) : (
                         <span className="text-[11px] italic text-faint">
                           {t('clusterNodeEmpty')}
@@ -526,17 +632,7 @@ export function RuntimeClusterStatus({
               </div>
               {unscheduled.length > 0 ? (
                 <div className="flex flex-wrap gap-1.5">
-                  {unscheduled.map((w) => (
-                    <WorkloadChip
-                      key={w.id}
-                      w={w}
-                      kind={insp.kind}
-                      canControl={canControl}
-                      onStop={() => askStop(w)}
-                      stopLabel={t('clusterActionStop')}
-                      idleTitle={t('clusterLongRunning')}
-                    />
-                  ))}
+                  {unscheduled.map((w) => chip(w, insp.kind))}
                 </div>
               ) : null}
             </div>
@@ -546,17 +642,7 @@ export function RuntimeClusterStatus({
           {!insp.nodes && insp.workload ? (
             <div className="flex flex-wrap gap-1.5">
               {insp.workload.length > 0 ? (
-                insp.workload.map((w) => (
-                  <WorkloadChip
-                    key={w.id}
-                    w={w}
-                    kind={insp.kind}
-                    canControl={canControl}
-                    onStop={() => askStop(w)}
-                    stopLabel={t('clusterActionStop')}
-                    idleTitle={t('clusterLongRunning')}
-                  />
-                ))
+                insp.workload.map((w) => chip(w, insp.kind))
               ) : (
                 <span className="text-[12px] text-faint">{t('clusterNoWorkload')}</span>
               )}
@@ -621,7 +707,129 @@ export function RuntimeClusterStatus({
           </div>
         </div>
       </Dialog>
+
+      {/* Resize modal — needs input, so it's separate from the confirm modal. Prefilled from the unit's current ask. */}
+      {resizing ? (
+        <ResizeDialog
+          unit={resizing}
+          kind={insp?.kind ?? ''}
+          running={running}
+          onCancel={() => setResizing(undefined)}
+          onSubmit={(cpu, memoryMb) =>
+            runCommand({
+              action: 'resizeWorkload',
+              name: resizing.name,
+              ...(resizing.namespace ? { namespace: resizing.namespace } : {}),
+              ...(cpu !== undefined ? { cpu } : {}),
+              ...(memoryMb !== undefined ? { memoryMb } : {}),
+            })
+          }
+          t={t}
+        />
+      ) : null}
     </div>
+  )
+}
+
+// A compact identity strip under a node's name — OS / arch, container-runtime + node-agent versions, IP. Only the
+// fields the cluster actually reported render (all best-effort); an empty strip collapses to nothing.
+function NodeMetaStrip({ node, t }: { node: InspectNode; t: ReturnType<typeof useTranslations> }) {
+  const rows: Array<{ k: string; v: string }> = []
+  if (node.os)
+    rows.push({ k: t('clusterNodeOs'), v: node.arch ? `${node.os} · ${node.arch}` : node.os })
+  else if (node.arch) rows.push({ k: t('clusterNodeArch'), v: node.arch })
+  if (node.kernel) rows.push({ k: t('clusterNodeKernel'), v: node.kernel })
+  if (node.containerRuntime) rows.push({ k: t('clusterNodeRuntime'), v: node.containerRuntime })
+  if (node.agentVersion) rows.push({ k: t('clusterNodeAgent'), v: node.agentVersion })
+  if (node.address) rows.push({ k: t('clusterNodeIp'), v: node.address })
+  if (rows.length === 0) return null
+  return (
+    <div className="flex flex-wrap gap-x-3 gap-y-1">
+      {rows.map((r) => (
+        <span key={r.k} className="inline-flex items-baseline gap-1 text-[10.5px]">
+          <span className="uppercase tracking-wide text-faint">{r.k}</span>
+          <span className="font-mono text-muted-foreground">{r.v}</span>
+        </span>
+      ))}
+    </div>
+  )
+}
+
+// The resize form — CPU + memory in the runtime's native units (Nomad MHz / K8s millicores; memory MiB), prefilled
+// from the unit's current ask. Submit is blocked until at least one field carries a positive number.
+function ResizeDialog({
+  unit,
+  kind,
+  running,
+  onCancel,
+  onSubmit,
+  t,
+}: {
+  unit: InspectWorkload
+  kind: string
+  running: boolean
+  onCancel: () => void
+  onSubmit: (cpu: number | undefined, memoryMb: number | undefined) => void
+  t: ReturnType<typeof useTranslations>
+}) {
+  const [cpu, setCpu] = useState(unit.cpu !== undefined ? String(unit.cpu) : '')
+  const [memoryMb, setMemoryMb] = useState(unit.memoryMb !== undefined ? String(unit.memoryMb) : '')
+  const cpuNum = cpu.trim() === '' ? undefined : Number(cpu)
+  const memNum = memoryMb.trim() === '' ? undefined : Number(memoryMb)
+  const cpuValid = cpuNum === undefined || (Number.isFinite(cpuNum) && cpuNum > 0)
+  const memValid = memNum === undefined || (Number.isFinite(memNum) && memNum > 0)
+  const hasValue = cpuNum !== undefined || memNum !== undefined
+  const valid = cpuValid && memValid && hasValue
+  return (
+    <Dialog open onClose={() => (running ? undefined : onCancel())}>
+      <div className="w-[26rem] max-w-full space-y-4 p-5">
+        <h3 className="text-[14px] font-[560]">{t('clusterResizeTitle', { name: unit.name })}</h3>
+        <p className="text-[13px] leading-relaxed text-muted-foreground">
+          {t('clusterResizeBody')}
+        </p>
+        <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-1">
+            <Label htmlFor="resize-cpu">
+              {kind === 'k8s' ? t('clusterResizeCpuMilli') : t('clusterResizeCpuMhz')}
+            </Label>
+            <Input
+              id="resize-cpu"
+              inputMode="numeric"
+              value={cpu}
+              onChange={(e) => setCpu(e.target.value)}
+              className={cn(!cpuValid && 'border-rose-500')}
+            />
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="resize-mem">{t('clusterResizeMemory')}</Label>
+            <Input
+              id="resize-mem"
+              inputMode="numeric"
+              value={memoryMb}
+              onChange={(e) => setMemoryMb(e.target.value)}
+              className={cn(!memValid && 'border-rose-500')}
+            />
+          </div>
+        </div>
+        {!hasValue ? (
+          <p className="text-[11.5px] text-faint">{t('clusterResizeNeedsValue')}</p>
+        ) : null}
+        <div className="flex justify-end gap-2">
+          <Button variant="ghost" size="sm" onClick={onCancel} disabled={running}>
+            {t('clusterCancel')}
+          </Button>
+          <Button
+            size="sm"
+            onClick={() => onSubmit(cpuNum, memNum)}
+            disabled={running || !valid}
+            className="gap-1.5"
+          >
+            {running ? <Loader2 className="size-3.5 animate-spin" /> : null}
+            {t('clusterResizeSubmit')}
+          </Button>
+        </div>
+      </div>
+    </Dialog>
   )
 }
 
