@@ -16,7 +16,6 @@ import {
 } from '@/entities/scorecard'
 import { can } from '@/shared/auth/can'
 import { currentPrincipal } from '@/shared/auth/principal'
-import { env } from '@/shared/config/env'
 import { controlPlane } from '@/shared/lib/control-plane'
 import {
   fmtMetricLabel,
@@ -27,6 +26,7 @@ import {
   HEALTH_TEXT,
   rateHealth,
 } from '@/shared/lib/format'
+import { resolveTemporalUiBase } from '@/shared/lib/temporal-ui'
 import { cn } from '@/shared/lib/utils'
 import { AutoRefresh } from '@/shared/ui/auto-refresh'
 import { Badge } from '@/shared/ui/badge'
@@ -231,6 +231,11 @@ export default async function ScorecardDetailPage({
   const summary = record.summary ?? []
   const summaryMetrics = summary.map((m) => m.metric) // sibling context for judge-metric disambiguation
   const judges = record.orchestration?.judges ?? [] // Agent Judges applied to this batch → entity links in the meta card
+  // Temporal UI base for the workflow chip — loopback TEMPORAL_UI_URL is rebased onto the request host
+  // (self-hosted: the operator's localhost is not the browser's localhost). Unset → the chip is plain text.
+  const temporalUiBase = record.orchestration?.workflowId
+    ? await resolveTemporalUiBase()
+    : undefined
   const results = record.scorecard?.results ?? []
   const steps = record.steps ?? []
   const live = record.status === 'queued' || record.status === 'running'
@@ -505,9 +510,9 @@ export default async function ScorecardDetailPage({
         {record.orchestration?.workflowId && (
           <MetaItem label={t('metaWorkflow')}>
             <span className="block truncate font-mono text-[13px] text-foreground">
-              {env.TEMPORAL_UI_URL ? (
+              {temporalUiBase ? (
                 <a
-                  href={`${env.TEMPORAL_UI_URL}/namespaces/default/workflows/${encodeURIComponent(record.orchestration.workflowId)}`}
+                  href={`${temporalUiBase}/namespaces/default/workflows/${encodeURIComponent(record.orchestration.workflowId)}`}
                   target="_blank"
                   rel="noreferrer"
                   className="rounded-sm hover:underline"

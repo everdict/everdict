@@ -187,6 +187,8 @@ services:
       target: runtime
     environment:
       CONTROL_PLANE_URL: http://api:8787
+      # Loopback default is fine: the web rebases a loopback host onto the browser's request host at render
+      # time (the Temporal UI is published on the same host as the web), so remote users get a reachable link.
       TEMPORAL_UI_URL: ${TEMPORAL_UI_URL:-http://localhost:${TEMPORAL_UI_PORT:-8233}}
       # Auth (enable with the `auth` profile). Unset → the web runs in dev mode (no login, tenant=default).
       AUTH_SECRET: ${AUTH_SECRET:-}

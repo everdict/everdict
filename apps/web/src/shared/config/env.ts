@@ -12,7 +12,10 @@ const schema = z.object({
   DESKTOP_RELEASES_TOKEN: z.string().optional(),
   // Fallback external link — where the download page points when release metadata can't be fetched (e.g. a private repo with no token).
   DESKTOP_DOWNLOAD_URL: z.string().url().optional(),
-  // Temporal Web UI base (e.g. http://localhost:8233) — when set, a Temporal-owned batch's workflow chip deep-links there.
+  // Temporal Web UI base (e.g. http://localhost:8233) — when set, a Temporal-owned batch's workflow chip deep-links
+  // there. The href is opened by the browser, so a loopback host is rebased onto the request host at render time
+  // (shared/lib/temporal-ui.ts) — the compose default stays correct for remote users; set a non-loopback URL to pin
+  // a vanity/proxied address verbatim.
   TEMPORAL_UI_URL: z.string().url().optional(),
   // Canonical base for the workspace URL shown read-only in Settings › General. Unset → derived from the actual
   // request origin (`<origin>/<workspace-id>`), so a self-hosted deployment shows its own server address with zero
