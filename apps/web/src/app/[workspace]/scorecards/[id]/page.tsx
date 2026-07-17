@@ -4,9 +4,10 @@ import { getLocale, getTranslations } from 'next-intl/server'
 
 import { DeleteScorecardButton } from '@/features/delete-scorecard'
 import { CommentsSection } from '@/features/discuss'
-import { RetryFailedButton } from '@/features/retry-failed-cases'
+import { RerunScorecardButton } from '@/features/rerun-scorecard'
 import { StopScorecardButton } from '@/features/stop-scorecard'
 import { membersSchema } from '@/entities/member'
+import { modelsSchema } from '@/entities/model'
 import { runsSchema, type RunStatus } from '@/entities/run'
 import { runnersResponseSchema, type RunnerMeta } from '@/entities/runner'
 import {
@@ -14,6 +15,7 @@ import {
   type MetricSummary,
   type ScorecardRecord,
 } from '@/entities/scorecard'
+import { traceSourcesResponseSchema } from '@/entities/trace-source'
 import { can } from '@/shared/auth/can'
 import { currentPrincipal } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
@@ -295,6 +297,26 @@ export default async function ScorecardDetailPage({
       // roster fetch failed → no live badge; the static hint still renders
     }
   }
+  // Re-run choices — the re-run dialog's advanced re-score overrides need the workspace's configured trace sinks
+  // (otel is pull-only) + registered models. Only fetched for a terminal batch the viewer can re-run (both optional).
+  const canRun = !live && can(principal?.roles, 'scorecards:run')
+  let sinks: { name: string; kind: string }[] = []
+  let models: { id: string }[] = []
+  if (canRun) {
+    try {
+      sinks = traceSourcesResponseSchema
+        .parse(await controlPlane.listTraceSources(ctx))
+        .sources.filter((s) => s.kind !== 'otel')
+        .map((s) => ({ name: s.name, kind: s.kind }))
+    } catch {
+      // Source list failed → the re-run dialog just omits the trace-sink override
+    }
+    try {
+      models = modelsSchema.parse(await controlPlane.listModels(ctx))
+    } catch {
+      // Model list failed → the re-run dialog just omits the judge-model override
+    }
+  }
   const locale = await getLocale()
   const runnerOnline = (lastSeenAt?: string) =>
     !!lastSeenAt && Date.now() - new Date(lastSeenAt).getTime() < 90_000
@@ -314,10 +336,17 @@ export default async function ScorecardDetailPage({
               {live && can(principal?.roles, 'scorecards:run') && (
                 <StopScorecardButton id={record.id} />
               )}
-              {/* Retry is offered once the batch is terminal and some cases failed — re-run just those (e.g. after a
-                  runner was down) as a new scorecard; passing cases carry over. The control plane enforces scorecards:run. */}
-              {!live && failedCount > 0 && (
-                <RetryFailedButton id={record.id} workspace={workspace} />
+              {/* Re-run is offered once the batch is terminal, to a viewer who can run scorecards — one button that
+                  chooses between a full re-run (every case, optionally re-scored) and a failed-only recovery
+                  (passing cases carry over). The control plane enforces scorecards:run. */}
+              {canRun && (
+                <RerunScorecardButton
+                  id={record.id}
+                  workspace={workspace}
+                  failedCount={failedCount}
+                  sinks={sinks}
+                  models={models}
+                />
               )}
               {/* Delete is offered once the batch is terminal, to its creator or a workspace admin (mirrors the
                   harness/dataset delete UX; the control plane enforces scorecards:delete + the creator exception). */}

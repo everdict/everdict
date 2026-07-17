@@ -3,6 +3,7 @@ import {
   type CaseResult,
   type Dataset,
   ForbiddenError,
+  type GraderSpec,
   type HarnessSpec,
   NotFoundError,
   type ScorecardOrigin,
@@ -247,6 +248,66 @@ export class ScorecardService {
       },
     );
     return record;
+  }
+
+  // Full re-run — re-execute a FINISHED batch's ENTIRE case set as a NEW scorecard, faithfully reproducing the
+  // original submit inputs (dataset+version, harness+ephemeral pins, selected judges, runtime, concurrency/retries/
+  // trials, subset) so the two are directly comparable — optionally applying a re-score override (a different
+  // grading plan / inline judge model / trace sink). The source record is never mutated. This is the "전체 재실행"
+  // scope (the recovery-only "실패만 재실행" stays retryFailed, which carries passing results over). Cloning through
+  // submit gets faithfulness for free (pins/judge-model/trials/temporal dispatch); the ONE thing we deliberately
+  // drop is the CI provenance (repo/sha/prNumber) — a manual re-run is a new trigger, and inheriting prNumber would
+  // wrongly supersede other in-flight batches of that PR. Lineage is kept via origin.retryOf. Workspace-scoped:
+  // another workspace's / a missing scorecard is a NotFound (no existence leak).
+  async rerun(input: {
+    tenant: string;
+    id: string;
+    submittedBy?: string;
+    // Re-score overrides (all optional) — unset inherits the original batch's own plan/model/sink.
+    graders?: GraderSpec[];
+    traceSink?: string; // a configured workspace sink name, or "none" to suppress export for this re-run
+    judgeModel?: string; // a registered Model id for the inline judge grader
+  }): Promise<ScorecardRecord> {
+    const src = await this.get(input.id);
+    if (!src || src.tenant !== input.tenant)
+      throw new NotFoundError("NOT_FOUND", { scorecard: input.id }, "scorecard not found.");
+    // Terminal-only gate (multi-trial IS allowed — submit re-fans the trials). The domain throws the 400.
+    ScorecardBatch.from(src).assertCanRerun();
+    const orch = src.orchestration;
+    const pins = src.origin?.pinOverrides;
+    // Reconstruct the original submit inputs from the stored record, then overlay the optional overrides.
+    return this.submit({
+      tenant: src.tenant,
+      ...(input.submittedBy ? { submittedBy: input.submittedBy } : {}),
+      dataset: { id: src.dataset.id, version: src.dataset.version },
+      harness: {
+        id: src.harness.id,
+        version: src.harness.version,
+        ...(pins && Object.keys(pins).length > 0 ? { pins } : {}),
+      },
+      judges: orch?.judges ?? [],
+      ...(src.runtime ? { runtime: src.runtime } : {}),
+      ...(orch?.concurrency !== undefined ? { concurrency: orch.concurrency } : {}),
+      ...(orch?.retries !== undefined ? { retries: orch.retries } : {}),
+      ...(orch?.trials !== undefined ? { trials: orch.trials } : {}),
+      ...(orch?.oomAutoBoost ? { oomAutoBoost: true } : {}),
+      // Re-run the SAME subset the original ran ("전체" = every case of THIS scorecard, not the whole dataset).
+      ...(src.subset
+        ? {
+            cases: {
+              ...(src.subset.ids ? { ids: src.subset.ids } : {}),
+              ...(src.subset.tags ? { tags: src.subset.tags } : {}),
+              ...(src.subset.limit !== undefined ? { limit: src.subset.limit } : {}),
+            },
+          }
+        : {}),
+      // Re-score overrides: explicit override → else inherit the original batch's own plan/sink/model.
+      ...((input.graders ?? orch?.graders) ? { graders: input.graders ?? orch?.graders } : {}),
+      ...((input.traceSink ?? orch?.traceSink) ? { traceSink: input.traceSink ?? orch?.traceSink } : {}),
+      ...(input.judgeModel ? { judge: { model: input.judgeModel } } : orch?.judge ? { judge: orch.judge } : {}),
+      // Lineage only — NO repo/prNumber (a manual re-run is a fresh trigger, and prNumber would supersede the PR).
+      origin: { source: "api", retryOf: src.id },
+    });
   }
 
   // Terminate any queued/running batch under the same (repo, PR, harness, dataset) key as superseded and send an abort signal.

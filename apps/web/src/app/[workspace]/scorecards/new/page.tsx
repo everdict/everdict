@@ -6,10 +6,8 @@ import { RunScorecardForm } from '@/features/run-scorecard'
 import { datasetsSchema } from '@/entities/dataset'
 import { harnessesSchema } from '@/entities/harness'
 import { judgesSchema } from '@/entities/judge'
-import { modelsSchema } from '@/entities/model'
 import { runnersResponseSchema } from '@/entities/runner'
 import { runtimesSchema } from '@/entities/runtime'
-import { traceSourcesResponseSchema } from '@/entities/trace-source'
 import { can } from '@/shared/auth/can'
 import { currentPrincipal } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
@@ -40,8 +38,6 @@ export default async function NewScorecardPage({
   let runtimes: { id: string; capabilities?: string[] }[] = []
   let runners: { id: string; label: string }[] = []
   let hasWorkspaceRunners = false
-  let sinks: { name: string; kind: string }[] = []
-  let models: { id: string }[] = []
   if (allowed) {
     try {
       datasets = datasetsSchema.parse(await controlPlane.listDatasets(ctx))
@@ -74,21 +70,6 @@ export default async function NewScorecardPage({
     } catch {
       // Even if the roster fails, the form still works (only the pool option is hidden)
     }
-    // Advanced overrides — the per-batch export override lists sink-capable trace sources (otel is pull-only) +
-    // registered models (inline judge model override). Both optional.
-    try {
-      sinks = traceSourcesResponseSchema
-        .parse(await controlPlane.listTraceSources(ctx))
-        .sources.filter((s) => s.kind !== 'otel')
-        .map((s) => ({ name: s.name, kind: s.kind }))
-    } catch {
-      // Even if the source list fails, the form still works (traceSink override just unavailable)
-    }
-    try {
-      models = modelsSchema.parse(await controlPlane.listModels(ctx))
-    } catch {
-      // Even if the model list fails, the form still works (judge-model override just unavailable)
-    }
   }
 
   return (
@@ -110,8 +91,6 @@ export default async function NewScorecardPage({
             runtimes={runtimes}
             runners={runners}
             hasWorkspaceRunners={hasWorkspaceRunners}
-            sinks={sinks}
-            models={models}
           />
         </Card>
       ) : (

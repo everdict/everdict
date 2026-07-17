@@ -333,6 +333,103 @@ async function waitTerminal(store: InMemoryScorecardStore, id: string): Promise<
   throw new Error("pull ingest did not finish");
 }
 
+describe("ScorecardService.rerun — full re-run of a finished batch (전체 재실행)", () => {
+  // Dispatch returns a scored result so the background track settles cleanly (the assertions read the
+  // synchronously-created new record either way).
+  const okDispatch: Dispatcher = {
+    async dispatch(job) {
+      return {
+        caseId: job.evalCase.id,
+        harness: `${job.harness.id}@${job.harness.version}`,
+        trace: [],
+        snapshot: { kind: "repo", diff: "", changedFiles: [], headSha: "h" },
+        scores: [{ graderId: "tests-pass", metric: "tests-pass", value: 1, pass: true }],
+      };
+    },
+  };
+
+  // A finished source batch whose config the re-run must reproduce — a CI-triggered PR run (repo/prNumber origin),
+  // a subset, a selected judge, and a grading plan.
+  const seedSrc = async (store: InMemoryScorecardStore, over: Partial<ScorecardRecord> = {}) => {
+    const src = record("src-1", {
+      status: "succeeded",
+      runtime: "self:laptop",
+      origin: { source: "github-actions", repo: "acme/app", prNumber: 7 },
+      subset: { total: 3, selected: 1, ids: ["c1"] },
+      orchestration: {
+        judges: [{ id: "j", version: "1" }],
+        concurrency: 2,
+        retries: 1,
+        graders: [{ id: "tests-pass" }],
+      },
+      ...over,
+    });
+    await store.create(src);
+    return src;
+  };
+
+  const build = (store: InMemoryScorecardStore) => {
+    const datasets = new InMemoryDatasetRegistry();
+    let n = 0;
+    const service = new ScorecardService({ dispatcher: okDispatch, store, datasets, newId: () => `new-${n++}` });
+    return { datasets, service };
+  };
+
+  it("clones the record's config into a NEW scorecard (retryOf lineage) and does NOT inherit the PR — so a manual re-run never supersedes the PR's in-flight batches", async () => {
+    const store = new InMemoryScorecardStore();
+    await seedSrc(store);
+    const { datasets, service } = build(store);
+    await datasets.register("acme", datasetWithCase());
+
+    const created = await service.rerun({ tenant: "acme", id: "src-1", submittedBy: "alice" });
+
+    expect(created.id).toBe("new-0"); // a fresh record, not a mutation of the source
+    expect(created.origin?.retryOf).toBe("src-1"); // lineage kept
+    expect(created.origin?.repo).toBeUndefined(); // PR provenance deliberately dropped …
+    expect(created.origin?.prNumber).toBeUndefined(); // … so submit's PR-supersede never fires for a manual re-run
+    // Config reproduced faithfully.
+    expect(created.dataset).toEqual({ id: "d", version: "1.0.0" });
+    expect(created.runtime).toBe("self:laptop");
+    expect(created.subset?.ids).toEqual(["c1"]);
+    expect(created.orchestration?.judges).toEqual([{ id: "j", version: "1" }]);
+    expect(created.orchestration?.concurrency).toBe(2);
+    expect(created.orchestration?.graders).toEqual([{ id: "tests-pass" }]); // original grading plan inherited
+    expect(created.createdBy).toBe("alice");
+    // The source record is never mutated.
+    expect((await store.get("src-1"))?.status).toBe("succeeded");
+  });
+
+  it("applies re-score overrides (grading plan / judge model / trace sink) to the new batch's orchestration", async () => {
+    const store = new InMemoryScorecardStore();
+    await seedSrc(store);
+    const { datasets, service } = build(store);
+    await datasets.register("acme", datasetWithCase());
+
+    const created = await service.rerun({
+      tenant: "acme",
+      id: "src-1",
+      graders: [{ id: "cost" }],
+      judgeModel: "gpt-x",
+      traceSink: "none",
+    });
+
+    expect(created.orchestration?.graders).toEqual([{ id: "cost" }]); // override replaces the inherited plan
+    expect(created.orchestration?.judge).toEqual({ model: "gpt-x" });
+    expect(created.orchestration?.traceSink).toBe("none");
+  });
+
+  it("rejects re-running a batch that has not finished (400) and hides another workspace's / a missing scorecard (404)", async () => {
+    const store = new InMemoryScorecardStore();
+    await seedSrc(store, { status: "running" });
+    const { datasets, service } = build(store);
+    await datasets.register("acme", datasetWithCase());
+
+    await expect(service.rerun({ tenant: "acme", id: "src-1" })).rejects.toBeInstanceOf(BadRequestError);
+    await expect(service.rerun({ tenant: "acme", id: "missing" })).rejects.toBeInstanceOf(NotFoundError);
+    await expect(service.rerun({ tenant: "other", id: "src-1" })).rejects.toBeInstanceOf(NotFoundError);
+  });
+});
+
 describe("ScorecardService.ingestPull", () => {
   it("pulls traces from a trace source, derives metrics, and stores as succeeded", async () => {
     const store = new InMemoryScorecardStore();

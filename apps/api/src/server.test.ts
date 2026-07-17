@@ -3297,6 +3297,52 @@ describe("API — scorecards (dataset×harness batch eval)", () => {
     await app.close();
   });
 
+  it("POST /scorecards/:id/rerun: member re-runs a finished batch as a new scorecard (202, fresh id) applying a grading-plan override", async () => {
+    const { app } = server({ requireAuth: true, authenticator: roleAuth(["member"]) });
+    const h = { authorization: "Bearer x" };
+    await app.inject({ method: "POST", url: "/datasets", headers: h, payload: DATASET });
+    const post = await app.inject({
+      method: "POST",
+      url: "/scorecards",
+      headers: h,
+      payload: { dataset: { id: "smoke" }, harness: { id: "scripted" } },
+    });
+    const id = post.json().id;
+    await pollScorecard(app, id, h); // let it settle (succeeded)
+    const rerun = await app.inject({
+      method: "POST",
+      url: `/scorecards/${id}/rerun`,
+      headers: h,
+      payload: { graders: [{ id: "steps" }] },
+    });
+    expect(rerun.statusCode).toBe(202);
+    expect(rerun.json().id).not.toBe(id); // a fresh scorecard, not a mutation of the source
+    expect(rerun.json().origin.retryOf).toBe(id); // lineage kept
+    await app.close();
+  });
+
+  it("POST /scorecards/:id/rerun: a missing scorecard is 404 (no existence leak); viewer → 403", async () => {
+    const member = server({ requireAuth: true, authenticator: roleAuth(["member"]) });
+    const miss = await member.app.inject({
+      method: "POST",
+      url: "/scorecards/nope/rerun",
+      headers: { authorization: "Bearer x" },
+      payload: {},
+    });
+    expect(miss.statusCode).toBe(404);
+    await member.app.close();
+
+    const viewer = server({ requireAuth: true, authenticator: roleAuth(["viewer"]) });
+    const forbidden = await viewer.app.inject({
+      method: "POST",
+      url: "/scorecards/any/rerun",
+      headers: { authorization: "Bearer x" },
+      payload: {},
+    });
+    expect(forbidden.statusCode).toBe(403); // scorecards:run required, gated before the service runs
+    await viewer.app.close();
+  });
+
   it("DELETE /scorecards/:id: the creator deletes their finished batch (200, then GET is 404)", async () => {
     const { app } = server({ requireAuth: true, authenticator: roleAuth(["member"]) }); // subject "u" runs AND deletes
     const h = { authorization: "Bearer x" };

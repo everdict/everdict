@@ -317,6 +317,13 @@ export const controlPlane = {
     call<T>(auth, '/scorecards', { method: 'POST', body: JSON.stringify(body) }),
   retryScorecard: <T>(auth: AuthContext, id: string) =>
     call<T>(auth, `/scorecards/${encodeURIComponent(id)}/retry`, { method: 'POST' }),
+  // Full re-run (전체 재실행) — a new scorecard re-running the source's ENTIRE case set, optionally with a re-score
+  // override (grading plan / judge model / trace sink) in the body. Distinct from retry (failed-only, carry-over).
+  rerunScorecard: <T>(auth: AuthContext, id: string, body: unknown) =>
+    call<T>(auth, `/scorecards/${encodeURIComponent(id)}/rerun`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
   // Stop a running/queued batch — marks it cancelled and force-frees the runtime of the in-flight cases.
   cancelScorecard: <T>(auth: AuthContext, id: string) =>
     call<T>(auth, `/scorecards/${encodeURIComponent(id)}/cancel`, { method: 'POST' }),

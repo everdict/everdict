@@ -11,7 +11,7 @@ import { versionOptions } from '@/shared/lib/version-options'
 import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
 import { Combobox, type ComboboxOption } from '@/shared/ui/combobox'
-import { FieldError, Input, Label, Textarea } from '@/shared/ui/input'
+import { FieldError, Input, Label } from '@/shared/ui/input'
 import { InfoTip } from '@/shared/ui/tooltip'
 
 import { runScorecardAction } from '../api/run-scorecard'
@@ -28,38 +28,6 @@ interface Values {
   caseIds: string // Partial run — explicit case ids (comma/space-separated; e.g. re-run the failing ones). Empty = not filtered by id.
   caseLimit: string // Partial run — only the first N (empty = all). Parsed to a number on submit.
   caseTags: string // Partial run — tag filter (comma-separated, any-match; empty = all)
-  // Advanced re-score overrides (the dataset stays pure data — these apply to THIS batch only).
-  traceSink: string // Per-batch trace-sink override: '' = harness default, 'none' = suppress, else a named workspace sink.
-  judgeModel: string // Inline judge scoring-model override: a registered Model id ('' = workspace default).
-  gradersJson: string // Grading-plan override — a GraderSpec[] JSON ('' = the dataset's own graders). Validated on submit.
-}
-
-// Parse the optional grading-plan JSON — empty is ok (no override). Must be a non-empty array of { id }. Returns a message key on error.
-function parseGradersJson(
-  text: string
-): { ok: true; graders?: { id: string; config?: Record<string, unknown> }[] } | { ok: false } {
-  const t = text.trim()
-  if (!t) return { ok: true }
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(t)
-  } catch {
-    return { ok: false }
-  }
-  if (!Array.isArray(parsed) || parsed.length === 0) return { ok: false }
-  const graders: { id: string; config?: Record<string, unknown> }[] = []
-  for (const g of parsed) {
-    if (typeof g !== 'object' || g === null || typeof (g as { id?: unknown }).id !== 'string')
-      return { ok: false }
-    const o = g as { id: string; config?: unknown }
-    graders.push({
-      id: o.id,
-      ...(o.config && typeof o.config === 'object' && !Array.isArray(o.config)
-        ? { config: o.config as Record<string, unknown> }
-        : {}),
-    })
-  }
-  return { ok: true, graders }
 }
 
 // Pick a harness × dataset × judge(s) and run a batch evaluation. The selected judges score each case's trace → their
@@ -71,8 +39,6 @@ export function RunScorecardForm({
   runtimes = [],
   runners = [],
   hasWorkspaceRunners = false,
-  sinks = [],
-  models = [],
 }: {
   datasets: { id: string; versions: string[]; versionTags?: Record<string, string[]> }[]
   // kind drives the submit-time capability-fit preview against each runtime (a service harness needs a container runtime).
@@ -86,14 +52,11 @@ export function RunScorecardForm({
   runtimes?: { id: string; capabilities?: string[] }[] // capabilities = latest version's declared caps (for fit preview)
   runners?: { id: string; label: string }[]
   hasWorkspaceRunners?: boolean // Expose the self:ws pool option when team shared runners exist
-  sinks?: { name: string; kind: string }[] // Configured workspace trace sinks (per-batch export override)
-  models?: { id: string }[] // Registered models (inline judge scoring-model override)
 }) {
   const router = useRouter()
   const { workspace } = useParams<{ workspace: string }>()
   const t = useTranslations('runScorecard')
   const [serverError, setServerError] = useState<string>()
-  const [advanced, setAdvanced] = useState(false) // reveal the re-score override section (traceSink / judge model / grading plan)
   const {
     control,
     register,
@@ -114,9 +77,6 @@ export function RunScorecardForm({
       caseIds: '',
       caseLimit: '',
       caseTags: '',
-      traceSink: '',
-      judgeModel: '',
-      gradersJson: '',
     },
   })
 
@@ -146,18 +106,7 @@ export function RunScorecardForm({
 
   async function onSubmit(values: Values) {
     setServerError(undefined)
-    const {
-      concurrency,
-      trials,
-      caseIds,
-      caseLimit,
-      caseTags,
-      judgeIds,
-      traceSink,
-      judgeModel,
-      gradersJson,
-      ...rest
-    } = values
+    const { concurrency, trials, caseIds, caseLimit, caseTags, judgeIds, ...rest } = values
     // Selected judges → the API's judges:[{id,version}] (version latest); omitted when none picked.
     const judgeRefs = judgeIds.map((id) => ({ id, version: 'latest' }))
     const n = Number.parseInt(concurrency, 10) // empty/invalid → omit (use control plane default)
@@ -174,21 +123,12 @@ export function RunScorecardForm({
       ...(tags.length > 0 ? { tags } : {}),
       ...(Number.isFinite(limit) && limit > 0 ? { limit } : {}),
     }
-    // Grading-plan override — validated client-side so a malformed plan never reaches the control plane.
-    const graders = parseGradersJson(gradersJson)
-    if (!graders.ok) {
-      setServerError(t('gradersInvalid'))
-      return
-    }
     const res = await runScorecardAction({
       ...rest,
       ...(judgeRefs.length > 0 ? { judges: judgeRefs } : {}),
       ...(Number.isFinite(n) && n > 0 ? { concurrency: n } : {}),
       ...(Number.isFinite(tn) && tn > 1 ? { trials: tn } : {}),
       ...(Object.keys(cases).length > 0 ? { cases } : {}),
-      ...(graders.graders ? { graders: graders.graders } : {}),
-      ...(traceSink ? { traceSink } : {}),
-      ...(judgeModel ? { judgeModel } : {}),
     })
     if (res.ok && res.id) router.push(`/${workspace}/scorecards/${res.id}`)
     else setServerError(res.error ?? t('submitError'))
@@ -455,86 +395,6 @@ export function RunScorecardForm({
             <Input id="caseTags" placeholder={t('caseTagsPlaceholder')} {...register('caseTags')} />
           </div>
         </div>
-      </div>
-
-      {/* Advanced re-score overrides — the dataset stays pure data; these apply to THIS batch only. Collapsed by default. */}
-      <div className="rounded-lg border bg-muted/20">
-        <button
-          type="button"
-          onClick={() => setAdvanced((v) => !v)}
-          className="flex w-full items-center justify-between px-4 py-2.5 text-[13px] font-[510] text-foreground"
-        >
-          {t('advancedToggle')}
-          <span className="text-faint">{advanced ? '−' : '+'}</span>
-        </button>
-        {advanced && (
-          <div className="space-y-4 border-t px-4 py-3.5">
-            {/* Per-batch trace-sink override — a configured workspace sink, or 'none' to suppress export for this batch. */}
-            <div className="space-y-1.5">
-              <div className="flex items-center gap-1">
-                <Label htmlFor="traceSink">{t('traceSinkLabel')}</Label>
-                <InfoTip content={t('traceSinkTip')} />
-              </div>
-              <Controller
-                control={control}
-                name="traceSink"
-                render={({ field }) => (
-                  <Combobox
-                    id="traceSink"
-                    options={[
-                      { value: '', label: t('traceSinkDefault') },
-                      { value: 'none', label: t('traceSinkNone') },
-                      ...sinks.map((s) => ({ value: s.name, label: `${s.name} (${s.kind})` })),
-                    ]}
-                    value={field.value}
-                    onChange={field.onChange}
-                    searchable={false}
-                  />
-                )}
-              />
-            </div>
-
-            {/* Inline judge scoring-model override — a registered Model id for the inline judge grader (not the Agent Judges above). */}
-            <div className="space-y-1.5">
-              <div className="flex items-center gap-1">
-                <Label htmlFor="judgeModel">{t('judgeModelLabel')}</Label>
-                <InfoTip content={t('judgeModelTip')} />
-              </div>
-              <Controller
-                control={control}
-                name="judgeModel"
-                render={({ field }) => (
-                  <Combobox
-                    id="judgeModel"
-                    options={[
-                      { value: '', label: t('judgeModelDefault') },
-                      ...models.map((m) => ({ value: m.id })),
-                    ]}
-                    value={field.value}
-                    onChange={field.onChange}
-                    placeholder={t('judgeModelDefault')}
-                    emptyText={t('judgeModelEmpty')}
-                  />
-                )}
-              />
-            </div>
-
-            {/* Grading-plan override — a GraderSpec[] JSON that replaces every case's default graders for this batch (re-score differently without editing the dataset). */}
-            <div className="space-y-1.5">
-              <div className="flex items-center gap-1">
-                <Label htmlFor="gradersJson">{t('gradersLabel')}</Label>
-                <InfoTip content={t('gradersTip')} />
-              </div>
-              <Textarea
-                id="gradersJson"
-                rows={4}
-                className="font-mono text-[12px]"
-                placeholder={t('gradersPlaceholder')}
-                {...register('gradersJson')}
-              />
-            </div>
-          </div>
-        )}
       </div>
 
       {serverError && <Callout tone="danger">{serverError}</Callout>}

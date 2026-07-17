@@ -2,6 +2,7 @@ import { IngestScorecardBodySchema, PullIngestBodySchema, originSource } from "@
 import type { FastifyInstance } from "fastify";
 import type { z } from "zod";
 import { type ServerDeps, gate, resolvePrincipal, sendError, zodIssues } from "../route-context.js";
+import { RerunScorecardBodySchema } from "./request/rerun-scorecard.js";
 import { RunScorecardBodySchema } from "./request/run-scorecard.js";
 import { scorecardDocs } from "./scorecard.docs.js";
 import { serveScorecard } from "./serve.js";
@@ -66,6 +67,40 @@ export function registerScorecardRoutes(app: FastifyInstance, deps: ServerDeps):
       );
     } catch (err) {
       return sendError(reply, err); // not found 404 / not terminal · nothing failed 400
+    }
+  });
+
+  // Full re-run — a NEW scorecard that re-runs a terminal batch's ENTIRE case set (전체 재실행), reproducing the
+  // original submit config and optionally applying a re-score override (grading plan / judge model / trace sink) from
+  // the body. Distinct from /retry (which recovers only the failed cases and carries the passing ones over). Same
+  // gate as submit (scorecards:run). docs/architecture/batch-resilience.md
+  app.post<{ Params: { id: string } }>("/scorecards/:id/rerun", { schema: scorecardDocs.rerun }, async (req, reply) => {
+    if (!deps.scorecardService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "scorecard service not configured" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "scorecards:run");
+    } catch (err) {
+      return sendError(reply, err);
+    }
+    let body: z.infer<typeof RerunScorecardBodySchema>;
+    try {
+      body = RerunScorecardBodySchema.parse(req.body ?? {});
+    } catch (err) {
+      return reply.code(400).send({ code: "BAD_REQUEST", message: (err as Error).message });
+    }
+    try {
+      return reply.code(202).send(
+        await deps.scorecardService.rerun({
+          tenant: principal.workspace,
+          id: req.params.id,
+          submittedBy: principal.subject,
+          ...body,
+        }),
+      );
+    } catch (err) {
+      return sendError(reply, err); // not found 404 / not terminal 400
     }
   });
 
