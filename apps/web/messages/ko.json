@@ -548,7 +548,11 @@
     "failed": "스코어카드를 삭제하지 못했어요.",
     "cancel": "취소",
     "confirm": "스코어카드 삭제",
-    "deleted": "스코어카드 {id} 삭제했어요"
+    "deleted": "스코어카드 {id} 삭제했어요",
+    "deletedMany": "스코어카드 {count}개를 삭제했어요",
+    "bulkTitle": "스코어카드 {count}개 삭제",
+    "bulkConfirm": "{count}개 삭제",
+    "failedSome": "스코어카드 {count}개를 삭제하지 못했어요."
   },
   "harnessVersions": {
     "versionsAria": "버전 ({count})",
@@ -2212,7 +2216,12 @@
     "emptyHint": "검색어나 필터를 바꿔보세요.",
     "noAggregate": "집계 없음",
     "pendingAggregate": "집계 대기",
-    "runnerLabel": "실행자"
+    "runnerLabel": "실행자",
+    "selectAria": "스코어카드 선택",
+    "selectedCount": "{count}개 선택",
+    "selectAllVisible": "전체선택",
+    "clearSelection": "해제",
+    "deleteSelected": "삭제"
   },
   "scorecardsPage": {
     "title": "스코어카드",

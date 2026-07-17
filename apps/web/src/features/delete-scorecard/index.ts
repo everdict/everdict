@@ -1,4 +1,6 @@
 export { deleteScorecardAction } from './api/delete-scorecard'
+export { deleteScorecardsAction } from './api/delete-scorecards'
 export { DeleteScorecardDialog } from './ui/delete-scorecard-dialog'
+export { DeleteScorecardsDialog } from './ui/delete-scorecards-dialog'
 export { DeleteScorecardButton } from './ui/delete-scorecard-button'
 export { DeleteScorecardRowButton } from './ui/delete-scorecard-row-button'

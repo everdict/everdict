@@ -548,7 +548,11 @@
     "failed": "Couldn't delete the scorecard.",
     "cancel": "Cancel",
     "confirm": "Delete scorecard",
-    "deleted": "Deleted scorecard {id}"
+    "deleted": "Deleted scorecard {id}",
+    "deletedMany": "Deleted {count, plural, one {# scorecard} other {# scorecards}}",
+    "bulkTitle": "Delete {count, plural, one {# scorecard} other {# scorecards}}",
+    "bulkConfirm": "Delete {count, plural, one {# scorecard} other {# scorecards}}",
+    "failedSome": "Couldn't delete {count, plural, one {# scorecard} other {# scorecards}}."
   },
   "harnessVersions": {
     "versionsAria": "Versions ({count})",
@@ -2212,7 +2216,12 @@
     "emptyHint": "Try a different search or filter.",
     "noAggregate": "No aggregate",
     "pendingAggregate": "Aggregating",
-    "runnerLabel": "Run by"
+    "runnerLabel": "Run by",
+    "selectAria": "Select scorecard",
+    "selectedCount": "{count} selected",
+    "selectAllVisible": "Select all",
+    "clearSelection": "Clear",
+    "deleteSelected": "Delete"
   },
   "scorecardsPage": {
     "title": "Scorecards",

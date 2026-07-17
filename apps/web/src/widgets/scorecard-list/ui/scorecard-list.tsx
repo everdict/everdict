@@ -1,11 +1,11 @@
 'use client'
 
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import Link from 'next/link'
-import { Search } from 'lucide-react'
+import { Check, Search, Trash2 } from 'lucide-react'
 import { useLocale, useTranslations } from 'next-intl'
 
-import { DeleteScorecardRowButton } from '@/features/delete-scorecard'
+import { DeleteScorecardRowButton, DeleteScorecardsDialog } from '@/features/delete-scorecard'
 import type { ScorecardRecord } from '@/entities/scorecard'
 import {
   dayKeyOf,
@@ -16,7 +16,9 @@ import {
   fmtTimeOnly,
 } from '@/shared/lib/format'
 import { usePersistentFilters } from '@/shared/lib/use-persistent-filters'
+import { cn } from '@/shared/lib/utils'
 import { UserAvatar } from '@/shared/ui/avatar'
+import { Button } from '@/shared/ui/button'
 import { EntityRef, MetricChip, ModelChip, SubsetChip } from '@/shared/ui/chip'
 import { Combobox } from '@/shared/ui/combobox'
 import { EmptyState } from '@/shared/ui/empty-state'
@@ -74,6 +76,26 @@ export function ScorecardList({
     FILTER_DEFAULTS
   )
   const { query, sort, dataset, harness, status, user } = values
+
+  // Multi-select delete — a Set of selected scorecard ids (only ever deletable rows). A floating action bar appears
+  // while any are selected; the confirm dialog fans out over them (partial failures reported per id). The row-level
+  // trash stays for the quick single-delete case.
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [confirming, setConfirming] = useState(false)
+  const toggleSelect = (id: string) =>
+    setSelected((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  const clearSelection = () => setSelected(new Set())
+  const dropFromSelection = (ids: string[]) =>
+    setSelected((prev) => {
+      const next = new Set(prev)
+      for (const id of ids) next.delete(id)
+      return next
+    })
 
   const total = scorecards.length
   const succeeded = scorecards.filter((s) => s.status === 'succeeded').length
@@ -158,6 +180,19 @@ export function ScorecardList({
     }
     return [...matched].sort(by[sort])
   }, [scorecards, authors, query, sort, dataset, harness, status, user])
+
+  // "Select all" adds every currently-visible deletable row to the selection (keeps ones hidden by a filter untouched).
+  const selectAllVisible = () =>
+    setSelected((prev) => {
+      const next = new Set(prev)
+      for (const s of visible) if (canDeleteRow(s)) next.add(s.id)
+      return next
+    })
+  // The confirm dialog needs each selected batch's coordinates — resolve ids against the full list (some may be filtered out).
+  const byId = useMemo(() => new Map(scorecards.map((s) => [s.id, s])), [scorecards])
+  const selectedTargets = [...selected]
+    .map((id) => byId.get(id))
+    .filter((s): s is ScorecardRecord => s !== undefined)
 
   return (
     <div className="space-y-5">
@@ -258,14 +293,48 @@ export function ScorecardList({
                 const metrics = s.summary ?? []
                 const shownMetrics = metrics.slice(0, 3) // keep the card format — top 3 only, the rest as +N
                 const judges = s.judgeModels ?? []
+                const selectable = canDeleteRow(s)
+                const isSelected = selected.has(s.id)
                 return (
                   // Fixed-format card — 3 lines (dataset/harness/aggregate), no arrow·inline name. Status is a color icon only.
                   <Link
                     key={s.id}
                     href={`/${workspace}/scorecards/${encodeURIComponent(s.id)}`}
                     style={{ animationDelay: `${Math.min(i, 12) * 28}ms` }}
-                    className="rise group flex items-center gap-3 rounded-lg border bg-card px-3.5 py-2.5 shadow-raise transition-colors hover:border-border-strong hover:bg-elevated"
+                    className={cn(
+                      'rise group flex items-center gap-3 rounded-lg border px-3.5 py-2.5 shadow-raise transition-colors',
+                      isSelected
+                        ? 'border-primary/50 bg-primary/[0.05]'
+                        : 'bg-card hover:border-border-strong hover:bg-elevated'
+                    )}
                   >
+                    {/* Left multi-select checkbox — same hover-reveal grammar as the right-edge trash; stays lit once selected. */}
+                    {showDeleteSlot && (
+                      <span className="flex w-5 shrink-0 justify-center">
+                        {selectable && (
+                          <button
+                            type="button"
+                            role="checkbox"
+                            aria-checked={isSelected}
+                            aria-label={t('selectAria')}
+                            onClick={(e) => {
+                              // The whole card is a Link — stop it so the checkbox click doesn't navigate.
+                              e.preventDefault()
+                              e.stopPropagation()
+                              toggleSelect(s.id)
+                            }}
+                            className={cn(
+                              'grid size-4 place-items-center rounded border outline-none transition-[opacity,color,background] focus-visible:opacity-100',
+                              isSelected
+                                ? 'border-primary bg-primary text-primary-foreground opacity-100'
+                                : 'border-border-strong bg-transparent opacity-0 group-hover:opacity-100'
+                            )}
+                          >
+                            {isSelected && <Check className="size-3" strokeWidth={3} />}
+                          </button>
+                        )}
+                      </span>
+                    )}
                     {/* Left: 3 lines — ① dataset ② harness (+model·source) ③ aggregate chips. Each one line, truncated (no wrap). */}
                     <div className="min-w-0 flex-1 space-y-1">
                       <div className="flex items-center gap-1.5 overflow-hidden whitespace-nowrap text-[13px] font-[510]">
@@ -372,6 +441,52 @@ export function ScorecardList({
             </section>
           ))}
         </div>
+      )}
+
+      {/* Floating action bar — appears while any row is selected (Linear-style). Fans out the delete over the selection. */}
+      {selected.size > 0 && (
+        <div className="fixed inset-x-0 bottom-6 z-30 flex justify-center px-4">
+          <div className="flex items-center gap-1 rounded-xl border border-border bg-card/95 px-2.5 py-2 shadow-lg backdrop-blur supports-[backdrop-filter]:bg-card/80">
+            <span className="px-1.5 text-[12.5px] font-[510] tabular-nums text-foreground">
+              {t('selectedCount', { count: selected.size })}
+            </span>
+            <span className="mx-1 h-4 w-px bg-border" />
+            <button
+              type="button"
+              onClick={selectAllVisible}
+              className="rounded-md px-2 py-1 text-[12.5px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            >
+              {t('selectAllVisible')}
+            </button>
+            <button
+              type="button"
+              onClick={clearSelection}
+              className="rounded-md px-2 py-1 text-[12.5px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            >
+              {t('clearSelection')}
+            </button>
+            <Button
+              variant="destructive"
+              size="sm"
+              className="ml-1"
+              onClick={() => setConfirming(true)}
+            >
+              <Trash2 className="size-3.5" />
+              {t('deleteSelected')}
+            </Button>
+          </div>
+        </div>
+      )}
+      {confirming && (
+        <DeleteScorecardsDialog
+          onClose={() => setConfirming(false)}
+          targets={selectedTargets.map((s) => ({
+            id: s.id,
+            dataset: s.dataset,
+            harness: s.harness,
+          }))}
+          onDeleted={dropFromSelection}
+        />
       )}
     </div>
   )
