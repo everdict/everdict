@@ -1,1 +1,1 @@
-export { InteractiveBrowserPanel } from './ui/interactive-browser-panel'
+export { BrowserCanvas } from './ui/browser-canvas'

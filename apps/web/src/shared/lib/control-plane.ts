@@ -125,6 +125,10 @@ export const controlPlane = {
     call<T>(auth, `/browser-sessions/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   browserSessionTicket: <T>(auth: AuthContext, id: string) =>
     call<T>(auth, `/browser-sessions/${encodeURIComponent(id)}/ticket`, { method: 'POST' }),
+  // Live "what a capture would remember" summary (per-domain cookie names; values never cross the wire) — the
+  // profile-creation flow polls it to render the remembered-login chips.
+  browserSessionStatePreview: <T>(auth: AuthContext, id: string) =>
+    call<T>(auth, `/browser-sessions/${encodeURIComponent(id)}/state-preview`),
   // Saved authenticated browser profiles (browser-profiles S2) — personal / self-scoped, enforced by the control plane.
   createBrowserProfile: <T>(auth: AuthContext, body: unknown) =>
     call<T>(auth, '/browser-profiles', { method: 'POST', body: JSON.stringify(body) }),

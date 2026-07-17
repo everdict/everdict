@@ -3,6 +3,7 @@ import { z } from "zod";
 import { errorResponses, toJsonSchema } from "../openapi.js";
 import {
   BrowserSessionListResponseSchema,
+  BrowserSessionStatePreviewResponseSchema,
   BrowserSessionTicketResponseSchema,
   BrowserSessionViewSchema,
 } from "./response/browser-session.js";
@@ -51,6 +52,19 @@ const docs = {
     response: {
       200: { description: "Closed", type: "object", properties: { ok: { type: "boolean" } } },
       ...errorResponses(401, 404),
+    },
+  },
+  statePreview: {
+    summary: "Preview what capturing this browser session would remember",
+    description:
+      "The session browser's current cookies summarized per domain — names only, cookie VALUES never cross the " +
+      "wire. Polled by the profile-creation flow so each login the owner performs surfaces as a 'remembered' " +
+      "chip before the profile is saved. Owner-only (404 otherwise).",
+    tags: ["browser-session"],
+    params: sessionIdParams,
+    response: {
+      200: { description: "Per-domain cookie summary", ...toJsonSchema(BrowserSessionStatePreviewResponseSchema) },
+      ...errorResponses(401, 404, 502),
     },
   },
   ticket: {

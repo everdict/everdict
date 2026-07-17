@@ -73,6 +73,7 @@ interface BrowserProfileRow {
   tenant: string;
   name: string;
   cookie_domains: unknown;
+  country: string | null;
   captured_at: string | Date | null;
   created_by: string;
   created_at: string | Date;
@@ -87,6 +88,7 @@ function rowToRecord(row: BrowserProfileRow): BrowserProfileRecord {
     tenant: row.tenant,
     name: row.name,
     cookieDomains: row.cookie_domains,
+    country: row.country,
     capturedAt: row.captured_at ? iso(row.captured_at) : null,
     createdBy: row.created_by,
     createdAt: iso(row.created_at),
@@ -100,13 +102,14 @@ export class PgBrowserProfileStore implements BrowserProfileStore {
 
   async create(record: BrowserProfileRecord): Promise<void> {
     await this.client.query(
-      `INSERT INTO everdict_browser_profiles (id, tenant, name, cookie_domains, created_by, created_at, updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+      `INSERT INTO everdict_browser_profiles (id, tenant, name, cookie_domains, country, created_by, created_at, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
       [
         record.id,
         record.tenant,
         record.name,
         JSON.stringify(record.cookieDomains),
+        record.country,
         record.createdBy,
         record.createdAt,
         record.updatedAt,

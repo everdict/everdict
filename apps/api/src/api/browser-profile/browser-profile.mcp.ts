@@ -16,9 +16,14 @@ export function registerBrowserProfileTools(server: McpServer, ctx: McpToolConte
       inputSchema: {
         name: z.string().min(1).describe("Profile name"),
         cookieDomains: z.array(z.string()).optional().describe("Domains this profile logs into (optional)"),
+        country: z
+          .string()
+          .min(1)
+          .optional()
+          .describe("Egress-proxy country the login session used (omitted = direct)"),
       },
     },
-    ({ name, cookieDomains }) =>
+    ({ name, cookieDomains, country }) =>
       plain(async () =>
         ok(
           await profiles.create({
@@ -26,6 +31,7 @@ export function registerBrowserProfileTools(server: McpServer, ctx: McpToolConte
             createdBy: principal.subject,
             name,
             ...(cookieDomains ? { cookieDomains } : {}),
+            ...(country ? { country } : {}),
           }),
         ),
       ),

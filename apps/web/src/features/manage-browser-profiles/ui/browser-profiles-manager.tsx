@@ -9,44 +9,27 @@ import { Callout } from '@/shared/ui/callout'
 import { EmptyState } from '@/shared/ui/empty-state'
 import { Input } from '@/shared/ui/input'
 
-// Saved browser profiles manager (browser-profiles S2) — personal / self-scoped CRUD. Create a named profile
-// (optionally declaring the domains it logs into), rename, or delete. Cookie capture (S3) and eval injection (S5)
-// build on it — a profile here is currently a login placeholder.
-export function BrowserProfilesManager({ initialProfiles }: { initialProfiles: BrowserProfile[] }) {
+import { ProfileLoginWizard } from './profile-login-wizard'
+
+// Saved browser profiles manager (browser-profiles) — personal / self-scoped. Creating a profile is session-first:
+// the wizard opens a live browser, the owner logs into the sites the profile should carry (each login surfaces as a
+// remembered chip), and finishing captures the cookies. Existing profiles can re-login (re-capture) the same way.
+export function BrowserProfilesManager({
+  initialProfiles,
+  canManageProxies,
+}: {
+  initialProfiles: BrowserProfile[]
+  canManageProxies: boolean
+}) {
   const t = useTranslations('browserProfiles')
   const [profiles, setProfiles] = useState<BrowserProfile[]>(initialProfiles)
-  const [name, setName] = useState('')
-  const [domains, setDomains] = useState('')
-  const [busy, setBusy] = useState(false)
+  // null = closed · {} = create a new profile · { profile } = re-login into an existing one
+  const [wizard, setWizard] = useState<{ profile?: BrowserProfile } | null>(null)
   const [error, setError] = useState<string | null>(null)
 
-  const parseDomains = (raw: string): string[] =>
-    raw
-      .split(',')
-      .map((d) => d.trim())
-      .filter(Boolean)
-
-  const create = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!name.trim()) return
-    setBusy(true)
-    setError(null)
-    try {
-      const res = await fetch('/api/browser-profiles', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ name: name.trim(), cookieDomains: parseDomains(domains) }),
-      })
-      const body = (await res.json()) as BrowserProfile & { error?: string }
-      if (!res.ok || body.error) throw new Error(body.error ?? `HTTP ${res.status}`)
-      setProfiles((prev) => [body, ...prev])
-      setName('')
-      setDomains('')
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setBusy(false)
-    }
+  const onDone = (saved: BrowserProfile) => {
+    setProfiles((prev) => [saved, ...prev.filter((p) => p.id !== saved.id)])
+    setWizard(null)
   }
 
   const rename = async (id: string, next: string) => {
@@ -79,32 +62,31 @@ export function BrowserProfilesManager({ initialProfiles }: { initialProfiles: B
     <div className="space-y-5">
       {error && <Callout tone="danger">{error}</Callout>}
 
-      <form onSubmit={create} className="flex flex-wrap items-end gap-2 rounded-xl border border-border bg-card p-4">
-        <label className="flex flex-1 flex-col gap-1">
-          <span className="text-[12px] text-muted-foreground">{t('nameLabel')}</span>
-          <Input value={name} onChange={(e) => setName(e.target.value)} placeholder={t('namePlaceholder')} />
-        </label>
-        <label className="flex flex-[2] flex-col gap-1">
-          <span className="text-[12px] text-muted-foreground">{t('domainsLabel')}</span>
-          <Input
-            value={domains}
-            onChange={(e) => setDomains(e.target.value)}
-            placeholder={t('domainsPlaceholder')}
-            autoComplete="off"
-            spellCheck={false}
-          />
-        </label>
-        <Button type="submit" disabled={busy || !name.trim()}>
-          {busy ? t('creating') : t('create')}
-        </Button>
-      </form>
+      {wizard ? (
+        <ProfileLoginWizard
+          profile={wizard.profile}
+          canManageProxies={canManageProxies}
+          onDone={onDone}
+          onCancel={() => setWizard(null)}
+        />
+      ) : (
+        <div className="flex justify-end">
+          <Button onClick={() => setWizard({})}>{t('newProfile')}</Button>
+        </div>
+      )}
 
       {profiles.length === 0 ? (
-        <EmptyState title={t('emptyTitle')} hint={t('emptyHint')} />
+        !wizard && <EmptyState title={t('emptyTitle')} hint={t('emptyHint')} />
       ) : (
         <ul className="divide-y divide-border overflow-hidden rounded-xl border border-border">
           {profiles.map((p) => (
-            <ProfileRow key={p.id} profile={p} onRename={rename} onRemove={remove} />
+            <ProfileRow
+              key={p.id}
+              profile={p}
+              onRename={rename}
+              onRemove={remove}
+              onRelogin={() => setWizard({ profile: p })}
+            />
           ))}
         </ul>
       )}
@@ -116,10 +98,12 @@ function ProfileRow({
   profile,
   onRename,
   onRemove,
+  onRelogin,
 }: {
   profile: BrowserProfile
   onRename: (id: string, next: string) => void
   onRemove: (id: string) => void
+  onRelogin: () => void
 }) {
   const t = useTranslations('browserProfiles')
   const [editing, setEditing] = useState(false)
@@ -137,7 +121,12 @@ function ProfileRow({
             }}
             className="flex items-center gap-2"
           >
-            <Input value={draft} onChange={(e) => setDraft(e.target.value)} className="h-7 text-[13px]" autoFocus />
+            <Input
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              className="h-7 text-[13px]"
+              autoFocus
+            />
             <Button type="submit" size="sm" variant="secondary">
               {t('save')}
             </Button>
@@ -153,6 +142,11 @@ function ProfileRow({
               ) : (
                 <span className="shrink-0 text-[10.5px] text-faint">{t('noLogin')}</span>
               )}
+              {profile.country && (
+                <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10.5px] text-muted-foreground">
+                  {profile.country}
+                </span>
+              )}
             </div>
             <div className="truncate text-[11.5px] text-faint">
               {profile.cookieDomains.length > 0 ? profile.cookieDomains.join(', ') : t('noDomains')}
@@ -162,6 +156,9 @@ function ProfileRow({
       </div>
       {!editing && (
         <div className="flex shrink-0 items-center gap-1">
+          <Button size="sm" variant="ghost" onClick={onRelogin}>
+            {t('relogin')}
+          </Button>
           <Button size="sm" variant="ghost" onClick={() => setEditing(true)}>
             {t('rename')}
           </Button>

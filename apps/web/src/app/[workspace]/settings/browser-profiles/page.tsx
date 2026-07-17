@@ -1,17 +1,21 @@
 import { getTranslations } from 'next-intl/server'
 
-import { type BrowserProfile, browserProfilesSchema } from '@/entities/browser-profile'
 import { BrowserProfilesManager } from '@/features/manage-browser-profiles'
-import { authContext } from '@/shared/auth/principal'
+import { browserProfilesSchema, type BrowserProfile } from '@/entities/browser-profile'
+import { can } from '@/shared/auth/can'
+import { authContext, currentPrincipal } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
 import { PageHeader } from '@/shared/ui/page-header'
 
 export const dynamic = 'force-dynamic'
 
-// Settings › Account › Browser profiles — personal saved logins (browser-profiles S2). Self-scoped (owner = the
-// signed-in user). Cookie capture (S3) and eval injection (S5) build on these.
+// Settings › Account › Browser profiles — personal saved logins (browser-profiles). Self-scoped (owner = the
+// signed-in user). Creating a profile is session-first: a live browser opens in the wizard, the user logs into the
+// sites the profile should carry (optionally through a per-country egress proxy), and finishing captures the
+// cookies. Admins (settings:write) manage the workspace proxy pool inline from the wizard's geo step.
 export default async function BrowserProfilesPage() {
   const t = await getTranslations('browserProfiles')
+  const { principal } = await currentPrincipal()
   const ctx = await authContext()
 
   let profiles: BrowserProfile[] = []
@@ -24,7 +28,10 @@ export default async function BrowserProfilesPage() {
   return (
     <div className="space-y-6">
       <PageHeader title={t('title')} description={t('description')} />
-      <BrowserProfilesManager initialProfiles={profiles} />
+      <BrowserProfilesManager
+        initialProfiles={profiles}
+        canManageProxies={can(principal?.roles, 'settings:write')}
+      />
     </div>
   )
 }

@@ -7,6 +7,7 @@ const rec = (id: string, tenant: string, createdBy: string, createdAt: string): 
   tenant,
   name: id,
   cookieDomains: ["example.com"],
+  country: null,
   capturedAt: null,
   createdBy,
   createdAt,

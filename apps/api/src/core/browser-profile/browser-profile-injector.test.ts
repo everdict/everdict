@@ -23,6 +23,7 @@ async function setup(withState: boolean) {
     tenant: "acme",
     name: "GitHub",
     cookieDomains: [],
+    country: null,
     capturedAt: null,
     createdBy: "alice",
     createdAt: "2026-07-17T00:00:00.000Z",

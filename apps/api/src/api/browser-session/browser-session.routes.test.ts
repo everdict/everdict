@@ -28,7 +28,12 @@ function build(withBrowser: boolean) {
     service,
     ...(withBrowser
       ? {
-          browserSessionService: new BrowserSessionService(new FakeProvisioner(), { newId: () => `bs-${i++}` }),
+          browserSessionService: new BrowserSessionService(new FakeProvisioner(), {
+            newId: () => `bs-${i++}`,
+            captureState: async () => ({
+              cookies: [{ name: "session", value: "secret-cookie-value", domain: ".github.com", path: "/" }],
+            }),
+          }),
           browserTickets: new TicketStore(),
         }
       : {}),
@@ -78,5 +83,24 @@ describe("browser-session routes", () => {
     expect((await app.inject({ method: "POST", url: "/browser-sessions/nope/ticket", headers: H })).statusCode).toBe(
       404,
     );
+  });
+
+  it("previews an active session's remembered cookies per domain — names only, values never cross the wire", async () => {
+    const app = build(true);
+    const created = await app.inject({ method: "POST", url: "/browser-sessions", headers: H });
+    const session = created.json() as { id: string };
+
+    const preview = await app.inject({
+      method: "GET",
+      url: `/browser-sessions/${session.id}/state-preview`,
+      headers: H,
+    });
+    expect(preview.statusCode).toBe(200);
+    expect(preview.json()).toEqual({ domains: [{ domain: "github.com", cookieNames: ["session"] }] });
+    expect(preview.body).not.toContain("secret-cookie-value");
+
+    // unknown session → 404 (owner gate / no existence leak)
+    const missing = await app.inject({ method: "GET", url: "/browser-sessions/nope/state-preview", headers: H });
+    expect(missing.statusCode).toBe(404);
   });
 });

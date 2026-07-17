@@ -32,6 +32,7 @@ function profileRecord(id: string, tenant: string, createdBy: string): BrowserPr
     tenant,
     name: id,
     cookieDomains: [],
+    country: null,
     capturedAt: null,
     createdBy,
     createdAt: "2026-07-16T00:00:00.000Z",

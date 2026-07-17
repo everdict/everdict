@@ -10,6 +10,7 @@ export interface CreateBrowserProfileInput {
   createdBy: string;
   name: string;
   cookieDomains?: string[];
+  country?: string; // the geo (egress-proxy country) the login session ran through — omitted = direct login
 }
 
 export interface UpdateBrowserProfileInput {
@@ -39,6 +40,7 @@ export class BrowserProfileService {
       tenant: input.tenant,
       name: input.name,
       cookieDomains: input.cookieDomains ?? [],
+      country: input.country ?? null, // null = direct login (no egress proxy)
       capturedAt: null, // no login captured yet — S3 sets it via saveState
       createdBy: input.createdBy,
       createdAt: ts,

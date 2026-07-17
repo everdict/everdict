@@ -1,6 +1,6 @@
 # Authenticated browser profiles — a real interactive remote browser, cookies reused in eval (design)
 
-> **Status: S0–S6 SHIPPED (S1 transport + web canvas · S2 profile entity · S3 cookie capture · S4 proxy/geo login browser · S5 cookie injection into evals · S6 containerized provisioner — no host-Chrome dependency). Follow-ups: managed-K8s reachability, eval-browser proxy, localStorage, web harness profile-picker.** S0 = the interactive live browser
+> **Status: S0–S7 SHIPPED (S1 transport + web canvas · S2 profile entity · S3 cookie capture · S4 proxy/geo login browser · S5 cookie injection into evals · S6 containerized provisioner — no host-Chrome dependency · S7 session-first creation UX + live remembered-login chips). Follow-ups: managed-K8s reachability, eval-browser proxy, localStorage, web harness profile-picker.** S0 = the interactive live browser
 > session primitive (`openBrowserSession`, `@everdict/topology`, `a168b5b`): CDP screencast (frames OUT, each
 > acked) + input (mouse/keyboard/navigate IN), transport-injectable, live-proven against real Chrome via
 > `scripts/live/interactive-browser.mjs`. **S1 productizes the transport end-to-end**: a personal / self-scoped
@@ -20,6 +20,20 @@ drives **remotely in real time** — navigate, click, **log into a site**; the r
 are remembered; and subsequent **browser eval tasks reuse that profile** (proxy + cookies) so the agent runs as the
 logged-in user. This directly unblocks authenticated/commercial sites in browser evals (today WebVoyager's
 commercial slice falls back to 0% because there is no login — see `browser-use-bundle-eval`).
+
+### The creation UX is session-first (S7)
+
+Making a profile IS a login session — not a metadata form. In Settings › Account › Browser profiles, "New profile"
+opens the wizard: name + geo (egress proxy country; admins manage the workspace proxy pool inline right there) →
+**a live browser opens in the page** (the S1 canvas) → the user navigates to a site, logs in, moves on to the next
+site, logs in again — one session accumulates any number of logins. While the session is open the wizard polls
+`GET /browser-sessions/:id/state-preview` (owner-gated) and renders **remembered-login chips** — one chip per cookie
+domain with the cookie *names* (values NEVER cross the wire) — so the user sees exactly what Everdict will remember
+as each login lands. "Save profile & close" creates the profile (with the chosen `country`) + captures (S3) + tears
+the session down; "Close without saving" persists nothing. Existing profiles re-login through the same wizard
+(re-capture into the profile, geo defaulting to the profile's country). Consequently there is **no Browser-sessions
+settings tab** (the session exists only inside the wizard) and **no Proxies settings tab** (the proxy pool is managed
+from the wizard's geo step, still `settings:write`-gated; the `/workspace/proxies` API is unchanged).
 
 ## Why it fits Everdict (current state — verified file:line)
 
@@ -85,7 +99,9 @@ short-lived container/pod per active login; self-hosted = the user's own local b
 ## The profile entity + capture + injection (S2–S5)
 
 - **`BrowserProfileSpec`** (`core`): `{ id, name, country?, proxyRef?, cookieDomains[], createdBy, storageStateRef,
-  updatedAt }`. Owner = subject (self-scoped, like connected accounts); optional workspace share later.
+  updatedAt }`. Owner = subject (self-scoped, like connected accounts); optional workspace share later. `country`
+  (nullable, migration `0061`) records the geo the login session ran through at creation (S7) — re-login defaults
+  to it and the eval-browser proxy launch (follow-up) reads it.
 - **`BrowserProfileStore`** (`db`): the metadata; the `storageState` blob lives in `storage` (S3), **encrypted**
   (`secret-cipher`), keyed `(workspace|subject, profileId)`.
 - **Capture** (S3): ✅ SHIPPED. `captureStorageState(cdpBase)` (`@everdict/topology`) reads the session's cookies
@@ -93,18 +109,20 @@ short-lived container/pod per active login; self-hosted = the user's own local b
   (`core/browser-profile`) encrypts it (AES-256-GCM, the shared `SecretCipher`) → `store.saveState` persists the
   opaque blob (`state_cipher`, migration `0059`) + `capturedAt` + the refined `cookieDomains`. Owner-gated on both
   the profile and the session; the blob is **server-only** (`loadState` reads it back for S5). Route
-  `POST /browser-profiles/:id/capture {sessionId}` + MCP `capture_browser_profile`. Web: "Save login" on the
-  interactive-session panel (create profile → capture) + a `capturedAt` badge on the profiles list. (localStorage
-  capture via `Runtime.evaluate` is deferred — cookies are the login material for most sites.)
+  `POST /browser-profiles/:id/capture {sessionId}` + MCP `capture_browser_profile`. Web: the capture is the "Save
+  profile & close" step of the S7 wizard (create profile → capture → close session) + a `capturedAt` badge on the
+  profiles list. (localStorage capture via `Runtime.evaluate` is deferred — cookies are the login material for
+  most sites.)
 - **Proxy / geo** (S4): ✅ SHIPPED (login browser). `WorkspaceSettings.proxies` (BYO per-country pool, like
   image-registries/trace sinks; `{name, country, url, authSecretName?}`, the auth secret a SecretStore name-ref) +
   `ProxyService` (`@everdict/application-control`: list/upsert/remove admin (settings:write) + `resolve(country)` →
   the `--proxy-server` value, folding the auth secret into the URL). Routes `GET /workspace/proxies` (workspace read,
   no role gate — the session geo picker consumes it) + `PUT`/`DELETE` (admin) + MCP parity. The interactive session
   (`BrowserSessionService.create({country})`) resolves the country → the `LocalChromeProvisioner` launches Chrome
-  with `--proxy-server`; web adds a Settings › Proxies admin card + a geo picker on the session panel. **Eval-browser
-  proxy is S5.** Known limit: headless Chrome doesn't honor inline proxy *auth* — full authed-proxy support needs CDP
-  `Fetch.continueWithAuth` (a follow-up); open proxies + inline-cred setups work today.
+  with `--proxy-server`; the web geo picker + inline proxy-pool management live in the S7 wizard's setup step (the
+  standalone Settings › Proxies page was removed with S7). **Eval-browser proxy is S5.** Known limit: headless
+  Chrome doesn't honor inline proxy *auth* — full authed-proxy support needs CDP `Fetch.continueWithAuth`
+  (a follow-up); open proxies + inline-cred setups work today.
 - **Injection** (S5): ✅ SHIPPED (cookies). A service harness's `target.profile` (an id) → `seedStorageState(cdpBase,
   state)` (`@everdict/topology`, the inverse of capture: CDP `Network.setCookies`) seeds the profile's decrypted
   cookies into the per-case browser **before the agent connects** (`ServiceTopologyBackend.seedProfile` hook, called
@@ -160,6 +178,17 @@ short-lived container/pod per active login; self-hosted = the user's own local b
    `RuntimeSpec.browserImage` at the mirror. To bump: re-resolve the digest, update `browser-image.ts`, re-run the
    mirror workflow. Follow-up: managed **K8s** reachability (per-session `kubectl port-forward` / ingress to the pod
    CDP) — lifts this from a control-plane-host Docker daemon to the SaaS cluster.
+9. **S7 — session-first creation UX + live remembered-login chips.** ✅ SHIPPED. Creating a profile IS the login
+   session (see "The creation UX is session-first" above). New endpoint `GET /browser-sessions/:id/state-preview`
+   (`BrowserSessionService.statePreview` — injectable `captureState`, default the S3 CDP capture; owner-gated,
+   throws NotFound cross-owner) returns the per-domain cookie **names** the session currently holds (values never
+   cross the wire) + MCP parity `preview_browser_session_state`. `BrowserProfileRecord.country` (migration `0061`)
+   records the creation geo. Web: `features/manage-browser-profiles` gained the `ProfileLoginWizard`
+   (name + geo → live canvas + polled chips → save = create+capture+close); `features/interactive-browser` slims to
+   the `BrowserCanvas` (the launcher panel is gone); the Settings › Browser-sessions and Settings › Proxies pages +
+   nav entries are REMOVED — proxy pool management (`features/manage-proxies`, still `settings:write`) is embedded
+   in the wizard's geo step. The `/workspace/proxies` and `/browser-sessions` APIs are unchanged (minus the new
+   preview route).
 
 ## Non-goals / risks
 

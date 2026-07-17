@@ -19,3 +19,14 @@ export const BrowserSessionListResponseSchema = z.object({
 export const BrowserSessionTicketResponseSchema = z.object({
   ticket: z.string().describe("Short-lived single-use WebSocket ticket"),
 });
+
+// Live "what a capture would remember" summary — per-domain cookie NAMES only; values are the login credential
+// and never cross the wire.
+export const BrowserSessionStatePreviewResponseSchema = z.object({
+  domains: z.array(
+    z.object({
+      domain: z.string().describe("Cookie domain (leading dot stripped)"),
+      cookieNames: z.array(z.string()).describe("Names of the cookies set for this domain (values never returned)"),
+    }),
+  ),
+});

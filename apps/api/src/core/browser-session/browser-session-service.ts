@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { NotFoundError } from "@everdict/contracts";
+import { type StorageState, captureStorageState } from "@everdict/topology";
 import type { BrowserSessionProvisioner } from "../../common/browser-session-provisioner.js";
 import { type BrowserSessionEntry, type BrowserSessionView, toBrowserSessionView } from "./browser-session.js";
 
@@ -9,12 +10,21 @@ export interface CreateBrowserSessionCommand {
   country?: string; // geo (browser-profiles S4) — resolved to the workspace's proxy for the login browser
 }
 
+// A live summary of what a capture WOULD remember right now — per-domain cookie NAMES only. Cookie values are the
+// login credential and never leave the control plane; the web polls this to show "remembered login" chips while
+// the owner logs into sites during profile creation.
+export interface BrowserSessionStatePreview {
+  domains: Array<{ domain: string; cookieNames: string[] }>;
+}
+
 export interface BrowserSessionServiceOptions {
   ttlMs?: number; // session lifetime (default 15m) — the browser is torn down after this
   now?: () => number;
   newId?: () => string;
   // Resolve a country → the Chrome --proxy-server value (browser-profiles S4). Absent / undefined return = direct.
   resolveProxy?: (tenant: string, country: string) => Promise<string | undefined>;
+  // Read the session browser's cookies (for statePreview). Injectable (tests); default = real CDP capture.
+  captureState?: (cdpBase: string) => Promise<StorageState>;
 }
 
 // Owns the lifecycle of interactive browser sessions: provision a dedicated browser, hold its reachable CDP base
@@ -26,6 +36,7 @@ export class BrowserSessionService {
   private readonly now: () => number;
   private readonly newId: () => string;
   private readonly resolveProxy?: (tenant: string, country: string) => Promise<string | undefined>;
+  private readonly captureState: (cdpBase: string) => Promise<StorageState>;
 
   constructor(
     private readonly provisioner: BrowserSessionProvisioner,
@@ -35,6 +46,7 @@ export class BrowserSessionService {
     this.now = opts.now ?? (() => Date.now());
     this.newId = opts.newId ?? (() => randomUUID());
     this.resolveProxy = opts.resolveProxy;
+    this.captureState = opts.captureState ?? ((cdpBase) => captureStorageState(cdpBase));
   }
 
   // Bring up a dedicated interactive browser for the owner. Enforces a single active session per owner (the
@@ -100,6 +112,30 @@ export class BrowserSessionService {
   ownerOf(id: string): string | undefined {
     this.sweep();
     return this.sessions.get(id)?.record.createdBy;
+  }
+
+  // What a capture would remember RIGHT NOW — the session browser's cookies summarized per domain, names only
+  // (values never cross the wire). Owner-gated like every read: another owner's session 404s, no existence leak.
+  // The web polls this during profile creation so each login surfaces as a "remembered" chip.
+  async statePreview(id: string, subject: string): Promise<BrowserSessionStatePreview> {
+    this.sweep();
+    const entry = this.sessions.get(id);
+    if (!entry || entry.record.createdBy !== subject || entry.record.status !== "active")
+      throw new NotFoundError("NOT_FOUND", { id }, "browser session not found.");
+    const state = await this.captureState(entry.record.cdpBase);
+    const byDomain = new Map<string, string[]>();
+    for (const cookie of state.cookies) {
+      const domain = cookie.domain.replace(/^\./, "");
+      if (!domain) continue;
+      const names = byDomain.get(domain) ?? [];
+      names.push(cookie.name);
+      byDomain.set(domain, names);
+    }
+    return {
+      domains: [...byDomain.entries()]
+        .map(([domain, cookieNames]) => ({ domain, cookieNames: cookieNames.sort() }))
+        .sort((a, b) => a.domain.localeCompare(b.domain)),
+    };
   }
 
   // Dispose every session whose TTL has elapsed. Idempotent; safe to call on every access and on a timer.

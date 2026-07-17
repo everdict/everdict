@@ -28,6 +28,7 @@ export function registerBrowserProfileRoutes(app: FastifyInstance, deps: ServerD
           createdBy: principal.subject,
           name: body.name,
           ...(body.cookieDomains ? { cookieDomains: body.cookieDomains } : {}),
+          ...(body.country ? { country: body.country } : {}),
         }),
       );
     } catch (err) {

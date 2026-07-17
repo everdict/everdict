@@ -80,6 +80,24 @@ export function registerBrowserSessionRoutes(app: FastifyInstance, deps: ServerD
     },
   );
 
+  // Live "what a capture would remember" preview — per-domain cookie names (values never cross the wire). The
+  // profile-creation flow polls this so each login the owner performs surfaces as a chip before saving.
+  app.get<{ Params: { id: string } }>(
+    "/browser-sessions/:id/state-preview",
+    { schema: browserSessionDocs.statePreview },
+    async (req, reply) => {
+      if (!deps.browserSessionService)
+        return reply.code(404).send({ code: "NOT_FOUND", message: "browser sessions not configured" });
+      const principal = await resolvePrincipal(req, reply, deps);
+      if (!principal) return reply;
+      try {
+        return reply.send(await deps.browserSessionService.statePreview(req.params.id, principal.subject));
+      } catch (err) {
+        return sendError(reply, err);
+      }
+    },
+  );
+
   // Mint a WS ticket — a browser can't set an Authorization header on a WebSocket, so an authenticated (owner-only)
   // POST mints a short-lived single-use ticket; the browser then opens WS /browser-sessions/:id?ticket=… .
   app.post<{ Params: { id: string } }>(

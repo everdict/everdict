@@ -55,6 +55,14 @@ describe("BrowserProfileService", () => {
     expect(p2.cookieDomains).toEqual([]); // default
   });
 
+  it("records the geo the login session ran through (country), defaulting to null for a direct login", async () => {
+    const s = svc(fakeStore());
+    const geo = await s.create({ tenant: "acme", createdBy: "alice", name: "US login", country: "US" });
+    expect(geo.country).toBe("US");
+    const direct = await s.create({ tenant: "acme", createdBy: "alice", name: "Direct" });
+    expect(direct.country).toBeNull();
+  });
+
   it("lists only the caller's own profiles", async () => {
     const s = svc(fakeStore());
     await s.create({ tenant: "acme", createdBy: "alice", name: "A" });

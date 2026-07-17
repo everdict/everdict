@@ -112,4 +112,37 @@ describe("BrowserSessionService", () => {
     expect(s.ownerOf(view.id)).toBe("alice");
     expect(s.ownerOf("nope")).toBeUndefined();
   });
+
+  it("previews the session state per domain — cookie names only, values never included", async () => {
+    const p = new FakeProvisioner();
+    const s = new BrowserSessionService(p, {
+      newId: () => "bs-0",
+      captureState: async () => ({
+        cookies: [
+          { name: "session", value: "top-secret-value", domain: ".github.com", path: "/" },
+          { name: "csrf", value: "another-secret", domain: "github.com", path: "/" },
+          { name: "sid", value: "s3", domain: "accounts.google.com", path: "/" },
+        ],
+      }),
+    });
+    const view = await s.create({ tenant: "acme", createdBy: "alice" });
+    const preview = await s.statePreview(view.id, "alice");
+    // grouped by domain (leading dot stripped), sorted, names only
+    expect(preview.domains).toEqual([
+      { domain: "accounts.google.com", cookieNames: ["sid"] },
+      { domain: "github.com", cookieNames: ["csrf", "session"] },
+    ]);
+    expect(JSON.stringify(preview)).not.toContain("top-secret-value");
+  });
+
+  it("gates the state preview on the owner — another subject gets Not Found (no leak)", async () => {
+    const p = new FakeProvisioner();
+    const s = new BrowserSessionService(p, {
+      newId: () => "bs-0",
+      captureState: async () => ({ cookies: [] }),
+    });
+    const view = await s.create({ tenant: "acme", createdBy: "alice" });
+    await expect(s.statePreview(view.id, "mallory")).rejects.toBeInstanceOf(AppError);
+    await expect(s.statePreview("nope", "alice")).rejects.toBeInstanceOf(AppError);
+  });
 });
