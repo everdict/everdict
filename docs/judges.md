@@ -37,9 +37,14 @@ judge image via `everdict image bake` for extra deps).
 
 **Model calls from the code.** `spec.model` (a first-class Model binding) rides the job's `judge` channel:
 `JudgeAuthDispatcher` resolves the registered Model (provider/underlying model/baseUrl/apiKeySecret, workspace →
-personal key fallback) and the backend injects `EVERDICT_JUDGE_MODEL` / `EVERDICT_JUDGE_PROVIDER` plus the
+personal key fallback) and the job carries `EVERDICT_JUDGE_MODEL` / `EVERDICT_JUDGE_PROVIDER` plus the
 provider key env (`ANTHROPIC_API_KEY` / `OPENAI_API_KEY`, `+_BASE_URL`) — the code just reads env and calls.
-Only the declared binding's key is injected, never the whole SecretStore.
+Only the declared binding's key is injected, never the whole SecretStore. Injection covers every lane: managed
+backends put it in the alloc/task env; on the runner/local/docker paths the agent threads it into every compute
+exec itself (`withJobEnv` in `@everdict/agent`). Self-hosted lanes resolve the key exactly like managed ones
+(parity with harness `{secretRef}`/model-binding secrets, which already ship to the runner); the one difference:
+when NO key resolves on a self-hosted lane the job ships without one and the runner's machine env is the
+fallback (own-pays), whereas a managed target stays a fail-fast 400.
 
 **Preview.** The zero-cost preview shows the evidence coverage the code will receive + the `requires` check.
 

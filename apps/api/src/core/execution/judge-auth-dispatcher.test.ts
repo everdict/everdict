@@ -89,11 +89,26 @@ describe("JudgeAuthDispatcher (per-job judge credential resolution)", () => {
     expect(seen).toHaveLength(0); // inner never reached — the case was not dispatched
   });
 
-  it("self-hosted lanes are exempt — the runner judges with its own env (own-pays), keys never shipped", async () => {
+  it("self-hosted lanes receive the resolved credential like managed ones (parity with harness secrets)", async () => {
+    // Regression: the old self:* exemption shipped code-judge jobs to the runner with no key at all — the judge
+    // script called the provider unauthenticated (401) even though the workspace key existed.
+    const { inner, seen } = innerSpy();
+    const d = new JudgeAuthDispatcher({
+      inner,
+      scopedSecretsFor: tiers({ workspace: { OPENAI_API_KEY: "ws-key", OPENAI_BASE_URL: "http://litellm" }, user: {} }),
+    });
+    for (const target of ["self", "self:runner-1", "self:ws", "self:ws:build-1"]) {
+      await d.dispatch(job({}, target));
+    }
+    expect(seen).toHaveLength(4);
+    expect(seen.every((j) => j.judgeAuth?.apiKey === "ws-key" && j.judgeAuth.baseUrl === "http://litellm")).toBe(true);
+  });
+
+  it("a self-hosted lane with NO resolvable key dispatches WITHOUT judgeAuth (own-pays machine env), no fail-fast", async () => {
     const { inner, seen } = innerSpy();
     const d = new JudgeAuthDispatcher({ inner, scopedSecretsFor: tiers({ workspace: {}, user: {} }) });
     for (const target of ["self", "self:runner-1", "self:ws", "self:ws:build-1"]) {
-      await d.dispatch(job({}, target)); // no key anywhere — still no throw, no judgeAuth
+      await d.dispatch(job({}, target)); // no key anywhere — still no throw, the runner's own env judges
     }
     expect(seen).toHaveLength(4);
     expect(seen.every((j) => j.judgeAuth === undefined)).toBe(true);
@@ -146,13 +161,14 @@ describe("JudgeAuthDispatcher (per-job judge credential resolution)", () => {
     expect(seen).toHaveLength(0);
   });
 
-  it("self-hosted {ref}: the model still resolves (the runner judges with the real model) but no workspace key is shipped", async () => {
+  it("self-hosted {ref}: the model resolves AND its linked key ships with the job (baseUrl no longer lost)", async () => {
     const models = new InMemoryModelRegistry();
     await models.register("acme", {
       id: "team-4o",
       version: "1.0.0",
       provider: "openai",
       model: "gpt-4o",
+      baseUrl: "https://litellm.acme",
       apiKeySecret: "TEAM_JUDGE_KEY",
       tags: [],
     });
@@ -164,6 +180,8 @@ describe("JudgeAuthDispatcher (per-job judge credential resolution)", () => {
     });
     await d.dispatch(job({ judge: { model: { ref: "team-4o" } } }, "self:ws"));
     expect(seen[0]?.judge).toEqual({ provider: "openai", model: "gpt-4o" }); // resolved for the runner
-    expect(seen[0]?.judgeAuth).toBeUndefined(); // own-pays — no key shipped to the user's machine
+    // Regression: the exemption also dropped the model's baseUrl (it rides judgeAuth) — a proxy-bound key on the
+    // runner's machine was sent to the real provider endpoint, another 401 shape.
+    expect(seen[0]?.judgeAuth).toEqual({ apiKey: "sk", baseUrl: "https://litellm.acme" });
   });
 });

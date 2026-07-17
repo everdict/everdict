@@ -27,8 +27,11 @@ export interface JudgeAuthDispatcherDeps {
 //    Resolution order: workspace (the team's judge key) first, the submitter's personal key as fallback.
 //  - silent skip: a judge model with NO resolvable key used to surface only as a "skipped" score after the
 //    run. On managed targets that is now a fail-fast config error at dispatch (before any compute is spent).
-// Self-hosted lanes (self / self:*) are exempt on both counts: the runner judges with its own machine env
-// (own-pays) and the control plane cannot see that env — never ship workspace keys to user machines.
+// Self-hosted lanes (self / self:*) get the SAME resolved credential as managed ones — the harness path already
+// ships workspace secrets to the runner ({secretRef} env + model-binding keys, resolveHarnessSecrets /
+// ModelResolvingDispatcher), so withholding only the judge key was an inconsistency that broke co-located code
+// judges (401 on the runner). The one self-hosted difference: a MISSING key is not fail-fast — the job ships
+// without judgeAuth and the runner's own machine env is the fallback (own-pays stays possible).
 export class JudgeAuthDispatcher implements Dispatcher {
   constructor(private readonly deps: JudgeAuthDispatcherDeps) {}
 
@@ -71,12 +74,9 @@ export class JudgeAuthDispatcher implements Dispatcher {
     // Rewrite job.judge to the resolved underlying model + provider (judgeEnv reads it downstream).
     const resolvedJudge = { provider, model };
 
-    // 2) Key injection — managed lanes only. Self-hosted lanes (self / self:*) judge with the runner's own machine env
-    //    (own-pays) and the control plane cannot see it — never ship workspace keys to user machines. A job that already
-    //    carries judgeAuth (a retry) keeps it. Both still get the resolved model on job.judge.
-    const target = job.evalCase.placement?.target;
-    const selfHosted = target === "self" || target?.startsWith("self:") === true;
-    if (job.judgeAuth !== undefined || selfHosted) {
+    // 2) Key injection — every lane, self-hosted included (parity with the harness secret path). A job that already
+    //    carries judgeAuth (a retry) keeps it; all paths get the resolved model on job.judge.
+    if (job.judgeAuth !== undefined) {
       return this.deps.inner.dispatch({ ...job, judge: resolvedJudge }, opts);
     }
     const baseName = provider === "anthropic" ? "ANTHROPIC_BASE_URL" : "OPENAI_BASE_URL";
@@ -84,12 +84,18 @@ export class JudgeAuthDispatcher implements Dispatcher {
     const scoped = await this.deps.scopedSecretsFor(tenant, job.submittedBy);
     const apiKey = scoped.workspace[keyName] ?? scoped.user[keyName]; // workspace (the team's key) first, personal fallback
     const baseUrl = modelBaseUrl ?? scoped.workspace[baseName] ?? scoped.user[baseName]; // the model's baseUrl wins
-    if (apiKey === undefined)
+    if (apiKey === undefined) {
+      // Self-hosted lanes soften the fail-fast: no resolvable key means the runner judges with its own machine
+      // env (own-pays) — ship the job without judgeAuth instead of refusing to dispatch.
+      const target = job.evalCase.placement?.target;
+      const selfHosted = target === "self" || target?.startsWith("self:") === true;
+      if (selfHosted) return this.deps.inner.dispatch({ ...job, judge: resolvedJudge }, opts);
       throw new BadRequestError(
         "BAD_REQUEST",
         { judgeModel: model, secret: keyName },
         `judge model '${model}' is configured but no ${keyName} secret is resolvable (workspace or personal) — set the secret or submit without a judge.`,
       );
+    }
     return this.deps.inner.dispatch(
       { ...job, judge: resolvedJudge, judgeAuth: { apiKey, ...(baseUrl ? { baseUrl } : {}) } },
       opts,

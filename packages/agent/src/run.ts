@@ -8,6 +8,7 @@ import {
   type Environment,
   type Grader,
   type LiveScreenCapture,
+  judgeAuthEnv,
   judgeEnv,
 } from "@everdict/contracts";
 import { classifyFailure, stageForError } from "@everdict/domain";
@@ -50,6 +51,26 @@ function environmentFor(kind: EnvSpec["kind"], repoToken?: string): Environment 
       throw new BadRequestError("BAD_REQUEST", { envKind: exhaustive }, "unsupported env kind.");
     }
   }
+}
+
+// Wrap a driver so every exec of every handle it provisions sees the job-level env (merged under any per-exec env).
+// This is the in-job equivalent of a managed alloc's task env: nomad/k8s inject judgeEnv/judgeAuthEnv at the alloc
+// level and child processes inherit them, but on the runner/local/docker paths the agent process env has no such
+// injection — without this, a code judge's script grader (compute.exec) never sees the judge model/credential.
+// Job-level values win over the machine env (LocalDriver merges exec env over process.env); per-exec env wins over both.
+export function withJobEnv(driver: Driver, env: Record<string, string>): Driver {
+  return {
+    id: driver.id,
+    provision: async (spec) => {
+      const handle = await driver.provision(spec);
+      return {
+        exec: (cmd, opts) => handle.exec(cmd, { ...opts, env: { ...env, ...opts?.env } }),
+        writeFile: (path, data) => handle.writeFile(path, data),
+        readFile: (path) => handle.readFile(path),
+        dispose: () => handle.dispose(),
+      };
+    },
+  };
 }
 
 // The classified CaseResult the agent emits when a job fails to produce a normal eval outcome. Crossing the process
@@ -105,10 +126,15 @@ export async function runAgentJob(
       "⚠ meterUsage requested but the case runs in a container — the loopback usage-proxy is unreachable from a container, so metering is disabled for this case (use trace instrumentation instead).",
     );
   const harness = makeHarness(job.harness.id, job.harness.version, job.harnessSpec, { meterUsage });
-  // Include the judge grader: build the Judge from env (key=secretEnv) + job.judge (model/provider, loaded onto the job by the control plane).
-  // A remote alloc already has judgeEnv injected into env by the backend, but merge here so local (process.env) behaves the same.
+  // Job-level judge env: model config (job.judge) + the dispatch-resolved provider credential (job.judgeAuth).
+  // A remote alloc already has both injected into its task env by the backend; here the agent carries them itself so
+  // the runner/local/docker paths behave the same — for the inline judge grader (below) AND for every compute exec
+  // (withJobEnv), which is how a code judge's script sees EVERDICT_JUDGE_MODEL + the provider key on a self-hosted
+  // runner. Absent judgeAuth (own-pays lanes), the machine env is the fallback.
+  const jobEnv = { ...judgeEnv(job.judge), ...judgeAuthEnv(job.judge, job.judgeAuth) };
+  // Include the judge grader: build the Judge from env + job-level judge env.
   // If unconfigured, only the judge spec gets a skip score (so a normal eval doesn't die).
-  const env = { ...process.env, ...judgeEnv(job.judge) };
+  const env = { ...process.env, ...jobEnv };
   const graders: Grader[] = makeGradersFromEnv(job.evalCase.graders, env);
   // Environment is chosen by the case's env.kind (browser topology is handled by ServiceTopologyBackend — outside this local path).
   const environment = environmentFor(job.evalCase.env.kind, job.repoToken);
@@ -123,18 +149,20 @@ export async function runAgentJob(
           ...(liveScreenSpec.intervalMs !== undefined ? { intervalMs: liveScreenSpec.intervalMs } : {}),
         }
       : undefined;
+  // Precedence: explicit driver → containerize (local Docker, case.image, host mounts) → default LocalDriver (in-process).
+  // registryAuth (transient on the job) — authenticated pre-pull of workspace-registry images (temporary DOCKER_CONFIG).
+  const baseDriver =
+    opts.driver ??
+    (opts.containerize
+      ? new DockerDriver({
+          echo: true, // in-job: tee container output to the job log (live tail feed) — parity with LocalDriver
+          ...(opts.mounts ? { mounts: opts.mounts } : {}),
+          ...(job.registryAuth ? { registryAuth: job.registryAuth } : {}),
+        })
+      : new LocalDriver({ echo: true })); // in-job: tee harness output to the job log (live tail feed)
   return runCase(job.evalCase, {
-    // Precedence: explicit driver → containerize (local Docker, case.image, host mounts) → default LocalDriver (in-process).
-    // registryAuth (transient on the job) — authenticated pre-pull of workspace-registry images (temporary DOCKER_CONFIG).
-    driver:
-      opts.driver ??
-      (opts.containerize
-        ? new DockerDriver({
-            echo: true, // in-job: tee container output to the job log (live tail feed) — parity with LocalDriver
-            ...(opts.mounts ? { mounts: opts.mounts } : {}),
-            ...(job.registryAuth ? { registryAuth: job.registryAuth } : {}),
-          })
-        : new LocalDriver({ echo: true })), // in-job: tee harness output to the job log (live tail feed)
+    // Job-level judge env rides every exec (incl. an explicitly injected driver — DockerBackend) via the wrapper.
+    driver: Object.keys(jobEnv).length > 0 ? withJobEnv(baseDriver, jobEnv) : baseDriver,
     environment,
     harness,
     graders,

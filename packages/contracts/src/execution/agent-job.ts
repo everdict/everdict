@@ -64,8 +64,10 @@ export const AgentJobSchema = z.object({
   // Transient judge provider credential — resolved at dispatch from the tenant's scoped secret tiers (workspace
   // first, the submitter's personal key as fallback) so a personal-only key still judges on MANAGED runtimes
   // (the backend-level secretEnv carries only the workspace tier). Same discipline as repoToken/registryAuth:
-  // never persisted to records. Backends map it to the provider env (OPENAI_/ANTHROPIC_ API_KEY + BASE_URL);
-  // self-hosted runner dispatch never carries it (the runner judges with its own env — own-pays).
+  // never persisted to records. Backends map it to the provider env (OPENAI_/ANTHROPIC_ API_KEY + BASE_URL); the
+  // agent itself threads it into every compute exec (withJobEnv) so runner/local/docker paths see the same env.
+  // Resolved on EVERY lane, self-hosted included (parity with harness {secretRef}/model-binding secrets); when no
+  // key resolves on a self-hosted lane the job ships without it and the runner's machine env is the fallback (own-pays).
   judgeAuth: z.object({ apiKey: z.string(), baseUrl: z.string().optional() }).optional(),
   // Transient credential for private repo clone — the control plane resolves evalCase.env.source.connectionId to the token of the external
   // account connection (Connected accounts) and loads it here. RepoEnvironment uses it only for authenticated clone (http.extraheader) and

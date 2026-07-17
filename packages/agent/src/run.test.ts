@@ -75,6 +75,48 @@ describe("failureResult (classified result crosses the process boundary)", () =>
   });
 });
 
+// The code-judge wrapper contract on the agent path: job.judge (model config) + job.judgeAuth (dispatch-resolved
+// credential) must reach a script grader's exec env — on managed allocs the backend injects them at the alloc level,
+// so the agent must do the equivalent itself (withJobEnv) for the runner/local/docker paths.
+describe("runAgentJob judge env threading (code-judge wrapper on the local/runner path)", () => {
+  it("a script grader's exec sees EVERDICT_JUDGE_MODEL + the provider key/base-url from job.judge/judgeAuth", async () => {
+    // Regression: these values never reached compute.exec — a code judge on a self-hosted runner called the
+    // provider with no key (401) even when the control plane had resolved one onto the job. The case mirrors
+    // buildCodeJudgeJob's wrapper shape: script + context as env files, entrypoint + contextPath grader config.
+    const code = [
+      "const detail = [process.env.EVERDICT_JUDGE_MODEL, process.env.OPENAI_API_KEY, process.env.OPENAI_BASE_URL].join(' ')",
+      "console.log(JSON.stringify({ graderId: 'judge', metric: 'judge', value: 1, pass: true, detail }))",
+    ].join("\n");
+    const job: AgentJob = {
+      harness: { id: "scripted", version: "0.0.0" },
+      evalCase: {
+        id: "judge-env-1",
+        env: { kind: "repo", source: { files: { "judge.mjs": code, "judge-context.json": "{}" } } },
+        task: "code judge",
+        graders: [
+          {
+            id: "script",
+            config: {
+              language: "node",
+              entrypoint: "judge.mjs",
+              cwd: "work",
+              contextPath: "judge-context.json",
+              id: "judge",
+            },
+          },
+        ],
+        timeoutSec: 60,
+        tags: ["judge"],
+      },
+      judge: { provider: "openai", model: "judge-model-x" },
+      judgeAuth: { apiKey: "sk-job-key", baseUrl: "http://job-proxy" },
+    };
+    const result = await runAgentJob(job);
+    const score = result.scores.find((s) => s.graderId === "judge");
+    expect(score?.detail).toBe("judge-model-x sk-job-key http://job-proxy");
+  });
+});
+
 // env.kind selects the Environment on the local agent path. browser is a service-topology target env and must
 // never reach here — it should fail loud, not be silently mishandled as a repo.
 describe("runAgentJob env.kind routing", () => {
