@@ -24,6 +24,9 @@ apps/desktop/bundle/
 apps/desktop/release/
 apps/web/.next-dev/
 
+# standalone runner bundle / SEA binaries (apps/cli — `pnpm bundle` + release CI)
+apps/cli/bundle/
+
 # python bytecode
 __pycache__/
 *.pyc

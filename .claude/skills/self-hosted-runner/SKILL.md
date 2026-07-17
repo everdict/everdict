@@ -50,4 +50,13 @@ Registered `RuntimeSpec` kinds are **`local | nomad | k8s`** only. The `docker` 
 ## `everdict runner` (`apps/cli/src/main.ts` `runnerCommand`)
 `--pair <rnr_…> --api-url … [--max-concurrent N] [--mount-codex-login] [--ready-timeout-ms/--ready-interval-ms]`. Self-advertises `detectCapabilities()` each lease; `--mount-codex-login` opt-in binds `~/.codex` into containerized (`case.image`) jobs so codex runs in-image with the machine login (own-pays; explicit, since the credential is exposed to the job container).
 
-See `docs/architecture/self-hosted-runner.md` (shipped personal tier) · `docs/architecture/self-hosted-service-runner.md` (DockerTopologyRuntime) · `docs/architecture/portable-harness-runtime.md` (case.image local↔managed) · `docs/runtimes.md`. Skills: `desktop` (Electron shell), `backends` (push placement + budget), `topology` (service harnesses).
+## Distribution — a headless machine that has no everdict (`docs/architecture/runner-distribution.md`)
+The registered-runner dialog prints `everdict runner --pair …`, but a bare host has no `everdict` (the CLI is
+an unpublished pnpm-workspace package). The bootstrap is a self-contained `everdict-runner` binary: a
+**runner-only entry** (`apps/cli/src/runner-standalone.ts` → `runner-command.ts`, extracted from `main.ts`) is
+esbuild-bundled (`apps/cli/esbuild.mjs`, `pnpm --filter @everdict/cli bundle`) into one file that EXCLUDES
+`@everdict/orchestrator` — Temporal's native `core-bridge` can't be bundled, and the runner path never needs it.
+That bundle → Node SEA → GitHub Release asset (`cli-v*`), fetched by a control-plane-served `install.sh` that
+installs + pairs in one paste. Never add an orchestrator/backends import to the runner entry (it breaks the bundle).
+
+See `docs/architecture/self-hosted-runner.md` (shipped personal tier) · `docs/architecture/self-hosted-service-runner.md` (DockerTopologyRuntime) · `docs/architecture/portable-harness-runtime.md` (case.image local↔managed) · `docs/architecture/runner-distribution.md` (standalone binary + install.sh) · `docs/runtimes.md`. Skills: `desktop` (Electron shell), `backends` (push placement + budget), `topology` (service harnesses).

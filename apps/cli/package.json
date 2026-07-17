@@ -10,7 +10,11 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run --passWithNoTests"
+    "test": "vitest run --passWithNoTests",
+    "bundle": "node esbuild.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.1"
   },
   "dependencies": {
     "@everdict/agent": "workspace:*",
