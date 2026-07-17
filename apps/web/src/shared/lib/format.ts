@@ -14,6 +14,14 @@ export function fmtScore(
   return '–'
 }
 
+// Score.detail is `unknown` on the wire — graders/judges may emit prose OR a structured verdict object.
+// Prose renders as-is; anything else degrades to compact JSON so a structured detail never breaks the page.
+export function fmtScoreDetail(detail: unknown): string | undefined {
+  if (detail == null) return undefined
+  if (typeof detail === 'string') return detail || undefined
+  return JSON.stringify(detail)
+}
+
 // Pass-rate health — for color encoding. Only meaningful for passRate (0~1); numeric metrics are 'none' = neutral.
 export type Health = 'good' | 'mid' | 'low' | 'none'
 export function rateHealth(passRate: number | null | undefined): Health {

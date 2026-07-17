@@ -20,6 +20,7 @@ import { controlPlane } from '@/shared/lib/control-plane'
 import {
   fmtMetricLabel,
   fmtPct,
+  fmtScoreDetail,
   fmtSubject,
   fmtTimeAgo,
   groupMetricRows,
@@ -875,7 +876,8 @@ export default async function ScorecardDetailPage({
                     Grouped order (overall first, criteria indented beneath) so a multi-criteria judge's reasons read as one block. */}
                   {scoreGroups
                     .flatMap((g) => [{ row: g.row, parsed: g.parsed }, ...g.criteria])
-                    .filter((e) => e.row.detail)
+                    .map((e) => ({ ...e, detailText: fmtScoreDetail(e.row.detail) }))
+                    .filter((e) => e.detailText)
                     .map((e) => (
                       <p
                         key={`${e.row.graderId}:${e.row.metric}-detail`}
@@ -889,7 +891,7 @@ export default async function ScorecardDetailPage({
                           siblings={caseMetrics}
                           className="mr-1 max-w-full align-middle font-[510] text-foreground"
                         />{' '}
-                        · {e.row.detail}
+                        · {e.detailText}
                       </p>
                     ))}
                   {/* error events from the run trace — how the case failed (harness crash/dispatch error). */}

@@ -1,4 +1,8 @@
-import type { RunUsageSummary, RunStatus as WireRunStatus } from '@everdict/contracts'
+import type {
+  RunUsageSummary,
+  RunStatus as WireRunStatus,
+  Score as WireScore,
+} from '@everdict/contracts'
 import type { RunDetailResponse } from '@everdict/contracts/wire'
 import { z } from 'zod'
 
@@ -9,16 +13,19 @@ import { z } from 'zod'
 // Posture: the flat run fields (id/tenant/harness/caseId/status/error/trigger/parentScorecardId/liveTrace/timestamps)
 // are sourced from the wire type and drift-guarded. `result`/`usage`/`Score`/`TraceEvent` stay a DELIBERATELY LOOSE
 // consumer view — the UI parses trace events and snapshots by kind defensively (passthrough) so it survives server-side
-// trace-kind/snapshot-kind additions, and renders `Score.detail` as text. Binding those to the strict wire shapes
-// (`CaseResult`'s discriminated-union trace/snapshot, `Score.detail: unknown`) would force every consumer to re-narrow
-// the unions. So they keep local types, drift-guarded only where they overlap the wire (Score/Usage numeric fields).
+// trace-kind/snapshot-kind additions, and narrows `Score.detail` (`unknown`, matching the wire) only at render
+// (fmtScoreDetail). Binding those to the strict wire shapes (`CaseResult`'s discriminated-union trace/snapshot) would
+// force every consumer to re-narrow the unions. So they keep local types, drift-guarded only where they overlap the
+// wire (Score/Usage numeric fields).
 
 export const scoreSchema = z.object({
   graderId: z.string(),
   metric: z.string(),
   value: z.number(),
   pass: z.boolean().optional(),
-  detail: z.string().optional(),
+  // Matches the contract's `unknown` — code judges emit structured objects, not just prose. Narrowed at render
+  // via fmtScoreDetail (string as-is, else compact JSON); typing it string here rejects the whole run/scorecard.
+  detail: z.unknown().optional(),
 })
 export type Score = z.infer<typeof scoreSchema>
 
@@ -103,5 +110,14 @@ type _statusGuard = AssertAssignable<WebRun['status'], WireRunStatus>
 // wire summary: the web keys must be exactly the wire keys (record-typed both ways).
 type _usageKeysMatch = AssertAssignable<keyof z.infer<typeof usageSchema>, keyof RunUsageSummary> &
   AssertAssignable<keyof RunUsageSummary, keyof z.infer<typeof usageSchema>>
+// Score.detail is `unknown` on the wire (structured verdict objects, not just prose) — the local view must
+// accept it, or a single object detail rejects the whole run result at parse time. Regression guard.
+type _scoreDetailAccepts = AssertAssignable<WireScore['detail'], Score['detail']>
 
-export type __runDriftGuard = [_flatGuard, _webFieldsOnWire, _statusGuard, _usageKeysMatch]
+export type __runDriftGuard = [
+  _flatGuard,
+  _webFieldsOnWire,
+  _statusGuard,
+  _usageKeysMatch,
+  _scoreDetailAccepts,
+]

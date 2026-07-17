@@ -1,5 +1,6 @@
 import type {
   MetricSummary as WireMetricSummary,
+  Score as WireScore,
   ScorecardExport as WireScorecardExport,
   ScorecardModels as WireScorecardModels,
   ScorecardStatus as WireScorecardStatus,
@@ -53,14 +54,15 @@ export const scorecardTrialSummarySchema = z.object({
 })
 
 // per-case scores (loose — display fields only, the rest passthrough). detail = the grader/judge's verdict rationale (VLM rubric reasoning, etc.).
-// Stays LOCAL: the contract Score's `detail` is `unknown` (discriminated), the web renders it as text.
+// Stays LOCAL: the contract Score's `detail` is `unknown` (prose OR a structured object — code judges emit objects),
+// so the schema must accept unknown too; the web narrows at render via fmtScoreDetail (string as-is, else JSON).
 export const caseScoreSchema = z
   .object({
     graderId: z.string(),
     metric: z.string(),
     value: z.number(),
     pass: z.boolean().optional(),
-    detail: z.string().optional(),
+    detail: z.unknown().optional(),
   })
   .passthrough()
 
@@ -318,6 +320,12 @@ type _modelsFwd = AssertAssignable<WebScorecardModels, WireScorecardModels>
 type _modelsBack = AssertAssignable<WireScorecardModels, WebScorecardModels>
 type _exportFwd = AssertAssignable<WebScorecardExport, WireScorecardExport>
 type _exportBack = AssertAssignable<WireScorecardExport, WebScorecardExport>
+// Score.detail is `unknown` on the wire (structured verdict objects, not just prose) — the local view must
+// accept it, or a single object detail rejects the whole scorecard at parse time. Regression guard.
+type _scoreDetailAccepts = AssertAssignable<
+  WireScore['detail'],
+  z.infer<typeof caseScoreSchema>['detail']
+>
 // ScorecardOrigin is narrower (omits retryOf/memoryBoostMb) — Pick-reverse.
 type _originFieldsOnWire = AssertAssignable<
   Pick<WireScorecardResponseOrigin, keyof WebScorecardOrigin>,
@@ -374,6 +382,7 @@ export type __scorecardDriftGuard = [
   _modelsBack,
   _exportFwd,
   _exportBack,
+  _scoreDetailAccepts,
   _originFieldsOnWire,
   _recordFieldsOnWire,
   _diffFwd,
