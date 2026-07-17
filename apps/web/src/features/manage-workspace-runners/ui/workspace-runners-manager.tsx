@@ -1,8 +1,7 @@
 'use client'
 
 import { useEffect, useState, useTransition } from 'react'
-import Link from 'next/link'
-import { Check, Copy, Download, Github, Lock, Search, Server, Trash2 } from 'lucide-react'
+import { Check, Copy, Github, Lock, Search, Server, Trash2 } from 'lucide-react'
 import { useLocale, useTranslations } from 'next-intl'
 
 import type { GithubAppInstallation, GithubAppView } from '@/entities/github-app'
@@ -10,7 +9,7 @@ import { capabilityMeta, type GithubRunnerInstall, type RunnerMeta } from '@/ent
 import { copyText } from '@/shared/lib/clipboard'
 import { cn } from '@/shared/lib/utils'
 import { Badge } from '@/shared/ui/badge'
-import { Button, buttonVariants } from '@/shared/ui/button'
+import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
 import { Dialog } from '@/shared/ui/dialog'
 import { EmptyState } from '@/shared/ui/empty-state'
@@ -36,13 +35,11 @@ export function WorkspaceRunnersManager({
   runners,
   canWrite,
   githubApp,
-  downloadHref,
   onOpenIntegrations,
 }: {
   runners: RunnerMeta[]
   canWrite: boolean
   githubApp: GithubAppView // Target list for the GitHub Actions runner registration picker (installations + allowed repos) — same snapshot as the Integrations tab
-  downloadHref: string // /{workspace}/download — where a runner machine gets everdict (the registered dialog links to it as a setup prerequisite)
   onOpenIntegrations?: () => void // "Install/manage GitHub App" CTA — switch to the Integrations tab (same settings page)
 }) {
   const t = useTranslations('manageWorkspaceRunners')
@@ -210,11 +207,7 @@ export function WorkspaceRunnersManager({
       )}
 
       {canWrite && (
-        <RegisterRunnerDialog
-          open={registerOpen}
-          onClose={() => setRegisterOpen(false)}
-          downloadHref={downloadHref}
-        />
+        <RegisterRunnerDialog open={registerOpen} onClose={() => setRegisterOpen(false)} />
       )}
       {canWrite && (
         <GithubInstallDialog
@@ -229,22 +222,15 @@ export function WorkspaceRunnersManager({
 }
 
 // Register dialog — name the runner, register. OS + capabilities are NOT asked for: the runner self-reports them the
-// first time it connects (registration only needs a name). Once registered, the same dialog switches to a two-step
-// setup: (1) get everdict onto the runner machine (it may not have it), (2) run the server-authored attach command.
-function RegisterRunnerDialog({
-  open,
-  onClose,
-  downloadHref,
-}: {
-  open: boolean
-  onClose: () => void
-  downloadHref: string
-}) {
+// first time it connects (registration only needs a name). Once registered, the same dialog shows the server-authored
+// setup command: the `curl … | sh` one-liner (installs everdict-runner AND pairs — for a host with no everdict) as the
+// primary path, with the raw `everdict runner --pair …` as a fallback for a host that already has the CLI.
+function RegisterRunnerDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   const t = useTranslations('manageWorkspaceRunners')
   const locale = useLocale()
   const [label, setLabel] = useState('')
-  const [issued, setIssued] = useState<{ token: string; command: string }>()
-  const [copied, setCopied] = useState(false)
+  const [issued, setIssued] = useState<{ installCommand?: string; attachCommand: string }>()
+  const [copied, setCopied] = useState<'install' | 'attach'>()
   const [error, setError] = useState<string>()
   const [pending, startTransition] = useTransition()
 
@@ -252,7 +238,7 @@ function RegisterRunnerDialog({
     if (!open) return
     setLabel('')
     setIssued(undefined)
-    setCopied(false)
+    setCopied(undefined)
     setError(undefined)
   }, [open])
 
@@ -264,14 +250,19 @@ function RegisterRunnerDialog({
     }
     startTransition(async () => {
       const r = await pairWorkspaceRunnerAction({ label: label.trim() })
-      // The control plane authors the attach command (correct `--pair <token>` form, api-url embedded) — display it verbatim.
+      // The control plane authors both commands (correct `--pair <token>` form, api-url embedded) — display them verbatim.
       if (r.ok && r.token && r.attachCommand)
-        setIssued({ token: r.token, command: r.attachCommand })
+        setIssued({
+          attachCommand: r.attachCommand,
+          ...(r.installCommand ? { installCommand: r.installCommand } : {}),
+        })
       else setError(r.error ?? t('registerFailed'))
     })
   }
 
-  const command = issued?.command ?? ''
+  function copy(text: string, which: 'install' | 'attach') {
+    void copyText(text, undefined, locale).then((ok) => ok && setCopied(which))
+  }
 
   return (
     <Dialog
@@ -291,39 +282,49 @@ function RegisterRunnerDialog({
             </p>
           </header>
           <div className="space-y-4 px-5 py-4">
-            {/* Step 1 — get everdict on the runner machine (the target may never have heard of it). */}
-            <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-elevated/50 px-3 py-2.5">
-              <span className="text-[13px] text-muted-foreground">{t('setupInstallStep')}</span>
-              <Link
-                href={downloadHref}
-                className={cn(buttonVariants({ size: 'sm', variant: 'secondary' }), 'shrink-0')}
-              >
-                <Download />
-                {t('getEverdict')}
-              </Link>
-            </div>
-            {/* Step 2 — the ready-to-run attach command (token embedded, shown once). */}
+            {/* Primary — the one-liner that installs everdict-runner AND pairs (a bare host needs no everdict/node). */}
+            {issued.installCommand && (
+              <div className="space-y-1.5">
+                <Label>{t('installStepLabel')}</Label>
+                <Callout tone="warning" hint={t('tokenOnceHint')}>
+                  <div className="flex items-center gap-2">
+                    <code className="min-w-0 flex-1 select-all break-all font-mono text-xs">
+                      {issued.installCommand}
+                    </code>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      className="shrink-0"
+                      // biome-ignore lint/style/noNonNullAssertion: guarded by the enclosing `issued.installCommand &&`
+                      onClick={() => copy(issued.installCommand!, 'install')}
+                    >
+                      {copied === 'install' ? <Check /> : <Copy />}
+                      {copied === 'install' ? t('copied') : t('copy')}
+                    </Button>
+                  </div>
+                </Callout>
+                <p className="text-[12px] text-faint">{t('installStepHint')}</p>
+              </div>
+            )}
+            {/* Fallback — the raw command for a host that already has the everdict CLI. */}
             <div className="space-y-1.5">
               <Label>{t('attachStepLabel')}</Label>
-              <Callout tone="warning" hint={t('tokenOnceHint')}>
-                <div className="flex items-center gap-2">
-                  <code className="min-w-0 flex-1 select-all break-all font-mono text-xs">
-                    {command}
-                  </code>
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    size="sm"
-                    className="shrink-0"
-                    onClick={() => {
-                      void copyText(command, undefined, locale).then((ok) => ok && setCopied(true))
-                    }}
-                  >
-                    {copied ? <Check /> : <Copy />}
-                    {copied ? t('copied') : t('copy')}
-                  </Button>
-                </div>
-              </Callout>
+              <div className="flex items-center gap-2 rounded-md border border-border bg-elevated/40 px-2.5 py-1.5">
+                <code className="min-w-0 flex-1 select-all break-all font-mono text-xs text-muted-foreground">
+                  {issued.attachCommand}
+                </code>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="shrink-0"
+                  onClick={() => copy(issued.attachCommand, 'attach')}
+                >
+                  {copied === 'attach' ? <Check /> : <Copy />}
+                  {copied === 'attach' ? t('copied') : t('copy')}
+                </Button>
+              </div>
             </div>
             <p className="text-[12px] text-faint">{t('autoDetectNote')}</p>
           </div>

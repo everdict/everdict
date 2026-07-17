@@ -1,4 +1,8 @@
-import { installGithubWorkspaceRunner, renderRunnerAttachCommand } from "@everdict/application-control";
+import {
+  installGithubWorkspaceRunner,
+  renderRunnerAttachCommand,
+  renderRunnerInstallCommand,
+} from "@everdict/application-control";
 import { RUNNER_CAPABILITIES } from "@everdict/application-control";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
@@ -43,13 +47,21 @@ export function registerWorkspaceRunnerTools(server: McpServer, ctx: McpToolCont
             ...(os !== undefined ? { os } : {}),
             ...(capabilities !== undefined ? { capabilities } : {}),
           });
-          // Server-authored attach command (BFF↔MCP parity with POST /workspace/runners) — the token rides as a
-          // POSITIONAL `--pair <token>`, ready to paste on the runner machine.
+          // Server-authored commands (BFF↔MCP parity with POST /workspace/runners) — attachCommand runs on a host that
+          // already has everdict; installCommand (`curl … | sh`) bootstraps one that doesn't. Both embed the token.
           const attachCommand = renderRunnerAttachCommand({
             token: paired.token,
             ...(deps.apiPublicUrl !== undefined ? { apiUrl: deps.apiPublicUrl } : {}),
           });
-          return ok({ runner: paired.meta, token: paired.token, attachCommand });
+          const installCommand = deps.apiPublicUrl
+            ? renderRunnerInstallCommand({ token: paired.token, apiUrl: deps.apiPublicUrl })
+            : undefined;
+          return ok({
+            runner: paired.meta,
+            token: paired.token,
+            attachCommand,
+            ...(installCommand !== undefined ? { installCommand } : {}),
+          });
         }),
     );
     server.registerTool(

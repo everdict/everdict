@@ -132,6 +132,11 @@ export {
   installGithubWorkspaceRunner,
 } from "./runner/github-runner-install.js";
 export { renderRunnerAttachCommand } from "./runner/runner-attach-command.js";
+export {
+  isRunnerToken,
+  renderRunnerInstallCommand,
+  renderRunnerInstallScript,
+} from "./runner/runner-install.js";
 export type {
   GithubAppCreds,
   GithubAppGateway,

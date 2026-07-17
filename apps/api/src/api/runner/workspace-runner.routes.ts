@@ -1,4 +1,8 @@
-import { installGithubWorkspaceRunner, renderRunnerAttachCommand } from "@everdict/application-control";
+import {
+  installGithubWorkspaceRunner,
+  renderRunnerAttachCommand,
+  renderRunnerInstallCommand,
+} from "@everdict/application-control";
 import { PairRunnerBodySchema, RUNNER_CAPABILITIES } from "@everdict/application-control";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
@@ -38,10 +42,13 @@ export function registerWorkspaceRunnerRoutes(app: FastifyInstance, deps: Server
         ...(body.data.os !== undefined ? { os: body.data.os } : {}),
         ...(body.data.capabilities !== undefined ? { capabilities: body.data.capabilities } : {}),
       });
-      // The server authors the ready-to-run attach command (the CLI wants the token as a POSITIONAL `--pair <token>`,
-      // not a `--token` flag) so every surface that shows it stays correct — the web just displays it.
-      const attachCommand = renderRunnerAttachCommand({ token: paired.token, apiUrl: baseUrl(req) });
-      return reply.send({ runner: paired.meta, token: paired.token, attachCommand });
+      // The server authors both commands (the CLI wants the token as a POSITIONAL `--pair <token>`, not a `--token`
+      // flag) so every surface that shows them stays correct — the web just displays them. installCommand is the
+      // `curl … | sh` one-liner for a host with no everdict; attachCommand is the raw command for one that has it.
+      const api = baseUrl(req);
+      const attachCommand = renderRunnerAttachCommand({ token: paired.token, apiUrl: api });
+      const installCommand = renderRunnerInstallCommand({ token: paired.token, apiUrl: api });
+      return reply.send({ runner: paired.meta, token: paired.token, attachCommand, installCommand });
     } catch (err) {
       return sendError(reply, err);
     }

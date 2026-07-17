@@ -22,7 +22,8 @@ export interface PairWorkspaceRunnerResult {
   ok: boolean
   token?: string // plaintext (rnr_…) — once only. Shown in the dialog/command then discarded (stored as a hash).
   runner?: RunnerMeta
-  attachCommand?: string // server-authored, ready-to-run `everdict runner --pair …` (token embedded) — the dialog displays it verbatim.
+  attachCommand?: string // server-authored `everdict runner --pair …` (token embedded) — raw command for a host that has everdict.
+  installCommand?: string // server-authored `curl … | sh` one-liner — installs the binary AND pairs, for a host that doesn't.
   error?: string
 }
 export interface WorkspaceRunnerMutationResult {
@@ -49,6 +50,7 @@ export async function pairWorkspaceRunnerAction(
       token: res.token,
       runner: res.runner,
       ...(res.attachCommand !== undefined ? { attachCommand: res.attachCommand } : {}),
+      ...(res.installCommand !== undefined ? { installCommand: res.installCommand } : {}),
     }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }

@@ -122,6 +122,7 @@ import {
 import { registerRubricRoutes } from "./api/rubric/rubric.routes.js";
 import { registerRunObservabilityRoutes } from "./api/run/run-observability.routes.js";
 import { registerRunRoutes } from "./api/run/run.routes.js";
+import { registerRunnerInstallRoutes } from "./api/runner/install.routes.js";
 import { registerRunnerRoutes } from "./api/runner/runner.routes.js";
 import { registerWorkspaceRunnerRoutes } from "./api/runner/workspace-runner.routes.js";
 import { registerRuntimeRoutes } from "./api/runtime/runtime.routes.js";
@@ -226,6 +227,8 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     registerCiLinkRoutes(routes, deps);
     registerRunnerRoutes(routes, deps);
     registerWorkspaceRunnerRoutes(routes, deps);
+    registerRunnerInstallRoutes(routes); // public GET /install.sh (token self-authorizes) — no deps/auth
+
     registerQueueRoutes(routes, deps);
     registerBillingRoutes(routes, deps);
     registerBrowserSessionRoutes(routes, deps);
