@@ -15,4 +15,7 @@ export interface ScorecardStore {
   update(id: string, patch: Partial<ScorecardRecord>): Promise<ScorecardRecord | undefined>;
   get(id: string): Promise<ScorecardRecord | undefined>;
   list(tenant?: string, filter?: ScorecardListFilter): Promise<ScorecardRecord[]>;
+  // Hard delete (scorecards are result records, not versioned reproducibility artifacts — no tombstone).
+  // Returns false when the id doesn't exist. Tenant scoping is the service's job (get-then-check, like cancel).
+  delete(id: string): Promise<boolean>;
 }

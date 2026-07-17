@@ -40,4 +40,12 @@ export class InMemoryRunStore implements RunStore {
         : scoped.filter((r) => r.parentScorecardId == null);
     return filtered.map(withRunUsage);
   }
+
+  async deleteByScorecard(scorecardId: string): Promise<number> {
+    let removed = 0;
+    for (const [id, r] of this.runs) {
+      if (r.parentScorecardId === scorecardId && this.runs.delete(id)) removed++;
+    }
+    return removed;
+  }
 }

@@ -2,6 +2,7 @@ import {
   BadRequestError,
   type CaseResult,
   type Dataset,
+  ForbiddenError,
   type HarnessSpec,
   NotFoundError,
   type ScorecardOrigin,
@@ -10,10 +11,12 @@ import {
 import {
   CircuitBreaker,
   type Leaderboard,
+  type Principal,
   ScorecardBatch,
   type ScorecardDiff,
   type ScorecardTrend,
   type TrialDiff,
+  can,
 } from "@everdict/domain";
 import { ScoringService } from "../execution/scoring-service.js";
 import { assertRuntimeTarget } from "../require-runtime/require-runtime.js";
@@ -307,6 +310,35 @@ export class ScorecardService {
     await this.deps.store.update(rec.id, ScorecardBatch.from(rec).cancel(this.now()));
     await this.stopInFlight(rec);
     return (await this.get(rec.id)) ?? rec;
+  }
+
+  // User delete — permanently remove a TERMINAL batch and its fan-out child runs (hard delete: scorecards are
+  // result records, not versioned reproducibility artifacts, so there is no tombstone; the record disappears from
+  // baseline/diff/leaderboard/trend). An in-flight batch is a 409 (stop it first — cancel owns the live teardown).
+  // Permission mirrors the registry deletes: the batch's creator or a workspace admin (scorecards:delete); the
+  // creator exception lives here, never in the route. Cross-workspace/missing → 404 (no existence leak, same as get).
+  async delete(input: {
+    principal: Principal;
+    id: string;
+  }): Promise<{ workspace: string; id: string; deleted: true; childRuns: number }> {
+    const ws = input.principal.workspace;
+    const rec = await this.deps.store.get(input.id);
+    if (!rec || rec.tenant !== ws)
+      throw new NotFoundError("NOT_FOUND", { scorecard: input.id }, "Scorecard not found.");
+    ScorecardBatch.from(rec).assertCanDelete();
+    const isAdmin = can(input.principal, "scorecards:delete"); // admin-only action
+    const isCreator = rec.createdBy !== undefined && rec.createdBy === input.principal.subject;
+    if (!isAdmin && !isCreator) {
+      throw new ForbiddenError(
+        "FORBIDDEN",
+        { workspace: ws, scorecard: input.id, action: "scorecards:delete" },
+        "You are not allowed to delete this scorecard (only the batch's creator or a workspace admin).",
+      );
+    }
+    // Children first — if the record delete then failed, orphaned children are already gone (never the reverse).
+    const childRuns = this.deps.runStore ? await this.deps.runStore.deleteByScorecard(rec.id) : 0;
+    await this.deps.store.delete(rec.id);
+    return { workspace: ws, id: rec.id, deleted: true, childRuns };
   }
 
   // A dispatched scorecard doesn't embed the heavy scorecard (case results), storing only runIds (storage dedup) →

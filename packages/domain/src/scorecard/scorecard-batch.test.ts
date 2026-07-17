@@ -113,6 +113,21 @@ describe("ScorecardBatch — guards (the SSOT for legality)", () => {
     }
   });
 
+  it("canDelete is the mirror of canCancel — only a terminal batch may be deleted (stop a live one first)", () => {
+    expect(ScorecardBatch.from(queued()).canDelete()).toBe(false);
+    expect(ScorecardBatch.from({ ...queued(), status: "running" }).canDelete()).toBe(false);
+    for (const status of ["succeeded", "failed", "superseded", "cancelled"] as const) {
+      expect(ScorecardBatch.from({ ...queued(), status }).canDelete()).toBe(true);
+    }
+  });
+
+  it("assertCanDelete throws a ConflictError on a live batch, pointing at cancel as the way out", () => {
+    expect(() => ScorecardBatch.from({ ...queued(), status: "running" }).assertCanDelete()).toThrow(
+      /stop it \(cancel\) before deleting/,
+    );
+    expect(() => ScorecardBatch.from({ ...queued(), status: "succeeded" }).assertCanDelete()).not.toThrow();
+  });
+
   it("canResume requires an unsettled status AND persisted orchestration inputs", () => {
     expect(ScorecardBatch.from({ ...queued(), status: "running" }).canResume()).toBe(true);
     expect(ScorecardBatch.from(queued()).canResume()).toBe(true);

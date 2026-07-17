@@ -3270,6 +3270,87 @@ describe("API — scorecards (dataset×harness batch eval)", () => {
     expect(res.statusCode).toBe(403); // scorecards:run required
     await app.close();
   });
+
+  it("DELETE /scorecards/:id: the creator deletes their finished batch (200, then GET is 404)", async () => {
+    const { app } = server({ requireAuth: true, authenticator: roleAuth(["member"]) }); // subject "u" runs AND deletes
+    const h = { authorization: "Bearer x" };
+    await app.inject({ method: "POST", url: "/datasets", headers: h, payload: DATASET });
+    const post = await app.inject({
+      method: "POST",
+      url: "/scorecards",
+      headers: h,
+      payload: { dataset: { id: "smoke" }, harness: { id: "scripted" } },
+    });
+    const id = post.json().id;
+    await pollScorecard(app, id, h); // terminal (succeeded) — deletable
+    const del = await app.inject({ method: "DELETE", url: `/scorecards/${id}`, headers: h });
+    expect(del.statusCode).toBe(200);
+    expect(del.json()).toMatchObject({ id, deleted: true });
+    expect((await app.inject({ method: "GET", url: `/scorecards/${id}`, headers: h })).statusCode).toBe(404);
+    await app.close();
+  });
+
+  it("DELETE /scorecards/:id: a member who is neither the creator nor an admin → 403; an admin can delete others' batches", async () => {
+    // Same in-memory stores across role swaps isn't possible with separate server() instances, so run the whole
+    // sequence on one app by swapping the authenticator's answer per token.
+    const bySubject: Record<string, { subject: string; roles: string[] }> = {
+      alice: { subject: "u-alice", roles: ["member"] },
+      bob: { subject: "u-bob", roles: ["member"] },
+      carol: { subject: "u-carol", roles: ["admin"] },
+    };
+    const { app, workspaceStore } = server({
+      requireAuth: true,
+      authenticator: {
+        async authenticate(token: string) {
+          const who = bySubject[token];
+          if (!who) return undefined;
+          return { ...who, workspace: "acme", via: "oidc" as const };
+        },
+      },
+    });
+    const alice = { authorization: "Bearer alice" };
+    await app.inject({ method: "POST", url: "/datasets", headers: alice, payload: DATASET });
+    // OIDC bootstrap caps a newcomer to an EXISTING workspace at member (applyActiveWorkspace) — seed carol's
+    // admin membership directly so the delete authorizes against a real workspace admin, not a token role.
+    await workspaceStore.ensureMembership("acme", "u-carol", "admin");
+    const post = await app.inject({
+      method: "POST",
+      url: "/scorecards",
+      headers: alice,
+      payload: { dataset: { id: "smoke" }, harness: { id: "scripted" } },
+    });
+    const id = post.json().id;
+    await pollScorecard(app, id, alice);
+
+    // bob (member, not the creator) → FORBIDDEN, the record survives.
+    const denied = await app.inject({
+      method: "DELETE",
+      url: `/scorecards/${id}`,
+      headers: { authorization: "Bearer bob" },
+    });
+    expect(denied.statusCode).toBe(403);
+    expect((await app.inject({ method: "GET", url: `/scorecards/${id}`, headers: alice })).statusCode).toBe(200);
+
+    // carol (admin, not the creator) → deletes fine.
+    const del = await app.inject({
+      method: "DELETE",
+      url: `/scorecards/${id}`,
+      headers: { authorization: "Bearer carol" },
+    });
+    expect(del.statusCode).toBe(200);
+    await app.close();
+  });
+
+  it("DELETE /scorecards/:id: a missing scorecard is 404 (no existence leak)", async () => {
+    const { app } = server({ requireAuth: true, authenticator: roleAuth(["admin"]) });
+    const res = await app.inject({
+      method: "DELETE",
+      url: "/scorecards/nope",
+      headers: { authorization: "Bearer x" },
+    });
+    expect(res.statusCode).toBe(404);
+    await app.close();
+  });
 });
 
 describe("API — secrets (workspace model/provider keys)", () => {

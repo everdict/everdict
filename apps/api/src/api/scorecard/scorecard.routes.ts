@@ -91,6 +91,21 @@ export function registerScorecardRoutes(app: FastifyInstance, deps: ServerDeps):
     },
   );
 
+  // Hard-delete a terminal scorecard and its fan-out child runs — the batch's creator or a workspace admin
+  // (scorecards:delete), enforced in the service (creator exception never lives in the route). An in-flight batch
+  // is a 409 (stop it first); another workspace's / a missing scorecard is a 404 (no existence leak).
+  app.delete<{ Params: { id: string } }>("/scorecards/:id", { schema: scorecardDocs.remove }, async (req, reply) => {
+    if (!deps.scorecardService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "scorecard service not configured" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      return reply.send(await deps.scorecardService.delete({ principal, id: req.params.id }));
+    } catch (err) {
+      return sendError(reply, err); // no permission 403 / not found 404 / still running 409
+    }
+  });
+
   // Trace ingest — upload traces already produced externally (TraceEvent[]) and turn them into a scorecard (no harness run). Validated at the boundary.
   app.post("/scorecards/ingest", { schema: scorecardDocs.ingest }, async (req, reply) => {
     if (!deps.scorecardService)

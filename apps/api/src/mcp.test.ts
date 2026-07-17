@@ -279,6 +279,7 @@ describe("MCP tools", () => {
       "delete_model",
       "delete_model_versions",
       "delete_schedule",
+      "delete_scorecard",
       "diff_datasets",
       "diff_harness_versions",
       "diff_judge_versions",
@@ -1214,6 +1215,76 @@ describe("MCP tools", () => {
     }
     expect(rec.status).toBe("succeeded");
     expect(seen?.judge?.model).toBe("gpt-5.4-mini");
+  });
+
+  it("delete_scorecard: creator deletes their terminal batch (child runs cascade); non-creator member FORBIDDEN; running CONFLICT; missing NOT_FOUND", async () => {
+    const store = new InMemoryScorecardStore();
+    const runStore = new InMemoryRunStore();
+    const base = {
+      tenant: "acme",
+      dataset: { id: "smoke", version: "1.0.0" },
+      harness: { id: "scripted", version: "0" },
+      createdBy: "u-alice",
+      createdAt: "2026-06-19T00:00:00.000Z",
+      updatedAt: "2026-06-19T00:00:00.000Z",
+    };
+    await store.create({ ...base, id: "sc-done", status: "succeeded" });
+    await store.create({ ...base, id: "sc-live", status: "running" });
+    await runStore.create({
+      id: "child-1",
+      tenant: "acme",
+      harness: { id: "scripted", version: "0" },
+      caseId: "c1",
+      status: "succeeded",
+      parentScorecardId: "sc-done",
+      trigger: "scorecard",
+      createdAt: "2026-06-19T00:00:00.000Z",
+      updatedAt: "2026-06-19T00:00:00.000Z",
+    });
+    const deps = {
+      service: new RunService({ dispatcher: okDispatcher, store: runStore, newId: () => `run-${n++}` }),
+      scorecardService: new ScorecardService({
+        dispatcher: okDispatcher,
+        store,
+        runStore,
+        datasets: new InMemoryDatasetRegistry(),
+        newId: () => `sc-${n++}`,
+      }),
+    };
+    const clientFor = async (roles: string[], subject: string) => {
+      const server = buildMcpServer(deps, { subject, workspace: "acme", roles, via: "oidc" });
+      const [clientT, serverT] = InMemoryTransport.createLinkedPair();
+      const client = new Client({ name: "test", version: "0" });
+      await server.connect(serverT);
+      await client.connect(clientT);
+      return client;
+    };
+
+    // Another member (not the creator) → FORBIDDEN, nothing deleted.
+    const bob = await clientFor(["member"], "u-bob");
+    const denied = await bob.callTool({ name: "delete_scorecard", arguments: { id: "sc-done" } });
+    expect(denied.isError).toBe(true);
+    expect(text(denied)).toContain("FORBIDDEN");
+    expect(await store.get("sc-done")).toBeDefined();
+
+    // The creator deletes — record + child runs are gone.
+    const alice = await clientFor(["member"], "u-alice");
+    const del = await alice.callTool({ name: "delete_scorecard", arguments: { id: "sc-done" } });
+    expect(del.isError).toBeFalsy();
+    expect(JSON.parse(text(del))).toMatchObject({ id: "sc-done", deleted: true, childRuns: 1 });
+    expect(await store.get("sc-done")).toBeUndefined();
+    expect(await runStore.get("child-1")).toBeUndefined();
+
+    // A live batch refuses delete even for an admin (stop it first) — CONFLICT.
+    const admin = await clientFor(["admin"], "u-carol");
+    const live = await admin.callTool({ name: "delete_scorecard", arguments: { id: "sc-live" } });
+    expect(live.isError).toBe(true);
+    expect(text(live)).toContain("CONFLICT");
+
+    // Missing id → NOT_FOUND.
+    const missing = await admin.callTool({ name: "delete_scorecard", arguments: { id: "nope" } });
+    expect(missing.isError).toBe(true);
+    expect(text(missing)).toContain("NOT_FOUND");
   });
 
   it("apply_bundle: member installs a bundle (dataset) ok; viewer lacks datasets:write → FORBIDDEN", async () => {

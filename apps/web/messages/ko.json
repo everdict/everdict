@@ -537,6 +537,19 @@
     "deletedVersions": "{id}의 {count}개 버전을 삭제했어요",
     "deletedJudge": "평가자 {id} 삭제했어요"
   },
+  "deleteScorecard": {
+    "triggerButton": "삭제",
+    "rowDeleteTitle": "스코어카드 삭제",
+    "rowDeleteAria": "스코어카드 {id} 삭제",
+    "title": "스코어카드 삭제",
+    "close": "닫기",
+    "explain": "이 스코어카드를 영구 삭제해요. 케이스 결과와 자식 실행(run)이 함께 삭제되고, 트렌드·리더보드·비교에서 사라져요. 실행 중인 배치는 먼저 중단해야 해요.",
+    "irreversible": "완전 삭제예요 — 되돌릴 수 없어요.",
+    "failed": "스코어카드를 삭제하지 못했어요.",
+    "cancel": "취소",
+    "confirm": "스코어카드 삭제",
+    "deleted": "스코어카드 {id} 삭제했어요"
+  },
   "harnessVersions": {
     "versionsAria": "버전 ({count})",
     "compare": "비교"

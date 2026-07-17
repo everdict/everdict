@@ -161,6 +161,13 @@ export class PgScorecardStore implements ScorecardStore {
     return res.rows[0] ? rowToRecord(res.rows[0], true) : undefined;
   }
 
+  async delete(id: string): Promise<boolean> {
+    const res = await this.client.query<{ id: string }>("DELETE FROM everdict_scorecards WHERE id = $1 RETURNING id", [
+      id,
+    ]);
+    return res.rows.length > 0;
+  }
+
   async list(tenant?: string, filter?: ScorecardListFilter): Promise<ScorecardRecord[]> {
     // Don't SELECT the heavy scorecard column (lighter list). Filters narrow via the SQL WHERE (leaderboard/trend).
     const conds = ["($1::text IS NULL OR tenant = $1)"];

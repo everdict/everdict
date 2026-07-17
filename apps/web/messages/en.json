@@ -537,6 +537,19 @@
     "deletedVersions": "Deleted {count, plural, one {# version} other {# versions}} of {id}",
     "deletedJudge": "Deleted judge {id}"
   },
+  "deleteScorecard": {
+    "triggerButton": "Delete",
+    "rowDeleteTitle": "Delete scorecard",
+    "rowDeleteAria": "Delete scorecard {id}",
+    "title": "Delete scorecard",
+    "close": "Close",
+    "explain": "Permanently deletes this scorecard: its case results and child runs are removed, and it disappears from trends, leaderboards, and comparisons. A running batch must be stopped first.",
+    "irreversible": "This is a hard delete — it cannot be undone.",
+    "failed": "Couldn't delete the scorecard.",
+    "cancel": "Cancel",
+    "confirm": "Delete scorecard",
+    "deleted": "Deleted scorecard {id}"
+  },
   "harnessVersions": {
     "versionsAria": "Versions ({count})",
     "compare": "Compare"

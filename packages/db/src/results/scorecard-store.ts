@@ -21,6 +21,10 @@ export class InMemoryScorecardStore implements ScorecardStore {
     return this.cards.get(id);
   }
 
+  async delete(id: string): Promise<boolean> {
+    return this.cards.delete(id);
+  }
+
   async list(tenant?: string, filter?: ScorecardListFilter): Promise<ScorecardRecord[]> {
     const all = [...this.cards.values()]
       .filter((c) => !tenant || c.tenant === tenant)

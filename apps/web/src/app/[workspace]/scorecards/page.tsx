@@ -45,6 +45,11 @@ export default async function ScorecardsPage({
     }
 
   const canRun = can(principal?.roles, 'scorecards:run')
+  // Row-trash gating info for the list: an admin deletes any terminal batch, a member only their own.
+  const viewer = {
+    ...(principal?.subject !== undefined ? { subject: principal.subject } : {}),
+    admin: can(principal?.roles, 'scorecards:delete'),
+  }
 
   return (
     <div className="space-y-6">
@@ -84,7 +89,12 @@ export default async function ScorecardsPage({
       ) : scorecards.length === 0 ? (
         <EmptyState title={t('emptyTitle')} hint={t('emptyHint')} />
       ) : (
-        <ScorecardList workspace={workspace} scorecards={scorecards} authors={authors} />
+        <ScorecardList
+          workspace={workspace}
+          scorecards={scorecards}
+          authors={authors}
+          viewer={viewer}
+        />
       )}
     </div>
   )

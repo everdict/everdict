@@ -1,7 +1,7 @@
 import { IngestScorecardBodySchema, PullIngestBodySchema, originSource } from "@everdict/application-control";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { type McpToolContext, fail, ok, run } from "../mcp-context.js";
+import { type McpToolContext, fail, ok, plain, run } from "../mcp-context.js";
 import { serveScorecard } from "./serve.js";
 
 // Scorecard resource MCP tools — the MCP twin of scorecard.routes.ts (same ScorecardService core, second transport).
@@ -193,6 +193,16 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
       },
       ({ id }) =>
         run(principal, "scorecards:run", async () => ok(serveScorecard(await scorecards.cancel({ tenant: ws, id })))),
+    );
+
+    server.registerTool(
+      "delete_scorecard",
+      {
+        description:
+          "Permanently delete a TERMINAL scorecard and its fan-out child runs (hard delete — it disappears from baseline/diff/leaderboard/trend). Only the batch's creator or a workspace admin. Still queued/running → conflict (cancel it first); other workspace / missing → NOT_FOUND.",
+        inputSchema: { id: z.string().describe("scorecard id to delete (must be terminal)") },
+      },
+      ({ id }) => plain(async () => ok(await scorecards.delete({ principal, id }))),
     );
 
     server.registerTool(

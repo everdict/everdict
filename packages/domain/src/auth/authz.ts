@@ -18,6 +18,7 @@ export type Action =
   | "harnesses:delete"
   | "scorecards:read"
   | "scorecards:run"
+  | "scorecards:delete"
   | "schedules:read"
   | "schedules:write"
   | "judges:read"
@@ -105,6 +106,7 @@ const ROLE_PERMISSIONS: Record<string, ReadonlySet<Action>> = {
     "judges:delete", // judge version soft-delete — same pattern (admin-only + creator exception in the service layer)
     "scorecards:read",
     "scorecards:run",
+    "scorecards:delete", // scorecard hard-delete (record + child runs) — admin-only + creator exception in the service layer
     "schedules:read",
     "schedules:write",
     "judges:read",

@@ -315,6 +315,10 @@ export const controlPlane = {
   // Stop a running/queued batch — marks it cancelled and force-frees the runtime of the in-flight cases.
   cancelScorecard: <T>(auth: AuthContext, id: string) =>
     call<T>(auth, `/scorecards/${encodeURIComponent(id)}/cancel`, { method: 'POST' }),
+  // Hard-delete a TERMINAL scorecard (record + child runs) — the batch's creator or a workspace admin; the
+  // control plane enforces (403), and an in-flight batch is a 409 (stop it first). Returns { deleted: true }.
+  deleteScorecard: <T>(auth: AuthContext, id: string) =>
+    call<T>(auth, `/scorecards/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   ingestScorecard: <T>(auth: AuthContext, body: unknown) =>
     call<T>(auth, '/scorecards/ingest', { method: 'POST', body: JSON.stringify(body) }),
   ingestScorecardPull: <T>(auth: AuthContext, body: unknown) =>

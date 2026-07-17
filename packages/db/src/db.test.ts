@@ -135,6 +135,13 @@ describe("PgRunStore", () => {
     await store.list("acme", { scorecardId: "sc1" });
     expect(calls[2]?.params).toEqual(["acme", "sc1", false]);
   });
+
+  it("deleteByScorecard → parameterized DELETE on parent_scorecard_id; RETURNING rows = removed count", async () => {
+    const { client, calls } = fakeClient(() => ({ rows: [{ id: "a" }, { id: "b" }] }));
+    await expect(new PgRunStore(client).deleteByScorecard("sc1")).resolves.toBe(2);
+    expect(calls[0]?.text).toMatch(/DELETE FROM everdict_runs WHERE parent_scorecard_id = \$1/);
+    expect(calls[0]?.params).toEqual(["sc1"]);
+  });
 });
 
 describe("WorkspaceSettingsStore", () => {
@@ -217,6 +224,21 @@ describe("InMemoryRunStore — scorecard child-run filter", () => {
     const child = await store.get("run-child-a");
     expect(child?.parentScorecardId).toBe("sc1");
     expect(child?.trigger).toBe("scorecard");
+  });
+
+  it("deleteByScorecard removes ONLY that batch's children (scorecard hard-delete cascade) and reports the count", async () => {
+    const store = new InMemoryRunStore();
+    await store.create(mk("run-solo", {}));
+    await store.create(mk("run-child-a", { parentScorecardId: "sc1", trigger: "scorecard" }));
+    await store.create(mk("run-child-b", { parentScorecardId: "sc1", trigger: "scorecard" }));
+    await store.create(mk("run-child-c", { parentScorecardId: "sc2", trigger: "scorecard" }));
+
+    await expect(store.deleteByScorecard("sc1")).resolves.toBe(2);
+    expect(await store.list("acme", { scorecardId: "sc1" })).toEqual([]);
+    // Standalone runs and other batches' children survive.
+    const all = await store.list("acme", { includeChildren: true });
+    expect(all.map((r) => r.id).sort()).toEqual(["run-child-c", "run-solo"]);
+    await expect(store.deleteByScorecard("sc1")).resolves.toBe(0); // idempotent — nothing left
   });
 });
 

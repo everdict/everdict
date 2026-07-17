@@ -15,4 +15,7 @@ export interface RunStore {
   update(id: string, patch: Partial<RunRecord>): Promise<RunRecord | undefined>;
   get(id: string): Promise<RunRecord | undefined>;
   list(tenant?: string, opts?: RunListOptions): Promise<RunRecord[]>;
+  // Remove every child run a scorecard fanned out (scorecard hard-delete cascade — orphaned children would
+  // otherwise linger in the "all executions" view). Returns the number of runs removed.
+  deleteByScorecard(scorecardId: string): Promise<number>;
 }

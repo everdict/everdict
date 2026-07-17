@@ -214,6 +214,22 @@ export class ScorecardBatch {
     return !this.isTerminal();
   }
 
+  // A batch may be deleted only once it is terminal — an in-flight batch must be stopped (cancel) first, so
+  // delete never has to race the live driver loop / runtime jobs (cancel already owns that teardown).
+  canDelete(): boolean {
+    return this.isTerminal();
+  }
+
+  // Throwing form of canDelete — deleting a live batch is a clean 409, pointing at cancel as the way out.
+  assertCanDelete(): void {
+    if (!this.isTerminal())
+      throw new ConflictError(
+        "CONFLICT",
+        { scorecard: this.record.id, status: this.record.status },
+        `scorecard batch is still ${this.record.status} — stop it (cancel) before deleting`,
+      );
+  }
+
   // Trial roll-up (pass@k / flakiness) — derived on read from the scorecard's repeated trials, never stored
   // (like RunRecord.usage). A no-op for a single-run batch, so the response shape is unchanged there.
   withTrialSummary(): ScorecardRecord {

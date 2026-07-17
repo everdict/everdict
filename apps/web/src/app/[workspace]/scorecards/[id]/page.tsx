@@ -2,6 +2,7 @@ import Link from 'next/link'
 import { ChevronLeft } from 'lucide-react'
 import { getLocale, getTranslations } from 'next-intl/server'
 
+import { DeleteScorecardButton } from '@/features/delete-scorecard'
 import { CommentsSection } from '@/features/discuss'
 import { RetryFailedButton } from '@/features/retry-failed-cases'
 import { StopScorecardButton } from '@/features/stop-scorecard'
@@ -312,6 +313,18 @@ export default async function ScorecardDetailPage({
               {!live && failedCount > 0 && (
                 <RetryFailedButton id={record.id} workspace={workspace} />
               )}
+              {/* Delete is offered once the batch is terminal, to its creator or a workspace admin (mirrors the
+                  harness/dataset delete UX; the control plane enforces scorecards:delete + the creator exception). */}
+              {!live &&
+                (can(principal?.roles, 'scorecards:delete') ||
+                  (record.createdBy !== undefined && record.createdBy === principal?.subject)) && (
+                  <DeleteScorecardButton
+                    id={record.id}
+                    dataset={record.dataset}
+                    harness={record.harness}
+                    workspace={workspace}
+                  />
+                )}
               <StatusPill status={record.status} />
             </div>
           }

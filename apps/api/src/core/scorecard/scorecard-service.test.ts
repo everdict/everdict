@@ -4,14 +4,16 @@ import {
   BadRequestError,
   type CaseResult,
   type Dataset,
+  ForbiddenError,
   type HarnessTemplateSpec,
   NotFoundError,
+  type RunRecord,
   type Scorecard,
   type TraceEvent,
   UpstreamError,
 } from "@everdict/contracts";
 import { InMemoryRunStore, InMemoryScorecardStore, type ScorecardRecord } from "@everdict/db";
-import { CircuitBreaker, inMemoryUsageMeter } from "@everdict/domain";
+import { CircuitBreaker, type Principal, inMemoryUsageMeter } from "@everdict/domain";
 import { costGrader, latencyGrader, stepsGrader } from "@everdict/graders";
 import {
   InMemoryDatasetRegistry,
@@ -3143,5 +3145,82 @@ describe("ScorecardService.cancel — user stop", () => {
     await store.create(record("sc-done", { status: "succeeded" }));
     const service = svc(store);
     await expect(service.cancel({ tenant: "acme", id: "sc-done" })).rejects.toMatchObject({ code: "CONFLICT" });
+  });
+});
+
+describe("ScorecardService.delete — hard delete (creator-or-admin, terminal only, child-run cascade)", () => {
+  const principal = (roles: string[], subject = "u-alice"): Principal => ({
+    subject,
+    workspace: "acme",
+    roles,
+    via: "oidc",
+  });
+  const childRun = (id: string, scorecardId: string): RunRecord => ({
+    id,
+    tenant: "acme",
+    harness: { id: "h", version: "1" },
+    caseId: id,
+    status: "succeeded",
+    parentScorecardId: scorecardId,
+    trigger: "scorecard",
+    createdAt: "2026-06-19T00:00:00.000Z",
+    updatedAt: "2026-06-19T00:00:00.000Z",
+  });
+
+  it("the creator (non-admin member) deletes their own terminal batch — the record AND its child runs are gone", async () => {
+    const store = new InMemoryScorecardStore();
+    const runStore = new InMemoryRunStore();
+    await store.create(record("sc-1", { createdBy: "u-alice" }));
+    await runStore.create(childRun("c1", "sc-1"));
+    await runStore.create(childRun("c2", "sc-1"));
+    await runStore.create(childRun("c3", "sc-other")); // another batch's child survives
+    const service = new ScorecardService({ dispatcher, store, runStore, datasets: new InMemoryDatasetRegistry() });
+
+    const res = await service.delete({ principal: principal(["member"]), id: "sc-1" });
+
+    expect(res).toEqual({ workspace: "acme", id: "sc-1", deleted: true, childRuns: 2 });
+    expect(await store.get("sc-1")).toBeUndefined();
+    expect(await runStore.list("acme", { scorecardId: "sc-1" })).toEqual([]);
+    expect((await runStore.list("acme", { scorecardId: "sc-other" })).map((r) => r.id)).toEqual(["c3"]);
+  });
+
+  it("an admin who is not the creator can delete; a member who is neither creator nor admin is FORBIDDEN", async () => {
+    const store = new InMemoryScorecardStore();
+    await store.create(record("sc-1", { createdBy: "u-alice" }));
+    const service = svc(store);
+
+    await expect(service.delete({ principal: principal(["member"], "u-bob"), id: "sc-1" })).rejects.toBeInstanceOf(
+      ForbiddenError,
+    );
+    expect(await store.get("sc-1")).toBeDefined(); // nothing deleted on deny
+
+    await expect(service.delete({ principal: principal(["admin"], "u-carol"), id: "sc-1" })).resolves.toMatchObject({
+      deleted: true,
+    });
+    expect(await store.get("sc-1")).toBeUndefined();
+  });
+
+  it("a queued/running batch is a ConflictError even for an admin — stop (cancel) it first", async () => {
+    const store = new InMemoryScorecardStore();
+    await store.create(record("sc-live", { status: "running", createdBy: "u-alice" }));
+    const service = svc(store);
+    await expect(service.delete({ principal: principal(["admin"]), id: "sc-live" })).rejects.toMatchObject({
+      code: "CONFLICT",
+    });
+    expect(await store.get("sc-live")).toBeDefined();
+  });
+
+  it("a missing or cross-workspace scorecard is a NotFound (no existence leak); no runStore → childRuns 0", async () => {
+    const store = new InMemoryScorecardStore();
+    await store.create(record("sc-other", { tenant: "other", createdBy: "u-alice" }));
+    await store.create(record("sc-1", { createdBy: "u-alice" }));
+    const service = svc(store); // no runStore configured (dev wiring)
+    await expect(service.delete({ principal: principal(["admin"]), id: "nope" })).rejects.toBeInstanceOf(NotFoundError);
+    await expect(service.delete({ principal: principal(["admin"]), id: "sc-other" })).rejects.toBeInstanceOf(
+      NotFoundError,
+    );
+    await expect(service.delete({ principal: principal(["admin"]), id: "sc-1" })).resolves.toMatchObject({
+      childRuns: 0,
+    });
   });
 });

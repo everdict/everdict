@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { Search } from 'lucide-react'
 import { useLocale, useTranslations } from 'next-intl'
 
+import { DeleteScorecardRowButton } from '@/features/delete-scorecard'
 import type { ScorecardRecord } from '@/entities/scorecard'
 import {
   dayKeyOf,
@@ -43,10 +44,14 @@ export function ScorecardList({
   workspace,
   scorecards,
   authors,
+  viewer,
 }: {
   workspace: string
   scorecards: ScorecardRecord[]
   authors: Record<string, Author>
+  // Delete gating (mirrors the harness/judge list-row trash): a workspace admin deletes any terminal batch, a
+  // member only their own. The control plane is the final enforcer — this only pre-hides the button.
+  viewer: { subject?: string; admin: boolean }
 }) {
   const t = useTranslations('scorecardList')
   const locale = useLocale()
@@ -117,6 +122,14 @@ export function ScorecardList({
         .map(([sub, name]) => ({ value: sub, label: name })),
     ]
   }, [scorecards, authors, t])
+
+  // Row-level delete gating — terminal batches only (a live one must be stopped first, same as the detail page).
+  const canDeleteRow = (s: ScorecardRecord) =>
+    s.status !== 'queued' &&
+    s.status !== 'running' &&
+    (viewer.admin || (s.createdBy !== undefined && s.createdBy === viewer.subject))
+  // Keep the right-edge columns aligned: render the trash slot on every row iff any row is deletable.
+  const showDeleteSlot = scorecards.some(canDeleteRow)
 
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -251,7 +264,7 @@ export function ScorecardList({
                     key={s.id}
                     href={`/${workspace}/scorecards/${encodeURIComponent(s.id)}`}
                     style={{ animationDelay: `${Math.min(i, 12) * 28}ms` }}
-                    className="rise flex items-center gap-3 rounded-lg border bg-card px-3.5 py-2.5 shadow-raise transition-colors hover:border-border-strong hover:bg-elevated"
+                    className="rise group flex items-center gap-3 rounded-lg border bg-card px-3.5 py-2.5 shadow-raise transition-colors hover:border-border-strong hover:bg-elevated"
                   >
                     {/* Left: 3 lines — ① dataset ② harness (+model·source) ③ aggregate chips. Each one line, truncated (no wrap). */}
                     <div className="min-w-0 flex-1 space-y-1">
@@ -339,6 +352,19 @@ export function ScorecardList({
                       <span className="flex w-5 justify-end">
                         <StatusIcon status={s.status} />
                       </span>
+                      {/* Hover-revealed trash (harness/judge list grammar) — a fixed slot keeps the columns aligned. */}
+                      {showDeleteSlot && (
+                        <span className="flex w-7 justify-end">
+                          {canDeleteRow(s) && (
+                            <DeleteScorecardRowButton
+                              id={s.id}
+                              dataset={s.dataset}
+                              harness={s.harness}
+                              workspace={workspace}
+                            />
+                          )}
+                        </span>
+                      )}
                     </div>
                   </Link>
                 )

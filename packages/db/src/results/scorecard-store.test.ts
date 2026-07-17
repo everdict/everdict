@@ -61,6 +61,14 @@ describe("InMemoryScorecardStore", () => {
     expect((await store.list("acme"))[0]?.runtime).toBe("self:mac");
   });
 
+  it("delete removes the record (true) and reports a missing id as false", async () => {
+    const store = new InMemoryScorecardStore();
+    await store.create(rec());
+    await expect(store.delete("sc1")).resolves.toBe(true);
+    expect(await store.get("sc1")).toBeUndefined();
+    await expect(store.delete("sc1")).resolves.toBe(false);
+  });
+
   it("the trace-sink export result (export) is detail-only (get) — omitted from list", async () => {
     const store = new InMemoryScorecardStore();
     await store.create(rec());
@@ -189,5 +197,15 @@ describe("PgScorecardStore", () => {
     expect(calls[0]?.text).toMatch(/dataset_id = \$2/);
     expect(calls[0]?.text).toMatch(/status = \$3/);
     expect(calls[0]?.params).toEqual(["acme", "d1", "succeeded"]);
+  });
+
+  it("delete → parameterized DELETE; RETURNING distinguishes deleted (true) from missing (false)", async () => {
+    const hit = fakeClient(() => ({ rows: [{ id: "sc1" }] }));
+    await expect(new PgScorecardStore(hit.client).delete("sc1")).resolves.toBe(true);
+    expect(hit.calls[0]?.text).toMatch(/DELETE FROM everdict_scorecards WHERE id = \$1/);
+    expect(hit.calls[0]?.params).toEqual(["sc1"]);
+
+    const miss = fakeClient(() => ({ rows: [] }));
+    await expect(new PgScorecardStore(miss.client).delete("nope")).resolves.toBe(false);
   });
 });

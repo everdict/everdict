@@ -1,5 +1,6 @@
 import { IngestScorecardBodySchema, PullIngestBodySchema } from "@everdict/application-control";
 import { BackfillModelsResponseSchema } from "@everdict/contracts/wire";
+import { DeleteScorecardResultSchema } from "@everdict/contracts/wire";
 import { LeaderboardResponseSchema } from "@everdict/contracts/wire";
 import { ScorecardDiffResponseSchema } from "@everdict/contracts/wire";
 import { ScorecardEstimateResponseSchema } from "@everdict/contracts/wire";
@@ -65,6 +66,21 @@ const docs = {
     params: scorecardIdParams,
     response: {
       200: { description: "The cancelled scorecard record", ...toJsonSchema(ScorecardResponseSchema) },
+      ...errorResponses(401, 403, 404, 409),
+    },
+  },
+  remove: {
+    summary: "Delete a scorecard",
+    description:
+      "Permanently deletes a TERMINAL scorecard together with its fan-out child runs (hard delete — scorecards " +
+      "are result records, not versioned artifacts, so there is no tombstone; the record disappears from " +
+      "baseline/diff/leaderboard/trend). Allowed for the batch's creator or a workspace admin (scorecards:delete) " +
+      "— enforced in the service. 409 while the batch is queued/running (stop it first); 404 for a missing / " +
+      "other-workspace scorecard.",
+    tags: ["scorecard"],
+    params: scorecardIdParams,
+    response: {
+      200: { description: "Deleted (record + child runs removed)", ...toJsonSchema(DeleteScorecardResultSchema) },
       ...errorResponses(401, 403, 404, 409),
     },
   },

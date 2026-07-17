@@ -128,4 +128,12 @@ export class PgRunStore implements RunStore {
     );
     return res.rows.map(rowToRecord);
   }
+
+  async deleteByScorecard(scorecardId: string): Promise<number> {
+    const res = await this.client.query<{ id: string }>(
+      "DELETE FROM everdict_runs WHERE parent_scorecard_id = $1 RETURNING id",
+      [scorecardId],
+    );
+    return res.rows.length;
+  }
 }
