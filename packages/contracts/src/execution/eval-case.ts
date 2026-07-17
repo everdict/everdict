@@ -22,6 +22,15 @@ export const PlacementSchema = z.object({
 });
 export type Placement = z.infer<typeof PlacementSchema>;
 
+// A verifiable intermediate expectation on the way to the case's final outcome — case DATA, like `expected`.
+// At judge time milestones merge into the judge's criteria (metric judge:<judge-id>:milestone:<id>), so when the
+// final answer fails the verdict localizes WHICH intermediate step broke by checking each against the trace.
+export const MilestoneSchema = z.object({
+  id: z.string(), // metric suffix — judge:<judge-id>:milestone:<id>
+  description: z.string(), // the expectation to verify against the trace (e.g. "logged in as the test user")
+});
+export type Milestone = z.infer<typeof MilestoneSchema>;
+
 export const EvalCaseSchema = z.object({
   id: z.string(),
   env: EnvSpecSchema,
@@ -29,6 +38,8 @@ export const EvalCaseSchema = z.object({
   // Reference output/answer — case DATA (rows of inputs/outputs), not grader config. answer-match falls back to it
   // and judges receive it as EXPECTED OUTPUT evidence. docs/architecture/eval-domain-model.md S5
   expected: z.string().optional(),
+  // Intermediate expectations (ordered) — judges verify each against the trace to localize where a failed run broke.
+  milestones: z.array(MilestoneSchema).optional(),
   // The case's OPTIONAL default grading plan (defaults to []). Grading is typically chosen at RUN time, not per case:
   // a scorecard run's `graders` replaces every case's plan (`applyGradingPlan`) and its `judges` score the trace — so a
   // dataset case is usually pure {id, env, task, expected} data with no per-case graders. Re-scoring never edits the dataset.

@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
+import type { TraceEvidence } from '@everdict/contracts'
 import { Plus, Search, X } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
@@ -8,7 +9,9 @@ import { cn } from '@/shared/lib/utils'
 import { InfoTip } from '@/shared/ui/tooltip'
 
 import {
+  EVIDENCE_MAPPING_FIELDS,
   SPAN_MAPPING_FIELDS,
+  type EvidenceMappingField,
   type SpanMappingField,
   type SpanMappingRecord,
 } from '../model/mapping'
@@ -20,7 +23,9 @@ export interface SpanAttrOption {
   sample?: string
 }
 
-function fieldKeys(mapping: SpanMappingRecord, field: SpanMappingField): string[] {
+type MappingField = SpanMappingField | EvidenceMappingField
+
+function fieldKeys(mapping: SpanMappingRecord, field: MappingField): string[] {
   return (mapping[field] ?? '')
     .split(',')
     .map((k) => k.trim())
@@ -154,78 +159,157 @@ function AddKeyButton({
   )
 }
 
+// One field row — label + assigned-key chips (click × to remove) + the click-to-add popover. `extra` renders an
+// inline status line under the chips (the evidence rows show their live extraction result there).
+function FieldRow({
+  field,
+  label,
+  mapping,
+  onChange,
+  attrs,
+  emptyText,
+  extra,
+}: {
+  field: MappingField
+  label: string
+  mapping: SpanMappingRecord
+  onChange: (next: SpanMappingRecord) => void
+  attrs: SpanAttrOption[]
+  emptyText: string
+  extra?: React.ReactNode
+}) {
+  const t = useTranslations('spanMapping')
+  const keys = fieldKeys(mapping, field)
+  const write = (next: string[]) => onChange({ ...mapping, [field]: next.join(', ') })
+  return (
+    <div className="flex items-start gap-3 px-3 py-1.5">
+      <span className="w-28 shrink-0 pt-1 font-mono text-[11px] text-muted-foreground">
+        {label}
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-center gap-1">
+          {keys.length === 0 && <span className="text-[11px] text-faint">{emptyText}</span>}
+          {keys.map((k) => (
+            <span
+              key={k}
+              className="flex items-center gap-1 rounded-md border border-primary/25 bg-primary/6 px-1.5 py-0.5 font-mono text-[11px] text-foreground"
+            >
+              {k}
+              <button
+                type="button"
+                onClick={() => write(keys.filter((x) => x !== k))}
+                aria-label={t('removeKey', { key: k })}
+                className="text-muted-foreground transition-colors hover:text-destructive"
+              >
+                <X className="size-3" />
+              </button>
+            </span>
+          ))}
+          <AddKeyButton
+            options={attrs}
+            assigned={keys}
+            onAdd={(key) => write([...keys, key])}
+            label={label}
+          />
+        </div>
+        {extra}
+      </div>
+    </div>
+  )
+}
+
+// The live extraction result under an evidence row — mapped but absent reads as an explicit miss.
+function EvidenceStatus({ mapped, value }: { mapped: boolean; value?: string }) {
+  const t = useTranslations('spanMapping')
+  if (!mapped) return null
+  if (value === undefined)
+    return <p className="mt-0.5 text-[11px] text-destructive">{t('evidenceAbsent')}</p>
+  return (
+    <p className="mt-0.5 truncate font-mono text-[10.5px] text-muted-foreground">
+      {value.length > 100 ? `${value.slice(0, 100)}…` : value}
+    </p>
+  )
+}
+
 // Span-attribute mapping builder (otel/mlflow) — the conversion layer between a harness's spans and the judge's
 // TraceEvents, authored entirely with the mouse: each row maps a canonical TraceEvent field to span-attribute keys
 // picked from the ones actually observed on the sample trace (with their sample values), never typed blind.
+// The evidence group maps the judge-evidence slots (final answer / final DOM / screenshot) the same way and shows
+// each slot's live extraction result from the picked trace.
 export function SpanMappingEditor({
   mapping,
   onChange,
   attrs = [],
+  evidence,
 }: {
   mapping: SpanMappingRecord
   onChange: (next: SpanMappingRecord) => void
   attrs?: SpanAttrOption[]
+  evidence?: TraceEvidence
 }) {
   const t = useTranslations('spanMapping')
 
-  function add(field: SpanMappingField, key: string) {
-    onChange({ ...mapping, [field]: [...fieldKeys(mapping, field), key].join(', ') })
-  }
-  function remove(field: SpanMappingField, key: string) {
-    onChange({
-      ...mapping,
-      [field]: fieldKeys(mapping, field)
-        .filter((k) => k !== key)
-        .join(', '),
-    })
+  // Evidence-slot extraction display value — screenshot shows its resolution state, not raw bytes.
+  const evidenceValue = (f: EvidenceMappingField): string | undefined => {
+    if (!evidence) return undefined
+    if (f === 'finalAnswer') return evidence.finalAnswer
+    if (f === 'dom') return evidence.dom
+    if (evidence.screenshot)
+      return t('screenshotResolved', { type: evidence.screenshotMediaType ?? 'image' })
+    if (evidence.screenshotRef) return t('screenshotRefOnly', { ref: evidence.screenshotRef })
+    return undefined
   }
 
   return (
-    <div className="space-y-2">
-      <div className="flex items-center gap-1">
-        <span className="text-[12px] font-[510] text-muted-foreground">
-          {t('builderHeading')}
-        </span>
-        <InfoTip content={t('builderTip')} />
+    <div className="space-y-3">
+      <div>
+        <div className="flex items-center gap-1">
+          <span className="text-[12px] font-[510] text-muted-foreground">
+            {t('builderHeading')}
+          </span>
+          <InfoTip content={t('builderTip')} />
+        </div>
+        <div className="mt-1.5 divide-y divide-border/60 rounded-lg border border-border bg-muted/20">
+          {SPAN_MAPPING_FIELDS.map((f) => (
+            <FieldRow
+              key={f}
+              field={f}
+              label={t(`field_${f}`)}
+              mapping={mapping}
+              onChange={onChange}
+              attrs={attrs}
+              emptyText={t('defaultKeys')}
+            />
+          ))}
+        </div>
       </div>
-      <div className="divide-y divide-border/60 rounded-lg border border-border bg-muted/20">
-        {SPAN_MAPPING_FIELDS.map((f) => {
-          const keys = fieldKeys(mapping, f)
-          return (
-            <div key={f} className="flex items-center gap-3 px-3 py-1.5">
-              <span className="w-28 shrink-0 font-mono text-[11px] text-muted-foreground">
-                {t(`field_${f}`)}
-              </span>
-              <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1">
-                {keys.length === 0 && (
-                  <span className="text-[11px] text-faint">{t('defaultKeys')}</span>
-                )}
-                {keys.map((k) => (
-                  <span
-                    key={k}
-                    className="flex items-center gap-1 rounded-md border border-primary/25 bg-primary/6 px-1.5 py-0.5 font-mono text-[11px] text-foreground"
-                  >
-                    {k}
-                    <button
-                      type="button"
-                      onClick={() => remove(f, k)}
-                      aria-label={t('removeKey', { key: k })}
-                      className="text-muted-foreground transition-colors hover:text-destructive"
-                    >
-                      <X className="size-3" />
-                    </button>
-                  </span>
-                ))}
-                <AddKeyButton
-                  options={attrs}
-                  assigned={keys}
-                  onAdd={(key) => add(f, key)}
-                  label={t(`field_${f}`)}
+
+      <div>
+        <div className="flex items-center gap-1">
+          <span className="text-[12px] font-[510] text-muted-foreground">
+            {t('evidenceHeading')}
+          </span>
+          <InfoTip content={t('evidenceTip')} />
+        </div>
+        <div className="mt-1.5 divide-y divide-border/60 rounded-lg border border-border bg-muted/20">
+          {EVIDENCE_MAPPING_FIELDS.map((f) => (
+            <FieldRow
+              key={f}
+              field={f}
+              label={t(`field_${f}`)}
+              mapping={mapping}
+              onChange={onChange}
+              attrs={attrs}
+              emptyText={t('evidenceEmpty')}
+              extra={
+                <EvidenceStatus
+                  mapped={fieldKeys(mapping, f).length > 0}
+                  value={evidenceValue(f)}
                 />
-              </div>
-            </div>
-          )
-        })}
+              }
+            />
+          ))}
+        </div>
       </div>
     </div>
   )

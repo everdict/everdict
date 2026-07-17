@@ -131,6 +131,37 @@ the fixed `spansToTraceEvents` waist blocks today:
 Preview's `warnings`/`missing` become the data that justifies which of these to build first — we do not
 pre-build ingest generality that no registered judge requires (no-hypothetical-surface rule).
 
+## Evidence slots + snapshot synthesis (pulled-trace browser evidence) — SHIPPED
+
+The browser-use-on-MLflow use case ("judge from final answer + final DOM + screenshot, pulled — no Everdict-run
+snapshot") is served by **evidence slots on the mapping**, not a new channel:
+
+- `SpanAttrMapping` carries `finalAnswer`/`dom`/`screenshot` slots (attr-key lists, **no built-in defaults** —
+  explicit mapping only). `spansToEvidence` (packages/trace) extracts the LAST defined value across time-ordered
+  spans (= the final state) into a `TraceEvidence {finalAnswer?, dom?, screenshotRef?, screenshot?(base64),
+  screenshotMediaType?}`; a screenshot attr value classifies as inline bytes (data-URI/bare base64) or a ref,
+  and an http(s) ref is resolved to bytes best-effort with the source's own credentials (`fetchImageBase64` —
+  a miss keeps the ref, never fails the pull).
+- `TraceSource.fetchDetailed?(runId) → {events, evidence?}` (contracts, optional — fakes/native kinds fall back
+  to `fetch`). The extracted final answer is ALSO appended as the trace's final assistant message
+  (`withEvidenceEvents`, deduped) so `{final_answer}` / `hasFinalAnswer` / trace display need no new channel.
+- **Snapshot synthesis**: `ScorecardIngestService.trackPull` turns evidence with any browser signal into
+  `EnvSnapshot{kind:"browser", dom, screenshot(base64)|screenshotRef}` on the ingested `CaseResult` — so
+  `assembleJudgeInput` (the SOLE JudgeInput constructor), `inputs:[dom,screenshot]` (VLM), and `requires`
+  dom/screenshot checks all work on pulled traces exactly as on Everdict-run ones, unchanged.
+- `inspect(traceId, mapping)` returns the same `evidence` so the judge wizard authors slots mouse-only against
+  a real trace (live extraction status per slot) and relays a synthesized browser snapshot into preview/try
+  (`JudgeEvidenceInput.snapshot`).
+
+## Case milestones → per-case criteria (failure localization) — SHIPPED
+
+`EvalCase.milestones?: [{id, description}]` (case DATA, like `expected`) are the dataset-defined intermediate
+expectations. `withCaseMilestones` (packages/graders) merges them into the judge's criteria per case as
+`milestone:<id>` entries — used by BOTH `JudgeGrader.grade` and the preview surface, so the preview prompt stays
+byte-identical to a real grade. One verdict call scores the judge's own criteria + every milestone; metrics land
+as `judge:<judge-id>:milestone:<id>`, so a failed final answer localizes WHICH intermediate step broke. Escalation
+(milestone pass only on final-fail) is a deliberate non-goal for now (one call keeps cost + latency flat).
+
 ## Slices (each independently shippable)
 
 | Slice | Contents | Status |

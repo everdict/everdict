@@ -134,7 +134,10 @@ gated benchmark end-to-end from the web. The wizard is state-aware: gated + no t
 A case is **rows of inputs/outputs** (docs/architecture/eval-domain-model.md S5): `EvalCase.expected?` carries the
 reference output as case DATA — `answer-match` falls back to it when the grader has no `expect` config, and judges
 receive it as `EXPECTED OUTPUT` evidence (`{expected}` placeholder — so for an LLM judge, `expected` typically holds the
-per-case **criteria**, not a literal gold answer). `EvalCase.graders` is **optional (defaults to `[]`)** and is only the
+per-case **criteria**, not a literal gold answer). `EvalCase.milestones?` (`[{id, description}]`) carries the case's
+**intermediate expectations** as data — at judge time they merge into the judge's criteria (one verdict call) and land
+as `judge:<judge-id>:milestone:<id>` scores, so a failed run localizes which step broke (see `docs/judges.md`).
+`EvalCase.graders` is **optional (defaults to `[]`)** and is only the
 case's *default* grading plan — grading is normally chosen at **run time**, not per case: a scorecard run's `graders`
 replaces every case's plan (`applyGradingPlan`) and its `judges` score the trace. So a case is usually pure
 `{id, env, task, expected}` data, and re-scoring the same dataset differently never edits the dataset.

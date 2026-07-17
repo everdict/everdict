@@ -404,6 +404,73 @@ describe("ScorecardService.ingestPull", () => {
     expect(captured?.mapping).toEqual({ model: ["my.llm.model"] });
   });
 
+  it("fetchDetailed evidence (dom/screenshot) synthesizes a browser snapshot the judges read", async () => {
+    const store = new InMemoryScorecardStore();
+    const datasets = new InMemoryDatasetRegistry();
+    await datasets.register("acme", datasetWithCase());
+
+    const service = new ScorecardService({
+      dispatcher,
+      store,
+      datasets,
+      // The source extracts evidence slots (mapping-authored) alongside the events — the pull-path substitute
+      // for the EnvSnapshot a live run produces.
+      buildTraceSource: (): TraceSource => ({
+        fetch: async () => [],
+        fetchDetailed: async () => ({
+          events: [{ t: 0, kind: "message", role: "assistant", text: "done" }],
+          evidence: {
+            finalAnswer: "done",
+            dom: "<html>goal</html>",
+            screenshot: "QUJD",
+            screenshotMediaType: "image/png",
+          },
+        }),
+      }),
+    });
+    const created = await service.ingestPull({
+      tenant: "acme",
+      dataset: { id: "d", version: "latest" },
+      harness: { id: "h", version: "1.0.0" },
+      source: { kind: "mlflow", endpoint: "http://mlflow" },
+      runs: [{ caseId: "c1", runId: "trace-1" }],
+      judges: [],
+    });
+    const done = await waitTerminal(store, created.id);
+    expect(done.status).toBe("succeeded");
+    const snapshot = done.scorecard?.results[0]?.snapshot;
+    expect(snapshot?.kind).toBe("browser");
+    if (snapshot?.kind === "browser") {
+      expect(snapshot.dom).toBe("<html>goal</html>");
+      expect(snapshot.screenshot).toBe("QUJD");
+    }
+  });
+
+  it("fetchDetailed without browser evidence keeps the synthetic ingest snapshot (no empty browser shell)", async () => {
+    const store = new InMemoryScorecardStore();
+    const datasets = new InMemoryDatasetRegistry();
+    await datasets.register("acme", datasetWithCase());
+    const service = new ScorecardService({
+      dispatcher,
+      store,
+      datasets,
+      buildTraceSource: (): TraceSource => ({
+        fetch: async () => [],
+        fetchDetailed: async () => ({ events: [{ t: 0, kind: "message", role: "assistant", text: "done" }] }),
+      }),
+    });
+    const created = await service.ingestPull({
+      tenant: "acme",
+      dataset: { id: "d", version: "latest" },
+      harness: { id: "h", version: "1.0.0" },
+      source: { kind: "mlflow", endpoint: "http://mlflow" },
+      runs: [{ caseId: "c1", runId: "trace-1" }],
+      judges: [],
+    });
+    const done = await waitTerminal(store, created.id);
+    expect(done.scorecard?.results[0]?.snapshot.kind).toBe("repo");
+  });
+
   it("missing dataset → NotFoundError (404)", async () => {
     const store = new InMemoryScorecardStore();
     const service = new ScorecardService({

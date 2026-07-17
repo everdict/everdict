@@ -1,4 +1,11 @@
-import type { SpanAttrMapping, SpanAttrSample, TraceEvent, TraceSpanNode, TraceSummary } from "@everdict/contracts";
+import type {
+  SpanAttrMapping,
+  SpanAttrSample,
+  TraceEvent,
+  TraceEvidence,
+  TraceSpanNode,
+  TraceSummary,
+} from "@everdict/contracts";
 
 // The shared intermediate-representation span for OTel/MLflow.
 export interface Span {
@@ -186,6 +193,69 @@ export function spansToTraceEvents(spans: Span[], mapping?: SpanAttrMapping): Tr
     }
   }
   return out;
+}
+
+// --- Evidence slots (finalAnswer / dom / screenshot) — judge evidence extracted from the trace itself. ---
+
+// A screenshot attribute value classified: inline bytes (data-URI or bare base64) vs a fetchable reference.
+export type ScreenshotValue = { base64: string; mediaType: string } | { ref: string };
+
+const DATA_URI_RE = /^data:(image\/[\w.+-]+);base64,([A-Za-z0-9+/=\s]+)$/;
+// Bare-base64 heuristic: long enough to be an image and made only of base64 characters (browser-use style inline PNGs).
+const BARE_BASE64_RE = /^[A-Za-z0-9+/=\r\n]+$/;
+
+export function classifyScreenshotValue(v: string): ScreenshotValue {
+  const m = v.match(DATA_URI_RE);
+  if (m?.[1] && m[2]) return { base64: m[2].replace(/\s/g, ""), mediaType: m[1] };
+  if (v.length >= 256 && BARE_BASE64_RE.test(v)) return { base64: v.replace(/\s/g, ""), mediaType: "image/png" };
+  return { ref: v };
+}
+
+// Span[] + the mapping's evidence slots → TraceEvidence. The LAST defined value across time-ordered spans wins
+// (= the FINAL answer/DOM/screenshot). Explicit-mapping only — no built-in default keys, so nothing is guessed.
+// Pure: an unresolvable screenshot stays a ref; byte resolution is I/O and belongs to the source (extractEvidence).
+export function spansToEvidence(spans: Span[], mapping?: SpanAttrMapping): TraceEvidence | undefined {
+  const slots = {
+    finalAnswer: mapping?.finalAnswer ?? [],
+    dom: mapping?.dom ?? [],
+    screenshot: mapping?.screenshot ?? [],
+  };
+  if (slots.finalAnswer.length === 0 && slots.dom.length === 0 && slots.screenshot.length === 0) return undefined;
+  const sorted = [...spans].sort((a, b) => a.startMs - b.startMs);
+  const last = (keys: readonly string[]): string | undefined => {
+    let found: string | undefined;
+    for (const s of sorted) {
+      const v = pickStr(s.attrs, keys);
+      if (v !== undefined) found = v;
+    }
+    return found;
+  };
+  const finalAnswer = last(slots.finalAnswer);
+  const dom = last(slots.dom);
+  const shot = last(slots.screenshot);
+  if (finalAnswer === undefined && dom === undefined && shot === undefined) return undefined;
+  const screenshot = shot !== undefined ? classifyScreenshotValue(shot) : undefined;
+  return {
+    ...(finalAnswer !== undefined ? { finalAnswer } : {}),
+    ...(dom !== undefined ? { dom } : {}),
+    ...(screenshot && "base64" in screenshot
+      ? { screenshot: screenshot.base64, screenshotMediaType: screenshot.mediaType }
+      : {}),
+    ...(screenshot && "ref" in screenshot ? { screenshotRef: screenshot.ref } : {}),
+  };
+}
+
+// Append the extracted final answer as the trace's final assistant message (unless the timeline already ends with
+// the same text) — so hasFinalAnswer / the {final_answer} prompt section / trace display all see it with no new channel.
+export function withEvidenceEvents(events: TraceEvent[], evidence?: TraceEvidence): TraceEvent[] {
+  const answer = evidence?.finalAnswer;
+  if (!answer) return events;
+  const assistant = events.filter(
+    (e): e is Extract<TraceEvent, { kind: "message" }> => e.kind === "message" && e.role === "assistant",
+  );
+  if (assistant[assistant.length - 1]?.text === answer) return events;
+  const t = events.reduce((m, e) => Math.max(m, e.t), 0);
+  return [...events, { t, kind: "message", role: "assistant", text: answer }];
 }
 
 // First defined I/O value as a display string (an object/array is JSON-stringified; a string passes through).

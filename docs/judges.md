@@ -29,6 +29,11 @@ Both kinds take the shared prompt fields (`docs/architecture/eval-domain-model.m
   `judge:<judge-id>` (the model's overall verdict, else the weighted mean Σ(w·score)/Σw). A criterion missing from
   the model's verdict is an explicit error (skip score), never a silent 0. `passThreshold` on the spec re-decides
   the overall only; per-criterion thresholds live on each criterion.
+- **Case milestones (failure localization)** — a dataset case may declare `milestones: [{id, description}]`
+  (intermediate expectations on the way to the final outcome). At grade time they merge into the judge's criteria
+  per case (`withCaseMilestones`, shared by `JudgeGrader.grade` and the preview so both stay byte-identical) and
+  ride the SAME single verdict call as criteria `milestone:<id>` → metrics `judge:<judge-id>:milestone:<id>`. When
+  the final answer fails, the per-milestone verdicts show WHERE the run broke (e.g. logged-in ✓ → searched ✗).
 
 This is the **agent-judge** step of the pipeline:
 ```

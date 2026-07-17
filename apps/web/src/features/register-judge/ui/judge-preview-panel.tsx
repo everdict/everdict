@@ -208,10 +208,32 @@ export function JudgePreviewPanel({
     return inspected?.events ?? []
   }
 
-  const meta = () => ({
-    ...(task.trim() ? { task: task.trim() } : {}),
-    ...(expected.trim() ? { expected: expected.trim() } : {}),
-  })
+  // The wizard-side mirror of the pull path's snapshot synthesis: extracted browser evidence (dom/screenshot)
+  // becomes the preview's browser snapshot, so dom/screenshot coverage and VLM "Run once" work on pulled traces.
+  // A manual JSON override carries no evidence — no snapshot then.
+  function evidenceSnapshot(): unknown | undefined {
+    const ev = inspected?.evidence
+    if (!ev || manualTrace.trim()) return undefined
+    if (ev.dom === undefined && ev.screenshot === undefined && ev.screenshotRef === undefined)
+      return undefined
+    return {
+      kind: 'browser',
+      url: '',
+      dom: ev.dom ?? '',
+      ...(ev.screenshot ? { screenshot: ev.screenshot } : {}),
+      ...(ev.screenshotRef ? { screenshotRef: ev.screenshotRef } : {}),
+      console: [],
+    }
+  }
+
+  const meta = () => {
+    const snapshot = evidenceSnapshot()
+    return {
+      ...(task.trim() ? { task: task.trim() } : {}),
+      ...(expected.trim() ? { expected: expected.trim() } : {}),
+      ...(snapshot ? { snapshot } : {}),
+    }
+  }
 
   function onPreview() {
     const trace = effectiveTrace()
@@ -488,7 +510,12 @@ export function JudgePreviewPanel({
           </div>
 
           {isSpanKind ? (
-            <SpanMappingEditor mapping={mappingRec} onChange={setMappingRec} attrs={attrOptions} />
+            <SpanMappingEditor
+              mapping={mappingRec}
+              onChange={setMappingRec}
+              attrs={attrOptions}
+              evidence={inspected?.evidence}
+            />
           ) : (
             <Callout tone="info">{t('nativeKindNote')}</Callout>
           )}

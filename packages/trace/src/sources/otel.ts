@@ -1,5 +1,6 @@
 import {
   type BrowsableTraceSource,
+  type FetchedTrace,
   type ListTracesOptions,
   type SpanAttrMapping,
   type TraceEvent,
@@ -7,12 +8,14 @@ import {
   type TraceSummary,
   UpstreamError,
 } from "@everdict/contracts";
+import { extractEvidence } from "./evidence-resolve.js";
 import {
   type Span,
   spansToRawAttributes,
   spansToSpanNodes,
   spansToTraceEvents,
   summarizeSpans,
+  withEvidenceEvents,
 } from "./trace-source.js";
 
 // OTLP span (attributes are a {key,value} array) → normalized Span.
@@ -149,16 +152,30 @@ export class OtelTraceSource implements BrowsableTraceSource {
   }
 
   async fetch(runId: string): Promise<TraceEvent[]> {
-    return spansToTraceEvents(await this.getSpans(this.url(runId)), this.opts.mapping);
+    return (await this.fetchDetailed(runId)).events;
+  }
+
+  // fetch + the evidence slots extracted via the configured mapping (screenshot refs resolved best-effort with the
+  // source's own credentials) — what the pull-ingest path consumes to synthesize a judge snapshot.
+  async fetchDetailed(runId: string): Promise<FetchedTrace> {
+    const spans = await this.getSpans(this.url(runId));
+    const m = this.opts.mapping;
+    const evidence = await extractEvidence(spans, m, this.opts.fetchImpl ?? fetch, this.opts.headers);
+    return {
+      events: withEvidenceEvents(spansToTraceEvents(spans, m), evidence),
+      ...(evidence ? { evidence } : {}),
+    };
   }
 
   async inspect(traceId: string, mapping?: SpanAttrMapping): Promise<TraceInspectResult> {
     const base = this.opts.endpoint.replace(/\/$/, "");
     const spans = await this.getSpans(`${base}/api/traces/${encodeURIComponent(traceId)}`);
     const m = mapping ?? this.opts.mapping;
+    const evidence = await extractEvidence(spans, m, this.opts.fetchImpl ?? fetch, this.opts.headers);
     return {
       rawAttributes: spansToRawAttributes(spans),
-      events: spansToTraceEvents(spans, m),
+      events: withEvidenceEvents(spansToTraceEvents(spans, m), evidence),
+      ...(evidence ? { evidence } : {}),
       detail: { rollup: summarizeSpans(spans), spans: spansToSpanNodes(spans, m) },
     };
   }

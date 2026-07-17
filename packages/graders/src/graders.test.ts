@@ -119,6 +119,60 @@ describe("JudgeGrader", () => {
     expect(scores[2]).toMatchObject({ graderId: "quality", value: 0.5, pass: false, detail: "messy" });
   });
 
+  it("a case's milestones merge into the criteria — one call scores judge:milestone:<id> per intermediate step", async () => {
+    const ctx = browserCtx("<html/>", "https://x");
+    ctx.case = {
+      ...ctx.case,
+      milestones: [
+        { id: "login", description: "logged in as the test user" },
+        { id: "search", description: "searched for the product" },
+      ],
+    };
+    const judge: Judge = {
+      async judge(input) {
+        // the milestone criteria (with their case-defined descriptions) reach the ONE verdict call
+        expect(input.criteria?.map((c) => c.id)).toEqual(["milestone:login", "milestone:search"]);
+        expect(input.criteria?.[0]?.description).toBe("logged in as the test user");
+        return {
+          pass: false,
+          score: 0.3,
+          reason: "failed at search",
+          criteria: {
+            "milestone:login": { pass: true, score: 1, reason: "login span present" },
+            "milestone:search": { pass: false, score: 0, reason: "no search action in the trace" },
+          },
+        };
+      },
+    };
+    const scores = toScores(await new JudgeGrader(judge, { id: "e2e" }).grade(ctx));
+    expect(scores.map((s) => s.metric)).toEqual(["judge", "judge:milestone:login", "judge:milestone:search"]);
+    expect(scores[1]).toMatchObject({ pass: true });
+    expect(scores[2]).toMatchObject({ pass: false, detail: "no search action in the trace" });
+  });
+
+  it("milestones append AFTER the judge's own criteria (both scored in the same call)", async () => {
+    const ctx = browserCtx("<html/>", "https://x");
+    ctx.case = { ...ctx.case, milestones: [{ id: "login", description: "logged in" }] };
+    const judge: Judge = {
+      async judge(input) {
+        expect(input.criteria?.map((c) => c.id)).toEqual(["accuracy", "milestone:login"]);
+        return {
+          pass: true,
+          score: 1,
+          reason: "ok",
+          criteria: {
+            accuracy: { pass: true, score: 1, reason: "r" },
+            "milestone:login": { pass: true, score: 1, reason: "m" },
+          },
+        };
+      },
+    };
+    const scores = toScores(
+      await new JudgeGrader(judge, { id: "q", criteria: [{ id: "accuracy", description: "d", weight: 1 }] }).grade(ctx),
+    );
+    expect(scores.map((s) => s.metric)).toEqual(["judge", "judge:accuracy", "judge:milestone:login"]);
+  });
+
   it("a Judge impl that ignores criteria yields visible per-criterion skips (never a silent drop)", async () => {
     const judge: Judge = {
       async judge() {

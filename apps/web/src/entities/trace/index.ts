@@ -4,15 +4,18 @@ export {
   spanAttrSampleSchema,
   traceCostSchema,
   traceEventSchema,
+  traceEvidenceSchema,
   traceInspectResultSchema,
   traceSummarySchema,
   tracesListResponseSchema,
 } from './model/schema'
 export {
   EMPTY_SPAN_MAPPING,
+  EVIDENCE_MAPPING_FIELDS,
   mappingRecordToSpec,
   mappingSpecToRecord,
   SPAN_MAPPING_FIELDS,
+  type EvidenceMappingField,
   type SpanMappingField,
   type SpanMappingRecord,
 } from './model/mapping'
@@ -22,6 +25,7 @@ export type {
   SpanAttrMapping,
   SpanAttrSample,
   TraceEvent,
+  TraceEvidence,
   TraceInspectResult,
   TraceSpanNode,
   TraceSummary,

@@ -1,6 +1,7 @@
 import type {
   ComputeHandle,
   EnvSnapshot,
+  EvalCase,
   GradeContext,
   Grader,
   JudgeCriterion,
@@ -95,9 +96,26 @@ export async function assembleJudgeInput(
   };
 }
 
+// Merge a case's milestones (dataset-defined intermediate expectations) into the judge's criteria for THIS case —
+// each becomes a criterion "milestone:<id>" (→ metric judge:<judge-id>:milestone:<id>), so ONE model call verifies
+// every intermediate step against the trace and a failed run localizes WHERE it broke. Shared by JudgeGrader.grade
+// and the preview/dry-run surfaces (the preview must stay byte-identical to a real grade).
+export function withCaseMilestones(
+  criteria: JudgeCriterion[] | undefined,
+  evalCase: EvalCase,
+): JudgeCriterion[] | undefined {
+  const milestones = evalCase.milestones ?? [];
+  if (milestones.length === 0) return criteria;
+  return [
+    ...(criteria ?? []),
+    ...milestones.map((m) => ({ id: `milestone:${m.id}`, description: m.description, weight: 1 })),
+  ];
+}
+
 // LLM/VLM judge grader. When useScreenshot, passes the snapshot's screenshot as vision input (browser=ref, os-use=read from the environment as bytes).
 // With criteria it is a multi-metric grader: ONE model call → the overall Score (metric "judge") followed by one Score
 // per criterion (metric "judge:<criterion-id>"). The judge runner rewrites the "judge" prefix to "judge:<judge-id>".
+// A case's milestones merge in as additional criteria (withCaseMilestones) — per-case, at grade time.
 export class JudgeGrader implements Grader {
   readonly id: string;
   constructor(
@@ -114,9 +132,11 @@ export class JudgeGrader implements Grader {
   }
 
   async grade(ctx: GradeContext): Promise<Score | Score[]> {
+    // Per-case: the case's milestones join the judge's own criteria so the ONE verdict call scores them all.
+    const criteria = withCaseMilestones(this.opts.criteria, ctx.case) ?? [];
     const input = await assembleJudgeInput(ctx, {
       ...(this.opts.rubric ? { rubric: this.opts.rubric } : {}),
-      ...(this.opts.criteria?.length ? { criteria: this.opts.criteria } : {}),
+      ...(criteria.length ? { criteria } : {}),
       ...(this.opts.promptTemplate ? { promptTemplate: this.opts.promptTemplate } : {}),
       ...(this.opts.useScreenshot ? { useScreenshot: true } : {}),
     });
@@ -128,7 +148,6 @@ export class JudgeGrader implements Grader {
       pass: verdict.pass,
       detail: verdict.reason,
     };
-    const criteria = this.opts.criteria ?? [];
     if (criteria.length === 0) return overall;
     const perCriterion = criteria.map((c): Score => {
       const v = verdict.criteria?.[c.id];

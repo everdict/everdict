@@ -1,4 +1,9 @@
-import type { SpanAttrMapping, SpanAttrSample, TraceSummary } from '@everdict/contracts'
+import type {
+  SpanAttrMapping,
+  SpanAttrSample,
+  TraceEvidence,
+  TraceSummary,
+} from '@everdict/contracts'
 import { z } from 'zod'
 
 // Client mirror of the observability trace types (list/inspect surfaces of the trace-source browser + judge wizard).
@@ -106,11 +111,22 @@ export const traceSpanNodeSchema = z.object({
   costUsd: z.number().optional(),
 })
 
+// Judge evidence extracted from a trace via the mapping's evidence slots (finalAnswer/dom/screenshot) — the wizard
+// relays it into the preview's synthesized browser snapshot so dom/screenshot judging works on pulled traces.
+export const traceEvidenceSchema = z.object({
+  finalAnswer: z.string().optional(),
+  dom: z.string().optional(),
+  screenshotRef: z.string().optional(),
+  screenshot: z.string().optional(),
+  screenshotMediaType: z.string().optional(),
+})
+
 // inspect(traceId, mapping) result — normalized events (with the supplied mapping) + raw span attributes + (best-effort)
 // the structured `detail` (rollups + span waterfall) the observability-grade detail dialog renders.
 export const traceInspectResultSchema = z.object({
   rawAttributes: z.array(spanAttrSampleSchema).optional(),
   events: z.array(traceEventSchema),
+  evidence: traceEvidenceSchema.optional(),
   detail: z
     .object({
       rollup: traceSummarySchema.omit({ id: true }).optional(),
@@ -120,6 +136,7 @@ export const traceInspectResultSchema = z.object({
 })
 
 // The per-field span-attribute mapping — the conversion layer between a harness's spans and the judge's TraceEvents.
+// The evidence slots (finalAnswer/dom/screenshot) extract judge evidence from the trace itself (no defaults).
 export const spanAttrMappingSchema = z.object({
   model: z.array(z.string()).optional(),
   inputTokens: z.array(z.string()).optional(),
@@ -130,6 +147,9 @@ export const spanAttrMappingSchema = z.object({
   toolArgs: z.array(z.string()).optional(),
   toolResult: z.array(z.string()).optional(),
   messageText: z.array(z.string()).optional(),
+  finalAnswer: z.array(z.string()).optional(),
+  dom: z.array(z.string()).optional(),
+  screenshot: z.array(z.string()).optional(),
 })
 export const harnessSpanMappingResponseSchema = z.object({
   mapping: spanAttrMappingSchema.nullable(),
@@ -146,6 +166,8 @@ type _sampleFwd = AssertAssignable<z.infer<typeof spanAttrSampleSchema>, SpanAtt
 type _sampleBack = AssertAssignable<SpanAttrSample, z.infer<typeof spanAttrSampleSchema>>
 type _mappingFwd = AssertAssignable<z.infer<typeof spanAttrMappingSchema>, SpanAttrMapping>
 type _mappingBack = AssertAssignable<SpanAttrMapping, z.infer<typeof spanAttrMappingSchema>>
+type _evidenceFwd = AssertAssignable<z.infer<typeof traceEvidenceSchema>, TraceEvidence>
+type _evidenceBack = AssertAssignable<TraceEvidence, z.infer<typeof traceEvidenceSchema>>
 
 export type __traceDriftGuard = [
   _summaryFwd,
@@ -154,4 +176,6 @@ export type __traceDriftGuard = [
   _sampleBack,
   _mappingFwd,
   _mappingBack,
+  _evidenceFwd,
+  _evidenceBack,
 ]

@@ -13,6 +13,7 @@ export {
   type CriterionVerdict,
   JudgeGrader,
   assembleJudgeInput,
+  withCaseMilestones,
 } from "./judge.js";
 export {
   type JudgeCompletion,

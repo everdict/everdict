@@ -45,16 +45,22 @@ export interface PreviewJudgeResult {
   prompt?: string
   evidence?: Record<string, EvidenceCoverage>
   warnings?: string[]
-  requirements?: { satisfied: EvidenceRequirement[]; missing: EvidenceRequirement[]; warnings: string[] }
+  requirements?: {
+    satisfied: EvidenceRequirement[]
+    missing: EvidenceRequirement[]
+    warnings: string[]
+  }
   error?: string
 }
 
 // Preview a draft judge against a pasted trace — the exact judging prompt + per-placeholder coverage, NO model call.
-// On transport/validation failure return {ok:false, error} so the form stays alive (the control plane enforces authZ).
+// meta.snapshot (a browser snapshot the wizard synthesizes from the trace's extracted evidence) makes dom/screenshot
+// judging previewable on pulled traces. On transport/validation failure return {ok:false, error} so the form stays
+// alive (the control plane enforces authZ).
 export async function previewJudgeAction(
   spec: unknown,
   trace: unknown,
-  meta?: { task?: string; expected?: string },
+  meta?: { task?: string; expected?: string; snapshot?: unknown }
 ): Promise<PreviewJudgeResult> {
   const ctx = await authContext()
   try {
@@ -63,8 +69,12 @@ export async function previewJudgeAction(
       trace,
       ...(meta?.task ? { task: meta.task } : {}),
       ...(meta?.expected ? { expected: meta.expected } : {}),
+      ...(meta?.snapshot ? { snapshot: meta.snapshot } : {}),
     }
-    const r = await controlPlane.previewJudge<Omit<PreviewJudgeResult, 'ok'>>(ctx, { spec, evidence })
+    const r = await controlPlane.previewJudge<Omit<PreviewJudgeResult, 'ok'>>(ctx, {
+      spec,
+      evidence,
+    })
     return { ok: true, ...r }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }
@@ -88,7 +98,7 @@ export interface TryJudgeResult extends PreviewJudgeResult {
 export async function tryJudgeAction(
   spec: unknown,
   trace: unknown,
-  meta?: { task?: string; expected?: string },
+  meta?: { task?: string; expected?: string; snapshot?: unknown }
 ): Promise<TryJudgeResult> {
   const ctx = await authContext()
   try {
@@ -97,6 +107,7 @@ export async function tryJudgeAction(
       trace,
       ...(meta?.task ? { task: meta.task } : {}),
       ...(meta?.expected ? { expected: meta.expected } : {}),
+      ...(meta?.snapshot ? { snapshot: meta.snapshot } : {}),
     }
     const r = await controlPlane.tryJudge<Omit<TryJudgeResult, 'ok'>>(ctx, { spec, evidence })
     return { ok: true, ...r }

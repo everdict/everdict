@@ -16,6 +16,7 @@ import {
   assembleJudgeInput,
   assessEvidence,
   previewJudge,
+  withCaseMilestones,
 } from "@everdict/graders";
 import type { RubricRegistry } from "@everdict/registry";
 import { resolveRubric } from "../execution/judge-runner.js";
@@ -105,9 +106,12 @@ export class JudgePreviewService {
         : resolution.effective;
 
     const useScreenshot = spec.kind === "model" && (spec.inputs ?? []).includes("screenshot");
+    // The case's milestones merge into the criteria exactly as JudgeGrader.grade does — the preview's prompt
+    // must stay byte-identical to a real grade (re-scored runs carry milestones via their stored caseSpec).
+    const criteria = withCaseMilestones(effective.criteria, ctx.case);
     const input = await assembleJudgeInput(ctx, {
       ...(effective.rubricText ? { rubric: effective.rubricText } : {}),
-      ...(effective.criteria?.length ? { criteria: effective.criteria } : {}),
+      ...(criteria?.length ? { criteria } : {}),
       ...(effective.promptTemplate ? { promptTemplate: effective.promptTemplate } : {}),
       ...(useScreenshot ? { useScreenshot: true } : {}),
     });

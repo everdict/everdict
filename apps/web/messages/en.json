@@ -1706,7 +1706,16 @@
     "field_toolCallId": "tool call id",
     "field_toolArgs": "tool args",
     "field_toolResult": "tool result",
-    "field_messageText": "message text"
+    "field_messageText": "message text",
+    "field_finalAnswer": "final answer",
+    "field_dom": "final DOM",
+    "field_screenshot": "screenshot",
+    "evidenceHeading": "Judge evidence",
+    "evidenceTip": "Extracts judge evidence from the trace itself — the final answer, the final DOM, and a screenshot (inline base64/data-URI, or a fetchable URL). Mapped slots feed the judge exactly like a live run's browser snapshot; empty slots stay absent.",
+    "evidenceEmpty": "not extracted",
+    "evidenceAbsent": "Mapped, but no value found on this trace.",
+    "screenshotResolved": "screenshot resolved ({type})",
+    "screenshotRefOnly": "unresolved ref: {ref}"
   },
   "registerJudge": {
     "kindModelLabel": "model (LLM/VLM call)",

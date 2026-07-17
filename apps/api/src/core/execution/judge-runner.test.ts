@@ -91,6 +91,36 @@ describe("defaultJudgeRunner", () => {
     expect(fetchImpl).toHaveBeenCalledOnce(); // one call scores everything
   });
 
+  it("a case's milestones land as judge:<id>:milestone:<mid> — failure localization via the runner path", async () => {
+    const verdict =
+      '{"criteria":{"milestone:login":{"score":1,"pass":true,"reason":"logged in"},"milestone:book":{"score":0,"pass":false,"reason":"no booking step in the trace"}},"pass":false,"score":0.2,"reason":"failed at booking"}';
+    const fetchImpl = vi.fn((_u: string, _i?: RequestInit) =>
+      Promise.resolve(new Response(JSON.stringify({ content: [{ text: verdict }] }), { status: 200 })),
+    );
+    const runner = defaultJudgeRunner({
+      secretsFor: async () => ({ ANTHROPIC_API_KEY: "sk" }),
+      fetchImpl: fetchImpl as typeof fetch,
+    });
+    const milestoneCtx: GradeContext = {
+      ...ctx,
+      case: {
+        ...ctx.case,
+        milestones: [
+          { id: "login", description: "logged in as the test user" },
+          { id: "book", description: "completed the booking form" },
+        ],
+      },
+    };
+    const scores = await runner.run(modelSpec, "acme", milestoneCtx);
+    expect(scores.map((s) => s.metric)).toEqual([
+      "judge:correctness",
+      "judge:correctness:milestone:login",
+      "judge:correctness:milestone:book",
+    ]);
+    expect(scores[2]).toMatchObject({ pass: false, detail: "no booking step in the trace" });
+    expect(fetchImpl).toHaveBeenCalledOnce(); // milestones ride the same single verdict call
+  });
+
   it("spec.passThreshold re-decides pass for the OVERALL score only (criteria keep their own verdicts)", async () => {
     const verdict =
       '{"criteria":{"accuracy":{"score":0.9,"pass":true,"reason":"right"}},"pass":true,"score":0.6,"reason":"overall"}';

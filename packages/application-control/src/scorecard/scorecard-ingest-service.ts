@@ -3,9 +3,11 @@ import {
   BadRequestError,
   type CaseResult,
   type Dataset,
+  type EnvSnapshot,
   type GradeContext,
   type Scorecard,
   type ScorecardRecord,
+  type TraceEvidence,
   toScores,
 } from "@everdict/contracts";
 import { ScorecardBatch, type ScorecardTransition, scorecardModels, summarizeScorecard } from "@everdict/domain";
@@ -18,6 +20,23 @@ import {
   type ScorecardServiceDeps,
   offloadResults,
 } from "./scorecard-shared.js";
+
+// Evidence extracted from a pulled trace → the browser snapshot a judge reads (dom/screenshot/VLM), the pull-path
+// substitute for the EnvSnapshot a live run produces. No browser evidence → undefined (finishIngest keeps its
+// synthetic repo snapshot; the final answer rides the trace itself as an assistant message).
+function snapshotFromEvidence(evidence: TraceEvidence | undefined): EnvSnapshot | undefined {
+  if (!evidence) return undefined;
+  if (evidence.dom === undefined && evidence.screenshot === undefined && evidence.screenshotRef === undefined)
+    return undefined;
+  return {
+    kind: "browser",
+    url: "",
+    dom: evidence.dom ?? "",
+    ...(evidence.screenshot ? { screenshot: evidence.screenshot } : {}),
+    ...(evidence.screenshotRef ? { screenshotRef: evidence.screenshotRef } : {}),
+    console: [],
+  };
+}
 
 // Ingest collaborator behind the ScorecardService facade (docs/architecture/api-route-modularization.md R2-b):
 // the push (uploaded TraceEvent[]) and pull (tenant OTel/MLflow source) ingest lifecycles — score externally-run
@@ -144,8 +163,11 @@ export class ScorecardIngestService {
       });
       const perCase: IngestScorecardBody["traces"] = [];
       for (const r of runs) {
-        const trace = await src.fetch(r.runId); // an external failure is UpstreamError → catch → failed
-        perCase.push({ caseId: r.caseId, trace });
+        // fetchDetailed (when the source provides it) also extracts the mapping's evidence slots — an external
+        // failure is UpstreamError → catch → failed.
+        const detailed = src.fetchDetailed ? await src.fetchDetailed(r.runId) : { events: await src.fetch(r.runId) };
+        const snapshot = snapshotFromEvidence(detailed.evidence);
+        perCase.push({ caseId: r.caseId, trace: detailed.events, ...(snapshot ? { snapshot } : {}) });
       }
       // attach hint: the original trace already lives on the source platform — if the sink is the same platform, attach scores only instead of duplicating (flow ②).
       await this.finishIngest(id, tenant, dataset, harnessLabel, perCase, judges, {

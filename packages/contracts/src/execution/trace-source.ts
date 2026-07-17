@@ -6,6 +6,10 @@ import { type TraceEvent, TraceEventSchema } from "./trace.js";
 // root (the repo's deliberate inversion); the per-platform fetch impls stay in @everdict/trace.
 export interface TraceSource {
   fetch(runId: string): Promise<TraceEvent[]>;
+  // fetch(runId) + the judge evidence extracted via the source's configured mapping evidence slots (span-based
+  // kinds; screenshot refs resolved to bytes best-effort). Optional: kinds/fakes without evidence extraction fall
+  // back to fetch() (events only). The pull-ingest path synthesizes a judge snapshot from the evidence.
+  fetchDetailed?(runId: string): Promise<FetchedTrace>;
 }
 
 // Options for enumerating a platform's recent traces (the browser/wizard list surface).
@@ -64,12 +68,25 @@ export const TraceSpanNodeSchema = z.object({
 });
 export type TraceSpanNode = z.infer<typeof TraceSpanNodeSchema>;
 
+// Judge evidence extracted from a pulled trace via the mapping's evidence slots — the pull-path substitute for the
+// EnvSnapshot a live run produces. The ingest pipeline synthesizes a browser snapshot from it, so dom/screenshot
+// judging (incl. VLM) works on externally-run traces exactly as on Everdict-run ones.
+export const TraceEvidenceSchema = z.object({
+  finalAnswer: z.string().optional(), // the agent's final answer text
+  dom: z.string().optional(), // the final DOM/HTML
+  screenshotRef: z.string().optional(), // an unresolved screenshot reference (URL/path) — kept when bytes can't be fetched
+  screenshot: z.string().optional(), // screenshot bytes as base64 (inline attr value or fetched from the ref)
+  screenshotMediaType: z.string().optional(), // e.g. "image/png" — set only when `screenshot` is set
+});
+export type TraceEvidence = z.infer<typeof TraceEvidenceSchema>;
+
 // The result of inspect(traceId, mapping): the normalized events (with the SUPPLIED mapping applied for span-based
 // kinds) plus, for span-based kinds, the raw span attributes so a mapping can be authored/iterated live, plus (best-
 // effort) the structured `detail` (rollups + span tree) the observability-grade detail dialog renders as a waterfall.
 export const TraceInspectResultSchema = z.object({
   rawAttributes: z.array(SpanAttrSampleSchema).optional(), // span-based (otel/mlflow) only; native kinds omit it.
   events: z.array(TraceEventSchema),
+  evidence: TraceEvidenceSchema.optional(), // evidence-slot extraction result (span-based kinds, when the mapping sets slots)
   detail: z
     .object({
       rollup: TraceSummarySchema.omit({ id: true }).optional(), // trace-level totals (duration/spanCount/tokens/cost/model/status/startedAt)
@@ -78,6 +95,12 @@ export const TraceInspectResultSchema = z.object({
     .optional(),
 });
 export type TraceInspectResult = z.infer<typeof TraceInspectResultSchema>;
+
+// fetch() + the extracted evidence in one pull — what the pull-ingest path consumes to synthesize a judge snapshot.
+export interface FetchedTrace {
+  events: TraceEvent[];
+  evidence?: TraceEvidence;
+}
 
 // A TraceSource that can also enumerate its recent traces and inspect one (raw spans + re-normalize with a supplied
 // mapping). buildTraceSource returns this; consumers that only pull-by-id keep using the narrower TraceSource.
@@ -91,6 +114,9 @@ export interface BrowsableTraceSource extends TraceSource {
 // Per-harness span-attribute mapping — the escape hatch for a harness that does NOT emit the OTel GenAI semantic
 // conventions the span→TraceEvent normalizer defaults to. Each field lists attribute keys to try FIRST (before the
 // built-in GenAI/MLflow defaults) when deriving that TraceEvent field. Applies to the span-based sources (otel/mlflow).
+// The evidence slots (finalAnswer/dom/screenshot) have NO built-in defaults — they extract judge evidence from the
+// trace itself (last defined value across spans wins = the FINAL state), so a pulled trace can carry the browser
+// evidence a run-produced snapshot would (docs/architecture/judge-input-contract.md).
 export const SpanAttrMappingSchema = z.object({
   model: z.array(z.string()).optional(), // → llm_call.model
   inputTokens: z.array(z.string()).optional(), // → llm_call.cost.inputTokens
@@ -101,6 +127,9 @@ export const SpanAttrMappingSchema = z.object({
   toolArgs: z.array(z.string()).optional(), // → tool_call.args
   toolResult: z.array(z.string()).optional(), // → tool_result.output
   messageText: z.array(z.string()).optional(), // → message.text
+  finalAnswer: z.array(z.string()).optional(), // → evidence.finalAnswer (+ appended as the trace's final assistant message)
+  dom: z.array(z.string()).optional(), // → evidence.dom (the final DOM a browser judge reads)
+  screenshot: z.array(z.string()).optional(), // → evidence.screenshot* (data-URI/base64 inline, else a fetchable ref)
 });
 export type SpanAttrMapping = z.infer<typeof SpanAttrMappingSchema>;
 

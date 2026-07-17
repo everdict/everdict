@@ -2,13 +2,24 @@
 // owns the fetch-backed impls and re-exports the contract here so an adapter consumer imports both together.
 export type {
   BrowsableTraceSource,
+  FetchedTrace,
   ListTracesOptions,
   SpanAttrSample,
+  TraceEvidence,
   TraceInspectResult,
   TraceSource,
   TraceSummary,
 } from "@everdict/contracts";
-export { type Span, spansToRawAttributes, spansToTraceEvents, summarizeSpans } from "./sources/trace-source.js";
+export {
+  type Span,
+  classifyScreenshotValue,
+  spansToEvidence,
+  spansToRawAttributes,
+  spansToTraceEvents,
+  summarizeSpans,
+  withEvidenceEvents,
+} from "./sources/trace-source.js";
+export { extractEvidence, fetchImageBase64 } from "./sources/evidence-resolve.js";
 export {
   jaegerTracesToSummaries,
   OtelTraceSource,

@@ -144,7 +144,8 @@ const docs = {
     summary: "Inspect one trace (raw spans + normalized events)",
     description:
       "Pull a trace by id and return the events normalized with the SUPPLIED span-attribute mapping, plus (for " +
-      "span-based kinds otel/mlflow) the raw span attributes so a mapping can be authored/iterated against real keys. " +
+      "span-based kinds otel/mlflow) the raw span attributes so a mapping can be authored/iterated against real keys, " +
+      "plus the mapping's evidence-slot extraction (finalAnswer/dom/screenshot) when slots are set. " +
       "Native kinds (langfuse/langsmith/phoenix) ignore mapping and omit rawAttributes. Nothing is persisted. Read is " +
       "harnesses:read.",
     tags: ["trace-source"],

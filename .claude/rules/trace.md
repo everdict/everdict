@@ -56,6 +56,15 @@ docs/service-harness.md + docs/architecture/trace-sink.md.
   spec) applies it at both production seams — `TraceSourceService.resolve` (dispatch-after-judge collect) and
   `ScorecardIngestService.trackPull`'s `spanMappingFor` (periodic pull-eval). See
   docs/architecture/judge-input-contract.md.
+- **Evidence slots (finalAnswer/dom/screenshot) + snapshot synthesis.** `SpanAttrMapping` also carries evidence
+  slots (attr-key lists, NO built-in defaults — explicit mapping only): `spansToEvidence` extracts the LAST
+  defined value across time-ordered spans (= the final state) into `TraceEvidence`; a screenshot value classifies
+  as inline bytes (data-URI/bare-base64) or a ref, and http(s) refs resolve to bytes best-effort with the source's
+  own credentials (`fetchImageBase64` — a miss keeps the ref, NEVER fails the pull). The span-based sources expose
+  `fetchDetailed(runId) → {events, evidence?}` (optional on the `TraceSource` contract; native kinds/fakes fall
+  back to `fetch`) and `inspect` returns the same `evidence`; the extracted final answer is also appended as the
+  trace's final assistant message (`withEvidenceEvents`, deduped). The pull-ingest path synthesizes
+  `EnvSnapshot{kind:"browser"}` from the evidence so dom/screenshot/VLM judging works on pulled traces unchanged.
 - **Sink = a trace source used as an export target (NO separate registration).** A workspace registers ONE pool
   (`WorkspaceSettings.traceSources[]`, owned by `TraceSourceService`); "export to X" is a per-harness selection
   (`traceSinkByHarness` → a source name; otel excluded — pull-only). `TraceSinkService` is the export EXECUTOR only:

@@ -1,5 +1,6 @@
 import {
   type BrowsableTraceSource,
+  type FetchedTrace,
   type ListTracesOptions,
   type SpanAttrMapping,
   type TraceEvent,
@@ -7,12 +8,14 @@ import {
   type TraceSummary,
   UpstreamError,
 } from "@everdict/contracts";
+import { extractEvidence } from "./evidence-resolve.js";
 import {
   type Span,
   spansToRawAttributes,
   spansToSpanNodes,
   spansToTraceEvents,
   summarizeSpans,
+  withEvidenceEvents,
 } from "./trace-source.js";
 
 // Span attributes in the MLflow 3.x trace REST are an OTLP-style AnyValue (snake_case) array — a format distinct from OTel (camelCase).
@@ -263,21 +266,35 @@ export class MlflowTraceSource implements BrowsableTraceSource {
   }
 
   async fetch(runId: string): Promise<TraceEvent[]> {
+    return (await this.fetchDetailed(runId)).events;
+  }
+
+  // fetch + the evidence slots extracted via the configured mapping (screenshot refs resolved best-effort with the
+  // source's own credentials) — what the pull-ingest path consumes to synthesize a judge snapshot.
+  async fetchDetailed(runId: string): Promise<FetchedTrace> {
     let traceId = runId;
     if (this.opts.correlate === "tag") {
       const found = await this.traceIdByTag(runId);
-      if (!found) return []; // tag not found — not arrived/tagged yet (flush lag) → degrade to 0 events
+      if (!found) return { events: [] }; // tag not found — not arrived/tagged yet (flush lag) → degrade to 0 events
       traceId = found;
     }
-    return spansToTraceEvents(await this.getSpansById(traceId), this.opts.mapping);
+    const spans = await this.getSpansById(traceId);
+    const m = this.opts.mapping;
+    const evidence = await extractEvidence(spans, m, this.opts.fetchImpl ?? fetch, this.opts.headers);
+    return {
+      events: withEvidenceEvents(spansToTraceEvents(spans, m), evidence),
+      ...(evidence ? { evidence } : {}),
+    };
   }
 
   async inspect(traceId: string, mapping?: SpanAttrMapping): Promise<TraceInspectResult> {
     const spans = await this.getSpansById(traceId);
     const m = mapping ?? this.opts.mapping;
+    const evidence = await extractEvidence(spans, m, this.opts.fetchImpl ?? fetch, this.opts.headers);
     return {
       rawAttributes: spansToRawAttributes(spans),
-      events: spansToTraceEvents(spans, m),
+      events: withEvidenceEvents(spansToTraceEvents(spans, m), evidence),
+      ...(evidence ? { evidence } : {}),
       detail: { rollup: summarizeSpans(spans), spans: spansToSpanNodes(spans, m) },
     };
   }
