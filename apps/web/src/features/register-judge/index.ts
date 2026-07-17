@@ -3,7 +3,6 @@ export { JudgePreviewPanel } from './ui/judge-preview-panel'
 export {
   validateJudgeAction,
   createJudgeAction,
-  previewJudgeAction,
   tryJudgeAction,
   type ValidateJudgeResult,
   type CreateJudgeResult,

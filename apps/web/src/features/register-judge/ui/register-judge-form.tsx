@@ -10,8 +10,9 @@ import type { TraceSourceConfig } from '@/entities/trace-source'
 import { cn } from '@/shared/lib/utils'
 import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
+import { CodeEditor } from '@/shared/ui/code-editor'
 import { Combobox } from '@/shared/ui/combobox'
-import { Input, Label, Textarea } from '@/shared/ui/input'
+import { Input, Label } from '@/shared/ui/input'
 
 import {
   createJudgeAction,
@@ -264,12 +265,11 @@ export function RegisterJudgeForm({
             ]}
           />
         </div>
-        <Textarea
+        <CodeEditor
           value={code}
-          onChange={(e) => setCode(e.target.value)}
-          rows={18}
-          spellCheck={false}
-          className="font-mono text-[12px] leading-relaxed"
+          onChange={setCode}
+          language={language}
+          minHeight="360px"
           aria-label={t('codeLabel')}
         />
         <p className="text-[12px] text-faint">{t('codeHint')}</p>

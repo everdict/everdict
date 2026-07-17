@@ -1,134 +1,54 @@
 'use client'
 
-import { useEffect, useMemo, useState, useTransition } from 'react'
+import { useEffect, useState, useTransition } from 'react'
 import {
   Check,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
-  Eye,
   Loader2,
   Play,
-  Save,
+  ShieldCheck,
 } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
-import {
-  inspectTraceAction,
-  saveHarnessSpanMappingAction,
-  TraceBrowser,
-  TraceEventList,
-} from '@/features/browse-traces'
-import {
-  EMPTY_EVIDENCE_SLOTS,
-  EMPTY_SPAN_MAPPING,
-  mappingRecordToSpec,
-  SpanMappingEditor,
-  type EvidenceSlotsForm,
-  type SpanAttrOption,
-  type SpanMappingRecord,
-  type TraceInspectResult,
-  type TraceSummary,
-} from '@/entities/trace'
+import { inspectTraceAction, TraceBrowser, TraceEventList } from '@/features/browse-traces'
+import type { TraceInspectResult, TraceSummary } from '@/entities/trace'
 import type { TraceSourceConfig } from '@/entities/trace-source'
 import { cn } from '@/shared/lib/utils'
 import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
-import { Combobox } from '@/shared/ui/combobox'
 import { Input, Label, Textarea } from '@/shared/ui/input'
 
-import { previewJudgeAction, tryJudgeAction, type TryJudgeResult } from '../api/register-judge'
+import { tryJudgeAction, type JudgeScore, type TryJudgeResult } from '../api/register-judge'
 
-const SPAN_KINDS = new Set(['otel', 'mlflow'])
+type Step = 'pick' | 'run'
 
-type Step = 'pick' | 'convert' | 'preview'
-
-// One sample value per observed attribute key — so the conversion builder shows what each key actually holds.
-function sampleStr(v: unknown): string {
-  if (typeof v === 'string') return v.length > 80 ? `${v.slice(0, 80)}…` : v
-  if (typeof v === 'number' || typeof v === 'boolean') return String(v)
-  try {
-    return (JSON.stringify(v) ?? String(v)).slice(0, 80)
-  } catch {
-    return String(v)
-  }
-}
-
-// A JSON-valued attr (object, or a JSON string) → its selectable leaf paths for the builder's drill-in picker.
-// Dot/bracket paths, capped in depth and count — a picker, not a JSON explorer.
-function jsonChildren(v: unknown): { path: string; sample: string }[] | undefined {
-  let root: unknown = v
-  if (typeof v === 'string') {
-    const t = v.trim()
-    if (!t.startsWith('{') && !t.startsWith('[')) return undefined
-    try {
-      root = JSON.parse(t)
-    } catch {
-      return undefined
-    }
-  }
-  if (root === null || typeof root !== 'object') return undefined
-  const out: { path: string; sample: string }[] = []
-  const walk = (node: unknown, prefix: string, depth: number) => {
-    if (out.length >= 40) return
-    if (node !== null && typeof node === 'object' && depth < 3) {
-      if (Array.isArray(node)) {
-        node.slice(0, 5).forEach((child, i) => walk(child, `${prefix}[${i}]`, depth + 1))
-      } else {
-        for (const [k, child] of Object.entries(node)) {
-          walk(child, prefix ? `${prefix}.${k}` : k, depth + 1)
-        }
-      }
-      return
-    }
-    if (prefix) out.push({ path: prefix, sample: sampleStr(node) })
-  }
-  walk(root, '', 0)
-  return out.length > 0 ? out : undefined
-}
-
-// The custom {<name>} placeholders a draft judge's promptTemplate declares — client-side mirror of the engine's
-// customPlaceholdersOf (the wizard shows each as an evidence row to bind; the reserved names are built-ins).
-const BUILTIN_PLACEHOLDERS = new Set([
-  'task',
-  'rubric',
-  'criteria',
-  'dom',
-  'expected',
-  'final_answer',
-  'response',
-  'trace',
-  'verdict_instruction',
-  'screenshot',
-])
-function templatePlaceholdersOf(spec: unknown): string[] {
-  const template = (spec as { promptTemplate?: unknown } | undefined)?.promptTemplate
-  if (typeof template !== 'string') return []
-  const names = new Set<string>()
-  for (const m of template.matchAll(/\{([a-zA-Z_][a-zA-Z0-9_-]*)\}/g)) {
-    const name = m[1]
-    if (name && !BUILTIN_PLACEHOLDERS.has(name)) names.add(name)
-  }
-  return [...names]
+// A code judge's error verdicts carry the run's stderr/stdout inside the score detail ([grader-error] … /
+// skipped: …) — surface those as a log block, not a one-liner.
+function isErrorDetail(detail: unknown): detail is string {
+  return (
+    typeof detail === 'string' &&
+    (detail.includes('[grader-error]') || detail.startsWith('skipped:'))
+  )
 }
 
 // The wizard's step rail — reachable steps are clickable, the completed pick shows a check.
 function StepRail({
   step,
   picked,
-  canPreview,
+  canRun,
   onGo,
 }: {
   step: Step
   picked: boolean
-  canPreview: boolean
+  canRun: boolean
   onGo: (s: Step) => void
 }) {
   const t = useTranslations('judgePreview')
   const items: { id: Step; label: string; enabled: boolean; done: boolean }[] = [
     { id: 'pick', label: t('stepPick'), enabled: true, done: picked && step !== 'pick' },
-    { id: 'convert', label: t('stepConvert'), enabled: picked, done: false },
-    { id: 'preview', label: t('stepPreview'), enabled: canPreview, done: false },
+    { id: 'run', label: t('stepRun'), enabled: canRun, done: false },
   ]
   return (
     <ol className="flex flex-wrap items-center gap-1">
@@ -168,32 +88,60 @@ function StepRail({
   )
 }
 
-// Live judge preview — a 3-step flow: ① pick a real sample trace from a connected observability platform
-// (list → detail dialog with prev/next → "Use this trace"), ② author the span→TraceEvent conversion against it
-// with the mouse-only mapping builder (the list stays out of the way), ③ see the EXACT judging prompt / evidence /
-// (with Run once) real scores. getSpec() reads the current form spec on demand so rubric edits reflect on the next
-// Preview/Run. Byte-identical to a real grade.
+// One verdict row — an error detail (crashed judge: [grader-error] with stderr, or a skip reason) renders as a
+// log block so the debugging signal is readable, not truncated into a chip.
+function ScoreRow({ score }: { score: JudgeScore }) {
+  const errorDetail = isErrorDetail(score.detail) ? score.detail : undefined
+  return (
+    <div
+      className={cn(
+        'rounded-md border px-2.5 py-1.5 text-[12px]',
+        errorDetail
+          ? 'border-destructive/30 bg-destructive/8'
+          : score.pass === true
+            ? 'border-[var(--color-success)]/30 bg-[var(--color-success)]/8'
+            : score.pass === false
+              ? 'border-destructive/30 bg-destructive/8'
+              : 'border-border bg-muted/40'
+      )}
+    >
+      <div className="flex items-center justify-between gap-2">
+        <span className="font-mono">{score.metric}</span>
+        <span className="tabular-nums">
+          {score.value.toFixed(2)}
+          {score.pass === true ? ' · ✓' : score.pass === false ? ' · ✗' : ''}
+        </span>
+      </div>
+      {errorDetail ? (
+        <pre className="mt-1.5 max-h-48 overflow-auto whitespace-pre-wrap rounded border border-destructive/20 bg-background/60 px-2 py-1.5 font-mono text-[11px] leading-relaxed text-destructive">
+          {errorDetail}
+        </pre>
+      ) : typeof score.detail === 'string' && score.detail ? (
+        <p className="mt-0.5 text-muted-foreground">{score.detail}</p>
+      ) : null}
+    </div>
+  )
+}
+
+// Judge run panel — pick a REAL trace from a connected observability platform, then EXECUTE the draft judge code
+// against it (one sandboxed dispatch) and read the actual scores / crash output. No conversion-layer authoring
+// here (that was the model-judge legacy): the code receives the normalized context as-is; a source-level mapping
+// (if configured) applies server-side, and extracted evidence/snapshot relay silently into the run.
 export function JudgePreviewPanel({
   getSpec,
   sources = [],
-  assignments = {},
 }: {
   getSpec: () => unknown
   sources?: TraceSourceConfig[]
+  // kept for call-site compat; the run panel no longer authors per-harness mappings
   assignments?: Record<string, string>
 }) {
   const t = useTranslations('judgePreview')
   const [step, setStep] = useState<Step>('pick')
   const [picked, setPicked] = useState<{ sourceName: string; summary: TraceSummary } | undefined>()
-  const [mappingRec, setMappingRec] = useState<SpanMappingRecord>(EMPTY_SPAN_MAPPING)
-  const [slots, setSlots] = useState<EvidenceSlotsForm>(EMPTY_EVIDENCE_SLOTS)
   const [inspected, setInspected] = useState<TraceInspectResult | undefined>()
   const [inspectError, setInspectError] = useState<string | undefined>()
   const [inspecting, startInspect] = useTransition()
-
-  const [saveHarness, setSaveHarness] = useState('')
-  const [saveMsg, setSaveMsg] = useState<{ ok: boolean; error?: string } | undefined>()
-  const [saving, startSave] = useTransition()
 
   const [task, setTask] = useState('')
   const [expected, setExpected] = useState('')
@@ -201,66 +149,26 @@ export function JudgePreviewPanel({
   const [parseError, setParseError] = useState<string | undefined>()
   const [busy, start] = useTransition()
 
+  const [timelineOpen, setTimelineOpen] = useState(false)
   const [manualOpen, setManualOpen] = useState(false)
   const [manualTrace, setManualTrace] = useState('')
 
-  const pickedSource = useMemo(
-    () => sources.find((s) => s.name === picked?.sourceName),
-    [sources, picked?.sourceName]
-  )
-  const isSpanKind = pickedSource ? SPAN_KINDS.has(pickedSource.kind) : false
-  const mappingSpec = useMemo(() => mappingRecordToSpec(mappingRec, slots), [mappingRec, slots])
-  // The custom {<name>} placeholders the current draft template declares — each becomes an evidence row to bind.
-  const placeholders = templatePlaceholdersOf(getSpec())
-
-  // Reverse-lookup: harnesses that pull from the picked source — the natural target(s) to save the conversion onto.
-  const assignedHarnesses = useMemo(
-    () =>
-      Object.entries(assignments)
-        .filter(([, name]) => name === picked?.sourceName)
-        .map(([h]) => h),
-    [assignments, picked?.sourceName]
-  )
-  useEffect(() => {
-    setSaveHarness(assignedHarnesses[0] ?? '')
-    setSaveMsg(undefined)
-  }, [assignedHarnesses])
-
-  // Re-inspect the picked trace whenever the trace or the (span-based) mapping changes — the live conversion loop.
+  // Inspect the picked trace once — the events (+ source-mapping-extracted evidence) the run will receive.
   useEffect(() => {
     if (!picked) return
-    const traceId = picked.summary.id
-    const sourceName = picked.sourceName
-    const spec = isSpanKind ? mappingSpec : undefined
-    const timer = setTimeout(() => {
-      startInspect(async () => {
-        setInspectError(undefined)
-        const res = await inspectTraceAction(sourceName, traceId, spec)
-        if (res.ok) setInspected(res.result)
-        else {
-          setInspected(undefined)
-          setInspectError(res.error)
-        }
-      })
-    }, 300)
-    return () => clearTimeout(timer)
-  }, [picked, mappingSpec, isSpanKind])
+    const { sourceName, summary } = picked
+    startInspect(async () => {
+      setInspectError(undefined)
+      const res = await inspectTraceAction(sourceName, summary.id)
+      if (res.ok) setInspected(res.result)
+      else {
+        setInspected(undefined)
+        setInspectError(res.error)
+      }
+    })
+  }, [picked])
 
-  // The observed attribute keys + one sample value each (LAST occurrence — matches extraction semantics) + the
-  // drill-in leaf paths for JSON values — what the mouse-only mapping builder offers per field/slot.
-  const attrOptions = useMemo<SpanAttrOption[]>(() => {
-    const latest = new Map<string, unknown>()
-    for (const s of inspected?.rawAttributes ?? [])
-      for (const [k, v] of Object.entries(s.attrs)) latest.set(k, v)
-    return [...latest.entries()]
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([key, v]) => {
-        const children = jsonChildren(v)
-        return { key, sample: sampleStr(v), ...(children ? { children } : {}) }
-      })
-  }, [inspected])
-
-  // The trace fed to preview/try: the manual JSON (advanced, when filled) overrides; else the inspected events.
+  // The trace fed to the run: the manual JSON (advanced, when filled) overrides; else the inspected events.
   function effectiveTrace(): unknown | undefined {
     setParseError(undefined)
     setResult(undefined)
@@ -275,9 +183,7 @@ export function JudgePreviewPanel({
     return inspected?.events ?? []
   }
 
-  // The wizard-side mirror of the pull path's snapshot synthesis: extracted browser evidence (dom/screenshot)
-  // becomes the preview's browser snapshot, so dom/screenshot coverage and VLM "Run once" work on pulled traces.
-  // A manual JSON override carries no evidence — no snapshot then.
+  // Extracted browser evidence → the run's synthesized snapshot (same as the pull path); manual JSON carries none.
   function evidenceSnapshot(): unknown | undefined {
     const ev = inspected?.evidence
     if (!ev || manualTrace.trim()) return undefined
@@ -293,40 +199,26 @@ export function JudgePreviewPanel({
     }
   }
 
-  const meta = () => {
+  function onRun() {
+    const trace = effectiveTrace()
+    if (trace === undefined) return
     const snapshot = evidenceSnapshot()
     const traceEvidence = manualTrace.trim() ? undefined : inspected?.evidence
-    return {
-      ...(task.trim() ? { task: task.trim() } : {}),
-      ...(expected.trim() ? { expected: expected.trim() } : {}),
-      ...(snapshot ? { snapshot } : {}),
-      ...(traceEvidence ? { traceEvidence } : {}),
-    }
-  }
-
-  function onPreview() {
-    const trace = effectiveTrace()
-    if (trace === undefined) return
-    start(async () => setResult(await previewJudgeAction(getSpec(), trace, meta())))
-  }
-  function onTry() {
-    const trace = effectiveTrace()
-    if (trace === undefined) return
-    start(async () => setResult(await tryJudgeAction(getSpec(), trace, meta())))
-  }
-
-  function onSaveMapping() {
-    if (!saveHarness.trim()) return
-    startSave(async () => {
-      const res = await saveHarnessSpanMappingAction(saveHarness.trim(), mappingSpec ?? null)
-      setSaveMsg(res.ok ? { ok: true } : { ok: false, error: res.error })
-    })
+    start(async () =>
+      setResult(
+        await tryJudgeAction(getSpec(), trace, {
+          ...(task.trim() ? { task: task.trim() } : {}),
+          ...(expected.trim() ? { expected: expected.trim() } : {}),
+          ...(snapshot ? { snapshot } : {}),
+          ...(traceEvidence ? { traceEvidence } : {}),
+        })
+      )
+    )
   }
 
   const canRun = Boolean(picked) || manualTrace.trim().length > 0
 
-  // Shared by the stepper's preview step and the no-sources fallback (manual JSON only).
-  const previewBody = (
+  const runBody = (
     <>
       {/* Task / expected context (optional). */}
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -345,20 +237,11 @@ export function JudgePreviewPanel({
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
-        <Button
-          variant="secondary"
-          onClick={onPreview}
-          disabled={busy || !canRun}
-          className="gap-1.5"
-        >
-          {busy ? <Loader2 className="size-4 animate-spin" /> : <Eye className="size-4" />}
-          {t('previewButton')}
+        <Button onClick={onRun} disabled={busy || !canRun} className="gap-1.5">
+          {busy ? <Loader2 className="size-4 animate-spin" /> : <Play className="size-4" />}
+          {busy ? t('running') : t('runButton')}
         </Button>
-        <Button variant="ghost" onClick={onTry} disabled={busy || !canRun} className="gap-1.5">
-          <Play className="size-4" />
-          {t('tryButton')}
-        </Button>
-        <span className="text-[12px] text-muted-foreground">{t('tryHint')}</span>
+        <span className="text-[12px] text-muted-foreground">{t('runHint')}</span>
       </div>
 
       {/* Advanced: paste a raw TraceEvent[] JSON instead (overrides the picked trace). */}
@@ -403,28 +286,7 @@ export function JudgePreviewPanel({
               ) : (
                 <div className="flex flex-col gap-1.5">
                   {result.scores.map((s) => (
-                    <div
-                      key={s.metric}
-                      className={cn(
-                        'rounded-md border px-2.5 py-1.5 text-[12px]',
-                        s.pass === true
-                          ? 'border-[var(--color-success)]/30 bg-[var(--color-success)]/8'
-                          : s.pass === false
-                            ? 'border-destructive/30 bg-destructive/8'
-                            : 'border-border bg-muted/40'
-                      )}
-                    >
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="font-mono">{s.metric}</span>
-                        <span className="tabular-nums">
-                          {s.value.toFixed(2)}
-                          {s.pass === true ? ' · ✓' : s.pass === false ? ' · ✗' : ''}
-                        </span>
-                      </div>
-                      {typeof s.detail === 'string' && s.detail ? (
-                        <p className="mt-0.5 text-muted-foreground">{s.detail}</p>
-                      ) : null}
-                    </div>
+                    <ScoreRow key={s.metric} score={s} />
                   ))}
                 </div>
               )}
@@ -441,36 +303,13 @@ export function JudgePreviewPanel({
             </Callout>
           ) : null}
 
-          {result.evidence ? (
-            <div>
-              <p className="mb-1.5 text-[12px] font-medium text-muted-foreground">
-                {t('coverage')}
-              </p>
-              <div className="flex flex-wrap gap-1.5">
-                {Object.entries(result.evidence).map(([key, c]) => (
-                  <span
-                    key={key}
-                    className={cn(
-                      'rounded-md border px-2 py-0.5 text-[12px]',
-                      c.present
-                        ? c.truncated
-                          ? 'border-[var(--color-warning)]/30 bg-[var(--color-warning)]/8 text-[var(--color-warning)]'
-                          : 'border-primary/25 bg-primary/6 text-foreground'
-                        : 'border-border bg-muted/50 text-muted-foreground line-through'
-                    )}
-                    title={c.present ? t('chars', { n: c.chars }) : t('absent')}
-                  >
-                    {key}
-                    {c.truncated ? ` · ${t('truncated')}` : ''}
-                  </span>
-                ))}
-              </div>
-            </div>
-          ) : null}
-
+          {/* Declared-requirement check — which of the judge's `requires` this trace satisfies. */}
           {result.requirements ? (
             <div className="space-y-1.5">
-              <p className="text-[12px] font-medium text-muted-foreground">{t('requirements')}</p>
+              <p className="flex items-center gap-1 text-[12px] font-medium text-muted-foreground">
+                <ShieldCheck className="size-3.5" />
+                {t('requirements')}
+              </p>
               <div className="flex flex-wrap gap-1.5">
                 {result.requirements.satisfied.map((r, i) => (
                   <span
@@ -493,23 +332,12 @@ export function JudgePreviewPanel({
               </div>
             </div>
           ) : null}
-
-          {result.prompt ? (
-            <div>
-              <p className="mb-1.5 text-[12px] font-medium text-muted-foreground">
-                {t('renderedPrompt')}
-              </p>
-              <pre className="max-h-80 overflow-auto rounded-lg border bg-muted/40 p-3 text-[12px] leading-relaxed whitespace-pre-wrap">
-                {result.prompt}
-              </pre>
-            </div>
-          ) : null}
         </div>
       ) : null}
     </>
   )
 
-  // No connected sources — no trace to pick or convert; fall back to the manual-JSON preview only.
+  // No connected sources — nothing to pick; run against a pasted trace only.
   if (sources.length === 0) {
     return (
       <div className="space-y-3">
@@ -518,7 +346,7 @@ export function JudgePreviewPanel({
           <p className="text-[12px] text-muted-foreground">{t('subtitle')}</p>
         </div>
         <Callout tone="info">{t('noSourcesNote')}</Callout>
-        {previewBody}
+        {runBody}
       </div>
     )
   }
@@ -530,12 +358,7 @@ export function JudgePreviewPanel({
           <h3 className="text-sm font-medium">{t('heading')}</h3>
           <p className="text-[12px] text-muted-foreground">{t('subtitle')}</p>
         </div>
-        <StepRail
-          step={step}
-          picked={Boolean(picked)}
-          canPreview={canRun}
-          onGo={(s) => setStep(s)}
-        />
+        <StepRail step={step} picked={Boolean(picked)} canRun={canRun} onGo={(s) => setStep(s)} />
       </div>
 
       {/* Step 1 — pick a sample trace. Kept mounted (hidden) so list/filter state survives step hops. */}
@@ -545,14 +368,15 @@ export function JudgePreviewPanel({
           selectedTraceId={picked?.summary.id}
           onPick={(summary, sourceName) => {
             setPicked({ sourceName, summary })
-            setStep('convert')
+            setResult(undefined)
+            setStep('run')
           }}
         />
         <button
           type="button"
           onClick={() => {
             setManualOpen(true)
-            setStep('preview')
+            setStep('run')
           }}
           className="text-[12px] text-muted-foreground underline underline-offset-2 hover:text-foreground"
         >
@@ -560,121 +384,62 @@ export function JudgePreviewPanel({
         </button>
       </div>
 
-      {/* Step 2 — the conversion layer, authored against the picked trace (the list stays hidden). */}
-      {step === 'convert' && picked && (
+      {/* Step 2 — execute the draft judge against the picked trace and read the real verdict / crash output. */}
+      {step === 'run' && (
         <div className="space-y-3">
-          <div className="flex flex-wrap items-center gap-3 rounded-lg border border-border bg-card/40 px-3 py-2.5">
-            <div className="min-w-0 flex-1">
-              <div className="truncate text-[13px] font-[510]">
-                {picked.summary.name ?? picked.summary.id}
+          {picked && (
+            <div className="flex flex-wrap items-center gap-3 rounded-lg border border-border bg-card/40 px-3 py-2.5">
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-[13px] font-[510]">
+                  {picked.summary.name ?? picked.summary.id}
+                </div>
+                <div className="truncate font-mono text-[11px] text-faint">
+                  {picked.summary.id} · {picked.sourceName}
+                  {inspecting
+                    ? ` · ${t('loadingEvents')}`
+                    : inspected
+                      ? ` · ${t('eventCount', { count: inspected.events.length })}`
+                      : ''}
+                </div>
               </div>
-              <div className="truncate font-mono text-[11px] text-faint">
-                {picked.summary.id} · {picked.sourceName}
-                {pickedSource ? ` (${pickedSource.kind})` : ''}
-              </div>
+              <Button variant="secondary" size="sm" onClick={() => setStep('pick')}>
+                {t('changeTrace')}
+              </Button>
             </div>
-            <Button variant="secondary" size="sm" onClick={() => setStep('pick')}>
-              {t('changeTrace')}
-            </Button>
-          </div>
-
-          {isSpanKind ? (
-            <SpanMappingEditor
-              mapping={mappingRec}
-              onChange={setMappingRec}
-              slots={slots}
-              onSlotsChange={setSlots}
-              attrs={attrOptions}
-              evidence={inspected?.evidence}
-              templatePlaceholders={placeholders}
-            />
-          ) : (
-            <Callout tone="info">{t('nativeKindNote')}</Callout>
           )}
           {inspectError && <Callout tone="danger">{inspectError}</Callout>}
 
-          {/* The live conversion result — exactly the events the judge will see, re-normalized on every click. */}
-          <div className="space-y-1.5">
-            <p className="text-[12px] font-medium text-muted-foreground">
-              {inspecting
-                ? t('converting')
-                : t('convertedEvents', { count: inspected?.events.length ?? 0 })}
-            </p>
-            {inspected && (
-              <div className="max-h-64 overflow-y-auto">
-                <TraceEventList events={inspected.events} />
-              </div>
-            )}
-          </div>
-
-          {/* Save the authored conversion onto a harness (member+). */}
-          {isSpanKind && mappingSpec && (
-            <div className="flex flex-wrap items-end gap-2 border-t border-border/60 pt-3">
-              <label className="flex flex-col gap-1">
-                <span className="text-[11px] font-[510] text-muted-foreground">
-                  {t('saveToHarness')}
-                </span>
-                {assignedHarnesses.length > 0 ? (
-                  <Combobox
-                    options={assignedHarnesses.map((h) => ({ value: h }))}
-                    value={saveHarness}
-                    onChange={setSaveHarness}
-                    className="w-56"
-                    aria-label={t('saveToHarness')}
-                  />
-                ) : (
-                  <Input
-                    value={saveHarness}
-                    onChange={(e) => setSaveHarness(e.target.value)}
-                    placeholder={t('harnessIdPlaceholder')}
-                    className="w-56 font-mono text-[12px]"
-                  />
-                )}
-              </label>
-              <Button
-                variant="secondary"
-                onClick={onSaveMapping}
-                disabled={saving || !saveHarness.trim()}
-                className="gap-1.5"
+          {/* What the code will receive — collapsible normalized timeline of the picked trace. */}
+          {picked && inspected && inspected.events.length > 0 && (
+            <div className="space-y-1.5">
+              <button
+                type="button"
+                onClick={() => setTimelineOpen((o) => !o)}
+                className="flex items-center gap-1 text-[12px] font-[510] text-muted-foreground hover:text-foreground"
               >
-                {saving ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />}
-                {t('saveMapping')}
-              </Button>
-              {saveMsg?.ok && (
-                <span className="pb-1.5 text-[12px] text-[var(--color-success)]">{t('saved')}</span>
-              )}
-              {saveMsg && !saveMsg.ok && (
-                <span className="pb-1.5 text-[12px] text-destructive">{saveMsg.error}</span>
+                {timelineOpen ? (
+                  <ChevronDown className="size-3.5" />
+                ) : (
+                  <ChevronRight className="size-3.5" />
+                )}
+                {t('timelineHeading')}
+              </button>
+              {timelineOpen && (
+                <div className="max-h-64 overflow-y-auto">
+                  <TraceEventList events={inspected.events} />
+                </div>
               )}
             </div>
           )}
 
-          <div className="flex items-center justify-between border-t border-border/60 pt-3">
+          {runBody}
+
+          <div className="border-t border-border/60 pt-3">
             <Button variant="ghost" size="sm" onClick={() => setStep('pick')} className="gap-1">
               <ChevronLeft className="size-4" />
               {t('back')}
             </Button>
-            <Button size="sm" onClick={() => setStep('preview')} className="gap-1">
-              {t('nextPreview')}
-              <ChevronRight className="size-4" />
-            </Button>
           </div>
-        </div>
-      )}
-
-      {/* Step 3 — preview / run against the converted (or pasted) trace. */}
-      {step === 'preview' && (
-        <div className="space-y-3">
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => setStep(picked ? 'convert' : 'pick')}
-            className="gap-1"
-          >
-            <ChevronLeft className="size-4" />
-            {t('back')}
-          </Button>
-          {previewBody}
         </div>
       )}
     </div>

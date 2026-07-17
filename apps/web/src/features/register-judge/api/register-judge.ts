@@ -53,35 +53,6 @@ export interface PreviewJudgeResult {
   error?: string
 }
 
-// Preview a draft judge against a pasted trace — the exact judging prompt + per-placeholder coverage, NO model call.
-// meta.snapshot (a browser snapshot the wizard synthesizes from the trace's extracted evidence) makes dom/screenshot
-// judging previewable on pulled traces. On transport/validation failure return {ok:false, error} so the form stays
-// alive (the control plane enforces authZ).
-export async function previewJudgeAction(
-  spec: unknown,
-  trace: unknown,
-  meta?: { task?: string; expected?: string; snapshot?: unknown; traceEvidence?: unknown }
-): Promise<PreviewJudgeResult> {
-  const ctx = await authContext()
-  try {
-    const evidence = {
-      source: 'trace' as const,
-      trace,
-      ...(meta?.task ? { task: meta.task } : {}),
-      ...(meta?.expected ? { expected: meta.expected } : {}),
-      ...(meta?.snapshot ? { snapshot: meta.snapshot } : {}),
-      ...(meta?.traceEvidence ? { traceEvidence: meta.traceEvidence } : {}),
-    }
-    const r = await controlPlane.previewJudge<Omit<PreviewJudgeResult, 'ok'>>(ctx, {
-      spec,
-      evidence,
-    })
-    return { ok: true, ...r }
-  } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : String(e) }
-  }
-}
-
 // One judge score (loose mirror of the control plane's Score).
 export interface JudgeScore {
   graderId: string
