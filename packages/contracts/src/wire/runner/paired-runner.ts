@@ -6,5 +6,11 @@ import { RunnerMetaSchema } from "./runner-meta.js";
 export const PairedRunnerResponseSchema = z.object({
   runner: RunnerMetaSchema,
   token: z.string().describe("Plaintext pairing token (rnr_…) — returned exactly once; only a hash is stored"),
+  attachCommand: z
+    .string()
+    .optional()
+    .describe(
+      "Ready-to-run `everdict runner --pair …` command that attaches a headless runner (workspace-shared / headless personal) — token embedded, shown once. Omitted for desktop one-click pairing (the token is handed to the app, never displayed).",
+    ),
 });
 export type PairedRunnerResponse = z.infer<typeof PairedRunnerResponseSchema>;

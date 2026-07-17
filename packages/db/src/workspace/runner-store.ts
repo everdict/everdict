@@ -81,6 +81,10 @@ export class InMemoryRunnerStore implements RunnerStore {
     const s = this.byOwner.get(owner)?.get(id);
     if (s) s.meta = { ...s.meta, capabilities };
   }
+  async setOs(owner: string, id: string, os: string): Promise<void> {
+    const s = this.byOwner.get(owner)?.get(id);
+    if (s) s.meta = { ...s.meta, os };
+  }
   async setVersion(owner: string, id: string, version: string, protocol: number): Promise<void> {
     const s = this.byOwner.get(owner)?.get(id);
     if (s) s.meta = { ...s.meta, version, protocol };
@@ -185,6 +189,9 @@ export class PgRunnerStore implements RunnerStore {
       id,
       capabilities.join(" "),
     ]);
+  }
+  async setOs(owner: string, id: string, os: string): Promise<void> {
+    await this.client.query("UPDATE everdict_runners SET os = $3 WHERE owner = $1 AND id = $2", [owner, id, os]);
   }
   async setVersion(owner: string, id: string, version: string, protocol: number): Promise<void> {
     await this.client.query("UPDATE everdict_runners SET version = $3, protocol = $4 WHERE owner = $1 AND id = $2", [

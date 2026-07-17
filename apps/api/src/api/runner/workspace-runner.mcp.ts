@@ -1,4 +1,4 @@
-import { installGithubWorkspaceRunner } from "@everdict/application-control";
+import { installGithubWorkspaceRunner, renderRunnerAttachCommand } from "@everdict/application-control";
 import { RUNNER_CAPABILITIES } from "@everdict/application-control";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
@@ -43,7 +43,13 @@ export function registerWorkspaceRunnerTools(server: McpServer, ctx: McpToolCont
             ...(os !== undefined ? { os } : {}),
             ...(capabilities !== undefined ? { capabilities } : {}),
           });
-          return ok({ runner: paired.meta, token: paired.token });
+          // Server-authored attach command (BFF↔MCP parity with POST /workspace/runners) — the token rides as a
+          // POSITIONAL `--pair <token>`, ready to paste on the runner machine.
+          const attachCommand = renderRunnerAttachCommand({
+            token: paired.token,
+            ...(deps.apiPublicUrl !== undefined ? { apiUrl: deps.apiPublicUrl } : {}),
+          });
+          return ok({ runner: paired.meta, token: paired.token, attachCommand });
         }),
     );
     server.registerTool(

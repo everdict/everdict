@@ -30,6 +30,7 @@ export interface RunnerHostOpts {
   heartbeatMs?: number; // lease renewal interval while running (default 30s)
   pollMs?: number; // lease error backoff (default 2s)
   capabilities?: string[]; // unset → detectCapabilities()
+  os?: string; // this machine's platform (process.platform), self-reported on lease → the roster fills in the OS with no user input
   version?: string; // runner build/app version, self-reported on lease (desktop passes app.getVersion()) — drives the update-required signal
   onStatus?: (status: RunnerHostStatus) => void;
   onJobDone?: (done: RunnerJobDone) => void; // job completion notice (success/failure) — OS notifications etc.
@@ -123,6 +124,7 @@ export class RunnerHost {
         heartbeatMs: this.opts.heartbeatMs ?? 30_000,
         pollMs: this.opts.pollMs ?? 2_000,
         capabilities: this.capabilities,
+        ...(this.opts.os !== undefined ? { os: this.opts.os } : {}),
         ...(this.opts.version !== undefined ? { version: this.opts.version } : {}),
         shouldStop: () => this.stopFlag,
       },

@@ -1,6 +1,7 @@
 import { BadRequestError } from "@everdict/contracts";
 import type { RunnerMeta } from "@everdict/contracts";
 import type { CiLinkService } from "../ci-link/ci-link-service.js";
+import { renderRunnerAttachCommand } from "./runner-attach-command.js";
 import type { RunnerService } from "./runner-service.js";
 
 // GitHub Actions self-hosted runner self-registration (design doc §4) — one admin action stands up **two workers** on a build server:
@@ -123,7 +124,7 @@ cd ..
 
 # 2) Everdict runner (leases self:ws jobs to run evals) — the everdict CLI must be installed.
 #    (if not installed: npm i -g @everdict/cli  or use the released binary)
-nohup everdict runner --pair "${p.everdictRunnerToken}" --api-url "${p.apiUrl}" > /tmp/everdict-runner.log 2>&1 &
+nohup ${renderRunnerAttachCommand({ token: p.everdictRunnerToken, apiUrl: p.apiUrl })} > /tmp/everdict-runner.log 2>&1 &
 
 echo "✓ GitHub Actions runner + Everdict runner (${p.runtimeTarget}) started"
 echo "  In your workflow, set the label on runs-on and ${p.runtimeTarget} on the run-eval action's runtime input."

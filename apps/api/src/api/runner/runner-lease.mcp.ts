@@ -22,15 +22,16 @@ export function registerRunnerLeaseTools(server: McpServer, ctx: McpToolContext)
       "lease_job",
       {
         description:
-          "Fetch the next eval job (runner pull, long-poll). If none, wait up to wait_ms then {job:null} — safe to call again immediately. Passing capabilities self-advertises the runner (e.g. docker detection → service-harness gate). Passing version/protocol self-reports the runner build; if the runner's protocol is behind this control plane the reply carries updateRequired:true (the runner/desktop should update). Report the result via submit_job_result.",
+          "Fetch the next eval job (runner pull, long-poll). If none, wait up to wait_ms then {job:null} — safe to call again immediately. Passing capabilities self-advertises the runner (e.g. docker detection → service-harness gate). Passing os self-reports the machine's platform (process.platform) → the roster fills in the OS with no user input. Passing version/protocol self-reports the runner build; if the runner's protocol is behind this control plane the reply carries updateRequired:true (the runner/desktop should update). Report the result via submit_job_result.",
         inputSchema: {
           wait_ms: z.number().int().min(0).max(60_000).optional(),
           capabilities: z.array(z.string()).optional(),
+          os: z.string().max(40).optional(),
           version: z.string().max(80).optional(),
           protocol: z.number().int().optional(),
         },
       },
-      ({ wait_ms, capabilities, version, protocol }) =>
+      ({ wait_ms, capabilities, os, version, protocol }) =>
         plain(async () => {
           const key = runnerKey();
           if (!key) return fail(NEED_RUNNER);
@@ -38,6 +39,8 @@ export function registerRunnerLeaseTools(server: McpServer, ctx: McpToolContext)
             await deps.runnerService.touch(key.owner, key.runnerId); // mark as connected
             // Update when the runner reports its actual capabilities (docker detection → sharpens the service-harness dispatch gate).
             if (capabilities) await deps.runnerService.setCapabilities(key.owner, key.runnerId, capabilities);
+            // Self-reported OS (process.platform) → the roster's OS badge is filled at attach time; registration only names the runner.
+            if (os) await deps.runnerService.setOs(key.owner, key.runnerId, os);
             // Persist the self-reported build/protocol version → drives the roster's update-required badge.
             if (version !== undefined && protocol !== undefined)
               await deps.runnerService.reportVersion(key.owner, key.runnerId, version, protocol);

@@ -63,7 +63,12 @@ export const pairRunnerInputSchema = z.object({
 export type PairRunnerInput = z.infer<typeof pairRunnerInputSchema>
 
 // POST /runners response — the plaintext token (rnr_…) is exposed here only once (never shown again).
-export const pairedRunnerSchema = z.object({ runner: runnerMetaSchema, token: z.string() })
+// attachCommand: the server-authored, ready-to-run `everdict runner --pair …` (headless runners only; omitted for desktop one-click).
+export const pairedRunnerSchema = z.object({
+  runner: runnerMetaSchema,
+  token: z.string(),
+  attachCommand: z.string().optional(),
+})
 
 // POST /workspace/runners/github-install response — an install script that stands up a GitHub runner + Everdict runner together on the build server.
 // installScript contains plaintext tokens (rnr_ + GitHub registration token), exposed only once.

@@ -1,4 +1,4 @@
-import { installGithubWorkspaceRunner } from "@everdict/application-control";
+import { installGithubWorkspaceRunner, renderRunnerAttachCommand } from "@everdict/application-control";
 import { PairRunnerBodySchema, RUNNER_CAPABILITIES } from "@everdict/application-control";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
@@ -38,7 +38,10 @@ export function registerWorkspaceRunnerRoutes(app: FastifyInstance, deps: Server
         ...(body.data.os !== undefined ? { os: body.data.os } : {}),
         ...(body.data.capabilities !== undefined ? { capabilities: body.data.capabilities } : {}),
       });
-      return reply.send({ runner: paired.meta, token: paired.token });
+      // The server authors the ready-to-run attach command (the CLI wants the token as a POSITIONAL `--pair <token>`,
+      // not a `--token` flag) so every surface that shows it stays correct — the web just displays it.
+      const attachCommand = renderRunnerAttachCommand({ token: paired.token, apiUrl: baseUrl(req) });
+      return reply.send({ runner: paired.meta, token: paired.token, attachCommand });
     } catch (err) {
       return sendError(reply, err);
     }

@@ -30,6 +30,7 @@ export interface RunnerLoopOpts {
   heartbeatMs: number; // lease renewal interval while running
   pollMs: number; // lease error backoff
   capabilities: string[]; // self-advertised on every lease (repo/docker/browser)
+  os?: string; // this machine's platform (process.platform), self-reported on every lease → the roster fills in the OS with no user input
   version?: string; // runner build/app version, self-reported on every lease (display only; the protocol drives update-required)
   shouldStop: () => boolean; // stop via SIGINT etc. — a worker drops out after finishing its current job
 }
@@ -77,6 +78,7 @@ export async function runLeaseWorkers(deps: RunnerLoopDeps, opts: RunnerLoopOpts
         leased = await deps.callJson("lease_job", {
           wait_ms: opts.waitMs,
           capabilities: opts.capabilities,
+          ...(opts.os !== undefined ? { os: opts.os } : {}),
           ...(opts.version !== undefined ? { version: opts.version } : {}),
           protocol: RUNNER_PROTOCOL_VERSION,
         });

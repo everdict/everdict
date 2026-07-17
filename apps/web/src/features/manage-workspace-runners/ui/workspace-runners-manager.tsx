@@ -1,20 +1,16 @@
 'use client'
 
 import { useEffect, useState, useTransition } from 'react'
-import { Check, Copy, Github, Lock, Search, Server, Trash2 } from 'lucide-react'
+import Link from 'next/link'
+import { Check, Copy, Download, Github, Lock, Search, Server, Trash2 } from 'lucide-react'
 import { useLocale, useTranslations } from 'next-intl'
 
 import type { GithubAppInstallation, GithubAppView } from '@/entities/github-app'
-import {
-  capabilityMeta,
-  type GithubRunnerInstall,
-  type RunnerCapability,
-  type RunnerMeta,
-} from '@/entities/runner'
+import { capabilityMeta, type GithubRunnerInstall, type RunnerMeta } from '@/entities/runner'
 import { copyText } from '@/shared/lib/clipboard'
 import { cn } from '@/shared/lib/utils'
 import { Badge } from '@/shared/ui/badge'
-import { Button } from '@/shared/ui/button'
+import { Button, buttonVariants } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
 import { Dialog } from '@/shared/ui/dialog'
 import { EmptyState } from '@/shared/ui/empty-state'
@@ -40,11 +36,13 @@ export function WorkspaceRunnersManager({
   runners,
   canWrite,
   githubApp,
+  downloadHref,
   onOpenIntegrations,
 }: {
   runners: RunnerMeta[]
   canWrite: boolean
   githubApp: GithubAppView // Target list for the GitHub Actions runner registration picker (installations + allowed repos) — same snapshot as the Integrations tab
+  downloadHref: string // /{workspace}/download — where a runner machine gets everdict (the registered dialog links to it as a setup prerequisite)
   onOpenIntegrations?: () => void // "Install/manage GitHub App" CTA — switch to the Integrations tab (same settings page)
 }) {
   const t = useTranslations('manageWorkspaceRunners')
@@ -212,7 +210,11 @@ export function WorkspaceRunnersManager({
       )}
 
       {canWrite && (
-        <RegisterRunnerDialog open={registerOpen} onClose={() => setRegisterOpen(false)} />
+        <RegisterRunnerDialog
+          open={registerOpen}
+          onClose={() => setRegisterOpen(false)}
+          downloadHref={downloadHref}
+        />
       )}
       {canWrite && (
         <GithubInstallDialog
@@ -226,14 +228,22 @@ export function WorkspaceRunnersManager({
   )
 }
 
-// Register dialog — pick a name + OS (optional) + capabilities, then register. Once registered, the same dialog switches to a step that shows the token once + the attach command.
-function RegisterRunnerDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+// Register dialog — name the runner, register. OS + capabilities are NOT asked for: the runner self-reports them the
+// first time it connects (registration only needs a name). Once registered, the same dialog switches to a two-step
+// setup: (1) get everdict onto the runner machine (it may not have it), (2) run the server-authored attach command.
+function RegisterRunnerDialog({
+  open,
+  onClose,
+  downloadHref,
+}: {
+  open: boolean
+  onClose: () => void
+  downloadHref: string
+}) {
   const t = useTranslations('manageWorkspaceRunners')
   const locale = useLocale()
   const [label, setLabel] = useState('')
-  const [os, setOs] = useState('')
-  const [caps, setCaps] = useState<RunnerCapability[]>([])
-  const [issued, setIssued] = useState<{ token: string; apiUrl?: string }>()
+  const [issued, setIssued] = useState<{ token: string; command: string }>()
   const [copied, setCopied] = useState(false)
   const [error, setError] = useState<string>()
   const [pending, startTransition] = useTransition()
@@ -241,16 +251,10 @@ function RegisterRunnerDialog({ open, onClose }: { open: boolean; onClose: () =>
   useEffect(() => {
     if (!open) return
     setLabel('')
-    setOs('')
-    setCaps([])
     setIssued(undefined)
     setCopied(false)
     setError(undefined)
   }, [open])
-
-  function toggleCap(name: RunnerCapability) {
-    setCaps((prev) => (prev.includes(name) ? prev.filter((c) => c !== name) : [...prev, name]))
-  }
 
   function onRegister() {
     setError(undefined)
@@ -259,20 +263,15 @@ function RegisterRunnerDialog({ open, onClose }: { open: boolean; onClose: () =>
       return
     }
     startTransition(async () => {
-      const r = await pairWorkspaceRunnerAction({
-        label: label.trim(),
-        ...(os.trim().length > 0 ? { os: os.trim() } : {}),
-        ...(caps.length > 0 ? { capabilities: caps } : {}),
-      })
-      if (r.ok && r.token) setIssued({ token: r.token, ...(r.apiUrl ? { apiUrl: r.apiUrl } : {}) })
+      const r = await pairWorkspaceRunnerAction({ label: label.trim() })
+      // The control plane authors the attach command (correct `--pair <token>` form, api-url embedded) — display it verbatim.
+      if (r.ok && r.token && r.attachCommand)
+        setIssued({ token: r.token, command: r.attachCommand })
       else setError(r.error ?? t('registerFailed'))
     })
   }
 
-  // Command to run when attaching on the server — include apiUrl if present (not a secret).
-  const command = issued
-    ? `everdict runner --pair --token ${issued.token}${issued.apiUrl ? ` --api-url ${issued.apiUrl}` : ''}`
-    : ''
+  const command = issued?.command ?? ''
 
   return (
     <Dialog
@@ -291,26 +290,42 @@ function RegisterRunnerDialog({ open, onClose }: { open: boolean; onClose: () =>
               {t('registeredDesc')}
             </p>
           </header>
-          <div className="px-5 py-4">
-            <Callout tone="warning" hint={t('tokenOnceHint')}>
-              <div className="flex items-center gap-2">
-                <code className="min-w-0 flex-1 select-all break-all font-mono text-xs">
-                  {command}
-                </code>
-                <Button
-                  type="button"
-                  variant="secondary"
-                  size="sm"
-                  className="shrink-0"
-                  onClick={() => {
-                    void copyText(command, undefined, locale).then((ok) => ok && setCopied(true))
-                  }}
-                >
-                  {copied ? <Check /> : <Copy />}
-                  {copied ? t('copied') : t('copy')}
-                </Button>
-              </div>
-            </Callout>
+          <div className="space-y-4 px-5 py-4">
+            {/* Step 1 — get everdict on the runner machine (the target may never have heard of it). */}
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-elevated/50 px-3 py-2.5">
+              <span className="text-[13px] text-muted-foreground">{t('setupInstallStep')}</span>
+              <Link
+                href={downloadHref}
+                className={cn(buttonVariants({ size: 'sm', variant: 'secondary' }), 'shrink-0')}
+              >
+                <Download />
+                {t('getEverdict')}
+              </Link>
+            </div>
+            {/* Step 2 — the ready-to-run attach command (token embedded, shown once). */}
+            <div className="space-y-1.5">
+              <Label>{t('attachStepLabel')}</Label>
+              <Callout tone="warning" hint={t('tokenOnceHint')}>
+                <div className="flex items-center gap-2">
+                  <code className="min-w-0 flex-1 select-all break-all font-mono text-xs">
+                    {command}
+                  </code>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    className="shrink-0"
+                    onClick={() => {
+                      void copyText(command, undefined, locale).then((ok) => ok && setCopied(true))
+                    }}
+                  >
+                    {copied ? <Check /> : <Copy />}
+                    {copied ? t('copied') : t('copy')}
+                  </Button>
+                </div>
+              </Callout>
+            </div>
+            <p className="text-[12px] text-faint">{t('autoDetectNote')}</p>
           </div>
           <footer className="flex justify-end border-t border-border px-5 py-3.5">
             <Button size="sm" onClick={onClose}>
@@ -339,41 +354,7 @@ function RegisterRunnerDialog({ open, onClose }: { open: boolean; onClose: () =>
                 maxLength={80}
                 autoFocus
               />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="runner-os">{t('osLabel')}</Label>
-              <Input
-                id="runner-os"
-                value={os}
-                onChange={(e) => setOs(e.target.value)}
-                placeholder="linux · darwin · win32"
-                maxLength={40}
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label>{t('capsLabel')}</Label>
-              <p className="text-[12px] text-muted-foreground">{t('capsHint')}</p>
-              <div className="flex flex-wrap gap-1.5 pt-0.5">
-                {capabilityMeta.map(({ name, label: capLabel }) => {
-                  const on = caps.includes(name)
-                  return (
-                    <button
-                      key={name}
-                      type="button"
-                      onClick={() => toggleCap(name)}
-                      className={cn(
-                        'rounded-md border px-2 py-1 text-[12px] transition-colors',
-                        on
-                          ? 'border-primary/40 bg-primary/10 text-foreground'
-                          : 'border-border text-muted-foreground hover:bg-elevated'
-                      )}
-                    >
-                      {on ? '✓ ' : ''}
-                      {capLabel}
-                    </button>
-                  )
-                })}
-              </div>
+              <p className="text-[12px] text-muted-foreground">{t('autoDetectNote')}</p>
             </div>
             {error && (
               <Callout tone="danger" className="py-1.5">

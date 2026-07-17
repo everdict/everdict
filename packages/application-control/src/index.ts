@@ -131,6 +131,7 @@ export {
   type GithubRunnerInstallResult,
   installGithubWorkspaceRunner,
 } from "./runner/github-runner-install.js";
+export { renderRunnerAttachCommand } from "./runner/runner-attach-command.js";
 export type {
   GithubAppCreds,
   GithubAppGateway,

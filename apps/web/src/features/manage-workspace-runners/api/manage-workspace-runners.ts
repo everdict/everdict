@@ -11,7 +11,6 @@ import {
   type RunnerMeta,
 } from '@/entities/runner'
 import { authContext } from '@/shared/auth/principal'
-import { env } from '@/shared/config/env'
 import { controlPlane } from '@/shared/lib/control-plane'
 
 // Workspace-shared runner (team resource, owner=ws:<workspace>) — unlike personal runners (manage-runners), an
@@ -23,7 +22,7 @@ export interface PairWorkspaceRunnerResult {
   ok: boolean
   token?: string // plaintext (rnr_…) — once only. Shown in the dialog/command then discarded (stored as a hash).
   runner?: RunnerMeta
-  apiUrl?: string // control-plane base the runner connects to (not a secret) — shown embedded in the `everdict runner` command.
+  attachCommand?: string // server-authored, ready-to-run `everdict runner --pair …` (token embedded) — the dialog displays it verbatim.
   error?: string
 }
 export interface WorkspaceRunnerMutationResult {
@@ -45,7 +44,12 @@ export async function pairWorkspaceRunnerAction(
     })
     const res = pairedRunnerSchema.parse(await controlPlane.pairWorkspaceRunner(ctx, body))
     revalidatePath('/[workspace]/settings')
-    return { ok: true, token: res.token, runner: res.runner, apiUrl: env.CONTROL_PLANE_URL }
+    return {
+      ok: true,
+      token: res.token,
+      runner: res.runner,
+      ...(res.attachCommand !== undefined ? { attachCommand: res.attachCommand } : {}),
+    }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }
   }

@@ -32,6 +32,10 @@ class FakeRunnerStore implements RunnerStore {
   async remove(): Promise<void> {}
   async touch(): Promise<void> {}
   async setCapabilities(): Promise<void> {}
+  async setOs(owner: string, id: string, os: string): Promise<void> {
+    const meta = this.byOwner.get(owner)?.get(id);
+    if (meta) this.byOwner.get(owner)?.set(id, { ...meta, os });
+  }
   async setVersion(owner: string, id: string, version: string, protocol: number): Promise<void> {
     const meta = this.byOwner.get(owner)?.get(id);
     if (meta) this.byOwner.get(owner)?.set(id, { ...meta, version, protocol });
@@ -80,6 +84,20 @@ describe("RunnerService — version reporting + roster overlay", () => {
     await svc.reportVersion("u-alice", "r1", "1.2.3", 1.5);
     const [r] = await svc.list("u-alice");
     expect(r?.protocol).toBeUndefined();
+  });
+
+  it("setOs persists the runner's self-reported OS (trimmed, bounded) so registration only needs a name", async () => {
+    const store = new FakeRunnerStore();
+    store.seed("u-alice", meta("r1"));
+    const svc = new RunnerService(store);
+    await svc.setOs("u-alice", "r1", "linux");
+    const [r] = await svc.list("u-alice");
+    expect(r?.os).toBe("linux");
+    // an over-long self-report is truncated at the 40-char ceiling; an empty one is ignored (never blanks the stored OS).
+    await svc.setOs("u-alice", "r1", "x".repeat(60));
+    expect((await svc.list("u-alice"))[0]?.os).toHaveLength(40);
+    await svc.setOs("u-alice", "r1", "   ");
+    expect((await svc.list("u-alice"))[0]?.os).toHaveLength(40);
   });
 
   it("list/listForWorkspace annotate updateRequired for a behind runner, and leave a current one untouched", async () => {

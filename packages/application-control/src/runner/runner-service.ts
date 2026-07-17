@@ -55,6 +55,13 @@ export class RunnerService {
     const known = new Set<string>(RUNNER_CAPABILITIES);
     await this.store.setCapabilities(owner, id, [...new Set(capabilities.filter((c) => known.has(c)))]);
   }
+  // Runner self-report of its OS (process.platform) at lease time → the roster fills in the OS badge with no user input.
+  // Bounded at this boundary (same 40-char ceiling as the pair body) to never persist an oversized self-report. No-op if the runner doesn't exist.
+  async setOs(owner: string, id: string, os: string): Promise<void> {
+    const trimmed = os.trim();
+    if (trimmed.length === 0) return; // ignore an empty self-report rather than blank out the stored OS
+    await this.store.setOs(owner, id, trimmed.slice(0, 40));
+  }
   // Runner self-report of its build/protocol version (on lease). The control plane derives `updateRequired` from the
   // stored protocol (roster badge) — see runnerUpdateRequired. Bounded/validated at this boundary. No-op if the runner doesn't exist.
   async reportVersion(owner: string, id: string, version: string, protocol: number): Promise<void> {

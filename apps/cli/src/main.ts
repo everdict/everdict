@@ -319,6 +319,7 @@ async function runnerCommand(flags: Map<string, string>): Promise<void> {
       heartbeatMs: hbMs,
       pollMs,
       capabilities,
+      os: process.platform, // self-reported OS → the workspace roster fills in the OS badge (registration only names the runner)
       // Optional display version (the protocol version — auto-sent from @everdict/contracts — drives update-required).
       ...(process.env.EVERDICT_RUNNER_VERSION ? { version: process.env.EVERDICT_RUNNER_VERSION } : {}),
       shouldStop: () => stop,

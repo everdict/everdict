@@ -267,6 +267,7 @@ const supervisor = new RunnerSupervisor({
       token,
       apiUrl,
       onStatus,
+      os: process.platform, // self-reported OS → the roster fills in the OS with no user input
       // Self-report this app's version on every lease → the control plane derives the roster's update-required badge.
       version: app.getVersion(),
       onJobDone: (done) => {
