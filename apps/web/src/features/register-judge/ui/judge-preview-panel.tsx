@@ -1,18 +1,29 @@
 'use client'
 
 import { useEffect, useMemo, useState, useTransition } from 'react'
-import { ChevronDown, ChevronRight, Eye, Loader2, Play, Save } from 'lucide-react'
+import {
+  Check,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  Eye,
+  Loader2,
+  Play,
+  Save,
+} from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
 import {
   inspectTraceAction,
   saveHarnessSpanMappingAction,
   TraceBrowser,
+  TraceEventList,
 } from '@/features/browse-traces'
 import {
   EMPTY_SPAN_MAPPING,
   mappingRecordToSpec,
   SpanMappingEditor,
+  type SpanAttrOption,
   type SpanMappingRecord,
   type TraceInspectResult,
   type TraceSummary,
@@ -28,9 +39,80 @@ import { previewJudgeAction, tryJudgeAction, type TryJudgeResult } from '../api/
 
 const SPAN_KINDS = new Set(['otel', 'mlflow'])
 
-// Live judge preview — pick a real trace from a connected observability platform, author the span→TraceEvent conversion
-// (span-based kinds) against it, and see the EXACT judging prompt / evidence / (with Run once) real scores. getSpec()
-// reads the current form spec on demand so rubric edits reflect on the next Preview/Run. Byte-identical to a real grade.
+type Step = 'pick' | 'convert' | 'preview'
+
+// One sample value per observed attribute key — so the conversion builder shows what each key actually holds.
+function sampleStr(v: unknown): string {
+  if (typeof v === 'string') return v.length > 80 ? `${v.slice(0, 80)}…` : v
+  if (typeof v === 'number' || typeof v === 'boolean') return String(v)
+  try {
+    return (JSON.stringify(v) ?? String(v)).slice(0, 80)
+  } catch {
+    return String(v)
+  }
+}
+
+// The wizard's step rail — reachable steps are clickable, the completed pick shows a check.
+function StepRail({
+  step,
+  picked,
+  canPreview,
+  onGo,
+}: {
+  step: Step
+  picked: boolean
+  canPreview: boolean
+  onGo: (s: Step) => void
+}) {
+  const t = useTranslations('judgePreview')
+  const items: { id: Step; label: string; enabled: boolean; done: boolean }[] = [
+    { id: 'pick', label: t('stepPick'), enabled: true, done: picked && step !== 'pick' },
+    { id: 'convert', label: t('stepConvert'), enabled: picked, done: false },
+    { id: 'preview', label: t('stepPreview'), enabled: canPreview, done: false },
+  ]
+  return (
+    <ol className="flex flex-wrap items-center gap-1">
+      {items.map((it, i) => (
+        <li key={it.id} className="flex items-center gap-1">
+          {i > 0 && <ChevronRight className="size-3.5 text-faint" />}
+          <button
+            type="button"
+            disabled={!it.enabled}
+            onClick={() => onGo(it.id)}
+            className={cn(
+              'flex items-center gap-1.5 rounded-md px-2 py-1 text-[12px] transition-colors',
+              step === it.id
+                ? 'bg-secondary font-[510] text-foreground'
+                : it.enabled
+                  ? 'text-muted-foreground hover:text-foreground'
+                  : 'cursor-default text-faint'
+            )}
+          >
+            <span
+              className={cn(
+                'flex size-4 items-center justify-center rounded-full text-[10px] font-[600]',
+                step === it.id
+                  ? 'bg-primary text-primary-foreground'
+                  : it.done
+                    ? 'bg-[var(--color-success)]/15 text-[var(--color-success)]'
+                    : 'bg-muted text-muted-foreground'
+              )}
+            >
+              {it.done ? <Check className="size-2.5" /> : i + 1}
+            </span>
+            {it.label}
+          </button>
+        </li>
+      ))}
+    </ol>
+  )
+}
+
+// Live judge preview — a 3-step flow: ① pick a real sample trace from a connected observability platform
+// (list → detail dialog with prev/next → "Use this trace"), ② author the span→TraceEvent conversion against it
+// with the mouse-only mapping builder (the list stays out of the way), ③ see the EXACT judging prompt / evidence /
+// (with Run once) real scores. getSpec() reads the current form spec on demand so rubric edits reflect on the next
+// Preview/Run. Byte-identical to a real grade.
 export function JudgePreviewPanel({
   getSpec,
   sources = [],
@@ -41,6 +123,7 @@ export function JudgePreviewPanel({
   assignments?: Record<string, string>
 }) {
   const t = useTranslations('judgePreview')
+  const [step, setStep] = useState<Step>('pick')
   const [picked, setPicked] = useState<{ sourceName: string; summary: TraceSummary } | undefined>()
   const [mappingRec, setMappingRec] = useState<SpanMappingRecord>(EMPTY_SPAN_MAPPING)
   const [inspected, setInspected] = useState<TraceInspectResult | undefined>()
@@ -100,11 +183,14 @@ export function JudgePreviewPanel({
     return () => clearTimeout(timer)
   }, [picked, mappingSpec, isSpanKind])
 
-  const rawAttrKeys = useMemo(() => {
-    const keys = new Set<string>()
+  // The observed attribute keys + one sample value each — what the mouse-only mapping builder offers per field.
+  const attrOptions = useMemo<SpanAttrOption[]>(() => {
+    const seen = new Map<string, string>()
     for (const s of inspected?.rawAttributes ?? [])
-      for (const k of Object.keys(s.attrs)) keys.add(k)
-    return [...keys].sort()
+      for (const [k, v] of Object.entries(s.attrs)) if (!seen.has(k)) seen.set(k, sampleStr(v))
+    return [...seen.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([key, sample]) => ({ key, sample }))
   }, [inspected])
 
   // The trace fed to preview/try: the manual JSON (advanced, when filled) overrides; else the inspected events.
@@ -148,92 +234,9 @@ export function JudgePreviewPanel({
 
   const canRun = Boolean(picked) || manualTrace.trim().length > 0
 
-  return (
-    <div className="space-y-3">
-      <div>
-        <h3 className="text-sm font-medium">{t('heading')}</h3>
-        <p className="text-[12px] text-muted-foreground">{t('subtitle')}</p>
-      </div>
-
-      {sources.length > 0 ? (
-        <div className="space-y-3 rounded-lg border border-border bg-card/40 p-3">
-          <p className="text-[12px] font-medium text-muted-foreground">{t('pickTrace')}</p>
-          <TraceBrowser
-            sources={sources}
-            selectedTraceId={picked?.summary.id}
-            onPick={(summary, sourceName) => setPicked({ sourceName, summary })}
-          />
-        </div>
-      ) : (
-        <Callout tone="info">{t('noSourcesNote')}</Callout>
-      )}
-
-      {picked && (
-        <div className="space-y-3 rounded-lg border border-border bg-card/40 p-3">
-          <p className="text-[12px] font-medium text-muted-foreground">
-            {t('conversion')} ·{' '}
-            <span className="font-mono text-foreground/80">{picked.summary.id}</span>
-          </p>
-          {isSpanKind ? (
-            <SpanMappingEditor
-              mapping={mappingRec}
-              onChange={setMappingRec}
-              rawAttrKeys={rawAttrKeys}
-            />
-          ) : (
-            <Callout tone="info">{t('nativeKindNote')}</Callout>
-          )}
-          {inspectError && <Callout tone="danger">{inspectError}</Callout>}
-          <p className="text-[12px] text-muted-foreground">
-            {inspecting
-              ? t('converting')
-              : t('convertedEvents', { count: inspected?.events.length ?? 0 })}
-          </p>
-
-          {/* Save the authored conversion onto a harness (member+). */}
-          {isSpanKind && mappingSpec && (
-            <div className="flex flex-wrap items-end gap-2 border-t border-border/60 pt-3">
-              <label className="flex flex-col gap-1">
-                <span className="text-[11px] font-[510] text-muted-foreground">
-                  {t('saveToHarness')}
-                </span>
-                {assignedHarnesses.length > 0 ? (
-                  <Combobox
-                    options={assignedHarnesses.map((h) => ({ value: h }))}
-                    value={saveHarness}
-                    onChange={setSaveHarness}
-                    className="w-56"
-                    aria-label={t('saveToHarness')}
-                  />
-                ) : (
-                  <Input
-                    value={saveHarness}
-                    onChange={(e) => setSaveHarness(e.target.value)}
-                    placeholder={t('harnessIdPlaceholder')}
-                    className="w-56 font-mono text-[12px]"
-                  />
-                )}
-              </label>
-              <Button
-                variant="secondary"
-                onClick={onSaveMapping}
-                disabled={saving || !saveHarness.trim()}
-                className="gap-1.5"
-              >
-                {saving ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />}
-                {t('saveMapping')}
-              </Button>
-              {saveMsg?.ok && (
-                <span className="pb-1.5 text-[12px] text-[var(--color-success)]">{t('saved')}</span>
-              )}
-              {saveMsg && !saveMsg.ok && (
-                <span className="pb-1.5 text-[12px] text-destructive">{saveMsg.error}</span>
-              )}
-            </div>
-          )}
-        </div>
-      )}
-
+  // Shared by the stepper's preview step and the no-sources fallback (manual JSON only).
+  const previewBody = (
+    <>
       {/* Task / expected context (optional). */}
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <div className="space-y-1.5">
@@ -412,6 +415,169 @@ export function JudgePreviewPanel({
           ) : null}
         </div>
       ) : null}
+    </>
+  )
+
+  // No connected sources — no trace to pick or convert; fall back to the manual-JSON preview only.
+  if (sources.length === 0) {
+    return (
+      <div className="space-y-3">
+        <div>
+          <h3 className="text-sm font-medium">{t('heading')}</h3>
+          <p className="text-[12px] text-muted-foreground">{t('subtitle')}</p>
+        </div>
+        <Callout tone="info">{t('noSourcesNote')}</Callout>
+        {previewBody}
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-end justify-between gap-2">
+        <div>
+          <h3 className="text-sm font-medium">{t('heading')}</h3>
+          <p className="text-[12px] text-muted-foreground">{t('subtitle')}</p>
+        </div>
+        <StepRail
+          step={step}
+          picked={Boolean(picked)}
+          canPreview={canRun}
+          onGo={(s) => setStep(s)}
+        />
+      </div>
+
+      {/* Step 1 — pick a sample trace. Kept mounted (hidden) so list/filter state survives step hops. */}
+      <div className={cn('space-y-2', step !== 'pick' && 'hidden')}>
+        <TraceBrowser
+          sources={sources}
+          selectedTraceId={picked?.summary.id}
+          onPick={(summary, sourceName) => {
+            setPicked({ sourceName, summary })
+            setStep('convert')
+          }}
+        />
+        <button
+          type="button"
+          onClick={() => {
+            setManualOpen(true)
+            setStep('preview')
+          }}
+          className="text-[12px] text-muted-foreground underline underline-offset-2 hover:text-foreground"
+        >
+          {t('skipToManual')}
+        </button>
+      </div>
+
+      {/* Step 2 — the conversion layer, authored against the picked trace (the list stays hidden). */}
+      {step === 'convert' && picked && (
+        <div className="space-y-3">
+          <div className="flex flex-wrap items-center gap-3 rounded-lg border border-border bg-card/40 px-3 py-2.5">
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-[13px] font-[510]">
+                {picked.summary.name ?? picked.summary.id}
+              </div>
+              <div className="truncate font-mono text-[11px] text-faint">
+                {picked.summary.id} · {picked.sourceName}
+                {pickedSource ? ` (${pickedSource.kind})` : ''}
+              </div>
+            </div>
+            <Button variant="secondary" size="sm" onClick={() => setStep('pick')}>
+              {t('changeTrace')}
+            </Button>
+          </div>
+
+          {isSpanKind ? (
+            <SpanMappingEditor mapping={mappingRec} onChange={setMappingRec} attrs={attrOptions} />
+          ) : (
+            <Callout tone="info">{t('nativeKindNote')}</Callout>
+          )}
+          {inspectError && <Callout tone="danger">{inspectError}</Callout>}
+
+          {/* The live conversion result — exactly the events the judge will see, re-normalized on every click. */}
+          <div className="space-y-1.5">
+            <p className="text-[12px] font-medium text-muted-foreground">
+              {inspecting
+                ? t('converting')
+                : t('convertedEvents', { count: inspected?.events.length ?? 0 })}
+            </p>
+            {inspected && (
+              <div className="max-h-64 overflow-y-auto">
+                <TraceEventList events={inspected.events} />
+              </div>
+            )}
+          </div>
+
+          {/* Save the authored conversion onto a harness (member+). */}
+          {isSpanKind && mappingSpec && (
+            <div className="flex flex-wrap items-end gap-2 border-t border-border/60 pt-3">
+              <label className="flex flex-col gap-1">
+                <span className="text-[11px] font-[510] text-muted-foreground">
+                  {t('saveToHarness')}
+                </span>
+                {assignedHarnesses.length > 0 ? (
+                  <Combobox
+                    options={assignedHarnesses.map((h) => ({ value: h }))}
+                    value={saveHarness}
+                    onChange={setSaveHarness}
+                    className="w-56"
+                    aria-label={t('saveToHarness')}
+                  />
+                ) : (
+                  <Input
+                    value={saveHarness}
+                    onChange={(e) => setSaveHarness(e.target.value)}
+                    placeholder={t('harnessIdPlaceholder')}
+                    className="w-56 font-mono text-[12px]"
+                  />
+                )}
+              </label>
+              <Button
+                variant="secondary"
+                onClick={onSaveMapping}
+                disabled={saving || !saveHarness.trim()}
+                className="gap-1.5"
+              >
+                {saving ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />}
+                {t('saveMapping')}
+              </Button>
+              {saveMsg?.ok && (
+                <span className="pb-1.5 text-[12px] text-[var(--color-success)]">{t('saved')}</span>
+              )}
+              {saveMsg && !saveMsg.ok && (
+                <span className="pb-1.5 text-[12px] text-destructive">{saveMsg.error}</span>
+              )}
+            </div>
+          )}
+
+          <div className="flex items-center justify-between border-t border-border/60 pt-3">
+            <Button variant="ghost" size="sm" onClick={() => setStep('pick')} className="gap-1">
+              <ChevronLeft className="size-4" />
+              {t('back')}
+            </Button>
+            <Button size="sm" onClick={() => setStep('preview')} className="gap-1">
+              {t('nextPreview')}
+              <ChevronRight className="size-4" />
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* Step 3 — preview / run against the converted (or pasted) trace. */}
+      {step === 'preview' && (
+        <div className="space-y-3">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setStep(picked ? 'convert' : 'pick')}
+            className="gap-1"
+          >
+            <ChevronLeft className="size-4" />
+            {t('back')}
+          </Button>
+          {previewBody}
+        </div>
+      )}
     </div>
   )
 }

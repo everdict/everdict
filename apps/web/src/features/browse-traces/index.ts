@@ -1,5 +1,5 @@
 export { TraceBrowser } from './ui/trace-browser'
-export { TraceDetail } from './ui/trace-detail'
+export { TraceDetail, TraceEventList } from './ui/trace-detail'
 export {
   getHarnessSpanMappingAction,
   inspectTraceAction,

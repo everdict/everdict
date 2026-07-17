@@ -16,7 +16,7 @@ export {
   type SpanMappingField,
   type SpanMappingRecord,
 } from './model/mapping'
-export { SpanMappingEditor } from './ui/span-mapping-editor'
+export { SpanMappingEditor, type SpanAttrOption } from './ui/span-mapping-editor'
 // Exported types anchor to the contracts wire types (the local zod schemas are drift-guarded against these).
 export type {
   SpanAttrMapping,

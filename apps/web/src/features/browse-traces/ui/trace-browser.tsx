@@ -127,10 +127,10 @@ export function TraceBrowser({
     )
   }
 
-  const rowClick = (tr: TraceSummary) => {
-    if (onPick) onPick(tr, sourceName)
-    else setOpenTrace(tr)
-  }
+  // Row click always drills into the detail dialog — in pick mode (onPick set) the dialog carries a
+  // "Use this trace" action, so choosing = inspect first, then confirm (with prev/next to compare siblings).
+  const rowClick = (tr: TraceSummary) => setOpenTrace(tr)
+  const openIndex = openTrace ? shown.findIndex((tr) => tr.id === openTrace.id) : -1
 
   return (
     <div className="space-y-3">
@@ -298,13 +298,31 @@ export function TraceBrowser({
         </div>
       )}
 
-      {/* Row click opens the observability-grade detail dialog (the wizard uses onPick instead and never opens it). */}
-      {openTrace && !onPick && (
+      {/* The observability-grade detail dialog — prev/next walks the filtered list; pick mode adds "Use this trace". */}
+      {openTrace && (
         <TraceDetailDialog
           open
           onClose={() => setOpenTrace(undefined)}
           sourceName={sourceName}
           trace={openTrace}
+          nav={
+            openIndex >= 0
+              ? {
+                  index: openIndex,
+                  total: shown.length,
+                  onPrev: () => setOpenTrace(shown[openIndex - 1] ?? openTrace),
+                  onNext: () => setOpenTrace(shown[openIndex + 1] ?? openTrace),
+                }
+              : undefined
+          }
+          onSelect={
+            onPick
+              ? (tr) => {
+                  onPick(tr, sourceName)
+                  setOpenTrace(undefined)
+                }
+              : undefined
+          }
         />
       )}
     </div>
