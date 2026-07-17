@@ -11,6 +11,7 @@ import {
 import { extractEvidence } from "./evidence-resolve.js";
 import {
   type Span,
+  modelFromSpans,
   spansToRawAttributes,
   spansToSpanNodes,
   spansToTraceEvents,
@@ -160,6 +161,18 @@ function mlflowTokens(info: MlflowTraceInfo): { input?: number; output?: number 
   }
 }
 
+// Trace-level total cost — real 3.x servers report it as the `mlflow.trace.cost` metadata JSON (live-verified 3.11).
+function mlflowCostUsd(info: MlflowTraceInfo): number | undefined {
+  const raw = info.trace_metadata?.["mlflow.trace.cost"];
+  if (typeof raw !== "string") return undefined;
+  try {
+    const c = JSON.parse(raw) as Record<string, unknown>;
+    return typeof c.total_cost === "number" ? c.total_cost : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 // Pure: MLflow TraceInfo[] → summaries. scope = the experiment id listed under.
 export function mlflowTracesToSummaries(traces: MlflowTraceInfo[], scope?: string): TraceSummary[] {
   const out: TraceSummary[] = [];
@@ -170,6 +183,7 @@ export function mlflowTracesToSummaries(traces: MlflowTraceInfo[], scope?: strin
     const status = mlflowStatus(info);
     const tags = mlflowTags(info);
     const tokens = mlflowTokens(info);
+    const costUsd = mlflowCostUsd(info);
     const name = tags?.[TRACE_NAME_TAG];
     out.push({
       id: info.trace_id,
@@ -179,6 +193,7 @@ export function mlflowTracesToSummaries(traces: MlflowTraceInfo[], scope?: strin
       ...(status ? { status } : {}),
       ...(tags ? { tags } : {}),
       ...(tokens ? { tokens } : {}),
+      ...(costUsd !== undefined ? { costUsd } : {}),
       ...(scope ? { scope } : {}),
     });
   }
@@ -198,6 +213,10 @@ export interface MlflowTraceSourceOptions {
 }
 
 const RUN_ID_TAG = "everdict.run_id"; // the correlation tag the instrumented agent writes (same value as the injected env EVERDICT_RUN_ID)
+
+// listTraces model enrichment bounds — one traces/get per row missing a model, so cap the fan-out and its parallelism.
+const MODEL_ENRICH_CAP = 50;
+const MODEL_ENRICH_CONCURRENCY = 6;
 
 // Fetch the trace from the MLflow 3.x tracing REST (`GET /api/3.0/mlflow/traces/get?trace_id=`) and normalize to TraceEvents.
 // With correlate="tag", first find the trace_id via `POST /api/3.0/mlflow/traces/search` (tags.`everdict.run_id` filter, verified on real 3.14)
@@ -327,6 +346,35 @@ export class MlflowTraceSource implements BrowsableTraceSource {
       );
     }
     const body = (await res.json().catch(() => ({}))) as { traces?: MlflowTraceInfo[] };
-    return mlflowTracesToSummaries(body.traces ?? [], experiments[0]);
+    return await this.enrichListModels(mlflowTracesToSummaries(body.traces ?? [], experiments[0]));
+  }
+
+  // TraceInfo never carries the model (only tokens/cost — live-verified 3.11/3.14), so the list would show every row
+  // model-less while the spans plainly have it. Enrich best-effort from each trace's spans: only the first
+  // MODEL_ENRICH_CAP rows missing a model, MODEL_ENRICH_CONCURRENCY parallel fetches, and a per-trace failure just
+  // leaves that row without a model — the list itself never fails on enrichment.
+  private async enrichListModels(summaries: TraceSummary[]): Promise<TraceSummary[]> {
+    const targets = summaries.filter((s) => s.llmModel === undefined).slice(0, MODEL_ENRICH_CAP);
+    if (targets.length === 0) return summaries;
+    const modelById = new Map<string, string>();
+    let next = 0;
+    const worker = async (): Promise<void> => {
+      while (next < targets.length) {
+        const target = targets[next];
+        next += 1;
+        if (!target) continue;
+        try {
+          const model = modelFromSpans(await this.getSpansById(target.id), this.opts.mapping);
+          if (model !== undefined) modelById.set(target.id, model);
+        } catch {
+          // best-effort — an unreachable/malformed trace keeps its row, just without a model
+        }
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(MODEL_ENRICH_CONCURRENCY, targets.length) }, worker));
+    return summaries.map((s) => {
+      const model = modelById.get(s.id);
+      return model === undefined ? s : { ...s, llmModel: model };
+    });
   }
 }

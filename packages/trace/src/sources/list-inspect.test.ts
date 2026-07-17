@@ -136,6 +136,68 @@ describe("MlflowTraceSource — listTraces + inspect", () => {
     await expect(src.listTraces()).rejects.toThrow("experiment");
   });
 
+  it("maps the trace-level total cost from the mlflow.trace.cost metadata (live 3.11 shape)", async () => {
+    const fetchImpl = vi.fn((..._args: Parameters<typeof fetch>) =>
+      Promise.resolve(
+        json({
+          traces: [
+            {
+              trace_id: "tr-cost",
+              state: "OK",
+              trace_metadata: {
+                "mlflow.trace.cost": JSON.stringify({ input_cost: 0.0, output_cost: 0.0, total_cost: 0.0012 }),
+              },
+            },
+          ],
+        }),
+      ),
+    );
+    const src = new MlflowTraceSource({ endpoint: "http://mlflow:5000", fetchImpl: fetchImpl as typeof fetch });
+    const traces = await src.listTraces({ scope: "exp1" });
+    expect(traces[0]?.costUsd).toBe(0.0012);
+  });
+
+  it("enriches model-less list rows from each trace's spans (TraceInfo never carries the model)", async () => {
+    // search returns two model-less rows; the per-trace get responses carry the model in the spans.
+    const spansFor = (model: string) => ({
+      trace: {
+        spans: [
+          {
+            name: "chat",
+            start_time_unix_nano: "1000000",
+            end_time_unix_nano: "2000000",
+            attributes: [{ key: "mlflow.llm.model", value: { string_value: model } }],
+          },
+        ],
+      },
+    });
+    const fetchImpl = vi.fn((...args: Parameters<typeof fetch>) => {
+      const url = String(args[0]);
+      if (url.includes("/traces/search"))
+        return Promise.resolve(json({ traces: [{ trace_id: "tr-a", state: "OK" }, { trace_id: "tr-b" }] }));
+      if (url.includes("trace_id=tr-a")) return Promise.resolve(json(spansFor("gpt-5.4-mini")));
+      return Promise.resolve(json(spansFor("claude-fable-5")));
+    });
+    const src = new MlflowTraceSource({ endpoint: "http://mlflow:5000", fetchImpl: fetchImpl as typeof fetch });
+    const traces = await src.listTraces({ scope: "exp1" });
+    expect(traces.map((t) => t.llmModel)).toEqual(["gpt-5.4-mini", "claude-fable-5"]);
+    // one traces/get per model-less row, after the single search
+    const gets = fetchImpl.mock.calls.map((c) => String(c[0])).filter((u) => u.includes("/traces/get"));
+    expect(gets).toHaveLength(2);
+  });
+
+  it("a failed enrichment fetch leaves the row model-less instead of failing the list", async () => {
+    const fetchImpl = vi.fn((...args: Parameters<typeof fetch>) => {
+      const url = String(args[0]);
+      if (url.includes("/traces/search")) return Promise.resolve(json({ traces: [{ trace_id: "tr-x", state: "OK" }] }));
+      return Promise.resolve(new Response("boom", { status: 500 }));
+    });
+    const src = new MlflowTraceSource({ endpoint: "http://mlflow:5000", fetchImpl: fetchImpl as typeof fetch });
+    const traces = await src.listTraces({ scope: "exp1" });
+    expect(traces).toHaveLength(1);
+    expect(traces[0]?.llmModel).toBeUndefined();
+  });
+
   it("inspect pulls the trace by id and exposes raw span attributes", async () => {
     const trace = {
       trace: {

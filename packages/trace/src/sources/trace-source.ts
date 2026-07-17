@@ -56,6 +56,15 @@ export function summarizeSpans(spans: Span[]): Omit<TraceSummary, "id"> {
   };
 }
 
+// The first model an llm_call span reports, mapping-aware — enriches list rows on platforms whose trace-level
+// list payload omits the model (MLflow TraceInfo carries tokens/cost but never a model; live-verified 3.11/3.14).
+export function modelFromSpans(spans: Span[], mapping?: SpanAttrMapping): string | undefined {
+  for (const e of spansToTraceEvents(spans, mapping)) {
+    if (e.kind === "llm_call" && e.model !== "") return e.model;
+  }
+  return undefined;
+}
+
 // Span-kind attribute keys per platform (MLflow `mlflow.spanType`: LLM/CHAT_MODEL/TOOL/AGENT/CHAIN/RETRIEVER/… ·
 // OpenInference/Phoenix `openinference.span.kind` · a generic `span.kind`). Classifies a span into a waterfall type.
 const SPAN_KIND_KEYS = ["mlflow.spanType", "openinference.span.kind", "span.kind", "traceloop.span.kind"] as const;
