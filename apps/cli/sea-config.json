@@ -1,0 +1,5 @@
+{
+  "main": "bundle/everdict-runner.cjs",
+  "output": "bundle/sea-prep.blob",
+  "disableExperimentalSEAWarning": true
+}

@@ -11,10 +11,12 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run --passWithNoTests",
-    "bundle": "node esbuild.mjs"
+    "bundle": "node esbuild.mjs",
+    "package:runner": "node esbuild.mjs && node sea-build.mjs"
   },
   "devDependencies": {
-    "esbuild": "^0.28.1"
+    "esbuild": "^0.28.1",
+    "postject": "^1.0.0-alpha.6"
   },
   "dependencies": {
     "@everdict/agent": "workspace:*",

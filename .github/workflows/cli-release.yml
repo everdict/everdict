@@ -1,0 +1,87 @@
+# Standalone runner binary — on tag `cli-vX.Y.Z` push (or manual dispatch=draft), build a self-contained
+# `everdict-runner` (Node SEA) on each OS/arch and publish them as one GitHub Release. The control-plane
+# `install.sh` downloads the matching asset so a bare host needs neither everdict nor node.
+# Assets: everdict-runner-{linux-x64,darwin-arm64,darwin-x64,win-x64[.exe]}. Unsigned (add signing once a
+# certificate is obtained — same posture as desktop-release.yml). Design: docs/architecture/runner-distribution.md.
+name: cli-release
+
+on:
+  push:
+    tags: ["cli-v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version (e.g. 0.1.0) — used in the release name, published as draft"
+        required: true
+
+permissions:
+  contents: write
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            asset: everdict-runner-linux-x64
+          - os: macos-latest # Apple silicon
+            asset: everdict-runner-darwin-arm64
+          - os: macos-13 # Intel
+            asset: everdict-runner-darwin-x64
+          - os: windows-latest
+            asset: everdict-runner-win-x64.exe
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v6 # version from the root package.json packageManager field
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22 # the SEA is built from THIS node — the runtime baked into the binary
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      # Build the runner's dependency chain (contracts → … → self-hosted-runner/agent) so esbuild can resolve dist.
+      - name: Build dependencies (turbo — cli chain only)
+        run: pnpm turbo run build --filter=@everdict/cli
+
+      # esbuild bundle → Node SEA graft → a standalone binary (no node needed on the target).
+      - name: Package standalone runner
+        working-directory: apps/cli
+        run: pnpm package:runner
+
+      - name: Name the asset for this OS/arch
+        working-directory: apps/cli
+        run: |
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            mv bundle/everdict-runner.exe "bundle/${{ matrix.asset }}"
+          else
+            mv bundle/everdict-runner "bundle/${{ matrix.asset }}"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          if-no-files-found: error
+          path: apps/cli/bundle/${{ matrix.asset }}
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Publish GitHub Release (tag trigger = final, dispatch = draft)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_type == 'tag' && github.ref_name || format('cli-v{0}', inputs.version) }}
+          name: Everdict Runner ${{ github.ref_type == 'tag' && github.ref_name || format('cli-v{0}', inputs.version) }}
+          draft: ${{ github.event_name == 'workflow_dispatch' }}
+          generate_release_notes: true
+          files: dist/**
