@@ -127,6 +127,13 @@ services:
       GITHUB_APP_ID: ${GITHUB_APP_ID:-}
       GITHUB_APP_PRIVATE_KEY: ${GITHUB_APP_PRIVATE_KEY:-}
       GITHUB_APP_SLUG: ${GITHUB_APP_SLUG:-}
+      # ── Optional: workspace GitHub App (GitHub Enterprise — one App for the single enterprise host, install-only) ──
+      GITHUB_ENTERPRISE_HOST: ${GITHUB_ENTERPRISE_HOST:-}
+      GITHUB_ENTERPRISE_APP_ID: ${GITHUB_ENTERPRISE_APP_ID:-}
+      GITHUB_ENTERPRISE_APP_SLUG: ${GITHUB_ENTERPRISE_APP_SLUG:-}
+      GITHUB_ENTERPRISE_APP_PRIVATE_KEY: ${GITHUB_ENTERPRISE_APP_PRIVATE_KEY:-}
+      # ── Optional: workspace Mattermost notifications (operator server URL; workspaces register bot token + channel) ──
+      MATTERMOST_HOST: ${MATTERMOST_HOST:-}
     depends_on:
       postgres:
         condition: service_healthy
