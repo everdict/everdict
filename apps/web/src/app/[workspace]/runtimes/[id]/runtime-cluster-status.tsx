@@ -684,8 +684,9 @@ export function RuntimeClusterStatus({
       <Dialog
         open={pending !== undefined}
         onClose={() => (running ? undefined : setPending(undefined))}
+        className="max-w-md"
       >
-        <div className="max-w-md space-y-4 p-5">
+        <div className="space-y-4 p-5">
           <h3 className="text-[14px] font-[560]">{pending?.title}</h3>
           <p className="text-[13px] leading-relaxed text-muted-foreground">{pending?.body}</p>
           <div className="flex justify-end gap-2">
@@ -784,8 +785,8 @@ function ResizeDialog({
   const hasValue = cpuNum !== undefined || memNum !== undefined
   const valid = cpuValid && memValid && hasValue
   return (
-    <Dialog open onClose={() => (running ? undefined : onCancel())}>
-      <div className="w-[26rem] max-w-full space-y-4 p-5">
+    <Dialog open onClose={() => (running ? undefined : onCancel())} className="max-w-[26rem]">
+      <div className="space-y-4 p-5">
         <h3 className="text-[14px] font-[560]">{t('clusterResizeTitle', { name: unit.name })}</h3>
         <p className="text-[13px] leading-relaxed text-muted-foreground">
           {t('clusterResizeBody')}
