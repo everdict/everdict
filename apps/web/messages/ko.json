@@ -2448,7 +2448,6 @@
     "viewJson": "JSON",
     "viewTable": "표",
     "attributesCount": "속성 · {count}개",
-    "valueTruncated": "전체 {total}자 중 앞 {shown}자만 표시 — 복사 버튼은 전체 내용을 복사합니다.",
     "metaSpanCount": "스팬",
     "timeline": "타임라인 · 이벤트 {count}개",
     "noEvents": "이 트레이스에 이벤트가 없습니다.",

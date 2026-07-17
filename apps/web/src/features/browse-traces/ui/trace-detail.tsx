@@ -7,11 +7,11 @@ import { useTranslations } from 'next-intl'
 import type { SpanAttrMapping, TraceEvent, TraceInspectResult } from '@/entities/trace'
 import { fmtDurationMs, fmtTokens, fmtUsd } from '@/shared/lib/format'
 import { cn } from '@/shared/lib/utils'
-import { Badge } from '@/shared/ui/badge'
 import { Callout } from '@/shared/ui/callout'
 import { ModelChip } from '@/shared/ui/chip'
 
 import { inspectTraceAction } from '../api/browse-traces'
+import { AttributesView } from './data-view'
 
 // One normalized event row — kind-aware rendering of the timeline the judge sees.
 function EventRow({ event, index }: { event: TraceEvent; index: number }) {
@@ -103,6 +103,21 @@ function EventRow({ event, index }: { event: TraceEvent; index: number }) {
   )
 }
 
+// The normalized-events timeline — what the judge sees. Standalone so the judge wizard can render the live
+// conversion result from events it already holds (no re-inspect).
+export function TraceEventList({ events }: { events: TraceEvent[] }) {
+  const t = useTranslations('traceBrowser')
+  if (events.length === 0)
+    return <p className="px-3 py-2 text-[12px] text-faint">{t('noEvents')}</p>
+  return (
+    <ul className="divide-y divide-border/50 rounded-md border bg-card/50">
+      {events.map((e, i) => (
+        <EventRow key={`${e.kind}-${i}`} event={e} index={i} />
+      ))}
+    </ul>
+  )
+}
+
 // Read-only trace detail — the normalized events timeline + (span-based kinds) the raw span attributes.
 // Reused by the settings browser (drill-in). The wizard authors a mapping via a separate editor over the same inspect.
 export function TraceDetail({
@@ -140,15 +155,7 @@ export function TraceDetail({
         <div className="mb-1 px-3 text-[11px] font-[510] uppercase tracking-wide text-faint">
           {t('timeline', { count: result.events.length })}
         </div>
-        {result.events.length === 0 ? (
-          <p className="px-3 py-2 text-[12px] text-faint">{t('noEvents')}</p>
-        ) : (
-          <ul className="divide-y divide-border/50 rounded-md border bg-card/50">
-            {result.events.map((e, i) => (
-              <EventRow key={`${e.kind}-${i}`} event={e} index={i} />
-            ))}
-          </ul>
-        )}
+        <TraceEventList events={result.events} />
       </div>
       {result.rawAttributes && result.rawAttributes.length > 0 && (
         <div>
@@ -161,17 +168,11 @@ export function TraceDetail({
             {t('rawSpans', { count: result.rawAttributes.length })}
           </button>
           {rawOpen && (
-            <ul className="mt-1 space-y-1.5 rounded-md border bg-card/50 p-3">
+            <ul className="mt-1 space-y-3 rounded-md border bg-card/50 p-3">
               {result.rawAttributes.map((span, i) => (
                 <li key={`${span.spanName}-${i}`} className="text-[11px]">
                   <div className="font-mono text-foreground/80">{span.spanName}</div>
-                  <div className="mt-0.5 flex flex-wrap gap-1">
-                    {Object.entries(span.attrs).map(([k, v]) => (
-                      <Badge key={k} tone="outline" className="font-mono text-[10px]">
-                        {k}={String(v).slice(0, 40)}
-                      </Badge>
-                    ))}
-                  </div>
+                  <AttributesView attributes={span.attrs} className="mt-1" />
                 </li>
               ))}
             </ul>

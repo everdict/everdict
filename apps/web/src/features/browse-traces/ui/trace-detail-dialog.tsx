@@ -1,17 +1,19 @@
 'use client'
 
 import { useEffect, useMemo, useState, useTransition } from 'react'
-import { X } from 'lucide-react'
+import { Check, ChevronLeft, ChevronRight, X } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
 import type { TraceInspectResult, TraceSpanNode, TraceSummary } from '@/entities/trace'
 import { fmtDateTime, fmtDurationMs, fmtTokens, fmtUsd } from '@/shared/lib/format'
 import { cn } from '@/shared/lib/utils'
 import { Badge } from '@/shared/ui/badge'
+import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
 import { Dialog } from '@/shared/ui/dialog'
 
 import { inspectTraceAction } from '../api/browse-traces'
+import { AttributesView, IoPanel } from './data-view'
 import { TraceDetail } from './trace-detail'
 
 // Span-type accent (fixed hexes — like the existing EventRow kind colors — so they read on both themes).
@@ -44,18 +46,25 @@ function computeDepths(spans: TraceSpanNode[]): Map<string, number> {
   return depth
 }
 
-// The observability-grade trace detail — a modal with the meta strip, a span waterfall, and the selected span's
-// I/O + attributes. When the platform gives no structured spans (native kinds), it falls back to the events timeline.
+// The observability-grade trace detail — a near-fullscreen modal: waterfall on the left, the selected
+// span's I/O + attributes in a side panel on the right (so a long timeline never buries the detail).
+// When the platform gives no structured spans (native kinds), it falls back to the events timeline.
+// `nav` pages through the sibling traces of the list this was opened from (prev/next, also ←/→ keys);
+// `onSelect` turns the dialog into a picker — a "Use this trace" primary action (the judge wizard).
 export function TraceDetailDialog({
   open,
   onClose,
   sourceName,
   trace,
+  nav,
+  onSelect,
 }: {
   open: boolean
   onClose: () => void
   sourceName: string
   trace: TraceSummary
+  nav?: { index: number; total: number; onPrev: () => void; onNext: () => void }
+  onSelect?: (trace: TraceSummary) => void
 }) {
   const t = useTranslations('traceBrowser')
   const [result, setResult] = useState<TraceInspectResult | undefined>()
@@ -74,6 +83,19 @@ export function TraceDetailDialog({
       else setError(res.error)
     })
   }, [open, sourceName, trace.id])
+
+  // ←/→ page through sibling traces while the dialog is open (mouse buttons stay the primary affordance).
+  const hasPrev = nav !== undefined && nav.index > 0
+  const hasNext = nav !== undefined && nav.index < nav.total - 1
+  useEffect(() => {
+    if (!open || !nav) return
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'ArrowLeft' && hasPrev) nav?.onPrev()
+      if (e.key === 'ArrowRight' && hasNext) nav?.onNext()
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [open, nav, hasPrev, hasNext])
 
   const spans = result?.detail?.spans ?? []
   const rollup = result?.detail?.rollup
@@ -98,16 +120,14 @@ export function TraceDetailDialog({
       open={open}
       onClose={onClose}
       labelledBy="trace-detail-title"
-      className="max-w-4xl max-h-[90vh] flex flex-col"
+      className="flex h-[90vh] max-h-[90vh] max-w-[1400px] flex-col"
     >
       {/* Header */}
       <div className="flex items-start justify-between gap-4 border-b border-border px-5 py-4">
         <div className="min-w-0 space-y-1">
           <h2 id="trace-detail-title" className="flex items-center gap-2 text-[15px] font-[600]">
             <span className="truncate">{trace.name ?? t('unnamedTrace')}</span>
-            <Badge
-              tone={status === 'ok' ? 'success' : status === 'error' ? 'danger' : 'outline'}
-            >
+            <Badge tone={status === 'ok' ? 'success' : status === 'error' ? 'danger' : 'outline'}>
               {t(`status_${status}`)}
             </Badge>
           </h2>
@@ -116,28 +136,58 @@ export function TraceDetailDialog({
             {trace.scope ? ` · ${trace.scope}` : ''}
           </div>
         </div>
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label={t('close')}
-          className="rounded-md border border-border p-1.5 text-muted-foreground hover:text-foreground"
-        >
-          <X className="size-4" />
-        </button>
+        <div className="flex shrink-0 items-center gap-2">
+          {nav && (
+            <div className="flex items-center gap-1 rounded-md border border-border p-0.5">
+              <button
+                type="button"
+                onClick={nav.onPrev}
+                disabled={!hasPrev}
+                aria-label={t('prevTrace')}
+                className="rounded p-1 text-muted-foreground transition-colors hover:text-foreground disabled:opacity-35 disabled:hover:text-muted-foreground"
+              >
+                <ChevronLeft className="size-4" />
+              </button>
+              <span className="min-w-12 text-center font-mono text-[11px] tabular-nums text-faint">
+                {nav.index + 1} / {nav.total}
+              </span>
+              <button
+                type="button"
+                onClick={nav.onNext}
+                disabled={!hasNext}
+                aria-label={t('nextTrace')}
+                className="rounded p-1 text-muted-foreground transition-colors hover:text-foreground disabled:opacity-35 disabled:hover:text-muted-foreground"
+              >
+                <ChevronRight className="size-4" />
+              </button>
+            </div>
+          )}
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label={t('close')}
+            className="rounded-md border border-border p-1.5 text-muted-foreground hover:text-foreground"
+          >
+            <X className="size-4" />
+          </button>
+        </div>
       </div>
 
       {/* Meta strip */}
       <div className="flex flex-wrap gap-x-7 gap-y-2 border-b border-border bg-card/50 px-5 py-3">
         <Meta label={t('colDuration')} value={fmtDurationMs(durationMs)} />
         <Meta label={t('metaSpanCount')} value={spanCount != null ? String(spanCount) : '–'} />
-        <Meta label={t('colTokens')} value={tokens ? `${fmtTokens(tokens.input)}→${fmtTokens(tokens.output)}` : '–'} />
+        <Meta
+          label={t('colTokens')}
+          value={tokens ? `${fmtTokens(tokens.input)}→${fmtTokens(tokens.output)}` : '–'}
+        />
         <Meta label={t('colCost')} value={fmtUsd(costUsd)} />
         <Meta label={t('colModel')} value={model ?? '–'} />
         <Meta label={t('colStarted')} value={startedAt ? fmtDateTime(startedAt) : '–'} />
       </div>
 
       {/* Body */}
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      <div className="min-h-0 flex-1">
         {error ? (
           <div className="p-5">
             <Callout tone="danger">{error}</Callout>
@@ -145,9 +195,10 @@ export function TraceDetailDialog({
         ) : pending && !result ? (
           <p className="p-5 text-[12px] text-faint">{t('loadingTrace')}</p>
         ) : spans.length > 0 ? (
-          <>
-            {/* Waterfall */}
-            <section className="border-b border-border px-5 py-4">
+          // Waterfall left, selected-span detail right — each pane scrolls on its own (≥lg);
+          // below lg they stack and the whole body scrolls.
+          <div className="flex h-full min-h-0 flex-col overflow-y-auto lg:flex-row lg:overflow-hidden">
+            <section className="min-w-0 flex-1 px-5 py-4 lg:overflow-y-auto">
               <SectionHead title={t('waterfall')}>
                 <Legend />
               </SectionHead>
@@ -197,52 +248,66 @@ export function TraceDetailDialog({
               </div>
             </section>
 
-            {/* Selected span detail */}
-            {selected && (
-              <section className="px-5 py-4">
-                <SectionHead
-                  title={`${t('spanDetail')} · ${selected.name}`}
-                  right={
-                    <span className="font-mono text-[11px] text-faint">
-                      +{fmtDurationMs(selected.startOffsetMs)} · {fmtDurationMs(selected.durationMs)}
-                    </span>
-                  }
-                />
-                <div className="mt-3 grid gap-4 md:grid-cols-2">
+            {/* Selected span detail — the side panel */}
+            <aside className="shrink-0 border-t border-border lg:w-[44%] lg:min-w-[400px] lg:max-w-[640px] lg:overflow-y-auto lg:border-l lg:border-t-0">
+              {selected && (
+                <div className="space-y-4 px-5 py-4">
+                  <div>
+                    <SectionHead
+                      title={t('spanDetail')}
+                      right={
+                        <span className="font-mono text-[11px] text-faint">
+                          +{fmtDurationMs(selected.startOffsetMs)} ·{' '}
+                          {fmtDurationMs(selected.durationMs)}
+                        </span>
+                      }
+                    />
+                    <div className="mt-2 flex min-w-0 items-center gap-1.5">
+                      <SpanTypeTag type={selected.type} />
+                      <span className="truncate text-[13px] font-[600]">{selected.name}</span>
+                    </div>
+                    {(selected.model || selected.tokens || selected.costUsd != null) && (
+                      <div className="mt-1 font-mono text-[11px] tabular-nums text-muted-foreground">
+                        {metricLine(selected)}
+                      </div>
+                    )}
+                  </div>
                   <div className="space-y-2">
-                    <FieldLabel>{t('io')}</FieldLabel>
-                    {selected.input !== undefined && <IoBlock role={t('input')} text={selected.input} />}
-                    {selected.output !== undefined && <IoBlock role={t('output')} accent text={selected.output} />}
+                    {selected.input !== undefined && (
+                      <IoPanel label={t('input')} text={selected.input} />
+                    )}
+                    {selected.output !== undefined && (
+                      <IoPanel label={t('output')} accent text={selected.output} />
+                    )}
                     {selected.input === undefined && selected.output === undefined && (
                       <p className="text-[12px] text-faint">{t('noIo')}</p>
                     )}
                   </div>
-                  <div className="space-y-3">
-                    <div>
-                      <FieldLabel>{t('attributes')}</FieldLabel>
-                      <div className="mt-1 divide-y divide-border/60 rounded-md border border-border">
-                        {(selected.model || selected.tokens || selected.costUsd != null) && (
-                          <KvRow k={t('colModel')} v={metricLine(selected)} />
-                        )}
-                        {Object.entries(selected.attributes)
-                          .slice(0, 24)
-                          .map(([k, v]) => (
-                            <KvRow key={k} k={k} v={valueStr(v)} />
-                          ))}
-                      </div>
-                    </div>
-                  </div>
+                  <AttributesView attributes={selected.attributes} />
                 </div>
-              </section>
-            )}
-          </>
+              )}
+            </aside>
+          </div>
         ) : (
           // Native-kind fallback — no structured spans; show the normalized events timeline + raw attributes.
-          <div className="p-4">
+          <div className="h-full overflow-y-auto p-4">
             <TraceDetail sourceName={sourceName} traceId={trace.id} />
           </div>
         )}
       </div>
+
+      {/* Picker footer — only when the dialog is a selector (judge wizard). */}
+      {onSelect && (
+        <div className="flex items-center justify-end gap-2 border-t border-border px-5 py-3">
+          <Button variant="ghost" onClick={onClose}>
+            {t('close')}
+          </Button>
+          <Button onClick={() => onSelect(trace)} className="gap-1.5">
+            <Check className="size-4" />
+            {t('useThisTrace')}
+          </Button>
+        </div>
+      )}
     </Dialog>
   )
 }
@@ -274,10 +339,6 @@ function SectionHead({
   )
 }
 
-function FieldLabel({ children }: { children: React.ReactNode }) {
-  return <div className="text-[10.5px] uppercase tracking-wide text-faint">{children}</div>
-}
-
 function SpanTypeTag({ type }: { type: TraceSpanNode['type'] }) {
   return (
     <span
@@ -302,47 +363,10 @@ function Legend() {
   )
 }
 
-function IoBlock({ role, text, accent }: { role: string; text: string; accent?: boolean }) {
-  return (
-    <div className="overflow-hidden rounded-md border border-border">
-      <div
-        className={cn(
-          'border-b border-border bg-card px-2.5 py-1 text-[10px] uppercase tracking-wide',
-          accent ? 'text-[#c5aef0]' : 'text-faint'
-        )}
-      >
-        {role}
-      </div>
-      <div className="max-h-40 overflow-y-auto whitespace-pre-wrap break-words px-2.5 py-2 font-mono text-[11.5px] leading-relaxed text-foreground/85">
-        {text.slice(0, 4000)}
-      </div>
-    </div>
-  )
-}
-
-function KvRow({ k, v }: { k: string; v: string }) {
-  return (
-    <div className="flex justify-between gap-3 px-2.5 py-1.5 text-[12px]">
-      <span className="shrink-0 text-muted-foreground">{k}</span>
-      <span className="truncate text-right font-mono text-[11px] tabular-nums text-foreground/80">{v}</span>
-    </div>
-  )
-}
-
 function metricLine(s: TraceSpanNode): string {
   const parts: string[] = []
   if (s.model) parts.push(s.model)
   if (s.tokens) parts.push(`${fmtTokens(s.tokens.input)}→${fmtTokens(s.tokens.output)}`)
   if (s.costUsd != null) parts.push(fmtUsd(s.costUsd))
   return parts.join(' · ') || '–'
-}
-
-function valueStr(v: unknown): string {
-  if (typeof v === 'string') return v.slice(0, 120)
-  if (typeof v === 'number' || typeof v === 'boolean') return String(v)
-  try {
-    return JSON.stringify(v).slice(0, 120)
-  } catch {
-    return String(v)
-  }
 }

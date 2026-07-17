@@ -120,6 +120,18 @@ function Node({
   )
 }
 
+// The bare collapsible tree (no frame, no copy button) — for embedding into a host that provides
+// its own chrome (e.g. the trace I/O panels and attribute rows).
+export function JsonTree({ value, className }: { value: unknown; className?: string }) {
+  return (
+    <pre className={cn('overflow-auto font-mono text-[12px] leading-[1.65]', className)}>
+      <code>
+        <Node value={value as Json} depth={0} trailingComma={false} />
+      </code>
+    </pre>
+  )
+}
+
 export function JsonView({ value, className }: { value: unknown; className?: string }) {
   const t = useTranslations('ui')
   const locale = useLocale()
@@ -156,11 +168,7 @@ export function JsonView({ value, className }: { value: unknown; className?: str
           </>
         )}
       </button>
-      <pre className="overflow-auto p-4 pr-20 font-mono text-[12px] leading-[1.65]">
-        <code>
-          <Node value={value as Json} depth={0} trailingComma={false} />
-        </code>
-      </pre>
+      <JsonTree value={value} className="p-4 pr-20" />
     </div>
   )
 }

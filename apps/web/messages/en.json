@@ -2448,7 +2448,6 @@
     "viewJson": "JSON",
     "viewTable": "Table",
     "attributesCount": "Attributes · {count}",
-    "valueTruncated": "Showing the first {shown} of {total} characters — copy takes the full content.",
     "metaSpanCount": "Spans",
     "timeline": "Timeline · {count} events",
     "noEvents": "No events in this trace.",
