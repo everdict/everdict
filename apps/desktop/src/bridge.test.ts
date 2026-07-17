@@ -79,6 +79,19 @@ describe("registerBridge", () => {
     expect(d.pair).toHaveBeenCalledWith({ token: "rnr_x", runnerId: "r1", apiUrl: "http://localhost:8787" });
   });
 
+  it("accepts a bounded maxConcurrent and rejects an out-of-range / non-integer one (the desktop-local worker-pool size)", async () => {
+    const ipc = fakeIpc();
+    const d = deps();
+    registerBridge(ipc, d);
+    // A valid integer within [1, 64] is forwarded to the supervisor verbatim.
+    await ipc.invoke(BRIDGE_CHANNELS.pair, `${WEB}/a`, { token: "rnr_x", runnerId: "r1", maxConcurrent: 4 });
+    expect(d.pair).toHaveBeenCalledWith({ token: "rnr_x", runnerId: "r1", maxConcurrent: 4 });
+    // Out-of-range / non-integer values are rejected at the boundary so an absurd value can never size the worker pool.
+    expect(() => ipc.invoke(BRIDGE_CHANNELS.pair, `${WEB}/a`, { token: "rnr_x", maxConcurrent: 0 })).toThrow();
+    expect(() => ipc.invoke(BRIDGE_CHANNELS.pair, `${WEB}/a`, { token: "rnr_x", maxConcurrent: 65 })).toThrow();
+    expect(() => ipc.invoke(BRIDGE_CHANNELS.pair, `${WEB}/a`, { token: "rnr_x", maxConcurrent: 2.5 })).toThrow();
+  });
+
   it("returns the aggregate runner list + appInfo (with cpuCount) for a web-origin call", async () => {
     const ipc = fakeIpc();
     registerBridge(ipc, deps());

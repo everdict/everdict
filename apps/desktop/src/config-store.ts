@@ -1,10 +1,12 @@
 import { z } from "zod";
 
 // Non-secret meta of one paired runner on this device (skill desktop D9 — multiple runners). The token is never here (token-store/safeStorage).
+// maxConcurrent = this runner's worker-pool size (jobs it runs in parallel), chosen at pair time; persisted so it survives a restart/reconnect.
 export const runnerConfigEntrySchema = z.object({
   runnerId: z.string().min(1),
   apiUrl: z.string().url().optional(),
   label: z.string().optional(),
+  maxConcurrent: z.number().int().min(1).optional(),
 });
 export type RunnerConfigEntry = z.infer<typeof runnerConfigEntrySchema>;
 

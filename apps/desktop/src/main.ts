@@ -262,11 +262,13 @@ const supervisor = new RunnerSupervisor({
     };
   },
   clearLegacy: () => clearToken(legacyTokenIo()),
-  makeHost: ({ token, apiUrl, onStatus }) =>
+  makeHost: ({ token, apiUrl, onStatus, maxConcurrent }) =>
     new RunnerHost({
       token,
       apiUrl,
       onStatus,
+      // Per-runner concurrency chosen at pair time (desktop-local) → runLeaseWorkers spins this many worker loops. Unset → RunnerHost default of 1.
+      ...(maxConcurrent !== undefined ? { maxConcurrent } : {}),
       os: process.platform, // self-reported OS → the roster fills in the OS with no user input
       // Self-report this app's version on every lease → the control plane derives the roster's update-required badge.
       version: app.getVersion(),

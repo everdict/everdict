@@ -97,6 +97,57 @@ describe("RunnerHost", () => {
     expect(host.status().state).toBe("off");
   });
 
+  it("maxConcurrent sizes the worker pool → that many jobs run in parallel (the pair-time concurrency knob)", async () => {
+    const N = 3;
+    // lease_job hands out N distinct jobs, then parks (idle). A concurrent RunnerHost pool should pick all N up at once.
+    let handed = 0;
+    const client: RunnerClient = {
+      async callTool(name) {
+        if (name === "lease_job") {
+          if (handed < N) {
+            handed++;
+            return { text: JSON.stringify({ jobId: `j${handed}`, job: JOB }), isError: false };
+          }
+          await new Promise((r) => setTimeout(r, 5)); // idle poll — park so a drained loop doesn't busy-spin
+          return { text: JSON.stringify({}), isError: false };
+        }
+        return { text: JSON.stringify({ ok: true }), isError: false };
+      },
+      async close() {},
+    };
+
+    let inFlight = 0;
+    let peak = 0;
+    let release: (() => void) | undefined;
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    const host = new RunnerHost({
+      apiUrl: "http://localhost:8787",
+      token: "rnr_x",
+      maxConcurrent: N,
+      capabilities: ["repo"],
+      connect: async () => client,
+      runJob: async () => {
+        inFlight++;
+        peak = Math.max(peak, inFlight);
+        await gate; // hold every job in-flight so the peak reflects true parallelism
+        inFlight--;
+        return RESULT;
+      },
+      waitMs: 10,
+      pollMs: 1,
+    });
+
+    await host.start();
+    // All N workers lease + enter runJob concurrently → the peak in-flight count reaches N (serial would peak at 1).
+    await vi.waitFor(() => expect(peak).toBe(N));
+    expect(host.status().activeJobs).toBe(N);
+    release?.();
+    await host.stop();
+    expect(peak).toBe(N);
+  });
+
   it("restart tears down the loop and resumes leasing on a fresh session (recovers an offline runner)", async () => {
     // connect() opens a session lazily on the first lease; restart must open a NEW one (not reuse the torn-down session).
     // lease_job parks briefly each poll so the idle loop can't busy-spin the microtask queue (real timers, no sleep override).

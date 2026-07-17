@@ -4,8 +4,10 @@ import type { RunnerConfigEntry } from "./config-store.js";
 import type { RunnerTokens } from "./token-store.js";
 
 // Supervises EVERY runner paired on this device (skill desktop D9 — a device may register as several independent runners,
-// each its own rnr_ identity → the workspace's personal `self` pool). Each runner is one RunnerHost; adding runners is how a
-// user widens their pool (per-runner concurrency stays 1 — the scorecard's own concurrency drives parallelism).
+// each its own rnr_ identity → the workspace's personal `self` pool). Each runner is one RunnerHost. A user widens their pool
+// on TWO composing axes: pairing more runners (D9), and each runner's per-runner concurrency (maxConcurrent, chosen at pair time →
+// runLeaseWorkers spins that many worker loops so one runner leases + runs that many jobs in parallel). maxConcurrent is
+// desktop-local (persisted in the config roster, never sent to the control plane) and defaults to 1 (the prior behavior).
 // No electron dependency (DI) — main wires in safeStorage / file IO / RunnerHost. Design: docs/architecture/desktop-app.md D3/D9.
 export interface RunnerHostLike {
   start(): Promise<void>;
@@ -35,6 +37,7 @@ export interface RunnerSupervisorDeps {
     token: string;
     apiUrl: string;
     onStatus: (s: RunnerHostStatus) => void;
+    maxConcurrent?: number; // this runner's worker-pool size (unset → the RunnerHost default of 1)
   }): RunnerHostLike;
   defaultApiUrl: string;
   broadcast(status: DesktopRunnersStatus): void;
@@ -70,7 +73,13 @@ export class RunnerSupervisor {
     for (const runner of this.deps.loadRunners()) {
       const token = tokens[runner.runnerId];
       if (token === undefined) continue; // config entry with no matching token (keychain lost) — skip; the user re-pairs
-      await this.startRunner(runner.runnerId, token, runner.apiUrl ?? this.deps.defaultApiUrl, runner.label);
+      await this.startRunner(
+        runner.runnerId,
+        token,
+        runner.apiUrl ?? this.deps.defaultApiUrl,
+        runner.label,
+        runner.maxConcurrent,
+      );
     }
     this.emit();
   }
@@ -85,10 +94,17 @@ export class RunnerSupervisor {
       upsertRunner(this.deps.loadRunners(), {
         runnerId,
         ...(payload.apiUrl !== undefined ? { apiUrl: payload.apiUrl } : {}),
+        ...(payload.maxConcurrent !== undefined ? { maxConcurrent: payload.maxConcurrent } : {}),
       }),
     );
     this.stopRunnerInBackground(runnerId);
-    await this.startRunner(runnerId, payload.token, payload.apiUrl ?? this.deps.defaultApiUrl);
+    await this.startRunner(
+      runnerId,
+      payload.token,
+      payload.apiUrl ?? this.deps.defaultApiUrl,
+      undefined,
+      payload.maxConcurrent,
+    );
   }
 
   // Unpair a specific runner (by id) or, when omitted, all runners on this device. Discards the token/meta immediately + broadcasts;
@@ -130,7 +146,7 @@ export class RunnerSupervisor {
       const token = tokens[id];
       const cfg = this.deps.loadRunners().find((r) => r.runnerId === id);
       if (token === undefined || cfg === undefined) continue; // keychain lost — can't reconnect; the row must be re-paired
-      await this.startRunner(id, token, cfg.apiUrl ?? this.deps.defaultApiUrl, cfg.label);
+      await this.startRunner(id, token, cfg.apiUrl ?? this.deps.defaultApiUrl, cfg.label, cfg.maxConcurrent);
     }
     this.emit();
   }
@@ -172,11 +188,18 @@ export class RunnerSupervisor {
     }
   }
 
-  private async startRunner(runnerId: string, token: string, apiUrl: string, label?: string): Promise<void> {
+  private async startRunner(
+    runnerId: string,
+    token: string,
+    apiUrl: string,
+    label?: string,
+    maxConcurrent?: number,
+  ): Promise<void> {
     const host = this.deps.makeHost({
       runnerId,
       token,
       apiUrl,
+      ...(maxConcurrent !== undefined ? { maxConcurrent } : {}),
       onStatus: (s) => {
         const entry = this.entries.get(runnerId);
         if (entry === undefined) return; // stopped between the poll and this callback — drop the stale status

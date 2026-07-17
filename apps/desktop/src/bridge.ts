@@ -14,10 +14,13 @@ export const BRIDGE_CHANNELS = {
 
 // The pairing payload the web (bridge caller) passes — boundary Zod validation. The token arrives via this path and is stored only in the keychain.
 // Pairing is additive (skill desktop D9): each call adds/starts one more runner keyed by runnerId (a re-pair of the same runnerId replaces its token/host).
+// maxConcurrent = how many jobs THIS one runner leases + runs in parallel (its worker-pool size; runLeaseWorkers). A DESKTOP-LOCAL knob —
+// never sent to the control plane — that composes with the D9 "pair more runners" axis. Bounded here so an absurd value can't size the pool.
 export const PairPayloadSchema = z.object({
   token: z.string().startsWith("rnr_"),
   runnerId: z.string().min(1).optional(),
   apiUrl: z.string().url().optional(),
+  maxConcurrent: z.number().int().min(1).max(64).optional(),
 });
 export type PairPayload = z.infer<typeof PairPayloadSchema>;
 

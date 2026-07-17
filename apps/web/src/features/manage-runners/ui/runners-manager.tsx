@@ -24,8 +24,18 @@ import { Button, buttonVariants } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
 import { DropdownItem, DropdownMenu } from '@/shared/ui/dropdown-menu'
 import { EmptyState } from '@/shared/ui/empty-state'
+import { Input } from '@/shared/ui/input'
+import { InfoTip } from '@/shared/ui/tooltip'
 
 import { pairRunnerAction, revokeRunnerAction } from '../api/manage-runners'
+
+// Per-runner concurrency the user may set at pair time — how many jobs this one runner leases + runs in parallel (its
+// worker-pool size). Desktop-local (never sent to the control plane). Hard-capped to match the desktop bridge's Zod bound.
+const MAX_CONCURRENCY = 64
+function clampConcurrency(n: number): number {
+  if (!Number.isFinite(n)) return 1
+  return Math.min(MAX_CONCURRENCY, Math.max(1, Math.floor(n)))
+}
 
 // Online check — a runner refreshes lastSeenAt on every long-poll lease (~25s), so within 90s it counts as connected.
 // (Evaluated at page-load time — not updated in real time.)
@@ -61,6 +71,8 @@ export function RunnersManager({
   const [bridge, setBridge] = useState<EverdictDesktopBridge | null>(null)
   const [desktop, setDesktop] = useState<DesktopRunnersStatus | null>(null)
   const [cpuCount, setCpuCount] = useState(0) // this device's logical cores — the soft-cap reference (D9)
+  // How many jobs the next paired runner runs in parallel (its worker-pool size). Default 1 = the prior one-job-at-a-time behavior.
+  const [concurrency, setConcurrency] = useState(1)
 
   useEffect(() => {
     const b = getEverdictDesktop()
@@ -161,6 +173,8 @@ export function RunnersManager({
           token: r.token,
           ...(r.runner ? { runnerId: r.runner.id } : {}),
           ...(r.apiUrl ? { apiUrl: r.apiUrl } : {}),
+          // Only send when >1 so the default one-job-at-a-time pairing stays byte-identical (the desktop defaults to 1).
+          ...(concurrency > 1 ? { maxConcurrent: concurrency } : {}),
         })
         setDesktop(normalizeRunnersStatus(await b.runnerStatus()))
       } catch (e) {
@@ -182,10 +196,27 @@ export function RunnersManager({
         <span className="flex shrink-0 items-center gap-2">
           {/* The desktop owns the pairing surface (D7) — the browser shows only a download CTA. Connecting is additive (D9). */}
           {bridge && (
-            <Button size="sm" onClick={onConnectThisDevice} disabled={pending}>
-              <Laptop />
-              {connectLabel}
-            </Button>
+            <>
+              {/* Per-runner concurrency — how many jobs this runner runs in parallel. Applied to the next runner paired. */}
+              <label className="flex items-center gap-1.5 text-[12px] text-muted-foreground">
+                <span className="whitespace-nowrap">{t('concurrencyLabel')}</span>
+                <InfoTip content={t('concurrencyHint')} />
+                <Input
+                  type="number"
+                  min={1}
+                  max={MAX_CONCURRENCY}
+                  value={concurrency}
+                  disabled={pending}
+                  onChange={(e) => setConcurrency(clampConcurrency(e.target.valueAsNumber))}
+                  aria-label={t('concurrencyLabel')}
+                  className="h-8 w-16 text-center"
+                />
+              </label>
+              <Button size="sm" onClick={onConnectThisDevice} disabled={pending}>
+                <Laptop />
+                {connectLabel}
+              </Button>
+            </>
           )}
           {!bridge && (
             <Link href={downloadHref} className={buttonVariants({ size: 'sm' })}>
@@ -206,6 +237,13 @@ export function RunnersManager({
       {bridge && overSoftCap && (
         <Callout tone="warning" className="py-1.5">
           {t('softCapWarning', { cpus: cpuCount })}
+        </Callout>
+      )}
+
+      {/* Per-runner concurrency above the core count can thrash this PC — warn, but never block (same philosophy as the count soft cap). */}
+      {bridge && cpuCount > 0 && concurrency > cpuCount && (
+        <Callout tone="warning" className="py-1.5">
+          {t('concurrencyOverCores', { cpus: cpuCount, n: concurrency })}
         </Callout>
       )}
 

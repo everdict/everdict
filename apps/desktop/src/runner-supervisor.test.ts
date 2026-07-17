@@ -6,6 +6,7 @@ import type { RunnerTokens } from "./token-store.js";
 
 interface FakeHost {
   runnerId: string;
+  maxConcurrent?: number; // the per-runner worker-pool size the supervisor threaded into makeHost (unset → RunnerHost default 1)
   started: boolean;
   stopped: boolean;
   restarts: number;
@@ -38,9 +39,10 @@ function makeDeps(
     clearLegacy: () => {
       legacy = null;
     },
-    makeHost: ({ runnerId, onStatus }) => {
+    makeHost: ({ runnerId, onStatus, maxConcurrent }) => {
       const host: FakeHost = {
         runnerId,
+        ...(maxConcurrent !== undefined ? { maxConcurrent } : {}),
         started: false,
         stopped: false,
         restarts: 0,
@@ -116,6 +118,47 @@ describe("RunnerSupervisor", () => {
         .sort(),
     ).toEqual(["r1", "r2"]);
     expect(ids(s.status())).toEqual(["r1", "r2"]);
+  });
+
+  it("pair — persists the chosen maxConcurrent and sizes the runner's worker pool with it", async () => {
+    const { deps, hosts, getRunners } = makeDeps();
+    const s = new RunnerSupervisor(deps);
+    await s.pair({ token: "rnr_a", runnerId: "r1", maxConcurrent: 4 });
+    // Persisted to the config roster (a desktop-local knob that survives restart/reconnect) …
+    expect(getRunners()).toEqual([{ runnerId: "r1", maxConcurrent: 4 }]);
+    // … and threaded into the host that runs the lease pool (→ runLeaseWorkers spins 4 workers).
+    expect(hosts.find((h) => h.runnerId === "r1")?.maxConcurrent).toBe(4);
+  });
+
+  it("pair — no maxConcurrent leaves it unset (the RunnerHost default of 1 = the prior one-job-at-a-time behavior)", async () => {
+    const { deps, hosts, getRunners } = makeDeps();
+    const s = new RunnerSupervisor(deps);
+    await s.pair({ token: "rnr_a", runnerId: "r1" });
+    expect(getRunners()).toEqual([{ runnerId: "r1" }]);
+    expect(hosts.find((h) => h.runnerId === "r1")?.maxConcurrent).toBeUndefined();
+  });
+
+  it("startFromStore — restores each runner's persisted maxConcurrent into its host", async () => {
+    const { deps, hosts } = makeDeps({
+      tokens: { r1: "rnr_a", r2: "rnr_b" },
+      runners: [{ runnerId: "r1", maxConcurrent: 3 }, { runnerId: "r2" }],
+    });
+    const s = new RunnerSupervisor(deps);
+    await s.startFromStore();
+    expect(hosts.find((h) => h.runnerId === "r1")?.maxConcurrent).toBe(3);
+    // A runner saved without a concurrency leaves it unset → the default 1 applies.
+    expect(hosts.find((h) => h.runnerId === "r2")?.maxConcurrent).toBeUndefined();
+  });
+
+  it("reconnect — re-applies the persisted maxConcurrent when (re)starting a runner that has no live host", async () => {
+    // Seed a config runner whose token exists but whose host was never started (keychain-recovered row) → reconnect starts it.
+    const { deps, hosts } = makeDeps({
+      tokens: { r1: "rnr_a" },
+      runners: [{ runnerId: "r1", maxConcurrent: 5 }],
+    });
+    const s = new RunnerSupervisor(deps);
+    await s.reconnect("r1");
+    expect(hosts.find((h) => h.runnerId === "r1")?.maxConcurrent).toBe(5);
   });
 
   it("pair — re-pairing the same runnerId replaces only that runner's host, leaving the others", async () => {

@@ -39,7 +39,13 @@ export interface DesktopWindowControls {
 export interface EverdictDesktopBridge {
   appInfo(): Promise<DesktopAppInfo>
   // One-click pairing — additive (D9): each call registers one more runner. The token is passed down only via this call and stored in the OS keychain (no screen exposure / read-back).
-  pairRunner(payload: { token: string; runnerId?: string; apiUrl?: string }): Promise<void>
+  // maxConcurrent = how many jobs this one runner runs in parallel (its worker-pool size); a desktop-local knob, never sent to the control plane. Omitted → the desktop default of 1.
+  pairRunner(payload: {
+    token: string
+    runnerId?: string
+    apiUrl?: string
+    maxConcurrent?: number
+  }): Promise<void>
   // Unpair a specific runner by id, or (omitted) every runner on this device.
   unpairRunner(runnerId?: string): Promise<void>
   // Force a specific runner by id, or (omitted) every runner on this device, to reconnect — recovers a runner that shows
