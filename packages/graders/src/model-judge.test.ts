@@ -224,7 +224,9 @@ describe("anthropicComplete", () => {
       Promise.resolve(new Response(JSON.stringify({ content: [], stop_reason: "max_tokens" }), { status: 200 })),
     );
     const complete = anthropicComplete({ apiKey: "k", model: "m", fetchImpl: fetchImpl as typeof fetch });
-    await expect(complete("p")).rejects.toThrow("The model response has no text (stop_reason: max_tokens).");
+    await expect(complete("p")).rejects.toThrow(
+      "The model response has no text (stop_reason: max_tokens). The token budget ran out before any visible text — reasoning models spend it on thinking first; raise maxTokens.",
+    );
   });
 
   it("with an image, sends multimodal content (base64 image block)", async () => {
@@ -269,7 +271,9 @@ describe("openaiComplete", () => {
       ),
     );
     const complete = openaiComplete({ apiKey: "k", model: "gpt-5.4-mini", fetchImpl: fetchImpl as typeof fetch });
-    await expect(complete("p")).rejects.toThrow("The model response has no text (finish_reason: length).");
+    await expect(complete("p")).rejects.toThrow(
+      "The model response has no text (finish_reason: length). The token budget ran out before any visible text — reasoning models spend it on thinking first; raise maxTokens.",
+    );
   });
 
   it("with an image, sends multimodal content (image_url data-URL) — incl. LiteLLM vision", async () => {

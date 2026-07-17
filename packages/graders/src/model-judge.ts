@@ -237,6 +237,11 @@ export function modelJudge(complete: JudgeCompletion): Judge {
   };
 }
 
+// Appended when the no-text response was cut off by the token cap — reasoning/thinking models spend completion
+// budget before any visible text, so the fix is a budget raise, not a connection change. Make that actionable.
+const TRUNCATION_HINT =
+  " The token budget ran out before any visible text — reasoning models spend it on thinking first; raise maxTokens.";
+
 // Anthropic Messages API transport (fetch). External failures are remapped to UpstreamError (so monitoring blames us).
 export function anthropicComplete(cfg: {
   apiKey: string;
@@ -284,7 +289,9 @@ export function anthropicComplete(cfg: {
       throw new UpstreamError(
         "UPSTREAM_ERROR",
         {},
-        `The model response has no text${json.stop_reason ? ` (stop_reason: ${json.stop_reason})` : ""}.`,
+        `The model response has no text${json.stop_reason ? ` (stop_reason: ${json.stop_reason})` : ""}.${
+          json.stop_reason === "max_tokens" ? TRUNCATION_HINT : ""
+        }`,
       );
     return text;
   };
@@ -336,11 +343,12 @@ export function openaiComplete(cfg: {
     const choice = json.choices?.[0];
     const text = choice?.message?.content;
     if (typeof text !== "string")
-      // finish_reason is the tell: "length" = the token budget went to reasoning, raise maxTokens.
       throw new UpstreamError(
         "UPSTREAM_ERROR",
         {},
-        `The model response has no text${choice?.finish_reason ? ` (finish_reason: ${choice.finish_reason})` : ""}.`,
+        `The model response has no text${choice?.finish_reason ? ` (finish_reason: ${choice.finish_reason})` : ""}.${
+          choice?.finish_reason === "length" ? TRUNCATION_HINT : ""
+        }`,
       );
     return text;
   };

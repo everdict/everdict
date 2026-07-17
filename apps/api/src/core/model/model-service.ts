@@ -31,7 +31,10 @@ export interface ModelServiceDeps {
 
 // A one-word probe — cheap, deterministic, and enough to prove the connection + key + model id all resolve upstream.
 const PROBE_PROMPT = "Reply with exactly the single word: OK";
-const DEFAULT_PROBE_MAX_TOKENS = 64;
+// A FLOOR, not a cost knob: reasoning models spend completion budget on thinking before any visible text, so a small
+// max_tokens dies as finish_reason:length with no text — a false "connection failed" on a healthy connection.
+// max_tokens is a ceiling, not a spend, so a roomy floor adds no cost for non-reasoning models.
+const PROBE_MAX_TOKENS_FLOOR = 4096;
 const PREVIEW_CHARS = 500;
 
 // Auto version (same rule as harness re-pin): semver → patch bump (skip taken), else a "-r<n>" suffix.
@@ -70,7 +73,10 @@ export class ModelService {
         error: `No API key resolved for '${secretName}' — set it in workspace or personal secrets, then test again.`,
       };
 
-    const maxTokens = conn.params?.maxTokens ?? DEFAULT_PROBE_MAX_TOKENS;
+    // The probe validates the CONNECTION, not the tenant's token budget — a configured maxTokens below the floor is
+    // raised so a reasoning model can think and still emit the probe text (a larger configured budget wins).
+    const configured = conn.params?.maxTokens;
+    const maxTokens = configured === undefined ? PROBE_MAX_TOKENS_FLOOR : Math.max(configured, PROBE_MAX_TOKENS_FLOOR);
     const envBaseUrl = provider === "anthropic" ? this.deps.anthropicBaseUrl : this.deps.openaiBaseUrl;
     const baseUrl = conn.baseUrl ?? envBaseUrl; // the model's own base wins; else the control-plane env default
     const cfg = {

@@ -2528,6 +2528,36 @@ describe("API — models (connection test + version-free save/edit)", () => {
     await app.close();
   });
 
+  it("test-connection: a reasoning model that thinks before answering probes ok — the budget floor beats a tiny maxTokens", async () => {
+    // Reasoning-model-shaped stub: a small completion budget is spent entirely on thinking (no text +
+    // finish_reason:length); a roomy one yields the text. The pre-fix 64-token probe false-fails this connection.
+    const reasoningFetch = (async (_url: unknown, init?: { body?: unknown }) => {
+      const body = JSON.parse(String(init?.body)) as { max_tokens?: number };
+      const roomy = typeof body.max_tokens === "number" && body.max_tokens >= 1024;
+      const choice = roomy ? { message: { content: "OK" } } : { message: { content: null }, finish_reason: "length" };
+      return new Response(JSON.stringify({ choices: [choice] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as unknown as typeof fetch;
+    const { app, keyStore } = server({
+      requireAuth: true,
+      modelSecrets: { workspace: { MY_KEY: "sk-live" }, user: {} },
+      modelFetch: reasoningFetch,
+    });
+    const acme = { authorization: `Bearer ${await issueKey(keyStore, "acme")}` };
+    // Even an explicitly small params.maxTokens is raised to the floor — the probe tests the connection, not the budget.
+    const res = await app.inject({
+      method: "POST",
+      url: "/models/test-connection",
+      headers: acme,
+      payload: { ...CONN, params: { maxTokens: 64 } },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({ ok: true, text: "OK" });
+    await app.close();
+  });
+
   it("test-connection: a named-but-unset apiKeySecret returns ok:false (not a 4xx) naming the key", async () => {
     const { app, keyStore } = server({ requireAuth: true, modelFetch: okFetch });
     const acme = { authorization: `Bearer ${await issueKey(keyStore, "acme")}` };
