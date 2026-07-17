@@ -107,6 +107,30 @@ describe("MlflowTraceSource — listTraces + inspect", () => {
     expect(traces[0]?.startedAt).toBe(new Date(1_700_000_000_000).toISOString());
   });
 
+  it("maps the MLflow 3.x trace-info shape — proto-JSON execution_duration and the mlflow.traceName tag", async () => {
+    // The live 3.x server returns execution_duration as a proto3-JSON Duration string ("1.2s") and the display
+    // name only as the mlflow.traceName tag — neither field of the older *_ms shape is present.
+    const fetchImpl = vi.fn((..._args: Parameters<typeof fetch>) =>
+      Promise.resolve(
+        json({
+          traces: [
+            {
+              trace_id: "tr2",
+              request_time: "2026-07-17T01:02:03Z",
+              execution_duration: "1.2s",
+              state: "ERROR",
+              tags: { "mlflow.traceName": "agent-run" },
+            },
+          ],
+        }),
+      ),
+    );
+    const src = new MlflowTraceSource({ endpoint: "http://mlflow:5000", fetchImpl: fetchImpl as typeof fetch });
+    const traces = await src.listTraces({ scope: "exp1" });
+    expect(traces[0]).toMatchObject({ id: "tr2", name: "agent-run", durationMs: 1200, status: "error" });
+    expect(traces[0]?.startedAt).toBe(new Date("2026-07-17T01:02:03Z").toISOString());
+  });
+
   it("listTraces requires an experiment scope", async () => {
     const src = new MlflowTraceSource({ endpoint: "http://m", fetchImpl: vi.fn() as unknown as typeof fetch });
     await expect(src.listTraces()).rejects.toThrow("experiment");

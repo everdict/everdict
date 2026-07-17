@@ -2389,6 +2389,7 @@
     "scopeLabel": "스코프",
     "scopePlaceholder": "experiment / project / service",
     "reload": "새로고침",
+    "loadMore": "더 보기",
     "traceCount": "{total}개 중 {shown}개",
     "filterPlaceholder": "이름·id·모델로 필터…",
     "status_all": "전체",

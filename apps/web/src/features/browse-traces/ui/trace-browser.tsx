@@ -1,6 +1,6 @@
 'use client'
 
-import { Fragment, useCallback, useEffect, useMemo, useState, useTransition } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, useTransition } from 'react'
 import { RefreshCw, Search, Telescope } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
@@ -20,6 +20,9 @@ import { listTracesAction } from '../api/browse-traces'
 import { TraceDetailDialog } from './trace-detail-dialog'
 
 type StatusFilter = 'all' | 'ok' | 'error'
+
+const PAGE_SIZE = 50 // first load + each "load more" increment
+const MAX_LIMIT = 500 // the control plane's listTraces limit cap
 
 const STATUS_TONE: Record<'ok' | 'error' | 'unset', 'success' | 'danger' | 'outline'> = {
   ok: 'success',
@@ -47,16 +50,21 @@ export function TraceBrowser({
   const [traces, setTraces] = useState<TraceSummary[]>([])
   const [error, setError] = useState<string | undefined>()
   const [loaded, setLoaded] = useState(false)
+  const [limit, setLimit] = useState(PAGE_SIZE)
   const [openTrace, setOpenTrace] = useState<TraceSummary | undefined>()
   const [pending, start] = useTransition()
+  const loadedSource = useRef<string | undefined>(undefined)
 
   const load = useCallback(
-    (name: string, scopeValue: string) => {
+    (name: string, scopeValue: string, limitValue: number) => {
       if (!name) return
       start(async () => {
         setError(undefined)
         setOpenTrace(undefined)
-        const res = await listTracesAction(name, scopeValue ? { scope: scopeValue } : {})
+        const res = await listTracesAction(name, {
+          ...(scopeValue ? { scope: scopeValue } : {}),
+          limit: limitValue,
+        })
         if (res.ok) {
           setTraces(res.traces)
           setLoaded(true)
@@ -70,13 +78,31 @@ export function TraceBrowser({
     [start]
   )
 
-  // On source change, prefill the scope from its configured project/service and auto-load.
+  // Auto-load ONCE per selected source, keyed by NAME — never by the `source` object identity: each server-action
+  // response re-renders the route and hands this island a fresh `sources` array, so an identity-keyed effect re-fires
+  // after every listTracesAction call (an infinite refresh loop). Beyond this, refreshing is strictly user-driven
+  // (reload button / Enter on scope / load more).
   useEffect(() => {
-    if (!source) return
+    if (!source || loadedSource.current === source.name) return
+    loadedSource.current = source.name
     const defaultScope = source.project ?? source.service ?? ''
     setScope(defaultScope)
-    load(source.name, defaultScope)
+    setLimit(PAGE_SIZE)
+    load(source.name, defaultScope, PAGE_SIZE)
   }, [source, load])
+
+  // The page can mount with zero sources (initial state '') — adopt the first source registered while mounted so the
+  // browser doesn't sit on an empty pick after "Add source".
+  useEffect(() => {
+    const first = sources[0]?.name
+    if (!sourceName && first) setSourceName(first)
+  }, [sources, sourceName])
+
+  const loadMore = () => {
+    const next = Math.min(limit + PAGE_SIZE, MAX_LIMIT)
+    setLimit(next)
+    load(sourceName, scope, next)
+  }
 
   const shown = useMemo(() => {
     const q = filter.trim().toLowerCase()
@@ -125,7 +151,7 @@ export function TraceBrowser({
           <input
             value={scope}
             onChange={(e) => setScope(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && load(sourceName, scope)}
+            onKeyDown={(e) => e.key === 'Enter' && load(sourceName, scope, limit)}
             placeholder={t('scopePlaceholder')}
             className="h-8 w-56 rounded-md border border-border bg-background px-2.5 text-[13px] outline-none focus:border-border-strong"
           />
@@ -133,7 +159,7 @@ export function TraceBrowser({
         <Button
           variant="secondary"
           size="md"
-          onClick={() => load(sourceName, scope)}
+          onClick={() => load(sourceName, scope, limit)}
           disabled={pending}
         >
           <RefreshCw className={cn('size-4', pending && 'animate-spin')} />
@@ -261,6 +287,15 @@ export function TraceBrowser({
             })}
           </TBody>
         </Table>
+      )}
+
+      {/* A full page means the platform may hold more — grow the limit and refetch (user-driven, no cursor state). */}
+      {!error && traces.length >= limit && limit < MAX_LIMIT && (
+        <div className="flex justify-center">
+          <Button variant="ghost" size="sm" disabled={pending} onClick={loadMore}>
+            {t('loadMore')}
+          </Button>
+        </div>
       )}
 
       {/* Row click opens the observability-grade detail dialog (the wizard uses onPick instead and never opens it). */}

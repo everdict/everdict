@@ -2389,6 +2389,7 @@
     "scopeLabel": "Scope",
     "scopePlaceholder": "experiment / project / service",
     "reload": "Reload",
+    "loadMore": "Load more",
     "traceCount": "{shown} of {total}",
     "filterPlaceholder": "Filter by name, id, model…",
     "status_all": "All",

@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useTransition } from 'react'
+import { Plus } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
 import { SecretPicker } from '@/features/pick-secret'
@@ -83,6 +84,8 @@ export function TraceSourceManager({
   const t = useTranslations('manageTraceSource')
   const [pending, startTransition] = useTransition()
   const [error, setError] = useState<string>()
+  // The register form stays hidden until asked for — an add button or a row's edit opens it; save/cancel closes it.
+  const [adding, setAdding] = useState(false)
   // name being edited — clicking a row prefills the form (saving is an upsert keyed by name). undefined = add a new source.
   const [editing, setEditing] = useState<string>()
   const [name, setName] = useState('')
@@ -109,7 +112,10 @@ export function TraceSourceManager({
   const scopeMissing = req?.required === true && !scopeValue
   const canSave = reachable && !scopeMissing && !pending
 
+  const formOpen = adding || editing !== undefined
+
   function resetForm() {
+    setAdding(false)
     setEditing(undefined)
     setName('')
     setKind('mlflow')
@@ -124,6 +130,7 @@ export function TraceSourceManager({
 
   function startEdit(s: TraceSourceConfig) {
     setError(undefined)
+    setAdding(false)
     setEditing(s.name)
     setName(s.name)
     setKind(s.kind)
@@ -204,12 +211,28 @@ export function TraceSourceManager({
 
   return (
     <div className="space-y-3">
-      <div className="space-y-1">
-        <h3 className="flex items-center gap-1.5 text-[13px] font-[560] text-foreground">
-          {t('heading')}
-          <InfoTip content={t('sourceInfoTip')} />
-        </h3>
-        <p className="text-[13px] leading-relaxed text-muted-foreground">{t('description')}</p>
+      <div className="flex items-start justify-between gap-2">
+        <div className="space-y-1">
+          <h3 className="flex items-center gap-1.5 text-[13px] font-[560] text-foreground">
+            {t('heading')}
+            <InfoTip content={t('sourceInfoTip')} />
+          </h3>
+          <p className="text-[13px] leading-relaxed text-muted-foreground">{t('description')}</p>
+        </div>
+        {canWrite && !formOpen && (
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            className="shrink-0 gap-1"
+            onClick={() => {
+              resetForm()
+              setAdding(true)
+            }}
+          >
+            <Plus className="size-3.5" /> {t('newSource')}
+          </Button>
+        )}
       </div>
 
       {sources.length === 0 ? (
@@ -252,7 +275,7 @@ export function TraceSourceManager({
         </SettingsList>
       )}
 
-      {canWrite && (
+      {canWrite && formOpen && (
         <div className="space-y-3 rounded-lg border bg-card p-4 shadow-raise">
           <p className="text-[12px] font-[560] text-foreground">
             {editing ? t('editTitle', { name: editing }) : t('newSource')}
@@ -388,7 +411,9 @@ export function TraceSourceManager({
               <div className="space-y-1">
                 <Label htmlFor="tsrc-scope" className="flex items-center gap-1.5">
                   {req.field === 'service' ? t('service') : t(meta.projectKey)}
-                  {req.required && <span className="text-[10px] font-[600] text-primary">{t('required')}</span>}
+                  {req.required && (
+                    <span className="text-[10px] font-[600] text-primary">{t('required')}</span>
+                  )}
                 </Label>
                 {probe.scopes.length > 0 ? (
                   <Combobox
@@ -415,16 +440,14 @@ export function TraceSourceManager({
             <Button size="sm" disabled={!canSave} onClick={onSave}>
               {pending ? t('saving') : editing ? t('update') : t('register')}
             </Button>
-            {editing && (
-              <button
-                type="button"
-                className="text-[12px] text-muted-foreground hover:text-foreground"
-                disabled={pending}
-                onClick={resetForm}
-              >
-                {t('cancel')}
-              </button>
-            )}
+            <button
+              type="button"
+              className="text-[12px] text-muted-foreground hover:text-foreground"
+              disabled={pending}
+              onClick={resetForm}
+            >
+              {t('cancel')}
+            </button>
           </div>
         </div>
       )}

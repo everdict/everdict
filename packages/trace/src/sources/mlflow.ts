@@ -85,12 +85,30 @@ interface MlflowTraceInfo {
   trace_id?: string;
   request_time?: string | number; // ms epoch (string|number) or ISO
   timestamp_ms?: number; // older field
-  execution_duration_ms?: number;
+  execution_duration?: string | number; // 3.x proto3-JSON Duration ("4.83s") — what the live server actually returns
+  execution_duration_ms?: number; // older (v2) field
   execution_time_ms?: number;
   state?: string; // OK|ERROR|IN_PROGRESS|STATE_UNSPECIFIED
   status?: string; // older
   tags?: Record<string, string> | Array<{ key?: string; value?: string }>;
   trace_metadata?: Record<string, string>;
+}
+
+const TRACE_NAME_TAG = "mlflow.traceName"; // TraceInfo has no name field — MLflow stores the display name in this tag
+
+// 3.x serializes execution_duration as a proto3-JSON Duration string ("1.2s"); v2 exposed *_ms number fields.
+function mlflowDurationMs(info: MlflowTraceInfo): number | undefined {
+  const ms = info.execution_duration_ms ?? info.execution_time_ms;
+  if (typeof ms === "number") return Math.max(0, ms);
+  const d = info.execution_duration;
+  if (typeof d === "number") return Math.max(0, d);
+  if (typeof d === "string") {
+    const secs = /^([0-9.]+)s$/.exec(d.trim());
+    if (secs) return Math.max(0, Math.round(Number(secs[1]) * 1000));
+    const n = Number(d);
+    if (!Number.isNaN(n)) return Math.max(0, n);
+  }
+  return undefined;
 }
 
 function mlflowStartedAt(info: MlflowTraceInfo): string | undefined {
@@ -145,14 +163,16 @@ export function mlflowTracesToSummaries(traces: MlflowTraceInfo[], scope?: strin
   for (const info of traces) {
     if (!info.trace_id) continue;
     const startedAt = mlflowStartedAt(info);
-    const durationRaw = info.execution_duration_ms ?? info.execution_time_ms;
+    const durationMs = mlflowDurationMs(info);
     const status = mlflowStatus(info);
     const tags = mlflowTags(info);
     const tokens = mlflowTokens(info);
+    const name = tags?.[TRACE_NAME_TAG];
     out.push({
       id: info.trace_id,
+      ...(name ? { name } : {}),
       ...(startedAt ? { startedAt } : {}),
-      ...(typeof durationRaw === "number" ? { durationMs: Math.max(0, durationRaw) } : {}),
+      ...(durationMs !== undefined ? { durationMs } : {}),
       ...(status ? { status } : {}),
       ...(tags ? { tags } : {}),
       ...(tokens ? { tokens } : {}),
