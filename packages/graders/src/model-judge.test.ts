@@ -199,6 +199,34 @@ describe("anthropicComplete", () => {
     await expect(complete("p")).rejects.toBeInstanceOf(AppError);
   });
 
+  it("returns the first TEXT block when a thinking block comes first (thinking-enabled model)", async () => {
+    const fetchImpl = vi.fn((_url: string, _init?: RequestInit) =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            content: [
+              { type: "thinking", thinking: "…" },
+              { type: "text", text: "hi" },
+            ],
+          }),
+          {
+            status: 200,
+          },
+        ),
+      ),
+    );
+    const complete = anthropicComplete({ apiKey: "k", model: "claude-opus-4-8", fetchImpl: fetchImpl as typeof fetch });
+    expect(await complete("p")).toBe("hi");
+  });
+
+  it("a no-text response reports a neutral message (not 'judge') with the stop_reason", async () => {
+    const fetchImpl = vi.fn((_url: string, _init?: RequestInit) =>
+      Promise.resolve(new Response(JSON.stringify({ content: [], stop_reason: "max_tokens" }), { status: 200 })),
+    );
+    const complete = anthropicComplete({ apiKey: "k", model: "m", fetchImpl: fetchImpl as typeof fetch });
+    await expect(complete("p")).rejects.toThrow("The model response has no text (stop_reason: max_tokens).");
+  });
+
   it("with an image, sends multimodal content (base64 image block)", async () => {
     const fetchImpl = vi.fn((_url: string, _init?: RequestInit) =>
       Promise.resolve(new Response(JSON.stringify({ content: [{ text: "hi" }] }), { status: 200 })),
@@ -230,6 +258,18 @@ describe("openaiComplete", () => {
     expect(await complete("p")).toBe("verdict");
     expect(fetchImpl.mock.calls[0]?.[0]).toBe("http://litellm/v1/chat/completions");
     expect((fetchImpl.mock.calls[0]?.[1]?.headers as Record<string, string>).authorization).toBe("Bearer k");
+  });
+
+  it("a null-content response (reasoning model spent the budget) reports a neutral message with the finish_reason", async () => {
+    const fetchImpl = vi.fn((_url: string, _init?: RequestInit) =>
+      Promise.resolve(
+        new Response(JSON.stringify({ choices: [{ message: { content: null }, finish_reason: "length" }] }), {
+          status: 200,
+        }),
+      ),
+    );
+    const complete = openaiComplete({ apiKey: "k", model: "gpt-5.4-mini", fetchImpl: fetchImpl as typeof fetch });
+    await expect(complete("p")).rejects.toThrow("The model response has no text (finish_reason: length).");
   });
 
   it("with an image, sends multimodal content (image_url data-URL) — incl. LiteLLM vision", async () => {

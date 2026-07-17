@@ -230,21 +230,22 @@ export function anthropicComplete(cfg: {
       throw new UpstreamError(
         "UPSTREAM_ERROR",
         {},
-        `judge model call failed: ${err instanceof Error ? err.message : String(err)}`,
+        `model call failed: ${err instanceof Error ? err.message : String(err)}`,
       );
     }
     if (!res.ok) {
       const body = await res.text().catch(() => "");
+      throw new UpstreamError("UPSTREAM_ERROR", { status: res.status }, `model ${res.status}: ${body.slice(0, 200)}`);
+    }
+    const json = (await res.json()) as { content?: Array<{ text?: string }>; stop_reason?: string };
+    // First text block, not content[0] — a thinking-enabled model puts a thinking block first.
+    const text = json.content?.find((block) => typeof block.text === "string")?.text;
+    if (typeof text !== "string")
       throw new UpstreamError(
         "UPSTREAM_ERROR",
-        { status: res.status },
-        `judge model ${res.status}: ${body.slice(0, 200)}`,
+        {},
+        `The model response has no text${json.stop_reason ? ` (stop_reason: ${json.stop_reason})` : ""}.`,
       );
-    }
-    const json = (await res.json()) as { content?: Array<{ text?: string }> };
-    const text = json.content?.[0]?.text;
-    if (typeof text !== "string")
-      throw new UpstreamError("UPSTREAM_ERROR", {}, "The judge model response has no text.");
     return text;
   };
 }
@@ -282,21 +283,25 @@ export function openaiComplete(cfg: {
       throw new UpstreamError(
         "UPSTREAM_ERROR",
         {},
-        `judge model call failed: ${err instanceof Error ? err.message : String(err)}`,
+        `model call failed: ${err instanceof Error ? err.message : String(err)}`,
       );
     }
     if (!res.ok) {
       const body = await res.text().catch(() => "");
+      throw new UpstreamError("UPSTREAM_ERROR", { status: res.status }, `model ${res.status}: ${body.slice(0, 200)}`);
+    }
+    const json = (await res.json()) as {
+      choices?: Array<{ message?: { content?: string | null }; finish_reason?: string }>;
+    };
+    const choice = json.choices?.[0];
+    const text = choice?.message?.content;
+    if (typeof text !== "string")
+      // finish_reason is the tell: "length" = the token budget went to reasoning, raise maxTokens.
       throw new UpstreamError(
         "UPSTREAM_ERROR",
-        { status: res.status },
-        `judge model ${res.status}: ${body.slice(0, 200)}`,
+        {},
+        `The model response has no text${choice?.finish_reason ? ` (finish_reason: ${choice.finish_reason})` : ""}.`,
       );
-    }
-    const json = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
-    const text = json.choices?.[0]?.message?.content;
-    if (typeof text !== "string")
-      throw new UpstreamError("UPSTREAM_ERROR", {}, "The judge model response has no text.");
     return text;
   };
 }
