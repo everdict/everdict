@@ -89,7 +89,10 @@ const docs = {
     params: toJsonSchema(z.object({ id: z.string().describe("Harness id (selection is version-independent)") })),
     body: toJsonSchema(z.object({ source: z.string().min(1).nullable().describe("Source name, or null to deselect") })),
     response: {
-      200: { description: "Updated per-harness PULL selection map", ...toJsonSchema(TraceSourceAssignmentsResponseSchema) },
+      200: {
+        description: "Updated per-harness PULL selection map",
+        ...toJsonSchema(TraceSourceAssignmentsResponseSchema),
+      },
       ...errorResponses(400, 401, 403, 404),
     },
   },
@@ -103,7 +106,10 @@ const docs = {
     params: toJsonSchema(z.object({ id: z.string().describe("Harness id (selection is version-independent)") })),
     body: toJsonSchema(z.object({ source: z.string().min(1).nullable().describe("Source name, or null to deselect") })),
     response: {
-      200: { description: "Updated per-harness EXPORT selection map", ...toJsonSchema(TraceSourceAssignmentsResponseSchema) },
+      200: {
+        description: "Updated per-harness EXPORT selection map",
+        ...toJsonSchema(TraceSourceAssignmentsResponseSchema),
+      },
       ...errorResponses(400, 401, 403, 404),
     },
   },

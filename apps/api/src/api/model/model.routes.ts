@@ -68,8 +68,7 @@ export function registerModelRoutes(app: FastifyInstance, deps: ServerDeps): voi
   // outcome (ok + preview text, or ok:false + reason) is the 200 payload — a failed connection is not a 4xx. models:write
   // (member+ — it fires a real billable call and reads the workspace/personal secret tiers).
   app.post("/models/test-connection", { schema: modelDocs.testConnection }, async (req, reply) => {
-    if (!deps.modelService)
-      return reply.code(404).send({ code: "NOT_FOUND", message: "model service not configured" });
+    if (!deps.modelService) return reply.code(404).send({ code: "NOT_FOUND", message: "model service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     try {
@@ -91,8 +90,7 @@ export function registerModelRoutes(app: FastifyInstance, deps: ServerDeps): voi
   // connection is an idempotent no-op (created:false). models:write (member+). POST /models stays the explicit-version
   // programmatic path (bundles/CI); this is the interactive edit path.
   app.put<{ Params: { id: string } }>("/models/:id", { schema: modelDocs.save }, async (req, reply) => {
-    if (!deps.modelService)
-      return reply.code(404).send({ code: "NOT_FOUND", message: "model service not configured" });
+    if (!deps.modelService) return reply.code(404).send({ code: "NOT_FOUND", message: "model service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     try {

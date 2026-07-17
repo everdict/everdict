@@ -38,9 +38,7 @@ describe("spansToSpanNodes — the waterfall the detail dialog renders", () => {
   });
 
   it("classifies a tool span and falls back to a name-index id when the platform gives no span id", () => {
-    const spans: Span[] = [
-      { name: "tool.web_search", startMs: 0, endMs: 700, attrs: { "tool.name": "web_search" } },
-    ];
+    const spans: Span[] = [{ name: "tool.web_search", startMs: 0, endMs: 700, attrs: { "tool.name": "web_search" } }];
     const nodes = spansToSpanNodes(spans);
     expect(nodes[0]).toMatchObject({ id: "tool.web_search-0", type: "tool", durationMs: 700 });
     expect(nodes[0]?.parentId).toBeUndefined();

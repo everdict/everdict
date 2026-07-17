@@ -124,7 +124,9 @@ export function registerModelTools(server: McpServer, ctx: McpToolContext): void
       {
         description:
           "Fire ONE minimal dummy completion against a model connection (JSON: provider + model + baseUrl? + apiKeySecret? + params?) to prove it is reachable and responding. Resolves apiKeySecret from the workspace/personal secret tiers. Requires models:write (makes a real billable call). Returns ok:true + a response-text preview, or ok:false + reason (missing key / upstream error) — a failed connection is a result, not an error.",
-        inputSchema: { connection: z.string().describe("Connection JSON (provider, model, baseUrl?, apiKeySecret?, params?)") },
+        inputSchema: {
+          connection: z.string().describe("Connection JSON (provider, model, baseUrl?, apiKeySecret?, params?)"),
+        },
       },
       ({ connection }) =>
         run(principal, "models:write", async () => {

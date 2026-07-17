@@ -1,4 +1,4 @@
-import { type CaseResult } from "@everdict/contracts";
+import type { CaseResult } from "@everdict/contracts";
 import type { ScorecardExport, TraceSink, TraceSinkCase, TraceSinkConfig } from "@everdict/contracts";
 import { createLimiter } from "../concurrency/limiter.js";
 import type { WorkspaceSettingsStore } from "../ports/workspace-settings-store.js";

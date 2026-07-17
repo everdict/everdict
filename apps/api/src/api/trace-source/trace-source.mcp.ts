@@ -99,7 +99,11 @@ export function registerTraceSourceTools(server: McpServer, ctx: McpToolContext)
           "Per-harness EXPORT selection (member+) — which registered source this harness's judged scorecards export to (the source used as an export target; a sink-capable kind, not otel). Same pool as the pull selection. Omit source to clear (export off).",
         inputSchema: {
           harness: z.string().min(1).describe("harness id"),
-          source: z.string().min(1).optional().describe("source name used as an export target (omit = clear selection)"),
+          source: z
+            .string()
+            .min(1)
+            .optional()
+            .describe("source name used as an export target (omit = clear selection)"),
         },
       },
       ({ harness, source: sourceName }) =>

@@ -204,7 +204,11 @@ function pickIo(a: Record<string, unknown>, keys: readonly string[]): string | u
 }
 
 // Classify a span into a waterfall type — the platform's declared span kind first, then infer from GenAI attrs.
-function classifySpan(a: Record<string, unknown>, model: string | undefined, toolName: string | undefined): TraceSpanNode["type"] {
+function classifySpan(
+  a: Record<string, unknown>,
+  model: string | undefined,
+  toolName: string | undefined,
+): TraceSpanNode["type"] {
   const declared = pickStr(a, SPAN_KIND_KEYS)?.toUpperCase();
   if (declared) {
     if (declared.includes("AGENT")) return "agent";
@@ -252,7 +256,12 @@ export function spansToSpanNodes(spans: Span[], mapping?: SpanAttrMapping): Trac
       ...(output !== undefined ? { output } : {}),
       ...(model !== undefined ? { model } : {}),
       ...(inTok !== undefined || outTok !== undefined
-        ? { tokens: { ...(inTok !== undefined ? { input: inTok } : {}), ...(outTok !== undefined ? { output: outTok } : {}) } }
+        ? {
+            tokens: {
+              ...(inTok !== undefined ? { input: inTok } : {}),
+              ...(outTok !== undefined ? { output: outTok } : {}),
+            },
+          }
         : {}),
       ...(usd !== undefined ? { costUsd: usd } : {}),
     };

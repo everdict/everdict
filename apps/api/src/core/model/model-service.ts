@@ -52,7 +52,11 @@ export class ModelService {
 
   // Fire a single dummy completion against the model's resolved connection. Returns the outcome (ok + preview text, or
   // ok:false + reason); it never throws for a reachability/auth failure so the caller can show it inline.
-  async testConnection(tenant: string, subject: string | undefined, conn: ModelConnection): Promise<TestModelConnectionResult> {
+  async testConnection(
+    tenant: string,
+    subject: string | undefined,
+    conn: ModelConnection,
+  ): Promise<TestModelConnectionResult> {
     const { provider, model } = conn;
     // Reuse the one owner of the provider-standard key vocabulary (explicit apiKeySecret, else ANTHROPIC/OPENAI_API_KEY).
     const secretName = modelApiKeySecretName({ id: "", version: "", tags: [], ...conn });

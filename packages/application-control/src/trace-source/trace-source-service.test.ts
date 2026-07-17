@@ -48,7 +48,9 @@ describe("TraceSourceService", () => {
   it("requires a scope for mlflow/phoenix regardless of correlate (traces live inside an experiment/project)", async () => {
     const svc = new TraceSourceService(fakeSettings());
     // mlflow default correlate:'id' still needs the experiment — the meaningful-test fix.
-    await expect(svc.upsert(WS, { name: "m", kind: "mlflow", endpoint: "http://mlflow" })).rejects.toThrow(/experiment/);
+    await expect(svc.upsert(WS, { name: "m", kind: "mlflow", endpoint: "http://mlflow" })).rejects.toThrow(
+      /experiment/,
+    );
     await expect(svc.upsert(WS, { name: "p", kind: "phoenix", endpoint: "http://phoenix" })).rejects.toThrow(/project/);
   });
 
