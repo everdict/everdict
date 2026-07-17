@@ -16,7 +16,7 @@ export const EvidenceAssessmentSchema = z.object({
 });
 
 export const JudgePreviewResultSchema = z.object({
-  kind: z.enum(["model", "harness"]),
+  kind: z.enum(["model", "harness", "code"]),
   prompt: z.string(),
   evidence: z.record(z.string(), EvidenceCoverageSchema),
   warnings: z.array(z.string()),
@@ -24,8 +24,10 @@ export const JudgePreviewResultSchema = z.object({
 });
 export type JudgePreviewResult = z.infer<typeof JudgePreviewResultSchema>;
 
-// The dry-run result — the real judge scores (one model call) plus the rendered prompt/coverage for transparency.
+// The dry-run result. model/harness → the real scores (one model call) plus the rendered prompt/coverage.
+// code → runId of the REAL standalone run executing the wrapper job (watch/read the verdict via GET /runs/:id).
 export const JudgeTryResultSchema = JudgePreviewResultSchema.extend({
-  scores: z.array(ScoreSchema),
+  scores: z.array(ScoreSchema).optional(),
+  runId: z.string().optional(),
 });
 export type JudgeTryResult = z.infer<typeof JudgeTryResultSchema>;

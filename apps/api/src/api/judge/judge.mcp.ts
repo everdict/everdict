@@ -180,9 +180,10 @@ export function registerJudgeTools(server: McpServer, ctx: McpToolContext): void
       "try_judge",
       {
         description:
-          "Dry-run a judge — ACTUALLY runs it (one model call, one case) over a pasted trace OR a prior run's " +
-          "re-scored trace (pass runId), returning the real scores + rendered prompt. A missing key/unresolved " +
-          "rubric surfaces as a skip score with a reason. Requires scorecards:run (consumes tenant keys/budget).",
+          "Dry-run a judge — ACTUALLY runs it (one case) over a pasted trace OR a prior run's re-scored trace " +
+          "(pass runId). model/harness judges return the real scores + rendered prompt (a missing key/unresolved " +
+          "rubric surfaces as a skip score with a reason). A code judge is promoted to a REAL standalone run and " +
+          "returns its runId — poll get_run for progress and the verdict. Requires scorecards:run (keys/budget).",
         inputSchema: {
           judge: z.string().describe("JudgeSpec JSON (kind: model | harness)"),
           runId: z.string().optional().describe("re-score this prior run's trace (source A). Omit to use `trace`."),
@@ -201,7 +202,15 @@ export function registerJudgeTools(server: McpServer, ctx: McpToolContext): void
           }
           const spec = JudgeSpecSchema.safeParse(specJson);
           if (!spec.success) return fail(`BAD_REQUEST: ${spec.error.message}`);
-          if (runId) return ok(await preview.try({ tenant: ws, spec: spec.data, evidence: { source: "run", runId } }));
+          if (runId)
+            return ok(
+              await preview.try({
+                tenant: ws,
+                spec: spec.data,
+                evidence: { source: "run", runId },
+                createdBy: principal.subject,
+              }),
+            );
           if (!trace) return fail("BAD_REQUEST: provide runId or trace.");
           let traceJson: unknown;
           try {
@@ -221,6 +230,7 @@ export function registerJudgeTools(server: McpServer, ctx: McpToolContext): void
                 ...(task ? { task } : {}),
                 ...(expected ? { expected } : {}),
               },
+              createdBy: principal.subject,
             }),
           );
         }),

@@ -43,6 +43,10 @@ export interface SubmitInput {
   runtime?: string; // the tenant Runtime id to run on (placement.target). If absent, the default backend (same symmetry as scorecard).
   // this run's origin (activity-view source axis): web|mcp|api|… if unset, unset (direct API). Scorecard children are shown as "scorecard" by the service.
   trigger?: string;
+  // Inline harness spec for a service-internal synthetic harness that has no registry entry (the code-judge dry-run
+  // wrapper). When set, dispatch embeds it verbatim instead of resolving the registry. Never exposed on the HTTP DTO.
+  // Boot recovery re-dispatches from the registry only, so an interrupted run of an inline spec fails visibly.
+  harnessSpec?: HarnessSpec;
   webhookUrl?: string;
   meterUsage?: boolean; // metering override for this request only (if unset, the workspace policy)
   judge?: JudgeRunConfig; // judge-model override for this request only (if unset, the workspace default)
@@ -317,10 +321,13 @@ export class RunService {
 
   private async track(id: string, input: SubmitInput): Promise<void> {
     // A declarative harness (command etc.) has its spec resolved from the registry and embedded in the job — the agent interprets it with no code.
+    // An inline spec (service-internal synthetic harness, e.g. the code-judge dry-run wrapper) wins over the registry.
     // Built-ins (claude-code/scripted) aren't in the registry, so undefined → fall back to id branching.
-    const harnessSpec = this.deps.resolveHarness
-      ? await this.deps.resolveHarness(input.tenant, input.harness.id, input.harness.version).catch(() => undefined)
-      : undefined;
+    const harnessSpec =
+      input.harnessSpec ??
+      (this.deps.resolveHarness
+        ? await this.deps.resolveHarness(input.tenant, input.harness.id, input.harness.version).catch(() => undefined)
+        : undefined);
     // Metering: request override → workspace policy (DB) → off. The control plane is authoritative — carried on the job and sent to the agent.
     const meterUsage =
       input.meterUsage ?? (this.deps.meterUsageFor ? await this.deps.meterUsageFor(input.tenant) : false);

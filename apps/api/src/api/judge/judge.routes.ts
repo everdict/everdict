@@ -80,9 +80,10 @@ export function registerJudgeRoutes(app: FastifyInstance, deps: ServerDeps): voi
     }
   });
 
-  // Dry-run — ACTUALLY run the judge (one model call, one case) over sample evidence via the same JudgeRunner a
-  // scorecard uses. Returns the real scores + the rendered prompt. A missing key/unresolved rubric surfaces as a
-  // skip score with a stated reason (same as a real batch). Gate scorecards:run (it consumes tenant keys/budget).
+  // Dry-run — ACTUALLY run the judge over sample evidence. model/harness: one model call via the same JudgeRunner a
+  // scorecard uses → the real scores + the rendered prompt (a missing key/unresolved rubric surfaces as a skip score
+  // with a stated reason, same as a real batch). code: the dry-run is promoted to a REAL standalone run (trigger
+  // "judge-preview") → returns runId; watch progress/logs via /runs/:id. Gate scorecards:run (keys/budget/dispatch).
   app.post("/judges/try", { schema: judgeDocs.try }, async (req, reply) => {
     if (!deps.judgePreviewService)
       return reply.code(404).send({ code: "NOT_FOUND", message: "judge dry-run not configured" });
@@ -101,6 +102,7 @@ export function registerJudgeRoutes(app: FastifyInstance, deps: ServerDeps): voi
           tenant: principal.workspace,
           spec: parsed.data.spec,
           evidence: parsed.data.evidence,
+          createdBy: principal.subject,
         }),
       );
     } catch (err) {

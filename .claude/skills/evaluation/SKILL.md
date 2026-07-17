@@ -51,6 +51,10 @@ gives per-metric count/mean/passRate (auto).
 serialized judge context (`{case, trace, snapshot, evidence}` — the script-grader contract), run SANDBOXED via a
 dispatched wrapper job (never on the control plane; `runCodeJudge` in `judge-runner.ts` — no-op command harness +
 script grader `contextPath`); `spec.model` rides `job.judge` → `EVERDICT_JUDGE_MODEL/PROVIDER` + provider key env.
+The wizard dry-run (`POST /judges/try`, code kind) **promotes the wrapper job to a real standalone run**
+(`trigger:"judge-preview"`, inline `harnessSpec`; sanctioned seam `codeJudgeRunSubmitter` → `RunService.submit` —
+see `docs/architecture/execution-scoring-orchestration.md`) and returns `{runId}` — progress/logs/verdict ride
+the run surfaces; the batch scoring path keeps dispatching inline.
 Legacy engine kinds (`model`|`harness`) keep running for existing specs but new registration exposes code only.
 A model judge splits pure **prompt-build + verdict-parse** (`modelJudge`, `packages/graders/src/model-judge.ts`,
 testable) from an injected **transport** `JudgeCompletion`: `anthropicComplete` / `openaiComplete`

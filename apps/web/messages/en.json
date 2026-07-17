@@ -1781,6 +1781,11 @@
     "runButton": "Run the code",
     "running": "Running…",
     "runHint": "One real sandboxed run against this trace — crashes show their stderr below.",
+    "runQueued": "Queued",
+    "runRunning": "Running",
+    "runSucceeded": "Completed",
+    "runFailed": "Run failed",
+    "viewRun": "Open run detail",
     "scores": "Scores",
     "noScores": "No scores were produced.",
     "failed": "The run failed."

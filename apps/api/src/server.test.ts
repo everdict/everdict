@@ -43,6 +43,7 @@ import {
 import { describe, expect, it } from "vitest";
 import { persistentBudget } from "./common/budget-tracker.js";
 import { TerminalTicketStore } from "./common/terminal-ticket.js";
+import { codeJudgeRunSubmitter } from "./composition/run.js";
 import { BenchmarkService } from "./core/benchmark/benchmark-service.js";
 import { BundleService } from "./core/bundle/bundle-service.js";
 import { defaultJudgeRunner } from "./core/execution/judge-runner.js";
@@ -287,6 +288,8 @@ function server(
       rubrics: rubricRegistry,
       // No secret → the model judge yields a visible skip score (verifies dry-run wiring without a real model call).
       judgeRunner: defaultJudgeRunner({ secretsFor: async () => ({}) }),
+      // Code dry-run promotion — same wiring as main.ts: the wrapper job becomes a real run on the fake dispatcher.
+      submitCodeJudgeRun: codeJudgeRunSubmitter(svc),
       getRun: async (tenant, runId) => {
         const rec = await svc.get(runId);
         return rec?.tenant === tenant ? rec : undefined;
@@ -3842,6 +3845,36 @@ describe("API — judges (Agent Judge, workspace-owned, member+ write)", () => {
     });
     expect(res.statusCode).toBe(200);
     expect(res.json().scores[0].metric).toBe("judge:correctness");
+    await app.close();
+  });
+
+  it("try promotes a code judge to a REAL standalone run — returns runId, and the run is watchable on the run surfaces", async () => {
+    const { app } = server({ requireAuth: true, authenticator: roleAuth(["member"]) });
+    const h = { authorization: "Bearer x" };
+    const spec = { kind: "code", id: "e2e-code", version: "1.0.0", language: "python", code: "print('{}')" };
+    const res = await app.inject({
+      method: "POST",
+      url: "/judges/try",
+      headers: h,
+      payload: {
+        spec,
+        evidence: { source: "trace", trace: [{ t: 0, kind: "message", role: "assistant", text: "done" }] },
+      },
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.kind).toBe("code");
+    expect(typeof body.runId).toBe("string");
+    expect(body.scores).toBeUndefined(); // the verdict is read from the completed run, not inline
+    // The dry-run is a first-class run: origin + synthetic wrapper harness visible, progress pollable.
+    let run = (await app.inject({ method: "GET", url: `/runs/${body.runId}`, headers: h })).json();
+    expect(run.trigger).toBe("judge-preview");
+    expect(run.harness.id).toBe("judge-e2e-code");
+    for (let i = 0; i < 100 && run.status !== "succeeded" && run.status !== "failed"; i++) {
+      await new Promise((r) => setTimeout(r, 5));
+      run = (await app.inject({ method: "GET", url: `/runs/${body.runId}`, headers: h })).json();
+    }
+    expect(run.status).toBe("succeeded");
     await app.close();
   });
 });

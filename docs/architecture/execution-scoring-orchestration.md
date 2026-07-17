@@ -123,6 +123,18 @@ Ingest is the existence proof for Concern 3.
 - **S3 — docs + skill** ✅ (this change). `materializeRun`/`BatchDriver` evaluated and deferred as DRY gold-plating
   (see status block) — the three concerns are already separated by S1+S2.
 
+## Sanctioned service→service seams
+
+Peer resource services never call each other (rule `api-layer`); the named exceptions are registered here:
+
+- **Orchestration → `executeCase` / `ScoringService`** — the core decomposition above.
+- **`JudgePreviewService` → `RunService.submit`** (via `codeJudgeRunSubmitter`, `apps/api/src/composition/run.ts`) —
+  the **code-judge dry-run promotion**: `POST /judges/try` on a `kind:"code"` judge submits the sandboxed wrapper
+  job as a real standalone run (`trigger: "judge-preview"`, inline `harnessSpec`) and returns `{ runId }`, so
+  progress/logs/verdict ride the run surfaces instead of an invisible blocking dispatch. This is single-run
+  *delivery* by design (one interactive dry-run, a person watching) — exactly what `RunService.submit` owns, so
+  the batch prohibition below does not apply. See `docs/judges.md` §Dry-run.
+
 ## Invariants / non-goals
 
 - **Do NOT route the batch through `RunService.submit`.** That bundles single-run *delivery* (202/webhook/per-run

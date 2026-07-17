@@ -119,15 +119,19 @@ const docs = {
   try: {
     summary: "Dry-run a judge against sample evidence",
     description:
-      "ACTUALLY runs the judge (one model call, one case) over sample evidence — a pasted trace or a prior run's " +
-      "re-scored trace — via the same JudgeRunner a scorecard uses, returning the real scores plus the rendered " +
-      "prompt. A missing key/unresolved rubric surfaces as a skip score with a reason (never a silent failure). " +
-      "Requires scorecards:run (member+; it consumes tenant keys/budget). A missing run is 404; a run with no " +
-      "result is 400.",
+      "ACTUALLY runs the judge (one case) over sample evidence — a pasted trace or a prior run's re-scored trace. " +
+      "model/harness judges run one model call via the same JudgeRunner a scorecard uses and return the real scores " +
+      "plus the rendered prompt (a missing key/unresolved rubric surfaces as a skip score with a reason, never a " +
+      "silent failure). A code judge is promoted to a REAL standalone run (trigger judge-preview) and returns its " +
+      "runId — watch progress/logs and read the verdict via GET /runs/:id. Requires scorecards:run (member+; it " +
+      "consumes tenant keys/budget). A missing run is 404; a run with no result is 400.",
     tags: ["judge"],
     body: toJsonSchema(TryJudgeBodySchema),
     response: {
-      200: { description: "Judge scores + rendered prompt + coverage", ...toJsonSchema(JudgeTryResultSchema) },
+      200: {
+        description: "Judge scores + rendered prompt + coverage (code judge: runId of the promoted run)",
+        ...toJsonSchema(JudgeTryResultSchema),
+      },
       ...errorResponses(400, 401, 403, 404),
     },
   },

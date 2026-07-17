@@ -1,6 +1,6 @@
 import { RunService } from "@everdict/application-control";
 import type { Dispatcher } from "@everdict/backends";
-import { type AgentJob, BadRequestError, type CaseResult, type EvalCase } from "@everdict/contracts";
+import { type AgentJob, BadRequestError, type CaseResult, type EvalCase, type HarnessSpec } from "@everdict/contracts";
 import { InMemoryRunStore, type RunRecord } from "@everdict/db";
 import { inMemoryBudget } from "@everdict/domain";
 import { describe, expect, it, vi } from "vitest";
@@ -113,6 +113,37 @@ describe("RunService", () => {
     expect(rec.trigger).toBe("web");
     const bare = await svc.submit({ tenant: "t", harness: { id: "s", version: "0" }, case: CASE });
     expect(bare.trigger).toBeUndefined();
+  });
+
+  it("an inline harnessSpec (service-internal synthetic harness, e.g. the code-judge dry-run wrapper) rides the job without consulting the registry", async () => {
+    const jobs: AgentJob[] = [];
+    const capture: Dispatcher = {
+      async dispatch(job) {
+        jobs.push(job);
+        return resultFor(job);
+      },
+    };
+    const inline: HarnessSpec = {
+      kind: "command",
+      id: "judge-x",
+      version: "1.0.0",
+      setup: [],
+      command: "true",
+      env: {},
+      params: {},
+      trace: { kind: "none" },
+    };
+    const resolveHarness = vi.fn(async () => undefined);
+    const svc = new RunService({ dispatcher: capture, store: new InMemoryRunStore(), newId: ids, resolveHarness });
+    await svc.submit({
+      tenant: "t",
+      harness: { id: "judge-x", version: "1.0.0" },
+      case: CASE,
+      harnessSpec: inline,
+    });
+    await flush();
+    expect(jobs[0]?.harnessSpec).toEqual(inline);
+    expect(resolveHarness).not.toHaveBeenCalled(); // the inline spec wins — no registry lookup for a synthetic id
   });
 
   it("self-hosted execution (provenance.ranOn=self-hosted) does not draw down the workspace usd/tokens budget", async () => {

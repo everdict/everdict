@@ -7,6 +7,7 @@ import type {
   Grader,
   HarnessSpec,
   JudgeCriterion,
+  JudgeRunConfig,
   JudgeSpec,
   ModelSpec,
   Placement,
@@ -124,19 +125,23 @@ async function resolveJudgeHarness(
 // script grader passes it as argv[1], so a code judge script has the exact ScriptGrader contract.
 const JUDGE_CONTEXT_FILE = "judge-context.json";
 
-// code judge — dispatch a sandboxed no-op job whose script grader runs the user's code against the ORIGINAL case's
-// serialized judge context ({case, trace, snapshot, evidence} as an env file). The code never runs on the control
-// plane; placement/trust-zone/self-hosted routing are the same machinery as any dispatch. spec.model rides the
-// job.judge channel — JudgeAuthDispatcher resolves the Model binding + workspace/personal key and the backend
-// injects EVERDICT_JUDGE_MODEL/PROVIDER + the provider key env, which the code reads to call its model.
-async function runCodeJudge(
+// The sandboxed wrapper job a code judge executes as: a no-op command harness (`true` → empty trace) plus a script
+// grader over the ORIGINAL case's serialized judge context ({case, trace, snapshot, evidence} as an env file).
+// spec.model rides the job.judge channel (JudgeAuthDispatcher → EVERDICT_JUDGE_MODEL/PROVIDER + provider key env).
+// Shared by the batch scoring path (runCodeJudge dispatches it inline) and the wizard dry-run (JudgePreviewService
+// submits it as a standalone run so the user can watch it progress).
+export interface CodeJudgeJob {
+  evalCase: EvalCase;
+  harness: { id: string; version: string };
+  harnessSpec: HarnessSpec;
+  judge?: JudgeRunConfig;
+}
+
+export function buildCodeJudgeJob(
   spec: Extract<JudgeSpec, { kind: "code" }>,
-  tenant: string,
   ctx: GradeContext,
-  deps: DefaultJudgeRunnerDeps,
   placement?: Placement,
-): Promise<Score[]> {
-  if (!deps.dispatch) return skip(spec, "code judge dispatch not configured");
+): CodeJudgeJob {
   const scriptFile = spec.language === "python" ? "judge.py" : "judge.mjs";
   const files: Record<string, string> = {
     [JUDGE_CONTEXT_FILE]: JSON.stringify({
@@ -171,7 +176,7 @@ async function runCodeJudge(
     ...(spec.image ? { image: spec.image } : {}),
     ...(judgePlacement ? { placement: judgePlacement } : {}),
   };
-  const job: AgentJob = {
+  return {
     evalCase,
     harness: { id: `judge-${spec.id}`, version: spec.version },
     // Declarative no-op command harness — the agent interprets it with no code; `true` produces an empty trace.
@@ -185,21 +190,45 @@ async function runCodeJudge(
       params: {},
       trace: { kind: "none" },
     },
-    tenant,
     ...(spec.model ? { judge: { model: spec.model, ...(spec.provider ? { provider: spec.provider } : {}) } } : {}),
+  };
+}
+
+// Rewrite the wrapper job's raw script scores into this judge's identity — graderId stamped, "judge" metric prefix
+// → judge:<id> (judge:<sub> → judge:<id>:<sub>), exactly like the model path.
+function stampCodeJudgeScores(spec: Extract<JudgeSpec, { kind: "code" }>, scores: Score[]): Score[] {
+  return scores.map((score) => ({
+    ...score,
+    graderId: spec.id,
+    metric: score.metric.replace(/^judge/, metricOf(spec)),
+  }));
+}
+
+// code judge — dispatch the sandboxed wrapper job inline (batch scoring path). The code never runs on the control
+// plane; placement/trust-zone/self-hosted routing are the same machinery as any dispatch.
+async function runCodeJudge(
+  spec: Extract<JudgeSpec, { kind: "code" }>,
+  tenant: string,
+  ctx: GradeContext,
+  deps: DefaultJudgeRunnerDeps,
+  placement?: Placement,
+): Promise<Score[]> {
+  if (!deps.dispatch) return skip(spec, "code judge dispatch not configured");
+  const built = buildCodeJudgeJob(spec, ctx, placement);
+  const job: AgentJob = {
+    evalCase: built.evalCase,
+    harness: built.harness,
+    harnessSpec: built.harnessSpec,
+    tenant,
+    ...(built.judge ? { judge: built.judge } : {}),
   };
   try {
     const result = await deps.dispatch(job);
     if (result.failure) {
       return skip(spec, `code judge job failed at ${result.failure.stage}: ${result.failure.message}`);
     }
-    // The wrapper job's scores ARE the code's verdict — stamp this judge's identity and rewrite the "judge"
-    // metric prefix exactly like the model path (judge → judge:<id>, judge:<sub> → judge:<id>:<sub>).
-    return result.scores.map((score) => ({
-      ...score,
-      graderId: spec.id,
-      metric: score.metric.replace(/^judge/, metricOf(spec)),
-    }));
+    // The wrapper job's scores ARE the code's verdict — stamp this judge's identity onto them.
+    return stampCodeJudgeScores(spec, result.scores);
   } catch (err) {
     return skip(spec, err instanceof Error ? err.message : String(err));
   }

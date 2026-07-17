@@ -3,6 +3,7 @@ import type { ImageRegistryService } from "@everdict/application-control";
 import type { NotificationService } from "@everdict/application-control";
 import { RunService } from "@everdict/application-control";
 import type { Dispatcher as CoreDispatcher, ExecStreamHandle } from "@everdict/backends";
+import type { GradeContext, JudgeSpec } from "@everdict/contracts";
 import type { RunStore, WorkspaceSettingsStore } from "@everdict/db";
 import { makeGraders } from "@everdict/graders";
 import type { HarnessInstanceRegistry, ModelRegistry, RubricRegistry } from "@everdict/registry";
@@ -10,7 +11,7 @@ import type { S3ArtifactStore } from "@everdict/storage";
 import { buildTraceSource } from "@everdict/trace";
 import type { PersistentBudget } from "../common/budget-tracker.js";
 import type { LiveFrameStore } from "../common/live-frame-store.js";
-import { defaultJudgeRunner } from "../core/execution/judge-runner.js";
+import { buildCodeJudgeJob, defaultJudgeRunner } from "../core/execution/judge-runner.js";
 import type { ModelResolvingDispatcher } from "../core/execution/model-resolving-dispatcher.js";
 import type { PlacementPreflight } from "../core/execution/placement-preflight.js";
 import type { RuntimeSecretsFn, ScopedSecretsFn } from "./types.js";
@@ -132,5 +133,29 @@ export function buildRun(deps: {
       ? { openaiBaseUrl: process.env.EVERDICT_JUDGE_OPENAI_BASE_URL }
       : {}),
   });
-  return { service, judgeRunner };
+  return { service, judgeRunner, submitCodeJudgeRun: codeJudgeRunSubmitter(service) };
+}
+
+// Code-judge dry-run promotion (JudgePreviewService.try): the wrapper job becomes a REAL standalone run — same
+// submit policy as any run (requireRuntime/preflight/budget), inline harnessSpec (the synthetic no-op wrapper has
+// no registry entry), placement = spec.runtime → else the source run's (re-score co-locate). Sanctioned seam:
+// docs/architecture/execution-scoring-orchestration.md.
+export function codeJudgeRunSubmitter(service: RunService) {
+  return async (input: {
+    tenant: string;
+    spec: Extract<JudgeSpec, { kind: "code" }>;
+    ctx: GradeContext;
+    createdBy?: string;
+  }) => {
+    const built = buildCodeJudgeJob(input.spec, input.ctx, input.ctx.case.placement);
+    return service.submit({
+      tenant: input.tenant,
+      ...(input.createdBy ? { submittedBy: input.createdBy } : {}),
+      harness: built.harness,
+      case: built.evalCase,
+      trigger: "judge-preview",
+      harnessSpec: built.harnessSpec,
+      ...(built.judge ? { judge: built.judge } : {}),
+    });
+  };
 }

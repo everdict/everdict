@@ -41,9 +41,18 @@ personal key fallback) and the backend injects `EVERDICT_JUDGE_MODEL` / `EVERDIC
 provider key env (`ANTHROPIC_API_KEY` / `OPENAI_API_KEY`, `+_BASE_URL`) — the code just reads env and calls.
 Only the declared binding's key is injected, never the whole SecretStore.
 
-**Preview.** The zero-cost preview shows the evidence coverage the code will receive + the `requires` check;
-"Run once" (`POST /judges/try`) does one real dispatch and shows the scores (stdout logs surface in the error
-detail on failure).
+**Preview.** The zero-cost preview shows the evidence coverage the code will receive + the `requires` check.
+
+**Dry-run = a real run.** "Run once" (`POST /judges/try`) **promotes the wrapper job to a first-class standalone
+run** (`trigger: "judge-preview"`, inline `harnessSpec` — the synthetic no-op wrapper has no registry entry) and
+returns `{ runId }` instead of blocking: progress, live stderr logs, and the verdict all ride the normal run
+surfaces (`GET /runs/:id` + `/logs`), and the wizard polls them live (the run-detail page is one click away).
+The run's stored scores keep the script's raw metrics; consumers stamp the production `judge:<id>` prefix on
+display exactly as batch scoring does. Submit policy is the same as any run (requireRuntime / placement
+preflight / budget) — placement = `spec.runtime`, else the source case's placement (re-score co-locate); with
+neither, submit is a visible 400. model/harness dry-runs stay synchronous (one model call → inline scores).
+Wiring: `codeJudgeRunSubmitter` (composition) → `JudgePreviewService.submitCodeJudgeRun` — a sanctioned seam,
+see `docs/architecture/execution-scoring-orchestration.md`.
 
 ## Legacy engine kinds (`model` | `harness`) — no new registrations
 

@@ -182,7 +182,7 @@ async function main(): Promise<void> {
 
   // Latest live-screen frame per run, pushed by a self-hosted runner (report_case_screen) → served by RunService.screen().
   const liveFrames = new LiveFrameStore();
-  const { service, judgeRunner } = buildRun({
+  const { service, judgeRunner, submitCodeJudgeRun } = buildRun({
     store,
     meteredDispatcher,
     dispatcher,
@@ -345,6 +345,7 @@ async function main(): Promise<void> {
     judgePreviewService: new JudgePreviewService({
       rubrics: rubricRegistry,
       judgeRunner,
+      submitCodeJudgeRun, // code dry-run = a real standalone run (trigger "judge-preview") — watchable on the run surfaces
       getRun: async (tenant, runId) => {
         const rec = await service.get(runId);
         return rec?.tenant === tenant ? rec : undefined; // workspace-scope the re-score

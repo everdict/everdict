@@ -43,21 +43,32 @@ export interface JudgePreviewResult extends JudgePreview {
   requirements?: EvidenceAssessment; // present when the judge declares `requires` — which needs are met by this run
 }
 
-// A dry-run = the real judge scores (one model call) PLUS the rendered prompt/coverage for transparency.
+// A dry-run result. model/harness → the real judge scores (one model call). code → the id of the REAL standalone
+// run executing the sandboxed wrapper job (watch progress/logs on the run surfaces; the verdict is its result).
 export interface JudgeTryResult extends JudgePreviewResult {
-  scores: Score[];
+  scores?: Score[];
+  runId?: string;
 }
 
 export interface JudgePreviewServiceDeps {
   rubrics?: RubricRegistry; // resolve a {id, version} rubric ref exactly as a real grade does (own fields override)
   judgeRunner?: JudgeRunner; // dry-run (try) transport — actually runs the judge (one model call). Absent → try disabled.
   getRun?: (tenant: string, runId: string) => Promise<RunRecord | undefined>; // source "run" — workspace-scoped
+  // Promote a code judge's dry-run to a real standalone run of the wrapper job (built via buildCodeJudgeJob and
+  // submitted through RunService — trigger "judge-preview"). Absent → code dry-run disabled.
+  submitCodeJudgeRun?: (input: {
+    tenant: string;
+    spec: Extract<JudgeSpec, { kind: "code" }>;
+    ctx: GradeContext;
+    createdBy?: string;
+  }) => Promise<{ id: string }>;
 }
 
 export interface PreviewCommand {
   tenant: string;
   spec: JudgeSpec;
   evidence: JudgeEvidenceInput;
+  createdBy?: string; // principal.subject — attributes the code dry-run's run record (owner/notifications)
 }
 
 // Build a GradeContext from a pasted trace + a synthetic, environment-free prompt snapshot (unless one is provided).
@@ -162,13 +173,25 @@ export class JudgePreviewService {
     return this.render(cmd.tenant, cmd.spec, ctx);
   }
 
-  // One-case dry-run — actually run the judge (one model call) over sample evidence via the SAME JudgeRunner a
-  // scorecard uses, and return its scores alongside the rendered prompt. A skip (no key/unresolved) surfaces as a
-  // skip Score with a stated reason (never a silent failure), exactly as in a real batch.
+  // One-case dry-run. model/harness — actually run the judge (one model call) via the SAME JudgeRunner a scorecard
+  // uses and return its scores alongside the rendered prompt (a skip surfaces as a skip Score with a stated reason,
+  // never a silent failure). code — the dry-run IS a real standalone run of the sandboxed wrapper job: return its
+  // runId so the caller watches progress/logs on the run surfaces and reads the verdict from the completed record.
   async try(cmd: PreviewCommand): Promise<JudgeTryResult> {
-    if (!this.deps.judgeRunner) throw new BadRequestError("BAD_REQUEST", {}, "judge dry-run is not configured");
     const ctx = await this.loadContext(cmd.tenant, cmd.evidence);
     const rendered = await this.render(cmd.tenant, cmd.spec, ctx);
+    if (cmd.spec.kind === "code") {
+      if (!this.deps.submitCodeJudgeRun)
+        throw new BadRequestError("BAD_REQUEST", {}, "code judge dry-run is not configured");
+      const run = await this.deps.submitCodeJudgeRun({
+        tenant: cmd.tenant,
+        spec: cmd.spec,
+        ctx,
+        ...(cmd.createdBy ? { createdBy: cmd.createdBy } : {}),
+      });
+      return { ...rendered, runId: run.id };
+    }
+    if (!this.deps.judgeRunner) throw new BadRequestError("BAD_REQUEST", {}, "judge dry-run is not configured");
     const scores = await this.deps.judgeRunner.run(cmd.spec, cmd.tenant, ctx);
     return { ...rendered, scores };
   }
