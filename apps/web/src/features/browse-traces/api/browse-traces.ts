@@ -1,7 +1,6 @@
 'use server'
 
 import {
-  harnessSpanMappingResponseSchema,
   traceInspectResultSchema,
   tracesListResponseSchema,
   type SpanAttrMapping,
@@ -53,34 +52,3 @@ export async function inspectTraceAction(
   }
 }
 
-export type MappingMutationResult = { ok: true } | { ok: false; error: string }
-
-// Store (or clear, with mapping=null) a harness's span-attribute mapping overlay — the conversion layer authored in the
-// judge wizard against a real trace. authZ (harnesses:register) is enforced by the control plane.
-export async function saveHarnessSpanMappingAction(
-  harnessId: string,
-  mapping: SpanAttrMapping | null
-): Promise<MappingMutationResult> {
-  const ctx = await authContext()
-  try {
-    await controlPlane.setHarnessSpanMapping(ctx, harnessId, { mapping })
-    return { ok: true }
-  } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : String(e) }
-  }
-}
-
-// Read a harness's stored overlay (to prefill the wizard editor when re-authoring). null = no overlay set.
-export async function getHarnessSpanMappingAction(
-  harnessId: string
-): Promise<{ ok: true; mapping: SpanAttrMapping | null } | { ok: false; error: string }> {
-  const ctx = await authContext()
-  try {
-    const raw = harnessSpanMappingResponseSchema.parse(
-      await controlPlane.getHarnessSpanMapping(ctx, harnessId)
-    )
-    return { ok: true, mapping: raw.mapping }
-  } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : String(e) }
-  }
-}

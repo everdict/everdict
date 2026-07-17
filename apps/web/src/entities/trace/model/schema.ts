@@ -162,9 +162,6 @@ export const spanAttrMappingSchema = z.object({
   screenshot: evidenceSlotSchema.optional(),
   evidence: z.record(z.string(), evidenceSlotSchema).optional(),
 })
-export const harnessSpanMappingResponseSchema = z.object({
-  mapping: spanAttrMappingSchema.nullable(),
-})
 
 // Drift guards — a wire rename/retype fails the web typecheck (bidirectional where identical-shape). The event/inspect
 // shapes are a DELIBERATELY-LOOSE consumer view: zod v4 infers an `unknown` object key (tool_call.args / env_action.detail)

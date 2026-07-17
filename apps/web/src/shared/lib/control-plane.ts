@@ -550,15 +550,6 @@ export const controlPlane = {
       `/workspace/trace-sources/${encodeURIComponent(name)}/traces/${encodeURIComponent(traceId)}/inspect`,
       { method: 'POST', body: JSON.stringify(body) }
     ),
-  // Per-harness span-attribute mapping overlay (the conversion layer between a harness and a judge). Read harnesses:read.
-  getHarnessSpanMapping: <T>(auth: AuthContext, harnessId: string) =>
-    call<T>(auth, `/harnesses/${encodeURIComponent(harnessId)}/span-attr-mapping`),
-  // Set/clear the overlay (member+, harnesses:register). body { mapping: SpanAttrMapping | null }.
-  setHarnessSpanMapping: <T>(auth: AuthContext, harnessId: string, body: unknown) =>
-    call<T>(auth, `/harnesses/${encodeURIComponent(harnessId)}/span-attr-mapping`, {
-      method: 'PUT',
-      body: JSON.stringify(body),
-    }),
   // Workspace image registries (BYO, multiple) — the harness image classification baseline + the everdict image push publish target.
   // Read harnesses:read (viewer+ — for classification badges) / register (upsert by name)·delete settings:write. Secrets pass through as name references only.
   listImageRegistries: <T>(auth: AuthContext) => call<T>(auth, '/workspace/image-registries'),
