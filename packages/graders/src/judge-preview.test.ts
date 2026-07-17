@@ -57,6 +57,39 @@ describe("assembleJudgeInput", () => {
   });
 });
 
+describe("custom evidence slots (mapping-authored → {<name>} placeholders)", () => {
+  it("assembleJudgeInput carries GradeContext.evidence.custom into the input", async () => {
+    const ctx: GradeContext = {
+      ...promptCtx(TRACE),
+      evidence: { custom: { confirmation_id: "R-42" } },
+    };
+    expect((await assembleJudgeInput(ctx)).custom).toEqual({ confirmation_id: "R-42" });
+  });
+
+  it("a custom template placeholder renders from the resolved slot; unbound identifiers stay verbatim", () => {
+    const preview = previewJudge({
+      task: "t",
+      trace: TRACE,
+      custom: { confirmation_id: "R-42" },
+      promptTemplate: "ID: {confirmation_id} / RAW: {unbound_name} / {verdict_instruction}",
+    });
+    expect(preview.prompt).toContain("ID: R-42");
+    expect(preview.prompt).toContain("RAW: {unbound_name}"); // never silently vanishes
+    expect(preview.warnings.some((w) => w.includes("{unbound_name}"))).toBe(true);
+    expect(preview.evidence.confirmation_id).toMatchObject({ present: true });
+    expect(preview.evidence.unbound_name).toMatchObject({ present: false });
+  });
+
+  it("without a custom template, resolved custom slots get default-template EVIDENCE sections", () => {
+    const preview = previewJudge({
+      task: "t",
+      trace: TRACE,
+      custom: { run_log: "step1 ok\nstep2 ok" },
+    });
+    expect(preview.prompt).toContain("EVIDENCE run_log:\nstep1 ok\nstep2 ok");
+  });
+});
+
 describe("previewJudge", () => {
   it("renders a prompt byte-identical to what the transport receives (the preview never lies)", async () => {
     const ctx = promptCtx(TRACE, "42");

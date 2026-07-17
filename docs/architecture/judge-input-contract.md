@@ -136,12 +136,11 @@ pre-build ingest generality that no registered judge requires (no-hypothetical-s
 The browser-use-on-MLflow use case ("judge from final answer + final DOM + screenshot, pulled — no Everdict-run
 snapshot") is served by **evidence slots on the mapping**, not a new channel:
 
-- `SpanAttrMapping` carries `finalAnswer`/`dom`/`screenshot` slots (attr-key lists, **no built-in defaults** —
-  explicit mapping only). `spansToEvidence` (packages/trace) extracts the LAST defined value across time-ordered
-  spans (= the final state) into a `TraceEvidence {finalAnswer?, dom?, screenshotRef?, screenshot?(base64),
-  screenshotMediaType?}`; a screenshot attr value classifies as inline bytes (data-URI/bare base64) or a ref,
-  and an http(s) ref is resolved to bytes best-effort with the source's own credentials (`fetchImageBase64` —
-  a miss keeps the ref, never fails the pull).
+- `SpanAttrMapping` carries `finalAnswer`/`dom`/`screenshot` slots (**no built-in defaults** — explicit mapping
+  only). `spansToEvidence` (packages/trace) resolves each slot into a `TraceEvidence {finalAnswer?, dom?,
+  screenshotRef?, screenshot?(base64), screenshotMediaType?, custom?}`; a screenshot attr value classifies as
+  inline bytes (data-URI/bare base64) or a ref, and an http(s) ref is resolved to bytes best-effort with the
+  source's own credentials (`fetchImageBase64` — a miss keeps the ref, never fails the pull).
 - `TraceSource.fetchDetailed?(runId) → {events, evidence?}` (contracts, optional — fakes/native kinds fall back
   to `fetch`). The extracted final answer is ALSO appended as the trace's final assistant message
   (`withEvidenceEvents`, deduped) so `{final_answer}` / `hasFinalAnswer` / trace display need no new channel.
@@ -152,6 +151,32 @@ snapshot") is served by **evidence slots on the mapping**, not a new channel:
 - `inspect(traceId, mapping)` returns the same `evidence` so the judge wizard authors slots mouse-only against
   a real trace (live extraction status per slot) and relays a synthesized browser snapshot into preview/try
   (`JudgeEvidenceInput.snapshot`).
+
+## Selectors, custom template slots + artifact auto-fetch — SHIPPED
+
+The generalization of the fixed trio: **the judge template DECLARES named evidence; the harness mapping
+REALIZES each name from its own trace.**
+
+- **Selectors.** An evidence slot is an ordered list of `string | {key, path?, pick?}` — a bare string stays the
+  attr-key shorthand. `path` reaches INSIDE a JSON attr value (an object, or a JSON **string** — parsed
+  transparently at each hop) with a deliberately-simple dot/bracket syntax (`final_answer`,
+  `steps[2].action`; NOT full JSONPath). Resolution is **selector-major**: the first selector that yields a
+  value wins; within a selector `pick` chooses the span occurrence (`last` default = final state).
+- **Custom slots.** `SpanAttrMapping.evidence: Record<name, slot>` — names are identifier-validated and must
+  not shadow built-ins (`RESERVED_EVIDENCE_NAMES`). Resolved values land on `TraceEvidence.custom`, ride the
+  `CaseResult.evidence` → `GradeContext.evidence` carrier, reach `JudgeInput.custom`, and expand a template's
+  `{<name>}` placeholder (`renderTemplate` — unbound identifiers stay VERBATIM, never silently vanish; the
+  preview warns instead). Without a custom template they render as default-template `EVIDENCE <name>:` sections.
+  `customPlaceholdersOf(template)` drives the preview warnings AND the wizard's slot rows.
+- **Artifact URL auto-fetch.** A resolved `dom`/custom-slot value that IS an http(s) URL auto-resolves to the
+  artifact's real text (`fetchTextArtifact`, 1 MB cap; an image stays a ref); `finalAnswer` is never fetched
+  (the answer is the answer, not a pointer). **Credentials travel same-origin only** — a URL inside a trace
+  whose origin differs from the source endpoint is fetched BARE (SSRF/credential-leak guard, applied to the
+  screenshot image fetch too).
+- **Wizard.** The evidence builder gains JSON **drill-in** (click an attr → its inner fields with sample values
+  → click to bind `{key, path}`), custom-slot rows auto-appear for every `{<name>}` the draft template declares
+  (unbound = warning state), and a manual add-slot input. Preview/try relay `TraceEvidence` via
+  `JudgeEvidenceInput.traceEvidence` so custom placeholders render for real before registration.
 
 ## Case milestones → per-case criteria (failure localization) — SHIPPED
 

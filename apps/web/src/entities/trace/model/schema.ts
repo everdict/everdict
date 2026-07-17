@@ -111,14 +111,15 @@ export const traceSpanNodeSchema = z.object({
   costUsd: z.number().optional(),
 })
 
-// Judge evidence extracted from a trace via the mapping's evidence slots (finalAnswer/dom/screenshot) — the wizard
-// relays it into the preview's synthesized browser snapshot so dom/screenshot judging works on pulled traces.
+// Judge evidence extracted from a trace via the mapping's evidence slots (finalAnswer/dom/screenshot + custom
+// named slots) — the wizard relays it into the preview (synthesized browser snapshot + custom placeholders).
 export const traceEvidenceSchema = z.object({
   finalAnswer: z.string().optional(),
   dom: z.string().optional(),
   screenshotRef: z.string().optional(),
   screenshot: z.string().optional(),
   screenshotMediaType: z.string().optional(),
+  custom: z.record(z.string(), z.string()).optional(),
 })
 
 // inspect(traceId, mapping) result — normalized events (with the supplied mapping) + raw span attributes + (best-effort)
@@ -135,8 +136,17 @@ export const traceInspectResultSchema = z.object({
     .optional(),
 })
 
+// One evidence selector — an attr key + an optional dot/bracket path INTO its JSON value. A bare string = { key }.
+export const evidenceSelectorSchema = z.object({
+  key: z.string(),
+  path: z.string().optional(),
+  pick: z.enum(['last', 'first']).optional(),
+})
+export const evidenceSlotSchema = z.array(z.union([z.string(), evidenceSelectorSchema]))
+
 // The per-field span-attribute mapping — the conversion layer between a harness's spans and the judge's TraceEvents.
-// The evidence slots (finalAnswer/dom/screenshot) extract judge evidence from the trace itself (no defaults).
+// The evidence slots (finalAnswer/dom/screenshot + the free-form `evidence` record) extract judge evidence from the
+// trace itself (no defaults); custom names become the judge template's {<name>} placeholders.
 export const spanAttrMappingSchema = z.object({
   model: z.array(z.string()).optional(),
   inputTokens: z.array(z.string()).optional(),
@@ -147,9 +157,10 @@ export const spanAttrMappingSchema = z.object({
   toolArgs: z.array(z.string()).optional(),
   toolResult: z.array(z.string()).optional(),
   messageText: z.array(z.string()).optional(),
-  finalAnswer: z.array(z.string()).optional(),
-  dom: z.array(z.string()).optional(),
-  screenshot: z.array(z.string()).optional(),
+  finalAnswer: evidenceSlotSchema.optional(),
+  dom: evidenceSlotSchema.optional(),
+  screenshot: evidenceSlotSchema.optional(),
+  evidence: z.record(z.string(), evidenceSlotSchema).optional(),
 })
 export const harnessSpanMappingResponseSchema = z.object({
   mapping: spanAttrMappingSchema.nullable(),

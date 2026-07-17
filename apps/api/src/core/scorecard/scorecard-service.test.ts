@@ -424,6 +424,7 @@ describe("ScorecardService.ingestPull", () => {
             dom: "<html>goal</html>",
             screenshot: "QUJD",
             screenshotMediaType: "image/png",
+            custom: { confirmation_id: "R-42" },
           },
         }),
       }),
@@ -444,6 +445,8 @@ describe("ScorecardService.ingestPull", () => {
       expect(snapshot.dom).toBe("<html>goal</html>");
       expect(snapshot.screenshot).toBe("QUJD");
     }
+    // the evidence itself rides the CaseResult — the carrier that brings CUSTOM slots to the judges
+    expect(done.scorecard?.results[0]?.evidence?.custom).toEqual({ confirmation_id: "R-42" });
   });
 
   it("fetchDetailed without browser evidence keeps the synthetic ingest snapshot (no empty browser shell)", async () => {

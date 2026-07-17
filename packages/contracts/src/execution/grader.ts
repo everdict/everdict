@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { ComputeHandle, ComputeSpec } from "./compute.js";
 import type { EnvSnapshot } from "./environment.js";
 import type { EvalCase, Scorecard } from "./eval-case.js";
+import type { TraceEvidence } from "./trace-source.js";
 import type { TraceEvent } from "./trace.js";
 
 export const ScoreSchema = z.object({
@@ -17,6 +18,10 @@ export interface GradeContext {
   case: EvalCase;
   trace: TraceEvent[];
   snapshot: EnvSnapshot;
+  // Evidence extracted from a pulled trace via the mapping's evidence slots — carries the CUSTOM named slots a
+  // judge's promptTemplate references ({<name>}); the fixed slots already ride the snapshot/trace. Optional:
+  // live-run paths without a mapping leave it unset.
+  evidence?: TraceEvidence;
   // Outcome graders can run commands in the environment (process harness). Optional because service/browser harnesses have no compute.
   compute?: ComputeHandle;
   // Provision a DEDICATED grading compute (script grader `image` mode) — injected by runCase from its driver.

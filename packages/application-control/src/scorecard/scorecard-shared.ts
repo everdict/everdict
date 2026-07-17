@@ -19,6 +19,7 @@ import {
   type ScorecardSubset,
   type SpanAttrMapping,
   TraceEventSchema,
+  TraceEvidenceSchema,
   type TraceSource,
   type TraceSourceConfig,
 } from "@everdict/contracts";
@@ -99,6 +100,7 @@ export const IngestScorecardBodySchema = z.object({
         caseId: z.string(),
         trace: z.array(TraceEventSchema),
         snapshot: EnvSnapshotSchema.optional(),
+        evidence: TraceEvidenceSchema.optional(), // pulled-trace evidence (mapping slots) — carries custom judge slots
         scores: z.array(ScoreSchema).optional(),
       }),
     )

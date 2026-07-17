@@ -9,6 +9,7 @@ import {
   type RunRecord,
   type Score,
   type TraceEvent,
+  type TraceEvidence,
 } from "@everdict/contracts";
 import {
   type EvidenceAssessment,
@@ -22,10 +23,18 @@ import type { RubricRegistry } from "@everdict/registry";
 import { resolveRubric } from "../execution/judge-runner.js";
 
 // Sample evidence to preview/dry-run a judge over — resolves to ONE GradeContext.
-// - "trace" (source B): a pasted/uploaded trace + a synthetic environment-free snapshot.
+// - "trace" (source B): a pasted/uploaded trace + a synthetic environment-free snapshot (+ optionally the
+//   extracted mapping evidence, which carries CUSTOM template slots exactly as the pull path does).
 // - "run"   (source A): a real prior standalone run's stored trace+snapshot+EvalCase (re-score).
 export type JudgeEvidenceInput =
-  | { source: "trace"; trace: TraceEvent[]; task?: string; expected?: string; snapshot?: EnvSnapshot }
+  | {
+      source: "trace";
+      trace: TraceEvent[];
+      task?: string;
+      expected?: string;
+      snapshot?: EnvSnapshot;
+      traceEvidence?: TraceEvidence;
+    }
   | { source: "run"; runId: string };
 
 // A preview = the exact prompt + coverage the judge would see, plus any rubric-resolution warning. No model call.
@@ -65,6 +74,7 @@ export function gradeContextFromTrace(evidence: Extract<JudgeEvidenceInput, { so
     },
     trace: evidence.trace,
     snapshot: evidence.snapshot ?? { kind: "prompt", output: "" },
+    ...(evidence.traceEvidence ? { evidence: evidence.traceEvidence } : {}),
   };
 }
 
@@ -90,7 +100,12 @@ export class JudgePreviewService {
       timeoutSec: 1,
       tags: [],
     };
-    return { case: evalCase, trace: record.result.trace, snapshot: record.result.snapshot };
+    return {
+      case: evalCase,
+      trace: record.result.trace,
+      snapshot: record.result.snapshot,
+      ...(record.result.evidence ? { evidence: record.result.evidence } : {}),
+    };
   }
 
   // Resolve the rubric via the SAME path a real grade uses, then render the prompt + coverage (no model call).

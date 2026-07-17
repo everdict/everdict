@@ -20,9 +20,11 @@ import {
   TraceEventList,
 } from '@/features/browse-traces'
 import {
+  EMPTY_EVIDENCE_SLOTS,
   EMPTY_SPAN_MAPPING,
   mappingRecordToSpec,
   SpanMappingEditor,
+  type EvidenceSlotsForm,
   type SpanAttrOption,
   type SpanMappingRecord,
   type TraceInspectResult,
@@ -50,6 +52,64 @@ function sampleStr(v: unknown): string {
   } catch {
     return String(v)
   }
+}
+
+// A JSON-valued attr (object, or a JSON string) → its selectable leaf paths for the builder's drill-in picker.
+// Dot/bracket paths, capped in depth and count — a picker, not a JSON explorer.
+function jsonChildren(v: unknown): { path: string; sample: string }[] | undefined {
+  let root: unknown = v
+  if (typeof v === 'string') {
+    const t = v.trim()
+    if (!t.startsWith('{') && !t.startsWith('[')) return undefined
+    try {
+      root = JSON.parse(t)
+    } catch {
+      return undefined
+    }
+  }
+  if (root === null || typeof root !== 'object') return undefined
+  const out: { path: string; sample: string }[] = []
+  const walk = (node: unknown, prefix: string, depth: number) => {
+    if (out.length >= 40) return
+    if (node !== null && typeof node === 'object' && depth < 3) {
+      if (Array.isArray(node)) {
+        node.slice(0, 5).forEach((child, i) => walk(child, `${prefix}[${i}]`, depth + 1))
+      } else {
+        for (const [k, child] of Object.entries(node)) {
+          walk(child, prefix ? `${prefix}.${k}` : k, depth + 1)
+        }
+      }
+      return
+    }
+    if (prefix) out.push({ path: prefix, sample: sampleStr(node) })
+  }
+  walk(root, '', 0)
+  return out.length > 0 ? out : undefined
+}
+
+// The custom {<name>} placeholders a draft judge's promptTemplate declares — client-side mirror of the engine's
+// customPlaceholdersOf (the wizard shows each as an evidence row to bind; the reserved names are built-ins).
+const BUILTIN_PLACEHOLDERS = new Set([
+  'task',
+  'rubric',
+  'criteria',
+  'dom',
+  'expected',
+  'final_answer',
+  'response',
+  'trace',
+  'verdict_instruction',
+  'screenshot',
+])
+function templatePlaceholdersOf(spec: unknown): string[] {
+  const template = (spec as { promptTemplate?: unknown } | undefined)?.promptTemplate
+  if (typeof template !== 'string') return []
+  const names = new Set<string>()
+  for (const m of template.matchAll(/\{([a-zA-Z_][a-zA-Z0-9_-]*)\}/g)) {
+    const name = m[1]
+    if (name && !BUILTIN_PLACEHOLDERS.has(name)) names.add(name)
+  }
+  return [...names]
 }
 
 // The wizard's step rail — reachable steps are clickable, the completed pick shows a check.
@@ -126,6 +186,7 @@ export function JudgePreviewPanel({
   const [step, setStep] = useState<Step>('pick')
   const [picked, setPicked] = useState<{ sourceName: string; summary: TraceSummary } | undefined>()
   const [mappingRec, setMappingRec] = useState<SpanMappingRecord>(EMPTY_SPAN_MAPPING)
+  const [slots, setSlots] = useState<EvidenceSlotsForm>(EMPTY_EVIDENCE_SLOTS)
   const [inspected, setInspected] = useState<TraceInspectResult | undefined>()
   const [inspectError, setInspectError] = useState<string | undefined>()
   const [inspecting, startInspect] = useTransition()
@@ -148,7 +209,9 @@ export function JudgePreviewPanel({
     [sources, picked?.sourceName]
   )
   const isSpanKind = pickedSource ? SPAN_KINDS.has(pickedSource.kind) : false
-  const mappingSpec = useMemo(() => mappingRecordToSpec(mappingRec), [mappingRec])
+  const mappingSpec = useMemo(() => mappingRecordToSpec(mappingRec, slots), [mappingRec, slots])
+  // The custom {<name>} placeholders the current draft template declares — each becomes an evidence row to bind.
+  const placeholders = templatePlaceholdersOf(getSpec())
 
   // Reverse-lookup: harnesses that pull from the picked source — the natural target(s) to save the conversion onto.
   const assignedHarnesses = useMemo(
@@ -183,14 +246,18 @@ export function JudgePreviewPanel({
     return () => clearTimeout(timer)
   }, [picked, mappingSpec, isSpanKind])
 
-  // The observed attribute keys + one sample value each — what the mouse-only mapping builder offers per field.
+  // The observed attribute keys + one sample value each (LAST occurrence — matches extraction semantics) + the
+  // drill-in leaf paths for JSON values — what the mouse-only mapping builder offers per field/slot.
   const attrOptions = useMemo<SpanAttrOption[]>(() => {
-    const seen = new Map<string, string>()
+    const latest = new Map<string, unknown>()
     for (const s of inspected?.rawAttributes ?? [])
-      for (const [k, v] of Object.entries(s.attrs)) if (!seen.has(k)) seen.set(k, sampleStr(v))
-    return [...seen.entries()]
+      for (const [k, v] of Object.entries(s.attrs)) latest.set(k, v)
+    return [...latest.entries()]
       .sort(([a], [b]) => a.localeCompare(b))
-      .map(([key, sample]) => ({ key, sample }))
+      .map(([key, v]) => {
+        const children = jsonChildren(v)
+        return { key, sample: sampleStr(v), ...(children ? { children } : {}) }
+      })
   }, [inspected])
 
   // The trace fed to preview/try: the manual JSON (advanced, when filled) overrides; else the inspected events.
@@ -228,10 +295,12 @@ export function JudgePreviewPanel({
 
   const meta = () => {
     const snapshot = evidenceSnapshot()
+    const traceEvidence = manualTrace.trim() ? undefined : inspected?.evidence
     return {
       ...(task.trim() ? { task: task.trim() } : {}),
       ...(expected.trim() ? { expected: expected.trim() } : {}),
       ...(snapshot ? { snapshot } : {}),
+      ...(traceEvidence ? { traceEvidence } : {}),
     }
   }
 
@@ -513,8 +582,11 @@ export function JudgePreviewPanel({
             <SpanMappingEditor
               mapping={mappingRec}
               onChange={setMappingRec}
+              slots={slots}
+              onSlotsChange={setSlots}
               attrs={attrOptions}
               evidence={inspected?.evidence}
+              templatePlaceholders={placeholders}
             />
           ) : (
             <Callout tone="info">{t('nativeKindNote')}</Callout>

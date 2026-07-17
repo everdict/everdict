@@ -65,7 +65,13 @@ export class ScoringService {
     const runPlacement: Placement | undefined = runtime
       ? { ...evalCase.placement, target: runtime }
       : evalCase.placement;
-    const ctx: GradeContext = { case: evalCase, trace: result.trace, snapshot: result.snapshot };
+    // Pulled-trace evidence (mapping evidence slots) rides the CaseResult — carries custom template slots to the judge.
+    const ctx: GradeContext = {
+      case: evalCase,
+      trace: result.trace,
+      snapshot: result.snapshot,
+      ...(result.evidence ? { evidence: result.evidence } : {}),
+    };
     for (const spec of specs) {
       result.scores.push(...(await runner.run(spec, tenant, ctx, runPlacement)));
     }

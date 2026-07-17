@@ -299,7 +299,13 @@ export class MlflowTraceSource implements BrowsableTraceSource {
     }
     const spans = await this.getSpansById(traceId);
     const m = this.opts.mapping;
-    const evidence = await extractEvidence(spans, m, this.opts.fetchImpl ?? fetch, this.opts.headers);
+    const evidence = await extractEvidence(
+      spans,
+      m,
+      this.opts.fetchImpl ?? fetch,
+      this.opts.headers,
+      this.opts.endpoint,
+    );
     return {
       events: withEvidenceEvents(spansToTraceEvents(spans, m), evidence),
       ...(evidence ? { evidence } : {}),
@@ -309,7 +315,13 @@ export class MlflowTraceSource implements BrowsableTraceSource {
   async inspect(traceId: string, mapping?: SpanAttrMapping): Promise<TraceInspectResult> {
     const spans = await this.getSpansById(traceId);
     const m = mapping ?? this.opts.mapping;
-    const evidence = await extractEvidence(spans, m, this.opts.fetchImpl ?? fetch, this.opts.headers);
+    const evidence = await extractEvidence(
+      spans,
+      m,
+      this.opts.fetchImpl ?? fetch,
+      this.opts.headers,
+      this.opts.endpoint,
+    );
     return {
       rawAttributes: spansToRawAttributes(spans),
       events: withEvidenceEvents(spansToTraceEvents(spans, m), evidence),

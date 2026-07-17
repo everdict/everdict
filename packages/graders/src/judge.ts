@@ -39,6 +39,7 @@ export interface JudgeInput {
   screenshot?: JudgeImage; // Image bytes resolved for VLM input
   response?: string; // Final response from the result channel (prompt snapshot output) — the only evidence when the trace has no assistant message
   expected?: string; // the case's reference output (EvalCase.expected) — EXPECTED OUTPUT evidence
+  custom?: Record<string, string>; // resolved custom evidence slots (mapping-authored) → the template's {<name>} placeholders
   rubric?: string;
   criteria?: JudgeCriterion[]; // multi-criteria: the verdict must score every listed criterion
   promptTemplate?: string; // custom judging prompt (must carry {verdict_instruction}) — absent: the default template
@@ -90,6 +91,9 @@ export async function assembleJudgeInput(
     ...(screenshot ? { screenshot } : {}),
     ...(snap.kind === "prompt" && snap.output ? { response: snap.output } : {}),
     ...(ctx.case.expected ? { expected: ctx.case.expected } : {}),
+    // Custom evidence slots ride GradeContext.evidence (pulled-trace extraction); fixed slots already ride the
+    // snapshot/trace, so only `custom` crosses here.
+    ...(ctx.evidence?.custom && Object.keys(ctx.evidence.custom).length > 0 ? { custom: ctx.evidence.custom } : {}),
     ...(opts.rubric ? { rubric: opts.rubric } : {}),
     ...(opts.criteria?.length ? { criteria: opts.criteria } : {}),
     ...(opts.promptTemplate ? { promptTemplate: opts.promptTemplate } : {}),

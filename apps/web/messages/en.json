@@ -1711,11 +1711,16 @@
     "field_dom": "final DOM",
     "field_screenshot": "screenshot",
     "evidenceHeading": "Judge evidence",
-    "evidenceTip": "Extracts judge evidence from the trace itself — the final answer, the final DOM, and a screenshot (inline base64/data-URI, or a fetchable URL). Mapped slots feed the judge exactly like a live run's browser snapshot; empty slots stay absent.",
+    "evidenceTip": "Extracts judge evidence from the trace itself — the final answer, the final DOM, a screenshot, plus any custom {name} placeholder the judge's prompt template declares. Click an attribute (or a field inside its JSON value) to bind each slot; URL values are fetched to their real content automatically. Empty slots stay absent.",
     "evidenceEmpty": "not extracted",
     "evidenceAbsent": "Mapped, but no value found on this trace.",
     "screenshotResolved": "screenshot resolved ({type})",
-    "screenshotRefOnly": "unresolved ref: {ref}"
+    "screenshotRefOnly": "unresolved ref: {ref}",
+    "drillIn": "Pick a field inside {key}",
+    "templateUnbound": "referenced by the template — map an attribute",
+    "newSlotPlaceholder": "new_slot_name",
+    "addSlot": "Add slot",
+    "slotNameInvalid": "Identifier only, not a built-in placeholder, not already added."
   },
   "registerJudge": {
     "kindModelLabel": "model (LLM/VLM call)",

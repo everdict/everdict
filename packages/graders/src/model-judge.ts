@@ -35,6 +35,9 @@ function criteriaText(criteria?: JudgeCriterion[]): string {
 
 // Custom template rendering — placeholders expand to the RAW evidence values ("" when absent); the template owns all
 // framing/section labels. {verdict_instruction} is mandatory (enforced at registration by JudgeSpecSchema).
+// Beyond the built-in placeholders, any {<name>} matching a resolved CUSTOM evidence slot (mapping-authored) expands
+// to that slot's value; an identifier with neither a built-in nor a custom binding stays verbatim (so JSON braces or
+// unbound names never silently vanish — the preview warns about unbound references instead).
 function renderTemplate(template: string, input: JudgeInput): string {
   const finalAnswer = finalAnswerOf(input.trace) ?? "";
   const values: Record<string, string> = {
@@ -48,10 +51,36 @@ function renderTemplate(template: string, input: JudgeInput): string {
     trace: input.trace ? JSON.stringify(input.trace).slice(0, MAX_CHARS) : "",
     verdict_instruction: verdictInstruction(input.criteria),
   };
-  return template.replace(
-    /\{(task|rubric|criteria|dom|expected|final_answer|response|trace|verdict_instruction)\}/g,
-    (_, key: string) => values[key] ?? "",
+  for (const [name, value] of Object.entries(input.custom ?? {})) {
+    if (!(name in values)) values[name] = value.slice(0, MAX_CHARS);
+  }
+  return template.replace(/\{([a-zA-Z_][a-zA-Z0-9_-]*)\}/g, (raw, key: string) =>
+    key in values ? (values[key] ?? "") : raw,
   );
+}
+
+// The custom-evidence names a template references — built-in/structural placeholders excluded. Drives the
+// preview's unbound-slot warnings and the wizard's slot rows ("the template declares, the mapping realizes").
+const BUILTIN_PLACEHOLDERS = new Set([
+  "task",
+  "rubric",
+  "criteria",
+  "dom",
+  "expected",
+  "final_answer",
+  "response",
+  "trace",
+  "verdict_instruction",
+  "screenshot",
+]);
+export function customPlaceholdersOf(template: string | undefined): string[] {
+  if (!template) return [];
+  const names = new Set<string>();
+  for (const m of template.matchAll(/\{([a-zA-Z_][a-zA-Z0-9_-]*)\}/g)) {
+    const name = m[1];
+    if (name && !BUILTIN_PLACEHOLDERS.has(name)) names.add(name);
+  }
+  return [...names];
 }
 
 // Judging prompt — asks the LLM/VLM for a JSON verdict from task + rubric/criteria + (final answer/response/trace/DOM/screenshot).
@@ -76,6 +105,8 @@ function buildPrompt(input: JudgeInput): string {
       : "",
     finalAnswer ? `AGENT FINAL ANSWER:\n${finalAnswer.slice(0, MAX_CHARS)}` : "",
     response ? `AGENT FINAL RESPONSE (result channel):\n${response.slice(0, MAX_CHARS)}` : "",
+    // Custom evidence slots (mapping-authored) get their own sections — usable without a custom template.
+    ...Object.entries(input.custom ?? {}).map(([name, value]) => `EVIDENCE ${name}:\n${value.slice(0, MAX_CHARS)}`),
     // Since the trace JSON may be truncated, tell it to look at the section above even if the final answer is cut off.
     `EXECUTION TRACE (JSON, truncated${finalAnswer ? "; see AGENT FINAL ANSWER above" : ""}):\n${trace}`,
     verdictInstruction(input.criteria),
@@ -121,6 +152,10 @@ export function previewJudge(input: JudgeInput): JudgePreview {
     dom: coverage(input.dom ?? ""),
     screenshot: { present: input.screenshot !== undefined, chars: 0, truncated: false },
   };
+  // Custom evidence slots — resolved slots report coverage; template-referenced names count even when unresolved
+  // (present:false), so an unbound {<name>} is visible in the same coverage view.
+  const customNames = new Set([...Object.keys(input.custom ?? {}), ...customPlaceholdersOf(input.promptTemplate)]);
+  for (const name of customNames) evidence[name] = coverage(input.custom?.[name] ?? "");
   const warnings: string[] = [];
   if (input.promptTemplate) {
     for (const key of EVIDENCE_PLACEHOLDERS) {
@@ -128,10 +163,15 @@ export function previewJudge(input: JudgeInput): JudgePreview {
         warnings.push(`Template references {${key}} but this run carries no ${key} evidence.`);
       }
     }
+    for (const name of customPlaceholdersOf(input.promptTemplate)) {
+      if (!evidence[name]?.present) {
+        warnings.push(`Template references {${name}} but no evidence slot resolves it (map it in the conversion).`);
+      }
+    }
   }
-  for (const key of EVIDENCE_PLACEHOLDERS) {
-    const c = evidence[key];
-    if (c?.truncated) warnings.push(`${key} is truncated to ${MAX_CHARS} chars in the prompt (${c.chars} total).`);
+  for (const [key, c] of Object.entries(evidence)) {
+    if (key === "task") continue; // task is never sliced in the prompt — no truncation to warn about
+    if (c.truncated) warnings.push(`${key} is truncated to ${MAX_CHARS} chars in the prompt (${c.chars} total).`);
   }
   return { prompt: buildPrompt(input), evidence, warnings };
 }

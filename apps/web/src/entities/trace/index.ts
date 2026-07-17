@@ -10,12 +10,15 @@ export {
   tracesListResponseSchema,
 } from './model/schema'
 export {
+  EMPTY_EVIDENCE_SLOTS,
   EMPTY_SPAN_MAPPING,
-  EVIDENCE_MAPPING_FIELDS,
+  FIXED_EVIDENCE_SLOTS,
   mappingRecordToSpec,
   mappingSpecToRecord,
   SPAN_MAPPING_FIELDS,
-  type EvidenceMappingField,
+  type EvidenceBindingForm,
+  type EvidenceSlotsForm,
+  type FixedEvidenceSlot,
   type SpanMappingField,
   type SpanMappingRecord,
 } from './model/mapping'

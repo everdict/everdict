@@ -79,6 +79,100 @@ describe("withEvidenceEvents", () => {
   });
 });
 
+describe("spansToEvidence — selectors (path into JSON + custom slots)", () => {
+  const JSON_SPANS: Span[] = [
+    {
+      name: "agent",
+      startMs: 0,
+      endMs: 10,
+      attrs: {
+        // an OBJECT attr (mlflow kvlist-flattened) and a JSON-STRING attr — both must be path-addressable
+        "mlflow.spanOutputs": { final_answer: "booked", steps: [{ action: "login" }, { action: "search" }] },
+        "agent.result": '{"confirmation": {"id": "R-42"}}',
+      },
+    },
+  ];
+
+  it("path reaches inside an object attr and a JSON-string attr (dot/bracket)", () => {
+    const evidence = spansToEvidence(JSON_SPANS, {
+      finalAnswer: [{ key: "mlflow.spanOutputs", path: "final_answer" }],
+      evidence: {
+        second_step: [{ key: "mlflow.spanOutputs", path: "steps[1].action" }],
+        confirmation_id: [{ key: "agent.result", path: "confirmation.id" }],
+      },
+    });
+    expect(evidence?.finalAnswer).toBe("booked");
+    expect(evidence?.custom).toEqual({ second_step: "search", confirmation_id: "R-42" });
+  });
+
+  it("a pathless selector on an object attr yields the whole value as JSON text", () => {
+    const evidence = spansToEvidence(JSON_SPANS, {
+      evidence: { raw_output: [{ key: "mlflow.spanOutputs", path: "confirmation_missing" }, "agent.result"] },
+    });
+    // selector-major: the first selector resolves nothing (bad path) → the next selector (whole value) wins
+    expect(evidence?.custom?.raw_output).toBe('{"confirmation": {"id": "R-42"}}');
+  });
+
+  it("pick:first takes the earliest span's occurrence (default stays last)", () => {
+    const spans: Span[] = [
+      { name: "a", startMs: 0, endMs: 1, attrs: { v: "early" } },
+      { name: "b", startMs: 5, endMs: 6, attrs: { v: "late" } },
+    ];
+    expect(spansToEvidence(spans, { evidence: { x: [{ key: "v", pick: "first" }] } })?.custom?.x).toBe("early");
+    expect(spansToEvidence(spans, { evidence: { x: [{ key: "v" }] } })?.custom?.x).toBe("late");
+  });
+});
+
+describe("extractEvidence — URL artifact auto-fetch (same-origin credential guard)", () => {
+  const spans: Span[] = [
+    {
+      name: "s",
+      startMs: 0,
+      endMs: 1,
+      attrs: {
+        "agent.dom_ref": "https://mlflow.acme.dev/artifacts/dom.html",
+        "agent.log_ref": "https://elsewhere.example.com/run.log",
+        "agent.answer": "https://the-answer-is-this-url.example.com",
+      },
+    },
+  ];
+  const mapping = {
+    dom: ["agent.dom_ref"],
+    finalAnswer: ["agent.answer"],
+    evidence: { run_log: ["agent.log_ref"] },
+  };
+
+  it("resolves URL values to their real text; credentials only travel same-origin; finalAnswer never fetched", async () => {
+    const calls: Array<{ url: string; headers: unknown }> = [];
+    const fetchImpl = vi.fn((...args: Parameters<typeof fetch>) => {
+      calls.push({ url: String(args[0]), headers: (args[1] as RequestInit | undefined)?.headers });
+      return Promise.resolve(new Response("REAL CONTENT", { status: 200, headers: { "content-type": "text/plain" } }));
+    });
+    const evidence = await extractEvidence(
+      spans,
+      mapping,
+      fetchImpl as unknown as typeof fetch,
+      { authorization: "Basic zzz" },
+      "https://mlflow.acme.dev",
+    );
+    expect(evidence?.dom).toBe("REAL CONTENT"); // same-origin ref → fetched with credentials
+    expect(evidence?.custom?.run_log).toBe("REAL CONTENT"); // cross-origin ref → fetched BARE
+    expect(evidence?.finalAnswer).toBe("https://the-answer-is-this-url.example.com"); // the answer is the answer
+    const domCall = calls.find((c) => c.url.includes("mlflow.acme.dev"));
+    const logCall = calls.find((c) => c.url.includes("elsewhere.example.com"));
+    expect(domCall?.headers).toEqual({ authorization: "Basic zzz" });
+    expect(logCall?.headers).toBeUndefined();
+    expect(calls.some((c) => c.url.includes("the-answer-is-this-url"))).toBe(false);
+  });
+
+  it("a failed artifact fetch keeps the URL string (never fails the pull)", async () => {
+    const failing = vi.fn(() => Promise.reject(new Error("down")));
+    const evidence = await extractEvidence(spans, mapping, failing as unknown as typeof fetch);
+    expect(evidence?.dom).toBe("https://mlflow.acme.dev/artifacts/dom.html");
+    expect(evidence?.custom?.run_log).toBe("https://elsewhere.example.com/run.log");
+  });
+});
+
 describe("fetchImageBase64", () => {
   it("resolves an http(s) ref with the source headers; failures return undefined (never throw)", async () => {
     const png = new Uint8Array([137, 80, 78, 71]);

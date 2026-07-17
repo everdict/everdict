@@ -60,7 +60,7 @@ export interface PreviewJudgeResult {
 export async function previewJudgeAction(
   spec: unknown,
   trace: unknown,
-  meta?: { task?: string; expected?: string; snapshot?: unknown }
+  meta?: { task?: string; expected?: string; snapshot?: unknown; traceEvidence?: unknown }
 ): Promise<PreviewJudgeResult> {
   const ctx = await authContext()
   try {
@@ -70,6 +70,7 @@ export async function previewJudgeAction(
       ...(meta?.task ? { task: meta.task } : {}),
       ...(meta?.expected ? { expected: meta.expected } : {}),
       ...(meta?.snapshot ? { snapshot: meta.snapshot } : {}),
+      ...(meta?.traceEvidence ? { traceEvidence: meta.traceEvidence } : {}),
     }
     const r = await controlPlane.previewJudge<Omit<PreviewJudgeResult, 'ok'>>(ctx, {
       spec,
@@ -98,7 +99,7 @@ export interface TryJudgeResult extends PreviewJudgeResult {
 export async function tryJudgeAction(
   spec: unknown,
   trace: unknown,
-  meta?: { task?: string; expected?: string; snapshot?: unknown }
+  meta?: { task?: string; expected?: string; snapshot?: unknown; traceEvidence?: unknown }
 ): Promise<TryJudgeResult> {
   const ctx = await authContext()
   try {
@@ -108,6 +109,7 @@ export async function tryJudgeAction(
       ...(meta?.task ? { task: meta.task } : {}),
       ...(meta?.expected ? { expected: meta.expected } : {}),
       ...(meta?.snapshot ? { snapshot: meta.snapshot } : {}),
+      ...(meta?.traceEvidence ? { traceEvidence: meta.traceEvidence } : {}),
     }
     const r = await controlPlane.tryJudge<Omit<TryJudgeResult, 'ok'>>(ctx, { spec, evidence })
     return { ok: true, ...r }

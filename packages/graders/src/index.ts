@@ -19,6 +19,7 @@ export {
   type JudgeCompletion,
   type EvidenceCoverage,
   type JudgePreview,
+  customPlaceholdersOf,
   modelJudge,
   previewJudge,
   anthropicComplete,

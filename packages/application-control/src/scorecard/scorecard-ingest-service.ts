@@ -167,7 +167,12 @@ export class ScorecardIngestService {
         // failure is UpstreamError → catch → failed.
         const detailed = src.fetchDetailed ? await src.fetchDetailed(r.runId) : { events: await src.fetch(r.runId) };
         const snapshot = snapshotFromEvidence(detailed.evidence);
-        perCase.push({ caseId: r.caseId, trace: detailed.events, ...(snapshot ? { snapshot } : {}) });
+        perCase.push({
+          caseId: r.caseId,
+          trace: detailed.events,
+          ...(snapshot ? { snapshot } : {}),
+          ...(detailed.evidence ? { evidence: detailed.evidence } : {}),
+        });
       }
       // attach hint: the original trace already lives on the source platform — if the sink is the same platform, attach scores only instead of duplicating (flow ②).
       await this.finishIngest(id, tenant, dataset, harnessLabel, perCase, judges, {
@@ -207,6 +212,7 @@ export class ScorecardIngestService {
         harness: harnessLabel,
         trace: up.trace,
         snapshot,
+        ...(up.evidence ? { evidence: up.evidence } : {}),
         scores: [...derived, ...(up.scores ?? [])],
       });
     }

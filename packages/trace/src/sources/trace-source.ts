@@ -1,4 +1,6 @@
 import type {
+  EvidenceSelector,
+  EvidenceSlot,
   SpanAttrMapping,
   SpanAttrSample,
   TraceEvent,
@@ -220,29 +222,101 @@ export function classifyScreenshotValue(v: string): ScreenshotValue {
   return { ref: v };
 }
 
-// Span[] + the mapping's evidence slots → TraceEvidence. The LAST defined value across time-ordered spans wins
-// (= the FINAL answer/DOM/screenshot). Explicit-mapping only — no built-in default keys, so nothing is guessed.
-// Pure: an unresolvable screenshot stays a ref; byte resolution is I/O and belongs to the source (extractEvidence).
-export function spansToEvidence(spans: Span[], mapping?: SpanAttrMapping): TraceEvidence | undefined {
-  const slots = {
-    finalAnswer: mapping?.finalAnswer ?? [],
-    dom: mapping?.dom ?? [],
-    screenshot: mapping?.screenshot ?? [],
-  };
-  if (slots.finalAnswer.length === 0 && slots.dom.length === 0 && slots.screenshot.length === 0) return undefined;
-  const sorted = [...spans].sort((a, b) => a.startMs - b.startMs);
-  const last = (keys: readonly string[]): string | undefined => {
-    let found: string | undefined;
-    for (const s of sorted) {
-      const v = pickStr(s.attrs, keys);
-      if (v !== undefined) found = v;
+// "a.b[0].c" → path segments. Deliberately-simple dot/bracket syntax, NOT full JSONPath.
+function pathSegments(path: string): (string | number)[] | undefined {
+  const out: (string | number)[] = [];
+  for (const part of path.split(".")) {
+    const m = part.match(/^([^[\]]*)((?:\[\d+\])*)$/);
+    if (!m) return undefined;
+    if (m[1]) out.push(m[1]);
+    for (const idx of m[2]?.match(/\d+/g) ?? []) out.push(Number(idx));
+  }
+  return out.length > 0 ? out : undefined;
+}
+
+// Parse a JSON-looking string into its value (else keep the string) — attr values are often JSON strings.
+function maybeJson(v: unknown): unknown {
+  if (typeof v !== "string") return v;
+  const t = v.trim();
+  if (!t.startsWith("{") && !t.startsWith("[")) return v;
+  try {
+    return JSON.parse(t);
+  } catch {
+    return v;
+  }
+}
+
+// Walk a dot/bracket path INTO an attr value (an object, or a JSON string — parsed transparently at each hop).
+export function resolveValuePath(value: unknown, path: string): unknown {
+  const segments = pathSegments(path);
+  if (!segments) return undefined;
+  let current = maybeJson(value);
+  for (const seg of segments) {
+    if (current === null || current === undefined) return undefined;
+    if (Array.isArray(current)) {
+      if (typeof seg !== "number") return undefined;
+      current = maybeJson(current[seg]);
+    } else if (typeof current === "object") {
+      current = maybeJson((current as Record<string | number, unknown>)[seg]);
+    } else {
+      return undefined;
     }
-    return found;
-  };
-  const finalAnswer = last(slots.finalAnswer);
-  const dom = last(slots.dom);
-  const shot = last(slots.screenshot);
-  if (finalAnswer === undefined && dom === undefined && shot === undefined) return undefined;
+  }
+  return current;
+}
+
+// A resolved evidence value as prompt text — strings pass through, scalars stringify, objects JSON-stringify.
+function evidenceText(v: unknown): string | undefined {
+  if (v === undefined || v === null) return undefined;
+  if (typeof v === "string") return v;
+  if (typeof v === "number" || typeof v === "boolean") return String(v);
+  try {
+    return JSON.stringify(v);
+  } catch {
+    return String(v);
+  }
+}
+
+// Resolve ONE slot: selector-major — the first selector (in slot order) that yields a value wins; within a
+// selector, `pick` decides which span's occurrence wins (default "last" = the final state).
+function resolveSlot(sorted: Span[], slot: EvidenceSlot | undefined): string | undefined {
+  for (const entry of slot ?? []) {
+    const sel: EvidenceSelector = typeof entry === "string" ? { key: entry } : entry;
+    const spans = sel.pick === "first" ? sorted : [...sorted].reverse();
+    for (const s of spans) {
+      const raw = s.attrs[sel.key];
+      if (raw === undefined) continue;
+      const value = sel.path === undefined ? raw : resolveValuePath(raw, sel.path);
+      const text = evidenceText(value);
+      if (text !== undefined) return text;
+    }
+  }
+  return undefined;
+}
+
+// Span[] + the mapping's evidence slots → TraceEvidence. Fixed slots (finalAnswer/dom/screenshot) plus the
+// free-form custom `evidence` record (name → the judge's {<name>} placeholder). Explicit-mapping only — no
+// built-in default keys, so nothing is guessed. Pure: an unresolvable screenshot stays a ref and URL values stay
+// URLs; byte/text resolution is I/O and belongs to the source (extractEvidence).
+export function spansToEvidence(spans: Span[], mapping?: SpanAttrMapping): TraceEvidence | undefined {
+  const customSlots = Object.entries(mapping?.evidence ?? {});
+  const hasAny =
+    (mapping?.finalAnswer?.length ?? 0) > 0 ||
+    (mapping?.dom?.length ?? 0) > 0 ||
+    (mapping?.screenshot?.length ?? 0) > 0 ||
+    customSlots.some(([, slot]) => slot.length > 0);
+  if (!hasAny) return undefined;
+  const sorted = [...spans].sort((a, b) => a.startMs - b.startMs);
+  const finalAnswer = resolveSlot(sorted, mapping?.finalAnswer);
+  const dom = resolveSlot(sorted, mapping?.dom);
+  const shot = resolveSlot(sorted, mapping?.screenshot);
+  const custom: Record<string, string> = {};
+  for (const [name, slot] of customSlots) {
+    const value = resolveSlot(sorted, slot);
+    if (value !== undefined) custom[name] = value;
+  }
+  const hasCustom = Object.keys(custom).length > 0;
+  if (finalAnswer === undefined && dom === undefined && shot === undefined && !hasCustom) return undefined;
   const screenshot = shot !== undefined ? classifyScreenshotValue(shot) : undefined;
   return {
     ...(finalAnswer !== undefined ? { finalAnswer } : {}),
@@ -251,6 +325,7 @@ export function spansToEvidence(spans: Span[], mapping?: SpanAttrMapping): Trace
       ? { screenshot: screenshot.base64, screenshotMediaType: screenshot.mediaType }
       : {}),
     ...(screenshot && "ref" in screenshot ? { screenshotRef: screenshot.ref } : {}),
+    ...(hasCustom ? { custom } : {}),
   };
 }
 

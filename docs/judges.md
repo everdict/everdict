@@ -29,6 +29,12 @@ Both kinds take the shared prompt fields (`docs/architecture/eval-domain-model.m
   `judge:<judge-id>` (the model's overall verdict, else the weighted mean Σ(w·score)/Σw). A criterion missing from
   the model's verdict is an explicit error (skip score), never a silent 0. `passThreshold` on the spec re-decides
   the overall only; per-criterion thresholds live on each criterion.
+- **Custom evidence placeholders** — beyond the built-ins, a `promptTemplate` may reference any `{<name>}`
+  identifier: the harness's span-attribute mapping overlay binds each name to a trace selector
+  (`SpanAttrMapping.evidence`, incl. JSON-path drill-in and URL-artifact auto-fetch), and the resolved value
+  expands the placeholder (unbound names stay verbatim + a preview warning; without a template, resolved slots
+  render as default `EVIDENCE <name>:` sections). The judge declares WHAT it needs; each harness's conversion
+  layer decides WHERE that comes from. See `docs/architecture/judge-input-contract.md`.
 - **Case milestones (failure localization)** — a dataset case may declare `milestones: [{id, description}]`
   (intermediate expectations on the way to the final outcome). At grade time they merge into the judge's criteria
   per case (`withCaseMilestones`, shared by `JudgeGrader.grade` and the preview so both stay byte-identical) and
