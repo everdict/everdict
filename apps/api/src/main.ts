@@ -1,4 +1,5 @@
 import { ProxyService } from "@everdict/application-control";
+import { perTenantTrustZones } from "@everdict/domain";
 import type { BrowserSessionProvisioner } from "./common/browser-session-provisioner.js";
 import { LiveFrameStore } from "./common/live-frame-store.js";
 import { TerminalTicketStore } from "./common/terminal-ticket.js";
@@ -35,7 +36,17 @@ import { ModelService } from "./core/model/model-service.js";
 import { SecretUsageService } from "./core/secret/secret-usage-service.js";
 import { DockerBrowserProvisioner } from "./infrastructure/browser-session/docker-browser-provisioner.js";
 import { LocalChromeProvisioner } from "./infrastructure/browser-session/local-chrome-provisioner.js";
+import { runtimeSessionProvision } from "./infrastructure/browser-session/nomad-session-provision.js";
+import { RoutingBrowserProvisioner } from "./infrastructure/browser-session/routing-browser-provisioner.js";
+import { RuntimeBrowserProvisioner } from "./infrastructure/browser-session/runtime-browser-provisioner.js";
 import { buildServer } from "./server.js";
+
+// Parse an env var as a strictly-positive integer; undefined (unset/blank/zero/negative/NaN) ⇒ "no limit".
+function positiveIntEnv(raw: string | undefined): number | undefined {
+  if (!raw) return undefined;
+  const n = Number(raw);
+  return Number.isInteger(n) && n > 0 ? n : undefined;
+}
 
 // Multi-tenant control-plane server. tenant is derived from the Bearer API key (dev header fallback if absent).
 // DATABASE_URL → Postgres (stores/keys/registries), else in-memory. NOMAD_ADDR → Nomad backend.
@@ -282,9 +293,25 @@ async function main(): Promise<void> {
             : {}),
         })
       : new LocalChromeProvisioner(browserChromeBin ? { binary: browserChromeBin } : {});
+  // Runtime binding (browser-profiles S9) — a session with a `runtime` runs the browser on the tenant's registered
+  // runtime inside that tenant's trust zone (per-tenant network isolation; reachable from a containerized control
+  // plane), else the host provisioner above. Nomad ships first; K8s / self-hosted are follow-ups.
+  const sessionTrustZones = perTenantTrustZones();
+  const runtimeBrowserProvisioner = new RuntimeBrowserProvisioner({
+    resolveSpec: (tenant, id) => runtimeRegistry.get(tenant, id).catch(() => undefined),
+    zoneFor: (tenant) => sessionTrustZones.resolve(tenant),
+    provisionOnRuntime: runtimeSessionProvision(),
+  });
+  const routingBrowserProvisioner = new RoutingBrowserProvisioner(browserProvisioner, runtimeBrowserProvisioner);
+  // Concurrent live-session caps (browser-profiles S8) — each session is a real browser process/container on this
+  // node, so bound them so one tenant (or the fleet) can't exhaust the host. Unset ⇒ unlimited (single-tenant/dev).
+  const browserMaxPerTenant = positiveIntEnv(process.env.EVERDICT_BROWSER_MAX_SESSIONS_PER_TENANT);
+  const browserMaxTotal = positiveIntEnv(process.env.EVERDICT_BROWSER_MAX_SESSIONS);
   const browserSessionService = browserSessionsEnabled
-    ? new BrowserSessionService(browserProvisioner, {
+    ? new BrowserSessionService(routingBrowserProvisioner, {
         resolveProxy: (ws, country) => proxyService.resolve(ws, country),
+        ...(browserMaxPerTenant !== undefined ? { maxPerTenant: browserMaxPerTenant } : {}),
+        ...(browserMaxTotal !== undefined ? { maxTotal: browserMaxTotal } : {}),
       })
     : undefined;
   if (browserSessionService) setInterval(() => browserSessionService.sweep(), 60_000).unref(); // TTL teardown

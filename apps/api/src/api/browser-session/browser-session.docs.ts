@@ -18,11 +18,19 @@ const docs = {
     description:
       "Provisions a dedicated interactive browser (for profile login) and returns its handle. Personal / " +
       "self-scoped — the session is owned by the caller (like connected accounts). At most one active session " +
-      "per owner: an existing one is closed first. The browser is torn down on close or after its TTL.",
+      "per owner: an existing one is closed first. The browser is torn down on close or after its TTL. Optional " +
+      "`country` selects the workspace egress proxy (S4); optional `runtime` hosts the browser on a " +
+      "tenant-registered runtime instead of the control-plane host (S9).",
     tags: ["browser-session"],
+    body: toJsonSchema(
+      z.object({
+        country: z.string().optional().describe("Egress-proxy country (workspace proxy pool)"),
+        runtime: z.string().optional().describe("Tenant-registered runtime id to host the session on"),
+      }),
+    ),
     response: {
       200: { description: "The started session", ...toJsonSchema(BrowserSessionViewSchema) },
-      ...errorResponses(401, 502),
+      ...errorResponses(401, 404, 429, 502),
     },
   },
   list: {

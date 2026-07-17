@@ -1,6 +1,10 @@
-import { AppError } from "@everdict/contracts";
+import { AppError, RateLimitError } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
-import type { BrowserSessionProvisioner, ProvisionedBrowser } from "../../common/browser-session-provisioner.js";
+import type {
+  BrowserSessionProvisioner,
+  ProvisionBrowserOptions,
+  ProvisionedBrowser,
+} from "../../common/browser-session-provisioner.js";
 import { BrowserSessionService } from "./browser-session-service.js";
 
 // A fake browser provisioner — records disposals + the proxy option so we can assert teardown/geo without a real Chrome.
@@ -39,6 +43,23 @@ describe("BrowserSessionService", () => {
     expect(view).toMatchObject({ id: "bs-0", status: "active", createdBy: "alice" });
     // the reachable CDP endpoint must never appear in the client-facing view.
     expect(JSON.stringify(view)).not.toContain("127.0.0.1");
+  });
+
+  it("threads the runtime binding + session id + tenant to the provisioner (S9)", async () => {
+    const opts: Array<ProvisionBrowserOptions | undefined> = [];
+    const provisioner: BrowserSessionProvisioner = {
+      async provision(o): Promise<ProvisionedBrowser> {
+        opts.push(o);
+        return { cdpBase: "http://127.0.0.1:9000", dispose: async () => {} };
+      },
+    };
+    const s = new BrowserSessionService(provisioner, { newId: () => "bs-9" });
+    await s.create({ tenant: "acme", createdBy: "alice", runtime: "nomad-eu" });
+    // the id is minted before provisioning so a runtime provisioner can key the browser by session id
+    expect(opts).toEqual([{ tenant: "acme", runtime: "nomad-eu", sessionId: "bs-9" }]);
+    // no runtime selected → the runtime field is omitted (host provisioner path)
+    await s.create({ tenant: "acme", createdBy: "alice" });
+    expect(opts[1]).toEqual({ tenant: "acme", sessionId: "bs-9" });
   });
 
   it("resolves a country to the workspace proxy and launches the browser through it (S4)", async () => {
@@ -144,5 +165,54 @@ describe("BrowserSessionService", () => {
     const view = await s.create({ tenant: "acme", createdBy: "alice" });
     await expect(s.statePreview(view.id, "mallory")).rejects.toBeInstanceOf(AppError);
     await expect(s.statePreview("nope", "alice")).rejects.toBeInstanceOf(AppError);
+  });
+
+  // ── Concurrency caps (S8) — one live browser per session is a scarce host resource ──
+  it("caps concurrent live sessions per tenant — a session over the limit is rejected (429)", async () => {
+    const p = new FakeProvisioner();
+    let i = 0;
+    const s = new BrowserSessionService(p, { newId: () => `bs-${i++}`, maxPerTenant: 2 });
+    await s.create({ tenant: "acme", createdBy: "alice" });
+    await s.create({ tenant: "acme", createdBy: "bob" });
+    // acme is at its cap of 2 — a third owner in the same workspace is refused, and no browser is provisioned for it.
+    await expect(s.create({ tenant: "acme", createdBy: "carol" })).rejects.toBeInstanceOf(RateLimitError);
+    expect(p.provisioned).toHaveLength(2);
+    // a different tenant is unaffected by acme's cap.
+    await s.create({ tenant: "globex", createdBy: "dave" });
+    expect(p.provisioned).toHaveLength(3);
+  });
+
+  it("caps total concurrent live sessions across all tenants (429)", async () => {
+    const p = new FakeProvisioner();
+    let i = 0;
+    const s = new BrowserSessionService(p, { newId: () => `bs-${i++}`, maxTotal: 2 });
+    await s.create({ tenant: "acme", createdBy: "alice" });
+    await s.create({ tenant: "globex", createdBy: "bob" });
+    await expect(s.create({ tenant: "initech", createdBy: "carol" })).rejects.toBeInstanceOf(RateLimitError);
+    expect(p.provisioned).toHaveLength(2);
+  });
+
+  it("never trips the owner's own cap — re-creating replaces the owner's session at the limit", async () => {
+    const p = new FakeProvisioner();
+    let i = 0;
+    const s = new BrowserSessionService(p, { newId: () => `bs-${i++}`, maxPerTenant: 1 });
+    await s.create({ tenant: "acme", createdBy: "alice" });
+    // alice is the only session and the cap is 1; her own re-create frees her session first, so it must not 429.
+    await expect(s.create({ tenant: "acme", createdBy: "alice" })).resolves.toMatchObject({ status: "active" });
+    expect(s.list("alice")).toHaveLength(1);
+  });
+
+  it("frees capacity when a session is closed or swept", async () => {
+    const p = new FakeProvisioner();
+    let i = 0;
+    let clock = 1000;
+    const s = new BrowserSessionService(p, { newId: () => `bs-${i++}`, now: () => clock, ttlMs: 5000, maxTotal: 1 });
+    const first = await s.create({ tenant: "acme", createdBy: "alice" });
+    await expect(s.create({ tenant: "globex", createdBy: "bob" })).rejects.toBeInstanceOf(RateLimitError);
+    await s.close(first.id, "alice"); // freeing the slot lets the next one through
+    await expect(s.create({ tenant: "globex", createdBy: "bob" })).resolves.toMatchObject({ status: "active" });
+    // and an expired session frees its slot on the next create's sweep too
+    clock += 6000;
+    await expect(s.create({ tenant: "initech", createdBy: "carol" })).resolves.toMatchObject({ status: "active" });
   });
 });

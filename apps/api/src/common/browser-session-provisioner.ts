@@ -14,6 +14,12 @@ export interface ProvisionBrowserOptions {
   // Egress proxy for the login browser (Chrome --proxy-server) — resolved from the workspace's per-country pool
   // (browser-profiles S4). Absent = a direct connection.
   proxyServer?: string;
+  // Runtime binding (browser-profiles S9) — WHERE the browser runs. A routing provisioner reads these: absent
+  // `runtime` ⇒ the control-plane host provisioner (dev/self-hosted default); a `runtime` id ⇒ the tenant's
+  // registered runtime, where the browser stands up inside that tenant's trust zone (per-tenant network isolation).
+  tenant?: string; // the owning workspace — scopes runtime resolution + the trust zone
+  runtime?: string; // the tenant-registered runtime id to host the session on (undefined = host provisioner)
+  sessionId?: string; // the session id, used to key + rediscover the browser on the runtime
 }
 
 export interface BrowserSessionProvisioner {

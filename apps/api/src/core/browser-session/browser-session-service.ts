@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { NotFoundError } from "@everdict/contracts";
+import { NotFoundError, RateLimitError } from "@everdict/contracts";
 import { type StorageState, captureStorageState } from "@everdict/topology";
 import type { BrowserSessionProvisioner } from "../../common/browser-session-provisioner.js";
 import { type BrowserSessionEntry, type BrowserSessionView, toBrowserSessionView } from "./browser-session.js";
@@ -8,6 +8,7 @@ export interface CreateBrowserSessionCommand {
   tenant: string;
   createdBy: string;
   country?: string; // geo (browser-profiles S4) — resolved to the workspace's proxy for the login browser
+  runtime?: string; // runtime binding (browser-profiles S9) — the tenant-registered runtime that hosts the browser
 }
 
 // A live summary of what a capture WOULD remember right now — per-domain cookie NAMES only. Cookie values are the
@@ -25,6 +26,12 @@ export interface BrowserSessionServiceOptions {
   resolveProxy?: (tenant: string, country: string) => Promise<string | undefined>;
   // Read the session browser's cookies (for statePreview). Injectable (tests); default = real CDP capture.
   captureState?: (cdpBase: string) => Promise<StorageState>;
+  // Concurrency caps (browser-profiles S8) — each live browser is a scarce host resource (a process/container),
+  // so a live session count is bounded to keep one tenant (or the fleet) from exhausting the control-plane host.
+  // Owner is already capped to one (a re-create evicts the owner's own session first); these bound the peers.
+  // undefined ⇒ unlimited (single-tenant / dev default). Exceeding either throws RateLimitError (429).
+  maxPerTenant?: number; // max concurrent live sessions per workspace
+  maxTotal?: number; // max concurrent live sessions across all workspaces on this control-plane node
 }
 
 // Owns the lifecycle of interactive browser sessions: provision a dedicated browser, hold its reachable CDP base
@@ -37,6 +44,8 @@ export class BrowserSessionService {
   private readonly newId: () => string;
   private readonly resolveProxy?: (tenant: string, country: string) => Promise<string | undefined>;
   private readonly captureState: (cdpBase: string) => Promise<StorageState>;
+  private readonly maxPerTenant?: number;
+  private readonly maxTotal?: number;
 
   constructor(
     private readonly provisioner: BrowserSessionProvisioner,
@@ -47,6 +56,8 @@ export class BrowserSessionService {
     this.newId = opts.newId ?? (() => randomUUID());
     this.resolveProxy = opts.resolveProxy;
     this.captureState = opts.captureState ?? ((cdpBase) => captureStorageState(cdpBase));
+    this.maxPerTenant = opts.maxPerTenant;
+    this.maxTotal = opts.maxTotal;
   }
 
   // Bring up a dedicated interactive browser for the owner. Enforces a single active session per owner (the
@@ -54,10 +65,19 @@ export class BrowserSessionService {
   // country resolves to the workspace's egress proxy (S4) so the login runs from that geo.
   async create(cmd: CreateBrowserSessionCommand): Promise<BrowserSessionView> {
     this.sweep();
-    await this.closeOwned(cmd.createdBy);
+    await this.closeOwned(cmd.createdBy); // frees the owner's own live session first, so caps count only the peers
+    this.enforceCapacity(cmd.tenant);
     const proxyServer = cmd.country && this.resolveProxy ? await this.resolveProxy(cmd.tenant, cmd.country) : undefined;
-    const browser = await this.provisioner.provision(proxyServer ? { proxyServer } : undefined);
+    // Id is minted BEFORE provisioning so a runtime provisioner can key + rediscover the browser by session id
+    // (a runtime-hosted browser is looked up by id to find its control-plane-reachable CDP). No entry is stored
+    // until provisioning succeeds, so a provision failure (e.g. unknown runtime) leaves no orphaned session.
     const id = this.newId();
+    const browser = await this.provisioner.provision({
+      ...(proxyServer ? { proxyServer } : {}),
+      tenant: cmd.tenant,
+      ...(cmd.runtime ? { runtime: cmd.runtime } : {}),
+      sessionId: id,
+    });
     const createdAt = new Date(this.now()).toISOString();
     const entry: BrowserSessionEntry = {
       browser,
@@ -147,6 +167,28 @@ export class BrowserSessionService {
 
   private async closeOwned(subject: string): Promise<void> {
     for (const [id, entry] of this.sessions) if (entry.record.createdBy === subject) await this.dispose(id);
+  }
+
+  // Reject a new session that would exceed the per-tenant or fleet-wide live-session cap (browser-profiles S8).
+  // Counted AFTER sweep + the owner's own session is freed, so the caller never trips their own limit. Throws
+  // RateLimitError (429) — a transient capacity signal, not a permanent denial (the client can retry later).
+  private enforceCapacity(tenant: string): void {
+    if (this.maxTotal !== undefined && this.sessions.size >= this.maxTotal)
+      throw new RateLimitError(
+        "RATE_LIMITED",
+        { scope: "global", limit: this.maxTotal },
+        "Too many live browser sessions on this node — try again once one frees up.",
+      );
+    if (this.maxPerTenant !== undefined) {
+      let owned = 0;
+      for (const entry of this.sessions.values()) if (entry.record.tenant === tenant) owned++;
+      if (owned >= this.maxPerTenant)
+        throw new RateLimitError(
+          "RATE_LIMITED",
+          { scope: "tenant", limit: this.maxPerTenant },
+          "This workspace has too many live browser sessions — close one before opening another.",
+        );
+    }
   }
 
   private async dispose(id: string): Promise<void> {

@@ -15,10 +15,25 @@ export function registerBrowserSessionTools(server: McpServer, ctx: McpToolConte
     {
       description:
         "Start an interactive browser session (a dedicated browser for profile login) — provisions a browser " +
-        "and returns its handle. At most one active session per owner (an existing one is closed first).",
-      inputSchema: {},
+        "and returns its handle. At most one active session per owner (an existing one is closed first). " +
+        "Optional country selects the workspace egress proxy (S4); optional runtime hosts the browser on a " +
+        "tenant-registered runtime instead of the control-plane host (S9).",
+      inputSchema: {
+        country: z.string().optional().describe("Egress-proxy country (workspace proxy pool)"),
+        runtime: z.string().optional().describe("Tenant-registered runtime id to host the session on"),
+      },
     },
-    () => plain(async () => ok(await sessions.create({ tenant: principal.workspace, createdBy: principal.subject }))),
+    ({ country, runtime }) =>
+      plain(async () =>
+        ok(
+          await sessions.create({
+            tenant: principal.workspace,
+            createdBy: principal.subject,
+            ...(country ? { country } : {}),
+            ...(runtime ? { runtime } : {}),
+          }),
+        ),
+      ),
   );
 
   server.registerTool(

@@ -1,6 +1,6 @@
 # Authenticated browser profiles — a real interactive remote browser, cookies reused in eval (design)
 
-> **Status: S0–S7 SHIPPED (S1 transport + web canvas · S2 profile entity · S3 cookie capture · S4 proxy/geo login browser · S5 cookie injection into evals · S6 containerized provisioner — no host-Chrome dependency · S7 session-first creation UX + live remembered-login chips). Follow-ups: managed-K8s reachability, eval-browser proxy, localStorage, web harness profile-picker.** S0 = the interactive live browser
+> **Status: S0–S9 SHIPPED (S1 transport + web canvas · S2 profile entity · S3 cookie capture · S4 proxy/geo login browser · S5 cookie injection into evals · S6 containerized provisioner — no host-Chrome dependency · S7 session-first creation UX + live remembered-login chips · S8 concurrent-session caps — per-tenant + fleet-wide · S9 runtime-bound sessions — the browser on the tenant's registered runtime inside its trust zone [Nomad shipped; K8s + self-hosted = follow-ups]). Follow-ups: K8s per-session reachability (port-forward), self-hosted reverse relay, store-backed session registry (multi-replica), web session runtime-picker, eval-browser proxy, localStorage.** S0 = the interactive live browser
 > session primitive (`openBrowserSession`, `@everdict/topology`, `a168b5b`): CDP screencast (frames OUT, each
 > acked) + input (mouse/keyboard/navigate IN), transport-injectable, live-proven against real Chrome via
 > `scripts/live/interactive-browser.mjs`. **S1 productizes the transport end-to-end**: a personal / self-scoped
@@ -189,6 +189,37 @@ short-lived container/pod per active login; self-hosted = the user's own local b
    nav entries are REMOVED — proxy pool management (`features/manage-proxies`, still `settings:write`) is embedded
    in the wizard's geo step. The `/workspace/proxies` and `/browser-sessions` APIs are unchanged (minus the new
    preview route).
+10. **S8 — concurrent-session caps (multi-tenant capacity).** ✅ SHIPPED. Each live session is a real browser
+    process/container on the control-plane node, so `BrowserSessionService` bounds the concurrent live count:
+    `EVERDICT_BROWSER_MAX_SESSIONS_PER_TENANT` (per workspace) + `EVERDICT_BROWSER_MAX_SESSIONS` (fleet-wide on this
+    node). Counted after the TTL sweep and after the owner's own single session is freed (`closeOwned`), so a
+    re-create never trips the owner's own limit; exceeding either cap throws `RateLimitError` (429 — a transient
+    capacity signal, `data.scope` = `tenant`|`global`), before any browser is provisioned. Unset ⇒ unlimited
+    (single-tenant / dev default). This closes the "one tenant exhausts the host" gap; it is NOT network isolation
+    between concurrent sessions — that is S9 (each tenant's browser on its own trust-zone runtime). Follow-up: fold
+    the count into a store when the session registry goes multi-replica (today the cap is per-node, matching the
+    in-memory registry).
+11. **S9 — runtime-bound sessions (managed reachability + per-tenant network isolation).** ✅ SHIPPED (Nomad).
+    A session's browser can run on a tenant's REGISTERED runtime instead of the control-plane host, which (a) makes
+    sessions work when apps/api is itself containerized (full compose / managed K8s — the browser stands up on the
+    tenant's cluster and the control plane reaches its CDP over the network, not `127.0.0.1`), and (b) closes the
+    cross-tenant CDP-theft gap flagged in S8 — each tenant's session runs in its own **trust zone** (namespace +
+    isolation runtime + cross-tenant network deny, `perTenantTrustZones`), so one tenant's live session can't reach
+    another's CDP. The seam: `CreateBrowserSessionCommand.runtime` (POST body / MCP `start_browser_session`; absent ⇒
+    the host provisioner) → a `RoutingBrowserProvisioner` (`opts.runtime` present ⇒ the `RuntimeBrowserProvisioner`,
+    else the S1/S6 host provisioner) → the `RuntimeBrowserProvisioner` resolves the tenant's `RuntimeSpec`
+    (404 if unknown), resolves the tenant trust zone, and delegates to an injected `provisionOnRuntime`. The session
+    id is minted **before** provisioning so the runtime browser is keyed + rediscovered by it. **Nomad** is the first
+    orchestrator (`runtimeSessionProvision` → `NomadTopologyRuntime.provisionBrowserEnv` for a bare per-session
+    browser job in the zone's namespace, then `browserCdpBase` for the control-plane-reachable alloc host port; a
+    synthetic empty-services `ServiceHarnessSpec` suffices — the browser job reads only `target`). **Reachability by
+    runtime** (unchanged intent from the S1 table, now realized): local/host = the host provisioner; **Nomad** =
+    published alloc port (shipped); **K8s** = per-session `kubectl port-forward`/ingress (follow-up — the standalone
+    provisioner throws a clear "not yet" for non-Nomad); **self-hosted** = the control plane can't dial into the
+    user's machine, so it needs a **reverse relay** (the runner brings up a local Docker browser and bridges CDP
+    outbound over MCP, like the live-screen frame push) — follow-up. Follow-ups: the K8s + self-hosted paths above,
+    a web session runtime-picker (the field is API/MCP-settable today, mirroring how S5's `target.profile` shipped),
+    and folding the S8 caps into a store alongside the multi-replica session registry.
 
 ## Non-goals / risks
 
