@@ -8,7 +8,7 @@ export const JudgeListEntrySchema = z.object({
   versions: z.array(z.string()).describe("Versions (semver ascending)"),
   latestVersion: z.string(),
   versionCount: z.number().int(),
-  kind: z.string().optional().describe("model | harness"),
+  kind: z.string().optional().describe("code | model | harness"),
   provider: z.string().optional().describe("Model judge: anthropic | openai"),
   model: z.string().optional().describe("Model judge: model id"),
   description: z.string().optional(),

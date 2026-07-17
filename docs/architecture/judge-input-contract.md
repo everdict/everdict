@@ -178,6 +178,18 @@ REALIZES each name from its own trace.**
   (unbound = warning state), and a manual add-slot input. Preview/try relay `TraceEvidence` via
   `JudgeEvidenceInput.traceEvidence` so custom placeholders render for real before registration.
 
+## Code judge (`kind:"code"`) — the main judge tier — SHIPPED
+
+Declarative judging kept re-inventing a language one knob at a time (criteria → milestones → evidence slots →
+selectors → custom placeholders → auto-fetch), so the authoring surface pivoted to **code**: a judge is user
+Python/Node code over the SAME judge context this document defines. Contract = the script grader's
+(argv[1] = `{case, trace, snapshot, evidence}` JSON; Score[] last on stdout; metric `judge` → `judge:<id>`).
+Execution = a dispatched no-op command-harness wrapper job whose script grader runs the code with `contextPath`
+(never on the control plane; placement/trust-zone/self-hosted machinery unchanged). `spec.model` rides the
+existing `job.judge` channel (JudgeAuthDispatcher) → `EVERDICT_JUDGE_MODEL/PROVIDER` + provider key env.
+Registration surfaces expose code only; `model`/`harness` kinds stay engine-internal for existing specs, and the
+evidence-slot mapping layer above remains the code judge's input normalizer (`ctx.evidence`). See `docs/judges.md`.
+
 ## Case milestones → per-case criteria (failure localization) — SHIPPED
 
 `EvalCase.milestones?: [{id, description}]` (case DATA, like `expected`) are the dataset-defined intermediate

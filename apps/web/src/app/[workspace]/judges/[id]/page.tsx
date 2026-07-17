@@ -149,9 +149,28 @@ export default async function JudgeDetailPage({
               <EntityRef id={judge.harness.id} version={judge.harness.version} kind="harness" />
             </span>
           )}
+          {judge.kind === 'code' && judge.language && (
+            <code className="rounded border border-border bg-muted/40 px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground">
+              {judge.language}
+            </code>
+          )}
+          {judge.kind === 'code' && judge.model && (
+            <ModelChip>{judgeModelLabel(judge.model)}</ModelChip>
+          )}
+          {judge.kind === 'code' && judge.runtime && <RuntimeChip label={judge.runtime} />}
           {judge.kind === 'harness' && judge.runtime && <RuntimeChip label={judge.runtime} />}
         </div>
       </div>
+
+      {/* Code judge — the code IS the judging logic; show it verbatim (entrypoint-in-image shows the path). */}
+      {judge.kind === 'code' && (judge.code ?? judge.entrypoint) && (
+        <section className="space-y-2.5">
+          <SectionHeader title={t('codeSection')} />
+          <pre className="max-h-96 overflow-auto whitespace-pre-wrap rounded-lg border border-border bg-muted/40 px-4 py-3 font-mono text-[12px] leading-relaxed text-muted-foreground">
+            {judge.code ?? `${judge.image ?? '(agent image)'} → ${judge.entrypoint}`}
+          </pre>
+        </section>
+      )}
 
       {rubric !== undefined && (
         <section className="space-y-2.5">

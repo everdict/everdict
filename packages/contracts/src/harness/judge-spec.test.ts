@@ -31,9 +31,22 @@ describe("JudgeSpecSchema — promptTemplate/criteria validated at the boundary 
       criteria: [{ id: "accuracy", description: "is it right" }],
     });
     expect(parsed.success).toBe(true);
-    if (parsed.success) {
+    if (parsed.success && parsed.data.kind !== "code") {
       expect(parsed.data.criteria?.[0]).toEqual({ id: "accuracy", description: "is it right", weight: 1 });
     }
+  });
+
+  it("code judge: requires code or entrypoint; defaults timeoutSec", () => {
+    const code = { kind: "code", id: "e2e", version: "1.0.0", language: "python" };
+    expect(JudgeSpecSchema.safeParse(code).success).toBe(false); // neither code nor entrypoint
+    const parsed = JudgeSpecSchema.safeParse({ ...code, code: "print('[]')" });
+    expect(parsed.success).toBe(true);
+    if (parsed.success && parsed.data.kind === "code") {
+      expect(parsed.data.timeoutSec).toBe(600);
+    }
+    expect(JudgeSpecSchema.safeParse({ ...code, entrypoint: "judge.py", image: "ghcr.io/x/judge:1" }).success).toBe(
+      true,
+    );
   });
 
   it("rejects duplicate criterion ids (each becomes a metric suffix)", () => {

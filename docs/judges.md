@@ -1,7 +1,55 @@
 # Agent Judges (`@everdict/registry` + control plane)
 
 An **Agent Judge** scores a run/scorecard's trace — it's a **first-class, user-registerable entity** with the
-same ownership/lifecycle as harnesses and datasets. A judge is one of two kinds:
+same ownership/lifecycle as harnesses and datasets.
+
+## The judge is CODE (`kind: "code"`) — the one authoring surface
+
+Real judging is workflow-shaped (extract evidence → maybe fetch artifacts → call a model → verify milestones →
+emit per-step scores) — a declarative config re-invents a programming language one knob at a time, so the
+registration surfaces (web form, wizard) expose **only the code judge**. A code judge is user **Python or Node
+code** that receives the run's full context and prints its verdict:
+
+```jsonc
+{ "kind": "code", "id": "e2e-booking", "version": "1.0.0",
+  "language": "python" | "node",
+  "code": "...",                 // inline source (frozen into the version) — OR entrypoint: a path in `image`
+  "image": "ghcr.io/acme/judge:1",  // optional dedicated judge image (must be everdict-baked); default = agent image
+  "model": { "ref": "judge-model" },// optional Model binding the code may call
+  "timeoutSec": 600, "runtime": "nomad-seoul", "requires": [ ... ] }
+```
+
+**The code contract** (identical to the script grader's — `packages/graders/src/script-grader.ts`):
+- `argv[1]` = the path of the serialized **judge context** JSON: `{ case, trace, snapshot, evidence }`
+  (`case` carries `task`/`expected`/`milestones`; `evidence` carries the mapping-extracted
+  finalAnswer/dom/screenshot + custom slots — see `docs/architecture/judge-input-contract.md`).
+- Print a `Score | Score[]` JSON (`{graderId, metric, value, pass?, detail?}`) as the **LAST** thing on stdout
+  (logs before it are fine). Use metric `"judge"` for the overall — the runner rewrites the `judge` prefix to
+  `judge:<judge-id>` (sub-metrics like `judge:milestone:login` become `judge:<id>:milestone:login`).
+- A non-zero exit / malformed output surfaces as a visible **skip** score with the reason — never a silent drop.
+
+**Execution: sandboxed via dispatch, never on the control plane.** The `JudgeRunner` wraps the code in a no-op
+command-harness job (the context + inline code are materialized as env files; the job's script grader runs the
+code with `contextPath` pointing at the real context) and dispatches it through the normal Backend machinery —
+tenant trust-zone isolation, `runtime` routing, co-locate-with-the-run default, self-hosted runners included.
+Node is available in the default agent image everywhere; Python needs a runtime/image with `python3` (bake a
+judge image via `everdict image bake` for extra deps).
+
+**Model calls from the code.** `spec.model` (a first-class Model binding) rides the job's `judge` channel:
+`JudgeAuthDispatcher` resolves the registered Model (provider/underlying model/baseUrl/apiKeySecret, workspace →
+personal key fallback) and the backend injects `EVERDICT_JUDGE_MODEL` / `EVERDICT_JUDGE_PROVIDER` plus the
+provider key env (`ANTHROPIC_API_KEY` / `OPENAI_API_KEY`, `+_BASE_URL`) — the code just reads env and calls.
+Only the declared binding's key is injected, never the whole SecretStore.
+
+**Preview.** The zero-cost preview shows the evidence coverage the code will receive + the `requires` check;
+"Run once" (`POST /judges/try`) does one real dispatch and shows the scores (stdout logs surface in the error
+detail on failure).
+
+## Legacy engine kinds (`model` | `harness`) — no new registrations
+
+Already-registered `model`/`harness` judges keep running unchanged (the engine keeps both kinds); new
+registration surfaces don't offer them. Their machinery (`modelJudge`, rubric resolution, criteria) also still
+powers the inline judge grader on the dispatch path.
 
 - **`model`** — a function that calls an **LLM/VLM** directly: `{ model, rubric, inputs, provider, passThreshold,
   promptTemplate?, criteria? }`. Judges from the trace (and optionally DOM/screenshot → VLM) against a rubric →

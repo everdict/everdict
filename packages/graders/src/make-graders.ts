@@ -62,6 +62,7 @@ export function makeGraders(specs: GraderSpec[], opts: { judge?: Judge } = {}): 
           ...(optStr(s.config?.entrypoint) ? { entrypoint: optStr(s.config?.entrypoint) } : {}),
           ...(optStr(s.config?.image) ? { image: optStr(s.config?.image) } : {}),
           ...(optStr(s.config?.cwd) ? { cwd: optStr(s.config?.cwd) } : {}),
+          ...(optStr(s.config?.contextPath) ? { contextPath: optStr(s.config?.contextPath) } : {}),
           ...(typeof s.config?.timeoutSec === "number" ? { timeoutSec: s.config.timeoutSec } : {}),
           ...(optStr(s.config?.id) ? { id: optStr(s.config?.id) } : {}),
         });

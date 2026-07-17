@@ -153,4 +153,44 @@ describe("ScriptGrader — user code over the full serialized GradeContext", () 
     const [g] = makeGraders([{ id: "script", config: { language: "python", code: "c", image: "everdict/grader:1" } }]);
     expect(g?.needsCompute).toBe(false);
   });
+
+  it("contextPath grades a PRE-SERIALIZED context file (code-judge wrapper) — no own-context write", async () => {
+    const out = '[{"graderId":"judge","metric":"judge","value":1,"pass":true}]';
+    const { compute, writes, execs } = mockCompute(out);
+    const grader = new ScriptGrader({
+      language: "node",
+      entrypoint: "judge.mjs",
+      cwd: "work",
+      contextPath: "judge-context.json",
+      id: "judge",
+    });
+    const scores = await grader.grade(ctx(compute));
+    // the wrapper job's own context is NOT serialized — argv[1] is the pre-materialized env file
+    expect(writes.some((w) => w.path === "/tmp/everdict-grade-context.json")).toBe(false);
+    expect(execs[0]?.cmd).toBe("node 'judge.mjs' 'judge-context.json'");
+    expect(execs[0]?.opts?.cwd).toBe("work");
+    expect(scores[0]).toMatchObject({ graderId: "judge", metric: "judge", pass: true });
+  });
+
+  it("serializes GradeContext.evidence (pulled-trace extraction) into the context file", async () => {
+    const out = '[{"graderId":"x","metric":"m","value":1}]';
+    const { compute, writes } = mockCompute(out);
+    const withEvidence: GradeContext = { ...ctx(compute), evidence: { custom: { confirmation_id: "R-42" } } };
+    await new ScriptGrader({ language: "python", code: "c" }).grade(withEvidence);
+    const contextWrite = writes.find((w) => w.path === "/tmp/everdict-grade-context.json");
+    const parsed = JSON.parse(contextWrite?.data ?? "{}") as { evidence?: { custom?: Record<string, string> } };
+    expect(parsed.evidence?.custom).toEqual({ confirmation_id: "R-42" });
+  });
+
+  it("makeGraders passes contextPath through (the code-judge wrapper spec)", async () => {
+    const [g] = makeGraders([
+      {
+        id: "script",
+        config: { language: "node", entrypoint: "judge.mjs", cwd: "work", contextPath: "judge-context.json" },
+      },
+    ]);
+    const { compute, execs } = mockCompute('[{"graderId":"j","metric":"judge","value":1}]');
+    await g?.grade(ctx(compute));
+    expect(execs[0]?.cmd).toContain("'judge-context.json'");
+  });
 });

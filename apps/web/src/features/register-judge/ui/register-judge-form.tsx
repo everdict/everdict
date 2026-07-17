@@ -1,7 +1,6 @@
 'use client'
 
 import { useState, useTransition } from 'react'
-import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { CheckCircle2, Loader2, ShieldCheck } from 'lucide-react'
 import { useTranslations } from 'next-intl'
@@ -22,12 +21,57 @@ import {
 import { JudgePreviewPanel } from './judge-preview-panel'
 import { RequiresEditor, type Requirement } from './requires-editor'
 
-const INPUTS = ['trace', 'dom', 'screenshot'] as const
-type Kind = 'model' | 'harness'
-// A judge's rubric comes in two shapes — inline freeform text or a registered-rubric reference {id, version}.
-type RubricMode = 'inline' | 'registered'
+type Language = 'python' | 'node'
 
-// Linear-style segmented control — shared by the kind and rubric-mode toggles.
+// Starter templates — the code contract in runnable form: read the context (argv[1] JSON with
+// {case, trace, snapshot, evidence}), optionally call the judge model via the injected env, print Score[] last.
+const PYTHON_STARTER = `import json, os, sys, urllib.request
+
+ctx = json.load(open(sys.argv[1]))  # {case, trace, snapshot, evidence}
+answer = (ctx.get("evidence") or {}).get("finalAnswer", "")
+
+def llm(prompt):
+    # EVERDICT_JUDGE_MODEL / ANTHROPIC_API_KEY are injected from this judge's Model binding
+    req = urllib.request.Request(
+        os.environ.get("ANTHROPIC_BASE_URL", "https://api.anthropic.com") + "/v1/messages",
+        method="POST",
+        headers={
+            "x-api-key": os.environ["ANTHROPIC_API_KEY"],
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json",
+        },
+        data=json.dumps({
+            "model": os.environ["EVERDICT_JUDGE_MODEL"],
+            "max_tokens": 512,
+            "messages": [{"role": "user", "content": prompt}],
+        }).encode(),
+    )
+    return json.load(urllib.request.urlopen(req))["content"][0]["text"]
+
+scores = []
+for m in ctx["case"].get("milestones") or []:
+    verdict = llm(f"Expectation: {m['description']}\\nTrace: {json.dumps(ctx['trace'])[:6000]}\\nSatisfied? yes/no")
+    ok = "yes" in verdict.lower()
+    scores.append({"graderId": "judge", "metric": f"judge:milestone:{m['id']}", "value": 1 if ok else 0, "pass": ok})
+
+ok = bool(answer)
+scores.insert(0, {"graderId": "judge", "metric": "judge", "value": 1 if ok else 0, "pass": ok})
+print(json.dumps(scores))
+`
+
+const NODE_STARTER = `import { readFileSync } from 'node:fs'
+
+const ctx = JSON.parse(readFileSync(process.argv[2], 'utf8')) // {case, trace, snapshot, evidence}
+const answer = ctx.evidence?.finalAnswer ?? ''
+
+// EVERDICT_JUDGE_MODEL + ANTHROPIC_API_KEY / OPENAI_API_KEY are injected from this judge's Model binding.
+const ok = answer.length > 0
+console.log(JSON.stringify([{ graderId: 'judge', metric: 'judge', value: ok ? 1 : 0, pass: ok }]))
+`
+
+const STARTERS: Record<Language, string> = { python: PYTHON_STARTER, node: NODE_STARTER }
+
+// Linear-style segmented control (language toggle).
 function Segmented<T extends string>({
   value,
   onChange,
@@ -76,89 +120,62 @@ function Field({
   )
 }
 
-// Agent Judge registration form — kind (model | harness) toggle + conditional fields; dry-run validate, then register.
-// runtimes = this workspace's runtimes (harness-judge execution infra; empty = co-locate only).
-// rubrics = registered rubrics (owned + shared) for the registered-rubric mode selector.
-// models = this workspace's registered LLM models — the model-kind judge picks its provider model from these (id ≠ model string).
+// Code-judge registration — THE judge authoring surface: user Python/Node code renders the verdict from the full
+// judge context, sandboxed via dispatch. (model/harness judges remain engine-internal for already-registered specs.)
+// runtimes = this workspace's runtimes (judge execution infra; empty = co-locate only).
+// models = registered LLM models — the optional Model binding the code may call (env-injected at dispatch).
 export function RegisterJudgeForm({
   workspace,
   runtimes = [],
-  rubrics = [],
   models = [],
   sources = [],
   assignments = {},
 }: {
   workspace: string
   runtimes?: { id: string }[]
-  rubrics?: { id: string; owner: string }[]
   models?: { id: string; provider: string; model: string }[]
   sources?: TraceSourceConfig[]
   assignments?: Record<string, string>
 }) {
   const router = useRouter()
   const t = useTranslations('registerJudge')
-  const [kind, setKind] = useState<Kind>('model')
   const [id, setId] = useState('')
   const [version, setVersion] = useState('1.0.0')
   const [description, setDescription] = useState('')
-  // model fields
-  const [provider, setProvider] = useState('anthropic')
-  const [model, setModel] = useState('claude-opus-4-8')
-  const [inputs, setInputs] = useState<string[]>(['trace'])
-  const [passThreshold, setPassThreshold] = useState('')
-  // Declared evidence requirements (both kinds) — the preview checks them against a sample trace (satisfied/missing).
-  const [requires, setRequires] = useState<Requirement[]>([])
-  // rubric (both kinds — model: required, harness: optional)
-  const [rubricMode, setRubricMode] = useState<RubricMode>('inline')
-  const [rubricText, setRubricText] = useState('')
-  const [rubricId, setRubricId] = useState('')
-  const [rubricVersion, setRubricVersion] = useState('latest')
-  // harness fields
-  const [harnessId, setHarnessId] = useState('')
-  const [harnessVersion, setHarnessVersion] = useState('latest')
+  const [language, setLanguage] = useState<Language>('python')
+  const [code, setCode] = useState<string>(PYTHON_STARTER)
+  const [model, setModel] = useState('')
   const [runtime, setRuntime] = useState('')
+  const [image, setImage] = useState('')
+  const [timeoutSec, setTimeoutSec] = useState('')
+  // Declared evidence requirements — the preview checks them against a sample trace (satisfied/missing).
+  const [requires, setRequires] = useState<Requirement[]>([])
 
   const [result, setResult] = useState<ValidateJudgeResult>()
   const [error, setError] = useState<string>()
   const [validating, startValidate] = useTransition()
   const [saving, startSave] = useTransition()
 
-  // The rubric field in its wire shape — string (inline) | {id, version} (reference) | undefined (harness only).
-  function rubricValue(): unknown {
-    if (rubricMode === 'registered')
-      return rubricId ? { id: rubricId, version: rubricVersion.trim() || 'latest' } : undefined
-    return rubricText.trim() ? rubricText : undefined
+  // Switching language swaps the starter only while the code is still an untouched starter (never clobber edits).
+  function onLanguage(next: Language) {
+    setLanguage(next)
+    if (code === STARTERS[language] || code.trim() === '') setCode(STARTERS[next])
   }
 
   function buildSpec(): unknown {
-    const rubric = rubricValue()
-    const common = {
+    return {
+      kind: 'code',
       id: id.trim(),
       version: version.trim() || '1.0.0',
       ...(description.trim() ? { description: description.trim() } : {}),
+      language,
+      code,
+      ...(model ? { model: { ref: model } } : {}),
+      ...(runtime ? { runtime } : {}),
+      ...(image.trim() ? { image: image.trim() } : {}),
+      ...(timeoutSec.trim() ? { timeoutSec: Number(timeoutSec) } : {}),
       ...(requires.length ? { requires } : {}),
       tags: [] as string[],
-    }
-    if (kind === 'model') {
-      // A picked registered model → a ModelRef {ref:id} (its connection resolves at judge-run time); a free-typed
-      // value that isn't a registered id stays a raw model string (provider + provider-default key).
-      const picked = models.find((m) => m.id === model.trim())
-      return {
-        ...common,
-        kind: 'model',
-        provider,
-        model: picked ? { ref: picked.id } : model.trim(),
-        rubric,
-        inputs,
-        ...(passThreshold.trim() ? { passThreshold: Number(passThreshold) } : {}),
-      }
-    }
-    return {
-      ...common,
-      kind: 'harness',
-      harness: { id: harnessId.trim(), version: harnessVersion.trim() || 'latest' },
-      ...(rubric !== undefined ? { rubric } : {}),
-      ...(runtime ? { runtime } : {}),
     }
   }
 
@@ -166,9 +183,7 @@ export function RegisterJudgeForm({
   function requiredErrorKey(): string | null {
     if (!id.trim()) return 'errorIdRequired'
     if (!version.trim()) return 'errorVersionRequired'
-    if (kind === 'model' && !model.trim()) return 'errorModelRequired'
-    if (kind === 'model' && rubricValue() === undefined) return 'errorRubricRequired'
-    if (kind === 'harness' && !harnessId.trim()) return 'errorHarnessRequired'
+    if (!code.trim()) return 'errorCodeRequired'
     return null
   }
 
@@ -205,28 +220,15 @@ export function RegisterJudgeForm({
   }
 
   const busy = validating || saving
-  const rubricRequired = kind === 'model'
-  // Registered models for the currently-selected provider. Picking one references it by id (a ModelRef) — its whole
-  // connection (underlying model / baseUrl / apiKeySecret) resolves from that one definition at judge-run time.
-  const providerModels = models.filter((m) => m.provider === provider)
 
   return (
-    <div className="max-w-2xl space-y-6">
-      <Segmented
-        value={kind}
-        onChange={setKind}
-        options={[
-          { value: 'model', label: t('kindModelLabel') },
-          { value: 'harness', label: t('kindHarnessLabel') },
-        ]}
-      />
-
+    <div className="max-w-3xl space-y-6">
       <div className="grid grid-cols-2 gap-4">
         <Field label={t('idLabel')} hint={t('idHint')}>
           <Input
             value={id}
             onChange={(e) => setId(e.target.value)}
-            placeholder="correctness"
+            placeholder="e2e-booking"
             autoComplete="off"
           />
         </Field>
@@ -249,165 +251,44 @@ export function RegisterJudgeForm({
         />
       </Field>
 
-      {kind === 'model' && (
-        <div className="grid grid-cols-2 gap-4">
-          <Field label={t('providerLabel')}>
-            <Combobox
-              value={provider}
-              onChange={setProvider}
-              options={[
-                { value: 'anthropic', label: 'anthropic' },
-                { value: 'openai', label: 'openai' },
-              ]}
-            />
-          </Field>
-          {/* Model — pick from the workspace's registered models for this provider; falls back to free text when none are registered. */}
-          <div className="space-y-1.5">
-            <Label>{t('modelLabel')}</Label>
-            {providerModels.length > 0 ? (
-              <Combobox
-                value={model}
-                onChange={setModel}
-                placeholder={t('modelPickerPlaceholder')}
-                options={providerModels.map((m) => ({ value: m.id, label: m.id, hint: m.model }))}
-                aria-label={t('modelLabel')}
-              />
-            ) : (
-              <Input
-                value={model}
-                onChange={(e) => setModel(e.target.value)}
-                placeholder="claude-opus-4-8"
-                autoComplete="off"
-              />
-            )}
-            <p className="text-[12px] text-faint">
-              {providerModels.length > 0 ? (
-                t('modelPickerHint')
-              ) : (
-                <>
-                  {t('modelNoneHint')}{' '}
-                  <Link
-                    href={`/${workspace}/settings/models`}
-                    className="font-[510] text-foreground underline underline-offset-2"
-                  >
-                    {t('registerModelCta')}
-                  </Link>
-                </>
-              )}
-            </p>
-          </div>
-        </div>
-      )}
-
-      {kind === 'harness' && (
-        <div className="grid grid-cols-2 gap-4">
-          <Field label={t('harnessIdLabel')}>
-            <Input
-              value={harnessId}
-              onChange={(e) => setHarnessId(e.target.value)}
-              placeholder="claude-code"
-              autoComplete="off"
-            />
-          </Field>
-          <Field label={t('harnessVersionLabel')}>
-            <Input
-              value={harnessVersion}
-              onChange={(e) => setHarnessVersion(e.target.value)}
-              placeholder="latest"
-              autoComplete="off"
-            />
-          </Field>
-        </div>
-      )}
-
-      {/* Rubric — inline text (frozen into this judge version) or a registered rubric reference (versioned separately). */}
+      {/* The code — the judge itself. Contract: argv[1] = context JSON path; print Score[] last on stdout. */}
       <div className="space-y-2.5">
         <div className="flex items-center justify-between gap-3">
-          <Label>{rubricRequired ? t('rubricLabel') : t('rubricOptionalLabel')}</Label>
+          <Label>{t('codeLabel')}</Label>
           <Segmented
-            value={rubricMode}
-            onChange={setRubricMode}
+            value={language}
+            onChange={onLanguage}
             options={[
-              { value: 'inline', label: t('rubricModeInline') },
-              { value: 'registered', label: t('rubricModeRegistered') },
+              { value: 'python', label: 'Python' },
+              { value: 'node', label: 'Node.js' },
             ]}
           />
         </div>
-        {rubricMode === 'inline' ? (
-          <Textarea
-            className="min-h-28"
-            value={rubricText}
-            onChange={(e) => setRubricText(e.target.value)}
-            placeholder={t('rubricTextPlaceholder')}
-            aria-label={t('rubricLabel')}
-          />
-        ) : rubrics.length === 0 ? (
-          <p className="text-[12px] text-muted-foreground">
-            {t('rubricEmptyHint')}{' '}
-            <Link
-              href={`/${workspace}/rubrics/new`}
-              className="font-[510] text-foreground underline underline-offset-2"
-            >
-              {t('registerRubricCta')}
-            </Link>
-          </p>
-        ) : (
-          <div className="grid grid-cols-2 gap-4">
-            <Field label={t('rubricSelectLabel')}>
-              <Combobox
-                value={rubricId}
-                onChange={setRubricId}
-                placeholder={t('rubricSelectPlaceholder')}
-                options={rubrics.map((r) => ({
-                  value: r.id,
-                  hint: r.owner === '_shared' ? t('sharedHint') : undefined,
-                }))}
-              />
-            </Field>
-            <Field label={t('rubricVersionLabel')} hint={t('rubricVersionHint')}>
-              <Input
-                value={rubricVersion}
-                onChange={(e) => setRubricVersion(e.target.value)}
-                placeholder="latest"
-                autoComplete="off"
-              />
-            </Field>
-          </div>
-        )}
+        <Textarea
+          value={code}
+          onChange={(e) => setCode(e.target.value)}
+          rows={18}
+          spellCheck={false}
+          className="font-mono text-[12px] leading-relaxed"
+          aria-label={t('codeLabel')}
+        />
+        <p className="text-[12px] text-faint">{t('codeHint')}</p>
       </div>
 
-      {kind === 'model' && (
-        <div className="grid grid-cols-2 gap-4">
-          <Field label={t('inputsLabel')}>
-            <div className="flex h-8 items-center gap-4 text-[13px]">
-              {INPUTS.map((o) => (
-                <label key={o} className="flex items-center gap-1.5">
-                  <input
-                    type="checkbox"
-                    checked={inputs.includes(o)}
-                    onChange={(e) =>
-                      setInputs(e.target.checked ? [...inputs, o] : inputs.filter((x) => x !== o))
-                    }
-                    className="accent-primary"
-                  />
-                  {o}
-                </label>
-              ))}
-            </div>
-          </Field>
-          <Field label={t('passThresholdLabel')}>
-            <Input
-              value={passThreshold}
-              onChange={(e) => setPassThreshold(e.target.value)}
-              placeholder="0.7"
-              inputMode="decimal"
-              autoComplete="off"
-            />
-          </Field>
-        </div>
-      )}
-
-      {kind === 'harness' && (
+      <div className="grid grid-cols-2 gap-4">
+        {/* Optional Model binding — injected as EVERDICT_JUDGE_MODEL/PROVIDER + the provider key env at dispatch. */}
+        <Field label={t('modelOptionalLabel')} hint={t('modelEnvHint')}>
+          <Combobox
+            value={model}
+            onChange={setModel}
+            placeholder={t('modelNonePlaceholder')}
+            options={[
+              { value: '', label: t('modelNoneOption') },
+              ...models.map((m) => ({ value: m.id, hint: `${m.provider}/${m.model}` })),
+            ]}
+            aria-label={t('modelOptionalLabel')}
+          />
+        </Field>
         <Field label={t('runtimeLabel')} hint={t('runtimeHint')}>
           <Combobox
             value={runtime}
@@ -418,7 +299,28 @@ export function RegisterJudgeForm({
             ]}
           />
         </Field>
-      )}
+      </div>
+
+      <div className="grid grid-cols-2 gap-4">
+        <Field label={t('imageLabel')} hint={t('imageHint')}>
+          <Input
+            value={image}
+            onChange={(e) => setImage(e.target.value)}
+            placeholder="ghcr.io/acme/judge:1 (everdict-baked)"
+            autoComplete="off"
+            className="font-mono text-[12px]"
+          />
+        </Field>
+        <Field label={t('timeoutLabel')} hint={t('timeoutHint')}>
+          <Input
+            value={timeoutSec}
+            onChange={(e) => setTimeoutSec(e.target.value)}
+            placeholder="600"
+            inputMode="numeric"
+            autoComplete="off"
+          />
+        </Field>
+      </div>
 
       {result && <ValidateBanner result={result} />}
       {error && (

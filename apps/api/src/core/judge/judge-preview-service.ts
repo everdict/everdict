@@ -110,6 +110,20 @@ export class JudgePreviewService {
 
   // Resolve the rubric via the SAME path a real grade uses, then render the prompt + coverage (no model call).
   private async render(tenant: string, spec: JudgeSpec, ctx: GradeContext): Promise<JudgePreviewResult> {
+    // code judge — there is no prompt to render (the code builds its own calls); the preview is the evidence
+    // coverage the code will receive plus the declared-requirement check. "Run once" (try) is the real preview.
+    if (spec.kind === "code") {
+      const input = await assembleJudgeInput(ctx, {});
+      const preview = previewJudge(input);
+      const requirements = spec.requires?.length ? assessEvidence(spec.requires, ctx) : undefined;
+      return {
+        kind: spec.kind,
+        prompt: "",
+        evidence: preview.evidence,
+        warnings: [],
+        ...(requirements ? { requirements } : {}),
+      };
+    }
     const resolution = await resolveRubric(this.deps.rubrics, tenant, spec);
     const rubricWarning = "skipReason" in resolution ? resolution.skipReason : undefined;
     const effective =

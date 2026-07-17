@@ -46,6 +46,32 @@ export const ModelJudgeSpecSchema = z.object({
 });
 export type ModelJudgeSpec = z.infer<typeof ModelJudgeSpecSchema>;
 
+// code judge — THE main judge tier: user Python/Node code renders the verdict from the full judge context
+// ({case, trace, snapshot, evidence} — argv[1] = the serialized context path; print a Score[] JSON as the LAST
+// thing on stdout, metric "judge" for the overall → rewritten to judge:<id>). Runs SANDBOXED via dispatch (never
+// on the control plane): the runner wraps it in a no-op command-harness job whose script grader executes the code.
+// `model` rides the job.judge channel — the code reads EVERDICT_JUDGE_MODEL/EVERDICT_JUDGE_PROVIDER plus the
+// provider key env (ANTHROPIC_API_KEY / OPENAI_API_KEY [+_BASE_URL]) that JudgeAuthDispatcher resolves/injects.
+// model/harness judges remain ENGINE-INTERNAL for already-registered specs; new registration surfaces expose code only.
+export const CodeJudgeSpecSchema = z.object({
+  kind: z.literal("code"),
+  id: z.string(),
+  version: z.string(),
+  description: z.string().optional(),
+  language: z.enum(["python", "node"]),
+  code: z.string().optional(), // inline source — frozen into this judge version
+  entrypoint: z.string().optional(), // OR a script path inside `image` (a baked judge image)
+  image: z.string().optional(), // dedicated judge image (must be everdict-baked); absent = the default agent image
+  model: ModelBindingSchema.optional(), // the model the code may call — registered Model ref | raw model string
+  provider: z.enum(["anthropic", "openai"]).optional(), // fallback provider for a RAW-STRING model
+  timeoutSec: z.number().int().positive().default(600),
+  // Tenant Runtime id to run the judge code on (routed via placement.target). Absent = co-locate with the produced run.
+  runtime: z.string().optional(),
+  requires: z.array(EvidenceRequirementSchema).optional(), // declared evidence needs — the preview checks them
+  tags: z.array(z.string()).default([]),
+});
+export type CodeJudgeSpec = z.infer<typeof CodeJudgeSpecSchema>;
+
 // harness judge: delegates the verdict to a registered harness (agent). version is resolved at run time (latest allowed).
 export const HarnessJudgeSpecSchema = z.object({
   kind: z.literal("harness"),
@@ -65,8 +91,18 @@ export type HarnessJudgeSpec = z.infer<typeof HarnessJudgeSpecSchema>;
 // Registration-time template/criteria validation rides the schema itself (every boundary parses through it):
 // a template without the verdict instruction would break verdict parsing at grading time — fail at the boundary instead.
 export const JudgeSpecSchema = z
-  .discriminatedUnion("kind", [ModelJudgeSpecSchema, HarnessJudgeSpecSchema])
+  .discriminatedUnion("kind", [ModelJudgeSpecSchema, HarnessJudgeSpecSchema, CodeJudgeSpecSchema])
   .superRefine((spec, ctx) => {
+    if (spec.kind === "code") {
+      if (!spec.code && !spec.entrypoint) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["code"],
+          message: "A code judge requires `code` (inline source) or `entrypoint` (a script path in its image).",
+        });
+      }
+      return;
+    }
     if (spec.promptTemplate && !spec.promptTemplate.includes(VERDICT_INSTRUCTION_PLACEHOLDER)) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,

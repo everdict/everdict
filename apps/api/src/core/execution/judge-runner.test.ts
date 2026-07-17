@@ -91,6 +91,94 @@ describe("defaultJudgeRunner", () => {
     expect(fetchImpl).toHaveBeenCalledOnce(); // one call scores everything
   });
 
+  it("code judge: dispatches a sandboxed wrapper job — context file + code + script grader + model channel", async () => {
+    const codeSpec: JudgeSpec = {
+      kind: "code",
+      id: "e2e",
+      version: "1.0.0",
+      language: "python",
+      code: "import json,sys; print('[]')",
+      model: { ref: "judge-model" },
+      timeoutSec: 600,
+      tags: [],
+    };
+    let dispatched: AgentJob | undefined;
+    const runner = defaultJudgeRunner({
+      secretsFor: async () => ({}),
+      dispatch: async (job) => {
+        dispatched = job;
+        return {
+          caseId: job.evalCase.id,
+          harness: "judge",
+          trace: [],
+          snapshot: { kind: "prompt", output: "" },
+          scores: [
+            { graderId: "judge", metric: "judge", value: 0.2, pass: false, detail: "failed at booking" },
+            { graderId: "judge", metric: "judge:milestone:login", value: 1, pass: true },
+          ],
+        } satisfies CaseResult;
+      },
+    });
+    const evidenceCtx: GradeContext = { ...ctx, evidence: { custom: { confirmation_id: "R-42" } } };
+    const scores = await runner.run(codeSpec, "acme", evidenceCtx, { target: "self:runner-1" });
+
+    // the ORIGINAL case's full judge context is materialized as an env file the code reads (argv[1])
+    const env = dispatched?.evalCase.env;
+    const files = env?.kind === "repo" && "files" in env.source ? env.source.files : {};
+    const parsedContext = JSON.parse(files["judge-context.json"] ?? "{}") as {
+      case?: { id?: string };
+      evidence?: { custom?: Record<string, string> };
+    };
+    expect(parsedContext.case?.id).toBe("c1");
+    expect(parsedContext.evidence?.custom).toEqual({ confirmation_id: "R-42" });
+    expect(files["judge.py"]).toContain("print('[]')");
+    // the wrapper grades via the script grader against the pre-serialized context; the harness is a no-op
+    expect(dispatched?.evalCase.graders[0]).toMatchObject({
+      id: "script",
+      config: { language: "python", entrypoint: "judge.py", contextPath: "judge-context.json", cwd: "work" },
+    });
+    expect(dispatched?.harnessSpec).toMatchObject({ kind: "command", command: "true" });
+    // spec.model rides the job.judge channel (JudgeAuthDispatcher resolves binding + key downstream)
+    expect(dispatched?.judge).toEqual({ model: { ref: "judge-model" } });
+    // co-locate: the source run's placement is inherited when spec.runtime is unset
+    expect(dispatched?.evalCase.placement).toEqual({ target: "self:runner-1" });
+    // scores come back stamped with THIS judge's identity + the judge→judge:<id> metric rewrite
+    expect(scores.map((s) => s.metric)).toEqual(["judge:e2e", "judge:e2e:milestone:login"]);
+    expect(scores.every((s) => s.graderId === "e2e")).toBe(true);
+  });
+
+  it("code judge: a failed wrapper job (CaseFailure) surfaces as a visible skip, never a silent drop", async () => {
+    const codeSpec: JudgeSpec = {
+      kind: "code",
+      id: "e2e",
+      version: "1.0.0",
+      language: "node",
+      code: "x",
+      timeoutSec: 600,
+      tags: [],
+    };
+    const runner = defaultJudgeRunner({
+      secretsFor: async () => ({}),
+      dispatch: async (job) => ({
+        caseId: job.evalCase.id,
+        harness: "judge",
+        trace: [],
+        snapshot: { kind: "prompt", output: "" },
+        scores: [],
+        failure: { stage: "grade", class: "config", code: "UPSTREAM_ERROR", message: "exited 1", retryable: false },
+      }),
+    });
+    const [score] = await runner.run(codeSpec, "acme", ctx);
+    expect(score?.metric).toBe("judge:e2e");
+    expect(String(score?.detail)).toContain("skipped");
+    expect(String(score?.detail)).toContain("exited 1");
+
+    // and with no dispatcher configured at all
+    const noDispatch = defaultJudgeRunner({ secretsFor: async () => ({}) });
+    const [skipScore] = await noDispatch.run(codeSpec, "acme", ctx);
+    expect(String(skipScore?.detail)).toContain("dispatch not configured");
+  });
+
   it("a case's milestones land as judge:<id>:milestone:<mid> — failure localization via the runner path", async () => {
     const verdict =
       '{"criteria":{"milestone:login":{"score":1,"pass":true,"reason":"logged in"},"milestone:book":{"score":0,"pass":false,"reason":"no booking step in the trace"}},"pass":false,"score":0.2,"reason":"failed at booking"}';

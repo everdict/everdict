@@ -23,6 +23,13 @@ export function judgeDerived(
       subtitle: `${spec.provider}/${modelLabel ?? "?"}`,
     };
   }
+  if (spec.kind === "code") {
+    return {
+      kind: "code",
+      ...(spec.description !== undefined ? { description: spec.description } : {}),
+      subtitle: `${spec.language} code`,
+    };
+  }
   return {
     kind: "harness",
     ...(spec.description !== undefined ? { description: spec.description } : {}),

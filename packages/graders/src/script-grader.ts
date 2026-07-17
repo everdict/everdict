@@ -17,6 +17,10 @@ export interface ScriptGraderConfig {
   // The case sandbox is not held for grading (observation-family) and the grader deps live in the grader image.
   image?: string;
   cwd?: string; // working directory for the run (default "work" in the case compute; the image's default in image mode)
+  // Grade a PRE-SERIALIZED context file already present in the environment (path relative to cwd) instead of this
+  // job's own context — the code-judge wrapper path: the ORIGINAL case's context is materialized as an env file and
+  // the wrapper job's own (synthetic) context is ignored. The script contract stays identical (argv[1] = context path).
+  contextPath?: string;
   timeoutSec?: number;
   id?: string; // grader id (default "script")
 }
@@ -82,15 +86,28 @@ export class ScriptGrader implements Grader {
   }
 
   private async runIn(compute: ComputeHandle, ctx: GradeContext): Promise<Score[]> {
-    // Full context minus the live handle — JSON-serializable by construction (EvalCase/TraceEvent[]/EnvSnapshot).
-    await compute.writeFile(CONTEXT_PATH, JSON.stringify({ case: ctx.case, trace: ctx.trace, snapshot: ctx.snapshot }));
+    let contextArg = this.cfg.contextPath;
+    if (!contextArg) {
+      // Full context minus the live handle — JSON-serializable by construction (EvalCase/TraceEvent[]/EnvSnapshot;
+      // evidence = the pulled-trace extraction, when present).
+      await compute.writeFile(
+        CONTEXT_PATH,
+        JSON.stringify({
+          case: ctx.case,
+          trace: ctx.trace,
+          snapshot: ctx.snapshot,
+          ...(ctx.evidence ? { evidence: ctx.evidence } : {}),
+        }),
+      );
+      contextArg = CONTEXT_PATH;
+    }
     let script = this.cfg.entrypoint;
     if (this.cfg.code) {
       script = INLINE_PATH[this.cfg.language];
       await compute.writeFile(script, this.cfg.code);
     }
     if (!script) throw new BadRequestError("BAD_REQUEST", { grader: this.id }, "No grader script to run.");
-    const cmd = `${INTERPRETER[this.cfg.language]} '${script.replace(/'/g, "'\\''")}' '${CONTEXT_PATH}'`;
+    const cmd = `${INTERPRETER[this.cfg.language]} '${script.replace(/'/g, "'\\''")}' '${contextArg.replace(/'/g, "'\\''")}'`;
     // The case compute has the "work" convention; a dedicated grader image keeps its own default workdir.
     const cwd = this.cfg.cwd ?? (this.cfg.image ? undefined : "work");
     const r = await compute.exec(cmd, { ...(cwd ? { cwd } : {}), timeoutSec: this.cfg.timeoutSec ?? 1800 });

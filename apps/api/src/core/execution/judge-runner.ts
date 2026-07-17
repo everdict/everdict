@@ -71,6 +71,7 @@ export async function resolveRubric(
   tenant: string,
   spec: JudgeSpec,
 ): Promise<{ effective: EffectiveRubric } | { skipReason: string }> {
+  if (spec.kind === "code") return { effective: {} }; // a code judge has no rubric/criteria/template — code IS the rubric
   const ref = spec.rubric;
   const own: EffectiveRubric = {
     ...(spec.criteria?.length ? { criteria: spec.criteria } : {}),
@@ -119,10 +120,97 @@ async function resolveJudgeHarness(
   }
 }
 
+// The env file the code judge's ORIGINAL context is materialized into (relative to the job's work dir) — the
+// script grader passes it as argv[1], so a code judge script has the exact ScriptGrader contract.
+const JUDGE_CONTEXT_FILE = "judge-context.json";
+
+// code judge — dispatch a sandboxed no-op job whose script grader runs the user's code against the ORIGINAL case's
+// serialized judge context ({case, trace, snapshot, evidence} as an env file). The code never runs on the control
+// plane; placement/trust-zone/self-hosted routing are the same machinery as any dispatch. spec.model rides the
+// job.judge channel — JudgeAuthDispatcher resolves the Model binding + workspace/personal key and the backend
+// injects EVERDICT_JUDGE_MODEL/PROVIDER + the provider key env, which the code reads to call its model.
+async function runCodeJudge(
+  spec: Extract<JudgeSpec, { kind: "code" }>,
+  tenant: string,
+  ctx: GradeContext,
+  deps: DefaultJudgeRunnerDeps,
+  placement?: Placement,
+): Promise<Score[]> {
+  if (!deps.dispatch) return skip(spec, "code judge dispatch not configured");
+  const scriptFile = spec.language === "python" ? "judge.py" : "judge.mjs";
+  const files: Record<string, string> = {
+    [JUDGE_CONTEXT_FILE]: JSON.stringify({
+      case: ctx.case,
+      trace: ctx.trace,
+      snapshot: ctx.snapshot,
+      ...(ctx.evidence ? { evidence: ctx.evidence } : {}),
+    }),
+    ...(spec.code ? { [scriptFile]: spec.code } : {}),
+  };
+  // Placement: spec.runtime (explicit) first → else inherit the source run's placement (co-locate).
+  const judgePlacement: Placement | undefined = spec.runtime ? { target: spec.runtime } : placement;
+  const evalCase: EvalCase = {
+    id: `judge-${spec.id}-${ctx.case.id}`,
+    env: { kind: "repo", source: { files } },
+    task: "code judge", // the verdict comes from the script grader, not the harness
+    graders: [
+      {
+        id: "script",
+        config: {
+          language: spec.language,
+          entrypoint: spec.code ? scriptFile : (spec.entrypoint ?? scriptFile),
+          cwd: "work",
+          contextPath: JUDGE_CONTEXT_FILE,
+          timeoutSec: spec.timeoutSec,
+          id: "judge",
+        },
+      },
+    ],
+    timeoutSec: spec.timeoutSec + 120, // job slack over the grading budget (env materialize + no-op harness)
+    tags: ["judge"],
+    ...(spec.image ? { image: spec.image } : {}),
+    ...(judgePlacement ? { placement: judgePlacement } : {}),
+  };
+  const job: AgentJob = {
+    evalCase,
+    harness: { id: `judge-${spec.id}`, version: spec.version },
+    // Declarative no-op command harness — the agent interprets it with no code; `true` produces an empty trace.
+    harnessSpec: {
+      kind: "command",
+      id: `judge-${spec.id}`,
+      version: spec.version,
+      setup: [],
+      command: "true",
+      env: {},
+      params: {},
+      trace: { kind: "none" },
+    },
+    tenant,
+    ...(spec.model ? { judge: { model: spec.model, ...(spec.provider ? { provider: spec.provider } : {}) } } : {}),
+  };
+  try {
+    const result = await deps.dispatch(job);
+    if (result.failure) {
+      return skip(spec, `code judge job failed at ${result.failure.stage}: ${result.failure.message}`);
+    }
+    // The wrapper job's scores ARE the code's verdict — stamp this judge's identity and rewrite the "judge"
+    // metric prefix exactly like the model path (judge → judge:<id>, judge:<sub> → judge:<id>:<sub>).
+    return result.scores.map((score) => ({
+      ...score,
+      graderId: spec.id,
+      metric: score.metric.replace(/^judge/, metricOf(spec)),
+    }));
+  } catch (err) {
+    return skip(spec, err instanceof Error ? err.message : String(err));
+  }
+}
+
 // Default implementation: model calls the provider with the tenant secret key (anthropic/openai), harness spins up the referenced agent to judge.
 export function defaultJudgeRunner(deps: DefaultJudgeRunnerDeps): JudgeRunner {
   return {
     async run(spec, tenant, ctx, placement) {
+      // code judge — its own dispatch path (no rubric/transport); see runCodeJudge above.
+      if (spec.kind === "code") return runCodeJudge(spec, tenant, ctx, deps, placement);
       // 1) Resolve the rubric first (cheapest gate — no secret read / provider call when it can't resolve).
       //    Inline string = as-is; {id, version} ref = registry lookup; unresolved → visible skip.
       const rubricResolution = await resolveRubric(deps.rubrics, tenant, spec);

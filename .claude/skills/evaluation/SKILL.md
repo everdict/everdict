@@ -47,11 +47,16 @@ never overturns an objective grader. `scorecardPassRate` aggregates over `caseVe
 gives per-metric count/mean/passRate (auto).
 
 ## Agent Judges
-A judge splits pure **prompt-build + verdict-parse** (`modelJudge`, `packages/graders/src/model-judge.ts`,
+**The authoring surface is the CODE judge** (`kind:"code"`, `docs/judges.md`): user Python/Node code over the
+serialized judge context (`{case, trace, snapshot, evidence}` — the script-grader contract), run SANDBOXED via a
+dispatched wrapper job (never on the control plane; `runCodeJudge` in `judge-runner.ts` — no-op command harness +
+script grader `contextPath`); `spec.model` rides `job.judge` → `EVERDICT_JUDGE_MODEL/PROVIDER` + provider key env.
+Legacy engine kinds (`model`|`harness`) keep running for existing specs but new registration exposes code only.
+A model judge splits pure **prompt-build + verdict-parse** (`modelJudge`, `packages/graders/src/model-judge.ts`,
 testable) from an injected **transport** `JudgeCompletion`: `anthropicComplete` / `openaiComplete`
 (OpenAI-compatible → LiteLLM via `baseUrl`) / `harnessComplete` (dispatch an agent harness, verdict from its
 trace via `traceToText`). `JudgeGrader` (`packages/graders/src/judge.ts`) wraps it; `useScreenshot` feeds the
-snapshot to a VLM. Judges are user-registered `model`|`harness` `JudgeSpec`s (`@everdict/registry`). The control
+snapshot to a VLM. The control
 plane builds the right transport from the spec + the tenant's SecretStore key/dispatcher:
 `apps/api/src/core/execution/judge-runner.ts` `defaultJudgeRunner` (`ANTHROPIC_API_KEY`/`OPENAI_API_KEY`, model-registry
 resolve, missing key ⇒ explicit `skip` score, never silent). Score metric = `judge:<id>`.

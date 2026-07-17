@@ -4,7 +4,6 @@ import { getTranslations } from 'next-intl/server'
 
 import { RegisterJudgeForm } from '@/features/register-judge'
 import { modelSpecSchema, modelsSchema } from '@/entities/model'
-import { rubricsSchema } from '@/entities/rubric'
 import { runtimesSchema } from '@/entities/runtime'
 import { traceSourcesResponseSchema, type TraceSourceConfig } from '@/entities/trace-source'
 import { can } from '@/shared/auth/can'
@@ -30,15 +29,7 @@ export default async function NewJudgePage({ params }: { params: Promise<{ works
     runtimes = []
   }
 
-  // For the registered-rubric selector — the form renders even on failure (empty = inline mode still works).
-  let rubrics: { id: string; owner: string }[] = []
-  try {
-    rubrics = rubricsSchema.parse(await controlPlane.listRubrics(ctx))
-  } catch {
-    rubrics = []
-  }
-
-  // For the model-judge model picker — registered models with their provider + underlying model string (id ≠ model).
+  // For the code judge's optional Model binding picker — registered models with provider + underlying model string.
   // Best-effort per-model spec fetch (the list summary carries only ids); empty = the form falls back to a free-text model input.
   type PickModel = { id: string; provider: string; model: string }
   let models: PickModel[] = []
@@ -89,7 +80,6 @@ export default async function NewJudgePage({ params }: { params: Promise<{ works
           <RegisterJudgeForm
             workspace={workspace}
             runtimes={runtimes}
-            rubrics={rubrics}
             models={models}
             sources={sources}
             assignments={assignments}

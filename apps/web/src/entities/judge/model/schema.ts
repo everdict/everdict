@@ -23,7 +23,9 @@ export type JudgeRubric = z.infer<typeof judgeRubricSchema>
 // A model judge's model: a raw model string OR a reference to a registered workspace Model ({ref, version?}) — the
 // SAME first-class binding a harness uses. Inline sub-shape of the JudgeSpec union (no standalone wire counterpart), so
 // it stays LOCAL. The web only DISPLAYS it (the ref id or the raw name); the connection resolves at judge-run time.
-export const judgeModelRefSchema = z.object({ ref: z.string(), version: z.string().optional() }).passthrough()
+export const judgeModelRefSchema = z
+  .object({ ref: z.string(), version: z.string().optional() })
+  .passthrough()
 export type JudgeModelRef = z.infer<typeof judgeModelRefSchema>
 export const judgeModelSchema = z.union([z.string(), judgeModelRefSchema])
 export type JudgeModel = z.infer<typeof judgeModelSchema>
@@ -35,7 +37,7 @@ export type JudgeModel = z.infer<typeof judgeModelSchema>
 // union), so no assignability guard can bind them — the web only displays fields, never reconstructs a spec.
 export const judgeSpecSchema = z
   .object({
-    kind: z.enum(['model', 'harness']),
+    kind: z.enum(['model', 'harness', 'code']),
     id: z.string(),
     version: z.string(),
     description: z.string().optional(),
@@ -47,7 +49,13 @@ export const judgeSpecSchema = z
     passThreshold: z.number().optional(),
     // harness kind
     harness: z.object({ id: z.string(), version: z.string() }).optional(),
-    runtime: z.string().optional(), // harness-judge execution runtime (absent = co-locate with the produced run)
+    runtime: z.string().optional(), // judge execution runtime (absent = co-locate with the produced run)
+    // code kind (THE registration surface — model/harness stay display-only legacy)
+    language: z.string().optional(),
+    code: z.string().optional(),
+    entrypoint: z.string().optional(),
+    image: z.string().optional(),
+    timeoutSec: z.number().optional(),
     tags: z.array(z.string()).optional(),
   })
   .passthrough()
