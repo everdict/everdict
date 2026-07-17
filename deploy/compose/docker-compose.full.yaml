@@ -134,12 +134,25 @@ services:
       GITHUB_ENTERPRISE_APP_PRIVATE_KEY: ${GITHUB_ENTERPRISE_APP_PRIVATE_KEY:-}
       # ── Optional: workspace Mattermost notifications (operator server URL; workspaces register bot token + channel) ──
       MATTERMOST_HOST: ${MATTERMOST_HOST:-}
+      # ── Optional: interactive browser sessions (login profiles) — see the .env template. The docker provisioner
+      #    additionally needs the Docker socket mount below (the api launches the headless-browser container). ──
+      EVERDICT_BROWSER_SESSIONS: ${EVERDICT_BROWSER_SESSIONS:-}
+      EVERDICT_BROWSER_PROVISIONER: ${EVERDICT_BROWSER_PROVISIONER:-}
+      EVERDICT_BROWSER_IMAGE: ${EVERDICT_BROWSER_IMAGE:-}
+      EVERDICT_BROWSER_DOCKER_NETWORK: ${EVERDICT_BROWSER_DOCKER_NETWORK:-}
+      EVERDICT_BROWSER_MAX_SESSIONS_PER_TENANT: ${EVERDICT_BROWSER_MAX_SESSIONS_PER_TENANT:-}
+      EVERDICT_BROWSER_MAX_SESSIONS: ${EVERDICT_BROWSER_MAX_SESSIONS:-}
     depends_on:
       postgres:
         condition: service_healthy
     extra_hosts:
       # Reach host-side services (a self-hosted runner or a LiteLLM proxy running on the Docker host).
       - "host.docker.internal:host-gateway"
+    # Uncomment for EVERDICT_BROWSER_PROVISIONER=docker — the api drives the host Docker daemon to launch the
+    # headless-browser container (grants this container Docker control; prefer runtime-bound sessions if that
+    # trust is unacceptable).
+    # volumes:
+    #   - /var/run/docker.sock:/var/run/docker.sock
     ports:
       - "${API_PORT:-8787}:8787"
     restart: unless-stopped
