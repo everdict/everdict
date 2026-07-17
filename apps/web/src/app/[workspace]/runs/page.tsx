@@ -1,14 +1,10 @@
-import Link from 'next/link'
-import { Plus } from 'lucide-react'
 import { getTranslations } from 'next-intl/server'
 
 import { RunsTable } from '@/widgets/runs-table'
 import { runsSchema } from '@/entities/run'
-import { can } from '@/shared/auth/can'
 import { currentPrincipal } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
 import { AutoRefresh } from '@/shared/ui/auto-refresh'
-import { buttonVariants } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
 import { PageHeader } from '@/shared/ui/page-header'
 
@@ -17,7 +13,7 @@ export const dynamic = 'force-dynamic'
 export default async function RunsPage({ params }: { params: Promise<{ workspace: string }> }) {
   const { workspace } = await params
   const t = await getTranslations('runsPage')
-  const { principal, ctx } = await currentPrincipal()
+  const { ctx } = await currentPrincipal()
   let error: string | undefined
   let runs = runsSchema.parse([])
   try {
@@ -34,18 +30,7 @@ export default async function RunsPage({ params }: { params: Promise<{ workspace
   return (
     <div className="space-y-6">
       <AutoRefresh enabled={active} />
-      <PageHeader
-        title={t('title')}
-        description={t('description', { runs: runs.length })}
-        actions={
-          can(principal?.roles, 'runs:submit') ? (
-            <Link href={`/${workspace}/runs/new`} className={buttonVariants({ size: 'sm' })}>
-              <Plus className="size-4" />
-              {t('newRun')}
-            </Link>
-          ) : null
-        }
-      />
+      <PageHeader title={t('title')} description={t('description', { runs: runs.length })} />
       {error ? (
         <Callout tone="danger">{t('connectError', { error })}</Callout>
       ) : (
