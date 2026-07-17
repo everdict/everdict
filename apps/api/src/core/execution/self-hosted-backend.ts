@@ -26,7 +26,9 @@ export class SelfHostedBackend implements Backend, Probeable {
   }
   async dispatch(job: AgentJob, opts?: DispatchOptions): Promise<CaseResult> {
     if (opts?.signal?.aborted) throw dispatchAborted(job); // best-effort: refuse a pre-cancelled park
-    const { result, ranBy } = await this.hub.enqueue(this.key, job);
+    // onStarted fires on LEASE (not here at park) — a self-hosted job is "waiting" until a runner takes it. The hub
+    // fires the hook the moment it hands the job to a runner, so the caller flips the run record queued→running then.
+    const { result, ranBy } = await this.hub.enqueue(this.key, job, opts?.onStarted);
     // Provenance is stamped by the control plane (not runner self-reported) — record in the result that this ran on an unmanaged personal host (D2).
     // runner = the runner that actually completed it (ranBy). For a pool (self:ws) job key.runnerId is "*" (the pool), so use ranBy to record the real runner.
     return { ...result, provenance: { ranOn: "self-hosted", runner: ranBy, by: this.key.owner } };

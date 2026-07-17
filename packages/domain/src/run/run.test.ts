@@ -45,13 +45,24 @@ describe("Run — the run lifecycle domain model", () => {
     expect(run.fail({ code: "INTERNAL", message: "boom" }, "t1")).toMatchObject({ status: "failed" });
   });
 
-  it("a terminal run rejects every re-write — succeed, fail, adopt, redispatch all throw ConflictError", () => {
+  it("start flips a queued run to running (compute began) and is refused once terminal", () => {
+    // The onStarted hook (managed dispatch / self-hosted lease) drives this — it makes "waiting for a runner" (queued)
+    // distinct from "executing" (running) so a fan-out parked behind one runner doesn't read as all-running.
+    expect(Run.from(queued()).start("t1")).toEqual({ status: "running", updatedAt: "t1" });
+    // Idempotent over an already-running record (a re-fire from spillover/speculation is a harmless no-op).
+    expect(Run.from({ ...queued(), status: "running" }).start("t2")).toEqual({ status: "running", updatedAt: "t2" });
+    // A late lease flip must never resurrect a settled run.
+    expect(() => Run.from({ ...queued(), status: "succeeded", result: RESULT }).start("t3")).toThrow(ConflictError);
+  });
+
+  it("a terminal run rejects every re-write — succeed, fail, adopt, redispatch, start all throw ConflictError", () => {
     const settled = Run.from({ ...queued(), status: "succeeded", result: RESULT });
     expect(settled.isTerminal()).toBe(true);
     expect(() => settled.succeed(RESULT, "t")).toThrow(ConflictError);
     expect(() => settled.fail({ code: "INTERNAL", message: "late" }, "t")).toThrow(ConflictError);
     expect(() => settled.adopt(RESULT, "t")).toThrow(ConflictError);
     expect(() => settled.redispatch("t")).toThrow(ConflictError);
+    expect(() => settled.start("t")).toThrow(ConflictError);
   });
 
   it("adoption is legal only while the run is unsettled", () => {

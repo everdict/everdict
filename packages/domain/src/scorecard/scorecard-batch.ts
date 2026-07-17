@@ -45,9 +45,11 @@ export interface NewQueuedIngestInput {
   now: string;
 }
 
-// A batch fan-out child run. Deliberately NOT Run.newQueued: a child is born running (created at the moment of
-// dispatch), never persists caseSpec (the batch re-plans from its dataset — the orchestration field is the
-// resume basis, not per-child case bodies), and its trigger is fixed to "scorecard".
+// A batch fan-out child run. Like Run.newQueued it is born QUEUED (created at dispatch, flipped to running only when
+// compute actually starts — a runner leases it / a managed backend dispatches it), so a fan-out parked behind one
+// runner reads as "waiting", not falsely "running". Unlike Run.newQueued it never persists caseSpec (the batch
+// re-plans from its dataset — the orchestration field is the resume basis, not per-child case bodies), and its
+// trigger is fixed to "scorecard".
 export interface NewChildRunInput {
   id: string;
   tenant: string;
@@ -98,14 +100,14 @@ export class ScorecardBatch {
     };
   }
 
-  // Fan-out child run, born running (see NewChildRunInput for why this is not Run.newQueued).
+  // Fan-out child run, born queued (flipped to running when compute starts; see NewChildRunInput).
   static newChildRun(input: NewChildRunInput): RunRecord {
     return {
       id: input.id,
       tenant: input.tenant,
       harness: input.harness,
       caseId: input.caseId,
-      status: "running",
+      status: "queued",
       parentScorecardId: input.parentScorecardId,
       trigger: "scorecard",
       ...(input.runtime ? { runtime: input.runtime } : {}),
@@ -195,6 +197,24 @@ export class ScorecardBatch {
         "BAD_REQUEST",
         { scorecard: this.record.id },
         "Retrying a multi-trial (pass@k) batch is not yet supported.",
+      );
+  }
+
+  // A full re-run re-executes a FINISHED batch's ENTIRE case set as a new scorecard (optionally re-scored with a
+  // different grading plan / judge model / trace sink). Unlike retry-failed there is no carry-over — every case
+  // re-runs — so a multi-trial batch is fine here (submit re-fans the trials); only unfinished/dead-end statuses
+  // are rejected. docs/architecture/batch-resilience.md
+  canRerun(): boolean {
+    return this.record.status === "succeeded" || this.record.status === "failed";
+  }
+
+  // Throwing form of canRerun — the 400 the rerun route returns for a batch that has not finished.
+  assertCanRerun(): void {
+    if (!this.canRerun())
+      throw new BadRequestError(
+        "BAD_REQUEST",
+        { scorecard: this.record.id, status: this.record.status },
+        "Only a finished batch can be re-run — wait for it to finish (or resume handles interruptions).",
       );
   }
 

@@ -1,6 +1,6 @@
 import type { AgentJob, CaseResult, RegistryAuth } from "@everdict/contracts";
 import { imageUsesRegistryHost } from "@everdict/domain";
-import type { Dispatcher } from "../ports/dispatcher.js";
+import type { DispatchOptions, Dispatcher } from "../ports/dispatcher.js";
 import { type CollectTraceDeps, collectDeferredTrace } from "./collect-trace.js";
 
 // Execution concern — a pure unit that runs a single case and produces a result. Shared by run/scorecard.
@@ -73,8 +73,14 @@ function withHarnessImage(job: AgentJob): AgentJob {
 
 // Pure execution: (promote harness image →) resolve+attach private-repo token → dispatch → (complete collection) → CaseResult.
 // budget admit/settle are the orchestration's (caller's) accounting concern — not done here (a run just runs). The caller passes the job
-// already enriched (tenant/harnessSpec/judge/meterUsage/submittedBy).
-export async function executeCase(deps: ExecuteCaseDeps, owner: string, job: AgentJob): Promise<CaseResult> {
+// already enriched (tenant/harnessSpec/judge/meterUsage/submittedBy). opts threads cancellation (signal) + the onStarted
+// hook (fires when compute actually begins → the caller flips the run record queued→running) down to the dispatcher.
+export async function executeCase(
+  deps: ExecuteCaseDeps,
+  owner: string,
+  job: AgentJob,
+  opts?: DispatchOptions,
+): Promise<CaseResult> {
   const normalized = withHarnessImage(job);
   const repoToken = await resolveRepoToken(deps, owner, normalized);
   const registryAuth = await resolveRegistryAuth(deps, normalized);
@@ -83,7 +89,7 @@ export async function executeCase(deps: ExecuteCaseDeps, owner: string, job: Age
     ...(repoToken ? { repoToken } : {}),
     ...(registryAuth ? { registryAuth } : {}),
   };
-  const result = await deps.dispatcher.dispatch(enriched);
+  const result = await deps.dispatcher.dispatch(enriched, opts);
   // A case whose collection was deferred out of the job (traceRef) is completed here — the job was returned when execution ended (2-phase).
   return collectDeferredTrace(deps, enriched.tenant, enriched.evalCase, result);
 }

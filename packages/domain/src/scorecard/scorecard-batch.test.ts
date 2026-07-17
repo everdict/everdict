@@ -61,7 +61,7 @@ describe("ScorecardBatch — factories", () => {
     expect(record.runtime).toBeUndefined();
   });
 
-  it("newChildRun materializes a running fan-out child (trigger=scorecard, no caseSpec) — not a queued standalone run", () => {
+  it("newChildRun materializes a QUEUED fan-out child (trigger=scorecard, no caseSpec) — waiting for a runner, not falsely running", () => {
     const child = ScorecardBatch.newChildRun({
       id: "r1",
       tenant: "acme",
@@ -73,7 +73,9 @@ describe("ScorecardBatch — factories", () => {
     });
     expect(() => RunRecordSchema.parse(child)).not.toThrow();
     expect(child).toMatchObject({
-      status: "running",
+      // Born queued (like a standalone run) — a fan-out parked behind one runner reads as "waiting" until leased,
+      // then flipped to running by the onStarted hook. It carries no caseSpec (the batch re-plans from its dataset).
+      status: "queued",
       trigger: "scorecard",
       parentScorecardId: "sc1",
       runtime: "nomad-a",
@@ -158,6 +160,24 @@ describe("ScorecardBatch — guards (the SSOT for legality)", () => {
     expect(() => ScorecardBatch.from({ ...multiTrial, status: "failed" }).assertCanRetryFailed()).toThrow(
       /multi-trial \(pass@k\) batch is not yet supported/,
     );
+  });
+
+  it("canRerun accepts any finished batch including multi-trial (submit re-fans the trials), rejects unfinished/dead-end", () => {
+    expect(ScorecardBatch.from({ ...queued(), status: "succeeded" }).canRerun()).toBe(true);
+    expect(ScorecardBatch.from({ ...queued(), status: "failed" }).canRerun()).toBe(true);
+    // Unlike retry-failed, a multi-trial batch IS re-runnable — a full re-run re-fans every trial.
+    const multiTrial = queued({ orchestration: { judges: [], concurrency: 4, retries: 1, trials: 3 } });
+    expect(ScorecardBatch.from({ ...multiTrial, status: "succeeded" }).canRerun()).toBe(true);
+    expect(ScorecardBatch.from({ ...queued(), status: "running" }).canRerun()).toBe(false);
+    expect(ScorecardBatch.from({ ...queued(), status: "superseded" }).canRerun()).toBe(false);
+    expect(ScorecardBatch.from({ ...queued(), status: "cancelled" }).canRerun()).toBe(false);
+  });
+
+  it("assertCanRerun throws a 400 for a batch that has not finished", () => {
+    expect(() => ScorecardBatch.from({ ...queued(), status: "running" }).assertCanRerun()).toThrow(
+      /Only a finished batch can be re-run/,
+    );
+    expect(() => ScorecardBatch.from({ ...queued(), status: "queued" }).assertCanRerun()).toThrow(BadRequestError);
   });
 
   it("canSupersede matches the (repo, prNumber) provenance case-insensitively and only while unsettled", () => {

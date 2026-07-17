@@ -52,6 +52,7 @@ interface QueueEntry {
   reject: (e: unknown) => void;
   signal?: AbortSignal; // per-dispatch cancellation — forwarded to the backend once in-flight
   onAbort?: () => void; // the queued-abort listener, detached when the entry leaves the queue
+  onStarted?: () => void; // fires when the entry leaves the wait queue and is dispatched — forwarded to the backend
 }
 
 export interface SchedulerOptions {
@@ -187,6 +188,7 @@ export class Scheduler {
         resolve,
         reject,
         ...(opts?.signal ? { signal: opts.signal } : {}),
+        ...(opts?.onStarted ? { onStarted: opts.onStarted } : {}),
       };
       if (opts?.signal) {
         // Aborted while still QUEUED → remove and reject, so a cancelled job never wastes a placement slot. Once
@@ -364,9 +366,19 @@ export class Scheduler {
   }
 
   private runOne(entry: QueueEntry, name: string, tenant: string, memNeedMb: number, cpuNeed: number): void {
+    // The entry just left the wait queue → forward signal (cancellation) AND onStarted (the "compute is beginning"
+    // hook). A managed backend fires onStarted at its dispatch entry (= now, post-admission); the self-hosted backend
+    // forwards it to the lease hub so it fires only when a runner actually takes the job.
+    const dispatchOpts =
+      entry.signal || entry.onStarted
+        ? {
+            ...(entry.signal ? { signal: entry.signal } : {}),
+            ...(entry.onStarted ? { onStarted: entry.onStarted } : {}),
+          }
+        : undefined;
     this.registry
       .get(name)
-      .dispatch(entry.job, entry.signal ? { signal: entry.signal } : undefined)
+      .dispatch(entry.job, dispatchOpts)
       .then((result) => {
         this.opts.budget?.settle(tenant, costOf(result)); // commit the actual cost on completion
         entry.resolve(result);

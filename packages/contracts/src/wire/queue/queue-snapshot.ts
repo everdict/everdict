@@ -16,7 +16,8 @@ const QueueItemSchema = z.object({
   progress: z
     .object({
       done: z.number().int().describe("Finished (succeeded+failed) children"),
-      active: z.number().int().describe("Running children"),
+      active: z.number().int().describe("Running children (a runner is actually executing them)"),
+      waiting: z.number().int().describe("Queued children (parked, waiting for a runner/backend slot)"),
       total: z.number().int().optional().describe("Dataset case count (omitted if resolution fails)"),
     })
     .optional()

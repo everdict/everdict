@@ -24,6 +24,7 @@ export class LocalBackend implements Backend, Probeable {
   dispatch(job: AgentJob, opts?: DispatchOptions): Promise<CaseResult> {
     // In-process — can't interrupt a started run, so honor the signal best-effort by refusing a not-yet-started one.
     if (opts?.signal?.aborted) return Promise.reject(dispatchAborted(job));
+    opts?.onStarted?.(); // dispatch = the case begins now (this backend has no queue) → flip the run record to running
     return runAgentJob(job);
   }
 

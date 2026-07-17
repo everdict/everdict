@@ -489,8 +489,10 @@ export class ScorecardBatchService {
         // Spillover: same failover as the in-process loop — a retryable infra failure moves the case to the
         // next healthy runtime of the shard list before the transient retry burns attempts on a dead cluster.
         // Tail speculation on top (same semantics as the in-process loop): straggler duplicate, first result wins.
+        const childId = child?.id;
+        const startOpts = childId && runStore ? { onStarted: () => void this.markChildRunning(childId) } : undefined;
         const exec = (j: AgentJob): Promise<{ result: CaseResult; target?: string }> =>
-          executeWithSpillover((jj) => executeCase(this.deps, ctx.owner, jj), j, {
+          executeWithSpillover((jj) => executeCase(this.deps, ctx.owner, jj, startOpts), j, {
             targets: ctx.targets,
             tenant: ctx.tenant,
             breaker: this.breaker,
@@ -826,6 +828,21 @@ export class ScorecardBatchService {
     return record;
   }
 
+  // Flip a fan-out child run queued→running when its case actually begins executing (the onStarted hook fires on
+  // managed dispatch / self-hosted lease). Best-effort and idempotent: acts only on a still-queued child (a re-fire
+  // from spillover/speculation, or a race with settlement, is a no-op), and a store error never disturbs the run.
+  private async markChildRunning(childId: string): Promise<void> {
+    const store = this.deps.runStore;
+    if (!store) return;
+    try {
+      const rec = await store.get(childId);
+      if (!rec || rec.status !== "queued") return; // already running/terminal — nothing to flip
+      await store.update(childId, Run.from(rec).start(this.now()));
+    } catch {
+      // Best-effort visibility flip — a failure here must never break the case (the run still executes and settles).
+    }
+  }
+
   // Reflect the case results finalized by batch judge/offload into each child run (since we don't store the embed, get's hydration source must be current).
   // Update each result onto its run via the caseId → childId mapping.
   private async writeBackResults(caseToChild: Map<string, string>, results: CaseResult[]): Promise<void> {
@@ -928,7 +945,8 @@ export class ScorecardBatchService {
         ...(judge ? { judge } : {}),
       };
       const runStore = this.deps.runStore;
-      // Child run (if any): create as running. Tagged with parentScorecardId, hidden from the activity list by default.
+      // Child run (if any): born queued, flipped to running via onStarted only when compute actually starts (a runner
+      // leases it / a managed backend dispatches it). Tagged with parentScorecardId, hidden from the activity list by default.
       let child: RunRecord | undefined;
       if (runStore) {
         child = ScorecardBatch.newChildRun({
@@ -965,8 +983,12 @@ export class ScorecardBatchService {
         // of the shard list; the shared breaker skips runtimes with a known outage entirely.
         // Tail speculation on top: at the batch tail a straggler gets a duplicate on another healthy runtime and
         // the first result wins (the duplicate runs through the same spillover-wrapped executor).
+        // Flip the child run queued→running the moment a backend/runner actually starts this case (not at park) — so a
+        // fan-out parked behind one runner reads as "waiting" until picked up. Best-effort; markChildRunning guards it.
+        const childId = child?.id;
+        const startOpts = childId && runStore ? { onStarted: () => void this.markChildRunning(childId) } : undefined;
         const exec = (j: AgentJob): Promise<{ result: CaseResult; target?: string }> =>
-          executeWithSpillover((jj) => executeCase(this.deps, owner, jj), j, {
+          executeWithSpillover((jj) => executeCase(this.deps, owner, jj, startOpts), j, {
             targets,
             tenant,
             breaker: this.breaker,

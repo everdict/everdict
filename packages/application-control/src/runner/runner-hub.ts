@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { type AgentJob, type CaseResult, UpstreamError } from "@everdict/contracts";
+import { type AgentJob, type CaseResult, RateLimitError, UpstreamError } from "@everdict/contracts";
 import { capabilityKind, requiredCapabilitiesForJob } from "@everdict/domain";
 
 // Self-hosted runner dispatch key — the identity of the runner a job will flow to. The lease queue is keyed by (owner, runnerId) (D3).
@@ -50,6 +50,10 @@ interface PendingEntry {
   job: AgentJob;
   resolve: (r: EnqueueResult) => void;
   reject: (e: Error) => void;
+  // Fired once when a runner first LEASES this job (undefined→leasedAt). Lets the dispatch caller flip the run record
+  // queued→running the moment it actually starts executing (not at park). Best-effort — a throw must not break lease.
+  onLease?: () => void;
+  onLeaseFired?: boolean;
   leasedAt?: number; // time the runner took it (undefined = waiting). Slice 6's expiry/requeue looks at this.
   // The control plane asked to stop this job (user cancel / supersede). Its promise is already rejected; the entry
   // lingers ONLY so the runner's next heartbeat is told to abort (freeing the runtime). Never leasable/requeuable.
@@ -63,6 +67,10 @@ export interface RunnerHubDeps {
   queueTimeoutMs?: number;
   // If this much time passes after a runner leases a job with no complete/heartbeat, requeue it (runner died / network cut → another/reconnected runner takes it).
   leaseTtlMs?: number;
+  // Backpressure (Phase 2): the max number of WAITING (un-leased) jobs a single runner/pool queue may hold. A park
+  // that would exceed it is rejected with RateLimitError(429) at dispatch instead of growing the queue without bound
+  // (self-hosted jobs bypass the Scheduler's queue-depth cap — this is its self-hosted analogue). 0/undefined = unlimited.
+  maxWaitingPerKey?: number;
   newJobId?: () => string;
   now?: () => number;
 }
@@ -75,13 +83,20 @@ export class RunnerHub {
   private readonly queues = new Map<string, PendingEntry[]>();
   private readonly waiters = new Map<string, Array<() => void>>(); // long-poll lease waiters (per-key wake callbacks)
   private readonly wakeCursor = new Map<string, number>(); // per-owner round-robin cursor (pool wake fairness)
+  // Lease FAIRNESS (Phase 2): a monotonic tick bumped on every lease + the tick each (queue, group) was last served.
+  // "group" = batchId ?? submitter ?? tenant → a runner shared by many users/batches rotates across them (WFQ-lite)
+  // instead of draining one 601-case batch before the next user's 3-case run. Priority (interactive) still dominates.
+  private serveTick = 0;
+  private readonly groupLastServed = new Map<string, number>();
   private readonly queueTimeoutMs: number;
   private readonly leaseTtlMs: number;
+  private readonly maxWaitingPerKey: number;
   private readonly newJobId: () => string;
   private readonly now: () => number;
   constructor(deps: RunnerHubDeps = {}) {
     this.queueTimeoutMs = deps.queueTimeoutMs ?? 300_000; // default 5 minutes
     this.leaseTtlMs = deps.leaseTtlMs ?? 120_000; // default 2 minutes (renewed by heartbeat)
+    this.maxWaitingPerKey = deps.maxWaitingPerKey ?? 0; // 0 = unlimited (backpressure opt-in)
     this.newJobId = deps.newJobId ?? randomUUID;
     this.now = deps.now ?? Date.now;
   }
@@ -98,9 +113,23 @@ export class RunnerHub {
 
   // Park a job and return the result promise (SelfHostedBackend.dispatch). Resolves when a runner completes it;
   // rejects if queueTimeoutMs passes with no 'activity' (lease/heartbeat) (unconnected/idle). FIFO per key.
-  enqueue(key: SelfHostedKey, job: AgentJob): Promise<EnqueueResult> {
+  // onLease (optional) fires once when a runner first takes the job → the caller flips the run record queued→running.
+  enqueue(key: SelfHostedKey, job: AgentJob, onLease?: () => void): Promise<EnqueueResult> {
     const jobId = this.newJobId();
     const arr = this.q(key);
+    // Backpressure: a self-hosted job bypasses the Scheduler's queue-depth cap, so bound the lease queue here. Over
+    // the cap ⇒ explicit RateLimitError(429), never a silent unbounded pile-up. Counts only WAITING (un-leased) jobs.
+    if (this.maxWaitingPerKey > 0) {
+      const waiting = arr.filter((e) => e.leasedAt === undefined && !e.cancelRequested).length;
+      if (waiting >= this.maxWaitingPerKey)
+        return Promise.reject(
+          new RateLimitError(
+            "RATE_LIMITED",
+            { runnerId: key.runnerId, waiting, limit: this.maxWaitingPerKey },
+            `This runner's queue is full (${waiting}/${this.maxWaitingPerKey} waiting) — wait for it to drain, add another runner, or raise EVERDICT_RUNNER_MAX_QUEUE.`,
+          ),
+        );
+    }
     // The executor runs synchronously, so resolve/reject are reassigned immediately (the no-op initial values are for the no-`!` discipline).
     let resolve: (r: EnqueueResult) => void = () => {};
     let reject: (e: Error) => void = () => {};
@@ -108,7 +137,14 @@ export class RunnerHub {
       resolve = res;
       reject = rej;
     });
-    const entry: PendingEntry = { jobId, job, resolve, reject, timer: this.armTimeout(key, jobId, reject) };
+    const entry: PendingEntry = {
+      jobId,
+      job,
+      resolve,
+      reject,
+      ...(onLease ? { onLease } : {}),
+      timer: this.armTimeout(key, jobId, reject),
+    };
     arr.push(entry);
     // Wake a runner that is long-poll waiting (single-threaded → inside wake, lease immediately takes this job).
     if (key.runnerId === POOL_RUNNER)
@@ -169,6 +205,54 @@ export class RunnerHub {
     entry.timer = this.armTimeout(key, entry.jobId, entry.reject);
   }
 
+  // Fire the entry's onLease hook exactly once (first lease). Best-effort — a throw in the caller's callback must not
+  // break the lease (the job still runs; only the queued→running record flip is missed). A requeue+re-lease won't
+  // re-fire (the flag stays set); the run is already running so there's nothing to re-flip anyway.
+  private fireOnLease(entry: PendingEntry): void {
+    if (entry.onLeaseFired || !entry.onLease) return;
+    entry.onLeaseFired = true;
+    try {
+      entry.onLease();
+    } catch (e) {
+      console.warn(`[runner-hub] onLease hook threw for job ${entry.jobId}: ${e instanceof Error ? e.message : e}`);
+    }
+  }
+
+  // The fairness group a job belongs to on a shared runner: its batch (scorecard fan-out), else its submitter
+  // (interactive single runs / different users), else its tenant. One giant batch = one group, so it can't crowd out
+  // the next user's small run — the lease rotates across groups.
+  private static groupKeyOf(job: AgentJob): string {
+    if (job.batchId) return `b:${job.batchId}`;
+    if (job.submittedBy) return `u:${job.submittedBy}`;
+    return `t:${job.tenant ?? ""}`;
+  }
+
+  // Un-leased, non-cancelled entries in the order a runner should take them: (1) interactive before batch (a person is
+  // waiting — same rule the managed Scheduler applies), then (2) the least-recently-served group first (WFQ-lite fair
+  // rotation across batches/users), then (3) FIFO within a group (stable by enqueue index). Pure read — leasing an
+  // entry (markServed) is what advances the rotation.
+  private orderLeasable(queueName: string, arr: PendingEntry[]): PendingEntry[] {
+    const prio = (e: PendingEntry): number => (e.job.priority === "interactive" ? 0 : 1);
+    const lastServed = (e: PendingEntry): number =>
+      this.groupLastServed.get(`${queueName} ${RunnerHub.groupKeyOf(e.job)}`) ?? -1;
+    return arr
+      .map((entry, index) => ({ entry, index }))
+      .filter((x) => x.entry.leasedAt === undefined && !x.entry.cancelRequested)
+      .sort((a, b) => {
+        const dp = prio(a.entry) - prio(b.entry);
+        if (dp !== 0) return dp;
+        const dg = lastServed(a.entry) - lastServed(b.entry);
+        if (dg !== 0) return dg;
+        return a.index - b.index; // FIFO within a group
+      })
+      .map((x) => x.entry);
+  }
+
+  // Record that this queue just served the entry's group → the next lease prefers a different group (round-robin).
+  private markServed(queueName: string, entry: PendingEntry): void {
+    this.groupLastServed.set(`${queueName} ${RunnerHub.groupKeyOf(entry.job)}`, ++this.serveTick);
+  }
+
   // Take the next un-leased job (runner pull). None → null (the runner re-polls). Records leasedAt.
   // First requeues expired leases (runner dead/disconnected) — so another/reconnected runner can take them again.
   // If capabilities are given (runner self-advertised) this is a placement gate: if the runner lacks a capability the job requires
@@ -177,10 +261,12 @@ export class RunnerHub {
     const arr = this.q(key);
     const now = this.now();
     this.requeueExpired(arr, now);
-    // 1) Own queue (jobs targeted at a specific runner) — on capability mismatch, reject immediately (this runner was explicitly named, so avoid the wrong environment).
-    for (;;) {
-      const entry = arr.find((e) => e.leasedAt === undefined && !e.cancelRequested); // a cancelled job is never handed out
-      if (!entry) break;
+    // 1) Own queue (jobs targeted at a specific runner) — on capability mismatch, reject immediately (this runner was
+    //    explicitly named, so avoid the wrong environment). Entries are considered in fairness order (priority → WFQ
+    //    across groups → FIFO), not raw arrival, so one big batch can't monopolize a runner shared by several users.
+    const ownName = selfHostedBackendName(key);
+    for (const entry of this.orderLeasable(ownName, arr)) {
+      if (entry.leasedAt !== undefined) continue; // a rejection below could have removed/settled an earlier pick
       const missing = capabilities
         ? requiredRunnerCapabilities(entry.job).filter((c) => !capabilities.includes(c))
         : [];
@@ -197,9 +283,11 @@ export class RunnerHub {
             `The runner lacks the capabilities [${missing.join(", ")}] this job requires — rejecting to avoid the wrong environment (host fallback).`,
           ),
         );
-        continue; // try the next job
+        continue; // try the next job (in fairness order)
       }
       entry.leasedAt = now;
+      this.markServed(ownName, entry); // advance the group rotation so the next lease prefers a different batch/user
+      this.fireOnLease(entry); // first lease → flip the run record queued→running (the case actually started)
       this.rearm(key, entry); // runner took it → reset idle timeout (heartbeat now keeps it alive)
       this.touchByRunner(key); // taking a job proves the runner is alive → keep the jobs queued behind it from expiring
       return { jobId: entry.jobId, job: entry.job };
@@ -211,13 +299,15 @@ export class RunnerHub {
     const poolKey = poolKeyFor(key.owner);
     const poolArr = this.q(poolKey);
     this.requeueExpired(poolArr, now);
-    for (const entry of poolArr) {
-      if (entry.leasedAt !== undefined || entry.cancelRequested) continue; // skip leased + cancelled
+    const poolName = selfHostedBackendName(poolKey);
+    for (const entry of this.orderLeasable(poolName, poolArr)) {
       const missing = capabilities
         ? requiredRunnerCapabilities(entry.job).filter((c) => !capabilities.includes(c))
         : [];
       if (missing.length > 0) continue; // this runner can't run it → skip and leave it for another runner (not a rejection)
       entry.leasedAt = now;
+      this.markServed(poolName, entry); // advance the group rotation within the pool too
+      this.fireOnLease(entry); // first lease → flip the run record queued→running (the case actually started)
       this.rearm(poolKey, entry); // the timer is keyed to the pool queue (so remove finds it in the pool)
       this.touchByRunner(key); // draining one pool job proves the runner is alive → keep the rest of the pool from expiring
       return { jobId: entry.jobId, job: entry.job };

@@ -1224,6 +1224,7 @@ export class K8sBackend implements Backend, Recoverable, Observable, Probeable, 
 
   async dispatch(job: AgentJob, options?: DispatchOptions): Promise<CaseResult> {
     if (options?.signal?.aborted) throw dispatchAborted(job); // cancelled before we applied the Job
+    options?.onStarted?.(); // past the Scheduler's wait queue — we're applying the Job now → flip the run to running
     const { ns, runtimeClassName, secretEnv } = await this.resolve(job);
     // Unique per dispatch — two concurrent batches over the same dataset would otherwise collide on the same Job
     // name (409 AlreadyExists → dispatch error). The capacity probe matches the label, not the name.

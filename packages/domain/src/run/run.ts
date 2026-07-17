@@ -59,6 +59,15 @@ export class Run {
     return !this.isTerminal() && this.record.caseSpec !== undefined;
   }
 
+  // queued → running — compute actually began (managed: the backend dispatched it; self-hosted: a runner leased it).
+  // A run is born queued (a standalone run, and now a batch child too); this is the flip that makes "waiting for a
+  // runner" (queued) distinct from "executing" (running) in the runs view + work queue. Idempotent over an already
+  // running record; refused once terminal (a late lease flip must never resurrect a settled run).
+  start(now: string): RunTransition {
+    this.assertNotTerminal("start");
+    return { status: "running", updatedAt: now };
+  }
+
   // queued|running → succeeded (normal completion).
   succeed(result: CaseResult, now: string): RunTransition {
     this.assertNotTerminal("succeed");

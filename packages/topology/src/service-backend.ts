@@ -109,6 +109,7 @@ export class ServiceTopologyBackend implements Backend, ScreenCapturable {
 
   async dispatch(job: AgentJob, opts?: DispatchOptions): Promise<CaseResult> {
     if (opts?.signal?.aborted) throw dispatchAborted(job); // best-effort: refuse a pre-cancelled run
+    opts?.onStarted?.(); // past the Scheduler's wait queue — we're standing up the topology now → flip the run to running
     const registered = await this.opts.specFor(job.tenant ?? "default", job.harness.id, job.harness.version);
     // per-dispatch image pins (#5) — override service images at run time. When pins are present, a suffix is appended to the effective version
     // so the warm pool separates into a distinct identity (the same topology can be evaluated as service X v1 ↔ v2).

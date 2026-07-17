@@ -17,9 +17,10 @@ export interface QueueItem {
   trigger?: string; // where it was fired from (web|api|schedule|scorecard…) — trigger for a run, origin.source for a scorecard
   createdBy?: string; // the runner subject (if any)
   createdAt: string;
-  // Batch progress (running scorecards only) — done=finished (succeeded+failed) children, active=running children,
-  // total=number of dataset cases (omitted if resolution fails → the UI shows only done/active).
-  progress?: { done: number; active: number; total?: number };
+  // Batch progress (running scorecards only) — done=finished (succeeded+failed) children, active=running children
+  // (a runner is actually executing them), waiting=queued children (parked, waiting for a runner/backend slot),
+  // total=number of dataset cases (omitted if resolution fails → the UI shows only done/active/waiting).
+  progress?: { done: number; active: number; waiting: number; total?: number };
 }
 
 export interface QueueUpcoming {
@@ -129,13 +130,16 @@ export class QueueService {
           const children = this.deps.runs ? await this.deps.runs.list(tenant, { scorecardId: c.id }) : [];
           const done = children.filter((r) => r.status === "succeeded" || r.status === "failed").length;
           const active = children.filter((r) => r.status === "running").length;
+          // Fan-out parked behind the runtime's runners/slots — dispatched but not yet leased/executing. This is the
+          // count that was previously invisible: a concurrency-8 batch on one runner reads as active 1 / waiting 7.
+          const waiting = children.filter((r) => r.status === "queued").length;
           // A partial run's denominator is the SELECTED subset size — "9/601" for a 12-case subset misreads as 1% done.
           const total =
             c.subset?.selected ??
             (this.deps.caseCountFor
               ? await this.deps.caseCountFor(tenant, c.dataset.id, c.dataset.version).catch(() => undefined)
               : undefined);
-          progressOf.set(c.id, { done, active, ...(total !== undefined ? { total } : {}) });
+          progressOf.set(c.id, { done, active, waiting, ...(total !== undefined ? { total } : {}) });
         }),
     );
 

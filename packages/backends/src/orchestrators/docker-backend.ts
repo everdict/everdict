@@ -30,6 +30,7 @@ export class DockerBackend implements Backend, Probeable {
 
   dispatch(job: AgentJob, opts?: DispatchOptions): Promise<CaseResult> {
     if (opts?.signal?.aborted) return Promise.reject(dispatchAborted(job)); // best-effort: refuse a pre-cancelled run
+    opts?.onStarted?.(); // dispatch = the case begins now (past the Scheduler's wait queue) → flip the run to running
     return runAgentJob(job, { driver: this.driver }); // run the case in a container (case.image ?? default image)
   }
 

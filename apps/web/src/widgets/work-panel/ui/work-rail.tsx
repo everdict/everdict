@@ -43,7 +43,7 @@ function laneLabel(lane: QueueLane, t: Translate): string {
 // Batch progress — if total is known, a bar + n/total, otherwise a done/running count as text.
 function Progress({ progress }: { progress: NonNullable<QueueItem['progress']> }) {
   const t = useTranslations('workPanel')
-  const { done, active, total } = progress
+  const { done, active, waiting, total } = progress
   if (total && total > 0) {
     const pct = Math.min(100, Math.round((done / total) * 100))
     return (
@@ -59,12 +59,19 @@ function Progress({ progress }: { progress: NonNullable<QueueItem['progress']> }
             {t('runningSuffix', { active })}
           </span>
         )}
+        {waiting > 0 && (
+          <span className="shrink-0 text-[10.5px] text-faint">
+            {t('waitingSuffix', { waiting })}
+          </span>
+        )}
       </span>
     )
   }
   return (
     <span className="shrink-0 font-mono text-[10.5px] tabular-nums text-muted-foreground">
-      {t('doneRunning', { done, active })}
+      {waiting > 0
+        ? t('doneRunningWaiting', { done, active, waiting })
+        : t('doneRunning', { done, active })}
     </span>
   )
 }

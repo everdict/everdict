@@ -18,7 +18,7 @@ export const queueItemSchema = z.object({
   createdAt: z.string(),
   // batch progress (running scorecards only). total is omitted if dataset resolution fails.
   progress: z
-    .object({ done: z.number(), active: z.number(), total: z.number().optional() })
+    .object({ done: z.number(), active: z.number(), waiting: z.number(), total: z.number().optional() })
     .optional(),
 })
 

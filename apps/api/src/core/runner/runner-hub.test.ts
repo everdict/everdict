@@ -1,5 +1,5 @@
 import { RunnerHub, type SelfHostedKey, poolKeyFor } from "@everdict/application-control";
-import type { AgentJob, CaseResult } from "@everdict/contracts";
+import { type AgentJob, type CaseResult, RateLimitError } from "@everdict/contracts";
 import { describe, expect, it, vi } from "vitest";
 
 const result: CaseResult = {
@@ -34,6 +34,73 @@ describe("RunnerHub", () => {
 
     expect(hub.complete(keyA, "j-0", result)).toBe(true);
     await expect(dispatched).resolves.toMatchObject({ result });
+  });
+
+  it("onLease fires once when a runner first takes the job — not at park (the queued→running flip signal)", async () => {
+    let n = 0;
+    const hub = new RunnerHub({ newJobId: () => `j-${n++}`, leaseTtlMs: 1 });
+    const onLease = vi.fn();
+    hub.enqueue(keyA, job("c1"), onLease);
+    expect(onLease).not.toHaveBeenCalled(); // parked, not started — the run stays "waiting"
+
+    hub.lease(keyA);
+    expect(onLease).toHaveBeenCalledTimes(1); // a runner took it → the case actually started
+
+    // A requeue (runner died) followed by a re-lease must not re-fire — the run is already running.
+    await new Promise((r) => setTimeout(r, 5)); // let the lease TTL lapse so requeueExpired frees it
+    hub.lease(keyA);
+    expect(onLease).toHaveBeenCalledTimes(1);
+  });
+
+  it("onLease fires for a pool (self:ws) job when any runner drains it", () => {
+    let n = 0;
+    const hub = new RunnerHub({ newJobId: () => `j-${n++}` });
+    const owner = "ws:acme";
+    const onLease = vi.fn();
+    hub.enqueue(poolKeyFor(owner), job("c1"), onLease);
+    expect(onLease).not.toHaveBeenCalled();
+    // A concrete runner of that owner leases from the pool.
+    hub.lease({ owner, runnerId: "box-1" });
+    expect(onLease).toHaveBeenCalledTimes(1);
+  });
+
+  it("lease rotates fairly across batches — one big batch can't drain before another user's job (WFQ)", () => {
+    let n = 0;
+    const hub = new RunnerHub({ newJobId: () => `j-${n++}` });
+    const batchJob = (id: string, batchId: string): AgentJob => ({ ...job(id), batchId, priority: "batch" });
+    // Batch A's three cases are all parked before batch B's single case.
+    hub.enqueue(keyA, batchJob("a1", "A"));
+    hub.enqueue(keyA, batchJob("a2", "A"));
+    hub.enqueue(keyA, batchJob("a3", "A"));
+    hub.enqueue(keyA, batchJob("b1", "B"));
+    const order: string[] = [];
+    for (let i = 0; i < 4; i++) order.push(hub.lease(keyA)?.job.evalCase.id ?? "none");
+    // Not a1,a2,a3,b1 (pure FIFO) — B's lone case is served on the second lease, not after all of A.
+    expect(order).toEqual(["a1", "b1", "a2", "a3"]);
+  });
+
+  it("an interactive job jumps ahead of parked batch fan-out (priority) — a person waiting doesn't sit behind 601 cases", () => {
+    let n = 0;
+    const hub = new RunnerHub({ newJobId: () => `j-${n++}` });
+    hub.enqueue(keyA, { ...job("b1"), batchId: "A", priority: "batch" });
+    hub.enqueue(keyA, { ...job("b2"), batchId: "A", priority: "batch" });
+    hub.enqueue(keyA, { ...job("i1"), priority: "interactive" }); // a single run — a person is waiting
+    expect(hub.lease(keyA)?.job.evalCase.id).toBe("i1"); // leased first despite arriving last
+  });
+
+  it("backpressure — a full runner queue rejects further parks with RateLimitError(429), never an unbounded pile-up", async () => {
+    let n = 0;
+    const hub = new RunnerHub({ newJobId: () => `j-${n++}`, maxWaitingPerKey: 2 });
+    const p1 = hub.enqueue(keyA, job("c1"));
+    const p2 = hub.enqueue(keyA, job("c2"));
+    p1.catch(() => {}); // parked (pending) — silence the unhandled-rejection guard for the teardown
+    p2.catch(() => {});
+    await expect(hub.enqueue(keyA, job("c3"))).rejects.toBeInstanceOf(RateLimitError);
+    // Leasing one frees a slot → a new park is admitted again.
+    hub.lease(keyA);
+    const p4 = hub.enqueue(keyA, job("c4"));
+    p4.catch(() => {});
+    await expect(Promise.race([p4, Promise.resolve("pending")])).resolves.toBe("pending"); // admitted (still parked)
   });
 
   it("lease is FIFO; owner (key) isolation — another owner's jobs are invisible", async () => {

@@ -46,7 +46,7 @@ export class StoreRunnerHub {
   // Park a job and poll the store until it settles — resolves on complete, rejects on fail/cancel, and rejects as
   // no_runner if activity_at goes stale (no runner leased/heartbeated it in queueTimeoutMs — connected-but-busy runners
   // keep it fresh via their heartbeat, exactly like the in-memory hub).
-  async enqueue(key: SelfHostedKey, job: AgentJob): Promise<EnqueueResult> {
+  async enqueue(key: SelfHostedKey, job: AgentJob, onLease?: () => void): Promise<EnqueueResult> {
     const jobId = this.newJobId();
     await this.store.park({
       jobId,
@@ -57,9 +57,21 @@ export class StoreRunnerHub {
       requiredCaps: requiredRunnerCapabilities(job),
       now: this.now(),
     });
+    // The parking replica polls the shared store; when the (cross-replica) claim first marks the row "leased" it
+    // fires onLease once → the caller flips the run record queued→running. The run store is shared, so this works
+    // even though a different replica did the claim. Best-effort, exactly like the in-memory hub's fireOnLease.
+    let onLeaseFired = false;
     for (;;) {
       await this.sleep(this.pollMs);
       const o = await this.store.outcome(jobId);
+      if (o && !onLeaseFired && onLease && o.status === "leased") {
+        onLeaseFired = true;
+        try {
+          onLease();
+        } catch (e) {
+          console.warn(`[runner-hub] onLease hook threw for job ${jobId}: ${e instanceof Error ? e.message : e}`);
+        }
+      }
       if (!o) {
         throw new UpstreamError(
           "UPSTREAM_ERROR",

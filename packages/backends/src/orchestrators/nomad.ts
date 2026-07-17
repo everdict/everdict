@@ -644,6 +644,7 @@ export class NomadBackend implements Backend, Recoverable, Observable, Shellable
 
   async dispatch(job: AgentJob, options?: DispatchOptions): Promise<CaseResult> {
     if (options?.signal?.aborted) throw dispatchAborted(job); // cancelled before we even submitted
+    options?.onStarted?.(); // past the Scheduler's wait queue — we're submitting the alloc now → flip the run to running
     const opts = await this.effectiveOpts(job);
     const ns = opts.namespace;
     const jobId = nomadJobId(job, dispatchSuffix()); // unique per dispatch (concurrent same-case batches + no stale-alloc reads)

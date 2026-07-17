@@ -123,7 +123,28 @@ describe("QueueService.snapshot", () => {
     });
     const snap = await svc.snapshot("acme", "bob");
     const item = snap.workspace.flatMap((l) => l.running).find((i) => i.id === "sc-subset");
-    expect(item?.progress).toEqual({ done: 1, active: 0, total: 12 });
+    expect(item?.progress).toEqual({ done: 1, active: 0, waiting: 0, total: 12 });
+  });
+
+  it("batch progress splits leased-and-running children from parked (queued) ones — waiting is no longer invisible", async () => {
+    const { scorecards, runs } = await fixtures();
+    // A concurrency-8 batch on a single runner: 1 child leased+running, the rest still queued (waiting for a lease).
+    await scorecards.create(card("sc-fan", { status: "running", runtime: "self:r1" }));
+    await runs.create(runRec("child-run", { status: "running", parentScorecardId: "sc-fan", runtime: "self:r1" }));
+    for (let i = 0; i < 7; i++)
+      await runs.create(
+        runRec(`child-wait-${i}`, { status: "queued", parentScorecardId: "sc-fan", runtime: "self:r1" }),
+      );
+    await runs.create(runRec("child-done", { status: "succeeded", parentScorecardId: "sc-fan", runtime: "self:r1" }));
+    const svc = new QueueService({
+      scorecards,
+      runs,
+      myRunners: async () => [{ id: "r1", label: "my-box" }], // surface the self:r1 lane in the personal scope
+      now: () => "2026-07-03T12:00:00.000Z",
+    });
+    const snap = await svc.snapshot("acme", "bob");
+    const item = [...snap.workspace, ...snap.personal].flatMap((l) => l.running).find((i) => i.id === "sc-fan");
+    expect(item?.progress).toMatchObject({ done: 1, active: 1, waiting: 7 });
   });
 
   it("the waiting queue is createdAt ascending (FIFO) — the front is the next item", async () => {

@@ -354,7 +354,11 @@ export class RunService {
         secrets && job.harnessSpec ? { ...job, harnessSpec: resolveHarnessSecrets(job.harnessSpec, secrets) } : job;
       // Pure execution is handled by executeCase (token resolve+attach → dispatch), shared with scorecard. The "after" (settle/offload/notify)
       // is this orchestrator's job. admit was already counted synchronously in submit, so don't double-count.
-      const result = await executeCase(this.deps, input.submittedBy ?? input.tenant, jobToRun);
+      // onStarted flips the run queued→running the moment compute actually begins (managed dispatch / self-hosted lease)
+      // — so a single run parked behind a busy runner reads as "waiting", not "running", exactly like a batch child.
+      const result = await executeCase(this.deps, input.submittedBy ?? input.tenant, jobToRun, {
+        onStarted: () => void this.markRunning(id),
+      });
       // Cost attribution: managed = the job's tenant · workspace-shared runner = that workspace (team resource) · personal runner = own-pays (not charged).
       const bill = billingTenant(result, input.tenant);
       if (bill) this.deps.budget?.settle(bill, costOf(result));
@@ -378,6 +382,19 @@ export class RunService {
       if (rec) await this.deps.onComplete(input.tenant, rec).catch(() => {});
     }
     if (input.webhookUrl) await this.fireWebhook(input.webhookUrl, id);
+  }
+
+  // Flip the run queued→running when compute actually begins (the onStarted hook: managed dispatch / self-hosted
+  // lease). Best-effort and idempotent — acts only on a still-queued record (a terminal/already-running run is a
+  // no-op), and a store error never disturbs the run itself.
+  private async markRunning(id: string): Promise<void> {
+    try {
+      const rec = await this.deps.store.get(id);
+      if (!rec || rec.status !== "queued") return;
+      await this.deps.store.update(id, Run.from(rec).start(this.now()));
+    } catch {
+      // Best-effort visibility flip.
+    }
   }
 
   // Terminal writes go through the domain guard: read the current record and skip when it is already settled

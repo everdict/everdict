@@ -6,6 +6,12 @@ import type { AgentJob, CaseResult } from "@everdict/contracts";
 // in-flight promise, complementing the id-keyed kill(caseId) side channel.
 export interface DispatchOptions {
   signal?: AbortSignal;
+  // Fired ONCE the moment the job actually begins executing — NOT at enqueue/park. Managed backends fire it at
+  // dispatch() entry (= the Scheduler admitted it, past the wait queue); the self-hosted path fires it when a runner
+  // LEASES the job (in-memory hub: at lease; store-backed hub: on the first "leased" outcome). Lets the caller flip
+  // the run record queued→running only when compute truly starts, so a fan-out parked behind one runner reads as
+  // "waiting" (queued) until picked up — not falsely "running". Best-effort; a throw must not break dispatch.
+  onStarted?: () => void;
 }
 
 // The (job)→CaseResult dispatch abstraction — satisfied by both Router (static) and Scheduler (capacity-aware).

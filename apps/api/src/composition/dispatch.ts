@@ -62,9 +62,15 @@ export function buildDispatch(deps: {
     browserProfileStore && cipher ? makeProfileSeeder({ store: browserProfileStore, cipher }) : undefined;
   // Self-hosted runner lease hub — parks self:<runnerId> jobs; the runner protocol (MCP, slice 4) leases/returns them.
   // A single instance shared by the dispatcher (park) and the MCP lease/result tools (lease/complete).
-  const hubTimeout = process.env.EVERDICT_SELF_HOSTED_QUEUE_TIMEOUT_MS
-    ? { queueTimeoutMs: Number(process.env.EVERDICT_SELF_HOSTED_QUEUE_TIMEOUT_MS) }
-    : {};
+  // EVERDICT_RUNNER_MAX_QUEUE=N → backpressure: a runner/pool queue holding N waiting jobs rejects further parks with
+  // RateLimitError(429) (self-hosted jobs bypass the Scheduler's queue-depth cap, so this is their bound). Default off.
+  const maxRunnerQueue = Number(process.env.EVERDICT_RUNNER_MAX_QUEUE);
+  const hubTimeout = {
+    ...(process.env.EVERDICT_SELF_HOSTED_QUEUE_TIMEOUT_MS
+      ? { queueTimeoutMs: Number(process.env.EVERDICT_SELF_HOSTED_QUEUE_TIMEOUT_MS) }
+      : {}),
+    ...(Number.isFinite(maxRunnerQueue) && maxRunnerQueue > 0 ? { maxWaitingPerKey: maxRunnerQueue } : {}),
+  };
   // EVERDICT_SELF_HOSTED_STORE_HUB=1 → the store-backed hub (a job parked on one control-plane replica is leased +
   // completed from another via the shared Pg queue). Default = the in-memory hub (single-process, no polling).
   const runnerHub: RunnerHubLike =
