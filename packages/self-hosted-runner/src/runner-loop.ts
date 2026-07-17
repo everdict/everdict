@@ -1,4 +1,4 @@
-import { type AgentJob, AgentJobSchema, type CaseResult } from "@everdict/contracts";
+import { type AgentJob, AgentJobSchema, type CaseResult, RUNNER_PROTOCOL_VERSION } from "@everdict/contracts";
 import { classifyFailure, stageForError } from "@everdict/domain";
 
 // Dependencies of the runner lease worker pool — the caller (main.ts) absorbs transport/session via ResilientMcpSession,
@@ -19,6 +19,9 @@ export interface RunnerLoopDeps {
   // Hook that sets up lease renewal while running — returns a cleanup function. Default is setInterval(heartbeat_job).
   // onCancel fires when the control plane's heartbeat response asks to stop this job (→ abort the local run). Tests inject a fake.
   setHeartbeat?: (jobId: string, onCancel: () => void) => () => void;
+  // Fired (at most once per run) when the control plane reports this runner is older than the server (lease reply
+  // updateRequired:true) — the seam the desktop wires to force an immediate auto-update check. GUI-free: the core only signals.
+  onUpdateRequired?: (info: { serverProtocol?: number }) => void;
 }
 
 export interface RunnerLoopOpts {
@@ -27,6 +30,7 @@ export interface RunnerLoopOpts {
   heartbeatMs: number; // lease renewal interval while running
   pollMs: number; // lease error backoff
   capabilities: string[]; // self-advertised on every lease (repo/docker/browser)
+  version?: string; // runner build/app version, self-reported on every lease (display only; the protocol drives update-required)
   shouldStop: () => boolean; // stop via SIGINT etc. — a worker drops out after finishing its current job
 }
 
@@ -54,16 +58,34 @@ export async function runLeaseWorkers(deps: RunnerLoopDeps, opts: RunnerLoopOpts
     });
   const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
+  // The control plane sets updateRequired on the lease reply when this runner is behind the server. Fire the seam ONCE
+  // for the whole pool (every worker's lease sees it) — the desktop acts on it (force an update check); repeating it each
+  // poll would spam. Reset per runLeaseWorkers call (a fresh session after a restart re-evaluates).
+  let updateSignalled = false;
+  const noteUpdate = (leased: Record<string, unknown>): void => {
+    if (updateSignalled || leased.updateRequired !== true) return;
+    updateSignalled = true;
+    const serverProtocol = typeof leased.serverProtocol === "number" ? leased.serverProtocol : undefined;
+    log("⚠ this runner is older than the control plane — an update is required.");
+    deps.onUpdateRequired?.({ ...(serverProtocol !== undefined ? { serverProtocol } : {}) });
+  };
+
   const worker = async (): Promise<void> => {
     while (!opts.shouldStop()) {
       let leased: Record<string, unknown>;
       try {
-        leased = await deps.callJson("lease_job", { wait_ms: opts.waitMs, capabilities: opts.capabilities });
+        leased = await deps.callJson("lease_job", {
+          wait_ms: opts.waitMs,
+          capabilities: opts.capabilities,
+          ...(opts.version !== undefined ? { version: opts.version } : {}),
+          protocol: RUNNER_PROTOCOL_VERSION,
+        });
       } catch (e) {
         log(`✗ lease failed: ${errMsg(e)}`);
         await sleep(opts.pollMs);
         continue;
       }
+      noteUpdate(leased); // an out-of-date runner is told to update (piggybacked on the lease reply)
       if (!leased.job) {
         await sleep(250); // long-poll timeout (no job) — repoll immediately (the server is already waiting)
         continue;

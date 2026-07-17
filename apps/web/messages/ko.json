@@ -1080,7 +1080,11 @@
     "revokeRunnerAria": "{name} 러너 해제",
     "reconnect": "다시 연결",
     "reconnecting": "다시 연결 중…",
-    "statusMenuAria": "{name} 러너 상태 및 작업"
+    "statusMenuAria": "{name} 러너 상태 및 작업",
+    "updateRequired": "업데이트 필요",
+    "updating": "업데이트 중…",
+    "updateAutoDesktop": "이 러너는 컨트롤 플레인보다 버전이 낮습니다. 데스크톱 앱이 곧 자동으로 업데이트합니다.",
+    "updateHintHeadless": "이 러너는 컨트롤 플레인보다 버전이 낮습니다. 최신 버전으로 다시 배포하세요."
   },
   "manageSchedules": {
     "runtimeDefault": "기본 백엔드",
@@ -1249,6 +1253,8 @@
     "offline": "오프라인",
     "capSupported": "이 러너가 지원",
     "capUnsupported": "이 러너에서 불가",
+    "updateRequired": "업데이트 필요",
+    "updateHint": "이 러너는 컨트롤 플레인보다 버전이 낮습니다. 최신 버전으로 다시 배포하세요.",
     "pairedAt": "등록 {date}",
     "revokeConfirm": "해제 확인",
     "close": "닫기",

@@ -96,6 +96,12 @@ logged-in web session over a minimal preload bridge.
   breaks at download). **Feed = the PUBLIC `everdict/everdict` GitHub Releases** (`publish` block is present;
   ship via a `desktop-v*` tag). **Linux non-AppImage (deb/rpm)** can't swap in place → `autoDownload:false`
   (detect-only) + an `onAvailable` "Download" dialog opening the releases page.
+- Update-when-behind (D13): the runner reports `RUNNER_PROTOCOL_VERSION` (from `@everdict/contracts`) on every lease;
+  when the control plane replies `updateRequired`, the runner core fires `RunnerHost.onUpdateRequired` **once per session**
+  (GUI-free seam) and main wires it to `UpdaterController.checkNow()` — a forced check outside the 6h cycle, so a desktop
+  behind the server self-updates instead of silently failing jobs. `makeHost` passes `version: app.getVersion()`. **Not a
+  bridge method** (internal to main; invariant 3 unchanged). Headless runners get an "Update required" badge on the web
+  runners lists (server-derived `RunnerMeta.updateRequired`) instead — they redeploy their own binary.
 
 ## Checklist
 1. Read `docs/architecture/desktop-app.md` first; slice order is binding.

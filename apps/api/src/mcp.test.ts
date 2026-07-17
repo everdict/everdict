@@ -9,6 +9,7 @@ import { ScorecardService } from "@everdict/application-control";
 import { TraceSourceService } from "@everdict/application-control";
 import type { Principal } from "@everdict/auth";
 import type { Dispatcher } from "@everdict/backends";
+import { RUNNER_PROTOCOL_VERSION } from "@everdict/contracts";
 import type { AgentJob, CaseResult, RunRecord, RuntimeSpec } from "@everdict/contracts";
 import {
   InMemoryBudgetStore,
@@ -249,6 +250,33 @@ describe("MCP — live screen (report_case_screen)", () => {
     });
     expect(res.isError).toBe(true);
     expect(frames.get("evd-run-42")).toBeUndefined();
+  });
+});
+
+describe("MCP — runner update-required signal (lease_job)", () => {
+  it("a runner whose reported protocol is behind the control plane is told to update (piggybacked on the lease reply)", async () => {
+    const runner = await connectRunner(harness(), "laptop");
+    const reply = JSON.parse(
+      text(await runner.callTool({ name: "lease_job", arguments: { protocol: RUNNER_PROTOCOL_VERSION - 1 } })),
+    );
+    expect(reply.updateRequired).toBe(true);
+    expect(reply.serverProtocol).toBe(RUNNER_PROTOCOL_VERSION);
+    expect(reply.job).toBeNull(); // no job queued — the signal rides an empty long-poll too
+  });
+
+  it("an up-to-date runner gets no update signal (the reply stays lean)", async () => {
+    const runner = await connectRunner(harness(), "laptop");
+    const reply = JSON.parse(
+      text(await runner.callTool({ name: "lease_job", arguments: { protocol: RUNNER_PROTOCOL_VERSION } })),
+    );
+    expect(reply.updateRequired).toBeUndefined();
+    expect(reply.serverProtocol).toBeUndefined();
+  });
+
+  it("a runner that reports no protocol (pre-version) is not nagged", async () => {
+    const runner = await connectRunner(harness(), "laptop");
+    const reply = JSON.parse(text(await runner.callTool({ name: "lease_job", arguments: {} })));
+    expect(reply.updateRequired).toBeUndefined();
   });
 });
 

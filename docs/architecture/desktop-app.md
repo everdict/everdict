@@ -112,6 +112,21 @@
 >   and the **tray** (native menu + popover `reconnect` action) reconnects all runners on the device. Bridge-additive and
 >   optional on the web mirror, so an older shell just doesn't show the affordance. No control-plane change — this is pure
 >   local device control (the server already refreshes `lastSeenAt` on the resulting lease).
+> - **D13 — a runner behind the control plane auto-updates itself (LOCKED 2026-07-17).** When the control plane moves
+>   forward, an older self-hosted runner can silently start failing jobs (the runner-facing `AgentJob`/lease contract
+>   moved on) — and a **desktop user cannot tell**. D13 closes the loop with a runner↔server **compatibility handshake**:
+>   `RUNNER_PROTOCOL_VERSION` (a monotonic integer in `@everdict/contracts`, bumped only on a breaking runner-contract
+>   change) is reported by the runner on every `lease_job` (alongside a display `version`); the control plane compares it
+>   to the value IT built with and, when the runner is behind, piggybacks `updateRequired:true` (+ `serverProtocol`) on
+>   the lease reply and stores the reported `version`/`protocol` (mig 0062) so the roster can derive a badge. The runner
+>   core signals this **once per session** via `onUpdateRequired` (GUI-free seam); the **desktop** wires it to
+>   `UpdaterController.checkNow()` — a forced auto-update check outside the 6h cycle (the existing D6 idle-apply then
+>   ships it, never mid-job) so a stranded desktop self-updates instead of failing silently. **Headless/CLI runners can't
+>   swap their own binary**, so the same signal surfaces as an **"Update required" badge** on the web runners lists
+>   (personal + workspace roster, server-derived `RunnerMeta.updateRequired`) telling the operator to redeploy. A runner
+>   that reports no protocol (pre-D13) is deliberately **not** flagged (we can't know it is behind; nagging every legacy
+>   runner on day one is noise — its own auto-update brings it to a protocol-reporting build). **No new bridge method** —
+>   the update-check is internal to main, not exposed to the web (invariant 3 unchanged).
 >
 > - **D1 — the UI is the deployed web, not a rebuild.** The desktop shell renders the SaaS web
 >   (`apps/web`) at its deployed URL inside the app window — the Linear/Slack/Notion model. `apps/web`

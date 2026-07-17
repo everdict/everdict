@@ -1080,7 +1080,11 @@
     "revokeRunnerAria": "Remove runner {name}",
     "reconnect": "Reconnect",
     "reconnecting": "Reconnecting…",
-    "statusMenuAria": "Runner {name} status and actions"
+    "statusMenuAria": "Runner {name} status and actions",
+    "updateRequired": "Update required",
+    "updating": "Updating…",
+    "updateAutoDesktop": "This runner is behind the control plane. The desktop app will update itself automatically.",
+    "updateHintHeadless": "This runner is behind the control plane. Redeploy it with the latest version."
   },
   "manageSchedules": {
     "runtimeDefault": "Default backend",
@@ -1249,6 +1253,8 @@
     "offline": "Offline",
     "capSupported": "Supported by this runner",
     "capUnsupported": "Not available on this runner",
+    "updateRequired": "Update required",
+    "updateHint": "This runner is behind the control plane. Redeploy it with the latest version.",
     "pairedAt": "Registered {date}",
     "revokeConfirm": "Confirm revoke",
     "close": "Close",

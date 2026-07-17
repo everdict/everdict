@@ -1,5 +1,5 @@
-import type { SelfHostedKey } from "@everdict/application-control";
-import { CaseResultSchema } from "@everdict/contracts";
+import { type SelfHostedKey, runnerUpdateRequired } from "@everdict/application-control";
+import { CaseResultSchema, RUNNER_PROTOCOL_VERSION } from "@everdict/contracts";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { type McpToolContext, fail, ok, plain } from "../mcp-context.js";
@@ -22,13 +22,15 @@ export function registerRunnerLeaseTools(server: McpServer, ctx: McpToolContext)
       "lease_job",
       {
         description:
-          "Fetch the next eval job (runner pull, long-poll). If none, wait up to wait_ms then {job:null} — safe to call again immediately. Passing capabilities self-advertises the runner (e.g. docker detection → service-harness gate). Report the result via submit_job_result.",
+          "Fetch the next eval job (runner pull, long-poll). If none, wait up to wait_ms then {job:null} — safe to call again immediately. Passing capabilities self-advertises the runner (e.g. docker detection → service-harness gate). Passing version/protocol self-reports the runner build; if the runner's protocol is behind this control plane the reply carries updateRequired:true (the runner/desktop should update). Report the result via submit_job_result.",
         inputSchema: {
           wait_ms: z.number().int().min(0).max(60_000).optional(),
           capabilities: z.array(z.string()).optional(),
+          version: z.string().max(80).optional(),
+          protocol: z.number().int().optional(),
         },
       },
-      ({ wait_ms, capabilities }) =>
+      ({ wait_ms, capabilities, version, protocol }) =>
         plain(async () => {
           const key = runnerKey();
           if (!key) return fail(NEED_RUNNER);
@@ -36,10 +38,18 @@ export function registerRunnerLeaseTools(server: McpServer, ctx: McpToolContext)
             await deps.runnerService.touch(key.owner, key.runnerId); // mark as connected
             // Update when the runner reports its actual capabilities (docker detection → sharpens the service-harness dispatch gate).
             if (capabilities) await deps.runnerService.setCapabilities(key.owner, key.runnerId, capabilities);
+            // Persist the self-reported build/protocol version → drives the roster's update-required badge.
+            if (version !== undefined && protocol !== undefined)
+              await deps.runnerService.reportVersion(key.owner, key.runnerId, version, protocol);
           }
           // Pass capabilities to the hub → placement gate (if a case.image needs docker but the runner lacks it, reject that job outright).
           const leased = await hub.leaseWait(key, wait_ms ?? 0, capabilities); // unset = return immediately (backward compatible)
-          return ok(leased ?? { job: null });
+          // A runner older than this control plane is told to update (piggybacked on the lease reply — the runner acts on it,
+          // e.g. the desktop forces an immediate auto-update check). Omitted when up to date so an up-to-date reply stays lean.
+          const update = runnerUpdateRequired(protocol)
+            ? { updateRequired: true, serverProtocol: RUNNER_PROTOCOL_VERSION }
+            : {};
+          return ok({ ...(leased ?? { job: null }), ...update });
         }),
     );
     server.registerTool(

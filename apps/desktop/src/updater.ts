@@ -72,13 +72,8 @@ export class UpdaterController {
       this.set({ kind: "error", message: err.message });
     });
 
-    const check = () => {
-      void u.checkForUpdates().catch((e: unknown) => {
-        this.set({ kind: "error", message: e instanceof Error ? e.message : String(e) });
-      });
-    };
     this.set({ kind: "idle" });
-    check();
+    this.runCheck();
     const schedule =
       this.opts.schedule ??
       ((fn: () => void, ms: number) => {
@@ -86,7 +81,22 @@ export class UpdaterController {
         (t as { unref?: () => void }).unref?.();
         return () => clearInterval(t);
       });
-    this.stopSchedule = schedule(check, this.opts.intervalMs ?? SIX_HOURS_MS);
+    this.stopSchedule = schedule(() => this.runCheck(), this.opts.intervalMs ?? SIX_HOURS_MS);
+  }
+
+  // Force an immediate check outside the periodic cycle. The control plane can request it (this runner is behind the
+  // server) so a stranded runner self-updates without waiting up to the full re-check interval. No-op if disabled/not started.
+  checkNow(): void {
+    if (!this.started) return;
+    this.runCheck();
+  }
+
+  private runCheck(): void {
+    const u = this.opts.updater;
+    if (!u) return;
+    void u.checkForUpdates().catch((e: unknown) => {
+      this.set({ kind: "error", message: e instanceof Error ? e.message : String(e) });
+    });
   }
 
   stop(): void {

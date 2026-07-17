@@ -1,6 +1,20 @@
-import { CapabilityNameSchema, type PairRunnerInput, type PairedRunner, type RunnerMeta } from "@everdict/contracts";
+import {
+  CapabilityNameSchema,
+  type PairRunnerInput,
+  type PairedRunner,
+  RUNNER_PROTOCOL_VERSION,
+  type RunnerMeta,
+} from "@everdict/contracts";
 import { z } from "zod";
 import type { RunnerStore } from "../ports/runner-store.js";
+
+// A runner is out of date when the protocol it built with is BELOW this control plane's — it is running older code than
+// the server, so the runner-facing job/lease contract may have moved on. A runner that reports no protocol (pre-version)
+// is left unflagged: we cannot know it is behind, and nagging every legacy runner on day one would be noise (its own
+// auto-update brings it to a protocol-reporting build anyway). Pure — shared by lease (signal) and list (roster badge).
+export function runnerUpdateRequired(protocol: number | undefined): boolean {
+  return protocol !== undefined && protocol < RUNNER_PROTOCOL_VERSION;
+}
 
 // Self-hosted runner service — the core of personally-owned device pairing (pair/list/revoke/workspace roster).
 // Shared by the HTTP routes and the MCP tools (BFF↔MCP parity). The token is returned in plaintext only once at pair time (stored as a hash).
@@ -18,15 +32,16 @@ export const PairRunnerBodySchema = z.object({
 });
 export type PairRunnerBody = z.infer<typeof PairRunnerBodySchema>;
 
+// Overlay the derived (never stored) update-required flag onto a stored runner meta for read paths (roster/list).
+function withUpdateRequired(meta: RunnerMeta): RunnerMeta {
+  return runnerUpdateRequired(meta.protocol) ? { ...meta, updateRequired: true } : meta;
+}
+
 export class RunnerService {
   constructor(private readonly store: RunnerStore) {}
   // Personally-owned: owner=principal.subject. The plaintext token rides out in the result exactly once (stored as a hash).
   async pair(input: PairRunnerInput): Promise<PairedRunner> {
     return this.store.pair(input);
-  }
-  // Personally-owned — I see my runners from any workspace (self-scoped, same as profile/connections).
-  async list(owner: string): Promise<RunnerMeta[]> {
-    return this.store.list(owner);
   }
   async revoke(owner: string, id: string): Promise<void> {
     await this.store.remove(owner, id);
@@ -40,9 +55,19 @@ export class RunnerService {
     const known = new Set<string>(RUNNER_CAPABILITIES);
     await this.store.setCapabilities(owner, id, [...new Set(capabilities.filter((c) => known.has(c)))]);
   }
+  // Runner self-report of its build/protocol version (on lease). The control plane derives `updateRequired` from the
+  // stored protocol (roster badge) — see runnerUpdateRequired. Bounded/validated at this boundary. No-op if the runner doesn't exist.
+  async reportVersion(owner: string, id: string, version: string, protocol: number): Promise<void> {
+    if (!Number.isInteger(protocol)) return; // ignore a malformed self-report rather than persist garbage
+    await this.store.setVersion(owner, id, version.slice(0, 80), protocol);
+  }
+  // Personal list — my runners (owner-scoped), annotated with the derived update-required flag (never stored).
+  async list(owner: string): Promise<RunnerMeta[]> {
+    return (await this.store.list(owner)).map(withUpdateRequired);
+  }
   // Workspace roster (read-only) — metadata for runners paired in this workspace (no tokens). For the settings > members tab.
   async listForWorkspace(workspace: string): Promise<RunnerMeta[]> {
-    return this.store.listByWorkspace(workspace);
+    return (await this.store.listByWorkspace(workspace)).map(withUpdateRequired);
   }
 
   // Workspace-shared runner (team resource) — owner="ws:<workspace>". Unlike a personal runner (owner=subject), an admin registers it and
@@ -55,7 +80,7 @@ export class RunnerService {
     return this.store.pair({ ...input, owner: RunnerService.wsOwner(input.workspace) });
   }
   async listWorkspaceOwned(workspace: string): Promise<RunnerMeta[]> {
-    return this.store.list(RunnerService.wsOwner(workspace));
+    return (await this.store.list(RunnerService.wsOwner(workspace))).map(withUpdateRequired);
   }
   async revokeWorkspaceRunner(workspace: string, id: string): Promise<void> {
     await this.store.remove(RunnerService.wsOwner(workspace), id);

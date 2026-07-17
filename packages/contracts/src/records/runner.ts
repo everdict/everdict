@@ -1,6 +1,13 @@
 // Self-hosted runner record shapes — moved from @everdict/db runner-store in re-architecture P2c.
 // The RunnerStore interface + impls + generateRunnerToken stay in @everdict/db.
 
+// Runner↔control-plane compatibility protocol version. The runner reports the value it was BUILT with (from its
+// bundled @everdict/contracts) on every lease; the control plane compares it to the value IT was built with. A runner
+// whose protocol is BELOW the control plane's is running older code than the server → it is told to update
+// (`updateRequired`). Bump this ONLY on a breaking change to the runner-facing job/lease contract (e.g. AgentJobSchema
+// tightening) — the same breakage the runner-loop's version-skew hint fires on. Monotonic; never reused.
+export const RUNNER_PROTOCOL_VERSION = 1;
+
 // A personal device where a user paired their own machine with a workspace.
 export interface RunnerMeta {
   id: string;
@@ -9,6 +16,9 @@ export interface RunnerMeta {
   capabilities: string[]; // repo | browser | os-use | docker — the environments this machine can run
   pairedAt: string;
   lastSeenAt?: string; // last lease/heartbeat time (refreshed via touch in a later slice)
+  version?: string; // runner build/app version (display only) — self-reported on lease; absent for a pre-version runner
+  protocol?: number; // runner protocol version (see RUNNER_PROTOCOL_VERSION) — self-reported on lease; absent for a pre-version runner
+  updateRequired?: boolean; // DERIVED on read (never stored): the runner's protocol is behind the control plane → update it
 }
 
 // Pairing input — the plaintext token is hashed just before storage. The token is issued by the server (the client doesn't choose it).

@@ -11,5 +11,11 @@ export const RunnerMetaSchema = z.object({
     .describe("What this machine can run (repo | browser | os-use | docker …) — re-probed when the runner attaches"),
   pairedAt: z.string(),
   lastSeenAt: z.string().optional().describe("Last lease/heartbeat time"),
+  version: z.string().optional().describe("Runner build/app version (display only) — self-reported on lease"),
+  protocol: z.number().int().optional().describe("Runner protocol version — self-reported on lease"),
+  updateRequired: z
+    .boolean()
+    .optional()
+    .describe("Derived on read: the runner's protocol is behind the control plane → it should update"),
 });
 export type RunnerMeta = z.infer<typeof RunnerMetaSchema>;

@@ -58,6 +58,7 @@ export {
   PairRunnerBodySchema,
   RUNNER_CAPABILITIES,
   RunnerService,
+  runnerUpdateRequired,
 } from "./runner/runner-service.js";
 export { generateInviteToken, generateKey, hashKey } from "./credential/credentials.js";
 export { WorkspaceService } from "./workspace/workspace-service.js";

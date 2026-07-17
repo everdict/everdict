@@ -117,6 +117,24 @@ describe("UpdaterController", () => {
     expect(checkForUpdates).toHaveBeenCalledTimes(2);
   });
 
+  it("checkNow — forces an immediate check outside the periodic cycle (the control-plane 'you are behind' seam)", () => {
+    const { u, checkForUpdates } = fakeUpdater();
+    const c = new UpdaterController({ updater: u, schedule: () => () => {} });
+    c.start(); // one initial check
+    expect(checkForUpdates).toHaveBeenCalledTimes(1);
+    c.checkNow(); // forced check (e.g. a runner lease reported updateRequired)
+    expect(checkForUpdates).toHaveBeenCalledTimes(2);
+  });
+
+  it("checkNow — is a no-op when disabled (no feed) or not started", () => {
+    const { u, checkForUpdates } = fakeUpdater();
+    const disabled = new UpdaterController({ updater: null });
+    disabled.checkNow();
+    const notStarted = new UpdaterController({ updater: u, schedule: () => () => {} });
+    notStarted.checkNow();
+    expect(checkForUpdates).not.toHaveBeenCalled();
+  });
+
   it("quitAndInstall — delegates only from ready (with the relaunch flag)", () => {
     const { u, quitAndInstall } = fakeUpdater();
     const c = new UpdaterController({ updater: u, schedule: () => () => {} });

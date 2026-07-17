@@ -140,6 +140,12 @@ export function WorkspaceRunnersManager({
                       {online ? t('online') : t('offline')}
                     </span>
                     {r.os && <Badge tone="outline">{r.os}</Badge>}
+                    {/* This runner's protocol is behind the control plane — a shared/headless runner must be redeployed with the latest version. */}
+                    {r.updateRequired && (
+                      <Badge tone="warning" title={t('updateHint')}>
+                        {t('updateRequired')}
+                      </Badge>
+                    )}
                   </div>
                   <div className="mt-1.5 flex flex-wrap items-center gap-1">
                     {capabilityMeta.map(({ name, label }) => {

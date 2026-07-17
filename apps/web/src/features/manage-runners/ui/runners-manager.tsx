@@ -325,6 +325,16 @@ export function RunnersManager({
                       </span>
                     )}
                     {r.os && <Badge tone="outline">{r.os}</Badge>}
+                    {/* Update-required: the control plane reports this runner is behind the server. On THIS device the
+                        desktop app auto-updates (informational); a headless runner must be updated by its operator. */}
+                    {r.updateRequired && (
+                      <Badge
+                        tone="warning"
+                        title={thisDevice ? t('updateAutoDesktop') : t('updateHintHeadless')}
+                      >
+                        {thisDevice ? t('updating') : t('updateRequired')}
+                      </Badge>
+                    )}
                   </div>
                   {/* Capability self-labels — green (supported)/grey (unsupported). The runner probes its own machine and advertises them. */}
                   <div className="mt-1.5 flex flex-wrap items-center gap-1">

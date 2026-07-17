@@ -1,4 +1,4 @@
-import { type AgentJob, type CaseResult, InternalError } from "@everdict/contracts";
+import { type AgentJob, type CaseResult, InternalError, RUNNER_PROTOCOL_VERSION } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { runLeaseWorkers } from "./runner-loop.js";
 
@@ -321,5 +321,74 @@ describe("runLeaseWorkers — heartbeat-delivered cancellation", () => {
     );
     expect(aborted).toBe(true); // the cancel signal reached the run
     expect(submitted).toEqual(["j1"]); // the classified (interrupted) result was submitted so the batch settles
+  });
+});
+
+describe("runLeaseWorkers — version self-report + update-required signal", () => {
+  it("reports the runner version + protocol on every lease", async () => {
+    let stop = false;
+    const leaseArgs: Array<Record<string, unknown>> = [];
+    const callJson = async (name: string, args: Record<string, unknown>): Promise<Record<string, unknown>> => {
+      if (name === "lease_job") {
+        leaseArgs.push(args);
+        stop = true; // one poll is enough
+        return { job: null };
+      }
+      return {};
+    };
+    await runLeaseWorkers(
+      { callJson, runJob: async () => ({}) as CaseResult, sleep: () => new Promise((r) => setTimeout(r, 0)) },
+      { ...opts(1, () => stop), version: "9.9.9" },
+    );
+    expect(leaseArgs[0]).toMatchObject({ version: "9.9.9", protocol: RUNNER_PROTOCOL_VERSION });
+  });
+
+  it("fires onUpdateRequired exactly once when the control plane replies updateRequired, even across many polls/workers", async () => {
+    let polls = 0;
+    let stop = false;
+    const updates: Array<{ serverProtocol?: number }> = [];
+    const callJson = async (name: string): Promise<Record<string, unknown>> => {
+      if (name === "lease_job") {
+        polls++;
+        if (polls >= 6) stop = true;
+        // The server keeps flagging the runner as behind on every reply — the loop must still signal only once.
+        return { job: null, updateRequired: true, serverProtocol: RUNNER_PROTOCOL_VERSION + 1 };
+      }
+      return {};
+    };
+    await runLeaseWorkers(
+      {
+        callJson,
+        runJob: async () => ({}) as CaseResult,
+        sleep: () => new Promise((r) => setTimeout(r, 0)),
+        onUpdateRequired: (info) => updates.push(info),
+      },
+      opts(2, () => stop), // 2 workers both see updateRequired
+    );
+    expect(updates).toEqual([{ serverProtocol: RUNNER_PROTOCOL_VERSION + 1 }]); // once, not per-poll/per-worker
+  });
+
+  it("does not fire onUpdateRequired when the runner is up to date", async () => {
+    let stop = false;
+    let fired = false;
+    const callJson = async (name: string): Promise<Record<string, unknown>> => {
+      if (name === "lease_job") {
+        stop = true;
+        return { job: null }; // no updateRequired
+      }
+      return {};
+    };
+    await runLeaseWorkers(
+      {
+        callJson,
+        runJob: async () => ({}) as CaseResult,
+        sleep: () => new Promise((r) => setTimeout(r, 0)),
+        onUpdateRequired: () => {
+          fired = true;
+        },
+      },
+      opts(1, () => stop),
+    );
+    expect(fired).toBe(false);
   });
 });

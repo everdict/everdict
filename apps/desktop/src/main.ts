@@ -267,9 +267,19 @@ const supervisor = new RunnerSupervisor({
       token,
       apiUrl,
       onStatus,
+      // Self-report this app's version on every lease → the control plane derives the roster's update-required badge.
+      version: app.getVersion(),
       onJobDone: (done) => {
         if (done.error) failedSinceIdle++;
         else doneSinceIdle++;
+      },
+      // The control plane reported this runner is behind the server → force an immediate auto-update check so a desktop
+      // user (who can't otherwise tell) self-updates instead of silently failing jobs, rather than waiting up to 6h.
+      onUpdateRequired: (info) => {
+        console.error(
+          `Runner is behind the control plane (server protocol ${info.serverProtocol ?? "?"}) — checking for an update now.`,
+        );
+        updater.checkNow();
       },
       log: (m) => console.error(m),
       // Desktop uses a shorter long-poll than the CLI (25s) to reduce shutdown latency (stop waits for the current poll to complete).

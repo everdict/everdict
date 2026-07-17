@@ -30,8 +30,12 @@ export interface RunnerHostOpts {
   heartbeatMs?: number; // lease renewal interval while running (default 30s)
   pollMs?: number; // lease error backoff (default 2s)
   capabilities?: string[]; // unset → detectCapabilities()
+  version?: string; // runner build/app version, self-reported on lease (desktop passes app.getVersion()) — drives the update-required signal
   onStatus?: (status: RunnerHostStatus) => void;
   onJobDone?: (done: RunnerJobDone) => void; // job completion notice (success/failure) — OS notifications etc.
+  // Fired (once per lease session) when the control plane reports this runner is behind the server — the desktop wires
+  // it to force an immediate auto-update check so a stranded runner self-updates instead of silently failing jobs.
+  onUpdateRequired?: (info: { serverProtocol?: number }) => void;
   log?: (msg: string) => void;
   // Test injection points
   connect?: ConnectClient; // default mcpConnect(new URL("/mcp", apiUrl), token)
@@ -106,13 +110,20 @@ export class RunnerHost {
     // superviseLease (not runLeaseWorkers directly) so a pool that ends unexpectedly self-heals — the resident runner
     // restarts itself instead of going silently dead. Only stop() (stopFlag) ends it. See runner-supervisor.ts.
     this.loop = superviseLease(
-      { callJson, runJob, log: this.opts.log, sleep: this.opts.sleep },
+      {
+        callJson,
+        runJob,
+        log: this.opts.log,
+        sleep: this.opts.sleep,
+        ...(this.opts.onUpdateRequired ? { onUpdateRequired: this.opts.onUpdateRequired } : {}),
+      },
       {
         maxConcurrent: Math.max(1, this.opts.maxConcurrent ?? 1),
         waitMs: this.opts.waitMs ?? 25_000,
         heartbeatMs: this.opts.heartbeatMs ?? 30_000,
         pollMs: this.opts.pollMs ?? 2_000,
         capabilities: this.capabilities,
+        ...(this.opts.version !== undefined ? { version: this.opts.version } : {}),
         shouldStop: () => this.stopFlag,
       },
     ).finally(() => {

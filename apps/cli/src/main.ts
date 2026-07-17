@@ -313,7 +313,16 @@ async function runnerCommand(flags: Map<string, string>): Promise<void> {
       log: (m) => console.error(m),
       sleep,
     },
-    { maxConcurrent, waitMs, heartbeatMs: hbMs, pollMs, capabilities, shouldStop: () => stop },
+    {
+      maxConcurrent,
+      waitMs,
+      heartbeatMs: hbMs,
+      pollMs,
+      capabilities,
+      // Optional display version (the protocol version — auto-sent from @everdict/contracts — drives update-required).
+      ...(process.env.EVERDICT_RUNNER_VERSION ? { version: process.env.EVERDICT_RUNNER_VERSION } : {}),
+      shouldStop: () => stop,
+    },
   );
   await session.close();
 }

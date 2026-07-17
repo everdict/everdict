@@ -81,6 +81,10 @@ export class InMemoryRunnerStore implements RunnerStore {
     const s = this.byOwner.get(owner)?.get(id);
     if (s) s.meta = { ...s.meta, capabilities };
   }
+  async setVersion(owner: string, id: string, version: string, protocol: number): Promise<void> {
+    const s = this.byOwner.get(owner)?.get(id);
+    if (s) s.meta = { ...s.meta, version, protocol };
+  }
   async resolveByToken(token: string): Promise<ResolvedRunner | null> {
     const hit = this.byTokenHash.get(hashKey(token));
     if (!hit) return null;
@@ -97,6 +101,8 @@ interface RunnerRow {
   capabilities: string;
   paired_at: string | Date;
   last_seen_at: string | Date | null;
+  version: string | null;
+  protocol: number | null;
 }
 
 function rowToMeta(r: RunnerRow): RunnerMeta {
@@ -107,8 +113,13 @@ function rowToMeta(r: RunnerRow): RunnerMeta {
     pairedAt: new Date(r.paired_at).toISOString(),
     ...(r.os !== null ? { os: r.os } : {}),
     ...(r.last_seen_at !== null ? { lastSeenAt: new Date(r.last_seen_at).toISOString() } : {}),
+    ...(r.version !== null ? { version: r.version } : {}),
+    ...(r.protocol !== null ? { protocol: r.protocol } : {}),
   };
 }
+
+// Every list/get SELECT reads the same runner-meta columns (never token_hash).
+const RUNNER_META_COLS = "id, label, os, capabilities, paired_at, last_seen_at, version, protocol";
 
 export class PgRunnerStore implements RunnerStore {
   constructor(private readonly client: SqlClient) {}
@@ -136,7 +147,7 @@ export class PgRunnerStore implements RunnerStore {
   async list(owner: string): Promise<RunnerMeta[]> {
     // Never select token_hash.
     const res = await this.client.query<RunnerRow>(
-      `SELECT id, label, os, capabilities, paired_at, last_seen_at
+      `SELECT ${RUNNER_META_COLS}
        FROM everdict_runners WHERE owner = $1 ORDER BY paired_at DESC`,
       [owner],
     );
@@ -144,7 +155,7 @@ export class PgRunnerStore implements RunnerStore {
   }
   async get(owner: string, id: string): Promise<RunnerMeta | null> {
     const res = await this.client.query<RunnerRow>(
-      `SELECT id, label, os, capabilities, paired_at, last_seen_at
+      `SELECT ${RUNNER_META_COLS}
        FROM everdict_runners WHERE owner = $1 AND id = $2`,
       [owner, id],
     );
@@ -153,7 +164,7 @@ export class PgRunnerStore implements RunnerStore {
   }
   async listByWorkspace(workspace: string): Promise<RunnerMeta[]> {
     const res = await this.client.query<RunnerRow>(
-      `SELECT id, label, os, capabilities, paired_at, last_seen_at
+      `SELECT ${RUNNER_META_COLS}
        FROM everdict_runners WHERE workspace = $1 ORDER BY paired_at DESC`,
       [workspace],
     );
@@ -173,6 +184,14 @@ export class PgRunnerStore implements RunnerStore {
       owner,
       id,
       capabilities.join(" "),
+    ]);
+  }
+  async setVersion(owner: string, id: string, version: string, protocol: number): Promise<void> {
+    await this.client.query("UPDATE everdict_runners SET version = $3, protocol = $4 WHERE owner = $1 AND id = $2", [
+      owner,
+      id,
+      version,
+      protocol,
     ]);
   }
   async resolveByToken(token: string): Promise<ResolvedRunner | null> {

@@ -80,6 +80,17 @@ describe("InMemoryRunnerStore", () => {
     await s.setCapabilities("u-alice", "nope", ["docker"]); // missing runner — doesn't throw
   });
 
+  it("setVersion records the runner's self-reported build/protocol version, and is a no-op for a missing runner", async () => {
+    const s = new InMemoryRunnerStore(() => "2026-01-01T00:00:00Z");
+    const r = await s.pair({ owner: "u-alice", workspace: "acme", label: "laptop" });
+    expect((await s.get("u-alice", r.meta.id))?.version).toBeUndefined();
+    await s.setVersion("u-alice", r.meta.id, "0.2.0", 1);
+    const meta = await s.get("u-alice", r.meta.id);
+    expect(meta?.version).toBe("0.2.0");
+    expect(meta?.protocol).toBe(1);
+    await s.setVersion("u-alice", "nope", "9.9.9", 9); // missing runner — doesn't throw
+  });
+
   it("if capabilities/os are unset, empty array + os omitted", async () => {
     const s = new InMemoryRunnerStore(() => "2026-01-01T00:00:00Z");
     const r = await s.pair({ owner: "u-alice", workspace: "acme", label: "minimal" });

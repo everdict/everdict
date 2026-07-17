@@ -46,6 +46,9 @@ export const runnerMetaSchema = z.object({
   capabilities: z.array(z.string()),
   pairedAt: z.string(),
   lastSeenAt: z.string().optional(),
+  version: z.string().optional(), // runner build/app version (self-reported on lease)
+  protocol: z.number().int().optional(), // runner protocol version (self-reported on lease)
+  updateRequired: z.boolean().optional(), // derived by the control plane: this runner is behind the server → update it
 })
 
 // GET /runners — my runner list (personally owned; account page).
