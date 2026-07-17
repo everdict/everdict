@@ -2145,6 +2145,7 @@
     "clusterTipNamespace": "ns",
     "clusterTipOwner": "소유자",
     "clusterActionResize": "리소스 크기 변경",
+    "clusterActionsMenu": "액션",
     "clusterActionTerminate": "이 서비스 종료",
     "clusterConfirmTerminate": "네임스페이스 {namespace}의 {name}을(를) 종료해요. 외부 서비스(또는 그 소유 컨트롤러)를 삭제하며, everdict 평가가 아니에요.",
     "clusterResizeTitle": "{name} 크기 변경",

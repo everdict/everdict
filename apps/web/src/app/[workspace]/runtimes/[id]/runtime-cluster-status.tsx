@@ -5,6 +5,7 @@ import {
   Ban,
   HardDrive,
   Loader2,
+  MoreHorizontal,
   Play,
   RefreshCw,
   Server,
@@ -24,6 +25,7 @@ import { cn } from '@/shared/lib/utils'
 import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
 import { Dialog } from '@/shared/ui/dialog'
+import { DropdownItem, DropdownMenu } from '@/shared/ui/dropdown-menu'
 import { Input, Label } from '@/shared/ui/input'
 
 type InspectNode = NonNullable<RuntimeInspection['nodes']>['items'][number]
@@ -121,8 +123,8 @@ function RadialGauge({
   )
 }
 
-// One workload as a role-coloured chip with a hover tooltip (role/ns/owner/status/age/resources) + inline controls:
-// stop/terminate for non-store units, and a resize button where the unit supports it. An external (role 'other')
+// One workload as a role-coloured chip with a hover tooltip (role/ns/owner/status/age/resources) + a single kebab
+// menu carrying its controls (resize where supported, stop/terminate for non-store units). An external (role 'other')
 // unit carries an "external" badge so it reads distinctly from the everdict eval/store units on the same node.
 function WorkloadChip({
   w,
@@ -133,6 +135,7 @@ function WorkloadChip({
   stopLabel,
   resizeLabel,
   externalLabel,
+  menuLabel,
   idleTitle,
   nsLabel,
   ownerLabel,
@@ -145,6 +148,7 @@ function WorkloadChip({
   stopLabel: string
   resizeLabel: string
   externalLabel: string
+  menuLabel: string
   idleTitle: string
   nsLabel: string
   ownerLabel: string
@@ -154,8 +158,20 @@ function WorkloadChip({
   const dot = w.role === 'store' ? 'bg-cyan-400' : w.role === 'eval' ? 'bg-primary' : 'bg-faint'
   const tv =
     w.role === 'store' ? 'text-cyan-400' : w.role === 'eval' ? 'text-primary' : 'text-faint'
+  // A store never resizes and is never stopped, so it carries no menu — its chip stays name-only.
+  const canResize = canControl && canResizeUnit(w, kind)
+  const canStop = canControl && w.role !== 'store'
+  const hasActions = canResize || canStop
   return (
-    <span className="group relative inline-flex items-center gap-1.5 rounded-md border border-border bg-secondary py-1 pl-2 pr-1 transition-colors hover:border-border-strong">
+    // A div (not a span): the kebab renders a block-level dropdown wrapper, which mustn't nest inside a span. As a
+    // flex item the container lays out identically either way.
+    <div
+      className={cn(
+        'group relative inline-flex items-center gap-1.5 rounded-md border border-border bg-secondary py-1 pl-2 transition-colors hover:border-border-strong',
+        // The kebab visually balances the right edge; without it, pad symmetrically so an action-less chip isn't lopsided.
+        hasActions ? 'pr-1' : 'pr-2'
+      )}
+    >
       <span className={cn('size-1.5 shrink-0 rounded-[2px]', dot)} />
       <span
         className={cn('max-w-[120px] truncate font-mono text-[11px]', idle && 'text-amber-500')}
@@ -168,28 +184,38 @@ function WorkloadChip({
           {externalLabel}
         </span>
       ) : null}
-      {/* The controls reserve their space and only toggle visibility on hover — the chip's width must never change
-          with hover. In a full flex-wrap row a hover-widened chip wraps to the next line, the pointer leaves it,
-          it un-wraps back under the pointer, and the layout oscillates forever. */}
-      {canControl && canResizeUnit(w, kind) ? (
-        <button
-          type="button"
-          title={resizeLabel}
-          onClick={onResize}
-          className="invisible grid size-4 place-items-center rounded text-faint transition-colors hover:bg-primary/10 hover:text-primary group-hover:visible"
+      {/* Controls live in one always-present kebab menu (not hover-reveal buttons): the chip's width is fixed, so it
+          never widens on hover — which in a flex-wrap row would wrap the chip, lose the pointer, and oscillate forever. */}
+      {hasActions ? (
+        <DropdownMenu
+          align="end"
+          className="shrink-0"
+          trigger={({ open, toggle }) => (
+            <button
+              type="button"
+              title={menuLabel}
+              aria-label={menuLabel}
+              onClick={toggle}
+              className={cn(
+                'grid size-4 place-items-center rounded text-faint transition-colors hover:bg-accent hover:text-foreground',
+                open && 'bg-accent text-foreground'
+              )}
+            >
+              <MoreHorizontal className="size-3" />
+            </button>
+          )}
         >
-          <SlidersHorizontal className="size-2.5" />
-        </button>
-      ) : null}
-      {canControl && w.role !== 'store' ? (
-        <button
-          type="button"
-          title={stopLabel}
-          onClick={onStop}
-          className="invisible grid size-4 place-items-center rounded text-faint transition-colors hover:bg-rose-500/10 hover:text-rose-500 group-hover:visible"
-        >
-          <X className="size-2.5" />
-        </button>
+          {canResize ? (
+            <DropdownItem icon={<SlidersHorizontal />} onSelect={onResize}>
+              {resizeLabel}
+            </DropdownItem>
+          ) : null}
+          {canStop ? (
+            <DropdownItem tone="danger" icon={<X />} onSelect={onStop}>
+              {stopLabel}
+            </DropdownItem>
+          ) : null}
+        </DropdownMenu>
       ) : null}
       <span className="pointer-events-none absolute bottom-[calc(100%+7px)] left-1/2 z-20 w-max max-w-[220px] -translate-x-1/2 translate-y-1 space-y-1 rounded-lg border border-border-strong bg-popover p-2 opacity-0 shadow-pop transition-all duration-150 group-hover:translate-y-0 group-hover:opacity-100">
         <TipRow k="role" v={<span className={tv}>{external ? externalLabel : w.role}</span>} />
@@ -204,7 +230,7 @@ function WorkloadChip({
           />
         ) : null}
       </span>
-    </span>
+    </div>
   )
 }
 function TipRow({ k, v }: { k: string; v: ReactNode }) {
@@ -339,6 +365,7 @@ export function RuntimeClusterStatus({
       stopLabel={isExternal(w) ? t('clusterActionTerminate') : t('clusterActionStop')}
       resizeLabel={t('clusterActionResize')}
       externalLabel={t('clusterExternal')}
+      menuLabel={t('clusterActionsMenu')}
       idleTitle={t('clusterLongRunning')}
       nsLabel={t('clusterTipNamespace')}
       ownerLabel={t('clusterTipOwner')}

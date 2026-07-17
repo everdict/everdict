@@ -2145,6 +2145,7 @@
     "clusterTipNamespace": "ns",
     "clusterTipOwner": "owner",
     "clusterActionResize": "Resize resources",
+    "clusterActionsMenu": "Actions",
     "clusterActionTerminate": "Terminate this service",
     "clusterConfirmTerminate": "Terminate {name} in namespace {namespace}. This deletes the external service (or its owning controller) — it is not an everdict evaluation.",
     "clusterResizeTitle": "Resize {name}",
