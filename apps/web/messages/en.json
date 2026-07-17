@@ -772,7 +772,11 @@
     "kindChangedNote": "The judge kind changed — the whole spec was restructured.",
     "loadError": "Couldn't load the judge{detail}.",
     "noPermissionTitle": "You don't have permission to register judges.",
-    "noPermissionHint": "Requires the member role or higher (judges:write). Ask a workspace admin."
+    "noPermissionHint": "Requires the member role or higher (judges:write). Ask a workspace admin.",
+    "evaluationHistory": "Evaluation history",
+    "evaluationHistoryCount": "{count, plural, one {# run} other {# runs}}",
+    "evaluationHistoryMore": "Showing the latest 12 — {count} more.",
+    "evaluationHistoryRunner": "Run by"
   },
   "landingPage": {
     "login": "Log in",

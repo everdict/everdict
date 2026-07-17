@@ -94,6 +94,23 @@ describe("InMemoryScorecardStore", () => {
     expect((await store.list("acme", { dataset: "d1", status: "succeeded" })).map((r) => r.id)).toEqual(["a"]);
     expect(await store.list("acme")).toHaveLength(3); // no filter → everything (current behavior)
   });
+
+  it("list(filter.judge) narrows to batches that applied the judge, at any version (judge-detail evaluation history)", async () => {
+    const store = new InMemoryScorecardStore();
+    const orchestration = { concurrency: 2, retries: 0 };
+    await store.create(
+      rec({ id: "a", orchestration: { ...orchestration, judges: [{ id: "clarity", version: "1.0.0" }] } }),
+    );
+    await store.create(
+      rec({ id: "b", orchestration: { ...orchestration, judges: [{ id: "clarity", version: "2.0.0" }] } }),
+    );
+    await store.create(
+      rec({ id: "c", orchestration: { ...orchestration, judges: [{ id: "other-judge", version: "1.0.0" }] } }),
+    );
+    await store.create(rec({ id: "d" })); // no orchestration at all (pre-field record)
+    expect((await store.list("acme", { judge: "clarity" })).map((r) => r.id).sort()).toEqual(["a", "b"]);
+    expect(await store.list("acme", { judge: "unknown" })).toEqual([]);
+  });
 });
 
 function fakeClient(handler: (text: string, params?: unknown[]) => { rows: unknown[] }): {
@@ -197,6 +214,13 @@ describe("PgScorecardStore", () => {
     expect(calls[0]?.text).toMatch(/dataset_id = \$2/);
     expect(calls[0]?.text).toMatch(/status = \$3/);
     expect(calls[0]?.params).toEqual(["acme", "d1", "succeeded"]);
+  });
+
+  it("list(filter.judge) → jsonb containment on orchestration.judges (matches the id at any version)", async () => {
+    const { client, calls } = fakeClient(() => ({ rows: [] }));
+    await new PgScorecardStore(client).list("acme", { judge: "clarity" });
+    expect(calls[0]?.text).toMatch(/orchestration->'judges' @> \$2::jsonb/);
+    expect(calls[0]?.params).toEqual(["acme", JSON.stringify([{ id: "clarity" }])]);
   });
 
   it("delete → parameterized DELETE; RETURNING distinguishes deleted (true) from missing (false)", async () => {

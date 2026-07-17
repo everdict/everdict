@@ -23,19 +23,24 @@ function useThemeMode(): 'light' | 'dark' {
 
 // The code editor (CodeMirror 6) — real editing for user judge/grader code: line numbers, syntax highlight,
 // auto-indent, bracket matching. Client-only by nature ('use client' + effects); language follows the judge's
-// language toggle. Kept thin — a shared atom, not a feature.
+// language toggle. Kept thin — a shared atom, not a feature. readOnly turns it into a highlighted viewer
+// (judge detail): same look, no cursor/edits, no focus ring.
 export function CodeEditor({
   value,
   onChange,
   language,
   minHeight = '320px',
+  maxHeight,
+  readOnly = false,
   className,
   'aria-label': ariaLabel,
 }: {
   value: string
-  onChange: (next: string) => void
+  onChange?: (next: string) => void
   language: 'python' | 'node'
   minHeight?: string
+  maxHeight?: string
+  readOnly?: boolean
   className?: string
   'aria-label'?: string
 }) {
@@ -45,7 +50,7 @@ export function CodeEditor({
       aria-label={ariaLabel}
       className={cn(
         'overflow-hidden rounded-md border border-border bg-card text-[12.5px] shadow-raise',
-        'focus-within:border-primary focus-within:ring-2 focus-within:ring-ring/25',
+        !readOnly && 'focus-within:border-primary focus-within:ring-2 focus-within:ring-ring/25',
         className
       )}
     >
@@ -54,11 +59,14 @@ export function CodeEditor({
         onChange={onChange}
         theme={theme}
         minHeight={minHeight}
+        maxHeight={maxHeight}
+        editable={!readOnly}
+        readOnly={readOnly}
         extensions={[language === 'python' ? python() : javascript()]}
         basicSetup={{
           lineNumbers: true,
           foldGutter: false,
-          highlightActiveLine: true,
+          highlightActiveLine: !readOnly, // a viewer has no caret — an active-line bar would be noise
           autocompletion: false, // no token soup over user identifiers — plain, predictable editing
         }}
       />

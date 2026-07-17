@@ -117,6 +117,11 @@ const docs = {
       "Lists the workspace's scorecard records. Requires scorecards:read (viewer+). The list view omits the " +
       "heavy per-case fields (scorecard/steps/runIds/export) — read GET /scorecards/:id for the detail.",
     tags: ["scorecard"],
+    querystring: toJsonSchema(
+      z.object({
+        judge: z.string().optional().describe("Narrow to batches that applied this Agent Judge (any version)"),
+      }),
+    ),
     response: {
       200: { description: "Scorecard records", ...toJsonSchema(ScorecardListResponseSchema) },
       ...errorResponses(401, 403),

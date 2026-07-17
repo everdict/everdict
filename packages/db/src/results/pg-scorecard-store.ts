@@ -185,6 +185,11 @@ export class PgScorecardStore implements ScorecardStore {
       conds.push(`status = $${i++}`);
       vals.push(filter.status);
     }
+    if (filter?.judge) {
+      // jsonb containment on the persisted orchestration.judges — matches the judge id at any version.
+      conds.push(`orchestration->'judges' @> $${i++}::jsonb`);
+      vals.push(JSON.stringify([{ id: filter.judge }]));
+    }
     const res = await this.client.query<ScorecardRow>(
       `SELECT id, tenant, dataset_id, dataset_version, harness_id, harness_version, status, summary, models, judge_models, origin, created_by, runtime, subset, error, created_at, updated_at
        FROM everdict_scorecards

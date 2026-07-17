@@ -2922,6 +2922,32 @@ describe("API — scorecards (dataset×harness batch eval)", () => {
     await app.close();
   });
 
+  it("GET /scorecards?judge= narrows the list to batches that applied that judge (evaluation history)", async () => {
+    const { app } = server({ requireAuth: true, authenticator: roleAuth(["member"]) });
+    const h = { authorization: "Bearer x" };
+    await app.inject({ method: "POST", url: "/datasets", headers: h, payload: DATASET });
+    await app.inject({ method: "POST", url: "/judges", headers: h, payload: JUDGE }); // model judge "correctness"
+    const judged = await app.inject({
+      method: "POST",
+      url: "/scorecards",
+      headers: h,
+      payload: { dataset: { id: "smoke" }, harness: { id: "scripted" }, judges: [{ id: "correctness" }] },
+    });
+    const plain = await app.inject({
+      method: "POST",
+      url: "/scorecards",
+      headers: h,
+      payload: { dataset: { id: "smoke" }, harness: { id: "scripted" } },
+    });
+    await pollScorecard(app, judged.json().id, h);
+    await pollScorecard(app, plain.json().id, h);
+    const filtered = await app.inject({ method: "GET", url: "/scorecards?judge=correctness", headers: h });
+    expect(filtered.json().map((r: { id: string }) => r.id)).toEqual([judged.json().id]);
+    const none = await app.inject({ method: "GET", url: "/scorecards?judge=unknown", headers: h });
+    expect(none.json()).toEqual([]);
+    await app.close();
+  });
+
   it("missing dataset → 404", async () => {
     const { app } = server({ requireAuth: true, authenticator: roleAuth(["member"]) });
     const res = await app.inject({

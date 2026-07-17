@@ -772,7 +772,11 @@
     "kindChangedNote": "평가자 종류가 바뀌었어요 — 스펙 전체가 재구성됐어요.",
     "loadError": "평가자를 불러오지 못했어요{detail}.",
     "noPermissionTitle": "평가자 등록 권한이 없어요.",
-    "noPermissionHint": "member 이상 역할이 필요해요(judges:write). 워크스페이스 관리자에게 문의하세요."
+    "noPermissionHint": "member 이상 역할이 필요해요(judges:write). 워크스페이스 관리자에게 문의하세요.",
+    "evaluationHistory": "평가 이력",
+    "evaluationHistoryCount": "총 {count}회",
+    "evaluationHistoryMore": "최근 12개만 보여요 — {count}개가 더 있어요.",
+    "evaluationHistoryRunner": "실행자"
   },
   "landingPage": {
     "login": "로그인",

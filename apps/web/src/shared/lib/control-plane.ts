@@ -305,7 +305,12 @@ export const controlPlane = {
     }),
   deleteView: (auth: AuthContext, id: string) =>
     callVoid(auth, `/views/${encodeURIComponent(id)}`, { method: 'DELETE' }),
-  listScorecards: <T>(auth: AuthContext) => call<T>(auth, '/scorecards'),
+  // filter.judge = only batches that applied this Agent Judge (the judge detail's evaluation history)
+  listScorecards: <T>(auth: AuthContext, filter?: { judge?: string }) =>
+    call<T>(
+      auth,
+      filter?.judge ? `/scorecards?judge=${encodeURIComponent(filter.judge)}` : '/scorecards'
+    ),
   getScorecard: <T>(auth: AuthContext, id: string) =>
     call<T>(auth, `/scorecards/${encodeURIComponent(id)}`),
   runScorecard: <T>(auth: AuthContext, body: unknown) =>

@@ -19,6 +19,7 @@ import {
   can,
 } from "@everdict/domain";
 import { ScoringService } from "../execution/scoring-service.js";
+import type { ScorecardListFilter } from "../ports/scorecard-store.js";
 import { assertRuntimeTarget } from "../require-runtime/require-runtime.js";
 import { ScorecardAnalyticsService } from "./scorecard-analytics-service.js";
 import { ScorecardBatchService } from "./scorecard-batch-service.js";
@@ -387,8 +388,8 @@ export class ScorecardService {
     }
   }
 
-  list(tenant?: string): Promise<ScorecardRecord[]> {
-    return this.deps.store.list(tenant);
+  list(tenant?: string, filter?: ScorecardListFilter): Promise<ScorecardRecord[]> {
+    return this.deps.store.list(tenant, filter);
   }
 
   // Cost/time preflight — "what will this batch cost, and how long will it run?" answered from HISTORY: the per-case

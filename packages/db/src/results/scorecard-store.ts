@@ -30,7 +30,8 @@ export class InMemoryScorecardStore implements ScorecardStore {
       .filter((c) => !tenant || c.tenant === tenant)
       .filter((c) => !filter?.dataset || c.dataset.id === filter.dataset)
       .filter((c) => !filter?.harness || c.harness.id === filter.harness)
-      .filter((c) => !filter?.status || c.status === filter.status);
+      .filter((c) => !filter?.status || c.status === filter.status)
+      .filter((c) => !filter?.judge || (c.orchestration?.judges ?? []).some((j) => j.id === filter.judge));
     // List omits the heavy scorecard/steps + detail-only runIds/export (summary/models only) — get the detail via get.
     return all.map(({ scorecard, steps, runIds, export: _export, ...rest }) => rest);
   }

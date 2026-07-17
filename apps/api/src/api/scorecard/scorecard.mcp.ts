@@ -207,8 +207,14 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
 
     server.registerTool(
       "list_scorecards",
-      { description: "This workspace's scorecards (summary only — excludes heavy per-case results)", inputSchema: {} },
-      () => run(principal, "scorecards:read", async () => ok(await scorecards.list(ws))),
+      {
+        description: "This workspace's scorecards (summary only — excludes heavy per-case results)",
+        inputSchema: {
+          judge: z.string().optional().describe("narrow to batches that applied this Agent Judge (any version)"),
+        },
+      },
+      ({ judge }) =>
+        run(principal, "scorecards:read", async () => ok(await scorecards.list(ws, judge ? { judge } : undefined))),
     );
 
     server.registerTool(

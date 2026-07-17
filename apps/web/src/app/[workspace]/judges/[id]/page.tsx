@@ -11,16 +11,22 @@ import {
   judgesSchema,
   type JudgeSpec,
 } from '@/entities/judge'
+import { membersSchema } from '@/entities/member'
+import { scorecardsSchema } from '@/entities/scorecard'
 import { can } from '@/shared/auth/can'
 import { currentPrincipal } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
+import { fmtDateTime, fmtDateTimeFull, fmtSubject } from '@/shared/lib/format'
 import { sortSemverDesc } from '@/shared/lib/semver'
+import { UserAvatar } from '@/shared/ui/avatar'
 import { Badge } from '@/shared/ui/badge'
 import { buttonVariants } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
-import { EntityRef, ModelChip, RuntimeChip } from '@/shared/ui/chip'
+import { EntityRef, MetricChip, ModelChip, RuntimeChip } from '@/shared/ui/chip'
+import { CodeEditor } from '@/shared/ui/code-editor'
 import { PageHeader } from '@/shared/ui/page-header'
 import { SectionHeader } from '@/shared/ui/section-header'
+import { StatusIcon } from '@/shared/ui/status-pill'
 
 export const dynamic = 'force-dynamic'
 
@@ -71,6 +77,29 @@ export default async function JudgeDetailPage({
     judge = judgeSpecSchema.parse(await controlPlane.getJudge(ctx, id, latest))
   } catch (e) {
     error = e instanceof Error ? e.message : String(e)
+  }
+
+  // Evaluation history — batches that applied this judge (server-side ?judge= narrowing; the list is
+  // lightweight). Supplementary: the detail still renders when it fails. Members resolve runner avatars.
+  const history = await controlPlane
+    .listScorecards(ctx, { judge: id })
+    .then((r) => scorecardsSchema.parse(r))
+    .then((list) => [...list].sort((a, b) => b.createdAt.localeCompare(a.createdAt)))
+    .catch(() => [])
+  const members =
+    history.length > 0
+      ? await controlPlane
+          .listMembers(ctx)
+          .then((r) => membersSchema.parse(r))
+          .catch(() => [])
+      : []
+  const resolveRunner = (subject?: string) => {
+    if (!subject) return undefined
+    const m = members.find((x) => x.subject === subject)
+    return {
+      name: m?.name ?? m?.email?.split('@')[0] ?? fmtSubject(subject),
+      ...(m?.avatarUrl ? { avatarUrl: m.avatarUrl } : {}),
+    }
   }
 
   if (!judge) {
@@ -162,13 +191,25 @@ export default async function JudgeDetailPage({
         </div>
       </div>
 
-      {/* Code judge — the code IS the judging logic; show it verbatim (entrypoint-in-image shows the path). */}
+      {/* Code judge — the code IS the judging logic; show it in the same highlighted editor the wizard uses,
+          read-only (entrypoint-in-image judges have no code to show, so they keep the plain path line). */}
       {judge.kind === 'code' && (judge.code ?? judge.entrypoint) && (
         <section className="space-y-2.5">
           <SectionHeader title={t('codeSection')} />
-          <pre className="max-h-96 overflow-auto whitespace-pre-wrap rounded-lg border border-border bg-muted/40 px-4 py-3 font-mono text-[12px] leading-relaxed text-muted-foreground">
-            {judge.code ?? `${judge.image ?? '(agent image)'} → ${judge.entrypoint}`}
-          </pre>
+          {judge.code ? (
+            <CodeEditor
+              value={judge.code}
+              language={judge.language === 'node' ? 'node' : 'python'}
+              readOnly
+              minHeight="120px"
+              maxHeight="480px"
+              aria-label={t('codeSection')}
+            />
+          ) : (
+            <pre className="overflow-x-auto whitespace-pre-wrap rounded-lg border border-border bg-muted/40 px-4 py-3 font-mono text-[12px] leading-relaxed text-muted-foreground">
+              {`${judge.image ?? '(agent image)'} → ${judge.entrypoint}`}
+            </pre>
+          )}
         </section>
       )}
 
@@ -204,6 +245,85 @@ export default async function JudgeDetailPage({
                 {v}
               </code>
             ))}
+          </div>
+        </section>
+      )}
+
+      {/* Evaluation history — the batches this judge scored, newest first (empty → the section is hidden,
+          detail-view convention). Each row leads to the scorecard detail; the chips are THIS judge's metrics. */}
+      {history.length > 0 && (
+        <section className="space-y-2.5">
+          <SectionHeader
+            title={t('evaluationHistory')}
+            action={
+              <span className="text-[12px] tabular-nums text-faint">
+                {t('evaluationHistoryCount', { count: history.length })}
+              </span>
+            }
+          />
+          <div className="space-y-2">
+            {history.slice(0, 12).map((s) => {
+              const judgeMetrics = (s.summary ?? []).filter(
+                (m) => m.metric === `judge:${id}` || m.metric.startsWith(`judge:${id}:`)
+              )
+              const runner = resolveRunner(s.createdBy)
+              return (
+                <Link
+                  key={s.id}
+                  href={`/${workspace}/scorecards/${encodeURIComponent(s.id)}`}
+                  className="group flex items-center gap-3 rounded-lg border bg-card px-3.5 py-2.5 shadow-raise transition-colors hover:border-border-strong hover:bg-elevated"
+                >
+                  <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden whitespace-nowrap text-[13px] font-[510]">
+                    <span className="truncate">
+                      <EntityRef id={s.dataset.id} version={s.dataset.version} kind="dataset" />
+                    </span>
+                    <span className="shrink-0 text-faint">·</span>
+                    <span className="truncate">
+                      <EntityRef id={s.harness.id} version={s.harness.version} kind="harness" />
+                    </span>
+                  </div>
+                  <div className="hidden shrink-0 items-center gap-1 sm:flex">
+                    {judgeMetrics.slice(0, 2).map((m) => (
+                      <MetricChip
+                        key={m.metric}
+                        metric={m.metric}
+                        mean={m.mean}
+                        passRate={m.passRate}
+                        siblings={judgeMetrics.map((x) => x.metric)}
+                      />
+                    ))}
+                    {judgeMetrics.length > 2 && (
+                      <span className="text-[11px] text-faint">+{judgeMetrics.length - 2}</span>
+                    )}
+                  </div>
+                  <div className="flex shrink-0 items-center gap-2.5">
+                    <span className="flex w-6 justify-center">
+                      {runner && (
+                        <UserAvatar
+                          name={runner.name}
+                          url={runner.avatarUrl}
+                          label={t('evaluationHistoryRunner')}
+                        />
+                      )}
+                    </span>
+                    <time
+                      className="hidden w-[84px] text-right font-mono text-[11px] text-muted-foreground sm:block"
+                      title={fmtDateTimeFull(s.createdAt)}
+                    >
+                      {fmtDateTime(s.createdAt)}
+                    </time>
+                    <span className="flex w-5 justify-end">
+                      <StatusIcon status={s.status} />
+                    </span>
+                  </div>
+                </Link>
+              )
+            })}
+            {history.length > 12 && (
+              <p className="px-0.5 text-[11.5px] text-faint">
+                {t('evaluationHistoryMore', { count: history.length - 12 })}
+              </p>
+            )}
           </div>
         </section>
       )}

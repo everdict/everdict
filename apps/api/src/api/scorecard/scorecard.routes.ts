@@ -160,14 +160,15 @@ export function registerScorecardRoutes(app: FastifyInstance, deps: ServerDeps):
     }
   });
 
-  app.get("/scorecards", { schema: scorecardDocs.list }, async (req, reply) => {
+  app.get<{ Querystring: { judge?: string } }>("/scorecards", { schema: scorecardDocs.list }, async (req, reply) => {
     if (!deps.scorecardService)
       return reply.code(404).send({ code: "NOT_FOUND", message: "scorecard service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     try {
       gate(principal, "scorecards:read");
-      return reply.send(await deps.scorecardService.list(principal.workspace));
+      const { judge } = req.query;
+      return reply.send(await deps.scorecardService.list(principal.workspace, judge ? { judge } : undefined));
     } catch (err) {
       return sendError(reply, err);
     }
