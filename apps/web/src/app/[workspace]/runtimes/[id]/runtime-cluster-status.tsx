@@ -168,12 +168,15 @@ function WorkloadChip({
           {externalLabel}
         </span>
       ) : null}
+      {/* The controls reserve their space and only toggle visibility on hover — the chip's width must never change
+          with hover. In a full flex-wrap row a hover-widened chip wraps to the next line, the pointer leaves it,
+          it un-wraps back under the pointer, and the layout oscillates forever. */}
       {canControl && canResizeUnit(w, kind) ? (
         <button
           type="button"
           title={resizeLabel}
           onClick={onResize}
-          className="hidden size-4 place-items-center rounded text-faint transition-colors hover:bg-primary/10 hover:text-primary group-hover:grid"
+          className="invisible grid size-4 place-items-center rounded text-faint transition-colors hover:bg-primary/10 hover:text-primary group-hover:visible"
         >
           <SlidersHorizontal className="size-2.5" />
         </button>
@@ -183,7 +186,7 @@ function WorkloadChip({
           type="button"
           title={stopLabel}
           onClick={onStop}
-          className="hidden size-4 place-items-center rounded text-faint transition-colors hover:bg-rose-500/10 hover:text-rose-500 group-hover:grid"
+          className="invisible grid size-4 place-items-center rounded text-faint transition-colors hover:bg-rose-500/10 hover:text-rose-500 group-hover:visible"
         >
           <X className="size-2.5" />
         </button>

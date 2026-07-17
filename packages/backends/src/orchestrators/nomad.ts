@@ -574,10 +574,12 @@ export class NomadBackend implements Backend, Recoverable, Observable, Shellable
 
     // Live workload from the alloc list (running/pending only) — every unit on the cluster, everdict-placed AND
     // external (other platforms' jobs), so the node view shows what actually occupies each node + shared stores.
+    // resources=true is required: without it the list stub omits AllocatedResources, so every unit's cpu/memoryMb
+    // would read unknown (blank hover detail + an unprefilled resize form).
     let workload: InspectWorkload[] | undefined;
     let stores: InspectStore[] | undefined;
     try {
-      const res = await this.http.request("GET", "/v1/allocations?namespace=*");
+      const res = await this.http.request("GET", "/v1/allocations?namespace=*&resources=true");
       if (res.status < 300) {
         const now = Date.now();
         const rows: InspectWorkload[] = (JSON.parse(res.text) as NomadAllocStub[])

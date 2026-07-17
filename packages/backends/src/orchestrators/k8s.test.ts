@@ -16,6 +16,7 @@ import {
   kubectlArgs,
   materializeKubeconfig,
   parseJobStatusOutput,
+  podResourceAsk,
   usageByNode,
 } from "./k8s.js";
 
@@ -772,6 +773,26 @@ describe("k8s quantity parsers (pure)", () => {
     expect(k8sMemToMiB("1048576")).toBe(1); // bytes → 1 MiB
     expect(k8sMemToMiB(undefined)).toBeUndefined();
     expect(k8sMemToMiB("nope")).toBeUndefined();
+  });
+  it("podResourceAsk sums container requests, with limits standing in where requests are absent", () => {
+    // A typical external service: limits only — pre-fix this read as no allocation at all.
+    expect(podResourceAsk([{ resources: { limits: { cpu: "500m", memory: "1Gi" } } }])).toEqual({
+      cpu: 500,
+      memoryMb: 1024,
+    });
+    // Requests win over limits when both are set; the fallback is per-resource (cpu from limits, memory from requests).
+    expect(
+      podResourceAsk([{ resources: { requests: { memory: "256Mi" }, limits: { cpu: "2", memory: "1Gi" } } }]),
+    ).toEqual({ cpu: 2000, memoryMb: 256 });
+    // Multi-container pods sum across containers; a pod with nothing declared stays absent (fields omitted).
+    expect(
+      podResourceAsk([
+        { resources: { requests: { cpu: "100m", memory: "128Mi" } } },
+        { resources: { limits: { cpu: "400m", memory: "384Mi" } } },
+      ]),
+    ).toEqual({ cpu: 500, memoryMb: 512 });
+    expect(podResourceAsk([{}])).toEqual({});
+    expect(podResourceAsk(undefined)).toEqual({});
   });
   it("usageByNode sums the workload rows' asks per node across ALL units (everdict + external)", () => {
     const rows = [

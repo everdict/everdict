@@ -359,20 +359,17 @@ export function kubectlApi(
           };
           spec?: {
             nodeName?: string;
-            containers?: Array<{ resources?: { requests?: { cpu?: string; memory?: string } } }>;
+            containers?: Array<{
+              resources?: { requests?: { cpu?: string; memory?: string }; limits?: { cpu?: string; memory?: string } };
+            }>;
           };
           status?: { phase?: string };
         }>;
         return items
           .filter((p) => p.status?.phase === "Running" || p.status?.phase === "Pending")
           .map((p) => {
-            // Sum the pod's container requests (millicores + MiB) — its resource ask, for the per-node usage bar.
-            let cpu = 0;
-            let memoryMb = 0;
-            for (const c of p.spec?.containers ?? []) {
-              cpu += k8sCpuToMillicores(c.resources?.requests?.cpu) ?? 0;
-              memoryMb += k8sMemToMiB(c.resources?.requests?.memory) ?? 0;
-            }
+            // The pod's resource ask (requests, limits standing in where absent) — hover detail + node usage bar.
+            const { cpu, memoryMb } = podResourceAsk(p.spec?.containers);
             const everdict = p.metadata?.labels?.app === "everdict";
             // Display kind: a ReplicaSet-owned pod is a Deployment in practice (control resolves the real chain).
             const rawOwner = (p.metadata?.ownerReferences ?? []).find((o) => o.kind)?.kind;
@@ -387,8 +384,8 @@ export function kubectlApi(
               ...(p.metadata?.namespace ? { namespace: p.metadata.namespace } : {}),
               ...(p.spec?.nodeName ? { node: p.spec.nodeName } : {}),
               ...(p.metadata?.creationTimestamp ? { creationTimestamp: p.metadata.creationTimestamp } : {}),
-              ...(cpu > 0 ? { cpu } : {}),
-              ...(memoryMb > 0 ? { memoryMb } : {}),
+              ...(cpu !== undefined ? { cpu } : {}),
+              ...(memoryMb !== undefined ? { memoryMb } : {}),
             };
           });
       } catch {
@@ -590,6 +587,26 @@ export function k8sMemToMiB(q: string | undefined): number | undefined {
   };
   const f = factor[unit];
   return f !== undefined ? Math.round(val * f) : undefined;
+}
+
+// A pod's resource ask (cpu millicores + memory MiB) summed across its containers. K8s semantics: a container
+// with no request defaults it to its limit, so limits stand in where requests are absent — external services
+// commonly declare limits only, and without the fallback they'd read as having no allocation at all (blank
+// hover detail + an unprefilled resize form). Pure, for unit testing.
+export function podResourceAsk(
+  containers:
+    | Array<{
+        resources?: { requests?: { cpu?: string; memory?: string }; limits?: { cpu?: string; memory?: string } };
+      }>
+    | undefined,
+): { cpu?: number; memoryMb?: number } {
+  let cpu = 0;
+  let memoryMb = 0;
+  for (const c of containers ?? []) {
+    cpu += k8sCpuToMillicores(c.resources?.requests?.cpu) ?? k8sCpuToMillicores(c.resources?.limits?.cpu) ?? 0;
+    memoryMb += k8sMemToMiB(c.resources?.requests?.memory) ?? k8sMemToMiB(c.resources?.limits?.memory) ?? 0;
+  }
+  return { ...(cpu > 0 ? { cpu } : {}), ...(memoryMb > 0 ? { memoryMb } : {}) };
 }
 
 // Sum the committed load (cpu millicores / memory MiB ask) per node over the inspected workload rows — every

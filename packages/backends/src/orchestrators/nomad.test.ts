@@ -797,13 +797,22 @@ describe("NomadBackend.inspect (live cluster view)", () => {
           status: 200,
           text: JSON.stringify([{ Status: "running" }, { Status: "running" }]),
         },
-        "/v1/allocations?namespace=*": {
+        // resources=true is part of the contract — inspect must ask for AllocatedResources or every unit's
+        // cpu/memoryMb reads unknown (Nomad's plain list stub omits them).
+        "/v1/allocations?namespace=*&resources=true": {
           status: 200,
           text: JSON.stringify([
             { ID: "a1", JobID: "everdict-c1-x", ClientStatus: "running", NodeName: "n1", CreateTime: 1e15 },
             { ID: "s1", JobID: "everdict-shared-postgres", ClientStatus: "running", NodeName: "n1" },
-            // not everdict → an EXTERNAL unit, listed as role "other" (with its namespace + job type)
-            { ID: "z9", JobID: "some-other-job", Namespace: "infra", JobType: "service", ClientStatus: "running" },
+            // not everdict → an EXTERNAL unit, listed as role "other" (with its namespace + job type + resources)
+            {
+              ID: "z9",
+              JobID: "some-other-job",
+              Namespace: "infra",
+              JobType: "service",
+              ClientStatus: "running",
+              AllocatedResources: { Tasks: { web: { Cpu: { CpuShares: 700 }, Memory: { MemoryMB: 1024 } } } },
+            },
             { ID: "z8", JobID: "finished-job", ClientStatus: "complete" }, // terminal → excluded
           ]),
         },
@@ -843,10 +852,13 @@ describe("NomadBackend.inspect (live cluster view)", () => {
     // classified + surfaced separately, and the terminal alloc is excluded.
     expect(r.workload?.map((w) => w.name)).toEqual(["everdict-c1-x", "everdict-shared-postgres", "some-other-job"]);
     expect(r.workload?.find((w) => w.name === "everdict-c1-x")).toMatchObject({ role: "eval", node: "n1" });
+    // An external unit surfaces its allocated resources — the hover detail + resize prefill read from these.
     expect(r.workload?.find((w) => w.name === "some-other-job")).toMatchObject({
       role: "other",
       namespace: "infra",
       ownerKind: "service",
+      cpu: 700,
+      memoryMb: 1024,
     });
     expect(r.stores).toEqual([{ name: "everdict-shared-postgres", status: "running" }]);
     expect(r.warnings).toEqual([]);
