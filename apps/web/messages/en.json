@@ -1786,38 +1786,18 @@
     "validateNewVersion": "(new version)",
     "validateExisting": "Existing versions: {versions}",
     "validateNone": "none",
-    "validateConflictNote": "Identical content is a no-op; different content is rejected with 409.",
-    "requiresHeading": "Required evidence",
-    "requiresSubtitle": "Optional, but it catches blind judges early: declare the evidence your code reads (a final answer, a tool call, a DOM/screenshot, an artifact). The test run then marks each need as satisfied or missing on the sample trace — so you learn BEFORE registering that a harness never produces what the code depends on, instead of shipping a judge that silently scores 0."
-  },
-  "judgeRequires": {
-    "kind_final_answer": "Final answer",
-    "kind_tool_call": "Tool call",
-    "kind_dom": "Browser DOM",
-    "kind_screenshot": "Screenshot",
-    "kind_artifact": "Artifact",
-    "kind_span": "Span",
-    "namePlaceholder": "name (optional)",
-    "rolePlaceholder": "role (optional)",
-    "add": "Add",
-    "remove": "Remove",
-    "empty": "No required evidence declared."
+    "validateConflictNote": "Identical content is a no-op; different content is rejected with 409."
   },
   "judgePreview": {
     "heading": "Test run",
     "subtitle": "Pick a real trace from a connected platform, execute this judge's code against it, and read the actual scores — or the crash output.",
-    "noSourcesNote": "No trace sources are connected. Paste a TraceEvent[] JSON under Advanced below, or register a source under Settings › Integrations.",
+    "noSourcesNote": "No trace sources are connected — register your observability platform under Settings › Observability to pick a sample trace.",
     "stepPick": "Sample trace",
     "stepRun": "Run the code",
     "changeTrace": "Change trace",
-    "back": "Back",
-    "skipToManual": "Paste a trace JSON instead",
     "loadingEvents": "loading events…",
     "eventCount": "{count} events",
     "timelineHeading": "What the code receives (normalized timeline)",
-    "manualHeading": "Advanced — paste a raw trace instead",
-    "manualHint": "A pasted TraceEvent[] JSON overrides the picked trace (dev/testing).",
-    "tracePlaceholder": "[{ \"t\": 0, \"kind\": \"message\", \"role\": \"assistant\", \"text\": \"the answer is 42\" }]",
     "taskLabel": "Task (optional)",
     "expectedLabel": "Expected output (optional)",
     "runButton": "Run the code",
@@ -1825,9 +1805,7 @@
     "runHint": "One real sandboxed run against this trace — crashes show their stderr below.",
     "scores": "Scores",
     "noScores": "No scores were produced.",
-    "invalidTrace": "The trace is not valid JSON.",
-    "failed": "The run failed.",
-    "requirements": "Required evidence"
+    "failed": "The run failed."
   },
   "registerRubric": {
     "idLabel": "ID",

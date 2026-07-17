@@ -1,15 +1,7 @@
 'use client'
 
 import { useEffect, useState, useTransition } from 'react'
-import {
-  Check,
-  ChevronDown,
-  ChevronLeft,
-  ChevronRight,
-  Loader2,
-  Play,
-  ShieldCheck,
-} from 'lucide-react'
+import { Check, ChevronDown, ChevronRight, Loader2, Play } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
 import { inspectTraceAction, TraceBrowser, TraceEventList } from '@/features/browse-traces'
@@ -18,7 +10,7 @@ import type { TraceSourceConfig } from '@/entities/trace-source'
 import { cn } from '@/shared/lib/utils'
 import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
-import { Input, Label, Textarea } from '@/shared/ui/input'
+import { Input, Label } from '@/shared/ui/input'
 
 import { tryJudgeAction, type JudgeScore, type TryJudgeResult } from '../api/register-judge'
 
@@ -146,12 +138,9 @@ export function JudgePreviewPanel({
   const [task, setTask] = useState('')
   const [expected, setExpected] = useState('')
   const [result, setResult] = useState<TryJudgeResult | undefined>()
-  const [parseError, setParseError] = useState<string | undefined>()
   const [busy, start] = useTransition()
 
   const [timelineOpen, setTimelineOpen] = useState(false)
-  const [manualOpen, setManualOpen] = useState(false)
-  const [manualTrace, setManualTrace] = useState('')
 
   // Inspect the picked trace once — the events (+ source-mapping-extracted evidence) the run will receive.
   useEffect(() => {
@@ -168,25 +157,10 @@ export function JudgePreviewPanel({
     })
   }, [picked])
 
-  // The trace fed to the run: the manual JSON (advanced, when filled) overrides; else the inspected events.
-  function effectiveTrace(): unknown | undefined {
-    setParseError(undefined)
-    setResult(undefined)
-    if (manualTrace.trim()) {
-      try {
-        return JSON.parse(manualTrace)
-      } catch {
-        setParseError(t('invalidTrace'))
-        return undefined
-      }
-    }
-    return inspected?.events ?? []
-  }
-
-  // Extracted browser evidence → the run's synthesized snapshot (same as the pull path); manual JSON carries none.
+  // Extracted browser evidence → the run's synthesized snapshot (same as the pull path).
   function evidenceSnapshot(): unknown | undefined {
     const ev = inspected?.evidence
-    if (!ev || manualTrace.trim()) return undefined
+    if (!ev) return undefined
     if (ev.dom === undefined && ev.screenshot === undefined && ev.screenshotRef === undefined)
       return undefined
     return {
@@ -200,10 +174,10 @@ export function JudgePreviewPanel({
   }
 
   function onRun() {
-    const trace = effectiveTrace()
-    if (trace === undefined) return
+    setResult(undefined)
+    const trace = inspected?.events ?? []
     const snapshot = evidenceSnapshot()
-    const traceEvidence = manualTrace.trim() ? undefined : inspected?.evidence
+    const traceEvidence = inspected?.evidence
     start(async () =>
       setResult(
         await tryJudgeAction(getSpec(), trace, {
@@ -216,7 +190,7 @@ export function JudgePreviewPanel({
     )
   }
 
-  const canRun = Boolean(picked) || manualTrace.trim().length > 0
+  const canRun = Boolean(picked)
 
   const runBody = (
     <>
@@ -244,36 +218,6 @@ export function JudgePreviewPanel({
         <span className="text-[12px] text-muted-foreground">{t('runHint')}</span>
       </div>
 
-      {/* Advanced: paste a raw TraceEvent[] JSON instead (overrides the picked trace). */}
-      <div className="space-y-2">
-        <button
-          type="button"
-          onClick={() => setManualOpen((o) => !o)}
-          className="flex items-center gap-1 text-[12px] font-[510] text-muted-foreground hover:text-foreground"
-        >
-          {manualOpen ? (
-            <ChevronDown className="size-3.5" />
-          ) : (
-            <ChevronRight className="size-3.5" />
-          )}
-          {t('manualHeading')}
-          {!manualOpen && manualTrace.trim() ? <span className="text-primary">•</span> : null}
-        </button>
-        {manualOpen && (
-          <div className="space-y-1.5">
-            <Textarea
-              value={manualTrace}
-              onChange={(e) => setManualTrace(e.target.value)}
-              placeholder={t('tracePlaceholder')}
-              rows={5}
-              className="font-mono text-[12px]"
-            />
-            <p className="text-[12px] text-muted-foreground">{t('manualHint')}</p>
-          </div>
-        )}
-      </div>
-
-      {parseError ? <Callout tone="danger">{parseError}</Callout> : null}
       {result && !result.ok ? <Callout tone="danger">{result.error ?? t('failed')}</Callout> : null}
 
       {result?.ok ? (
@@ -302,42 +246,12 @@ export function JudgePreviewPanel({
               </ul>
             </Callout>
           ) : null}
-
-          {/* Declared-requirement check — which of the judge's `requires` this trace satisfies. */}
-          {result.requirements ? (
-            <div className="space-y-1.5">
-              <p className="flex items-center gap-1 text-[12px] font-medium text-muted-foreground">
-                <ShieldCheck className="size-3.5" />
-                {t('requirements')}
-              </p>
-              <div className="flex flex-wrap gap-1.5">
-                {result.requirements.satisfied.map((r, i) => (
-                  <span
-                    key={`ok-${i}-${r.kind}`}
-                    className="rounded-md border border-[var(--color-success)]/30 bg-[var(--color-success)]/8 px-2 py-0.5 text-[12px] text-[var(--color-success)]"
-                  >
-                    ✓ {r.kind}
-                    {r.name ? `:${r.name}` : r.role ? `:${r.role}` : ''}
-                  </span>
-                ))}
-                {result.requirements.missing.map((r, i) => (
-                  <span
-                    key={`no-${i}-${r.kind}`}
-                    className="rounded-md border border-destructive/30 bg-destructive/8 px-2 py-0.5 text-[12px] text-destructive"
-                  >
-                    ✗ {r.kind}
-                    {r.name ? `:${r.name}` : r.role ? `:${r.role}` : ''}
-                  </span>
-                ))}
-              </div>
-            </div>
-          ) : null}
         </div>
       ) : null}
     </>
   )
 
-  // No connected sources — nothing to pick; run against a pasted trace only.
+  // No connected sources — nothing to pick, nothing to run against; point at the source registration.
   if (sources.length === 0) {
     return (
       <div className="space-y-3">
@@ -346,7 +260,6 @@ export function JudgePreviewPanel({
           <p className="text-[12px] text-muted-foreground">{t('subtitle')}</p>
         </div>
         <Callout tone="info">{t('noSourcesNote')}</Callout>
-        {runBody}
       </div>
     )
   }
@@ -362,7 +275,7 @@ export function JudgePreviewPanel({
       </div>
 
       {/* Step 1 — pick a sample trace. Kept mounted (hidden) so list/filter state survives step hops. */}
-      <div className={cn('space-y-2', step !== 'pick' && 'hidden')}>
+      <div className={cn(step !== 'pick' && 'hidden')}>
         <TraceBrowser
           sources={sources}
           selectedTraceId={picked?.summary.id}
@@ -372,16 +285,6 @@ export function JudgePreviewPanel({
             setStep('run')
           }}
         />
-        <button
-          type="button"
-          onClick={() => {
-            setManualOpen(true)
-            setStep('run')
-          }}
-          className="text-[12px] text-muted-foreground underline underline-offset-2 hover:text-foreground"
-        >
-          {t('skipToManual')}
-        </button>
       </div>
 
       {/* Step 2 — execute the draft judge against the picked trace and read the real verdict / crash output. */}
@@ -433,13 +336,6 @@ export function JudgePreviewPanel({
           )}
 
           {runBody}
-
-          <div className="border-t border-border/60 pt-3">
-            <Button variant="ghost" size="sm" onClick={() => setStep('pick')} className="gap-1">
-              <ChevronLeft className="size-4" />
-              {t('back')}
-            </Button>
-          </div>
         </div>
       )}
     </div>

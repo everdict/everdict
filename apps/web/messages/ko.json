@@ -1786,38 +1786,18 @@
     "validateNewVersion": "(새 버전)",
     "validateExisting": "기존 버전: {versions}",
     "validateNone": "없음",
-    "validateConflictNote": "동일 내용이면 no-op, 다르면 409 로 거부돼요.",
-    "requiresHeading": "필요 근거",
-    "requiresSubtitle": "선택 사항이지만 눈먼 평가자를 미리 걸러냅니다: 코드가 읽는 증거(최종 답변·툴 호출·DOM/스크린샷·아티팩트)를 선언하면, 실행해 보기에서 샘플 트레이스가 각 항목을 충족하는지/결측인지 표시해줍니다 — 하네스가 그 증거를 아예 만들지 않는다는 사실을 등록 전에 알게 되고, 조용히 0점만 내는 평가자를 배포하는 사고를 막습니다."
-  },
-  "judgeRequires": {
-    "kind_final_answer": "최종 답변",
-    "kind_tool_call": "도구 호출",
-    "kind_dom": "브라우저 DOM",
-    "kind_screenshot": "스크린샷",
-    "kind_artifact": "아티팩트",
-    "kind_span": "스팬",
-    "namePlaceholder": "이름 (선택)",
-    "rolePlaceholder": "역할 (선택)",
-    "add": "추가",
-    "remove": "삭제",
-    "empty": "선언된 필요 근거가 없습니다."
+    "validateConflictNote": "동일 내용이면 no-op, 다르면 409 로 거부돼요."
   },
   "judgePreview": {
     "heading": "실행해 보기",
     "subtitle": "연결된 플랫폼에서 실제 트레이스를 골라 이 평가자의 코드를 실행하고, 실제 점수 — 또는 크래시 출력 — 를 확인합니다.",
-    "noSourcesNote": "연결된 트레이스 소스가 없습니다. 아래 고급에서 TraceEvent[] JSON을 붙여넣거나, 설정 › 통합에서 소스를 등록하세요.",
+    "noSourcesNote": "연결된 트레이스 소스가 없습니다 — 설정 › Observability에서 관측 플랫폼을 등록하면 샘플 트레이스를 고를 수 있어요.",
     "stepPick": "샘플 트레이스",
     "stepRun": "코드 실행",
     "changeTrace": "다른 트레이스 선택",
-    "back": "이전",
-    "skipToManual": "트레이스 JSON을 직접 붙여넣기",
     "loadingEvents": "이벤트 불러오는 중…",
     "eventCount": "이벤트 {count}개",
     "timelineHeading": "코드가 받는 내용 (정규화된 타임라인)",
-    "manualHeading": "고급 — 원시 트레이스 직접 붙여넣기",
-    "manualHint": "붙여넣은 TraceEvent[] JSON은 선택한 트레이스를 대체합니다(개발/테스트용).",
-    "tracePlaceholder": "[{ \"t\": 0, \"kind\": \"message\", \"role\": \"assistant\", \"text\": \"정답은 42\" }]",
     "taskLabel": "태스크 (선택)",
     "expectedLabel": "기대 출력 (선택)",
     "runButton": "코드 실행",
@@ -1825,9 +1805,7 @@
     "runHint": "이 트레이스로 샌드박스에서 1회 실제 실행합니다 — 크래시는 stderr가 아래에 표시돼요.",
     "scores": "점수",
     "noScores": "생성된 점수가 없습니다.",
-    "invalidTrace": "트레이스가 올바른 JSON이 아닙니다.",
-    "failed": "실행에 실패했습니다.",
-    "requirements": "필요 근거"
+    "failed": "실행에 실패했습니다."
   },
   "registerRubric": {
     "idLabel": "ID",

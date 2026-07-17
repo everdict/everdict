@@ -20,7 +20,6 @@ import {
   type ValidateJudgeResult,
 } from '../api/register-judge'
 import { JudgePreviewPanel } from './judge-preview-panel'
-import { RequiresEditor, type Requirement } from './requires-editor'
 
 type Language = 'python' | 'node'
 
@@ -149,8 +148,6 @@ export function RegisterJudgeForm({
   const [runtime, setRuntime] = useState('')
   const [image, setImage] = useState('')
   const [timeoutSec, setTimeoutSec] = useState('')
-  // Declared evidence requirements — the preview checks them against a sample trace (satisfied/missing).
-  const [requires, setRequires] = useState<Requirement[]>([])
 
   const [result, setResult] = useState<ValidateJudgeResult>()
   const [error, setError] = useState<string>()
@@ -175,7 +172,6 @@ export function RegisterJudgeForm({
       ...(runtime ? { runtime } : {}),
       ...(image.trim() ? { image: image.trim() } : {}),
       ...(timeoutSec.trim() ? { timeoutSec: Number(timeoutSec) } : {}),
-      ...(requires.length ? { requires } : {}),
       tags: [] as string[],
     }
   }
@@ -328,14 +324,6 @@ export function RegisterJudgeForm({
           {error}
         </Callout>
       )}
-
-      <div className="space-y-2 border-t border-border pt-5">
-        <div>
-          <h3 className="text-sm font-medium">{t('requiresHeading')}</h3>
-          <p className="text-[12px] text-muted-foreground">{t('requiresSubtitle')}</p>
-        </div>
-        <RequiresEditor value={requires} onChange={setRequires} />
-      </div>
 
       <div className="border-t border-border pt-5">
         <JudgePreviewPanel getSpec={buildSpec} sources={sources} assignments={assignments} />
