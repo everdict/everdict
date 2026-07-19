@@ -28,17 +28,20 @@ const SPEC: ServiceHarnessSpec = {
 };
 
 // Fake Docker — records calls and returns published ports deterministically (no daemon needed).
-function fakeDocker(): {
+// runningNames seeds `running()` (the adopt-don't-kill gate); empty = nothing pre-existing (fresh deploy).
+function fakeDocker(runningNames: string[] = []): {
   docker: Docker;
   runs: DockerRunSpec[];
   networks: string[];
   removed: string[];
   rmNets: string[];
+  execs: string[][];
 } {
   const runs: DockerRunSpec[] = [];
   const networks: string[] = [];
   const removed: string[] = [];
   const rmNets: string[] = [];
+  const execs: string[][] = [];
   let nextPort = 49152;
   const docker: Docker = {
     async ensureNetwork(name) {
@@ -51,15 +54,20 @@ function fakeDocker(): {
     async hostPort() {
       return nextPort++;
     },
-    async exec() {},
+    async exec(container, cmd) {
+      execs.push([container, ...cmd]);
+    },
     async rm(c) {
       removed.push(...c);
     },
     async removeNetwork(n) {
       rmNets.push(n);
     },
+    async running(names) {
+      return names.filter((n) => runningNames.includes(n));
+    },
   };
-  return { docker, runs, networks, removed, rmNets };
+  return { docker, runs, networks, removed, rmNets, execs };
 }
 
 const okFetch: typeof fetch = (async (url: string) => {
@@ -166,6 +174,43 @@ describe("DockerTopologyRuntime", () => {
     expect(handle.endpoints["agent-server"]).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
   });
 
+  // Container names are deterministic across processes, so two runners on one host reach the same names.
+  const SPEC_CONTAINERS = [
+    "everdict-bu-1.0.0-bu-postgres",
+    "everdict-bu-1.0.0-bu-redis",
+    "everdict-bu-1.0.0-agent-server",
+  ];
+
+  it("adopts a fully-running same-name topology instead of removing it (two runner processes share one host)", async () => {
+    const f = fakeDocker(SPEC_CONTAINERS);
+    const rt = new DockerTopologyRuntime({ docker: f.docker, fetchImpl: okFetch });
+    const handle = await rt.ensureTopology(SPEC);
+    expect(handle.endpoints["agent-server"]).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
+    expect(f.runs).toEqual([]); // nothing deployed…
+    expect(f.removed).toEqual([]); // …and, critically, the other process's LIVE containers were not rm -f'd
+    // liveness was actually probed (stores accept connections), not assumed from the name match
+    expect(f.execs.some((e) => e[0] === "everdict-bu-1.0.0-bu-redis" && e.includes("ping"))).toBe(true);
+  });
+
+  it("removes and redeploys when the same-name leftover set is only partially running", async () => {
+    const f = fakeDocker(["everdict-bu-1.0.0-bu-postgres"]); // a restart leftover: only one store survived
+    const rt = new DockerTopologyRuntime({ docker: f.docker, fetchImpl: okFetch });
+    await rt.ensureTopology(SPEC);
+    expect(f.runs).toHaveLength(3); // fresh deploy
+    expect(f.removed).toContain("everdict-bu-1.0.0-bu-postgres"); // the leftover is cleaned before its redeploy
+  });
+
+  it("does not adopt an unready topology — a failing probe falls back to rm+redeploy", async () => {
+    const f = fakeDocker(SPEC_CONTAINERS);
+    // The pre-existing front door answers 500 (mid-boot elsewhere); post-deploy readiness answers 200.
+    const bootingFetch: typeof fetch = (async () =>
+      new Response("{}", { status: f.runs.length === 0 ? 500 : 200 })) as unknown as typeof fetch;
+    const rt = new DockerTopologyRuntime({ docker: f.docker, fetchImpl: bootingFetch });
+    const handle = await rt.ensureTopology(SPEC);
+    expect(f.runs).toHaveLength(3); // adoption refused → fresh deploy
+    expect(handle.endpoints["agent-server"]).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
+  });
+
   it("ensureTopology: injects the service static env (svc.env) + precedence (connEnv < svc.env < storeEnv)", async () => {
     const f = fakeDocker();
     const spec: ServiceHarnessSpec = {
@@ -237,6 +282,9 @@ describe("DockerTopologyRuntime", () => {
         for (const name of c) live.delete(name);
       },
       async removeNetwork() {},
+      async running(names) {
+        return names.filter((n) => live.has(n)); // partial set (2 of 3) → adoption declines → rm+redeploy path
+      },
     };
     const rt = new DockerTopologyRuntime({ docker, fetchImpl: okFetch });
     // If a leftover container isn't rm'd before run, this throws on a name-collision cascade (regression guard).
@@ -320,6 +368,9 @@ describe("DockerTopologyRuntime", () => {
         removed.push(...c);
       },
       async removeNetwork() {},
+      async running(names) {
+        return names.filter((n) => live.has(n)); // empty on both attempts (first = fresh, second = cleaned up)
+      },
     };
     // readyTimeoutMs/pollIntervalMs at 1ms — so the failure-path polling ends immediately.
     const rt = new DockerTopologyRuntime({ docker, fetchImpl: okFetch, readyTimeoutMs: 1, pollIntervalMs: 1 });

@@ -77,6 +77,12 @@ driver); `provisionBrowserEnv` runs headless-shell (`cdpUrl` = the **internal** 
 hits the **host** published port). It exists so the **self-hosted runner** can drive `kind:"service"` harnesses on
 a laptop — a single-user host, so **no `TrustZone`/gVisor/pool-silo** (those stay for cluster runtimes). See
 `docs/architecture/self-hosted-service-runner.md`.
+- **Adopt-don't-kill (cross-process safety).** Container/network names are deterministic (`everdict-<id>-<version>-…`),
+  so two runner PROCESSES on one host (desktop app + CLI runner) reach the same names. `deploy` first probes the
+  full same-name set (`Docker.running` exact-name gate → one-shot store exec probes + ported-service HTTP probes)
+  and **adopts** a fully-running, ready topology into the warm pool instead of `docker rm -f`-ing another process's
+  live containers. Partial/stopped/unready sets take the existing rm+redeploy path. Residual race: a probe hitting a
+  topology mid-deploy by another process falls back to redeploy (converges; a true cross-process lock is a non-goal).
 - **Per-service declarative knobs (Docker honors them; Nomad/K8s ignore for now):** `TopologyService.volumes`
   (`string[]` → `docker -v` mount specs, named volume or bind mount) and `TopologyService.readiness`
   (`{timeoutMs,intervalMs}` → the HTTP endpoint readiness-poll budget; absent = the runtime default 60s/1s, also

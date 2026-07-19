@@ -20,6 +20,9 @@ function fakeDocker() {
       removed.push(containers);
     },
     async removeNetwork() {},
+    async running() {
+      return []; // session containers are never adopted — the provisioner always runs fresh
+    },
   };
   return { docker, runs, removed };
 }

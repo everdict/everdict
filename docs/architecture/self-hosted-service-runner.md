@@ -127,6 +127,19 @@ The runner already declares `capabilities[]` (`self-hosted-runner.md` D-model: `
    per-run wiring visible in its logs), the trace degraded as designed, and the result landed with
    `provenance.ranOn=self-hosted`.
 
+## Follow-up — adopt-don't-kill (cross-process container collision)
+
+`DockerTopologyRuntime`'s names are deterministic (`everdict-<id>-<version>-<svc>`), which the
+"idempotent redeploy" `docker rm -f` relied on. But two runner PROCESSES on the same host (e.g. the
+desktop app plus a CLI runner) running the same harness version reach the SAME names — the second
+process's cleanup killed the first's live topology mid-run. Fix: `deploy` first gates on
+`Docker.running(names)` (exact-name intersection over `docker ps`) and, when the full set is running,
+one-shot-probes it (store `pg_isready`/`redis-cli ping` + ported-service HTTP) — a healthy topology is
+**adopted** into the warm pool (endpoints rediscovered via `docker port`) instead of removed; anything
+partial or unready still takes the rm+redeploy path. Residual race: probing a topology that another
+process is mid-deploying fails the probe and redeploys over it (converges — the loser's deploy fails,
+its retry adopts); a true cross-process lock stays a non-goal on a personal host.
+
 ## Non-goals (this pass)
 
 - **No per-tenant store isolation (pool/silo) on the personal host.** A self-hosted runner is one user's machine =

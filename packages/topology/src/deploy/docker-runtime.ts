@@ -35,6 +35,16 @@ function netName(spec: ServiceHarnessSpec): string {
   return `everdict-${sanitize(spec.id)}-${sanitize(spec.version)}`;
 }
 
+// Store liveness probe command (docker exec). Shared by the deploy-time readiness poll and the
+// adoption single-shot probe so both judge "accepting connections" identically. minio has none (skipped).
+function storeProbeCmd(store: string): string[] | undefined {
+  return store === "postgres"
+    ? ["pg_isready", "-U", "everdict"]
+    : store === "redis"
+      ? ["redis-cli", "ping"]
+      : undefined;
+}
+
 // Live DockerTopologyRuntime: brings up the topology (stores + services) + a per-case browser on the user's Docker daemon.
 // A sibling of NomadTopologyRuntime / K8sTopologyRuntime — ServiceTopologyBackend only swaps among the three (orchestrator-agnostic).
 // The local topology by which the self-hosted runner drives service harnesses on a laptop. Design: docs/architecture/self-hosted-service-runner.md.
@@ -71,6 +81,17 @@ export class DockerTopologyRuntime implements TopologyRuntime {
   // The actual topology deploy (network → stores → services). Only the single-flight wrapper (ensureTopology) calls it.
   private async deploy(spec: ServiceHarnessSpec, key: string): Promise<TopologyHandle> {
     const network = netName(spec);
+    // Adopt-don't-kill: container names are deterministic (same in every runner process), so the same
+    // topology may ALREADY be running on this daemon — another runner process's warm topology, or a
+    // still-healthy leftover from a restart of this one. The old unconditional rm -f killed that live
+    // topology mid-run (mutual destruction when two runner processes share a host). If the full set is
+    // running and answers one-shot probes, adopt its endpoints instead; anything partial/unready still
+    // takes the rm+redeploy path below.
+    const adopted = await this.tryAdopt(spec, network);
+    if (adopted) {
+      this.warm.set(key, adopted);
+      return adopted.handle;
+    }
     // Names of the containers we brought up (or tried to) — cleanup targets on partial failure. Pushed before run, so a name whose run itself threw is still caught.
     const containers: string[] = [];
     try {
@@ -129,6 +150,36 @@ export class DockerTopologyRuntime implements TopologyRuntime {
       await this.docker.rm(containers).catch(() => {});
       await this.docker.removeNetwork(network).catch(() => {});
       throw err;
+    }
+  }
+
+  // Adoption probe: the whole deterministic container set must be RUNNING, every store must accept a
+  // connection, and every ported service must answer HTTP — all single-shot (an adoptable topology is
+  // already ready; a mid-deploy or wedged set fails a probe and falls back to rm+redeploy). Returns the
+  // warm entry to cache, or undefined to take the fresh-deploy path.
+  private async tryAdopt(spec: ServiceHarnessSpec, network: string): Promise<WarmEntry | undefined> {
+    const stores = dependencyStores(spec).map(({ store, name }) => ({ store, cname: `${network}-${name}` }));
+    const services = spec.services.map((svc) => ({ svc, cname: `${network}-${sanitize(svc.name)}` }));
+    const names = [...stores.map((s) => s.cname), ...services.map((s) => s.cname)];
+    if (names.length === 0) return undefined;
+    const up = await this.docker.running(names).catch(() => []);
+    if (up.length !== names.length) return undefined; // absent, stopped, or partial → rm+redeploy
+    try {
+      for (const { store, cname } of stores) {
+        const probe = storeProbeCmd(store);
+        if (probe) await this.docker.exec(cname, probe);
+      }
+      const endpoints: Record<string, string> = {};
+      for (const { svc, cname } of services) {
+        if (svc.port === undefined) continue; // no probe surface — adopted alongside its ported peers
+        const hostPort = await this.docker.hostPort(cname, svc.port);
+        const url = `http://127.0.0.1:${hostPort}`;
+        if ((await this.fetchImpl(url)).status >= 500) return undefined;
+        endpoints[svc.name] = url;
+      }
+      return { handle: { endpoints }, network, containers: names };
+    } catch {
+      return undefined; // any probe failure = not adoptable (never kills what it probed — redeploy decides)
     }
   }
 
@@ -234,8 +285,7 @@ export class DockerTopologyRuntime implements TopologyRuntime {
 
   // Poll until the store actually accepts connections (docker exec pg_isready / redis-cli ping). minio is skipped.
   private async waitStoreAccepting(store: string, container: string): Promise<void> {
-    const probe =
-      store === "postgres" ? ["pg_isready", "-U", "everdict"] : store === "redis" ? ["redis-cli", "ping"] : undefined;
+    const probe = storeProbeCmd(store);
     if (!probe) return;
     await this.pollReady(
       this.defaultReadyTimeoutMs,

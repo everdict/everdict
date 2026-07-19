@@ -62,6 +62,7 @@ export interface Docker {
   exec(container: string, cmd: string[]): Promise<void>;
   rm(containers: string[]): Promise<void>; // best-effort force removal
   removeNetwork(name: string): Promise<void>;
+  running(names: string[]): Promise<string[]>; // the subset of these exact names currently running (adopt-don't-kill gate)
 }
 
 // Default impl — execFile("docker", …). A stopped daemon / lack of permission makes execFile reject → the runtime maps it to UpstreamError.
@@ -91,6 +92,18 @@ export function dockerCli(bin = "docker"): Docker {
     },
     async removeNetwork(name) {
       await sh(["network", "rm", name]).catch(() => {});
+    },
+    async running(names) {
+      if (names.length === 0) return [];
+      // Exact-name intersection over `docker ps` — the name FILTER is substring-matching, so list and match here.
+      const { stdout } = await sh(["ps", "--format", "{{.Names}}"]);
+      const up = new Set(
+        stdout
+          .split("\n")
+          .map((s) => s.trim())
+          .filter(Boolean),
+      );
+      return names.filter((n) => up.has(n));
     },
   };
 }
