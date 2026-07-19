@@ -170,14 +170,17 @@ export function resolveHarnessInstance(template: HarnessTemplateSpec, instance: 
         const volumes = ov?.volumes ?? s.volumes;
         const readiness = ov?.readiness ?? s.readiness;
         const resources = ov?.resources ?? s.resources;
+        // Spread the template service instead of rebuilding it field-by-field: an allowlist here silently
+        // DROPS every field it doesn't name — that bug class ate volumes/readiness once, and later
+        // requires/wiring/model (a requires.os=windows topology lost its OS requirement on resolve, so the
+        // lease-time placement gate let any Linux runner take it). The spread carries current AND future
+        // pass-through fields; only the pinned/overridden ones are recomputed on top.
+        const { slot: _slot, ...passthrough } = s;
         return {
-          name: s.name,
+          ...passthrough,
           image,
-          needs: s.needs,
-          perRun: s.perRun,
           replicas: ov?.replicas ?? s.replicas,
           env,
-          ...(s.port !== undefined ? { port: s.port } : {}),
           ...(volumes !== undefined ? { volumes } : {}),
           ...(readiness !== undefined ? { readiness } : {}),
           ...(resources !== undefined ? { resources } : {}),

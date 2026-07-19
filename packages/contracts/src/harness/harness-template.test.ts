@@ -97,6 +97,42 @@ describe("resolveHarnessInstance — service(topology)", () => {
     expect(resolved.services[0]?.readiness).toEqual({ timeoutMs: 120000, intervalMs: 2000 });
   });
 
+  it("service requires/wiring/model are preserved through to the resolved spec (placement + peer wiring + model binding)", () => {
+    // Regression: the resolve rebuilt services from an allowlist and DROPPED these — a requires.os=windows
+    // topology lost its OS requirement, so the lease-time placement gate let any Linux runner take it.
+    const tpl: HarnessTemplateSpec = HarnessTemplateSpecSchema.parse({
+      kind: "service",
+      category: "topology",
+      id: "w",
+      version: "1",
+      services: [
+        {
+          name: "client",
+          needs: ["relay"],
+          requires: { os: "windows" },
+          wiring: [{ service: "relay", urlEnv: "RELAY_URL" }],
+          model: "gpt-5-codex",
+        },
+        { name: "relay", needs: [], port: 8001 },
+      ],
+      dependencies: [],
+      frontDoor: { service: "relay", submit: "POST /runs" },
+      traceSource: { kind: "otel", endpoint: "http://o:4318" },
+    });
+    const instance = HarnessInstanceSpecSchema.parse({
+      template: { id: "w", version: "1" },
+      id: "w",
+      version: "v1",
+      pins: { client: "win-client:1", relay: "relay:1" },
+    });
+    const resolved = resolveHarnessInstance(tpl, instance);
+    if (resolved.kind !== "service") throw new Error("expected service");
+    const client = resolved.services.find((s) => s.name === "client");
+    expect(client?.requires).toEqual({ os: "windows" });
+    expect(client?.wiring).toEqual([{ service: "relay", urlEnv: "RELAY_URL" }]);
+    expect(client?.model).toBe("gpt-5-codex");
+  });
+
   it("external(BYO) dependency + service is preserved through to the resolved spec", () => {
     const tpl: HarnessTemplateSpec = HarnessTemplateSpecSchema.parse({
       kind: "service",
