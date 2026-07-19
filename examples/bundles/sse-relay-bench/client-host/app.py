@@ -9,6 +9,7 @@
 # Each session's extension subscribes to its own SSE stream ({key_prefix}:chat:{session_id}) and
 # reports its transcript to {key_prefix}:result:{session_id} — per-session isolation by construction.
 import os
+import shutil
 import uuid
 from urllib.parse import quote
 
@@ -84,6 +85,9 @@ async def close_session(session_id: str):
     if ctx is None:
         raise HTTPException(status_code=404, detail="unknown session")
     await ctx.close()
+    # Remove the session's browser profile — without this a long-lived client-host grows disk
+    # unboundedly (one profile dir per case; a 50-scorecard soak is 400 of them).
+    shutil.rmtree(f"/tmp/pw-{session_id}", ignore_errors=True)
     return {"closed": session_id}
 
 
