@@ -57,6 +57,9 @@ export function parseHostPort(out: string): number {
 
 export interface Docker {
   ensureNetwork(name: string): Promise<void>;
+  // Exclusive create — true if THIS call created the network, false if it already existed. `docker network create`
+  // is atomic on the daemon, so this doubles as the cross-process cold-start mutex (exactly one deployer wins).
+  createNetwork(name: string): Promise<boolean>;
   run(spec: DockerRunSpec): Promise<string>; // container id
   hostPort(container: string, containerPort: number): Promise<number>; // discover the published host port
   exec(container: string, cmd: string[]): Promise<void>;
@@ -74,6 +77,14 @@ export function dockerCli(bin = "docker"): Docker {
         await sh(["network", "inspect", name]);
       } catch {
         await sh(["network", "create", name]);
+      }
+    },
+    async createNetwork(name) {
+      try {
+        await sh(["network", "create", name]);
+        return true; // we created it — this process owns the deploy
+      } catch {
+        return false; // already exists (or a racing creator won) — the caller adopts/waits
       }
     },
     async run(spec) {

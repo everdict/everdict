@@ -28,14 +28,20 @@ const SPEC: ServiceHarnessSpec = {
 };
 
 // Fake Docker — records calls and returns published ports deterministically (no daemon needed).
-// runningNames seeds `running()` (the adopt-don't-kill gate); empty = nothing pre-existing (fresh deploy).
-function fakeDocker(runningNames: string[] = []): {
+// runningNames seeds `running()` (the adopt-don't-kill gate) and stays MUTABLE — tests push/splice it to
+// simulate containers dying or another process's deploy landing. networkExists=true makes createNetwork
+// report "already existed" (the cold-start loser's view).
+function fakeDocker(
+  runningNames: string[] = [],
+  opts: { networkExists?: boolean } = {},
+): {
   docker: Docker;
   runs: DockerRunSpec[];
   networks: string[];
   removed: string[];
   rmNets: string[];
   execs: string[][];
+  runningNames: string[];
 } {
   const runs: DockerRunSpec[] = [];
   const networks: string[] = [];
@@ -46,6 +52,11 @@ function fakeDocker(runningNames: string[] = []): {
   const docker: Docker = {
     async ensureNetwork(name) {
       networks.push(name);
+    },
+    async createNetwork(name) {
+      if (opts.networkExists) return false;
+      networks.push(name);
+      return true;
     },
     async run(spec) {
       runs.push(spec);
@@ -67,7 +78,7 @@ function fakeDocker(runningNames: string[] = []): {
       return names.filter((n) => runningNames.includes(n));
     },
   };
-  return { docker, runs, networks, removed, rmNets, execs };
+  return { docker, runs, networks, removed, rmNets, execs, runningNames };
 }
 
 const okFetch: typeof fetch = (async (url: string) => {
@@ -200,6 +211,37 @@ describe("DockerTopologyRuntime", () => {
     expect(f.removed).toContain("everdict-bu-1.0.0-bu-postgres"); // the leftover is cleaned before its redeploy
   });
 
+  it("self-heals a poisoned warm entry — dead containers invalidate the cache and the next ensure redeploys", async () => {
+    const f = fakeDocker();
+    const rt = new DockerTopologyRuntime({ docker: f.docker, fetchImpl: okFetch });
+    await rt.ensureTopology(SPEC);
+    expect(f.runs).toHaveLength(3);
+    // The topology is deployed and warm; now its containers die (crash / docker rm -f / host reboot):
+    // runningNames stays empty, so the warm entry's liveness check sees 0/3 running.
+    const handle = await rt.ensureTopology(SPEC);
+    expect(f.runs).toHaveLength(6); // redeployed instead of serving the dead handle forever
+    expect(handle.endpoints["agent-server"]).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
+  });
+
+  it("cold-start loser waits for the winner's deploy and adopts it (never tears it down)", async () => {
+    // The network already exists (another process won docker network create); its containers land mid-wait.
+    const f = fakeDocker([], { networkExists: true });
+    const rt = new DockerTopologyRuntime({ docker: f.docker, fetchImpl: okFetch, pollIntervalMs: 1 });
+    setTimeout(() => f.runningNames.push(...SPEC_CONTAINERS), 5); // the winner's containers come up shortly
+    const handle = await rt.ensureTopology(SPEC);
+    expect(handle.endpoints["agent-server"]).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
+    expect(f.runs).toEqual([]); // adopted — this process deployed nothing…
+    expect(f.removed).toEqual([]); // …and never rm -f'd the winner's containers
+  });
+
+  it("cold-start takeover — a stale network with no deploy behind it is deployed over after a short grace", async () => {
+    const f = fakeDocker([], { networkExists: true }); // leftover network from a crashed deployer, nothing running
+    const rt = new DockerTopologyRuntime({ docker: f.docker, fetchImpl: okFetch, pollIntervalMs: 1 });
+    const handle = await rt.ensureTopology(SPEC);
+    expect(f.runs).toHaveLength(3); // gave up waiting → took over and deployed
+    expect(handle.endpoints["agent-server"]).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
+  });
+
   it("does not adopt an unready topology — a failing probe falls back to rm+redeploy", async () => {
     const f = fakeDocker(SPEC_CONTAINERS);
     // The pre-existing front door answers 500 (mid-boot elsewhere); post-deploy readiness answers 200.
@@ -285,6 +327,9 @@ describe("DockerTopologyRuntime", () => {
       async running(names) {
         return names.filter((n) => live.has(n)); // partial set (2 of 3) → adoption declines → rm+redeploy path
       },
+      async createNetwork() {
+        return true;
+      },
     };
     const rt = new DockerTopologyRuntime({ docker, fetchImpl: okFetch });
     // If a leftover container isn't rm'd before run, this throws on a name-collision cascade (regression guard).
@@ -296,6 +341,7 @@ describe("DockerTopologyRuntime", () => {
     const f = fakeDocker();
     const rt = new DockerTopologyRuntime({ docker: f.docker, fetchImpl: okFetch });
     await rt.ensureTopology(SPEC);
+    f.runningNames.push(...f.runs.map((r) => r.name)); // the deployed containers are up (the warm liveness check sees 3/3)
     const runsAfterFirst = f.runs.length;
     await rt.ensureTopology(SPEC);
     expect(f.runs.length).toBe(runsAfterFirst); // the second is cached
@@ -315,12 +361,13 @@ describe("DockerTopologyRuntime", () => {
   it("ensureTopology: a re-call after a failed deploy tries fresh (a failed topology isn't cached in single-flight)", async () => {
     const f = fakeDocker();
     let firstNetwork = true;
-    f.docker.ensureNetwork = async (name: string) => {
+    f.docker.createNetwork = async (name: string) => {
       if (firstNetwork) {
         firstNetwork = false;
         throw new Error("docker down");
       }
       f.networks.push(name);
+      return true;
     };
     const rt = new DockerTopologyRuntime({ docker: f.docker, fetchImpl: okFetch });
     await expect(rt.ensureTopology(SPEC)).rejects.toThrow("docker down");
@@ -370,6 +417,9 @@ describe("DockerTopologyRuntime", () => {
       async removeNetwork() {},
       async running(names) {
         return names.filter((n) => live.has(n)); // empty on both attempts (first = fresh, second = cleaned up)
+      },
+      async createNetwork() {
+        return true;
       },
     };
     // readyTimeoutMs/pollIntervalMs at 1ms — so the failure-path polling ends immediately.

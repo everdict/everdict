@@ -23,6 +23,9 @@ function fakeDocker() {
     async running() {
       return []; // session containers are never adopted — the provisioner always runs fresh
     },
+    async createNetwork() {
+      return true; // the provisioner never races another deployer on its per-session names
+    },
   };
   return { docker, runs, removed };
 }

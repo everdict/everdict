@@ -67,7 +67,14 @@ export class DockerTopologyRuntime implements TopologyRuntime {
   async ensureTopology(spec: ServiceHarnessSpec): Promise<TopologyHandle> {
     const key = `${spec.id}@${spec.version}`;
     const cached = this.warm.get(key);
-    if (cached) return cached.handle; // warm: deployed only once per version
+    if (cached) {
+      // Warm-poisoning guard: a warm handle whose containers died (crash / docker rm / host reboot) must not
+      // be served forever — every later case would fail against dead endpoints with no self-heal. One docker ps
+      // per ensure is cheap; on a partial/absent set, drop the entry and fall through to adopt-or-redeploy.
+      const up = await this.docker.running(cached.containers).catch(() => undefined);
+      if (up === undefined || up.length === cached.containers.length) return cached.handle; // daemon blip → serve cached (best effort)
+      this.warm.delete(key);
+    }
     const inflight = this.inFlight.get(key);
     if (inflight) return inflight; // concurrent ensures join in — prevents duplicate deploy (name collision)
 
@@ -92,11 +99,22 @@ export class DockerTopologyRuntime implements TopologyRuntime {
       this.warm.set(key, adopted);
       return adopted.handle;
     }
+    // Cross-process cold-start mutex: nothing adoptable yet, so someone must deploy — and `docker network
+    // create` is atomic on the daemon, so exactly one process wins it. The winner deploys; a loser (create
+    // failed: the network already exists) WAITS for the winner's topology to become adoptable instead of
+    // tearing the winner's half-deployed fixed-name containers down. Takeover (fall through to deploy over
+    // the existing network) happens only when nothing materializes — a stale network from a crashed deployer.
+    const creator = await this.docker.createNetwork(network);
+    if (!creator) {
+      const later = await this.waitAdopt(spec, network);
+      if (later) {
+        this.warm.set(key, later);
+        return later.handle;
+      }
+    }
     // Names of the containers we brought up (or tried to) — cleanup targets on partial failure. Pushed before run, so a name whose run itself threw is still caught.
     const containers: string[] = [];
     try {
-      await this.docker.ensureNetwork(network);
-
       // 1) Dependency stores (one per type) — network alias = `<id>-<store>` (matches the host in dependencyConnEnv → services connect by that name).
       for (const { store, name, def } of dependencyStores(spec)) {
         const cname = `${network}-${name}`;
@@ -181,6 +199,33 @@ export class DockerTopologyRuntime implements TopologyRuntime {
     } catch {
       return undefined; // any probe failure = not adoptable (never kills what it probed — redeploy decides)
     }
+  }
+
+  // Wait for another process's in-flight deploy of the SAME topology to become adoptable (the cold-start
+  // loser's path). Zero running containers across a few polls = no deploy is actually happening behind the
+  // existing network (a crashed deployer's leftover) → give up so the caller takes over. Bounded by the
+  // runtime readiness budget — the same patience a fresh deploy's slowest service would get.
+  private async waitAdopt(spec: ServiceHarnessSpec, network: string): Promise<WarmEntry | undefined> {
+    const names = [
+      ...dependencyStores(spec).map(({ name }) => `${network}-${name}`),
+      ...spec.services.map((svc) => `${network}-${sanitize(svc.name)}`),
+    ];
+    const intervalMs = this.defaultIntervalMs;
+    const deadline = Date.now() + this.defaultReadyTimeoutMs;
+    let idlePolls = 0;
+    while (Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, intervalMs));
+      const adopted = await this.tryAdopt(spec, network);
+      if (adopted) return adopted;
+      const up = await this.docker.running(names).catch(() => []);
+      if (up.length === 0) {
+        idlePolls += 1;
+        if (idlePolls >= 3) return undefined; // nothing is coming — stale network, take over
+      } else {
+        idlePolls = 0; // containers exist → a deploy is in progress, keep waiting
+      }
+    }
+    return undefined;
   }
 
   async provisionBrowserEnv(spec: ServiceHarnessSpec, runId: string): Promise<TargetEnvHandle> {
