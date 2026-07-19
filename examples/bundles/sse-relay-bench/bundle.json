@@ -1,0 +1,180 @@
+{
+  "id": "sse-relay-bench",
+  "version": "1.0.0",
+  "description": "Parallelism/stability probe topology: command front door -> Redis Streams -> SSE relay -> Chrome-extension client behind a Playwright wrapping server (start-browser session API). No LLM calls; each case verifies its own message loop by nonce accounting (no loss, no cross-session leakage). Build the three images first (see README.md).",
+  "harnessTemplates": [
+    {
+      "kind": "service",
+      "category": "topology",
+      "id": "sse-relay-bench",
+      "version": "1",
+      "services": [
+        {
+          "name": "command",
+          "image": "sse-relay-command:v1",
+          "port": 8000,
+          "needs": [],
+          "perRun": [],
+          "replicas": 1,
+          "env": { "MESSAGE_COUNT": "40", "PUBLISH_INTERVAL_MS": "250" },
+          "readiness": { "timeoutMs": 120000, "intervalMs": 1000 }
+        },
+        {
+          "name": "relay",
+          "image": "sse-relay-relay:v1",
+          "port": 8001,
+          "needs": [],
+          "perRun": [],
+          "replicas": 1,
+          "env": {},
+          "readiness": { "timeoutMs": 120000, "intervalMs": 1000 }
+        },
+        {
+          "name": "client-host",
+          "image": "sse-relay-client-host:v1",
+          "port": 8002,
+          "needs": ["relay"],
+          "perRun": [],
+          "replicas": 1,
+          "env": { "RELAY_URL": "{{relay.url}}" },
+          "readiness": { "timeoutMs": 180000, "intervalMs": 1000 }
+        }
+      ],
+      "dependencies": [{ "store": "redis", "role": "bus", "isolateBy": "key-prefix" }],
+      "target": {
+        "kind": "browser",
+        "engine": "chromium",
+        "delivery": { "mode": "sentinel", "path": "observation" },
+        "acquire": {
+          "mode": "service",
+          "service": "client-host",
+          "open": "POST /sessions/{key_prefix}",
+          "coordinates": { "session_id": "session_id" },
+          "close": "DELETE /sessions/{session_id}",
+          "ready": {
+            "service": "relay",
+            "poll": "GET /subscribed/{key_prefix}:chat:{session_id}",
+            "intervalMs": 500,
+            "timeoutMs": 120000
+          }
+        }
+      },
+      "frontDoor": {
+        "service": "command",
+        "submit": "POST /runs",
+        "request": {
+          "bodyTemplate": {
+            "run_id": "{{run_id}}",
+            "session_id": "{{session_id}}",
+            "key_prefix": "{{key_prefix}}",
+            "task": "{{task}}"
+          }
+        },
+        "completion": {
+          "mode": "poll",
+          "statusPath": "GET /runs/{run_id}",
+          "done": { "field": "status", "equals": "done" },
+          "failed": { "field": "status", "equals": "failed" },
+          "intervalMs": 1000,
+          "timeoutMs": 300000
+        },
+        "traceInline": { "path": "trace" }
+      },
+      "traceSource": { "kind": "otel", "endpoint": "http://127.0.0.1:9" }
+    }
+  ],
+  "harnesses": [
+    {
+      "template": { "id": "sse-relay-bench", "version": "1" },
+      "id": "sse-relay-bench",
+      "version": "1.0.0",
+      "pins": {
+        "command": "sse-relay-command:v1",
+        "relay": "sse-relay-relay:v1",
+        "client-host": "sse-relay-client-host:v1"
+      }
+    }
+  ],
+  "datasets": [
+    {
+      "id": "sse-relay-parallel",
+      "version": "1.0.0",
+      "description": "8 identical stream-loop cases meant to run in PARALLEL (scorecard concurrency=8 x runner --max-concurrent 8). Each case passes only if its own transcript is complete and leak-free (ok=true from the command server's nonce accounting).",
+      "cases": [
+        {
+          "id": "parallel-0",
+          "env": { "kind": "prompt" },
+          "task": "stream benchmark case 0",
+          "expected": "ok=true",
+          "graders": [{ "id": "answer-match" }],
+          "timeoutSec": 600,
+          "tags": ["parallel", "sse-relay"]
+        },
+        {
+          "id": "parallel-1",
+          "env": { "kind": "prompt" },
+          "task": "stream benchmark case 1",
+          "expected": "ok=true",
+          "graders": [{ "id": "answer-match" }],
+          "timeoutSec": 600,
+          "tags": ["parallel", "sse-relay"]
+        },
+        {
+          "id": "parallel-2",
+          "env": { "kind": "prompt" },
+          "task": "stream benchmark case 2",
+          "expected": "ok=true",
+          "graders": [{ "id": "answer-match" }],
+          "timeoutSec": 600,
+          "tags": ["parallel", "sse-relay"]
+        },
+        {
+          "id": "parallel-3",
+          "env": { "kind": "prompt" },
+          "task": "stream benchmark case 3",
+          "expected": "ok=true",
+          "graders": [{ "id": "answer-match" }],
+          "timeoutSec": 600,
+          "tags": ["parallel", "sse-relay"]
+        },
+        {
+          "id": "parallel-4",
+          "env": { "kind": "prompt" },
+          "task": "stream benchmark case 4",
+          "expected": "ok=true",
+          "graders": [{ "id": "answer-match" }],
+          "timeoutSec": 600,
+          "tags": ["parallel", "sse-relay"]
+        },
+        {
+          "id": "parallel-5",
+          "env": { "kind": "prompt" },
+          "task": "stream benchmark case 5",
+          "expected": "ok=true",
+          "graders": [{ "id": "answer-match" }],
+          "timeoutSec": 600,
+          "tags": ["parallel", "sse-relay"]
+        },
+        {
+          "id": "parallel-6",
+          "env": { "kind": "prompt" },
+          "task": "stream benchmark case 6",
+          "expected": "ok=true",
+          "graders": [{ "id": "answer-match" }],
+          "timeoutSec": 600,
+          "tags": ["parallel", "sse-relay"]
+        },
+        {
+          "id": "parallel-7",
+          "env": { "kind": "prompt" },
+          "task": "stream benchmark case 7",
+          "expected": "ok=true",
+          "graders": [{ "id": "answer-match" }],
+          "timeoutSec": 600,
+          "tags": ["parallel", "sse-relay"]
+        }
+      ],
+      "tags": ["parallel", "sse-relay"]
+    }
+  ]
+}

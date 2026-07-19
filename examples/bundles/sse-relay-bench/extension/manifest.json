@@ -1,0 +1,8 @@
+{
+  "manifest_version": 3,
+  "name": "everdict-sse-relay-client",
+  "version": "1.0",
+  "description": "Benchmark client: subscribes to the relay's per-session SSE stream and reports the transcript upstream.",
+  "background": { "service_worker": "bg.js" },
+  "content_scripts": [{ "matches": ["<all_urls>"], "js": ["content.js"], "run_at": "document_idle" }]
+}

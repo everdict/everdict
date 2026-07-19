@@ -1,0 +1,4 @@
+fastapi==0.115.8
+uvicorn==0.34.0
+# Must match the browsers baked into the base image (mcr playwright/python v1.49.1).
+playwright==1.49.1
