@@ -77,12 +77,16 @@ driver); `provisionBrowserEnv` runs headless-shell (`cdpUrl` = the **internal** 
 hits the **host** published port). It exists so the **self-hosted runner** can drive `kind:"service"` harnesses on
 a laptop — a single-user host, so **no `TrustZone`/gVisor/pool-silo** (those stay for cluster runtimes). See
 `docs/architecture/self-hosted-service-runner.md`.
-- **Adopt-don't-kill (cross-process safety).** Container/network names are deterministic (`everdict-<id>-<version>-…`),
-  so two runner PROCESSES on one host (desktop app + CLI runner) reach the same names. `deploy` first probes the
-  full same-name set (`Docker.running` exact-name gate → one-shot store exec probes + ported-service HTTP probes)
-  and **adopts** a fully-running, ready topology into the warm pool instead of `docker rm -f`-ing another process's
-  live containers. Partial/stopped/unready sets take the existing rm+redeploy path. Residual race: a probe hitting a
-  topology mid-deploy by another process falls back to redeploy (converges; a true cross-process lock is a non-goal).
+- **Cross-process deploy coordination (adopt → cold-start mutex → heal).** Container/network names are deterministic
+  (`everdict-<id>-<version>-…`), so every runner PROCESS on one daemon (desktop app + CLI runners) reaches the same
+  names. `deploy` arbitrates atomically ON THE DAEMON, in order: ① **adopt** a fully-running, ready same-name set
+  (`Docker.running` exact-name gate → one-shot store exec + ported-service HTTP probes) — never `docker rm -f`
+  another process's live topology; ② **cold start** — `docker network create` is atomic, so exactly one process wins
+  and deploys while losers wait-adopt within the readiness budget; ③ **heal** — a MAIMED set (some containers dead)
+  is demolished + redeployed under a dedicated heal-lock network (`<network>.heal`, atomic create, stale locks
+  expire by age) so concurrent healers can't collide on `docker run --name`; lock losers loop back and adopt.
+  The warm cache also liveness-checks its container set each ensure (one `docker ps`) — dead-set entries are
+  dropped and re-arbitrated instead of served forever (self-heal, verified by the live chaos suite).
 - **Per-service declarative knobs (Docker honors them; Nomad/K8s ignore for now):** `TopologyService.volumes`
   (`string[]` → `docker -v` mount specs, named volume or bind mount) and `TopologyService.readiness`
   (`{timeoutMs,intervalMs}` → the HTTP endpoint readiness-poll budget; absent = the runtime default 60s/1s, also

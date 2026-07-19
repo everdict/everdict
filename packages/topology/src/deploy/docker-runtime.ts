@@ -34,6 +34,10 @@ function sanitize(s: string): string {
 function netName(spec: ServiceHarnessSpec): string {
   return `everdict-${sanitize(spec.id)}-${sanitize(spec.version)}`;
 }
+// The heal-lock network name — the daemon-atomic mutex that serializes demolition+redeploy of a maimed set.
+function healLockName(network: string): string {
+  return `${network}.heal`;
+}
 
 // Store liveness probe command (docker exec). Shared by the deploy-time readiness poll and the
 // adoption single-shot probe so both judge "accepting connections" identically. minio has none (skipped).
@@ -85,33 +89,86 @@ export class DockerTopologyRuntime implements TopologyRuntime {
     return p;
   }
 
-  // The actual topology deploy (network → stores → services). Only the single-flight wrapper (ensureTopology) calls it.
+  // Deploy coordination (cross-process safe). Container names are deterministic — every runner process on
+  // this daemon reaches the same ones — so deploy arbitration must be atomic ON THE DAEMON:
+  //   1) adopt: a fully-running, ready same-name topology is adopted, never torn down (adopt-don't-kill);
+  //   2) cold start: `docker network create` is atomic → exactly one process wins and deploys; losers
+  //      wait-adopt the winner's topology (never rm its half-deployed containers);
+  //   3) heal: a MAIMED set (some containers dead — crash, docker rm) can't be adopted and can't be
+  //      arbitrated by the main network (it still exists), so demolition+redeploy is serialized by a
+  //      dedicated heal-lock network (`<network>.heal`, atomic create; stale locks expire by age). The
+  //      lock loser loops back and adopts the healer's fresh deploy.
+  // Bounded attempts: adopt → cold-start race → wait → heal → (loop). Design: self-hosted-service-runner.md.
   private async deploy(spec: ServiceHarnessSpec, key: string): Promise<TopologyHandle> {
     const network = netName(spec);
-    // Adopt-don't-kill: container names are deterministic (same in every runner process), so the same
-    // topology may ALREADY be running on this daemon — another runner process's warm topology, or a
-    // still-healthy leftover from a restart of this one. The old unconditional rm -f killed that live
-    // topology mid-run (mutual destruction when two runner processes share a host). If the full set is
-    // running and answers one-shot probes, adopt its endpoints instead; anything partial/unready still
-    // takes the rm+redeploy path below.
-    const adopted = await this.tryAdopt(spec, network);
-    if (adopted) {
-      this.warm.set(key, adopted);
-      return adopted.handle;
-    }
-    // Cross-process cold-start mutex: nothing adoptable yet, so someone must deploy — and `docker network
-    // create` is atomic on the daemon, so exactly one process wins it. The winner deploys; a loser (create
-    // failed: the network already exists) WAITS for the winner's topology to become adoptable instead of
-    // tearing the winner's half-deployed fixed-name containers down. Takeover (fall through to deploy over
-    // the existing network) happens only when nothing materializes — a stale network from a crashed deployer.
-    const creator = await this.docker.createNetwork(network);
-    if (!creator) {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const adopted = await this.tryAdopt(spec, network);
+      if (adopted) {
+        this.warm.set(key, adopted);
+        return adopted.handle;
+      }
+      if (await this.docker.createNetwork(network)) {
+        const handle = await this.deployContainers(spec, network); // we own the fresh network → deploy
+        this.warm.set(key, this.warmEntryFor(spec, network, handle));
+        return handle;
+      }
       const later = await this.waitAdopt(spec, network);
       if (later) {
         this.warm.set(key, later);
         return later.handle;
       }
+      // Nothing became adoptable within the budget: the network fronts a stale or maimed set. Serialize the
+      // demolition behind the heal lock — the winner clears + redeploys, losers loop back and adopt.
+      if (await this.acquireHealLock(network)) {
+        try {
+          await this.docker.rm(this.topologyContainerNames(spec, network)).catch(() => {});
+          await this.docker.removeNetwork(network).catch(() => {});
+          if (await this.docker.createNetwork(network)) {
+            const handle = await this.deployContainers(spec, network);
+            this.warm.set(key, this.warmEntryFor(spec, network, handle));
+            return handle;
+          }
+        } finally {
+          await this.docker.removeNetwork(healLockName(network)).catch(() => {});
+        }
+      }
+      // heal lock lost (another process is healing) or an unlucky re-create race — loop and adopt theirs.
     }
+    throw new UpstreamError(
+      "UPSTREAM_ERROR",
+      { network },
+      "Could not deploy, adopt, or heal the topology after repeated attempts — inspect the docker daemon state.",
+    );
+  }
+
+  // All this topology's deterministic container names (stores + services) — adoption/heal targets.
+  private topologyContainerNames(spec: ServiceHarnessSpec, network: string): string[] {
+    return [
+      ...dependencyStores(spec).map(({ name }) => `${network}-${name}`),
+      ...spec.services.map((svc) => `${network}-${sanitize(svc.name)}`),
+    ];
+  }
+
+  private warmEntryFor(spec: ServiceHarnessSpec, network: string, handle: TopologyHandle): WarmEntry {
+    return { handle, network, containers: this.topologyContainerNames(spec, network) };
+  }
+
+  // Win the right to demolish+redeploy a stuck topology. Atomic via network create; a lock left by a
+  // crashed healer expires by age (readiness budget + slack) and is broken by the next contender.
+  private async acquireHealLock(network: string): Promise<boolean> {
+    const lock = healLockName(network);
+    if (await this.docker.createNetwork(lock)) return true;
+    const createdAt = await this.docker.networkCreatedAt(lock);
+    const staleMs = this.defaultReadyTimeoutMs + 30_000;
+    if (createdAt !== undefined && Date.now() - createdAt > staleMs) {
+      await this.docker.removeNetwork(lock).catch(() => {});
+      return this.docker.createNetwork(lock); // re-race after breaking the stale lock — one contender wins
+    }
+    return false;
+  }
+
+  // The container deploy itself (stores → services) onto an OWNED network. Only the arbitration in deploy() calls it.
+  private async deployContainers(spec: ServiceHarnessSpec, network: string): Promise<TopologyHandle> {
     // Names of the containers we brought up (or tried to) — cleanup targets on partial failure. Pushed before run, so a name whose run itself threw is still caught.
     const containers: string[] = [];
     try {
@@ -160,7 +217,6 @@ export class DockerTopologyRuntime implements TopologyRuntime {
       }
 
       const handle: TopologyHandle = { endpoints };
-      this.warm.set(key, { handle, network, containers });
       return handle;
     } catch (err) {
       // Clean up the partial startup — a leftover fixed-name container makes the next case's docker run (--name is non-idempotent) cascade-fail on a name collision.
@@ -206,10 +262,7 @@ export class DockerTopologyRuntime implements TopologyRuntime {
   // existing network (a crashed deployer's leftover) → give up so the caller takes over. Bounded by the
   // runtime readiness budget — the same patience a fresh deploy's slowest service would get.
   private async waitAdopt(spec: ServiceHarnessSpec, network: string): Promise<WarmEntry | undefined> {
-    const names = [
-      ...dependencyStores(spec).map(({ name }) => `${network}-${name}`),
-      ...spec.services.map((svc) => `${network}-${sanitize(svc.name)}`),
-    ];
+    const names = this.topologyContainerNames(spec, network);
     const intervalMs = this.defaultIntervalMs;
     const deadline = Date.now() + this.defaultReadyTimeoutMs;
     let idlePolls = 0;

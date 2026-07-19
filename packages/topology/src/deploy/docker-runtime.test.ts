@@ -49,12 +49,16 @@ function fakeDocker(
   const rmNets: string[] = [];
   const execs: string[][] = [];
   let nextPort = 49152;
+  // Per-name network existence (like the daemon): createNetwork is atomic-exclusive, removeNetwork frees the
+  // name. networkExists pre-seeds the MAIN topology network (the cold-start loser's / heal contender's view).
+  const existingNetworks = new Set<string>(opts.networkExists ? ["everdict-bu-1.0.0"] : []);
   const docker: Docker = {
     async ensureNetwork(name) {
       networks.push(name);
     },
     async createNetwork(name) {
-      if (opts.networkExists) return false;
+      if (existingNetworks.has(name)) return false;
+      existingNetworks.add(name);
       networks.push(name);
       return true;
     },
@@ -72,10 +76,14 @@ function fakeDocker(
       removed.push(...c);
     },
     async removeNetwork(n) {
+      existingNetworks.delete(n);
       rmNets.push(n);
     },
     async running(names) {
       return names.filter((n) => runningNames.includes(n));
+    },
+    async networkCreatedAt(name) {
+      return existingNetworks.has(name) ? Date.now() : undefined; // existing = fresh (never stale) in the fake
     },
   };
   return { docker, runs, networks, removed, rmNets, execs, runningNames };
@@ -226,19 +234,39 @@ describe("DockerTopologyRuntime", () => {
   it("cold-start loser waits for the winner's deploy and adopts it (never tears it down)", async () => {
     // The network already exists (another process won docker network create); its containers land mid-wait.
     const f = fakeDocker([], { networkExists: true });
-    const rt = new DockerTopologyRuntime({ docker: f.docker, fetchImpl: okFetch, pollIntervalMs: 1 });
-    setTimeout(() => f.runningNames.push(...SPEC_CONTAINERS), 5); // the winner's containers come up shortly
+    // Poll slower than the containers' arrival so the zero-running grace (3 polls) can't expire first.
+    const rt = new DockerTopologyRuntime({ docker: f.docker, fetchImpl: okFetch, pollIntervalMs: 10 });
+    setTimeout(() => f.runningNames.push(...SPEC_CONTAINERS), 2); // the winner's containers come up shortly
     const handle = await rt.ensureTopology(SPEC);
     expect(handle.endpoints["agent-server"]).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
     expect(f.runs).toEqual([]); // adopted — this process deployed nothing…
     expect(f.removed).toEqual([]); // …and never rm -f'd the winner's containers
   });
 
-  it("cold-start takeover — a stale network with no deploy behind it is deployed over after a short grace", async () => {
+  it("cold-start takeover — a stale network with no deploy behind it is healed over after a short grace", async () => {
     const f = fakeDocker([], { networkExists: true }); // leftover network from a crashed deployer, nothing running
     const rt = new DockerTopologyRuntime({ docker: f.docker, fetchImpl: okFetch, pollIntervalMs: 1 });
     const handle = await rt.ensureTopology(SPEC);
-    expect(f.runs).toHaveLength(3); // gave up waiting → took over and deployed
+    expect(f.runs).toHaveLength(3); // gave up waiting → won the heal lock → demolished + deployed
+    expect(f.rmNets).toContain("everdict-bu-1.0.0.heal"); // the heal lock was released
+    expect(handle.endpoints["agent-server"]).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
+  });
+
+  it("a MAIMED topology (some containers dead) is demolished and redeployed under the heal lock", async () => {
+    // relay/agent died, one store survived — not adoptable (partial), and the main network still exists so
+    // the cold-start mutex can't arbitrate: pre-fix, concurrent takeovers collided on docker run --name.
+    const f = fakeDocker(["everdict-bu-1.0.0-bu-postgres"], { networkExists: true });
+    // readyTimeoutMs bounds the wait-adopt budget — a maimed set never becomes adoptable, so keep it tiny.
+    const rt = new DockerTopologyRuntime({
+      docker: f.docker,
+      fetchImpl: okFetch,
+      pollIntervalMs: 1,
+      readyTimeoutMs: 30,
+    });
+    const handle = await rt.ensureTopology(SPEC);
+    expect(f.removed).toContain("everdict-bu-1.0.0-bu-postgres"); // the survivor was demolished with the set
+    expect(f.runs).toHaveLength(3); // full redeploy
+    expect(f.rmNets).toContain("everdict-bu-1.0.0.heal"); // lock released after healing
     expect(handle.endpoints["agent-server"]).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
   });
 
@@ -330,6 +358,9 @@ describe("DockerTopologyRuntime", () => {
       async createNetwork() {
         return true;
       },
+      async networkCreatedAt() {
+        return undefined;
+      },
     };
     const rt = new DockerTopologyRuntime({ docker, fetchImpl: okFetch });
     // If a leftover container isn't rm'd before run, this throws on a name-collision cascade (regression guard).
@@ -420,6 +451,9 @@ describe("DockerTopologyRuntime", () => {
       },
       async createNetwork() {
         return true;
+      },
+      async networkCreatedAt() {
+        return undefined;
       },
     };
     // readyTimeoutMs/pollIntervalMs at 1ms — so the failure-path polling ends immediately.

@@ -26,6 +26,9 @@ function fakeDocker() {
     async createNetwork() {
       return true; // the provisioner never races another deployer on its per-session names
     },
+    async networkCreatedAt() {
+      return undefined;
+    },
   };
   return { docker, runs, removed };
 }

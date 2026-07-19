@@ -66,6 +66,7 @@ export interface Docker {
   rm(containers: string[]): Promise<void>; // best-effort force removal
   removeNetwork(name: string): Promise<void>;
   running(names: string[]): Promise<string[]>; // the subset of these exact names currently running (adopt-don't-kill gate)
+  networkCreatedAt(name: string): Promise<number | undefined>; // epoch ms (undefined = missing) — stale-heal-lock detection
 }
 
 // Default impl — execFile("docker", …). A stopped daemon / lack of permission makes execFile reject → the runtime maps it to UpstreamError.
@@ -115,6 +116,15 @@ export function dockerCli(bin = "docker"): Docker {
           .filter(Boolean),
       );
       return names.filter((n) => up.has(n));
+    },
+    async networkCreatedAt(name) {
+      try {
+        const { stdout } = await sh(["network", "inspect", "-f", "{{.Created}}", name]);
+        const t = Date.parse(stdout.trim());
+        return Number.isFinite(t) ? t : undefined;
+      } catch {
+        return undefined; // missing network (or daemon error) — the caller treats it as absent
+      }
     },
   };
 }
