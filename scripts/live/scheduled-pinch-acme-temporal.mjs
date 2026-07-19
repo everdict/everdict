@@ -101,7 +101,7 @@ try {
 
   // ③ pair + start alice-owned self-hosted runner (codex on PATH)
   console.log("\n=== ③ POST /runners (as alice) + everdict runner --pair (codex on PATH) ===");
-  const paired = await post("/runners", { label: "alice-codex-laptop", capabilities: ["repo"] });
+  const paired = await post("/runners", { label: "alice-codex-laptop", capabilities: ["git"] });
   const token = paired.json.token;
   const runnerId = paired.json.runner?.id;
   console.log(`  → ${paired.status} runnerId=${runnerId}`);

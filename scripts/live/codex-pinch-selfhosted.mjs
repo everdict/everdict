@@ -47,7 +47,7 @@ try {
 
   // ② pair the runner
   console.log("\n=== ② POST /runners (pair this machine) ===");
-  const paired = await post("/runners", { label: "codex-laptop", capabilities: ["repo"] });
+  const paired = await post("/runners", { label: "codex-laptop", capabilities: ["git"] });
   const token = paired.json.token;
   const runnerId = paired.json.runner?.id;
   console.log(`  → ${paired.status} runnerId=${runnerId}`);

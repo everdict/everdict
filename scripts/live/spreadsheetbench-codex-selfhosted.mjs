@@ -42,7 +42,7 @@ try {
   if (!up) throw new Error("control plane failed to start");
 
   console.log("\n=== ② POST /runners ===");
-  const paired = await post("/runners", { label: "codex-image", capabilities: ["repo"] });
+  const paired = await post("/runners", { label: "codex-image", capabilities: ["git"] });
   const runnerId = paired.json.runner?.id;
   console.log(`  → ${paired.status} runnerId=${runnerId}`);
   if (!paired.json.token || !runnerId) throw new Error("pairing failed");

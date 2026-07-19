@@ -25,7 +25,7 @@ const api = async (path, init = {}) => {
 // 1) device pairing → rnr_ token (shown once).
 const { runner, token } = await api("/runners", {
   method: "POST",
-  body: JSON.stringify({ label: "e2e-laptop", capabilities: ["repo"] }),
+  body: JSON.stringify({ label: "e2e-laptop", capabilities: ["git"] }),
 });
 console.log(`▶ paired runner ${runner.id} (${runner.label})`);
 

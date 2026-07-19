@@ -79,7 +79,7 @@ try {
 
   // ③ pair + start runner (codex on PATH — the harness that ran pinch)
   console.log("\n=== ③ POST /runners + everdict runner --pair (codex on PATH) ===");
-  const paired = await post("/runners", { label: "codex-laptop", capabilities: ["repo"] });
+  const paired = await post("/runners", { label: "codex-laptop", capabilities: ["git"] });
   const token = paired.json.token;
   const runnerId = paired.json.runner?.id;
   console.log(`  → ${paired.status} runnerId=${runnerId}`);

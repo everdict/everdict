@@ -100,7 +100,7 @@ const startRunner = (id, maxConcurrent) => {
       runJob: (job, opts) => runLeasedJob(job, { dockerAvailable: false, signal: opts?.signal }),
       log: () => {},
     },
-    { maxConcurrent, waitMs: 400, heartbeatMs: 250, pollMs: 150, capabilities: ["repo"], shouldStop: () => stop },
+    { maxConcurrent, waitMs: 400, heartbeatMs: 250, pollMs: 150, capabilities: ["git"], shouldStop: () => stop },
   );
   runners.push({ id, loop });
 };
