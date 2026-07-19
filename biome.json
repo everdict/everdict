@@ -8,6 +8,7 @@
       "coverage",
       "apps/web",
       ".next",
+      "apps/cli/bundle",
       "apps/desktop/bundle",
       "apps/desktop/release"
     ]
