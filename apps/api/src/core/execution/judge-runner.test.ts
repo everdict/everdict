@@ -147,6 +147,38 @@ describe("defaultJudgeRunner", () => {
     expect(scores.every((s) => s.graderId === "e2e")).toBe(true);
   });
 
+  it("code judge: carries the run's submitter (submittedBy) so a co-located self:<runnerId> wrapper resolves its owner", async () => {
+    // Regression: the wrapper inherits the source run's self:<runnerId> placement, and RuntimeDispatcher resolves
+    // that runner's owner from job.submittedBy. Pre-fix the wrapper job omitted submittedBy → owner=undefined →
+    // "Self-hosted runner not found" → every code judge on a self-hosted scorecard skipped. Assert it's carried.
+    const codeSpec: JudgeSpec = {
+      kind: "code",
+      id: "e2e",
+      version: "1.0.0",
+      language: "python",
+      code: "print('[]')",
+      timeoutSec: 600,
+      tags: [],
+    };
+    let dispatched: AgentJob | undefined;
+    const runner = defaultJudgeRunner({
+      secretsFor: async () => ({}),
+      dispatch: async (job) => {
+        dispatched = job;
+        return {
+          caseId: job.evalCase.id,
+          harness: "judge",
+          trace: [],
+          snapshot: { kind: "prompt", output: "" },
+          scores: [],
+        } satisfies CaseResult;
+      },
+    });
+    await runner.run(codeSpec, "acme", ctx, { target: "self:runner-1" }, "user-alice");
+    expect(dispatched?.submittedBy).toBe("user-alice");
+    expect(dispatched?.evalCase.placement).toEqual({ target: "self:runner-1" }); // still co-located
+  });
+
   it("code judge: a failed wrapper job (CaseFailure) surfaces as a visible skip, never a silent drop", async () => {
     const codeSpec: JudgeSpec = {
       kind: "code",
@@ -442,6 +474,14 @@ describe("defaultJudgeRunner", () => {
     const runner = defaultJudgeRunner({ secretsFor: async () => ({}), dispatch });
     await runner.run(harnessSpec, "acme", ctx, { target: "rt-near-store", os: "linux" });
     expect(dispatch.mock.calls[0]?.[0]?.evalCase.placement).toEqual({ target: "rt-near-store", os: "linux" });
+  });
+
+  it("harness judge: carries the run's submitter so a co-located self:<runnerId> agent dispatch resolves its owner", async () => {
+    // Same co-locate ownership contract as the code judge — regression against dropping submittedBy on the dispatched job.
+    const dispatch = vi.fn((_job: AgentJob) => Promise.resolve(harnessResult));
+    const runner = defaultJudgeRunner({ secretsFor: async () => ({}), dispatch });
+    await runner.run(harnessSpec, "acme", ctx, { target: "self:runner-7" }, "user-bob");
+    expect(dispatch.mock.calls[0]?.[0]?.submittedBy).toBe("user-bob");
   });
 
   it("harness judge: with neither spec.runtime nor a source placement, no placement (default backend)", async () => {

@@ -47,6 +47,32 @@ describe("ScoringService — scoring unit decoupled from execution", () => {
     expect(seenPlacement?.target).toBe("nomad-seoul"); // runtime co-locate injection
   });
 
+  it("applyJudges: threads the submitter to the runner so a code/harness judge owns its co-located self:<runnerId> dispatch", async () => {
+    // Regression: the wrapper job a code/harness judge dispatches inherits the run's self:<runnerId> placement, and
+    // RuntimeDispatcher resolves that runner's owner from submittedBy. When applyJudges dropped submittedBy, the
+    // wrapper dispatched with owner=undefined → "Self-hosted runner not found" → every code judge on a self-hosted
+    // scorecard silently skipped. Assert the submitter reaches JudgeRunner.run.
+    const judges = new InMemoryJudgeRegistry();
+    await judges.register("acme", JUDGE("j"));
+    let seenSubmittedBy: string | undefined = "UNSET";
+    const judgeRunner: JudgeRunner = {
+      async run(
+        _spec: JudgeSpec,
+        _tenant: string,
+        _ctx: GradeContext,
+        _placement?: Placement,
+        submittedBy?: string,
+      ): Promise<Score[]> {
+        seenSubmittedBy = submittedBy;
+        return [{ graderId: "j", metric: "judge:j", value: 1, pass: true }];
+      },
+    };
+    const scoring = new ScoringService({ judges, judgeRunner });
+    const results = [result()];
+    await scoring.applyJudges("acme", DATASET, results, [{ id: "j", version: "latest" }], "self:r-123", "user-alice");
+    expect(seenSubmittedBy).toBe("user-alice");
+  });
+
   it("collectJudgeModels: distinct models of inline + registered model-judges (sorted)", async () => {
     const judges = new InMemoryJudgeRegistry();
     await judges.register("acme", {

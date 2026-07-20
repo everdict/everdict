@@ -119,7 +119,7 @@ export class ScorecardIngestService {
   ): Promise<void> {
     await this.deps.store.update(record.id, ScorecardBatch.from(record).start(this.now()));
     try {
-      await this.finishIngest(record.id, tenant, dataset, harnessLabel, traces, judges);
+      await this.finishIngest(record.id, tenant, dataset, harnessLabel, traces, judges, undefined, record.createdBy);
     } catch (err) {
       await this.failIngest(record.id, err);
     }
@@ -175,10 +175,19 @@ export class ScorecardIngestService {
         });
       }
       // attach hint: the original trace already lives on the source platform — if the sink is the same platform, attach scores only instead of duplicating (flow ②).
-      await this.finishIngest(id, tenant, dataset, harnessLabel, perCase, judges, {
-        sourceKind: source.kind,
-        externalIdByCase: Object.fromEntries(runs.map((r) => [r.caseId, r.runId])),
-      });
+      await this.finishIngest(
+        id,
+        tenant,
+        dataset,
+        harnessLabel,
+        perCase,
+        judges,
+        {
+          sourceKind: source.kind,
+          externalIdByCase: Object.fromEntries(runs.map((r) => [r.caseId, r.runId])),
+        },
+        record.createdBy,
+      );
     } catch (err) {
       await this.failIngest(id, err);
     }
@@ -194,6 +203,7 @@ export class ScorecardIngestService {
     perCase: IngestScorecardBody["traces"],
     judges: Array<{ id: string; version: string }>,
     attach?: { sourceKind: string; externalIdByCase: Record<string, string> },
+    submittedBy?: string, // the ingest submitter — a code/harness judge with spec.runtime self:<runnerId> needs it to own the wrapper dispatch.
   ): Promise<void> {
     const caseById = new Map(dataset.cases.map((c) => [c.id, c]));
     const results: CaseResult[] = [];
@@ -217,7 +227,7 @@ export class ScorecardIngestService {
       });
     }
     const scorecard: Scorecard = { suiteId: dataset.id, harness: harnessLabel, results };
-    await this.scoring.applyJudges(tenant, dataset, results, judges); // trace → judge scores (control plane)
+    await this.scoring.applyJudges(tenant, dataset, results, judges, undefined, submittedBy); // trace → judge scores (control plane)
     await offloadResults(this.deps, id, results); // os-use screenshots → object storage (slim record)
     // Trace-sink export (when configured) — same place as the live batch (after scoring). pull attaches scores only to the original trace via attach.
     const exported = this.deps.exportResults

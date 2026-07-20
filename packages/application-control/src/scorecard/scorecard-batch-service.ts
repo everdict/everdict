@@ -550,7 +550,9 @@ export class ScorecardBatchService {
     this.deps.usage?.meterCase(result, ctx.tenant); // meter-only billing usage (own-pays runs skip themselves)
     // Per-case judge scoring — the same "judge the moment the case lands" semantics as the in-process judge stream.
     if (ctx.judges.length > 0) {
-      await this.scoring.applyJudges(ctx.tenant, ctx.dataset, [result], ctx.judges).catch(() => {});
+      await this.scoring
+        .applyJudges(ctx.tenant, ctx.dataset, [result], ctx.judges, undefined, ctx.owner)
+        .catch(() => {});
     }
     if (runStore && child)
       await runStore.update(child.id, {
@@ -760,7 +762,9 @@ export class ScorecardBatchService {
         if (attempt.failure === undefined) {
           healed += 1;
           if (orch.judges.length > 0)
-            await this.scoring.applyJudges(input.tenant, dataset, [attempt], orch.judges).catch(() => {});
+            await this.scoring
+              .applyJudges(input.tenant, dataset, [attempt], orch.judges, src.runtime, input.submittedBy)
+              .catch(() => {});
         }
         recovered.push(attempt);
       }
@@ -1087,7 +1091,7 @@ export class ScorecardBatchService {
       // judge streaming — fire a case's judge the moment it finishes, without waiting for the whole batch to complete
       // (case-axis parallel·bounded). Removes the barrier where the slowest case blocked judging of the rest.
       // docs/architecture/streaming-case-pipeline.md
-      const judgeStream = await this.scoring.createJudgeStream(tenant, dataset, judges, runtime);
+      const judgeStream = await this.scoring.createJudgeStream(tenant, dataset, judges, runtime, owner);
       // sink-export streaming (D5) — if the harness selected a sink, export each case to the team platform the moment it completes (after judging)
       // (live visibility + whatever went out survives even if the batch dies midway). If not wired,
       // the success path below falls back to exportResults (batched) (no regression).

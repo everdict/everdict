@@ -212,6 +212,7 @@ async function runCodeJudge(
   ctx: GradeContext,
   deps: DefaultJudgeRunnerDeps,
   placement?: Placement,
+  submittedBy?: string,
 ): Promise<Score[]> {
   if (!deps.dispatch) return skip(spec, "code judge dispatch not configured");
   const built = buildCodeJudgeJob(spec, ctx, placement);
@@ -220,6 +221,9 @@ async function runCodeJudge(
     harness: built.harness,
     harnessSpec: built.harnessSpec,
     tenant,
+    // Carry the producing run's submitter — a co-located self:<runnerId> placement resolves its owner from
+    // submittedBy (RuntimeDispatcher). Dropping it made every code judge on a self-hosted scorecard skip.
+    ...(submittedBy ? { submittedBy } : {}),
     ...(built.judge ? { judge: built.judge } : {}),
   };
   try {
@@ -237,9 +241,9 @@ async function runCodeJudge(
 // Default implementation: model calls the provider with the tenant secret key (anthropic/openai), harness spins up the referenced agent to judge.
 export function defaultJudgeRunner(deps: DefaultJudgeRunnerDeps): JudgeRunner {
   return {
-    async run(spec, tenant, ctx, placement) {
+    async run(spec, tenant, ctx, placement, submittedBy) {
       // code judge — its own dispatch path (no rubric/transport); see runCodeJudge above.
-      if (spec.kind === "code") return runCodeJudge(spec, tenant, ctx, deps, placement);
+      if (spec.kind === "code") return runCodeJudge(spec, tenant, ctx, deps, placement, submittedBy);
       // 1) Resolve the rubric first (cheapest gate — no secret read / provider call when it can't resolve).
       //    Inline string = as-is; {id, version} ref = registry lookup; unresolved → visible skip.
       const rubricResolution = await resolveRubric(deps.rubrics, tenant, spec);
@@ -271,6 +275,8 @@ export function defaultJudgeRunner(deps: DefaultJudgeRunnerDeps): JudgeRunner {
               evalCase,
               harness: { id: ref.id, version: resolved.version },
               tenant,
+              // Same co-locate ownership contract as the code judge — a self:<runnerId> judge placement needs the submitter.
+              ...(submittedBy ? { submittedBy } : {}),
               ...(resolved.spec ? { harnessSpec: resolved.spec } : {}),
             };
             return (await dispatch(job)).trace;

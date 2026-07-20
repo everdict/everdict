@@ -57,6 +57,7 @@ export class ScoringService {
     specs: JudgeSpec[],
     result: CaseResult,
     runtime?: string, // the producing run's runtime (for co-locate). The ingest path has no producing run, so undefined.
+    submittedBy?: string, // the producing run's submitter — code/harness judges need it to own a co-located self:<runnerId> dispatch.
   ): Promise<void> {
     const runner = this.deps.judgeRunner;
     if (!runner) return;
@@ -73,7 +74,7 @@ export class ScoringService {
       ...(result.evidence ? { evidence: result.evidence } : {}),
     };
     for (const spec of specs) {
-      result.scores.push(...(await runner.run(spec, tenant, ctx, runPlacement)));
+      result.scores.push(...(await runner.run(spec, tenant, ctx, runPlacement, submittedBy)));
     }
   }
 
@@ -84,6 +85,7 @@ export class ScoringService {
     dataset: Dataset,
     judges: Array<{ id: string; version: string }>,
     runtime?: string,
+    submittedBy?: string,
   ): Promise<JudgeStream> {
     const specs = await this.resolveJudges(tenant, judges);
     if (specs.length === 0) return NOOP_STREAM;
@@ -95,10 +97,12 @@ export class ScoringService {
       push: (result) => {
         const evalCase = caseById.get(result.caseId);
         if (!evalCase) return Promise.resolve(); // skip caseIds not in the dataset (can't align)
-        const task = limit(() => this.applyJudgesToCase(tenant, evalCase, specs, result, runtime)).catch((err) => {
-          // Catch at fire time (prevents an unhandled rejection) — settle rethrows the first error.
-          firstError ??= err;
-        });
+        const task = limit(() => this.applyJudgesToCase(tenant, evalCase, specs, result, runtime, submittedBy)).catch(
+          (err) => {
+            // Catch at fire time (prevents an unhandled rejection) — settle rethrows the first error.
+            firstError ??= err;
+          },
+        );
         tasks.push(task);
         return task; // signal for this case's judge completion (errors swallowed — chaining stages only await completion)
       },
@@ -117,8 +121,9 @@ export class ScoringService {
     results: CaseResult[],
     judges: Array<{ id: string; version: string }>,
     runtime?: string,
+    submittedBy?: string,
   ): Promise<void> {
-    const stream = await this.createJudgeStream(tenant, dataset, judges, runtime);
+    const stream = await this.createJudgeStream(tenant, dataset, judges, runtime, submittedBy);
     for (const result of results) stream.push(result);
     await stream.settle();
   }
