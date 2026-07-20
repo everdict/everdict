@@ -1053,8 +1053,7 @@ export class NomadBackend implements Backend, Recoverable, Observable, Shellable
               throw new UpstreamError(
                 "UPSTREAM_ERROR",
                 { jobId, reason: "placement_blocked" },
-                `placement blocked — ${blocked} (the job's resources exceed what any eligible node offers; ` +
-                  "lower the harness resources or add capacity)",
+                `placement blocked — ${blocked} (the job's resources exceed what any eligible node offers; lower the harness resources or add capacity)`,
               );
             }
           } else {

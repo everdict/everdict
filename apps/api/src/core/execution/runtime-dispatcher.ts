@@ -98,9 +98,7 @@ export class RuntimeDispatcher implements Dispatcher {
             throw new BadRequestError(
               "BAD_REQUEST",
               { pool: target, need, advertised },
-              `No runner in the ${target} pool advertises the capabilities this job requires [${need.join(", ")}] ` +
-                `(the pool advertises [${advertised.join(", ")}]). Connect a runner that provides them ` +
-                "(capabilities refresh on each lease) or target a runtime that does.",
+              `No runner in the ${target} pool advertises the capabilities this job requires [${need.join(", ")}] (the pool advertises [${advertised.join(", ")}]). Connect a runner that provides them (capabilities refresh on each lease) or target a runtime that does.`,
             );
           }
         }
