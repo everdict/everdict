@@ -24,6 +24,7 @@ import {
   openaiComplete,
 } from "@everdict/graders";
 import type { HarnessInstanceRegistry, ModelRegistry, RubricRegistry } from "@everdict/registry";
+import { resolveJudgeArtifacts } from "./resolve-judge-artifacts.js";
 
 // Judge runner — JudgeSpec + tenant + GradeContext (trace) → Score[]. The control plane judges from the trace.
 // model (anthropic/openai) and harness are unified via modelJudge (a transport) — only the transport differs (API call / agent dispatch).
@@ -242,8 +243,15 @@ async function runCodeJudge(
 export function defaultJudgeRunner(deps: DefaultJudgeRunnerDeps): JudgeRunner {
   return {
     async run(spec, tenant, ctx, placement, submittedBy) {
+      // Resolve artifact URLs → real data before ANY judge sees the context (offloaded/ingested/re-scored refs):
+      // text artifacts (evidence {name} slots + dom that ARE urls) for every judge; the screenshot image only when a
+      // model judge actually consumes it (avoids a large fetch a text-only judge would ignore). A no-op when the
+      // context carries no url refs.
+      const wantsImage = spec.kind === "model" && (spec.inputs ?? []).includes("screenshot");
+      const resolvedCtx = await resolveJudgeArtifacts(ctx, deps.fetchImpl ?? fetch, { image: wantsImage });
       // code judge — its own dispatch path (no rubric/transport); see runCodeJudge above.
-      if (spec.kind === "code") return runCodeJudge(spec, tenant, ctx, deps, placement, submittedBy);
+      if (spec.kind === "code") return runCodeJudge(spec, tenant, resolvedCtx, deps, placement, submittedBy);
+      ctx = resolvedCtx;
       // 1) Resolve the rubric first (cheapest gate — no secret read / provider call when it can't resolve).
       //    Inline string = as-is; {id, version} ref = registry lookup; unresolved → visible skip.
       const rubricResolution = await resolveRubric(deps.rubrics, tenant, spec);
@@ -359,6 +367,7 @@ export function defaultJudgeRunner(deps: DefaultJudgeRunnerDeps): JudgeRunner {
           ...(promptTemplate ? { promptTemplate } : {}),
           useScreenshot,
         });
+        // Artifact URLs (screenshot bytes, url evidence slots) are already resolved to real data at the top of run().
         const graded = toScores(await grader.grade(ctx));
         const threshold = spec.kind === "model" ? spec.passThreshold : undefined;
         // JudgeGrader emits the metric prefix "judge" (criteria as "judge:<criterion>") — rewrite the prefix to this

@@ -19,7 +19,7 @@ export {
   summarizeSpans,
   withEvidenceEvents,
 } from "./sources/trace-source.js";
-export { extractEvidence, fetchImageBase64 } from "./sources/evidence-resolve.js";
+export { extractEvidence, fetchImageBase64, fetchTextArtifact } from "./sources/evidence-resolve.js";
 export {
   jaegerTracesToSummaries,
   OtelTraceSource,

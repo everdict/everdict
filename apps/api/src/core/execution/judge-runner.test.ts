@@ -179,6 +179,53 @@ describe("defaultJudgeRunner", () => {
     expect(dispatched?.evalCase.placement).toEqual({ target: "self:runner-1" }); // still co-located
   });
 
+  it("code judge: a URL evidence slot is resolved to the artifact's text BEFORE the wrapper serializes the context", async () => {
+    // Various artifacts, not just images: a {name} evidence slot that is a url must reach the code judge as the
+    // artifact's real content, not a link it can't (portably) fetch. Resolution happens once at the top of run().
+    const codeSpec: JudgeSpec = {
+      kind: "code",
+      id: "e2e",
+      version: "1.0.0",
+      language: "python",
+      code: "print('[]')",
+      timeoutSec: 600,
+      tags: [],
+    };
+    let dispatched: AgentJob | undefined;
+    const fetchImpl = vi.fn(async (u: string) => {
+      const b = Buffer.from(`LOG CONTENTS of ${u}`);
+      return {
+        ok: true,
+        async arrayBuffer() {
+          return b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength);
+        },
+        headers: { get: () => "text/plain" },
+      };
+    }) as unknown as typeof fetch;
+    const runner = defaultJudgeRunner({
+      secretsFor: async () => ({}),
+      fetchImpl,
+      dispatch: async (job) => {
+        dispatched = job;
+        return {
+          caseId: job.evalCase.id,
+          harness: "judge",
+          trace: [],
+          snapshot: { kind: "prompt", output: "" },
+          scores: [],
+        } satisfies CaseResult;
+      },
+    });
+    const urlCtx: GradeContext = { ...ctx, evidence: { custom: { run_log: "https://store.example/run.log" } } };
+    await runner.run(codeSpec, "acme", urlCtx);
+    const env = dispatched?.evalCase.env;
+    const files = env?.kind === "repo" && "files" in env.source ? env.source.files : {};
+    const parsed = JSON.parse(files["judge-context.json"] ?? "{}") as {
+      evidence?: { custom?: Record<string, string> };
+    };
+    expect(parsed.evidence?.custom?.run_log).toBe("LOG CONTENTS of https://store.example/run.log"); // fetched, not the url
+  });
+
   it("code judge: a failed wrapper job (CaseFailure) surfaces as a visible skip, never a silent drop", async () => {
     const codeSpec: JudgeSpec = {
       kind: "code",
@@ -309,6 +356,63 @@ describe("defaultJudgeRunner", () => {
     const url = fetchImpl.mock.calls[0]?.[0];
     expect(url).toMatch(/\/chat\/completions$/);
     expect(url).toContain("litellm"); // OPENAI_BASE_URL (LiteLLM, etc.) applied
+  });
+
+  it("VLM judge resolves a snapshot's screenshotRef URL to bytes and sends the IMAGE (not the URL) to the model", async () => {
+    // Regression: a browser/os-use snapshot can reach the judge carrying only a screenshotRef URL (offloaded to object
+    // storage, or a push-ingested trace's S3 image) with no embedded base64. The model transport only sends image
+    // bytes — so without resolving the URL first the VLM judge grades blind. Assert the artifact is fetched and its
+    // base64 (not the URL) rides the vision call.
+    const pngB64 = Buffer.from("PNGBYTES").toString("base64");
+    const calls: Array<{ url: string; body?: string }> = [];
+    const fetchImpl = vi.fn((u: string, init?: RequestInit) => {
+      calls.push({ url: String(u), body: init?.body ? String(init.body) : undefined });
+      if (String(u).includes("/artifacts/"))
+        return Promise.resolve(
+          new Response(Buffer.from("PNGBYTES"), { status: 200, headers: { "content-type": "image/png" } }),
+        );
+      return Promise.resolve(
+        new Response(JSON.stringify({ choices: [{ message: { content: '{"pass":true,"score":1,"reason":"ok"}' } }] }), {
+          status: 200,
+        }),
+      );
+    });
+    const browserCtx: GradeContext = {
+      case: {
+        id: "c",
+        env: { kind: "browser", startUrl: "https://x" },
+        task: "did it finish?",
+        graders: [],
+        timeoutSec: 1,
+        tags: [],
+      },
+      trace: [],
+      // URL only — the base64 was offloaded to object storage.
+      snapshot: {
+        kind: "browser",
+        url: "https://x",
+        dom: "<html></html>",
+        screenshotRef: "https://store.example/artifacts/r1.png",
+        console: [],
+      },
+    };
+    const runner = defaultJudgeRunner({
+      secretsFor: async () => ({ OPENAI_API_KEY: "sk", OPENAI_BASE_URL: "http://litellm/v1" }),
+      fetchImpl: fetchImpl as typeof fetch,
+    });
+    const spec: JudgeSpec = {
+      ...modelSpec,
+      provider: "openai",
+      model: "gpt-5.4-mini",
+      inputs: ["screenshot", "trace"],
+    };
+    const [score] = await runner.run(spec, "acme", browserCtx);
+    expect(score?.pass).toBe(true);
+    expect(calls.some((c) => c.url.includes("/artifacts/r1.png"))).toBe(true); // the artifact URL was fetched
+    const llm = calls.find((c) => c.url.includes("chat/completions"));
+    expect(llm?.body).toContain(pngB64); // the base64 bytes reached the VLM…
+    expect(llm?.body).toContain("data:image/png;base64"); // …in OpenAI vision format, not as a bare URL
+    expect(llm?.body).not.toContain("store.example/artifacts"); // the URL itself was NOT sent as the image
   });
 
   it("model+registered apiKeySecret: reads the model's linked secret, not the provider default (judge↔harness consistency)", async () => {
