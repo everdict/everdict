@@ -15,7 +15,7 @@ import {
   type RegistryAuth,
   type RuntimeSpec,
 } from "@everdict/contracts";
-import { imageUsesRegistryHost, requiredCapabilitiesForJob, runtimeSatisfies } from "@everdict/domain";
+import { capabilityKind, imageUsesRegistryHost, requiredCapabilitiesForJob, runtimeSatisfies } from "@everdict/domain";
 import type { RuntimeRegistry } from "@everdict/registry";
 
 export interface RuntimeDispatcherDeps {
@@ -36,6 +36,11 @@ export interface RuntimeDispatcherDeps {
   resolveSelfRunner?: (owner: string, runnerId: string) => Promise<string[] | undefined>;
   // self:ws (no runner id) pool target — whether that owner (=ws:<tenant>) has any runner at all. Any runner leases it.
   poolHasRunners?: (owner: string) => Promise<boolean>;
+  // The pool's per-runner ADVERTISED capabilities (each runner's stored set, refreshed on every lease) — the
+  // dispatch-time satisfiability gate. Without it a job no pool runner can EVER run (e.g. requires.os=windows
+  // with a Linux-only fleet) parks until the generic idle timeout: the lease-time gate only SKIPS per runner,
+  // so nobody ever picks it up and nothing names the missing capability.
+  poolRunnerCapabilities?: (owner: string) => Promise<string[][]>;
   // SelfHostedKey → Backend (Slice 2 stub → Slice 3 lease queue). If not injected, self: falls back to the normal path (not configured).
   buildSelfHostedBackend?: (key: SelfHostedKey) => Backend;
 }
@@ -80,7 +85,26 @@ export class RuntimeDispatcher implements Dispatcher {
             ? "No shared runner is registered in this workspace — register a shared runner first."
             : "You have no registered runner — pair a runner first.",
         );
-      // The service-harness docker requirement is handled by the per-runner capability gate at lease time (requiredRunnerCapabilities maps service→docker).
+      // Per-runner capability details stay a lease-time concern (each runner skips what it can't run) — but when
+      // NO runner in the pool advertises a required FUNCTIONAL capability, the job would park unleased until the
+      // generic idle timeout. Fail fast at dispatch instead, naming what's missing (mirror of the pinned-runner gate).
+      if (this.deps.poolRunnerCapabilities) {
+        const need = requiredCapabilitiesForJob(job).filter((c) => capabilityKind(c) === "functional");
+        if (need.length > 0) {
+          const fleets = await this.deps.poolRunnerCapabilities(owner);
+          const satisfiable = fleets.some((caps) => need.every((c) => caps.includes(c)));
+          if (!satisfiable) {
+            const advertised = [...new Set(fleets.flat())];
+            throw new BadRequestError(
+              "BAD_REQUEST",
+              { pool: target, need, advertised },
+              `No runner in the ${target} pool advertises the capabilities this job requires [${need.join(", ")}] ` +
+                `(the pool advertises [${advertised.join(", ")}]). Connect a runner that provides them ` +
+                "(capabilities refresh on each lease) or target a runtime that does.",
+            );
+          }
+        }
+      }
       const key = poolKeyFor(owner);
       const name = selfHostedBackendName(key);
       if (!this.deps.backends.has(name)) this.deps.backends.register(name, this.deps.buildSelfHostedBackend(key));

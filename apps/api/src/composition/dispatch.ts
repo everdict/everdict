@@ -137,6 +137,8 @@ export function buildDispatch(deps: {
     resolveSelfRunner: async (owner, runnerId) => (await runnerStore.get(owner, runnerId))?.capabilities,
     // self:ws — workspace pool. Whether that owner (=ws:<tenant>) has any runner at all (lease any runner).
     poolHasRunners: async (owner) => (await runnerStore.list(owner)).length > 0,
+    // Pool satisfiability gate: each runner's stored capability set (self-advertised on every lease).
+    poolRunnerCapabilities: async (owner) => (await runnerStore.list(owner)).map((r) => r.capabilities ?? []),
     // Park ceiling: the Scheduler admits at most `capacity().total` concurrent parks per pool backend, and
     // the default ceiling (8) is BELOW any useful EVERDICT_RUNNER_MAX_QUEUE — the hub would then never hold
     // enough waiting jobs to reach the cap, and the overflow would pile up unbounded (and uncapped: self-hosted

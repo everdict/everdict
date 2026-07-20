@@ -292,7 +292,7 @@ describe("RuntimeDispatcher", () => {
   });
 
   // self:ws (no runner id) — workspace pool. Instead of a specific runner, any runner of that workspace (satisfying the capabilities) takes it.
-  const poolDeps = (hasRunners: boolean) => {
+  const poolDeps = (hasRunners: boolean, fleets?: string[][]) => {
     const { inner, seen } = innerSpy();
     const backends = new BackendRegistry();
     const stub = { id: "stub", capacity: async () => ({ total: 1, used: 0 }), dispatch: async () => result };
@@ -306,6 +306,7 @@ describe("RuntimeDispatcher", () => {
       resolveSelfRunner: async () => undefined,
       poolHasRunners,
       buildSelfHostedBackend,
+      ...(fleets ? { poolRunnerCapabilities: vi.fn(async () => fleets) } : {}),
     });
     return { d, seen, backends, poolHasRunners };
   };
@@ -322,6 +323,53 @@ describe("RuntimeDispatcher", () => {
     const { d, seen } = poolDeps(false);
     await expect(d.dispatch(selfJob("self:ws"))).rejects.toMatchObject({ code: "NOT_FOUND", status: 404 });
     expect(seen).toHaveLength(0);
+  });
+
+  it("a pool job NO runner can satisfy fails fast at dispatch naming the missing capability", async () => {
+    // Regression: the lease-time gate only SKIPS per runner, so a job requiring a capability no pool runner
+    // advertises (a windows-service topology on a Linux-only fleet) parked unleased until the generic idle
+    // timeout — nothing ever named os-windows. The dispatch-time satisfiability gate rejects it immediately.
+    const { d, seen } = poolDeps(true, [
+      ["git", "docker", "browser"],
+      ["git", "docker"],
+    ]);
+    const winJob: AgentJob = {
+      ...selfServiceJob("self:ws", "u-alice"),
+      harnessSpec: {
+        kind: "service",
+        id: "bu",
+        version: "1",
+        services: [
+          { name: "client", image: "i", needs: [], perRun: [], replicas: 1, env: {}, requires: { os: "windows" } },
+        ],
+        dependencies: [],
+        frontDoor: { service: "client", submit: "POST /runs" },
+        traceSource: { kind: "mlflow", endpoint: "http://x" },
+      },
+    };
+    await expect(d.dispatch(winJob)).rejects.toMatchObject({ code: "BAD_REQUEST", status: 400 });
+    await expect(d.dispatch(winJob)).rejects.toThrow(/os-windows/);
+    expect(seen).toHaveLength(0);
+  });
+
+  it("a pool job SOME runner can satisfy passes the satisfiability gate and routes to the pool", async () => {
+    const { d, seen } = poolDeps(true, [["git"], ["git", "docker", "browser", "topology", "os-windows"]]);
+    const winJob: AgentJob = {
+      ...selfServiceJob("self:ws", "u-alice"),
+      harnessSpec: {
+        kind: "service",
+        id: "bu",
+        version: "1",
+        services: [
+          { name: "client", image: "i", needs: [], perRun: [], replicas: 1, env: {}, requires: { os: "windows" } },
+        ],
+        dependencies: [],
+        frontDoor: { service: "client", submit: "POST /runs" },
+        traceSource: { kind: "mlflow", endpoint: "http://x" },
+      },
+    };
+    await d.dispatch(winJob);
+    expect(seen[0]?.evalCase.placement?.target).toBe("self:ws:acme:*");
   });
 
   // self (no runner id) — personal pool. owner=submitter (submittedBy). Any of my runners (several processes/machines in one pool).
