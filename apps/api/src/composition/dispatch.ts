@@ -137,7 +137,18 @@ export function buildDispatch(deps: {
     resolveSelfRunner: async (owner, runnerId) => (await runnerStore.get(owner, runnerId))?.capabilities,
     // self:ws — workspace pool. Whether that owner (=ws:<tenant>) has any runner at all (lease any runner).
     poolHasRunners: async (owner) => (await runnerStore.list(owner)).length > 0,
-    buildSelfHostedBackend: (key) => new SelfHostedBackend(key, runnerHub),
+    // Park ceiling: the Scheduler admits at most `capacity().total` concurrent parks per pool backend, and
+    // the default ceiling (8) is BELOW any useful EVERDICT_RUNNER_MAX_QUEUE — the hub would then never hold
+    // enough waiting jobs to reach the cap, and the overflow would pile up unbounded (and uncapped: self-hosted
+    // is exempt from the Scheduler's queue-depth backpressure) in the Scheduler queue instead. When the runner
+    // queue cap is configured, raise the park ceiling past it (cap + lease headroom) so the hub actually sees
+    // the flood and sheds with the explicit queue-full 429 the knob promises.
+    buildSelfHostedBackend: (key) =>
+      new SelfHostedBackend(
+        key,
+        runnerHub,
+        Number.isFinite(maxRunnerQueue) && maxRunnerQueue > 0 ? maxRunnerQueue + 64 : undefined,
+      ),
   });
   // Judge provider key resolved per job (workspace tier → submitter personal fallback; fail-fast when a judge
   // is configured with no resolvable key on a managed target). MUST wrap OUTSIDE RuntimeDispatcher — it keys off

@@ -41,4 +41,12 @@ describe("SelfHostedBackend", () => {
     const backend = new SelfHostedBackend(key, new RunnerHub());
     expect(await backend.capacity()).toEqual({ total: 8, used: 0 });
   });
+
+  it("a configured park ceiling raises capacity past the runner queue cap (EVERDICT_RUNNER_MAX_QUEUE wiring)", async () => {
+    // Regression: with the default ceiling (8) the Scheduler admitted at most 8 concurrent parks, so a runner
+    // queue cap above 8 could NEVER trip — the overflow piled up uncapped in the Scheduler queue instead, and
+    // the knob's promised queue-full 429 never fired (live: 800-case flood at cap 200 shed 0).
+    const backend = new SelfHostedBackend(key, new RunnerHub(), 200 + 64);
+    expect(await backend.capacity()).toEqual({ total: 264, used: 0 });
+  });
 });
