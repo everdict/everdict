@@ -289,7 +289,7 @@ export class RunnerHub {
       this.markServed(ownName, entry); // advance the group rotation so the next lease prefers a different batch/user
       this.fireOnLease(entry); // first lease → flip the run record queued→running (the case actually started)
       this.rearm(key, entry); // runner took it → reset idle timeout (heartbeat now keeps it alive)
-      this.touchByRunner(key); // taking a job proves the runner is alive → keep the jobs queued behind it from expiring
+      this.touchByRunner(key, capabilities); // taking a job proves the runner is alive → keep the jobs IT COULD run from expiring
       return { jobId: entry.jobId, job: entry.job };
     }
     // 2) Owner pool queue (jobs submitted as self:ws, no specific runner) — on capability mismatch **skip, don't reject**
@@ -309,7 +309,7 @@ export class RunnerHub {
       this.markServed(poolName, entry); // advance the group rotation within the pool too
       this.fireOnLease(entry); // first lease → flip the run record queued→running (the case actually started)
       this.rearm(poolKey, entry); // the timer is keyed to the pool queue (so remove finds it in the pool)
-      this.touchByRunner(key); // draining one pool job proves the runner is alive → keep the rest of the pool from expiring
+      this.touchByRunner(key, capabilities); // draining one pool job proves the runner is alive → keep the rest of the pool IT COULD run from expiring
       return { jobId: entry.jobId, job: entry.job };
     }
     return null;
@@ -364,10 +364,12 @@ export class RunnerHub {
   // Runner liveness signal — renew the lease (update leasedAt) so a long-running job isn't requeued. It also carries
   // the control plane's cancel decision back to the runner: `cancelled` = stop this job now (→ the runner aborts the
   // local run, freeing the runtime mid-case). `extended` is false if the job isn't in a queue (own/pool).
-  heartbeat(key: SelfHostedKey, jobId: string): { extended: boolean; cancelled: boolean } {
+  heartbeat(key: SelfHostedKey, jobId: string, capabilities?: string[]): { extended: boolean; cancelled: boolean } {
     // A heartbeat is proof the runner is alive — refresh the idle timeout of everything else it could still take too
     // (a maxConcurrent=1 runner heartbeats only the job it is running; the jobs queued behind it must not expire meanwhile).
-    this.touchByRunner(key);
+    // capabilities scope it: a runner only keeps alive jobs IT could run, so a job whose only capable runner DIED stops
+    // being refreshed by surviving-but-incapable runners → it times out (fails with a reason) instead of pending forever.
+    this.touchByRunner(key, capabilities);
     const loc = this.locate(key, jobId);
     if (!loc) return { extended: false, cancelled: false };
     loc.entry.leasedAt = this.now();
@@ -408,16 +410,25 @@ export class RunnerHub {
   // non-docker runner passing over an image job in the pool) must not refresh that job forever — it still times out so an
   // unsatisfiable job fails instead of hanging. Leased jobs are left untouched — each is kept alive by its own heartbeat,
   // so a genuinely dead runner's in-flight job still expires.
-  private touchByRunner(key: SelfHostedKey): void {
-    this.rearmWaiting(key, this.q(key));
+  private touchByRunner(key: SelfHostedKey, capabilities?: string[]): void {
+    this.rearmWaiting(key, this.q(key), capabilities);
     if (key.runnerId !== POOL_RUNNER) {
       const poolKey = poolKeyFor(key.owner);
-      this.rearmWaiting(poolKey, this.q(poolKey));
+      this.rearmWaiting(poolKey, this.q(poolKey), capabilities);
     }
   }
 
-  private rearmWaiting(key: SelfHostedKey, arr: PendingEntry[]): void {
-    for (const e of arr) if (e.leasedAt === undefined && !e.cancelRequested) this.rearm(key, e);
+  // Refresh the idle timeout of un-leased jobs this runner keeps alive by being present. With capabilities given,
+  // ONLY jobs the runner could actually lease (required ⊆ advertised) are refreshed — a job the runner can't run
+  // isn't kept alive by it, so when a job's only capable runner dies it stops being refreshed and times out
+  // (→ no_runner failure) instead of pending forever behind surviving-but-incapable runners. capabilities
+  // undefined (a pre-capability runner) preserves the old refresh-all behavior (no false mass timeouts).
+  private rearmWaiting(key: SelfHostedKey, arr: PendingEntry[], capabilities?: string[]): void {
+    for (const e of arr) {
+      if (e.leasedAt !== undefined || e.cancelRequested) continue;
+      if (capabilities && requiredRunnerCapabilities(e.job).some((c) => !capabilities.includes(c))) continue;
+      this.rearm(key, e);
+    }
   }
 
   // Runner reports a result → resolve the parked promise. false if not in a queue (own/pool) (already completed/expired/unknown).

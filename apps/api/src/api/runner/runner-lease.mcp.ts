@@ -85,15 +85,15 @@ export function registerRunnerLeaseTools(server: McpServer, ctx: McpToolContext)
       "heartbeat_job",
       {
         description:
-          "Runner liveness signal — refresh lastSeenAt. Passing jobId also renews that job's lease to prevent requeue during long runs, and carries back a `cancelled` flag: when true the control plane has stopped this job (a user cancelled / superseded the scorecard) → abort the local run and free the runtime.",
-        inputSchema: { jobId: z.string().optional() },
+          "Runner liveness signal — refresh lastSeenAt. Passing jobId also renews that job's lease to prevent requeue during long runs, and carries back a `cancelled` flag: when true the control plane has stopped this job (a user cancelled / superseded the scorecard) → abort the local run and free the runtime. Passing capabilities scopes which QUEUED jobs this heartbeat keeps alive to the ones this runner could run — so a job whose only capable runner died isn't kept pending forever by incapable survivors.",
+        inputSchema: { jobId: z.string().optional(), capabilities: z.array(z.string()).optional() },
       },
-      ({ jobId }) =>
+      ({ jobId, capabilities }) =>
         plain(async () => {
           const key = runnerKey();
           if (!key) return fail(NEED_RUNNER);
           if (deps.runnerService) await deps.runnerService.touch(key.owner, key.runnerId);
-          const hb = jobId ? await hub.heartbeat(key, jobId) : undefined;
+          const hb = jobId ? await hub.heartbeat(key, jobId, capabilities) : undefined;
           return ok({ ok: true, ...(hb ? { extended: hb.extended, cancelled: hb.cancelled } : {}) });
         }),
     );

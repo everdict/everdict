@@ -21,6 +21,10 @@ const imageJob = (id: string): AgentJob => ({
 });
 const keyA: SelfHostedKey = { owner: "u-alice", runnerId: "laptop" };
 const keyB: SelfHostedKey = { owner: "u-bob", runnerId: "laptop" };
+// Two runners in u-alice's POOL — a capable one (docker) that will "die" and an incapable survivor (no docker).
+const poolA = poolKeyFor("u-alice");
+const capableRunner: SelfHostedKey = { owner: "u-alice", runnerId: "capable" };
+const incapableRunner: SelfHostedKey = { owner: "u-alice", runnerId: "incapable" };
 
 describe("RunnerHub", () => {
   it("enqueue parks → lease takes → complete resolves the dispatch promise with the result", async () => {
@@ -161,6 +165,56 @@ describe("RunnerHub", () => {
     const hub = new RunnerHub({ newJobId: () => "j-img" });
     hub.enqueue(keyA, imageJob("c-img"));
     expect(hub.lease(keyA)?.job.evalCase.id).toBe("c-img"); // capabilities undefined → gate skipped
+  });
+
+  // Regression (never pending forever): a POOL image job's only capable runner dies; a surviving INCAPABLE runner
+  // keeps heartbeating other work. Pre-fix, touchByRunner refreshed EVERY queued job on any heartbeat, so the
+  // image job the survivor can't run was kept alive forever — leased by no one, never timing out. Post-fix the
+  // heartbeat only keeps alive jobs the runner could run, so the orphaned image job times out → rejected as
+  // no_runner (a bounded, explicit failure a batch retry re-parks) instead of pending forever.
+  it("a pool job whose only capable runner died is NOT kept alive forever by an incapable survivor's heartbeat", async () => {
+    vi.useFakeTimers();
+    try {
+      const hub = new RunnerHub({ queueTimeoutMs: 100, newJobId: () => "j-orphan" });
+      const d = hub.enqueue(poolA, imageJob("c-img")); // parked in the pool; needs docker
+      const settled = d.then(
+        () => ({ ok: true as const }),
+        (e: unknown) => ({ ok: false as const, e }),
+      );
+      // The capable runner is gone from the start; only the incapable (no docker) survivor polls + heartbeats other work.
+      for (let i = 0; i < 6; i++) {
+        await vi.advanceTimersByTimeAsync(30); // 180ms total, well past queueTimeoutMs (100)
+        expect(hub.lease(incapableRunner, ["git"])).toBeNull(); // can't run the image job → skips it
+        hub.heartbeat(incapableRunner, "none", ["git"]); // liveness, but it can't run the image job
+      }
+      const r = await settled;
+      expect(r).toMatchObject({ ok: false, e: { extra: { reason: "no_runner" } } }); // bounded failure, not eternal pending
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // The dual: a CAPABLE survivor's heartbeat DOES keep the queued job alive (it will run once the runner frees up).
+  it("a pool job IS kept alive by a capable runner's heartbeat while it drains other work", async () => {
+    vi.useFakeTimers();
+    try {
+      let n = 0;
+      const hub = new RunnerHub({ queueTimeoutMs: 100, newJobId: () => `j-${n++}` });
+      hub.enqueue(poolA, imageJob("c-a")); // j-0 — the capable runner takes this
+      const dB = hub.enqueue(poolA, imageJob("c-b")); // j-1 — waits behind it
+      dB.catch(() => {});
+      expect(hub.lease(capableRunner, ["git", "docker"])?.jobId).toBe("j-0");
+      for (let i = 0; i < 6; i++) {
+        await vi.advanceTimersByTimeAsync(30); // 180ms > queueTimeoutMs
+        hub.heartbeat(capableRunner, "j-0", ["git", "docker"]); // capable → keeps j-1 alive
+      }
+      hub.complete(capableRunner, "j-0", result);
+      expect(hub.lease(capableRunner, ["git", "docker"])?.jobId).toBe("j-1"); // still there, leasable
+      hub.complete(capableRunner, "j-1", result);
+      await expect(dB).resolves.toMatchObject({ result });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("gate: reject the image job but the same runner leases the following non-image job normally", async () => {

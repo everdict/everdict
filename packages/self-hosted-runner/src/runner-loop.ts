@@ -47,7 +47,9 @@ export async function runLeaseWorkers(deps: RunnerLoopDeps, opts: RunnerLoopOpts
     ((jobId: string, onCancel: () => void) => {
       const t = setInterval(() => {
         void deps
-          .callJson("heartbeat_job", { jobId })
+          // Carry capabilities on the heartbeat too — the hub only keeps QUEUED jobs alive that this runner could
+          // run, so a job whose only capable runner died stops being refreshed by incapable survivors (no eternal pending).
+          .callJson("heartbeat_job", { jobId, ...(opts.capabilities ? { capabilities: opts.capabilities } : {}) })
           .then((r) => {
             // The control plane piggybacks a cancel decision on the liveness reply — stop the local run on request.
             if (r.cancelled === true) onCancel();
