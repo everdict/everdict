@@ -102,6 +102,7 @@ function execEcho(
     let stderr = "";
     let timedOut = false;
     let settled = false;
+    let exitGrace: ReturnType<typeof setTimeout> | undefined;
     const timer = setTimeout(() => {
       timedOut = true;
       if (child.pid !== undefined) {
@@ -124,6 +125,7 @@ function execEcho(
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      if (exitGrace) clearTimeout(exitGrace);
       resolve({
         exitCode,
         stdout,
@@ -131,7 +133,18 @@ function execEcho(
       });
     };
     child.on("error", () => settle(127));
-    child.on("exit", (code) => settle(timedOut ? 124 : (code ?? 1)));
+    // Settle on 'close' — it fires after 'exit' AND all stdio has flushed, so the full stdout is captured. Settling
+    // on 'exit' directly races the final stdout 'data' event: a fast command (e.g. `echo`) can fire 'exit' before its
+    // output is delivered, dropping stdout — under concurrency that surfaced as an EMPTY harness trace for ~1 case.
+    child.on("close", (code) => settle(timedOut ? 124 : (code ?? 1)));
+    // 'exit' fallback: a DETACHED grandchild (e.g. `sleep &`) can inherit the stdio pipes and hold them open so
+    // 'close' never fires — the original reason this settled on 'exit'. Arm a short grace after exit: 'close'
+    // normally wins with complete output; if a lingering pipe-holder blocks it, force-settle with what's buffered
+    // (no hang), without the lost-output race of settling on 'exit' immediately.
+    child.on("exit", (code) => {
+      if (settled) return;
+      exitGrace = setTimeout(() => settle(timedOut ? 124 : (code ?? 1)), 250);
+    });
   });
 }
 

@@ -54,4 +54,23 @@ describe("LocalDriver — echo mode (in-job live-tail feed)", () => {
     expect(res.stdout).toContain("before");
     expect(res.stderr).toContain("timed out");
   });
+
+  it("captures stdout that flushes around/after process exit (regression: settle on 'close', not 'exit')", async () => {
+    // The exec used to resolve on the child's 'exit' event, which fires when the process ends but BEFORE its stdout
+    // is guaranteed flushed — so output delivered at/after exit was dropped. For a plain fast command (echo) this
+    // was a tick race that, under concurrency, left ~1 case per batch with an EMPTY harness trace (trace:none →
+    // no assistant message → the judge scored 0). Deterministic repro of the same root cause: a backgrounded
+    // subshell writes AFTER the top-level shell has already exited. Settling on 'exit' resolves immediately and
+    // loses "late-line"; settling on 'close' (all stdio EOF, ≤250ms grace) keeps it.
+    const orig = process.stdout.write.bind(process.stdout);
+    process.stdout.write = (() => true) as typeof process.stdout.write; // silence the tee for a clean test log
+    try {
+      const compute = await new LocalDriver({ echo: true }).provision({ os: "linux", needs: [] });
+      const res = await compute.exec("(sleep 0.1; echo late-line) &");
+      await compute.dispose();
+      expect(res.stdout).toContain("late-line"); // pre-fix: '' (resolved on the shell's immediate exit)
+    } finally {
+      process.stdout.write = orig;
+    }
+  });
 });
