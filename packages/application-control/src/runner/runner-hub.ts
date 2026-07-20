@@ -75,6 +75,16 @@ export interface RunnerHubDeps {
   now?: () => number;
 }
 
+// The fairness-map composite-key separator (queueName + group). A NUL byte can't occur in a backend name
+// (self:owner:runnerId) or a group key (b:/u:/t:<id>), so it joins them collision-free — the same idiom as
+// leaderboard.ts's GROUP_SEP. NAMED (not an inline literal) so every reader/writer/cleaner uses the SAME
+// delimiter: an earlier inline-NUL literal here was silently mismatched by a later edit that typed a space,
+// leaking the map. Keep all groupLastServed key math going through fairnessKey/this prefix.
+const GROUP_KEY_SEP = "\0";
+function fairnessKey(queueName: string, group: string): string {
+  return `${queueName}${GROUP_KEY_SEP}${group}`;
+}
+
 // In-memory lease hub for personally-owned self-hosted runners — the heart of push→pull.
 // SelfHostedBackend.dispatch parks a job here (returning a promise), and the runner protocol (MCP, Slice 4)
 // resolves that promise via lease (take) / complete (report result). FIFO queue per key (= per runner).
@@ -234,7 +244,7 @@ export class RunnerHub {
   private orderLeasable(queueName: string, arr: PendingEntry[]): PendingEntry[] {
     const prio = (e: PendingEntry): number => (e.job.priority === "interactive" ? 0 : 1);
     const lastServed = (e: PendingEntry): number =>
-      this.groupLastServed.get(`${queueName} ${RunnerHub.groupKeyOf(e.job)}`) ?? -1;
+      this.groupLastServed.get(fairnessKey(queueName, RunnerHub.groupKeyOf(e.job))) ?? -1;
     return arr
       .map((entry, index) => ({ entry, index }))
       .filter((x) => x.entry.leasedAt === undefined && !x.entry.cancelRequested)
@@ -250,7 +260,7 @@ export class RunnerHub {
 
   // Record that this queue just served the entry's group → the next lease prefers a different group (round-robin).
   private markServed(queueName: string, entry: PendingEntry): void {
-    this.groupLastServed.set(`${queueName} ${RunnerHub.groupKeyOf(entry.job)}`, ++this.serveTick);
+    this.groupLastServed.set(fairnessKey(queueName, RunnerHub.groupKeyOf(entry.job)), ++this.serveTick);
   }
 
   // Take the next un-leased job (runner pull). None → null (the runner re-polls). Records leasedAt.
@@ -297,9 +307,12 @@ export class RunnerHub {
     //    with only leasedAt marked (on runner death the requeue happens naturally within the pool so another runner re-acquires it).
     if (key.runnerId === POOL_RUNNER) return null; // the pool key itself doesn't self-lease (prevents infinite recursion)
     const poolKey = poolKeyFor(key.owner);
-    const poolArr = this.q(poolKey);
-    this.requeueExpired(poolArr, now);
     const poolName = selfHostedBackendName(poolKey);
+    // Peek, don't materialize: a pinned-runner poll must not lazily create an empty pool queue every time (that
+    // empty [] would linger per owner). No pool jobs → nothing to lease from the pool.
+    const poolArr = this.queues.get(poolName);
+    if (!poolArr || poolArr.length === 0) return null;
+    this.requeueExpired(poolArr, now);
     for (const entry of this.orderLeasable(poolName, poolArr)) {
       const missing = capabilities
         ? requiredRunnerCapabilities(entry.job).filter((c) => !capabilities.includes(c))
@@ -350,6 +363,7 @@ export class RunnerHub {
         const a = this.waiters.get(k);
         const i = a?.indexOf(wake) ?? -1;
         if (a && i >= 0) a.splice(i, 1);
+        if (a && a.length === 0) this.waiters.delete(k); // don't leak an empty waiters array per runner key (churn hygiene)
         resolve(v);
       };
       const wake = () => finish(this.lease(key, capabilities)); // enqueue wakes us → immediately lease that job (gate included)
@@ -411,10 +425,14 @@ export class RunnerHub {
   // unsatisfiable job fails instead of hanging. Leased jobs are left untouched — each is kept alive by its own heartbeat,
   // so a genuinely dead runner's in-flight job still expires.
   private touchByRunner(key: SelfHostedKey, capabilities?: string[]): void {
-    this.rearmWaiting(key, this.q(key), capabilities);
+    const own = this.queues.get(selfHostedBackendName(key));
+    if (own) this.rearmWaiting(key, own, capabilities);
     if (key.runnerId !== POOL_RUNNER) {
+      // Peek — don't materialize an empty pool queue on every job a pinned runner completes (that stray [] would
+      // linger per owner). No pool jobs ⇒ nothing to refresh.
       const poolKey = poolKeyFor(key.owner);
-      this.rearmWaiting(poolKey, this.q(poolKey), capabilities);
+      const pool = this.queues.get(selfHostedBackendName(poolKey));
+      if (pool) this.rearmWaiting(poolKey, pool, capabilities);
     }
   }
 
@@ -457,10 +475,38 @@ export class RunnerHub {
     return this.q(key).length;
   }
 
+  // Bookkeeping-map sizes — a leak sentinel for the lease hub's lifecycle. Under sustained batch/runner churn
+  // these must track LIVE state (active queues + fairness groups), not grow monotonically; a monitor/alert can
+  // watch them. NOTE: reads only — unlike pending(), it never lazily recreates a cleaned-up queue.
+  bookkeepingSize(): { queues: number; groups: number; waiters: number } {
+    return { queues: this.queues.size, groups: this.groupLastServed.size, waiters: this.waiters.size };
+  }
+
   private remove(key: SelfHostedKey, jobId: string): PendingEntry | undefined {
+    const name = selfHostedBackendName(key);
     const arr = this.q(key);
     const i = arr.findIndex((e) => e.jobId === jobId);
     if (i < 0) return undefined;
-    return arr.splice(i, 1)[0];
+    const [entry] = arr.splice(i, 1);
+    this.cleanupQueue(name, arr, entry);
+    return entry;
+  }
+
+  // Bound the bookkeeping maps to LIVE state (lifecycle hygiene). Without this, a long-running control plane
+  // leaks unboundedly: `groupLastServed` accretes one entry per (queue, batch) forever as scorecards churn, and
+  // `queues` keeps an empty [] per runner/pool key ever seen (unbounded under runner pair/unpair churn). After
+  // an entry leaves a queue: drop its fairness-rotation entry once no sibling of the same group remains, and
+  // delete the whole queue (+ any stray group entries) once it is empty and nothing is long-poll waiting on it.
+  private cleanupQueue(name: string, arr: PendingEntry[], removed: PendingEntry | undefined): void {
+    if (removed) {
+      const group = RunnerHub.groupKeyOf(removed.job);
+      if (!arr.some((e) => RunnerHub.groupKeyOf(e.job) === group))
+        this.groupLastServed.delete(fairnessKey(name, group));
+    }
+    if (arr.length === 0 && !(this.waiters.get(name)?.length ?? 0)) {
+      this.queues.delete(name);
+      for (const gk of this.groupLastServed.keys())
+        if (gk.startsWith(`${name}${GROUP_KEY_SEP}`)) this.groupLastServed.delete(gk);
+    }
   }
 }

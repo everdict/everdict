@@ -132,6 +132,32 @@ describe("RunnerHub", () => {
     await expect(d).rejects.toMatchObject({ code: "UPSTREAM_ERROR", status: 502 });
   });
 
+  // Lifecycle leak sentinel: under sustained batch + runner churn the bookkeeping maps must return to ~empty, not
+  // grow monotonically. Pre-fix, groupLastServed kept one entry per (queue, batch) forever and queues/waiters kept
+  // an empty [] per runner key ever seen — an unbounded leak on a long-running control plane processing many jobs.
+  it("bookkeeping maps return to empty after churning many batches across many runner keys (no leak)", async () => {
+    let n = 0;
+    const hub = new RunnerHub({ newJobId: () => `j-${n++}` });
+    for (let b = 0; b < 200; b++) {
+      const runner: SelfHostedKey = { owner: "u-alice", runnerId: `runner-${b}` }; // a fresh runner id each round (churn)
+      const cases = [0, 1, 2].map((c) => ({ ...job(`b${b}-c${c}`), batchId: `batch-${b}` })); // a distinct batch group
+      const settled = cases.map((jb) => {
+        const d = hub.enqueue(runner, jb);
+        d.catch(() => {});
+        return d;
+      });
+      for (let c = 0; c < cases.length; c++) {
+        const leased = hub.lease(runner, ["git"]);
+        expect(leased).not.toBeNull();
+        if (leased) hub.complete(runner, leased.jobId, result);
+      }
+      await Promise.all(settled);
+    }
+    const sizes = hub.bookkeepingSize();
+    // Everything completed → live state is empty. A tiny constant slack would be fine; exact-zero proves the cleanup.
+    expect(sizes).toEqual({ queues: 0, groups: 0, waiters: 0 });
+  });
+
   it("complete/fail with an unknown jobId returns false (already completed/expired)", () => {
     const hub = new RunnerHub();
     expect(hub.complete(keyA, "nope", result)).toBe(false);
