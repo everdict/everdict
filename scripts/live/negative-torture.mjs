@@ -295,7 +295,7 @@ try {
     // Pre-fix escape hatch: the 30-minute alloc poll would hold this suite hostage — cancel and record the hang.
     await post(`/scorecards/${n1id}/cancel`, {});
     n1 = await waitTerminal(n1id, 120);
-    check(false, `N1: unplaceable batch HUNG >200s (pre-fix 30-min alloc poll) — cancelled to continue`);
+    check(false, "N1: unplaceable batch HUNG >200s (pre-fix 30-min alloc poll) — cancelled to continue");
   } else {
     const n1d = caseDetails(n1);
     check(n1d.length > 0 && n1d.every((c) => !c.pass), `N1: every unplaceable case failed (status=${n1.status})`);
