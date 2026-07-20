@@ -158,6 +158,30 @@ describe("RunnerHub", () => {
     expect(sizes).toEqual({ queues: 0, groups: 0, waiters: 0 });
   });
 
+  it("a pool job completed by a runner does NOT leak that runner's empty own queue (locate/complete peek)", async () => {
+    // Regression: complete(runner) → locate() used q() which materialized self:owner:runner even when the runner
+    // only ever ran POOL jobs — one stray [] leaked per churned pool runner. locate/remove/lease now peek.
+    let n = 0;
+    const hub = new RunnerHub({ newJobId: () => `j-${n++}` });
+    for (let r = 0; r < 50; r++) {
+      const runner: SelfHostedKey = { owner: "u-alice", runnerId: `pool-runner-${r}` }; // fresh runner each round
+      const d = hub.enqueue(poolKeyFor("u-alice"), job(`p-${r}`)); // parked in the POOL, not the runner's own queue
+      d.catch(() => {});
+      const leased = hub.lease(runner, ["git"]); // a pinned-runner poll draining the pool
+      expect(leased).not.toBeNull();
+      if (leased) hub.complete(runner, leased.jobId, result); // complete under the runner's own key
+      await d;
+    }
+    // No per-runner own queue was ever materialized; the shared pool queue drained to empty and was pruned.
+    expect(hub.bookkeepingSize()).toEqual({ queues: 0, groups: 0, waiters: 0 });
+  });
+
+  it("polling an empty own queue (idle runner) never materializes a queue entry", () => {
+    const hub = new RunnerHub();
+    for (let r = 0; r < 50; r++) expect(hub.lease({ owner: "u-alice", runnerId: `idle-${r}` }, ["git"])).toBeNull();
+    expect(hub.bookkeepingSize().queues).toBe(0); // pre-fix: 50 empty queues from the lazy q() on each poll
+  });
+
   it("complete/fail with an unknown jobId returns false (already completed/expired)", () => {
     const hub = new RunnerHub();
     expect(hub.complete(keyA, "nope", result)).toBe(false);

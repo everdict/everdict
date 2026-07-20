@@ -113,6 +113,30 @@ describe("Scheduler", () => {
     expect(sched.stats().queued).toBe(0);
   });
 
+  // Lifecycle leak sentinel: the in-flight admission maps are keyed by backend name (rt:tenant:id@ver /
+  // self:owner:runnerId). Under runtime/runner churn each distinct name is reserved then released to 0 — pre-fix
+  // that 0 lingered forever (one dead entry per backend ever scheduled), an unbounded leak. Now zero deletes the key.
+  it("admission maps drop to empty after churning many distinct backends (no per-backend zero-entry leak)", async () => {
+    const reg = new BackendRegistry();
+    const sched = new Scheduler(reg);
+    for (let i = 0; i < 100; i++) {
+      const b = new ControlledBackend(`bk-${i}`, 1);
+      b.memoryBudgetMb = 1024; // exercise the mem/cpu maps too
+      b.cpuBudget = 1000;
+      reg.register(`bk-${i}`, b);
+      const p = sched.dispatch(job(`bk-${i}`)); // pinned to this churned backend
+      await flush();
+      b.releaseAll();
+      await flush();
+      await p;
+    }
+    const s = sched.stats();
+    expect(Object.keys(s.inFlight)).toHaveLength(0); // was 100 (a zero entry per backend)
+    expect(Object.keys(s.memInFlightMb)).toHaveLength(0);
+    expect(Object.keys(s.cpuInFlight)).toHaveLength(0);
+    expect(Object.keys(s.tenantInFlight)).toHaveLength(0);
+  });
+
   it("queues when there's no room, then flushes as slots free", async () => {
     const b = new ControlledBackend("a", 1);
     const sched = new Scheduler(new BackendRegistry().register("a", b));
@@ -326,7 +350,7 @@ describe("Scheduler", () => {
     b.releaseAll();
     await flush();
     await Promise.all(p);
-    expect(sched.stats().memInFlightMb.a).toBe(0);
+    expect(sched.stats().memInFlightMb.a ?? 0).toBe(0); // released to 0 → the key is pruned (no per-backend leak), reads as 0
   });
 
   it("undeclared-memory jobs are admitted outside the memory budget (opt-in gating)", async () => {
@@ -379,7 +403,7 @@ describe("Scheduler", () => {
     b.releaseAll();
     await flush();
     await Promise.all(p);
-    expect(sched.stats().cpuInFlight.a).toBe(0);
+    expect(sched.stats().cpuInFlight.a ?? 0).toBe(0); // released to 0 → the key is pruned (no per-backend leak), reads as 0
   });
 
   it("undeclared-cpu jobs are admitted outside the cpu budget (opt-in gating)", async () => {

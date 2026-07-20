@@ -125,9 +125,14 @@ class Admission {
   }
 }
 
-// Add delta to a counter map, clamped at 0 (never negative).
+// Add delta to a counter map, clamped at 0 (never negative). At zero the key is DELETED, not left as a 0 entry:
+// these maps are keyed by backend name (`rt:<tenant>:<id>@<ver>`, `self:<owner>:<runnerId>`) and tenant, so under
+// runtime/runner churn a lingering 0 accretes one dead entry per distinct backend ever scheduled — an unbounded
+// leak on a long-running scheduler. get() reads `?? 0`, so a deleted-then-recreated key is identical.
 function bump(map: Map<string, number>, key: string, delta: number): void {
-  map.set(key, Math.max(0, (map.get(key) ?? 0) + delta));
+  const next = Math.max(0, (map.get(key) ?? 0) + delta);
+  if (next === 0) map.delete(key);
+  else map.set(key, next);
 }
 
 // A capacity-aware + tenant-fair scheduler: place jobs where there's room based on backend free capacity, but pull

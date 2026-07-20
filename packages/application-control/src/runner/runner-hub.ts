@@ -85,6 +85,10 @@ function fairnessKey(queueName: string, group: string): string {
   return `${queueName}${GROUP_KEY_SEP}${group}`;
 }
 
+// Shared read-only stand-in for an absent queue — lease() scans it (find nothing) without materializing a map
+// entry. Never mutated on the peek path (an empty queue yields no leasable entry); a real enqueue uses q().
+const EMPTY_QUEUE: ReadonlyArray<PendingEntry> = Object.freeze([]);
+
 // In-memory lease hub for personally-owned self-hosted runners — the heart of push→pull.
 // SelfHostedBackend.dispatch parks a job here (returning a promise), and the runner protocol (MCP, Slice 4)
 // resolves that promise via lease (take) / complete (report result). FIFO queue per key (= per runner).
@@ -241,7 +245,7 @@ export class RunnerHub {
   // waiting — same rule the managed Scheduler applies), then (2) the least-recently-served group first (WFQ-lite fair
   // rotation across batches/users), then (3) FIFO within a group (stable by enqueue index). Pure read — leasing an
   // entry (markServed) is what advances the rotation.
-  private orderLeasable(queueName: string, arr: PendingEntry[]): PendingEntry[] {
+  private orderLeasable(queueName: string, arr: readonly PendingEntry[]): PendingEntry[] {
     const prio = (e: PendingEntry): number => (e.job.priority === "interactive" ? 0 : 1);
     const lastServed = (e: PendingEntry): number =>
       this.groupLastServed.get(fairnessKey(queueName, RunnerHub.groupKeyOf(e.job))) ?? -1;
@@ -268,8 +272,11 @@ export class RunnerHub {
   // If capabilities are given (runner self-advertised) this is a placement gate: if the runner lacks a capability the job requires
   // (case.image→docker), fail that job immediately — reject with a clear reason instead of running in the wrong environment (host fallback), avoiding a silent idle timeout.
   lease(key: SelfHostedKey, capabilities?: string[]): LeasedJob | null {
-    const arr = this.q(key);
     const now = this.now();
+    // Peek, don't materialize: an idle runner polling an EMPTY own queue must not lazily recreate the map entry
+    // every poll (a runner that then disconnects would leak that empty [] — one per churned runner). Absent = no
+    // own jobs; fall through to the pool. A real enqueue still creates the queue via q().
+    const arr = this.queues.get(selfHostedBackendName(key)) ?? EMPTY_QUEUE;
     this.requeueExpired(arr, now);
     // 1) Own queue (jobs targeted at a specific runner) — on capability mismatch, reject immediately (this runner was
     //    explicitly named, so avoid the wrong environment). Entries are considered in fairness order (priority → WFQ
@@ -329,7 +336,7 @@ export class RunnerHub {
   }
 
   // Requeue expired leases (runner dead/disconnected) — clear leasedAt to make them leasable again. Shared by the own queue and the pool queue.
-  private requeueExpired(arr: PendingEntry[], now: number): void {
+  private requeueExpired(arr: readonly PendingEntry[], now: number): void {
     for (const e of arr) {
       // A cancelled entry is never requeued (it's on its way out — the runner is being told to abort it).
       if (e.leasedAt !== undefined && !e.cancelRequested && now - e.leasedAt > this.leaseTtlMs) e.leasedAt = undefined;
@@ -338,11 +345,14 @@ export class RunnerHub {
 
   // Find jobId in the own queue first, else in the owner pool queue (a pool job lives in the pool queue and the runner completes/heartbeats with its own key).
   private locate(key: SelfHostedKey, jobId: string): { entry: PendingEntry; key: SelfHostedKey } | undefined {
-    const own = this.q(key).find((e) => e.jobId === jobId);
+    // Peek both queues — locate is a READ (complete/fail/heartbeat lookup). Using q() here materialized an empty
+    // own queue for a runner that only ever ran POOL jobs (its complete(runnerN) creates self:owner:runnerN),
+    // leaking one [] per churned pool runner. get() never creates.
+    const own = this.queues.get(selfHostedBackendName(key))?.find((e) => e.jobId === jobId);
     if (own) return { entry: own, key };
     if (key.runnerId !== POOL_RUNNER) {
       const poolKey = poolKeyFor(key.owner);
-      const pooled = this.q(poolKey).find((e) => e.jobId === jobId);
+      const pooled = this.queues.get(selfHostedBackendName(poolKey))?.find((e) => e.jobId === jobId);
       if (pooled) return { entry: pooled, key: poolKey };
     }
     return undefined;
@@ -441,7 +451,7 @@ export class RunnerHub {
   // isn't kept alive by it, so when a job's only capable runner dies it stops being refreshed and times out
   // (→ no_runner failure) instead of pending forever behind surviving-but-incapable runners. capabilities
   // undefined (a pre-capability runner) preserves the old refresh-all behavior (no false mass timeouts).
-  private rearmWaiting(key: SelfHostedKey, arr: PendingEntry[], capabilities?: string[]): void {
+  private rearmWaiting(key: SelfHostedKey, arr: readonly PendingEntry[], capabilities?: string[]): void {
     for (const e of arr) {
       if (e.leasedAt !== undefined || e.cancelRequested) continue;
       if (capabilities && requiredRunnerCapabilities(e.job).some((c) => !capabilities.includes(c))) continue;
@@ -470,21 +480,23 @@ export class RunnerHub {
     return true;
   }
 
-  // Number of waiting/leased jobs (for capacity/observability).
+  // Number of waiting/leased jobs (for capacity/observability). Peek — a status read must never lazily create
+  // an empty queue for a key that has no jobs (that stray [] would leak under churn).
   pending(key: SelfHostedKey): number {
-    return this.q(key).length;
+    return this.queues.get(selfHostedBackendName(key))?.length ?? 0;
   }
 
   // Bookkeeping-map sizes — a leak sentinel for the lease hub's lifecycle. Under sustained batch/runner churn
   // these must track LIVE state (active queues + fairness groups), not grow monotonically; a monitor/alert can
-  // watch them. NOTE: reads only — unlike pending(), it never lazily recreates a cleaned-up queue.
+  // watch them. Reads only — never recreates a cleaned-up queue.
   bookkeepingSize(): { queues: number; groups: number; waiters: number } {
     return { queues: this.queues.size, groups: this.groupLastServed.size, waiters: this.waiters.size };
   }
 
   private remove(key: SelfHostedKey, jobId: string): PendingEntry | undefined {
     const name = selfHostedBackendName(key);
-    const arr = this.q(key);
+    const arr = this.queues.get(name); // peek — a remove for an already-gone job must not recreate an empty queue
+    if (!arr) return undefined;
     const i = arr.findIndex((e) => e.jobId === jobId);
     if (i < 0) return undefined;
     const [entry] = arr.splice(i, 1);
