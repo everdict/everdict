@@ -166,6 +166,10 @@ export function buildDispatch(deps: {
   // Workspace secrets feed the cached runtime backends' secretEnv — a secret change must drop that tenant's
   // cache so the next dispatch rebuilds with fresh values (previously only a CP restart picked them up).
   const invalidateTenantBackends = (tenant: string) => runtimeDispatcher.invalidateTenant(tenant);
+  // Drop a revoked runner's lazily-registered self:<owner>:<runnerId> backend so runner churn (pair→run→revoke)
+  // doesn't leak one Backend per runner in the placement registry. Wired to RunnerService.onRevoke in main.ts.
+  const releaseSelfRunnerBackend = (owner: string, runnerId: string) =>
+    runtimeDispatcher.unregisterSelfRunnerBackend(owner, runnerId);
   // Metered dispatcher — every dispatch (single runs, batch cases, judges) flows through one seam, so outcome
   // counters and the per-runtime duration histogram cover the whole system without per-caller wiring.
   const meteredDispatcher: CoreDispatcher = {
@@ -212,5 +216,6 @@ export function buildDispatch(deps: {
     inspectRuntime,
     controlRuntime,
     invalidateTenantBackends,
+    releaseSelfRunnerBackend,
   };
 }

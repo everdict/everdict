@@ -61,6 +61,14 @@ export class RuntimeDispatcher implements Dispatcher {
     }
   }
 
+  // Drop a revoked runner's lazily-registered self:<owner>:<runnerId> Backend. The dispatch path registers one
+  // Backend per pinned runner on first use and never removed it, so runner churn (pair→run→revoke) leaked one
+  // Backend per runner in the placement registry. Wired to RunnerService.onRevoke. No-op if never registered
+  // (a runner that only took pool jobs) — the pool backend (self:<owner>:*) is shared and stays.
+  unregisterSelfRunnerBackend(owner: string, runnerId: string): void {
+    this.deps.backends.unregister(selfHostedBackendName({ owner, runnerId }));
+  }
+
   async dispatch(job: AgentJob, opts?: DispatchOptions): Promise<CaseResult> {
     const tenant = job.tenant ?? "default";
     const target = job.evalCase.placement?.target;

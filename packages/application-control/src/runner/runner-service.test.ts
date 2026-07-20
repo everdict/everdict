@@ -111,4 +111,24 @@ describe("RunnerService — version reporting + roster overlay", () => {
     const roster = await svc.listForWorkspace("acme");
     expect(roster.find((r) => r.id === "old")?.updateRequired).toBe(true);
   });
+
+  it("revoke fires onRevoke(owner, id) so the composition can drop the runner's placement backend (churn hygiene)", async () => {
+    const store = new FakeRunnerStore();
+    store.seed("u-alice", meta("r1"));
+    const svc = new RunnerService(store);
+    const revoked: Array<[string, string]> = [];
+    svc.onRevoke = (owner, id) => revoked.push([owner, id]);
+    await svc.revoke("u-alice", "r1");
+    expect(revoked).toEqual([["u-alice", "r1"]]); // fired exactly once with the revoked identity (the store.remove is covered elsewhere)
+  });
+
+  it("revokeWorkspaceRunner fires onRevoke with the ws:<workspace> owner", async () => {
+    const store = new FakeRunnerStore();
+    store.seed("ws:acme", meta("team-r1"));
+    const svc = new RunnerService(store);
+    const revoked: Array<[string, string]> = [];
+    svc.onRevoke = (owner, id) => revoked.push([owner, id]);
+    await svc.revokeWorkspaceRunner("acme", "team-r1");
+    expect(revoked).toEqual([["ws:acme", "team-r1"]]);
+  });
 });

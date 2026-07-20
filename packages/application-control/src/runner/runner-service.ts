@@ -39,12 +39,17 @@ function withUpdateRequired(meta: RunnerMeta): RunnerMeta {
 
 export class RunnerService {
   constructor(private readonly store: RunnerStore) {}
+  // Fired when a runner is revoked (owner, runnerId) — the composition wires it to unregister that runner's
+  // lazily-registered self:<owner>:<runnerId> Backend from the placement registry, so runner churn doesn't leak
+  // one Backend per revoked runner. Settable (not a ctor arg) because the dispatcher is built after this service.
+  onRevoke?: (owner: string, id: string) => void;
   // Personally-owned: owner=principal.subject. The plaintext token rides out in the result exactly once (stored as a hash).
   async pair(input: PairRunnerInput): Promise<PairedRunner> {
     return this.store.pair(input);
   }
   async revoke(owner: string, id: string): Promise<void> {
     await this.store.remove(owner, id);
+    this.onRevoke?.(owner, id); // drop the runner's registered self backend (churn hygiene)
   }
   // Mark a runner as connected (update lastSeenAt on lease/heartbeat). No-op if the runner doesn't exist.
   async touch(owner: string, id: string): Promise<void> {
@@ -90,6 +95,8 @@ export class RunnerService {
     return (await this.store.list(RunnerService.wsOwner(workspace))).map(withUpdateRequired);
   }
   async revokeWorkspaceRunner(workspace: string, id: string): Promise<void> {
-    await this.store.remove(RunnerService.wsOwner(workspace), id);
+    const owner = RunnerService.wsOwner(workspace);
+    await this.store.remove(owner, id);
+    this.onRevoke?.(owner, id);
   }
 }

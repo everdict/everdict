@@ -128,6 +128,7 @@ async function main(): Promise<void> {
     inspectRuntime,
     controlRuntime,
     invalidateTenantBackends,
+    releaseSelfRunnerBackend,
   } = buildDispatch({
     callbackStore,
     secretStore,
@@ -143,6 +144,9 @@ async function main(): Promise<void> {
     browserProfileStore, // browser-profiles S5 — eval-browser profile injection (resolve + owner-gate)
     cipher, // browser-profiles S5 — decrypt the profile's captured storageState
   });
+  // Revoking a runner drops its lazily-registered self:<owner>:<runnerId> placement backend (runner churn hygiene —
+  // built here because the dispatcher is created after the workspace/runner services).
+  runnerService.onRevoke = (owner, id) => releaseSelfRunnerBackend(owner, id);
 
   // Artifact store (when env-configured): offload os-use screenshots to S3/MinIO → result records carry only a presigned URL (no base64 inline).
   // Unset → undefined → the service falls back to base64 inline (dev). Credentials are env secrets (never committed).

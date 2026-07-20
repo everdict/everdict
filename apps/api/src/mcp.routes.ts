@@ -19,6 +19,34 @@ export function registerMcpRoutes(app: FastifyInstance, deps: ServerDeps): void 
   // Streamable HTTP MCP endpoint (stateful session). Every method needs a valid Bearer (none → 401 login challenge).
   // On initialize, create a server bound to the Principal + a session; subsequent requests route to that session by mcp-session-id.
   const sessions = new Map<string, StreamableHTTPServerTransport>();
+  // Idle-session eviction (churn hygiene). A session holds a full McpServer (every tool as a closure over all
+  // deps — heavy). Cleanup relied solely on transport.onclose, which fires on a graceful DELETE /mcp but NOT
+  // when a runner is SIGKILLed / its network drops — so under runner churn the map accreted one McpServer per
+  // dead session, the dominant control-plane memory leak (RSS climbed ~1.4MB per churned runner, PG-backed).
+  // Track last activity and sweep sessions idle past the TTL (default 10 min — far above a live runner's ~25s
+  // long-poll / heartbeat cadence, so an active runner is never evicted). EVERDICT_MCP_SESSION_IDLE_MS overrides.
+  const lastSeen = new Map<string, number>();
+  const idleMs = Number(process.env.EVERDICT_MCP_SESSION_IDLE_MS ?? 600_000);
+  const touch = (sid: string | undefined): void => {
+    if (sid && sessions.has(sid)) lastSeen.set(sid, Date.now());
+  };
+  const sweep = setInterval(
+    () => {
+      const now = Date.now();
+      for (const [sid, transport] of sessions) {
+        if (now - (lastSeen.get(sid) ?? now) > idleMs) {
+          lastSeen.delete(sid);
+          try {
+            transport.close(); // → onclose removes it from `sessions` and releases the McpServer for GC
+          } catch {
+            sessions.delete(sid);
+          }
+        }
+      }
+    },
+    Math.min(idleMs, 60_000),
+  );
+  (sweep as { unref?: () => void }).unref?.();
   app.post("/mcp", async (req, reply) => {
     const principal = await resolveBearerPrincipal(req, deps);
     if (!principal) return mcpChallenge(req, reply);
@@ -40,10 +68,14 @@ export function registerMcpRoutes(app: FastifyInstance, deps: ServerDeps): void 
         sessionIdGenerator: () => randomUUID(),
         onsessioninitialized: (id) => {
           sessions.set(id, transport as StreamableHTTPServerTransport);
+          lastSeen.set(id, Date.now());
         },
       });
       transport.onclose = () => {
-        if (transport?.sessionId) sessions.delete(transport.sessionId);
+        if (transport?.sessionId) {
+          sessions.delete(transport.sessionId);
+          lastSeen.delete(transport.sessionId);
+        }
       };
       await buildMcpServer(
         {
@@ -87,6 +119,7 @@ export function registerMcpRoutes(app: FastifyInstance, deps: ServerDeps): void 
         principal,
       ).connect(transport);
     }
+    touch(transport.sessionId); // activity → keep this live session out of the idle sweep
     reply.hijack(); // the transport owns the raw response directly.
     await transport.handleRequest(req.raw, reply.raw, req.body);
   });
@@ -107,6 +140,7 @@ export function registerMcpRoutes(app: FastifyInstance, deps: ServerDeps): void 
         .code(400)
         .send({ code: "BAD_REQUEST", message: "initialize request or a valid mcp-session-id is required." });
     }
+    touch(sid); // GET (SSE stream) / DELETE also count as activity
     reply.hijack();
     await transport.handleRequest(req.raw, reply.raw);
   };
