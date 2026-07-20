@@ -86,6 +86,10 @@ export interface NomadBackendOptions {
   ) => Promise<{ code: number; stdout: string; stderr: string }>;
   purgeDelayMs?: number; // age before a dead job is purge-swept when enabled (default 60s; 0 = immediate for tests)
   maxPolls?: number;
+  // Patience for a BLOCKED evaluation with no alloc (unplaceable resources) before failing the dispatch with
+  // nomad's exhausted-dimension verdict (default 2 min). Short blocked spells (capacity freeing) are tolerated;
+  // without this an unplaceable job silently grinds the full alloc-poll budget (~30 min).
+  failOnBlockedEvalMs?: number;
   // This cluster's concurrent-job cap (for capacity-aware placement). If a function, dynamically reads the value the autoscaler changes.
   maxConcurrent?: number | (() => number);
   // Declared memory envelope (RuntimeSpec.memoryBudgetMb) — the Scheduler caps the sum of in-flight
@@ -1027,13 +1031,36 @@ export class NomadBackend implements Backend, Recoverable, Observable, Shellable
   private async waitForAlloc(jobId: string, namespace?: string, signal?: AbortSignal): Promise<string> {
     const interval = this.opts.pollIntervalMs ?? 2000;
     const maxPolls = this.opts.maxPolls ?? 900;
+    const blockedBudgetMs = this.opts.failOnBlockedEvalMs ?? 120_000;
     const nsq = namespace ? `?namespace=${encodeURIComponent(namespace)}` : "";
+    let blockedSinceMs: number | undefined;
     for (let i = 0; i < maxPolls; i++) {
       if (signal?.aborted) throw new InternalError("CANCELLED", { jobId }, "dispatch aborted while waiting for alloc.");
       const res = await this.http.request("GET", `/v1/job/${jobId}/allocations${nsq}`);
       if (res.status < 300) {
         const allocs = JSON.parse(res.text) as Array<{ ID: string; ClientStatus: string }>;
         const alloc = allocs[0];
+        // No alloc yet: an UNPLACEABLE job (resources beyond every node) never produces one — the scheduler
+        // parks a BLOCKED evaluation instead, and this loop would grind the full 30-minute budget on a job
+        // that can never start. Surface the blocked verdict (with the exhausted dimensions) after a bounded
+        // patience window; short blocked spells (capacity about to free) are tolerated, and the
+        // failure is retryable-infra so a sharded batch spills the case to another runtime.
+        if (!alloc) {
+          const blocked = await this.blockedPlacement(jobId, nsq);
+          if (blocked) {
+            blockedSinceMs ??= Date.now();
+            if (Date.now() - blockedSinceMs >= blockedBudgetMs) {
+              throw new UpstreamError(
+                "UPSTREAM_ERROR",
+                { jobId, reason: "placement_blocked" },
+                `placement blocked — ${blocked} (the job's resources exceed what any eligible node offers; ` +
+                  "lower the harness resources or add capacity)",
+              );
+            }
+          } else {
+            blockedSinceMs = undefined; // eval progressed — reset the patience window
+          }
+        }
         if (alloc) {
           if (alloc.ClientStatus === "complete") return alloc.ID;
           if (alloc.ClientStatus === "failed" || alloc.ClientStatus === "lost") {
@@ -1059,5 +1086,42 @@ export class NomadBackend implements Backend, Recoverable, Observable, Shellable
       await abortableDelay(interval, signal);
     }
     throw new UpstreamError("UPSTREAM_ERROR", { jobId }, "timed out waiting for alloc completion");
+  }
+
+  // Whether the job's latest evaluation is BLOCKED with failed task-group allocations (nomad's "cannot place
+  // this anywhere right now" verdict). Returns a human-readable summary of the exhausted dimensions
+  // ("cpu exhausted on 1 node(s)") or undefined when placement is not blocked. Best-effort — an evals API
+  // error reads as "not blocked" (the alloc poll keeps its own timeout as the backstop).
+  private async blockedPlacement(jobId: string, nsq: string): Promise<string | undefined> {
+    try {
+      const res = await this.http.request("GET", `/v1/job/${jobId}/evaluations${nsq}`);
+      if (res.status >= 300) return undefined;
+      const evals = JSON.parse(res.text) as Array<{
+        Status?: string;
+        FailedTGAllocs?: Record<
+          string,
+          {
+            NodesEvaluated?: number;
+            DimensionExhausted?: Record<string, number>;
+            ClassExhausted?: Record<string, number>;
+          }
+        > | null;
+      }>;
+      const failed = evals.find((e) => e.FailedTGAllocs && Object.keys(e.FailedTGAllocs).length > 0);
+      const blocked = evals.some((e) => e.Status === "blocked") || failed !== undefined;
+      if (!blocked || !failed?.FailedTGAllocs) return blocked ? "no eligible node (blocked evaluation)" : undefined;
+      const parts: string[] = [];
+      for (const [group, metrics] of Object.entries(failed.FailedTGAllocs)) {
+        const dims = Object.entries(metrics.DimensionExhausted ?? {})
+          .map(([dim, n]) => `${dim} exhausted on ${n} node(s)`)
+          .join(", ");
+        parts.push(
+          `${group}: ${dims || "no eligible node"}${metrics.NodesEvaluated !== undefined ? ` (${metrics.NodesEvaluated} evaluated)` : ""}`,
+        );
+      }
+      return parts.join("; ");
+    } catch {
+      return undefined;
+    }
   }
 }

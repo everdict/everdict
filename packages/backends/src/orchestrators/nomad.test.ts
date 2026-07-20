@@ -139,6 +139,37 @@ describe("fetchHttp (Nomad API auth)", () => {
 });
 
 describe("NomadBackend.dispatch", () => {
+  it("an unplaceable job (blocked evaluation, no alloc) fails fast with the exhausted-dimension verdict", async () => {
+    // Regression: resources beyond every node never produce an alloc — nomad parks a BLOCKED evaluation —
+    // and the alloc poll used to grind its full ~30-minute budget before a generic timeout. With the
+    // blocked-eval patience window it must surface nomad's own placement verdict quickly instead.
+    const http: NomadHttp = {
+      async request(_method, path) {
+        if (path === "/v1/jobs") return { status: 200, text: "{}" };
+        if (path.includes("/allocations")) return { status: 200, text: "[]" }; // never any alloc
+        if (path.includes("/evaluations"))
+          return {
+            status: 200,
+            text: JSON.stringify([
+              {
+                Status: "blocked",
+                FailedTGAllocs: { eval: { NodesEvaluated: 1, DimensionExhausted: { memory: 1, cpu: 1 } } },
+              },
+            ]),
+          };
+        return { status: 404, text: "" };
+      },
+    };
+    const backend = new NomadBackend({
+      addr: "http://nomad:4646",
+      image: "img",
+      http,
+      pollIntervalMs: 1,
+      failOnBlockedEvalMs: 5, // tiny patience for the test — production default is 2 minutes
+    });
+    await expect(backend.dispatch(JOB)).rejects.toThrow(/placement blocked.*exhausted/i);
+  });
+
   it("submit job → poll alloc completion → parse CaseResult from the stdout sentinel", async () => {
     const calls: string[] = [];
     const http: NomadHttp = {
