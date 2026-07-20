@@ -1,5 +1,6 @@
 import type { ServiceHarnessSpec } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
+import type { CdpSocket } from "../front-door/capture-cdp.js";
 import { DockerTopologyRuntime } from "./docker-runtime.js";
 import { type Docker, type DockerRunSpec, dockerRunArgs, parseHostPort } from "./docker.js";
 
@@ -420,6 +421,58 @@ describe("DockerTopologyRuntime", () => {
     // dispose removes only the browser container (keeps the warm topology).
     await browser.dispose();
     expect(f.removed).toContain("everdict-bu-1.0.0-browser-run-1");
+  });
+
+  it("provisionBrowserEnv snapshot: captures the REAL page DOM + screenshot via CDP (browser benchmark grading signals)", async () => {
+    // Regression: dom used to be JSON.stringify(targets) (the CDP target list), not the rendered page — so a live
+    // front-door run couldn't be graded on page content (dom-contains / WebArena string_match / program_html) and
+    // WebVoyager had no screenshot. Now the snapshot pulls outerHTML + a PNG over CDP.
+    const html = "<html><body><h1>Cart</h1><span id='total'>$42.00</span></body></html>";
+    const cdpFetch = (async (url: string) => {
+      const u = String(url);
+      if (u.endsWith("/json/list"))
+        return new Response(JSON.stringify([{ url: "https://shop.example/cart" }]), { status: 200 });
+      if (u.endsWith("/json"))
+        return new Response(
+          JSON.stringify([{ type: "page", webSocketDebuggerUrl: "ws://browser-run-1:9222/page/1" }]),
+          { status: 200 },
+        );
+      return new Response("{}", { status: 200 });
+    }) as unknown as typeof fetch;
+    // fake CDP socket — replies to Runtime.evaluate (DOM) and Page.captureScreenshot (PNG)
+    const connect = (_url: string): CdpSocket => {
+      const msgHandlers: Array<(ev: { data: unknown }) => void> = [];
+      return {
+        send(data: string) {
+          const sent = JSON.parse(data) as { method?: string };
+          const out =
+            sent.method === "Runtime.evaluate"
+              ? { id: 1, result: { result: { type: "string", value: html } } }
+              : sent.method === "Page.captureScreenshot"
+                ? { id: 1, result: { data: "PNGB64" } }
+                : undefined;
+          if (out)
+            queueMicrotask(() => {
+              for (const h of msgHandlers) h({ data: JSON.stringify(out) });
+            });
+        },
+        close() {},
+        addEventListener(type: "message" | "open" | "error", cb: ((ev: { data: unknown }) => void) & (() => void)) {
+          if (type === "message") msgHandlers.push(cb);
+          else if (type === "open") queueMicrotask(() => cb());
+        },
+      } as CdpSocket;
+    };
+    const f = fakeDocker();
+    const rt = new DockerTopologyRuntime({ docker: f.docker, fetchImpl: cdpFetch, cdpConnect: connect });
+    await rt.ensureTopology(SPEC);
+    const browser = await rt.provisionBrowserEnv(SPEC, "run-1");
+    const snap = await browser.snapshot();
+    if (snap.kind !== "browser") throw new Error("expected a browser snapshot");
+    expect(snap.url).toBe("https://shop.example/cart");
+    expect(snap.dom).toBe(html); // the rendered HTML, not the target list JSON
+    expect(snap.dom).toContain("$42.00"); // a benchmark grader can now string-match page content
+    expect(snap.screenshot).toBe("PNGB64"); // embedded for VLM (WebVoyager) judging
   });
 
   it("ensureTopology: a retry after partial failure succeeds without a container name collision (cascade prevention)", async () => {

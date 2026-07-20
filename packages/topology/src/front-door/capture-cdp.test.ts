@@ -1,6 +1,6 @@
 import { UpstreamError } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
-import { type CdpSocket, captureCdpScreenshot } from "./capture-cdp.js";
+import { type CdpSocket, captureCdpDom, captureCdpScreenshot } from "./capture-cdp.js";
 
 // A fake CDP WebSocket — replays open then a scripted reply to captureScreenshot.
 function fakeSocket(reply: (sent: unknown) => unknown): { connect: (url: string) => CdpSocket; opened: string[] } {
@@ -79,5 +79,41 @@ describe("captureCdpScreenshot", () => {
         timeoutMs: 20,
       }),
     ).rejects.toThrow(/timed out/);
+  });
+});
+
+describe("captureCdpDom", () => {
+  it("picks a page target, evaluates document.documentElement.outerHTML, returns the rendered HTML", async () => {
+    // Regression: the browser snapshot used to set dom = JSON.stringify(targets) (the CDP target list), not the real
+    // page HTML — so dom-contains / WebArena string_match / program_html couldn't grade a live front-door run.
+    const html = "<html><body><h1>Order confirmed</h1><span id='total'>$42.00</span></body></html>";
+    const { connect, opened } = fakeSocket((sent) => {
+      expect(sent).toMatchObject({
+        id: 1,
+        method: "Runtime.evaluate",
+        params: { expression: "document.documentElement.outerHTML", returnByValue: true },
+      });
+      return { id: 1, result: { result: { type: "string", value: html } } };
+    });
+    const dom = await captureCdpDom("http://browser:9222", {
+      fetch: jsonList([
+        { type: "background_page", webSocketDebuggerUrl: "ws://x/bg" },
+        { type: "page", webSocketDebuggerUrl: "ws://browser:9222/page/1" },
+      ]),
+      connect,
+    });
+    expect(dom).toBe(html);
+    expect(dom).toContain("Order confirmed"); // real page content a benchmark grader can string-match
+    expect(opened).toEqual(["ws://browser:9222/page/1"]);
+  });
+
+  it("throws UpstreamError when the evaluation returns no value", async () => {
+    const { connect } = fakeSocket(() => ({ id: 1, result: { result: { type: "undefined" } } }));
+    await expect(
+      captureCdpDom("http://b:9222", {
+        fetch: jsonList([{ type: "page", webSocketDebuggerUrl: "ws://b/p" }]),
+        connect,
+      }),
+    ).rejects.toBeInstanceOf(UpstreamError);
   });
 });

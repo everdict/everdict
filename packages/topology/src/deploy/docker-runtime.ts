@@ -4,6 +4,7 @@ import {
   type ServiceReadiness,
   UpstreamError,
 } from "@everdict/contracts";
+import { type CdpSocket, captureCdpDom, captureCdpScreenshot } from "../front-door/capture-cdp.js";
 import { DEFAULT_BROWSER_IMAGE } from "./browser-image.js";
 import { dependencyConnEnv, dependencyStores } from "./dependencies.js";
 import { type Docker, dockerCli } from "./docker.js";
@@ -19,6 +20,7 @@ export interface DockerTopologyRuntimeOptions {
   readyTimeoutMs?: number;
   pollIntervalMs?: number;
   fetchImpl?: typeof fetch; // for endpoint readiness/CDP lookups (test injection)
+  cdpConnect?: (url: string) => CdpSocket; // CDP WebSocket factory for DOM/screenshot capture (test injection; default = global WebSocket)
 }
 
 interface WarmEntry {
@@ -311,6 +313,7 @@ export class DockerTopologyRuntime implements TopologyRuntime {
     hostPort: number,
   ): Promise<TargetEnvHandle> {
     const fetchImpl = this.fetchImpl; // capture locally since `this` changes inside the returned closures
+    const cdpConnect = this.opts.cdpConnect;
     const docker = this.docker;
     const hostCdp = `http://127.0.0.1:${hostPort}`;
     await this.waitForHttp(`${hostCdp}/json/version`);
@@ -329,11 +332,30 @@ export class DockerTopologyRuntime implements TopologyRuntime {
         } catch {
           targets = [];
         }
+        // The rendered page DOM (post-JS outerHTML) — the observation real browser benchmarks grade on
+        // (dom-contains, WebArena string_match/program_html, WebShop). Best-effort: fall back to the CDP target list
+        // if the page can't be evaluated, so a snapshot always returns.
+        const cdpOpts = { fetch: fetchImpl, ...(cdpConnect ? { connect: cdpConnect } : {}) };
+        let dom = "";
+        try {
+          dom = await captureCdpDom(hostCdp, cdpOpts);
+        } catch {
+          dom = "";
+        }
+        // Screenshot for VLM judging (WebVoyager). Inline base64, best-effort; offloadSnapshot moves it to object
+        // storage so the persisted record stays slim (parity with os-use).
+        let screenshot: string | undefined;
+        try {
+          screenshot = await captureCdpScreenshot(hostCdp, cdpOpts);
+        } catch {
+          screenshot = undefined;
+        }
         return {
           kind: "browser",
           url: targets[0]?.url ?? "about:blank",
-          dom: JSON.stringify(targets),
+          dom: dom || JSON.stringify(targets),
           screenshotRef: `runs/${runId}/screenshot.png`,
+          ...(screenshot ? { screenshot } : {}),
           console: [],
         };
       },

@@ -22,6 +22,25 @@ describe("offloadSnapshot (os-use screenshot → object storage)", () => {
     expect(store.objects.get("runs/r1.png")?.contentType).toBe("image/png");
   });
 
+  it("offloads a BROWSER snapshot's embedded screenshot too (WebVoyager-style VLM input, slim record)", async () => {
+    // The front-door now embeds the page screenshot in the browser snapshot for VLM judging; offload it like os-use.
+    const store = new InMemoryArtifactStore("memory://artifacts/");
+    const snap: EnvSnapshot = {
+      kind: "browser",
+      url: "https://shop.example/cart",
+      dom: "<html>…</html>",
+      screenshot: Buffer.from("PAGEPNG").toString("base64"),
+      console: [],
+    };
+    const out = await offloadSnapshot(snap, store, "runs/b1.png");
+    expect(out.kind).toBe("browser");
+    if (out.kind !== "browser") throw new Error("kind");
+    expect(out.screenshot).toBe(""); // base64 removed from the record
+    expect(out.screenshotRef).toBe("memory://artifacts/runs/b1.png"); // replaced with the URL
+    expect(out.dom).toBe("<html>…</html>"); // the DOM (grading signal) is untouched
+    expect(Buffer.from(store.objects.get("runs/b1.png")?.data ?? new Uint8Array()).toString()).toBe("PAGEPNG");
+  });
+
   it("unchanged without a store (fallback: inline base64 — dev)", async () => {
     const snap: EnvSnapshot = { kind: "os-use", screenshotRef: "/tmp/s.png", screenshot: "QUJD", windows: [] };
     const out = await offloadSnapshot(snap, undefined, "k.png");
