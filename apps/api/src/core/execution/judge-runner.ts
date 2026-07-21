@@ -242,16 +242,15 @@ async function runCodeJudge(
 // Default implementation: model calls the provider with the tenant secret key (anthropic/openai), harness spins up the referenced agent to judge.
 export function defaultJudgeRunner(deps: DefaultJudgeRunnerDeps): JudgeRunner {
   return {
-    async run(spec, tenant, ctx, placement, submittedBy) {
+    async run(spec, tenant, rawCtx, placement, submittedBy) {
       // Resolve artifact URLs → real data before ANY judge sees the context (offloaded/ingested/re-scored refs):
       // text artifacts (evidence {name} slots + dom that ARE urls) for every judge; the screenshot image only when a
       // model judge actually consumes it (avoids a large fetch a text-only judge would ignore). A no-op when the
-      // context carries no url refs.
+      // context carries no url refs. `ctx` below is the resolved view for every downstream path.
       const wantsImage = spec.kind === "model" && (spec.inputs ?? []).includes("screenshot");
-      const resolvedCtx = await resolveJudgeArtifacts(ctx, deps.fetchImpl ?? fetch, { image: wantsImage });
+      const ctx = await resolveJudgeArtifacts(rawCtx, deps.fetchImpl ?? fetch, { image: wantsImage });
       // code judge — its own dispatch path (no rubric/transport); see runCodeJudge above.
-      if (spec.kind === "code") return runCodeJudge(spec, tenant, resolvedCtx, deps, placement, submittedBy);
-      ctx = resolvedCtx;
+      if (spec.kind === "code") return runCodeJudge(spec, tenant, ctx, deps, placement, submittedBy);
       // 1) Resolve the rubric first (cheapest gate — no secret read / provider call when it can't resolve).
       //    Inline string = as-is; {id, version} ref = registry lookup; unresolved → visible skip.
       const rubricResolution = await resolveRubric(deps.rubrics, tenant, spec);
