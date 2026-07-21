@@ -77,6 +77,30 @@ describe("checkPortability", () => {
     expect(rules(s)).toContain("unique-ports");
   });
 
+  it("warns (not errors) that an INTERNAL object store's artifacts won't reach the judge — so it never blocks registration", () => {
+    const s = spec([svc({ name: "web", port: 3000 })], {
+      dependencies: [{ store: "minio", role: "artifacts", isolateBy: "object-prefix" }],
+    });
+    const issues = checkPortability(s);
+    const art = issues.find((i) => i.rule === "artifact-store-internal");
+    expect(art?.severity).toBe("warning"); // surfaced, never blocks
+    expect(art?.field).toBe("dependencies[artifacts]");
+    expect(art?.message).toMatch(/won't reach the judge|inline|external/i);
+    // it is a warning only — a topology with an internal store still registers (assertPortable throws on errors only).
+    expect(() => assertPortable(s)).not.toThrow();
+  });
+
+  it("does NOT warn when the object store is external (BYO, control-plane-reachable) or is a non-object store (pg/redis)", () => {
+    const external = spec([svc({ name: "web", port: 3000 })], {
+      dependencies: [{ store: "minio", role: "artifacts", isolateBy: "external" }],
+    });
+    expect(rules(external)).not.toContain("artifact-store-internal");
+    const kv = spec([svc({ name: "web", port: 3000 })], {
+      dependencies: [{ store: "redis", role: "bus", isolateBy: "key-prefix" }],
+    });
+    expect(rules(kv)).not.toContain("artifact-store-internal");
+  });
+
   it("scans the front-door bodyTemplate for a literal host", () => {
     const s = spec([svc({ name: "web", port: 3000 })], {
       frontDoor: { service: "web", submit: "POST /runs", request: { bodyTemplate: { base: "http://127.0.0.1:8000" } } },

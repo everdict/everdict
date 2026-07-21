@@ -12,7 +12,8 @@ export type PortabilityRule =
   | "needs-complete" // a peer is referenced but not declared in needs — per-service Nomad wires only declared needs
   | "addressed-has-port" // a peer is addressed but declares no port — nothing to publish/forward
   | "reference-not-address" // front-door / target references a service that is not declared
-  | "unique-ports"; // two services share a port — the co-located Nomad shared netns forbids it
+  | "unique-ports" // two services share a port — the co-located Nomad shared netns forbids it
+  | "artifact-store-internal"; // an internal object store — artifacts referenced by its URL won't reach the judge
 
 // Portability is a purely STRUCTURAL check over a service topology's addressing (service names/ports/needs/env/wiring +
 // front-door/target/trace references) — it never reads a service `image`. So a template (image-less services) is checked
@@ -44,6 +45,7 @@ const SEVERITY: Record<PortabilityRule, "error" | "warning"> = {
   "addressed-has-port": "error",
   "reference-not-address": "error",
   "unique-ports": "error",
+  "artifact-store-internal": "warning",
 };
 
 // Only the issues that hard-block a new registration (used by the registry register + the validate route).
@@ -215,6 +217,22 @@ export function checkPortability(spec: PortabilityServiceSpec): PortabilityIssue
 
   // A loopback trace endpoint is only reachable when the control plane is co-located — non-portable like the rest.
   scanLiteral("traceSource.endpoint", spec.traceSource.endpoint);
+
+  // Artifact reachability. An Everdict-provisioned object store (minio, isolateBy != "external") lives INSIDE the
+  // topology network on every runtime, so an artifact a service writes there and references by its internal-store URL
+  // (e.g. http://<id>-minio:9000/…) is NOT reachable by the control plane / judge — the judge would grade blind. This
+  // is portable (every runtime provisions it the same way), so it is a warning, not an error: it is fine IF the harness
+  // returns artifacts inline (sentinel delivery / base64 in the trace) or uses an external store — the two ways an
+  // artifact actually reaches the judge. Surfaced at authoring time so the choice is deliberate.
+  for (const dep of spec.dependencies ?? []) {
+    if (dep.store === "minio" && dep.isolateBy !== "external")
+      issues.push({
+        rule: "artifact-store-internal",
+        ...(dep.service ? { service: dep.service } : {}),
+        field: `dependencies[${dep.role}]`,
+        message: `The "${dep.role}" object store is provisioned inside the topology (isolateBy: ${dep.isolateBy}), so an artifact a service writes there and references by its internal URL will NOT reach the judge. To make artifacts judge-visible, return them inline (sentinel delivery / base64 in the trace), declare the store isolateBy: "external" with a control-plane-reachable endpoint, or upload artifacts to the trace platform's own store.`,
+      });
+  }
 
   return issues.map((i) => ({ ...i, severity: SEVERITY[i.rule] }));
 }
