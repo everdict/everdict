@@ -265,6 +265,21 @@ export class TraceSourceService {
     return mapping ? { ...config, mapping } : config;
   }
 
+  // Resolve a registered source by NAME → a usable TraceSourceConfig (auth resolved from the SecretStore at point of
+  // use). This is the "register once, pull by name" path for standalone pull-ingest (scoring a trace with no harness
+  // run): a scorecard names a source from the workspace pool instead of restating its kind/endpoint/credential inline.
+  // An unknown name is a 400 (never a silent dangling reference), consistent with assignSource/assignSink.
+  async resolveByName(tenant: string, name: string): Promise<TraceSourceConfig> {
+    const source = unifiedTraceSources(await this.settings.get(tenant)).find((e) => e.name === name);
+    if (!source)
+      throw new BadRequestError(
+        "BAD_REQUEST",
+        { source: name },
+        `Unregistered trace source "${name}" — register it in Settings › Observability, or pass an inline source config.`,
+      );
+    return this.buildConfig(tenant, source);
+  }
+
   // Build a browsable source for a registered source name (observability browser + judge-wizard sampling). 404 if the
   // name isn't registered; 400 if the browse engine isn't configured (buildSource dep absent).
   private async browsableFor(tenant: string, name: string): Promise<BrowsableTraceSource> {

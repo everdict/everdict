@@ -3,7 +3,7 @@ import type { ImageRegistryService } from "@everdict/application-control";
 import type { NotificationService } from "@everdict/application-control";
 import type { Metrics } from "@everdict/application-control";
 import type { RunnerHubLike } from "@everdict/application-control";
-import { ScorecardService } from "@everdict/application-control";
+import { ScorecardService, TraceSourceService } from "@everdict/application-control";
 import type { TraceSinkService } from "@everdict/application-control";
 import type { Dispatcher as CoreDispatcher, Scheduler } from "@everdict/backends";
 import type { CaseResult } from "@everdict/contracts";
@@ -91,6 +91,9 @@ export function buildScorecard(deps: {
       ? process.env.EVERDICT_TEMPORAL_ADDRESS
       : undefined;
 
+  // Resolve a REGISTERED workspace trace source by name for pull-ingest "by name" (same pool the dispatch path reads).
+  const traceSourcesForIngest = new TraceSourceService(settingsStore, { secretsFor: runtimeSecretsFor });
+
   return new ScorecardService({
     dispatcher: meteredDispatcher,
     store: scorecardStore,
@@ -161,6 +164,8 @@ export function buildScorecard(deps: {
     judgeFor: async (tenant) => (await settingsStore.get(tenant))?.judge,
     // Pull ingest: pull traces from the tenant's OTel/MLflow and score them. Credentials come from the tenant SecretStore (authSecret name).
     buildTraceSource,
+    // "Register once, pull by name" — a pull-ingest source given as { name } resolves against the workspace pool.
+    resolveTraceSourceByName: (tenant, name) => traceSourcesForIngest.resolveByName(tenant, name),
     // Per-harness span-attribute mapping overlay (judge-wizard-authored) — applied to the pull-eval trace source so
     // production traces normalize the way this harness/judge expect (WorkspaceSettings.spanAttrMappingByHarness).
     spanMappingFor: async (tenant, harnessId) =>

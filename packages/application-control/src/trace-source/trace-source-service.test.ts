@@ -45,6 +45,30 @@ describe("TraceSourceService", () => {
     ]);
   });
 
+  it("resolveByName resolves a registered source → a usable config (auth from the SecretStore), and 400s an unknown name", async () => {
+    // Powers pull-ingest "by name": register a source once, then a scorecard pulls by name instead of restating the config.
+    const svc = new TraceSourceService(fakeSettings(), {
+      secretsFor: async () => ({ "mlflow-token": "Basic abc123" }),
+    });
+    await svc.upsert(WS, {
+      name: "dev-mlflow",
+      kind: "mlflow",
+      endpoint: "https://mlflow.acme.dev",
+      authSecretName: "mlflow-token",
+      correlate: "tag",
+      project: "12",
+    });
+    const cfg = await svc.resolveByName(WS, "dev-mlflow");
+    expect(cfg).toMatchObject({
+      kind: "mlflow",
+      endpoint: "https://mlflow.acme.dev",
+      headers: { authorization: "Basic abc123" }, // secret NAME → value, resolved at point of use
+      project: "12",
+      correlate: "tag",
+    });
+    await expect(svc.resolveByName(WS, "ghost")).rejects.toThrow(/Unregistered trace source/);
+  });
+
   it("requires a scope for mlflow/phoenix regardless of correlate (traces live inside an experiment/project)", async () => {
     const svc = new TraceSourceService(fakeSettings());
     // mlflow default correlate:'id' still needs the experiment — the meaningful-test fix.

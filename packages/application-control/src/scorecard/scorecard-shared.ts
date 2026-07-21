@@ -115,18 +115,24 @@ export type IngestScorecardInput = IngestScorecardBody & {
 };
 
 // pull-ingest body — pull per-runId traces from the tenant's OTel/MLflow and score them (harness not run).
-// source credentials come only via the authSecret name (SecretStore) — no plaintext token in the spec.
+// The source is EITHER a registered workspace trace source referenced by name ("register once, pull by name" — the
+// low-friction path) OR an inline ad-hoc config. Named: credential/kind/endpoint come from the pool; inline: credentials
+// come only via the authSecret name (SecretStore) — no plaintext token in the spec.
 export const PullIngestBodySchema = z.object({
   dataset: z.object({ id: z.string(), version: z.string().default("latest") }),
   harness: z.object({ id: z.string(), version: z.string().default("latest") }),
-  source: z.object({
-    kind: z.enum(["otel", "mlflow", "langfuse", "langsmith", "phoenix"]),
-    endpoint: z.string().url(),
-    // SecretStore key name → its value used as the credential. otel/mlflow use the Authorization header verbatim (scheme included:
-    // "Bearer …"|"Basic …"); for langfuse/langsmith/phoenix the adapter places it in the platform's conventional header (langsmith=x-api-key).
-    authSecret: z.string().optional(),
-    project: z.string().optional(), // required for phoenix span-lookup path (project name/ID). Ignored for other kinds.
-  }),
+  source: z.union([
+    // a registered workspace source (Settings › Observability) — the whole connection is already stored under this name.
+    z.object({ name: z.string().min(1) }),
+    z.object({
+      kind: z.enum(["otel", "mlflow", "langfuse", "langsmith", "phoenix"]),
+      endpoint: z.string().url(),
+      // SecretStore key name → its value used as the credential. otel/mlflow use the Authorization header verbatim (scheme included:
+      // "Bearer …"|"Basic …"); for langfuse/langsmith/phoenix the adapter places it in the platform's conventional header (langsmith=x-api-key).
+      authSecret: z.string().optional(),
+      project: z.string().optional(), // required for phoenix span-lookup path (project name/ID). Ignored for other kinds.
+    }),
+  ]),
   runs: z.array(z.object({ caseId: z.string(), runId: z.string() })).min(1),
   judges: z.array(z.object({ id: z.string(), version: z.string().default("latest") })).default([]),
 });
@@ -295,6 +301,9 @@ export interface ScorecardServiceDeps {
   queueDepth?: () => number;
   queuePressure?: number; // queued entries above this = pressure (default 64)
   buildTraceSource?: (cfg: TraceSourceConfig) => TraceSource; // trace source factory for pull-ingest (@everdict/trace)
+  // Resolve a REGISTERED workspace trace source by name → a usable TraceSourceConfig (auth resolved). Powers pull-ingest
+  // "by name" (register once in the pool, then pull by name) — bound to TraceSourceService.resolveByName. Unknown name → 400.
+  resolveTraceSourceByName?: (tenant: string, name: string) => Promise<TraceSourceConfig>;
   // Per-harness span-attribute mapping overlay (the conversion layer authored in the judge wizard, WorkspaceSettings
   // .spanAttrMappingByHarness) — applied to the pull-eval trace source so production traces normalize the way the
   // harness/judge expect. Absent = no overlay (span→TraceEvent uses the source config / OTel GenAI defaults).

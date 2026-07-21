@@ -8,6 +8,7 @@ import {
   type Scorecard,
   type ScorecardRecord,
   type TraceEvidence,
+  type TraceSourceConfig,
   toScores,
 } from "@everdict/contracts";
 import { ScorecardBatch, type ScorecardTransition, scorecardModels, summarizeScorecard } from "@everdict/domain";
@@ -141,26 +142,39 @@ export class ScorecardIngestService {
     try {
       if (!this.deps.buildTraceSource)
         throw new BadRequestError("BAD_REQUEST", {}, "trace source builder is not configured (pull disabled).");
-      // credential: source.authSecret name → inject the tenant SecretStore value verbatim as the Authorization header.
-      // The value includes the scheme (e.g. "Bearer <token>" [OTel/Jaeger] or "Basic <base64>" [MLflow]) — don't hardcode the scheme.
-      let headers: Record<string, string> | undefined;
-      if (source.authSecret) {
-        const secrets = await (this.deps.secretsFor?.(tenant) ?? Promise.resolve<Record<string, string>>({}));
-        const token = secrets[source.authSecret];
-        if (token) headers = { authorization: token };
+      // Source config — EITHER a registered workspace source (by name, "register once, pull by name") whose whole
+      // connection (kind/endpoint/credential/scope) is resolved from the pool, OR an inline ad-hoc config.
+      let base: TraceSourceConfig;
+      if ("name" in source) {
+        if (!this.deps.resolveTraceSourceByName)
+          throw new BadRequestError(
+            "BAD_REQUEST",
+            {},
+            "Named trace sources are not configured — pass an inline source config.",
+          );
+        base = await this.deps.resolveTraceSourceByName(tenant, source.name); // resolves auth from the SecretStore; unknown name → 400
+      } else {
+        // credential: source.authSecret name → inject the tenant SecretStore value verbatim as the Authorization header.
+        // The value includes the scheme (e.g. "Bearer <token>" [OTel/Jaeger] or "Basic <base64>" [MLflow]) — don't hardcode the scheme.
+        let headers: Record<string, string> | undefined;
+        if (source.authSecret) {
+          const secrets = await (this.deps.secretsFor?.(tenant) ?? Promise.resolve<Record<string, string>>({}));
+          const token = secrets[source.authSecret];
+          if (token) headers = { authorization: token };
+        }
+        base = {
+          kind: source.kind,
+          endpoint: source.endpoint,
+          ...(headers ? { headers } : {}),
+          // credential 'value' for the newer sources (langfuse/langsmith/phoenix) — the adapter owns the header name.
+          ...(headers?.authorization ? { auth: headers.authorization } : {}),
+          ...(source.project ? { project: source.project } : {}),
+        };
       }
       // Per-harness conversion overlay (judge-wizard-authored) — production traces normalize the way this harness/judge
       // expect. This is the periodic-eval consumer of the same SpanAttrMapping the dispatch-after-judge path bakes.
       const mapping = await this.deps.spanMappingFor?.(tenant, harnessId);
-      const src = this.deps.buildTraceSource({
-        kind: source.kind,
-        endpoint: source.endpoint,
-        ...(headers ? { headers } : {}),
-        // credential 'value' for the newer sources (langfuse/langsmith/phoenix) — the adapter owns the header name.
-        ...(headers?.authorization ? { auth: headers.authorization } : {}),
-        ...(source.project ? { project: source.project } : {}),
-        ...(mapping ? { mapping } : {}),
-      });
+      const src = this.deps.buildTraceSource({ ...base, ...(mapping ? { mapping } : {}) });
       const perCase: IngestScorecardBody["traces"] = [];
       for (const r of runs) {
         // fetchDetailed (when the source provides it) also extracts the mapping's evidence slots — an external
@@ -183,7 +197,7 @@ export class ScorecardIngestService {
         perCase,
         judges,
         {
-          sourceKind: source.kind,
+          sourceKind: base.kind, // resolved kind (named source or inline) — for same-platform attach-only export
           externalIdByCase: Object.fromEntries(runs.map((r) => [r.caseId, r.runId])),
         },
         record.createdBy,

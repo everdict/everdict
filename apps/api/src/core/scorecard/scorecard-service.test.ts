@@ -538,6 +538,47 @@ describe("ScorecardService.ingestPull", () => {
     expect(captured?.headers?.authorization).toBe("Bearer secret-xyz");
   });
 
+  it("resolves a REGISTERED source referenced by name (register once, pull by name) — the credential comes from the pool, not the request", async () => {
+    const store = new InMemoryScorecardStore();
+    const datasets = new InMemoryDatasetRegistry();
+    await datasets.register("acme", datasetWithCase());
+    const trace: TraceEvent[] = [{ t: 0, kind: "tool_call", id: "t1", name: "bash", args: {} }];
+    let captured: TraceSourceConfig | undefined;
+    const service = new ScorecardService({
+      dispatcher,
+      store,
+      datasets,
+      defaultTraceGraders,
+      buildTraceSource: (cfg): TraceSource => {
+        captured = cfg;
+        return { fetch: async () => trace };
+      },
+      // the workspace pool resolver — a name → the whole config (as TraceSourceService.resolveByName does).
+      resolveTraceSourceByName: async (_t, name) => {
+        if (name !== "prod-mlflow") throw new BadRequestError("BAD_REQUEST", {}, "Unregistered trace source");
+        return {
+          kind: "mlflow",
+          endpoint: "https://mlflow.prod",
+          headers: { authorization: "Basic xyz" },
+          project: "7",
+          correlate: "tag",
+        };
+      },
+    });
+    const created = await service.ingestPull({
+      tenant: "acme",
+      dataset: { id: "d", version: "latest" },
+      harness: { id: "h", version: "1.0.0" },
+      source: { name: "prod-mlflow" }, // just a name — no kind/endpoint/credential restated
+      runs: [{ caseId: "c1", runId: "trace-1" }],
+      judges: [],
+    });
+    const done = await waitTerminal(store, created.id);
+    expect(done.status).toBe("succeeded");
+    expect(captured).toMatchObject({ kind: "mlflow", endpoint: "https://mlflow.prod", project: "7" });
+    expect(captured?.headers?.authorization).toBe("Basic xyz"); // resolved from the registered pool
+  });
+
   it("applies the per-harness conversion overlay (spanMappingFor) to the pull-eval trace source", async () => {
     const store = new InMemoryScorecardStore();
     const datasets = new InMemoryDatasetRegistry();
