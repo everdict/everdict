@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isRunnerOnline, RUNNER_ONLINE_WINDOW_MS } from "./liveness.js";
+import { RUNNER_ONLINE_WINDOW_MS, isRunnerOnline } from "./liveness.js";
 
 describe("isRunnerOnline", () => {
   const now = Date.parse("2026-07-19T12:00:00.000Z");

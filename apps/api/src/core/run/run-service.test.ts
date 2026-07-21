@@ -120,7 +120,14 @@ describe("RunService", () => {
     });
     await store.create({ ...base, id: "a", caseId: "c", createdAt: "2026-07-01T00:00:00.000Z", result: ranBy("r1") });
     // a scorecard CHILD this runner ran → included (a runner mostly runs cases), and it's the newest
-    await store.create({ ...base, id: "b", caseId: "c", parentScorecardId: "sc1", createdAt: "2026-07-03T00:00:00.000Z", result: ranBy("r1") });
+    await store.create({
+      ...base,
+      id: "b",
+      caseId: "c",
+      parentScorecardId: "sc1",
+      createdAt: "2026-07-03T00:00:00.000Z",
+      result: ranBy("r1"),
+    });
     await store.create({ ...base, id: "c", caseId: "c", createdAt: "2026-07-02T00:00:00.000Z", result: ranBy("r2") }); // other runner
     await store.create({ ...base, id: "d", caseId: "c", createdAt: "2026-07-04T00:00:00.000Z" }); // no provenance (managed / in-flight)
 

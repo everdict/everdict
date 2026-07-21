@@ -34,12 +34,12 @@ import {
 import { collectDeferredTrace } from "../execution/collect-trace.js";
 import { executeCase } from "../execution/execute-case.js";
 import type { ScoringService } from "../execution/scoring-service.js";
-import type { DispatchOptions } from "../ports/dispatcher.js";
 import { AdaptiveConcurrencyGate } from "../ops/adaptive-concurrency.js";
 import { OOM_ESCALATION_CAP_MB, executeWithOomBoost } from "../ops/oom-boost.js";
 import { executeWithSpillover } from "../ops/runtime-spillover.js";
 import { weightedTargets } from "../ops/shard-weights.js";
 import { SpeculationController } from "../ops/speculation.js";
+import type { DispatchOptions } from "../ports/dispatcher.js";
 import { type Dispatch, runSuite } from "../run-suite.js";
 import {
   type ScorecardServiceDeps,
