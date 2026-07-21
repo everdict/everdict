@@ -13,28 +13,38 @@ import {
 import { membersSchema } from '@/entities/member'
 import { queueSnapshotSchema, type QueueSnapshot } from '@/entities/queue'
 
-// Shared work-widget state — the collapsed summary pill (top-right cluster) and the expanded docking rail (a sibling
-// of main) live at different DOM locations yet must share the same open state and the same polling snapshot, so it is
-// lifted into context (one poll refreshes both). Data is client polling of GET /queue (BFF /api/queue) — slow when
-// closed / fast when open, skipped while the tab is hidden.
+// Infra split-view state — the screen splits into an eval side (left: routed pages) and an infra side (right:
+// the floating panel with schedules / runtimes / runs / work). The vertical rail (the divider device) and the
+// panel live at different DOM locations yet share the open state, the active tab, the selected live run and the
+// polled queue snapshot, so it is lifted into context. Mounted once in the [workspace] shell — the panel
+// survives left-side navigation, which is what keeps a run's live stream uninterrupted.
 
 export type WorkAuthor = { name: string; avatarUrl?: string }
 
-type WorkPanelValue = {
+export type InfraTab = 'schedules' | 'runtimes' | 'runs' | 'work'
+
+type InfraPanelValue = {
   workspace: string
   open: boolean
-  setOpen: (v: boolean) => void
-  toggle: () => void
+  tab: InfraTab
+  // Rail button semantics — same tab while open = collapse; otherwise open on that tab.
+  toggleTab: (tab: InfraTab) => void
+  close: () => void
+  // Live run selection (runs tab) — openRun() is the cross-page entry: any left-side surface can push a run
+  // into the right panel without navigating away.
+  selectedRunId: string | null
+  selectRun: (id: string | null) => void
+  openRun: (id: string) => void
   snapshot: QueueSnapshot | null
   authors: Record<string, WorkAuthor>
 }
 
-const WorkPanelContext = createContext<WorkPanelValue | null>(null)
+const InfraPanelContext = createContext<InfraPanelValue | null>(null)
 
 const POLL_OPEN_MS = 4_000 // when open — live progress
-const POLL_CLOSED_MS = 20_000 // when closed — only refresh the summary counts
+const POLL_CLOSED_MS = 20_000 // when closed — only refresh the rail badge counts
 
-export function WorkPanelProvider({
+export function InfraPanelProvider({
   workspace,
   children,
 }: {
@@ -42,6 +52,8 @@ export function WorkPanelProvider({
   children: ReactNode
 }) {
   const [open, setOpen] = useState(false)
+  const [tab, setTab] = useState<InfraTab>('work')
+  const [selectedRunId, setSelectedRunId] = useState<string | null>(null)
   const [snapshot, setSnapshot] = useState<QueueSnapshot | null>(null)
   const [authors, setAuthors] = useState<Record<string, WorkAuthor>>({})
   const authorsLoaded = useRef(false)
@@ -75,7 +87,7 @@ export function WorkPanelProvider({
     }
   }, [poll, open])
 
-  // Authors (name/avatar) — lazy-loaded only on the rail's first open (so we don't add a member lookup to every page).
+  // Authors (name/avatar) — lazy-loaded only on the panel's first open (so we don't add a member lookup to every page).
   useEffect(() => {
     if (!open || authorsLoaded.current) return
     authorsLoaded.current = true
@@ -108,17 +120,47 @@ export function WorkPanelProvider({
     return () => window.removeEventListener('keydown', onKey)
   }, [open])
 
-  const toggle = useCallback(() => setOpen((v) => !v), [])
+  const toggleTab = useCallback(
+    (next: InfraTab) => {
+      if (open && tab === next) setOpen(false)
+      else {
+        setTab(next)
+        setOpen(true)
+      }
+    },
+    [open, tab]
+  )
+
+  const close = useCallback(() => setOpen(false), [])
+
+  const openRun = useCallback((id: string) => {
+    setSelectedRunId(id)
+    setTab('runs')
+    setOpen(true)
+  }, [])
 
   return (
-    <WorkPanelContext.Provider value={{ workspace, open, setOpen, toggle, snapshot, authors }}>
+    <InfraPanelContext.Provider
+      value={{
+        workspace,
+        open,
+        tab,
+        toggleTab,
+        close,
+        selectedRunId,
+        selectRun: setSelectedRunId,
+        openRun,
+        snapshot,
+        authors,
+      }}
+    >
       {children}
-    </WorkPanelContext.Provider>
+    </InfraPanelContext.Provider>
   )
 }
 
-export function useWorkPanel(): WorkPanelValue {
-  const ctx = useContext(WorkPanelContext)
-  if (!ctx) throw new Error('useWorkPanel must be used within WorkPanelProvider')
+export function useInfraPanel(): InfraPanelValue {
+  const ctx = useContext(InfraPanelContext)
+  if (!ctx) throw new Error('useInfraPanel must be used within InfraPanelProvider')
   return ctx
 }

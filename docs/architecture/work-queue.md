@@ -55,12 +55,14 @@ breaker state (open = dispatches currently route around this runtime). The web l
 envelope (`used/budget Mb`) and an open-circuit badge; live-verified: an autoscaled batch showed
 `queued 4 / inFlight 8` + `memInFlightMb 4096`, and a dead-runtime shard surfaced `circuit {open, consecutive 3}`.
 
-## Web (`/{workspace}/queue`, nav 'Work')
-`widgets/queue-board` — two groups: **workspace queue / my personal queue (self-hosted)**. Each lane card
-(Server/Laptop icon + label + count, idle badge) has 3 columns in **flow direction**:
-**next-scheduled ⇢ queued (FIFO, a 'next' badge at the front) ⇢ running (progress bar)** — pulse connectors between
-columns give a left→right rushing-current feel. Items are fixed-spec rows (52px): EntityRef kind icon +
-executor avatar + timestamp. If there's active work, `AutoRefresh` (5s); if everything is idle, no polling.
+## Web (the infra panel's work tab, `widgets/infra-panel`)
+Not a nav page — the **work tab of the floating infra panel**, opened from the vertical rail on the right edge
+(the rail's work button always carries the running+queued badge, fed by a slow background poll). Two groups:
+**workspace queue / my personal queue (self-hosted)**. Each lane card (Server/Laptop icon + label + count, idle
+badge) renders the flow vertically: **next-scheduled ⇢ queued (FIFO, a 'next' badge at the front) ⇢ running
+(progress bar)**. Items are fixed one-line rows: EntityRef refs + executor avatar + timestamp; a running single
+run offers a watch-live shortcut that opens it in the panel's runs tab (live screen + log tail) in place.
+Polling: 4s while the panel is open, 20s closed (badge only), skipped while the tab is hidden.
 
 ## Correctness: orphan recovery on boot
 Batches/runs are tracked in-process inside the control-plane process (single-process assumption) — on restart, the

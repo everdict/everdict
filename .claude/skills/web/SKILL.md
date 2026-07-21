@@ -67,6 +67,10 @@ near-black `#08090a` dark surface). Light+dark via the `.dark` class (`@custom-v
   bare `dl` grid.
 - **State toggles** = a status icon + click dropdown (`shared/ui/dropdown-menu.tsx`; e.g.
   `widgets/notification-bell/`), not text links.
+- **Infra split view** (`widgets/infra-panel`): infra concerns (schedules · runtimes · runs · work queue) open
+  in the floating right panel toggled by the vertical rail — eval pages stay on the left half. To show a run
+  live from any page, call `useInfraPanel().openRun(id)`; don't build per-page live viewers or re-dock the
+  panel as a flush column.
 - **Secret-name inputs** are never free text — use `SecretPicker` from `features/pick-secret`
   (combobox over preloaded names + "new" inline create; `defaultMultiline` for PEM/kubeconfig).
   Used by harness env, GHE App private key, Mattermost tokens.

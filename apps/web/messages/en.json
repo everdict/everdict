@@ -2739,9 +2739,6 @@
     "discuss": "Discussion"
   },
   "workPanel": {
-    "title": "Work",
-    "summaryAria": "Work — {running} running, {queued} queued, {upcoming} scheduled",
-    "collapse": "Collapse work panel",
     "loading": "Loading…",
     "empty": "Nothing running or queued",
     "running": "Running",
@@ -2770,6 +2767,31 @@
     "workspaceQueue": "Workspace queue",
     "personalQueue": "My personal queue (self-hosted)",
     "personalEmpty": "No runner connected — <link>connect your machine in Runtimes</link>."
+  },
+  "infraPanel": {
+    "tab_schedules": "Schedules",
+    "tab_runtimes": "Runtimes",
+    "tab_runs": "Runs",
+    "tab_work": "Work",
+    "collapse": "Collapse panel",
+    "fullPage": "Full page",
+    "watchLive": "Watch live",
+    "loading": "Loading…",
+    "backToList": "Back",
+    "openRunDetail": "Open detail",
+    "activeRuns": "Active",
+    "recentRuns": "Recently settled",
+    "runsEmpty": "No runs yet",
+    "workspaceRuntimes": "Workspace runtimes",
+    "myRunners": "My runners",
+    "versionCount": "{n} versions",
+    "updateRequired": "Update required",
+    "online": "Online",
+    "offline": "Offline",
+    "runtimesEmpty": "No runtimes or runners yet",
+    "schedulesEmpty": "No schedules yet",
+    "disabled": "Off",
+    "lastFailed": "Last run failed"
   },
   "workspaceSettings": {
     "meterUsage": "Meter usage",

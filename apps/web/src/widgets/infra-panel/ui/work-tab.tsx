@@ -1,14 +1,13 @@
 'use client'
 
-import { useCallback } from 'react'
 import Link from 'next/link'
 import {
-  Activity,
   CalendarClock,
   ChevronsRight,
   CircleDashed,
   Laptop,
   Loader2,
+  MonitorPlay,
   Server,
 } from 'lucide-react'
 import { useTranslations } from 'next-intl'
@@ -19,18 +18,15 @@ import { cn } from '@/shared/lib/utils'
 import { UserAvatar } from '@/shared/ui/avatar'
 import { Badge } from '@/shared/ui/badge'
 import { EntityRef } from '@/shared/ui/chip'
+import { Tooltip } from '@/shared/ui/tooltip'
 
-import { useWorkPanel, type WorkAuthor } from '../model/work-panel-context'
+import { useInfraPanel, type WorkAuthor } from '../model/infra-panel-context'
 
-// Expanded work rail — rendered as a flex-child sibling of main, so when open it takes real layout space and main
-// shrinks accordingly (md+ docking). No dim overlay. On a narrow screen (mobile) there is no room to dock, so it
-// falls back to a fixed right-hand sheet. Reconstructs the docs/architecture/work-queue.md snapshot vertically —
-// top summary + scheduler admission + per-lane flow.
+// Work tab — the queue snapshot rendered vertically (docs/architecture/work-queue.md): top summary + scheduler
+// admission + per-lane flow (upcoming ⇢ queued ⇢ running). Moved from the former standalone work rail into the
+// infra panel. Running single runs additionally get a live-view shortcut that opens them in the runs tab.
 
 type Translate = ReturnType<typeof useTranslations<'workPanel'>>
-
-// Top padding so the rail starts below the cluster (the floating top-right bell + summary pill) — to avoid overlapping it.
-const CLUSTER_CLEARANCE = 'h-11 shrink-0'
 
 // Lane label — prefer the server-provided label (the runner hostname). '' = the default backend.
 function laneLabel(lane: QueueLane, t: Translate): string {
@@ -76,7 +72,8 @@ function Progress({ progress }: { progress: NonNullable<QueueItem['progress']> }
   )
 }
 
-// Work item — a fixed one-line format: dataset→harness + progress/status + runner·time. Click = go to the detail (closing the rail on mobile).
+// Work item — a fixed one-line format: dataset→harness + progress/status + runner·time. Click = go to the detail
+// (closing the panel on mobile). A running single run also offers "watch live" = open it in the runs tab in place.
 function ItemRow({
   item,
   workspace,
@@ -91,6 +88,8 @@ function ItemRow({
   next?: boolean
 }) {
   const t = useTranslations('workPanel')
+  const tp = useTranslations('infraPanel')
+  const { openRun } = useInfraPanel()
   const href =
     item.type === 'scorecard'
       ? `/${workspace}/scorecards/${encodeURIComponent(item.id)}`
@@ -98,11 +97,12 @@ function ItemRow({
   const author = item.createdBy
     ? (authors[item.createdBy] ?? { name: fmtSubject(item.createdBy) })
     : undefined
+  const live = item.type === 'run' && item.status === 'running'
   return (
     <Link
       href={href}
       onClick={onNavigate}
-      className="flex items-center gap-2 rounded-md border bg-card px-2 py-1.5 transition-colors hover:border-border-strong hover:bg-elevated"
+      className="group flex items-center gap-2 rounded-md border bg-card px-2 py-1.5 transition-colors hover:border-border-strong hover:bg-elevated"
     >
       <div className="min-w-0 flex-1 space-y-1">
         <div className="flex items-center gap-1.5 overflow-hidden whitespace-nowrap text-[12px] font-[510]">
@@ -142,6 +142,22 @@ function ItemRow({
           )}
         </div>
       </div>
+      {live && (
+        <Tooltip content={tp('watchLive')} side="top" align="end">
+          <button
+            type="button"
+            aria-label={tp('watchLive')}
+            onClick={(e) => {
+              e.preventDefault()
+              e.stopPropagation()
+              openRun(item.id)
+            }}
+            className="grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100"
+          >
+            <MonitorPlay className="size-3.5" />
+          </button>
+        </Tooltip>
+      )}
       <span className="flex w-5 shrink-0 justify-center">
         {author && (
           <UserAvatar name={author.name} url={author.avatarUrl} label={t('runnerLabel')} />
@@ -389,7 +405,7 @@ function LaneGroup({
   )
 }
 
-// Top summary stats (running/queued/upcoming) — compact for the rail.
+// Top summary stats (running/queued/upcoming) — compact for the panel.
 function Totals({ totals }: { totals: QueueSnapshot['totals'] }) {
   const t = useTranslations('workPanel')
   const cells: Array<{ label: string; value: number; primary?: boolean }> = [
@@ -416,125 +432,77 @@ function Totals({ totals }: { totals: QueueSnapshot['totals'] }) {
   )
 }
 
-export function WorkRail() {
+export function WorkTab({ onNavigate }: { onNavigate: () => void }) {
   const t = useTranslations('workPanel')
-  const { open, setOpen, snapshot, authors, workspace } = useWorkPanel()
+  const { snapshot, authors, workspace } = useInfraPanel()
 
-  // Close on navigation only when a mobile overlay (a docked desktop keeps the detail beside it = a persistent panel).
-  const onNavigate = useCallback(() => {
-    if (typeof window !== 'undefined' && window.matchMedia('(max-width: 767px)').matches) {
-      setOpen(false)
-    }
-  }, [setOpen])
-
-  if (!open) return null
-  const close = () => setOpen(false)
   const active = (snapshot?.totals.running ?? 0) + (snapshot?.totals.queued ?? 0)
 
+  if (!snapshot)
+    return (
+      <div className="flex items-center justify-center gap-2 py-8 text-[12.5px] text-faint">
+        <Loader2 className="size-3.5 animate-spin" /> {t('loading')}
+      </div>
+    )
+
   return (
-    <>
-      {/* Mobile only — no room to dock, so a fixed right-hand sheet. Tap to close (a light scrim, not a dim). Desktop is docked, so no backdrop. */}
-      <button
-        type="button"
-        aria-label={t('collapse')}
-        onClick={close}
-        className="fixed inset-0 z-40 cursor-default bg-black/20 md:hidden"
-      />
-      <aside
-        aria-label={t('title')}
-        // The top starts below the desktop title bar (--titlebar-h), and the height is the viewport minus that. Mobile = a
-        // fixed right-hand sheet; md+ = a real layout column with sticky docking (main shrinks accordingly). z is raised only on mobile, to sit above the cluster.
-        style={{ top: 'var(--titlebar-h)', height: 'calc(100dvh - var(--titlebar-h))' }}
-        className={cn(
-          'flex w-[min(380px,100vw)] flex-col border-l border-border bg-background',
-          'fixed right-0 z-50 shadow-pop',
-          'md:sticky md:right-auto md:z-auto md:w-[340px] md:shrink-0 md:self-start md:shadow-none'
-        )}
-      >
-        {/* Reserve top space so it doesn't overlap the floating cluster (bell + summary pill) — closing is via the cluster's summary pill / Esc / the button below. */}
-        <div className={CLUSTER_CLEARANCE} />
-        <div className="flex items-center justify-between gap-2 border-b border-border px-3.5 pb-2.5">
-          <div className="flex items-center gap-2">
-            <Activity className="size-4 text-primary" strokeWidth={1.75} />
-            <h2 className="text-[14px] font-[560] tracking-[-0.01em]">{t('title')}</h2>
-          </div>
-          <button
-            type="button"
-            aria-label={t('collapse')}
-            onClick={close}
-            className="grid size-7 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
-          >
-            <ChevronsRight className="size-4" />
-          </button>
-        </div>
+    <div className="space-y-4 px-3.5 py-3.5">
+      <Totals totals={snapshot.totals} />
 
-        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-3.5 py-3.5">
-          {snapshot ? (
-            <>
-              <Totals totals={snapshot.totals} />
-
-              {/* Orchestrator headline — how much the control-plane scheduler is admitting right now (in-flight/queued/quota). */}
-              {snapshot.scheduler && (
-                <div className="flex items-center gap-1.5 rounded-md border bg-card px-2.5 py-2 font-mono text-[11px] tabular-nums text-muted-foreground">
-                  <ChevronsRight className="size-3.5 shrink-0 text-primary/60" />
-                  <span>
-                    {t('schedulerLine', {
-                      inFlight: snapshot.scheduler.inFlight,
-                      queued: snapshot.scheduler.queued,
-                    })}
-                  </span>
-                  {snapshot.scheduler.quota !== undefined && (
-                    <span className="text-faint">
-                      {t('schedulerQuota', { quota: snapshot.scheduler.quota })}
-                    </span>
-                  )}
-                </div>
-              )}
-
-              {active === 0 && snapshot.totals.upcoming === 0 ? (
-                <p className="py-6 text-center text-[12.5px] text-faint">{t('empty')}</p>
-              ) : (
-                <>
-                  <LaneGroup
-                    title={t('workspaceQueue')}
-                    lanes={snapshot.workspace}
-                    workspace={workspace}
-                    authors={authors}
-                    onNavigate={onNavigate}
-                  />
-                  <LaneGroup
-                    title={t('personalQueue')}
-                    lanes={snapshot.personal}
-                    workspace={workspace}
-                    authors={authors}
-                    onNavigate={onNavigate}
-                    personal
-                    emptyHint={
-                      <p className="text-[11.5px] text-faint">
-                        {t.rich('personalEmpty', {
-                          link: (chunks) => (
-                            <Link
-                              href={`/${workspace}/runtimes`}
-                              onClick={onNavigate}
-                              className="text-link hover:underline"
-                            >
-                              {chunks}
-                            </Link>
-                          ),
-                        })}
-                      </p>
-                    }
-                  />
-                </>
-              )}
-            </>
-          ) : (
-            <div className="flex items-center justify-center gap-2 py-8 text-[12.5px] text-faint">
-              <Loader2 className="size-3.5 animate-spin" /> {t('loading')}
-            </div>
+      {/* Orchestrator headline — how much the control-plane scheduler is admitting right now (in-flight/queued/quota). */}
+      {snapshot.scheduler && (
+        <div className="flex items-center gap-1.5 rounded-md border bg-card px-2.5 py-2 font-mono text-[11px] tabular-nums text-muted-foreground">
+          <ChevronsRight className="size-3.5 shrink-0 text-primary/60" />
+          <span>
+            {t('schedulerLine', {
+              inFlight: snapshot.scheduler.inFlight,
+              queued: snapshot.scheduler.queued,
+            })}
+          </span>
+          {snapshot.scheduler.quota !== undefined && (
+            <span className="text-faint">
+              {t('schedulerQuota', { quota: snapshot.scheduler.quota })}
+            </span>
           )}
         </div>
-      </aside>
-    </>
+      )}
+
+      {active === 0 && snapshot.totals.upcoming === 0 ? (
+        <p className="py-6 text-center text-[12.5px] text-faint">{t('empty')}</p>
+      ) : (
+        <>
+          <LaneGroup
+            title={t('workspaceQueue')}
+            lanes={snapshot.workspace}
+            workspace={workspace}
+            authors={authors}
+            onNavigate={onNavigate}
+          />
+          <LaneGroup
+            title={t('personalQueue')}
+            lanes={snapshot.personal}
+            workspace={workspace}
+            authors={authors}
+            onNavigate={onNavigate}
+            personal
+            emptyHint={
+              <p className="text-[11.5px] text-faint">
+                {t.rich('personalEmpty', {
+                  link: (chunks) => (
+                    <Link
+                      href={`/${workspace}/runtimes`}
+                      onClick={onNavigate}
+                      className="text-link hover:underline"
+                    >
+                      {chunks}
+                    </Link>
+                  ),
+                })}
+              </p>
+            }
+          />
+        </>
+      )}
+    </div>
   )
 }

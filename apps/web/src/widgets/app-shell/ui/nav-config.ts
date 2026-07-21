@@ -29,7 +29,7 @@ export interface NavSection {
 // First-class concepts of the SaaS surface: home (overview) · run (individual execution/activity) · harness (what) · benchmark
 // (with what) · scorecard (result) · judge (who scores the result) · runtime (where — execution infra the workspace registers
 // itself, no default seed) + flows (views/schedules).
-// The work queue is no longer a nav page — it's the always-present floating work panel (widgets/work-panel) in the top-right cluster.
+// The work queue is no longer a nav page — it's the work tab of the floating infra panel (widgets/infra-panel), opened from the vertical rail.
 // metric/model/recipe/bundle are engine parts/advanced options — excluded from the nav (routes remain, reachable via URL).
 export const NAV_SECTIONS: NavSection[] = [
   {

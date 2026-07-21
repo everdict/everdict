@@ -102,12 +102,21 @@ panel/list guidance is not.
   `TraceEvent[]`; **pull** fetches from a tenant's OTel/MLflow (`source` + `runs:[{caseId,runId}]`, auth-secret name).
   Both produce a scorecard with no harness run. Role-gated off `/me` (run/ingest = member+, read/compare = viewer+).
   See `docs/scorecards.md`.
-- **Work `/{workspace}/queue`** — the **work queue**: per-runtime lanes (default backend · registered runtimes ·
-  `self:<runner>`) each showing **running** (batch = one item with a case-progress bar), **waiting** (FIFO — first
-  item badged 'Next'), and **next scheduled** (upcoming schedule fires, Temporal-authoritative). Reads
-  `GET /queue` (`runs:read`; MCP parity `get_queue`); auto-refreshes while anything is active. Runtime placement
-  is captured on records (`RunRecord.runtime`/`ScorecardRecord.runtime`, mig 0040). See
-  `docs/architecture/work-queue.md`.
+- **Infra panel (split view, `widgets/infra-panel`)** — infra concerns (schedules · runtimes · runs · work
+  queue) don't live on the left with the eval pages: a **vertical rail** of toggle buttons (vertically centered,
+  the divider between the eval half and the infra half) opens a **floating right panel** (rounded, gapped,
+  pop-shadow card — not a flush docked column) as a flex sibling of `main`, so the two sides split the space
+  half-and-half on md+; on mobile the rail floats on the right edge and the panel becomes a floating sheet.
+  Panel state + polling live in `InfraPanelProvider` in the shell (above the routes), so left-side navigation
+  never unmounts it. Tabs: **work** — the queue snapshot: per-runtime lanes (default backend · registered
+  runtimes · `self:<runner>`) each showing running (batch = case-progress bar), waiting (FIFO, first badged
+  'Next') and next-scheduled fires, from `GET /queue` (`runs:read`; MCP parity `get_queue`; see
+  `docs/architecture/work-queue.md`); **runs** — the execution feed (BFF `/api/runs`, scope=all) where selecting
+  a run swaps in its **uninterrupted live view** (LiveScreen frames + LiveLogs tail) right in the panel — the
+  cross-page entry is `useInfraPanel().openRun(id)` (e.g. the work tab's watch-live shortcut on running runs);
+  **runtimes** — the infra roster (workspace runtimes + my self-hosted runners with 90s-window online dots, BFF
+  `/api/runtimes`); **schedules** — enabled-first upcoming fires (BFF `/api/schedules`). Runtime placement is
+  captured on records (`RunRecord.runtime`/`ScorecardRecord.runtime`, mig 0040).
 - **Judge `/{workspace}/judges`** — owned vs `_shared` Agent Judges (kind + version chips; rows link to detail).
   **Detail `/{workspace}/judges/[id]`** shows kind + fields + rubric. **Register `/{workspace}/judges/new`** — a
   **kind-toggle form** (model | harness) with a validate (dry-run) step → `POST /judges`. Role-gated off `/me`
