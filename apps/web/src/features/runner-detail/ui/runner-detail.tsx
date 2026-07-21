@@ -80,12 +80,15 @@ export function RunnerDetail({
   }, [router])
 
   const online = isOnline(runner.lastSeenAt)
-  // The live status of THIS runner from the desktop bridge (present only when it's paired to THIS device). Only then can
-  // the bridge reconnect it (it holds the rnr_ token), and only then do we have the LOCAL note + the URL it's dialing.
+  // Running inside the desktop shell? Then the user CAN act on the runner here (reconnect / change the server address).
+  const inDesktop = bridge !== null
+  // The live status of THIS runner from the desktop bridge (present only when it's paired to THIS device) — the source
+  // of the LOCAL note + the URL it's dialing.
   const deviceStatus = (desktop?.runners ?? []).find((r) => r.paired && r.runnerId === runner.id)
   const onThisDevice = deviceStatus !== undefined
-  const canReconnect =
-    bridge !== null && typeof bridge.reconnectRunner === 'function' && onThisDevice
+  // Reconnect whenever the desktop shell exposes it — reconnectRunner(id) is a safe no-op for a runner this device
+  // doesn't hold, so we don't gate on the (async-loaded, occasionally-empty) bridge status and leave the user buttonless.
+  const canReconnect = bridge !== null && typeof bridge.reconnectRunner === 'function'
   // Local (desktop) note wins over the CP-side status: a runner that can't reach the control plane has NO CP-side status
   // (the CP never heard from it), but the desktop knows the reason ("cannot reach control plane: …").
   const note = deviceStatus?.note ?? runner.status
@@ -263,9 +266,11 @@ export function RunnerDetail({
       {!online && (
         <Card className="space-y-3 p-5">
           <p className="text-[13px] font-[560] text-foreground">{t('offlineTitle')}</p>
-          {onThisDevice ? (
-            // Inside the desktop app, this runner is on THIS device — never tell the user to "open the desktop app".
-            // Show the URL it's dialing (a wrong/loopback one is the #1 cause) + reconnect + how to change it.
+          {inDesktop ? (
+            // Inside the desktop app — the user can act here; never tell them to "open the desktop app". Show the URL it's
+            // dialing (a wrong/unreachable one is the #1 cause: a runner on another machine can't reach 127.0.0.1) +
+            // reconnect + how to point it at a reachable server. Shown whenever we're in the shell (not gated on the
+            // async bridge status), so a just-paired runner is never left with no controls.
             <>
               <p className="text-[13px] leading-relaxed text-muted-foreground">
                 {t('offlineDeviceHint')}
