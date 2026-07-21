@@ -1,9 +1,10 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { Check, Search, Trash2 } from 'lucide-react'
 import { useLocale, useTranslations } from 'next-intl'
+import { createPortal } from 'react-dom'
 
 import { DeleteScorecardRowButton, DeleteScorecardsDialog } from '@/features/delete-scorecard'
 import type { ScorecardRecord } from '@/entities/scorecard'
@@ -77,25 +78,61 @@ export function ScorecardList({
   )
   const { query, sort, dataset, harness, status, user } = values
 
-  // Multi-select delete — a Set of selected scorecard ids (only ever deletable rows). A floating action bar appears
-  // while any are selected; the confirm dialog fans out over them (partial failures reported per id). The row-level
-  // trash stays for the quick single-delete case.
+  // Multi-select delete — a Set of selected scorecard ids (only ever deletable rows). While anything is selected the
+  // list enters "selection mode": every checkbox stays visible and clicking a card toggles it instead of navigating,
+  // so a stray click can't throw you into the detail page mid-selection. The selection also survives navigation via
+  // sessionStorage (per tab + workspace). A floating action bar (portaled — see below) carries the bulk actions; the
+  // row-level trash stays for the quick single-delete case.
+  const selectionStorageKey = `everdict:selection:scorecards:${workspace}`
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [confirming, setConfirming] = useState(false)
+  const selectionMode = selected.size > 0
+  // Persisted inside the state updater (usePersistentFilters grammar) — idempotent, so StrictMode double-invoke is fine.
+  const persistSelection = (next: Set<string>) => {
+    try {
+      sessionStorage.setItem(selectionStorageKey, JSON.stringify([...next]))
+    } catch {
+      // sessionStorage blocked: the selection just won't survive navigation
+    }
+    return next
+  }
   const toggleSelect = (id: string) =>
     setSelected((prev) => {
       const next = new Set(prev)
       if (next.has(id)) next.delete(id)
       else next.add(id)
-      return next
+      return persistSelection(next)
     })
-  const clearSelection = () => setSelected(new Set())
+  const clearSelection = () => {
+    setSelected(new Set())
+    try {
+      sessionStorage.removeItem(selectionStorageKey)
+    } catch {
+      // ignore
+    }
+  }
   const dropFromSelection = (ids: string[]) =>
     setSelected((prev) => {
       const next = new Set(prev)
       for (const id of ids) next.delete(id)
-      return next
+      return persistSelection(next)
     })
+  // Esc drops the whole selection (skipped while the confirm dialog is open — Esc there means "close the dialog").
+  useEffect(() => {
+    if (!selectionMode || confirming) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setSelected(new Set())
+        try {
+          sessionStorage.removeItem(selectionStorageKey)
+        } catch {
+          // ignore
+        }
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [selectionMode, confirming, selectionStorageKey])
 
   const total = scorecards.length
   const succeeded = scorecards.filter((s) => s.status === 'succeeded').length
@@ -153,6 +190,25 @@ export function ScorecardList({
   // Keep the right-edge columns aligned: render the trash slot on every row iff any row is deletable.
   const showDeleteSlot = scorecards.some(canDeleteRow)
 
+  // Restore the saved selection once after mount (SSR-safe: the first render is always empty), dropping ids that no
+  // longer exist or stopped being deletable. Ref-guarded instead of a dep array so the lint deps stay honest.
+  const hydratedRef = useRef(false)
+  useEffect(() => {
+    if (hydratedRef.current) return
+    hydratedRef.current = true
+    try {
+      const raw = sessionStorage.getItem(selectionStorageKey)
+      if (!raw) return
+      const saved: unknown = JSON.parse(raw)
+      if (!Array.isArray(saved)) return
+      const deletable = new Set(scorecards.filter(canDeleteRow).map((s) => s.id))
+      const valid = saved.filter((x): x is string => typeof x === 'string' && deletable.has(x))
+      if (valid.length > 0) setSelected(persistSelection(new Set(valid)))
+    } catch {
+      // sessionStorage blocked / JSON corrupt: keep an empty selection
+    }
+  })
+
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase()
     const matched = scorecards.filter((s) => {
@@ -186,8 +242,30 @@ export function ScorecardList({
     setSelected((prev) => {
       const next = new Set(prev)
       for (const s of visible) if (canDeleteRow(s)) next.add(s.id)
-      return next
+      return persistSelection(next)
     })
+  // Shift-click selects the whole range between the last-toggled row (the anchor) and the clicked one. The anchor is
+  // tracked by id so a filter/sort change can't mis-range; if it left the visible list, fall back to a plain toggle.
+  const anchorRef = useRef<string | null>(null)
+  const handleToggle = (id: string, shiftKey: boolean) => {
+    const anchor = anchorRef.current
+    if (shiftKey && anchor !== null && anchor !== id) {
+      const from = visible.findIndex((s) => s.id === anchor)
+      const to = visible.findIndex((s) => s.id === id)
+      if (from !== -1 && to !== -1) {
+        const [lo, hi] = from < to ? [from, to] : [to, from]
+        const range = visible
+          .slice(lo, hi + 1)
+          .filter(canDeleteRow)
+          .map((s) => s.id)
+        setSelected((prev) => persistSelection(new Set([...prev, ...range])))
+        anchorRef.current = id
+        return
+      }
+    }
+    toggleSelect(id)
+    anchorRef.current = id
+  }
   // The confirm dialog needs each selected batch's coordinates — resolve ids against the full list (some may be filtered out).
   const byId = useMemo(() => new Map(scorecards.map((s) => [s.id, s])), [scorecards])
   const selectedTargets = [...selected]
@@ -301,16 +379,26 @@ export function ScorecardList({
                     key={s.id}
                     href={`/${workspace}/scorecards/${encodeURIComponent(s.id)}`}
                     style={{ animationDelay: `${Math.min(i, 12) * 28}ms` }}
+                    onClick={(e) => {
+                      // Selection mode: a card click toggles (no-op on a non-deletable row) instead of navigating —
+                      // a stray click must not throw the user into the detail page mid-selection.
+                      if (!selectionMode) return
+                      e.preventDefault()
+                      if (selectable) handleToggle(s.id, e.shiftKey)
+                    }}
                     className={cn(
                       'rise group flex items-center gap-3 rounded-lg border px-3.5 py-2.5 shadow-raise transition-colors',
+                      selectionMode && 'select-none', // shift-range clicks must not highlight card text
                       isSelected
                         ? 'border-primary/50 bg-primary/[0.05]'
                         : 'bg-card hover:border-border-strong hover:bg-elevated'
                     )}
                   >
-                    {/* Left multi-select checkbox — same hover-reveal grammar as the right-edge trash; stays lit once selected. */}
+                    {/* Left multi-select checkbox — the visual box stays small but the hit target is a generous 32px
+                        square (negative margins overlap the card padding; z-[1] wins the overlap). Hover-revealed
+                        until a selection starts, then every checkbox stays visible. */}
                     {showDeleteSlot && (
-                      <span className="flex w-5 shrink-0 justify-center">
+                      <span className="relative z-[1] flex w-5 shrink-0 justify-center">
                         {selectable && (
                           <button
                             type="button"
@@ -321,16 +409,25 @@ export function ScorecardList({
                               // The whole card is a Link — stop it so the checkbox click doesn't navigate.
                               e.preventDefault()
                               e.stopPropagation()
-                              toggleSelect(s.id)
+                              handleToggle(s.id, e.shiftKey)
                             }}
                             className={cn(
-                              'grid size-4 place-items-center rounded border outline-none transition-[opacity,color,background] focus-visible:opacity-100',
-                              isSelected
-                                ? 'border-primary bg-primary text-primary-foreground opacity-100'
-                                : 'border-border-strong bg-transparent opacity-0 group-hover:opacity-100'
+                              '-m-2 grid size-8 place-items-center rounded-md outline-none transition-opacity hover:bg-accent/60 focus-visible:opacity-100',
+                              isSelected || selectionMode
+                                ? 'opacity-100'
+                                : 'opacity-0 group-hover:opacity-100'
                             )}
                           >
-                            {isSelected && <Check className="size-3" strokeWidth={3} />}
+                            <span
+                              className={cn(
+                                'grid size-[18px] place-items-center rounded border transition-colors',
+                                isSelected
+                                  ? 'border-primary bg-primary text-primary-foreground'
+                                  : 'border-border-strong bg-card'
+                              )}
+                            >
+                              {isSelected && <Check className="size-3" strokeWidth={3} />}
+                            </span>
                           </button>
                         )}
                       </span>
@@ -443,40 +540,45 @@ export function ScorecardList({
         </div>
       )}
 
-      {/* Floating action bar — appears while any row is selected (Linear-style). Fans out the delete over the selection. */}
-      {selected.size > 0 && (
-        <div className="fixed inset-x-0 bottom-6 z-30 flex justify-center px-4">
-          <div className="flex items-center gap-1 rounded-xl border border-border bg-card/95 px-2.5 py-2 shadow-lg backdrop-blur supports-[backdrop-filter]:bg-card/80">
-            <span className="px-1.5 text-[12.5px] font-[510] tabular-nums text-foreground">
-              {t('selectedCount', { count: selected.size })}
-            </span>
-            <span className="mx-1 h-4 w-px bg-border" />
-            <button
-              type="button"
-              onClick={selectAllVisible}
-              className="rounded-md px-2 py-1 text-[12.5px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-            >
-              {t('selectAllVisible')}
-            </button>
-            <button
-              type="button"
-              onClick={clearSelection}
-              className="rounded-md px-2 py-1 text-[12.5px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-            >
-              {t('clearSelection')}
-            </button>
-            <Button
-              variant="destructive"
-              size="sm"
-              className="ml-1"
-              onClick={() => setConfirming(true)}
-            >
-              <Trash2 className="size-3.5" />
-              {t('deleteSelected')}
-            </Button>
-          </div>
-        </div>
-      )}
+      {/* Floating action bar — appears while any row is selected (Linear-style) and fans out the delete over the
+          selection. Portaled to <body> (dialog.tsx grammar): the page-transition wrapper animates transform, and a
+          transformed ancestor becomes the containing block for `fixed` — inline, the bar would pin to the bottom of
+          the page content (below the fold on a long list) instead of the viewport. */}
+      {selected.size > 0 &&
+        createPortal(
+          <div className="fixed inset-x-0 bottom-6 z-30 flex justify-center px-4">
+            <div className="flex items-center gap-1 rounded-xl border border-border bg-card/95 px-2.5 py-2 shadow-lg backdrop-blur supports-[backdrop-filter]:bg-card/80">
+              <span className="px-1.5 text-[12.5px] font-[510] tabular-nums text-foreground">
+                {t('selectedCount', { count: selected.size })}
+              </span>
+              <span className="mx-1 h-4 w-px bg-border" />
+              <button
+                type="button"
+                onClick={selectAllVisible}
+                className="rounded-md px-2 py-1 text-[12.5px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              >
+                {t('selectAllVisible')}
+              </button>
+              <button
+                type="button"
+                onClick={clearSelection}
+                className="rounded-md px-2 py-1 text-[12.5px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              >
+                {t('clearSelection')}
+              </button>
+              <Button
+                variant="destructive"
+                size="sm"
+                className="ml-1"
+                onClick={() => setConfirming(true)}
+              >
+                <Trash2 className="size-3.5" />
+                {t('deleteSelected')}
+              </Button>
+            </div>
+          </div>,
+          document.body
+        )}
       {confirming && (
         <DeleteScorecardsDialog
           onClose={() => setConfirming(false)}

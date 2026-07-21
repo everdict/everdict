@@ -49,7 +49,10 @@ samp {
   letter-spacing: -0.022em;
 }
 
-/* page-load staggered reveal — a restrained 8px rise (refined aesthetic). Disabled under reduced-motion. */
+/* page-load staggered reveal — a restrained 8px rise (refined aesthetic). Disabled under reduced-motion.
+   Fill mode is `backwards`, NOT `both`: `both` keeps the final identity transform applied forever, which turns
+   every animated container into the containing block for `position: fixed` descendants (floating bars pinned to
+   the page content instead of the viewport). `backwards` still hides staggered items during their delay. */
 @keyframes everdict-rise {
   from {
     opacity: 0;
@@ -62,7 +65,7 @@ samp {
 }
 @media (prefers-reduced-motion: no-preference) {
   .rise {
-    animation: everdict-rise 0.42s var(--ease-out-quart) both;
+    animation: everdict-rise 0.42s var(--ease-out-quart) backwards;
   }
 }
 
