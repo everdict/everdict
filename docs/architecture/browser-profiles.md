@@ -1,6 +1,6 @@
 # Authenticated browser profiles — a real interactive remote browser, cookies reused in eval (design)
 
-> **Status: S0–S9 SHIPPED (S1 transport + web canvas · S2 profile entity · S3 cookie capture · S4 proxy/geo login browser · S5 cookie injection into evals · S6 containerized provisioner — no host-Chrome dependency · S7 session-first creation UX + live remembered-login chips · S8 concurrent-session caps — per-tenant + fleet-wide · S9 runtime-bound sessions — the browser on the tenant's registered runtime inside its trust zone [Nomad shipped; K8s + self-hosted = follow-ups]). Follow-ups: K8s per-session reachability (port-forward), self-hosted reverse relay, store-backed session registry (multi-replica), web session runtime-picker, eval-browser proxy, localStorage.** S0 = the interactive live browser
+> **Status: S0–S9 SHIPPED (S1 transport + web canvas · S2 profile entity · S3 cookie capture · S4 proxy/geo login browser · S5 cookie injection into evals · S6 containerized provisioner — no host-Chrome dependency · S6b remote sidecar pool — socket-free multi-user self-hosted (`EVERDICT_BROWSER_PROVISIONER=remote`, lease-a-browser-from-a-pool, re-lease wipe) · S7 session-first creation UX + live remembered-login chips · S8 concurrent-session caps — per-tenant + fleet-wide · S9 runtime-bound sessions — the browser on the tenant's registered runtime inside its trust zone [Nomad shipped; K8s + self-hosted = follow-ups]). Follow-ups: K8s per-session reachability (port-forward), self-hosted reverse relay, store-backed session registry (multi-replica), web session runtime-picker, eval-browser proxy, localStorage.** S0 = the interactive live browser
 > session primitive (`openBrowserSession`, `@everdict/topology`, `a168b5b`): CDP screencast (frames OUT, each
 > acked) + input (mouse/keyboard/navigate IN), transport-injectable, live-proven against real Chrome via
 > `scripts/live/interactive-browser.mjs`. **S1 productizes the transport end-to-end**: a personal / self-scoped
@@ -178,6 +178,24 @@ short-lived container/pod per active login; self-hosted = the user's own local b
    `RuntimeSpec.browserImage` at the mirror. To bump: re-resolve the digest, update `browser-image.ts`, re-run the
    mirror workflow. Follow-up: managed **K8s** reachability (per-session `kubectl port-forward` / ingress to the pod
    CDP) — lifts this from a control-plane-host Docker daemon to the SaaS cluster.
+   - **S6b — remote sidecar pool (socket-free, multi-user self-hosted).** ✅ SHIPPED. `DockerBrowserProvisioner`
+     assumes the control plane runs **on** the Docker host (it shells out to `docker` and reaches the published port
+     at `127.0.0.1`); in the containerized `docker-compose.full` stack the api is itself a container, so that path
+     needs the host socket mounted, a `docker` CLI in the image, AND `127.0.0.1:<hostPort>` is the api container's
+     loopback — not the host. `PooledBrowserProvisioner` (`apps/api infrastructure`) sidesteps all three: it **leases
+     a whole browser** from a fixed pool of already-running `chromedp/headless-shell` sidecars, addressed over the
+     compose/cluster network by name (`EVERDICT_BROWSER_PROVISIONER=remote` + `EVERDICT_BROWSER_CDP_POOL`, a
+     comma-separated list of CDP bases). No socket, no docker CLI, no `reachableWsUrl` host-port dance (the pool base
+     IS the reachable authority). A member is leased to exactly one session at a time — its `/json` + cookie jar are
+     that session's alone, so the shipped `openBrowserSession`/`captureStorageState` primitives (which assume a
+     dedicated browser) are unchanged. On release the member is **wiped** (`resetBrowserState` in `@everdict/topology`
+     — `Network.clearBrowserCookies` + `Storage.clearDataForOrigin` + close extra tabs + blank the page) before it
+     can be re-leased; a member whose reset fails is **quarantined**, never re-leased dirty (fail-closed, security
+     over availability). Concurrency = pool size (a full pool 429s, composing with the S8 caps); scale by adding
+     sidecars (`browser2`, …) to the list. Trade-off: **no per-session geo proxy** (S4) — the sidecars are
+     pre-launched, so a country-bound login is rejected on this tier (use the `docker` or Nomad-runtime provisioner
+     for geo). This is the recommended provisioner for the containerized compose stack (see the `browser` profile in
+     `deploy/compose/docker-compose.full.yaml`).
    **Fonts:** `headless-shell` ships no CJK fonts — Korean/Japanese/Chinese pages render as tofu (verified against
    the pinned image). `EVERDICT_BROWSER_FONTS_DIR` (e.g. `/usr/share/fonts`) bind-mounts a host font directory
    read-only at `/usr/share/fonts/everdict-host` inside the session container (fontconfig scans `/usr/share/fonts`

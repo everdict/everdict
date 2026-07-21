@@ -38,6 +38,7 @@ import { SecretUsageService } from "./core/secret/secret-usage-service.js";
 import { DockerBrowserProvisioner } from "./infrastructure/browser-session/docker-browser-provisioner.js";
 import { LocalChromeProvisioner } from "./infrastructure/browser-session/local-chrome-provisioner.js";
 import { runtimeSessionProvision } from "./infrastructure/browser-session/nomad-session-provision.js";
+import { PooledBrowserProvisioner } from "./infrastructure/browser-session/pooled-browser-provisioner.js";
 import { RoutingBrowserProvisioner } from "./infrastructure/browser-session/routing-browser-provisioner.js";
 import { RuntimeBrowserProvisioner } from "./infrastructure/browser-session/runtime-browser-provisioner.js";
 import { buildServer } from "./server.js";
@@ -47,6 +48,28 @@ function positiveIntEnv(raw: string | undefined): number | undefined {
   if (!raw) return undefined;
   const n = Number(raw);
   return Number.isInteger(n) && n > 0 ? n : undefined;
+}
+
+// Choose the interactive-browser-session provisioner from env (browser-profiles). See the call site for the modes.
+// `remote` (pool of headless-shell sidecars) is the socket-free multi-user self-hosted path; `docker` launches a
+// container per session (needs the host Docker socket); default is the host-Chrome LocalChromeProvisioner (dev).
+function selectBrowserProvisioner(chromeBin: string | undefined): BrowserSessionProvisioner {
+  const kind = process.env.EVERDICT_BROWSER_PROVISIONER;
+  if (kind === "remote") {
+    const pool = (process.env.EVERDICT_BROWSER_CDP_POOL ?? "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    return new PooledBrowserProvisioner({ pool });
+  }
+  if (kind === "docker")
+    return new DockerBrowserProvisioner({
+      ...(process.env.EVERDICT_BROWSER_IMAGE ? { image: process.env.EVERDICT_BROWSER_IMAGE } : {}),
+      ...(process.env.EVERDICT_BROWSER_DOCKER_NETWORK ? { network: process.env.EVERDICT_BROWSER_DOCKER_NETWORK } : {}),
+      // Host fonts → container (read-only). headless-shell has no CJK fonts; without this Korean pages are tofu.
+      ...(process.env.EVERDICT_BROWSER_FONTS_DIR ? { fontsDir: process.env.EVERDICT_BROWSER_FONTS_DIR } : {}),
+    });
+  return new LocalChromeProvisioner(chromeBin ? { binary: chromeBin } : {});
 }
 
 // Multi-tenant control-plane server. tenant is derived from the Bearer API key (dev header fallback if absent).
@@ -284,25 +307,19 @@ async function main(): Promise<void> {
   const browserProfileService = buildBrowserProfile({ browserProfileStore });
 
   const terminalTickets = new TerminalTicketStore();
-  // Interactive browser sessions (browser-profiles S1) — env-gated. The provisioner (S6) is selectable:
-  // EVERDICT_BROWSER_PROVISIONER=docker runs a headless-Chromium CONTAINER (no host Chrome needed — decoupled from
-  // the local environment), else the host-Chrome LocalChromeProvisioner (dev / self-hosted). Managed K8s = follow-up.
+  // Interactive browser sessions (browser-profiles S1) — env-gated. The provisioner is selectable:
+  //   • EVERDICT_BROWSER_PROVISIONER=remote — LEASE a whole browser from a fixed pool of headless-shell sidecars
+  //     (EVERDICT_BROWSER_CDP_POOL, comma-separated CDP bases). No host Chrome, no Docker socket, no docker CLI —
+  //     the api reaches each sidecar over the compose/cluster network by name. The easy multi-user self-hosted path.
+  //   • EVERDICT_BROWSER_PROVISIONER=docker — LAUNCH a headless-Chromium container per session (needs the host
+  //     Docker socket + a control plane running on the docker host; not the containerized compose stack).
+  //   • else — the host-Chrome LocalChromeProvisioner (dev).
   const browserSessionsEnabled = process.env.EVERDICT_BROWSER_SESSIONS === "1";
   const browserTickets = browserSessionsEnabled ? new TicketStore() : undefined;
   const browserChromeBin = process.env.EVERDICT_BROWSER_CHROME_BIN; // override the launched binary (e.g. chromium)
   // Workspace BYO egress proxy pool (browser-profiles S4) — a country resolves to the login browser's --proxy-server.
   const proxyService = new ProxyService({ settings: settingsStore, secretsFor: runtimeSecretsFor });
-  const browserProvisioner: BrowserSessionProvisioner =
-    process.env.EVERDICT_BROWSER_PROVISIONER === "docker"
-      ? new DockerBrowserProvisioner({
-          ...(process.env.EVERDICT_BROWSER_IMAGE ? { image: process.env.EVERDICT_BROWSER_IMAGE } : {}),
-          ...(process.env.EVERDICT_BROWSER_DOCKER_NETWORK
-            ? { network: process.env.EVERDICT_BROWSER_DOCKER_NETWORK }
-            : {}),
-          // Host fonts → container (read-only). headless-shell has no CJK fonts; without this Korean pages are tofu.
-          ...(process.env.EVERDICT_BROWSER_FONTS_DIR ? { fontsDir: process.env.EVERDICT_BROWSER_FONTS_DIR } : {}),
-        })
-      : new LocalChromeProvisioner(browserChromeBin ? { binary: browserChromeBin } : {});
+  const browserProvisioner: BrowserSessionProvisioner = selectBrowserProvisioner(browserChromeBin);
   // Runtime binding (browser-profiles S9) — a session with a `runtime` runs the browser on the tenant's registered
   // runtime inside that tenant's trust zone (per-tenant network isolation; reachable from a containerized control
   // plane), else the host provisioner above. Nomad ships first; K8s / self-hosted are follow-ups.

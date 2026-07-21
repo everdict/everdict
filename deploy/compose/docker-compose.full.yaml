@@ -134,10 +134,16 @@ services:
       GITHUB_ENTERPRISE_APP_PRIVATE_KEY: ${GITHUB_ENTERPRISE_APP_PRIVATE_KEY:-}
       # ── Optional: workspace Mattermost notifications (operator server URL; workspaces register bot token + channel) ──
       MATTERMOST_HOST: ${MATTERMOST_HOST:-}
-      # ── Optional: interactive browser sessions (login profiles) — see the .env template. The docker provisioner
-      #    additionally needs the Docker socket mount below (the api launches the headless-browser container). ──
+      # ── Optional: interactive browser sessions (login profiles) — see the .env template ──
+      #    Recommended for this containerized stack: EVERDICT_BROWSER_PROVISIONER=remote — the api LEASES a whole
+      #    browser from the `browser` sidecar pool over the compose network (EVERDICT_BROWSER_CDP_POOL). No Docker
+      #    socket, no docker CLI in the api image. Scale concurrency by adding sidecars (browser2, browser3, …) to
+      #    the pool. The `docker` provisioner (launch-a-container-per-session) instead needs the socket mount below
+      #    AND a control plane on the docker host — ill-suited to this api-in-a-container stack.
       EVERDICT_BROWSER_SESSIONS: ${EVERDICT_BROWSER_SESSIONS:-}
       EVERDICT_BROWSER_PROVISIONER: ${EVERDICT_BROWSER_PROVISIONER:-}
+      # remote pool: comma-separated CDP bases of the browser sidecars, reachable from the api by service name.
+      EVERDICT_BROWSER_CDP_POOL: ${EVERDICT_BROWSER_CDP_POOL:-http://browser:9222}
       EVERDICT_BROWSER_IMAGE: ${EVERDICT_BROWSER_IMAGE:-}
       EVERDICT_BROWSER_DOCKER_NETWORK: ${EVERDICT_BROWSER_DOCKER_NETWORK:-}
       EVERDICT_BROWSER_MAX_SESSIONS_PER_TENANT: ${EVERDICT_BROWSER_MAX_SESSIONS_PER_TENANT:-}
@@ -155,6 +161,30 @@ services:
     #   - /var/run/docker.sock:/var/run/docker.sock
     ports:
       - "${API_PORT:-8787}:8787"
+    restart: unless-stopped
+
+  # ── Headless-browser sidecar pool (interactive login sessions) — only with `--profile browser` ───────────────
+  # A dedicated headless Chromium the api LEASES per live session (EVERDICT_BROWSER_PROVISIONER=remote). CDP on 9222,
+  # reachable from the api as `browser:9222` — NOT published to the host (server-only). No Docker socket needed. Raise
+  # concurrency by adding browser2/browser3 copies and listing them in EVERDICT_BROWSER_CDP_POOL. headless-shell ships
+  # NO CJK fonts — bind a host fonts dir (below) if your users log into Korean/Japanese/Chinese sites (else tofu).
+  browser:
+    image: ${EVERDICT_BROWSER_IMAGE:-chromedp/headless-shell@sha256:7f8ec4782f1b138c30900e65ae53795d5966fbf52168b8fc062843db3e6d5be5}
+    profiles: ["browser"]
+    command:
+      - "--remote-debugging-address=0.0.0.0"
+      - "--remote-debugging-port=9222"
+      - "--remote-allow-origins=*"
+      - "--no-sandbox"
+      - "--disable-dev-shm-usage"
+      - "--window-size=1280,800"
+    # Chromium wants more than the default 64MB /dev/shm for real pages (belt-and-suspenders with --disable-dev-shm-usage).
+    shm_size: "1gb"
+    # CJK fonts for the login browser — uncomment and point at a host fonts dir (fontconfig scans it recursively).
+    # volumes:
+    #   - /usr/share/fonts:/usr/share/fonts/everdict-host:ro
+    expose:
+      - "9222"
     restart: unless-stopped
 
   # ── Temporal worker — polls the task queue; batch/schedule activities bridge back to the API over /internal ──
