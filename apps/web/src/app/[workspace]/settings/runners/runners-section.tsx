@@ -25,6 +25,7 @@ export function RunnersSection({
       runners={runners}
       canWrite={canWrite}
       githubApp={githubApp}
+      workspace={workspace}
       onOpenIntegrations={() => router.push(`/${workspace}/settings/integrations?app=github`)}
     />
   )

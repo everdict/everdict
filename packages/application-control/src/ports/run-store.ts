@@ -7,6 +7,12 @@ import type { RunRecord } from "@everdict/contracts";
 export interface RunListOptions {
   scorecardId?: string;
   includeChildren?: boolean;
+  // Runs a given self-hosted runner executed (result.provenance.runner === runnerId) — the runner-detail activity
+  // feed. Implies includeChildren (a runner mostly runs scorecard cases). Only completed runs carry provenance, so
+  // this returns finished runs, newest first.
+  runnerId?: string;
+  // Cap the number of rows returned (newest first) — the activity feed only needs the recent slice. Unset = no cap.
+  limit?: number;
 }
 
 // Result store contract. in-memory (dev/test) or Postgres (production) — swapped behind the same interface.

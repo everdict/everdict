@@ -125,15 +125,21 @@ describe("PgRunStore", () => {
     expect(calls[0]?.params?.[0]).toBe("acme");
   });
 
-  it("list scope: default hides children ($3 false); includeChildren = all ($3 true); scorecardId = one batch ($2)", async () => {
+  it("list scope: default hides children ($3 false); includeChildren = all ($3 true); scorecardId = one batch ($2); runner filter ($4) + limit ($5)", async () => {
     const { client, calls } = fakeClient(() => ({ rows: [ROW] }));
     const store = new PgRunStore(client);
+    // params: [tenant, scorecardId, includeChildren, runnerId, limit]
     await store.list("acme");
-    expect(calls[0]?.params).toEqual(["acme", null, false]);
+    expect(calls[0]?.params).toEqual(["acme", null, false, null, null]);
     await store.list("acme", { includeChildren: true });
-    expect(calls[1]?.params).toEqual(["acme", null, true]);
+    expect(calls[1]?.params).toEqual(["acme", null, true, null, null]);
     await store.list("acme", { scorecardId: "sc1" });
-    expect(calls[2]?.params).toEqual(["acme", "sc1", false]);
+    expect(calls[2]?.params).toEqual(["acme", "sc1", false, null, null]);
+    // runner activity feed — jsonb provenance filter + capped
+    await store.list("acme", { runnerId: "r1", limit: 20 });
+    expect(calls[3]?.params).toEqual(["acme", null, false, "r1", 20]);
+    expect(calls[3]?.text).toMatch(/result->'provenance'->>'runner' = \$4/);
+    expect(calls[3]?.text).toMatch(/LIMIT \$5/);
   });
 
   it("deleteByScorecard → parameterized DELETE on parent_scorecard_id; RETURNING rows = removed count", async () => {

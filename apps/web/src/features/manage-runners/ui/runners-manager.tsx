@@ -56,9 +56,11 @@ function isRunnerCapability(value: string): value is RunnerCapability {
 export function RunnersManager({
   runners,
   downloadHref,
+  workspace,
 }: {
   runners: RunnerMeta[]
   downloadHref: string // /{workspace}/download — desktop download page for browser users
+  workspace: string // active workspace slug — for the per-runner detail link (/{workspace}/runtimes/self/{id})
 }) {
   const t = useTranslations('manageRunners')
   const locale = useLocale()
@@ -323,9 +325,12 @@ export function RunnersManager({
                 </span>
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="truncate text-[13px] font-[510] text-foreground">
+                    <Link
+                      href={`/${workspace}/runtimes/self/${encodeURIComponent(r.id)}`}
+                      className="truncate text-[13px] font-[510] text-foreground transition-colors hover:text-link hover:underline"
+                    >
                       {r.label}
-                    </span>
+                    </Link>
                     {thisDevice && <Badge>{t('thisDevice')}</Badge>}
                     {/* Status = icon + click-dropdown of state actions (state-controls convention). Only THIS device can
                         reconnect (it holds the token); other rows show a static status label. */}

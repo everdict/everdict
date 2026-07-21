@@ -87,14 +87,19 @@ export const controlPlane = {
   deleteWorkspace: (auth: AuthContext) => callVoid(auth, '/workspace', { method: 'DELETE' }),
   // scorecardId → that scorecard's per-case child runs (drilldown); all → standalone runs + scorecard children
   // (activity console's all-executions view, grouped in the UI); otherwise the standalone activity list (children hidden).
-  listRuns: <T>(auth: AuthContext, opts?: { scorecardId?: string; all?: boolean }) =>
+  listRuns: <T>(
+    auth: AuthContext,
+    opts?: { scorecardId?: string; all?: boolean; runner?: string; limit?: number }
+  ) =>
     call<T>(
       auth,
       opts?.scorecardId
         ? `/runs?scorecardId=${encodeURIComponent(opts.scorecardId)}`
-        : opts?.all
-          ? '/runs?scope=all'
-          : '/runs'
+        : opts?.runner
+          ? `/runs?runner=${encodeURIComponent(opts.runner)}${opts.limit ? `&limit=${opts.limit}` : ''}`
+          : opts?.all
+            ? '/runs?scope=all'
+            : '/runs'
     ),
   getRun: <T>(auth: AuthContext, id: string) => call<T>(auth, `/runs/${encodeURIComponent(id)}`),
   // Live-progress log snapshot (the LiveLogs widget polls; found=false = nothing to tail yet).

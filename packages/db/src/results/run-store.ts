@@ -31,6 +31,14 @@ export class InMemoryRunStore implements RunStore {
   async list(tenant?: string, opts?: RunListOptions): Promise<RunRecord[]> {
     const all = [...this.runs.values()];
     const scoped = tenant ? all.filter((r) => r.tenant === tenant) : all;
+    // runnerId → runs this self-hosted runner executed (provenance), newest first, capped. Implies children included
+    // (a runner mostly runs scorecard cases). Mirrors the Pg jsonb filter.
+    if (opts?.runnerId) {
+      const byRunner = scoped
+        .filter((r) => r.result?.provenance?.runner === opts.runnerId)
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt)); // newest first (ISO strings sort lexicographically)
+      return (opts.limit ? byRunner.slice(0, opts.limit) : byRunner).map(withRunUsage);
+    }
     // scorecardId given → that batch's children only; includeChildren → all runs (standalone + children);
     // otherwise standalone (parentless) runs only (children hidden → prevents activity-list flooding).
     const filtered = opts?.scorecardId
@@ -38,7 +46,7 @@ export class InMemoryRunStore implements RunStore {
       : opts?.includeChildren
         ? scoped
         : scoped.filter((r) => r.parentScorecardId == null);
-    return filtered.map(withRunUsage);
+    return (opts?.limit ? filtered.slice(0, opts.limit) : filtered).map(withRunUsage);
   }
 
   async deleteByScorecard(scorecardId: string): Promise<number> {

@@ -40,7 +40,7 @@ export function registerRunRoutes(app: FastifyInstance, deps: ServerDeps): void 
     }
   });
 
-  app.get<{ Querystring: { scorecardId?: string; scope?: string } }>(
+  app.get<{ Querystring: { scorecardId?: string; scope?: string; runner?: string; limit?: string } }>(
     "/runs",
     { schema: runDocs.list },
     async (req, reply) => {
@@ -49,9 +49,17 @@ export function registerRunRoutes(app: FastifyInstance, deps: ServerDeps): void 
       try {
         gate(principal, "runs:read");
         // scorecardId → that batch's child runs (case drill-down); scope=all → standalone + scorecard children
-        // (activity console's "all executions", grouped in the UI); otherwise the standalone activity list.
-        const { scorecardId, scope } = req.query;
-        const opts = scorecardId ? { scorecardId } : scope === "all" ? { includeChildren: true } : undefined;
+        // (activity console's "all executions", grouped in the UI); runner → runs a self-hosted runner executed
+        // (runner-detail activity feed, capped by limit); otherwise the standalone activity list.
+        const { scorecardId, scope, runner, limit } = req.query;
+        const parsedLimit = limit !== undefined && /^\d+$/.test(limit) ? Number(limit) : undefined;
+        const opts = scorecardId
+          ? { scorecardId }
+          : runner
+            ? { runnerId: runner, ...(parsedLimit ? { limit: parsedLimit } : {}) }
+            : scope === "all"
+              ? { includeChildren: true }
+              : undefined;
         return reply.send(await deps.service.list(principal.workspace, opts));
       } catch (err) {
         return sendError(reply, err);

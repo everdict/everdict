@@ -106,6 +106,29 @@ describe("RunService", () => {
     expect((await svc.list("t", { scorecardId: "sc1" })).map((r) => r.id)).toEqual(["ch1"]); // batch drilldown
   });
 
+  it("list({runnerId}) returns the runs a self-hosted runner executed (provenance), children included, newest first, capped", async () => {
+    const store = new InMemoryRunStore();
+    const svc = new RunService({ dispatcher: okDispatcher, store, newId: ids });
+    const base = { tenant: "t", harness: { id: "s", version: "0" }, status: "succeeded" as const, updatedAt: "t" };
+    const ranBy = (runner: string): CaseResult => ({
+      caseId: "c",
+      harness: "s@0",
+      trace: [],
+      snapshot: { kind: "prompt", output: "" },
+      scores: [],
+      provenance: { ranOn: "self-hosted", runner, by: "u" },
+    });
+    await store.create({ ...base, id: "a", caseId: "c", createdAt: "2026-07-01T00:00:00.000Z", result: ranBy("r1") });
+    // a scorecard CHILD this runner ran → included (a runner mostly runs cases), and it's the newest
+    await store.create({ ...base, id: "b", caseId: "c", parentScorecardId: "sc1", createdAt: "2026-07-03T00:00:00.000Z", result: ranBy("r1") });
+    await store.create({ ...base, id: "c", caseId: "c", createdAt: "2026-07-02T00:00:00.000Z", result: ranBy("r2") }); // other runner
+    await store.create({ ...base, id: "d", caseId: "c", createdAt: "2026-07-04T00:00:00.000Z" }); // no provenance (managed / in-flight)
+
+    expect((await svc.list("t", { runnerId: "r1" })).map((r) => r.id)).toEqual(["b", "a"]); // newest first, r2/no-provenance excluded
+    expect((await svc.list("t", { runnerId: "r1", limit: 1 })).map((r) => r.id)).toEqual(["b"]); // capped to the newest
+    expect(await svc.list("t", { runnerId: "nobody" })).toEqual([]); // an unknown runner has no activity
+  });
+
   it("records the trigger on the record (activity-view source axis) — unset if not given", async () => {
     const store = new InMemoryRunStore();
     const svc = new RunService({ dispatcher: okDispatcher, store, newId: ids });

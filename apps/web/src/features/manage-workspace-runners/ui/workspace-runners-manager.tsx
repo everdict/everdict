@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState, useTransition } from 'react'
+import Link from 'next/link'
 import { Check, Copy, Github, Lock, Search, Server, Trash2 } from 'lucide-react'
 import { useLocale, useTranslations } from 'next-intl'
 
@@ -36,9 +37,11 @@ export function WorkspaceRunnersManager({
   canWrite,
   githubApp,
   onOpenIntegrations,
+  workspace,
 }: {
   runners: RunnerMeta[]
   canWrite: boolean
+  workspace: string // active workspace slug — for the per-runner detail link (/{workspace}/runtimes/self/{id})
   githubApp: GithubAppView // Target list for the GitHub Actions runner registration picker (installations + allowed repos) — same snapshot as the Integrations tab
   onOpenIntegrations?: () => void // "Install/manage GitHub App" CTA — switch to the Integrations tab (same settings page)
 }) {
@@ -123,9 +126,12 @@ export function WorkspaceRunnersManager({
                 </span>
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="truncate text-[13px] font-[510] text-foreground">
+                    <Link
+                      href={`/${workspace}/runtimes/self/${encodeURIComponent(r.id)}`}
+                      className="truncate text-[13px] font-[510] text-foreground transition-colors hover:text-link hover:underline"
+                    >
                       {r.label}
-                    </span>
+                    </Link>
                     <span
                       className={cn(
                         'text-[12px]',
