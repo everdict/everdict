@@ -20,7 +20,8 @@ export function ServiceView({ spec }: { spec: HarnessSpec }) {
   // display view, so an out-of-contract value still renders — flag it: it's the shape that fails at the runner boundary
   // (a "malformed job"), most often a control-plane/runner version skew.
   const deliveryUnknownMode =
-    target?.delivery !== undefined && !['reference', 'sentinel', 'egress'].includes(target.delivery.mode)
+    target?.delivery !== undefined &&
+    !['reference', 'sentinel', 'egress'].includes(target.delivery.mode)
 
   return (
     <div className="space-y-7">
@@ -46,6 +47,12 @@ export function ServiceView({ spec }: { spec: HarnessSpec }) {
                   {s.name === frontDoor?.service && <Badge tone="info">front door</Badge>}
                 </div>
                 <div className="flex items-center gap-1.5">
+                  {/* Intrinsic OS placement — shown only when non-linux (linux is the default, no node gate). */}
+                  {s.requires?.os && s.requires.os !== 'linux' && (
+                    <Badge tone="outline" title={t('serviceOsNodeTip', { os: s.requires.os })}>
+                      {s.requires.os}
+                    </Badge>
+                  )}
                   {s.port !== undefined && <Mono>:{s.port}</Mono>}
                   <Mono>×{s.replicas}</Mono>
                 </div>
@@ -177,7 +184,9 @@ export function ServiceView({ spec }: { spec: HarnessSpec }) {
                           (target.delivery.path ? ` (${target.delivery.path})` : '') +
                           (target.delivery.sink ? ` → ${target.delivery.sink}` : '')}
                       </span>
-                      {deliveryUnknownMode && <Badge tone="warning">{t('deliveryUnknownMode')}</Badge>}
+                      {deliveryUnknownMode && (
+                        <Badge tone="warning">{t('deliveryUnknownMode')}</Badge>
+                      )}
                     </span>
                   ) : (
                     'reference (store-fetch)'

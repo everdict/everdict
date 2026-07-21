@@ -128,6 +128,15 @@ export const serviceReadinessSchema = z.object({
 })
 export type ServiceReadiness = z.infer<typeof serviceReadinessSchema>
 
+// intrinsic execution requirement — WHAT the service's image needs, never WHERE (not a node label). os = the OS the
+// image genuinely requires (a Windows Playwright server needs Windows on ANY infra); it derives to an os-<x> capability
+// so the placement gate excludes runtimes without such a node and each runtime realizes it natively (k8s nodeSelector /
+// nomad ${attr.kernel.name} / docker declines). Unset / linux = no gate. Loose display mirror (the control plane validates the exact enum).
+export const serviceRequiresSchema = z.object({
+  os: z.string().optional(),
+})
+export type ServiceRequires = z.infer<typeof serviceRequiresSchema>
+
 // topology service — perRun = per-case key names injected at runtime. env = static env (non-store config),
 // volumes = docker -v mounts, readiness = polling ceiling. All three are info the harness actually uses, so exposed in the detail view.
 // A service's agent-server model binding — a bare registered-Model id (the web wizard writes only this shape;
@@ -157,6 +166,7 @@ export const topologyServiceSchema = z.object({
   volumes: z.array(z.string()).optional(),
   readiness: serviceReadinessSchema.optional(),
   wiring: z.array(serviceWiringSchema).optional(),
+  requires: serviceRequiresSchema.optional(), // intrinsic OS need → node placement (windows/macos; linux = default, no gate)
 })
 export type TopologyService = z.infer<typeof topologyServiceSchema>
 
@@ -277,6 +287,7 @@ export const templateServiceSchema = z.object({
   volumes: z.array(z.string()).optional(),
   readiness: serviceReadinessSchema.optional(),
   wiring: z.array(serviceWiringSchema).optional(),
+  requires: serviceRequiresSchema.optional(), // intrinsic OS need (structure, not a pin target)
 })
 export type TemplateService = z.infer<typeof templateServiceSchema>
 

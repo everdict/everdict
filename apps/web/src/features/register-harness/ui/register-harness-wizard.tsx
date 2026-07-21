@@ -33,6 +33,7 @@ import {
   INITIAL_INSTANCE,
   INITIAL_TEMPLATE,
   parseJsonObject,
+  SERVICE_OS_OPTIONS,
   type DepInjectRow,
   type DepRow,
   type InstanceState,
@@ -66,6 +67,20 @@ const isolateOptions = (t: Translate): ComboboxOption[] => [
   { value: 'schema', description: t('isolateSchema') },
   { value: 'external', description: t('isolateExternal') },
 ]
+
+// Per-service OS placement — the OS the image intrinsically needs (portable; the runtime maps it to a node). linux is
+// the default (no gate); windows/macos exclude runtimes without such a node. SSOT for the values = SERVICE_OS_OPTIONS.
+const osOptions = (t: Translate): ComboboxOption[] =>
+  SERVICE_OS_OPTIONS.map((os) => ({
+    value: os,
+    label: os,
+    description:
+      os === 'linux'
+        ? t('svcOsLinuxDesc')
+        : os === 'windows'
+          ? t('svcOsWindowsDesc')
+          : t('svcOsMacosDesc'),
+  }))
 
 // kind = how the harness actually runs (runtime style). process is a harness defined in code,
 // so a (declarative) form only yields an empty shell — excluded here; only command / service are exposed.
@@ -341,6 +356,7 @@ export function TemplateForm({
                     volumes: '',
                     readinessTimeout: '',
                     readinessInterval: '',
+                    os: '',
                   },
                 ],
               })
@@ -378,6 +394,21 @@ export function TemplateForm({
                     onChange={(v) => setService(i, { replicas: v })}
                     placeholder="1"
                     inputMode="numeric"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <span className="flex items-center gap-1">
+                    <span className="text-[11px] font-[510] text-muted-foreground">
+                      {t('svcOsLabel')}
+                    </span>
+                    <InfoTip content={t('svcOsTip')} />
+                  </span>
+                  <Combobox
+                    value={sv.os || 'linux'}
+                    onChange={(v) => setService(i, { os: v })}
+                    options={osOptions(t)}
+                    className="w-full"
+                    aria-label={t('svcOsLabel')}
                   />
                 </div>
                 <PeerNeedsField
@@ -1549,6 +1580,8 @@ function previewSpec(s: TemplateState): HarnessSpec {
         perRun: [],
         replicas: sv.replicas.trim() ? Number(sv.replicas) : 1,
         env: {},
+        // Only a non-linux OS is a real placement requirement (linux = default) — mirror the emit rule so the badge shows live.
+        ...(sv.os.trim() && sv.os.trim() !== 'linux' ? { requires: { os: sv.os.trim() } } : {}),
       })),
     dependencies: s.deps
       .filter((d) => d.store.trim())

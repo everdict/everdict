@@ -1,7 +1,7 @@
 // Assemble wizard form state → HarnessTemplateSpec / HarnessInstanceSpec (pure). The control plane does the final schema/conflict validation.
 // Template (top-level category) = shape/slots (version not pinned); Instance = template reference + pins (slot→image/value).
 import type { HarnessTemplateSpec } from '@/entities/harness'
-import { type TraceSourceValue, traceSourceToSpec } from '@/entities/trace-source'
+import { traceSourceToSpec, type TraceSourceValue } from '@/entities/trace-source'
 
 export type Kind = 'process' | 'service' | 'command'
 
@@ -28,8 +28,12 @@ export interface ServiceRow {
   volumes: string // docker -v mounts, newline-separated ("vol:/data" · "/host:/c:ro")
   readinessTimeout: string // readiness polling ceiling (ms) — if left empty, unset
   readinessInterval: string // readiness polling interval (ms)
+  os: string // intrinsic OS the image needs → node placement (windows/macos); '' or 'linux' = default, no gate
 }
 
+// The OS a service can require — the portable placement axis (WHAT the image needs, never a node label). 'linux' is the
+// implicit default (no capability, no gate), so the form treats '' and 'linux' the same and only emits requires for windows/macos.
+export const SERVICE_OS_OPTIONS = ['linux', 'windows', 'macos'] as const
 // One BYO env mapping of a dependency store — env = the key the service image actually reads (e.g. VALKEY_URL),
 // template = an optional {field} recomposition of the deployed store's coordinates ('' = the canonical {url}).
 // Rendered at deploy time from the store Everdict actually deployed (endpoint + pool-minted creds), so the mapping —
@@ -247,6 +251,8 @@ export function buildTemplate(s: TemplateState): Record<string, unknown> {
         ...(Object.keys(env).length ? { env } : {}),
         ...(wiring.length ? { wiring } : {}),
         ...(volumes.length ? { volumes } : {}),
+        // linux is the default (no placement gate) — only a non-linux OS carries an intrinsic requirement to a runtime.
+        ...(sv.os.trim() && sv.os.trim() !== 'linux' ? { requires: { os: sv.os.trim() } } : {}),
         ...(hasReadiness
           ? {
               readiness: {
@@ -319,6 +325,7 @@ export function templateStateFromSpec(t: HarnessTemplateSpec): TemplateState {
       readinessTimeout: s.readiness?.timeoutMs !== undefined ? String(s.readiness.timeoutMs) : '',
       readinessInterval:
         s.readiness?.intervalMs !== undefined ? String(s.readiness.intervalMs) : '',
+      os: s.requires?.os ?? '', // unset in the spec → default (linux) in the form
     })),
     deps: (t.dependencies ?? []).map((d) => ({
       store: d.store,
@@ -503,6 +510,7 @@ export const INITIAL_TEMPLATE: TemplateState = {
       volumes: '',
       readinessTimeout: '',
       readinessInterval: '',
+      os: '',
     },
   ],
   deps: [],

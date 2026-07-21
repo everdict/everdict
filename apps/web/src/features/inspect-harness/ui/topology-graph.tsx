@@ -292,6 +292,15 @@ export function TopologyGraph({ spec }: { spec: HarnessSpec }) {
                   <>
                     {s.port !== undefined && <NodeBadge>:{s.port}</NodeBadge>}
                     {s.replicas > 1 && <NodeBadge>×{s.replicas}</NodeBadge>}
+                    {/* Intrinsic OS placement (linux is the default, so only a non-linux node requirement is shown). */}
+                    {s.requires?.os && s.requires.os !== 'linux' && (
+                      <span
+                        className="rounded bg-[var(--color-accent)] px-1 py-0.5 font-mono text-[9.5px] leading-none text-[var(--color-accent-foreground)]"
+                        title={t('serviceOsNodeTip', { os: s.requires.os })}
+                      >
+                        {s.requires.os}
+                      </span>
+                    )}
                   </>
                 }
               >
