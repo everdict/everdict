@@ -3,17 +3,22 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import {
+  Activity,
+  CalendarClock,
   CornerDownLeft,
   GitCompareArrows,
   Moon,
+  Play,
   Plus,
   Search,
+  Server,
   SunMoon,
   Upload,
   type LucideIcon,
 } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
+import { useInfraPanel, type InfraTab } from '@/widgets/infra-panel'
 import { cn } from '@/shared/lib/utils'
 import { Dialog } from '@/shared/ui/dialog'
 import { Kbd } from '@/shared/ui/kbd'
@@ -28,6 +33,15 @@ interface Command {
   keywords?: string
   perform: (router: ReturnType<typeof useRouter>) => void
 }
+
+// Infra concerns left the sidebar (the vertical rail owns them) — the palette keeps them reachable by opening
+// the infra panel on the matching tab. Keywords carry over from the former nav entries.
+const INFRA_TABS: { tab: InfraTab; icon: LucideIcon; keywords: string }[] = [
+  { tab: 'runs', icon: Play, keywords: 'run runs activity execution history live' },
+  { tab: 'schedules', icon: CalendarClock, keywords: 'schedule cron recurring regression' },
+  { tab: 'runtimes', icon: Server, keywords: 'runtime execution infra docker k8s nomad runner' },
+  { tab: 'work', icon: Activity, keywords: 'work queue lane running queued upcoming' },
+]
 
 function toggleTheme() {
   const next = !document.documentElement.classList.contains('dark')
@@ -116,6 +130,7 @@ function actionsFor(workspace: string, t: ReturnType<typeof useTranslations>): C
 export function CommandPalette({ workspace }: { workspace: string }) {
   const router = useRouter()
   const t = useTranslations()
+  const { openTab } = useInfraPanel()
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
   const [selected, setSelected] = useState(0)
@@ -132,9 +147,17 @@ export function CommandPalette({ workspace }: { workspace: string }) {
         keywords: item.keywords,
         perform: (r) => r.push(`/${workspace}${item.href}`),
       })),
+      ...INFRA_TABS.map<Command>(({ tab, icon, keywords }) => ({
+        id: `infra:${tab}`,
+        label: t(`infraPanel.tab_${tab}`),
+        icon,
+        group: t('palette.groupInfra'),
+        keywords,
+        perform: () => openTab(tab),
+      })),
       ...actionsFor(workspace, t),
     ],
-    [workspace, t]
+    [workspace, t, openTab]
   )
 
   const filtered = useMemo(() => {

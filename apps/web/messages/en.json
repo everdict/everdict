@@ -1540,6 +1540,7 @@
     "placeholder": "Go to a page or run an action…",
     "empty": "No results.",
     "groupNav": "Go to",
+    "groupInfra": "Infra",
     "groupActions": "Actions",
     "newRun": "New run",
     "newScorecard": "New scorecard run",

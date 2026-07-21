@@ -72,7 +72,9 @@ panel/list guidance is not.
   the workspaces I belong to (= navigate to `/{id}`; the first URL segment is the authority for the active workspace, the middleware syncs the cookie) + **new workspace**
   (`/new-workspace` → `create-workspace`, the creator is admin). The list and active workspace are authoritative from `GET /me.workspaces`. See `docs/tenancy.md`.
 - **Overview `/{workspace}`** — scorecard stat cards (total / success / fail / pass-rate) + recent runs + harness summary.
-- **Runs `/{workspace}/runs`** — full runs table (rows link to detail).
+- **Runs `/{workspace}/runs`** — full runs table (rows link to detail). Like schedules/runtimes, not a sidebar
+  entry — the sidebar is the eval half; infra full pages open from the infra panel's "full page" links or the
+  palette's infra group.
 - **Run detail `/{workspace}/runs/[id]`** — status, meta, scores, **trace timeline**, snapshot, error.
 - **Harnesses `/{workspace}/harnesses`** — owned vs `_shared` harnesses with versions. **Detail
   `/{workspace}/harnesses/[id]`** shows the active version's **Config panel** — the raw, editable config
@@ -121,7 +123,8 @@ panel/list guidance is not.
   **Detail `/{workspace}/judges/[id]`** shows kind + fields + rubric. **Register `/{workspace}/judges/new`** — a
   **kind-toggle form** (model | harness) with a validate (dry-run) step → `POST /judges`. Role-gated off `/me`
   (`judges:write` = member+). See `docs/judges.md`.
-- **Runtimes `/{workspace}/runtimes`** — the single **"where evals run"** surface (first-class nav, Server icon):
+- **Runtimes `/{workspace}/runtimes`** — the single **"where evals run"** surface (opened from the infra rail's
+  runtimes tab / palette — not a sidebar entry):
   ① **registered infra** — tenant execution infra (nomad | k8s; push — the control plane connects),
   no auto-seeded defaults; ② **connect my machine (self-hosted runner)** — the personal self-hosted runners section
   (RunnersManager moved here from the account page: desktop one-click pairing, presence, revoke, download CTA;

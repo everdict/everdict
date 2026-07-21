@@ -2,12 +2,9 @@ import {
   BarChart3,
   Bookmark,
   Boxes,
-  CalendarClock,
   Database,
   Gavel,
   LayoutDashboard,
-  Play,
-  Server,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -26,10 +23,11 @@ export interface NavSection {
   items: NavItem[]
 }
 
-// First-class concepts of the SaaS surface: home (overview) · run (individual execution/activity) · harness (what) · benchmark
-// (with what) · scorecard (result) · judge (who scores the result) · runtime (where — execution infra the workspace registers
-// itself, no default seed) + flows (views/schedules).
-// The work queue is no longer a nav page — it's the work tab of the floating infra panel (widgets/infra-panel), opened from the vertical rail.
+// The sidebar is the EVAL half of the split view: home (overview) · harness (what) · benchmark (with what) ·
+// scorecard (result) · judge (who scores the result) + saved views.
+// Infra concerns (runs · schedules · runtimes · work queue) are NOT sidebar entries — they live on the vertical
+// infra rail (widgets/infra-panel) on the right; their full pages remain routable (panel "full page" links,
+// command palette infra group).
 // metric/model/recipe/bundle are engine parts/advanced options — excluded from the nav (routes remain, reachable via URL).
 export const NAV_SECTIONS: NavSection[] = [
   {
@@ -40,12 +38,6 @@ export const NAV_SECTIONS: NavSection[] = [
         icon: LayoutDashboard,
         exact: true,
         keywords: 'overview home',
-      },
-      {
-        href: '/runs',
-        labelKey: 'runs',
-        icon: Play,
-        keywords: 'run runs activity execution history',
       },
       {
         href: '/harnesses',
@@ -76,18 +68,6 @@ export const NAV_SECTIONS: NavSection[] = [
         labelKey: 'views',
         icon: Bookmark,
         keywords: 'view analysis saved dashboard leaderboard trend compare pivot',
-      },
-      {
-        href: '/schedules',
-        labelKey: 'schedules',
-        icon: CalendarClock,
-        keywords: 'schedule cron recurring regression',
-      },
-      {
-        href: '/runtimes',
-        labelKey: 'runtimes',
-        icon: Server,
-        keywords: 'runtime execution infra docker k8s nomad runner',
       },
     ],
   },

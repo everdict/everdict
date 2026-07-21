@@ -29,6 +29,8 @@ type InfraPanelValue = {
   tab: InfraTab
   // Rail button semantics — same tab while open = collapse; otherwise open on that tab.
   toggleTab: (tab: InfraTab) => void
+  // Non-toggling open (command palette, deep entries) — always ends open on the given tab.
+  openTab: (tab: InfraTab) => void
   close: () => void
   // Live run selection (runs tab) — openRun() is the cross-page entry: any left-side surface can push a run
   // into the right panel without navigating away.
@@ -131,6 +133,11 @@ export function InfraPanelProvider({
     [open, tab]
   )
 
+  const openTab = useCallback((next: InfraTab) => {
+    setTab(next)
+    setOpen(true)
+  }, [])
+
   const close = useCallback(() => setOpen(false), [])
 
   const openRun = useCallback((id: string) => {
@@ -146,6 +153,7 @@ export function InfraPanelProvider({
         open,
         tab,
         toggleTab,
+        openTab,
         close,
         selectedRunId,
         selectRun: setSelectedRunId,
