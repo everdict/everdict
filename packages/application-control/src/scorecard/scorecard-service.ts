@@ -162,6 +162,12 @@ export class ScorecardService {
       }
     }
 
+    // Pin each selected judge to a concrete version (latest→concrete) — the SAME reproducibility contract as the
+    // harness/dataset above. Without this, orchestration.judges records "latest", so a re-run or a scheduled re-eval
+    // would score with whatever "latest" resolves to THEN — a different judge version, a different verdict. A judge id
+    // that doesn't resolve is kept as-given (the scoring path skips a missing judge exactly as it does today).
+    const pinnedJudges = await this.pinJudgeVersions(input.tenant, input.judges ?? []);
+
     // provenance: overlay the ephemeral-pin record onto the caller-provided origin. Even if only pins exist (no origin), still record them (reproducibility evidence).
     const origin: ScorecardOrigin | undefined =
       input.origin || pins
@@ -186,7 +192,7 @@ export class ScorecardService {
       ...(input.runtime ? { runtime: input.runtime } : {}),
       ...(subset ? { subset } : {}),
       orchestration: {
-        judges: input.judges ?? [],
+        judges: pinnedJudges,
         ...(input.graders && input.graders.length > 0 ? { graders: input.graders } : {}),
         ...(judge ? { judge } : {}),
         concurrency,
@@ -235,7 +241,7 @@ export class ScorecardService {
       input.harness.id,
       harnessVersion,
       harnessSpec,
-      input.judges ?? [],
+      pinnedJudges,
       input.runtime,
       judge,
       // Request parallelism takes precedence, else the service default. Positive integers only (the boundary is enforced by the route/MCP via Zod).
@@ -248,6 +254,27 @@ export class ScorecardService {
       },
     );
     return record;
+  }
+
+  // Resolve each selected judge's version (latest→concrete) via the registry, so the recorded orchestration pins the
+  // exact judge that scored — the same reproducibility guarantee harness/dataset already have. No registry (unit paths)
+  // or an unresolvable id → keep the ref as-given; the scoring path silently skips a judge it can't resolve, unchanged.
+  private async pinJudgeVersions(
+    tenant: string,
+    judges: Array<{ id: string; version: string }>,
+  ): Promise<Array<{ id: string; version: string }>> {
+    if (!this.deps.judges || judges.length === 0) return judges;
+    const registry = this.deps.judges;
+    const pinned: Array<{ id: string; version: string }> = [];
+    for (const j of judges) {
+      try {
+        const spec = await registry.get(tenant, j.id, j.version || "latest");
+        pinned.push({ id: j.id, version: spec.version }); // concrete resolved version, never "latest"
+      } catch {
+        pinned.push(j);
+      }
+    }
+    return pinned;
   }
 
   // Full re-run — re-execute a FINISHED batch's ENTIRE case set as a NEW scorecard, faithfully reproducing the

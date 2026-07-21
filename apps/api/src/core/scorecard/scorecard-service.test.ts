@@ -6,6 +6,7 @@ import {
   type Dataset,
   ForbiddenError,
   type HarnessTemplateSpec,
+  type JudgeSpec,
   NotFoundError,
   type RunRecord,
   type Scorecard,
@@ -171,6 +172,71 @@ describe("ScorecardService.submit — registered harness spec resolution (regres
     });
     const rec = await waitTerminal(store, "sc-builtin");
     expect(rec.status).toBe("succeeded"); // NotFound stays swallowed — the built-in fall-through is preserved
+  });
+});
+
+describe("ScorecardService.submit — judge version pinning (reproducibility)", () => {
+  const okDispatch: Dispatcher = {
+    async dispatch(job) {
+      return {
+        caseId: job.evalCase.id,
+        harness: `${job.harness.id}@${job.harness.version}`,
+        trace: [],
+        snapshot: { kind: "repo", diff: "", changedFiles: [], headSha: "h" },
+        scores: [],
+      };
+    },
+  };
+  const modelJudge = (version: string): JudgeSpec => ({
+    kind: "model",
+    id: "quality",
+    version,
+    provider: "anthropic",
+    model: "claude-opus-4-8",
+    rubric: "good?",
+    inputs: ["trace"],
+    tags: [],
+  });
+
+  it("resolves a selected judge's 'latest' to the concrete version and records it — a re-run scores with the SAME judge", async () => {
+    // Regression: orchestration.judges used to store the ref as-given, so a later re-run/schedule resolved "latest"
+    // again → possibly a different judge version → a different verdict. Harness/dataset were pinned; judges were not.
+    const datasets = new InMemoryDatasetRegistry();
+    await datasets.register("acme", datasetWithCase());
+    const judges = new InMemoryJudgeRegistry();
+    await judges.register("acme", modelJudge("1.0.0"));
+    await judges.register("acme", modelJudge("2.0.0")); // latest
+    const store = new InMemoryScorecardStore();
+    const service = new ScorecardService({ dispatcher: okDispatch, store, datasets, judges, newId: () => "sc-pin" });
+    await service.submit({
+      tenant: "acme",
+      dataset: { id: "d", version: "1.0.0" },
+      harness: { id: "scripted", version: "0" },
+      judges: [{ id: "quality", version: "latest" }],
+    });
+    const rec = await waitTerminal(store, "sc-pin");
+    expect(rec.orchestration?.judges).toEqual([{ id: "quality", version: "2.0.0" }]); // concrete, never "latest"
+  });
+
+  it("keeps an unknown judge id as-given (the scoring path skips a missing judge, unchanged)", async () => {
+    const datasets = new InMemoryDatasetRegistry();
+    await datasets.register("acme", datasetWithCase());
+    const store = new InMemoryScorecardStore();
+    const service = new ScorecardService({
+      dispatcher: okDispatch,
+      store,
+      datasets,
+      judges: new InMemoryJudgeRegistry(),
+      newId: () => "sc-unknown",
+    });
+    await service.submit({
+      tenant: "acme",
+      dataset: { id: "d", version: "1.0.0" },
+      harness: { id: "scripted", version: "0" },
+      judges: [{ id: "ghost", version: "latest" }],
+    });
+    const rec = await waitTerminal(store, "sc-unknown");
+    expect(rec.orchestration?.judges).toEqual([{ id: "ghost", version: "latest" }]); // kept as-given
   });
 });
 
