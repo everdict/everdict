@@ -2567,6 +2567,7 @@
   },
   "shell": {
     "searchPlaceholder": "검색·이동",
+    "downloadDesktop": "데스크탑 앱 다운로드",
     "account": "계정",
     "settings": "설정",
     "workspaceSettings": "워크스페이스 설정",

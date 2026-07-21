@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
-import { ArrowLeft, LogIn, LogOut, Menu, Search, Settings, X } from 'lucide-react'
+import { ArrowLeft, LogIn, LogOut, Menu, MonitorDown, Search, Settings, X } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
 import { WorkspaceSwitcher } from '@/widgets/workspace-switcher'
@@ -259,6 +259,44 @@ function SidebarFooter({
   )
 }
 
+// Pinned bottom entry to the desktop-app download page (/{workspace}/download) — the page existed but had no nav entry,
+// so a browser user had no way to find "get the desktop app". Sits just above the user footer so it's always visible.
+function DesktopDownloadLink({
+  workspace,
+  onNavigate,
+}: {
+  workspace: string
+  onNavigate?: () => void
+}) {
+  const pathname = usePathname()
+  const t = useTranslations('shell')
+  const href = `/${workspace}/download`
+  const active = pathname === href || pathname.startsWith(`${href}/`)
+  return (
+    <Link
+      href={href}
+      onClick={onNavigate}
+      aria-current={active ? 'page' : undefined}
+      className={navRowClass(active)}
+    >
+      <span
+        className={cn(
+          'absolute left-0 top-1/2 h-3.5 w-0.5 -translate-y-1/2 rounded-full bg-primary transition-opacity',
+          active ? 'opacity-100' : 'opacity-0'
+        )}
+      />
+      <MonitorDown
+        className={cn(
+          'size-[17px] shrink-0 transition-colors',
+          active ? 'text-foreground' : 'text-muted-foreground group-hover:text-foreground'
+        )}
+        strokeWidth={1.75}
+      />
+      {t('downloadDesktop')}
+    </Link>
+  )
+}
+
 function SidebarBody({ onNavigate, ...props }: SidebarProps & { onNavigate?: () => void }) {
   const pathname = usePathname()
   const inSettings =
@@ -293,6 +331,8 @@ function SidebarBody({ onNavigate, ...props }: SidebarProps & { onNavigate?: () 
       <div className="-mr-1 flex-1 overflow-y-auto pr-1">
         <NavLinks workspace={props.workspace} onNavigate={onNavigate} />
       </div>
+
+      <DesktopDownloadLink workspace={props.workspace} onNavigate={onNavigate} />
 
       <SidebarFooter
         workspace={props.workspace}

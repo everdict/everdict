@@ -2567,6 +2567,7 @@
   },
   "shell": {
     "searchPlaceholder": "Search…",
+    "downloadDesktop": "Download desktop app",
     "account": "Account",
     "settings": "Settings",
     "workspaceSettings": "Workspace settings",
