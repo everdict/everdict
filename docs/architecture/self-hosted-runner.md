@@ -194,6 +194,14 @@ Self-hosted:   member's `everdict runner` → MCP lease_job (long-call) → runA
     ("idle" / "running N job(s)" / "no Docker daemon" / "last job failed [class]: …" / "cannot reach control
     plane: …"); the control plane overlays it on the roster read (never stored; expired after ~2 min of silence)
     and the workspace runner card renders it colored by severity — an "online but stuck" runner reads at a glance.
+  - **Live execution log stream (Phase 3) — the log twin of `report_case_screen`.** While it runs a case, the
+    runner pushes its per-case lifecycle lines (`▶ Started` / `✓ Completed` / `✗ Failed [class / stage]: reason`)
+    to the control plane via the `report_case_log` MCP tool, keyed by the CP-minted runId. `LiveLogStore` (in-
+    memory, append-only, generous TTL since a log is cumulative history) buffers them, and `RunService.logs()`
+    prefers the pushed log over the managed-backend tail (a self-hosted runner has no backend the CP can tail).
+    The existing `GET /runs/:id/logs` route + `LiveLogs` web widget light up with zero new read/UI code — the run
+    detail page's live-log panel shows what the runner is doing, live. (Same wiring fix registered the previously-
+    unforwarded `liveFrames` on the MCP endpoint, so `report_case_screen` push works in production too.)
 - ✅ **Case-level parallelism (`--max-concurrent`)** — the runner runs N lease workers concurrently
   (`runLeaseWorkers`, `packages/self-hosted-runner/src/runner-loop.ts`), all sharing one MCP session. `RunnerHub.lease` is
   single-thread-atomic, so concurrent `lease_job` calls never hand the same job out twice → the workers safely

@@ -11,6 +11,7 @@ import type { S3ArtifactStore } from "@everdict/storage";
 import { buildTraceSource } from "@everdict/trace";
 import type { PersistentBudget } from "../common/budget-tracker.js";
 import type { LiveFrameStore } from "../common/live-frame-store.js";
+import type { LiveLogStore } from "../common/live-log-store.js";
 import { buildCodeJudgeJob, defaultJudgeRunner } from "../core/execution/judge-runner.js";
 import type { ModelResolvingDispatcher } from "../core/execution/model-resolving-dispatcher.js";
 import type { PlacementPreflight } from "../core/execution/placement-preflight.js";
@@ -63,6 +64,8 @@ export function buildRun(deps: {
   readers: RuntimeAccessReaders;
   // Latest live-screen frame per run, pushed by a self-hosted runner (report_case_screen). RunService.screen() serves it.
   liveFrames: LiveFrameStore;
+  // Accumulated live execution log per run, pushed by a self-hosted runner (report_case_log). RunService.logs() serves it.
+  liveLogs: LiveLogStore;
 }) {
   const {
     store,
@@ -83,6 +86,7 @@ export function buildRun(deps: {
     preflightPlacement,
     readers,
     liveFrames,
+    liveLogs,
   } = deps;
   const { readCaseLogsFn, execInSandboxFn, captureBrowserScreenFn, openTerminalStreamFn } = readers;
 
@@ -93,6 +97,8 @@ export function buildRun(deps: {
     captureBrowserScreen: (tenant, runtimeList, runId) => captureBrowserScreenFn(tenant, runtimeList, runId),
     // Pushed frames (self-hosted) — RunService.screen() prefers this over the CDP pull for unreachable containers.
     liveFrame: (runId) => liveFrames.get(runId)?.frameBase64,
+    // Pushed log (self-hosted) — RunService.logs() prefers this over the backend tail for unreachable runners.
+    pushLogs: (runId) => liveLogs.get(runId),
     openTerminalStream: (tenant, runtimeList, caseId) => openTerminalStreamFn(tenant, runtimeList, caseId),
     dispatcher: meteredDispatcher,
     store,

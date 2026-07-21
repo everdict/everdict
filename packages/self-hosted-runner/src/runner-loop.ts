@@ -150,6 +150,13 @@ export async function runLeaseWorkers(deps: RunnerLoopDeps, opts: RunnerLoopOpts
       const reportScreen = runId
         ? (frame: string): Promise<void> => deps.callJson("report_case_screen", { runId, frame }).then(() => {})
         : undefined;
+      // Live execution log: push this runner's per-case lifecycle lines to the control plane keyed by the CP-minted
+      // runId, so the run detail page's live-log panel shows what THIS runner is doing (a self-hosted runner has no
+      // backend the CP can tail). Best-effort — a push failure must never affect the run. Only wired with a runId.
+      const reportLog = runId
+        ? (line: string): void => void deps.callJson("report_case_log", { runId, line }).catch(() => {})
+        : undefined;
+      reportLog?.("▶ Started — running the case on this self-hosted runner.");
       try {
         const result = await deps.runJob(parsed.data, {
           signal: controller.signal,
@@ -158,6 +165,7 @@ export async function runLeaseWorkers(deps: RunnerLoopDeps, opts: RunnerLoopOpts
         await deps.callJson("submit_job_result", { jobId, result });
         setStatus(active > 1 ? `running ${active - 1} job(s)` : "idle", "info");
         log(`✓ job ${jobId} done → replied`);
+        reportLog?.("✓ Completed — result submitted to the control plane.");
       } catch (e) {
         // Classified failure parity with the agent sentinel: the self-hosted path has no sentinel, so a bare
         // fail_job would erase WHERE the case died. Submit a classified failed CaseResult instead (the batch
@@ -166,6 +174,7 @@ export async function runLeaseWorkers(deps: RunnerLoopDeps, opts: RunnerLoopOpts
         // Surface the failure on the roster (persists until the next success) — this is the "why isn't it working" signal.
         setStatus(`last job failed [${failure.class}]: ${errMsg(e)}`, "error");
         log(`✗ job ${jobId} failed [${failure.class}/${failure.stage}]: ${errMsg(e)} → replying classified result`);
+        reportLog?.(`✗ Failed [${failure.class} / ${failure.stage}]: ${errMsg(e)}`);
         const failed = {
           caseId: parsed.data.evalCase.id,
           harness: `${parsed.data.harness.id}@${parsed.data.harness.version}`,

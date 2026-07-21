@@ -122,6 +122,10 @@ export interface RunServiceDeps {
   // from the control plane, so a self-driven-browser command harness (e.g. browser-use, env.kind "prompt") relies on
   // the runner pushing frames rather than the CP pulling them.
   liveFrame?: (runId: string) => string | undefined;
+  // Live execution log PUSHED by a self-hosted runner (report_case_log), by CP-minted runId — the runner's per-case
+  // lifecycle lines (started / completed / failed [class/stage]: reason). Takes precedence over readCaseLogs for the
+  // default (stdout) view: a self-hosted runner has no backend the control plane can tail, so it pushes instead.
+  pushLogs?: (runId: string) => string | undefined;
   // One-shot exec inside the case's live sandbox (observability ④ web terminal / ⑤ screen capture). Resolves the
   // run's runtime to a live backend and runs `sh -c command`. undefined = no live container.
   execInSandbox?: (
@@ -235,11 +239,7 @@ export class RunService {
   ): Promise<{ record: RunRecord; dataUrl: string | undefined; supported: boolean } | undefined> {
     const record = await this.deps.store.get(id);
     if (!record) return undefined;
-    // CP-minted correlation id — the same derivation the dispatch stamps on AgentJob.runId (evd-run-<id> for a single
-    // run, evd-<batchId>-<caseId> for a scorecard child). Shared by the pushed-frame lookup and the CDP pull below.
-    const runId = record.parentScorecardId
-      ? `evd-${record.parentScorecardId}-${record.caseId}`
-      : `evd-run-${record.id}`;
+    const runId = RunService.runIdFor(record);
     // Pushed frame (self-hosted runner) wins — the control plane can't reach a self-hosted container to pull one. This
     // is how a browser-use command harness (env.kind "prompt", self-driven Chromium) surfaces its live screen.
     const pushed = this.deps.liveFrame?.(runId);
@@ -284,10 +284,24 @@ export class RunService {
   ): Promise<{ record: RunRecord; text: string | undefined } | undefined> {
     const record = await this.deps.store.get(id);
     if (!record) return undefined;
+    // Pushed runner log (self-hosted) wins for the default (stdout) view — a self-hosted runner has no backend the
+    // control plane can tail, so it pushes its per-case lifecycle log instead. It's a single stream; the stderr toggle
+    // stays a managed-backend concern (falls through). Same runId derivation as screen().
+    if (stream !== "stderr" && this.deps.pushLogs) {
+      const pushed = this.deps.pushLogs(RunService.runIdFor(record));
+      if (pushed) return { record, text: pushed };
+    }
     const text = this.deps.readCaseLogs
       ? await this.deps.readCaseLogs(record.tenant, record.runtime, record.caseId, stream).catch(() => undefined)
       : undefined;
     return { record, text };
+  }
+
+  // CP-minted correlation id — the same derivation the dispatch stamps on AgentJob.runId (evd-run-<id> for a single
+  // run, evd-<batchId>-<caseId> for a scorecard child). Shared by the pushed-frame + pushed-log lookups (both keyed by
+  // the runId the runner reports with).
+  private static runIdFor(record: RunRecord): string {
+    return record.parentScorecardId ? `evd-${record.parentScorecardId}-${record.caseId}` : `evd-run-${record.id}`;
   }
 
   // Boot recovery for an interrupted standalone run. adopted = a result harvested from the still-alive backend

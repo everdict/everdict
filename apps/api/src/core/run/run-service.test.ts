@@ -662,6 +662,54 @@ describe("RunService.screen — browser (topology) live frame (observability ⑦
   });
 });
 
+describe("RunService.logs — pushed runner log wins over the backend tail (observability ②)", () => {
+  const promptCase: EvalCase = { id: "p1", env: { kind: "prompt" }, task: "t", graders: [], timeoutSec: 60, tags: [] };
+
+  it("serves the log a self-hosted runner PUSHED (report_case_log), keyed by the record-derivable runId", async () => {
+    const store = new InMemoryRunStore();
+    const pushed = new Map<string, string>();
+    let backendTailed = false;
+    const svc = new RunService({
+      dispatcher: okDispatcher,
+      store,
+      newId: ids,
+      pushLogs: (runId) => pushed.get(runId),
+      readCaseLogs: async () => {
+        backendTailed = true;
+        return "from-backend";
+      },
+    });
+    const rec = await svc.submit({
+      tenant: "t",
+      harness: { id: "s", version: "0" },
+      case: promptCase,
+      runtime: "self:x",
+    });
+    await store.update(rec.id, { status: "running" });
+    pushed.set(`evd-run-${rec.id}`, "▶ Started\n✓ Completed");
+
+    const out = await svc.logs(rec.id);
+    expect(out?.text).toBe("▶ Started\n✓ Completed");
+    expect(backendTailed).toBe(false); // the pushed log short-circuits the backend tail (self-hosted is unreachable)
+  });
+
+  it("falls through to the backend tail when nothing was pushed, and for the stderr toggle (a managed-backend concern)", async () => {
+    const store = new InMemoryRunStore();
+    const svc = new RunService({
+      dispatcher: okDispatcher,
+      store,
+      newId: ids,
+      pushLogs: () => undefined, // nothing pushed
+      readCaseLogs: async (_t, _r, _c, stream) => `backend:${stream ?? "stdout"}`,
+    });
+    const rec = await svc.submit({ tenant: "t", harness: { id: "s", version: "0" }, case: promptCase, runtime: "rt" });
+    await store.update(rec.id, { status: "running" });
+
+    expect((await svc.logs(rec.id))?.text).toBe("backend:stdout"); // no pushed log → backend
+    expect((await svc.logs(rec.id, "stderr"))?.text).toBe("backend:stderr"); // stderr never uses the pushed (single-stream) log
+  });
+});
+
 describe("RunService — terminal writes are domain-guarded (first terminal write wins)", () => {
   it("a late tracker failure does not overwrite a run that was already settled by adoption", async () => {
     // Given a dispatch that hangs until we release it

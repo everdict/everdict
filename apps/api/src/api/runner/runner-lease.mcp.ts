@@ -49,7 +49,8 @@ export function registerRunnerLeaseTools(server: McpServer, ctx: McpToolContext)
             if (version !== undefined && protocol !== undefined)
               await deps.runnerService.reportVersion(key.owner, key.runnerId, version, protocol);
             // Live status overlay (server-stamped time so a skewed runner clock can't backdate/expire it).
-            if (status) deps.runnerService.reportStatus(key.runnerId, status, statusLevel ?? "info", new Date().toISOString());
+            if (status)
+              deps.runnerService.reportStatus(key.runnerId, status, statusLevel ?? "info", new Date().toISOString());
           }
           // Pass capabilities to the hub → placement gate (if a case.image needs docker but the runner lacks it, reject that job outright).
           const leased = await hub.leaseWait(key, wait_ms ?? 0, capabilities); // unset = return immediately (backward compatible)
@@ -105,7 +106,8 @@ export function registerRunnerLeaseTools(server: McpServer, ctx: McpToolContext)
           if (!key) return fail(NEED_RUNNER);
           if (deps.runnerService) {
             await deps.runnerService.touch(key.owner, key.runnerId);
-            if (status) deps.runnerService.reportStatus(key.runnerId, status, statusLevel ?? "info", new Date().toISOString());
+            if (status)
+              deps.runnerService.reportStatus(key.runnerId, status, statusLevel ?? "info", new Date().toISOString());
           }
           const hb = jobId ? await hub.heartbeat(key, jobId, capabilities) : undefined;
           return ok({ ok: true, ...(hb ? { extended: hb.extended, cancelled: hb.cancelled } : {}) });
@@ -129,6 +131,29 @@ export function registerRunnerLeaseTools(server: McpServer, ctx: McpToolContext)
             const key = runnerKey();
             if (!key) return fail(NEED_RUNNER);
             frames.put(runId, frame);
+            return ok({ ok: true });
+          }),
+      );
+    }
+
+    // Live execution log push (observability ②) — the log twin of report_case_screen. A self-hosted runner has no
+    // backend the control plane can tail, so it PUSHES its per-case lifecycle lines (started / completed / failed
+    // [class/stage]: reason) here, keyed by the CP-minted runId; RunService.logs() serves the accumulated text on the
+    // run detail page's live-log panel. Runner token only, best-effort (a push failure must never affect the run).
+    if (deps.liveLogs) {
+      const logs = deps.liveLogs;
+      server.registerTool(
+        "report_case_log",
+        {
+          description:
+            "Append a log line for a running case, keyed by its runId — the run detail page streams it as the live execution log. Only meaningful for a self-hosted runner (managed backends read logs from the job directly); best-effort (drop failures).",
+          inputSchema: { runId: z.string().min(1), line: z.string().max(16_000) },
+        },
+        ({ runId, line }) =>
+          plain(async () => {
+            const key = runnerKey();
+            if (!key) return fail(NEED_RUNNER);
+            logs.append(runId, line);
             return ok({ ok: true });
           }),
       );

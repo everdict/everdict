@@ -298,6 +298,61 @@ describe("runLeaseWorkers — classified failure submission", () => {
   });
 });
 
+// Live execution log — the runner tees its per-case lifecycle lines to report_case_log keyed by the CP-minted runId,
+// so the run detail page's live-log panel shows what THIS self-hosted runner is doing (there's no backend to tail).
+describe("runLeaseWorkers — live execution log stream (report_case_log)", () => {
+  const jobWith = (runId?: string): Record<string, unknown> => ({
+    jobId: "j1",
+    job: {
+      ...(runId ? { runId } : {}),
+      harness: { id: "h", version: "1" },
+      evalCase: { id: "c1", env: { kind: "prompt" }, task: "t", graders: [], timeoutSec: 60, tags: [] },
+    },
+  });
+
+  const runOnce = async (firstJob: Record<string, unknown>, runJob: () => Promise<CaseResult>): Promise<string[]> => {
+    const logCalls: string[] = [];
+    let stop = false;
+    const queue = [firstJob];
+    const callJson = async (name: string, args: Record<string, unknown>): Promise<Record<string, unknown>> => {
+      if (name === "lease_job") {
+        const next = queue.shift();
+        if (!next) stop = true;
+        return next ?? {};
+      }
+      if (name === "report_case_log") logCalls.push(String(args.line));
+      if (name === "submit_job_result") stop = true;
+      return {};
+    };
+    await runLeaseWorkers(
+      { callJson, runJob, setHeartbeat: () => () => {}, sleep: async () => {} },
+      { maxConcurrent: 1, waitMs: 0, heartbeatMs: 10_000, pollMs: 0, capabilities: ["repo"], shouldStop: () => stop },
+    );
+    return logCalls;
+  };
+
+  it("streams started → completed for a job that carries a runId", async () => {
+    const lines = await runOnce(jobWith("evd-run-1"), async () => ({}) as CaseResult);
+    expect(lines.some((l) => l.startsWith("▶ Started"))).toBe(true);
+    expect(lines.some((l) => l.startsWith("✓ Completed"))).toBe(true);
+  });
+
+  it("streams the classified failure reason (class / stage) on a runJob throw", async () => {
+    const lines = await runOnce(jobWith("evd-run-1"), async () => {
+      throw new InternalError("HARNESS_INSTALL_FAILED", {}, "pip exploded");
+    });
+    const failLine = lines.find((l) => l.startsWith("✗ Failed"));
+    expect(failLine).toBeDefined();
+    expect(failLine).toContain("harness / install"); // names WHERE the case died, live
+    expect(failLine).toContain("pip exploded");
+  });
+
+  it("does NOT stream when the job carries no runId (best-effort — control-plane dispatch only)", async () => {
+    const lines = await runOnce(jobWith(undefined), async () => ({}) as CaseResult);
+    expect(lines).toEqual([]);
+  });
+});
+
 // Lease cancellation — the control plane piggybacks a cancel decision on the heartbeat reply; the worker aborts the
 // in-flight run (which frees the runtime mid-case) and settles it back so the batch isn't left hanging.
 describe("runLeaseWorkers — heartbeat-delivered cancellation", () => {

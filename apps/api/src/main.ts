@@ -2,6 +2,7 @@ import { ProxyService } from "@everdict/application-control";
 import { perTenantTrustZones } from "@everdict/domain";
 import type { BrowserSessionProvisioner } from "./common/browser-session-provisioner.js";
 import { LiveFrameStore } from "./common/live-frame-store.js";
+import { LiveLogStore } from "./common/live-log-store.js";
 import { TerminalTicketStore } from "./common/terminal-ticket.js";
 import { TicketStore } from "./common/ticket-store.js";
 import { buildAuthenticator } from "./composition/authenticator.js";
@@ -186,6 +187,8 @@ async function main(): Promise<void> {
 
   // Latest live-screen frame per run, pushed by a self-hosted runner (report_case_screen) → served by RunService.screen().
   const liveFrames = new LiveFrameStore();
+  // Accumulated live execution log per run, pushed by a self-hosted runner (report_case_log) → served by RunService.logs().
+  const liveLogs = new LiveLogStore();
   const { service, judgeRunner, submitCodeJudgeRun } = buildRun({
     store,
     meteredDispatcher,
@@ -205,6 +208,7 @@ async function main(): Promise<void> {
     preflightPlacement,
     readers: { readCaseLogsFn, execInSandboxFn, captureBrowserScreenFn, openTerminalStreamFn },
     liveFrames,
+    liveLogs,
   });
 
   const scorecardService = buildScorecard({
@@ -331,6 +335,7 @@ async function main(): Promise<void> {
     ...(browserProfileCaptureService ? { browserProfileCaptureService } : {}), // S3 capture (needs browser sessions)
     proxyService, // workspace BYO egress proxies (browser-profiles S4) — per-country pool + session geo
     liveFrames, // live-screen frames pushed by self-hosted runners (report_case_screen MCP tool)
+    liveLogs, // live execution log pushed by self-hosted runners (report_case_log MCP tool)
     service,
     scorecardService,
     metrics, // GET /metrics (Prometheus text) — unauthenticated; deployments firewall the scrape path

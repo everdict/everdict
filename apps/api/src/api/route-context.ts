@@ -88,6 +88,7 @@ import { WebSocketServer } from "ws";
 import type { z } from "zod";
 import { type BudgetAdmin, BudgetLimitInputSchema } from "../common/budget-tracker.js";
 import type { LiveFrameStore } from "../common/live-frame-store.js";
+import type { LiveLogStore } from "../common/live-log-store.js";
 import type { TerminalTicketStore } from "../common/terminal-ticket.js";
 import type { TicketStore } from "../common/ticket-store.js";
 import {
@@ -169,6 +170,7 @@ export interface ServerDeps {
   callbackSink?: CallbackSink; // inbound receiver for the front-door callback completion model (/frontdoor-callback disabled if absent)
   terminalTickets?: TerminalTicketStore; // WS terminal (observability ⑥) — mints/consumes short-lived tickets (WS routes disabled if absent)
   liveFrames?: LiveFrameStore; // live-screen frames pushed by a self-hosted runner (report_case_screen) — served by RunService.screen()
+  liveLogs?: LiveLogStore; // live execution log pushed by a self-hosted runner (report_case_log) — served by RunService.logs()
   browserSessionService?: BrowserSessionService; // interactive browser sessions (browser-profiles S1) — self-scoped (routes disabled if absent)
   browserTickets?: TicketStore; // WS ticket store for interactive browser sessions (browser-session WS disabled if absent)
   browserProfileService?: BrowserProfileService; // saved authenticated browser profiles (browser-profiles S2) — self-scoped (routes disabled if absent)

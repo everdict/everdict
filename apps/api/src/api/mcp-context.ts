@@ -35,6 +35,7 @@ import type {
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { BudgetAdmin } from "../common/budget-tracker.js";
 import type { LiveFrameStore } from "../common/live-frame-store.js";
+import type { LiveLogStore } from "../common/live-log-store.js";
 import type { TicketStore } from "../common/ticket-store.js";
 import type { BenchmarkService } from "../core/benchmark/benchmark-service.js";
 import type { BrowserProfileCaptureService } from "../core/browser-profile/browser-profile-capture-service.js";
@@ -85,6 +86,7 @@ export interface McpDeps {
   commentService?: CommentService; // resource comments (datasets, etc.) — list/create/delete
   runnerHub?: RunnerHubLike; // runner lease hub — lease_job/submit_job_result/fail_job/heartbeat_job (runner token only)
   liveFrames?: LiveFrameStore; // latest live-screen frame per run, pushed by a self-hosted runner (report_case_screen)
+  liveLogs?: LiveLogStore; // accumulated live execution log per run, pushed by a self-hosted runner (report_case_log)
   settingsStore?: WorkspaceSettingsStore;
   benchmarkService?: BenchmarkService; // benchmark preview + import (source → dataset)
   bundleService?: BundleService; // bundle one-shot apply (harness + benchmark + runtime, etc.)

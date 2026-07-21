@@ -40,6 +40,7 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { describe, expect, it } from "vitest";
 import { persistentBudget } from "./common/budget-tracker.js";
 import { LiveFrameStore } from "./common/live-frame-store.js";
+import { LiveLogStore } from "./common/live-log-store.js";
 import { BundleService } from "./core/bundle/bundle-service.js";
 import { githubAppGateway } from "./infrastructure/github/app-gateway.js";
 import { buildMcpServer } from "./mcp.js";
@@ -250,6 +251,30 @@ describe("MCP — live screen (report_case_screen)", () => {
     });
     expect(res.isError).toBe(true);
     expect(frames.get("evd-run-42")).toBeUndefined();
+  });
+});
+
+describe("MCP — live execution log (report_case_log)", () => {
+  const withLogs = (logs: LiveLogStore) => ({ ...harness(), liveLogs: logs });
+
+  it("a runner appends lifecycle log lines under the run id (cumulative; served later by RunService.logs())", async () => {
+    const logs = new LiveLogStore();
+    const runner = await connectRunner(withLogs(logs), "laptop");
+    await runner.callTool({ name: "report_case_log", arguments: { runId: "evd-run-42", line: "▶ Started" } });
+    const res = await runner.callTool({
+      name: "report_case_log",
+      arguments: { runId: "evd-run-42", line: "✓ Completed" },
+    });
+    expect(res.isError).toBeFalsy();
+    expect(logs.get("evd-run-42")).toBe("▶ Started\n✓ Completed"); // append, not overwrite
+  });
+
+  it("regular (non-runner) credentials cannot push a log line — FORBIDDEN", async () => {
+    const logs = new LiveLogStore();
+    const admin = await connect(withLogs(logs), ["admin"]); // via=oidc, no runnerId
+    const res = await admin.callTool({ name: "report_case_log", arguments: { runId: "evd-run-42", line: "x" } });
+    expect(res.isError).toBe(true);
+    expect(logs.get("evd-run-42")).toBeUndefined();
   });
 });
 
