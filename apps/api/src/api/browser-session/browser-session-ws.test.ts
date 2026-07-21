@@ -31,6 +31,8 @@ class FakeSession implements BrowserSessionHandle {
   readonly mice: unknown[] = [];
   readonly keys: unknown[] = [];
   readonly navigations: string[] = [];
+  readonly insertedTexts: string[] = [];
+  readonly viewports: Array<{ width: number; height: number }> = [];
   closed = false;
   private frameCb?: (f: ScreencastFrame) => void;
   private errCb?: (e: Error) => void;
@@ -52,6 +54,12 @@ class FakeSession implements BrowserSessionHandle {
   }
   navigate(url: string): void {
     this.navigations.push(url);
+  }
+  insertText(text: string): void {
+    this.insertedTexts.push(text);
+  }
+  setViewport(width: number, height: number): void {
+    this.viewports.push({ width, height });
   }
   close(): void {
     this.closed = true;
@@ -103,6 +111,27 @@ describe("attachBrowserSessionWs", () => {
     expect(session.mice).toEqual([{ type: "mousePressed", x: 10, y: 20, button: "left" }]);
     expect(session.keys).toEqual([{ type: "char", text: "a" }]);
     expect(session.navigations).toEqual(["https://example.com"]);
+  });
+
+  it("routes IME insertText and canvas resize input IN to the session", async () => {
+    const ws = new FakeWs();
+    const session = new FakeSession();
+    attachBrowserSessionWs(ws as unknown as WebSocket, "http://cdp", async () => session);
+    await flush();
+    ws.emit("message", JSON.stringify({ kind: "insertText", text: "안녕하세요" }));
+    ws.emit("message", JSON.stringify({ kind: "resize", width: 1440, height: 900 }));
+    expect(session.insertedTexts).toEqual(["안녕하세요"]);
+    expect(session.viewports).toEqual([{ width: 1440, height: 900 }]);
+  });
+
+  it("rejects an out-of-bounds resize (a client cannot demand an absurd screencast surface)", async () => {
+    const ws = new FakeWs();
+    const session = new FakeSession();
+    attachBrowserSessionWs(ws as unknown as WebSocket, "http://cdp", async () => session);
+    await flush();
+    ws.emit("message", JSON.stringify({ kind: "resize", width: 20_000, height: 900 }));
+    ws.emit("message", JSON.stringify({ kind: "resize", width: 1024.5, height: 768 })); // non-integer
+    expect(session.viewports).toHaveLength(0);
   });
 
   it("drops malformed input (bad JSON / unknown kind / missing fields) without crashing", async () => {

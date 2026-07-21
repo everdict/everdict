@@ -48,6 +48,12 @@ export interface BrowserSessionHandle {
   onClose(cb: () => void): void;
   mouse(input: MouseInput): void;
   key(input: KeyInput): void;
+  // Insert a composed string as-is (CDP Input.insertText) — the IME path: a client composes Korean/Japanese/… locally
+  // and commits the final text in one shot (per-keystroke char events cannot express composition).
+  insertText(text: string): void;
+  // Match the remote viewport to the client canvas (CDP Emulation.setDeviceMetricsOverride) — without this the
+  // screencast stays at the browser's launch window size and the canvas scales it (blurry, wrong hit-testing feel).
+  setViewport(width: number, height: number): void;
   navigate(url: string): void;
   close(): void;
 }
@@ -136,6 +142,9 @@ export async function openBrowserSession(
     onClose: (cb) => closeCbs.push(cb),
     mouse: (input) => send("Input.dispatchMouseEvent", { ...input }),
     key: (input) => send("Input.dispatchKeyEvent", { ...input }),
+    insertText: (text) => send("Input.insertText", { text }),
+    setViewport: (width, height) =>
+      send("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 1, mobile: false }),
     navigate: (url) => send("Page.navigate", { url }),
     close: () => {
       try {

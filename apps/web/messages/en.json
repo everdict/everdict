@@ -2832,15 +2832,21 @@
     "cookieCount": "{count, plural, one {# cookie} other {# cookies}}",
     "saveProfile": "Save profile & close",
     "savingProfile": "Saving…",
-    "cancelSession": "Close without saving"
+    "cancelSession": "Close without saving",
+    "cancel": "Cancel",
+    "deleteConfirmTitle": "Delete profile",
+    "deleteConfirmBody": "The profile \"{name}\" and its captured logins will be deleted. This cannot be undone."
   },
   "interactiveBrowser": {
     "connecting": "Connecting…",
     "live": "Live",
     "closed": "Disconnected",
     "disconnected": "The session ended. Close the wizard and start again.",
-    "urlPlaceholder": "https://… (Enter to go)",
+    "urlPlaceholder": "Enter an address (Enter to go)",
     "go": "Go",
-    "canvasHint": "Click, type, and navigate — you are driving the real browser."
+    "canvasHint": "Click, type, and scroll — you are driving the real browser.",
+    "imeHint": "Composed input (Korean, Japanese, …) is sent the moment the composition commits.",
+    "keyboardAttached": "Keyboard attached",
+    "keyboardDetached": "Click the screen to attach the keyboard"
   }
 }

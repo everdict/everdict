@@ -93,6 +93,24 @@ describe("openBrowserSession (interactive CDP: screencast out + input in)", () =
     expect(sock.byMethod("Page.navigate")[0]?.params).toMatchObject({ url: "https://example.com/login" });
   });
 
+  it("commits composed IME text in one shot via Input.insertText", async () => {
+    const { sock, handle } = await setup();
+    sock.emit("open");
+    handle.insertText("안녕하세요");
+    expect(sock.byMethod("Input.insertText")[0]?.params).toMatchObject({ text: "안녕하세요" });
+  });
+
+  it("matches the remote viewport to the client canvas via Emulation.setDeviceMetricsOverride", async () => {
+    const { sock, handle } = await setup();
+    sock.emit("open");
+    handle.setViewport(1440, 900);
+    expect(sock.byMethod("Emulation.setDeviceMetricsOverride")[0]?.params).toMatchObject({
+      width: 1440,
+      height: 900,
+      mobile: false,
+    });
+  });
+
   it("throws when there is no CDP page target", async () => {
     await expect(
       openBrowserSession("http://b:9222", {

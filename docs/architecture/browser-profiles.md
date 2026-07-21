@@ -178,6 +178,16 @@ short-lived container/pod per active login; self-hosted = the user's own local b
    `RuntimeSpec.browserImage` at the mirror. To bump: re-resolve the digest, update `browser-image.ts`, re-run the
    mirror workflow. Follow-up: managed **K8s** reachability (per-session `kubectl port-forward` / ingress to the pod
    CDP) — lifts this from a control-plane-host Docker daemon to the SaaS cluster.
+   **Fonts:** `headless-shell` ships no CJK fonts — Korean/Japanese/Chinese pages render as tofu (verified against
+   the pinned image). `EVERDICT_BROWSER_FONTS_DIR` (e.g. `/usr/share/fonts`) bind-mounts a host font directory
+   read-only at `/usr/share/fonts/everdict-host` inside the session container (fontconfig scans `/usr/share/fonts`
+   recursively); unset = no mount. The container also launches with `--window-size=1280,800` (mirroring
+   `LocalChromeProvisioner`) so the screencast surface is sane before the client's first `resize`.
+   **Live-view input protocol** (`browser-session-ws`, client→server kinds): `mouse` (incl. `mouseWheel` — the
+   canvas forwards wheel deltas), `key`, `navigate`, `insertText` (the IME path — Korean/Japanese composition
+   commits as ONE CDP `Input.insertText`; per-key char events cannot express Hangul), and `resize` (bounded
+   320–2560 × 240–1600 → `Emulation.setDeviceMetricsOverride`, so the remote viewport follows the client canvas
+   1:1 — no scaling blur, correct hit-testing).
 9. **S7 — session-first creation UX + live remembered-login chips.** ✅ SHIPPED. Creating a profile IS the login
    session (see "The creation UX is session-first" above). New endpoint `GET /browser-sessions/:id/state-preview`
    (`BrowserSessionService.statePreview` — injectable `captureState`, default the S3 CDP capture; owner-gated,

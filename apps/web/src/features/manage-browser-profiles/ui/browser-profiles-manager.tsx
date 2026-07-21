@@ -1,11 +1,13 @@
 'use client'
 
 import { useState } from 'react'
+import { Pencil, RotateCw, Trash2 } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
 import type { BrowserProfile } from '@/entities/browser-profile'
 import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
+import { Dialog } from '@/shared/ui/dialog'
 import { EmptyState } from '@/shared/ui/empty-state'
 import { Input } from '@/shared/ui/input'
 
@@ -25,6 +27,8 @@ export function BrowserProfilesManager({
   const [profiles, setProfiles] = useState<BrowserProfile[]>(initialProfiles)
   // null = closed · {} = create a new profile · { profile } = re-login into an existing one
   const [wizard, setWizard] = useState<{ profile?: BrowserProfile } | null>(null)
+  // A profile pending delete confirmation (captured logins are destroyed with it — never a one-click delete).
+  const [confirming, setConfirming] = useState<BrowserProfile | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   const onDone = (saved: BrowserProfile) => {
@@ -84,12 +88,38 @@ export function BrowserProfilesManager({
               key={p.id}
               profile={p}
               onRename={rename}
-              onRemove={remove}
+              onRemove={() => setConfirming(p)}
               onRelogin={() => setWizard({ profile: p })}
             />
           ))}
         </ul>
       )}
+
+      <Dialog open={confirming !== null} onClose={() => setConfirming(null)} className="max-w-sm">
+        {confirming && (
+          <div className="space-y-3 p-4">
+            <h3 className="text-[13.5px] font-medium">{t('deleteConfirmTitle')}</h3>
+            <p className="text-[12.5px] text-muted-foreground">
+              {t('deleteConfirmBody', { name: confirming.name })}
+            </p>
+            <div className="flex justify-end gap-2">
+              <Button variant="ghost" size="sm" onClick={() => setConfirming(null)}>
+                {t('cancel')}
+              </Button>
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={() => {
+                  remove(confirming.id)
+                  setConfirming(null)
+                }}
+              >
+                {t('delete')}
+              </Button>
+            </div>
+          </div>
+        )}
+      </Dialog>
     </div>
   )
 }
@@ -102,7 +132,7 @@ function ProfileRow({
 }: {
   profile: BrowserProfile
   onRename: (id: string, next: string) => void
-  onRemove: (id: string) => void
+  onRemove: () => void
   onRelogin: () => void
 }) {
   const t = useTranslations('browserProfiles')
@@ -155,15 +185,31 @@ function ProfileRow({
         )}
       </div>
       {!editing && (
-        <div className="flex shrink-0 items-center gap-1">
-          <Button size="sm" variant="ghost" onClick={onRelogin}>
+        <div className="flex shrink-0 items-center gap-0.5">
+          {/* Re-login is the row's primary action — it keeps its label; housekeeping shrinks to icons. */}
+          <Button size="sm" variant="ghost" onClick={onRelogin} className="gap-1.5">
+            <RotateCw className="size-3.5" />
             {t('relogin')}
           </Button>
-          <Button size="sm" variant="ghost" onClick={() => setEditing(true)}>
-            {t('rename')}
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => setEditing(true)}
+            aria-label={t('rename')}
+            title={t('rename')}
+            className="size-7 p-0"
+          >
+            <Pencil className="size-3.5" />
           </Button>
-          <Button size="sm" variant="ghost" onClick={() => onRemove(profile.id)}>
-            {t('delete')}
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={onRemove}
+            aria-label={t('delete')}
+            title={t('delete')}
+            className="size-7 p-0 text-muted-foreground hover:text-[var(--color-danger)]"
+          >
+            <Trash2 className="size-3.5" />
           </Button>
         </div>
       )}

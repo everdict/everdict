@@ -2832,15 +2832,21 @@
     "cookieCount": "쿠키 {count}개",
     "saveProfile": "프로필 저장 후 종료",
     "savingProfile": "저장 중…",
-    "cancelSession": "저장하지 않고 종료"
+    "cancelSession": "저장하지 않고 종료",
+    "cancel": "취소",
+    "deleteConfirmTitle": "프로필 삭제",
+    "deleteConfirmBody": "\"{name}\" 프로필과 캡처된 로그인이 삭제됩니다. 이 작업은 되돌릴 수 없습니다."
   },
   "interactiveBrowser": {
     "connecting": "연결 중…",
     "live": "라이브",
     "closed": "연결 종료",
     "disconnected": "세션이 종료되었습니다. 위자드를 닫고 다시 시작하세요.",
-    "urlPlaceholder": "https://… (Enter로 이동)",
+    "urlPlaceholder": "주소 입력 (Enter로 이동)",
     "go": "이동",
-    "canvasHint": "클릭·입력·이동 — 실제 브라우저를 직접 조종하고 있습니다."
+    "canvasHint": "클릭·입력·스크롤 — 실제 브라우저를 직접 조종하고 있습니다.",
+    "imeHint": "한글 등 조합 입력은 조합이 끝나는 순간 전송됩니다.",
+    "keyboardAttached": "키보드 연결됨",
+    "keyboardDetached": "화면을 클릭하면 키보드가 연결됩니다"
   }
 }

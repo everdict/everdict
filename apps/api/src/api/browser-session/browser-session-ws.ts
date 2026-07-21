@@ -29,10 +29,20 @@ const KeyInputSchema = z.object({
   windowsVirtualKeyCode: z.number().optional(),
 });
 const NavigateInputSchema = z.object({ kind: z.literal("navigate"), url: z.string() });
+// IME path — the client composes locally (Korean/Japanese/…) and commits the final string in one shot.
+const InsertTextInputSchema = z.object({ kind: z.literal("insertText"), text: z.string().max(4096) });
+// Match the remote viewport to the client canvas. Bounded so a client can't demand an absurd screencast surface.
+const ResizeInputSchema = z.object({
+  kind: z.literal("resize"),
+  width: z.number().int().min(320).max(2560),
+  height: z.number().int().min(240).max(1600),
+});
 export const BrowserSessionInputSchema = z.discriminatedUnion("kind", [
   MouseInputSchema,
   KeyInputSchema,
   NavigateInputSchema,
+  InsertTextInputSchema,
+  ResizeInputSchema,
 ]);
 export type BrowserSessionInput = z.infer<typeof BrowserSessionInputSchema>;
 
@@ -44,6 +54,10 @@ function dispatchInput(session: BrowserSessionHandle, input: BrowserSessionInput
   } else if (input.kind === "key") {
     const { kind: _k, ...key } = input;
     session.key(key);
+  } else if (input.kind === "insertText") {
+    session.insertText(input.text);
+  } else if (input.kind === "resize") {
+    session.setViewport(input.width, input.height);
   } else {
     session.navigate(input.url);
   }

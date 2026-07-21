@@ -299,6 +299,8 @@ async function main(): Promise<void> {
           ...(process.env.EVERDICT_BROWSER_DOCKER_NETWORK
             ? { network: process.env.EVERDICT_BROWSER_DOCKER_NETWORK }
             : {}),
+          // Host fonts → container (read-only). headless-shell has no CJK fonts; without this Korean pages are tofu.
+          ...(process.env.EVERDICT_BROWSER_FONTS_DIR ? { fontsDir: process.env.EVERDICT_BROWSER_FONTS_DIR } : {}),
         })
       : new LocalChromeProvisioner(browserChromeBin ? { binary: browserChromeBin } : {});
   // Runtime binding (browser-profiles S9) — a session with a `runtime` runs the browser on the tenant's registered

@@ -220,52 +220,65 @@ export function ProfileLoginWizard({
           </div>
         </div>
       ) : (
-        <div className="space-y-4">
+        // Live step — the canvas is the protagonist (left, full width); the capture state + finish actions live in a
+        // sticky right rail so "what will be saved" and the save button stay visible without scrolling past the screen.
+        <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_280px]">
           <BrowserCanvas sessionId={session.id} />
 
-          <div className="space-y-2 border-t border-border pt-3">
-            <div>
-              <span className="text-[12.5px] font-medium">{t('rememberedTitle')}</span>
-              <p className="text-[11.5px] text-faint">{t('rememberedHint')}</p>
-            </div>
-            {remembered.length === 0 ? (
-              <p className="text-[12px] text-muted-foreground">{t('rememberedEmpty')}</p>
-            ) : (
-              <div className="flex flex-wrap gap-1.5">
-                {remembered.map((d) => (
-                  <span
-                    key={d.domain}
-                    title={d.cookieNames.join(', ')}
-                    className="inline-flex items-center gap-1 rounded-full border border-border bg-muted/40 px-2 py-0.5 text-[11px]"
-                  >
-                    <span className="font-medium">{d.domain}</span>
-                    <span className="text-faint">
-                      · {t('cookieCount', { count: d.cookieNames.length })}
-                    </span>
-                  </span>
-                ))}
+          <aside className="space-y-3 xl:sticky xl:top-4 xl:self-start">
+            <div className="space-y-2 rounded-lg border border-border bg-card/60 p-3">
+              <div>
+                <span className="text-[12.5px] font-medium">{t('rememberedTitle')}</span>
+                <p className="mt-0.5 text-[11.5px] text-faint">{t('rememberedHint')}</p>
               </div>
-            )}
-          </div>
+              {remembered.length === 0 ? (
+                <p className="text-[12px] text-muted-foreground">{t('rememberedEmpty')}</p>
+              ) : (
+                <ul className="max-h-56 space-y-1 overflow-y-auto">
+                  {remembered.map((d) => (
+                    <li
+                      key={d.domain}
+                      title={d.cookieNames.join(', ')}
+                      className="flex items-baseline justify-between gap-2 rounded-md border border-border bg-muted/30 px-2 py-1 text-[11.5px]"
+                    >
+                      <span className="truncate font-medium">{d.domain}</span>
+                      <span className="shrink-0 text-faint">
+                        {t('cookieCount', { count: d.cookieNames.length })}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
 
-          <div className="flex flex-wrap items-end gap-2 border-t border-border pt-3">
-            {!profile && (
-              <label className="flex min-w-56 flex-col gap-1">
-                <span className="text-[12px] text-muted-foreground">{t('nameLabel')}</span>
-                <Input
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder={t('namePlaceholder')}
-                />
-              </label>
-            )}
-            <Button onClick={saveAndFinish} disabled={busy !== 'idle' || !name.trim()}>
-              {busy === 'saving' ? t('savingProfile') : t('saveProfile')}
-            </Button>
-            <Button variant="ghost" onClick={cancel} disabled={busy === 'saving'}>
-              {t('cancelSession')}
-            </Button>
-          </div>
+            <div className="space-y-2.5 rounded-lg border border-border bg-card/60 p-3">
+              {!profile && (
+                <label className="flex flex-col gap-1">
+                  <span className="text-[12px] text-muted-foreground">{t('nameLabel')}</span>
+                  <Input
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    placeholder={t('namePlaceholder')}
+                  />
+                </label>
+              )}
+              <Button
+                className="w-full"
+                onClick={saveAndFinish}
+                disabled={busy !== 'idle' || !name.trim()}
+              >
+                {busy === 'saving' ? t('savingProfile') : t('saveProfile')}
+              </Button>
+              <Button
+                variant="ghost"
+                className="w-full"
+                onClick={cancel}
+                disabled={busy === 'saving'}
+              >
+                {t('cancelSession')}
+              </Button>
+            </div>
+          </aside>
         </div>
       )}
     </div>

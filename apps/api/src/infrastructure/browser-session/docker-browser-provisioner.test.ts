@@ -60,6 +60,32 @@ describe("DockerBrowserProvisioner (browser-profiles S6)", () => {
     expect(runs[0]?.args).toContain("--proxy-server=http://user:pass@proxy:8080");
   });
 
+  it("launches with a sane default window size (the screencast surface before the first client resize)", async () => {
+    const { docker, runs } = fakeDocker();
+    const p = new DockerBrowserProvisioner({ docker, fetch: okFetch, newName: () => "x" });
+    await p.provision();
+    expect(runs[0]?.args).toContain("--window-size=1280,800");
+  });
+
+  it("bind-mounts the host fonts dir read-only when configured — headless-shell has no CJK fonts (tofu otherwise)", async () => {
+    const { docker, runs } = fakeDocker();
+    const p = new DockerBrowserProvisioner({
+      docker,
+      fetch: okFetch,
+      newName: () => "x",
+      fontsDir: "/usr/share/fonts",
+    });
+    await p.provision();
+    expect(runs[0]?.volumes).toEqual(["/usr/share/fonts:/usr/share/fonts/everdict-host:ro"]);
+  });
+
+  it("mounts no fonts volume when fontsDir is unset", async () => {
+    const { docker, runs } = fakeDocker();
+    const p = new DockerBrowserProvisioner({ docker, fetch: okFetch, newName: () => "x" });
+    await p.provision();
+    expect(runs[0]?.volumes).toBeUndefined();
+  });
+
   it("disposes by removing the container", async () => {
     const { docker, removed } = fakeDocker();
     const p = new DockerBrowserProvisioner({ docker, fetch: okFetch, newName: () => "x" });

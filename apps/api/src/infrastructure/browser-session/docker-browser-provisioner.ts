@@ -20,6 +20,11 @@ export interface DockerBrowserOptions {
   network?: string; // docker network (default "bridge" — a standalone browser, published to the host)
   readyTimeoutMs?: number; // wait for CDP /json/version (default 20s — a container cold-start incl. image pull)
   newName?: () => string; // container-name suffix (tests inject a fixed value)
+  // Host font directory bind-mounted read-only into the container. headless-shell ships NO CJK fonts — without this
+  // every Korean/Japanese/Chinese page renders as tofu (verified against the pinned image). Wire via
+  // EVERDICT_BROWSER_FONTS_DIR (e.g. /usr/share/fonts); unset = no mount.
+  fontsDir?: string;
+  windowSize?: string; // --window-size W,H (default 1280,800 — mirrors LocalChromeProvisioner)
 }
 
 export class DockerBrowserProvisioner implements BrowserSessionProvisioner {
@@ -29,6 +34,8 @@ export class DockerBrowserProvisioner implements BrowserSessionProvisioner {
   private readonly network: string;
   private readonly readyTimeoutMs: number;
   private readonly newName: () => string;
+  private readonly fontsDir?: string;
+  private readonly windowSize: string;
 
   constructor(opts: DockerBrowserOptions = {}) {
     this.docker = opts.docker ?? dockerCli();
@@ -37,18 +44,27 @@ export class DockerBrowserProvisioner implements BrowserSessionProvisioner {
     this.network = opts.network ?? "bridge";
     this.readyTimeoutMs = opts.readyTimeoutMs ?? 20_000;
     this.newName = opts.newName ?? (() => randomUUID().slice(0, 8));
+    if (opts.fontsDir !== undefined) this.fontsDir = opts.fontsDir;
+    this.windowSize = opts.windowSize ?? "1280,800";
   }
 
   async provision(opts: ProvisionBrowserOptions = {}): Promise<ProvisionedBrowser> {
     const name = `evd-browser-session-${this.newName()}`;
-    // headless-shell exposes CDP on 9222 itself; add only allow-origins (host mismatch tolerated) + the optional geo
-    // proxy (browser-profiles S4). The port is published to an arbitrary host port, discovered via hostPort.
+    // headless-shell exposes CDP on 9222 itself; add allow-origins (host mismatch tolerated), a sane window size
+    // (the screencast surface before the client sends its first resize) + the optional geo proxy (browser-profiles
+    // S4). The port is published to an arbitrary host port, discovered via hostPort. Fonts: a subdirectory mount —
+    // fontconfig scans /usr/share/fonts recursively, and the container's own font dirs stay visible.
     const containerId = await this.docker.run({
       name,
       image: this.image,
       network: this.network,
       publish: 9222,
-      args: ["--remote-allow-origins=*", ...(opts.proxyServer ? [`--proxy-server=${opts.proxyServer}`] : [])],
+      ...(this.fontsDir ? { volumes: [`${this.fontsDir}:/usr/share/fonts/everdict-host:ro`] } : {}),
+      args: [
+        "--remote-allow-origins=*",
+        `--window-size=${this.windowSize}`,
+        ...(opts.proxyServer ? [`--proxy-server=${opts.proxyServer}`] : []),
+      ],
     });
     const dispose = async (): Promise<void> => {
       await this.docker.rm([containerId]).catch(() => undefined); // best-effort force removal
