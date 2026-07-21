@@ -57,6 +57,9 @@ export { type NewQueuedRunInput, Run, type RunTransition } from "./run/run.js";
 // member — the last-admin invariant (from apps/api core/member)
 export { MembershipPolicy } from "./member/membership-policy.js";
 
+// runner — self-hosted runner liveness (the online window the dispatch-time "no online runner" diagnostic keys on)
+export { isRunnerOnline, RUNNER_ONLINE_WINDOW_MS } from "./runner/liveness.js";
+
 // schedule — the Schedule aggregate + cron validity (from apps/api core/schedule)
 export {
   isValidCron,

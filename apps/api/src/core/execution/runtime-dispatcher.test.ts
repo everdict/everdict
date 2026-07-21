@@ -204,12 +204,14 @@ describe("RuntimeDispatcher", () => {
     ...job(target),
     ...(submittedBy ? { submittedBy } : {}),
   });
-  const selfDeps = (caps: string[] | undefined) => {
-    // caps: undefined = not owned (404), array = owned + that runner's capabilities.
+  const selfDeps = (caps: string[] | undefined, online = true) => {
+    // caps: undefined = not owned (404), array = owned + that runner's capabilities. online = reachable right now.
     const { inner, seen } = innerSpy();
     const backends = new BackendRegistry();
     const stub = { id: "stub", capacity: async () => ({ total: 1, used: 0 }), dispatch: async () => result };
-    const resolveSelfRunner = vi.fn(async () => caps);
+    const resolveSelfRunner = vi.fn(async () =>
+      caps === undefined ? undefined : { capabilities: caps, online, label: "dev-laptop" },
+    );
     const buildSelfHostedBackend = vi.fn(() => stub);
     const d = new RuntimeDispatcher({
       inner,
@@ -274,6 +276,26 @@ describe("RuntimeDispatcher", () => {
     expect(seen[0]?.evalCase.placement?.target).toBe("self:u-alice:dev-laptop");
   });
 
+  // Immediate offline-runner feedback (Phase 1): a pinned runner that's OFFLINE right now doesn't hard-fail (it may
+  // reconnect within the idle window) — the job still parks, but onWaiting surfaces the reason at dispatch time
+  // instead of the case sitting silently "queued" for ~5 minutes.
+  it("pinned runner offline → fires onWaiting with an actionable reason AND still parks (non-terminal)", async () => {
+    const { d, seen } = selfDeps(["repo"], false); // owned + capable, but offline
+    const onWaiting = vi.fn();
+    await d.dispatch(selfJob("self:dev-laptop", "u-alice"), { onWaiting });
+    expect(onWaiting).toHaveBeenCalledTimes(1);
+    expect(onWaiting.mock.calls[0]?.[0]).toMatch(/offline/i);
+    expect(onWaiting.mock.calls[0]?.[0]).toContain("dev-laptop"); // names the runner
+    expect(seen).toHaveLength(1); // still routed/parked — it runs the moment the runner reconnects
+  });
+
+  it("pinned runner online → does NOT fire onWaiting (healthy dispatch)", async () => {
+    const { d } = selfDeps(["repo"], true);
+    const onWaiting = vi.fn();
+    await d.dispatch(selfJob("self:dev-laptop", "u-alice"), { onWaiting });
+    expect(onWaiting).not.toHaveBeenCalled();
+  });
+
   // self:ws:<runnerId> — a workspace-shared runner. The owner is derived from the job's tenant (ws:<tenant>), not the submitter, so
   // any member of that workspace can target it (regardless of submittedBy). For sharing team build servers/CI runners.
   it("self:ws:<runnerId> resolves as owner=ws:<tenant> (any member — no submittedBy needed)", async () => {
@@ -292,11 +314,16 @@ describe("RuntimeDispatcher", () => {
   });
 
   // self:ws (no runner id) — workspace pool. Instead of a specific runner, any runner of that workspace (satisfying the capabilities) takes it.
-  const poolDeps = (hasRunners: boolean, fleets?: string[][]) => {
+  const poolDeps = (hasRunners: boolean, fleets?: string[][], online = true) => {
     const { inner, seen } = innerSpy();
     const backends = new BackendRegistry();
     const stub = { id: "stub", capacity: async () => ({ total: 1, used: 0 }), dispatch: async () => result };
-    const poolHasRunners = vi.fn(async () => hasRunners);
+    // hasRunners=false → empty pool (404). Else one runner per fleet (default: a single no-capability runner), each
+    // carrying `online`. poolRunners subsumes the old poolHasRunners (empty = none) + poolRunnerCapabilities (caps).
+    const runners = hasRunners
+      ? (fleets ?? [[]]).map((caps, i) => ({ capabilities: caps, online, label: `r${i}` }))
+      : [];
+    const poolRunners = vi.fn(async () => runners);
     const buildSelfHostedBackend = vi.fn(() => stub);
     const d = new RuntimeDispatcher({
       inner,
@@ -304,17 +331,16 @@ describe("RuntimeDispatcher", () => {
       runtimes: new InMemoryRuntimeRegistry(),
       secretsFor: async () => ({}),
       resolveSelfRunner: async () => undefined,
-      poolHasRunners,
+      poolRunners,
       buildSelfHostedBackend,
-      ...(fleets ? { poolRunnerCapabilities: vi.fn(async () => fleets) } : {}),
     });
-    return { d, seen, backends, poolHasRunners };
+    return { d, seen, backends, poolRunners };
   };
 
   it("self:ws (no id) → route to the workspace pool backend self:ws:acme:* (any runner drains)", async () => {
-    const { d, seen, backends, poolHasRunners } = poolDeps(true);
+    const { d, seen, backends, poolRunners } = poolDeps(true);
     await d.dispatch(selfJob("self:ws"));
-    expect(poolHasRunners).toHaveBeenCalledWith("ws:acme");
+    expect(poolRunners).toHaveBeenCalledWith("ws:acme");
     expect(backends.has("self:ws:acme:*")).toBe(true);
     expect(seen[0]?.evalCase.placement?.target).toBe("self:ws:acme:*");
   });
@@ -372,11 +398,40 @@ describe("RuntimeDispatcher", () => {
     expect(seen[0]?.evalCase.placement?.target).toBe("self:ws:acme:*");
   });
 
+  // Immediate offline-runner feedback (Phase 1) — pool variant: capable runner(s) exist but ALL are offline right now.
+  it("pool with capable runners but ALL offline → fires onWaiting AND still parks (non-terminal)", async () => {
+    const { d, seen } = poolDeps(true, [["git", "docker"]], false); // one capable runner, offline
+    const onWaiting = vi.fn();
+    await d.dispatch(selfJob("self:ws"), { onWaiting });
+    expect(onWaiting).toHaveBeenCalledTimes(1);
+    expect(onWaiting.mock.calls[0]?.[0]).toMatch(/offline/i);
+    expect(seen).toHaveLength(1); // still routed to the pool backend — runs when a runner reconnects
+  });
+
+  it("pool with an online capable runner → does NOT fire onWaiting (a runner can pick it up)", async () => {
+    const { d } = poolDeps(true, [["git", "docker"]], true);
+    const onWaiting = vi.fn();
+    await d.dispatch(selfJob("self:ws"), { onWaiting });
+    expect(onWaiting).not.toHaveBeenCalled();
+  });
+
+  it("pool where NO runner is capable → still the hard 400 (never onWaiting — it can never succeed)", async () => {
+    // Offline is a soft warning (reconnect fixes it); an uncapable pool is a hard failure (nothing can ever run it).
+    const { d, seen } = poolDeps(true, [["git"]], false); // offline AND lacks docker
+    const onWaiting = vi.fn();
+    await expect(d.dispatch(selfServiceJob("self:ws", "u-alice"), { onWaiting })).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      status: 400,
+    });
+    expect(onWaiting).not.toHaveBeenCalled();
+    expect(seen).toHaveLength(0);
+  });
+
   // self (no runner id) — personal pool. owner=submitter (submittedBy). Any of my runners (several processes/machines in one pool).
   it("self (no id) → route to the personal pool backend self:<subject>:* (owner=submitter)", async () => {
-    const { d, seen, backends, poolHasRunners } = poolDeps(true);
+    const { d, seen, backends, poolRunners } = poolDeps(true);
     await d.dispatch(selfJob("self", "u-alice"));
-    expect(poolHasRunners).toHaveBeenCalledWith("u-alice"); // the submitter, not the workspace
+    expect(poolRunners).toHaveBeenCalledWith("u-alice"); // the submitter, not the workspace
     expect(backends.has("self:u-alice:*")).toBe(true);
     expect(seen[0]?.evalCase.placement?.target).toBe("self:u-alice:*");
   });

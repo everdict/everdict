@@ -34,6 +34,7 @@ import {
 import { collectDeferredTrace } from "../execution/collect-trace.js";
 import { executeCase } from "../execution/execute-case.js";
 import type { ScoringService } from "../execution/scoring-service.js";
+import type { DispatchOptions } from "../ports/dispatcher.js";
 import { AdaptiveConcurrencyGate } from "../ops/adaptive-concurrency.js";
 import { OOM_ESCALATION_CAP_MB, executeWithOomBoost } from "../ops/oom-boost.js";
 import { executeWithSpillover } from "../ops/runtime-spillover.js";
@@ -490,7 +491,12 @@ export class ScorecardBatchService {
         // next healthy runtime of the shard list before the transient retry burns attempts on a dead cluster.
         // Tail speculation on top (same semantics as the in-process loop): straggler duplicate, first result wins.
         const childId = child?.id;
-        const startOpts = childId && runStore ? { onStarted: () => void this.markChildRunning(childId) } : undefined;
+        // Parity with track(): surface a "no online runner" placement warning immediately (one step per case — the
+        // Temporal path fans one activity per case, so there's no shared in-memory dedupe across cases here).
+        const startOpts: DispatchOptions = {
+          onWaiting: (reason) => void this.appendBatchStep(id, { phase: "dispatch", status: "info", message: reason }),
+          ...(childId && runStore ? { onStarted: () => void this.markChildRunning(childId) } : {}),
+        };
         const exec = (j: AgentJob): Promise<{ result: CaseResult; target?: string }> =>
           executeWithSpillover((jj) => executeCase(this.deps, ctx.owner, jj, startOpts), j, {
             targets: ctx.targets,
@@ -908,6 +914,17 @@ export class ScorecardBatchService {
       steps.push({ ts: this.now(), phase: p, status, message, ...(caseId ? { caseId } : {}) });
     };
     const flushSteps = (): Promise<unknown> => this.deps.store.update(id, { steps: [...steps], updatedAt: this.now() });
+    // "No online runner" placement warnings surfaced by the dispatcher at park time (self-hosted cases whose runner
+    // pool is offline). Deduped by the exact reason (pool-level, case-independent) so an all-offline 601-case batch
+    // shows ONE actionable line, not 601 identical steps. Non-terminal — the batch still runs the moment a runner
+    // reconnects. Cleared implicitly by the batch finishing; a different reason (a different offline pool) re-shows.
+    const waitingReasonsShown = new Set<string>();
+    const onWaiting = (reason: string): void => {
+      if (waitingReasonsShown.has(reason)) return;
+      waitingReasonsShown.add(reason);
+      pushStep("dispatch", "info", reason);
+      void flushSteps();
+    };
     const seed = opts.seed ?? [];
     const seedRunIds = opts.seedRunIds ?? [];
     // Seeds carried WITHOUT child-run backing (retry-failed carries another scorecard's results) can't be
@@ -990,7 +1007,13 @@ export class ScorecardBatchService {
         // Flip the child run queued→running the moment a backend/runner actually starts this case (not at park) — so a
         // fan-out parked behind one runner reads as "waiting" until picked up. Best-effort; markChildRunning guards it.
         const childId = child?.id;
-        const startOpts = childId && runStore ? { onStarted: () => void this.markChildRunning(childId) } : undefined;
+        // onWaiting is ALWAYS wired (a scorecard always has a step timeline, deduped per batch); onStarted only when
+        // there's a child run to flip queued→running. So a self-hosted case whose runner pool is offline surfaces the
+        // reason even when run-record backing is off.
+        const startOpts: DispatchOptions = {
+          onWaiting,
+          ...(childId && runStore ? { onStarted: () => void this.markChildRunning(childId) } : {}),
+        };
         const exec = (j: AgentJob): Promise<{ result: CaseResult; target?: string }> =>
           executeWithSpillover((jj) => executeCase(this.deps, owner, jj, startOpts), j, {
             targets,

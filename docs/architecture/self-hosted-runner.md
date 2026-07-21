@@ -180,6 +180,20 @@ Self-hosted:   member's `everdict runner` → MCP lease_job (long-call) → runA
   `enqueue` or `wait_ms` timeout; MCP `lease_job{wait_ms?}` (omit = immediate, back-compat); CLI `--wait-ms` (25s).
 - ✅ **Runner presence in the web** (`e9821cc`) — online/offline dot + label on the account roster, derived from
   `lastSeenAt` freshness (long-poll lease touches it ~every 25s). Page-load-time state (not live-updating).
+- ✅ **Diagnosability — "why isn't my runner doing work?"** Two complementary signals so a stuck/absent runner is
+  never a black box:
+  - **Dispatch-time offline diagnostic (Phase 1).** Before a self-hosted case parks, `RuntimeDispatcher` checks
+    runner *liveness*, not just existence/capability. `resolveSelfRunner`/`poolRunners` now carry `online`
+    (`@everdict/domain` `isRunnerOnline` — the same 90s window the web uses). No runner paired (404) and no
+    *capable* runner (400) stay **hard** failures (they can never succeed); a capable-but-**offline** runner is a
+    **soft** signal — the job still parks (it runs the moment the runner reconnects, or fails at the ~5-min idle
+    timeout), but the dispatcher fires `DispatchOptions.onWaiting(reason)` with an actionable sentence naming the
+    offline runner(s). The scorecard batch appends it as ONE `dispatch/info` step (deduped per batch), so the
+    user sees "Runner X is offline — start or reconnect it" immediately instead of a silent 5-min "queued".
+  - **Runner self-reported live status (Phase 2).** The runner carries a short status on every lease/heartbeat
+    ("idle" / "running N job(s)" / "no Docker daemon" / "last job failed [class]: …" / "cannot reach control
+    plane: …"); the control plane overlays it on the roster read (never stored; expired after ~2 min of silence)
+    and the workspace runner card renders it colored by severity — an "online but stuck" runner reads at a glance.
 - ✅ **Case-level parallelism (`--max-concurrent`)** — the runner runs N lease workers concurrently
   (`runLeaseWorkers`, `packages/self-hosted-runner/src/runner-loop.ts`), all sharing one MCP session. `RunnerHub.lease` is
   single-thread-atomic, so concurrent `lease_job` calls never hand the same job out twice → the workers safely

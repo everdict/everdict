@@ -11,7 +11,7 @@ import {
 } from "@everdict/backends";
 import type { RegistryAuth, RuntimeSpec } from "@everdict/contracts";
 import type { CallbackStore, RunnerStore, SecretCipher, SecretStore, WorkspaceSettingsStore } from "@everdict/db";
-import { classifyFailure } from "@everdict/domain";
+import { classifyFailure, isRunnerOnline } from "@everdict/domain";
 import type { HarnessInstanceRegistry, ModelRegistry, RuntimeRegistry } from "@everdict/registry";
 import { makeProfileSeeder } from "../core/browser-profile/browser-profile-injector.js";
 import { JudgeAuthDispatcher } from "../core/execution/judge-auth-dispatcher.js";
@@ -133,12 +133,22 @@ export function buildDispatch(deps: {
     buildBackend: runtimeBuildBackend,
     // Workspace registry pull credentials — carried into the topology backend build to authenticate service-image pulls.
     registryAuthsFor: (tenant) => imageRegistryService.pullAuths(tenant),
-    // self:<runnerId> — personally-owned runner. Confirm ownership (not owned = undefined) + return that runner's capabilities (for the service gate).
-    resolveSelfRunner: async (owner, runnerId) => (await runnerStore.get(owner, runnerId))?.capabilities,
-    // self:ws — workspace pool. Whether that owner (=ws:<tenant>) has any runner at all (lease any runner).
-    poolHasRunners: async (owner) => (await runnerStore.list(owner)).length > 0,
-    // Pool satisfiability gate: each runner's stored capability set (self-advertised on every lease).
-    poolRunnerCapabilities: async (owner) => (await runnerStore.list(owner)).map((r) => r.capabilities ?? []),
+    // self:<runnerId> — personally-owned runner. Confirm ownership (not owned = undefined) + return its liveness
+    // (advertised capabilities for the service gate + whether it's online now for the "runner offline" diagnostic).
+    resolveSelfRunner: async (owner, runnerId) => {
+      const r = await runnerStore.get(owner, runnerId);
+      return r
+        ? { capabilities: r.capabilities ?? [], online: isRunnerOnline(r.lastSeenAt, Date.now()), label: r.label }
+        : undefined;
+    },
+    // self:ws / self — pool. The liveness of every runner in that owner's pool: empty = no runner (404); the
+    // capability sets drive the satisfiability gate; `online` drives the "all capable runners offline" diagnostic.
+    poolRunners: async (owner) =>
+      (await runnerStore.list(owner)).map((r) => ({
+        capabilities: r.capabilities ?? [],
+        online: isRunnerOnline(r.lastSeenAt, Date.now()),
+        label: r.label,
+      })),
     // Park ceiling: the Scheduler admits at most `capacity().total` concurrent parks per pool backend, and
     // the default ceiling (8) is BELOW any useful EVERDICT_RUNNER_MAX_QUEUE — the hub would then never hold
     // enough waiting jobs to reach the cap, and the overflow would pile up unbounded (and uncapped: self-hosted

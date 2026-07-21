@@ -496,6 +496,90 @@ describe("ScorecardService.rerun — full re-run of a finished batch (전체 재
   });
 });
 
+describe("ScorecardService — placement waiting diagnostic (Phase 1: immediate offline-runner feedback)", () => {
+  // A dataset with two cases so the batch fans out twice — the diagnostic must appear ONCE (deduped per batch), not per case.
+  const twoCaseDataset = (): Dataset => ({
+    id: "d",
+    version: "1.0.0",
+    cases: ["c1", "c2"].map((id) => ({
+      id,
+      env: { kind: "repo" as const, source: { files: { "a.txt": "x" } } },
+      task: "do",
+      graders: [],
+      timeoutSec: 1800,
+      tags: [],
+    })),
+    tags: [],
+  });
+
+  // The dispatcher stands in for the RuntimeDispatcher's self-hosted gate: it fires onWaiting (the offline runner
+  // reason) at dispatch, then still parks-and-runs (returns a result) — exactly the non-terminal contract.
+  const offlineThenRuns = (reason: string): Dispatcher => ({
+    async dispatch(job, opts) {
+      opts?.onWaiting?.(reason);
+      return {
+        caseId: job.evalCase.id,
+        harness: `${job.harness.id}@${job.harness.version}`,
+        trace: [],
+        snapshot: { kind: "repo", diff: "", changedFiles: [], headSha: "h" },
+        scores: [{ graderId: "tests-pass", metric: "tests-pass", value: 1, pass: true }],
+      };
+    },
+  });
+
+  it("surfaces the dispatcher's onWaiting reason as ONE 'dispatch/info' step (deduped across a 2-case batch)", async () => {
+    const reason = 'Runner "laptop" is offline (no lease in the last ~90s) — start or reconnect it.';
+    const datasets = new InMemoryDatasetRegistry();
+    await datasets.register("acme", twoCaseDataset());
+    const store = new InMemoryScorecardStore();
+    const service = new ScorecardService({
+      dispatcher: offlineThenRuns(reason),
+      store,
+      datasets,
+      newId: () => "sc-wait",
+    });
+    await service.submit({
+      tenant: "acme",
+      dataset: { id: "d", version: "1.0.0" },
+      harness: { id: "scripted", version: "0" },
+    });
+    const rec = await waitTerminal(store, "sc-wait");
+
+    const waitingSteps = (rec.steps ?? []).filter((s) => s.phase === "dispatch" && s.status === "info");
+    expect(waitingSteps).toHaveLength(1); // deduped — two cases hit the same offline pool, but the user sees one line
+    expect(waitingSteps[0]?.message).toBe(reason);
+    // Non-terminal: the runner "reconnected" (the fake still returned a result) so the batch still succeeds.
+    expect(rec.status).toBe("succeeded");
+  });
+
+  it("does NOT add a waiting step when the dispatcher never signals onWaiting (healthy dispatch)", async () => {
+    const datasets = new InMemoryDatasetRegistry();
+    await datasets.register("acme", twoCaseDataset());
+    const store = new InMemoryScorecardStore();
+    const healthy: Dispatcher = {
+      async dispatch(job) {
+        return {
+          caseId: job.evalCase.id,
+          harness: `${job.harness.id}@${job.harness.version}`,
+          trace: [],
+          snapshot: { kind: "repo", diff: "", changedFiles: [], headSha: "h" },
+          scores: [{ graderId: "tests-pass", metric: "tests-pass", value: 1, pass: true }],
+        };
+      },
+    };
+    const service = new ScorecardService({ dispatcher: healthy, store, datasets, newId: () => "sc-ok" });
+    await service.submit({
+      tenant: "acme",
+      dataset: { id: "d", version: "1.0.0" },
+      harness: { id: "scripted", version: "0" },
+    });
+    const rec = await waitTerminal(store, "sc-ok");
+
+    expect((rec.steps ?? []).filter((s) => s.phase === "dispatch" && s.status === "info")).toHaveLength(0);
+    expect(rec.status).toBe("succeeded");
+  });
+});
+
 describe("ScorecardService.ingestPull", () => {
   it("pulls traces from a trace source, derives metrics, and stores as succeeded", async () => {
     const store = new InMemoryScorecardStore();

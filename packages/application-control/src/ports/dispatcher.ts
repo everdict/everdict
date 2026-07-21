@@ -12,6 +12,13 @@ export interface DispatchOptions {
   // the run record queued→running only when compute truly starts, so a fan-out parked behind one runner reads as
   // "waiting" (queued) until picked up — not falsely "running". Best-effort; a throw must not break dispatch.
   onStarted?: () => void;
+  // Fired at PARK time when a self-hosted case can't start immediately because no ONLINE capable runner exists right
+  // now (paired runners are all offline / the pinned runner is offline). Non-terminal — the job still parks and runs
+  // as soon as a runner reconnects (or fails at the idle timeout), but this surfaces the reason IMMEDIATELY instead of
+  // the case sitting silently "queued" for ~5 minutes. `reason` is a ready-to-display, actionable sentence. The caller
+  // decides how to show it (the scorecard batch appends it as a step). Best-effort; a throw must not break dispatch.
+  // NOT fired when a runner is merely busy (healthy queuing) — only when nothing online can pick the job up.
+  onWaiting?: (reason: string) => void;
 }
 
 // The (job)→CaseResult dispatch abstraction — satisfied by both Router (static) and Scheduler (capacity-aware).
