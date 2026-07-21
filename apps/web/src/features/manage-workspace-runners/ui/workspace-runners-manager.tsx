@@ -158,6 +158,24 @@ export function WorkspaceRunnersManager({
                       )
                     })}
                   </div>
+                  {/* Live self-reported status (why the runner can/can't do work now) — the diagnosability line. The
+                      text is the runner's own report (data), colored by severity so an "online but stuck" runner reads at a glance. */}
+                  {r.status && (
+                    <div
+                      className={cn(
+                        'mt-1 truncate text-[12px]',
+                        r.status.level === 'error'
+                          ? 'text-destructive'
+                          : r.status.level === 'warn'
+                            ? 'text-[var(--color-warning)]'
+                            : 'text-muted-foreground'
+                      )}
+                      title={r.status.text}
+                    >
+                      {(r.status.level === 'error' || r.status.level === 'warn') && '⚠ '}
+                      {r.status.text}
+                    </div>
+                  )}
                   <div className="mt-0.5 flex items-center gap-1.5 text-[12px] text-faint">
                     <code className="font-mono text-muted-foreground">self:ws:{r.id}</code>
                     <span>·</span>

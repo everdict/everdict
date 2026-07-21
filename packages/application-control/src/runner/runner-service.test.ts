@@ -112,6 +112,28 @@ describe("RunnerService — version reporting + roster overlay", () => {
     expect(roster.find((r) => r.id === "old")?.updateRequired).toBe(true);
   });
 
+  it("overlays the runner's self-reported live status on the roster read, drops it when stale, and clears it on revoke", async () => {
+    const store = new FakeRunnerStore();
+    store.seed("u-alice", meta("laptop"));
+    const svc = new RunnerService(store);
+    // no report yet → no status overlay
+    expect((await svc.list("u-alice"))[0]?.status).toBeUndefined();
+    // a fresh report shows up on the roster (personal list + workspace roster), with level + text
+    svc.reportStatus("laptop", "no Docker daemon", "error", new Date().toISOString());
+    expect((await svc.list("u-alice"))[0]?.status).toMatchObject({ text: "no Docker daemon", level: "error" });
+    expect((await svc.listForWorkspace("acme"))[0]?.status?.text).toBe("no Docker daemon");
+    // a STALE report (older than the 2-min TTL) is dropped — a dead runner's "running" note must not mislead
+    svc.reportStatus("laptop", "running 3 job(s)", "info", new Date(Date.now() - 5 * 60_000).toISOString());
+    expect((await svc.list("u-alice"))[0]?.status).toBeUndefined();
+    // an empty text is ignored (never blanks a real status); revoke clears the ephemeral status
+    svc.reportStatus("laptop", "idle", "info", new Date().toISOString());
+    svc.reportStatus("laptop", "   ", "info", new Date().toISOString());
+    expect((await svc.list("u-alice"))[0]?.status?.text).toBe("idle");
+    await svc.revoke("u-alice", "laptop");
+    store.seed("u-alice", meta("laptop")); // re-pair the same id → status is gone (not leaked across pairings)
+    expect((await svc.list("u-alice"))[0]?.status).toBeUndefined();
+  });
+
   it("revoke fires onRevoke(owner, id) so the composition can drop the runner's placement backend (churn hygiene)", async () => {
     const store = new FakeRunnerStore();
     store.seed("u-alice", meta("r1"));

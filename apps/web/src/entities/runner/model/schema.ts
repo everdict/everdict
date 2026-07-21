@@ -49,6 +49,10 @@ export const runnerMetaSchema = z.object({
   version: z.string().optional(), // runner build/app version (self-reported on lease)
   protocol: z.number().int().optional(), // runner protocol version (self-reported on lease)
   updateRequired: z.boolean().optional(), // derived by the control plane: this runner is behind the server → update it
+  // Live self-reported status (overlaid by the control plane, never stored) — why the runner can/can't do work now.
+  status: z
+    .object({ text: z.string(), level: z.enum(['info', 'warn', 'error']), at: z.string() })
+    .optional(),
 })
 
 // GET /runners — my runner list (personally owned; account page).

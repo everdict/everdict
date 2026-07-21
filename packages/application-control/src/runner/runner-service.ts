@@ -3,6 +3,7 @@ import {
   type PairRunnerInput,
   type PairedRunner,
   RUNNER_PROTOCOL_VERSION,
+  type RunnerLiveStatus,
   type RunnerMeta,
 } from "@everdict/contracts";
 import { z } from "zod";
@@ -32,10 +33,9 @@ export const PairRunnerBodySchema = z.object({
 });
 export type PairRunnerBody = z.infer<typeof PairRunnerBodySchema>;
 
-// Overlay the derived (never stored) update-required flag onto a stored runner meta for read paths (roster/list).
-function withUpdateRequired(meta: RunnerMeta): RunnerMeta {
-  return runnerUpdateRequired(meta.protocol) ? { ...meta, updateRequired: true } : meta;
-}
+// A runner-reported status older than this is stale (the runner stopped heartbeating), so it's dropped from the read
+// overlay — a stale "running" note on a runner that has since died would mislead. Aligns with the roster's online window.
+const STATUS_TTL_MS = 120_000;
 
 export class RunnerService {
   constructor(private readonly store: RunnerStore) {}
@@ -43,12 +43,35 @@ export class RunnerService {
   // lazily-registered self:<owner>:<runnerId> Backend from the placement registry, so runner churn doesn't leak
   // one Backend per revoked runner. Settable (not a ctor arg) because the dispatcher is built after this service.
   onRevoke?: (owner: string, id: string) => void;
+
+  // Live, self-reported runner status keyed by the (unique) runner id — never persisted (ephemeral; the runner
+  // re-reports on the next lease, so a control-plane restart re-fills it in seconds). Overlaid on every roster read
+  // (owner-scoped list + workspace roster), so keying by id works without threading each meta's owner through.
+  private readonly statusByRunner = new Map<string, RunnerLiveStatus>();
+
+  // Overlay the derived update-required flag + the live self-reported status onto a stored meta for read paths.
+  private readonly overlay = (meta: RunnerMeta): RunnerMeta => {
+    const withUpdate: RunnerMeta = runnerUpdateRequired(meta.protocol) ? { ...meta, updateRequired: true } : meta;
+    const status = this.statusByRunner.get(meta.id);
+    if (!status || Date.now() - Date.parse(status.at) > STATUS_TTL_MS) return withUpdate; // absent/stale → no overlay
+    return { ...withUpdate, status };
+  };
+
+  // Runner self-report of its live status/last-error (on lease/heartbeat) — "idle", "running N", "no Docker daemon",
+  // "image pull failed: …". Bounded, ephemeral (in-memory), stamped with the report time. No-op for an empty text.
+  reportStatus(id: string, text: string, level: RunnerLiveStatus["level"], at: string): void {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    this.statusByRunner.set(id, { text: trimmed.slice(0, 200), level, at });
+  }
+
   // Personally-owned: owner=principal.subject. The plaintext token rides out in the result exactly once (stored as a hash).
   async pair(input: PairRunnerInput): Promise<PairedRunner> {
     return this.store.pair(input);
   }
   async revoke(owner: string, id: string): Promise<void> {
     await this.store.remove(owner, id);
+    this.statusByRunner.delete(id); // drop the ephemeral status too (churn hygiene)
     this.onRevoke?.(owner, id); // drop the runner's registered self backend (churn hygiene)
   }
   // Mark a runner as connected (update lastSeenAt on lease/heartbeat). No-op if the runner doesn't exist.
@@ -73,13 +96,13 @@ export class RunnerService {
     if (!Number.isInteger(protocol)) return; // ignore a malformed self-report rather than persist garbage
     await this.store.setVersion(owner, id, version.slice(0, 80), protocol);
   }
-  // Personal list — my runners (owner-scoped), annotated with the derived update-required flag (never stored).
+  // Personal list — my runners (owner-scoped), annotated with the derived update-required flag + live status (never stored).
   async list(owner: string): Promise<RunnerMeta[]> {
-    return (await this.store.list(owner)).map(withUpdateRequired);
+    return (await this.store.list(owner)).map(this.overlay);
   }
   // Workspace roster (read-only) — metadata for runners paired in this workspace (no tokens). For the settings > members tab.
   async listForWorkspace(workspace: string): Promise<RunnerMeta[]> {
-    return (await this.store.listByWorkspace(workspace)).map(withUpdateRequired);
+    return (await this.store.listByWorkspace(workspace)).map(this.overlay);
   }
 
   // Workspace-shared runner (team resource) — owner="ws:<workspace>". Unlike a personal runner (owner=subject), an admin registers it and
@@ -92,11 +115,12 @@ export class RunnerService {
     return this.store.pair({ ...input, owner: RunnerService.wsOwner(input.workspace) });
   }
   async listWorkspaceOwned(workspace: string): Promise<RunnerMeta[]> {
-    return (await this.store.list(RunnerService.wsOwner(workspace))).map(withUpdateRequired);
+    return (await this.store.list(RunnerService.wsOwner(workspace))).map(this.overlay);
   }
   async revokeWorkspaceRunner(workspace: string, id: string): Promise<void> {
     const owner = RunnerService.wsOwner(workspace);
     await this.store.remove(owner, id);
+    this.statusByRunner.delete(id);
     this.onRevoke?.(owner, id);
   }
 }

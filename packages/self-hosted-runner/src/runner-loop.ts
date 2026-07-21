@@ -49,7 +49,13 @@ export async function runLeaseWorkers(deps: RunnerLoopDeps, opts: RunnerLoopOpts
         void deps
           // Carry capabilities on the heartbeat too — the hub only keeps QUEUED jobs alive that this runner could
           // run, so a job whose only capable runner died stops being refreshed by incapable survivors (no eternal pending).
-          .callJson("heartbeat_job", { jobId, ...(opts.capabilities ? { capabilities: opts.capabilities } : {}) })
+          // Carry the live status too so a long-running job keeps the roster's status fresh between leases.
+          .callJson("heartbeat_job", {
+            jobId,
+            ...(opts.capabilities ? { capabilities: opts.capabilities } : {}),
+            status: status.text,
+            statusLevel: status.level,
+          })
           .then((r) => {
             // The control plane piggybacks a cancel decision on the liveness reply — stop the local run on request.
             if (r.cancelled === true) onCancel();
@@ -60,6 +66,16 @@ export async function runLeaseWorkers(deps: RunnerLoopDeps, opts: RunnerLoopOpts
       return () => clearInterval(t);
     });
   const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e));
+
+  // Self-reported live status → the control plane's roster (diagnosability: why the runner can/can't do work). The
+  // last significant event wins; an error (can't reach the CP, a failed job) persists until the next success clears it.
+  // Reported on every lease + heartbeat; the CP overlays it on the runner list and expires it after ~2 min of silence.
+  let status: { text: string; level: "info" | "warn" | "error" } = { text: "starting", level: "info" };
+  let active = 0;
+  const setStatus = (text: string, level: "info" | "warn" | "error"): void => {
+    status = { text, level };
+  };
+  const idleText = (): string => (active > 0 ? `running ${active} job(s)` : "idle");
 
   // The control plane sets updateRequired on the lease reply when this runner is behind the server. Fire the seam ONCE
   // for the whole pool (every worker's lease sees it) — the desktop acts on it (force an update check); repeating it each
@@ -83,8 +99,15 @@ export async function runLeaseWorkers(deps: RunnerLoopDeps, opts: RunnerLoopOpts
           ...(opts.os !== undefined ? { os: opts.os } : {}),
           ...(opts.version !== undefined ? { version: opts.version } : {}),
           protocol: RUNNER_PROTOCOL_VERSION,
+          status: status.text,
+          statusLevel: status.level,
         });
+        // A successful lease call proves the runner reached the control plane → clear a prior connect error.
+        if (status.level === "error" && status.text.startsWith("cannot reach")) setStatus(idleText(), "info");
       } catch (e) {
+        // Can't reach the control plane — the runner can't report this over the (failed) lease, so it's shown on the
+        // NEXT successful lease; still worth setting locally so the desktop log/state reflects it.
+        setStatus(`cannot reach control plane: ${errMsg(e)}`, "error");
         log(`✗ lease failed: ${errMsg(e)}`);
         await sleep(opts.pollMs);
         continue;
@@ -113,6 +136,8 @@ export async function runLeaseWorkers(deps: RunnerLoopDeps, opts: RunnerLoopOpts
           .catch(() => {});
         continue;
       }
+      active += 1;
+      setStatus(`running: case ${parsed.data.evalCase.id}`, "info");
       log(`▶ running job ${jobId} (case ${parsed.data.evalCase.id}) …`);
       // Cancellation: the control plane signals a stop via the heartbeat reply → abort the run (its compute/topology
       // is torn down, freeing the runtime mid-case). The run then throws and the classified-failure path replies.
@@ -131,12 +156,15 @@ export async function runLeaseWorkers(deps: RunnerLoopDeps, opts: RunnerLoopOpts
           ...(reportScreen ? { reportScreen } : {}),
         });
         await deps.callJson("submit_job_result", { jobId, result });
+        setStatus(active > 1 ? `running ${active - 1} job(s)` : "idle", "info");
         log(`✓ job ${jobId} done → replied`);
       } catch (e) {
         // Classified failure parity with the agent sentinel: the self-hosted path has no sentinel, so a bare
         // fail_job would erase WHERE the case died. Submit a classified failed CaseResult instead (the batch
         // settles it with stage/class intact); fail_job stays only for jobs we cannot even parse.
         const failure = classifyFailure(e, stageForError(e));
+        // Surface the failure on the roster (persists until the next success) — this is the "why isn't it working" signal.
+        setStatus(`last job failed [${failure.class}]: ${errMsg(e)}`, "error");
         log(`✗ job ${jobId} failed [${failure.class}/${failure.stage}]: ${errMsg(e)} → replying classified result`);
         const failed = {
           caseId: parsed.data.evalCase.id,
@@ -159,6 +187,7 @@ export async function runLeaseWorkers(deps: RunnerLoopDeps, opts: RunnerLoopOpts
         });
       } finally {
         stopHeartbeat();
+        active -= 1;
       }
     }
   };

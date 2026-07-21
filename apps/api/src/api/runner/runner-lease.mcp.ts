@@ -29,9 +29,13 @@ export function registerRunnerLeaseTools(server: McpServer, ctx: McpToolContext)
           os: z.string().max(40).optional(),
           version: z.string().max(80).optional(),
           protocol: z.number().int().optional(),
+          // Live self-reported status/last-error for the roster's diagnosability (why it can/can't do work) — "idle",
+          // "running 2 job(s)", "no Docker daemon", "image pull failed: …". Overlaid on the roster read, never persisted.
+          status: z.string().max(200).optional(),
+          statusLevel: z.enum(["info", "warn", "error"]).optional(),
         },
       },
-      ({ wait_ms, capabilities, os, version, protocol }) =>
+      ({ wait_ms, capabilities, os, version, protocol, status, statusLevel }) =>
         plain(async () => {
           const key = runnerKey();
           if (!key) return fail(NEED_RUNNER);
@@ -44,6 +48,8 @@ export function registerRunnerLeaseTools(server: McpServer, ctx: McpToolContext)
             // Persist the self-reported build/protocol version → drives the roster's update-required badge.
             if (version !== undefined && protocol !== undefined)
               await deps.runnerService.reportVersion(key.owner, key.runnerId, version, protocol);
+            // Live status overlay (server-stamped time so a skewed runner clock can't backdate/expire it).
+            if (status) deps.runnerService.reportStatus(key.runnerId, status, statusLevel ?? "info", new Date().toISOString());
           }
           // Pass capabilities to the hub → placement gate (if a case.image needs docker but the runner lacks it, reject that job outright).
           const leased = await hub.leaseWait(key, wait_ms ?? 0, capabilities); // unset = return immediately (backward compatible)
@@ -86,13 +92,21 @@ export function registerRunnerLeaseTools(server: McpServer, ctx: McpToolContext)
       {
         description:
           "Runner liveness signal — refresh lastSeenAt. Passing jobId also renews that job's lease to prevent requeue during long runs, and carries back a `cancelled` flag: when true the control plane has stopped this job (a user cancelled / superseded the scorecard) → abort the local run and free the runtime. Passing capabilities scopes which QUEUED jobs this heartbeat keeps alive to the ones this runner could run — so a job whose only capable runner died isn't kept pending forever by incapable survivors.",
-        inputSchema: { jobId: z.string().optional(), capabilities: z.array(z.string()).optional() },
+        inputSchema: {
+          jobId: z.string().optional(),
+          capabilities: z.array(z.string()).optional(),
+          status: z.string().max(200).optional(),
+          statusLevel: z.enum(["info", "warn", "error"]).optional(),
+        },
       },
-      ({ jobId, capabilities }) =>
+      ({ jobId, capabilities, status, statusLevel }) =>
         plain(async () => {
           const key = runnerKey();
           if (!key) return fail(NEED_RUNNER);
-          if (deps.runnerService) await deps.runnerService.touch(key.owner, key.runnerId);
+          if (deps.runnerService) {
+            await deps.runnerService.touch(key.owner, key.runnerId);
+            if (status) deps.runnerService.reportStatus(key.runnerId, status, statusLevel ?? "info", new Date().toISOString());
+          }
           const hb = jobId ? await hub.heartbeat(key, jobId, capabilities) : undefined;
           return ok({ ok: true, ...(hb ? { extended: hb.extended, cancelled: hb.cancelled } : {}) });
         }),

@@ -17,5 +17,13 @@ export const RunnerMetaSchema = z.object({
     .boolean()
     .optional()
     .describe("Derived on read: the runner's protocol is behind the control plane → it should update"),
+  status: z
+    .object({
+      text: z.string(),
+      level: z.enum(["info", "warn", "error"]),
+      at: z.string(),
+    })
+    .optional()
+    .describe("Overlaid on read (never stored): the runner's self-reported live status/last-error (diagnosability)"),
 });
 export type RunnerMeta = z.infer<typeof RunnerMetaSchema>;

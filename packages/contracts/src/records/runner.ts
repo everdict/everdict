@@ -8,6 +8,16 @@
 // tightening) — the same breakage the runner-loop's version-skew hint fires on. Monotonic; never reused.
 export const RUNNER_PROTOCOL_VERSION = 1;
 
+// A short, self-reported liveness note from the runner (why it can / can't do work right now). Carried on the runner's
+// lease/heartbeat and overlaid on the roster read (never persisted — a restart re-fills it on the next lease). The
+// level drives the roster's health color so an "online but stuck" runner (docker daemon down, image pull failing) is
+// distinguishable from a healthy idle one at a glance.
+export interface RunnerLiveStatus {
+  text: string; // e.g. "idle", "running 2 job(s)", "no Docker daemon", "image pull failed: …"
+  level: "info" | "warn" | "error";
+  at: string; // ISO time the runner reported it
+}
+
 // A personal device where a user paired their own machine with a workspace.
 export interface RunnerMeta {
   id: string;
@@ -19,6 +29,7 @@ export interface RunnerMeta {
   version?: string; // runner build/app version (display only) — self-reported on lease; absent for a pre-version runner
   protocol?: number; // runner protocol version (see RUNNER_PROTOCOL_VERSION) — self-reported on lease; absent for a pre-version runner
   updateRequired?: boolean; // DERIVED on read (never stored): the runner's protocol is behind the control plane → update it
+  status?: RunnerLiveStatus; // OVERLAID on read (never stored): the runner's self-reported live status/last-error (diagnosability)
 }
 
 // Pairing input — the plaintext token is hashed just before storage. The token is issued by the server (the client doesn't choose it).

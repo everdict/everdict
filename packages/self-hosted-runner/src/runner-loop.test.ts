@@ -132,6 +132,31 @@ describe("runLeaseWorkers — case-level parallelism (maxConcurrent)", () => {
     expect([...h.submitted].sort()).toEqual(["j0", "j1"]);
   });
 
+  it("reports its live status on every lease — a failed job becomes an error status the roster can show (diagnosability)", async () => {
+    const leaseStatuses: Array<{ text: unknown; level: unknown }> = [];
+    let stop = false;
+    const queue = [{ jobId: "j0", job: job("boom") }];
+    const callJson = async (name: string, args: Record<string, unknown>): Promise<Record<string, unknown>> => {
+      if (name === "lease_job") {
+        leaseStatuses.push({ text: args.status, level: args.statusLevel });
+        if (leaseStatuses.length >= 2) stop = true; // captured the post-failure status → wind down
+        return queue.shift() ?? {};
+      }
+      return {}; // submit_job_result / heartbeat_job accepted
+    };
+    const runJob = async (): Promise<CaseResult> => {
+      throw new Error("docker daemon not running");
+    };
+    await runLeaseWorkers(
+      { callJson, runJob, setHeartbeat: () => () => {}, sleep: async () => {} },
+      opts(1, () => stop),
+    );
+    // the first lease carries a benign status; after the job fails, the NEXT lease carries an error status naming why
+    const err = leaseStatuses.find((s) => s.level === "error");
+    expect(err).toBeTruthy();
+    expect(String(err?.text)).toMatch(/last job failed.*docker daemon not running/i);
+  });
+
   it("malformed job → reply fail_job (don't run)", async () => {
     const submitted: string[] = [];
     const failed: string[] = [];
