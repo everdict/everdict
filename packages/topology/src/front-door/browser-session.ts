@@ -23,23 +23,30 @@ export interface ScreencastFrame {
   metadata: ScreencastMetadata;
 }
 
-// A mouse event to inject (CDP Input.dispatchMouseEvent). x/y are CSS pixels in the viewport.
+// A mouse event to inject (CDP Input.dispatchMouseEvent). x/y are CSS pixels in the viewport. `modifiers` is the
+// CDP bitmask (Alt=1, Ctrl=2, Meta=4, Shift=8); `buttons` is the pressed-buttons bitmask (left=1, right=2, middle=4)
+// — required for drags (a mouseMoved without it reads as a hover, so text selection/sliders never engage).
 export interface MouseInput {
   type: "mousePressed" | "mouseReleased" | "mouseMoved" | "mouseWheel";
   x: number;
   y: number;
   button?: "none" | "left" | "middle" | "right";
+  buttons?: number;
   clickCount?: number;
   deltaX?: number;
   deltaY?: number;
+  modifiers?: number;
 }
-// A keyboard event (CDP Input.dispatchKeyEvent). "char" + text inserts a character; keyDown/keyUp for control keys.
+// A keyboard event (CDP Input.dispatchKeyEvent). keyDown carrying `text` produces the character with the full
+// keydown/keypress/input sequence (the Puppeteer model); bare keyDown/keyUp for control keys; `modifiers` as above
+// (without it Ctrl+A / Shift+Arrow / every shortcut is dead on arrival).
 export interface KeyInput {
   type: "keyDown" | "keyUp" | "char" | "rawKeyDown";
   text?: string;
   key?: string;
   code?: string;
   windowsVirtualKeyCode?: number;
+  modifiers?: number;
 }
 
 export interface BrowserSessionHandle {
@@ -49,8 +56,13 @@ export interface BrowserSessionHandle {
   mouse(input: MouseInput): void;
   key(input: KeyInput): void;
   // Insert a composed string as-is (CDP Input.insertText) — the IME path: a client composes Korean/Japanese/… locally
-  // and commits the final text in one shot (per-keystroke char events cannot express composition).
+  // and commits the final text in one shot (per-keystroke char events cannot express composition). Committing while a
+  // remote composition (setComposition) is active REPLACES it — never a double insert.
   insertText(text: string): void;
+  // Mirror the client's in-progress IME composition remotely (CDP Input.imeSetComposition) so the user sees Hangul
+  // forming live in the focused field instead of nothing-until-commit. Best-effort: with no focused editable the
+  // command errors and is ignored.
+  setComposition(text: string): void;
   // Match the remote viewport to the client canvas (CDP Emulation.setDeviceMetricsOverride) — without this the
   // screencast stays at the browser's launch window size and the canvas scales it (blurry, wrong hit-testing feel).
   setViewport(width: number, height: number): void;
@@ -143,6 +155,8 @@ export async function openBrowserSession(
     mouse: (input) => send("Input.dispatchMouseEvent", { ...input }),
     key: (input) => send("Input.dispatchKeyEvent", { ...input }),
     insertText: (text) => send("Input.insertText", { text }),
+    setComposition: (text) =>
+      send("Input.imeSetComposition", { text, selectionStart: text.length, selectionEnd: text.length }),
     setViewport: (width, height) =>
       send("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 1, mobile: false }),
     navigate: (url) => send("Page.navigate", { url }),

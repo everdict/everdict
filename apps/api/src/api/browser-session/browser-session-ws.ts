@@ -8,6 +8,12 @@ import { z } from "zod";
 
 const OPEN = 1; // ws readyState OPEN (numeric — the instance constant is unreliable across ws versions).
 
+// Frame backpressure high-water mark. Above this many bytes queued on the client socket, screencast frames are
+// COALESCED (latest wins) instead of queued — otherwise a client slower than the frame rate accumulates seconds of
+// lag and every interaction appears to respond later and later. Input/error messages are never dropped.
+const FRAME_HIGH_WATER_BYTES = 256 * 1024;
+const FRAME_RETRY_MS = 15;
+
 // Input from the browser canvas — validated at this boundary (untrusted). A discriminated union on `kind`; a
 // malformed message is dropped (never a crash). Field sets mirror the CDP Input.dispatch* / Page.navigate params.
 const MouseInputSchema = z.object({
@@ -16,9 +22,11 @@ const MouseInputSchema = z.object({
   x: z.number(),
   y: z.number(),
   button: z.enum(["none", "left", "middle", "right"]).optional(),
+  buttons: z.number().int().min(0).max(31).optional(), // pressed-buttons bitmask — carries drags
   clickCount: z.number().optional(),
   deltaX: z.number().optional(),
   deltaY: z.number().optional(),
+  modifiers: z.number().int().min(0).max(15).optional(), // CDP bitmask: Alt=1 Ctrl=2 Meta=4 Shift=8
 });
 const KeyInputSchema = z.object({
   kind: z.literal("key"),
@@ -27,10 +35,13 @@ const KeyInputSchema = z.object({
   key: z.string().optional(),
   code: z.string().optional(),
   windowsVirtualKeyCode: z.number().optional(),
+  modifiers: z.number().int().min(0).max(15).optional(),
 });
 const NavigateInputSchema = z.object({ kind: z.literal("navigate"), url: z.string() });
 // IME path — the client composes locally (Korean/Japanese/…) and commits the final string in one shot.
 const InsertTextInputSchema = z.object({ kind: z.literal("insertText"), text: z.string().max(4096) });
+// In-progress IME composition, mirrored remotely per keystroke so the user sees Hangul form live.
+const ComposeInputSchema = z.object({ kind: z.literal("compose"), text: z.string().max(256) });
 // Match the remote viewport to the client canvas. Bounded so a client can't demand an absurd screencast surface.
 const ResizeInputSchema = z.object({
   kind: z.literal("resize"),
@@ -42,6 +53,7 @@ export const BrowserSessionInputSchema = z.discriminatedUnion("kind", [
   KeyInputSchema,
   NavigateInputSchema,
   InsertTextInputSchema,
+  ComposeInputSchema,
   ResizeInputSchema,
 ]);
 export type BrowserSessionInput = z.infer<typeof BrowserSessionInputSchema>;
@@ -56,6 +68,8 @@ function dispatchInput(session: BrowserSessionHandle, input: BrowserSessionInput
     session.key(key);
   } else if (input.kind === "insertText") {
     session.insertText(input.text);
+  } else if (input.kind === "compose") {
+    session.setComposition(input.text);
   } else if (input.kind === "resize") {
     session.setViewport(input.width, input.height);
   } else {
@@ -114,9 +128,28 @@ export function attachBrowserSessionWs(
       return;
     }
     session = opened;
+    // Latest-wins frame pump: at most one frame waits behind the socket. When the client can't drain fast enough
+    // (slow link/tab), intermediate frames are dropped so what it sees is always the NEWEST state — bounded latency
+    // instead of an ever-growing queue.
+    let latestFrame: string | undefined;
+    let retryTimer: NodeJS.Timeout | undefined;
+    const pumpFrame = (): void => {
+      retryTimer = undefined;
+      if (latestFrame === undefined) return;
+      if (ws.readyState !== OPEN) {
+        latestFrame = undefined;
+        return;
+      }
+      if (ws.bufferedAmount > FRAME_HIGH_WATER_BYTES) {
+        retryTimer = setTimeout(pumpFrame, FRAME_RETRY_MS);
+        return;
+      }
+      ws.send(latestFrame);
+      latestFrame = undefined;
+    };
     opened.onFrame((frame) => {
-      if (ws.readyState === OPEN)
-        ws.send(JSON.stringify({ type: "frame", data: frame.data, metadata: frame.metadata }));
+      latestFrame = JSON.stringify({ type: "frame", data: frame.data, metadata: frame.metadata });
+      if (retryTimer === undefined) pumpFrame();
     });
     opened.onError((err) => {
       if (ws.readyState === OPEN) {

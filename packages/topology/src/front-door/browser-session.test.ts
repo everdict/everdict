@@ -100,6 +100,17 @@ describe("openBrowserSession (interactive CDP: screencast out + input in)", () =
     expect(sock.byMethod("Input.insertText")[0]?.params).toMatchObject({ text: "안녕하세요" });
   });
 
+  it("mirrors an in-progress composition via Input.imeSetComposition with the caret at the end", async () => {
+    const { sock, handle } = await setup();
+    sock.emit("open");
+    handle.setComposition("안녕");
+    expect(sock.byMethod("Input.imeSetComposition")[0]?.params).toMatchObject({
+      text: "안녕",
+      selectionStart: 2,
+      selectionEnd: 2,
+    });
+  });
+
   it("matches the remote viewport to the client canvas via Emulation.setDeviceMetricsOverride", async () => {
     const { sock, handle } = await setup();
     sock.emit("open");

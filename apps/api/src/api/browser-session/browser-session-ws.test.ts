@@ -6,6 +6,7 @@ import { attachBrowserSessionWs } from "./browser-session-ws.js";
 // A minimal fake WebSocket exposing only the surface attachBrowserSessionWs touches.
 class FakeWs {
   readyState = 1; // OPEN
+  bufferedAmount = 0; // tests raise this to simulate a slow client (frame backpressure)
   readonly sent: string[] = [];
   closed = false;
   private handlers: Record<string, ((data?: unknown) => void)[]> = {};
@@ -57,6 +58,10 @@ class FakeSession implements BrowserSessionHandle {
   }
   insertText(text: string): void {
     this.insertedTexts.push(text);
+  }
+  readonly compositions: string[] = [];
+  setComposition(text: string): void {
+    this.compositions.push(text);
   }
   setViewport(width: number, height: number): void {
     this.viewports.push({ width, height });
@@ -122,6 +127,41 @@ describe("attachBrowserSessionWs", () => {
     ws.emit("message", JSON.stringify({ kind: "resize", width: 1440, height: 900 }));
     expect(session.insertedTexts).toEqual(["안녕하세요"]);
     expect(session.viewports).toEqual([{ width: 1440, height: 900 }]);
+  });
+
+  it("mirrors an in-progress IME composition (compose) and forwards modifier/buttons bitmasks", async () => {
+    const ws = new FakeWs();
+    const session = new FakeSession();
+    attachBrowserSessionWs(ws as unknown as WebSocket, "http://cdp", async () => session);
+    await flush();
+    ws.emit("message", JSON.stringify({ kind: "compose", text: "안" }));
+    ws.emit("message", JSON.stringify({ kind: "compose", text: "안녕" }));
+    ws.emit(
+      "message",
+      JSON.stringify({ kind: "key", type: "keyDown", key: "a", code: "KeyA", modifiers: 2, windowsVirtualKeyCode: 65 }),
+    );
+    ws.emit("message", JSON.stringify({ kind: "mouse", type: "mouseMoved", x: 5, y: 6, buttons: 1, modifiers: 8 }));
+    expect(session.compositions).toEqual(["안", "안녕"]);
+    expect(session.keys).toEqual([
+      { type: "keyDown", key: "a", code: "KeyA", modifiers: 2, windowsVirtualKeyCode: 65 },
+    ]);
+    expect(session.mice).toEqual([{ type: "mouseMoved", x: 5, y: 6, buttons: 1, modifiers: 8 }]);
+  });
+
+  it("coalesces screencast frames under client backpressure — the newest frame wins, none queue behind a slow socket", async () => {
+    const ws = new FakeWs();
+    const session = new FakeSession();
+    attachBrowserSessionWs(ws as unknown as WebSocket, "http://cdp", async () => session);
+    await flush();
+    ws.bufferedAmount = 10 * 1024 * 1024; // the client is not draining
+    session.emitFrame({ ...FRAME, data: "OLD-1" });
+    session.emitFrame({ ...FRAME, data: "OLD-2" });
+    session.emitFrame({ ...FRAME, data: "NEWEST" });
+    expect(ws.sent).toHaveLength(0); // nothing piled onto the saturated socket
+    ws.bufferedAmount = 0; // the client drained
+    await new Promise((r) => setTimeout(r, 40)); // let the retry pump fire
+    expect(ws.sent).toHaveLength(1); // intermediate frames were dropped…
+    expect(JSON.parse(ws.sent[0] ?? "{}")).toMatchObject({ type: "frame", data: "NEWEST" }); // …only the newest went out
   });
 
   it("rejects an out-of-bounds resize (a client cannot demand an absurd screencast surface)", async () => {

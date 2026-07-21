@@ -184,10 +184,19 @@ short-lived container/pod per active login; self-hosted = the user's own local b
    recursively); unset = no mount. The container also launches with `--window-size=1280,800` (mirroring
    `LocalChromeProvisioner`) so the screencast surface is sane before the client's first `resize`.
    **Live-view input protocol** (`browser-session-ws`, client→server kinds): `mouse` (incl. `mouseWheel` — the
-   canvas forwards wheel deltas), `key`, `navigate`, `insertText` (the IME path — Korean/Japanese composition
-   commits as ONE CDP `Input.insertText`; per-key char events cannot express Hangul), and `resize` (bounded
-   320–2560 × 240–1600 → `Emulation.setDeviceMetricsOverride`, so the remote viewport follows the client canvas
-   1:1 — no scaling blur, correct hit-testing).
+   canvas forwards wheel deltas — plus `modifiers`/`buttons` bitmasks: shortcuts, shift-selection, and drags),
+   `key` (a printable keyDown carries `text` — the Puppeteer model, so remote keydown/keypress/input handlers all
+   fire; `modifiers` bitmask Alt=1/Ctrl=2/Meta=4/Shift=8), `navigate`, `compose` (in-progress IME composition →
+   CDP `Input.imeSetComposition`, so Hangul forms live in the remote field), `insertText` (composition commit —
+   ONE CDP `Input.insertText`, which REPLACES the mirrored composition; per-key char events cannot express
+   Hangul), and `resize` (bounded 320–2560 × 240–1600 → `Emulation.setDeviceMetricsOverride`, so the remote
+   viewport follows the client canvas 1:1 — no scaling blur, correct hit-testing).
+   **Frame backpressure (real-time-ness):** the relay never queues screencast frames behind a slow client — above
+   a 256 KiB `bufferedAmount` high-water mark frames COALESCE latest-wins (input/error messages are never
+   dropped), so latency stays bounded instead of accumulating. The web canvas mirrors this: one
+   `createImageBitmap` decode in flight with newest-wins replacement (data-URL `<img>` decodes could finish out
+   of order), the canvas only re-sizes on an actual dimension change (assigning `canvas.width` force-clears), and
+   mousemoves coalesce to one per animation frame.
 9. **S7 — session-first creation UX + live remembered-login chips.** ✅ SHIPPED. Creating a profile IS the login
    session (see "The creation UX is session-first" above). New endpoint `GET /browser-sessions/:id/state-preview`
    (`BrowserSessionService.statePreview` — injectable `captureState`, default the S3 CDP capture; owner-gated,

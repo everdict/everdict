@@ -47,6 +47,26 @@ const VIRTUAL_KEYS: Record<string, number> = {
 // Viewport bounds mirror the server-side resize validation (browser-session-ws).
 const VIEWPORT = { minW: 320, maxW: 2560, minH: 240, maxH: 1600, aspect: 5 / 8 }
 
+// DOM MouseEvent.button index → CDP button name.
+const MOUSE_BUTTONS = ['left', 'middle', 'right'] as const
+
+// CDP modifiers bitmask: Alt=1, Ctrl=2, Meta=4, Shift=8 — without it every shortcut/shift-selection is dead remotely.
+const modifiersOf = (e: {
+  altKey: boolean
+  ctrlKey: boolean
+  metaKey: boolean
+  shiftKey: boolean
+}): number => (e.altKey ? 1 : 0) | (e.ctrlKey ? 2 : 0) | (e.metaKey ? 4 : 0) | (e.shiftKey ? 8 : 0)
+
+// Windows virtual key code — alphanumerics derive from the uppercase code point, control keys from the map.
+const vkOf = (key: string): number | undefined => {
+  if (key.length === 1) {
+    const cp = key.toUpperCase().codePointAt(0) ?? 0
+    return (cp >= 48 && cp <= 57) || (cp >= 65 && cp <= 90) ? cp : undefined
+  }
+  return VIRTUAL_KEYS[key]
+}
+
 export function BrowserCanvas({ sessionId }: { sessionId: string }) {
   const t = useTranslations('interactiveBrowser')
   const [state, setState] = useState<ConnState>('connecting')
@@ -61,10 +81,50 @@ export function BrowserCanvas({ sessionId }: { sessionId: string }) {
   const lastSentViewportRef = useRef<{ w: number; h: number } | null>(null)
   // The initial resize must go out right after the WS opens — keep the measurer reachable from the open handler.
   const measureRef = useRef<() => void>(() => {})
+  const ctxRef = useRef<CanvasRenderingContext2D | null>(null)
+  const pendingFrameRef = useRef<Frame | null>(null)
+  const decodingRef = useRef(false)
+  const moveRef = useRef<{ x: number; y: number; buttons: number; modifiers: number } | null>(null)
+  const moveScheduledRef = useRef(false)
 
   const send = (msg: unknown) => {
     const ws = wsRef.current
     if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg))
+  }
+
+  // Latest-wins frame pipeline: one decode in flight, newest frame replaces any waiting one. createImageBitmap
+  // decodes off the main thread and, unlike per-frame data-URL <img>s, cannot complete out of order (a stale frame
+  // finishing late used to overwrite a newer one). The canvas is only re-sized on an actual dimension change —
+  // assigning canvas.width every frame force-clears it and was costing a full re-raster per frame.
+  const drawPending = async () => {
+    if (decodingRef.current) return
+    decodingRef.current = true
+    try {
+      for (;;) {
+        const frame = pendingFrameRef.current
+        pendingFrameRef.current = null
+        if (!frame) break
+        const canvas = canvasRef.current
+        if (!canvas) break
+        const bytes = Uint8Array.from(atob(frame.data), (c) => c.charCodeAt(0))
+        const bitmap = await createImageBitmap(new Blob([bytes], { type: 'image/jpeg' }))
+        sizeRef.current = { w: frame.metadata.deviceWidth, h: frame.metadata.deviceHeight }
+        if (canvas.width !== bitmap.width) canvas.width = bitmap.width
+        if (canvas.height !== bitmap.height) canvas.height = bitmap.height
+        // desynchronized: let the canvas present without vsync-locking the compositor (lower perceived latency).
+        const ctx =
+          ctxRef.current ??
+          canvas.getContext('2d', { desynchronized: true }) ??
+          canvas.getContext('2d')
+        ctxRef.current = ctx
+        ctx?.drawImage(bitmap, 0, 0)
+        bitmap.close()
+      }
+    } catch {
+      // a frame failed to decode — the next one repaints
+    } finally {
+      decodingRef.current = false
+    }
   }
 
   useEffect(() => {
@@ -100,18 +160,8 @@ export function BrowserCanvas({ sessionId }: { sessionId: string }) {
             return
           }
           if (msg.type !== 'frame') return
-          const canvas = canvasRef.current
-          if (!canvas) return
-          const ctx = canvas.getContext('2d')
-          if (!ctx) return
-          const img = new Image()
-          img.onload = () => {
-            sizeRef.current = { w: msg.metadata.deviceWidth, h: msg.metadata.deviceHeight }
-            canvas.width = msg.metadata.deviceWidth
-            canvas.height = msg.metadata.deviceHeight
-            ctx.drawImage(img, 0, 0)
-          }
-          img.src = `data:image/jpeg;base64,${msg.data}`
+          pendingFrameRef.current = msg
+          void drawPending()
         })
         ws.addEventListener('close', () => setState('closed'))
         ws.addEventListener('error', () => setState('closed'))
@@ -172,6 +222,7 @@ export function BrowserCanvas({ sessionId }: { sessionId: string }) {
         button: 'none',
         deltaX: e.deltaX * lineScale,
         deltaY: e.deltaY * lineScale,
+        modifiers: modifiersOf(e),
       })
     }
     canvas.addEventListener('wheel', onWheel, { passive: false })
@@ -190,39 +241,48 @@ export function BrowserCanvas({ sessionId }: { sessionId: string }) {
     }
   }
 
-  // Keyboard proxy (hidden textarea). ASCII forwards per keystroke; IME composition commits once on compositionend.
+  // Keyboard proxy (hidden textarea). Every key forwards as a real keyDown/keyUp pair — a printable keyDown carries
+  // `text` so the remote gets the full keydown/keypress/input sequence (the Puppeteer model; the old char-only path
+  // skipped keydown and broke key-gated site handlers). IME composition mirrors live and commits on compositionend.
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.nativeEvent.isComposing || e.key === 'Process') return // IME is composing locally
-    if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
-      e.preventDefault()
-      send({ kind: 'key', type: 'char', text: e.key })
-      return
-    }
+    // Cmd/Ctrl+V stays local: the paste event forwards the LOCAL clipboard as insertText — forwarding the chord
+    // would ALSO paste the remote browser's (stale) clipboard on top of it.
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v') return
     e.preventDefault()
-    const virtualKey = VIRTUAL_KEYS[e.key]
+    const virtualKey = vkOf(e.key)
+    const printable = e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey
     send({
       kind: 'key',
       type: 'keyDown',
       key: e.key,
       code: e.code,
+      modifiers: modifiersOf(e),
       ...(virtualKey !== undefined ? { windowsVirtualKeyCode: virtualKey } : {}),
+      ...(printable ? { text: e.key } : {}),
       ...(e.key === 'Enter' ? { text: '\r' } : {}), // Enter needs text to fire input events remotely
     })
   }
   const onKeyUp = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.nativeEvent.isComposing || e.key === 'Process') return
-    if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) return // char already handled the press
-    const virtualKey = VIRTUAL_KEYS[e.key]
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v') return
+    e.preventDefault()
+    const virtualKey = vkOf(e.key)
     send({
       kind: 'key',
       type: 'keyUp',
       key: e.key,
       code: e.code,
+      modifiers: modifiersOf(e),
       ...(virtualKey !== undefined ? { windowsVirtualKeyCode: virtualKey } : {}),
     })
   }
+  // Mirror the in-progress composition remotely (Input.imeSetComposition) — the user watches Hangul form live in
+  // the remote field instead of typing into a void until commit.
+  const onCompositionUpdate = (e: React.CompositionEvent<HTMLTextAreaElement>) =>
+    send({ kind: 'compose', text: e.data ?? '' })
   const onCompositionEnd = (e: React.CompositionEvent<HTMLTextAreaElement>) => {
-    if (e.data) send({ kind: 'insertText', text: e.data })
+    if (e.data) send({ kind: 'insertText', text: e.data }) // committing replaces the mirrored composition
     e.currentTarget.value = '' // the proxy never accumulates text
   }
   const onPaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
@@ -306,8 +366,10 @@ export function BrowserCanvas({ sessionId }: { sessionId: string }) {
                   type: 'mousePressed',
                   x: p.x,
                   y: p.y,
-                  button: 'left',
+                  button: MOUSE_BUTTONS[e.button] ?? 'left', // right-click reaches the remote page too
+                  buttons: e.buttons,
                   clickCount: e.detail || 1, // double-click selects remotely too
+                  modifiers: modifiersOf(e),
                 })
                 keyboardRef.current?.focus({ preventScroll: true })
               }}
@@ -318,13 +380,29 @@ export function BrowserCanvas({ sessionId }: { sessionId: string }) {
                   type: 'mouseReleased',
                   x: p.x,
                   y: p.y,
-                  button: 'left',
+                  button: MOUSE_BUTTONS[e.button] ?? 'left',
+                  buttons: e.buttons,
                   clickCount: e.detail || 1,
+                  modifiers: modifiersOf(e),
                 })
               }}
               onMouseMove={(e) => {
+                // Coalesce to one move per animation frame — an unthrottled stream floods the relay and starves
+                // clicks/keys behind hundreds of queued moves. `buttons` rides along so drags select/slide remotely.
                 const p = toCdp(e)
-                send({ kind: 'mouse', type: 'mouseMoved', x: p.x, y: p.y })
+                moveRef.current = {
+                  x: p.x,
+                  y: p.y,
+                  buttons: e.buttons,
+                  modifiers: modifiersOf(e),
+                }
+                if (moveScheduledRef.current) return
+                moveScheduledRef.current = true
+                requestAnimationFrame(() => {
+                  moveScheduledRef.current = false
+                  const m = moveRef.current
+                  if (m) send({ kind: 'mouse', type: 'mouseMoved', ...m })
+                })
               }}
               onContextMenu={(e) => e.preventDefault()} // no local menu over the remote screen
               className="block w-full cursor-default select-none outline-none"
@@ -340,6 +418,7 @@ export function BrowserCanvas({ sessionId }: { sessionId: string }) {
               spellCheck={false}
               onKeyDown={onKeyDown}
               onKeyUp={onKeyUp}
+              onCompositionUpdate={onCompositionUpdate}
               onCompositionEnd={onCompositionEnd}
               onPaste={onPaste}
               onFocus={() => setKeyboardOn(true)}
