@@ -87,9 +87,15 @@ export function BrowserCanvas({ sessionId }: { sessionId: string }) {
   const moveRef = useRef<{ x: number; y: number; buttons: number; modifiers: number } | null>(null)
   const moveScheduledRef = useRef(false)
 
-  const send = (msg: unknown) => {
+  // Returns whether the message actually went out — a caller that records "already sent" state (the viewport
+  // measurer) must not treat a silent pre-open drop as delivered.
+  const send = (msg: unknown): boolean => {
     const ws = wsRef.current
-    if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg))
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify(msg))
+      return true
+    }
+    return false
   }
 
   // Latest-wins frame pipeline: one decode in flight, newest frame replaces any waiting one. createImageBitmap
@@ -186,9 +192,12 @@ export function BrowserCanvas({ sessionId }: { sessionId: string }) {
       const h = Math.min(VIEWPORT.maxH, Math.max(VIEWPORT.minH, Math.round(w * VIEWPORT.aspect)))
       const last = lastSentViewportRef.current
       if (last && Math.abs(last.w - w) < 8 && last.h === h) return // ignore sub-pixel churn
+      // Record ONLY on actual delivery. The ResizeObserver fires before the WS opens; recording that silent drop
+      // made the post-open re-measure skip as "already sent", leaving the remote at its 1280×800 launch size —
+      // squeezed into the canvas, targets shrink and clicks/typing appear to be ignored.
+      if (!send({ kind: 'resize', width: w, height: h })) return
       lastSentViewportRef.current = { w, h }
       setViewport({ w, h })
-      send({ kind: 'resize', width: w, height: h })
     }
     measureRef.current = measure
     let timer: ReturnType<typeof setTimeout> | undefined
