@@ -38,6 +38,13 @@ export interface DesktopRunnerStatus {
   state: "off" | "idle" | "running";
   activeJobs: number;
   capabilities: string[];
+  // The runner's local liveness note — WHY it can/can't work right now ("cannot reach control plane: …", "no Docker
+  // daemon", "last job failed …"). The crucial channel for a runner that can't reach the CP: the roster shows it
+  // offline with no reason (the CP never heard from it), but the desktop knows and surfaces it here.
+  note?: { text: string; level: "info" | "warn" | "error" };
+  // The control-plane URL this runner is dialing (…/mcp) — shown so a wrong/unreachable URL (the #1 "won't connect"
+  // cause: a loopback the CP isn't on) is obvious, and repointable.
+  apiUrl?: string;
 }
 
 // The aggregate status pushed to the web — every runner paired on this device (skill desktop D9).

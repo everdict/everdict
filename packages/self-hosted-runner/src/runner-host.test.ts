@@ -78,6 +78,33 @@ describe("RunnerHost", () => {
     expect(done[0]?.error).toBeUndefined();
   });
 
+  it("surfaces the loop's connect-failure note in status() so the desktop can show WHY a runner is offline", async () => {
+    // connect() always throws (control plane unreachable — the #1 'won't connect' cause). The lease loop can't report
+    // the reason TO the CP (it can't reach it), so it must surface LOCALLY — status().note carries it to the desktop UI.
+    // A REAL (tiny) timer sleep is required: an instant async sleep on an always-failing loop never yields → microtask OOM.
+    const host = new RunnerHost({
+      apiUrl: "http://127.0.0.1:8787",
+      token: "rnr_x",
+      capabilities: ["repo"],
+      connect: async () => {
+        throw new Error("ECONNREFUSED 127.0.0.1:8787");
+      },
+      runJob: async () => RESULT,
+      sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
+      waitMs: 1,
+      pollMs: 1,
+    });
+    await host.start();
+    await vi.waitFor(() => {
+      const note = host.status().note;
+      expect(note?.level).toBe("error");
+      expect(note?.text).toMatch(/cannot reach control plane/i);
+      expect(note?.text).toContain("ECONNREFUSED"); // the actual cause, verbatim
+    });
+    await host.stop();
+    expect(host.status().note).toBeUndefined(); // a user-requested stop clears the note (a restart re-fills it)
+  });
+
   it("start is idempotent (no duplicate loop), and capabilities are carried in the status", async () => {
     const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
     const host = new RunnerHost({

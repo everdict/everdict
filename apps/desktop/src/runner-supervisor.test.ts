@@ -6,6 +6,7 @@ import type { RunnerTokens } from "./token-store.js";
 
 interface FakeHost {
   runnerId: string;
+  apiUrl: string; // the control-plane URL the supervisor threaded into makeHost (asserted by the repoint test)
   maxConcurrent?: number; // the per-runner worker-pool size the supervisor threaded into makeHost (unset → RunnerHost default 1)
   started: boolean;
   stopped: boolean;
@@ -39,9 +40,10 @@ function makeDeps(
     clearLegacy: () => {
       legacy = null;
     },
-    makeHost: ({ runnerId, onStatus, maxConcurrent }) => {
+    makeHost: ({ runnerId, apiUrl, onStatus, maxConcurrent }) => {
       const host: FakeHost = {
         runnerId,
+        apiUrl,
         ...(maxConcurrent !== undefined ? { maxConcurrent } : {}),
         started: false,
         stopped: false,
@@ -258,6 +260,31 @@ describe("RunnerSupervisor", () => {
     await s.reconnect("gone");
     expect(hosts).toHaveLength(0);
     expect(s.status()).toEqual({ runners: [] });
+  });
+
+  it("repoint — swaps every runner's CP host onto the new server address (keeping the port), persists, and restarts on the new URL", async () => {
+    // The stuck-runner case: a loopback apiUrl baked in at pair time is unreachable → repoint to the reachable host.
+    const { deps, hosts, getRunners } = makeDeps({
+      tokens: { r1: "rnr_a", r2: "rnr_b" },
+      runners: [
+        { runnerId: "r1", apiUrl: "http://127.0.0.1:8787" },
+        { runnerId: "r2", apiUrl: "http://127.0.0.1:8787", maxConcurrent: 3 },
+      ],
+    });
+    const s = new RunnerSupervisor(deps);
+    await s.startFromStore();
+    hosts.length = 0; // ignore the initial hosts; watch what repoint (re)starts
+
+    await s.repoint("100.69.164.81");
+
+    // Persisted: hostname swapped, CP port/scheme kept.
+    expect(getRunners()).toEqual([
+      { runnerId: "r1", apiUrl: "http://100.69.164.81:8787" },
+      { runnerId: "r2", apiUrl: "http://100.69.164.81:8787", maxConcurrent: 3 },
+    ]);
+    // Restarted on the NEW url (a fresh host per runner, dialing the reachable host), carrying the persisted concurrency.
+    expect(hosts.map((h) => h.apiUrl)).toEqual(["http://100.69.164.81:8787", "http://100.69.164.81:8787"]);
+    expect(hosts.find((h) => h.runnerId === "r2")?.maxConcurrent).toBe(3);
   });
 
   it("startFromStore — migrates a legacy single pairing into the multi store, then clears the legacy record", async () => {

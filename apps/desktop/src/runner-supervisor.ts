@@ -151,6 +151,33 @@ export class RunnerSupervisor {
     this.emit();
   }
 
+  // Repoint every runner's control-plane URL onto a new host (the user changed the server address in the tray) and
+  // restart them — the fix for a runner stuck on an unreachable URL (e.g. a loopback baked in at pair time on a
+  // different machine) WITHOUT a full unpair/re-pair. Only the hostname is swapped; each runner keeps its CP port/path
+  // (the common case: the server moved hosts, same CP port). A malformed stored URL is left as-is. Persists first, then
+  // restarts each host on its new URL.
+  async repoint(host: string): Promise<void> {
+    const rebased = this.deps.loadRunners().map((r) => {
+      const current = r.apiUrl ?? this.deps.defaultApiUrl;
+      try {
+        const u = new URL(current);
+        u.hostname = host;
+        return { ...r, apiUrl: u.toString().replace(/\/+$/, "") };
+      } catch {
+        return r; // unparseable stored URL — leave it (re-pair to reset)
+      }
+    });
+    this.deps.saveRunners(rebased);
+    const tokens = this.deps.loadTokens();
+    for (const r of rebased) {
+      const token = tokens[r.runnerId];
+      this.stopRunnerInBackground(r.runnerId);
+      if (token === undefined) continue; // keychain lost — can't restart; the row must be re-paired
+      await this.startRunner(r.runnerId, token, r.apiUrl ?? this.deps.defaultApiUrl, r.label, r.maxConcurrent);
+    }
+    this.emit();
+  }
+
   status(): DesktopRunnersStatus {
     const runners: DesktopRunnerStatus[] = [...this.entries.entries()].map(([runnerId, entry]) => ({
       paired: true,
@@ -158,6 +185,10 @@ export class RunnerSupervisor {
       state: entry.status.state,
       activeJobs: entry.status.activeJobs,
       capabilities: entry.status.capabilities,
+      // Carry the runner's local note (why it can/can't work — incl. a connect failure) + the URL it's dialing, so the
+      // web surfaces WHY it's offline and can point out a wrong apiUrl.
+      ...(entry.status.note ? { note: entry.status.note } : {}),
+      apiUrl: entry.apiUrl,
     }));
     return { runners };
   }

@@ -157,6 +157,32 @@ describe("runLeaseWorkers — case-level parallelism (maxConcurrent)", () => {
     expect(String(err?.text)).toMatch(/last job failed.*docker daemon not running/i);
   });
 
+  it("fires onStatus locally on a connect failure — the reason reaches the desktop even when the CP is unreachable", async () => {
+    const notes: Array<{ text: string; level: string }> = [];
+    let stop = false;
+    const callJson = async (name: string): Promise<Record<string, unknown>> => {
+      if (name === "lease_job") throw new Error("ECONNREFUSED 127.0.0.1:8787"); // can't reach the control plane
+      return {};
+    };
+    await runLeaseWorkers(
+      {
+        callJson,
+        runJob: async () => ({}) as CaseResult,
+        setHeartbeat: () => () => {},
+        sleep: async () => {},
+        onStatus: (s) => {
+          notes.push(s);
+          if (s.level === "error") stop = true; // captured the connect-failure note → wind down
+        },
+      },
+      opts(1, () => stop),
+    );
+    const err = notes.find((n) => n.level === "error");
+    expect(err).toBeTruthy();
+    expect(err?.text).toMatch(/cannot reach control plane/i);
+    expect(err?.text).toContain("ECONNREFUSED"); // onStatus surfaces the reason locally (lease_job never reached the CP)
+  });
+
   it("malformed job → reply fail_job (don't run)", async () => {
     const submitted: string[] = [];
     const failed: string[] = [];

@@ -9,8 +9,8 @@ import {
   type RunnerMeta,
 } from '@/entities/runner'
 import { authContext } from '@/shared/auth/principal'
-import { env } from '@/shared/config/env'
 import { controlPlane } from '@/shared/lib/control-plane'
+import { resolveRunnerApiUrl } from '@/shared/lib/runner-api-url'
 
 export interface PairRunnerResult {
   ok: boolean
@@ -38,7 +38,9 @@ export async function pairRunnerAction(input: PairRunnerInput): Promise<PairRunn
     })
     const res = pairedRunnerSchema.parse(await controlPlane.pairRunner(ctx, body))
     revalidatePath('/[workspace]/runtimes')
-    return { ok: true, token: res.token, runner: res.runner, apiUrl: env.CONTROL_PLANE_URL }
+    // The runner-reachable CP url (public/rebased), NOT the web's server-side CONTROL_PLANE_URL — a loopback there is
+    // unreachable from a runner on another machine (the #1 "won't connect" cause). See resolveRunnerApiUrl.
+    return { ok: true, token: res.token, runner: res.runner, apiUrl: await resolveRunnerApiUrl() }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }
   }

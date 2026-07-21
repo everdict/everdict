@@ -1,6 +1,15 @@
 import { type AgentJob, AgentJobSchema, type CaseResult, RUNNER_PROTOCOL_VERSION } from "@everdict/contracts";
 import { classifyFailure, stageForError } from "@everdict/domain";
 
+// The runner's own short liveness note (what it's doing / why it can't work right now). Reported to the control plane
+// on every lease/heartbeat (the roster diagnosability), AND surfaced LOCALLY via onStatus — the crucial second channel
+// for a runner that CAN'T reach the control plane (its lease fails, so the CP never hears the reason; the desktop shell
+// does, and shows it). level drives the severity color.
+export interface RunnerLoopStatus {
+  text: string;
+  level: "info" | "warn" | "error";
+}
+
 // Dependencies of the runner lease worker pool — the caller (main.ts) absorbs transport/session via ResilientMcpSession,
 // and here we inject only callJson (already JSON-parsed and retried) and job execution, keeping just the pure lease-loop logic (test-friendly).
 export interface RunnerLoopDeps {
@@ -22,6 +31,10 @@ export interface RunnerLoopDeps {
   // Fired (at most once per run) when the control plane reports this runner is older than the server (lease reply
   // updateRequired:true) — the seam the desktop wires to force an immediate auto-update check. GUI-free: the core only signals.
   onUpdateRequired?: (info: { serverProtocol?: number }) => void;
+  // Fired on every local status change (idle / running / a failed job / "cannot reach control plane: …"). The desktop
+  // shell wires this to surface WHY a runner is offline in the UI — the local twin of the CP-side status report, which
+  // is useless exactly when it matters most (a runner that can't reach the CP can't report its reason TO the CP).
+  onStatus?: (status: RunnerLoopStatus) => void;
 }
 
 export interface RunnerLoopOpts {
@@ -70,10 +83,11 @@ export async function runLeaseWorkers(deps: RunnerLoopDeps, opts: RunnerLoopOpts
   // Self-reported live status → the control plane's roster (diagnosability: why the runner can/can't do work). The
   // last significant event wins; an error (can't reach the CP, a failed job) persists until the next success clears it.
   // Reported on every lease + heartbeat; the CP overlays it on the runner list and expires it after ~2 min of silence.
-  let status: { text: string; level: "info" | "warn" | "error" } = { text: "starting", level: "info" };
+  let status: RunnerLoopStatus = { text: "starting", level: "info" };
   let active = 0;
-  const setStatus = (text: string, level: "info" | "warn" | "error"): void => {
+  const setStatus = (text: string, level: RunnerLoopStatus["level"]): void => {
     status = { text, level };
+    deps.onStatus?.(status); // local surfacing (desktop UI) — independent of whether the CP-side report gets through
   };
   const idleText = (): string => (active > 0 ? `running ${active} job(s)` : "idle");
 

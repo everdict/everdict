@@ -80,10 +80,16 @@ export function RunnerDetail({
   }, [router])
 
   const online = isOnline(runner.lastSeenAt)
-  // Is this runner paired to THIS device? Only then can the desktop bridge reconnect it (it holds the rnr_ token).
-  const onThisDevice = (desktop?.runners ?? []).some((r) => r.paired && r.runnerId === runner.id)
+  // The live status of THIS runner from the desktop bridge (present only when it's paired to THIS device). Only then can
+  // the bridge reconnect it (it holds the rnr_ token), and only then do we have the LOCAL note + the URL it's dialing.
+  const deviceStatus = (desktop?.runners ?? []).find((r) => r.paired && r.runnerId === runner.id)
+  const onThisDevice = deviceStatus !== undefined
   const canReconnect =
     bridge !== null && typeof bridge.reconnectRunner === 'function' && onThisDevice
+  // Local (desktop) note wins over the CP-side status: a runner that can't reach the control plane has NO CP-side status
+  // (the CP never heard from it), but the desktop knows the reason ("cannot reach control plane: …").
+  const note = deviceStatus?.note ?? runner.status
+  const dialUrl = deviceStatus?.apiUrl
 
   function onReconnect() {
     const reconnect = bridge?.reconnectRunner
@@ -187,19 +193,20 @@ export function RunnerDetail({
           )}
         </div>
 
-        {/* Self-reported live status (Phase 2) — what the runner is doing / why it can't do work, colored by severity. */}
-        {runner.status && (
+        {/* Live status — the runner's own note (desktop-local when on this device, else the CP-side report): what it's
+            doing / why it can't work, colored by severity. */}
+        {note && (
           <div
             className={cn(
               'rounded-lg border px-3 py-2 text-[13px]',
-              runner.status.level === 'error'
+              note.level === 'error'
                 ? 'border-destructive/30 text-destructive'
-                : runner.status.level === 'warn'
+                : note.level === 'warn'
                   ? 'border-[var(--color-warning)]/30 text-[var(--color-warning)]'
                   : 'border-border text-muted-foreground'
             )}
           >
-            <span className="font-[510]">{t('selfStatus')}</span> {runner.status.text}
+            <span className="font-[510]">{t('selfStatus')}</span> {note.text}
           </div>
         )}
 
@@ -256,30 +263,43 @@ export function RunnerDetail({
       {!online && (
         <Card className="space-y-3 p-5">
           <p className="text-[13px] font-[560] text-foreground">{t('offlineTitle')}</p>
-          <p className="text-[13px] leading-relaxed text-muted-foreground">
-            {canReconnect
-              ? t('offlineReconnectHint')
-              : onThisDevice
-                ? t('offlineOpenDesktopHint')
-                : scope === 'workspace'
-                  ? t('offlineWorkspaceHint')
-                  : t('offlinePersonalHint')}
-          </p>
-          <div className="flex flex-wrap items-center gap-2">
-            {canReconnect ? (
-              <Button size="sm" onClick={onReconnect} disabled={busy}>
-                <RefreshCw className={cn('size-3.5', busy && 'animate-spin')} />
-                {t('reconnect')}
-              </Button>
-            ) : (
+          {onThisDevice ? (
+            // Inside the desktop app, this runner is on THIS device — never tell the user to "open the desktop app".
+            // Show the URL it's dialing (a wrong/loopback one is the #1 cause) + reconnect + how to change it.
+            <>
+              <p className="text-[13px] leading-relaxed text-muted-foreground">
+                {t('offlineDeviceHint')}
+              </p>
+              {dialUrl && (
+                <p className="text-[12px] text-muted-foreground">
+                  {t('connectingTo')}{' '}
+                  <code className="rounded bg-muted px-1.5 py-0.5 font-mono">{dialUrl}</code>
+                </p>
+              )}
+              <p className="text-[12px] leading-relaxed text-faint">{t('changeServerHint')}</p>
+              <div className="flex flex-wrap items-center gap-2">
+                {canReconnect && (
+                  <Button size="sm" onClick={onReconnect} disabled={busy}>
+                    <RefreshCw className={cn('size-3.5', busy && 'animate-spin')} />
+                    {t('reconnect')}
+                  </Button>
+                )}
+              </div>
+            </>
+          ) : (
+            // Remote browser / a runner not on this device — the web can't start someone else's process; guide them.
+            <>
+              <p className="text-[13px] leading-relaxed text-muted-foreground">
+                {scope === 'workspace' ? t('offlineWorkspaceHint') : t('offlinePersonalHint')}
+              </p>
               <Link
                 href={downloadHref}
                 className="inline-flex items-center gap-1.5 text-[13px] font-[510] text-link transition-colors hover:underline"
               >
                 {t('getDesktop')}
               </Link>
-            )}
-          </div>
+            </>
+          )}
         </Card>
       )}
 

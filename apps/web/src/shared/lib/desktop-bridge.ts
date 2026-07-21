@@ -8,6 +8,11 @@ export interface DesktopRunnerStatus {
   state: 'off' | 'idle' | 'running'
   activeJobs: number
   capabilities: string[]
+  // The runner's local liveness note — WHY it can/can't work ("cannot reach control plane: …", "no Docker daemon", …).
+  // Surfaces the reason a runner is offline even when the control plane never heard from it. Absent on an older desktop.
+  note?: { text: string; level: 'info' | 'warn' | 'error' }
+  // The control-plane URL this runner dials (…/mcp) — shown so a wrong/unreachable URL is obvious. Absent on an older desktop.
+  apiUrl?: string
 }
 
 // The aggregate status — every runner paired on this device (skill desktop D9). A device can register as several independent runners.

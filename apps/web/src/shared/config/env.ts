@@ -25,6 +25,12 @@ const schema = z.object({
   // connects here directly with a short-lived ticket. Unset → derived from CONTROL_PLANE_URL (http→ws), which is
   // reachable in dev (localhost) but should be set to the public wss:// origin in a deployed setup.
   CONTROL_PLANE_WS_URL: z.string().optional(),
+  // Public HTTP base of the control plane for a self-hosted RUNNER (the desktop app / `everdict runner`) — it dials
+  // `<base>/mcp` DIRECTLY (not via the web). CONTROL_PLANE_URL is the web SERVER's url to reach the CP (often a
+  // loopback), which is unreachable from a runner on another machine — the #1 "runner won't connect" cause. Unset → the
+  // web rebases a loopback CONTROL_PLANE_URL onto the request host at pair time (shared/lib/runner-api-url.ts), so a
+  // co-located deploy is reachable with zero config; set this (verbatim) to pin a public/proxied CP origin.
+  CONTROL_PLANE_PUBLIC_URL: z.string().url().optional(),
   // Keycloak (Auth.js)
   AUTH_SECRET: z.string().optional(),
   KEYCLOAK_ISSUER: z.string().url().optional(), // e.g. http://localhost:8081/realms/everdict
@@ -40,6 +46,7 @@ export const env = schema.parse({
   TEMPORAL_UI_URL: process.env.TEMPORAL_UI_URL,
   WORKSPACE_URL_BASE: process.env.WORKSPACE_URL_BASE,
   CONTROL_PLANE_WS_URL: process.env.CONTROL_PLANE_WS_URL,
+  CONTROL_PLANE_PUBLIC_URL: process.env.CONTROL_PLANE_PUBLIC_URL,
   AUTH_SECRET: process.env.AUTH_SECRET,
   KEYCLOAK_ISSUER: process.env.KEYCLOAK_ISSUER,
   KEYCLOAK_CLIENT_ID: process.env.KEYCLOAK_CLIENT_ID,

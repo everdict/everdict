@@ -763,6 +763,12 @@ if (!app.requestSingleInstanceLock()) {
       config = { ...loadConfig(configIo()), webUrl: url };
       saveConfig(configIo(), config);
       applyWebUrl(url);
+      // Follow the server move for the RUNNER too — repoint every paired runner's control-plane URL onto the new host
+      // and restart it. Without this the runner keeps dialing the old/loopback URL and stays offline (the tray option
+      // used to change only where the WEB loads from). Background — a connect that hangs must not block the reload.
+      void supervisor
+        .repoint(new URL(url).hostname)
+        .catch((e) => console.error(`Repoint runners failed (ignored): ${e instanceof Error ? e.message : e}`));
       // Give the newly-entered URL a fresh attempt — otherwise the load-failed gate would bounce it straight back to setup.
       webUrlLoadFailed = false;
       // The existing app window holds the previous origin's preload argument, so open a fresh one (destroy it, bypassing the close=hide handler).

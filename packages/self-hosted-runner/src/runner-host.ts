@@ -1,6 +1,7 @@
 import type { AgentJob, CaseResult } from "@everdict/contracts";
 import { detectCapabilities } from "./capabilities.js";
 import { runLeasedJob } from "./run-leased-job.js";
+import type { RunnerLoopStatus } from "./runner-loop.js";
 import { type ConnectClient, ResilientMcpSession, mcpConnect } from "./runner-session.js";
 import { superviseLease } from "./runner-supervisor.js";
 
@@ -13,6 +14,10 @@ export interface RunnerHostStatus {
   state: RunnerHostState;
   activeJobs: number;
   capabilities: string[];
+  // The runner's latest local liveness note (idle / running / a failed job / "cannot reach control plane: …"). Carries
+  // WHY a runner is offline to the desktop UI — a connect failure only lives here and in the log, never on the roster
+  // (the CP never hears from an unreachable runner). undefined until the loop first reports.
+  note?: RunnerLoopStatus;
 }
 
 // Completion notice for one job — consumed by the GUI (OS notifications etc.). On failure it carries error, on success result.
@@ -54,12 +59,18 @@ export class RunnerHost {
   private session: ResilientMcpSession | null = null;
   private activeJobs = 0;
   private capabilities: string[] = [];
+  private lastNote: RunnerLoopStatus | undefined;
 
   constructor(private readonly opts: RunnerHostOpts) {}
 
   status(): RunnerHostStatus {
     const state: RunnerHostState = this.loop === null ? "off" : this.activeJobs > 0 ? "running" : "idle";
-    return { state, activeJobs: this.activeJobs, capabilities: this.capabilities };
+    return {
+      state,
+      activeJobs: this.activeJobs,
+      capabilities: this.capabilities,
+      ...(this.lastNote ? { note: this.lastNote } : {}),
+    };
   }
 
   // Idempotent start — no-op if already running. An initial connection failure isn't thrown since the loop retries with backoff.
@@ -117,6 +128,11 @@ export class RunnerHost {
         log: this.opts.log,
         sleep: this.opts.sleep,
         ...(this.opts.onUpdateRequired ? { onUpdateRequired: this.opts.onUpdateRequired } : {}),
+        // Surface the loop's local note (incl. "cannot reach control plane: …") to the host status → desktop UI.
+        onStatus: (s) => {
+          this.lastNote = s;
+          this.emit();
+        },
       },
       {
         maxConcurrent: Math.max(1, this.opts.maxConcurrent ?? 1),
@@ -138,6 +154,7 @@ export class RunnerHost {
   // Graceful stop — in-flight jobs run to completion and reply; idle workers drop out once the current long-poll (≤waitMs) ends.
   async stop(): Promise<void> {
     this.stopFlag = true;
+    this.lastNote = undefined; // a user-requested stop clears the note so a stale "cannot reach …" doesn't linger (restart re-fills it)
     const loop = this.loop;
     if (loop) await loop.catch(() => {});
     const s = this.session;
