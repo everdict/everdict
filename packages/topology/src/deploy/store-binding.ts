@@ -1,6 +1,13 @@
 import { createHmac } from "node:crypto";
 import type { ServiceHarnessSpec, TrustZone } from "@everdict/contracts";
-import { STORE_DEFS, dependencyConnEnv, dependencyStores } from "./dependencies.js";
+import {
+  STORE_DEFS,
+  type StoreValues,
+  dependencyConnEnv,
+  dependencyStoreValues,
+  dependencyStores,
+  splitEndpoint,
+} from "./dependencies.js";
 
 // Tenant-isolation model for shared stores.
 //   pool     = one shared PG/Redis + per-tenant logical isolation (dedicated DATABASE+role / Redis ACL user+key-prefix) + scoped creds.
@@ -71,6 +78,10 @@ export interface StorePlan {
   isolation: StoreIsolation;
   serviceEnv: Record<string, string>; // store connection env to inject into services (merged)
   tenants: TenantStorePlan[]; // per-store provisioning to run for pool (empty array for silo/external)
+  // Structured per-store coordinates (endpoint + the creds this isolation model minted) — what dependencies[].inject
+  // templates render from. serviceEnv is the conventional-key rendering of the SAME values (external: none — no
+  // Everdict-deployed store, so nothing to render).
+  storeValues: Partial<Record<string, StoreValues>>;
 }
 
 // Tenant (zone) store plan — pure. The runtime uses it to run DDL/ACL against the shared store + inject the service env.
@@ -82,9 +93,9 @@ export function planTenantStores(
   const isolation = resolveStoreIsolation(zone);
   if (isolation === "silo") {
     // SLICE 39: deploy a dedicated store into the zone ns (the builder injects connEnv automatically) — here we just expose the same env.
-    return { isolation, serviceEnv: dependencyConnEnv(spec), tenants: [] };
+    return { isolation, serviceEnv: dependencyConnEnv(spec), tenants: [], storeValues: dependencyStoreValues(spec) };
   }
-  if (isolation === "external") return { isolation, serviceEnv: {}, tenants: [] };
+  if (isolation === "external") return { isolation, serviceEnv: {}, tenants: [], storeValues: {} };
 
   // pool: shared store + per-tenant logical isolation.
   const poolNs = opts.poolNamespace ?? DEFAULT_POOL_NS;
@@ -93,6 +104,7 @@ export function planTenantStores(
   const slug = sanitizeIdent(zoneId);
   const serviceEnv: Record<string, string> = {};
   const tenants: TenantStorePlan[] = [];
+  const storeValues: Partial<Record<string, StoreValues>> = {};
   // Default endpoint = K8s Service DNS:port. Nomad injects the discovered host:port via opts.storeEndpoint.
   const endpointFor = (store: string): string =>
     opts.storeEndpoint?.(store) ?? `${sharedStoreHost(store, poolNs)}:${STORE_DEFS[store]?.port ?? 0}`;
@@ -103,6 +115,15 @@ export function planTenantStores(
       const database = `tenant_${slug}`;
       const role = `r_${slug}`;
       const endpoint = endpointFor("postgres");
+      storeValues.postgres = {
+        ...splitEndpoint(endpoint),
+        endpoint,
+        user: role,
+        password: pw,
+        userinfo: `${role}:${pw}@`,
+        database,
+        url: `postgresql://${role}:${pw}@${endpoint}/${database}`,
+      };
       const env = { DATABASE_URL: `postgresql://${role}:${pw}@${endpoint}/${database}` };
       Object.assign(serviceEnv, env);
       tenants.push({
@@ -127,6 +148,15 @@ export function planTenantStores(
       const aclUser = slug;
       const keyPrefix = `t:${slug}:`;
       const endpoint = endpointFor("redis");
+      storeValues.redis = {
+        ...splitEndpoint(endpoint),
+        endpoint,
+        user: aclUser,
+        password: pw,
+        userinfo: `${aclUser}:${pw}@`,
+        keyPrefix,
+        url: `redis://${aclUser}:${pw}@${endpoint}`,
+      };
       // Connection URL uses the ACL user, keys are namespaced by prefix (per-case isolateBy nests under it).
       const env = {
         REDIS_URL: `redis://${aclUser}:${pw}@${endpoint}`,
@@ -146,6 +176,14 @@ export function planTenantStores(
       const accessKey = `t-${slug}`;
       const bucket = `tenant-${slug}`;
       const endpoint = endpointFor("minio");
+      storeValues.minio = {
+        ...splitEndpoint(endpoint),
+        endpoint,
+        url: `http://${endpoint}`,
+        accessKey,
+        secretKey: pw,
+        bucket,
+      };
       // Per-tenant access key + bucket + a policy allowing only that bucket → access to other buckets is AccessDenied (the core of cross-blocking).
       const env = {
         AWS_S3_ENDPOINT: `http://${endpoint}`,
@@ -176,7 +214,7 @@ export function planTenantStores(
       });
     }
   }
-  return { isolation, serviceEnv, tenants };
+  return { isolation, serviceEnv, tenants, storeValues };
 }
 
 export { DEFAULT_POOL_NS, sharedStoreHost };

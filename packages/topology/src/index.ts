@@ -2,12 +2,16 @@ export type { TopologyRuntime, TopologyHandle, TargetEnvHandle } from "./deploy/
 export { type RunKeys, keysFor, newRunId, wiringVars, EnvironmentManager } from "./environment-manager.js";
 export {
   type StoreDef,
+  type StoreValues,
   STORE_DEFS,
   dependencyStores,
   dependencyConnEnv,
+  dependencyStoreValues,
+  splitEndpoint,
   buildSharedStoreManifests,
   storeName,
 } from "./deploy/dependencies.js";
+export { dependencyInjectEnv, renderInjectTemplate } from "./deploy/inject-env.js";
 export {
   type StoreIsolation,
   type StoreBindingOptions,

@@ -160,6 +160,15 @@ export const topologyServiceSchema = z.object({
 })
 export type TopologyService = z.infer<typeof topologyServiceSchema>
 
+// BYO env mapping of a dependency store — env = the key the service image reads (e.g. VALKEY_URL), template = an
+// optional {field} recomposition of the deployed store's coordinates (unset = the canonical {url}). Rendered by the
+// runtime from the store it actually deployed, so one mapping works on every runtime/isolation model.
+export const dependencyInjectSchema = z.object({
+  env: z.string(),
+  template: z.string().optional(),
+})
+export type DependencyInject = z.infer<typeof dependencyInjectSchema>
+
 // dependency store — shared + per-case logical isolation (isolateBy = the kind of isolation key).
 // isolateBy="external" = BYO external/shared store (a different cluster, etc.; not deployed by Everdict, connection via env at deploy time). service = the service that uses it.
 export const topologyDependencySchema = z.object({
@@ -167,6 +176,7 @@ export const topologyDependencySchema = z.object({
   role: z.string(),
   isolateBy: z.string(), // thread_id | key-prefix | object-prefix | schema | external
   service: z.string().optional(), // the service that uses this store (unset = shared across the topology)
+  inject: z.array(dependencyInjectSchema).optional(), // BYO store env names (scoped by `service` the same way)
 })
 export type TopologyDependency = z.infer<typeof topologyDependencySchema>
 

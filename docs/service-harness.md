@@ -9,7 +9,27 @@ Chromium loading a client browser extension (the extension drives the browser).
 `services[]` (per-version warm; each `{image, port?, needs, env?}` — `env` = per-service static config, e.g.
 `MODEL`/`LOG_LEVEL`/flags) · `dependencies[]` (shared store + `isolateBy`) · `target`
 (browser+extension, per-case) · `frontDoor` ({service, submit, trace}) · `traceSource` ({kind: otel|mlflow, endpoint}).
-Service env precedence: store `connEnv` (conventional) < `service.env` (author) < runtime `storeEnv` (operator override).
+Service env precedence: store `connEnv` (conventional) < `service.env` (author) < runtime `storeEnv` (operator
+override) < `dependencies[].inject` (BYO store env names — rendered from the deployed store, nothing shadows it).
+
+**Dependency env injection (`dependencies[].inject`) — BYO store env names.** The store-side sibling of
+`service.wiring`: an unmodified third-party image that reads its store connection under **its own** env keys
+(`VALKEY_URL`, `OBJECT_STORAGE_ENDPOINT`, …) declares, on the dependency, which keys it reads and how to compose them —
+`inject: [{env: "VALKEY_URL", template: "valkey://{userinfo}{host}:{port}"}]` (`template` unset = the canonical
+`{url}`). The `{field}` vocabulary is **closed per store kind** (`STORE_INJECT_FIELDS` in `@everdict/contracts`:
+postgres `host/port/endpoint/url/user/password/userinfo/database`, redis `…/keyPrefix`, minio
+`…/accessKey/secretKey/bucket`); an unknown field fails at registration (schema `superRefine`) AND at deploy
+(`renderInjectTemplate`, registry-bypassing paths). Values come from the **structured coordinates of the store the
+runtime actually deployed** (`StoreValues` — built where the endpoint is known: docker alias / K8s Service DNS at build
+time, Nomad discovered host:port, pool-minted per-tenant creds in `planTenantStores.storeValues`), so ONE mapping works
+unchanged across docker/nomad/k8s and pool/silo — a `service.env` literal can't even express pool creds (minted at
+deploy). A field the isolation model didn't mint renders empty (`{userinfo}` on an open silo redis → "" but
+"user:pw@" under pool) — that's what keeps one template portable across isolation models. Rendered **topmost** in the
+env merge by one shared pure renderer (`dependencyInjectEnv`, `packages/topology/src/deploy/inject-env.ts`) called by
+all three builders: a stale `service.env` literal shadowing the deployed store's coordinates is exactly the rupture
+this closes (the portability lint warns on such a dead literal — `inject-shadowed-literal`). `isolateBy: "external"`
+deps reject `inject` (Everdict deployed nothing — there are no coordinates); their connection stays `storeEnv`/env.
+Scoped by the dependency's existing `service` field (unset = every service).
 
 **Peer env interpolation.** A `service.env` value may reference a `needs` peer's endpoint with a `{{peer}}` token —
 `{{planner}}` / `{{planner.url}}` → `http://planner:8000`, `{{planner.host}}` → the host, `{{planner.port}}` → the port

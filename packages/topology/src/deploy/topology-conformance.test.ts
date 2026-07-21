@@ -56,6 +56,63 @@ function k8sServiceEnv(deployName: string): Record<string, string> {
   return Object.fromEntries((container?.env ?? []).map((e) => [e.name, e.value]));
 }
 
+// Store-side conformance: a redis dependency with inject (BYO env names) rendered from the SAME storeValues must land
+// identically on both builders, and must OVERRIDE a stale service.env literal (the exact rupture inject exists to
+// close: an image reading VALKEY_URL used to see only the literal, never the deployed store).
+const storeCanary: ServiceHarnessSpec = {
+  kind: "service",
+  id: "spica",
+  version: "1",
+  services: [svc({ name: "app", port: 8080, env: { VALKEY_URL: "redis://stale-literal:6379" } })],
+  dependencies: [
+    {
+      store: "redis",
+      role: "queue",
+      isolateBy: "key-prefix",
+      inject: [{ env: "VALKEY_URL", template: "valkey://{userinfo}{host}:{port}" }],
+    },
+  ],
+  frontDoor: { service: "app", submit: "POST /runs" },
+  traceSource: { kind: "otel", endpoint: "http://otel:4318" },
+};
+
+const mintedRedis = {
+  host: "everdict-shared-redis",
+  port: "6379",
+  endpoint: "everdict-shared-redis:6379",
+  url: "redis://acme:pw@everdict-shared-redis:6379",
+  user: "acme",
+  password: "pw",
+  userinfo: "acme:pw@",
+  keyPrefix: "t:acme:",
+};
+
+describe("cross-runtime conformance — dependency inject renders identically and beats the stale literal", () => {
+  function nomadAppEnv(): Record<string, string> {
+    const groups = (buildNomadTopologyJob(storeCanary, { storeValues: { redis: mintedRedis } }) as NomadJob).Job
+      .TaskGroups;
+    const env = groups.find((g) => g.Name === SERVICE_GROUP_NAME)?.Tasks.find((t) => t.Name === "app")?.Env;
+    if (!env) throw new Error("no nomad task env for app");
+    return env;
+  }
+  function k8sAppEnv(): Record<string, string> {
+    const dep = buildK8sManifests(storeCanary, { storeValues: { redis: mintedRedis } }).find(
+      (m) => m.kind === "Deployment" && m.metadata.name === "spica-app",
+    );
+    if (!dep) throw new Error("no k8s deployment spica-app");
+    const container = (dep.spec as K8sDeploySpec).template.spec.containers[0];
+    return Object.fromEntries((container?.env ?? []).map((e) => [e.name, e.value]));
+  }
+
+  it("Nomad renders the BYO env name from the deployed store's coordinates, over the service.env literal", () => {
+    expect(nomadAppEnv().VALKEY_URL).toBe("valkey://acme:pw@everdict-shared-redis:6379");
+  });
+
+  it("K8s renders the SAME value from the SAME storeValues — one mapping, every runtime", () => {
+    expect(k8sAppEnv().VALKEY_URL).toBe(nomadAppEnv().VALKEY_URL);
+  });
+});
+
 describe("cross-runtime conformance — one canary, each backend's correct peer address", () => {
   it("Nomad (co-located) addresses the peer by its plain alias — via wiring AND {{peer}}", () => {
     const env = nomadServiceEnv("web");

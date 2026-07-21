@@ -82,6 +82,17 @@ describe("planTenantStores — pool", () => {
     expect(np.serviceEnv.REDIS_URL).toContain("@10.0.0.7:36379");
   });
 
+  it("exposes the SAME minted coordinates structured (storeValues) — what dependencies[].inject templates render from", () => {
+    // serviceEnv is the conventional-key rendering; storeValues carries the pieces so a BYO template can recompose them.
+    expect(plan.storeValues.postgres?.user).toBe("r_acme");
+    expect(plan.storeValues.postgres?.database).toBe("tenant_acme");
+    expect(plan.storeValues.postgres?.url).toBe(plan.serviceEnv.DATABASE_URL);
+    expect(plan.storeValues.redis?.user).toBe("acme");
+    expect(plan.storeValues.redis?.keyPrefix).toBe("t:acme:");
+    expect(plan.storeValues.redis?.url).toBe(plan.serviceEnv.REDIS_URL);
+    expect(plan.storeValues.redis?.userinfo).toMatch(/^acme:.+@$/);
+  });
+
   it("the password is seed-deterministic (idempotent), and each tenant gets a different DB (tenant boundary)", () => {
     const again = planTenantStores(SPEC, zone({ storeIsolation: "pool" }));
     expect(again.serviceEnv.DATABASE_URL).toBe(plan.serviceEnv.DATABASE_URL); // same seed → same
@@ -116,10 +127,15 @@ describe("planTenantStores — silo / external", () => {
     const plan = planTenantStores(SPEC, zone({ storeIsolation: "silo" }));
     expect(plan.tenants).toHaveLength(0);
     expect(plan.serviceEnv.DATABASE_URL).toBe("postgresql://everdict:everdict@aegra-postgres:5432/everdict");
+    // Build-time default coordinates (root creds) — silo inject templates render from these.
+    expect(plan.storeValues.postgres?.url).toBe(plan.serviceEnv.DATABASE_URL);
+    expect(plan.storeValues.redis?.url).toBe("redis://aegra-redis:6379");
+    expect(plan.storeValues.redis?.userinfo).toBeUndefined(); // open silo redis — {userinfo} renders empty
   });
   it("external: no store env (BYO storeEnv handles it)", () => {
     const plan = planTenantStores(SPEC, zone({ storeIsolation: "external" }));
     expect(plan.tenants).toHaveLength(0);
     expect(plan.serviceEnv).toEqual({});
+    expect(plan.storeValues).toEqual({}); // nothing deployed → nothing to render
   });
 });

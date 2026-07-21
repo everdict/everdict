@@ -13,7 +13,8 @@ export type PortabilityRule =
   | "addressed-has-port" // a peer is addressed but declares no port — nothing to publish/forward
   | "reference-not-address" // front-door / target references a service that is not declared
   | "unique-ports" // two services share a port — the co-located Nomad shared netns forbids it
-  | "artifact-store-internal"; // an internal object store — artifacts referenced by its URL won't reach the judge
+  | "artifact-store-internal" // an internal object store — artifacts referenced by its URL won't reach the judge
+  | "inject-shadowed-literal"; // a service.env literal under the same key as a dependency inject mapping — dead config
 
 // Portability is a purely STRUCTURAL check over a service topology's addressing (service names/ports/needs/env/wiring +
 // front-door/target/trace references) — it never reads a service `image`. So a template (image-less services) is checked
@@ -46,6 +47,7 @@ const SEVERITY: Record<PortabilityRule, "error" | "warning"> = {
   "reference-not-address": "error",
   "unique-ports": "error",
   "artifact-store-internal": "warning",
+  "inject-shadowed-literal": "warning",
 };
 
 // Only the issues that hard-block a new registration (used by the registry register + the validate route).
@@ -224,6 +226,24 @@ export function checkPortability(spec: PortabilityServiceSpec): PortabilityIssue
   // is portable (every runtime provisions it the same way), so it is a warning, not an error: it is fine IF the harness
   // returns artifacts inline (sentinel delivery / base64 in the trace) or uses an external store — the two ways an
   // artifact actually reaches the judge. Surfaced at authoring time so the choice is deliberate.
+  // Dependency inject × service.env collision. An inject mapping renders the DEPLOYED store's coordinates and is
+  // merged above service.env, so a same-key literal is dead configuration — surface it so the author deletes the
+  // literal (or the mapping) deliberately, instead of guessing which value the image saw.
+  for (const dep of spec.dependencies ?? []) {
+    for (const mapping of dep.inject ?? []) {
+      for (const svc of spec.services) {
+        if (dep.service !== undefined && dep.service !== svc.name) continue;
+        if (typeof svc.env[mapping.env] === "string")
+          issues.push({
+            rule: "inject-shadowed-literal",
+            service: svc.name,
+            field: `services[${svc.name}].env.${mapping.env}`,
+            message: `services[${svc.name}].env.${mapping.env} is a literal, but the "${dep.role}" (${dep.store}) dependency also injects ${mapping.env} — the injected value (rendered from the deployed store) always wins, so the literal is dead. Remove the literal, or drop the inject mapping if the literal was intentional.`,
+          });
+      }
+    }
+  }
+
   for (const dep of spec.dependencies ?? []) {
     if (dep.store === "minio" && dep.isolateBy !== "external")
       issues.push({

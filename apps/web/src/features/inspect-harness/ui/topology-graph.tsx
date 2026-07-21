@@ -119,12 +119,14 @@ function buildEdges(
     // If we know which service uses it (d.service), draw that service→store; otherwise from the front-door anchor.
     const from = d.service && names.has(d.service) ? `svc:${d.service}` : anchorId
     const external = d.isolateBy === 'external'
+    // BYO env keys (dependencies[].inject) label the edge — the wire the store actually reaches the image through.
+    const injectKeys = (d.inject ?? []).map((m) => m.env).join(', ')
     edges.push({
       id: `store:${i}`,
       from,
       to: `store:${i}`,
       kind: external ? 'external' : 'store',
-      label: external ? 'external' : d.isolateBy,
+      label: external ? 'external' : injectKeys ? `${d.isolateBy} · ${injectKeys}` : d.isolateBy,
     })
   })
   if (hasTarget)

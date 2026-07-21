@@ -1,5 +1,31 @@
 import type { ServiceHarnessSpec } from "@everdict/contracts";
 
+// The structured coordinates of a deployed store — what dependency env injection (dependencies[].inject) renders
+// {field} templates from, and what the conventional connEnv keys are DERIVED from. Built where the endpoint is known
+// (build-time DNS on docker/k8s, discovered host:port on Nomad, pool-minted creds in planTenantStores) — never
+// flattened into env keys before both renderings happen (flattening early is exactly what made BYO env names
+// unreachable). Field names = the STORE_INJECT_FIELDS contract vocabulary; a field the isolation model doesn't mint
+// stays undefined and renders as "" (e.g. userinfo on an unauthenticated silo redis).
+export interface StoreValues {
+  host: string;
+  port: string;
+  endpoint: string; // "host:port"
+  url: string; // the canonical connection URL (creds included when they exist)
+  user?: string;
+  password?: string;
+  userinfo?: string; // "user:pw@" or absent — lets one template cover authenticated and open stores
+  database?: string;
+  keyPrefix?: string;
+  accessKey?: string;
+  secretKey?: string;
+  bucket?: string;
+}
+
+export function splitEndpoint(endpoint: string): { host: string; port: string } {
+  const at = endpoint.lastIndexOf(":");
+  return at === -1 ? { host: endpoint, port: "" } : { host: endpoint.slice(0, at), port: endpoint.slice(at + 1) };
+}
+
 // Standard image/port/boot-env for shared stores (spec.dependencies[]). When the whole topology is brought up
 // (provisionDependencies) the runtime deploys PG/Redis alongside the services from these defs and auto-injects the
 // connection URL (connEnv) into the services. A store is deployed once per (harness-version, zone) — shared across
@@ -9,8 +35,11 @@ export interface StoreDef {
   port: number;
   env?: Record<string, string>; // boot env (e.g. POSTGRES_PASSWORD)
   args?: string[]; // container run args/command (e.g. minio "server /data")
-  // Build the service connection env from a "host:port" endpoint. K8s=Service DNS:port (build-time), Nomad=discovered host:port.
-  connEnv: (endpoint: string) => Record<string, string>;
+  // Structured default/root coordinates from a "host:port" endpoint. K8s=Service DNS:port (build-time),
+  // Nomad=discovered host:port. Pool overrides these with per-tenant minted creds (planTenantStores).
+  values: (endpoint: string) => StoreValues;
+  // Conventional connection keys derived from the coordinates — the implicit-convention rendering of `values`.
+  connEnv: (values: StoreValues) => Record<string, string>;
 }
 
 export const STORE_DEFS: Record<string, StoreDef> = {
@@ -18,13 +47,23 @@ export const STORE_DEFS: Record<string, StoreDef> = {
     image: "postgres:16-alpine",
     port: 5432,
     env: { POSTGRES_USER: "everdict", POSTGRES_PASSWORD: "everdict", POSTGRES_DB: "everdict" },
-    connEnv: (ep) => ({ DATABASE_URL: `postgresql://everdict:everdict@${ep}/everdict` }),
+    values: (ep) => ({
+      ...splitEndpoint(ep),
+      endpoint: ep,
+      user: "everdict",
+      password: "everdict",
+      userinfo: "everdict:everdict@",
+      database: "everdict",
+      url: `postgresql://everdict:everdict@${ep}/everdict`,
+    }),
+    connEnv: (v) => ({ DATABASE_URL: v.url }),
   },
   redis: {
     image: "redis:7-alpine",
     port: 6379,
+    values: (ep) => ({ ...splitEndpoint(ep), endpoint: ep, url: `redis://${ep}` }),
     // Both REDIS_URL (de facto) + REDIS_URI (aegra / some LangGraph) — an explicit storeEnv wins if present.
-    connEnv: (ep) => ({ REDIS_URL: `redis://${ep}`, REDIS_URI: `redis://${ep}` }),
+    connEnv: (v) => ({ REDIS_URL: v.url, REDIS_URI: v.url }),
   },
   // minio: object store (snapshots). The server image bundles mc → pool provisioning (bucket/user/policy) via exec. Root password ≥8 chars.
   minio: {
@@ -33,11 +72,18 @@ export const STORE_DEFS: Record<string, StoreDef> = {
     args: ["server", "/data"],
     env: { MINIO_ROOT_USER: "everdict", MINIO_ROOT_PASSWORD: "everdictsecret" },
     // Default/silo (dedicated instance) = root creds. For pool the planner overrides with per-tenant scoped keys/buckets.
-    connEnv: (ep) => ({
-      AWS_S3_ENDPOINT: `http://${ep}`,
-      MINIO_ENDPOINT: `http://${ep}`,
-      AWS_ACCESS_KEY_ID: "everdict",
-      AWS_SECRET_ACCESS_KEY: "everdictsecret",
+    values: (ep) => ({
+      ...splitEndpoint(ep),
+      endpoint: ep,
+      url: `http://${ep}`,
+      accessKey: "everdict",
+      secretKey: "everdictsecret",
+    }),
+    connEnv: (v) => ({
+      AWS_S3_ENDPOINT: v.url,
+      MINIO_ENDPOINT: v.url,
+      ...(v.accessKey !== undefined ? { AWS_ACCESS_KEY_ID: v.accessKey } : {}),
+      ...(v.secretKey !== undefined ? { AWS_SECRET_ACCESS_KEY: v.secretKey } : {}),
     }),
   },
 };
@@ -61,7 +107,17 @@ export function dependencyStores(spec: ServiceHarnessSpec): Array<{ store: strin
 // K8s: endpoint = Service DNS:port (deployment name : default port, fixed at build time).
 export function dependencyConnEnv(spec: ServiceHarnessSpec): Record<string, string> {
   const out: Record<string, string> = {};
-  for (const { name, def } of dependencyStores(spec)) Object.assign(out, def.connEnv(`${name}:${def.port}`));
+  for (const { name, def } of dependencyStores(spec))
+    Object.assign(out, def.connEnv(def.values(`${name}:${def.port}`)));
+  return out;
+}
+
+// Structured build-time coordinates per deployed store (docker alias / k8s in-namespace Service DNS `<id>-<store>`,
+// default root creds) — what dependency inject templates render from on the runtimes that fix addresses at build time.
+// Pool/Nomad-silo paths pass their own values instead (minted creds / discovered endpoints).
+export function dependencyStoreValues(spec: ServiceHarnessSpec): Partial<Record<string, StoreValues>> {
+  const out: Partial<Record<string, StoreValues>> = {};
+  for (const { store, name, def } of dependencyStores(spec)) out[store] = def.values(`${name}:${def.port}`);
   return out;
 }
 

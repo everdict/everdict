@@ -33,6 +33,7 @@ import {
   INITIAL_INSTANCE,
   INITIAL_TEMPLATE,
   parseJsonObject,
+  type DepInjectRow,
   type DepRow,
   type InstanceState,
   type Kind,
@@ -456,7 +457,7 @@ export function TemplateForm({
               set({
                 deps: [
                   ...s.deps,
-                  { store: 'postgres', role: '', isolateBy: 'thread_id', service: '' },
+                  { store: 'postgres', role: '', isolateBy: 'thread_id', service: '', inject: [] },
                 ],
               })
             }
@@ -510,8 +511,14 @@ export function TemplateForm({
                   onChange={(v) => setDep(i, { service: v })}
                   placeholder="agent-server"
                 />
-                {d.isolateBy === 'external' && (
+                {d.isolateBy === 'external' ? (
                   <p className="text-[11px] text-muted-foreground">{t('depExternalNote')}</p>
+                ) : (
+                  <DepInjectEditor
+                    rows={d.inject}
+                    onChange={(inject) => setDep(i, { inject })}
+                    store={d.store}
+                  />
                 )}
                 <RemoveBtn onClick={() => set({ deps: s.deps.filter((_, j) => j !== i) })} />
               </div>
@@ -1545,12 +1552,20 @@ function previewSpec(s: TemplateState): HarnessSpec {
       })),
     dependencies: s.deps
       .filter((d) => d.store.trim())
-      .map((d) => ({
-        store: d.store,
-        role: d.role,
-        isolateBy: d.isolateBy,
-        ...(d.service.trim() ? { service: d.service.trim() } : {}),
-      })),
+      .map((d) => {
+        // Mirror the emit rule (external deps carry no inject) so the store edge labels the BYO keys live.
+        const inject =
+          d.isolateBy === 'external'
+            ? []
+            : d.inject.filter((m) => m.env.trim()).map((m) => ({ env: m.env.trim() }))
+        return {
+          store: d.store,
+          role: d.role,
+          isolateBy: d.isolateBy,
+          ...(d.service.trim() ? { service: d.service.trim() } : {}),
+          ...(inject.length ? { inject } : {}),
+        }
+      }),
     ...(s.targetEnabled ? { target: { kind: 'browser', observe: [] } } : {}),
     frontDoor: { service: s.frontDoorService, submit: s.frontDoorSubmit },
     traceSource: { kind: s.traceSource.kind, endpoint: s.traceSource.endpoint },
@@ -1570,6 +1585,89 @@ function TopologyPreview({ s }: { s: TemplateState }) {
         <p className="text-[12px] text-muted-foreground">{t('previewEmpty')}</p>
       ) : (
         <TopologyGraph spec={previewSpec(s)} />
+      )}
+    </div>
+  )
+}
+
+// The {field} vocabulary an inject template can recompose, per store kind (mirror of the control plane's
+// STORE_INJECT_FIELDS — display hint only; the control plane rejects an unknown field at registration).
+const INJECT_FIELD_HINT: Record<string, string> = {
+  postgres: '{host} {port} {endpoint} {url} {user} {password} {userinfo} {database}',
+  redis: '{host} {port} {endpoint} {url} {user} {password} {userinfo} {keyPrefix}',
+  minio: '{host} {port} {endpoint} {url} {accessKey} {secretKey} {bucket}',
+}
+
+// BYO store env names (dependencies[].inject) — the store-side sibling of the peer wiring editor: the image reads its
+// store connection under ITS OWN keys (VALKEY_URL …), rendered at deploy time from the store Everdict actually
+// deploys. Empty template = the store's canonical {url}.
+function DepInjectEditor({
+  rows,
+  onChange,
+  store,
+}: {
+  rows: DepInjectRow[]
+  onChange: (rows: DepInjectRow[]) => void
+  store: string
+}) {
+  const t = useTranslations('registerHarness')
+  const set = (i: number, patch: Partial<DepInjectRow>) =>
+    onChange(rows.map((r, j) => (j === i ? { ...r, ...patch } : r)))
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between">
+        <span className="flex items-center gap-1">
+          <span className="text-[11px] font-[510] text-muted-foreground">
+            {t('depInjectLabel')}
+          </span>
+          <InfoTip
+            content={
+              <>
+                {t('depInjectTip')}{' '}
+                <code className="font-mono">{INJECT_FIELD_HINT[store] ?? ''}</code>
+              </>
+            }
+          />
+        </span>
+        <button
+          type="button"
+          onClick={() => onChange([...rows, { env: '', template: '' }])}
+          className="flex items-center gap-1 text-[12px] font-[510] text-link transition-colors hover:text-foreground"
+        >
+          <Plus className="size-3.5" /> {t('depInjectAdd')}
+        </button>
+      </div>
+      {rows.length > 0 && (
+        <div className="space-y-2">
+          {rows.map((r, i) => (
+            <div key={i} className="flex items-center gap-2">
+              <Input
+                aria-label={t('depInjectEnvLabel')}
+                value={r.env}
+                onChange={(e) => set(i, { env: e.target.value })}
+                placeholder="VALKEY_URL"
+                spellCheck={false}
+                className="w-2/5 font-mono text-[12px]"
+              />
+              <Input
+                aria-label={t('depInjectTemplateLabel')}
+                value={r.template}
+                onChange={(e) => set(i, { template: e.target.value })}
+                placeholder={t('depInjectTemplatePlaceholder')}
+                spellCheck={false}
+                className="flex-1 font-mono text-[12px]"
+              />
+              <button
+                type="button"
+                aria-label={t('remove')}
+                onClick={() => onChange(rows.filter((_, j) => j !== i))}
+                className="text-muted-foreground transition-colors hover:text-destructive"
+              >
+                <Trash2 className="size-3.5" />
+              </button>
+            </div>
+          ))}
+        </div>
       )}
     </div>
   )

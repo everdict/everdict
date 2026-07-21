@@ -309,6 +309,47 @@ describe("DockerTopologyRuntime", () => {
     expect(agent?.env?.DATABASE_URL).toBe("postgresql://store"); // storeEnv wins over svc.env (and connEnv)
   });
 
+  it("ensureTopology: dependencies[].inject renders a BYO store env name that beats BOTH the svc.env literal and storeEnv", async () => {
+    // The SPICA rupture: an image reading VALKEY_URL (not REDIS_URL) used to see only the stale literal — the deployed
+    // store's endpoint never reached it. The inject mapping is the deployed truth, so nothing may shadow it.
+    const f = fakeDocker();
+    const spec: ServiceHarnessSpec = {
+      ...SPEC,
+      services: [
+        {
+          name: "agent-server",
+          image: "reg/spica:1",
+          port: 8000,
+          needs: ["redis"],
+          perRun: [],
+          replicas: 1,
+          env: { VALKEY_URL: "redis://stale-literal:6379" },
+        },
+      ],
+      dependencies: [
+        {
+          store: "redis",
+          role: "queue",
+          isolateBy: "key-prefix",
+          inject: [
+            { env: "VALKEY_URL", template: "valkey://{host}:{port}" },
+            { env: "QUEUE_ENDPOINT", template: "{endpoint}" },
+          ],
+        },
+      ],
+    };
+    const rt = new DockerTopologyRuntime({
+      docker: f.docker,
+      fetchImpl: okFetch,
+      storeEnv: { VALKEY_URL: "redis://operator-override:6379" },
+    });
+    await rt.ensureTopology(spec);
+    const agent = f.runs.find((r) => r.alias === "agent-server");
+    expect(agent?.env?.VALKEY_URL).toBe("valkey://bu-redis:6379"); // rendered from the deployed store's alias, shadowing literal + storeEnv
+    expect(agent?.env?.QUEUE_ENDPOINT).toBe("bu-redis:6379");
+    expect(agent?.env?.REDIS_URL).toBe("redis://bu-redis:6379"); // conventional keys still injected alongside
+  });
+
   it("ensureTopology: interpolates a {{peer}} env ref to the peer's network-alias URL (one pass, static)", async () => {
     const f = fakeDocker();
     const spec: ServiceHarnessSpec = {

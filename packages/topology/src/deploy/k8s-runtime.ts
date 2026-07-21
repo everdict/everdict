@@ -112,7 +112,12 @@ export class K8sTopologyRuntime implements TopologyRuntime {
     // Decide the store isolation model: with a zone → plan (pool/silo/external), without → provisionDependencies (silo/external).
     const plan: StorePlan = zone
       ? planTenantStores(spec, zone, { poolNamespace: this.opts.poolNamespace, storeSecret: this.opts.storeSecret })
-      : { isolation: this.opts.provisionDependencies ? "silo" : "external", serviceEnv: {}, tenants: [] };
+      : {
+          isolation: this.opts.provisionDependencies ? "silo" : "external",
+          serviceEnv: {},
+          tenants: [],
+          storeValues: {},
+        };
 
     // pool: shared store (once per cluster) → mint per-tenant DB/role/ACL (DDL against the shared store) → scoped creds into the service env.
     if (plan.isolation === "pool") await this.provisionPool(spec, plan, readySec);
@@ -123,6 +128,9 @@ export class K8sTopologyRuntime implements TopologyRuntime {
       namespace: ns,
       runtimeClass: this.opts.runtimeClass,
       storeEnv,
+      // pool: dependencies[].inject renders from the plan's minted per-tenant coordinates; silo: the builder derives
+      // build-time defaults itself (provisionDependencies); external: nothing to render.
+      ...(plan.isolation === "pool" ? { storeValues: plan.storeValues } : {}),
       imagePullPolicy: this.opts.imagePullPolicy,
       provisionDependencies: isSilo, // only silo deploys a dedicated store into the zone ns (SLICE 39); pool/external do not.
       ...(this.opts.registryAuth ? { registryAuth: this.opts.registryAuth } : {}),

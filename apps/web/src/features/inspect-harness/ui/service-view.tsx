@@ -118,25 +118,38 @@ export function ServiceView({ spec }: { spec: HarnessSpec }) {
           <Card className="divide-y divide-border">
             {deps.map((d, i) => {
               const external = d.isolateBy === 'external'
+              const inject = d.inject ?? []
               return (
-                <div
-                  key={i}
-                  className="flex flex-wrap items-center justify-between gap-3 px-4 py-3"
-                >
-                  <div className="flex min-w-0 items-center gap-2.5">
-                    <span className="text-[13px] font-[560] text-foreground">{d.store}</span>
-                    <span className="font-mono text-[12px] text-muted-foreground">{d.role}</span>
-                    {d.service && (
-                      <span className="text-[12px] text-faint">used by {d.service}</span>
+                <div key={i} className="space-y-2 px-4 py-3">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="flex min-w-0 items-center gap-2.5">
+                      <span className="text-[13px] font-[560] text-foreground">{d.store}</span>
+                      <span className="font-mono text-[12px] text-muted-foreground">{d.role}</span>
+                      {d.service && (
+                        <span className="text-[12px] text-faint">used by {d.service}</span>
+                      )}
+                    </div>
+                    {external ? (
+                      <div className="flex items-center gap-2">
+                        <span className="text-[11px] text-faint">{t('connEnvAtDeploy')}</span>
+                        <Badge tone="warning">external (BYO)</Badge>
+                      </div>
+                    ) : (
+                      <Badge tone="outline">isolate · {d.isolateBy}</Badge>
                     )}
                   </div>
-                  {external ? (
-                    <div className="flex items-center gap-2">
-                      <span className="text-[11px] text-faint">{t('connEnvAtDeploy')}</span>
-                      <Badge tone="warning">external (BYO)</Badge>
+                  {/* BYO env keys the image reads — rendered from the deployed store at deploy time (dependencies[].inject). */}
+                  {inject.length > 0 && (
+                    <div className="space-y-0.5">
+                      <span className="text-[11px] text-faint">{t('depInjectHeading')}</span>
+                      {inject.map((m, j) => (
+                        <div key={j} className="font-mono text-[12px] text-muted-foreground">
+                          <span className="text-foreground">{m.env}</span>
+                          {' ← '}
+                          {m.template ?? '{url}'}
+                        </div>
+                      ))}
                     </div>
-                  ) : (
-                    <Badge tone="outline">isolate · {d.isolateBy}</Badge>
                   )}
                 </div>
               )

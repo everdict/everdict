@@ -1,7 +1,8 @@
 import type { RegistryAuth, ServiceHarnessSpec, ServiceReadiness, ServiceResources } from "@everdict/contracts";
 import { dockerAuthConfigJson, imageUsesRegistryHost } from "@everdict/domain";
 import { DEFAULT_BROWSER_IMAGE } from "./browser-image.js";
-import { dependencyConnEnv, dependencyStores } from "./dependencies.js";
+import { type StoreValues, dependencyConnEnv, dependencyStoreValues, dependencyStores } from "./dependencies.js";
+import { dependencyInjectEnv } from "./inject-env.js";
 import { interpolateServiceEnv, staticWiringEnv } from "./nomad-topology.js";
 import { k8sPeerHost } from "./peer-resolver.js";
 
@@ -58,6 +59,9 @@ export interface K8sTopologyOptions {
   namespace?: string;
   runtimeClass?: string; // e.g. "gvisor"
   storeEnv?: Record<string, string>;
+  // Structured store coordinates for dependencies[].inject (BYO env names). Pool passes the plan's minted values;
+  // unset + provisionDependencies (silo) falls back to the build-time defaults (in-namespace Service DNS + root creds).
+  storeValues?: Partial<Record<string, StoreValues>>;
   imagePullPolicy?: string; // e.g. "IfNotPresent" (when using pre-loaded images, as with kind)
   provisionDependencies?: boolean; // also deploy spec.dependencies[] (postgres/redis) + auto-inject connection env
   // Workspace image-registry pull credentials (transient) — if a service image host matches, render a
@@ -129,8 +133,9 @@ export function buildDependencyManifests(spec: ServiceHarnessSpec, opts: K8sTopo
 
 export function buildK8sManifests(spec: ServiceHarnessSpec, opts: K8sTopologyOptions = {}): K8sManifest[] {
   const ns = opts.namespace ?? "everdict-platform";
-  // When stores are brought up too, auto-inject the connection env — precedence: connEnv (convention) < svc.env (service static) < storeEnv (operational override).
+  // When stores are brought up too, auto-inject the connection env — precedence: connEnv (convention) < svc.env (service static) < storeEnv (operational override) < dependency inject.
   const depEnv = opts.provisionDependencies ? dependencyConnEnv(spec) : {};
+  const storeValues = opts.storeValues ?? (opts.provisionDependencies ? dependencyStoreValues(spec) : {});
   const out: K8sManifest[] = [];
   // Render the dockerconfigjson Secret + imagePullSecrets only when a workspace-registry image is actually present.
   const auth = opts.registryAuth;
@@ -142,12 +147,16 @@ export function buildK8sManifests(spec: ServiceHarnessSpec, opts: K8sTopologyOpt
     // Peer wiring (BYO env names) + {{peer}} refs in svc.env resolve to the peer's stable Service DNS name (<id>-<svc>) — < service env < storeEnv.
     const wiringEnv = staticWiringEnv(svc, spec.services, k8sPeerHost(spec.id));
     const svcEnv = interpolateServiceEnv(svc, spec.services, k8sPeerHost(spec.id));
-    const env = Object.entries({ ...wiringEnv, ...depEnv, ...svcEnv, ...(opts.storeEnv ?? {}) }).map(
-      ([name, value]) => ({
-        name,
-        value,
-      }),
-    );
+    const env = Object.entries({
+      ...wiringEnv,
+      ...depEnv,
+      ...svcEnv,
+      ...(opts.storeEnv ?? {}),
+      ...dependencyInjectEnv(spec, storeValues, svc.name),
+    }).map(([name, value]) => ({
+      name,
+      value,
+    }));
     const vm = svc.volumes && svc.volumes.length > 0 ? k8sVolumes(svc.volumes) : { volumes: [], mounts: [] };
     out.push({
       apiVersion: "apps/v1",

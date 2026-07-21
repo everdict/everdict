@@ -97,17 +97,76 @@ export const TopologyServiceSchema = z.object({
 export type TopologyService = z.infer<typeof TopologyServiceSchema>;
 export type ServiceWiring = NonNullable<TopologyService["wiring"]>[number];
 
+// The closed {field} vocabulary for dependency env injection (dependencies[].inject), per store kind. These are the
+// coordinates a deployed store exposes to an inject template — the SSOT the schema validates against and
+// @everdict/topology renders from. A field the current isolation model doesn't mint renders as "" (e.g. {userinfo} on
+// an unauthenticated silo redis is empty but "user:pw@" under pool), so ONE template stays portable across
+// pool/silo and across the docker/nomad/k8s runtimes.
+export const STORE_INJECT_FIELDS = {
+  postgres: ["host", "port", "endpoint", "url", "user", "password", "userinfo", "database"],
+  redis: ["host", "port", "endpoint", "url", "user", "password", "userinfo", "keyPrefix"],
+  minio: ["host", "port", "endpoint", "url", "accessKey", "secretKey", "bucket"],
+} as const;
+export type StoreInjectField = (typeof STORE_INJECT_FIELDS)[keyof typeof STORE_INJECT_FIELDS][number];
+
+// Extract the {field} tokens of an inject template (fresh regex per call — no shared lastIndex state).
+export function injectTemplateFields(template: string): string[] {
+  return [...template.matchAll(/\{([a-zA-Z]+)\}/g)].flatMap((m) => (m[1] === undefined ? [] : [m[1]]));
+}
+
+// Inject a deployed store's coordinates into the services under a BYO env name — the store-side sibling of
+// service.wiring: an unmodified third-party image finds its store connection under the names IT expects
+// (e.g. VALKEY_URL / OBJECT_STORAGE_ENDPOINT), instead of Everdict's conventional keys (REDIS_URL / AWS_S3_ENDPOINT).
+// template = a {field} string over the store-kind vocabulary (unset = the store's canonical "{url}"). Values come from
+// the store the runtime actually deployed (endpoint + pool-minted creds), so a mapping — unlike a service.env literal,
+// which can't even express pool creds — works unchanged on every runtime and isolation model.
+export const DependencyInjectSchema = z
+  .object({
+    env: z.string().min(1), // the env key the service image reads
+    template: z.string().optional(), // {field} template over STORE_INJECT_FIELDS[store] — default "{url}"
+  })
+  .strict();
+export type DependencyInject = z.infer<typeof DependencyInjectSchema>;
+
 // Dependency store (shared + per-case logical isolation). isolateBy = the isolation key kind.
 // isolateBy="external" = BYO external/shared store (another cluster etc.) — Everdict does not deploy/isolate it, the service just connects.
 //   The connection is out of spec, injected at deploy time via env (storeEnv)/service.env (consistent with StoreIsolation's external model).
 //   The runtime excludes an external dep from provisioning/wiring and only exposes it first-class in the diagram/structure.
-// service = the service that uses this store (unset = topology-wide) — for the service→store edge in the diagram.
-export const TopologyDependencySchema = z.object({
-  store: z.enum(["postgres", "redis", "minio"]),
-  role: z.string(),
-  isolateBy: z.enum(["thread_id", "key-prefix", "object-prefix", "schema", "external"]),
-  service: z.string().optional(),
-});
+// service = the service that uses this store (unset = topology-wide) — for the service→store edge in the diagram;
+//   inject is scoped the same way (unset = injected into every service).
+export const TopologyDependencySchema = z
+  .object({
+    store: z.enum(["postgres", "redis", "minio"]),
+    role: z.string(),
+    isolateBy: z.enum(["thread_id", "key-prefix", "object-prefix", "schema", "external"]),
+    service: z.string().optional(),
+    inject: z.array(DependencyInjectSchema).optional(),
+  })
+  .superRefine((dep, ctx) => {
+    if (!dep.inject?.length) return;
+    // external = Everdict deploys nothing, so there are no coordinates to render — the connection is storeEnv/service.env.
+    if (dep.isolateBy === "external") {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["inject"],
+        message:
+          "inject requires an Everdict-deployed store; an external dependency's connection comes from storeEnv/service.env.",
+      });
+      return;
+    }
+    const allowed: readonly string[] = STORE_INJECT_FIELDS[dep.store];
+    for (const [i, entry] of dep.inject.entries()) {
+      for (const field of injectTemplateFields(entry.template ?? "{url}")) {
+        if (!allowed.includes(field)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["inject", i, "template"],
+            message: `Unknown template field {${field}} for store "${dep.store}" — allowed: ${allowed.join(", ")}.`,
+          });
+        }
+      }
+    }
+  });
 export type TopologyDependency = z.infer<typeof TopologyDependencySchema>;
 
 // Observation delivery mode — how the judge/grader receives observations.

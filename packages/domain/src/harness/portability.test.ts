@@ -90,6 +90,38 @@ describe("checkPortability", () => {
     expect(() => assertPortable(s)).not.toThrow();
   });
 
+  it("warns (not errors) when a service.env literal shares a key with a dependency inject mapping — the inject always wins, the literal is dead", () => {
+    const s = spec([svc({ name: "app", port: 3000, env: { VALKEY_URL: "redis://stale:6379" } })], {
+      dependencies: [{ store: "redis", role: "queue", isolateBy: "key-prefix", inject: [{ env: "VALKEY_URL" }] }],
+    });
+    const issue = checkPortability(s).find((i) => i.rule === "inject-shadowed-literal");
+    expect(issue?.severity).toBe("warning");
+    expect(issue?.field).toBe("services[app].env.VALKEY_URL");
+    expect(() => assertPortable(s)).not.toThrow(); // warning only — never blocks registration
+  });
+
+  it("scopes the inject-shadow warning by dep.service and skips non-colliding keys", () => {
+    const s = spec(
+      [
+        svc({ name: "app", port: 3000, env: { VALKEY_URL: "redis://stale:6379" } }),
+        svc({ name: "worker", env: { VALKEY_URL: "redis://stale:6379" } }),
+      ],
+      {
+        dependencies: [
+          {
+            store: "redis",
+            role: "queue",
+            isolateBy: "key-prefix",
+            service: "worker",
+            inject: [{ env: "VALKEY_URL" }],
+          },
+        ],
+      },
+    );
+    const shadowed = checkPortability(s).filter((i) => i.rule === "inject-shadowed-literal");
+    expect(shadowed.map((i) => i.service)).toEqual(["worker"]); // app's literal is untouched — the mapping targets worker only
+  });
+
   it("does NOT warn when the object store is external (BYO, control-plane-reachable) or is a non-object store (pg/redis)", () => {
     const external = spec([svc({ name: "web", port: 3000 })], {
       dependencies: [{ store: "minio", role: "artifacts", isolateBy: "external" }],

@@ -1,7 +1,8 @@
 import { BadRequestError, type RegistryAuth, type ServiceHarnessSpec, type TopologyService } from "@everdict/contracts";
 import { flattenEnv, imageUsesRegistryHost } from "@everdict/domain";
 import { DEFAULT_BROWSER_IMAGE } from "./browser-image.js";
-import { dependencyStores } from "./dependencies.js";
+import { type StoreValues, dependencyStores } from "./dependencies.js";
+import { dependencyInjectEnv } from "./inject-env.js";
 import { aliasPeerHost } from "./peer-resolver.js";
 import { sanitizeIdent } from "./store-binding.js";
 
@@ -94,6 +95,9 @@ export interface NomadTopologyOptions {
   runtime?: string; // isolation runtime (e.g. "runsc")
   namespace?: string;
   storeEnv?: Record<string, string>; // shared-store endpoints etc.
+  // Structured store coordinates (from the pool plan / silo discovery) — dependencies[].inject renders BYO env names
+  // from these at build time (unlike peers, store endpoints are already known when the job is built — no template).
+  storeValues?: Partial<Record<string, StoreValues>>;
   zoneId?: string; // trust-zone (tenant) identifier — mixed into the warm job ID to prevent cross-tenant sharing
   provisionDependencies?: boolean; // also deploy spec.dependencies[] (postgres/redis) as task groups in the same job
   // Workspace image-registry pull credentials (transient) — render the docker auth block only on tasks whose service
@@ -439,11 +443,13 @@ function buildColocatedGroup(spec: ServiceHarnessSpec, opts: NomadTopologyOption
       Name: svc.name,
       Driver: "docker",
       Config: config,
-      // Peer wiring (co-located = loopback alias <peer>) < service static env (with {{peer}} refs → loopback URL) < operational storeEnv.
+      // Peer wiring (co-located = loopback alias <peer>) < service static env (with {{peer}} refs → loopback URL)
+      // < operational storeEnv < dependency inject (BYO store env names — the deployed truth, nothing shadows it).
       Env: {
         ...staticWiringEnv(svc, spec.services, aliasPeerHost),
         ...interpolateServiceEnv(svc, spec.services, aliasPeerHost),
         ...opts.storeEnv,
+        ...dependencyInjectEnv(spec, opts.storeValues ?? {}, svc.name),
       },
       Resources: { CPU: svc.resources?.cpu ?? 1000, MemoryMB: svc.resources?.memoryMb ?? 1024 },
     };
@@ -475,7 +481,9 @@ function buildPerServiceGroups(spec: ServiceHarnessSpec, opts: NomadTopologyOpti
       Name: svc.name,
       Driver: "docker",
       Config: config,
-      Env: { ...staticEnv, ...opts.storeEnv },
+      // Store endpoints are build-time-known (opts.storeValues) even on the per-service path — only PEER addresses need
+      // the runtime catalog template, so dependency inject renders straight into Env here too.
+      Env: { ...staticEnv, ...opts.storeEnv, ...dependencyInjectEnv(spec, opts.storeValues ?? {}, svc.name) },
       Resources: { CPU: svc.resources?.cpu ?? 1000, MemoryMB: svc.resources?.memoryMb ?? 1024 },
       ...(template ? { Templates: [template] } : {}),
     };

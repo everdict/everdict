@@ -13,7 +13,7 @@ import {
   buildTenantIntentions,
   meshServiceName,
 } from "./consul-intentions.js";
-import { STORE_DEFS, dependencyStores } from "./dependencies.js";
+import { STORE_DEFS, type StoreValues, dependencyStores } from "./dependencies.js";
 import {
   type AllocLike,
   SERVICE_GROUP_NAME,
@@ -158,11 +158,19 @@ export class NomadTopologyRuntime implements TopologyRuntime {
     // pool: shared store (once per cluster) → mint per-tenant DB/role/ACL (alloc exec) → scoped creds into the service env.
     // (Nomad has no DNS without Consul, so unlike K8s it discovers host:port at runtime and injects it.)
     let storeEnv = this.opts.storeEnv;
+    let storeValues: Partial<Record<string, StoreValues>> | undefined;
     if (zone) {
       const isolation = resolveStoreIsolation(zone);
       // pool = shared store + tenant DDL, silo = a dedicated store instance per tenant (both discover host:port then inject), external = storeEnv.
-      if (isolation === "pool") storeEnv = { ...(await this.provisionPool(spec, zone)), ...this.opts.storeEnv };
-      else if (isolation === "silo") storeEnv = { ...(await this.provisionSilo(spec, zone)), ...this.opts.storeEnv };
+      if (isolation === "pool") {
+        const pool = await this.provisionPool(spec, zone);
+        storeEnv = { ...pool.env, ...this.opts.storeEnv };
+        storeValues = pool.values;
+      } else if (isolation === "silo") {
+        const silo = await this.provisionSilo(spec, zone);
+        storeEnv = { ...silo.env, ...this.opts.storeEnv };
+        storeValues = silo.values;
+      }
     }
 
     // Cross-tenant network isolation is the per-(spec,version,zone) job/namespace/netns separation below — a co-located
@@ -178,6 +186,7 @@ export class NomadTopologyRuntime implements TopologyRuntime {
       runtime: zone?.isolationRuntime ?? this.opts.runtime,
       namespace: ns,
       storeEnv,
+      ...(storeValues ? { storeValues } : {}),
       zoneId: zone?.id,
       ...(this.opts.registryAuth ? { registryAuth: this.opts.registryAuth } : {}),
     });
@@ -230,7 +239,10 @@ export class NomadTopologyRuntime implements TopologyRuntime {
 
   // pool: bring up the shared store once (discover host:port), and mint per-tenant logical objects (dedicated DB+role / Redis ACL) via alloc exec.
   // Even hostile tenant code only receives its own DB creds, so cross-access is denied by PG auth / Redis ACL (same guarantee as K8s pool).
-  private async provisionPool(spec: ServiceHarnessSpec, zone: TrustZone): Promise<Record<string, string>> {
+  private async provisionPool(
+    spec: ServiceHarnessSpec,
+    zone: TrustZone,
+  ): Promise<{ env: Record<string, string>; values: Partial<Record<string, StoreValues>> }> {
     const ns = this.opts.poolNamespace;
     const stores = dependencyStores(spec).map((s) => s.store);
     await this.ensureSharedStores(stores);
@@ -259,19 +271,23 @@ export class NomadTopologyRuntime implements TopologyRuntime {
         await this.execImpl.exec(rec.allocId, rec.task, ["sh", "-c", t.minioSetup], { namespace: ns });
       }
     }
-    return plan.serviceEnv;
+    return { env: plan.serviceEnv, values: plan.storeValues };
   }
 
   // silo: bring up the tenant's dedicated store job, discover host:port, and inject it into the service connEnv (no DDL — the whole instance belongs to the tenant).
-  private async provisionSilo(spec: ServiceHarnessSpec, zone: TrustZone): Promise<Record<string, string>> {
+  private async provisionSilo(
+    spec: ServiceHarnessSpec,
+    zone: TrustZone,
+  ): Promise<{ env: Record<string, string>; values: Partial<Record<string, StoreValues>> }> {
     const ns = zone.namespace ?? this.opts.namespace;
     const stores = [...new Set(dependencyStores(spec).map((s) => s.store))];
-    if (stores.length === 0) return {};
+    if (stores.length === 0) return { env: {}, values: {} };
     await this.register(
       buildDedicatedStoreJob(spec, stores, zone.id, { datacenters: this.opts.datacenters, namespace: ns }),
       ns,
     );
     const env: Record<string, string> = {};
+    const values: Partial<Record<string, StoreValues>> = {};
     for (const store of stores) {
       const alloc = await this.waitForGroupRunning(
         dedicatedStoreJobId(spec, zone.id),
@@ -281,9 +297,13 @@ export class NomadTopologyRuntime implements TopologyRuntime {
       const p = resolvePort(alloc, "store");
       if (!p)
         throw new UpstreamError("UPSTREAM_ERROR", { store }, "Could not find the dedicated store port in the alloc.");
-      Object.assign(env, STORE_DEFS[store]?.connEnv(`${p.hostIp}:${p.port}`) ?? {});
+      const def = STORE_DEFS[store];
+      if (!def) continue;
+      const v = def.values(`${p.hostIp}:${p.port}`);
+      values[store] = v;
+      Object.assign(env, def.connEnv(v));
     }
-    return env;
+    return { env, values };
   }
 
   private async ensureSharedStores(stores: string[]): Promise<void> {

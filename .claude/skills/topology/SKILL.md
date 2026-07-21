@@ -10,8 +10,19 @@ A harness can be a process (Claude Code) or a **deployed multi-service topology 
 
 ## The model
 - `HarnessSpec(kind:"service")`: `services[]` (each `{image, port?, needs, env?, model?}`; `env` = per-service static
-  config — precedence store `connEnv` < `service.env` < runtime `storeEnv`) + `dependencies[]` (shared stores) +
-  `target` (browser+ext) + `frontDoor` + `traceSource`.
+  config — precedence store `connEnv` < `service.env` < runtime `storeEnv` < `dependencies[].inject`) + `dependencies[]`
+  (shared stores) + `target` (browser+ext) + `frontDoor` + `traceSource`.
+- **Dependency env injection (`dependencies[].inject`) — BYO store env names.** The store-side sibling of
+  `service.wiring`: an image reading its store connection under its OWN keys (`VALKEY_URL`, `OBJECT_STORAGE_ENDPOINT`)
+  maps them on the dependency (`{env, template?}`; template = `{field}` over the closed per-store vocabulary
+  `STORE_INJECT_FIELDS` in contracts, unset = `{url}`; unknown field fails at register + deploy). Rendered by ONE pure
+  renderer (`dependencyInjectEnv`, `deploy/inject-env.ts`) from the deployed store's structured `StoreValues`
+  (docker/k8s build-time defaults · Nomad discovered endpoints · pool-minted creds via `StorePlan.storeValues`) in all
+  3 builders, merged TOPMOST (a stale `service.env` literal must never shadow the deployed store — the
+  `inject-shadowed-literal` portability warning flags such dead literals). `external` deps reject inject (nothing
+  deployed → no coordinates). One mapping ⇒ one harness works on every runtime/isolation — a literal can't even
+  express pool creds. Never flatten store coordinates into env keys before BOTH renderings (conventional connEnv +
+  inject) happen — early flattening is the exact rupture this closed.
 - **`service.model` = a registered-Model binding** (`string | ModelRef`, `docs/models.md`). Set it on the service
   that runs the agent → `ModelResolvingDispatcher` (`apps/api`) injects that model's connection (baseUrl + underlying
   model + the API key from its `apiKeySecret`) into **that** service's env at dispatch, wins over a same-name literal,

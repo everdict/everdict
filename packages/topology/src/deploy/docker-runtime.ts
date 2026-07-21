@@ -6,8 +6,9 @@ import {
 } from "@everdict/contracts";
 import { type CdpSocket, captureCdpDom, captureCdpScreenshot } from "../front-door/capture-cdp.js";
 import { DEFAULT_BROWSER_IMAGE } from "./browser-image.js";
-import { dependencyConnEnv, dependencyStores } from "./dependencies.js";
+import { dependencyConnEnv, dependencyStoreValues, dependencyStores } from "./dependencies.js";
 import { type Docker, dockerCli } from "./docker.js";
+import { dependencyInjectEnv } from "./inject-env.js";
 import { interpolateServiceEnv, staticWiringEnv } from "./nomad-topology.js";
 import { aliasPeerHost } from "./peer-resolver.js";
 import { endpointUnreachableError } from "./reachability.js";
@@ -184,6 +185,9 @@ export class DockerTopologyRuntime implements TopologyRuntime {
       }
       // Service connection env: automatic connEnv (<id>-<store>:<port>). Precedence: connEnv < svc.env (service static) < storeEnv (explicit wins).
       const connEnv = dependencyConnEnv(spec);
+      // Structured coordinates of the SAME stores — dependencies[].inject renders BYO env names from these, merged topmost
+      // (an inject mapping is the deployed truth; neither a stale service.env literal nor storeEnv may shadow it).
+      const storeValues = dependencyStoreValues(spec);
 
       // 2) Services — alias = svc.name (needs/front-door internal address). With a port, publish to an arbitrary host port → the runner (outside docker) can reach it.
       const endpoints: Record<string, string> = {};
@@ -197,12 +201,13 @@ export class DockerTopologyRuntime implements TopologyRuntime {
           network,
           alias: svc.name,
           // Peer wiring (BYO env names) resolves to the peer's network alias (svc.name). connEnv < wiring < service env
-          // (with {{peer}} refs → the peer's alias URL) < storeEnv.
+          // (with {{peer}} refs → the peer's alias URL) < storeEnv < dependency inject (BYO store env names).
           env: {
             ...connEnv,
             ...staticWiringEnv(svc, spec.services, aliasPeerHost),
             ...interpolateServiceEnv(svc, spec.services, aliasPeerHost),
             ...this.opts.storeEnv,
+            ...dependencyInjectEnv(spec, storeValues, svc.name),
           },
           ...(svc.volumes && svc.volumes.length > 0 ? { volumes: svc.volumes } : {}),
           ...(svc.port !== undefined ? { publish: svc.port } : {}),

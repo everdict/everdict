@@ -29,11 +29,21 @@ export interface ServiceRow {
   readinessTimeout: string // readiness polling ceiling (ms) — if left empty, unset
   readinessInterval: string // readiness polling interval (ms)
 }
+
+// One BYO env mapping of a dependency store — env = the key the service image actually reads (e.g. VALKEY_URL),
+// template = an optional {field} recomposition of the deployed store's coordinates ('' = the canonical {url}).
+// Rendered at deploy time from the store Everdict actually deployed (endpoint + pool-minted creds), so the mapping —
+// unlike an env literal — works unchanged on every runtime.
+export interface DepInjectRow {
+  env: string
+  template: string
+}
 export interface DepRow {
   store: string
   role: string
   isolateBy: string // …/schema | external (BYO external store — not deployed by Everdict; connection is env at deploy time)
   service: string // service that uses this store (optional; if left empty, shared across the topology)
+  inject: DepInjectRow[] // BYO store env names (empty = the conventional keys only)
 }
 
 // Template (top-level category) form state.
@@ -247,12 +257,23 @@ export function buildTemplate(s: TemplateState): Record<string, unknown> {
           : {}),
       }
     }),
-    dependencies: s.deps.map((d) => ({
-      store: d.store,
-      role: d.role,
-      isolateBy: d.isolateBy,
-      ...(d.service.trim() ? { service: d.service.trim() } : {}),
-    })),
+    dependencies: s.deps.map((d) => {
+      // external = Everdict deploys nothing, so there are no coordinates to render — never emit inject there
+      // (the control plane rejects it; the form simply drops rows left over from a mode switch).
+      const inject = (d.isolateBy === 'external' ? [] : d.inject)
+        .filter((m) => m.env.trim())
+        .map((m) => ({
+          env: m.env.trim(),
+          ...(m.template.trim() ? { template: m.template.trim() } : {}),
+        }))
+      return {
+        store: d.store,
+        role: d.role,
+        isolateBy: d.isolateBy,
+        ...(d.service.trim() ? { service: d.service.trim() } : {}),
+        ...(inject.length ? { inject } : {}),
+      }
+    }),
     frontDoor: {
       service: s.frontDoorService,
       submit: s.frontDoorSubmit,
@@ -304,6 +325,7 @@ export function templateStateFromSpec(t: HarnessTemplateSpec): TemplateState {
       role: d.role,
       isolateBy: d.isolateBy,
       service: d.service ?? '',
+      inject: (d.inject ?? []).map((m) => ({ env: m.env, template: m.template ?? '' })),
     })),
     frontDoorService: t.frontDoor?.service ?? '',
     frontDoorSubmit: t.frontDoor?.submit ?? '',
