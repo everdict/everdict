@@ -1,11 +1,23 @@
 'use client'
 
-import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+} from 'react'
+import { createPortal } from 'react-dom'
 
 import { cn } from '@/shared/lib/utils'
 
 // Dependency-free lightweight dropdown menu (Linear st. popover). Closes on outside-click/Esc, aligned to the trigger.
 const Ctx = createContext<{ close: () => void } | null>(null)
+
+// 트리거와 팝오버 사이 간격(px). 예전의 mt-1.5/mb-1.5 를 fixed 좌표 계산으로 옮긴 값.
+const GAP = 6
 
 export function DropdownMenu({
   trigger,
@@ -23,43 +35,84 @@ export function DropdownMenu({
   contentClassName?: string
 }) {
   const [open, setOpen] = useState(false)
-  const ref = useRef<HTMLDivElement>(null)
+  // 트리거의 뷰포트 좌표. 팝오버는 body 로 포털링해 fixed 로 여기에 정렬한다
+  // (부모의 overflow-hidden 에 잘리지 않도록 — 예: 설정 카드 SettingsList).
+  const [rect, setRect] = useState<DOMRect | null>(null)
+  const triggerRef = useRef<HTMLDivElement>(null)
+  const contentRef = useRef<HTMLDivElement>(null)
+
+  // 트리거 좌표를 다시 잰다(열기·스크롤·리사이즈 시).
+  function measure() {
+    const el = triggerRef.current
+    if (el) setRect(el.getBoundingClientRect())
+  }
+
+  function toggle() {
+    if (open) {
+      setOpen(false)
+      return
+    }
+    measure() // 열기 전에 좌표를 확보해 첫 페인트 깜빡임을 없앤다
+    setOpen(true)
+  }
 
   useEffect(() => {
     if (!open) return
     function onDown(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+      const target = e.target as Node
+      // 트리거 또는 포털된 콘텐츠 안의 클릭이면 유지(콘텐츠는 triggerRef 의 DOM 자식이 아니다).
+      if (triggerRef.current?.contains(target) || contentRef.current?.contains(target)) return
+      setOpen(false)
     }
     function onKey(e: KeyboardEvent) {
       if (e.key === 'Escape') setOpen(false)
     }
+    // 캡처 단계로 어떤 스크롤 컨테이너의 스크롤이든 따라잡는다.
+    window.addEventListener('scroll', measure, true)
+    window.addEventListener('resize', measure)
     document.addEventListener('mousedown', onDown)
     document.addEventListener('keydown', onKey)
     return () => {
+      window.removeEventListener('scroll', measure, true)
+      window.removeEventListener('resize', measure)
       document.removeEventListener('mousedown', onDown)
       document.removeEventListener('keydown', onKey)
     }
   }, [open])
 
+  const style: CSSProperties | undefined = rect
+    ? {
+        position: 'fixed',
+        ...(side === 'bottom'
+          ? { top: rect.bottom + GAP }
+          : { bottom: window.innerHeight - rect.top + GAP }),
+        ...(align === 'end' ? { right: window.innerWidth - rect.right } : { left: rect.left }),
+      }
+    : undefined
+
   return (
-    <div ref={ref} className={cn('relative', className)}>
-      {trigger({ open, toggle: () => setOpen((v) => !v) })}
-      {open && (
-        <Ctx.Provider value={{ close: () => setOpen(false) }}>
-          <div
-            role="menu"
-            className={cn(
-              'absolute z-50 min-w-[200px] overflow-hidden rounded-lg border border-border bg-popover p-1 text-[13px] shadow-pop',
-              'origin-top animate-in fade-in-0 zoom-in-95 duration-100',
-              side === 'bottom' ? 'top-full mt-1.5' : 'bottom-full mb-1.5',
-              align === 'end' ? 'right-0' : 'left-0',
-              contentClassName
-            )}
-          >
-            {children}
-          </div>
-        </Ctx.Provider>
-      )}
+    <div ref={triggerRef} className={cn('relative', className)}>
+      {trigger({ open, toggle })}
+      {open &&
+        style &&
+        createPortal(
+          <Ctx.Provider value={{ close: () => setOpen(false) }}>
+            <div
+              ref={contentRef}
+              role="menu"
+              style={style}
+              className={cn(
+                'z-50 min-w-[200px] overflow-hidden rounded-lg border border-border bg-popover p-1 text-[13px] shadow-pop',
+                'animate-in fade-in-0 zoom-in-95 duration-100',
+                side === 'bottom' ? 'origin-top' : 'origin-bottom',
+                contentClassName
+              )}
+            >
+              {children}
+            </div>
+          </Ctx.Provider>,
+          document.body
+        )}
     </div>
   )
 }
