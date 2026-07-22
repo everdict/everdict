@@ -557,12 +557,13 @@ export const controlPlane = {
   listTraceSourceTraces: <T>(
     auth: AuthContext,
     name: string,
-    query: { scope?: string; limit?: number; since?: string } = {}
+    query: { scope?: string; limit?: number; since?: string; until?: string } = {}
   ) => {
     const qs = new URLSearchParams()
     if (query.scope) qs.set('scope', query.scope)
     if (query.limit !== undefined) qs.set('limit', String(query.limit))
     if (query.since) qs.set('since', query.since)
+    if (query.until) qs.set('until', query.until)
     const suffix = qs.toString()
     return call<T>(
       auth,

@@ -16,7 +16,12 @@ export interface TraceSource {
 export interface ListTracesOptions {
   scope?: string; // platform scope to list within — mlflow experiment id · phoenix/langfuse/langsmith project · otel[jaeger] service. Falls back to the source's configured scope.
   limit?: number; // max traces to return (adapter caps to a platform maximum).
-  since?: string; // ISO-8601 lower time bound (best-effort — a platform without time filtering ignores it).
+  // Time window (best-effort — a platform without time filtering ignores it). `since` is the lower bound, `until` the
+  // upper bound; both are ISO-8601. Together they express a bounded range ("yesterday"); `since` alone is open-ended to
+  // now. Each adapter maps them to its platform's time params (langfuse from/toTimestamp · jaeger start/end micros ·
+  // phoenix start_time/end_time · mlflow/langsmith timestamp filter).
+  since?: string; // ISO-8601 lower time bound.
+  until?: string; // ISO-8601 upper time bound.
 }
 
 // One row in a trace list — the observability metrics a platform reports for a whole trace (normalized across kinds).

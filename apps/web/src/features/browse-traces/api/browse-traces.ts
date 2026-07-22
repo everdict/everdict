@@ -16,7 +16,7 @@ export type ListTracesResult = { ok: true; traces: TraceSummary[] } | { ok: fals
 // authZ (harnesses:read) is enforced by the control plane.
 export async function listTracesAction(
   sourceName: string,
-  query: { scope?: string; limit?: number } = {}
+  query: { scope?: string; limit?: number; since?: string; until?: string } = {}
 ): Promise<ListTracesResult> {
   const ctx = await authContext()
   try {
@@ -51,4 +51,3 @@ export async function inspectTraceAction(
     return { ok: false, error: e instanceof Error ? e.message : String(e) }
   }
 }
-

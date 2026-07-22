@@ -89,6 +89,12 @@ weighted overall (`judge:<id>`). See `docs/judges.md` + `docs/architecture/eval-
 `buildTraceSource` — kinds `otel|mlflow|langfuse|langsmith|phoenix` (`source.authSecret` → SecretStore value;
 otel/mlflow = verbatim `Authorization` header, the newer three place the value in their platform's header —
 langsmith `x-api-key`; phoenix needs `source.project`), then score.
+**`dataset`/`harness` are OPTIONAL on both ingest paths** — omit them to score the traces DIRECTLY: each trace becomes
+its own synthesized case (judges only, no `expected`) and the record carries the reserved sentinel `TRACE_EVAL_REF`
+(`"_traces"`, `@everdict/contracts`) as dataset+harness (NO migration; consumers detect a trace-evaluation by
+`dataset.id === TRACE_EVAL_REF`; leaderboard/trend self-exclude it). This is the web **"Evaluate traces"** mode (pick
+traces from a source + judge). A named-source pull may pass `source.correlate` to override the pooled setting — the
+evaluate-traces flow forces `"id"` (it holds the platform's real trace ids from `listTraces`). See `docs/scorecards.md`.
 
 ## Trace sink (export judged detail OUT — outbound mirror of ingest)
 The workspace registers **named sinks** (`WorkspaceSettings.traceSinks[]`: MLflow/Langfuse/LangSmith/Phoenix,

@@ -245,6 +245,7 @@ async function main(): Promise<void> {
   const scorecardService = buildScorecard({
     scorecardStore,
     runStore: store,
+    ...(recordingStore ? { recordingStore } : {}),
     meteredDispatcher,
     scheduler,
     runnerHub,

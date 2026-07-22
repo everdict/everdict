@@ -145,6 +145,7 @@ export class LangfuseTraceSource implements BrowsableTraceSource {
     const base = this.opts.endpoint.replace(/\/$/, "");
     const qs = new URLSearchParams({ limit: String(opts?.limit ?? 50), page: "1" });
     if (opts?.since) qs.set("fromTimestamp", opts.since);
+    if (opts?.until) qs.set("toTimestamp", opts.until); // upper bound — symmetric with fromTimestamp (Langfuse public API)
     const res = await f(`${base}/api/public/traces?${qs.toString()}`, {
       ...(this.opts.auth ? { headers: { authorization: this.opts.auth } } : {}),
     });

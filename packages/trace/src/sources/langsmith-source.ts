@@ -119,6 +119,10 @@ export class LangsmithTraceSource implements BrowsableTraceSource {
     }
     const f = this.opts.fetchImpl ?? fetch;
     const base = this.opts.endpoint.replace(/\/$/, "");
+    // NOTE: opts.since/until (time window) are NOT wired here. /runs/query narrows time via a `filter` DSL
+    // (gte/lte(start_time, …)) whose exact grammar we have not live-verified; a malformed filter would 400 the whole
+    // listing (a regression), so until it is verified LangSmith lists the most-recent N and the window is best-effort-
+    // ignored (see ListTracesOptions).
     const res = await f(`${base}/runs/query`, {
       method: "POST",
       headers: { "content-type": "application/json", ...(this.opts.auth ? { "x-api-key": this.opts.auth } : {}) },

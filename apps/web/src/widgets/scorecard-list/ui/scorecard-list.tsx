@@ -2,12 +2,12 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
-import { Check, Search, Trash2 } from 'lucide-react'
+import { Check, Search, Telescope, Trash2 } from 'lucide-react'
 import { useLocale, useTimeZone, useTranslations } from 'next-intl'
 import { createPortal } from 'react-dom'
 
 import { DeleteScorecardRowButton, DeleteScorecardsDialog } from '@/features/delete-scorecard'
-import type { ScorecardRecord } from '@/entities/scorecard'
+import { isTraceEvaluation, TRACE_EVAL_REF, type ScorecardRecord } from '@/entities/scorecard'
 import {
   dayKeyOf,
   fmtDateHeading,
@@ -153,12 +153,15 @@ export function ScorecardList({
     return { name: '—', known: false }
   }
 
-  // Filter dropdown options — dataset · harness · runner (derived from all scorecards).
+  // Filter dropdown options — dataset · harness · runner (derived from all scorecards). The reserved trace-eval
+  // sentinel is shown with a friendly label (so it reads as "Trace evaluation", not a literal "_traces" id).
   const datasetOptions = useMemo(() => {
     const s = new Set(scorecards.map((c) => c.dataset.id))
     return [
       { value: '', label: t('allDatasets') },
-      ...[...s].sort().map((d) => ({ value: d, label: d })),
+      ...[...s]
+        .sort()
+        .map((d) => ({ value: d, label: d === TRACE_EVAL_REF ? t('traceEvaluation') : d })),
     ]
   }, [scorecards, t])
 
@@ -166,7 +169,9 @@ export function ScorecardList({
     const s = new Set(scorecards.map((c) => c.harness.id))
     return [
       { value: '', label: t('allHarnesses') },
-      ...[...s].sort().map((h) => ({ value: h, label: h })),
+      ...[...s]
+        .sort()
+        .map((h) => ({ value: h, label: h === TRACE_EVAL_REF ? t('traceEvaluation') : h })),
     ]
   }, [scorecards, t])
 
@@ -433,33 +438,59 @@ export function ScorecardList({
                         )}
                       </span>
                     )}
-                    {/* Left: 3 lines — ① dataset ② harness (+model·source) ③ aggregate chips. Each one line, truncated (no wrap). */}
+                    {/* Left: 3 lines — ① dataset ② harness (+model·source) ③ aggregate chips. Each one line, truncated
+                        (no wrap). A trace evaluation (sentinel dataset/harness) collapses ①② into a single badge line
+                        instead of two literal "_traces" refs that would read as a broken entity. */}
                     <div className="min-w-0 flex-1 space-y-1">
-                      <div className="flex items-center gap-1.5 overflow-hidden whitespace-nowrap text-[13px] font-[510]">
-                        <span className="truncate">
-                          <EntityRef id={s.dataset.id} version={s.dataset.version} kind="dataset" />
-                        </span>
-                        {s.subset ? (
-                          <span className="shrink-0">
-                            <SubsetChip selected={s.subset.selected} total={s.subset.total} />
+                      {isTraceEvaluation(s) ? (
+                        <div className="flex items-center gap-1.5 overflow-hidden whitespace-nowrap text-[13px] font-[510]">
+                          <span className="inline-flex shrink-0 items-center gap-1 rounded bg-secondary px-1.5 py-0.5 text-[11px] font-[560] text-secondary-foreground ring-1 ring-inset ring-border">
+                            <Telescope className="size-3" />
+                            {t('traceEvaluation')}
                           </span>
-                        ) : null}
-                      </div>
-                      <div className="flex items-center gap-1.5 overflow-hidden whitespace-nowrap text-[13px] font-[510]">
-                        <span className="truncate">
-                          <EntityRef id={s.harness.id} version={s.harness.version} kind="harness" />
-                        </span>
-                        {s.models?.primary ? (
-                          <span className="hidden shrink-0 sm:inline-flex">
-                            <ModelChip>{s.models.primary}</ModelChip>
-                          </span>
-                        ) : null}
-                        {s.origin ? (
-                          <span className="hidden shrink-0 md:inline-flex">
-                            <OriginChip origin={s.origin} />
-                          </span>
-                        ) : null}
-                      </div>
+                          {s.models?.primary ? (
+                            <span className="hidden shrink-0 sm:inline-flex">
+                              <ModelChip>{s.models.primary}</ModelChip>
+                            </span>
+                          ) : null}
+                        </div>
+                      ) : (
+                        <>
+                          <div className="flex items-center gap-1.5 overflow-hidden whitespace-nowrap text-[13px] font-[510]">
+                            <span className="truncate">
+                              <EntityRef
+                                id={s.dataset.id}
+                                version={s.dataset.version}
+                                kind="dataset"
+                              />
+                            </span>
+                            {s.subset ? (
+                              <span className="shrink-0">
+                                <SubsetChip selected={s.subset.selected} total={s.subset.total} />
+                              </span>
+                            ) : null}
+                          </div>
+                          <div className="flex items-center gap-1.5 overflow-hidden whitespace-nowrap text-[13px] font-[510]">
+                            <span className="truncate">
+                              <EntityRef
+                                id={s.harness.id}
+                                version={s.harness.version}
+                                kind="harness"
+                              />
+                            </span>
+                            {s.models?.primary ? (
+                              <span className="hidden shrink-0 sm:inline-flex">
+                                <ModelChip>{s.models.primary}</ModelChip>
+                              </span>
+                            ) : null}
+                            {s.origin ? (
+                              <span className="hidden shrink-0 md:inline-flex">
+                                <OriginChip origin={s.origin} />
+                              </span>
+                            ) : null}
+                          </div>
+                        </>
+                      )}
                       <div className="flex items-center gap-1 overflow-hidden whitespace-nowrap">
                         {shownMetrics.length > 0 ? (
                           shownMetrics.map((m) => (

@@ -33,6 +33,7 @@ import type { Dispatcher } from "../ports/dispatcher.js";
 import type { HarnessInstanceRegistry } from "../ports/harness-instance-registry.js";
 import type { JudgeRegistry } from "../ports/judge-registry.js";
 import type { JudgeRunner } from "../ports/judge-runner.js";
+import type { RecordingStore } from "../ports/recording-store.js";
 import type { RunStore } from "../ports/run-store.js";
 import type { ScorecardStore } from "../ports/scorecard-store.js";
 import type { CaseExportStream } from "../trace-sink/trace-sink-service.js";
@@ -94,10 +95,12 @@ export function caseReason(r: CaseResult): string | undefined {
 }
 
 // Trace-ingest body — upload traces already produced externally without running the harness (edge-normalized: TraceEvent[] upload).
-// dataset/harness serve as labels and refs (caseId↔task alignment, diff alignment). Validated at the boundary with TraceEventSchema.
+// dataset/harness are OPTIONAL labels/refs: with a dataset each trace aligns to a case (expected/graders + diff alignment);
+// WITHOUT one, every uploaded trace becomes its own case and judges score it directly (the "evaluate traces" path — the
+// scorecard is stamped with the TRACE_EVAL_REF sentinel dataset/harness). Validated at the boundary with TraceEventSchema.
 export const IngestScorecardBodySchema = z.object({
-  dataset: z.object({ id: z.string(), version: z.string().default("latest") }),
-  harness: z.object({ id: z.string(), version: z.string().default("latest") }),
+  dataset: z.object({ id: z.string(), version: z.string().default("latest") }).optional(),
+  harness: z.object({ id: z.string(), version: z.string().default("latest") }).optional(),
   traces: z
     .array(
       z.object({
@@ -119,15 +122,20 @@ export type IngestScorecardInput = IngestScorecardBody & {
 };
 
 // pull-ingest body — pull per-runId traces from the tenant's OTel/MLflow and score them (harness not run).
+// dataset/harness are OPTIONAL labels (see IngestScorecardBodySchema): omit both to evaluate the pulled traces directly
+// (each trace = one case, judges only, TRACE_EVAL_REF sentinel) — the "pick traces from a trace source + judge" path.
 // The source is EITHER a registered workspace trace source referenced by name ("register once, pull by name" — the
 // low-friction path) OR an inline ad-hoc config. Named: credential/kind/endpoint come from the pool; inline: credentials
 // come only via the authSecret name (SecretStore) — no plaintext token in the spec.
 export const PullIngestBodySchema = z.object({
-  dataset: z.object({ id: z.string(), version: z.string().default("latest") }),
-  harness: z.object({ id: z.string(), version: z.string().default("latest") }),
+  dataset: z.object({ id: z.string(), version: z.string().default("latest") }).optional(),
+  harness: z.object({ id: z.string(), version: z.string().default("latest") }).optional(),
   source: z.union([
     // a registered workspace source (Settings › Observability) — the whole connection is already stored under this name.
-    z.object({ name: z.string().min(1) }),
+    // `correlate` overrides the source's stored setting for THIS pull: the "evaluate existing traces" flow already holds
+    // the platform's real trace ids (from listTraces), so it forces "id" (fetch-by-trace-id) even if the source is
+    // normally used with "tag" (find-by-everdict-run_id) correlation. Absent = the source's own setting.
+    z.object({ name: z.string().min(1), correlate: z.enum(["id", "tag"]).optional() }),
     z.object({
       kind: z.enum(["otel", "mlflow", "langfuse", "langsmith", "phoenix"]),
       endpoint: z.string().url(),
@@ -343,6 +351,8 @@ export interface ScorecardServiceDeps {
   // When set, fan out a child run (RunRecord) per case so each case becomes an addressable run (trace/usage/provenance).
   // When unset, keep the current behavior: an embedded scorecard only, no child runs (shares the same RunStore as a single run). Children are hidden from the activity list by default.
   runStore?: RunStore;
+  // Durable replay recording (optional) — at child write-back, seal the frames/logs teed under the child's runId and attach the ref.
+  recordingStore?: RecordingStore;
   concurrency?: number;
   // Policy gate: if true, a batch without a runtime is rejected 400 at submit (no local fallback). The API (main.ts) always sets true.
   // Unset (tests: inject a mock dispatcher directly) = no gate. Not an env toggle — a deployment's fixed policy.

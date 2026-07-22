@@ -199,8 +199,12 @@ export class PhoenixTraceSource implements BrowsableTraceSource {
     const f = this.opts.fetchImpl ?? fetch;
     const base = this.opts.endpoint.replace(/\/$/, "");
     const limit = opts?.limit ?? 50;
-    // Best-effort: one recent-spans page, grouped by trace_id (Phoenix REST has no list-traces endpoint).
-    const res = await f(`${base}/v1/projects/${encodeURIComponent(project)}/spans?limit=1000`, {
+    // Best-effort: one recent-spans page, grouped by trace_id (Phoenix REST has no list-traces endpoint). The spans
+    // endpoint filters by start_time/end_time (ISO-8601) when given.
+    const qs = new URLSearchParams({ limit: "1000" });
+    if (opts?.since) qs.set("start_time", opts.since);
+    if (opts?.until) qs.set("end_time", opts.until);
+    const res = await f(`${base}/v1/projects/${encodeURIComponent(project)}/spans?${qs.toString()}`, {
       ...(this.opts.auth ? { headers: { authorization: this.opts.auth } } : {}),
     });
     if (!res.ok) {

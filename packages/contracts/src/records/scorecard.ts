@@ -122,6 +122,15 @@ export const ScorecardExportSchema = z.object({
 });
 export type ScorecardExport = z.infer<typeof ScorecardExportSchema>;
 
+// Reserved sentinel id used for a scorecard's `dataset` (and `harness`) when it scores observability traces DIRECTLY —
+// the "evaluate existing traces" path (pick traces from a workspace trace source + run judges, no dataset, no harness
+// run). It keeps the NOT-NULL dataset/harness columns populated WITHOUT a real registry entry, so no schema migration
+// is needed. A leading underscore mirrors the reserved `_shared` tenant convention. Consumers detect a trace-evaluation
+// scorecard by `dataset.id === TRACE_EVAL_REF` (this id never collides with a real, registrable dataset id) and render
+// it without a dataset/harness deep-link. It also self-excludes from leaderboard/trend, which positively filter by a
+// real datasetId. docs/scorecards.md
+export const TRACE_EVAL_REF = "_traces";
+
 export const ScorecardRecordSchema = z.object({
   id: z.string(),
   tenant: z.string(),

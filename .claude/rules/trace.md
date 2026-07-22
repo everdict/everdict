@@ -46,7 +46,10 @@ docs/service-harness.md + docs/architecture/trace-sink.md.
   docs/architecture/trace-sink.md.
 - **Browse + inspect + the conversion overlay** (`BrowsableTraceSource extends TraceSource`, what
   `buildTraceSource` now returns): `listTraces(opts)` enumerates a source's recent traces + observability metrics
-  (started/duration/tokens/cost/status/tags — pure per-kind summary parsers) and `inspect(traceId, mapping)`
+  (started/duration/tokens/cost/status/tags — pure per-kind summary parsers). `opts` carries a best-effort time window
+  (`since`/`until`, ISO-8601) each adapter maps to its platform's params — langfuse `from/toTimestamp`, jaeger
+  `start/end` micros, phoenix `start_time/end_time`; mlflow/langsmith are recent-N only (their POST-body time filter
+  grammar is unverified — a wrong filter would 400 the whole listing, so leave it until live-verified). `inspect(traceId, mapping)`
   returns the raw span attributes (span-based kinds) + events normalized with the SUPPLIED mapping + (best-effort) a
   structured `detail` (trace rollups + a span waterfall via `spansToSpanNodes` — offset/duration/type/io/tokens/cost,
   parentId nesting where the platform exposes it) — powering the Settings › Observability browser (a row-click opens

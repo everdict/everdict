@@ -125,15 +125,17 @@ export function registerTraceSourceTools(server: McpServer, ctx: McpToolContext)
             .describe("platform scope to list within (defaults to the source's configured scope)"),
           limit: z.number().int().positive().max(500).optional().describe("max traces (default 50)"),
           since: z.string().min(1).optional().describe("ISO-8601 lower time bound (best-effort)"),
+          until: z.string().min(1).optional().describe("ISO-8601 upper time bound (best-effort — bounded window)"),
         },
       },
-      ({ name, scope, limit, since }) =>
+      ({ name, scope, limit, since, until }) =>
         run(principal, "harnesses:read", async () =>
           ok({
             traces: await source.listTraces(ws, name, {
               ...(scope ? { scope } : {}),
               ...(limit ? { limit } : {}),
               ...(since ? { since } : {}),
+              ...(until ? { until } : {}),
             }),
           }),
         ),

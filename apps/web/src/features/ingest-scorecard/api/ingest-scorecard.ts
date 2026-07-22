@@ -91,3 +91,38 @@ export async function pullScorecardAction(
     return { ok: false, error: e instanceof Error ? e.message : String(e) }
   }
 }
+
+export interface EvaluateTracesInput {
+  sourceName: string // a REGISTERED workspace trace source (Settings › Observability) — pull by name (credential from the pool)
+  traceIds: string[] // the selected trace ids to evaluate; each becomes one case (caseId = trace id)
+  judgeIds: string[] // Agent Judges to score each pulled trace (empty = control-plane default scoring)
+}
+
+// Server action: the "evaluate existing traces" scorecard — pull a chosen SET of traces from a registered source and
+// judge them directly, with NO dataset and NO harness run (each trace = one case). A thin wrapper over pull-ingest with
+// dataset/harness omitted (the control plane stamps the trace-eval sentinel).
+export async function evaluateTracesAction(
+  input: EvaluateTracesInput
+): Promise<IngestScorecardResult> {
+  const ctx = await authContext()
+  const t = await getTranslations('evaluateTraces')
+  if (!input.sourceName) return { ok: false, error: t('noSource') }
+  if (input.traceIds.length === 0) return { ok: false, error: t('noTraces') }
+  const body = {
+    // dataset + harness deliberately omitted → the control plane treats this as a direct trace evaluation.
+    // correlate:"id" — the ids ARE the platform's real trace ids (from listTraces), so fetch by id even if the source
+    // is registered for "tag" (everdict.run_id) correlation.
+    source: { name: input.sourceName, correlate: 'id' as const },
+    runs: input.traceIds.map((id) => ({ caseId: id, runId: id })),
+    ...(input.judgeIds.length > 0
+      ? { judges: input.judgeIds.map((id) => ({ id, version: 'latest' })) }
+      : {}),
+  }
+  try {
+    const rec = await controlPlane.ingestScorecardPull<{ id: string }>(ctx, body)
+    revalidatePath('/[workspace]/scorecards')
+    return { ok: true, id: rec.id }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
+}

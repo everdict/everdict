@@ -1,4 +1,4 @@
-export { TraceBrowser } from './ui/trace-browser'
+export { TraceBrowser, type TraceSelection } from './ui/trace-browser'
 export { TraceDetail, TraceEventList } from './ui/trace-detail'
 export {
   inspectTraceAction,

@@ -341,6 +341,10 @@ export class MlflowTraceSource implements BrowsableTraceSource {
         "MLflow trace listing requires an experiment scope (traces/search requires locations).",
       );
     }
+    // NOTE: opts.since/until (time window) are NOT wired here. traces/search filters via a `filter` string whose
+    // timestamp field/grammar we have not live-verified (a wrong filter would 400 the whole listing, not just ignore
+    // the window — a regression). Until it is verified against a real server, MLflow lists the most-recent N and the
+    // time window is best-effort-ignored (see ListTracesOptions). Wire it with the same care as the verified tag filter.
     const res = await f(`${base}/api/3.0/mlflow/traces/search`, {
       method: "POST",
       headers: { "content-type": "application/json", ...(this.opts.headers ?? {}) },

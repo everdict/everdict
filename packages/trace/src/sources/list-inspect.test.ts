@@ -70,6 +70,17 @@ describe("OtelTraceSource — listTraces + inspect (Jaeger)", () => {
     await expect(src.listTraces()).rejects.toThrow("service");
   });
 
+  it("passes the time window as start/end microseconds (Jaeger query API)", async () => {
+    const fetchImpl = vi.fn((..._args: Parameters<typeof fetch>) => Promise.resolve(json(listBody)));
+    const src = new OtelTraceSource({ endpoint: "http://jaeger:16686", fetchImpl: fetchImpl as typeof fetch });
+    const since = "2026-07-01T00:00:00.000Z";
+    const until = "2026-07-02T00:00:00.000Z";
+    await src.listTraces({ scope: "svc-a", since, until });
+    const url = new URL(String(fetchImpl.mock.calls[0]?.[0]));
+    expect(url.searchParams.get("start")).toBe(String(Date.parse(since) * 1000));
+    expect(url.searchParams.get("end")).toBe(String(Date.parse(until) * 1000));
+  });
+
   it("inspect pulls raw spans by id and applies the supplied mapping", async () => {
     const fetchImpl = vi.fn((..._args: Parameters<typeof fetch>) => Promise.resolve(json(listBody)));
     const src = new OtelTraceSource({ endpoint: "http://jaeger:16686", fetchImpl: fetchImpl as typeof fetch });
@@ -255,6 +266,19 @@ describe("PhoenixTraceSource — listTraces groups spans by trace_id", () => {
     expect(traces[0]?.tokens).toEqual({ input: 8, output: 3 });
   });
 
+  it("passes the time window as start_time/end_time on the spans endpoint", async () => {
+    const fetchImpl = vi.fn((..._args: Parameters<typeof fetch>) => Promise.resolve(json({ data: [] })));
+    const src = new PhoenixTraceSource({
+      endpoint: "http://phoenix:6006",
+      project: "p",
+      fetchImpl: fetchImpl as typeof fetch,
+    });
+    await src.listTraces({ since: "2026-07-01T00:00:00.000Z", until: "2026-07-02T00:00:00.000Z" });
+    const url = new URL(String(fetchImpl.mock.calls[0]?.[0]));
+    expect(url.searchParams.get("start_time")).toBe("2026-07-01T00:00:00.000Z");
+    expect(url.searchParams.get("end_time")).toBe("2026-07-02T00:00:00.000Z");
+  });
+
   it("inspect returns events only (native kind — no raw attributes / mapping)", async () => {
     const body = {
       data: [{ name: "n", context: { trace_id: "t1" }, span_kind: "CHAIN", start_time: "2026-01-01T00:00:00Z" }],
@@ -284,6 +308,15 @@ describe("LangfuseTraceSource — listTraces", () => {
     expect(String(fetchImpl.mock.calls[0]?.[0])).toContain("/api/public/traces?");
     expect(traces[0]).toMatchObject({ id: "lf1", name: "agent", durationMs: 2500, costUsd: 0.03 });
     expect(traces[0]?.tags).toEqual({ prod: "" });
+  });
+
+  it("passes the time window as fromTimestamp/toTimestamp", async () => {
+    const fetchImpl = vi.fn((..._args: Parameters<typeof fetch>) => Promise.resolve(json({ data: [] })));
+    const src = new LangfuseTraceSource({ endpoint: "http://langfuse:3000", fetchImpl: fetchImpl as typeof fetch });
+    await src.listTraces({ since: "2026-07-01T00:00:00.000Z", until: "2026-07-02T00:00:00.000Z" });
+    const url = new URL(String(fetchImpl.mock.calls[0]?.[0]));
+    expect(url.searchParams.get("fromTimestamp")).toBe("2026-07-01T00:00:00.000Z");
+    expect(url.searchParams.get("toTimestamp")).toBe("2026-07-02T00:00:00.000Z");
   });
 });
 

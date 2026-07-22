@@ -34,3 +34,4 @@ export {
   type Leaderboard,
 } from './model/schema'
 export { trackOf } from './model/verdict'
+export { TRACE_EVAL_REF, isTraceEvaluation } from './model/trace-eval'

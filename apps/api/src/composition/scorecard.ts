@@ -2,6 +2,7 @@ import type { GithubAppService } from "@everdict/application-control";
 import type { ImageRegistryService } from "@everdict/application-control";
 import type { NotificationService } from "@everdict/application-control";
 import type { Metrics } from "@everdict/application-control";
+import type { RecordingStore } from "@everdict/application-control";
 import type { RunnerHubLike } from "@everdict/application-control";
 import { ScorecardService, TraceSourceService } from "@everdict/application-control";
 import type { TraceSinkService } from "@everdict/application-control";
@@ -29,6 +30,7 @@ export interface ScorecardRuntimeAccess {
 export function buildScorecard(deps: {
   scorecardStore: ScorecardStore;
   runStore: RunStore;
+  recordingStore?: RecordingStore;
   meteredDispatcher: CoreDispatcher;
   scheduler: Scheduler;
   // Self-hosted lease hub — cancel/supersede reclaims a batch's in-flight lease jobs through it (requestCancel).
@@ -57,6 +59,7 @@ export function buildScorecard(deps: {
   const {
     scorecardStore,
     runStore,
+    recordingStore,
     meteredDispatcher,
     scheduler,
     runnerHub,
@@ -153,6 +156,7 @@ export function buildScorecard(deps: {
     preflightPlacement, // submit-time capability gate: reject a harness/runtime mismatch (per runtime in the shard list) at 400
     // Fan out a child run per case (sharing the same RunStore as a single run) — each case becomes an addressable run, hidden by default in the activity list.
     runStore,
+    ...(recordingStore ? { recordingStore } : {}),
     datasets: datasetRegistry,
     harnesses: harnessInstanceRegistry,
     judges: judgeRegistry,

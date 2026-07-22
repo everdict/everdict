@@ -4,9 +4,11 @@ import {
   type CaseResult,
   type Dataset,
   type EnvSnapshot,
+  type EvalCase,
   type GradeContext,
   type Scorecard,
   type ScorecardRecord,
+  TRACE_EVAL_REF,
   type TraceEvidence,
   type TraceSourceConfig,
   toScores,
@@ -21,6 +23,20 @@ import {
   type ScorecardServiceDeps,
   offloadResults,
 } from "./scorecard-shared.js";
+
+// Sentinel version paired with TRACE_EVAL_REF for the "evaluate traces" path (no dataset / no harness run). Kept
+// distinct from a real registrable version so a trace-eval scorecard is unambiguous (dataset.id === TRACE_EVAL_REF).
+const TRACE_EVAL_VERSION = "external";
+
+// The dataset/harness ref a scorecard carries when it scores traces directly (no chosen dataset/harness) — the NOT-NULL
+// columns stay populated with the sentinel instead of a real registry entry (no migration; consumers detect + special-case it).
+const TRACE_EVAL_LABEL = { id: TRACE_EVAL_REF, version: TRACE_EVAL_VERSION };
+
+// A synthetic case for a directly-evaluated trace (the "evaluate traces" path has no dataset, so there is no real case to
+// align to). Environment-free QA shell so judges can score the trace/evidence; it is never executed, only judged.
+function syntheticCase(caseId: string): EvalCase {
+  return { id: caseId, env: { kind: "prompt" }, task: "", graders: [], timeoutSec: 1800, tags: [] };
+}
 
 // Evidence extracted from a pulled trace → the browser snapshot a judge reads (dom/screenshot/VLM), the pull-path
 // substitute for the EnvSnapshot a live run produces. No browser evidence → undefined (finishIngest keeps its
@@ -56,16 +72,22 @@ export class ScorecardIngestService {
     this.scoring = shared.scoring;
   }
 
-  // Trace ingest — create a scorecard from traces already produced externally (harness not run). Resolve dataset (404 if missing) → queued → async scoring.
+  // Trace ingest — create a scorecard from traces already produced externally (harness not run). dataset OPTIONAL: with
+  // one, resolve it (404 if missing) and align by caseId; without one, evaluate the traces directly (sentinel label,
+  // each trace = a case). harness is a label, likewise optional. → queued → async scoring.
   async ingest(input: IngestScorecardInput): Promise<ScorecardRecord> {
-    const dataset = await this.deps.datasets.get(input.tenant, input.dataset.id, input.dataset.version || "latest");
-    const harnessVersion = input.harness.version || "latest";
+    const dataset = input.dataset
+      ? await this.deps.datasets.get(input.tenant, input.dataset.id, input.dataset.version || "latest")
+      : undefined;
+    const harness = input.harness
+      ? { id: input.harness.id, version: input.harness.version || "latest" }
+      : TRACE_EVAL_LABEL;
     // Record assembly is the domain's job (ScorecardBatch.newQueuedIngest) — the service only orchestrates.
     const record: ScorecardRecord = ScorecardBatch.newQueuedIngest({
       id: this.newId(),
       tenant: input.tenant,
-      dataset: { id: dataset.id, version: dataset.version },
-      harness: { id: input.harness.id, version: harnessVersion }, // the harness that produced the trace (label)
+      dataset: dataset ? { id: dataset.id, version: dataset.version } : TRACE_EVAL_LABEL,
+      harness, // the harness that produced the trace (label) — sentinel when unspecified
       ...(input.origin ? { origin: input.origin } : {}),
       ...(input.submittedBy ? { createdBy: input.submittedBy } : {}),
       now: this.now(),
@@ -75,22 +97,27 @@ export class ScorecardIngestService {
       record,
       input.tenant,
       dataset,
-      `${input.harness.id}@${harnessVersion}`,
+      `${harness.id}@${harness.version}`,
       input.traces,
       input.judges ?? [],
     );
     return record;
   }
 
-  // pull ingest — pull per-runId traces from the tenant's OTel/MLflow and create a scorecard. Resolve dataset (404 if missing) → queued → async.
+  // pull ingest — pull per-runId traces from the tenant's OTel/MLflow and create a scorecard. dataset/harness OPTIONAL
+  // (see ingest): omit both to evaluate the pulled traces directly. → queued → async.
   async ingestPull(input: PullIngestInput): Promise<ScorecardRecord> {
-    const dataset = await this.deps.datasets.get(input.tenant, input.dataset.id, input.dataset.version || "latest");
-    const harnessVersion = input.harness.version || "latest";
+    const dataset = input.dataset
+      ? await this.deps.datasets.get(input.tenant, input.dataset.id, input.dataset.version || "latest")
+      : undefined;
+    const harness = input.harness
+      ? { id: input.harness.id, version: input.harness.version || "latest" }
+      : TRACE_EVAL_LABEL;
     const record: ScorecardRecord = ScorecardBatch.newQueuedIngest({
       id: this.newId(),
       tenant: input.tenant,
-      dataset: { id: dataset.id, version: dataset.version },
-      harness: { id: input.harness.id, version: harnessVersion }, // the harness that produced the trace (label)
+      dataset: dataset ? { id: dataset.id, version: dataset.version } : TRACE_EVAL_LABEL,
+      harness, // the harness that produced the trace (label) — sentinel when unspecified
       ...(input.origin ? { origin: input.origin } : {}),
       ...(input.submittedBy ? { createdBy: input.submittedBy } : {}),
       now: this.now(),
@@ -100,8 +127,8 @@ export class ScorecardIngestService {
       record,
       input.tenant,
       dataset,
-      `${input.harness.id}@${harnessVersion}`,
-      input.harness.id,
+      `${harness.id}@${harness.version}`,
+      harness.id, // per-harness span-mapping overlay lookup key (sentinel → no overlay)
       input.source,
       input.runs,
       input.judges ?? [],
@@ -113,7 +140,7 @@ export class ScorecardIngestService {
   private async trackIngest(
     record: ScorecardRecord,
     tenant: string,
-    dataset: Dataset,
+    dataset: Dataset | undefined,
     harnessLabel: string,
     traces: IngestScorecardBody["traces"],
     judges: Array<{ id: string; version: string }>,
@@ -130,7 +157,7 @@ export class ScorecardIngestService {
   private async trackPull(
     record: ScorecardRecord,
     tenant: string,
-    dataset: Dataset,
+    dataset: Dataset | undefined,
     harnessLabel: string,
     harnessId: string,
     source: PullIngestBody["source"],
@@ -153,6 +180,9 @@ export class ScorecardIngestService {
             "Named trace sources are not configured — pass an inline source config.",
           );
         base = await this.deps.resolveTraceSourceByName(tenant, source.name); // resolves auth from the SecretStore; unknown name → 400
+        // Per-pull correlation override — the evaluate-traces flow passes the platform's real trace ids, so it forces
+        // "id" fetch even when the pooled source is registered for "tag" correlation (find-by-everdict-run_id).
+        if (source.correlate) base = { ...base, correlate: source.correlate };
       } else {
         // credential: source.authSecret name → inject the tenant SecretStore value verbatim as the Authorization header.
         // The value includes the scheme (e.g. "Bearer <token>" [OTel/Jaeger] or "Basic <base64>" [MLflow]) — don't hardcode the scheme.
@@ -212,14 +242,23 @@ export class ScorecardIngestService {
   private async finishIngest(
     id: string,
     tenant: string,
-    dataset: Dataset,
+    dataset: Dataset | undefined,
     harnessLabel: string,
     perCase: IngestScorecardBody["traces"],
     judges: Array<{ id: string; version: string }>,
     attach?: { sourceKind: string; externalIdByCase: Record<string, string> },
     submittedBy?: string, // the ingest submitter — a code/harness judge with spec.runtime self:<runnerId> needs it to own the wrapper dispatch.
   ): Promise<void> {
-    const caseById = new Map(dataset.cases.map((c) => [c.id, c]));
+    // No chosen dataset (the "evaluate traces" path) → synthesize one from the pulled traces so every trace becomes its
+    // own case and judges align to it (createJudgeStream skips caseIds not in the dataset). The sentinel id/version match
+    // the record's dataset label so display/attach stay consistent.
+    const effectiveDataset: Dataset = dataset ?? {
+      id: TRACE_EVAL_REF,
+      version: TRACE_EVAL_VERSION,
+      cases: perCase.map((up) => syntheticCase(up.caseId)),
+      tags: [],
+    };
+    const caseById = new Map(effectiveDataset.cases.map((c) => [c.id, c]));
     const results: CaseResult[] = [];
     for (const up of perCase) {
       const evalCase = caseById.get(up.caseId);
@@ -240,15 +279,15 @@ export class ScorecardIngestService {
         scores: [...derived, ...(up.scores ?? [])],
       });
     }
-    const scorecard: Scorecard = { suiteId: dataset.id, harness: harnessLabel, results };
-    await this.scoring.applyJudges(tenant, dataset, results, judges, undefined, submittedBy); // trace → judge scores (control plane)
+    const scorecard: Scorecard = { suiteId: effectiveDataset.id, harness: harnessLabel, results };
+    await this.scoring.applyJudges(tenant, effectiveDataset, results, judges, undefined, submittedBy); // trace → judge scores (control plane)
     await offloadResults(this.deps, id, results); // os-use screenshots → object storage (slim record)
     // Trace-sink export (when configured) — same place as the live batch (after scoring). pull attaches scores only to the original trace via attach.
     const exported = this.deps.exportResults
       ? await this.deps
           .exportResults(
             tenant,
-            { scorecardId: id, dataset: `${dataset.id}@${dataset.version}`, harness: harnessLabel },
+            { scorecardId: id, dataset: `${effectiveDataset.id}@${effectiveDataset.version}`, harness: harnessLabel },
             results,
             attach,
           )

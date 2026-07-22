@@ -71,8 +71,8 @@ Migrations: `packages/db/migrations/0006_create_scorecards.sql`, `0035_add_score
 |---|---|---|
 | `POST /scorecards` `{dataset, harness, judges?, runtime?, concurrency?, cases?{ids,tags,limit}}` → 202 | `run_scorecard` | `scorecards:run` (member+) |
 | `POST /scorecards/:id/cancel` → 200 (the cancelled record) | `cancel_scorecard` | `scorecards:run` (member+) |
-| `POST /scorecards/ingest` `{dataset, harness, traces[], judges?}` → 202 | `ingest_scorecard` | `scorecards:run` (member+) |
-| `POST /scorecards/ingest/pull` `{dataset, harness, source{kind,endpoint,authSecret?}, runs[], judges?}` → 202 | `pull_scorecard` | `scorecards:run` (member+) |
+| `POST /scorecards/ingest` `{dataset?, harness?, traces[], judges?}` → 202 | `ingest_scorecard` | `scorecards:run` (member+) |
+| `POST /scorecards/ingest/pull` `{dataset?, harness?, source{name\|kind,endpoint,authSecret?}, runs[], judges?}` → 202 | `pull_scorecard` | `scorecards:run` (member+) |
 | `GET /scorecards` (summary only) | `list_scorecards` | `scorecards:read` (viewer+) |
 | `GET /scorecards/:id` (full) | `get_scorecard` | `scorecards:read` |
 | `GET /scorecards/diff?baseline=&candidate=` | `diff_scorecards` | `scorecards:read` |
@@ -130,6 +130,18 @@ the same `spansToTraceEvents` seam — per-harness span variance is absorbed by 
 `finishIngest` pipeline as push (re-derive `tool_calls`/`usd`/`span`, apply judges, store). So push and pull converge
 on one scoring path; only the *acquisition* differs.
 
+**Evaluate existing traces (no dataset / no harness run).** `dataset` and `harness` are **optional** on both ingest
+paths. Omit them to score the traces *directly*: each trace becomes its own case (synthesized `EvalCase`, judges only —
+no `expected`/ground-truth alignment) and the record is stamped with the reserved sentinel `dataset`/`harness`
+(`TRACE_EVAL_REF` = `"_traces"`, `@everdict/contracts`) instead of a real registry ref. This keeps the NOT-NULL
+dataset/harness columns populated with **no migration**, and consumers detect a trace evaluation by
+`dataset.id === TRACE_EVAL_REF` — leaderboard/trend self-exclude it (they filter by a real datasetId), and the web
+renders a "Trace evaluation" badge instead of a dataset/harness deep-link. This powers the web **"Evaluate traces"**
+mode: pick a set of traces from a registered source and judge them. A named-source pull may also pass
+`source.correlate` to override the pooled source's setting — the evaluate-traces flow forces `"id"` because it already
+holds the platform's real trace ids (from `listTraces`), even when the source is normally used with `"tag"`
+(`everdict.run_id`) correlation.
+
 **Credentials never live in the request.** `source.authSecret` is the *name* of a workspace SecretStore entry; the
 control plane resolves it server-side and injects it as the **verbatim `Authorization` header** on the fetch
 (`secretsFor` + `buildTraceSource` deps). The secret value carries its own scheme — `Bearer <token>` for
@@ -159,12 +171,18 @@ All workspace-scoped (other-workspace `get` → `404`/`NOT_FOUND`), one service 
 - **Scorecards `/dashboard/scorecards`** — runs list (dataset@v → harness@v, status, per-metric summary chips).
 - **Detail `/dashboard/scorecards/[id]`** — status, meta, per-metric **stat cards** (mean + pass-rate), per-case
   scores, error.
-- **Run `/dashboard/scorecards/new`** — pick **harness × dataset × judge(s)**: dataset + harness comboboxes (with a
-  version picker each) and an optional **judge multi-select** (a combobox that appends registered Agent Judges as
-  removable chips, each at `latest`) → `runScorecardAction` → `POST /scorecards` `{dataset, harness, judges?}`. The
-  selected judges score each case's trace, so the detail page's per-metric stat cards gain a `judge:<id>` metric (mean +
-  pass-rate) alongside the dataset's own graders. No judges picked = the dataset's graders only. Role-gated off `/me`
-  (`scorecards:run` = member+).
+- **Create `/dashboard/scorecards/new`** (`widgets/scorecard-create`) — one entry, a **mode switch** for the two ways
+  to make a scorecard (judging is common; only where the traces come from differs):
+  - **Run harness** — pick **harness × dataset × judge(s)**: dataset + harness comboboxes (with a version picker each)
+    and an optional **judge multi-select** (a combobox that appends registered Agent Judges as removable chips, each at
+    `latest`) → `runScorecardAction` → `POST /scorecards` `{dataset, harness, judges?}`. The selected judges score each
+    case's trace, so the detail page's per-metric stat cards gain a `judge:<id>` metric (mean + pass-rate) alongside the
+    dataset's own graders. No judges picked = the dataset's graders only.
+  - **Evaluate traces** — no dataset, no harness run: pick a registered observability trace source, filter by a time
+    window (`Any`/`24h`/`Yesterday`/`7d`/`30d` → `since`/`until`), **multi-select** the traces to evaluate (the shared
+    `TraceBrowser` in selection mode), and pick judges → `evaluateTracesAction` → `POST /scorecards/ingest/pull` with
+    `dataset`/`harness` omitted (the trace-eval sentinel) and `source:{name, correlate:"id"}`.
+  Role-gated off `/me` (`scorecards:run` = member+).
 - **Compare `/dashboard/scorecards/compare?baseline=&candidate=`** — pick two succeeded scorecards → per-metric
   mean Δ table + **regressions (pass→fail) / improvements (fail→pass)** via `diffScorecards`. This is the
   baseline-vs-candidate payoff. `scorecards:read`.

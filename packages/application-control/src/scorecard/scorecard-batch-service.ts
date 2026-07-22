@@ -854,13 +854,31 @@ export class ScorecardBatchService {
   }
 
   // Reflect the case results finalized by batch judge/offload into each child run (since we don't store the embed, get's hydration source must be current).
-  // Update each result onto its run via the caseId → childId mapping.
-  private async writeBackResults(caseToChild: Map<string, string>, results: CaseResult[]): Promise<void> {
+  // Update each result onto its run via the caseId → childId mapping. This is the authoritative final write, so it also
+  // seals the replay recording teed under each child's runId and attaches the ref (best-effort). docs/architecture/replay.md.
+  private async writeBackResults(
+    scorecardId: string,
+    caseToChild: Map<string, string>,
+    results: CaseResult[],
+  ): Promise<void> {
     const store = this.deps.runStore;
     if (!store) return;
     for (const r of results) {
       const childId = caseToChild.get(childKey(r.caseId, r.trial));
-      if (childId) await store.update(childId, { result: r, updatedAt: this.now() });
+      if (!childId) continue;
+      if (this.deps.recordingStore) {
+        try {
+          // runId parity with dispatch (baseJob.runId = evd-<scorecardId>-<caseId>; RunService.runIdFor for a child).
+          // envKind = the observation kind. Empty recording → seal returns undefined → no ref attached.
+          const ref = await this.deps.recordingStore.seal(`evd-${scorecardId}-${r.caseId}`, {
+            envKind: r.snapshot.kind,
+          });
+          if (ref) r.recordingRef = ref;
+        } catch {
+          // best-effort — a recording failure never affects the scorecard
+        }
+      }
+      await store.update(childId, { result: r, updatedAt: this.now() });
     }
   }
 
@@ -1221,7 +1239,7 @@ export class ScorecardBatchService {
           "Replaced by a newer fire of the same PR — remaining cases not fired, only partial results kept",
         );
         const hasChildren = caseToChild.size > 0 || seedRunIds.length > 0;
-        if (hasChildren) await this.writeBackResults(caseToChild, scorecard.results);
+        if (hasChildren) await this.writeBackResults(id, caseToChild, scorecard.results);
         // The record was already marked superseded by supersedeInFlight — settle it with the partial outcome
         // (a legal re-write of a superseded record; the domain rejects it over succeeded/failed).
         const reclaimed = await this.deps.store.get(id);
@@ -1278,7 +1296,7 @@ export class ScorecardBatchService {
       // If there are child runs: write back the judge/offload-finalized results to the children, then store only runIds instead of the heavy embed
       //  → get hydrates from the children (storage dedup, response shape unchanged). Without children (no runStore), embed as before.
       const hasChildren = caseToChild.size > 0 || seedRunIds.length > 0;
-      if (hasChildren) await this.writeBackResults(caseToChild, scorecard.results);
+      if (hasChildren) await this.writeBackResults(id, caseToChild, scorecard.results);
       const extras: ScorecardOutcomeExtras = {
         summary,
         models,
@@ -1311,7 +1329,7 @@ export class ScorecardBatchService {
       // Preserve partial results — on a post-dispatch (judge/offload) failure, persist the case results already gathered for visibility.
       // With child runs, mirror the success path: runIds references (partial) instead of embed + write back results to the children.
       const hasChildren = caseToChild.size > 0 || seedRunIds.length > 0;
-      if (scorecard && hasChildren) await this.writeBackResults(caseToChild, scorecard.results);
+      if (scorecard && hasChildren) await this.writeBackResults(id, caseToChild, scorecard.results);
       const declared = modelBindingLabel(harnessSpec?.kind === "command" ? harnessSpec.model : undefined);
       const extras: ScorecardOutcomeExtras = {
         steps: [...steps],

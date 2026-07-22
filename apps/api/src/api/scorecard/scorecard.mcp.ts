@@ -367,7 +367,7 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
       "ingest_scorecard",
       {
         description:
-          "Upload externally produced traces (TraceEvent[]) into a scorecard (harness not run). body=IngestScorecard JSON {dataset,harness,traces:[{caseId,trace}],judges?}",
+          "Upload externally produced traces (TraceEvent[]) into a scorecard (harness not run). dataset/harness are OPTIONAL labels — omit both to evaluate the uploaded traces directly (each trace = one case, judges only). body=IngestScorecard JSON {dataset?,harness?,traces:[{caseId,trace}],judges?}",
         inputSchema: { body: z.string().describe("IngestScorecard JSON") },
       },
       ({ body }) =>
@@ -388,7 +388,7 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
       "pull_scorecard",
       {
         description:
-          "Pull per-runId traces from the tenant's observability platform (otel|mlflow|langfuse|langsmith|phoenix) into a scorecard (harness not run). source is EITHER a registered workspace source by name {name} (register once in Settings › Observability, then pull by name) OR an inline config {kind,endpoint,authSecret?,project?[required for phoenix]}. body=PullIngest JSON {dataset,harness,source,runs:[{caseId,runId}],judges?}",
+          "Pull per-runId traces from the tenant's observability platform (otel|mlflow|langfuse|langsmith|phoenix) into a scorecard (harness not run). dataset/harness are OPTIONAL labels — omit both to evaluate the pulled traces directly (each trace = one case, judges only). source is EITHER a registered workspace source by name {name} (register once in Settings › Observability, then pull by name) OR an inline config {kind,endpoint,authSecret?,project?[required for phoenix]}. body=PullIngest JSON {dataset?,harness?,source,runs:[{caseId,runId}],judges?}",
         inputSchema: { body: z.string().describe("PullIngest JSON") },
       },
       ({ body }) =>

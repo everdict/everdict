@@ -10,10 +10,11 @@ import {
   NotFoundError,
   type RunRecord,
   type Scorecard,
+  TRACE_EVAL_REF,
   type TraceEvent,
   UpstreamError,
 } from "@everdict/contracts";
-import { InMemoryRunStore, InMemoryScorecardStore, type ScorecardRecord } from "@everdict/db";
+import { InMemoryRecordingStore, InMemoryRunStore, InMemoryScorecardStore, type ScorecardRecord } from "@everdict/db";
 import { CircuitBreaker, type Principal, inMemoryUsageMeter } from "@everdict/domain";
 import { costGrader, latencyGrader, stepsGrader } from "@everdict/graders";
 import {
@@ -28,7 +29,7 @@ import { describe, expect, it } from "vitest";
 // Trace-only grader factory injected into the ingest path (re-architecture P2 S4) — the application layer never
 // imports @everdict/graders, so the composition side supplies the steps/cost/latency graders the ingest re-derives.
 const defaultTraceGraders = () => [stepsGrader, costGrader, latencyGrader];
-import type { CaseExportStream } from "@everdict/application-control";
+import type { CaseExportStream, JudgeRunner } from "@everdict/application-control";
 import { ScorecardService } from "@everdict/application-control";
 
 const dispatcher: Dispatcher = {
@@ -674,6 +675,39 @@ describe("ScorecardService.ingestPull", () => {
     expect(captured?.headers?.authorization).toBe("Basic xyz"); // resolved from the registered pool
   });
 
+  it("a named-source pull can override correlation to 'id' (evaluate-traces holds the platform's real trace ids)", async () => {
+    // The registered source is normally used with "tag" correlation (find-by-everdict-run_id). The evaluate-traces flow
+    // already has the platform's real trace ids from listTraces, so it must fetch by id — the per-pull override wins.
+    const store = new InMemoryScorecardStore();
+    let captured: TraceSourceConfig | undefined;
+    const service = new ScorecardService({
+      dispatcher,
+      store,
+      datasets: new InMemoryDatasetRegistry(),
+      defaultTraceGraders,
+      buildTraceSource: (cfg): TraceSource => {
+        captured = cfg;
+        return { fetch: async () => [{ t: 0, kind: "llm_call", model: "m" }] };
+      },
+      resolveTraceSourceByName: async () => ({
+        kind: "mlflow",
+        endpoint: "https://mlflow.prod",
+        headers: { authorization: "Basic z" },
+        project: "7",
+        correlate: "tag", // the pooled setting …
+      }),
+    });
+    const created = await service.ingestPull({
+      tenant: "acme",
+      // no dataset/harness (evaluate traces) + override the pooled "tag" correlation to "id"
+      source: { name: "prod-mlflow", correlate: "id" },
+      runs: [{ caseId: "trace-1", runId: "trace-1" }],
+      judges: [],
+    });
+    await waitTerminal(store, created.id);
+    expect(captured?.correlate).toBe("id"); // … the per-pull override wins
+  });
+
   it("applies the per-harness conversion overlay (spanMappingFor) to the pull-eval trace source", async () => {
     const store = new InMemoryScorecardStore();
     const datasets = new InMemoryDatasetRegistry();
@@ -793,6 +827,88 @@ describe("ScorecardService.ingestPull", () => {
         judges: [],
       }),
     ).rejects.toBeInstanceOf(NotFoundError);
+  });
+
+  it("no dataset/harness → each pulled trace becomes its own case and judges score it directly (TRACE_EVAL_REF sentinel)", async () => {
+    // The "evaluate existing traces" path: pick traces from a trace source + run judges, with NO dataset and NO harness
+    // run. Pre-fix, dataset was required — omitting it 404'd, and even a synthetic scorecard would have judged nothing
+    // (createJudgeStream skips caseIds absent from the dataset). Post-fix, every pulled trace becomes a synthetic case
+    // so the judges align to it.
+    const store = new InMemoryScorecardStore();
+    const datasets = new InMemoryDatasetRegistry(); // empty — no dataset registered, and none is referenced
+    const judges = new InMemoryJudgeRegistry();
+    await judges.register("acme", {
+      kind: "model",
+      id: "quality",
+      version: "1.0.0",
+      provider: "anthropic",
+      model: "claude-opus-4-8",
+      rubric: "good?",
+      inputs: ["trace"],
+      tags: [],
+    });
+    // A fake judge runner that scores each case — proves the judges see the synthesized cases (alignment).
+    const judgeRunner: JudgeRunner = {
+      run: async (spec, _tenant, ctx) => [
+        { graderId: `judge:${spec.id}`, metric: `judge:${spec.id}`, value: 1, pass: true, detail: ctx.case.id },
+      ],
+    };
+    const service = new ScorecardService({
+      dispatcher,
+      store,
+      datasets,
+      defaultTraceGraders,
+      judges,
+      judgeRunner,
+      buildTraceSource: (): TraceSource => ({
+        fetch: async () => [{ t: 0, kind: "tool_call", id: "t1", name: "bash", args: {} }],
+      }),
+    });
+    const created = await service.ingestPull({
+      tenant: "acme",
+      // dataset + harness deliberately OMITTED — evaluate the pulled traces directly
+      source: { kind: "otel", endpoint: "http://jaeger:16686" },
+      runs: [
+        { caseId: "trace-1", runId: "trace-1" },
+        { caseId: "trace-2", runId: "trace-2" },
+      ],
+      judges: [{ id: "quality", version: "latest" }],
+    });
+    // The record carries the reserved sentinel for both NOT-NULL refs (a trace-evaluation, detectable by consumers).
+    expect(created.dataset).toEqual({ id: TRACE_EVAL_REF, version: "external" });
+    expect(created.harness).toEqual({ id: TRACE_EVAL_REF, version: "external" });
+
+    const done = await waitTerminal(store, created.id);
+    expect(done.status).toBe("succeeded");
+    // Every pulled trace became a case — nothing was skipped for want of a dataset.
+    expect(done.scorecard?.results.map((r) => r.caseId).sort()).toEqual(["trace-1", "trace-2"]);
+    // The selected judge scored each synthetic case (the createJudgeStream alignment works via the synthesized dataset).
+    for (const r of done.scorecard?.results ?? []) {
+      expect(r.scores.some((s) => s.metric === "judge:quality" && s.pass === true)).toBe(true);
+    }
+  });
+
+  it("push ingest with no dataset/harness → uploaded traces become cases under the TRACE_EVAL_REF sentinel", async () => {
+    const store = new InMemoryScorecardStore();
+    const service = new ScorecardService({
+      dispatcher,
+      store,
+      datasets: new InMemoryDatasetRegistry(),
+      defaultTraceGraders,
+    });
+    const created = await service.ingest({
+      tenant: "acme",
+      // dataset + harness omitted
+      traces: [
+        { caseId: "a", trace: [{ t: 0, kind: "tool_call", id: "t1", name: "bash", args: {} }] },
+        { caseId: "b", trace: [{ t: 0, kind: "llm_call", model: "m" }] },
+      ],
+      judges: [],
+    });
+    expect(created.dataset).toEqual({ id: TRACE_EVAL_REF, version: "external" });
+    const done = await waitTerminal(store, created.id);
+    expect(done.status).toBe("succeeded");
+    expect(done.scorecard?.results.map((r) => r.caseId).sort()).toEqual(["a", "b"]);
   });
 
   it("buildTraceSource unset → the run ends failed (BAD_REQUEST)", async () => {
@@ -1331,6 +1447,36 @@ describe("ScorecardService.submit — child-run fan-out (runStore)", () => {
     // The activity list (default) hides children, but by scorecardId those batch children are visible.
     expect(await runStore.list("acme")).toEqual([]);
     expect((await runStore.list("acme", { scorecardId: "sc-0" })).map((r) => r.id)).toEqual(["sc-1"]);
+  });
+
+  it("seals the replay recording teed under each child's runId and attaches the ref on write-back", async () => {
+    const datasets = new InMemoryDatasetRegistry();
+    await datasets.register("acme", datasetWithCase());
+    const store = new InMemoryScorecardStore();
+    const runStore = new InMemoryRunStore();
+    const recordingStore = new InMemoryRecordingStore();
+    // A frame teed under the child's derived runId (evd-<scorecardId>-<caseId>) while the case ran.
+    await recordingStore.append("evd-sc-0-c1", { track: "frames", entry: { t: 1, ref: "memory://f" } });
+    let n = 0;
+    const service = new ScorecardService({
+      dispatcher: okDispatch,
+      store,
+      runStore,
+      recordingStore,
+      datasets,
+      newId: () => `sc-${n++}`, // sc-0 = scorecard, sc-1 = child run of case c1
+    });
+    await service.submit({
+      tenant: "acme",
+      dataset: { id: "d", version: "1.0.0" },
+      harness: { id: "scripted", version: "0" },
+    });
+    await waitTerminal(store, "sc-0");
+
+    // The child run's final result carries the sealed recording ref; the recording is retrievable.
+    const child = await runStore.get("sc-1");
+    expect(child?.result?.recordingRef?.ref).toBe("memory://recording/evd-sc-0-c1");
+    expect((await recordingStore.get("evd-sc-0-c1"))?.tracks.frames).toHaveLength(1);
   });
 
   it("diff hydrates dedup (runIds) scorecards too and computes regression/improvement", async () => {

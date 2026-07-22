@@ -2,16 +2,16 @@ import Link from 'next/link'
 import { ChevronLeft } from 'lucide-react'
 import { getTranslations } from 'next-intl/server'
 
-import { RunScorecardForm } from '@/features/run-scorecard'
+import { ScorecardCreate } from '@/widgets/scorecard-create'
 import { datasetsSchema } from '@/entities/dataset'
 import { harnessesSchema } from '@/entities/harness'
 import { judgesSchema } from '@/entities/judge'
 import { runnersResponseSchema } from '@/entities/runner'
 import { runtimesSchema } from '@/entities/runtime'
+import { traceSourcesResponseSchema, type TraceSourceConfig } from '@/entities/trace-source'
 import { can } from '@/shared/auth/can'
 import { currentPrincipal } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
-import { Card } from '@/shared/ui/card'
 import { EmptyState } from '@/shared/ui/empty-state'
 import { PageHeader } from '@/shared/ui/page-header'
 
@@ -38,6 +38,7 @@ export default async function NewScorecardPage({
   let runtimes: { id: string; capabilities?: string[] }[] = []
   let runners: { id: string; label: string }[] = []
   let hasWorkspaceRunners = false
+  let traceSources: TraceSourceConfig[] = []
   if (allowed) {
     try {
       datasets = datasetsSchema.parse(await controlPlane.listDatasets(ctx))
@@ -70,6 +71,14 @@ export default async function NewScorecardPage({
     } catch {
       // Even if the roster fails, the form still works (only the pool option is hidden)
     }
+    // Registered observability trace sources — the "evaluate existing traces" mode pulls a chosen set from one. Not shown if it fails/is empty.
+    try {
+      traceSources = traceSourcesResponseSchema.parse(
+        await controlPlane.listTraceSources(ctx)
+      ).sources
+    } catch {
+      // Even if the list fails, the run mode still works (the trace-eval tab just shows "register a source first")
+    }
   }
 
   return (
@@ -83,16 +92,15 @@ export default async function NewScorecardPage({
       </Link>
       <PageHeader title={t('run')} description={t('runDescription')} />
       {allowed ? (
-        <Card className="p-5">
-          <RunScorecardForm
-            datasets={datasets}
-            harnesses={harnesses}
-            judges={judges}
-            runtimes={runtimes}
-            runners={runners}
-            hasWorkspaceRunners={hasWorkspaceRunners}
-          />
-        </Card>
+        <ScorecardCreate
+          datasets={datasets}
+          harnesses={harnesses}
+          judges={judges}
+          runtimes={runtimes}
+          runners={runners}
+          hasWorkspaceRunners={hasWorkspaceRunners}
+          traceSources={traceSources}
+        />
       ) : (
         <EmptyState title={t('noRunPermTitle')} hint={t('noPermHint')} />
       )}

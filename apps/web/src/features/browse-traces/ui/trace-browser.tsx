@@ -1,7 +1,15 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from 'react'
-import { CheckCircle2, CircleSlash, RefreshCw, Search, Telescope, XCircle } from 'lucide-react'
+import {
+  Check,
+  CheckCircle2,
+  CircleSlash,
+  RefreshCw,
+  Search,
+  Telescope,
+  XCircle,
+} from 'lucide-react'
 import { useLocale, useTimeZone, useTranslations } from 'next-intl'
 
 import type { TraceSummary } from '@/entities/trace'
@@ -53,16 +61,49 @@ function TraceStatusIcon({ status }: { status: TraceStatus }) {
   )
 }
 
+// Named time windows for the list, computed client-side into an ISO-8601 {since?, until?} passed to listTraces. "any"
+// omits both; the rolling windows set only `since` (open-ended to now); "yesterday" is BOUNDED (both since + until).
+// Best-effort — a platform without time filtering falls back to "recent N" (the contract documents this).
+type TimePreset = 'any' | '24h' | 'yesterday' | '7d' | '30d'
+const TIME_PRESETS: TimePreset[] = ['any', '24h', 'yesterday', '7d', '30d']
+const PRESET_HOURS: Record<'24h' | '7d' | '30d', number> = {
+  '24h': 24,
+  '7d': 24 * 7,
+  '30d': 24 * 30,
+}
+function windowFor(preset: TimePreset): { since?: string; until?: string } {
+  if (preset === 'any') return {}
+  const now = Date.now()
+  if (preset === 'yesterday') {
+    // [start of yesterday, start of today) in the local day — a bounded window (this is what the `until` bound is for).
+    const startToday = new Date(now)
+    startToday.setHours(0, 0, 0, 0)
+    const startYesterday = new Date(startToday.getTime() - 24 * 3600_000)
+    return { since: startYesterday.toISOString(), until: startToday.toISOString() }
+  }
+  return { since: new Date(now - PRESET_HOURS[preset] * 3600_000).toISOString() }
+}
+
+// A caller-provided multi-select controller — when set, rows become selectable (checkbox + toggle-on-click) instead of
+// opening the inspect dialog. Powers the "evaluate existing traces" scorecard flow (pick a set of traces to judge).
+export interface TraceSelection {
+  selected: Set<string>
+  onToggle: (trace: TraceSummary, sourceName: string) => void
+}
+
 // The workspace observability trace browser — pick a registered source, list its recent traces + metrics, drill into one.
-// Reused by the judge wizard (pass onPick to select a sample trace instead of expanding an inline detail).
+// Reused by the judge wizard (pass onPick to select a sample trace) and the scorecard "evaluate traces" flow (pass
+// selection to multi-select a set to judge).
 export function TraceBrowser({
   sources,
   onPick,
   selectedTraceId,
+  selection,
 }: {
   sources: TraceSourceConfig[]
   onPick?: (trace: TraceSummary, sourceName: string) => void
   selectedTraceId?: string
+  selection?: TraceSelection
 }) {
   const t = useTranslations('traceBrowser')
   const locale = useLocale()
@@ -72,6 +113,7 @@ export function TraceBrowser({
   const [scope, setScope] = useState('')
   const [filter, setFilter] = useState('')
   const [status, setStatus] = useState<StatusFilter>('all')
+  const [timePreset, setTimePreset] = useState<TimePreset>('any')
   const [traces, setTraces] = useState<TraceSummary[]>([])
   const [error, setError] = useState<string | undefined>()
   const [loaded, setLoaded] = useState(false)
@@ -81,14 +123,17 @@ export function TraceBrowser({
   const loadedSource = useRef<string | undefined>(undefined)
 
   const load = useCallback(
-    (name: string, scopeValue: string, limitValue: number) => {
+    (name: string, scopeValue: string, limitValue: number, preset: TimePreset) => {
       if (!name) return
+      const win = windowFor(preset)
       start(async () => {
         setError(undefined)
         setOpenTrace(undefined)
         const res = await listTracesAction(name, {
           ...(scopeValue ? { scope: scopeValue } : {}),
           limit: limitValue,
+          ...(win.since ? { since: win.since } : {}),
+          ...(win.until ? { until: win.until } : {}),
         })
         if (res.ok) {
           setTraces(res.traces)
@@ -113,8 +158,8 @@ export function TraceBrowser({
     const defaultScope = source.project ?? source.service ?? ''
     setScope(defaultScope)
     setLimit(PAGE_SIZE)
-    load(source.name, defaultScope, PAGE_SIZE)
-  }, [source, load])
+    load(source.name, defaultScope, PAGE_SIZE, timePreset)
+  }, [source, load, timePreset])
 
   // The page can mount with zero sources (initial state '') — adopt the first source registered while mounted so the
   // browser doesn't sit on an empty pick after "Add source".
@@ -126,7 +171,7 @@ export function TraceBrowser({
   const loadMore = () => {
     const next = Math.min(limit + PAGE_SIZE, MAX_LIMIT)
     setLimit(next)
-    load(sourceName, scope, next)
+    load(sourceName, scope, next, timePreset)
   }
 
   // Filter → recent-first order → date groups (header = today/yesterday/date, rows show time only; undated rows
@@ -163,9 +208,13 @@ export function TraceBrowser({
     )
   }
 
-  // Row click always drills into the detail dialog — in pick mode (onPick set) the dialog carries a
-  // "Use this trace" action, so choosing = inspect first, then confirm (with prev/next to compare siblings).
-  const rowClick = (tr: TraceSummary) => setOpenTrace(tr)
+  // Row click: in selection mode (multi-select for "evaluate traces") it toggles membership; otherwise it drills into
+  // the detail dialog — in pick mode (onPick set) the dialog carries a "Use this trace" action, so choosing = inspect
+  // first, then confirm (with prev/next to compare siblings).
+  const rowClick = (tr: TraceSummary) => {
+    if (selection) selection.onToggle(tr, sourceName)
+    else setOpenTrace(tr)
+  }
   const openIndex = openTrace ? flat.findIndex((tr) => tr.id === openTrace.id) : -1
 
   const statusOptions: { value: StatusFilter; label: string }[] = [
@@ -198,10 +247,23 @@ export function TraceBrowser({
         <Input
           value={scope}
           onChange={(e) => setScope(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && load(sourceName, scope, limit)}
+          onKeyDown={(e) => e.key === 'Enter' && load(sourceName, scope, limit, timePreset)}
           placeholder={t('scopePlaceholder')}
           className="w-[180px]"
           aria-label={t('scopeLabel')}
+        />
+        {/* Time window (since lower bound) — recompute + reload on change. */}
+        <Combobox
+          options={TIME_PRESETS.map((p) => ({ value: p, label: t(`time_${p}`) }))}
+          value={timePreset}
+          onChange={(v) => {
+            const preset = (TIME_PRESETS as string[]).includes(v) ? (v as TimePreset) : 'any'
+            setTimePreset(preset)
+            load(sourceName, scope, limit, preset)
+          }}
+          searchable={false}
+          className="w-[120px]"
+          aria-label={t('timeLabel')}
         />
         <Combobox
           options={statusOptions.map((s) => ({ value: s.value, label: s.label }))}
@@ -214,7 +276,7 @@ export function TraceBrowser({
         <Button
           variant="secondary"
           size="md"
-          onClick={() => load(sourceName, scope, limit)}
+          onClick={() => load(sourceName, scope, limit, timePreset)}
           disabled={pending}
         >
           <RefreshCw className={cn('size-4', pending && 'animate-spin')} />
@@ -251,9 +313,12 @@ export function TraceBrowser({
                 </h4>
               )}
               {items.map((tr, i) => {
-                const isPicked = selectedTraceId === tr.id || openTrace?.id === tr.id
+                const isPicked = selection
+                  ? selection.selected.has(tr.id)
+                  : selectedTraceId === tr.id || openTrace?.id === tr.id
                 return (
                   // Fixed-format card row — left ① name+model ② mono id·span count, right metric slots + status icon.
+                  // In selection mode a leading checkbox reflects membership (the whole row toggles it).
                   <button
                     key={tr.id}
                     type="button"
@@ -261,9 +326,24 @@ export function TraceBrowser({
                     style={{ animationDelay: `${Math.min(i, 12) * 28}ms` }}
                     className={cn(
                       'rise flex w-full items-center gap-3 rounded-lg border bg-card px-3.5 py-2.5 text-left shadow-raise transition-colors hover:border-border-strong hover:bg-elevated',
-                      isPicked && 'border-border-strong bg-elevated'
+                      isPicked &&
+                        (selection
+                          ? 'border-primary/50 bg-primary/[0.05]'
+                          : 'border-border-strong bg-elevated')
                     )}
                   >
+                    {selection && (
+                      <span
+                        className={cn(
+                          'grid size-[18px] shrink-0 place-items-center rounded border transition-colors',
+                          isPicked
+                            ? 'border-primary bg-primary text-primary-foreground'
+                            : 'border-border-strong bg-card'
+                        )}
+                      >
+                        {isPicked && <Check className="size-3" strokeWidth={3} />}
+                      </span>
+                    )}
                     <div className="min-w-0 flex-1 space-y-1">
                       <div className="flex items-center gap-1.5 overflow-hidden whitespace-nowrap text-[13px] font-[510]">
                         <span className="truncate">{tr.name ?? t('unnamedTrace')}</span>

@@ -12,6 +12,7 @@ import { runsSchema, type RunStatus } from '@/entities/run'
 import { runnersResponseSchema, type RunnerMeta } from '@/entities/runner'
 import { runtimesSchema } from '@/entities/runtime'
 import {
+  isTraceEvaluation,
   scorecardRecordSchema,
   type MetricSummary,
   type ScorecardRecord,
@@ -393,7 +394,11 @@ export default async function ScorecardDetailPage({
         <BackLink workspace={workspace} label={t('backToList')} />
         <PageHeader
           title={<span className="font-mono">scorecard {record.id.slice(0, 8)}</span>}
-          description={`${record.dataset.id}@${record.dataset.version} → ${record.harness.id}@${record.harness.version}`}
+          description={
+            isTraceEvaluation(record)
+              ? t('traceEvaluation')
+              : `${record.dataset.id}@${record.dataset.version} → ${record.harness.id}@${record.harness.version}`
+          }
           actions={
             <div className="flex items-center gap-2">
               {/* Stop is offered only while the batch is live and the viewer can run scorecards. */}
@@ -537,21 +542,31 @@ export default async function ScorecardDetailPage({
       )}
 
       <Card className="grid grid-cols-2 gap-4 p-4 sm:grid-cols-4">
-        {/* dataset · harness · judge are real entities — shown as their chip (icon + id@version), linking to the entity detail. */}
-        <MetaItem label="dataset">
-          <EntityMetaLink
-            href={`/${workspace}/datasets/${encodeURIComponent(record.dataset.id)}?version=${encodeURIComponent(record.dataset.version)}`}
-          >
-            <EntityRef id={record.dataset.id} version={record.dataset.version} kind="dataset" />
-          </EntityMetaLink>
-        </MetaItem>
-        <MetaItem label="harness">
-          <EntityMetaLink
-            href={`/${workspace}/harnesses/${encodeURIComponent(record.harness.id)}?v=${encodeURIComponent(record.harness.version)}`}
-          >
-            <EntityRef id={record.harness.id} version={record.harness.version} kind="harness" />
-          </EntityMetaLink>
-        </MetaItem>
+        {/* dataset · harness · judge are real entities — shown as their chip (icon + id@version), linking to the entity
+            detail. A trace evaluation (no dataset / no harness run) carries the reserved sentinel for both, so show a
+            single "Trace evaluation" label instead of two deep-links that would 404. */}
+        {isTraceEvaluation(record) ? (
+          <MetaItem label={t('sourceMeta')}>
+            <span className="text-[13px] font-[510]">{t('traceEvaluation')}</span>
+          </MetaItem>
+        ) : (
+          <>
+            <MetaItem label="dataset">
+              <EntityMetaLink
+                href={`/${workspace}/datasets/${encodeURIComponent(record.dataset.id)}?version=${encodeURIComponent(record.dataset.version)}`}
+              >
+                <EntityRef id={record.dataset.id} version={record.dataset.version} kind="dataset" />
+              </EntityMetaLink>
+            </MetaItem>
+            <MetaItem label="harness">
+              <EntityMetaLink
+                href={`/${workspace}/harnesses/${encodeURIComponent(record.harness.id)}?v=${encodeURIComponent(record.harness.version)}`}
+              >
+                <EntityRef id={record.harness.id} version={record.harness.version} kind="harness" />
+              </EntityMetaLink>
+            </MetaItem>
+          </>
+        )}
         {/* The Agent Judge(s) that scored this batch — each links to its detail page (detail resolves the latest version). */}
         {judges.length > 0 && (
           <MetaItem label="judge">

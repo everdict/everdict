@@ -204,6 +204,11 @@ export class OtelTraceSource implements BrowsableTraceSource {
     }
     const f = this.opts.fetchImpl ?? fetch;
     const qs = new URLSearchParams({ service: scope, limit: String(opts?.limit ?? 50) });
+    // Jaeger query API takes the time window as start/end in MICROSECONDS since epoch (ignored if the value is unparseable).
+    const since = opts?.since ? Date.parse(opts.since) : Number.NaN;
+    const until = opts?.until ? Date.parse(opts.until) : Number.NaN;
+    if (!Number.isNaN(since)) qs.set("start", String(since * 1000));
+    if (!Number.isNaN(until)) qs.set("end", String(until * 1000));
     const res = await f(`${base}/api/traces?${qs.toString()}`, {
       ...(this.opts.headers ? { headers: this.opts.headers } : {}),
     });

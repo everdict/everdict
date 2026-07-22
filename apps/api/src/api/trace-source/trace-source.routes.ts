@@ -137,7 +137,8 @@ export function registerTraceSourceRoutes(app: FastifyInstance, deps: ServerDeps
       .object({
         scope: z.string().min(1).optional(),
         limit: z.coerce.number().int().positive().max(500).optional(),
-        since: z.string().min(1).optional(),
+        since: z.string().min(1).optional(), // ISO-8601 lower time bound (best-effort)
+        until: z.string().min(1).optional(), // ISO-8601 upper time bound (best-effort — bounded window with since)
       })
       .safeParse(req.query ?? {});
     if (!query.success)

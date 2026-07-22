@@ -2417,7 +2417,9 @@
     "runHistoryTitle": "Run history",
     "regressed": "Regressed",
     "sparklineLabel": "score trend",
-    "metaWorkflow": "Workflow"
+    "metaWorkflow": "Workflow",
+    "traceEvaluation": "Trace evaluation",
+    "sourceMeta": "source"
   },
   "scorecardSummary": {
     "statTotal": "Total runs",
@@ -2540,7 +2542,13 @@
     "noTracesScopeHint": "No traces in this scope — check the experiment/service name is correct.",
     "useThisTrace": "Use this trace",
     "prevTrace": "Previous trace",
-    "nextTrace": "Next trace"
+    "nextTrace": "Next trace",
+    "time_any": "Any time",
+    "time_24h": "Last 24h",
+    "time_yesterday": "Yesterday",
+    "time_7d": "Last 7 days",
+    "time_30d": "Last 30 days",
+    "timeLabel": "Time window"
   },
   "settingsPage": {
     "title": "Workspace settings",
@@ -2905,5 +2913,28 @@
     "imeHint": "Composed input (Korean, Japanese, …) is sent the moment the composition commits.",
     "keyboardAttached": "Keyboard attached",
     "keyboardDetached": "Click the screen to attach the keyboard"
+  },
+  "scorecardCreate": {
+    "modeRun": "Run harness",
+    "modeTraces": "Evaluate traces",
+    "runDescription": "Run a harness against a dataset to produce traces, then score them.",
+    "tracesDescription": "Score traces you already have in observability — pick a set and run judges, with no dataset and no harness run."
+  },
+  "evaluateTraces": {
+    "noSource": "Pick a trace source.",
+    "noTraces": "Select at least one trace.",
+    "submitError": "Couldn't start the evaluation",
+    "noSourcesTitle": "No trace sources",
+    "noSourcesHint": "Register an observability trace source in Settings › Observability first, then pick traces to evaluate.",
+    "judgesLabel": "Judges (optional)",
+    "judgesTip": "Model/harness judges that score each selected trace. Picks aggregate as judge metrics (mean + pass-rate).",
+    "judgesPlaceholder": "Add a judge",
+    "judgesEmpty": "No judges registered",
+    "judgesRemove": "Remove {id}",
+    "judgesHelp": "Selected judges score each trace and add judge metrics on the scorecard.",
+    "selectedCount": "{count, plural, one {# trace selected} other {# traces selected}}",
+    "selectHint": "Pick traces above to evaluate.",
+    "submitting": "Starting…",
+    "submit": "Evaluate traces"
   }
 }
