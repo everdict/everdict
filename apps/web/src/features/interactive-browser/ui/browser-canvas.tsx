@@ -369,6 +369,10 @@ export function BrowserCanvas({ sessionId }: { sessionId: string }) {
             <canvas
               ref={canvasRef}
               onMouseDown={(e) => {
+                // A real mousedown's default action moves focus to the click target AFTER handlers run — the
+                // canvas isn't focusable, so the browser would blur the keyboard proxy we just focused and every
+                // keystroke dies locally. Synthetic-event tests skip default actions, so only real users hit this.
+                e.preventDefault()
                 const p = toCdp(e)
                 send({
                   kind: 'mouse',
