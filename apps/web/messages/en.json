@@ -2112,6 +2112,7 @@
     "liveLogs": "Live logs",
     "liveTrace": "This harness is configured to report its trace to {kind} — find it there by everdict.run_id:",
     "sandbox": "Sandbox terminal",
+    "replay": "Replay",
     "metaRuntime": "Runtime",
     "metaSource": "Origin",
     "metaRunBy": "Run by",
@@ -2853,7 +2854,8 @@
     "play": "Play",
     "pause": "Pause",
     "frameAlt": "Recorded frame",
-    "frameOf": "Frame {i}/{n}"
+    "frameOf": "Frame {i}/{n}",
+    "logsOnly": "This recording has logs only — no screen frames."
   },
   "sandboxTerminal": {
     "hint": "Run a command inside the live sandbox (ls · cat · ps · env …)",

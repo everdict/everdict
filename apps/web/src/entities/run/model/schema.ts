@@ -50,6 +50,9 @@ export const resultSchema = z
       .passthrough()
       .optional(),
     harness: z.string().optional(),
+    // Replay recording pointer — set at finalize when a run was recorded. Drives the "replay available" affordance
+    // (a header badge + the Replay section on the run detail). docs/architecture/replay.md.
+    recordingRef: z.object({ ref: z.string() }).optional(),
   })
   .partial()
 

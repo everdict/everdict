@@ -10,9 +10,10 @@ import { SectionHeader } from '@/shared/ui/section-header'
 
 const TERMINAL = new Set(['succeeded', 'failed', 'superseded', 'cancelled'])
 
-// 리플레이 플레이어 — 종료된 run의 봉인된 녹화를 한 번 불러와, 환경 프레임을 스크럽/재생하고 그 시점까지의 로그를
-// 함께 보여준다. 라이브 화면(LiveScreen)의 <img> 렌더를 재사용하되 데이터 출처만 라이브 폴링 → 녹화 fetch로 바뀐다.
-// 녹화가 없거나 프레임이 없으면(로그만) 아무것도 렌더하지 않는다(빈 섹션 없음).
+// 리플레이 플레이어 — 종료된 run의 봉인된 녹화를 한 번 불러온다. 프레임이 있으면 환경 화면을 스크럽/재생하고 그
+// 시점까지의 로그를 함께 보여주며, 프레임 없이 로그만 있으면 로그 레인을 보여준다(발견성 — 녹화된 run은 무언가 뜬다).
+// 라이브 화면(LiveScreen)의 <img> 렌더를 재사용하되 데이터 출처만 라이브 폴링 → 녹화 fetch로 바뀐다. 녹화 자체가
+// 없으면 self-null. run 상세는 recordingRef가 있을 때만 이 위젯을 마운트한다.
 export function ReplayPlayer({ runId, initialStatus }: { runId: string; initialStatus?: string }) {
   const t = useTranslations('replay')
   const [rec, setRec] = useState<Recording | null>(null)
@@ -58,44 +59,58 @@ export function ReplayPlayer({ runId, initialStatus }: { runId: string; initialS
     return () => clearInterval(timer)
   }, [playing, frames.length])
 
-  // No visual recording to replay (a logs-only recording has nothing to scrub here).
-  if (!rec || frames.length === 0 || !current) return null
-
-  const elapsedSec = Math.max(0, current.t - rec.t0) / 1000
-  const shownLogs = logs.filter((l) => l.t <= current.t)
+  // Still fetching (or the recording genuinely returned nothing). The run detail only mounts this when a
+  // recording exists, so this is normally just the brief pre-fetch state.
+  if (!rec) return null
+  const shownLogs = current ? logs.filter((l) => l.t <= current.t) : logs
+  // A truly empty recording (no frames, no logs) — nothing to show.
+  if (!current && shownLogs.length === 0) return null
+  const elapsedSec = current ? Math.max(0, current.t - rec.t0) / 1000 : 0
 
   return (
     <div className="space-y-2.5">
       <SectionHeader title={t('title')} />
       <Card className="space-y-3 p-4">
-        <div className="overflow-hidden rounded-lg border border-border bg-black">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={current.ref}
-            alt={t('frameAlt')}
-            className="max-h-[28rem] w-full object-contain"
-          />
-        </div>
-        <div className="flex items-center gap-3">
-          <Button type="button" variant="secondary" size="sm" onClick={() => setPlaying((p) => !p)}>
-            {playing ? t('pause') : t('play')}
-          </Button>
-          <input
-            type="range"
-            min={0}
-            max={frames.length - 1}
-            value={clamped}
-            onChange={(e) => {
-              setPlaying(false)
-              setIndex(Number(e.target.value))
-            }}
-            className="h-1 flex-1 cursor-pointer accent-primary"
-            aria-label={t('title')}
-          />
-          <span className="shrink-0 text-[11.5px] tabular-nums text-faint">
-            {t('frameOf', { i: clamped + 1, n: frames.length })} · {elapsedSec.toFixed(1)}s
-          </span>
-        </div>
+        {current ? (
+          <>
+            <div className="overflow-hidden rounded-lg border border-border bg-black">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={current.ref}
+                alt={t('frameAlt')}
+                className="max-h-[28rem] w-full object-contain"
+              />
+            </div>
+            <div className="flex items-center gap-3">
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={() => setPlaying((p) => !p)}
+              >
+                {playing ? t('pause') : t('play')}
+              </Button>
+              <input
+                type="range"
+                min={0}
+                max={frames.length - 1}
+                value={clamped}
+                onChange={(e) => {
+                  setPlaying(false)
+                  setIndex(Number(e.target.value))
+                }}
+                className="h-1 flex-1 cursor-pointer accent-primary"
+                aria-label={t('title')}
+              />
+              <span className="shrink-0 text-[11.5px] tabular-nums text-faint">
+                {t('frameOf', { i: clamped + 1, n: frames.length })} · {elapsedSec.toFixed(1)}s
+              </span>
+            </div>
+          </>
+        ) : (
+          // Logs-only recording (no frame series to scrub) — still shown so a recorded run is discoverable.
+          <p className="text-[12px] text-muted-foreground">{t('logsOnly')}</p>
+        )}
         {shownLogs.length > 0 && (
           <div className="max-h-40 overflow-auto rounded-md border border-border bg-elevated p-2 font-mono text-[11.5px] leading-relaxed text-muted-foreground">
             {shownLogs.map((l, i) => (

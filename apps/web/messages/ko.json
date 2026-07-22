@@ -2112,6 +2112,7 @@
     "liveLogs": "라이브 로그",
     "liveTrace": "이 하니스는 트레이스를 {kind}에 내보내도록 설정돼 있어요 — everdict.run_id로 여기서 찾아봐요:",
     "sandbox": "샌드박스 터미널",
+    "replay": "리플레이",
     "metaRuntime": "런타임",
     "metaSource": "출처",
     "metaRunBy": "실행자",
@@ -2853,7 +2854,8 @@
     "play": "재생",
     "pause": "일시정지",
     "frameAlt": "녹화 프레임",
-    "frameOf": "프레임 {i}/{n}"
+    "frameOf": "프레임 {i}/{n}",
+    "logsOnly": "이 녹화는 로그만 있어요 (화면 프레임 없음)."
   },
   "sandboxTerminal": {
     "hint": "실행 중인 샌드박스에서 명령을 실행해요 (ls · cat · ps · env …)",

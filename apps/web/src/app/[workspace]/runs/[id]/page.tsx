@@ -156,7 +156,17 @@ export default async function RunDetailPage({
             harness: `${run.harness.id}@${run.harness.version}`,
             caseId: run.caseId,
           })}
-          actions={<StatusPill status={run.status} />}
+          actions={
+            <div className="flex items-center gap-2">
+              {/* 녹화된 run이면 "리플레이" 배지 노출 → 아래 #replay 섹션으로 점프(발견성) */}
+              {run.result?.recordingRef && (
+                <a href="#replay" className="no-underline">
+                  <Badge tone="info">{t('replay')}</Badge>
+                </a>
+              )}
+              <StatusPill status={run.status} />
+            </div>
+          }
         />
       </div>
 
@@ -261,8 +271,12 @@ export default async function RunDetailPage({
         </section>
       )}
 
-      {/* 리플레이 — 종료된 run의 봉인된 녹화(프레임 스크럽 + 시점 동기 로그). 녹화 없으면 위젯이 self-null */}
-      <ReplayPlayer runId={run.id} initialStatus={run.status} />
+      {/* 리플레이 — 녹화가 있는 run에서만 보이는 앵커 섹션(프레임 스크럽 + 로그). 헤더의 "리플레이" 배지가 여기로 점프한다. */}
+      {run.result?.recordingRef && (
+        <div id="replay" className="scroll-mt-6">
+          <ReplayPlayer runId={run.id} initialStatus={run.status} />
+        </div>
+      )}
 
       <section className="space-y-2.5">
         <SectionHeader title={t('scores')} />
