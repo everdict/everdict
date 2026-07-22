@@ -1,4 +1,5 @@
 import { can } from "@everdict/auth";
+import { OfflineTokenGrantSchema } from "@everdict/contracts";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { type ServerDeps, gate, resolvePrincipal, sendError, zodIssues } from "../route-context.js";
@@ -65,6 +66,38 @@ export function registerSecretRoutes(app: FastifyInstance, deps: ServerDeps): vo
       return sendError(reply, err);
     }
   });
+
+  // Register/replace an offline_token secret — a stored long-lived OAuth refresh token that the control plane exchanges
+  // for a short-lived access token on use. The initial grant validates the refresh token + computes the first expiry
+  // (an invalid token 502s here). Thereafter any reference to this name injects a freshly-minted access token.
+  app.put<{ Params: { name: string } }>(
+    "/secrets/:name/offline-token",
+    { schema: secretDocs.setOfflineToken },
+    async (req, reply) => {
+      if (!deps.secretStore) return reply.code(404).send({ code: "NOT_FOUND", message: "secret store not configured" });
+      const principal = await resolvePrincipal(req, reply, deps);
+      if (!principal) return reply;
+      const name = SecretNameSchema.safeParse(req.params.name);
+      if (!name.success)
+        return reply
+          .code(400)
+          .send({ code: "BAD_REQUEST", message: "secret name must be env format (^[A-Z_][A-Z0-9_]*$)" });
+      const body = z
+        .object({ grant: OfflineTokenGrantSchema, scope: z.enum(["user", "workspace"]).default("workspace") })
+        .safeParse(req.body);
+      if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: body.error.message });
+      try {
+        const owner = body.data.scope === "user" ? principal.subject : "";
+        if (body.data.scope === "workspace") gate(principal, "secrets:write"); // only shared secrets are admin
+        const meta = await deps.secretStore.setOfflineToken(principal.workspace, name.data, body.data.grant, owner);
+        // Workspace secrets feed cached runtime backends (secretEnv baked at build) — drop the cache so the next dispatch re-resolves.
+        if (body.data.scope === "workspace") deps.invalidateTenantBackends?.(principal.workspace);
+        return reply.send(meta); // returns the meta (with the computed access-token expiry) — the tokens themselves are never returned
+      } catch (err) {
+        return sendError(reply, err);
+      }
+    },
+  );
 
   app.delete<{ Params: { name: string }; Querystring: { scope?: string } }>(
     "/secrets/:name",

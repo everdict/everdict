@@ -1491,7 +1491,24 @@
     "save": "저장",
     "saveNote": "저장하면 값은 다시 볼 수 없어요.",
     "nameFormat": "이름은 ^[A-Z_][A-Z0-9_]*$ 형식이어야 합니다.",
-    "valueEmpty": "값이 비어 있습니다."
+    "valueEmpty": "값이 비어 있습니다.",
+    "offlineToken": {
+      "add": "오프라인 토큰 추가",
+      "badge": "오프라인 토큰",
+      "formHelp": "장수(long-lived) OAuth 리프레시 토큰을 저장하면, 컨트롤 플레인이 사용 시점에 짧게 유효한 access token으로 교환하고 만료 전에 자동으로 재발급해요. 이 시크릿 이름을 참조하는 곳에는 리프레시 토큰이 아니라 매번 새 access token이 주입됩니다.",
+      "tokenUrlLabel": "토큰 엔드포인트 URL",
+      "clientIdLabel": "클라이언트 ID",
+      "clientSecretLabel": "클라이언트 시크릿",
+      "refreshTokenLabel": "리프레시 토큰 (오프라인 토큰)",
+      "scopeLabel": "OAuth 스코프",
+      "optional": "선택",
+      "registering": "등록 중…",
+      "registered": "등록됨",
+      "saveNote": "지금 리프레시 토큰을 검증하고 access token 만료 시각을 계산해요.",
+      "fieldsRequired": "토큰 엔드포인트, 클라이언트 ID, 리프레시 토큰은 필수예요.",
+      "expiresHint": "access token 자동 재발급 · 현재 토큰 만료 {date}",
+      "autoRefreshHint": "사용 시점에 access token이 자동 재발급돼요."
+    }
   },
   "nav": {
     "overview": "개요",

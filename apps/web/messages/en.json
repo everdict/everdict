@@ -1491,7 +1491,24 @@
     "save": "Save",
     "saveNote": "Once saved, the value can’t be viewed again.",
     "nameFormat": "Name must match ^[A-Z_][A-Z0-9_]*$.",
-    "valueEmpty": "Value is empty."
+    "valueEmpty": "Value is empty.",
+    "offlineToken": {
+      "add": "Add offline token",
+      "badge": "offline token",
+      "formHelp": "Store a long-lived OAuth refresh token; the control plane exchanges it for a short-lived access token on use and refreshes it automatically. Any reference to this secret name injects a fresh access token — never the refresh token.",
+      "tokenUrlLabel": "Token endpoint URL",
+      "clientIdLabel": "Client ID",
+      "clientSecretLabel": "Client secret",
+      "refreshTokenLabel": "Refresh token (offline token)",
+      "scopeLabel": "OAuth scope",
+      "optional": "Optional",
+      "registering": "Registering…",
+      "registered": "Registered",
+      "saveNote": "We validate the refresh token now and compute its access-token expiry.",
+      "fieldsRequired": "Token endpoint, client ID and refresh token are required.",
+      "expiresHint": "Access token auto-refreshed · current one expires {date}",
+      "autoRefreshHint": "Access token refreshed automatically on use."
+    }
   },
   "nav": {
     "overview": "Overview",

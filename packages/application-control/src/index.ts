@@ -19,6 +19,7 @@ export type { ViewStore } from "./ports/view-store.js";
 export type { OAuthStateStore } from "./ports/oauth-state-store.js";
 export type { RunnerStore } from "./ports/runner-store.js";
 export type { SecretStore } from "./ports/secret-store.js";
+export type { OfflineTokenMinter } from "./ports/offline-token-minter.js";
 export type { TenantKeyStore } from "./ports/tenant-key-store.js";
 export type { UserProfileStore } from "./ports/user-profile-store.js";
 export type { WorkspaceInviteStore } from "./ports/workspace-invite-store.js";

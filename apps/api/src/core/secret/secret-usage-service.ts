@@ -34,9 +34,7 @@ export class SecretUsageService {
       if (refs) refs.push(usage.ref);
       else byName.set(usage.name, [usage.ref]);
     }
-    return metas
-      .filter((m) => m.scope === "workspace")
-      .map((m) => ({ name: m.name, updatedAt: m.updatedAt, scope: m.scope, refs: byName.get(m.name) ?? [] }));
+    return metas.filter((m) => m.scope === "workspace").map((m) => ({ ...m, refs: byName.get(m.name) ?? [] }));
   }
 
   private async gatherInputs(workspace: string): Promise<SecretUsageInputs> {

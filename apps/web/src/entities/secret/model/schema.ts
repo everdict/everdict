@@ -11,10 +11,16 @@ import { z } from 'zod'
 // scope: "workspace" (shared, admin-managed) | "user" (my personal, self-managed). Values are write-only (never returned after saving).
 export const secretScopeSchema = z.enum(['user', 'workspace'])
 
+// kind: "plain" opaque string | "offline_token" = a stored OAuth refresh token exchanged for a fresh access token on
+// use (accessTokenExpiresAt = the cached access token's expiry, auto-refreshed before it lapses).
+export const secretKindSchema = z.enum(['plain', 'offline_token'])
+
 export const secretMetaSchema = z.object({
   name: z.string(),
   updatedAt: z.string(),
   scope: secretScopeSchema.default('workspace'),
+  kind: secretKindSchema.default('plain'),
+  accessTokenExpiresAt: z.string().optional(),
 })
 
 export const secretsSchema = z.array(secretMetaSchema)

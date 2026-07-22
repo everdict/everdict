@@ -2,6 +2,7 @@ export {
   secretMetaSchema,
   secretsSchema,
   secretScopeSchema,
+  secretKindSchema,
   secretUsageSchema,
   secretUsagesSchema,
   secretUsageRefSchema,

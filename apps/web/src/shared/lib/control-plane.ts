@@ -502,6 +502,25 @@ export const controlPlane = {
       method: 'PUT',
       body: JSON.stringify({ value, scope }),
     }),
+  // Register an offline-token secret — a stored OAuth refresh token the control plane exchanges for a short-lived
+  // access token on use. The control plane performs one refresh-token grant to validate it + compute the first expiry
+  // (a bad grant surfaces as an error), then returns the secret metadata (incl. accessTokenExpiresAt). Tokens are never returned.
+  setOfflineToken: <T>(
+    auth: AuthContext,
+    name: string,
+    grant: {
+      tokenUrl: string
+      clientId: string
+      clientSecret?: string
+      refreshToken: string
+      scope?: string
+    },
+    scope: 'user' | 'workspace' = 'workspace'
+  ) =>
+    call<T>(auth, `/secrets/${encodeURIComponent(name)}/offline-token`, {
+      method: 'PUT',
+      body: JSON.stringify({ grant, scope }),
+    }),
   deleteSecret: (auth: AuthContext, name: string, scope: 'user' | 'workspace' = 'workspace') =>
     callVoid(auth, `/secrets/${encodeURIComponent(name)}?scope=${scope}`, { method: 'DELETE' }),
   // Workspace-owned GitHub App integration (org install → selected repos). Both github.com AND GitHub Enterprise are

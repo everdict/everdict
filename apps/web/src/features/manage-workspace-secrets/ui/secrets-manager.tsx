@@ -14,6 +14,7 @@ import {
   MessageSquare,
   Package,
   Plus,
+  RefreshCw,
   Server,
 } from 'lucide-react'
 import { useLocale, useTimeZone, useTranslations } from 'next-intl'
@@ -34,7 +35,12 @@ import { FieldError, Input, Label, Textarea } from '@/shared/ui/input'
 import { SettingsList, SettingsRow } from '@/shared/ui/settings-list'
 import { InfoTip } from '@/shared/ui/tooltip'
 
-import { deleteSecretAction, setSecretAction } from '../api/manage-secrets'
+import {
+  deleteSecretAction,
+  setOfflineTokenAction,
+  setSecretAction,
+  type OfflineTokenGrantInput,
+} from '../api/manage-secrets'
 
 const NAME_RE = /^[A-Z_][A-Z0-9_]*$/
 
@@ -359,6 +365,7 @@ function SecretRows({
   const locale = useLocale()
   const timeZone = useTimeZone()
   const [adding, setAdding] = useState(false)
+  const [addingOffline, setAddingOffline] = useState(false)
   const [confirmName, setConfirmName] = useState<string>()
   const [error, setError] = useState<string>()
   const [pending, startTransition] = useTransition()
@@ -384,19 +391,33 @@ function SecretRows({
             ''
           )}
         </span>
-        {canWrite && !adding && (
-          <Button
-            type="button"
-            variant="secondary"
-            size="sm"
-            className="gap-1"
-            onClick={() => {
-              setAdding(true)
-              setError(undefined)
-            }}
-          >
-            <Plus className="size-3.5" /> {t('addSecret')}
-          </Button>
+        {canWrite && !adding && !addingOffline && (
+          <span className="flex items-center gap-2">
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              className="gap-1"
+              onClick={() => {
+                setAddingOffline(true)
+                setError(undefined)
+              }}
+            >
+              <RefreshCw className="size-3.5" /> {t('offlineToken.add')}
+            </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              className="gap-1"
+              onClick={() => {
+                setAdding(true)
+                setError(undefined)
+              }}
+            >
+              <Plus className="size-3.5" /> {t('addSecret')}
+            </Button>
+          </span>
         )}
       </div>
 
@@ -406,6 +427,14 @@ function SecretRows({
           namePlaceholder={namePlaceholder}
           onDone={() => setAdding(false)}
           onCancel={() => setAdding(false)}
+        />
+      )}
+
+      {canWrite && addingOffline && (
+        <OfflineTokenForm
+          scope={scope}
+          onDone={() => setAddingOffline(false)}
+          onCancel={() => setAddingOffline(false)}
         />
       )}
 
@@ -419,7 +448,17 @@ function SecretRows({
           {secrets.map((s) => (
             <SettingsRow
               key={s.name}
-              label={<code className="font-mono text-[13px] text-foreground">{s.name}</code>}
+              label={
+                <span className="flex items-center gap-1.5">
+                  <code className="font-mono text-[13px] text-foreground">{s.name}</code>
+                  {s.kind === 'offline_token' && (
+                    <Badge tone="outline" className="gap-1">
+                      <RefreshCw className="size-2.5" />
+                      {t('offlineToken.badge')}
+                    </Badge>
+                  )}
+                </span>
+              }
               hint={
                 <>
                   <span className="block">
@@ -427,6 +466,17 @@ function SecretRows({
                       date: new Date(s.updatedAt).toLocaleString(locale, { timeZone }),
                     })}
                   </span>
+                  {s.kind === 'offline_token' && (
+                    <span className="block text-faint">
+                      {s.accessTokenExpiresAt
+                        ? t('offlineToken.expiresHint', {
+                            date: new Date(s.accessTokenExpiresAt).toLocaleString(locale, {
+                              timeZone,
+                            }),
+                          })
+                        : t('offlineToken.autoRefreshHint')}
+                    </span>
+                  )}
                   {s.refs !== undefined && <UsageSites refs={s.refs} />}
                 </>
               }
@@ -593,6 +643,164 @@ function AddSecretForm({
           {t('cancel')}
         </button>
         <span className="text-[11px] text-faint">{t('saveNote')}</span>
+      </div>
+    </div>
+  )
+}
+
+// Register an offline-token secret: a name + the OAuth material (token endpoint, client id, optional client secret,
+// the refresh token, optional scope). On save the control plane runs one refresh-token grant to validate it + compute
+// the first access-token expiry (a bad grant surfaces as an inline error), and thereafter auto-refreshes on use.
+function OfflineTokenForm({
+  scope,
+  onDone,
+  onCancel,
+}: {
+  scope: SecretScope
+  onDone: () => void
+  onCancel: () => void
+}) {
+  const t = useTranslations('manageWorkspaceSecrets')
+  const [name, setName] = useState('')
+  const [tokenUrl, setTokenUrl] = useState('')
+  const [clientId, setClientId] = useState('')
+  const [clientSecret, setClientSecret] = useState('')
+  const [refreshToken, setRefreshToken] = useState('')
+  const [oauthScope, setOauthScope] = useState('')
+  const [show, setShow] = useState(false)
+  const [error, setError] = useState<string>()
+  const [pending, startTransition] = useTransition()
+  const nameInvalid = name.length > 0 && !NAME_RE.test(name)
+  const incomplete =
+    name.length === 0 || tokenUrl.length === 0 || clientId.length === 0 || refreshToken.length === 0
+
+  function onSave() {
+    setError(undefined)
+    startTransition(async () => {
+      const grant: OfflineTokenGrantInput = {
+        tokenUrl,
+        clientId,
+        refreshToken,
+        ...(clientSecret ? { clientSecret } : {}),
+        ...(oauthScope ? { scope: oauthScope } : {}),
+      }
+      const r = await setOfflineTokenAction(name, grant, scope)
+      if (r.ok) onDone()
+      else setError(r.error)
+    })
+  }
+
+  return (
+    <div className="space-y-3 rounded-lg border bg-muted/30 p-3.5">
+      <p className="text-[12px] text-muted-foreground">{t('offlineToken.formHelp')}</p>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div className="space-y-1.5">
+          <Label htmlFor="offline-name">{t('nameLabel')}</Label>
+          <Input
+            id="offline-name"
+            value={name}
+            placeholder="MY_OFFLINE_TOKEN"
+            onChange={(e) => setName(e.target.value.toUpperCase())}
+            autoComplete="off"
+            spellCheck={false}
+            className="font-mono text-[12px]"
+          />
+          {nameInvalid && <FieldError message={t('nameInvalid')} />}
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="offline-token-url">{t('offlineToken.tokenUrlLabel')}</Label>
+          <Input
+            id="offline-token-url"
+            value={tokenUrl}
+            placeholder="https://id.example.com/oauth/token"
+            onChange={(e) => setTokenUrl(e.target.value)}
+            autoComplete="off"
+            spellCheck={false}
+            className="text-[12px]"
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="offline-client-id">{t('offlineToken.clientIdLabel')}</Label>
+          <Input
+            id="offline-client-id"
+            value={clientId}
+            onChange={(e) => setClientId(e.target.value)}
+            autoComplete="off"
+            spellCheck={false}
+            className="font-mono text-[12px]"
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="offline-client-secret">{t('offlineToken.clientSecretLabel')}</Label>
+          <Input
+            id="offline-client-secret"
+            type="password"
+            value={clientSecret}
+            placeholder={t('offlineToken.optional')}
+            onChange={(e) => setClientSecret(e.target.value)}
+            autoComplete="off"
+            spellCheck={false}
+            className="text-[12px]"
+          />
+        </div>
+        <div className="space-y-1.5 sm:col-span-2">
+          <Label htmlFor="offline-refresh-token">{t('offlineToken.refreshTokenLabel')}</Label>
+          <div className="relative">
+            <Input
+              id="offline-refresh-token"
+              type={show ? 'text' : 'password'}
+              value={refreshToken}
+              onChange={(e) => setRefreshToken(e.target.value)}
+              autoComplete="off"
+              spellCheck={false}
+              className="pr-8 font-mono text-[12px]"
+            />
+            <button
+              type="button"
+              onClick={() => setShow((v) => !v)}
+              aria-label={show ? t('hideValue') : t('showValue')}
+              className="absolute right-1.5 top-1/2 -translate-y-1/2 text-muted-foreground transition-colors hover:text-foreground"
+            >
+              {show ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
+            </button>
+          </div>
+        </div>
+        <div className="space-y-1.5 sm:col-span-2">
+          <Label htmlFor="offline-scope">{t('offlineToken.scopeLabel')}</Label>
+          <Input
+            id="offline-scope"
+            value={oauthScope}
+            placeholder={t('offlineToken.optional')}
+            onChange={(e) => setOauthScope(e.target.value)}
+            autoComplete="off"
+            spellCheck={false}
+            className="text-[12px]"
+          />
+        </div>
+      </div>
+      {error && (
+        <Callout tone="danger" className="py-1.5">
+          {error}
+        </Callout>
+      )}
+      <div className="flex items-center gap-2">
+        <Button
+          size="sm"
+          className="gap-1"
+          disabled={pending || incomplete || nameInvalid}
+          onClick={onSave}
+        >
+          <RefreshCw className="size-3.5" />{' '}
+          {pending ? t('offlineToken.registering') : t('register')}
+        </Button>
+        <button
+          type="button"
+          className="text-[12px] text-muted-foreground transition-colors hover:text-foreground"
+          onClick={onCancel}
+        >
+          {t('cancel')}
+        </button>
+        <span className="text-[11px] text-faint">{t('offlineToken.saveNote')}</span>
       </div>
     </div>
   )

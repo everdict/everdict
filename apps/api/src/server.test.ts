@@ -3497,7 +3497,7 @@ describe("API — secrets (workspace model/provider keys)", () => {
     ).toBe(204);
     // Now GET shows only my personal secret with scope:user
     expect((await app.inject({ method: "GET", url: "/secrets", headers: h })).json()).toEqual([
-      { name: "MY_KEY", updatedAt: expect.any(String), scope: "user" },
+      { name: "MY_KEY", updatedAt: expect.any(String), scope: "user", kind: "plain" },
     ]);
     await app.close();
   });

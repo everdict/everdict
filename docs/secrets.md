@@ -15,19 +15,57 @@ into that workspace's runs.
     Other members never see or use them. A harness that references a user secret is **private to that user** (below).
 - **Encrypted at rest** (`@everdict/db` `SecretStore`): AES-256-GCM, KEK from **`EVERDICT_SECRETS_KEY`** (base64 32B;
   `openssl rand -base64 32`). DB holds only ciphertext/iv/tag. Prod should use Vault/KMS for the KEK.
-- **Write-only**: `list` returns `name` + `updatedAt` + `scope` only — values are **never** returned by the API;
-  they're decrypted server-side solely to inject into a run (`entries` = workspace-only for legacy consumers;
-  `scopedEntries(ws, subject)` = `{workspace, user}` for run/scorecard harness resolution).
+- **Two kinds (`SecretMeta.kind`, migration `0065_secret_offline_token.sql`):** `plain` (default — an opaque string)
+  and `offline_token` — a stored long-lived OAuth refresh token exchanged for a short-lived **access token** on read
+  (see [Offline tokens](#offline-tokens-auto-refreshed-access-tokens)). Both kinds share the one namespace/table, so a
+  reference by name is kind-agnostic.
+- **Write-only**: `list` returns `name` + `updatedAt` + `scope` + `kind` (+ `accessTokenExpiresAt` for offline tokens)
+  only — token/refresh values are **never** returned by the API; they're decrypted server-side solely to inject into a
+  run (`entries` = workspace-only for legacy consumers; `scopedEntries(ws, subject)` = `{workspace, user}` for
+  run/scorecard harness resolution). For an `offline_token`, `entries`/`scopedEntries` yield a *freshly-minted access
+  token* (auto-refreshed before expiry), never the refresh token.
 - **Fail-closed**: no `EVERDICT_SECRETS_KEY` → no secret store → the routes/tools 404 (feature off).
 
 ## Manage (API + MCP, same core) — scope-aware authz
 `GET /secrets` is open to any authenticated member and returns **your own user secrets always** + **workspace
 secret names only if `secrets:read` (admin)**. `PUT`/`DELETE` take a **`scope`** (`workspace` default | `user`):
 workspace scope requires admin (`secrets:write`); user scope is self (no gate, `owner=subject`).
-| Surface | Set | List (names+scope) | Delete |
-|---|---|---|---|
-| HTTP | `PUT /secrets/:name` `{value, scope?}` → 204 | `GET /secrets` | `DELETE /secrets/:name?scope=` → 204 |
-| MCP | `set_secret {name,value,scope?}` | `list_secrets` | `delete_secret {name,scope?}` |
+| Surface | Set (plain) | Set (offline token) | List (names+scope+kind) | Delete |
+|---|---|---|---|---|
+| HTTP | `PUT /secrets/:name` `{value, scope?}` → 204 | `PUT /secrets/:name/offline-token` `{grant, scope?}` → 200 meta | `GET /secrets` | `DELETE /secrets/:name?scope=` → 204 |
+| MCP | `set_secret {name,value,scope?}` | `set_offline_token {name,tokenUrl,clientId,clientSecret?,refreshToken,oauthScope?,scope?}` | `list_secrets` | `delete_secret {name,scope?}` |
+
+The offline-token set is the only secret write that returns a body (200) — the resulting metadata incl.
+`accessTokenExpiresAt` — because registration performs a live grant (below); the token values are still never returned.
+
+## Offline tokens (auto-refreshed access tokens)
+Some credentials aren't a static key but a long-lived OAuth **refresh token** ("offline token") that you exchange for a
+short-lived **access token** each time the old one expires. Everdict stores the refresh token once and hands out a
+fresh access token on demand — a consumer referencing the secret never deals with expiry.
+
+- **Register** (`PUT /secrets/:name/offline-token` / MCP `set_offline_token`) with the OAuth material:
+  `tokenUrl` (the token endpoint), `clientId`, optional `clientSecret` (omit for public clients), the `refreshToken`,
+  and an optional `scope`. On registration the control plane performs **one refresh-token grant** (RFC 6749 §6) to
+  (a) validate the refresh token and (b) compute the first access-token expiry — an invalid grant is a **502** at
+  registration, so a bad token fails loudly up front, not at dispatch. The refresh token + optional client secret are
+  AES-GCM encrypted like any value; `kind='offline_token'` + `access_token_expires_at` are stored in the clear so
+  `list` can show staleness without decrypting.
+- **On use** — anywhere the secret is referenced by name (harness `env {secretRef}`, a model's `apiKeySecret`,
+  trace/runtime auth, …), `entries`/`scopedEntries` resolve it to a **currently-valid access token**: if the cached one
+  is within the refresh skew (60s) of expiry, the store re-mints via the refresh grant, **rotates** the stored refresh
+  token if the provider issued a new one, caches the result back, and returns the new access token. So every existing
+  consumer transparently gets a live token with **no code change** — the refresh token never leaves the control plane.
+- **Where it lives** — the refresh HTTP is an injected `OfflineTokenMinter` port (impl `httpOfflineTokenMinter` in
+  `apps/api` `infrastructure/oauth`), wired into the `SecretStore` (`@everdict/db`) like `SecretCipher`, so OAuth I/O
+  stays out of the store package. The store owns only the pure expiry decision, rotation, in-process refresh dedup
+  (one lapsed token = one grant, not one per referencing dispatch), and the write-back cache.
+- **Best-effort on read** — a refresh failure returns the last-known access token rather than throwing, so a provider
+  outage never breaks the whole injection map (an unrelated dispatch is unaffected; a case that actually references the
+  broken token surfaces its own upstream 401). If no `expires_in` is returned, a conservative 300s TTL is assumed.
+- Verified: `packages/db/src/workspace/secret-store.test.ts` (register→list→entries yields the access token, expiry
+  refresh + rotation, best-effort stale fallback, concurrent-refresh dedup), `apps/api/src/infrastructure/oauth/
+  offline-token-minter.test.ts` (form grant, expiry/TTL, rotation, upstream remap), and
+  `apps/api/src/api/secret/offline-token.routes.test.ts` (register→meta, 502 on bad grant, name/body validation).
 
 ## Injection into runs
 At dispatch, a store-backed `SecretProvider` gives the backend **only that tenant's** secrets, which are injected

@@ -92,6 +92,7 @@ import {
   type RubricRegistry,
   type RuntimeRegistry,
 } from "@everdict/registry";
+import { httpOfflineTokenMinter } from "../infrastructure/oauth/offline-token-minter.js";
 
 export interface Persistence {
   store: RunStore;
@@ -144,6 +145,9 @@ function resolveSecretCipher(): SecretCipher {
 // auto-generated — safe in-memory since it's volatile, but persistent Pg operation must pin the key via EVERDICT_SECRETS_KEY (restart decryption).
 export async function makePersistence(): Promise<Persistence> {
   const cipher = resolveSecretCipher();
+  // Refresh-grant client for offline_token secrets — injected into the SecretStore so it can exchange a stored
+  // refresh token for a fresh access token on read (OAuth I/O stays out of @everdict/db).
+  const offlineTokenMinter = httpOfflineTokenMinter();
   const url = process.env.DATABASE_URL;
   if (!url) {
     const workspaceStore = new InMemoryWorkspaceStore();
@@ -165,7 +169,7 @@ export async function makePersistence(): Promise<Persistence> {
       workspaceStore,
       userProfileStore: new InMemoryUserProfileStore(),
       inviteStore: new InMemoryWorkspaceInviteStore(workspaceStore),
-      secretStore: new InMemorySecretStore(cipher),
+      secretStore: new InMemorySecretStore(cipher, undefined, offlineTokenMinter),
       oauthStateStore: new InMemoryOAuthStateStore(),
       runnerStore: new InMemoryRunnerStore(),
       runnerJobStore: new InMemoryRunnerJobStore(),
@@ -201,7 +205,7 @@ export async function makePersistence(): Promise<Persistence> {
     workspaceStore: new PgWorkspaceStore(client),
     userProfileStore: new PgUserProfileStore(client),
     inviteStore: new PgWorkspaceInviteStore(client),
-    secretStore: new PgSecretStore(client, cipher),
+    secretStore: new PgSecretStore(client, cipher, offlineTokenMinter),
     oauthStateStore: new PgOAuthStateStore(client),
     runnerStore: new PgRunnerStore(client),
     runnerJobStore: new PgRunnerJobStore(client),
