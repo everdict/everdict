@@ -26,10 +26,11 @@ const schema = z.object({
   // reachable in dev (localhost) but should be set to the public wss:// origin in a deployed setup.
   CONTROL_PLANE_WS_URL: z.string().optional(),
   // Public HTTP base of the control plane for a self-hosted RUNNER (the desktop app / `everdict runner`) — it dials
-  // `<base>/mcp` DIRECTLY (not via the web). CONTROL_PLANE_URL is the web SERVER's url to reach the CP (often a
-  // loopback), which is unreachable from a runner on another machine — the #1 "runner won't connect" cause. Unset → the
-  // web rebases a loopback CONTROL_PLANE_URL onto the request host at pair time (shared/lib/runner-api-url.ts), so a
-  // co-located deploy is reachable with zero config; set this (verbatim) to pin a public/proxied CP origin.
+  // `<base>/mcp` DIRECTLY (not via the web). CONTROL_PLANE_URL is the web SERVER's url to reach the CP (often a loopback
+  // or an internal container name like `api:8787`), which is unreachable from a runner on another machine — the #1
+  // "runner won't connect" cause. Unset → the web rebases an internal (loopback / single-label) CONTROL_PLANE_URL host
+  // onto the request host at pair time (shared/lib/runner-api-url.ts), so a co-located deploy is reachable with zero
+  // config; set this (verbatim) to pin a public/proxied CP origin.
   CONTROL_PLANE_PUBLIC_URL: z.string().url().optional(),
   // Keycloak (Auth.js)
   AUTH_SECRET: z.string().optional(),

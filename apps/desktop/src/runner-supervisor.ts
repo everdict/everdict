@@ -41,9 +41,10 @@ export interface RunnerSupervisorDeps {
   }): RunnerHostLike;
   defaultApiUrl: string;
   // The hostname this device can currently reach the server on — the URL the desktop loads the web from (main.ts wires
-  // the live webUrl). Used to self-heal a runner whose stored control-plane URL is a loopback baked in at pair time on a
-  // DIFFERENT machine (unreachable → permanently offline, the #1 "won't connect" cause). Optional: absent for the CLI /
-  // tests (no healing); a return of undefined means the server URL isn't known yet (also no healing).
+  // the live webUrl). Used to self-heal a runner whose stored control-plane URL is an internal host — a loopback, or the
+  // server's own container/compose name (`api:8787`) — that a runner on this device can't dial (→ permanently offline,
+  // the #1 "won't connect" cause). Optional: absent for the CLI / tests (no healing); a return of undefined means the
+  // server URL isn't known yet (also no healing).
   reachableHost?: () => string | undefined;
   broadcast(status: DesktopRunnersStatus): void;
   log?: (msg: string) => void;
@@ -54,6 +55,16 @@ const OFF: RunnerHostStatus = { state: "off", activeJobs: 0, capabilities: [] };
 // Loopback hosts a pairing may have baked into a runner's control-plane URL — reachable from the server host itself but
 // NOT from a runner on another machine. Kept in sync with the web's resolveRunnerApiUrl LOOPBACK_HOSTNAMES set.
 const LOOPBACK_HOSTNAMES = new Set(["localhost", "127.0.0.1", "[::1]", "0.0.0.0"]);
+
+// A control-plane host reachable only from the server itself, never from a runner on another machine: loopback, OR a
+// single-label hostname (no dot) — a container/compose service name like `api` that the web reports (e.g. the compose
+// `http://api:8787`) when IT reaches the CP over the deploy network. Both must be rebased onto the host this device can
+// actually reach the server on. A real FQDN or IP literal (has a dot, or a bracketed IPv6) is an intentional public
+// origin and is NEVER rewritten. Kept in concept-sync with the web's resolveRunnerApiUrl.isInternalHost.
+function isInternalHost(hostname: string): boolean {
+  if (LOOPBACK_HOSTNAMES.has(hostname)) return true;
+  return !hostname.includes(".") && !hostname.startsWith("[");
+}
 
 interface RunnerEntry {
   host: RunnerHostLike;
@@ -98,12 +109,18 @@ export class RunnerSupervisor {
   // the same runnerId replaces just that runner's host, leaving the others running.
   async pair(payload: PairPayload): Promise<void> {
     const runnerId = payload.runnerId ?? UNNAMED;
+    // The web reports the control-plane URL from ITS vantage — often the server's own internal address (a `api:8787`
+    // container/compose service name, or a loopback), which a runner on this device can't dial. Rebase it, at pair time,
+    // onto the host the user configured the desktop to reach the server on (reachableHost), so the runner honors the
+    // server address the user set instead of being born permanently offline. No-op when there's no incoming URL, no
+    // configured host, single-machine dev, or the URL is already a real public origin; startup/reconnect heal the same.
+    const apiUrl = payload.apiUrl === undefined ? undefined : this.healApiUrl(payload.apiUrl);
     // saveTokens may throw (safeStorage unavailable) — do so BEFORE mutating any in-memory/host state so a failure does not advance.
     this.deps.saveTokens({ ...this.deps.loadTokens(), [runnerId]: payload.token });
     this.deps.saveRunners(
       upsertRunner(this.deps.loadRunners(), {
         runnerId,
-        ...(payload.apiUrl !== undefined ? { apiUrl: payload.apiUrl } : {}),
+        ...(apiUrl !== undefined ? { apiUrl } : {}),
         ...(payload.maxConcurrent !== undefined ? { maxConcurrent: payload.maxConcurrent } : {}),
       }),
     );
@@ -111,7 +128,7 @@ export class RunnerSupervisor {
     await this.startRunner(
       runnerId,
       payload.token,
-      payload.apiUrl ?? this.deps.defaultApiUrl,
+      apiUrl ?? this.deps.defaultApiUrl,
       undefined,
       payload.maxConcurrent,
     );
@@ -178,16 +195,17 @@ export class RunnerSupervisor {
     this.emit();
   }
 
-  // Rebase a stored control-plane URL that points at loopback onto the host this device can actually reach the server on
-  // (the URL it loaded the web from), keeping the CP port/path — the same rebase repoint / the web's resolveRunnerApiUrl
-  // do, but AUTOMATIC and ONLY for loopback (a real host is never rewritten). Returns the URL unchanged when there's no
-  // reachable host, the reachable host is itself loopback (genuine single-machine dev), or the stored URL isn't loopback.
+  // Rebase a stored control-plane URL whose host is internal (loopback, or a container/compose service name like `api`
+  // the server reports for itself) onto the host this device can actually reach the server on (the URL it loaded the web
+  // from), keeping the CP port/path — the same rebase repoint / the web's resolveRunnerApiUrl do, but AUTOMATIC and only
+  // for an internal host (a real FQDN/IP is never rewritten). Returns the URL unchanged when there's no reachable host,
+  // the reachable host is itself loopback (genuine single-machine dev), or the stored URL is already a real public origin.
   private healApiUrl(url: string): string {
     const host = this.deps.reachableHost?.();
     if (host === undefined || LOOPBACK_HOSTNAMES.has(host)) return url;
     try {
       const u = new URL(url);
-      if (!LOOPBACK_HOSTNAMES.has(u.hostname)) return url;
+      if (!isInternalHost(u.hostname)) return url;
       u.hostname = host;
       return u.toString().replace(/\/+$/, "");
     } catch {

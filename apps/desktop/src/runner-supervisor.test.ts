@@ -344,7 +344,7 @@ describe("RunnerSupervisor", () => {
     const s = new RunnerSupervisor(store.deps);
     await s.startFromStore();
     await s.reconnect("r1");
-    // The real host is left untouched (heal is loopback-only) …
+    // The real host is left untouched (heal only rebases internal hosts — a dotted FQDN is a real origin) …
     expect(store.getRunners()).toEqual([{ runnerId: "r1", apiUrl: "http://cp.example:8787" }]);
     // … and the live host is restarted in place (no swap, no status race).
     const r1 = store.hosts.filter((h) => h.runnerId === "r1");
@@ -365,6 +365,43 @@ describe("RunnerSupervisor", () => {
     const r1 = store.hosts.filter((h) => h.runnerId === "r1");
     expect(r1).toHaveLength(1);
     expect(r1[0]?.restarts).toBe(1);
+  });
+
+  it("pair — rebases an internal control-plane host (api:8787) onto the configured server address at pair time", async () => {
+    // The reported bug: pairing from the desktop, the web reports the server's OWN internal CP address (the compose
+    // `http://api:8787`), which a runner on this device can't dial → born permanently offline. The desktop knows the
+    // server address the user configured (reachableHost) → the incoming URL is rebased onto it at pair time so the
+    // runner honors that address. (Pre-fix: `api:8787` was stored + dialed verbatim.)
+    const store = makeDeps({ reachableHost: "100.69.164.81" });
+    const s = new RunnerSupervisor(store.deps);
+    await s.pair({ token: "rnr_a", runnerId: "r1", apiUrl: "http://api:8787" });
+    // Persisted + dialed on the configured server host, keeping the CP port/scheme.
+    expect(store.getRunners()).toEqual([{ runnerId: "r1", apiUrl: "http://100.69.164.81:8787" }]);
+    expect(store.hosts.at(-1)?.apiUrl).toBe("http://100.69.164.81:8787");
+  });
+
+  it("pair — never rewrites a real (FQDN) control-plane origin, even when it differs from the server host", async () => {
+    // A deliberate split deploy (the server's CONTROL_PLANE_PUBLIC_URL) reports a real public CP origin on a different
+    // host than the web — the desktop must honor it verbatim, not clobber it with its own configured host.
+    const store = makeDeps({ reachableHost: "app.everdict.io" });
+    const s = new RunnerSupervisor(store.deps);
+    await s.pair({ token: "rnr_a", runnerId: "r1", apiUrl: "https://cp.everdict.io" });
+    expect(store.getRunners()).toEqual([{ runnerId: "r1", apiUrl: "https://cp.everdict.io" }]);
+    expect(store.hosts.at(-1)?.apiUrl).toBe("https://cp.everdict.io");
+  });
+
+  it("startFromStore — self-heals a stored internal (single-label) control-plane host onto the reachable server host", async () => {
+    // A runner paired before the fix (or by an older web) has `http://api:8787` baked in — self-heal it on launch so it
+    // comes back online with no user action, the same way a stale loopback URL is healed.
+    const store = makeDeps({
+      tokens: { r1: "rnr_1" },
+      runners: [{ runnerId: "r1", apiUrl: "http://api:8787" }],
+      reachableHost: "100.69.164.81",
+    });
+    const s = new RunnerSupervisor(store.deps);
+    await s.startFromStore();
+    expect(store.getRunners()).toEqual([{ runnerId: "r1", apiUrl: "http://100.69.164.81:8787" }]);
+    expect(store.hosts.find((h) => h.runnerId === "r1")?.apiUrl).toBe("http://100.69.164.81:8787");
   });
 
   it("startFromStore — migrates a legacy single pairing into the multi store, then clears the legacy record", async () => {
