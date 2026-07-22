@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { CirclePause, CirclePlay, Pause, Pencil, Play, Trash2 } from 'lucide-react'
+import { CirclePause, CirclePlay, Pause, Pencil, Play, Telescope, Trash2 } from 'lucide-react'
 import { useLocale, useTimeZone, useTranslations } from 'next-intl'
 
 import type { Schedule } from '@/entities/schedule'
@@ -87,43 +87,55 @@ export function ScheduleCard({
         {/* ② Target — icons distinguish the kind (benchmark=Database · harness=Boxes · runtime=Server). Avoid clipping:
             on narrow screens benchmark/harness each get their own line (two lines), md+ is one line. Icons stand in for arrows (same as scorecards). */}
         <div className="flex flex-col gap-y-1 text-[12.5px] md:flex-row md:items-center md:gap-x-2.5">
-          <Link
-            href={`/${workspace}/datasets/${encodeURIComponent(s.runTemplate.dataset.id)}`}
-            className="min-w-0 overflow-hidden whitespace-nowrap rounded-sm hover:text-foreground hover:underline"
-            title={t('datasetDetail')}
-          >
-            <EntityRef
-              id={s.runTemplate.dataset.id}
-              version={s.runTemplate.dataset.version}
-              kind="dataset"
-            />
-          </Link>
-          <span className="flex min-w-0 items-center gap-x-2 overflow-hidden whitespace-nowrap">
-            <Link
-              href={`/${workspace}/harnesses/${encodeURIComponent(s.runTemplate.harness.id)}`}
-              className="min-w-0 truncate rounded-sm hover:text-foreground hover:underline"
-              title={t('harnessDetail')}
-            >
-              <EntityRef
-                id={s.runTemplate.harness.id}
-                version={s.runTemplate.harness.version}
-                kind="harness"
-              />
-            </Link>
-            <span className="hidden shrink-0 sm:inline-flex">
-              {s.runTemplate.runtime && !s.runTemplate.runtime.startsWith('self:') ? (
-                <Link
-                  href={`/${workspace}/runtimes/${encodeURIComponent(s.runTemplate.runtime)}`}
-                  className="rounded-sm hover:underline"
-                  title={t('runtimeDetail')}
-                >
-                  <RuntimeChip label={runtimeChipLabel(runtimeLabelOf(s), t)} />
-                </Link>
-              ) : (
-                <RuntimeChip label={runtimeChipLabel(runtimeLabelOf(s), t)} />
-              )}
+          {s.runTemplate.pull ? (
+            // Trace-evaluation schedule — no dataset/harness/runtime; show the source it judges each fire.
+            <span className="inline-flex min-w-0 items-center gap-1.5 overflow-hidden whitespace-nowrap font-[510]">
+              <Telescope className="size-3.5 shrink-0 text-muted-foreground" />
+              <span className="truncate">
+                {t('traceEvalTarget', { source: s.runTemplate.pull.source })}
+              </span>
             </span>
-          </span>
+          ) : (
+            <>
+              <Link
+                href={`/${workspace}/datasets/${encodeURIComponent(s.runTemplate.dataset?.id ?? '')}`}
+                className="min-w-0 overflow-hidden whitespace-nowrap rounded-sm hover:text-foreground hover:underline"
+                title={t('datasetDetail')}
+              >
+                <EntityRef
+                  id={s.runTemplate.dataset?.id ?? ''}
+                  version={s.runTemplate.dataset?.version ?? ''}
+                  kind="dataset"
+                />
+              </Link>
+              <span className="flex min-w-0 items-center gap-x-2 overflow-hidden whitespace-nowrap">
+                <Link
+                  href={`/${workspace}/harnesses/${encodeURIComponent(s.runTemplate.harness?.id ?? '')}`}
+                  className="min-w-0 truncate rounded-sm hover:text-foreground hover:underline"
+                  title={t('harnessDetail')}
+                >
+                  <EntityRef
+                    id={s.runTemplate.harness?.id ?? ''}
+                    version={s.runTemplate.harness?.version ?? ''}
+                    kind="harness"
+                  />
+                </Link>
+                <span className="hidden shrink-0 sm:inline-flex">
+                  {s.runTemplate.runtime && !s.runTemplate.runtime.startsWith('self:') ? (
+                    <Link
+                      href={`/${workspace}/runtimes/${encodeURIComponent(s.runTemplate.runtime)}`}
+                      className="rounded-sm hover:underline"
+                      title={t('runtimeDetail')}
+                    >
+                      <RuntimeChip label={runtimeChipLabel(runtimeLabelOf(s), t)} />
+                    </Link>
+                  ) : (
+                    <RuntimeChip label={runtimeChipLabel(runtimeLabelOf(s), t)} />
+                  )}
+                </span>
+              </span>
+            </>
+          )}
         </div>
         {/* ③ Cadence · next run · latest status */}
         <div className="flex items-center gap-x-2 overflow-hidden whitespace-nowrap text-[12px] text-muted-foreground">

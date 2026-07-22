@@ -8,8 +8,18 @@ import { z } from 'zod'
 export const scheduleOverlapPolicySchema = z.enum(['skip', 'bufferOne', 'allowAll'])
 
 export const scheduleRunTemplateSchema = z.object({
-  dataset: z.object({ id: z.string(), version: z.string() }),
-  harness: z.object({ id: z.string(), version: z.string() }),
+  // batch mode (dataset×harness). Optional — a trace-evaluation (pull) schedule omits them.
+  dataset: z.object({ id: z.string(), version: z.string() }).optional(),
+  harness: z.object({ id: z.string(), version: z.string() }).optional(),
+  // trace-evaluation mode — judge a rolling window of a registered trace source (no harness run).
+  pull: z
+    .object({
+      source: z.string(),
+      correlate: z.enum(['id', 'tag']).optional(),
+      scope: z.string().optional(),
+      windowHours: z.number(),
+    })
+    .optional(),
   judges: z.array(z.object({ id: z.string(), version: z.string() })).default([]),
   runtime: z.string().optional(),
   concurrency: z.number().optional(),

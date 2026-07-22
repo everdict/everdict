@@ -193,7 +193,21 @@
     "saving": "저장 중…",
     "creating": "만드는 중…",
     "saveChanges": "변경 저장",
-    "createSchedule": "예약 만들기"
+    "createSchedule": "예약 만들기",
+    "modeLabel": "무엇을 실행",
+    "modeBatch": "하네스 실행",
+    "modeTraces": "트레이스 평가",
+    "modeBatchHint": "매 실행마다 하네스를 데이터셋에 실행해 점수를 수집합니다.",
+    "modeTracesHint": "매 실행마다 옵저버빌리티 소스의 최근 트레이스를 rolling window로 평가합니다 — 데이터셋도, 하네스 실행도 없이.",
+    "pullSourceLabel": "트레이스 소스",
+    "pullSourceRequired": "트레이스 소스를 선택하세요",
+    "pullSourcePlaceholder": "소스 선택",
+    "pullSourceEmpty": "트레이스 소스 없음 — 설정 › 옵저버빌리티에서 등록하세요",
+    "pullWindowLabel": "기간(시간)",
+    "pullWindowTip": "매 실행마다 최근 N시간의 트레이스를 평가합니다 (24 = 지난 하루).",
+    "pullScopeLabel": "범위 (선택)",
+    "pullScopeTip": "조회할 플랫폼 범위 — mlflow experiment / phoenix·langfuse·langsmith project / otel service. 미지정 시 소스 기본 범위.",
+    "pullScopePlaceholder": "experiment / project / service"
   },
   "createWorkspace": {
     "nameRequired": "이름을 입력해주세요.",
@@ -1185,7 +1199,8 @@
     "dowWed": "수",
     "dowThu": "목",
     "dowFri": "금",
-    "dowSat": "토"
+    "dowSat": "토",
+    "traceEvalTarget": "트레이스 평가 · {source}"
   },
   "manageTraceSink": {
     "notExported": "적재 안 함",

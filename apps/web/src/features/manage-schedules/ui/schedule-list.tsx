@@ -132,8 +132,9 @@ export function ScheduleList({
           s.name,
           s.cron,
           describeCron(s.cron, locale),
-          s.runTemplate.dataset.id,
-          s.runTemplate.harness.id,
+          s.runTemplate.dataset?.id ?? '',
+          s.runTemplate.harness?.id ?? '',
+          s.runTemplate.pull?.source ?? '',
           runtimeLabelOf(s),
           ownerNameOf(authors, s.createdBy),
         ]

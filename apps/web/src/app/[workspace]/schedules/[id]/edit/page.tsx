@@ -11,6 +11,7 @@ import { judgesSchema } from '@/entities/judge'
 import { runnersResponseSchema } from '@/entities/runner'
 import { runtimesSchema } from '@/entities/runtime'
 import { scheduleSchema, type Schedule } from '@/entities/schedule'
+import { traceSourcesResponseSchema, type TraceSourceConfig } from '@/entities/trace-source'
 import { currentPrincipal } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
 import { Card } from '@/shared/ui/card'
@@ -51,12 +52,20 @@ export default async function EditSchedulePage({
   let judges: { id: string }[] = []
   let runners: { id: string; label: string }[] = []
   let hasWorkspaceRunners = false
+  let traceSources: TraceSourceConfig[] = []
   try {
     datasets = datasetsSchema.parse(await controlPlane.listDatasets(ctx))
     harnesses = harnessesSchema.parse(await controlPlane.listHarnesses(ctx))
     runtimes = runtimesSchema.parse(await controlPlane.listRuntimes(ctx))
   } catch {
     // Even if the list fails, the form still works (keeps the current values)
+  }
+  try {
+    traceSources = traceSourcesResponseSchema.parse(
+      await controlPlane.listTraceSources(ctx)
+    ).sources
+  } catch {
+    // Even if the list fails, batch mode still works
   }
   try {
     judges = judgesSchema.parse(await controlPlane.listJudges(ctx))
@@ -76,21 +85,34 @@ export default async function EditSchedulePage({
   }
 
   const tmpl = schedule.runTemplate
-  const initial = {
-    name: schedule.name,
-    cron: schedule.cron,
-    timezone: schedule.timezone,
-    overlapPolicy: schedule.overlapPolicy,
-    datasetId: tmpl.dataset.id,
-    datasetVersion: tmpl.dataset.version,
-    harnessId: tmpl.harness.id,
-    harnessVersion: tmpl.harness.version,
-    runtime: tmpl.runtime ?? '',
-    concurrency: tmpl.concurrency != null ? String(tmpl.concurrency) : '',
-    trials: tmpl.trials != null ? String(tmpl.trials) : '',
-    caseLimit: tmpl.cases?.limit != null ? String(tmpl.cases.limit) : '',
-    caseTags: (tmpl.cases?.tags ?? []).join(', '),
-  }
+  // A pull (trace-evaluation) schedule has no dataset/harness — prefill the pull fields + mode instead. Batch is unchanged.
+  const initial = tmpl.pull
+    ? {
+        mode: 'pull' as const,
+        name: schedule.name,
+        cron: schedule.cron,
+        timezone: schedule.timezone,
+        overlapPolicy: schedule.overlapPolicy,
+        pullSource: tmpl.pull.source,
+        pullScope: tmpl.pull.scope ?? '',
+        pullWindowHours: String(tmpl.pull.windowHours),
+      }
+    : {
+        mode: 'batch' as const,
+        name: schedule.name,
+        cron: schedule.cron,
+        timezone: schedule.timezone,
+        overlapPolicy: schedule.overlapPolicy,
+        datasetId: tmpl.dataset?.id ?? '',
+        datasetVersion: tmpl.dataset?.version ?? 'latest',
+        harnessId: tmpl.harness?.id ?? '',
+        harnessVersion: tmpl.harness?.version ?? 'latest',
+        runtime: tmpl.runtime ?? '',
+        concurrency: tmpl.concurrency != null ? String(tmpl.concurrency) : '',
+        trials: tmpl.trials != null ? String(tmpl.trials) : '',
+        caseLimit: tmpl.cases?.limit != null ? String(tmpl.cases.limit) : '',
+        caseTags: (tmpl.cases?.tags ?? []).join(', '),
+      }
 
   return (
     <div className="space-y-6">
@@ -110,6 +132,7 @@ export default async function EditSchedulePage({
           judges={judges}
           runners={runners}
           hasWorkspaceRunners={hasWorkspaceRunners}
+          traceSources={traceSources}
           initial={initial}
           scheduleId={schedule.id}
           initialJudges={tmpl.judges}

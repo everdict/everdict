@@ -5,7 +5,7 @@ import { revalidatePath } from 'next/cache'
 import { authContext } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
 
-import type { CreateScheduleInput } from './create-schedule'
+import { buildScheduleRunTemplate, type CreateScheduleInput } from '../model/build-run-template'
 
 export interface UpdateScheduleResult {
   ok: boolean
@@ -24,15 +24,7 @@ export async function updateScheduleAction(
     cron: input.cron,
     timezone: input.timezone || 'UTC',
     overlapPolicy: input.overlapPolicy || 'skip',
-    runTemplate: {
-      dataset: { id: input.datasetId, version: input.datasetVersion || 'latest' },
-      harness: { id: input.harnessId, version: input.harnessVersion || 'latest' },
-      judges: input.judges ?? [],
-      ...(input.runtime ? { runtime: input.runtime } : {}),
-      ...(input.concurrency ? { concurrency: input.concurrency } : {}),
-      ...(input.trials ? { trials: input.trials } : {}),
-      ...(input.cases ? { cases: input.cases } : {}),
-    },
+    runTemplate: buildScheduleRunTemplate(input),
   }
   try {
     await controlPlane.updateSchedule(ctx, id, patch)

@@ -193,7 +193,21 @@
     "saving": "Saving…",
     "creating": "Creating…",
     "saveChanges": "Save changes",
-    "createSchedule": "Create schedule"
+    "createSchedule": "Create schedule",
+    "modeLabel": "What to run",
+    "modeBatch": "Run harness",
+    "modeTraces": "Evaluate traces",
+    "modeBatchHint": "Each fire runs a harness against a dataset and collects the scores.",
+    "modeTracesHint": "Each fire judges the recent traces of an observability source over a rolling window — no dataset, no harness run.",
+    "pullSourceLabel": "Trace source",
+    "pullSourceRequired": "Select a trace source",
+    "pullSourcePlaceholder": "Select source",
+    "pullSourceEmpty": "No trace sources — register one in Settings › Observability",
+    "pullWindowLabel": "Window (hours)",
+    "pullWindowTip": "Each fire judges the traces from the last N hours (24 = the last day).",
+    "pullScopeLabel": "Scope (optional)",
+    "pullScopeTip": "Platform scope to list within — mlflow experiment / phoenix·langfuse·langsmith project / otel service. Defaults to the source scope.",
+    "pullScopePlaceholder": "experiment / project / service"
   },
   "createWorkspace": {
     "nameRequired": "Enter a name.",
@@ -1185,7 +1199,8 @@
     "dowWed": "Wed",
     "dowThu": "Thu",
     "dowFri": "Fri",
-    "dowSat": "Sat"
+    "dowSat": "Sat",
+    "traceEvalTarget": "Trace evaluation · {source}"
   },
   "manageTraceSink": {
     "notExported": "Not exported",

@@ -8,6 +8,7 @@ import { harnessesSchema } from '@/entities/harness'
 import { judgesSchema } from '@/entities/judge'
 import { runnersResponseSchema } from '@/entities/runner'
 import { runtimesSchema } from '@/entities/runtime'
+import { traceSourcesResponseSchema, type TraceSourceConfig } from '@/entities/trace-source'
 import { can } from '@/shared/auth/can'
 import { currentPrincipal } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
@@ -38,6 +39,7 @@ export default async function NewSchedulePage({
   let judges: { id: string }[] = []
   let runners: { id: string; label: string }[] = []
   let hasWorkspaceRunners = false
+  let traceSources: TraceSourceConfig[] = []
   if (allowed) {
     try {
       datasets = datasetsSchema.parse(await controlPlane.listDatasets(ctx))
@@ -65,6 +67,14 @@ export default async function NewSchedulePage({
     } catch {
       // Even if the roster fails, the form still works (only the pool option is hidden)
     }
+    // Registered observability trace sources — enable the "evaluate traces" (pull) schedule mode. Not shown if it fails/is empty.
+    try {
+      traceSources = traceSourcesResponseSchema.parse(
+        await controlPlane.listTraceSources(ctx)
+      ).sources
+    } catch {
+      // Even if the list fails, batch mode still works (the trace-eval tab just shows "register a source first")
+    }
   }
 
   return (
@@ -86,6 +96,7 @@ export default async function NewSchedulePage({
             judges={judges}
             runners={runners}
             hasWorkspaceRunners={hasWorkspaceRunners}
+            traceSources={traceSources}
           />
         </Card>
       ) : (
