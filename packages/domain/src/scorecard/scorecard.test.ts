@@ -32,6 +32,62 @@ describe("summarizeScorecard", () => {
     const steps = summary.find((s) => s.metric === "tool_calls");
     expect(steps?.mean).toBe(3);
   });
+
+  it("aggregates an ORDERED enum (tier) as a distribution in ordinal order + the most-frequent mode", () => {
+    // A tier grader emits Score.label with `value` as the ordering key (bronze<silver<gold ⇒ 1<2<3); averaging tiers
+    // is meaningless, so the summary carries the label distribution — read in natural order — and the mode.
+    const tier = (caseId: string, label: string, rank: number): CaseResult => ({
+      caseId,
+      harness: "h@1",
+      trace: [],
+      snapshot: { kind: "repo", diff: "", changedFiles: [], headSha: "h" },
+      scores: [{ graderId: "tier", metric: "tier", value: rank, label }],
+    });
+    const summary = summarizeScorecard({
+      suiteId: "s1",
+      harness: "h@1",
+      results: [tier("a", "gold", 3), tier("b", "gold", 3), tier("c", "silver", 2), tier("d", "bronze", 1)],
+    });
+    const m = summary.find((s) => s.metric === "tier");
+    expect(m?.distribution).toEqual([
+      { label: "bronze", count: 1 },
+      { label: "silver", count: 1 },
+      { label: "gold", count: 2 },
+    ]); // natural ordinal order (value asc), NOT frequency — an ordered enum reads bronze→silver→gold
+    expect(m?.mode).toBe("gold"); // mode is still the most-frequent label (count 2), independent of display order
+    expect(m?.count).toBe(4);
+    expect(m?.passRate).toBeUndefined(); // no pass on a categorical metric
+  });
+
+  it("aggregates an UNORDERED enum (reason) by frequency — every value 0 ⇒ count descending", () => {
+    // A classification "reason" enum has no natural order, so the grader sets value 0; the distribution then falls
+    // back to most-frequent-first (the natural read for a failure-reason breakdown).
+    const reason = (caseId: string, label: string): CaseResult => ({
+      caseId,
+      harness: "h@1",
+      trace: [],
+      snapshot: { kind: "repo", diff: "", changedFiles: [], headSha: "h" },
+      scores: [{ graderId: "classify", metric: "reason", value: 0, label }],
+    });
+    const summary = summarizeScorecard({
+      suiteId: "s1",
+      harness: "h@1",
+      results: [
+        reason("a", "correct"),
+        reason("b", "correct"),
+        reason("c", "timeout"),
+        reason("d", "correct"),
+        reason("e", "wrong"),
+      ],
+    });
+    const m = summary.find((s) => s.metric === "reason");
+    expect(m?.distribution).toEqual([
+      { label: "correct", count: 3 },
+      { label: "timeout", count: 1 }, // the count-1 tie breaks alphabetically (timeout < wrong)
+      { label: "wrong", count: 1 },
+    ]);
+    expect(m?.mode).toBe("correct");
+  });
 });
 
 describe("diffScorecards", () => {

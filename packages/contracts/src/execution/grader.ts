@@ -10,6 +10,11 @@ export const ScoreSchema = z.object({
   metric: z.string(),
   value: z.number(),
   pass: z.boolean().optional(),
+  // Categorical outcome (tier/string) — a human-facing value like "gold" | "correct" | "B". Its presence marks the
+  // metric CATEGORICAL: the batch summary aggregates a label DISTRIBUTION + mode instead of a (meaningless) mean, and
+  // the UI shows the label, not `value`. `value` stays required as the numeric ordering key (bronze<silver<gold ⇒
+  // 1<2<3; 0 when unordered) so trend/diff/leaderboard still have a number. Absent ⇒ a plain numeric/boolean metric.
+  label: z.string().optional(),
   detail: z.unknown().optional(),
 });
 export type Score = z.infer<typeof ScoreSchema>;

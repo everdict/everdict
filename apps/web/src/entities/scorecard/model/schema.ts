@@ -39,6 +39,11 @@ export const metricSummarySchema = z.object({
   count: z.number(),
   mean: z.number(),
   passRate: z.number().optional(),
+  // Categorical metrics (scores carried a `label`): label distribution (ordered enum → ordinal, else by frequency) +
+  // most-frequent label. Present only when the metric is categorical (tier/string/enum); the dashboard keys off this
+  // instead of the mean. Guarded vs the wire.
+  distribution: z.array(z.object({ label: z.string(), count: z.number() })).optional(),
+  mode: z.string().optional(),
 })
 
 // trial roll-up (pass@k / flakiness) — derived on the detail when a batch ran trials>1. Absent on single-run batches.
@@ -62,6 +67,7 @@ export const caseScoreSchema = z
     metric: z.string(),
     value: z.number(),
     pass: z.boolean().optional(),
+    label: z.string().optional(), // categorical value (tier/string) — shown instead of `value` when present
     detail: z.unknown().optional(),
   })
   .passthrough()

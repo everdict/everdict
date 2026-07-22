@@ -37,25 +37,60 @@ export interface MetricSummary {
   count: number;
   mean: number;
   passRate?: number;
+  // Categorical metrics (scores carrying `label`): the label distribution (ordered enum → ordinal order, else by
+  // frequency) + the most-frequent label (mode). Set only when the metric is categorical; numeric/boolean metrics
+  // leave them unset. Isomorphic to the contracts MetricSummarySchema. docs/architecture/eval-domain-model.md
+  distribution?: { label: string; count: number }[];
+  mode?: string;
 }
 
-// Per-metric aggregation (count/mean/pass rate).
+// Per-metric aggregation. Numeric/boolean metrics ⇒ count/mean/passRate. A CATEGORICAL metric (any score carried a
+// `label`) additionally gets a label distribution + mode — averaging a tier/string is meaningless, so the display
+// keys off the distribution instead of the mean (which stays populated as the mean of the ordering `value`).
 export function summarizeScorecard(sc: Scorecard): MetricSummary[] {
-  const byMetric = new Map<string, { values: number[]; passes: boolean[] }>();
+  const byMetric = new Map<
+    string,
+    { values: number[]; passes: boolean[]; labeled: { label: string; value: number }[] }
+  >();
   for (const result of sc.results) {
     for (const s of result.scores) {
-      const m = byMetric.get(s.metric) ?? { values: [], passes: [] };
+      const m = byMetric.get(s.metric) ?? { values: [], passes: [], labeled: [] };
       m.values.push(s.value);
       if (s.pass !== undefined) m.passes.push(s.pass);
+      // Pair the label with its ordering `value` (not the metric-wide values[], which would misalign if some scores
+      // in the metric lacked a label) so an ORDERED enum can be shown in its natural order.
+      if (s.label !== undefined) m.labeled.push({ label: s.label, value: s.value });
       byMetric.set(s.metric, m);
     }
   }
-  return [...byMetric.entries()].map(([metric, m]) => ({
-    metric,
-    count: m.values.length,
-    mean: m.values.reduce((a, b) => a + b, 0) / (m.values.length || 1),
-    passRate: m.passes.length > 0 ? m.passes.filter(Boolean).length / m.passes.length : undefined,
-  }));
+  const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
+  return [...byMetric.entries()].map(([metric, m]) => {
+    const summary: MetricSummary = {
+      metric,
+      count: m.values.length,
+      mean: m.values.reduce((a, b) => a + b, 0) / (m.values.length || 1),
+      passRate: m.passes.length > 0 ? m.passes.filter(Boolean).length / m.passes.length : undefined,
+    };
+    if (m.labeled.length > 0) {
+      const counts = new Map<string, number>();
+      const ordinal = new Map<string, number>(); // label → its ordering value (first seen); 0 for an unordered enum
+      for (const { label, value } of m.labeled) {
+        counts.set(label, (counts.get(label) ?? 0) + 1);
+        if (!ordinal.has(label)) ordinal.set(label, value);
+      }
+      const ord = (l: string) => ordinal.get(l) ?? 0;
+      // Display order: ordering `value` ascending (bronze<silver<gold), then most-frequent, then label — so an ORDERED
+      // enum reads in its natural order, while an UNORDERED one (every value 0) falls back to frequency. Deterministic.
+      summary.distribution = [...counts.entries()]
+        .map(([label, count]) => ({ label, count }))
+        .sort((a, b) => ord(a.label) - ord(b.label) || b.count - a.count || cmp(a.label, b.label));
+      // Mode = the single most-frequent label, independent of display order (ties → lower ordinal, then label).
+      summary.mode = [...counts.entries()].sort(
+        (a, b) => b[1] - a[1] || ord(a[0]) - ord(b[0]) || cmp(a[0], b[0]),
+      )[0]?.[0];
+    }
+    return summary;
+  });
 }
 
 export interface CaseDelta {

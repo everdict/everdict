@@ -139,6 +139,66 @@ export function fmtUsd(n: number | null | undefined): string {
   return `$${n.toFixed(2)}`
 }
 
+// ── Metric-kind classification + kind-aware value formatting ─────────────────────────────────
+// A Score's `value` is always a bare number, but a metric can MEAN many things — a pass/fail, a percentage, a cost,
+// a latency, a count, or (with a `label`) a category/tier. We infer the kind so the dashboard formats each with the
+// right unit/visual instead of a uniform "0.50". Inference-based (no declared `kind` on Score) — the categorical and
+// pass/fail signals come from the DATA (a label / a passRate), the numeric units from the metric NAME.
+export type MetricKind =
+  | 'categorical' // scores carry a label → a distribution of tiers/strings (bronze/silver/gold, correct/partial/wrong)
+  | 'passfail' // scores carry pass → a boolean/objective metric summarized as a pass rate
+  | 'currency' // cost/usd/price → $
+  | 'duration' // latency/duration/elapsed/_ms → 12.4s (value is milliseconds)
+  | 'tokens' // token counts → 1.2k
+  | 'count' // steps/tool_calls/turns → integer
+  | 'percent' // accuracy/rate/precision/recall/f1/ratio, or a bare 0..1 mean → %
+  | 'plain' // anything else → 2-decimal number
+
+// Strip a judge-metric prefix (judge:<id>:<criterion>) down to the trailing segment for name-based unit inference.
+function metricUnitName(metric: string): string {
+  const seg = metric.includes(':') ? metric.slice(metric.lastIndexOf(':') + 1) : metric
+  return seg.toLowerCase()
+}
+
+export function classifyMetric(s: {
+  metric: string
+  passRate?: number | null
+  distribution?: readonly unknown[] | null
+  mean?: number | null
+}): MetricKind {
+  if (s.distribution && s.distribution.length > 0) return 'categorical'
+  if (s.passRate != null) return 'passfail'
+  const m = metricUnitName(s.metric)
+  if (/cost|usd|price/.test(m)) return 'currency'
+  if (/latency|duration|elapsed|_ms$|^ms$|millis/.test(m)) return 'duration'
+  if (/token/.test(m)) return 'tokens'
+  if (/steps|tool_calls|turns|calls|count/.test(m)) return 'count'
+  if (/rate|accuracy|precision|recall|ratio|percent|pct|f1/.test(m)) return 'percent'
+  if (s.mean != null && s.mean >= 0 && s.mean <= 1) return 'percent' // bare 0..1 → read as a fraction
+  return 'plain'
+}
+
+// Format a numeric metric value (a mean, or a single case's value) for its inferred kind. Categorical metrics are
+// NOT formatted here — they render as a distribution (their `value` is only an ordering key). percent/passfail
+// expect a 0..1 fraction; duration expects milliseconds.
+export function fmtMetricValue(kind: MetricKind, value: number): string {
+  switch (kind) {
+    case 'currency':
+      return fmtUsd(value)
+    case 'duration':
+      return fmtDurationMs(value)
+    case 'tokens':
+      return fmtTokens(value)
+    case 'percent':
+    case 'passfail':
+      return fmtPct(value)
+    case 'count':
+      return Number.isInteger(value) ? String(value) : value.toFixed(1)
+    default:
+      return value.toFixed(2)
+  }
+}
+
 // Local full rendering for title= (exact time on hover).
 export function fmtDateTimeFull(iso: string): string {
   try {

@@ -10,7 +10,7 @@ dataset×harness → `Scorecard` + summary via `runSuite`. Regression = `diffSco
 `leaderboard`. Cost/tokens come from the **harness's own trace** (Claude `total_cost_usd`), never measured by us.
 
 ## Checklist
-1. Score = `{graderId, metric, value, pass?, detail?}` (`@everdict/contracts`). A grader reads trace + snapshot, never mutates.
+1. Score = `{graderId, metric, value, pass?, label?, detail?}` (`@everdict/contracts`). A grader reads trace + snapshot, never mutates. `value` is always a number; a **categorical** outcome (tier/string/enum — "gold" | "correct" | "timeout") sets `label` (with `value` as the ordering key: `1<2<3` for an ordered enum, `0` for an unordered one), which flips the metric to a **distribution** summary (see checklist 3).
 2. Batch always through `runSuite` (`packages/suite/src/run-suite.ts`) — per-case isolation: a thrown dispatch becomes a `pass:false` failed `CaseResult`, the batch keeps going. Never route a batch via `RunService.submit`.
 3. Aggregate/compare only via `@everdict/domain` pure fns (`summarizeScorecard`/`diffScorecards`/`leaderboard`/`trendSeries`) — they take the light `ScorecardRecord` shape, no `@everdict/db` dep.
 4. Judge = a **model grader** (`JudgeGrader`), constructed where a `Judge` is injected — NOT in `makeGraders`. Scores land under metric `judge:<id>`.
@@ -44,7 +44,11 @@ from `GraderSpec` in `makeGraders` (`packages/graders/src/make-graders.ts`); `ju
 Case verdict is **authority-ranked** (`packages/suite/src/scorecard.ts` `caseVerdict`): ground-truth
 (`state`/`tests_pass`) > objective (`answer_match`/`url_matches`/`dom_contains`) > `judge` — a VLM/LLM judge
 never overturns an objective grader. `scorecardPassRate` aggregates over `caseVerdict`; `summarizeScorecard`
-gives per-metric count/mean/passRate (auto).
+gives per-metric count/mean/passRate (auto) — plus, for a metric whose scores carry `label`, a
+`distribution` (label→count; ordinal order for an ordered enum, else by frequency) + `mode` instead of a
+meaningless mean. The web dashboard is
+**metric-kind-aware** (`classifyMetric`/`fmtMetricValue` in `apps/web/.../format.ts`): categorical → distribution
+bar, pass/fail → proportion bar, numeric → the mean in its inferred unit ($ / s / % / count) — never a raw `0.50`.
 
 ## Agent Judges
 **The authoring surface is the CODE judge** (`kind:"code"`, `docs/judges.md`): user Python/Node code over the

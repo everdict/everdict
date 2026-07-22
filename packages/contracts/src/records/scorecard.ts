@@ -22,6 +22,11 @@ export const MetricSummarySchema = z.object({
   count: z.number(),
   mean: z.number(),
   passRate: z.number().optional(),
+  // Categorical metrics (any score carried a `label`): the label distribution (ordered enum → ordinal order via the
+  // scores' `value`, else by frequency) + the most-frequent label (mode). Present ONLY when the metric is categorical
+  // — numeric/boolean metrics leave both unset and are read via mean/passRate. `mean` stays populated but is not shown.
+  distribution: z.array(z.object({ label: z.string(), count: z.number().int().nonnegative() })).optional(),
+  mode: z.string().optional(),
 });
 export type MetricSummary = z.infer<typeof MetricSummarySchema>;
 

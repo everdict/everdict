@@ -141,7 +141,7 @@ export class ScriptGrader implements Grader {
       throw new UpstreamError(
         "UPSTREAM_ERROR",
         { grader: this.id, issues: parsed.error.issues.map((i) => i.message) },
-        "custom grader output is not in Score / Score[] format ({graderId, metric, value, pass?, detail?}).",
+        "custom grader output is not in Score / Score[] format ({graderId, metric, value, pass?, label?, detail?}). Emit `label` for a categorical/tier metric (e.g. {metric:'tier', value:3, label:'gold'}).",
       );
     }
     return toScores(parsed.data).map((s) => ({ ...s, graderId: this.id }));

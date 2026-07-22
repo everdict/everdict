@@ -20,7 +20,9 @@ import { can } from '@/shared/auth/can'
 import { currentPrincipal } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
 import {
+  classifyMetric,
   fmtMetricLabel,
+  fmtMetricValue,
   fmtPct,
   fmtScoreDetail,
   fmtSubject,
@@ -36,6 +38,7 @@ import { Badge } from '@/shared/ui/badge'
 import { Callout } from '@/shared/ui/callout'
 import { Card } from '@/shared/ui/card'
 import { EntityRef, ModelChip, RuntimeChip } from '@/shared/ui/chip'
+import { DistributionBar } from '@/shared/ui/distribution-bar'
 import { ExpandableText } from '@/shared/ui/expandable-text'
 import { CriterionBadge, MetricLabel } from '@/shared/ui/metric-label'
 import { OriginInline, OriginPins } from '@/shared/ui/origin'
@@ -125,11 +128,44 @@ function EntityMetaLink({ href, children }: { href: string; children: React.Reac
   )
 }
 
-// Numeric cells of a metric-summary row — shared by judge-overall rows and their indented criterion sub-rows.
+// A health-colored proportion bar (0..1) — the visual for a pass/fail metric's pass rate.
+function ProportionBar({ value }: { value: number }) {
+  const health = rateHealth(value)
+  const bg =
+    health === 'good'
+      ? 'var(--color-success)'
+      : health === 'mid'
+        ? 'var(--color-warning)'
+        : 'var(--color-destructive)'
+  return (
+    <div
+      className="h-2 w-full min-w-16 overflow-hidden rounded-full bg-muted/40"
+      title={fmtPct(value)}
+    >
+      <div
+        className="h-full rounded-full"
+        style={{ width: `${Math.round(value * 100)}%`, backgroundColor: bg }}
+      />
+    </div>
+  )
+}
+
+// The "value" cell of a metric-summary row — kind-aware so each metric reads in its own terms rather than a uniform
+// "0.50": a categorical metric shows its label distribution, a pass/fail metric a proportion bar, and a numeric
+// metric its mean with the right unit ($ / s / % / 1.2k). Shared by judge-overall rows and their criterion sub-rows.
 function SummaryCells({ m }: { m: MetricSummary }) {
+  const kind = classifyMetric(m)
   return (
     <>
-      <TD className="text-right font-mono text-[12px] tabular-nums">{m.mean.toFixed(2)}</TD>
+      <TD className="min-w-40">
+        {kind === 'categorical' && m.distribution ? (
+          <DistributionBar segments={m.distribution} mode={m.mode} />
+        ) : kind === 'passfail' && m.passRate != null ? (
+          <ProportionBar value={m.passRate} />
+        ) : (
+          <span className="font-mono text-[12px] tabular-nums">{fmtMetricValue(kind, m.mean)}</span>
+        )}
+      </TD>
       <TD className="text-right font-mono text-[12px] tabular-nums text-muted-foreground">
         {m.count}
       </TD>
@@ -147,6 +183,20 @@ function SummaryCells({ m }: { m: MetricSummary }) {
 // Per-case score badge tone — the judge/grader pass verdict (neutral when the score carries no pass).
 function scoreTone(pass?: boolean): 'neutral' | 'success' | 'danger' {
   return pass == null ? 'neutral' : pass ? 'success' : 'danger'
+}
+
+// The value shown on a per-case score badge: a categorical `label` verbatim (gold / correct / B); a bare 0/1 pass
+// flag as a check/cross (the tone already carries the color, so the raw number is noise); else the value in its
+// inferred unit ($ / s / % / count). Keeps a single case's score as legible as the aggregate summary.
+function scoreBadgeValue(s: {
+  metric: string
+  value: number
+  pass?: boolean
+  label?: string
+}): string {
+  if (s.label !== undefined && s.label !== '') return s.label
+  if (s.pass !== undefined && (s.value === 0 || s.value === 1)) return s.pass ? '✓' : '✗'
+  return fmtMetricValue(classifyMetric({ metric: s.metric, mean: s.value }), s.value)
 }
 
 function BackLink({ workspace, label }: { workspace: string; label: string }) {
@@ -730,7 +780,7 @@ export default async function ScorecardDetailPage({
             <THead>
               <tr>
                 <TH>metric</TH>
-                <TH className="text-right">mean</TH>
+                <TH>value</TH>
                 <TH className="text-right">n</TH>
                 <TH className="text-right">pass rate</TH>
               </tr>
@@ -858,7 +908,7 @@ export default async function ScorecardDetailPage({
                               title={g.row.metric}
                               tone={scoreTone(g.row.pass)}
                             >
-                              {fmtMetricLabel(g.row.metric, caseMetrics)} {g.row.value}
+                              {fmtMetricLabel(g.row.metric, caseMetrics)} {scoreBadgeValue(g.row)}
                             </Badge>
                           ) : (
                             <span
@@ -866,7 +916,7 @@ export default async function ScorecardDetailPage({
                               className="inline-flex flex-wrap items-center gap-1 rounded-lg border border-border/60 bg-muted/20 p-0.5"
                             >
                               <Badge title={g.row.metric} tone={scoreTone(g.row.pass)}>
-                                {fmtMetricLabel(g.row.metric, caseMetrics)} {g.row.value}
+                                {fmtMetricLabel(g.row.metric, caseMetrics)} {scoreBadgeValue(g.row)}
                               </Badge>
                               {g.criteria.map((c) => (
                                 <Badge
@@ -878,7 +928,7 @@ export default async function ScorecardDetailPage({
                                   {c.parsed.kind === 'judge-criterion'
                                     ? c.parsed.criterionId
                                     : c.row.metric}{' '}
-                                  {c.row.value}
+                                  {scoreBadgeValue(c.row)}
                                 </Badge>
                               ))}
                             </span>
