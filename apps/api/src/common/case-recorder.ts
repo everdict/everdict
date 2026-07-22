@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import type { ArtifactStore, RecordingStore } from "@everdict/application-control";
+import type { TrackEntry } from "@everdict/contracts";
 
 // The durable twin of LiveFrameStore/LiveLogStore. As a self-hosted runner pushes frames/logs
 // (report_case_screen / report_case_log), the runner-lease MCP handlers ALSO tee them here so the run can be
@@ -41,6 +42,17 @@ export class CaseRecorder {
       await this.recordings.append(runId, { track: "logs", entry: { t: this.now(), stream: "stdout", text: line } });
     } catch {
       // best-effort
+    }
+  }
+
+  // Append a pre-prepared deep-capture entry (network/console/nav/dom/stateDeltas/runtime/custom). Byte-heavy
+  // entries (dom-event batches) carry an object-store ref the PRODUCER already offloaded, so this is a pure
+  // append — the deep-track twin of recordFrame (which offloads a raw frame). Frames still go through recordFrame.
+  async recordTrack(runId: string, item: TrackEntry): Promise<void> {
+    try {
+      await this.recordings.append(runId, item);
+    } catch {
+      // best-effort — a recording failure must never affect the run
     }
   }
 }

@@ -1,5 +1,5 @@
 import { type SelfHostedKey, runnerUpdateRequired } from "@everdict/application-control";
-import { CaseResultSchema, RUNNER_PROTOCOL_VERSION } from "@everdict/contracts";
+import { CaseResultSchema, RUNNER_PROTOCOL_VERSION, TrackEntrySchema } from "@everdict/contracts";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { type McpToolContext, fail, ok, plain } from "../mcp-context.js";
@@ -158,6 +158,29 @@ export function registerRunnerLeaseTools(server: McpServer, ctx: McpToolContext)
             logs.append(runId, line);
             // Durable replay tee (best-effort) — persist the log line onto the recording's logs lane.
             await deps.caseRecorder?.recordLog(runId, line);
+            return ok({ ok: true });
+          }),
+      );
+    }
+
+    // Generic deep-track push — the deep-capture twin of report_case_screen/report_case_log. A producer (a browser
+    // CDP recorder, a runtime sampler, …) pushes a prepared TrackEntry (network/console/nav/dom/runtime/custom;
+    // byte-heavy entries carry an already-offloaded ref) here, keyed by the CP-minted runId; the durable recorder
+    // appends it so it replays on the run detail. Runner token only, best-effort.
+    if (deps.caseRecorder) {
+      const recorder = deps.caseRecorder;
+      server.registerTool(
+        "report_case_track",
+        {
+          description:
+            "Push one prepared replay track entry (network/console/nav/dom/runtime/custom — byte-heavy entries carry an offloaded ref) for a running case, keyed by its runId. The deep-capture twin of report_case_screen/report_case_log; best-effort.",
+          inputSchema: { runId: z.string().min(1), item: TrackEntrySchema },
+        },
+        ({ runId, item }) =>
+          plain(async () => {
+            const key = runnerKey();
+            if (!key) return fail(NEED_RUNNER);
+            await recorder.recordTrack(runId, item);
             return ok({ ok: true });
           }),
       );

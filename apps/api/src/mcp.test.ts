@@ -14,6 +14,7 @@ import type { AgentJob, CaseResult, RunRecord, RuntimeSpec } from "@everdict/con
 import {
   InMemoryBudgetStore,
   InMemoryOAuthStateStore,
+  InMemoryRecordingStore,
   InMemoryRunStore,
   InMemoryRunnerStore,
   InMemoryScheduleStore,
@@ -35,10 +36,12 @@ import {
   InMemoryRubricRegistry,
   InMemoryRuntimeRegistry,
 } from "@everdict/registry";
+import { InMemoryArtifactStore } from "@everdict/storage";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { describe, expect, it } from "vitest";
 import { persistentBudget } from "./common/budget-tracker.js";
+import { CaseRecorder } from "./common/case-recorder.js";
 import { LiveFrameStore } from "./common/live-frame-store.js";
 import { LiveLogStore } from "./common/live-log-store.js";
 import { BundleService } from "./core/bundle/bundle-service.js";
@@ -275,6 +278,36 @@ describe("MCP — live execution log (report_case_log)", () => {
     const res = await admin.callTool({ name: "report_case_log", arguments: { runId: "evd-run-42", line: "x" } });
     expect(res.isError).toBe(true);
     expect(logs.get("evd-run-42")).toBeUndefined();
+  });
+});
+
+describe("MCP — deep track push (report_case_track)", () => {
+  const withRecorder = (recordings: InMemoryRecordingStore) => ({
+    ...harness(),
+    caseRecorder: new CaseRecorder(recordings, new InMemoryArtifactStore()),
+  });
+
+  it("a runner pushes a prepared deep-track entry; it is appended to the recording under the run id", async () => {
+    const recordings = new InMemoryRecordingStore();
+    const runner = await connectRunner(withRecorder(recordings), "laptop");
+    const res = await runner.callTool({
+      name: "report_case_track",
+      arguments: { runId: "evd-run-42", item: { track: "network", entry: { t: 1, method: "GET", url: "https://x" } } },
+    });
+    expect(res.isError).toBeFalsy();
+    await recordings.seal("evd-run-42", { envKind: "browser" });
+    expect((await recordings.get("evd-run-42"))?.tracks.network?.[0]?.url).toBe("https://x");
+  });
+
+  it("regular (non-runner) credentials cannot push a track — FORBIDDEN", async () => {
+    const recordings = new InMemoryRecordingStore();
+    const admin = await connect(withRecorder(recordings), ["admin"]); // via=oidc, no runnerId
+    const res = await admin.callTool({
+      name: "report_case_track",
+      arguments: { runId: "evd-run-42", item: { track: "console", entry: { t: 1, level: "log", text: "x" } } },
+    });
+    expect(res.isError).toBe(true);
+    expect(await recordings.get("evd-run-42")).toBeUndefined();
   });
 });
 

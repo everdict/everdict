@@ -80,6 +80,22 @@ describe("CaseRecorder", () => {
     expect(rec?.tracks.frames).toBeUndefined();
   });
 
+  it("appends a prepared deep-track entry (network/console/…) verbatim onto its lane", async () => {
+    // Given a recorder and producer-prepared deep-track entries (byte-heavy ones carry an already-offloaded ref)
+    const recordings = new InMemoryRecordingStore();
+    const recorder = new CaseRecorder(recordings, new InMemoryArtifactStore(), fakeClock());
+
+    // When deep tracks are pushed
+    await recorder.recordTrack("evd-run-1", { track: "network", entry: { t: 5, method: "GET", url: "https://x" } });
+    await recorder.recordTrack("evd-run-1", { track: "console", entry: { t: 6, level: "error", text: "boom" } });
+
+    // Then each lands on its own lane, appended as-is (no offload)
+    await recordings.seal("evd-run-1", { envKind: "browser" });
+    const rec = await recordings.get("evd-run-1");
+    expect(rec?.tracks.network?.[0]?.url).toBe("https://x");
+    expect(rec?.tracks.console?.[0]?.text).toBe("boom");
+  });
+
   it("swallows an artifact-store failure so a recording error never affects the run", async () => {
     // Given an artifact store that throws on put
     const recordings = new InMemoryRecordingStore();
