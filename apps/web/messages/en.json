@@ -2095,8 +2095,18 @@
     "snapshot": "Snapshot ({kind})",
     "discuss": "Discussion",
     "liveLogs": "Live logs",
-    "liveTrace": "The trace is accumulating on the {kind} platform right now:",
-    "sandbox": "Sandbox terminal"
+    "liveTrace": "This harness is configured to report its trace to {kind} — find it there by everdict.run_id:",
+    "sandbox": "Sandbox terminal",
+    "metaRuntime": "Runtime",
+    "metaSource": "Origin",
+    "metaRunBy": "Run by",
+    "metaScorecard": "Scorecard",
+    "runtimeSelfHosted": "Self-hosted runner",
+    "runtimeDetailTitle": "View runtime detail",
+    "usageCost": "Cost",
+    "usageTokens": "Tokens",
+    "usageCalls": "Calls",
+    "usageTokensBreakdown": "{prompt} in · {completion} out"
   },
   "runsTable": {
     "sourceWeb": "Web",

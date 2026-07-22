@@ -2095,8 +2095,18 @@
     "snapshot": "스냅샷 ({kind})",
     "discuss": "논의",
     "liveLogs": "라이브 로그",
-    "liveTrace": "트레이스가 {kind} 플랫폼에 실시간 적재 중이에요:",
-    "sandbox": "샌드박스 터미널"
+    "liveTrace": "이 하니스는 트레이스를 {kind}에 내보내도록 설정돼 있어요 — everdict.run_id로 여기서 찾아봐요:",
+    "sandbox": "샌드박스 터미널",
+    "metaRuntime": "런타임",
+    "metaSource": "출처",
+    "metaRunBy": "실행자",
+    "metaScorecard": "스코어카드",
+    "runtimeSelfHosted": "셀프호스티드 러너",
+    "runtimeDetailTitle": "런타임 상세 보기",
+    "usageCost": "비용",
+    "usageTokens": "토큰",
+    "usageCalls": "호출",
+    "usageTokensBreakdown": "입력 {prompt} · 출력 {completion}"
   },
   "runsTable": {
     "sourceWeb": "웹",

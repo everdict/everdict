@@ -74,6 +74,10 @@ export const runSchema = z.object({
   error: z.object({ code: z.string(), message: z.string() }).optional(),
   // provenance (activity view source axis): web|mcp|api|scorecard|schedule|front-door… unset=direct API.
   trigger: z.string().optional(),
+  // who ran it (member subject) — resolved to a display name via the members join. Machine-fired is unset.
+  createdBy: z.string().optional(),
+  // the runtime it was placed on (registered runtime id | self:<runnerId>). Unset = default backend / legacy.
+  runtime: z.string().optional(),
   // the scorecard batch this run belongs to (if any). The control plane excludes children (where set) from the activity list by default.
   parentScorecardId: z.string().optional(),
   // live trace deep-link (derived, present only while active + the harness exports a platform trace)

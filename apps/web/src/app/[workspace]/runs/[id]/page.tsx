@@ -6,13 +6,15 @@ import { LiveLogs } from '@/widgets/live-logs'
 import { LiveScreen, SandboxTerminal } from '@/widgets/sandbox-terminal'
 import { TraceTimeline } from '@/widgets/trace-timeline'
 import { CommentsSection } from '@/features/discuss'
+import { membersSchema } from '@/entities/member'
 import { runSchema, type Run } from '@/entities/run'
 import { authContext } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
-import { fmtScoreDetail } from '@/shared/lib/format'
+import { fmtScoreDetail, fmtSubject, fmtTokens, fmtUsd } from '@/shared/lib/format'
 import { Badge } from '@/shared/ui/badge'
 import { Callout } from '@/shared/ui/callout'
 import { Card } from '@/shared/ui/card'
+import { RuntimeChip } from '@/shared/ui/chip'
 import { MetricLabel } from '@/shared/ui/metric-label'
 import { PageHeader } from '@/shared/ui/page-header'
 import { SectionHeader } from '@/shared/ui/section-header'
@@ -31,11 +33,42 @@ function osUseShotSrc(snapshot?: {
   return undefined
 }
 
-function Prop({ label, value }: { label: string; value: string }) {
+// Source (the activity view's source axis) → the shared human label (reused from the runs-table). Unset = direct API.
+const SOURCE_KEY: Record<string, string> = {
+  web: 'sourceWeb',
+  mcp: 'sourceMcp',
+  api: 'sourceApi',
+  scorecard: 'sourceScorecard',
+  schedule: 'sourceSchedule',
+  'front-door': 'sourceFrontDoor',
+}
+
+// One labeled cell of the meta card (dt/dd). Rich cells (runtime chip, scorecard link) pass `children`; `Prop` is the
+// plain-text convenience over it (harness/case/source/run-by/created/updated).
+function MetaItem({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="min-w-0">
       <dt className="text-[11px] font-[510] uppercase tracking-wide text-faint">{label}</dt>
-      <dd className="mt-1 truncate font-mono text-[13px] text-foreground">{value}</dd>
+      <dd className="mt-1">{children}</dd>
+    </div>
+  )
+}
+
+function Prop({ label, value }: { label: string; value: string }) {
+  return (
+    <MetaItem label={label}>
+      <span className="block truncate font-mono text-[13px] text-foreground">{value}</span>
+    </MetaItem>
+  )
+}
+
+// One economics stat of the usage card (cost / tokens / calls) — a single run's own cost, which a scorecard only
+// aggregates. `usage` is derived from the trace on read (usageFromTrace), so it needs no separate fetch.
+function UsageStat({ label, value, hint }: { label: string; value: string; hint?: string }) {
+  return (
+    <div title={hint}>
+      <div className="text-[10.5px] font-[560] uppercase tracking-wide text-faint">{label}</div>
+      <div className="mt-0.5 font-mono text-[15px] font-[560] tabular-nums">{value}</div>
     </div>
   )
 }
@@ -83,6 +116,34 @@ export default async function RunDetailPage({
   const scores = run.result?.scores ?? []
   const trace = run.result?.trace ?? []
   const snapshot = run.result?.snapshot
+  const usage = run.usage
+
+  // Source label — reuse the runs-table's shared source vocabulary (web/mcp/api/scorecard/schedule/front-door).
+  const tTable = await getTranslations('runsTable')
+  const sourceKey = run.trigger ? SOURCE_KEY[run.trigger] : undefined
+  const sourceText = run.trigger
+    ? sourceKey
+      ? tTable(sourceKey)
+      : run.trigger
+    : tTable('sourceDirect')
+
+  // Run-by name (members join) — supplementary, so the detail still renders if it fails. Name is profile name > email
+  // local part > shortened subject. Machine-fired runs (createdBy unset) skip the lookup and hide the cell.
+  let authorName: string | undefined
+  if (run.createdBy) {
+    const createdBy = run.createdBy
+    const members = await controlPlane
+      .listMembers(ctx)
+      .then((r) => membersSchema.parse(r))
+      .catch(() => [])
+    const m = members.find((x) => x.subject === createdBy)
+    authorName = m?.name ?? m?.email?.split('@')[0] ?? fmtSubject(createdBy)
+  }
+
+  // Runtime this run was placed on — a registered runtime links to its detail; a self-hosted runner (self / self:<id>)
+  // shows a generic label with no link (multi-tenant: it may be another member's personal device, no screen to open).
+  const runtime = run.runtime
+  const runtimeIsSelfHosted = runtime === 'self' || (runtime?.startsWith('self:') ?? false)
 
   return (
     <div className="space-y-7">
@@ -101,6 +162,25 @@ export default async function RunDetailPage({
       <Card className="grid grid-cols-2 gap-4 p-4 sm:grid-cols-4">
         <Prop label="harness" value={`${run.harness.id}@${run.harness.version}`} />
         <Prop label="case" value={run.caseId} />
+        {/* Runtime (where it ran) — registered runtime links out; a self-hosted runner shows a label only. Hidden if unset (legacy / default backend). */}
+        {runtime && (
+          <MetaItem label={t('metaRuntime')}>
+            {runtimeIsSelfHosted ? (
+              <RuntimeChip label={t('runtimeSelfHosted')} />
+            ) : (
+              <Link
+                href={`/${workspace}/runtimes/${encodeURIComponent(runtime)}`}
+                className="rounded-sm hover:underline"
+                title={t('runtimeDetailTitle')}
+              >
+                <RuntimeChip label={runtime} />
+              </Link>
+            )}
+          </MetaItem>
+        )}
+        {/* Source (why this run happened) + run-by (who) — the activity view's provenance axes, folded into the meta card. */}
+        <Prop label={t('metaSource')} value={sourceText} />
+        {authorName && <Prop label={t('metaRunBy')} value={authorName} />}
         <Prop
           label="created"
           value={new Date(run.createdAt).toLocaleString(undefined, { timeZone })}
@@ -109,7 +189,35 @@ export default async function RunDetailPage({
           label="updated"
           value={new Date(run.updatedAt).toLocaleString(undefined, { timeZone })}
         />
+        {/* Batch child run → back-link to the scorecard it belongs to (standalone runs have no parent, so hidden). */}
+        {run.parentScorecardId && (
+          <MetaItem label={t('metaScorecard')}>
+            <Link
+              href={`/${workspace}/scorecards/${encodeURIComponent(run.parentScorecardId)}`}
+              className="inline-flex items-center gap-1 font-mono text-[13px] text-link transition-colors hover:text-foreground"
+            >
+              {run.parentScorecardId.slice(0, 8)} →
+            </Link>
+          </MetaItem>
+        )}
       </Card>
+
+      {/* Usage (this run's own economics) — cost · tokens · calls, derived from the trace. A scorecard only aggregates
+          these across cases; a single run reports its own. Hidden until there's a non-zero trace-derived usage. */}
+      {usage && (usage.usd > 0 || usage.totalTokens > 0) && (
+        <Card className="flex flex-wrap items-center gap-x-8 gap-y-2 p-4">
+          <UsageStat label={t('usageCost')} value={fmtUsd(usage.usd)} />
+          <UsageStat
+            label={t('usageTokens')}
+            value={fmtTokens(usage.totalTokens)}
+            hint={t('usageTokensBreakdown', {
+              prompt: usage.promptTokens,
+              completion: usage.completionTokens,
+            })}
+          />
+          <UsageStat label={t('usageCalls')} value={String(usage.calls)} />
+        </Card>
+      )}
 
       {run.error && (
         <Callout tone="danger" hint={run.error.message}>
