@@ -2,6 +2,7 @@ import type { GithubAppService } from "@everdict/application-control";
 import type { ImageRegistryService } from "@everdict/application-control";
 import type { NotificationService } from "@everdict/application-control";
 import { RunService } from "@everdict/application-control";
+import type { RecordingStore } from "@everdict/application-control";
 import type { Dispatcher as CoreDispatcher, ExecStreamHandle } from "@everdict/backends";
 import type { GradeContext, JudgeSpec } from "@everdict/contracts";
 import type { RunStore, WorkspaceSettingsStore } from "@everdict/db";
@@ -66,6 +67,8 @@ export function buildRun(deps: {
   liveFrames: LiveFrameStore;
   // Accumulated live execution log per run, pushed by a self-hosted runner (report_case_log). RunService.logs() serves it.
   liveLogs: LiveLogStore;
+  // Durable replay recording (optional) — RunService seals it at finalize and attaches the ref to the result.
+  recordingStore?: RecordingStore;
 }) {
   const {
     store,
@@ -87,6 +90,7 @@ export function buildRun(deps: {
     readers,
     liveFrames,
     liveLogs,
+    recordingStore,
   } = deps;
   const { readCaseLogsFn, execInSandboxFn, captureBrowserScreenFn, openTerminalStreamFn } = readers;
 
@@ -109,6 +113,7 @@ export function buildRun(deps: {
     requireRuntime: true, // policy (default): a run with no runtime/self target is 400 at submit — the API does not register local
     preflightPlacement, // submit-time capability gate: reject a harness/runtime mismatch (e.g. Windows topology → Linux cluster) at 400
     ...(artifacts ? { artifacts } : {}),
+    ...(recordingStore ? { recordingStore } : {}),
     // Declarative harness: resolve template+pins from the instance registry and embed the spec in the job (built-in fallback if absent).
     resolveHarness: (tenant, id, version) => harnessInstanceRegistry.get(tenant, id, version),
     // Resolve harness env {secretRef} (shared + personal secrets) just before dispatch (no plaintext stored in the registry). Same as scorecard.

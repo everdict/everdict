@@ -131,6 +131,8 @@ export function registerRunnerLeaseTools(server: McpServer, ctx: McpToolContext)
             const key = runnerKey();
             if (!key) return fail(NEED_RUNNER);
             frames.put(runId, frame);
+            // Durable replay tee (best-effort) — persist the frame so the run can be replayed after it settles.
+            await deps.caseRecorder?.recordFrame(runId, frame);
             return ok({ ok: true });
           }),
       );
@@ -154,6 +156,8 @@ export function registerRunnerLeaseTools(server: McpServer, ctx: McpToolContext)
             const key = runnerKey();
             if (!key) return fail(NEED_RUNNER);
             logs.append(runId, line);
+            // Durable replay tee (best-effort) — persist the log line onto the recording's logs lane.
+            await deps.caseRecorder?.recordLog(runId, line);
             return ok({ ok: true });
           }),
       );

@@ -109,6 +109,8 @@ export function registerMcpRoutes(app: FastifyInstance, deps: ServerDeps): void 
           runnerHub: deps.runnerHub,
           liveFrames: deps.liveFrames, // runner PUSH of live-screen frames (report_case_screen) — same MCP endpoint as the lease tools
           liveLogs: deps.liveLogs, // runner PUSH of the live execution log (report_case_log)
+          caseRecorder: deps.caseRecorder, // durable replay tee for the pushed frames/logs
+
           settingsStore: deps.settingsStore,
           benchmarkService: deps.benchmarkService,
           bundleService: deps.bundleService,

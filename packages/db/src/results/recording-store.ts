@@ -1,10 +1,13 @@
 import type { RecordingSeal, RecordingStore } from "@everdict/application-control";
-import type { CaseRecording, RecordingRef, TrackEntry } from "@everdict/contracts";
+import type { CaseRecording, DispatchManifest, Fidelity, RecordingRef, TrackEntry } from "@everdict/contracts";
 
-// In-memory recording store (dev/test). Accumulates track entries per runId; `seal` freezes the metadata and hands
-// back a memory:// ref. Interchangeable with the Postgres + object-store impl behind RecordingStore (S4).
+type SealedMeta = { t0: number; envKind: string; effectiveFidelity: Fidelity; dispatch?: DispatchManifest };
+
+// In-memory recording store (dev/test). Accumulates track entries per runId; `seal` freezes the metadata (deriving
+// t0 + effectiveFidelity from the tracks) and hands back a memory:// ref. Interchangeable with the Postgres +
+// object-store impl behind RecordingStore (S4).
 export class InMemoryRecordingStore implements RecordingStore {
-  private readonly recordings = new Map<string, { tracks: CaseRecording["tracks"]; sealed?: RecordingSeal }>();
+  private readonly recordings = new Map<string, { tracks: CaseRecording["tracks"]; sealed?: SealedMeta }>();
 
   async append(runId: string, item: TrackEntry): Promise<void> {
     const rec = this.recordings.get(runId) ?? { tracks: {} };
@@ -12,10 +15,16 @@ export class InMemoryRecordingStore implements RecordingStore {
     this.recordings.set(runId, rec);
   }
 
-  async seal(runId: string, meta: RecordingSeal): Promise<RecordingRef> {
-    const rec = this.recordings.get(runId) ?? { tracks: {} };
-    rec.sealed = meta;
-    this.recordings.set(runId, rec);
+  async seal(runId: string, meta: RecordingSeal): Promise<RecordingRef | undefined> {
+    const rec = this.recordings.get(runId);
+    if (!rec) return undefined; // nothing was recorded for this run → no ref to attach
+    rec.sealed = {
+      t0: earliestT(rec.tracks),
+      envKind: meta.envKind,
+      // What was actually captured: a screen-frame series is `frames`; otherwise only logs/metadata → `final`.
+      effectiveFidelity: rec.tracks.frames?.length ? "frames" : "final",
+      ...(meta.dispatch ? { dispatch: meta.dispatch } : {}),
+    };
     return { ref: `memory://recording/${runId}` };
   }
 
@@ -28,9 +37,19 @@ export class InMemoryRecordingStore implements RecordingStore {
       tracks: rec.tracks,
       envKind: rec.sealed.envKind,
       effectiveFidelity: rec.sealed.effectiveFidelity,
-      dispatch: rec.sealed.dispatch,
+      ...(rec.sealed.dispatch ? { dispatch: rec.sealed.dispatch } : {}),
     };
   }
+}
+
+// The wall-clock anchor: the earliest event across all lanes (fallback 0 when empty).
+function earliestT(tracks: CaseRecording["tracks"]): number {
+  let t0 = Number.POSITIVE_INFINITY;
+  for (const lane of Object.values(tracks)) {
+    if (!lane) continue;
+    for (const e of lane) t0 = Math.min(t0, e.t);
+  }
+  return Number.isFinite(t0) ? t0 : 0;
 }
 
 // Push one entry onto its track lane, type-safe over the discriminated TrackEntry (each case narrows item.entry).

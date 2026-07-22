@@ -11,7 +11,15 @@ describe("InMemoryRecordingStore", () => {
     expect(await store.get("run-1")).toBeUndefined();
   });
 
-  it("accumulates track entries in order and seals them into a CaseRecording", async () => {
+  it("seals nothing (undefined) when no entries were recorded for the run", async () => {
+    // Given a run with nothing appended
+    const store = new InMemoryRecordingStore();
+    // When/Then there is no recording to seal → no RecordingRef to attach
+    expect(await store.seal("run-x", { envKind: "repo" })).toBeUndefined();
+    expect(await store.get("run-x")).toBeUndefined();
+  });
+
+  it("accumulates track entries in order and seals them, deriving t0 and effectiveFidelity", async () => {
     // Given frames, logs and a runtime sample appended across a run
     const store = new InMemoryRecordingStore();
     const entries: TrackEntry[] = [
@@ -22,24 +30,28 @@ describe("InMemoryRecordingStore", () => {
     ];
     for (const entry of entries) await store.append("run-1", entry);
 
-    // When the recording is sealed with its clock/kind/fidelity + audit manifest
-    const ref = await store.seal("run-1", {
-      t0: 1000,
-      envKind: "browser",
-      effectiveFidelity: "frames",
-      dispatch: { harness: "claude-code@1.0.0" },
-    });
+    // When the recording is sealed with its env kind + audit manifest
+    const ref = await store.seal("run-1", { envKind: "browser", dispatch: { harness: "claude-code@1.0.0" } });
 
     // Then the ref points at the recording and get() returns the assembled, ordered tracks
-    expect(ref.ref).toBe("memory://recording/run-1");
+    expect(ref?.ref).toBe("memory://recording/run-1");
     const rec = await store.get("run-1");
-    expect(rec?.t0).toBe(1000);
+    expect(rec?.t0).toBe(1000); // earliest event across all lanes
     expect(rec?.envKind).toBe("browser");
-    expect(rec?.effectiveFidelity).toBe("frames");
+    expect(rec?.effectiveFidelity).toBe("frames"); // frames present → a screenshot series
     expect(rec?.tracks.frames?.map((f) => f.ref)).toEqual(["memory://f1", "memory://f2"]);
     expect(rec?.tracks.logs?.[0]?.text).toBe("step 1");
     expect(rec?.tracks.runtime?.[0]?.memBytes).toBe(128);
     expect(rec?.dispatch?.harness).toBe("claude-code@1.0.0");
+  });
+
+  it("derives effectiveFidelity=final for a logs-only recording (no frame series)", async () => {
+    // Given only log lines (a run with no live screen)
+    const store = new InMemoryRecordingStore();
+    await store.append("run-2", { track: "logs", entry: { t: 5, stream: "stdout", text: "started" } });
+    await store.seal("run-2", { envKind: "repo" });
+    // Then the recording is `final` fidelity — the final snapshot is the only visual
+    expect((await store.get("run-2"))?.effectiveFidelity).toBe("final");
   });
 
   it("keeps recordings separate per runId", async () => {
@@ -47,8 +59,8 @@ describe("InMemoryRecordingStore", () => {
     const store = new InMemoryRecordingStore();
     await store.append("run-a", { track: "frames", entry: { t: 1, ref: "memory://a" } });
     await store.append("run-b", { track: "frames", entry: { t: 1, ref: "memory://b" } });
-    await store.seal("run-a", { t0: 0, envKind: "os-use", effectiveFidelity: "frames" });
-    await store.seal("run-b", { t0: 0, envKind: "os-use", effectiveFidelity: "frames" });
+    await store.seal("run-a", { envKind: "os-use" });
+    await store.seal("run-b", { envKind: "os-use" });
 
     // Then each recording holds only its own frames
     expect((await store.get("run-a"))?.tracks.frames?.map((f) => f.ref)).toEqual(["memory://a"]);

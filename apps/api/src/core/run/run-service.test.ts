@@ -1,7 +1,7 @@
 import { RunService } from "@everdict/application-control";
 import type { Dispatcher } from "@everdict/backends";
 import { type AgentJob, BadRequestError, type CaseResult, type EvalCase, type HarnessSpec } from "@everdict/contracts";
-import { InMemoryRunStore, type RunRecord } from "@everdict/db";
+import { InMemoryRecordingStore, InMemoryRunStore, type RunRecord } from "@everdict/db";
 import { inMemoryBudget } from "@everdict/domain";
 import { describe, expect, it, vi } from "vitest";
 
@@ -49,6 +49,41 @@ describe("RunService", () => {
     const done = await svc.get(rec.id);
     expect(done?.status).toBe("succeeded");
     expect(done?.result?.caseId).toBe("c1");
+  });
+
+  it("seals the replay recording and attaches its ref when frames were teed during the run", async () => {
+    // Given a recording store with a frame teed under the run's derived runId (evd-run-<id>)
+    const store = new InMemoryRunStore();
+    const recordingStore = new InMemoryRecordingStore();
+    await recordingStore.append("evd-run-rec1", { track: "frames", entry: { t: 1, ref: "memory://f" } });
+    const svc = new RunService({ dispatcher: okDispatcher, store, newId: () => "rec1", recordingStore });
+
+    // When the run finalizes
+    const rec = await svc.submit({ tenant: "t", harness: { id: "s", version: "0" }, case: CASE });
+    await flush();
+
+    // Then the result carries the recordingRef and the sealed recording (envKind from the case) is retrievable
+    const done = await svc.get(rec.id);
+    expect(done?.result?.recordingRef?.ref).toBe("memory://recording/evd-run-rec1");
+    expect((await recordingStore.get("evd-run-rec1"))?.envKind).toBe("repo");
+  });
+
+  it("attaches no recordingRef when nothing was recorded for the run", async () => {
+    // Given a recording store with no entries for this run
+    const store = new InMemoryRunStore();
+    const svc = new RunService({
+      dispatcher: okDispatcher,
+      store,
+      newId: () => "rec2",
+      recordingStore: new InMemoryRecordingStore(),
+    });
+
+    // When the run finalizes with nothing teed
+    const rec = await svc.submit({ tenant: "t", harness: { id: "s", version: "0" }, case: CASE });
+    await flush();
+
+    // Then no recordingRef is attached (an empty recording seals to undefined)
+    expect((await svc.get(rec.id))?.result?.recordingRef).toBeUndefined();
   });
 
   it("when a runtime is given, injects it as the case's placement.target and dispatches (same symmetry as scorecard)", async () => {

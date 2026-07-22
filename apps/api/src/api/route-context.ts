@@ -87,6 +87,7 @@ import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest }
 import { WebSocketServer } from "ws";
 import type { z } from "zod";
 import { type BudgetAdmin, BudgetLimitInputSchema } from "../common/budget-tracker.js";
+import type { CaseRecorder } from "../common/case-recorder.js";
 import type { LiveFrameStore } from "../common/live-frame-store.js";
 import type { LiveLogStore } from "../common/live-log-store.js";
 import type { TerminalTicketStore } from "../common/terminal-ticket.js";
@@ -171,6 +172,7 @@ export interface ServerDeps {
   terminalTickets?: TerminalTicketStore; // WS terminal (observability ⑥) — mints/consumes short-lived tickets (WS routes disabled if absent)
   liveFrames?: LiveFrameStore; // live-screen frames pushed by a self-hosted runner (report_case_screen) — served by RunService.screen()
   liveLogs?: LiveLogStore; // live execution log pushed by a self-hosted runner (report_case_log) — served by RunService.logs()
+  caseRecorder?: CaseRecorder; // durable replay tee — persists the pushed frames/logs (docs/architecture/replay.md)
   browserSessionService?: BrowserSessionService; // interactive browser sessions (browser-profiles S1) — self-scoped (routes disabled if absent)
   browserTickets?: TicketStore; // WS ticket store for interactive browser sessions (browser-session WS disabled if absent)
   browserProfileService?: BrowserProfileService; // saved authenticated browser profiles (browser-profiles S2) — self-scoped (routes disabled if absent)

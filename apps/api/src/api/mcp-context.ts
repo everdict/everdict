@@ -34,6 +34,7 @@ import type {
 } from "@everdict/registry";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { BudgetAdmin } from "../common/budget-tracker.js";
+import type { CaseRecorder } from "../common/case-recorder.js";
 import type { LiveFrameStore } from "../common/live-frame-store.js";
 import type { LiveLogStore } from "../common/live-log-store.js";
 import type { TicketStore } from "../common/ticket-store.js";
@@ -87,6 +88,7 @@ export interface McpDeps {
   runnerHub?: RunnerHubLike; // runner lease hub — lease_job/submit_job_result/fail_job/heartbeat_job (runner token only)
   liveFrames?: LiveFrameStore; // latest live-screen frame per run, pushed by a self-hosted runner (report_case_screen)
   liveLogs?: LiveLogStore; // accumulated live execution log per run, pushed by a self-hosted runner (report_case_log)
+  caseRecorder?: CaseRecorder; // durable replay tee — persists pushed frames/logs so a run can be replayed after it settles
   settingsStore?: WorkspaceSettingsStore;
   benchmarkService?: BenchmarkService; // benchmark preview + import (source → dataset)
   bundleService?: BundleService; // bundle one-shot apply (harness + benchmark + runtime, etc.)

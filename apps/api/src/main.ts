@@ -1,6 +1,8 @@
 import { ProxyService } from "@everdict/application-control";
+import { InMemoryRecordingStore } from "@everdict/db";
 import { perTenantTrustZones } from "@everdict/domain";
 import type { BrowserSessionProvisioner } from "./common/browser-session-provisioner.js";
+import { CaseRecorder } from "./common/case-recorder.js";
 import { LiveFrameStore } from "./common/live-frame-store.js";
 import { LiveLogStore } from "./common/live-log-store.js";
 import { TerminalTicketStore } from "./common/terminal-ticket.js";
@@ -212,6 +214,11 @@ async function main(): Promise<void> {
   const liveFrames = new LiveFrameStore();
   // Accumulated live execution log per run, pushed by a self-hosted runner (report_case_log) → served by RunService.logs().
   const liveLogs = new LiveLogStore();
+  // Durable replay recording (opt-in via EVERDICT_RECORDING) — the runner-lease MCP tees the pushed frames/logs here
+  // so a run can be replayed after it settles; RunService seals it at finalize. In-memory for now (Pg + object-store
+  // retention is S4); the frame offload needs an object store. docs/architecture/replay.md.
+  const recordingStore = process.env.EVERDICT_RECORDING ? new InMemoryRecordingStore() : undefined;
+  const caseRecorder = recordingStore && artifacts ? new CaseRecorder(recordingStore, artifacts) : undefined;
   const { service, judgeRunner, submitCodeJudgeRun } = buildRun({
     store,
     meteredDispatcher,
@@ -232,6 +239,7 @@ async function main(): Promise<void> {
     readers: { readCaseLogsFn, execInSandboxFn, captureBrowserScreenFn, openTerminalStreamFn },
     liveFrames,
     liveLogs,
+    ...(recordingStore ? { recordingStore } : {}),
   });
 
   const scorecardService = buildScorecard({
@@ -355,6 +363,7 @@ async function main(): Promise<void> {
     proxyService, // workspace BYO egress proxies (browser-profiles S4) — per-country pool + session geo
     liveFrames, // live-screen frames pushed by self-hosted runners (report_case_screen MCP tool)
     liveLogs, // live execution log pushed by self-hosted runners (report_case_log MCP tool)
+    ...(caseRecorder ? { caseRecorder } : {}), // durable replay tee (opt-in) for the pushed frames/logs
     service,
     scorecardService,
     metrics, // GET /metrics (Prometheus text) — unauthenticated; deployments firewall the scrape path

@@ -23,6 +23,7 @@ import { type ExecuteCaseDeps, executeCase } from "../execution/execute-case.js"
 import { type ArtifactStore, offloadSnapshot } from "../ports/artifact-store.js";
 import type { Dispatcher } from "../ports/dispatcher.js";
 import type { ExecStreamHandle } from "../ports/exec-stream.js";
+import type { RecordingStore } from "../ports/recording-store.js";
 import type { RunStore } from "../ports/run-store.js";
 import { assertRuntimeTarget } from "../require-runtime/require-runtime.js";
 
@@ -55,6 +56,8 @@ export interface SubmitInput {
 export interface RunServiceDeps {
   dispatcher: Dispatcher; // Scheduler (recommended) or Router — placement/fairness/autoscaling live there
   store: RunStore;
+  // Durable replay recording (optional) — at finalize, seal the frames/logs teed during the run and attach the ref.
+  recordingStore?: RecordingStore;
   // Grader factory (@everdict/graders) injected into executeCase's collection-mode scoring — the application layer
   // never imports the grader impls, so apps/api supplies makeGraders here (re-architecture P2 S3). Optional: a mock
   // dispatcher (unit tests) never reaches the collection path, so it may be omitted there; main.ts always supplies it.
@@ -384,6 +387,14 @@ export class RunService {
       if (this.deps.artifacts && result.snapshot) {
         try {
           result.snapshot = await offloadSnapshot(result.snapshot, this.deps.artifacts, `runs/${id}.png`);
+        } catch {}
+      }
+      // Seal the replay recording (frames/logs teed during the run under job.runId) → attach the ref. Best-effort:
+      // a recording failure never fails the run, and an empty recording seals to undefined (no ref). replay.md D3.
+      if (this.deps.recordingStore) {
+        try {
+          const ref = await this.deps.recordingStore.seal(`evd-run-${id}`, { envKind: input.case.env.kind });
+          if (ref) result.recordingRef = ref;
         } catch {}
       }
       await this.finalize(id, (run) => run.succeed(result, this.now()));
