@@ -69,6 +69,25 @@ A **`Schedule`** = a stored `RunScorecardInput` + `{ cron, timezone, overlapPoli
 `Pg` + numbered migration), workspace-scoped. It is mutable (pause/resume/edit) → a **Store**, not the immutable
 versioned registry. **No new execution engine** — firing = calling the existing `submit`.
 
+### Two fire modes: batch run vs trace evaluation
+
+`ScheduleRunTemplate` is a discriminated definition (XOR-refined) with two mutually-exclusive modes:
+
+- **Batch** (`dataset` + `harness`) — the original: each fire runs dataset×harness → `ScorecardService.submit`.
+- **Trace evaluation** (`pull: { source, correlate?, scope?, windowHours }`) — each fire pulls the recent traces of a
+  registered observability source over a **rolling window ending at the fire moment** and judges them directly (no
+  harness run) → `ScorecardService.ingestPull`. This is "**every day, judge the last 24h of production traces**"
+  (`cron="0 3 * * *"`, `windowHours=24`).
+
+`ScheduleService.fire()` branches on `runTemplate.pull`: it computes `until=now()`, `since=now()-windowHours`,
+enumerates the window via `listTraceIds` (= `TraceSourceService.listTraces({scope, since, until})` → trace ids), and
+calls `ingestPull({ source:{name, correlate:"id"}, runs:[{caseId,runId}], judges })` — no dataset/harness (the record
+carries the `TRACE_EVAL_REF` sentinel, `docs/scorecards.md`). An **empty window** yields an empty (succeeded)
+scorecard, so a quiet day is recorded rather than erroring. The Temporal fire→poll→finalize loop is unchanged (it is
+agnostic to how the scorecard was produced). Both `ingestPull` + `listTraceIds` are injected in `composition/schedule.ts`
+(the latter only when the workspace has a trace-source pool; absent ⇒ a pull-mode fire cleanly 400s). Firer-configured
+checks live OUTSIDE `fire()`'s try so a missing firer (deployment config) does not auto-disable the schedule.
+
 ### Driver: Temporal Schedules (native) — chosen
 
 Temporal **Schedules** give timezone, overlap policy, catchup window, pause/resume and backfill **natively** —

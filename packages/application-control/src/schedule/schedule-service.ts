@@ -8,6 +8,7 @@ import {
 } from "@everdict/contracts";
 import { Schedule, type ScheduleSpec, classifyFailure } from "@everdict/domain";
 import type { ScheduleStore } from "../ports/schedule-store.js";
+import type { PullIngestInput } from "../scorecard/scorecard-shared.js";
 import type { RunScorecardInput } from "../scorecard/scorecard-service.js";
 
 // Cron validity and the Temporal spec shape are owned by the domain model (@everdict/domain) — re-exported here
@@ -51,8 +52,18 @@ export interface ScheduleServiceDeps {
   store: ScheduleStore;
   // Temporal sync — if not injected, schedules are only stored/managed and never fire (Temporal-less dev path).
   driver?: ScheduleDriver;
-  // Called on fire (= ScorecardService.submit). If not injected, fire throws BadRequest (firing disabled).
+  // Called on a BATCH-mode fire (= ScorecardService.submit). If not injected, a batch fire throws BadRequest (firing disabled).
   submitScorecard?: (input: RunScorecardInput) => Promise<{ id: string; status: string }>;
+  // Called on a PULL-mode fire (= ScorecardService.ingestPull) — judge the recent traces of a rolling window (no harness
+  // run). If not injected, a pull-mode fire throws BadRequest.
+  ingestPull?: (input: PullIngestInput) => Promise<{ id: string; status: string }>;
+  // Enumerate a registered trace source's trace ids within a time window (= TraceSourceService.listTraces → ids). The
+  // pull fire uses it to turn the rolling window into the ingestPull runs mapping. If not injected, a pull fire throws.
+  listTraceIds?: (
+    tenant: string,
+    source: string,
+    opts: { scope?: string; since: string; until: string; limit?: number },
+  ) => Promise<string[]>;
   // Polls the fired scorecard's status (workflow poll-to-terminal). If not injected, the status route is disabled.
   scorecardStatus?: (scorecardId: string) => Promise<string | undefined>;
   // For regression alerts: previous↔current scorecard diff (= ScorecardService.diff). Throws if either is incomplete/errored → finalize swallows it.
@@ -196,24 +207,64 @@ export class ScheduleService {
   // If no firer is configured, BadRequest (Temporal-less dev).
   async fire(tenant: string, id: string): Promise<{ scorecardId: string; previousScorecardId?: string }> {
     const schedule = await this.getRecord(tenant, id); // 404
-    if (!this.deps.submitScorecard)
-      throw new BadRequestError("BAD_REQUEST", { id }, "Scorecard firer is not configured (firing disabled).");
-    const previousScorecardId = schedule.lastScorecardId; // the run just before this fire (finalize's regression baseline)
     const t = schedule.runTemplate;
-    let rec: Awaited<ReturnType<NonNullable<ScheduleServiceDeps["submitScorecard"]>>>;
+    const { submitScorecard, ingestPull, listTraceIds } = this.deps;
+    // Firer-configured checks live OUTSIDE the try: a missing firer is a deployment-config problem, not a schedule-config
+    // one, so it must NOT auto-disable the schedule (the catch's classifyFailure would). Each mode needs its own firer.
+    if (t.pull) {
+      if (!ingestPull || !listTraceIds)
+        throw new BadRequestError(
+          "BAD_REQUEST",
+          { id },
+          "Trace-evaluation firer is not configured (pull firing disabled).",
+        );
+    } else if (!submitScorecard) {
+      throw new BadRequestError("BAD_REQUEST", { id }, "Scorecard firer is not configured (firing disabled).");
+    }
+    const previousScorecardId = schedule.lastScorecardId; // the run just before this fire (finalize's regression baseline)
+    let rec: { id: string; status: string };
     try {
-      rec = await this.deps.submitScorecard({
-        tenant,
-        submittedBy: schedule.createdBy, // fired run = creator's identity (budget → tenant, private-repo connection resolve)
-        origin: { source: "schedule" }, // provenance — stamp that this is a schedule fire
-        dataset: t.dataset,
-        harness: t.harness,
-        judges: t.judges,
-        ...(t.runtime !== undefined ? { runtime: t.runtime } : {}),
-        ...(t.concurrency !== undefined ? { concurrency: t.concurrency } : {}),
-        ...(t.trials !== undefined ? { trials: t.trials } : {}),
-        ...(t.cases !== undefined ? { cases: t.cases } : {}),
-      });
+      if (t.pull && ingestPull && listTraceIds) {
+        // Trace-evaluation fire — enumerate the rolling window's traces and judge them (no harness run). An empty window
+        // yields an empty (succeeded) scorecard, so a quiet day is recorded rather than erroring.
+        const until = this.now();
+        const since = new Date(Date.parse(until) - t.pull.windowHours * 3_600_000).toISOString();
+        const traceIds = await listTraceIds(tenant, t.pull.source, {
+          ...(t.pull.scope !== undefined ? { scope: t.pull.scope } : {}),
+          since,
+          until,
+          limit: 500,
+        });
+        rec = await ingestPull({
+          tenant,
+          submittedBy: schedule.createdBy,
+          origin: { source: "schedule" },
+          // correlate:"id" — the ids ARE the platform's real trace ids (from listTraceIds), so fetch by id.
+          source: { name: t.pull.source, correlate: t.pull.correlate ?? "id" },
+          runs: traceIds.map((tid) => ({ caseId: tid, runId: tid })),
+          judges: t.judges,
+        });
+      } else if (submitScorecard && t.dataset && t.harness) {
+        rec = await submitScorecard({
+          tenant,
+          submittedBy: schedule.createdBy, // fired run = creator's identity (budget → tenant, private-repo connection resolve)
+          origin: { source: "schedule" }, // provenance — stamp that this is a schedule fire
+          dataset: t.dataset,
+          harness: t.harness,
+          judges: t.judges,
+          ...(t.runtime !== undefined ? { runtime: t.runtime } : {}),
+          ...(t.concurrency !== undefined ? { concurrency: t.concurrency } : {}),
+          ...(t.trials !== undefined ? { trials: t.trials } : {}),
+          ...(t.cases !== undefined ? { cases: t.cases } : {}),
+        });
+      } else {
+        // The schema's refine guarantees exactly one mode, so this is unreachable — but stay explicit rather than assert.
+        throw new BadRequestError(
+          "BAD_REQUEST",
+          { id },
+          "schedule runTemplate is neither a batch nor a pull definition.",
+        );
+      }
     } catch (err) {
       // A CONFIG-class submit failure is deterministic — the same fire fails the same way on every tick (deleted
       // dataset/harness, revoked credentials/authz, invalid template, exhausted budget). Firing on is pure noise:

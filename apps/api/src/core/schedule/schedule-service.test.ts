@@ -1,4 +1,4 @@
-import type { RunScorecardInput } from "@everdict/application-control";
+import type { PullIngestInput, RunScorecardInput } from "@everdict/application-control";
 import { type ScheduleDriver, ScheduleService, type ScheduleSpec, isValidCron } from "@everdict/application-control";
 import { BadRequestError, ForbiddenError, NotFoundError, UpstreamError } from "@everdict/contracts";
 import { InMemoryScheduleStore, type ScheduleRunTemplate, type ScheduleStore } from "@everdict/db";
@@ -225,6 +225,66 @@ describe("ScheduleService.fire — firing (called by the internal route)", () =>
       lastStatus: "queued",
       lastFiredAt: "2026-06-29T03:00:00.000Z",
     });
+  });
+
+  it("a pull-mode schedule fires a trace evaluation over a rolling window (ingestPull, correlate:id, since=now-windowHours)", async () => {
+    // "Every day, judge the last 24h of production traces": the fire enumerates the rolling window's traces and judges
+    // them directly (no dataset, no harness run).
+    const store = new InMemoryScheduleStore();
+    const listedWith: Array<{
+      source: string;
+      opts: { scope?: string; since: string; until: string; limit?: number };
+    }> = [];
+    const pulled: PullIngestInput[] = [];
+    const s = new ScheduleService({
+      store,
+      newId: () => "sch-1",
+      now: () => "2026-06-29T03:00:00.000Z",
+      listTraceIds: async (_tenant, source, opts) => {
+        listedWith.push({ source, opts });
+        return ["t1", "t2"];
+      },
+      ingestPull: async (input) => {
+        pulled.push(input);
+        return { id: "sc-eval", status: "queued" };
+      },
+    });
+    await s.create({
+      ...base,
+      runTemplate: {
+        pull: { source: "prod-mlflow", scope: "exp1", windowHours: 24 },
+        judges: [{ id: "q", version: "1" }],
+      },
+    });
+    const res = await s.fire("acme", "sch-1");
+    expect(res).toEqual({ scorecardId: "sc-eval" });
+    // enumerated the rolling window ending at the fire moment (since = now - 24h, until = now)
+    expect(listedWith[0]).toEqual({
+      source: "prod-mlflow",
+      opts: { scope: "exp1", since: "2026-06-28T03:00:00.000Z", until: "2026-06-29T03:00:00.000Z", limit: 500 },
+    });
+    // judged the listed traces directly — no dataset/harness, correlate forced to id (the ids are real trace ids)
+    expect(pulled[0]).toMatchObject({
+      tenant: "acme",
+      submittedBy: "u-1",
+      origin: { source: "schedule" },
+      source: { name: "prod-mlflow", correlate: "id" },
+      runs: [
+        { caseId: "t1", runId: "t1" },
+        { caseId: "t2", runId: "t2" },
+      ],
+      judges: [{ id: "q", version: "1" }],
+    });
+    expect(pulled[0]?.dataset).toBeUndefined();
+    expect(pulled[0]?.harness).toBeUndefined();
+  });
+
+  it("a pull-mode schedule with no pull firer configured is a BadRequest (not an auto-disable)", async () => {
+    const s = new ScheduleService({ store: new InMemoryScheduleStore(), newId: () => "sch-1", now: () => "t" });
+    await s.create({ ...base, runTemplate: { pull: { source: "prod-mlflow", windowHours: 24 }, judges: [] } });
+    await expect(s.fire("acme", "sch-1")).rejects.toBeInstanceOf(BadRequestError);
+    // Deployment-config problem (missing firer), not schedule-config — the schedule stays enabled.
+    expect((await s.get("acme", "sch-1"))?.enabled).toBe(true);
   });
 
   it("a CONFIG-class fire failure auto-disables the schedule (visible reason + Temporal pause); transient failures don't", async () => {

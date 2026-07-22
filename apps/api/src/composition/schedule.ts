@@ -1,6 +1,6 @@
 import type { NotificationService } from "@everdict/application-control";
 import { ScheduleService } from "@everdict/application-control";
-import type { ScorecardService } from "@everdict/application-control";
+import type { ScorecardService, TraceSourceService } from "@everdict/application-control";
 import type { ScheduleStore } from "@everdict/db";
 import { TemporalScheduleDriver } from "../core/schedule/temporal-schedule-driver.js";
 
@@ -35,14 +35,25 @@ export function wireScheduleService(
     scheduleStore: ScheduleStore;
     scorecardService: ScorecardService;
     notificationService: NotificationService;
+    // Optional — enables PULL-mode schedules (judge a rolling window of a trace source). Absent = batch-only firing.
+    traceSourceService?: TraceSourceService;
   },
 ): ScheduleService {
-  const { scheduleStore, scorecardService, notificationService } = deps;
+  const { scheduleStore, scorecardService, notificationService, traceSourceService } = deps;
   const temporalAddress = process.env.EVERDICT_TEMPORAL_ADDRESS;
   const scheduleService = new ScheduleService({
     store: scheduleStore,
     ...(temporalAddress ? { driver: new TemporalScheduleDriver({ address: temporalAddress }) } : {}),
     submitScorecard: (sc) => scorecardService.submit(sc),
+    // Pull-mode fire — judge the recent traces of a rolling window (no harness run). listTraceIds enumerates the window
+    // via the trace-source pool; only wired when that service is configured (else a pull-mode fire cleanly 400s).
+    ingestPull: (input) => scorecardService.ingestPull(input),
+    ...(traceSourceService
+      ? {
+          listTraceIds: async (tenant, source, opts) =>
+            (await traceSourceService.listTraces(tenant, source, opts)).map((t) => t.id),
+        }
+      : {}),
     scorecardStatus: async (id) => (await scorecardService.get(id))?.status,
     // Regression alert: diff previous↔this schedule run (both must be complete) → Mattermost on regression (completion notification is separate, via the scorecard onComplete).
     diffScorecards: (tenant, baselineId, candidateId) => scorecardService.diff(tenant, baselineId, candidateId),

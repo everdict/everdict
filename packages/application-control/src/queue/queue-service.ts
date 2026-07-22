@@ -1,3 +1,4 @@
+import { TRACE_EVAL_REF } from "@everdict/contracts";
 import type { RunStore } from "../ports/run-store.js";
 import type { ScorecardStore } from "../ports/scorecard-store.js";
 import type { ScheduleRecordWithNext } from "../schedule/schedule-service.js";
@@ -185,8 +186,10 @@ export class QueueService {
           scheduleId: s.id,
           name: s.name,
           at,
-          dataset: s.runTemplate.dataset.id,
-          harness: s.runTemplate.harness.id,
+          // A pull-mode (trace-evaluation) schedule has no dataset/harness — surface the trace-eval sentinel (the web
+          // relabels it), same as the scorecard record it will produce.
+          dataset: s.runTemplate.dataset?.id ?? TRACE_EVAL_REF,
+          harness: s.runTemplate.harness?.id ?? TRACE_EVAL_REF,
         },
       });
     }
