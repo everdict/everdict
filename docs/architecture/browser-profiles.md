@@ -27,9 +27,13 @@ Making a profile IS a login session — not a metadata form. In Settings › Acc
 opens the wizard: name + geo (egress proxy country; admins manage the workspace proxy pool inline right there) →
 **a live browser opens in the page** (the S1 canvas) → the user navigates to a site, logs in, moves on to the next
 site, logs in again — one session accumulates any number of logins. While the session is open the wizard polls
-`GET /browser-sessions/:id/state-preview` (owner-gated) and renders **remembered-login chips** — one chip per cookie
-domain with the cookie *names* (values NEVER cross the wire) — so the user sees exactly what Everdict will remember
-as each login lands. "Save profile & close" creates the profile (with the chosen `country`) + captures (S3) + tears
+`GET /browser-sessions/:id/state-preview` (owner-gated) and renders **selectable per-cookie chips** grouped by
+domain (cookie *names* only — values NEVER cross the wire): one login can set a dozen unrelated cookies (analytics,
+consent, A/B buckets), so the user picks what the profile actually keeps. New cookies default to selected (state is
+a deselection set, so later polls don't wipe choices); the domain header toggles its whole group; saving with zero
+selected is blocked. "Save profile & close" creates the profile (with the chosen `country`) + captures (S3) **only
+the selected cookies** (`cookies: [{domain, name}]` on the capture body, domains preview-normalized [no leading
+dot]; omitted = capture everything — the API/MCP default, 400 when a given selection matches nothing) + tears
 the session down; "Close without saving" persists nothing. Existing profiles re-login through the same wizard
 (re-capture into the profile, geo defaulting to the profile's country). Consequently there is **no Browser-sessions
 settings tab** (the session exists only inside the wizard) and **no Proxies settings tab** (the proxy pool is managed
@@ -109,7 +113,10 @@ short-lived container/pod per active login; self-hosted = the user's own local b
   (`core/browser-profile`) encrypts it (AES-256-GCM, the shared `SecretCipher`) → `store.saveState` persists the
   opaque blob (`state_cipher`, migration `0059`) + `capturedAt` + the refined `cookieDomains`. Owner-gated on both
   the profile and the session; the blob is **server-only** (`loadState` reads it back for S5). Route
-  `POST /browser-profiles/:id/capture {sessionId}` + MCP `capture_browser_profile`. Web: the capture is the "Save
+  `POST /browser-profiles/:id/capture {sessionId, cookies?}` + MCP `capture_browser_profile` — the optional
+  `cookies: [{domain, name}]` narrows the capture to the user's chip selection (S7); omitted = keep everything,
+  a selection matching nothing = 400 (never silently store a dead login). `cookieDomains` derives from the
+  filtered set. Web: the capture is the "Save
   profile & close" step of the S7 wizard (create profile → capture → close session) + a `capturedAt` badge on the
   profiles list. (localStorage capture via `Runtime.evaluate` is deferred — cookies are the login material for
   most sites.)

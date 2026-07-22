@@ -6,6 +6,7 @@ import { useTranslations } from 'next-intl'
 import { BrowserCanvas } from '@/features/interactive-browser'
 import { ProxiesManager, type ProxyView } from '@/features/manage-proxies'
 import type { BrowserProfile } from '@/entities/browser-profile'
+import { cn } from '@/shared/lib/utils'
 import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
 import { Input } from '@/shared/ui/input'
@@ -14,6 +15,11 @@ interface RememberedDomain {
   domain: string
   cookieNames: string[]
 }
+
+// One login can set a dozen unrelated cookies (analytics, consent, A/B buckets) — the user picks what the
+// profile actually keeps. Selection state is a DEselection set so cookies appearing on later polls default to
+// selected without wiping earlier choices.
+const cookieKey = (domain: string, name: string) => `${domain}|${name}`
 
 // Session-first browser-profile creation (browser-profiles): making a profile IS a login session. A live browser
 // opens (optionally through a per-country egress proxy), the owner logs into every site the profile should carry,
@@ -37,10 +43,39 @@ export function ProfileLoginWizard({
   const [showProxies, setShowProxies] = useState(false)
   const [session, setSession] = useState<{ id: string } | null>(null)
   const [remembered, setRemembered] = useState<RememberedDomain[]>([])
+  const [deselected, setDeselected] = useState<Set<string>>(new Set())
   const [busy, setBusy] = useState<'idle' | 'opening' | 'saving'>('idle')
   const [error, setError] = useState<string | null>(null)
 
   const countries = [...new Set(proxies.map((p) => p.country))].sort()
+
+  const totalCookies = remembered.reduce((sum, d) => sum + d.cookieNames.length, 0)
+  const selectedCookies = remembered.flatMap((d) =>
+    d.cookieNames
+      .filter((name) => !deselected.has(cookieKey(d.domain, name)))
+      .map((name) => ({ domain: d.domain, name }))
+  )
+
+  const toggleCookie = (domain: string, name: string) =>
+    setDeselected((prev) => {
+      const next = new Set(prev)
+      const key = cookieKey(domain, name)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+
+  // Domain header toggle — all on ⇒ all off, anything off ⇒ all on.
+  const toggleDomain = (d: RememberedDomain) =>
+    setDeselected((prev) => {
+      const next = new Set(prev)
+      const allOn = d.cookieNames.every((name) => !next.has(cookieKey(d.domain, name)))
+      for (const name of d.cookieNames) {
+        if (allOn) next.add(cookieKey(d.domain, name))
+        else next.delete(cookieKey(d.domain, name))
+      }
+      return next
+    })
 
   // The workspace's egress proxies (browser-profiles S4) — the geo the login session runs through.
   useEffect(() => {
@@ -138,7 +173,12 @@ export function ProfileLoginWizard({
         {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ sessionId: session.id }),
+          // Only the cookies the user saw and left selected — a cookie landing between the last poll and the
+          // capture is not silently swept in. No cookies observed yet = legacy capture-everything.
+          body: JSON.stringify({
+            sessionId: session.id,
+            ...(totalCookies > 0 ? { cookies: selectedCookies } : {}),
+          }),
         }
       )
       const body = (await captured.json()) as BrowserProfile & { error?: string }
@@ -228,25 +268,64 @@ export function ProfileLoginWizard({
           <aside className="space-y-3 xl:sticky xl:top-4 xl:self-start">
             <div className="space-y-2 rounded-lg border border-border bg-card/60 p-3">
               <div>
-                <span className="text-[12.5px] font-medium">{t('rememberedTitle')}</span>
+                <div className="flex items-baseline justify-between gap-2">
+                  <span className="text-[12.5px] font-medium">{t('rememberedTitle')}</span>
+                  {totalCookies > 0 && (
+                    <span className="shrink-0 text-[11px] text-faint">
+                      {t('selectedCount', { selected: selectedCookies.length, total: totalCookies })}
+                    </span>
+                  )}
+                </div>
                 <p className="mt-0.5 text-[11.5px] text-faint">{t('rememberedHint')}</p>
               </div>
               {remembered.length === 0 ? (
                 <p className="text-[12px] text-muted-foreground">{t('rememberedEmpty')}</p>
               ) : (
-                <ul className="max-h-56 space-y-1 overflow-y-auto">
-                  {remembered.map((d) => (
-                    <li
-                      key={d.domain}
-                      title={d.cookieNames.join(', ')}
-                      className="flex items-baseline justify-between gap-2 rounded-md border border-border bg-muted/30 px-2 py-1 text-[11.5px]"
-                    >
-                      <span className="truncate font-medium">{d.domain}</span>
-                      <span className="shrink-0 text-faint">
-                        {t('cookieCount', { count: d.cookieNames.length })}
-                      </span>
-                    </li>
-                  ))}
+                <ul className="max-h-64 space-y-1.5 overflow-y-auto">
+                  {remembered.map((d) => {
+                    const domainSelected = d.cookieNames.filter(
+                      (name) => !deselected.has(cookieKey(d.domain, name))
+                    ).length
+                    return (
+                      <li
+                        key={d.domain}
+                        className="rounded-md border border-border bg-muted/30 px-2 py-1.5"
+                      >
+                        <button
+                          type="button"
+                          onClick={() => toggleDomain(d)}
+                          title={t('toggleDomain')}
+                          className="flex w-full items-baseline justify-between gap-2 text-left"
+                        >
+                          <span className="truncate text-[11.5px] font-medium">{d.domain}</span>
+                          <span className="shrink-0 font-mono text-[10.5px] text-faint">
+                            {domainSelected}/{d.cookieNames.length}
+                          </span>
+                        </button>
+                        <div className="mt-1 flex flex-wrap gap-1">
+                          {d.cookieNames.map((name) => {
+                            const off = deselected.has(cookieKey(d.domain, name))
+                            return (
+                              <button
+                                key={name}
+                                type="button"
+                                onClick={() => toggleCookie(d.domain, name)}
+                                title={off ? t('cookieExcluded') : t('cookieIncluded')}
+                                className={cn(
+                                  'max-w-full truncate rounded border px-1.5 py-0.5 font-mono text-[10.5px] transition-colors',
+                                  off
+                                    ? 'border-border/60 text-faint line-through'
+                                    : 'border-primary/40 bg-primary/10'
+                                )}
+                              >
+                                {name}
+                              </button>
+                            )
+                          })}
+                        </div>
+                      </li>
+                    )
+                  })}
                 </ul>
               )}
             </div>
@@ -265,10 +344,17 @@ export function ProfileLoginWizard({
               <Button
                 className="w-full"
                 onClick={saveAndFinish}
-                disabled={busy !== 'idle' || !name.trim()}
+                disabled={
+                  busy !== 'idle' ||
+                  !name.trim() ||
+                  (totalCookies > 0 && selectedCookies.length === 0)
+                }
               >
                 {busy === 'saving' ? t('savingProfile') : t('saveProfile')}
               </Button>
+              {totalCookies > 0 && selectedCookies.length === 0 && (
+                <p className="text-[11px] text-muted-foreground">{t('noCookiesSelected')}</p>
+              )}
               <Button
                 variant="ghost"
                 className="w-full"

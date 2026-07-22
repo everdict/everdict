@@ -68,8 +68,10 @@ const docs = {
     summary: "Capture a session's login into a profile",
     description:
       "Reads the cookies from the caller's active interactive browser session (S1) and stores them (encrypted) on " +
-      "this profile, refreshing cookieDomains + capturedAt. Owner-only for both the profile and the session. 404 " +
-      "when the profile isn't the caller's / not configured; 400 when the session isn't active.",
+      "this profile, refreshing cookieDomains + capturedAt. An optional cookies selection narrows what is saved " +
+      "(one login can set many unrelated cookies). Owner-only for both the profile and the session. 404 " +
+      "when the profile isn't the caller's / not configured; 400 when the session isn't active or the selection " +
+      "matches nothing.",
     tags: ["browser-profile"],
     params: profileIdParams,
     body: toJsonSchema(CaptureBrowserProfileBodySchema),

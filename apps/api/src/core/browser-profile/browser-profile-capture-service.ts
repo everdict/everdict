@@ -16,11 +16,19 @@ export interface BrowserProfileCaptureServiceDeps {
   now?: () => string;
 }
 
+// A cookie the caller chose to keep, addressed the way the state preview reports it (domain without the
+// leading dot + name). One login can set a dozen unrelated cookies — the selection is the user's intent.
+export interface CookieSelection {
+  domain: string;
+  name: string;
+}
+
 export interface CaptureCommand {
   tenant: string;
   profileId: string;
   sessionId: string;
   subject: string;
+  cookies?: CookieSelection[]; // absent = keep everything the session holds
 }
 
 export class BrowserProfileCaptureService {
@@ -47,7 +55,16 @@ export class BrowserProfileCaptureService {
         "browser session not found or no longer active.",
       );
 
-    const state = await this.capture(cdpBase);
+    const captured = await this.capture(cdpBase);
+    const state = cmd.cookies ? filterState(captured, cmd.cookies) : captured;
+    // A selection that matches nothing would silently store an empty login — the cookies changed between the
+    // preview and the capture (e.g. the site rotated them). Surface it instead of saving a dead profile.
+    if (cmd.cookies && state.cookies.length === 0)
+      throw new BadRequestError(
+        "BAD_REQUEST",
+        { sessionId: cmd.sessionId },
+        "none of the selected cookies are present in the session anymore.",
+      );
     const stateCipher = JSON.stringify(this.deps.cipher.encrypt(JSON.stringify(state)));
     const capturedAt = this.now();
     const updated = await this.deps.store.saveState(
@@ -60,4 +77,11 @@ export class BrowserProfileCaptureService {
     if (!updated) throw new NotFoundError("NOT_FOUND", { id: cmd.profileId }, "browser profile not found.");
     return updated;
   }
+}
+
+// Keep only the selected cookies. Domains match with the leading dot stripped — the same normalization the
+// state preview applies, so the wizard's chips round-trip exactly.
+function filterState(state: StorageState, selection: CookieSelection[]): StorageState {
+  const keep = new Set(selection.map((s) => `${s.domain}|${s.name}`));
+  return { cookies: state.cookies.filter((c) => keep.has(`${c.domain.replace(/^\./, "")}|${c.name}`)) };
 }

@@ -93,9 +93,17 @@ export function registerBrowserProfileTools(server: McpServer, ctx: McpToolConte
         inputSchema: {
           id: z.string().describe("Browser profile id"),
           sessionId: z.string().describe("The interactive browser session to capture cookies from"),
+          cookies: z
+            .array(z.object({ domain: z.string().min(1), name: z.string().min(1) }))
+            .min(1)
+            .optional()
+            .describe(
+              "Only save these cookies, addressed as the state preview reports them (domain without the " +
+                "leading dot + name). Omitted = save every cookie the session holds.",
+            ),
         },
       },
-      ({ id, sessionId }) =>
+      ({ id, sessionId, cookies }) =>
         plain(async () =>
           ok(
             await capture.captureInto({
@@ -103,6 +111,7 @@ export function registerBrowserProfileTools(server: McpServer, ctx: McpToolConte
               profileId: id,
               sessionId,
               subject: principal.subject,
+              ...(cookies ? { cookies } : {}),
             }),
           ),
         ),

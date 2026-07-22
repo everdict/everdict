@@ -128,6 +128,7 @@ export function registerBrowserProfileRoutes(app: FastifyInstance, deps: ServerD
             profileId: req.params.id,
             sessionId: body.sessionId,
             subject: principal.subject,
+            ...(body.cookies ? { cookies: body.cookies } : {}),
           }),
         );
       } catch (err) {

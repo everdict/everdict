@@ -75,6 +75,36 @@ describe("BrowserProfileCaptureService", () => {
     expect(JSON.parse(fakeCipher.decrypt(envelope))).toEqual(STATE); // full storageState round-trips
   });
 
+  it("saves only the selected cookies when a selection is given (per-cookie chips)", async () => {
+    const { store, session, capture } = await setup();
+    const updated = await capture.captureInto({
+      tenant: "acme",
+      profileId: "prof-1",
+      sessionId: session.id,
+      subject: "alice",
+      // preview-normalized addressing: the stored domain is ".github.com" but the chip says "github.com"
+      cookies: [{ domain: "github.com", name: "sid" }],
+    });
+    const stored = await store.loadState("acme", "prof-1");
+    const state = JSON.parse(fakeCipher.decrypt(JSON.parse(stored ?? "{}")));
+    expect(state.cookies).toEqual([{ name: "sid", value: "secret", domain: ".github.com", path: "/" }]);
+    // derived domains reflect the FILTERED set, not everything the session held
+    expect(updated.cookieDomains).toEqual(["github.com"]);
+  });
+
+  it("400s when the selection matches no cookie in the session anymore", async () => {
+    const { session, capture } = await setup();
+    await expect(
+      capture.captureInto({
+        tenant: "acme",
+        profileId: "prof-1",
+        sessionId: session.id,
+        subject: "alice",
+        cookies: [{ domain: "gone.example.com", name: "sid" }],
+      }),
+    ).rejects.toBeInstanceOf(AppError);
+  });
+
   it("404s a profile owned by another subject (no existence leak)", async () => {
     const { session, capture } = await setup();
     await expect(
