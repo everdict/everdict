@@ -40,8 +40,17 @@ heuristic default (later polls never wipe a user's choice; a new cookie appears 
 toggles its selectable cookies; saving with zero selected is blocked. "Save profile & close" creates the profile (with the chosen `country`) + captures (S3) **only
 the selected cookies** (`cookies: [{domain, name}]` on the capture body, domains preview-normalized [no leading
 dot]; omitted = capture everything — the API/MCP default, 400 when a given selection matches nothing) + tears
-the session down; "Close without saving" persists nothing. Existing profiles re-login through the same wizard
-(re-capture into the profile, geo defaulting to the profile's country). Consequently there is **no Browser-sessions
+the session down; "Close without saving" persists nothing.
+
+Existing profiles re-login through the same wizard, but **warm** — not from a blank browser. When "Log in again"
+opens the session, the wizard calls `POST /browser-profiles/:id/restore {sessionId}` (+ MCP `restore_browser_profile`):
+the control plane decrypts the profile's saved cookies and seeds them into the fresh session (`seedStorageState`,
+the S5 inverse of capture, owner-gated on both profile and session), then the canvas auto-navigates to the profile's
+first carried domain. So the owner resumes from their prior state: if the saved login still holds they land
+already signed-in and just re-save (refreshing the capture); if it lapsed the site still recognizes the device, so
+re-auth is lighter. Best-effort — a restore failure (or an empty profile) just leaves a blank browser to log into.
+The decrypted cookies go into the browser, never back to the client (restore returns only the carried domains).
+Geo defaults to the profile's country. Consequently there is **no Browser-sessions
 settings tab** (the session exists only inside the wizard) and **no Proxies settings tab** (the proxy pool is managed
 from the wizard's geo step, still `settings:write`-gated; the `/workspace/proxies` API is unchanged).
 

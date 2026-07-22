@@ -151,6 +151,12 @@ export const controlPlane = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
+  // Warm re-login — seed a profile's saved cookies into an interactive session (browser-profiles).
+  restoreBrowserProfile: <T>(auth: AuthContext, id: string, body: unknown) =>
+    call<T>(auth, `/browser-profiles/${encodeURIComponent(id)}/restore`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
   // Workspace BYO egress proxies (browser-profiles S4) — per-country pool. List = workspace read, register/remove = admin.
   listProxies: <T>(auth: AuthContext) => call<T>(auth, '/workspace/proxies'),
   upsertProxy: <T>(auth: AuthContext, body: unknown) =>

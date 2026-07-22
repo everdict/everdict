@@ -4,6 +4,7 @@ import { type ServerDeps, resolvePrincipal, sendError } from "../route-context.j
 import { browserProfileDocs } from "./browser-profile.docs.js";
 import { CaptureBrowserProfileBodySchema } from "./request/capture-browser-profile.js";
 import { CreateBrowserProfileBodySchema } from "./request/create-browser-profile.js";
+import { RestoreBrowserProfileBodySchema } from "./request/restore-browser-profile.js";
 import { UpdateBrowserProfileBodySchema } from "./request/update-browser-profile.js";
 
 // Saved authenticated browser profiles (browser-profiles S2) — personal / self-scoped (owner = subject, like
@@ -129,6 +130,37 @@ export function registerBrowserProfileRoutes(app: FastifyInstance, deps: ServerD
             sessionId: body.sessionId,
             subject: principal.subject,
             ...(body.cookies ? { cookies: body.cookies } : {}),
+          }),
+        );
+      } catch (err) {
+        return sendError(reply, err);
+      }
+    },
+  );
+
+  // Warm re-login — seed this profile's saved login into the caller's active session (browser-profiles). Same
+  // subsystem gate as capture; the service owner-gates both the profile and the session.
+  app.post<{ Params: { id: string } }>(
+    "/browser-profiles/:id/restore",
+    { schema: browserProfileDocs.restore },
+    async (req, reply) => {
+      if (!deps.browserProfileCaptureService)
+        return reply.code(404).send({ code: "NOT_FOUND", message: "browser profile capture not configured" });
+      const principal = await resolvePrincipal(req, reply, deps);
+      if (!principal) return reply;
+      let body: z.infer<typeof RestoreBrowserProfileBodySchema>;
+      try {
+        body = RestoreBrowserProfileBodySchema.parse(req.body);
+      } catch (err) {
+        return reply.code(400).send({ code: "BAD_REQUEST", message: (err as Error).message });
+      }
+      try {
+        return reply.send(
+          await deps.browserProfileCaptureService.restoreInto({
+            tenant: principal.workspace,
+            profileId: req.params.id,
+            sessionId: body.sessionId,
+            subject: principal.subject,
           }),
         );
       } catch (err) {

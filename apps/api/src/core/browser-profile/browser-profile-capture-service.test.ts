@@ -112,6 +112,57 @@ describe("BrowserProfileCaptureService", () => {
     ).rejects.toBeInstanceOf(AppError);
   });
 
+  it("restoreInto seeds the profile's saved cookies into the session (warm re-login)", async () => {
+    const store = new InMemoryBrowserProfileStore();
+    await store.create(profileRecord("prof-1", "acme", "alice"));
+    // Pre-capture a login into the profile: an encrypted blob + carried domains.
+    await store.saveState(
+      "acme",
+      "prof-1",
+      JSON.stringify(fakeCipher.encrypt(JSON.stringify(STATE))),
+      "2026-07-16T00:00:00.000Z",
+      ["app.example.com", "github.com"],
+    );
+    const sessions = new BrowserSessionService(fakeProvisioner, { newId: () => "sess-1" });
+    const session = await sessions.create({ tenant: "acme", createdBy: "alice" });
+    const seeded: StorageState[] = [];
+    const capture = new BrowserProfileCaptureService({
+      store,
+      sessions,
+      cipher: fakeCipher,
+      seed: async (_cdpBase, state) => {
+        seeded.push(state);
+      },
+    });
+    const result = await capture.restoreInto({
+      tenant: "acme",
+      profileId: "prof-1",
+      sessionId: session.id,
+      subject: "alice",
+    });
+    // the decrypted storageState was seeded into the session's browser, and the carried domains came back
+    expect(seeded).toEqual([STATE]);
+    expect(result.domains).toEqual(["app.example.com", "github.com"]);
+  });
+
+  it("restoreInto is a no-op for a profile with no login captured yet", async () => {
+    const { session, capture } = await setup(); // prof-1 has no saveState
+    const result = await capture.restoreInto({
+      tenant: "acme",
+      profileId: "prof-1",
+      sessionId: session.id,
+      subject: "alice",
+    });
+    expect(result.domains).toEqual([]); // nothing captured → nothing carried, and no seed attempted
+  });
+
+  it("restoreInto 404s a profile owned by another subject (no existence leak)", async () => {
+    const { session, capture } = await setup();
+    await expect(
+      capture.restoreInto({ tenant: "acme", profileId: "prof-1", sessionId: session.id, subject: "mallory" }),
+    ).rejects.toBeInstanceOf(AppError);
+  });
+
   it("400s when the session is not the caller's / not active", async () => {
     const { capture } = await setup();
     await expect(

@@ -116,5 +116,31 @@ export function registerBrowserProfileTools(server: McpServer, ctx: McpToolConte
           ),
         ),
     );
+
+    server.registerTool(
+      "restore_browser_profile",
+      {
+        description:
+          "Warm re-login — seed a profile's saved cookies into my active interactive browser session so re-logging " +
+          "in starts from the prior state instead of a blank browser (browser-profiles). A no-op for a profile " +
+          "with no login captured yet. Returns the domains the profile carries (cookie values never leave the " +
+          "control plane). Owner-only.",
+        inputSchema: {
+          id: z.string().describe("Browser profile id"),
+          sessionId: z.string().describe("The interactive browser session to seed the saved login into"),
+        },
+      },
+      ({ id, sessionId }) =>
+        plain(async () =>
+          ok(
+            await capture.restoreInto({
+              tenant: principal.workspace,
+              profileId: id,
+              sessionId,
+              subject: principal.subject,
+            }),
+          ),
+        ),
+    );
   }
 }

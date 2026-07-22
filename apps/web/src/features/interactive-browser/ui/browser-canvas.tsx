@@ -67,10 +67,19 @@ const vkOf = (key: string): number | undefined => {
   return VIRTUAL_KEYS[key]
 }
 
-export function BrowserCanvas({ sessionId }: { sessionId: string }) {
+export function BrowserCanvas({
+  sessionId,
+  initialUrl,
+}: {
+  sessionId: string
+  initialUrl?: string // navigate here once the session is live (warm re-login lands on the profile's site)
+}) {
   const t = useTranslations('interactiveBrowser')
   const [state, setState] = useState<ConnState>('connecting')
   const [url, setUrl] = useState('')
+  // Kept in a ref so the socket effect (keyed on sessionId only) reads the latest value without reconnecting.
+  const initialUrlRef = useRef(initialUrl)
+  initialUrlRef.current = initialUrl
   const [keyboardOn, setKeyboardOn] = useState(false)
   const [viewport, setViewport] = useState<{ w: number; h: number } | null>(null)
   const shellRef = useRef<HTMLDivElement>(null)
@@ -152,6 +161,13 @@ export function BrowserCanvas({ sessionId }: { sessionId: string }) {
         ws.addEventListener('open', () => {
           setState('live')
           measureRef.current() // fit the remote viewport to the canvas before the first real frame
+          // Warm re-login: land on the profile's site (cookies were already seeded server-side) so the user
+          // immediately sees whether the saved login still holds. The relay buffers this until the CDP session is up.
+          const target = initialUrlRef.current
+          if (target) {
+            setUrl(target)
+            send({ kind: 'navigate', url: target })
+          }
         })
         ws.addEventListener('message', async (ev) => {
           const text = typeof ev.data === 'string' ? ev.data : await (ev.data as Blob).text()

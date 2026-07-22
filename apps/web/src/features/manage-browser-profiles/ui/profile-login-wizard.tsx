@@ -53,6 +53,8 @@ export function ProfileLoginWizard({
   const [proxies, setProxies] = useState<ProxyView[]>([])
   const [showProxies, setShowProxies] = useState(false)
   const [session, setSession] = useState<{ id: string } | null>(null)
+  const [initialUrl, setInitialUrl] = useState<string | undefined>(undefined)
+  const [restored, setRestored] = useState(false)
   const [preview, setPreview] = useState<StatePreview | null>(null)
   const [override, setOverride] = useState<Map<string, boolean>>(new Map())
   const [busy, setBusy] = useState<'idle' | 'opening' | 'saving'>('idle')
@@ -162,6 +164,29 @@ export function ProfileLoginWizard({
       })
       const body = (await res.json()) as { id: string; error?: string }
       if (!res.ok || body.error) throw new Error(body.error ?? `HTTP ${res.status}`)
+      // Warm re-login: for an existing profile, seed its saved cookies into the fresh session BEFORE the canvas
+      // mounts, and land on the first carried domain — the user resumes from their prior state, not a blank page.
+      // Best-effort: a restore failure just leaves a blank browser to log into from scratch.
+      if (profile) {
+        try {
+          const restore = await fetch(
+            `/api/browser-profiles/${encodeURIComponent(profile.id)}/restore`,
+            {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ sessionId: body.id }),
+            }
+          )
+          const rb = (await restore.json()) as { domains?: string[] }
+          const first = rb.domains?.[0]
+          if (restore.ok && first) {
+            setInitialUrl(`https://${first}`)
+            setRestored(true)
+          }
+        } catch {
+          // restore is best-effort — fall through to a blank re-login
+        }
+      }
       setSession({ id: body.id })
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -289,7 +314,14 @@ export function ProfileLoginWizard({
         // Live step — the canvas is the protagonist (left, full width); the capture state + finish actions live in a
         // sticky right rail so "what will be saved" and the save button stay visible without scrolling past the screen.
         <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_280px]">
-          <BrowserCanvas sessionId={session.id} />
+          <div className="space-y-2">
+            {restored && (
+              <Callout tone="info">
+                <span className="text-[12px]">{t('restoredNote')}</span>
+              </Callout>
+            )}
+            <BrowserCanvas sessionId={session.id} initialUrl={initialUrl} />
+          </div>
 
           <aside className="space-y-3 xl:sticky xl:top-4 xl:self-start">
             <div className="space-y-2 rounded-lg border border-border bg-card/60 p-3">

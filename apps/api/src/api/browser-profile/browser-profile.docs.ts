@@ -4,6 +4,7 @@ import { z } from "zod";
 import { errorResponses, toJsonSchema } from "../openapi.js";
 import { CaptureBrowserProfileBodySchema } from "./request/capture-browser-profile.js";
 import { CreateBrowserProfileBodySchema } from "./request/create-browser-profile.js";
+import { RestoreBrowserProfileBodySchema } from "./request/restore-browser-profile.js";
 import { UpdateBrowserProfileBodySchema } from "./request/update-browser-profile.js";
 
 const profileIdParams = toJsonSchema(z.object({ id: z.string().describe("Browser profile id") }));
@@ -77,6 +78,25 @@ const docs = {
     body: toJsonSchema(CaptureBrowserProfileBodySchema),
     response: {
       200: { description: "The updated profile (capturedAt set)", ...profileResponse },
+      ...errorResponses(400, 401, 404),
+    },
+  },
+  restore: {
+    summary: "Seed a profile's saved login into a session (warm re-login)",
+    description:
+      "Decrypts this profile's saved cookies and seeds them into the caller's active interactive session so " +
+      "re-logging in starts from the prior state instead of a blank browser. Owner-only for both the profile and " +
+      "the session. A no-op for a profile with no login captured yet. Returns the domains the profile carries " +
+      "(cookie values never cross the wire). 404 when the profile isn't the caller's / not configured; 400 when " +
+      "the session isn't active.",
+    tags: ["browser-profile"],
+    params: profileIdParams,
+    body: toJsonSchema(RestoreBrowserProfileBodySchema),
+    response: {
+      200: {
+        description: "The domains the profile carries",
+        ...toJsonSchema(z.object({ domains: z.array(z.string()) })),
+      },
       ...errorResponses(400, 401, 404),
     },
   },

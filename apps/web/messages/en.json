@@ -2859,6 +2859,7 @@
     "emptyHint": "Create a profile: a live browser opens, you log into the sites you need, and those logins are reused in browser evals.",
     "wizardCreateTitle": "New browser profile",
     "wizardReloginTitle": "Log in again — {name}",
+    "restoredNote": "Your saved login was restored into this browser and it opened the profile’s site — check you’re still signed in. If the session lapsed, just log in again, then save.",
     "wizardIntro": "A live browser will open. Log into every site this profile should carry — each login appears below as it is remembered. Nothing is saved until you finish.",
     "geoLabel": "Geo (egress proxy)",
     "geoDirect": "Direct (no proxy)",
