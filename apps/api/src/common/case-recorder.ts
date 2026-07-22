@@ -11,11 +11,14 @@ export class CaseRecorder {
   private readonly lastFrame = new Map<string, { hash: string; ref: string }>();
   constructor(
     private readonly recordings: RecordingStore,
-    private readonly artifacts: ArtifactStore,
+    // Optional: frames need an object store to offload. Without one, logs still record (they carry no bytes).
+    private readonly artifacts: ArtifactStore | undefined,
     private readonly now: () => number = () => Date.now(),
   ) {}
 
   async recordFrame(runId: string, frameBase64: string): Promise<void> {
+    const artifacts = this.artifacts;
+    if (!artifacts) return; // frames need an object store to offload; without one, skip them (logs still record)
     try {
       const t = this.now();
       const hash = createHash("sha256").update(frameBase64).digest("hex");
@@ -24,7 +27,7 @@ export class CaseRecorder {
       if (prev && prev.hash === hash) {
         ref = prev.ref; // consecutive-identical frame → reuse the offloaded object (dedup a static screen)
       } else {
-        ref = await this.artifacts.put(`recordings/${runId}/${t}.png`, Buffer.from(frameBase64, "base64"), "image/png");
+        ref = await artifacts.put(`recordings/${runId}/${t}.png`, Buffer.from(frameBase64, "base64"), "image/png");
         this.lastFrame.set(runId, { hash, ref });
       }
       await this.recordings.append(runId, { track: "frames", entry: { t, ref, hash } });

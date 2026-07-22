@@ -1,5 +1,4 @@
 import { ProxyService } from "@everdict/application-control";
-import { InMemoryRecordingStore } from "@everdict/db";
 import { perTenantTrustZones } from "@everdict/domain";
 import type { BrowserSessionProvisioner } from "./common/browser-session-provisioner.js";
 import { CaseRecorder } from "./common/case-recorder.js";
@@ -85,6 +84,7 @@ async function main(): Promise<void> {
 
   const {
     store,
+    recordingStore,
     scorecardStore,
     keyStore,
     harnessTemplateRegistry,
@@ -214,11 +214,11 @@ async function main(): Promise<void> {
   const liveFrames = new LiveFrameStore();
   // Accumulated live execution log per run, pushed by a self-hosted runner (report_case_log) → served by RunService.logs().
   const liveLogs = new LiveLogStore();
-  // Durable replay recording (opt-in via EVERDICT_RECORDING) — the runner-lease MCP tees the pushed frames/logs here
-  // so a run can be replayed after it settles; RunService seals it at finalize. In-memory for now (Pg + object-store
-  // retention is S4); the frame offload needs an object store. docs/architecture/replay.md.
-  const recordingStore = process.env.EVERDICT_RECORDING ? new InMemoryRecordingStore() : undefined;
-  const caseRecorder = recordingStore && artifacts ? new CaseRecorder(recordingStore, artifacts) : undefined;
+  // Durable replay recording — persistent by DEFAULT (Postgres when DATABASE_URL is set, else in-memory), from
+  // persistence. The runner-lease MCP tees pushed frames/logs into it so a run can be replayed after it settles;
+  // RunService/scorecard seal it at finalize. Frames need an object store to offload; logs record regardless.
+  // docs/architecture/replay.md.
+  const caseRecorder = new CaseRecorder(recordingStore, artifacts);
   const { service, judgeRunner, submitCodeJudgeRun } = buildRun({
     store,
     meteredDispatcher,
@@ -290,7 +290,12 @@ async function main(): Promise<void> {
   // Close the schedule cycle: build ScheduleService (it needs scorecardService) and publish it into scheduleRef so
   // the member-removal hook can resolve it. Nothing before this point invokes that hook (a member can only leave a
   // running server, long after boot). See composition/schedule.ts.
-  const scheduleService = wireScheduleService(scheduleRef, { scheduleStore, scorecardService, notificationService });
+  const scheduleService = wireScheduleService(scheduleRef, {
+    scheduleStore,
+    scorecardService,
+    notificationService,
+    ...(traceSourceService ? { traceSourceService } : {}),
+  });
 
   const queueService = buildQueue({
     scorecardStore,

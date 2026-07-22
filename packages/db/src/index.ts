@@ -69,6 +69,7 @@ export {
 export type {
   RunStore,
   RunListOptions,
+  RecordingStore,
   ScorecardStore,
   ScorecardListFilter,
   ScheduleStore,
@@ -109,6 +110,7 @@ export {
 } from "./results/usage-store.js";
 export { InMemoryBudgetStore, PgBudgetStore } from "./results/budget-store.js";
 export { PgRunStore } from "./results/pg-run-store.js";
+export { PgRecordingStore } from "./results/pg-recording-store.js";
 export { PgScorecardStore } from "./results/pg-scorecard-store.js";
 export { PgScheduleStore } from "./results/pg-schedule-store.js";
 export {

@@ -64,6 +64,22 @@ describe("CaseRecorder", () => {
     expect(logs.map((l) => l.text)).toEqual(["Started", "Completed"]);
   });
 
+  it("records logs without an object store, but skips frames (they need offload)", async () => {
+    // Given a recorder with NO artifact store (persistent recording still on; frames just can't offload)
+    const recordings = new InMemoryRecordingStore();
+    const recorder = new CaseRecorder(recordings, undefined, fakeClock());
+
+    // When both a frame and a log are reported
+    await recorder.recordFrame("evd-run-1", "AAAA");
+    await recorder.recordLog("evd-run-1", "Started");
+
+    // Then the log is recorded and the frame is skipped
+    await recordings.seal("evd-run-1", { envKind: "repo" });
+    const rec = await recordings.get("evd-run-1");
+    expect(rec?.tracks.logs?.map((l) => l.text)).toEqual(["Started"]);
+    expect(rec?.tracks.frames).toBeUndefined();
+  });
+
   it("swallows an artifact-store failure so a recording error never affects the run", async () => {
     // Given an artifact store that throws on put
     const recordings = new InMemoryRecordingStore();

@@ -9,6 +9,7 @@ import {
   InMemoryCommentStore,
   InMemoryNotificationStore,
   InMemoryOAuthStateStore,
+  InMemoryRecordingStore,
   InMemoryRunStore,
   InMemoryRunnerJobStore,
   InMemoryRunnerStore,
@@ -30,6 +31,7 @@ import {
   PgCommentStore,
   PgNotificationStore,
   PgOAuthStateStore,
+  PgRecordingStore,
   PgRunStore,
   PgRunnerJobStore,
   PgRunnerStore,
@@ -43,6 +45,7 @@ import {
   PgWorkspaceInviteStore,
   PgWorkspaceSettingsStore,
   PgWorkspaceStore,
+  type RecordingStore,
   type RunStore,
   type RunnerJobStore,
   type RunnerStore,
@@ -92,6 +95,7 @@ import {
 
 export interface Persistence {
   store: RunStore;
+  recordingStore: RecordingStore; // durable replay recording (frames/logs/env/runtime tracks) — persistent by default
   scorecardStore: ScorecardStore;
   keyStore: TenantKeyStore;
   harnessTemplateRegistry: HarnessTemplateRegistry; // harness category (template structure)
@@ -146,6 +150,7 @@ export async function makePersistence(): Promise<Persistence> {
     const harnessTemplateRegistry = new InMemoryHarnessTemplateRegistry();
     return {
       store: new InMemoryRunStore(),
+      recordingStore: new InMemoryRecordingStore(),
       scorecardStore: new InMemoryScorecardStore(),
       keyStore: new InMemoryTenantKeyStore(),
       harnessTemplateRegistry,
@@ -181,6 +186,7 @@ export async function makePersistence(): Promise<Persistence> {
   const harnessTemplateRegistry = new PgHarnessTemplateRegistry(client);
   return {
     store: new PgRunStore(client),
+    recordingStore: new PgRecordingStore(client),
     scorecardStore: new PgScorecardStore(client),
     keyStore: new PgTenantKeyStore(client),
     harnessTemplateRegistry,
