@@ -1,8 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
-import Link from 'next/link'
-import { ArrowUpRight, ChevronLeft, Loader2 } from 'lucide-react'
+import { Loader2 } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
 import { LiveLogs } from '@/widgets/live-logs'
@@ -13,6 +12,7 @@ import { EntityRef } from '@/shared/ui/chip'
 import { StatusIcon, StatusPill } from '@/shared/ui/status-pill'
 
 import { useInfraPanel } from '../model/infra-panel-context'
+import { DetailNav } from './panel-bits'
 
 // Runs tab — the live half of the split view. Without a selection: the execution feed (active first, then the
 // latest settled). Selecting a run swaps in its uninterrupted live view (screen frames + log tail) right here in
@@ -69,24 +69,11 @@ export function RunsTab({ onNavigate }: { onNavigate: () => void }) {
     const selected = runs?.find((r) => r.id === selectedRunId)
     return (
       <div className="space-y-3 px-3.5 py-3">
-        <div className="flex items-center justify-between gap-2">
-          <button
-            type="button"
-            onClick={() => selectRun(null)}
-            className="inline-flex items-center gap-0.5 rounded-md px-1 py-0.5 text-[12px] font-[510] text-muted-foreground hover:bg-accent hover:text-foreground"
-          >
-            <ChevronLeft className="size-3.5" />
-            {t('backToList')}
-          </button>
-          <Link
-            href={`/${workspace}/runs/${encodeURIComponent(selectedRunId)}`}
-            onClick={onNavigate}
-            className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md px-1.5 text-[11.5px] font-[510] text-muted-foreground hover:bg-accent hover:text-foreground"
-          >
-            {t('openRunDetail')}
-            <ArrowUpRight className="size-3.5" />
-          </Link>
-        </div>
+        <DetailNav
+          onBack={() => selectRun(null)}
+          fullHref={`/${workspace}/runs/${encodeURIComponent(selectedRunId)}`}
+          onNavigate={onNavigate}
+        />
 
         <div className="flex flex-wrap items-center gap-2">
           {selected && <StatusPill status={selected.status} />}

@@ -23,6 +23,11 @@ export type WorkAuthor = { name: string; avatarUrl?: string }
 
 export type InfraTab = 'schedules' | 'runtimes' | 'runs' | 'work'
 
+// The panel navigates on its own — infra detail views (runtime / runner / schedule / live run) open INSIDE the
+// panel, never via the left router. Per-tab drill-in state lives here (not in the tab components) so switching
+// tabs or navigating the left half never loses a drill-in.
+export type RuntimesDetail = { kind: 'runtime' | 'runner'; id: string } | null
+
 type InfraPanelValue = {
   workspace: string
   open: boolean
@@ -32,11 +37,18 @@ type InfraPanelValue = {
   // Non-toggling open (command palette, deep entries) — always ends open on the given tab.
   openTab: (tab: InfraTab) => void
   close: () => void
-  // Live run selection (runs tab) — openRun() is the cross-page entry: any left-side surface can push a run
+  // Live run selection (runs tab) — openRun() is the cross-page entry: any surface can push a run
   // into the right panel without navigating away.
   selectedRunId: string | null
   selectRun: (id: string | null) => void
   openRun: (id: string) => void
+  // In-panel infra navigation — runtime/runner and schedule drill-ins (+ cross-tab entries used by the work tab).
+  runtimesDetail: RuntimesDetail
+  setRuntimesDetail: (d: RuntimesDetail) => void
+  openRuntime: (kind: 'runtime' | 'runner', id: string) => void
+  schedulesDetail: string | null
+  setSchedulesDetail: (id: string | null) => void
+  openSchedule: (id: string) => void
   snapshot: QueueSnapshot | null
   authors: Record<string, WorkAuthor>
 }
@@ -56,6 +68,8 @@ export function InfraPanelProvider({
   const [open, setOpen] = useState(false)
   const [tab, setTab] = useState<InfraTab>('work')
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null)
+  const [runtimesDetail, setRuntimesDetail] = useState<RuntimesDetail>(null)
+  const [schedulesDetail, setSchedulesDetail] = useState<string | null>(null)
   const [snapshot, setSnapshot] = useState<QueueSnapshot | null>(null)
   const [authors, setAuthors] = useState<Record<string, WorkAuthor>>({})
   const authorsLoaded = useRef(false)
@@ -146,6 +160,18 @@ export function InfraPanelProvider({
     setOpen(true)
   }, [])
 
+  const openRuntime = useCallback((kind: 'runtime' | 'runner', id: string) => {
+    setRuntimesDetail({ kind, id })
+    setTab('runtimes')
+    setOpen(true)
+  }, [])
+
+  const openSchedule = useCallback((id: string) => {
+    setSchedulesDetail(id)
+    setTab('schedules')
+    setOpen(true)
+  }, [])
+
   return (
     <InfraPanelContext.Provider
       value={{
@@ -158,6 +184,12 @@ export function InfraPanelProvider({
         selectedRunId,
         selectRun: setSelectedRunId,
         openRun,
+        runtimesDetail,
+        setRuntimesDetail,
+        openRuntime,
+        schedulesDetail,
+        setSchedulesDetail,
+        openSchedule,
         snapshot,
         authors,
       }}

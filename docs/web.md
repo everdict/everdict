@@ -110,7 +110,11 @@ panel/list guidance is not.
   pop-shadow card — not a flush docked column) as a flex sibling of `main`, so the two sides split the space
   half-and-half on md+; on mobile the rail floats on the right edge and the panel becomes a floating sheet.
   Panel state + polling live in `InfraPanelProvider` in the shell (above the routes), so left-side navigation
-  never unmounts it. Tabs: **work** — the queue snapshot: per-runtime lanes (default backend · registered
+  never unmounts it. **The panel navigates itself**: infra drill-ins (runtime · runner · schedule · live run)
+  open IN-PANEL (per-tab detail state in the provider, `DetailNav` back row), never via the left router — the
+  two halves have independent navigation. The only left-bound links inside the panel are the deliberate
+  "full page" escape hatches and eval-axis entities (scorecards). Tabs: **work** — the queue snapshot:
+  per-runtime lanes (default backend · registered
   runtimes · `self:<runner>`) each showing running (batch = case-progress bar), waiting (FIFO, first badged
   'Next') and next-scheduled fires, from `GET /queue` (`runs:read`; MCP parity `get_queue`; see
   `docs/architecture/work-queue.md`); **runs** — the execution feed (BFF `/api/runs`, scope=all) where selecting

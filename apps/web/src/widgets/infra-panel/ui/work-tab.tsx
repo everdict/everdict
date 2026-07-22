@@ -1,15 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import {
-  CalendarClock,
-  ChevronsRight,
-  CircleDashed,
-  Laptop,
-  Loader2,
-  MonitorPlay,
-  Server,
-} from 'lucide-react'
+import { CalendarClock, ChevronsRight, CircleDashed, Laptop, Loader2, Server } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
 import { type QueueItem, type QueueLane, type QueueSnapshot } from '@/entities/queue'
@@ -18,7 +10,6 @@ import { cn } from '@/shared/lib/utils'
 import { UserAvatar } from '@/shared/ui/avatar'
 import { Badge } from '@/shared/ui/badge'
 import { EntityRef } from '@/shared/ui/chip'
-import { Tooltip } from '@/shared/ui/tooltip'
 
 import { useInfraPanel, type WorkAuthor } from '../model/infra-panel-context'
 
@@ -72,8 +63,9 @@ function Progress({ progress }: { progress: NonNullable<QueueItem['progress']> }
   )
 }
 
-// Work item — a fixed one-line format: dataset→harness + progress/status + runner·time. Click = go to the detail
-// (closing the panel on mobile). A running single run also offers "watch live" = open it in the runs tab in place.
+// Work item — a fixed one-line format: dataset→harness + progress/status + runner·time. Navigation splits by
+// axis: a run opens IN-PANEL (runs tab live view — the panel navigates itself); a scorecard is an eval-axis
+// entity, so it navigates the left half (closing the panel on mobile).
 function ItemRow({
   item,
   workspace,
@@ -88,22 +80,12 @@ function ItemRow({
   next?: boolean
 }) {
   const t = useTranslations('workPanel')
-  const tp = useTranslations('infraPanel')
   const { openRun } = useInfraPanel()
-  const href =
-    item.type === 'scorecard'
-      ? `/${workspace}/scorecards/${encodeURIComponent(item.id)}`
-      : `/${workspace}/runs/${encodeURIComponent(item.id)}`
   const author = item.createdBy
     ? (authors[item.createdBy] ?? { name: fmtSubject(item.createdBy) })
     : undefined
-  const live = item.type === 'run' && item.status === 'running'
-  return (
-    <Link
-      href={href}
-      onClick={onNavigate}
-      className="group flex items-center gap-2 rounded-md border bg-card px-2 py-1.5 transition-colors hover:border-border-strong hover:bg-elevated"
-    >
+  const body = (
+    <>
       <div className="min-w-0 flex-1 space-y-1">
         <div className="flex items-center gap-1.5 overflow-hidden whitespace-nowrap text-[12px] font-[510]">
           {next && (
@@ -142,22 +124,6 @@ function ItemRow({
           )}
         </div>
       </div>
-      {live && (
-        <Tooltip content={tp('watchLive')} side="top" align="end">
-          <button
-            type="button"
-            aria-label={tp('watchLive')}
-            onClick={(e) => {
-              e.preventDefault()
-              e.stopPropagation()
-              openRun(item.id)
-            }}
-            className="grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100"
-          >
-            <MonitorPlay className="size-3.5" />
-          </button>
-        </Tooltip>
-      )}
       <span className="flex w-5 shrink-0 justify-center">
         {author && (
           <UserAvatar name={author.name} url={author.avatarUrl} label={t('runnerLabel')} />
@@ -169,7 +135,50 @@ function ItemRow({
       >
         {fmtDateTime(item.createdAt)}
       </time>
+    </>
+  )
+  const rowClass =
+    'flex w-full items-center gap-2 rounded-md border bg-card px-2 py-1.5 text-left transition-colors hover:border-border-strong hover:bg-elevated'
+  if (item.type === 'run')
+    return (
+      <button type="button" onClick={() => openRun(item.id)} className={rowClass}>
+        {body}
+      </button>
+    )
+  return (
+    <Link
+      href={`/${workspace}/scorecards/${encodeURIComponent(item.id)}`}
+      onClick={onNavigate}
+      className={rowClass}
+    >
+      {body}
     </Link>
+  )
+}
+
+// Upcoming fire — clicking drills into that schedule's in-panel detail (schedules tab), not the left router.
+function UpcomingRow({ upcoming }: { upcoming: QueueLane['upcoming'][number] }) {
+  const { openSchedule } = useInfraPanel()
+  return (
+    <button
+      type="button"
+      onClick={() => openSchedule(upcoming.scheduleId)}
+      className="flex w-full items-center gap-2 rounded-md border bg-card px-2 py-1.5 text-left transition-colors hover:border-border-strong hover:bg-elevated"
+    >
+      <CalendarClock className="size-3.5 shrink-0 text-faint" />
+      <div className="min-w-0 flex-1 space-y-0.5 overflow-hidden whitespace-nowrap">
+        <div className="truncate text-[12px] font-[510]">{upcoming.name}</div>
+        <div className="truncate font-mono text-[10.5px] text-faint">
+          {upcoming.dataset} → {upcoming.harness}
+        </div>
+      </div>
+      <time
+        className="shrink-0 font-mono text-[10.5px] text-muted-foreground"
+        title={fmtDateTimeFull(upcoming.at)}
+      >
+        {fmtDateTime(upcoming.at)}
+      </time>
+    </button>
   )
 }
 
@@ -270,20 +279,27 @@ function LaneCard({
   personal?: boolean
 }) {
   const t = useTranslations('workPanel')
+  const { openRuntime } = useInfraPanel()
   const idle = lane.running.length === 0 && lane.queued.length === 0 && lane.upcoming.length === 0
   const Icon = personal ? Laptop : Server
+  // Lane header click = the in-panel runtime/runner drill-in (the panel navigates itself, never the left half).
+  const drillIn = lane.registered
+    ? () => openRuntime('runtime', lane.runtime)
+    : lane.runtime.startsWith('self:')
+      ? () => openRuntime('runner', lane.runtime.slice('self:'.length))
+      : undefined
   return (
     <div className={cn('rounded-lg border bg-card p-2.5', idle && 'opacity-60')}>
       <div className="flex items-center gap-1.5 overflow-hidden whitespace-nowrap">
         <Icon className="size-3.5 shrink-0 text-[#6ec6a8]" />
-        {lane.registered ? (
-          <Link
-            href={`/${workspace}/runtimes/${encodeURIComponent(lane.runtime)}`}
-            onClick={onNavigate}
+        {drillIn ? (
+          <button
+            type="button"
+            onClick={drillIn}
             className="truncate text-[12.5px] font-[560] hover:underline"
           >
             {laneLabel(lane, t)}
-          </Link>
+          </button>
         ) : (
           <span className="truncate text-[12.5px] font-[560]">{laneLabel(lane, t)}</span>
         )}
@@ -307,26 +323,7 @@ function LaneCard({
           <div className="mt-2 space-y-2.5">
             <LaneSection title={t('upcoming')} count={lane.upcoming.length}>
               {lane.upcoming.map((u) => (
-                <Link
-                  key={`${u.scheduleId}-${u.at}`}
-                  href={`/${workspace}/schedules`}
-                  onClick={onNavigate}
-                  className="flex items-center gap-2 rounded-md border bg-card px-2 py-1.5 transition-colors hover:border-border-strong hover:bg-elevated"
-                >
-                  <CalendarClock className="size-3.5 shrink-0 text-faint" />
-                  <div className="min-w-0 flex-1 space-y-0.5 overflow-hidden whitespace-nowrap">
-                    <div className="truncate text-[12px] font-[510]">{u.name}</div>
-                    <div className="truncate font-mono text-[10.5px] text-faint">
-                      {u.dataset} → {u.harness}
-                    </div>
-                  </div>
-                  <time
-                    className="shrink-0 font-mono text-[10.5px] text-muted-foreground"
-                    title={fmtDateTimeFull(u.at)}
-                  >
-                    {fmtDateTime(u.at)}
-                  </time>
-                </Link>
+                <UpcomingRow key={`${u.scheduleId}-${u.at}`} upcoming={u} />
               ))}
             </LaneSection>
             <LaneSection title={t('queued')} count={lane.queued.length}>

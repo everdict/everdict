@@ -1,21 +1,31 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import Link from 'next/link'
 import { Laptop, Loader2, Server } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 import { z } from 'zod'
 
+import { runsSchema, type Run } from '@/entities/run'
 import { runnerMetaSchema, type RunnerMeta } from '@/entities/runner'
-import { runtimesSchema, type RuntimeSummary } from '@/entities/runtime'
+import {
+  runtimeSpecSchema,
+  runtimesSchema,
+  runtimeSummarySchema,
+  type RuntimeSpec,
+  type RuntimeSummary,
+} from '@/entities/runtime'
 import { fmtDateTime, fmtDateTimeFull } from '@/shared/lib/format'
 import { cn } from '@/shared/lib/utils'
 import { Badge } from '@/shared/ui/badge'
+import { EntityRef } from '@/shared/ui/chip'
+import { StatusIcon } from '@/shared/ui/status-pill'
 
 import { useInfraPanel } from '../model/infra-panel-context'
+import { DetailNav, MetaRow, SectionLabel } from './panel-bits'
 
-// Runtimes tab — the execution-infra roster at a glance: workspace runtimes (registered infra) + my self-hosted
-// runners with their live connectivity. A compact status surface; deep management stays on the full runtimes page.
+// Runtimes tab — the execution-infra roster with its OWN navigation: clicking a runtime or runner drills into a
+// compact in-panel detail (the left half never navigates). The "full page" link inside a drill-in is the one
+// deliberate escape hatch to the routed page.
 
 const POLL_MS = 10_000
 // Online check — a runner refreshes lastSeenAt on every long-poll lease (~25s), so within 90s it counts as connected
@@ -27,13 +37,18 @@ const rosterSchema = z.object({
   runners: z.array(runnerMetaSchema),
 })
 
+const runtimeDetailSchema = z.object({
+  summary: runtimeSummarySchema,
+  spec: runtimeSpecSchema.optional(),
+})
+
 function isOnline(lastSeenAt?: string): boolean {
   return lastSeenAt !== undefined && Date.now() - new Date(lastSeenAt).getTime() < ONLINE_WINDOW_MS
 }
 
 export function RuntimesTab({ onNavigate }: { onNavigate: () => void }) {
   const t = useTranslations('infraPanel')
-  const { workspace } = useInfraPanel()
+  const { workspace, runtimesDetail, setRuntimesDetail } = useInfraPanel()
   const [roster, setRoster] = useState<{
     runtimes: RuntimeSummary[]
     runners: RunnerMeta[]
@@ -62,6 +77,27 @@ export function RuntimesTab({ onNavigate }: { onNavigate: () => void }) {
     }
   }, [])
 
+  if (runtimesDetail?.kind === 'runtime')
+    return (
+      <RuntimeDetail
+        id={runtimesDetail.id}
+        workspace={workspace}
+        onBack={() => setRuntimesDetail(null)}
+        onNavigate={onNavigate}
+      />
+    )
+  if (runtimesDetail?.kind === 'runner')
+    return (
+      <RunnerDetail
+        id={runtimesDetail.id}
+        meta={roster?.runners.find((r) => r.id === runtimesDetail.id)}
+        loading={roster === null}
+        workspace={workspace}
+        onBack={() => setRuntimesDetail(null)}
+        onNavigate={onNavigate}
+      />
+    )
+
   if (!roster)
     return (
       <div className="flex items-center justify-center gap-2 py-8 text-[12.5px] text-faint">
@@ -76,17 +112,14 @@ export function RuntimesTab({ onNavigate }: { onNavigate: () => void }) {
     <div className="space-y-4 px-3.5 py-3.5">
       {roster.runtimes.length > 0 && (
         <section className="space-y-1">
-          <div className="flex items-center gap-1.5 text-[10.5px] font-[510] uppercase tracking-wide text-faint">
-            {t('workspaceRuntimes')}
-            <span className="tabular-nums text-muted-foreground">{roster.runtimes.length}</span>
-          </div>
+          <SectionLabel count={roster.runtimes.length}>{t('workspaceRuntimes')}</SectionLabel>
           <div className="space-y-1">
             {roster.runtimes.map((r) => (
-              <Link
+              <button
                 key={r.id}
-                href={`/${workspace}/runtimes/${encodeURIComponent(r.id)}`}
-                onClick={onNavigate}
-                className="flex items-center gap-2 rounded-md border bg-card px-2 py-1.5 transition-colors hover:border-border-strong hover:bg-elevated"
+                type="button"
+                onClick={() => setRuntimesDetail({ kind: 'runtime', id: r.id })}
+                className="flex w-full items-center gap-2 rounded-md border bg-card px-2 py-1.5 text-left transition-colors hover:border-border-strong hover:bg-elevated"
               >
                 <Server className="size-3.5 shrink-0 text-[#6ec6a8]" />
                 <span className="min-w-0 flex-1 truncate text-[12px] font-[510]">{r.id}</span>
@@ -98,7 +131,7 @@ export function RuntimesTab({ onNavigate }: { onNavigate: () => void }) {
                 <span className="shrink-0 font-mono text-[10.5px] text-faint">
                   {t('versionCount', { n: r.versions.length })}
                 </span>
-              </Link>
+              </button>
             ))}
           </div>
         </section>
@@ -106,19 +139,16 @@ export function RuntimesTab({ onNavigate }: { onNavigate: () => void }) {
 
       {roster.runners.length > 0 && (
         <section className="space-y-1">
-          <div className="flex items-center gap-1.5 text-[10.5px] font-[510] uppercase tracking-wide text-faint">
-            {t('myRunners')}
-            <span className="tabular-nums text-muted-foreground">{roster.runners.length}</span>
-          </div>
+          <SectionLabel count={roster.runners.length}>{t('myRunners')}</SectionLabel>
           <div className="space-y-1">
             {roster.runners.map((r) => {
               const online = isOnline(r.lastSeenAt)
               return (
-                <Link
+                <button
                   key={r.id}
-                  href={`/${workspace}/runtimes/self/${encodeURIComponent(r.id)}`}
-                  onClick={onNavigate}
-                  className="flex items-center gap-2 rounded-md border bg-card px-2 py-1.5 transition-colors hover:border-border-strong hover:bg-elevated"
+                  type="button"
+                  onClick={() => setRuntimesDetail({ kind: 'runner', id: r.id })}
+                  className="flex w-full items-center gap-2 rounded-md border bg-card px-2 py-1.5 text-left transition-colors hover:border-border-strong hover:bg-elevated"
                 >
                   <Laptop className="size-3.5 shrink-0 text-[#6ec6a8]" />
                   <span
@@ -161,12 +191,272 @@ export function RuntimesTab({ onNavigate }: { onNavigate: () => void }) {
                       {fmtDateTime(r.lastSeenAt)}
                     </time>
                   )}
-                </Link>
+                </button>
               )
             })}
           </div>
         </section>
       )}
+    </div>
+  )
+}
+
+// Registered-runtime drill-in — the latest version's spec, read once per id (the roster poll keeps the list fresh;
+// a spec is immutable per version so it doesn't need polling).
+function RuntimeDetail({
+  id,
+  workspace,
+  onBack,
+  onNavigate,
+}: {
+  id: string
+  workspace: string
+  onBack: () => void
+  onNavigate: () => void
+}) {
+  const t = useTranslations('infraPanel')
+  const [detail, setDetail] = useState<{ summary: RuntimeSummary; spec?: RuntimeSpec } | null>(null)
+  const [missing, setMissing] = useState(false)
+
+  useEffect(() => {
+    setDetail(null)
+    setMissing(false)
+    let stopped = false
+    void (async () => {
+      try {
+        const res = await fetch(`/api/runtimes/${encodeURIComponent(id)}`, { cache: 'no-store' })
+        if (stopped) return
+        if (!res.ok) {
+          setMissing(true)
+          return
+        }
+        const parsed = runtimeDetailSchema.safeParse(await res.json())
+        if (parsed.success) setDetail(parsed.data)
+        else setMissing(true)
+      } catch {
+        if (!stopped) setMissing(true)
+      }
+    })()
+    return () => {
+      stopped = true
+    }
+  }, [id])
+
+  const spec = detail?.spec
+  return (
+    <div className="space-y-3 px-3.5 py-3">
+      <DetailNav
+        onBack={onBack}
+        fullHref={`/${workspace}/runtimes/${encodeURIComponent(id)}`}
+        onNavigate={onNavigate}
+      />
+      <div className="flex flex-wrap items-center gap-2">
+        <Server className="size-4 shrink-0 text-[#6ec6a8]" />
+        <span className="min-w-0 truncate text-[13px] font-[560]">{id}</span>
+        {spec && <Badge tone="info">{spec.kind}</Badge>}
+      </div>
+
+      {missing && <p className="py-6 text-center text-[12.5px] text-faint">{t('detailMissing')}</p>}
+      {!missing && !detail && (
+        <div className="flex items-center justify-center gap-2 py-8 text-[12.5px] text-faint">
+          <Loader2 className="size-3.5 animate-spin" /> {t('loading')}
+        </div>
+      )}
+
+      {detail && (
+        <>
+          {spec?.description && (
+            <p className="text-[12px] text-muted-foreground">{spec.description}</p>
+          )}
+          <div className="rounded-md border bg-card px-2.5 py-1.5">
+            {spec?.addr && <MetaRow label={t('addr')}>{spec.addr}</MetaRow>}
+            {spec?.context && <MetaRow label={t('contextLabel')}>{spec.context}</MetaRow>}
+            {spec?.server && <MetaRow label={t('serverLabel')}>{spec.server}</MetaRow>}
+            {spec?.namespace && <MetaRow label={t('namespaceLabel')}>{spec.namespace}</MetaRow>}
+            {spec?.image && <MetaRow label={t('imageLabel')}>{spec.image}</MetaRow>}
+            {spec?.browserImage && (
+              <MetaRow label={t('browserImageLabel')}>{spec.browserImage}</MetaRow>
+            )}
+            {spec?.runtimeClass && (
+              <MetaRow label={t('runtimeClassLabel')}>{spec.runtimeClass}</MetaRow>
+            )}
+            {spec?.maxConcurrent !== undefined && (
+              <MetaRow label={t('maxConcurrentLabel')}>{spec.maxConcurrent}</MetaRow>
+            )}
+            {spec?.memoryBudgetMb !== undefined && (
+              <MetaRow label={t('memoryBudgetLabel')}>{spec.memoryBudgetMb}Mb</MetaRow>
+            )}
+            {spec?.cpuBudget !== undefined && (
+              <MetaRow label={t('cpuBudgetLabel')}>{spec.cpuBudget}</MetaRow>
+            )}
+            <MetaRow label={t('versionsLabel')}>{detail.summary.versions.join(' · ')}</MetaRow>
+          </div>
+          {(detail.summary.capabilities ?? []).length > 0 && (
+            <div className="flex flex-wrap items-center gap-1">
+              <SectionLabel>{t('capabilitiesLabel')}</SectionLabel>
+              {(detail.summary.capabilities ?? []).map((c) => (
+                <Badge key={c} tone="neutral">
+                  {c}
+                </Badge>
+              ))}
+            </div>
+          )}
+          {(spec?.tags ?? []).length > 0 && (
+            <div className="flex flex-wrap items-center gap-1">
+              <SectionLabel>{t('tagsLabel')}</SectionLabel>
+              {(spec?.tags ?? []).map((tag) => (
+                <Badge key={tag} tone="neutral">
+                  {tag}
+                </Badge>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  )
+}
+
+// Self-hosted runner drill-in — presence/status from the polled roster + a recent-activity feed; clicking a run
+// switches to the runs tab's live view (still inside the panel).
+function RunnerDetail({
+  id,
+  meta,
+  loading,
+  workspace,
+  onBack,
+  onNavigate,
+}: {
+  id: string
+  meta: RunnerMeta | undefined
+  loading: boolean
+  workspace: string
+  onBack: () => void
+  onNavigate: () => void
+}) {
+  const t = useTranslations('infraPanel')
+  const { openRun } = useInfraPanel()
+  const [activity, setActivity] = useState<Run[] | null>(null)
+
+  useEffect(() => {
+    setActivity(null)
+    let stopped = false
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const tick = async () => {
+      try {
+        const res = await fetch(`/api/runs?runner=${encodeURIComponent(id)}`, {
+          cache: 'no-store',
+        })
+        if (res.ok) {
+          const parsed = runsSchema.safeParse(await res.json())
+          if (stopped) return
+          if (parsed.success) setActivity(parsed.data)
+        }
+      } catch {
+        // transient — keep polling
+      }
+      if (!stopped) timer = setTimeout(tick, 15_000)
+    }
+    void tick()
+    return () => {
+      stopped = true
+      if (timer) clearTimeout(timer)
+    }
+  }, [id])
+
+  const online = isOnline(meta?.lastSeenAt)
+  return (
+    <div className="space-y-3 px-3.5 py-3">
+      <DetailNav
+        onBack={onBack}
+        fullHref={`/${workspace}/runtimes/self/${encodeURIComponent(id)}`}
+        onNavigate={onNavigate}
+      />
+      <div className="flex flex-wrap items-center gap-2">
+        <Laptop className="size-4 shrink-0 text-[#6ec6a8]" />
+        <span className="min-w-0 truncate text-[13px] font-[560]">{meta?.label ?? id}</span>
+        <Badge tone={online ? 'success' : 'neutral'}>{online ? t('online') : t('offline')}</Badge>
+        {meta?.updateRequired && <Badge tone="info">{t('updateRequired')}</Badge>}
+      </div>
+
+      {!meta && !loading && (
+        <p className="py-6 text-center text-[12.5px] text-faint">{t('detailMissing')}</p>
+      )}
+
+      {meta && (
+        <>
+          {meta.status && (
+            <p
+              className={cn(
+                'text-[12px]',
+                meta.status.level === 'error'
+                  ? 'text-[var(--color-destructive)]'
+                  : meta.status.level === 'warn'
+                    ? 'text-[var(--color-warning)]'
+                    : 'text-muted-foreground'
+              )}
+            >
+              {meta.status.text}
+            </p>
+          )}
+          <div className="rounded-md border bg-card px-2.5 py-1.5">
+            {meta.os && <MetaRow label={t('osLabel')}>{meta.os}</MetaRow>}
+            {meta.version && <MetaRow label={t('runnerVersionLabel')}>{meta.version}</MetaRow>}
+            <MetaRow label={t('pairedAtLabel')}>{fmtDateTime(meta.pairedAt)}</MetaRow>
+            {meta.lastSeenAt && (
+              <MetaRow label={t('lastSeenLabel')}>{fmtDateTime(meta.lastSeenAt)}</MetaRow>
+            )}
+          </div>
+          {meta.capabilities.length > 0 && (
+            <div className="flex flex-wrap items-center gap-1">
+              <SectionLabel>{t('capabilitiesLabel')}</SectionLabel>
+              {meta.capabilities.map((c) => (
+                <Badge key={c} tone="neutral">
+                  {c}
+                </Badge>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+
+      <section className="space-y-1">
+        <SectionLabel count={activity?.length}>{t('recentActivity')}</SectionLabel>
+        {activity === null ? (
+          <div className="flex items-center justify-center gap-2 py-4 text-[12.5px] text-faint">
+            <Loader2 className="size-3.5 animate-spin" /> {t('loading')}
+          </div>
+        ) : activity.length === 0 ? (
+          <p className="py-4 text-center text-[12px] text-faint">{t('activityEmpty')}</p>
+        ) : (
+          <div className="space-y-1">
+            {activity.map((r) => (
+              <button
+                key={r.id}
+                type="button"
+                onClick={() => openRun(r.id)}
+                className="flex w-full items-center gap-2 rounded-md border bg-card px-2 py-1.5 text-left transition-colors hover:border-border-strong hover:bg-elevated"
+              >
+                <StatusIcon status={r.status} className="size-3.5 shrink-0" />
+                <span className="min-w-0 flex-1 space-y-0.5 overflow-hidden whitespace-nowrap">
+                  <span className="block truncate text-[12px] font-[510]">
+                    <EntityRef id={r.harness.id} version={r.harness.version} kind="harness" />
+                  </span>
+                  <span className="block truncate font-mono text-[10.5px] text-faint">
+                    {r.caseId}
+                  </span>
+                </span>
+                <time
+                  className="w-[68px] shrink-0 text-right font-mono text-[10.5px] text-muted-foreground"
+                  title={fmtDateTimeFull(r.createdAt)}
+                >
+                  {fmtDateTime(r.createdAt)}
+                </time>
+              </button>
+            ))}
+          </div>
+        )}
+      </section>
     </div>
   )
 }
