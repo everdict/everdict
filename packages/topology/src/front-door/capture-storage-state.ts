@@ -103,6 +103,15 @@ export function storageStateDomains(state: StorageState): string[] {
   return [...new Set(state.cookies.map((c) => c.domain.replace(/^\./, "")).filter(Boolean))].sort();
 }
 
+// The profile's expected expiry (browser-profiles — "surface staleness") — the EARLIEST wall-clock expiry (unix
+// SECONDS) among the captured cookies that carry one, or null when every cookie is a session cookie (no persistent
+// expiry, CDP reports -1/undefined) or there are none. A login is only as fresh as its soonest-expiring persisted
+// cookie, so this is when the profile starts to go stale; session cookies have no wall-clock lapse and are ignored.
+export function storageStateExpiry(state: StorageState): number | null {
+  const times = state.cookies.map((c) => c.expires).filter((e): e is number => typeof e === "number" && e > 0);
+  return times.length > 0 ? Math.min(...times) : null;
+}
+
 // Seed a captured storageState INTO a running browser over CDP (browser-profiles S5) — the inverse of
 // captureStorageState. Given a running Chrome's CDP HTTP base and a Playwright-style storageState, set every cookie
 // via `Network.setCookies` so a browser eval that attaches afterwards is already logged-in. A no-op for an empty

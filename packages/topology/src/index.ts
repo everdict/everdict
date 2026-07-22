@@ -130,6 +130,7 @@ export {
   captureStorageState,
   seedStorageState,
   storageStateDomains,
+  storageStateExpiry,
   type StorageState,
   type StoredCookie,
 } from "./front-door/capture-storage-state.js";

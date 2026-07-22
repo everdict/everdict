@@ -52,10 +52,11 @@ export class InMemoryBrowserProfileStore implements BrowserProfileStore {
     stateCipher: string,
     capturedAt: string,
     cookieDomains: string[],
+    expiresAt: string | null,
   ): Promise<BrowserProfileRecord | undefined> {
     const r = this.byId.get(id);
     if (!r || r.tenant !== tenant) return undefined;
-    const next = { ...r, capturedAt, cookieDomains, updatedAt: capturedAt };
+    const next = { ...r, capturedAt, cookieDomains, expiresAt, updatedAt: capturedAt };
     this.byId.set(id, next);
     this.ciphers.set(id, stateCipher);
     return next;
@@ -75,6 +76,7 @@ interface BrowserProfileRow {
   cookie_domains: unknown;
   country: string | null;
   captured_at: string | Date | null;
+  expires_at: string | Date | null;
   created_by: string;
   created_at: string | Date;
   updated_at: string | Date;
@@ -90,6 +92,7 @@ function rowToRecord(row: BrowserProfileRow): BrowserProfileRecord {
     cookieDomains: row.cookie_domains,
     country: row.country,
     capturedAt: row.captured_at ? iso(row.captured_at) : null,
+    expiresAt: row.expires_at ? iso(row.expires_at) : null,
     createdBy: row.created_by,
     createdAt: iso(row.created_at),
     updatedAt: iso(row.updated_at),
@@ -160,16 +163,17 @@ export class PgBrowserProfileStore implements BrowserProfileStore {
     stateCipher: string,
     capturedAt: string,
     cookieDomains: string[],
+    expiresAt: string | null,
   ): Promise<BrowserProfileRecord | undefined> {
     const current = await this.get(tenant, id);
     if (!current) return undefined;
     await this.client.query(
       `UPDATE everdict_browser_profiles
-       SET state_cipher=$3, captured_at=$4, cookie_domains=$5, updated_at=$4
+       SET state_cipher=$3, captured_at=$4, cookie_domains=$5, expires_at=$6, updated_at=$4
        WHERE tenant=$1 AND id=$2`,
-      [tenant, id, stateCipher, capturedAt, JSON.stringify(cookieDomains)],
+      [tenant, id, stateCipher, capturedAt, JSON.stringify(cookieDomains), expiresAt],
     );
-    return { ...current, capturedAt, cookieDomains, updatedAt: capturedAt };
+    return { ...current, capturedAt, cookieDomains, expiresAt, updatedAt: capturedAt };
   }
 
   async loadState(tenant: string, id: string): Promise<string | undefined> {

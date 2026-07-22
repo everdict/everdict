@@ -285,6 +285,13 @@ short-lived container/pod per active login; self-hosted = the user's own local b
 - **Security is the through-line.** A live CDP-driven browser is powerful (navigate anywhere, exec JS) — that is the
   point (the user drives it), so gate it HARD: owner-only ticket, single active session, TTL, isolated egress (trust
   zone). Cookies = login credentials → encrypted at rest, never logged, transient in the browser, personal scope.
-- **Cookie expiry** — profiles go stale; surface staleness + a one-click re-login (re-run S1 + S3).
+- **Cookie expiry** — profiles go stale. ✅ Surfaced: capture records the profile's expected expiry
+  (`BrowserProfileRecord.expiresAt`, migration `0064`) = the EARLIEST wall-clock expiry among the captured cookies
+  (`storageStateExpiry` in `@everdict/topology`; a login is only as fresh as its soonest-expiring persisted cookie;
+  null when every captured cookie is a session cookie / nothing is captured — not sensitive, so it rides on the
+  record unlike the storageState blob). Settings › Browser profiles renders a per-row expiry chip
+  (`entities/browser-profile` `profileExpiryStatus`: a quiet date/"Session-based" chip when fresh, a colored
+  "Expires in N days"/"Expired" chip inside the `EXPIRY_SOON_DAYS`=7 window, which also promotes the row's
+  "Log in again" button) so an owner re-logs in (warm re-login, S3) before an eval would run unauthenticated.
 - **Quality** — CDP screencast is modest-fps JPEG; fine for login/navigation, not smooth video.
 - **Not a general remote-desktop** — one page target, browser only; no multi-tab orchestration in v1.

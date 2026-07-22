@@ -1,10 +1,15 @@
 'use client'
 
 import { useState } from 'react'
-import { Pencil, RotateCw, Trash2 } from 'lucide-react'
-import { useTranslations } from 'next-intl'
+import { AlertTriangle, Pencil, RotateCw, Trash2 } from 'lucide-react'
+import { useLocale, useTranslations } from 'next-intl'
 
-import type { BrowserProfile } from '@/entities/browser-profile'
+import {
+  profileExpiryStatus,
+  type BrowserProfile,
+  type ProfileExpiryStatus,
+} from '@/entities/browser-profile'
+import { cn } from '@/shared/lib/utils'
 import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
 import { Dialog } from '@/shared/ui/dialog'
@@ -138,6 +143,8 @@ function ProfileRow({
   const t = useTranslations('browserProfiles')
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(profile.name)
+  const expiry = profileExpiryStatus(profile, Date.now())
+  const needsAttention = expiry.kind === 'soon' || expiry.kind === 'expired'
 
   return (
     <li className="flex items-center justify-between gap-3 bg-card px-4 py-3">
@@ -172,6 +179,7 @@ function ProfileRow({
               ) : (
                 <span className="shrink-0 text-[10.5px] text-faint">{t('noLogin')}</span>
               )}
+              <ExpiryChip status={expiry} />
               {profile.country && (
                 <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10.5px] text-muted-foreground">
                   {profile.country}
@@ -186,8 +194,14 @@ function ProfileRow({
       </div>
       {!editing && (
         <div className="flex shrink-0 items-center gap-0.5">
-          {/* Re-login is the row's primary action — it keeps its label; housekeeping shrinks to icons. */}
-          <Button size="sm" variant="ghost" onClick={onRelogin} className="gap-1.5">
+          {/* Re-login is the row's primary action — it keeps its label; housekeeping shrinks to icons. When the
+              saved login is expiring soon or already lapsed it steps up from ghost to draw the eye. */}
+          <Button
+            size="sm"
+            variant={needsAttention ? 'secondary' : 'ghost'}
+            onClick={onRelogin}
+            className="gap-1.5"
+          >
             <RotateCw className="size-3.5" />
             {t('relogin')}
           </Button>
@@ -214,5 +228,48 @@ function ProfileRow({
         </div>
       )}
     </li>
+  )
+}
+
+// The saved login's freshness (browser-profiles — "surface staleness"). Fresh profiles get a quiet chip (an absolute
+// expiry date, or "Session-based" when there's no wall-clock expiry); a profile within the re-login window or already
+// lapsed gets a colored, icon-led chip so it stands out in the list. Nothing captured yet → nothing here (the
+// "No login" text already covers it).
+function ExpiryChip({ status }: { status: ProfileExpiryStatus }) {
+  const t = useTranslations('browserProfiles')
+  const locale = useLocale()
+  if (status.kind === 'none') return null
+  const dateFmt = new Intl.DateTimeFormat(locale, { dateStyle: 'medium' })
+  if (status.kind === 'session')
+    return (
+      <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10.5px] text-muted-foreground">
+        {t('sessionBased')}
+      </span>
+    )
+  if (status.kind === 'ok')
+    return (
+      <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10.5px] text-muted-foreground">
+        {t('expiresOn', { date: dateFmt.format(new Date(status.expiresAt)) })}
+      </span>
+    )
+  const soon = status.kind === 'soon'
+  const text = soon
+    ? status.days === 0
+      ? t('expiresToday')
+      : t('expiresSoon', { days: status.days })
+    : t('expired')
+  return (
+    <span
+      title={dateFmt.format(new Date(status.expiresAt))}
+      className={cn(
+        'inline-flex shrink-0 items-center gap-1 rounded-full px-1.5 py-0.5 text-[10.5px] font-medium',
+        soon
+          ? 'bg-[var(--color-warning)]/10 text-[var(--color-warning)]'
+          : 'bg-[var(--color-danger)]/10 text-[var(--color-danger)]'
+      )}
+    >
+      <AlertTriangle className="size-3" />
+      {text}
+    </span>
   )
 }

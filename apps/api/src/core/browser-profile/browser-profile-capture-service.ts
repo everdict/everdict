@@ -1,7 +1,13 @@
 import type { BrowserProfileStore } from "@everdict/application-control";
 import { BadRequestError, type BrowserProfileRecord, NotFoundError } from "@everdict/contracts";
 import type { SecretCipher } from "@everdict/db";
-import { type StorageState, captureStorageState, seedStorageState, storageStateDomains } from "@everdict/topology";
+import {
+  type StorageState,
+  captureStorageState,
+  seedStorageState,
+  storageStateDomains,
+  storageStateExpiry,
+} from "@everdict/topology";
 import type { BrowserSessionService } from "../browser-session/browser-session-service.js";
 
 // The profile ⇄ session bridge (browser-profiles). Two inverse operations, both owner-gated on the profile AND the
@@ -101,12 +107,17 @@ export class BrowserProfileCaptureService {
       );
     const stateCipher = JSON.stringify(this.deps.cipher.encrypt(JSON.stringify(state)));
     const capturedAt = this.now();
+    // The profile's expected expiry = the earliest cookie expiry (unix seconds → ISO), or null when the login is
+    // session-only. Persisted as plain metadata (not the cookie values) so Settings can surface staleness.
+    const expirySeconds = storageStateExpiry(state);
+    const expiresAt = expirySeconds !== null ? new Date(expirySeconds * 1000).toISOString() : null;
     const updated = await this.deps.store.saveState(
       cmd.tenant,
       cmd.profileId,
       stateCipher,
       capturedAt,
       storageStateDomains(state),
+      expiresAt,
     );
     if (!updated) throw new NotFoundError("NOT_FOUND", { id: cmd.profileId }, "browser profile not found.");
     return updated;

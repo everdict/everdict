@@ -28,10 +28,10 @@ function fakeStore(): BrowserProfileStore {
       const r = byId.get(id);
       if (r && r.tenant === tenant) byId.delete(id);
     },
-    async saveState(tenant, id, _cipher, capturedAt, cookieDomains) {
+    async saveState(tenant, id, _cipher, capturedAt, cookieDomains, expiresAt) {
       const r = byId.get(id);
       if (!r || r.tenant !== tenant) return undefined;
-      const next = { ...r, capturedAt, cookieDomains, updatedAt: capturedAt };
+      const next = { ...r, capturedAt, cookieDomains, expiresAt, updatedAt: capturedAt };
       byId.set(id, next);
       return next;
     },

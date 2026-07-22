@@ -42,6 +42,7 @@ export class BrowserProfileService {
       cookieDomains: input.cookieDomains ?? [],
       country: input.country ?? null, // null = direct login (no egress proxy)
       capturedAt: null, // no login captured yet — S3 sets it via saveState
+      expiresAt: null, // no login captured yet — S3's saveState computes it from the cookies
       createdBy: input.createdBy,
       createdAt: ts,
       updatedAt: ts,

@@ -9,6 +9,7 @@ const rec = (id: string, tenant: string, createdBy: string, createdAt: string): 
   cookieDomains: ["example.com"],
   country: null,
   capturedAt: null,
+  expiresAt: null,
   createdBy,
   createdAt,
   updatedAt: createdAt,
@@ -45,14 +46,25 @@ describe("InMemoryBrowserProfileStore", () => {
     expect(updated).toMatchObject({ id: "a", tenant: "acme", name: "renamed", cookieDomains: ["github.com"] });
   });
 
-  it("saveState stores the opaque cipher + sets capturedAt/cookieDomains; loadState reads it back (owner-scoped)", async () => {
+  it("saveState stores the opaque cipher + sets capturedAt/cookieDomains/expiresAt; loadState reads it back (owner-scoped)", async () => {
     const store = new InMemoryBrowserProfileStore();
     await store.create(rec("a", "acme", "alice", "2026-06-01T00:00:00.000Z"));
-    const saved = await store.saveState("acme", "a", "CIPHER", "2026-07-16T00:00:00.000Z", ["github.com"]);
-    expect(saved).toMatchObject({ capturedAt: "2026-07-16T00:00:00.000Z", cookieDomains: ["github.com"] });
+    const saved = await store.saveState(
+      "acme",
+      "a",
+      "CIPHER",
+      "2026-07-16T00:00:00.000Z",
+      ["github.com"],
+      "2026-08-15T00:00:00.000Z",
+    );
+    expect(saved).toMatchObject({
+      capturedAt: "2026-07-16T00:00:00.000Z",
+      cookieDomains: ["github.com"],
+      expiresAt: "2026-08-15T00:00:00.000Z",
+    });
     expect(await store.loadState("acme", "a")).toBe("CIPHER");
     // another workspace can neither save nor load
-    expect(await store.saveState("beta", "a", "X", "t", [])).toBeUndefined();
+    expect(await store.saveState("beta", "a", "X", "t", [], null)).toBeUndefined();
     expect(await store.loadState("beta", "a")).toBeUndefined();
   });
 });

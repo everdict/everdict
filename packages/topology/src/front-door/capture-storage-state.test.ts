@@ -1,7 +1,12 @@
 import { UpstreamError } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import type { CdpSocket } from "./capture-cdp.js";
-import { captureStorageState, seedStorageState, storageStateDomains } from "./capture-storage-state.js";
+import {
+  captureStorageState,
+  seedStorageState,
+  storageStateDomains,
+  storageStateExpiry,
+} from "./capture-storage-state.js";
 
 // A fake CDP WebSocket — replays open then a scripted reply to the sent command (mirrors capture-cdp.test).
 function fakeSocket(reply: (sent: unknown) => unknown): { connect: (url: string) => CdpSocket; opened: string[] } {
@@ -135,5 +140,42 @@ describe("storageStateDomains", () => {
         ],
       }),
     ).toEqual(["app.example.com", "github.com"]);
+  });
+});
+
+describe("storageStateExpiry", () => {
+  it("returns the earliest persistent-cookie expiry (a login is only as fresh as its soonest cookie)", () => {
+    expect(
+      storageStateExpiry({
+        cookies: [
+          { name: "sid", value: "1", domain: ".github.com", path: "/", expires: 2_100_000_000 },
+          { name: "consent", value: "2", domain: ".github.com", path: "/", expires: 1_900_000_000 },
+        ],
+      }),
+    ).toBe(1_900_000_000);
+  });
+
+  it("ignores session cookies (no expires) and CDP's -1 sentinel", () => {
+    expect(
+      storageStateExpiry({
+        cookies: [
+          { name: "sid", value: "1", domain: ".github.com", path: "/" }, // session cookie — no expiry
+          { name: "tmp", value: "2", domain: ".github.com", path: "/", expires: -1 }, // CDP session sentinel
+          { name: "persist", value: "3", domain: ".github.com", path: "/", expires: 2_000_000_000 },
+        ],
+      }),
+    ).toBe(2_000_000_000);
+  });
+
+  it("returns null when every cookie is a session cookie (no wall-clock expiry)", () => {
+    expect(
+      storageStateExpiry({
+        cookies: [{ name: "sid", value: "1", domain: ".github.com", path: "/" }],
+      }),
+    ).toBeNull();
+  });
+
+  it("returns null for an empty storageState", () => {
+    expect(storageStateExpiry({ cookies: [] })).toBeNull();
   });
 });

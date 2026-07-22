@@ -25,6 +25,7 @@ async function setup(withState: boolean) {
     cookieDomains: [],
     country: null,
     capturedAt: null,
+    expiresAt: null,
     createdBy: "alice",
     createdAt: "2026-07-17T00:00:00.000Z",
     updatedAt: "2026-07-17T00:00:00.000Z",
@@ -32,7 +33,7 @@ async function setup(withState: boolean) {
   await store.create(record);
   if (withState) {
     const blob = JSON.stringify(fakeCipher.encrypt(JSON.stringify(STATE)));
-    await store.saveState("acme", "prof-1", blob, "2026-07-17T01:00:00.000Z", ["github.com"]);
+    await store.saveState("acme", "prof-1", blob, "2026-07-17T01:00:00.000Z", ["github.com"], null);
   }
   const seeded: Array<{ cdpBase: string; state: StorageState }> = [];
   const seed = makeProfileSeeder({

@@ -16,6 +16,12 @@ export const BrowserProfileRecordSchema = z.object({
   // When the login (cookies) was last captured into this profile (S3), or null if none captured yet. Display only —
   // the encrypted storageState blob itself is server-only and never crosses the wire.
   capturedAt: z.string().nullable(),
+  // When this profile's login is expected to lapse — the EARLIEST wall-clock expiry among its captured cookies (a
+  // login is only as fresh as its soonest-expiring persisted cookie), or null when every captured cookie is a
+  // session cookie (no fixed expiry) or nothing is captured yet. Computed at capture time (browser-profiles —
+  // "surface staleness"); drives the expiry badge + re-login nudge in Settings. Not sensitive (a timestamp, not a
+  // cookie value), so it rides on the record unlike the storageState blob.
+  expiresAt: z.string().nullable(),
   createdBy: z.string(), // owner subject (self-scoped)
   createdAt: z.string(),
   updatedAt: z.string(),

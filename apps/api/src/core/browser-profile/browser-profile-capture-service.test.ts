@@ -34,6 +34,7 @@ function profileRecord(id: string, tenant: string, createdBy: string): BrowserPr
     cookieDomains: [],
     country: null,
     capturedAt: null,
+    expiresAt: null,
     createdBy,
     createdAt: "2026-07-16T00:00:00.000Z",
     updatedAt: "2026-07-16T00:00:00.000Z",
@@ -67,12 +68,39 @@ describe("BrowserProfileCaptureService", () => {
     expect(updated.capturedAt).toBe("2026-07-16T12:00:00.000Z");
     // domains derived from the cookies (leading dot stripped, sorted)
     expect(updated.cookieDomains).toEqual(["app.example.com", "github.com"]);
+    // STATE is session-only (no cookie carries an expiry) → no wall-clock expiry to surface
+    expect(updated.expiresAt).toBeNull();
     // the stored blob is the ENCRYPTED storageState envelope (server-only) — decrypting round-trips the cookies
     const stored = await store.loadState("acme", "prof-1");
     expect(stored).toBeDefined();
     const envelope = JSON.parse(stored ?? "{}");
     expect(envelope).toMatchObject({ ciphertext: expect.any(String), iv: "iv", tag: "tag" });
     expect(JSON.parse(fakeCipher.decrypt(envelope))).toEqual(STATE); // full storageState round-trips
+  });
+
+  it("records the profile's expected expiry = the earliest cookie expiry (unix seconds → ISO)", async () => {
+    const { store, sessions, session } = await setup();
+    const capture = new BrowserProfileCaptureService({
+      store,
+      sessions,
+      cipher: fakeCipher,
+      // one session cookie (no expiry) + two persistent cookies — the earliest of the two is the profile's expiry
+      capture: async () => ({
+        cookies: [
+          { name: "consent", value: "1", domain: ".github.com", path: "/", expires: 1_900_000_000 },
+          { name: "sid", value: "secret", domain: ".github.com", path: "/", expires: 2_100_000_000 },
+          { name: "ephemeral", value: "z", domain: ".github.com", path: "/" },
+        ],
+      }),
+      now: () => "2026-07-16T12:00:00.000Z",
+    });
+    const updated = await capture.captureInto({
+      tenant: "acme",
+      profileId: "prof-1",
+      sessionId: session.id,
+      subject: "alice",
+    });
+    expect(updated.expiresAt).toBe(new Date(1_900_000_000 * 1000).toISOString());
   });
 
   it("saves only the selected cookies when a selection is given (per-cookie chips)", async () => {
@@ -122,6 +150,7 @@ describe("BrowserProfileCaptureService", () => {
       JSON.stringify(fakeCipher.encrypt(JSON.stringify(STATE))),
       "2026-07-16T00:00:00.000Z",
       ["app.example.com", "github.com"],
+      null,
     );
     const sessions = new BrowserSessionService(fakeProvisioner, { newId: () => "sess-1" });
     const session = await sessions.create({ tenant: "acme", createdBy: "alice" });
