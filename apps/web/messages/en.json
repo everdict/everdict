@@ -2649,6 +2649,8 @@
     "comboboxSearch": "Search…",
     "copied": "Copied",
     "copy": "Copy",
+    "showMore": "Show more",
+    "showLess": "Show less",
     "envPrompt": "Prompt",
     "envPromptHint": "A case answered with text only, no environment",
     "envRepo": "Repository",

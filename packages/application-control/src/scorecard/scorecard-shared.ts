@@ -78,7 +78,11 @@ export function childKey(caseId: string, trial?: number): string {
   return `${caseId}#${trial ?? 0}`;
 }
 
-// One-line case failure/verdict reason — for progress-step messages. Prefer trace error events over a pass:false score.detail. Truncate if long.
+// Progress-step failure/verdict reason — prefer a trace error event over a pass:false score.detail. Carried verbatim
+// so the live "Progress" timeline shows the WHOLE error (the web clamps it to a few lines with an expand toggle rather
+// than cutting it), bounded only to keep the steps jsonb from exploding on a batch of long-erroring cases — a full
+// stack trace beyond the cap still lives untruncated on the per-case result. Was 140 (cut mid-sentence — unreadable).
+const CASE_REASON_MAX = 2000;
 export function caseReason(r: CaseResult): string | undefined {
   const errEvent = r.trace.find((e) => e.kind === "error");
   const raw =
@@ -86,7 +90,7 @@ export function caseReason(r: CaseResult): string | undefined {
       ? errEvent.message
       : r.scores.find((s) => s.pass === false && typeof s.detail === "string")?.detail;
   if (typeof raw !== "string" || raw === "") return undefined;
-  return raw.length > 140 ? `${raw.slice(0, 140)}…` : raw;
+  return raw.length > CASE_REASON_MAX ? `${raw.slice(0, CASE_REASON_MAX)}…` : raw;
 }
 
 // Trace-ingest body — upload traces already produced externally without running the harness (edge-normalized: TraceEvent[] upload).

@@ -2649,6 +2649,8 @@
     "comboboxSearch": "검색…",
     "copied": "복사됨",
     "copy": "복사",
+    "showMore": "더 보기",
+    "showLess": "접기",
     "envPrompt": "프롬프트",
     "envPromptHint": "환경 없이 텍스트로만 응답하는 케이스",
     "envRepo": "리포지토리",

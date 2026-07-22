@@ -36,6 +36,7 @@ import { Badge } from '@/shared/ui/badge'
 import { Callout } from '@/shared/ui/callout'
 import { Card } from '@/shared/ui/card'
 import { EntityRef, ModelChip, RuntimeChip } from '@/shared/ui/chip'
+import { ExpandableText } from '@/shared/ui/expandable-text'
 import { CriterionBadge, MetricLabel } from '@/shared/ui/metric-label'
 import { OriginInline, OriginPins } from '@/shared/ui/origin'
 import { PageHeader } from '@/shared/ui/page-header'
@@ -700,14 +701,15 @@ export default async function ScorecardDetailPage({
                     <span className="text-[10.5px] font-[560] uppercase tracking-wide text-faint">
                       {s.phase}
                     </span>
-                    <p
+                    {/* Long failure reasons (the whole error is carried now, not cut at 140) stay a few lines with an
+                        expand toggle so one erroring case doesn't blow up the timeline; short steps show no toggle. */}
+                    <ExpandableText
+                      text={s.message}
                       className={cn(
                         'break-words text-[13px] leading-relaxed',
                         s.status === 'failed' ? 'text-destructive' : 'text-foreground'
                       )}
-                    >
-                      {s.message}
-                    </p>
+                    />
                   </div>
                   <time className="shrink-0 pt-0.5 font-mono text-[11px] tabular-nums text-faint">
                     {new Date(s.ts).toLocaleTimeString()}
@@ -923,16 +925,28 @@ export default async function ScorecardDetailPage({
                         · {e.detailText}
                       </p>
                     ))}
-                  {/* error events from the run trace — how the case failed (harness crash/dispatch error). */}
+                  {/* error events from the run trace — how the case failed (harness crash/dispatch error). The full
+                      message is shown, clamped to a few lines with an expand toggle so a long stack trace stays readable. */}
                   {(r.trace ?? [])
-                    .filter((e) => e.kind === 'error' && typeof e.message === 'string')
+                    .filter(
+                      (e): e is typeof e & { message: string } =>
+                        e.kind === 'error' && typeof e.message === 'string'
+                    )
                     .map((e, i) => (
-                      <p
+                      <div
                         key={`trace-error-${i}`}
                         className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 font-mono text-[12px] leading-relaxed text-destructive"
                       >
-                        <span className="font-[560]">error</span> · {e.message}
-                      </p>
+                        <ExpandableText
+                          text={e.message}
+                          prefix={
+                            <>
+                              <span className="font-[560]">error</span> ·{' '}
+                            </>
+                          }
+                          className="whitespace-pre-wrap break-words"
+                        />
+                      </div>
                     ))}
                   {/* Self-hosted runner failure (no_runner/capability) — show the runner's live health when we can resolve
                       it from the roster (online now / offline · last seen …), else a static hint, both pointing at the
