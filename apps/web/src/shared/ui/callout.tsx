@@ -29,8 +29,10 @@ export function Callout({
 }) {
   return (
     <div className={cn(calloutVariants({ tone }), className)}>
-      <div>{children}</div>
-      {hint ? <div className="mt-1 text-[12px] text-muted-foreground">{hint}</div> : null}
+      <div className="min-w-0 break-words">{children}</div>
+      {hint ? (
+        <div className="mt-1 min-w-0 break-words text-[12px] text-muted-foreground">{hint}</div>
+      ) : null}
     </div>
   )
 }

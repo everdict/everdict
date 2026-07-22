@@ -23,7 +23,9 @@ export function PageHeader({
         )}
       </div>
       {description && (
-        <p className="text-[13px] leading-relaxed text-muted-foreground">{description}</p>
+        <p className="break-words text-[13px] leading-relaxed text-muted-foreground">
+          {description}
+        </p>
       )}
     </div>
   )

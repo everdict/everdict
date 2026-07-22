@@ -120,7 +120,7 @@ export default async function RunDetailPage({
                 href={run.liveTrace.endpoint}
                 target="_blank"
                 rel="noreferrer"
-                className="font-mono underline underline-offset-2"
+                className="break-all font-mono underline underline-offset-2"
               >
                 {run.liveTrace.endpoint}
               </a>
@@ -157,12 +157,14 @@ export default async function RunDetailPage({
               return (
                 <Card key={`${s.graderId}:${s.metric}`} className="p-3.5">
                   <div className="flex items-center justify-between gap-2">
-                    <span className="truncate text-[13px] font-[510]">{s.graderId}</span>
+                    <span className="min-w-0 truncate text-[13px] font-[510]">{s.graderId}</span>
                     {s.pass != null && (
-                      <Badge tone={s.pass ? 'success' : 'danger'}>{s.pass ? 'pass' : 'fail'}</Badge>
+                      <Badge tone={s.pass ? 'success' : 'danger'} className="shrink-0">
+                        {s.pass ? 'pass' : 'fail'}
+                      </Badge>
                     )}
                   </div>
-                  <div className="mt-1.5 font-mono text-2xl font-[560] tabular-nums tracking-tight">
+                  <div className="mt-1.5 break-words font-mono text-2xl font-[560] tabular-nums tracking-tight">
                     {s.value}
                   </div>
                   <div className="text-[12px] text-faint">
@@ -198,7 +200,7 @@ export default async function RunDetailPage({
               <img
                 src={osUseShotSrc(snapshot)}
                 alt="os-use screenshot"
-                className="max-h-[480px] w-auto rounded-lg border"
+                className="max-h-[480px] w-auto max-w-full rounded-lg border"
               />
             )}
             {/* browser (service-topology: browser-use, etc.) — the final URL the agent reached + an extracted DOM excerpt. */}
