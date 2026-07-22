@@ -86,6 +86,39 @@ describe("RunService", () => {
     expect((await svc.get(rec.id))?.result?.recordingRef).toBeUndefined();
   });
 
+  it("recording() returns the sealed replay recording for a run, keyed by its derived runId", async () => {
+    // Given a run whose recording was teed + sealed under its derived runId (evd-run-<id>)
+    const store = new InMemoryRunStore();
+    const recordingStore = new InMemoryRecordingStore();
+    await recordingStore.append("evd-run-rec3", { track: "frames", entry: { t: 1, ref: "memory://f" } });
+    const svc = new RunService({ dispatcher: okDispatcher, store, newId: () => "rec3", recordingStore });
+    const rec = await svc.submit({ tenant: "t", harness: { id: "s", version: "0" }, case: CASE });
+    await flush();
+
+    // When the recording is fetched, it returns the sealed CaseRecording + the record (for authz)
+    const out = await svc.recording(rec.id);
+    expect(out?.recording?.runId).toBe("evd-run-rec3");
+    expect(out?.recording?.tracks.frames).toHaveLength(1);
+    expect(out?.record.status).toBe("succeeded");
+  });
+
+  it("recording() yields an undefined recording when nothing was recorded, and undefined for a missing run", async () => {
+    // Given a run with nothing teed
+    const store = new InMemoryRunStore();
+    const svc = new RunService({
+      dispatcher: okDispatcher,
+      store,
+      newId: () => "rec4",
+      recordingStore: new InMemoryRecordingStore(),
+    });
+    const rec = await svc.submit({ tenant: "t", harness: { id: "s", version: "0" }, case: CASE });
+    await flush();
+
+    // Then the record is returned with no recording, and a missing run is undefined
+    expect((await svc.recording(rec.id))?.recording).toBeUndefined();
+    expect(await svc.recording("nope")).toBeUndefined();
+  });
+
   it("when a runtime is given, injects it as the case's placement.target and dispatches (same symmetry as scorecard)", async () => {
     const store = new InMemoryRunStore();
     const jobs: AgentJob[] = [];

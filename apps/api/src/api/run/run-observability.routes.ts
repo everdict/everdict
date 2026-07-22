@@ -121,6 +121,34 @@ export function registerRunObservabilityRoutes(app: FastifyInstance, deps: Serve
     },
   );
 
+  // Replay recording (docs/architecture/replay.md): the sealed screen frames + logs + env/runtime tracks of a
+  // settled run. Creator-or-admin gated (it contains screenshots), same as the live screen; requires runs:read.
+  app.get<{ Params: { id: string } }>(
+    "/runs/:id/recording",
+    { schema: runObservabilityDocs.recording },
+    async (req, reply) => {
+      const principal = await resolvePrincipal(req, reply, deps);
+      if (!principal) return reply;
+      try {
+        gate(principal, "runs:read");
+        const out = await deps.service.recording(req.params.id);
+        if (!out || out.record.tenant !== principal.workspace)
+          return reply.code(404).send({ code: "NOT_FOUND", message: "run not found." });
+        if (out.record.createdBy && out.record.createdBy !== principal.subject && !principal.roles.includes("admin"))
+          return reply
+            .code(403)
+            .send({ code: "FORBIDDEN", message: "only the run's creator or an admin can view the recording." });
+        return reply.send({
+          status: out.record.status,
+          found: out.recording !== undefined,
+          recording: out.recording ?? null,
+        });
+      } catch (err) {
+        return sendError(reply, err);
+      }
+    },
+  );
+
   // SSE tail: emits appended log chunks (JSON-encoded strings — newline-safe) every ~2s until the run is
   // terminal, then `event: end` with the final status. Heartbeat comments keep proxies from idling out.
   app.get<{ Params: { id: string }; Querystring: { stream?: string } }>(

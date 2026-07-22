@@ -83,6 +83,23 @@ export function registerRunTools(server: McpServer, ctx: McpToolContext): void {
   );
 
   server.registerTool(
+    "get_run_recording",
+    {
+      description:
+        "The sealed replay recording of a settled run — screen frames + logs + env/runtime tracks on one t0 clock, aligned with the trace. found=false when nothing was recorded. Creator-or-admin (it contains screenshots).",
+      inputSchema: { id: z.string() },
+    },
+    ({ id }) =>
+      run(principal, "runs:read", async () => {
+        const out = await deps.service.recording(id);
+        if (!out || out.record.tenant !== ws) return fail("NOT_FOUND: run not found.");
+        if (out.record.createdBy && out.record.createdBy !== principal.subject && !principal.roles.includes("admin"))
+          return fail("FORBIDDEN: only the run's creator or an admin can view the recording.");
+        return ok({ status: out.record.status, found: out.recording !== undefined, recording: out.recording ?? null });
+      }),
+  );
+
+  server.registerTool(
     "submit_run",
     {
       description:

@@ -1,6 +1,7 @@
 import {
   type AgentJob,
   AppError,
+  type CaseRecording,
   type CaseResult,
   type EvalCase,
   type HarnessSpec,
@@ -298,6 +299,18 @@ export class RunService {
       ? await this.deps.readCaseLogs(record.tenant, record.runtime, record.caseId, stream).catch(() => undefined)
       : undefined;
     return { record, text };
+  }
+
+  // Persisted replay recording (docs/architecture/replay.md) — the sealed screen frames + logs + env/runtime tracks of a
+  // settled run, on the shared t0 clock with the trace. Returns the record (for authz) + the recording (undefined = none
+  // recorded, e.g. recording disabled or nothing was teed). Keyed by the same runId derivation as screen()/logs().
+  async recording(id: string): Promise<{ record: RunRecord; recording: CaseRecording | undefined } | undefined> {
+    const record = await this.deps.store.get(id);
+    if (!record) return undefined;
+    const recording = this.deps.recordingStore
+      ? await this.deps.recordingStore.get(RunService.runIdFor(record))
+      : undefined;
+    return { record, recording };
   }
 
   // CP-minted correlation id — the same derivation the dispatch stamps on AgentJob.runId (evd-run-<id> for a single

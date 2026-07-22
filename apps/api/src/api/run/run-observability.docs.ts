@@ -1,3 +1,4 @@
+import { CaseRecordingSchema } from "@everdict/contracts";
 import { RunExecResponseSchema } from "@everdict/contracts/wire";
 import { RunLogsResponseSchema } from "@everdict/contracts/wire";
 import { RunScreenResponseSchema } from "@everdict/contracts/wire";
@@ -72,6 +73,24 @@ const docs = {
     params: runIdParams,
     response: {
       200: { description: "Screen frame", ...toJsonSchema(RunScreenResponseSchema) },
+      ...errorResponses(401, 403, 404),
+    },
+  },
+  recording: {
+    summary: "Get a run's replay recording",
+    description:
+      "The sealed replay recording of a settled run — screen frames + logs + env/runtime tracks on one t0 clock, " +
+      "aligned with the trace. found=false when nothing was recorded. Creator-or-admin gated (it contains " +
+      "screenshots); requires runs:read. Workspace-scoped (404 otherwise).",
+    tags: ["run"],
+    params: runIdParams,
+    response: {
+      200: {
+        description: "Recording",
+        ...toJsonSchema(
+          z.object({ status: z.string(), found: z.boolean(), recording: CaseRecordingSchema.nullable() }),
+        ),
+      },
       ...errorResponses(401, 403, 404),
     },
   },
