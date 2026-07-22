@@ -58,7 +58,7 @@ if (!KEY) {
 }
 // The judge grader runs in THIS (runner) process → reach LiteLLM on the host (localhost), while the
 // harness's own model call runs in the container and reaches it via the bridge gateway (172.17.0.1,
-// baked into the harness env). runAgentJob builds the judge from process.env + judgeEnv(job.judge).
+// baked into the harness env). runCaseJob builds the judge from process.env + judgeEnv(job.judge).
 process.env.OPENAI_API_KEY = KEY;
 process.env.OPENAI_BASE_URL = process.env.OPENAI_BASE_URL ?? "http://localhost:4000/v1";
 
@@ -151,7 +151,7 @@ for (const id of ids) {
     console.log("  (no cases after benign filter — skipping)");
     continue;
   }
-  // AgentJob per case — harnessSpec embedded (control-plane style) + image promoted onto the case (executeCase.withHarnessImage) + judge model.
+  // CaseJob per case — harnessSpec embedded (control-plane style) + image promoted onto the case (executeCase.withHarnessImage) + judge model.
   const suite = { id, harness: { id: spec.id }, cases };
   const toJob = (job) => ({
     ...job,

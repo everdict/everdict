@@ -51,7 +51,7 @@ export const NomadRuntimeSpecSchema = z.object({
   kind: z.literal("nomad"),
   ...base,
   addr: z.string().url(), // Nomad HTTP endpoint (e.g. http://nomad.internal:4646)
-  image: z.string(), // runner agent image (tenant registry)
+  image: z.string(), // job-runner image (tenant registry)
   runtime: z.string().optional(), // docker isolation runtime (e.g. runsc=gVisor)
   datacenters: z.array(z.string()).optional(),
   namespace: z.string().optional(),

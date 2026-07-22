@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { type AgentJob, type CaseResult, UpstreamError } from "@everdict/contracts";
+import { type CaseJob, type CaseResult, UpstreamError } from "@everdict/contracts";
 import type { RunnerJobStore } from "../ports/runner-job-store.js";
 import {
   type EnqueueResult,
@@ -46,7 +46,7 @@ export class StoreRunnerHub {
   // Park a job and poll the store until it settles — resolves on complete, rejects on fail/cancel, and rejects as
   // no_runner if activity_at goes stale (no runner leased/heartbeated it in queueTimeoutMs — connected-but-busy runners
   // keep it fresh via their heartbeat, exactly like the in-memory hub).
-  async enqueue(key: SelfHostedKey, job: AgentJob, onLease?: () => void): Promise<EnqueueResult> {
+  async enqueue(key: SelfHostedKey, job: CaseJob, onLease?: () => void): Promise<EnqueueResult> {
     const jobId = this.newJobId();
     await this.store.park({
       jobId,
@@ -136,7 +136,7 @@ export class StoreRunnerHub {
     return this.store.fail(jobId, message);
   }
 
-  requestCancel(predicate: (job: AgentJob) => boolean): Promise<number> {
+  requestCancel(predicate: (job: CaseJob) => boolean): Promise<number> {
     return this.store.cancel(predicate);
   }
 

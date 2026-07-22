@@ -1,5 +1,5 @@
-import { runAgentJob } from "@everdict/agent";
-import type { AgentJob, CaseResult } from "@everdict/contracts";
+import type { CaseJob, CaseResult } from "@everdict/contracts";
+import { runCaseJob } from "@everdict/job-runner";
 import {
   type Backend,
   type BackendCapacity,
@@ -21,11 +21,11 @@ export class LocalBackend implements Backend, Probeable {
     return { total, used: 0 };
   }
 
-  dispatch(job: AgentJob, opts?: DispatchOptions): Promise<CaseResult> {
+  dispatch(job: CaseJob, opts?: DispatchOptions): Promise<CaseResult> {
     // In-process — can't interrupt a started run, so honor the signal best-effort by refusing a not-yet-started one.
     if (opts?.signal?.aborted) return Promise.reject(dispatchAborted(job));
     opts?.onStarted?.(); // dispatch = the case begins now (this backend has no queue) → flip the run record to running
-    return runAgentJob(job);
+    return runCaseJob(job);
   }
 
   // in-process — no cluster, so always reachable (the control-plane host itself).

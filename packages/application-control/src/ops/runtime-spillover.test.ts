@@ -1,9 +1,9 @@
-import { type AgentJob, type CaseResult, UpstreamError } from "@everdict/contracts";
+import { type CaseJob, type CaseResult, UpstreamError } from "@everdict/contracts";
 import { CircuitBreaker } from "@everdict/domain";
 import { describe, expect, it } from "vitest";
 import { executeWithSpillover } from "./runtime-spillover.js";
 
-const jobOn = (target: string): AgentJob => ({
+const jobOn = (target: string): CaseJob => ({
   evalCase: {
     id: "c1",
     env: { kind: "repo", source: { files: {} } },

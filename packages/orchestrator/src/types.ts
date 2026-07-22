@@ -1,8 +1,8 @@
-import type { AgentJob, CaseResult } from "@everdict/contracts";
+import type { CaseJob, CaseResult } from "@everdict/contracts";
 
 // Activity signatures the workflow calls (pure types — safely imported into the workflow bundle).
 export interface Activities {
-  dispatchCase(job: AgentJob): Promise<CaseResult>;
+  dispatchCase(job: CaseJob): Promise<CaseResult>;
   // Scheduled fire — submit a scorecard via the control-plane internal route (the worker has no ScorecardService, so an HTTP bridge).
   // Also receives the previous schedule run id (the regression baseline) and passes it to finalize.
   fireScheduledScorecard(input: {

@@ -403,7 +403,7 @@ export const CommandHarnessSpecSchema = z.object({
   kind: z.literal("command"),
   id: z.string(),
   version: z.string(),
-  image: z.string().optional(), // dispatch image (default agent image if absent). Install tools via setup.
+  image: z.string().optional(), // dispatch image (default job-runner image if absent). Install tools via setup.
   // Resource request for the whole job (same convention as TopologyService.resources: cpu 1000=1vCPU/nomad MHz,
   // memoryMb). Heavier harnesses declare it so nomad/k8s bin-pack correctly and starvation reads as an infra
   // failure (OOM_KILLED) instead of an agent one. Unset = backend defaults.

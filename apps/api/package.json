@@ -13,7 +13,7 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
-    "@everdict/agent": "workspace:*",
+    "@everdict/job-runner": "workspace:*",
     "@everdict/application-control": "workspace:*",
     "@everdict/auth": "workspace:*",
     "@everdict/backends": "workspace:*",

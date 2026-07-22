@@ -23,7 +23,7 @@
 >   trace-only run with a `{kind:"prompt"}` (no-stage) snapshot** — no core-contract change (reuses the prompt-env
 >   snapshot; `CaseResult.snapshot` stays required). The `harness`-provided target (observe a declared service's own
 >   CDP endpoint) needs a `TopologyRuntime.observe`-style method and is the remaining follow-up.
-> - **#5 per-service image pin — DONE.** `AgentJob.imagePins` (service name → image) overrides registered service
+> - **#5 per-service image pin — DONE.** `CaseJob.imagePins` (service name → image) overrides registered service
 >   images at dispatch. `applyImagePins` folds the pins into a deterministic effective version (`-pin-<hash>`), so
 >   `topologyJobId` (id@version-keyed) separates pinned variants with **no runtime change**; an unknown service name
 >   is rejected (`BadRequestError`). Absent `imagePins` = unchanged.
@@ -108,10 +108,10 @@ Every knob is optional; its default reproduces today's behavior.
 | 2 ✅ | `frontDoor.completion.mode`: `sync` \| `poll` (+ `statusPath`, `done`/`failed` `StatusMatch`, `intervalMs`, `timeoutMs`) — `stream`/`callback` deferred | `sync` (current echo behavior) | — (the genuinely missing piece) |
 | 3 ✅ | `frontDoor.correlate.mode`: `injected` (Everdict's `run_id`) \| `returned` (extract agent id from the submit response via `correlate.path` dot-path) | `injected` | `getField` dot-path reader; `SubmitFn` widened to return the response (the dormant `frontDoor.trace` *endpoint* stays a separate future capability) |
 | 4 ✅ | gate browser provisioning on `spec.target` (present→provision/observe; absent→trace-only `{kind:"prompt"}` snapshot). `harness`-provided target observation = follow-up | provision when `spec.target` set | the already-optional `target` + the `prompt` (no-stage) snapshot — no contract change |
-| 5 ✅ | `AgentJob.imagePins` (service name → image) overrides registered images at dispatch; `applyImagePins` folds pins into a deterministic `-pin-<hash>` effective version so warm pools separate variants (no runtime change) | `spec.image` (no pins) | `HarnessTemplate` slot/pins (`harness-template.ts:97-115`); `node:crypto` hash for the version suffix |
+| 5 ✅ | `CaseJob.imagePins` (service name → image) overrides registered images at dispatch; `applyImagePins` folds pins into a deterministic `-pin-<hash>` effective version so warm pools separate variants (no runtime change) | `spec.image` (no pins) | `HarnessTemplate` slot/pins (`harness-template.ts:97-115`); `node:crypto` hash for the version suffix |
 
 Knob 5 is ~80% built: `resolveHarnessInstance` already maps `pins[slot] → image` per service
-(`harness-template.ts:99`); it only resolves at *registration*. Threading an optional pin through `AgentJob`
+(`harness-template.ts:99`); it only resolves at *registration*. Threading an optional pin through `CaseJob`
 (`agent-job.ts:28`) lets a tenant/case select a per-service image at *dispatch*.
 
 ## Proposed contract (sketch)
@@ -150,7 +150,7 @@ type DriveOutcome = { traceRef: string; status: "done" | "failed" | "timeout" };
 // HttpFrontDoorDriver is the default impl (injectable submit/getJson/sleep/now for deterministic tests).
 
 // @everdict/contracts — agent-job.ts (#5): per-dispatch image override (NOT on the spec — it's a run input)
-AgentJob.imagePins?: Record<string /* service name */, string /* image */>;
+CaseJob.imagePins?: Record<string /* service name */, string /* image */>;
 // @everdict/topology — image-pins.ts: applyImagePins(spec, pins) overrides images + appends a deterministic
 // `-pin-<hash>` to the effective version, so the warm pool (keyed by id@version) separates pinned variants.
 ```
@@ -179,7 +179,7 @@ Each step merges independently; defaults keep current behavior, so no regression
    per-run variable names from `dependencies[].isolateBy`. Absent `request` = today's 5-field body.
 4. **#4 target observation** ✅ — gate provisioning on `spec.target`; absent → trace-only `{kind:"prompt"}` snapshot
    (no contract change). `harness`-provided target observation deferred (needs a `TopologyRuntime.observe` method).
-5. **#5 image pin** ✅ — `AgentJob.imagePins` + `applyImagePins` (override images + deterministic `-pin-<hash>`
+5. **#5 image pin** ✅ — `CaseJob.imagePins` + `applyImagePins` (override images + deterministic `-pin-<hash>`
    effective version so warm pools separate variants, no runtime change). Absent `imagePins` = unchanged.
 6. **Default submit on `node:http` (not global `fetch`)** ✅ — undici's `headersTimeout` (default 300s) aborts a
    `sync`-completion harness that holds the response for minutes while the agent runs its N steps; the raw node

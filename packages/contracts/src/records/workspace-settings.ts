@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { JudgeRunConfigSchema } from "../execution/agent-job.js";
+import { JudgeRunConfigSchema } from "../execution/case-job.js";
 import { SpanAttrMappingSchema } from "../execution/trace-source.js";
 
 // CI repo link — a single record that doubles as the repository ↔ harness service-slot mapping + the GitHub Actions OIDC trust policy.

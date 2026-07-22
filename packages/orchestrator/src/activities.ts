@@ -1,5 +1,5 @@
 import type { Dispatcher } from "@everdict/backends";
-import type { AgentJob, CaseResult } from "@everdict/contracts";
+import type { CaseJob, CaseResult } from "@everdict/contracts";
 import type { Activities } from "./types.js";
 
 // Config for the scheduled-fire activities to call the control-plane internal routes (worker→API HTTP bridge). Without it, the fire activities are disabled.
@@ -13,7 +13,7 @@ export interface ScheduleActivityConfig {
 // (scheduled workflows only start when Temporal+API are configured, so they aren't called on the normal path).
 export function createActivities(dispatcher: Dispatcher, schedule?: ScheduleActivityConfig): Activities {
   return {
-    dispatchCase(job: AgentJob): Promise<CaseResult> {
+    dispatchCase(job: CaseJob): Promise<CaseResult> {
       return dispatcher.dispatch(job);
     },
     async fireScheduledScorecard(input: {

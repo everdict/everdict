@@ -28,7 +28,7 @@ correlation key `runCase` mints and later collects by). `apiKeyEnv` is usually
 **empty** — `LocalDriver` uses the machine's own `claude` login (own-pays); keys are injected only in a
 keyless sandbox. The interface lives in `core` (a deliberate inversion of the single-impl "no interfaces" rule — Everdict is a
 plugin runtime); impls live in `packages/harnesses`. The dispatch factory `makeHarness(id, version, spec?)`
-(`packages/agent/src/registry.ts`) picks the impl: `spec.kind==="command"` → `CommandHarness`, else id-branch.
+(`packages/job-runner/src/registry.ts`) picks the impl: `spec.kind==="command"` → `CommandHarness`, else id-branch.
 
 ## Reference impls (`packages/harnesses/src/`, re-exported via `index.ts`)
 - `ClaudeCodeHarness` (`claude-code.ts`) — real Claude Code CLI: runs `claude -p <task> --output-format
@@ -43,7 +43,7 @@ plugin runtime); impls live in `packages/harnesses`. The dispatch factory `makeH
 `run()` templates `command` — `{{task}}` (auto shell-quoted via `shq`, don't wrap it), `{{model}}`, `{{run_id}}`,
 plus any `{{key}}` from `params` (reserved tokens substituted first so params can't clobber them) — then
 `compute.exec`s it (cwd `spec.workDir ?? "work"`, with `EVERDICT_RUN_ID` + resolved `spec.env`). The control plane
-resolves the spec from the registry and embeds it in the `AgentJob`; `makeHarness` builds the generic
+resolves the spec from the registry and embeds it in the `CaseJob`; `makeHarness` builds the generic
 `CommandHarness`. Full spec + tokens: `docs/command-harness.md`.
 - **`model` = a registered-Model binding** (`string | ModelRef`, `docs/models.md`), not just the `{{model}}` slot.
   When it resolves to a registered Model, `ModelResolvingDispatcher` (`apps/api`) injects that model's connection

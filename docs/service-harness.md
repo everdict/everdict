@@ -553,13 +553,13 @@ pointing the case at the official prebuilt image (which bundles the repo at `bas
 SWE-bench adapter seeds `EvalCase.image` to the official Docker Hub image via `sweBenchImage(instance_id)` — the
 verified naming `swebench/sweb.eval.x86_64.<instance_id with __→_1776_>:latest` — using a new data-driven
 `CaseMapping.imageField`. The backends now honor a per-case image: `buildNomadJob` / `buildK8sJob` use
-`job.evalCase.image ?? opts.image`, so a case runs in its own image instead of the default agent image (a general
+`job.evalCase.image ?? opts.image`, so a case runs in its own image instead of the default job-runner image (a general
 capability, not SWE-bench-specific).
 
 **Verified live** (`scripts/live/swe-bench-image-seed.mjs`, real HF + real Docker Hub): a real SWE-bench_Lite row
 (`astropy__astropy-12907`) → `case.image = swebench/sweb.eval.x86_64.astropy_1776_astropy-12907:latest`, which is
 **actually published** on Docker Hub (`tags: latest, v2, v1`), and `buildNomadJob` puts that image on the container
-(not the default agent image). So dependency provisioning is now a data seed pointing at a real image.
+(not the default job-runner image). So dependency provisioning is now a data seed pointing at a real image.
 
 #### Env-container execution — running a case inside its image (`DockerDriver`) ✅
 The SWE-bench prebuilt image is an *environment* image (repo + deps, no Everdict agent). Rather than bake the agent into
@@ -586,7 +586,7 @@ runnable end-to-end on real dependencies.
 > The mechanism below is unchanged — only the *entry point* moved (registered `kind:"docker"` runtime → runner `docker` capability).
 
 `DockerDriver` runs a case's harness *and* grading inside a container from the case's `EvalCase.image` via
-`runAgentJob(job, { driver: DockerDriver })`. `runAgentJob` gained an optional `{ driver }` so the same agent loop
+`runCaseJob(job, { driver: DockerDriver })`. `runCaseJob` gained an optional `{ driver }` so the same agent loop
 (harness + `makeGradersFromEnv` + `RepoEnvironment`) runs over any compute; `DockerDriver` keeps a base workdir
 (`/everdict`) so relative paths (`RepoEnvironment`'s `work`) and absolute ones (SWE-bench's `/testbed`) both resolve.
 
@@ -627,13 +627,13 @@ image with real dependencies — not just stand-ins.
 Pure-QA benchmarks (GSM8K, GAIA) have no *stage* — the agent just answers a prompt. They were mapped to a
 browser-less `browser` env as a stopgap; now there's a proper **`prompt`** env kind (`EnvSpec` + `EnvSnapshot`
 variants alongside `repo`/`browser`). `PromptEnvironment` is a no-stage environment (`seed` is a no-op, `snapshot`
-returns `{kind:"prompt"}`); grading reads the answer from the trace (`answer-match`/`judge`). `runAgentJob` now
+returns `{kind:"prompt"}`); grading reads the answer from the trace (`answer-match`/`judge`). `runCaseJob` now
 selects the environment by `evalCase.env.kind` (`prompt` → `PromptEnvironment`, else `RepoEnvironment`), and the
 `CaseMapping.promptEnv` flag makes the `gsm8k`/`gaia` adapters emit `env: {kind:"prompt"}` instead of the
 browser-less stopgap.
 
 **Verified live** (`scripts/live/prompt-env-qa.mjs`): the `gsm8k` adapter emits `case.env = {kind:"prompt"}`;
-`runAgentJob` on a prompt case yields `snapshot.kind === "prompt"` (proving `PromptEnvironment` is selected — a
+`runCaseJob` on a prompt case yields `snapshot.kind === "prompt"` (proving `PromptEnvironment` is selected — a
 `repo` env would have thrown at seed); and `runCase(PromptEnvironment + a QA harness + answer-match)` grades the
 answer (`pass=true`) with no browser/repo stage. So non-browser QA is a first-class environment, not a workaround.
 
@@ -642,7 +642,7 @@ Desktop-automation benchmarks (OSWorld, and apps like **hermes-desktop**) need a
 GUI apps*. Added an **`os-use`** env kind (`EnvSpec` `{kind:"os-use", display?, setup?, screenshotCmd?, screenshotPath?}`
 + `EnvSnapshot` `{kind:"os-use", screenshotRef, windows}`) and an `OsUseEnvironment` that runs inside a desktop
 compute image (Xvfb + the app): `seed` runs the `setup` commands (start Xvfb / window manager / the desktop app, with
-`DISPLAY` injected), `snapshot` captures a screenshot (`scrot`) + the window list (`wmctrl`). `runAgentJob` selects it
+`DISPLAY` injected), `snapshot` captures a screenshot (`scrot`) + the window list (`wmctrl`). `runCaseJob` selects it
 by `env.kind` (`os-use` → `OsUseEnvironment`); pairs with the `DockerDriver` env-container so the desktop image is the
 case compute (same model as SWE-bench prebuilt). VLM `judge` over the screenshot is the natural grader.
 
@@ -717,15 +717,15 @@ app (Chat / Discover / Office / Kanban sidebar, "Ask anything" composer) loaded 
 real OS input → the app does real work → observe → VLM judge. (Loopback SSH keeps it self-contained; a remote host is the
 same flow with a different `host`. The multi-GB image + build cache were removed afterward; disk returned to prior level.)
 
-### os-use full loop as one dispatch — `runAgentJob(AgentJob)`, not a hand-written script ✅
+### os-use full loop as one dispatch — `runCaseJob(CaseJob)`, not a hand-written script ✅
 SLICES 73/75 wired the driver + grading by hand in a live script. This makes the whole os-use desktop task a **single
-`AgentJob`** the control plane dispatches — `runAgentJob(job)` runs it end-to-end (provision → seed → agent drives →
+`CaseJob`** the control plane dispatches — `runCaseJob(job)` runs it end-to-end (provision → seed → agent drives →
 snapshot → VLM judge → `CaseResult`), no bespoke orchestration. The job is pure data:
 - `harnessSpec`: a **`command`** harness `node /agent.cjs {{task}}` with `env:{DISPLAY:":99"}` — the declarative-CLI-agent
   abstraction now doubles as the **desktop agent**. The agent under test is just a program in the env; here a baked
   reference agent (`examples/agents/desktop-ssh-agent.cjs`) drives via CDP-locate + `xdotool` real OS input (BYO agents
   drop in their own program / image).
-- `evalCase.env`: `os-use` with `setup` = sshd + `/health` stub + Xvfb + hermes; `runAgentJob` already selects
+- `evalCase.env`: `os-use` with `setup` = sshd + `/health` stub + Xvfb + hermes; `runCaseJob` already selects
   `OsUseEnvironment` by `env.kind`.
 - `evalCase.graders`: `[{ id:"judge", config:{ useScreenshot:true, rubric } }]`; with `job.judge` (model/provider) +
   secret env, `makeGradersFromEnv` builds the VLM `JudgeGrader` over the os-use snapshot (SLICE 74 path).
@@ -735,7 +735,7 @@ snapshot → VLM judge → `CaseResult`), no bespoke orchestration. The job is p
 `workDir:"/tmp"` (an existing dir) the agent runs. `CommandHarness` now uses `spec.workDir ?? opts.workDir ?? "work"` for
 both `setup` and the command (+2 tests; default stays `"work"`).
 
-**Verified live** (`scripts/live/os-use-dispatch.mjs`, real Docker + real VLM): one `runAgentJob(job)` →
+**Verified live** (`scripts/live/os-use-dispatch.mjs`, real Docker + real VLM): one `runCaseJob(job)` →
 `snapshot.kind="os-use"`, `scores=[{ graderId:"judge", pass:true, value:0.98 }]` — the VLM read the final screen as
 "past the SSH connection form and into the main app UI, sidebar (Chat, Discover…) and the 'Ask anything' box visible, no
 SSH error." So the full computer-use loop — provision desktop → drive with real OS input → app does real work (opens a
@@ -743,7 +743,7 @@ genuine SSH tunnel) → observe → VLM judge — is now a **one-call control-pl
 is a documented pre-step in `scripts/live/Dockerfile.hermes-ssh-agent`; removed afterward, disk returned to prior level.)
 
 ### os-use benchmark over the HTTP API — `POST /runs`, registered as data ✅
-SLICE 76 dispatched via `runAgentJob` in a node script. This registers the whole os-use task as **first-party catalog
+SLICE 76 dispatched via `runCaseJob` in a node script. This registers the whole os-use task as **first-party catalog
 data** and dispatches it through the **real HTTP control plane** — what a SaaS tenant actually calls:
 - `examples/datasets/hermes-desktop-ssh.json` — a `Dataset` whose single `EvalCase` is the os-use SSH task (env
   `os-use` + setup, `graders:[judge useScreenshot]`, `placement.target:"docker"`); seeded to `_shared`, served at
@@ -752,7 +752,7 @@ data** and dispatches it through the **real HTTP control plane** — what a SaaS
   `GET /harnesses`.
 - Execution runtime — the os-use case's `image` runs in a local container. When this section first shipped, a
   registerable `docker` `RuntimeSpec` (`examples/runtimes/docker-1.0.0.json`) resolved `placement.target:"docker"` →
-  `buildRuntimeBackend` → `DockerBackend` → `runAgentJob(DockerDriver)`. Since slice 5b (`ab7e2d2`) `docker` is **no
+  `buildRuntimeBackend` → `DockerBackend` → `runCaseJob(DockerDriver)`. Since slice 5b (`ab7e2d2`) `docker` is **no
   longer a registerable runtime kind** (kinds are `local|nomad|k8s`) and that example file was removed (`038c31d`);
   container execution is now the self-hosted runner's `docker` **capability** (a local `DockerDriver`), or a `nomad`/`k8s`
   runtime honoring `EvalCase.image`. Either way there's no new dispatch code: the existing control-plane path
@@ -809,7 +809,7 @@ The hand-authored `hermes-desktop-ssh` dataset proves the runtime; this connects
 `{ id:"osworld", category:"desktop" }`; `POST /benchmarks/import { benchmark:"osworld", text:<OSWorld jsonl> }` → `201`,
 and `GET /datasets/osworld-mini/versions/1.0.0` → os-use `EvalCase`s — `placement.target:"docker"`,
 `image:"everdict-osworld:demo"`, snapshot/source tags, and a `judge useScreenshot` grader whose rubric carries that row's
-instruction. These are the *same os-use case shape* SLICES 76–78 proved runnable (`runAgentJob`/`POST /runs`/scorecards),
+instruction. These are the *same os-use case shape* SLICES 76–78 proved runnable (`runCaseJob`/`POST /runs`/scorecards),
 so once a tenant supplies an OSWorld desktop image + a computer-use agent, OSWorld runs and scores through the existing
 control plane. (Deterministic adapter tests cover the mapping + per-row rubric; no docker this slice.)
 
@@ -1059,39 +1059,39 @@ A `judge` grader preset (e.g. WebVoyager) must run in a *normal* eval, not only 
 (which evaluates registered `JudgeSpec` entities post-hoc). So the per-case grader path now builds the `Judge` from
 the agent's environment: `judgeFromEnv(env)` (`EVERDICT_JUDGE_MODEL` + provider key — OpenAI/LiteLLM or Anthropic — the
 control plane injects these from tenant secrets into the alloc, same channel as harness model keys), and
-`makeGradersFromEnv(specs, env)` is used by **both** dispatch paths (`runAgentJob` and the topology
+`makeGradersFromEnv(specs, env)` is used by **both** dispatch paths (`runCaseJob` and the topology
 `ServiceTopologyBackend`). When the judge model is configured, a `judge` spec becomes a real `JudgeGrader`; when it
 isn't, the judge spec degrades to a **skip score** (`pass: undefined`, `detail: "skipped…"`, same philosophy as the
 judge-runner) so an ordinary eval never crashes on an unconfigured judge. The low-level `makeGraders(specs, {judge})`
 stays strict (throws) for direct callers.
 
 **Verified live** (`scripts/live/judge-dispatch-e2e.mjs`, real LiteLLM): the same case (a `scripted` harness that
-runs `echo hello > out.txt`, plus a `judge` grader) through `runAgentJob` — with the judge env set, the **real model
+runs `echo hello > out.txt`, plus a `judge` grader) through `runCaseJob` — with the judge env set, the **real model
 judges the actual trace** (`pass=true`, score 1.00, "ran a tool command `echo hello > out.txt`…"); with it unset, the
 judge grader yields a skip score and the eval still completes. So WebVoyager-style judge presets now score
 automatically in a normal eval.
 
 #### Control-plane injection of the judge model into remote allocs ✅
 The judge needs a **model** (which model judges) and a **key** (provider credential) — different concerns, different
-channels. The model is per-run *config*, not a secret, so it travels on the job: `AgentJob.judge: {provider?, model}`
+channels. The model is per-run *config*, not a secret, so it travels on the job: `CaseJob.judge: {provider?, model}`
 (set by the control plane from workspace/suite policy, like the existing `meterUsage`). `core.judgeEnv(job.judge)`
 maps it to the env contract (`EVERDICT_JUDGE_MODEL` / `EVERDICT_JUDGE_PROVIDER`, the same names `judgeFromEnv` reads), and
 **both backends merge it into the alloc env** (`buildNomadJob` / `buildK8sJob`), alongside — but separate from — the
 tenant secret keys (`OPENAI_API_KEY` etc.) injected via the `SecretProvider` channel (which was already a no-whitelist
-passthrough). `runAgentJob` merges the same `judgeEnv(job.judge)` so local and remote behave identically.
+passthrough). `runCaseJob` merges the same `judgeEnv(job.judge)` so local and remote behave identically.
 
 **Verified live** (`scripts/live/judge-config-injection.mjs`, real LiteLLM): with `process.env.EVERDICT_JUDGE_MODEL`
 deliberately unset, `buildNomadJob` puts `EVERDICT_JUDGE_MODEL`/`EVERDICT_JUDGE_PROVIDER` in the alloc env (key arriving
-separately via `secretEnv`), and `runAgentJob` — taking the model **only from `job.judge`** — runs the real model
+separately via `secretEnv`), and `runCaseJob` — taking the model **only from `job.judge`** — runs the real model
 judge (`pass=true`, 1.00, "A tool call executed `echo hello > out.txt`…"). So a per-run judge config reaches a remote
 alloc end-to-end, with the credential kept on the separate secret channel.
 
-**Per-job key resolution (`AgentJob.judgeAuth`) + dispatch preflight.** The backend-level `secretEnv` channel carries
+**Per-job key resolution (`CaseJob.judgeAuth`) + dispatch preflight.** The backend-level `secretEnv` channel carries
 only the WORKSPACE secret tier (it is baked into the cached backend), so a submitter whose provider key was a
 *personal* secret used to get a working harness but a silently skipped judge on managed runtimes. `JudgeAuthDispatcher`
 (`apps/api/core/execution`, wrapping the shared dispatcher OUTSIDE `RuntimeDispatcher`) now resolves the credential
 per job at dispatch — **workspace tier first, the submitter's personal key as fallback** — onto the transient
-`AgentJob.judgeAuth {apiKey, baseUrl?}` (never persisted, same discipline as `repoToken`/`registryAuth`); both
+`CaseJob.judgeAuth {apiKey, baseUrl?}` (never persisted, same discipline as `repoToken`/`registryAuth`); both
 backends spread `judgeAuthEnv(job.judge, job.judgeAuth)` AFTER `secretEnv` so the job-level credential wins. When a
 judge is configured and NO key is resolvable on a managed target, dispatch **fails fast as a config error** instead
 of running the harness and skipping the judge. Self-hosted lanes (`self`/`self:*`) are exempt on both counts: the
@@ -1336,7 +1336,7 @@ Three more, all live:
   fails on both — the agent consistently detours to a Bing search); the diff shows `tool_calls 5.83 → 6.67`
   (gpt-5.4 takes more steps) and judge mean `0.778 → 0.800`, with no `pass` transitions. Honest, benchmark-shaped.
 - **Unified desktop + web report (`unified-report.mjs`).** One report spanning two *different harness shapes*
-  through the same `CaseResult → Scorecard → summarize` flow: a **desktop** track (OSWorld via `runAgentJob` +
+  through the same `CaseResult → Scorecard → summarize` flow: a **desktop** track (OSWorld via `runCaseJob` +
   the os-use command harness — mousepad creates a file, graded by a VLM judge **and** a `command`/state grader)
   and a **web** track (WebVoyager via `ServiceTopologyBackend` + the browser-use service harness). Live: the
   desktop case's authoritative `state` grader **PASSes** (`test -f note.txt && grep` confirms the file was

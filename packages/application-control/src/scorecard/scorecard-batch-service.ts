@@ -1,7 +1,7 @@
 import {
-  type AgentJob,
   AppError,
   BadRequestError,
+  type CaseJob,
   type CaseResult,
   type Dataset,
   type EvalCase,
@@ -456,7 +456,7 @@ export class ScorecardBatchService {
       });
       await runStore.create(child);
     }
-    const baseJob: AgentJob = {
+    const baseJob: CaseJob = {
       evalCase,
       harness: { id: ctx.harnessId, version: ctx.harnessVersion },
       tenant: ctx.tenant,
@@ -497,7 +497,7 @@ export class ScorecardBatchService {
           onWaiting: (reason) => void this.appendBatchStep(id, { phase: "dispatch", status: "info", message: reason }),
           ...(childId && runStore ? { onStarted: () => void this.markChildRunning(childId) } : {}),
         };
-        const exec = (j: AgentJob): Promise<{ result: CaseResult; target?: string }> =>
+        const exec = (j: CaseJob): Promise<{ result: CaseResult; target?: string }> =>
           executeWithSpillover((jj) => executeCase(this.deps, ctx.owner, jj, startOpts), j, {
             targets: ctx.targets,
             tenant: ctx.tenant,
@@ -971,7 +971,7 @@ export class ScorecardBatchService {
     // When runStore is set, create a child run (RunRecord) per case so each case becomes an addressable run (trace/usage/provenance).
     const dispatch: Dispatch = async (job) => {
       this.deps.budget?.admit(tenant); // throws if over budget → batch fails
-      const enriched: AgentJob = {
+      const enriched: CaseJob = {
         ...job,
         tenant,
         batchId: id, // scheduler-side reclaim key (supersede / speculation-loser queue cancel)
@@ -1032,7 +1032,7 @@ export class ScorecardBatchService {
           onWaiting,
           ...(childId && runStore ? { onStarted: () => void this.markChildRunning(childId) } : {}),
         };
-        const exec = (j: AgentJob): Promise<{ result: CaseResult; target?: string }> =>
+        const exec = (j: CaseJob): Promise<{ result: CaseResult; target?: string }> =>
           executeWithSpillover((jj) => executeCase(this.deps, owner, jj, startOpts), j, {
             targets,
             tenant,

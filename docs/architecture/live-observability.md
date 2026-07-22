@@ -109,7 +109,7 @@ variable survived across commands (a real persistent session), and a reused tick
 For harnesses that DO export a platform trace (otel/mlflow/langfuse/langsmith/phoenix), the
 correlation used to be minted IN-JOB (`runCase`'s `newRunId()`), so nothing outside the job could
 find the trace until the result landed. The control plane now mints it at dispatch and carries it
-on the job (`AgentJob.runId`; `runCase` keeps its self-mint only as the no-CP fallback):
+on the job (`CaseJob.runId`; `runCase` keeps its self-mint only as the no-CP fallback):
 
 - standalone run → `evd-run-<record id>` · batch child → `evd-<scorecardId>-<caseId>[-t<n>]` —
   **derivable from the record alone**, zero lookups for observers.

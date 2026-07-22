@@ -1,10 +1,10 @@
-import type { AgentJob, CaseResult } from "@everdict/contracts";
+import type { CaseJob, CaseResult } from "@everdict/contracts";
 import { CircuitBreaker } from "@everdict/domain";
 import { describe, expect, it } from "vitest";
 import type { SpilloverOutcome } from "./runtime-spillover.js";
 import { SpeculationController } from "./speculation.js";
 
-const jobOn = (id: string, target: string): AgentJob => ({
+const jobOn = (id: string, target: string): CaseJob => ({
   evalCase: {
     id,
     env: { kind: "repo", source: { files: {} } },
@@ -58,7 +58,7 @@ function fakeTime() {
 function fakeExecutor() {
   const dispatched: string[] = []; // "caseId@target"
   const parked = new Map<string, { resolve: (o: SpilloverOutcome) => void; reject: (e: unknown) => void }>();
-  const execute = (job: AgentJob): Promise<SpilloverOutcome> => {
+  const execute = (job: CaseJob): Promise<SpilloverOutcome> => {
     const target = job.evalCase.placement?.target ?? "?";
     const key = `${job.evalCase.id}@${target}`;
     dispatched.push(key);

@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { defaultJudgeRunner } from "./judge-runner.js";
 
 // REAL end-to-end, no infra: LocalBackend dispatches the code judge's wrapper job in-process →
-// @everdict/agent runCase materializes the context/code env files, runs the no-op command harness, and the
+// @everdict/job-runner runCase materializes the context/code env files, runs the no-op command harness, and the
 // script grader executes the user's Node code as a real subprocess on this host. Proves the WHOLE chain
 // (context serialization → dispatch → sandbox contract → score rewrite) with a genuine `node` execution.
 describe("code judge — real dispatch end-to-end (in-process LocalBackend)", () => {

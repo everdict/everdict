@@ -53,7 +53,7 @@ export type EnvSnapshot = z.infer<typeof EnvSnapshotSchema>;
 // path: use the repo in the image as the working directory without cloning (deps also bundled in the image) — the coding agent works directly on that repo.
 export const RepoSourceSchema = z.union([
   // Remote git: as-is if public; if private, reference a workspace external account connection (Connected accounts) by connectionId —
-  // the control plane resolves that token at dispatch and loads it transiently into the job (AgentJob.repoToken) for authenticated clone (the token is not stored on the case).
+  // the control plane resolves that token at dispatch and loads it transiently into the job (CaseJob.repoToken) for authenticated clone (the token is not stored on the case).
   z.object({ git: z.string().url(), ref: z.string(), connectionId: z.string().optional() }),
   z.object({ files: z.record(z.string()) }),
   z.object({ path: z.string() }),

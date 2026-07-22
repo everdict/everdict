@@ -1,5 +1,5 @@
 // live e2e (lifecycle): dispatch a command-harness job via LocalBackend with usage metering on (EVERDICT_METER_USAGE=1).
-// The agent (runAgentJob) passes meterUsage to CommandHarness → the harness swaps OPENAI_API_BASE to the local usage-proxy
+// The agent (runCaseJob) passes meterUsage to CommandHarness → the harness swaps OPENAI_API_BASE to the local usage-proxy
 // → the child (here, the seeded solve.py) calls the real gateway through that proxy → the harvested tokens land as a synthetic
 // llm_call in result.trace (the control plane aggregates via budget.settle(costOf(result)) — with no extra code).
 //

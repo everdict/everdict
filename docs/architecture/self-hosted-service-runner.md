@@ -11,25 +11,25 @@
 > Extends [self-hosted-runner.md](./self-hosted-runner.md) (SHIPPED — process/command harnesses on a personal host)
 > to its missing harness class. Like [judge-placement-locality](./judge-placement-locality.md) /
 > [front-door-generalization](./front-door-generalization.md): **strict generalization, not a clean break** — the
-> runner's existing `runAgentJob` path is unchanged; service harnesses take a new branch; absence of Docker just
+> runner's existing `runCaseJob` path is unchanged; service harnesses take a new branch; absence of Docker just
 > means the runner declines service jobs.
 
 ## Problem
 
 The self-hosted runner lets a member run a **workspace** harness/dataset on **their own machine** by changing only
 the runtime (`self:<runnerId>`). But it only handles **process/command** harnesses: its unit of work is
-`runAgentJob(job)` → `runCase` over `LocalDriver`. A **`kind:"service"` topology harness** (multi-service + a
+`runCaseJob(job)` → `runCase` over `LocalDriver`. A **`kind:"service"` topology harness** (multi-service + a
 target browser, e.g. browser-use) is driven by a *different* path — `ServiceTopologyBackend` holding a
 `TopologyRuntime` (Nomad/K8s) — which the runner has no access to. So "run it on my laptop" works for SWE-bench /
 aider but **not** for a service topology.
 
 ## Current state — verified
 
-- **Runner unit of work is process-only.** `runAgentJob` (`packages/agent/src/run.ts:13`) picks the environment by
+- **Runner unit of work is process-only.** `runCaseJob` (`packages/job-runner/src/run.ts:13`) picks the environment by
   `evalCase.env.kind` (prompt / os-use / repo) and runs over `LocalDriver`. `run.ts:25` is explicit:
   *"browser topology is handled by ServiceTopologyBackend — outside this local path"* (topology is **outside** this local path).
-- **The CLI runner never branches.** `runnerCommand` (`apps/cli/src/main.ts:204`) leases a job, `AgentJobSchema`-
-  parses it, and unconditionally calls `runAgentJob(parsed.data)` (`main.ts:272`). A service job would be mis-run.
+- **The CLI runner never branches.** `runnerCommand` (`apps/cli/src/main.ts:204`) leases a job, `CaseJobSchema`-
+  parses it, and unconditionally calls `runCaseJob(parsed.data)` (`main.ts:272`). A service job would be mis-run.
 - **No local topology runtime exists.** `TopologyRuntime` has exactly two impls — `NomadTopologyRuntime`
   (`nomad-runtime.ts:109`) and `K8sTopologyRuntime` (`k8s-runtime.ts:43`). Both need a *cluster*. There is no way
   to stand a topology up on a laptop's Docker daemon.
@@ -38,21 +38,21 @@ aider but **not** for a service topology.
   **no backend change**. `STORE_DEFS` (`dependencies.ts`, image/port/`connEnv`) and the per-run wiring
   (`wiringVars`) are orchestrator-agnostic and reused as-is. `DockerBackend` (`docker-backend.ts:32`) shows the
   `execFile("docker", …)` adapter pattern (probe = `docker version`).
-- **The job already carries what's needed.** `AgentJob.harnessSpec` is the **resolved** `HarnessSpec` (incl.
+- **The job already carries what's needed.** `CaseJob.harnessSpec` is the **resolved** `HarnessSpec` (incl.
   `kind:"service"` with `services`/`dependencies`/`target`/`frontDoor`/`traceSource`), Zod-validated at the MCP
   lease boundary — the runner can read `kind` and the full topology from the leased job.
 
 ## Direction — three decisions
 
 The dispatch-a-worker insight one level out: the runner **is the user's "cluster."** Today its placement layer is
-`runAgentJob` (in-process). For topologies it needs a *topology placement* on the same machine — that's
+`runCaseJob` (in-process). For topologies it needs a *topology placement* on the same machine — that's
 `DockerTopologyRuntime`. The runner picks the path by harness kind; everything downstream is the existing
 orchestrator-agnostic machinery.
 
 | # | Decision | Shape |
 | --- | --- | --- |
 | D1 | **Local topology** | `DockerTopologyRuntime` (`@everdict/topology`) — deploy on the user's Docker daemon; sibling of Nomad/K8s |
-| D2 | **Runner branch** | CLI: `harnessSpec.kind === "service"` → `ServiceTopologyBackend(DockerTopologyRuntime)`; else `runAgentJob` |
+| D2 | **Runner branch** | CLI: `harnessSpec.kind === "service"` → `ServiceTopologyBackend(DockerTopologyRuntime)`; else `runCaseJob` |
 | D3 | **Trace** | degrade-to-snapshot (no local OTel/MLflow needed); the topology's existing trace-fetch guard handles it |
 
 ### `DockerTopologyRuntime` (D1)
@@ -81,9 +81,9 @@ if (job.harnessSpec?.kind === "service") {
   });
   return backend.dispatch(job);
 }
-return runAgentJob(job);                                          // process/command (today)
+return runCaseJob(job);                                          // process/command (today)
 ```
-`apps/cli` gains `@everdict/topology` + `@everdict/trace` deps (it already has `@everdict/agent`/`@everdict/backends`).
+`apps/cli` gains `@everdict/topology` + `@everdict/trace` deps (it already has `@everdict/job-runner`/`@everdict/backends`).
 
 ### Capabilities + routing (D2 cont.)
 The runner already declares `capabilities[]` (`self-hosted-runner.md` D-model: `repo`/`browser`/`os-use`/`docker`).
@@ -107,8 +107,8 @@ The runner already declares `capabilities[]` (`self-hosted-runner.md` D-model: `
 2. ✅ **Runner kind-branch** — DONE. `packages/self-hosted-runner/src/run-leased-job.ts` (extracted from `apps/cli`) `runLeasedJob(job)`: `harnessSpec.kind ===
    "service"` → `ServiceTopologyBackend({ runtime: new DockerTopologyRuntime(), traceSource:
    buildTraceSource(spec.traceSource), specFor: () => spec })` (no trustZones; submit/getJson default fetch); else
-   `runAgentJob` (absent `harnessSpec` ⇒ process path = today). The runner loop (`main.ts:273`) calls it instead of
-   `runAgentJob`. `apps/cli` gains `@everdict/topology` + `@everdict/trace` deps. Injectable `runService`/`runProcess` →
+   `runCaseJob` (absent `harnessSpec` ⇒ process path = today). The runner loop (`main.ts:273`) calls it instead of
+   `runCaseJob`. `apps/cli` gains `@everdict/topology` + `@everdict/trace` deps. Injectable `runService`/`runProcess` →
    daemon-free unit test of the branch (3 cases). cli build + 3/3 test + full turbo build 20/20 green.
 3. ✅ **Capabilities + routing — DONE (code + live e2e).** Auto-advertise: the CLI runner probes
    `docker version` on start → `capabilities = ["repo", ...(docker ? ["docker","browser"] : [])]`, reported on every

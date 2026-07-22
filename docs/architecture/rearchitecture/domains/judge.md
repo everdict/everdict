@@ -17,7 +17,7 @@ namespace and are **auxiliary by verdict authority** — they can never override
 
 Language rules worth pinning:
 - *inline judge* vs *Agent Judge* — two systems today: the per-run `JudgeRunConfig` (model name +
-  provider riding `AgentJob.judge` → env → the **in-job** judge grader) vs registered `JudgeSpec`s
+  provider riding `CaseJob.judge` → env → the **in-job** judge grader) vs registered `JudgeSpec`s
   applied **control-plane-side** after the run. Both are real; the target must name them.
 - *skip score* — an unrunnable judge never silently vanishes: it emits a visible
   `pass: undefined` score with the reason in `detail`.
@@ -152,7 +152,7 @@ sequenceDiagram
     participant AG as judge agent (dispatched harness)
 
     JR->>JR: placement = spec.runtime ? {target: spec.runtime} : producing run's placement (co-locate)
-    JR->>D: AgentJob{evalCase: judge-<spec.id>-<case.id>, task = judging prompt, graders: [], placement}
+    JR->>D: CaseJob{evalCase: judge-<spec.id>-<case.id>, task = judging prompt, graders: [], placement}
     D->>AG: dispatch onto the chosen runtime
     AG-->>D: CaseResult (the judge agent's own trace)
     D-->>JR: trace → harnessComplete extracts the final answer text
@@ -166,11 +166,11 @@ sequenceDiagram
 sequenceDiagram
     participant CP as control plane (Run/Scorecard submit)
     participant BE as backend adapter (nomad/k8s)
-    participant AG as agent (runAgentJob)
+    participant AG as agent (runCaseJob)
     participant G as makeGradersFromEnv (graders pkg)
 
     CP->>CP: judge = request override ?? workspace default (judgeFor)
-    CP->>BE: AgentJob.judge = JudgeRunConfig{model, provider}
+    CP->>BE: CaseJob.judge = JudgeRunConfig{model, provider}
     BE->>AG: alloc env += judgeEnv(job.judge) + secretEnv keys
     AG->>AG: env = {...process.env, ...judgeEnv(job.judge)} — merged AGAIN for local parity
     AG->>G: makeGradersFromEnv(case.graders, env)
@@ -200,7 +200,7 @@ From the apps-api survey catalog (§1.6, #64–67):
 |---|---|---|
 | `JudgeRegistry` / `RubricRegistry` / `ModelRegistry` | resolve specs (owner + `_shared`) | `@everdict/registry` |
 | `secretsFor(tenant)` | provider API keys (`ANTHROPIC_API_KEY`/`OPENAI_API_KEY`/`OPENAI_BASE_URL` names) | lambda over `SecretStore` (main.ts) |
-| `dispatch` (`(AgentJob) → CaseResult`) | harness judge = an agent run | the same Dispatcher chain as runs |
+| `dispatch` (`(CaseJob) → CaseResult`) | harness judge = an agent run | the same Dispatcher chain as runs |
 | `JudgeCompletion` (transport port) | provider-agnostic verdict call | `anthropicComplete`/`openaiComplete` (raw fetch, in `packages/graders/src/model-judge.ts`), `harnessComplete` |
 | `HarnessInstanceRegistry` | resolve the judge's referenced harness | `@everdict/registry` |
 | `fetchImpl` / provider baseUrls | test injection + LiteLLM proxy | ctor deps |
@@ -209,7 +209,7 @@ From the apps-api survey catalog (§1.6, #64–67):
 
 | Rule | Today (evidence) | Target |
 |---|---|---|
-| **Judge composition** (config → Judge instance) | **3 composers**: ① `packages/graders/src/judge-env.ts` (`judgeFromEnv`/`makeGradersFromEnv` — reads `process.env` **by default inside a library**); ② `packages/agent/src/run.ts:100-103` (merges `judgeEnv(job.judge)` over `process.env`, then calls ①); ③ `apps/api/src/core/execution/judge-runner.ts:119-234` (`defaultJudgeRunner`: spec → transport → `JudgeGrader`). Plus a 4th consumer of ① in a placement adapter: `packages/topology/src/service-backend.ts:203` | ONE judge-composition function in `application/execution`; the agent and CP both call it; env parsing happens only in composition roots |
+| **Judge composition** (config → Judge instance) | **3 composers**: ① `packages/graders/src/judge-env.ts` (`judgeFromEnv`/`makeGradersFromEnv` — reads `process.env` **by default inside a library**); ② `packages/job-runner/src/run.ts:100-103` (merges `judgeEnv(job.judge)` over `process.env`, then calls ①); ③ `apps/api/src/core/execution/judge-runner.ts:119-234` (`defaultJudgeRunner`: spec → transport → `JudgeGrader`). Plus a 4th consumer of ① in a placement adapter: `packages/topology/src/service-backend.ts:203` | ONE judge-composition function in `application/execution`; the agent and CP both call it; env parsing happens only in composition roots |
 | Judge env wire contract | env names live in the dependency root: `packages/core/src/execution/agent-job.ts:15-21` (`JUDGE_MODEL_ENV`/`JUDGE_PROVIDER_ENV` + `judgeEnv`); injected by backend adapters `packages/backends/src/orchestrators/nomad.ts:131` and `k8s.ts:314` (copy-adapted comment included) | env mapping becomes part of the job envelope in `contracts` (god-DTO split); adapters stop knowing judge semantics |
 | Metric-prefix naming rule | **split across two packages**: `packages/graders/src/judge.ts:68-69,102,115` emits `judge` / `judge:<criterion>` with the comment "the judge runner rewrites the prefix"; the rewrite lives in `apps/api/src/core/execution/judge-runner.ts:217-227` | one `domain/judge` naming function (`judgeMetric(judgeId, criterionId?)`) used by both the grader and the runner |
 | Skip-score philosophy | **2 implementations**: `skip()` in `judge-runner.ts:36-38` and `skipGrader()` in `packages/graders/src/judge-env.ts:33-40` — same rule ("a chosen judge never silently vanishes"), two shapes | one `domain/judge` skip-score constructor |

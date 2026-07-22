@@ -1,5 +1,5 @@
 import { BackendRegistry, type Dispatcher } from "@everdict/backends";
-import type { AgentJob, CaseResult, RuntimeSpec } from "@everdict/contracts";
+import type { CaseJob, CaseResult, RuntimeSpec } from "@everdict/contracts";
 import { InMemoryRuntimeRegistry } from "@everdict/registry";
 import { describe, expect, it, vi } from "vitest";
 import { RuntimeDispatcher } from "./runtime-dispatcher.js";
@@ -14,7 +14,7 @@ const result: CaseResult = {
 
 // inner (Scheduler stand-in) — records the received job and returns result.
 function innerSpy() {
-  const seen: AgentJob[] = [];
+  const seen: CaseJob[] = [];
   const inner: Dispatcher = {
     async dispatch(job) {
       seen.push(job);
@@ -24,7 +24,7 @@ function innerSpy() {
   return { inner, seen };
 }
 
-const job = (target?: string): AgentJob => ({
+const job = (target?: string): CaseJob => ({
   evalCase: {
     id: "c1",
     env: { kind: "repo", source: { files: {} } },
@@ -132,7 +132,7 @@ describe("RuntimeDispatcher", () => {
 
   // Capability placement gate — reject a job the registered runtime can't run BEFORE dispatching (else the
   // orchestrator accepts it and the mismatched service sits pending forever). See heterogeneous-topology-placement.md.
-  const winSvcJob = (target: string): AgentJob => ({
+  const winSvcJob = (target: string): CaseJob => ({
     ...job(target),
     harnessSpec: {
       kind: "service",
@@ -200,7 +200,7 @@ describe("RuntimeDispatcher", () => {
   });
 
   // self:<runnerId> — personally-owned self-hosted runner routing (Slice 2: ownership check + backend build/routing).
-  const selfJob = (target: string, submittedBy?: string): AgentJob => ({
+  const selfJob = (target: string, submittedBy?: string): CaseJob => ({
     ...job(target),
     ...(submittedBy ? { submittedBy } : {}),
   });
@@ -225,7 +225,7 @@ describe("RuntimeDispatcher", () => {
   };
 
   // A service-harness job (harnessSpec.kind==="service") — for verifying the docker capability gate.
-  const selfServiceJob = (target: string, submittedBy: string): AgentJob => ({
+  const selfServiceJob = (target: string, submittedBy: string): CaseJob => ({
     ...selfJob(target, submittedBy),
     harnessSpec: {
       kind: "service",
@@ -359,7 +359,7 @@ describe("RuntimeDispatcher", () => {
       ["git", "docker", "browser"],
       ["git", "docker"],
     ]);
-    const winJob: AgentJob = {
+    const winJob: CaseJob = {
       ...selfServiceJob("self:ws", "u-alice"),
       harnessSpec: {
         kind: "service",
@@ -380,7 +380,7 @@ describe("RuntimeDispatcher", () => {
 
   it("a pool job SOME runner can satisfy passes the satisfiability gate and routes to the pool", async () => {
     const { d, seen } = poolDeps(true, [["git"], ["git", "docker", "browser", "topology", "os-windows"]]);
-    const winJob: AgentJob = {
+    const winJob: CaseJob = {
       ...selfServiceJob("self:ws", "u-alice"),
       harnessSpec: {
         kind: "service",

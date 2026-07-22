@@ -63,7 +63,7 @@ logged-in web session over a minimal preload bridge.
 
 ## Layering
 - `packages/self-hosted-runner` — extracted runner loop (`runLeaseWorkers`, `ResilientMcpSession`,
-  `mcpConnect`, `runLeasedJob`, `RunnerHost`). Deps: `@everdict/contracts` + `@everdict/agent` +
+  `mcpConnect`, `runLeasedJob`, `RunnerHost`). Deps: `@everdict/contracts` + `@everdict/job-runner` +
   `@everdict/topology` + `@everdict/trace` + MCP SDK. Consumers: `apps/cli` (thin flags wrapper),
   `apps/desktop`. It must stay GUI-free and transport-injectable (DI like `RunnerLoopDeps`).
 - `apps/desktop` — deps: `@everdict/self-hosted-runner` + `electron` (+ `electron-builder` dev). It must NOT

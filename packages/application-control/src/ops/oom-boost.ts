@@ -1,4 +1,4 @@
-import { type AgentJob, OOM_KILLED } from "@everdict/contracts";
+import { type CaseJob, OOM_KILLED } from "@everdict/contracts";
 import { classifyFailure } from "@everdict/domain";
 import type { SpilloverOutcome } from "./runtime-spillover.js";
 
@@ -19,8 +19,8 @@ export interface OomBoostOpts {
 }
 
 export async function executeWithOomBoost(
-  run: (job: AgentJob) => Promise<SpilloverOutcome>,
-  job: AgentJob,
+  run: (job: CaseJob) => Promise<SpilloverOutcome>,
+  job: CaseJob,
   opts: OomBoostOpts,
 ): Promise<SpilloverOutcome> {
   if (!opts.enabled) return run(job);

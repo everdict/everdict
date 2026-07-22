@@ -27,7 +27,7 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm test
       - run: pnpm build
-      # Slim agent image guard — the @everdict/agent dependency cone must stay control-plane-free.
+      # Slim job-runner image guard — the @everdict/job-runner dependency cone must stay control-plane-free.
       - run: pnpm cone
       # Web runtime-decoupling guard — apps/web may import only TYPE-ONLY @everdict/contracts.
       - run: pnpm web-imports

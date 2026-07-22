@@ -155,7 +155,7 @@ sequenceDiagram
     participant S as Scheduler (policy chain)
     participant B as Backend adapter (Nomad / K8s / topology / self-hosted)
 
-    U->>M: dispatch(AgentJob) — target already validated non-empty at submit (requireRuntime)
+    U->>M: dispatch(CaseJob) — target already validated non-empty at submit (requireRuntime)
     M->>RD: dispatch (metrics wrapped, {{model}} resolved)
     alt target = self / self:ws / self:runnerId
         RD->>RD: derive owner (ws:tenant | submittedBy); ownership miss → 404, service-harness w/o docker cap → 400

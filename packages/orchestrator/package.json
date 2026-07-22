@@ -18,7 +18,7 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
-    "@everdict/agent": "workspace:*",
+    "@everdict/job-runner": "workspace:*",
     "@everdict/backends": "workspace:*",
     "@everdict/contracts": "workspace:*",
     "@temporalio/activity": "^1.18.1",

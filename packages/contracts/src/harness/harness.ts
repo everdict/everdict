@@ -16,7 +16,7 @@ export interface RunContext {
   // Live in-run screen capture (opt-in, in-process only — never crosses the wire, like `signal`). When set, runCase
   // runs a background loop that execs `captureCmd` in the compute every `intervalMs` and hands the resulting base64
   // PNG frame to `report`. The self-hosted runner supplies `report` (pushes the frame to the control plane's live-frame
-  // store, keyed by runId); runAgentJob supplies `captureCmd` from the harness's declared liveScreen. Best-effort:
+  // store, keyed by runId); runCaseJob supplies `captureCmd` from the harness's declared liveScreen. Best-effort:
   // capture/report failures are swallowed and never affect the eval result. Absent = no live screen.
   liveScreen?: LiveScreenCapture;
 }

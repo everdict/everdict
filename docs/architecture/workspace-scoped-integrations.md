@@ -117,7 +117,7 @@ simply no longer read/written (old rows parse and are rewritten without them).
 
 This is the **workspace analog of `repoTokenFor`** — resolved by **workspace** (not submitter
 subject), so any member's run in the workspace uses it. The transient plumbing is unchanged: the
-token is carried as `AgentJob.repoToken` (never persisted), injected into git via `http.extraheader`
+token is carried as `CaseJob.repoToken` (never persisted), injected into git via `http.extraheader`
 (`packages/environments/src/repo.ts`, already implemented).
 
 ## Repo-source wiring (S3)

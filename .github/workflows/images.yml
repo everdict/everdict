@@ -1,4 +1,4 @@
-# Container images — build + push api/web/agent to GHCR (ghcr.io/everdict/*).
+# Container images — build + push api/web/job-runner to GHCR (ghcr.io/everdict/*).
 # Triggers: a release tag `v*` (versioned + latest) or manual dispatch (latest only).
 # The compose prod profile can pull these instead of building from source.
 name: images
@@ -25,8 +25,8 @@ jobs:
           - image: web
             dockerfile: apps/web/Dockerfile
             target: runtime
-          - image: agent
-            dockerfile: packages/agent/Dockerfile
+          - image: job-runner
+            dockerfile: packages/job-runner/Dockerfile
             target: "" # single-stage Dockerfile — no target
     steps:
       - uses: actions/checkout@v5

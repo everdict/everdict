@@ -1,8 +1,8 @@
-import { type AgentJob, type CaseResult, InternalError, RUNNER_PROTOCOL_VERSION } from "@everdict/contracts";
+import { type CaseJob, type CaseResult, InternalError, RUNNER_PROTOCOL_VERSION } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { runLeaseWorkers } from "./runner-loop.js";
 
-const evalCase: AgentJob["evalCase"] = {
+const evalCase: CaseJob["evalCase"] = {
   id: "c",
   env: { kind: "repo", source: { files: {} } },
   task: "do",
@@ -11,13 +11,13 @@ const evalCase: AgentJob["evalCase"] = {
   tags: [],
 };
 
-const job = (id: string): AgentJob => ({
+const job = (id: string): CaseJob => ({
   evalCase: { ...evalCase, id },
   harness: { id: "scripted", version: "1.0.0" },
 });
 
 // A fake MCP surface — lease_job does a synchronous shift from the queue (atomic), submit/fail record. runJob measures concurrent in-flight.
-function harness(jobs: AgentJob[]) {
+function harness(jobs: CaseJob[]) {
   const queue = jobs.map((j, i) => ({ jobId: `j${i}`, job: j }));
   const submitted: string[] = [];
   const failed: string[] = [];
@@ -48,7 +48,7 @@ function harness(jobs: AgentJob[]) {
     return {}; // heartbeat_job etc.
   };
 
-  const runJob = async (j: AgentJob): Promise<CaseResult> => {
+  const runJob = async (j: CaseJob): Promise<CaseResult> => {
     runCalls++;
     inFlight++;
     peak = Math.max(peak, inFlight);
@@ -192,7 +192,7 @@ describe("runLeaseWorkers — case-level parallelism (maxConcurrent)", () => {
       if (name === "lease_job") {
         if (leased) return {};
         leased = true;
-        return { jobId: "bad", job: { not: "an AgentJob" } }; // schema violation
+        return { jobId: "bad", job: { not: "an CaseJob" } }; // schema violation
       }
       if (name === "submit_job_result") {
         submitted.push(String(args.jobId));
@@ -405,7 +405,7 @@ describe("runLeaseWorkers — heartbeat-delivered cancellation", () => {
       return {};
     };
     // A hanging run that ends only when its cancellation signal aborts.
-    const runJob = (_j: AgentJob, o?: { signal?: AbortSignal }): Promise<CaseResult> =>
+    const runJob = (_j: CaseJob, o?: { signal?: AbortSignal }): Promise<CaseResult> =>
       new Promise<CaseResult>((_, reject) => {
         o?.signal?.addEventListener(
           "abort",

@@ -1,6 +1,6 @@
-import { type DriverMount, pullWithRegistryAuth, runAgentJob } from "@everdict/agent";
-import type { AgentJob, CaseResult, RegistryAuth, ServiceHarnessSpec } from "@everdict/contracts";
+import type { CaseJob, CaseResult, RegistryAuth, ServiceHarnessSpec } from "@everdict/contracts";
 import { imageUsesRegistryHost } from "@everdict/domain";
+import { type DriverMount, pullWithRegistryAuth, runCaseJob } from "@everdict/job-runner";
 import {
   DockerTopologyRuntime,
   type DockerTopologyRuntimeOptions,
@@ -30,16 +30,16 @@ export function resetSharedTopologyRuntime(): void {
   sharedRuntime = undefined;
 }
 
-// Branch a leased job by harness kind. service (topology) → local Docker topology, otherwise → runAgentJob.
+// Branch a leased job by harness kind. service (topology) → local Docker topology, otherwise → runCaseJob.
 // If a non-service case declares case.image and this runner has Docker, run in that image's container (DockerDriver) —
 // the same path as the managed DockerBackend, so "one definition, same environment whether managed or local" holds. Otherwise host-native LocalDriver.
 // Design: docs/architecture/portable-harness-runtime.md · self-hosted-service-runner.md. The branch lives in exactly one place.
 export async function runLeasedJob(
-  job: AgentJob,
+  job: CaseJob,
   opts: {
-    runService?: (job: AgentJob) => Promise<CaseResult>; // test injection
+    runService?: (job: CaseJob) => Promise<CaseResult>; // test injection
     runProcess?: (
-      job: AgentJob,
+      job: CaseJob,
       runOpts: {
         containerize?: boolean;
         mounts?: DriverMount[];
@@ -71,7 +71,7 @@ export async function runLeasedJob(
       }
     }
     const runService =
-      opts.runService ?? ((j: AgentJob) => defaultRunService(j, spec, opts.runtimeOptions, opts.signal));
+      opts.runService ?? ((j: CaseJob) => defaultRunService(j, spec, opts.runtimeOptions, opts.signal));
     return runService(job);
   }
   // process/command. If image is declared + Docker is present, run in that image's container (toolchain bundled — same as managed). Otherwise in-process on the host.
@@ -83,7 +83,7 @@ export async function runLeasedJob(
     );
   // Pass host mounts only for container execution (host-native LocalDriver has no mount concept).
   // Live-screen capture is passed only for containerized runs — the capture command targets the case container.
-  return (opts.runProcess ?? runAgentJob)(job, {
+  return (opts.runProcess ?? runCaseJob)(job, {
     containerize,
     ...(containerize && opts.mounts?.length ? { mounts: opts.mounts } : {}),
     ...(opts.signal ? { signal: opts.signal } : {}),
@@ -105,7 +105,7 @@ export function workspaceImagesToPull(
 // service harness: deploy and run the topology on the user's Docker daemon. No trustZones since it's a personal host; if the trace
 // doesn't arrive, the topology degrades to snapshot (existing behavior). submit/getJson use the default fetch.
 function defaultRunService(
-  job: AgentJob,
+  job: CaseJob,
   spec: ServiceHarnessSpec,
   runtimeOptions?: DockerTopologyRuntimeOptions,
   signal?: AbortSignal,

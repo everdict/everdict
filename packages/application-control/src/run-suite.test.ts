@@ -1,4 +1,4 @@
-import { type AgentJob, BadRequestError, type CaseResult, type Suite, UpstreamError } from "@everdict/contracts";
+import { BadRequestError, type CaseJob, type CaseResult, type Suite, UpstreamError } from "@everdict/contracts";
 import { caseTrialStats, caseVerdict } from "@everdict/domain";
 import { describe, expect, it } from "vitest";
 import { runSuite } from "./run-suite.js";
@@ -27,8 +27,8 @@ const SUITE: Suite = {
 
 describe("runSuite", () => {
   it("dispatches each case with the harness version attached and collects them into a Scorecard", async () => {
-    const seen: AgentJob[] = [];
-    const dispatch = async (job: AgentJob): Promise<CaseResult> => {
+    const seen: CaseJob[] = [];
+    const dispatch = async (job: CaseJob): Promise<CaseResult> => {
       seen.push(job);
       return caseResult(job.evalCase.id, `${job.harness.id}@${job.harness.version}`, true, 3);
     };
@@ -54,7 +54,7 @@ describe("runSuite", () => {
     };
     let inFlight = 0;
     let peak = 0;
-    const dispatch = async (job: AgentJob): Promise<CaseResult> => {
+    const dispatch = async (job: CaseJob): Promise<CaseResult> => {
       inFlight++;
       peak = Math.max(peak, inFlight);
       await new Promise((r) => setTimeout(r, 5)); // hold the slot so overlap is observable
@@ -70,7 +70,7 @@ describe("runSuite", () => {
 
   it("does not stop the batch when one case's dispatch throws and records it as a failed CaseResult", async () => {
     // Given: a dispatch where case a throws and b succeeds
-    const dispatch = async (job: AgentJob): Promise<CaseResult> => {
+    const dispatch = async (job: CaseJob): Promise<CaseResult> => {
       if (job.evalCase.id === "a") throw new Error("boom");
       return caseResult(job.evalCase.id, `${job.harness.id}@${job.harness.version}`, true, 3);
     };
@@ -93,7 +93,7 @@ describe("runSuite", () => {
     // Given: a batch that aborts while the first case is being dispatched (serial — concurrency 1 fixes the order)
     const controller = new AbortController();
     const dispatched: string[] = [];
-    const dispatch = async (job: AgentJob): Promise<CaseResult> => {
+    const dispatch = async (job: CaseJob): Promise<CaseResult> => {
       dispatched.push(job.evalCase.id);
       controller.abort(); // scenario where supersede happens while the first case runs
       return caseResult(job.evalCase.id, `${job.harness.id}@${job.harness.version}`, true, 1);
@@ -189,8 +189,8 @@ describe("runSuite failure classification", () => {
 describe("runSuite N-trial fan-out", () => {
   it("runs each case N times, stamping a distinct trial index on every job and result", async () => {
     // Given: a dispatch that records the jobs it sees
-    const seen: AgentJob[] = [];
-    const dispatch = async (job: AgentJob): Promise<CaseResult> => {
+    const seen: CaseJob[] = [];
+    const dispatch = async (job: CaseJob): Promise<CaseResult> => {
       seen.push(job);
       return caseResult(job.evalCase.id, `${job.harness.id}@${job.harness.version}`, true, 1);
     };
@@ -210,8 +210,8 @@ describe("runSuite N-trial fan-out", () => {
   });
 
   it("defaults to 1 trial and leaves the trial index unset (single-run shape unchanged)", async () => {
-    const seen: AgentJob[] = [];
-    const dispatch = async (job: AgentJob): Promise<CaseResult> => {
+    const seen: CaseJob[] = [];
+    const dispatch = async (job: CaseJob): Promise<CaseResult> => {
       seen.push(job);
       return caseResult(job.evalCase.id, `${job.harness.id}@${job.harness.version}`, true, 1);
     };
@@ -222,7 +222,7 @@ describe("runSuite N-trial fan-out", () => {
 
   it("isolates a throwing trial — the other trials of the same case still run and feed pass@k", async () => {
     // Given: case a's second trial throws, every other trial passes
-    const dispatch = async (job: AgentJob): Promise<CaseResult> => {
+    const dispatch = async (job: CaseJob): Promise<CaseResult> => {
       if (job.evalCase.id === "a" && job.trial === 1) throw new Error("flake");
       return caseResult(job.evalCase.id, `${job.harness.id}@${job.harness.version}`, true, 1);
     };

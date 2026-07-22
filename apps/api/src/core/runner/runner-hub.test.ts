@@ -1,5 +1,5 @@
 import { RunnerHub, type SelfHostedKey, poolKeyFor } from "@everdict/application-control";
-import { type AgentJob, type CaseResult, RateLimitError } from "@everdict/contracts";
+import { type CaseJob, type CaseResult, RateLimitError } from "@everdict/contracts";
 import { describe, expect, it, vi } from "vitest";
 
 const result: CaseResult = {
@@ -9,13 +9,13 @@ const result: CaseResult = {
   snapshot: { kind: "repo", diff: "", changedFiles: [], headSha: "h" },
   scores: [],
 };
-const job = (id: string): AgentJob => ({
+const job = (id: string): CaseJob => ({
   evalCase: { id, env: { kind: "repo", source: { files: {} } }, task: "t", graders: [], timeoutSec: 60, tags: [] },
   harness: { id: "scripted", version: "0" },
   tenant: "acme",
 });
 // A job requiring case.image — container execution, so the runner needs the docker capability.
-const imageJob = (id: string): AgentJob => ({
+const imageJob = (id: string): CaseJob => ({
   ...job(id),
   evalCase: { ...job(id).evalCase, image: "spreadsheetbench:v1" },
 });
@@ -71,7 +71,7 @@ describe("RunnerHub", () => {
   it("lease rotates fairly across batches — one big batch can't drain before another user's job (WFQ)", () => {
     let n = 0;
     const hub = new RunnerHub({ newJobId: () => `j-${n++}` });
-    const batchJob = (id: string, batchId: string): AgentJob => ({ ...job(id), batchId, priority: "batch" });
+    const batchJob = (id: string, batchId: string): CaseJob => ({ ...job(id), batchId, priority: "batch" });
     // Batch A's three cases are all parked before batch B's single case.
     hub.enqueue(keyA, batchJob("a1", "A"));
     hub.enqueue(keyA, batchJob("a2", "A"));
@@ -554,7 +554,7 @@ describe("RunnerHub — workspace pool (N runners drain)", () => {
 
 // Cancellation — a user stops a scorecard (or supersede reclaims it); the hub cancels that batch's in-flight jobs.
 describe("RunnerHub — requestCancel (user stop / supersede)", () => {
-  const withBatch = (id: string, batchId: string): AgentJob => ({ ...job(id), batchId });
+  const withBatch = (id: string, batchId: string): CaseJob => ({ ...job(id), batchId });
 
   it("rejects a leased job's promise now and tells the runner to abort on its next heartbeat", async () => {
     let n = 0;

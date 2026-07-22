@@ -1,5 +1,5 @@
 import { RunnerHub, type SelfHostedKey } from "@everdict/application-control";
-import type { AgentJob, CaseResult } from "@everdict/contracts";
+import type { CaseJob, CaseResult } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { SelfHostedBackend } from "./self-hosted-backend.js";
 
@@ -10,7 +10,7 @@ const result: CaseResult = {
   snapshot: { kind: "repo", diff: "", changedFiles: [], headSha: "h" },
   scores: [],
 };
-const job: AgentJob = {
+const job: CaseJob = {
   evalCase: {
     id: "c1",
     env: { kind: "repo", source: { files: {} } },

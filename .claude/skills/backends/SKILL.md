@@ -1,20 +1,20 @@
 ---
 name: backends
-description: How Everdict dispatches eval runs to execution backends (Nomad/K8s/Windows) — the dispatched runner-agent, the AgentJob contract, isolation, secret injection. Use when adding or editing a Backend.
+description: How Everdict dispatches eval runs to execution backends (Nomad/K8s/Windows) — the dispatched job-runner, the CaseJob contract, isolation, secret injection. Use when adding or editing a Backend.
 allowed-tools: Read, Grep, Glob, Edit, Write, Bash
 ---
 # Backends (placement layer)
 
-The control plane (outside clusters) → `Backend.dispatch(AgentJob)` → runner-agent runs the
+The control plane (outside clusters) → `Backend.dispatch(CaseJob)` → job-runner runs the
 whole `runCase` inside an isolated unit → emits CaseResult (`__EVERDICT_RESULT__` sentinel on stdout).
 
 ## Checklist
 1. Implement the CORE `Backend` (`packages/backends/src/backend.ts`) = `dispatch` + `capacity` only.
 2. Add capabilities as SEPARATE interfaces you also `implements`, never as optional methods on `Backend`
    (see "Capabilities" below). A caller narrows with a guard (`isObservable(backend)`), not `backend.logs`.
-3. Dispatch the `@everdict/agent` image with the job as `EVERDICT_AGENT_JOB` (base64 JSON) env.
+3. Dispatch the `@everdict/job-runner` image with the job as `EVERDICT_CASE_JOB` (base64 JSON) env.
 4. Isolation = orchestrator runtime (Nomad `runtime`, K8s `runtimeClassName`) — config, not code.
-5. Inject auth (`collectAuthEnv()` from `@everdict/agent`) into the job env; never log it.
+5. Inject auth (`collectAuthEnv()` from `@everdict/job-runner`) into the job env; never log it.
 6. Parse the CaseResult from the sentinel line; map failures to `UpstreamError`.
 
 ## Capabilities (typed, not optional-method feature-detection)
@@ -72,8 +72,8 @@ can move it); live-probe the cluster for `used` where cheap (Nomad counts runnin
 LAGGING the scheduler's own jobs) — best-effort, so report `0` rather than guess when a live count isn't available.
 
 ## Contracts
-`AgentJob` (`@everdict/contracts`) = `{ evalCase, harness:{id,version}, tenant? }`. The agent reconstructs the
-harness + graders from a registry (`@everdict/agent` `makeHarness`/`makeGraders`); graders carry
+`CaseJob` (`@everdict/contracts`) = `{ evalCase, harness:{id,version}, tenant? }`. The agent reconstructs the
+harness + graders from a registry (`@everdict/job-runner` `makeHarness`/`makeGraders`); graders carry
 their config via `GraderSpec` (`{id, config?}`), e.g. tests-pass `{ cmd }`. `tenant` keys all the
 multi-tenant machinery below (the agent ignores it).
 

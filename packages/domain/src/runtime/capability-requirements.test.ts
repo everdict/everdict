@@ -1,4 +1,4 @@
-import type { AgentJob, EvalCase, RuntimeSpec, ServiceHarnessSpec } from "@everdict/contracts";
+import type { CaseJob, EvalCase, RuntimeSpec, ServiceHarnessSpec } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import {
   defaultRuntimeCapabilities,
@@ -94,7 +94,7 @@ describe("requiredCapabilitiesForJob — case ∪ topology (the shared placement
     frontDoor: { service: services[0]?.name ?? "s", submit: "POST /runs" },
     traceSource: { kind: "otel", endpoint: "http://x" },
   });
-  const job = (over: Partial<AgentJob>): AgentJob => ({
+  const job = (over: Partial<CaseJob>): CaseJob => ({
     evalCase: base({}),
     harness: { id: "h", version: "1.0.0" },
     ...over,

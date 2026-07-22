@@ -1,6 +1,6 @@
 import { stat } from "node:fs/promises";
 import { RESULT_SENTINEL } from "@everdict/contracts";
-import { type AgentJob, BadRequestError, type CaseResult, UpstreamError } from "@everdict/contracts";
+import { BadRequestError, type CaseJob, type CaseResult, UpstreamError } from "@everdict/contracts";
 import { perTenantTrustZones, staticTrustZones } from "@everdict/domain";
 import { describe, expect, it } from "vitest";
 import { staticSecrets } from "../policy/secrets.js";
@@ -20,7 +20,7 @@ import {
   usageByNode,
 } from "./k8s.js";
 
-const JOB: AgentJob = {
+const JOB: CaseJob = {
   harness: { id: "aider", version: "latest" },
   evalCase: {
     id: "c1",
@@ -162,18 +162,18 @@ function mockApi(
 }
 
 describe("buildK8sJob / k8sJobName", () => {
-  it("puts the image, pull policy, job payload (EVERDICT_AGENT_JOB), and namespace", () => {
+  it("puts the image, pull policy, job payload (EVERDICT_CASE_JOB), and namespace", () => {
     const m = buildK8sJob(
       JOB,
-      { image: "reg/everdict-agent:1" },
+      { image: "reg/everdict-job-runner:1" },
       "everdict-c1",
       "everdict-acme",
     ) as unknown as JobManifest;
     expect(m.metadata.namespace).toBe("everdict-acme");
-    expect(m.spec.template.spec.containers[0]?.image).toBe("reg/everdict-agent:1");
+    expect(m.spec.template.spec.containers[0]?.image).toBe("reg/everdict-job-runner:1");
     expect(m.spec.template.spec.containers[0]?.imagePullPolicy).toBe("IfNotPresent");
     expect(m.spec.template.spec.runtimeClassName).toBeUndefined();
-    const decoded = JSON.parse(Buffer.from(envOf(m, "EVERDICT_AGENT_JOB") ?? "", "base64").toString("utf8"));
+    const decoded = JSON.parse(Buffer.from(envOf(m, "EVERDICT_CASE_JOB") ?? "", "base64").toString("utf8"));
     expect(decoded.harness.id).toBe("aider");
     // The case label is the kill(caseId) selector — a superseded batch force-stops its live jobs by it.
     expect((m.metadata as { labels?: Record<string, string> }).labels?.["everdict.dev/case"]).toBe("c1");
@@ -246,7 +246,7 @@ describe("buildK8sJob / k8sJobName", () => {
     };
     const m = buildK8sJob(withAuth, { image: "reg/agent:1" }, "n", "ns") as unknown as JobManifest;
     expect(m.spec.template.spec.imagePullSecrets).toEqual([{ name: K8S_REGISTRY_AUTH_SECRET }]);
-    // On a host mismatch (the default agent image), not rendered.
+    // On a host mismatch (the default job-runner image), not rendered.
     const off = buildK8sJob(
       { ...JOB, registryAuth: { host: "ghcr.io", password: "p" } },
       { image: "reg/agent:1" },

@@ -1,7 +1,7 @@
 import type { Backend } from "@everdict/backends";
 import {
-  type AgentJob,
   BadRequestError,
+  type CaseJob,
   type RegistryAuth,
   type RuntimeSpec,
   type TraceSourceConfig,
@@ -36,7 +36,7 @@ export function buildTopologyBackend(
     secretEnv?: Record<string, string>;
     // Saved-profile injection (browser-profiles S5) — seed a referenced profile's login into the per-case browser
     // before the agent connects. Built in the composition (BrowserProfileStore + cipher); undefined = no injection.
-    seedProfile?: (profileId: string, cdpBase: string, job: AgentJob) => Promise<void>;
+    seedProfile?: (profileId: string, cdpBase: string, job: CaseJob) => Promise<void>;
   },
 ): Backend {
   const ts = spec.traceSource;

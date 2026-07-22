@@ -33,7 +33,7 @@
 > mirrors anchor to contracts via type-only imports + compile-time drift guards [bidirectional /
 > Pick-reverse / run-style split; zod v3/v4 coexist — z.unknown() and z.default() optionality quirks
 > pinned; spec discriminated unions stay honest local views]; 138 wire type exports; enforcement live:
-> check-web-imports.mjs [type-only, contracts-only] + the four layer pins in check-agent-cone.mjs.
+> check-web-imports.mjs [type-only, contracts-only] + the four layer pins in check-job-runner-cone.mjs.
 > P4 RESOLUTIONS (2026-07-10, maintainer): ① compat-shell sweep APPROVED and EXECUTED
 > (`b5aea48` pass A: 158 apps/api shells deleted · `e60b8cc` pass B: @everdict/{core,run-case,suite,
 > billing} DELETED, 239 core importers split kernel→domain / shapes→contracts, workspace 29→25,
@@ -93,8 +93,8 @@ interfaces}.md`. The findings that force a redesign:
    doc-only); the CLI prints raw domain JSON; the web re-implements domain logic client-side because the
    wire carries no derived fields; the sdk hand-mirrors DTOs. There is **no owned wire contract**.
 5. **Contracts are trapped in fat packages.** The result-sentinel codec lives in the heaviest package
-   (`agent`) so backends/runner inherit the full engine cone for `parseResult`; `CommandHarness`
-   value-imports `@everdict/trace` into the agent image; `@everdict/auth`'s ports are owned by `db`.
+   (`job-runner`) so backends/runner inherit the full engine cone for `parseResult`; `CommandHarness`
+   value-imports `@everdict/trace` into the job-runner image; `@everdict/auth`'s ports are owned by `db`.
 
 ## 3. Principles (the consistent core of clean/hexagonal, applied)
 
@@ -122,7 +122,7 @@ packages/
     src/{eval-case, case-result, trace-event, harness-spec, runtime-spec, judge, dataset,
          agent-job,              # SLIMMED: job essentials; scheduling/billing hints move to a
                                  #  control-plane envelope type (the god-DTO split)
-         job-result-wire,        # the __EVERDICT_RESULT__ sentinel codec (from packages/agent)
+         job-result-wire,        # the __EVERDICT_RESULT__ sentinel codec (from packages/job-runner)
          wire/**}                # the public wire DTOs (control-plane responses) — THE contract
                                  #  web/sdk import types from here; no more hand mirrors
   domain/                        # L1 — THE unique domain. Pure. Imports contracts only.
@@ -144,7 +144,7 @@ packages/
         image/ trace/            # classifyImageRef + host normalization · ONE trace-coordinates model
         auth/                    # role/scope matrix (authz.ts from packages/auth)
   application/
-    execution/                   # L2a — agent-safe use-cases: runCase two-phase loop + scoring
+    execution/                   # L2a — job-runner-safe use-cases: runCase two-phase loop + scoring
                                  #  composition + collect (absorbs run-case; the topology grading loop
                                  #  collapses into THIS — placement adapters stop scoring)
     control/                     # L2b — control-plane use-cases (~162, from apps/api services) +
@@ -170,7 +170,7 @@ packages/
 apps/                            # L3 — interfaces + composition roots ONLY
   api/                           # routes/tools/docs + composition (main.ts shrinks to wiring builders
                                  #  over application-control ports)
-  agent/                         # job-side composition of application/execution (from packages/agent)
+  agent/                         # job-side composition of application/execution (from packages/job-runner)
   cli/                           # commands = thin drivers over application use-cases (embedded mode
                                  #  composes the same use-cases; output through interface-kit DTOs)
   desktop/ web/                  # unchanged posture (web additionally imports contracts/wire TYPES,
@@ -184,7 +184,7 @@ apps/                            # L3 — interfaces + composition roots ONLY
 | `core` | split: `contracts` (schemas/types/errors) + `domain/{failure,harness,image,runtime}` (kernel) + adapter strays → `infrastructure/*` |
 | `suite` | split: `domain/scorecard` (verdict/trials/diff/leaderboard) + `application/control` (runSuite) |
 | `run-case` | `application/execution` |
-| `agent` | `apps/agent` (composition) + `contracts/job-result-wire` (sentinel) |
+| `job-runner` | `apps/job-runner` (composition) + `contracts/job-result-wire` (sentinel) |
 | `backends` | `domain/placement` (policies) + `application/control` (Dispatcher port) + `infrastructure/placement-*` (adapters) |
 | `orchestrator` | `application/control` (workflows/activities contract) + `infrastructure/temporal` |
 | `topology` | `domain/harness` (pin identity) + `domain/trace` (coordinates) + `infrastructure/topology-runtimes`; its eval loop merges into `application/execution` |
@@ -220,7 +220,7 @@ dependency on the whole engine.
 - **Parity**: interface-kit mappers are the parity mechanism — HTTP and MCP cannot drift because both
   call the same `from()`.
 
-## 6. Migration plan (strangler, every phase green: workspace typecheck + full tests + boot + agent image build)
+## 6. Migration plan (strangler, every phase green: workspace typecheck + full tests + boot + job-runner image build)
 
 - **P0 — contracts + sentinel + wire types.** Split `contracts` out of core; move the sentinel codec;
   introduce `contracts/wire` (typed from Round 5's response schemas). Compat re-exports everywhere.
@@ -251,7 +251,7 @@ Each phase is independently shippable; P0/P1 unblock the highest-value duplicati
 ## 8. Open questions for review
 
 1. Package granularity: `application/{execution,control}` as two packages (proposed) vs one with two
-   entrypoints — two keeps the agent cone provable by construction.
+   entrypoints — two keeps the job-runner cone provable by construction.
 2. `contracts/wire` versioning: adopt a `v1` namespace now (future-proof external SDK) or defer?
 3. `self-hosted-runner` placement: keep as its own package (proposed — it is a deployable library used
    by CLI+desktop) vs fold into `application/execution`.

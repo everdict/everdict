@@ -17,7 +17,7 @@ levels (whole-mesh + per-module) — see [`collaboration.md`](collaboration.md).
 provision(Driver) → seed(Environment) → install+run(Harness)→normalized trace →
 snapshot(Environment) → grade(Grader[]) → `CaseResult`.
 
-The **Backend** dispatches the runner-agent (`@everdict/agent`) — which runs the loop above via
+The **Backend** dispatches the job-runner (`@everdict/job-runner`) — which runs the loop above via
 `LocalDriver` inside an isolated job — and parses the returned result. Isolation is the
 orchestrator's (Nomad task `runtime` / K8s `runtimeClassName` / Windows VM). Suites fan out over
 cases × harness versions; regression = diff two scorecards.
@@ -27,7 +27,7 @@ See `docs/execution-backends.md` (Backend vs Driver) and `docs/sandbox-auth.md` 
 - new compute target (Nomad/K8s/Windows) → new `Backend` (agent + loop unchanged).
 - OS Win/macOS on a pool → `Backend` + per-run VM checkpoint isolation.
 - env browser/os-use → new `Environment` + snapshot variant (+ a `Computer` capability for os-use).
-- harness Codex/LangGraph → new `EvaluableHarness` (+ registry entry in `@everdict/agent`); any CLI with
+- harness Codex/LangGraph → new `EvaluableHarness` (+ registry entry in `@everdict/job-runner`); any CLI with
   zero code via the declarative `command` harness (`docs/command-harness.md`).
 - **service-topology harness** (multi-service + browser/OS target env) → `HarnessSpec(service)` +
   orchestrator-agnostic `ServiceTopologyBackend` (Nomad/K8s) + `@everdict/trace` (OTel/MLflow). See `docs/service-harness.md`.

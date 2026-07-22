@@ -37,7 +37,7 @@ decision, so they ship as one coherent design.
 ## Current state — verified
 
 ### Judge dispatch has no placement (but rides the same dispatcher as a run)
-`apps/api/src/execution/judge-runner.ts:76-81` builds the harness judge's `AgentJob` with **no `evalCase.placement`**, then
+`apps/api/src/execution/judge-runner.ts:76-81` builds the harness judge's `CaseJob` with **no `evalCase.placement`**, then
 dispatches via `DefaultJudgeRunnerDeps.dispatch` — documented as *"same path as a single run"* (the same
 `RuntimeDispatcher` the scorecard run uses). So **threading `placement.target` is sufficient to route a judge** —
 no new dispatch path.
@@ -72,7 +72,7 @@ takes the cheap, correct path (co-locate by *inheriting the producing run's plac
 `packages/topology/src/service-backend.ts:132` always does `const snapshot = target ? await target.snapshot() :
 {kind:"prompt"}` — a **pull** from the per-case browser CDP (`reference`). `TopologyTarget.observe[]`
 (`dom/screenshot/url`, `packages/core/src/harness/harness-spec.ts:35`) is **declared but unused**. The `__EVERDICT_RESULT__`
-sentinel (`packages/agent/src/run.ts:9`, parsed in `packages/backends/src/*.ts`) returns the whole `CaseResult` for
+sentinel (`packages/job-runner/src/run.ts:9`, parsed in `packages/backends/src/*.ts`) returns the whole `CaseResult` for
 **process** backends, but topology observations never ride it. There is no egress path. Graders/judges consume the
 result via `GradeContext.snapshot` (`packages/core/src/execution/grader.ts`).
 
@@ -121,7 +121,7 @@ interface ObservationSource { observe(req): Promise<EnvSnapshot>; }   // referen
 //   (producingRunPlacement threaded into applyJudges from scorecard-service track; undefined on ingest).
 ```
 
-No `Placement`/`Scheduler`/`AgentJob` schema change is needed for D1/D2 — `placement.target` already exists and the
+No `Placement`/`Scheduler`/`CaseJob` schema change is needed for D1/D2 — `placement.target` already exists and the
 dispatcher already resolves it. D3 is the only new core surface (one optional `JudgeSpec` field + one optional
 `TopologyTarget` field).
 
@@ -171,7 +171,7 @@ dispatcher already resolves it. D3 is the only new core surface (one optional `J
 - `packages/core/src/harness/judge-spec.ts` — `HarnessJudgeSpecSchema.runtime?` (slice 1).
 - `packages/core/src/harness/harness-spec.ts` + `harness-template.ts` — `TopologyTarget.delivery?` + template mirror (slice 2).
 - `apps/api/src/execution/scorecard-service.ts` — thread producing-run placement into `applyJudges` (slice 1).
-- `apps/api/src/execution/judge-runner.ts` — co-locate/override placement on the judge `AgentJob` (slice 1).
+- `apps/api/src/execution/judge-runner.ts` — co-locate/override placement on the judge `CaseJob` (slice 1).
 - `apps/api/src/server.ts` + `mcp.ts` — judge `runtime` field validated against the runtime registry; **BFF↔MCP
   parity** (slice 1).
 - `apps/web/src/features/register-judge/*` — runtime selector on the judge form (slice 1).

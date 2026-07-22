@@ -7,7 +7,7 @@ CREATE TABLE IF NOT EXISTS everdict_runner_jobs (
   owner text NOT NULL,
   runner_id text NOT NULL,                       -- target runner id, or '*' for the owner pool
   tenant text,
-  job jsonb NOT NULL,                            -- the AgentJob
+  job jsonb NOT NULL,                            -- the CaseJob
   required_caps text[] NOT NULL DEFAULT '{}',    -- functional caps the job needs — filtered against advertised on claim
   status text NOT NULL DEFAULT 'queued',         -- queued | leased | completed | failed
   cancel_requested boolean NOT NULL DEFAULT false,

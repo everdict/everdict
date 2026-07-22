@@ -1,14 +1,14 @@
-// live check: K8sBackend(process) launches the runner agent as a Job on a real K8s (kind),
+// live check: K8sBackend(process) launches the job-runner as a Job on a real K8s (kind),
 // polls for completion, then parses CaseResult from the sentinel in the pod logs (= the K8s counterpart of NomadBackend).
 //
-// Prereq: a kind cluster `everdict` + load the everdict-agent:local image onto the kind node.
-//   docker build -f packages/agent/Dockerfile -t everdict-agent:local .
-//   kind load docker-image everdict-agent:local --name everdict
-// Usage: node scripts/live/k8s-backend.mjs   (CONTEXT=kind-everdict IMAGE=everdict-agent:local NS=everdict-ci)
+// Prereq: a kind cluster `everdict` + load the everdict-job-runner:local image onto the kind node.
+//   docker build -f packages/job-runner/Dockerfile -t everdict-job-runner:local .
+//   kind load docker-image everdict-job-runner:local --name everdict
+// Usage: node scripts/live/k8s-backend.mjs   (CONTEXT=kind-everdict IMAGE=everdict-job-runner:local NS=everdict-ci)
 import { K8sBackend } from "../../packages/backends/dist/index.js";
 
 const CONTEXT = process.env.CONTEXT ?? "kind-everdict";
-const IMAGE = process.env.IMAGE ?? "everdict-agent:local";
+const IMAGE = process.env.IMAGE ?? "everdict-job-runner:local";
 const NS = process.env.NS ?? "everdict-ci";
 const STAMP = Date.now().toString(36);
 

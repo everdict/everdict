@@ -149,12 +149,12 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
     participant CP as control plane
-    participant AG as agent (runAgentJob)
+    participant AG as agent (runCaseJob)
     participant H as CommandHarness
     participant PX as usage proxy (loopback, in @everdict/trace)
     participant M as UsageMeter (CP, after result returns)
 
-    CP->>AG: AgentJob.meterUsage — request override ?? workspace policy ?? off
+    CP->>AG: CaseJob.meterUsage — request override ?? workspace policy ?? off
     AG->>AG: resolveMeterUsage — fail-safe OFF when containerized (loopback unreachable from the container; warns loudly)
     AG->>H: makeHarness(…, {meterUsage})
     H->>PX: startUsageProxy — ephemeral 127.0.0.1 port; child's OPENAI_API_BASE rewritten
@@ -197,8 +197,8 @@ From the apps-api survey catalog (§1.10, §1.16):
 | **Parallel budget path without the payer rule** | `packages/backends/src/scheduling/scheduler.ts:73-74,155-183,362-372`: the Scheduler's optional budget does admit-at-enqueue (backpressure-before-admit anti-leak ordering `:159-161`), `releaseBudget` on cancel/never-dispatched (`:197,223,321`), and settles with `settle(tenantOf(job), costOf(result))` — **no `billingTenant`**, so a self-hosted own-pays run would bill the tenant on this path. apps/api does NOT wire it (`main.ts:630-636` passes no budget), so the two homes currently cannot double-admit — by wiring luck, not by design | ONE admission/settle owner in `application/control`; either the Scheduler loses its budget option or it becomes the sole owner and adopts `billingTenant` — decide in review |
 | Reservation-leak protection | scheduler-side: documented ordering (`scheduler.ts:159-161`) + 3 `releaseBudget` call sites; service-side: `admit` before `store.create` and the comment "admit was already counted synchronously in submit, so don't double-count" (`run-service.ts:302-304`) — but **no `release()` call exists anywhere in apps/api** (grep) — a superseded batch's never-run cases keep their per-case reservations only because the batch path admits per case at dispatch time | pin the invariant per path: admit-at-dispatch (batch) needs no release; admit-at-submit (run) leaks one reservation if the track never dispatches — target makes the reservation lifecycle explicit |
 | Metering policy chain (request override → workspace setting → env → off) | `run-service.ts:279-280` (`meterUsageFor`), scorecard path equivalent, `envMeterPolicy` fallback in main.ts — the chain is re-stated per service | one `domain/billing` policy function over a settings port |
-| Container metering fail-safe | `packages/agent/src/run.ts:25` (`resolveMeterUsage`) — disables metering when containerized (loopback proxy unreachable) using `instanceof DockerDriver` (engine survey §7 smell 4: policy reaching into a concrete adapter) | the Driver port advertises `containerized`; the policy moves to `domain/billing` |
-| Usage capture lives in the wrong packages | the proxy is in `packages/trace/src/usage-proxy.ts` and its lifecycle is embedded in `CommandHarness` (`packages/harnesses/src/command.ts` — engine survey §4 smell 2 "billing inside the harness"), dragging the proxy into the agent image for every job | metering capture becomes an `infrastructure/compute` concern composed by `application/execution`; policy in `domain/billing` |
+| Container metering fail-safe | `packages/job-runner/src/run.ts:25` (`resolveMeterUsage`) — disables metering when containerized (loopback proxy unreachable) using `instanceof DockerDriver` (engine survey §7 smell 4: policy reaching into a concrete adapter) | the Driver port advertises `containerized`; the policy moves to `domain/billing` |
+| Usage capture lives in the wrong packages | the proxy is in `packages/trace/src/usage-proxy.ts` and its lifecycle is embedded in `CommandHarness` (`packages/harnesses/src/command.ts` — engine survey §4 smell 2 "billing inside the harness"), dragging the proxy into the job-runner image for every job | metering capture becomes an `infrastructure/compute` concern composed by `application/execution`; policy in `domain/billing` |
 | Billable surface = harness + judge; only harness is metered | `UsageSource = "harness" \| "judge"` (`packages/billing/src/usage.ts:11-12`) but **no `record(tenant, "judge", …)` call exists in apps/api** (grep) — CP model-judge provider calls (tenant key, `judge-runner.ts`) are unmetered | wire judge metering in the scoring use-case, or drop the `judge` source; align with `judge.md` open question 2 |
 | Cost comes from the harness's own trace | `sumCost` over `llm_call` events (`cost.ts:6-16`); Claude's `total_cost_usd` mapped in `mapClaudeStreamJson`; proxy emits synthetic `llm_call` — one vocabulary, already unified | keep; document as the pinned cost contract |
 

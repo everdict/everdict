@@ -53,7 +53,7 @@ no default-to-first**. Discriminated unions carry the shape variants:
   shape) + `pins`/`overrides` (deltas); `resolveHarnessInstance()` merges → a resolved `HarnessSpec`,
   throwing `BadRequestError` on a missing/mismatched slot.
 - `EvalCase` (`eval-case.ts`) — case bundle (env, task, graders, image?); also `CaseResult`/`Scorecard`.
-- `AgentJob` (`agent-job.ts`) — one dispatched unit; `tenant`/`submittedBy` key the SaaS machinery.
+- `CaseJob` (`case-job.ts`) — one dispatched unit; `tenant`/`submittedBy` key the SaaS machinery.
 - `TraceEvent` (`trace.ts`) — union on `kind` (message/llm_call/tool_call/…); cost comes from here.
 - `RuntimeSpec` (`runtime-spec.ts`) — `local | nomad | k8s` execution infra; **never store secrets**
   (only SecretStore key *names* like `authSecret`).

@@ -1,6 +1,6 @@
 import type {
-  AgentJob,
   BrowserSnapshot,
+  CaseJob,
   CaseResult,
   Grader,
   ServiceHarnessSpec,
@@ -796,7 +796,7 @@ describe("ServiceTopologyBackend (orchestrator-agnostic, mock runtime)", () => {
       newRunId: () => "fixed",
     });
 
-    const job: AgentJob = {
+    const job: CaseJob = {
       harness: { id: "browser-use-langgraph", version: "1.0.0" },
       evalCase: {
         id: "c1",
@@ -850,7 +850,7 @@ describe("ServiceTopologyBackend (orchestrator-agnostic, mock runtime)", () => {
         return [{ t: 0, kind: "message", role: "assistant", text: "from SELECTED workspace source" }];
       },
     };
-    const job: AgentJob = {
+    const job: CaseJob = {
       harness: { id: "browser-use-langgraph", version: "1.0.0" },
       tenant: "acme",
       evalCase: {
@@ -941,7 +941,7 @@ describe("ServiceTopologyBackend (orchestrator-agnostic, mock runtime)", () => {
       submit,
       newRunId: () => "fixed",
     });
-    const job: AgentJob = {
+    const job: CaseJob = {
       harness: { id: "bu", version: "1.0.0" },
       evalCase: {
         id: "c1",
@@ -1008,7 +1008,7 @@ describe("ServiceTopologyBackend (orchestrator-agnostic, mock runtime)", () => {
       },
       newRunId: () => "fixed",
     });
-    const job: AgentJob = {
+    const job: CaseJob = {
       harness: { id: "bu", version: "1.0.0" },
       evalCase: {
         id: "c1",
@@ -1064,7 +1064,7 @@ describe("ServiceTopologyBackend (orchestrator-agnostic, mock runtime)", () => {
       graders: [urlGrader],
       newRunId: () => "fixed",
     });
-    const job: AgentJob = {
+    const job: CaseJob = {
       harness: { id: "browser-use-langgraph", version: "1.0.0" },
       evalCase: { id: "c1", env: { kind: "browser" }, task: "t", graders: [], timeoutSec: 60, tags: [] },
     };
@@ -1110,7 +1110,7 @@ describe("ServiceTopologyBackend (orchestrator-agnostic, mock runtime)", () => {
       newRunId: () => "r",
       trustZones: perTenantTrustZones(),
     });
-    const mk = (tenant: string): AgentJob => ({
+    const mk = (tenant: string): CaseJob => ({
       harness: { id: "browser-use-langgraph", version: "1.0.0" },
       tenant,
       evalCase: { id: `c-${tenant}`, env: { kind: "browser" }, task: "t", graders: [], timeoutSec: 60, tags: [] },
@@ -1149,7 +1149,7 @@ describe("ServiceTopologyBackend (orchestrator-agnostic, mock runtime)", () => {
       return browser;
     },
   });
-  const job: AgentJob = {
+  const job: CaseJob = {
     harness: { id: "browser-use-langgraph", version: "1.0.0" },
     evalCase: { id: "c1", env: { kind: "browser" }, task: "t", graders: [], timeoutSec: 60, tags: [] },
   };
@@ -1642,7 +1642,7 @@ describe("ServiceTopologyBackend (orchestrator-agnostic, mock runtime)", () => {
       submit: async () => {},
       newRunId: () => "fixed",
     });
-    const pinnedJob: AgentJob = { ...job, imagePins: { "agent-server": "reg/bu-agent:2" } };
+    const pinnedJob: CaseJob = { ...job, imagePins: { "agent-server": "reg/bu-agent:2" } };
 
     const result = await backend.dispatch(pinnedJob);
 

@@ -17,7 +17,7 @@ A run separates four in-sandbox concerns + a placement layer:
 
 ## Architecture (one-way deps)
 ```
-core ← { drivers · environments · harnesses · graders · trace } ← runner ← agent ← backends ← { orchestrator · topology · suite } ← runner-core ← { apps/cli · apps/desktop }
+core ← { drivers · environments · harnesses · graders · trace } ← runner ← job-runner ← backends ← { orchestrator · topology · suite } ← runner-core ← { apps/cli · apps/desktop }
 control plane on top: apps/api (HTTP+MCP) · apps/web (SaaS web) — see CLAUDE.md for the full map
 ```
 
@@ -30,7 +30,7 @@ control plane on top: apps/api (HTTP+MCP) · apps/web (SaaS web) — see CLAUDE.
 | `@everdict/harnesses` | the agent under test: `ClaudeCodeHarness`, `ScriptedHarness`, declarative `CommandHarness` (any CLI, no code — `docs/command-harness.md`). |
 | `@everdict/graders` | scoring (tests-pass / cost / steps / latency) + **Agent Judge** (`JudgeGrader`: LLM/VLM/agent verdict — `docs/judges.md`). |
 | `@everdict/runner` | the eval loop (`runCase`). |
-| `@everdict/agent` | the dispatched unit: a self-contained worker that runs `runCase` in an isolated job. |
+| `@everdict/job-runner` | the dispatched unit: a self-contained worker that runs `runCase` in an isolated job. |
 | `@everdict/backends` | placement: `Backend` (Local/Nomad/K8s) + `Router`/`Scheduler` (tenant-fair WFQ, quotas, budgets) + trust zones + autoscaler + tenant `RuntimeSpec`→live backend (`docs/runtimes.md`). |
 | `@everdict/orchestrator` | durable control plane on Temporal (Direct / Temporal + worker; powers scheduled evals). |
 | `@everdict/trace` | pull a harness trace from OTel/MLflow → `TraceEvent`; usage-proxy metering. |

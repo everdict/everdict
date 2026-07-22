@@ -1,4 +1,4 @@
-import { type AgentJob, AgentJobSchema, type CaseResult, RUNNER_PROTOCOL_VERSION } from "@everdict/contracts";
+import { type CaseJob, CaseJobSchema, type CaseResult, RUNNER_PROTOCOL_VERSION } from "@everdict/contracts";
 import { classifyFailure, stageForError } from "@everdict/domain";
 
 // The runner's own short liveness note (what it's doing / why it can't work right now). Reported to the control plane
@@ -20,7 +20,7 @@ export interface RunnerLoopDeps {
   // compute/topology and frees the runtime mid-case. reportScreen (when the harness declares liveScreen) pushes each
   // captured frame of the case's screen back to the control plane for live viewing.
   runJob: (
-    job: AgentJob,
+    job: CaseJob,
     opts?: { signal?: AbortSignal; reportScreen?: (frameBase64: string) => Promise<void> },
   ) => Promise<CaseResult>;
   log?: (msg: string) => void; // default no-op (tests stay quiet)
@@ -132,7 +132,7 @@ export async function runLeaseWorkers(deps: RunnerLoopDeps, opts: RunnerLoopOpts
         continue;
       }
       const jobId = String(leased.jobId);
-      const parsed = AgentJobSchema.safeParse(leased.job); // boundary validation
+      const parsed = CaseJobSchema.safeParse(leased.job); // boundary validation
       if (!parsed.success) {
         // A discriminator/enum mismatch on the embedded harnessSpec (e.g. target.delivery.mode) almost always means
         // this self-hosted runner and the control plane are on different everdict versions — the job schema was

@@ -1,6 +1,6 @@
 import { fileURLToPath } from "node:url";
-import { collectAuthEnv } from "@everdict/agent";
 import { BackendRegistry, type BackendsConfig, LocalBackend, Scheduler, buildRegistry } from "@everdict/backends";
+import { collectAuthEnv } from "@everdict/job-runner";
 import { NativeConnection, Worker } from "@temporalio/worker";
 import { createActivities } from "./activities.js";
 import { TASK_QUEUE } from "./constants.js";

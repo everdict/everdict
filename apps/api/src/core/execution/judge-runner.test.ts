@@ -1,4 +1,4 @@
-import type { AgentJob, CaseResult, GradeContext, JudgeSpec } from "@everdict/contracts";
+import type { CaseJob, CaseResult, GradeContext, JudgeSpec } from "@everdict/contracts";
 import { RubricSpecSchema } from "@everdict/contracts";
 import { InMemoryModelRegistry, InMemoryRubricRegistry } from "@everdict/registry";
 import { describe, expect, it, vi } from "vitest";
@@ -102,7 +102,7 @@ describe("defaultJudgeRunner", () => {
       timeoutSec: 600,
       tags: [],
     };
-    let dispatched: AgentJob | undefined;
+    let dispatched: CaseJob | undefined;
     const runner = defaultJudgeRunner({
       secretsFor: async () => ({}),
       dispatch: async (job) => {
@@ -160,7 +160,7 @@ describe("defaultJudgeRunner", () => {
       timeoutSec: 600,
       tags: [],
     };
-    let dispatched: AgentJob | undefined;
+    let dispatched: CaseJob | undefined;
     const runner = defaultJudgeRunner({
       secretsFor: async () => ({}),
       dispatch: async (job) => {
@@ -191,7 +191,7 @@ describe("defaultJudgeRunner", () => {
       timeoutSec: 600,
       tags: [],
     };
-    let dispatched: AgentJob | undefined;
+    let dispatched: CaseJob | undefined;
     const fetchImpl = vi.fn(async (u: string) => {
       const b = Buffer.from(`LOG CONTENTS of ${u}`);
       return {
@@ -542,7 +542,7 @@ describe("defaultJudgeRunner", () => {
       snapshot: { kind: "repo", diff: "", changedFiles: [], headSha: "h" },
       scores: [],
     };
-    const dispatch = vi.fn((_job: AgentJob) => Promise.resolve(result));
+    const dispatch = vi.fn((_job: CaseJob) => Promise.resolve(result));
     const runner = defaultJudgeRunner({ secretsFor: async () => ({}), dispatch });
     const [score] = await runner.run(harnessSpec, "acme", ctx);
     expect(score).toMatchObject({ metric: "judge:reviewer", value: 0.9, pass: true });
@@ -566,7 +566,7 @@ describe("defaultJudgeRunner", () => {
   };
 
   it("harness judge: spec.runtime is dispatched as placement.target (explicit selection)", async () => {
-    const dispatch = vi.fn((_job: AgentJob) => Promise.resolve(harnessResult));
+    const dispatch = vi.fn((_job: CaseJob) => Promise.resolve(harnessResult));
     const runner = defaultJudgeRunner({ secretsFor: async () => ({}), dispatch });
     // Even with a source placement (rt-run), spec.runtime (rt-judge) wins.
     await runner.run({ ...harnessSpec, runtime: "rt-judge" }, "acme", ctx, { target: "rt-run" });
@@ -574,7 +574,7 @@ describe("defaultJudgeRunner", () => {
   });
 
   it("harness judge: without spec.runtime, inherits the source run's placement (co-locate)", async () => {
-    const dispatch = vi.fn((_job: AgentJob) => Promise.resolve(harnessResult));
+    const dispatch = vi.fn((_job: CaseJob) => Promise.resolve(harnessResult));
     const runner = defaultJudgeRunner({ secretsFor: async () => ({}), dispatch });
     await runner.run(harnessSpec, "acme", ctx, { target: "rt-near-store", os: "linux" });
     expect(dispatch.mock.calls[0]?.[0]?.evalCase.placement).toEqual({ target: "rt-near-store", os: "linux" });
@@ -582,14 +582,14 @@ describe("defaultJudgeRunner", () => {
 
   it("harness judge: carries the run's submitter so a co-located self:<runnerId> agent dispatch resolves its owner", async () => {
     // Same co-locate ownership contract as the code judge — regression against dropping submittedBy on the dispatched job.
-    const dispatch = vi.fn((_job: AgentJob) => Promise.resolve(harnessResult));
+    const dispatch = vi.fn((_job: CaseJob) => Promise.resolve(harnessResult));
     const runner = defaultJudgeRunner({ secretsFor: async () => ({}), dispatch });
     await runner.run(harnessSpec, "acme", ctx, { target: "self:runner-7" }, "user-bob");
     expect(dispatch.mock.calls[0]?.[0]?.submittedBy).toBe("user-bob");
   });
 
   it("harness judge: with neither spec.runtime nor a source placement, no placement (default backend)", async () => {
-    const dispatch = vi.fn((_job: AgentJob) => Promise.resolve(harnessResult));
+    const dispatch = vi.fn((_job: CaseJob) => Promise.resolve(harnessResult));
     const runner = defaultJudgeRunner({ secretsFor: async () => ({}), dispatch });
     await runner.run(harnessSpec, "acme", ctx);
     expect(dispatch.mock.calls[0]?.[0]?.evalCase.placement).toBeUndefined();

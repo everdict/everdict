@@ -1,9 +1,9 @@
-import { collectAuthEnv } from "@everdict/agent";
 import { Metrics } from "@everdict/application-control";
 import { type AutoscaleConfig, parseAutoscale, parseTenantMap } from "@everdict/application-control";
 import { BackendRegistry, K8sBackend, NomadBackend, Scheduler } from "@everdict/backends";
 import type { BudgetStore, SecretStore, UsageStore } from "@everdict/db";
 import { Autoscaler, type BudgetLimit, CircuitBreaker, MutableSlots } from "@everdict/domain";
+import { collectAuthEnv } from "@everdict/job-runner";
 import { persistentBudget } from "../common/budget-tracker.js";
 import { persistentUsageMeter } from "../common/usage-meter.js";
 

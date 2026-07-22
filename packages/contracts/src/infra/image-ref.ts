@@ -33,7 +33,7 @@ export interface ImageWarning {
 }
 
 // Registry pull/push credentials (transient) — the control plane resolves them from the workspace SecretStore
-// and ships them via AgentJob.registryAuth (same discipline as repoToken: never persist to results/datasets); the
+// and ships them via CaseJob.registryAuth (same discipline as repoToken: never persist to results/datasets); the
 // consumer (DockerDriver/runner/topology builder) uses them only for an authenticated pull and then discards them.
 export const RegistryAuthSchema = z.object({
   host: z.string().min(1), // the registry host[:port] these credentials are valid for

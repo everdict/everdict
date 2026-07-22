@@ -1,4 +1,4 @@
-import type { AgentJob, CaseResult } from "@everdict/contracts";
+import type { CaseJob, CaseResult } from "@everdict/contracts";
 
 // Per-dispatch options — currently just cooperative cancellation. A backend that cannot interrupt an already-started
 // run (in-process / pull) honors `signal` best-effort by rejecting a not-yet-started dispatch; the pollers (Nomad/K8s)
@@ -25,5 +25,5 @@ export interface DispatchOptions {
 // The control plane and the orchestrator activity depend on this PORT, not an implementation (drop-in swap).
 // Moved from @everdict/backends in re-architecture P2c — placement adapters implement it, application consumes it.
 export interface Dispatcher {
-  dispatch(job: AgentJob, opts?: DispatchOptions): Promise<CaseResult>;
+  dispatch(job: CaseJob, opts?: DispatchOptions): Promise<CaseResult>;
 }

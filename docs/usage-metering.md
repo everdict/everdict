@@ -30,17 +30,17 @@ The proxy lives **in the agent's sandbox**, on `localhost` — so it works on ev
 without any cross-network reconfiguration (the agent→upstream path is the one that already works).
 **Exception — containerized image-cases on a self-hosted runner (DockerDriver):** there the agent process runs on
 the runner HOST while the child runs in a container, so the loopback proxy is unreachable from the child; leaving
-metering on would rewrite the child's model base URL to a dead endpoint and kill every model call. `runAgentJob`
+metering on would rewrite the child's model base URL to a dead endpoint and kill every model call. `runCaseJob`
 disables metering fail-safe for `containerize` jobs (warn logged) — meter those runs via trace instrumentation
 (`trace: otel/mlflow`) instead:
-1. **Control plane decides** whether to meter a run and sets **`AgentJob.meterUsage`** (authoritative).
+1. **Control plane decides** whether to meter a run and sets **`CaseJob.meterUsage`** (authoritative).
    Resolution in `RunService` (async): per-run override (`POST /runs` body `meterUsage`) → per-workspace policy
    (`meterUsageFor(tenant)`) → `false`. `main.ts` wires the policy as **durable per-workspace settings → env
    fallback**: `(await settingsStore.get(tenant))?.meterUsage ?? envPolicy(tenant)`, where the
    `WorkspaceSettingsStore` (`@everdict/db`, InMemory/Pg, table `everdict_workspace_settings`) is managed by admins via
    **`PUT/GET /workspace/settings`** (`settings:write`/`settings:read`, admin-only), and `envPolicy` is the
    default from **`EVERDICT_METER_TENANTS`** (comma list) or **`EVERDICT_METER_USAGE=1`** (all).
-2. `runAgentJob` uses `job.meterUsage` (falls back to the `EVERDICT_METER_USAGE` env only for direct
+2. `runCaseJob` uses `job.meterUsage` (falls back to the `EVERDICT_METER_USAGE` env only for direct
    `LocalBackend.dispatch` with no control plane) → passes `meterUsage` to `makeHarness`.
 3. `CommandHarness.run` (only when `trace:none` + the model-base env var is present — avoids double-counting a
    harness that already reports its own cost) starts a per-run `startUsageProxy(upstream = OPENAI_API_BASE)`,
@@ -63,7 +63,7 @@ disables metering fail-safe for `containerize` jobs (warn logged) — meter thos
   the synthetic `llm_call` with the captured tokens **and `usd`**, and closes the proxy; **not** metered when
   `trace` ≠ `none`.
 - Deterministic (`apps/api/src/run-service.test.ts`): resolution order — per-run override > per-workspace policy
-  > off — and the decided value is carried on `AgentJob.meterUsage`.
+  > off — and the decided value is carried on `CaseJob.meterUsage`.
 - Live proxy (`scripts/live/usage-proxy.mjs`) vs real workclaw LiteLLM `gpt-5.4-mini`: `run-A` = 2 calls / 3276
   tokens, `run-B` = 1 call / 1642 tokens — captured while responses pass through intact.
 - Live lifecycle (`scripts/live/usage-proxy-run.mjs`): a `command` harness dispatched via `LocalBackend` with

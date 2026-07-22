@@ -166,7 +166,7 @@ sequenceDiagram
     S->>R: resolveWithPins(tenant, id, version, pins) — PR image swap, registry unchanged
     R-->>S: resolved HarnessSpec (unknown slot → 400, typo never silently ignored)
     S->>S: origin.pinOverrides = pins (reproducibility evidence on the record)
-    S->>D: AgentJob (harness = resolved id@version)
+    S->>D: CaseJob (harness = resolved id@version)
     D->>B: dispatch (service kind)
     B->>B: applyImagePins(spec, pins) → version + "-pin-" + sha1(sortedPins)[0..8]
     B->>W: ensureTopology(spec@version-pin-hash, zone)

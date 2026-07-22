@@ -1,7 +1,7 @@
 // Bundle the STANDALONE runner entry into one self-contained CJS file — the input to the Node SEA build that produces
 // the distributable `everdict-runner` binary (release CI). Only `runner-standalone.ts` is bundled (NOT main.ts): it
 // excludes @everdict/orchestrator, so Temporal's native Rust bindings never enter the graph and esbuild can inline
-// everything (@everdict/self-hosted-runner + @everdict/agent, the same graph the desktop already bundles).
+// everything (@everdict/self-hosted-runner + @everdict/job-runner, the same graph the desktop already bundles).
 // The gate (turbo build) stays tsc (dist/) — this script is for `pnpm bundle` / release packaging only.
 // Design: docs/architecture/runner-distribution.md.
 //

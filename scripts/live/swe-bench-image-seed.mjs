@@ -1,7 +1,7 @@
 // Live e2e (SLICE 63): seed the official SWE-bench prebuilt image (deps+repo bundled) as the per-case env.image → the backend uses it.
 //   1) Ingest a real SWE-bench_Lite row → case.image = swebench/sweb.eval.x86_64.<instance __→_1776_>:latest
 //   2) Confirm that image is actually published on Docker Hub (HTTP 200) — the seed points at a real image
-//   3) buildNomadJob uses case.image as the per-case container image (instead of the default agent image)
+//   3) buildNomadJob uses case.image as the per-case container image (instead of the default job-runner image)
 // (Image pull/run is multiple GB, so not done here — verified up to naming/existence/wiring.)
 import process from "node:process";
 import { buildNomadJob } from "../../packages/backends/dist/index.js";
@@ -35,9 +35,9 @@ try {
 }
 console.log(`Docker Hub published: ${published}  tags=${JSON.stringify(tags)}`);
 
-// Confirm the backend uses it as the per-case image (instead of the default agent image).
+// Confirm the backend uses it as the per-case image (instead of the default job-runner image).
 const job = { evalCase: c, harness: { id: "swe", version: "1.0.0" }, tenant: "acme" };
-const spec = buildNomadJob(job, { addr: "http://nomad:4646", image: "reg/everdict-agent:1" });
+const spec = buildNomadJob(job, { addr: "http://nomad:4646", image: "reg/everdict-job-runner:1" });
 const jobImage = spec.Job.TaskGroups[0]?.Tasks[0]?.Config.image;
 console.log(`\nbuildNomadJob container image: ${jobImage}`);
 const usesCaseImage = jobImage === c.image;

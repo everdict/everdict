@@ -3,8 +3,8 @@
 //   - the provider 'key' comes from env (OPENAI_API_KEY/BASE_URL = mimics what the backend secretEnv injects into the alloc)
 // process.env.EVERDICT_JUDGE_MODEL is intentionally cleared → the model must come only from job.judge.
 import process from "node:process";
-import { runAgentJob } from "../../packages/agent/dist/index.js";
 import { buildNomadJob } from "../../packages/backends/dist/index.js";
+import { runCaseJob } from "../../packages/job-runner/dist/index.js";
 
 // biome-ignore lint/performance/noDelete: clearing the process.env key is intentional (forces the model to come only from job.judge, not env)
 delete process.env.EVERDICT_JUDGE_MODEL;
@@ -37,7 +37,7 @@ const job = {
 // 1) Backend injection contract: buildNomadJob maps job.judge → alloc env (EVERDICT_JUDGE_MODEL/PROVIDER), key via secretEnv.
 const spec = buildNomadJob(job, {
   addr: "http://nomad:4646",
-  image: "reg/everdict-agent:1",
+  image: "reg/everdict-job-runner:1",
   secretEnv: { OPENAI_API_KEY: process.env.OPENAI_API_KEY ?? "", OPENAI_BASE_URL: process.env.OPENAI_BASE_URL ?? "" },
 });
 const allocEnv = spec.Job.TaskGroups[0]?.Tasks[0]?.Env ?? {};
@@ -49,9 +49,9 @@ console.log(
   `  OPENAI_API_KEY=${allocEnv.OPENAI_API_KEY ? "<set via secretEnv>" : "<missing>"}  OPENAI_BASE_URL=${allocEnv.OPENAI_BASE_URL || "<unset>"}`,
 );
 
-// 2) Real dispatch (runAgentJob): model from job.judge, key from env (mimicking secretEnv) → real model verdict.
-console.log("\n=== runAgentJob — model from job.judge, key from env(secretEnv) → real judge ===");
-const result = await runAgentJob(job);
+// 2) Real dispatch (runCaseJob): model from job.judge, key from env (mimicking secretEnv) → real model verdict.
+console.log("\n=== runCaseJob — model from job.judge, key from env(secretEnv) → real judge ===");
+const result = await runCaseJob(job);
 const j = result.scores.find((s) => s.metric === "judge");
 console.log(`  scores: ${result.scores.map((s) => s.graderId).join(", ")}`);
 console.log(`  judge: graderId=${j?.graderId} pass=${j?.pass} value=${j?.value?.toFixed?.(2) ?? j?.value}`);

@@ -136,7 +136,7 @@ sequenceDiagram
     participant P as tenant platform (mlflow/otel/…)
     participant SS as SecretStore
 
-    CP->>AG: AgentJob{runId: evd-…} — minted, derivable from the record
+    CP->>AG: CaseJob{runId: evd-…} — minted, derivable from the record
     AG->>H: run(compute, task, {runId})
     H->>H: env += EVERDICT_RUN_ID + OTEL_RESOURCE_ATTRIBUTES=everdict.run_id=<runId>
     H->>P: the agent-under-test exports its own trace (tenant instrumentation)
@@ -212,7 +212,7 @@ The trace domain has no resource of its own today — it serves other domains' u
 | Auth header conventions per platform | adapter-owned, stated in three comment blocks: `build-source.ts:12-13`, `trace-sink.ts:49-50`, `collect-trace.ts:61` (+ pull-ingest route docs) — consistent but only by convention | the value object carries `authSecret` (name); each adapter declares its header materialization; a contract test pins the per-kind header |
 | Collect failure classification (`TRACE_COLLECT_FAILED`, stage=collect, retryable, work preserved) | 2 implementations: job-side `run-case.ts:101-115` and CP-side `collect-trace.ts:106-118` — deliberately symmetric ("both collection modes fail identically"), maintained by hand | one `domain/failure` classification + one shared "keep the work, defer observation scoring" policy in `application/execution` |
 | Deferred-observation scoring parity (needsCompute=false only; inline judge → visible skip) | agent rule in `run-case.ts:117-123` mirrored CP-side in `collect-trace.ts:120-142` (`skipScore` is yet another skip-constructor copy — see `judge.md`) | one scoring-composition function in `application/execution` used by both phases |
-| CommandHarness value-drags the whole trace package into the agent image | `packages/harnesses/src/command.ts` value-imports `buildTraceSource` + `startUsageProxy` → agent image carries all 5 sources + 4 sinks + the metering HTTP proxy (engine survey §4 smell 1, §7 smell 6) | sources split from sinks in `infrastructure/trace-adapters`; the agent cone imports only the source side it needs; the usage proxy moves with billing |
+| CommandHarness value-drags the whole trace package into the job-runner image | `packages/harnesses/src/command.ts` value-imports `buildTraceSource` + `startUsageProxy` → job-runner image carries all 5 sources + 4 sinks + the metering HTTP proxy (engine survey §4 smell 1, §7 smell 6) | sources split from sinks in `infrastructure/trace-adapters`; the job-runner cone imports only the source side it needs; the usage proxy moves with billing |
 | Trace normalization (native → `TraceEvent`) | `mapClaudeStreamJson` `packages/harnesses/src/map-claude-stream-json.ts` (pure, well-isolated); trace:none stdout/stderr fallback in `CommandHarness` | stays a pure domain mapper (anti-corruption layer) under `domain/trace` or with the harness adapter — decide in review |
 
 ## Invariants

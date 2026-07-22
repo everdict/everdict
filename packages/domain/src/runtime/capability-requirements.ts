@@ -1,6 +1,6 @@
 import type {
-  AgentJob,
   CapabilityName,
+  CaseJob,
   EvalCase,
   HarnessSpec,
   RuntimeSpec,
@@ -55,7 +55,7 @@ export function requiredCapabilitiesForTopology(spec: ServiceHarnessSpec): Capab
 // (runtimeSatisfies vs RuntimeSpec.capabilities) and the self-hosted runner hub (vs a runner's probed capabilities) —
 // so both reject a job a target can't run BEFORE placing it (e.g. a Windows-service topology on a Linux-only target,
 // which would otherwise sit constraint-filtered / pending forever). Pure. Design: docs/architecture/heterogeneous-topology-placement.md.
-export function requiredCapabilitiesForJob(job: AgentJob): CapabilityName[] {
+export function requiredCapabilitiesForJob(job: CaseJob): CapabilityName[] {
   const caps = new Set<CapabilityName>(requiredCapabilities(job.evalCase));
   if (job.harnessSpec?.kind === "service") {
     caps.add("docker"); // a topology stands up containers even when the case carries no image

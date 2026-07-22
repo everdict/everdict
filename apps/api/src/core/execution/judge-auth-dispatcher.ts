@@ -1,5 +1,5 @@
 import type { DispatchOptions, Dispatcher } from "@everdict/backends";
-import { type AgentJob, BadRequestError, type CaseResult, type ModelSpec } from "@everdict/contracts";
+import { BadRequestError, type CaseJob, type CaseResult, type ModelSpec } from "@everdict/contracts";
 import { modelApiKeySecretName, normalizeModelBinding } from "@everdict/domain";
 import type { ModelRegistry } from "@everdict/registry";
 
@@ -35,7 +35,7 @@ export interface JudgeAuthDispatcherDeps {
 export class JudgeAuthDispatcher implements Dispatcher {
   constructor(private readonly deps: JudgeAuthDispatcherDeps) {}
 
-  async dispatch(job: AgentJob, opts?: DispatchOptions): Promise<CaseResult> {
+  async dispatch(job: CaseJob, opts?: DispatchOptions): Promise<CaseResult> {
     if (!job.judge) return this.deps.inner.dispatch(job, opts);
     const tenant = job.tenant ?? "default";
 

@@ -30,7 +30,7 @@ release + esbuild tooling.
 `apps/cli/src/main.ts` imports `@everdict/orchestrator` (Temporal) for `run`/`worker`/`suite`. Temporal's
 `@temporalio/core-bridge` is a native Rust addon that **cannot be bundled** into a single file. The runner
 path never touches the orchestrator, so the distributable is built from a **runner-only entry** that
-imports only `@everdict/self-hosted-runner` + `@everdict/agent` — the same graph the desktop already
+imports only `@everdict/self-hosted-runner` + `@everdict/job-runner` — the same graph the desktop already
 bundles with esbuild. `runnerCommand` + `parseFlags` were extracted out of `main.ts` so both the full CLI
 and the standalone entry reuse them (runner LOGIC still lives in `@everdict/self-hosted-runner`).
 

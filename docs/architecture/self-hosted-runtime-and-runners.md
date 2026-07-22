@@ -118,7 +118,7 @@ runner, once configured, holds its own GitHub credential — a company resource,
 
 | Piece | Status |
 |---|---|
-| `runAgentJob`/`AgentJob`/`CaseResult`, `Scheduler`, `RunStore`/`ScorecardStore`, MCP lease protocol, provenance/budget | **reused verbatim** |
+| `runCaseJob`/`CaseJob`/`CaseResult`, `Scheduler`, `RunStore`/`ScorecardStore`, MCP lease protocol, provenance/budget | **reused verbatim** |
 | `RunnerHub` lease queue | **generalized** key `(owner,runnerId)` → `(runtimeRef)` (pool) |
 | `RuntimeDispatcher` `self:` branch | **widened** to `self:<subj>:<id>` + `ws:<ws>:<id>` |
 | Personal self-hosted runtime (today's `RunnerStore` pairing) | **reused** (renamed concept: pairing = a personal runtime) |

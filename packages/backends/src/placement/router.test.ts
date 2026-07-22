@@ -1,4 +1,4 @@
-import type { AgentJob, CaseResult } from "@everdict/contracts";
+import type { CaseJob, CaseResult } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import type { Backend } from "../backend.js";
 import { BackendRegistry } from "./registry.js";
@@ -9,7 +9,7 @@ class FakeBackend implements Backend {
   async capacity() {
     return { total: 1, used: 0 };
   }
-  async dispatch(_job: AgentJob): Promise<CaseResult> {
+  async dispatch(_job: CaseJob): Promise<CaseResult> {
     return {
       caseId: "c",
       harness: this.id, // marks which backend handled it
@@ -20,7 +20,7 @@ class FakeBackend implements Backend {
   }
 }
 
-function job(target?: string): AgentJob {
+function job(target?: string): CaseJob {
   return {
     harness: { id: "scripted", version: "0" },
     evalCase: {

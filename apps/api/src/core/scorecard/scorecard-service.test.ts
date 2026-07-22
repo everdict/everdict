@@ -1,7 +1,7 @@
 import type { Dispatcher } from "@everdict/backends";
 import {
-  type AgentJob,
   BadRequestError,
+  type CaseJob,
   type CaseResult,
   type Dataset,
   ForbiddenError,
@@ -1661,7 +1661,7 @@ describe("ScorecardService.submit — submit-time ephemeral pins + origin proven
   it("pins swap only the matching slot image in the dispatched harnessSpec and are recorded via origin.pinOverrides (registry unchanged)", async () => {
     const { datasets, instances } = await fixtures();
     const store = new InMemoryScorecardStore();
-    const jobs: AgentJob[] = [];
+    const jobs: CaseJob[] = [];
     const capture: Dispatcher = {
       async dispatch(job) {
         jobs.push(job);
@@ -2018,7 +2018,7 @@ describe("ScorecardService — batch-on-Temporal internals (plan → case → fi
   it("the full workflow loop — plan lists remaining cases (sharded targets), each case settles once, finalize aggregates", async () => {
     const seen: Array<{ id: string; target?: string }> = [];
     const dispatcher: Dispatcher = {
-      async dispatch(job: AgentJob) {
+      async dispatch(job: CaseJob) {
         seen.push({
           id: job.evalCase.id,
           ...(job.evalCase.placement?.target ? { target: job.evalCase.placement.target } : {}),
@@ -2053,7 +2053,7 @@ describe("ScorecardService — batch-on-Temporal internals (plan → case → fi
 
   it("a re-plan after a restart returns only unfinished cases (done children excluded)", async () => {
     const dispatcher: Dispatcher = {
-      async dispatch(job: AgentJob) {
+      async dispatch(job: CaseJob) {
         return ok(job.evalCase.id);
       },
     };
@@ -2078,7 +2078,7 @@ describe("ScorecardService — batch-on-Temporal internals (plan → case → fi
   it("submit with a temporal driver stamps workflowId and starts the workflow; a failed start degrades to in-process", async () => {
     const started: string[] = [];
     const dispatcher: Dispatcher = {
-      async dispatch(job: AgentJob) {
+      async dispatch(job: CaseJob) {
         return ok(job.evalCase.id);
       },
     };
@@ -2132,7 +2132,7 @@ describe("ScorecardService — batch-on-Temporal internals (plan → case → fi
 
   it("boot resume leaves a Temporal-owned batch alone (returns handled without re-driving)", async () => {
     const dispatcher: Dispatcher = {
-      async dispatch(job: AgentJob) {
+      async dispatch(job: CaseJob) {
         return ok(job.evalCase.id);
       },
     };
@@ -2168,7 +2168,7 @@ describe("ScorecardService — batch resilience (resume · retry-failed)", () =>
   function capturingDispatcher() {
     const dispatched: string[] = [];
     const dispatcher: Dispatcher = {
-      async dispatch(job: AgentJob) {
+      async dispatch(job: CaseJob) {
         dispatched.push(job.evalCase.id);
         return passResult(job.evalCase.id);
       },
@@ -2193,7 +2193,7 @@ describe("ScorecardService — batch resilience (resume · retry-failed)", () =>
   it('runtime:"auto" expands to every registered runtime and shards; empty registry is a 400', async () => {
     const seen: string[] = [];
     const dispatcher: Dispatcher = {
-      async dispatch(job: AgentJob) {
+      async dispatch(job: CaseJob) {
         seen.push(job.evalCase.placement?.target ?? "?");
         return passResult(job.evalCase.id);
       },
@@ -2238,7 +2238,7 @@ describe("ScorecardService — batch resilience (resume · retry-failed)", () =>
   it("a comma-separated runtime SHARDS the batch — cases round-robin across the listed runtimes", async () => {
     const seen: string[] = [];
     const dispatcher: Dispatcher = {
-      async dispatch(job: AgentJob) {
+      async dispatch(job: CaseJob) {
         seen.push(job.evalCase.placement?.target ?? "?");
         return passResult(job.evalCase.id);
       },
@@ -2573,7 +2573,7 @@ describe("ScorecardService — batch resilience (resume · retry-failed)", () =>
       failure: { stage: "dispatch", class: "infra", code: "OOM_KILLED", message: "task OOM-killed", retryable: false },
     });
     // The dispatcher keeps OOM-killing c2 — each retry must escalate from the PREVIOUS boost, not the spec base.
-    const jobs: AgentJob[] = [];
+    const jobs: CaseJob[] = [];
     const dispatcher: Dispatcher = {
       async dispatch(job) {
         jobs.push(job);
@@ -3244,7 +3244,7 @@ describe("ScorecardService — trace-correlation runId on batch jobs (observabil
       ],
       tags: [],
     });
-    const jobs: AgentJob[] = [];
+    const jobs: CaseJob[] = [];
     const capture: Dispatcher = {
       async dispatch(job) {
         jobs.push(job);
@@ -3280,7 +3280,7 @@ describe("ScorecardService.submit — run-time grading plan (dataset stays pure 
     ],
     tags: [],
   };
-  const capture = (jobs: AgentJob[]): Dispatcher => ({
+  const capture = (jobs: CaseJob[]): Dispatcher => ({
     async dispatch(job) {
       jobs.push(job);
       return { ...caseResult(true), caseId: job.evalCase.id };
@@ -3291,7 +3291,7 @@ describe("ScorecardService.submit — run-time grading plan (dataset stays pure 
     const store = new InMemoryScorecardStore();
     const datasets = new InMemoryDatasetRegistry();
     await datasets.register("acme", planDataset);
-    const jobs: AgentJob[] = [];
+    const jobs: CaseJob[] = [];
     const service = new ScorecardService({ dispatcher: capture(jobs), store, datasets, newId: () => "sc-plan" });
     await service.submit({
       tenant: "acme",
@@ -3311,7 +3311,7 @@ describe("ScorecardService.submit — run-time grading plan (dataset stays pure 
     const store = new InMemoryScorecardStore();
     const datasets = new InMemoryDatasetRegistry();
     await datasets.register("acme", planDataset);
-    const jobs: AgentJob[] = [];
+    const jobs: CaseJob[] = [];
     const service = new ScorecardService({ dispatcher: capture(jobs), store, datasets, newId: () => "sc-noplan" });
     await service.submit({
       tenant: "acme",
@@ -3508,8 +3508,8 @@ describe("ScorecardService.cancel — user stop", () => {
   it("marks a running batch cancelled and requests both reclaim paths (queued scheduler + self-hosted lease), keyed by batch id", async () => {
     const store = new InMemoryScorecardStore();
     await store.create(record("sc-run", { status: "running" }));
-    let queuedPred: ((j: AgentJob) => boolean) | undefined;
-    let leasedPred: ((j: AgentJob) => boolean) | undefined;
+    let queuedPred: ((j: CaseJob) => boolean) | undefined;
+    let leasedPred: ((j: CaseJob) => boolean) | undefined;
     const service = new ScorecardService({
       dispatcher,
       store,
@@ -3529,9 +3529,9 @@ describe("ScorecardService.cancel — user stop", () => {
     expect(stopped.status).toBe("cancelled");
     expect(stopped.error).toEqual({ code: "CANCELLED", message: "Stopped by user" });
     // Both reclaim predicates target THIS batch (and only this batch).
-    expect(queuedPred?.({ batchId: "sc-run" } as AgentJob)).toBe(true);
-    expect(leasedPred?.({ batchId: "sc-run" } as AgentJob)).toBe(true);
-    expect(leasedPred?.({ batchId: "other" } as AgentJob)).toBe(false);
+    expect(queuedPred?.({ batchId: "sc-run" } as CaseJob)).toBe(true);
+    expect(leasedPred?.({ batchId: "sc-run" } as CaseJob)).toBe(true);
+    expect(leasedPred?.({ batchId: "other" } as CaseJob)).toBe(false);
   });
 
   it("force-kills only the RUNNING managed child runs, targeting each child's runtime", async () => {

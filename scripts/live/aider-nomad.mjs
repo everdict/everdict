@@ -1,16 +1,16 @@
 // Live (Nomad): real aider fixes a seeded bug with gpt-5.4-mini (workclaw LiteLLM) and Everdict grades it with
 // tests-pass — but the run happens inside a **real Nomad alloc (docker container)**. NomadBackend launches the
-// everdict-agent image as a job, and the agent interprets the declarative command harness (zero code): (aider preinstalled) → run aider → tests-pass.
+// everdict-job-runner image as a job, and the agent interprets the declarative command harness (zero code): (aider preinstalled) → run aider → tests-pass.
 //
-// Setup: run a nomad agent + build the everdict-agent:local image (with python + aider preinstalled).
-// Usage: NOMAD_ADDR=http://127.0.0.1:4646 EVERDICT_AGENT_IMAGE=everdict-agent:local \
+// Setup: run a nomad agent + build the everdict-job-runner:local image (with python + aider preinstalled).
+// Usage: NOMAD_ADDR=http://127.0.0.1:4646 EVERDICT_AGENT_IMAGE=everdict-job-runner:local \
 //       OPENAI_API_KEY=<litellm key> EVERDICT_MODEL=chatgpt/gpt-5.4-mini node scripts/live/aider-nomad.mjs
 //   (LiteLLM is on the host :4000 — container→host is reached via the default 172.17.0.1 gateway. Override with LITELLM_HOST.)
 import process from "node:process";
 import { NomadBackend } from "../../packages/backends/dist/index.js";
 
 const ADDR = process.env.NOMAD_ADDR ?? "http://127.0.0.1:4646";
-const IMAGE = process.env.EVERDICT_AGENT_IMAGE ?? "everdict-agent:local";
+const IMAGE = process.env.EVERDICT_AGENT_IMAGE ?? "everdict-job-runner:local";
 const KEY = process.env.OPENAI_API_KEY;
 // Sandbox (container)→host is most reliable via the docker bridge gateway (172.17.0.1). A LAN IP connects over tcp,
 // but model completion responses sometimes don't come back cleanly over that path, so the default is the gateway (override with LITELLM_HOST).
@@ -30,7 +30,7 @@ const job = {
     kind: "command",
     id: "aider",
     version: "0.74.0",
-    // aider is preinstalled on the everdict-agent image (PATH) → setup empty. (For a specific version, pip-install it via setup.)
+    // aider is preinstalled on the everdict-job-runner image (PATH) → setup empty. (For a specific version, pip-install it via setup.)
     setup: [],
     command:
       "aider --yes-always --no-git --no-auto-commits --no-show-model-warnings --no-check-update --no-show-release-notes --analytics-disable --no-stream --edit-format whole --model openai/{{model}} --message {{task}} mathutils.py",

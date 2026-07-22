@@ -85,7 +85,7 @@ classDiagram
     RunService --> Run : guards + transitions only
     RunService --> RunRecord : persists patches verbatim
     RunService --> executeCase : pure execution seam
-    executeCase --> Dispatcher : enriched AgentJob
+    executeCase --> Dispatcher : enriched CaseJob
     RecoverySweep --> RunService : resume(record, adopted?)
     RunService --> RuntimeAccess : observability reads
     SubmissionRecipe --> RunRecord : one recipe, N interfaces
@@ -95,7 +95,7 @@ classDiagram
 
 Target placement (00 §4): the `Run` aggregate moves verbatim to `@everdict/domain` `run/`;
 `RunService`/`executeCase`/`recoverInterrupted` become `application/control` use-cases; the
-`(AgentJob) → CaseResult` seam is named **once** as an application port; the submit recipe
+`(CaseJob) → CaseResult` seam is named **once** as an application port; the submit recipe
 (default graders/timeout) becomes a domain function served to all interfaces; the four
 observability closures become one typed `RuntimeAccess` port.
 
@@ -206,7 +206,7 @@ From the apps-api survey catalog (§1.1, #1–11):
 | Port | Why needed | Today's adapter |
 |---|---|---|
 | `RunStore` | record persistence, list scoping | `@everdict/db` InMemory/Pg |
-| `Dispatcher` (`(AgentJob) → CaseResult`) | the execution seam | Scheduler → RuntimeDispatcher → BackendRegistry chain (main.ts) |
+| `Dispatcher` (`(CaseJob) → CaseResult`) | the execution seam | Scheduler → RuntimeDispatcher → BackendRegistry chain (main.ts) |
 | `BudgetTracker` (admit/settle) | 402 admission + cost attribution | `@everdict/billing` via `persistentBudget` (apps/api/src/common) |
 | `resolveHarness` | embed declarative spec in the job | lambda over `HarnessInstanceRegistry` (main.ts) |
 | `scopedSecretsFor` / `secretsFor` | `{secretRef}` resolve (2-tier) / traceRef auth | lambdas over `SecretStore` (main.ts) |
@@ -261,6 +261,6 @@ From the apps-api survey catalog (§1.1, #1–11):
    are domain decisions that should be extracted first.
 4. The webhook is fire-and-forget with no retry or signature. Keep as-is (store is the source of
    truth) or fold into a general notification/event port?
-5. `AgentJob.registryAuth` is singular — mixing images from two BYO registries in one job
+5. `CaseJob.registryAuth` is singular — mixing images from two BYO registries in one job
    authenticates only the first match (documented limitation, `execute-case.ts:38-46`). Does the
    target make it plural?

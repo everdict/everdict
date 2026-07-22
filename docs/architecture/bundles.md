@@ -28,7 +28,7 @@ generalization; `codex`+`pinch` is the bundle that plugs into it.
 - **Per-type registries** — harness templates/instances, datasets, benchmark recipes, judges, models,
   runtimes: all `(tenant,id,version)` immutable, tenant-owned + `_shared` fallback, in-memory/Pg + file-GitOps
   loaders + HTTP+MCP register/list/get. `examples/*` are seeded to `_shared` at boot (env-configurable dirs).
-- **No core violations** — the only harness-name special-casing is `packages/agent/src/registry.ts` `makeHarness`
+- **No core violations** — the only harness-name special-casing is `packages/job-runner/src/registry.ts` `makeHarness`
   (builtin claude-code/scripted have no spec file); everything else is spec-driven.
 - **Gap** — registration is **piecemeal** (register harness → register recipe → import → register runtime). No
   single "apply this bundle" action, and no first-party example proving a full codex+pinch flow as a bundle.

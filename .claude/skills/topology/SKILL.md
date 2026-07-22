@@ -141,7 +141,7 @@ touching `service-backend.ts`'s driving logic.
   was ignored): absent → no browser, trace-only run with a `{kind:"prompt"}` snapshot (no core-contract change).
   A `harness`-provided target (a service's own session) is now the **target axis** (round 2) below — not a
   `TopologyRuntime.observe` method.
-- **#5 per-service image pin — DONE.** `AgentJob.imagePins` (service name → image) overrides registered images at
+- **#5 per-service image pin — DONE.** `CaseJob.imagePins` (service name → image) overrides registered images at
   dispatch; `applyImagePins` (`image-pins.ts`) folds pins into a deterministic `-pin-<hash>` effective version so
   warm pools (id@version-keyed) separate variants with no runtime change; unknown service → `BadRequestError`.
 - **All 5 core knobs landed** + completion `stream`/`callback` (round 3) + `request.headers`/`method`

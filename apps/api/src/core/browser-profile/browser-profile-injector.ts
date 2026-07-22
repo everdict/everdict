@@ -1,5 +1,5 @@
 import type { BrowserProfileStore } from "@everdict/application-control";
-import type { AgentJob } from "@everdict/contracts";
+import type { CaseJob } from "@everdict/contracts";
 import type { SecretCipher } from "@everdict/db";
 import { type StorageState, seedStorageState } from "@everdict/topology";
 
@@ -16,7 +16,7 @@ export interface ProfileInjectorDeps {
 
 export function makeProfileSeeder(
   deps: ProfileInjectorDeps,
-): (profileId: string, cdpBase: string, job: AgentJob) => Promise<void> {
+): (profileId: string, cdpBase: string, job: CaseJob) => Promise<void> {
   const seed = deps.seed ?? ((cdpBase, state) => seedStorageState(cdpBase, state));
   return async (profileId, cdpBase, job) => {
     const tenant = job.tenant ?? "default";

@@ -1,7 +1,7 @@
 import {
-  type AgentJob,
   AppError,
   BadRequestError,
+  type CaseJob,
   type CaseResult,
   type Dataset,
   EnvSnapshotSchema,
@@ -293,11 +293,11 @@ export interface ScorecardServiceDeps {
   // Per-batch trace-sink override validation — does a workspace sink with this name exist? (submit 400s otherwise).
   sinkExists?: (tenant: string, name: string) => Promise<boolean>;
   // Cancel still-QUEUED scheduler entries matching the predicate (supersede reclaim + speculation-loser reclaim).
-  cancelQueued?: (predicate: (job: AgentJob) => boolean) => number;
+  cancelQueued?: (predicate: (job: CaseJob) => boolean) => number;
   // Cancel matching self-hosted lease jobs (user stop / supersede) — rejects the parked/leased dispatch and tells the
   // runner (via its heartbeat) to abort the in-flight run, freeing the runtime mid-case. killCase covers managed
   // Nomad/K8s backends; self:* lanes are lease queues, so this is their force-kill path (RunnerHub.requestCancel).
-  cancelLeased?: (predicate: (job: AgentJob) => boolean) => number | Promise<number>;
+  cancelLeased?: (predicate: (job: CaseJob) => boolean) => number | Promise<number>;
   // Orchestration-event observability hook (metrics) — fired on spillover / speculation / OOM escalation.
   // One generic seam so the service stays metrics-vocabulary-free; main.ts maps events to counters.
   onOrchestrationEvent?: (

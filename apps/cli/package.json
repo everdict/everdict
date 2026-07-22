@@ -19,7 +19,7 @@
     "postject": "^1.0.0-alpha.6"
   },
   "dependencies": {
-    "@everdict/agent": "workspace:*",
+    "@everdict/job-runner": "workspace:*",
     "@everdict/application-control": "workspace:*",
     "@everdict/backends": "workspace:*",
     "@everdict/contracts": "workspace:*",

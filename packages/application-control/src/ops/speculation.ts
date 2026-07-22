@@ -1,4 +1,4 @@
-import type { AgentJob } from "@everdict/contracts";
+import type { CaseJob } from "@everdict/contracts";
 import type { CircuitBreaker } from "@everdict/domain";
 import type { SpilloverOutcome } from "./runtime-spillover.js";
 
@@ -68,7 +68,7 @@ export class SpeculationController {
 
   // Wrap one case execution. `execute` is the (spillover-wrapped) executor; the duplicate reuses it with the
   // placement rewritten, so it gets the same failover semantics as any dispatch.
-  run(execute: (job: AgentJob) => Promise<SpilloverOutcome>, job: AgentJob): Promise<SpilloverOutcome> {
+  run(execute: (job: CaseJob) => Promise<SpilloverOutcome>, job: CaseJob): Promise<SpilloverOutcome> {
     this.started += 1;
     const startedAt = this.clock();
     const assigned = job.evalCase.placement?.target;

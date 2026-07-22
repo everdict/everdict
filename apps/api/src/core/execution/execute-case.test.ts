@@ -1,6 +1,6 @@
 import { type ExecuteCaseDeps, executeCase } from "@everdict/application-control";
 import type { Dispatcher } from "@everdict/backends";
-import type { AgentJob, CaseResult } from "@everdict/contracts";
+import type { CaseJob, CaseResult } from "@everdict/contracts";
 import { makeGraders } from "@everdict/graders";
 import { describe, expect, it } from "vitest";
 
@@ -8,7 +8,7 @@ import { describe, expect, it } from "vitest";
 // apps/api supplies the real factory. Spread it into every deps object so the collection-mode scoring path is exercised.
 const deps = (d: Omit<ExecuteCaseDeps, "makeGraders">): ExecuteCaseDeps => ({ makeGraders, ...d });
 
-const JOB: AgentJob = {
+const JOB: CaseJob = {
   evalCase: {
     id: "c1",
     env: { kind: "repo", source: { files: {} } },
@@ -21,7 +21,7 @@ const JOB: AgentJob = {
   tenant: "acme",
 };
 
-function resultFor(job: AgentJob): CaseResult {
+function resultFor(job: CaseJob): CaseResult {
   return {
     caseId: job.evalCase.id,
     harness: "s@0",
@@ -31,8 +31,8 @@ function resultFor(job: AgentJob): CaseResult {
   };
 }
 
-const capture = (): { dispatcher: Dispatcher; seen: () => AgentJob | undefined } => {
-  let seen: AgentJob | undefined;
+const capture = (): { dispatcher: Dispatcher; seen: () => CaseJob | undefined } => {
+  let seen: CaseJob | undefined;
   return {
     dispatcher: {
       async dispatch(job) {
@@ -47,7 +47,7 @@ const capture = (): { dispatcher: Dispatcher; seen: () => AgentJob | undefined }
 describe("executeCase — pure execution (token resolve+attach → dispatch)", () => {
   it("for a private-repo (git+connectionId) case, resolves the owner's token, attaches it to the job, then dispatches", async () => {
     const cap = capture();
-    const gitJob: AgentJob = {
+    const gitJob: CaseJob = {
       ...JOB,
       evalCase: {
         ...JOB.evalCase,
@@ -67,7 +67,7 @@ describe("executeCase — pure execution (token resolve+attach → dispatch)", (
 
   it("tries the workspace GitHub App token before the personal connection and attaches it to the job", async () => {
     const cap = capture();
-    const gitJob: AgentJob = {
+    const gitJob: CaseJob = {
       ...JOB,
       tenant: "acme",
       evalCase: {
@@ -89,7 +89,7 @@ describe("executeCase — pure execution (token resolve+attach → dispatch)", (
 
   it("falls back to the personal connection (connectionId) when there's no workspace App match", async () => {
     const cap = capture();
-    const gitJob: AgentJob = {
+    const gitJob: CaseJob = {
       ...JOB,
       tenant: "acme",
       evalCase: {
@@ -128,7 +128,7 @@ describe("executeCase — attach workspace-registry pull credentials (job.regist
 
   it("when the case image belongs to a workspace registry, attaches registryAuth", async () => {
     const cap = capture();
-    const job: AgentJob = { ...JOB, evalCase: { ...JOB.evalCase, image: "ghcr.io/acme/sbench:v1" } };
+    const job: CaseJob = { ...JOB, evalCase: { ...JOB.evalCase, image: "ghcr.io/acme/sbench:v1" } };
     await executeCase(
       deps({ dispatcher: cap.dispatcher, registryAuthsFor: async (ws) => (ws === "acme" ? [AUTH] : []) }),
       "u",
@@ -139,14 +139,14 @@ describe("executeCase — attach workspace-registry pull credentials (job.regist
 
   it("when the job image isn't on that registry's host, no credentials are attached (avoids needless leakage)", async () => {
     const cap = capture();
-    const job: AgentJob = { ...JOB, evalCase: { ...JOB.evalCase, image: "spreadsheetbench:v1" } };
+    const job: CaseJob = { ...JOB, evalCase: { ...JOB.evalCase, image: "spreadsheetbench:v1" } };
     await executeCase(deps({ dispatcher: cap.dispatcher, registryAuthsFor: async () => [AUTH] }), "u", job);
     expect(cap.seen()?.registryAuth).toBeUndefined();
   });
 
   it("a service harness is judged by its service images (+ per-dispatch pin override)", async () => {
     const cap = capture();
-    const serviceSpec: NonNullable<AgentJob["harnessSpec"]> = {
+    const serviceSpec: NonNullable<CaseJob["harnessSpec"]> = {
       kind: "service",
       id: "bu",
       version: "1",
@@ -158,14 +158,14 @@ describe("executeCase — attach workspace-registry pull credentials (job.regist
       traceSource: { kind: "mlflow", endpoint: "http://m:5000" },
     };
     // the spec image is external, but the pin overrides to a workspace registry → attach.
-    const job: AgentJob = { ...JOB, harnessSpec: serviceSpec, imagePins: { agent: "ghcr.io/acme/agent:pr-1" } };
+    const job: CaseJob = { ...JOB, harnessSpec: serviceSpec, imagePins: { agent: "ghcr.io/acme/agent:pr-1" } };
     await executeCase(deps({ dispatcher: cap.dispatcher, registryAuthsFor: async () => [AUTH] }), "u", job);
     expect(cap.seen()?.registryAuth).toEqual(AUTH);
   });
 });
 
 describe("executeCase — command-harness image promotion (evalCase.image ??= harnessSpec.image)", () => {
-  const commandSpec = (image?: string): NonNullable<AgentJob["harnessSpec"]> => ({
+  const commandSpec = (image?: string): NonNullable<CaseJob["harnessSpec"]> => ({
     kind: "command",
     id: "codex-sheets",
     version: "1",
@@ -185,7 +185,7 @@ describe("executeCase — command-harness image promotion (evalCase.image ??= ha
 
   it("when a case specifies an image, it isn't overwritten by the harness image (case wins — datasets are harness-agnostic)", async () => {
     const cap = capture();
-    const jobWithImage: AgentJob = {
+    const jobWithImage: CaseJob = {
       ...JOB,
       evalCase: { ...JOB.evalCase, image: "case:v9" },
       harnessSpec: commandSpec("codex:v2"),
@@ -205,7 +205,7 @@ describe("executeCase — command-harness image promotion (evalCase.image ??= ha
 // docs/architecture/streaming-case-pipeline.md
 
 describe("executeCase — out-of-job trace collection (traceRef completion)", () => {
-  const deferredResult = (job: AgentJob): CaseResult => ({
+  const deferredResult = (job: CaseJob): CaseResult => ({
     caseId: job.evalCase.id,
     harness: "cmd@1",
     trace: [{ t: 0, kind: "error", message: "command exit 1: boom" }], // execution event left by the job
@@ -213,13 +213,13 @@ describe("executeCase — out-of-job trace collection (traceRef completion)", ()
     scores: [{ graderId: "tests-pass", metric: "tests_pass", value: 1, pass: true }], // ground-truth from the job
     traceRef: { kind: "otel", endpoint: "http://collector", runId: "rid-9" },
   });
-  const dispatcherOf = (result: (job: AgentJob) => CaseResult): Dispatcher => ({
+  const dispatcherOf = (result: (job: CaseJob) => CaseResult): Dispatcher => ({
     async dispatch(job) {
       return result(job);
     },
   });
   // Attach observation-grader specs to the case so steps/cost can be reconstructed and scored in the control plane.
-  const jobWithGraders: AgentJob = {
+  const jobWithGraders: CaseJob = {
     ...JOB,
     evalCase: { ...JOB.evalCase, graders: [{ id: "tests-pass", config: { cmd: "true" } }, { id: "steps" }] },
   };
@@ -278,7 +278,7 @@ describe("executeCase — out-of-job trace collection (traceRef completion)", ()
 
   it("a job-side collect failure RECOVERS on the control-plane pull: failure cleared, deferred observations scored", async () => {
     // The sandbox couldn't reach the platform, but the control plane can (the common network-asymmetry case).
-    const failedInJob = (job: AgentJob): CaseResult => ({
+    const failedInJob = (job: CaseJob): CaseResult => ({
       ...deferredResult(job),
       failure: {
         stage: "collect",
@@ -305,7 +305,7 @@ describe("executeCase — out-of-job trace collection (traceRef completion)", ()
   });
 
   it("a failed case does NOT recover on zero events — the {collect} classification is kept for a later stage-aware retry", async () => {
-    const failedInJob = (job: AgentJob): CaseResult => ({
+    const failedInJob = (job: CaseJob): CaseResult => ({
       ...deferredResult(job),
       failure: {
         stage: "collect",
@@ -333,7 +333,7 @@ describe("executeCase — out-of-job trace collection (traceRef completion)", ()
   });
 
   it("authSecret is re-resolved from the tenant SecretStore into Authorization, and correlate/experiment flow into the source config", async () => {
-    const authedRef = (job: AgentJob): CaseResult => ({
+    const authedRef = (job: CaseJob): CaseResult => ({
       ...deferredResult(job),
       traceRef: {
         kind: "mlflow",

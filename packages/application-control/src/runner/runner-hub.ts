@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { type AgentJob, type CaseResult, RateLimitError, UpstreamError } from "@everdict/contracts";
+import { type CaseJob, type CaseResult, RateLimitError, UpstreamError } from "@everdict/contracts";
 import { capabilityKind, requiredCapabilitiesForJob } from "@everdict/domain";
 
 // Self-hosted runner dispatch key — the identity of the runner a job will flow to. The lease queue is keyed by (owner, runnerId) (D3).
@@ -28,14 +28,14 @@ export function selfHostedBackendName(key: SelfHostedKey): string {
 // placement. So a service (topology) harness needs docker, and a Windows service needs os-windows (a Linux runner that
 // doesn't advertise it is correctly skipped; a Linux topology adds no OS cap → unaffected).
 // Design: docs/architecture/self-hosted-runtime-and-runners.md · heterogeneous-topology-placement.md (placement gate).
-export function requiredRunnerCapabilities(job: AgentJob): string[] {
+export function requiredRunnerCapabilities(job: CaseJob): string[] {
   return requiredCapabilitiesForJob(job).filter((c) => capabilityKind(c) === "functional");
 }
 
 // A single job the runner leases (the core of the MCP lease_job response).
 export interface LeasedJob {
   jobId: string;
-  job: AgentJob;
+  job: CaseJob;
 }
 
 // enqueue result — the job result + the id of the runner that actually completed it (ranBy). For a pool (self:ws) job we don't
@@ -47,7 +47,7 @@ export interface EnqueueResult {
 
 interface PendingEntry {
   jobId: string;
-  job: AgentJob;
+  job: CaseJob;
   resolve: (r: EnqueueResult) => void;
   reject: (e: Error) => void;
   // Fired once when a runner first LEASES this job (undefined→leasedAt). Lets the dispatch caller flip the run record
@@ -128,7 +128,7 @@ export class RunnerHub {
   // Park a job and return the result promise (SelfHostedBackend.dispatch). Resolves when a runner completes it;
   // rejects if queueTimeoutMs passes with no 'activity' (lease/heartbeat) (unconnected/idle). FIFO per key.
   // onLease (optional) fires once when a runner first takes the job → the caller flips the run record queued→running.
-  enqueue(key: SelfHostedKey, job: AgentJob, onLease?: () => void): Promise<EnqueueResult> {
+  enqueue(key: SelfHostedKey, job: CaseJob, onLease?: () => void): Promise<EnqueueResult> {
     const jobId = this.newJobId();
     const arr = this.q(key);
     // Backpressure: a self-hosted job bypasses the Scheduler's queue-depth cap, so bound the lease queue here. Over
@@ -235,7 +235,7 @@ export class RunnerHub {
   // The fairness group a job belongs to on a shared runner: its batch (scorecard fan-out), else its submitter
   // (interactive single runs / different users), else its tenant. One giant batch = one group, so it can't crowd out
   // the next user's small run — the lease rotates across groups.
-  private static groupKeyOf(job: AgentJob): string {
+  private static groupKeyOf(job: CaseJob): string {
     if (job.batchId) return `b:${job.batchId}`;
     if (job.submittedBy) return `u:${job.submittedBy}`;
     return `t:${job.tenant ?? ""}`;
@@ -407,7 +407,7 @@ export class RunnerHub {
   // ONLY so the runner's next heartbeat returns cancelled and it aborts the local run + frees the runtime; the runner's
   // submit (or the idle timeout) then removes it. Returns how many jobs were signalled. Single-process, best-effort —
   // the same assumption as the lease hub itself. Predicate keys on the job (e.g. j.batchId === scorecardId).
-  requestCancel(predicate: (job: AgentJob) => boolean): number {
+  requestCancel(predicate: (job: CaseJob) => boolean): number {
     let count = 0;
     for (const arr of this.queues.values()) {
       for (const entry of arr) {

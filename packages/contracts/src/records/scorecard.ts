@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { JudgeRunConfigSchema } from "../execution/agent-job.js";
+import { JudgeRunConfigSchema } from "../execution/case-job.js";
 import { GraderSpecSchema, ScorecardSchema } from "../execution/eval-case.js";
 
 // Scorecard run lifecycle: accept a dataset×harness batch eval → run → success/failure.

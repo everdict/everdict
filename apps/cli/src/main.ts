@@ -1,5 +1,4 @@
 import { readFileSync } from "node:fs";
-import { collectAuthEnv, hasClaudeAuth } from "@everdict/agent";
 import { runSuite } from "@everdict/application-control";
 import {
   BackendRegistry,
@@ -9,8 +8,9 @@ import {
   Router,
   buildRegistry,
 } from "@everdict/backends";
-import { type AgentJob, AppError, type GraderSpec, ScorecardSchema, SuiteSchema } from "@everdict/contracts";
+import { AppError, type CaseJob, type GraderSpec, ScorecardSchema, SuiteSchema } from "@everdict/contracts";
 import { diffScorecards, summarizeScorecard } from "@everdict/domain";
+import { collectAuthEnv, hasClaudeAuth } from "@everdict/job-runner";
 import { DirectOrchestrator, type Orchestrator, TemporalOrchestrator, runWorker } from "@everdict/orchestrator";
 import { parseFlags } from "./flags.js";
 import { imageBakeCommand } from "./image-bake.js";
@@ -52,7 +52,7 @@ function usage(): void {
   );
 }
 
-function buildJob(flags: Map<string, string>, task: string): AgentJob {
+function buildJob(flags: Map<string, string>, task: string): CaseJob {
   const backendName = flags.get("backend") ?? "local";
   const explicitTarget = flags.get("target");
   const git = flags.get("git");

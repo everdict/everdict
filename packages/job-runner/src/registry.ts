@@ -7,7 +7,7 @@ export { makeGraders, makeGradersFromEnv } from "@everdict/graders";
 
 // id → harness. When a declarative command spec arrives (resolved from the registry and embedded by the
 // control plane), interpret it as a generic CommandHarness — a SaaS user can register a CLI agent with no
-// code adapter. Built-ins (claude-code/scripted) branch on id (preinstalled in the agent image).
+// code adapter. Built-ins (claude-code/scripted) branch on id (preinstalled in the job-runner image).
 export interface MakeHarnessOptions {
   meterUsage?: boolean; // Meter the command harness's model calls via a usage-proxy (only active when trace:none)
 }

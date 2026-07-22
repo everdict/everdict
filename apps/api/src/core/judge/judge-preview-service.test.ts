@@ -1,6 +1,6 @@
 import { RunService } from "@everdict/application-control";
 import type { Dispatcher } from "@everdict/backends";
-import { type AgentJob, BadRequestError, type CaseResult, type JudgeSpec, type TraceEvent } from "@everdict/contracts";
+import { BadRequestError, type CaseJob, type CaseResult, type JudgeSpec, type TraceEvent } from "@everdict/contracts";
 import { InMemoryRunStore } from "@everdict/db";
 import { describe, expect, it, vi } from "vitest";
 import { codeJudgeRunSubmitter } from "../../composition/run.js";
@@ -47,7 +47,7 @@ describe("JudgePreviewService — code judge dry-run promotion", () => {
 
 describe("codeJudgeRunSubmitter — the wrapper job as a first-class run", () => {
   function capture() {
-    const jobs: AgentJob[] = [];
+    const jobs: CaseJob[] = [];
     const dispatcher: Dispatcher = {
       async dispatch(job): Promise<CaseResult> {
         jobs.push(job);

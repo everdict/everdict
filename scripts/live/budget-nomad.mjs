@@ -5,7 +5,7 @@
 //     rejected immediately with 402 (BUDGET_EXCEEDED) (even under burst, admit reserves synchronously so the cap holds).
 //     (the scripted harness has cost=0, so usd/token budgets don't trigger → demoed via the runs budget; usd/token verified by unit tests)
 //
-// Usage: NOMAD_ADDR=http://127.0.0.1:4646 EVERDICT_AGENT_IMAGE=everdict-agent:local node scripts/live/budget-nomad.mjs
+// Usage: NOMAD_ADDR=http://127.0.0.1:4646 EVERDICT_AGENT_IMAGE=everdict-job-runner:local node scripts/live/budget-nomad.mjs
 
 import {
   BackendRegistry,
@@ -17,7 +17,7 @@ import {
 } from "../../packages/backends/dist/index.js";
 
 const NOMAD_ADDR = process.env.NOMAD_ADDR ?? "http://127.0.0.1:4646";
-const IMAGE = process.env.EVERDICT_AGENT_IMAGE ?? "everdict-agent:local";
+const IMAGE = process.env.EVERDICT_AGENT_IMAGE ?? "everdict-job-runner:local";
 const STAMP = Date.now().toString(36);
 const RUNS_LIMIT = 3;
 const N = 5;

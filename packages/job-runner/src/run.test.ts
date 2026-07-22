@@ -1,11 +1,11 @@
-import { type AgentJob, InternalError } from "@everdict/contracts";
+import { type CaseJob, InternalError } from "@everdict/contracts";
 import { DockerDriver, LocalDriver } from "@everdict/drivers";
 import { describe, expect, it } from "vitest";
-import { failureResult, resolveMeterUsage, runAgentJob } from "./run.js";
+import { failureResult, resolveMeterUsage, runCaseJob } from "./run.js";
 
-describe("runAgentJob", () => {
+describe("runCaseJob", () => {
   it("runs a scripted job, produces a CaseResult, and tests-pass passes", async () => {
-    const job: AgentJob = {
+    const job: CaseJob = {
       harness: { id: "scripted", version: "0.0.0" },
       evalCase: {
         id: "agent-1",
@@ -17,7 +17,7 @@ describe("runAgentJob", () => {
       },
     };
 
-    const result = await runAgentJob(job);
+    const result = await runCaseJob(job);
     if (result.snapshot.kind !== "repo") throw new Error("expected a repo snapshot");
 
     expect(result.harness).toBe("scripted@0.0.0");
@@ -78,7 +78,7 @@ describe("failureResult (classified result crosses the process boundary)", () =>
 // The code-judge wrapper contract on the agent path: job.judge (model config) + job.judgeAuth (dispatch-resolved
 // credential) must reach a script grader's exec env — on managed allocs the backend injects them at the alloc level,
 // so the agent must do the equivalent itself (withJobEnv) for the runner/local/docker paths.
-describe("runAgentJob judge env threading (code-judge wrapper on the local/runner path)", () => {
+describe("runCaseJob judge env threading (code-judge wrapper on the local/runner path)", () => {
   it("a script grader's exec sees EVERDICT_JUDGE_MODEL + the provider key/base-url from job.judge/judgeAuth", async () => {
     // Regression: these values never reached compute.exec — a code judge on a self-hosted runner called the
     // provider with no key (401) even when the control plane had resolved one onto the job. The case mirrors
@@ -87,7 +87,7 @@ describe("runAgentJob judge env threading (code-judge wrapper on the local/runne
       "const detail = [process.env.EVERDICT_JUDGE_MODEL, process.env.OPENAI_API_KEY, process.env.OPENAI_BASE_URL].join(' ')",
       "console.log(JSON.stringify({ graderId: 'judge', metric: 'judge', value: 1, pass: true, detail }))",
     ].join("\n");
-    const job: AgentJob = {
+    const job: CaseJob = {
       harness: { id: "scripted", version: "0.0.0" },
       evalCase: {
         id: "judge-env-1",
@@ -111,7 +111,7 @@ describe("runAgentJob judge env threading (code-judge wrapper on the local/runne
       judge: { provider: "openai", model: "judge-model-x" },
       judgeAuth: { apiKey: "sk-job-key", baseUrl: "http://job-proxy" },
     };
-    const result = await runAgentJob(job);
+    const result = await runCaseJob(job);
     const score = result.scores.find((s) => s.graderId === "judge");
     expect(score?.detail).toBe("judge-model-x sk-job-key http://job-proxy");
   });
@@ -119,9 +119,9 @@ describe("runAgentJob judge env threading (code-judge wrapper on the local/runne
 
 // env.kind selects the Environment on the local agent path. browser is a service-topology target env and must
 // never reach here — it should fail loud, not be silently mishandled as a repo.
-describe("runAgentJob env.kind routing", () => {
+describe("runCaseJob env.kind routing", () => {
   it("rejects a browser env on the local agent path instead of mishandling it as a repo", async () => {
-    const job: AgentJob = {
+    const job: CaseJob = {
       harness: { id: "scripted", version: "0.0.0" },
       evalCase: {
         id: "b1",
@@ -132,14 +132,14 @@ describe("runAgentJob env.kind routing", () => {
         tags: [],
       },
     };
-    await expect(runAgentJob(job)).rejects.toThrow(/browser env is not runnable/);
+    await expect(runCaseJob(job)).rejects.toThrow(/browser env is not runnable/);
   });
 });
 
 // Metering fail-safe (integration): the guard must key off container execution, and the CommandHarness must honor
 // the resolved decision — rewriting the base URL host-native but leaving it untouched when containerized.
-describe("runAgentJob meterUsage × containerize fail-safe", () => {
-  const meteredJob = (): AgentJob => ({
+describe("runCaseJob meterUsage × containerize fail-safe", () => {
+  const meteredJob = (): CaseJob => ({
     harness: { id: "probe", version: "1" },
     meterUsage: true,
     harnessSpec: {
@@ -159,14 +159,14 @@ describe("runAgentJob meterUsage × containerize fail-safe", () => {
     trace.filter((e) => e.kind === "message").at(-1)?.text ?? "";
 
   it("host-native (LocalDriver): metering rewrites the child's base URL to the loopback proxy", async () => {
-    const result = await runAgentJob(meteredJob());
+    const result = await runCaseJob(meteredJob());
     expect(finalText(result.trace)).toMatch(/base=http:\/\/127\.0\.0\.1:\d+/);
   });
 
   it("containerized: metering is disabled so the child keeps the real upstream URL", async () => {
     // explicit driver wins over containerize, so the case still executes host-side — but the guard must key off
     // containerize (what the runner passes for image-cases) and leave the env untouched.
-    const result = await runAgentJob(meteredJob(), { driver: new LocalDriver(), containerize: true });
+    const result = await runCaseJob(meteredJob(), { driver: new LocalDriver(), containerize: true });
     expect(finalText(result.trace)).toContain("base=http://upstream.test/v1");
   });
 });

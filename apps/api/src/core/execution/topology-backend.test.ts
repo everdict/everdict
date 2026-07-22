@@ -1,5 +1,5 @@
 import { isScreenCapturable } from "@everdict/backends";
-import { type AgentJob, AppError, type RuntimeSpec, RuntimeSpecSchema } from "@everdict/contracts";
+import { AppError, type CaseJob, type RuntimeSpec, RuntimeSpecSchema } from "@everdict/contracts";
 import type { HarnessInstanceRegistry } from "@everdict/registry";
 import { describe, expect, it } from "vitest";
 import { buildTopologyBackend } from "./topology-backend.js";
@@ -32,7 +32,7 @@ function harnessesReturning(kind: string): HarnessInstanceRegistry {
   } as unknown as HarnessInstanceRegistry;
 }
 
-const job: AgentJob = {
+const job: CaseJob = {
   evalCase: { id: "c", env: { kind: "prompt" }, task: "t", graders: [], timeoutSec: 1, tags: [] },
   harness: { id: "h", version: "1.0.0" },
   tenant: "acme",

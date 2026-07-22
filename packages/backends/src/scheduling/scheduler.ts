@@ -1,10 +1,10 @@
-import { type AgentJob, type CaseResult, InternalError, NotFoundError, RateLimitError } from "@everdict/contracts";
+import { type CaseJob, type CaseResult, InternalError, NotFoundError, RateLimitError } from "@everdict/contracts";
 import { type BudgetTracker, FairQueue, costOf } from "@everdict/domain";
 import { type BackendCapacity, type DispatchOptions, dispatchAborted } from "../backend.js";
 import type { BackendRegistry } from "../placement/registry.js";
 
 const DEFAULT_TENANT = "default";
-const tenantOf = (job: AgentJob): string => job.tenant ?? DEFAULT_TENANT;
+const tenantOf = (job: CaseJob): string => job.tenant ?? DEFAULT_TENANT;
 
 // A snapshot of one backend's available slots.
 export interface BackendSlot {
@@ -20,15 +20,15 @@ export interface BackendSlot {
 
 // The memory a job asks of the admission envelope — the harness's declared weight. Undeclared → 0 (admitted
 // outside the memory budget; resource-aware admission is opt-in by declaring resources on the harness).
-const jobMemoryMb = (job: AgentJob): number =>
+const jobMemoryMb = (job: CaseJob): number =>
   job.harnessSpec?.kind === "command" ? (job.harnessSpec.resources?.memoryMb ?? 0) : 0;
 // The CPU twin (resources.cpu, 1000 = 1 vCPU) — same opt-in contract as jobMemoryMb.
-const jobCpu = (job: AgentJob): number =>
+const jobCpu = (job: CaseJob): number =>
   job.harnessSpec?.kind === "command" ? (job.harnessSpec.resources?.cpu ?? 0) : 0;
 
 // The placement policy that picks one of the candidates with room (must be pure/deterministic).
 export interface PlacementPolicy {
-  choose(candidates: BackendSlot[], job: AgentJob): string | undefined;
+  choose(candidates: BackendSlot[], job: CaseJob): string | undefined;
 }
 
 // The one with the most room (spread). Ties broken deterministically by name.
@@ -46,7 +46,7 @@ export const binPackPolicy: PlacementPolicy = {
 };
 
 interface QueueEntry {
-  job: AgentJob;
+  job: CaseJob;
   enqueuedAt: number; // aging clock — a long-waiting batch entry is promoted to the urgent scan (starvation guard)
   resolve: (r: CaseResult) => void;
   reject: (e: unknown) => void;
@@ -59,7 +59,7 @@ export interface SchedulerOptions {
   policy?: PlacementPolicy;
   maxQueueDepth?: number; // backpressure: RateLimitError(429) once the queue fills to this
   // A custom hook to restrict candidates (e.g. harness↔backend matching) — if unset, the pin or all backends.
-  eligible?: (job: AgentJob, names: string[]) => string[];
+  eligible?: (job: CaseJob, names: string[]) => string[];
   // Multi-tenant fairness: WFQ weight (larger = more often) + per-tenant concurrent-execution cap (quota).
   weightFor?: (tenant: string) => number; // default 1
   tenantQuota?: (tenant: string) => number; // default unlimited
@@ -157,7 +157,7 @@ export class Scheduler {
     });
   }
 
-  dispatch(job: AgentJob, opts?: DispatchOptions): Promise<CaseResult> {
+  dispatch(job: CaseJob, opts?: DispatchOptions): Promise<CaseResult> {
     // Already cancelled before we did anything — reject without touching the budget or the queue.
     if (opts?.signal?.aborted) return Promise.reject(dispatchAborted(job));
     const tenant = tenantOf(job);
@@ -221,7 +221,7 @@ export class Scheduler {
   // speculation loser. The entry's promise rejects with CANCELLED (classified infra-retryable, but every caller
   // either swallows it [speculation race already settled] or has aborted its retry loop [supersede]). In-flight
   // jobs are untouched — reclaiming those is Backend.kill's job.
-  cancelQueued(predicate: (job: AgentJob) => boolean): number {
+  cancelQueued(predicate: (job: CaseJob) => boolean): number {
     let cancelled = 0;
     for (const entry of this.queue.ordered()) {
       if (!predicate(entry.job)) continue;
@@ -249,7 +249,7 @@ export class Scheduler {
     };
   }
 
-  private eligibleNames(job: AgentJob): string[] {
+  private eligibleNames(job: CaseJob): string[] {
     const pin = job.evalCase.placement?.target;
     if (pin) {
       if (!this.registry.has(pin)) {
@@ -366,7 +366,7 @@ export class Scheduler {
 
   // Give back a queued job's admit reservation when it leaves the queue WITHOUT being dispatched (abort / supersede /
   // placement failure); a dispatched job that later fails still ran, so it is NOT released here.
-  private releaseBudget(job: AgentJob): void {
+  private releaseBudget(job: CaseJob): void {
     this.opts.budget?.release(tenantOf(job));
   }
 

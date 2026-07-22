@@ -18,7 +18,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@everdict/agent": "workspace:*",
+    "@everdict/job-runner": "workspace:*",
     "@everdict/application-control": "workspace:*",
     "@everdict/contracts": "workspace:*",
     "@everdict/domain": "workspace:*",

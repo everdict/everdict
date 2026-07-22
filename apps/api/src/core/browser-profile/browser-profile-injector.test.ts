@@ -1,4 +1,4 @@
-import type { AgentJob, BrowserProfileRecord } from "@everdict/contracts";
+import type { BrowserProfileRecord, CaseJob } from "@everdict/contracts";
 import type { SecretCipher } from "@everdict/db";
 import { InMemoryBrowserProfileStore } from "@everdict/db";
 import type { StorageState } from "@everdict/topology";
@@ -13,8 +13,8 @@ const fakeCipher: SecretCipher = {
 
 const STATE: StorageState = { cookies: [{ name: "sid", value: "secret", domain: ".github.com", path: "/" }] };
 
-const job = (submittedBy?: string): AgentJob =>
-  ({ tenant: "acme", ...(submittedBy ? { submittedBy } : {}) }) as unknown as AgentJob;
+const job = (submittedBy?: string): CaseJob =>
+  ({ tenant: "acme", ...(submittedBy ? { submittedBy } : {}) }) as unknown as CaseJob;
 
 async function setup(withState: boolean) {
   const store = new InMemoryBrowserProfileStore();

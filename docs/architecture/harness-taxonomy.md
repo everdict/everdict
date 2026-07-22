@@ -38,7 +38,7 @@ Template (category)         "the shape"          versions unpinned, declares slo
   (`specsEqual`), but runtime-irrelevant so `resolve()` does not carry it into the resolved `HarnessSpec`.
 - **Resolved `HarnessSpec`** — `template structure (at the referenced template version) + pins`. This is the
   existing `process | service | command` spec the backends/runtime already consume. **Nothing downstream of
-  resolution changes** — `AgentJob.harness:{id,version}` still names a concrete, runnable thing.
+  resolution changes** — `CaseJob.harness:{id,version}` still names a concrete, runnable thing.
 
 ## Schemas (`@everdict/contracts`)
 

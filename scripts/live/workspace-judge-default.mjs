@@ -4,8 +4,8 @@
 // process.env.EVERDICT_JUDGE_MODEL is left empty on purpose → the model must come only from the workspace settings → job.judge.
 import process from "node:process";
 import { RunService } from "../../apps/api/dist/run-service.js";
-import { runAgentJob } from "../../packages/agent/dist/index.js";
 import { InMemoryRunStore, InMemoryWorkspaceSettingsStore } from "../../packages/db/dist/index.js";
+import { runCaseJob } from "../../packages/job-runner/dist/index.js";
 
 // biome-ignore lint/performance/noDelete: removing the process.env key is intentional (verifies only the workspace default applies)
 delete process.env.EVERDICT_JUDGE_MODEL;
@@ -16,8 +16,8 @@ const settings = new InMemoryWorkspaceSettingsStore();
 // register the workspace default judge model (the key comes from secrets/env; here just model/provider).
 await settings.set("acme", { judge: { provider: "openai", model: process.env.LLM_MODEL ?? "gpt-5.4-mini" } });
 
-// dispatcher that runs the case in-process on the control plane (LocalBackend equivalent). runAgentJob builds the judge from job.judge.
-const dispatcher = { dispatch: (job) => runAgentJob(job) };
+// dispatcher that runs the case in-process on the control plane (LocalBackend equivalent). runCaseJob builds the judge from job.judge.
+const dispatcher = { dispatch: (job) => runCaseJob(job) };
 const svc = new RunService({
   dispatcher,
   store: new InMemoryRunStore(),

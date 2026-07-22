@@ -1,4 +1,4 @@
-import type { AgentJob, CaseResult, RegistryAuth } from "@everdict/contracts";
+import type { CaseJob, CaseResult, RegistryAuth } from "@everdict/contracts";
 import { imageUsesRegistryHost } from "@everdict/domain";
 import type { DispatchOptions, Dispatcher } from "../ports/dispatcher.js";
 import { type CollectTraceDeps, collectDeferredTrace } from "./collect-trace.js";
@@ -23,7 +23,7 @@ export interface ExecuteCaseDeps extends CollectTraceDeps {
 }
 
 // Every image reference this job can pull — the case image + service-harness service images (+per-dispatch pin override).
-export function jobImages(job: AgentJob): string[] {
+export function jobImages(job: CaseJob): string[] {
   const images: string[] = [];
   if (job.evalCase.image) images.push(job.evalCase.image);
   const spec = job.harnessSpec;
@@ -32,9 +32,9 @@ export function jobImages(job: AgentJob): string[] {
 }
 
 // If any job image belongs to a workspace registry (plural), attach that registry's pull credentials
-// (same discipline as repoToken — non-persisted transient). Only the first host match — AgentJob.registryAuth is a singular contract, so
+// (same discipline as repoToken — non-persisted transient). Only the first host match — CaseJob.registryAuth is a singular contract, so
 // mixing images from two different BYO registries in one job authenticates only the first match (a documented limitation).
-async function resolveRegistryAuth(deps: ExecuteCaseDeps, job: AgentJob): Promise<RegistryAuth | undefined> {
+async function resolveRegistryAuth(deps: ExecuteCaseDeps, job: CaseJob): Promise<RegistryAuth | undefined> {
   if (!deps.registryAuthsFor || !job.tenant) return undefined;
   const auths = await deps.registryAuthsFor(job.tenant).catch(() => [] as RegistryAuth[]);
   const images = jobImages(job);
@@ -44,7 +44,7 @@ async function resolveRegistryAuth(deps: ExecuteCaseDeps, job: AgentJob): Promis
 // If the case repo seed is private (git), resolve a token. Try the workspace GitHub App (installation) first and
 // (if no matching installation) fall back to the legacy personal connection (connectionId). Returns undefined for public/non-repo/unset.
 // Module-internal helper (executeCase only) — not exposed externally.
-async function resolveRepoToken(deps: ExecuteCaseDeps, owner: string, job: AgentJob): Promise<string | undefined> {
+async function resolveRepoToken(deps: ExecuteCaseDeps, owner: string, job: CaseJob): Promise<string | undefined> {
   const env = job.evalCase.env;
   if (env.kind !== "repo") return undefined;
   const src = env.source;
@@ -65,7 +65,7 @@ async function resolveRepoToken(deps: ExecuteCaseDeps, owner: string, job: Agent
 // execution: every backend picks the container by evalCase.image (no harness fallback), and the self-hosted runner reads
 // only job.evalCase.image → a CI image re-pin becomes a pointless no-op that can't change the container.
 // Design: docs/architecture/portable-harness-runtime.md.
-function withHarnessImage(job: AgentJob): AgentJob {
+function withHarnessImage(job: CaseJob): CaseJob {
   const spec = job.harnessSpec;
   if (!spec || spec.kind !== "command" || !spec.image || job.evalCase.image) return job;
   return { ...job, evalCase: { ...job.evalCase, image: spec.image } };
@@ -78,13 +78,13 @@ function withHarnessImage(job: AgentJob): AgentJob {
 export async function executeCase(
   deps: ExecuteCaseDeps,
   owner: string,
-  job: AgentJob,
+  job: CaseJob,
   opts?: DispatchOptions,
 ): Promise<CaseResult> {
   const normalized = withHarnessImage(job);
   const repoToken = await resolveRepoToken(deps, owner, normalized);
   const registryAuth = await resolveRegistryAuth(deps, normalized);
-  const enriched: AgentJob = {
+  const enriched: CaseJob = {
     ...normalized,
     ...(repoToken ? { repoToken } : {}),
     ...(registryAuth ? { registryAuth } : {}),

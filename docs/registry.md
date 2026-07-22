@@ -1,6 +1,6 @@
 # Harness version registry (`@everdict/registry`)
 
-The **single source of truth for harness versions**: resolve `(id, version) → HarnessSpec`. An `AgentJob`
+The **single source of truth for harness versions**: resolve `(id, version) → HarnessSpec`. An `CaseJob`
 carries only `harness: {id, version}` — a *reference*; the registry turns that reference into the concrete spec
 (services, deps, target, front-door, trace source for a service harness; metadata for a process harness).
 

@@ -1,13 +1,13 @@
 // Live e2e (SLICE 69): prompt env kind — environment-less QA (gsm8k/GAIA style) as a first-class case, with no repo/browser workaround.
 //   A) gsm8k adapter → case.env = {kind:"prompt"} (data)
-//   B) runAgentJob picks PromptEnvironment for prompt cases (previously RepoEnvironment.seed would throw) → snapshot.kind=prompt
+//   B) runCaseJob picks PromptEnvironment for prompt cases (previously RepoEnvironment.seed would throw) → snapshot.kind=prompt
 //   C) runCase(PromptEnvironment + QA harness + answer-match) → pass if the answer matches (QA eval without browser/repo)
 import process from "node:process";
-import { runAgentJob } from "../../packages/agent/dist/index.js";
 import { adapterToDataset, getBenchmark } from "../../packages/datasets/dist/index.js";
 import { LocalDriver } from "../../packages/drivers/dist/index.js";
 import { PromptEnvironment } from "../../packages/environments/dist/index.js";
 import { makeGraders } from "../../packages/graders/dist/index.js";
+import { runCaseJob } from "../../packages/job-runner/dist/index.js";
 import { runCase } from "../../packages/runner/dist/index.js";
 
 // A) the gsm8k adapter emits a prompt env as data.
@@ -19,7 +19,7 @@ console.log("=== A) gsm8k adapter → env ===");
 console.log(`  case.env = ${JSON.stringify(ds.cases[0].env)}  graders=${JSON.stringify(ds.cases[0].graders)}`);
 const aOk = ds.cases[0].env.kind === "prompt";
 
-// B) runAgentJob picks PromptEnvironment for the prompt case (previously it was RepoEnvironment, which threw).
+// B) runCaseJob picks PromptEnvironment for the prompt case (previously it was RepoEnvironment, which threw).
 const promptCase = {
   id: "qa-1",
   env: { kind: "prompt" },
@@ -28,8 +28,8 @@ const promptCase = {
   timeoutSec: 60,
   tags: [],
 };
-console.log("\n=== B) runAgentJob(prompt case, scripted harness) — env selection ===");
-const jobResult = await runAgentJob({
+console.log("\n=== B) runCaseJob(prompt case, scripted harness) — env selection ===");
+const jobResult = await runCaseJob({
   evalCase: promptCase,
   harness: { id: "scripted", version: "1.0.0" },
   tenant: "acme",
@@ -63,7 +63,7 @@ console.log(`  snapshot.kind=${result.snapshot.kind}  answer-match: pass=${am?.p
 const ok = aOk && bOk && am?.pass === true;
 console.log(
   ok
-    ? "\n✅ SLICE 69: prompt env kind — gsm8k/GAIA-style QA expressed first-class as an environment-less prompt env. runAgentJob picks PromptEnvironment by env.kind (removes the repo/browser workaround), runCase grades the answer (pass) with PromptEnvironment + QA harness + answer-match. Pure QA eval with no browser/repo stage."
+    ? "\n✅ SLICE 69: prompt env kind — gsm8k/GAIA-style QA expressed first-class as an environment-less prompt env. runCaseJob picks PromptEnvironment by env.kind (removes the repo/browser workaround), runCase grades the answer (pass) with PromptEnvironment + QA harness + answer-match. Pure QA eval with no browser/repo stage."
     : `\n⚠️ does not match expectations (a=${aOk} b=${bOk} c=${am?.pass})`,
 );
 process.exit(ok ? 0 : 1);

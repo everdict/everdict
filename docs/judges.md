@@ -14,7 +14,7 @@ code** that receives the run's full context and prints its verdict:
 { "kind": "code", "id": "e2e-booking", "version": "1.0.0",
   "language": "python" | "node",
   "code": "...",                 // inline source (frozen into the version) — OR entrypoint: a path in `image`
-  "image": "ghcr.io/acme/judge:1",  // optional dedicated judge image (must be everdict-baked); default = agent image
+  "image": "ghcr.io/acme/judge:1",  // optional dedicated judge image (must be everdict-baked); default = job-runner image
   "model": { "ref": "judge-model" },// optional Model binding the code may call
   "timeoutSec": 600, "runtime": "nomad-seoul", "requires": [ ... ] }
 ```
@@ -32,7 +32,7 @@ code** that receives the run's full context and prints its verdict:
 command-harness job (the context + inline code are materialized as env files; the job's script grader runs the
 code with `contextPath` pointing at the real context) and dispatches it through the normal Backend machinery —
 tenant trust-zone isolation, `runtime` routing, co-locate-with-the-run default, self-hosted runners included.
-Node is available in the default agent image everywhere; Python needs a runtime/image with `python3` (bake a
+Node is available in the default job-runner image everywhere; Python needs a runtime/image with `python3` (bake a
 judge image via `everdict image bake` for extra deps).
 
 **Model calls from the code.** `spec.model` (a first-class Model binding) rides the job's `judge` channel:
@@ -41,7 +41,7 @@ personal key fallback) and the job carries `EVERDICT_JUDGE_MODEL` / `EVERDICT_JU
 provider key env (`ANTHROPIC_API_KEY` / `OPENAI_API_KEY`, `+_BASE_URL`) — the code just reads env and calls.
 Only the declared binding's key is injected, never the whole SecretStore. Injection covers every lane: managed
 backends put it in the alloc/task env; on the runner/local/docker paths the agent threads it into every compute
-exec itself (`withJobEnv` in `@everdict/agent`). Self-hosted lanes resolve the key exactly like managed ones
+exec itself (`withJobEnv` in `@everdict/job-runner`). Self-hosted lanes resolve the key exactly like managed ones
 (parity with harness `{secretRef}`/model-binding secrets, which already ship to the runner); the one difference:
 when NO key resolves on a self-hosted lane the job ships without one and the runner's machine env is the
 fallback (own-pays), whereas a managed target stays a fail-fast 400.

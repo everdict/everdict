@@ -1,4 +1,4 @@
-import type { AgentJob, CaseResult } from "@everdict/contracts";
+import type { CaseJob, CaseResult } from "@everdict/contracts";
 
 // Shared store for a MULTI-REPLICA self-hosted runner lease queue — the cross-replica counterpart to the in-process
 // RunnerHub. A job parked on replica A is leased by a runner attached to replica B (atomic claim), and the parking
@@ -11,7 +11,7 @@ import type { AgentJob, CaseResult } from "@everdict/contracts";
 // A claimed job handed to a runner.
 export interface RunnerJobLease {
   jobId: string;
-  job: AgentJob;
+  job: CaseJob;
 }
 
 // What the parking replica polls to resolve/reject its dispatch promise.
@@ -28,7 +28,7 @@ export interface ParkInput {
   owner: string;
   runnerId: string; // target runner id, or POOL_RUNNER ("*") for the owner pool
   tenant?: string;
-  job: AgentJob;
+  job: CaseJob;
   requiredCaps: string[]; // functional caps this job needs — filtered against the runner's advertised set on claim
   now: number;
 }
@@ -56,6 +56,6 @@ export interface RunnerJobStore {
   // The parking replica polls this to resolve/reject its dispatch promise. null = the row is gone.
   outcome(jobId: string): Promise<RunnerJobOutcome | null>;
   // User cancel / supersede — mark matching non-terminal jobs cancelled (the predicate runs in-process over candidates).
-  cancel(match: (job: AgentJob) => boolean): Promise<number>;
+  cancel(match: (job: CaseJob) => boolean): Promise<number>;
   pending(owner: string, runnerId: string): Promise<number>;
 }

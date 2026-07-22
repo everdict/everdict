@@ -1,9 +1,9 @@
-import type { AgentJob, CaseResult } from "@everdict/contracts";
+import type { CaseJob, CaseResult } from "@everdict/contracts";
 import { describe, expect, it, vi } from "vitest";
 import { RunnerHost, type RunnerHostStatus, type RunnerJobDone } from "./runner-host.js";
 import type { RunnerClient } from "./runner-session.js";
 
-const evalCase: AgentJob["evalCase"] = {
+const evalCase: CaseJob["evalCase"] = {
   id: "c1",
   env: { kind: "repo", source: { files: {} } },
   task: "do",
@@ -11,7 +11,7 @@ const evalCase: AgentJob["evalCase"] = {
   timeoutSec: 60,
   tags: [],
 };
-const JOB: AgentJob = { evalCase, harness: { id: "h", version: "1" } };
+const JOB: CaseJob = { evalCase, harness: { id: "h", version: "1" } };
 const RESULT: CaseResult = {
   caseId: "c1",
   harness: "h@1",

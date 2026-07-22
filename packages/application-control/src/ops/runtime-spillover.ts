@@ -1,4 +1,4 @@
-import type { AgentJob, CaseResult } from "@everdict/contracts";
+import type { CaseJob, CaseResult } from "@everdict/contracts";
 import { type CircuitBreaker, classifyFailure } from "@everdict/domain";
 
 // Runtime spillover — automatic failover inside a sharded batch (docs/architecture/batch-resilience.md).
@@ -26,8 +26,8 @@ export interface SpilloverOutcome {
 }
 
 export async function executeWithSpillover(
-  run: (job: AgentJob) => Promise<CaseResult>,
-  job: AgentJob,
+  run: (job: CaseJob) => Promise<CaseResult>,
+  job: CaseJob,
   opts: SpilloverOpts,
 ): Promise<SpilloverOutcome> {
   const assigned = job.evalCase.placement?.target;
@@ -44,7 +44,7 @@ export async function executeWithSpillover(
   let lastErr: unknown;
   for (let i = 0; i < candidates.length; i++) {
     const target = candidates[i] as string;
-    const attempt: AgentJob =
+    const attempt: CaseJob =
       target === assigned
         ? job
         : { ...job, evalCase: { ...job.evalCase, placement: { ...job.evalCase.placement, target } } };

@@ -102,7 +102,7 @@ share one `stopInFlight` helper. The steps:
 3. **Free the runtime mid-case** — the self-hosted path: `cancelLeased` = `RunnerHub.requestCancel`, which rejects
    the parked/leased dispatch (the batch settles without waiting on the runner) and marks the lease
    `cancelRequested`; the runner learns of it on its next `heartbeat_job` reply (`{cancelled:true}`), aborts the
-   in-flight run (an `AbortSignal` threaded runner-loop → `runLeasedJob` → `runAgentJob` → `runCase`), and disposes
+   in-flight run (an `AbortSignal` threaded runner-loop → `runLeasedJob` → `runCaseJob` → `runCase`), and disposes
    the compute — `docker rm -f` for a containerised case, or a process-group kill for host-native `LocalDriver` — so
    the work actually stops on the machine. (Latency = one heartbeat interval.) For a **service-topology** run the
    same `AbortSignal` threads into `ServiceTopologyBackend.dispatch` → the front-door driver: the in-flight

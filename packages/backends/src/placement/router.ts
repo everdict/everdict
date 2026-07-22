@@ -1,4 +1,4 @@
-import { type AgentJob, BadRequestError, type CaseResult } from "@everdict/contracts";
+import { BadRequestError, type CaseJob, type CaseResult } from "@everdict/contracts";
 import type { DispatchOptions } from "../backend.js";
 import type { BackendRegistry } from "./registry.js";
 
@@ -10,7 +10,7 @@ export class Router {
   ) {}
 
   // async: makes a synchronous throw consistently a rejection (the caller handles it with await/.catch).
-  async dispatch(job: AgentJob, opts?: DispatchOptions): Promise<CaseResult> {
+  async dispatch(job: CaseJob, opts?: DispatchOptions): Promise<CaseResult> {
     const target = job.evalCase.placement?.target ?? this.defaultTarget;
     if (!target) {
       throw new BadRequestError("BAD_REQUEST", undefined, "placement.target or a default backend is required.");

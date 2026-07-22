@@ -1,11 +1,5 @@
 import type { DispatchOptions, Dispatcher } from "@everdict/backends";
-import {
-  type AgentJob,
-  BadRequestError,
-  type CaseResult,
-  type ModelBinding,
-  type ModelSpec,
-} from "@everdict/contracts";
+import { BadRequestError, type CaseJob, type CaseResult, type ModelBinding, type ModelSpec } from "@everdict/contracts";
 import { modelApiKeySecretName, modelConnectionEnv, normalizeModelBinding } from "@everdict/domain";
 import type { ModelRegistry } from "@everdict/registry";
 import type { ScopedSecretTiers } from "./judge-auth-dispatcher.js";
@@ -62,11 +56,7 @@ async function resolveBinding(
 
 // Resolve a job's harness Model binding(s). Without secretsFor, only the command {{model}} string is normalized (provenance
 // only, no secret read); with it, the connection env is also injected into the right env map(s).
-export async function resolveJobModel(
-  models: ModelRegistry,
-  job: AgentJob,
-  secretsFor?: SecretsFor,
-): Promise<AgentJob> {
+export async function resolveJobModel(models: ModelRegistry, job: CaseJob, secretsFor?: SecretsFor): Promise<CaseJob> {
   const spec = job.harnessSpec;
   if (!spec) return job;
   const tenant = job.tenant ?? "default";
@@ -107,7 +97,7 @@ export class ModelResolvingDispatcher implements Dispatcher {
     private readonly scopedSecretsFor?: SecretsFor,
   ) {}
 
-  async dispatch(job: AgentJob, opts?: DispatchOptions): Promise<CaseResult> {
+  async dispatch(job: CaseJob, opts?: DispatchOptions): Promise<CaseResult> {
     return this.inner.dispatch(await resolveJobModel(this.models, job, this.scopedSecretsFor), opts);
   }
 }

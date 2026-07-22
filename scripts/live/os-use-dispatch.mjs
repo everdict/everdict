@@ -1,20 +1,20 @@
 // Live e2e (SLICE 76): the os-use full loop in *a single dispatch* — proof that, rather than a live orchestration script,
-// feeding a single control-plane-issued AgentJob into runAgentJob() runs it end-to-end (provision → seed → agent run → snapshot → VLM grade).
-// SLICE73/75 wired driver/grade by hand; here all of that is expressed as AgentJob data.
+// feeding a single control-plane-issued CaseJob into runCaseJob() runs it end-to-end (provision → seed → agent run → snapshot → VLM grade).
+// SLICE73/75 wired driver/grade by hand; here all of that is expressed as CaseJob data.
 //
-//   AgentJob = {
+//   CaseJob = {
 //     harnessSpec: command(`node /agent.cjs {{task}}`, workDir:/tmp, env:{DISPLAY}),  // desktop agent (baked)
 //     evalCase:   { env: os-use(setup: sshd+health+Xvfb+hermes), image, task, graders:[judge useScreenshot] },
 //     judge:      { provider:"openai", model } }                                       // control plane loads it into the job
-//   runAgentJob: env.kind=os-use → OsUseEnvironment, command harness → run the agent, snapshot → screenshot,
+//   runCaseJob: env.kind=os-use → OsUseEnvironment, command harness → run the agent, snapshot → screenshot,
 //   makeGradersFromEnv → VLM JudgeGrader. judge verdict in CaseResult.scores.
 //
 // Image build (prerequisite): see the scripts/live/Dockerfile.hermes-ssh-agent header → everdict-hermes-dispatch:demo
 // Key: OPENAI_API_KEY env or infra/litellm/.env (runtime only, never committed).
 import { readFileSync } from "node:fs";
 import process from "node:process";
-import { runAgentJob } from "../../packages/agent/dist/index.js";
 import { DockerDriver } from "../../packages/drivers/dist/index.js";
+import { runCaseJob } from "../../packages/job-runner/dist/index.js";
 
 const IMAGE = process.env.HERMES_IMAGE ?? "everdict-hermes-dispatch:demo";
 
@@ -35,7 +35,7 @@ if (!process.env.OPENAI_API_KEY) {
   process.exit(2);
 }
 
-// The AgentJob the control plane dispatches — the entire os-use desktop full task lives in this one object.
+// The CaseJob the control plane dispatches — the entire os-use desktop full task lives in this one object.
 const job = {
   harness: { id: "desktop-ssh-agent", version: "1.0.0" },
   harnessSpec: {
@@ -86,9 +86,9 @@ const job = {
   judge: { provider: "openai", model: process.env.EVERDICT_JUDGE_MODEL ?? "gpt-5.4-mini" },
 };
 
-console.log("=== runAgentJob(AgentJob) — os-use full loop, single dispatch ===");
+console.log("=== runCaseJob(CaseJob) — os-use full loop, single dispatch ===");
 console.log("harness:", job.harnessSpec.kind, job.harnessSpec.command, "| judge:", job.judge.model);
-const result = await runAgentJob(job, { driver: new DockerDriver() });
+const result = await runCaseJob(job, { driver: new DockerDriver() });
 
 const judgeScore = result.scores.find((s) => s.metric === "judge");
 console.log("\n--- CaseResult ---");
@@ -111,7 +111,7 @@ try {
 const ok = result.snapshot.kind === "os-use" && judgeScore?.pass === true;
 console.log(
   ok
-    ? "\n✅ SLICE 76: the os-use desktop full task was dispatched + graded end-to-end via a single AgentJob → runAgentJob(). " +
+    ? "\n✅ SLICE 76: the os-use desktop full task was dispatched + graded end-to-end via a single CaseJob → runCaseJob(). " +
         "The agent (command harness, baked) fills the SSH form with real OS input so hermes opens a genuine SSH tunnel and enters main, " +
         "and the VLM JudgeGrader passes the OsUseEnvironment snapshot. Via the control-plane path, with no live orchestration."
     : "\n⚠️ does not match expectation (judge.pass not true)",

@@ -10,7 +10,7 @@ import { TraceSourceService } from "@everdict/application-control";
 import type { Principal } from "@everdict/auth";
 import type { Dispatcher } from "@everdict/backends";
 import { RUNNER_PROTOCOL_VERSION } from "@everdict/contracts";
-import type { AgentJob, CaseResult, RunRecord, RuntimeSpec } from "@everdict/contracts";
+import type { CaseJob, CaseResult, RunRecord, RuntimeSpec } from "@everdict/contracts";
 import {
   InMemoryBudgetStore,
   InMemoryOAuthStateStore,
@@ -768,7 +768,7 @@ describe("MCP tools", () => {
   it("runner protocol: lease a parked job → report via submit_job_result → the dispatch promise resolves", async () => {
     const deps = harness();
     const key = { owner: "u-alice", runnerId: "laptop" };
-    const parkedJob: AgentJob = {
+    const parkedJob: CaseJob = {
       evalCase: {
         id: "c1",
         env: { kind: "repo", source: { files: {} } },
@@ -810,7 +810,7 @@ describe("MCP tools", () => {
   it("placement gate: a runner without docker leasing an image job → {job:null} + that job is rejected as capability_mismatch", async () => {
     const deps = harness();
     const key = { owner: "u-alice", runnerId: "laptop" };
-    const imageJob: AgentJob = {
+    const imageJob: CaseJob = {
       evalCase: {
         id: "c-img",
         env: { kind: "repo", source: { files: {} } },
@@ -848,7 +848,7 @@ describe("MCP tools", () => {
   });
 
   it("submit_run: with a runtime, the case is dispatched to placement.target (BFF↔MCP parity)", async () => {
-    let seen: AgentJob | undefined;
+    let seen: CaseJob | undefined;
     const capture: Dispatcher = {
       async dispatch(job) {
         seen = job;
@@ -1216,7 +1216,7 @@ describe("MCP tools", () => {
   });
 
   it("run_scorecard: with a runtime, cases are dispatched to placement.target and recorded (BFF↔MCP parity)", async () => {
-    let seen: AgentJob | undefined;
+    let seen: CaseJob | undefined;
     const capture: Dispatcher = {
       async dispatch(job) {
         seen = job;
@@ -1262,7 +1262,7 @@ describe("MCP tools", () => {
   });
 
   it("run_scorecard: an inline judge-model override reaches the dispatched job (HTTP parity)", async () => {
-    let seen: AgentJob | undefined;
+    let seen: CaseJob | undefined;
     const capture: Dispatcher = {
       async dispatch(job) {
         seen = job;

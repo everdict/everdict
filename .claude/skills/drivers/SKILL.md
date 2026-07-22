@@ -19,8 +19,8 @@ Isolation/placement is the Backend's job (see skill `backends`) — this is the 
 ## Reference impl
 `packages/drivers/src/local.ts` — `LocalDriver` (`id="local"`): `mkdtemp` root + `child_process.exec`;
 `exec` `mkdir`s the requested `cwd` first (so a harness default cwd like `work` can't silently kill spawn).
-Dev / inside the agent (`packages/agent/src/run.ts` default) — the harness uses the machine's existing
-login, so no API key (`packages/agent/src/env.ts`). Weak isolation (shares the host) — that's the Backend's job.
+Dev / inside the agent (`packages/job-runner/src/run.ts` default) — the harness uses the machine's existing
+login, so no API key (`packages/job-runner/src/env.ts`). Weak isolation (shares the host) — that's the Backend's job.
 
 `packages/drivers/src/docker.ts` — `DockerDriver` (`id="docker"`): `docker run -d … sleep infinity` keep-alive
 container from `spec.image ?? defaultImage`, then `docker exec` per command. Base workdir `/everdict` so relative
@@ -31,7 +31,7 @@ paths in (e.g. the runner's `~/.codex` login). Consumed by the managed `DockerBa
 (`packages/self-hosted-runner/src/run-leased-job.ts`) — one `case.image` definition runs managed OR local identically.
 
 ## Driver vs Backend
-- **Backend** (`@everdict/backends`) = *placement*: dispatches the runner-agent job to an orchestrator; isolation
+- **Backend** (`@everdict/backends`) = *placement*: dispatches the job-runner job to an orchestrator; isolation
   = the orchestrator runtime. It never runs the harness itself (see skill `backends`).
 - **Driver** (`@everdict/drivers`) = *compute*: runs the harness/graders inside that already-isolated job.
 `LocalDriver` = in-process; `DockerDriver` = a local container (portability contract, not strong isolation).

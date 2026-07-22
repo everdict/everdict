@@ -1,4 +1,4 @@
-import { type AgentJob, type CaseResult, InternalError } from "@everdict/contracts";
+import { type CaseJob, type CaseResult, InternalError } from "@everdict/contracts";
 // Type-only reuse of the inspection wire schema as the SSOT for Inspectable.inspect's return (no drift, no runtime
 // edge). backends → contracts is the allowed direction; /wire is the same package's DTO surface.
 import type { InspectRuntimeResult } from "@everdict/contracts/wire";
@@ -64,7 +64,7 @@ import type { DispatchOptions, Dispatcher } from "@everdict/application-control"
 
 // The uniform "this dispatch was cancelled via its AbortSignal" rejection (reuses the CANCELLED code the Scheduler
 // already rejects queued entries with, so callers classify it the same way).
-export function dispatchAborted(job: AgentJob): InternalError {
+export function dispatchAborted(job: CaseJob): InternalError {
   return new InternalError("CANCELLED", { caseId: job.evalCase.id }, "dispatch aborted.");
 }
 

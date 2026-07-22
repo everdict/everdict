@@ -4,12 +4,12 @@
 // scheduler brings up only CAP allocs at a time and queues the rest. As slots free up, it lets the next ones through.
 // A separate poller observes the number of in-flight everdict-sched-* jobs on Nomad to prove concurrent allocs never exceed CAP.
 //
-// Usage: NOMAD_ADDR=http://127.0.0.1:4646 EVERDICT_AGENT_IMAGE=everdict-agent:local node scripts/live/scheduler-nomad.mjs
+// Usage: NOMAD_ADDR=http://127.0.0.1:4646 EVERDICT_AGENT_IMAGE=everdict-job-runner:local node scripts/live/scheduler-nomad.mjs
 
 import { BackendRegistry, NomadBackend, Scheduler } from "../../packages/backends/dist/index.js";
 
 const NOMAD_ADDR = process.env.NOMAD_ADDR ?? "http://127.0.0.1:4646";
-const IMAGE = process.env.EVERDICT_AGENT_IMAGE ?? "everdict-agent:local";
+const IMAGE = process.env.EVERDICT_AGENT_IMAGE ?? "everdict-job-runner:local";
 const N = Number(process.env.N ?? "5");
 const CAP = Number(process.env.CAP ?? "2");
 const STAMP = Date.now().toString(36);

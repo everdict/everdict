@@ -1,4 +1,4 @@
-// Lives in @everdict/agent because it pins the composed loop end-to-end: runCase (the use-case, in
+// Lives in @everdict/job-runner because it pins the composed loop end-to-end: runCase (the use-case, in
 // @everdict/application-execution) driven against real adapters (drivers/environments/graders/
 // harnesses). agent is the only package that depends on all of them, so the integration test lands
 // here rather than in application-execution (which by design depends on neither).

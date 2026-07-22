@@ -1,5 +1,5 @@
 import { type SelfHostedKey, StoreRunnerHub } from "@everdict/application-control";
-import type { AgentJob, CaseResult } from "@everdict/contracts";
+import type { CaseJob, CaseResult } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { InMemoryRunnerJobStore } from "./runner-job-store.js";
 
@@ -13,12 +13,12 @@ const result: CaseResult = {
   snapshot: { kind: "repo", diff: "", changedFiles: [], headSha: "h" },
   scores: [],
 };
-const job = (id: string): AgentJob => ({
+const job = (id: string): CaseJob => ({
   evalCase: { id, env: { kind: "repo", source: { files: {} } }, task: "t", graders: [], timeoutSec: 60, tags: [] },
   harness: { id: "scripted", version: "0" },
   tenant: "acme",
 });
-const imageJob = (id: string): AgentJob => ({ ...job(id), evalCase: { ...job(id).evalCase, image: "sbench:v1" } });
+const imageJob = (id: string): CaseJob => ({ ...job(id), evalCase: { ...job(id).evalCase, image: "sbench:v1" } });
 const keyA: SelfHostedKey = { owner: "u-alice", runnerId: "laptop" };
 
 let seq = 0;

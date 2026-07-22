@@ -17,7 +17,7 @@
 //                           submit_job_result must be rejected without duplicating results.
 //
 // Usage: node scripts/live/negative-torture.mjs   (docker + api/cli/self-hosted-runner dists built;
-//   Nomad at NOMAD_ADDR with the docker driver's image GC disabled + everdict-agent:slim present).
+//   Nomad at NOMAD_ADDR with the docker driver's image GC disabled + everdict-job-runner:slim present).
 //   ~20 min — N3 waits out the 2-minute lease TTL.
 import { execFileSync, spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
@@ -80,8 +80,8 @@ try {
   nomadUp = (await fetch(`${NOMAD}/v1/status/leader`)).ok;
 } catch {}
 if (!nomadUp) throw new Error("nomad required for N1/N4 — start nomad agent -dev (image GC disabled)");
-if (!sh("docker", ["images", "-q", "everdict-agent:slim"]).trim())
-  throw new Error("everdict-agent:slim missing — build it (see packages/agent/Dockerfile.slim)");
+if (!sh("docker", ["images", "-q", "everdict-job-runner:slim"]).trim())
+  throw new Error("everdict-job-runner:slim missing — build it (see packages/job-runner/Dockerfile.slim)");
 
 console.log(`\n=== ① control plane (:${PORT}, idle-timeout 60s) + fleet (2×CLI 1w + RunnerHost 2w) ===`);
 const cp = spawn("node", ["apps/api/dist/main.js"], {
@@ -152,7 +152,7 @@ try {
     ["nomad-t", NOMAD],
     ["nomad-dead", "http://127.0.0.1:4747"],
   ]) {
-    const r = await post("/runtimes", { kind: "nomad", id, version: "1.0.0", addr, image: "everdict-agent:slim" });
+    const r = await post("/runtimes", { kind: "nomad", id, version: "1.0.0", addr, image: "everdict-job-runner:slim" });
     if (r.status >= 300) throw new Error(`runtime ${id} registration failed`);
   }
   // The resource hog — a command harness no node can hold (100 cores / 1TB).

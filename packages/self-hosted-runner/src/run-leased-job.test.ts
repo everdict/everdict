@@ -1,4 +1,4 @@
-import type { AgentJob, CaseResult } from "@everdict/contracts";
+import type { CaseJob, CaseResult } from "@everdict/contracts";
 import type { TopologyRuntime } from "@everdict/topology";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -8,7 +8,7 @@ import {
   workspaceImagesToPull,
 } from "./run-leased-job.js";
 
-const evalCase: AgentJob["evalCase"] = {
+const evalCase: CaseJob["evalCase"] = {
   id: "c1",
   env: { kind: "repo", source: { files: {} } },
   task: "do x",
@@ -25,7 +25,7 @@ const RESULT: CaseResult = {
   scores: [],
 };
 
-const serviceJob: AgentJob = {
+const serviceJob: CaseJob = {
   evalCase,
   harness: { id: "bu", version: "1.0.0" },
   harnessSpec: {
@@ -39,7 +39,7 @@ const serviceJob: AgentJob = {
   },
 };
 
-const processJob: AgentJob = { evalCase, harness: { id: "claude-code", version: "1.0.0" } };
+const processJob: CaseJob = { evalCase, harness: { id: "claude-code", version: "1.0.0" } };
 
 describe("runLeasedJob — harness kind branching", () => {
   it("a service harness goes down the runService (local Docker topology) path", async () => {
@@ -50,7 +50,7 @@ describe("runLeasedJob — harness kind branching", () => {
     expect(runProcess).not.toHaveBeenCalled();
   });
 
-  it("a process/command harness goes down the runProcess (runAgentJob) path", async () => {
+  it("a process/command harness goes down the runProcess (runCaseJob) path", async () => {
     const runService = vi.fn(async () => RESULT);
     const runProcess = vi.fn(async () => RESULT);
     await runLeasedJob(processJob, { runService, runProcess });
@@ -70,7 +70,7 @@ describe("runLeasedJob — harness kind branching", () => {
 // Workspace-registry service images: authenticated pre-pull (temporary DOCKER_CONFIG) before deploy — pin overrides applied, host-match only.
 describe("runLeasedJob — workspace-registry pre-pull (service)", () => {
   const AUTH = { host: "ghcr.io", username: "bot", password: "pull-tok" };
-  const spec: NonNullable<AgentJob["harnessSpec"]> = {
+  const spec: NonNullable<CaseJob["harnessSpec"]> = {
     kind: "service",
     id: "bu",
     version: "1.0.0",
@@ -116,7 +116,7 @@ describe("runLeasedJob — workspace-registry pre-pull (service)", () => {
 // Portability contract: a non-service case that declares case.image runs in that image's container (containerize) when the runner has Docker
 // → "one definition, same environment whether managed or local". Design: docs/architecture/portable-harness-runtime.md.
 describe("runLeasedJob — case.image container execution (portability)", () => {
-  const imageJob: AgentJob = {
+  const imageJob: CaseJob = {
     evalCase: { ...evalCase, image: "spreadsheetbench:v1" },
     harness: { id: "codex", version: "1.0.0" },
   };

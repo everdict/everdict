@@ -1,6 +1,6 @@
 // live e2e: *unified desktop + web report* — demonstrates harness-agnosticism. Two tracks in one report via the same everdict grading/scorecard flow:
-//   • desktop (os-use/OSWorld): runAgentJob (command harness + OsUseEnvironment) → create a file with mousepad → VLM judge (screenshot)
-//     + command/state grader (verify checks the actual file).  [packages/agent runAgentJob + DockerDriver]
+//   • desktop (os-use/OSWorld): runCaseJob (command harness + OsUseEnvironment) → create a file with mousepad → VLM judge (screenshot)
+//     + command/state grader (verify checks the actual file).  [packages/job-runner runCaseJob + DockerDriver]
 //   • web (browser-use/WebVoyager): ServiceTopologyBackend (service harness) → drive a real site → answer-match + judge.
 // Collect each track's CaseResults into a Scorecard and print summarizeScorecard + a unified summary (per-track + overall pass rate).
 //
@@ -9,10 +9,10 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { copyFileSync, readFileSync } from "node:fs";
 import process from "node:process";
-import { runAgentJob } from "../../packages/agent/dist/index.js";
 import { importWebVoyager } from "../../packages/datasets/dist/index.js";
 import { scorecardPassRate, summarizeScorecard } from "../../packages/domain/dist/index.js";
 import { DockerDriver } from "../../packages/drivers/dist/index.js";
+import { runCaseJob } from "../../packages/job-runner/dist/index.js";
 import { ServiceTopologyBackend } from "../../packages/topology/dist/index.js";
 import { OtelTraceSource } from "../../packages/trace/dist/index.js";
 
@@ -118,7 +118,7 @@ async function desktopTrack() {
     };
     console.log(`  [desktop] ${row.id}: ${row.instruction.slice(0, 60)}…`);
     try {
-      const r = await runAgentJob(job, { driver: new DockerDriver() });
+      const r = await runCaseJob(job, { driver: new DockerDriver() });
       const j = r.scores.find((s) => s.metric === "judge");
       const st = r.scores.find((s) => s.metric === "state");
       console.log(`    judge=${j?.pass ? "PASS" : "FAIL"} state=${st ? (st.pass ? "PASS" : "FAIL") : "-"}`);
@@ -274,7 +274,7 @@ try {
   ok = desktop.results.length > 0 && web.results.length > 0;
   console.log(
     ok
-      ? "\n✅ ③: one unified report ties both tracks — *desktop (os-use/OSWorld, runAgentJob)* and *web (browser-use/WebVoyager, " +
+      ? "\n✅ ③: one unified report ties both tracks — *desktop (os-use/OSWorld, runCaseJob)* and *web (browser-use/WebVoyager, " +
           "ServiceTopologyBackend)* — through the same everdict CaseResult→Scorecard→summarize flow — a harness/infra-agnostic " +
           "eval runtime produces desktop+web benchmarks in a single report."
       : "\n⚠️ one track has no results (see logs above)",

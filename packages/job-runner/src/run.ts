@@ -1,7 +1,7 @@
 import { runCase } from "@everdict/application-execution";
 import {
-  type AgentJob,
   BadRequestError,
+  type CaseJob,
   type CaseResult,
   type Driver,
   type EnvSpec,
@@ -97,14 +97,14 @@ export function failureResult(
   };
 }
 
-// Runs one AgentJob end to end. Default driver=LocalDriver (in-process); DockerBackend injects a DockerDriver
+// Runs one CaseJob end to end. Default driver=LocalDriver (in-process); DockerBackend injects a DockerDriver
 // (runs the case in its own env-image container — e.g. SWE-bench prebuilt). If harnessSpec is present, interpret
 // it as a declarative command harness. When containerize=true, run in a case.image container (DockerDriver) — used
 // when a self-hosted runner runs an image-case on local Docker identically to the managed DockerBackend (an
 // explicitly passed driver takes precedence). mounts are host resources to bind-mount into that container (e.g. the
 // codex login directory → codex in the container uses the machine login). Design: docs/architecture/portable-harness-runtime.md.
-export async function runAgentJob(
-  job: AgentJob,
+export async function runCaseJob(
+  job: CaseJob,
   opts: {
     driver?: Driver;
     containerize?: boolean;

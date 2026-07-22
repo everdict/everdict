@@ -1,5 +1,5 @@
-# Runner-agent image — Nomad/K8s launch this as a job.
-# Build (from repo root): docker build -f packages/agent/Dockerfile -t <registry>/everdict-agent:<tag> .
+# Job-runner image — Nomad/K8s launch this as a job.
+# Build (from repo root): docker build -f packages/job-runner/Dockerfile -t <registry>/everdict-job-runner:<tag> .
 FROM node:22-bookworm-slim
 
 # Preinstall git (environment seed) + claude CLI (harness under test) + python3/venv/pip (setup for
@@ -21,7 +21,7 @@ WORKDIR /app
 COPY . .
 RUN corepack enable \
   && pnpm install --frozen-lockfile \
-  && pnpm --filter @everdict/agent... build
+  && pnpm --filter @everdict/job-runner... build
 
-# AgentJob is injected via the EVERDICT_AGENT_JOB env (base64 JSON); auth via CLAUDE_CODE_OAUTH_TOKEN etc.
-ENTRYPOINT ["node", "packages/agent/dist/main.js"]
+# CaseJob is injected via the EVERDICT_CASE_JOB env (base64 JSON); auth via CLAUDE_CODE_OAUTH_TOKEN etc.
+ENTRYPOINT ["node", "packages/job-runner/dist/main.js"]

@@ -83,7 +83,7 @@ classDiagram
     class RunnerLoopClient {
         <<exists today - runner-side application>>
         +runLeaseWorkers N workers long-poll
-        +runLeasedJob service to Docker topology else runAgentJob
+        +runLeasedJob service to Docker topology else runCaseJob
         +classified-failure parity on throw
         +ResilientMcpSession reconnect once
     }
@@ -161,11 +161,11 @@ sequenceDiagram
     W->>M: lease_job(waitMs, capabilities[]) — long-poll + self-advertisement
     M->>H: leaseWait(key, waitMs, caps)
     H->>H: requeueExpired → own queue first (mismatch = reject) → owner pool (mismatch = skip)
-    H-->>W: LeasedJob {jobId, job} (AgentJobSchema re-validated runner-side)
+    H-->>W: LeasedJob {jobId, job} (CaseJobSchema re-validated runner-side)
     loop while running
         W->>M: heartbeat_job(jobId) — leasedAt refresh + idle re-arm + RunnerService.touch
     end
-    W->>W: runLeasedJob — service kind → Docker topology; else runAgentJob (containerize when case.image + docker)
+    W->>W: runLeasedJob — service kind → Docker topology; else runCaseJob (containerize when case.image + docker)
     alt success or eval failure
         W->>M: submit_job_result(jobId, CaseResult) — a throwing job submits a CLASSIFIED failed CaseResult (parity with the agent sentinel path)
         M->>H: complete(key, jobId, result)
@@ -203,9 +203,9 @@ From the apps-api survey catalog (§1.8, #72–82):
 | `RunnerStore` (pair/list/revoke/touch/setCapabilities/resolveByToken) | `@everdict/db` interface (InMemory + Pg) | `application/control` port; auth's runner authenticator consumes `resolveByToken` (port repatriated per 00 §4 auth row) |
 | Token primitives (`generateRunnerToken` `rnr_`, `hashKey`) | values in `@everdict/db` (`runner-store.ts:52-54`, `tenant-auth.ts`) | ONE `domain` credential-issuance recipe (prefix-parameterized, shared with `ak_`/`inv_`) |
 | `RunnerHub` lease machine | `apps/api/src/core/runner/runner-hub.ts` in-memory singleton | `domain/runner` RunnerLease + application hub (persistence: open question 1) |
-| Lease protocol (tool names + shapes) | stringly shared with `packages/self-hosted-runner` (only `AgentJobSchema` validated) | typed `contracts` lease-protocol module |
+| Lease protocol (tool names + shapes) | stringly shared with `packages/self-hosted-runner` (only `CaseJobSchema` validated) | typed `contracts` lease-protocol module |
 | GitHub registration token mint | `CiLinkService.mintRunnerToken` → `GithubAppService.runnerRegistrationToken` | integrations domain port |
-| Runner-side execution (`runAgentJob`, `DockerTopologyRuntime`) | `@everdict/self-hosted-runner` → `@everdict/agent`/`topology` | `application/execution` consumer (00 §8 Q3 keeps the package) |
+| Runner-side execution (`runCaseJob`, `DockerTopologyRuntime`) | `@everdict/self-hosted-runner` → `@everdict/job-runner`/`topology` | `application/execution` consumer (00 §8 Q3 keeps the package) |
 
 ## Rules: today → target
 

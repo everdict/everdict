@@ -7,7 +7,7 @@ import {
   type Probeable,
   dispatchAborted,
 } from "@everdict/backends";
-import type { AgentJob, CaseResult } from "@everdict/contracts";
+import type { CaseJob, CaseResult } from "@everdict/contracts";
 
 // Personally-owned self-hosted runner backend — pull, not push. dispatch(job) parks the job in the RunnerHub and
 // returns a promise. When the runner client (everdict runner) leases it via MCP, runs it on its own machine, and reports
@@ -24,7 +24,7 @@ export class SelfHostedBackend implements Backend, Probeable {
     // used is 0 since the scheduler tracks it via its own in-flight (here the park queue absorbs the real waiting).
     return { total: this.maxConcurrent, used: 0 };
   }
-  async dispatch(job: AgentJob, opts?: DispatchOptions): Promise<CaseResult> {
+  async dispatch(job: CaseJob, opts?: DispatchOptions): Promise<CaseResult> {
     if (opts?.signal?.aborted) throw dispatchAborted(job); // best-effort: refuse a pre-cancelled park
     // onStarted fires on LEASE (not here at park) — a self-hosted job is "waiting" until a runner takes it. The hub
     // fires the hook the moment it hands the job to a runner, so the caller flips the run record queued→running then.

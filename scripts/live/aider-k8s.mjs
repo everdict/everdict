@@ -1,12 +1,12 @@
 // Live (K8s/kind): real aider fixes a seeded bug with gpt-5.4-mini (workclaw LiteLLM) and Everdict grades it with
-// tests-pass — but the run happens inside a **real K8s Job (pod)**. K8sBackend launches the everdict-agent image as a Job,
+// tests-pass — but the run happens inside a **real K8s Job (pod)**. K8sBackend launches the everdict-job-runner image as a Job,
 // and the agent interprets the declarative command harness (zero code): (aider preinstalled) → run aider → tests-pass.
 //
 // ✅ Verified (PASS): inside a real K8s Job, aider (gpt-5.4-mini) fixes the seeded bug + passes tests-pass. Nomad↔K8s real-agent parity.
 //
 // Setup:
-//   1) kind cluster `everdict` + load everdict-agent:local (python+aider) onto the node:
-//      docker build -f packages/agent/Dockerfile -t everdict-agent:local . && kind load docker-image everdict-agent:local --name everdict
+//   1) kind cluster `everdict` + load everdict-job-runner:local (python+aider) onto the node:
+//      docker build -f packages/job-runner/Dockerfile -t everdict-job-runner:local . && kind load docker-image everdict-job-runner:local --name everdict
 //   2) Connect the node to the default docker bridge so hostNetwork pods can reach the host LiteLLM (:4000):
 //      docker network connect bridge everdict-control-plane   (→ reachable via the 172.17.0.1 gateway)
 //   3) **Clean model alias**: register a name without the `chatgpt/` prefix (gpt-5.4-mini) in LiteLLM.
@@ -18,7 +18,7 @@ import process from "node:process";
 import { K8sBackend } from "../../packages/backends/dist/index.js";
 
 const CONTEXT = process.env.CONTEXT ?? "kind-everdict";
-const IMAGE = process.env.IMAGE ?? "everdict-agent:local";
+const IMAGE = process.env.IMAGE ?? "everdict-job-runner:local";
 const NS = process.env.NS ?? "everdict-ci";
 const KEY = process.env.OPENAI_API_KEY;
 const HOST = process.env.LITELLM_HOST ?? "172.17.0.1"; // hostNetwork pod → default bridge gateway = host

@@ -1,5 +1,5 @@
 import type {
-  AgentJob,
+  CaseJob,
   CaseResult,
   CommandHarnessSpec,
   ModelBinding,
@@ -46,7 +46,7 @@ const secretsFor =
   (workspace: Record<string, string>, user: Record<string, string> = {}) =>
   async (): Promise<ScopedSecretTiers> => ({ workspace, user });
 
-function job(harnessSpec: AgentJob["harnessSpec"], tenant = "acme"): AgentJob {
+function job(harnessSpec: CaseJob["harnessSpec"], tenant = "acme"): CaseJob {
   return {
     evalCase: {
       id: "c1",
@@ -202,7 +202,7 @@ describe("resolveJobModel — connection env injection", () => {
 describe("ModelResolvingDispatcher", () => {
   it("delegates to the inner dispatcher with the resolved model", async () => {
     const models = await registry();
-    let seen: AgentJob | undefined;
+    let seen: CaseJob | undefined;
     const result = {
       caseId: "c1",
       harness: "aider@1.0.0",
@@ -211,7 +211,7 @@ describe("ModelResolvingDispatcher", () => {
       scores: [],
     } satisfies CaseResult;
     const inner = {
-      async dispatch(j: AgentJob): Promise<CaseResult> {
+      async dispatch(j: CaseJob): Promise<CaseResult> {
         seen = j;
         return result;
       },

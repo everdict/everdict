@@ -156,7 +156,7 @@ and unit-tested.
 
 ## Pull wiring (S4 — shipped)
 
-One transient contract, consumed per runtime. `AgentJob.registryAuth` (`RegistryAuthSchema` =
+One transient contract, consumed per runtime. `CaseJob.registryAuth` (`RegistryAuthSchema` =
 `{host, username?, password}`) follows the `repoToken` discipline exactly: the control plane
 resolves `pullSecretName` at dispatch (`executeCase` → `registryAuthFor`, wired for run AND
 scorecard), attaches it **only when a job image's explicit host matches the registry host**
@@ -165,7 +165,7 @@ applied), and it is never persisted to any record/dataset.
 
 Consumers (auth is always rendered **only** for host-matching images — no credential spray):
 
-- **Self-hosted runner, `case.image` path:** `runAgentJob` threads `job.registryAuth` into
+- **Self-hosted runner, `case.image` path:** `runCaseJob` threads `job.registryAuth` into
   `DockerDriver({registryAuth})` → authenticated pre-pull via a temp-`DOCKER_CONFIG`
   (`pullWithRegistryAuth`, 0600, removed in `finally` — the host's `~/.docker/config.json` is
   never touched), then `docker run` uses the local image.
@@ -211,7 +211,7 @@ if a real footgun shows up that warnings don't catch.
 - **S3 — web:** Settings → Integrations "Image registries" card (admin form, Linear settings-list) +
   harness-detail image classification badges (service/command images) + push-command hint in the
   register wizard.
-- **S4 — pull auth (shipped):** `AgentJob.registryAuth` transient + DockerDriver/runner pre-pull
+- **S4 — pull auth (shipped):** `CaseJob.registryAuth` transient + DockerDriver/runner pre-pull
   (temp `DOCKER_CONFIG`) + nomad docker `auth` + k8s `dockerconfigjson` Secret/`imagePullSecrets`
   (topology builders AND managed case backends) + dispatch wiring (`executeCase` ·
   `RuntimeDispatcher`). Placement stays warn-only (see the pull-wiring section for why).

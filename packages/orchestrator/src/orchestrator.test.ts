@@ -1,6 +1,6 @@
 import { BackendRegistry, Router } from "@everdict/backends";
 import type { Backend } from "@everdict/backends";
-import type { AgentJob, CaseResult } from "@everdict/contracts";
+import type { CaseJob, CaseResult } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { createActivities } from "./activities.js";
 import { DirectOrchestrator } from "./orchestrator.js";
@@ -10,7 +10,7 @@ class FakeBackend implements Backend {
   async capacity() {
     return { total: 1, used: 0 };
   }
-  async dispatch(_job: AgentJob): Promise<CaseResult> {
+  async dispatch(_job: CaseJob): Promise<CaseResult> {
     return {
       caseId: "c",
       harness: this.id,
@@ -21,7 +21,7 @@ class FakeBackend implements Backend {
   }
 }
 
-const job: AgentJob = {
+const job: CaseJob = {
   harness: { id: "scripted", version: "0" },
   evalCase: { id: "c", env: { kind: "repo", source: { files: {} } }, task: "t", graders: [], timeoutSec: 1, tags: [] },
 };

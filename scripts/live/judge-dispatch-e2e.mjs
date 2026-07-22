@@ -1,10 +1,10 @@
-// live e2e: whether the judge grader flows through the "normal dispatch path" (runAgentJob) — not a separate judge-runner,
+// live e2e: whether the judge grader flows through the "normal dispatch path" (runCaseJob) — not a separate judge-runner,
 // but the judge preset in EvalCase.graders is scored with a real model verdict in the actual eval loop.
 //   env set (EVERDICT_JUDGE_MODEL + OPENAI key) → judge grader = real model verdict (pass/score/reason)
 //   env unset                                   → judge grader = skip score (normal eval does not die)
 // The harness is scripted (no key needed): actually runs `echo hello > out.txt` → a real trace → the judge verdicts that trace.
 import process from "node:process";
-import { runAgentJob } from "../../packages/agent/dist/index.js";
+import { runCaseJob } from "../../packages/job-runner/dist/index.js";
 
 const baseJob = {
   harness: { id: "scripted", version: "1.0.0" },
@@ -38,15 +38,15 @@ function showJudge(label, result) {
 }
 
 // 1) judge model configured → real model verdict.
-console.log("=== runAgentJob (judge env set) — the real model verdicts the trace ===");
-const real = await runAgentJob(baseJob);
+console.log("=== runCaseJob (judge env set) — the real model verdicts the trace ===");
+const real = await runCaseJob(baseJob);
 const realJudge = showJudge("env O", real);
 
 // 2) judge model not configured → only the judge is skipped (the rest is normal).
 // biome-ignore lint/performance/noDelete: removing the process.env key is intentional (reproduces the unconfigured state)
 delete process.env.EVERDICT_JUDGE_MODEL;
-console.log("\n=== runAgentJob (judge env unset) — the judge is skipped, eval continues ===");
-const skipped = await runAgentJob(baseJob);
+console.log("\n=== runCaseJob (judge env unset) — the judge is skipped, eval continues ===");
+const skipped = await runCaseJob(baseJob);
 const skipJudge = showJudge("env X", skipped);
 
 const ok =
@@ -60,7 +60,7 @@ const ok =
 
 console.log(
   ok
-    ? "\n✅ the judge threads through the normal dispatch path (runAgentJob): with env set the real model verdicts the trace (pass), with env unset only the judge gets a skip score (eval continues). WebVoyager-style judge presets are scored automatically in a normal eval."
+    ? "\n✅ the judge threads through the normal dispatch path (runCaseJob): with env set the real model verdicts the trace (pass), with env unset only the judge gets a skip score (eval continues). WebVoyager-style judge presets are scored automatically in a normal eval."
     : "\n⚠️ does not match expectation",
 );
 process.exit(ok ? 0 : 1);

@@ -61,7 +61,7 @@ const SPEC = {
   traceSource: { kind: "mlflow", endpoint: MLFLOW_ENDPOINT },
 };
 
-/** @type {import("@everdict/contracts").AgentJob} */
+/** @type {import("@everdict/contracts").CaseJob} */
 const JOB = {
   harness: { id: SPEC.id, version: SPEC.version },
   evalCase: {

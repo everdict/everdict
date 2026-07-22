@@ -1,4 +1,4 @@
-import type { AgentJob, CaseResult } from "@everdict/contracts";
+import type { CaseJob, CaseResult } from "@everdict/contracts";
 import { detectCapabilities } from "./capabilities.js";
 import { runLeasedJob } from "./run-leased-job.js";
 import type { RunnerLoopStatus } from "./runner-loop.js";
@@ -22,7 +22,7 @@ export interface RunnerHostStatus {
 
 // Completion notice for one job — consumed by the GUI (OS notifications etc.). On failure it carries error, on success result.
 export interface RunnerJobDone {
-  job: AgentJob;
+  job: CaseJob;
   result?: CaseResult;
   error?: Error;
 }
@@ -46,7 +46,7 @@ export interface RunnerHostOpts {
   // Test injection points
   connect?: ConnectClient; // default mcpConnect(new URL("/mcp", apiUrl), token)
   runJob?: (
-    job: AgentJob,
+    job: CaseJob,
     opts?: { signal?: AbortSignal; reportScreen?: (frameBase64: string) => Promise<void> },
   ) => Promise<CaseResult>; // default runLeasedJob (signal = lease cancel; reportScreen = live-screen frames)
   detect?: () => Promise<string[]>; // default detectCapabilities
@@ -92,7 +92,7 @@ export class RunnerHost {
     const dockerAvailable = this.capabilities.includes("docker");
     const baseRun =
       this.opts.runJob ??
-      ((job: AgentJob, opts?: { signal?: AbortSignal; reportScreen?: (frameBase64: string) => Promise<void> }) =>
+      ((job: CaseJob, opts?: { signal?: AbortSignal; reportScreen?: (frameBase64: string) => Promise<void> }) =>
         runLeasedJob(job, {
           dockerAvailable,
           log: this.opts.log,
@@ -101,7 +101,7 @@ export class RunnerHost {
         }));
     // Wrap job start/finish to track activeJobs (the basis for running/idle events) + emit a completion notice.
     const runJob = async (
-      job: AgentJob,
+      job: CaseJob,
       opts?: { signal?: AbortSignal; reportScreen?: (frameBase64: string) => Promise<void> },
     ): Promise<CaseResult> => {
       this.activeJobs++;

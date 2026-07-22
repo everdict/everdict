@@ -20,8 +20,8 @@
 >   ever lands on my machine (my login, my files), and a run there executes **as me**. The lease queue is keyed by
 >   `(owner, runnerId)` — workspace-independent, so one runner serves **all** of its owner's workspaces
 >   (cross-workspace); each job keeps its own `tenant` for result/budget attribution.
-> - **D4 — packaging is a CLI subcommand.** `everdict runner` (in `apps/cli`) reuses `@everdict/agent`'s
->   `runAgentJob` verbatim. No new app; no GUI (a desktop client is a later, optional slice).
+> - **D4 — packaging is a CLI subcommand.** `everdict runner` (in `apps/cli`) reuses `@everdict/job-runner`'s
+>   `runCaseJob` verbatim. No new app; no GUI (a desktop client is a later, optional slice).
 > - **D5 — transport is MCP.** The runner is an automated client → it rides the existing OAuth/API-key
 >   `/mcp` (Streamable HTTP). Lease/result/heartbeat are **MCP tools**, consistent with CLAUDE.md's
 >   "Humans→Keycloak; agents→API keys/MCP".
@@ -53,18 +53,18 @@ Three things make this awkward under the current model:
    because eval = untrusted code on Everdict's infra. On a user's own host, isolation is the *user's* concern, and
    the *user's* subscription login pays — not the workspace's keys/budget.
 
-**The unifying insight:** the unit of work already exists and is location-agnostic. `runAgentJob(job)`
-(`packages/agent/src/run.ts`) takes an `AgentJob` and runs `runCase` over `LocalDriver` — and `LocalDriver`
+**The unifying insight:** the unit of work already exists and is location-agnostic. `runCaseJob(job)`
+(`packages/job-runner/src/run.ts`) takes an `CaseJob` and runs `runCase` over `LocalDriver` — and `LocalDriver`
 already "uses the machine's existing login (no API key)". We only need to (a) let the *user's* machine pull that
 job instead of the control plane pushing it, and (b) scope the runtime **personally** so it's the user's own
 box, identity, and bill.
 
 ## Current state — verified
 
-- **Unit of work** — `runAgentJob(job: AgentJob): Promise<CaseResult>` (`packages/agent/src/run.ts:13`) runs a
+- **Unit of work** — `runCaseJob(job: CaseJob): Promise<CaseResult>` (`packages/job-runner/src/run.ts:13`) runs a
   whole case over `LocalDriver` (`opts.driver ?? new LocalDriver()`). `run.ts:15` already documents a dev
   fallback for "when dispatching LocalBackend directly" — exactly the self-hosted shape, minus the pull transport.
-- **Job wire format** — `AgentJob` (`packages/core/src/execution/agent-job.ts`) is Zod-validated and base64-JSON
+- **Job wire format** — `CaseJob` (`packages/contracts/src/execution/case-job.ts`) is Zod-validated and base64-JSON
   serializable; it already carries `tenant`, `meterUsage`, transient `repoToken`, etc. `CaseResult` is the
   return contract. The push path scrapes `__EVERDICT_RESULT__` from logs; the pull path posts `CaseResult` JSON
   directly (Zod-validated at the MCP boundary) — cleaner, no sentinel.
@@ -103,8 +103,8 @@ Dispatch direction flips from push to **pull**, absorbed as one new `Backend` so
 untouched:
 
 ```
-Today (push):  control plane → Backend.dispatch(job) → Nomad/K8s runs the agent image → parse __EVERDICT_RESULT__
-Self-hosted:   member's `everdict runner` → MCP lease_job (long-call) → runAgentJob(job) locally → MCP submit_result
+Today (push):  control plane → Backend.dispatch(job) → Nomad/K8s runs the job-runner image → parse __EVERDICT_RESULT__
+Self-hosted:   member's `everdict runner` → MCP lease_job (long-call) → runCaseJob(job) locally → MCP submit_result
 ```
 
 - **`SelfHostedBackend`** (`@everdict/backends`) — `dispatch(job)` does **not** push to a cluster. It enqueues the
@@ -118,7 +118,7 @@ Self-hosted:   member's `everdict runner` → MCP lease_job (long-call) → runA
   `Scheduler`. No self-hosted runner registered / not owned → no fallthrough to a cluster (explicit error — a
   self-hosted pin is intentional).
 - **MCP runner tools** (subject-scoped, no role gate — personal, like `list_api_keys`):
-  - `lease_job {runnerId, capabilities, waitMs}` → long-call returning the next `AgentJob` pinned to a
+  - `lease_job {runnerId, capabilities, waitMs}` → long-call returning the next `CaseJob` pinned to a
     self-runner **owned by the leasing subject**, or empty on timeout (the runner re-polls). Double-sided
     enforcement: the queue only holds the owner's jobs, and the tool only serves the owner's queue.
   - `submit_result {runnerId, jobId, result}` → Zod-validated `CaseResult`; resolves the parked `dispatch`
@@ -143,14 +143,14 @@ Self-hosted:   member's `everdict runner` → MCP lease_job (long-call) → runA
 
 | Piece | Status |
 |---|---|
-| `runAgentJob` / `AgentJob` / `CaseResult` (base64-JSON) | **reused verbatim** — the whole point |
+| `runCaseJob` / `CaseJob` / `CaseResult` (base64-JSON) | **reused verbatim** — the whole point |
 | API-key auth (`@everdict/auth`), `Scheduler`/`FairQueue`/`BudgetTracker`, `RunStore`/`ScorecardStore` | **reused** |
 | Runtime selector → `placement.target` → `RuntimeDispatcher` | **reused** (new `self:` branch) |
 | Personal ownership model (`owner=subject`, account page, encrypted at rest, no role gate) | **mirrored** from Connected accounts (since removed in S6c) |
 | `RunnerStore` (`@everdict/db`) + pairing | **new** |
 | `SelfHostedBackend` + owner-scoped lease queue | **new** (`@everdict/backends`) |
 | MCP tools `lease_job`/`submit_result`/`heartbeat_job` + pairing tools (BFF parity) | **new** (`apps/api`) |
-| `everdict runner` CLI (MCP client driving `runAgentJob`) | **new** (`apps/cli`) |
+| `everdict runner` CLI (MCP client driving `runCaseJob`) | **new** (`apps/cli`) |
 
 ## Slices (all shipped; `pnpm` gates + live e2e green at each step)
 
@@ -161,13 +161,13 @@ Self-hosted:   member's `everdict runner` → MCP lease_job (long-call) → runA
    manage-only (list/live status/revoke + a desktop-download CTA). The `POST /runners` API/MCP surface is
    unchanged and is the **headless path**: pair with an API key, then `everdict runner --pair <rnr_…>`.
 2. ✅ **Runtime selector merge + `self:` routing** — scorecard Run form lists the caller's own runners as
-   `self:<runnerId>`; `RuntimeDispatcher` recognizes `self:` (resolve + owner-check → 404 if unowned). `AgentJob.submittedBy`
+   `self:<runnerId>`; `RuntimeDispatcher` recognizes `self:` (resolve + owner-check → 404 if unowned). `CaseJob.submittedBy`
    threads the subject. (Shipped with a stub backend, replaced in slice 3.)
 3. ✅ **`SelfHostedBackend` + `RunnerHub` lease queue** — in-memory owner-scoped FIFO park queue; `dispatch` parks +
    awaits the post-back; `capacity()` = `maxConcurrent`. `queueTimeoutMs` rejects unleased jobs.
 4. ✅ **MCP runner protocol + `everdict runner`** — `runnerAuthenticator` (pairing token `rnr_` → `Principal{via:"runner",
    runnerId}`, least-privilege); MCP `lease_job`/`submit_job_result`/`fail_job`/`heartbeat_job` (runner-token only);
-   CLI authenticates to `/mcp` (StreamableHTTP), leases in a loop, runs `runAgentJob` (this machine's login), posts back.
+   CLI authenticates to `/mcp` (StreamableHTTP), leases in a loop, runs `runCaseJob` (this machine's login), posts back.
 5. ✅ **Provenance + budget** — `CaseResult.provenance{ranOn,runner,by}` stamped control-plane-side by `SelfHostedBackend`;
    self-hosted runs skip the workspace usd/tokens budget (own login pays; `runs` still counted). Isolation-bypass is by
    construction (never routes through `TrustZone`).

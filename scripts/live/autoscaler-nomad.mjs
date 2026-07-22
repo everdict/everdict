@@ -4,7 +4,7 @@
 // the scheduler launches only 1, queuing the rest → the autoscaler sees the backlog and raises slots up to MAX,
 // concurrent allocs grow, and when the queue drains it scales back down to MIN. A poller observes the actual concurrent alloc count.
 //
-// Usage: NOMAD_ADDR=http://127.0.0.1:4646 EVERDICT_AGENT_IMAGE=everdict-agent:local node scripts/live/autoscaler-nomad.mjs
+// Usage: NOMAD_ADDR=http://127.0.0.1:4646 EVERDICT_AGENT_IMAGE=everdict-job-runner:local node scripts/live/autoscaler-nomad.mjs
 
 import {
   Autoscaler,
@@ -16,7 +16,7 @@ import {
 } from "../../packages/backends/dist/index.js";
 
 const NOMAD_ADDR = process.env.NOMAD_ADDR ?? "http://127.0.0.1:4646";
-const IMAGE = process.env.EVERDICT_AGENT_IMAGE ?? "everdict-agent:local";
+const IMAGE = process.env.EVERDICT_AGENT_IMAGE ?? "everdict-job-runner:local";
 const N = Number(process.env.N ?? "8");
 const MIN = Number(process.env.MIN ?? "1");
 const MAX = Number(process.env.MAX ?? "4");

@@ -1,6 +1,6 @@
 import { RunService } from "@everdict/application-control";
 import type { Dispatcher } from "@everdict/backends";
-import { type AgentJob, BadRequestError, type CaseResult, type EvalCase, type HarnessSpec } from "@everdict/contracts";
+import { BadRequestError, type CaseJob, type CaseResult, type EvalCase, type HarnessSpec } from "@everdict/contracts";
 import { InMemoryRecordingStore, InMemoryRunStore, type RunRecord } from "@everdict/db";
 import { inMemoryBudget } from "@everdict/domain";
 import { describe, expect, it, vi } from "vitest";
@@ -14,7 +14,7 @@ const CASE: EvalCase = {
   tags: [],
 };
 
-function resultFor(job: AgentJob, usd = 0): CaseResult {
+function resultFor(job: CaseJob, usd = 0): CaseResult {
   return {
     caseId: job.evalCase.id,
     harness: `${job.harness.id}@${job.harness.version}`,
@@ -121,7 +121,7 @@ describe("RunService", () => {
 
   it("when a runtime is given, injects it as the case's placement.target and dispatches (same symmetry as scorecard)", async () => {
     const store = new InMemoryRunStore();
-    const jobs: AgentJob[] = [];
+    const jobs: CaseJob[] = [];
     const capture: Dispatcher = {
       async dispatch(job) {
         jobs.push(job);
@@ -214,7 +214,7 @@ describe("RunService", () => {
   });
 
   it("an inline harnessSpec (service-internal synthetic harness, e.g. the code-judge dry-run wrapper) rides the job without consulting the registry", async () => {
-    const jobs: AgentJob[] = [];
+    const jobs: CaseJob[] = [];
     const capture: Dispatcher = {
       async dispatch(job) {
         jobs.push(job);
@@ -314,7 +314,7 @@ describe("RunService", () => {
   });
 
   it("judge model: request override > workspace default > none, carries the decided value as job.judge", async () => {
-    const seen: Array<AgentJob["judge"]> = [];
+    const seen: Array<CaseJob["judge"]> = [];
     const dispatcher: Dispatcher = {
       async dispatch(job) {
         seen.push(job.judge);
@@ -377,7 +377,7 @@ describe("RunService", () => {
   });
 
   it("private repo: env.source.connectionId → resolved via repoTokenFor and carried as job.repoToken", async () => {
-    const seen: Array<AgentJob["repoToken"]> = [];
+    const seen: Array<CaseJob["repoToken"]> = [];
     const dispatcher: Dispatcher = {
       async dispatch(job) {
         seen.push(job.repoToken);
@@ -498,7 +498,7 @@ describe("RunService — single-run durability (P4, docs/architecture/batch-resi
 
   it("resume with an adopted result settles the run directly — zero re-dispatch", async () => {
     const store = new InMemoryRunStore();
-    const jobs: AgentJob[] = [];
+    const jobs: CaseJob[] = [];
     const capture: Dispatcher = {
       async dispatch(job) {
         jobs.push(job);
@@ -521,7 +521,7 @@ describe("RunService — single-run durability (P4, docs/architecture/batch-resi
 
   it("resume without an adopted result re-dispatches from the persisted caseSpec to the same runtime", async () => {
     const store = new InMemoryRunStore();
-    const jobs: AgentJob[] = [];
+    const jobs: CaseJob[] = [];
     const capture: Dispatcher = {
       async dispatch(job) {
         jobs.push(job);
@@ -551,7 +551,7 @@ describe("RunService — single-run durability (P4, docs/architecture/batch-resi
 
   it("resume returns false for a legacy record with no caseSpec — the caller keeps the tombstone path", async () => {
     const store = new InMemoryRunStore();
-    const jobs: AgentJob[] = [];
+    const jobs: CaseJob[] = [];
     const capture: Dispatcher = {
       async dispatch(job) {
         jobs.push(job);
@@ -578,7 +578,7 @@ describe("RunService — single-run durability (P4, docs/architecture/batch-resi
 describe("RunService — live trace correlation (observability ③)", () => {
   it("stamps the control-plane-minted job runId (evd-run-<record id>) so observers can correlate mid-run", async () => {
     const store = new InMemoryRunStore();
-    const jobs: AgentJob[] = [];
+    const jobs: CaseJob[] = [];
     const capture: Dispatcher = {
       async dispatch(job) {
         jobs.push(job);
@@ -826,7 +826,7 @@ describe("RunService — terminal writes are domain-guarded (first terminal writ
     const rec = await svc.submit({ tenant: "acme", harness: { id: "scripted", version: "0" }, case: CASE });
 
     // When boot-recovery adoption settles the run first…
-    const adopted = resultFor({ evalCase: CASE, harness: rec.harness, tenant: "acme" } as AgentJob);
+    const adopted = resultFor({ evalCase: CASE, harness: rec.harness, tenant: "acme" } as CaseJob);
     await svc.resume((await store.get(rec.id)) as RunRecord, adopted);
     // …and the in-flight tracker later fails
     release?.();
@@ -846,10 +846,7 @@ describe("RunService — terminal writes are domain-guarded (first terminal writ
     await flush(); // normal completion → succeeded
 
     const before = await store.get(rec.id);
-    const late = resultFor(
-      { evalCase: CASE, harness: { id: "scripted", version: "0" }, tenant: "acme" } as AgentJob,
-      9,
-    );
+    const late = resultFor({ evalCase: CASE, harness: { id: "scripted", version: "0" }, tenant: "acme" } as CaseJob, 9);
     const outcome = await svc.resume(before as RunRecord, late);
     expect(outcome).toBe(false);
     expect(await store.get(rec.id)).toEqual(before); // untouched

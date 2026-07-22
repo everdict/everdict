@@ -61,7 +61,7 @@ export const CodeJudgeSpecSchema = z.object({
   language: z.enum(["python", "node"]),
   code: z.string().optional(), // inline source — frozen into this judge version
   entrypoint: z.string().optional(), // OR a script path inside `image` (a baked judge image)
-  image: z.string().optional(), // dedicated judge image (must be everdict-baked); absent = the default agent image
+  image: z.string().optional(), // dedicated judge image (must be everdict-baked); absent = the default job-runner image
   model: ModelBindingSchema.optional(), // the model the code may call — registered Model ref | raw model string
   provider: z.enum(["anthropic", "openai"]).optional(), // fallback provider for a RAW-STRING model
   timeoutSec: z.number().int().positive().default(600),

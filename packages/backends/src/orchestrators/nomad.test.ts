@@ -1,6 +1,6 @@
 import { EventEmitter } from "node:events";
 import { RESULT_SENTINEL } from "@everdict/contracts";
-import { type AgentJob, BadRequestError, type CaseResult } from "@everdict/contracts";
+import { BadRequestError, type CaseJob, type CaseResult } from "@everdict/contracts";
 import { perTenantTrustZones, staticTrustZones } from "@everdict/domain";
 import { describe, expect, it, vi } from "vitest";
 import { staticSecrets } from "../policy/secrets.js";
@@ -21,7 +21,7 @@ import {
   summarizeAllocFailure,
 } from "./nomad.js";
 
-const JOB: AgentJob = {
+const JOB: CaseJob = {
   harness: { id: "claude-code", version: "latest" },
   evalCase: {
     id: "c1",
@@ -45,31 +45,31 @@ describe("buildNomadJob", () => {
   it("puts the image, isolation runtime, secrets, and job payload into the task spec", () => {
     const spec = buildNomadJob(JOB, {
       addr: "http://nomad:4646",
-      image: "reg/everdict-agent:1",
+      image: "reg/everdict-job-runner:1",
       secretEnv: { CLAUDE_CODE_OAUTH_TOKEN: "tok" },
       runtime: "runsc",
     });
     const task = spec.Job.TaskGroups[0]?.Tasks[0];
-    expect(task?.Config.image).toBe("reg/everdict-agent:1");
+    expect(task?.Config.image).toBe("reg/everdict-job-runner:1");
     expect(task?.Config.runtime).toBe("runsc");
     expect(task?.Env.CLAUDE_CODE_OAUTH_TOKEN).toBe("tok");
-    const decoded = JSON.parse(Buffer.from(task?.Env.EVERDICT_AGENT_JOB ?? "", "base64").toString("utf8"));
+    const decoded = JSON.parse(Buffer.from(task?.Env.EVERDICT_CASE_JOB ?? "", "base64").toString("utf8"));
     expect(decoded.evalCase.id).toBe("c1");
     expect(decoded.harness.id).toBe("claude-code");
   });
 
   it("renders a docker auth block when case.image is a workspace-registry one (job.registryAuth)", () => {
-    const withAuth: AgentJob = {
+    const withAuth: CaseJob = {
       ...JOB,
       evalCase: { ...JOB.evalCase, image: "ghcr.io/acme/sbench:v1" },
       registryAuth: { host: "ghcr.io", username: "bot", password: "pull-tok" },
     };
-    const spec = buildNomadJob(withAuth, { addr: "http://nomad:4646", image: "reg/everdict-agent:1" });
+    const spec = buildNomadJob(withAuth, { addr: "http://nomad:4646", image: "reg/everdict-job-runner:1" });
     expect(spec.Job.TaskGroups[0]?.Tasks[0]?.Config.auth).toEqual([{ username: "bot", password: "pull-tok" }]);
-    // On a host mismatch (e.g. the default agent image), auth isn't rendered — don't send credentials to an unrelated registry.
+    // On a host mismatch (e.g. the default job-runner image), auth isn't rendered — don't send credentials to an unrelated registry.
     const mismatch = buildNomadJob(
       { ...JOB, registryAuth: { host: "ghcr.io", password: "p" } },
-      { addr: "http://nomad:4646", image: "reg/everdict-agent:1" },
+      { addr: "http://nomad:4646", image: "reg/everdict-job-runner:1" },
     );
     expect(mismatch.Job.TaskGroups[0]?.Tasks[0]?.Config.auth).toBeUndefined();
   });
@@ -79,7 +79,7 @@ describe("buildNomadJob", () => {
       { ...JOB, judge: { provider: "openai", model: "gpt-5.4-mini" } },
       {
         addr: "http://nomad:4646",
-        image: "reg/everdict-agent:1",
+        image: "reg/everdict-job-runner:1",
         secretEnv: { OPENAI_API_KEY: "k", OPENAI_BASE_URL: "http://litellm" },
       },
     );

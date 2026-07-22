@@ -22,11 +22,11 @@ injects it into the job (Nomad alloc env / K8s Secret / Windows secure env):
 Put it in `everdict/.env` (gitignored), then run against a sandbox backend, e.g. Nomad:
 ```bash
 pnpm everdict run --backend nomad --nomad-addr http://<nomad>:4646 \
-  --image <registry>/everdict-agent:<tag> --runtime runsc --task "..."
+  --image <registry>/everdict-job-runner:<tag> --runtime runsc --task "..."
 ```
 
 ### Sandbox requirements
-- The **agent image** (`packages/agent/Dockerfile`) bakes Node + git + `@anthropic-ai/claude-code`,
+- The **job-runner image** (`packages/job-runner/Dockerfile`) bakes Node + git + `@anthropic-ai/claude-code`,
   so the dispatched job already has the harness toolchain. Build & push it to your internal registry.
 
 ### ⚠ Security

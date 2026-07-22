@@ -23,7 +23,7 @@ for evaluating your own agent.
 {
   "kind": "command",
   "id": "my-agent", "version": "1.0.0",
-  "image": "…",                         // optional dispatch image (default = the agent image)
+  "image": "…",                         // optional dispatch image (default = the job-runner image)
   "setup": ["pip install --quiet my-agent==1.0.0"],   // run once in the sandbox before the task
   "command": "my-agent --message {{task}} --model {{model}} .",
   "model": "sonnet",

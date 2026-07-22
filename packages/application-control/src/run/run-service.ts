@@ -1,6 +1,6 @@
 import {
-  type AgentJob,
   AppError,
+  type CaseJob,
   type CaseRecording,
   type CaseResult,
   type EvalCase,
@@ -92,7 +92,7 @@ export interface RunServiceDeps {
   judgeFor?: (tenant: string) => JudgeRunConfig | undefined | Promise<JudgeRunConfig | undefined>;
   // Token resolution for a private-repo seed — evalCase.env.source.connectionId → an external account (Connected accounts) token.
   // The connection is personally owned, so resolve by owner (= submitter subject) ("clone with my connection"). If unset/unresolved, public clone.
-  // The token is carried transiently on the job (AgentJob.repoToken) only and never stored on the record/case.
+  // The token is carried transiently on the job (CaseJob.repoToken) only and never stored on the record/case.
   repoTokenFor?: (owner: string, connectionId: string) => Promise<string | undefined>;
   // Workspace-owned GitHub App token (preferred) — if the case git URL owner matches a workspace installation, issued via that App.
   installationTokenFor?: (workspace: string, gitUrl: string) => Promise<string | undefined>;
@@ -313,7 +313,7 @@ export class RunService {
     return { record, recording };
   }
 
-  // CP-minted correlation id — the same derivation the dispatch stamps on AgentJob.runId (evd-run-<id> for a single
+  // CP-minted correlation id — the same derivation the dispatch stamps on CaseJob.runId (evd-run-<id> for a single
   // run, evd-<batchId>-<caseId> for a scorecard child). Shared by the pushed-frame + pushed-log lookups (both keyed by
   // the runId the runner reports with).
   private static runIdFor(record: RunRecord): string {
@@ -367,7 +367,7 @@ export class RunService {
       input.meterUsage ?? (this.deps.meterUsageFor ? await this.deps.meterUsageFor(input.tenant) : false);
     // Judge model: request override → workspace default (DB) → none (the judge grader is skipped). The key is injected by the backend as secretEnv.
     const judge = input.judge ?? (this.deps.judgeFor ? await this.deps.judgeFor(input.tenant) : undefined);
-    const job: AgentJob = {
+    const job: CaseJob = {
       evalCase: input.case,
       harness: input.harness,
       tenant: input.tenant,

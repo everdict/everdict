@@ -6,7 +6,7 @@ paths: "packages/suite/**"
 Batch evaluation + version regression over **any** backend. Pure functions over `Scorecard`; no I/O, no SDKs.
 The deep domain model (scoring, judges, leaderboard, views) is in skill `evaluation`. See `docs/suites.md`.
 
-- **`runSuite(dataset, harness, dispatch)`** fans each case through a `Dispatch` (`AgentJob → CaseResult`) — depend
+- **`runSuite(dataset, harness, dispatch)`** fans each case through a `Dispatch` (`CaseJob → CaseResult`) — depend
   on that interface, not a concrete Backend/Scheduler. Per-case isolation: one case failing must not sink the batch.
 - **Scoring is Grader-only.** `caseVerdict` derives per-case pass from `scores` by **authority rank**
   (ground-truth > objective > judge) — don't reinvent pass logic elsewhere. `summarizeScorecard` auto-emits

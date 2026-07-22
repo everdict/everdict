@@ -21,7 +21,7 @@ then at high zoom (one diagram per module). Companion to
   - **in-sandbox eval loop** — `runCase` drives Driver · Environment · Harness · Grader.
   - **placement / control plane** — Backend · Scheduler · Orchestrator · the HTTP/MCP surface dispatch
     that loop to isolated infra and persist the result.
-- The pivotal data contracts that flow between *every* module: `AgentJob` (in) and `CaseResult` (out),
+- The pivotal data contracts that flow between *every* module: `CaseJob` (in) and `CaseResult` (out),
   with `TraceEvent[]` as the normalized currency every metric is derived from.
 
 ---
@@ -52,7 +52,7 @@ flowchart TD
   end
 
   subgraph L3["dispatched unit (self-contained worker)"]
-    agent["@everdict/agent"]
+    agent["@everdict/job-runner"]
   end
 
   subgraph L4["placement"]
@@ -133,14 +133,14 @@ flowchart TD
 
 ## 1.2 The eval loop (runtime collaboration, end-to-end)
 
-The single most important sequence: one `AgentJob` → one `CaseResult`. Same loop whether dispatched
+The single most important sequence: one `CaseJob` → one `CaseResult`. Same loop whether dispatched
 locally, to Nomad/K8s, or durably via Temporal — only the *placement* layer changes.
 
 ```mermaid
 sequenceDiagram
   participant Caller as Orchestrator / Router / Scheduler
   participant Backend
-  participant Agent as @everdict/agent
+  participant Agent as @everdict/job-runner
   participant Runner as @everdict/application-execution
   participant Driver as LocalDriver
   participant Compute as ComputeHandle
@@ -148,9 +148,9 @@ sequenceDiagram
   participant Harness as EvaluableHarness
   participant Grader as Grader[]
 
-  Caller->>Backend: dispatch(AgentJob)
+  Caller->>Backend: dispatch(CaseJob)
   Note over Backend: LocalBackend runs in-process.<br/>Nomad/K8s submit a Job, then parse<br/>the EVERDICT_RESULT stdout sentinel
-  Backend->>Agent: runAgentJob(job)
+  Backend->>Agent: runCaseJob(job)
   Agent->>Agent: makeHarness(id, ver, spec?) and makeGraders(specs)
   Agent->>Runner: runCase(evalCase, deps)
   Runner->>Driver: provision(ComputeSpec)
@@ -210,7 +210,7 @@ flowchart TD
   jr --> SecretStore["SecretStore (model-judge keys)"]
   authn --> TenantKeyStore
 
-  Backend --> agentjob["@everdict/agent → runCase loop (see 1.2)"]
+  Backend --> agentjob["@everdict/job-runner → runCase loop (see 1.2)"]
 ```
 
 ---
@@ -257,13 +257,13 @@ classDiagram
   class Backend {
     <<interface>>
     +capacity() BackendCapacity
-    +dispatch(AgentJob) CaseResult
+    +dispatch(CaseJob) CaseResult
   }
   class Dispatcher {
     <<interface>>
-    +dispatch(AgentJob) CaseResult
+    +dispatch(CaseJob) CaseResult
   }
-  class AgentJob {
+  class CaseJob {
     +evalCase
     +harness
     +harnessSpec
@@ -296,8 +296,8 @@ classDiagram
   EvaluableHarness ..> ComputeHandle
   EvaluableHarness ..> TraceEvent
   Grader ..> TraceEvent
-  AgentJob *-- EvalCase
-  AgentJob *-- HarnessSpec
+  CaseJob *-- EvalCase
+  CaseJob *-- HarnessSpec
   CaseResult *-- TraceEvent
   note for TraceEvent "kind = message · llm_call · tool_call · tool_result · env_action · error"
   note for HarnessSpec "kind = process · service · command"
@@ -341,7 +341,7 @@ classDiagram
 
 - **`provision`** → `mkdtemp(/tmp/everdict-…)` → `LocalComputeHandle(root)`.
 - **`exec`** runs via `child_process` (non-zero exit ≠ throw); **`dispose`** = `rm -rf root`.
-- **Called by:** `@everdict/application-execution` (`runCase`) and therefore `@everdict/agent`.
+- **Called by:** `@everdict/application-execution` (`runCase`) and therefore `@everdict/job-runner`.
 
 ---
 
@@ -367,7 +367,7 @@ classDiagram
 
 - **`seed`** — inline `files` map (`git init` + commit a baseline) **or** `git clone --depth 1` + `checkout ref` + run `setup[]`.
 - **`snapshot`** — `git add -A` → `git diff --cached HEAD` (+ `--name-only`, + `rev-parse HEAD`) → `RepoSnapshot{diff, changedFiles, headSha}`.
-- **Called by:** `@everdict/application-execution`; instantiated by `@everdict/agent`. Browser/os-use add a new `Environment` variant, no core rewrite.
+- **Called by:** `@everdict/application-execution`; instantiated by `@everdict/job-runner`. Browser/os-use add a new `Environment` variant, no core rewrite.
 
 ---
 
@@ -448,7 +448,7 @@ classDiagram
   When `meterUsage` and `trace.kind="none"`, it spins a usage-proxy and emits a synthetic `llm_call`
   carrying the recovered tokens/USD.
 - **ScriptedHarness** — deterministic steps; lets the whole eval loop run with no LLM/key.
-- **Selected by:** `@everdict/agent`'s `makeHarness(id, version, spec?)`.
+- **Selected by:** `@everdict/job-runner`'s `makeHarness(id, version, spec?)`.
 
 ---
 
@@ -513,29 +513,29 @@ flowchart LR
 ```
 
 - **Imports** the `@everdict/contracts` interfaces plus the concrete adapter *types*; the *instances* are injected
-  by the caller (`@everdict/agent`). This keeps the runner adapter-agnostic.
+  by the caller (`@everdict/job-runner`). This keeps the runner adapter-agnostic.
 - **Becomes** a Temporal activity unchanged later (pure async, no shared state).
 
 ---
 
-## `@everdict/agent` — the dispatched unit (self-contained worker)
+## `@everdict/job-runner` — the dispatched unit (self-contained worker)
 
-**Role.** `runAgentJob(AgentJob) → CaseResult`: assemble concrete adapters from the job, run `runCase`,
+**Role.** `runCaseJob(CaseJob) → CaseResult`: assemble concrete adapters from the job, run `runCase`,
 emit the result behind the `EVERDICT_RESULT` stdout sentinel.
 
 ```mermaid
 flowchart TD
-  job[AgentJob] --> runAgentJob
-  runAgentJob --> makeHarness["makeHarness(id, ver, spec?)"]
-  runAgentJob --> makeGraders["makeGraders(specs)"]
+  job[CaseJob] --> runCaseJob
+  runCaseJob --> makeHarness["makeHarness(id, ver, spec?)"]
+  runCaseJob --> makeGraders["makeGraders(specs)"]
   makeHarness --> H["@everdict/harnesses<br/>Claude / Command / Scripted"]
   makeGraders --> G["@everdict/graders"]
-  runAgentJob --> runCase["@everdict/application-execution.runCase"]
+  runCaseJob --> runCase["@everdict/application-execution.runCase"]
   runCase --> LD["new LocalDriver()"]
   runCase --> RE["new RepoEnvironment()"]
   runCase --> H
   runCase --> G
-  runAgentJob -->|"runContextFromEnv / collectAuthEnv"| ctx[RunContext]
+  runCaseJob -->|"runContextFromEnv / collectAuthEnv"| ctx[RunContext]
   runCase --> res[CaseResult]
 ```
 
@@ -588,7 +588,7 @@ classDiagram
   Scheduler --> BudgetTracker
   Router --> BackendRegistry
   Autoscaler --> Scheduler
-  LocalBackend ..> agent : runAgentJob in-process
+  LocalBackend ..> agent : runCaseJob in-process
   NomadBackend ..> TrustZonePolicy
   NomadBackend ..> SecretProvider
   K8sBackend ..> TrustZonePolicy
@@ -624,7 +624,7 @@ sequenceDiagram
   pools are keyed by zone and never shared across tenants.
 - **`buildRuntimeBackend(RuntimeSpec, {secretEnv})`** turns a tenant-registered runtime into a live Backend
   (credentials injected via `secretEnv`, never in the spec). `buildRegistry(BackendsConfig)` builds the static set.
-- **Calls:** `@everdict/agent` (`LocalBackend`). **Called by:** `@everdict/orchestrator`, `apps/api`, `apps/cli`.
+- **Calls:** `@everdict/job-runner` (`LocalBackend`). **Called by:** `@everdict/orchestrator`, `apps/api`, `apps/cli`.
 
 ---
 
@@ -681,7 +681,7 @@ Backend/Router/Scheduler/Orchestrator plugs in.
 
 ```mermaid
 flowchart LR
-  runSuite -->|"cases.map → AgentJob list"| jobs
+  runSuite -->|"cases.map → CaseJob list"| jobs
   jobs -->|mapLimit concurrency| Dispatch["Dispatch = job to CaseResult"]
   Dispatch --> results["CaseResult list"]
   results --> Scorecard
@@ -941,7 +941,7 @@ flowchart TD
 ```
 
 - **`POST /runs`** → `authorize(principal,'runs:submit')` → `RunService.submit`: `budget.admit` →
-  `RunStore.create(queued)` → fire-and-forget `track` (resolve `HarnessSpec`, build `AgentJob`,
+  `RunStore.create(queued)` → fire-and-forget `track` (resolve `HarnessSpec`, build `CaseJob`,
   `dispatch`, `budget.settle`, `RunStore.update`) → 202 + run id. Optional webhook.
 - **`POST /scorecards`** → `ScorecardService`: resolve `Dataset` + harness → `runSuite(…, dispatch)` →
   `applyJudges` (per trace, via `JudgeRunner`: model judges call the provider with the tenant's
@@ -966,16 +966,16 @@ flowchart LR
   orch -->|temporal| TO["TemporalOrchestrator"]
   DO --> Router["Router(buildRegistry(config))"]
   Router --> B["LocalBackend / NomadBackend"]
-  run --> job[AgentJob] --> DO
+  run --> job[CaseJob] --> DO
 
   worker["everdict worker"] --> runWorker["@everdict/orchestrator.runWorker"]
   suite["everdict suite"] --> runSuite["@everdict/application-control.runSuite"]
   suite --> diff["diffScorecards (--baseline)"]
 ```
 
-- **`everdict run`** builds an `AgentJob` and an `Orchestrator` (Direct over `Router`, or Temporal), calls `run(job)`.
+- **`everdict run`** builds an `CaseJob` and an `Orchestrator` (Direct over `Router`, or Temporal), calls `run(job)`.
 - **`everdict worker`** → `runWorker` (the durable side). **`everdict suite`** → `runSuite` (+ regression diff).
-- **Depends on:** `@everdict/orchestrator`, `@everdict/backends`, `@everdict/agent`, `@everdict/domain`, `@everdict/contracts`.
+- **Depends on:** `@everdict/orchestrator`, `@everdict/backends`, `@everdict/job-runner`, `@everdict/domain`, `@everdict/contracts`.
 
 ---
 

@@ -9,7 +9,7 @@
 //   O4 cancel storm  — 5 of 10 in-flight batches cancelled: they terminate as cancelled, their queued
 //                      work is reclaimed, the surviving 5 complete 8/8, the fleet stays healthy;
 //   O7 runtime shard — runtime:"self,<nomad>" splits ONE batch across the self-hosted pool AND a real
-//                      Nomad runtime (agent image) — both lanes execute and every case passes
+//                      Nomad runtime (job-runner image) — both lanes execute and every case passes
 //                      (skipped unless Nomad answers at NOMAD_ADDR);
 //   O5 backpressure  — a flood beyond EVERDICT_RUNNER_MAX_QUEUE fails the overflow FAST with the
 //                      explicit queue-full error (never a silent pile-up), every batch reaches a
@@ -20,10 +20,10 @@
 //   O6 rerun lineage — a finished batch reruns as a NEW record carrying origin.retryOf, and passes.
 //
 // Usage: node scripts/live/orchestration-torture.mjs   (docker + api/cli/self-hosted-runner dists built;
-//   Nomad at NOMAD_ADDR [default http://127.0.0.1:4646] + everdict-agent:slim enable O7). ~15-20 min.
+//   Nomad at NOMAD_ADDR [default http://127.0.0.1:4646] + everdict-job-runner:slim enable O7). ~15-20 min.
 //   ⚠ O7 on a dev Nomad: the docker driver's image GC DELETES locally-built images after allocs die —
 //   run `nomad agent -dev -config <hcl with plugin "docker" { config { gc { image = false } } }>` or
-//   the agent image silently vanishes between runs (pull access denied → spillover hides the lane).
+//   the job-runner image silently vanishes between runs (pull access denied → spillover hides the lane).
 import { execFileSync, spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
 import process from "node:process";
@@ -96,12 +96,12 @@ let nomadUp = false;
 try {
   nomadUp = (await fetch(`${NOMAD}/v1/status/leader`)).ok;
 } catch {}
-if (nomadUp && !sh("docker", ["images", "-q", process.env.AGENT_IMAGE ?? "everdict-agent:slim"]).trim()) {
+if (nomadUp && !sh("docker", ["images", "-q", process.env.AGENT_IMAGE ?? "everdict-job-runner:slim"]).trim()) {
   // A dev Nomad's docker image GC deletes locally-built images after allocs die (see the header) — an
-  // absent agent image would make every O7 nomad case fail-pull and spill over to self, silently
+  // absent job-runner image would make every O7 nomad case fail-pull and spill over to self, silently
   // voiding the phase. Skip loudly instead.
   console.log(
-    "  ⚠ agent image missing locally (nomad image GC?) — O7 skipped; rebuild it and disable the driver's image GC",
+    "  ⚠ job-runner image missing locally (nomad image GC?) — O7 skipped; rebuild it and disable the driver's image GC",
   );
   nomadUp = false;
 }
@@ -182,7 +182,7 @@ try {
       id: "nomad-t",
       version: "1.0.0",
       addr: NOMAD,
-      image: process.env.AGENT_IMAGE ?? "everdict-agent:slim",
+      image: process.env.AGENT_IMAGE ?? "everdict-job-runner:slim",
     });
     check(r.status < 300, `nomad runtime registered for O7 (${r.status})`);
   }

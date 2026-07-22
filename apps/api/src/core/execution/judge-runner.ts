@@ -1,6 +1,6 @@
 import type { JudgeRunner } from "@everdict/application-control";
 import type {
-  AgentJob,
+  CaseJob,
   CaseResult,
   EvalCase,
   GradeContext,
@@ -48,7 +48,7 @@ const OPENAI_BASE_URL = "OPENAI_BASE_URL"; // OpenAI-compatible proxy base like 
 
 export interface DefaultJudgeRunnerDeps {
   secretsFor: (tenant: string) => Promise<Record<string, string>>; // SecretStore.entries (decrypted, server-internal only)
-  dispatch?: (job: AgentJob) => Promise<CaseResult>; // agent dispatch for harness judges (same path as a single run)
+  dispatch?: (job: CaseJob) => Promise<CaseResult>; // agent dispatch for harness judges (same path as a single run)
   harnesses?: HarnessInstanceRegistry; // resolve the harness instance a judge references (template+pins→resolved)
   models?: ModelRegistry; // if judge.model is a registered model id, resolve provider/baseUrl/underlying model (else a raw string)
   rubrics?: RubricRegistry; // if judge.rubric is a {id, version} ref, resolve the registered rubric (owner+_shared fallback)
@@ -217,7 +217,7 @@ async function runCodeJudge(
 ): Promise<Score[]> {
   if (!deps.dispatch) return skip(spec, "code judge dispatch not configured");
   const built = buildCodeJudgeJob(spec, ctx, placement);
-  const job: AgentJob = {
+  const job: CaseJob = {
     evalCase: built.evalCase,
     harness: built.harness,
     harnessSpec: built.harnessSpec,
@@ -278,7 +278,7 @@ export function defaultJudgeRunner(deps: DefaultJudgeRunnerDeps): JudgeRunner {
               tags: ["judge"],
               ...(judgePlacement ? { placement: judgePlacement } : {}),
             };
-            const job: AgentJob = {
+            const job: CaseJob = {
               evalCase,
               harness: { id: ref.id, version: resolved.version },
               tenant,

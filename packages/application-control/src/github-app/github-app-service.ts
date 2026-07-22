@@ -221,7 +221,7 @@ export class GithubAppService {
 
   // Private-repo clone token — if the git URL's owner matches a workspace installation account, mint via that App
   // a short-lived (~1h) installation token scoped to that repo (contents:read). No matching installation → undefined.
-  // execute-case calls this at dispatch time; the returned token rides only as transient (AgentJob.repoToken), never stored.
+  // execute-case calls this at dispatch time; the returned token rides only as transient (CaseJob.repoToken), never stored.
   async tokenForRepo(workspace: string, gitUrl: string): Promise<string | undefined> {
     const parsed = parseGitRepo(gitUrl);
     if (!parsed) return undefined;

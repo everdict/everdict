@@ -120,7 +120,7 @@ async function registerFixtures() {
     id: "nomad-live",
     version: "1.0.0",
     addr: NOMAD,
-    image: process.env.AGENT_IMAGE ?? "everdict-agent:slim",
+    image: process.env.AGENT_IMAGE ?? "everdict-job-runner:slim",
   });
   must(r.status < 300, `runtime nomad-live registered (${r.status})`);
   r = await api("POST", "/runtimes", {
@@ -128,7 +128,7 @@ async function registerFixtures() {
     id: "nomad-dead",
     version: "1.0.0",
     addr: "http://127.0.0.1:4747", // nothing listens here — the dead shard
-    image: "everdict-agent:slim",
+    image: "everdict-job-runner:slim",
   });
   must(r.status < 300, `runtime nomad-dead registered (${r.status})`);
 

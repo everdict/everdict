@@ -3,13 +3,13 @@
 Two layers decide *where a harness run executes*:
 
 - **Driver** (`@everdict/contracts`, in-sandbox compute): runs the harness as a subprocess INSIDE an
-  already-isolated unit. The runner-agent uses `LocalDriver`.
-- **Backend** (`@everdict/backends`, placement): dispatches a runner-agent job to an orchestrator
+  already-isolated unit. The job-runner uses `LocalDriver`.
+- **Backend** (`@everdict/backends`, placement): dispatches a job-runner job to an orchestrator
   and returns the `CaseResult`. Isolation is the orchestrator's job, not Everdict's.
 
-## The runner-agent (dispatched worker)
-The control plane (outside the clusters) builds an `AgentJob` and hands it to a `Backend`:
-`dispatch(job)` → runs `@everdict/agent` (`runAgentJob`) inside an isolated unit → the agent does
+## The job-runner (dispatched worker)
+The control plane (outside the clusters) builds an `CaseJob` and hands it to a `Backend`:
+`dispatch(job)` → runs `@everdict/job-runner` (`runCaseJob`) inside an isolated unit → the agent does
 the whole `runCase` and prints the `CaseResult` on stdout behind the `__EVERDICT_RESULT__`
 sentinel → the Backend parses it.
 
@@ -71,8 +71,8 @@ Multiplicity lives in the control plane, not the Backend:
   "default": "nomad-seoul",
   "backends": [
     { "name": "dev",         "kind": "local" },
-    { "name": "nomad-seoul", "kind": "nomad", "addr": "http://nomad-seoul:4646", "image": "reg/everdict-agent:1", "runtime": "runsc" },
-    { "name": "nomad-onprem","kind": "nomad", "addr": "http://nomad-b:4646",     "image": "reg/everdict-agent:1" }
+    { "name": "nomad-seoul", "kind": "nomad", "addr": "http://nomad-seoul:4646", "image": "reg/everdict-job-runner:1", "runtime": "runsc" },
+    { "name": "nomad-onprem","kind": "nomad", "addr": "http://nomad-b:4646",     "image": "reg/everdict-job-runner:1" }
   ]
 }
 ```
@@ -94,7 +94,7 @@ At SaaS scale many users submit many cases against finite/elastic infra, so plac
   per eligible backend and picks one via a `PlacementPolicy`: `leastLoadedPolicy` (spread, default) or
   `binPackPolicy` (consolidate → enables scale-to-zero). `placement.target` is honored as a hard pin.
 - **fair queue (multi-tenant)** — pending jobs are ordered by a **weighted fair queue** (`FairQueue`,
-  WFQ) keyed by `AgentJob.tenant`, so one tenant's large batch can't starve another: each job gets a
+  WFQ) keyed by `CaseJob.tenant`, so one tenant's large batch can't starve another: each job gets a
   virtual-finish time `max(globalClock, tenantLastFinish) + 1/weight`, and the scheduler serves lowest
   first. Heavier `weightFor(tenant)` ⇒ served more often; an idle tenant can't hoard credit (the global
   virtual clock advances on every dequeue). `tenantQuota(tenant)` caps a tenant's concurrent in-flight
@@ -103,7 +103,7 @@ At SaaS scale many users submit many cases against finite/elastic infra, so plac
   is dispatched the moment a slot frees (a dispatch settling re-pumps the queue). `maxQueueDepth` rejects
   with `RateLimitError` (429) when the queue is saturated. The scheduler avoids head-of-line blocking by
   scanning the fair-ordered queue for the first placeable job.
-- **priority classes** — `AgentJob.priority`: `"interactive"` (a person is waiting — single runs) is scanned
+- **priority classes** — `CaseJob.priority`: `"interactive"` (a person is waiting — single runs) is scanned
   before `"batch"` (scorecard fan-out), with WFQ order preserved WITHIN each class, so a 3-case check never
   sits behind a 601-case batch. RunService stamps interactive; the batch loops stamp batch; absent = batch-
   equivalent. Live: on a quota-1 lane, a run submitted after 3 queued batch cases finished ahead of 2 of them.
@@ -185,7 +185,7 @@ Live proof: `scripts/live/autoscaler-nomad.mjs` — 8 cases submitted at once wi
 autoscaler scales 1→4 under backlog (peak 4 concurrent Nomad allocs, never above `MAX`) then back to 1 when idle.
 
 ## Per-tenant secrets & budgets
-Two more multi-tenant guarantees, both keyed by `AgentJob.tenant`:
+Two more multi-tenant guarantees, both keyed by `CaseJob.tenant`:
 
 - **Secret scoping** (`SecretProvider`, `staticSecrets`) — each tenant's model keys (e.g. `ANTHROPIC_API_KEY`,
   `CLAUDE_CODE_OAUTH_TOKEN`) are injected into **only that tenant's** alloc env. `NomadBackend({secrets})`
@@ -211,8 +211,8 @@ Next slices: ClickHouse analytics store behind `RunStore`, MCP toolization of th
 
 ## Nomad (phase 1)
 ```bash
-# 1) build + push the agent image to your internal registry
-docker build -f packages/agent/Dockerfile -t <registry>/everdict-agent:<tag> .
+# 1) build + push the job-runner image to your internal registry
+docker build -f packages/job-runner/Dockerfile -t <registry>/everdict-job-runner:<tag> .
 
 # 2) host: mint a subscription token, put it in everdict/.env
 claude setup-token            # → CLAUDE_CODE_OAUTH_TOKEN=...
@@ -220,7 +220,7 @@ claude setup-token            # → CLAUDE_CODE_OAUTH_TOKEN=...
 # 3) run against your Nomad
 pnpm everdict run --backend nomad \
   --nomad-addr http://<nomad>:4646 \
-  --image <registry>/everdict-agent:<tag> --runtime runsc \
+  --image <registry>/everdict-job-runner:<tag> --runtime runsc \
   --task "..." --test "..."
 ```
 The control plane submits a batch job, polls the alloc to completion, and parses the

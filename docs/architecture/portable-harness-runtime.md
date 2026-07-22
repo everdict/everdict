@@ -49,12 +49,12 @@ not formulas"). That is not a proper harness; the environment contract leaked.
   the driver: `driver.provision({ os, needs, image: evalCase.image })` (`packages/run-case/src/run-case.ts:25`).
 - **A container driver already exists and is proven:** `DockerDriver` (`packages/drivers/src/docker.ts`) provisions
   `spec.image ?? defaultImage` as a container `ComputeHandle` (`docker run` keep-alive + `docker exec`). The managed
-  **`DockerBackend`** runs cases in their image via exactly this: `runAgentJob(job, { driver: new DockerDriver(...) })`
+  **`DockerBackend`** runs cases in their image via exactly this: `runCaseJob(job, { driver: new DockerDriver(...) })`
   (`packages/backends/src/orchestrators/docker-backend.ts:26`). Nomad/K8s backends also honor `evalCase.image`
   (`packages/backends/src/orchestrators/nomad.ts:92`).
-- **`runAgentJob` already accepts an injected driver** (`packages/agent/src/run.ts:13`, default `LocalDriver`).
+- **`runCaseJob` already accepts an injected driver** (`packages/job-runner/src/run.ts:13`, default `LocalDriver`).
 - **The gap is only in the self-hosted runner.** `runLeasedJob` branches: `service`(topology) → local Docker
-  topology; **everything else → `runAgentJob(job)` with the default `LocalDriver`** — in-process on the bare host,
+  topology; **everything else → `runCaseJob(job)` with the default `LocalDriver`** — in-process on the bare host,
   **`case.image` ignored** (`packages/self-hosted-runner/src/run-leased-job.ts:32,48`).
 - **The runner already knows if Docker is present.** It probes and advertises a `docker` capability
   (`packages/self-hosted-runner/src/capabilities.ts`: `["repo", ...(dockerOk ? ["docker","browser"] : [])]`); the CLI
@@ -90,10 +90,10 @@ export async function runLeasedJob(job, opts: { ..., dockerAvailable?: boolean }
   const image = job.evalCase.image;
   if (image && opts.dockerAvailable) {
     // run the case in its declared image on the user's local Docker — same path the managed DockerBackend uses.
-    return (opts.runProcess ?? ((j) => runAgentJob(j, { driver: new DockerDriver() })))(job);
+    return (opts.runProcess ?? ((j) => runCaseJob(j, { driver: new DockerDriver() })))(job);
   }
   // no image, or image declared but Docker absent → host-native LocalDriver.
-  return (opts.runProcess ?? runAgentJob)(job);
+  return (opts.runProcess ?? runCaseJob)(job);
 }
 ```
 
@@ -163,7 +163,7 @@ not formulas" hack. (Recalc-on-load may need LibreOffice's `RecalcOptOnLoad` reg
    run host-native, while a following non-image job still leases. Tests: hub gate (image+no-docker→reject /
    image+docker→lease / no-caps→lease [back-compat] / skip-image-lease-next) + MCP wiring (lease_job passes caps).
 4. ✅ **Host-resource mounts (codex login in the image)** — `DockerDriver({ mounts })` adds `-v source:target[:ro]`;
-   `runAgentJob({ containerize, mounts })` and `runLeasedJob({ mounts })` thread them; the CLI runner's opt-in
+   `runCaseJob({ containerize, mounts })` and `runLeasedJob({ mounts })` thread them; the CLI runner's opt-in
    `--mount-codex-login` binds `${CODEX_HOME:-~/.codex}` → `/codex` for containerized jobs (mounts flow only when
    containerizing — LocalDriver has no mount concept). This lets **codex run *in* the case image using the machine's
    login** (own-pays, no API key), while the same image also carries the grader toolchain (LibreOffice recalc). The
@@ -190,4 +190,4 @@ not formulas" hack. (Recalc-on-load may need LibreOffice's `RecalcOptOnLoad` reg
 [self-hosted-runner.md](./self-hosted-runner.md) · [self-hosted-service-runner.md](./self-hosted-service-runner.md)
 (the service-harness precedent for local Docker) · [execution-backends.md](../execution-backends.md) (Backend vs
 Driver) · [runtimes.md](../runtimes.md) · `examples/bundles/spreadsheetbench/` · rules `drivers` /
-`agent` / `backends`.
+`job-runner` / `backends`.

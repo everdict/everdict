@@ -4,8 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseResult, stripSentinel } from "@everdict/contracts";
 import {
-  type AgentJob,
   BadRequestError,
+  type CaseJob,
   type CaseResult,
   InternalError,
   NotFoundError,
@@ -504,7 +504,7 @@ export function kubectlApi(
 }
 
 export interface K8sBackendOptions {
-  image: string; // runner-agent image
+  image: string; // job-runner image
   api?: K8sApi;
   context?: string; // kubeconfig context (e.g. kind-everdict)
   server?: string; // external API server URL (when authenticating with a bearer token instead of context)
@@ -666,7 +666,7 @@ export async function resolveWorkloadOwner(
   return { kind: ref.kind, name: ref.name };
 }
 
-export function k8sJobName(job: AgentJob, suffix?: string): string {
+export function k8sJobName(job: CaseJob, suffix?: string): string {
   // With a suffix the slug budget shrinks so the full name stays within the DNS-1123 63-char cap.
   const slug = caseSlug(job.evalCase.id, suffix ? 43 : 50);
   return `everdict-${slug || "case"}${suffix ? `-${suffix}` : ""}`;
@@ -690,10 +690,7 @@ export const K8S_REGISTRY_AUTH_SECRET = "everdict-registry-auth";
 
 // Workspace-registry credentials (transient job.registryAuth) → a dockerconfigjson Secret. When case.image is
 // that registry host, dispatch applies it together with the Job as a List.
-export function k8sRegistryAuthSecret(
-  auth: NonNullable<AgentJob["registryAuth"]>,
-  ns: string,
-): Record<string, unknown> {
+export function k8sRegistryAuthSecret(auth: NonNullable<CaseJob["registryAuth"]>, ns: string): Record<string, unknown> {
   return {
     apiVersion: "v1",
     kind: "Secret",
@@ -703,23 +700,23 @@ export function k8sRegistryAuthSecret(
   };
 }
 
-// AgentJob → K8s batch Job. The payload is the EVERDICT_AGENT_JOB(base64) env. Isolation is runtimeClassName.
+// CaseJob → K8s batch Job. The payload is the EVERDICT_CASE_JOB(base64) env. Isolation is runtimeClassName.
 export function buildK8sJob(
-  job: AgentJob,
+  job: CaseJob,
   opts: K8sBackendOptions,
   name: string,
   ns: string,
   runtimeClassName?: string,
 ): Record<string, unknown> {
   const env: Record<string, string> = {
-    EVERDICT_AGENT_JOB: Buffer.from(JSON.stringify(job)).toString("base64"),
+    EVERDICT_CASE_JOB: Buffer.from(JSON.stringify(job)).toString("base64"),
     ...judgeEnv(job.judge), // per-run judge model config. The inline judge grader judges with this model.
     ...opts.secretEnv,
     // Judge provider key resolved per-job at dispatch (workspace tier → submitter personal fallback) — AFTER
     // secretEnv so the job-level credential wins over the backend's baked workspace tier.
     ...judgeAuthEnv(job.judge, job.judgeAuth),
   };
-  // Prefer the per-case image (e.g. the official SWE-bench prebuilt = deps+repo bundled), otherwise the default agent image.
+  // Prefer the per-case image (e.g. the official SWE-bench prebuilt = deps+repo bundled), otherwise the default job-runner image.
   const image = job.evalCase.image ?? opts.image;
   // For a workspace-registry image, imagePullSecrets (dispatch applies the Secret above together) — only when the host matches.
   const pullAuth = Boolean(job.registryAuth && imageUsesRegistryHost(image, job.registryAuth.host));
@@ -790,7 +787,7 @@ export async function materializeKubeconfig(yaml: string): Promise<{ path: strin
   return { path, cleanup: () => rm(dir, { recursive: true, force: true }) };
 }
 
-// Launch the runner-agent as a K8s Job, poll for completion, then parse the CaseResult from the sentinel in the pod log.
+// Launch the job-runner as a K8s Job, poll for completion, then parse the CaseResult from the sentinel in the pod log.
 // Isolation is namespace (per-tenant) + runtimeClassName (gVisor/kata). The K8s counterpart of NomadBackend.
 export class K8sBackend implements Backend, Recoverable, Observable, Probeable, Inspectable, Reclaimable {
   // A long-lived api from an injected api (test) or non-kubeconfig auth (context/server/token).
@@ -1210,7 +1207,7 @@ export class K8sBackend implements Backend, Recoverable, Observable, Probeable, 
 
   // Apply/enforce the tenant zone/secrets per job: untrusted requires strong isolation, a dedicated namespace, and inject only that tenant's keys.
   private async resolve(
-    job: AgentJob,
+    job: CaseJob,
   ): Promise<{ ns: string; runtimeClassName?: string; secretEnv?: Record<string, string> }> {
     const tenant = job.tenant ?? "default";
     const zone = this.opts.trustZones?.resolve(tenant);
@@ -1222,7 +1219,7 @@ export class K8sBackend implements Backend, Recoverable, Observable, Probeable, 
     return { ns: zone.namespace ?? this.opts.namespace ?? "default", runtimeClassName, secretEnv };
   }
 
-  async dispatch(job: AgentJob, options?: DispatchOptions): Promise<CaseResult> {
+  async dispatch(job: CaseJob, options?: DispatchOptions): Promise<CaseResult> {
     if (options?.signal?.aborted) throw dispatchAborted(job); // cancelled before we applied the Job
     options?.onStarted?.(); // past the Scheduler's wait queue — we're applying the Job now → flip the run to running
     const { ns, runtimeClassName, secretEnv } = await this.resolve(job);

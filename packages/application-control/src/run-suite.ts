@@ -1,14 +1,14 @@
-import type { AgentJob, CaseResult, Scorecard, Suite } from "@everdict/contracts";
+import type { CaseJob, CaseResult, Scorecard, Suite } from "@everdict/contracts";
 import { classifyFailure } from "@everdict/domain";
 
 // Same (job)→CaseResult signature as Backend/Router/Orchestrator.
-export type Dispatch = (job: AgentJob) => Promise<CaseResult>;
+export type Dispatch = (job: CaseJob) => Promise<CaseResult>;
 
 // If dispatch throws, don't stop the whole batch (case isolation) — capture it as a failed CaseResult.
 // Record the reason as a trace=error event and put one pass:false score so the pass rate/summary counts this case as a failure.
 // The classified failure (stage × class × retryable) rides on the result so recovery can act by WHERE it died
 // (retry ?class=infra re-runs only infra casualties; agent FAILs are legitimate outcomes and carry no failure).
-function failedCaseResult(job: AgentJob, error: unknown): CaseResult {
+function failedCaseResult(job: CaseJob, error: unknown): CaseResult {
   const message = error instanceof Error ? error.message : String(error);
   const failure = classifyFailure(error, "dispatch");
   return {
@@ -63,7 +63,7 @@ export async function runSuite(
 ): Promise<Scorecard> {
   // Fan out each case into `trials` jobs. trials=1 keeps the single-run shape (no trial field) for backward compatibility.
   const trials = Math.max(1, opts.trials ?? 1);
-  const jobs: AgentJob[] = suite.cases.flatMap((evalCase) =>
+  const jobs: CaseJob[] = suite.cases.flatMap((evalCase) =>
     Array.from({ length: trials }, (_, trial) => ({
       evalCase,
       harness: { id: suite.harness.id, version },

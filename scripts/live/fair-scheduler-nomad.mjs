@@ -5,12 +5,12 @@
 //  - Under WFQ, B jumps in right after one A (2nd) → one tenant's bulk submit does not starve another.
 // Prove it by recording the dispatch order with a wrapper backend.
 //
-// Usage: NOMAD_ADDR=http://127.0.0.1:4646 EVERDICT_AGENT_IMAGE=everdict-agent:local node scripts/live/fair-scheduler-nomad.mjs
+// Usage: NOMAD_ADDR=http://127.0.0.1:4646 EVERDICT_AGENT_IMAGE=everdict-job-runner:local node scripts/live/fair-scheduler-nomad.mjs
 
 import { BackendRegistry, NomadBackend, Scheduler } from "../../packages/backends/dist/index.js";
 
 const NOMAD_ADDR = process.env.NOMAD_ADDR ?? "http://127.0.0.1:4646";
-const IMAGE = process.env.EVERDICT_AGENT_IMAGE ?? "everdict-agent:local";
+const IMAGE = process.env.EVERDICT_AGENT_IMAGE ?? "everdict-job-runner:local";
 const STAMP = Date.now().toString(36);
 
 // Wrapper that records the order of dispatched case ids.

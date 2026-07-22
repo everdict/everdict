@@ -6,7 +6,7 @@ import {
   type RunnerJobOutcome,
   type RunnerJobStore,
 } from "@everdict/application-control";
-import { type AgentJob, AgentJobSchema, type CaseResult, CaseResultSchema } from "@everdict/contracts";
+import { type CaseJob, CaseJobSchema, type CaseResult, CaseResultSchema } from "@everdict/contracts";
 import type { SqlClient } from "../client.js";
 
 // Store-backed self-hosted runner lease queue (migration 0055) — the multi-replica RunnerHub persistence.
@@ -18,7 +18,7 @@ interface Entry {
   owner: string;
   runnerId: string;
   tenant?: string;
-  job: AgentJob;
+  job: CaseJob;
   requiredCaps: string[];
   status: "queued" | "leased" | "completed" | "failed";
   cancelRequested: boolean;
@@ -122,7 +122,7 @@ export class InMemoryRunnerJobStore implements RunnerJobStore {
     };
   }
 
-  async cancel(match: (job: AgentJob) => boolean): Promise<number> {
+  async cancel(match: (job: CaseJob) => boolean): Promise<number> {
     let n = 0;
     for (const e of this.jobs.values()) {
       if (!isTerminal(e) && !e.cancelRequested && match(e.job)) {
@@ -191,7 +191,7 @@ export class PgRunnerJobStore implements RunnerJobStore {
     );
     const row = res.rows[0];
     if (!row) return null;
-    return { jobId: row.job_id, job: AgentJobSchema.parse(row.job) };
+    return { jobId: row.job_id, job: CaseJobSchema.parse(row.job) };
   }
 
   async touch(jobId: string, now: number): Promise<{ extended: boolean; cancelled: boolean }> {
@@ -250,11 +250,11 @@ export class PgRunnerJobStore implements RunnerJobStore {
     };
   }
 
-  async cancel(match: (job: AgentJob) => boolean): Promise<number> {
+  async cancel(match: (job: CaseJob) => boolean): Promise<number> {
     const res = await this.client.query<{ job_id: string; job: unknown }>(
       `SELECT job_id, job FROM everdict_runner_jobs WHERE status IN ('queued', 'leased') AND NOT cancel_requested`,
     );
-    const ids = res.rows.filter((r) => match(AgentJobSchema.parse(r.job))).map((r) => r.job_id);
+    const ids = res.rows.filter((r) => match(CaseJobSchema.parse(r.job))).map((r) => r.job_id);
     if (ids.length === 0) return 0;
     await this.client.query("UPDATE everdict_runner_jobs SET cancel_requested = true WHERE job_id = ANY($1)", [ids]);
     return ids.length;

@@ -1,4 +1,4 @@
-import { type AgentJob, type CaseResult, PaymentRequiredError } from "@everdict/contracts";
+import { type CaseJob, type CaseResult, PaymentRequiredError } from "@everdict/contracts";
 import { inMemoryBudget } from "@everdict/domain";
 import { describe, expect, it } from "vitest";
 import type { Backend } from "../backend.js";
@@ -42,7 +42,7 @@ class ControlledBackend implements Backend {
       ...(this.cpuBudget !== undefined ? { cpuBudget: this.cpuBudget } : {}),
     };
   }
-  dispatch(job: AgentJob): Promise<CaseResult> {
+  dispatch(job: CaseJob): Promise<CaseResult> {
     this.inFlight++;
     this.handled++;
     this.dispatchedIds.push(job.evalCase.id);
@@ -62,7 +62,7 @@ class ControlledBackend implements Backend {
   }
 }
 
-function job(target?: string): AgentJob {
+function job(target?: string): CaseJob {
   return {
     harness: { id: "scripted", version: "0" },
     evalCase: {
@@ -78,7 +78,7 @@ function job(target?: string): AgentJob {
 }
 
 // A job with a tenant + case id (for fairness/quota tests).
-function tjob(tenant: string, id: string): AgentJob {
+function tjob(tenant: string, id: string): CaseJob {
   return {
     harness: { id: "scripted", version: "0" },
     tenant,
@@ -316,7 +316,7 @@ describe("Scheduler", () => {
   });
 
   // A job whose harness declares its memory weight (resource-aware admission).
-  function heavyJob(id: string, memoryMb: number): AgentJob {
+  function heavyJob(id: string, memoryMb: number): CaseJob {
     return {
       ...tjob("acme", id),
       harnessSpec: {
@@ -369,7 +369,7 @@ describe("Scheduler", () => {
   });
 
   // A job whose harness declares its cpu weight (resources.cpu, 1000 = 1 vCPU).
-  function cpuJob(id: string, cpu: number): AgentJob {
+  function cpuJob(id: string, cpu: number): CaseJob {
     return {
       ...tjob("acme", id),
       harnessSpec: {
@@ -438,7 +438,7 @@ describe("Scheduler", () => {
     const b = new ControlledBackend("a", 1);
     const sched = new Scheduler(new BackendRegistry().register("a", b));
 
-    const batchJob = (id: string): AgentJob => ({ ...tjob("acme", id), priority: "batch" });
+    const batchJob = (id: string): CaseJob => ({ ...tjob("acme", id), priority: "batch" });
     const running = sched.dispatch(batchJob("b0")); // occupies the single slot
     await flush();
     const waiting = [batchJob("b1"), batchJob("b2")].map((j) => sched.dispatch(j));

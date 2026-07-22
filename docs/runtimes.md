@@ -120,7 +120,7 @@ A 100+-case batch leaves that many dead jobs/allocs behind per run. Two operatio
      rebuild — it pins the OLD sha, not the tag.
 
 **Agent image per runtime**: `RuntimeSpec.image` is tenant-chosen, so pure-command/BYO-image workloads can run the
-**slim agent** (`packages/agent/Dockerfile.slim`, ~330MB — node+git, no claude/aider batteries) — 3× faster alloc
+**slim agent** (`packages/job-runner/Dockerfile.slim`, ~330MB — node+git, no claude/aider batteries) — 3× faster alloc
 start than the batteries-included default and small enough to `kind load` into a local cluster.
 
 See `docs/backends.md` (skill `backends`), `docs/tenancy.md`, `docs/scorecards.md`.

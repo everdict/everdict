@@ -122,7 +122,7 @@
 >   real host). A healed URL is persisted and the host is rebuilt on it; an unchanged URL keeps the cheap in-place
 >   restart. This makes the button the user reaches for actually recover the runner instead of silently re-failing.
 > - **D13 — a runner behind the control plane auto-updates itself (LOCKED 2026-07-17).** When the control plane moves
->   forward, an older self-hosted runner can silently start failing jobs (the runner-facing `AgentJob`/lease contract
+>   forward, an older self-hosted runner can silently start failing jobs (the runner-facing `CaseJob`/lease contract
 >   moved on) — and a **desktop user cannot tell**. D13 closes the loop with a runner↔server **compatibility handshake**:
 >   `RUNNER_PROTOCOL_VERSION` (a monotonic integer in `@everdict/contracts`, bumped only on a breaking runner-contract
 >   change) is reported by the runner on every `lease_job` (alongside a display `version`); the control plane compares it
@@ -142,7 +142,7 @@
 >   stays the **single UI SSOT**; the desktop has feature parity *by construction* (every web deploy
 >   lands in the desktop instantly, no app release). We never fork or re-implement screens in the shell.
 > - **D2 — shell is Electron (LOCKED).** Rationale: the monorepo is all-TS and the runner
->   core needs Node (`@everdict/agent`'s `runAgentJob`), which Electron's main process runs **in-process** —
+>   core needs Node (`@everdict/job-runner`'s `runCaseJob`), which Electron's main process runs **in-process** —
 >   no sidecar binary; bundled Chromium renders the Next 16 / Tailwind v4 app identically on every OS;
 >   tray / auto-update / deep-link / keychain (`safeStorage`) are mature. The Tauri alternative is
 >   smaller (~10MB vs ~100MB) but needs a Node sidecar for the runner, adds a Rust toolchain to a
@@ -195,7 +195,7 @@ requirement structurally: parity is not a feature to build, it's a property of r
   webview holding the same cookies behaves identically.
 - **Runner loop is already transport-clean** — `apps/cli/src/runner-loop.ts` (`runLeaseWorkers`, N lease
   workers over one MCP session) + `runner-session.ts` (`ResilientMcpSession` — reconnect-on-stale-session)
-  + `run-leased-job.ts`, driving `runAgentJob` (`@everdict/agent`). It depends on flags + a token, not on
+  + `run-leased-job.ts`, driving `runCaseJob` (`@everdict/job-runner`). It depends on flags + a token, not on
   being a CLI — extraction to a package is mechanical.
 - **Pairing is a personal API** — `rnr_` token minted from the account page (BFF + MCP parity,
   self-hosted-runner slice 1), SHA-256-hashed at rest, owner = `principal.subject`, no role gate. A
@@ -209,7 +209,7 @@ requirement structurally: parity is not a feature to build, it's a property of r
 ┌─ apps/desktop (Electron) ─────────────────────────────────────────────┐
 │ main process                        renderer (BrowserWindow)          │
 │  ├─ runner host: @everdict/self-hosted-runner  │  loads deployed apps/web URL   │
-│  │   (lease → runAgentJob → submit)  │  (Keycloak login, all screens, │
+│  │   (lease → runCaseJob → submit)  │  (Keycloak login, all screens, │
 │  ├─ keychain (safeStorage): rnr_     │   session cookies live here)   │
 │  ├─ tray: status / start·stop / quit │                                │
 │  ├─ autostart · auto-update · notify │  preload: window.everdictDesktop  │
@@ -223,8 +223,8 @@ requirement structurally: parity is not a feature to build, it's a property of r
 ### `packages/self-hosted-runner` — one runner, three consumers
 
 Move `runner-loop.ts` / `runner-session.ts` / `run-leased-job.ts` (+ their tests) from `apps/cli` into
-`packages/self-hosted-runner` (depends on `@everdict/agent`, `@modelcontextprotocol/sdk`; sits at the same layer as
-`apps/*` consumers of `agent`). Exports: `runLeaseWorkers(opts)`, `ResilientMcpSession`, `mcpConnect`,
+`packages/self-hosted-runner` (depends on `@everdict/job-runner`, `@modelcontextprotocol/sdk`; sits at the same layer as
+`apps/*` consumers of `job-runner`). Exports: `runLeaseWorkers(opts)`, `ResilientMcpSession`, `mcpConnect`,
 plus a small `RunnerHost` facade (start/stop/status events) for GUI embedding. `apps/cli` re-imports and
 behaves identically (pure refactor slice); `apps/desktop` main process embeds `RunnerHost`. (A future CI
 runner would be the third consumer.)
@@ -288,7 +288,7 @@ exact `file://` senderFrame match (never the web, never an external page): `wind
 |---|---|
 | Entire UI (`apps/web` deployed) — all screens, auth, role-gating | **reused verbatim** — the whole point (D1) |
 | Runner protocol (MCP `lease_job`/`submit_job_result`/`heartbeat_job`) + pairing API | **reused, untouched** |
-| Runner loop (`runLeaseWorkers`, `ResilientMcpSession`, `runAgentJob` path) | **extracted** → `packages/self-hosted-runner` (pure refactor) |
+| Runner loop (`runLeaseWorkers`, `ResilientMcpSession`, `runCaseJob` path) | **extracted** → `packages/self-hosted-runner` (pure refactor) |
 | `everdict runner` CLI | **kept** — thin wrapper over `self-hosted-runner`, headless/CI answer |
 | `apps/desktop` (Electron shell: window, tray, keychain, autostart, updater, IPC) | **new** |
 | `window.everdictDesktop` preload bridge + web desktop-aware pairing branch | **new** (bridge) + **small web edit** |

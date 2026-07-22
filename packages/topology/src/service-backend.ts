@@ -7,8 +7,8 @@ import {
   dispatchAborted,
 } from "@everdict/backends";
 import {
-  type AgentJob,
   BadRequestError,
+  type CaseJob,
   type CaseResult,
   type EnvSnapshot,
   type FrontDoorFile,
@@ -48,7 +48,7 @@ export type { SubmitFn } from "./front-door/front-door-driver.js";
 // Resolve declared front-door attachments (frontDoor.request.files, G2) from the case env's inline repo files into
 // multipart parts. A declared attachment whose `from` is not present is a config error (fail-fast) — never a silently
 // missing file. Only repo-env inline `source.files` are supported today (the attachment content lives in the case data).
-export function resolveFrontDoorFiles(files: FrontDoorFile[], evalCase: AgentJob["evalCase"]): FrontDoorFilePart[] {
+export function resolveFrontDoorFiles(files: FrontDoorFile[], evalCase: CaseJob["evalCase"]): FrontDoorFilePart[] {
   const env = evalCase.env;
   const source = env.kind === "repo" ? env.source : undefined;
   const map = source && "files" in source ? source.files : undefined;
@@ -85,7 +85,7 @@ export interface ServiceTopologyBackendOptions {
   // login (cookies) into the per-case browser BEFORE the agent connects, so the eval runs already authenticated. The
   // control plane implements it (resolve + owner-gate + decrypt + seedStorageState). Best-effort — the topology
   // backend swallows a failure so injection never fails the run. cdpBase = the control-plane-reachable CDP.
-  seedProfile?: (profileId: string, cdpBase: string, job: AgentJob) => Promise<void>;
+  seedProfile?: (profileId: string, cdpBase: string, job: CaseJob) => Promise<void>;
 }
 
 // The orchestrator-agnostic service-topology backend (a Backend implementation).
@@ -107,7 +107,7 @@ export class ServiceTopologyBackend implements Backend, ScreenCapturable {
     return await captureCdpScreenshot(base).catch(() => undefined);
   }
 
-  async dispatch(job: AgentJob, opts?: DispatchOptions): Promise<CaseResult> {
+  async dispatch(job: CaseJob, opts?: DispatchOptions): Promise<CaseResult> {
     if (opts?.signal?.aborted) throw dispatchAborted(job); // best-effort: refuse a pre-cancelled run
     opts?.onStarted?.(); // past the Scheduler's wait queue — we're standing up the topology now → flip the run to running
     const registered = await this.opts.specFor(job.tenant ?? "default", job.harness.id, job.harness.version);

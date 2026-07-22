@@ -1,5 +1,5 @@
 import type { Dispatcher } from "@everdict/backends";
-import type { AgentJob, CaseResult } from "@everdict/contracts";
+import type { CaseJob, CaseResult } from "@everdict/contracts";
 import { InMemoryModelRegistry } from "@everdict/registry";
 import { describe, expect, it } from "vitest";
 import { JudgeAuthDispatcher, type ScopedSecretTiers } from "./judge-auth-dispatcher.js";
@@ -13,7 +13,7 @@ const result: CaseResult = {
 };
 
 function innerSpy() {
-  const seen: AgentJob[] = [];
+  const seen: CaseJob[] = [];
   const inner: Dispatcher = {
     async dispatch(job) {
       seen.push(job);
@@ -23,7 +23,7 @@ function innerSpy() {
   return { inner, seen };
 }
 
-const job = (over: Partial<AgentJob> = {}, target = "nomad-local"): AgentJob => ({
+const job = (over: Partial<CaseJob> = {}, target = "nomad-local"): CaseJob => ({
   evalCase: {
     id: "c1",
     env: { kind: "prompt" },

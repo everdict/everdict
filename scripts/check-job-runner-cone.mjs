@@ -1,8 +1,8 @@
 #!/usr/bin/env node
-// Slim agent-image guard (re-architecture P0).
-// Walks @everdict/agent's workspace dependency cone transitively and checks three invariants:
+// Slim job-runner-image guard (re-architecture P0).
+// Walks @everdict/job-runner's workspace dependency cone transitively and checks three invariants:
 //   (1) every cone member must be on the allowlist — if a control-plane package (db/auth/backends…)
-//       gets pulled into the agent image, the image bloats again.
+//       gets pulled into the job-runner image, the image bloats again.
 //   (2) cone members may not depend on "pg" or control-plane @everdict/* packages — DB drivers and
 //       the orchestration layer have no business running inside the sandbox.
 //   (3) @everdict/contracts (L0) depends on exactly {"zod"} — the contract root stays light forever.
@@ -13,10 +13,10 @@ import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
-// Every package allowed inside the agent image (unscoped names under packages/<name>).
+// Every package allowed inside the job-runner image (unscoped names under packages/<name>).
 const ALLOWLIST = new Set([
-  "agent",
-  "application-execution", // L2a agent-safe use-cases (imports contracts + domain only — enforced below)
+  "job-runner",
+  "application-execution", // L2a job-runner-safe use-cases (imports contracts + domain only — enforced below)
   "contracts",
   "domain", // L1 pure rules (imports contracts only — enforced below)
   "drivers",
@@ -28,7 +28,7 @@ const ALLOWLIST = new Set([
 
 // Control-plane packages that cone members must never depend on.
 const FORBIDDEN = new Set([
-  "@everdict/application-control", // L2b control-plane use-cases/ports — never inside the agent image
+  "@everdict/application-control", // L2b control-plane use-cases/ports — never inside the job-runner image
   "@everdict/db",
   "@everdict/auth",
   "@everdict/registry",
@@ -50,8 +50,8 @@ function readPackageJson(unscopedName) {
 }
 
 const violations = [];
-const cone = new Set(["agent"]);
-const queue = ["agent"];
+const cone = new Set(["job-runner"]);
+const queue = ["job-runner"];
 
 // Compute the workspace dependency cone via BFS, checking edge by edge.
 while (queue.length > 0) {
@@ -112,9 +112,9 @@ if (appControlDeps.join(",") !== "@everdict/application-execution,@everdict/cont
 }
 
 if (violations.length > 0) {
-  console.error("agent cone check FAILED:");
+  console.error("job-runner cone check FAILED:");
   for (const v of violations) console.error(`  - ${v}`);
   process.exit(1);
 }
 
-console.log(`PASS agent cone: ${[...cone].sort().join(", ")}`);
+console.log(`PASS job-runner cone: ${[...cone].sort().join(", ")}`);

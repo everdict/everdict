@@ -26,9 +26,6 @@ importers:
 
   apps/api:
     dependencies:
-      '@everdict/agent':
-        specifier: workspace:*
-        version: link:../../packages/agent
       '@everdict/application-control':
         specifier: workspace:*
         version: link:../../packages/application-control
@@ -53,6 +50,9 @@ importers:
       '@everdict/graders':
         specifier: workspace:*
         version: link:../../packages/graders
+      '@everdict/job-runner':
+        specifier: workspace:*
+        version: link:../../packages/job-runner
       '@everdict/registry':
         specifier: workspace:*
         version: link:../../packages/registry
@@ -96,9 +96,6 @@ importers:
 
   apps/cli:
     dependencies:
-      '@everdict/agent':
-        specifier: workspace:*
-        version: link:../../packages/agent
       '@everdict/application-control':
         specifier: workspace:*
         version: link:../../packages/application-control
@@ -111,6 +108,9 @@ importers:
       '@everdict/domain':
         specifier: workspace:*
         version: link:../../packages/domain
+      '@everdict/job-runner':
+        specifier: workspace:*
+        version: link:../../packages/job-runner
       '@everdict/orchestrator':
         specifier: workspace:*
         version: link:../../packages/orchestrator
@@ -250,30 +250,6 @@ importers:
         specifier: ^5.7.2
         version: 5.9.3
 
-  packages/agent:
-    dependencies:
-      '@everdict/application-execution':
-        specifier: workspace:*
-        version: link:../application-execution
-      '@everdict/contracts':
-        specifier: workspace:*
-        version: link:../contracts
-      '@everdict/domain':
-        specifier: workspace:*
-        version: link:../domain
-      '@everdict/drivers':
-        specifier: workspace:*
-        version: link:../drivers
-      '@everdict/environments':
-        specifier: workspace:*
-        version: link:../environments
-      '@everdict/graders':
-        specifier: workspace:*
-        version: link:../graders
-      '@everdict/harnesses':
-        specifier: workspace:*
-        version: link:../harnesses
-
   packages/application-control:
     dependencies:
       '@everdict/application-execution':
@@ -315,9 +291,6 @@ importers:
 
   packages/backends:
     dependencies:
-      '@everdict/agent':
-        specifier: workspace:*
-        version: link:../agent
       '@everdict/application-control':
         specifier: workspace:*
         version: link:../application-control
@@ -330,6 +303,9 @@ importers:
       '@everdict/drivers':
         specifier: workspace:*
         version: link:../drivers
+      '@everdict/job-runner':
+        specifier: workspace:*
+        version: link:../job-runner
       zod:
         specifier: ^3.24.1
         version: 3.25.76
@@ -413,17 +389,41 @@ importers:
         specifier: workspace:*
         version: link:../trace
 
+  packages/job-runner:
+    dependencies:
+      '@everdict/application-execution':
+        specifier: workspace:*
+        version: link:../application-execution
+      '@everdict/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@everdict/domain':
+        specifier: workspace:*
+        version: link:../domain
+      '@everdict/drivers':
+        specifier: workspace:*
+        version: link:../drivers
+      '@everdict/environments':
+        specifier: workspace:*
+        version: link:../environments
+      '@everdict/graders':
+        specifier: workspace:*
+        version: link:../graders
+      '@everdict/harnesses':
+        specifier: workspace:*
+        version: link:../harnesses
+
   packages/orchestrator:
     dependencies:
-      '@everdict/agent':
-        specifier: workspace:*
-        version: link:../agent
       '@everdict/backends':
         specifier: workspace:*
         version: link:../backends
       '@everdict/contracts':
         specifier: workspace:*
         version: link:../contracts
+      '@everdict/job-runner':
+        specifier: workspace:*
+        version: link:../job-runner
       '@temporalio/activity':
         specifier: ^1.18.1
         version: 1.18.1
@@ -459,15 +459,15 @@ importers:
 
   packages/self-hosted-runner:
     dependencies:
-      '@everdict/agent':
-        specifier: workspace:*
-        version: link:../agent
       '@everdict/contracts':
         specifier: workspace:*
         version: link:../contracts
       '@everdict/domain':
         specifier: workspace:*
         version: link:../domain
+      '@everdict/job-runner':
+        specifier: workspace:*
+        version: link:../job-runner
       '@everdict/topology':
         specifier: workspace:*
         version: link:../topology

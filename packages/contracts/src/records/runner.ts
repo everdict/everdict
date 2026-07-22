@@ -4,7 +4,7 @@
 // Runner↔control-plane compatibility protocol version. The runner reports the value it was BUILT with (from its
 // bundled @everdict/contracts) on every lease; the control plane compares it to the value IT was built with. A runner
 // whose protocol is BELOW the control plane's is running older code than the server → it is told to update
-// (`updateRequired`). Bump this ONLY on a breaking change to the runner-facing job/lease contract (e.g. AgentJobSchema
+// (`updateRequired`). Bump this ONLY on a breaking change to the runner-facing job/lease contract (e.g. CaseJobSchema
 // tightening) — the same breakage the runner-loop's version-skew hint fires on. Monotonic; never reused.
 export const RUNNER_PROTOCOL_VERSION = 1;
 

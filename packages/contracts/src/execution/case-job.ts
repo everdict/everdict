@@ -41,12 +41,12 @@ export function judgeAuthEnv(j?: JudgeRunConfig, auth?: { apiKey: string; baseUr
   };
 }
 
-// A single unit of work passed from the control plane → runner agent.
+// A single unit of work passed from the control plane → job-runner.
 // The agent takes only this and runs runCase to completion (harness under test + case).
 // tenant: SaaS multi-tenant identifier — the key for fair scheduling/quota/isolation/billing. The agent ignores it.
 // harnessSpec: the control plane resolves it from the registry and embeds it (a declarative command harness the agent interprets with no code).
 //   If absent, the agent builds a built-in adapter (claude-code/scripted) from the id.
-export const AgentJobSchema = z.object({
+export const CaseJobSchema = z.object({
   evalCase: EvalCaseSchema,
   harness: z.object({ id: z.string(), version: z.string() }),
   harnessSpec: HarnessSpecSchema.optional(),
@@ -98,4 +98,4 @@ export const AgentJobSchema = z.object({
   // single-run. The agent ignores it (it runs exactly one job); the control plane stamps the result. docs/architecture/trial-based-verdict.md
   trial: z.number().int().nonnegative().optional(),
 });
-export type AgentJob = z.infer<typeof AgentJobSchema>;
+export type CaseJob = z.infer<typeof CaseJobSchema>;

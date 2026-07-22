@@ -8,8 +8,8 @@ import {
   buildRuntimeBackend,
 } from "@everdict/backends";
 import {
-  type AgentJob,
   BadRequestError,
+  type CaseJob,
   type CaseResult,
   NotFoundError,
   type RegistryAuth,
@@ -87,7 +87,7 @@ export class RuntimeDispatcher implements Dispatcher {
     this.deps.backends.unregister(selfHostedBackendName({ owner, runnerId }));
   }
 
-  async dispatch(job: AgentJob, opts?: DispatchOptions): Promise<CaseResult> {
+  async dispatch(job: CaseJob, opts?: DispatchOptions): Promise<CaseResult> {
     const tenant = job.tenant ?? "default";
     const target = job.evalCase.placement?.target;
 

@@ -158,7 +158,7 @@ export class DockerDriver implements Driver {
   private readonly mounts: DriverMount[];
   // defaultImage: the image to use when a case carries no image. keepAlive: the sleep argument that keeps the container alive. base: the working root for relative paths.
   // mounts: host→container bind mounts (injected by the runner — e.g. codex login). registryAuth: workspace-registry
-  // pull credentials (transient, AgentJob.registryAuth) — if the image host matches, authenticated pre-pull then run.
+  // pull credentials (transient, CaseJob.registryAuth) — if the image host matches, authenticated pre-pull then run.
   // Design: docs/architecture/portable-harness-runtime.md · workspace-image-registry.md.
   constructor(
     private readonly opts: {

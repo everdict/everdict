@@ -1,8 +1,8 @@
 import { spawn } from "node:child_process";
 import { parseResult, stripSentinel } from "@everdict/contracts";
 import {
-  type AgentJob,
   BadRequestError,
+  type CaseJob,
   type CaseResult,
   InternalError,
   NotFoundError,
@@ -60,7 +60,7 @@ export function fetchHttp(addr: string, apiToken?: string, fetchImpl?: typeof fe
 
 export interface NomadBackendOptions {
   addr: string; // Nomad HTTP endpoint, e.g. http://nomad.internal:4646
-  image: string; // runner-agent image (in-house registry)
+  image: string; // job-runner image (in-house registry)
   apiToken?: string; // Nomad ACL token (X-Nomad-Token) — control-plane↔Nomad API auth. Unrelated to the alloc env.
   http?: NomadHttp;
   secretEnv?: Record<string, string>; // auth to inject into the alloc (e.g. CLAUDE_CODE_OAUTH_TOKEN). The default when secrets is absent.
@@ -123,7 +123,7 @@ export interface NomadJobSpec {
   };
 }
 
-export function nomadJobId(job: AgentJob, suffix?: string): string {
+export function nomadJobId(job: CaseJob, suffix?: string): string {
   return `everdict-${job.evalCase.id}${suffix ? `-${suffix}` : ""}`;
 }
 
@@ -318,17 +318,17 @@ function dispatchSuffix(): string {
   return Math.random().toString(36).slice(2, 7);
 }
 
-// AgentJob → Nomad batch job spec. The job payload is carried in the EVERDICT_AGENT_JOB(base64) env.
-export function buildNomadJob(job: AgentJob, opts: NomadBackendOptions, jobId?: string): NomadJobSpec {
+// CaseJob → Nomad batch job spec. The job payload is carried in the EVERDICT_CASE_JOB(base64) env.
+export function buildNomadJob(job: CaseJob, opts: NomadBackendOptions, jobId?: string): NomadJobSpec {
   const env: Record<string, string> = {
-    EVERDICT_AGENT_JOB: Buffer.from(JSON.stringify(job)).toString("base64"),
+    EVERDICT_CASE_JOB: Buffer.from(JSON.stringify(job)).toString("base64"),
     ...judgeEnv(job.judge), // per-run judge model config. The inline judge grader judges with this model.
     ...opts.secretEnv,
     // Judge provider key resolved per-job at dispatch (workspace tier → submitter personal fallback) — AFTER
     // secretEnv so the job-level credential wins over the backend's baked workspace tier.
     ...judgeAuthEnv(job.judge, job.judgeAuth),
   };
-  // Prefer the per-case image (e.g. the official SWE-bench prebuilt = deps+repo bundled), otherwise the default agent image.
+  // Prefer the per-case image (e.g. the official SWE-bench prebuilt = deps+repo bundled), otherwise the default job-runner image.
   const image = job.evalCase.image ?? opts.image;
   // For a workspace-registry image, docker auth (transient job credentials) — only when the host matches.
   const registryAuth = job.registryAuth;
@@ -433,7 +433,7 @@ export function streamHandleFor(child: StreamChild): ExecStreamHandle {
   };
 }
 
-// Launch the runner-agent as a Nomad batch alloc, poll for completion, then
+// Launch the job-runner as a Nomad batch alloc, poll for completion, then
 // parse the CaseResult from the sentinel in the stdout log.
 export class NomadBackend implements Backend, Recoverable, Observable, Shellable, Probeable, Inspectable, Reclaimable {
   private readonly http: NomadHttp;
@@ -631,7 +631,7 @@ export class NomadBackend implements Backend, Recoverable, Observable, Shellable
   }
 
   // Apply/enforce the tenant zone/secrets per job: untrusted requires strong isolation, a dedicated namespace, and inject only that tenant's keys.
-  private async effectiveOpts(job: AgentJob): Promise<NomadBackendOptions> {
+  private async effectiveOpts(job: CaseJob): Promise<NomadBackendOptions> {
     const tenant = job.tenant ?? "default";
     const zone = this.opts.trustZones?.resolve(tenant);
     if (zone) assertHardenedIsolation(zone);
@@ -646,7 +646,7 @@ export class NomadBackend implements Backend, Recoverable, Observable, Shellable
     };
   }
 
-  async dispatch(job: AgentJob, options?: DispatchOptions): Promise<CaseResult> {
+  async dispatch(job: CaseJob, options?: DispatchOptions): Promise<CaseResult> {
     if (options?.signal?.aborted) throw dispatchAborted(job); // cancelled before we even submitted
     options?.onStarted?.(); // past the Scheduler's wait queue — we're submitting the alloc now → flip the run to running
     const opts = await this.effectiveOpts(job);

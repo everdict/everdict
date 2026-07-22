@@ -4,18 +4,18 @@ import { bakeDockerfile, bakeImage, bakeTargetRef } from "./image-bake.js";
 describe("bakeDockerfile (managed case.image agent bootstrap)", () => {
   it("generates the multi-stage agent wrap: agent node+dist copied in, agent as entrypoint", () => {
     const df = bakeDockerfile("browseruse-eval:0.13.3");
-    expect(df).toContain("FROM everdict-agent:slim AS agent");
+    expect(df).toContain("FROM everdict-job-runner:slim AS agent");
     expect(df).toContain("FROM browseruse-eval:0.13.3");
     expect(df).toContain("COPY --from=agent /usr/local/bin/node /usr/local/bin/node");
-    expect(df).toContain("COPY --from=agent /app /everdict-agent");
-    expect(df).toContain('ENTRYPOINT ["node", "/everdict-agent/dist/main.js"]');
+    expect(df).toContain("COPY --from=agent /app /everdict-job-runner");
+    expect(df).toContain('ENTRYPOINT ["node", "/everdict-job-runner/dist/main.js"]');
     expect(df).toContain("CMD []"); // the base image's CMD must not leak into the agent's argv
     expect(df).toContain("libstdc++6"); // node's non-libc shared-lib dep, missing on slim python/debian bases
   });
 
-  it("honors a custom agent image", () => {
-    expect(bakeDockerfile("base:1", "reg.example.com/everdict-agent:v2")).toContain(
-      "FROM reg.example.com/everdict-agent:v2 AS agent",
+  it("honors a custom job-runner image", () => {
+    expect(bakeDockerfile("base:1", "reg.example.com/everdict-job-runner:v2")).toContain(
+      "FROM reg.example.com/everdict-job-runner:v2 AS agent",
     );
   });
 });

@@ -1,8 +1,8 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { runAgentJob } from "@everdict/agent";
-import type { AgentJob, CaseResult } from "@everdict/contracts";
+import type { CaseJob, CaseResult } from "@everdict/contracts";
 import { DockerDriver } from "@everdict/drivers";
+import { runCaseJob } from "@everdict/job-runner";
 import {
   type Backend,
   type BackendCapacity,
@@ -28,10 +28,10 @@ export class DockerBackend implements Backend, Probeable {
     return { total: typeof m === "function" ? m() : m, used: 0 };
   }
 
-  dispatch(job: AgentJob, opts?: DispatchOptions): Promise<CaseResult> {
+  dispatch(job: CaseJob, opts?: DispatchOptions): Promise<CaseResult> {
     if (opts?.signal?.aborted) return Promise.reject(dispatchAborted(job)); // best-effort: refuse a pre-cancelled run
     opts?.onStarted?.(); // dispatch = the case begins now (past the Scheduler's wait queue) → flip the run to running
-    return runAgentJob(job, { driver: this.driver }); // run the case in a container (case.image ?? default image)
+    return runCaseJob(job, { driver: this.driver }); // run the case in a container (case.image ?? default image)
   }
 
   // docker daemon reachability — asks for the server version (non-zero exit if the daemon isn't running / no permission).

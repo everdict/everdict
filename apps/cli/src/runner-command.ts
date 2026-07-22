@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { type DriverMount, hasClaudeAuth } from "@everdict/agent";
+import { type DriverMount, hasClaudeAuth } from "@everdict/job-runner";
 import {
   ResilientMcpSession,
   detectCapabilities,
@@ -13,7 +13,7 @@ import type { DockerTopologyRuntimeOptions } from "@everdict/topology";
 
 // `everdict runner` — the self-hosted runner lease loop, extracted from main.ts so it can be bundled into a STANDALONE
 // binary (`runner-standalone.ts`) WITHOUT pulling in @everdict/orchestrator (Temporal's native Rust bindings can't be
-// bundled). The runner path only needs @everdict/self-hosted-runner + @everdict/agent, both of which bundle cleanly
+// bundled). The runner path only needs @everdict/self-hosted-runner + @everdict/job-runner, both of which bundle cleanly
 // (the desktop already bundles the same). Runner LOGIC lives in @everdict/self-hosted-runner — this stays a thin wrapper.
 // Design: docs/architecture/self-hosted-runner.md · docs/architecture/runner-distribution.md.
 export async function runnerCommand(flags: Map<string, string>): Promise<void> {

@@ -7,7 +7,7 @@ We split "how to build Everdict" knowledge by **how the knowledge fails**:
 - Owns **short rules that conflict with ecosystem defaults** — things the model would
   otherwise "do the standard TS way" and get wrong for Everdict.
 - Keep each file thin (~20 lines): inlined critical rules + a pointer to the matching skill.
-- Current rules: `typescript`, `core-contracts`, `drivers`, `harnesses`, `graders`, `agent`,
+- Current rules: `typescript`, `core-contracts`, `drivers`, `harnesses`, `graders`, `job-runner`,
   `backends`, `orchestrator`, `trace`, `topology`, `api-layer`, `mcp`, `auth`, `db`, `registry`,
   `web`, `datasets`, `suite`, `workspace-integrations`, `testing`, `infra-deploy`, `ci`.
 
@@ -20,7 +20,7 @@ We split "how to build Everdict" knowledge by **how the knowledge fails**:
 
 ## Skills (pull)
 - `foundation/`     — module deps, the spine (4 concerns + Backend placement), error model, conventions.
-- `backends/`       — distributed execution: Backend vs Driver, `AgentJob`; the SaaS operational layer
+- `backends/`       — distributed execution: Backend vs Driver, `CaseJob`; the SaaS operational layer
   (capacity-aware + tenant-fair `Scheduler`, trust-zone isolation, secrets, budgets, autoscaling).
 - `topology/`       — service-topology harnesses: HarnessSpec(service), warm-pool/shared-store/per-case efficiency, live `NomadTopologyRuntime` + per-tenant warm pools, Nomad+K8s, OTel/MLflow trace.
 - `api-layer/`      — control-plane HTTP (`apps/api`, Fastify): async `POST /runs`/poll/webhook, `RunStore`, flat envelopes.

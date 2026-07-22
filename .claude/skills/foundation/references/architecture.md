@@ -21,7 +21,7 @@ domain kernel), `run-case`→`application-execution`, `suite`→`application-con
 | `@everdict/auth` | control-plane auth core: `Authenticator`→`Principal`, re-exports the authz vocabulary (domain) beside the authenticators | contracts, domain, db |
 | `@everdict/storage` | `ArtifactStore` impls (S3/InMemory); re-exports the port + `offloadSnapshot` (application-control) beside the impls | contracts, application-control |
 | `@everdict/backends` | `Backend` impls (+ `capacity()`) — placement (Local/Docker, Nomad, K8s) + `Router`/`Scheduler`/`BackendRegistry`; re-exports the `Dispatcher` port (application-control) beside `Backend` | contracts, domain, application-control, agent, drivers |
-| `@everdict/agent` | dispatched unit: a self-contained worker that runs `runCase` inside a job, emits result | contracts, domain, application-execution, drivers, environments, harnesses, graders |
+| `@everdict/job-runner` | dispatched unit: a self-contained worker that runs `runCase` inside a job, emits result | contracts, domain, application-execution, drivers, environments, harnesses, graders |
 | `@everdict/orchestrator` | durable control plane (Temporal): Direct/Temporal orchestrators + worker | contracts, backends, agent |
 | `@everdict/topology` | service-topology harnesses: `ServiceTopologyBackend` + Nomad/K8s builders + env manager | contracts, domain, application-execution, backends, graders, trace |
 | `@everdict/self-hosted-runner` | self-hosted runner core (MCP lease loop, resilient session, kind-branch execution) | contracts, agent, topology, trace |
@@ -45,8 +45,8 @@ runCase(case, { driver, environment, harness, graders, runCtx }):
 ```
 
 ## Distributed execution: Backend (placement) vs Driver (in-sandbox)
-The control plane (outside the clusters) builds an `AgentJob` (`{evalCase, harness:{id,version}}`)
-and calls `Backend.dispatch(job)`. The Backend dispatches the **runner-agent** (`@everdict/agent`)
+The control plane (outside the clusters) builds an `CaseJob` (`{evalCase, harness:{id,version}}`)
+and calls `Backend.dispatch(job)`. The Backend dispatches the **job-runner** (`@everdict/job-runner`)
 into an isolated unit; the agent reconstructs the harness+graders from a registry
 (`makeHarness`/`makeGraders`; graders carry config via `GraderSpec`), runs the eval loop above via
 `LocalDriver`, and prints the `CaseResult` behind the `__EVERDICT_RESULT__` sentinel; the Backend
@@ -66,7 +66,7 @@ starts+awaits. `suiteWorkflow` fan-out is bounded. See `docs/orchestration.md` +
 - New OS env on a pool (Windows/macOS) → `Backend` + per-run VM-checkpoint isolation.
 - New env type (browser / os-use) → new `Environment` + `EnvSnapshot` variant + grader family.
   os-use adds a `Computer` capability (screenshot/click/type) to `ComputeHandle` + a desktop image.
-- New harness (Codex / LangGraph) → new `EvaluableHarness` adapter (+ a registry entry in `@everdict/agent`).
+- New harness (Codex / LangGraph) → new `EvaluableHarness` adapter (+ a registry entry in `@everdict/job-runner`).
 - New scoring signal → new `Grader` (+ a registry entry). Grader is the one scoring primitive (a model-backed
   Grader = an Agent Judge); the automatic passRate/mean summary needs no definition.
 

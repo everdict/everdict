@@ -1,4 +1,4 @@
-import type { AgentJob, CaseResult } from "@everdict/contracts";
+import type { CaseJob, CaseResult } from "@everdict/contracts";
 import { continueAsNew, proxyActivities, sleep, workflowInfo } from "@temporalio/workflow";
 import type { Activities } from "./types.js";
 
@@ -16,7 +16,7 @@ const { fireScheduledScorecard, scheduledScorecardStatus, finalizeScheduledScore
 });
 
 // One case = a durable workflow execution. Resumes even if the control plane dies.
-export async function evalCaseWorkflow(job: AgentJob): Promise<CaseResult> {
+export async function evalCaseWorkflow(job: CaseJob): Promise<CaseResult> {
   return dispatchCase(job);
 }
 
@@ -26,7 +26,7 @@ const SUITE_FANOUT = 8;
 
 // Suite = dispatch multiple cases with a bounded fan-out (each activity retries independently).
 // Deterministic: lane workers grab an index via a shared counter and fill results by index (Temporal replay-safe).
-export async function suiteWorkflow(jobs: AgentJob[]): Promise<CaseResult[]> {
+export async function suiteWorkflow(jobs: CaseJob[]): Promise<CaseResult[]> {
   const results = new Array<CaseResult>(jobs.length);
   let next = 0;
   const lane = async (): Promise<void> => {
