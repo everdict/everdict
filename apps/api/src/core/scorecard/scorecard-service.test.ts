@@ -465,7 +465,7 @@ describe("ScorecardService.rerun — full re-run of a finished batch (전체 재
     expect((await store.get("src-1"))?.status).toBe("succeeded");
   });
 
-  it("applies re-score overrides (grading plan / judge model / trace sink) to the new batch's orchestration", async () => {
+  it("applies run-config overrides (selected judges / runtime) to the new batch while reproducing the original scoring", async () => {
     const store = new InMemoryScorecardStore();
     await seedSrc(store);
     const { datasets, service } = build(store);
@@ -474,14 +474,25 @@ describe("ScorecardService.rerun — full re-run of a finished batch (전체 재
     const created = await service.rerun({
       tenant: "acme",
       id: "src-1",
-      graders: [{ id: "cost" }],
-      judgeModel: "gpt-x",
-      traceSink: "none",
+      judges: [{ id: "k", version: "latest" }],
+      runtime: "rt-cloud",
     });
 
-    expect(created.orchestration?.graders).toEqual([{ id: "cost" }]); // override replaces the inherited plan
-    expect(created.orchestration?.judge).toEqual({ model: "gpt-x" });
-    expect(created.orchestration?.traceSink).toBe("none");
+    expect(created.orchestration?.judges).toEqual([{ id: "k", version: "latest" }]); // override replaces the original selection
+    expect(created.runtime).toBe("rt-cloud"); // runtime override applied
+    expect(created.orchestration?.graders).toEqual([{ id: "tests-pass" }]); // scoring reproduced verbatim (not overridable)
+  });
+
+  it("an explicit empty judges list re-runs with no judges (score with the dataset's graders only)", async () => {
+    const store = new InMemoryScorecardStore();
+    await seedSrc(store);
+    const { datasets, service } = build(store);
+    await datasets.register("acme", datasetWithCase());
+
+    const created = await service.rerun({ tenant: "acme", id: "src-1", judges: [] });
+
+    expect(created.orchestration?.judges).toEqual([]); // [] is an override to "no judges", not "inherit"
+    expect(created.runtime).toBe("self:laptop"); // runtime still inherited (unset)
   });
 
   it("rejects re-running a batch that has not finished (400) and hides another workspace's / a missing scorecard (404)", async () => {

@@ -6,16 +6,16 @@ import { DeleteScorecardButton } from '@/features/delete-scorecard'
 import { CommentsSection } from '@/features/discuss'
 import { RerunScorecardButton } from '@/features/rerun-scorecard'
 import { StopScorecardButton } from '@/features/stop-scorecard'
+import { judgesSchema } from '@/entities/judge'
 import { membersSchema } from '@/entities/member'
-import { modelsSchema } from '@/entities/model'
 import { runsSchema, type RunStatus } from '@/entities/run'
 import { runnersResponseSchema, type RunnerMeta } from '@/entities/runner'
+import { runtimesSchema } from '@/entities/runtime'
 import {
   scorecardRecordSchema,
   type MetricSummary,
   type ScorecardRecord,
 } from '@/entities/scorecard'
-import { traceSourcesResponseSchema } from '@/entities/trace-source'
 import { can } from '@/shared/auth/can'
 import { currentPrincipal } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
@@ -348,24 +348,36 @@ export default async function ScorecardDetailPage({
       // roster fetch failed → no live badge; the static hint still renders
     }
   }
-  // Re-run choices — the re-run dialog's advanced re-score overrides need the workspace's configured trace sinks
-  // (otel is pull-only) + registered models. Only fetched for a terminal batch the viewer can re-run (both optional).
+  // Re-run choices — the re-run dialog lets the viewer adjust the two run-config choices made at submit time (the
+  // selected judges + the execution runtime), pre-filled from this batch. Fetch the pickable judges/runtimes/runners
+  // only for a terminal batch the viewer can re-run (all optional — a failed fetch just narrows the picker, the
+  // original selection is still reproduced).
   const canRun = !live && can(principal?.roles, 'scorecards:run')
-  let sinks: { name: string; kind: string }[] = []
-  let models: { id: string }[] = []
+  let judgeChoices: { id: string }[] = []
+  let runtimeChoices: { id: string }[] = []
+  let myRunners: { id: string; label: string }[] = []
+  let hasWorkspaceRunners = false
   if (canRun) {
     try {
-      sinks = traceSourcesResponseSchema
-        .parse(await controlPlane.listTraceSources(ctx))
-        .sources.filter((s) => s.kind !== 'otel')
-        .map((s) => ({ name: s.name, kind: s.kind }))
+      judgeChoices = judgesSchema.parse(await controlPlane.listJudges(ctx))
     } catch {
-      // Source list failed → the re-run dialog just omits the trace-sink override
+      // Judge list failed → the dialog keeps the original judges, it just can't add new ones
     }
     try {
-      models = modelsSchema.parse(await controlPlane.listModels(ctx))
+      runtimeChoices = runtimesSchema.parse(await controlPlane.listRuntimes(ctx))
     } catch {
-      // Model list failed → the re-run dialog just omits the judge-model override
+      // Runtime list failed → the dialog keeps the original runtime, it just can't switch registered runtimes
+    }
+    try {
+      myRunners = runnersResponseSchema.parse(await controlPlane.listRunners(ctx)).runners
+    } catch {
+      // Runner list failed → the dialog omits personal-runner options
+    }
+    try {
+      hasWorkspaceRunners =
+        runnersResponseSchema.parse(await controlPlane.listWorkspaceRunners(ctx)).runners.length > 0
+    } catch {
+      // Roster failed → the dialog hides the shared team-runner pool option
     }
   }
   const locale = await getLocale()
@@ -395,8 +407,12 @@ export default async function ScorecardDetailPage({
                   id={record.id}
                   workspace={workspace}
                   failedCount={failedCount}
-                  sinks={sinks}
-                  models={models}
+                  originalJudges={judges}
+                  originalRuntime={record.runtime}
+                  judges={judgeChoices}
+                  runtimes={runtimeChoices}
+                  runners={myRunners}
+                  hasWorkspaceRunners={hasWorkspaceRunners}
                 />
               )}
               {/* Delete is offered once the batch is terminal, to its creator or a workspace admin (mirrors the

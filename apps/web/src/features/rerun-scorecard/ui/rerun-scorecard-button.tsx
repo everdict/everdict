@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useMemo, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { Loader2, RotateCcw, X } from 'lucide-react'
 import { useTranslations } from 'next-intl'
@@ -8,71 +8,74 @@ import { useTranslations } from 'next-intl'
 import { cn } from '@/shared/lib/utils'
 import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
-import { Combobox } from '@/shared/ui/combobox'
+import { Combobox, type ComboboxOption } from '@/shared/ui/combobox'
 import { Dialog } from '@/shared/ui/dialog'
-import { Label, Textarea } from '@/shared/ui/input'
+import { Label } from '@/shared/ui/input'
 import { InfoTip } from '@/shared/ui/tooltip'
 
 import { rerunScorecardAction } from '../api/rerun-scorecard'
 
-// Parse the optional grading-plan JSON — empty is ok (no override). Must be a non-empty array of { id }.
-function parseGraders(
-  text: string
-): { ok: true; graders?: { id: string; config?: Record<string, unknown> }[] } | { ok: false } {
-  const t = text.trim()
-  if (!t) return { ok: true }
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(t)
-  } catch {
-    return { ok: false }
-  }
-  if (!Array.isArray(parsed) || parsed.length === 0) return { ok: false }
-  const graders: { id: string; config?: Record<string, unknown> }[] = []
-  for (const g of parsed) {
-    if (typeof g !== 'object' || g === null || typeof (g as { id?: unknown }).id !== 'string')
-      return { ok: false }
-    const o = g as { id: string; config?: unknown }
-    graders.push({
-      id: o.id,
-      ...(o.config && typeof o.config === 'object' && !Array.isArray(o.config)
-        ? { config: o.config as Record<string, unknown> }
-        : {}),
-    })
-  }
-  return { ok: true, graders }
-}
-
 // Re-run action for a TERMINAL scorecard — one button, two scopes chosen in the dialog: a FULL re-run (every case,
-// original config, optionally re-scored with a different grading plan / judge model / trace sink) or a FAILED-only
-// recovery (passing results carry over). The advanced re-score overrides live here (not in the creation wizard) —
-// re-scoring differently is inherently a re-run concern, and they apply to the full scope only (a failed-only
-// recovery keeps the original scoring so the carried-over cases stay consistent). On success we navigate to the
-// fresh scorecard. The control plane enforces scorecards:run.
+// reproducing the original config) or a FAILED-only recovery (passing results carry over). For a full re-run the
+// dialog surfaces the two run-config choices made at submit time — the selected judges and the execution runtime —
+// pre-filled from the original batch and EDITABLE, so the user can adjust who runs it and re-run. Scoring (the
+// grading plan / inline judge model / trace sink) is reproduced verbatim — a re-run adjusts WHO runs it, not HOW it's
+// scored. A failed-only recovery keeps the original config as-is (carried-over cases stay consistent). On success we
+// navigate to the fresh scorecard. The control plane enforces scorecards:run.
 export function RerunScorecardButton({
   id,
   workspace,
   failedCount,
-  sinks = [],
-  models = [],
+  originalJudges = [],
+  originalRuntime,
+  judges = [],
+  runtimes = [],
+  runners = [],
+  hasWorkspaceRunners = false,
 }: {
   id: string
   workspace: string
   failedCount: number // number of failed cases in the source batch — gates the "failed only" scope
-  sinks?: { name: string; kind: string }[] // configured workspace trace sinks (per-batch export override)
-  models?: { id: string }[] // registered models (inline judge scoring-model override)
+  originalJudges?: { id: string; version: string }[] // the batch's selected judges (prefill + version map)
+  originalRuntime?: string // the batch's execution target (prefill)
+  judges?: { id: string }[] // registered Agent Judges available to pick
+  runtimes?: { id: string }[] // registered runtimes
+  runners?: { id: string; label: string }[] // my personal runners
+  hasWorkspaceRunners?: boolean // team shared runner pool available (self:ws)
 }) {
   const t = useTranslations('rerunScorecard')
+  const tr = useTranslations('runScorecard') // reuse the creation form's judge/runtime picker copy
   const router = useRouter()
   const [open, setOpen] = useState(false)
   const [pending, start] = useTransition()
   const [scope, setScope] = useState<'all' | 'failed'>('all')
-  const [advanced, setAdvanced] = useState(false)
-  const [traceSink, setTraceSink] = useState('')
-  const [judgeModel, setJudgeModel] = useState('')
-  const [gradersJson, setGradersJson] = useState('')
+  const [judgeIds, setJudgeIds] = useState<string[]>(originalJudges.map((j) => j.id))
+  const [runtime, setRuntime] = useState(originalRuntime ?? '')
   const [error, setError] = useState<string>()
   const titleId = 'rerun-scorecard'
+
+  // Original judge → pinned version, so an unchanged judge re-runs on the exact version that scored (a newly-added one gets latest).
+  const versionByJudge = useMemo(
+    () => new Map(originalJudges.map((j) => [j.id, j.version])),
+    [originalJudges]
+  )
+  // Runtime choices — registered runtimes + runner pools, same as the creation form. The original runtime is always
+  // an option (even if it's since been removed) so the pre-filled value renders.
+  const runtimeOptions = useMemo<ComboboxOption[]>(() => {
+    const opts: ComboboxOption[] = [
+      ...runtimes.map((r) => ({ value: r.id })),
+      ...(hasWorkspaceRunners
+        ? [{ value: 'self:ws', label: tr('poolWorkspaceLabel'), hint: tr('poolWorkspaceHint') }]
+        : []),
+      ...(runners.length > 0
+        ? [{ value: 'self', label: tr('poolSelfLabel'), hint: tr('poolSelfHint') }]
+        : []),
+      ...runners.map((r) => ({ value: `self:${r.id}`, label: r.label, hint: tr('poolSelfHint') })),
+    ]
+    if (originalRuntime && !opts.some((o) => o.value === originalRuntime))
+      opts.unshift({ value: originalRuntime })
+    return opts
+  }, [runtimes, runners, hasWorkspaceRunners, originalRuntime, tr])
 
   function close() {
     if (pending) return
@@ -81,32 +84,27 @@ export function RerunScorecardButton({
 
   function submit() {
     setError(undefined)
-    // Overrides apply to the full re-run only; a failed-only recovery keeps the original scoring.
-    let graders: { id: string; config?: Record<string, unknown> }[] | undefined
-    if (scope === 'all') {
-      const parsed = parseGraders(gradersJson)
-      if (!parsed.ok) {
-        setError(t('gradersInvalid'))
-        return
-      }
-      graders = parsed.graders
-    }
+    // Run-config edits apply to the full re-run only; a failed-only recovery reproduces the original config as-is.
+    const overrides =
+      scope === 'all'
+        ? {
+            // Always send the (possibly-edited) list — an empty list re-runs with no judges. Unchanged judges keep
+            // their original pinned version; a newly-added judge resolves to latest server-side.
+            judges: judgeIds.map((jid) => ({
+              id: jid,
+              version: versionByJudge.get(jid) ?? 'latest',
+            })),
+            ...(runtime ? { runtime } : {}),
+          }
+        : {}
     start(async () => {
-      const res = await rerunScorecardAction({
-        id,
-        scope,
-        ...(scope === 'all'
-          ? {
-              ...(graders ? { graders } : {}),
-              ...(traceSink ? { traceSink } : {}),
-              ...(judgeModel ? { judgeModel } : {}),
-            }
-          : {}),
-      })
+      const res = await rerunScorecardAction({ id, scope, ...overrides })
       if (res.ok && res.id) router.push(`/${workspace}/scorecards/${res.id}`)
       else setError(res.error ?? t('error'))
     })
   }
+
+  const availableJudges = judges.filter((j) => !judgeIds.includes(j.id))
 
   return (
     <>
@@ -155,75 +153,65 @@ export function RerunScorecardButton({
             />
           </fieldset>
 
-          {/* Advanced re-score overrides — full re-run only (a failed recovery keeps the original scoring). */}
+          {/* Run configuration — the judges + runtime this scorecard was run with, pre-filled and editable (full re-run
+              only; a failed-only recovery reproduces the original config as-is). Scoring is reproduced verbatim. */}
           {scope === 'all' && (
-            <div className="rounded-lg border bg-muted/20">
-              <button
-                type="button"
-                onClick={() => setAdvanced((v) => !v)}
-                className="flex w-full items-center justify-between px-4 py-2.5 text-[13px] font-[510] text-foreground"
-              >
-                {t('advancedToggle')}
-                <span className="text-faint">{advanced ? '−' : '+'}</span>
-              </button>
-              {advanced && (
-                <div className="space-y-4 border-t px-4 py-3.5">
-                  <p className="text-[12px] text-muted-foreground">{t('overridesNote')}</p>
-                  {/* Per-batch trace-sink override — a configured workspace sink, or 'none' to suppress export. */}
-                  <div className="space-y-1.5">
-                    <div className="flex items-center gap-1">
-                      <Label htmlFor="rerun-traceSink">{t('traceSinkLabel')}</Label>
-                      <InfoTip content={t('traceSinkTip')} />
-                    </div>
-                    <Combobox
-                      id="rerun-traceSink"
-                      options={[
-                        { value: '', label: t('traceSinkDefault') },
-                        { value: 'none', label: t('traceSinkNone') },
-                        ...sinks.map((s) => ({ value: s.name, label: `${s.name} (${s.kind})` })),
-                      ]}
-                      value={traceSink}
-                      onChange={setTraceSink}
-                      searchable={false}
-                    />
-                  </div>
+            <div className="space-y-4 rounded-lg border bg-muted/20 px-4 py-3.5">
+              <div className="flex items-center gap-1">
+                <span className="text-[13px] font-[510] text-foreground">{t('configLegend')}</span>
+                <InfoTip content={t('configNote')} />
+              </div>
 
-                  {/* Inline judge scoring-model override — a registered Model id for the inline judge grader. */}
-                  <div className="space-y-1.5">
-                    <div className="flex items-center gap-1">
-                      <Label htmlFor="rerun-judgeModel">{t('judgeModelLabel')}</Label>
-                      <InfoTip content={t('judgeModelTip')} />
-                    </div>
-                    <Combobox
-                      id="rerun-judgeModel"
-                      options={[
-                        { value: '', label: t('judgeModelDefault') },
-                        ...models.map((m) => ({ value: m.id })),
-                      ]}
-                      value={judgeModel}
-                      onChange={setJudgeModel}
-                      placeholder={t('judgeModelDefault')}
-                      emptyText={t('judgeModelEmpty')}
-                    />
-                  </div>
-
-                  {/* Grading-plan override — a GraderSpec[] JSON that replaces every case's default graders. */}
-                  <div className="space-y-1.5">
-                    <div className="flex items-center gap-1">
-                      <Label htmlFor="rerun-gradersJson">{t('gradersLabel')}</Label>
-                      <InfoTip content={t('gradersTip')} />
-                    </div>
-                    <Textarea
-                      id="rerun-gradersJson"
-                      rows={4}
-                      className="font-mono text-[12px]"
-                      placeholder={t('gradersPlaceholder')}
-                      value={gradersJson}
-                      onChange={(e) => setGradersJson(e.target.value)}
-                    />
-                  </div>
+              {/* Selected judges — pre-filled from the original batch; edit the set to score the re-run differently. */}
+              <div className="space-y-1.5">
+                <div className="flex items-center gap-1">
+                  <Label htmlFor="rerun-judges">{tr('judgesLabel')}</Label>
+                  <InfoTip content={tr('judgesTip')} />
                 </div>
-              )}
+                <Combobox
+                  id="rerun-judges"
+                  options={availableJudges.map((j) => ({ value: j.id }))}
+                  value=""
+                  onChange={(v) => {
+                    if (v && !judgeIds.includes(v)) setJudgeIds([...judgeIds, v])
+                  }}
+                  placeholder={tr('judgesPlaceholder')}
+                  emptyText={tr('judgesEmpty')}
+                />
+                {judgeIds.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 pt-0.5">
+                    {judgeIds.map((jid) => (
+                      <span
+                        key={jid}
+                        className="inline-flex items-center gap-1 rounded bg-secondary px-2 py-0.5 font-mono text-[12px] font-[510] text-secondary-foreground ring-1 ring-inset ring-border"
+                      >
+                        {jid}
+                        <button
+                          type="button"
+                          aria-label={tr('judgesRemove', { id: jid })}
+                          onClick={() => setJudgeIds(judgeIds.filter((x) => x !== jid))}
+                          className="text-faint transition-colors hover:text-destructive"
+                        >
+                          <X className="size-3" />
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Execution runtime — pre-filled from the original batch; change where the re-run executes. */}
+              <div className="space-y-1.5">
+                <Label htmlFor="rerun-runtime">{tr('runtimeLabel')}</Label>
+                <Combobox
+                  id="rerun-runtime"
+                  options={runtimeOptions}
+                  value={runtime}
+                  onChange={setRuntime}
+                  placeholder={tr('runtimePlaceholder')}
+                  emptyText={tr('runtimeEmpty')}
+                />
+              </div>
             </div>
           )}
 

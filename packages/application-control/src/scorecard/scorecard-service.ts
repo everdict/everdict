@@ -3,7 +3,6 @@ import {
   type CaseResult,
   type Dataset,
   ForbiddenError,
-  type GraderSpec,
   type HarnessSpec,
   NotFoundError,
   type ScorecardOrigin,
@@ -278,11 +277,11 @@ export class ScorecardService {
   }
 
   // Full re-run — re-execute a FINISHED batch's ENTIRE case set as a NEW scorecard, faithfully reproducing the
-  // original submit inputs (dataset+version, harness+ephemeral pins, selected judges, runtime, concurrency/retries/
-  // trials, subset) so the two are directly comparable — optionally applying a re-score override (a different
-  // grading plan / inline judge model / trace sink). The source record is never mutated. This is the "전체 재실행"
-  // scope (the recovery-only "실패만 재실행" stays retryFailed, which carries passing results over). Cloning through
-  // submit gets faithfulness for free (pins/judge-model/trials/temporal dispatch); the ONE thing we deliberately
+  // original submit inputs (dataset+version, harness+ephemeral pins, grading plan, concurrency/retries/trials, subset)
+  // so the two are directly comparable — while letting the caller adjust the two run-config choices that were made at
+  // submit time: the selected Agent Judges and the execution runtime. The source record is never mutated. This is the
+  // "전체 재실행" scope (the recovery-only "실패만 재실행" stays retryFailed, which carries passing results over). Cloning
+  // through submit gets faithfulness for free (pins/judge-model/trials/temporal dispatch); the ONE thing we deliberately
   // drop is the CI provenance (repo/sha/prNumber) — a manual re-run is a new trigger, and inheriting prNumber would
   // wrongly supersede other in-flight batches of that PR. Lineage is kept via origin.retryOf. Workspace-scoped:
   // another workspace's / a missing scorecard is a NotFound (no existence leak).
@@ -290,10 +289,11 @@ export class ScorecardService {
     tenant: string;
     id: string;
     submittedBy?: string;
-    // Re-score overrides (all optional) — unset inherits the original batch's own plan/model/sink.
-    graders?: GraderSpec[];
-    traceSink?: string; // a configured workspace sink name, or "none" to suppress export for this re-run
-    judgeModel?: string; // a registered Model id for the inline judge grader
+    // Run-config overrides (both optional) — surfaced from the original submit so a re-run can adjust them:
+    //   judges  — the selected Agent Judges; unset inherits the original selection, [] re-runs with none.
+    //   runtime — the execution target (a registered runtime id / self:* runner); unset inherits the original.
+    judges?: Array<{ id: string; version: string }>;
+    runtime?: string;
   }): Promise<ScorecardRecord> {
     const src = await this.get(input.id);
     if (!src || src.tenant !== input.tenant)
@@ -312,8 +312,10 @@ export class ScorecardService {
         version: src.harness.version,
         ...(pins && Object.keys(pins).length > 0 ? { pins } : {}),
       },
-      judges: orch?.judges ?? [],
-      ...(src.runtime ? { runtime: src.runtime } : {}),
+      // Selected judges: an explicit override (incl. an empty list = run with none) → else the original selection.
+      judges: input.judges ?? orch?.judges ?? [],
+      // Execution target: an explicit override → else the original runtime.
+      ...((input.runtime ?? src.runtime) ? { runtime: input.runtime ?? src.runtime } : {}),
       ...(orch?.concurrency !== undefined ? { concurrency: orch.concurrency } : {}),
       ...(orch?.retries !== undefined ? { retries: orch.retries } : {}),
       ...(orch?.trials !== undefined ? { trials: orch.trials } : {}),
@@ -328,10 +330,11 @@ export class ScorecardService {
             },
           }
         : {}),
-      // Re-score overrides: explicit override → else inherit the original batch's own plan/sink/model.
-      ...((input.graders ?? orch?.graders) ? { graders: input.graders ?? orch?.graders } : {}),
-      ...((input.traceSink ?? orch?.traceSink) ? { traceSink: input.traceSink ?? orch?.traceSink } : {}),
-      ...(input.judgeModel ? { judge: { model: input.judgeModel } } : orch?.judge ? { judge: orch.judge } : {}),
+      // Scoring is reproduced verbatim from the source (grading plan / inline judge model / trace sink) — a re-run
+      // adjusts WHO runs it (judges/runtime), not HOW it is scored.
+      ...(orch?.graders ? { graders: orch.graders } : {}),
+      ...(orch?.traceSink ? { traceSink: orch.traceSink } : {}),
+      ...(orch?.judge ? { judge: orch.judge } : {}),
       // Lineage only — NO repo/prNumber (a manual re-run is a fresh trigger, and prNumber would supersede the PR).
       origin: { source: "api", retryOf: src.id },
     });

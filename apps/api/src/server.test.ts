@@ -3297,7 +3297,7 @@ describe("API — scorecards (dataset×harness batch eval)", () => {
     await app.close();
   });
 
-  it("POST /scorecards/:id/rerun: member re-runs a finished batch as a new scorecard (202, fresh id) applying a grading-plan override", async () => {
+  it("POST /scorecards/:id/rerun: member re-runs a finished batch as a new scorecard (202, fresh id) adjusting the selected judges + runtime", async () => {
     const { app } = server({ requireAuth: true, authenticator: roleAuth(["member"]) });
     const h = { authorization: "Bearer x" };
     await app.inject({ method: "POST", url: "/datasets", headers: h, payload: DATASET });
@@ -3313,11 +3313,13 @@ describe("API — scorecards (dataset×harness batch eval)", () => {
       method: "POST",
       url: `/scorecards/${id}/rerun`,
       headers: h,
-      payload: { graders: [{ id: "steps" }] },
+      payload: { judges: [{ id: "quality" }], runtime: "self:laptop" },
     });
     expect(rerun.statusCode).toBe(202);
     expect(rerun.json().id).not.toBe(id); // a fresh scorecard, not a mutation of the source
     expect(rerun.json().origin.retryOf).toBe(id); // lineage kept
+    expect(rerun.json().runtime).toBe("self:laptop"); // runtime override applied
+    expect(rerun.json().orchestration.judges).toEqual([{ id: "quality", version: "latest" }]); // judges override applied
     await app.close();
   });
 

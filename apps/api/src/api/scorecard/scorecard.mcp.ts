@@ -188,38 +188,33 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
       "rerun_scorecard",
       {
         description:
-          "Re-run a finished batch's ENTIRE case set as a new scorecard (전체 재실행), faithfully reproducing the original submit (dataset+version, harness+pins, judges, runtime, concurrency/retries/trials, subset) so the two compare directly — optionally applying a re-score override (a different grading plan / inline judge model / trace sink). Async (poll with get_scorecard). Multi-trial IS supported here. Lineage via origin.retryOf; the source record is never mutated. For recovering only the FAILED cases (carry the passing ones over) use retry_scorecard instead.",
+          "Re-run a finished batch's ENTIRE case set as a new scorecard (전체 재실행), faithfully reproducing the original submit (dataset+version, harness+pins, grading plan, concurrency/retries/trials, subset) so the two compare directly — while optionally adjusting the two run-config choices made at submit time: the selected judges and the execution runtime (each unset field inherits the original). Async (poll with get_scorecard). Multi-trial IS supported here. Lineage via origin.retryOf; the source record is never mutated. For recovering only the FAILED cases (carry the passing ones over) use retry_scorecard instead.",
         inputSchema: {
           id: z.string().describe("source scorecard id (must be succeeded/failed)"),
-          graders: z
-            .array(z.object({ id: z.string(), config: z.record(z.unknown()).optional() }))
-            .min(1)
+          judges: z
+            .array(z.object({ id: z.string(), version: z.string().default("latest") }))
             .optional()
-            .describe("re-score grading plan (GraderSpec[] {id, config?}) — unset inherits the original batch's plan"),
-          judge_model: z
-            .string()
-            .min(1)
-            .optional()
-            .describe("inline judge scoring-model override (a registered Model id) — unset inherits the original"),
-          trace_sink: z
+            .describe(
+              "selected Agent Judges override [{id, version?}] — unset inherits the original selection, [] re-runs with no judges",
+            ),
+          runtime: z
             .string()
             .min(1)
             .optional()
             .describe(
-              'trace-sink override: a configured sink name, or "none" to suppress export — unset inherits the original',
+              "execution target override (a registered runtime id or self:* runner) — unset inherits the original",
             ),
         },
       },
-      ({ id, graders, judge_model, trace_sink }) =>
+      ({ id, judges, runtime }) =>
         run(principal, "scorecards:run", async () =>
           ok(
             await scorecards.rerun({
               tenant: ws,
               id,
               submittedBy: principal.subject,
-              ...(graders ? { graders } : {}),
-              ...(judge_model ? { judgeModel: judge_model } : {}),
-              ...(trace_sink ? { traceSink: trace_sink } : {}),
+              ...(judges ? { judges } : {}),
+              ...(runtime ? { runtime } : {}),
             }),
           ),
         ),

@@ -59,12 +59,13 @@ const docs = {
     summary: "Re-run a scorecard (full re-run)",
     description:
       "Creates a NEW scorecard that re-runs the ENTIRE case set of a terminal batch (전체 재실행), faithfully " +
-      "reproducing the original submit (dataset+version, harness+ephemeral pins, judges, runtime, concurrency/" +
-      "retries/trials, subset) so the two compare directly — optionally applying a re-score override (grading " +
-      "plan / inline judge model / trace sink) in the body. Unlike retry it re-runs every case (no carry-over) and " +
-      "supports multi-trial batches. Lineage via origin.retryOf; the source is never mutated, and the CI " +
-      "provenance (repo/PR) is deliberately dropped so a manual re-run never supersedes the PR's in-flight batches. " +
-      "Requires scorecards:run (member+), workspace-scoped. 400 when the source is not terminal.",
+      "reproducing the original submit (dataset+version, harness+ephemeral pins, grading plan, concurrency/" +
+      "retries/trials, subset) so the two compare directly — while optionally adjusting the two run-config choices " +
+      "made at submit time: the selected judges and the execution runtime (each unset field inherits the original). " +
+      "Unlike retry it re-runs every case (no carry-over) and supports multi-trial batches. Lineage via " +
+      "origin.retryOf; the source is never mutated, and the CI provenance (repo/PR) is deliberately dropped so a " +
+      "manual re-run never supersedes the PR's in-flight batches. Requires scorecards:run (member+), " +
+      "workspace-scoped. 400 when the source is not terminal.",
     tags: ["scorecard"],
     params: scorecardIdParams,
     body: toJsonSchema(RerunScorecardBodySchema),
