@@ -13,7 +13,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "dev": "pnpm build && electron .",
-    "package": "node esbuild.mjs && electron-builder --publish never"
+    "package": "pnpm turbo run build --filter=@everdict/desktop && node esbuild.mjs && electron-builder --publish never"
   },
   "dependencies": {
     "@everdict/self-hosted-runner": "workspace:*",
