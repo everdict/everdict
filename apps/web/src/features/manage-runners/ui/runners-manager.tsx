@@ -88,7 +88,14 @@ export function RunnersManager({
       .runnerStatus()
       .then((s) => setDesktop(normalizeRunnersStatus(s)))
       .catch(() => {})
-    return b.onRunnerStatus((s) => setDesktop(normalizeRunnersStatus(s)))
+    // Live status subscription. When this page is hosted in the panel's same-origin iframe the bridge is reached
+    // through the top frame (getEverdictDesktop); a subscription the shell cannot wire across the frame boundary
+    // degrades to no live updates (the one-shot fetch above already seeded the state) rather than throwing.
+    try {
+      return b.onRunnerStatus((s) => setDesktop(normalizeRunnersStatus(s)))
+    } catch {
+      // no cross-frame subscription — the initial runnerStatus() fetch already populated this device's status
+    }
   }, [])
 
   // Runners paired on THIS device (from the live bridge), and the set of their ids for row matching.

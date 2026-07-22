@@ -68,7 +68,14 @@ export function RunnerDetail({
       .runnerStatus()
       .then((s) => setDesktop(normalizeRunnersStatus(s)))
       .catch(() => {})
-    return b.onRunnerStatus((s) => setDesktop(normalizeRunnersStatus(s)))
+    // Live status subscription. This detail page is hosted in the panel's same-origin iframe, where the bridge is
+    // reached through the top frame (getEverdictDesktop); a subscription the shell cannot wire across the frame
+    // boundary degrades to no live updates (the one-shot fetch above already seeded the state) rather than throwing.
+    try {
+      return b.onRunnerStatus((s) => setDesktop(normalizeRunnersStatus(s)))
+    } catch {
+      // no cross-frame subscription — the initial runnerStatus() fetch already populated this device's status
+    }
   }, [])
 
   // Live-ish: re-fetch the server component while the tab is visible so the online dot / self-status / activity update.

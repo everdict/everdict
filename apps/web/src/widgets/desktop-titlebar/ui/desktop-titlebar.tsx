@@ -19,6 +19,10 @@ export function DesktopTitlebar() {
   const [maximized, setMaximized] = useState(false)
 
   useEffect(() => {
+    // The frameless OS title bar belongs to the real top window. getEverdictDesktop now resolves the bridge
+    // across the frame boundary (so embedded panel pages detect the shell), so an embedded document could also
+    // see `window` controls — but it must never draw a second title bar inside the infra panel's iframe.
+    if (window.top !== window.self) return
     const bridge = getEverdictDesktop()
     const win = bridge?.window
     if (!bridge || !win) return

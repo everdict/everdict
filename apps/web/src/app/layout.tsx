@@ -15,7 +15,10 @@ export const metadata: Metadata = {
 
 // Apply the theme before paint to prevent FOUC (theme flicker).
 // Prefer the stored explicit choice (localStorage), else the OS preference (prefers-color-scheme).
-const themeScript = `(function(){try{var s=localStorage.getItem('theme');var d=s?s==='dark':matchMedia('(prefers-color-scheme: dark)').matches;var e=document.documentElement;e.classList.toggle('dark',d);e.style.colorScheme=d?'dark':'light';}catch(_){}})();`
+// It also re-applies on the `storage` event so a theme change in another same-origin document takes effect
+// here without a reload — the infra panel hosts pages in a same-origin iframe that stays mounted, so a toggle
+// in the parent must sync into it (the storage event fires in every OTHER same-origin document); cross-tab too.
+const themeScript = `(function(){function a(){try{var s=localStorage.getItem('theme');var d=s?s==='dark':matchMedia('(prefers-color-scheme: dark)').matches;var e=document.documentElement;e.classList.toggle('dark',d);e.style.colorScheme=d?'dark':'light';}catch(_){}}a();try{window.addEventListener('storage',function(ev){if(!ev.key||ev.key==='theme')a();});}catch(_){}})();`
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   // Locale/catalog is resolved per request by shared/i18n/request.ts (cookie > Accept-Language > en).

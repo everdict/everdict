@@ -66,9 +66,23 @@ export interface EverdictDesktopBridge {
 }
 
 // Present only when rendering inside the desktop shell — null in a regular browser.
+// The Electron preload injects the bridge on the TOP frame ONLY (it does not run in sub-frames). The infra panel
+// hosts the real routed pages (runtimes list · runner detail) in a same-origin iframe, which therefore has no
+// local `window.everdictDesktop` and would look like a plain browser (showing the "get the desktop app" CTA
+// instead of pairing / this-device controls). Reach up to the top frame so an embedded page still detects the
+// shell. Same-origin cross-frame access is allowed and the bridge's own IPC still gates on the top frame's origin;
+// a cross-origin top (a foreign site framing us) throws on access → caught → null, so the bridge never leaks.
 export function getEverdictDesktop(): EverdictDesktopBridge | null {
   if (typeof window === 'undefined') return null
-  return (window as Window & { everdictDesktop?: EverdictDesktopBridge }).everdictDesktop ?? null
+  const here = window as Window & { everdictDesktop?: EverdictDesktopBridge }
+  if (here.everdictDesktop) return here.everdictDesktop
+  try {
+    const top = window.top as (Window & { everdictDesktop?: EverdictDesktopBridge }) | null
+    if (top && top !== window) return top.everdictDesktop ?? null
+  } catch {
+    // cross-origin top — not our desktop shell, so no bridge to reach
+  }
+  return null
 }
 
 // Normalize a bridge status payload into the aggregate list shape. An older desktop (pre-D9) returns a bare
