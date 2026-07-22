@@ -17,6 +17,10 @@ function injectWorkspace(req: NextRequest): NextResponse {
   if (!slug) return NextResponse.next()
   const headers = new Headers(req.headers)
   headers.set(ACTIVE_WORKSPACE_HEADER, slug)
+  // Infra-panel iframe marker — the panel loads pages with ?embed=1 (Sec-Fetch-Dest is only sent on
+  // trustworthy origins, so plain-HTTP dev needs the explicit param). Promoted to a request header the
+  // [workspace] layout reads to render chrome-less; in-iframe soft navigation keeps that layout instance.
+  if (req.nextUrl.searchParams.get('embed') === '1') headers.set('x-everdict-embed', '1')
   const res = NextResponse.next({ request: { headers } })
   // Same attributes as active-workspace.ts setActiveWorkspace — so action writes and middleware writes don't conflict.
   res.cookies.set(ACTIVE_WORKSPACE_COOKIE, slug, {

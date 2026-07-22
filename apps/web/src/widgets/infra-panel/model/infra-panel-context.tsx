@@ -14,19 +14,19 @@ import { membersSchema } from '@/entities/member'
 import { queueSnapshotSchema, type QueueSnapshot } from '@/entities/queue'
 
 // Infra split-view state — the screen splits into an eval side (left: routed pages) and an infra side (right:
-// the floating panel with schedules / runtimes / runs / work). The vertical rail (the divider device) and the
-// panel live at different DOM locations yet share the open state, the active tab, the selected live run and the
-// polled queue snapshot, so it is lifted into context. Mounted once in the [workspace] shell — the panel
-// survives left-side navigation, which is what keeps a run's live stream uninterrupted.
+// the floating panel). The panel hosts the REAL routed infra pages (schedules / runtimes / runs) in same-origin
+// iframes with their own history — full existing screens, fully independent navigation — plus the purpose-built
+// work tab (queue snapshot). The vertical rail (divider) and the panel share this context; it is mounted once
+// in the [workspace] shell, so left-side navigation never interrupts anything playing on the right.
 
 export type WorkAuthor = { name: string; avatarUrl?: string }
 
 export type InfraTab = 'schedules' | 'runtimes' | 'runs' | 'work'
 
-// The panel navigates on its own — infra detail views (runtime / runner / schedule / live run) open INSIDE the
-// panel, never via the left router. Per-tab drill-in state lives here (not in the tab components) so switching
-// tabs or navigating the left half never loses a drill-in.
-export type RuntimesDetail = { kind: 'runtime' | 'runner'; id: string } | null
+// A deep-open request into a page tab's iframe — e.g. openRun() points the runs tab at that run's REAL detail
+// page. seq forces re-application even for a repeated identical target (the user may have navigated away inside
+// the iframe in between).
+export type FrameRequest = { tab: InfraTab; path: string; seq: number }
 
 type InfraPanelValue = {
   workspace: string
@@ -37,18 +37,11 @@ type InfraPanelValue = {
   // Non-toggling open (command palette, deep entries) — always ends open on the given tab.
   openTab: (tab: InfraTab) => void
   close: () => void
-  // Live run selection (runs tab) — openRun() is the cross-page entry: any surface can push a run
-  // into the right panel without navigating away.
-  selectedRunId: string | null
-  selectRun: (id: string | null) => void
+  // Deep entries — open the panel on a tab AND point its iframe at the real page for the entity.
   openRun: (id: string) => void
-  // In-panel infra navigation — runtime/runner and schedule drill-ins (+ cross-tab entries used by the work tab).
-  runtimesDetail: RuntimesDetail
-  setRuntimesDetail: (d: RuntimesDetail) => void
   openRuntime: (kind: 'runtime' | 'runner', id: string) => void
-  schedulesDetail: string | null
-  setSchedulesDetail: (id: string | null) => void
   openSchedule: (id: string) => void
+  frameRequest: FrameRequest | null
   snapshot: QueueSnapshot | null
   authors: Record<string, WorkAuthor>
 }
@@ -67,9 +60,8 @@ export function InfraPanelProvider({
 }) {
   const [open, setOpen] = useState(false)
   const [tab, setTab] = useState<InfraTab>('work')
-  const [selectedRunId, setSelectedRunId] = useState<string | null>(null)
-  const [runtimesDetail, setRuntimesDetail] = useState<RuntimesDetail>(null)
-  const [schedulesDetail, setSchedulesDetail] = useState<string | null>(null)
+  const [frameRequest, setFrameRequest] = useState<FrameRequest | null>(null)
+  const frameSeq = useRef(0)
   const [snapshot, setSnapshot] = useState<QueueSnapshot | null>(null)
   const [authors, setAuthors] = useState<Record<string, WorkAuthor>>({})
   const authorsLoaded = useRef(false)
@@ -154,23 +146,31 @@ export function InfraPanelProvider({
 
   const close = useCallback(() => setOpen(false), [])
 
-  const openRun = useCallback((id: string) => {
-    setSelectedRunId(id)
-    setTab('runs')
+  const request = useCallback((target: InfraTab, path: string) => {
+    frameSeq.current += 1
+    setFrameRequest({ tab: target, path, seq: frameSeq.current })
+    setTab(target)
     setOpen(true)
   }, [])
 
-  const openRuntime = useCallback((kind: 'runtime' | 'runner', id: string) => {
-    setRuntimesDetail({ kind, id })
-    setTab('runtimes')
-    setOpen(true)
-  }, [])
+  const openRun = useCallback(
+    (id: string) => request('runs', `/runs/${encodeURIComponent(id)}`),
+    [request]
+  )
 
-  const openSchedule = useCallback((id: string) => {
-    setSchedulesDetail(id)
-    setTab('schedules')
-    setOpen(true)
-  }, [])
+  const openRuntime = useCallback(
+    (kind: 'runtime' | 'runner', id: string) =>
+      request(
+        'runtimes',
+        kind === 'runner'
+          ? `/runtimes/self/${encodeURIComponent(id)}`
+          : `/runtimes/${encodeURIComponent(id)}`
+      ),
+    [request]
+  )
+
+  // The schedules surface is the list page (no per-schedule route) — open it; the id stays for a future anchor.
+  const openSchedule = useCallback((_id: string) => request('schedules', '/schedules'), [request])
 
   return (
     <InfraPanelContext.Provider
@@ -181,15 +181,10 @@ export function InfraPanelProvider({
         toggleTab,
         openTab,
         close,
-        selectedRunId,
-        selectRun: setSelectedRunId,
         openRun,
-        runtimesDetail,
-        setRuntimesDetail,
         openRuntime,
-        schedulesDetail,
-        setSchedulesDetail,
         openSchedule,
+        frameRequest,
         snapshot,
         authors,
       }}

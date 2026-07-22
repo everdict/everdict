@@ -1,6 +1,7 @@
+import { headers } from 'next/headers'
 import { redirect } from 'next/navigation'
 
-import { AppShell } from '@/widgets/app-shell'
+import { ShellSwitch } from '@/widgets/app-shell'
 import { currentPrincipal } from '@/shared/auth/principal'
 import { keycloakConfigured } from '@/shared/config/env'
 
@@ -30,8 +31,18 @@ export default async function WorkspaceLayout({
   const isMember = principal.workspaces?.some((w) => w.id === slug) ?? false
   if (!isMember) redirect(`/${principal.workspace}`)
 
+  // Infra split view: the infra panel hosts the REAL routed pages in a same-origin iframe → render them
+  // chrome-less. The server hint is sec-fetch-dest=iframe (sent only on trustworthy origins) OR the panel's
+  // explicit ?embed=1 (promoted to x-everdict-embed by the middleware); ShellSwitch (client) makes the framed
+  // decision STICKY, because this dynamic layout re-renders on soft navigation without those signals.
+  const requestHeaders = await headers()
+  const embedHint =
+    requestHeaders.get('sec-fetch-dest') === 'iframe' ||
+    requestHeaders.get('x-everdict-embed') === '1'
+
   return (
-    <AppShell
+    <ShellSwitch
+      embedHint={embedHint}
       workspace={principal.workspace}
       workspaces={principal.workspaces ?? []}
       subject={principal.subject}
@@ -42,6 +53,6 @@ export default async function WorkspaceLayout({
       {...(principal.profile !== undefined ? { profile: principal.profile } : {})}
     >
       {children}
-    </AppShell>
+    </ShellSwitch>
   )
 }

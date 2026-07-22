@@ -110,20 +110,22 @@ panel/list guidance is not.
   pop-shadow card — not a flush docked column) as a flex sibling of `main`, so the two sides split the space
   half-and-half on md+; on mobile the rail floats on the right edge and the panel becomes a floating sheet.
   Panel state + polling live in `InfraPanelProvider` in the shell (above the routes), so left-side navigation
-  never unmounts it. **The panel navigates itself and is self-sufficient**: infra drill-ins (runtime · runner ·
-  schedule · live run) open IN-PANEL (per-tab detail state in the provider, `DetailNav` back row), never via
-  the left router — the two halves have fully independent navigation, and there is deliberately NO "full page"
-  link (the panel shows the full content itself; routed infra pages stay URL-reachable only). The only
-  left-bound links inside the panel are eval-axis entities (scorecards). Tabs: **work** — the queue snapshot:
-  per-runtime lanes (default backend · registered
-  runtimes · `self:<runner>`) each showing running (batch = case-progress bar), waiting (FIFO, first badged
+  never unmounts it. **The page tabs host the REAL routed pages** (user decision — no re-implemented
+  summaries): schedules · runtimes · runs are same-origin iframes of `/{ws}/schedules|runtimes|runs` rendered
+  chrome-less — the [workspace] layout passes an embed hint (sec-fetch-dest=iframe, only sent on trustworthy
+  origins, OR the panel's `?embed=1` promoted to `x-everdict-embed` by the middleware) to `ShellSwitch`
+  (client), whose framed decision is STICKY because the dynamic layout re-renders on soft nav without those
+  signals; `EmbedShell` renders the page bare. Each iframe owns its history (fully independent right-side
+  navigation: list → detail → back, live 20s cluster polling, run detail with trace/logs/screen — the full
+  existing screens) and stays mounted once opened, so tab switches and left-side navigation never interrupt a
+  live view. Eval-axis links clicked inside an iframe (anything but runs/runtimes/schedules) are intercepted by
+  `EmbedShell` and posted to the parent (`everdict:left-nav`) → the LEFT router navigates instead. Deep entries
+  `useInfraPanel().openRun/openRuntime/openSchedule` point the tab's iframe at the entity's real page. The
+  **work** tab stays purpose-built (no full page): the queue snapshot per-runtime lanes (default backend ·
+  registered runtimes · `self:<runner>`) with running (batch = case-progress bar), waiting (FIFO, first badged
   'Next') and next-scheduled fires, from `GET /queue` (`runs:read`; MCP parity `get_queue`; see
-  `docs/architecture/work-queue.md`); **runs** — the execution feed (BFF `/api/runs`, scope=all) where selecting
-  a run swaps in its **uninterrupted live view** (LiveScreen frames + LiveLogs tail) right in the panel — the
-  cross-page entry is `useInfraPanel().openRun(id)` (e.g. the work tab's watch-live shortcut on running runs);
-  **runtimes** — the infra roster (workspace runtimes + my self-hosted runners with 90s-window online dots, BFF
-  `/api/runtimes`); **schedules** — enabled-first upcoming fires (BFF `/api/schedules`). Runtime placement is
-  captured on records (`RunRecord.runtime`/`ScorecardRecord.runtime`, mig 0040).
+  `docs/architecture/work-queue.md`); its run rows open the run's real page in the runs tab. Runtime placement
+  is captured on records (`RunRecord.runtime`/`ScorecardRecord.runtime`, mig 0040).
 - **Judge `/{workspace}/judges`** — owned vs `_shared` Agent Judges (kind + version chips; rows link to detail).
   **Detail `/{workspace}/judges/[id]`** shows kind + fields + rubric. **Register `/{workspace}/judges/new`** — a
   **kind-toggle form** (model | harness) with a validate (dry-run) step → `POST /judges`. Role-gated off `/me`
