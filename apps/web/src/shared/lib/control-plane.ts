@@ -118,6 +118,9 @@ export const controlPlane = {
   // Live screen frame (LiveScreen — os-use desktop). supported=false for other env kinds.
   getRunScreen: <T>(auth: AuthContext, id: string) =>
     call<T>(auth, `/runs/${encodeURIComponent(id)}/screen`),
+  // Sealed replay recording of a settled run (ReplayPlayer). Creator-or-admin, enforced by the control plane.
+  getRunRecording: <T>(auth: AuthContext, id: string) =>
+    call<T>(auth, `/runs/${encodeURIComponent(id)}/recording`),
   // Interactive-terminal ticket (LiveTerminal — observability ⑥). Creator-or-admin, enforced by the control plane.
   terminalTicket: <T>(auth: AuthContext, id: string) =>
     call<T>(auth, `/runs/${encodeURIComponent(id)}/terminal-ticket`, { method: 'POST' }),

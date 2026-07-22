@@ -2545,10 +2545,10 @@
     "nextTrace": "다음 트레이스",
     "time_any": "전체 기간",
     "time_24h": "최근 24시간",
-    "time_yesterday": "어제",
     "time_7d": "최근 7일",
     "time_30d": "최근 30일",
-    "timeLabel": "기간"
+    "timeLabel": "기간",
+    "time_yesterday": "어제"
   },
   "settingsPage": {
     "title": "워크스페이스 설정",
@@ -2832,6 +2832,13 @@
   "liveScreen": {
     "label": "라이브 화면",
     "waiting": "첫 프레임을 기다리는 중…"
+  },
+  "replay": {
+    "title": "리플레이",
+    "play": "재생",
+    "pause": "일시정지",
+    "frameAlt": "녹화 프레임",
+    "frameOf": "프레임 {i}/{n}"
   },
   "sandboxTerminal": {
     "hint": "실행 중인 샌드박스에서 명령을 실행해요 (ls · cat · ps · env …)",

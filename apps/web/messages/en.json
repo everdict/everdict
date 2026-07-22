@@ -2545,10 +2545,10 @@
     "nextTrace": "Next trace",
     "time_any": "Any time",
     "time_24h": "Last 24h",
-    "time_yesterday": "Yesterday",
     "time_7d": "Last 7 days",
     "time_30d": "Last 30 days",
-    "timeLabel": "Time window"
+    "timeLabel": "Time window",
+    "time_yesterday": "Yesterday"
   },
   "settingsPage": {
     "title": "Workspace settings",
@@ -2832,6 +2832,13 @@
   "liveScreen": {
     "label": "Live screen",
     "waiting": "Waiting for the first frame…"
+  },
+  "replay": {
+    "title": "Replay",
+    "play": "Play",
+    "pause": "Pause",
+    "frameAlt": "Recorded frame",
+    "frameOf": "Frame {i}/{n}"
   },
   "sandboxTerminal": {
     "hint": "Run a command inside the live sandbox (ls · cat · ps · env …)",

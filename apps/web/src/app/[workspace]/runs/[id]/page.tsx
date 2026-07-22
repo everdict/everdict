@@ -3,6 +3,7 @@ import { ChevronLeft } from 'lucide-react'
 import { getTimeZone, getTranslations } from 'next-intl/server'
 
 import { LiveLogs } from '@/widgets/live-logs'
+import { ReplayPlayer } from '@/widgets/replay-player'
 import { LiveScreen, SandboxTerminal } from '@/widgets/sandbox-terminal'
 import { TraceTimeline } from '@/widgets/trace-timeline'
 import { CommentsSection } from '@/features/discuss'
@@ -259,6 +260,9 @@ export default async function RunDetailPage({
           </div>
         </section>
       )}
+
+      {/* 리플레이 — 종료된 run의 봉인된 녹화(프레임 스크럽 + 시점 동기 로그). 녹화 없으면 위젯이 self-null */}
+      <ReplayPlayer runId={run.id} initialStatus={run.status} />
 
       <section className="space-y-2.5">
         <SectionHeader title={t('scores')} />
