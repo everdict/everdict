@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { clampFidelity, FIDELITY_ORDER } from "./fidelity.js";
+import { FIDELITY_ORDER, clampFidelity } from "./fidelity.js";
 
 describe("clampFidelity", () => {
   it("returns the requested rung when the recorder supports it", () => {

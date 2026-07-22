@@ -8,8 +8,8 @@ import {
 } from "@everdict/contracts";
 import { Schedule, type ScheduleSpec, classifyFailure } from "@everdict/domain";
 import type { ScheduleStore } from "../ports/schedule-store.js";
-import type { PullIngestInput } from "../scorecard/scorecard-shared.js";
 import type { RunScorecardInput } from "../scorecard/scorecard-service.js";
+import type { PullIngestInput } from "../scorecard/scorecard-shared.js";
 
 // Cron validity and the Temporal spec shape are owned by the domain model (@everdict/domain) — re-exported here
 // so existing importers (server.ts, route-context, request DTOs, the Temporal driver) keep their path.
