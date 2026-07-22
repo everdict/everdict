@@ -341,16 +341,23 @@ export class MlflowTraceSource implements BrowsableTraceSource {
         "MLflow trace listing requires an experiment scope (traces/search requires locations).",
       );
     }
-    // NOTE: opts.since/until (time window) are NOT wired here. traces/search filters via a `filter` string whose
-    // timestamp field/grammar we have not live-verified (a wrong filter would 400 the whole listing, not just ignore
-    // the window — a regression). Until it is verified against a real server, MLflow lists the most-recent N and the
-    // time window is best-effort-ignored (see ListTracesOptions). Wire it with the same care as the verified tag filter.
+    // Time window → traces/search `filter` on `timestamp_ms` (ms epoch), the trace request-time field (same filter
+    // grammar as the live-verified `` tags.`everdict.run_id` `` tag filter). Best-effort — if a server rejects the
+    // filter field the listing fails rather than silently widening, so this is the field to re-check first if a real
+    // server 400s the list.
+    const clauses: string[] = [];
+    const since = opts?.since ? Date.parse(opts.since) : Number.NaN;
+    const until = opts?.until ? Date.parse(opts.until) : Number.NaN;
+    if (!Number.isNaN(since)) clauses.push(`timestamp_ms >= ${since}`);
+    if (!Number.isNaN(until)) clauses.push(`timestamp_ms <= ${until}`);
+    const filter = clauses.join(" AND ");
     const res = await f(`${base}/api/3.0/mlflow/traces/search`, {
       method: "POST",
       headers: { "content-type": "application/json", ...(this.opts.headers ?? {}) },
       body: JSON.stringify({
         locations: experiments.map((id) => ({ type: "MLFLOW_EXPERIMENT", mlflow_experiment: { experiment_id: id } })),
         max_results: opts?.limit ?? 50,
+        ...(filter ? { filter } : {}),
       }),
     });
     if (!res.ok) {

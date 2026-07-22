@@ -118,6 +118,16 @@ describe("MlflowTraceSource — listTraces + inspect", () => {
     expect(traces[0]?.startedAt).toBe(new Date(1_700_000_000_000).toISOString());
   });
 
+  it("passes the time window as a timestamp_ms filter on traces/search", async () => {
+    const fetchImpl = vi.fn((..._args: Parameters<typeof fetch>) => Promise.resolve(json({ traces: [] })));
+    const src = new MlflowTraceSource({ endpoint: "http://mlflow:5000", fetchImpl: fetchImpl as typeof fetch });
+    const since = "2026-07-01T00:00:00.000Z";
+    const until = "2026-07-02T00:00:00.000Z";
+    await src.listTraces({ scope: "exp1", since, until });
+    const req = JSON.parse(String(fetchImpl.mock.calls[0]?.[1]?.body));
+    expect(req.filter).toBe(`timestamp_ms >= ${Date.parse(since)} AND timestamp_ms <= ${Date.parse(until)}`);
+  });
+
   it("maps the MLflow 3.x trace-info shape — proto-JSON execution_duration and the mlflow.traceName tag", async () => {
     // The live 3.x server returns execution_duration as a proto3-JSON Duration string ("1.2s") and the display
     // name only as the mlflow.traceName tag — neither field of the older *_ms shape is present.
@@ -345,6 +355,19 @@ describe("LangsmithTraceSource — listTraces (root runs)", () => {
     const traces = await src.listTraces({ scope: "sess1" });
     expect(traces[0]).toMatchObject({ id: "t1", durationMs: 1000, status: "ok", costUsd: 0.01, scope: "sess1" });
     expect(traces[0]?.tokens).toEqual({ input: 10, output: 5 });
+  });
+
+  it("passes the time window as a start_time filter DSL on /runs/query", async () => {
+    const fetchImpl = vi.fn((..._args: Parameters<typeof fetch>) => Promise.resolve(json({ runs: [] })));
+    const src = new LangsmithTraceSource({
+      endpoint: "https://api.smith.langchain.com",
+      fetchImpl: fetchImpl as typeof fetch,
+    });
+    const since = "2026-07-01T00:00:00.000Z";
+    const until = "2026-07-02T00:00:00.000Z";
+    await src.listTraces({ scope: "sess1", since, until });
+    const req = JSON.parse(String(fetchImpl.mock.calls[0]?.[1]?.body));
+    expect(req.filter).toBe(`and(gte(start_time, "${since}"), lte(start_time, "${until}"))`);
   });
 
   it("listTraces requires a session (project) scope", async () => {
