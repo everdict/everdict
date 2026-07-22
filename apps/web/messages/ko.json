@@ -2823,7 +2823,20 @@
     "tab_runtimes": "런타임",
     "tab_runs": "실행",
     "tab_work": "작업",
+    "tab_agent": "에이전트",
     "collapse": "패널 접기"
+  },
+  "agentChat": {
+    "subtitle": "평가에 대해 물어보세요",
+    "new": "새 대화",
+    "empty": "아직 대화가 없어요. 하네스 리뷰·스코어카드 분석·런타임 점검을 대화로 시작해 보세요.",
+    "emptyMessages": "스코어카드·judge 트레이스·하네스·런타임에 대해 에이전트에게 물어보세요.",
+    "placeholder": "에이전트에게 메시지…",
+    "send": "보내기",
+    "thinking": "생각 중…",
+    "back": "대화 목록으로",
+    "errorSend": "메시지를 보내지 못했어요. 다시 시도해 주세요.",
+    "errorGeneric": "문제가 발생했어요."
   },
   "workspaceSettings": {
     "meterUsage": "사용량 계측",

@@ -21,7 +21,7 @@ import { queueSnapshotSchema, type QueueSnapshot } from '@/entities/queue'
 
 export type WorkAuthor = { name: string; avatarUrl?: string }
 
-export type InfraTab = 'schedules' | 'runtimes' | 'runs' | 'work'
+export type InfraTab = 'schedules' | 'runtimes' | 'runs' | 'work' | 'agent'
 
 // A deep-open request into a page tab's iframe — e.g. openRun() points the runs tab at that run's REAL detail
 // page. seq forces re-application even for a repeated identical target (the user may have navigated away inside

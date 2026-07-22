@@ -2823,7 +2823,20 @@
     "tab_runtimes": "Runtimes",
     "tab_runs": "Runs",
     "tab_work": "Work",
+    "tab_agent": "Agent",
     "collapse": "Collapse panel"
+  },
+  "agentChat": {
+    "subtitle": "Ask about your evals",
+    "new": "New",
+    "empty": "No conversations yet. Start one to review harnesses, analyze scorecards, or inspect runtimes.",
+    "emptyMessages": "Ask the agent about your scorecards, judge traces, harnesses, or runtimes.",
+    "placeholder": "Message the agent…",
+    "send": "Send",
+    "thinking": "Thinking…",
+    "back": "Back to conversations",
+    "errorSend": "Couldn’t send the message. Try again.",
+    "errorGeneric": "Something went wrong."
   },
   "workspaceSettings": {
     "meterUsage": "Meter usage",

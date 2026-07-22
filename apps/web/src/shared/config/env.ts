@@ -4,6 +4,8 @@ import { z } from 'zod'
 const schema = z.object({
   // Control plane (@everdict/api) base URL — called from the server only.
   CONTROL_PLANE_URL: z.string().url().default('http://127.0.0.1:8787'),
+  // Agent server (@everdict/agent) base URL — the conversational agent; called from the server (BFF) only.
+  AGENT_URL: z.string().url().default('http://127.0.0.1:8790'),
   // GitHub repo the desktop download page (/{ws}/download) reads releases from. Public (everdict/everdict) → read
   // unauthenticated; members download via the /api/desktop/download proxy (302) after web login.
   DESKTOP_RELEASES_REPO: z.string().default('everdict/everdict'),
@@ -41,6 +43,7 @@ const schema = z.object({
 
 export const env = schema.parse({
   CONTROL_PLANE_URL: process.env.CONTROL_PLANE_URL,
+  AGENT_URL: process.env.AGENT_URL,
   DESKTOP_RELEASES_REPO: process.env.DESKTOP_RELEASES_REPO,
   DESKTOP_RELEASES_TOKEN: process.env.DESKTOP_RELEASES_TOKEN,
   DESKTOP_DOWNLOAD_URL: process.env.DESKTOP_DOWNLOAD_URL,

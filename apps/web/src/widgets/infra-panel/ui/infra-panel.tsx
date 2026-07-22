@@ -2,9 +2,18 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Activity, CalendarClock, ChevronsRight, Play, Server, type LucideIcon } from 'lucide-react'
+import {
+  Activity,
+  Bot,
+  CalendarClock,
+  ChevronsRight,
+  Play,
+  Server,
+  type LucideIcon,
+} from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
+import { AgentChatPanel } from '@/features/agent-chat'
 import { cn } from '@/shared/lib/utils'
 
 import { useInfraPanel, type InfraTab } from '../model/infra-panel-context'
@@ -27,6 +36,7 @@ const TAB_META: Record<InfraTab, { icon: LucideIcon }> = {
   runtimes: { icon: Server },
   runs: { icon: Play },
   work: { icon: Activity },
+  agent: { icon: Bot },
 }
 
 // The page tabs and their iframe home paths (workspace-relative).
@@ -166,6 +176,11 @@ export function InfraPanel() {
             {tab === 'work' && (
               <div className="h-full overflow-y-auto">
                 <WorkTab onNavigate={onNavigate} />
+              </div>
+            )}
+            {tab === 'agent' && (
+              <div className="h-full">
+                <AgentChatPanel />
               </div>
             )}
             {mountedTabs.map((pageTab) => (

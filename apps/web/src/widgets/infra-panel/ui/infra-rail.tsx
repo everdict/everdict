@@ -1,6 +1,6 @@
 'use client'
 
-import { Activity, CalendarClock, Play, Server, type LucideIcon } from 'lucide-react'
+import { Activity, Bot, CalendarClock, Play, Server, type LucideIcon } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
 import { cn } from '@/shared/lib/utils'
@@ -18,6 +18,7 @@ const TABS: { tab: InfraTab; icon: LucideIcon }[] = [
   { tab: 'runtimes', icon: Server },
   { tab: 'runs', icon: Play },
   { tab: 'work', icon: Activity },
+  { tab: 'agent', icon: Bot },
 ]
 
 function RailButtons() {
