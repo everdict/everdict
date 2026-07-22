@@ -289,6 +289,17 @@ const supervisor = new RunnerSupervisor({
       waitMs: 8_000,
     }),
   defaultApiUrl,
+  // Where this device can actually reach the server — the host it loads the web from. Lets the supervisor self-heal a
+  // runner stuck on a loopback URL (baked in at pair time on a different machine) on reconnect/startup instead of leaving
+  // it permanently offline. Read live: webUrl is mutable (set after resolve, changeable via the setup window).
+  reachableHost: () => {
+    if (webUrl === null) return undefined;
+    try {
+      return new URL(webUrl).hostname;
+    } catch {
+      return undefined;
+    }
+  },
   broadcast: (status) => {
     notifyDrainIfNeeded(latestRunnersStatus, status);
     latestRunnersStatus = status;

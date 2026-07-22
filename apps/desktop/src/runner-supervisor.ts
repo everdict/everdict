@@ -40,11 +40,20 @@ export interface RunnerSupervisorDeps {
     maxConcurrent?: number; // this runner's worker-pool size (unset → the RunnerHost default of 1)
   }): RunnerHostLike;
   defaultApiUrl: string;
+  // The hostname this device can currently reach the server on — the URL the desktop loads the web from (main.ts wires
+  // the live webUrl). Used to self-heal a runner whose stored control-plane URL is a loopback baked in at pair time on a
+  // DIFFERENT machine (unreachable → permanently offline, the #1 "won't connect" cause). Optional: absent for the CLI /
+  // tests (no healing); a return of undefined means the server URL isn't known yet (also no healing).
+  reachableHost?: () => string | undefined;
   broadcast(status: DesktopRunnersStatus): void;
   log?: (msg: string) => void;
 }
 
 const OFF: RunnerHostStatus = { state: "off", activeJobs: 0, capabilities: [] };
+
+// Loopback hosts a pairing may have baked into a runner's control-plane URL — reachable from the server host itself but
+// NOT from a runner on another machine. Kept in sync with the web's resolveRunnerApiUrl LOOPBACK_HOSTNAMES set.
+const LOOPBACK_HOSTNAMES = new Set(["localhost", "127.0.0.1", "[::1]", "0.0.0.0"]);
 
 interface RunnerEntry {
   host: RunnerHostLike;
@@ -73,13 +82,14 @@ export class RunnerSupervisor {
     for (const runner of this.deps.loadRunners()) {
       const token = tokens[runner.runnerId];
       if (token === undefined) continue; // config entry with no matching token (keychain lost) — skip; the user re-pairs
-      await this.startRunner(
-        runner.runnerId,
-        token,
-        runner.apiUrl ?? this.deps.defaultApiUrl,
-        runner.label,
-        runner.maxConcurrent,
-      );
+      // Self-heal a loopback URL baked in at pair time on a different machine, so a just-updated app comes back online on
+      // launch with no user action (the same rebase reconnect / repoint do — see healApiUrl). Persist the change so it sticks.
+      const current = runner.apiUrl ?? this.deps.defaultApiUrl;
+      const healed = this.healApiUrl(current);
+      if (healed !== current) {
+        this.deps.saveRunners(upsertRunner(this.deps.loadRunners(), { ...runner, apiUrl: healed }));
+      }
+      await this.startRunner(runner.runnerId, token, healed, runner.label, runner.maxConcurrent);
     }
     this.emit();
   }
@@ -128,9 +138,13 @@ export class RunnerSupervisor {
 
   // Force a paired runner (or, id omitted, every runner on this device) to reconnect — the recovery lever for a runner that
   // shows "offline" (its lease loop can't reach the control plane, so lastSeenAt goes stale) without discarding the pairing.
-  // A live host is restarted in place (fresh MCP session → re-advertise → lease → lastSeenAt refreshes). A runner that has no
-  // live host (e.g. its token was recovered after a keychain loss that made startFromStore skip it) is (re)started from the
-  // stored token; a still-missing token can't be recovered here (the row must be re-paired) and is skipped.
+  // FIRST self-heals a stale loopback URL: reconnect is the button a user actually reaches for, so if the stored apiUrl is a
+  // loopback baked in at pair time on another machine (permanently unreachable → a plain restart would just fail again), it
+  // is rebased onto the reachable server host so the reconnect actually recovers it. Then: a live host still dialing a
+  // reachable URL is restarted in place (fresh MCP session → re-advertise → lease → lastSeenAt refreshes — no host swap, no
+  // status race); a runner whose URL had to change, or that has no live host (e.g. its token was recovered after a keychain
+  // loss that made startFromStore skip it), is (re)built on the healed URL from the stored token; a still-tokenless runner
+  // can't be recovered here (the row must be re-paired) and is skipped.
   async reconnect(runnerId?: string): Promise<void> {
     const targets =
       runnerId !== undefined
@@ -139,16 +153,46 @@ export class RunnerSupervisor {
     const tokens = this.deps.loadTokens();
     for (const id of targets) {
       const entry = this.entries.get(id);
-      if (entry !== undefined) {
+      const cfg = this.deps.loadRunners().find((r) => r.runnerId === id);
+      const current = entry?.apiUrl ?? cfg?.apiUrl ?? this.deps.defaultApiUrl;
+      const healed = this.healApiUrl(current);
+      // Persist a healed URL so it sticks (survives the next restart) — only when there's a config row to update.
+      if (healed !== current && cfg !== undefined) {
+        this.deps.saveRunners(upsertRunner(this.deps.loadRunners(), { ...cfg, apiUrl: healed }));
+      }
+      // A live host already dialing a reachable URL only needs a cheap in-place restart (no host swap → no status race).
+      if (entry !== undefined && healed === current) {
         await entry.host.restart();
         continue;
       }
+      // The URL had to be healed, or there is no live host → (re)build the host on the healed URL. Needs the token; a
+      // healed live host whose token can't be recovered falls back to an in-place restart (best effort, keeps the old URL).
       const token = tokens[id];
-      const cfg = this.deps.loadRunners().find((r) => r.runnerId === id);
-      if (token === undefined || cfg === undefined) continue; // keychain lost — can't reconnect; the row must be re-paired
-      await this.startRunner(id, token, cfg.apiUrl ?? this.deps.defaultApiUrl, cfg.label, cfg.maxConcurrent);
+      if (token === undefined) {
+        if (entry !== undefined) await entry.host.restart();
+        continue; // no live host AND no token — nothing to reconnect; the row must be re-paired
+      }
+      this.stopRunnerInBackground(id);
+      await this.startRunner(id, token, healed, entry?.label ?? cfg?.label, cfg?.maxConcurrent);
     }
     this.emit();
+  }
+
+  // Rebase a stored control-plane URL that points at loopback onto the host this device can actually reach the server on
+  // (the URL it loaded the web from), keeping the CP port/path — the same rebase repoint / the web's resolveRunnerApiUrl
+  // do, but AUTOMATIC and ONLY for loopback (a real host is never rewritten). Returns the URL unchanged when there's no
+  // reachable host, the reachable host is itself loopback (genuine single-machine dev), or the stored URL isn't loopback.
+  private healApiUrl(url: string): string {
+    const host = this.deps.reachableHost?.();
+    if (host === undefined || LOOPBACK_HOSTNAMES.has(host)) return url;
+    try {
+      const u = new URL(url);
+      if (!LOOPBACK_HOSTNAMES.has(u.hostname)) return url;
+      u.hostname = host;
+      return u.toString().replace(/\/+$/, "");
+    } catch {
+      return url; // unparseable stored URL — leave it (re-pair to reset)
+    }
   }
 
   // Repoint every runner's control-plane URL onto a new host (the user changed the server address in the tray) and

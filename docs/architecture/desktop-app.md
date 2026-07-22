@@ -112,6 +112,15 @@
 >   and the **tray** (native menu + popover `reconnect` action) reconnects all runners on the device. Bridge-additive and
 >   optional on the web mirror, so an older shell just doesn't show the affordance. No control-plane change — this is pure
 >   local device control (the server already refreshes `lastSeenAt` on the resulting lease).
+>   **Reconnect self-heals a loopback URL (added after the initial D12 lock).** A runner paired on a machine *different*
+>   from the server bakes in a loopback control-plane URL (`http://127.0.0.1:8787` — the web server's own
+>   `CONTROL_PLANE_URL`), which is permanently unreachable from that machine, so a plain in-place restart just fails
+>   again and the runner never comes back — the exact "updated + reconnected, still offline" report. So `reconnect`
+>   (and `startFromStore` on launch) now FIRST rebase a stored *loopback* apiUrl onto the host the desktop actually
+>   reaches the server on (`RunnerSupervisor.reachableHost()` = the live `webUrl`'s hostname, keeping the CP port/path —
+>   the same rebase `repoint` and the web's `resolveRunnerApiUrl` do, but automatic and loopback-only, never rewriting a
+>   real host). A healed URL is persisted and the host is rebuilt on it; an unchanged URL keeps the cheap in-place
+>   restart. This makes the button the user reaches for actually recover the runner instead of silently re-failing.
 > - **D13 — a runner behind the control plane auto-updates itself (LOCKED 2026-07-17).** When the control plane moves
 >   forward, an older self-hosted runner can silently start failing jobs (the runner-facing `AgentJob`/lease contract
 >   moved on) — and a **desktop user cannot tell**. D13 closes the loop with a runner↔server **compatibility handshake**:

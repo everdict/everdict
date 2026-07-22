@@ -17,11 +17,17 @@ interface FakeHost {
 }
 
 function makeDeps(
-  initial: { tokens?: RunnerTokens; runners?: RunnerConfigEntry[]; legacy?: LegacyPairing | null } = {},
+  initial: {
+    tokens?: RunnerTokens;
+    runners?: RunnerConfigEntry[];
+    legacy?: LegacyPairing | null;
+    reachableHost?: string; // the host this device reaches the server on — drives loopback self-heal (undefined → no healing)
+  } = {},
 ) {
   let tokens: RunnerTokens = { ...(initial.tokens ?? {}) };
   let runners: RunnerConfigEntry[] = [...(initial.runners ?? [])];
   let legacy: LegacyPairing | null = initial.legacy ?? null;
+  let reachableHost: string | undefined = initial.reachableHost;
   const broadcasts: DesktopRunnersStatus[] = [];
   const hosts: FakeHost[] = [];
   const deps: RunnerSupervisorDeps = {
@@ -64,6 +70,7 @@ function makeDeps(
       return host;
     },
     defaultApiUrl: "http://localhost:8787",
+    reachableHost: () => reachableHost,
     broadcast: (s) => broadcasts.push(s),
   };
   return {
@@ -73,6 +80,10 @@ function makeDeps(
     getTokens: () => tokens,
     getRunners: () => runners,
     getLegacy: () => legacy,
+    // Simulate the desktop learning (or changing) the server host it can reach — the input to loopback self-heal.
+    setReachableHost: (h: string | undefined) => {
+      reachableHost = h;
+    },
   };
 }
 
@@ -285,6 +296,75 @@ describe("RunnerSupervisor", () => {
     // Restarted on the NEW url (a fresh host per runner, dialing the reachable host), carrying the persisted concurrency.
     expect(hosts.map((h) => h.apiUrl)).toEqual(["http://100.69.164.81:8787", "http://100.69.164.81:8787"]);
     expect(hosts.find((h) => h.runnerId === "r2")?.maxConcurrent).toBe(3);
+  });
+
+  it("reconnect(id) — heals a loopback apiUrl onto the reachable server host, persists it, and rebuilds the host on the new URL", async () => {
+    // The stuck-runner case the user hits: paired on another machine so a loopback CP url is baked in (permanently
+    // unreachable → offline). reconnect is the button they reach for, and a plain in-place restart would just fail again.
+    const store = makeDeps({
+      tokens: { r1: "rnr_1" },
+      runners: [{ runnerId: "r1", apiUrl: "http://127.0.0.1:8787" }],
+      // reachableHost unset at startup → the host first comes up on the (unreachable) loopback URL, the real stuck state.
+    });
+    const s = new RunnerSupervisor(store.deps);
+    await s.startFromStore();
+    expect(store.hosts.at(-1)?.apiUrl).toBe("http://127.0.0.1:8787"); // started on loopback = offline in reality
+    store.hosts.length = 0; // ignore the initial host; watch what reconnect (re)builds
+
+    store.setReachableHost("100.69.164.81"); // the desktop now knows it reaches the server on a real host
+    await s.reconnect("r1");
+
+    // Persisted: hostname rebased onto the reachable host, CP port/scheme kept (so it sticks across restarts).
+    expect(store.getRunners()).toEqual([{ runnerId: "r1", apiUrl: "http://100.69.164.81:8787" }]);
+    // Rebuilt dialing the reachable URL — NOT an in-place restart of the dead loopback host.
+    expect(store.hosts.at(-1)?.apiUrl).toBe("http://100.69.164.81:8787");
+    expect(store.hosts.at(-1)?.started).toBe(true);
+  });
+
+  it("startFromStore — self-heals a loopback apiUrl onto the reachable host before starting (a just-updated app comes back online)", async () => {
+    const store = makeDeps({
+      tokens: { r1: "rnr_1" },
+      runners: [{ runnerId: "r1", apiUrl: "http://127.0.0.1:8787", maxConcurrent: 2 }],
+      reachableHost: "100.69.164.81",
+    });
+    const s = new RunnerSupervisor(store.deps);
+    await s.startFromStore();
+    // Persisted + dialed on the reachable host, keeping the persisted concurrency.
+    expect(store.getRunners()).toEqual([{ runnerId: "r1", apiUrl: "http://100.69.164.81:8787", maxConcurrent: 2 }]);
+    expect(store.hosts.find((h) => h.runnerId === "r1")?.apiUrl).toBe("http://100.69.164.81:8787");
+    expect(store.hosts.find((h) => h.runnerId === "r1")?.maxConcurrent).toBe(2);
+  });
+
+  it("reconnect(id) — never rewrites a real (non-loopback) server host; it just restarts in place", async () => {
+    const store = makeDeps({
+      tokens: { r1: "rnr_1" },
+      runners: [{ runnerId: "r1", apiUrl: "http://cp.example:8787" }],
+      reachableHost: "100.69.164.81",
+    });
+    const s = new RunnerSupervisor(store.deps);
+    await s.startFromStore();
+    await s.reconnect("r1");
+    // The real host is left untouched (heal is loopback-only) …
+    expect(store.getRunners()).toEqual([{ runnerId: "r1", apiUrl: "http://cp.example:8787" }]);
+    // … and the live host is restarted in place (no swap, no status race).
+    const r1 = store.hosts.filter((h) => h.runnerId === "r1");
+    expect(r1).toHaveLength(1);
+    expect(r1[0]?.restarts).toBe(1);
+  });
+
+  it("reconnect(id) — does not heal when the reachable host is itself loopback (single-machine dev)", async () => {
+    const store = makeDeps({
+      tokens: { r1: "rnr_1" },
+      runners: [{ runnerId: "r1", apiUrl: "http://127.0.0.1:8787" }],
+      reachableHost: "localhost", // desktop and server on the same machine — loopback is genuinely reachable
+    });
+    const s = new RunnerSupervisor(store.deps);
+    await s.startFromStore();
+    await s.reconnect("r1");
+    expect(store.getRunners()).toEqual([{ runnerId: "r1", apiUrl: "http://127.0.0.1:8787" }]);
+    const r1 = store.hosts.filter((h) => h.runnerId === "r1");
+    expect(r1).toHaveLength(1);
+    expect(r1[0]?.restarts).toBe(1);
   });
 
   it("startFromStore — migrates a legacy single pairing into the multi store, then clears the legacy record", async () => {
