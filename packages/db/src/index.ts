@@ -67,6 +67,7 @@ export {
 // Store ports + credential primitives live in @everdict/application-control; re-exported here beside the
 // impls so a consumer narrowing a store to its port interface imports both from one module.
 export type {
+  AgentSessionStore,
   RunStore,
   RunListOptions,
   RecordingStore,
@@ -132,6 +133,7 @@ export { InMemorySecretStore, PgSecretStore } from "./workspace/secret-store.js"
 export { InMemoryOAuthStateStore, PgOAuthStateStore, generateOAuthState } from "./workspace/oauth-state-store.js";
 export { InMemoryNotificationStore, PgNotificationStore } from "./activity/notification-store.js";
 export { InMemoryCommentStore, PgCommentStore } from "./activity/comment-store.js";
+export { InMemoryAgentSessionStore, PgAgentSessionStore } from "./activity/agent-session-store.js";
 export { InMemoryRunnerStore, PgRunnerStore, generateRunnerToken } from "./workspace/runner-store.js";
 export { InMemoryWorkspaceSettingsStore, PgWorkspaceSettingsStore } from "./workspace/workspace-settings.js";
 export { InMemoryWorkspaceStore, PgWorkspaceStore } from "./workspace/workspace-store.js";

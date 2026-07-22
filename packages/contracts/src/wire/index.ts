@@ -1,5 +1,8 @@
 // HTTP wire DTOs (response schemas) — moved from apps/api's api/*/response in re-architecture P0c.
 // Not part of the main barrel (index.ts) — exposed only via the "@everdict/contracts/wire" subpath.
+export * from "./agent-session/agent-message-list.js";
+export * from "./agent-session/agent-session-list.js";
+export * from "./agent-session/agent-session.js";
 export * from "./api-key/api-key-meta.js";
 export * from "./api-key/created-api-key.js";
 export * from "./benchmark/benchmark-catalog-entry.js";
