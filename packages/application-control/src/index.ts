@@ -11,6 +11,7 @@ export type { CommentStore } from "./ports/comment-store.js";
 export type { NotificationListOptions, NotificationStore } from "./ports/notification-store.js";
 export type { BudgetStore } from "./ports/budget-store.js";
 export type { RunListOptions, RunStore } from "./ports/run-store.js";
+export type { RecordingSeal, RecordingStore } from "./ports/recording-store.js";
 export type { ScheduleStore } from "./ports/schedule-store.js";
 export type { ScorecardListFilter, ScorecardStore } from "./ports/scorecard-store.js";
 export type { UsageStore } from "./ports/usage-store.js";

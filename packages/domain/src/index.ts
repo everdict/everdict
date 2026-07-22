@@ -142,6 +142,7 @@ export { validateImageRef } from "./image/display-image.js";
 
 // trace — trace-derived usage summary (from @everdict/core; shapes stay in contracts)
 export { usageFromTrace } from "./trace/usage-from-trace.js";
+export { clampFidelity, FIDELITY_ORDER } from "./recording/fidelity.js";
 
 // registry — the version algebra every versioned registry shares (from @everdict/registry)
 export {

@@ -2,6 +2,7 @@ import { z } from "zod";
 import { CaseFailureSchema } from "./case-failure.js";
 import { EnvSnapshotSchema, EnvSpecSchema } from "./environment.js";
 import { ScoreSchema } from "./grader.js";
+import { RecordingRefSchema } from "./recording.js";
 import { SpanAttrMappingSchema, TraceEvidenceSchema } from "./trace-source.js";
 import { TraceEventSchema } from "./trace.js";
 
@@ -100,6 +101,9 @@ export const CaseResultSchema = z.object({
   // Evidence extracted from a pulled trace (mapping evidence slots) — the carrier that brings CUSTOM named slots
   // to the judges (GradeContext.evidence); the fixed slots also synthesize the browser snapshot above.
   evidence: TraceEvidenceSchema.optional(),
+  // Object-store pointer to the sealed replay recording (frames/env/runtime tracks on a shared t0 clock) — sibling of
+  // traceRef, coordinates never bytes. Absent unless recording was requested. docs/architecture/replay.md
+  recordingRef: RecordingRefSchema.optional(),
 });
 export type CaseResult = z.infer<typeof CaseResultSchema>;
 

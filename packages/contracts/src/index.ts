@@ -12,6 +12,7 @@ export * from "./execution/environment.js";
 export * from "./harness/harness.js";
 export * from "./execution/grader.js";
 export * from "./execution/eval-case.js";
+export * from "./execution/recording.js";
 export * from "./execution/agent-job.js";
 export * from "./infra/trust-zone.js";
 export * from "./infra/capability.js";

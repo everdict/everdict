@@ -94,6 +94,7 @@ export { generateKey, hashKey, generateInviteToken } from "@everdict/application
 
 // Store impls (InMemory*/Pg*) + local persistence helpers stay here — the db package owns them.
 export { InMemoryRunStore } from "./results/run-store.js";
+export { InMemoryRecordingStore } from "./results/recording-store.js";
 export { InMemoryScorecardStore } from "./results/scorecard-store.js";
 export { InMemoryScheduleStore } from "./results/schedule-store.js";
 export { InMemoryViewStore, PgViewStore } from "./results/view-store.js";

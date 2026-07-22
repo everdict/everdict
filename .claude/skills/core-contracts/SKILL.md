@@ -57,6 +57,9 @@ no default-to-first**. Discriminated unions carry the shape variants:
 - `TraceEvent` (`trace.ts`) — union on `kind` (message/llm_call/tool_call/…); cost comes from here.
 - `RuntimeSpec` (`runtime-spec.ts`) — `local | nomad | k8s` execution infra; **never store secrets**
   (only SecretStore key *names* like `authSecret`).
+- `CaseRecording` (`recording.ts`) — replay capture: track lanes on one `t0` wall-clock (`TrackEntry` union
+  on `track`), `Fidelity` ladder, `RecordingRef` (sibling of `traceRef` on `CaseResult`, coordinates never
+  bytes) + the `EnvironmentRecorder` seam (one impl per env kind). docs/architecture/replay.md.
 
 ## Capability & trust-zone vocab
 - `packages/contracts/src/infra/capability.ts` — SSOT `CAPABILITY_DEFS` keyed by `kind`: **functional**→placement gate
