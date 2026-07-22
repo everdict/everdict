@@ -4,6 +4,11 @@
 // everything (@everdict/self-hosted-runner + @everdict/agent, the same graph the desktop already bundles).
 // The gate (turbo build) stays tsc (dist/) — this script is for `pnpm bundle` / release packaging only.
 // Design: docs/architecture/runner-distribution.md.
+//
+// INVARIANT: this resolves each @everdict/* workspace dep through its package `exports` → its built `dist/`, so a stale
+// dist gets baked into the binary verbatim (e.g. an out-of-date @everdict/contracts Zod enum → the runner rejects a
+// newer leased job with `invalid_enum_value`). The `package:runner` script therefore runs `turbo run build --filter`
+// FIRST so every upstream dist is fresh before we bundle (release CI does the same); never run this on an unbuilt tree.
 import { build } from "esbuild";
 
 await build({

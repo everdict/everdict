@@ -12,7 +12,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run --passWithNoTests",
     "bundle": "node esbuild.mjs",
-    "package:runner": "node esbuild.mjs && node sea-build.mjs"
+    "package:runner": "pnpm turbo run build --filter=@everdict/cli && node esbuild.mjs && node sea-build.mjs"
   },
   "devDependencies": {
     "esbuild": "^0.28.1",
