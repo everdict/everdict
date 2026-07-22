@@ -19,7 +19,7 @@ import {
   Waypoints,
 } from 'lucide-react'
 import { useTranslations } from 'next-intl'
-import { getTranslations } from 'next-intl/server'
+import { getTimeZone, getTranslations } from 'next-intl/server'
 
 import { VersionSwitcher } from '@/features/dataset-versions'
 import { DeleteDatasetButton } from '@/features/delete-dataset'
@@ -79,6 +79,7 @@ export default async function DatasetDetailPage({
   const { version } = await searchParams
   const { principal, ctx } = await currentPrincipal()
   const t = await getTranslations('datasetsPage')
+  const timeZone = await getTimeZone()
 
   // All versions this dataset has (newest first) + list meta (creator·created/updated time) — used by the version switcher/diff/header.
   let versions: string[] = []
@@ -282,12 +283,12 @@ export default async function DatasetDetailPage({
           {summary?.createdAt && (
             <span
               className="inline-flex items-center gap-1.5"
-              title={`${t('metaCreatedPrefix')} ${fmtDateTimeFull(summary.createdAt)}${summary.updatedAt ? ` · ${t('metaUpdatedPrefix')} ${fmtDateTimeFull(summary.updatedAt)}` : ''}`}
+              title={`${t('metaCreatedPrefix')} ${fmtDateTimeFull(summary.createdAt, { timeZone })}${summary.updatedAt ? ` · ${t('metaUpdatedPrefix')} ${fmtDateTimeFull(summary.updatedAt, { timeZone })}` : ''}`}
             >
               <Clock className="size-3.5 text-faint" />
-              {t('metaCreatedPrefix')} {fmtDateTime(summary.createdAt)}
+              {t('metaCreatedPrefix')} {fmtDateTime(summary.createdAt, timeZone)}
               {summary.updatedAt && summary.updatedAt !== summary.createdAt
-                ? ` · ${t('metaUpdatedPrefix')} ${fmtDateTime(summary.updatedAt)}`
+                ? ` · ${t('metaUpdatedPrefix')} ${fmtDateTime(summary.updatedAt, timeZone)}`
                 : ''}
             </span>
           )}

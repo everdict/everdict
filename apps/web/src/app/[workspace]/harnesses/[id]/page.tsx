@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
 import Link from 'next/link'
 import { ChevronLeft, FileText, GitBranchPlus, GitCompare, Lock } from 'lucide-react'
-import { getTranslations } from 'next-intl/server'
+import { getTimeZone, getTranslations } from 'next-intl/server'
 
 import { DeleteHarnessButton } from '@/features/delete-harness'
 import { CommentsSection } from '@/features/discuss'
@@ -93,6 +93,7 @@ export default async function HarnessDetailPage({
   const { v } = await searchParams
   const { principal, ctx } = await currentPrincipal()
   const t = await getTranslations('harnessesPage')
+  const timeZone = await getTimeZone()
 
   let versions: string[] = []
   let versionTags: Record<string, string[]> = {}
@@ -321,17 +322,17 @@ export default async function HarnessDetailPage({
         {entry?.createdAt && (
           <MetaItem
             label={t('metaCreated')}
-            title={t('createdTitle', { time: fmtDateTimeFull(entry.createdAt) })}
+            title={t('createdTitle', { time: fmtDateTimeFull(entry.createdAt, { timeZone }) })}
           >
-            {fmtDateTime(entry.createdAt)}
+            {fmtDateTime(entry.createdAt, timeZone)}
           </MetaItem>
         )}
         {entry?.updatedAt && entry.updatedAt !== entry.createdAt && (
           <MetaItem
             label={t('metaUpdated')}
-            title={t('updatedTitle', { time: fmtDateTimeFull(entry.updatedAt) })}
+            title={t('updatedTitle', { time: fmtDateTimeFull(entry.updatedAt, { timeZone }) })}
           >
-            {fmtDateTime(entry.updatedAt)}
+            {fmtDateTime(entry.updatedAt, timeZone)}
           </MetaItem>
         )}
         <MetaItem label={t('metaAuthor')}>

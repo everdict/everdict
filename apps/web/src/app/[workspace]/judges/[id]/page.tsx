@@ -1,7 +1,7 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { ChevronLeft, GitCompare } from 'lucide-react'
-import { getTranslations } from 'next-intl/server'
+import { getTimeZone, getTranslations } from 'next-intl/server'
 
 import { DeleteJudgeButton } from '@/features/delete-judge'
 import {
@@ -51,6 +51,7 @@ export default async function JudgeDetailPage({
 }) {
   const { workspace, id } = await params
   const t = await getTranslations('judgesPage')
+  const timeZone = await getTimeZone()
   const { principal, ctx } = await currentPrincipal()
 
   // Summary (owner/versions) from the list — back to the list if the judge doesn't exist or the connection fails.
@@ -308,9 +309,9 @@ export default async function JudgeDetailPage({
                     </span>
                     <time
                       className="hidden w-[84px] text-right font-mono text-[11px] text-muted-foreground sm:block"
-                      title={fmtDateTimeFull(s.createdAt)}
+                      title={fmtDateTimeFull(s.createdAt, { timeZone })}
                     >
-                      {fmtDateTime(s.createdAt)}
+                      {fmtDateTime(s.createdAt, timeZone)}
                     </time>
                     <span className="flex w-5 justify-end">
                       <StatusIcon status={s.status} />

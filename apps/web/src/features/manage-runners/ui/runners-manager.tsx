@@ -4,7 +4,7 @@ import { useEffect, useState, useTransition } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { ChevronDown, Download, Laptop, RefreshCw, Trash2 } from 'lucide-react'
-import { useLocale, useTranslations } from 'next-intl'
+import { useLocale, useTimeZone, useTranslations } from 'next-intl'
 
 import {
   capabilityMeta,
@@ -64,6 +64,7 @@ export function RunnersManager({
 }) {
   const t = useTranslations('manageRunners')
   const locale = useLocale()
+  const timeZone = useTimeZone()
   const router = useRouter()
   const [confirmId, setConfirmId] = useState<string>()
   const [reconnectingId, setReconnectingId] = useState<string>()
@@ -405,14 +406,16 @@ export function RunnersManager({
                   </div>
                   <div className="mt-0.5 flex items-center gap-1.5 text-[12px] text-faint">
                     <span>
-                      {t('pairedAt', { date: new Date(r.pairedAt).toLocaleString(locale) })}
+                      {t('pairedAt', {
+                        date: new Date(r.pairedAt).toLocaleString(locale, { timeZone }),
+                      })}
                     </span>
                     {r.lastSeenAt && (
                       <>
                         <span>·</span>
                         <span>
                           {t('lastSeenAt', {
-                            date: new Date(r.lastSeenAt).toLocaleString(locale),
+                            date: new Date(r.lastSeenAt).toLocaleString(locale, { timeZone }),
                           })}
                         </span>
                       </>

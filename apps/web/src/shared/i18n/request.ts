@@ -2,6 +2,7 @@ import { cookies, headers } from 'next/headers'
 import { getRequestConfig } from 'next-intl/server'
 
 import { FALLBACK_LOCALE, isLocale, LOCALE_COOKIE, LOCALES, type Locale } from './config'
+import { DEFAULT_TIMEZONE, isValidTimeZone, TIMEZONE_COOKIE } from './timezone'
 
 // Detect a supported locale from Accept-Language (the browser already sends q-values in order — match from the front).
 function detectLocale(acceptLanguage: string | null): Locale {
@@ -23,5 +24,9 @@ export default getRequestConfig(async () => {
   const locale = isLocale(fromCookie)
     ? fromCookie
     : detectLocale((await headers()).get('accept-language'))
-  return { locale, messages: (await import(`../../../messages/${locale}.json`)).default }
+  // Display timezone: cookie (explicit choice, features/switch-timezone) > UTC default. Exposed to the app via
+  // next-intl's useTimeZone()/getTimeZone(), which the format atoms consume so server + client render the same zone.
+  const tzCookie = store.get(TIMEZONE_COOKIE)?.value
+  const timeZone = isValidTimeZone(tzCookie) ? tzCookie : DEFAULT_TIMEZONE
+  return { locale, timeZone, messages: (await import(`../../../messages/${locale}.json`)).default }
 })

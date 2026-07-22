@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState, useTransition } from 'react'
 import { Check, ChevronLeft, ChevronRight, X } from 'lucide-react'
-import { useTranslations } from 'next-intl'
+import { useTimeZone, useTranslations } from 'next-intl'
 
 import type { TraceInspectResult, TraceSpanNode, TraceSummary } from '@/entities/trace'
 import { fmtDateTime, fmtDurationMs, fmtTokens, fmtUsd } from '@/shared/lib/format'
@@ -67,6 +67,7 @@ export function TraceDetailDialog({
   onSelect?: (trace: TraceSummary) => void
 }) {
   const t = useTranslations('traceBrowser')
+  const timeZone = useTimeZone()
   const [result, setResult] = useState<TraceInspectResult | undefined>()
   const [error, setError] = useState<string | undefined>()
   const [selectedId, setSelectedId] = useState<string | undefined>()
@@ -183,7 +184,7 @@ export function TraceDetailDialog({
         />
         <Meta label={t('colCost')} value={fmtUsd(costUsd)} />
         <Meta label={t('colModel')} value={model ?? '–'} />
-        <Meta label={t('colStarted')} value={startedAt ? fmtDateTime(startedAt) : '–'} />
+        <Meta label={t('colStarted')} value={startedAt ? fmtDateTime(startedAt, timeZone) : '–'} />
       </div>
 
       {/* Body */}

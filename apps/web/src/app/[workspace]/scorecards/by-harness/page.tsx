@@ -1,6 +1,6 @@
 import Link from 'next/link'
 import { ChevronLeft } from 'lucide-react'
-import { getTranslations } from 'next-intl/server'
+import { getTimeZone, getTranslations } from 'next-intl/server'
 
 import { HarnessPicker, type HarnessOption } from '@/features/by-harness-scorecards'
 import { scorecardsSchema, type ScorecardRecord } from '@/entities/scorecard'
@@ -29,6 +29,7 @@ export default async function ByHarnessPage({
   const { harness } = await searchParams
   const ctx = await authContext()
   const t = await getTranslations('scorecardsPage')
+  const timeZone = await getTimeZone()
 
   let error: string | undefined
   let scorecards: ScorecardRecord[] = []
@@ -145,9 +146,9 @@ export default async function ByHarnessPage({
                         </TD>
                         <TD
                           className="whitespace-nowrap text-right font-mono text-[11px] text-muted-foreground"
-                          title={fmtDateTimeFull(s.createdAt)}
+                          title={fmtDateTimeFull(s.createdAt, { timeZone })}
                         >
-                          {fmtDateTime(s.createdAt)}
+                          {fmtDateTime(s.createdAt, timeZone)}
                         </TD>
                       </TR>
                     ))}

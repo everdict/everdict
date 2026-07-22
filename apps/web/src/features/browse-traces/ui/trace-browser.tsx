@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from 'react'
 import { CheckCircle2, CircleSlash, RefreshCw, Search, Telescope, XCircle } from 'lucide-react'
-import { useLocale, useTranslations } from 'next-intl'
+import { useLocale, useTimeZone, useTranslations } from 'next-intl'
 
 import type { TraceSummary } from '@/entities/trace'
 import type { TraceSourceConfig } from '@/entities/trace-source'
@@ -66,6 +66,7 @@ export function TraceBrowser({
 }) {
   const t = useTranslations('traceBrowser')
   const locale = useLocale()
+  const timeZone = useTimeZone()
   const [sourceName, setSourceName] = useState(sources[0]?.name ?? '')
   const source = useMemo(() => sources.find((s) => s.name === sourceName), [sources, sourceName])
   const [scope, setScope] = useState('')
@@ -144,13 +145,13 @@ export function TraceBrowser({
     const sorted = [...matched].sort((a, b) => (b.startedAt ?? '').localeCompare(a.startedAt ?? ''))
     const byDay = new Map<string, TraceSummary[]>()
     for (const tr of sorted) {
-      const key = tr.startedAt ? dayKeyOf(tr.startedAt) : ''
+      const key = tr.startedAt ? dayKeyOf(tr.startedAt, timeZone) : ''
       const group = byDay.get(key)
       if (group) group.push(tr)
       else byDay.set(key, [tr])
     }
     return { groups: [...byDay.entries()], flat: sorted }
-  }, [traces, filter, status])
+  }, [traces, filter, status, timeZone])
 
   if (sources.length === 0) {
     return (
@@ -246,7 +247,7 @@ export function TraceBrowser({
             <section key={day || 'undated'} className="space-y-2">
               {day && items[0]?.startedAt && (
                 <h4 className="px-0.5 text-[11.5px] font-[560] uppercase tracking-wide text-faint">
-                  {fmtDateHeading(items[0].startedAt, locale)}
+                  {fmtDateHeading(items[0].startedAt, locale, timeZone)}
                 </h4>
               )}
               {items.map((tr, i) => {
@@ -304,9 +305,13 @@ export function TraceBrowser({
                       </span>
                       <time
                         className="hidden w-[44px] text-right font-mono text-[11px] text-muted-foreground sm:block"
-                        title={tr.startedAt ? fmtDateTimeFull(tr.startedAt) : undefined}
+                        title={
+                          tr.startedAt
+                            ? fmtDateTimeFull(tr.startedAt, { locale, timeZone })
+                            : undefined
+                        }
                       >
-                        {tr.startedAt ? fmtTimeOnly(tr.startedAt) : '–'}
+                        {tr.startedAt ? fmtTimeOnly(tr.startedAt, timeZone) : '–'}
                       </time>
                       <span className="flex w-5 justify-end">
                         <TraceStatusIcon status={tr.status ?? 'unset'} />

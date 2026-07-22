@@ -3,6 +3,7 @@
 import { useTranslations } from 'next-intl'
 
 import { LocaleSwitcher } from '@/features/switch-locale'
+import { TimezoneSwitcher } from '@/features/switch-timezone'
 import { SettingsList, SettingsRow } from '@/shared/ui/settings-list'
 import { ThemeToggle } from '@/shared/ui/theme-toggle'
 
@@ -17,6 +18,9 @@ export function PreferencesPanel() {
       </SettingsRow>
       <SettingsRow label={t('languageLabel')} hint={t('languageHint')}>
         <LocaleSwitcher variant="compact" />
+      </SettingsRow>
+      <SettingsRow label={t('timezoneLabel')} hint={t('timezoneHint')}>
+        <TimezoneSwitcher />
       </SettingsRow>
     </SettingsList>
   )

@@ -3,7 +3,7 @@
 import { useMemo } from 'react'
 import Link from 'next/link'
 import { Boxes, Clock, Database, Search, Waypoints } from 'lucide-react'
-import { useTranslations } from 'next-intl'
+import { useTimeZone, useTranslations } from 'next-intl'
 
 import type { DatasetSummary } from '@/entities/dataset'
 import type { DatasetRelation } from '@/shared/lib/dataset-relations'
@@ -61,6 +61,7 @@ export function DatasetList({
   authors: Record<string, Author>
 }) {
   const t = useTranslations('datasetList')
+  const timeZone = useTimeZone()
   const sorts: { value: Sort; label: string }[] = [
     { value: 'name', label: t('sortName') },
     { value: 'updated', label: t('sortUpdated') },
@@ -285,10 +286,10 @@ export function DatasetList({
                   {rel?.lastRunAt && (
                     <span
                       className="inline-flex items-center gap-1"
-                      title={t('lastRunAt', { at: fmtDateTimeFull(rel.lastRunAt) })}
+                      title={t('lastRunAt', { at: fmtDateTimeFull(rel.lastRunAt, { timeZone }) })}
                     >
                       <Clock className="size-3.5" />
-                      {fmtDateTime(rel.lastRunAt)}
+                      {fmtDateTime(rel.lastRunAt, timeZone)}
                     </span>
                   )}
                 </div>

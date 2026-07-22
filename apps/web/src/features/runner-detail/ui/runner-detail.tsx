@@ -4,7 +4,7 @@ import { useEffect, useState, useTransition } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { Check, Copy, Cpu, RefreshCw, Trash2 } from 'lucide-react'
-import { useLocale, useTranslations } from 'next-intl'
+import { useLocale, useTimeZone, useTranslations } from 'next-intl'
 
 import type { Run } from '@/entities/run'
 import { capabilityMeta, type RunnerMeta } from '@/entities/runner'
@@ -51,6 +51,7 @@ export function RunnerDetail({
 }) {
   const t = useTranslations('runnerDetail')
   const locale = useLocale()
+  const timeZone = useTimeZone()
   const router = useRouter()
   const [bridge, setBridge] = useState<EverdictDesktopBridge | null>(null)
   const [desktop, setDesktop] = useState<DesktopRunnersStatus | null>(null)
@@ -136,10 +137,12 @@ export function RunnerDetail({
     },
     ...(runner.os ? [{ label: t('metaOs'), value: runner.os }] : []),
     ...(runner.version ? [{ label: t('metaVersion'), value: runner.version }] : []),
-    { label: t('metaPaired'), value: fmtDateTime(runner.pairedAt) },
+    { label: t('metaPaired'), value: fmtDateTime(runner.pairedAt, timeZone) },
     {
       label: t('metaLastSeen'),
-      value: runner.lastSeenAt ? fmtTimeAgo(runner.lastSeenAt, locale) : t('lastSeenNever'),
+      value: runner.lastSeenAt
+        ? fmtTimeAgo(runner.lastSeenAt, locale, timeZone)
+        : t('lastSeenNever'),
     },
   ]
 
@@ -334,7 +337,7 @@ export function RunnerDetail({
                   {r.harness.id}@{r.harness.version}
                 </span>
                 <span className="w-[92px] shrink-0 text-right text-[11px] text-faint">
-                  {fmtTimeAgo(r.createdAt, locale)}
+                  {fmtTimeAgo(r.createdAt, locale, timeZone)}
                 </span>
                 <StatusPill status={r.status} />
               </Link>

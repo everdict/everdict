@@ -1,6 +1,6 @@
 import Link from 'next/link'
 import { ChevronLeft } from 'lucide-react'
-import { getTranslations } from 'next-intl/server'
+import { getTimeZone, getTranslations } from 'next-intl/server'
 
 import { LeaderboardPicker, type DatasetOption } from '@/features/leaderboard-scorecards'
 import { datasetsSchema } from '@/entities/dataset'
@@ -49,6 +49,7 @@ export default async function LeaderboardPage({
   const { dataset, metric, window, judgeModel } = await searchParams
   const ctx = await authContext()
   const t = await getTranslations('scorecardsPage')
+  const timeZone = await getTimeZone()
 
   let options: DatasetOption[] = []
   try {
@@ -186,9 +187,9 @@ export default async function LeaderboardPage({
                       </TD>
                       <TD
                         className="whitespace-nowrap text-right font-mono text-[11px] text-muted-foreground"
-                        title={fmtDateTimeFull(r.createdAt)}
+                        title={fmtDateTimeFull(r.createdAt, { timeZone })}
                       >
-                        {fmtDateTime(r.createdAt)}
+                        {fmtDateTime(r.createdAt, timeZone)}
                       </TD>
                     </TR>
                   ))}

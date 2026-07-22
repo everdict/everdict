@@ -1,6 +1,6 @@
 import Link from 'next/link'
 import { ChevronLeft } from 'lucide-react'
-import { getTranslations } from 'next-intl/server'
+import { getTimeZone, getTranslations } from 'next-intl/server'
 
 import { LiveLogs } from '@/widgets/live-logs'
 import { LiveScreen, SandboxTerminal } from '@/widgets/sandbox-terminal'
@@ -59,6 +59,7 @@ export default async function RunDetailPage({
 }) {
   const { workspace, id } = await params
   const t = await getTranslations('runsPage')
+  const timeZone = await getTimeZone()
   const ctx = await authContext()
 
   let run: Run | undefined
@@ -100,8 +101,14 @@ export default async function RunDetailPage({
       <Card className="grid grid-cols-2 gap-4 p-4 sm:grid-cols-4">
         <Prop label="harness" value={`${run.harness.id}@${run.harness.version}`} />
         <Prop label="case" value={run.caseId} />
-        <Prop label="created" value={new Date(run.createdAt).toLocaleString()} />
-        <Prop label="updated" value={new Date(run.updatedAt).toLocaleString()} />
+        <Prop
+          label="created"
+          value={new Date(run.createdAt).toLocaleString(undefined, { timeZone })}
+        />
+        <Prop
+          label="updated"
+          value={new Date(run.updatedAt).toLocaleString(undefined, { timeZone })}
+        />
       </Card>
 
       {run.error && (

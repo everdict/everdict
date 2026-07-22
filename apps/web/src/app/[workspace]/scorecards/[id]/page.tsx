@@ -1,6 +1,6 @@
 import Link from 'next/link'
 import { ChevronLeft } from 'lucide-react'
-import { getLocale, getTranslations } from 'next-intl/server'
+import { getLocale, getTimeZone, getTranslations } from 'next-intl/server'
 
 import { DeleteScorecardButton } from '@/features/delete-scorecard'
 import { CommentsSection } from '@/features/discuss'
@@ -381,6 +381,7 @@ export default async function ScorecardDetailPage({
     }
   }
   const locale = await getLocale()
+  const timeZone = await getTimeZone()
   const runnerOnline = (lastSeenAt?: string) =>
     !!lastSeenAt && Date.now() - new Date(lastSeenAt).getTime() < 90_000
 
@@ -600,8 +601,14 @@ export default async function ScorecardDetailPage({
             <OriginInline origin={record.origin} />
           </MetaItem>
         )}
-        <Prop label="created" value={new Date(record.createdAt).toLocaleString()} />
-        <Prop label="updated" value={new Date(record.updatedAt).toLocaleString()} />
+        <Prop
+          label="created"
+          value={new Date(record.createdAt).toLocaleString(undefined, { timeZone })}
+        />
+        <Prop
+          label="updated"
+          value={new Date(record.updatedAt).toLocaleString(undefined, { timeZone })}
+        />
         {authorName && <Prop label={t('metaRunBy')} value={authorName} />}
         {/* Temporal-owned batch — the durable workflow's id; deep-links to the Temporal UI when TEMPORAL_UI_URL is set. */}
         {record.orchestration?.workflowId && (
@@ -778,7 +785,7 @@ export default async function ScorecardDetailPage({
                     />
                   </div>
                   <time className="shrink-0 pt-0.5 font-mono text-[11px] tabular-nums text-faint">
-                    {new Date(s.ts).toLocaleTimeString()}
+                    {new Date(s.ts).toLocaleTimeString(undefined, { timeZone })}
                   </time>
                 </div>
               ))}
@@ -1028,7 +1035,7 @@ export default async function ScorecardDetailPage({
                           : t('failedOnRunnerOffline', {
                               label: meta.label,
                               ago: meta.lastSeenAt
-                                ? fmtTimeAgo(meta.lastSeenAt, locale)
+                                ? fmtTimeAgo(meta.lastSeenAt, locale, timeZone)
                                 : t('runnerNeverSeen'),
                             })
                       return (

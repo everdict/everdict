@@ -830,6 +830,12 @@
     "ko": "한국어",
     "en": "English"
   },
+  "timezone": {
+    "label": "시간대",
+    "searchPlaceholder": "시간대 검색…",
+    "empty": "일치하는 시간대가 없습니다",
+    "useBrowser": "브라우저 기준"
+  },
   "manageApiKeys": {
     "title": "API 키",
     "introRich": "에이전트가 Everdict 에 접근할 때 쓰는 키예요(<code>ak_…</code>). 발급할 때 권한을 정할 수 있고, 키는 한 번만 보여요.",
@@ -2436,7 +2442,9 @@
     "themeLabel": "테마",
     "themeHint": "라이트/다크 모드 (이 기기에 저장).",
     "languageLabel": "언어",
-    "languageHint": "인터페이스 언어 (쿠키에 저장)."
+    "languageHint": "인터페이스 언어 (쿠키에 저장).",
+    "timezoneLabel": "시간대",
+    "timezoneHint": "모든 날짜·시간을 표시할 시간대 (이 기기에 저장)."
   },
   "settingsNav": {
     "groupAccount": "계정",
@@ -2445,7 +2453,7 @@
     "profile": "프로필",
     "profileDesc": "이름과 사진.",
     "preferences": "환경설정",
-    "preferencesDesc": "이 기기의 테마와 언어.",
+    "preferencesDesc": "이 기기의 테마·언어·시간대.",
     "apiKeys": "API 키",
     "apiKeysDesc": "내 권한으로 동작하는 개인 키.",
     "personalSecrets": "개인 시크릿",

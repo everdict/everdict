@@ -3,7 +3,7 @@
 import { useEffect, useState, useTransition } from 'react'
 import Link from 'next/link'
 import { Check, GitBranch, Lock, Search } from 'lucide-react'
-import { useTranslations } from 'next-intl'
+import { useTimeZone, useTranslations } from 'next-intl'
 
 import type { CiLink, CiTrigger, RepoInfo } from '@/entities/ci-link'
 import type { HarnessKind } from '@/entities/harness'
@@ -82,6 +82,7 @@ export function ConnectRepoDialog({
   onSaved: (links: CiLink[]) => void
 }) {
   const t = useTranslations('manageCiLinks')
+  const timeZone = useTimeZone()
   const [repos, setRepos] = useState<RepoInfo[]>()
   const [reposError, setReposError] = useState<string>()
   const [reposLoading, startReposLoad] = useTransition()
@@ -306,9 +307,9 @@ export function ConnectRepoDialog({
                             {r.pushedAt && (
                               <time
                                 className="shrink-0 font-mono text-[10.5px] text-faint"
-                                title={fmtDateTimeFull(r.pushedAt)}
+                                title={fmtDateTimeFull(r.pushedAt, { timeZone })}
                               >
-                                {fmtDateTime(r.pushedAt)}
+                                {fmtDateTime(r.pushedAt, timeZone)}
                               </time>
                             )}
                           </button>

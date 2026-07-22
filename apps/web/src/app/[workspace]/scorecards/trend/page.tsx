@@ -1,7 +1,7 @@
 import Link from 'next/link'
 import { ChevronLeft } from 'lucide-react'
-import { useTranslations } from 'next-intl'
-import { getTranslations } from 'next-intl/server'
+import { useTimeZone, useTranslations } from 'next-intl'
+import { getTimeZone, getTranslations } from 'next-intl/server'
 
 import { TrendPicker, type DatasetOption } from '@/features/trend-scorecards'
 import { datasetsSchema } from '@/entities/dataset'
@@ -30,6 +30,7 @@ function fmtDelta(n: number | null): string {
 // Dependency-free inline SVG sparkline — score time series + baseline reference line + point hover tooltip (regressions in red).
 function Sparkline({ points }: { points: ScorecardTrend['points'] }) {
   const t = useTranslations('scorecardsPage')
+  const timeZone = useTimeZone()
   const pts = points
     .map((p, i) => ({ ...p, i }))
     .filter((p): p is (typeof points)[number] & { score: number; i: number } => p.score !== null)
@@ -104,7 +105,7 @@ function Sparkline({ points }: { points: ScorecardTrend['points'] }) {
           r={4}
           fill={p.regressed ? 'var(--color-destructive)' : 'var(--color-success)'}
         >
-          <title>{`${fmtDateTime(p.createdAt)} · ${fmtScore(p.passRate, p.mean)}${p.regressed ? ` · ${t('regressed')}` : ''}`}</title>
+          <title>{`${fmtDateTime(p.createdAt, timeZone)} · ${fmtScore(p.passRate, p.mean)}${p.regressed ? ` · ${t('regressed')}` : ''}`}</title>
         </circle>
       ))}
       <text
@@ -130,6 +131,7 @@ export default async function TrendPage({
   const { dataset, metric, baseline } = await searchParams
   const ctx = await authContext()
   const t = await getTranslations('scorecardsPage')
+  const timeZone = await getTimeZone()
 
   let options: DatasetOption[] = []
   try {
@@ -236,9 +238,9 @@ export default async function TrendPage({
                     <TR key={p.scorecardId}>
                       <TD
                         className="whitespace-nowrap font-mono text-[11px] text-muted-foreground"
-                        title={fmtDateTimeFull(p.createdAt)}
+                        title={fmtDateTimeFull(p.createdAt, { timeZone })}
                       >
-                        {fmtDateTime(p.createdAt)}
+                        {fmtDateTime(p.createdAt, timeZone)}
                       </TD>
                       <TD>
                         <Link

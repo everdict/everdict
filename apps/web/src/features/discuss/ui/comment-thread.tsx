@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, useTransition, type ReactNode } from 'react'
 import { useRouter } from 'next/navigation'
 import { CornerDownRight, Loader2, MessageSquare, Trash2 } from 'lucide-react'
-import { useLocale, useTranslations } from 'next-intl'
+import { useLocale, useTimeZone, useTranslations } from 'next-intl'
 
 import { fmtDateTimeFull, fmtTimeAgo } from '@/shared/lib/format'
 import { cn } from '@/shared/lib/utils'
@@ -172,6 +172,7 @@ function renderBody(body: string, mentionables: Mentionable[]): ReactNode {
 function CommentCard({ item, mentionables }: { item: ThreadComment; mentionables: Mentionable[] }) {
   const t = useTranslations('discuss')
   const locale = useLocale()
+  const timeZone = useTimeZone()
   const router = useRouter()
   const [pending, startTransition] = useTransition()
   const [error, setError] = useState<string>()
@@ -198,8 +199,11 @@ function CommentCard({ item, mentionables }: { item: ThreadComment; mentionables
           />
         )}
         <span className="text-[12.5px] font-[560] text-foreground">{item.actor.name}</span>
-        <time className="text-[11px] text-faint" title={fmtDateTimeFull(item.at)}>
-          {fmtTimeAgo(item.at, locale)}
+        <time
+          className="text-[11px] text-faint"
+          title={fmtDateTimeFull(item.at, { locale, timeZone })}
+        >
+          {fmtTimeAgo(item.at, locale, timeZone)}
         </time>
         {item.canDelete && (
           <button

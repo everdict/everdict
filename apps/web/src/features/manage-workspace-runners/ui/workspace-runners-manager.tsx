@@ -3,7 +3,7 @@
 import { useEffect, useState, useTransition } from 'react'
 import Link from 'next/link'
 import { Check, Copy, Github, Lock, Search, Server, Trash2 } from 'lucide-react'
-import { useLocale, useTranslations } from 'next-intl'
+import { useLocale, useTimeZone, useTranslations } from 'next-intl'
 
 import type { GithubAppInstallation, GithubAppView } from '@/entities/github-app'
 import { capabilityMeta, type GithubRunnerInstall, type RunnerMeta } from '@/entities/runner'
@@ -47,6 +47,7 @@ export function WorkspaceRunnersManager({
 }) {
   const t = useTranslations('manageWorkspaceRunners')
   const locale = useLocale()
+  const timeZone = useTimeZone()
   const [registerOpen, setRegisterOpen] = useState(false)
   const [githubOpen, setGithubOpen] = useState(false)
   const [confirmId, setConfirmId] = useState<string>()
@@ -186,7 +187,9 @@ export function WorkspaceRunnersManager({
                     <code className="font-mono text-muted-foreground">self:ws:{r.id}</code>
                     <span>·</span>
                     <span>
-                      {t('pairedAt', { date: new Date(r.pairedAt).toLocaleString(locale) })}
+                      {t('pairedAt', {
+                        date: new Date(r.pairedAt).toLocaleString(locale, { timeZone }),
+                      })}
                     </span>
                   </div>
                 </div>
@@ -428,6 +431,7 @@ function GithubInstallDialog({
 }) {
   const t = useTranslations('manageWorkspaceRunners')
   const locale = useLocale()
+  const timeZone = useTimeZone()
   const [mode, setMode] = useState<'repo' | 'org'>('repo')
   const [repoQuery, setRepoQuery] = useState('')
   const [repoSel, setRepoSel] = useState<SelectedTarget>()
@@ -558,7 +562,7 @@ function GithubInstallDialog({
             </div>
             <Callout tone="warning" className="py-1.5">
               {t('registrationExpires', {
-                date: new Date(result.registrationExpiresAt).toLocaleString(locale),
+                date: new Date(result.registrationExpiresAt).toLocaleString(locale, { timeZone }),
               })}
             </Callout>
           </div>

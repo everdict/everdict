@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useTransition } from 'react'
-import { useLocale, useTranslations } from 'next-intl'
+import { useLocale, useTimeZone, useTranslations } from 'next-intl'
 
 import type { GithubAppInstallation, GithubAppView } from '@/entities/github-app'
 import { Badge } from '@/shared/ui/badge'
@@ -159,6 +159,7 @@ function InstallationRow({
 }) {
   const t = useTranslations('manageGithubApp')
   const locale = useLocale()
+  const timeZone = useTimeZone()
   const [expanded, setExpanded] = useState(false)
   const repos = install.repos ?? []
   const shown = expanded ? repos : repos.slice(0, REPO_PREVIEW_COUNT)
@@ -176,7 +177,7 @@ function InstallationRow({
         <span className="flex flex-wrap items-center gap-x-1.5 gap-y-1">
           <span>
             {t('installedOn', {
-              date: new Date(install.connectedAt).toLocaleDateString(locale),
+              date: new Date(install.connectedAt).toLocaleDateString(locale, { timeZone }),
             })}
           </span>
           <span>·</span>

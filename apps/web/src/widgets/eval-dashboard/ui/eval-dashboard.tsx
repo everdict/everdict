@@ -1,6 +1,6 @@
 import Link from 'next/link'
 import { ChevronRight, FlaskConical } from 'lucide-react'
-import { useTranslations } from 'next-intl'
+import { useTimeZone, useTranslations } from 'next-intl'
 
 import type { MetricSummary, ScorecardRecord } from '@/entities/scorecard'
 import { fmtDateTime, fmtPct } from '@/shared/lib/format'
@@ -52,6 +52,7 @@ export function EvalDashboard({
   workspace: string
 }) {
   const t = useTranslations('evalDashboard')
+  const timeZone = useTimeZone()
   const done = scorecards.filter((s) => s.status === 'succeeded')
   const benchmarks = new Set(scorecards.map((s) => s.dataset.id))
   const harnesses = new Set(scorecards.map((s) => s.harness.id))
@@ -135,7 +136,7 @@ export function EvalDashboard({
                     </span>
                     {s.models?.primary ? <ModelChip muted>{s.models.primary}</ModelChip> : null}
                     <span className="shrink-0 text-[10.5px] tabular-nums text-faint">
-                      {fmtDateTime(s.createdAt)}
+                      {fmtDateTime(s.createdAt, timeZone)}
                     </span>
                     {s.status === 'succeeded' ? (
                       <Score passRate={primary(s)?.passRate} mean={primary(s)?.mean} />

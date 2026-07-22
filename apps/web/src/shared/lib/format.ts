@@ -108,9 +108,62 @@ export function groupMetricRows<T extends { metric: string }>(
   return groups
 }
 
-// Compact time 'MM-DD HH:mm' (value is UTC — precise/local supplemented via title). If not ISO, pass through.
-export function fmtDateTime(iso: string): string {
+// ── Timezone-aware wall-clock extraction ─────────────────────────────────────────────────────
+// The user's display timezone is a per-device preference (features/switch-timezone → next-intl timeZone).
+// Components read it with useTimeZone()/getTimeZone() and thread it into the date atoms below, exactly as they
+// already thread locale. When a `timeZone` is omitted these keep their prior behavior (UTC string slice / the
+// browser's local zone) so callers migrate incrementally without a break.
+const zonedFmtCache = new Map<string, Intl.DateTimeFormat>()
+function zonedFormatter(timeZone: string): Intl.DateTimeFormat {
+  const cached = zonedFmtCache.get(timeZone)
+  if (cached) return cached
+  const opts: Intl.DateTimeFormatOptions = {
+    hourCycle: 'h23',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  }
+  let fmt: Intl.DateTimeFormat
+  try {
+    fmt = new Intl.DateTimeFormat('en-US', { timeZone, ...opts })
+  } catch {
+    fmt = new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', ...opts }) // invalid tz → keep the display from breaking
+  }
+  zonedFmtCache.set(timeZone, fmt)
+  return fmt
+}
+interface WallClock {
+  year: number
+  month: number
+  day: number
+  hour: number
+  minute: number
+}
+function wallClockIn(d: Date, timeZone: string): WallClock {
+  const m: Record<string, string> = {}
+  for (const p of zonedFormatter(timeZone).formatToParts(d)) m[p.type] = p.value
+  return {
+    year: Number(m.year),
+    month: Number(m.month),
+    day: Number(m.day),
+    hour: Number(m.hour) % 24, // h23 = 0~23 (guard against some runtimes rendering 24)
+    minute: Number(m.minute),
+  }
+}
+const pad2 = (n: number) => String(n).padStart(2, '0')
+
+// Compact time 'MM-DD HH:mm'. With a `timeZone` the wall-clock is that zone's; without one the value's UTC fields
+// are sliced from the ISO string (prior behavior). If not ISO, pass through.
+export function fmtDateTime(iso: string, timeZone?: string): string {
   if (!/^\d{4}-\d{2}-\d{2}T/.test(iso)) return iso
+  if (timeZone) {
+    const d = new Date(iso)
+    if (Number.isNaN(d.getTime())) return iso
+    const w = wallClockIn(d, timeZone)
+    return `${pad2(w.month)}-${pad2(w.day)} ${pad2(w.hour)}:${pad2(w.minute)}`
+  }
   return iso
     .replace('T', ' ')
     .replace(/\.\d+Z?$/, '')
@@ -199,10 +252,17 @@ export function fmtMetricValue(kind: MetricKind, value: number): string {
   }
 }
 
-// Local full rendering for title= (exact time on hover).
-export function fmtDateTimeFull(iso: string): string {
+// Full rendering for title= (exact time on hover). locale/timeZone come from the caller (useLocale()/useTimeZone()
+// or the server equivalents); omitted → the browser's defaults (prior behavior).
+export function fmtDateTimeFull(
+  iso: string,
+  opts: { locale?: string; timeZone?: string } = {}
+): string {
   try {
-    return new Date(iso).toLocaleString()
+    return new Date(iso).toLocaleString(
+      opts.locale,
+      opts.timeZone ? { timeZone: opts.timeZone } : undefined
+    )
   } catch {
     return iso
   }
@@ -216,9 +276,9 @@ export function fmtSubject(s: string): string {
 
 // Relative time (for feeds like notifications) — Intl.RelativeTimeFormat locale rendering (e.g. '3 minutes ago'),
 // falling back to an absolute date past 7 days. locale is passed by the caller (component) via useLocale()/getLocale() (default ko).
-export function fmtTimeAgo(iso: string, locale: string = 'ko'): string {
+export function fmtTimeAgo(iso: string, locale: string = 'ko', timeZone?: string): string {
   const ms = Date.now() - new Date(iso).getTime()
-  if (!Number.isFinite(ms) || ms < 0) return fmtDateTime(iso)
+  if (!Number.isFinite(ms) || ms < 0) return fmtDateTime(iso, timeZone)
   const min = Math.floor(ms / 60_000)
   if (min < 1) return locale.startsWith('ko') ? '방금 전' : 'just now'
   const rtf = new Intl.RelativeTimeFormat(locale, { numeric: 'always' })
@@ -227,35 +287,52 @@ export function fmtTimeAgo(iso: string, locale: string = 'ko'): string {
   if (hours < 24) return rtf.format(-hours, 'hour')
   const days = Math.floor(hours / 24)
   if (days <= 7) return rtf.format(-days, 'day')
-  return fmtDateTime(iso)
+  return fmtDateTime(iso, timeZone)
 }
 
 // List date-group header — today/yesterday as relative (numeric:auto), otherwise locale month·day (include the year in a different year).
-export function fmtDateHeading(iso: string, locale: string = 'ko'): string {
+// The today/yesterday boundary and the month·day are computed in `timeZone` when given, else the browser's local zone.
+export function fmtDateHeading(iso: string, locale: string = 'ko', timeZone?: string): string {
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return iso
   const now = new Date()
-  const startOf = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime()
-  const diffDays = Math.round((startOf(now) - startOf(d)) / 86_400_000)
+  // Midnight-aligned day ordinal in the display zone (UTC-based so the subtraction is zone-neutral once shifted).
+  const dayOrdinal = (x: Date) => {
+    if (timeZone) {
+      const w = wallClockIn(x, timeZone)
+      return Date.UTC(w.year, w.month - 1, w.day)
+    }
+    return new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime()
+  }
+  const diffDays = Math.round((dayOrdinal(now) - dayOrdinal(d)) / 86_400_000)
   if (diffDays === 0 || diffDays === 1)
     return new Intl.RelativeTimeFormat(locale, { numeric: 'auto' }).format(-diffDays, 'day')
-  const opts: Intl.DateTimeFormatOptions =
-    d.getFullYear() === now.getFullYear()
+  const yearOf = (x: Date) => (timeZone ? wallClockIn(x, timeZone).year : x.getFullYear())
+  const base: Intl.DateTimeFormatOptions =
+    yearOf(d) === yearOf(now)
       ? { month: 'long', day: 'numeric' }
       : { year: 'numeric', month: 'long', day: 'numeric' }
-  return new Intl.DateTimeFormat(locale, opts).format(d)
+  return new Intl.DateTimeFormat(locale, timeZone ? { ...base, timeZone } : base).format(d)
 }
 
-// Time for a date-group row — HH:MM (local). The date lives in the group header.
-export function fmtTimeOnly(iso: string): string {
+// Time for a date-group row — HH:MM in the display zone (`timeZone`), else the browser's local zone. The date lives in the group header.
+export function fmtTimeOnly(iso: string, timeZone?: string): string {
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return iso
-  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+  if (timeZone) {
+    const w = wallClockIn(d, timeZone)
+    return `${pad2(w.hour)}:${pad2(w.minute)}`
+  }
+  return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`
 }
 
-// Date-group key (based on local midnight) — the same day yields the same key.
-export function dayKeyOf(iso: string): string {
+// Date-group key (display-zone midnight) — the same day yields the same key. Must share `timeZone` with fmtDateHeading/fmtTimeOnly.
+export function dayKeyOf(iso: string, timeZone?: string): string {
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return iso
+  if (timeZone) {
+    const w = wallClockIn(d, timeZone)
+    return `${w.year}-${w.month}-${w.day}`
+  }
   return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`
 }

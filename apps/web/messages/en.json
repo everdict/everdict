@@ -830,6 +830,12 @@
     "ko": "한국어",
     "en": "English"
   },
+  "timezone": {
+    "label": "Timezone",
+    "searchPlaceholder": "Search timezones…",
+    "empty": "No matching timezone",
+    "useBrowser": "Use browser"
+  },
   "manageApiKeys": {
     "title": "API keys",
     "introRich": "Keys agents use to access Everdict (<code>ak_…</code>). You can set permissions when issuing, and a key is shown only once.",
@@ -2436,7 +2442,9 @@
     "themeLabel": "Theme",
     "themeHint": "Light or dark appearance (stored on this device).",
     "languageLabel": "Language",
-    "languageHint": "Interface language (stored in a cookie)."
+    "languageHint": "Interface language (stored in a cookie).",
+    "timezoneLabel": "Timezone",
+    "timezoneHint": "The zone all dates and times are shown in (stored on this device)."
   },
   "settingsNav": {
     "groupAccount": "Account",
@@ -2445,7 +2453,7 @@
     "profile": "Profile",
     "profileDesc": "Your name and photo.",
     "preferences": "Preferences",
-    "preferencesDesc": "Theme and language for this device.",
+    "preferencesDesc": "Theme, language, and timezone for this device.",
     "apiKeys": "API keys",
     "apiKeysDesc": "Personal keys that act with your permissions.",
     "personalSecrets": "Personal secrets",

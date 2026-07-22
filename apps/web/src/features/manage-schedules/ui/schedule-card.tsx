@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { CirclePause, CirclePlay, Pause, Pencil, Play, Trash2 } from 'lucide-react'
-import { useLocale, useTranslations } from 'next-intl'
+import { useLocale, useTimeZone, useTranslations } from 'next-intl'
 
 import type { Schedule } from '@/entities/schedule'
 import { describeCron, fireDayLabel, fireTimeLabel } from '@/shared/lib/cron'
@@ -75,6 +75,7 @@ export function ScheduleCard({
   const router = useRouter()
   const t = useTranslations('manageSchedules')
   const locale = useLocale()
+  const timeZone = useTimeZone()
   return (
     // Fixed-format card — every card has the same 3-line structure (name / target / cadence · next run) + a fixed right-side slot.
     <div className="flex items-center gap-3 rounded-lg border bg-card px-3.5 py-3 shadow-raise">
@@ -132,7 +133,7 @@ export function ScheduleCard({
           <span className="hidden shrink-0 text-faint sm:inline">{s.timezone}</span>
           {s.enabled ? (
             next ? (
-              <span className="truncate" title={fmtDateTimeFull(next)}>
+              <span className="truncate" title={fmtDateTimeFull(next, { timeZone })}>
                 {t('nextRunLabel')} {fireDayLabel(next, nowIso, s.timezone, locale)}{' '}
                 {fireTimeLabel(next, s.timezone)}
                 {approx ? <span className="text-faint"> {t('approxNote')}</span> : null}
@@ -146,7 +147,7 @@ export function ScheduleCard({
           {s.lastStatus ? (
             <span className="hidden truncate text-faint lg:inline">
               · {t('lastRun')} {s.lastStatus}
-              {s.lastFiredAt ? ` (${fmtDateTime(s.lastFiredAt)})` : ''}
+              {s.lastFiredAt ? ` (${fmtDateTime(s.lastFiredAt, timeZone)})` : ''}
             </span>
           ) : null}
         </div>

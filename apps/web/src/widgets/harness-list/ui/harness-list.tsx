@@ -3,7 +3,7 @@
 import { useMemo, useState } from 'react'
 import Link from 'next/link'
 import { Boxes, Clock, Layers, Lock, Trash2, Waypoints } from 'lucide-react'
-import { useTranslations } from 'next-intl'
+import { useTimeZone, useTranslations } from 'next-intl'
 
 import { DeleteHarnessDialog } from '@/features/delete-harness'
 import type { Harness } from '@/entities/harness'
@@ -65,6 +65,7 @@ export function HarnessList({
 }) {
   const t = useTranslations('harnessList')
   const dt = useTranslations('deleteHarness')
+  const timeZone = useTimeZone()
   // The harness currently pending deletion (opens the shared delete dialog).
   const [deleting, setDeleting] = useState<Harness | null>(null)
   const sorts: { value: Sort; label: string }[] = [
@@ -307,10 +308,10 @@ export function HarnessList({
                   {rel?.lastRunAt && (
                     <span
                       className="inline-flex items-center gap-1"
-                      title={t('lastRunAt', { at: fmtDateTimeFull(rel.lastRunAt) })}
+                      title={t('lastRunAt', { at: fmtDateTimeFull(rel.lastRunAt, { timeZone }) })}
                     >
                       <Clock className="size-3.5" />
-                      {fmtDateTime(rel.lastRunAt)}
+                      {fmtDateTime(rel.lastRunAt, timeZone)}
                     </span>
                   )}
                 </div>

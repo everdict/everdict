@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useTransition } from 'react'
-import { useLocale, useTranslations } from 'next-intl'
+import { useLocale, useTimeZone, useTranslations } from 'next-intl'
 
 import type { Invite } from '@/entities/member'
 import { copyText } from '@/shared/lib/clipboard'
@@ -23,6 +23,7 @@ function inviteLink(token: string): string {
 export function InvitesManager({ invites, canWrite }: { invites: Invite[]; canWrite: boolean }) {
   const t = useTranslations('manageInvites')
   const locale = useLocale()
+  const timeZone = useTimeZone()
   const [role, setRole] = useState<string>('member')
   const [open, setOpen] = useState(false) // expand the create form — collapsed by default to hide the invite UI (role picker, etc.)
   const [link, setLink] = useState<string>() // the invite link just issued (once)
@@ -102,7 +103,9 @@ export function InvitesManager({ invites, canWrite }: { invites: Invite[]; canWr
                 <span className="ml-2 text-[12px] text-faint">{i.role}</span>
                 <span className="ml-2 text-[12px] text-faint">
                   {i.expiresAt
-                    ? t('expiresAt', { date: new Date(i.expiresAt).toLocaleString(locale) })
+                    ? t('expiresAt', {
+                        date: new Date(i.expiresAt).toLocaleString(locale, { timeZone }),
+                      })
                     : t('noExpiry')}
                 </span>
                 <span className="ml-2 text-[12px] text-faint">

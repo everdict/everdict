@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import { BarChart3, History, Sparkles } from 'lucide-react'
-import { useLocale, useTranslations } from 'next-intl'
+import { useLocale, useTimeZone, useTranslations } from 'next-intl'
 
 import { fmtDateTimeFull, fmtTimeAgo } from '@/shared/lib/format'
 import { cn } from '@/shared/lib/utils'
@@ -103,9 +103,13 @@ function TimelineRail({ item, last }: { item: ActivityItem; last: boolean }) {
 
 function When({ at }: { at: string }) {
   const locale = useLocale()
+  const timeZone = useTimeZone()
   return (
-    <time className="shrink-0 text-[11px] text-faint" title={fmtDateTimeFull(at)}>
-      {fmtTimeAgo(at, locale)}
+    <time
+      className="shrink-0 text-[11px] text-faint"
+      title={fmtDateTimeFull(at, { locale, timeZone })}
+    >
+      {fmtTimeAgo(at, locale, timeZone)}
     </time>
   )
 }

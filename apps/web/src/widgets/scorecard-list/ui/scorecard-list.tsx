@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { Check, Search, Trash2 } from 'lucide-react'
-import { useLocale, useTranslations } from 'next-intl'
+import { useLocale, useTimeZone, useTranslations } from 'next-intl'
 import { createPortal } from 'react-dom'
 
 import { DeleteScorecardRowButton, DeleteScorecardsDialog } from '@/features/delete-scorecard'
@@ -58,6 +58,7 @@ export function ScorecardList({
 }) {
   const t = useTranslations('scorecardList')
   const locale = useLocale()
+  const timeZone = useTimeZone()
   const sorts: { value: Sort; label: string }[] = [
     { value: 'recent', label: t('sortRecent') },
     { value: 'name', label: t('sortName') },
@@ -350,7 +351,7 @@ export function ScorecardList({
               [
                 ...visible
                   .reduce((m, s) => {
-                    const k = dayKeyOf(s.createdAt)
+                    const k = dayKeyOf(s.createdAt, timeZone)
                     const g = m.get(k)
                     if (g) g.push(s)
                     else m.set(k, [s])
@@ -363,7 +364,7 @@ export function ScorecardList({
             <section key={day || 'all'} className="space-y-2">
               {day && items[0] && (
                 <h4 className="px-0.5 text-[11.5px] font-[560] uppercase tracking-wide text-faint">
-                  {fmtDateHeading(items[0].createdAt, locale)}
+                  {fmtDateHeading(items[0].createdAt, locale, timeZone)}
                 </h4>
               )}
               {items.map((s, i) => {
@@ -511,9 +512,11 @@ export function ScorecardList({
                             ? 'hidden w-[44px] text-right font-mono text-[11px] text-muted-foreground sm:block'
                             : 'hidden w-[84px] text-right font-mono text-[11px] text-muted-foreground sm:block'
                         }
-                        title={fmtDateTimeFull(s.createdAt)}
+                        title={fmtDateTimeFull(s.createdAt, { locale, timeZone })}
                       >
-                        {sort === 'recent' ? fmtTimeOnly(s.createdAt) : fmtDateTime(s.createdAt)}
+                        {sort === 'recent'
+                          ? fmtTimeOnly(s.createdAt, timeZone)
+                          : fmtDateTime(s.createdAt, timeZone)}
                       </time>
                       <span className="flex w-5 justify-end">
                         <StatusIcon status={s.status} />

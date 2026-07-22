@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Bell, BellOff, BellRing, Check } from 'lucide-react'
-import { useLocale, useTranslations } from 'next-intl'
+import { useLocale, useTimeZone, useTranslations } from 'next-intl'
 
 import { notificationsResponseSchema, type NotificationItem } from '@/entities/notification'
 import {
@@ -66,6 +66,7 @@ const NATIVE_STATUS_KEY: Record<NativeStatus, string> = {
 export function NotificationBell({ workspace }: { workspace: string }) {
   const t = useTranslations('notificationBell')
   const locale = useLocale()
+  const timeZone = useTimeZone()
   const router = useRouter()
   const [open, setOpen] = useState(false)
   const [items, setItems] = useState<NotificationItem[]>([])
@@ -324,7 +325,7 @@ export function NotificationBell({ workspace }: { workspace: string }) {
                           <span className="block truncate text-[12px] text-faint">{n.body}</span>
                         )}
                         <span className="block text-[11px] text-faint">
-                          {fmtTimeAgo(n.createdAt, locale)}
+                          {fmtTimeAgo(n.createdAt, locale, timeZone)}
                         </span>
                       </span>
                     </button>

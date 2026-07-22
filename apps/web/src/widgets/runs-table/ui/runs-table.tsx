@@ -1,7 +1,7 @@
 import { Fragment } from 'react'
 import Link from 'next/link'
 import { Layers } from 'lucide-react'
-import { useLocale, useTranslations } from 'next-intl'
+import { useLocale, useTimeZone, useTranslations } from 'next-intl'
 
 import type { Run, RunStatus, Usage } from '@/entities/run'
 import { Badge } from '@/shared/ui/badge'
@@ -35,7 +35,7 @@ function cost(usage?: Usage): string | undefined {
 }
 
 // Relative time — Linear-style concise rendering.
-function ago(t: Translate, locale: string, iso: string): string {
+function ago(t: Translate, locale: string, iso: string, timeZone: string | undefined): string {
   const d = new Date(iso).getTime()
   const diff = Date.now() - d
   const m = Math.round(diff / 60000)
@@ -45,7 +45,7 @@ function ago(t: Translate, locale: string, iso: string): string {
   if (h < 24) return t('hoursAgo', { h })
   const days = Math.round(h / 24)
   if (days < 30) return t('daysAgo', { days })
-  return new Date(iso).toLocaleDateString(locale, { month: 'short', day: 'numeric' })
+  return new Date(iso).toLocaleDateString(locale, { month: 'short', day: 'numeric', timeZone })
 }
 
 // A scorecard batch's rollup status from its children — still active if any child is; else failed if any failed.
@@ -90,12 +90,14 @@ function RunRow({
   workspace,
   t,
   locale,
+  timeZone,
   isChild,
 }: {
   run: Run
   workspace: string
   t: Translate
   locale: string
+  timeZone: string | undefined
   isChild?: boolean
 }) {
   const c = cost(run.usage)
@@ -129,7 +131,7 @@ function RunRow({
         {c ?? <span className="text-faint">—</span>}
       </TD>
       <TD className="whitespace-nowrap text-right text-[12px] text-muted-foreground">
-        {ago(t, locale, run.updatedAt)}
+        {ago(t, locale, run.updatedAt, timeZone)}
       </TD>
     </TR>
   )
@@ -149,6 +151,7 @@ export function RunsTable({
 }) {
   const t = useTranslations('runsTable')
   const locale = useLocale()
+  const timeZone = useTimeZone()
   const rows = limit ? runs.slice(0, limit) : runs
   if (rows.length === 0) {
     return <EmptyState title={t('emptyTitle')} hint={t('emptyHint')} />
@@ -175,6 +178,7 @@ export function RunsTable({
               workspace={workspace}
               t={t}
               locale={locale}
+              timeZone={timeZone}
               isChild={false}
             />
           ) : (
@@ -195,7 +199,7 @@ export function RunsTable({
                     <Badge tone="outline">{t('batchCount', { n: block.runs.length })}</Badge>
                     <StatusPill status={rollupStatus(block.runs)} />
                     <span className="ml-auto text-[12px] text-muted-foreground">
-                      {ago(t, locale, new Date(block.ts).toISOString())}
+                      {ago(t, locale, new Date(block.ts).toISOString(), timeZone)}
                     </span>
                   </div>
                 </td>
@@ -207,6 +211,7 @@ export function RunsTable({
                   workspace={workspace}
                   t={t}
                   locale={locale}
+                  timeZone={timeZone}
                   isChild
                 />
               ))}

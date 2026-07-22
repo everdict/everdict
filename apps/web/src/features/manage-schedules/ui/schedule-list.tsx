@@ -3,7 +3,7 @@
 import { useMemo, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { CalendarClock, Search } from 'lucide-react'
-import { useLocale, useTranslations } from 'next-intl'
+import { useLocale, useTimeZone, useTranslations } from 'next-intl'
 
 import type { Schedule } from '@/entities/schedule'
 import { describeCron, fireDayLabel, fireTimeLabel } from '@/shared/lib/cron'
@@ -69,6 +69,7 @@ export function ScheduleList({
   const router = useRouter()
   const t = useTranslations('manageSchedules')
   const locale = useLocale()
+  const timeZone = useTimeZone()
   const statusOptions = [
     { value: '', label: t('statusAll') },
     { value: 'enabled', label: t('active') },
@@ -308,7 +309,7 @@ export function ScheduleList({
                 >
                   <span
                     className="w-[112px] shrink-0 font-mono tabular-nums text-muted-foreground"
-                    title={fmtDateTimeFull(iso)}
+                    title={fmtDateTimeFull(iso, { timeZone })}
                   >
                     {fireDayLabel(iso, nowIso, schedule.timezone, locale)}{' '}
                     <span className="text-foreground">{fireTimeLabel(iso, schedule.timezone)}</span>

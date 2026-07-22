@@ -4,7 +4,7 @@ import { useState, useTransition } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { Globe, Lock, MoreHorizontal, Trash2 } from 'lucide-react'
-import { useLocale, useTranslations } from 'next-intl'
+import { useLocale, useTimeZone, useTranslations } from 'next-intl'
 
 import type { View } from '@/entities/view'
 import { fmtTimeAgo } from '@/shared/lib/format'
@@ -34,6 +34,7 @@ export function ViewList({
 }) {
   const t = useTranslations('analyzeScorecards')
   const locale = useLocale()
+  const timeZone = useTimeZone()
   const router = useRouter()
   const [pending, start] = useTransition()
   const [error, setError] = useState<string | undefined>()
@@ -101,7 +102,7 @@ export function ViewList({
 
             <div className="flex shrink-0 items-center gap-2">
               <span className="hidden text-[11px] text-faint sm:inline">
-                {t('updatedAgo', { time: fmtTimeAgo(v.updatedAt, locale) })}
+                {t('updatedAgo', { time: fmtTimeAgo(v.updatedAt, locale, timeZone) })}
               </span>
               <span className="flex w-7 justify-center">
                 <UserAvatar

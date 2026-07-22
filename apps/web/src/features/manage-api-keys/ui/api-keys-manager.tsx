@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useTransition } from 'react'
 import { Check, Copy, KeyRound, Plus, Trash2 } from 'lucide-react'
-import { useLocale, useTranslations } from 'next-intl'
+import { useLocale, useTimeZone, useTranslations } from 'next-intl'
 
 import type { ApiKeyMeta, ApiKeyScope } from '@/entities/api-key'
 import { copyText } from '@/shared/lib/clipboard'
@@ -25,6 +25,7 @@ function scopeLabel(scopes?: ApiKeyScope[]): string {
 export function ApiKeysManager({ keys, canWrite }: { keys: ApiKeyMeta[]; canWrite: boolean }) {
   const t = useTranslations('manageApiKeys')
   const locale = useLocale()
+  const timeZone = useTimeZone()
   const [createOpen, setCreateOpen] = useState(false)
   const [confirmId, setConfirmId] = useState<string>()
   const [error, setError] = useState<string>()
@@ -97,7 +98,7 @@ export function ApiKeysManager({ keys, canWrite }: { keys: ApiKeyMeta[]; canWrit
                 <div className="mt-0.5 flex items-center gap-1.5 text-[12px] text-faint">
                   <code className="font-mono text-muted-foreground">{k.prefix}…</code>
                   <span>·</span>
-                  <span>{new Date(k.createdAt).toLocaleString(locale)}</span>
+                  <span>{new Date(k.createdAt).toLocaleString(locale, { timeZone })}</span>
                 </div>
               </div>
               {canWrite &&

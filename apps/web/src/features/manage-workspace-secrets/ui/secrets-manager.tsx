@@ -16,7 +16,7 @@ import {
   Plus,
   Server,
 } from 'lucide-react'
-import { useLocale, useTranslations } from 'next-intl'
+import { useLocale, useTimeZone, useTranslations } from 'next-intl'
 
 import {
   PROVIDER_TOKENS,
@@ -206,6 +206,7 @@ function ProviderTokenRows({
 }) {
   const t = useTranslations('manageWorkspaceSecrets')
   const locale = useLocale()
+  const timeZone = useTimeZone()
   const [editing, setEditing] = useState<string>() // name of the token whose register/replace form is open
   const [confirmName, setConfirmName] = useState<string>()
   const [error, setError] = useState<string>()
@@ -254,7 +255,7 @@ function ProviderTokenRows({
                 registered
                   ? t('registeredHint', {
                       usedFor: t(`providerTokens.${pt.name}.usedFor`),
-                      date: new Date(registered.updatedAt).toLocaleDateString(locale),
+                      date: new Date(registered.updatedAt).toLocaleDateString(locale, { timeZone }),
                     })
                   : t(`providerTokens.${pt.name}.usedFor`)
               }
@@ -356,6 +357,7 @@ function SecretRows({
 }) {
   const t = useTranslations('manageWorkspaceSecrets')
   const locale = useLocale()
+  const timeZone = useTimeZone()
   const [adding, setAdding] = useState(false)
   const [confirmName, setConfirmName] = useState<string>()
   const [error, setError] = useState<string>()
@@ -421,7 +423,9 @@ function SecretRows({
               hint={
                 <>
                   <span className="block">
-                    {t('updatedHint', { date: new Date(s.updatedAt).toLocaleString(locale) })}
+                    {t('updatedHint', {
+                      date: new Date(s.updatedAt).toLocaleString(locale, { timeZone }),
+                    })}
                   </span>
                   {s.refs !== undefined && <UsageSites refs={s.refs} />}
                 </>

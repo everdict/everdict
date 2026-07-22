@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { CalendarClock, ChevronsRight, CircleDashed, Laptop, Loader2, Server } from 'lucide-react'
-import { useTranslations } from 'next-intl'
+import { useTimeZone, useTranslations } from 'next-intl'
 
 import { type QueueItem, type QueueLane, type QueueSnapshot } from '@/entities/queue'
 import { fmtDateTime, fmtDateTimeFull, fmtSubject } from '@/shared/lib/format'
@@ -80,6 +80,7 @@ function ItemRow({
   next?: boolean
 }) {
   const t = useTranslations('workPanel')
+  const timeZone = useTimeZone()
   const { openRun } = useInfraPanel()
   const author = item.createdBy
     ? (authors[item.createdBy] ?? { name: fmtSubject(item.createdBy) })
@@ -131,9 +132,9 @@ function ItemRow({
       </span>
       <time
         className="w-[68px] shrink-0 text-right font-mono text-[10.5px] text-muted-foreground"
-        title={fmtDateTimeFull(item.createdAt)}
+        title={fmtDateTimeFull(item.createdAt, { timeZone })}
       >
-        {fmtDateTime(item.createdAt)}
+        {fmtDateTime(item.createdAt, timeZone)}
       </time>
     </>
   )
@@ -158,6 +159,7 @@ function ItemRow({
 
 // Upcoming fire — clicking drills into that schedule's in-panel detail (schedules tab), not the left router.
 function UpcomingRow({ upcoming }: { upcoming: QueueLane['upcoming'][number] }) {
+  const timeZone = useTimeZone()
   const { openSchedule } = useInfraPanel()
   return (
     <button
@@ -174,9 +176,9 @@ function UpcomingRow({ upcoming }: { upcoming: QueueLane['upcoming'][number] }) 
       </div>
       <time
         className="shrink-0 font-mono text-[10.5px] text-muted-foreground"
-        title={fmtDateTimeFull(upcoming.at)}
+        title={fmtDateTimeFull(upcoming.at, { timeZone })}
       >
-        {fmtDateTime(upcoming.at)}
+        {fmtDateTime(upcoming.at, timeZone)}
       </time>
     </button>
   )
