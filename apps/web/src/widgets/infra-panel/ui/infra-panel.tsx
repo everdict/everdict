@@ -95,15 +95,26 @@ export function InfraPanel() {
   useEffect(() => {
     const onMessage = (e: MessageEvent) => {
       if (e.origin !== window.location.origin) return
-      const data = e.data as { type?: string; href?: string } | null
+      const data = e.data as { type?: string; href?: string; bounce?: boolean } | null
       if (data?.type === 'everdict:left-nav' && typeof data.href === 'string') {
         router.push(data.href)
         onNavigate()
+        // A bounced document (a non-infra page that got INTO an iframe) — the panel is infra-only, so send
+        // that iframe back to its tab's home page.
+        if (data.bounce) {
+          for (const pageTab of PAGE_TABS) {
+            const frameWindow = frames.current[pageTab]?.contentWindow
+            if (frameWindow && frameWindow === e.source) {
+              frameWindow.location.replace(withEmbed(`/${workspace}${HOME_PATH[pageTab]}`))
+              break
+            }
+          }
+        }
       }
     }
     window.addEventListener('message', onMessage)
     return () => window.removeEventListener('message', onMessage)
-  }, [router, onNavigate])
+  }, [router, onNavigate, workspace])
 
   // Never opened → nothing to preserve. After the first open, collapse only HIDES the panel (iframes live on).
   if (!open && !everOpened.current) return null
