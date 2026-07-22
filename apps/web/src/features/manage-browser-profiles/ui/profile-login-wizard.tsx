@@ -1,10 +1,15 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { useTranslations } from 'next-intl'
+import { useLocale, useTranslations } from 'next-intl'
 
 import { BrowserCanvas } from '@/features/interactive-browser'
 import { ProxiesManager, type ProxyView } from '@/features/manage-proxies'
+import {
+  defaultKeepCookie,
+  isExpired,
+  type PreviewCookie,
+} from '@/features/manage-browser-profiles/lib/cookie-selection'
 import type { BrowserProfile } from '@/entities/browser-profile'
 import { cn } from '@/shared/lib/utils'
 import { Button } from '@/shared/ui/button'
@@ -13,12 +18,17 @@ import { Input } from '@/shared/ui/input'
 
 interface RememberedDomain {
   domain: string
-  cookieNames: string[]
+  cookies: PreviewCookie[]
+}
+interface StatePreview {
+  now: number // server epoch seconds — expiry is judged against this, not the client clock
+  domains: RememberedDomain[]
 }
 
-// One login can set a dozen unrelated cookies (analytics, consent, A/B buckets) — the user picks what the
-// profile actually keeps. Selection state is a DEselection set so cookies appearing on later polls default to
-// selected without wiping earlier choices.
+// One login sets a dozen unrelated cookies (analytics, consent, A/B buckets) plus the real session token — the
+// auth ones are auto-selected (see lib/cookie-selection) and the user adjusts via chips. Selection is an explicit
+// OVERRIDE map (key → chosen) layered over the heuristic default, so later polls never wipe a user's choice and a
+// freshly-appearing cookie shows up with its heuristic default.
 const cookieKey = (domain: string, name: string) => `${domain}|${name}`
 
 // Session-first browser-profile creation (browser-profiles): making a profile IS a login session. A live browser
@@ -37,45 +47,60 @@ export function ProfileLoginWizard({
   onCancel: () => void
 }) {
   const t = useTranslations('browserProfiles')
+  const locale = useLocale()
   const [name, setName] = useState(profile?.name ?? '')
   const [country, setCountry] = useState(profile?.country ?? '')
   const [proxies, setProxies] = useState<ProxyView[]>([])
   const [showProxies, setShowProxies] = useState(false)
   const [session, setSession] = useState<{ id: string } | null>(null)
-  const [remembered, setRemembered] = useState<RememberedDomain[]>([])
-  const [deselected, setDeselected] = useState<Set<string>>(new Set())
+  const [preview, setPreview] = useState<StatePreview | null>(null)
+  const [override, setOverride] = useState<Map<string, boolean>>(new Map())
   const [busy, setBusy] = useState<'idle' | 'opening' | 'saving'>('idle')
   const [error, setError] = useState<string | null>(null)
 
   const countries = [...new Set(proxies.map((p) => p.country))].sort()
 
-  const totalCookies = remembered.reduce((sum, d) => sum + d.cookieNames.length, 0)
-  const selectedCookies = remembered.flatMap((d) =>
-    d.cookieNames
-      .filter((name) => !deselected.has(cookieKey(d.domain, name)))
-      .map((name) => ({ domain: d.domain, name }))
+  const nowSeconds = preview?.now ?? Math.floor(Date.now() / 1000)
+  const domains = preview?.domains ?? []
+  const totalCookies = domains.reduce((sum, d) => sum + d.cookies.length, 0)
+
+  // Expired cookies can never be selected (re-seeding them is a no-op); otherwise a user override wins over the
+  // heuristic default. Domain-scoped date formatter (absolute expiry, medium — "excellent" per the user request).
+  const isSelected = (domain: string, c: PreviewCookie): boolean => {
+    if (isExpired(c, nowSeconds)) return false
+    const key = cookieKey(domain, c.name)
+    const chosen = override.get(key)
+    return chosen ?? defaultKeepCookie(c, nowSeconds)
+  }
+  const selectedCookies = domains.flatMap((d) =>
+    d.cookies.filter((c) => isSelected(d.domain, c)).map((c) => ({ domain: d.domain, name: c.name }))
   )
 
-  const toggleCookie = (domain: string, name: string) =>
-    setDeselected((prev) => {
-      const next = new Set(prev)
-      const key = cookieKey(domain, name)
-      if (next.has(key)) next.delete(key)
-      else next.add(key)
-      return next
-    })
+  const dateFmt = new Intl.DateTimeFormat(locale, { dateStyle: 'medium' })
+  const expiryLabel = (c: PreviewCookie): { text: string; tone: 'expired' | 'session' | 'date' } => {
+    if (isExpired(c, nowSeconds)) return { text: t('cookieExpired'), tone: 'expired' }
+    if (c.expires === null) return { text: t('cookieSession'), tone: 'session' }
+    return { text: dateFmt.format(new Date(c.expires * 1000)), tone: 'date' }
+  }
 
-  // Domain header toggle — all on ⇒ all off, anything off ⇒ all on.
-  const toggleDomain = (d: RememberedDomain) =>
-    setDeselected((prev) => {
-      const next = new Set(prev)
-      const allOn = d.cookieNames.every((name) => !next.has(cookieKey(d.domain, name)))
-      for (const name of d.cookieNames) {
-        if (allOn) next.add(cookieKey(d.domain, name))
-        else next.delete(cookieKey(d.domain, name))
-      }
+  const toggleCookie = (domain: string, c: PreviewCookie) => {
+    if (isExpired(c, nowSeconds)) return // dead cookie — not selectable
+    const key = cookieKey(domain, c.name)
+    const nextValue = !isSelected(domain, c)
+    setOverride((prev) => new Map(prev).set(key, nextValue))
+  }
+
+  // Domain header toggle over the SELECTABLE cookies — all on ⇒ all off, anything off ⇒ all on.
+  const toggleDomain = (d: RememberedDomain) => {
+    const selectable = d.cookies.filter((c) => !isExpired(c, nowSeconds))
+    if (selectable.length === 0) return
+    const allOn = selectable.every((c) => isSelected(d.domain, c))
+    setOverride((prev) => {
+      const next = new Map(prev)
+      for (const c of selectable) next.set(cookieKey(d.domain, c.name), !allOn)
       return next
     })
+  }
 
   // The workspace's egress proxies (browser-profiles S4) — the geo the login session runs through.
   useEffect(() => {
@@ -109,8 +134,9 @@ export function ProfileLoginWizard({
           `/api/browser-sessions/${encodeURIComponent(session.id)}/state-preview`
         )
         if (!res.ok) return
-        const body = (await res.json()) as { domains?: RememberedDomain[] }
-        if (!stopped && body.domains) setRemembered(body.domains)
+        const body = (await res.json()) as Partial<StatePreview>
+        if (!stopped && body.domains && typeof body.now === 'number')
+          setPreview({ now: body.now, domains: body.domains })
       } catch {
         // transient — the next tick retries
       } finally {
@@ -278,51 +304,88 @@ export function ProfileLoginWizard({
                 </div>
                 <p className="mt-0.5 text-[11.5px] text-faint">{t('rememberedHint')}</p>
               </div>
-              {remembered.length === 0 ? (
+              {domains.length === 0 ? (
                 <p className="text-[12px] text-muted-foreground">{t('rememberedEmpty')}</p>
               ) : (
-                <ul className="max-h-64 space-y-1.5 overflow-y-auto">
-                  {remembered.map((d) => {
-                    const domainSelected = d.cookieNames.filter(
-                      (name) => !deselected.has(cookieKey(d.domain, name))
-                    ).length
+                <ul className="max-h-72 space-y-2 overflow-y-auto">
+                  {domains.map((d) => {
+                    const domainSelected = d.cookies.filter((c) => isSelected(d.domain, c)).length
                     return (
                       <li
                         key={d.domain}
-                        className="rounded-md border border-border bg-muted/30 px-2 py-1.5"
+                        className="overflow-hidden rounded-md border border-border bg-muted/20"
                       >
                         <button
                           type="button"
                           onClick={() => toggleDomain(d)}
                           title={t('toggleDomain')}
-                          className="flex w-full items-baseline justify-between gap-2 text-left"
+                          className="flex w-full items-baseline justify-between gap-2 border-b border-border/60 px-2 py-1 text-left"
                         >
                           <span className="truncate text-[11.5px] font-medium">{d.domain}</span>
                           <span className="shrink-0 font-mono text-[10.5px] text-faint">
-                            {domainSelected}/{d.cookieNames.length}
+                            {domainSelected}/{d.cookies.length}
                           </span>
                         </button>
-                        <div className="mt-1 flex flex-wrap gap-1">
-                          {d.cookieNames.map((name) => {
-                            const off = deselected.has(cookieKey(d.domain, name))
+                        <ul>
+                          {d.cookies.map((c) => {
+                            const on = isSelected(d.domain, c)
+                            const expired = isExpired(c, nowSeconds)
+                            const expiry = expiryLabel(c)
                             return (
-                              <button
-                                key={name}
-                                type="button"
-                                onClick={() => toggleCookie(d.domain, name)}
-                                title={off ? t('cookieExcluded') : t('cookieIncluded')}
-                                className={cn(
-                                  'max-w-full truncate rounded border px-1.5 py-0.5 font-mono text-[10.5px] transition-colors',
-                                  off
-                                    ? 'border-border/60 text-faint line-through'
-                                    : 'border-primary/40 bg-primary/10'
-                                )}
-                              >
-                                {name}
-                              </button>
+                              <li key={c.name}>
+                                <button
+                                  type="button"
+                                  disabled={expired}
+                                  onClick={() => toggleCookie(d.domain, c)}
+                                  title={
+                                    expired
+                                      ? t('cookieExpiredHint')
+                                      : on
+                                        ? t('cookieIncluded')
+                                        : t('cookieExcluded')
+                                  }
+                                  className={cn(
+                                    'flex w-full items-center gap-2 px-2 py-1 text-left transition-colors',
+                                    expired
+                                      ? 'cursor-not-allowed opacity-60'
+                                      : 'hover:bg-muted/40'
+                                  )}
+                                >
+                                  <span
+                                    className={cn(
+                                      'grid size-3.5 shrink-0 place-items-center rounded-[3px] border text-[9px] leading-none',
+                                      on
+                                        ? 'border-primary bg-primary text-primary-foreground'
+                                        : 'border-border'
+                                    )}
+                                    aria-hidden
+                                  >
+                                    {on ? '✓' : ''}
+                                  </span>
+                                  <span
+                                    className={cn(
+                                      'min-w-0 flex-1 truncate font-mono text-[10.5px]',
+                                      !on && 'text-faint',
+                                      expired && 'line-through'
+                                    )}
+                                  >
+                                    {c.name}
+                                  </span>
+                                  <span
+                                    className={cn(
+                                      'shrink-0 text-[10px]',
+                                      expiry.tone === 'expired'
+                                        ? 'text-[var(--color-destructive)]'
+                                        : 'text-faint'
+                                    )}
+                                  >
+                                    {expiry.text}
+                                  </span>
+                                </button>
+                              </li>
                             )
                           })}
-                        </div>
+                        </ul>
                       </li>
                     )
                   })}

@@ -11,11 +11,19 @@ export interface CreateBrowserSessionCommand {
   runtime?: string; // runtime binding (browser-profiles S9) — the tenant-registered runtime that hosts the browser
 }
 
-// A live summary of what a capture WOULD remember right now — per-domain cookie NAMES only. Cookie values are the
-// login credential and never leave the control plane; the web polls this to show "remembered login" chips while
-// the owner logs into sites during profile creation.
+// A live summary of what a capture WOULD remember right now — per-domain cookie NAMES + non-secret attributes.
+// Cookie VALUES are the login credential and never leave the control plane; names/flags/expiry are safe metadata
+// the web uses to auto-select the auth cookies and show each one's expiry. Polled while the owner logs into sites.
+export interface StatePreviewCookie {
+  name: string;
+  expires: number | null; // unix SECONDS; null = a session cookie (no persistent expiry, dies with the browser)
+  httpOnly: boolean; // hidden from JS — the strongest signal a cookie is a session/auth token, not analytics
+  secure: boolean;
+}
 export interface BrowserSessionStatePreview {
-  domains: Array<{ domain: string; cookieNames: string[] }>;
+  // Server clock (epoch SECONDS) at capture — the client marks a cookie expired against THIS, not its own clock.
+  now: number;
+  domains: Array<{ domain: string; cookies: StatePreviewCookie[] }>;
 }
 
 export interface BrowserSessionServiceOptions {
@@ -143,17 +151,27 @@ export class BrowserSessionService {
     if (!entry || entry.record.createdBy !== subject || entry.record.status !== "active")
       throw new NotFoundError("NOT_FOUND", { id }, "browser session not found.");
     const state = await this.captureState(entry.record.cdpBase);
-    const byDomain = new Map<string, string[]>();
+    const byDomain = new Map<string, StatePreviewCookie[]>();
     for (const cookie of state.cookies) {
       const domain = cookie.domain.replace(/^\./, "");
       if (!domain) continue;
-      const names = byDomain.get(domain) ?? [];
-      names.push(cookie.name);
-      byDomain.set(domain, names);
+      const cookies = byDomain.get(domain) ?? [];
+      cookies.push({
+        name: cookie.name,
+        // CDP reports a session cookie's expiry as -1 (or omits it) — normalize both to null.
+        expires: cookie.expires === undefined || cookie.expires <= 0 ? null : cookie.expires,
+        httpOnly: cookie.httpOnly ?? false,
+        secure: cookie.secure ?? false,
+      });
+      byDomain.set(domain, cookies);
     }
     return {
+      now: Math.floor(this.now() / 1000),
       domains: [...byDomain.entries()]
-        .map(([domain, cookieNames]) => ({ domain, cookieNames: cookieNames.sort() }))
+        .map(([domain, cookies]) => ({
+          domain,
+          cookies: cookies.sort((a, b) => a.name.localeCompare(b.name)),
+        }))
         .sort((a, b) => a.domain.localeCompare(b.domain)),
     };
   }

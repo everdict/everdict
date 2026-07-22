@@ -134,24 +134,40 @@ describe("BrowserSessionService", () => {
     expect(s.ownerOf("nope")).toBeUndefined();
   });
 
-  it("previews the session state per domain — cookie names only, values never included", async () => {
+  it("previews the session state per domain — names + expiry/flags, values never included", async () => {
     const p = new FakeProvisioner();
     const s = new BrowserSessionService(p, {
       newId: () => "bs-0",
+      now: () => 1_700_000_000_000, // fixed clock → preview.now = 1_700_000_000 (seconds)
       captureState: async () => ({
         cookies: [
-          { name: "session", value: "top-secret-value", domain: ".github.com", path: "/" },
-          { name: "csrf", value: "another-secret", domain: "github.com", path: "/" },
-          { name: "sid", value: "s3", domain: "accounts.google.com", path: "/" },
+          {
+            name: "session",
+            value: "top-secret-value",
+            domain: ".github.com",
+            path: "/",
+            expires: 1_800_000_000,
+            httpOnly: true,
+            secure: true,
+          },
+          { name: "csrf", value: "another-secret", domain: "github.com", path: "/", expires: -1 }, // session cookie
+          { name: "sid", value: "s3", domain: "accounts.google.com", path: "/" }, // no attrs → null expiry
         ],
       }),
     });
     const view = await s.create({ tenant: "acme", createdBy: "alice" });
     const preview = await s.statePreview(view.id, "alice");
-    // grouped by domain (leading dot stripped), sorted, names only
+    expect(preview.now).toBe(1_700_000_000);
+    // grouped by domain (leading dot stripped), sorted; each cookie carries expiry + flags (values never do)
     expect(preview.domains).toEqual([
-      { domain: "accounts.google.com", cookieNames: ["sid"] },
-      { domain: "github.com", cookieNames: ["csrf", "session"] },
+      { domain: "accounts.google.com", cookies: [{ name: "sid", expires: null, httpOnly: false, secure: false }] },
+      {
+        domain: "github.com",
+        cookies: [
+          { name: "csrf", expires: null, httpOnly: false, secure: false }, // -1 normalized to null (session)
+          { name: "session", expires: 1_800_000_000, httpOnly: true, secure: true },
+        ],
+      },
     ]);
     expect(JSON.stringify(preview)).not.toContain("top-secret-value");
   });

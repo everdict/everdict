@@ -20,13 +20,24 @@ export const BrowserSessionTicketResponseSchema = z.object({
   ticket: z.string().describe("Short-lived single-use WebSocket ticket"),
 });
 
-// Live "what a capture would remember" summary — per-domain cookie NAMES only; values are the login credential
-// and never cross the wire.
+// Live "what a capture would remember" summary — per-domain cookie names + non-secret attributes (expiry, flags).
+// Cookie VALUES are the login credential and never cross the wire; names/flags/expiry are safe metadata the web
+// uses to auto-select the auth cookies and show each one's expiry.
 export const BrowserSessionStatePreviewResponseSchema = z.object({
+  now: z.number().describe("Server clock (epoch seconds) at capture — mark cookies expired against this"),
   domains: z.array(
     z.object({
       domain: z.string().describe("Cookie domain (leading dot stripped)"),
-      cookieNames: z.array(z.string()).describe("Names of the cookies set for this domain (values never returned)"),
+      cookies: z
+        .array(
+          z.object({
+            name: z.string().describe("Cookie name (value never returned)"),
+            expires: z.number().nullable().describe("Epoch seconds; null = session cookie (no persistent expiry)"),
+            httpOnly: z.boolean().describe("Hidden from JS — a strong auth-token signal"),
+            secure: z.boolean().describe("Sent over HTTPS only"),
+          }),
+        )
+        .describe("Cookies set for this domain (names + attributes; values never returned)"),
     }),
   ),
 });

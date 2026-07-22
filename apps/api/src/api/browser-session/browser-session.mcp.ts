@@ -77,8 +77,8 @@ export function registerBrowserSessionTools(server: McpServer, ctx: McpToolConte
     {
       description:
         "Preview what capturing this browser session would remember — the browser's current cookies summarized " +
-        "per domain (names only; cookie values never cross the wire). Poll it while logging into sites to see " +
-        "which logins a profile capture would save. Owner-only.",
+        "per domain with each cookie's name, expiry, and httpOnly/secure flags (cookie values never cross the " +
+        "wire). Poll it while logging into sites to see which logins a profile capture would save. Owner-only.",
       inputSchema: { id: z.string().describe("Browser session id") },
     },
     ({ id }) => plain(async () => ok(await sessions.statePreview(id, principal.subject))),

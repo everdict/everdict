@@ -27,11 +27,17 @@ Making a profile IS a login session — not a metadata form. In Settings › Acc
 opens the wizard: name + geo (egress proxy country; admins manage the workspace proxy pool inline right there) →
 **a live browser opens in the page** (the S1 canvas) → the user navigates to a site, logs in, moves on to the next
 site, logs in again — one session accumulates any number of logins. While the session is open the wizard polls
-`GET /browser-sessions/:id/state-preview` (owner-gated) and renders **selectable per-cookie chips** grouped by
-domain (cookie *names* only — values NEVER cross the wire): one login can set a dozen unrelated cookies (analytics,
-consent, A/B buckets), so the user picks what the profile actually keeps. New cookies default to selected (state is
-a deselection set, so later polls don't wipe choices); the domain header toggles its whole group; saving with zero
-selected is blocked. "Save profile & close" creates the profile (with the chosen `country`) + captures (S3) **only
+`GET /browser-sessions/:id/state-preview` (owner-gated) and renders **selectable per-cookie rows** grouped by
+domain. The preview returns each cookie's *name + expiry + httpOnly/secure flags* (cookie **values** NEVER cross
+the wire) plus the server clock (`now`). One login sets a dozen unrelated cookies (analytics, consent, A/B buckets)
+plus the real session token, so the wizard **auto-selects the authentication cookies** with a site-agnostic
+heuristic (`features/manage-browser-profiles/lib/cookie-selection.ts`): `httpOnly` is the strongest signal (session
+tokens are hidden from JS; analytics/prefs are JS-readable), backed by name patterns (`session`/`token`/`login`/
+`csrf`/`__Host-`…) and analytics/preference deny-lists. Each row shows its **expiry date** (or "Session" for
+session cookies, "Expired" in red for lapsed ones, judged against server `now`); **expired cookies are excluded and
+non-selectable** (re-seeding a past-expiry cookie is a no-op). Selection is an explicit override layered over the
+heuristic default (later polls never wipe a user's choice; a new cookie appears with its default); the domain header
+toggles its selectable cookies; saving with zero selected is blocked. "Save profile & close" creates the profile (with the chosen `country`) + captures (S3) **only
 the selected cookies** (`cookies: [{domain, name}]` on the capture body, domains preview-normalized [no leading
 dot]; omitted = capture everything — the API/MCP default, 400 when a given selection matches nothing) + tears
 the session down; "Close without saving" persists nothing. Existing profiles re-login through the same wizard

@@ -30,8 +30,19 @@ function build(withBrowser: boolean) {
       ? {
           browserSessionService: new BrowserSessionService(new FakeProvisioner(), {
             newId: () => `bs-${i++}`,
+            now: () => 1_700_000_000_000,
             captureState: async () => ({
-              cookies: [{ name: "session", value: "secret-cookie-value", domain: ".github.com", path: "/" }],
+              cookies: [
+                {
+                  name: "session",
+                  value: "secret-cookie-value",
+                  domain: ".github.com",
+                  path: "/",
+                  expires: 1_800_000_000,
+                  httpOnly: true,
+                  secure: true,
+                },
+              ],
             }),
           }),
           browserTickets: new TicketStore(),
@@ -85,7 +96,7 @@ describe("browser-session routes", () => {
     );
   });
 
-  it("previews an active session's remembered cookies per domain — names only, values never cross the wire", async () => {
+  it("previews an active session's remembered cookies per domain — names + expiry, values never cross the wire", async () => {
     const app = build(true);
     const created = await app.inject({ method: "POST", url: "/browser-sessions", headers: H });
     const session = created.json() as { id: string };
@@ -96,7 +107,15 @@ describe("browser-session routes", () => {
       headers: H,
     });
     expect(preview.statusCode).toBe(200);
-    expect(preview.json()).toEqual({ domains: [{ domain: "github.com", cookieNames: ["session"] }] });
+    expect(preview.json()).toEqual({
+      now: 1_700_000_000,
+      domains: [
+        {
+          domain: "github.com",
+          cookies: [{ name: "session", expires: 1_800_000_000, httpOnly: true, secure: true }],
+        },
+      ],
+    });
     expect(preview.body).not.toContain("secret-cookie-value");
 
     // unknown session → 404 (owner gate / no existence leak)
