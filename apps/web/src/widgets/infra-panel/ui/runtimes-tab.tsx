@@ -23,9 +23,9 @@ import { StatusIcon } from '@/shared/ui/status-pill'
 import { useInfraPanel } from '../model/infra-panel-context'
 import { DetailNav, MetaRow, SectionLabel } from './panel-bits'
 
-// Runtimes tab — the execution-infra roster with its OWN navigation: clicking a runtime or runner drills into a
-// compact in-panel detail (the left half never navigates). The "full page" link inside a drill-in is the one
-// deliberate escape hatch to the routed page.
+// Runtimes tab — the execution-infra roster with its OWN navigation: clicking a runtime or runner drills into
+// an in-panel detail. The left half never navigates — the panel shows the full content itself (no "full page"
+// escape hatch).
 
 const POLL_MS = 10_000
 // Online check — a runner refreshes lastSeenAt on every long-poll lease (~25s), so within 90s it counts as connected
@@ -46,9 +46,9 @@ function isOnline(lastSeenAt?: string): boolean {
   return lastSeenAt !== undefined && Date.now() - new Date(lastSeenAt).getTime() < ONLINE_WINDOW_MS
 }
 
-export function RuntimesTab({ onNavigate }: { onNavigate: () => void }) {
+export function RuntimesTab() {
   const t = useTranslations('infraPanel')
-  const { workspace, runtimesDetail, setRuntimesDetail } = useInfraPanel()
+  const { runtimesDetail, setRuntimesDetail } = useInfraPanel()
   const [roster, setRoster] = useState<{
     runtimes: RuntimeSummary[]
     runners: RunnerMeta[]
@@ -78,23 +78,14 @@ export function RuntimesTab({ onNavigate }: { onNavigate: () => void }) {
   }, [])
 
   if (runtimesDetail?.kind === 'runtime')
-    return (
-      <RuntimeDetail
-        id={runtimesDetail.id}
-        workspace={workspace}
-        onBack={() => setRuntimesDetail(null)}
-        onNavigate={onNavigate}
-      />
-    )
+    return <RuntimeDetail id={runtimesDetail.id} onBack={() => setRuntimesDetail(null)} />
   if (runtimesDetail?.kind === 'runner')
     return (
       <RunnerDetail
         id={runtimesDetail.id}
         meta={roster?.runners.find((r) => r.id === runtimesDetail.id)}
         loading={roster === null}
-        workspace={workspace}
         onBack={() => setRuntimesDetail(null)}
-        onNavigate={onNavigate}
       />
     )
 
@@ -203,17 +194,7 @@ export function RuntimesTab({ onNavigate }: { onNavigate: () => void }) {
 
 // Registered-runtime drill-in — the latest version's spec, read once per id (the roster poll keeps the list fresh;
 // a spec is immutable per version so it doesn't need polling).
-function RuntimeDetail({
-  id,
-  workspace,
-  onBack,
-  onNavigate,
-}: {
-  id: string
-  workspace: string
-  onBack: () => void
-  onNavigate: () => void
-}) {
+function RuntimeDetail({ id, onBack }: { id: string; onBack: () => void }) {
   const t = useTranslations('infraPanel')
   const [detail, setDetail] = useState<{ summary: RuntimeSummary; spec?: RuntimeSpec } | null>(null)
   const [missing, setMissing] = useState(false)
@@ -245,11 +226,7 @@ function RuntimeDetail({
   const spec = detail?.spec
   return (
     <div className="space-y-3 px-3.5 py-3">
-      <DetailNav
-        onBack={onBack}
-        fullHref={`/${workspace}/runtimes/${encodeURIComponent(id)}`}
-        onNavigate={onNavigate}
-      />
+      <DetailNav onBack={onBack} />
       <div className="flex flex-wrap items-center gap-2">
         <Server className="size-4 shrink-0 text-[#6ec6a8]" />
         <span className="min-w-0 truncate text-[13px] font-[560]">{id}</span>
@@ -323,16 +300,12 @@ function RunnerDetail({
   id,
   meta,
   loading,
-  workspace,
   onBack,
-  onNavigate,
 }: {
   id: string
   meta: RunnerMeta | undefined
   loading: boolean
-  workspace: string
   onBack: () => void
-  onNavigate: () => void
 }) {
   const t = useTranslations('infraPanel')
   const { openRun } = useInfraPanel()
@@ -367,11 +340,7 @@ function RunnerDetail({
   const online = isOnline(meta?.lastSeenAt)
   return (
     <div className="space-y-3 px-3.5 py-3">
-      <DetailNav
-        onBack={onBack}
-        fullHref={`/${workspace}/runtimes/self/${encodeURIComponent(id)}`}
-        onNavigate={onNavigate}
-      />
+      <DetailNav onBack={onBack} />
       <div className="flex flex-wrap items-center gap-2">
         <Laptop className="size-4 shrink-0 text-[#6ec6a8]" />
         <span className="min-w-0 truncate text-[13px] font-[560]">{meta?.label ?? id}</span>

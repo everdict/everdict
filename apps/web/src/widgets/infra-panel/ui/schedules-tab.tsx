@@ -171,7 +171,7 @@ function ScheduleDetail({
   if (!s)
     return (
       <div className="space-y-3 px-3.5 py-3">
-        <DetailNav onBack={onBack} fullHref={`/${workspace}/schedules`} onNavigate={onNavigate} />
+        <DetailNav onBack={onBack} />
         {schedules === null ? (
           <div className="flex items-center justify-center gap-2 py-8 text-[12.5px] text-faint">
             <Loader2 className="size-3.5 animate-spin" /> {t('loading')}
@@ -186,7 +186,7 @@ function ScheduleDetail({
   const runtime = s.runTemplate.runtime
   return (
     <div className="space-y-3 px-3.5 py-3">
-      <DetailNav onBack={onBack} fullHref={`/${workspace}/schedules`} onNavigate={onNavigate} />
+      <DetailNav onBack={onBack} />
       <div className="flex flex-wrap items-center gap-2">
         <CalendarClock className="size-4 shrink-0 text-faint" />
         <span className="min-w-0 truncate text-[13px] font-[560]">{s.name}</span>

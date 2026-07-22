@@ -69,13 +69,13 @@ near-black `#08090a` dark surface). Light+dark via the `.dark` class (`@custom-v
   `widgets/notification-bell/`), not text links.
 - **Infra split view** (`widgets/infra-panel`): infra concerns (schedules · runtimes · runs · work queue) open
   in the floating right panel toggled by the vertical rail — eval pages stay on the left half, and the sidebar
-  is eval-only (don't re-add runs/schedules/runtimes nav entries; their full pages open from the panel's
-  "full page" links and the palette's infra group via `openTab`). **The two halves navigate independently**:
-  infra entities inside the panel drill in IN-PANEL (per-tab detail state in the provider + `DetailNav`,
-  `openRun`/`openRuntime`/`openSchedule`) — never `Link` an infra entity to the left router from panel UI;
-  only "full page" escape hatches and eval-axis entities (scorecards) may navigate left. To show a run live
-  from any page, call `useInfraPanel().openRun(id)`; don't build per-page live viewers or re-dock the panel
-  as a flush column.
+  is eval-only (don't re-add runs/schedules/runtimes nav entries; the palette's infra group opens the panel
+  via `openTab`). **The two halves navigate independently and the panel is self-sufficient**: infra entities
+  drill in IN-PANEL (per-tab detail state in the provider + `DetailNav`, `openRun`/`openRuntime`/
+  `openSchedule`) — never `Link` an infra entity to the left router from panel UI, and don't add "full page"
+  links (user decision: the panel shows the full content itself; routed infra pages are URL-reachable only).
+  Only eval-axis entities (scorecards) may navigate left. To show a run live from any page, call
+  `useInfraPanel().openRun(id)`; don't build per-page live viewers or re-dock the panel as a flush column.
 - **Secret-name inputs** are never free text — use `SecretPicker` from `features/pick-secret`
   (combobox over preloaded names + "new" inline create; `defaultMultiline` for PEM/kubeconfig).
   Used by harness env, GHE App private key, Mattermost tokens.

@@ -1,16 +1,7 @@
 'use client'
 
 import { useCallback } from 'react'
-import Link from 'next/link'
-import {
-  Activity,
-  ArrowUpRight,
-  CalendarClock,
-  ChevronsRight,
-  Play,
-  Server,
-  type LucideIcon,
-} from 'lucide-react'
+import { Activity, CalendarClock, ChevronsRight, Play, Server, type LucideIcon } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
 import { cn } from '@/shared/lib/utils'
@@ -26,17 +17,19 @@ import { WorkTab } from './work-tab'
 // card with a gap, rounded corners and a pop shadow instead of a flush docked column. On mobile it is a
 // floating right-hand sheet over a light scrim. Mounted in the shell (not the route), so left-side navigation
 // never unmounts it — a selected run's live stream keeps playing.
+// The panel is SELF-SUFFICIENT: infra content shows its full content here (no "full page" escape hatch — the
+// user runs the two halves independently; routed infra pages remain URL-reachable only).
 
-const TAB_META: Record<InfraTab, { icon: LucideIcon; href?: string }> = {
-  schedules: { icon: CalendarClock, href: '/schedules' },
-  runtimes: { icon: Server, href: '/runtimes' },
-  runs: { icon: Play, href: '/runs' },
+const TAB_META: Record<InfraTab, { icon: LucideIcon }> = {
+  schedules: { icon: CalendarClock },
+  runtimes: { icon: Server },
+  runs: { icon: Play },
   work: { icon: Activity },
 }
 
 export function InfraPanel() {
   const t = useTranslations('infraPanel')
-  const { open, tab, close, workspace, selectedRunId } = useInfraPanel()
+  const { open, tab, close, selectedRunId } = useInfraPanel()
 
   // Close on navigation only when a mobile overlay (the md+ split keeps the detail beside it = a persistent panel).
   const onNavigate = useCallback(() => {
@@ -46,7 +39,7 @@ export function InfraPanel() {
   }, [close])
 
   if (!open) return null
-  const { icon: Icon, href } = TAB_META[tab]
+  const { icon: Icon } = TAB_META[tab]
   // The runs tab stays mounted across tab switches while a run is selected — its live log/screen polling
   // must not restart just because the user peeked at another tab.
   const keepRunsMounted = selectedRunId !== null
@@ -79,35 +72,23 @@ export function InfraPanel() {
                 {t(`tab_${tab}`)}
               </h2>
             </div>
-            <div className="flex shrink-0 items-center gap-0.5">
-              {href && (
-                <Link
-                  href={`/${workspace}${href}`}
-                  onClick={onNavigate}
-                  className="inline-flex h-7 items-center gap-1 rounded-md px-1.5 text-[11.5px] font-[510] text-muted-foreground hover:bg-accent hover:text-foreground"
-                >
-                  {t('fullPage')}
-                  <ArrowUpRight className="size-3.5" />
-                </Link>
-              )}
-              <button
-                type="button"
-                aria-label={t('collapse')}
-                onClick={close}
-                className="grid size-7 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
-              >
-                <ChevronsRight className="size-4" />
-              </button>
-            </div>
+            <button
+              type="button"
+              aria-label={t('collapse')}
+              onClick={close}
+              className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+            >
+              <ChevronsRight className="size-4" />
+            </button>
           </div>
 
           <div className="min-h-0 flex-1 overflow-y-auto">
             {tab === 'work' && <WorkTab onNavigate={onNavigate} />}
             {tab === 'schedules' && <SchedulesTab onNavigate={onNavigate} />}
-            {tab === 'runtimes' && <RuntimesTab onNavigate={onNavigate} />}
+            {tab === 'runtimes' && <RuntimesTab />}
             {(tab === 'runs' || keepRunsMounted) && (
               <div className={tab === 'runs' ? undefined : 'hidden'}>
-                <RunsTab onNavigate={onNavigate} />
+                <RunsTab />
               </div>
             )}
           </div>

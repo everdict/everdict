@@ -2777,7 +2777,6 @@
     "tab_runs": "실행",
     "tab_work": "작업",
     "collapse": "패널 접기",
-    "fullPage": "전체 보기",
     "loading": "불러오는 중…",
     "backToList": "목록",
     "activeRuns": "진행 중",
@@ -2822,7 +2821,8 @@
     "trialsLabel": "시행 수",
     "lastFiredLabel": "마지막 실행",
     "nextFiresLabel": "다음 실행",
-    "lastScorecard": "마지막 스코어카드 보기"
+    "lastScorecard": "마지막 스코어카드 보기",
+    "scoresLabel": "점수"
   },
   "workspaceSettings": {
     "meterUsage": "사용량 계측",

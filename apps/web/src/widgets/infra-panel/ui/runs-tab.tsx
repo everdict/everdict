@@ -7,12 +7,15 @@ import { useTranslations } from 'next-intl'
 import { LiveLogs } from '@/widgets/live-logs'
 import { LiveScreen } from '@/widgets/sandbox-terminal'
 import { runsSchema, type Run } from '@/entities/run'
-import { fmtDateTime, fmtDateTimeFull } from '@/shared/lib/format'
+import { fmtDateTime, fmtDateTimeFull, fmtScoreDetail } from '@/shared/lib/format'
+import { Badge } from '@/shared/ui/badge'
+import { Callout } from '@/shared/ui/callout'
 import { EntityRef } from '@/shared/ui/chip'
+import { MetricLabel } from '@/shared/ui/metric-label'
 import { StatusIcon, StatusPill } from '@/shared/ui/status-pill'
 
 import { useInfraPanel } from '../model/infra-panel-context'
-import { DetailNav } from './panel-bits'
+import { DetailNav, SectionLabel } from './panel-bits'
 
 // Runs tab — the live half of the split view. Without a selection: the execution feed (active first, then the
 // latest settled). Selecting a run swaps in its uninterrupted live view (screen frames + log tail) right here in
@@ -24,9 +27,9 @@ const LIST_CAP = 15
 
 const ACTIVE = new Set(['queued', 'running'])
 
-export function RunsTab({ onNavigate }: { onNavigate: () => void }) {
+export function RunsTab() {
   const t = useTranslations('infraPanel')
-  const { workspace, selectedRunId, selectRun } = useInfraPanel()
+  const { selectedRunId, selectRun } = useInfraPanel()
   const [runs, setRuns] = useState<Run[] | null>(null)
 
   // Poll the execution feed (scope=all folds in scorecard children — those are the runs worth watching live).
@@ -67,13 +70,10 @@ export function RunsTab({ onNavigate }: { onNavigate: () => void }) {
 
   if (selectedRunId) {
     const selected = runs?.find((r) => r.id === selectedRunId)
+    const scores = selected?.result?.scores ?? []
     return (
       <div className="space-y-3 px-3.5 py-3">
-        <DetailNav
-          onBack={() => selectRun(null)}
-          fullHref={`/${workspace}/runs/${encodeURIComponent(selectedRunId)}`}
-          onNavigate={onNavigate}
-        />
+        <DetailNav onBack={() => selectRun(null)} />
 
         <div className="flex flex-wrap items-center gap-2">
           {selected && <StatusPill status={selected.status} />}
@@ -91,10 +91,55 @@ export function RunsTab({ onNavigate }: { onNavigate: () => void }) {
           </span>
         </div>
 
+        {selected?.error && (
+          <Callout tone="danger" className="px-2.5 py-2 text-[12px]">
+            <span className="font-mono">{selected.error.code}</span> {selected.error.message}
+          </Callout>
+        )}
+
         {/* Live stream — the widgets poll the BFF themselves and stop on a terminal status. initialStatus falls
             back to running when the feed hasn't listed this run yet (openRun from a left page), so polling starts. */}
         <LiveScreen runId={selectedRunId} initialStatus={selected?.status ?? 'running'} />
         <LiveLogs runId={selectedRunId} initialStatus={selected?.status ?? 'running'} />
+
+        {/* Verdict — per-metric scores once graded (the panel shows the full run content; there is no full-page hop). */}
+        {scores.length > 0 && (
+          <section className="space-y-1">
+            <SectionLabel count={scores.length}>{t('scoresLabel')}</SectionLabel>
+            <div className="space-y-1">
+              {scores.map((s) => {
+                const detailText = fmtScoreDetail(s.detail)
+                return (
+                  <div
+                    key={`${s.graderId}:${s.metric}`}
+                    className="rounded-md border bg-card px-2.5 py-1.5"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="min-w-0 truncate text-[11.5px] text-muted-foreground">
+                        <MetricLabel metric={s.metric} siblings={scores.map((x) => x.metric)} />
+                      </span>
+                      <span className="flex shrink-0 items-center gap-1.5">
+                        <span className="font-mono text-[12px] font-[560] tabular-nums">
+                          {s.value}
+                        </span>
+                        {s.pass != null && (
+                          <Badge tone={s.pass ? 'success' : 'danger'}>
+                            {s.pass ? 'pass' : 'fail'}
+                          </Badge>
+                        )}
+                      </span>
+                    </div>
+                    {detailText && (
+                      <p className="mt-1 line-clamp-3 text-[11px] leading-relaxed text-muted-foreground">
+                        {detailText}
+                      </p>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          </section>
+        )}
       </div>
     )
   }

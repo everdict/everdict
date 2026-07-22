@@ -2777,7 +2777,6 @@
     "tab_runs": "Runs",
     "tab_work": "Work",
     "collapse": "Collapse panel",
-    "fullPage": "Full page",
     "loading": "Loading…",
     "backToList": "Back",
     "activeRuns": "Active",
@@ -2822,7 +2821,8 @@
     "trialsLabel": "Trials",
     "lastFiredLabel": "Last fired",
     "nextFiresLabel": "Next fires",
-    "lastScorecard": "View last scorecard"
+    "lastScorecard": "View last scorecard",
+    "scoresLabel": "Scores"
   },
   "workspaceSettings": {
     "meterUsage": "Meter usage",

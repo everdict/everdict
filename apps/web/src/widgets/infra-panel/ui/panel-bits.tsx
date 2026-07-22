@@ -1,26 +1,17 @@
 'use client'
 
 import type { ReactNode } from 'react'
-import Link from 'next/link'
-import { ArrowUpRight, ChevronLeft } from 'lucide-react'
+import { ChevronLeft } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
 // Shared scaffolding for the panel's OWN navigation — infra drill-ins (runtime / runner / schedule / live run)
-// open inside the panel, so every detail view gets the same back row. The optional "full page" link is the one
-// deliberate left-router escape hatch of a drill-in; everything else navigates in place.
+// open inside the panel, so every detail view gets the same back row. There is deliberately NO "full page"
+// link: the panel shows the full content itself and never routes the left half to an infra page.
 
-export function DetailNav({
-  onBack,
-  fullHref,
-  onNavigate,
-}: {
-  onBack: () => void
-  fullHref?: string
-  onNavigate: () => void
-}) {
+export function DetailNav({ onBack }: { onBack: () => void }) {
   const t = useTranslations('infraPanel')
   return (
-    <div className="flex items-center justify-between gap-2">
+    <div className="flex items-center gap-2">
       <button
         type="button"
         onClick={onBack}
@@ -29,16 +20,6 @@ export function DetailNav({
         <ChevronLeft className="size-3.5" />
         {t('backToList')}
       </button>
-      {fullHref && (
-        <Link
-          href={fullHref}
-          onClick={onNavigate}
-          className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md px-1.5 text-[11.5px] font-[510] text-muted-foreground hover:bg-accent hover:text-foreground"
-        >
-          {t('fullPage')}
-          <ArrowUpRight className="size-3.5" />
-        </Link>
-      )}
     </div>
   )
 }

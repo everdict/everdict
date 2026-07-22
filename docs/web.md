@@ -72,9 +72,9 @@ panel/list guidance is not.
   the workspaces I belong to (= navigate to `/{id}`; the first URL segment is the authority for the active workspace, the middleware syncs the cookie) + **new workspace**
   (`/new-workspace` → `create-workspace`, the creator is admin). The list and active workspace are authoritative from `GET /me.workspaces`. See `docs/tenancy.md`.
 - **Overview `/{workspace}`** — scorecard stat cards (total / success / fail / pass-rate) + recent runs + harness summary.
-- **Runs `/{workspace}/runs`** — full runs table (rows link to detail). Like schedules/runtimes, not a sidebar
-  entry — the sidebar is the eval half; infra full pages open from the infra panel's "full page" links or the
-  palette's infra group.
+- **Runs `/{workspace}/runs`** — full runs table (rows link to detail). Like schedules/runtimes, not linked
+  from the UI at all — the infra panel is THE surface for infra concerns (sidebar is eval-only, the palette's
+  infra group opens the panel); the route remains URL-reachable only.
 - **Run detail `/{workspace}/runs/[id]`** — status, meta, scores, **trace timeline**, snapshot, error.
 - **Harnesses `/{workspace}/harnesses`** — owned vs `_shared` harnesses with versions. **Detail
   `/{workspace}/harnesses/[id]`** shows the active version's **Config panel** — the raw, editable config
@@ -110,10 +110,11 @@ panel/list guidance is not.
   pop-shadow card — not a flush docked column) as a flex sibling of `main`, so the two sides split the space
   half-and-half on md+; on mobile the rail floats on the right edge and the panel becomes a floating sheet.
   Panel state + polling live in `InfraPanelProvider` in the shell (above the routes), so left-side navigation
-  never unmounts it. **The panel navigates itself**: infra drill-ins (runtime · runner · schedule · live run)
-  open IN-PANEL (per-tab detail state in the provider, `DetailNav` back row), never via the left router — the
-  two halves have independent navigation. The only left-bound links inside the panel are the deliberate
-  "full page" escape hatches and eval-axis entities (scorecards). Tabs: **work** — the queue snapshot:
+  never unmounts it. **The panel navigates itself and is self-sufficient**: infra drill-ins (runtime · runner ·
+  schedule · live run) open IN-PANEL (per-tab detail state in the provider, `DetailNav` back row), never via
+  the left router — the two halves have fully independent navigation, and there is deliberately NO "full page"
+  link (the panel shows the full content itself; routed infra pages stay URL-reachable only). The only
+  left-bound links inside the panel are eval-axis entities (scorecards). Tabs: **work** — the queue snapshot:
   per-runtime lanes (default backend · registered
   runtimes · `self:<runner>`) each showing running (batch = case-progress bar), waiting (FIFO, first badged
   'Next') and next-scheduled fires, from `GET /queue` (`runs:read`; MCP parity `get_queue`; see

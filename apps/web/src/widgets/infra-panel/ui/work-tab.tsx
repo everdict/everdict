@@ -431,7 +431,7 @@ function Totals({ totals }: { totals: QueueSnapshot['totals'] }) {
 
 export function WorkTab({ onNavigate }: { onNavigate: () => void }) {
   const t = useTranslations('workPanel')
-  const { snapshot, authors, workspace } = useInfraPanel()
+  const { snapshot, authors, workspace, openTab } = useInfraPanel()
 
   const active = (snapshot?.totals.running ?? 0) + (snapshot?.totals.queued ?? 0)
 
@@ -486,13 +486,14 @@ export function WorkTab({ onNavigate }: { onNavigate: () => void }) {
               <p className="text-[11.5px] text-faint">
                 {t.rich('personalEmpty', {
                   link: (chunks) => (
-                    <Link
-                      href={`/${workspace}/runtimes`}
-                      onClick={onNavigate}
+                    // 인프라 링크는 왼쪽 라우터가 아니라 패널 안 런타임 탭으로 — 좌우 내비게이션 독립.
+                    <button
+                      type="button"
+                      onClick={() => openTab('runtimes')}
                       className="text-link hover:underline"
                     >
                       {chunks}
-                    </Link>
+                    </button>
                   ),
                 })}
               </p>
