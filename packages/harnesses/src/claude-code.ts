@@ -4,6 +4,7 @@ import { mapClaudeStreamJson } from "./stream-json.js";
 export interface ClaudeCodeOptions {
   install?: boolean; // If true, npm-install the CLI into compute (e.g. a sandbox job). LocalDriver uses claude from PATH.
   workDir?: string;
+  clock?: () => number; // Event-time source; defaults to the wall clock (`Date.now`). Injected for deterministic tests.
 }
 
 // The real Claude Code adapter. Runs `claude -p ... --output-format stream-json` inside compute (the sandbox)
@@ -28,8 +29,10 @@ export class ClaudeCodeHarness implements EvaluableHarness {
     const cmd = `claude -p ${shq(task)} --output-format stream-json --verbose --dangerously-skip-permissions`;
     const res = await compute.exec(cmd, { cwd, env, timeoutSec: ctx.timeoutSec });
 
-    let t = 0;
-    const nextT = () => t++;
+    // Stamp real wall-clock event times so the trace aligns to the recording timeline and the latency
+    // grader reflects real elapsed time — a synthetic counter made every Claude Code run's latency ≈ the
+    // event count (docs/architecture/replay.md D1).
+    const now = this.opts.clock ?? (() => Date.now());
     for (const line of res.stdout.split("\n")) {
       const trimmed = line.trim();
       if (!trimmed) continue;
@@ -39,7 +42,7 @@ export class ClaudeCodeHarness implements EvaluableHarness {
       } catch {
         continue;
       }
-      for (const ev of mapClaudeStreamJson(obj, nextT)) yield ev;
+      for (const ev of mapClaudeStreamJson(obj, now)) yield ev;
     }
   }
 }

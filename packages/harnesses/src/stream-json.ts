@@ -12,8 +12,10 @@ function num(v: unknown): number | undefined {
 }
 
 // Converts one line (JSON object) of Claude Code `--output-format stream-json --verbose`
-// into normalized TraceEvent[]. Reusable by any stream-json harness.
-export function mapClaudeStreamJson(obj: unknown, nextT: () => number): TraceEvent[] {
+// into normalized TraceEvent[]. Reusable by any stream-json harness. `now` is the event-time source:
+// the real wall clock in production (so the trace aligns to the recording timeline and the latency grader
+// reflects real elapsed time — see docs/architecture/replay.md D1); tests inject a deterministic one.
+export function mapClaudeStreamJson(obj: unknown, now: () => number): TraceEvent[] {
   const o = rec(obj);
   if (!o) return [];
   const out: TraceEvent[] = [];
@@ -27,15 +29,15 @@ export function mapClaudeStreamJson(obj: unknown, nextT: () => number): TraceEve
       if (!part) continue;
       const pt = str(part.type);
       if (pt === "text") {
-        out.push({ t: nextT(), kind: "message", role: "assistant", text: str(part.text) });
+        out.push({ t: now(), kind: "message", role: "assistant", text: str(part.text) });
       } else if (pt === "tool_use") {
-        out.push({ t: nextT(), kind: "tool_call", id: str(part.id), name: str(part.name), args: part.input });
+        out.push({ t: now(), kind: "tool_call", id: str(part.id), name: str(part.name), args: part.input });
       }
     }
     const usage = msg ? rec(msg.usage) : null;
     if (usage) {
       out.push({
-        t: nextT(),
+        t: now(),
         kind: "llm_call",
         model: msg ? str(msg.model) : "",
         cost: { inputTokens: num(usage.input_tokens) ?? 0, outputTokens: num(usage.output_tokens) ?? 0, usd: 0 },
@@ -48,7 +50,7 @@ export function mapClaudeStreamJson(obj: unknown, nextT: () => number): TraceEve
       const part = rec(partU);
       if (!part || str(part.type) !== "tool_result") continue;
       out.push({
-        t: nextT(),
+        t: now(),
         kind: "tool_result",
         id: str(part.tool_use_id),
         ok: part.is_error !== true,
@@ -58,7 +60,7 @@ export function mapClaudeStreamJson(obj: unknown, nextT: () => number): TraceEve
   } else if (type === "result") {
     const usd = num(o.total_cost_usd);
     if (usd !== undefined) {
-      out.push({ t: nextT(), kind: "llm_call", model: "aggregate", cost: { inputTokens: 0, outputTokens: 0, usd } });
+      out.push({ t: now(), kind: "llm_call", model: "aggregate", cost: { inputTokens: 0, outputTokens: 0, usd } });
     }
   }
   return out;

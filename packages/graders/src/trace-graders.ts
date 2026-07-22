@@ -21,7 +21,8 @@ export const costGrader: Grader = {
   },
 };
 
-// ⓒ Latency — logical time from trace start to end.
+// ⓒ Latency — wall-clock ms from the first trace event to the last (real elapsed once harnesses stamp
+// real time; a synthetic counter made this ≈ the event count — see docs/architecture/replay.md D1).
 export const latencyGrader: Grader = {
   id: "latency",
   async grade(ctx: GradeContext): Promise<Score> {
