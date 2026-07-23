@@ -2835,6 +2835,8 @@
     "send": "보내기",
     "thinking": "생각 중…",
     "back": "대화 목록으로",
+    "delete": "대화 삭제",
+    "confirmDelete": "이 대화를 삭제할까요?",
     "errorSend": "메시지를 보내지 못했어요. 다시 시도해 주세요.",
     "errorGeneric": "문제가 발생했어요."
   },

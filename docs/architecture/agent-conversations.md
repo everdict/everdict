@@ -97,9 +97,17 @@ i18n `agentChat` namespace in `messages/{en,ko}.json`.
 - **P4** — web: infra-panel `agent` tab + `features/agent-chat` + BFF proxy (`/api/agent/*`, `AGENT_URL`) + i18n. ✅
 - **P5** — automated gates green (turbo typecheck+test 70/70 · cone · web-imports · web build). ✅
   *Remaining: LIVE e2e against a running stack + a registered workspace model; dev `up.sh` wiring; `ci:local` before push.*
+- **P6 (post-v1 polish, landed)** — session **delete** UI; **live tool activity**: the loop persists each
+  assistant/tool turn as it is produced (`onMessage`) and the web polls `/messages?since=` during a turn, so tool
+  calls/results show live (collapsible rows) rather than only after the turn settles. **Gap pass** vs digo-agent +
+  `workspaces/claude-code` — fixed: tool-only assistant `content:null` (not `""`, which some providers reject),
+  `produced` accumulated on append (compaction-safe, not a tail slice), transient upstream **retry** (429/5xx/network,
+  same model, fixed backoff), tool-output cap 24k→48k chars. (Assessed-but-not-a-bug for this loop's control flow:
+  abort/budget dangling tool_calls — every exit point leaves a balanced transcript; system-anchor loss — the system
+  prompt is re-added each turn, never stored in the compacted array.)
 - **Later** — write-action tools behind HITL (port `permissions`); skills for harness-review / scorecard-triage;
   autonomous scheduled sweeps (runtime monitor → propose/trigger evals); findings → comments + Mattermost;
-  SSE token streaming in the web panel (replace request/response-per-turn).
+  SSE token streaming (replace polling); a fallback model + prompt caching; parallel independent tool calls.
 
 ## Running it (dev)
 

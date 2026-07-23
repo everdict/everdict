@@ -2835,6 +2835,8 @@
     "send": "Send",
     "thinking": "Thinking…",
     "back": "Back to conversations",
+    "delete": "Delete conversation",
+    "confirmDelete": "Delete this conversation?",
     "errorSend": "Couldn’t send the message. Try again.",
     "errorGeneric": "Something went wrong."
   },
