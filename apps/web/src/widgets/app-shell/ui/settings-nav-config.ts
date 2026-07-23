@@ -1,4 +1,5 @@
 import {
+  BookOpen,
   Building2,
   Cpu,
   Fingerprint,
@@ -65,6 +66,7 @@ export const SETTINGS_NAV_GROUPS: SettingsNavGroup[] = [
       { href: '/secrets', labelKey: 'secrets', icon: Shield, requiredAction: 'secrets:read' },
       { href: '/models', labelKey: 'models', icon: Cpu, requiredAction: 'models:read' },
       { href: '/agent', labelKey: 'agent', icon: Sparkles, requiredAction: 'agents:read' },
+      { href: '/skills', labelKey: 'skills', icon: BookOpen, requiredAction: 'skills:read' },
       {
         href: '/integrations',
         labelKey: 'integrations',
