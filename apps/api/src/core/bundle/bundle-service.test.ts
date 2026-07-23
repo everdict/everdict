@@ -9,7 +9,6 @@ import {
   InMemoryRubricRegistry,
 } from "@everdict/registry";
 import { describe, expect, it } from "vitest";
-import { BenchmarkService } from "../benchmark/benchmark-service.js";
 import { BundleSchema, BundleService, requiredActionsForBundle } from "./bundle-service.js";
 
 const DATASET = {
@@ -105,10 +104,7 @@ describe("examples/bundles/codex-pinch bundle (artifact guard)", () => {
       harnessTemplates: templates,
       harnessInstances: new InMemoryHarnessInstanceRegistry(templates),
       datasets: new InMemoryDatasetRegistry(),
-      benchmarks: new BenchmarkService({
-        datasets: new InMemoryDatasetRegistry(),
-        benchmarks: new InMemoryBenchmarkRegistry(),
-      }),
+      benchmarks: new InMemoryBenchmarkRegistry(),
     });
     const res = await svc.apply("acme", "u", parsed);
     expect(res.results.every((r) => r.status === "ok")).toBe(true); // codex template+instance + pinch recipe + sample dataset

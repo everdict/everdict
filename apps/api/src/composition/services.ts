@@ -103,7 +103,7 @@ export function buildCatalog(deps: {
   const bundleService = new BundleService({
     harnessTemplates: harnessTemplateRegistry,
     harnessInstances: harnessInstanceRegistry,
-    benchmarks: benchmarkService,
+    benchmarks: benchmarkRegistry,
     datasets: datasetRegistry,
     judges: judgeRegistry,
     rubrics: rubricRegistry,

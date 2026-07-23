@@ -8,7 +8,6 @@ import {
   storageStateDomains,
   storageStateExpiry,
 } from "@everdict/topology";
-import type { BrowserSessionService } from "../browser-session/browser-session-service.js";
 
 // The profile ⇄ session bridge (browser-profiles). Two inverse operations. The profile is gated by the same rule as
 // BrowserProfileService management: a `private` profile is creator-only (a non-creator 404s — invisible, no admin
@@ -21,7 +20,9 @@ import type { BrowserSessionService } from "../browser-session/browser-session-s
 //                      is lighter. The decrypted blob stays server-side (only the domains to re-visit are returned).
 export interface BrowserProfileCaptureServiceDeps {
   store: BrowserProfileStore;
-  sessions: BrowserSessionService;
+  // The interactive session's reachable CDP base — an injected callback, NOT the peer BrowserSessionService (a core
+  // service must not call another core service; cross-resource data arrives via a callback/store/registry).
+  resolveCdpBase: (sessionId: string, subject: string) => string | undefined;
   cipher: SecretCipher;
   capture?: (cdpBase: string) => Promise<StorageState>; // injectable (tests); default = real CDP capture
   seed?: (cdpBase: string, state: StorageState) => Promise<void>; // injectable (tests); default = real CDP seed
@@ -86,7 +87,7 @@ export class BrowserProfileCaptureService {
         "Only the profile's creator or a workspace admin can manage this shared browser profile.",
       );
     }
-    const cdpBase = this.deps.sessions.cdpBaseFor(cmd.sessionId, cmd.subject);
+    const cdpBase = this.deps.resolveCdpBase(cmd.sessionId, cmd.subject);
     if (!cdpBase)
       throw new BadRequestError(
         "BAD_REQUEST",

@@ -54,7 +54,7 @@ async function setup() {
   const session = await sessions.create({ tenant: "acme", createdBy: "alice" });
   const capture = new BrowserProfileCaptureService({
     store,
-    sessions,
+    resolveCdpBase: (id, subject) => sessions.cdpBaseFor(id, subject),
     cipher: fakeCipher,
     capture: async () => STATE,
     now: () => "2026-07-16T12:00:00.000Z",
@@ -89,7 +89,7 @@ describe("BrowserProfileCaptureService", () => {
     const { store, sessions, session } = await setup();
     const capture = new BrowserProfileCaptureService({
       store,
-      sessions,
+      resolveCdpBase: (id, subject) => sessions.cdpBaseFor(id, subject),
       cipher: fakeCipher,
       // one session cookie (no expiry) + two persistent cookies — the earliest of the two is the profile's expiry
       capture: async () => ({
@@ -164,7 +164,7 @@ describe("BrowserProfileCaptureService", () => {
     const session = await sessions.create({ tenant: "acme", createdBy: "mallory" }); // mallory's own session
     const capture = new BrowserProfileCaptureService({
       store,
-      sessions,
+      resolveCdpBase: (id, subject) => sessions.cdpBaseFor(id, subject),
       cipher: fakeCipher,
       capture: async () => STATE,
     });
@@ -186,7 +186,7 @@ describe("BrowserProfileCaptureService", () => {
     await sessions.create({ tenant: "acme", createdBy: "admin" }); // the admin's own live session
     const capture = new BrowserProfileCaptureService({
       store,
-      sessions,
+      resolveCdpBase: (id, subject) => sessions.cdpBaseFor(id, subject),
       cipher: fakeCipher,
       capture: async () => STATE,
       now: () => "2026-07-16T12:00:00.000Z",
@@ -218,7 +218,7 @@ describe("BrowserProfileCaptureService", () => {
     const seeded: StorageState[] = [];
     const capture = new BrowserProfileCaptureService({
       store,
-      sessions,
+      resolveCdpBase: (id, subject) => sessions.cdpBaseFor(id, subject),
       cipher: fakeCipher,
       seed: async (_cdpBase, state) => {
         seeded.push(state);
@@ -253,7 +253,11 @@ describe("BrowserProfileCaptureService", () => {
     await store.create(profileRecord("prof-1", "acme", "alice", "workspace")); // shared, created by alice
     const sessions = new BrowserSessionService(fakeProvisioner, { newId: () => "sess-1" });
     const session = await sessions.create({ tenant: "acme", createdBy: "mallory" }); // mallory's own session
-    const capture = new BrowserProfileCaptureService({ store, sessions, cipher: fakeCipher });
+    const capture = new BrowserProfileCaptureService({
+      store,
+      resolveCdpBase: (id, subject) => sessions.cdpBaseFor(id, subject),
+      cipher: fakeCipher,
+    });
     await expect(
       capture.restoreInto({
         tenant: "acme",

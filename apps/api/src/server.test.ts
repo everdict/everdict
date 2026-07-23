@@ -189,9 +189,10 @@ function server(
     new InMemoryWorkspaceInviteStore(workspaceStore),
     new InMemoryUserProfileStore(),
   );
+  const benchmarkRegistry = new InMemoryBenchmarkRegistry();
   const benchmarkService = new BenchmarkService({
     datasets: datasetRegistry,
-    benchmarks: new InMemoryBenchmarkRegistry(),
+    benchmarks: benchmarkRegistry,
   });
   const harnessTemplates = new InMemoryHarnessTemplateRegistry();
   const harnessInstances = new InMemoryHarnessInstanceRegistry(harnessTemplates);
@@ -199,7 +200,7 @@ function server(
   const bundleService = new BundleService({
     harnessTemplates,
     harnessInstances,
-    benchmarks: benchmarkService,
+    benchmarks: benchmarkRegistry,
     datasets: datasetRegistry,
     judges: judgeRegistry,
     runtimes: runtimeRegistry,

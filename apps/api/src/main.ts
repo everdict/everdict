@@ -363,7 +363,11 @@ async function main(): Promise<void> {
   // Capture a session login into a profile (browser-profiles S3) — only when interactive sessions exist (it needs
   // a session's reachable CDP base). Encrypts the storageState blob with the shared at-rest cipher.
   const browserProfileCaptureService = browserSessionService
-    ? new BrowserProfileCaptureService({ store: browserProfileStore, sessions: browserSessionService, cipher })
+    ? new BrowserProfileCaptureService({
+        store: browserProfileStore,
+        resolveCdpBase: (sessionId, subject) => browserSessionService.cdpBaseFor(sessionId, subject),
+        cipher,
+      })
     : undefined;
   const app = buildServer({
     terminalTickets,

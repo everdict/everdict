@@ -11,6 +11,7 @@ import {
 } from "@everdict/contracts";
 import { BenchmarkAdapterSpecSchema } from "@everdict/datasets";
 import type {
+  BenchmarkRegistry,
   DatasetRegistry,
   HarnessInstanceRegistry,
   HarnessTemplateRegistry,
@@ -20,7 +21,6 @@ import type {
   RuntimeRegistry,
 } from "@everdict/registry";
 import { z } from "zod";
-import type { BenchmarkService } from "../benchmark/benchmark-service.js";
 
 // Bundle — a manifest of existing specs scattered across registries (harness+benchmark+dataset+runtime+judge/model).
 // "specializations are bundles" principle: specific harnesses/benchmarks like codex+pinch are registered via this bundle (pure data) — core unchanged.
@@ -73,7 +73,7 @@ export function requiredActionsForBundle(bundle: Bundle): Action[] {
 export interface BundleServiceDeps {
   harnessTemplates?: HarnessTemplateRegistry;
   harnessInstances?: HarnessInstanceRegistry;
-  benchmarks?: BenchmarkService; // recipe registration (BenchmarkService.registerRecipe)
+  benchmarks?: BenchmarkRegistry; // recipe registration — registry-direct, like every other section (no peer-service hop)
   datasets?: DatasetRegistry;
   judges?: JudgeRegistry;
   rubrics?: RubricRegistry;
@@ -133,11 +133,7 @@ export class BundleService {
     await applySection(
       "benchmark-recipe",
       bundle.benchmarkRecipes,
-      benchmarks
-        ? async (s) => {
-            await benchmarks.registerRecipe(tenant, s);
-          }
-        : undefined,
+      benchmarks ? (s) => benchmarks.register(tenant, s) : undefined,
       results,
     );
     await applySection(
