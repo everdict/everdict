@@ -1,4 +1,4 @@
-import type { EnvSnapshot, ServiceHarnessSpec, TrustZone } from "@everdict/contracts";
+import type { EnvSnapshot, ServiceHarnessSpec, StoreReadQuery, TrustZone } from "@everdict/contracts";
 import type { StoreSeedPlan } from "./store-seed.js";
 
 // warm topology handle: service name → base URL (front-door etc.).
@@ -32,4 +32,8 @@ export interface TopologyRuntime {
   // Optional: only runtimes that can exec into their stores implement it — a case with fixtures on a runtime without it
   // fails the run (the required world-state can't be established). docs/architecture/dependency-store-roles.md P2.
   seedFixtures?(spec: ServiceHarnessSpec, runId: string, plans: StoreSeedPlan[], zone?: TrustZone): Promise<void>;
+  // Read a data store's post-run isolation slice for store-state grading (P2) — the co-located read the grader can't do
+  // itself (an internal store URL is unreachable from a remote grader). Resolves (store, role) → slice and runs the
+  // query there, returning stdout. Optional: only store-exec-capable runtimes implement it.
+  readStoreState?(spec: ServiceHarnessSpec, runId: string, query: StoreReadQuery, zone?: TrustZone): Promise<string>;
 }

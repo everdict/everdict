@@ -4,6 +4,7 @@ import { CommandGrader } from "./command.js";
 import { type Judge, JudgeGrader } from "./judge.js";
 import { ScriptGrader } from "./script-grader.js";
 import { ScriptScoreGrader } from "./script-score.js";
+import { StoreStateGrader } from "./store-state.js";
 import { SweBenchGrader } from "./swe-bench.js";
 import { TestsPassGrader } from "./tests-pass.js";
 import { TextMetricGrader } from "./text-metric.js";
@@ -87,6 +88,16 @@ export function makeGraders(specs: GraderSpec[], opts: { judge?: Judge } = {}): 
       case "answer-match":
         // No expect config → undefined (NOT ""), so the grader can fall back to the case's own `expected` row data.
         return new AnswerMatchGrader(optStr(s.config?.expect), s.config?.mode === "exact" ? "exact" : "contains");
+      case "store-state":
+        // Grade the POST-RUN state of a data store (P2): read the case's slice via ctx.readStore (topology runtime) and
+        // compare to expected. store/query are required data; expect falls back to the case's own `expected`.
+        return new StoreStateGrader({
+          store: String(s.config?.store ?? "postgres"),
+          ...(optStr(s.config?.role) ? { role: optStr(s.config?.role) } : {}),
+          query: String(s.config?.query ?? ""),
+          ...(optStr(s.config?.expect) ? { expect: optStr(s.config?.expect) } : {}),
+          ...(s.config?.mode === "exact" ? { mode: "exact" as const } : {}),
+        });
       case "text-metric":
         // Numeric metric recovered from the agent's printed output (trace:none stdout tail) — pattern/metric are required data.
         return new TextMetricGrader({

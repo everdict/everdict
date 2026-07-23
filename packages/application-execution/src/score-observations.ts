@@ -1,4 +1,13 @@
-import type { ComputeHandle, ComputeSpec, EnvSnapshot, EvalCase, Grader, Score, TraceEvent } from "@everdict/contracts";
+import type {
+  ComputeHandle,
+  ComputeSpec,
+  EnvSnapshot,
+  EvalCase,
+  Grader,
+  Score,
+  StoreReader,
+  TraceEvent,
+} from "@everdict/contracts";
 import { safeGrade } from "./safe-grade.js";
 
 // The observation-scoring use-case — one owner for "score a case against its collected observations
@@ -13,6 +22,7 @@ export interface ScoreObservationsInput {
   graders: Grader[];
   skipComputeBound?: boolean;
   provision?: (spec: ComputeSpec) => Promise<ComputeHandle>; // dedicated grading compute (script grader image mode)
+  readStore?: StoreReader; // read a data store's post-run slice (store-state grading, P2) — from a store-capable runtime
 }
 
 export async function scoreObservations(input: ScoreObservationsInput): Promise<Score[]> {
@@ -25,6 +35,7 @@ export async function scoreObservations(input: ScoreObservationsInput): Promise<
         trace: input.trace,
         snapshot: input.snapshot,
         ...(input.provision ? { provision: input.provision } : {}),
+        ...(input.readStore ? { readStore: input.readStore } : {}),
       })),
     );
   }

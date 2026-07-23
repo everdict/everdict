@@ -34,7 +34,7 @@ const SPEC: ServiceHarnessSpec = {
 // report "already existed" (the cold-start loser's view).
 function fakeDocker(
   runningNames: string[] = [],
-  opts: { networkExists?: boolean } = {},
+  opts: { networkExists?: boolean; captureOut?: string } = {},
 ): {
   docker: Docker;
   runs: DockerRunSpec[];
@@ -42,6 +42,7 @@ function fakeDocker(
   removed: string[];
   rmNets: string[];
   execs: string[][];
+  execCaptures: string[][];
   runningNames: string[];
 } {
   const runs: DockerRunSpec[] = [];
@@ -49,6 +50,7 @@ function fakeDocker(
   const removed: string[] = [];
   const rmNets: string[] = [];
   const execs: string[][] = [];
+  const execCaptures: string[][] = [];
   let nextPort = 49152;
   // Per-name network existence (like the daemon): createNetwork is atomic-exclusive, removeNetwork frees the
   // name. networkExists pre-seeds the MAIN topology network (the cold-start loser's / heal contender's view).
@@ -73,6 +75,10 @@ function fakeDocker(
     async exec(container, cmd) {
       execs.push([container, ...cmd]);
     },
+    async execCapture(container, cmd) {
+      execCaptures.push([container, ...cmd]);
+      return opts.captureOut ?? "";
+    },
     async rm(c) {
       removed.push(...c);
     },
@@ -87,7 +93,7 @@ function fakeDocker(
       return existingNetworks.has(name) ? Date.now() : undefined; // existing = fresh (never stale) in the fake
     },
   };
-  return { docker, runs, networks, removed, rmNets, execs, runningNames };
+  return { docker, runs, networks, removed, rmNets, execs, execCaptures, runningNames };
 }
 
 const okFetch: typeof fetch = (async (url: string) => {
@@ -213,6 +219,29 @@ describe("DockerTopologyRuntime", () => {
     const script = pg?.[pg.length - 1] ?? "";
     expect(script).toContain('CREATE SCHEMA IF NOT EXISTS "run_run1"');
     expect(script).toContain("INSERT INTO t VALUES (1);");
+  });
+
+  it("readStoreState: reads the postgres slice via psql and returns stdout (P2)", async () => {
+    const f = fakeDocker([], { captureOut: "1|alice\n2|bob\n" });
+    const rt = new DockerTopologyRuntime({ docker: f.docker, fetchImpl: okFetch });
+    const spec: ServiceHarnessSpec = {
+      ...SPEC,
+      dependencies: [
+        ...(SPEC.dependencies ?? []),
+        { store: "postgres", role: "world", purpose: "data", isolateBy: "schema" },
+      ],
+    };
+    const out = await rt.readStoreState(spec, "run1", {
+      store: "postgres",
+      role: "world",
+      query: "SELECT id,name FROM t",
+    });
+    expect(out).toBe("1|alice\n2|bob\n");
+    const cap = f.execCaptures.find((e) => e[0] === "everdict-bu-1.0.0-bu-postgres");
+    expect(cap?.[1]).toBe("psql");
+    const script = cap?.[cap.length - 1] ?? "";
+    expect(script).toContain('SET search_path TO "run_run1"');
+    expect(script).toContain("SELECT id,name FROM t");
   });
 
   // Container names are deterministic across processes, so two runners on one host reach the same names.
@@ -412,6 +441,9 @@ describe("DockerTopologyRuntime", () => {
         return 49152;
       },
       async exec() {},
+      async execCapture() {
+        return "";
+      },
       async rm(c) {
         for (const name of c) live.delete(name);
       },
@@ -556,6 +588,9 @@ describe("DockerTopologyRuntime", () => {
       },
       async exec() {
         if (!storeReady) throw new Error("store not accepting yet");
+      },
+      async execCapture() {
+        return "";
       },
       async rm(c) {
         for (const name of c) live.delete(name);

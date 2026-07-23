@@ -1,7 +1,9 @@
 import {
+  BadRequestError,
   type BrowserSnapshot,
   type ServiceHarnessSpec,
   type ServiceReadiness,
+  type StoreReadQuery,
   UpstreamError,
 } from "@everdict/contracts";
 import { type CdpSocket, captureCdpDom, captureCdpScreenshot } from "../front-door/capture-cdp.js";
@@ -12,7 +14,7 @@ import { dependencyInjectEnv } from "./inject-env.js";
 import { interpolateServiceEnv, staticWiringEnv } from "./nomad-topology.js";
 import { aliasPeerHost } from "./peer-resolver.js";
 import { endpointUnreachableError } from "./reachability.js";
-import { type StoreSeedPlan, buildSeedExec } from "./store-seed.js";
+import { type StoreSeedPlan, buildSeedExec, resolveStoreReadSlice } from "./store-seed.js";
 import type { TargetEnvHandle, TopologyHandle, TopologyRuntime } from "./topology-runtime.js";
 
 export interface DockerTopologyRuntimeOptions {
@@ -299,6 +301,31 @@ export class DockerTopologyRuntime implements TopologyRuntime {
       const exec = buildSeedExec(plan);
       await this.docker.exec(`${network}-${storeName(spec, exec.store)}`, exec.argv);
     }
+  }
+
+  // Store-state grading read (P2): resolve the store's per-case slice and run the query there, capturing stdout. The
+  // co-located read the grader can't do remotely; postgres uses tuples-only/unaligned psql for clean scriptable output.
+  async readStoreState(spec: ServiceHarnessSpec, runId: string, query: StoreReadQuery): Promise<string> {
+    const slice = resolveStoreReadSlice(spec.dependencies, query.store, query.role, runId);
+    const cname = `${netName(spec)}-${storeName(spec, query.store)}`;
+    if (query.store === "postgres") {
+      return await this.docker.execCapture(cname, [
+        "psql",
+        "-U",
+        "everdict",
+        "-d",
+        "everdict",
+        "-t",
+        "-A",
+        "-c",
+        `SET search_path TO "${slice}"; ${query.query}`,
+      ]);
+    }
+    throw new BadRequestError(
+      "BAD_REQUEST",
+      { store: query.store },
+      `Reading a "${query.store}" store is not supported yet (postgres only for now).`,
+    );
   }
 
   async provisionBrowserEnv(spec: ServiceHarnessSpec, runId: string): Promise<TargetEnvHandle> {

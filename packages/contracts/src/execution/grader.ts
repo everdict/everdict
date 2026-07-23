@@ -19,6 +19,16 @@ export const ScoreSchema = z.object({
 });
 export type Score = z.infer<typeof ScoreSchema>;
 
+// A read against a purpose:"data" store's per-case slice — the store-state grader's window into the post-run world.
+// The topology runtime resolves (store, role?) → the case's isolation slice and runs `query` there. Co-located by
+// necessity: an internal store URL never reaches a remote grader (docs/architecture/judge-placement-locality.md).
+export interface StoreReadQuery {
+  store: string;
+  role?: string; // disambiguate when several dependencies share a store kind
+  query: string; // the read (a SQL SELECT for postgres)
+}
+export type StoreReader = (q: StoreReadQuery) => Promise<string>;
+
 export interface GradeContext {
   case: EvalCase;
   trace: TraceEvent[];
@@ -33,6 +43,10 @@ export interface GradeContext {
   // Optional: scoring paths without a driver (control-plane collect, topology) leave it unset. The grader that
   // provisions OWNS the handle and MUST dispose it in a finally.
   provision?: (spec: ComputeSpec) => Promise<ComputeHandle>;
+  // Read a purpose:"data" store's post-run slice (store-state grading, P2). Injected by the topology backend from a
+  // runtime that can exec into its stores; other paths leave it unset (a store-state grader then fails, like a
+  // missing-compute outcome grader). docs/architecture/dependency-store-roles.md
+  readStore?: StoreReader;
   baseline?: Scorecard; // for regression comparison
 }
 

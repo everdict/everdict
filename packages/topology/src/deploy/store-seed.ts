@@ -72,6 +72,33 @@ export function planStoreSeed(
   });
 }
 
+// Resolve the per-case isolation slice for a store READ (store-state grading) — the read-side sibling of the seed
+// binding. Finds the dependency by (store, role?) and returns its slice key; throws when the store is unknown or
+// external (no per-case slice to read). Purpose is not re-checked — a grader reads whatever store it names.
+export function resolveStoreReadSlice(
+  dependencies: TopologyDependency[] | undefined,
+  store: string,
+  role: string | undefined,
+  runId: string,
+): string {
+  const dep = (dependencies ?? []).find((d) => d.store === store && (role === undefined || d.role === role));
+  if (dep === undefined) {
+    throw new BadRequestError(
+      "BAD_REQUEST",
+      { store, role },
+      `store-state read targets store "${store}"${role ? ` role "${role}"` : ""}, but the harness declares no such dependency.`,
+    );
+  }
+  if (dep.isolateBy === "external") {
+    throw new BadRequestError(
+      "BAD_REQUEST",
+      { store, role },
+      "store-state read targets an external (BYO) store, which has no per-case isolation slice to read.",
+    );
+  }
+  return isolationSliceKey(dep.isolateBy, runId);
+}
+
 // The command to exec INSIDE a store container to apply one seed plan — the runtime-agnostic half of the seed I/O
 // (a runtime maps `store` → its container and runs `argv`). Pure + testable; the runtime owns only the container reach.
 export interface SeedExec {

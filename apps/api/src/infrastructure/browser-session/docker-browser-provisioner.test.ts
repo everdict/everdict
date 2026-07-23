@@ -16,6 +16,9 @@ function fakeDocker() {
       return 54231;
     },
     async exec() {},
+    async execCapture() {
+      return "";
+    },
     async rm(containers) {
       removed.push(containers);
     },

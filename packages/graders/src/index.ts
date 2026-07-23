@@ -6,6 +6,7 @@ export { ScriptGrader, type ScriptGraderConfig } from "./script-grader.js";
 export { stepsGrader, costGrader, latencyGrader } from "./trace-graders.js";
 export { DomContainsGrader, UrlMatchesGrader, AnswerMatchGrader } from "./browser-graders.js";
 export { TextMetricGrader } from "./text-metric.js";
+export { StoreStateGrader, type StoreStateConfig } from "./store-state.js";
 export {
   type Judge,
   type JudgeInput,

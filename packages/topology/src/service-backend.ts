@@ -16,6 +16,7 @@ import {
   InternalError,
   type Score,
   type ServiceHarnessSpec,
+  type StoreReader,
   type TraceEvent,
   type TrustZone,
 } from "@everdict/contracts";
@@ -295,9 +296,21 @@ export class ServiceTopologyBackend implements Backend, ScreenCapturable {
         (job.evalCase.graders.length > 0
           ? makeGradersFromEnv(job.evalCase.graders) // includes the judge grader (env Judge; if unconfigured, only judge is skipped)
           : [stepsGrader, costGrader, latencyGrader]);
+      // Store-state grading (P2): when the runtime can read its stores, expose a co-located reader so a store-state
+      // grader can diff the post-run slice against expected (an internal store URL never reaches a remote grader).
+      const readStoreState = this.opts.runtime.readStoreState;
+      const readStore: StoreReader | undefined = readStoreState
+        ? (q) => readStoreState.call(this.opts.runtime, spec, runId, q, zone)
+        : undefined;
       // Scoring is the execution layer's job (re-architecture P2b) — this placement adapter only selects
       // the grader set and hands the observations to the one scoring use-case.
-      const scores: Score[] = await scoreObservations({ evalCase: job.evalCase, trace, snapshot, graders });
+      const scores: Score[] = await scoreObservations({
+        evalCase: job.evalCase,
+        trace,
+        snapshot,
+        graders,
+        ...(readStore ? { readStore } : {}),
+      });
 
       return { caseId: job.evalCase.id, harness: `${spec.id}@${spec.version}`, trace, snapshot, scores };
     } finally {

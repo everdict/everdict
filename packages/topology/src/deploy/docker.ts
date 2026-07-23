@@ -63,6 +63,7 @@ export interface Docker {
   run(spec: DockerRunSpec): Promise<string>; // container id
   hostPort(container: string, containerPort: number): Promise<number>; // discover the published host port
   exec(container: string, cmd: string[]): Promise<void>;
+  execCapture(container: string, cmd: string[]): Promise<string>; // exec + return stdout (store-state reads)
   rm(containers: string[]): Promise<void>; // best-effort force removal
   removeNetwork(name: string): Promise<void>;
   running(names: string[]): Promise<string[]>; // the subset of these exact names currently running (adopt-don't-kill gate)
@@ -98,6 +99,10 @@ export function dockerCli(bin = "docker"): Docker {
     },
     async exec(container, cmd) {
       await sh(["exec", container, ...cmd]);
+    },
+    async execCapture(container, cmd) {
+      const { stdout } = await sh(["exec", container, ...cmd]);
+      return stdout;
     },
     async rm(containers) {
       if (containers.length > 0) await sh(["rm", "-f", ...containers]).catch(() => {});
