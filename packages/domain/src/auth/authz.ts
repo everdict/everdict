@@ -27,6 +27,11 @@ export type Action =
   | "models:read"
   | "models:write"
   | "models:delete"
+  // Workspace agent configuration (instructions + MCP tool servers + model powering the conversational agent).
+  // Same shape as models: read viewer+, write member+ (eval-authoring content), delete admin+ (creator exception in the service).
+  | "agents:read"
+  | "agents:write"
+  | "agents:delete"
   | "runtimes:read"
   | "runtimes:write"
   // Destructive live-cluster control (stop a running workload / reclaim idle / purge terminal jobs / cordon a node) —
@@ -61,6 +66,7 @@ const ROLE_PERMISSIONS: Record<string, ReadonlySet<Action>> = {
     "schedules:read", // reading schedules is benign (same as reading scorecards) → viewer+
     "judges:read",
     "models:read",
+    "agents:read", // reading the workspace agent config is benign → viewer+
     "runtimes:read",
     "runtimes:write", // runtime registration (+validate/probe) is role-independent — every member registers their own workspace's execution infra (same as harnesses:register)
     "members:read", // reading the team (workspace members) is benign → viewer+
@@ -82,6 +88,8 @@ const ROLE_PERMISSIONS: Record<string, ReadonlySet<Action>> = {
     "judges:write",
     "models:read",
     "models:write", // model definition = eval content (which model was run) → member-allowed like judges/datasets
+    "agents:read",
+    "agents:write", // agent config = eval-authoring content (how the workspace's assistant behaves) → member+ like models/judges
     "runtimes:read",
     "runtimes:write", // runtime registration (+validate/probe) is role-independent
     "members:read",
@@ -103,6 +111,7 @@ const ROLE_PERMISSIONS: Record<string, ReadonlySet<Action>> = {
     "datasets:delete", // dataset version soft-delete — admin-only (the creator is separately overridden in the service). member/viewer don't have it
     "harnesses:delete", // harness version soft-delete — same pattern (admin-only + creator exception in the service layer)
     "models:delete", // model version soft-delete — same pattern (admin-only + creator exception in the service layer)
+    "agents:delete", // agent config version soft-delete — same pattern (admin-only + creator exception in the service layer)
     "judges:delete", // judge version soft-delete — same pattern (admin-only + creator exception in the service layer)
     "scorecards:read",
     "scorecards:run",
@@ -113,6 +122,8 @@ const ROLE_PERMISSIONS: Record<string, ReadonlySet<Action>> = {
     "judges:write",
     "models:read",
     "models:write",
+    "agents:read",
+    "agents:write",
     "runtimes:read",
     "runtimes:write", // runtime registration is role-independent (viewer/member have it too) — the credential 'value' is separately protected by secrets:write (admin)
     "runtimes:control", // destructive live-cluster control (stop workload / reclaim idle / purge / cordon) — admin-only
@@ -146,6 +157,7 @@ const SCOPE_READ_ACTIONS: readonly Action[] = [
   "schedules:read",
   "judges:read",
   "models:read",
+  "agents:read",
   "runtimes:read",
   "members:read",
   "comments:read",
@@ -161,6 +173,7 @@ const SCOPE_WRITE_ACTIONS: readonly Action[] = [
   "schedules:write",
   "judges:write",
   "models:write",
+  "agents:write",
   "runtimes:write",
   "comments:write",
   "images:push", // image publishing = part of harness authoring (a credential scoped to one's own workspace registry)

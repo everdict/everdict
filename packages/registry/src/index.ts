@@ -15,6 +15,8 @@ export { loadRubricDir } from "./rubric/load-rubrics.js";
 export { type ModelRegistry, InMemoryModelRegistry } from "./model/model-registry.js";
 export { PgModelRegistry } from "./model/pg-model-registry.js";
 export { loadModelDir } from "./model/load-models.js";
+export { type AgentRegistry, InMemoryAgentRegistry } from "./agent/agent-registry.js";
+export { PgAgentRegistry } from "./agent/pg-agent-registry.js";
 export { type RuntimeRegistry, type RuntimeListEntry, InMemoryRuntimeRegistry } from "./runtime/runtime-registry.js";
 export { PgRuntimeRegistry } from "./runtime/pg-runtime-registry.js";
 export { loadRuntimeDir } from "./runtime/load-runtimes.js";

@@ -117,6 +117,22 @@ i18n `agentChat` namespace in `messages/{en,ko}.json`.
   (`PATCH /agent/sessions/:id` + inline UI). **File attachments** — text files (paperclip / drag-drop) are read
   client-side and folded into the model context (like @-references); only metadata (name/type/size) is persisted
   (`AgentAttachment`, migration 0068).
+- **P9 (per-workspace customization, landed — Phase 1)** — each workspace can enhance its own agent, plugging its
+  context + tools into the shared framework the way Claude Code takes a per-project CLAUDE.md + MCP servers. A new
+  **registered, versioned `AgentSpec` entity** (`(tenant, id, version) → AgentSpec`, same immutable-version SSOT as
+  harness/judge/model: owner-first + `_shared` fallback, soft-delete tombstones) carries three channels:
+  **`instructions`** (appended to the base system prompt — persona + tool protocol stay fixed), **`mcpServers[]`**
+  (workspace MCP tool servers connected alongside the built-in read-only tools; `authSecret` names a SecretStore key
+  resolved to a verbatim `Authorization` value at connect time; **`write` is a per-server opt-in** — the built-in
+  Everdict tools stay read-only, a workspace's own server MAY mutate), and a **`model`** override (which registered
+  model powers the agent). **Skills are Phase 2.** Surfaces: `POST/GET /agents` + `PUT /agents/:id` (save-upsert,
+  auto version-bump) + `DELETE …` + `POST /agents/validate`, with MCP parity (`list_/get_/create_/validate_/delete_agent`;
+  `save_agent` stays HTTP-only, mirroring `save_model`); authz `agents:read` (viewer+) / `agents:write` (member+) /
+  `agents:delete` (admin, creator exception in the service). The agent server resolves `(workspace, AGENT_CONFIG_ID
+  ["default"])` → an `AgentProfile` per turn (`apps/agent/src/profile.ts`): base prompt + instructions, the workspace
+  MCP servers (secrets resolved, read-only unless write), and the model override; an unregistered workspace gets the
+  base agent unchanged. Web: **Settings › Agent** (`features/manage-agent`) edits the workspace's default agent
+  (instructions · MCP servers with a `SecretPicker` authSecret + write toggle · model picker). Migration `0070`.
 - **Later** — write-action tools behind HITL (port `permissions`); skills for harness-review / scorecard-triage;
   autonomous scheduled sweeps (runtime monitor → propose/trigger evals); findings → comments + Mattermost;
   SSE token streaming (replace polling); a fallback model + prompt caching; parallel independent tool calls.
