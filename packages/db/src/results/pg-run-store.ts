@@ -117,7 +117,8 @@ export class PgRunStore implements RunStore {
     // scorecardId given → that batch's children only; else includeChildren ($3) → all runs (standalone + children);
     // otherwise standalone (parentless) runs only (children hidden → prevents activity-list flooding).
     // runnerId ($4) → runs this self-hosted runner executed (jsonb result.provenance.runner); implies children
-    // included. limit ($5, NULL = all) caps the activity feed. LIMIT NULL is valid Postgres (unlimited).
+    // included. limit ($5, NULL = all) caps the activity feed. LIMIT NULL is valid Postgres (unlimited). offset ($6,
+    // default 0) skips the first N rows for the runner-detail activity feed's offset pagination.
     const res = await this.client.query<RunRow>(
       `SELECT * FROM everdict_runs
        WHERE ($1::text IS NULL OR tenant = $1)
@@ -127,13 +128,14 @@ export class PgRunStore implements RunStore {
            OR ($2::text IS NULL AND ($3::bool OR $4::text IS NOT NULL OR parent_scorecard_id IS NULL))
          )
        ORDER BY created_at DESC, id DESC
-       LIMIT $5`,
+       LIMIT $5 OFFSET $6`,
       [
         tenant ?? null,
         opts?.scorecardId ?? null,
         opts?.includeChildren ?? false,
         opts?.runnerId ?? null,
         opts?.limit ?? null,
+        opts?.offset ?? 0,
       ],
     );
     return res.rows.map(rowToRecord);

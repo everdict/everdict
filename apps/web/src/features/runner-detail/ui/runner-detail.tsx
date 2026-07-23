@@ -3,10 +3,9 @@
 import { useEffect, useState, useTransition } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { Check, Copy, Cpu, RefreshCw, Trash2 } from 'lucide-react'
+import { Check, Copy, RefreshCw, Trash2 } from 'lucide-react'
 import { useLocale, useTimeZone, useTranslations } from 'next-intl'
 
-import type { Run } from '@/entities/run'
 import { capabilityMeta, type RunnerMeta } from '@/entities/runner'
 import { copyText } from '@/shared/lib/clipboard'
 import {
@@ -21,9 +20,9 @@ import { Badge } from '@/shared/ui/badge'
 import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
 import { Card } from '@/shared/ui/card'
-import { StatusPill } from '@/shared/ui/status-pill'
 
 import { revokeRunnerFromDetailAction } from '../api/runner-detail'
+import { RunnerActivity } from './runner-activity'
 
 // A runner refreshes lastSeenAt on every long-poll lease (~25s), so within 90s it counts as connected (roster convention).
 const ONLINE_WINDOW_MS = 90_000
@@ -38,14 +37,12 @@ export function RunnerDetail({
   runner,
   scope,
   target,
-  activity,
   workspace,
   downloadHref,
 }: {
   runner: RunnerMeta
   scope: 'personal' | 'workspace'
   target: string
-  activity: Run[]
   workspace: string
   downloadHref: string
 }) {
@@ -318,33 +315,9 @@ export function RunnerDetail({
         </Card>
       )}
 
-      {/* Activity — the recent runs this runner executed (provenance), newest first. */}
-      <div className="space-y-2.5">
-        <p className="text-[13px] font-[560] text-foreground">{t('activityTitle')}</p>
-        {activity.length === 0 ? (
-          <p className="text-[13px] text-muted-foreground">{t('activityEmpty')}</p>
-        ) : (
-          <Card className="divide-y divide-border">
-            {activity.map((r) => (
-              <Link
-                key={r.id}
-                href={`/${workspace}/runs/${encodeURIComponent(r.id)}`}
-                className="flex items-center gap-3 px-4 py-2.5 transition-colors hover:bg-elevated"
-              >
-                <Cpu className="size-3.5 shrink-0 text-faint" />
-                <span className="min-w-0 flex-1 truncate font-mono text-[12px]">{r.caseId}</span>
-                <span className="hidden shrink-0 text-[12px] text-muted-foreground sm:inline">
-                  {r.harness.id}@{r.harness.version}
-                </span>
-                <span className="w-[92px] shrink-0 text-right text-[11px] text-faint">
-                  {fmtTimeAgo(r.createdAt, locale, timeZone)}
-                </span>
-                <StatusPill status={r.status} />
-              </Link>
-            ))}
-          </Card>
-        )}
-      </div>
+      {/* Activity — the recent runs this runner executed (provenance), offset-paginated + fetched client-side so the
+          detail page's first paint isn't blocked on a heavy runs read; every row links to that run's detail screen. */}
+      <RunnerActivity runnerId={runner.id} workspace={workspace} />
     </div>
   )
 }

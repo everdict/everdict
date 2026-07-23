@@ -201,6 +201,9 @@ describe("RunService", () => {
 
     expect((await svc.list("t", { runnerId: "r1" })).map((r) => r.id)).toEqual(["b", "a"]); // newest first, r2/no-provenance excluded
     expect((await svc.list("t", { runnerId: "r1", limit: 1 })).map((r) => r.id)).toEqual(["b"]); // capped to the newest
+    // offset pagination — page 2 (limit 1, offset 1) skips the newest and returns the next-newest
+    expect((await svc.list("t", { runnerId: "r1", limit: 1, offset: 1 })).map((r) => r.id)).toEqual(["a"]);
+    expect(await svc.list("t", { runnerId: "r1", limit: 1, offset: 2 })).toEqual([]); // past the end
     expect(await svc.list("t", { runnerId: "nobody" })).toEqual([]); // an unknown runner has no activity
   });
 

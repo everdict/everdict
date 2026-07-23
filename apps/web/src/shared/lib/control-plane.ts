@@ -89,14 +89,14 @@ export const controlPlane = {
   // (activity console's all-executions view, grouped in the UI); otherwise the standalone activity list (children hidden).
   listRuns: <T>(
     auth: AuthContext,
-    opts?: { scorecardId?: string; all?: boolean; runner?: string; limit?: number }
+    opts?: { scorecardId?: string; all?: boolean; runner?: string; limit?: number; offset?: number }
   ) =>
     call<T>(
       auth,
       opts?.scorecardId
         ? `/runs?scorecardId=${encodeURIComponent(opts.scorecardId)}`
         : opts?.runner
-          ? `/runs?runner=${encodeURIComponent(opts.runner)}${opts.limit ? `&limit=${opts.limit}` : ''}`
+          ? `/runs?runner=${encodeURIComponent(opts.runner)}${opts.limit ? `&limit=${opts.limit}` : ''}${opts.offset ? `&offset=${opts.offset}` : ''}`
           : opts?.all
             ? '/runs?scope=all'
             : '/runs'

@@ -13,6 +13,9 @@ export interface RunListOptions {
   runnerId?: string;
   // Cap the number of rows returned (newest first) — the activity feed only needs the recent slice. Unset = no cap.
   limit?: number;
+  // Skip the first N rows (newest first) before applying limit — offset pagination for the runner-detail activity
+  // feed (each page fetches exactly `limit` rows at `offset = page * limit`). Unset/0 = start from the newest.
+  offset?: number;
 }
 
 // Result store contract. in-memory (dev/test) or Postgres (production) — swapped behind the same interface.

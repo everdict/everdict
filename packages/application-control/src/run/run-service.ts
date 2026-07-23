@@ -346,10 +346,16 @@ export class RunService {
 
   // Default is standalone runs (activity list); scorecardId → only that batch's child runs (scorecard-detail case
   // drilldown); includeChildren → all runs (standalone + children) for the activity console's "all executions" view;
-  // runnerId → runs a self-hosted runner executed (runner-detail activity feed), capped by limit (newest first).
+  // runnerId → runs a self-hosted runner executed (runner-detail activity feed), offset-paginated by limit (newest first).
   list(
     tenant?: string,
-    opts?: { scorecardId?: string; includeChildren?: boolean; runnerId?: string; limit?: number },
+    opts?: {
+      scorecardId?: string;
+      includeChildren?: boolean;
+      runnerId?: string;
+      limit?: number;
+      offset?: number;
+    },
   ): Promise<RunRecord[]> {
     return this.deps.store.list(tenant, opts);
   }

@@ -13,15 +13,16 @@ export function registerRunTools(server: McpServer, ctx: McpToolContext): void {
       description:
         "This workspace's run list (standalone activity). With scorecard_id, the case child-runs of that scorecard. " +
         'With scope="all", standalone runs AND scorecard child runs together (the "all executions" view). With runner, ' +
-        "the runs a self-hosted runner executed (newest first, capped by limit) — the runner-detail activity feed.",
+        "the runs a self-hosted runner executed (newest first, capped by limit, offset-paginated) — the runner-detail activity feed.",
       inputSchema: {
         scorecard_id: z.string().optional(),
         scope: z.enum(["standalone", "all"]).optional(),
         runner: z.string().optional(),
         limit: z.number().int().positive().optional(),
+        offset: z.number().int().nonnegative().optional(),
       },
     },
-    ({ scorecard_id, scope, runner, limit }) =>
+    ({ scorecard_id, scope, runner, limit, offset }) =>
       run(principal, "runs:read", async () =>
         ok(
           await deps.service.list(
@@ -29,7 +30,7 @@ export function registerRunTools(server: McpServer, ctx: McpToolContext): void {
             scorecard_id
               ? { scorecardId: scorecard_id }
               : runner
-                ? { runnerId: runner, ...(limit ? { limit } : {}) }
+                ? { runnerId: runner, ...(limit ? { limit } : {}), ...(offset ? { offset } : {}) }
                 : scope === "all"
                   ? { includeChildren: true }
                   : undefined,

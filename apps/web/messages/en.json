@@ -1143,7 +1143,11 @@
     "offlinePersonalHint": "It hasn't leased a job in the last ~90s. Open the Everdict desktop app on that machine to reconnect it, or start the runner there.",
     "getDesktop": "Get the desktop app",
     "activityTitle": "Recent runs on this runner",
-    "activityEmpty": "No runs have completed on this runner yet."
+    "activityEmpty": "No runs have completed on this runner yet.",
+    "activityLoading": "Loading recent runs…",
+    "paginationPrev": "Previous",
+    "paginationNext": "Next",
+    "paginationPage": "Page {page}"
   },
   "manageSchedules": {
     "runtimeDefault": "Default backend",

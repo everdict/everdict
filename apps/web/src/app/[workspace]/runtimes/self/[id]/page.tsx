@@ -4,7 +4,6 @@ import { ChevronLeft } from 'lucide-react'
 import { getTranslations } from 'next-intl/server'
 
 import { RunnerDetail } from '@/features/runner-detail'
-import { runsSchema, type Run } from '@/entities/run'
 import { runnersResponseSchema, type RunnerMeta } from '@/entities/runner'
 import { currentPrincipal } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
@@ -46,14 +45,8 @@ export default async function RunnerDetailPage({
   }
   if (!runner) redirect(`/${workspace}/runtimes`)
 
-  // Recent runs this runner executed (provenance) — newest first, capped. Best-effort (empty on failure).
-  let activity: Run[] = []
-  try {
-    activity = runsSchema.parse(await controlPlane.listRuns(ctx, { runner: id, limit: 30 }))
-  } catch {
-    activity = []
-  }
-
+  // The runner's recent runs (provenance) are fetched + paginated client-side by RunnerDetail — the detail page's
+  // first paint no longer blocks on a heavy runs read, and the periodic refresh only re-pulls one page.
   const target = scope === 'workspace' ? `self:ws:${id}` : `self:${id}`
 
   return (
@@ -70,7 +63,6 @@ export default async function RunnerDetailPage({
         runner={runner}
         scope={scope}
         target={target}
-        activity={activity}
         workspace={workspace}
         downloadHref={`/${workspace}/download`}
       />

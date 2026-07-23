@@ -1143,7 +1143,11 @@
     "offlinePersonalHint": "최근 90초 동안 작업을 리스하지 않았습니다. 그 머신에서 Everdict 데스크탑 앱을 열어 다시 연결하거나, 러너를 시작하세요.",
     "getDesktop": "데스크탑 앱 받기",
     "activityTitle": "이 러너의 최근 실행",
-    "activityEmpty": "이 러너에서 완료된 실행이 아직 없습니다."
+    "activityEmpty": "이 러너에서 완료된 실행이 아직 없습니다.",
+    "activityLoading": "최근 실행 불러오는 중…",
+    "paginationPrev": "이전",
+    "paginationNext": "다음",
+    "paginationPage": "{page}페이지"
   },
   "manageSchedules": {
     "runtimeDefault": "기본 백엔드",

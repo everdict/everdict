@@ -125,21 +125,24 @@ describe("PgRunStore", () => {
     expect(calls[0]?.params?.[0]).toBe("acme");
   });
 
-  it("list scope: default hides children ($3 false); includeChildren = all ($3 true); scorecardId = one batch ($2); runner filter ($4) + limit ($5)", async () => {
+  it("list scope: default hides children ($3 false); includeChildren = all ($3 true); scorecardId = one batch ($2); runner filter ($4) + limit ($5) + offset ($6)", async () => {
     const { client, calls } = fakeClient(() => ({ rows: [ROW] }));
     const store = new PgRunStore(client);
-    // params: [tenant, scorecardId, includeChildren, runnerId, limit]
+    // params: [tenant, scorecardId, includeChildren, runnerId, limit, offset]
     await store.list("acme");
-    expect(calls[0]?.params).toEqual(["acme", null, false, null, null]);
+    expect(calls[0]?.params).toEqual(["acme", null, false, null, null, 0]);
     await store.list("acme", { includeChildren: true });
-    expect(calls[1]?.params).toEqual(["acme", null, true, null, null]);
+    expect(calls[1]?.params).toEqual(["acme", null, true, null, null, 0]);
     await store.list("acme", { scorecardId: "sc1" });
-    expect(calls[2]?.params).toEqual(["acme", "sc1", false, null, null]);
+    expect(calls[2]?.params).toEqual(["acme", "sc1", false, null, null, 0]);
     // runner activity feed — jsonb provenance filter + capped
     await store.list("acme", { runnerId: "r1", limit: 20 });
-    expect(calls[3]?.params).toEqual(["acme", null, false, "r1", 20]);
+    expect(calls[3]?.params).toEqual(["acme", null, false, "r1", 20, 0]);
     expect(calls[3]?.text).toMatch(/result->'provenance'->>'runner' = \$4/);
-    expect(calls[3]?.text).toMatch(/LIMIT \$5/);
+    expect(calls[3]?.text).toMatch(/LIMIT \$5 OFFSET \$6/);
+    // offset pagination — the runner feed's next page skips the first N ($6)
+    await store.list("acme", { runnerId: "r1", limit: 20, offset: 40 });
+    expect(calls[4]?.params).toEqual(["acme", null, false, "r1", 20, 40]);
   });
 
   it("deleteByScorecard → parameterized DELETE on parent_scorecard_id; RETURNING rows = removed count", async () => {

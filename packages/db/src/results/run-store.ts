@@ -8,6 +8,13 @@ export function withRunUsage(r: RunRecord): RunRecord {
 
 import type { RunListOptions, RunStore } from "@everdict/application-control";
 
+// Apply offset/limit to an already-sorted (newest-first) slice — mirrors the Pg `OFFSET $6 LIMIT $5`.
+// offset unset/0 = from the newest; limit unset = to the end.
+function page(rows: RunRecord[], opts?: RunListOptions): RunRecord[] {
+  const offset = opts?.offset ?? 0;
+  return rows.slice(offset, opts?.limit !== undefined ? offset + opts.limit : undefined);
+}
+
 export class InMemoryRunStore implements RunStore {
   private readonly runs = new Map<string, RunRecord>();
 
@@ -37,7 +44,7 @@ export class InMemoryRunStore implements RunStore {
       const byRunner = scoped
         .filter((r) => r.result?.provenance?.runner === opts.runnerId)
         .sort((a, b) => b.createdAt.localeCompare(a.createdAt)); // newest first (ISO strings sort lexicographically)
-      return (opts.limit ? byRunner.slice(0, opts.limit) : byRunner).map(withRunUsage);
+      return page(byRunner, opts).map(withRunUsage);
     }
     // scorecardId given → that batch's children only; includeChildren → all runs (standalone + children);
     // otherwise standalone (parentless) runs only (children hidden → prevents activity-list flooding).
@@ -46,7 +53,7 @@ export class InMemoryRunStore implements RunStore {
       : opts?.includeChildren
         ? scoped
         : scoped.filter((r) => r.parentScorecardId == null);
-    return (opts?.limit ? filtered.slice(0, opts.limit) : filtered).map(withRunUsage);
+    return page(filtered, opts).map(withRunUsage);
   }
 
   async deleteByScorecard(scorecardId: string): Promise<number> {

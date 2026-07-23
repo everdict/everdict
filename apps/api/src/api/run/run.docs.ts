@@ -51,6 +51,15 @@ const docs = {
           .enum(["standalone", "all"])
           .optional()
           .describe("standalone (default) = children hidden; all = standalone runs + scorecard children"),
+        runner: z
+          .string()
+          .optional()
+          .describe("Return only runs a self-hosted runner executed (runner-detail activity feed)"),
+        limit: z.string().optional().describe("Cap the number of rows returned (newest first)"),
+        offset: z
+          .string()
+          .optional()
+          .describe("Skip the first N rows before limit — offset pagination for the runner activity feed"),
       }),
     ),
     response: {
