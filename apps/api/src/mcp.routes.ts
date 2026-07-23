@@ -92,6 +92,7 @@ export function registerMcpRoutes(app: FastifyInstance, deps: ServerDeps): void 
           judgeRegistry: deps.judgeRegistry,
           judgePreviewService: deps.judgePreviewService,
           modelRegistry: deps.modelRegistry,
+          agentRegistry: deps.agentRegistry,
           runtimeRegistry: deps.runtimeRegistry,
           probeRuntime: deps.probeRuntime,
           inspectRuntime: deps.inspectRuntime,

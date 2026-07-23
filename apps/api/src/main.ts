@@ -30,6 +30,7 @@ import {
   buildView,
 } from "./composition/services.js";
 import { buildWorkspace } from "./composition/workspace.js";
+import { AgentService } from "./core/agent/agent-service.js";
 import { BrowserProfileCaptureService } from "./core/browser-profile/browser-profile-capture-service.js";
 import { BrowserSessionService } from "./core/browser-session/browser-session-service.js";
 import { buildPlacementPreflight } from "./core/execution/placement-preflight.js";
@@ -94,6 +95,7 @@ async function main(): Promise<void> {
     judgeRegistry,
     rubricRegistry,
     modelRegistry,
+    agentRegistry,
     runtimeRegistry,
     settingsStore,
     workspaceStore,
@@ -405,6 +407,9 @@ async function main(): Promise<void> {
         ? { openaiBaseUrl: process.env.EVERDICT_JUDGE_OPENAI_BASE_URL }
         : {}),
     }),
+    agentRegistry,
+    // Agent config version-free save/edit upsert (the interactive web path) — the workspace's conversational-agent customization.
+    agentService: new AgentService({ agents: agentRegistry }),
     runtimeRegistry,
     probeRuntime,
     inspectRuntime,

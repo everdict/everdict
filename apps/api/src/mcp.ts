@@ -1,5 +1,6 @@
 import type { Principal } from "@everdict/auth";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { registerAgentTools } from "./api/agent/agent.mcp.js";
 import { registerApiKeyTools } from "./api/api-key/api-key.mcp.js";
 import { registerBenchmarkTools } from "./api/benchmark/benchmark.mcp.js";
 import { registerBillingTools } from "./api/billing/billing.mcp.js";
@@ -59,6 +60,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
   registerJudgeTools(server, ctx);
   registerRubricTools(server, ctx);
   registerModelTools(server, ctx);
+  registerAgentTools(server, ctx);
   registerRuntimeTools(server, ctx);
   registerBenchmarkTools(server, ctx);
   registerBundleTools(server, ctx);

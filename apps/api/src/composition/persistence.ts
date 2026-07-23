@@ -67,10 +67,12 @@ import {
   sqlClient,
 } from "@everdict/db";
 import {
+  type AgentRegistry,
   type BenchmarkRegistry,
   type DatasetRegistry,
   type HarnessInstanceRegistry,
   type HarnessTemplateRegistry,
+  InMemoryAgentRegistry,
   InMemoryBenchmarkRegistry,
   InMemoryDatasetRegistry,
   InMemoryHarnessInstanceRegistry,
@@ -81,6 +83,7 @@ import {
   InMemoryRuntimeRegistry,
   type JudgeRegistry,
   type ModelRegistry,
+  PgAgentRegistry,
   PgBenchmarkRegistry,
   PgDatasetRegistry,
   PgHarnessInstanceRegistry,
@@ -106,6 +109,7 @@ export interface Persistence {
   judgeRegistry: JudgeRegistry;
   rubricRegistry: RubricRegistry;
   modelRegistry: ModelRegistry;
+  agentRegistry: AgentRegistry; // the workspace's conversational-agent configuration (instructions + MCP tool servers + model)
   runtimeRegistry: RuntimeRegistry;
   settingsStore: WorkspaceSettingsStore; // workspace settings (metering policy, etc.) — always available
   workspaceStore: WorkspaceStore; // workspace membership (create/switch) — always available
@@ -164,6 +168,7 @@ export async function makePersistence(): Promise<Persistence> {
       judgeRegistry: new InMemoryJudgeRegistry(),
       rubricRegistry: new InMemoryRubricRegistry(),
       modelRegistry: new InMemoryModelRegistry(),
+      agentRegistry: new InMemoryAgentRegistry(),
       runtimeRegistry: new InMemoryRuntimeRegistry(),
       settingsStore: new InMemoryWorkspaceSettingsStore(),
       workspaceStore,
@@ -200,6 +205,7 @@ export async function makePersistence(): Promise<Persistence> {
     judgeRegistry: new PgJudgeRegistry(client),
     rubricRegistry: new PgRubricRegistry(client),
     modelRegistry: new PgModelRegistry(client),
+    agentRegistry: new PgAgentRegistry(client),
     runtimeRegistry: new PgRuntimeRegistry(client),
     settingsStore: new PgWorkspaceSettingsStore(client),
     workspaceStore: new PgWorkspaceStore(client),

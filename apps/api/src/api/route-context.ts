@@ -72,6 +72,7 @@ import {
 import { collectHarnessImages, imageWarnings } from "@everdict/domain";
 import type { UsageMeter } from "@everdict/domain";
 import type {
+  AgentRegistry,
   DatasetRegistry,
   HarnessInstanceRegistry,
   HarnessTemplateRegistry,
@@ -92,6 +93,7 @@ import type { LiveFrameStore } from "../common/live-frame-store.js";
 import type { LiveLogStore } from "../common/live-log-store.js";
 import type { TerminalTicketStore } from "../common/terminal-ticket.js";
 import type { TicketStore } from "../common/ticket-store.js";
+import type { AgentService } from "../core/agent/agent-service.js";
 import {
   BenchmarkImportBodySchema,
   BenchmarkPreviewBodySchema,
@@ -126,6 +128,8 @@ export interface ServerDeps {
   rubricRegistry?: RubricRegistry; // Rubric (HOW to judge — referenced by judges) CRUD (route disabled if absent)
   modelRegistry?: ModelRegistry; // Model (inference/judging model) CRUD (route disabled if absent)
   modelService?: ModelService; // Model connection test (dummy completion) + version-free save/edit upsert (routes disabled if absent)
+  agentRegistry?: AgentRegistry; // Agent config (instructions + MCP tool servers + model) CRUD — the workspace's conversational agent (route disabled if absent)
+  agentService?: AgentService; // Agent version-free save/edit upsert (routes disabled if absent)
   runtimeRegistry?: RuntimeRegistry; // Runtime (execution infra) CRUD (route disabled if absent)
   // Runtime connection test — RuntimeSpec → build a live backend, then probe() (reachability/auth without a job). main injects it with secrets + a builder.
   probeRuntime?: (workspace: string, spec: RuntimeSpec) => Promise<RuntimeProbeResult>;

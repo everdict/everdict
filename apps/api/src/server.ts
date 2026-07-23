@@ -82,6 +82,7 @@ import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
 import { WebSocketServer } from "ws";
 import { z } from "zod";
+import { registerAgentRoutes } from "./api/agent/agent.routes.js";
 import { registerApiKeyRoutes } from "./api/api-key/api-key.routes.js";
 import { registerBenchmarkRoutes } from "./api/benchmark/benchmark.routes.js";
 import { registerBillingRoutes } from "./api/billing/billing.routes.js";
@@ -209,6 +210,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     registerJudgeRoutes(routes, deps);
     registerRubricRoutes(routes, deps);
     registerModelRoutes(routes, deps);
+    registerAgentRoutes(routes, deps);
     registerRuntimeRoutes(routes, deps);
     registerProfileRoutes(routes, deps);
     registerWorkspaceRoutes(routes, deps);

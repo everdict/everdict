@@ -28,6 +28,7 @@ import {
 import { inMemoryUsageMeter } from "@everdict/domain";
 import { costGrader, latencyGrader, stepsGrader } from "@everdict/graders";
 import {
+  InMemoryAgentRegistry,
   InMemoryDatasetRegistry,
   InMemoryHarnessInstanceRegistry,
   InMemoryHarnessTemplateRegistry,
@@ -95,6 +96,7 @@ function harness() {
   const judgeRegistry = new InMemoryJudgeRegistry();
   const rubricRegistry = new InMemoryRubricRegistry();
   const modelRegistry = new InMemoryModelRegistry();
+  const agentRegistry = new InMemoryAgentRegistry();
   const runtimeRegistry = new InMemoryRuntimeRegistry();
   const bundleService = new BundleService({
     harnessTemplates,
@@ -137,6 +139,7 @@ function harness() {
     judgeRegistry,
     rubricRegistry,
     modelRegistry,
+    agentRegistry,
     runtimeRegistry,
     probeRuntime: async (_ws: string, spec: RuntimeSpec) => ({
       kind: spec.kind,
@@ -350,6 +353,7 @@ describe("MCP tools", () => {
       "backfill_scorecard_models",
       "cancel_scorecard",
       "control_runtime",
+      "create_agent",
       "create_api_key",
       "create_dataset",
       "create_invite",
@@ -358,6 +362,8 @@ describe("MCP tools", () => {
       "create_rubric",
       "create_runtime",
       "create_schedule",
+      "delete_agent",
+      "delete_agent_versions",
       "delete_dataset",
       "delete_dataset_versions",
       "delete_harness",
@@ -373,6 +379,7 @@ describe("MCP tools", () => {
       "estimate_scorecard",
       "exec_in_run",
       "fail_job",
+      "get_agent",
       "get_dataset",
       "get_harness_instance",
       "get_harness_template",
@@ -396,6 +403,7 @@ describe("MCP tools", () => {
       "leaderboard_scorecards",
       "lease_job",
       "leave_workspace",
+      "list_agents",
       "list_api_keys",
       "list_datasets",
       "list_harness_templates",
@@ -447,6 +455,7 @@ describe("MCP tools", () => {
       "submit_run",
       "unlink_workspace_github_app_installation",
       "update_schedule",
+      "validate_agent",
       "validate_dataset",
       "validate_judge",
       "validate_model",
