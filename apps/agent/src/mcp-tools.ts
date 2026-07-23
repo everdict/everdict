@@ -50,9 +50,12 @@ const EMPTY_SESSION: ToolSession = { registry: new ToolRegistry([]), call: null,
 
 // One MCP call → ToolResult, bound to a specific client. An MCP result is a content-block array — join the text blocks
 // and carry any image blocks through as base64 (the kernel surfaces them to the model as multimodal content).
-function makeInvoke(client: Client): McpInvoke {
+function makeInvoke(client: Client, prefix?: string): McpInvoke {
   return async (name, args) => {
-    const r = await client.callTool({ name, arguments: args });
+    // A namespaced workspace tool is exposed to the model as `mcp__<server>__<tool>`; strip the prefix before calling
+    // the server, which only knows the bare tool name.
+    const toolName = prefix && name.startsWith(prefix) ? name.slice(prefix.length) : name;
+    const r = await client.callTool({ name: toolName, arguments: args });
     const blocks =
       (r.content as Array<{ type?: string; text?: string; data?: string; mimeType?: string }> | undefined) ?? [];
     const text = blocks
@@ -105,8 +108,9 @@ export function mcpToolProvider(mcpUrl: string): ToolProvider {
       await baseClient.close().catch(() => {});
     }
 
-    // 2. Each workspace-registered MCP server — its OWN authorization; read-only unless registered write-allowed.
-    // Existing bridged names win on collision (base everdict tools are never shadowed by a workspace server).
+    // 2. Each workspace-registered MCP server — its OWN authorization; read-only unless registered write-allowed. Its
+    // tools are NAMESPACED `mcp__<server>__<tool>` so multiple servers (and the built-in tools) can't collide, and the
+    // model can see which server a tool belongs to. The invoke strips the prefix before calling the server.
     for (const server of extraServers) {
       const client = new Client({ name: "everdict-agent", version: "0.1.0" });
       try {
@@ -117,20 +121,18 @@ export function mcpToolProvider(mcpUrl: string): ToolProvider {
           requestInit: { headers: requestHeaders },
         });
         await client.connect(transport);
+        const prefix = `mcp__${server.name.replace(/[^a-zA-Z0-9_]/g, "_")}__`;
         const listed = (await client.listTools()).tools;
-        const tools = server.write ? listed : listed.filter((t) => isReadOnlyToolName(t.name));
-        const fresh = tools.filter((t) => !bridged.some((b) => b.name === t.name)); // don't shadow already-bridged names
-        if (fresh.length === 0) {
-          await client.close().catch(() => {});
-          continue;
-        }
-        clients.push(client);
-        const invoke = makeInvoke(client);
-        for (const t of fresh) {
-          bridged.push(
+        const allowed = server.write ? listed : listed.filter((t) => isReadOnlyToolName(t.name));
+        const invoke = makeInvoke(client, prefix);
+        const toAdd: ToolDefinition[] = [];
+        for (const t of allowed) {
+          const name = `${prefix}${t.name}`;
+          if (bridged.some((b) => b.name === name) || toAdd.some((b) => b.name === name)) continue;
+          toAdd.push(
             mcpToolToDefinition(
               {
-                name: t.name,
+                name,
                 ...(t.description !== undefined ? { description: t.description } : {}),
                 inputSchema: t.inputSchema as Record<string, unknown> | undefined,
               },
@@ -139,10 +141,19 @@ export function mcpToolProvider(mcpUrl: string): ToolProvider {
             ),
           );
         }
+        if (toAdd.length === 0) {
+          await client.close().catch(() => {});
+          continue;
+        }
+        clients.push(client);
+        bridged.push(...toAdd);
       } catch {
         await client.close().catch(() => {}); // an unreachable workspace server is skipped, not fatal
       }
     }
+
+    // Deterministic tool order (name-sorted) so ToolSearch results + the outbound tools[] are stable across runs.
+    bridged.sort((a, b) => a.name.localeCompare(b.name));
 
     // The native `use_skill` tool (progressive disclosure over the workspace's skills) is added even when no MCP tools
     // are reachable — a workspace can rely on skills alone.
