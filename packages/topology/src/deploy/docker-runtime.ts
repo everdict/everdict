@@ -46,9 +46,12 @@ function healLockName(network: string): string {
 
 // Store liveness probe command (docker exec). Shared by the deploy-time readiness poll and the
 // adoption single-shot probe so both judge "accepting connections" identically. minio has none (skipped).
+// postgres is probed over TCP (`-h 127.0.0.1`), NOT the socket: first-boot initdb runs a temporary server on the
+// socket only (listen_addresses='') and then restarts for the real TCP server — a socket probe passes on that temp
+// server and lets a seed race the restart ("the database system is shutting down"). TCP passes only on the real server.
 function storeProbeCmd(store: string): string[] | undefined {
   return store === "postgres"
-    ? ["pg_isready", "-U", "everdict"]
+    ? ["pg_isready", "-h", "127.0.0.1", "-U", "everdict"]
     : store === "redis"
       ? ["redis-cli", "ping"]
       : undefined;

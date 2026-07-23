@@ -260,6 +260,13 @@ describe("DockerTopologyRuntime", () => {
     expect(f.removed).toEqual([]); // …and, critically, the other process's LIVE containers were not rm -f'd
     // liveness was actually probed (stores accept connections), not assumed from the name match
     expect(f.execs.some((e) => e[0] === "everdict-bu-1.0.0-bu-redis" && e.includes("ping"))).toBe(true);
+    // postgres is probed over TCP (-h 127.0.0.1), NOT the socket — the socket passes on the temporary initdb server
+    // and lets a seed race its restart ("database system is shutting down"). Regression: keep it TCP.
+    expect(
+      f.execs.some(
+        (e) => e[0] === "everdict-bu-1.0.0-bu-postgres" && e.includes("pg_isready") && e.includes("127.0.0.1"),
+      ),
+    ).toBe(true);
   });
 
   it("removes and redeploys when the same-name leftover set is only partially running", async () => {
