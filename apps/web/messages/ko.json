@@ -2838,7 +2838,23 @@
     "delete": "대화 삭제",
     "confirmDelete": "이 대화를 삭제할까요?",
     "errorSend": "메시지를 보내지 못했어요. 다시 시도해 주세요.",
-    "errorGeneric": "문제가 발생했어요."
+    "errorGeneric": "문제가 발생했어요.",
+    "mentionAdd": "워크스페이스 엔티티 참조",
+    "mentionRemove": "참조 제거",
+    "mentionClose": "닫기",
+    "mentionPick": "참조…",
+    "mentionSearch": "검색…",
+    "mentionLoading": "불러오는 중…",
+    "mentionEmpty": "결과 없음",
+    "refType": {
+      "harness": "하네스",
+      "runtime": "런타임",
+      "run": "실행",
+      "dataset": "데이터셋",
+      "scorecard": "스코어카드",
+      "judge": "평가자",
+      "view": "뷰"
+    }
   },
   "workspaceSettings": {
     "meterUsage": "사용량 계측",

@@ -3,6 +3,7 @@
 import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
 import {
   ArrowLeft,
+  AtSign,
   Bot,
   Check,
   Loader2,
@@ -18,8 +19,11 @@ import {
   agentSessionListSchema,
   agentSessionSchema,
   type AgentMessage,
+  type AgentReference,
   type AgentSession,
 } from '@/entities/agent-session'
+
+import { MentionPicker, ReferenceChip } from './mention-picker'
 
 // The agent conversation surface embedded in the infra panel's "agent" tab. Two views in one narrow column: the
 // session list (the member's chat history) and an open conversation (transcript + composer). Talks only to the
@@ -71,6 +75,8 @@ export function AgentChatPanel() {
   const [input, setInput] = useState('')
   const [sending, setSending] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [references, setReferences] = useState<AgentReference[]>([])
+  const [mentionOpen, setMentionOpen] = useState(false)
   const scrollRef = useRef<HTMLDivElement>(null)
 
   const loadSessions = useCallback(async () => {
@@ -157,7 +163,10 @@ export function AgentChatPanel() {
   const send = useCallback(async () => {
     const text = input.trim()
     if (text.length === 0 || !activeId || sending) return
+    const refs = references
     setInput('')
+    setReferences([])
+    setMentionOpen(false)
     setError(null)
     setSending(true)
     setPendingUser(text)
@@ -188,7 +197,7 @@ export function AgentChatPanel() {
       const res = await fetch(`/api/agent/sessions/${encodeURIComponent(activeId)}/chat`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ message: text }),
+        body: JSON.stringify({ message: text, ...(refs.length > 0 ? { references: refs } : {}) }),
       })
       if (!res.ok) throw new Error(await res.text())
       const parsed = agentMessageListSchema.safeParse(await res.json())
@@ -205,7 +214,7 @@ export function AgentChatPanel() {
       setSending(false)
       void loadSessions()
     }
-  }, [input, activeId, sending, messages, loadSessions, t])
+  }, [input, activeId, sending, messages, references, loadSessions, t])
 
   const activeSession = sessions.find((s) => s.id === activeId)
 
@@ -299,13 +308,25 @@ export function AgentChatPanel() {
         )}
         {messages.map((m) => {
           if (m.role === 'user') {
-            return m.content.trim().length > 0 ? (
-              <div key={m.id} className="flex justify-end">
-                <div className="max-w-[85%] whitespace-pre-wrap rounded-2xl bg-primary px-3 py-2 text-[13px] leading-relaxed text-primary-foreground">
-                  {m.content}
-                </div>
+            const hasText = m.content.trim().length > 0
+            const hasRefs = m.references !== undefined && m.references.length > 0
+            if (!hasText && !hasRefs) return null
+            return (
+              <div key={m.id} className="flex flex-col items-end gap-1">
+                {hasRefs && (
+                  <div className="flex max-w-[85%] flex-wrap justify-end gap-1">
+                    {m.references?.map((r, i) => (
+                      <ReferenceChip key={`${r.type}:${r.id}:${i}`} reference={r} />
+                    ))}
+                  </div>
+                )}
+                {hasText && (
+                  <div className="max-w-[85%] whitespace-pre-wrap rounded-2xl bg-primary px-3 py-2 text-[13px] leading-relaxed text-primary-foreground">
+                    {m.content}
+                  </div>
+                )}
               </div>
-            ) : null
+            )
           }
           if (m.role === 'assistant') {
             return (
@@ -350,10 +371,50 @@ export function AgentChatPanel() {
       {error && <p className="px-3 pb-1 text-[12px] text-destructive">{error}</p>}
 
       <div className="border-t border-border p-2">
-        <div className="flex items-end gap-2">
+        {references.length > 0 && (
+          <div className="mb-1.5 flex flex-wrap gap-1">
+            {references.map((r, i) => (
+              <ReferenceChip
+                key={`${r.type}:${r.id}:${i}`}
+                reference={r}
+                onRemove={() => setReferences((prev) => prev.filter((_, j) => j !== i))}
+              />
+            ))}
+          </div>
+        )}
+        <div className="relative flex items-end gap-2">
+          {mentionOpen && (
+            <MentionPicker
+              onClose={() => setMentionOpen(false)}
+              onPick={(ref) => {
+                setReferences((prev) =>
+                  prev.some((r) => r.type === ref.type && r.id === ref.id) ? prev : [...prev, ref]
+                )
+                setMentionOpen(false)
+              }}
+            />
+          )}
+          <button
+            type="button"
+            aria-label={t('mentionAdd')}
+            aria-pressed={mentionOpen}
+            onClick={() => setMentionOpen((o) => !o)}
+            className="grid size-9 shrink-0 place-items-center rounded-lg border border-border text-muted-foreground hover:bg-accent hover:text-foreground aria-pressed:bg-accent aria-pressed:text-foreground"
+          >
+            <AtSign className="size-4" />
+          </button>
           <textarea
             value={input}
-            onChange={(e) => setInput(e.target.value)}
+            onChange={(e) => {
+              const v = e.target.value
+              // Typing '@' opens the mention picker; the char is dropped (the picker has its own search input).
+              if (v.endsWith('@') && !input.endsWith('@')) {
+                setInput(v.slice(0, -1))
+                setMentionOpen(true)
+                return
+              }
+              setInput(v)
+            }}
             onKeyDown={(e) => {
               if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault()

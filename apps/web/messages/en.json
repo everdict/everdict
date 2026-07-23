@@ -2838,7 +2838,23 @@
     "delete": "Delete conversation",
     "confirmDelete": "Delete this conversation?",
     "errorSend": "Couldn’t send the message. Try again.",
-    "errorGeneric": "Something went wrong."
+    "errorGeneric": "Something went wrong.",
+    "mentionAdd": "Reference a workspace entity",
+    "mentionRemove": "Remove reference",
+    "mentionClose": "Close",
+    "mentionPick": "Reference…",
+    "mentionSearch": "Search…",
+    "mentionLoading": "Loading…",
+    "mentionEmpty": "Nothing found",
+    "refType": {
+      "harness": "Harness",
+      "runtime": "Runtime",
+      "run": "Run",
+      "dataset": "Dataset",
+      "scorecard": "Scorecard",
+      "judge": "Judge",
+      "view": "View"
+    }
   },
   "workspaceSettings": {
     "meterUsage": "Meter usage",

@@ -20,6 +20,26 @@ export const agentToolCallSchema = z.object({
   arguments: z.string(),
 })
 
+export const AGENT_REFERENCE_TYPES = [
+  'harness',
+  'runtime',
+  'run',
+  'dataset',
+  'scorecard',
+  'judge',
+  'view',
+] as const
+export const agentReferenceTypeSchema = z.enum(AGENT_REFERENCE_TYPES)
+export type AgentReferenceType = z.infer<typeof agentReferenceTypeSchema>
+
+export const agentReferenceSchema = z.object({
+  type: agentReferenceTypeSchema,
+  id: z.string(),
+  version: z.string().optional(),
+  label: z.string(),
+})
+export type AgentReference = z.infer<typeof agentReferenceSchema>
+
 export const agentMessageSchema = z.object({
   id: z.string(),
   tenant: z.string(),
@@ -30,6 +50,7 @@ export const agentMessageSchema = z.object({
   toolCalls: z.array(agentToolCallSchema).optional(),
   toolCallId: z.string().optional(),
   name: z.string().optional(),
+  references: z.array(agentReferenceSchema).optional(),
   createdAt: z.string(),
 })
 
