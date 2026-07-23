@@ -1,7 +1,9 @@
 import {
   type McpInvoke,
+  type SkillEntry,
   type ToolDefinition,
   ToolRegistry,
+  buildSkillTool,
   buildToolSearchTool,
   mcpToolToDefinition,
 } from "@everdict/agent-runtime";
@@ -35,10 +37,14 @@ export interface ToolSession {
   close: () => Promise<void>;
 }
 
-// Given the caller's forward headers (and the workspace's extra MCP servers), produce the tool registry for one chat
-// turn: connect to the control plane's MCP as that principal + each workspace server, bridge the allowed tools
-// (deferred), and add ToolSearch.
-export type ToolProvider = (headers: ForwardHeaders, extraServers?: ResolvedMcpServer[]) => Promise<ToolSession>;
+// Given the caller's forward headers (and the workspace's extra MCP servers + skills), produce the tool registry for
+// one chat turn: connect to the control plane's MCP as that principal + each workspace server, bridge the allowed
+// tools (deferred), add ToolSearch, and add the native `use_skill` tool for the workspace's skills.
+export type ToolProvider = (
+  headers: ForwardHeaders,
+  extraServers?: ResolvedMcpServer[],
+  skills?: SkillEntry[],
+) => Promise<ToolSession>;
 
 const EMPTY_SESSION: ToolSession = { registry: new ToolRegistry([]), call: null, close: async () => {} };
 
@@ -53,7 +59,7 @@ function makeInvoke(client: Client): McpInvoke {
 
 export function mcpToolProvider(mcpUrl: string): ToolProvider {
   const baseUrl = new URL(mcpUrl);
-  return async (headers, extraServers = []) => {
+  return async (headers, extraServers = [], skills = []) => {
     const clients: Client[] = [];
     const bridged: ToolDefinition[] = [];
     let baseCall: McpInvoke | null = null;
@@ -129,9 +135,15 @@ export function mcpToolProvider(mcpUrl: string): ToolProvider {
       }
     }
 
-    if (bridged.length === 0) return EMPTY_SESSION;
-    const bridgedRegistry = new ToolRegistry(bridged);
-    const registry = new ToolRegistry([buildToolSearchTool(bridgedRegistry), ...bridged]);
+    // The native `use_skill` tool (progressive disclosure over the workspace's skills) is added even when no MCP tools
+    // are reachable — a workspace can rely on skills alone.
+    const skillTool = buildSkillTool(skills);
+    if (bridged.length === 0 && !skillTool) return EMPTY_SESSION;
+
+    const tools: ToolDefinition[] = [];
+    if (bridged.length > 0) tools.push(buildToolSearchTool(new ToolRegistry(bridged)), ...bridged);
+    if (skillTool) tools.push(skillTool);
+    const registry = new ToolRegistry(tools);
     return {
       registry,
       call: baseCall,

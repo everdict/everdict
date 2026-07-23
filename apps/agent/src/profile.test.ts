@@ -1,5 +1,5 @@
-import type { AgentRegistry, SecretStore } from "@everdict/application-control";
-import { type AgentSpec, NotFoundError } from "@everdict/contracts";
+import type { AgentRegistry, SecretStore, SkillStore } from "@everdict/application-control";
+import { type AgentSpec, NotFoundError, type SkillRecord } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import type { Principal } from "./principal.js";
 import { registryProfileResolver } from "./profile.js";
@@ -22,10 +22,35 @@ function secretStore(workspace: Record<string, string>, user: Record<string, str
   return { scopedEntries: async () => ({ workspace, user }) } as unknown as SecretStore;
 }
 
-function resolver(spec: AgentSpec | undefined, secrets: SecretStore = secretStore({})) {
+// A minimal SkillStore whose list() returns the given records.
+function skillStore(records: SkillRecord[] = []): SkillStore {
+  return { list: async () => records } as unknown as SkillStore;
+}
+
+function skillRecord(over: Partial<SkillRecord>): SkillRecord {
+  return {
+    id: "s1",
+    tenant: "acme",
+    name: "triage",
+    description: "d",
+    instructions: "1. …",
+    visibility: "workspace",
+    createdBy: "u1",
+    createdAt: "t",
+    updatedAt: "t",
+    ...over,
+  };
+}
+
+function resolver(
+  spec: AgentSpec | undefined,
+  secrets: SecretStore = secretStore({}),
+  skills: SkillStore = skillStore(),
+) {
   return registryProfileResolver({
     agentRegistry: agentRegistry(spec),
     secretStore: secrets,
+    skillStore: skills,
     baseSystemPrompt: BASE,
     configId: "default",
   });
@@ -38,7 +63,17 @@ function spec(over: Partial<AgentSpec> = {}): AgentSpec {
 describe("registryProfileResolver", () => {
   it("falls back to the base profile when no agent is registered", async () => {
     const profile = await resolver(undefined)(principal);
-    expect(profile).toEqual({ systemPrompt: BASE, mcpServers: [] });
+    expect(profile).toEqual({ systemPrompt: BASE, mcpServers: [], skills: [] });
+  });
+
+  it("loads the workspace's skills into the profile (even with no agent registered) and notes them in the prompt", async () => {
+    const profile = await resolver(
+      undefined,
+      secretStore({}),
+      skillStore([skillRecord({ name: "triage" })]),
+    )(principal);
+    expect(profile.skills).toEqual([{ name: "triage", description: "d", instructions: "1. …" }]);
+    expect(profile.systemPrompt).toContain("use_skill");
   });
 
   it("appends the workspace instructions to the base system prompt", async () => {

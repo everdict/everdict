@@ -11,6 +11,7 @@ export * from "./tools/deferred.js";
 export * from "./tools/openai.js";
 export * from "./tools/invocation.js";
 export * from "./tools/tool-search.js";
+export * from "./tools/skill-tool.js";
 export * from "./mcp/bridge.js";
 export * from "./context/token-budget.js";
 export * from "./context/compaction.js";

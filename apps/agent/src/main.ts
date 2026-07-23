@@ -4,6 +4,7 @@ import {
   InMemoryAgentSessionStore,
   PgAgentSessionStore,
   PgSecretStore,
+  PgSkillStore,
   cipherFromEnv,
   makePool,
   sqlClient,
@@ -62,6 +63,7 @@ async function main(): Promise<void> {
       resolveProfile = registryProfileResolver({
         agentRegistry,
         secretStore,
+        skillStore: new PgSkillStore(client),
         baseSystemPrompt: EVERDICT_AGENT_SYSTEM_PROMPT,
         configId: config.AGENT_CONFIG_ID,
       });
