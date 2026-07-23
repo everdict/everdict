@@ -2,7 +2,7 @@ import { ToolRegistry } from "@everdict/agent-runtime";
 import { UnauthenticatedError } from "@everdict/contracts";
 import { InMemoryAgentSessionStore } from "@everdict/db";
 import type OpenAI from "openai";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { ToolProvider } from "./mcp-tools.js";
 import type { ModelResolver } from "./model.js";
 import { type AgentServerDeps, buildServer } from "./server.js";
@@ -21,7 +21,11 @@ function fakeClientAlways(text: string): OpenAI {
 function makeDeps(over: Partial<AgentServerDeps> = {}): AgentServerDeps {
   let n = 0;
   const resolveModel: ModelResolver = async () => ({ client: fakeClientAlways("Hi there"), model: "test-model" });
-  const toolProvider: ToolProvider = async () => ({ registry: new ToolRegistry([]), close: async () => {} });
+  const toolProvider: ToolProvider = async () => ({
+    registry: new ToolRegistry([]),
+    call: null,
+    close: async () => {},
+  });
   return {
     authenticate: async () => ({ subject: "alice", workspace: "acme", roles: ["member"] }),
     sessions: new InMemoryAgentSessionStore(),
@@ -106,6 +110,29 @@ describe("agent server", () => {
       payload: { message: "hi" },
     });
     expect(res.statusCode).toBe(404);
+    await app.close();
+  });
+
+  it("resolves @-references via the read tool and records them on the user message", async () => {
+    const call = vi.fn(async () => ({ content: '{"id":"demo-qa","caseCount":2}', isError: false }));
+    const toolProvider: ToolProvider = async () => ({ registry: new ToolRegistry([]), call, close: async () => {} });
+    const app = buildServer(makeDeps({ toolProvider }));
+    const session = (await app.inject({ method: "POST", url: "/agent/sessions", headers: auth, payload: {} })).json();
+    await app.inject({
+      method: "POST",
+      url: `/agent/sessions/${session.id}/chat`,
+      headers: auth,
+      payload: {
+        message: "describe it",
+        references: [{ type: "dataset", id: "demo-qa", version: "1.0.0", label: "demo-qa" }],
+      },
+    });
+    expect(call).toHaveBeenCalledWith("get_dataset", { id: "demo-qa", version: "1.0.0" });
+    const messages = (
+      await app.inject({ method: "GET", url: `/agent/sessions/${session.id}/messages`, headers: auth })
+    ).json().messages as { role: string; references?: unknown }[];
+    const user = messages.find((m) => m.role === "user");
+    expect(user?.references).toEqual([{ type: "dataset", id: "demo-qa", version: "1.0.0", label: "demo-qa" }]);
     await app.close();
   });
 

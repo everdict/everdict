@@ -1,5 +1,5 @@
 import type { AgentSessionRecord } from "@everdict/contracts";
-import { AppError } from "@everdict/contracts";
+import { AgentReferenceSchema, AppError } from "@everdict/contracts";
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
 import { z } from "zod";
 import { type ChatDeps, DEFAULT_SESSION_TITLE, runChat } from "./chat.js";
@@ -106,10 +106,12 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
     const principal = await principalOf(req, reply);
     if (!principal) return reply;
     const { id } = idParams.parse(req.params);
-    const body = z.object({ message: z.string().min(1) }).safeParse(req.body);
+    const body = z
+      .object({ message: z.string().min(1), references: z.array(AgentReferenceSchema).optional() })
+      .safeParse(req.body);
     if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: body.error.message });
     try {
-      const result = await runChat(deps, principal, forwardHeaders(req), id, body.data.message);
+      const result = await runChat(deps, principal, forwardHeaders(req), id, body.data.message, body.data.references);
       return reply.send(result);
     } catch (err) {
       return sendError(reply, err);

@@ -1,4 +1,10 @@
-import { type ToolDefinition, ToolRegistry, buildToolSearchTool, mcpToolToDefinition } from "@everdict/agent-runtime";
+import {
+  type McpInvoke,
+  type ToolDefinition,
+  ToolRegistry,
+  buildToolSearchTool,
+  mcpToolToDefinition,
+} from "@everdict/agent-runtime";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { type ForwardHeaders, forwardHeaderRecord } from "./principal.js";
@@ -13,6 +19,8 @@ function isReadOnlyToolName(name: string): boolean {
 
 export interface ToolSession {
   registry: ToolRegistry;
+  // Direct read-tool invocation for reference resolution (get_*); null when no MCP session is available.
+  call: McpInvoke | null;
   close: () => Promise<void>;
 }
 
@@ -20,7 +28,7 @@ export interface ToolSession {
 // MCP as that principal, list its tools, keep the read-only subset (bridged as deferred), and add ToolSearch.
 export type ToolProvider = (headers: ForwardHeaders) => Promise<ToolSession>;
 
-const EMPTY_SESSION: ToolSession = { registry: new ToolRegistry([]), close: async () => {} };
+const EMPTY_SESSION: ToolSession = { registry: new ToolRegistry([]), call: null, close: async () => {} };
 
 export function mcpToolProvider(mcpUrl: string): ToolProvider {
   const url = new URL(mcpUrl);
@@ -56,6 +64,7 @@ export function mcpToolProvider(mcpUrl: string): ToolProvider {
       const registry = new ToolRegistry([buildToolSearchTool(bridgedRegistry), ...bridged]);
       return {
         registry,
+        call: invoke,
         close: async () => {
           await client.close().catch(() => {});
         },

@@ -22,6 +22,22 @@ export const AgentToolCallSchema = z.object({
 });
 export type AgentToolCall = z.infer<typeof AgentToolCallSchema>;
 
+// The workspace entity kinds a message can @-reference. Each maps to a control-plane read (get_<kind>) the agent
+// resolves into context, and to a list endpoint the composer's mention picker browses.
+export const AGENT_REFERENCE_TYPES = ["harness", "runtime", "run", "dataset", "scorecard", "judge", "view"] as const;
+export const AgentReferenceTypeSchema = z.enum(AGENT_REFERENCE_TYPES);
+export type AgentReferenceType = z.infer<typeof AgentReferenceTypeSchema>;
+
+// An @-mention on a user turn — the entity whose context the agent is handed. label is the display text the
+// composer showed (denormalized so the transcript renders the chip without re-fetching).
+export const AgentReferenceSchema = z.object({
+  type: AgentReferenceTypeSchema,
+  id: z.string(),
+  version: z.string().optional(),
+  label: z.string(),
+});
+export type AgentReference = z.infer<typeof AgentReferenceSchema>;
+
 // One transcript message. `role` mirrors the chat protocol: a `user` turn, an `assistant` reply (text and/or
 // tool_calls), or a `tool` result answering an assistant tool_call. `seq` orders the transcript within a session.
 export const AgentMessageRecordSchema = z.object({
@@ -34,6 +50,7 @@ export const AgentMessageRecordSchema = z.object({
   toolCalls: z.array(AgentToolCallSchema).optional(), // assistant turns that requested tools
   toolCallId: z.string().optional(), // tool turns: the assistant tool_call this answers
   name: z.string().optional(), // tool turns: the tool name (for display)
+  references: z.array(AgentReferenceSchema).optional(), // user turns: the entities @-referenced this turn
   createdAt: z.string(),
 });
 export type AgentMessageRecord = z.infer<typeof AgentMessageRecordSchema>;

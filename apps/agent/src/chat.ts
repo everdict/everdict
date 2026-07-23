@@ -1,9 +1,48 @@
-import { type ChatMessage, runAgentLoop } from "@everdict/agent-runtime";
+import { type ChatMessage, type McpInvoke, runAgentLoop } from "@everdict/agent-runtime";
 import type { AgentSessionStore } from "@everdict/application-control";
-import { type AgentMessageRecord, type AgentToolCall, NotFoundError } from "@everdict/contracts";
+import {
+  type AgentMessageRecord,
+  type AgentReference,
+  type AgentReferenceType,
+  type AgentToolCall,
+  NotFoundError,
+} from "@everdict/contracts";
 import type { ToolProvider } from "./mcp-tools.js";
 import type { ModelResolver } from "./model.js";
 import type { ForwardHeaders, Principal } from "./principal.js";
+
+// An @-reference resolves to the workspace read tool that fetches that entity's full record.
+const REFERENCE_TOOL: Record<AgentReferenceType, string> = {
+  harness: "get_harness_instance",
+  runtime: "get_runtime",
+  run: "get_run",
+  dataset: "get_dataset",
+  scorecard: "get_scorecard",
+  judge: "get_judge",
+  view: "get_view",
+};
+
+const MAX_REFERENCE_CHARS = 4_000;
+
+// Resolve each @-reference via its read tool and assemble a context preamble the model reads before the user's
+// words. Best-effort: an unresolved reference degrades to a note rather than failing the turn.
+async function resolveReferences(call: McpInvoke, references: AgentReference[]): Promise<string> {
+  const blocks: string[] = [];
+  for (const ref of references) {
+    const args: Record<string, unknown> = { id: ref.id, ...(ref.version ? { version: ref.version } : {}) };
+    let detail: string;
+    try {
+      const r = await call(REFERENCE_TOOL[ref.type], args);
+      detail = r.isError ? `(could not resolve: ${r.content.slice(0, 200)})` : r.content;
+    } catch (err) {
+      detail = `(could not resolve: ${err instanceof Error ? err.message : String(err)})`;
+    }
+    if (detail.length > MAX_REFERENCE_CHARS) detail = `${detail.slice(0, MAX_REFERENCE_CHARS)}\n… [truncated]`;
+    const tag = ref.version ? `${ref.id}@${ref.version}` : ref.id;
+    blocks.push(`### Referenced ${ref.type}: ${ref.label} (${tag})\n${detail}`);
+  }
+  return `The user attached the following workspace context via @-references. Use it to answer.\n\n${blocks.join("\n\n")}`;
+}
 
 export interface ChatDeps {
   sessions: AgentSessionStore;
@@ -84,6 +123,7 @@ export async function runChat(
   headers: ForwardHeaders,
   sessionId: string,
   userText: string,
+  references?: AgentReference[],
   signal?: AbortSignal,
 ): Promise<ChatResult> {
   const { workspace, subject } = principal;
@@ -100,11 +140,10 @@ export async function runChat(
     seq: seq++,
     role: "user",
     content: userText,
+    ...(references && references.length > 0 ? { references } : {}),
     createdAt: deps.now(),
   };
   await deps.sessions.appendMessages([userRecord]);
-
-  const history: ChatMessage[] = [...recordsToHistory(existing), { role: "user", content: userText }];
 
   const producedRecords: AgentMessageRecord[] = [];
   const messageToRecord = (message: ChatMessage): AgentMessageRecord | null => {
@@ -146,6 +185,14 @@ export async function runChat(
 
   const tools = await deps.toolProvider(headers);
   try {
+    // Fold any @-referenced entity context into the user turn the model sees (the persisted record keeps the
+    // clean text + the reference metadata separately).
+    let userForModel = userText;
+    if (references && references.length > 0 && tools.call) {
+      const preamble = await resolveReferences(tools.call, references);
+      userForModel = `${preamble}\n\n---\n\nUser message:\n${userText}`;
+    }
+    const history: ChatMessage[] = [...recordsToHistory(existing), { role: "user", content: userForModel }];
     const model = await deps.resolveModel(principal);
     await runAgentLoop({
       client: model.client,
