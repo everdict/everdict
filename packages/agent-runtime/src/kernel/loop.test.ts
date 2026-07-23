@@ -338,6 +338,27 @@ describe("runAgentLoop", () => {
     expect(toolContents).toEqual(["slow-done", "fast-done"]);
   });
 
+  it("delegates to a sub-agent via spawn_agent and folds back its summary", async () => {
+    // create() calls in order: (0) parent → spawn_agent tool call; (1) nested sub-agent → text summary; (2) parent → text.
+    const client = fakeClient([
+      toolCallResponse("s1", "spawn_agent", JSON.stringify({ task: "research the failures" })),
+      textResponse("SUB: found 3 failures"),
+      textResponse("done — the sub-agent found 3 failures"),
+    ]);
+    const result = await runAgentLoop({
+      client,
+      model: "test-model",
+      systemPrompt: "sys",
+      history,
+      registry: new ToolRegistry([]),
+    });
+    expect(result.content).toBe("done — the sub-agent found 3 failures");
+    // The spawn tool result carried the sub-agent's final summary back to the parent.
+    const spawnResult = result.produced.find((m) => m.role === "tool");
+    expect((spawnResult as { content: string } | undefined)?.content).toContain("SUB: found 3 failures");
+    expect(result.toolCalls).toEqual([{ name: "spawn_agent", ok: true }]);
+  });
+
   it("stops with aborted when the signal is already aborted", async () => {
     const client = fakeClient([textResponse("unused")]);
     const result = await runAgentLoop({

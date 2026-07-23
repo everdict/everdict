@@ -10,6 +10,7 @@ import type {
   PermissionDecision,
   PermissionHook,
   ToolContext,
+  ToolDefinition,
   ToolResult,
   ToolResultImage,
 } from "../tools/definition.js";
@@ -17,6 +18,7 @@ import { invokeTool } from "../tools/invocation.js";
 import { toOpenAiTools } from "../tools/openai.js";
 import { ToolRegistry } from "../tools/registry.js";
 import { OFFLOAD_THRESHOLD_CHARS, ResultStore, buildReadResultTool, offloadResult } from "../tools/result-store.js";
+import { buildSpawnAgentTool } from "../tools/spawn-tool.js";
 import { type TodoItem, buildTodoTool, extractTodosFromHistory, renderTodoReminder } from "../tools/todo-tool.js";
 import { normalizeHistory } from "./normalize.js";
 import { buildSystemPrompt } from "./system-prompt.js";
@@ -53,6 +55,9 @@ export interface AgentLoopOptions {
   // it (auto-allow); absent hook = allow (write tools are already opt-in). A denied call becomes an error result the
   // model sees and can adapt to.
   permit?: PermissionHook;
+  // Sub-agent recursion depth (internal). A top-level run is 0; spawn_agent runs a nested loop at depth+1, and the
+  // spawn tool is withheld once depth reaches the cap — so delegation is bounded.
+  depth?: number;
   onEvent?: (e: AgentEvent) => void;
   // Fired (awaited) as each assistant/tool message is appended, so the host can persist the transcript
   // incrementally — the source of live progress for a polling UI.
@@ -76,6 +81,8 @@ const DEFAULT_MAX_RETRIES = 2;
 // Circuit breaker: if compaction fires this many times in one run without the context ever fitting, stop instead of
 // hammering the summariser forever on an irrecoverably-oversized context.
 const MAX_COMPACTIONS = 12;
+// Sub-agent delegation depth cap — a top-level agent can spawn one level of sub-agents; those can't spawn further.
+const MAX_AGENT_DEPTH = 1;
 const RETRY_BACKOFF_MS = [500, 1500];
 
 // A transient upstream failure worth a retry on the same model: HTTP 429/5xx or a network hiccup.
@@ -128,10 +135,34 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
   let todos: TodoItem[] = extractTodosFromHistory(messages);
   // Large tool results are offloaded here (stored full) and previewed to the model, which pages the rest via read_tool_result.
   const resultStore = new ResultStore();
+  // Sub-agent delegation: below the depth cap, add spawn_agent — it runs a nested loop (fresh context, same base tools)
+  // at depth+1 and returns only its summary, protecting this agent's context from the sub-task's intermediate output.
+  const depth = opts.depth ?? 0;
+  const spawnTools: ToolDefinition[] =
+    depth < MAX_AGENT_DEPTH
+      ? [
+          buildSpawnAgentTool((task) =>
+            runAgentLoop({
+              client: opts.client,
+              model: opts.model,
+              systemPrompt: `${opts.systemPrompt}\n\n## Sub-task\nYou are handling a scoped sub-task delegated by another agent, with your own fresh context. Do the work with your tools, then give a clear, self-contained summary of your findings as your FINAL message — that summary is your only output back to the caller.`,
+              history: [{ role: "user", content: task }],
+              registry: opts.registry,
+              depth: depth + 1,
+              ...(opts.temperature !== undefined ? { temperature: opts.temperature } : {}),
+              ...(opts.signal ? { signal: opts.signal } : {}),
+              ...(opts.maxTurns !== undefined ? { maxTurns: opts.maxTurns } : {}),
+              ...(opts.summarize ? { summarize: opts.summarize } : {}),
+              ...(opts.permit ? { permit: opts.permit } : {}),
+            }).then((r) => r.content),
+          ),
+        ]
+      : [];
   const registry = new ToolRegistry([
     ...opts.registry.list(),
     buildTodoTool((t) => (todos = t)),
     buildReadResultTool(resultStore),
+    ...spawnTools,
   ]);
   let finalText = "";
   let compactionCount = 0;
