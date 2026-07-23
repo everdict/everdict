@@ -16,14 +16,20 @@ function asArgs(input: unknown): Record<string, unknown> {
 }
 
 // Bridge one MCP tool spec into a runtime ToolDefinition. Marked isMcp → deferred by default (ToolSearch-gated).
-export function mcpToolToDefinition(spec: McpToolSpec, invoke: McpInvoke): ToolDefinition {
+// isReadOnly defaults to true (the built-in control-plane surface is read-only); a host bridging a write-allowed
+// workspace server passes { isReadOnly: false } so the tool is honestly marked as mutating.
+export function mcpToolToDefinition(
+  spec: McpToolSpec,
+  invoke: McpInvoke,
+  opts?: { isReadOnly?: boolean },
+): ToolDefinition {
   const params = spec.inputSchema ?? { type: "object", properties: {} };
   return {
     name: spec.name,
     description: spec.description ?? spec.name,
     parametersJsonSchema: params,
     isMcp: true,
-    isReadOnly: true,
+    isReadOnly: opts?.isReadOnly ?? true,
     call: (input) => invoke(spec.name, asArgs(input)),
   };
 }

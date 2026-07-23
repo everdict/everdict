@@ -8,8 +8,9 @@ import {
   NotFoundError,
 } from "@everdict/contracts";
 import type { ToolProvider } from "./mcp-tools.js";
-import type { ModelResolver } from "./model.js";
+import type { ModelByIdResolver, ModelResolver } from "./model.js";
 import type { ForwardHeaders, Principal } from "./principal.js";
+import type { ProfileResolver } from "./profile.js";
 
 // An @-reference resolves to the workspace read tool that fetches that entity's full record.
 const REFERENCE_TOOL: Record<AgentReferenceType, string> = {
@@ -60,7 +61,9 @@ function buildAttachmentPreamble(attachments: AgentAttachmentInput[]): string | 
   for (const a of attachments) {
     if (typeof a.content !== "string" || a.content.length === 0) continue;
     const capped =
-      a.content.length > MAX_ATTACHMENT_CHARS ? `${a.content.slice(0, MAX_ATTACHMENT_CHARS)}\n… [truncated]` : a.content;
+      a.content.length > MAX_ATTACHMENT_CHARS
+        ? `${a.content.slice(0, MAX_ATTACHMENT_CHARS)}\n… [truncated]`
+        : a.content;
     blocks.push(`### Attached file: ${a.name}\n\`\`\`\n${capped}\n\`\`\``);
   }
   if (blocks.length === 0) return undefined;
@@ -71,10 +74,15 @@ export interface ChatDeps {
   sessions: AgentSessionStore;
   resolveModel: ModelResolver;
   toolProvider: ToolProvider;
-  systemPrompt: string;
+  systemPrompt: string; // base persona — used as-is when no resolveProfile is wired (dev / no DB)
   now: () => string;
   newId: () => string;
   maxTurns?: number;
+  // Per-workspace agent customization (Phase 1): resolve the workspace's AgentSpec → system prompt (base +
+  // instructions), MCP tool servers, and an optional model override. Absent → the base agent (no customization).
+  resolveProfile?: ProfileResolver;
+  // Resolve the AgentSpec.model override → the LLM client. Only consulted when a profile names a model.
+  resolveModelById?: ModelByIdResolver;
 }
 
 export interface ChatResult {
@@ -226,7 +234,12 @@ export async function runChat(
     hooks?.onRecord?.(record);
   };
 
-  const tools = await deps.toolProvider(headers);
+  // Resolve the workspace's agent customization (Phase 1): system prompt (base + instructions), MCP tool servers, and
+  // an optional model override. Absent resolver → the base agent (unchanged behavior).
+  const profile = deps.resolveProfile ? await deps.resolveProfile(principal) : undefined;
+  const systemPrompt = profile?.systemPrompt ?? deps.systemPrompt;
+
+  const tools = await deps.toolProvider(headers, profile?.mcpServers ?? []);
   try {
     // Fold any @-referenced entity context into the user turn the model sees (the persisted record keeps the
     // clean text + the reference metadata separately).
@@ -241,11 +254,15 @@ export async function runChat(
     const userForModel =
       preambles.length > 0 ? `${preambles.join("\n\n")}\n\n---\n\nUser message:\n${userText}` : userText;
     const history: ChatMessage[] = [...recordsToHistory(existing), { role: "user", content: userForModel }];
-    const model = await deps.resolveModel(principal);
+    // The AgentSpec.model override (if any) picks which registered model powers this workspace's agent, else the default.
+    const model =
+      profile?.model && deps.resolveModelById
+        ? await deps.resolveModelById(principal, profile.model)
+        : await deps.resolveModel(principal);
     await runAgentLoop({
       client: model.client,
       model: model.model,
-      systemPrompt: deps.systemPrompt,
+      systemPrompt,
       history,
       registry: tools.registry,
       onMessage: persist,
