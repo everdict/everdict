@@ -6,10 +6,14 @@ describe("perRun vocabulary + field injection", () => {
   const runId = "abc";
   const keys = keysFor(runId);
   // A thread_id-isolated dependency contributes thread_id to the wiring; task/target are caller extras.
-  const wiring = wiringVars(runId, [{ store: "postgres", role: "checkpoint", isolateBy: "thread_id" }], {
-    task: "do it",
-    target_cdp_url: "ws://browser:9222",
-  });
+  const wiring = wiringVars(
+    runId,
+    [{ store: "postgres", role: "checkpoint", purpose: "plumbing", isolateBy: "thread_id" }],
+    {
+      task: "do it",
+      target_cdp_url: "ws://browser:9222",
+    },
+  );
   const vocab = perRunVocabulary(keys, wiring);
 
   it("spans both the isolateBy wiring and the keysFor default-body names (so historic perRun keys resolve)", () => {

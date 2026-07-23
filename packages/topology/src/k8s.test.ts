@@ -217,7 +217,7 @@ describe("K8sTopologyRuntime", () => {
   });
   const SPEC_PG: ServiceHarnessSpec = {
     ...SPEC,
-    dependencies: [{ store: "postgres", role: "checkpoints", isolateBy: "thread_id" }],
+    dependencies: [{ store: "postgres", role: "checkpoints", purpose: "plumbing", isolateBy: "thread_id" }],
   };
 
   it("pool: deploys the shared store once + mints the tenant DB/role (psql exec) + injects a scoped DATABASE_URL into the service", async () => {

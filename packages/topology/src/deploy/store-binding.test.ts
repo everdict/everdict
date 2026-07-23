@@ -10,8 +10,8 @@ const SPEC: ServiceHarnessSpec = {
     { name: "agent-server", image: "aegra:1", port: 2026, needs: [], perRun: ["thread_id"], replicas: 1, env: {} },
   ],
   dependencies: [
-    { store: "postgres", role: "checkpoints", isolateBy: "thread_id" },
-    { store: "redis", role: "broker", isolateBy: "key-prefix" },
+    { store: "postgres", role: "checkpoints", purpose: "plumbing", isolateBy: "thread_id" },
+    { store: "redis", role: "broker", purpose: "plumbing", isolateBy: "key-prefix" },
   ],
   frontDoor: { service: "agent-server", submit: "POST /runs" },
   traceSource: { kind: "otel", endpoint: "http://unused" },
@@ -105,7 +105,7 @@ describe("planTenantStores — pool", () => {
 describe("planTenantStores — minio pool", () => {
   const MINIO_SPEC: ServiceHarnessSpec = {
     ...SPEC,
-    dependencies: [{ store: "minio", role: "snapshots", isolateBy: "object-prefix" }],
+    dependencies: [{ store: "minio", role: "snapshots", purpose: "plumbing", isolateBy: "object-prefix" }],
   };
   const plan = planTenantStores(MINIO_SPEC, zone({ storeIsolation: "pool" }));
 

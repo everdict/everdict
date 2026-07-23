@@ -63,9 +63,9 @@ const SPEC: ServiceHarnessSpec = {
     },
   ],
   dependencies: [
-    { store: "postgres", role: "checkpoints", isolateBy: "thread_id" },
-    { store: "redis", role: "action-stream", isolateBy: "key-prefix" },
-    { store: "minio", role: "snapshots", isolateBy: "object-prefix" },
+    { store: "postgres", role: "checkpoints", purpose: "plumbing", isolateBy: "thread_id" },
+    { store: "redis", role: "action-stream", purpose: "plumbing", isolateBy: "key-prefix" },
+    { store: "minio", role: "snapshots", purpose: "plumbing", isolateBy: "object-prefix" },
   ],
   target: {
     kind: "browser",
@@ -566,8 +566,8 @@ describe("provisionDependencies (co-deploy stores + auto-wire connection env)", 
         },
       ],
       dependencies: [
-        { store: "postgres", role: "db", isolateBy: "thread_id" },
-        { store: "redis", role: "bus", isolateBy: "key-prefix" },
+        { store: "postgres", role: "db", purpose: "plumbing", isolateBy: "thread_id" },
+        { store: "redis", role: "bus", purpose: "plumbing", isolateBy: "key-prefix" },
       ],
       frontDoor: { service: "agent", submit: "POST /runs" },
       traceSource: { kind: "otel", endpoint: "http://o:4318" },

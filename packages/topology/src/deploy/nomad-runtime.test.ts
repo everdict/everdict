@@ -10,7 +10,7 @@ const SPEC: ServiceHarnessSpec = {
   id: "aegra",
   version: "1.0.0",
   services: [{ name: "agent-server", image: "aegra:1", needs: [], perRun: ["thread_id"], replicas: 1, env: {} }],
-  dependencies: [{ store: "postgres", role: "checkpoints", isolateBy: "thread_id" }],
+  dependencies: [{ store: "postgres", role: "checkpoints", purpose: "plumbing", isolateBy: "thread_id" }],
   frontDoor: { service: "agent-server", submit: "POST /runs" },
   traceSource: { kind: "otel", endpoint: "http://unused" },
 };

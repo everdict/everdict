@@ -18,7 +18,7 @@ const buTemplate: HarnessTemplateSpec = HarnessTemplateSpecSchema.parse({
     { name: "browser" },
     { name: "action-stream", needs: ["redis"], slot: "action" },
   ],
-  dependencies: [{ store: "redis", role: "bus", isolateBy: "key-prefix" }],
+  dependencies: [{ store: "redis", role: "bus", purpose: "plumbing", isolateBy: "key-prefix" }],
   frontDoor: { service: "planner", submit: "POST /runs" },
   traceSource: { kind: "otel", endpoint: "http://otel:4318" },
 });
@@ -140,7 +140,7 @@ describe("resolveHarnessInstance — service(topology)", () => {
       id: "x",
       version: "1",
       services: [{ name: "planner", needs: [] }],
-      dependencies: [{ store: "redis", role: "cache", isolateBy: "external", service: "planner" }],
+      dependencies: [{ store: "redis", role: "cache", purpose: "plumbing", isolateBy: "external", service: "planner" }],
       frontDoor: { service: "planner", submit: "POST /runs" },
       traceSource: { kind: "otel", endpoint: "http://o:4318" },
     });
@@ -155,6 +155,7 @@ describe("resolveHarnessInstance — service(topology)", () => {
     expect(resolved.dependencies[0]).toEqual({
       store: "redis",
       role: "cache",
+      purpose: "plumbing",
       isolateBy: "external",
       service: "planner",
     });

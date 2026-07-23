@@ -42,12 +42,55 @@ export interface DepInjectRow {
   env: string
   template: string
 }
+// How the store is managed — the ONE comprehensible axis the author chooses, replacing the raw 5-value isolateBy enum
+// (which conflated three orthogonal things: physical partition mechanism, who-isolates, and deploy model). See
+// docs/architecture/dependency-store-roles.md.
+//   managed  = Everdict deploys the store and isolates each case automatically (physical mechanism derived from the store type).
+//   agent    = the agent isolates itself per case via its own thread/session id (thread_id) — e.g. LangGraph.
+//   external = a BYO store outside Everdict — not deployed; the connection is provided on the using service's env.
+export type DepManagement = 'managed' | 'agent' | 'external'
+
 export interface DepRow {
   store: string
   role: string
-  isolateBy: string // …/schema | external (BYO external store — not deployed by Everdict; connection is env at deploy time)
+  purpose: 'plumbing' | 'data' // plumbing = the agent's own state (empty at start) · data = world-state seeded per-case from the dataset
+  management: DepManagement // replaces the raw isolateBy choice — isolateBy is DERIVED from this + the store kind
   service: string // service that uses this store (optional; if left empty, shared across the topology)
   inject: DepInjectRow[] // BYO store env names (empty = the conventional keys only)
+}
+
+// The physical isolation an Everdict-deployed store uses, derived from its kind — the author never picks this directly.
+function physicalIsolateByFor(store: string): string {
+  switch (store) {
+    case 'redis':
+      return 'key-prefix'
+    case 'minio':
+      return 'object-prefix'
+    default:
+      return 'schema' // postgres + any relational default
+  }
+}
+
+// management (+ store) → the contract's isolateBy value (the internal per-case wiring vocabulary the runtime consumes).
+export function isolateByForManagement(management: DepManagement, store: string): string {
+  if (management === 'external') return 'external'
+  if (management === 'agent') return 'thread_id'
+  return physicalIsolateByFor(store)
+}
+
+// Inverse (prefill): an existing spec's isolateBy → the management choice. The physical kinds collapse to "managed".
+export function managementFromIsolateBy(isolateBy: string): DepManagement {
+  if (isolateBy === 'external') return 'external'
+  if (isolateBy === 'thread_id') return 'agent'
+  return 'managed'
+}
+
+// The conventional connection env key per store kind (mirror of the control plane's STORE_DEFS connEnv) — shown as a
+// hint for an external (BYO) store so the author knows which env to set on the using service to point at their store.
+export const CONVENTIONAL_CONN_KEY: Record<string, string> = {
+  postgres: 'DATABASE_URL',
+  redis: 'REDIS_URL',
+  minio: 'AWS_S3_ENDPOINT',
 }
 
 // Template (top-level category) form state.
@@ -264,9 +307,10 @@ export function buildTemplate(s: TemplateState): Record<string, unknown> {
       }
     }),
     dependencies: s.deps.map((d) => {
+      const isolateBy = isolateByForManagement(d.management, d.store)
       // external = Everdict deploys nothing, so there are no coordinates to render — never emit inject there
       // (the control plane rejects it; the form simply drops rows left over from a mode switch).
-      const inject = (d.isolateBy === 'external' ? [] : d.inject)
+      const inject = (d.management === 'external' ? [] : d.inject)
         .filter((m) => m.env.trim())
         .map((m) => ({
           env: m.env.trim(),
@@ -275,7 +319,9 @@ export function buildTemplate(s: TemplateState): Record<string, unknown> {
       return {
         store: d.store,
         role: d.role,
-        isolateBy: d.isolateBy,
+        // Emit only the non-default (data); plumbing is the control-plane default, so omitting keeps the wire minimal.
+        ...(d.purpose === 'data' ? { purpose: 'data' as const } : {}),
+        isolateBy,
         ...(d.service.trim() ? { service: d.service.trim() } : {}),
         ...(inject.length ? { inject } : {}),
       }
@@ -330,7 +376,8 @@ export function templateStateFromSpec(t: HarnessTemplateSpec): TemplateState {
     deps: (t.dependencies ?? []).map((d) => ({
       store: d.store,
       role: d.role,
-      isolateBy: d.isolateBy,
+      purpose: d.purpose === 'data' ? ('data' as const) : ('plumbing' as const),
+      management: managementFromIsolateBy(d.isolateBy),
       service: d.service ?? '',
       inject: (d.inject ?? []).map((m) => ({ env: m.env, template: m.template ?? '' })),
     })),

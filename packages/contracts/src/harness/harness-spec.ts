@@ -134,10 +134,16 @@ export type DependencyInject = z.infer<typeof DependencyInjectSchema>;
 //   The runtime excludes an external dep from provisioning/wiring and only exposes it first-class in the diagram/structure.
 // service = the service that uses this store (unset = topology-wide) — for the service→store edge in the diagram;
 //   inject is scoped the same way (unset = injected into every service).
+// purpose = the store's ROLE in the eval (docs/architecture/dependency-store-roles.md):
+//   "plumbing" (default) = the agent's OWN execution state (LangGraph checkpoints / session DB); it comes up empty and
+//     is only per-case logically isolated. This is intrinsic to the agent's deployable → harness-owned.
+//   "data" = a world-state store the TASK operates on; its CONTENT is an experiment condition seeded per-case from the
+//     dataset (EvalCase.fixtures, P2). P1 is a semantic marker only — no runtime branch keys off it yet.
 export const TopologyDependencySchema = z
   .object({
     store: z.enum(["postgres", "redis", "minio"]),
     role: z.string(),
+    purpose: z.enum(["plumbing", "data"]).default("plumbing"),
     isolateBy: z.enum(["thread_id", "key-prefix", "object-prefix", "schema", "external"]),
     service: z.string().optional(),
     inject: z.array(DependencyInjectSchema).optional(),

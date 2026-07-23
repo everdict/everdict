@@ -79,7 +79,7 @@ describe("checkPortability", () => {
 
   it("warns (not errors) that an INTERNAL object store's artifacts won't reach the judge — so it never blocks registration", () => {
     const s = spec([svc({ name: "web", port: 3000 })], {
-      dependencies: [{ store: "minio", role: "artifacts", isolateBy: "object-prefix" }],
+      dependencies: [{ store: "minio", role: "artifacts", purpose: "plumbing", isolateBy: "object-prefix" }],
     });
     const issues = checkPortability(s);
     const art = issues.find((i) => i.rule === "artifact-store-internal");
@@ -92,7 +92,15 @@ describe("checkPortability", () => {
 
   it("warns (not errors) when a service.env literal shares a key with a dependency inject mapping — the inject always wins, the literal is dead", () => {
     const s = spec([svc({ name: "app", port: 3000, env: { VALKEY_URL: "redis://stale:6379" } })], {
-      dependencies: [{ store: "redis", role: "queue", isolateBy: "key-prefix", inject: [{ env: "VALKEY_URL" }] }],
+      dependencies: [
+        {
+          store: "redis",
+          role: "queue",
+          purpose: "plumbing",
+          isolateBy: "key-prefix",
+          inject: [{ env: "VALKEY_URL" }],
+        },
+      ],
     });
     const issue = checkPortability(s).find((i) => i.rule === "inject-shadowed-literal");
     expect(issue?.severity).toBe("warning");
@@ -111,6 +119,7 @@ describe("checkPortability", () => {
           {
             store: "redis",
             role: "queue",
+            purpose: "plumbing",
             isolateBy: "key-prefix",
             service: "worker",
             inject: [{ env: "VALKEY_URL" }],
@@ -124,11 +133,11 @@ describe("checkPortability", () => {
 
   it("does NOT warn when the object store is external (BYO, control-plane-reachable) or is a non-object store (pg/redis)", () => {
     const external = spec([svc({ name: "web", port: 3000 })], {
-      dependencies: [{ store: "minio", role: "artifacts", isolateBy: "external" }],
+      dependencies: [{ store: "minio", role: "artifacts", purpose: "plumbing", isolateBy: "external" }],
     });
     expect(rules(external)).not.toContain("artifact-store-internal");
     const kv = spec([svc({ name: "web", port: 3000 })], {
-      dependencies: [{ store: "redis", role: "bus", isolateBy: "key-prefix" }],
+      dependencies: [{ store: "redis", role: "bus", purpose: "plumbing", isolateBy: "key-prefix" }],
     });
     expect(rules(kv)).not.toContain("artifact-store-internal");
   });

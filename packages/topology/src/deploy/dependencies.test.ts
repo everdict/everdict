@@ -19,21 +19,21 @@ function spec(dependencies: ServiceHarnessSpec["dependencies"]): ServiceHarnessS
 describe("dependencies — excludes external (BYO) stores", () => {
   it("an external dep is left out of dependencyStores (no container deployed)", () => {
     const s = spec([
-      { store: "postgres", role: "ckpt", isolateBy: "thread_id" },
-      { store: "redis", role: "cache", isolateBy: "external", service: "planner" },
+      { store: "postgres", role: "ckpt", purpose: "plumbing", isolateBy: "thread_id" },
+      { store: "redis", role: "cache", purpose: "plumbing", isolateBy: "external", service: "planner" },
     ]);
     expect(dependencyStores(s).map((d) => d.store)).toEqual(["postgres"]); // redis (external) excluded
   });
 
   it("an external dep is not subject to automatic connEnv injection (connection = storeEnv)", () => {
-    const s = spec([{ store: "redis", role: "cache", isolateBy: "external" }]);
+    const s = spec([{ store: "redis", role: "cache", purpose: "plumbing", isolateBy: "external" }]);
     expect(dependencyConnEnv(s)).toEqual({}); // no automatic REDIS_URL injection
   });
 
   it("wiringVars does not create an isolation variable for an external dep", () => {
     const deps: ServiceHarnessSpec["dependencies"] = [
-      { store: "postgres", role: "ckpt", isolateBy: "thread_id" },
-      { store: "redis", role: "cache", isolateBy: "external" },
+      { store: "postgres", role: "ckpt", purpose: "plumbing", isolateBy: "thread_id" },
+      { store: "redis", role: "cache", purpose: "plumbing", isolateBy: "external" },
     ];
     const vars = wiringVars("r1", deps);
     expect(vars.thread_id).toBe("run-r1"); // isolated kinds create a variable

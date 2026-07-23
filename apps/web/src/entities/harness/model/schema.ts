@@ -181,9 +181,12 @@ export type DependencyInject = z.infer<typeof dependencyInjectSchema>
 
 // dependency store — shared + per-case logical isolation (isolateBy = the kind of isolation key).
 // isolateBy="external" = BYO external/shared store (a different cluster, etc.; not deployed by Everdict, connection via env at deploy time). service = the service that uses it.
+// purpose = the store's role in the eval: "plumbing" (default) = the agent's own state (empty at start) · "data" = a
+// world-state store the task operates on, seeded per-case from the dataset (docs/architecture/dependency-store-roles.md).
 export const topologyDependencySchema = z.object({
   store: z.string(), // postgres | redis | minio
   role: z.string(),
+  purpose: z.enum(['plumbing', 'data']).default('plumbing'),
   isolateBy: z.string(), // thread_id | key-prefix | object-prefix | schema | external
   service: z.string().optional(), // the service that uses this store (unset = shared across the topology)
   inject: z.array(dependencyInjectSchema).optional(), // BYO store env names (scoped by `service` the same way)

@@ -61,6 +61,7 @@ describe("dependencyInjectEnv", () => {
         {
           store: "redis",
           role: "queue",
+          purpose: "plumbing",
           isolateBy: "key-prefix",
           inject: [{ env: "VALKEY_URL" }, { env: "QUEUE_HOST", template: "{host}" }],
         },
@@ -75,7 +76,14 @@ describe("dependencyInjectEnv", () => {
   it("scopes by dep.service — unset injects into every service, set injects into that service only", () => {
     const s = spec({
       dependencies: [
-        { store: "redis", role: "queue", isolateBy: "key-prefix", service: "worker", inject: [{ env: "VALKEY_URL" }] },
+        {
+          store: "redis",
+          role: "queue",
+          purpose: "plumbing",
+          isolateBy: "key-prefix",
+          service: "worker",
+          inject: [{ env: "VALKEY_URL" }],
+        },
       ],
     });
     expect(dependencyInjectEnv(s, { redis: redis }, "app")).toEqual({});
@@ -85,8 +93,14 @@ describe("dependencyInjectEnv", () => {
   it("skips an external dependency (Everdict deployed nothing — no coordinates) and a store with no values", () => {
     const s = spec({
       dependencies: [
-        { store: "minio", role: "artifacts", isolateBy: "external", inject: [{ env: "OBJECT_STORAGE_ENDPOINT" }] },
-        { store: "postgres", role: "state", isolateBy: "schema", inject: [{ env: "PG_URL" }] },
+        {
+          store: "minio",
+          role: "artifacts",
+          purpose: "plumbing",
+          isolateBy: "external",
+          inject: [{ env: "OBJECT_STORAGE_ENDPOINT" }],
+        },
+        { store: "postgres", role: "state", purpose: "plumbing", isolateBy: "schema", inject: [{ env: "PG_URL" }] },
       ],
     });
     // postgres has no entry in storeValues (this runtime configuration deployed no store) → nothing rendered.
@@ -94,7 +108,7 @@ describe("dependencyInjectEnv", () => {
   });
 
   it("renders nothing for a dependency without inject mappings (conventional connEnv keys remain the only injection)", () => {
-    const s = spec({ dependencies: [{ store: "redis", role: "queue", isolateBy: "key-prefix" }] });
+    const s = spec({ dependencies: [{ store: "redis", role: "queue", purpose: "plumbing", isolateBy: "key-prefix" }] });
     expect(dependencyInjectEnv(s, { redis: redis }, "app")).toEqual({});
   });
 });

@@ -29,12 +29,15 @@ import {
 import {
   buildInstance,
   buildTemplate,
+  CONVENTIONAL_CONN_KEY,
   EMPTY_SERVICE_OVERRIDE,
   INITIAL_INSTANCE,
   INITIAL_TEMPLATE,
+  isolateByForManagement,
   parseJsonObject,
   SERVICE_OS_OPTIONS,
   type DepInjectRow,
+  type DepManagement,
   type DepRow,
   type InstanceState,
   type Kind,
@@ -60,12 +63,19 @@ const storeOptions = (t: Translate): ComboboxOption[] => [
   { value: 'redis', description: t('storeInMemory') },
   { value: 'minio', description: t('storeObjectStore') },
 ]
-const isolateOptions = (t: Translate): ComboboxOption[] => [
-  { value: 'thread_id', description: t('isolateThreadId') },
-  { value: 'key-prefix', description: t('isolateKeyPrefix') },
-  { value: 'object-prefix', description: t('isolateObjectPrefix') },
-  { value: 'schema', description: t('isolateSchema') },
-  { value: 'external', description: t('isolateExternal') },
+// How the store is managed — the ONE comprehensible axis, replacing the raw 5-value isolateBy enum (which conflated
+// physical partition mechanism [derived from the store, never a real choice], who-isolates, and deploy model). The
+// physical schema/key-prefix/object-prefix values collapse into "managed"; the wizard derives them from the store kind.
+const manageOptions = (t: Translate): ComboboxOption[] => [
+  { value: 'managed', label: t('manageManagedLabel'), description: t('manageManagedDesc') },
+  { value: 'agent', label: t('manageAgentLabel'), description: t('manageAgentDesc') },
+  { value: 'external', label: t('manageExternalLabel'), description: t('manageExternalDesc') },
+]
+// The store's ROLE in the eval — the primary question (see docs/architecture/dependency-store-roles.md). Asking this
+// first (instead of the raw isolateBy) means the author no longer needs to know their agent's internal isolation model.
+const purposeOptions = (t: Translate): ComboboxOption[] => [
+  { value: 'plumbing', label: t('purposePlumbingLabel'), description: t('purposePlumbingDesc') },
+  { value: 'data', label: t('purposeDataLabel'), description: t('purposeDataDesc') },
 ]
 
 // Per-service OS placement — the OS the image intrinsically needs (portable; the runtime maps it to a node). linux is
@@ -488,7 +498,14 @@ export function TemplateForm({
               set({
                 deps: [
                   ...s.deps,
-                  { store: 'postgres', role: '', isolateBy: 'thread_id', service: '', inject: [] },
+                  {
+                    store: 'postgres',
+                    role: '',
+                    purpose: 'plumbing',
+                    management: 'managed',
+                    service: '',
+                    inject: [],
+                  },
                 ],
               })
             }
@@ -501,11 +518,27 @@ export function TemplateForm({
                 <div className="grid grid-cols-3 gap-2.5">
                   <div className="space-y-1">
                     <span className="flex items-center gap-1">
+                      <span className="text-[11px] font-[510] text-muted-foreground">
+                        {t('depPurposeLabel')}
+                      </span>
+                      <InfoTip content={t('depPurposeTip')} />
+                    </span>
+                    <Combobox
+                      value={d.purpose}
+                      onChange={(v) => setDep(i, { purpose: v === 'data' ? 'data' : 'plumbing' })}
+                      options={purposeOptions(t)}
+                      className="w-full"
+                      aria-label="purpose"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <span className="flex items-center gap-1">
                       <span className="text-[11px] font-[510] text-muted-foreground">store</span>
                       <InfoTip content={t('depStoreTip')} />
                     </span>
                     <Combobox
                       value={d.store}
+                      // isolateBy is derived from (management + store) at emit, so changing the store needs no extra work.
                       onChange={(v) => setDep(i, { store: v })}
                       options={storeOptions(t)}
                       className="w-full"
@@ -519,21 +552,6 @@ export function TemplateForm({
                     onChange={(v) => setDep(i, { role: v })}
                     placeholder="main"
                   />
-                  <div className="space-y-1">
-                    <span className="flex items-center gap-1">
-                      <span className="text-[11px] font-[510] text-muted-foreground">
-                        isolateBy
-                      </span>
-                      <InfoTip content={t('depIsolateByTip')} />
-                    </span>
-                    <Combobox
-                      value={d.isolateBy}
-                      onChange={(v) => setDep(i, { isolateBy: v })}
-                      options={isolateOptions(t)}
-                      className="w-full"
-                      aria-label="isolateBy"
-                    />
-                  </div>
                 </div>
                 <LabeledInput
                   label={t('depServiceLabel')}
@@ -542,8 +560,38 @@ export function TemplateForm({
                   onChange={(v) => setDep(i, { service: v })}
                   placeholder="agent-server"
                 />
-                {d.isolateBy === 'external' ? (
-                  <p className="text-[11px] text-muted-foreground">{t('depExternalNote')}</p>
+                {d.purpose === 'data' && (
+                  <p className="text-[11px] text-muted-foreground">{t('depDataNote')}</p>
+                )}
+                {/* The one comprehensible axis — who deploys the store & how cases are isolated. The physical mechanism
+                    (schema/key-prefix/object-prefix) is derived from the store type, so it is never shown. */}
+                <div className="space-y-1">
+                  <span className="flex items-center gap-1">
+                    <span className="text-[11px] font-[510] text-muted-foreground">
+                      {t('depManageLabel')}
+                    </span>
+                    <InfoTip content={t('depManageTip')} />
+                  </span>
+                  <Combobox
+                    value={d.management}
+                    onChange={(v) => setDep(i, { management: v as DepManagement })}
+                    options={manageOptions(t)}
+                    className="w-full"
+                    aria-label="management"
+                  />
+                </div>
+                {d.management === 'external' ? (
+                  <p className="text-[11px] text-muted-foreground">
+                    {t('depExternalNote')}{' '}
+                    {t.rich('depExternalHint', {
+                      key: () => (
+                        <code className="font-mono">
+                          {CONVENTIONAL_CONN_KEY[d.store] ?? 'the store URL'}
+                        </code>
+                      ),
+                      svc: () => <b>{d.service.trim() || t('depExternalHintAnyService')}</b>,
+                    })}
+                  </p>
                 ) : (
                   <DepInjectEditor
                     rows={d.inject}
@@ -1588,13 +1636,14 @@ function previewSpec(s: TemplateState): HarnessSpec {
       .map((d) => {
         // Mirror the emit rule (external deps carry no inject) so the store edge labels the BYO keys live.
         const inject =
-          d.isolateBy === 'external'
+          d.management === 'external'
             ? []
             : d.inject.filter((m) => m.env.trim()).map((m) => ({ env: m.env.trim() }))
         return {
           store: d.store,
           role: d.role,
-          isolateBy: d.isolateBy,
+          purpose: d.purpose, // always present for the live diagram's (required) local type
+          isolateBy: isolateByForManagement(d.management, d.store),
           ...(d.service.trim() ? { service: d.service.trim() } : {}),
           ...(inject.length ? { inject } : {}),
         }

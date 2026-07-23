@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { TopologyDependencySchema, injectTemplateFields } from "./harness-spec.js";
 
-const base = { store: "redis", role: "queue", isolateBy: "key-prefix" };
+const base = { store: "redis", role: "queue", purpose: "plumbing", isolateBy: "key-prefix" };
 
 describe("TopologyDependencySchema.inject — BYO store env names validated at the boundary", () => {
   it("accepts a dependency without inject (back-compat)", () => {

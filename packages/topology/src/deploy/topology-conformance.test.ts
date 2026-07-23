@@ -68,6 +68,7 @@ const storeCanary: ServiceHarnessSpec = {
     {
       store: "redis",
       role: "queue",
+      purpose: "plumbing",
       isolateBy: "key-prefix",
       inject: [{ env: "VALKEY_URL", template: "valkey://{userinfo}{host}:{port}" }],
     },

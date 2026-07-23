@@ -20,8 +20,8 @@ const SPEC: ServiceHarnessSpec = {
     },
   ],
   dependencies: [
-    { store: "postgres", role: "checkpoints", isolateBy: "thread_id" },
-    { store: "redis", role: "action-stream", isolateBy: "key-prefix" },
+    { store: "postgres", role: "checkpoints", purpose: "plumbing", isolateBy: "thread_id" },
+    { store: "redis", role: "action-stream", purpose: "plumbing", isolateBy: "key-prefix" },
   ],
   target: { kind: "browser", engine: "chromium", lifecycle: "per-case-instance", observe: ["dom"] },
   frontDoor: { service: "agent-server", submit: "POST /runs" },
@@ -330,6 +330,7 @@ describe("DockerTopologyRuntime", () => {
         {
           store: "redis",
           role: "queue",
+          purpose: "plumbing",
           isolateBy: "key-prefix",
           inject: [
             { env: "VALKEY_URL", template: "valkey://{host}:{port}" },
