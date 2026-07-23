@@ -178,7 +178,9 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
     : [];
   const registry = new ToolRegistry([
     ...opts.registry.list(),
-    buildTodoTool((t) => (todos = t)),
+    buildTodoTool((t) => {
+      todos = t;
+    }),
     buildReadResultTool(resultStore),
     ...spawnTools,
     ...planTools,

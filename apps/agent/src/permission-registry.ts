@@ -18,15 +18,14 @@ export class PermissionRegistry {
   wait(requestId: string, sessionId: string, signal?: AbortSignal): Promise<PermissionDecision> {
     return new Promise<PermissionDecision>((resolve) => {
       let settled = false;
-      let timer: ReturnType<typeof setTimeout> | undefined;
       const finish = (decision: PermissionDecision): void => {
         if (settled) return;
         settled = true;
         this.pending.delete(requestId);
-        if (timer) clearTimeout(timer);
+        clearTimeout(timer);
         resolve(decision);
       };
-      timer = setTimeout(() => finish("deny"), this.timeoutMs);
+      const timer = setTimeout(() => finish("deny"), this.timeoutMs);
       signal?.addEventListener("abort", () => finish("deny"), { once: true });
       this.pending.set(requestId, { sessionId, resolve: finish });
     });
