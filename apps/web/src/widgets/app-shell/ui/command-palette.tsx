@@ -13,7 +13,6 @@ import {
   Search,
   Server,
   SunMoon,
-  Upload,
   type LucideIcon,
 } from 'lucide-react'
 import { useTranslations } from 'next-intl'
@@ -83,14 +82,6 @@ function actionsFor(workspace: string, t: ReturnType<typeof useTranslations>): C
       group,
       keywords: 'compare diff regression',
       perform: push('/scorecards/compare'),
-    },
-    {
-      id: 'ingest-trace',
-      label: t('palette.ingestTrace'),
-      icon: Upload,
-      group,
-      keywords: 'ingest otel mlflow trace',
-      perform: push('/scorecards/ingest'),
     },
     {
       id: 'new-dataset',

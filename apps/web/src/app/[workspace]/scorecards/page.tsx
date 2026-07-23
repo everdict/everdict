@@ -57,30 +57,14 @@ export default async function ScorecardsPage({
         title={t('title')}
         description={t('description')}
         actions={
-          <div className="flex flex-wrap items-center gap-2">
+          canRun ? (
             <Link
-              href={`/${workspace}/scorecards/analyze`}
-              className={buttonVariants({ size: 'sm', variant: 'secondary' })}
+              href={`/${workspace}/scorecards/new`}
+              className={buttonVariants({ size: 'sm' })}
             >
-              {t('analyze')}
+              {t('run')}
             </Link>
-            {canRun ? (
-              <>
-                <Link
-                  href={`/${workspace}/scorecards/ingest`}
-                  className={buttonVariants({ size: 'sm', variant: 'secondary' })}
-                >
-                  {t('ingest')}
-                </Link>
-                <Link
-                  href={`/${workspace}/scorecards/new`}
-                  className={buttonVariants({ size: 'sm' })}
-                >
-                  {t('run')}
-                </Link>
-              </>
-            ) : null}
-          </div>
+          ) : null
         }
       />
 
