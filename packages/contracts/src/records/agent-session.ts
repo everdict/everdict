@@ -38,6 +38,15 @@ export const AgentReferenceSchema = z.object({
 });
 export type AgentReference = z.infer<typeof AgentReferenceSchema>;
 
+// A file the user attached to a turn — metadata only (name/type/size). The text content is folded into the model
+// context at send time (like an @-reference) but is NOT persisted; the transcript shows a chip by name.
+export const AgentAttachmentSchema = z.object({
+  name: z.string(),
+  mimeType: z.string().optional(),
+  size: z.number().int().nonnegative().optional(),
+});
+export type AgentAttachment = z.infer<typeof AgentAttachmentSchema>;
+
 // One transcript message. `role` mirrors the chat protocol: a `user` turn, an `assistant` reply (text and/or
 // tool_calls), or a `tool` result answering an assistant tool_call. `seq` orders the transcript within a session.
 export const AgentMessageRecordSchema = z.object({
@@ -51,6 +60,7 @@ export const AgentMessageRecordSchema = z.object({
   toolCallId: z.string().optional(), // tool turns: the assistant tool_call this answers
   name: z.string().optional(), // tool turns: the tool name (for display)
   references: z.array(AgentReferenceSchema).optional(), // user turns: the entities @-referenced this turn
+  attachments: z.array(AgentAttachmentSchema).optional(), // user turns: files attached (metadata only)
   createdAt: z.string(),
 });
 export type AgentMessageRecord = z.infer<typeof AgentMessageRecordSchema>;
