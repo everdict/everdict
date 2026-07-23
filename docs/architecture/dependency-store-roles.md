@@ -1,20 +1,23 @@
 # Dependency store roles — plumbing vs data, and data-as-condition (design)
 
-> **Status: design only (not started).** A doc-first SSOT for splitting a service-topology harness's dependency
-> stores by ROLE, so a store's *plumbing* stays with the harness while a store's *data* becomes a first-class
-> experiment condition owned by the dataset. Every phase is sequenced to keep the live e2e
-> (`scripts/live/service-topology-{nomad,k8s}.mjs`) green and to default to today's behavior exactly — a spec that
-> sets nothing new dispatches identically to today. Parent: `docs/service-harness.md`. Siblings:
-> `judge-placement-locality.md` (store-locality grading), `streaming-case-pipeline.md` (recording seal),
+> **Status: P1 shipped · P2 core shipped (Docker/postgres) · tail + P3 open.** A doc-first SSOT for splitting a
+> service-topology harness's dependency stores by ROLE, so a store's *plumbing* stays with the harness while a
+> store's *data* becomes a first-class experiment condition owned by the dataset. Every phase defaults to today's
+> behavior exactly — a spec that sets nothing new dispatches identically to today. Parent: `docs/service-harness.md`.
+> Siblings: `judge-placement-locality.md` (store-locality grading), `streaming-case-pipeline.md` (recording seal),
 > `portable-harness-runtime.md`, `front-door-generalization.md` (the `isolateBy`→wiring precedent).
 >
-> - **P1 — role split (`purpose`).** A dependency gains `purpose: "plumbing" | "data"` (default `plumbing` = today).
->   `plumbing` = the agent's own state store (empty at start, per-case logical isolation). `data` = a world-state
->   store whose CONTENT is the experiment variable, seeded per-case from the dataset. `isolateBy` becomes a
->   store-derived default (wizard stops asking it raw). Wizard: purpose-first + an `external` connection sub-form.
-> - **P2 — data as condition.** `EvalCase.fixtures[]` (dataset-owned) seeds a `purpose:"data"` store's per-case
->   isolation slice AFTER `ensureTopology`, BEFORE the front-door drive. A co-located store-state grader reads the
->   post-run slice and diffs vs `expected`. The fixture hash is sealed into the recording for reproducibility.
+> - **P1 — role split (`purpose`). SHIPPED.** A dependency gains `purpose: "plumbing" | "data"` (default `plumbing` =
+>   today). The wizard is purpose-first and replaces the raw 5-value `isolateBy` enum with a 3-option `management`
+>   axis (Everdict-managed / Agent-isolated / External) that derives `isolateBy`; the inspect view shows a `data`
+>   badge. (`external` gets a connection *hint*; a guided connection sub-form that emits into `service.env` is a
+>   follow-up — see the wizard section.)
+> - **P2 — data as condition. CORE SHIPPED.** `EvalCase.fixtures[]` (dataset-owned) is bound + validated by the pure
+>   `planStoreSeed`, seeded into a `purpose:"data"` store's per-case slice via `TopologyRuntime.seedFixtures` AFTER
+>   `ensureTopology` and BEFORE the drive, and graded by `StoreStateGrader` reading the post-run slice via a
+>   co-located `GradeContext.readStore` (`TopologyRuntime.readStoreState`) and diffing vs `expected`. Live on the
+>   Docker runtime for postgres. **Open tail:** the fixture hash is not yet sealed into the recording; K8s/Nomad
+>   `seedFixtures`/`readStoreState`, redis/minio seed+read, and artifact-`ref` seeds fail loud until implemented.
 > - **P3 — `StoreSpec` (deferred / YAGNI).** Open the closed `store` enum + `STORE_DEFS` to a declarative store
 >   definition, keeping the three built-ins as defaults. Only when a non-default store is an actual need.
 
