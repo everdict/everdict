@@ -12,15 +12,17 @@
 >   axis (Everdict-managed / Agent-isolated / External) that derives `isolateBy`; the inspect view shows a `data`
 >   badge. (`external` gets a connection *hint*; a guided connection sub-form that emits into `service.env` is a
 >   follow-up — see the wizard section.)
-> - **P2 — data as condition. CORE SHIPPED.** `EvalCase.fixtures[]` (dataset-owned) is bound + validated by the pure
->   `planStoreSeed`, seeded into a `purpose:"data"` store's per-case slice via `TopologyRuntime.seedFixtures` AFTER
->   `ensureTopology` and BEFORE the drive, and graded by `StoreStateGrader` reading the post-run slice via a
->   co-located `GradeContext.readStore` (`TopologyRuntime.readStoreState`) and diffing vs `expected`. Implemented on
->   the **Docker** (self-hosted) and **K8s** (managed, dedicated/silo stores) runtimes for postgres; the fixture hash
->   is sealed into the recording's audit manifest. **Open tail (all fail loud, never a silent skip):** Nomad
->   `seedFixtures`/`readStoreState` (alloc/task resolution + live verify), K8s **pool** stores (shared store +
->   per-tenant DB), redis/minio seed+read (key-prefix rewrite / mc), and artifact-`ref` seeds (resolver wiring). Each
->   is a runtime/exec extension of the same pure planner + grader — the design is settled, the exec is the work.
+> - **P2 — data as condition. SHIPPED (postgres + redis; minio deferred).** `EvalCase.fixtures[]` (dataset-owned) is
+>   bound + validated by the pure `planStoreSeed`, seeded into a `purpose:"data"` store's per-case slice via
+>   `TopologyRuntime.seedFixtures` AFTER `ensureTopology` and BEFORE the drive, and graded by `StoreStateGrader`
+>   reading the post-run slice via a co-located `GradeContext.readStore` (`TopologyRuntime.readStoreState`) and
+>   diffing vs `expected`. **Live on all three runtimes** — Docker (self-hosted), K8s, and Nomad — for both **silo**
+>   (dedicated store, `everdict` DB) and **pool** (shared store + `tenant_<slug>` DB), across **postgres + redis**
+>   (the `{prefix}` placeholder scopes redis; the schema slice scopes postgres). Artifact-`ref` fixtures resolve to
+>   inline via an injected `resolveSeedRef`; the fixture hash is sealed into the recording's audit manifest; the
+>   wizard authors an external store's connection. **Live-verified** end-to-end against a real postgres
+>   (`scripts/live/store-fixture-seed.mjs` — which caught the read's `SET`-echo bug the fakes missed). **Deferred
+>   (fail loud):** minio object-store seed/read (objects-as-task-data is niche + pool mints per-tenant mc creds).
 > - **P3 — `StoreSpec` (deferred / YAGNI).** Open the closed `store` enum + `STORE_DEFS` to a declarative store
 >   definition, keeping the three built-ins as defaults. Only when a non-default store is an actual need.
 
