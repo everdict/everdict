@@ -1,4 +1,4 @@
-import { type ChatMessage, type McpInvoke, runAgentLoop } from "@everdict/agent-runtime";
+import { type AgentEvent, type ChatMessage, type McpInvoke, runAgentLoop } from "@everdict/agent-runtime";
 import type { AgentSessionStore } from "@everdict/application-control";
 import {
   type AgentMessageRecord,
@@ -44,6 +44,29 @@ async function resolveReferences(call: McpInvoke, references: AgentReference[]):
   return `The user attached the following workspace context via @-references. Use it to answer.\n\n${blocks.join("\n\n")}`;
 }
 
+const MAX_ATTACHMENT_CHARS = 8_000;
+
+// A file the user attached — content is the read text (folded into the model context, not persisted).
+export interface AgentAttachmentInput {
+  name: string;
+  mimeType?: string;
+  size?: number;
+  content?: string;
+}
+
+// Fold attached text files into a context preamble (their content is not persisted, only their metadata).
+function buildAttachmentPreamble(attachments: AgentAttachmentInput[]): string | undefined {
+  const blocks: string[] = [];
+  for (const a of attachments) {
+    if (typeof a.content !== "string" || a.content.length === 0) continue;
+    const capped =
+      a.content.length > MAX_ATTACHMENT_CHARS ? `${a.content.slice(0, MAX_ATTACHMENT_CHARS)}\n… [truncated]` : a.content;
+    blocks.push(`### Attached file: ${a.name}\n\`\`\`\n${capped}\n\`\`\``);
+  }
+  if (blocks.length === 0) return undefined;
+  return `The user attached the following file(s). Use their content to answer.\n\n${blocks.join("\n\n")}`;
+}
+
 export interface ChatDeps {
   sessions: AgentSessionStore;
   resolveModel: ModelResolver;
@@ -56,6 +79,13 @@ export interface ChatDeps {
 
 export interface ChatResult {
   messages: AgentMessageRecord[]; // the newly produced tail (user echo + assistant/tool turns), seq-ordered
+}
+
+// Streaming hooks (SSE): onEvent forwards the loop's live events (text deltas, tool call/result); onRecord fires
+// as each message (user, assistant, tool) is persisted, so the caller can push the structured record to the client.
+export interface ChatHooks {
+  onEvent?: (event: AgentEvent) => void;
+  onRecord?: (record: AgentMessageRecord) => void;
 }
 
 export const DEFAULT_SESSION_TITLE = "New conversation";
@@ -124,7 +154,9 @@ export async function runChat(
   sessionId: string,
   userText: string,
   references?: AgentReference[],
+  attachments?: AgentAttachmentInput[],
   signal?: AbortSignal,
+  hooks?: ChatHooks,
 ): Promise<ChatResult> {
   const { workspace, subject } = principal;
   const session = await deps.sessions.getSession(workspace, subject, sessionId);
@@ -141,9 +173,19 @@ export async function runChat(
     role: "user",
     content: userText,
     ...(references && references.length > 0 ? { references } : {}),
+    ...(attachments && attachments.length > 0
+      ? {
+          attachments: attachments.map((a) => ({
+            name: a.name,
+            ...(a.mimeType !== undefined ? { mimeType: a.mimeType } : {}),
+            ...(a.size !== undefined ? { size: a.size } : {}),
+          })),
+        }
+      : {}),
     createdAt: deps.now(),
   };
   await deps.sessions.appendMessages([userRecord]);
+  hooks?.onRecord?.(userRecord);
 
   const producedRecords: AgentMessageRecord[] = [];
   const messageToRecord = (message: ChatMessage): AgentMessageRecord | null => {
@@ -181,17 +223,23 @@ export async function runChat(
     if (!record) return;
     await deps.sessions.appendMessages([record]);
     producedRecords.push(record);
+    hooks?.onRecord?.(record);
   };
 
   const tools = await deps.toolProvider(headers);
   try {
     // Fold any @-referenced entity context into the user turn the model sees (the persisted record keeps the
     // clean text + the reference metadata separately).
-    let userForModel = userText;
-    if (references && references.length > 0 && tools.call) {
-      const preamble = await resolveReferences(tools.call, references);
-      userForModel = `${preamble}\n\n---\n\nUser message:\n${userText}`;
+    const preambles: string[] = [];
+    if (attachments && attachments.length > 0) {
+      const attPreamble = buildAttachmentPreamble(attachments);
+      if (attPreamble) preambles.push(attPreamble);
     }
+    if (references && references.length > 0 && tools.call) {
+      preambles.push(await resolveReferences(tools.call, references));
+    }
+    const userForModel =
+      preambles.length > 0 ? `${preambles.join("\n\n")}\n\n---\n\nUser message:\n${userText}` : userText;
     const history: ChatMessage[] = [...recordsToHistory(existing), { role: "user", content: userForModel }];
     const model = await deps.resolveModel(principal);
     await runAgentLoop({
@@ -201,6 +249,7 @@ export async function runChat(
       history,
       registry: tools.registry,
       onMessage: persist,
+      ...(hooks?.onEvent ? { onEvent: hooks.onEvent } : {}),
       ...(deps.maxTurns !== undefined ? { maxTurns: deps.maxTurns } : {}),
       ...(model.temperature !== undefined ? { temperature: model.temperature } : {}),
       ...(signal ? { signal } : {}),

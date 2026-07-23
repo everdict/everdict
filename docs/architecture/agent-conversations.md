@@ -105,6 +105,18 @@ i18n `agentChat` namespace in `messages/{en,ko}.json`.
   same model, fixed backoff), tool-output cap 24k→48k chars. (Assessed-but-not-a-bug for this loop's control flow:
   abort/budget dangling tool_calls — every exit point leaves a balanced transcript; system-anchor loss — the system
   prompt is re-added each turn, never stored in the compacted array.)
+- **P7 (frontier-grade UI redesign, landed)** — the panel was rebuilt to a Claude/ChatGPT-desktop bar: assistant
+  turns render markdown (`shared/ui/Markdown`) in full-width role rows (an indigo "spark" `AgentAvatar`, not a
+  robot); tool calls are collapsible cards (`JsonView`); hover actions (copy / regenerate) with toasts; an
+  auto-grow composer with a Stop button, `@`-mention, and `Kbd` hints; a suggested-prompt empty state; smart
+  auto-scroll + a scroll-to-bottom pill; date-grouped history with relative time; delete via a styled `Dialog`;
+  tasteful `animate-in` motion — all in everdict's design-system atoms/tokens.
+- **P8 (real-time + rename + attachments, landed)** — a turn **streams over SSE** (content-negotiated on the chat
+  route, `reply.hijack`): `delta` events grow a live assistant bubble, `message` events merge each persisted
+  record; the Stop button aborts the request → the server aborts the loop (`req.raw` close). **Session rename**
+  (`PATCH /agent/sessions/:id` + inline UI). **File attachments** — text files (paperclip / drag-drop) are read
+  client-side and folded into the model context (like @-references); only metadata (name/type/size) is persisted
+  (`AgentAttachment`, migration 0068).
 - **Later** — write-action tools behind HITL (port `permissions`); skills for harness-review / scorecard-triage;
   autonomous scheduled sweeps (runtime monitor → propose/trigger evals); findings → comments + Mattermost;
   SSE token streaming (replace polling); a fallback model + prompt caching; parallel independent tool calls.
