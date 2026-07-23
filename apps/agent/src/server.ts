@@ -1,8 +1,10 @@
+import type { PermissionHook } from "@everdict/agent-runtime";
 import type { AgentSessionRecord } from "@everdict/contracts";
 import { AgentReferenceSchema, AppError } from "@everdict/contracts";
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
 import { z } from "zod";
 import { type ChatDeps, DEFAULT_SESSION_TITLE, runChat } from "./chat.js";
+import { PermissionRegistry } from "./permission-registry.js";
 import type { Authenticate, ForwardHeaders, Principal } from "./principal.js";
 import { runSkillTry } from "./skill-try.js";
 
@@ -46,6 +48,8 @@ const attachmentInputSchema = z.object({
 
 export function buildServer(deps: AgentServerDeps): FastifyInstance {
   const app = Fastify({ logger: false });
+  // Human-in-the-loop approvals: a write-tool call in an SSE turn parks here until POST /permission resolves it.
+  const permissions = new PermissionRegistry();
 
   app.get("/healthz", async () => ({ ok: true }));
 
@@ -164,12 +168,23 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
     const write = (event: string, data: unknown): void => {
       reply.raw.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
     };
+    // HITL: a write tool call parks here — emit a `permission` ask (with a fresh id) and await the human's POST. A
+    // client disconnect or timeout resolves to "deny" (the registry's safe default).
+    const permit: PermissionHook = (request) => {
+      const requestId = deps.newId();
+      write("permission", { requestId, name: request.name, input: request.input });
+      return permissions.wait(requestId, id, controller.signal);
+    };
     try {
       await runChat(deps, principal, headers, id, message, references, attachments, controller.signal, {
         onEvent: (e) => {
           if (e.type === "text_delta") write("delta", { text: e.delta });
+          // The post-decision event: forward it so the web dismisses the prompt even when the decision was the
+          // registry's timeout/disconnect default rather than a click.
+          else if (e.type === "permission") write("permission_resolved", { name: e.name, decision: e.decision });
         },
         onRecord: (r) => write("message", r),
+        permit,
       });
       write("done", {});
     } catch (err) {
@@ -177,6 +192,23 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
     } finally {
       reply.raw.end();
     }
+  });
+
+  // HITL decision: resolve a parked write-tool approval the SSE turn is awaiting. Scoped to the session owner + the
+  // request id, so a stale or cross-session id can't approve someone else's tool call.
+  app.post("/agent/sessions/:id/permission", async (req, reply) => {
+    const principal = await principalOf(req, reply);
+    if (!principal) return reply;
+    const { id } = idParams.parse(req.params);
+    const parsed = z
+      .object({ requestId: z.string().min(1), decision: z.enum(["allow", "deny"]) })
+      .safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
+    const session = await deps.sessions.getSession(principal.workspace, principal.subject, id);
+    if (!session) return reply.code(404).send({ code: "NOT_FOUND", message: "Conversation not found." });
+    const ok = permissions.respond(parsed.data.requestId, id, parsed.data.decision);
+    if (!ok) return reply.code(404).send({ code: "NOT_FOUND", message: "No pending approval for that request." });
+    return reply.send({ ok: true });
   });
 
   // Skill test-drive — run a stateless agent turn with just this (possibly unsaved) skill + the read-only tools, and

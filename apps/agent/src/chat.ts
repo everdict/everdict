@@ -1,4 +1,10 @@
-import { type AgentEvent, type ChatMessage, type McpInvoke, runAgentLoop } from "@everdict/agent-runtime";
+import {
+  type AgentEvent,
+  type ChatMessage,
+  type McpInvoke,
+  type PermissionHook,
+  runAgentLoop,
+} from "@everdict/agent-runtime";
 import type { AgentSessionStore } from "@everdict/application-control";
 import {
   type AgentMessageRecord,
@@ -95,6 +101,9 @@ export interface ChatResult {
 export interface ChatHooks {
   onEvent?: (event: AgentEvent) => void;
   onRecord?: (record: AgentMessageRecord) => void;
+  // Human-in-the-loop approval for write (non-read-only) tool calls — the SSE handler supplies one that pauses the
+  // loop, asks the web, and resolves allow/deny. Absent (buffered/API callers) → write tools auto-allow as before.
+  permit?: PermissionHook;
 }
 
 export const DEFAULT_SESSION_TITLE = "New conversation";
@@ -270,6 +279,7 @@ export async function runChat(
       registry: tools.registry,
       onMessage: persist,
       ...(hooks?.onEvent ? { onEvent: hooks.onEvent } : {}),
+      ...(hooks?.permit ? { permit: hooks.permit } : {}),
       ...(deps.maxTurns !== undefined ? { maxTurns: deps.maxTurns } : {}),
       ...(model.temperature !== undefined ? { temperature: model.temperature } : {}),
       ...(signal ? { signal } : {}),

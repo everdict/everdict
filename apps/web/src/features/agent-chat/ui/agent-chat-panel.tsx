@@ -16,6 +16,7 @@ import {
 } from '@/entities/agent-session'
 
 import { ConversationView } from './conversation-view'
+import type { PendingPermission } from './permission-prompt'
 import { SessionList } from './session-list'
 
 // The agent conversation surface for the infra panel's "agent" tab. Owns all state + I/O; delegates rendering to
@@ -41,6 +42,7 @@ export function AgentChatPanel() {
   const [references, setReferences] = useState<AgentReference[]>([])
   const [attachments, setAttachments] = useState<AgentAttachmentInput[]>([])
   const [streamingText, setStreamingText] = useState('')
+  const [pendingPermissions, setPendingPermissions] = useState<PendingPermission[]>([])
   const abortRef = useRef<AbortController | null>(null)
 
   const loadSessions = useCallback(async () => {
@@ -156,7 +158,8 @@ export function AgentChatPanel() {
       abortRef.current = controller
 
       // Apply one SSE event: a text delta grows the live assistant bubble; a persisted record merges into the
-      // transcript (and, for the finalized assistant text, retires the live bubble).
+      // transcript (and, for the finalized assistant text, retires the live bubble); a `permission` event parks a
+      // write-tool approval the member must decide, and `permission_resolved` dismisses it (e.g. server timeout).
       const handleEvent = (event: string, data: unknown) => {
         if (event === 'delta') {
           const delta =
@@ -172,6 +175,26 @@ export function AgentChatPanel() {
           if (parsed.data.role === 'user') setPendingUser(null)
           if (parsed.data.role === 'assistant' && parsed.data.content.trim().length > 0)
             setStreamingText('')
+        } else if (event === 'permission') {
+          if (data !== null && typeof data === 'object' && 'requestId' in data && 'name' in data) {
+            const d = data as { requestId?: unknown; name?: unknown; input?: unknown }
+            if (typeof d.requestId === 'string' && typeof d.name === 'string')
+              setPendingPermissions((prev) => [
+                ...prev,
+                { requestId: d.requestId as string, name: d.name as string, input: d.input },
+              ])
+          }
+        } else if (event === 'permission_resolved') {
+          // The server decided it (a timeout/disconnect default, not a click) — drop the first prompt for that tool.
+          const name =
+            data !== null && typeof data === 'object' && 'name' in data
+              ? (data as { name?: unknown }).name
+              : undefined
+          if (typeof name === 'string')
+            setPendingPermissions((prev) => {
+              const i = prev.findIndex((p) => p.name === name)
+              return i < 0 ? prev : prev.filter((_, j) => j !== i)
+            })
         }
       }
 
@@ -229,6 +252,8 @@ export function AgentChatPanel() {
         setStreamingText('')
         setPendingUser(null)
         setSending(false)
+        // The turn is over; any approval still parked was denied server-side (timeout/disconnect), so clear the strip.
+        setPendingPermissions([])
         void loadSessions()
       }
     },
@@ -236,6 +261,22 @@ export function AgentChatPanel() {
   )
 
   const stop = useCallback(() => abortRef.current?.abort(), [])
+
+  const decidePermission = useCallback(
+    (requestId: string, decision: 'allow' | 'deny') => {
+      setPendingPermissions((prev) => prev.filter((p) => p.requestId !== requestId))
+      if (!activeId) return
+      // Fire-and-forget: if this fails, the server-side timeout denies it anyway, so we don't block the UI on it.
+      void fetch(`/api/agent/sessions/${encodeURIComponent(activeId)}/permission`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ requestId, decision }),
+      }).catch(() => {
+        // silent — the loop's pending approval falls back to deny on timeout
+      })
+    },
+    [activeId]
+  )
 
   const regenerate = useCallback(() => {
     const lastUser = [...messages]
@@ -282,6 +323,8 @@ export function AgentChatPanel() {
       onBack={() => setActiveId(null)}
       onRegenerate={regenerate}
       onSuggestion={(txt) => void send(txt)}
+      pendingPermissions={pendingPermissions}
+      onDecidePermission={decidePermission}
     />
   )
 }

@@ -12,6 +12,7 @@ import { Markdown } from '@/shared/ui/markdown'
 import { AgentAvatar } from './agent-avatar'
 import { Composer } from './composer'
 import { MessageRow } from './message-row'
+import { type PendingPermission, PermissionPrompt } from './permission-prompt'
 
 export function ConversationView({
   title,
@@ -32,6 +33,8 @@ export function ConversationView({
   onBack,
   onRegenerate,
   onSuggestion,
+  pendingPermissions,
+  onDecidePermission,
 }: {
   title: string
   messages: AgentMessage[]
@@ -51,6 +54,8 @@ export function ConversationView({
   onBack: () => void
   onRegenerate: () => void
   onSuggestion: (text: string) => void
+  pendingPermissions: PendingPermission[]
+  onDecidePermission: (requestId: string, decision: 'allow' | 'deny') => void
 }) {
   const t = useTranslations('agentChat')
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -193,6 +198,8 @@ export function ConversationView({
           </button>
         )}
       </div>
+
+      <PermissionPrompt pending={pendingPermissions} onDecide={onDecidePermission} />
 
       <Composer
         value={input}

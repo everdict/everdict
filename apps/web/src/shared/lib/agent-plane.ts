@@ -55,6 +55,17 @@ export const agentPlane = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
+  // HITL: resolve a write-tool approval the streaming turn is awaiting (allow/deny).
+  respondPermission: <T>(
+    auth: AuthContext,
+    id: string,
+    requestId: string,
+    decision: 'allow' | 'deny'
+  ) =>
+    call<T>(auth, `/agent/sessions/${encodeURIComponent(id)}/permission`, {
+      method: 'POST',
+      body: JSON.stringify({ requestId, decision }),
+    }),
   // Raw (unbuffered) chat — forwards the caller's Accept so the BFF can stream an SSE turn straight through.
   chatRaw: (auth: AuthContext, id: string, body: unknown, accept: string): Promise<Response> => {
     const headers = authHeaders(auth)
