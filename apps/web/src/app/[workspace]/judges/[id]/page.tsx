@@ -4,6 +4,7 @@ import { ChevronLeft, GitCompare } from 'lucide-react'
 import { getTimeZone, getTranslations } from 'next-intl/server'
 
 import { DeleteJudgeButton } from '@/features/delete-judge'
+import { JudgeHistory, type JudgeHistoryEntry } from '@/features/judge-history'
 import {
   isRubricRef,
   judgeModelLabel,
@@ -16,17 +17,15 @@ import { scorecardsSchema } from '@/entities/scorecard'
 import { can } from '@/shared/auth/can'
 import { currentPrincipal } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
-import { fmtDateTime, fmtDateTimeFull, fmtSubject } from '@/shared/lib/format'
+import { fmtSubject } from '@/shared/lib/format'
 import { sortSemverDesc } from '@/shared/lib/semver'
-import { UserAvatar } from '@/shared/ui/avatar'
 import { Badge } from '@/shared/ui/badge'
 import { buttonVariants } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
-import { EntityRef, MetricChip, ModelChip, RuntimeChip } from '@/shared/ui/chip'
+import { EntityRef, ModelChip, RuntimeChip } from '@/shared/ui/chip'
 import { CodeEditor } from '@/shared/ui/code-editor'
 import { PageHeader } from '@/shared/ui/page-header'
 import { SectionHeader } from '@/shared/ui/section-header'
-import { StatusIcon } from '@/shared/ui/status-pill'
 
 export const dynamic = 'force-dynamic'
 
@@ -102,6 +101,26 @@ export default async function JudgeDetailPage({
       ...(m?.avatarUrl ? { avatarUrl: m.avatarUrl } : {}),
     }
   }
+  // Shape each batch into a serializable row for the client history island — narrow the summary to THIS
+  // judge's metrics (overall + criteria) up front so the chips stay compact and the client stays dumb.
+  const historyEntries: JudgeHistoryEntry[] = history.map((s) => {
+    const runner = resolveRunner(s.createdBy)
+    return {
+      id: s.id,
+      dataset: s.dataset,
+      harness: s.harness,
+      metrics: (s.summary ?? [])
+        .filter((m) => m.metric === `judge:${id}` || m.metric.startsWith(`judge:${id}:`))
+        .map((m) => ({
+          metric: m.metric,
+          mean: m.mean,
+          ...(m.passRate != null ? { passRate: m.passRate } : {}),
+        })),
+      ...(runner ? { runner } : {}),
+      createdAt: s.createdAt,
+      status: s.status,
+    }
+  })
 
   if (!judge) {
     return (
@@ -251,81 +270,19 @@ export default async function JudgeDetailPage({
       )}
 
       {/* Evaluation history — the batches this judge scored, newest first (empty → the section is hidden,
-          detail-view convention). Each row leads to the scorecard detail; the chips are THIS judge's metrics. */}
-      {history.length > 0 && (
+          detail-view convention). Paginated 10-at-a-time in a client island; the chips are THIS judge's
+          metrics, rendered compact so dataset/harness keep priority width. */}
+      {historyEntries.length > 0 && (
         <section className="space-y-2.5">
           <SectionHeader
             title={t('evaluationHistory')}
             action={
               <span className="text-[12px] tabular-nums text-faint">
-                {t('evaluationHistoryCount', { count: history.length })}
+                {t('evaluationHistoryCount', { count: historyEntries.length })}
               </span>
             }
           />
-          <div className="space-y-2">
-            {history.slice(0, 12).map((s) => {
-              const judgeMetrics = (s.summary ?? []).filter(
-                (m) => m.metric === `judge:${id}` || m.metric.startsWith(`judge:${id}:`)
-              )
-              const runner = resolveRunner(s.createdBy)
-              return (
-                <Link
-                  key={s.id}
-                  href={`/${workspace}/scorecards/${encodeURIComponent(s.id)}`}
-                  className="group flex items-center gap-3 rounded-lg border bg-card px-3.5 py-2.5 shadow-raise transition-colors hover:border-border-strong hover:bg-elevated"
-                >
-                  <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden whitespace-nowrap text-[13px] font-[510]">
-                    <span className="truncate">
-                      <EntityRef id={s.dataset.id} version={s.dataset.version} kind="dataset" />
-                    </span>
-                    <span className="shrink-0 text-faint">·</span>
-                    <span className="truncate">
-                      <EntityRef id={s.harness.id} version={s.harness.version} kind="harness" />
-                    </span>
-                  </div>
-                  <div className="hidden shrink-0 items-center gap-1 sm:flex">
-                    {judgeMetrics.slice(0, 2).map((m) => (
-                      <MetricChip
-                        key={m.metric}
-                        metric={m.metric}
-                        mean={m.mean}
-                        passRate={m.passRate}
-                        siblings={judgeMetrics.map((x) => x.metric)}
-                      />
-                    ))}
-                    {judgeMetrics.length > 2 && (
-                      <span className="text-[11px] text-faint">+{judgeMetrics.length - 2}</span>
-                    )}
-                  </div>
-                  <div className="flex shrink-0 items-center gap-2.5">
-                    <span className="flex w-6 justify-center">
-                      {runner && (
-                        <UserAvatar
-                          name={runner.name}
-                          url={runner.avatarUrl}
-                          label={t('evaluationHistoryRunner')}
-                        />
-                      )}
-                    </span>
-                    <time
-                      className="hidden w-[84px] text-right font-mono text-[11px] text-muted-foreground sm:block"
-                      title={fmtDateTimeFull(s.createdAt, { timeZone })}
-                    >
-                      {fmtDateTime(s.createdAt, timeZone)}
-                    </time>
-                    <span className="flex w-5 justify-end">
-                      <StatusIcon status={s.status} />
-                    </span>
-                  </div>
-                </Link>
-              )
-            })}
-            {history.length > 12 && (
-              <p className="px-0.5 text-[11.5px] text-faint">
-                {t('evaluationHistoryMore', { count: history.length - 12 })}
-              </p>
-            )}
-          </div>
+          <JudgeHistory workspace={workspace} entries={historyEntries} timeZone={timeZone} />
         </section>
       )}
     </div>

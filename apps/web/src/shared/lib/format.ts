@@ -76,6 +76,15 @@ export function fmtMetricLabel(metric: string, siblings?: readonly string[]): st
   return p.kind === 'judge-criterion' ? `${head} › ${p.criterionId}` : head
 }
 
+// Compact label for contexts where the judge is already known (its own detail page) — drops the
+// redundant 'judge <id>' head: overall → '' (the value alone reads clearly), criterion → the bare
+// criterion id. Plain metrics pass through unchanged.
+export function fmtMetricLabelCompact(metric: string, siblings?: readonly string[]): string {
+  const p = parseMetricLabel(metric, siblings)
+  if (p.kind === 'plain') return p.metric
+  return p.kind === 'judge-criterion' ? p.criterionId : ''
+}
+
 // Group metric-keyed rows for display — criterion rows nest under their judge's overall row
 // (overall first, criteria beneath in stable label order). Non-judge rows keep their original order;
 // an orphan criterion (no overall row present) stays top-level.

@@ -2,29 +2,33 @@ import type { ReactNode } from 'react'
 import { Boxes, Cpu, Database, Gavel, ListFilter, Server, Tag } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
-import { fmtMetricLabel, fmtPct } from '@/shared/lib/format'
+import { fmtMetricLabel, fmtMetricLabelCompact, fmtPct } from '@/shared/lib/format'
 import { cn } from '@/shared/lib/utils'
 
 // Metric summary chip — name (faint) + mean + optional pass rate. Same across lists/per-harness.
 // Judge metrics render human-readably ('judge <id> › <criterion>'); siblings disambiguate the 2-segment
-// judge form (raw label on hover).
+// judge form (raw label on hover). `compact` drops the redundant 'judge <id>' head (for the judge's own
+// detail page) — the overall then shows the value alone, so the empty label span is omitted.
 export function MetricChip({
   metric,
   mean,
   passRate,
   siblings,
+  compact,
 }: {
   metric: string
   mean: number
   passRate?: number | null
   siblings?: readonly string[]
+  compact?: boolean
 }) {
+  const label = compact ? fmtMetricLabelCompact(metric, siblings) : fmtMetricLabel(metric, siblings)
   return (
     <code
       title={metric}
       className="inline-flex items-center gap-1 rounded border border-border bg-muted/40 px-1.5 py-0.5 font-mono text-[11px]"
     >
-      <span className="text-faint">{fmtMetricLabel(metric, siblings)}</span>
+      {label && <span className="text-faint">{label}</span>}
       <span className="tabular-nums text-foreground/85">{mean.toFixed(2)}</span>
       {passRate != null && <span className="tabular-nums text-faint">· {fmtPct(passRate)}</span>}
     </code>

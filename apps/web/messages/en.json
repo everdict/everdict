@@ -795,7 +795,7 @@
     "noPermissionHint": "Requires the member role or higher (judges:write). Ask a workspace admin.",
     "evaluationHistory": "Evaluation history",
     "evaluationHistoryCount": "{count, plural, one {# run} other {# runs}}",
-    "evaluationHistoryMore": "Showing the latest 12 — {count} more.",
+    "evaluationHistoryLoadMore": "Show {count} more",
     "evaluationHistoryRunner": "Run by"
   },
   "landingPage": {
