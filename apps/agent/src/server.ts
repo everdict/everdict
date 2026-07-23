@@ -4,6 +4,7 @@ import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest }
 import { z } from "zod";
 import { type ChatDeps, DEFAULT_SESSION_TITLE, runChat } from "./chat.js";
 import type { Authenticate, ForwardHeaders, Principal } from "./principal.js";
+import { runSkillTry } from "./skill-try.js";
 
 export interface AgentServerDeps extends ChatDeps {
   authenticate: Authenticate;
@@ -175,6 +176,39 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
       write("error", { message: err instanceof AppError ? err.message : "Internal error" });
     } finally {
       reply.raw.end();
+    }
+  });
+
+  // Skill test-drive — run a stateless agent turn with just this (possibly unsaved) skill + the read-only tools, and
+  // return the transcript so the member can verify the skill actually drives the agent before saving it.
+  app.post("/agent/skills/try", async (req, reply) => {
+    const principal = await principalOf(req, reply);
+    if (!principal) return reply;
+    const body = z
+      .object({
+        skill: z.object({
+          name: z.string().min(1),
+          description: z.string(),
+          instructions: z.string().min(1),
+        }),
+        message: z.string().min(1),
+      })
+      .safeParse(req.body);
+    if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: body.error.message });
+    const controller = new AbortController();
+    req.raw.on("close", () => controller.abort());
+    try {
+      const result = await runSkillTry(
+        deps,
+        principal,
+        forwardHeaders(req),
+        body.data.skill,
+        body.data.message,
+        controller.signal,
+      );
+      return reply.send(result);
+    } catch (err) {
+      return sendError(reply, err);
     }
   });
 

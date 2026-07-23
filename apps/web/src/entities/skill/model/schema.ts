@@ -31,6 +31,17 @@ export const generateSkillResultSchema = z.object({
 })
 export type GenerateSkillResult = z.infer<typeof generateSkillResultSchema>
 
+// POST /agent/skills/try 200 — 스킬 테스트 드라이브 트랜스크립트(무상태, 영속 안 됨). assistant 본문 + tool호출(use_skill 포함).
+export const skillTryMessageSchema = z.object({
+  role: z.enum(['assistant', 'tool']),
+  content: z.string(),
+  toolCalls: z.array(z.object({ name: z.string(), arguments: z.string() })).optional(),
+  toolCallId: z.string().optional(),
+})
+export const skillTryResultSchema = z.object({ messages: z.array(skillTryMessageSchema) })
+export type SkillTryMessage = z.infer<typeof skillTryMessageSchema>
+export type SkillTryResult = z.infer<typeof skillTryResultSchema>
+
 // 드리프트 가드 — 레코드는 양방향(어느 쪽 필드 변경도 웹 타입체크를 깨뜨린다); 생성결과는 양방향(동일 형태).
 type AssertAssignable<A extends B, B> = A
 type _SkillFwd = AssertAssignable<Skill, ContractSkillRecord>

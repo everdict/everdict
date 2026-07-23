@@ -98,7 +98,7 @@ export interface ChatHooks {
 
 export const DEFAULT_SESSION_TITLE = "New conversation";
 
-function contentToString(content: ChatMessage["content"]): string {
+export function contentToString(content: ChatMessage["content"]): string {
   if (typeof content === "string") return content;
   if (Array.isArray(content)) {
     return content
@@ -135,7 +135,7 @@ function recordsToHistory(records: AgentMessageRecord[]): ChatMessage[] {
   });
 }
 
-function extractToolCalls(message: ChatMessage): AgentToolCall[] | undefined {
+export function extractToolCalls(message: ChatMessage): AgentToolCall[] | undefined {
   if (message.role !== "assistant") return undefined;
   const tcs = message.tool_calls;
   if (!tcs || tcs.length === 0) return undefined;

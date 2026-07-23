@@ -2917,7 +2917,15 @@
     "generating": "Generating…",
     "generated": "Draft ready — review and edit below.",
     "generateError": "Could not generate a draft.",
-    "noModels": "Register a model in Settings › Models to use AI generation."
+    "noModels": "Register a model in Settings › Models to use AI generation.",
+    "testTitle": "Test this skill",
+    "testHint": "Run a sample request through the agent with just this skill — see whether it loads the skill and follows the steps against your real data. Nothing is saved.",
+    "testPlaceholder": "e.g. Triage my latest scorecard.",
+    "runTest": "Run test",
+    "testing": "Running…",
+    "testEmpty": "The agent didn't produce a response.",
+    "testError": "Could not run the test.",
+    "usedSkill": "loaded skill {skill}"
   },
   "agentChat": {
     "subtitle": "Ask about your evals",

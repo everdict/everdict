@@ -30,6 +30,9 @@ async function call<T>(auth: AuthContext, path: string, init?: RequestInit): Pro
 }
 
 export const agentPlane = {
+  // Skill test-drive — run a stateless agent turn with just this (possibly unsaved) skill + read-only tools, return the transcript.
+  trySkill: <T>(auth: AuthContext, skill: unknown, message: string) =>
+    call<T>(auth, '/agent/skills/try', { method: 'POST', body: JSON.stringify({ skill, message }) }),
   listSessions: <T>(auth: AuthContext) => call<T>(auth, '/agent/sessions'),
   createSession: <T>(auth: AuthContext, body: unknown) =>
     call<T>(auth, '/agent/sessions', { method: 'POST', body: JSON.stringify(body) }),

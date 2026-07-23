@@ -13,6 +13,7 @@ import { Dialog } from '@/shared/ui/dialog'
 import { EmptyState } from '@/shared/ui/empty-state'
 import { Input, Label, Textarea } from '@/shared/ui/input'
 import { createSkillAction, deleteSkillAction, generateSkillAction, updateSkillAction } from '../api/manage-skills'
+import { TestSkillPanel } from './test-skill-panel'
 
 // Workspace › Skills — 멤버가 함께 만들어가는 SKILL.md식 스킬 라이브러리. 목록 + AI 생성 위저드(설명→초안→편집→저장) +
 // 편집 + 비공개↔워크스페이스 공유 토글 + 삭제. 에이전트는 이 스킬들을 use_skill 로 발견·사용한다(웹은 저작 표면).
@@ -263,6 +264,9 @@ function SkillEditorDialog({
             className="font-mono text-[13px]"
           />
         </div>
+
+        {/* 저장 전에 이 스킬이 실제로 잘 도는지 검증 — 미저장 상태로도 현재 필드 값으로 테스트. */}
+        <TestSkillPanel skill={{ name, description, instructions }} />
 
         <label className="flex items-center gap-2 text-[13px]">
           <input

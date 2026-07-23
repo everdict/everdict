@@ -2,7 +2,15 @@
 
 import { revalidatePath } from 'next/cache'
 
-import { generateSkillResultSchema, type GenerateSkillResult, skillSchema, type Skill } from '@/entities/skill'
+import {
+  generateSkillResultSchema,
+  type GenerateSkillResult,
+  skillSchema,
+  type Skill,
+  type SkillTryResult,
+  skillTryResultSchema,
+} from '@/entities/skill'
+import { agentPlane } from '@/shared/lib/agent-plane'
 import { authContext } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
 
@@ -68,6 +76,27 @@ export async function generateSkillAction(description: string, model: string): P
   try {
     const draft = generateSkillResultSchema.parse(await controlPlane.generateSkill(ctx, { description, model }))
     return { ok: true, draft }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
+}
+
+export interface TrySkillActionResult {
+  ok: boolean
+  result?: SkillTryResult
+  error?: string
+}
+
+// 스킬 테스트 드라이브 — (미저장일 수도 있는) 스킬 + 샘플 요청으로 에이전트를 실제 1턴 실행(POST /agent/skills/try, 무상태),
+// 트랜스크립트 반환. 저장 전에 "이 스킬이 실제로 잘 도는지" 검증. 실패(모델/키/업스트림)는 error.
+export async function trySkillAction(
+  skill: { name: string; description: string; instructions: string },
+  message: string
+): Promise<TrySkillActionResult> {
+  const ctx = await authContext()
+  try {
+    const result = skillTryResultSchema.parse(await agentPlane.trySkill(ctx, skill, message))
+    return { ok: true, result }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }
   }
