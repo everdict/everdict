@@ -99,11 +99,16 @@ export function TraceBrowser({
   onPick,
   selectedTraceId,
   selection,
+  autoLoad = true,
 }: {
   sources: TraceSourceConfig[]
   onPick?: (trace: TraceSummary, sourceName: string) => void
   selectedTraceId?: string
   selection?: TraceSelection
+  // Whether to hit the platform automatically on open / source-switch. The pick flows (judge wizard, evaluate-traces)
+  // want the list ready; the settings Observability page opts OUT so registering a source doesn't fire a slow pull —
+  // the user selects a source and presses Fetch. Default stays true to preserve the pick flows' behavior.
+  autoLoad?: boolean
 }) {
   const t = useTranslations('traceBrowser')
   const locale = useLocale()
@@ -148,18 +153,27 @@ export function TraceBrowser({
     [start]
   )
 
-  // Auto-load ONCE per selected source, keyed by NAME — never by the `source` object identity: each server-action
-  // response re-renders the route and hands this island a fresh `sources` array, so an identity-keyed effect re-fires
-  // after every listTracesAction call (an infinite refresh loop). Beyond this, refreshing is strictly user-driven
-  // (reload button / Enter on scope / load more).
+  // Prime the scope + list ONCE per selected source, keyed by NAME — never by the `source` object identity: each
+  // server-action response re-renders the route and hands this island a fresh `sources` array, so an identity-keyed
+  // effect re-fires after every listTracesAction call (an infinite refresh loop). When autoLoad is off (settings
+  // Observability) we prefill the default scope but do NOT pull — a source switch just clears the previous list and
+  // waits for the user's explicit Fetch. Beyond the initial load, refreshing is always user-driven (Fetch / Enter on
+  // scope / time change / load more).
   useEffect(() => {
     if (!source || loadedSource.current === source.name) return
     loadedSource.current = source.name
     const defaultScope = source.project ?? source.service ?? ''
     setScope(defaultScope)
     setLimit(PAGE_SIZE)
-    load(source.name, defaultScope, PAGE_SIZE, timePreset)
-  }, [source, load, timePreset])
+    if (autoLoad) {
+      load(source.name, defaultScope, PAGE_SIZE, timePreset)
+    } else {
+      setTraces([])
+      setLoaded(false)
+      setError(undefined)
+      setOpenTrace(undefined)
+    }
+  }, [source, load, timePreset, autoLoad])
 
   // The page can mount with zero sources (initial state '') — adopt the first source registered while mounted so the
   // browser doesn't sit on an empty pick after "Add source".
@@ -216,6 +230,8 @@ export function TraceBrowser({
     else setOpenTrace(tr)
   }
   const openIndex = openTrace ? flat.findIndex((tr) => tr.id === openTrace.id) : -1
+  // Manual mode before its first pull: the toolbar action reads "Fetch" and a prompt stands in for the (empty) list.
+  const firstFetch = !autoLoad && !loaded
 
   const statusOptions: { value: StatusFilter; label: string }[] = [
     { value: 'all', label: t('status_all') },
@@ -259,7 +275,8 @@ export function TraceBrowser({
           onChange={(v) => {
             const preset = (TIME_PRESETS as string[]).includes(v) ? (v as TimePreset) : 'any'
             setTimePreset(preset)
-            load(sourceName, scope, limit, preset)
+            // Before the first manual fetch, changing the window just stages the choice — the Fetch button pulls with it.
+            if (autoLoad || loaded) load(sourceName, scope, limit, preset)
           }}
           searchable={false}
           className="w-[120px]"
@@ -277,14 +294,33 @@ export function TraceBrowser({
           variant="secondary"
           size="md"
           onClick={() => load(sourceName, scope, limit, timePreset)}
-          disabled={pending}
+          disabled={pending || !sourceName}
         >
           <RefreshCw className={cn('size-4', pending && 'animate-spin')} />
-          {t('reload')}
+          {firstFetch ? t('fetch') : t('reload')}
         </Button>
       </div>
 
       {error && <Callout tone="danger">{error}</Callout>}
+
+      {/* Manual mode, nothing pulled yet — prompt the explicit fetch instead of hitting the platform on open. */}
+      {firstFetch && !error && (
+        <EmptyState
+          icon={<Telescope className="size-5" />}
+          title={t('notLoadedTitle')}
+          hint={t('notLoadedHint')}
+          action={
+            <Button
+              size="sm"
+              onClick={() => load(sourceName, scope, limit, timePreset)}
+              disabled={pending || !sourceName}
+            >
+              <RefreshCw className={cn('size-4', pending && 'animate-spin')} />
+              {t('fetch')}
+            </Button>
+          }
+        />
+      )}
 
       {loaded && !error && traces.length === 0 && (
         <EmptyState

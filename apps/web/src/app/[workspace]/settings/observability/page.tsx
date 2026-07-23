@@ -67,7 +67,9 @@ export default async function ObservabilityPage() {
             secretNames={secretNames}
           />
           <div className="border-t pt-6">
-            <TraceBrowser sources={roster?.sources ?? []} />
+            {/* Opt out of auto-pull here: registering/listing a source shouldn't fire a slow platform query — the user
+                selects a source and presses Fetch. The pick flows (judge wizard, evaluate-traces) keep auto-loading. */}
+            <TraceBrowser sources={roster?.sources ?? []} autoLoad={false} />
           </div>
         </>
       )}
