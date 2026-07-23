@@ -1,12 +1,14 @@
 import { lookup as dnsLookup } from "node:dns/promises";
 import {
+  BadRequestError,
   type BrowserSnapshot,
   type RegistryAuth,
   type ServiceHarnessSpec,
+  type StoreReadQuery,
   type TrustZone,
   UpstreamError,
 } from "@everdict/contracts";
-import { STORE_DEFS, buildSharedStoreManifests, dependencyStores } from "./dependencies.js";
+import { STORE_DEFS, buildSharedStoreManifests, dependencyStores, storeName } from "./dependencies.js";
 import { browserDeployName, buildBrowserManifests, buildK8sManifests } from "./k8s-topology.js";
 import { type Kubectl, type PortForward, kubectlCli } from "./kubectl.js";
 import {
@@ -16,7 +18,8 @@ import {
   resolveEgressCidrs,
 } from "./network-policy.js";
 import { endpointUnreachableError } from "./reachability.js";
-import { DEFAULT_POOL_NS, type StorePlan, planTenantStores } from "./store-binding.js";
+import { DEFAULT_POOL_NS, type StorePlan, planTenantStores, resolveStoreIsolation } from "./store-binding.js";
+import { type StoreSeedPlan, buildSeedExec, resolveStoreReadSlice } from "./store-seed.js";
 import type { TargetEnvHandle, TopologyHandle, TopologyRuntime } from "./topology-runtime.js";
 
 export interface K8sTopologyRuntimeOptions {
@@ -229,6 +232,67 @@ export class K8sTopologyRuntime implements TopologyRuntime {
       await new Promise((r) => setTimeout(r, interval));
     }
     throw new UpstreamError("UPSTREAM_ERROR", { store }, "Timed out waiting for the shared store to become ready");
+  }
+
+  // Resolve how this zone's stores are deployed — the SAME decision the deploy made (with a zone → pool/silo/external;
+  // without → provisionDependencies). Seed/read only support a dedicated (silo) store today: it lives at
+  // `<id>-<store>` in the zone namespace with the default creds, so buildSeedExec's db/creds match. pool (shared store +
+  // per-tenant DB) and external (BYO) are a follow-up — rejected loud rather than silently mis-targeted.
+  private siloNsOrThrow(spec: ServiceHarnessSpec, zone: TrustZone | undefined, op: string): string {
+    const isolation = zone ? resolveStoreIsolation(zone) : this.opts.provisionDependencies ? "silo" : "external";
+    if (isolation !== "silo") {
+      throw new BadRequestError(
+        "BAD_REQUEST",
+        { isolation, op },
+        `store ${op} on K8s currently supports only a dedicated (silo) store; "${isolation}" is a follow-up.`,
+      );
+    }
+    return this.nsFor(zone);
+  }
+
+  // Fixture seeding (P2): apply each plan inside its dedicated store pod via kubectl exec (buildSeedExec → psql into the
+  // schema slice). The store Deployment is labelled `app=<id>-<store>`, so podFor resolves the same store the services use.
+  async seedFixtures(
+    spec: ServiceHarnessSpec,
+    _runId: string,
+    plans: StoreSeedPlan[],
+    zone?: TrustZone,
+  ): Promise<void> {
+    const ns = this.siloNsOrThrow(spec, zone, "seeding");
+    for (const plan of plans) {
+      const pod = await this.kubectl.podFor(`app=${storeName(spec, plan.store)}`, ns);
+      await this.kubectl.exec(pod, ns, buildSeedExec(plan).argv);
+    }
+  }
+
+  // Store-state grading read (P2): resolve the store's per-case slice and run the query in its pod, returning stdout.
+  async readStoreState(
+    spec: ServiceHarnessSpec,
+    runId: string,
+    query: StoreReadQuery,
+    zone?: TrustZone,
+  ): Promise<string> {
+    const ns = this.siloNsOrThrow(spec, zone, "reading");
+    if (query.store !== "postgres") {
+      throw new BadRequestError(
+        "BAD_REQUEST",
+        { store: query.store },
+        `reading a "${query.store}" store is not supported yet (postgres only for now).`,
+      );
+    }
+    const slice = resolveStoreReadSlice(spec.dependencies, query.store, query.role, runId);
+    const pod = await this.kubectl.podFor(`app=${storeName(spec, query.store)}`, ns);
+    return await this.kubectl.exec(pod, ns, [
+      "psql",
+      "-U",
+      "everdict",
+      "-d",
+      "everdict",
+      "-t",
+      "-A",
+      "-c",
+      `SET search_path TO "${slice}"; ${query.query}`,
+    ]);
   }
 
   async provisionBrowserEnv(spec: ServiceHarnessSpec, runId: string, zone?: TrustZone): Promise<TargetEnvHandle> {

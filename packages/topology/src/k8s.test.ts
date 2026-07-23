@@ -23,7 +23,7 @@ const SPEC: ServiceHarnessSpec = {
 };
 
 // A fake kubectl that records calls; port-forward returns a fixed local port.
-function fakeKubectl(): { kubectl: Kubectl; calls: string[]; applied: Array<Record<string, unknown>> } {
+function fakeKubectl(execOut = ""): { kubectl: Kubectl; calls: string[]; applied: Array<Record<string, unknown>> } {
   const calls: string[] = [];
   const applied: Array<Record<string, unknown>> = [];
   let port = 40000;
@@ -53,8 +53,8 @@ function fakeKubectl(): { kubectl: Kubectl; calls: string[]; applied: Array<Reco
       return `${selector.replace(/^app=/, "")}-pod`;
     },
     async exec(pod, ns, command, stdin) {
-      calls.push(`exec:${ns}/${pod}:${command[0]}${stdin ? ":stdin" : ""}`);
-      return "";
+      calls.push(`exec:${ns}/${pod}:${command.join(" ")}${stdin ? ":stdin" : ""}`);
+      return execOut;
     },
   };
   return { kubectl, calls, applied };
@@ -279,5 +279,65 @@ describe("K8sTopologyRuntime", () => {
       `del:everdict-acme/deployment/${browserDeployName("run1")}+service/${browserDeployName("run1")}`,
     );
     expect(calls.some((c) => c.startsWith("delns:"))).toBe(false); // does not delete the ns
+  });
+
+  const SPEC_DATA: ServiceHarnessSpec = {
+    ...SPEC,
+    dependencies: [{ store: "postgres", role: "world", purpose: "data", isolateBy: "schema" }],
+  };
+
+  it("seedFixtures: execs the postgres seed into the dedicated store pod's schema slice (P2, silo)", async () => {
+    const { kubectl, calls } = fakeKubectl();
+    const rt = new K8sTopologyRuntime({ kubectl, fetchImpl: okFetch, pollIntervalMs: 1, provisionDependencies: true });
+    await rt.seedFixtures(SPEC_DATA, "run1", [
+      {
+        store: "postgres",
+        role: "world",
+        isolateBy: "schema",
+        slice: "run_run1",
+        seed: { inline: "INSERT INTO t VALUES (1);" },
+        format: "sql",
+      },
+    ]);
+    expect(calls.some((c) => c.startsWith("podFor:") && c.includes("app=bu-postgres"))).toBe(true);
+    expect(
+      calls.some(
+        (c) => c.startsWith("exec:") && c.includes("psql") && c.includes('CREATE SCHEMA IF NOT EXISTS "run_run1"'),
+      ),
+    ).toBe(true);
+  });
+
+  it("readStoreState: reads the schema slice via psql in the store pod and returns stdout (P2, silo)", async () => {
+    const { kubectl, calls } = fakeKubectl("1|alice\n");
+    const rt = new K8sTopologyRuntime({ kubectl, fetchImpl: okFetch, pollIntervalMs: 1, provisionDependencies: true });
+    const out = await rt.readStoreState(SPEC_DATA, "run1", {
+      store: "postgres",
+      role: "world",
+      query: "SELECT id,name FROM t",
+    });
+    expect(out).toBe("1|alice\n");
+    expect(
+      calls.some(
+        (c) =>
+          c.startsWith("exec:") && c.includes('SET search_path TO "run_run1"') && c.includes("SELECT id,name FROM t"),
+      ),
+    ).toBe(true);
+  });
+
+  it("seedFixtures: rejects a store on a runtime that deploys none (dedicated-silo only)", async () => {
+    const { kubectl } = fakeKubectl();
+    const rt = new K8sTopologyRuntime({ kubectl, fetchImpl: okFetch, pollIntervalMs: 1 }); // provisionDependencies unset → external
+    await expect(
+      rt.seedFixtures(SPEC_DATA, "run1", [
+        {
+          store: "postgres",
+          role: "world",
+          isolateBy: "schema",
+          slice: "run_run1",
+          seed: { inline: "x" },
+          format: "sql",
+        },
+      ]),
+    ).rejects.toThrow(/dedicated/);
   });
 });
