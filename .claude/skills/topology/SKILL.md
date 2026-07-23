@@ -45,6 +45,26 @@ A harness can be a process (Claude Code) or a **deployed multi-service topology 
 stateless services = per-version warm; stores = shared + per-case logical isolation
 (`thread_id`/key-prefix/object-prefix); browser = per-case. Wiring via the front-door, not a redeploy.
 
+## Store roles + data-as-condition (P2 — `docs/architecture/dependency-store-roles.md`)
+- **`dependencies[].purpose`** = the store's role: `plumbing` (default — the agent's OWN state, empty at start,
+  harness-owned) vs `data` (a world-state store the TASK operates on; its CONTENT is an experiment variable owned by
+  the dataset). The wizard asks `purpose` + a 3-option `management` axis (managed / agent-isolated / external) and
+  DERIVES `isolateBy` — authors never pick the raw 5-value enum. The contract enum is unchanged (runtime wiring vocab).
+- **Seed** (`EvalCase.fixtures[]`, dataset-owned): the PURE `planStoreSeed` binds each fixture to a `purpose:"data"`
+  store `(store, role?)`, validates it (rejects no-match / ambiguous / plumbing / external), and resolves the per-case
+  slice. `ServiceTopologyBackend` resolves artifact-`ref` seeds to inline (`resolveSeedRef`), then calls
+  **`TopologyRuntime.seedFixtures(spec, runId, plans, zone)`** AFTER `ensureTopology`, BEFORE the drive (a PRECONDITION
+  — a failure or a runtime without the capability fails the run).
+- **Grade** (`StoreStateGrader`, graders skill): reads the post-run slice via a co-located
+  **`TopologyRuntime.readStoreState(spec, runId, query, zone)`** injected as `GradeContext.readStore` — an internal
+  store URL can't reach a remote grader (`judge-placement-locality.md`).
+- **The exec is runtime-agnostic**: `buildSeedExec`/`buildReadExec` (pure, `store-seed.ts`) build the in-container
+  command per store — postgres (schema slice via the connection's `search_path` startup option, NOT a `SET` that
+  would echo into a read), redis + minio (`{prefix}` placeholder; redis via a redis-cli stdin heredoc, minio via `mc`
+  with root creds). The `db` param carries the pool tenant DB. All 3 runtimes (Docker/K8s/Nomad) share them; each
+  resolves silo (dedicated store, `everdict` DB) vs pool (shared store + `tenant_<slug>` DB) the SAME way the deploy
+  did. Live-verified: `scripts/live/store-fixture-seed.mjs` (real postgres + minio).
+
 ## Orchestrator-agnostic
 `ServiceTopologyBackend` (a `Backend`) holds a `TopologyRuntime`. Only the runtime differs:
 `buildNomadTopologyJob` (Nomad) vs `buildK8sManifests` (K8s). Both pure + deterministic-tested.

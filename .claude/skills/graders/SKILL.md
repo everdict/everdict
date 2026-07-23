@@ -31,7 +31,8 @@ The generic outcome grader; `tests-pass`/`swe-bench` are convenience presets ove
 ## Contract
 `Score` (`grader.ts`) = `{ graderId, metric, value, pass?, detail? }` — `metric` is a free label, `value`
 a number, `pass` optional (trace graders like `steps`/`cost`/`latency` emit value-only, no `pass`).
-`GradeContext` = `{ case, trace, snapshot, compute?, baseline? }`. A grader picks the fields its family needs.
+`GradeContext` = `{ case, trace, snapshot, compute?, provision?, readStore?, baseline? }`. A grader picks the fields
+its family needs (`readStore?` = a co-located store reader injected by the topology backend — store-state grading, P2).
 
 ## Families (cite the file)
 - **outcome** — `tests-pass.ts` (`TestsPassGrader`), `command.ts` (`CommandGrader`), `swe-bench.ts`,
@@ -44,6 +45,11 @@ a number, `pass` optional (trace graders like `steps`/`cost`/`latency` emit valu
   `latencyGrader` (last.t − first.t). Read ONLY `ctx.trace`; cost/tokens come from the harness's own trace.
 - **browser** — `browser-graders.ts`: `DomContainsGrader`, `UrlMatchesGrader` (require `snapshot.kind==="browser"`),
   `AnswerMatchGrader` (last assistant message vs expected, contains|exact — QA benchmarks).
+- **store** — `store-state.ts` (`StoreStateGrader`, P2): grades the POST-RUN state of a `purpose:"data"` topology
+  store. Reads the case's isolation slice via `ctx.readStore` (co-located runtime exec — an internal store URL can't
+  reach a remote grader) and diffs vs `expected` (config.expect | case.expected, contains|exact). Missing `readStore`
+  → `BadRequestError` (like a missing-compute outcome grader). The store-side sibling of `AnswerMatchGrader`. See the
+  **topology** skill for the seed/read exec + `docs/architecture/dependency-store-roles.md`.
 - **model** — `judge.ts` (`JudgeGrader`): LLM/VLM verdict over the trace/snapshot. Needs an injected `Judge`
   → see the **evaluation** skill for transports, `JudgeRunner`, and how it lands under metric `judge:<id>`.
 
