@@ -23,7 +23,7 @@ import {
 import { type TrustZonePolicy, assertHardenedIsolation } from "@everdict/domain";
 import { costGrader, latencyGrader, makeGradersFromEnv, stepsGrader } from "@everdict/graders";
 import type { TraceSource } from "@everdict/trace";
-import { planStoreSeed } from "./deploy/store-seed.js";
+import { type StoreSeedPlan, planStoreSeed } from "./deploy/store-seed.js";
 import type { TopologyRuntime } from "./deploy/topology-runtime.js";
 import { keysFor, newRunId, perRunFields, perRunVocabulary, wiringVars } from "./environment-manager.js";
 import { captureCdpScreenshot } from "./front-door/capture-cdp.js";
@@ -88,12 +88,33 @@ export interface ServiceTopologyBackendOptions {
   // control plane implements it (resolve + owner-gate + decrypt + seedStorageState). Best-effort — the topology
   // backend swallows a failure so injection never fails the run. cdpBase = the control-plane-reachable CDP.
   seedProfile?: (profileId: string, cdpBase: string, job: CaseJob) => Promise<void>;
+  // Resolve a fixture's ArtifactStore ref (large SQL dump / RDB / bucket tarball) to its inline seed body (P2). The
+  // control plane injects it (fetch + decode); a case with a ref fixture but no resolver fails loud. Absent = inline only.
+  resolveSeedRef?: (ref: string) => Promise<string>;
 }
 
 // The orchestrator-agnostic service-topology backend (a Backend implementation).
 // ensure warm topology → per-case browser → drive (front-door, per-run wiring) → collectTrace → observe → grade.
 export class ServiceTopologyBackend implements Backend, ScreenCapturable {
   constructor(private readonly opts: ServiceTopologyBackendOptions) {}
+
+  // Resolve any artifact-ref seed to inline bytes (via the injected resolver) so the runtime only handles inline seeds.
+  // A ref fixture with no resolver configured fails loud — the required world-state can't be materialized.
+  private async resolveSeedRefs(plans: StoreSeedPlan[]): Promise<StoreSeedPlan[]> {
+    return Promise.all(
+      plans.map(async (p) => {
+        if ("inline" in p.seed) return p;
+        if (!this.opts.resolveSeedRef) {
+          throw new BadRequestError(
+            "BAD_REQUEST",
+            { store: p.store, ref: p.seed.ref },
+            "The case declares an artifact-ref fixture, but no seed-ref resolver is configured for this backend.",
+          );
+        }
+        return { ...p, seed: { inline: await this.opts.resolveSeedRef(p.seed.ref) } };
+      }),
+    );
+  }
 
   // Capacity: how many per-case browsers can run at once (warm services are a shared pool, so the per-case browser is the bottleneck).
   async capacity(): Promise<BackendCapacity> {
@@ -135,7 +156,9 @@ export class ServiceTopologyBackend implements Backend, ScreenCapturable {
     // missing seed capability fails the run (the required world-state can't be established).
     const fixtures = job.evalCase.fixtures ?? [];
     if (fixtures.length > 0) {
-      const plans = planStoreSeed(fixtures, spec.dependencies, runId);
+      // Resolve any artifact-ref fixtures (large SQL dumps etc.) to inline bytes via the injected resolver before the
+      // runtime seeds — the runtime only ever sees inline seeds.
+      const plans = await this.resolveSeedRefs(planStoreSeed(fixtures, spec.dependencies, runId));
       if (!this.opts.runtime.seedFixtures) {
         throw new InternalError(
           "HARNESS_RUN_FAILED",

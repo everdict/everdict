@@ -921,6 +921,75 @@ describe("ServiceTopologyBackend (orchestrator-agnostic, mock runtime)", () => {
     await expect(backend.dispatch(job)).rejects.toThrow(/fixture-seeding capability/);
   });
 
+  it("resolves an artifact-ref fixture to inline via the injected resolver before seeding (P2)", async () => {
+    const seeded: StoreSeedPlan[][] = [];
+    const runtime: TopologyRuntime = {
+      ...seedRuntime(),
+      async seedFixtures(_spec, _runId, plans) {
+        seeded.push(plans);
+      },
+    };
+    const backend = new ServiceTopologyBackend({
+      runtime,
+      traceSource: {
+        async fetch() {
+          return [];
+        },
+      },
+      specFor: () => SPEC_SEED,
+      submit: async () => {},
+      newRunId: () => "fixed",
+      resolveSeedRef: async (ref) => `-- resolved ${ref}`,
+    });
+    const job: CaseJob = {
+      harness: { id: "browser-use-langgraph", version: "1.0.0" },
+      evalCase: {
+        id: "c1",
+        env: { kind: "browser", startUrl: "https://x" },
+        task: "do it",
+        graders: [],
+        timeoutSec: 60,
+        tags: [],
+        fixtures: [{ store: "postgres", role: "world", seed: { ref: "s3://dump.sql" } }],
+      },
+    };
+
+    await backend.dispatch(job);
+    expect(seeded[0]?.[0]?.seed).toEqual({ inline: "-- resolved s3://dump.sql" });
+  });
+
+  it("fails a ref fixture when no seed-ref resolver is configured", async () => {
+    const runtime: TopologyRuntime = {
+      ...seedRuntime(),
+      async seedFixtures() {},
+    };
+    const backend = new ServiceTopologyBackend({
+      runtime,
+      traceSource: {
+        async fetch() {
+          return [];
+        },
+      },
+      specFor: () => SPEC_SEED,
+      submit: async () => {},
+      newRunId: () => "fixed",
+    });
+    const job: CaseJob = {
+      harness: { id: "browser-use-langgraph", version: "1.0.0" },
+      evalCase: {
+        id: "c1",
+        env: { kind: "browser" },
+        task: "t",
+        graders: [],
+        timeoutSec: 60,
+        tags: [],
+        fixtures: [{ store: "postgres", role: "world", seed: { ref: "s3://x" } }],
+      },
+    };
+
+    await expect(backend.dispatch(job)).rejects.toThrow(/artifact-ref/);
+  });
+
   it("traceSourceFor: the harness's selected workspace source is pulled instead of the fixed runtime source; falls back when none is selected", async () => {
     const browser: TargetEnvHandle = {
       wiring: { target_cdp_url: "ws://browser/ctx" },
