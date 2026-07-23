@@ -16,6 +16,7 @@ import type {
 import { invokeTool } from "../tools/invocation.js";
 import { toOpenAiTools } from "../tools/openai.js";
 import { ToolRegistry } from "../tools/registry.js";
+import { OFFLOAD_THRESHOLD_CHARS, ResultStore, buildReadResultTool, offloadResult } from "../tools/result-store.js";
 import { type TodoItem, buildTodoTool, extractTodosFromHistory, renderTodoReminder } from "../tools/todo-tool.js";
 import { normalizeHistory } from "./normalize.js";
 import { buildSystemPrompt } from "./system-prompt.js";
@@ -76,14 +77,6 @@ const DEFAULT_MAX_RETRIES = 2;
 // hammering the summariser forever on an irrecoverably-oversized context.
 const MAX_COMPACTIONS = 12;
 const RETRY_BACKOFF_MS = [500, 1500];
-// Cap a single tool result before feeding it back to the model — an unbounded MCP payload (a big scorecard JSON)
-// would otherwise dominate the context window in one turn. ~48k chars ≈ ~12k tokens.
-const MAX_TOOL_OUTPUT_CHARS = 48_000;
-
-function capToolOutput(content: string): string {
-  if (content.length <= MAX_TOOL_OUTPUT_CHARS) return content;
-  return `${content.slice(0, MAX_TOOL_OUTPUT_CHARS)}\n… [truncated ${content.length - MAX_TOOL_OUTPUT_CHARS} chars]`;
-}
 
 // A transient upstream failure worth a retry on the same model: HTTP 429/5xx or a network hiccup.
 function isTransient(err: unknown): boolean {
@@ -133,7 +126,13 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
   // Goal persistence: the loop owns a todo list the model manages via write_todos, re-surfaced each turn as a
   // transient system-reminder so a long task stays on-goal. Seeded from a prior run in the same conversation.
   let todos: TodoItem[] = extractTodosFromHistory(messages);
-  const registry = new ToolRegistry([...opts.registry.list(), buildTodoTool((t) => (todos = t))]);
+  // Large tool results are offloaded here (stored full) and previewed to the model, which pages the rest via read_tool_result.
+  const resultStore = new ResultStore();
+  const registry = new ToolRegistry([
+    ...opts.registry.list(),
+    buildTodoTool((t) => (todos = t)),
+    buildReadResultTool(resultStore),
+  ]);
   let finalText = "";
   let compactionCount = 0;
   const toolCalls: { name: string; ok: boolean }[] = [];
@@ -251,7 +250,12 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
       const tc = result.toolCalls[i];
       const output = outputs[i];
       if (!tc || !output) continue;
-      const toolMessage: ChatMessage = { role: "tool", tool_call_id: tc.id, content: capToolOutput(output.content) };
+      // Offload a large result (store full + preview + id) rather than truncating away its tail; small ones pass through.
+      const content =
+        output.content.length > OFFLOAD_THRESHOLD_CHARS
+          ? offloadResult(resultStore, `result-${turn}-${i}`, output.content)
+          : output.content;
+      const toolMessage: ChatMessage = { role: "tool", tool_call_id: tc.id, content };
       messages = [...messages, toolMessage];
       produced.push(toolMessage);
       toolCalls.push({ name: tc.function.name, ok: !output.isError });
