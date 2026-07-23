@@ -505,6 +505,8 @@ export function TemplateForm({
                     management: 'managed',
                     service: '',
                     inject: [],
+                    externalEndpoint: '',
+                    externalSecret: '',
                   },
                 ],
               })
@@ -581,17 +583,37 @@ export function TemplateForm({
                   />
                 </div>
                 {d.management === 'external' ? (
-                  <p className="text-[11px] text-muted-foreground">
-                    {t('depExternalNote')}{' '}
-                    {t.rich('depExternalHint', {
-                      key: () => (
-                        <code className="font-mono">
-                          {CONVENTIONAL_CONN_KEY[d.store] ?? 'the store URL'}
-                        </code>
-                      ),
-                      svc: () => <b>{d.service.trim() || t('depExternalHintAnyService')}</b>,
-                    })}
-                  </p>
+                  <div className="space-y-2">
+                    <p className="text-[11px] text-muted-foreground">
+                      {t('depExternalNote')}{' '}
+                      {t.rich('depExternalHint', {
+                        key: () => (
+                          <code className="font-mono">
+                            {CONVENTIONAL_CONN_KEY[d.store] ?? 'the store URL'}
+                          </code>
+                        ),
+                        svc: () => <b>{d.service.trim() || t('depExternalHintAnyService')}</b>,
+                      })}
+                    </p>
+                    <LabeledInput
+                      label={t('depExternalEndpointLabel')}
+                      tip={t('depExternalEndpointTip')}
+                      value={d.externalEndpoint}
+                      onChange={(v) => setDep(i, { externalEndpoint: v })}
+                      placeholder={
+                        CONVENTIONAL_CONN_KEY[d.store]
+                          ? `${CONVENTIONAL_CONN_KEY[d.store]} value`
+                          : 'connection URL'
+                      }
+                    />
+                    <LabeledInput
+                      label={t('depExternalSecretLabel')}
+                      tip={t('depExternalSecretTip')}
+                      value={d.externalSecret}
+                      onChange={(v) => setDep(i, { externalSecret: v })}
+                      placeholder={t('depExternalSecretPlaceholder')}
+                    />
+                  </div>
                 ) : (
                   <DepInjectEditor
                     rows={d.inject}

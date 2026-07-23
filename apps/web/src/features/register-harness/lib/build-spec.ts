@@ -57,6 +57,11 @@ export interface DepRow {
   management: DepManagement // replaces the raw isolateBy choice — isolateBy is DERIVED from this + the store kind
   service: string // service that uses this store (optional; if left empty, shared across the topology)
   inject: DepInjectRow[] // BYO store env names (empty = the conventional keys only)
+  // For an external (BYO) store: the connection endpoint/URL + an optional workspace-secret name. Emitted at build time
+  // into the using service's env under the store's conventional key (CONVENTIONAL_CONN_KEY) — the connection's home is
+  // service.env, so re-editing shows it there (this sub-form authors it once). Ignored for a managed/agent store.
+  externalEndpoint: string
+  externalSecret: string // workspace-secret name (unset = the endpoint is a literal)
 }
 
 // The physical isolation an Everdict-deployed store uses, derived from its kind — the author never picks this directly.
@@ -91,6 +96,24 @@ export const CONVENTIONAL_CONN_KEY: Record<string, string> = {
   postgres: 'DATABASE_URL',
   redis: 'REDIS_URL',
   minio: 'AWS_S3_ENDPOINT',
+}
+
+// External (BYO) store connections → env for the service that uses them. Each external dep with an endpoint emits its
+// conventional connection key (DATABASE_URL etc.) into the using service's env — a {secretRef} when a secret name is
+// set, else the literal endpoint. An unset dep.service applies to every service. Merged UNDER envRowsToSpec so an
+// explicit service-env row wins; the connection's canonical home is service.env (round-trippable on prefill).
+export function externalConnEnv(deps: DepRow[], serviceName: string): Record<string, EnvValue> {
+  const out: Record<string, EnvValue> = {}
+  for (const d of deps) {
+    if (d.management !== 'external' || !d.externalEndpoint.trim()) continue
+    if (d.service.trim() && d.service.trim() !== serviceName) continue
+    const key = CONVENTIONAL_CONN_KEY[d.store]
+    if (!key) continue
+    out[key] = d.externalSecret.trim()
+      ? { secretRef: d.externalSecret.trim() }
+      : d.externalEndpoint.trim()
+  }
+  return out
 }
 
 // Template (top-level category) form state.
@@ -279,7 +302,8 @@ export function buildTemplate(s: TemplateState): Record<string, unknown> {
     kind: 'service',
     ...base,
     services: s.services.map((sv) => {
-      const env = envRowsToSpec(sv.env)
+      // Merge BYO external-store connections in FIRST so an explicit service-env row still wins.
+      const env = { ...externalConnEnv(s.deps, sv.name), ...envRowsToSpec(sv.env) }
       const volumes = lines(sv.volumes)
       const wiring = wiringToSpec(sv.wiring)
       const hasReadiness = sv.readinessTimeout.trim() !== '' || sv.readinessInterval.trim() !== ''
@@ -380,6 +404,10 @@ export function templateStateFromSpec(t: HarnessTemplateSpec): TemplateState {
       management: managementFromIsolateBy(d.isolateBy),
       service: d.service ?? '',
       inject: (d.inject ?? []).map((m) => ({ env: m.env, template: m.template ?? '' })),
+      // The external connection lives in the service's env after the first save (round-trips there), so the sub-form
+      // starts empty on re-edit — filling it again re-authors the same key.
+      externalEndpoint: '',
+      externalSecret: '',
     })),
     frontDoorService: t.frontDoor?.service ?? '',
     frontDoorSubmit: t.frontDoor?.submit ?? '',
