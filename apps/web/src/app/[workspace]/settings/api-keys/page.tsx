@@ -7,7 +7,6 @@ import { controlPlane } from '@/shared/lib/control-plane'
 import { Callout } from '@/shared/ui/callout'
 import { EmptyState } from '@/shared/ui/empty-state'
 import { PageHeader } from '@/shared/ui/page-header'
-import { SettingsColumn } from '@/shared/ui/settings-column'
 
 export const dynamic = 'force-dynamic'
 
@@ -18,10 +17,10 @@ export default async function ApiKeysPage() {
   if (!principal) {
     const a = await getTranslations('accountPage')
     return (
-      <SettingsColumn>
+      <div className="space-y-6">
         <PageHeader title={t('apiKeys')} description={t('apiKeysDesc')} />
         <EmptyState title={a('signedOutTitle')} hint={a('signedOutHint')} />
-      </SettingsColumn>
+      </div>
     )
   }
 
@@ -35,13 +34,13 @@ export default async function ApiKeysPage() {
   const a = await getTranslations('accountPage')
 
   return (
-    <SettingsColumn>
+    <div className="space-y-6">
       <PageHeader title={t('apiKeys')} description={t('apiKeysDesc')} />
       {keysError ? (
         <Callout tone="danger">{a('keysLoadError', { error: keysError })}</Callout>
       ) : (
         <ApiKeysManager keys={keys} canWrite />
       )}
-    </SettingsColumn>
+    </div>
   )
 }

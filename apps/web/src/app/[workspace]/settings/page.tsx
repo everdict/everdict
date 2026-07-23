@@ -10,7 +10,6 @@ import { controlPlane } from '@/shared/lib/control-plane'
 import { Callout } from '@/shared/ui/callout'
 import { EmptyState } from '@/shared/ui/empty-state'
 import { PageHeader } from '@/shared/ui/page-header'
-import { SettingsColumn } from '@/shared/ui/settings-column'
 
 export const dynamic = 'force-dynamic'
 
@@ -58,10 +57,10 @@ export default async function SettingsGeneralPage({
   const header = <PageHeader title={t('general')} description={t('generalDesc')} />
   if (!canRead) {
     return (
-      <SettingsColumn>
+      <div className="space-y-6">
         {header}
         <EmptyState title={s('noPermissionTitle')} hint={s('noPermissionHint')} />
-      </SettingsColumn>
+      </div>
     )
   }
 
@@ -78,7 +77,7 @@ export default async function SettingsGeneralPage({
   const urlBase = await resolveWorkspaceUrlBase()
 
   return (
-    <SettingsColumn>
+    <div className="space-y-6">
       {header}
       {error !== undefined ? (
         <Callout tone="danger">{s('connectError', { error })}</Callout>
@@ -100,6 +99,6 @@ export default async function SettingsGeneralPage({
           )}
         </div>
       )}
-    </SettingsColumn>
+    </div>
   )
 }

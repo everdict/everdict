@@ -6,7 +6,6 @@ import { currentPrincipal } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
 import { EmptyState } from '@/shared/ui/empty-state'
 import { PageHeader } from '@/shared/ui/page-header'
-import { SettingsColumn } from '@/shared/ui/settings-column'
 
 export const dynamic = 'force-dynamic'
 
@@ -18,10 +17,10 @@ export default async function PersonalSecretsPage() {
   if (!principal) {
     const a = await getTranslations('accountPage')
     return (
-      <SettingsColumn>
+      <div className="space-y-6">
         <PageHeader title={t('personalSecrets')} description={t('personalSecretsDesc')} />
         <EmptyState title={a('signedOutTitle')} hint={a('signedOutHint')} />
-      </SettingsColumn>
+      </div>
     )
   }
 
@@ -35,9 +34,9 @@ export default async function PersonalSecretsPage() {
   }
 
   return (
-    <SettingsColumn>
+    <div className="space-y-6">
       <PageHeader title={t('personalSecrets')} description={t('personalSecretsDesc')} />
       <SecretsManager variant="personal" secrets={personalSecrets} canWrite />
-    </SettingsColumn>
+    </div>
   )
 }

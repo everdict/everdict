@@ -5,7 +5,6 @@ import { ProfileForm } from '@/features/update-profile'
 import { currentPrincipal } from '@/shared/auth/principal'
 import { EmptyState } from '@/shared/ui/empty-state'
 import { PageHeader } from '@/shared/ui/page-header'
-import { SettingsColumn } from '@/shared/ui/settings-column'
 
 export const dynamic = 'force-dynamic'
 
@@ -16,15 +15,15 @@ export default async function ProfilePage() {
   if (!principal) {
     const a = await getTranslations('accountPage')
     return (
-      <SettingsColumn>
+      <div className="space-y-6">
         <PageHeader title={t('profile')} description={t('profileDesc')} />
         <EmptyState title={a('signedOutTitle')} hint={a('signedOutHint')} />
-      </SettingsColumn>
+      </div>
     )
   }
 
   return (
-    <SettingsColumn>
+    <div className="space-y-6">
       <PageHeader title={t('profile')} description={t('profileDesc')} />
       <div className="space-y-5">
         <ProfileForm
@@ -35,6 +34,6 @@ export default async function ProfilePage() {
         {/* Leave workspace — based on the active workspace (hidden for api-key sessions). */}
         {principal.via === 'oidc' && principal.workspace && <LeaveWorkspaceButton />}
       </div>
-    </SettingsColumn>
+    </div>
   )
 }
