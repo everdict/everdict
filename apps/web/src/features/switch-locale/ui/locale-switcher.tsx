@@ -6,6 +6,7 @@ import { Check, Languages } from 'lucide-react'
 import { useLocale, useTranslations } from 'next-intl'
 
 import { LOCALES, type Locale } from '@/shared/i18n/config'
+import { reloadInfraFrames } from '@/shared/lib/reload-infra-frames'
 import { cn } from '@/shared/lib/utils'
 import { DropdownItem, DropdownMenu } from '@/shared/ui/dropdown-menu'
 
@@ -31,6 +32,9 @@ export function LocaleSwitcher({
     startTransition(async () => {
       await setLocale(next)
       router.refresh()
+      // Re-render the infra panel's mounted iframes too — they resolve the locale server-side off the cookie
+      // and router.refresh() does not reach their separate browsing context.
+      reloadInfraFrames()
     })
   }
 

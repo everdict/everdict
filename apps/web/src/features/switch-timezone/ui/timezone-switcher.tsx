@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { useTimeZone, useTranslations } from 'next-intl'
 
 import { DEFAULT_TIMEZONE, detectTimeZone, listTimeZones } from '@/shared/i18n/timezone'
+import { reloadInfraFrames } from '@/shared/lib/reload-infra-frames'
 import { Combobox, type ComboboxOption } from '@/shared/ui/combobox'
 
 import { setTimezone } from '../api/set-timezone'
@@ -53,6 +54,9 @@ export function TimezoneSwitcher() {
     startTransition(async () => {
       await setTimezone(next)
       router.refresh()
+      // Re-render the infra panel's mounted iframes too — they resolve the timezone server-side off the cookie
+      // and router.refresh() does not reach their separate browsing context.
+      reloadInfraFrames()
     })
   }
 
