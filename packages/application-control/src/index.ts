@@ -252,3 +252,4 @@ export { ScorecardService } from "./scorecard/scorecard-service.js";
 export { ScorecardBatchService } from "./scorecard/scorecard-batch-service.js";
 export { ScorecardIngestService } from "./scorecard/scorecard-ingest-service.js";
 export { ScorecardAnalyticsService } from "./scorecard/scorecard-analytics-service.js";
+export { dispatchManifest } from "./recording-manifest.js";

@@ -102,6 +102,9 @@ export const DispatchManifestSchema = z.object({
   model: z.string().optional(),
   seed: z.string().optional(),
   env: z.record(z.string(), z.string()).optional(),
+  // Content hash of the case's world-state fixtures (P2) — what data the run was seeded with, so the sealed recording
+  // is self-describing for audit/reproducibility. Absent when the case declares no fixtures.
+  fixtures: z.string().optional(),
 });
 export type DispatchManifest = z.infer<typeof DispatchManifestSchema>;
 

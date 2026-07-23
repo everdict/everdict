@@ -40,6 +40,7 @@ import { executeWithSpillover } from "../ops/runtime-spillover.js";
 import { weightedTargets } from "../ops/shard-weights.js";
 import { SpeculationController } from "../ops/speculation.js";
 import type { DispatchOptions } from "../ports/dispatcher.js";
+import { dispatchManifest } from "../recording-manifest.js";
 import { type Dispatch, runSuite } from "../run-suite.js";
 import {
   type ScorecardServiceDeps,
@@ -872,6 +873,9 @@ export class ScorecardBatchService {
           // envKind = the observation kind. Empty recording → seal returns undefined → no ref attached.
           const ref = await this.deps.recordingStore.seal(`evd-${scorecardId}-${r.caseId}`, {
             envKind: r.snapshot.kind,
+            // Harness-only manifest here (the case's fixtures aren't threaded into write-back yet); RunService seals the
+            // fixtures hash for single runs. docs/architecture/dependency-store-roles.md P2.
+            dispatch: dispatchManifest(r.harness),
           });
           if (ref) r.recordingRef = ref;
         } catch {
