@@ -385,6 +385,7 @@ describe("MCP tools", () => {
       "estimate_scorecard",
       "exec_in_run",
       "fail_job",
+      "fire_schedule",
       "get_agent",
       "get_dataset",
       "get_harness_instance",
