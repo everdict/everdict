@@ -122,18 +122,11 @@ const internal = {
   scheduleFinalize: {
     summary: "Finalize a schedule fire (internal bridge)",
     description:
-      "Called by the workflow after poll-to-terminal: records the fire's final status on the schedule and " +
-      "emits a regression notification vs the previous run when applicable. Guarded by x-internal-token " +
-      "(403 on mismatch; fail-closed 404 when unset).",
+      "Called by the workflow after poll-to-terminal: records the fired scorecard's terminal status on the " +
+      "schedule. Guarded by x-internal-token (403 on mismatch; fail-closed 404 when unset).",
     tags: ["internal"],
     params: scheduleIdParams,
-    body: toJsonSchema(
-      z.object({
-        tenant: z.string().min(1),
-        scorecardId: z.string().min(1),
-        previousScorecardId: z.string().optional(),
-      }),
-    ),
+    body: toJsonSchema(z.object({ tenant: z.string().min(1), scorecardId: z.string().min(1) })),
     response: {
       200: { description: "Finalized", ...toJsonSchema(OkResponseSchema) },
       ...errorResponses(400, 403, 404),

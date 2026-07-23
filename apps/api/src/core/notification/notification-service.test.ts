@@ -135,16 +135,33 @@ describe("NotificationService personal feed (bell inbox) — notifications N1/N2
     expect(await svc.markFeedRead("alice", "acme", "all")).toBe(0); // idempotent
   });
 
-  it("scheduled regression → schedule_regression goes to the schedule creator's feed", async () => {
+  it("a scheduled scorecard (origin.source=schedule) becomes a schedule-BRANDED feed notification, not the generic one", async () => {
     const { svc } = build({});
-    await svc.notifyRegression("acme", {
-      scheduleName: "nightly",
-      scorecardId: "sc-2",
-      previousScorecardId: "sc-1",
-      regressions: [{ caseId: "c1", metric: "tests_pass", baseline: 1, candidate: 0 }],
+    await svc.notifyScorecard("acme", {
+      id: "sc-2",
+      status: "succeeded",
+      dataset: { id: "d", version: "1" },
+      harness: { id: "h", version: "2" },
       createdBy: "alice",
+      origin: { source: "schedule" },
     });
-    expect((await svc.listFeed("alice", "acme"))[0]?.kind).toBe("schedule_regression");
+    const rows = await svc.listFeed("alice", "acme");
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ kind: "schedule_completed", link: { scorecardId: "sc-2" } });
+    expect(rows[0]?.title).toContain("Scheduled run completed");
+  });
+
+  it("a scheduled scorecard that fails becomes schedule_failed", async () => {
+    const { svc } = build({});
+    await svc.notifyScorecard("acme", {
+      id: "sc-3",
+      status: "failed",
+      dataset: { id: "d", version: "1" },
+      harness: { id: "h", version: "2" },
+      createdBy: "alice",
+      origin: { source: "schedule" },
+    });
+    expect((await svc.listFeed("alice", "acme"))[0]?.kind).toBe("schedule_failed");
   });
 });
 

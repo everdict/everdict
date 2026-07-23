@@ -8,7 +8,8 @@ export const NotificationKindSchema = z.enum([
   "run_failed",
   "scorecard_completed",
   "scorecard_failed",
-  "schedule_regression",
+  "schedule_completed", // a scheduled eval (cron fire or manual "run now") finished — branded with "Scheduled run"
+  "schedule_failed",
   "comment_mention", // @-mentioned in a comment — the link jumps straight to that context (dataset comment)
 ]);
 export type NotificationKind = z.infer<typeof NotificationKindSchema>;

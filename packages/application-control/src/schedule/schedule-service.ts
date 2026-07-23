@@ -65,32 +65,11 @@ export interface ScheduleServiceDeps {
     opts: { scope?: string; since: string; until: string; limit?: number },
   ) => Promise<string[]>;
   // Polls the fired scorecard's status (workflow poll-to-terminal). If not injected, the status route is disabled.
+  // finalize uses it to record the terminal lastStatus; the completion notification itself comes from the scorecard's
+  // onComplete (schedule-branded via origin.source === "schedule" — see NotificationService.notifyScorecard).
   scorecardStatus?: (scorecardId: string) => Promise<string | undefined>;
-  // For regression alerts: previous↔current scorecard diff (= ScorecardService.diff). Throws if either is incomplete/errored → finalize swallows it.
-  diffScorecards?: (
-    tenant: string,
-    baselineId: string,
-    candidateId: string,
-  ) => Promise<{ regressions: RegressionDelta[] }>;
-  // Alert when a regression is caught (= NotificationService.notifyRegression). If not injected, regression alerts are disabled (completion alerts come from the scorecard's onComplete).
-  notifyRegression?: (tenant: string, payload: RegressionAlert) => Promise<void>;
   newId?: () => string;
   now?: () => string;
-}
-
-// One regression from a diff (case × metric) — only the fields the alert message needs.
-export interface RegressionDelta {
-  caseId: string;
-  metric: string;
-  baseline: number;
-  candidate: number;
-}
-export interface RegressionAlert {
-  scheduleName: string;
-  scorecardId: string;
-  previousScorecardId: string;
-  regressions: RegressionDelta[];
-  createdBy?: string; // schedule creator — personal notification-feed recipient (notifications N2)
 }
 
 // Scheduled (cron) scorecard CRUD. Firing (Temporal Schedule sync + workflow) is slice 2 — here we manage only the SSOT record.
@@ -203,9 +182,8 @@ export class ScheduleService {
   }
 
   // Fire (called by the Temporal workflow via an internal route) — submit the schedule's runTemplate under the creator's identity.
-  // Records lastFired/last* and also returns the previous schedule run id (the lastScorecardId just before this fire) for regression comparison.
-  // If no firer is configured, BadRequest (Temporal-less dev).
-  async fire(tenant: string, id: string): Promise<{ scorecardId: string; previousScorecardId?: string }> {
+  // Records lastFired/last* and returns the submitted scorecard id. If no firer is configured, BadRequest (Temporal-less dev).
+  async fire(tenant: string, id: string): Promise<{ scorecardId: string }> {
     const schedule = await this.getRecord(tenant, id); // 404
     const t = schedule.runTemplate;
     const { submitScorecard, ingestPull, listTraceIds } = this.deps;
@@ -221,7 +199,6 @@ export class ScheduleService {
     } else if (!submitScorecard) {
       throw new BadRequestError("BAD_REQUEST", { id }, "Scorecard firer is not configured (firing disabled).");
     }
-    const previousScorecardId = schedule.lastScorecardId; // the run just before this fire (finalize's regression baseline)
     let rec: { id: string; status: string };
     try {
       if (t.pull && ingestPull && listTraceIds) {
@@ -287,7 +264,7 @@ export class ScheduleService {
       lastStatus: rec.status,
       updatedAt: this.now(),
     });
-    return { scorecardId: rec.id, ...(previousScorecardId !== undefined ? { previousScorecardId } : {}) };
+    return { scorecardId: rec.id };
   }
 
   // The fired scorecard's status (workflow poll-to-terminal). undefined if not configured.
@@ -295,27 +272,13 @@ export class ScheduleService {
     return this.deps.scorecardStatus?.(scorecardId) ?? Promise.resolve(undefined);
   }
 
-  // Finalize (called by the workflow after poll-to-terminal) — record the final status and, if there are regressions vs the previous run, alert.
-  // diff requires both to be complete (throws if incomplete/errored) → swallow and skip only the regression alert (completion alerts come from the scorecard's onComplete).
-  async finalize(tenant: string, id: string, scorecardId: string, previousScorecardId?: string): Promise<void> {
-    const schedule = await this.getRecord(tenant, id); // 404 (if the schedule was deleted, nothing more to do)
+  // Finalize (called by the workflow after poll-to-terminal) — record the fired scorecard's terminal status on the
+  // schedule (last-run status for the list/detail). The creator's completion notification is emitted by the scorecard's
+  // own onComplete (schedule-branded via origin.source === "schedule"), so finalize no longer notifies.
+  async finalize(tenant: string, id: string, scorecardId: string): Promise<void> {
+    await this.getRecord(tenant, id); // 404 (if the schedule was deleted, nothing more to do)
     const status = await this.scorecardStatus(scorecardId);
     if (status !== undefined) await this.deps.store.update(tenant, id, { lastStatus: status, updatedAt: this.now() });
-    if (!previousScorecardId || !this.deps.diffScorecards || !this.deps.notifyRegression) return;
-    let regressions: RegressionDelta[];
-    try {
-      ({ regressions } = await this.deps.diffScorecards(tenant, previousScorecardId, scorecardId));
-    } catch {
-      return; // one side is incomplete/failed → cannot compare, skip the regression alert
-    }
-    if (regressions.length === 0) return;
-    await this.deps.notifyRegression(tenant, {
-      scheduleName: schedule.name,
-      scorecardId,
-      previousScorecardId,
-      regressions,
-      createdBy: schedule.createdBy, // schedule creator → personal notification-feed recipient (notifications N2)
-    });
   }
 }
 

@@ -298,7 +298,6 @@ async function main(): Promise<void> {
   const scheduleService = wireScheduleService(scheduleRef, {
     scheduleStore,
     scorecardService,
-    notificationService,
     ...(traceSourceService ? { traceSourceService } : {}),
   });
 

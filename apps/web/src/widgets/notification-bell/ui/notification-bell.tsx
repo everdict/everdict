@@ -2,10 +2,27 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Bell, BellOff, BellRing, Check } from 'lucide-react'
+import {
+  AtSign,
+  Bell,
+  BellOff,
+  BellRing,
+  CalendarCheck,
+  CalendarX,
+  Check,
+  CircleCheck,
+  CircleX,
+  ClipboardCheck,
+  ClipboardX,
+  type LucideIcon,
+} from 'lucide-react'
 import { useLocale, useTimeZone, useTranslations } from 'next-intl'
 
-import { notificationsResponseSchema, type NotificationItem } from '@/entities/notification'
+import {
+  notificationsResponseSchema,
+  type NotificationItem,
+  type NotificationKind,
+} from '@/entities/notification'
 import {
   desktopHasPairedRunner,
   getEverdictDesktop,
@@ -41,6 +58,24 @@ function hrefOf(workspace: string, n: NotificationItem): string {
     if (seg) return `/${workspace}/${seg}${n.link.commentId ? `#comment-${n.link.commentId}` : ''}`
   }
   return `/${workspace}`
+}
+
+// Per-kind icon + outcome tone — the row leads with a tinted icon chip so "what happened" reads at a glance
+// (glyph = the notification type, tint = the outcome: success/danger/warning/info). Language-independent — no catalog.
+type KindTone = 'success' | 'danger' | 'info'
+const KIND_META: Record<NotificationKind, { Icon: LucideIcon; tone: KindTone }> = {
+  run_completed: { Icon: CircleCheck, tone: 'success' },
+  run_failed: { Icon: CircleX, tone: 'danger' },
+  scorecard_completed: { Icon: ClipboardCheck, tone: 'success' },
+  scorecard_failed: { Icon: ClipboardX, tone: 'danger' },
+  schedule_completed: { Icon: CalendarCheck, tone: 'success' },
+  schedule_failed: { Icon: CalendarX, tone: 'danger' },
+  comment_mention: { Icon: AtSign, tone: 'info' },
+}
+const TONE_CHIP: Record<KindTone, string> = {
+  success: 'bg-[var(--color-success)]/12 text-[var(--color-success)]',
+  danger: 'bg-destructive/12 text-destructive',
+  info: 'bg-primary/12 text-primary',
 }
 
 type Permission = NotificationPermission | 'unsupported'
@@ -297,40 +332,53 @@ export function NotificationBell({ workspace }: { workspace: string }) {
               </p>
             ) : (
               <ul className="max-h-[360px] divide-y divide-border overflow-y-auto">
-                {items.map((n) => (
-                  <li key={n.id}>
-                    <button
-                      type="button"
-                      onClick={() => onItemClick(n)}
-                      className="flex w-full items-start gap-2 px-3 py-2.5 text-left transition-colors hover:bg-accent"
-                    >
-                      <span
-                        className={cn(
-                          'mt-1.5 size-1.5 shrink-0 rounded-full',
-                          n.readAt === undefined ? 'bg-primary' : 'bg-transparent'
-                        )}
-                      />
-                      <span className="min-w-0 flex-1">
+                {items.map((n) => {
+                  const { Icon, tone } = KIND_META[n.kind]
+                  const isUnread = n.readAt === undefined
+                  return (
+                    <li key={n.id}>
+                      <button
+                        type="button"
+                        onClick={() => onItemClick(n)}
+                        className="flex w-full items-start gap-2.5 px-3 py-2.5 text-left transition-colors hover:bg-accent"
+                      >
+                        {/* Type + outcome at a glance — tinted icon chip (glyph=kind, color=outcome). */}
                         <span
+                          aria-hidden
                           className={cn(
-                            'block truncate text-[13px]',
-                            n.readAt === undefined
-                              ? 'font-[560] text-foreground'
-                              : 'text-muted-foreground'
+                            'mt-0.5 grid size-7 shrink-0 place-items-center rounded-md',
+                            TONE_CHIP[tone]
                           )}
                         >
-                          {n.title}
+                          <Icon className="size-4" strokeWidth={1.75} />
                         </span>
-                        {n.body && (
-                          <span className="block truncate text-[12px] text-faint">{n.body}</span>
+                        <span className="min-w-0 flex-1">
+                          <span
+                            className={cn(
+                              'block truncate text-[13px]',
+                              isUnread ? 'font-[560] text-foreground' : 'text-muted-foreground'
+                            )}
+                          >
+                            {n.title}
+                          </span>
+                          {n.body && (
+                            <span className="block truncate text-[12px] text-faint">{n.body}</span>
+                          )}
+                          <span className="block text-[11px] text-faint">
+                            {fmtTimeAgo(n.createdAt, locale, timeZone)}
+                          </span>
+                        </span>
+                        {/* Unread marker — moved to the trailing edge so the icon chip owns the lead. */}
+                        {isUnread && (
+                          <span
+                            aria-hidden
+                            className="mt-1.5 size-1.5 shrink-0 rounded-full bg-primary"
+                          />
                         )}
-                        <span className="block text-[11px] text-faint">
-                          {fmtTimeAgo(n.createdAt, locale, timeZone)}
-                        </span>
-                      </span>
-                    </button>
-                  </li>
-                ))}
+                      </button>
+                    </li>
+                  )
+                })}
               </ul>
             )}
           </div>

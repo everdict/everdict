@@ -16,10 +16,7 @@ export function createActivities(dispatcher: Dispatcher, schedule?: ScheduleActi
     dispatchCase(job: CaseJob): Promise<CaseResult> {
       return dispatcher.dispatch(job);
     },
-    async fireScheduledScorecard(input: {
-      scheduleId: string;
-      tenant: string;
-    }): Promise<{ scorecardId: string; previousScorecardId?: string }> {
+    async fireScheduledScorecard(input: { scheduleId: string; tenant: string }): Promise<{ scorecardId: string }> {
       if (!schedule)
         throw new Error("Schedule activities are not configured (EVERDICT_API_URL/EVERDICT_INTERNAL_TOKEN).");
       const res = await fetch(
@@ -31,12 +28,9 @@ export function createActivities(dispatcher: Dispatcher, schedule?: ScheduleActi
         },
       );
       if (!res.ok) throw new Error(`Scheduled fire failed: ${res.status} ${await res.text()}`);
-      const json = (await res.json()) as { scorecardId?: unknown; previousScorecardId?: unknown };
+      const json = (await res.json()) as { scorecardId?: unknown };
       if (typeof json.scorecardId !== "string") throw new Error("The fire response has no scorecardId.");
-      return {
-        scorecardId: json.scorecardId,
-        ...(typeof json.previousScorecardId === "string" ? { previousScorecardId: json.previousScorecardId } : {}),
-      };
+      return { scorecardId: json.scorecardId };
     },
     async scheduledScorecardStatus(scorecardId: string): Promise<string | null> {
       if (!schedule)
@@ -53,7 +47,6 @@ export function createActivities(dispatcher: Dispatcher, schedule?: ScheduleActi
       scheduleId: string;
       tenant: string;
       scorecardId: string;
-      previousScorecardId?: string;
     }): Promise<void> {
       if (!schedule)
         throw new Error("Schedule activities are not configured (EVERDICT_API_URL/EVERDICT_INTERNAL_TOKEN).");
@@ -62,11 +55,7 @@ export function createActivities(dispatcher: Dispatcher, schedule?: ScheduleActi
         {
           method: "POST",
           headers: { "content-type": "application/json", "x-internal-token": schedule.internalToken },
-          body: JSON.stringify({
-            tenant: input.tenant,
-            scorecardId: input.scorecardId,
-            ...(input.previousScorecardId !== undefined ? { previousScorecardId: input.previousScorecardId } : {}),
-          }),
+          body: JSON.stringify({ tenant: input.tenant, scorecardId: input.scorecardId }),
         },
       );
       if (!res.ok) throw new Error(`Scheduled finalization failed: ${res.status} ${await res.text()}`);

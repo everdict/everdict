@@ -116,14 +116,14 @@ export function registerInternalRoutes(app: FastifyInstance, deps: ServerDeps): 
       const body = z.object({ tenant: z.string().min(1) }).safeParse(req.body);
       if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: body.error.message });
       try {
-        return reply.send(await deps.scheduleService.fire(body.data.tenant, req.params.id)); // { scorecardId, previousScorecardId? }
+        return reply.send(await deps.scheduleService.fire(body.data.tenant, req.params.id)); // { scorecardId }
       } catch (err) {
         return sendError(reply, err); // missing schedule 404, firer not configured 400
       }
     },
   );
 
-  // Fire finalization — the workflow calls this after poll-to-terminal. Records the final status + a regression notification vs the previous run.
+  // Fire finalization — the workflow calls this after poll-to-terminal. Records the fired scorecard's terminal status on the schedule.
   app.post<{ Params: { id: string } }>(
     "/internal/schedules/:id/finalize",
     { schema: internalDocs.scheduleFinalize },
@@ -133,21 +133,10 @@ export function registerInternalRoutes(app: FastifyInstance, deps: ServerDeps): 
       const provided = req.headers["x-internal-token"];
       if (typeof provided !== "string" || !constantTimeEq(provided, deps.internalToken))
         return reply.code(403).send({ code: "FORBIDDEN", message: "internal token mismatch" });
-      const body = z
-        .object({
-          tenant: z.string().min(1),
-          scorecardId: z.string().min(1),
-          previousScorecardId: z.string().optional(),
-        })
-        .safeParse(req.body);
+      const body = z.object({ tenant: z.string().min(1), scorecardId: z.string().min(1) }).safeParse(req.body);
       if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: body.error.message });
       try {
-        await deps.scheduleService.finalize(
-          body.data.tenant,
-          req.params.id,
-          body.data.scorecardId,
-          body.data.previousScorecardId,
-        );
+        await deps.scheduleService.finalize(body.data.tenant, req.params.id, body.data.scorecardId);
         return reply.send({ ok: true });
       } catch (err) {
         return sendError(reply, err); // missing schedule 404

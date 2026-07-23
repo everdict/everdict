@@ -13,7 +13,8 @@ export const notificationKinds = [
   'run_failed',
   'scorecard_completed',
   'scorecard_failed',
-  'schedule_regression',
+  'schedule_completed',
+  'schedule_failed',
   'comment_mention',
 ] as const
 export const notificationKindSchema = z.enum(notificationKinds)

@@ -97,8 +97,9 @@ repo↔service wiring. Competing products call this an "integration" and make it
   `deps.harnesses.get(tenant, id, version)` before dispatch — the single point to apply an ephemeral pin override.
 - **Auth is composable** (`packages/auth`): `compositeAuthenticator([...])` already chains OIDC (jose
   `createRemoteJWKSet`), API-key (`ak_`), and runner (`rnr_`) authenticators; adding a 4th issuer is additive.
-- **Regression analytics exist**: `diffScorecards` + `GET /scorecards/diff`; schedules already do
-  fire → finalize → diff-vs-previous → `notifyRegression` (Mattermost).
+- **Regression analytics exist**: `diffScorecards` + `GET /scorecards/diff`; the schedule detail page reads them
+  for regression-over-time (`trendSeries`). Schedules do fire → poll → finalize (record `lastStatus`); the
+  creator's completion notification is schedule-branded via the scorecard `onComplete`.
 - **Self-hosted placement exists**: `runtime: "self:<id>"` routes through `runtime-dispatcher.ts` →
   `SelfHostedBackend` → runner-hub `lease_job` long-poll. CI-fired runs can land on a member's machine.
 - **Workspace GitHub App** holds workspace-owned installation tokens (org install → selected repos), host-aware

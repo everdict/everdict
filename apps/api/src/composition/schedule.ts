@@ -1,4 +1,3 @@
-import type { NotificationService } from "@everdict/application-control";
 import { ScheduleService } from "@everdict/application-control";
 import type { ScorecardService, TraceSourceService } from "@everdict/application-control";
 import type { ScheduleStore } from "@everdict/db";
@@ -34,12 +33,11 @@ export function wireScheduleService(
   deps: {
     scheduleStore: ScheduleStore;
     scorecardService: ScorecardService;
-    notificationService: NotificationService;
     // Optional — enables PULL-mode schedules (judge a rolling window of a trace source). Absent = batch-only firing.
     traceSourceService?: TraceSourceService;
   },
 ): ScheduleService {
-  const { scheduleStore, scorecardService, notificationService, traceSourceService } = deps;
+  const { scheduleStore, scorecardService, traceSourceService } = deps;
   const temporalAddress = process.env.EVERDICT_TEMPORAL_ADDRESS;
   const scheduleService = new ScheduleService({
     store: scheduleStore,
@@ -54,10 +52,9 @@ export function wireScheduleService(
             (await traceSourceService.listTraces(tenant, source, opts)).map((t) => t.id),
         }
       : {}),
+    // Terminal status recorded on the schedule at finalize; the creator's completion notification is emitted by the
+    // scorecard's own onComplete (schedule-branded via origin.source === "schedule").
     scorecardStatus: async (id) => (await scorecardService.get(id))?.status,
-    // Regression alert: diff previous↔this schedule run (both must be complete) → Mattermost on regression (completion notification is separate, via the scorecard onComplete).
-    diffScorecards: (tenant, baselineId, candidateId) => scorecardService.diff(tenant, baselineId, candidateId),
-    notifyRegression: (tenant, payload) => notificationService.notifyRegression(tenant, payload),
   });
   ref.set(scheduleService);
   return scheduleService;

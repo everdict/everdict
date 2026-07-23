@@ -216,8 +216,6 @@ export { assertRuntimeTarget } from "./require-runtime/require-runtime.js";
 export { type LiveTraceRef, RunService, type RunServiceDeps, type SubmitInput } from "./run/run-service.js";
 export {
   type CreateScheduleInput,
-  type RegressionAlert,
-  type RegressionDelta,
   type ScheduleDriver,
   type ScheduleRecordWithNext,
   ScheduleService,

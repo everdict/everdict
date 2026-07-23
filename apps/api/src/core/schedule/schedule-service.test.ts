@@ -339,95 +339,52 @@ describe("ScheduleService.fire — firing (called by the internal route)", () =>
     await expect(s.fire("acme", "nope")).rejects.toBeInstanceOf(NotFoundError);
   });
 
-  it("consecutive fires: the second fire returns the first run id as previousScorecardId (regression baseline)", async () => {
+  it("each fire returns its own submitted scorecard id and records it as lastScorecardId", async () => {
     let i = 0;
-    const s = new ScheduleService({
-      store: new InMemoryScheduleStore(),
-      newId: () => "sch-1",
-      now: () => "t",
-      submitScorecard: async () => ({ id: `sc-${++i}`, status: "queued" }),
-    });
-    await s.create(base);
-    const first = await s.fire("acme", "sch-1");
-    expect(first).toEqual({ scorecardId: "sc-1" }); // first fire — no previous
-    const second = await s.fire("acme", "sch-1");
-    expect(second).toEqual({ scorecardId: "sc-2", previousScorecardId: "sc-1" });
-  });
-});
-
-describe("ScheduleService.finalize — regression alert", () => {
-  function svcWith(over: {
-    diff?: (
-      t: string,
-      a: string,
-      b: string,
-    ) => Promise<{ regressions: { caseId: string; metric: string; baseline: number; candidate: number }[] }>;
-    status?: string;
-  }) {
-    const notified: Array<{
-      tenant: string;
-      payload: { scheduleName: string; scorecardId: string; previousScorecardId: string };
-    }> = [];
     const store = new InMemoryScheduleStore();
     const s = new ScheduleService({
       store,
       newId: () => "sch-1",
       now: () => "t",
-      scorecardStatus: async () => over.status ?? "succeeded",
-      ...(over.diff ? { diffScorecards: over.diff } : {}),
-      notifyRegression: async (tenant, payload) => {
-        notified.push({ tenant, payload });
-      },
+      submitScorecard: async () => ({ id: `sc-${++i}`, status: "queued" }),
     });
-    return { s, store, notified };
+    await s.create(base);
+    expect(await s.fire("acme", "sch-1")).toEqual({ scorecardId: "sc-1" });
+    expect((await s.get("acme", "sch-1")).lastScorecardId).toBe("sc-1");
+    expect(await s.fire("acme", "sch-1")).toEqual({ scorecardId: "sc-2" });
+    expect((await s.get("acme", "sch-1")).lastScorecardId).toBe("sc-2");
+  });
+});
+
+describe("ScheduleService.finalize — records the fired scorecard's terminal status", () => {
+  function svcWith(status: string | undefined) {
+    const store = new InMemoryScheduleStore();
+    const s = new ScheduleService({
+      store,
+      newId: () => "sch-1",
+      now: () => "t",
+      scorecardStatus: async () => status,
+    });
+    return { s, store };
   }
 
-  it("alerts and updates lastStatus when there are regressions vs the previous run", async () => {
-    const { s, notified } = svcWith({
-      diff: async () => ({ regressions: [{ caseId: "c1", metric: "tests-pass", baseline: 1, candidate: 0 }] }),
-    });
+  it("updates lastStatus to the polled terminal status", async () => {
+    const { s } = svcWith("succeeded");
     await s.create(base);
-    await s.finalize("acme", "sch-1", "sc-new", "sc-prev");
-    expect(notified).toHaveLength(1);
-    expect(notified[0]).toMatchObject({
-      tenant: "acme",
-      payload: { scheduleName: "nightly", scorecardId: "sc-new", previousScorecardId: "sc-prev" },
-    });
+    await s.finalize("acme", "sch-1", "sc-new");
     expect((await s.get("acme", "sch-1")).lastStatus).toBe("succeeded");
   });
 
-  it("no alert when there are no regressions (but lastStatus is updated)", async () => {
-    const { s, notified } = svcWith({ diff: async () => ({ regressions: [] }) });
+  it("a failed fire records lastStatus=failed", async () => {
+    const { s } = svcWith("failed");
     await s.create(base);
-    await s.finalize("acme", "sch-1", "sc-new", "sc-prev");
-    expect(notified).toEqual([]);
-    expect((await s.get("acme", "sch-1")).lastStatus).toBe("succeeded");
+    await s.finalize("acme", "sch-1", "sc-new");
+    expect((await s.get("acme", "sch-1")).lastStatus).toBe("failed");
   });
 
-  it("with no previous run (first fire) skips diff/alert", async () => {
-    let diffCalls = 0;
-    const { s, notified } = svcWith({
-      diff: async () => {
-        diffCalls++;
-        return { regressions: [] };
-      },
-    });
-    await s.create(base);
-    await s.finalize("acme", "sch-1", "sc-new"); // no previousScorecardId
-    expect(diffCalls).toBe(0);
-    expect(notified).toEqual([]);
-  });
-
-  it("if diff throws (one side incomplete) it is swallowed — only the regression alert is skipped", async () => {
-    const { s, notified } = svcWith({
-      diff: async () => {
-        throw new Error("not completed");
-      },
-    });
-    await s.create(base);
-    await expect(s.finalize("acme", "sch-1", "sc-new", "sc-prev")).resolves.toBeUndefined();
-    expect(notified).toEqual([]);
-    expect((await s.get("acme", "sch-1")).lastStatus).toBe("succeeded");
+  it("finalizing a missing schedule is 404", async () => {
+    const { s } = svcWith("succeeded");
+    await expect(s.finalize("acme", "nope", "sc-new")).rejects.toBeInstanceOf(NotFoundError);
   });
 });
 

@@ -3,11 +3,14 @@
 > **Status: slices 1 + 2 + 3 SHIPPED.** Driver decision **locked with the user: Temporal Schedules (native)**.
 > Slice 1 (`f57a55b` backend + `5960009` web) = Schedule SSOT + CRUD API/MCP/web. Slice 2 (`a0ed30d`) = firing —
 > `ScheduleService` driver-sync seam + `fire()` + internal routes + `scheduledScorecardWorkflow` (poll-to-terminal)
-> + schedule activities (HTTP bridge) + `TemporalScheduleDriver`. Slice 3 (this change) = regression alert —
-> `fire()` returns the previous run id, `finalize()` (workflow calls it post-terminal) diffs vs the previous
-> scheduled run and fires `notifyRegression` (Mattermost) on a regression + records final `lastStatus`; web cron
-> preset picker + last-fire display. **creator-left auto-disable** also shipped (member leave/remove → disable that
-> creator's schedules + Temporal pause).
+> + schedule activities (HTTP bridge) + `TemporalScheduleDriver`. Slice 3 = completion visibility — `finalize()`
+> (the workflow calls it post-terminal) records the fire's final `lastStatus`; the creator's completion
+> notification is emitted by the scorecard's own `onComplete`, **schedule-branded** (`schedule_{completed,failed}`,
+> title "Scheduled run …") when `origin.source === "schedule"` — so cron fires and manual "run now" both notify
+> exactly once. (This superseded the original per-regression `notifyRegression` alert; regression-over-time still
+> lives in the schedule detail page's `trendSeries`/`diffScorecards` analytics.) Web cron preset picker + last-fire
+> display. **creator-left auto-disable** also shipped (member leave/remove → disable that creator's schedules +
+> Temporal pause).
 >
 > **Live Temporal e2e — VERIFIED (2026-07-03).** The full cron→fire→run→grade loop was run against a real
 > Temporal dev server (`docker run temporalio/temporal server start-dev`) with the **codex+pinch** harness (the
@@ -107,7 +110,7 @@ ScheduleClient.create({
 scheduledScorecardWorkflow(scheduleId)            [deterministic — NO I/O]
   1. id = await submitScheduledScorecard(scheduleId)   // activity → API internal route → ScorecardService.submit
   2. await pollUntilTerminal(id)                        // activity getScorecardStatus + workflow.sleep loop
-  3. await notifyRegression(scheduleId, id)             // activity: diff vs previous scheduled run → Mattermost
+  3. await finalizeScheduledScorecard(scheduleId, id)  // activity: record final lastStatus (completion notif = scorecard onComplete, schedule-branded)
 ```
 
 **Why the workflow polls to completion (step 2):** `submit` returns a `queued` record immediately. If the
@@ -193,11 +196,12 @@ single owner in the API — **no fork, no stores duplicated into the worker**. (
    (poll-to-terminal) + `fireScheduledScorecard`/`scheduledScorecardStatus` activities (HTTP bridge) + worker
    wiring; `POST /internal/schedules/:id/fire` + `GET /internal/schedules/scorecard-status/:id` (`x-internal-token`).
    Fires a real scorecard on cron. *(fire + driver-sync unit-tested with fakes; Temporal glue is live-verified.)*
-3. ✅ **Regression alert + UX** — `fire()` returns previous run id; `finalize()` (workflow calls it after
-   poll-to-terminal, via `POST /internal/schedules/:id/finalize`) diffs vs the previous scheduled run and fires
-   `NotificationService.notifyRegression` (Mattermost) on a regression + records final `lastStatus`; web cron
-   **preset picker** (hourly/daily/weekday/weekly chips → cron string) + last-fire time on the list. *(diff-vs-previous +
-   notify decision unit-tested; completion notify already free via scorecard `onComplete`.)* **Creator-left
+3. ✅ **Completion visibility + UX** — `finalize()` (workflow calls it after poll-to-terminal, via
+   `POST /internal/schedules/:id/finalize`) records the fire's final `lastStatus`; the creator's completion
+   notification is **schedule-branded** by the scorecard's own `onComplete` (`schedule_{completed,failed}` when
+   `origin.source === "schedule"` — cron fires + manual "run now" both notify once), superseding the original
+   per-regression alert; web cron **preset picker** (hourly/daily/weekday/weekly chips → cron string) + last-fire
+   time on the list. *(finalize lastStatus + schedule-branded notify unit-tested.)* **Creator-left
    auto-disable** shipped: `ScheduleService.disableByCreator(tenant, createdBy)` (disable + Temporal pause + reason
    in `lastStatus`), wired via `MembershipService.onMemberRemoved` (single core → HTTP + MCP leave/remove both
    covered). Follow-up: **connection-revoked** auto-disable (indirect dependency schedule→dataset→case.connectionId

@@ -113,17 +113,12 @@ export async function scorecardBatchWorkflow(input: {
 }
 
 export async function scheduledScorecardWorkflow(input: { scheduleId: string; tenant: string }): Promise<void> {
-  const { scorecardId, previousScorecardId } = await fireScheduledScorecard(input);
+  const { scorecardId } = await fireScheduledScorecard(input);
   for (let i = 0; i < MAX_POLLS; i++) {
     const status = await scheduledScorecardStatus(scorecardId);
     if (status === "succeeded" || status === "failed") {
-      // Completion → record the final status + alert on regression vs the previous run (finalize). Then the workflow ends.
-      await finalizeScheduledScorecard({
-        scheduleId: input.scheduleId,
-        tenant: input.tenant,
-        scorecardId,
-        ...(previousScorecardId !== undefined ? { previousScorecardId } : {}),
-      });
+      // Completion → record the fired scorecard's terminal status on the schedule (finalize). Then the workflow ends.
+      await finalizeScheduledScorecard({ scheduleId: input.scheduleId, tenant: input.tenant, scorecardId });
       return;
     }
     await sleep(POLL_INTERVAL_MS);

@@ -57,14 +57,24 @@ export class NotificationService {
       dataset: { id: string; version: string };
       harness: { id: string; version: string };
       createdBy?: string;
+      // Provenance — a scorecard fired by a schedule (cron tick or manual "run now") gets a schedule-BRANDED feed
+      // notification ("Scheduled run …") in place of the generic one, so the bell reads as "my scheduled job ran".
+      origin?: { source?: string };
     },
   ): Promise<void> {
+    const scheduled = record.origin?.source === "schedule";
     if (record.createdBy && (record.status === "succeeded" || record.status === "failed"))
       await this.pushFeed({
         workspace: tenant,
         recipient: record.createdBy,
-        kind: record.status === "succeeded" ? "scorecard_completed" : "scorecard_failed",
-        title: `Scorecard ${record.status === "succeeded" ? "completed" : "failed"} — ${record.dataset.id}@${record.dataset.version} × ${record.harness.id}@${record.harness.version}`,
+        kind: scheduled
+          ? record.status === "succeeded"
+            ? "schedule_completed"
+            : "schedule_failed"
+          : record.status === "succeeded"
+            ? "scorecard_completed"
+            : "scorecard_failed",
+        title: `${scheduled ? "Scheduled run" : "Scorecard"} ${record.status === "succeeded" ? "completed" : "failed"} — ${record.dataset.id}@${record.dataset.version} × ${record.harness.id}@${record.harness.version}`,
         link: { scorecardId: record.id },
       });
     const icon = record.status === "succeeded" ? "✅" : record.status === "failed" ? "❌" : "•";
@@ -120,41 +130,6 @@ export class NotificationService {
     } catch {
       // Feed failure never affects the result.
     }
-  }
-
-  // Scheduled (cron) regression alert — if a regression vs the previous scheduled run is detected, post a high-signal warning to the channel (separate from completion notifications).
-  async notifyRegression(
-    tenant: string,
-    payload: {
-      scheduleName: string;
-      scorecardId: string;
-      previousScorecardId: string;
-      regressions: Array<{ caseId: string; metric: string; baseline: number; candidate: number }>;
-      createdBy?: string; // schedule creator — personal feed recipient (N2)
-    },
-  ): Promise<void> {
-    if (payload.createdBy)
-      await this.pushFeed({
-        workspace: tenant,
-        recipient: payload.createdBy,
-        kind: "schedule_regression",
-        title: `Scheduled regression — ${payload.scheduleName} (${payload.regressions.length} regression(s))`,
-        body: payload.regressions
-          .slice(0, 3)
-          .map((r) => `${r.caseId} ${r.metric}: ${r.baseline} → ${r.candidate}`)
-          .join(" · "),
-        link: { scorecardId: payload.scorecardId },
-      });
-    const lines = payload.regressions
-      .slice(0, 10)
-      .map((r) => `• \`${r.caseId}\` ${r.metric}: ${r.baseline} → ${r.candidate}`)
-      .join("\n");
-    const more = payload.regressions.length > 10 ? `\n…and ${payload.regressions.length - 10} more` : "";
-    await this.post(
-      tenant,
-      `⚠️ **Scheduled regression \`${payload.scheduleName}\`** — ${payload.regressions.length} regression(s) ` +
-        `(scorecard \`${payload.scorecardId}\` vs previous \`${payload.previousScorecardId}\`)\n${lines}${more}`,
-    );
   }
 
   // Post to a channel via the workspace-registered Mattermost (bot token). Unset/no-token/failure are silently ignored (notification failure never affects the result).
