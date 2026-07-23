@@ -22,7 +22,7 @@ import {
 import { type TrustZonePolicy, assertHardenedIsolation } from "@everdict/domain";
 import { costGrader, latencyGrader, makeGradersFromEnv, stepsGrader } from "@everdict/graders";
 import type { TraceSource } from "@everdict/trace";
-import { type StoreSeedPlan, planStoreSeed } from "./deploy/store-seed.js";
+import { planStoreSeed } from "./deploy/store-seed.js";
 import type { TopologyRuntime } from "./deploy/topology-runtime.js";
 import { keysFor, newRunId, perRunFields, perRunVocabulary, wiringVars } from "./environment-manager.js";
 import { captureCdpScreenshot } from "./front-door/capture-cdp.js";
@@ -87,11 +87,6 @@ export interface ServiceTopologyBackendOptions {
   // control plane implements it (resolve + owner-gate + decrypt + seedStorageState). Best-effort — the topology
   // backend swallows a failure so injection never fails the run. cdpBase = the control-plane-reachable CDP.
   seedProfile?: (profileId: string, cdpBase: string, job: CaseJob) => Promise<void>;
-  // World-state fixture seeding (P2) — when a case declares EvalCase.fixtures, the pure planStoreSeed binds each to a
-  // purpose:"data" store and resolves its per-case isolation slice; this hook applies the resolved plans (runtime exec
-  // into the store — psql/redis-cli/mc, slice 2). Unlike seedProfile this is a PRECONDITION: a failure fails the run,
-  // and a case with fixtures but no hook is an error (the runtime can't establish the required world-state).
-  seedFixtures?: (runId: string, plans: StoreSeedPlan[], zone: TrustZone | undefined) => Promise<void>;
 }
 
 // The orchestrator-agnostic service-topology backend (a Backend implementation).
@@ -140,14 +135,14 @@ export class ServiceTopologyBackend implements Backend, ScreenCapturable {
     const fixtures = job.evalCase.fixtures ?? [];
     if (fixtures.length > 0) {
       const plans = planStoreSeed(fixtures, spec.dependencies, runId);
-      if (!this.opts.seedFixtures) {
+      if (!this.opts.runtime.seedFixtures) {
         throw new InternalError(
           "HARNESS_RUN_FAILED",
           { runId, fixtures: plans.length },
           "The case declares store fixtures, but this runtime has no fixture-seeding capability.",
         );
       }
-      await this.opts.seedFixtures(runId, plans, zone);
+      await this.opts.runtime.seedFixtures(spec, runId, plans, zone);
     }
     // Target acquisition (#2/#4): only when spec.target is declared. Branch by acquire strategy — provision (default, runtime browser) |
     // service (the session API of a declared service). If absent, trace-only with no observation stage. Pass the base wiring for open/close path interpolation

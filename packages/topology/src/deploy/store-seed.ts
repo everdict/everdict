@@ -71,3 +71,37 @@ export function planStoreSeed(
     };
   });
 }
+
+// The command to exec INSIDE a store container to apply one seed plan — the runtime-agnostic half of the seed I/O
+// (a runtime maps `store` → its container and runs `argv`). Pure + testable; the runtime owns only the container reach.
+export interface SeedExec {
+  store: string; // the store kind whose container the argv runs in
+  argv: string[]; // the in-container command (psql / redis-cli / mc)
+}
+
+// Build the in-container seed command for one plan. postgres seeds into the case's SCHEMA slice via a single psql -c
+// script (docker/k8s exec have no stdin). redis/minio + artifact-ref seeds are a follow-up — they fail loud (never a
+// silent skip) so an unsupported fixture is an explicit run failure, not a quietly-empty store.
+export function buildSeedExec(plan: StoreSeedPlan): SeedExec {
+  if ("ref" in plan.seed) {
+    throw new BadRequestError(
+      "BAD_REQUEST",
+      { store: plan.store },
+      "Artifact-ref fixtures are not supported yet — use an inline seed.",
+    );
+  }
+  if (plan.store === "postgres") {
+    // Namespace the seed under the per-case schema slice, then run the author's SQL there. psql -c runs the whole
+    // multi-statement script. The slice is Everdict-minted (run_<runId>), quoted as an identifier.
+    const script = `CREATE SCHEMA IF NOT EXISTS "${plan.slice}"; SET search_path TO "${plan.slice}"; ${plan.seed.inline}`;
+    return {
+      store: "postgres",
+      argv: ["psql", "-U", "everdict", "-d", "everdict", "-v", "ON_ERROR_STOP=1", "-c", script],
+    };
+  }
+  throw new BadRequestError(
+    "BAD_REQUEST",
+    { store: plan.store },
+    `Seeding a "${plan.store}" store is not supported yet (postgres only for now).`,
+  );
+}

@@ -194,6 +194,27 @@ describe("DockerTopologyRuntime", () => {
     expect(handle.endpoints["agent-server"]).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
   });
 
+  it("seedFixtures: execs the postgres seed into the store container's per-case schema slice (P2)", async () => {
+    const f = fakeDocker();
+    const rt = new DockerTopologyRuntime({ docker: f.docker, fetchImpl: okFetch });
+    await rt.seedFixtures(SPEC, "run1", [
+      {
+        store: "postgres",
+        role: "world",
+        isolateBy: "schema",
+        slice: "run_run1",
+        seed: { inline: "INSERT INTO t VALUES (1);" },
+        format: "sql",
+      },
+    ]);
+    // reaches the deterministic postgres container name and runs psql with the schema-scoped seed script.
+    const pg = f.execs.find((e) => e[0] === "everdict-bu-1.0.0-bu-postgres");
+    expect(pg?.[1]).toBe("psql");
+    const script = pg?.[pg.length - 1] ?? "";
+    expect(script).toContain('CREATE SCHEMA IF NOT EXISTS "run_run1"');
+    expect(script).toContain("INSERT INTO t VALUES (1);");
+  });
+
   // Container names are deterministic across processes, so two runners on one host reach the same names.
   const SPEC_CONTAINERS = [
     "everdict-bu-1.0.0-bu-postgres",

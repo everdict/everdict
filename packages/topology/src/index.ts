@@ -12,7 +12,7 @@ export {
   storeName,
 } from "./deploy/dependencies.js";
 export { dependencyInjectEnv, renderInjectTemplate } from "./deploy/inject-env.js";
-export { planStoreSeed, type StoreSeedPlan } from "./deploy/store-seed.js";
+export { planStoreSeed, buildSeedExec, type StoreSeedPlan, type SeedExec } from "./deploy/store-seed.js";
 export { isolationSliceKey } from "./environment-manager.js";
 export {
   type StoreIsolation,

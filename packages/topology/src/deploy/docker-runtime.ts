@@ -6,12 +6,13 @@ import {
 } from "@everdict/contracts";
 import { type CdpSocket, captureCdpDom, captureCdpScreenshot } from "../front-door/capture-cdp.js";
 import { DEFAULT_BROWSER_IMAGE } from "./browser-image.js";
-import { dependencyConnEnv, dependencyStoreValues, dependencyStores } from "./dependencies.js";
+import { dependencyConnEnv, dependencyStoreValues, dependencyStores, storeName } from "./dependencies.js";
 import { type Docker, dockerCli } from "./docker.js";
 import { dependencyInjectEnv } from "./inject-env.js";
 import { interpolateServiceEnv, staticWiringEnv } from "./nomad-topology.js";
 import { aliasPeerHost } from "./peer-resolver.js";
 import { endpointUnreachableError } from "./reachability.js";
+import { type StoreSeedPlan, buildSeedExec } from "./store-seed.js";
 import type { TargetEnvHandle, TopologyHandle, TopologyRuntime } from "./topology-runtime.js";
 
 export interface DockerTopologyRuntimeOptions {
@@ -286,6 +287,18 @@ export class DockerTopologyRuntime implements TopologyRuntime {
       }
     }
     return undefined;
+  }
+
+  // World-state fixture seeding (P2): apply each resolved plan inside its store container in the warm topology. The
+  // container name is deterministic (`<network>-<id>-<store>`), so the seed reaches the same store the services connect
+  // to; buildSeedExec produces the in-container command (psql into the schema slice). A failed exec rejects → fails the
+  // run (a precondition). docs/architecture/dependency-store-roles.md P2.
+  async seedFixtures(spec: ServiceHarnessSpec, _runId: string, plans: StoreSeedPlan[]): Promise<void> {
+    const network = netName(spec);
+    for (const plan of plans) {
+      const exec = buildSeedExec(plan);
+      await this.docker.exec(`${network}-${storeName(spec, exec.store)}`, exec.argv);
+    }
   }
 
   async provisionBrowserEnv(spec: ServiceHarnessSpec, runId: string): Promise<TargetEnvHandle> {

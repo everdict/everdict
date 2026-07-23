@@ -846,8 +846,14 @@ describe("ServiceTopologyBackend (orchestrator-agnostic, mock runtime)", () => {
 
   it("seeds a case's world-state fixtures into their isolation slice before driving (P2)", async () => {
     const seeded: { runId: string; plans: StoreSeedPlan[] }[] = [];
+    const runtime: TopologyRuntime = {
+      ...seedRuntime(),
+      async seedFixtures(_spec, runId, plans) {
+        seeded.push({ runId, plans });
+      },
+    };
     const backend = new ServiceTopologyBackend({
-      runtime: seedRuntime(),
+      runtime,
       traceSource: {
         async fetch() {
           return [];
@@ -856,9 +862,6 @@ describe("ServiceTopologyBackend (orchestrator-agnostic, mock runtime)", () => {
       specFor: () => SPEC_SEED,
       submit: async () => {},
       newRunId: () => "fixed",
-      seedFixtures: async (runId, plans) => {
-        seeded.push({ runId, plans });
-      },
     });
     const job: CaseJob = {
       harness: { id: "browser-use-langgraph", version: "1.0.0" },
