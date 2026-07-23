@@ -16,6 +16,21 @@ export async function GET(
   }
 }
 
+export async function PATCH(
+  request: Request,
+  { params }: { params: Promise<{ id: string }> }
+): Promise<Response> {
+  const ctx = await authContext()
+  const { id } = await params
+  try {
+    const body = await request.json().catch(() => ({}))
+    const title = typeof body.title === 'string' ? body.title : ''
+    return NextResponse.json(await agentPlane.renameSession(ctx, id, title))
+  } catch (e) {
+    return NextResponse.json({ error: e instanceof Error ? e.message : String(e) }, { status: 502 })
+  }
+}
+
 export async function DELETE(
   _request: Request,
   { params }: { params: Promise<{ id: string }> }

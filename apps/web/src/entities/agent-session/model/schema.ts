@@ -40,6 +40,21 @@ export const agentReferenceSchema = z.object({
 })
 export type AgentReference = z.infer<typeof agentReferenceSchema>
 
+export const agentAttachmentSchema = z.object({
+  name: z.string(),
+  mimeType: z.string().optional(),
+  size: z.number().optional(),
+})
+export type AgentAttachment = z.infer<typeof agentAttachmentSchema>
+
+// The composer's in-flight attachment — carries the read text content sent to the agent (not persisted).
+export interface AgentAttachmentInput {
+  name: string
+  mimeType?: string
+  size?: number
+  content?: string
+}
+
 export const agentMessageSchema = z.object({
   id: z.string(),
   tenant: z.string(),
@@ -51,6 +66,7 @@ export const agentMessageSchema = z.object({
   toolCallId: z.string().optional(),
   name: z.string().optional(),
   references: z.array(agentReferenceSchema).optional(),
+  attachments: z.array(agentAttachmentSchema).optional(),
   createdAt: z.string(),
 })
 

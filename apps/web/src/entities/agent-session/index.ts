@@ -4,6 +4,7 @@ export {
   agentToolCallSchema,
   agentReferenceSchema,
   agentReferenceTypeSchema,
+  agentAttachmentSchema,
   agentSessionListSchema,
   agentMessageListSchema,
   AGENT_REFERENCE_TYPES,
@@ -11,4 +12,6 @@ export {
   type AgentMessage,
   type AgentReference,
   type AgentReferenceType,
+  type AgentAttachment,
+  type AgentAttachmentInput,
 } from './model/schema'

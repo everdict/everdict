@@ -1,69 +1,33 @@
 'use client'
 
-import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
-import {
-  ArrowLeft,
-  AtSign,
-  Bot,
-  Check,
-  Loader2,
-  MessageSquarePlus,
-  SendHorizontal,
-  Trash2,
-  Wrench,
-} from 'lucide-react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslations } from 'next-intl'
+import { toast } from 'sonner'
 
 import {
   agentMessageListSchema,
+  agentMessageSchema,
   agentSessionListSchema,
   agentSessionSchema,
+  type AgentAttachmentInput,
   type AgentMessage,
   type AgentReference,
   type AgentSession,
 } from '@/entities/agent-session'
 
-import { MentionPicker, ReferenceChip } from './mention-picker'
+import { ConversationView } from './conversation-view'
+import { SessionList } from './session-list'
 
-// The agent conversation surface embedded in the infra panel's "agent" tab. Two views in one narrow column: the
-// session list (the member's chat history) and an open conversation (transcript + composer). Talks only to the
-// same-origin BFF (/api/agent/*), which forwards to the agent server. While a turn runs, the transcript is polled
-// (the agent server persists each assistant/tool message as it is produced) so tool activity appears live.
+// The agent conversation surface for the infra panel's "agent" tab. Owns all state + I/O; delegates rendering to
+// SessionList (history) and ConversationView (the open chat). Talks only to the same-origin BFF (/api/agent/*).
+// A turn streams over SSE: `delta` events grow the live assistant bubble, `message` events merge each persisted
+// record (so tool cards + the finalized answer appear live); the Stop button aborts the request → the server
+// aborts the loop.
 
 function mergeMessages(prev: AgentMessage[], incoming: AgentMessage[]): AgentMessage[] {
   const byId = new Map(prev.map((m) => [m.id, m]))
   for (const m of incoming) byId.set(m.id, m)
   return [...byId.values()].sort((a, b) => a.seq - b.seq)
-}
-
-function maxSeq(messages: AgentMessage[]): number {
-  return messages.reduce((acc, m) => Math.max(acc, m.seq), -1)
-}
-
-// One tool call and (once available) its result — a collapsible activity row. While the result is absent the call
-// is still running.
-function ToolActivity({ name, args, result }: { name: string; args: string; result?: string }) {
-  const running = result === undefined
-  return (
-    <details className="rounded-lg border border-border bg-muted/40 px-2 py-1 text-[12px]">
-      <summary className="flex cursor-pointer list-none items-center gap-1.5 text-muted-foreground">
-        <Wrench className="size-3 shrink-0" />
-        <span className="truncate font-mono text-foreground/80" title={args}>
-          {name}
-        </span>
-        {running ? (
-          <Loader2 className="size-3 shrink-0 animate-spin text-primary" />
-        ) : (
-          <Check className="size-3 shrink-0 text-emerald-500" />
-        )}
-      </summary>
-      {result !== undefined && (
-        <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded bg-background/70 p-1.5 font-mono text-[11px] text-muted-foreground">
-          {result}
-        </pre>
-      )}
-    </details>
-  )
 }
 
 export function AgentChatPanel() {
@@ -74,10 +38,10 @@ export function AgentChatPanel() {
   const [pendingUser, setPendingUser] = useState<string | null>(null)
   const [input, setInput] = useState('')
   const [sending, setSending] = useState(false)
-  const [error, setError] = useState<string | null>(null)
   const [references, setReferences] = useState<AgentReference[]>([])
-  const [mentionOpen, setMentionOpen] = useState(false)
-  const scrollRef = useRef<HTMLDivElement>(null)
+  const [attachments, setAttachments] = useState<AgentAttachmentInput[]>([])
+  const [streamingText, setStreamingText] = useState('')
+  const abortRef = useRef<AbortController | null>(null)
 
   const loadSessions = useCallback(async () => {
     try {
@@ -117,10 +81,6 @@ export function AgentChatPanel() {
     }
   }, [activeId])
 
-  useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight })
-  }, [messages, sending, pendingUser])
-
   const newConversation = useCallback(async () => {
     try {
       const res = await fetch('/api/agent/sessions', {
@@ -134,15 +94,13 @@ export function AgentChatPanel() {
       setSessions((prev) => [parsed.data, ...prev])
       setActiveId(parsed.data.id)
       setMessages([])
-      setError(null)
     } catch {
-      setError(t('errorGeneric'))
+      toast.error(t('errorGeneric'))
     }
   }, [t])
 
   const deleteSession = useCallback(
     async (id: string) => {
-      if (!window.confirm(t('confirmDelete'))) return
       try {
         const res = await fetch(`/api/agent/sessions/${encodeURIComponent(id)}`, {
           method: 'DELETE',
@@ -154,288 +112,176 @@ export function AgentChatPanel() {
           setMessages([])
         }
       } catch {
-        // silent
+        toast.error(t('errorGeneric'))
       }
     },
     [activeId, t]
   )
 
-  const send = useCallback(async () => {
-    const text = input.trim()
-    if (text.length === 0 || !activeId || sending) return
-    const refs = references
-    setInput('')
-    setReferences([])
-    setMentionOpen(false)
-    setError(null)
-    setSending(true)
-    setPendingUser(text)
-
-    const since = { current: maxSeq(messages) }
-    let stopped = false
-    const pump = async () => {
+  const renameSession = useCallback(
+    async (id: string, title: string) => {
+      const trimmed = title.trim()
+      if (trimmed.length === 0) return
+      setSessions((prev) => prev.map((s) => (s.id === id ? { ...s, title: trimmed } : s)))
       try {
-        const res = await fetch(
-          `/api/agent/sessions/${encodeURIComponent(activeId)}/messages?since=${since.current}`,
-          { cache: 'no-store' }
-        )
-        if (!res.ok) return
-        const parsed = agentMessageListSchema.safeParse(await res.json())
-        if (!parsed.success || parsed.data.messages.length === 0) return
-        setMessages((prev) => mergeMessages(prev, parsed.data.messages))
-        since.current = Math.max(since.current, maxSeq(parsed.data.messages))
-        if (parsed.data.messages.some((m) => m.role === 'user')) setPendingUser(null)
+        await fetch(`/api/agent/sessions/${encodeURIComponent(id)}`, {
+          method: 'PATCH',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ title: trimmed }),
+        })
       } catch {
-        // silent — retried on the next tick
+        void loadSessions()
       }
-    }
-    const timer = setInterval(() => {
-      if (!stopped) void pump()
-    }, 1200)
+    },
+    [loadSessions]
+  )
 
-    try {
-      const res = await fetch(`/api/agent/sessions/${encodeURIComponent(activeId)}/chat`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ message: text, ...(refs.length > 0 ? { references: refs } : {}) }),
-      })
-      if (!res.ok) throw new Error(await res.text())
-      const parsed = agentMessageListSchema.safeParse(await res.json())
-      if (parsed.success) setMessages((prev) => mergeMessages(prev, parsed.data.messages))
-      await pump()
-      setPendingUser(null)
-    } catch {
-      setPendingUser(null)
-      setInput(text)
-      setError(t('errorSend'))
-    } finally {
-      stopped = true
-      clearInterval(timer)
-      setSending(false)
-      void loadSessions()
-    }
-  }, [input, activeId, sending, messages, references, loadSessions, t])
+  const send = useCallback(
+    async (textArg?: string, refsArg?: AgentReference[]) => {
+      const text = (textArg ?? input).trim()
+      if (text.length === 0 || !activeId || sending) return
+      const refs = refsArg ?? references
+      const fromComposer = textArg === undefined
+      const atts = fromComposer ? attachments : []
+      if (fromComposer) {
+        setInput('')
+        setReferences([])
+        setAttachments([])
+      }
+      setSending(true)
+      setPendingUser(text)
+      setStreamingText('')
 
-  const activeSession = sessions.find((s) => s.id === activeId)
+      const controller = new AbortController()
+      abortRef.current = controller
 
-  const resultByCallId = new Map<string, string>()
-  for (const m of messages)
-    if (m.role === 'tool' && m.toolCallId) resultByCallId.set(m.toolCallId, m.content)
+      // Apply one SSE event: a text delta grows the live assistant bubble; a persisted record merges into the
+      // transcript (and, for the finalized assistant text, retires the live bubble).
+      const handleEvent = (event: string, data: unknown) => {
+        if (event === 'delta') {
+          const delta =
+            data !== null && typeof data === 'object' && 'text' in data
+              ? (data as { text?: unknown }).text
+              : undefined
+          if (typeof delta === 'string' && delta.length > 0)
+            setStreamingText((prev) => prev + delta)
+        } else if (event === 'message') {
+          const parsed = agentMessageSchema.safeParse(data)
+          if (!parsed.success) return
+          setMessages((prev) => mergeMessages(prev, [parsed.data]))
+          if (parsed.data.role === 'user') setPendingUser(null)
+          if (parsed.data.role === 'assistant' && parsed.data.content.trim().length > 0)
+            setStreamingText('')
+        }
+      }
 
-  // --- session list view ---
+      try {
+        const res = await fetch(`/api/agent/sessions/${encodeURIComponent(activeId)}/chat`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', accept: 'text/event-stream' },
+          body: JSON.stringify({
+            message: text,
+            ...(refs.length > 0 ? { references: refs } : {}),
+            ...(atts.length > 0 ? { attachments: atts } : {}),
+          }),
+          signal: controller.signal,
+        })
+        if (!res.ok || !res.body) throw new Error('chat failed')
+        if ((res.headers.get('content-type') ?? '').includes('application/json')) {
+          const parsed = agentMessageListSchema.safeParse(await res.json())
+          if (parsed.success) setMessages((prev) => mergeMessages(prev, parsed.data.messages))
+        } else {
+          const reader = res.body.getReader()
+          const decoder = new TextDecoder()
+          let buffer = ''
+          for (;;) {
+            const { done, value } = await reader.read()
+            if (done) break
+            buffer += decoder.decode(value, { stream: true })
+            let boundary = buffer.indexOf('\n\n')
+            while (boundary >= 0) {
+              const frame = buffer.slice(0, boundary)
+              buffer = buffer.slice(boundary + 2)
+              let ev = 'message'
+              let dataStr = ''
+              for (const line of frame.split('\n')) {
+                if (line.startsWith('event:')) ev = line.slice(6).trim()
+                else if (line.startsWith('data:')) dataStr += line.slice(5).trim()
+              }
+              if (dataStr.length > 0) {
+                try {
+                  handleEvent(ev, JSON.parse(dataStr))
+                } catch {
+                  // skip a malformed frame
+                }
+              }
+              boundary = buffer.indexOf('\n\n')
+            }
+          }
+        }
+      } catch {
+        if (!controller.signal.aborted) {
+          if (fromComposer) setInput(text)
+          toast.error(t('errorSend'))
+        }
+      } finally {
+        abortRef.current = null
+        setStreamingText('')
+        setPendingUser(null)
+        setSending(false)
+        void loadSessions()
+      }
+    },
+    [input, activeId, sending, references, attachments, loadSessions, t]
+  )
+
+  const stop = useCallback(() => abortRef.current?.abort(), [])
+
+  const regenerate = useCallback(() => {
+    const lastUser = [...messages]
+      .reverse()
+      .find((m) => m.role === 'user' && m.content.trim().length > 0)
+    if (lastUser) void send(lastUser.content, lastUser.references)
+  }, [messages, send])
+
   if (!activeId) {
     return (
-      <div className="flex h-full flex-col">
-        <div className="flex items-center justify-between px-3 py-2">
-          <span className="text-[12px] text-muted-foreground">{t('subtitle')}</span>
-          <button
-            type="button"
-            onClick={() => void newConversation()}
-            className="inline-flex items-center gap-1 rounded-md bg-primary px-2 py-1 text-[12px] font-[560] text-primary-foreground hover:opacity-90"
-          >
-            <MessageSquarePlus className="size-3.5" />
-            {t('new')}
-          </button>
-        </div>
-        <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
-          {sessions.length === 0 ? (
-            <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center">
-              <Bot className="size-7 text-muted-foreground/60" strokeWidth={1.5} />
-              <p className="text-[12.5px] text-muted-foreground">{t('empty')}</p>
-            </div>
-          ) : (
-            <ul className="space-y-0.5">
-              {sessions.map((s) => (
-                <li
-                  key={s.id}
-                  className="group flex items-center gap-1 rounded-md pr-1 hover:bg-accent"
-                >
-                  <button
-                    type="button"
-                    onClick={() => setActiveId(s.id)}
-                    className="flex min-w-0 flex-1 items-center gap-2 px-2 py-1.5 text-left"
-                  >
-                    <Bot className="size-4 shrink-0 text-muted-foreground/70" strokeWidth={1.75} />
-                    <span className="truncate text-[13px] text-foreground">{s.title}</span>
-                  </button>
-                  <button
-                    type="button"
-                    aria-label={t('delete')}
-                    onClick={() => void deleteSession(s.id)}
-                    className="grid size-6 shrink-0 place-items-center rounded text-muted-foreground opacity-0 transition-opacity hover:bg-destructive/10 hover:text-destructive group-hover:opacity-100"
-                  >
-                    <Trash2 className="size-3.5" />
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      </div>
+      <SessionList
+        sessions={sessions}
+        activeId={null}
+        onOpen={setActiveId}
+        onNew={() => void newConversation()}
+        onDelete={(id) => void deleteSession(id)}
+        onRename={(id, title) => void renameSession(id, title)}
+      />
     )
   }
 
-  // --- open conversation view ---
+  const active = sessions.find((s) => s.id === activeId)
   return (
-    <div className="flex h-full flex-col">
-      <div className="flex items-center gap-2 border-b border-border px-2 py-1.5">
-        <button
-          type="button"
-          aria-label={t('back')}
-          onClick={() => setActiveId(null)}
-          className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
-        >
-          <ArrowLeft className="size-4" />
-        </button>
-        <span className="min-w-0 flex-1 truncate text-[13px] font-[560] text-foreground">
-          {activeSession?.title ?? ''}
-        </span>
-        <button
-          type="button"
-          aria-label={t('delete')}
-          onClick={() => activeId && void deleteSession(activeId)}
-          className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-        >
-          <Trash2 className="size-4" />
-        </button>
-      </div>
-
-      <div ref={scrollRef} className="min-h-0 flex-1 space-y-3 overflow-y-auto px-3 py-3">
-        {messages.length === 0 && !pendingUser && !sending && (
-          <p className="pt-6 text-center text-[12.5px] text-muted-foreground">
-            {t('emptyMessages')}
-          </p>
-        )}
-        {messages.map((m) => {
-          if (m.role === 'user') {
-            const hasText = m.content.trim().length > 0
-            const hasRefs = m.references !== undefined && m.references.length > 0
-            if (!hasText && !hasRefs) return null
-            return (
-              <div key={m.id} className="flex flex-col items-end gap-1">
-                {hasRefs && (
-                  <div className="flex max-w-[85%] flex-wrap justify-end gap-1">
-                    {m.references?.map((r, i) => (
-                      <ReferenceChip key={`${r.type}:${r.id}:${i}`} reference={r} />
-                    ))}
-                  </div>
-                )}
-                {hasText && (
-                  <div className="max-w-[85%] whitespace-pre-wrap rounded-2xl bg-primary px-3 py-2 text-[13px] leading-relaxed text-primary-foreground">
-                    {m.content}
-                  </div>
-                )}
-              </div>
-            )
-          }
-          if (m.role === 'assistant') {
-            return (
-              <Fragment key={m.id}>
-                {m.content.trim().length > 0 && (
-                  <div className="flex justify-start">
-                    <div className="max-w-[85%] whitespace-pre-wrap rounded-2xl bg-muted px-3 py-2 text-[13px] leading-relaxed text-foreground">
-                      {m.content}
-                    </div>
-                  </div>
-                )}
-                {m.toolCalls?.map((tc) => (
-                  <ToolActivity
-                    key={tc.id}
-                    name={tc.name}
-                    args={tc.arguments}
-                    result={resultByCallId.get(tc.id)}
-                  />
-                ))}
-              </Fragment>
-            )
-          }
-          return null
-        })}
-        {pendingUser && (
-          <div className="flex justify-end">
-            <div className="max-w-[85%] whitespace-pre-wrap rounded-2xl bg-primary px-3 py-2 text-[13px] leading-relaxed text-primary-foreground opacity-70">
-              {pendingUser}
-            </div>
-          </div>
-        )}
-        {sending && (
-          <div className="flex justify-start">
-            <div className="inline-flex items-center gap-2 rounded-2xl bg-muted px-3 py-2 text-[13px] text-muted-foreground">
-              <Loader2 className="size-3.5 animate-spin" />
-              {t('thinking')}
-            </div>
-          </div>
-        )}
-      </div>
-
-      {error && <p className="px-3 pb-1 text-[12px] text-destructive">{error}</p>}
-
-      <div className="border-t border-border p-2">
-        {references.length > 0 && (
-          <div className="mb-1.5 flex flex-wrap gap-1">
-            {references.map((r, i) => (
-              <ReferenceChip
-                key={`${r.type}:${r.id}:${i}`}
-                reference={r}
-                onRemove={() => setReferences((prev) => prev.filter((_, j) => j !== i))}
-              />
-            ))}
-          </div>
-        )}
-        <div className="relative flex items-end gap-2">
-          {mentionOpen && (
-            <MentionPicker
-              onClose={() => setMentionOpen(false)}
-              onPick={(ref) => {
-                setReferences((prev) =>
-                  prev.some((r) => r.type === ref.type && r.id === ref.id) ? prev : [...prev, ref]
-                )
-                setMentionOpen(false)
-              }}
-            />
-          )}
-          <button
-            type="button"
-            aria-label={t('mentionAdd')}
-            aria-pressed={mentionOpen}
-            onClick={() => setMentionOpen((o) => !o)}
-            className="grid size-9 shrink-0 place-items-center rounded-lg border border-border text-muted-foreground hover:bg-accent hover:text-foreground aria-pressed:bg-accent aria-pressed:text-foreground"
-          >
-            <AtSign className="size-4" />
-          </button>
-          <textarea
-            value={input}
-            onChange={(e) => {
-              const v = e.target.value
-              // Typing '@' opens the mention picker; the char is dropped (the picker has its own search input).
-              if (v.endsWith('@') && !input.endsWith('@')) {
-                setInput(v.slice(0, -1))
-                setMentionOpen(true)
-                return
-              }
-              setInput(v)
-            }}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault()
-                void send()
-              }
-            }}
-            rows={2}
-            placeholder={t('placeholder')}
-            className="max-h-40 min-h-[38px] flex-1 resize-none rounded-lg border border-border bg-background px-2.5 py-2 text-[13px] outline-none placeholder:text-muted-foreground/70 focus:border-primary/50"
-          />
-          <button
-            type="button"
-            aria-label={t('send')}
-            disabled={sending || input.trim().length === 0}
-            onClick={() => void send()}
-            className="grid size-9 shrink-0 place-items-center rounded-lg bg-primary text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-40"
-          >
-            <SendHorizontal className="size-4" />
-          </button>
-        </div>
-      </div>
-    </div>
+    <ConversationView
+      title={active?.title ?? ''}
+      messages={messages}
+      pendingUser={pendingUser}
+      sending={sending}
+      streamingText={streamingText}
+      input={input}
+      references={references}
+      attachments={attachments}
+      onChange={setInput}
+      onSend={() => void send()}
+      onStop={stop}
+      onPickReference={(r) =>
+        setReferences((prev) =>
+          prev.some((x) => x.type === r.type && x.id === r.id) ? prev : [...prev, r]
+        )
+      }
+      onRemoveReference={(i) => setReferences((prev) => prev.filter((_, j) => j !== i))}
+      onPickAttachment={(a) => setAttachments((prev) => [...prev, a])}
+      onRemoveAttachment={(i) => setAttachments((prev) => prev.filter((_, j) => j !== i))}
+      onBack={() => setActiveId(null)}
+      onRegenerate={regenerate}
+      onSuggestion={(txt) => void send(txt)}
+    />
   )
 }

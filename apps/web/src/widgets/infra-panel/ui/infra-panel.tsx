@@ -4,11 +4,11 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   Activity,
-  Bot,
   CalendarClock,
   ChevronsRight,
   Play,
   Server,
+  Sparkles,
   type LucideIcon,
 } from 'lucide-react'
 import { useTranslations } from 'next-intl'
@@ -36,7 +36,7 @@ const TAB_META: Record<InfraTab, { icon: LucideIcon }> = {
   runtimes: { icon: Server },
   runs: { icon: Play },
   work: { icon: Activity },
-  agent: { icon: Bot },
+  agent: { icon: Sparkles },
 }
 
 // The page tabs and their iframe home paths (workspace-relative).

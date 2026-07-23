@@ -37,6 +37,11 @@ export const agentPlane = {
     call<T>(auth, `/agent/sessions/${encodeURIComponent(id)}`),
   deleteSession: (auth: AuthContext, id: string) =>
     call<void>(auth, `/agent/sessions/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  renameSession: <T>(auth: AuthContext, id: string, title: string) =>
+    call<T>(auth, `/agent/sessions/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ title }),
+    }),
   listMessages: <T>(auth: AuthContext, id: string, since?: number) =>
     call<T>(
       auth,
@@ -47,4 +52,19 @@ export const agentPlane = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
+  // Raw (unbuffered) chat — forwards the caller's Accept so the BFF can stream an SSE turn straight through.
+  chatRaw: (auth: AuthContext, id: string, body: unknown, accept: string): Promise<Response> => {
+    const headers = authHeaders(auth)
+    headers['content-type'] = 'application/json'
+    if (accept) headers.accept = accept
+    return fetch(
+      `${env.AGENT_URL.replace(/\/$/, '')}/agent/sessions/${encodeURIComponent(id)}/chat`,
+      {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(body),
+        cache: 'no-store',
+      }
+    )
+  },
 }
