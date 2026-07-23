@@ -483,6 +483,14 @@ export const controlPlane = {
       method: 'DELETE',
       ...(versions && versions.length > 0 ? { body: JSON.stringify({ versions }) } : {}),
     }),
+  // Workspace agent — the conversational assistant's configuration (instructions + MCP tool servers + model override).
+  // A workspace registers an agent (under a stable id, "default") to plug its own context + tools into the shared agent
+  // framework. Read agents:read (viewer+); save/register agents:write (member+). saveAgent = version-free upsert (PUT).
+  listAgents: <T>(auth: AuthContext) => call<T>(auth, '/agents'),
+  getAgent: <T>(auth: AuthContext, id: string, version: string) =>
+    call<T>(auth, `/agents/${encodeURIComponent(id)}/versions/${encodeURIComponent(version)}`),
+  saveAgent: <T>(auth: AuthContext, id: string, body: unknown) =>
+    call<T>(auth, `/agents/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(body) }),
   getWorkspaceSettings: <T>(auth: AuthContext) => call<T>(auth, '/workspace/settings'),
   setWorkspaceSettings: <T>(auth: AuthContext, patch: unknown) =>
     call<T>(auth, '/workspace/settings', { method: 'PUT', body: JSON.stringify(patch) }),

@@ -20,6 +20,9 @@ export type WebAction =
   | 'models:read'
   | 'models:write'
   | 'models:delete'
+  | 'agents:read'
+  | 'agents:write'
+  | 'agents:delete'
   | 'runtimes:read'
   | 'runtimes:write'
   | 'runtimes:control'
@@ -44,6 +47,7 @@ const PERMS: Record<string, WebAction[]> = {
     'schedules:read',
     'judges:read',
     'models:read',
+    'agents:read', // reading the workspace agent config is viewer+
     'runtimes:read',
     'runtimes:write', // runtime registration (+connection test) is role-agnostic — same as harnesses:register
     'members:read', // team read is viewer+
@@ -64,6 +68,8 @@ const PERMS: Record<string, WebAction[]> = {
     'judges:write',
     'models:read',
     'models:write',
+    'agents:read',
+    'agents:write', // agent config = eval-authoring content → member+
     'runtimes:read',
     'runtimes:write', // runtime registration (+connection test) is role-agnostic
     'members:read',
@@ -90,6 +96,9 @@ const PERMS: Record<string, WebAction[]> = {
     'models:read',
     'models:write',
     'models:delete', // model version/whole-model soft-delete = admin (creator exception is server-side)
+    'agents:read',
+    'agents:write',
+    'agents:delete', // agent version soft-delete = admin (creator exception is server-side)
     'runtimes:read',
     'runtimes:write', // runtime registration is role-agnostic (credential values are split out to secrets:write=admin)
     'runtimes:control', // destructive live-cluster control (stop/reclaim/purge/cordon) = admin-only

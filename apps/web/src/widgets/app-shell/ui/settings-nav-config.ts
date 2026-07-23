@@ -10,6 +10,7 @@ import {
   Server,
   Shield,
   SlidersHorizontal,
+  Sparkles,
   Telescope,
   UserCircle,
   Users,
@@ -63,6 +64,7 @@ export const SETTINGS_NAV_GROUPS: SettingsNavGroup[] = [
       { href: '/members', labelKey: 'members', icon: Users, requiredAction: 'members:read' },
       { href: '/secrets', labelKey: 'secrets', icon: Shield, requiredAction: 'secrets:read' },
       { href: '/models', labelKey: 'models', icon: Cpu, requiredAction: 'models:read' },
+      { href: '/agent', labelKey: 'agent', icon: Sparkles, requiredAction: 'agents:read' },
       {
         href: '/integrations',
         labelKey: 'integrations',
