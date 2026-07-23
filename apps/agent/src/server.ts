@@ -26,7 +26,8 @@ function sendError(reply: FastifyReply, err: unknown): FastifyReply {
     reply.code(err.status).send(err.toEnvelope());
     return reply;
   }
-  reply.log.error(err);
+  // Unexpected (non-AppError) failure — log to stderr since the Fastify logger is off, so operators can see it.
+  console.error("[agent] unhandled error:", err);
   reply.code(500).send({ code: "INTERNAL_ERROR", message: "Internal error" });
   return reply;
 }
