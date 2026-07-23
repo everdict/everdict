@@ -15,6 +15,7 @@ import {
 } from "@everdict/contracts";
 import { ScorecardBatch, type ScorecardTransition, scorecardModels, summarizeScorecard } from "@everdict/domain";
 import type { ScoringService } from "../execution/scoring-service.js";
+import { traceAuthorizationCredential } from "../trace-source/authorization-credential.js";
 import {
   type IngestScorecardBody,
   type IngestScorecardInput,
@@ -184,13 +185,14 @@ export class ScorecardIngestService {
         // "id" fetch even when the pooled source is registered for "tag" correlation (find-by-everdict-run_id).
         if (source.correlate) base = { ...base, correlate: source.correlate };
       } else {
-        // credential: source.authSecret name → inject the tenant SecretStore value verbatim as the Authorization header.
-        // The value includes the scheme (e.g. "Bearer <token>" [OTel/Jaeger] or "Basic <base64>" [MLflow]) — don't hardcode the scheme.
+        // credential: source.authSecret name → inject the tenant SecretStore value as the Authorization header. A plain
+        // secret carries the scheme ("Bearer <token>" [OTel/Jaeger] or "Basic <base64>" [MLflow]) and is used verbatim;
+        // a bare offline_token access token is Bearer-wrapped (langsmith x-api-key stays raw) — see traceAuthorizationCredential.
         let headers: Record<string, string> | undefined;
         if (source.authSecret) {
           const secrets = await (this.deps.secretsFor?.(tenant) ?? Promise.resolve<Record<string, string>>({}));
           const token = secrets[source.authSecret];
-          if (token) headers = { authorization: token };
+          if (token) headers = { authorization: traceAuthorizationCredential(source.kind, token) };
         }
         base = {
           kind: source.kind,

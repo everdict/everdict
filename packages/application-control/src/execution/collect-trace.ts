@@ -11,6 +11,7 @@ import {
   UpstreamError,
 } from "@everdict/contracts";
 import { classifyFailure } from "@everdict/domain";
+import { traceAuthorizationCredential } from "../trace-source/authorization-credential.js";
 
 // Out-of-job trace collection (the collection phase of the 2-phase design, D4) — the completion step for spec.trace.collect="control-plane" cases.
 // The job ended at execution (bringing only CaseResult.traceRef); here we: pull from the platform (runId-correlated, absorbing flush
@@ -65,14 +66,15 @@ export async function collectDeferredTrace(
   let gotEvents = false;
   if (deps.buildTraceSource) {
     try {
-      // Auth: authSecret name → tenant SecretStore value → verbatim Authorization (pull-ingest convention).
+      // Auth: authSecret name → tenant SecretStore value → Authorization header (pull-ingest convention). A plain secret
+      // carries the scheme verbatim; a bare offline_token access token is Bearer-wrapped (see traceAuthorizationCredential).
       let headers: Record<string, string> | undefined;
       if (ref.authSecret) {
         const secrets = tenant && deps.secretsFor ? await deps.secretsFor(tenant) : {};
         const auth = secrets[ref.authSecret];
         if (auth === undefined)
           throw new Error(`auth secret '${ref.authSecret}' not registered (workspace SecretStore) — cannot collect`);
-        headers = { authorization: auth };
+        headers = { authorization: traceAuthorizationCredential(ref.kind, auth) };
       }
       // Search scope: the experiment for mlflow tag correlation | phoenix's project — converges to TraceSourceConfig.project.
       // The service for otel tag correlation is a separate parameter (Jaeger service).

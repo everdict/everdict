@@ -2,6 +2,7 @@ import type { CaseResult } from "@everdict/contracts";
 import type { ScorecardExport, TraceSink, TraceSinkCase, TraceSinkConfig } from "@everdict/contracts";
 import { createLimiter } from "../concurrency/limiter.js";
 import type { WorkspaceSettingsStore } from "../ports/workspace-settings-store.js";
+import { traceAuthorizationCredential } from "../trace-source/authorization-credential.js";
 import { unifiedTraceSources } from "../trace-source/trace-source-service.js";
 
 // Trace-sink EXPORT executor — the outbound half of the pipeline. Registration is NOT here: a workspace registers ONE
@@ -65,9 +66,10 @@ export class TraceSinkService {
       let auth: string | undefined;
       if (source.authSecretName) {
         const secrets = await (this.deps.secretsFor?.(tenant) ?? Promise.resolve<Record<string, string>>({}));
-        auth = secrets[source.authSecretName];
-        if (!auth)
+        const value = secrets[source.authSecretName];
+        if (!value)
           initError = `No value for '${source.authSecretName}' in the SecretStore — register the secret first.`;
+        else auth = traceAuthorizationCredential(sinkKind, value);
       }
       if (!initError) {
         impl = buildSink({

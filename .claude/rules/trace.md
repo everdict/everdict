@@ -12,9 +12,15 @@ docs/service-harness.md + docs/architecture/trace-sink.md.
 - Keep parsing pure/deterministic (unit-testable with sample span JSON); only `fetch()` does I/O. Inject `fetchImpl`
   for tests.
 - **Credentials are injected, never embedded.** A source takes `headers?`; the caller resolves the value from the
-  tenant SecretStore by name and passes it as the **verbatim `Authorization` header** — the scheme lives in the
+  tenant SecretStore by name and passes it as the **verbatim `Authorization` header** — the scheme normally lives in the
   secret value (`Bearer …` for OTel/Jaeger, `Basic <base64>` for MLflow), NOT hardcoded. The source never reads
   secrets itself. Use the `buildTraceSource(cfg)` factory (kind/endpoint/headers) to build a source from config.
+  ONE exception, applied at the **resolution boundary** (not the adapter): an `offline_token` secret resolves to a
+  **bare** OAuth2 access token (the minter returns `access_token`, no scheme), so the application-control resolution
+  (`traceAuthorizationCredential`, used by `TraceSourceService.buildConfig`/`probe`, `TraceSinkService`,
+  `ScorecardIngestService` inline pull, `collectDeferredTrace`) **Bearer-wraps a schemeless value** before it becomes
+  the header — otherwise a Keycloak/OIDC-protected endpoint 401s on `Authorization: <bare-token>`. A value that
+  already carries a scheme (a plain secret) stays verbatim; `langsmith` (injected as raw `x-api-key`) is never wrapped.
 - **Source kinds are 5-wide**: `otel|mlflow` (headers path, above) + `langfuse|langsmith|phoenix` — the newer
   three take `auth` (the resolved value; the **adapter owns the header name** — langsmith is `x-api-key`, the
   others verbatim `Authorization`); the factory inherits `headers.authorization` as `auth` so the existing pull

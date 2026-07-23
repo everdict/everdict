@@ -261,4 +261,38 @@ describe("TraceSourceService", () => {
     await svc.upsert(WS, { name: "s1", kind: "otel", endpoint: "http://jaeger" });
     await expect(svc.listTraces(WS, "s1")).rejects.toThrow(/not configured/);
   });
+
+  // Regression: an offline_token secret resolves to a BARE OAuth2 access token (no scheme). Injected verbatim it would
+  // go out as `Authorization: <token>` and a Keycloak/OIDC-protected OTel endpoint 401s — the resolution must wrap it
+  // as a Bearer credential. A plain secret already carrying "Bearer …"/"Basic …" stays verbatim (asserted above).
+  it("resolve() Bearer-wraps a bare offline_token access token for an otel source (would 401 unwrapped)", async () => {
+    const bareToken = "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJyb2JvdCJ9.sig"; // what an offline_token mints to — no "Bearer "
+    const svc = new TraceSourceService(fakeSettings(), { secretsFor: async () => ({ "kc-offline": bareToken }) });
+    await svc.upsert(WS, {
+      name: "dev-otel",
+      kind: "otel",
+      endpoint: "http://jaeger:16686",
+      authSecretName: "kc-offline",
+    });
+    await svc.assignSource(WS, "harness-a", "dev-otel");
+    const cfg = await svc.resolve(WS, "harness-a");
+    expect(cfg?.headers).toEqual({ authorization: `Bearer ${bareToken}` });
+  });
+
+  it("probe() Bearer-wraps a bare offline_token access token before hitting the platform (otel)", async () => {
+    const bareToken = "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJyb2JvdCJ9.sig";
+    const probeConnection = vi
+      .fn<(cfg: TraceProbeConfig) => Promise<TraceProbeResult>>()
+      .mockResolvedValue({ kind: "otel", reachable: true, scopeKind: "service", scopes: [], detail: "ok" });
+    const svc = new TraceSourceService(fakeSettings(), {
+      secretsFor: async () => ({ "kc-offline": bareToken }),
+      probeConnection,
+    });
+    await svc.probe(WS, { kind: "otel", endpoint: "http://jaeger:16686", authSecretName: "kc-offline" });
+    expect(probeConnection).toHaveBeenCalledWith({
+      kind: "otel",
+      endpoint: "http://jaeger:16686",
+      auth: `Bearer ${bareToken}`,
+    });
+  });
 });

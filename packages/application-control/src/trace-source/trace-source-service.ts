@@ -12,6 +12,7 @@ import {
   type WorkspaceSettings,
 } from "@everdict/contracts";
 import type { WorkspaceSettingsStore } from "../ports/workspace-settings-store.js";
+import { traceAuthorizationCredential } from "./authorization-credential.js";
 
 // Workspace trace-source integration — the ONE registration pool for observability platforms
 // (OTel/MLflow/Langfuse/LangSmith/Phoenix). A trace source is registered once (name-keyed roster); whether a harness
@@ -213,32 +214,35 @@ export class TraceSourceService {
     let auth: string | undefined;
     if (input.authSecretName) {
       const secrets = await (this.deps.secretsFor?.(workspace) ?? Promise.resolve<Record<string, string>>({}));
-      auth = secrets[input.authSecretName];
-      if (!auth)
+      const value = secrets[input.authSecretName];
+      if (!value)
         return {
           kind: input.kind,
           reachable: false,
           reason: "auth",
           detail: `No value for '${input.authSecretName}' in the SecretStore — save the secret first.`,
         };
+      auth = traceAuthorizationCredential(input.kind, value);
     }
     return this.deps.probeConnection({ kind: input.kind, endpoint: input.endpoint, ...(auth ? { auth } : {}) });
   }
 
   // A registered source entry → a fully-built TraceSourceConfig (auth value pulled from the SecretStore). The auth
   // VALUE lives only here, transiently. otel/mlflow read it from headers.authorization; langfuse/langsmith/phoenix
-  // inherit it as `auth` (buildTraceSource). So the single headers.authorization mapping covers all five kinds.
+  // inherit it as `auth` (buildTraceSource). So the single headers.authorization mapping covers all five kinds. The
+  // resolved value is normalized to a valid credential (a bare offline_token access token → Bearer-wrapped).
   private async buildConfig(tenant: string, source: TraceSourceEntry): Promise<TraceSourceConfig> {
     let auth: string | undefined;
     if (source.authSecretName) {
       const secrets = await (this.deps.secretsFor?.(tenant) ?? Promise.resolve<Record<string, string>>({}));
-      auth = secrets[source.authSecretName];
-      if (!auth)
+      const value = secrets[source.authSecretName];
+      if (!value)
         throw new BadRequestError(
           "BAD_REQUEST",
           { source: source.name, secret: source.authSecretName },
           `No value for '${source.authSecretName}' in the SecretStore — register the secret first.`,
         );
+      auth = traceAuthorizationCredential(source.kind, value);
     }
     return {
       kind: source.kind,
