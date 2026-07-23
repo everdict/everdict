@@ -152,20 +152,27 @@ describe("agent server", () => {
   // tested in permission-registry.test.ts; here we pin the HTTP contract: auth, session ownership, validation, and the
   // 404 for an id with no pending approval (a stale click, or a decision that raced the turn's end).
   describe("write-tool approval route", () => {
-    const decide = (app: ReturnType<typeof buildServer>, id: string, body: unknown) =>
-      app.inject({ method: "POST", url: `/agent/sessions/${id}/permission`, headers: auth, payload: body });
-
     it("rejects an invalid decision with 400", async () => {
       const app = buildServer(makeDeps());
       const session = (await app.inject({ method: "POST", url: "/agent/sessions", headers: auth, payload: {} })).json();
-      const res = await decide(app, session.id, { requestId: "req-1", decision: "maybe" });
+      const res = await app.inject({
+        method: "POST",
+        url: `/agent/sessions/${session.id}/permission`,
+        headers: auth,
+        payload: { requestId: "req-1", decision: "maybe" },
+      });
       expect(res.statusCode).toBe(400);
       await app.close();
     });
 
     it("returns 404 for a decision on a conversation the caller does not own", async () => {
       const app = buildServer(makeDeps());
-      const res = await decide(app, "missing", { requestId: "req-1", decision: "allow" });
+      const res = await app.inject({
+        method: "POST",
+        url: "/agent/sessions/missing/permission",
+        headers: auth,
+        payload: { requestId: "req-1", decision: "allow" },
+      });
       expect(res.statusCode).toBe(404);
       await app.close();
     });
@@ -173,7 +180,12 @@ describe("agent server", () => {
     it("returns 404 when no approval is pending for the request id", async () => {
       const app = buildServer(makeDeps());
       const session = (await app.inject({ method: "POST", url: "/agent/sessions", headers: auth, payload: {} })).json();
-      const res = await decide(app, session.id, { requestId: "nope", decision: "allow" });
+      const res = await app.inject({
+        method: "POST",
+        url: `/agent/sessions/${session.id}/permission`,
+        headers: auth,
+        payload: { requestId: "nope", decision: "allow" },
+      });
       expect(res.statusCode).toBe(404);
       await app.close();
     });
@@ -186,7 +198,12 @@ describe("agent server", () => {
           },
         }),
       );
-      const res = await decide(app, "x", { requestId: "r", decision: "allow" });
+      const res = await app.inject({
+        method: "POST",
+        url: "/agent/sessions/x/permission",
+        headers: auth,
+        payload: { requestId: "r", decision: "allow" },
+      });
       expect(res.statusCode).toBe(401);
       await app.close();
     });
