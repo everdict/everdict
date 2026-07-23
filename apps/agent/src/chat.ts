@@ -11,6 +11,7 @@ import type { ToolProvider } from "./mcp-tools.js";
 import type { ModelByIdResolver, ModelResolver } from "./model.js";
 import type { ForwardHeaders, Principal } from "./principal.js";
 import type { ProfileResolver } from "./profile.js";
+import { buildEnvironmentSection } from "./system-prompt.js";
 
 // An @-reference resolves to the workspace read tool that fetches that entity's full record.
 const REFERENCE_TOOL: Record<AgentReferenceType, string> = {
@@ -259,10 +260,12 @@ export async function runChat(
       profile?.model && deps.resolveModelById
         ? await deps.resolveModelById(principal, profile.model)
         : await deps.resolveModel(principal);
+    // Append the per-turn environment block (workspace · model · date) now that the model is resolved.
+    const systemWithEnv = `${systemPrompt}\n\n${buildEnvironmentSection({ workspace, model: model.model, date: deps.now() })}`;
     await runAgentLoop({
       client: model.client,
       model: model.model,
-      systemPrompt,
+      systemPrompt: systemWithEnv,
       history,
       registry: tools.registry,
       onMessage: persist,
