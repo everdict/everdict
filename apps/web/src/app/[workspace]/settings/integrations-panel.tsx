@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, type ReactNode } from 'react'
-import { ChevronLeft } from 'lucide-react'
+import { ChevronDown } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
 import { GithubAppManager, type GithubAppNotice } from '@/features/manage-github-app'
@@ -10,15 +10,18 @@ import { MattermostManager } from '@/features/manage-mattermost'
 import type { GithubAppView } from '@/entities/github-app'
 import type { ImageRegistryConfig } from '@/entities/image-registry'
 import type { MattermostConfig } from '@/entities/mattermost'
+import { cn } from '@/shared/lib/utils'
 import { Badge } from '@/shared/ui/badge'
 import { Button } from '@/shared/ui/button'
-import { SettingsList, SettingsRow } from '@/shared/ui/settings-list'
+import { SettingsList } from '@/shared/ui/settings-list'
+import { InfoTip } from '@/shared/ui/tooltip'
 
 export type IntegrationKey = 'github' | 'mattermost' | 'image-registry'
 
-// Integrations tab — instead of stacking all four managers expanded, a list of one-line per-integration summaries (connection-status badge)
-// drills into just that integration via "Manage". If there's a GitHub App installation callback just fired (githubAppNotice) or a ?app= deep link,
-// open that integration's detail directly.
+// Integrations tab — one-line per-integration summary rows (connection-status badge); "Manage" expands that
+// integration's manager IN PLACE below the row (single-open accordion) instead of swapping the whole list for a
+// drill-in view — no page-navigation feel, the other integrations stay visible. If a GitHub App installation
+// callback just fired (githubAppNotice) or a ?app= deep link is present, that row starts expanded.
 export function IntegrationsPanel({
   githubApp,
   githubAppNotice,
@@ -38,14 +41,25 @@ export function IntegrationsPanel({
   initialActive?: IntegrationKey
 }) {
   const t = useTranslations('settingsPage')
+  const tGithub = useTranslations('manageGithubApp')
+  const tMattermost = useTranslations('manageMattermost')
+  const tRegistry = useTranslations('manageImageRegistry')
   const [active, setActive] = useState<IntegrationKey | undefined>(
     initialActive ?? (githubAppNotice ? 'github' : undefined)
   )
 
-  const rows: { key: IntegrationKey; label: string; hint: string; status: ReactNode }[] = [
+  const rows: {
+    key: IntegrationKey
+    label: string
+    tip: ReactNode
+    hint: string
+    status: ReactNode
+    detail: ReactNode
+  }[] = [
     {
       key: 'github',
       label: 'GitHub',
+      tip: tGithub('titleTip'),
       hint: t('githubHint'),
       status:
         githubApp.installations.length > 0 ? (
@@ -55,10 +69,18 @@ export function IntegrationsPanel({
         ) : (
           <Badge tone="outline">{t('notConnected')}</Badge>
         ),
+      detail: (
+        <GithubAppManager
+          view={githubApp}
+          canWrite={canWrite}
+          {...(githubAppNotice !== undefined ? { notice: githubAppNotice } : {})}
+        />
+      ),
     },
     {
       key: 'mattermost',
       label: 'Mattermost',
+      tip: tMattermost('titleTip'),
       hint: t('mattermostHint'),
       status:
         mattermost?.config && mattermost.host ? (
@@ -66,10 +88,21 @@ export function IntegrationsPanel({
         ) : (
           <Badge tone="outline">{t('notConnected')}</Badge>
         ),
+      detail: (
+        <MattermostManager
+          canWrite={canWrite}
+          secretNames={secretNames}
+          {...(mattermost?.host !== undefined ? { serverHost: mattermost.host } : {})}
+          {...(mattermost?.config !== undefined ? { config: mattermost.config } : {})}
+        />
+      ),
     },
     {
       key: 'image-registry',
       label: t('imageRegistryLabel'),
+      tip: tRegistry.rich('titleTip', {
+        mono: (chunks) => <span className="font-mono">{chunks}</span>,
+      }),
       hint: t('imageRegistryHint'),
       status:
         imageRegistries.length > 0 ? (
@@ -77,66 +110,49 @@ export function IntegrationsPanel({
         ) : (
           <Badge tone="outline">{t('notRegistered')}</Badge>
         ),
-    },
-  ]
-
-  // Default view — per-integration summary rows in a single Linear settings-list.
-  if (!active) {
-    return (
-      <SettingsList>
-        {rows.map((r) => (
-          <SettingsRow
-            key={r.key}
-            label={
-              <span className="inline-flex flex-wrap items-center gap-2">
-                {r.label}
-                {r.status}
-              </span>
-            }
-            hint={r.hint}
-          >
-            <Button variant="secondary" size="xs" onClick={() => setActive(r.key)}>
-              {t('manage')}
-            </Button>
-          </SettingsRow>
-        ))}
-      </SettingsList>
-    )
-  }
-
-  // Drill-in view — back link + only that integration's manager.
-  return (
-    <div className="space-y-5">
-      <button
-        type="button"
-        onClick={() => setActive(undefined)}
-        className="inline-flex items-center gap-0.5 text-[12px] font-[510] text-muted-foreground transition-colors hover:text-foreground"
-      >
-        <ChevronLeft className="size-3.5" />
-        {t('tabIntegrations')}
-      </button>
-      {active === 'github' && (
-        <GithubAppManager
-          view={githubApp}
-          canWrite={canWrite}
-          {...(githubAppNotice !== undefined ? { notice: githubAppNotice } : {})}
-        />
-      )}
-      {active === 'mattermost' && (
-        <MattermostManager
-          canWrite={canWrite}
-          secretNames={secretNames}
-          {...(mattermost?.host !== undefined ? { serverHost: mattermost.host } : {})}
-          {...(mattermost?.config !== undefined ? { config: mattermost.config } : {})}
-        />
-      )}
-      {active === 'image-registry' && (
+      detail: (
         <ImageRegistryManager
           registries={imageRegistries}
           canWrite={canWrite}
           secretNames={secretNames}
         />
-      )}
-    </div>
+      ),
+    },
+  ]
+
+  return (
+    <SettingsList>
+      {rows.map((r) => {
+        const open = active === r.key
+        return (
+          <li key={r.key}>
+            <div className="flex min-h-[60px] flex-col gap-2 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+              <div className="min-w-0 space-y-0.5">
+                <span className="inline-flex flex-wrap items-center gap-2 text-[13px] font-[510] text-foreground">
+                  <span className="inline-flex items-center gap-1.5">
+                    {r.label}
+                    <InfoTip content={r.tip} />
+                  </span>
+                  {r.status}
+                </span>
+                <p className="text-[12px] leading-relaxed text-muted-foreground">{r.hint}</p>
+              </div>
+              <div className="flex shrink-0 items-center gap-2 sm:justify-end">
+                <Button
+                  variant="secondary"
+                  size="xs"
+                  aria-expanded={open}
+                  onClick={() => setActive(open ? undefined : r.key)}
+                >
+                  {open ? t('collapse') : t('manage')}
+                  <ChevronDown className={cn('transition-transform', open && 'rotate-180')} />
+                </Button>
+              </div>
+            </div>
+            {open && <div className="border-t border-border/60 px-4 py-4">{r.detail}</div>}
+          </li>
+        )
+      })}
+    </SettingsList>
   )
 }

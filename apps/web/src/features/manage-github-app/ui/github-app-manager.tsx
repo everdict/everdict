@@ -8,7 +8,6 @@ import { Badge } from '@/shared/ui/badge'
 import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
 import { SettingsList, SettingsRow } from '@/shared/ui/settings-list'
-import { InfoTip } from '@/shared/ui/tooltip'
 
 import {
   startGithubAppInstallAction,
@@ -31,6 +30,7 @@ const INSTALL_ERROR_KEYS: Record<string, string> = {
 // Workspace-owned GitHub App integration — org install → selected repos → workspace-owned installation (replaces personal connections).
 // BOTH github.com and GitHub Enterprise are operator env (one App per host) — the admin only clicks "Install" and picks repos on GitHub.
 // The install list shows github.com and GHE in the same shape (account + host chip + installed badge + allowed-repo chips) — consistency.
+// Rendered inside the Integrations accordion row — the row owns the title/InfoTip, so this renders content only.
 export function GithubAppManager({
   view,
   canWrite,
@@ -66,14 +66,6 @@ export function GithubAppManager({
 
   return (
     <div className="space-y-3">
-      <div className="space-y-1">
-        <h3 className="flex items-center gap-1.5 text-[13px] font-[560] text-foreground">
-          {t('title')}
-          <InfoTip content={t('titleTip')} />
-        </h3>
-        <p className="text-[13px] leading-relaxed text-muted-foreground">{t('description')}</p>
-      </div>
-
       {/* Feedback right after the install callback — the moment we return from GitHub, explicitly say "succeeded/failed". */}
       {notice?.installed && (
         <Callout tone="info" className="py-1.5">

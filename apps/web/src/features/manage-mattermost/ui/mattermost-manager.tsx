@@ -22,6 +22,7 @@ import {
 // channel with the bot token (replaces personal connections). The bot token value is stored only as a workspace secret (name).
 // Registration requires a verified connection first (Test connection → the control plane also re-verifies strictly on save).
 // serverHost = the operator-configured Mattermost URL (absent = operator hasn't set MATTERMOST_HOST). secretNames = token picker.
+// Rendered inside the Integrations accordion row — the row owns the title/InfoTip, so this renders content only.
 export function MattermostManager({
   serverHost,
   config,
@@ -55,12 +56,9 @@ export function MattermostManager({
   // Operator hasn't configured a Mattermost server — nothing to register a bot against.
   if (!serverHost) {
     return (
-      <div className="space-y-3">
-        <Header t={t} />
-        <Callout tone="warning" className="py-1.5">
-          {t('serverNotConfigured')}
-        </Callout>
-      </div>
+      <Callout tone="warning" className="py-1.5">
+        {t('serverNotConfigured')}
+      </Callout>
     )
   }
 
@@ -119,8 +117,6 @@ export function MattermostManager({
 
   return (
     <div className="space-y-3">
-      <Header t={t} />
-
       {canWrite ? (
         <div className="space-y-3 rounded-lg border bg-card p-4 shadow-raise">
           {/* The server URL is operator env — read-only, never an input. */}
@@ -242,18 +238,6 @@ export function MattermostManager({
           {error}
         </Callout>
       )}
-    </div>
-  )
-}
-
-function Header({ t }: { t: ReturnType<typeof useTranslations> }) {
-  return (
-    <div className="space-y-1">
-      <h3 className="flex items-center gap-1.5 text-[13px] font-[560] text-foreground">
-        {t('title')}
-        <InfoTip content={t('titleTip')} />
-      </h3>
-      <p className="text-[13px] leading-relaxed text-muted-foreground">{t('description')}</p>
     </div>
   )
 }

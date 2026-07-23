@@ -17,6 +17,7 @@ import { removeImageRegistryAction, upsertImageRegistryAction } from '../api/man
 // and members publish locally built images here via everdict image push (with several, select via --registry <name>).
 // pull/push token values are stored only as workspace secret references (names). The two pickers share the list, so
 // inline-created ones are merged in via created.
+// Rendered inside the Integrations accordion row — the row owns the title/InfoTip, so this renders content only.
 export function ImageRegistryManager({
   registries,
   canWrite,
@@ -103,18 +104,6 @@ export function ImageRegistryManager({
 
   return (
     <div className="space-y-3">
-      <div className="space-y-1">
-        <h3 className="flex items-center gap-1.5 text-[13px] font-[560] text-foreground">
-          {t('title')}
-          <InfoTip
-            content={t.rich('titleTip', {
-              mono: (chunks) => <span className="font-mono">{chunks}</span>,
-            })}
-          />
-        </h3>
-        <p className="text-[13px] leading-relaxed text-muted-foreground">{t('description')}</p>
-      </div>
-
       {registries.length === 0 ? (
         <p className="text-[13px] text-muted-foreground">{t('empty')}</p>
       ) : (

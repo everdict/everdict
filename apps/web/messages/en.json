@@ -965,9 +965,7 @@
     "installErrorMissingInstallation": "GitHub didn’t return installation info. Please start the install again.",
     "installErrorInstallFailed": "Couldn’t confirm the install. Check the operator’s GitHub App configuration.",
     "installStartFailed": "Couldn’t start the install.",
-    "title": "GitHub App (organization)",
     "titleTip": "Install the Everdict GitHub App on your organization and pick repositories, and the workspace clones them as a shared team resource (independent of members’ personal logins). Access is limited to the repositories GitHub selected. github.com and GitHub Enterprise are both configured by the operator (env) and work the same way — you only install and pick repos.",
-    "description": "Connect private repositories per workspace. Only the repositories you pick at install time are accessible.",
     "installedNotice": "GitHub App install connected. Check the allowed repositories in the install list below.",
     "installFailedGeneric": "Install failed ({code})",
     "noProviderConfigured": "No GitHub App is configured by the operator yet. Set GITHUB_APP_* (github.com) and/or GITHUB_ENTERPRISE_APP_* (GitHub Enterprise) in the deployment environment.",
@@ -987,9 +985,7 @@
   "manageImageRegistry": {
     "validationName": "Enter a registry name.",
     "validationHost": "Enter a registry host.",
-    "title": "Image registries",
     "titleTip": "Register your team image registries (GHCR, Harbor, etc.) and harness images are classified as local build or workspace image. Members publish local build images here with <mono>everdict image push</mono> — if you have several, pick one with <mono>--registry '<name>'</mono>, and if there’s only one you can omit it. Pick the token from workspace secrets or save it inline with “New” — only its name is kept here.",
-    "description": "Register per workspace to use for image provenance classification and publishing.",
     "empty": "No image registry registered yet.",
     "imageRefSuffix": "'<image>':'<tag>'",
     "edit": "Edit",
@@ -1040,9 +1036,7 @@
   },
   "manageMattermost": {
     "validationToken": "Pick a bot token secret.",
-    "title": "Mattermost notifications",
     "titleTip": "Register your workspace’s bot token and channel against the operator’s Mattermost server, and it posts run/scorecard completions and regressions to a channel automatically. Pick the bot token from workspace secrets or save it inline with “New” — only its name is kept here.",
-    "description": "Register once per workspace to use it for team-wide notifications.",
     "serverNotConfigured": "No Mattermost server is configured by the operator yet. Set MATTERMOST_HOST in the deployment environment.",
     "serverUrl": "Server URL",
     "serverUrlTip": "The Mattermost server URL is configured by the operator (MATTERMOST_HOST) and shared across the workspace. You register your bot token and channel against it.",
@@ -2595,7 +2589,6 @@
     "tabGeneral": "General",
     "tabSecrets": "Secrets",
     "tabModels": "Models",
-    "tabIntegrations": "Integrations",
     "tabCi": "CI",
     "tabRunners": "Shared runners",
     "tabBudget": "Budget & usage",
@@ -2614,6 +2607,7 @@
     "imageRegistryLabel": "Image registries",
     "imageRegistryHint": "The baseline for image classification and the target for everdict image push.",
     "manage": "Manage",
+    "collapse": "Collapse",
     "partialError": "Some settings sections failed to load ({sections}): {error}"
   },
   "shell": {

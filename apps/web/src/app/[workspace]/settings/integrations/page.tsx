@@ -15,7 +15,7 @@ import { IntegrationsPanel, type IntegrationKey } from '../integrations-panel'
 
 export const dynamic = 'force-dynamic'
 
-// Each integration is a per-integration summary row → "Manage" drill-in inside this one page (not a sidebar item).
+// Each integration is a per-integration summary row → "Manage" expands it in place on this one page (not a sidebar item).
 const INTEGRATION_KEYS: IntegrationKey[] = ['github', 'mattermost', 'image-registry']
 
 // Per-section soft-fail: one misbehaving integration must not blank the page. Each read falls back to a default.
@@ -28,7 +28,7 @@ async function soft<T>(fn: () => Promise<T>, fallback: T): Promise<T> {
 }
 
 // Workspace › Integrations — GitHub App · Mattermost · trace sinks/sources · image registries (settings:read; management = admin).
-// ?app= drills straight into one integration; ?githubApp=installed / ?error= is the GitHub App install-callback notice (opens the GitHub detail).
+// ?app= expands one integration on load; ?githubApp=installed / ?error= is the GitHub App install-callback notice (expands the GitHub row).
 export default async function IntegrationsPage({
   searchParams,
 }: {

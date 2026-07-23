@@ -965,9 +965,7 @@
     "installErrorMissingInstallation": "GitHub 이 설치 정보를 주지 않았어요. 설치를 다시 시작해주세요.",
     "installErrorInstallFailed": "설치 확인에 실패했어요. 운영자의 GitHub App 설정을 확인해주세요.",
     "installStartFailed": "설치를 시작하지 못했어요.",
-    "title": "GitHub App (조직)",
     "titleTip": "조직에 Everdict GitHub App 을 설치하고 저장소를 선택하면, 그 저장소를 워크스페이스가 팀 공용으로 clone 해요(멤버 개인 로그인과 무관). 접근은 GitHub 이 선택한 저장소로만 제한돼요. github.com 과 GitHub Enterprise 둘 다 운영자가 환경변수로 설정하며 방식이 똑같아요 — 여러분은 설치하고 저장소만 고르면 돼요.",
-    "description": "비공개 저장소를 워크스페이스 단위로 연결해요. 설치할 때 고른 저장소만 접근할 수 있어요.",
     "installedNotice": "GitHub App 설치가 연결됐어요. 아래 설치 목록에서 허용된 저장소를 확인하세요.",
     "installFailedGeneric": "설치에 실패했어요 ({code})",
     "noProviderConfigured": "아직 운영자가 GitHub App 을 설정하지 않았어요. 배포 환경변수에 GITHUB_APP_*(github.com) 또는 GITHUB_ENTERPRISE_APP_*(GitHub Enterprise)를 설정해주세요.",
@@ -987,9 +985,7 @@
   "manageImageRegistry": {
     "validationName": "레지스트리 이름을 입력해주세요.",
     "validationHost": "레지스트리 호스트를 입력해주세요.",
-    "title": "이미지 레지스트리",
     "titleTip": "팀 이미지 레지스트리(GHCR·Harbor 등)를 등록하면 하니스 이미지가 로컬 빌드인지 워크스페이스 이미지인지 구분돼요. 멤버는 <mono>everdict image push</mono> 로 로컬 빌드 이미지를 여기로 발행해요 — 여러 개면 <mono>--registry <이름></mono> 으로 고르고, 1개뿐이면 생략해도 돼요. 토큰은 워크스페이스 시크릿에서 고르거나 “새로”로 바로 저장해요 — 여기엔 그 이름만 남아요.",
-    "description": "워크스페이스 단위로 등록하면 이미지 출처 분류와 발행에 쓰여요.",
     "empty": "아직 등록된 이미지 레지스트리가 없어요.",
     "imageRefSuffix": "<이미지>:<태그>",
     "edit": "편집",
@@ -1040,9 +1036,7 @@
   },
   "manageMattermost": {
     "validationToken": "bot 토큰 시크릿을 선택해주세요.",
-    "title": "Mattermost 알림",
     "titleTip": "운영자가 설정한 Mattermost 서버에 워크스페이스의 bot 토큰과 채널을 등록하면 실행·스코어카드 완료와 회귀를 채널에 자동으로 알려요. bot 토큰은 워크스페이스 시크릿에서 고르거나 “새로”로 바로 저장해요 — 여기엔 그 이름만 남아요.",
-    "description": "워크스페이스 단위로 한 번 등록하면 팀 전체 알림에 쓰여요.",
     "serverNotConfigured": "아직 운영자가 Mattermost 서버를 설정하지 않았어요. 배포 환경변수에 MATTERMOST_HOST 를 설정해주세요.",
     "serverUrl": "서버 URL",
     "serverUrlTip": "Mattermost 서버 URL 은 운영자가 환경변수(MATTERMOST_HOST)로 설정하며 워크스페이스가 공유해요. 여러분은 여기에 bot 토큰과 채널만 등록해요.",
@@ -2595,7 +2589,6 @@
     "tabGeneral": "일반",
     "tabSecrets": "시크릿",
     "tabModels": "모델",
-    "tabIntegrations": "통합",
     "tabCi": "CI 연동",
     "tabRunners": "공유 러너",
     "tabBudget": "예산·사용량",
@@ -2614,6 +2607,7 @@
     "imageRegistryLabel": "이미지 레지스트리",
     "imageRegistryHint": "이미지 분류 기준이자 everdict image push 대상이에요.",
     "manage": "관리",
+    "collapse": "접기",
     "partialError": "일부 설정 정보를 불러오지 못했습니다 ({sections}): {error}"
   },
   "shell": {
