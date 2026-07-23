@@ -5,6 +5,7 @@
 export * from "./messages.js";
 export * from "./llm/client.js";
 export * from "./llm/stream-chat.js";
+export * from "./llm/summarize.js";
 export * from "./tools/definition.js";
 export * from "./tools/registry.js";
 export * from "./tools/deferred.js";

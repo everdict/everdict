@@ -1,8 +1,9 @@
 import { UpstreamError } from "@everdict/contracts";
 import type OpenAI from "openai";
-import { compactMessages } from "../context/compaction.js";
+import { compactMessages, microcompact, summarizeAndCompact } from "../context/compaction.js";
 import { type TokenBudget, thresholdReached } from "../context/token-budget.js";
 import { type StreamChatResult, streamChat } from "../llm/stream-chat.js";
+import { buildSummarizer } from "../llm/summarize.js";
 import { type ChatMessage, systemMessage } from "../messages.js";
 import { extractDiscoveredToolNames } from "../tools/deferred.js";
 import type { ToolContext } from "../tools/definition.js";
@@ -20,7 +21,7 @@ export type AgentEvent =
   | { type: "assistant_message"; content: string }
   | { type: "tool_call"; name: string; args: string }
   | { type: "tool_result"; name: string; isError: boolean }
-  | { type: "compaction"; droppedMessages: number }
+  | { type: "compaction"; droppedMessages: number; mode?: "microcompact" | "summarize" | "drop" }
   | { type: "done"; stopReason: StopReason };
 
 export interface AgentLoopOptions {
@@ -36,6 +37,9 @@ export interface AgentLoopOptions {
   maxRetries?: number;
   temperature?: number;
   signal?: AbortSignal;
+  // Rung-2 (LLM) compaction: digest the old span into a summary. Defaults to a summariser bound to this loop's own
+  // model (buildSummarizer); tests inject a deterministic one. Return "" to decline (loop falls through to structural).
+  summarize?: (oldSpan: ChatMessage[]) => Promise<string>;
   onEvent?: (e: AgentEvent) => void;
   // Fired (awaited) as each assistant/tool message is appended, so the host can persist the transcript
   // incrementally — the source of live progress for a polling UI.
@@ -52,7 +56,9 @@ export interface AgentLoopResult {
   toolCalls: { name: string; ok: boolean }[];
 }
 
-const DEFAULT_MAX_TURNS = 12;
+// A high safety cap, not a task budget — the token budget (+ compaction) is the primary limiter for long tasks. 12
+// was too low for multi-step goals; compaction keeps the context bounded so more turns don't blow the window.
+const DEFAULT_MAX_TURNS = 50;
 const DEFAULT_MAX_TOKENS = 900_000;
 const DEFAULT_MAX_RETRIES = 2;
 const RETRY_BACKOFF_MS = [500, 1500];
@@ -104,6 +110,8 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
   const maxTurns = opts.maxTurns ?? DEFAULT_MAX_TURNS;
   const maxRetries = opts.maxRetries ?? DEFAULT_MAX_RETRIES;
   const budget: TokenBudget = { maxTokens: opts.maxTokens ?? DEFAULT_MAX_TOKENS, consumed: 0 };
+  // Rung-2 compaction summariser — the loop's own model by default (a one-shot digest), overridable for tests.
+  const summarize = opts.summarize ?? buildSummarizer(opts.client, opts.model);
   const emit = (e: AgentEvent): void => opts.onEvent?.(e);
 
   let messages: ChatMessage[] = normalizeHistory(opts.history);
@@ -210,12 +218,27 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
     }
 
     if (thresholdReached(budget)) {
-      const compacted = compactMessages(messages);
-      if (compacted.length < messages.length) {
-        emit({ type: "compaction", droppedMessages: messages.length - compacted.length });
-        messages = compacted;
+      // Escalation ladder — try the cheapest, most information-preserving compaction first, stop only if none fit.
+      // Rung 1: clear old tool-result bodies (deterministic; freed tokens surface in the next turn's usage).
+      const micro = microcompact(messages);
+      if (micro.cleared > 0) {
+        messages = micro.messages;
+        emit({ type: "compaction", mode: "microcompact", droppedMessages: 0 });
       } else {
-        return finish("token_budget", turn);
+        // Rung 2: LLM digest of the old span (goal/pending preserved). Rung 3: structural drop. Else: stop.
+        const summarized = await summarizeAndCompact(messages, summarize);
+        if (summarized.length < messages.length) {
+          emit({ type: "compaction", mode: "summarize", droppedMessages: messages.length - summarized.length });
+          messages = summarized;
+        } else {
+          const dropped = compactMessages(messages);
+          if (dropped.length < messages.length) {
+            emit({ type: "compaction", mode: "drop", droppedMessages: messages.length - dropped.length });
+            messages = dropped;
+          } else {
+            return finish("token_budget", turn);
+          }
+        }
       }
     }
   }

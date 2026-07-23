@@ -1,16 +1,73 @@
 import type { ChatMessage } from "../messages.js";
 
-// First-cut structural compaction: when over budget, drop the oldest turns but only up to a clean boundary — a
-// `user` message — so the kept suffix never begins with an orphan `tool` result whose assistant tool_call was
-// dropped (which would make the next LLM call reject). Returns the same array when it cannot safely trim.
-// LLM-summary compaction (preserving a digest of the dropped span) is a later enhancement.
-export function compactMessages(messages: ChatMessage[], recentKeep = 8): ChatMessage[] {
+// Context compaction — a 3-rung escalation ladder that raises tokens-per-information instead of just discarding the
+// oldest turns (Claude Code parity). The loop applies them in order until it fits:
+//   1. microcompact  — deterministic: clear OLD tool-result BODIES (keep tool_call_id + pairing), ~free tokens back.
+//   2. summarize     — semantic: an LLM digest of the old span (goal/files/pending preserved), keep the recent tail.
+//   3. structural    — last resort: drop the oldest turns to a clean user boundary (the original behaviour).
+// Each is a pure transform (summarize takes an injected async summariser); the loop owns the ordering + budget check.
+
+const CLEARED_MARK = "[tool result elided to fit the context window";
+const DEFAULT_RECENT_KEEP = 8;
+// Clearing a tiny result isn't worth the churn (and would thrash the prompt cache); only elide sizeable ones.
+const MIN_CLEAR_CHARS = 400;
+
+// Rung 1 — clear the CONTENT of tool messages older than the recent window, keeping role + tool_call_id so the
+// assistant.tool_calls ↔ tool pairing stays valid (the next model call must still see a balanced transcript). Already
+// cleared / small results are left as-is. Returns the (possibly new) array + how many bodies were cleared.
+export function microcompact(
+  messages: ChatMessage[],
+  recentKeep = DEFAULT_RECENT_KEEP,
+): { messages: ChatMessage[]; cleared: number } {
+  if (messages.length <= recentKeep) return { messages, cleared: 0 };
+  const cutoff = messages.length - recentKeep;
+  let cleared = 0;
+  const out = messages.map((m, i): ChatMessage => {
+    if (i >= cutoff || m.role !== "tool") return m;
+    const content = typeof m.content === "string" ? m.content : "";
+    if (content.length < MIN_CLEAR_CHARS || content.startsWith(CLEARED_MARK)) return m;
+    cleared++;
+    return { ...m, content: `${CLEARED_MARK} — was ${content.length} chars]` };
+  });
+  return { messages: out, cleared };
+}
+
+// Rung 3 — structural drop to a clean `user` boundary (kept as the final fallback). Returns the same array when it
+// cannot safely trim (never leaves the suffix starting on an orphan tool result).
+export function compactMessages(messages: ChatMessage[], recentKeep = DEFAULT_RECENT_KEEP): ChatMessage[] {
   if (messages.length <= recentKeep) return messages;
   const dropUpTo = messages.length - recentKeep;
   for (let i = dropUpTo; i < messages.length; i++) {
-    if (messages[i]?.role === "user") {
-      return i > 0 ? messages.slice(i) : messages;
-    }
+    if (messages[i]?.role === "user") return i > 0 ? messages.slice(i) : messages;
   }
   return messages;
+}
+
+// Rung 2 — replace the old span with an LLM digest, keep the recent tail from a clean user boundary. The digest is a
+// synthetic user message the model reads as context (Intent/Files/Errors/Pending/Current-Work survive the boundary).
+// Returns the same array when no safe boundary exists (so the loop falls through to structural drop).
+export async function summarizeAndCompact(
+  messages: ChatMessage[],
+  summarize: (oldSpan: ChatMessage[]) => Promise<string>,
+  recentKeep = DEFAULT_RECENT_KEEP,
+): Promise<ChatMessage[]> {
+  if (messages.length <= recentKeep) return messages;
+  const dropUpTo = messages.length - recentKeep;
+  let boundary = -1;
+  for (let i = dropUpTo; i < messages.length; i++) {
+    if (messages[i]?.role === "user") {
+      boundary = i;
+      break;
+    }
+  }
+  if (boundary <= 0) return messages; // nothing safe to summarise (keep everything; loop escalates/stops)
+  const oldSpan = messages.slice(0, boundary);
+  const tail = messages.slice(boundary);
+  const digest = (await summarize(oldSpan)).trim();
+  if (digest.length === 0) return messages; // summariser produced nothing — don't drop context blindly
+  const summaryMessage: ChatMessage = {
+    role: "user",
+    content: `[The earlier part of this conversation was summarised to fit the context window. Continue from here.]\n\n${digest}`,
+  };
+  return [summaryMessage, ...tail];
 }

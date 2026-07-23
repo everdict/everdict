@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { ChatMessage } from "../messages.js";
 import type { ToolDefinition } from "../tools/definition.js";
 import { ToolRegistry } from "../tools/registry.js";
-import { runAgentLoop } from "./loop.js";
+import { type AgentEvent, runAgentLoop } from "./loop.js";
 
 interface FakeChunk {
   choices: {
@@ -114,6 +114,61 @@ describe("runAgentLoop", () => {
     expect(result.toolCalls).toEqual([{ name: "missing_tool", ok: false }]);
     expect(result.stopReason).toBe("end_turn");
     expect(result.content).toBe("recovered");
+  });
+
+  it("runs the compaction ladder when over the token budget (microcompact clears old tool results)", async () => {
+    const big = "R".repeat(600);
+    const longHistory: ChatMessage[] = [{ role: "user", content: "goal" }];
+    for (let i = 0; i < 5; i++) {
+      longHistory.push({
+        role: "assistant",
+        content: null,
+        tool_calls: [{ id: `h${i}`, type: "function", function: { name: "noop", arguments: "{}" } }],
+      });
+      longHistory.push({ role: "tool", tool_call_id: `h${i}`, content: big });
+    }
+    longHistory.push({ role: "user", content: "continue" });
+
+    const noop: ToolDefinition = {
+      name: "noop",
+      description: "noop",
+      parametersJsonSchema: { type: "object", properties: {} },
+      isReadOnly: true,
+      call: async () => ({ content: "ok", isError: false }),
+    };
+    // turn 1: a tool call whose usage pushes past 90% of 900k → compaction after dispatch; turn 2: text → end_turn.
+    const highUsageEnd: FakeChunk = {
+      choices: [{ delta: {}, finish_reason: "stop" }],
+      usage: { total_tokens: 850_000 },
+    };
+    const client = fakeClient([
+      [
+        {
+          choices: [
+            {
+              delta: { tool_calls: [{ index: 0, id: "call_1", function: { name: "noop", arguments: "{}" } }] },
+              finish_reason: "tool_calls",
+            },
+          ],
+        },
+        highUsageEnd,
+      ],
+      textResponse("done"),
+    ]);
+    const events: AgentEvent[] = [];
+    const result = await runAgentLoop({
+      client,
+      model: "test-model",
+      systemPrompt: "sys",
+      history: longHistory,
+      registry: new ToolRegistry([noop]),
+      summarize: async () => "digest", // keep the default summariser off the fake client (rung 1 wins here anyway)
+      onEvent: (e) => events.push(e),
+    });
+    const compactions = events.filter((e) => e.type === "compaction");
+    expect(compactions.length).toBeGreaterThan(0);
+    expect((compactions[0] as { mode?: string }).mode).toBe("microcompact");
+    expect(result.stopReason).toBe("end_turn");
   });
 
   it("stops with aborted when the signal is already aborted", async () => {
