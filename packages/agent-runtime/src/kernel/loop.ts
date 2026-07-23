@@ -1,7 +1,7 @@
 import { UpstreamError } from "@everdict/contracts";
 import type OpenAI from "openai";
 import { compactMessages, microcompact, summarizeAndCompact } from "../context/compaction.js";
-import { type TokenBudget, thresholdReached } from "../context/token-budget.js";
+import { type TokenBudget, effectiveBudget, estimateTokens, thresholdReached } from "../context/token-budget.js";
 import { type StreamChatResult, streamChat } from "../llm/stream-chat.js";
 import { buildSummarizer } from "../llm/summarize.js";
 import { type ChatMessage, systemMessage } from "../messages.js";
@@ -60,7 +60,6 @@ export interface AgentLoopResult {
 // A high safety cap, not a task budget — the token budget (+ compaction) is the primary limiter for long tasks. 12
 // was too low for multi-step goals; compaction keeps the context bounded so more turns don't blow the window.
 const DEFAULT_MAX_TURNS = 50;
-const DEFAULT_MAX_TOKENS = 900_000;
 const DEFAULT_MAX_RETRIES = 2;
 const RETRY_BACKOFF_MS = [500, 1500];
 // Cap a single tool result before feeding it back to the model — an unbounded MCP payload (a big scorecard JSON)
@@ -110,7 +109,8 @@ function parseArgs(raw: string): { ok: true; value: Record<string, unknown> } | 
 export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopResult> {
   const maxTurns = opts.maxTurns ?? DEFAULT_MAX_TURNS;
   const maxRetries = opts.maxRetries ?? DEFAULT_MAX_RETRIES;
-  const budget: TokenBudget = { maxTokens: opts.maxTokens ?? DEFAULT_MAX_TOKENS, consumed: 0 };
+  // Budget = the model's own context window minus output headroom (compact at ~90% of it), not a fixed constant.
+  const budget: TokenBudget = { maxTokens: opts.maxTokens ?? effectiveBudget(opts.model), consumed: 0 };
   // Rung-2 compaction summariser — the loop's own model by default (a one-shot digest), overridable for tests.
   const summarize = opts.summarize ?? buildSummarizer(opts.client, opts.model);
   const emit = (e: AgentEvent): void => opts.onEvent?.(e);
@@ -181,9 +181,10 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
     const result = await callModel();
     if (!result) return finish("aborted", turn - 1);
 
-    // The latest turn's total_tokens is the current context footprint (prompt grows each turn) — a better budget
-    // signal than a per-turn sum, which would double-count the carried-over context.
-    budget.consumed = result.usage?.total_tokens ?? budget.consumed;
+    // The latest turn's total_tokens is the context footprint the MODEL saw; tool results appended after its turn are
+    // added as an estimate (hybrid) before the budget check below.
+    const usageTokens = result.usage?.total_tokens ?? budget.consumed;
+    budget.consumed = usageTokens;
 
     // content is null (not "") when the turn is tool-calls-only — an empty string alongside tool_calls is
     // rejected by some providers (Anthropic via LiteLLM).
@@ -193,6 +194,7 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
       ...(result.toolCalls.length > 0 ? { tool_calls: result.toolCalls } : {}),
     };
     messages = [...messages, assistant];
+    const afterAssistantLen = messages.length; // tool results appended past here aren't in the model's usage count
     produced.push(assistant);
     if (result.content && result.content.length > 0) {
       finalText = result.content;
@@ -245,6 +247,8 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
       messages = [...messages, imageMessage];
     }
 
+    // Hybrid budget: the model's reported usage + an estimate of everything appended since (tool results, image turn).
+    budget.consumed = usageTokens + estimateTokens(messages.slice(afterAssistantLen));
     if (thresholdReached(budget)) {
       // Escalation ladder — try the cheapest, most information-preserving compaction first, stop only if none fit.
       // Rung 1: clear old tool-result bodies (deterministic; freed tokens surface in the next turn's usage).
