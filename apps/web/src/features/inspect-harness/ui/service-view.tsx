@@ -136,14 +136,17 @@ export function ServiceView({ spec }: { spec: HarnessSpec }) {
                         <span className="text-[12px] text-faint">used by {d.service}</span>
                       )}
                     </div>
-                    {external ? (
-                      <div className="flex items-center gap-2">
-                        <span className="text-[11px] text-faint">{t('connEnvAtDeploy')}</span>
-                        <Badge tone="warning">external (BYO)</Badge>
-                      </div>
-                    ) : (
-                      <Badge tone="outline">isolate · {d.isolateBy}</Badge>
-                    )}
+                    <div className="flex items-center gap-2">
+                      {d.purpose === 'data' && <Badge tone="info">{t('depDataBadge')}</Badge>}
+                      {external ? (
+                        <div className="flex items-center gap-2">
+                          <span className="text-[11px] text-faint">{t('connEnvAtDeploy')}</span>
+                          <Badge tone="warning">external (BYO)</Badge>
+                        </div>
+                      ) : (
+                        <Badge tone="outline">isolate · {d.isolateBy}</Badge>
+                      )}
+                    </div>
                   </div>
                   {/* BYO env keys the image reads — rendered from the deployed store at deploy time (dependencies[].inject). */}
                   {inject.length > 0 && (

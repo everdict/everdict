@@ -741,6 +741,7 @@
     "noServices": "서비스 없음",
     "noSharedStores": "공유 스토어 없음.",
     "connEnvAtDeploy": "연결은 배포 시 env",
+    "depDataBadge": "데이터 · 세계 상태",
     "depInjectHeading": "이미지가 읽는 env 키 (배포 시 렌더링)",
     "engine": "엔진",
     "lifecycle": "수명주기",

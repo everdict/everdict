@@ -741,6 +741,7 @@
     "noServices": "No services",
     "noSharedStores": "No shared stores.",
     "connEnvAtDeploy": "Connection via env at deploy",
+    "depDataBadge": "data · world-state",
     "depInjectHeading": "env keys the image reads (rendered at deploy)",
     "engine": "Engine",
     "lifecycle": "Lifecycle",
