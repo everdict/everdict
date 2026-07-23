@@ -9,7 +9,8 @@ import { extractDiscoveredToolNames } from "../tools/deferred.js";
 import type { ToolContext } from "../tools/definition.js";
 import { invokeTool } from "../tools/invocation.js";
 import { toOpenAiTools } from "../tools/openai.js";
-import type { ToolRegistry } from "../tools/registry.js";
+import { ToolRegistry } from "../tools/registry.js";
+import { type TodoItem, buildTodoTool, extractTodosFromHistory, renderTodoReminder } from "../tools/todo-tool.js";
 import { normalizeHistory } from "./normalize.js";
 import { buildSystemPrompt } from "./system-prompt.js";
 
@@ -115,6 +116,10 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
   const emit = (e: AgentEvent): void => opts.onEvent?.(e);
 
   let messages: ChatMessage[] = normalizeHistory(opts.history);
+  // Goal persistence: the loop owns a todo list the model manages via write_todos, re-surfaced each turn as a
+  // transient system-reminder so a long task stays on-goal. Seeded from a prior run in the same conversation.
+  let todos: TodoItem[] = extractTodosFromHistory(messages);
+  const registry = new ToolRegistry([...opts.registry.list(), buildTodoTool((t) => (todos = t))]);
   let finalText = "";
   const toolCalls: { name: string; ok: boolean }[] = [];
   // The messages produced this run, accumulated as they are appended — NOT a tail slice of `messages`, which
@@ -138,8 +143,12 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
     emit({ type: "turn_start", turn });
 
     const discovered = extractDiscoveredToolNames(messages);
-    const tools = toOpenAiTools(opts.registry, discovered);
-    const system = buildSystemPrompt(opts.systemPrompt, opts.registry, discovered);
+    const tools = toOpenAiTools(registry, discovered);
+    const system = buildSystemPrompt(opts.systemPrompt, registry, discovered);
+    // Inject the current todos as a transient reminder (this turn only — never persisted, no history bloat).
+    const reminder = renderTodoReminder(todos);
+    const turnMessages: ChatMessage[] =
+      reminder.length > 0 ? [...messages, { role: "user", content: reminder }] : messages;
 
     // `messages` is always balanced here (never ends on a dangling assistant tool_call), so a retry re-sends a
     // valid transcript without needing to scrub an orphan tail. Returns undefined when the caller aborts.
@@ -149,7 +158,7 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
           return await streamChat({
             client: opts.client,
             model: opts.model,
-            messages: [systemMessage(system), ...messages],
+            messages: [systemMessage(system), ...turnMessages],
             tools,
             ...(opts.temperature !== undefined ? { temperature: opts.temperature } : {}),
             ...(opts.signal ? { signal: opts.signal } : {}),
@@ -199,7 +208,7 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
     };
     for (const tc of result.toolCalls) {
       emit({ type: "tool_call", name: tc.function.name, args: tc.function.arguments });
-      const tool = opts.registry.get(tc.function.name);
+      const tool = registry.get(tc.function.name);
       const parsed = parseArgs(tc.function.arguments);
       let output: { content: string; isError: boolean };
       if (!tool) {
