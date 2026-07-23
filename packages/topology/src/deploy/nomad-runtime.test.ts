@@ -409,4 +409,14 @@ describe("NomadTopologyRuntime — fixture seed/read (silo)", () => {
     const rt = new NomadTopologyRuntime({ addr: "http://nomad", http, exec, pollIntervalMs: 1, maxPolls: 5 });
     await expect(rt.seedFixtures(SPEC_DATA, "run1", [seedPlan])).rejects.toThrow(/zone/);
   });
+
+  it("seedFixtures: pool store — seeds via the shared store alloc (P2)", async () => {
+    const { execCalls, http, exec } = fakes();
+    const rt = new NomadTopologyRuntime({ addr: "http://nomad", http, exec, pollIntervalMs: 1, maxPolls: 5 });
+    await rt.ensureTopology(SPEC_DATA, POOL_ZONE); // provisions the shared store → populates the alloc map
+    const before = execCalls.length;
+    await rt.seedFixtures(SPEC_DATA, "run1", [seedPlan], POOL_ZONE);
+    const seed = execCalls.slice(before).find((c) => c.cmd === "psql");
+    expect(seed?.task).toBe("everdict-shared-postgres"); // routed to the cluster-shared store
+  });
 });

@@ -324,7 +324,7 @@ describe("K8sTopologyRuntime", () => {
     ).toBe(true);
   });
 
-  it("seedFixtures: rejects a store on a runtime that deploys none (dedicated-silo only)", async () => {
+  it("seedFixtures: rejects an external (BYO) store — Everdict cannot exec into one it does not run", async () => {
     const { kubectl } = fakeKubectl();
     const rt = new K8sTopologyRuntime({ kubectl, fetchImpl: okFetch, pollIntervalMs: 1 }); // provisionDependencies unset → external
     await expect(
@@ -338,6 +338,36 @@ describe("K8sTopologyRuntime", () => {
           format: "sql",
         },
       ]),
-    ).rejects.toThrow(/dedicated/);
+    ).rejects.toThrow(/external/);
+  });
+
+  it("seedFixtures: pool store — seeds into the tenant DB's schema slice in the shared store pod (P2)", async () => {
+    const { kubectl, calls } = fakeKubectl();
+    const rt = new K8sTopologyRuntime({ kubectl, fetchImpl: okFetch, pollIntervalMs: 1 });
+    const POOL_ZONE: TrustZone = {
+      id: "acme",
+      isolationRuntime: "runsc",
+      namespace: "everdict-acme",
+      network: "deny-cross-tenant",
+      trusted: true,
+      storeIsolation: "pool",
+    };
+    await rt.seedFixtures(
+      SPEC_DATA,
+      "run1",
+      [
+        {
+          store: "postgres",
+          role: "world",
+          isolateBy: "schema",
+          slice: "run_run1",
+          seed: { inline: "x" },
+          format: "sql",
+        },
+      ],
+      POOL_ZONE,
+    );
+    expect(calls.some((c) => c.startsWith("podFor:") && c.includes("app=everdict-shared-postgres"))).toBe(true);
+    expect(calls.some((c) => c.startsWith("exec:") && c.includes("tenant_acme"))).toBe(true); // -d tenant_acme
   });
 });

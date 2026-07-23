@@ -34,7 +34,7 @@ import {
   topologyJobId,
 } from "./nomad-topology.js";
 import { endpointUnreachableError } from "./reachability.js";
-import { type StorePlan, planTenantStores, resolveStoreIsolation } from "./store-binding.js";
+import { type StorePlan, planTenantStores, resolveStoreIsolation, sanitizeIdent } from "./store-binding.js";
 import { type StoreSeedPlan, buildReadExec, buildSeedExec, resolveStoreReadSlice } from "./store-seed.js";
 import type { TargetEnvHandle, TopologyHandle, TopologyRuntime } from "./topology-runtime.js";
 
@@ -354,35 +354,53 @@ export class NomadTopologyRuntime implements TopologyRuntime {
     throw new UpstreamError("UPSTREAM_ERROR", { store }, "Timed out waiting for the shared store to become ready");
   }
 
-  // Resolve the dedicated (silo) store's running alloc — the same job/group the deploy brought up. Seed/read support
-  // only silo (a dedicated store per zone, at the default creds so buildSeedExec's db matches); pool (shared store +
-  // per-tenant DB) and external are a follow-up, rejected loud. Silo needs a zone (the dedicated job is zone-keyed).
-  private async siloStoreAlloc(
+  // Resolve WHERE a store's per-case slice lives + which alloc/task to exec in — the same decision the deploy made.
+  // silo = the zone's dedicated store job (group == task), default `everdict` DB. pool = the cluster-shared store's
+  // running alloc (from the deploy's sharedStores map) + the tenant's `tenant_<slug>` DB. Both need a zone; external
+  // (BYO) is rejected loud. Nomad has no store without a zone (no-zone deploys no dependency stores).
+  private async storeAllocTarget(
     spec: ServiceHarnessSpec,
     store: string,
     zone: TrustZone | undefined,
     op: string,
-  ): Promise<{ allocId: string; task: string; ns: string | undefined }> {
+  ): Promise<{ allocId: string; task: string; ns: string | undefined; db: string }> {
     if (!zone) {
-      throw new BadRequestError("BAD_REQUEST", { op }, `store ${op} on Nomad needs a tenant zone (a dedicated store).`);
+      throw new BadRequestError("BAD_REQUEST", { op }, `store ${op} on Nomad needs a tenant zone.`);
     }
-    if (resolveStoreIsolation(zone) !== "silo") {
-      throw new BadRequestError(
-        "BAD_REQUEST",
-        { op },
-        `store ${op} on Nomad currently supports only a dedicated (silo) store; pool/external is a follow-up.`,
-      );
+    const isolation = resolveStoreIsolation(zone);
+    if (isolation === "silo") {
+      const ns = zone.namespace ?? this.opts.namespace;
+      const group = dedicatedStoreGroup(zone.id, store); // group == task name for a dedicated store
+      const alloc = await this.waitForGroupRunning(dedicatedStoreJobId(spec, zone.id), group, ns);
+      if (!alloc.ID) {
+        throw new UpstreamError("UPSTREAM_ERROR", { store, op }, "Could not resolve the dedicated store alloc.");
+      }
+      return { allocId: alloc.ID, task: group, ns, db: "everdict" };
     }
-    const ns = zone.namespace ?? this.opts.namespace;
-    const group = dedicatedStoreGroup(zone.id, store); // group == task name for a dedicated store
-    const alloc = await this.waitForGroupRunning(dedicatedStoreJobId(spec, zone.id), group, ns);
-    if (!alloc.ID) {
-      throw new UpstreamError("UPSTREAM_ERROR", { store, op }, "Could not resolve the dedicated store alloc.");
+    if (isolation === "pool") {
+      const rec = this.sharedStores.get(store);
+      if (!rec) {
+        throw new UpstreamError(
+          "UPSTREAM_ERROR",
+          { store, op },
+          "Shared store not provisioned — ensure the topology first.",
+        );
+      }
+      return {
+        allocId: rec.allocId,
+        task: rec.task,
+        ns: this.opts.poolNamespace,
+        db: `tenant_${sanitizeIdent(zone.id)}`,
+      };
     }
-    return { allocId: alloc.ID, task: group, ns };
+    throw new BadRequestError(
+      "BAD_REQUEST",
+      { op },
+      `store ${op} on Nomad does not support external (BYO) stores — Everdict cannot exec into one it doesn't run.`,
+    );
   }
 
-  // Fixture seeding (P2): apply each plan inside the dedicated store's alloc via `nomad alloc exec` (buildSeedExec).
+  // Fixture seeding (P2): apply each plan inside the store's alloc via `nomad alloc exec` (buildSeedExec).
   async seedFixtures(
     spec: ServiceHarnessSpec,
     _runId: string,
@@ -390,8 +408,10 @@ export class NomadTopologyRuntime implements TopologyRuntime {
     zone?: TrustZone,
   ): Promise<void> {
     for (const plan of plans) {
-      const { allocId, task, ns } = await this.siloStoreAlloc(spec, plan.store, zone, "seeding");
-      for (const argv of buildSeedExec(plan).argvs) await this.execImpl.exec(allocId, task, argv, { namespace: ns });
+      const t = await this.storeAllocTarget(spec, plan.store, zone, "seeding");
+      for (const argv of buildSeedExec(plan, t.db).argvs) {
+        await this.execImpl.exec(t.allocId, t.task, argv, { namespace: t.ns });
+      }
     }
   }
 
@@ -402,9 +422,11 @@ export class NomadTopologyRuntime implements TopologyRuntime {
     query: StoreReadQuery,
     zone?: TrustZone,
   ): Promise<string> {
-    const { allocId, task, ns } = await this.siloStoreAlloc(spec, query.store, zone, "reading");
+    const t = await this.storeAllocTarget(spec, query.store, zone, "reading");
     const slice = resolveStoreReadSlice(spec.dependencies, query.store, query.role, runId);
-    return await this.execImpl.exec(allocId, task, buildReadExec(query.store, slice, query.query), { namespace: ns });
+    return await this.execImpl.exec(t.allocId, t.task, buildReadExec(query.store, slice, query.query, t.db), {
+      namespace: t.ns,
+    });
   }
 
   async provisionBrowserEnv(spec: ServiceHarnessSpec, runId: string, zone?: TrustZone): Promise<TargetEnvHandle> {

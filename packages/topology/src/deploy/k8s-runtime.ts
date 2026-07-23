@@ -18,7 +18,14 @@ import {
   resolveEgressCidrs,
 } from "./network-policy.js";
 import { endpointUnreachableError } from "./reachability.js";
-import { DEFAULT_POOL_NS, type StorePlan, planTenantStores, resolveStoreIsolation } from "./store-binding.js";
+import {
+  DEFAULT_POOL_NS,
+  type StorePlan,
+  planTenantStores,
+  resolveStoreIsolation,
+  sanitizeIdent,
+  sharedStoreName,
+} from "./store-binding.js";
 import { type StoreSeedPlan, buildReadExec, buildSeedExec, resolveStoreReadSlice } from "./store-seed.js";
 import type { TargetEnvHandle, TopologyHandle, TopologyRuntime } from "./topology-runtime.js";
 
@@ -234,34 +241,43 @@ export class K8sTopologyRuntime implements TopologyRuntime {
     throw new UpstreamError("UPSTREAM_ERROR", { store }, "Timed out waiting for the shared store to become ready");
   }
 
-  // Resolve how this zone's stores are deployed — the SAME decision the deploy made (with a zone → pool/silo/external;
-  // without → provisionDependencies). Seed/read only support a dedicated (silo) store today: it lives at
-  // `<id>-<store>` in the zone namespace with the default creds, so buildSeedExec's db/creds match. pool (shared store +
-  // per-tenant DB) and external (BYO) are a follow-up — rejected loud rather than silently mis-targeted.
-  private siloNsOrThrow(spec: ServiceHarnessSpec, zone: TrustZone | undefined, op: string): string {
+  // Resolve WHERE a store's per-case slice lives — the SAME decision the deploy made (zone → pool/silo/external; no zone
+  // → provisionDependencies). silo = a dedicated store at `<id>-<store>` in the zone ns, default `everdict` DB. pool =
+  // the cluster-shared `everdict-shared-<store>` in the pool ns, the tenant's `tenant_<slug>` DB (the seed's schema
+  // slice nests under it). external (BYO) is rejected loud — Everdict can't exec into a store it doesn't run.
+  private storeTarget(
+    spec: ServiceHarnessSpec,
+    store: string,
+    zone: TrustZone | undefined,
+    op: string,
+  ): { podSelector: string; ns: string; db: string } {
     const isolation = zone ? resolveStoreIsolation(zone) : this.opts.provisionDependencies ? "silo" : "external";
-    if (isolation !== "silo") {
-      throw new BadRequestError(
-        "BAD_REQUEST",
-        { isolation, op },
-        `store ${op} on K8s currently supports only a dedicated (silo) store; "${isolation}" is a follow-up.`,
-      );
+    if (isolation === "silo") {
+      return { podSelector: `app=${storeName(spec, store)}`, ns: this.nsFor(zone), db: "everdict" };
     }
-    return this.nsFor(zone);
+    if (isolation === "pool" && zone) {
+      const poolNs = this.opts.poolNamespace ?? DEFAULT_POOL_NS;
+      return { podSelector: `app=${sharedStoreName(store)}`, ns: poolNs, db: `tenant_${sanitizeIdent(zone.id)}` };
+    }
+    throw new BadRequestError(
+      "BAD_REQUEST",
+      { isolation, op },
+      `store ${op} on K8s does not support "${isolation}" stores (external is BYO — Everdict cannot exec into it).`,
+    );
   }
 
-  // Fixture seeding (P2): apply each plan inside its dedicated store pod via kubectl exec (buildSeedExec → psql into the
-  // schema slice). The store Deployment is labelled `app=<id>-<store>`, so podFor resolves the same store the services use.
+  // Fixture seeding (P2): apply each plan inside its store pod via kubectl exec (buildSeedExec → psql/redis-cli scoped
+  // to the case slice). podFor resolves the same store the services use (dedicated `<id>-<store>` or shared).
   async seedFixtures(
     spec: ServiceHarnessSpec,
     _runId: string,
     plans: StoreSeedPlan[],
     zone?: TrustZone,
   ): Promise<void> {
-    const ns = this.siloNsOrThrow(spec, zone, "seeding");
     for (const plan of plans) {
-      const pod = await this.kubectl.podFor(`app=${storeName(spec, plan.store)}`, ns);
-      for (const argv of buildSeedExec(plan).argvs) await this.kubectl.exec(pod, ns, argv);
+      const t = this.storeTarget(spec, plan.store, zone, "seeding");
+      const pod = await this.kubectl.podFor(t.podSelector, t.ns);
+      for (const argv of buildSeedExec(plan, t.db).argvs) await this.kubectl.exec(pod, t.ns, argv);
     }
   }
 
@@ -272,10 +288,10 @@ export class K8sTopologyRuntime implements TopologyRuntime {
     query: StoreReadQuery,
     zone?: TrustZone,
   ): Promise<string> {
-    const ns = this.siloNsOrThrow(spec, zone, "reading");
+    const t = this.storeTarget(spec, query.store, zone, "reading");
     const slice = resolveStoreReadSlice(spec.dependencies, query.store, query.role, runId);
-    const pod = await this.kubectl.podFor(`app=${storeName(spec, query.store)}`, ns);
-    return await this.kubectl.exec(pod, ns, buildReadExec(query.store, slice, query.query));
+    const pod = await this.kubectl.podFor(t.podSelector, t.ns);
+    return await this.kubectl.exec(pod, t.ns, buildReadExec(query.store, slice, query.query, t.db));
   }
 
   async provisionBrowserEnv(spec: ServiceHarnessSpec, runId: string, zone?: TrustZone): Promise<TargetEnvHandle> {
