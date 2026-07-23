@@ -16,6 +16,7 @@ import type {
 } from "../tools/definition.js";
 import { invokeTool } from "../tools/invocation.js";
 import { toOpenAiTools } from "../tools/openai.js";
+import { buildPresentPlanTool } from "../tools/plan-tool.js";
 import { ToolRegistry } from "../tools/registry.js";
 import { OFFLOAD_THRESHOLD_CHARS, ResultStore, buildReadResultTool, offloadResult } from "../tools/result-store.js";
 import { buildSpawnAgentTool } from "../tools/spawn-tool.js";
@@ -32,6 +33,7 @@ export type AgentEvent =
   | { type: "tool_call"; name: string; args: string }
   | { type: "tool_result"; name: string; isError: boolean }
   | { type: "permission"; name: string; decision: PermissionDecision }
+  | { type: "plan"; plan: string }
   | { type: "compaction"; droppedMessages: number; mode?: "microcompact" | "summarize" | "drop" }
   | { type: "done"; stopReason: StopReason };
 
@@ -58,6 +60,10 @@ export interface AgentLoopOptions {
   // Sub-agent recursion depth (internal). A top-level run is 0; spawn_agent runs a nested loop at depth+1, and the
   // spawn tool is withheld once depth reaches the cap — so delegation is bounded.
   depth?: number;
+  // Plan mode: start read-only-only; the agent must present_plan and get it approved (onPlan) before any write tool
+  // runs. onPlan defaults to auto-approve. Off unless the host opts in.
+  planMode?: boolean;
+  onPlan?: (plan: string) => boolean | Promise<boolean>;
   onEvent?: (e: AgentEvent) => void;
   // Fired (awaited) as each assistant/tool message is appended, so the host can persist the transcript
   // incrementally — the source of live progress for a polling UI.
@@ -158,11 +164,24 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
           ),
         ]
       : [];
+  // Plan mode: while on, write tools are blocked; present_plan asks the host to approve, then turns it off.
+  let inPlanMode = opts.planMode === true;
+  const planTools: ToolDefinition[] = opts.planMode
+    ? [
+        buildPresentPlanTool(async (plan) => {
+          emit({ type: "plan", plan });
+          const approved = opts.onPlan ? await opts.onPlan(plan) : true;
+          if (approved) inPlanMode = false;
+          return approved;
+        }),
+      ]
+    : [];
   const registry = new ToolRegistry([
     ...opts.registry.list(),
     buildTodoTool((t) => (todos = t)),
     buildReadResultTool(resultStore),
     ...spawnTools,
+    ...planTools,
   ]);
   let finalText = "";
   let compactionCount = 0;
@@ -264,6 +283,12 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
         const parsed = parseArgs(tc.function.arguments);
         if (!tool) return { content: `Unknown tool: ${tc.function.name}`, isError: true };
         if (!parsed.ok) return { content: `Invalid JSON arguments: ${parsed.error}`, isError: true };
+        if (tool.isReadOnly !== true && inPlanMode) {
+          return {
+            content: `In plan mode — the write tool "${tool.name}" is blocked until your plan is approved. Present a plan with present_plan first.`,
+            isError: true,
+          };
+        }
         if (tool.isReadOnly !== true && opts.permit) {
           // Write tool + a permission hook → gate it (read-only tools + no hook auto-allow).
           const decision = await opts.permit({ name: tool.name, isReadOnly: false, input: parsed.value });

@@ -359,6 +359,38 @@ describe("runAgentLoop", () => {
     expect(result.toolCalls).toEqual([{ name: "spawn_agent", ok: true }]);
   });
 
+  it("blocks write tools in plan mode until present_plan is approved", async () => {
+    const writeCall = vi.fn(async () => ({ content: "wrote", isError: false }));
+    const writeTool: ToolDefinition = {
+      name: "do_write",
+      description: "write",
+      parametersJsonSchema: { type: "object", properties: {} },
+      isReadOnly: false,
+      call: writeCall,
+    };
+    const onPlan = vi.fn(async () => true);
+    const client = fakeClient([
+      toolCallResponse("w1", "do_write", "{}"), // turn 1 — blocked (plan mode)
+      toolCallResponse("p1", "present_plan", JSON.stringify({ plan: "1. do the thing" })), // turn 2 — approved
+      toolCallResponse("w2", "do_write", "{}"), // turn 3 — now allowed
+      textResponse("done"), // turn 4
+    ]);
+    const result = await runAgentLoop({
+      client,
+      model: "test-model",
+      systemPrompt: "sys",
+      history,
+      registry: new ToolRegistry([writeTool]),
+      planMode: true,
+      onPlan,
+    });
+    expect(writeCall).toHaveBeenCalledOnce(); // only the post-approval write ran
+    expect(onPlan).toHaveBeenCalledWith("1. do the thing");
+    expect(result.content).toBe("done");
+    const toolResults = result.produced.filter((m) => m.role === "tool").map((m) => (m as { content: string }).content);
+    expect(toolResults[0]).toContain("In plan mode"); // the first write was blocked
+  });
+
   it("stops with aborted when the signal is already aborted", async () => {
     const client = fakeClient([textResponse("unused")]);
     const result = await runAgentLoop({
