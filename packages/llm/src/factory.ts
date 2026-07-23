@@ -1,5 +1,6 @@
 import { BadRequestError } from "@everdict/contracts";
 import OpenAI from "openai";
+import { AnthropicTransport } from "./anthropic-transport.js";
 import { OpenAiTransport } from "./openai-transport.js";
 import type { LlmTransport } from "./transport.js";
 
@@ -16,6 +17,12 @@ export interface TransportConfig {
 // coordinates; this never reads env.
 export function transportFor(config: TransportConfig): LlmTransport {
   switch (config.provider) {
+    case "anthropic":
+      return new AnthropicTransport({
+        apiKey: config.apiKey,
+        ...(config.baseUrl !== undefined ? { baseUrl: config.baseUrl } : {}),
+        ...(config.timeoutMs !== undefined ? { timeoutMs: config.timeoutMs } : {}),
+      });
     case "openai":
     case "openai-compatible":
       return new OpenAiTransport(buildOpenAiClient(config));
