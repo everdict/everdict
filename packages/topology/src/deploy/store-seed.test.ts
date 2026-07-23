@@ -1,6 +1,6 @@
 import { BadRequestError, type TopologyDependency } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
-import { type StoreSeedPlan, buildSeedExec, planStoreSeed } from "./store-seed.js";
+import { type StoreSeedPlan, buildReadExec, buildSeedExec, planStoreSeed } from "./store-seed.js";
 
 // Build a dependency with sensible defaults; override per test.
 function dep(over: Partial<TopologyDependency> & Pick<TopologyDependency, "store">): TopologyDependency {
@@ -139,21 +139,64 @@ describe("buildSeedExec", () => {
   it("seeds postgres into the case schema slice via a single psql -c script", () => {
     const exec = buildSeedExec(pgPlan());
     expect(exec.store).toBe("postgres");
-    expect(exec.argv[0]).toBe("psql");
-    expect(exec.argv).toContain("-c");
-    const script = exec.argv[exec.argv.length - 1];
+    expect(exec.argvs).toHaveLength(1);
+    const argv = exec.argvs[0] ?? [];
+    expect(argv[0]).toBe("psql");
+    expect(argv).toContain("-c");
+    const script = argv[argv.length - 1];
     expect(script).toContain('CREATE SCHEMA IF NOT EXISTS "run_run42"');
     expect(script).toContain('SET search_path TO "run_run42"');
     expect(script).toContain("INSERT INTO t VALUES (1);");
+  });
+
+  it("targets the given database (pool passes the tenant DB)", () => {
+    const argv = buildSeedExec(pgPlan(), "tenant_acme").argvs[0] ?? [];
+    expect(argv[argv.indexOf("-d") + 1]).toBe("tenant_acme");
+  });
+
+  it("seeds redis via a redis-cli stdin heredoc, substituting {prefix} with the key-prefix slice", () => {
+    const exec = buildSeedExec(
+      pgPlan({ store: "redis", isolateBy: "key-prefix", slice: "run-run42", seed: { inline: "SET {prefix}:k v" } }),
+    );
+    expect(exec.store).toBe("redis");
+    const argv = exec.argvs[0] ?? [];
+    expect(argv[0]).toBe("sh");
+    const script = argv[argv.length - 1];
+    expect(script).toContain("redis-cli <<");
+    expect(script).toContain("SET run-run42:k v"); // {prefix} → the slice
   });
 
   it("rejects an artifact-ref seed (not supported yet)", () => {
     expect(() => buildSeedExec(pgPlan({ seed: { ref: "s3://x" } }))).toThrow(BadRequestError);
   });
 
-  it("rejects a store kind that has no seed exec yet (redis/minio)", () => {
-    expect(() => buildSeedExec(pgPlan({ store: "redis", isolateBy: "key-prefix", slice: "run-run42" }))).toThrow(
+  it("rejects a store kind that has no seed exec yet (minio)", () => {
+    expect(() => buildSeedExec(pgPlan({ store: "minio", isolateBy: "object-prefix", slice: "runs/run42/" }))).toThrow(
       /not supported yet/,
     );
+  });
+});
+
+describe("buildReadExec", () => {
+  it("reads postgres via tuples-only psql scoped to the schema slice", () => {
+    const argv = buildReadExec("postgres", "run_run42", "SELECT * FROM t");
+    expect(argv[0]).toBe("psql");
+    expect(argv).toContain("-t");
+    expect(argv[argv.length - 1]).toBe('SET search_path TO "run_run42"; SELECT * FROM t');
+  });
+
+  it("reads postgres from the given database (pool)", () => {
+    const argv = buildReadExec("postgres", "run_run42", "SELECT 1", "tenant_acme");
+    expect(argv[argv.indexOf("-d") + 1]).toBe("tenant_acme");
+  });
+
+  it("reads redis via redis-cli, substituting {prefix}", () => {
+    const argv = buildReadExec("redis", "run-run42", "GET {prefix}:k");
+    expect(argv[0]).toBe("sh");
+    expect(argv[argv.length - 1]).toContain("GET run-run42:k");
+  });
+
+  it("rejects an unsupported store kind (minio)", () => {
+    expect(() => buildReadExec("minio", "runs/x/", "ls")).toThrow(/not supported yet/);
   });
 });

@@ -99,17 +99,26 @@ export function resolveStoreReadSlice(
   return isolationSliceKey(dep.isolateBy, runId);
 }
 
-// The command to exec INSIDE a store container to apply one seed plan — the runtime-agnostic half of the seed I/O
-// (a runtime maps `store` → its container and runs `argv`). Pure + testable; the runtime owns only the container reach.
+// The command(s) to exec INSIDE a store container to apply one seed plan — the runtime-agnostic half of the seed I/O
+// (a runtime maps `store` → its container and runs each `argv`). Pure + testable; the runtime owns only the container reach.
 export interface SeedExec {
-  store: string; // the store kind whose container the argv runs in
-  argv: string[]; // the in-container command (psql / redis-cli / mc)
+  store: string; // the store kind whose container the argvs run in
+  argvs: string[][]; // in-container commands, run in order (postgres = 1 psql; redis = 1 sh -c redis-cli)
 }
 
-// Build the in-container seed command for one plan. postgres seeds into the case's SCHEMA slice via a single psql -c
-// script (docker/k8s exec have no stdin). redis/minio + artifact-ref seeds are a follow-up — they fail loud (never a
-// silent skip) so an unsupported fixture is an explicit run failure, not a quietly-empty store.
-export function buildSeedExec(plan: StoreSeedPlan): SeedExec {
+const DEFAULT_DB = "everdict"; // the STORE_DEFS default database (silo / self-hosted); pool passes the tenant DB.
+
+// Substitute the per-case slice into an inline seed/read body under the {prefix} placeholder — redis/minio scope by a
+// key/object prefix (the author writes {prefix}), while postgres scopes physically via SET search_path (no placeholder).
+function withPrefix(body: string, slice: string): string {
+  return body.split("{prefix}").join(slice);
+}
+
+// Build the in-container seed command(s) for one plan. postgres seeds into the case's SCHEMA slice via psql -c; redis
+// runs the {prefix}-substituted commands through a redis-cli stdin heredoc (multi-command in one exec). `db` names the
+// postgres database (pool = the tenant DB). minio + artifact-ref seeds fail loud — an unsupported fixture is an explicit
+// run failure, never a quietly-empty store. docs/architecture/dependency-store-roles.md
+export function buildSeedExec(plan: StoreSeedPlan, db: string = DEFAULT_DB): SeedExec {
   if ("ref" in plan.seed) {
     throw new BadRequestError(
       "BAD_REQUEST",
@@ -117,18 +126,41 @@ export function buildSeedExec(plan: StoreSeedPlan): SeedExec {
       "Artifact-ref fixtures are not supported yet — use an inline seed.",
     );
   }
+  const inline = plan.seed.inline;
   if (plan.store === "postgres") {
-    // Namespace the seed under the per-case schema slice, then run the author's SQL there. psql -c runs the whole
-    // multi-statement script. The slice is Everdict-minted (run_<runId>), quoted as an identifier.
-    const script = `CREATE SCHEMA IF NOT EXISTS "${plan.slice}"; SET search_path TO "${plan.slice}"; ${plan.seed.inline}`;
-    return {
-      store: "postgres",
-      argv: ["psql", "-U", "everdict", "-d", "everdict", "-v", "ON_ERROR_STOP=1", "-c", script],
-    };
+    // Namespace the seed under the per-case schema slice, then run the author's SQL there (psql -c runs the whole script).
+    const script = `CREATE SCHEMA IF NOT EXISTS "${plan.slice}"; SET search_path TO "${plan.slice}"; ${inline}`;
+    return { store: "postgres", argvs: [["psql", "-U", "everdict", "-d", db, "-v", "ON_ERROR_STOP=1", "-c", script]] };
+  }
+  if (plan.store === "redis") {
+    // redis-cli reads one command per stdin line — a heredoc runs the whole prefix-substituted seed in one exec.
+    return { store: "redis", argvs: [redisScriptArgv(withPrefix(inline, plan.slice))] };
   }
   throw new BadRequestError(
     "BAD_REQUEST",
     { store: plan.store },
-    `Seeding a "${plan.store}" store is not supported yet (postgres only for now).`,
+    `Seeding a "${plan.store}" store is not supported yet (postgres/redis for now).`,
   );
+}
+
+// The in-container READ command for store-state grading — postgres SELECT / redis command, scoped to the case slice.
+export function buildReadExec(store: string, slice: string, query: string, db: string = DEFAULT_DB): string[] {
+  if (store === "postgres") {
+    // -t -A = tuples-only, unaligned → clean scriptable output.
+    return ["psql", "-U", "everdict", "-d", db, "-t", "-A", "-c", `SET search_path TO "${slice}"; ${query}`];
+  }
+  if (store === "redis") {
+    return redisScriptArgv(withPrefix(query, slice));
+  }
+  throw new BadRequestError(
+    "BAD_REQUEST",
+    { store },
+    `Reading a "${store}" store is not supported yet (postgres/redis for now).`,
+  );
+}
+
+// Run a multi-line redis-cli script (one command per line) in a single exec via a stdin heredoc — works over
+// docker/kubectl/nomad exec (none of which pipe stdin here) and returns the command output on stdout (used by reads).
+function redisScriptArgv(script: string): string[] {
+  return ["sh", "-c", `redis-cli <<'EVERDICT_REDIS'\n${script}\nEVERDICT_REDIS`];
 }

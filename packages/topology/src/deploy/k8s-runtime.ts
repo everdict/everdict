@@ -19,7 +19,7 @@ import {
 } from "./network-policy.js";
 import { endpointUnreachableError } from "./reachability.js";
 import { DEFAULT_POOL_NS, type StorePlan, planTenantStores, resolveStoreIsolation } from "./store-binding.js";
-import { type StoreSeedPlan, buildSeedExec, resolveStoreReadSlice } from "./store-seed.js";
+import { type StoreSeedPlan, buildReadExec, buildSeedExec, resolveStoreReadSlice } from "./store-seed.js";
 import type { TargetEnvHandle, TopologyHandle, TopologyRuntime } from "./topology-runtime.js";
 
 export interface K8sTopologyRuntimeOptions {
@@ -261,7 +261,7 @@ export class K8sTopologyRuntime implements TopologyRuntime {
     const ns = this.siloNsOrThrow(spec, zone, "seeding");
     for (const plan of plans) {
       const pod = await this.kubectl.podFor(`app=${storeName(spec, plan.store)}`, ns);
-      await this.kubectl.exec(pod, ns, buildSeedExec(plan).argv);
+      for (const argv of buildSeedExec(plan).argvs) await this.kubectl.exec(pod, ns, argv);
     }
   }
 
@@ -273,26 +273,9 @@ export class K8sTopologyRuntime implements TopologyRuntime {
     zone?: TrustZone,
   ): Promise<string> {
     const ns = this.siloNsOrThrow(spec, zone, "reading");
-    if (query.store !== "postgres") {
-      throw new BadRequestError(
-        "BAD_REQUEST",
-        { store: query.store },
-        `reading a "${query.store}" store is not supported yet (postgres only for now).`,
-      );
-    }
     const slice = resolveStoreReadSlice(spec.dependencies, query.store, query.role, runId);
     const pod = await this.kubectl.podFor(`app=${storeName(spec, query.store)}`, ns);
-    return await this.kubectl.exec(pod, ns, [
-      "psql",
-      "-U",
-      "everdict",
-      "-d",
-      "everdict",
-      "-t",
-      "-A",
-      "-c",
-      `SET search_path TO "${slice}"; ${query.query}`,
-    ]);
+    return await this.kubectl.exec(pod, ns, buildReadExec(query.store, slice, query.query));
   }
 
   async provisionBrowserEnv(spec: ServiceHarnessSpec, runId: string, zone?: TrustZone): Promise<TargetEnvHandle> {
