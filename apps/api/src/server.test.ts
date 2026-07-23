@@ -4293,6 +4293,47 @@ describe("API — schedules (scheduled cron scorecards)", () => {
     await app.close();
   });
 
+  it("POST /schedules/:id/fire runs it now → the scorecard is stamped origin.scheduleId → GET /scorecards?schedule= lists it", async () => {
+    const { app } = server();
+    await app.inject({ method: "POST", url: "/datasets", headers: h, payload: DATASET }); // registers "smoke"
+    const rec = (
+      await app.inject({
+        method: "POST",
+        url: "/schedules",
+        headers: h,
+        payload: {
+          name: "nightly",
+          cron: "0 3 * * *",
+          runTemplate: { dataset: { id: "smoke" }, harness: { id: "scripted" } },
+        },
+      })
+    ).json();
+
+    // Run now — the manual fire submits through the same ScorecardService.submit a cron tick uses.
+    const fired = await app.inject({ method: "POST", url: `/schedules/${rec.id}/fire`, headers: h });
+    expect(fired.statusCode).toBe(200);
+    const scorecardId = fired.json().scorecardId as string;
+    expect(scorecardId).toBeTruthy();
+    await pollScorecard(app, scorecardId, h);
+
+    // The fired scorecard carries the schedule provenance …
+    const detail = await app.inject({ method: "GET", url: `/scorecards/${scorecardId}`, headers: h });
+    expect(detail.json().origin).toMatchObject({ source: "schedule", scheduleId: rec.id });
+
+    // … so the schedule's run-history filter finds it (and only it).
+    const history = await app.inject({ method: "GET", url: `/scorecards?schedule=${rec.id}`, headers: h });
+    expect(history.json().map((s: { id: string }) => s.id)).toEqual([scorecardId]);
+    const none = await app.inject({ method: "GET", url: "/scorecards?schedule=sch-unknown", headers: h });
+    expect(none.json()).toEqual([]);
+    await app.close();
+  });
+
+  it("firing a missing schedule is 404", async () => {
+    const { app } = server();
+    expect((await app.inject({ method: "POST", url: "/schedules/nope/fire", headers: h })).statusCode).toBe(404);
+    await app.close();
+  });
+
   it("internal fire route: token guard (unset 404 / mismatch 403) + delegation (unknown schedule 404)", async () => {
     // internalToken unset → internal disabled (404)
     const open = server();

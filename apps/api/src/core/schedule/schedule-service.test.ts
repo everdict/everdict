@@ -209,10 +209,12 @@ describe("ScheduleService.fire — firing (called by the internal route)", () =>
     await s.create({ ...base, runTemplate: { ...runTemplate, concurrency: 8, runtime: "rt-1" } });
     const res = await s.fire("acme", "sch-1");
     expect(res).toEqual({ scorecardId: "sc-fired" });
-    // submitted with the creator's identity + the template verbatim
+    // submitted with the creator's identity + the template verbatim, provenance stamped with WHICH schedule fired
+    // it (origin.scheduleId → the schedule detail's run-history lookup).
     expect(seen[0]).toMatchObject({
       tenant: "acme",
       submittedBy: "u-1",
+      origin: { source: "schedule", scheduleId: "sch-1" },
       dataset: { id: "repo-smoke", version: "latest" },
       harness: { id: "scripted", version: "latest" },
       concurrency: 8,
@@ -267,7 +269,7 @@ describe("ScheduleService.fire — firing (called by the internal route)", () =>
     expect(pulled[0]).toMatchObject({
       tenant: "acme",
       submittedBy: "u-1",
-      origin: { source: "schedule" },
+      origin: { source: "schedule", scheduleId: "sch-1" },
       source: { name: "prod-mlflow", correlate: "id" },
       runs: [
         { caseId: "t1", runId: "t1" },

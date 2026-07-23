@@ -36,3 +36,18 @@ export async function deleteScheduleAction(id: string): Promise<ScheduleActionRe
     return { ok: false, error: e instanceof Error ? e.message : String(e) }
   }
 }
+
+// Manual "run now" — fire the schedule immediately. Returns the submitted scorecard id so the caller can navigate to it.
+// AuthZ is the control plane's (schedules:write). Firing not configured (Temporal-less dev) surfaces as an error.
+export async function fireScheduleAction(
+  id: string
+): Promise<ScheduleActionResult & { scorecardId?: string }> {
+  const ctx = await authContext()
+  try {
+    const res = await controlPlane.fireSchedule<{ scorecardId: string }>(ctx, id)
+    revalidatePath('/[workspace]/schedules')
+    return { ok: true, scorecardId: res.scorecardId }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
+}

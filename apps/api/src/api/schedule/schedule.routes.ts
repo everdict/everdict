@@ -110,4 +110,25 @@ export function registerScheduleRoutes(app: FastifyInstance, deps: ServerDeps): 
       return sendError(reply, err);
     }
   });
+
+  // Manual "run now" — fire the schedule immediately (one-off), reusing the SAME ScheduleService.fire the Temporal
+  // workflow calls (origin stamp + creator identity + last* recording are identical). No poll-to-terminal finalize
+  // (that's the cron workflow's job) — this just submits and returns the scorecard id. The completion notification
+  // still fires from the scorecard's own onComplete (schedule-branded via origin.source === "schedule").
+  app.post<{ Params: { id: string } }>("/schedules/:id/fire", { schema: scheduleDocs.fire }, async (req, reply) => {
+    if (!deps.scheduleService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "schedule service not configured" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "schedules:write");
+    } catch (err) {
+      return sendError(reply, err);
+    }
+    try {
+      return reply.send(await deps.scheduleService.fire(principal.workspace, req.params.id)); // 404 not found, 400 firing disabled
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
 }

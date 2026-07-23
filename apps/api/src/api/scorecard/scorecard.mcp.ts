@@ -247,10 +247,13 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
         description: "This workspace's scorecards (summary only — excludes heavy per-case results)",
         inputSchema: {
           judge: z.string().optional().describe("narrow to batches that applied this Agent Judge (any version)"),
+          schedule: z.string().optional().describe("narrow to the runs a schedule fired (its run history)"),
         },
       },
-      ({ judge }) =>
-        run(principal, "scorecards:read", async () => ok(await scorecards.list(ws, judge ? { judge } : undefined))),
+      ({ judge, schedule }) =>
+        run(principal, "scorecards:read", async () =>
+          ok(await scorecards.list(ws, schedule ? { scheduleId: schedule } : judge ? { judge } : undefined)),
+        ),
     );
 
     server.registerTool(

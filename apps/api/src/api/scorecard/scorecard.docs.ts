@@ -140,6 +140,7 @@ const docs = {
     querystring: toJsonSchema(
       z.object({
         judge: z.string().optional().describe("Narrow to batches that applied this Agent Judge (any version)"),
+        schedule: z.string().optional().describe("Narrow to the runs a schedule fired (its run history)"),
       }),
     ),
     response: {

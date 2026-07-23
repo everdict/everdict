@@ -1,2 +1,7 @@
 export { ScheduleList } from './ui/schedule-list'
-export { setScheduleEnabledAction, deleteScheduleAction } from './api/schedule-actions'
+export { ScheduleDetailActions } from './ui/schedule-detail-actions'
+export {
+  setScheduleEnabledAction,
+  deleteScheduleAction,
+  fireScheduleAction,
+} from './api/schedule-actions'

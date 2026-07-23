@@ -1,3 +1,4 @@
+import { ScheduleFireResponseSchema } from "@everdict/contracts/wire";
 import { ScheduleListResponseSchema } from "@everdict/contracts/wire";
 import { ScheduleResponseSchema } from "@everdict/contracts/wire";
 import type { FastifySchema } from "fastify";
@@ -71,6 +72,20 @@ const docs = {
     response: {
       204: { description: "Deleted (no content)" },
       ...errorResponses(401, 403, 404),
+    },
+  },
+  fire: {
+    summary: "Run a schedule now",
+    description:
+      "Fires a schedule immediately (a manual, one-off run) — submits the schedule's run template as the creator, " +
+      "the same path a Temporal cron tick uses. Requires schedules:write (member+), workspace-scoped (404 when not " +
+      "found). Unlike a cron fire, this does not run the Temporal poll-to-terminal + regression-diff workflow; it " +
+      "returns immediately with the submitted scorecard id (400 when firing is not configured on this deployment).",
+    tags: ["schedule"],
+    params: scheduleIdParams,
+    response: {
+      200: { description: "The scorecard the fire submitted", ...toJsonSchema(ScheduleFireResponseSchema) },
+      ...errorResponses(400, 401, 403, 404),
     },
   },
 } satisfies Record<string, FastifySchema>;

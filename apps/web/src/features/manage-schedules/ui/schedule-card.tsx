@@ -80,9 +80,14 @@ export function ScheduleCard({
     // Fixed-format card — every card has the same 3-line structure (name / target / cadence · next run) + a fixed right-side slot.
     <div className="flex items-center gap-3 rounded-lg border bg-card px-3.5 py-3 shadow-raise">
       <div className="min-w-0 flex-1 space-y-1.5">
-        {/* ① Name */}
+        {/* ① Name — links to the schedule detail (the row's primary drill-in). */}
         <div className="flex items-center overflow-hidden whitespace-nowrap text-[13px] font-[560]">
-          <span className="truncate">{s.name}</span>
+          <Link
+            href={`/${workspace}/schedules/${encodeURIComponent(s.id)}`}
+            className="truncate rounded-sm hover:underline"
+          >
+            {s.name}
+          </Link>
         </div>
         {/* ② Target — icons distinguish the kind (benchmark=Database · harness=Boxes · runtime=Server). Avoid clipping:
             on narrow screens benchmark/harness each get their own line (two lines), md+ is one line. Icons stand in for arrows (same as scorecards). */}

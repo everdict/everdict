@@ -195,19 +195,25 @@ export function registerScorecardRoutes(app: FastifyInstance, deps: ServerDeps):
     }
   });
 
-  app.get<{ Querystring: { judge?: string } }>("/scorecards", { schema: scorecardDocs.list }, async (req, reply) => {
-    if (!deps.scorecardService)
-      return reply.code(404).send({ code: "NOT_FOUND", message: "scorecard service not configured" });
-    const principal = await resolvePrincipal(req, reply, deps);
-    if (!principal) return reply;
-    try {
-      gate(principal, "scorecards:read");
-      const { judge } = req.query;
-      return reply.send(await deps.scorecardService.list(principal.workspace, judge ? { judge } : undefined));
-    } catch (err) {
-      return sendError(reply, err);
-    }
-  });
+  app.get<{ Querystring: { judge?: string; schedule?: string } }>(
+    "/scorecards",
+    { schema: scorecardDocs.list },
+    async (req, reply) => {
+      if (!deps.scorecardService)
+        return reply.code(404).send({ code: "NOT_FOUND", message: "scorecard service not configured" });
+      const principal = await resolvePrincipal(req, reply, deps);
+      if (!principal) return reply;
+      try {
+        gate(principal, "scorecards:read");
+        const { judge, schedule } = req.query;
+        // Mutually-exclusive detail-history narrows: ?schedule= (schedule's run history) | ?judge= (judge's eval history).
+        const filter = schedule ? { scheduleId: schedule } : judge ? { judge } : undefined;
+        return reply.send(await deps.scorecardService.list(principal.workspace, filter));
+      } catch (err) {
+        return sendError(reply, err);
+      }
+    },
+  );
 
   // baseline vs candidate comparison (regressions/improvements). Static path → matched before :id. Both must be this workspace's and completed.
   // Cost/time preflight — history-based estimate for a dataset×harness batch ("what will it cost / how long").

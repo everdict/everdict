@@ -111,6 +111,16 @@ describe("InMemoryScorecardStore", () => {
     expect((await store.list("acme", { judge: "clarity" })).map((r) => r.id).sort()).toEqual(["a", "b"]);
     expect(await store.list("acme", { judge: "unknown" })).toEqual([]);
   });
+
+  it("list(filter.scheduleId) narrows to the runs a schedule fired (origin.scheduleId — schedule-detail run history)", async () => {
+    const store = new InMemoryScorecardStore();
+    await store.create(rec({ id: "a", origin: { source: "schedule", scheduleId: "sch-1" } }));
+    await store.create(rec({ id: "b", origin: { source: "schedule", scheduleId: "sch-2" } }));
+    await store.create(rec({ id: "c", origin: { source: "web" } })); // a manual run — no scheduleId
+    await store.create(rec({ id: "d" })); // no origin at all (pre-field record)
+    expect((await store.list("acme", { scheduleId: "sch-1" })).map((r) => r.id)).toEqual(["a"]);
+    expect(await store.list("acme", { scheduleId: "unknown" })).toEqual([]);
+  });
 });
 
 function fakeClient(handler: (text: string, params?: unknown[]) => { rows: unknown[] }): {
@@ -221,6 +231,13 @@ describe("PgScorecardStore", () => {
     await new PgScorecardStore(client).list("acme", { judge: "clarity" });
     expect(calls[0]?.text).toMatch(/orchestration->'judges' @> \$2::jsonb/);
     expect(calls[0]?.params).toEqual(["acme", JSON.stringify([{ id: "clarity" }])]);
+  });
+
+  it("list(filter.scheduleId) → origin->>'scheduleId' clause in the SQL WHERE (schedule run history)", async () => {
+    const { client, calls } = fakeClient(() => ({ rows: [] }));
+    await new PgScorecardStore(client).list("acme", { scheduleId: "sch-1" });
+    expect(calls[0]?.text).toMatch(/origin->>'scheduleId' = \$2/);
+    expect(calls[0]?.params).toEqual(["acme", "sch-1"]);
   });
 
   it("delete → parameterized DELETE; RETURNING distinguishes deleted (true) from missing (false)", async () => {

@@ -215,7 +215,7 @@ export class ScheduleService {
         rec = await ingestPull({
           tenant,
           submittedBy: schedule.createdBy,
-          origin: { source: "schedule" },
+          origin: { source: "schedule", scheduleId: id }, // provenance — stamp WHICH schedule fired this (run-history lookup)
           // correlate:"id" — the ids ARE the platform's real trace ids (from listTraceIds), so fetch by id.
           source: { name: t.pull.source, correlate: t.pull.correlate ?? "id" },
           runs: traceIds.map((tid) => ({ caseId: tid, runId: tid })),
@@ -225,7 +225,7 @@ export class ScheduleService {
         rec = await submitScorecard({
           tenant,
           submittedBy: schedule.createdBy, // fired run = creator's identity (budget → tenant, private-repo connection resolve)
-          origin: { source: "schedule" }, // provenance — stamp that this is a schedule fire
+          origin: { source: "schedule", scheduleId: id }, // provenance — stamp WHICH schedule fired this (run-history lookup)
           dataset: t.dataset,
           harness: t.harness,
           judges: t.judges,

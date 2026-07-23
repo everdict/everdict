@@ -190,6 +190,11 @@ export class PgScorecardStore implements ScorecardStore {
       conds.push(`orchestration->'judges' @> $${i++}::jsonb`);
       vals.push(JSON.stringify([{ id: filter.judge }]));
     }
+    if (filter?.scheduleId) {
+      // jsonb field match on the persisted origin — the runs a schedule fired (source === "schedule").
+      conds.push(`origin->>'scheduleId' = $${i++}`);
+      vals.push(filter.scheduleId);
+    }
     const res = await this.client.query<ScorecardRow>(
       `SELECT id, tenant, dataset_id, dataset_version, harness_id, harness_version, status, summary, models, judge_models, origin, created_by, runtime, subset, error, created_at, updated_at
        FROM everdict_scorecards

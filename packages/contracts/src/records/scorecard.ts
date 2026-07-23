@@ -59,6 +59,9 @@ export type ScorecardModels = z.infer<typeof ScorecardModelsSchema>;
 // this field is the reproducibility basis for "what it was evaluated with". Lightweight → included in list too. Pg is origin jsonb (mig 0033, additive).
 export const ScorecardOriginSchema = z.object({
   source: z.string(), // schedule|github-actions|api|web…
+  // The schedule that fired this run (source === "schedule"). Lets a schedule's detail view list its own run
+  // history (regression over time) — the only link otherwise is Schedule.lastScorecardId (the latest fire).
+  scheduleId: z.string().optional(),
   repo: z.string().optional(), // "owner/name"
   sha: z.string().optional(),
   ref: z.string().optional(), // refs/heads/… | refs/pull/…

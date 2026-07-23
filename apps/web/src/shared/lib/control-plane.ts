@@ -307,6 +307,9 @@ export const controlPlane = {
     }),
   deleteSchedule: (auth: AuthContext, id: string) =>
     callVoid(auth, `/schedules/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  // Manual "run now" — fire a schedule immediately (one-off). Returns { scorecardId }.
+  fireSchedule: <T>(auth: AuthContext, id: string) =>
+    call<T>(auth, `/schedules/${encodeURIComponent(id)}/fire`, { method: 'POST' }),
   // Saved scorecard-analysis View — a named AnalysisConfig (opaque), private|shared. Re-run live against current data on open.
   listViews: <T>(auth: AuthContext) => call<T>(auth, '/views'),
   getView: <T>(auth: AuthContext, id: string) => call<T>(auth, `/views/${encodeURIComponent(id)}`),
@@ -319,11 +322,16 @@ export const controlPlane = {
     }),
   deleteView: (auth: AuthContext, id: string) =>
     callVoid(auth, `/views/${encodeURIComponent(id)}`, { method: 'DELETE' }),
-  // filter.judge = only batches that applied this Agent Judge (the judge detail's evaluation history)
-  listScorecards: <T>(auth: AuthContext, filter?: { judge?: string }) =>
+  // filter.judge = only batches that applied this Agent Judge (the judge detail's evaluation history);
+  // filter.schedule = only the runs a schedule fired (the schedule detail's run history). Mutually exclusive.
+  listScorecards: <T>(auth: AuthContext, filter?: { judge?: string; schedule?: string }) =>
     call<T>(
       auth,
-      filter?.judge ? `/scorecards?judge=${encodeURIComponent(filter.judge)}` : '/scorecards'
+      filter?.schedule
+        ? `/scorecards?schedule=${encodeURIComponent(filter.schedule)}`
+        : filter?.judge
+          ? `/scorecards?judge=${encodeURIComponent(filter.judge)}`
+          : '/scorecards'
     ),
   getScorecard: <T>(auth: AuthContext, id: string) =>
     call<T>(auth, `/scorecards/${encodeURIComponent(id)}`),

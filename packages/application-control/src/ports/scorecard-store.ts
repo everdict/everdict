@@ -7,6 +7,7 @@ export interface ScorecardListFilter {
   harness?: string; // harness.id
   status?: ScorecardStatus;
   judge?: string; // applied Agent Judge id (orchestration.judges[].id, any version) — the judge detail's evaluation history
+  scheduleId?: string; // the schedule that fired the run (origin.scheduleId) — the schedule detail's run history
 }
 
 // Scorecard store contract. in-memory (dev/test) or Postgres (production) — swapped behind the same interface.

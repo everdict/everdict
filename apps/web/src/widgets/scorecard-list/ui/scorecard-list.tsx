@@ -278,8 +278,34 @@ export function ScorecardList({
     .map((id) => byId.get(id))
     .filter((s): s is ScorecardRecord => s !== undefined)
 
+  // Keep the floating action bar centered over the eval (left) content region, not the full viewport. The bar is
+  // portaled to <body> and `fixed`, so `inset-x-0` would center it across the whole screen — when the infra split
+  // panel opens on the right the bar would slide under it. Measure this list's in-flow content box (which reflows
+  // when the panel opens) and pin the bar to it; observing the enclosing <main> catches the panel toggle + resize
+  // (its width always changes when the panel takes/releases its flex share), leaving mobile (fixed overlay panel,
+  // full-width main) exactly as before.
+  const rootRef = useRef<HTMLDivElement>(null)
+  const [barBox, setBarBox] = useState<{ left: number; width: number } | null>(null)
+  useEffect(() => {
+    const el = rootRef.current
+    if (!el || !selectionMode) return
+    const measure = () => {
+      const r = el.getBoundingClientRect()
+      setBarBox({ left: r.left, width: r.width })
+    }
+    measure()
+    const observed = el.closest('main') ?? el
+    const ro = new ResizeObserver(measure)
+    ro.observe(observed)
+    window.addEventListener('resize', measure)
+    return () => {
+      ro.disconnect()
+      window.removeEventListener('resize', measure)
+    }
+  }, [selectionMode])
+
   return (
-    <div className="space-y-5">
+    <div ref={rootRef} className="space-y-5">
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <StatCard label={t('statTotal')} value={total} />
         <StatCard
@@ -580,7 +606,10 @@ export function ScorecardList({
           the page content (below the fold on a long list) instead of the viewport. */}
       {selected.size > 0 &&
         createPortal(
-          <div className="fixed inset-x-0 bottom-6 z-30 flex justify-center px-4">
+          <div
+            className="fixed bottom-6 z-30 flex justify-center px-4"
+            style={barBox ? { left: barBox.left, width: barBox.width } : { left: 0, right: 0 }}
+          >
             <div className="flex items-center gap-1 rounded-xl border border-border bg-card/95 px-2.5 py-2 shadow-lg backdrop-blur supports-[backdrop-filter]:bg-card/80">
               <span className="px-1.5 text-[12.5px] font-[510] tabular-nums text-foreground">
                 {t('selectedCount', { count: selected.size })}

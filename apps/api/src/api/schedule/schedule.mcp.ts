@@ -139,5 +139,15 @@ export function registerScheduleTools(server: McpServer, ctx: McpToolContext): v
           return ok({ id, deleted: true });
         }),
     );
+
+    server.registerTool(
+      "fire_schedule",
+      {
+        description:
+          "Run a schedule NOW (manual one-off) — submit its run template immediately, the same fire path a cron tick uses (no Temporal poll-to-terminal finalize). Returns the submitted scorecard id (poll with get_scorecard).",
+        inputSchema: { id: z.string() },
+      },
+      ({ id }) => run(principal, "schedules:write", async () => ok(await schedules.fire(ws, id))),
+    );
   }
 }
