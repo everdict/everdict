@@ -75,12 +75,16 @@ describe("runAgentLoop", () => {
       call,
     };
     const client = fakeClient([toolCallResponse("call_1", "echo", '{"x":1}'), textResponse("done")]);
+    const seen: ChatMessage[] = [];
     const result = await runAgentLoop({
       client,
       model: "test-model",
       systemPrompt: "You are a test agent.",
       history,
       registry: new ToolRegistry([echo]),
+      onMessage: (m) => {
+        seen.push(m);
+      },
     });
     expect(call).toHaveBeenCalledWith({ x: 1 }, expect.objectContaining({ selectedModel: "test-model" }));
     expect(result.stopReason).toBe("end_turn");
@@ -90,6 +94,12 @@ describe("runAgentLoop", () => {
     // The produced transcript pairs the assistant tool_call with its tool result.
     const roles = result.produced.map((m) => m.role);
     expect(roles).toEqual(["assistant", "tool", "assistant"]);
+    // produced is accumulated as messages are appended (== what onMessage saw), not a tail slice of the context.
+    expect(result.produced).toEqual(seen);
+    // A tool-only assistant turn carries null content (not "") alongside tool_calls.
+    const first = result.produced[0] as { content: unknown; tool_calls?: unknown[] };
+    expect(first.content).toBeNull();
+    expect(first.tool_calls).toHaveLength(1);
   });
 
   it("records a failed tool call without breaking the loop", async () => {

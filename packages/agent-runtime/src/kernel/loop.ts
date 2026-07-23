@@ -2,7 +2,7 @@ import { UpstreamError } from "@everdict/contracts";
 import type OpenAI from "openai";
 import { compactMessages } from "../context/compaction.js";
 import { type TokenBudget, thresholdReached } from "../context/token-budget.js";
-import { streamChat } from "../llm/stream-chat.js";
+import { type StreamChatResult, streamChat } from "../llm/stream-chat.js";
 import { type ChatMessage, systemMessage } from "../messages.js";
 import { extractDiscoveredToolNames } from "../tools/deferred.js";
 import type { ToolContext } from "../tools/definition.js";
@@ -32,9 +32,14 @@ export interface AgentLoopOptions {
   registry: ToolRegistry;
   maxTurns?: number;
   maxTokens?: number;
+  // Retries of a single model call on a transient upstream error (429/5xx/network), same model, fixed backoff.
+  maxRetries?: number;
   temperature?: number;
   signal?: AbortSignal;
   onEvent?: (e: AgentEvent) => void;
+  // Fired (awaited) as each assistant/tool message is appended, so the host can persist the transcript
+  // incrementally — the source of live progress for a polling UI.
+  onMessage?: (message: ChatMessage) => void | Promise<void>;
 }
 
 export interface AgentLoopResult {
@@ -49,6 +54,38 @@ export interface AgentLoopResult {
 
 const DEFAULT_MAX_TURNS = 12;
 const DEFAULT_MAX_TOKENS = 900_000;
+const DEFAULT_MAX_RETRIES = 2;
+const RETRY_BACKOFF_MS = [500, 1500];
+// Cap a single tool result before feeding it back to the model — an unbounded MCP payload (a big scorecard JSON)
+// would otherwise dominate the context window in one turn. ~48k chars ≈ ~12k tokens.
+const MAX_TOOL_OUTPUT_CHARS = 48_000;
+
+function capToolOutput(content: string): string {
+  if (content.length <= MAX_TOOL_OUTPUT_CHARS) return content;
+  return `${content.slice(0, MAX_TOOL_OUTPUT_CHARS)}\n… [truncated ${content.length - MAX_TOOL_OUTPUT_CHARS} chars]`;
+}
+
+// A transient upstream failure worth a retry on the same model: HTTP 429/5xx or a network hiccup.
+function isTransient(err: unknown): boolean {
+  const status = (err as { status?: unknown }).status;
+  if (typeof status === "number" && (status === 429 || status >= 500)) return true;
+  const message = err instanceof Error ? err.message : String(err);
+  return /\b(429|5\d\d)\b|ETIMEDOUT|ECONNRESET|ECONNREFUSED|ENOTFOUND|fetch failed|timeout/i.test(message);
+}
+
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(resolve, ms);
+    signal?.addEventListener(
+      "abort",
+      () => {
+        clearTimeout(timer);
+        resolve();
+      },
+      { once: true },
+    );
+  });
+}
 
 function parseArgs(raw: string): { ok: true; value: Record<string, unknown> } | { ok: false; error: string } {
   const text = raw.trim();
@@ -65,13 +102,16 @@ function parseArgs(raw: string): { ok: true; value: Record<string, unknown> } | 
 // repeat until the model stops asking for tools (end_turn), turns/budget run out, or the caller aborts.
 export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopResult> {
   const maxTurns = opts.maxTurns ?? DEFAULT_MAX_TURNS;
+  const maxRetries = opts.maxRetries ?? DEFAULT_MAX_RETRIES;
   const budget: TokenBudget = { maxTokens: opts.maxTokens ?? DEFAULT_MAX_TOKENS, consumed: 0 };
   const emit = (e: AgentEvent): void => opts.onEvent?.(e);
 
   let messages: ChatMessage[] = normalizeHistory(opts.history);
-  const baseLen = messages.length;
   let finalText = "";
   const toolCalls: { name: string; ok: boolean }[] = [];
+  // The messages produced this run, accumulated as they are appended — NOT a tail slice of `messages`, which
+  // mid-loop compaction can shrink below the input length (that would drop or misattribute produced turns).
+  const produced: ChatMessage[] = [];
 
   const finish = (stopReason: StopReason, turns: number): AgentLoopResult => {
     emit({ type: "done", stopReason });
@@ -80,7 +120,7 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
       stopReason,
       turns,
       tokensConsumed: budget.consumed,
-      produced: messages.slice(baseLen),
+      produced,
       toolCalls,
     };
   };
@@ -93,38 +133,55 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
     const tools = toOpenAiTools(opts.registry, discovered);
     const system = buildSystemPrompt(opts.systemPrompt, opts.registry, discovered);
 
-    let result: Awaited<ReturnType<typeof streamChat>>;
-    try {
-      result = await streamChat({
-        client: opts.client,
-        model: opts.model,
-        messages: [systemMessage(system), ...messages],
-        tools,
-        ...(opts.temperature !== undefined ? { temperature: opts.temperature } : {}),
-        ...(opts.signal ? { signal: opts.signal } : {}),
-        onContentDelta: (delta) => emit({ type: "text_delta", delta }),
-      });
-    } catch (err) {
-      if (opts.signal?.aborted) return finish("aborted", turn - 1);
-      throw new UpstreamError(
-        "UPSTREAM_ERROR",
-        { detail: err instanceof Error ? err.message : String(err) },
-        "The model provider call failed.",
-      );
-    }
+    // `messages` is always balanced here (never ends on a dangling assistant tool_call), so a retry re-sends a
+    // valid transcript without needing to scrub an orphan tail. Returns undefined when the caller aborts.
+    const callModel = async (): Promise<StreamChatResult | undefined> => {
+      for (let attempt = 0; ; attempt++) {
+        try {
+          return await streamChat({
+            client: opts.client,
+            model: opts.model,
+            messages: [systemMessage(system), ...messages],
+            tools,
+            ...(opts.temperature !== undefined ? { temperature: opts.temperature } : {}),
+            ...(opts.signal ? { signal: opts.signal } : {}),
+            onContentDelta: (delta) => emit({ type: "text_delta", delta }),
+          });
+        } catch (err) {
+          if (opts.signal?.aborted) return undefined;
+          if (attempt >= maxRetries || !isTransient(err)) {
+            throw new UpstreamError(
+              "UPSTREAM_ERROR",
+              { detail: err instanceof Error ? err.message : String(err), attempts: attempt + 1 },
+              "The model provider call failed.",
+            );
+          }
+          await sleep(RETRY_BACKOFF_MS[attempt] ?? 1500, opts.signal);
+          if (opts.signal?.aborted) return undefined;
+        }
+      }
+    };
+    const result = await callModel();
+    if (!result) return finish("aborted", turn - 1);
 
-    budget.consumed += result.usage?.total_tokens ?? 0;
+    // The latest turn's total_tokens is the current context footprint (prompt grows each turn) — a better budget
+    // signal than a per-turn sum, which would double-count the carried-over context.
+    budget.consumed = result.usage?.total_tokens ?? budget.consumed;
 
+    // content is null (not "") when the turn is tool-calls-only — an empty string alongside tool_calls is
+    // rejected by some providers (Anthropic via LiteLLM).
     const assistant: ChatMessage = {
       role: "assistant",
-      content: result.content ?? "",
+      content: result.content && result.content.length > 0 ? result.content : null,
       ...(result.toolCalls.length > 0 ? { tool_calls: result.toolCalls } : {}),
     };
     messages = [...messages, assistant];
+    produced.push(assistant);
     if (result.content && result.content.length > 0) {
       finalText = result.content;
       emit({ type: "assistant_message", content: result.content });
     }
+    await opts.onMessage?.(assistant);
 
     if (result.toolCalls.length === 0) return finish("end_turn", turn);
 
@@ -144,9 +201,12 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
       } else {
         output = await invokeTool(tool, parsed.value, ctx);
       }
-      messages = [...messages, { role: "tool", tool_call_id: tc.id, content: output.content }];
+      const toolMessage: ChatMessage = { role: "tool", tool_call_id: tc.id, content: capToolOutput(output.content) };
+      messages = [...messages, toolMessage];
+      produced.push(toolMessage);
       toolCalls.push({ name: tc.function.name, ok: !output.isError });
       emit({ type: "tool_result", name: tc.function.name, isError: output.isError });
+      await opts.onMessage?.(toolMessage);
     }
 
     if (thresholdReached(budget)) {

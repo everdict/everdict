@@ -40,7 +40,8 @@ function recordsToHistory(records: AgentMessageRecord[]): ChatMessage[] {
       if (r.toolCalls && r.toolCalls.length > 0) {
         return {
           role: "assistant",
-          ...(r.content.length > 0 ? { content: r.content } : {}),
+          // null (not omitted/"") alongside tool_calls — the shape providers accept for a tool-only turn.
+          content: r.content.length > 0 ? r.content : null,
           tool_calls: r.toolCalls.map((tc) => ({
             id: tc.id,
             type: "function",
@@ -105,30 +106,11 @@ export async function runChat(
 
   const history: ChatMessage[] = [...recordsToHistory(existing), { role: "user", content: userText }];
 
-  const tools = await deps.toolProvider(headers);
-  let produced: ChatMessage[] = [];
-  try {
-    const model = await deps.resolveModel(principal);
-    const result = await runAgentLoop({
-      client: model.client,
-      model: model.model,
-      systemPrompt: deps.systemPrompt,
-      history,
-      registry: tools.registry,
-      ...(deps.maxTurns !== undefined ? { maxTurns: deps.maxTurns } : {}),
-      ...(model.temperature !== undefined ? { temperature: model.temperature } : {}),
-      ...(signal ? { signal } : {}),
-    });
-    produced = result.produced;
-  } finally {
-    await tools.close();
-  }
-
   const producedRecords: AgentMessageRecord[] = [];
-  for (const message of produced) {
+  const messageToRecord = (message: ChatMessage): AgentMessageRecord | null => {
     if (message.role === "assistant") {
       const toolCalls = extractToolCalls(message);
-      producedRecords.push({
+      return {
         id: deps.newId(),
         tenant: workspace,
         sessionId,
@@ -137,9 +119,10 @@ export async function runChat(
         content: contentToString(message.content),
         ...(toolCalls ? { toolCalls } : {}),
         createdAt: deps.now(),
-      });
-    } else if (message.role === "tool") {
-      producedRecords.push({
+      };
+    }
+    if (message.role === "tool") {
+      return {
         id: deps.newId(),
         tenant: workspace,
         sessionId,
@@ -148,10 +131,36 @@ export async function runChat(
         content: contentToString(message.content),
         toolCallId: message.tool_call_id,
         createdAt: deps.now(),
-      });
+      };
     }
+    return null;
+  };
+  // Persist each assistant/tool turn the moment the loop produces it, so a polling client sees tool activity as it
+  // happens (not only after the whole loop settles).
+  const persist = async (message: ChatMessage): Promise<void> => {
+    const record = messageToRecord(message);
+    if (!record) return;
+    await deps.sessions.appendMessages([record]);
+    producedRecords.push(record);
+  };
+
+  const tools = await deps.toolProvider(headers);
+  try {
+    const model = await deps.resolveModel(principal);
+    await runAgentLoop({
+      client: model.client,
+      model: model.model,
+      systemPrompt: deps.systemPrompt,
+      history,
+      registry: tools.registry,
+      onMessage: persist,
+      ...(deps.maxTurns !== undefined ? { maxTurns: deps.maxTurns } : {}),
+      ...(model.temperature !== undefined ? { temperature: model.temperature } : {}),
+      ...(signal ? { signal } : {}),
+    });
+  } finally {
+    await tools.close();
   }
-  if (producedRecords.length > 0) await deps.sessions.appendMessages(producedRecords);
 
   const nextTitle = session.title === DEFAULT_SESSION_TITLE ? deriveTitle(userText) : undefined;
   await deps.sessions.touchSession(workspace, sessionId, deps.now(), nextTitle);
