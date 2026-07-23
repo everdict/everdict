@@ -329,3 +329,84 @@ describe("NomadTopologyRuntime — per-service endpoint discovery (heterogeneous
     expect(new Set(groupsWaited)).toEqual(new Set(["alloc-a", "alloc-b"]));
   });
 });
+
+describe("NomadTopologyRuntime — fixture seed/read (silo)", () => {
+  const SILO_ZONE: TrustZone = {
+    id: "acme",
+    isolationRuntime: "runc",
+    network: "deny-cross-tenant",
+    trusted: false,
+    storeIsolation: "silo",
+  };
+  const SPEC_DATA: ServiceHarnessSpec = {
+    ...SPEC,
+    dependencies: [{ store: "postgres", role: "world", purpose: "data", isolateBy: "schema" }],
+  };
+  // dedicatedStoreGroup("acme", "postgres") — the group == task name for a dedicated store.
+  const GROUP = "everdict-store-acme-postgres";
+
+  function siloFakes(execOut = "") {
+    const execCalls: Array<{ allocId: string; task: string; command: string[] }> = [];
+    const http: NomadHttp = {
+      async request(_method, path) {
+        if (path.includes("/allocations")) {
+          return {
+            status: 200,
+            text: JSON.stringify([{ TaskGroup: GROUP, ClientStatus: "running", ID: "alloc-silo" }]),
+          };
+        }
+        if (path.startsWith("/v1/allocation/")) {
+          return {
+            status: 200,
+            text: JSON.stringify({ ID: "alloc-silo", TaskGroup: GROUP, AllocatedResources: { Shared: { Ports: [] } } }),
+          };
+        }
+        return { status: 200, text: "[]" };
+      },
+    };
+    const exec: NomadExec = {
+      async exec(allocId, task, command) {
+        execCalls.push({ allocId, task, command });
+        return execOut;
+      },
+    };
+    return { execCalls, http, exec };
+  }
+
+  const seedPlan = {
+    store: "postgres",
+    role: "world",
+    isolateBy: "schema",
+    slice: "run_run1",
+    seed: { inline: "INSERT INTO t VALUES (1);" },
+    format: "sql",
+  } as const;
+
+  it("seedFixtures: execs the postgres seed in the dedicated store alloc (P2)", async () => {
+    const { execCalls, http, exec } = siloFakes();
+    const rt = new NomadTopologyRuntime({ addr: "http://nomad", http, exec, pollIntervalMs: 1, maxPolls: 5 });
+    await rt.seedFixtures(SPEC_DATA, "run1", [seedPlan], SILO_ZONE);
+    const call = execCalls.find((c) => c.allocId === "alloc-silo");
+    expect(call?.task).toBe(GROUP);
+    expect(call?.command[0]).toBe("psql");
+    expect(call?.command[call.command.length - 1]).toContain('CREATE SCHEMA IF NOT EXISTS "run_run1"');
+  });
+
+  it("readStoreState: reads the slice via alloc exec and returns stdout (P2)", async () => {
+    const { http, exec } = siloFakes("1|alice\n");
+    const rt = new NomadTopologyRuntime({ addr: "http://nomad", http, exec, pollIntervalMs: 1, maxPolls: 5 });
+    const out = await rt.readStoreState(
+      SPEC_DATA,
+      "run1",
+      { store: "postgres", role: "world", query: "SELECT id FROM t" },
+      SILO_ZONE,
+    );
+    expect(out).toBe("1|alice\n");
+  });
+
+  it("seedFixtures: rejects seeding without a zone (a dedicated store is zone-keyed)", async () => {
+    const { http, exec } = siloFakes();
+    const rt = new NomadTopologyRuntime({ addr: "http://nomad", http, exec, pollIntervalMs: 1, maxPolls: 5 });
+    await expect(rt.seedFixtures(SPEC_DATA, "run1", [seedPlan])).rejects.toThrow(/zone/);
+  });
+});
