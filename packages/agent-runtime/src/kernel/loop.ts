@@ -6,7 +6,7 @@ import { type StreamChatResult, streamChat } from "../llm/stream-chat.js";
 import { buildSummarizer } from "../llm/summarize.js";
 import { type ChatMessage, systemMessage } from "../messages.js";
 import { extractDiscoveredToolNames } from "../tools/deferred.js";
-import type { ToolContext } from "../tools/definition.js";
+import type { ToolContext, ToolResult, ToolResultImage } from "../tools/definition.js";
 import { invokeTool } from "../tools/invocation.js";
 import { toOpenAiTools } from "../tools/openai.js";
 import { ToolRegistry } from "../tools/registry.js";
@@ -206,11 +206,12 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
       selectedModel: opts.model,
       ...(opts.signal ? { abortSignal: opts.signal } : {}),
     };
+    const turnImages: ToolResultImage[] = []; // images returned by this turn's tools → one follow-up multimodal turn
     for (const tc of result.toolCalls) {
       emit({ type: "tool_call", name: tc.function.name, args: tc.function.arguments });
       const tool = registry.get(tc.function.name);
       const parsed = parseArgs(tc.function.arguments);
-      let output: { content: string; isError: boolean };
+      let output: ToolResult;
       if (!tool) {
         output = { content: `Unknown tool: ${tc.function.name}`, isError: true };
       } else if (!parsed.ok) {
@@ -222,8 +223,26 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
       messages = [...messages, toolMessage];
       produced.push(toolMessage);
       toolCalls.push({ name: tc.function.name, ok: !output.isError });
+      if (output.images && output.images.length > 0) turnImages.push(...output.images);
       emit({ type: "tool_result", name: tc.function.name, isError: output.isError });
       await opts.onMessage?.(toolMessage);
+    }
+
+    // Multimodal tool results: after ALL tool_calls are answered (pairing intact), surface any images the tools
+    // returned in ONE follow-up user turn so the model can actually SEE them (chat.completions image_url content).
+    // In-run context only — NOT pushed to `produced`/onMessage (base64 must not bloat the durable transcript).
+    if (turnImages.length > 0) {
+      const imageMessage: ChatMessage = {
+        role: "user",
+        content: [
+          { type: "text", text: `The tool call(s) above returned ${turnImages.length} image(s):` },
+          ...turnImages.map((img) => ({
+            type: "image_url" as const,
+            image_url: { url: `data:${img.mediaType};base64,${img.data}` },
+          })),
+        ],
+      };
+      messages = [...messages, imageMessage];
     }
 
     if (thresholdReached(budget)) {

@@ -5,11 +5,19 @@ export interface ToolContext {
   selectedModel?: string;
 }
 
-// A tool result is always string content fed back to the model as a `tool` message (plus an error flag so the
-// loop can record success/failure without inspecting the text).
+// An image a tool returned (a base64 payload + its MIME type) — e.g. a browser screenshot or a rendered DOM. The loop
+// feeds these to the model as image content so it can actually SEE them (multimodal tool results).
+export interface ToolResultImage {
+  data: string; // base64 (no data: prefix)
+  mediaType: string; // e.g. "image/png"
+}
+
+// A tool result: string content fed back as a `tool` message (+ an error flag so the loop records success/failure
+// without inspecting the text), plus any images the loop surfaces to the model in a follow-up multimodal user turn.
 export interface ToolResult {
   content: string;
   isError: boolean;
+  images?: ToolResultImage[];
 }
 
 export interface ToolDefinition {

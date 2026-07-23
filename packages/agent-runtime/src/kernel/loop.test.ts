@@ -171,6 +171,56 @@ describe("runAgentLoop", () => {
     expect(result.stopReason).toBe("end_turn");
   });
 
+  it("surfaces tool-returned images as a follow-up multimodal user turn (in-run, not persisted)", async () => {
+    const shot: ToolDefinition = {
+      name: "shot",
+      description: "screenshot",
+      parametersJsonSchema: { type: "object", properties: {} },
+      isReadOnly: true,
+      call: async () => ({ content: "captured", isError: false, images: [{ data: "AAAA", mediaType: "image/png" }] }),
+    };
+    const seenRequests: ChatMessage[][] = [];
+    let call = 0;
+    const responses: FakeChunk[][] = [
+      [
+        {
+          choices: [
+            {
+              delta: { tool_calls: [{ index: 0, id: "c1", function: { name: "shot", arguments: "{}" } }] },
+              finish_reason: "tool_calls",
+            },
+          ],
+        },
+        usageEnd,
+      ],
+      textResponse("I see a red button"),
+    ];
+    const create = (body: { messages: ChatMessage[] }): AsyncGenerator<FakeChunk> => {
+      seenRequests.push(body.messages);
+      const chunks = responses[call] ?? [];
+      call += 1;
+      return (async function* () {
+        for (const c of chunks) yield c;
+      })();
+    };
+    const client = { chat: { completions: { create } } } as unknown as OpenAI;
+    const result = await runAgentLoop({
+      client,
+      model: "test-model",
+      systemPrompt: "sys",
+      history,
+      registry: new ToolRegistry([shot]),
+    });
+    // Turn 2's request carries the image as an image_url content part.
+    const turn2 = seenRequests[1] ?? [];
+    const imgMsg = turn2.find((m) => m.role === "user" && Array.isArray(m.content));
+    const parts = (imgMsg as { content: Array<{ type: string; image_url?: { url: string } }> } | undefined)?.content;
+    expect(parts?.find((p) => p.type === "image_url")?.image_url?.url).toContain("data:image/png;base64,AAAA");
+    // The multimodal message is in-run only — the persisted transcript stays assistant/tool/assistant (no base64 bloat).
+    expect(result.produced.map((m) => m.role)).toEqual(["assistant", "tool", "assistant"]);
+    expect(result.content).toBe("I see a red button");
+  });
+
   it("stops with aborted when the signal is already aborted", async () => {
     const client = fakeClient([textResponse("unused")]);
     const result = await runAgentLoop({

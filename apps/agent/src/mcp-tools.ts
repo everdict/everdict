@@ -48,12 +48,21 @@ export type ToolProvider = (
 
 const EMPTY_SESSION: ToolSession = { registry: new ToolRegistry([]), call: null, close: async () => {} };
 
-// One MCP call → ToolResult, bound to a specific client.
+// One MCP call → ToolResult, bound to a specific client. An MCP result is a content-block array — join the text blocks
+// and carry any image blocks through as base64 (the kernel surfaces them to the model as multimodal content).
 function makeInvoke(client: Client): McpInvoke {
   return async (name, args) => {
     const r = await client.callTool({ name, arguments: args });
-    const text = (r.content as Array<{ text?: string }> | undefined)?.[0]?.text ?? "";
-    return { content: text, isError: r.isError === true };
+    const blocks =
+      (r.content as Array<{ type?: string; text?: string; data?: string; mimeType?: string }> | undefined) ?? [];
+    const text = blocks
+      .filter((b) => typeof b.text === "string")
+      .map((b) => b.text)
+      .join("\n");
+    const images = blocks
+      .filter((b) => b.type === "image" && typeof b.data === "string")
+      .map((b) => ({ data: b.data as string, mediaType: b.mimeType ?? "image/png" }));
+    return { content: text, isError: r.isError === true, ...(images.length > 0 ? { images } : {}) };
   };
 }
 
