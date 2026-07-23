@@ -1,59 +1,54 @@
-import type OpenAI from "openai";
+import type { LlmTransport, StreamRequest, StreamResult } from "@everdict/llm";
 import { describe, expect, it, vi } from "vitest";
 import type { ChatMessage } from "../messages.js";
 import type { PermissionDecision, PermissionRequest, ToolDefinition } from "../tools/definition.js";
 import { ToolRegistry } from "../tools/registry.js";
 import { type AgentEvent, runAgentLoop } from "./loop.js";
 
-interface FakeChunk {
-  choices: {
-    delta: {
-      content?: string;
-      tool_calls?: { index: number; id?: string; function?: { name?: string; arguments?: string } }[];
-    };
-    finish_reason: string | null;
-  }[];
-  usage?: { total_tokens: number };
-}
-
-// A fake OpenAI whose chat.completions.create returns a pre-scripted async stream per successive call, so the
-// loop can be driven deterministically without a network provider.
-function fakeClient(responses: FakeChunk[][]): OpenAI {
+// A fake transport that returns a pre-scripted StreamResult per successive call and records each request, so the loop
+// can be driven deterministically without a provider. Fires onContentDelta once so text_delta emission is exercised.
+function fakeTransport(results: StreamResult[]): { transport: LlmTransport; requests: StreamRequest[] } {
+  const requests: StreamRequest[] = [];
   let call = 0;
-  const create = (): AsyncGenerator<FakeChunk> => {
-    const chunks = responses[call] ?? [];
-    call += 1;
-    return (async function* () {
-      for (const c of chunks) yield c;
-    })();
-  };
-  return { chat: { completions: { create } } } as unknown as OpenAI;
-}
-
-const usageEnd: FakeChunk = { choices: [{ delta: {}, finish_reason: "stop" }], usage: { total_tokens: 7 } };
-
-function textResponse(text: string): FakeChunk[] {
-  return [{ choices: [{ delta: { content: text }, finish_reason: null }] }, usageEnd];
-}
-
-function toolCallResponse(id: string, name: string, args: string): FakeChunk[] {
-  return [
-    {
-      choices: [
-        { delta: { tool_calls: [{ index: 0, id, function: { name, arguments: args } }] }, finish_reason: "tool_calls" },
-      ],
+  const transport: LlmTransport = {
+    provider: "fake",
+    stream: async (req) => {
+      requests.push(req);
+      const r = results[call] ?? { content: null, toolCalls: [], finishReason: "stop" };
+      call += 1;
+      if (r.content) req.onContentDelta?.(r.content);
+      return r;
     },
-    usageEnd,
-  ];
+  };
+  return { transport, requests };
+}
+
+const usage7 = { inputTokens: 7, outputTokens: 0, totalTokens: 7 };
+
+function textResult(text: string): StreamResult {
+  return { content: text, toolCalls: [], finishReason: "stop", usage: usage7 };
+}
+
+function toolCallResult(id: string, name: string, args: string): StreamResult {
+  return { content: null, toolCalls: [{ id, name, arguments: args }], finishReason: "tool_calls", usage: usage7 };
+}
+
+function toolCallsResult(calls: { id: string; name: string; args: string }[]): StreamResult {
+  return {
+    content: null,
+    toolCalls: calls.map((c) => ({ id: c.id, name: c.name, arguments: c.args })),
+    finishReason: "tool_calls",
+    usage: usage7,
+  };
 }
 
 const history: ChatMessage[] = [{ role: "user", content: "hello" }];
 
 describe("runAgentLoop", () => {
   it("stops with end_turn when the model returns text and no tool calls", async () => {
-    const client = fakeClient([textResponse("Hi there")]);
+    const { transport } = fakeTransport([textResult("Hi there")]);
     const result = await runAgentLoop({
-      client,
+      transport,
       model: "test-model",
       systemPrompt: "You are a test agent.",
       history,
@@ -74,10 +69,10 @@ describe("runAgentLoop", () => {
       isReadOnly: true,
       call,
     };
-    const client = fakeClient([toolCallResponse("call_1", "echo", '{"x":1}'), textResponse("done")]);
+    const { transport } = fakeTransport([toolCallResult("call_1", "echo", '{"x":1}'), textResult("done")]);
     const seen: ChatMessage[] = [];
     const result = await runAgentLoop({
-      client,
+      transport,
       model: "test-model",
       systemPrompt: "You are a test agent.",
       history,
@@ -103,9 +98,9 @@ describe("runAgentLoop", () => {
   });
 
   it("records a failed tool call without breaking the loop", async () => {
-    const client = fakeClient([toolCallResponse("call_1", "missing_tool", "{}"), textResponse("recovered")]);
+    const { transport } = fakeTransport([toolCallResult("call_1", "missing_tool", "{}"), textResult("recovered")]);
     const result = await runAgentLoop({
-      client,
+      transport,
       model: "test-model",
       systemPrompt: "sys",
       history,
@@ -137,27 +132,16 @@ describe("runAgentLoop", () => {
       call: async () => ({ content: "ok", isError: false }),
     };
     // turn 1: a tool call whose usage pushes past 90% of 900k → compaction after dispatch; turn 2: text → end_turn.
-    const highUsageEnd: FakeChunk = {
-      choices: [{ delta: {}, finish_reason: "stop" }],
-      usage: { total_tokens: 850_000 },
+    const highUsageToolCall: StreamResult = {
+      content: null,
+      toolCalls: [{ id: "call_1", name: "noop", arguments: "{}" }],
+      finishReason: "tool_calls",
+      usage: { inputTokens: 850_000, outputTokens: 0, totalTokens: 850_000 },
     };
-    const client = fakeClient([
-      [
-        {
-          choices: [
-            {
-              delta: { tool_calls: [{ index: 0, id: "call_1", function: { name: "noop", arguments: "{}" } }] },
-              finish_reason: "tool_calls",
-            },
-          ],
-        },
-        highUsageEnd,
-      ],
-      textResponse("done"),
-    ]);
+    const { transport } = fakeTransport([highUsageToolCall, textResult("done")]);
     const events: AgentEvent[] = [];
     const result = await runAgentLoop({
-      client,
+      transport,
       model: "test-model",
       systemPrompt: "sys",
       history: longHistory,
@@ -179,40 +163,19 @@ describe("runAgentLoop", () => {
       isReadOnly: true,
       call: async () => ({ content: "captured", isError: false, images: [{ data: "AAAA", mediaType: "image/png" }] }),
     };
-    const seenRequests: ChatMessage[][] = [];
-    let call = 0;
-    const responses: FakeChunk[][] = [
-      [
-        {
-          choices: [
-            {
-              delta: { tool_calls: [{ index: 0, id: "c1", function: { name: "shot", arguments: "{}" } }] },
-              finish_reason: "tool_calls",
-            },
-          ],
-        },
-        usageEnd,
-      ],
-      textResponse("I see a red button"),
-    ];
-    const create = (body: { messages: ChatMessage[] }): AsyncGenerator<FakeChunk> => {
-      seenRequests.push(body.messages);
-      const chunks = responses[call] ?? [];
-      call += 1;
-      return (async function* () {
-        for (const c of chunks) yield c;
-      })();
-    };
-    const client = { chat: { completions: { create } } } as unknown as OpenAI;
+    const { transport, requests } = fakeTransport([
+      toolCallResult("c1", "shot", "{}"),
+      textResult("I see a red button"),
+    ]);
     const result = await runAgentLoop({
-      client,
+      transport,
       model: "test-model",
       systemPrompt: "sys",
       history,
       registry: new ToolRegistry([shot]),
     });
     // Turn 2's request carries the image as an image_url content part.
-    const turn2 = seenRequests[1] ?? [];
+    const turn2 = requests[1]?.messages ?? [];
     const imgMsg = turn2.find((m) => m.role === "user" && Array.isArray(m.content));
     const parts = (imgMsg as { content: Array<{ type: string; image_url?: { url: string } }> } | undefined)?.content;
     expect(parts?.find((p) => p.type === "image_url")?.image_url?.url).toContain("data:image/png;base64,AAAA");
@@ -242,28 +205,16 @@ describe("runAgentLoop", () => {
       async (req: PermissionRequest): Promise<PermissionDecision> => (req.name === "do_write" ? "deny" : "allow"),
     );
     // One turn, two tool calls (a write + a read); permit denies the write.
-    const client = fakeClient([
-      [
-        {
-          choices: [
-            {
-              delta: {
-                tool_calls: [
-                  { index: 0, id: "w", function: { name: "do_write", arguments: "{}" } },
-                  { index: 1, id: "r", function: { name: "do_read", arguments: "{}" } },
-                ],
-              },
-              finish_reason: "tool_calls",
-            },
-          ],
-        },
-        usageEnd,
-      ],
-      textResponse("done"),
+    const { transport } = fakeTransport([
+      toolCallsResult([
+        { id: "w", name: "do_write", args: "{}" },
+        { id: "r", name: "do_read", args: "{}" },
+      ]),
+      textResult("done"),
     ]);
     const events: AgentEvent[] = [];
     const result = await runAgentLoop({
-      client,
+      transport,
       model: "test-model",
       systemPrompt: "sys",
       history,
@@ -303,27 +254,15 @@ describe("runAgentLoop", () => {
         return { content: "fast-done", isError: false };
       },
     };
-    const client = fakeClient([
-      [
-        {
-          choices: [
-            {
-              delta: {
-                tool_calls: [
-                  { index: 0, id: "s", function: { name: "slow", arguments: "{}" } },
-                  { index: 1, id: "f", function: { name: "fast", arguments: "{}" } },
-                ],
-              },
-              finish_reason: "tool_calls",
-            },
-          ],
-        },
-        usageEnd,
-      ],
-      textResponse("done"),
+    const { transport } = fakeTransport([
+      toolCallsResult([
+        { id: "s", name: "slow", args: "{}" },
+        { id: "f", name: "fast", args: "{}" },
+      ]),
+      textResult("done"),
     ]);
     const result = await runAgentLoop({
-      client,
+      transport,
       model: "test-model",
       systemPrompt: "sys",
       history,
@@ -340,13 +279,13 @@ describe("runAgentLoop", () => {
 
   it("delegates to a sub-agent via spawn_agent and folds back its summary", async () => {
     // create() calls in order: (0) parent → spawn_agent tool call; (1) nested sub-agent → text summary; (2) parent → text.
-    const client = fakeClient([
-      toolCallResponse("s1", "spawn_agent", JSON.stringify({ task: "research the failures" })),
-      textResponse("SUB: found 3 failures"),
-      textResponse("done — the sub-agent found 3 failures"),
+    const { transport } = fakeTransport([
+      toolCallResult("s1", "spawn_agent", JSON.stringify({ task: "research the failures" })),
+      textResult("SUB: found 3 failures"),
+      textResult("done — the sub-agent found 3 failures"),
     ]);
     const result = await runAgentLoop({
-      client,
+      transport,
       model: "test-model",
       systemPrompt: "sys",
       history,
@@ -369,14 +308,14 @@ describe("runAgentLoop", () => {
       call: writeCall,
     };
     const onPlan = vi.fn(async () => true);
-    const client = fakeClient([
-      toolCallResponse("w1", "do_write", "{}"), // turn 1 — blocked (plan mode)
-      toolCallResponse("p1", "present_plan", JSON.stringify({ plan: "1. do the thing" })), // turn 2 — approved
-      toolCallResponse("w2", "do_write", "{}"), // turn 3 — now allowed
-      textResponse("done"), // turn 4
+    const { transport } = fakeTransport([
+      toolCallResult("w1", "do_write", "{}"), // turn 1 — blocked (plan mode)
+      toolCallResult("p1", "present_plan", JSON.stringify({ plan: "1. do the thing" })), // turn 2 — approved
+      toolCallResult("w2", "do_write", "{}"), // turn 3 — now allowed
+      textResult("done"), // turn 4
     ]);
     const result = await runAgentLoop({
-      client,
+      transport,
       model: "test-model",
       systemPrompt: "sys",
       history,
@@ -392,9 +331,9 @@ describe("runAgentLoop", () => {
   });
 
   it("stops with aborted when the signal is already aborted", async () => {
-    const client = fakeClient([textResponse("unused")]);
+    const { transport } = fakeTransport([textResult("unused")]);
     const result = await runAgentLoop({
-      client,
+      transport,
       model: "test-model",
       systemPrompt: "sys",
       history,

@@ -15,6 +15,7 @@
   "dependencies": {
     "@everdict/agent-runtime": "workspace:*",
     "@everdict/application-control": "workspace:*",
+    "@everdict/llm": "workspace:*",
     "@everdict/contracts": "workspace:*",
     "@everdict/db": "workspace:*",
     "@everdict/domain": "workspace:*",

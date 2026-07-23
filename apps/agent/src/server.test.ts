@@ -1,26 +1,32 @@
 import { ToolRegistry } from "@everdict/agent-runtime";
 import { UnauthenticatedError } from "@everdict/contracts";
 import { InMemoryAgentSessionStore } from "@everdict/db";
-import type OpenAI from "openai";
+import type { LlmTransport } from "@everdict/llm";
 import { describe, expect, it, vi } from "vitest";
 import type { ToolProvider } from "./mcp-tools.js";
 import type { ModelResolver } from "./model.js";
 import { type AgentServerDeps, buildServer } from "./server.js";
 
-// A fake OpenAI that always streams a fixed assistant reply and no tool calls (end_turn), so the server route can
+// A fake transport that always returns a fixed assistant reply and no tool calls (end_turn), so the server route can
 // be exercised without a provider.
-function fakeClientAlways(text: string): OpenAI {
-  const create = () =>
-    (async function* () {
-      yield { choices: [{ delta: { content: text }, finish_reason: null }] };
-      yield { choices: [{ delta: {}, finish_reason: "stop" }], usage: { total_tokens: 5 } };
-    })();
-  return { chat: { completions: { create } } } as unknown as OpenAI;
+function fakeTransportAlways(text: string): LlmTransport {
+  return {
+    provider: "fake",
+    stream: async (req) => {
+      req.onContentDelta?.(text);
+      return {
+        content: text,
+        toolCalls: [],
+        finishReason: "stop",
+        usage: { inputTokens: 5, outputTokens: 1, totalTokens: 6 },
+      };
+    },
+  };
 }
 
 function makeDeps(over: Partial<AgentServerDeps> = {}): AgentServerDeps {
   let n = 0;
-  const resolveModel: ModelResolver = async () => ({ client: fakeClientAlways("Hi there"), model: "test-model" });
+  const resolveModel: ModelResolver = async () => ({ transport: fakeTransportAlways("Hi there"), model: "test-model" });
   const toolProvider: ToolProvider = async () => ({
     registry: new ToolRegistry([]),
     call: null,

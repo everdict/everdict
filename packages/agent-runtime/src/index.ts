@@ -3,8 +3,6 @@
 // the kernel runs turns, dispatches tools, applies ToolSearch progressive disclosure, and compacts context.
 // See docs/architecture/agent-conversations.md.
 export * from "./messages.js";
-export * from "./llm/client.js";
-export * from "./llm/stream-chat.js";
 export * from "./llm/summarize.js";
 export * from "./tools/definition.js";
 export * from "./tools/registry.js";

@@ -19,6 +19,7 @@
   },
   "dependencies": {
     "@everdict/contracts": "workspace:*",
+    "@everdict/llm": "workspace:*",
     "openai": "^4.104.0",
     "zod": "^3.24.1"
   }

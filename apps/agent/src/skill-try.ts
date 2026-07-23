@@ -45,7 +45,7 @@ export async function runSkillTry(
     const messages: SkillTryMessage[] = [];
     const model = await deps.resolveModel(principal);
     await runAgentLoop({
-      client: model.client,
+      transport: model.transport,
       model: model.model,
       systemPrompt: `${deps.systemPrompt}\n\n## Skill test\n${TEST_PREAMBLE} Skill under test: "${skill.name}".`,
       history: [{ role: "user", content: message }],

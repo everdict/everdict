@@ -1,10 +1,9 @@
 import { UpstreamError } from "@everdict/contracts";
-import type OpenAI from "openai";
+import type { LlmTransport, StreamResult } from "@everdict/llm";
 import { compactMessages, microcompact, summarizeAndCompact } from "../context/compaction.js";
 import { type TokenBudget, effectiveBudget, estimateTokens, thresholdReached } from "../context/token-budget.js";
-import { type StreamChatResult, streamChat } from "../llm/stream-chat.js";
 import { buildSummarizer } from "../llm/summarize.js";
-import { type ChatMessage, systemMessage } from "../messages.js";
+import type { ChatMessage } from "../messages.js";
 import { extractDiscoveredToolNames } from "../tools/deferred.js";
 import type {
   PermissionDecision,
@@ -15,7 +14,7 @@ import type {
   ToolResultImage,
 } from "../tools/definition.js";
 import { invokeTool } from "../tools/invocation.js";
-import { toOpenAiTools } from "../tools/openai.js";
+import { toLlmTools } from "../tools/openai.js";
 import { buildPresentPlanTool } from "../tools/plan-tool.js";
 import { ToolRegistry } from "../tools/registry.js";
 import { OFFLOAD_THRESHOLD_CHARS, ResultStore, buildReadResultTool, offloadResult } from "../tools/result-store.js";
@@ -38,7 +37,10 @@ export type AgentEvent =
   | { type: "done"; stopReason: StopReason };
 
 export interface AgentLoopOptions {
-  client: OpenAI;
+  // The provider-native transport (Anthropic / OpenAI / OpenAI-compatible). The kernel never constructs it — the host
+  // resolves the workspace's model↔provider binding and injects the right one, so the loop stays provider-agnostic in
+  // its own code while the wire it speaks is fully native.
+  transport: LlmTransport;
   model: string;
   systemPrompt: string;
   // Full conversation so far, including the latest user message. The kernel never appends user turns.
@@ -132,7 +134,7 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
   // Budget = the model's own context window minus output headroom (compact at ~90% of it), not a fixed constant.
   const budget: TokenBudget = { maxTokens: opts.maxTokens ?? effectiveBudget(opts.model), consumed: 0 };
   // Rung-2 compaction summariser — the loop's own model by default (a one-shot digest), overridable for tests.
-  const summarize = opts.summarize ?? buildSummarizer(opts.client, opts.model);
+  const summarize = opts.summarize ?? buildSummarizer(opts.transport, opts.model);
   const emit = (e: AgentEvent): void => opts.onEvent?.(e);
 
   let messages: ChatMessage[] = normalizeHistory(opts.history);
@@ -149,7 +151,7 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
       ? [
           buildSpawnAgentTool((task) =>
             runAgentLoop({
-              client: opts.client,
+              transport: opts.transport,
               model: opts.model,
               systemPrompt: `${opts.systemPrompt}\n\n## Sub-task\nYou are handling a scoped sub-task delegated by another agent, with your own fresh context. Do the work with your tools, then give a clear, self-contained summary of your findings as your FINAL message — that summary is your only output back to the caller.`,
               history: [{ role: "user", content: task }],
@@ -209,7 +211,7 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
     emit({ type: "turn_start", turn });
 
     const discovered = extractDiscoveredToolNames(messages);
-    const tools = toOpenAiTools(registry, discovered);
+    const tools = toLlmTools(registry, discovered);
     const system = buildSystemPrompt(opts.systemPrompt, registry, discovered);
     // Inject the current todos as a transient reminder (this turn only — never persisted, no history bloat).
     const reminder = renderTodoReminder(todos);
@@ -218,14 +220,17 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
 
     // `messages` is always balanced here (never ends on a dangling assistant tool_call), so a retry re-sends a
     // valid transcript without needing to scrub an orphan tail. Returns undefined when the caller aborts.
-    const callModel = async (): Promise<StreamChatResult | undefined> => {
+    const callModel = async (): Promise<StreamResult | undefined> => {
       for (let attempt = 0; ; attempt++) {
         try {
-          return await streamChat({
-            client: opts.client,
+          return await opts.transport.stream({
             model: opts.model,
-            messages: [systemMessage(system), ...turnMessages],
+            system,
+            messages: turnMessages,
             tools,
+            // Cache the stable prefix (system + tools) so long multi-turn runs re-read a cached prefix each turn —
+            // the provider's own prompt/KV caching (Anthropic cache_control; OpenAI caches automatically).
+            cache: { system: true, tools: true },
             ...(opts.temperature !== undefined ? { temperature: opts.temperature } : {}),
             ...(opts.signal ? { signal: opts.signal } : {}),
             onContentDelta: (delta) => emit({ type: "text_delta", delta }),
@@ -249,15 +254,24 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
 
     // The latest turn's total_tokens is the context footprint the MODEL saw; tool results appended after its turn are
     // added as an estimate (hybrid) before the budget check below.
-    const usageTokens = result.usage?.total_tokens ?? budget.consumed;
+    const usageTokens = result.usage?.totalTokens ?? budget.consumed;
     budget.consumed = usageTokens;
 
-    // content is null (not "") when the turn is tool-calls-only — an empty string alongside tool_calls is
-    // rejected by some providers (Anthropic via LiteLLM).
+    // content is null (not "") when the turn is tool-calls-only — an empty string alongside tool_calls is rejected by
+    // some providers. Map the transport's neutral tool calls into the canonical (OpenAI-shaped) message for storage +
+    // tool pairing; the transport translates them back to its own wire format on the next turn.
     const assistant: ChatMessage = {
       role: "assistant",
       content: result.content && result.content.length > 0 ? result.content : null,
-      ...(result.toolCalls.length > 0 ? { tool_calls: result.toolCalls } : {}),
+      ...(result.toolCalls.length > 0
+        ? {
+            tool_calls: result.toolCalls.map((tc) => ({
+              id: tc.id,
+              type: "function" as const,
+              function: { name: tc.name, arguments: tc.arguments },
+            })),
+          }
+        : {}),
     };
     messages = [...messages, assistant];
     const afterAssistantLen = messages.length; // tool results appended past here aren't in the model's usage count
@@ -275,15 +289,15 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
       ...(opts.signal ? { abortSignal: opts.signal } : {}),
     };
     const turnImages: ToolResultImage[] = []; // images returned by this turn's tools → one follow-up multimodal turn
-    for (const tc of result.toolCalls) emit({ type: "tool_call", name: tc.function.name, args: tc.function.arguments });
+    for (const tc of result.toolCalls) emit({ type: "tool_call", name: tc.name, args: tc.arguments });
 
     // Dispatch the turn's tool calls CONCURRENTLY (Claude Code parity — the model asks for independent tools together),
     // then append the results in call order so the assistant.tool_calls ↔ tool pairing stays ordered.
     const outputs: ToolResult[] = await Promise.all(
       result.toolCalls.map(async (tc): Promise<ToolResult> => {
-        const tool = registry.get(tc.function.name);
-        const parsed = parseArgs(tc.function.arguments);
-        if (!tool) return { content: `Unknown tool: ${tc.function.name}`, isError: true };
+        const tool = registry.get(tc.name);
+        const parsed = parseArgs(tc.arguments);
+        if (!tool) return { content: `Unknown tool: ${tc.name}`, isError: true };
         if (!parsed.ok) return { content: `Invalid JSON arguments: ${parsed.error}`, isError: true };
         if (tool.isReadOnly !== true && inPlanMode) {
           return {
@@ -316,9 +330,9 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
       const toolMessage: ChatMessage = { role: "tool", tool_call_id: tc.id, content };
       messages = [...messages, toolMessage];
       produced.push(toolMessage);
-      toolCalls.push({ name: tc.function.name, ok: !output.isError });
+      toolCalls.push({ name: tc.name, ok: !output.isError });
       if (output.images && output.images.length > 0) turnImages.push(...output.images);
-      emit({ type: "tool_result", name: tc.function.name, isError: output.isError });
+      emit({ type: "tool_result", name: tc.name, isError: output.isError });
       await opts.onMessage?.(toolMessage);
     }
 

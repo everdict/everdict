@@ -1,6 +1,5 @@
-import type OpenAI from "openai";
+import type { LlmTransport } from "@everdict/llm";
 import type { ChatMessage } from "../messages.js";
-import { streamChat } from "./stream-chat.js";
 
 // The compaction digest prompt — a condensed take on Claude Code's structured-summary template. The point is to
 // preserve what a long task can't afford to lose across a compaction boundary: the user's goal, the concrete state,
@@ -20,18 +19,18 @@ const SUMMARY_SYSTEM_PROMPT = [
   "Output ONLY the summary. Do not call tools. Do not add commentary before or after.",
 ].join("\n");
 
-// Build a summariser bound to the loop's own model — a single non-tool completion that digests the old span. Reused by
-// runAgentLoop for rung-2 (LLM) compaction; tests inject their own summariser instead.
-export function buildSummarizer(client: OpenAI, model: string): (oldSpan: ChatMessage[]) => Promise<string> {
+// Build a summariser bound to the loop's own transport + model — a single non-tool completion that digests the old
+// span. Reused by runAgentLoop for rung-2 (LLM) compaction; tests inject their own summariser instead.
+export function buildSummarizer(transport: LlmTransport, model: string): (oldSpan: ChatMessage[]) => Promise<string> {
   return async (oldSpan) => {
-    const result = await streamChat({
-      client,
+    const result = await transport.stream({
       model,
+      system: SUMMARY_SYSTEM_PROMPT,
       messages: [
-        { role: "system", content: SUMMARY_SYSTEM_PROMPT },
         ...oldSpan,
         { role: "user", content: "Summarise the conversation above per the instructions. Text only, no tools." },
       ],
+      tools: [],
     });
     return result.content ?? "";
   };

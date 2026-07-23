@@ -272,7 +272,7 @@ export async function runChat(
     // Append the per-turn environment block (workspace · model · date) now that the model is resolved.
     const systemWithEnv = `${systemPrompt}\n\n${buildEnvironmentSection({ workspace, model: model.model, date: deps.now() })}`;
     await runAgentLoop({
-      client: model.client,
+      transport: model.transport,
       model: model.model,
       systemPrompt: systemWithEnv,
       history,
