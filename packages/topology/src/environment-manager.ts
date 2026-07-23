@@ -32,6 +32,15 @@ function isolationVar(
   }
 }
 
+// The per-case isolation slice KEY for one dependency (the schema/prefix a fixture seeds into and a store grader reads).
+// Same value `wiringVars` hands the agent, exposed for the store-seed planner (docs/architecture/dependency-store-roles.md P2).
+export function isolationSliceKey(
+  isolateBy: Exclude<TopologyDependency["isolateBy"], "external">,
+  runId: string,
+): string {
+  return isolationVar(isolateBy, runId)[1];
+}
+
 // per-run wiring variables — derived from the declared dependency stores' isolateBy (+ run_id + caller extra: task/target_cdp_url etc.).
 // The single vocabulary used to interpolate the front-door body template ({{thread_id}} etc.) + poll statusPath ({run_id} etc.).
 export function wiringVars(

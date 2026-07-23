@@ -32,6 +32,21 @@ export const MilestoneSchema = z.object({
 });
 export type Milestone = z.infer<typeof MilestoneSchema>;
 
+// A per-case seed for a purpose:"data" dependency store — the world-state the TASK operates on, so it is dataset-owned
+// (the experiment INPUT), NOT harness config. Applied into the case's per-case isolation slice AFTER the warm topology
+// is up and BEFORE the front-door drive, so concurrent cases don't collide. docs/architecture/dependency-store-roles.md P2.
+// store enum is inlined (mirrors the topology store kinds) to keep this leaf module free of a harness-spec import cycle.
+export const StoreFixtureSchema = z.object({
+  store: z.enum(["postgres", "redis", "minio"]),
+  role: z.string().optional(), // bind to a specific dependency when several share a store kind (unset = the sole one of that kind)
+  seed: z.union([
+    z.object({ inline: z.string() }), // inline seed body (SQL / redis commands) — small fixtures
+    z.object({ ref: z.string() }), // ArtifactStore ref (SQL dump / RDB / bucket tarball) — large fixtures
+  ]),
+  format: z.enum(["sql", "redis-cmds", "objects"]).optional(), // default inferred from the store kind at seed time
+});
+export type StoreFixture = z.infer<typeof StoreFixtureSchema>;
+
 export const EvalCaseSchema = z.object({
   id: z.string(),
   env: EnvSpecSchema,
@@ -46,6 +61,9 @@ export const EvalCaseSchema = z.object({
   // dataset case is usually pure {id, env, task, expected} data with no per-case graders. Re-scoring never edits the dataset.
   graders: z.array(GraderSpecSchema).default([]),
   image: z.string().optional(),
+  // World-state seeds for the harness's purpose:"data" dependency stores (P2). Absent = today (no seed). Each fixture
+  // is applied into this case's isolation slice before the drive; a store-state grader can then verify the post-run slice.
+  fixtures: z.array(StoreFixtureSchema).optional(),
   // Per-case execution budget (seconds). int+positive so it can be forwarded verbatim as the run-context timeout
   // (the dispatched agent plumbs it → EVERDICT_TIMEOUT_SEC-parity default). Dataset adapters set it from the task's
   // own max-agent-timeout; a long agent case (many LLM calls) is honored instead of clipped to a short default.

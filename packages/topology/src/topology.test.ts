@@ -30,6 +30,7 @@ import {
   servicePortLabel,
   topologyJobId,
 } from "./deploy/nomad-topology.js";
+import type { StoreSeedPlan } from "./deploy/store-seed.js";
 import type { TargetEnvHandle, TopologyRuntime } from "./deploy/topology-runtime.js";
 import { keysFor } from "./environment-manager.js";
 import { InProcessCallbackRendezvous } from "./front-door/callback-rendezvous.js";
@@ -817,6 +818,104 @@ describe("ServiceTopologyBackend (orchestrator-agnostic, mock runtime)", () => {
     expect(recorded[0]?.thread_id).toBe(keysFor("fixed").threadId);
     expect(recorded[0]?.browser_cdp_url).toBe("ws://browser/ctx");
     expect(recorded[0]?.minio_prefix).toBe("runs/fixed/");
+  });
+
+  // World-state fixture seeding (P2) — a data store is added to the spec and the case declares a fixture for it.
+  const SPEC_SEED: ServiceHarnessSpec = {
+    ...SPEC,
+    dependencies: [
+      ...(SPEC.dependencies ?? []),
+      { store: "postgres", role: "world", purpose: "data", isolateBy: "schema" },
+    ],
+  };
+  const seedRuntime = (): TopologyRuntime => ({
+    id: "mock",
+    async ensureTopology() {
+      return { endpoints: { "agent-server": "http://agent-server:8000" } };
+    },
+    async provisionBrowserEnv() {
+      return {
+        wiring: { target_cdp_url: "ws://browser/ctx" },
+        async snapshot() {
+          return { kind: "browser", url: "https://x", dom: "<html/>", console: [] } satisfies BrowserSnapshot;
+        },
+        async dispose() {},
+      };
+    },
+  });
+
+  it("seeds a case's world-state fixtures into their isolation slice before driving (P2)", async () => {
+    const seeded: { runId: string; plans: StoreSeedPlan[] }[] = [];
+    const backend = new ServiceTopologyBackend({
+      runtime: seedRuntime(),
+      traceSource: {
+        async fetch() {
+          return [];
+        },
+      },
+      specFor: () => SPEC_SEED,
+      submit: async () => {},
+      newRunId: () => "fixed",
+      seedFixtures: async (runId, plans) => {
+        seeded.push({ runId, plans });
+      },
+    });
+    const job: CaseJob = {
+      harness: { id: "browser-use-langgraph", version: "1.0.0" },
+      evalCase: {
+        id: "c1",
+        env: { kind: "browser", startUrl: "https://x" },
+        task: "do it",
+        graders: [],
+        timeoutSec: 60,
+        tags: [],
+        fixtures: [{ store: "postgres", role: "world", seed: { inline: "INSERT INTO t VALUES (1);" } }],
+      },
+    };
+
+    await backend.dispatch(job);
+
+    expect(seeded).toHaveLength(1);
+    expect(seeded[0]?.runId).toBe("fixed");
+    expect(seeded[0]?.plans).toEqual([
+      {
+        store: "postgres",
+        role: "world",
+        isolateBy: "schema",
+        slice: "run_fixed",
+        seed: { inline: "INSERT INTO t VALUES (1);" },
+        format: "sql",
+      },
+    ]);
+  });
+
+  it("fails a run whose case declares fixtures when the runtime has no seeding capability", async () => {
+    const backend = new ServiceTopologyBackend({
+      runtime: seedRuntime(),
+      traceSource: {
+        async fetch() {
+          return [];
+        },
+      },
+      specFor: () => SPEC_SEED,
+      submit: async () => {},
+      newRunId: () => "fixed",
+      // no seedFixtures hook
+    });
+    const job: CaseJob = {
+      harness: { id: "browser-use-langgraph", version: "1.0.0" },
+      evalCase: {
+        id: "c1",
+        env: { kind: "browser" },
+        task: "t",
+        graders: [],
+        timeoutSec: 60,
+        tags: [],
+        fixtures: [{ store: "postgres", role: "world", seed: { inline: "x" } }],
+      },
+    };
+
+    await expect(backend.dispatch(job)).rejects.toThrow(/fixture-seeding capability/);
   });
 
   it("traceSourceFor: the harness's selected workspace source is pulled instead of the fixed runtime source; falls back when none is selected", async () => {
