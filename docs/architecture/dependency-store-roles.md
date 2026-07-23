@@ -15,9 +15,12 @@
 > - **P2 — data as condition. CORE SHIPPED.** `EvalCase.fixtures[]` (dataset-owned) is bound + validated by the pure
 >   `planStoreSeed`, seeded into a `purpose:"data"` store's per-case slice via `TopologyRuntime.seedFixtures` AFTER
 >   `ensureTopology` and BEFORE the drive, and graded by `StoreStateGrader` reading the post-run slice via a
->   co-located `GradeContext.readStore` (`TopologyRuntime.readStoreState`) and diffing vs `expected`. Live on the
->   Docker runtime for postgres. **Open tail:** the fixture hash is not yet sealed into the recording; K8s/Nomad
->   `seedFixtures`/`readStoreState`, redis/minio seed+read, and artifact-`ref` seeds fail loud until implemented.
+>   co-located `GradeContext.readStore` (`TopologyRuntime.readStoreState`) and diffing vs `expected`. Implemented on
+>   the **Docker** (self-hosted) and **K8s** (managed, dedicated/silo stores) runtimes for postgres; the fixture hash
+>   is sealed into the recording's audit manifest. **Open tail (all fail loud, never a silent skip):** Nomad
+>   `seedFixtures`/`readStoreState` (alloc/task resolution + live verify), K8s **pool** stores (shared store +
+>   per-tenant DB), redis/minio seed+read (key-prefix rewrite / mc), and artifact-`ref` seeds (resolver wiring). Each
+>   is a runtime/exec extension of the same pure planner + grader — the design is settled, the exec is the work.
 > - **P3 — `StoreSpec` (deferred / YAGNI).** Open the closed `store` enum + `STORE_DEFS` to a declarative store
 >   definition, keeping the three built-ins as defaults. Only when a non-default store is an actual need.
 
