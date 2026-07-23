@@ -121,6 +121,7 @@ export * from "./runtime/validate-runtime-result.js";
 export * from "./schedule/schedule-list.js";
 export * from "./schedule/schedule.js";
 export * from "./scorecard/backfill-models.js";
+export * from "./skill/generate-skill-result.js";
 export * from "./scorecard/delete-scorecard-result.js";
 export * from "./scorecard/leaderboard.js";
 export * from "./scorecard/scorecard-diff.js";

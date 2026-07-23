@@ -7,6 +7,7 @@ export { type Dispatch, runSuite } from "./run-suite.js";
 // Store ports (interfaces only) — the impls (InMemory*/Pg*) live in @everdict/db, which binds these.
 export type { AgentSessionStore } from "./ports/agent-session-store.js";
 export type { BrowserProfileStore } from "./ports/browser-profile-store.js";
+export type { SkillStore } from "./ports/skill-store.js";
 export type { CallbackStore } from "./ports/callback-store.js";
 export type { CommentStore } from "./ports/comment-store.js";
 export type { NotificationListOptions, NotificationStore } from "./ports/notification-store.js";
@@ -46,6 +47,13 @@ export {
   type CreateBrowserProfileInput,
   type UpdateBrowserProfileInput,
 } from "./browser-profile/browser-profile-service.js";
+export {
+  type CreateSkillInput,
+  SkillService,
+  type SkillActor,
+  type SkillServiceDeps,
+  type UpdateSkillInput,
+} from "./skill/skill-service.js";
 export { ProxyService, type ProxyServiceDeps, type ProxyView } from "./proxy/proxy-service.js";
 export {
   COMMENT_RESOURCE_TYPES,

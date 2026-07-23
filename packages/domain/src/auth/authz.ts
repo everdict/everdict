@@ -32,6 +32,10 @@ export type Action =
   | "agents:read"
   | "agents:write"
   | "agents:delete"
+  // Workspace Skills — SKILL.md-style procedures members author for the conversational agent. Collaborative content
+  // like comments/datasets: read viewer+, write (create/edit/share) member+; delete = creator-or-admin (service layer).
+  | "skills:read"
+  | "skills:write"
   | "runtimes:read"
   | "runtimes:write"
   // Destructive live-cluster control (stop a running workload / reclaim idle / purge terminal jobs / cordon a node) —
@@ -67,6 +71,7 @@ const ROLE_PERMISSIONS: Record<string, ReadonlySet<Action>> = {
     "judges:read",
     "models:read",
     "agents:read", // reading the workspace agent config is benign → viewer+
+    "skills:read", // reading the workspace skill library is benign → viewer+
     "runtimes:read",
     "runtimes:write", // runtime registration (+validate/probe) is role-independent — every member registers their own workspace's execution infra (same as harnesses:register)
     "members:read", // reading the team (workspace members) is benign → viewer+
@@ -90,6 +95,8 @@ const ROLE_PERMISSIONS: Record<string, ReadonlySet<Action>> = {
     "models:write", // model definition = eval content (which model was run) → member-allowed like judges/datasets
     "agents:read",
     "agents:write", // agent config = eval-authoring content (how the workspace's assistant behaves) → member+ like models/judges
+    "skills:read",
+    "skills:write", // authoring/sharing a workspace skill = collaborative content → member+ (delete = creator-or-admin, service layer)
     "runtimes:read",
     "runtimes:write", // runtime registration (+validate/probe) is role-independent
     "members:read",
@@ -124,6 +131,8 @@ const ROLE_PERMISSIONS: Record<string, ReadonlySet<Action>> = {
     "models:write",
     "agents:read",
     "agents:write",
+    "skills:read",
+    "skills:write",
     "runtimes:read",
     "runtimes:write", // runtime registration is role-independent (viewer/member have it too) — the credential 'value' is separately protected by secrets:write (admin)
     "runtimes:control", // destructive live-cluster control (stop workload / reclaim idle / purge / cordon) — admin-only
@@ -158,6 +167,7 @@ const SCOPE_READ_ACTIONS: readonly Action[] = [
   "judges:read",
   "models:read",
   "agents:read",
+  "skills:read",
   "runtimes:read",
   "members:read",
   "comments:read",
@@ -174,6 +184,7 @@ const SCOPE_WRITE_ACTIONS: readonly Action[] = [
   "judges:write",
   "models:write",
   "agents:write",
+  "skills:write",
   "runtimes:write",
   "comments:write",
   "images:push", // image publishing = part of harness authoring (a credential scoped to one's own workspace registry)

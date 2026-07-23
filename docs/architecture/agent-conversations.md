@@ -133,7 +133,26 @@ i18n `agentChat` namespace in `messages/{en,ko}.json`.
   MCP servers (secrets resolved, read-only unless write), and the model override; an unregistered workspace gets the
   base agent unchanged. Web: **Settings › Agent** (`features/manage-agent`) edits the workspace's default agent
   (instructions · MCP servers with a `SecretPicker` authSecret + write toggle · model picker). Migration `0070`.
-- **Later** — write-action tools behind HITL (port `permissions`); skills for harness-review / scorecard-triage;
+- **P10 (workspace Skills, landed — the members author them, not imported)** — a workspace builds up its own library
+  of **SKILL.md-style procedures** the agent follows for recurring tasks (scorecard-triage, harness-review, …), the
+  third Claude-Code channel (context ✓ · tools ✓ · **skills**). Decisions: skills are **authored in-workspace** (not a
+  filesystem port), **instructions-only** (v1 — no executable code; actions come from MCP tools), generation lives in a
+  **web wizard**, and sharing is **private → workspace** (`visibility private|workspace`, the Views/browser-profile
+  pattern — a member drafts privately then "shares to the workspace", managed creator-or-admin). A store-backed `Skill`
+  entity (`SkillRecord` {name, description, instructions, visibility, createdBy}; `SkillStore` InMemory/Pg, migration
+  `0071`; `SkillService` with the per-visibility gate) — NOT versioned (skills are living docs, edited in place, unlike
+  the immutable AgentSpec/Model). Surfaces: `POST/GET /skills` + `PATCH` (edit / share = visibility toggle) + `DELETE`
+  + `POST /skills/generate` (**skill-generate** — a description + a registered model id → an AI-drafted
+  {name, description, instructions} via the workspace's model + key, reusing the model-probe connection resolution; the
+  draft persists nothing), with MCP parity for CRUD (`list_/get_/create_/update_/delete_skill`; generate stays
+  HTTP-only, an interactive flow). authz `skills:read` (viewer+) / `skills:write` (member+, creator-or-admin per skill
+  in the service). The agent consumes skills via **progressive disclosure**: a native `use_skill` tool
+  (`@everdict/agent-runtime` `buildSkillTool`) lists every available skill (name + when-to-use) in its description and
+  returns the chosen skill's full body on call; the profile resolver loads the caller's visible skills
+  (workspace-shared + own private) each turn, independent of the AgentSpec. Web: **Settings › Skills**
+  (`features/manage-skills`) — the library list + a New-skill dialog with an AI generate wizard (describe → draft →
+  edit → save) + a private↔workspace share toggle + delete (creator-or-admin).
+- **Later** — write-action tools behind HITL (port `permissions`); executable (scripted) skills;
   autonomous scheduled sweeps (runtime monitor → propose/trigger evals); findings → comments + Mattermost;
   SSE token streaming (replace polling); a fallback model + prompt caching; parallel independent tool calls.
 
