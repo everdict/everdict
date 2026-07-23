@@ -7,9 +7,11 @@ import { CreateBrowserProfileBodySchema } from "./request/create-browser-profile
 import { RestoreBrowserProfileBodySchema } from "./request/restore-browser-profile.js";
 import { UpdateBrowserProfileBodySchema } from "./request/update-browser-profile.js";
 
-// Saved authenticated browser profiles (browser-profiles S2) — personal / self-scoped (owner = subject, like
-// connected accounts): authenticated, NO role gate; the service enforces owner-only (a cross-owner id 404s, no
-// existence leak). See docs/architecture/browser-profiles.md.
+// Saved authenticated browser profiles (browser-profiles S2) — dual-scoped (`private` personal / `workspace` shared).
+// Reads (list/get) are authenticated: list returns the caller's visible set (all workspace profiles + their own
+// private ones), get resolves a workspace profile for any member and a private one only for its creator. Writes
+// (update/delete + capture/restore) run the service's per-visibility gate (private = creator-only 404, workspace =
+// creator-or-admin 403). See docs/architecture/browser-profiles.md.
 export function registerBrowserProfileRoutes(app: FastifyInstance, deps: ServerDeps): void {
   app.post("/browser-profiles", { schema: browserProfileDocs.create }, async (req, reply) => {
     if (!deps.browserProfileService)
@@ -28,6 +30,7 @@ export function registerBrowserProfileRoutes(app: FastifyInstance, deps: ServerD
           tenant: principal.workspace,
           createdBy: principal.subject,
           name: body.name,
+          ...(body.visibility ? { visibility: body.visibility } : {}),
           ...(body.cookieDomains ? { cookieDomains: body.cookieDomains } : {}),
           ...(body.country ? { country: body.country } : {}),
         }),
@@ -81,7 +84,10 @@ export function registerBrowserProfileRoutes(app: FastifyInstance, deps: ServerD
       }
       try {
         return reply.send(
-          await deps.browserProfileService.update(principal.workspace, req.params.id, body, principal.subject),
+          await deps.browserProfileService.update(principal.workspace, req.params.id, body, {
+            subject: principal.subject,
+            isAdmin: principal.roles.includes("admin"),
+          }),
         );
       } catch (err) {
         return sendError(reply, err);
@@ -98,7 +104,10 @@ export function registerBrowserProfileRoutes(app: FastifyInstance, deps: ServerD
       const principal = await resolvePrincipal(req, reply, deps);
       if (!principal) return reply;
       try {
-        await deps.browserProfileService.remove(principal.workspace, req.params.id, principal.subject);
+        await deps.browserProfileService.remove(principal.workspace, req.params.id, {
+          subject: principal.subject,
+          isAdmin: principal.roles.includes("admin"),
+        });
         return reply.code(204).send();
       } catch (err) {
         return sendError(reply, err);
@@ -129,6 +138,7 @@ export function registerBrowserProfileRoutes(app: FastifyInstance, deps: ServerD
             profileId: req.params.id,
             sessionId: body.sessionId,
             subject: principal.subject,
+            isAdmin: principal.roles.includes("admin"),
             ...(body.cookies ? { cookies: body.cookies } : {}),
           }),
         );
@@ -161,6 +171,7 @@ export function registerBrowserProfileRoutes(app: FastifyInstance, deps: ServerD
             profileId: req.params.id,
             sessionId: body.sessionId,
             subject: principal.subject,
+            isAdmin: principal.roles.includes("admin"),
           }),
         );
       } catch (err) {

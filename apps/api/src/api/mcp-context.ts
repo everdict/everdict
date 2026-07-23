@@ -99,7 +99,7 @@ export interface McpDeps {
   apiPublicUrl?: string; // control-plane public base — the everdict runner --api-url in github_install_workspace_runner (falls back to the request base)
   browserSessionService?: BrowserSessionService; // interactive browser sessions (browser-profiles S1) — self-scoped
   browserTickets?: TicketStore; // WS ticket store for interactive browser sessions
-  browserProfileService?: BrowserProfileService; // saved authenticated browser profiles (browser-profiles S2) — self-scoped
+  browserProfileService?: BrowserProfileService; // saved authenticated browser profiles (browser-profiles S2) — workspace-scoped
   browserProfileCaptureService?: BrowserProfileCaptureService; // capture a session login into a profile (browser-profiles S3)
   proxyService?: ProxyService; // workspace BYO egress proxies (browser-profiles S4) — per-country pool for the login browser
 }

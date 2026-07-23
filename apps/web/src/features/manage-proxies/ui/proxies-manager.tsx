@@ -2,28 +2,36 @@
 
 import { useEffect, useState } from 'react'
 import { useTranslations } from 'next-intl'
+import { z } from 'zod'
 
 import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
 import { EmptyState } from '@/shared/ui/empty-state'
 import { Input } from '@/shared/ui/input'
 
-export interface ProxyView {
-  name: string
-  country: string
-  url: string
-  authSecretName?: string
-}
+// Redacted proxy view the control plane returns (the auth secret is a name-ref, its value never crosses the wire).
+export const proxyViewSchema = z.object({
+  name: z.string(),
+  country: z.string(),
+  url: z.string(),
+  authSecretName: z.string().optional(),
+})
+export const proxyListResponseSchema = z.object({ proxies: z.array(proxyViewSchema) })
+export type ProxyView = z.infer<typeof proxyViewSchema>
 
 // Workspace BYO egress proxy manager (browser-profiles S4) — admin registers per-country proxies used by the
 // interactive login browser (and eval browsers, S5). The auth secret is a SecretStore name-ref (value never shown).
-// Embedded in the profile-creation wizard's geo step; onChange lets the host refresh its country picker live.
+// Reads are a workspace read (any member picks a geo); writes are admin — `canManage` hides the add form + delete
+// (read-only list) for non-admins. Used both standalone (Settings › Browser › Proxies) and embedded in the
+// profile-creation wizard's geo step, where onChange refreshes the host's country picker live.
 export function ProxiesManager({
   initialProxies,
   onChange,
+  canManage = true,
 }: {
   initialProxies: ProxyView[]
   onChange?: (proxies: ProxyView[]) => void
+  canManage?: boolean
 }) {
   const t = useTranslations('proxies')
   const [proxies, setProxies] = useState<ProxyView[]>(initialProxies)
@@ -86,37 +94,41 @@ export function ProxiesManager({
     <div className="space-y-5">
       {error && <Callout tone="warning">{error}</Callout>}
 
-      <form
-        onSubmit={save}
-        className="grid grid-cols-1 gap-2 rounded-xl border border-border bg-card p-4 sm:grid-cols-4"
-      >
-        <Input value={form.name} onChange={set('name')} placeholder={t('namePlaceholder')} />
-        <Input
-          value={form.country}
-          onChange={set('country')}
-          placeholder={t('countryPlaceholder')}
-        />
-        <Input
-          value={form.url}
-          onChange={set('url')}
-          placeholder={t('urlPlaceholder')}
-          autoComplete="off"
-          spellCheck={false}
-        />
-        <Input
-          value={form.authSecretName}
-          onChange={set('authSecretName')}
-          placeholder={t('secretPlaceholder')}
-        />
-        <div className="sm:col-span-4">
-          <Button
-            type="submit"
-            disabled={busy || !form.name.trim() || !form.country.trim() || !form.url.trim()}
-          >
-            {busy ? t('saving') : t('add')}
-          </Button>
-        </div>
-      </form>
+      {canManage ? (
+        <form
+          onSubmit={save}
+          className="grid grid-cols-1 gap-2 rounded-xl border border-border bg-card p-4 sm:grid-cols-4"
+        >
+          <Input value={form.name} onChange={set('name')} placeholder={t('namePlaceholder')} />
+          <Input
+            value={form.country}
+            onChange={set('country')}
+            placeholder={t('countryPlaceholder')}
+          />
+          <Input
+            value={form.url}
+            onChange={set('url')}
+            placeholder={t('urlPlaceholder')}
+            autoComplete="off"
+            spellCheck={false}
+          />
+          <Input
+            value={form.authSecretName}
+            onChange={set('authSecretName')}
+            placeholder={t('secretPlaceholder')}
+          />
+          <div className="sm:col-span-4">
+            <Button
+              type="submit"
+              disabled={busy || !form.name.trim() || !form.country.trim() || !form.url.trim()}
+            >
+              {busy ? t('saving') : t('add')}
+            </Button>
+          </div>
+        </form>
+      ) : (
+        <Callout tone="muted">{t('readonly')}</Callout>
+      )}
 
       {proxies.length === 0 ? (
         <EmptyState title={t('emptyTitle')} hint={t('emptyHint')} />
@@ -138,9 +150,11 @@ export function ProxiesManager({
                     : ` · ${t('open')}`}
                 </div>
               </div>
-              <Button size="sm" variant="ghost" onClick={() => remove(p.name)}>
-                {t('delete')}
-              </Button>
+              {canManage && (
+                <Button size="sm" variant="ghost" onClick={() => remove(p.name)}>
+                  {t('delete')}
+                </Button>
+              )}
             </li>
           ))}
         </ul>

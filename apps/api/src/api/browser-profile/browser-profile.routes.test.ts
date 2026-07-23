@@ -40,7 +40,7 @@ describe("browser-profile routes", () => {
     expect(res.statusCode).toBe(404);
   });
 
-  it("creates, lists, gets, renames, and deletes a profile (self-scoped happy path)", async () => {
+  it("creates, lists, gets, renames, and deletes a profile (workspace-scoped happy path)", async () => {
     const app = build(true);
 
     const created = await app.inject({

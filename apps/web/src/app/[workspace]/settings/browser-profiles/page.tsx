@@ -9,10 +9,11 @@ import { PageHeader } from '@/shared/ui/page-header'
 
 export const dynamic = 'force-dynamic'
 
-// Settings › Account › Browser profiles — personal saved logins (browser-profiles). Self-scoped (owner = the
-// signed-in user). Creating a profile is session-first: a live browser opens in the wizard, the user logs into the
-// sites the profile should carry (optionally through a per-country egress proxy), and finishing captures the
-// cookies. Admins (settings:write) manage the workspace proxy pool inline from the wizard's geo step.
+// Settings › Browser › Browser profiles — workspace-shared saved logins (browser-profiles). A shared workspace asset:
+// every member sees the workspace's profiles; the creator or a workspace admin manages each one. Creating a profile
+// is session-first: a live browser opens in the wizard, the user logs into the sites the profile should carry
+// (optionally through a per-country egress proxy), and finishing captures the cookies. Admins (settings:write) manage
+// the workspace proxy pool inline from the wizard's geo step (also its own Settings › Browser › Proxies page).
 export default async function BrowserProfilesPage() {
   const t = await getTranslations('browserProfiles')
   const { principal } = await currentPrincipal()
@@ -30,6 +31,8 @@ export default async function BrowserProfilesPage() {
       <PageHeader title={t('title')} description={t('description')} />
       <BrowserProfilesManager
         initialProfiles={profiles}
+        currentSubject={principal?.subject ?? ''}
+        canManageAll={principal?.roles.includes('admin') ?? false}
         canManageProxies={can(principal?.roles, 'settings:write')}
       />
     </div>

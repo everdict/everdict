@@ -364,7 +364,7 @@ async function main(): Promise<void> {
   const app = buildServer({
     terminalTickets,
     ...(browserSessionService && browserTickets ? { browserSessionService, browserTickets } : {}),
-    browserProfileService, // saved authenticated browser profiles (browser-profiles S2) — personal metadata CRUD
+    browserProfileService, // saved authenticated browser profiles (browser-profiles S2) — workspace-scoped metadata CRUD
     ...(browserProfileCaptureService ? { browserProfileCaptureService } : {}), // S3 capture (needs browser sessions)
     proxyService, // workspace BYO egress proxies (browser-profiles S4) — per-country pool + session geo
     liveFrames, // live-screen frames pushed by self-hosted runners (report_case_screen MCP tool)

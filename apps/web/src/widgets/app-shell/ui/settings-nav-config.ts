@@ -3,6 +3,7 @@ import {
   Cpu,
   Fingerprint,
   GitBranch,
+  Globe,
   KeyRound,
   Lock,
   Plug,
@@ -18,8 +19,11 @@ import {
 
 import type { WebAction } from '@/shared/auth/can'
 
-// Settings secondary-nav — grouped Account (personal, no gate) + Workspace (role-gated). Mirrors nav-config's idiom:
-// href is a suffix UNDER /{workspace}/settings (prefixed at render), and labelKey is a settingsNav.* message key.
+// Settings secondary-nav — grouped Account (personal, no gate) + Workspace (role-gated) + Browser (workspace-scoped
+// eval env). The Browser group is the home for evaluation-specialized config that fits neither generic personal
+// account nor generic workspace ops: browse-use browser tooling (saved login profiles + egress proxies), shared at
+// the workspace scope. Mirrors nav-config's idiom: href is a suffix UNDER /{workspace}/settings (prefixed at render),
+// and labelKey is a settingsNav.* message key.
 export interface SettingsNavItem {
   href: string // '' = General index, '/profile', … (suffix under /settings)
   labelKey: string // settingsNav.* key
@@ -44,7 +48,6 @@ export const SETTINGS_NAV_GROUPS: SettingsNavGroup[] = [
       { href: '/preferences', labelKey: 'preferences', icon: SlidersHorizontal },
       { href: '/api-keys', labelKey: 'apiKeys', icon: KeyRound },
       { href: '/personal-secrets', labelKey: 'personalSecrets', icon: Lock },
-      { href: '/browser-profiles', labelKey: 'browserProfiles', icon: Fingerprint },
     ],
   },
   {
@@ -75,6 +78,16 @@ export const SETTINGS_NAV_GROUPS: SettingsNavGroup[] = [
       { href: '/ci', labelKey: 'ci', icon: GitBranch, requiredAction: 'settings:read' },
       { href: '/runners', labelKey: 'runners', icon: Server, requiredAction: 'settings:write' },
       { href: '/budget', labelKey: 'budget', icon: Wallet, requiredAction: 'scorecards:read' },
+    ],
+  },
+  {
+    // Evaluation-specialized workspace env — browse-use browser tooling. Reads are workspace reads (any member sees
+    // the shared profiles/proxies to pick from); writes are gated in-page (profiles = creator-or-admin, proxies =
+    // admin), so the nav items themselves stay ungated.
+    headingKey: 'groupBrowser',
+    items: [
+      { href: '/browser-profiles', labelKey: 'browserProfiles', icon: Fingerprint },
+      { href: '/proxies', labelKey: 'proxies', icon: Globe },
     ],
   },
 ]

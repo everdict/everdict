@@ -49,6 +49,8 @@ export function ProfileLoginWizard({
   const t = useTranslations('browserProfiles')
   const locale = useLocale()
   const [name, setName] = useState(profile?.name ?? '')
+  // Scope for a NEW profile (browser-profiles workspace-share) — personal by default; sharing is an explicit opt-in.
+  const [visibility, setVisibility] = useState<'private' | 'workspace'>(profile?.visibility ?? 'private')
   const [country, setCountry] = useState(profile?.country ?? '')
   const [proxies, setProxies] = useState<ProxyView[]>([])
   const [showProxies, setShowProxies] = useState(false)
@@ -213,7 +215,7 @@ export function ProfileLoginWizard({
         const created = await fetch('/api/browser-profiles', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ name: name.trim(), ...(country ? { country } : {}) }),
+          body: JSON.stringify({ name: name.trim(), visibility, ...(country ? { country } : {}) }),
         })
         const body = (await created.json()) as { id: string; error?: string }
         if (!created.ok || body.error) throw new Error(body.error ?? `HTTP ${created.status}`)
@@ -269,6 +271,31 @@ export function ProfileLoginWizard({
                 placeholder={t('namePlaceholder')}
               />
             </label>
+          )}
+          {!profile && (
+            <div className="flex max-w-sm flex-col gap-1">
+              <span className="text-[12px] text-muted-foreground">{t('scopeLabel')}</span>
+              <div className="inline-flex rounded-md border border-border p-0.5">
+                {(['private', 'workspace'] as const).map((v) => (
+                  <button
+                    key={v}
+                    type="button"
+                    onClick={() => setVisibility(v)}
+                    className={cn(
+                      'rounded px-2.5 py-1 text-[12px] font-medium transition-colors',
+                      visibility === v
+                        ? 'bg-accent text-foreground'
+                        : 'text-muted-foreground hover:text-foreground'
+                    )}
+                  >
+                    {v === 'private' ? t('scopePrivate') : t('scopeWorkspace')}
+                  </button>
+                ))}
+              </div>
+              <span className="text-[11px] text-faint">
+                {visibility === 'private' ? t('scopePrivateHint') : t('scopeWorkspaceHint')}
+              </span>
+            </div>
           )}
           {(countries.length > 0 || canManageProxies) && (
             <div className="space-y-2">

@@ -1,4 +1,4 @@
-import { AppError, type BrowserProfileRecord } from "@everdict/contracts";
+import { AppError, type BrowserProfileRecord, ForbiddenError, NotFoundError } from "@everdict/contracts";
 import type { SecretCipher } from "@everdict/db";
 import { InMemoryBrowserProfileStore } from "@everdict/db";
 import type { StorageState } from "@everdict/topology";
@@ -26,11 +26,17 @@ const STATE: StorageState = {
   ],
 };
 
-function profileRecord(id: string, tenant: string, createdBy: string): BrowserProfileRecord {
+function profileRecord(
+  id: string,
+  tenant: string,
+  createdBy: string,
+  visibility: "private" | "workspace" = "private",
+): BrowserProfileRecord {
   return {
     id,
     tenant,
     name: id,
+    visibility,
     cookieDomains: [],
     country: null,
     capturedAt: null,
@@ -64,6 +70,7 @@ describe("BrowserProfileCaptureService", () => {
       profileId: "prof-1",
       sessionId: session.id,
       subject: "alice",
+      isAdmin: false,
     });
     expect(updated.capturedAt).toBe("2026-07-16T12:00:00.000Z");
     // domains derived from the cookies (leading dot stripped, sorted)
@@ -99,6 +106,7 @@ describe("BrowserProfileCaptureService", () => {
       profileId: "prof-1",
       sessionId: session.id,
       subject: "alice",
+      isAdmin: false,
     });
     expect(updated.expiresAt).toBe(new Date(1_900_000_000 * 1000).toISOString());
   });
@@ -110,6 +118,7 @@ describe("BrowserProfileCaptureService", () => {
       profileId: "prof-1",
       sessionId: session.id,
       subject: "alice",
+      isAdmin: false,
       // preview-normalized addressing: the stored domain is ".github.com" but the chip says "github.com"
       cookies: [{ domain: "github.com", name: "sid" }],
     });
@@ -128,16 +137,68 @@ describe("BrowserProfileCaptureService", () => {
         profileId: "prof-1",
         sessionId: session.id,
         subject: "alice",
+        isAdmin: false,
         cookies: [{ domain: "gone.example.com", name: "sid" }],
       }),
     ).rejects.toBeInstanceOf(AppError);
   });
 
-  it("404s a profile owned by another subject (no existence leak)", async () => {
-    const { session, capture } = await setup();
+  it("404s a member capturing into a PRIVATE profile they did not create (invisible — no admin override)", async () => {
+    const { session, capture } = await setup(); // prof-1 is private, created by alice
+    // A non-creator member — even an admin — cannot see a private profile: 404, no existence leak.
     await expect(
-      capture.captureInto({ tenant: "acme", profileId: "prof-1", sessionId: session.id, subject: "mallory" }),
-    ).rejects.toBeInstanceOf(AppError);
+      capture.captureInto({
+        tenant: "acme",
+        profileId: "prof-1",
+        sessionId: session.id,
+        subject: "carol",
+        isAdmin: true,
+      }),
+    ).rejects.toBeInstanceOf(NotFoundError);
+  });
+
+  it("403s a member capturing into a WORKSPACE profile they did not create (creator-or-admin)", async () => {
+    const store = new InMemoryBrowserProfileStore();
+    await store.create(profileRecord("prof-1", "acme", "alice", "workspace")); // shared, created by alice
+    const sessions = new BrowserSessionService(fakeProvisioner, { newId: () => "sess-1" });
+    const session = await sessions.create({ tenant: "acme", createdBy: "mallory" }); // mallory's own session
+    const capture = new BrowserProfileCaptureService({
+      store,
+      sessions,
+      cipher: fakeCipher,
+      capture: async () => STATE,
+    });
+    await expect(
+      capture.captureInto({
+        tenant: "acme",
+        profileId: "prof-1",
+        sessionId: session.id,
+        subject: "mallory",
+        isAdmin: false,
+      }),
+    ).rejects.toBeInstanceOf(ForbiddenError);
+  });
+
+  it("lets a workspace admin capture into another member's WORKSPACE profile, driving the admin's own session", async () => {
+    const store = new InMemoryBrowserProfileStore();
+    await store.create(profileRecord("prof-1", "acme", "bob", "workspace")); // shared, created by bob
+    const sessions = new BrowserSessionService(fakeProvisioner, { newId: () => "sess-1" });
+    await sessions.create({ tenant: "acme", createdBy: "admin" }); // the admin's own live session
+    const capture = new BrowserProfileCaptureService({
+      store,
+      sessions,
+      cipher: fakeCipher,
+      capture: async () => STATE,
+      now: () => "2026-07-16T12:00:00.000Z",
+    });
+    const updated = await capture.captureInto({
+      tenant: "acme",
+      profileId: "prof-1",
+      sessionId: "sess-1",
+      subject: "admin", // not the creator (bob) …
+      isAdmin: true, // … but a workspace admin overrides the profile gate
+    });
+    expect(updated.capturedAt).toBe("2026-07-16T12:00:00.000Z");
   });
 
   it("restoreInto seeds the profile's saved cookies into the session (warm re-login)", async () => {
@@ -168,6 +229,7 @@ describe("BrowserProfileCaptureService", () => {
       profileId: "prof-1",
       sessionId: session.id,
       subject: "alice",
+      isAdmin: false,
     });
     // the decrypted storageState was seeded into the session's browser, and the carried domains came back
     expect(seeded).toEqual([STATE]);
@@ -181,21 +243,51 @@ describe("BrowserProfileCaptureService", () => {
       profileId: "prof-1",
       sessionId: session.id,
       subject: "alice",
+      isAdmin: false,
     });
     expect(result.domains).toEqual([]); // nothing captured → nothing carried, and no seed attempted
   });
 
-  it("restoreInto 404s a profile owned by another subject (no existence leak)", async () => {
+  it("restoreInto 403s a member restoring a WORKSPACE profile they did not create (creator-or-admin)", async () => {
+    const store = new InMemoryBrowserProfileStore();
+    await store.create(profileRecord("prof-1", "acme", "alice", "workspace")); // shared, created by alice
+    const sessions = new BrowserSessionService(fakeProvisioner, { newId: () => "sess-1" });
+    const session = await sessions.create({ tenant: "acme", createdBy: "mallory" }); // mallory's own session
+    const capture = new BrowserProfileCaptureService({ store, sessions, cipher: fakeCipher });
+    await expect(
+      capture.restoreInto({
+        tenant: "acme",
+        profileId: "prof-1",
+        sessionId: session.id,
+        subject: "mallory",
+        isAdmin: false,
+      }),
+    ).rejects.toBeInstanceOf(ForbiddenError);
+  });
+
+  it("404s a profile in another workspace (no cross-tenant existence leak)", async () => {
     const { session, capture } = await setup();
     await expect(
-      capture.restoreInto({ tenant: "acme", profileId: "prof-1", sessionId: session.id, subject: "mallory" }),
+      capture.captureInto({
+        tenant: "beta",
+        profileId: "prof-1",
+        sessionId: session.id,
+        subject: "alice",
+        isAdmin: true, // even an admin can't reach a profile that isn't in their workspace
+      }),
     ).rejects.toBeInstanceOf(AppError);
   });
 
   it("400s when the session is not the caller's / not active", async () => {
     const { capture } = await setup();
     await expect(
-      capture.captureInto({ tenant: "acme", profileId: "prof-1", sessionId: "nope", subject: "alice" }),
+      capture.captureInto({
+        tenant: "acme",
+        profileId: "prof-1",
+        sessionId: "nope",
+        subject: "alice",
+        isAdmin: false,
+      }),
     ).rejects.toBeInstanceOf(AppError);
   });
 });

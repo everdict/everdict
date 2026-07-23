@@ -2,10 +2,17 @@ import type { BrowserProfileRecord } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { InMemoryBrowserProfileStore } from "./browser-profile-store.js";
 
-const rec = (id: string, tenant: string, createdBy: string, createdAt: string): BrowserProfileRecord => ({
+const rec = (
+  id: string,
+  tenant: string,
+  createdBy: string,
+  createdAt: string,
+  visibility: "private" | "workspace" = "workspace",
+): BrowserProfileRecord => ({
   id,
   tenant,
   name: id,
+  visibility,
   cookieDomains: ["example.com"],
   country: null,
   capturedAt: null,
@@ -16,13 +23,16 @@ const rec = (id: string, tenant: string, createdBy: string, createdAt: string): 
 });
 
 describe("InMemoryBrowserProfileStore", () => {
-  it("listOwned returns only the subject's own profiles, newest first (others excluded)", async () => {
+  it("list returns workspace profiles + the caller's own private ones, newest first (others' private + other workspaces excluded)", async () => {
     const store = new InMemoryBrowserProfileStore();
-    await store.create(rec("a", "acme", "alice", "2026-06-01T00:00:00.000Z"));
-    await store.create(rec("b", "acme", "alice", "2026-06-03T00:00:00.000Z"));
-    await store.create(rec("c", "acme", "bob", "2026-06-02T00:00:00.000Z"));
-    expect((await store.listOwned("acme", "alice")).map((r) => r.id)).toEqual(["b", "a"]);
-    expect((await store.listOwned("acme", "bob")).map((r) => r.id)).toEqual(["c"]);
+    await store.create(rec("shared-old", "acme", "alice", "2026-06-01T00:00:00.000Z", "workspace"));
+    await store.create(rec("alice-priv", "acme", "alice", "2026-06-03T00:00:00.000Z", "private"));
+    await store.create(rec("bob-shared", "acme", "bob", "2026-06-02T00:00:00.000Z", "workspace"));
+    await store.create(rec("bob-priv", "acme", "bob", "2026-06-04T00:00:00.000Z", "private")); // bob's private — hidden from alice
+    await store.create(rec("beta", "beta", "alice", "2026-06-05T00:00:00.000Z", "workspace")); // another workspace — excluded
+    expect((await store.list("acme", "alice")).map((r) => r.id)).toEqual(["alice-priv", "bob-shared", "shared-old"]);
+    // bob sees the shared ones + his own private, not alice's private
+    expect((await store.list("acme", "bob")).map((r) => r.id)).toEqual(["bob-priv", "bob-shared", "shared-old"]);
   });
 
   it("get/update/remove can't touch another workspace (no existence leak)", async () => {

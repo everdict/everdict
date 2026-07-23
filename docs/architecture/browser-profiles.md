@@ -23,7 +23,7 @@ commercial slice falls back to 0% because there is no login — see `browser-use
 
 ### The creation UX is session-first (S7)
 
-Making a profile IS a login session — not a metadata form. In Settings › Account › Browser profiles, "New profile"
+Making a profile IS a login session — not a metadata form. In Settings › Browser › Browser profiles, "New profile"
 opens the wizard: name + geo (egress proxy country; admins manage the workspace proxy pool inline right there) →
 **a live browser opens in the page** (the S1 canvas) → the user navigates to a site, logs in, moves on to the next
 site, logs in again — one session accumulates any number of logins. While the session is open the wizard polls
@@ -50,9 +50,10 @@ first carried domain. So the owner resumes from their prior state: if the saved 
 already signed-in and just re-save (refreshing the capture); if it lapsed the site still recognizes the device, so
 re-auth is lighter. Best-effort — a restore failure (or an empty profile) just leaves a blank browser to log into.
 The decrypted cookies go into the browser, never back to the client (restore returns only the carried domains).
-Geo defaults to the profile's country. Consequently there is **no Browser-sessions
-settings tab** (the session exists only inside the wizard) and **no Proxies settings tab** (the proxy pool is managed
-from the wizard's geo step, still `settings:write`-gated; the `/workspace/proxies` API is unchanged).
+Geo defaults to the profile's country. The interactive **session** exists only inside the wizard (there is no
+Browser-sessions settings tab), but proxies now have their own **Settings › Browser › Proxies** page
+(`settings:write`-gated; admins register there, and the wizard's geo step still manages the same pool inline; the
+`/workspace/proxies` API is unchanged).
 
 ## Why it fits Everdict (current state — verified file:line)
 
@@ -117,10 +118,22 @@ short-lived container/pod per active login; self-hosted = the user's own local b
 
 ## The profile entity + capture + injection (S2–S5)
 
-- **`BrowserProfileSpec`** (`core`): `{ id, name, country?, proxyRef?, cookieDomains[], createdBy, storageStateRef,
-  updatedAt }`. Owner = subject (self-scoped, like connected accounts); optional workspace share later. `country`
-  (nullable, migration `0061`) records the geo the login session ran through at creation (S7) — re-login defaults
-  to it and the eval-browser proxy launch (follow-up) reads it.
+- **`BrowserProfileSpec`** (`core`): `{ id, name, visibility, country?, proxyRef?, cookieDomains[], createdBy,
+  storageStateRef, updatedAt }`. **Dual-scoped** (`visibility`, migration `0069`, mirrors View visibility; the
+  "workspace share" this entity anticipated is now realized as an *opt-in*):
+  - `private` (default) = a personal profile, visible and manageable only by its creator (user scope — the right
+    default for personal login material; NO admin override even for management: a non-creator gets a 404, no
+    existence leak).
+  - `workspace` = a shared asset: read by any member, managed by the creator or a workspace admin (a non-manager
+    gets a 403).
+  `list` returns the caller's visible set (all workspace profiles + their own private ones). The gate is uniform
+  across update/remove and the capture/restore session ops (same `manageableOrThrow` rule). The encrypted
+  `storageState` blob stays server-only, and the interactive session driving capture/restore stays owner-only (you
+  can only drive your own live browser). Eval injection (S5) still owner-gates on `job.submittedBy` — cross-member
+  use of a profile's login inside evals is a deliberate follow-up, not part of the metadata share. Sharing is an
+  explicit toggle in the manager (share private→workspace / make workspace→private, via `visibility` in the update).
+  `country` (nullable, migration `0061`) records the geo the login session ran through at creation (S7) — re-login
+  defaults to it and the eval-browser proxy launch (follow-up) reads it.
 - **`BrowserProfileStore`** (`db`): the metadata; the `storageState` blob lives in `storage` (S3), **encrypted**
   (`secret-cipher`), keyed `(workspace|subject, profileId)`.
 - **Capture** (S3): ✅ SHIPPED. `captureStorageState(cdpBase)` (`@everdict/topology`) reads the session's cookies
@@ -171,15 +184,20 @@ short-lived container/pod per active login; self-hosted = the user's own local b
 3. **S1b — apps/web canvas feature.** ✅ SHIPPED. `features/interactive-browser` (the `--serve` page productized:
    one WS instead of SSE/POST) + BFF proxy routes (`/api/browser-sessions*`, ticket route injects the WS base) +
    Settings › Account › Browser sessions page + ko/en i18n. Users start a browser and drive it inside the app.
-4. **S2 — profile entity.** ✅ SHIPPED. `BrowserProfileRecord` (`@everdict/contracts`) — personal / self-scoped
-   `{ id, tenant, name, cookieDomains[], createdBy, createdAt, updatedAt }` (the `storageStateRef`/`country`/`proxyRef`
-   fields are deferred to the slices that populate them — S3/S4 — per no-hypothetical-surface); `BrowserProfileStore`
-   port (`@everdict/application-control`) + `InMemory`/`Pg` impls (`@everdict/db`, migration `0058`,
-   `everdict_browser_profiles`) + `BrowserProfileService` (owner-scoped CRUD, no admin override — a profile holds
-   personal login material) + `api/browser-profile` routes/docs/MCP parity (self-scoped, no role gate) + the
-   `apps/web` `features/manage-browser-profiles` manager (Settings › Account › Browser profiles: create/rename/delete)
-   + `entities/browser-profile` drift-guarded schema + ko/en i18n. A profile is a login placeholder until S3 captures
-   cookies into it.
+4. **S2 — profile entity.** ✅ SHIPPED (dual-scoped since the workspace-share follow-up). `BrowserProfileRecord`
+   (`@everdict/contracts`) `{ id, tenant, name, visibility, cookieDomains[], createdBy, createdAt, updatedAt }`
+   (`visibility` = `private`|`workspace`, migration `0069`, default `private`; the
+   `storageStateRef`/`country`/`proxyRef` fields are deferred to the slices that populate them — S3/S4 — per
+   no-hypothetical-surface); `BrowserProfileStore` port (`@everdict/application-control`, `list(tenant, subject)` =
+   workspace profiles + the caller's own private ones) + `InMemory`/`Pg` impls (`@everdict/db`, migration `0058`,
+   `everdict_browser_profiles`) + `BrowserProfileService` (dual-scoped CRUD: get resolves a workspace profile for any
+   member and a private one only for its creator; update/remove/capture/restore run one per-visibility gate —
+   private = creator-only [404], workspace = creator-or-admin [403] via a `ProfileActor` `{ subject, isAdmin }`, the
+   admin override mirroring comments:delete) + `api/browser-profile` routes/docs/MCP parity + the `apps/web`
+   `features/manage-browser-profiles` manager (**Settings › Browser › Browser profiles**: create with a scope toggle
+   [personal default], per-row scope badge + share/make-personal toggle, per-row re-login/rename/delete for the
+   creator or an admin, creator chip on others' shared rows) + `entities/browser-profile` drift-guarded schema +
+   ko/en i18n. A profile is a login placeholder until S3 captures cookies into it.
 5. **S3 — cookie capture** on session save (`Network.getAllCookies` → storageState → encrypt → store). ✅ SHIPPED.
 6. **S4 — proxy / geo** (`ProxyProvider`, `--proxy-server`). ✅ SHIPPED for the login browser (eval-browser proxy = S5).
 7. **S5 — injection into eval** (seed cookies before the agent connects). ✅ SHIPPED (cookies; proxy-at-eval-launch is a follow-up).
@@ -284,7 +302,11 @@ short-lived container/pod per active login; self-hosted = the user's own local b
 
 - **Security is the through-line.** A live CDP-driven browser is powerful (navigate anywhere, exec JS) — that is the
   point (the user drives it), so gate it HARD: owner-only ticket, single active session, TTL, isolated egress (trust
-  zone). Cookies = login credentials → encrypted at rest, never logged, transient in the browser, personal scope.
+  zone). Cookies = login credentials → encrypted at rest, never logged, transient in the browser. The **session**
+  stays personal (owner-only); a **profile** is personal by default and only becomes shared on an explicit opt-in,
+  and even then only its metadata crosses the wire — the encrypted `storageState` blob is server-only, and
+  capture/restore/manage are creator-or-admin (a private profile: creator-only, no admin override), so the login
+  material itself is never exposed to the rest of the workspace.
 - **Cookie expiry** — profiles go stale. ✅ Surfaced: capture records the profile's expected expiry
   (`BrowserProfileRecord.expiresAt`, migration `0064`) = the EARLIEST wall-clock expiry among the captured cookies
   (`storageStateExpiry` in `@everdict/topology`; a login is only as fresh as its soonest-expiring persisted cookie;

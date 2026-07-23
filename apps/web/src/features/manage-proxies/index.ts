@@ -1,1 +1,6 @@
-export { ProxiesManager, type ProxyView } from './ui/proxies-manager'
+export {
+  ProxiesManager,
+  proxyListResponseSchema,
+  proxyViewSchema,
+  type ProxyView,
+} from './ui/proxies-manager'

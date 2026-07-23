@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { AlertTriangle, Pencil, RotateCw, Trash2 } from 'lucide-react'
+import { AlertTriangle, Lock, Pencil, RotateCw, Trash2, Users } from 'lucide-react'
 import { useLocale, useTranslations } from 'next-intl'
 
 import {
@@ -18,14 +18,19 @@ import { Input } from '@/shared/ui/input'
 
 import { ProfileLoginWizard } from './profile-login-wizard'
 
-// Saved browser profiles manager (browser-profiles) — personal / self-scoped. Creating a profile is session-first:
-// the wizard opens a live browser, the owner logs into the sites the profile should carry (each login surfaces as a
-// remembered chip), and finishing captures the cookies. Existing profiles can re-login (re-capture) the same way.
+// Saved browser profiles manager (browser-profiles) — workspace-shared. Every member sees the workspace's profiles;
+// the creator or a workspace admin (`canManageAll`) can re-login, rename, or delete each one (a non-manager row is
+// read-only). Creating a profile is session-first: the wizard opens a live browser, the user logs into the sites the
+// profile should carry (each login surfaces as a remembered chip), and finishing captures the cookies.
 export function BrowserProfilesManager({
   initialProfiles,
+  currentSubject,
+  canManageAll,
   canManageProxies,
 }: {
   initialProfiles: BrowserProfile[]
+  currentSubject: string
+  canManageAll: boolean
   canManageProxies: boolean
 }) {
   const t = useTranslations('browserProfiles')
@@ -67,6 +72,23 @@ export function BrowserProfilesManager({
     }
   }
 
+  // Flip a profile's scope (browser-profiles workspace-share) — share a personal profile with the workspace, or pull
+  // a shared one back to personal. Creator-or-admin (workspace) / creator (private) is enforced by the control plane.
+  const changeScope = async (id: string, visibility: 'private' | 'workspace') => {
+    try {
+      const res = await fetch(`/api/browser-profiles/${encodeURIComponent(id)}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ visibility }),
+      })
+      const body = (await res.json()) as BrowserProfile & { error?: string }
+      if (!res.ok || body.error) throw new Error(body.error ?? `HTTP ${res.status}`)
+      setProfiles((prev) => prev.map((p) => (p.id === id ? body : p)))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    }
+  }
+
   return (
     <div className="space-y-5">
       {error && <Callout tone="danger">{error}</Callout>}
@@ -92,7 +114,10 @@ export function BrowserProfilesManager({
             <ProfileRow
               key={p.id}
               profile={p}
+              currentSubject={currentSubject}
+              canManage={p.createdBy === currentSubject || canManageAll}
               onRename={rename}
+              onChangeScope={changeScope}
               onRemove={() => setConfirming(p)}
               onRelogin={() => setWizard({ profile: p })}
             />
@@ -131,12 +156,18 @@ export function BrowserProfilesManager({
 
 function ProfileRow({
   profile,
+  currentSubject,
+  canManage,
   onRename,
+  onChangeScope,
   onRemove,
   onRelogin,
 }: {
   profile: BrowserProfile
+  currentSubject: string
+  canManage: boolean
   onRename: (id: string, next: string) => void
+  onChangeScope: (id: string, visibility: 'private' | 'workspace') => void
   onRemove: () => void
   onRelogin: () => void
 }) {
@@ -145,6 +176,9 @@ function ProfileRow({
   const [draft, setDraft] = useState(profile.name)
   const expiry = profileExpiryStatus(profile, Date.now())
   const needsAttention = expiry.kind === 'soon' || expiry.kind === 'expired'
+  const shared = profile.visibility === 'workspace'
+  // A shared profile created by someone else — surface who owns it (a private profile is always mine).
+  const byOther = shared && profile.createdBy !== currentSubject
 
   return (
     <li className="flex items-center justify-between gap-3 bg-card px-4 py-3">
@@ -180,9 +214,21 @@ function ProfileRow({
                 <span className="shrink-0 text-[10.5px] text-faint">{t('noLogin')}</span>
               )}
               <ExpiryChip status={expiry} />
+              <span
+                className="inline-flex shrink-0 items-center gap-1 rounded-full bg-muted px-1.5 py-0.5 text-[10.5px] text-muted-foreground"
+                title={shared ? t('scopeWorkspaceHint') : t('scopePrivateHint')}
+              >
+                {shared ? <Users className="size-2.5" /> : <Lock className="size-2.5" />}
+                {shared ? t('scopeWorkspace') : t('scopePrivate')}
+              </span>
               {profile.country && (
                 <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10.5px] text-muted-foreground">
                   {profile.country}
+                </span>
+              )}
+              {byOther && (
+                <span className="shrink-0 text-[10.5px] text-faint">
+                  {t('createdBy', { name: profile.createdBy })}
                 </span>
               )}
             </div>
@@ -192,10 +238,11 @@ function ProfileRow({
           </>
         )}
       </div>
-      {!editing && (
+      {!editing && canManage && (
         <div className="flex shrink-0 items-center gap-0.5">
           {/* Re-login is the row's primary action — it keeps its label; housekeeping shrinks to icons. When the
-              saved login is expiring soon or already lapsed it steps up from ghost to draw the eye. */}
+              saved login is expiring soon or already lapsed it steps up from ghost to draw the eye. Only the
+              creator or a workspace admin sees these — a non-manager row is read-only (writes 403 anyway). */}
           <Button
             size="sm"
             variant={needsAttention ? 'secondary' : 'ghost'}
@@ -204,6 +251,16 @@ function ProfileRow({
           >
             <RotateCw className="size-3.5" />
             {t('relogin')}
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => onChangeScope(profile.id, shared ? 'private' : 'workspace')}
+            aria-label={shared ? t('makePrivate') : t('shareWithWorkspace')}
+            title={shared ? t('makePrivate') : t('shareWithWorkspace')}
+            className="size-7 p-0"
+          >
+            {shared ? <Lock className="size-3.5" /> : <Users className="size-3.5" />}
           </Button>
           <Button
             size="sm"

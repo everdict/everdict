@@ -8,6 +8,7 @@ export const browserProfileSchema = z.object({
   id: z.string(),
   tenant: z.string(),
   name: z.string(),
+  visibility: z.enum(['private', 'workspace']), // 'private' = personal (creator-only) · 'workspace' = shared asset
   cookieDomains: z.array(z.string()),
   country: z.string().nullable(), // the geo (egress-proxy country) the login session ran through — null = direct
   capturedAt: z.string().nullable(), // when the login was last captured (S3), or null if none yet

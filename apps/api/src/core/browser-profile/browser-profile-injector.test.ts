@@ -22,6 +22,7 @@ async function setup(withState: boolean) {
     id: "prof-1",
     tenant: "acme",
     name: "GitHub",
+    visibility: "private",
     cookieDomains: [],
     country: null,
     capturedAt: null,

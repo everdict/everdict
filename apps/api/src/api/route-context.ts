@@ -175,7 +175,7 @@ export interface ServerDeps {
   caseRecorder?: CaseRecorder; // durable replay tee — persists the pushed frames/logs (docs/architecture/replay.md)
   browserSessionService?: BrowserSessionService; // interactive browser sessions (browser-profiles S1) — self-scoped (routes disabled if absent)
   browserTickets?: TicketStore; // WS ticket store for interactive browser sessions (browser-session WS disabled if absent)
-  browserProfileService?: BrowserProfileService; // saved authenticated browser profiles (browser-profiles S2) — self-scoped (routes disabled if absent)
+  browserProfileService?: BrowserProfileService; // saved authenticated browser profiles (browser-profiles S2) — workspace-scoped (routes disabled if absent)
   browserProfileCaptureService?: BrowserProfileCaptureService; // capture a session login into a profile (browser-profiles S3) — needs browser sessions (route disabled if absent)
   proxyService?: ProxyService; // workspace BYO egress proxies (browser-profiles S4) — per-country pool for the login browser (route disabled if absent)
 }

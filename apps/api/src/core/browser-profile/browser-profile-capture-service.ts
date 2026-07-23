@@ -1,5 +1,5 @@
 import type { BrowserProfileStore } from "@everdict/application-control";
-import { BadRequestError, type BrowserProfileRecord, NotFoundError } from "@everdict/contracts";
+import { BadRequestError, type BrowserProfileRecord, ForbiddenError, NotFoundError } from "@everdict/contracts";
 import type { SecretCipher } from "@everdict/db";
 import {
   type StorageState,
@@ -10,12 +10,14 @@ import {
 } from "@everdict/topology";
 import type { BrowserSessionService } from "../browser-session/browser-session-service.js";
 
-// The profile ⇄ session bridge (browser-profiles). Two inverse operations, both owner-gated on the profile AND the
-// session (a cross-owner id 404s):
+// The profile ⇄ session bridge (browser-profiles). Two inverse operations. The profile is gated by the same rule as
+// BrowserProfileService management: a `private` profile is creator-only (a non-creator 404s — invisible, no admin
+// override); a `workspace` profile is creator-or-admin (a non-manager 403s). A profile in another workspace 404s. The
+// interactive session stays owner-only regardless (a foreign session 400s — you can only drive your own live browser):
 //   captureInto (S3) — read the session's cookies → encrypt → persist on the profile.
 //   restoreInto      — decrypt the profile's saved cookies → seed them into the session (warm re-login): re-logging
 //                      into a profile no longer starts from a blank browser. If the saved login is still valid the
-//                      owner lands already signed-in; if it lapsed the site still recognizes the device, so re-auth
+//                      caller lands already signed-in; if it lapsed the site still recognizes the device, so re-auth
 //                      is lighter. The decrypted blob stays server-side (only the domains to re-visit are returned).
 export interface BrowserProfileCaptureServiceDeps {
   store: BrowserProfileStore;
@@ -31,6 +33,7 @@ export interface RestoreCommand {
   profileId: string;
   sessionId: string;
   subject: string;
+  isAdmin: boolean; // creator-override on the workspace-scoped profile (the session is always the caller's own)
 }
 
 // A cookie the caller chose to keep, addressed the way the state preview reports it (domain without the
@@ -45,6 +48,7 @@ export interface CaptureCommand {
   profileId: string;
   sessionId: string;
   subject: string;
+  isAdmin: boolean; // creator-override on the workspace-scoped profile (the session is always the caller's own)
   cookies?: CookieSelection[]; // absent = keep everything the session holds
 }
 
@@ -59,17 +63,29 @@ export class BrowserProfileCaptureService {
     this.now = deps.now ?? (() => new Date().toISOString());
   }
 
-  // Owner-gate the profile + resolve the session's reachable CDP base — the shared preamble of capture/restore. A
-  // cross-owner (or missing) profile 404s with no existence leak; an inactive/foreign session is a 400.
+  // Per-visibility gate the profile + resolve the session's reachable CDP base — the shared preamble of
+  // capture/restore. A `private` profile is creator-only (a non-creator 404s — invisible, no admin override); a
+  // `workspace` profile is creator-or-admin (a non-manager 403s); a profile in another workspace 404s; an
+  // inactive/foreign session is a 400 (the session is always the caller's own).
   private async resolve(cmd: {
     tenant: string;
     profileId: string;
     sessionId: string;
     subject: string;
+    isAdmin: boolean;
   }): Promise<{ profile: BrowserProfileRecord; cdpBase: string }> {
     const profile = await this.deps.store.get(cmd.tenant, cmd.profileId);
-    if (!profile || profile.createdBy !== cmd.subject)
-      throw new NotFoundError("NOT_FOUND", { id: cmd.profileId }, "browser profile not found.");
+    if (!profile) throw new NotFoundError("NOT_FOUND", { id: cmd.profileId }, "browser profile not found.");
+    if (profile.visibility === "private") {
+      if (profile.createdBy !== cmd.subject)
+        throw new NotFoundError("NOT_FOUND", { id: cmd.profileId }, "browser profile not found.");
+    } else if (profile.createdBy !== cmd.subject && !cmd.isAdmin) {
+      throw new ForbiddenError(
+        "FORBIDDEN",
+        { id: cmd.profileId },
+        "Only the profile's creator or a workspace admin can manage this shared browser profile.",
+      );
+    }
     const cdpBase = this.deps.sessions.cdpBaseFor(cmd.sessionId, cmd.subject);
     if (!cdpBase)
       throw new BadRequestError(
