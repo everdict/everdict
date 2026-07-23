@@ -40,7 +40,12 @@ const c = await transport.complete(req);
 console.log("complete():", JSON.stringify({ content: c.content, finishReason: c.finishReason, usage: c.usage }));
 
 let streamed = "";
-const s = await transport.stream({ ...req, onContentDelta: (d) => (streamed += d) });
+const s = await transport.stream({
+  ...req,
+  onContentDelta: (d) => {
+    streamed += d;
+  },
+});
 console.log(
   "stream():",
   JSON.stringify({ content: s.content, deltas: streamed.length, finishReason: s.finishReason, usage: s.usage }),
