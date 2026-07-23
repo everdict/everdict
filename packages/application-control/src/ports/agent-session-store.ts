@@ -10,6 +10,8 @@ export interface AgentSessionStore {
   listSessions(tenant: string, owner: string): Promise<AgentSessionRecord[]>;
   // Bump updatedAt (activity) and optionally set the title (e.g. first user message → session title).
   touchSession(tenant: string, id: string, updatedAt: string, title?: string): Promise<void>;
+  // Set the conversation's model override (null clears it → falls back to the workspace/server default) and bump updatedAt.
+  setSessionModel(tenant: string, id: string, model: string | null, updatedAt: string): Promise<void>;
   deleteSession(tenant: string, owner: string, id: string): Promise<void>;
   appendMessages(records: AgentMessageRecord[]): Promise<void>;
   // Oldest first (seq ascending). With sinceSeq, only messages whose seq is strictly greater (polling).

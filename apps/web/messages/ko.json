@@ -3008,6 +3008,9 @@
   "agentChat": {
     "subtitle": "평가에 대해 물어보세요",
     "new": "새 대화",
+    "model": "모델",
+    "modelDefault": "워크스페이스 기본",
+    "modelPick": "모델 선택",
     "empty": "아직 대화가 없어요. 하네스 리뷰·스코어카드 분석·런타임 점검을 대화로 시작해 보세요.",
     "emptyMessages": "스코어카드·judge 트레이스·하네스·런타임에 대해 에이전트에게 물어보세요.",
     "placeholder": "에이전트에게 메시지…",
@@ -3107,7 +3110,10 @@
     "pause": "일시정지",
     "frameAlt": "녹화 프레임",
     "frameOf": "프레임 {i}/{n}",
-    "logsOnly": "이 녹화는 로그만 있어요 (화면 프레임 없음)."
+    "logsOnly": "이 녹화는 로그만 있어요 (화면 프레임 없음).",
+    "stepOf": "스텝 {i}/{n}",
+    "agentPlane": "에이전트",
+    "logLane": "로그"
   },
   "sandboxTerminal": {
     "hint": "실행 중인 샌드박스에서 명령을 실행해요 (ls · cat · ps · env …)",

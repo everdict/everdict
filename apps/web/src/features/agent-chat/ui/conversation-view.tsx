@@ -1,21 +1,76 @@
 'use client'
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { ArrowDown, ArrowLeft, Sparkles, User } from 'lucide-react'
+import { ArrowDown, ArrowLeft, Check, ChevronDown, Cpu, Sparkles, User } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
 import type { AgentAttachmentInput, AgentMessage, AgentReference } from '@/entities/agent-session'
 import { cn } from '@/shared/lib/utils'
 import { Button } from '@/shared/ui/button'
+import { DropdownItem, DropdownLabel, DropdownMenu } from '@/shared/ui/dropdown-menu'
 import { Markdown } from '@/shared/ui/markdown'
 
 import { AgentAvatar } from './agent-avatar'
 import { Composer } from './composer'
 import { MessageRow } from './message-row'
-import { type PendingPermission, PermissionPrompt } from './permission-prompt'
+import { PermissionPrompt, type PendingPermission } from './permission-prompt'
+
+// A compact model selector in the conversation header — the member picks which registered workspace model powers
+// this conversation. "Workspace default" (null) falls back to the workspace AgentSpec's model / the server default.
+// No registered models → nothing to pick, so it renders nothing (the agent uses the default).
+function ModelPicker({
+  models,
+  model,
+  onChange,
+}: {
+  models: string[]
+  model: string | null
+  onChange: (model: string | null) => void
+}) {
+  const t = useTranslations('agentChat')
+  if (models.length === 0) return null
+  return (
+    <DropdownMenu
+      align="end"
+      trigger={({ toggle, open }) => (
+        <button
+          type="button"
+          onClick={toggle}
+          aria-label={t('modelPick')}
+          aria-expanded={open}
+          className="flex max-w-[10rem] shrink-0 items-center gap-1 rounded-md px-1.5 py-1 text-[11.5px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+        >
+          <Cpu className="size-3.5 shrink-0" strokeWidth={1.75} />
+          <span className="min-w-0 truncate">{model ?? t('modelDefault')}</span>
+          <ChevronDown className="size-3 shrink-0 opacity-60" />
+        </button>
+      )}
+    >
+      <DropdownLabel>{t('model')}</DropdownLabel>
+      <DropdownItem
+        onSelect={() => onChange(null)}
+        trailing={model === null ? <Check className="size-4" /> : undefined}
+      >
+        {t('modelDefault')}
+      </DropdownItem>
+      {models.map((m) => (
+        <DropdownItem
+          key={m}
+          onSelect={() => onChange(m)}
+          trailing={model === m ? <Check className="size-4" /> : undefined}
+        >
+          {m}
+        </DropdownItem>
+      ))}
+    </DropdownMenu>
+  )
+}
 
 export function ConversationView({
   title,
+  models,
+  model,
+  onChangeModel,
   messages,
   pendingUser,
   sending,
@@ -37,6 +92,9 @@ export function ConversationView({
   onDecidePermission,
 }: {
   title: string
+  models: string[]
+  model: string | null
+  onChangeModel: (model: string | null) => void
   messages: AgentMessage[]
   pendingUser: string | null
   sending: boolean
@@ -102,6 +160,7 @@ export function ConversationView({
         <span className="min-w-0 flex-1 truncate text-[13px] font-[560] text-foreground">
           {title}
         </span>
+        <ModelPicker models={models} model={model} onChange={onChangeModel} />
       </div>
 
       <div className="relative min-h-0 flex-1">

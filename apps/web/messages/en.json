@@ -3008,6 +3008,9 @@
   "agentChat": {
     "subtitle": "Ask about your evals",
     "new": "New",
+    "model": "Model",
+    "modelDefault": "Workspace default",
+    "modelPick": "Select model",
     "empty": "No conversations yet. Start one to review harnesses, analyze scorecards, or inspect runtimes.",
     "emptyMessages": "Ask the agent about your scorecards, judge traces, harnesses, or runtimes.",
     "placeholder": "Message the agent…",
@@ -3107,7 +3110,10 @@
     "pause": "Pause",
     "frameAlt": "Recorded frame",
     "frameOf": "Frame {i}/{n}",
-    "logsOnly": "This recording has logs only — no screen frames."
+    "logsOnly": "This recording has logs only — no screen frames.",
+    "stepOf": "Step {i}/{n}",
+    "agentPlane": "Agent",
+    "logLane": "Logs"
   },
   "sandboxTerminal": {
     "hint": "Run a command inside the live sandbox (ls · cat · ps · env …)",

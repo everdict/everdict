@@ -32,7 +32,10 @@ async function call<T>(auth: AuthContext, path: string, init?: RequestInit): Pro
 export const agentPlane = {
   // Skill test-drive — run a stateless agent turn with just this (possibly unsaved) skill + read-only tools, return the transcript.
   trySkill: <T>(auth: AuthContext, skill: unknown, message: string) =>
-    call<T>(auth, '/agent/skills/try', { method: 'POST', body: JSON.stringify({ skill, message }) }),
+    call<T>(auth, '/agent/skills/try', {
+      method: 'POST',
+      body: JSON.stringify({ skill, message }),
+    }),
   listSessions: <T>(auth: AuthContext) => call<T>(auth, '/agent/sessions'),
   createSession: <T>(auth: AuthContext, body: unknown) =>
     call<T>(auth, '/agent/sessions', { method: 'POST', body: JSON.stringify(body) }),
@@ -44,6 +47,16 @@ export const agentPlane = {
     call<T>(auth, `/agent/sessions/${encodeURIComponent(id)}`, {
       method: 'PATCH',
       body: JSON.stringify({ title }),
+    }),
+  // Partial update: rename (title) and/or pin the conversation's model (model: id, or null to clear the override).
+  updateSession: <T>(
+    auth: AuthContext,
+    id: string,
+    patch: { title?: string; model?: string | null }
+  ) =>
+    call<T>(auth, `/agent/sessions/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
     }),
   listMessages: <T>(auth: AuthContext, id: string, since?: number) =>
     call<T>(

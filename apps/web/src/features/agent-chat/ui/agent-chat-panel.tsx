@@ -14,6 +14,7 @@ import {
   type AgentReference,
   type AgentSession,
 } from '@/entities/agent-session'
+import { modelsSchema } from '@/entities/model'
 
 import { ConversationView } from './conversation-view'
 import type { PendingPermission } from './permission-prompt'
@@ -43,6 +44,7 @@ export function AgentChatPanel() {
   const [attachments, setAttachments] = useState<AgentAttachmentInput[]>([])
   const [streamingText, setStreamingText] = useState('')
   const [pendingPermissions, setPendingPermissions] = useState<PendingPermission[]>([])
+  const [modelIds, setModelIds] = useState<string[]>([])
   const abortRef = useRef<AbortController | null>(null)
 
   const loadSessions = useCallback(async () => {
@@ -59,6 +61,21 @@ export function AgentChatPanel() {
   useEffect(() => {
     void loadSessions()
   }, [loadSessions])
+
+  // The workspace's registered models power the per-conversation model picker (same ids the agent resolves to
+  // run the turn). Best-effort: no registry / no permission → an empty list, and the picker offers only "default".
+  useEffect(() => {
+    void (async () => {
+      try {
+        const res = await fetch('/api/models', { cache: 'no-store' })
+        if (!res.ok) return
+        const parsed = modelsSchema.safeParse(await res.json())
+        if (parsed.success) setModelIds(parsed.data.map((m) => m.id))
+      } catch {
+        // silent — the picker degrades to "workspace default"
+      }
+    })()
+  }, [])
 
   useEffect(() => {
     if (!activeId) {
@@ -136,6 +153,28 @@ export function AgentChatPanel() {
       }
     },
     [loadSessions]
+  )
+
+  const changeModel = useCallback(
+    async (model: string | null) => {
+      if (!activeId) return
+      // Optimistic — reflect the pick immediately; the PATCH persists it (or reverts via reload on failure).
+      setSessions((prev) =>
+        prev.map((s) => (s.id === activeId ? { ...s, model: model ?? undefined } : s))
+      )
+      try {
+        const res = await fetch(`/api/agent/sessions/${encodeURIComponent(activeId)}`, {
+          method: 'PATCH',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ model }),
+        })
+        if (!res.ok) throw new Error('patch failed')
+      } catch {
+        toast.error(t('errorGeneric'))
+        void loadSessions()
+      }
+    },
+    [activeId, loadSessions, t]
   )
 
   const send = useCallback(
@@ -302,6 +341,9 @@ export function AgentChatPanel() {
   return (
     <ConversationView
       title={active?.title ?? ''}
+      models={modelIds}
+      model={active?.model ?? null}
+      onChangeModel={(m) => void changeModel(m)}
       messages={messages}
       pendingUser={pendingUser}
       sending={sending}

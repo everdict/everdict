@@ -10,6 +10,8 @@ export const agentSessionSchema = z.object({
   tenant: z.string(),
   owner: z.string(),
   title: z.string(),
+  // Registered model id this conversation runs on (the member's per-conversation pick); unset → workspace/server default.
+  model: z.string().optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 })

@@ -8,6 +8,9 @@ export const AgentSessionRecordSchema = z.object({
   tenant: z.string(),
   owner: z.string(), // creator subject — sessions are listed per-owner (a member's own chat history)
   title: z.string(),
+  // Registered model id this conversation runs on (a per-conversation override the member picks in the chat).
+  // Unset → the workspace AgentSpec's model (Settings › Agent) → the agent server's default model.
+  model: z.string().optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });

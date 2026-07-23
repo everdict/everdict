@@ -94,6 +94,64 @@ describe("agent server", () => {
     await app.close();
   });
 
+  describe("per-conversation model selection", () => {
+    it("creates a conversation pinned to a chosen model and exposes it on read", async () => {
+      const app = buildServer(makeDeps());
+      const created = (
+        await app.inject({ method: "POST", url: "/agent/sessions", headers: auth, payload: { model: "gpt-5-mini" } })
+      ).json();
+      expect(created.model).toBe("gpt-5-mini");
+      const got = (await app.inject({ method: "GET", url: `/agent/sessions/${created.id}`, headers: auth })).json();
+      expect(got.model).toBe("gpt-5-mini");
+      await app.close();
+    });
+
+    it("changes the model via PATCH, and null clears it back to the default", async () => {
+      const app = buildServer(makeDeps());
+      const s = (await app.inject({ method: "POST", url: "/agent/sessions", headers: auth, payload: {} })).json();
+      const patched = (
+        await app.inject({
+          method: "PATCH",
+          url: `/agent/sessions/${s.id}`,
+          headers: auth,
+          payload: { model: "claude-sonnet" },
+        })
+      ).json();
+      expect(patched.model).toBe("claude-sonnet");
+      const cleared = (
+        await app.inject({
+          method: "PATCH",
+          url: `/agent/sessions/${s.id}`,
+          headers: auth,
+          payload: { model: null },
+        })
+      ).json();
+      expect(cleared.model).toBeUndefined();
+      await app.close();
+    });
+
+    it("routes the turn through the conversation's chosen model (resolveModelById), not the default", async () => {
+      const resolveModelById = vi.fn(async () => ({ transport: fakeTransportAlways("via picked"), model: "picked" }));
+      const app = buildServer(makeDeps({ resolveModelById }));
+      const s = (
+        await app.inject({
+          method: "POST",
+          url: "/agent/sessions",
+          headers: auth,
+          payload: { model: "picked-model-id" },
+        })
+      ).json();
+      await app.inject({
+        method: "POST",
+        url: `/agent/sessions/${s.id}/chat`,
+        headers: auth,
+        payload: { message: "hi" },
+      });
+      expect(resolveModelById).toHaveBeenCalledWith(expect.objectContaining({ subject: "alice" }), "picked-model-id");
+      await app.close();
+    });
+  });
+
   it("returns 401 when the control plane rejects the identity", async () => {
     const app = buildServer(
       makeDeps({

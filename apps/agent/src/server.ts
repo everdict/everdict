@@ -66,7 +66,9 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
   app.post("/agent/sessions", async (req, reply) => {
     const principal = await principalOf(req, reply);
     if (!principal) return reply;
-    const body = z.object({ title: z.string().optional() }).safeParse(req.body ?? {});
+    const body = z
+      .object({ title: z.string().optional(), model: z.string().min(1).optional() })
+      .safeParse(req.body ?? {});
     if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: body.error.message });
     const now = deps.now();
     const record: AgentSessionRecord = {
@@ -74,6 +76,7 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
       tenant: principal.workspace,
       owner: principal.subject,
       title: body.data.title && body.data.title.length > 0 ? body.data.title : DEFAULT_SESSION_TITLE,
+      ...(body.data.model !== undefined ? { model: body.data.model } : {}),
       createdAt: now,
       updatedAt: now,
     };
@@ -101,12 +104,24 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
     const principal = await principalOf(req, reply);
     if (!principal) return reply;
     const { id } = idParams.parse(req.params);
-    const body = z.object({ title: z.string().min(1).max(200) }).safeParse(req.body);
+    const body = z
+      .object({
+        title: z.string().min(1).max(200).optional(),
+        // A registered model id pins this conversation's model; null clears the override (→ workspace/server default).
+        model: z.string().min(1).nullable().optional(),
+      })
+      .refine((b) => b.title !== undefined || b.model !== undefined, { message: "Nothing to update." })
+      .safeParse(req.body);
     if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: body.error.message });
     const session = await deps.sessions.getSession(principal.workspace, principal.subject, id);
     if (!session) return reply.code(404).send({ code: "NOT_FOUND", message: "Conversation not found." });
-    await deps.sessions.touchSession(principal.workspace, id, deps.now(), body.data.title);
-    return reply.send({ ...session, title: body.data.title, updatedAt: deps.now() });
+    const now = deps.now();
+    if (body.data.title !== undefined) await deps.sessions.touchSession(principal.workspace, id, now, body.data.title);
+    if (body.data.model !== undefined)
+      await deps.sessions.setSessionModel(principal.workspace, id, body.data.model, now);
+    // Return the fresh persisted record — the single source of truth after the write(s).
+    const fresh = await deps.sessions.getSession(principal.workspace, principal.subject, id);
+    return reply.send(fresh ?? session);
   });
 
   app.delete("/agent/sessions/:id", async (req, reply) => {

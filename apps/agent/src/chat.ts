@@ -264,10 +264,12 @@ export async function runChat(
     const userForModel =
       preambles.length > 0 ? `${preambles.join("\n\n")}\n\n---\n\nUser message:\n${userText}` : userText;
     const history: ChatMessage[] = [...recordsToHistory(existing), { role: "user", content: userForModel }];
-    // The AgentSpec.model override (if any) picks which registered model powers this workspace's agent, else the default.
+    // Which registered model powers this turn, in priority order: the conversation's own pick (session.model, set in
+    // the chat) → the workspace AgentSpec's model (Settings › Agent) → the agent server's default model.
+    const modelRef = session.model ?? profile?.model;
     const model =
-      profile?.model && deps.resolveModelById
-        ? await deps.resolveModelById(principal, profile.model)
+      modelRef && deps.resolveModelById
+        ? await deps.resolveModelById(principal, modelRef)
         : await deps.resolveModel(principal);
     // Append the per-turn environment block (workspace · model · date) now that the model is resolved.
     const systemWithEnv = `${systemPrompt}\n\n${buildEnvironmentSection({ workspace, model: model.model, date: deps.now() })}`;

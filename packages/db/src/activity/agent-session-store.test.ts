@@ -59,6 +59,25 @@ describe("InMemoryAgentSessionStore", () => {
     expect(s?.title).toBe("Summarize failures");
   });
 
+  it("setSessionModel pins the conversation's model and clearing it removes the override", async () => {
+    await store.createSession(session({ id: "a", owner: "alice" }));
+    await store.setSessionModel("acme", "a", "gpt-5-mini", "2026-07-10T00:00:00.000Z");
+    let s = await store.getSession("acme", "alice", "a");
+    expect(s?.model).toBe("gpt-5-mini");
+    expect(s?.updatedAt).toBe("2026-07-10T00:00:00.000Z");
+    // null clears the override → falls back to the workspace/server default
+    await store.setSessionModel("acme", "a", null, "2026-07-11T00:00:00.000Z");
+    s = await store.getSession("acme", "alice", "a");
+    expect(s?.model).toBeUndefined();
+    expect(s?.updatedAt).toBe("2026-07-11T00:00:00.000Z");
+  });
+
+  it("persists the model chosen at session creation", async () => {
+    await store.createSession(session({ id: "a", owner: "alice", model: "claude-sonnet" }));
+    const s = await store.getSession("acme", "alice", "a");
+    expect(s?.model).toBe("claude-sonnet");
+  });
+
   it("returns messages seq-ascending and honors sinceSeq for polling", async () => {
     await store.appendMessages([
       message({ id: "m0", seq: 0, role: "user", content: "hi" }),

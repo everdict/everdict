@@ -32,6 +32,13 @@ export class InMemoryAgentSessionStore implements AgentSessionStore {
     if (title !== undefined) s.title = title;
   }
 
+  async setSessionModel(tenant: string, id: string, model: string | null, updatedAt: string): Promise<void> {
+    const s = this.sessions.find((r) => r.tenant === tenant && r.id === id);
+    if (!s) return;
+    s.updatedAt = updatedAt;
+    s.model = model ?? undefined; // null clears the override → falls back to the workspace/server default
+  }
+
   async deleteSession(tenant: string, owner: string, id: string): Promise<void> {
     for (let i = this.sessions.length - 1; i >= 0; i--) {
       const s = this.sessions[i];
@@ -59,6 +66,7 @@ interface SessionRow {
   tenant: string;
   owner: string;
   title: string;
+  model: string | null;
   created_at: string | Date;
   updated_at: string | Date;
 }
@@ -69,6 +77,7 @@ function sessionRowToRecord(row: SessionRow): AgentSessionRecord {
     tenant: row.tenant,
     owner: row.owner,
     title: row.title,
+    ...(row.model !== null ? { model: row.model } : {}),
     createdAt: new Date(row.created_at).toISOString(),
     updatedAt: new Date(row.updated_at).toISOString(),
   });
@@ -111,15 +120,15 @@ export class PgAgentSessionStore implements AgentSessionStore {
 
   async createSession(record: AgentSessionRecord): Promise<void> {
     await this.client.query(
-      `INSERT INTO everdict_agent_sessions (id, tenant, owner, title, created_at, updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6)`,
-      [record.id, record.tenant, record.owner, record.title, record.createdAt, record.updatedAt],
+      `INSERT INTO everdict_agent_sessions (id, tenant, owner, title, model, created_at, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+      [record.id, record.tenant, record.owner, record.title, record.model ?? null, record.createdAt, record.updatedAt],
     );
   }
 
   async getSession(tenant: string, owner: string, id: string): Promise<AgentSessionRecord | undefined> {
     const res = await this.client.query<SessionRow>(
-      `SELECT id, tenant, owner, title, created_at, updated_at
+      `SELECT id, tenant, owner, title, model, created_at, updated_at
        FROM everdict_agent_sessions WHERE tenant = $1 AND owner = $2 AND id = $3`,
       [tenant, owner, id],
     );
@@ -128,7 +137,7 @@ export class PgAgentSessionStore implements AgentSessionStore {
 
   async listSessions(tenant: string, owner: string): Promise<AgentSessionRecord[]> {
     const res = await this.client.query<SessionRow>(
-      `SELECT id, tenant, owner, title, created_at, updated_at
+      `SELECT id, tenant, owner, title, model, created_at, updated_at
        FROM everdict_agent_sessions WHERE tenant = $1 AND owner = $2
        ORDER BY updated_at DESC, id DESC`,
       [tenant, owner],
@@ -149,6 +158,13 @@ export class PgAgentSessionStore implements AgentSessionStore {
       id,
       updatedAt,
     ]);
+  }
+
+  async setSessionModel(tenant: string, id: string, model: string | null, updatedAt: string): Promise<void> {
+    await this.client.query(
+      "UPDATE everdict_agent_sessions SET model = $3, updated_at = $4 WHERE tenant = $1 AND id = $2",
+      [tenant, id, model, updatedAt],
+    );
   }
 
   async deleteSession(tenant: string, owner: string, id: string): Promise<void> {
