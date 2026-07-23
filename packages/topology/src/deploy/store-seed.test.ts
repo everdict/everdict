@@ -178,16 +178,18 @@ describe("buildSeedExec", () => {
 });
 
 describe("buildReadExec", () => {
-  it("reads postgres via tuples-only psql scoped to the schema slice", () => {
+  it("reads postgres via tuples-only psql, scoping the schema on the CONNECTION so the query output isn't polluted", () => {
     const argv = buildReadExec("postgres", "run_run42", "SELECT * FROM t");
     expect(argv[0]).toBe("psql");
     expect(argv).toContain("-t");
-    expect(argv[argv.length - 1]).toBe('SET search_path TO "run_run42"; SELECT * FROM t');
+    // the query is the last arg, unpolluted (a SET in -c would echo "SET" into the captured read — live-caught bug).
+    expect(argv[argv.length - 1]).toBe("SELECT * FROM t");
+    expect(argv[argv.indexOf("-d") + 1]).toContain("search_path=run_run42");
   });
 
   it("reads postgres from the given database (pool)", () => {
     const argv = buildReadExec("postgres", "run_run42", "SELECT 1", "tenant_acme");
-    expect(argv[argv.indexOf("-d") + 1]).toBe("tenant_acme");
+    expect(argv[argv.indexOf("-d") + 1]).toContain("dbname=tenant_acme");
   });
 
   it("reads redis via redis-cli, substituting {prefix}", () => {

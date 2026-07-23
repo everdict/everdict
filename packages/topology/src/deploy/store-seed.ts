@@ -146,8 +146,9 @@ export function buildSeedExec(plan: StoreSeedPlan, db: string = DEFAULT_DB): See
 // The in-container READ command for store-state grading — postgres SELECT / redis command, scoped to the case slice.
 export function buildReadExec(store: string, slice: string, query: string, db: string = DEFAULT_DB): string[] {
   if (store === "postgres") {
-    // -t -A = tuples-only, unaligned → clean scriptable output.
-    return ["psql", "-U", "everdict", "-d", db, "-t", "-A", "-c", `SET search_path TO "${slice}"; ${query}`];
+    // Scope to the case's schema via the connection's search_path STARTUP option, not a SET statement — a `SET` in the
+    // -c script echoes "SET" into the captured stdout and corrupts the read. -t -A = tuples-only, unaligned (clean rows).
+    return ["psql", "-U", "everdict", "-d", `dbname=${db} options='-c search_path=${slice}'`, "-t", "-A", "-c", query];
   }
   if (store === "redis") {
     return redisScriptArgv(withPrefix(query, slice));

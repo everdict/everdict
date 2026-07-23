@@ -318,8 +318,7 @@ describe("K8sTopologyRuntime", () => {
     expect(out).toBe("1|alice\n");
     expect(
       calls.some(
-        (c) =>
-          c.startsWith("exec:") && c.includes('SET search_path TO "run_run1"') && c.includes("SELECT id,name FROM t"),
+        (c) => c.startsWith("exec:") && c.includes("search_path=run_run1") && c.includes("SELECT id,name FROM t"),
       ),
     ).toBe(true);
   });

@@ -239,9 +239,9 @@ describe("DockerTopologyRuntime", () => {
     expect(out).toBe("1|alice\n2|bob\n");
     const cap = f.execCaptures.find((e) => e[0] === "everdict-bu-1.0.0-bu-postgres");
     expect(cap?.[1]).toBe("psql");
-    const script = cap?.[cap.length - 1] ?? "";
-    expect(script).toContain('SET search_path TO "run_run1"');
-    expect(script).toContain("SELECT id,name FROM t");
+    // schema scoped on the connection (search_path startup option), query unpolluted as the last arg.
+    expect(cap?.some((a) => a.includes("search_path=run_run1"))).toBe(true);
+    expect(cap?.[cap.length - 1]).toBe("SELECT id,name FROM t");
   });
 
   // Container names are deterministic across processes, so two runners on one host reach the same names.
