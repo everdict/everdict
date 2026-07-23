@@ -11,3 +11,4 @@ export {
   type TraceEvent,
   type Usage,
 } from './model/schema'
+export { RunRow, sourceLabel, costLabel, type RunRowData } from './ui/run-row'

@@ -2132,8 +2132,18 @@
     "missing": "{caps} 필요",
     "note": "선택한 런타임은 이 서비스(토폴로지) 하니스에 필요한 {caps}을(를) 광고하지 않아요 — 디스패치 시 컨트롤 플레인이 거부해요. 컨테이너 실행이 가능한 런타임을 고르세요."
   },
+  "activityConsole": {
+    "loading": "활동 불러오는 중…",
+    "loadError": "활동을 불러오지 못했어요: {error}",
+    "casesLoading": "케이스 불러오는 중…",
+    "casesError": "케이스를 불러오지 못했어요.",
+    "paginationPrev": "이전",
+    "paginationNext": "다음",
+    "paginationPage": "{page} / {total} 페이지"
+  },
   "runsPage": {
     "title": "실행",
+    "subtitle": "이 워크스페이스의 모든 실행과 스코어카드 배치.",
     "description": "실행 {runs}건",
     "newRun": "새 실행",
     "connectError": "서버에 연결하지 못했어요: {error}",

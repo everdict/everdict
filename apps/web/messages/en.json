@@ -2132,8 +2132,18 @@
     "missing": "needs {caps}",
     "note": "The selected runtime doesn't advertise {caps}, which this service (topology) harness needs — the control plane will reject it at dispatch. Pick a container-capable runtime."
   },
+  "activityConsole": {
+    "loading": "Loading activity…",
+    "loadError": "Couldn't load activity: {error}",
+    "casesLoading": "Loading cases…",
+    "casesError": "Couldn't load cases.",
+    "paginationPrev": "Previous",
+    "paginationNext": "Next",
+    "paginationPage": "Page {page} / {total}"
+  },
   "runsPage": {
     "title": "Runs",
+    "subtitle": "Every run and scorecard batch in this workspace.",
     "description": "{runs, plural, one {# run} other {# runs}}",
     "newRun": "New run",
     "connectError": "Couldn't reach the server: {error}",
