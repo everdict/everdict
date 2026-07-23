@@ -6,6 +6,7 @@ import { RunnerHub } from "@everdict/application-control";
 import { RunnerService } from "@everdict/application-control";
 import { ScheduleService } from "@everdict/application-control";
 import { ScorecardService } from "@everdict/application-control";
+import { SkillService } from "@everdict/application-control";
 import { TraceSourceService } from "@everdict/application-control";
 import type { Principal } from "@everdict/auth";
 import type { Dispatcher } from "@everdict/backends";
@@ -19,6 +20,7 @@ import {
   InMemoryRunnerStore,
   InMemoryScheduleStore,
   InMemoryScorecardStore,
+  InMemorySkillStore,
   InMemoryTenantKeyStore,
   InMemoryUserProfileStore,
   InMemoryWorkspaceInviteStore,
@@ -97,6 +99,7 @@ function harness() {
   const rubricRegistry = new InMemoryRubricRegistry();
   const modelRegistry = new InMemoryModelRegistry();
   const agentRegistry = new InMemoryAgentRegistry();
+  const skillService = new SkillService({ store: new InMemorySkillStore() });
   const runtimeRegistry = new InMemoryRuntimeRegistry();
   const bundleService = new BundleService({
     harnessTemplates,
@@ -140,6 +143,7 @@ function harness() {
     rubricRegistry,
     modelRegistry,
     agentRegistry,
+    skillService,
     runtimeRegistry,
     probeRuntime: async (_ws: string, spec: RuntimeSpec) => ({
       kind: spec.kind,
@@ -362,6 +366,7 @@ describe("MCP tools", () => {
       "create_rubric",
       "create_runtime",
       "create_schedule",
+      "create_skill",
       "delete_agent",
       "delete_agent_versions",
       "delete_dataset",
@@ -372,6 +377,7 @@ describe("MCP tools", () => {
       "delete_model_versions",
       "delete_schedule",
       "delete_scorecard",
+      "delete_skill",
       "diff_datasets",
       "diff_harness_versions",
       "diff_judge_versions",
@@ -392,6 +398,7 @@ describe("MCP tools", () => {
       "get_runtime",
       "get_schedule",
       "get_scorecard",
+      "get_skill",
       "get_usage",
       "get_workspace_mattermost",
       "heartbeat_job",
@@ -418,6 +425,7 @@ describe("MCP tools", () => {
       "list_runtimes",
       "list_schedules",
       "list_scorecards",
+      "list_skills",
       "list_trace_source_traces",
       "list_workspace_github_app",
       "list_workspace_owned_runners",
@@ -455,6 +463,7 @@ describe("MCP tools", () => {
       "submit_run",
       "unlink_workspace_github_app_installation",
       "update_schedule",
+      "update_skill",
       "validate_agent",
       "validate_dataset",
       "validate_judge",

@@ -1,4 +1,5 @@
 import { ProxyService } from "@everdict/application-control";
+import { SkillService } from "@everdict/application-control";
 import { perTenantTrustZones } from "@everdict/domain";
 import type { BrowserSessionProvisioner } from "./common/browser-session-provisioner.js";
 import { CaseRecorder } from "./common/case-recorder.js";
@@ -37,6 +38,7 @@ import { buildPlacementPreflight } from "./core/execution/placement-preflight.js
 import { JudgePreviewService } from "./core/judge/judge-preview-service.js";
 import { ModelService } from "./core/model/model-service.js";
 import { SecretUsageService } from "./core/secret/secret-usage-service.js";
+import { SkillGenerator } from "./core/skill/skill-generator.js";
 import { DockerBrowserProvisioner } from "./infrastructure/browser-session/docker-browser-provisioner.js";
 import { LocalChromeProvisioner } from "./infrastructure/browser-session/local-chrome-provisioner.js";
 import { runtimeSessionProvision } from "./infrastructure/browser-session/nomad-session-provision.js";
@@ -110,6 +112,7 @@ async function main(): Promise<void> {
     commentStore,
     viewStore,
     browserProfileStore,
+    skillStore,
     callbackStore,
     usageStore,
     budgetStore,
@@ -410,6 +413,16 @@ async function main(): Promise<void> {
     agentRegistry,
     // Agent config version-free save/edit upsert (the interactive web path) — the workspace's conversational-agent customization.
     agentService: new AgentService({ agents: agentRegistry }),
+    // Workspace Skills — SKILL.md procedures the members author (dual-scoped private|workspace) + skill-generate (drafts
+    // a skill from a description via the workspace's registered model + key; same secret tiers/base as the model probe).
+    skillService: new SkillService({ store: skillStore }),
+    skillGenerator: new SkillGenerator({
+      models: modelRegistry,
+      scopedSecretsFor,
+      ...(process.env.EVERDICT_JUDGE_OPENAI_BASE_URL
+        ? { openaiBaseUrl: process.env.EVERDICT_JUDGE_OPENAI_BASE_URL }
+        : {}),
+    }),
     runtimeRegistry,
     probeRuntime,
     inspectRuntime,

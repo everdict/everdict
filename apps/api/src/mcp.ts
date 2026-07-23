@@ -33,6 +33,7 @@ import { registerRuntimeTools } from "./api/runtime/runtime.mcp.js";
 import { registerScheduleTools } from "./api/schedule/schedule.mcp.js";
 import { registerScorecardTools } from "./api/scorecard/scorecard.mcp.js";
 import { registerSecretTools } from "./api/secret/secret.mcp.js";
+import { registerSkillTools } from "./api/skill/skill.mcp.js";
 import { registerTraceSourceTools } from "./api/trace-source/trace-source.mcp.js";
 import { registerViewTools } from "./api/view/view.mcp.js";
 import { registerSettingsTools } from "./api/workspace/settings.mcp.js";
@@ -61,6 +62,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
   registerRubricTools(server, ctx);
   registerModelTools(server, ctx);
   registerAgentTools(server, ctx);
+  registerSkillTools(server, ctx);
   registerRuntimeTools(server, ctx);
   registerBenchmarkTools(server, ctx);
   registerBundleTools(server, ctx);

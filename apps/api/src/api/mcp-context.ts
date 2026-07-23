@@ -13,6 +13,7 @@ import type { RunnerHubLike } from "@everdict/application-control";
 import type { RunnerService } from "@everdict/application-control";
 import type { ScheduleService } from "@everdict/application-control";
 import type { ScorecardService } from "@everdict/application-control";
+import type { SkillService } from "@everdict/application-control";
 import type { SpanAttrMappingService } from "@everdict/application-control";
 import type { TraceSourceService } from "@everdict/application-control";
 import type { ViewService } from "@everdict/application-control";
@@ -69,6 +70,7 @@ export interface McpDeps {
   modelService?: ModelService; // Model connection test (dummy completion) + version-free save/edit upsert
   agentRegistry?: AgentRegistry; // Agent config (instructions + MCP tool servers + model) register/read — the conversational agent per workspace
   agentService?: AgentService; // Agent version-free save/edit upsert
+  skillService?: SkillService; // Workspace Skills (SKILL.md procedures the members author) CRUD — dual-scoped private|workspace
   runtimeRegistry?: RuntimeRegistry;
   probeRuntime?: (workspace: string, spec: RuntimeSpec) => Promise<RuntimeProbeResult>; // runtime connection test
   inspectRuntime?: (workspace: string, spec: RuntimeSpec) => Promise<InspectRuntimeResult>; // runtime live cluster view

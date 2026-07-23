@@ -29,6 +29,7 @@ import {
 import type { TraceSourceService } from "@everdict/application-control";
 import type { ViewService } from "@everdict/application-control";
 import type { BrowserProfileService } from "@everdict/application-control";
+import type { SkillService } from "@everdict/application-control";
 import type { WorkspaceService } from "@everdict/application-control";
 import {
   API_KEY_SCOPES,
@@ -106,6 +107,7 @@ import type { JudgePreviewService } from "../core/judge/judge-preview-service.js
 import type { ModelService } from "../core/model/model-service.js";
 import type { RuntimeProbeResult } from "../core/ops/runtime-probe.js";
 import type { SecretUsageService } from "../core/secret/secret-usage-service.js";
+import type { SkillGenerator } from "../core/skill/skill-generator.js";
 import { buildMcpServer } from "../mcp.js";
 
 export interface ServerDeps {
@@ -130,6 +132,8 @@ export interface ServerDeps {
   modelService?: ModelService; // Model connection test (dummy completion) + version-free save/edit upsert (routes disabled if absent)
   agentRegistry?: AgentRegistry; // Agent config (instructions + MCP tool servers + model) CRUD — the workspace's conversational agent (route disabled if absent)
   agentService?: AgentService; // Agent version-free save/edit upsert (routes disabled if absent)
+  skillService?: SkillService; // Workspace Skills (SKILL.md procedures the members author) CRUD (routes disabled if absent)
+  skillGenerator?: SkillGenerator; // skill-generate — draft a skill from a description via the workspace's model (route disabled if absent)
   runtimeRegistry?: RuntimeRegistry; // Runtime (execution infra) CRUD (route disabled if absent)
   // Runtime connection test — RuntimeSpec → build a live backend, then probe() (reachability/auth without a job). main injects it with secrets + a builder.
   probeRuntime?: (workspace: string, spec: RuntimeSpec) => Promise<RuntimeProbeResult>;
