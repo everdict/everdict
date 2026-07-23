@@ -96,4 +96,37 @@ export class OpenAiTransport implements LlmTransport {
       usage: normalizeUsage(usage),
     };
   }
+
+  // One-shot, non-streaming completion (judges / probes) — same request, the final message instead of token deltas.
+  async complete(req: StreamRequest): Promise<StreamResult> {
+    const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
+      { role: "system", content: req.system },
+      ...req.messages,
+    ];
+    const tools = toOpenAiTools(req.tools);
+    const res = await this.client.chat.completions.create(
+      {
+        model: req.model,
+        messages,
+        ...(tools.length > 0 ? { tools } : {}),
+        ...(req.temperature !== undefined ? { temperature: req.temperature } : {}),
+        ...(req.maxTokens !== undefined ? { max_tokens: req.maxTokens } : {}),
+        stream: false,
+      },
+      req.signal ? { signal: req.signal } : undefined,
+    );
+    const choice = res.choices[0];
+    const toolCalls: LlmToolCall[] = (choice?.message.tool_calls ?? [])
+      .filter(
+        (tc): tc is OpenAI.Chat.Completions.ChatCompletionMessageToolCall & { type: "function" } =>
+          tc.type === "function",
+      )
+      .map((tc) => ({ id: tc.id, name: tc.function.name, arguments: tc.function.arguments }));
+    return {
+      content: choice?.message.content ?? null,
+      toolCalls,
+      finishReason: choice?.finish_reason ?? null,
+      usage: normalizeUsage(res.usage),
+    };
+  }
 }

@@ -1,5 +1,6 @@
+import { transportFor } from "@everdict/llm";
 import { describe, expect, it } from "vitest";
-import { modelJudge, openaiComplete } from "./model-judge.js";
+import { modelJudge, transportComplete } from "./model-judge.js";
 
 // Live E2E — calls a real model through an OpenAI-compatible endpoint (e.g. LiteLLM) to verify the full judge path (transport→parse).
 // Requires real infra, so skip if env is unset (CI-safe). Locally:
@@ -12,7 +13,12 @@ const MODEL = process.env.EVERDICT_E2E_OPENAI_MODEL;
 
 describe.skipIf(!BASE || !KEY || !MODEL)("model judge — live OpenAI-compatible (LiteLLM)", () => {
   if (!BASE || !KEY || !MODEL) return; // type narrowing (separate from skipIf)
-  const judge = modelJudge(openaiComplete({ apiKey: KEY, model: MODEL, baseUrl: BASE, maxTokens: 200 }));
+  const judge = modelJudge(
+    transportComplete(transportFor({ provider: "openai-compatible", apiKey: KEY, baseUrl: BASE }), {
+      model: MODEL,
+      maxTokens: 200,
+    }),
+  );
   const task = "Create a file ok.txt containing 'done'.";
   const rubric = "PASS only if ok.txt is created with the exact content 'done'.";
 

@@ -80,4 +80,21 @@ describe("OpenAiTransport", () => {
       function: { name: "get_run", description: "Fetch a run", parameters: { type: "object" } },
     });
   });
+
+  it("complete() returns the non-streaming choice message + usage", async () => {
+    let args: { stream?: boolean } = {};
+    const create = (a: { stream?: boolean }) => {
+      args = a;
+      return Promise.resolve({
+        choices: [{ message: { content: "verdict", tool_calls: [] }, finish_reason: "stop" }],
+        usage: { prompt_tokens: 20, completion_tokens: 3, total_tokens: 23 },
+      });
+    };
+    const client = { chat: { completions: { create } } } as unknown as OpenAI;
+    const result = await new OpenAiTransport(client).complete(baseReq);
+    expect(args.stream).toBe(false);
+    expect(result.content).toBe("verdict");
+    expect(result.finishReason).toBe("stop");
+    expect(result.usage).toEqual({ inputTokens: 20, outputTokens: 3, totalTokens: 23 });
+  });
 });

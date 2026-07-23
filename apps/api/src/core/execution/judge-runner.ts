@@ -15,14 +15,8 @@ import type {
 } from "@everdict/contracts";
 import { toScores } from "@everdict/contracts";
 import { modelApiKeySecretName, normalizeModelBinding } from "@everdict/domain";
-import {
-  type JudgeCompletion,
-  JudgeGrader,
-  anthropicComplete,
-  harnessComplete,
-  modelJudge,
-  openaiComplete,
-} from "@everdict/graders";
+import { type JudgeCompletion, JudgeGrader, harnessComplete, modelJudge, transportComplete } from "@everdict/graders";
+import { transportFor } from "@everdict/llm";
 import type { HarnessInstanceRegistry, ModelRegistry, RubricRegistry } from "@everdict/registry";
 import { resolveJudgeArtifacts } from "./resolve-judge-artifacts.js";
 
@@ -331,29 +325,21 @@ export function defaultJudgeRunner(deps: DefaultJudgeRunnerDeps): JudgeRunner {
             `model '${ref}${version === "latest" ? "" : `@${version}`}' is not a registered model in this workspace`,
           );
         }
-        if (provider === "anthropic") {
-          const apiKey = secrets[keyName];
-          if (!apiKey) return skip(spec, `${keyName} secret not configured`);
-          const baseUrl = modelBaseUrl ?? deps.anthropicBaseUrl;
-          complete = anthropicComplete({
-            apiKey,
-            model,
-            ...(baseUrl ? { baseUrl } : {}),
-            ...(maxTokens ? { maxTokens } : {}),
-            ...(deps.fetchImpl ? { fetchImpl: deps.fetchImpl } : {}),
-          });
-        } else {
-          const apiKey = secrets[keyName];
-          if (!apiKey) return skip(spec, `${keyName} secret not configured`);
-          const baseUrl = secrets[OPENAI_BASE_URL] ?? modelBaseUrl ?? deps.openaiBaseUrl;
-          complete = openaiComplete({
-            apiKey,
-            model,
-            ...(baseUrl ? { baseUrl } : {}),
-            ...(maxTokens ? { maxTokens } : {}),
-            ...(deps.fetchImpl ? { fetchImpl: deps.fetchImpl } : {}),
-          });
-        }
+        const apiKey = secrets[keyName];
+        if (!apiKey) return skip(spec, `${keyName} secret not configured`);
+        // Same provider-native transport the agent uses (@everdict/llm) — Anthropic Messages / OpenAI, custom baseUrl
+        // for an OpenAI-compatible endpoint. The OPENAI_BASE_URL secret still overrides for the openai provider.
+        const baseUrl =
+          provider === "anthropic"
+            ? (modelBaseUrl ?? deps.anthropicBaseUrl)
+            : (secrets[OPENAI_BASE_URL] ?? modelBaseUrl ?? deps.openaiBaseUrl);
+        const transport = transportFor({
+          provider,
+          apiKey,
+          ...(baseUrl ? { baseUrl } : {}),
+          ...(deps.fetchImpl ? { fetchImpl: deps.fetchImpl } : {}),
+        });
+        complete = transportComplete(transport, { model, ...(maxTokens ? { maxTokens } : {}) });
       }
 
       // 3) Unified judging: wrap modelJudge (transport) in JudgeGrader to score the trace → judge:<id> score(s).

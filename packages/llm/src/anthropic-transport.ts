@@ -155,12 +155,12 @@ export class AnthropicTransport implements LlmTransport {
     this.f = config.fetchImpl ?? fetch;
   }
 
-  async stream(req: StreamRequest): Promise<StreamResult> {
+  // Build the request body (minus `stream`): message/tool translation + cache_control breakpoints on the stable prefix
+  // (tools + system) and a rolling one on the last turn.
+  private buildBody(req: StreamRequest): Record<string, unknown> {
     const cacheSystem = req.cache?.system === true;
     const cacheTools = req.cache?.tools === true;
     const { system, out } = foldMessages(req.system, req.messages);
-    // Rolling history breakpoint: cache_control on the last block of the last turn caches the conversation prefix up to
-    // this turn — next turn's identical prefix is a cache hit.
     if ((cacheSystem || cacheTools) && out.length > 0) {
       const lastMsg = out[out.length - 1];
       const lastBlock = lastMsg?.content[lastMsg.content.length - 1];
@@ -170,17 +170,17 @@ export class AnthropicTransport implements LlmTransport {
     }
     const systemField =
       cacheSystem && system.length > 0 ? [{ type: "text", text: system, cache_control: EPHEMERAL }] : system;
-
-    const body = {
+    return {
       model: req.model,
       max_tokens: req.maxTokens ?? DEFAULT_MAX_TOKENS,
       system: systemField,
       messages: out,
       ...(req.tools.length > 0 ? { tools: toAnthropicTools(req.tools, cacheTools) } : {}),
       ...(req.temperature !== undefined ? { temperature: req.temperature } : {}),
-      stream: true,
     };
+  }
 
+  private async post(body: Record<string, unknown>, signal?: AbortSignal): Promise<Response> {
     let res: Response;
     try {
       res = await this.f(`${this.base}/v1/messages`, {
@@ -191,7 +191,7 @@ export class AnthropicTransport implements LlmTransport {
           "anthropic-version": ANTHROPIC_VERSION,
         },
         body: JSON.stringify(body),
-        ...(req.signal ? { signal: req.signal } : {}),
+        ...(signal ? { signal } : {}),
       });
     } catch (err) {
       throw new UpstreamError(
@@ -200,12 +200,58 @@ export class AnthropicTransport implements LlmTransport {
         `model call failed: ${err instanceof Error ? err.message : String(err)}`,
       );
     }
-    if (!res.ok || res.body === null) {
+    if (!res.ok) {
       const text = await res.text().catch(() => "");
       throw new UpstreamError("UPSTREAM_ERROR", { status: res.status }, `model ${res.status}: ${text.slice(0, 200)}`);
     }
+    return res;
+  }
 
+  async stream(req: StreamRequest): Promise<StreamResult> {
+    const res = await this.post({ ...this.buildBody(req), stream: true }, req.signal);
+    if (res.body === null) throw new UpstreamError("UPSTREAM_ERROR", {}, "The model stream response has no body.");
     return this.consume(res.body, req.onContentDelta);
+  }
+
+  // One-shot, non-streaming completion (judges / probes) — the final Messages response instead of an SSE stream.
+  async complete(req: StreamRequest): Promise<StreamResult> {
+    const res = await this.post(this.buildBody(req), req.signal);
+    const json = (await res.json()) as {
+      content?: Array<{ type?: string; text?: string; id?: string; name?: string; input?: unknown }>;
+      stop_reason?: string;
+      usage?: {
+        input_tokens?: number;
+        output_tokens?: number;
+        cache_read_input_tokens?: number;
+        cache_creation_input_tokens?: number;
+      };
+    };
+    let content = "";
+    const toolCalls: LlmToolCall[] = [];
+    for (const block of json.content ?? []) {
+      // Collect text from any block carrying a string `text` (a thinking-enabled model puts a thinking block first);
+      // tool_use blocks become tool calls.
+      if (block.type === "tool_use")
+        toolCalls.push({ id: block.id ?? "", name: block.name ?? "", arguments: JSON.stringify(block.input ?? {}) });
+      else if (typeof block.text === "string") content += block.text;
+    }
+    const u = json.usage;
+    const cacheRead = u?.cache_read_input_tokens ?? 0;
+    const cacheWrite = u?.cache_creation_input_tokens ?? 0;
+    const inputTokens = (u?.input_tokens ?? 0) + cacheRead + cacheWrite;
+    const outputTokens = u?.output_tokens ?? 0;
+    return {
+      content: content.length > 0 ? content : null,
+      toolCalls: toolCalls.filter((c) => c.id.length > 0 && c.name.length > 0),
+      finishReason: json.stop_reason ?? null,
+      usage: {
+        inputTokens,
+        outputTokens,
+        totalTokens: inputTokens + outputTokens,
+        ...(cacheRead > 0 ? { cacheReadTokens: cacheRead } : {}),
+        ...(cacheWrite > 0 ? { cacheWriteTokens: cacheWrite } : {}),
+      },
+    };
   }
 
   // Parse the Anthropic SSE event stream into a canonical StreamResult.

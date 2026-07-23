@@ -1,7 +1,8 @@
 import { BadRequestError } from "@everdict/contracts";
 import type { GenerateSkillResult } from "@everdict/contracts/wire";
 import { modelApiKeySecretName } from "@everdict/domain";
-import { type JudgeCompletion, anthropicComplete, openaiComplete } from "@everdict/graders";
+import { type JudgeCompletion, transportComplete } from "@everdict/graders";
+import { transportFor } from "@everdict/llm";
 import type { ModelRegistry } from "@everdict/registry";
 import type { ScopedSecretTiers } from "../execution/judge-auth-dispatcher.js";
 
@@ -80,14 +81,16 @@ export class SkillGenerator {
       );
     const envBaseUrl = spec.provider === "anthropic" ? this.deps.anthropicBaseUrl : this.deps.openaiBaseUrl;
     const baseUrl = spec.baseUrl ?? envBaseUrl;
-    const cfg = {
+    const transport = transportFor({
+      provider: spec.provider,
       apiKey,
-      model: spec.model,
       ...(baseUrl ? { baseUrl } : {}),
-      maxTokens: GENERATE_MAX_TOKENS,
       ...(this.deps.fetchImpl ? { fetchImpl: this.deps.fetchImpl } : {}),
-    };
-    const complete: JudgeCompletion = spec.provider === "anthropic" ? anthropicComplete(cfg) : openaiComplete(cfg);
+    });
+    const complete: JudgeCompletion = transportComplete(transport, {
+      model: spec.model,
+      maxTokens: GENERATE_MAX_TOKENS,
+    });
     const prompt = `${SYSTEM_PROMPT}\n\nUser's description of the skill to create:\n${input.description}`;
     const text = await complete(prompt); // upstream/network failures are already remapped to UpstreamError
     return parseDraft(text, input.description);

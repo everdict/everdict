@@ -62,9 +62,12 @@ export interface StreamResult {
 }
 
 // A provider-native transport: translate the canonical request to the provider's API (message protocol, tool format,
-// prompt caching), stream it, and normalize the reply. One method serves both agentic turns (with tools) and one-shot
-// completions (empty tools) — e.g. the compaction summariser and model judges.
+// prompt caching), and normalize the reply. `stream` powers the agent loop (live token deltas). `complete` is the
+// one-shot, non-streaming variant for callers that only want the final text (model judges, connection probes, the
+// compaction summariser) — same request/result shape, no streaming. Optional so a fake transport can implement only
+// what it exercises; callers that want a one-shot fall back to `stream` when it's absent.
 export interface LlmTransport {
   readonly provider: string;
   stream(req: StreamRequest): Promise<StreamResult>;
+  complete?(req: StreamRequest): Promise<StreamResult>;
 }

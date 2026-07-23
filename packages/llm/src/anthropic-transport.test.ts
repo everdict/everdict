@@ -112,4 +112,28 @@ describe("AnthropicTransport", () => {
     const transport = new AnthropicTransport({ apiKey: "k", fetchImpl });
     await expect(transport.stream(base)).rejects.toThrow(/model 401/);
   });
+
+  it("complete() reads a non-streaming Messages response (first text block + tool_use)", async () => {
+    let body = "";
+    const fetchImpl = (async (_url: string, init: { body: string }) => {
+      body = init.body;
+      return new Response(
+        JSON.stringify({
+          content: [
+            { type: "thinking", thinking: "…" },
+            { type: "text", text: "verdict" },
+            { type: "tool_use", id: "tu_1", name: "get_run", input: { id: "r1" } },
+          ],
+          stop_reason: "tool_use",
+          usage: { input_tokens: 10, output_tokens: 2, cache_read_input_tokens: 4 },
+        }),
+        { status: 200 },
+      );
+    }) as unknown as typeof fetch;
+    const result = await new AnthropicTransport({ apiKey: "k", fetchImpl }).complete(base);
+    expect(JSON.parse(body).stream).toBeUndefined(); // non-streaming request
+    expect(result.content).toBe("verdict"); // skips the thinking block
+    expect(result.toolCalls).toEqual([{ id: "tu_1", name: "get_run", arguments: '{"id":"r1"}' }]);
+    expect(result.usage).toEqual({ inputTokens: 14, outputTokens: 2, totalTokens: 16, cacheReadTokens: 4 });
+  });
 });

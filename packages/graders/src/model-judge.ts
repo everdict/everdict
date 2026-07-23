@@ -1,4 +1,5 @@
 import { type JudgeCriterion, type TraceEvent, UpstreamError } from "@everdict/contracts";
+import type { LlmMessage, LlmTransport } from "@everdict/llm";
 import type { CriterionVerdict, Judge, JudgeImage, JudgeInput, JudgeVerdict } from "./judge.js";
 
 // Model-call primitive — (prompt[, image]) → raw text. Separates transport from judging logic (injected in tests).
@@ -242,114 +243,42 @@ export function modelJudge(complete: JudgeCompletion): Judge {
 const TRUNCATION_HINT =
   " The token budget ran out before any visible text — reasoning models spend it on thinking first; raise maxTokens.";
 
-// Anthropic Messages API transport (fetch). External failures are remapped to UpstreamError (so monitoring blames us).
-export function anthropicComplete(cfg: {
-  apiKey: string;
-  model: string;
-  baseUrl?: string;
-  maxTokens?: number;
-  fetchImpl?: typeof fetch;
-}): JudgeCompletion {
-  const f = cfg.fetchImpl ?? fetch;
-  const base = (cfg.baseUrl ?? "https://api.anthropic.com").replace(/\/$/, "");
+// The judge's completion transport, unified onto the provider-native @everdict/llm transport (Anthropic Messages /
+// OpenAI / OpenAI-compatible). One home for provider-native LLM calls — the judge no longer carries its own per-provider
+// fetch code. A VLM judge's image rides as an image_url content part (the transport renders it into each provider's
+// native image block). External failures are already remapped to UpstreamError inside the transport.
+export function transportComplete(
+  transport: LlmTransport,
+  cfg: { model: string; maxTokens?: number },
+): JudgeCompletion {
   return async (prompt, image) => {
-    // With an image, multimodal content (text + base64 image block) — Anthropic Messages vision format.
-    const content = image
-      ? [
-          { type: "text", text: prompt },
-          { type: "image", source: { type: "base64", media_type: image.mediaType, data: image.base64 } },
-        ]
-      : prompt;
-    let res: Response;
-    try {
-      res = await f(`${base}/v1/messages`, {
-        method: "POST",
-        headers: { "content-type": "application/json", "x-api-key": cfg.apiKey, "anthropic-version": "2023-06-01" },
-        body: JSON.stringify({
-          model: cfg.model,
-          max_tokens: cfg.maxTokens ?? 1024,
-          messages: [{ role: "user", content }],
-        }),
-      });
-    } catch (err) {
-      throw new UpstreamError(
-        "UPSTREAM_ERROR",
-        {},
-        `model call failed: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
-    if (!res.ok) {
-      const body = await res.text().catch(() => "");
-      throw new UpstreamError("UPSTREAM_ERROR", { status: res.status }, `model ${res.status}: ${body.slice(0, 200)}`);
-    }
-    const json = (await res.json()) as { content?: Array<{ text?: string }>; stop_reason?: string };
-    // First text block, not content[0] — a thinking-enabled model puts a thinking block first.
-    const text = json.content?.find((block) => typeof block.text === "string")?.text;
-    if (typeof text !== "string")
-      throw new UpstreamError(
-        "UPSTREAM_ERROR",
-        {},
-        `The model response has no text${json.stop_reason ? ` (stop_reason: ${json.stop_reason})` : ""}.${
-          json.stop_reason === "max_tokens" ? TRUNCATION_HINT : ""
-        }`,
-      );
-    return text;
-  };
-}
-
-// OpenAI Chat Completions transport (fetch). For OpenAI-compatible endpoints, also supports LiteLLM proxies etc. via baseUrl.
-export function openaiComplete(cfg: {
-  apiKey: string;
-  model: string;
-  baseUrl?: string;
-  maxTokens?: number;
-  fetchImpl?: typeof fetch;
-}): JudgeCompletion {
-  const f = cfg.fetchImpl ?? fetch;
-  const base = (cfg.baseUrl ?? "https://api.openai.com/v1").replace(/\/$/, "");
-  return async (prompt, image) => {
-    // With an image, multimodal content (text + data-URL image_url) — OpenAI-compatible vision format (incl. LiteLLM proxies).
-    const content = image
+    const content: LlmMessage["content"] = image
       ? [
           { type: "text", text: prompt },
           { type: "image_url", image_url: { url: `data:${image.mediaType};base64,${image.base64}` } },
         ]
       : prompt;
-    let res: Response;
-    try {
-      res = await f(`${base}/chat/completions`, {
-        method: "POST",
-        headers: { "content-type": "application/json", authorization: `Bearer ${cfg.apiKey}` },
-        body: JSON.stringify({
-          model: cfg.model,
-          ...(cfg.maxTokens ? { max_tokens: cfg.maxTokens } : {}),
-          messages: [{ role: "user", content }],
-        }),
-      });
-    } catch (err) {
+    // A judge is one-shot — prefer the transport's non-streaming complete(); fall back to stream() for a fake that only
+    // implements streaming.
+    const run = transport.complete ? transport.complete.bind(transport) : transport.stream.bind(transport);
+    const result = await run({
+      model: cfg.model,
+      system: "",
+      messages: [{ role: "user", content }],
+      tools: [],
+      ...(cfg.maxTokens !== undefined ? { maxTokens: cfg.maxTokens } : {}),
+    });
+    const text = result.content;
+    if (typeof text !== "string" || text.length === 0) {
+      const stop = result.finishReason;
       throw new UpstreamError(
         "UPSTREAM_ERROR",
-        {},
-        `model call failed: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
-    if (!res.ok) {
-      const body = await res.text().catch(() => "");
-      throw new UpstreamError("UPSTREAM_ERROR", { status: res.status }, `model ${res.status}: ${body.slice(0, 200)}`);
-    }
-    const json = (await res.json()) as {
-      choices?: Array<{ message?: { content?: string | null }; finish_reason?: string }>;
-    };
-    const choice = json.choices?.[0];
-    const text = choice?.message?.content;
-    if (typeof text !== "string")
-      throw new UpstreamError(
-        "UPSTREAM_ERROR",
-        {},
-        `The model response has no text${choice?.finish_reason ? ` (finish_reason: ${choice.finish_reason})` : ""}.${
-          choice?.finish_reason === "length" ? TRUNCATION_HINT : ""
+        { finishReason: stop },
+        `The model response has no text${stop ? ` (stop: ${stop})` : ""}.${
+          stop === "max_tokens" || stop === "length" ? TRUNCATION_HINT : ""
         }`,
       );
+    }
     return text;
   };
 }

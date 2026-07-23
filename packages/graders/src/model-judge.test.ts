@@ -1,6 +1,7 @@
 import { AppError, type TraceEvent } from "@everdict/contracts";
+import type { LlmTransport, StreamRequest, StreamResult } from "@everdict/llm";
 import { describe, expect, it, vi } from "vitest";
-import { anthropicComplete, harnessComplete, modelJudge, openaiComplete, traceToText } from "./model-judge.js";
+import { harnessComplete, modelJudge, traceToText, transportComplete } from "./model-judge.js";
 
 const TRACE: TraceEvent[] = [{ t: 0, kind: "llm_call", model: "m" }];
 
@@ -180,114 +181,43 @@ describe("modelJudge", () => {
   });
 });
 
-describe("anthropicComplete", () => {
-  it("calls the Messages API and returns content[0].text", async () => {
-    const fetchImpl = vi.fn((_url: string, _init?: RequestInit) =>
-      Promise.resolve(new Response(JSON.stringify({ content: [{ text: "hi" }] }), { status: 200 })),
-    );
-    const complete = anthropicComplete({ apiKey: "k", model: "claude-opus-4-8", fetchImpl: fetchImpl as typeof fetch });
-    expect(await complete("p")).toBe("hi");
-    expect(fetchImpl.mock.calls[0]?.[0]).toMatch(/\/v1\/messages$/);
-    expect((fetchImpl.mock.calls[0]?.[1]?.headers as Record<string, string>)["x-api-key"]).toBe("k");
+describe("transportComplete", () => {
+  // Provider-native call behavior (Anthropic Messages / OpenAI, image blocks, error mapping) is tested in @everdict/llm;
+  // here we test the JudgeCompletion wrapper over an injected transport.
+  function fakeTransport(result: Partial<StreamResult>): {
+    transport: LlmTransport;
+    requests: StreamRequest[];
+  } {
+    const requests: StreamRequest[] = [];
+    const transport: LlmTransport = {
+      provider: "fake",
+      stream: async (req) => {
+        requests.push(req);
+        return { content: null, toolCalls: [], finishReason: null, ...result };
+      },
+    };
+    return { transport, requests };
+  }
+
+  it("returns the transport's content for a text prompt", async () => {
+    const { transport, requests } = fakeTransport({ content: "verdict" });
+    expect(await transportComplete(transport, { model: "m" })("p")).toBe("verdict");
+    expect(requests[0]?.messages).toEqual([{ role: "user", content: "p" }]);
   });
 
-  it("remaps non-2xx to UpstreamError", async () => {
-    const fetchImpl = vi.fn((_url: string, _init?: RequestInit) =>
-      Promise.resolve(new Response("nope", { status: 500 })),
-    );
-    const complete = anthropicComplete({ apiKey: "k", model: "m", fetchImpl: fetchImpl as typeof fetch });
-    await expect(complete("p")).rejects.toBeInstanceOf(AppError);
+  it("sends the image as an image_url content part for a VLM judge", async () => {
+    const { transport, requests } = fakeTransport({ content: "v" });
+    await transportComplete(transport, { model: "m" })("p", { base64: "B64", mediaType: "image/png" });
+    const content = requests[0]?.messages[0]?.content as unknown as Array<Record<string, unknown>>;
+    expect(content[0]).toEqual({ type: "text", text: "p" });
+    expect(content[1]).toEqual({ type: "image_url", image_url: { url: "data:image/png;base64,B64" } });
   });
 
-  it("returns the first TEXT block when a thinking block comes first (thinking-enabled model)", async () => {
-    const fetchImpl = vi.fn((_url: string, _init?: RequestInit) =>
-      Promise.resolve(
-        new Response(
-          JSON.stringify({
-            content: [
-              { type: "thinking", thinking: "…" },
-              { type: "text", text: "hi" },
-            ],
-          }),
-          {
-            status: 200,
-          },
-        ),
-      ),
+  it("reports a neutral no-text message with the stop reason + truncation hint", async () => {
+    const { transport } = fakeTransport({ content: null, finishReason: "max_tokens" });
+    await expect(transportComplete(transport, { model: "m" })("p")).rejects.toThrow(
+      "The model response has no text (stop: max_tokens). The token budget ran out before any visible text — reasoning models spend it on thinking first; raise maxTokens.",
     );
-    const complete = anthropicComplete({ apiKey: "k", model: "claude-opus-4-8", fetchImpl: fetchImpl as typeof fetch });
-    expect(await complete("p")).toBe("hi");
-  });
-
-  it("a no-text response reports a neutral message (not 'judge') with the stop_reason", async () => {
-    const fetchImpl = vi.fn((_url: string, _init?: RequestInit) =>
-      Promise.resolve(new Response(JSON.stringify({ content: [], stop_reason: "max_tokens" }), { status: 200 })),
-    );
-    const complete = anthropicComplete({ apiKey: "k", model: "m", fetchImpl: fetchImpl as typeof fetch });
-    await expect(complete("p")).rejects.toThrow(
-      "The model response has no text (stop_reason: max_tokens). The token budget ran out before any visible text — reasoning models spend it on thinking first; raise maxTokens.",
-    );
-  });
-
-  it("with an image, sends multimodal content (base64 image block)", async () => {
-    const fetchImpl = vi.fn((_url: string, _init?: RequestInit) =>
-      Promise.resolve(new Response(JSON.stringify({ content: [{ text: "hi" }] }), { status: 200 })),
-    );
-    const complete = anthropicComplete({ apiKey: "k", model: "claude-opus-4-8", fetchImpl: fetchImpl as typeof fetch });
-    await complete("p", { base64: "B64", mediaType: "image/png" });
-    const body = JSON.parse(String((fetchImpl.mock.calls[0]?.[1] as RequestInit).body));
-    expect(body.messages[0].content[0]).toEqual({ type: "text", text: "p" });
-    expect(body.messages[0].content[1]).toEqual({
-      type: "image",
-      source: { type: "base64", media_type: "image/png", data: "B64" },
-    });
-  });
-});
-
-describe("openaiComplete", () => {
-  it("calls chat/completions and returns choices[0].message.content (base URL applied)", async () => {
-    const fetchImpl = vi.fn((_url: string, _init?: RequestInit) =>
-      Promise.resolve(
-        new Response(JSON.stringify({ choices: [{ message: { content: "verdict" } }] }), { status: 200 }),
-      ),
-    );
-    const complete = openaiComplete({
-      apiKey: "k",
-      model: "gpt-5.4-mini",
-      baseUrl: "http://litellm/v1",
-      fetchImpl: fetchImpl as typeof fetch,
-    });
-    expect(await complete("p")).toBe("verdict");
-    expect(fetchImpl.mock.calls[0]?.[0]).toBe("http://litellm/v1/chat/completions");
-    expect((fetchImpl.mock.calls[0]?.[1]?.headers as Record<string, string>).authorization).toBe("Bearer k");
-  });
-
-  it("a null-content response (reasoning model spent the budget) reports a neutral message with the finish_reason", async () => {
-    const fetchImpl = vi.fn((_url: string, _init?: RequestInit) =>
-      Promise.resolve(
-        new Response(JSON.stringify({ choices: [{ message: { content: null }, finish_reason: "length" }] }), {
-          status: 200,
-        }),
-      ),
-    );
-    const complete = openaiComplete({ apiKey: "k", model: "gpt-5.4-mini", fetchImpl: fetchImpl as typeof fetch });
-    await expect(complete("p")).rejects.toThrow(
-      "The model response has no text (finish_reason: length). The token budget ran out before any visible text — reasoning models spend it on thinking first; raise maxTokens.",
-    );
-  });
-
-  it("with an image, sends multimodal content (image_url data-URL) — incl. LiteLLM vision", async () => {
-    const fetchImpl = vi.fn((_url: string, _init?: RequestInit) =>
-      Promise.resolve(new Response(JSON.stringify({ choices: [{ message: { content: "v" } }] }), { status: 200 })),
-    );
-    const complete = openaiComplete({ apiKey: "k", model: "gpt-5.4-mini", fetchImpl: fetchImpl as typeof fetch });
-    await complete("p", { base64: "B64", mediaType: "image/png" });
-    const body = JSON.parse(String((fetchImpl.mock.calls[0]?.[1] as RequestInit).body));
-    expect(body.messages[0].content[0]).toEqual({ type: "text", text: "p" });
-    expect(body.messages[0].content[1]).toEqual({
-      type: "image_url",
-      image_url: { url: "data:image/png;base64,B64" },
-    });
   });
 });
 

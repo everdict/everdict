@@ -1,8 +1,9 @@
 import process from "node:process";
 import { type Grader, type GraderSpec, JUDGE_MODEL_ENV, JUDGE_PROVIDER_ENV, type Score } from "@everdict/contracts";
+import { transportFor } from "@everdict/llm";
 import type { Judge } from "./judge.js";
 import { makeGraders } from "./make-graders.js";
-import { anthropicComplete, modelJudge, openaiComplete } from "./model-judge.js";
+import { modelJudge, transportComplete } from "./model-judge.js";
 
 type Env = Record<string, string | undefined>;
 
@@ -14,18 +15,12 @@ type Env = Record<string, string | undefined>;
 export function judgeFromEnv(env: Env = process.env): Judge | undefined {
   const model = env[JUDGE_MODEL_ENV];
   if (!model) return undefined;
-  if ((env[JUDGE_PROVIDER_ENV] ?? "openai") === "anthropic") {
-    const apiKey = env.ANTHROPIC_API_KEY;
-    if (!apiKey) return undefined;
-    return modelJudge(
-      anthropicComplete({ apiKey, model, ...(env.ANTHROPIC_BASE_URL ? { baseUrl: env.ANTHROPIC_BASE_URL } : {}) }),
-    );
-  }
-  const apiKey = env.OPENAI_API_KEY;
+  const provider = (env[JUDGE_PROVIDER_ENV] ?? "openai") === "anthropic" ? "anthropic" : "openai";
+  const apiKey = provider === "anthropic" ? env.ANTHROPIC_API_KEY : env.OPENAI_API_KEY;
   if (!apiKey) return undefined;
-  return modelJudge(
-    openaiComplete({ apiKey, model, ...(env.OPENAI_BASE_URL ? { baseUrl: env.OPENAI_BASE_URL } : {}) }),
-  );
+  const baseUrl = provider === "anthropic" ? env.ANTHROPIC_BASE_URL : env.OPENAI_BASE_URL;
+  const transport = transportFor({ provider, apiKey, ...(baseUrl ? { baseUrl } : {}) });
+  return modelJudge(transportComplete(transport, { model }));
 }
 
 // A skip grader that keeps an unrunnable grader from silently vanishing from the scores (same philosophy as judge-runner: reason in detail).

@@ -22,6 +22,7 @@
     "@everdict/db": "workspace:*",
     "@everdict/domain": "workspace:*",
     "@everdict/graders": "workspace:*",
+    "@everdict/llm": "workspace:*",
     "@everdict/registry": "workspace:*",
     "@everdict/storage": "workspace:*",
     "@everdict/topology": "workspace:*",

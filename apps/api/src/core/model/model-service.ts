@@ -1,7 +1,8 @@
 import type { ModelSpec } from "@everdict/contracts";
 import type { SaveModelResult, TestModelConnectionResult } from "@everdict/contracts/wire";
 import { modelApiKeySecretName, specsEqual } from "@everdict/domain";
-import { type JudgeCompletion, anthropicComplete, openaiComplete } from "@everdict/graders";
+import { type JudgeCompletion, transportComplete } from "@everdict/graders";
+import { transportFor } from "@everdict/llm";
 import type { ModelRegistry } from "@everdict/registry";
 import type { ScopedSecretTiers } from "../execution/judge-auth-dispatcher.js";
 
@@ -79,14 +80,13 @@ export class ModelService {
     const maxTokens = configured === undefined ? PROBE_MAX_TOKENS_FLOOR : Math.max(configured, PROBE_MAX_TOKENS_FLOOR);
     const envBaseUrl = provider === "anthropic" ? this.deps.anthropicBaseUrl : this.deps.openaiBaseUrl;
     const baseUrl = conn.baseUrl ?? envBaseUrl; // the model's own base wins; else the control-plane env default
-    const cfg = {
+    const transport = transportFor({
+      provider,
       apiKey,
-      model,
       ...(baseUrl ? { baseUrl } : {}),
-      maxTokens,
       ...(this.deps.fetchImpl ? { fetchImpl: this.deps.fetchImpl } : {}),
-    };
-    const complete: JudgeCompletion = provider === "anthropic" ? anthropicComplete(cfg) : openaiComplete(cfg);
+    });
+    const complete: JudgeCompletion = transportComplete(transport, { model, maxTokens });
 
     const started = Date.now();
     try {

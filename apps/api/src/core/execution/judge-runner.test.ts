@@ -343,7 +343,7 @@ describe("defaultJudgeRunner", () => {
       Promise.resolve(
         new Response(
           JSON.stringify({ choices: [{ message: { content: '{"pass":true,"score":0.7,"reason":"ok"}' } }] }),
-          { status: 200 },
+          { status: 200, headers: { "content-type": "application/json" } },
         ),
       ),
     );
@@ -374,6 +374,7 @@ describe("defaultJudgeRunner", () => {
       return Promise.resolve(
         new Response(JSON.stringify({ choices: [{ message: { content: '{"pass":true,"score":1,"reason":"ok"}' } }] }), {
           status: 200,
+          headers: { "content-type": "application/json" },
         }),
       );
     });

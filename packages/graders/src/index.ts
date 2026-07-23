@@ -23,8 +23,7 @@ export {
   customPlaceholdersOf,
   modelJudge,
   previewJudge,
-  anthropicComplete,
-  openaiComplete,
+  transportComplete,
   harnessComplete,
   traceToText,
 } from "./model-judge.js";

@@ -19,6 +19,7 @@
   },
   "dependencies": {
     "@everdict/application-execution": "workspace:*",
-    "@everdict/contracts": "workspace:*"
+    "@everdict/contracts": "workspace:*",
+    "@everdict/llm": "workspace:*"
   }
 }

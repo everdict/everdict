@@ -89,6 +89,9 @@ importers:
       '@everdict/job-runner':
         specifier: workspace:*
         version: link:../../packages/job-runner
+      '@everdict/llm':
+        specifier: workspace:*
+        version: link:../../packages/llm
       '@everdict/registry':
         specifier: workspace:*
         version: link:../../packages/registry
@@ -427,6 +430,9 @@ importers:
       '@everdict/contracts':
         specifier: workspace:*
         version: link:../contracts
+      '@everdict/llm':
+        specifier: workspace:*
+        version: link:../llm
 
   packages/harnesses:
     dependencies:
