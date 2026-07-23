@@ -20,6 +20,17 @@ export interface ToolResult {
   images?: ToolResultImage[];
 }
 
+// Permission gate for a (write) tool call. Read-only tools auto-allow; a non-read-only tool consults the host's hook
+// (allow/deny) — the low-level seam a HITL approval flow plugs into. "ask" is expressed by the host resolving the
+// promise only after a human decides, then returning allow/deny.
+export type PermissionDecision = "allow" | "deny";
+export interface PermissionRequest {
+  name: string;
+  isReadOnly: boolean;
+  input: unknown;
+}
+export type PermissionHook = (req: PermissionRequest) => PermissionDecision | Promise<PermissionDecision>;
+
 export interface ToolDefinition {
   name: string;
   description: string;

@@ -6,7 +6,13 @@ import { type StreamChatResult, streamChat } from "../llm/stream-chat.js";
 import { buildSummarizer } from "../llm/summarize.js";
 import { type ChatMessage, systemMessage } from "../messages.js";
 import { extractDiscoveredToolNames } from "../tools/deferred.js";
-import type { ToolContext, ToolResult, ToolResultImage } from "../tools/definition.js";
+import type {
+  PermissionDecision,
+  PermissionHook,
+  ToolContext,
+  ToolResult,
+  ToolResultImage,
+} from "../tools/definition.js";
 import { invokeTool } from "../tools/invocation.js";
 import { toOpenAiTools } from "../tools/openai.js";
 import { ToolRegistry } from "../tools/registry.js";
@@ -22,6 +28,7 @@ export type AgentEvent =
   | { type: "assistant_message"; content: string }
   | { type: "tool_call"; name: string; args: string }
   | { type: "tool_result"; name: string; isError: boolean }
+  | { type: "permission"; name: string; decision: PermissionDecision }
   | { type: "compaction"; droppedMessages: number; mode?: "microcompact" | "summarize" | "drop" }
   | { type: "done"; stopReason: StopReason };
 
@@ -41,6 +48,10 @@ export interface AgentLoopOptions {
   // Rung-2 (LLM) compaction: digest the old span into a summary. Defaults to a summariser bound to this loop's own
   // model (buildSummarizer); tests inject a deterministic one. Return "" to decline (loop falls through to structural).
   summarize?: (oldSpan: ChatMessage[]) => Promise<string>;
+  // Permission gate for write (non-read-only) tool calls — the seam a HITL approval plugs into. Read-only tools skip
+  // it (auto-allow); absent hook = allow (write tools are already opt-in). A denied call becomes an error result the
+  // model sees and can adapt to.
+  permit?: PermissionHook;
   onEvent?: (e: AgentEvent) => void;
   // Fired (awaited) as each assistant/tool message is appended, so the host can persist the transcript
   // incrementally — the source of live progress for a polling UI.
@@ -218,6 +229,14 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
         output = { content: `Unknown tool: ${tc.function.name}`, isError: true };
       } else if (!parsed.ok) {
         output = { content: `Invalid JSON arguments: ${parsed.error}`, isError: true };
+      } else if (tool.isReadOnly !== true && opts.permit) {
+        // Write tool + a permission hook → gate it (read-only tools + no hook fall through to auto-allow).
+        const decision = await opts.permit({ name: tool.name, isReadOnly: false, input: parsed.value });
+        emit({ type: "permission", name: tool.name, decision });
+        output =
+          decision === "deny"
+            ? { content: `Permission denied: the tool "${tool.name}" was not approved by the user.`, isError: true }
+            : await invokeTool(tool, parsed.value, ctx);
       } else {
         output = await invokeTool(tool, parsed.value, ctx);
       }

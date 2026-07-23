@@ -1,7 +1,7 @@
 import type OpenAI from "openai";
 import { describe, expect, it, vi } from "vitest";
 import type { ChatMessage } from "../messages.js";
-import type { ToolDefinition } from "../tools/definition.js";
+import type { PermissionDecision, PermissionRequest, ToolDefinition } from "../tools/definition.js";
 import { ToolRegistry } from "../tools/registry.js";
 import { type AgentEvent, runAgentLoop } from "./loop.js";
 
@@ -219,6 +219,65 @@ describe("runAgentLoop", () => {
     // The multimodal message is in-run only — the persisted transcript stays assistant/tool/assistant (no base64 bloat).
     expect(result.produced.map((m) => m.role)).toEqual(["assistant", "tool", "assistant"]);
     expect(result.content).toBe("I see a red button");
+  });
+
+  it("gates write tools through the permit hook and auto-allows read-only tools", async () => {
+    const writeCall = vi.fn(async () => ({ content: "wrote", isError: false }));
+    const readCall = vi.fn(async () => ({ content: "read", isError: false }));
+    const writeTool: ToolDefinition = {
+      name: "do_write",
+      description: "write",
+      parametersJsonSchema: { type: "object", properties: {} },
+      isReadOnly: false,
+      call: writeCall,
+    };
+    const readTool: ToolDefinition = {
+      name: "do_read",
+      description: "read",
+      parametersJsonSchema: { type: "object", properties: {} },
+      isReadOnly: true,
+      call: readCall,
+    };
+    const permit = vi.fn(
+      async (req: PermissionRequest): Promise<PermissionDecision> => (req.name === "do_write" ? "deny" : "allow"),
+    );
+    // One turn, two tool calls (a write + a read); permit denies the write.
+    const client = fakeClient([
+      [
+        {
+          choices: [
+            {
+              delta: {
+                tool_calls: [
+                  { index: 0, id: "w", function: { name: "do_write", arguments: "{}" } },
+                  { index: 1, id: "r", function: { name: "do_read", arguments: "{}" } },
+                ],
+              },
+              finish_reason: "tool_calls",
+            },
+          ],
+        },
+        usageEnd,
+      ],
+      textResponse("done"),
+    ]);
+    const events: AgentEvent[] = [];
+    const result = await runAgentLoop({
+      client,
+      model: "test-model",
+      systemPrompt: "sys",
+      history,
+      registry: new ToolRegistry([writeTool, readTool]),
+      permit,
+      onEvent: (e) => events.push(e),
+    });
+    expect(writeCall).not.toHaveBeenCalled(); // denied
+    expect(readCall).toHaveBeenCalledOnce(); // read-only → auto-allowed
+    expect(permit).toHaveBeenCalledOnce(); // consulted only for the write tool
+    expect(events.filter((e) => e.type === "permission")).toEqual([
+      { type: "permission", name: "do_write", decision: "deny" },
+    ]);
+    expect(result.toolCalls.find((t) => t.name === "do_write")?.ok).toBe(false);
   });
 
   it("stops with aborted when the signal is already aborted", async () => {
