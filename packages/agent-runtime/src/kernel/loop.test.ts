@@ -280,6 +280,64 @@ describe("runAgentLoop", () => {
     expect(result.toolCalls.find((t) => t.name === "do_write")?.ok).toBe(false);
   });
 
+  it("dispatches multiple tool calls concurrently but appends results in call order", async () => {
+    const finished: string[] = [];
+    const slow: ToolDefinition = {
+      name: "slow",
+      description: "slow",
+      parametersJsonSchema: { type: "object", properties: {} },
+      isReadOnly: true,
+      call: async () => {
+        await new Promise((r) => setTimeout(r, 10));
+        finished.push("slow");
+        return { content: "slow-done", isError: false };
+      },
+    };
+    const fast: ToolDefinition = {
+      name: "fast",
+      description: "fast",
+      parametersJsonSchema: { type: "object", properties: {} },
+      isReadOnly: true,
+      call: async () => {
+        finished.push("fast");
+        return { content: "fast-done", isError: false };
+      },
+    };
+    const client = fakeClient([
+      [
+        {
+          choices: [
+            {
+              delta: {
+                tool_calls: [
+                  { index: 0, id: "s", function: { name: "slow", arguments: "{}" } },
+                  { index: 1, id: "f", function: { name: "fast", arguments: "{}" } },
+                ],
+              },
+              finish_reason: "tool_calls",
+            },
+          ],
+        },
+        usageEnd,
+      ],
+      textResponse("done"),
+    ]);
+    const result = await runAgentLoop({
+      client,
+      model: "test-model",
+      systemPrompt: "sys",
+      history,
+      registry: new ToolRegistry([slow, fast]),
+    });
+    // Concurrency: the fast tool completed before the slow one (sequential would be ["slow","fast"]).
+    expect(finished).toEqual(["fast", "slow"]);
+    // But the transcript preserves CALL order — slow's result precedes fast's (pairing must stay ordered).
+    const toolContents = result.produced
+      .filter((m) => m.role === "tool")
+      .map((m) => (m as { content: string }).content);
+    expect(toolContents).toEqual(["slow-done", "fast-done"]);
+  });
+
   it("stops with aborted when the signal is already aborted", async () => {
     const client = fakeClient([textResponse("unused")]);
     const result = await runAgentLoop({

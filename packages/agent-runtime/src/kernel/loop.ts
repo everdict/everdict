@@ -72,6 +72,9 @@ export interface AgentLoopResult {
 // was too low for multi-step goals; compaction keeps the context bounded so more turns don't blow the window.
 const DEFAULT_MAX_TURNS = 50;
 const DEFAULT_MAX_RETRIES = 2;
+// Circuit breaker: if compaction fires this many times in one run without the context ever fitting, stop instead of
+// hammering the summariser forever on an irrecoverably-oversized context.
+const MAX_COMPACTIONS = 12;
 const RETRY_BACKOFF_MS = [500, 1500];
 // Cap a single tool result before feeding it back to the model — an unbounded MCP payload (a big scorecard JSON)
 // would otherwise dominate the context window in one turn. ~48k chars ≈ ~12k tokens.
@@ -132,6 +135,7 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
   let todos: TodoItem[] = extractTodosFromHistory(messages);
   const registry = new ToolRegistry([...opts.registry.list(), buildTodoTool((t) => (todos = t))]);
   let finalText = "";
+  let compactionCount = 0;
   const toolCalls: { name: string; ok: boolean }[] = [];
   // The messages produced this run, accumulated as they are appended — NOT a tail slice of `messages`, which
   // mid-loop compaction can shrink below the input length (that would drop or misattribute produced turns).
@@ -220,26 +224,33 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
       ...(opts.signal ? { abortSignal: opts.signal } : {}),
     };
     const turnImages: ToolResultImage[] = []; // images returned by this turn's tools → one follow-up multimodal turn
-    for (const tc of result.toolCalls) {
-      emit({ type: "tool_call", name: tc.function.name, args: tc.function.arguments });
-      const tool = registry.get(tc.function.name);
-      const parsed = parseArgs(tc.function.arguments);
-      let output: ToolResult;
-      if (!tool) {
-        output = { content: `Unknown tool: ${tc.function.name}`, isError: true };
-      } else if (!parsed.ok) {
-        output = { content: `Invalid JSON arguments: ${parsed.error}`, isError: true };
-      } else if (tool.isReadOnly !== true && opts.permit) {
-        // Write tool + a permission hook → gate it (read-only tools + no hook fall through to auto-allow).
-        const decision = await opts.permit({ name: tool.name, isReadOnly: false, input: parsed.value });
-        emit({ type: "permission", name: tool.name, decision });
-        output =
-          decision === "deny"
-            ? { content: `Permission denied: the tool "${tool.name}" was not approved by the user.`, isError: true }
-            : await invokeTool(tool, parsed.value, ctx);
-      } else {
-        output = await invokeTool(tool, parsed.value, ctx);
-      }
+    for (const tc of result.toolCalls) emit({ type: "tool_call", name: tc.function.name, args: tc.function.arguments });
+
+    // Dispatch the turn's tool calls CONCURRENTLY (Claude Code parity — the model asks for independent tools together),
+    // then append the results in call order so the assistant.tool_calls ↔ tool pairing stays ordered.
+    const outputs: ToolResult[] = await Promise.all(
+      result.toolCalls.map(async (tc): Promise<ToolResult> => {
+        const tool = registry.get(tc.function.name);
+        const parsed = parseArgs(tc.function.arguments);
+        if (!tool) return { content: `Unknown tool: ${tc.function.name}`, isError: true };
+        if (!parsed.ok) return { content: `Invalid JSON arguments: ${parsed.error}`, isError: true };
+        if (tool.isReadOnly !== true && opts.permit) {
+          // Write tool + a permission hook → gate it (read-only tools + no hook auto-allow).
+          const decision = await opts.permit({ name: tool.name, isReadOnly: false, input: parsed.value });
+          emit({ type: "permission", name: tool.name, decision });
+          if (decision === "deny")
+            return {
+              content: `Permission denied: the tool "${tool.name}" was not approved by the user.`,
+              isError: true,
+            };
+        }
+        return invokeTool(tool, parsed.value, ctx);
+      }),
+    );
+    for (let i = 0; i < result.toolCalls.length; i++) {
+      const tc = result.toolCalls[i];
+      const output = outputs[i];
+      if (!tc || !output) continue;
       const toolMessage: ChatMessage = { role: "tool", tool_call_id: tc.id, content: capToolOutput(output.content) };
       messages = [...messages, toolMessage];
       produced.push(toolMessage);
@@ -269,6 +280,8 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
     // Hybrid budget: the model's reported usage + an estimate of everything appended since (tool results, image turn).
     budget.consumed = usageTokens + estimateTokens(messages.slice(afterAssistantLen));
     if (thresholdReached(budget)) {
+      // Circuit breaker — don't hammer the summariser forever on an irrecoverably-oversized context.
+      if (++compactionCount > MAX_COMPACTIONS) return finish("token_budget", turn);
       // Escalation ladder — try the cheapest, most information-preserving compaction first, stop only if none fit.
       // Rung 1: clear old tool-result bodies (deterministic; freed tokens surface in the next turn's usage).
       const micro = microcompact(messages);
@@ -277,7 +290,13 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
         emit({ type: "compaction", mode: "microcompact", droppedMessages: 0 });
       } else {
         // Rung 2: LLM digest of the old span (goal/pending preserved). Rung 3: structural drop. Else: stop.
-        const summarized = await summarizeAndCompact(messages, summarize);
+        // A summariser failure (upstream error) must not crash the run — fall through to the structural drop.
+        let summarized = messages;
+        try {
+          summarized = await summarizeAndCompact(messages, summarize);
+        } catch {
+          summarized = messages;
+        }
         if (summarized.length < messages.length) {
           emit({ type: "compaction", mode: "summarize", droppedMessages: messages.length - summarized.length });
           messages = summarized;
