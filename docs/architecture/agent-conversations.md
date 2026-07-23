@@ -58,7 +58,7 @@ Depends only on `@everdict/contracts` + `openai` + `@modelcontextprotocol/sdk` +
 | area | ported from | purpose |
 |---|---|---|
 | `kernel/loop` + `agenticAdapter` + `messages` + `normalize` + `systemPrompt` | `runtime/kernel/*` | one turn = LLM call → dispatch tool calls → feed results → repeat until `end_turn`/`max_turns`/budget/aborted |
-| `llm/{client,streamChat,jsonCall}` | `runtime/llm/*` | openai-SDK streaming client **with tool-calling** (LiteLLM/provider baseURL); one-shot JSON for compaction |
+| `@everdict/llm` `LlmTransport` (injected) + `llm/summarize` | `runtime/llm/*` | **provider-NATIVE transport** (Anthropic Messages / OpenAI, native protocol + prompt/KV caching) selected by `ModelSpec.provider`; `stream()` for the turn (tool-calling), `complete()` one-shot for compaction. NOT provider-agnostic-over-LiteLLM — a custom `baseUrl` = the `openai-compatible` escape hatch |
 | `context/{tokenBudget,microCompact,compaction}` | `runtime/context/*` | context-window compaction at ~90% budget (micro → LLM → structural) |
 | `tools/{definition,registry,invocation,deferred,ToolSearchTool,openai}` | `runtime/tools/*` | tool contract + registry + **ToolSearch progressive disclosure** (deferred MCP tools stay hidden until discovered — critical with ~121 MCP tools vs. context budget) |
 | `mcp/{client,bridge,discovery}` | `runtime/mcp/*` | bridge MCP tools → `ToolDefinition` (marked deferred); the transport/session is injected by the host |

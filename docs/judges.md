@@ -167,12 +167,18 @@ Both kinds unify as **`modelJudge(transport)`** (`packages/graders`) — only th
 `JudgeRunner` picks it from the spec; missing key / dispatcher → a **skip** score (`detail: "skipped: …"`) so a
 selected judge never silently vanishes, and `UpstreamError`s become skip scores too.
 
-- **`model` · anthropic** → `anthropicComplete` (Messages API), keyed by the tenant's **`ANTHROPIC_API_KEY`**.
-- **`model` · openai** → `openaiComplete` (Chat Completions), keyed by **`OPENAI_API_KEY`**; OpenAI-compatible so
-  a **LiteLLM** proxy works via the **`OPENAI_BASE_URL`** secret (or `EVERDICT_JUDGE_OPENAI_BASE_URL`). Live-verified
-  end-to-end against a real LiteLLM proxy (`chatgpt/gpt-5.4-mini`): `openaiComplete`→`modelJudge`→`JudgeRunner`
-  produced a `judge:<id>` score from a real model. Reproduce via the guarded scenario test
-  `packages/graders/src/model-judge.scenario.test.ts` (`EVERDICT_E2E_OPENAI_{BASE_URL,KEY,MODEL}`; skips if unset).
+Model judges use the **same provider-native `@everdict/llm` transport the agent uses**:
+`transportComplete(transportFor({ provider, apiKey, baseUrl }), { model })` wraps a one-shot
+`LlmTransport.complete()` as the `JudgeCompletion`. everdict is NOT provider-agnostic-over-LiteLLM — each
+provider is native, with its own message protocol + prompt caching:
+- **`model` · anthropic** → the native Anthropic Messages API, keyed by the tenant's **`ANTHROPIC_API_KEY`**.
+- **`model` · openai** → the native OpenAI Chat Completions, keyed by **`OPENAI_API_KEY`**. A custom
+  **`OPENAI_BASE_URL`** (or `EVERDICT_JUDGE_OPENAI_BASE_URL`) routes an **OpenAI-compatible** endpoint (vLLM, a
+  **LiteLLM** proxy) through the OpenAI transport — an explicit escape hatch, never the default. Live-verified
+  end-to-end against a real OpenAI-compatible proxy (`chatgpt/gpt-5.4-mini`):
+  `transportComplete`→`modelJudge`→`JudgeRunner` produced a `judge:<id>` score from a real model. Reproduce via
+  the guarded scenario test `packages/graders/src/model-judge.scenario.test.ts`
+  (`EVERDICT_E2E_OPENAI_{BASE_URL,KEY,MODEL}`; skips if unset).
 - **`harness`** → `harnessComplete`: dispatches the referenced harness (same path as a run) with the judge prompt
   as its task, then extracts the verdict from that agent's own trace (`traceToText` → tolerant JSON parse). The
   judge-agent must emit a JSON verdict as its output; otherwise it's a skip. (One agent run per case × judge.)

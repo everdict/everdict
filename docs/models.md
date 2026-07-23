@@ -79,7 +79,7 @@ rows, creator or admin). No first-party models are auto-seeded — a workspace s
 ### Connection test (`POST /models/test-connection`, `ModelService.testConnection`)
 Resolves the connection's `apiKeySecret` from the tenant's secret tiers (workspace first, personal fallback — the same
 source dispatch uses) and fires **one** minimal dummy completion through the shared judge transport
-(`anthropicComplete` / `openaiComplete`, a tiny prompt). The probe's `max_tokens` has a roomy **floor** (4096; a larger
+(the provider-native `@everdict/llm` transport via `transportComplete`, a tiny prompt). The probe's `max_tokens` has a roomy **floor** (4096; a larger
 configured `params.maxTokens` wins): reasoning models spend completion budget on thinking before any visible text, so a
 tiny cap would false-fail a healthy connection with `finish_reason: length` — and a cap is a ceiling, not a spend, so
 the floor costs nothing on other models. The outcome is the payload, never a 4xx: `ok:true` with a
