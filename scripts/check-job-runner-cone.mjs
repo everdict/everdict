@@ -23,6 +23,7 @@ const ALLOWLIST = new Set([
   "environments",
   "graders",
   "harnesses",
+  "llm", // provider-native LLM transports (imports contracts + openai only — leaf lib, no control plane)
   "trace",
 ]);
 
