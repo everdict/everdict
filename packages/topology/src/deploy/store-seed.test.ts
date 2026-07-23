@@ -170,10 +170,25 @@ describe("buildSeedExec", () => {
     expect(() => buildSeedExec(pgPlan({ seed: { ref: "s3://x" } }))).toThrow(BadRequestError);
   });
 
-  it("rejects a store kind that has no seed exec yet (minio)", () => {
-    expect(() => buildSeedExec(pgPlan({ store: "minio", isolateBy: "object-prefix", slice: "runs/run42/" }))).toThrow(
-      /not supported yet/,
+  it("seeds minio via mc (local alias), substituting {prefix} with the object-path slice", () => {
+    const exec = buildSeedExec(
+      pgPlan({
+        store: "minio",
+        isolateBy: "object-prefix",
+        slice: "runs/run42/",
+        seed: { inline: "mc pipe local/b/{prefix}k" },
+      }),
     );
+    expect(exec.store).toBe("minio");
+    const argv = exec.argvs[0] ?? [];
+    expect(argv[0]).toBe("sh");
+    const script = argv[argv.length - 1];
+    expect(script).toContain("mc alias set local");
+    expect(script).toContain("mc pipe local/b/runs/run42/k"); // {prefix} → the slice
+  });
+
+  it("rejects a store kind that has no seed exec (only postgres/redis/minio)", () => {
+    expect(() => buildSeedExec(pgPlan({ store: "mysql" }))).toThrow(/not supported/);
   });
 });
 
@@ -198,7 +213,13 @@ describe("buildReadExec", () => {
     expect(argv[argv.length - 1]).toContain("GET run-run42:k");
   });
 
-  it("rejects an unsupported store kind (minio)", () => {
-    expect(() => buildReadExec("minio", "runs/x/", "ls")).toThrow(/not supported yet/);
+  it("reads minio via mc, substituting {prefix}", () => {
+    const argv = buildReadExec("minio", "runs/run42/", "mc cat local/b/{prefix}k");
+    expect(argv[0]).toBe("sh");
+    expect(argv[argv.length - 1]).toContain("mc cat local/b/runs/run42/k");
+  });
+
+  it("rejects an unsupported store kind", () => {
+    expect(() => buildReadExec("mysql", "s/", "x")).toThrow(/not supported/);
   });
 });

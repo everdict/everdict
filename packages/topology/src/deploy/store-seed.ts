@@ -115,9 +115,9 @@ function withPrefix(body: string, slice: string): string {
 }
 
 // Build the in-container seed command(s) for one plan. postgres seeds into the case's SCHEMA slice via psql -c; redis
-// runs the {prefix}-substituted commands through a redis-cli stdin heredoc (multi-command in one exec). `db` names the
-// postgres database (pool = the tenant DB). minio + artifact-ref seeds fail loud — an unsupported fixture is an explicit
-// run failure, never a quietly-empty store. docs/architecture/dependency-store-roles.md
+// runs the {prefix}-substituted commands through a redis-cli stdin heredoc; minio runs the author's mc commands
+// ({prefix} = object slice). `db` names the postgres database (pool = the tenant DB). An artifact-ref (resolved earlier)
+// or an unknown store fails loud — an unsupported fixture is an explicit run failure, never a quietly-empty store.
 export function buildSeedExec(plan: StoreSeedPlan, db: string = DEFAULT_DB): SeedExec {
   if ("ref" in plan.seed) {
     throw new BadRequestError(
@@ -136,10 +136,15 @@ export function buildSeedExec(plan: StoreSeedPlan, db: string = DEFAULT_DB): See
     // redis-cli reads one command per stdin line — a heredoc runs the whole prefix-substituted seed in one exec.
     return { store: "redis", argvs: [redisScriptArgv(withPrefix(inline, plan.slice))] };
   }
+  if (plan.store === "minio") {
+    // Run the author's `mc` commands ({prefix} = the object-path slice) with the local alias set — a privileged
+    // (root-creds) seed, so it works for both silo and pool without per-tenant keys (those gate the AGENT, not the seed).
+    return { store: "minio", argvs: [mcScriptArgv(withPrefix(inline, plan.slice))] };
+  }
   throw new BadRequestError(
     "BAD_REQUEST",
     { store: plan.store },
-    `Seeding a "${plan.store}" store is not supported yet (postgres/redis for now).`,
+    `Seeding a "${plan.store}" store is not supported (postgres/redis/minio).`,
   );
 }
 
@@ -153,10 +158,13 @@ export function buildReadExec(store: string, slice: string, query: string, db: s
   if (store === "redis") {
     return redisScriptArgv(withPrefix(query, slice));
   }
+  if (store === "minio") {
+    return mcScriptArgv(withPrefix(query, slice));
+  }
   throw new BadRequestError(
     "BAD_REQUEST",
     { store },
-    `Reading a "${store}" store is not supported yet (postgres/redis for now).`,
+    `Reading a "${store}" store is not supported (postgres/redis/minio).`,
   );
 }
 
@@ -164,4 +172,10 @@ export function buildReadExec(store: string, slice: string, query: string, db: s
 // docker/kubectl/nomad exec (none of which pipe stdin here) and returns the command output on stdout (used by reads).
 function redisScriptArgv(script: string): string[] {
   return ["sh", "-c", `redis-cli <<'EVERDICT_REDIS'\n${script}\nEVERDICT_REDIS`];
+}
+
+// Run `mc` commands with the local alias pointed at the in-container minio (STORE_DEFS root creds) — the bundled mc
+// client. One exec; command output flows to stdout (used by reads). The author's script scopes objects via {prefix}.
+function mcScriptArgv(script: string): string[] {
+  return ["sh", "-c", `mc alias set local http://localhost:9000 everdict everdictsecret >/dev/null 2>&1; ${script}`];
 }
