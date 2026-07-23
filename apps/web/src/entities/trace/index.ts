@@ -5,6 +5,7 @@ export {
   traceEventSchema,
   traceEvidenceSchema,
   traceInspectResultSchema,
+  traceProvenanceSchema,
   traceSummarySchema,
   tracesListResponseSchema,
 } from './model/schema'
@@ -15,6 +16,7 @@ export type {
   TraceEvent,
   TraceEvidence,
   TraceInspectResult,
+  TraceProvenance,
   TraceSpanNode,
   TraceSummary,
 } from '@everdict/contracts'

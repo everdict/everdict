@@ -8,6 +8,8 @@ import {
   UpstreamError,
 } from "@everdict/contracts";
 
+import { extractProvenance } from "./trace-source.js";
+
 // Langfuse observations — TraceWithFullDetails.observations[] in the GET /api/public/traces/{traceId} response.
 // Real-API notes: observations are fully inline (no pagination), fields are present-but-null (not optional),
 // usage is deprecated and usageDetails/costDetails are current, and type carries newer enums (AGENT/TOOL/
@@ -28,6 +30,7 @@ interface LangfuseObservation {
 }
 interface LangfuseTraceDetail {
   observations?: LangfuseObservation[];
+  metadata?: Record<string, unknown> | null; // the sink writes everdict origin here: scorecardId/dataset/harness/caseId (unprefixed)
 }
 
 const ms = (iso: string | null | undefined): number => (iso ? Date.parse(iso) : 0);
@@ -112,12 +115,19 @@ export interface LangfuseTraceSourceOptions {
 export class LangfuseTraceSource implements BrowsableTraceSource {
   constructor(private readonly opts: LangfuseTraceSourceOptions) {}
   async fetch(runId: string): Promise<TraceEvent[]> {
+    const detail = await this.fetchTrace(runId);
+    return langfuseObservationsToTraceEvents(detail?.observations ?? []);
+  }
+
+  // GET the trace detail (observations + metadata) — shared by fetch + inspect (inspect also reads metadata for
+  // provenance). 404/parse-failure → undefined (degrade to 0 events, the shared source rule).
+  private async fetchTrace(runId: string): Promise<LangfuseTraceDetail | undefined> {
     const f = this.opts.fetchImpl ?? fetch;
     const base = this.opts.endpoint.replace(/\/$/, "");
     const res = await f(`${base}/api/public/traces/${encodeURIComponent(runId)}`, {
       ...(this.opts.auth ? { headers: { authorization: this.opts.auth } } : {}),
     });
-    if (res.status === 404) return []; // if the trace isn't present yet, degrade to 0 events (the shared source rule)
+    if (res.status === 404) return undefined;
     if (!res.ok) {
       const text = await res.text().catch(() => "");
       throw new UpstreamError(
@@ -126,18 +136,21 @@ export class LangfuseTraceSource implements BrowsableTraceSource {
         `Langfuse trace fetch ${res.status}: ${text.slice(0, 200)}`,
       );
     }
-    let body: LangfuseTraceDetail;
     try {
-      body = (await res.json()) as LangfuseTraceDetail;
+      return (await res.json()) as LangfuseTraceDetail;
     } catch {
-      return [];
+      return undefined;
     }
-    return langfuseObservationsToTraceEvents(body.observations ?? []);
   }
 
   // Native kind: fixed converter, no per-harness SpanAttrMapping — mapping ignored, no rawAttributes.
   async inspect(traceId: string, _mapping?: SpanAttrMapping): Promise<TraceInspectResult> {
-    return { events: await this.fetch(traceId) };
+    const detail = await this.fetchTrace(traceId);
+    const provenance = detail?.metadata ? extractProvenance(detail.metadata) : undefined;
+    return {
+      events: langfuseObservationsToTraceEvents(detail?.observations ?? []),
+      ...(provenance ? { provenance } : {}),
+    };
   }
 
   async listTraces(opts?: ListTracesOptions): Promise<TraceSummary[]> {

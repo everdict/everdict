@@ -115,7 +115,7 @@ export function registerTraceSourceTools(server: McpServer, ctx: McpToolContext)
       "list_trace_source_traces",
       {
         description:
-          "Enumerate a registered trace source's recent traces + observability metrics (id, name, startedAt, durationMs, tokens, costUsd, status, tags) — the list the judge wizard samples from and the settings traces view. scope defaults to the source's configured scope (mlflow experiment / phoenix|langfuse|langsmith project / otel[jaeger] service).",
+          "Enumerate a registered trace source's recent traces + observability metrics (id, name, startedAt, durationMs, tokens, costUsd, status, tags) — the list the judge wizard samples from and the settings traces view. When a trace was produced by Everdict, each row carries `provenance` {runId, scorecardId, dataset, harness, caseId} — the origin to fetch related context (the scorecard/run/dataset/harness) before analyzing it. scope defaults to the source's configured scope (mlflow experiment / phoenix|langfuse|langsmith project / otel[jaeger] service).",
         inputSchema: {
           name: z.string().min(1).describe("registered source name"),
           scope: z
@@ -144,7 +144,7 @@ export function registerTraceSourceTools(server: McpServer, ctx: McpToolContext)
       "inspect_trace",
       {
         description:
-          "Inspect one trace by id — returns the events normalized with the SUPPLIED span-attribute mapping, plus (for span-based kinds otel/mlflow) the raw span attributes so a mapping can be authored against real keys. Native kinds (langfuse/langsmith/phoenix) ignore mapping and omit rawAttributes. Nothing is persisted.",
+          "Inspect one trace by id — returns the events normalized with the SUPPLIED span-attribute mapping, plus (for span-based kinds otel/mlflow) the raw span attributes so a mapping can be authored against real keys. Native kinds (langfuse/langsmith/phoenix) ignore mapping and omit rawAttributes. When the trace was produced by Everdict it also carries `provenance` {runId, scorecardId, dataset, harness, caseId} — the origin to pull related context before acting on the analysis. Nothing is persisted.",
         inputSchema: {
           name: z.string().min(1).describe("registered source name"),
           traceId: z.string().min(1).describe("trace id (from list_trace_source_traces)"),

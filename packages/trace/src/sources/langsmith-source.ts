@@ -4,9 +4,12 @@ import {
   type SpanAttrMapping,
   type TraceEvent,
   type TraceInspectResult,
+  type TraceProvenance,
   type TraceSummary,
   UpstreamError,
 } from "@everdict/contracts";
+
+import { provenanceByLookup } from "./trace-source.js";
 
 // LangSmith run — RunSchema (selected fields only) from the POST /runs/query {trace:<trace_id>} response.
 // Real-API notes: auth is the X-API-Key header (bare path = same as the SDK), full-trace fetch is v1 /runs/query's
@@ -24,10 +27,25 @@ interface LangsmithRun {
   prompt_tokens?: number | null;
   completion_tokens?: number | null;
   total_cost?: string | null; // decimal string
-  extra?: { metadata?: Record<string, unknown> | null } | null;
+  inputs?: Record<string, unknown> | null; // the sink writes everdict origin here: caseId/dataset/harness (unprefixed)
+  extra?: { metadata?: Record<string, unknown> | null } | null; // and scorecardId under extra.metadata
 }
 
 const ms = (iso: string | null | undefined): number => (iso ? Date.parse(iso) : 0);
+
+// Everdict origin the sink splits across a run's inputs (caseId/dataset/harness) + extra.metadata (scorecardId) —
+// unprefixed keys, so extractProvenance's bare fallbacks match. First run that carries a key wins.
+function langsmithProvenance(runs: LangsmithRun[]): TraceProvenance | undefined {
+  return provenanceByLookup((k) => {
+    for (const r of runs) {
+      const fromInputs = r.inputs?.[k];
+      if (fromInputs !== undefined) return fromInputs;
+      const fromMeta = r.extra?.metadata?.[k];
+      if (fromMeta !== undefined) return fromMeta;
+    }
+    return undefined;
+  });
+}
 
 // run array → TraceEvent[] (pure). llm run → llm_call (model from ls_model_name metadata → run name fallback),
 // tool run → a tool_call/result pair (ok = no error), other (structural runs like chain) are skipped.
@@ -82,6 +100,7 @@ export function langsmithRunsToSummaries(runs: LangsmithRun[], scope?: string): 
     const model = typeof metaModel === "string" ? metaModel : undefined;
     const hasTokens = r.prompt_tokens != null || r.completion_tokens != null;
     const cost = r.total_cost != null && r.total_cost !== "" ? Number(r.total_cost) : undefined;
+    const provenance = langsmithProvenance([r]);
     out.push({
       id,
       ...(r.name ? { name: r.name } : {}),
@@ -92,6 +111,7 @@ export function langsmithRunsToSummaries(runs: LangsmithRun[], scope?: string): 
       ...(cost !== undefined && !Number.isNaN(cost) ? { costUsd: Math.max(0, cost) } : {}),
       ...(model ? { llmModel: model } : {}),
       ...(scope ? { scope } : {}),
+      ...(provenance ? { provenance } : {}),
     });
   }
   return out;
@@ -109,7 +129,12 @@ export class LangsmithTraceSource implements BrowsableTraceSource {
 
   // Native kind: fixed converter, no per-harness SpanAttrMapping — mapping ignored, no rawAttributes.
   async inspect(traceId: string, _mapping?: SpanAttrMapping): Promise<TraceInspectResult> {
-    return { events: await this.fetch(traceId) };
+    const runs = await this.fetchRuns(traceId);
+    const provenance = langsmithProvenance(runs);
+    return {
+      events: langsmithRunsToTraceEvents(runs),
+      ...(provenance ? { provenance } : {}),
+    };
   }
 
   async listTraces(opts?: ListTracesOptions): Promise<TraceSummary[]> {
@@ -142,6 +167,7 @@ export class LangsmithTraceSource implements BrowsableTraceSource {
           "prompt_tokens",
           "completion_tokens",
           "total_cost",
+          "inputs",
           "extra",
         ],
         limit: opts?.limit ?? 50,
@@ -159,6 +185,11 @@ export class LangsmithTraceSource implements BrowsableTraceSource {
     return langsmithRunsToSummaries(body.runs ?? [], session);
   }
   async fetch(runId: string): Promise<TraceEvent[]> {
+    return langsmithRunsToTraceEvents(await this.fetchRuns(runId));
+  }
+
+  // Cursor-loop all runs of the trace (shared by fetch + inspect — inspect also extracts provenance from them).
+  private async fetchRuns(runId: string): Promise<LangsmithRun[]> {
     const f = this.opts.fetchImpl ?? fetch;
     const base = this.opts.endpoint.replace(/\/$/, "");
     const runs: LangsmithRun[] = [];
@@ -183,6 +214,7 @@ export class LangsmithTraceSource implements BrowsableTraceSource {
             "prompt_tokens",
             "completion_tokens",
             "total_cost",
+            "inputs",
             "extra",
           ],
           limit: 100,
@@ -207,6 +239,6 @@ export class LangsmithTraceSource implements BrowsableTraceSource {
       runs.push(...(body.runs ?? []));
       cursor = body.cursors?.next ?? undefined;
     } while (cursor);
-    return langsmithRunsToTraceEvents(runs);
+    return runs;
   }
 }

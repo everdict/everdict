@@ -1,10 +1,28 @@
 'use client'
 
 import { useEffect, useMemo, useState, useTransition } from 'react'
-import { Check, ChevronLeft, ChevronRight, X } from 'lucide-react'
+import Link from 'next/link'
+import { useParams } from 'next/navigation'
+import {
+  Boxes,
+  Check,
+  ChevronLeft,
+  ChevronRight,
+  ClipboardCheck,
+  Database,
+  FileText,
+  Hash,
+  Play,
+  X,
+} from 'lucide-react'
 import { useTimeZone, useTranslations } from 'next-intl'
 
-import type { TraceInspectResult, TraceSpanNode, TraceSummary } from '@/entities/trace'
+import type {
+  TraceInspectResult,
+  TraceProvenance,
+  TraceSpanNode,
+  TraceSummary,
+} from '@/entities/trace'
 import { fmtDateTime, fmtDurationMs, fmtTokens, fmtUsd } from '@/shared/lib/format'
 import { cn } from '@/shared/lib/utils'
 import { Badge } from '@/shared/ui/badge'
@@ -115,6 +133,8 @@ export function TraceDetailDialog({
   const model = rollup?.llmModel ?? trace.llmModel
   const startedAt = rollup?.startedAt ?? trace.startedAt
   const status = rollup?.status ?? trace.status ?? 'unset'
+  // Everdict origin — on the list summary for most platforms; native kinds (langfuse) carry it only on inspect.
+  const provenance = trace.provenance ?? result?.provenance
 
   return (
     <Dialog
@@ -136,6 +156,7 @@ export function TraceDetailDialog({
             {trace.id}
             {trace.scope ? ` · ${trace.scope}` : ''}
           </div>
+          {provenance && <OriginBar provenance={provenance} />}
         </div>
         <div className="flex shrink-0 items-center gap-2">
           {nav && (
@@ -209,13 +230,25 @@ export function TraceDetailDialog({
                   const leftPct = (s.startOffsetMs / total) * 100
                   const widthPct = Math.max(0.6, (s.durationMs / total) * 100)
                   const isSel = selected?.id === s.id
+                  const hasTokens = s.tokens?.input != null || s.tokens?.output != null
+                  // The row stays ONE line: tokens + cost sit in a fixed-width right rail (so every bar keeps a
+                  // shared time axis), and the I/O preview rides the hover tooltip — full I/O is a click away in
+                  // the side panel. This keeps tool-vs-model signal visible without fattening the row.
+                  const ioTitle =
+                    [
+                      s.input ? `${t('input')}: ${compactPreview(s.input)}` : null,
+                      s.output ? `${t('output')}: ${compactPreview(s.output)}` : null,
+                    ]
+                      .filter(Boolean)
+                      .join('\n') || undefined
                   return (
                     <button
                       type="button"
                       key={s.id}
                       onClick={() => setSelectedId(s.id)}
+                      title={ioTitle}
                       className={cn(
-                        'grid w-full items-center gap-2 rounded-md py-1 text-left [grid-template-columns:minmax(120px,220px)_1fr] hover:bg-elevated/50',
+                        'grid w-full items-center gap-2 rounded-md py-1 text-left [grid-template-columns:minmax(110px,200px)_1fr_7rem] hover:bg-elevated/50',
                         isSel && 'bg-primary/10'
                       )}
                     >
@@ -242,6 +275,23 @@ export function TraceDetailDialog({
                         >
                           {fmtDurationMs(s.durationMs)}
                         </span>
+                      </span>
+                      {/* Right rail — tokens (models) + cost, right-aligned; fixed width keeps bars aligned. */}
+                      <span className="flex items-center justify-end gap-1.5 overflow-hidden pr-1 font-mono text-[10px] tabular-nums text-faint">
+                        {hasTokens && (
+                          <span
+                            className="flex items-center gap-0.5 whitespace-nowrap"
+                            title={t('colTokens')}
+                          >
+                            <Hash className="size-2.5 opacity-70" />
+                            {fmtTokens(s.tokens?.input)}→{fmtTokens(s.tokens?.output)}
+                          </span>
+                        )}
+                        {s.costUsd != null && (
+                          <span className="whitespace-nowrap text-faint/80">
+                            {fmtUsd(s.costUsd)}
+                          </span>
+                        )}
                       </span>
                     </button>
                   )
@@ -274,11 +324,17 @@ export function TraceDetailDialog({
                     )}
                   </div>
                   <div className="space-y-2">
+                    {/* Key per span so the JSON-vs-raw default is recomputed for each span, not reused. */}
                     {selected.input !== undefined && (
-                      <IoPanel label={t('input')} text={selected.input} />
+                      <IoPanel key={`in-${selected.id}`} label={t('input')} text={selected.input} />
                     )}
                     {selected.output !== undefined && (
-                      <IoPanel label={t('output')} accent text={selected.output} />
+                      <IoPanel
+                        key={`out-${selected.id}`}
+                        label={t('output')}
+                        accent
+                        text={selected.output}
+                      />
                     )}
                     {selected.input === undefined && selected.output === undefined && (
                       <p className="text-[12px] text-faint">{t('noIo')}</p>
@@ -364,10 +420,108 @@ function Legend() {
   )
 }
 
+// One-line, whitespace-collapsed preview of a payload for the waterfall row (the full value lives in the
+// side panel). Capped so a huge payload never bloats the row DOM — the truncate class elides the rest.
+function compactPreview(v: string): string {
+  const s = v.replace(/\s+/g, ' ').trim()
+  return s.length > 160 ? `${s.slice(0, 160)}…` : s
+}
+
 function metricLine(s: TraceSpanNode): string {
   const parts: string[] = []
   if (s.model) parts.push(s.model)
   if (s.tokens) parts.push(`${fmtTokens(s.tokens.input)}→${fmtTokens(s.tokens.output)}`)
   if (s.costUsd != null) parts.push(fmtUsd(s.costUsd))
   return parts.join(' · ') || '–'
+}
+
+// Everdict origin chips — deep-link a pulled trace back to the run/scorecard/dataset/harness that produced it, so a
+// human (and, via the same `provenance` data on the API/MCP, an agent) can pull the related context before acting.
+// dataset/harness arrive as "id@version": link to the base id, show the full ref.
+function OriginChip({
+  label,
+  value,
+  href,
+  icon: Icon,
+}: {
+  label: string
+  value: string
+  href?: string
+  icon: typeof Play
+}) {
+  const inner = (
+    <span
+      className={cn(
+        'inline-flex min-w-0 items-center gap-1 rounded-md border border-border bg-card px-1.5 py-0.5 text-[10.5px]',
+        href && 'transition-colors hover:border-border-strong hover:bg-elevated'
+      )}
+    >
+      <Icon className="size-3 shrink-0 text-faint" />
+      <span className="shrink-0 text-faint">{label}</span>
+      <span className="max-w-[180px] truncate font-mono text-foreground/80">{value}</span>
+    </span>
+  )
+  return href ? (
+    <Link href={href} className="min-w-0">
+      {inner}
+    </Link>
+  ) : (
+    inner
+  )
+}
+
+function OriginBar({ provenance }: { provenance: TraceProvenance }) {
+  const t = useTranslations('traceBrowser')
+  const params = useParams<{ workspace: string }>()
+  const ws = typeof params.workspace === 'string' ? params.workspace : undefined
+  const baseId = (ref: string) => ref.split('@')[0] ?? ref
+  const link = (path: string, id: string) =>
+    ws ? `/${ws}/${path}/${encodeURIComponent(id)}` : undefined
+
+  const chips: { key: string; label: string; value: string; href?: string; icon: typeof Play }[] =
+    []
+  if (provenance.scorecardId)
+    chips.push({
+      key: 'sc',
+      label: t('originScorecard'),
+      value: provenance.scorecardId,
+      href: link('scorecards', provenance.scorecardId),
+      icon: ClipboardCheck,
+    })
+  if (provenance.runId)
+    chips.push({
+      key: 'run',
+      label: t('originRun'),
+      value: provenance.runId,
+      href: link('runs', provenance.runId),
+      icon: Play,
+    })
+  if (provenance.dataset)
+    chips.push({
+      key: 'ds',
+      label: t('originDataset'),
+      value: provenance.dataset,
+      href: link('datasets', baseId(provenance.dataset)),
+      icon: Database,
+    })
+  if (provenance.harness)
+    chips.push({
+      key: 'hn',
+      label: t('originHarness'),
+      value: provenance.harness,
+      href: link('harnesses', baseId(provenance.harness)),
+      icon: Boxes,
+    })
+  if (provenance.caseId)
+    chips.push({ key: 'case', label: t('originCase'), value: provenance.caseId, icon: FileText })
+  if (chips.length === 0) return null
+
+  return (
+    <div className="flex flex-wrap items-center gap-1.5 pt-1">
+      <span className="text-[10px] uppercase tracking-wide text-faint">{t('origin')}</span>
+      {chips.map((c) => (
+        <OriginChip key={c.key} label={c.label} value={c.value} href={c.href} icon={c.icon} />
+      ))}
+    </div>
+  )
 }

@@ -11,6 +11,7 @@ import {
 import { extractEvidence } from "./evidence-resolve.js";
 import {
   type Span,
+  provenanceFromSpans,
   spansToRawAttributes,
   spansToSpanNodes,
   spansToTraceEvents,
@@ -184,9 +185,11 @@ export class OtelTraceSource implements BrowsableTraceSource {
       this.opts.headers,
       this.opts.endpoint,
     );
+    const provenance = provenanceFromSpans(spans); // resource/span attrs carry everdict.run_id + everdict.scorecard_id/harness
     return {
       rawAttributes: spansToRawAttributes(spans),
       events: withEvidenceEvents(spansToTraceEvents(spans, m), evidence),
+      ...(provenance ? { provenance } : {}),
       ...(evidence ? { evidence } : {}),
       detail: { rollup: summarizeSpans(spans), spans: spansToSpanNodes(spans, m) },
     };

@@ -11,7 +11,9 @@ import {
 import { extractEvidence } from "./evidence-resolve.js";
 import {
   type Span,
+  extractProvenance,
   modelFromSpans,
+  provenanceFromSpans,
   spansToRawAttributes,
   spansToSpanNodes,
   spansToTraceEvents,
@@ -185,6 +187,8 @@ export function mlflowTracesToSummaries(traces: MlflowTraceInfo[], scope?: strin
     const tokens = mlflowTokens(info);
     const costUsd = mlflowCostUsd(info);
     const name = tags?.[TRACE_NAME_TAG];
+    // Everdict origin lives in trace_metadata (everdict.scorecardId/dataset/harness/caseId) + the everdict.run_id tag.
+    const provenance = extractProvenance({ ...info.trace_metadata, ...tags });
     out.push({
       id: info.trace_id,
       ...(name ? { name } : {}),
@@ -195,6 +199,7 @@ export function mlflowTracesToSummaries(traces: MlflowTraceInfo[], scope?: strin
       ...(tokens ? { tokens } : {}),
       ...(costUsd !== undefined ? { costUsd } : {}),
       ...(scope ? { scope } : {}),
+      ...(provenance ? { provenance } : {}),
     });
   }
   return out;
@@ -322,9 +327,11 @@ export class MlflowTraceSource implements BrowsableTraceSource {
       this.opts.headers,
       this.opts.endpoint,
     );
+    const provenance = provenanceFromSpans(spans); // span attrs carry everdict.scorecard_id/harness (OTLP)
     return {
       rawAttributes: spansToRawAttributes(spans),
       events: withEvidenceEvents(spansToTraceEvents(spans, m), evidence),
+      ...(provenance ? { provenance } : {}),
       ...(evidence ? { evidence } : {}),
       detail: { rollup: summarizeSpans(spans), spans: spansToSpanNodes(spans, m) },
     };

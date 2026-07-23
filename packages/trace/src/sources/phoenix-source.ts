@@ -4,9 +4,12 @@ import {
   type SpanAttrMapping,
   type TraceEvent,
   type TraceInspectResult,
+  type TraceProvenance,
   type TraceSummary,
   UpstreamError,
 } from "@everdict/contracts";
+
+import { provenanceByLookup } from "./trace-source.js";
 
 // Arize Phoenix spans — the GET /v1/projects/{p}/spans?trace_id=<hex> response (Span schema, read side).
 // Real-API notes: there is no GET /v1/traces/{id} — cursor-loop the project spans via the trace_id filter (≥13.9.0).
@@ -95,6 +98,18 @@ function phAttr(attrs: Record<string, unknown> | undefined, path: string): unkno
 const phNum = (v: unknown): number => (typeof v === "number" ? v : typeof v === "string" ? Number(v) || 0 : 0);
 const phStr = (v: unknown): string | undefined => (typeof v === "string" ? v : undefined);
 
+// Everdict origin the sink writes as span attributes (everdict.scorecard_id/harness) — read via the nested/flat
+// accessor since Phoenix returns attributes nested. First span that carries a key wins.
+function phoenixProvenance(spans: PhoenixSpan[]): TraceProvenance | undefined {
+  return provenanceByLookup((k) => {
+    for (const s of spans) {
+      const v = phAttr(s.attributes, k);
+      if (v !== undefined) return v;
+    }
+    return undefined;
+  });
+}
+
 export function phoenixSpansToSummaries(spans: PhoenixSpan[], scope?: string): TraceSummary[] {
   const byTrace = new Map<string, PhoenixSpan[]>();
   for (const s of spans) {
@@ -124,6 +139,7 @@ export function phoenixSpansToSummaries(spans: PhoenixSpan[], scope?: string): T
       }
       if (s.status_code === "ERROR") hasError = true;
     }
+    const provenance = phoenixProvenance(group);
     out.push({
       id,
       ...(first?.name ? { name: first.name } : {}),
@@ -134,6 +150,7 @@ export function phoenixSpansToSummaries(spans: PhoenixSpan[], scope?: string): T
       ...(hasLlm ? { tokens: { input, output } } : {}),
       ...(model ? { llmModel: model } : {}),
       ...(scope ? { scope } : {}),
+      ...(provenance ? { provenance } : {}),
     });
   }
   return out;
@@ -190,7 +207,12 @@ export class PhoenixTraceSource implements BrowsableTraceSource {
 
   // Native kind: no per-harness SpanAttrMapping (fixed OpenInference converter) — mapping is ignored, no rawAttributes.
   async inspect(traceId: string, _mapping?: SpanAttrMapping): Promise<TraceInspectResult> {
-    return { events: phoenixSpansToTraceEvents(await this.spansForTrace(traceId)) };
+    const spans = await this.spansForTrace(traceId);
+    const provenance = phoenixProvenance(spans);
+    return {
+      events: phoenixSpansToTraceEvents(spans),
+      ...(provenance ? { provenance } : {}),
+    };
   }
 
   async listTraces(opts?: ListTracesOptions): Promise<TraceSummary[]> {

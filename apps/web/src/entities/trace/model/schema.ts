@@ -2,6 +2,7 @@ import type {
   SpanAttrMapping,
   SpanAttrSample,
   TraceEvidence,
+  TraceProvenance,
   TraceSummary,
 } from '@everdict/contracts'
 import { z } from 'zod'
@@ -73,6 +74,16 @@ export const traceEventSchema = z.discriminatedUnion('kind', [
   }),
 ])
 
+// Everdict origin recovered from a pulled trace's platform metadata (the everdict.* keys the sink writes + the
+// harness run_id tag). Present only when the trace is Everdict-produced — powers the Origin deep-links in the detail.
+export const traceProvenanceSchema = z.object({
+  runId: z.string().optional(),
+  scorecardId: z.string().optional(),
+  dataset: z.string().optional(),
+  harness: z.string().optional(),
+  caseId: z.string().optional(),
+})
+
 // A trace list row — id + observability metrics the platform reports for a whole trace (everything but id best-effort).
 export const traceSummarySchema = z.object({
   id: z.string(),
@@ -86,6 +97,7 @@ export const traceSummarySchema = z.object({
   spanCount: z.number().optional(),
   tags: z.record(z.string(), z.string()).optional(),
   scope: z.string().optional(),
+  provenance: traceProvenanceSchema.optional(),
 })
 export const tracesListResponseSchema = z.object({ traces: z.array(traceSummarySchema) })
 
@@ -127,6 +139,7 @@ export const traceEvidenceSchema = z.object({
 export const traceInspectResultSchema = z.object({
   rawAttributes: z.array(spanAttrSampleSchema).optional(),
   events: z.array(traceEventSchema),
+  provenance: traceProvenanceSchema.optional(),
   evidence: traceEvidenceSchema.optional(),
   detail: z
     .object({
@@ -176,6 +189,8 @@ type _mappingFwd = AssertAssignable<z.infer<typeof spanAttrMappingSchema>, SpanA
 type _mappingBack = AssertAssignable<SpanAttrMapping, z.infer<typeof spanAttrMappingSchema>>
 type _evidenceFwd = AssertAssignable<z.infer<typeof traceEvidenceSchema>, TraceEvidence>
 type _evidenceBack = AssertAssignable<TraceEvidence, z.infer<typeof traceEvidenceSchema>>
+type _provenanceFwd = AssertAssignable<z.infer<typeof traceProvenanceSchema>, TraceProvenance>
+type _provenanceBack = AssertAssignable<TraceProvenance, z.infer<typeof traceProvenanceSchema>>
 
 export type __traceDriftGuard = [
   _summaryFwd,
@@ -186,4 +201,6 @@ export type __traceDriftGuard = [
   _mappingBack,
   _evidenceFwd,
   _evidenceBack,
+  _provenanceFwd,
+  _provenanceBack,
 ]

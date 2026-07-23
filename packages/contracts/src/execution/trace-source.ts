@@ -24,6 +24,20 @@ export interface ListTracesOptions {
   until?: string; // ISO-8601 upper time bound.
 }
 
+// Everdict origin recovered from a pulled trace's platform metadata/attributes — the `everdict.*` keys the sink
+// writes (scorecardId/dataset/harness/caseId) plus the harness-written `everdict.run_id` correlation tag. Present
+// only when the trace actually carries them (an unrelated external trace has none). This is DATA, not just UI: it
+// lets an agent inspecting a trace resolve which run/scorecard/dataset/harness produced it and pull that context
+// before acting, and the web renders it as Origin deep-links. See docs/architecture/trace-sink.md.
+export const TraceProvenanceSchema = z.object({
+  runId: z.string().optional(), // the Everdict run id (everdict.run_id) — the correlation axis
+  scorecardId: z.string().optional(), // the batch this case belonged to
+  dataset: z.string().optional(), // the dataset ref/id the case came from
+  harness: z.string().optional(), // the harness ref/id under test
+  caseId: z.string().optional(), // the specific eval case
+});
+export type TraceProvenance = z.infer<typeof TraceProvenanceSchema>;
+
 // One row in a trace list — the observability metrics a platform reports for a whole trace (normalized across kinds).
 // Everything but `id` is best-effort (a platform that doesn't report a field omits it — no silent zero).
 export const TraceSummarySchema = z.object({
@@ -40,6 +54,7 @@ export const TraceSummarySchema = z.object({
   spanCount: z.number().int().nonnegative().optional(),
   tags: z.record(z.string(), z.string()).optional(), // platform tags (e.g. everdict.run_id) — passthrough for correlation display.
   scope: z.string().optional(), // the scope this trace was listed under (experiment/project/service).
+  provenance: TraceProvenanceSchema.optional(), // Everdict origin extracted from the trace's metadata/attrs (when present).
 });
 export type TraceSummary = z.infer<typeof TraceSummarySchema>;
 
@@ -92,6 +107,7 @@ export type TraceEvidence = z.infer<typeof TraceEvidenceSchema>;
 export const TraceInspectResultSchema = z.object({
   rawAttributes: z.array(SpanAttrSampleSchema).optional(), // span-based (otel/mlflow) only; native kinds omit it.
   events: z.array(TraceEventSchema),
+  provenance: TraceProvenanceSchema.optional(), // Everdict origin extracted from the trace (uniform across kinds, when present).
   evidence: TraceEvidenceSchema.optional(), // evidence-slot extraction result (span-based kinds, when the mapping sets slots)
   detail: z
     .object({

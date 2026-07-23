@@ -68,7 +68,11 @@ export function CopyButton({
         className
       )}
     >
-      {copied ? <Check className="size-3 text-[var(--color-success)]" /> : <Copy className="size-3" />}
+      {copied ? (
+        <Check className="size-3 text-[var(--color-success)]" />
+      ) : (
+        <Copy className="size-3" />
+      )}
     </button>
   )
 }
@@ -105,11 +109,20 @@ function ModeSwitch<T extends string>({
   )
 }
 
-// One I/O payload — raw text by default, a pretty JSON tree when the payload parses as one, copy always.
-export function IoPanel({ label, text, accent }: { label: string; text: string; accent?: boolean }) {
+// One I/O payload — a pretty JSON tree by default when the payload parses as one (raw for non-JSON text), copy always.
+export function IoPanel({
+  label,
+  text,
+  accent,
+}: {
+  label: string
+  text: string
+  accent?: boolean
+}) {
   const t = useTranslations('traceBrowser')
-  const [mode, setMode] = useState<'raw' | 'json'>('raw')
   const parsed = useMemo(() => parseJsonContainer(text), [text])
+  // JSON reads better than the raw string, so default to it whenever the payload is a container.
+  const [mode, setMode] = useState<'raw' | 'json'>(parsed !== undefined ? 'json' : 'raw')
 
   return (
     <div className="overflow-hidden rounded-md border border-border">
@@ -184,7 +197,8 @@ function AttributeRow({ name, value }: { name: string; value: unknown }) {
   // Anything that can't be read whole on one truncated line gets an expander.
   const expandable =
     (typeof value === 'object' && value !== null) ||
-    (typeof value === 'string' && (value.length > 64 || value.includes('\n') || parseJsonContainer(value) !== undefined))
+    (typeof value === 'string' &&
+      (value.length > 64 || value.includes('\n') || parseJsonContainer(value) !== undefined))
 
   return (
     <div className="group px-2.5 py-1.5 text-[12px]">
@@ -238,9 +252,10 @@ export function AttributesView({
   if (entries.length === 0) return null
 
   return (
-    <div className={className}>
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-[10.5px] uppercase tracking-wide text-faint">
+    // Same chrome as IoPanel — a bordered box with a bg-card header bar — so the three sections read as one family.
+    <div className={cn('overflow-hidden rounded-md border border-border', className)}>
+      <div className="flex items-center justify-between gap-2 border-b border-border bg-card px-2.5 py-1">
+        <span className="text-[10px] uppercase tracking-wide text-faint">
           {t('attributesCount', { count: entries.length })}
         </span>
         <span className="flex items-center gap-1.5">
@@ -256,12 +271,9 @@ export function AttributesView({
         </span>
       </div>
       {mode === 'json' ? (
-        <JsonTree
-          value={attributes}
-          className="mt-1 max-h-[480px] rounded-md border border-border p-2.5 text-[11.5px]"
-        />
+        <JsonTree value={attributes} className="max-h-[480px] p-2.5 text-[11.5px]" />
       ) : (
-        <div className="mt-1 divide-y divide-border/60 rounded-md border border-border">
+        <div className="max-h-[480px] divide-y divide-border/60 overflow-y-auto">
           {entries.map(([k, v]) => (
             <AttributeRow key={k} name={k} value={v} />
           ))}

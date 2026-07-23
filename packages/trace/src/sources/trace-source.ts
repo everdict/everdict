@@ -5,6 +5,7 @@ import type {
   SpanAttrSample,
   TraceEvent,
   TraceEvidence,
+  TraceProvenance,
   TraceSpanNode,
   TraceSummary,
 } from "@everdict/contracts";
@@ -22,6 +23,63 @@ export interface Span {
 // Span[] → the raw-attribute samples inspect() surfaces so a SpanAttrMapping can be authored against real keys.
 export function spansToRawAttributes(spans: Span[]): SpanAttrSample[] {
   return spans.map((s) => ({ spanName: s.name, attrs: s.attrs }));
+}
+
+// The Everdict origin keys, across the per-platform naming variants a pulled trace can carry: MLflow trace_metadata
+// uses camelCase (everdict.scorecardId); OTLP/OTel/Phoenix span attributes use snake (everdict.scorecard_id); Langfuse
+// metadata is UNPREFIXED (scorecardId); the harness writes everdict.run_id for correlation. First defined wins.
+const PROVENANCE_KEYS = {
+  runId: ["everdict.run_id", "everdict.runId", "runId"],
+  scorecardId: ["everdict.scorecardId", "everdict.scorecard_id", "scorecardId"],
+  dataset: ["everdict.dataset", "dataset"],
+  harness: ["everdict.harness", "harness"],
+  caseId: ["everdict.caseId", "everdict.case_id", "caseId"],
+} as const;
+const ALL_PROVENANCE_KEYS: readonly string[] = Object.values(PROVENANCE_KEYS).flat();
+
+// Extract Everdict provenance from a bag of platform metadata/tags/attributes (string-valued keys, variant-tolerant).
+// Returns undefined when the trace carries NONE (an unrelated external trace) — never a partial object of empty strings.
+export function extractProvenance(bag: Record<string, unknown>): TraceProvenance | undefined {
+  const pick = (keys: readonly string[]): string | undefined => {
+    for (const k of keys) {
+      const v = bag[k];
+      if (typeof v === "string" && v.trim() !== "") return v;
+    }
+    return undefined;
+  };
+  const runId = pick(PROVENANCE_KEYS.runId);
+  const scorecardId = pick(PROVENANCE_KEYS.scorecardId);
+  const dataset = pick(PROVENANCE_KEYS.dataset);
+  const harness = pick(PROVENANCE_KEYS.harness);
+  const caseId = pick(PROVENANCE_KEYS.caseId);
+  if (!runId && !scorecardId && !dataset && !harness && !caseId) return undefined;
+  return {
+    ...(runId ? { runId } : {}),
+    ...(scorecardId ? { scorecardId } : {}),
+    ...(dataset ? { dataset } : {}),
+    ...(harness ? { harness } : {}),
+    ...(caseId ? { caseId } : {}),
+  };
+}
+
+// Scan a Span[] for the Everdict provenance attributes (the sink writes them on the root/CHAIN span, the harness on
+// resource attrs) — merge the specific keys across spans (first defined wins), then extract. Powers otel/mlflow.
+export function provenanceFromSpans(spans: Span[]): TraceProvenance | undefined {
+  return provenanceByLookup((k) => {
+    for (const s of spans) if (s.attrs[k] !== undefined) return s.attrs[k];
+    return undefined;
+  });
+}
+
+// Extract provenance when the attributes are only addressable via an accessor (e.g. Phoenix's mixed nested/flat
+// attrs, or LangSmith's inputs+extra.metadata split) — `lookup(variantKey)` returns the value or undefined.
+export function provenanceByLookup(lookup: (key: string) => unknown): TraceProvenance | undefined {
+  const bag: Record<string, unknown> = {};
+  for (const k of ALL_PROVENANCE_KEYS) {
+    const v = lookup(k);
+    if (v !== undefined) bag[k] = v;
+  }
+  return extractProvenance(bag);
 }
 
 // Span[] → the metric fields of a TraceSummary (id/scope/status/tags are added by the per-source caller).
@@ -48,6 +106,7 @@ export function summarizeSpans(spans: Span[]): Omit<TraceSummary, "id"> {
     }
   }
   const name = sorted[0]?.name;
+  const provenance = provenanceFromSpans(spans);
   return {
     ...(name ? { name } : {}),
     ...(startMs > 0 ? { startedAt: new Date(startMs).toISOString() } : {}),
@@ -55,6 +114,7 @@ export function summarizeSpans(spans: Span[]): Omit<TraceSummary, "id"> {
     spanCount: spans.length,
     ...(hasLlm ? { tokens: { input, output }, costUsd: usd } : {}),
     ...(model ? { llmModel: model } : {}),
+    ...(provenance ? { provenance } : {}),
   };
 }
 
