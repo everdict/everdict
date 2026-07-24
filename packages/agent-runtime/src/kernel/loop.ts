@@ -13,11 +13,11 @@ import type {
   ToolResultImage,
 } from "../tools/definition.js";
 import { invokeTool } from "../tools/invocation.js";
+import { buildListTeammatesTool } from "../tools/list-teammates-tool.js";
 import { toLlmTools } from "../tools/openai.js";
 import { buildPresentPlanTool } from "../tools/plan-tool.js";
 import { ToolRegistry } from "../tools/registry.js";
 import { OFFLOAD_THRESHOLD_CHARS, ResultStore, buildReadResultTool, offloadResult } from "../tools/result-store.js";
-import { buildListTeammatesTool } from "../tools/list-teammates-tool.js";
 import { buildSendMessageTool } from "../tools/send-message-tool.js";
 import { buildSpawnTeammateTool } from "../tools/spawn-teammate-tool.js";
 import { buildSpawnAgentTool } from "../tools/spawn-tool.js";
