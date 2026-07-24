@@ -19,6 +19,7 @@ interface ScorecardRow {
   runtime: string | null;
   subset: unknown;
   scorecard: unknown;
+  analysis_ref: string | null;
   sink_export: unknown;
   error: unknown;
   steps: unknown;
@@ -47,6 +48,7 @@ function rowToRecord(row: ScorecardRow, hasDetail: boolean): ScorecardRecord {
     subset: row.subset ?? undefined, // lightweight → included in list too (partial-run badge)
     orchestration: row.orchestration ?? undefined, // resume/retry inputs (mig 0049) — lightweight
     scorecard: hasDetail ? (row.scorecard ?? undefined) : undefined,
+    analysisRef: hasDetail ? (row.analysis_ref ?? undefined) : undefined, // detail-only download ref (get only, like steps)
     export: hasDetail ? (row.sink_export ?? undefined) : undefined, // for detail (get only, like steps). Column name is sink_export (reserved-word avoidance)
     error: row.error ?? undefined,
     steps: hasDetail ? (row.steps ?? undefined) : undefined,
@@ -63,8 +65,8 @@ export class PgScorecardStore implements ScorecardStore {
   async create(r: ScorecardRecord): Promise<void> {
     await this.client.query(
       `INSERT INTO everdict_scorecards
-        (id, tenant, dataset_id, dataset_version, harness_id, harness_version, status, summary, models, judge_models, origin, created_by, runtime, subset, orchestration, scorecard, sink_export, error, steps, run_ids, created_at, updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)`,
+        (id, tenant, dataset_id, dataset_version, harness_id, harness_version, status, summary, models, judge_models, origin, created_by, runtime, subset, orchestration, scorecard, analysis_ref, sink_export, error, steps, run_ids, created_at, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23)`,
       [
         r.id,
         r.tenant,
@@ -82,6 +84,7 @@ export class PgScorecardStore implements ScorecardStore {
         r.subset ? JSON.stringify(r.subset) : null,
         r.orchestration ? JSON.stringify(r.orchestration) : null,
         r.scorecard ? JSON.stringify(r.scorecard) : null,
+        r.analysisRef ?? null,
         r.export ? JSON.stringify(r.export) : null,
         r.error ? JSON.stringify(r.error) : null,
         r.steps ? JSON.stringify(r.steps) : null,
@@ -126,6 +129,11 @@ export class PgScorecardStore implements ScorecardStore {
     if (patch.scorecard !== undefined) {
       sets.push(`scorecard = $${i++}`);
       vals.push(JSON.stringify(patch.scorecard));
+    }
+    if (patch.analysisRef !== undefined) {
+      // set at finalize (succeed) — dropping it left the record with no download ref even when the object store held it.
+      sets.push(`analysis_ref = $${i++}`);
+      vals.push(patch.analysisRef);
     }
     if (patch.export !== undefined) {
       sets.push(`sink_export = $${i++}`);

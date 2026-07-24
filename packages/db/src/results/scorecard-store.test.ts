@@ -218,6 +218,25 @@ describe("PgScorecardStore", () => {
     expect(updated?.export?.cases?.[1]?.error).toBe("upstream 500");
   });
 
+  it("analysisRef → update writes the analysis_ref column (set at finalize) and get maps it back (detail-only download ref)", async () => {
+    // Regression: the finalize path sets analysisRef via succeed()→store.update; the store used to ignore the field,
+    // so with Postgres the ref was silently dropped and the download link never appeared even when the object store held it.
+    const ref = "https://minio.corp.io/artifacts/analyses/sc1.json?X-Amz-Signature=abc";
+    const upd = fakeClient(() => ({ rows: [{ ...ROW, analysis_ref: ref }] }));
+    const updated = await new PgScorecardStore(upd.client).update("sc1", { analysisRef: ref });
+    expect(upd.calls[0]?.text).toMatch(/analysis_ref = \$1/); // pre-fix: ignored → sets empty → a SELECT, never this UPDATE
+    expect(upd.calls[0]?.params?.[0]).toBe(ref);
+    expect(updated?.analysisRef).toBe(ref); // row.analysis_ref → record.analysisRef (get mapping)
+  });
+
+  it("create → INSERT carries the analysis_ref column + value (so a ref set on a fresh record survives insert)", async () => {
+    const ref = "https://minio.corp.io/artifacts/analyses/sc1.json";
+    const { client, calls } = fakeClient(() => ({ rows: [] }));
+    await new PgScorecardStore(client).create(rec({ analysisRef: ref }));
+    expect(calls[0]?.text).toMatch(/analysis_ref/); // column present in the INSERT list (absent pre-fix)
+    expect(calls[0]?.params?.[16]).toBe(ref); // positioned after scorecard ($16), before sink_export
+  });
+
   it("list(filter) → dataset_id/status clauses in the SQL WHERE + parameterization (avoids a full scan)", async () => {
     const { client, calls } = fakeClient(() => ({ rows: [] }));
     await new PgScorecardStore(client).list("acme", { dataset: "d1", status: "succeeded" });
