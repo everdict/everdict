@@ -3,6 +3,7 @@
 import { useMemo, useState, useTransition } from 'react'
 import {
   Boxes,
+  Check,
   Code2,
   Globe,
   Lock,
@@ -33,11 +34,25 @@ import { DropdownItem, DropdownMenu, DropdownSeparator } from '@/shared/ui/dropd
 import { EmptyState } from '@/shared/ui/empty-state'
 import { Input, Label, Textarea } from '@/shared/ui/input'
 
+import { adoptCapabilityAction, unadoptCapabilityAction } from '../api/adopt-capability'
 import {
   deleteCapabilityVersionAction,
   saveCapabilityAction,
   setCapabilityVisibilityAction,
 } from '../api/manage-capabilities'
+
+// capability 의 필요 시크릿(채택 시 내 시크릿으로 바인딩). skill 은 없음.
+function requiredSecretsOf(c: Capability): RequiredSecret[] {
+  if (c.spec.type === 'mcp' || c.spec.type === 'code') return c.spec.requiredSecrets
+  return []
+}
+// 이 capability 가 write(변경) 도구를 제공하는가 — 채택 시 enableWrite 옵트인 대상.
+function offersWrite(c: Capability): boolean {
+  if (c.spec.type === 'mcp') return c.spec.write
+  if (c.spec.type === 'code') return !c.spec.isReadOnly
+  return false
+}
+const capKey = (c: { tenant: string; id: string }): string => `${c.tenant}/${c.id}`
 
 type Author = { name: string; avatarUrl?: string }
 type RequiredSecret = { name: string; description: string }
@@ -57,6 +72,9 @@ export function CapabilityStore({
   publicCaps,
   authors,
   canWrite,
+  canAdopt,
+  adoptedKeys,
+  secretNames,
   currentSubject,
   isAdmin,
 }: {
@@ -64,6 +82,9 @@ export function CapabilityStore({
   publicCaps: Capability[]
   authors: Record<string, Author>
   canWrite: boolean
+  canAdopt: boolean
+  adoptedKeys: string[]
+  secretNames: string[]
   currentSubject?: string
   isAdmin: boolean
 }) {
@@ -74,7 +95,10 @@ export function CapabilityStore({
   const [editing, setEditing] = useState<Capability | 'new' | null>(null)
   const [reaching, setReaching] = useState<Capability | null>(null)
   const [confirming, setConfirming] = useState<Capability | null>(null)
+  const [adopting, setAdopting] = useState<Capability | null>(null)
   const [pending, startTransition] = useTransition()
+
+  const adopted = useMemo(() => new Set(adoptedKeys), [adoptedKeys])
 
   const canManage = (c: Capability) => c.createdBy === currentSubject || isAdmin
   const authorOf = (createdBy: string): Author => {
@@ -104,6 +128,31 @@ export function CapabilityStore({
       if (r.ok) toast.success(t('deleted', { name: c.name }))
       else toast.error(r.error ?? t('deleteError'))
       setConfirming(null)
+    })
+
+  // 채택 — 필요 시크릿/쓰기 옵션이 있으면 다이얼로그로 바인딩을 받고, 없으면 바로 채택.
+  const startAdopt = (c: Capability) => {
+    if (requiredSecretsOf(c).length > 0 || offersWrite(c)) setAdopting(c)
+    else adopt(c, {}, false)
+  }
+  const adopt = (c: Capability, secretBindings: Record<string, string>, enableWrite: boolean) =>
+    startTransition(async () => {
+      const r = await adoptCapabilityAction({
+        source: c.tenant,
+        id: c.id,
+        version: c.version,
+        secretBindings,
+        enableWrite,
+      })
+      if (r.ok) toast.success(t('adopted', { name: c.name }))
+      else toast.error(r.error ?? t('adoptError'))
+      setAdopting(null)
+    })
+  const unadopt = (c: Capability) =>
+    startTransition(async () => {
+      const r = await unadoptCapabilityAction(c.tenant, c.id)
+      if (r.ok) toast.success(t('removed', { name: c.name }))
+      else toast.error(r.error ?? t('adoptError'))
     })
 
   return (
@@ -240,14 +289,33 @@ export function CapabilityStore({
                   {c.description}
                 </p>
 
-                <div className="mt-3 flex items-center gap-1.5 text-[11.5px] text-faint">
-                  <Avatar
-                    name={author.name}
-                    url={author.avatarUrl}
-                    size="sm"
-                    className="rounded-full"
-                  />
-                  <span>{t('createdBy', { name: author.name })}</span>
+                <div className="mt-3 flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-1.5 text-[11.5px] text-faint">
+                    <Avatar
+                      name={author.name}
+                      url={author.avatarUrl}
+                      size="sm"
+                      className="rounded-full"
+                    />
+                    <span>{t('createdBy', { name: author.name })}</span>
+                  </div>
+                  {canAdopt &&
+                    (adopted.has(capKey(c)) ? (
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        disabled={pending}
+                        onClick={() => unadopt(c)}
+                      >
+                        <Check />
+                        {t('adoptedRemove')}
+                      </Button>
+                    ) : (
+                      <Button size="sm" disabled={pending} onClick={() => startAdopt(c)}>
+                        <Plus />
+                        {t('adopt')}
+                      </Button>
+                    ))}
                 </div>
               </div>
             )
@@ -264,6 +332,16 @@ export function CapabilityStore({
 
       {reaching !== null && (
         <ReachDialog capability={reaching} isAdmin={isAdmin} onClose={() => setReaching(null)} />
+      )}
+
+      {adopting !== null && (
+        <AdoptDialog
+          capability={adopting}
+          secretNames={secretNames}
+          pending={pending}
+          onClose={() => setAdopting(null)}
+          onAdopt={(bindings, enableWrite) => adopt(adopting, bindings, enableWrite)}
+        />
       )}
 
       <Dialog open={confirming !== null} onClose={() => setConfirming(null)} className="max-w-sm">
@@ -688,6 +766,89 @@ function ReachDialog({
             disabled={pending || (visibility === 'public' && !isAdmin)}
           >
             {pending ? t('saving') : t('save')}
+          </Button>
+        </div>
+      </div>
+    </Dialog>
+  )
+}
+
+// 채택 다이얼로그 — 필요 시크릿을 내 워크스페이스 시크릿 이름으로 바인딩 + 쓰기 옵트인. 그 다음 에이전트에 pin 추가.
+function AdoptDialog({
+  capability,
+  secretNames,
+  pending,
+  onClose,
+  onAdopt,
+}: {
+  capability: Capability
+  secretNames: string[]
+  pending: boolean
+  onClose: () => void
+  onAdopt: (secretBindings: Record<string, string>, enableWrite: boolean) => void
+}) {
+  const t = useTranslations('capabilityStore')
+  const required = requiredSecretsOf(capability)
+  const write = offersWrite(capability)
+  const [bindings, setBindings] = useState<Record<string, string>>(
+    Object.fromEntries(required.map((s) => [s.name, s.name]))
+  )
+  const [enableWrite, setEnableWrite] = useState(false)
+
+  return (
+    <Dialog open onClose={onClose} className="max-w-md">
+      <div className="space-y-4 p-5">
+        <div>
+          <h3 className="text-sm font-medium">{t('adoptTitle', { name: capability.name })}</h3>
+          {capability.spec.type === 'code' && (
+            <p className="mt-1 text-[12px] text-muted-foreground">{t('adoptCodeNote')}</p>
+          )}
+        </div>
+        {required.length > 0 && (
+          <div className="space-y-2">
+            <Label>{t('bindSecrets')}</Label>
+            <p className="text-[12px] text-muted-foreground">{t('bindSecretsHint')}</p>
+            {required.map((s) => (
+              <div key={s.name} className="space-y-1">
+                <div className="text-[12px]">
+                  <span className="font-mono">{s.name}</span>
+                  {s.description ? (
+                    <span className="text-muted-foreground"> — {s.description}</span>
+                  ) : null}
+                </div>
+                <Input
+                  list="cap-secret-names"
+                  value={bindings[s.name] ?? ''}
+                  onChange={(e) => setBindings((b) => ({ ...b, [s.name]: e.target.value }))}
+                  placeholder={s.name}
+                  className="font-mono text-[12px]"
+                />
+              </div>
+            ))}
+            <datalist id="cap-secret-names">
+              {secretNames.map((n) => (
+                <option key={n} value={n} />
+              ))}
+            </datalist>
+          </div>
+        )}
+        {write && (
+          <label className="flex items-center gap-2 text-[13px]">
+            <input
+              type="checkbox"
+              className="accent-primary"
+              checked={enableWrite}
+              onChange={(e) => setEnableWrite(e.target.checked)}
+            />
+            <span>{t('enableWrite')}</span>
+          </label>
+        )}
+        <div className="flex justify-end gap-2">
+          <Button variant="secondary" size="sm" onClick={onClose}>
+            {t('cancel')}
+          </Button>
+          <Button size="sm" disabled={pending} onClick={() => onAdopt(bindings, enableWrite)}>
+            {pending ? t('saving') : t('adopt')}
           </Button>
         </div>
       </div>

@@ -3312,6 +3312,16 @@
     "requiredSecretsHint": "채택자가 채우는 시크릿(이름 + 설명) — 선언만, 값 아님.",
     "secretDescPlaceholder": "무엇인지 / 어디서 얻는지",
     "remove": "삭제",
-    "addSecret": "시크릿 추가"
+    "addSecret": "시크릿 추가",
+    "adopt": "채택",
+    "adoptedRemove": "채택됨",
+    "adopted": "\"{name}\"을(를) 내 에이전트에 추가했습니다.",
+    "adoptError": "에이전트를 업데이트하지 못했습니다.",
+    "removed": "\"{name}\"을(를) 내 에이전트에서 제거했습니다.",
+    "adoptTitle": "\"{name}\" 채택",
+    "adoptCodeNote": "코드 도구입니다 — 샌드박스에서 실행되며, 남이 만든 코드는 격리 런타임에서만 실행됩니다.",
+    "bindSecrets": "시크릿 바인딩",
+    "bindSecretsHint": "필요 시크릿을 내 워크스페이스 시크릿 이름에 매핑하세요.",
+    "enableWrite": "이 도구의 변경(write) 허용"
   }
 }

@@ -3312,6 +3312,16 @@
     "requiredSecretsHint": "Secrets the adopter supplies (name + what it is) — declared, never a value.",
     "secretDescPlaceholder": "what it is / where to get it",
     "remove": "Remove",
-    "addSecret": "Add secret"
+    "addSecret": "Add secret",
+    "adopt": "Adopt",
+    "adoptedRemove": "Adopted",
+    "adopted": "Added \"{name}\" to your agent.",
+    "adoptError": "Couldn't update your agent.",
+    "removed": "Removed \"{name}\" from your agent.",
+    "adoptTitle": "Adopt \"{name}\"",
+    "adoptCodeNote": "This is a code tool — it runs in a sandbox; adopted-from-others code only runs on an isolated runtime.",
+    "bindSecrets": "Bind secrets",
+    "bindSecretsHint": "Map each required secret to one of your workspace secret names.",
+    "enableWrite": "Allow this tool to make changes (write)"
   }
 }
