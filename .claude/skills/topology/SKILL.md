@@ -115,7 +115,10 @@ cross-tenant authorization decision (defense-in-depth / external gateway policy)
 via `kubectl port-forward svc/… :<port>` (parse the local port from stdout). `provisionBrowserEnv` runs a
 headless-Chromium Deployment+Service; `dispose()` deletes only the browser (warm topology survives), `teardown()`
 deletes the namespace. `imagePullPolicy`/`runtimeClass` are options (kind: pre-`kind load` images + IfNotPresent).
-Verified live on kind — Nomad↔K8s parity.
+Verified live on kind — Nomad↔K8s parity. **Warm-cache liveness (gap 2, parity with Nomad):** each `ensureTopology`
+cache hit re-verifies every ported service still has a pod (`podFor` scoped `everdict/harness`+`everdict/version`+`app`);
+a dead set (ns/Deployment deleted) drops the cache and redeploys (K8s `apply` is idempotent, so a redeploy on a probe
+blip merely re-adopts — no separate blip-vs-dead distinction needed, unlike Nomad).
 
 ## Local Docker runtime (self-hosted runner)
 `DockerTopologyRuntime` (`docker-runtime.ts`) is the **third** `TopologyRuntime` — same shape as Nomad/K8s but on

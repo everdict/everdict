@@ -173,6 +173,42 @@ describe("K8sTopologyRuntime", () => {
     expect(calls).toContain("pf:everdict-acme/svc/bu-agent-server");
   });
 
+  // Regression (gap 2, K8s parity with Nomad): a warm entry whose pods are gone (namespace/Deployment deleted) must be
+  // re-verified on cache hit and redeployed, not served forever. Pre-fix K8s blind-returned the cached handle.
+  it("re-verifies warm liveness on a cache hit and redeploys after the pods are gone", async () => {
+    let podsGone = false;
+    let deploys = 0; // ensureNamespace runs once at the start of each deploy
+    const kubectl: Kubectl = {
+      async apply() {},
+      async ensureNamespace() {
+        deploys++;
+      },
+      async rolloutStatus() {},
+      async portForward(): Promise<PortForward> {
+        return { localPort: 33333, stop: async () => {} };
+      },
+      async deleteResources() {},
+      async deleteNamespace() {},
+      async exec() {
+        return "";
+      },
+      async podFor(selector: string) {
+        if (podsGone) throw new Error(`no pods for ${selector}`);
+        return "pod-1";
+      },
+    };
+    const rt = new K8sTopologyRuntime({ kubectl, fetchImpl: okFetch, pollIntervalMs: 1 });
+    await rt.ensureTopology(SPEC, ZONE("acme"));
+    expect(deploys).toBe(1);
+    // Cache hit while the pods exist → liveness passes → serve cached, no redeploy.
+    await rt.ensureTopology(SPEC, ZONE("acme"));
+    expect(deploys).toBe(1);
+    // The pods are gone (ns/Deployment deleted) → the liveness re-check drops the poisoned entry and redeploys.
+    podsGone = true;
+    await rt.ensureTopology(SPEC, ZONE("acme"));
+    expect(deploys).toBe(2);
+  });
+
   it("multi-tenant: separates the warm topology into a different namespace per zone", async () => {
     const { kubectl, calls } = fakeKubectl();
     const rt = new K8sTopologyRuntime({ kubectl, fetchImpl: okFetch, pollIntervalMs: 1 });

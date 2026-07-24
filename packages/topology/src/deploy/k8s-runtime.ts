@@ -85,7 +85,14 @@ export class K8sTopologyRuntime implements TopologyRuntime {
   async ensureTopology(spec: ServiceHarnessSpec, zone?: TrustZone): Promise<TopologyHandle> {
     const key = `${spec.id}@${spec.version}@${zone?.id ?? "default"}`;
     const cached = this.warm.get(key);
-    if (cached) return cached.handle;
+    if (cached) {
+      // Warm-poisoning guard (gap 2, parity with Nomad + Docker): a warm topology whose namespace/Deployments were
+      // deleted (teardown/purge) leaves the cached port-forwards dead — serving them forever fails every later case.
+      // Re-verify each service still has a pod; on a dead set drop the entry and redeploy. K8s `apply` is idempotent
+      // (a redeploy adopts the existing Deployments if present), so treating any probe error as "redeploy" is safe.
+      if (await this.topologyAlive(spec, cached.ns)) return cached.handle;
+      this.warm.delete(key);
+    }
     const inflight = this.inFlight.get(key);
     if (inflight) return inflight; // concurrent ensures join the first deploy — see the inFlight field comment
 
@@ -94,6 +101,22 @@ export class K8sTopologyRuntime implements TopologyRuntime {
     const p = this.deploy(spec, key, zone).finally(() => this.inFlight.delete(key));
     this.inFlight.set(key, p);
     return p;
+  }
+
+  // Cheap liveness check for a warm topology (gap 2) — every ported service must still have a pod (harness+version+app
+  // scoped). Any probe failure (a deleted pod/Deployment, or a transient kubectl error) → false → the caller drops the
+  // cache and redeploys (K8s `apply` is idempotent, so a redeploy on a blip merely re-adopts). Portless spec → nothing to verify.
+  private async topologyAlive(spec: ServiceHarnessSpec, ns: string): Promise<boolean> {
+    const ported = spec.services.filter((s) => s.port !== undefined);
+    if (ported.length === 0) return true;
+    try {
+      for (const svc of ported) {
+        await this.kubectl.podFor(`everdict/harness=${spec.id},everdict/version=${spec.version},app=${svc.name}`, ns);
+      }
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   private async deploy(spec: ServiceHarnessSpec, key: string, zone?: TrustZone): Promise<TopologyHandle> {
