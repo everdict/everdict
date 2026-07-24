@@ -9,6 +9,7 @@ import {
 } from "@everdict/agent-runtime";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { type CodeToolRuntime, type ResolvedCodeTool, buildCodeTools } from "./code-tools.js";
 import { type ForwardHeaders, forwardHeaderRecord } from "./principal.js";
 
 // Read-only allowlist by verb prefix — default-deny. Only these read/preview verbs from the control-plane MCP surface
@@ -18,6 +19,29 @@ const READ_PREFIXES = ["get_", "list_", "inspect_", "diff_", "estimate_", "leade
 
 function isReadOnlyToolName(name: string): boolean {
   return READ_PREFIXES.some((p) => name.startsWith(p));
+}
+
+// Curated "use the integration" ACTION tools from the control-plane surface, exposed to the agent BY DEFAULT (beyond
+// the read verbs) so a workspace's configured integrations (Mattermost / CI / image registry) are usable without an
+// admin hand-registering a write-allowed MCP server. Kept deliberately narrow: only genuine use-the-integration
+// actions — NOT config/register/destroy (set_/probe_/remove_/assign_/link_/unlink_/start_) and NOT secret writes.
+// Each is bridged as isReadOnly:false so the agent's HITL permission gate approves every call inline. This is an
+// explicit allowlist, so default-deny still holds for every other mutating verb on the base surface.
+const INTEGRATION_ACTIONS = new Set<string>([
+  "post_mattermost_message",
+  "open_ci_setup_pr",
+  "get_image_push_credentials",
+]);
+
+// A base (built-in everdict) tool reaches the agent if it is a read verb OR one of the curated integration actions.
+export function isDefaultBaseTool(name: string): boolean {
+  return isReadOnlyToolName(name) || INTEGRATION_ACTIONS.has(name);
+}
+
+// A base tool is read-only (skips the HITL gate) only when it is a pure read verb AND not a curated integration
+// action — so an action like get_image_push_credentials (matches get_ but MINTS credentials) is still HITL-gated.
+export function isBaseToolReadOnly(name: string): boolean {
+  return isReadOnlyToolName(name) && !INTEGRATION_ACTIONS.has(name);
 }
 
 // A workspace-registered MCP tool server (from the workspace's AgentSpec), with its authSecret already resolved to a
@@ -44,6 +68,7 @@ export type ToolProvider = (
   headers: ForwardHeaders,
   extraServers?: ResolvedMcpServer[],
   skills?: SkillEntry[],
+  codeTools?: ResolvedCodeTool[],
 ) => Promise<ToolSession>;
 
 const EMPTY_SESSION: ToolSession = { registry: new ToolRegistry([]), call: null, close: async () => {} };
@@ -69,26 +94,27 @@ function makeInvoke(client: Client, prefix?: string): McpInvoke {
   };
 }
 
-export function mcpToolProvider(mcpUrl: string): ToolProvider {
+export function mcpToolProvider(mcpUrl: string, codeRuntime?: CodeToolRuntime): ToolProvider {
   const baseUrl = new URL(mcpUrl);
-  return async (headers, extraServers = [], skills = []) => {
+  return async (headers, extraServers = [], skills = [], codeTools = []) => {
     const clients: Client[] = [];
     const bridged: ToolDefinition[] = [];
     let baseCall: McpInvoke | null = null;
 
-    // 1. Base everdict MCP — read-only, forwarding the caller's bearer (dogfooding the control plane's own tools).
+    // 1. Base everdict MCP — read verbs + the curated integration actions, forwarding the caller's bearer (dogfooding
+    // the control plane's own tools). The integration actions are bridged isReadOnly:false so each call is HITL-gated.
     const baseClient = new Client({ name: "everdict-agent", version: "0.1.0" });
     try {
       const transport = new StreamableHTTPClientTransport(baseUrl, {
         requestInit: { headers: forwardHeaderRecord(headers) },
       });
       await baseClient.connect(transport);
-      const readTools = (await baseClient.listTools()).tools.filter((t) => isReadOnlyToolName(t.name));
-      if (readTools.length > 0) {
+      const baseTools = (await baseClient.listTools()).tools.filter((t) => isDefaultBaseTool(t.name));
+      if (baseTools.length > 0) {
         clients.push(baseClient);
         const invoke = makeInvoke(baseClient);
         baseCall = invoke;
-        for (const t of readTools) {
+        for (const t of baseTools) {
           bridged.push(
             mcpToolToDefinition(
               {
@@ -97,6 +123,7 @@ export function mcpToolProvider(mcpUrl: string): ToolProvider {
                 inputSchema: t.inputSchema as Record<string, unknown> | undefined,
               },
               invoke,
+              { isReadOnly: isBaseToolReadOnly(t.name) },
             ),
           );
         }
@@ -158,10 +185,14 @@ export function mcpToolProvider(mcpUrl: string): ToolProvider {
     // The native `use_skill` tool (progressive disclosure over the workspace's skills) is added even when no MCP tools
     // are reachable — a workspace can rely on skills alone.
     const skillTool = buildSkillTool(skills);
-    if (bridged.length === 0 && !skillTool) return EMPTY_SESSION;
+    // Adopted code capabilities → native `code__<name>` tools. buildCodeTools drops any adopted-from-others code the
+    // runtime can't safely (isolatedly) run — never execute untrusted code on the host.
+    const { defs: codeDefs } = buildCodeTools(codeTools, codeRuntime);
+    if (bridged.length === 0 && !skillTool && codeDefs.length === 0) return EMPTY_SESSION;
 
     const tools: ToolDefinition[] = [];
     if (bridged.length > 0) tools.push(buildToolSearchTool(new ToolRegistry(bridged)), ...bridged);
+    tools.push(...codeDefs); // native code tools — always loaded (not deferred behind ToolSearch)
     if (skillTool) tools.push(skillTool);
     const registry = new ToolRegistry(tools);
     return {

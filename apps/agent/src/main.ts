@@ -10,7 +10,9 @@ import {
   makePool,
   sqlClient,
 } from "@everdict/db";
+import { LocalDriver } from "@everdict/drivers";
 import { PgAgentRegistry, PgModelRegistry } from "@everdict/registry";
+import type { CodeToolRuntime } from "./code-tools.js";
 import { type AgentConfig, loadConfig } from "./config.js";
 import { mcpToolProvider } from "./mcp-tools.js";
 import {
@@ -81,13 +83,20 @@ async function main(): Promise<void> {
     resolveModel = envModelFallback(config);
   }
 
+  // Code capabilities (type:'code') run in a provisioned compute. The default agent uses a LocalDriver (host
+  // subprocess — dev / self-hosted, matching "LocalDriver = inside the agent"); it is NOT isolated, so own-workspace
+  // code runs while adopted-from-others code is skipped (the buildCodeTools sandbox gate). A managed deployment
+  // injects an isolated driver (DockerDriver) to run adopted code safely.
+  const localDriver = new LocalDriver();
+  const codeRuntime: CodeToolRuntime = { provision: (spec) => localDriver.provision(spec), isolated: false };
+
   const app = buildServer({
     authenticate: meAuthenticate(config.CONTROL_PLANE_URL),
     sessions,
     resolveModel,
     resolveProfile,
     ...(resolveModelById ? { resolveModelById } : {}),
-    toolProvider: mcpToolProvider(config.mcpUrl),
+    toolProvider: mcpToolProvider(config.mcpUrl, codeRuntime),
     systemPrompt: EVERDICT_AGENT_SYSTEM_PROMPT,
     now: () => new Date().toISOString(),
     newId: () => randomUUID(),

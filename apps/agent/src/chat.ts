@@ -297,7 +297,12 @@ export async function runChat(
   const profile = deps.resolveProfile ? await deps.resolveProfile(principal) : undefined;
   const systemPrompt = profile?.systemPrompt ?? deps.systemPrompt;
 
-  const tools = await deps.toolProvider(headers, profile?.mcpServers ?? [], profile?.skills ?? []);
+  const tools = await deps.toolProvider(
+    headers,
+    profile?.mcpServers ?? [],
+    profile?.skills ?? [],
+    profile?.codeTools ?? [],
+  );
   try {
     // Fold any @-referenced entity context into the user turn the model sees (the persisted record keeps the
     // clean text + the reference metadata separately).

@@ -41,6 +41,9 @@ importers:
       '@everdict/domain':
         specifier: workspace:*
         version: link:../../packages/domain
+      '@everdict/drivers':
+        specifier: workspace:*
+        version: link:../../packages/drivers
       '@everdict/llm':
         specifier: workspace:*
         version: link:../../packages/llm

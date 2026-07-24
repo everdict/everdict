@@ -106,7 +106,7 @@ function spec(over: Partial<AgentSpec> = {}): AgentSpec {
 describe("registryProfileResolver", () => {
   it("falls back to the base profile when no agent is registered", async () => {
     const profile = await resolver(undefined)(principal);
-    expect(profile).toEqual({ systemPrompt: BASE, mcpServers: [], skills: [] });
+    expect(profile).toEqual({ systemPrompt: BASE, mcpServers: [], skills: [], codeTools: [] });
   });
 
   it("loads the workspace's skills into the profile (even with no agent registered) and notes them in the prompt", async () => {
@@ -234,5 +234,38 @@ describe("registryProfileResolver", () => {
     )(principal);
     expect(profile.mcpServers).toEqual([]);
     expect(profile.skills).toEqual([]);
+    expect(profile.codeTools).toEqual([]);
+  });
+
+  it("resolves an adopted code capability into a runnable code tool (env bound, sandbox flag from source)", async () => {
+    const cap = capRecord(
+      {
+        type: "code",
+        language: "python",
+        code: "print('{}')",
+        parametersSchema: { type: "object", properties: {} },
+        isReadOnly: true,
+        requiredSecrets: [{ name: "API_KEY", description: "k" }],
+      },
+      { name: "scorer", tenant: "beta", visibility: "public", createdBy: "owner" },
+    );
+    const profile = await resolver(
+      spec({ capabilities: [capRef({ source: "beta", secretBindings: { API_KEY: "my_key" } })] }),
+      secretStore({ my_key: "sk-9" }),
+      skillStore(),
+      capabilityStore([cap]),
+    )(principal);
+    expect(profile.codeTools).toEqual([
+      {
+        name: "scorer",
+        description: "d",
+        language: "python",
+        code: "print('{}')",
+        parametersSchema: { type: "object", properties: {} },
+        isReadOnly: true,
+        env: { API_KEY: "sk-9" },
+        sandbox: true, // adopted from beta (source !== acme)
+      },
+    ]);
   });
 });

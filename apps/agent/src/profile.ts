@@ -2,6 +2,7 @@ import type { SkillEntry } from "@everdict/agent-runtime";
 import type { AgentRegistry, CapabilityStore, SecretStore, SkillStore } from "@everdict/application-control";
 import type { CapabilityRecord } from "@everdict/contracts";
 import { canConsumeCapability } from "@everdict/domain";
+import type { ResolvedCodeTool } from "./code-tools.js";
 import type { ResolvedMcpServer } from "./mcp-tools.js";
 import type { Principal } from "./principal.js";
 
@@ -16,6 +17,9 @@ export interface AgentProfile {
   // Workspace skills the caller can use (workspace-shared + their own private drafts) — surfaced as the `use_skill`
   // tool (Claude-Code-style progressive disclosure). Members author these; they're not imported.
   skills: SkillEntry[];
+  // Adopted code capabilities (type:'code') resolved to a runnable form — bridged as native `code__<name>` tools. The
+  // ToolProvider decides which can safely run (own-workspace code on a host driver; adopted-from-others only isolated).
+  codeTools: ResolvedCodeTool[];
 }
 
 export type ProfileResolver = (principal: Principal) => Promise<AgentProfile>;
@@ -84,6 +88,7 @@ export function registryProfileResolver(opts: {
         systemPrompt: composeSystemPrompt(opts.baseSystemPrompt, undefined, false, skills.length > 0),
         mcpServers: [],
         skills,
+        codeTools: [],
       };
     }
 
@@ -97,6 +102,7 @@ export function registryProfileResolver(opts: {
       name ? (scoped.workspace[name] ?? scoped.user[name]) : undefined;
 
     const mcpServers: ResolvedMcpServer[] = [];
+    const codeTools: ResolvedCodeTool[] = [];
     for (const s of spec.mcpServers) {
       const authorization = resolveSecret(s.authSecret); // verbatim header value (e.g. "Bearer …") — same discipline as trace sources
       mcpServers.push({ name: s.name, url: s.url, ...(authorization ? { authorization } : {}), write: s.write });
@@ -130,6 +136,26 @@ export function registryProfileResolver(opts: {
       } else if (capSpec.type === "skill") {
         if (!skills.some((s) => s.name === record.name))
           skills.push({ name: record.name, description: record.description, instructions: capSpec.instructions });
+      } else if (capSpec.type === "code") {
+        // Bind each declared required secret to the adopter's own secret VALUE (the code reads it as an env var by
+        // its logical name). sandbox = adopted from another workspace → the ToolProvider requires an isolated runtime.
+        const env: Record<string, string> = {};
+        for (const rs of capSpec.requiredSecrets) {
+          const value = resolveSecret(ref.secretBindings[rs.name]);
+          if (value !== undefined) env[rs.name] = value;
+        }
+        codeTools.push({
+          name: record.name,
+          description: record.description,
+          language: capSpec.language,
+          code: capSpec.code,
+          parametersSchema: capSpec.parametersSchema,
+          isReadOnly: capSpec.isReadOnly,
+          env,
+          ...(capSpec.timeoutSec !== undefined ? { timeoutSec: capSpec.timeoutSec } : {}),
+          ...(capSpec.image !== undefined ? { image: capSpec.image } : {}),
+          sandbox: ref.source !== principal.workspace,
+        });
       }
     }
     const hasWriteTools = mcpServers.some((s) => s.write);
@@ -138,11 +164,12 @@ export function registryProfileResolver(opts: {
       ...(spec.model ? { model: spec.model } : {}),
       mcpServers,
       skills,
+      codeTools,
     };
   };
 }
 
 // Dev / no-DB fallback: always the base profile (no per-workspace customization without a registry + stores).
 export function baseProfileResolver(baseSystemPrompt: string): ProfileResolver {
-  return async () => ({ systemPrompt: baseSystemPrompt, mcpServers: [], skills: [] });
+  return async () => ({ systemPrompt: baseSystemPrompt, mcpServers: [], skills: [], codeTools: [] });
 }
