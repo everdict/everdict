@@ -71,9 +71,10 @@ export function registerScorecardRoutes(app: FastifyInstance, deps: ServerDeps):
   });
 
   // Full re-run — a NEW scorecard that re-runs a terminal batch's ENTIRE case set (전체 재실행), reproducing the
-  // original submit config and optionally applying a re-score override (grading plan / judge model / trace sink) from
-  // the body. Distinct from /retry (which recovers only the failed cases and carries the passing ones over). Same
-  // gate as submit (scorecards:run). docs/architecture/batch-resilience.md
+  // original submit config and optionally overriding the run-config knobs from the body: WHO runs it (judges/runtime)
+  // and HOW it is dispatched (concurrency/retries/subset). Scoring is reproduced verbatim (never overridden). Distinct
+  // from /retry (which recovers only the failed cases and carries the passing ones over). Same gate as submit
+  // (scorecards:run). docs/architecture/batch-resilience.md
   app.post<{ Params: { id: string } }>("/scorecards/:id/rerun", { schema: scorecardDocs.rerun }, async (req, reply) => {
     if (!deps.scorecardService)
       return reply.code(404).send({ code: "NOT_FOUND", message: "scorecard service not configured" });

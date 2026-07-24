@@ -289,11 +289,18 @@ export class ScorecardService {
     tenant: string;
     id: string;
     submittedBy?: string;
-    // Run-config overrides (both optional) — surfaced from the original submit so a re-run can adjust them:
-    //   judges  — the selected Agent Judges; unset inherits the original selection, [] re-runs with none.
-    //   runtime — the execution target (a registered runtime id / self:* runner); unset inherits the original.
+    // Run-config overrides (all optional) — surfaced from the original submit so a re-run can adjust WHO runs it and HOW
+    // it is dispatched (scoring stays verbatim from the source):
+    //   judges      — the selected Agent Judges; unset inherits the original selection, [] re-runs with none.
+    //   runtime     — the execution target (a registered runtime id / self:* runner); unset inherits the original.
+    //   concurrency — dispatch width; unset inherits the original batch concurrency.
+    //   retries     — per-case transient retries; unset inherits the original.
+    //   cases       — subset override; unset re-runs the SAME subset the source ran.
     judges?: Array<{ id: string; version: string }>;
     runtime?: string;
+    concurrency?: number;
+    retries?: number;
+    cases?: { ids?: string[]; tags?: string[]; limit?: number };
   }): Promise<ScorecardRecord> {
     const src = await this.get(input.id);
     if (!src || src.tenant !== input.tenant)
@@ -316,20 +323,26 @@ export class ScorecardService {
       judges: input.judges ?? orch?.judges ?? [],
       // Execution target: an explicit override → else the original runtime.
       ...((input.runtime ?? src.runtime) ? { runtime: input.runtime ?? src.runtime } : {}),
-      ...(orch?.concurrency !== undefined ? { concurrency: orch.concurrency } : {}),
-      ...(orch?.retries !== undefined ? { retries: orch.retries } : {}),
+      // Dispatch knobs: an explicit override → else the original batch value (concurrency/retries).
+      ...((input.concurrency ?? orch?.concurrency) !== undefined
+        ? { concurrency: input.concurrency ?? orch?.concurrency }
+        : {}),
+      ...((input.retries ?? orch?.retries) !== undefined ? { retries: input.retries ?? orch?.retries } : {}),
       ...(orch?.trials !== undefined ? { trials: orch.trials } : {}),
       ...(orch?.oomAutoBoost ? { oomAutoBoost: true } : {}),
-      // Re-run the SAME subset the original ran ("전체" = every case of THIS scorecard, not the whole dataset).
-      ...(src.subset
-        ? {
-            cases: {
-              ...(src.subset.ids ? { ids: src.subset.ids } : {}),
-              ...(src.subset.tags ? { tags: src.subset.tags } : {}),
-              ...(src.subset.limit !== undefined ? { limit: src.subset.limit } : {}),
-            },
-          }
-        : {}),
+      // Subset: an explicit override → else re-run the SAME subset the original ran ("전체" = every case of THIS
+      // scorecard, not the whole dataset). An override lets a re-run narrow to specific cases.
+      ...(input.cases
+        ? { cases: input.cases }
+        : src.subset
+          ? {
+              cases: {
+                ...(src.subset.ids ? { ids: src.subset.ids } : {}),
+                ...(src.subset.tags ? { tags: src.subset.tags } : {}),
+                ...(src.subset.limit !== undefined ? { limit: src.subset.limit } : {}),
+              },
+            }
+          : {}),
       // Scoring is reproduced verbatim from the source (grading plan / inline judge model / trace sink) — a re-run
       // adjusts WHO runs it (judges/runtime), not HOW it is scored.
       ...(orch?.graders ? { graders: orch.graders } : {}),

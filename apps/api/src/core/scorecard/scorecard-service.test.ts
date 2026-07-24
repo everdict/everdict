@@ -484,6 +484,37 @@ describe("ScorecardService.rerun — full re-run of a finished batch (전체 재
     expect(created.orchestration?.graders).toEqual([{ id: "tests-pass" }]); // scoring reproduced verbatim (not overridable)
   });
 
+  // Regression (gap: rerun could not adjust dispatch knobs) — a re-run may override concurrency/retries/subset; unset
+  // fields still inherit the source. Pre-fix these three inputs did not exist, so a re-run always inherited them.
+  it("applies dispatch-knob overrides (concurrency / retries / subset) while inheriting the unset ones", async () => {
+    const twoCaseDataset: Dataset = {
+      id: "d",
+      version: "1.0.0",
+      tags: [],
+      cases: [
+        { id: "c1", env: { kind: "repo", source: { files: {} } }, task: "do", graders: [], timeoutSec: 1800, tags: [] },
+        { id: "c2", env: { kind: "repo", source: { files: {} } }, task: "do", graders: [], timeoutSec: 1800, tags: [] },
+      ],
+    };
+    const store = new InMemoryScorecardStore();
+    await seedSrc(store); // source: concurrency 2, retries 1, subset ids ["c1"], judges [{j,1}]
+    const { datasets, service } = build(store);
+    await datasets.register("acme", twoCaseDataset);
+
+    const created = await service.rerun({
+      tenant: "acme",
+      id: "src-1",
+      concurrency: 8,
+      retries: 3,
+      cases: { ids: ["c2"] },
+    });
+
+    expect(created.orchestration?.concurrency).toBe(8); // override (source was 2)
+    expect(created.orchestration?.retries).toBe(3); // override (source was 1)
+    expect(created.subset?.ids).toEqual(["c2"]); // subset override (source was ["c1"])
+    expect(created.orchestration?.judges).toEqual([{ id: "j", version: "1" }]); // judges inherited (unset)
+  });
+
   it("an explicit empty judges list re-runs with no judges (score with the dataset's graders only)", async () => {
     const store = new InMemoryScorecardStore();
     await seedSrc(store);

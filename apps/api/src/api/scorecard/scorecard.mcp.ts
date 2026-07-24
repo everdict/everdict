@@ -188,7 +188,7 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
       "rerun_scorecard",
       {
         description:
-          "Re-run a finished batch's ENTIRE case set as a new scorecard (전체 재실행), faithfully reproducing the original submit (dataset+version, harness+pins, grading plan, concurrency/retries/trials, subset) so the two compare directly — while optionally adjusting the two run-config choices made at submit time: the selected judges and the execution runtime (each unset field inherits the original). Async (poll with get_scorecard). Multi-trial IS supported here. Lineage via origin.retryOf; the source record is never mutated. For recovering only the FAILED cases (carry the passing ones over) use retry_scorecard instead.",
+          "Re-run a finished batch's ENTIRE case set as a new scorecard (전체 재실행), faithfully reproducing the original submit (dataset+version, harness+pins, grading plan, trials) so the two compare directly — while optionally overriding the run-config knobs: WHO runs it (judges, runtime) and HOW it is dispatched (concurrency, retries, subset via cases). Each unset field inherits the original; scoring is reproduced verbatim (never overridden). Async (poll with get_scorecard). Multi-trial IS supported here. Lineage via origin.retryOf; the source record is never mutated. For recovering only the FAILED cases (carry the passing ones over) use retry_scorecard instead.",
         inputSchema: {
           id: z.string().describe("source scorecard id (must be succeeded/failed)"),
           judges: z
@@ -204,9 +204,31 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
             .describe(
               "execution target override (a registered runtime id or self:* runner) — unset inherits the original",
             ),
+          concurrency: z
+            .number()
+            .int()
+            .min(1)
+            .max(512)
+            .optional()
+            .describe("dispatch concurrency override (max cases at once) — unset inherits the original"),
+          retries: z
+            .number()
+            .int()
+            .min(0)
+            .max(5)
+            .optional()
+            .describe("per-case transient retry override — unset inherits the original"),
+          cases: z
+            .object({
+              ids: z.array(z.string().min(1)).min(1).optional(),
+              tags: z.array(z.string().min(1)).min(1).optional(),
+              limit: z.number().int().min(1).max(10_000).optional(),
+            })
+            .optional()
+            .describe("subset override (ids → tags → limit) — unset re-runs the SAME subset the source ran"),
         },
       },
-      ({ id, judges, runtime }) =>
+      ({ id, judges, runtime, concurrency, retries, cases }) =>
         run(principal, "scorecards:run", async () =>
           ok(
             await scorecards.rerun({
@@ -215,6 +237,9 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
               submittedBy: principal.subject,
               ...(judges ? { judges } : {}),
               ...(runtime ? { runtime } : {}),
+              ...(concurrency !== undefined ? { concurrency } : {}),
+              ...(retries !== undefined ? { retries } : {}),
+              ...(cases ? { cases } : {}),
             }),
           ),
         ),
