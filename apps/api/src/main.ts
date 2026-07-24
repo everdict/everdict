@@ -46,6 +46,7 @@ import { runtimeSessionProvision } from "./infrastructure/browser-session/nomad-
 import { PooledBrowserProvisioner } from "./infrastructure/browser-session/pooled-browser-provisioner.js";
 import { RoutingBrowserProvisioner } from "./infrastructure/browser-session/routing-browser-provisioner.js";
 import { RuntimeBrowserProvisioner } from "./infrastructure/browser-session/runtime-browser-provisioner.js";
+import { installProxyDispatcher } from "./infrastructure/http/proxy-dispatcher.js";
 import { buildServer } from "./server.js";
 
 // Parse an env var as a strictly-positive integer; undefined (unset/blank/zero/negative/NaN) ⇒ "no limit".
@@ -81,6 +82,12 @@ function selectBrowserProvisioner(chromeBin: string | undefined): BrowserSession
 // DATABASE_URL → Postgres (stores/keys/registries), else in-memory. NOMAD_ADDR → Nomad backend.
 // main is the process composition root: env → per-concern builders (composition/*) → buildServer → start.
 async function main(): Promise<void> {
+  // Proxy-aware outbound: install a global dispatcher FIRST (before any client fetches) so every outbound call (LLM
+  // providers, trace pull/export, GitHub App, Mattermost) honors HTTP(S)_PROXY / NO_PROXY behind a corporate proxy.
+  // No-op when no proxy env is set.
+  const proxy = installProxyDispatcher();
+  if (proxy) console.log(`[everdict] outbound proxy: ${proxy.httpsProxy ?? proxy.httpProxy} (NO_PROXY honored)`);
+
   const port = Number(process.env.PORT ?? "8787");
   const nomadAddr = process.env.NOMAD_ADDR;
   const k8sContext = process.env.EVERDICT_K8S_CONTEXT;
