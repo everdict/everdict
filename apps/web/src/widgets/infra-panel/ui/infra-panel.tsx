@@ -128,21 +128,19 @@ export function InfraPanel() {
   }, [router, onNavigate, workspace])
 
   // A server-resolved per-device preference (locale / timezone) changed in the parent. The mounted iframes read
-  // it server-side off the cookie and stay frozen, so router.refresh() in the switcher never reaches them —
-  // reload each in place (its current URL, re-requested with the new cookie). Theme is client-only and syncs
-  // live via the storage event, so it is not signalled here.
+  // it server-side off the cookie and stay frozen, so router.refresh() in the switcher never reaches their
+  // separate browsing context. Signal each frame to soft-refresh IN PLACE (everdict:refresh → EmbedShell calls
+  // its own router.refresh()) — the server re-renders with the new cookie without a hard reload, so scroll,
+  // in-iframe route and live streams survive and it feels like one app (not a flashing sub-frame). Theme is
+  // client-only and syncs live via the storage event, so it is not signalled here.
   useEffect(() => {
-    const onReload = () => {
+    const onRefresh = () => {
       for (const el of Object.values(frames.current)) {
-        try {
-          el?.contentWindow?.location.reload()
-        } catch {
-          // Same-origin frames only — a reload cannot throw here, but stay defensive.
-        }
+        el?.contentWindow?.postMessage({ type: 'everdict:refresh' }, window.location.origin)
       }
     }
-    window.addEventListener(RELOAD_INFRA_FRAMES_EVENT, onReload)
-    return () => window.removeEventListener(RELOAD_INFRA_FRAMES_EVENT, onReload)
+    window.addEventListener(RELOAD_INFRA_FRAMES_EVENT, onRefresh)
+    return () => window.removeEventListener(RELOAD_INFRA_FRAMES_EVENT, onRefresh)
   }, [])
 
   // Never opened → nothing to preserve. After the first open, collapse only HIDES the panel (iframes live on).

@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, type ReactNode } from 'react'
-import { usePathname } from 'next/navigation'
+import { usePathname, useRouter } from 'next/navigation'
 
 // Chrome-less shell for pages rendered INSIDE the infra panel's iframe (the [workspace] layout switches to this
 // when the document was requested as an iframe — sec-fetch-dest). The real routed pages render at full fidelity
@@ -15,6 +15,19 @@ const INFRA_SEGMENTS = new Set(['runs', 'runtimes', 'schedules'])
 
 export function EmbedShell({ children }: { children: ReactNode }) {
   const pathname = usePathname()
+  const router = useRouter()
+
+  // Cookie-backed per-device preference (locale / timezone) changed in the parent. The parent's switcher sets the
+  // cookie then signals us here (everdict:refresh); soft-refresh so the server re-renders this framed page with the
+  // new cookie in place — no hard reload, so scroll position and in-iframe navigation survive (behaves as one app).
+  useEffect(() => {
+    const onMessage = (e: MessageEvent) => {
+      if (e.origin !== window.location.origin) return
+      if ((e.data as { type?: string } | null)?.type === 'everdict:refresh') router.refresh()
+    }
+    window.addEventListener('message', onMessage)
+    return () => window.removeEventListener('message', onMessage)
+  }, [router])
 
   // Bounce guard — if a NON-infra page ends up inside the panel's iframe anyway (a pre-hydration click beats
   // the interceptor below, a redirect, a programmatic push, …), forward it to the parent so the LEFT half

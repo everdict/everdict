@@ -32,9 +32,32 @@ function injectWorkspace(req: NextRequest): NextResponse {
   return res
 }
 
+// An embed iframe request (the infra panel hosts pages in same-origin iframes with ?embed=1; Sec-Fetch-Dest is
+// only sent on trustworthy origins, so plain-HTTP dev needs the param too).
+function isEmbedRequest(req: NextRequest): boolean {
+  return (
+    req.nextUrl.searchParams.get('embed') === '1' || req.headers.get('sec-fetch-dest') === 'iframe'
+  )
+}
+
 // Redirect to login, carrying the original path as callbackUrl so we return to that spot after login.
 // (Block the loop where a stale callbackUrl=`/` in the cookie bounces back again, using an explicit callbackUrl.)
 function signinRedirect(req: NextRequest): NextResponse {
+  const slug = workspaceSlugFromPath(req.nextUrl.pathname)
+  // Infra panel: a dead session must NEVER render the Keycloak sign-in flow INSIDE the panel — Keycloak refuses
+  // cross-origin framing (X-Frame-Options/frame-ancestors), so a framed login is a dead panel, and re-auth is an
+  // app-wide event, not a per-panel one. Break out of the frame and send the WHOLE app to sign-in at the top
+  // level, landing back on the workspace after login. A plain redirect can't do this — it would just navigate the
+  // iframe — so return a tiny frame-busting document.
+  if (isEmbedRequest(req)) {
+    const target = new URL('/api/auth/signin', req.nextUrl.origin)
+    target.searchParams.set('callbackUrl', slug ? `/${slug}` : '/')
+    const href = JSON.stringify(target.pathname + target.search)
+    return new NextResponse(
+      `<!doctype html><meta charset="utf-8"><script>var u=${href};try{(top||window).location.replace(u)}catch(_){location.replace(u)}</script>`,
+      { status: 401, headers: { 'content-type': 'text/html; charset=utf-8' } }
+    )
+  }
   const url = new URL('/api/auth/signin', req.nextUrl.origin)
   url.searchParams.set('callbackUrl', req.nextUrl.pathname)
   return NextResponse.redirect(url)
