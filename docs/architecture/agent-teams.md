@@ -106,10 +106,13 @@ The gap is not the loop — it is (a) a **shared message substrate** with addres
   The `spawn_teammate` agent TOOL is in too — an agent (not just the web) spawns a teammate (host `spawnTeammate`
   seam → the same `spawnTeammateFor`), so agents autonomously grow their own team and coordinate over
   `send_message`. The roster is in too: `GET /agent/teammates` (the caller's live teammates) + `DELETE
-  /agent/teammates/:id` (stop — unregister + revoke its execution token; keeps the transcript). **Remaining
-  polish:** a named `team` grouping + a web surface. The agent can also DISCOVER its team (a `list_teammates`
-  tool over the roster) to coordinate over send_message. The core — persistent, addressable, autonomous,
-  self-spawning, discoverable, collaborating, stoppable agents — is in.
+  /agent/teammates/:id` (stop — unregister + revoke its execution token; keeps the transcript). The **web
+  surface is in too:** a Team menu in the chat header (`apps/web` `features/agent-chat/ui/team-menu.tsx` over
+  two same-origin BFF proxy routes) lists the caller's teammates (name + watched kinds), spawns one (name +
+  standing task + watched completion kinds), and stops one — with a roster badge that refreshes after each turn
+  so a self-spawned teammate appears. **Remaining polish:** a named `team` grouping. The agent can also DISCOVER
+  its team (a `list_teammates` tool over the roster) to coordinate over send_message. The core — persistent,
+  addressable, autonomous, self-spawning, discoverable, collaborating, stoppable, human-visible agents — is in.
 - **S4 — event bridge (monitoring → agent inbox). Agent-side LANDED.** A teammate subscribes to event kinds
   (spawn_teammate / POST /agent/teammates `watch: [...]`), and `POST /agent/events {kind, source, message}` fans
   the event out to the caller's teammates that watch that kind — delivering it (attributed) into each mailbox and
@@ -121,8 +124,10 @@ The gap is not the loop — it is (a) a **shared message substrate** with addres
   `run.completed`/`run.failed`/`scorecard.completed`/`scorecard.failed` event via an `AgentEventSink` (an HTTP
   client to `/agent/events`, wired when `AGENT_SERVICE_URL` + `AGENT_INTERNAL_TOKEN` are set) — best-effort, so
   an unreachable agent never affects the result. Everything Everdict monitors now auto-drives the proactive
-  team: a run/scorecard completes → its creator's watching teammates wake and react. **Remaining:** only the
-  web surface (teammate list/spawn), and richer event kinds (e.g. a real `scorecard.regressed` from a diff).
+  team: a run/scorecard completes → its creator's watching teammates wake and react. The **web surface for
+  spawning/watching teammates is in** (S3 note). **Remaining:** only richer event kinds — and note that
+  regression detection (`scorecard.regressed`) belongs in the AGENT (a watcher diffs via MCP `diff_scorecards`),
+  not the control plane, which emits only facts (completed/failed). So the event model is already complete.
 - **S5 — proactive triggers.** An event in an idle subscribed agent's mailbox wakes a turn (reuse the
   schedule-fire path). The proactive agent team is live.
 - **S6 — agent drives eval (write capability).** Expose the write control-plane tools to the agent behind
