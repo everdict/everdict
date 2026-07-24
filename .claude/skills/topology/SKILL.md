@@ -81,6 +81,12 @@ cache hit re-verifies every service group still has a running alloc (one `/v1/jo
 `topologyAlive`) — after a reschedule/purge the cached host:port is stale, so a poisoned entry is dropped and
 redeployed instead of served forever (mirrors Docker's `docker ps` guard; a Nomad blip serves cached best-effort).
 The warm entry stores `{handle, jobId, ns, groups}` for this.
+**Resetting a warm topology (gap 3 — already an ops lever).** A per-`(id@version@zone)` teardown does not need a new
+endpoint: the topology job is deterministically named `everdict-harness-<id>-<version>[-<zone>]` (`topologyJobId`), so
+an admin `stopWorkload everdict-harness-<id>-<version>-<zone>` (the existing runtime-control ops action + MCP tool,
+gated `runtimes:control`) deregisters the cluster job, and the warm-cache liveness re-check above then drops the now-
+dead in-memory entry on the next `ensureTopology` and redeploys. So a poisoned/stale warm topology is cleared by
+`stopWorkload` (durable, cluster) + the auto-heal (in-memory) — no control-plane restart, no dedicated teardown route.
 **No-zone store parity:** declared `dependencies[]` must be provisioned on every runtime regardless of zone — Docker
 always deploys them, K8s deploys when `provisionDependencies` is set, and Nomad now honors the SAME
 `provisionDependencies` option for the no-zone case (deploys the stores as a dedicated silo under a `default` id via
