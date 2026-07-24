@@ -118,7 +118,14 @@ export interface NomadTopologyRuntimeOptions {
   maxPolls?: number;
   readyTimeoutMs?: number;
   registryAuth?: RegistryAuth; // workspace image-registry pull credentials — the builder renders them as docker auth
+  // Default store isolation when there is NO trust zone (single-tenant / dev host): true → deploy declared dependency
+  // stores as a dedicated silo (parity with Docker + K8s), false → external (BYO, connect via storeEnv). Mirrors the
+  // K8sTopologyRuntime option of the same name.
+  provisionDependencies?: boolean;
 }
+
+// The store-namespace id used for a no-zone silo (there are no tenants, so one default id names the dedicated store job).
+const NO_ZONE_STORE_ID = "default";
 
 // Live NomadTopologyRuntime: register the warm service job + discover endpoints + per-case browser (real CDP).
 // The orchestrator-agnostic ServiceTopologyBackend drives topologies on Nomad through this.
@@ -180,10 +187,18 @@ export class NomadTopologyRuntime implements TopologyRuntime {
         storeEnv = { ...pool.env, ...this.opts.storeEnv };
         storeValues = pool.values;
       } else if (isolation === "silo") {
-        const silo = await this.provisionSilo(spec, zone);
+        const silo = await this.provisionSilo(spec, zone.id, ns);
         storeEnv = { ...silo.env, ...this.opts.storeEnv };
         storeValues = silo.values;
       }
+    } else if (this.opts.provisionDependencies) {
+      // No trust zone (single-tenant / dev host, like the docker runtime): still provision the declared dependency
+      // stores instead of silently skipping them — parity with Docker (always deploys) and K8s (provisionDependencies →
+      // silo). Deployed as a dedicated silo (no tenant DDL) under a default id; the host provides no cross-tenant
+      // isolation (there are no other tenants here). gap 1: Nomad no-zone used to deploy ZERO declared stores.
+      const silo = await this.provisionSilo(spec, NO_ZONE_STORE_ID, ns);
+      storeEnv = { ...silo.env, ...this.opts.storeEnv };
+      storeValues = silo.values;
     }
 
     // Cross-tenant network isolation is the per-(spec,version,zone) job/namespace/netns separation below — a co-located
@@ -305,23 +320,24 @@ export class NomadTopologyRuntime implements TopologyRuntime {
     return { env: plan.serviceEnv, values: plan.storeValues };
   }
 
-  // silo: bring up the tenant's dedicated store job, discover host:port, and inject it into the service connEnv (no DDL — the whole instance belongs to the tenant).
+  // silo: bring up a dedicated store job, discover host:port, and inject it into the service connEnv (no DDL — the whole
+  // instance belongs to the tenant, or to the no-zone deployment). `zoneId` names the job (a real zone or NO_ZONE_STORE_ID).
   private async provisionSilo(
     spec: ServiceHarnessSpec,
-    zone: TrustZone,
+    zoneId: string,
+    ns: string | undefined,
   ): Promise<{ env: Record<string, string>; values: Partial<Record<string, StoreValues>> }> {
-    const ns = zone.namespace ?? this.opts.namespace;
     const stores = [...new Set(dependencyStores(spec).map((s) => s.store))];
     if (stores.length === 0) return { env: {}, values: {} };
     await this.register(
-      buildDedicatedStoreJob(spec, stores, zone.id, { datacenters: this.opts.datacenters, namespace: ns }),
+      buildDedicatedStoreJob(spec, stores, zoneId, { datacenters: this.opts.datacenters, namespace: ns }),
       ns,
     );
     const env: Record<string, string> = {};
     const values: Partial<Record<string, StoreValues>> = {};
     for (const store of stores) {
-      const group = dedicatedStoreGroup(zone.id, store); // group == task name for a dedicated store
-      const alloc = await this.waitForGroupRunning(dedicatedStoreJobId(spec, zone.id), group, ns);
+      const group = dedicatedStoreGroup(zoneId, store); // group == task name for a dedicated store
+      const alloc = await this.waitForGroupRunning(dedicatedStoreJobId(spec, zoneId), group, ns);
       const p = resolvePort(alloc, "store");
       if (!p)
         throw new UpstreamError("UPSTREAM_ERROR", { store }, "Could not find the dedicated store port in the alloc.");

@@ -78,6 +78,11 @@ cache hit re-verifies every service group still has a running alloc (one `/v1/jo
 `topologyAlive`) — after a reschedule/purge the cached host:port is stale, so a poisoned entry is dropped and
 redeployed instead of served forever (mirrors Docker's `docker ps` guard; a Nomad blip serves cached best-effort).
 The warm entry stores `{handle, jobId, ns, groups}` for this.
+**No-zone store parity:** declared `dependencies[]` must be provisioned on every runtime regardless of zone — Docker
+always deploys them, K8s deploys when `provisionDependencies` is set, and Nomad now honors the SAME
+`provisionDependencies` option for the no-zone case (deploys the stores as a dedicated silo under a `default` id via
+`provisionSilo`, no tenant DDL). Without it, no-zone = `external` (BYO). Pre-fix Nomad no-zone deployed ZERO declared
+stores (the isolation branch was gated on `if (zone)`).
 **Co-located topology (Nomad only — see `docs/architecture/nomad-colocated-topology.md`).** `buildNomadTopologyJob`
 renders **one task group** (`SERVICE_GROUP_NAME`) with **one task per service** on a **bridge** netns — every
 service shares one network namespace, so peers talk over **loopback** (`localhost:<svc.port>`; `extra_hosts` also

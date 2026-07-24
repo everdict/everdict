@@ -150,6 +150,81 @@ describe("NomadTopologyRuntime — pool store isolation", () => {
   });
 });
 
+describe("NomadTopologyRuntime — no-zone dependency provisioning (gap 1)", () => {
+  // Regression: with no trust zone, Nomad used to deploy ZERO declared stores (the isolation branch was gated on
+  // `if (zone)`), while Docker always deploys and K8s deploys when provisionDependencies is set. Nomad now honors the
+  // same provisionDependencies option → the declared stores come up as a dedicated silo under a "default" id.
+  function nzFakes() {
+    const registered: Array<{
+      Job: { ID: string; TaskGroups: Array<{ Tasks: Array<{ Env: Record<string, string> }> }> };
+    }> = [];
+    const execCalls: string[] = [];
+    const http: NomadHttp = {
+      async request(method, path, body) {
+        if (method === "POST" && path.startsWith("/v1/jobs")) {
+          registered.push(body as (typeof registered)[number]);
+          return { status: 200, text: "{}" };
+        }
+        if (path.includes("/allocations")) {
+          return {
+            status: 200,
+            text: JSON.stringify([
+              { TaskGroup: "everdict-store-default-postgres", ClientStatus: "running", ID: "alloc-nz-pg" },
+            ]),
+          };
+        }
+        if (path.startsWith("/v1/allocation/")) {
+          return {
+            status: 200,
+            text: JSON.stringify({
+              ID: "alloc-nz-pg",
+              TaskGroup: "everdict-store-default-postgres",
+              AllocatedResources: { Shared: { Ports: [{ Label: "store", Value: 45432, HostIP: "10.9.9.9" }] } },
+            }),
+          };
+        }
+        return { status: 200, text: "[]" };
+      },
+    };
+    const exec: NomadExec = {
+      async exec(_allocId, _task, command) {
+        execCalls.push(command[0] ?? "");
+        return "";
+      },
+    };
+    return { registered, execCalls, http, exec };
+  }
+
+  it("with provisionDependencies, a no-zone deploy brings the declared stores up as a silo (parity with docker/k8s)", async () => {
+    const { registered, execCalls, http, exec } = nzFakes();
+    const rt = new NomadTopologyRuntime({
+      addr: "http://nomad",
+      http,
+      exec,
+      provisionDependencies: true,
+      pollIntervalMs: 1,
+      maxPolls: 5,
+    });
+    await rt.ensureTopology(SPEC); // NO zone
+
+    // deploys the dedicated store job under the no-zone "default" id (pre-fix: nothing was deployed).
+    expect(registered.some((j) => j.Job.ID === "everdict-store-aegra-default")).toBe(true);
+    // probes the store is accepting before the services connect (gap-4 parity applies to the no-zone silo too).
+    expect(execCalls).toContain("pg_isready");
+    // injects the discovered store address into the service env.
+    const topo = registered.find((j) => j.Job.ID === topologyJobId(SPEC));
+    const env = topo?.Job.TaskGroups[0]?.Tasks[0]?.Env ?? {};
+    expect(env.DATABASE_URL).toContain("10.9.9.9:45432");
+  });
+
+  it("without provisionDependencies, a no-zone deploy provisions no dependency stores (external — the default)", async () => {
+    const { registered, http, exec } = nzFakes();
+    const rt = new NomadTopologyRuntime({ addr: "http://nomad", http, exec, pollIntervalMs: 1, maxPolls: 5 });
+    await rt.ensureTopology(SPEC); // NO zone, provisionDependencies unset
+    expect(registered.some((j) => j.Job.ID.startsWith("everdict-store-"))).toBe(false);
+  });
+});
+
 describe("NomadTopologyRuntime — single-flight (concurrent ensures)", () => {
   // Regression: the topology job ID is deterministic (everdict-harness-<id>-<version>), so under case-level parallelism
   // (many cases of the same dataset+harness dispatched at once) concurrent ensureTopology calls used to each re-POST the
