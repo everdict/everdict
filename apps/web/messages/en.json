@@ -2583,6 +2583,7 @@
   "settingsNav": {
     "groupAccount": "Account",
     "groupWorkspace": "Workspace",
+    "groupAgent": "Agent",
     "groupBrowser": "Browser",
     "backToApp": "Back to app",
     "profile": "Profile",

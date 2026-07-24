@@ -21,11 +21,12 @@ import {
 
 import type { WebAction } from '@/shared/auth/can'
 
-// Settings secondary-nav — grouped Account (personal, no gate) + Workspace (role-gated) + Browser (workspace-scoped
-// eval env). The Browser group is the home for evaluation-specialized config that fits neither generic personal
-// account nor generic workspace ops: browse-use browser tooling (saved login profiles + egress proxies), shared at
-// the workspace scope. Mirrors nav-config's idiom: href is a suffix UNDER /{workspace}/settings (prefixed at render),
-// and labelKey is a settingsNav.* message key.
+// Settings secondary-nav — grouped Account (personal, no gate) + Workspace (role-gated) + Agent + Browser (both
+// workspace-scoped eval env). The Agent and Browser groups are the home for evaluation-specialized config that fits
+// neither generic personal account nor generic workspace ops: the workspace assistant (instructions + skills + tools +
+// model) and browse-use browser tooling (saved login profiles + egress proxies), shared at the workspace scope.
+// Mirrors nav-config's idiom: href is a suffix UNDER /{workspace}/settings (prefixed at render), and labelKey is a
+// settingsNav.* message key.
 export interface SettingsNavItem {
   href: string // '' = General index, '/profile', … (suffix under /settings)
   labelKey: string // settingsNav.* key
@@ -65,8 +66,6 @@ export const SETTINGS_NAV_GROUPS: SettingsNavGroup[] = [
       { href: '/members', labelKey: 'members', icon: Users, requiredAction: 'members:read' },
       { href: '/secrets', labelKey: 'secrets', icon: Shield, requiredAction: 'secrets:read' },
       { href: '/models', labelKey: 'models', icon: Cpu, requiredAction: 'models:read' },
-      { href: '/agent', labelKey: 'agent', icon: Sparkles, requiredAction: 'agents:read' },
-      { href: '/skills', labelKey: 'skills', icon: BookOpen, requiredAction: 'skills:read' },
       {
         href: '/integrations',
         labelKey: 'integrations',
@@ -82,6 +81,16 @@ export const SETTINGS_NAV_GROUPS: SettingsNavGroup[] = [
       { href: '/ci', labelKey: 'ci', icon: GitBranch, requiredAction: 'settings:read' },
       { href: '/runners', labelKey: 'runners', icon: Server, requiredAction: 'settings:write' },
       { href: '/budget', labelKey: 'budget', icon: Wallet, requiredAction: 'scorecards:read' },
+    ],
+  },
+  {
+    // Evaluation-specialized workspace env — the workspace assistant. Its own group (mirrors Browser) so the agent's
+    // config (instructions/tools/model + the skills it follows) reads as one concern, not lost among generic ops.
+    // Reads are role-gated per item (agents:read / skills:read); writes are enforced in-page and by the control plane.
+    headingKey: 'groupAgent',
+    items: [
+      { href: '/agent', labelKey: 'agent', icon: Sparkles, requiredAction: 'agents:read' },
+      { href: '/skills', labelKey: 'skills', icon: BookOpen, requiredAction: 'skills:read' },
     ],
   },
   {

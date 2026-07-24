@@ -2583,6 +2583,7 @@
   "settingsNav": {
     "groupAccount": "계정",
     "groupWorkspace": "워크스페이스",
+    "groupAgent": "에이전트",
     "groupBrowser": "브라우저",
     "backToApp": "앱으로 돌아가기",
     "profile": "프로필",
