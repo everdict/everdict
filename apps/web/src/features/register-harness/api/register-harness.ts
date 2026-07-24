@@ -15,8 +15,9 @@ export interface ValidateHarnessResult {
   version?: string
   kind?: string
   error?: string
-  // Image provenance warning (warn-not-block) — local/unqualified images have no pull guarantee (registration still succeeds).
-  imageWarnings?: { image: string; class: 'local' | 'unqualified' }[]
+  // Image provenance warning (warn-not-block) — local/unqualified images have no pull guarantee; mutable-tag images
+  // (pinned by `latest`/untagged, no digest) are not reproducible. Registration still succeeds.
+  imageWarnings?: { image: string; class: 'local' | 'unqualified' | 'mutable-tag' }[]
   // Cross-runtime portability findings on the service topology — anchored per service/field in the wizard. Template
   // validate returns these at authoring time (errors + warnings); the instance path folds errors into `errors` instead.
   portabilityIssues?: PortabilityIssue[]

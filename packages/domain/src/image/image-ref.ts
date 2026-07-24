@@ -82,7 +82,17 @@ export function imageWarnings(
   const warnings: ImageWarning[] = [];
   for (const image of images) {
     const cls = classifyImageRef(image, registry);
-    if (cls === "local" || cls === "unqualified") warnings.push({ image, class: cls });
+    if (cls === "local" || cls === "unqualified") {
+      warnings.push({ image, class: cls });
+      continue;
+    }
+    // A pullable (workspace/external) image pinned by the mutable `latest` tag — or untagged, which resolves to latest —
+    // and no digest is not reproducible: the tag can be rebuilt/overwritten and already-cached hosts keep the stale
+    // image. Flag it so the author pins a digest. A specific version tag is left alone (the project treats it as stable).
+    const parsed = parseImageRef(image);
+    if (!parsed.digest && (parsed.tag === undefined || parsed.tag === "latest")) {
+      warnings.push({ image, class: "mutable-tag" });
+    }
   }
   return warnings;
 }

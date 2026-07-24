@@ -26,10 +26,14 @@ export interface ParsedImageRef {
   digest?: string;
 }
 
-// A warning for an image with no pull guarantee — imageWarnings in the register/validate response (warn-not-block, same convention as missingSecrets).
+// A warning for an image with no pull guarantee OR no reproducibility — imageWarnings in the register/validate response
+// (warn-not-block, same convention as missingSecrets). local/unqualified = no pull guarantee off the build machine;
+// mutable-tag = a pullable (workspace/external) image pinned by the mutable `latest` tag (or untagged) and no digest, so
+// it is not reproducible (the tag can be rebuilt/overwritten; already-cached hosts keep the stale image → pin a digest).
+export type ImageWarningClass = Extract<ImageRefClass, "local" | "unqualified"> | "mutable-tag";
 export interface ImageWarning {
   image: string;
-  class: Extract<ImageRefClass, "local" | "unqualified">;
+  class: ImageWarningClass;
 }
 
 // Registry pull/push credentials (transient) — the control plane resolves them from the workspace SecretStore

@@ -1826,7 +1826,12 @@ function ValidateBanner({ result }: { result: ValidateHarnessResult }) {
               {result.imageWarnings.map((w) => (
                 <code key={w.image} className="mr-1 font-mono">
                   {w.image}(
-                  {w.class === 'local' ? t('imageClassLocal') : t('imageClassUnqualified')})
+                  {w.class === 'local'
+                    ? t('imageClassLocal')
+                    : w.class === 'mutable-tag'
+                      ? t('imageClassMutableTag')
+                      : t('imageClassUnqualified')}
+                  )
                 </code>
               ))}
               — <code className="font-mono">everdict image push</code> {t('imagePushHint')}

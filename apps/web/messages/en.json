@@ -1710,6 +1710,7 @@
     "idTip": "The name of this harness (category). e.g. bu, aider, codex.",
     "imageClassLocal": "local only",
     "imageClassUnqualified": "no registry",
+    "imageClassMutableTag": "mutable tag — pin a digest",
     "imageLabel": "image (optional)",
     "imagePushHint": "publishes it to the workspace registry so it runs anywhere.",
     "imageTip": "Container image to run the command. Empty = default sandbox. The instance overrides it via slot.",

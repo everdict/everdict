@@ -5,6 +5,7 @@ import {
   dockerAuthConfigJson,
   imageRegistryPrefix,
   imageUsesRegistryHost,
+  imageWarnings,
   parseImageRef,
 } from "./image-ref.js";
 
@@ -115,5 +116,37 @@ describe("dockerAuthConfigJson — temporary DOCKER_CONFIG contents (shared by p
     expect(Buffer.from(parsed.auths["ghcr.io"].auth, "base64").toString()).toBe("bot:p");
     const tokenOnly = JSON.parse(dockerAuthConfigJson({ host: "r.io", password: "t" }));
     expect(Buffer.from(tokenOnly.auths["r.io"].auth, "base64").toString()).toBe("everdict:t");
+  });
+});
+
+describe("imageWarnings — no-pull-guarantee (local/unqualified) + non-reproducible (mutable-tag)", () => {
+  it("flags a local and an unqualified image (no pull guarantee)", () => {
+    expect(imageWarnings(["localhost:5000/agent:dev"], acme)).toEqual([
+      { image: "localhost:5000/agent:dev", class: "local" },
+    ]);
+    expect(imageWarnings(["spreadsheetbench:v1"], acme)).toEqual([
+      { image: "spreadsheetbench:v1", class: "unqualified" },
+    ]);
+  });
+
+  // gap 13: a pullable image pinned by the mutable `latest` tag (or untagged) with no digest is not reproducible.
+  it("flags a workspace/external image pinned by `latest` or untagged as mutable-tag", () => {
+    expect(imageWarnings(["ghcr.io/acme/agent:latest"], acme)).toEqual([
+      { image: "ghcr.io/acme/agent:latest", class: "mutable-tag" },
+    ]);
+    // untagged workspace image resolves to :latest → still mutable.
+    expect(imageWarnings(["ghcr.io/acme/agent"], acme)).toEqual([
+      { image: "ghcr.io/acme/agent", class: "mutable-tag" },
+    ]);
+    // external :latest too.
+    expect(imageWarnings(["mendhak/http-https-echo:latest"], acme)).toEqual([
+      { image: "mendhak/http-https-echo:latest", class: "mutable-tag" },
+    ]);
+  });
+
+  it("does NOT flag a specific version tag or a digest-pinned image (reproducible enough / immutable)", () => {
+    expect(imageWarnings(["ghcr.io/acme/agent:v1"], acme)).toEqual([]); // a version tag is treated as stable
+    expect(imageWarnings(["ghcr.io/acme/agent@sha256:abc"], acme)).toEqual([]); // digest = immutable
+    expect(imageWarnings(["ghcr.io/acme/agent:latest@sha256:abc"], acme)).toEqual([]); // digest present → immutable
   });
 });
