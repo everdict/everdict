@@ -10,6 +10,7 @@ export {
 } from "./authz.js";
 export { type OidcAuthOptions, type OidcVerifyErrorInfo, oidcAuthenticator } from "./oidc.js";
 export { type ApiKeyAuthOptions, apiKeyAuthenticator } from "./api-key.js";
+export { type AgentTokenAuthOptions, type AgentTokenResolution, agentTokenAuthenticator } from "./agent-token.js";
 export { type RunnerAuthOptions, runnerAuthenticator } from "./runner.js";
 export {
   type GithubActionsAuthOptions,
