@@ -90,6 +90,7 @@ import { registerBrowserProfileRoutes } from "./api/browser-profile/browser-prof
 import { attachBrowserSessionWs } from "./api/browser-session/browser-session-ws.js";
 import { registerBrowserSessionRoutes } from "./api/browser-session/browser-session.routes.js";
 import { registerBundleRoutes } from "./api/bundle/bundle.routes.js";
+import { registerCapabilityRoutes } from "./api/capability/capability.routes.js";
 import { registerCiLinkRoutes } from "./api/ci-link/ci-link.routes.js";
 import { registerCommentRoutes } from "./api/comment/comment.routes.js";
 import { registerDatasetRoutes } from "./api/dataset/dataset.routes.js";
@@ -213,6 +214,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     registerModelRoutes(routes, deps);
     registerAgentRoutes(routes, deps);
     registerSkillRoutes(routes, deps);
+    registerCapabilityRoutes(routes, deps);
     registerRuntimeRoutes(routes, deps);
     registerProfileRoutes(routes, deps);
     registerWorkspaceRoutes(routes, deps);

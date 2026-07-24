@@ -30,6 +30,7 @@ import type { TraceSourceService } from "@everdict/application-control";
 import type { ViewService } from "@everdict/application-control";
 import type { BrowserProfileService } from "@everdict/application-control";
 import type { SkillService } from "@everdict/application-control";
+import type { CapabilityService } from "@everdict/application-control";
 import type { WorkspaceService } from "@everdict/application-control";
 import {
   API_KEY_SCOPES,
@@ -133,6 +134,7 @@ export interface ServerDeps {
   agentRegistry?: AgentRegistry; // Agent config (instructions + MCP tool servers + model) CRUD — the workspace's conversational agent (route disabled if absent)
   agentService?: AgentService; // Agent version-free save/edit upsert (routes disabled if absent)
   skillService?: SkillService; // Workspace Skills (SKILL.md procedures the members author) CRUD (routes disabled if absent)
+  capabilityService?: CapabilityService; // Capability Store (mcp|code|skill authored + published + adopted) CRUD (routes disabled if absent)
   skillGenerator?: SkillGenerator; // skill-generate — draft a skill from a description via the workspace's model (route disabled if absent)
   runtimeRegistry?: RuntimeRegistry; // Runtime (execution infra) CRUD (route disabled if absent)
   // Runtime connection test — RuntimeSpec → build a live backend, then probe() (reachability/auth without a job). main injects it with secrets + a builder.

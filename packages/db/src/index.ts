@@ -77,6 +77,7 @@ export type {
   ViewStore,
   BrowserProfileStore,
   SkillStore,
+  CapabilityStore,
   UsageStore,
   BudgetStore,
   NotificationStore,

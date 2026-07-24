@@ -3,6 +3,7 @@ import type { CommentService } from "@everdict/application-control";
 import type { GithubAppService } from "@everdict/application-control";
 import type { ImageRegistryService } from "@everdict/application-control";
 import type { ProxyService } from "@everdict/application-control";
+import type { CapabilityService } from "@everdict/application-control";
 import type { MattermostService } from "@everdict/application-control";
 import type { MembershipService } from "@everdict/application-control";
 import type { NotificationService } from "@everdict/application-control";
@@ -71,6 +72,7 @@ export interface McpDeps {
   agentRegistry?: AgentRegistry; // Agent config (instructions + MCP tool servers + model) register/read — the conversational agent per workspace
   agentService?: AgentService; // Agent version-free save/edit upsert
   skillService?: SkillService; // Workspace Skills (SKILL.md procedures the members author) CRUD — dual-scoped private|workspace
+  capabilityService?: CapabilityService; // Capability Store (mcp|code|skill authored + published + adopted) CRUD
   runtimeRegistry?: RuntimeRegistry;
   probeRuntime?: (workspace: string, spec: RuntimeSpec) => Promise<RuntimeProbeResult>; // runtime connection test
   inspectRuntime?: (workspace: string, spec: RuntimeSpec) => Promise<InspectRuntimeResult>; // runtime live cluster view

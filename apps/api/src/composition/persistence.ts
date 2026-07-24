@@ -2,10 +2,12 @@ import {
   type BrowserProfileStore,
   type BudgetStore,
   type CallbackStore,
+  type CapabilityStore,
   type CommentStore,
   InMemoryBrowserProfileStore,
   InMemoryBudgetStore,
   InMemoryCallbackStore,
+  InMemoryCapabilityStore,
   InMemoryCommentStore,
   InMemoryNotificationStore,
   InMemoryOAuthStateStore,
@@ -29,6 +31,7 @@ import {
   PgBrowserProfileStore,
   PgBudgetStore,
   PgCallbackStore,
+  PgCapabilityStore,
   PgCommentStore,
   PgNotificationStore,
   PgOAuthStateStore,
@@ -128,6 +131,7 @@ export interface Persistence {
   viewStore: ViewStore; // saved scorecard-analysis Views (named AnalysisConfig, private|workspace) — live re-run
   browserProfileStore: BrowserProfileStore; // saved authenticated browser profiles (browser-profiles S2) — personal metadata
   skillStore: SkillStore; // workspace Skills (SKILL.md procedures the members author) — dual-scoped private|workspace
+  capabilityStore: CapabilityStore; // Capability Store (mcp|code|skill) — versioned + per-capability visibility (private|workspace|subset|public)
   // Front-door callback bodies (multi-replica rendezvous) — Pg-backed when DATABASE_URL is set, else in-memory
   // (single process; the in-process rendezvous is equivalent there). docs/architecture/completion-stream-callback.md
   callbackStore: CallbackStore;
@@ -188,6 +192,7 @@ export async function makePersistence(): Promise<Persistence> {
       viewStore: new InMemoryViewStore(),
       browserProfileStore: new InMemoryBrowserProfileStore(),
       skillStore: new InMemorySkillStore(),
+      capabilityStore: new InMemoryCapabilityStore(),
       callbackStore: new InMemoryCallbackStore(),
       usageStore: new InMemoryUsageStore(),
       budgetStore: new InMemoryBudgetStore(),
@@ -226,6 +231,7 @@ export async function makePersistence(): Promise<Persistence> {
     viewStore: new PgViewStore(client),
     browserProfileStore: new PgBrowserProfileStore(client),
     skillStore: new PgSkillStore(client),
+    capabilityStore: new PgCapabilityStore(client),
     callbackStore: new PgCallbackStore(client),
     usageStore: new PgUsageStore(client),
     budgetStore: new PgBudgetStore(client),

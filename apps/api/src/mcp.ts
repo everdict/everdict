@@ -7,6 +7,7 @@ import { registerBillingTools } from "./api/billing/billing.mcp.js";
 import { registerBrowserProfileTools } from "./api/browser-profile/browser-profile.mcp.js";
 import { registerBrowserSessionTools } from "./api/browser-session/browser-session.mcp.js";
 import { registerBundleTools } from "./api/bundle/bundle.mcp.js";
+import { registerCapabilityTools } from "./api/capability/capability.mcp.js";
 import { registerCiLinkTools } from "./api/ci-link/ci-link.mcp.js";
 import { registerCommentTools } from "./api/comment/comment.mcp.js";
 import { registerDatasetTools } from "./api/dataset/dataset.mcp.js";
@@ -63,6 +64,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
   registerModelTools(server, ctx);
   registerAgentTools(server, ctx);
   registerSkillTools(server, ctx);
+  registerCapabilityTools(server, ctx);
   registerRuntimeTools(server, ctx);
   registerBenchmarkTools(server, ctx);
   registerBundleTools(server, ctx);

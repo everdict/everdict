@@ -1,5 +1,6 @@
 import { ProxyService } from "@everdict/application-control";
 import { SkillService } from "@everdict/application-control";
+import { CapabilityService } from "@everdict/application-control";
 import { perTenantTrustZones } from "@everdict/domain";
 import type { BrowserSessionProvisioner } from "./common/browser-session-provisioner.js";
 import { CaseRecorder } from "./common/case-recorder.js";
@@ -113,6 +114,7 @@ async function main(): Promise<void> {
     viewStore,
     browserProfileStore,
     skillStore,
+    capabilityStore,
     callbackStore,
     usageStore,
     budgetStore,
@@ -419,6 +421,10 @@ async function main(): Promise<void> {
     // Workspace Skills — SKILL.md procedures the members author (dual-scoped private|workspace) + skill-generate (drafts
     // a skill from a description via the workspace's registered model + key; same secret tiers/base as the model probe).
     skillService: new SkillService({ store: skillStore }),
+    // Capability Store — one discriminated versioned entity (mcp|code|skill) members author, publish (private|workspace|
+    // subset|public), and adopt into their agent. Reach beyond the workspace: subset fans across the author's own
+    // workspaces, public exposes to everyone (admin-gated). See docs/architecture/capability-store.md.
+    capabilityService: new CapabilityService({ store: capabilityStore }),
     skillGenerator: new SkillGenerator({
       models: modelRegistry,
       scopedSecretsFor,

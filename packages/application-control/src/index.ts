@@ -55,6 +55,13 @@ export {
   type SkillServiceDeps,
   type UpdateSkillInput,
 } from "./skill/skill-service.js";
+export {
+  type CapabilityActor,
+  CapabilityService,
+  type CapabilityServiceDeps,
+  type CapabilityUpsert,
+  type SaveCapabilityResult,
+} from "./capability/capability-service.js";
 export { ProxyService, type ProxyServiceDeps, type ProxyView } from "./proxy/proxy-service.js";
 export {
   COMMENT_RESOURCE_TYPES,
