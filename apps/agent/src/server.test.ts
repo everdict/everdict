@@ -1,4 +1,4 @@
-import { ToolRegistry } from "@everdict/agent-runtime";
+import { type ToolDefinition, ToolRegistry } from "@everdict/agent-runtime";
 import { UnauthenticatedError } from "@everdict/contracts";
 import { InMemoryAgentSessionStore } from "@everdict/db";
 import type { LlmTransport } from "@everdict/llm";
@@ -45,6 +45,42 @@ function makeDeps(over: Partial<AgentServerDeps> = {}): AgentServerDeps {
 }
 
 const auth = { authorization: "Bearer x", "x-everdict-workspace": "acme" };
+
+// A transport that calls a named tool on turn 1, then replies with text on turn 2 — for exercising the write-tool
+// permission path (the always-text fake never asks for a tool).
+function callThenText(toolName: string): LlmTransport {
+  let n = 0;
+  const usage = { inputTokens: 5, outputTokens: 1, totalTokens: 6 };
+  return {
+    provider: "fake",
+    stream: async () => {
+      n += 1;
+      if (n === 1) {
+        return {
+          content: null,
+          toolCalls: [{ id: "w1", name: toolName, arguments: "{}" }],
+          finishReason: "tool_calls",
+          usage,
+        };
+      }
+      return { content: "done", toolCalls: [], finishReason: "stop", usage };
+    },
+  };
+}
+
+function writeToolDeps(writeCall: () => Promise<{ content: string; isError: boolean }>): Partial<AgentServerDeps> {
+  const writeTool: ToolDefinition = {
+    name: "do_write",
+    description: "write",
+    parametersJsonSchema: { type: "object", properties: {} },
+    isReadOnly: false,
+    call: writeCall,
+  };
+  return {
+    resolveModel: async () => ({ transport: callThenText("do_write"), model: "test-model" }),
+    toolProvider: async () => ({ registry: new ToolRegistry([writeTool]), call: null, close: async () => {} }),
+  };
+}
 
 describe("agent server", () => {
   it("creates a conversation and lists it for its owner", async () => {
@@ -143,6 +179,78 @@ describe("agent server", () => {
     expect(refs).toContain("fb-id");
     expect(refs).not.toContain("small-id");
     await app.close();
+  });
+
+  describe("permission modes and fine-grained rules", () => {
+    it("a session deny-rule blocks a write tool without prompting", async () => {
+      const writeCall = vi.fn(async () => ({ content: "wrote", isError: false }));
+      const app = buildServer(makeDeps(writeToolDeps(writeCall)));
+      const s = (await app.inject({ method: "POST", url: "/agent/sessions", headers: auth, payload: {} })).json();
+      await app.inject({
+        method: "POST",
+        url: `/agent/sessions/${s.id}/rules`,
+        headers: auth,
+        payload: { tool: "do_write", decision: "deny" },
+      });
+      await app.inject({
+        method: "POST",
+        url: `/agent/sessions/${s.id}/chat`,
+        headers: auth,
+        payload: { message: "write it" },
+      });
+      expect(writeCall).not.toHaveBeenCalled();
+      await app.close();
+    });
+
+    it("plan mode blocks a write tool until a plan is presented", async () => {
+      const writeCall = vi.fn(async () => ({ content: "wrote", isError: false }));
+      const app = buildServer(makeDeps(writeToolDeps(writeCall)));
+      const s = (await app.inject({ method: "POST", url: "/agent/sessions", headers: auth, payload: {} })).json();
+      await app.inject({
+        method: "POST",
+        url: `/agent/sessions/${s.id}/chat`,
+        headers: auth,
+        payload: { message: "write it", mode: "plan" },
+      });
+      // The model called do_write without presenting a plan first → blocked.
+      expect(writeCall).not.toHaveBeenCalled();
+      await app.close();
+    });
+
+    it("manages rules over their CRUD endpoints", async () => {
+      const app = buildServer(makeDeps());
+      const s = (await app.inject({ method: "POST", url: "/agent/sessions", headers: auth, payload: {} })).json();
+      const added = await app.inject({
+        method: "POST",
+        url: `/agent/sessions/${s.id}/rules`,
+        headers: auth,
+        payload: { tool: "do_write", decision: "allow" },
+      });
+      expect(added.json().rules).toEqual({ do_write: "allow" });
+      const listed = await app.inject({ method: "GET", url: `/agent/sessions/${s.id}/rules`, headers: auth });
+      expect(listed.json().rules).toEqual({ do_write: "allow" });
+      const removed = await app.inject({
+        method: "DELETE",
+        url: `/agent/sessions/${s.id}/rules/do_write`,
+        headers: auth,
+      });
+      expect(removed.statusCode).toBe(204);
+      const empty = await app.inject({ method: "GET", url: `/agent/sessions/${s.id}/rules`, headers: auth });
+      expect(empty.json().rules).toEqual({});
+      await app.close();
+    });
+
+    it("rejects rules for a conversation the caller does not own", async () => {
+      const app = buildServer(makeDeps());
+      const res = await app.inject({
+        method: "POST",
+        url: "/agent/sessions/nope/rules",
+        headers: auth,
+        payload: { tool: "do_write", decision: "allow" },
+      });
+      expect(res.statusCode).toBe(404);
+      await app.close();
+    });
   });
 
   it("sets the conversation title from the first user message", async () => {

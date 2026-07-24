@@ -117,6 +117,10 @@ export interface ChatHooks {
   // Mid-run steering: pull any user messages the web queued (POST /input) since this turn started, so the running loop
   // absorbs them at the next turn boundary instead of the user having to Stop and resend. Absent → strict turn-based.
   drainInput?: () => ChatMessage[];
+  // Plan mode: start read-only; the agent must present_plan and have it approved (onPlan) before any write tool runs.
+  // The SSE handler supplies onPlan to park for the human; absent onPlan → auto-approve.
+  planMode?: boolean;
+  onPlan?: (plan: string) => boolean | Promise<boolean>;
 }
 
 export const DEFAULT_SESSION_TITLE = "New conversation";
@@ -335,6 +339,8 @@ export async function runChat(
       ...(hooks?.onEvent ? { onEvent: hooks.onEvent } : {}),
       ...(hooks?.permit ? { permit: hooks.permit } : {}),
       ...(hooks?.drainInput ? { drainInput: hooks.drainInput } : {}),
+      ...(hooks?.planMode ? { planMode: hooks.planMode } : {}),
+      ...(hooks?.onPlan ? { onPlan: hooks.onPlan } : {}),
       ...(deps.maxTurns !== undefined ? { maxTurns: deps.maxTurns } : {}),
       ...(model.temperature !== undefined ? { temperature: model.temperature } : {}),
       ...(signal ? { signal } : {}),

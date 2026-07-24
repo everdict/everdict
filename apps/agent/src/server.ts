@@ -1,4 +1,4 @@
-import type { ChatMessage, PermissionHook } from "@everdict/agent-runtime";
+import type { ChatMessage, PermissionDecision, PermissionHook } from "@everdict/agent-runtime";
 import type { AgentSessionRecord } from "@everdict/contracts";
 import { AgentReferenceSchema, AppError } from "@everdict/contracts";
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
@@ -6,6 +6,7 @@ import { z } from "zod";
 import { type ChatDeps, DEFAULT_SESSION_TITLE, runChat } from "./chat.js";
 import { InputQueue } from "./input-queue.js";
 import { PermissionRegistry } from "./permission-registry.js";
+import { PermissionRules } from "./permission-rules.js";
 import type { Authenticate, ForwardHeaders, Principal } from "./principal.js";
 import { runSkillTry } from "./skill-try.js";
 
@@ -53,6 +54,8 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
   const permissions = new PermissionRegistry();
   // Mid-run steering: POST /input queues a user message the streaming turn's loop drains at the next turn boundary.
   const inputQueue = new InputQueue();
+  // Fine-grained "always allow / deny this tool" rules (per session) that short-circuit the HITL prompt.
+  const rules = new PermissionRules();
 
   app.get("/healthz", async () => ({ ok: true }));
 
@@ -155,6 +158,9 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
         message: z.string().min(1),
         references: z.array(AgentReferenceSchema).optional(),
         attachments: z.array(attachmentInputSchema).optional(),
+        // Permission mode for this turn: default = ask on write tools (HITL) · bypass = auto-allow writes ·
+        // plan = read-only until the agent presents a plan and it is approved. (Coarse RBAC still gates every call.)
+        mode: z.enum(["default", "bypass", "plan"]).optional(),
       })
       .safeParse(req.body);
     if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: body.error.message });
@@ -164,10 +170,19 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
     req.raw.on("close", () => controller.abort());
     const headers = forwardHeaders(req);
     const { message, references, attachments } = body.data;
+    const mode = body.data.mode ?? "default";
 
     const drainInput = (): ChatMessage[] => inputQueue.drain(principal.workspace, id);
+    // A fine-grained rule (allow/deny for a tool in this session) short-circuits the human prompt.
+    const withRules =
+      (base: PermissionHook): PermissionHook =>
+      (request) => {
+        const ruled = rules.get(principal.workspace, id, request.name);
+        return ruled ?? base(request);
+      };
 
-    // Non-streaming clients (tests / API callers) get the buffered JSON tail.
+    // Non-streaming clients (tests / API callers) get the buffered JSON tail. No human channel: writes auto-allow
+    // (bypass) or follow the session rules (default/plan), and plan mode auto-approves (onPlan absent).
     if (!(req.headers.accept ?? "").includes("text/event-stream")) {
       try {
         const result = await runChat(
@@ -181,6 +196,8 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
           controller.signal,
           {
             drainInput,
+            ...(mode === "bypass" ? {} : { permit: withRules((): PermissionDecision => "allow") }),
+            ...(mode === "plan" ? { planMode: true } : {}),
           },
         );
         return reply.send(result);
@@ -201,11 +218,19 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
       reply.raw.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
     };
     // HITL: a write tool call parks here — emit a `permission` ask (with a fresh id) and await the human's POST. A
-    // client disconnect or timeout resolves to "deny" (the registry's safe default).
-    const permit: PermissionHook = (request) => {
+    // client disconnect or timeout resolves to "deny" (the registry's safe default). Wrapped by withRules so a
+    // standing "always allow/deny" rule for the tool answers without prompting.
+    const permit: PermissionHook = withRules((request) => {
       const requestId = deps.newId();
       write("permission", { requestId, name: request.name, input: request.input });
       return permissions.wait(requestId, id, controller.signal);
+    });
+    // Plan approval reuses the same park-and-await channel: emit a `plan` ask, resolve via POST /permission.
+    const onPlan = async (plan: string): Promise<boolean> => {
+      const requestId = deps.newId();
+      write("plan", { requestId, plan });
+      const decision = await permissions.wait(requestId, id, controller.signal);
+      return decision === "allow";
     };
     try {
       await runChat(deps, principal, headers, id, message, references, attachments, controller.signal, {
@@ -214,9 +239,12 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
           // The post-decision event: forward it so the web dismisses the prompt even when the decision was the
           // registry's timeout/disconnect default rather than a click.
           else if (e.type === "permission") write("permission_resolved", { name: e.name, decision: e.decision });
+          else if (e.type === "plan") write("plan_presented", { plan: e.plan });
         },
         onRecord: (r) => write("message", r),
-        permit,
+        // bypass → no permit (auto-allow writes); default/plan → HITL + rules. plan → planMode + onPlan approval.
+        ...(mode === "bypass" ? {} : { permit }),
+        ...(mode === "plan" ? { planMode: true, onPlan } : {}),
         drainInput,
       });
       write("done", {});
@@ -255,6 +283,39 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
     if (!session) return reply.code(404).send({ code: "NOT_FOUND", message: "Conversation not found." });
     inputQueue.enqueue(principal.workspace, id, parsed.data.message);
     return reply.code(202).send({ queued: true });
+  });
+
+  // Fine-grained permission rules for a conversation — the "always allow / always deny this tool" layer above the
+  // coarse RBAC. The HITL prompt consults them, so the web's "always allow" button posts a rule here. Scoped to owner.
+  app.get("/agent/sessions/:id/rules", async (req, reply) => {
+    const principal = await principalOf(req, reply);
+    if (!principal) return reply;
+    const { id } = idParams.parse(req.params);
+    const session = await deps.sessions.getSession(principal.workspace, principal.subject, id);
+    if (!session) return reply.code(404).send({ code: "NOT_FOUND", message: "Conversation not found." });
+    return reply.send({ rules: rules.list(principal.workspace, id) });
+  });
+
+  app.post("/agent/sessions/:id/rules", async (req, reply) => {
+    const principal = await principalOf(req, reply);
+    if (!principal) return reply;
+    const { id } = idParams.parse(req.params);
+    const parsed = z.object({ tool: z.string().min(1), decision: z.enum(["allow", "deny"]) }).safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
+    const session = await deps.sessions.getSession(principal.workspace, principal.subject, id);
+    if (!session) return reply.code(404).send({ code: "NOT_FOUND", message: "Conversation not found." });
+    rules.set(principal.workspace, id, parsed.data.tool, parsed.data.decision);
+    return reply.send({ rules: rules.list(principal.workspace, id) });
+  });
+
+  app.delete("/agent/sessions/:id/rules/:tool", async (req, reply) => {
+    const principal = await principalOf(req, reply);
+    if (!principal) return reply;
+    const params = z.object({ id: z.string().min(1), tool: z.string().min(1) }).parse(req.params);
+    const session = await deps.sessions.getSession(principal.workspace, principal.subject, params.id);
+    if (!session) return reply.code(404).send({ code: "NOT_FOUND", message: "Conversation not found." });
+    rules.clear(principal.workspace, params.id, params.tool);
+    return reply.code(204).send();
   });
 
   // Skill test-drive — run a stateless agent turn with just this (possibly unsaved) skill + the read-only tools, and
