@@ -96,6 +96,36 @@ The gap is not the loop — it is (a) a **shared message substrate** with addres
   permission modes/rules; wire file-mutating eval work through the dispatch/isolation path (+ worktree
   isolation for local file work). The agent runs, not just discusses, evals.
 
+  **Design (ready to drop in).** `apps/agent/mcp-tools.ts` already gates the base surface with an allowlist:
+  read verbs (skip the HITL gate) + a curated `INTEGRATION_ACTIONS` set (Mattermost/CI/registry actions,
+  bridged `isReadOnly:false` so the HITL gate approves each). S6 adds a sibling **`EVAL_ACTIONS`** curated
+  allowlist — the eval-driving verbs — exposed **opt-in** (`AGENT_ALLOW_EVAL_DRIVE`, default off; the default
+  agent stays read-only). When on, `isDefaultBaseTool` also admits `EVAL_ACTIONS` and `isBaseToolReadOnly`
+  excludes them (→ every call is HITL/plan/rule-gated). Concrete `EVAL_ACTIONS`:
+  - runs/scorecards: `run_scorecard` · `retry_scorecard` · `rerun_scorecard` · `cancel_scorecard` ·
+    `ingest_scorecard` · `pull_scorecard` · `submit_run` · `backfill_scorecard_models`
+  - harness/dataset/judge/model/runtime authoring: `register_harness` · `register_harness_template` ·
+    `pin_harness_images` · `create_dataset` · `create_judge` · `create_model` · `create_runtime` ·
+    `set_{harness,dataset,judge,model,runtime}_version_tags` · `assign_harness_trace_{source,sink}` ·
+    `set_harness_span_attr_mapping`
+  - scheduling/ops/import/view: `create_schedule` · `update_schedule` · `control_runtime` ·
+    `import_benchmark` · `import_harbor` · `import_terminal_bench` · `apply_bundle` · `create_view` ·
+    `create_comment`
+
+  **Excluded even with eval-drive on** (destructive/governance/secret — never the agent's job): `delete_*` ·
+  `remove_*` · `revoke_*` · `unlink_*` · `set_secret` · `set_workspace_*` · `create_workspace` ·
+  `delete_workspace` · `set_member_role` · `create_api_key` · `create_invite` · `pair_*` · `github_*` ·
+  `link_ci_repository` · `set_budget_limit`. Backstop: the agent acts as its authenticated **principal**, so
+  the control-plane RBAC blocks anything its role can't do regardless of the allowlist — the allowlist is
+  defense-in-depth + intentional scoping, not the only guard.
+
+  > **Blocked on coordination (2026-07-24):** `mcp-tools.ts` — S6's only edit site — currently has
+  > *uncommitted* teammate WIP that introduces exactly the `INTEGRATION_ACTIONS`/`isDefaultBaseTool`/
+  > `isBaseToolReadOnly` allowlist model above (the "agent uses integrations" slice of S6). Editing it now
+  > would absorb/collide with that WIP. S6's code lands as a small extension (add `EVAL_ACTIONS` +
+  > `AGENT_ALLOW_EVAL_DRIVE`) **once that WIP is committed** — the permission layer it sits behind
+  > (`3e48d9f3`) and the substrate (S1) are already in.
+
 ## Non-goals / guardrails
 
 - Not a new execution engine — teammates and proactive runs reuse the loop + the scheduler/dispatch paths.
