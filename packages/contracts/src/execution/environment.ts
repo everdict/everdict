@@ -15,6 +15,9 @@ export const BrowserSnapshotSchema = z.object({
   kind: z.literal("browser"),
   url: z.string(),
   dom: z.string(),
+  // Object-store ref to the FULL page DOM when it was offloaded (large HTML bloats the persisted record). When set,
+  // `dom` holds only an inline preview; the full DOM stays fetchable via this ref. Absent = `dom` is the whole thing.
+  domRef: z.string().optional(),
   screenshotRef: z.string().optional(),
   // Embed the final page screenshot PNG as base64 (same shape as os-use) — input for a VLM judge (useScreenshot) + web inline display.
   // Reproduces how the official WebVoyager judges a screenshot with GPT-4V. If absent (not embedded), fall back to a text judge.

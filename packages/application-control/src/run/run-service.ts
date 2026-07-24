@@ -406,7 +406,7 @@ export class RunService {
       // Offload os-use screenshots (embedded base64) to object storage → the record keeps only the URL (slim). On failure the run still succeeds (fallback: keep base64).
       if (this.deps.artifacts && result.snapshot) {
         try {
-          result.snapshot = await offloadSnapshot(result.snapshot, this.deps.artifacts, `runs/${id}.png`);
+          result.snapshot = await offloadSnapshot(result.snapshot, this.deps.artifacts, `runs/${id}`);
         } catch {}
       }
       // Seal the replay recording (frames/logs teed during the run under job.runId) → attach the ref. Best-effort:

@@ -376,7 +376,7 @@ export async function offloadResults(deps: ScorecardServiceDeps, id: string, res
   if (!deps.artifacts) return;
   for (const r of results) {
     try {
-      r.snapshot = await offloadSnapshot(r.snapshot, deps.artifacts, `scorecards/${id}/${r.caseId}.png`);
+      r.snapshot = await offloadSnapshot(r.snapshot, deps.artifacts, `scorecards/${id}/${r.caseId}`);
     } catch {}
   }
 }

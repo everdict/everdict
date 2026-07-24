@@ -8,17 +8,33 @@ export interface ArtifactStore {
   put(key: string, data: Uint8Array, contentType: string): Promise<string>;
 }
 
-// Offload the embedded base64 screenshot of an os-use OR browser snapshot to object storage → replace screenshotRef=URL
-// and clear screenshot (slims the result record). Both kinds carry an inline base64 screenshot for VLM judging
-// (os-use = OSWorld-style desktop, browser = WebVoyager-style page); offloading keeps the persisted record small.
-// If there's no store or no base64, leave it as-is (fallback: inline base64 — the dev/InMemory store path).
+// Offload a run's produced snapshot MEDIA to object storage so the persisted result stays small (the store's `put`
+// returns a fetchable ref). Two artifacts, both keyed off `keyBase` (no extension — the function appends one):
+//   1. the embedded base64 SCREENSHOT of an os-use/browser snapshot (WebVoyager/OSWorld VLM-judge input) → screenshotRef,
+//      inline bytes cleared;
+//   2. the full page DOM of a browser snapshot when it exceeds DOM_INLINE_MAX → domRef, with `dom` kept as an inline
+//      preview. The offload runs AFTER judging, so the judge always saw the full dom; the preview (>= the judge prompt's
+//      own truncation) only affects a later re-score's inline view — the full DOM is fetchable via domRef.
+// No store, or nothing to offload → returned as-is (dev/InMemory path keeps everything inline).
+export const DOM_INLINE_MAX = 8192; // keep up to this much DOM inline (covers the judge prompt truncation); offload the rest
+
 export async function offloadSnapshot(
   snapshot: EnvSnapshot,
   store: ArtifactStore | undefined,
-  key: string,
+  keyBase: string,
 ): Promise<EnvSnapshot> {
-  if (!store || (snapshot.kind !== "os-use" && snapshot.kind !== "browser") || !snapshot.screenshot) return snapshot;
-  const bytes = Buffer.from(snapshot.screenshot, "base64");
-  const ref = await store.put(key, bytes, "image/png");
-  return { ...snapshot, screenshotRef: ref, screenshot: "" }; // remove base64 → only the URL in the record
+  if (!store) return snapshot;
+  let out = snapshot;
+  // Screenshot (os-use + browser): base64 → object store, replace with a ref, drop the inline bytes.
+  if ((out.kind === "os-use" || out.kind === "browser") && out.screenshot) {
+    const ref = await store.put(`${keyBase}.png`, Buffer.from(out.screenshot, "base64"), "image/png");
+    out = { ...out, screenshotRef: ref, screenshot: "" };
+  }
+  // DOM (browser): the full page HTML can be large (100KB–1MB), bloating the persisted jsonb result. Offload it and
+  // keep only an inline preview; the full DOM stays fetchable via domRef.
+  if (out.kind === "browser" && out.dom.length > DOM_INLINE_MAX) {
+    const ref = await store.put(`${keyBase}.dom.html`, Buffer.from(out.dom, "utf8"), "text/html; charset=utf-8");
+    out = { ...out, domRef: ref, dom: out.dom.slice(0, DOM_INLINE_MAX) };
+  }
+  return out;
 }

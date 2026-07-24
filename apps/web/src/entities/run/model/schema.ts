@@ -46,6 +46,7 @@ export const resultSchema = z
         screenshotRef: z.string().optional(),
         url: z.string().optional(),
         dom: z.string().optional(),
+        domRef: z.string().optional(), // full page DOM offloaded to object storage (dom = inline preview)
       })
       .passthrough()
       .optional(),
