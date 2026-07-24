@@ -3004,7 +3004,9 @@
     "testing": "Running…",
     "testEmpty": "The agent didn't produce a response.",
     "testError": "Could not run the test.",
-    "usedSkill": "loaded skill {skill}"
+    "usedSkill": "loaded skill {skill}",
+    "createdBy": "Created by {name}",
+    "skillMenu": "Skill actions"
   },
   "agentChat": {
     "new": "New",

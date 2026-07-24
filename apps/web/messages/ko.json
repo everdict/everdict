@@ -3004,7 +3004,9 @@
     "testing": "실행 중…",
     "testEmpty": "에이전트가 응답을 내지 않았어요.",
     "testError": "테스트를 실행하지 못했어요.",
-    "usedSkill": "스킬 {skill} 로드"
+    "usedSkill": "스킬 {skill} 로드",
+    "createdBy": "작성자 {name}",
+    "skillMenu": "스킬 작업"
   },
   "agentChat": {
     "new": "새 대화",

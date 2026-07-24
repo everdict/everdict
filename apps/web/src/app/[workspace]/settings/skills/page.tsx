@@ -1,8 +1,9 @@
 import { getTranslations } from 'next-intl/server'
 
-import { modelsSchema } from '@/entities/model'
-import { type Skill, skillsSchema } from '@/entities/skill'
 import { SkillsManager } from '@/features/manage-skills'
+import { membersSchema } from '@/entities/member'
+import { modelsSchema } from '@/entities/model'
+import { skillsSchema, type Skill } from '@/entities/skill'
 import { can } from '@/shared/auth/can'
 import { currentPrincipal } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
@@ -47,6 +48,19 @@ export default async function SkillsPage() {
     // No model registry / no permission — generation offers no model (the manual form still works).
   }
 
+  // For showing who authored each skill — subject → name + avatar (if any). Name is profile name > email local part >
+  // subject fallback. Soft: on fetch failure the list falls back to fmtSubject(createdBy).
+  const members = await controlPlane
+    .listMembers(ctx)
+    .then((r) => membersSchema.parse(r))
+    .catch(() => [])
+  const authors: Record<string, { name: string; avatarUrl?: string }> = {}
+  for (const m of members)
+    authors[m.subject] = {
+      name: m.name ?? m.email?.split('@')[0] ?? m.subject,
+      ...(m.avatarUrl ? { avatarUrl: m.avatarUrl } : {}),
+    }
+
   return (
     <div className="space-y-6">
       {header}
@@ -56,6 +70,7 @@ export default async function SkillsPage() {
         <SkillsManager
           skills={skills}
           modelIds={modelIds}
+          authors={authors}
           canWrite={canWrite}
           isAdmin={isAdmin}
           {...(principal?.subject !== undefined ? { currentSubject: principal.subject } : {})}
