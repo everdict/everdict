@@ -55,6 +55,33 @@ describe("assembleJudgeInput", () => {
     expect(input.criteria).toHaveLength(1);
     expect(input.promptTemplate).toBe("{trace} {verdict_instruction}");
   });
+
+  // gap 18: the VLM media type must be sniffed from the image's MAGIC BYTES, not the ref extension. The control-plane
+  // artifact resolver puts base64 into snap.screenshot without a content-type, so a `*.png` ref would mislabel a JPEG.
+  const browserShot = (screenshot: string, screenshotRef: string): GradeContext => ({
+    case: { id: "c", env: { kind: "browser", startUrl: "u" }, task: "t", graders: [], timeoutSec: 1, tags: [] },
+    trace: [],
+    snapshot: { kind: "browser", url: "u", dom: "", console: [], screenshotRef, screenshot },
+  });
+
+  it("labels a JPEG screenshot image/jpeg even when its ref ends in .png", async () => {
+    const jpeg = "/9j/4AAQSkZJRgABAQAAAQABAAD/2wBD"; // JPEG SOI (FF D8 FF)
+    const input = await assembleJudgeInput(browserShot(jpeg, "runs/x/shot.png"), { useScreenshot: true });
+    expect(input.screenshot?.mediaType).toBe("image/jpeg"); // pre-fix: image/png (from the .png extension)
+  });
+
+  it("labels a PNG screenshot image/png (sniffed), and falls back to the extension for an unknown signature", async () => {
+    const png = "iVBORw0KGgoAAAANSUhEUg=="; // PNG signature (89 50 4E 47)
+    expect(
+      (await assembleJudgeInput(browserShot(png, "runs/x/shot"), { useScreenshot: true })).screenshot?.mediaType,
+    ).toBe("image/png");
+    // an unrecognized signature falls back to the ref extension (today's behavior).
+    const unknown = Buffer.from("not an image at all").toString("base64");
+    expect(
+      (await assembleJudgeInput(browserShot(unknown, "runs/x/shot.jpg"), { useScreenshot: true })).screenshot
+        ?.mediaType,
+    ).toBe("image/jpeg");
+  });
 });
 
 describe("custom evidence slots (mapping-authored → {<name>} placeholders)", () => {
