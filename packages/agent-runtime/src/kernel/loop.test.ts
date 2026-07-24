@@ -719,6 +719,29 @@ describe("runAgentLoop", () => {
     expect(toolMsg?.content).toContain("Delivered to teammate-researcher");
   });
 
+  it("routes spawn_teammate to the host callback when wired (autonomous collaboration)", async () => {
+    const spawned: { name: string; task: string }[] = [];
+    const { transport } = fakeTransport([
+      toolCallResult("t1", "spawn_teammate", JSON.stringify({ name: "researcher", task: "watch regressions" })),
+      textResult("teammate is on it"),
+    ]);
+    const result = await runAgentLoop({
+      transport,
+      model: "m",
+      systemPrompt: "sys",
+      history,
+      registry: new ToolRegistry([]),
+      spawnTeammate: async (name, task) => {
+        spawned.push({ name, task });
+        return { id: "tm-1" };
+      },
+    });
+    expect(result.content).toBe("teammate is on it");
+    expect(spawned).toEqual([{ name: "researcher", task: "watch regressions" }]);
+    const toolMsg = result.produced.find((m) => m.role === "tool") as { content: string } | undefined;
+    expect(toolMsg?.content).toContain("tm-1");
+  });
+
   it("stops with aborted when the signal is already aborted", async () => {
     const { transport } = fakeTransport([textResult("unused")]);
     const result = await runAgentLoop({

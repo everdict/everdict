@@ -132,6 +132,9 @@ export interface ChatHooks {
     to: string,
     message: string,
   ) => { ok: boolean; error?: string } | Promise<{ ok: boolean; error?: string }>;
+  // Spawn a persistent teammate (S3) — the host creates its session + execution token and returns its id. Present →
+  // the agent gets a spawn_teammate tool (an agent, not just the web, spawns teammates). Absent → no spawn_teammate.
+  spawnTeammate?: (name: string, task: string) => Promise<{ id: string } | { error: string }>;
 }
 
 export const DEFAULT_SESSION_TITLE = "New conversation";
@@ -381,6 +384,7 @@ export async function runChat(
       ...(hooks?.planMode ? { planMode: hooks.planMode } : {}),
       ...(hooks?.onPlan ? { onPlan: hooks.onPlan } : {}),
       ...(hooks?.sendMessage ? { sendMessage: hooks.sendMessage } : {}),
+      ...(hooks?.spawnTeammate ? { spawnTeammate: hooks.spawnTeammate } : {}),
       ...(deps.maxTurns !== undefined ? { maxTurns: deps.maxTurns } : {}),
       ...(model.temperature !== undefined ? { temperature: model.temperature } : {}),
       ...(signal ? { signal } : {}),

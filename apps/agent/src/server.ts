@@ -75,6 +75,40 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
     mailbox.enqueue(workspace, sessionId, envelope);
     if (supervisor.isTeammate(sessionId)) supervisor.wake(sessionId);
   };
+  // Spawn a persistent teammate for a principal: mint its execution token (acts AS the creator), create its session,
+  // register it with the supervisor, seed the standing task, and wake it. Shared by POST /teammates AND the
+  // spawn_teammate agent tool (so an agent, not just the web, spawns teammates). No key store → soft error.
+  const spawnTeammateFor = async (
+    principal: Principal,
+    name: string,
+    task: string,
+  ): Promise<{ id: string } | { error: string }> => {
+    if (!deps.keyStore) return { error: "Teammate execution tokens are not configured." };
+    const now = deps.now();
+    const sessionId = deps.newId();
+    await deps.sessions.createSession({
+      id: sessionId,
+      tenant: principal.workspace,
+      owner: principal.subject,
+      title: name,
+      createdAt: now,
+      updatedAt: now,
+    });
+    const token = await issueAgentToken(
+      deps.keyStore,
+      principal.workspace,
+      principal.subject,
+      ["write"],
+      `teammate:${name}`,
+    );
+    teammateTokens.set(sessionId, token);
+    supervisor.register(sessionId, name);
+    deliver(principal.workspace, sessionId, {
+      from: "user",
+      content: `You are "${name}", an autonomous teammate. Your standing task:\n${task}`,
+    });
+    return { id: sessionId };
+  };
 
   app.get("/healthz", async () => ({ ok: true }));
 
@@ -200,6 +234,9 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
       deliver(principal.workspace, to, { from: "agent", sender: id, content: message });
       return { ok: true };
     };
+    // spawn_teammate for this run — an agent can spin up an autonomous teammate (owned by the same principal).
+    const spawnTeammate = (name: string, task: string): Promise<{ id: string } | { error: string }> =>
+      spawnTeammateFor(principal, name, task);
     // A fine-grained rule (allow/deny for a tool in this session) short-circuits the human prompt.
     const withRules =
       (base: PermissionHook): PermissionHook =>
@@ -224,6 +261,7 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
           {
             drainInput,
             sendMessage,
+            spawnTeammate,
             ...(mode === "bypass" ? {} : { permit: withRules((): PermissionDecision => "allow") }),
             ...(mode === "plan" ? { planMode: true } : {}),
           },
@@ -277,6 +315,7 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
         ...(mode === "plan" ? { planMode: true, onPlan } : {}),
         drainInput,
         sendMessage,
+        spawnTeammate,
       });
       write("done", {});
     } catch (err) {
@@ -342,36 +381,11 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
   app.post("/agent/teammates", async (req, reply) => {
     const principal = await principalOf(req, reply);
     if (!principal) return reply;
-    if (!deps.keyStore)
-      return reply.code(404).send({ code: "NOT_FOUND", message: "Teammate execution tokens are not configured." });
     const parsed = z.object({ name: z.string().min(1).max(60), task: z.string().min(1) }).safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
-    const now = deps.now();
-    const sessionId = deps.newId();
-    const record: AgentSessionRecord = {
-      id: sessionId,
-      tenant: principal.workspace,
-      owner: principal.subject,
-      title: parsed.data.name,
-      createdAt: now,
-      updatedAt: now,
-    };
-    await deps.sessions.createSession(record);
-    // Mint the teammate's execution token (acts AS the creator), register it, seed the task, and wake it.
-    const token = await issueAgentToken(
-      deps.keyStore,
-      principal.workspace,
-      principal.subject,
-      ["write"],
-      `teammate:${parsed.data.name}`,
-    );
-    teammateTokens.set(sessionId, token);
-    supervisor.register(sessionId, parsed.data.name);
-    deliver(principal.workspace, sessionId, {
-      from: "user",
-      content: `You are "${parsed.data.name}", an autonomous teammate. Your standing task:\n${parsed.data.task}`,
-    });
-    return reply.code(201).send({ id: sessionId, name: parsed.data.name });
+    const result = await spawnTeammateFor(principal, parsed.data.name, parsed.data.task);
+    if ("error" in result) return reply.code(404).send({ code: "NOT_FOUND", message: result.error });
+    return reply.code(201).send({ id: result.id, name: parsed.data.name });
   });
 
   // Fine-grained permission rules for a conversation — the "always allow / always deny this tool" layer above the

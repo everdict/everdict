@@ -224,6 +224,60 @@ describe("agent server", () => {
     await app.close();
   });
 
+  it("lets an agent spawn a teammate via the spawn_teammate tool, which then processes its task (autonomous collaboration)", async () => {
+    const usage = { inputTokens: 5, outputTokens: 1, totalTokens: 6 };
+    let n = 0;
+    // The chat agent calls spawn_teammate on its first turn, then replies; every later turn (incl. the teammate's) is text.
+    const scripted: LlmTransport = {
+      provider: "fake",
+      stream: async () => {
+        n += 1;
+        if (n === 1) {
+          return {
+            content: null,
+            toolCalls: [
+              {
+                id: "t1",
+                name: "spawn_teammate",
+                arguments: JSON.stringify({ name: "researcher", task: "watch regressions" }),
+              },
+            ],
+            finishReason: "tool_calls",
+            usage,
+          };
+        }
+        return { content: "delegated", toolCalls: [], finishReason: "stop", usage };
+      },
+    };
+    const app = buildServer(
+      makeDeps({
+        resolveModel: async () => ({ transport: scripted, model: "m" }),
+        keyStore: new InMemoryTenantKeyStore(),
+      }),
+    );
+    const chat = (await app.inject({ method: "POST", url: "/agent/sessions", headers: auth, payload: {} })).json();
+    await app.inject({
+      method: "POST",
+      url: `/agent/sessions/${chat.id}/chat`,
+      headers: auth,
+      payload: { message: "spin up a researcher teammate" },
+    });
+    // The spawn is synchronous within the tool call → the teammate session exists by now.
+    const sessions = (await app.inject({ method: "GET", url: "/agent/sessions", headers: auth })).json().sessions as {
+      id: string;
+      title: string;
+    }[];
+    const teammate = sessions.find((s) => s.title === "researcher");
+    expect(teammate).toBeDefined();
+    // The teammate was woken; let its autonomous turn run and process the standing task.
+    await new Promise((r) => setTimeout(r, 30));
+    const msgs = (
+      await app.inject({ method: "GET", url: `/agent/sessions/${teammate?.id}/messages`, headers: auth })
+    ).json().messages as { content: string }[];
+    expect(msgs.some((m) => m.content.includes("watch regressions"))).toBe(true);
+    await app.close();
+  });
+
   it("teammate spawn is 404 when no key store (agent token issuance) is configured", async () => {
     const app = buildServer(makeDeps()); // no keyStore
     const res = await app.inject({

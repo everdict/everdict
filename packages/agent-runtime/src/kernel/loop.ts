@@ -18,6 +18,7 @@ import { buildPresentPlanTool } from "../tools/plan-tool.js";
 import { ToolRegistry } from "../tools/registry.js";
 import { OFFLOAD_THRESHOLD_CHARS, ResultStore, buildReadResultTool, offloadResult } from "../tools/result-store.js";
 import { buildSendMessageTool } from "../tools/send-message-tool.js";
+import { buildSpawnTeammateTool } from "../tools/spawn-teammate-tool.js";
 import { buildSpawnAgentTool } from "../tools/spawn-tool.js";
 import { type TodoItem, buildTodoTool, extractTodosFromHistory, renderTodoReminder } from "../tools/todo-tool.js";
 import { normalizeHistory } from "./normalize.js";
@@ -100,6 +101,10 @@ export interface AgentLoopOptions {
     to: string,
     message: string,
   ) => { ok: boolean; error?: string } | Promise<{ ok: boolean; error?: string }>;
+  // Host callback to spawn a persistent TEAMMATE (S3) — a long-lived autonomous agent the host creates (session +
+  // execution token) and returns its id. Present → the agent gets a spawn_teammate tool (autonomous collaboration:
+  // agents, not just the web, spawn teammates). Absent → no spawn_teammate tool.
+  spawnTeammate?: (name: string, task: string) => Promise<{ id: string } | { error: string }>;
   // Per-tool wall-clock deadline (ms). A tool call that outruns it is aborted and returned as an error the model sees,
   // so a hung MCP tool can't pin the turn's Promise.all forever. Absent → no per-tool timeout (the run signal still applies).
   toolTimeoutMs?: number;
@@ -379,6 +384,7 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
             opts.subagentTypes?.map((t) => ({ name: t.name, description: t.description })),
           ),
           buildSendMessageTool(deliverMessage),
+          ...(opts.spawnTeammate ? [buildSpawnTeammateTool(opts.spawnTeammate)] : []),
         ]
       : [];
   // Plan mode: while on, write tools are blocked; present_plan asks the host to approve, then turns it off.

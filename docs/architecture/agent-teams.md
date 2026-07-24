@@ -103,9 +103,10 @@ The gap is not the loop — it is (a) a **shared message substrate** with addres
   creates its session, registers it with the supervisor, seeds the task, and wakes it — it runs a
   `runTeammateTurn` (authenticated request-less) that processes the task. A peer's `send_message` or a platform
   `/event` to a teammate's session `deliver()`s into its mailbox AND wakes it, so it reacts autonomously.
-  **Remaining polish:** a `team` roster (a named group) + a `spawn_teammate` agent TOOL (so an agent, not just
-  the web, spawns teammates) + web surface. The core (persistent, addressable, autonomous, collaborating agents)
-  is in.
+  The `spawn_teammate` agent TOOL is in too — an agent (not just the web) spawns a teammate (host `spawnTeammate`
+  seam → the same `spawnTeammateFor`), so agents autonomously grow their own team and coordinate over
+  `send_message`. **Remaining polish:** a `team` roster (a named group / list + stop) + web surface. The core —
+  persistent, addressable, autonomous, self-spawning, collaborating agents — is in.
 - **S4 — event bridge (monitoring → agent inbox).** The notification emitter also routes to subscribed agent
   inboxes; subscription model per agent/team. Everything monitored is now an agent-consumable message.
 - **S5 — proactive triggers.** An event in an idle subscribed agent's mailbox wakes a turn (reuse the
