@@ -160,6 +160,32 @@ describe("agent server", () => {
     await app.close();
   });
 
+  it("absorbs a platform /event into the running turn, attributed as an Everdict event", async () => {
+    const app = buildServer(makeDeps());
+    const session = (await app.inject({ method: "POST", url: "/agent/sessions", headers: auth, payload: {} })).json();
+    const queued = await app.inject({
+      method: "POST",
+      url: `/agent/sessions/${session.id}/event`,
+      headers: auth,
+      payload: { message: "completed with 2 failures", source: "scorecard sc_123" },
+    });
+    expect(queued.statusCode).toBe(202);
+    await app.inject({
+      method: "POST",
+      url: `/agent/sessions/${session.id}/chat`,
+      headers: auth,
+      payload: { message: "hello" },
+    });
+    const messages = (
+      await app.inject({ method: "GET", url: `/agent/sessions/${session.id}/messages`, headers: auth })
+    ).json().messages as { role: string; content: string }[];
+    // The event is folded into the transcript, attributed so the agent knows it is a platform event.
+    const eventMsg = messages.find((m) => m.content.includes("scorecard sc_123"));
+    expect(eventMsg?.content).toContain("[Everdict event — scorecard sc_123]");
+    expect(eventMsg?.content).toContain("completed with 2 failures");
+    await app.close();
+  });
+
   it("resolves the fallback model up front and the small model lazily (only when compaction fires)", async () => {
     const resolveModelById = vi.fn(async (_principal: unknown, _ref: string) => ({
       transport: fakeTransportAlways("Hi there"),

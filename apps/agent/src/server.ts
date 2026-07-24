@@ -3,8 +3,8 @@ import type { AgentSessionRecord } from "@everdict/contracts";
 import { AgentReferenceSchema, AppError } from "@everdict/contracts";
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
 import { z } from "zod";
+import { AgentMailbox } from "./agent-mailbox.js";
 import { type ChatDeps, DEFAULT_SESSION_TITLE, runChat } from "./chat.js";
-import { InputQueue } from "./input-queue.js";
 import { PermissionRegistry } from "./permission-registry.js";
 import { PermissionRules } from "./permission-rules.js";
 import type { Authenticate, ForwardHeaders, Principal } from "./principal.js";
@@ -52,8 +52,9 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
   const app = Fastify({ logger: false });
   // Human-in-the-loop approvals: a write-tool call in an SSE turn parks here until POST /permission resolves it.
   const permissions = new PermissionRegistry();
-  // Mid-run steering: POST /input queues a user message the streaming turn's loop drains at the next turn boundary.
-  const inputQueue = new InputQueue();
+  // The message substrate (agent-teams.md S1): a per-session mailbox the streaming turn drains at each turn boundary.
+  // POST /input delivers a user steering message; POST /event delivers a platform event (both absorbed mid-run).
+  const mailbox = new AgentMailbox();
   // Fine-grained "always allow / deny this tool" rules (per session) that short-circuit the HITL prompt.
   const rules = new PermissionRules();
 
@@ -172,7 +173,7 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
     const { message, references, attachments } = body.data;
     const mode = body.data.mode ?? "default";
 
-    const drainInput = (): ChatMessage[] => inputQueue.drain(principal.workspace, id);
+    const drainInput = (): ChatMessage[] => mailbox.drain(principal.workspace, id);
     // A fine-grained rule (allow/deny for a tool in this session) short-circuits the human prompt.
     const withRules =
       (base: PermissionHook): PermissionHook =>
@@ -281,7 +282,26 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
     if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
     const session = await deps.sessions.getSession(principal.workspace, principal.subject, id);
     if (!session) return reply.code(404).send({ code: "NOT_FOUND", message: "Conversation not found." });
-    inputQueue.enqueue(principal.workspace, id, parsed.data.message);
+    mailbox.enqueueUser(principal.workspace, id, parsed.data.message);
+    return reply.code(202).send({ queued: true });
+  });
+
+  // Deliver a platform EVENT into a conversation's mailbox (agent-teams.md S1 — the seed of message-based monitoring).
+  // The running turn absorbs it attributed as an Everdict event, so the agent can react. Scoped to the session owner
+  // (the cross-process monitoring→agent bridge is a later stage; this is the same substrate an event will use).
+  app.post("/agent/sessions/:id/event", async (req, reply) => {
+    const principal = await principalOf(req, reply);
+    if (!principal) return reply;
+    const { id } = idParams.parse(req.params);
+    const parsed = z.object({ message: z.string().min(1), source: z.string().min(1).optional() }).safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
+    const session = await deps.sessions.getSession(principal.workspace, principal.subject, id);
+    if (!session) return reply.code(404).send({ code: "NOT_FOUND", message: "Conversation not found." });
+    mailbox.enqueue(principal.workspace, id, {
+      from: "event",
+      ...(parsed.data.source !== undefined ? { sender: parsed.data.source } : {}),
+      content: parsed.data.message,
+    });
     return reply.code(202).send({ queued: true });
   });
 
