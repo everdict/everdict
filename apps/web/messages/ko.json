@@ -2470,6 +2470,7 @@
     "exportPartial": "부분 적재",
     "exportFailed": "적재 실패",
     "exportViewOnPlatform": "플랫폼에서 상세 보기 ↗",
+    "downloadAnalysis": "분석 결과 다운로드",
     "modelsObserved": "관측",
     "modelsDeclared": "선언",
     "modelsMismatch": "선언≠실제",

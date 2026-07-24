@@ -1,5 +1,5 @@
 import Link from 'next/link'
-import { ChevronLeft } from 'lucide-react'
+import { ChevronLeft, Download } from 'lucide-react'
 import { getLocale, getTimeZone, getTranslations } from 'next-intl/server'
 
 import { DeleteScorecardButton } from '@/features/delete-scorecard'
@@ -43,6 +43,7 @@ import { DistributionBar } from '@/shared/ui/distribution-bar'
 import { ExpandableText } from '@/shared/ui/expandable-text'
 import { CriterionBadge, MetricLabel } from '@/shared/ui/metric-label'
 import { OriginInline, OriginPins } from '@/shared/ui/origin'
+import { buttonVariants } from '@/shared/ui/button'
 import { PageHeader } from '@/shared/ui/page-header'
 import { SectionHeader } from '@/shared/ui/section-header'
 import { StatCard } from '@/shared/ui/stat-card'
@@ -401,6 +402,21 @@ export default async function ScorecardDetailPage({
           }
           actions={
             <div className="flex items-center gap-2">
+              {/* Download the self-contained analysis artifact (summary + per-case verdict/scores) — a presigned
+                  object-store URL. Shown only when the ref is a browser-fetchable http(s) URL (S3/MinIO); the dev
+                  in-memory store's memory:// ref is not fetchable, so the link is hidden (same gate as screenshots). */}
+              {record.analysisRef && /^https?:\/\//.test(record.analysisRef) && (
+                <a
+                  href={record.analysisRef}
+                  target="_blank"
+                  rel="noreferrer"
+                  download
+                  className={buttonVariants({ variant: 'secondary', size: 'sm' })}
+                >
+                  <Download />
+                  {t('downloadAnalysis')}
+                </a>
+              )}
               {/* Stop is offered only while the batch is live and the viewer can run scorecards. */}
               {live && can(principal?.roles, 'scorecards:run') && (
                 <StopScorecardButton id={record.id} />

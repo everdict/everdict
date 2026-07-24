@@ -2470,6 +2470,7 @@
     "exportPartial": "Partially exported",
     "exportFailed": "Export failed",
     "exportViewOnPlatform": "View on platform ↗",
+    "downloadAnalysis": "Download analysis",
     "modelsObserved": "Observed",
     "modelsDeclared": "Declared",
     "modelsMismatch": "Declared ≠ actual",
