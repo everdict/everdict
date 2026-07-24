@@ -66,6 +66,10 @@ third-party image's expected var names. Both resolve to the same static address 
   (Docker/DockerDriver `--add-host`; Nomad docker `extra_hosts`), so an agent that calls a host-local model gateway
   (LiteLLM etc.) reaches it portably on Linux too — matching Docker Desktop's built-in alias (the docker0 gateway
   `172.17.0.1` is often blocked by the host firewall). Point the agent at `http://host.docker.internal:<port>`.
+  The target is **configurable per runtime** (`hostGatewayAddr`, gap 5): `host-gateway` (the Docker-CLI magic keyword)
+  is the default, but a Nomad docker driver that doesn't translate it — and K8s, which has no docker host — take a
+  concrete gateway IP (`hostGatewayAddr: "172.17.0.1"` → Nomad `extra_hosts` uses the IP; K8s adds a pod `hostAliases`
+  entry, otherwise K8s adds none since the keyword isn't a valid hostAliases IP).
 
 ## Orchestrator-agnostic (Nomad AND K8s)
 `ServiceTopologyBackend` (a `Backend`) is orchestrator-agnostic; only `TopologyRuntime` differs:

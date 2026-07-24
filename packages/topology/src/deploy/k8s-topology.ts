@@ -67,6 +67,10 @@ export interface K8sTopologyOptions {
   // Workspace image-registry pull credentials (transient) — if a service image host matches, render a
   // dockerconfigjson Secret + imagePullSecrets. docs/architecture/workspace-image-registry.md
   registryAuth?: RegistryAuth;
+  // host.docker.internal → this IP as a pod hostAlias (gap 5). K8s has no docker host, so it is opt-in — set it to the
+  // concrete gateway IP to give a K8s-deployed service the SAME host-local reach a Docker/Nomad service gets. The
+  // Docker-CLI `host-gateway` keyword is not a valid hostAliases IP, so it is ignored here.
+  hostGatewayAddr?: string;
 }
 
 // Name of the Secret referenced by imagePullSecrets — one per namespace, apply upserts it idempotently.
@@ -179,6 +183,11 @@ export function buildK8sManifests(spec: ServiceHarnessSpec, opts: K8sTopologyOpt
             // Workspace-registry image auth — reference it (the Secret above) only when this service image's host matches.
             ...(auth && imageUsesRegistryHost(svc.image, auth.host)
               ? { imagePullSecrets: [{ name: REGISTRY_AUTH_SECRET_NAME }] }
+              : {}),
+            // host.docker.internal parity (gap 5) — opt-in: only when a concrete gateway IP is configured (the Docker
+            // "host-gateway" keyword is not a valid K8s hostAliases IP, so it is skipped).
+            ...(opts.hostGatewayAddr && opts.hostGatewayAddr !== "host-gateway"
+              ? { hostAliases: [{ ip: opts.hostGatewayAddr, hostnames: ["host.docker.internal"] }] }
               : {}),
             containers: [
               {

@@ -44,6 +44,7 @@ export interface K8sTopologyRuntimeOptions {
   dnsLookup?: (host: string) => Promise<string[]>; // resolver for test injection (default node:dns)
   browserImage?: string;
   imagePullPolicy?: string; // pre-loaded images (kind etc.): "IfNotPresent"
+  hostGatewayAddr?: string; // host.docker.internal → this IP as a pod hostAlias (gap 5); opt-in (K8s has no docker host)
   registryAuth?: RegistryAuth; // workspace image-registry pull credentials — renders a dockerconfigjson Secret + imagePullSecrets
   readyTimeoutMs?: number;
   pollIntervalMs?: number;
@@ -144,6 +145,7 @@ export class K8sTopologyRuntime implements TopologyRuntime {
       imagePullPolicy: this.opts.imagePullPolicy,
       provisionDependencies: isSilo, // only silo deploys a dedicated store into the zone ns (SLICE 39); pool/external do not.
       ...(this.opts.registryAuth ? { registryAuth: this.opts.registryAuth } : {}),
+      ...(this.opts.hostGatewayAddr ? { hostGatewayAddr: this.opts.hostGatewayAddr } : {}),
     });
     await this.kubectl.apply(manifests);
 

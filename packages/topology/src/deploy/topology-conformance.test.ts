@@ -131,3 +131,40 @@ describe("cross-runtime conformance — one canary, each backend's correct peer 
     expect(nomadServiceEnv("web").PLANNER_URL).not.toBe(k8sServiceEnv("canary-web").PLANNER_URL);
   });
 });
+
+// gap 5: host.docker.internal (a service reaching a host-local gateway, e.g. a LiteLLM proxy) is a Docker-CLI idiom.
+// Its target is configurable per runtime so a Nomad docker driver that doesn't translate the `host-gateway` keyword —
+// and K8s, which has no docker host at all — can be given a concrete gateway IP for parity with the Docker path.
+describe("cross-runtime conformance — host.docker.internal gateway is configurable per runtime (gap 5)", () => {
+  type NomadTaskConfig = { Name: string; Config?: { extra_hosts?: string[] } };
+  type NomadJobConfig = { Job: { TaskGroups: Array<{ Name: string; Tasks: NomadTaskConfig[] }> } };
+  const nomadExtraHosts = (opts: Parameters<typeof buildNomadTopologyJob>[1]): string[] => {
+    const groups = (buildNomadTopologyJob(canary, opts) as NomadJobConfig).Job.TaskGroups;
+    return (
+      groups.find((g) => g.Name === SERVICE_GROUP_NAME)?.Tasks.find((t) => t.Name === "web")?.Config?.extra_hosts ?? []
+    );
+  };
+  type K8sPodSpec = { template: { spec: { hostAliases?: Array<{ ip: string; hostnames: string[] }> } } };
+  const k8sHostAliases = (
+    opts: Parameters<typeof buildK8sManifests>[1],
+  ): K8sPodSpec["template"]["spec"]["hostAliases"] => {
+    const dep = buildK8sManifests(canary, opts).find(
+      (m) => m.kind === "Deployment" && m.metadata.name === "canary-web",
+    );
+    return (dep?.spec as K8sPodSpec | undefined)?.template.spec.hostAliases;
+  };
+
+  it("Nomad defaults host.docker.internal to the host-gateway keyword and takes a concrete IP override", () => {
+    expect(nomadExtraHosts({})).toContain("host.docker.internal:host-gateway");
+    expect(nomadExtraHosts({ hostGatewayAddr: "172.17.0.1" })).toContain("host.docker.internal:172.17.0.1");
+  });
+
+  it("K8s adds no hostAlias by default (no docker host), and one when a concrete IP is configured", () => {
+    expect(k8sHostAliases({})).toBeUndefined();
+    expect(k8sHostAliases({ hostGatewayAddr: "172.17.0.1" })).toEqual([
+      { ip: "172.17.0.1", hostnames: ["host.docker.internal"] },
+    ]);
+    // the Docker-only "host-gateway" keyword is not a valid K8s hostAlias IP → skipped.
+    expect(k8sHostAliases({ hostGatewayAddr: "host-gateway" })).toBeUndefined();
+  });
+});

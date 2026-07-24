@@ -103,7 +103,15 @@ export interface NomadTopologyOptions {
   // Workspace image-registry pull credentials (transient) — render the docker auth block only on tasks whose service
   // image host matches. docs/architecture/workspace-image-registry.md
   registryAuth?: RegistryAuth;
+  // The address `host.docker.internal` resolves to (the docker-host gateway a service uses to reach a host-local model
+  // gateway etc.). Default `host-gateway` = the Docker-CLI magic keyword (the DockerDriver path); a Nomad docker driver
+  // that doesn't translate that keyword can override with the concrete bridge-gateway IP (e.g. "172.17.0.1"). See gap 5.
+  hostGatewayAddr?: string;
 }
+
+// The default host.docker.internal target — the Docker-CLI `--add-host … :host-gateway` magic keyword. Overridable per
+// runtime (NomadTopologyOptions.hostGatewayAddr / K8sTopologyOptions.hostGatewayAddr) where the keyword isn't honored.
+export const DEFAULT_HOST_GATEWAY = "host-gateway";
 
 // Connect group service (sidecar + upstream). A standalone building block for the live Consul-Connect enforcement
 // proof (scripts/live/connect-enforce-nomad.mjs). NOT wired by buildNomadTopologyJob anymore: co-located services
@@ -405,8 +413,9 @@ function serviceConfig(
   if (svc.volumes && svc.volumes.length > 0) config.volumes = svc.volumes;
   // host.docker.internal → the docker host gateway (Docker 20.10+), so a service that calls a host-local model gateway
   // (LiteLLM etc.) reaches it — parity with the Docker/DockerDriver paths. Both topology group builders start from this;
-  // the co-located builder appends peer loopback aliases on top.
-  config.extra_hosts = ["host.docker.internal:host-gateway"];
+  // the co-located builder appends peer loopback aliases on top. Configurable (gap 5): a Nomad docker driver that does
+  // not translate the `host-gateway` magic keyword takes the concrete gateway IP via opts.hostGatewayAddr.
+  config.extra_hosts = [`host.docker.internal:${opts.hostGatewayAddr ?? DEFAULT_HOST_GATEWAY}`];
   return config;
 }
 

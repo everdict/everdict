@@ -122,6 +122,9 @@ export interface NomadTopologyRuntimeOptions {
   // stores as a dedicated silo (parity with Docker + K8s), false → external (BYO, connect via storeEnv). Mirrors the
   // K8sTopologyRuntime option of the same name.
   provisionDependencies?: boolean;
+  // Override for `host.docker.internal` (gap 5) — default `host-gateway` keyword; a Nomad docker driver that doesn't
+  // translate it takes a concrete bridge-gateway IP (e.g. "172.17.0.1").
+  hostGatewayAddr?: string;
 }
 
 // The store-namespace id used for a no-zone silo (there are no tenants, so one default id names the dedicated store job).
@@ -217,6 +220,7 @@ export class NomadTopologyRuntime implements TopologyRuntime {
       ...(storeValues ? { storeValues } : {}),
       zoneId: zone?.id,
       ...(this.opts.registryAuth ? { registryAuth: this.opts.registryAuth } : {}),
+      ...(this.opts.hostGatewayAddr ? { hostGatewayAddr: this.opts.hostGatewayAddr } : {}),
     });
     await this.register(job, ns);
 
