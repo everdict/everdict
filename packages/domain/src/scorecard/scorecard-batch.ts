@@ -15,7 +15,10 @@ export type ScorecardRunError = NonNullable<ScorecardRecord["error"]>;
 // The outcome payload a terminal transition carries alongside the status flip (summary/models/export/steps/
 // result references). Assembled by the orchestrating service — the domain only guards the flip and stamps it.
 export type ScorecardOutcomeExtras = Partial<
-  Pick<ScorecardRecord, "summary" | "models" | "judgeModels" | "export" | "steps" | "runIds" | "scorecard">
+  Pick<
+    ScorecardRecord,
+    "summary" | "models" | "judgeModels" | "export" | "steps" | "runIds" | "scorecard" | "analysisRef"
+  >
 >;
 
 export interface NewQueuedBatchInput {

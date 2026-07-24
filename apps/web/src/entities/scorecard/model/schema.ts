@@ -201,6 +201,9 @@ export const scorecardRecordSchema = z.object({
   scorecard: fullScorecardSchema.optional(),
   // Server-computed rollup of per-case verdicts (detail only) — replaces the deleted client-side casePass mirror.
   casePass: z.object({ pass: z.number().int(), total: z.number().int() }).optional(),
+  // Object-store ref to the self-contained analysis artifact (summary + per-case verdict/scores) — downloadable/shareable
+  // independent of the DB. Best-effort at finalize; absent when no object store is configured.
+  analysisRef: z.string().optional(),
   export: scorecardExportSchema.optional(), // trace-sink export result (detail only)
   error: z
     .object({ code: z.string(), message: z.string(), phase: z.string().optional() })

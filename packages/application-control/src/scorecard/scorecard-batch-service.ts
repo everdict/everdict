@@ -44,11 +44,13 @@ import { dispatchManifest, foldEnvDeltas } from "../recording-manifest.js";
 import { type Dispatch, runSuite } from "../run-suite.js";
 import {
   type ScorecardServiceDeps,
+  analysisBundle,
   applyGradingPlan,
   caseReason,
   childKey,
   embedHarnessSpec,
   exportStepMessage,
+  offloadAnalysis,
   offloadResults,
   selectSubsetCases,
 } from "./scorecard-shared.js";
@@ -638,6 +640,16 @@ export class ScorecardBatchService {
       results,
     };
     await offloadResults(this.deps, id, results);
+    const summary = summarizeScorecard(scorecard);
+    const analysisRef = await offloadAnalysis(
+      this.deps,
+      id,
+      analysisBundle(
+        { scorecardId: id, dataset: `${rec.dataset.id}@${rec.dataset.version}`, harness: scorecard.harness },
+        summary,
+        results,
+      ),
+    );
     // Trace-sink export (batched at finalize on the Temporal path — per-case export streaming stays in-process-only).
     const exported = this.deps.exportResults
       ? await this.deps
@@ -669,10 +681,11 @@ export class ScorecardBatchService {
       id,
       batch.succeed(
         {
-          summary: summarizeScorecard(scorecard),
+          summary,
           models: scorecardModels(scorecard, declared),
           ...(judgeModels.length > 0 ? { judgeModels } : {}),
           ...(exported ? { export: exported } : {}),
+          ...(analysisRef ? { analysisRef } : {}),
           steps: final?.steps ?? [],
           ...(runIds.length > 0 ? { runIds } : { scorecard }),
         },
@@ -1302,6 +1315,15 @@ export class ScorecardBatchService {
       if (exported) pushStep("export", exported.status === "failed" ? "failed" : "ok", exportStepMessage(exported));
       phase = "persist";
       const summary = summarizeScorecard(scorecard);
+      const analysisRef = await offloadAnalysis(
+        this.deps,
+        id,
+        analysisBundle(
+          { scorecardId: id, dataset: exportCtx.dataset, harness: exportCtx.harness },
+          summary,
+          scorecard.results,
+        ),
+      );
       // leaderboard model axis: trace observation preferred + spec declaration (command harness only) fallback.
       const declared = modelBindingLabel(harnessSpec?.kind === "command" ? harnessSpec.model : undefined);
       const models = scorecardModels(scorecard, declared);
@@ -1317,6 +1339,7 @@ export class ScorecardBatchService {
         models,
         ...(judgeModels.length > 0 ? { judgeModels } : {}),
         ...(exported ? { export: exported } : {}),
+        ...(analysisRef ? { analysisRef } : {}),
         steps: [...steps],
         ...(hasChildren && seedChildBacked
           ? { runIds: [...seedRunIds, ...caseToChild.values()] }

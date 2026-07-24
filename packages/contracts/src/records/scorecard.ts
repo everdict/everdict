@@ -185,6 +185,11 @@ export const ScorecardRecordSchema = z.object({
     })
     .optional(),
   scorecard: ScorecardSchema.optional(), // full per-case results (for detail, heavy)
+  // Object-store ref to the self-contained ANALYSIS artifact (the analysis result as a first-class object): the
+  // dataset/harness + aggregate summary + per-case verdict/scores, generated at finalize. Downloadable/shareable/
+  // archivable independent of the DB (the analysis-output sibling of the run-output snapshot artifacts). Best-effort —
+  // absent when no ArtifactStore is configured or the offload failed.
+  analysisRef: z.string().optional(),
   export: ScorecardExportSchema.optional(), // trace-sink export result (for detail — get only, like steps)
   error: ScorecardRunErrorSchema.optional(),
   steps: z.array(ScorecardStepSchema).optional(), // execution timeline (appended even while in progress)

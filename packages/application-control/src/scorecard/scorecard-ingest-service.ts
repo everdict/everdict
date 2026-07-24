@@ -3,14 +3,13 @@ import {
   BadRequestError,
   type CaseResult,
   type Dataset,
-  type EnvSnapshot,
   type EvalCase,
   type GradeContext,
   type Scorecard,
   type ScorecardRecord,
   TRACE_EVAL_REF,
-  type TraceEvidence,
   type TraceSourceConfig,
+  snapshotFromEvidence,
   toScores,
 } from "@everdict/contracts";
 import { ScorecardBatch, type ScorecardTransition, scorecardModels, summarizeScorecard } from "@everdict/domain";
@@ -22,6 +21,8 @@ import {
   type PullIngestBody,
   type PullIngestInput,
   type ScorecardServiceDeps,
+  analysisBundle,
+  offloadAnalysis,
   offloadResults,
 } from "./scorecard-shared.js";
 
@@ -37,23 +38,6 @@ const TRACE_EVAL_LABEL = { id: TRACE_EVAL_REF, version: TRACE_EVAL_VERSION };
 // align to). Environment-free QA shell so judges can score the trace/evidence; it is never executed, only judged.
 function syntheticCase(caseId: string): EvalCase {
   return { id: caseId, env: { kind: "prompt" }, task: "", graders: [], timeoutSec: 1800, tags: [] };
-}
-
-// Evidence extracted from a pulled trace → the browser snapshot a judge reads (dom/screenshot/VLM), the pull-path
-// substitute for the EnvSnapshot a live run produces. No browser evidence → undefined (finishIngest keeps its
-// synthetic repo snapshot; the final answer rides the trace itself as an assistant message).
-function snapshotFromEvidence(evidence: TraceEvidence | undefined): EnvSnapshot | undefined {
-  if (!evidence) return undefined;
-  if (evidence.dom === undefined && evidence.screenshot === undefined && evidence.screenshotRef === undefined)
-    return undefined;
-  return {
-    kind: "browser",
-    url: "",
-    dom: evidence.dom ?? "",
-    ...(evidence.screenshot ? { screenshot: evidence.screenshot } : {}),
-    ...(evidence.screenshotRef ? { screenshotRef: evidence.screenshotRef } : {}),
-    console: [],
-  };
 }
 
 // Ingest collaborator behind the ScorecardService facade (docs/architecture/api-route-modularization.md R2-b):
@@ -296,6 +280,15 @@ export class ScorecardIngestService {
           .catch(() => undefined)
       : undefined;
     const summary = summarizeScorecard(scorecard);
+    const analysisRef = await offloadAnalysis(
+      this.deps,
+      id,
+      analysisBundle(
+        { scorecardId: id, dataset: `${effectiveDataset.id}@${effectiveDataset.version}`, harness: harnessLabel },
+        summary,
+        results,
+      ),
+    );
     // ingest doesn't resolve the harness spec → the model axis comes from observation (trace) only.
     const models = scorecardModels(scorecard);
     // judge axis: ingest has no inline judge, so only the models of the applied registered judges.
@@ -308,6 +301,7 @@ export class ScorecardIngestService {
           models,
           ...(judgeModels.length > 0 ? { judgeModels } : {}),
           ...(exported ? { export: exported } : {}),
+          ...(analysisRef ? { analysisRef } : {}),
         },
         this.now(),
       ),

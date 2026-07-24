@@ -1,6 +1,7 @@
 import {
   AppError,
   BadRequestError,
+  type CaseFailure,
   type CaseJob,
   type CaseResult,
   type Dataset,
@@ -10,8 +11,10 @@ import {
   type GraderSpec,
   type HarnessSpec,
   type JudgeRunConfig,
+  type MetricSummary,
   NotFoundError,
   type RegistryAuth,
+  type Score,
   ScoreSchema,
   type ScorecardExport,
   type ScorecardOrigin,
@@ -23,7 +26,13 @@ import {
   type TraceSource,
   type TraceSourceConfig,
 } from "@everdict/contracts";
-import type { BudgetTracker, CircuitBreaker, HarnessSecretMaps, UsageMeter } from "@everdict/domain";
+import {
+  type BudgetTracker,
+  type CircuitBreaker,
+  type HarnessSecretMaps,
+  type UsageMeter,
+  caseVerdict,
+} from "@everdict/domain";
 import { z } from "zod";
 import type { ExecuteCaseDeps } from "../execution/execute-case.js";
 import type { ArtifactStore } from "../ports/artifact-store.js";
@@ -378,5 +387,49 @@ export async function offloadResults(deps: ScorecardServiceDeps, id: string, res
     try {
       r.snapshot = await offloadSnapshot(r.snapshot, deps.artifacts, `scorecards/${id}/${r.caseId}`);
     } catch {}
+  }
+}
+
+// The self-contained ANALYSIS artifact — the analysis result as a first-class, portable object (the analysis-output
+// sibling of the run-output snapshot artifacts). Pure: dataset/harness + the aggregate summary + per-case verdict/scores.
+export interface AnalysisBundle {
+  scorecardId: string;
+  dataset: string;
+  harness: string;
+  summary: MetricSummary[];
+  cases: Array<{ caseId: string; verdict: boolean | undefined; scores: Score[]; failure?: CaseFailure }>;
+}
+
+export function analysisBundle(
+  meta: { scorecardId: string; dataset: string; harness: string },
+  summary: MetricSummary[],
+  results: CaseResult[],
+): AnalysisBundle {
+  return {
+    scorecardId: meta.scorecardId,
+    dataset: meta.dataset,
+    harness: meta.harness,
+    summary,
+    cases: results.map((r) => ({
+      caseId: r.caseId,
+      verdict: caseVerdict(r),
+      scores: r.scores,
+      ...(r.failure ? { failure: r.failure } : {}),
+    })),
+  };
+}
+
+// Offload the analysis bundle to object storage → a downloadable ref (ScorecardRecord.analysisRef). Best-effort: no
+// store or a failure returns undefined and never affects the scorecard (same discipline as offloadResults).
+export async function offloadAnalysis(
+  deps: Pick<ScorecardServiceDeps, "artifacts">,
+  id: string,
+  bundle: AnalysisBundle,
+): Promise<string | undefined> {
+  if (!deps.artifacts) return undefined;
+  try {
+    return await deps.artifacts.put(`analyses/${id}.json`, Buffer.from(JSON.stringify(bundle)), "application/json");
+  } catch {
+    return undefined;
   }
 }
