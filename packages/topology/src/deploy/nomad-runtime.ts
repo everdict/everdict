@@ -126,7 +126,9 @@ export class NomadTopologyRuntime implements TopologyRuntime {
   readonly id = "nomad";
   private readonly http: NomadHttp;
   private readonly execImpl: NomadExec;
-  private readonly warm = new Map<string, TopologyHandle>(); // key: id@version@zone
+  // key: id@version@zone → the handle + what's needed to re-verify liveness (jobId + the service groups that must
+  // still have a running alloc + the namespace). A warm entry is re-checked on every cache hit (gap 2).
+  private readonly warm = new Map<string, { handle: TopologyHandle; jobId: string; ns?: string; groups: string[] }>();
   // In-progress deploy (single-flight). The topology job ID is deterministic (everdict-harness-<id>-<version>-<zone>),
   // so under case-level parallelism a second ensure while the warm entry is still empty would re-POST the SAME job →
   // Nomad treats that as a job UPDATE and churns the alloc, so the services never stabilize ("many cases of the same
@@ -145,7 +147,15 @@ export class NomadTopologyRuntime implements TopologyRuntime {
     // Separate the warm pool per tenant (zone) — don't share arbitrary code execution within the same process.
     const key = `${spec.id}@${spec.version}@${zone?.id ?? "default"}`;
     const cached = this.warm.get(key);
-    if (cached) return cached; // warm: deployed only once per (version, zone)
+    if (cached) {
+      // Warm-poisoning guard: after an alloc reschedule/purge the cached host:port is dead — serving it forever makes
+      // every later case fetch-fail with no self-heal. One Nomad allocations Get per ensure re-verifies each service
+      // group still has a running alloc; on a dead set drop the entry and fall through to redeploy (mirrors the
+      // DockerTopologyRuntime docker-ps guard, keeping the runtimes isomorphic). A Nomad blip serves cached best-effort.
+      const alive = await this.topologyAlive(cached).catch(() => undefined);
+      if (alive === undefined || alive) return cached.handle;
+      this.warm.delete(key);
+    }
     const inflight = this.inFlight.get(key);
     if (inflight) return inflight; // concurrent ensures join the first deploy — see the inFlight field comment
 
@@ -235,9 +245,27 @@ export class NomadTopologyRuntime implements TopologyRuntime {
       }
     }
 
+    // The service group(s) whose alloc must stay running for the warm handle to be valid — co-located = the one shared
+    // group, per-service = one group per ported service. Empty (no ported service) → nothing to re-verify.
+    const groups = needsPerServiceGroups(spec)
+      ? portedServices.map((svc) => perServiceGroupName(svc.name))
+      : portedServices.length > 0
+        ? [SERVICE_GROUP_NAME]
+        : [];
     const handle: TopologyHandle = { endpoints };
-    this.warm.set(key, handle);
+    this.warm.set(key, { handle, jobId, ns, groups });
     return handle;
+  }
+
+  // Cheap liveness check for a warm topology — ONE Nomad allocations Get: every service group must still have a running
+  // alloc. A reschedule/purge leaves the cached host:port stale, so a poisoned warm entry is dropped instead of served
+  // forever. undefined on a Nomad blip → the caller serves cached (best-effort, same posture as Docker's docker-ps).
+  private async topologyAlive(entry: { jobId: string; ns?: string; groups: string[] }): Promise<boolean | undefined> {
+    if (entry.groups.length === 0) return true; // no ported service to verify
+    const res = await this.http.request("GET", `/v1/job/${entry.jobId}/allocations${this.nsq(entry.ns, "?")}`);
+    if (res.status >= 300) return undefined;
+    const allocs = JSON.parse(res.text) as AllocLike[];
+    return entry.groups.every((g) => allocs.some((a) => a.TaskGroup === g && a.ClientStatus === "running"));
   }
 
   // pool: bring up the shared store once (discover host:port), and mint per-tenant logical objects (dedicated DB+role / Redis ACL) via alloc exec.

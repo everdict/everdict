@@ -73,7 +73,11 @@ stateless services = per-version warm; stores = shared + per-case logical isolat
 `NomadTopologyRuntime` implements `TopologyRuntime` against the Nomad API: `ensureTopology` registers the
 warm service job, polls it to running, and discovers endpoints from the alloc via pure `resolvePort`
 (`AllocatedResources.Shared.Ports` → `Resources.Networks`); `provisionBrowserEnv` runs a per-case headless
-Chromium and discovers its CDP from `/json/version`.
+Chromium and discovers its CDP from `/json/version`. **Warm-cache liveness re-check:** each `ensureTopology`
+cache hit re-verifies every service group still has a running alloc (one `/v1/job/:id/allocations` Get via
+`topologyAlive`) — after a reschedule/purge the cached host:port is stale, so a poisoned entry is dropped and
+redeployed instead of served forever (mirrors Docker's `docker ps` guard; a Nomad blip serves cached best-effort).
+The warm entry stores `{handle, jobId, ns, groups}` for this.
 **Co-located topology (Nomad only — see `docs/architecture/nomad-colocated-topology.md`).** `buildNomadTopologyJob`
 renders **one task group** (`SERVICE_GROUP_NAME`) with **one task per service** on a **bridge** netns — every
 service shares one network namespace, so peers talk over **loopback** (`localhost:<svc.port>`; `extra_hosts` also

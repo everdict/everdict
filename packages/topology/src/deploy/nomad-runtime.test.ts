@@ -2,7 +2,7 @@ import type { ServiceHarnessSpec, TrustZone } from "@everdict/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ConsulClient, ServiceIntention } from "./consul-intentions.js";
 import { type NomadExec, type NomadHttp, NomadTopologyRuntime } from "./nomad-runtime.js";
-import { SERVICE_GROUP_NAME, topologyJobId } from "./nomad-topology.js";
+import { SERVICE_GROUP_NAME, servicePortLabel, topologyJobId } from "./nomad-topology.js";
 
 // A portless service → skips ensureTopology's endpoint-discovery (real fetch) loop (unit-test only the pool wiring).
 const SPEC: ServiceHarnessSpec = {
@@ -259,6 +259,73 @@ describe("NomadTopologyRuntime — co-located endpoint discovery", () => {
     });
     // the single co-located alloc was read once (not a separate group alloc per service).
     expect(new Set(groupsPolled)).toEqual(new Set(["alloc-svc"]));
+  });
+
+  // Regression (gap 2): a warm entry must be liveness-re-checked on every cache hit. After a reschedule/purge the cached
+  // host:port is dead — pre-fix ensureTopology returned the poisoned handle forever (every later case fetch-failed). Now
+  // one allocations Get per ensure re-verifies the service group is still running and redeploys when it is gone.
+  it("re-verifies warm liveness on a cache hit and redeploys after the alloc is gone", async () => {
+    vi.stubGlobal("fetch", async () => ({ status: 200 }) as unknown as Response);
+    let allocGone = false;
+    let deploys = 0;
+    const http: NomadHttp = {
+      async request(method, path) {
+        if (method === "POST" && path.startsWith("/v1/jobs")) {
+          deploys++;
+          return { status: 200, text: "{}" };
+        }
+        if (path.includes("/allocations")) {
+          // Only the liveness probe sees "gone" (one shot); the ensuing redeploy's waitForGroupRunning sees it running.
+          if (allocGone) {
+            allocGone = false;
+            return { status: 200, text: "[]" };
+          }
+          return {
+            status: 200,
+            text: JSON.stringify([{ TaskGroup: SERVICE_GROUP_NAME, ClientStatus: "running", ID: "alloc-svc" }]),
+          };
+        }
+        if (path.startsWith("/v1/allocation/")) {
+          return {
+            status: 200,
+            text: JSON.stringify({
+              ID: "alloc-svc",
+              TaskGroup: SERVICE_GROUP_NAME,
+              AllocatedResources: {
+                Shared: { Ports: [{ Label: servicePortLabel("svc"), Value: 21000, HostIP: "127.0.0.1" }] },
+              },
+            }),
+          };
+        }
+        return { status: 200, text: "[]" };
+      },
+    };
+    const spec: ServiceHarnessSpec = {
+      kind: "service",
+      id: "live",
+      version: "1.0.0",
+      services: [{ name: "svc", image: "a:1", port: 8000, needs: [], perRun: [], replicas: 1, env: {} }],
+      dependencies: [],
+      frontDoor: { service: "svc", submit: "POST /runs" },
+      traceSource: { kind: "otel", endpoint: "http://unused" },
+    };
+    const rt = new NomadTopologyRuntime({
+      addr: "http://nomad",
+      http,
+      pollIntervalMs: 1,
+      maxPolls: 5,
+      readyTimeoutMs: 10,
+    });
+
+    await rt.ensureTopology(spec);
+    expect(deploys).toBe(1);
+    // Cache hit while the alloc is running → liveness passes → serve cached, no redeploy.
+    await rt.ensureTopology(spec);
+    expect(deploys).toBe(1);
+    // The alloc is gone (reschedule/purge) → the liveness re-check drops the poisoned entry and redeploys.
+    allocGone = true;
+    await rt.ensureTopology(spec);
+    expect(deploys).toBe(2);
   });
 });
 
