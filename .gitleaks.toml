@@ -18,4 +18,7 @@ regexes = [
   # Architecture docs listing application-control responsibilities — "credential primitives, scheduling/ops
   # orchestration" trips generic-api-key ("credential" keyword + a path-like token). Doc prose, not a secret.
   '''credential primitives, scheduling/ops orchestration''',
+  # Fake JWT fixture in trace-source tests — an "offline_token" mints to a bare access token; this is a synthetic
+  # value (header {alg:RS256}, payload {sub:robot}, signature literally "sig"), not a real secret. Full-history scan.
+  '''eyJhbGciOiJSUzI1NiJ9\.eyJzdWIiOiJyb2JvdCJ9\.sig''',
 ]
