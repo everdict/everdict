@@ -68,9 +68,14 @@ request-less turn (teammate wake / proactive event)
   - *(b) dedicated `AgentTokenStore`* (new table + migration) — clean separation + teammate-tied lifecycle, no
     key-list leak, at the cost of a migration + a parallel store.
   Lean (a) + the list filter for the first cut (no migration); revisit (b) if agent-token lifecycle diverges.
-- **A3 — request-less turn auth.** `apps/agent` resolves an agent `Principal` from a stored `agt_` token
-  (instead of forwarding a user header) for a teammate/proactive turn, and forwards that token to the MCP
-  tools. This unblocks S3 `runTeammateTurn` and S5 proactive wake.
+- **A3 — request-less turn auth. CORE LANDED.** `apps/agent` `runTeammateTurn(deps, authenticate, mailbox,
+  sessionId, agentToken)`: authenticates via the `agt_` token (→ the agent principal), drains the teammate's
+  mailbox, and runs the agent loop over the incoming messages — forwarding the SAME token to the MCP tools, so
+  every tool call is authenticated + RBAC-bounded as the creator. Best-effort (a failed turn is logged, never
+  thrown). Unit-tested (authenticated turn over an incoming message; empty-mailbox no-op). **Last mile:** wire
+  `runTeammateTurn` as the `TeammateSupervisor`'s `runTurn` + a `spawn_teammate` path that issues the token
+  (`issueAgentToken`), creates the teammate session, and registers it — then S3 (peer collaboration) and S5
+  (proactive: an event wakes the same turn) are live end-to-end.
 
 ## Non-goals / guardrails
 
