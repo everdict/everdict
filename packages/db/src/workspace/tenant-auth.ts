@@ -151,11 +151,13 @@ export async function issueAgentToken(
   owner: string,
   scopes: string[] = ["write"],
   label?: string,
-): Promise<string> {
+): Promise<{ token: string; id: string }> {
   const token = generateAgentToken();
+  const id = randomUUID();
   const prefix = token.slice(0, 12); // "agt_" + first 8 chars — list identification hint
-  await store.add(tenant, hashKey(token), { id: randomUUID(), label, prefix, scopes, owner });
-  return token;
+  await store.add(tenant, hashKey(token), { id, label, prefix, scopes, owner });
+  // Return the key id too — a teammate's lifecycle owns its token, so stopping the teammate can revoke(tenant, id).
+  return { token, id };
 }
 
 // True for a key row that is an agent execution token (agt_), so the personal key-list surface can hide it — an agt_

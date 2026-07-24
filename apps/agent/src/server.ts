@@ -65,10 +65,10 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
   const rules = new PermissionRules();
   // S3 teammates — long-lived agents the supervisor wakes when a message lands in their mailbox; each runs a
   // request-less turn authenticated by its own agt_ token (runTeammateTurn). Turns are serialized per teammate.
-  const teammateTokens = new Map<string, string>(); // sessionId → its agt_ execution token
+  const teammateTokens = new Map<string, { token: string; keyId: string }>(); // sessionId → its agt_ token + key id (for revoke)
   const supervisor = new TeammateSupervisor(async (sessionId) => {
-    const token = teammateTokens.get(sessionId);
-    if (token) await runTeammateTurn(deps, deps.authenticate, mailbox, sessionId, token);
+    const entry = teammateTokens.get(sessionId);
+    if (entry) await runTeammateTurn(deps, deps.authenticate, mailbox, sessionId, entry.token);
   });
   // Deliver to a session's mailbox and, if it is a teammate, wake it to process the message (no-op for plain sessions).
   const deliver = (workspace: string, sessionId: string, envelope: Parameters<AgentMailbox["enqueue"]>[2]): void => {
@@ -94,14 +94,14 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
       createdAt: now,
       updatedAt: now,
     });
-    const token = await issueAgentToken(
+    const { token, id: keyId } = await issueAgentToken(
       deps.keyStore,
       principal.workspace,
       principal.subject,
       ["write"],
       `teammate:${name}`,
     );
-    teammateTokens.set(sessionId, token);
+    teammateTokens.set(sessionId, { token, keyId });
     supervisor.register(sessionId, name);
     deliver(principal.workspace, sessionId, {
       from: "user",
@@ -386,6 +386,30 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
     const result = await spawnTeammateFor(principal, parsed.data.name, parsed.data.task);
     if ("error" in result) return reply.code(404).send({ code: "NOT_FOUND", message: result.error });
     return reply.code(201).send({ id: result.id, name: parsed.data.name });
+  });
+
+  // The caller's teammate roster — their sessions that are registered, running teammates.
+  app.get("/agent/teammates", async (req, reply) => {
+    const principal = await principalOf(req, reply);
+    if (!principal) return reply;
+    const sessions = await deps.sessions.listSessions(principal.workspace, principal.subject);
+    const teammates = sessions.filter((s) => supervisor.isTeammate(s.id)).map((s) => ({ id: s.id, name: s.title }));
+    return reply.send({ teammates });
+  });
+
+  // Stop a teammate: unregister it (no more wakes), revoke its execution token, and drop it. Owner-scoped; its session
+  // (transcript) is kept. A no-op-safe 204 if it isn't a live teammate.
+  app.delete("/agent/teammates/:id", async (req, reply) => {
+    const principal = await principalOf(req, reply);
+    if (!principal) return reply;
+    const { id } = idParams.parse(req.params);
+    const session = await deps.sessions.getSession(principal.workspace, principal.subject, id);
+    if (!session) return reply.code(404).send({ code: "NOT_FOUND", message: "Teammate not found." });
+    supervisor.unregister(id);
+    const entry = teammateTokens.get(id);
+    if (entry && deps.keyStore) await deps.keyStore.revoke(principal.workspace, entry.keyId, principal.subject);
+    teammateTokens.delete(id);
+    return reply.code(204).send();
   });
 
   // Fine-grained permission rules for a conversation — the "always allow / always deny this tool" layer above the

@@ -38,8 +38,9 @@ describe("agentTokenAuthenticator", () => {
 
   it("issues an agt_ token via the key store that resolves as its creator and is hidden from the key list (A2)", async () => {
     const store = new InMemoryTenantKeyStore();
-    const token = await issueAgentToken(store, "acme", "alice");
+    const { token, id } = await issueAgentToken(store, "acme", "alice");
     expect(token.startsWith("agt_")).toBe(true);
+    expect(id.length).toBeGreaterThan(0);
     const auth = agentTokenAuthenticator({
       resolve: async (h) => {
         const r = await store.resolveByHash(h);

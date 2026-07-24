@@ -278,6 +278,46 @@ describe("agent server", () => {
     await app.close();
   });
 
+  it("lists the caller's teammates and stops one (roster)", async () => {
+    const app = buildServer(makeDeps({ keyStore: new InMemoryTenantKeyStore() }));
+    const r1 = (
+      await app.inject({
+        method: "POST",
+        url: "/agent/teammates",
+        headers: auth,
+        payload: { name: "researcher", task: "t1" },
+      })
+    ).json();
+    await app.inject({
+      method: "POST",
+      url: "/agent/teammates",
+      headers: auth,
+      payload: { name: "analyst", task: "t2" },
+    });
+
+    const list = (await app.inject({ method: "GET", url: "/agent/teammates", headers: auth })).json().teammates as {
+      id: string;
+      name: string;
+    }[];
+    expect(list.map((t) => t.name).sort()).toEqual(["analyst", "researcher"]);
+
+    const del = await app.inject({ method: "DELETE", url: `/agent/teammates/${r1.id}`, headers: auth });
+    expect(del.statusCode).toBe(204);
+
+    const list2 = (await app.inject({ method: "GET", url: "/agent/teammates", headers: auth })).json().teammates as {
+      name: string;
+    }[];
+    expect(list2.map((t) => t.name)).toEqual(["analyst"]);
+    await app.close();
+  });
+
+  it("stopping an unknown teammate is 404", async () => {
+    const app = buildServer(makeDeps({ keyStore: new InMemoryTenantKeyStore() }));
+    const res = await app.inject({ method: "DELETE", url: "/agent/teammates/nope", headers: auth });
+    expect(res.statusCode).toBe(404);
+    await app.close();
+  });
+
   it("teammate spawn is 404 when no key store (agent token issuance) is configured", async () => {
     const app = buildServer(makeDeps()); // no keyStore
     const res = await app.inject({
