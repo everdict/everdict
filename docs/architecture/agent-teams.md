@@ -109,8 +109,12 @@ The gap is not the loop — it is (a) a **shared message substrate** with addres
   /agent/teammates/:id` (stop — unregister + revoke its execution token; keeps the transcript). **Remaining
   polish:** a named `team` grouping + a web surface. The core — persistent, addressable, autonomous,
   self-spawning, collaborating, stoppable agents — is in.
-- **S4 — event bridge (monitoring → agent inbox).** The notification emitter also routes to subscribed agent
-  inboxes; subscription model per agent/team. Everything monitored is now an agent-consumable message.
+- **S4 — event bridge (monitoring → agent inbox). Agent-side LANDED.** A teammate subscribes to event kinds
+  (spawn_teammate / POST /agent/teammates `watch: [...]`), and `POST /agent/events {kind, source, message}` fans
+  the event out to the caller's teammates that watch that kind — delivering it (attributed) into each mailbox and
+  waking it, so it reacts proactively (S5 too). Nothing watches the kind → notified:0. **Remaining:** the control
+  plane's notification emitter (notifications.md) POSTs to `/agent/events` when a run/scorecard completes or
+  regresses (cross-service, thin) — then everything Everdict monitors auto-drives the proactive team.
 - **S5 — proactive triggers.** An event in an idle subscribed agent's mailbox wakes a turn (reuse the
   schedule-fire path). The proactive agent team is live.
 - **S6 — agent drives eval (write capability).** Expose the write control-plane tools to the agent behind

@@ -65,10 +65,20 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
   const rules = new PermissionRules();
   // S3 teammates — long-lived agents the supervisor wakes when a message lands in their mailbox; each runs a
   // request-less turn authenticated by its own agt_ token (runTeammateTurn). Turns are serialized per teammate.
-  const teammateTokens = new Map<string, { token: string; keyId: string }>(); // sessionId → its agt_ token + key id (for revoke)
+  // The teammate registry — sessionId → its execution token (+ key id for revoke), owner/workspace scope, and the
+  // platform event kinds it watches (S4: a matching event wakes it proactively, like a peer's message).
+  interface TeammateMeta {
+    token: string;
+    keyId: string;
+    name: string;
+    owner: string;
+    workspace: string;
+    watch: Set<string>;
+  }
+  const teammates = new Map<string, TeammateMeta>();
   const supervisor = new TeammateSupervisor(async (sessionId) => {
-    const entry = teammateTokens.get(sessionId);
-    if (entry) await runTeammateTurn(deps, deps.authenticate, mailbox, sessionId, entry.token);
+    const t = teammates.get(sessionId);
+    if (t) await runTeammateTurn(deps, deps.authenticate, mailbox, sessionId, t.token);
   });
   // Deliver to a session's mailbox and, if it is a teammate, wake it to process the message (no-op for plain sessions).
   const deliver = (workspace: string, sessionId: string, envelope: Parameters<AgentMailbox["enqueue"]>[2]): void => {
@@ -82,6 +92,7 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
     principal: Principal,
     name: string,
     task: string,
+    watch: string[] = [],
   ): Promise<{ id: string } | { error: string }> => {
     if (!deps.keyStore) return { error: "Teammate execution tokens are not configured." };
     const now = deps.now();
@@ -101,7 +112,14 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
       ["write"],
       `teammate:${name}`,
     );
-    teammateTokens.set(sessionId, { token, keyId });
+    teammates.set(sessionId, {
+      token,
+      keyId,
+      name,
+      owner: principal.subject,
+      workspace: principal.workspace,
+      watch: new Set(watch),
+    });
     supervisor.register(sessionId, name);
     deliver(principal.workspace, sessionId, {
       from: "user",
@@ -235,8 +253,8 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
       return { ok: true };
     };
     // spawn_teammate for this run — an agent can spin up an autonomous teammate (owned by the same principal).
-    const spawnTeammate = (name: string, task: string): Promise<{ id: string } | { error: string }> =>
-      spawnTeammateFor(principal, name, task);
+    const spawnTeammate = (name: string, task: string, watch: string[]): Promise<{ id: string } | { error: string }> =>
+      spawnTeammateFor(principal, name, task, watch);
     // A fine-grained rule (allow/deny for a tool in this session) short-circuits the human prompt.
     const withRules =
       (base: PermissionHook): PermissionHook =>
@@ -381,20 +399,23 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
   app.post("/agent/teammates", async (req, reply) => {
     const principal = await principalOf(req, reply);
     if (!principal) return reply;
-    const parsed = z.object({ name: z.string().min(1).max(60), task: z.string().min(1) }).safeParse(req.body);
+    const parsed = z
+      .object({ name: z.string().min(1).max(60), task: z.string().min(1), watch: z.array(z.string()).optional() })
+      .safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
-    const result = await spawnTeammateFor(principal, parsed.data.name, parsed.data.task);
+    const result = await spawnTeammateFor(principal, parsed.data.name, parsed.data.task, parsed.data.watch ?? []);
     if ("error" in result) return reply.code(404).send({ code: "NOT_FOUND", message: result.error });
     return reply.code(201).send({ id: result.id, name: parsed.data.name });
   });
 
-  // The caller's teammate roster — their sessions that are registered, running teammates.
+  // The caller's teammate roster — their live teammates, with the event kinds each watches.
   app.get("/agent/teammates", async (req, reply) => {
     const principal = await principalOf(req, reply);
     if (!principal) return reply;
-    const sessions = await deps.sessions.listSessions(principal.workspace, principal.subject);
-    const teammates = sessions.filter((s) => supervisor.isTeammate(s.id)).map((s) => ({ id: s.id, name: s.title }));
-    return reply.send({ teammates });
+    const roster = [...teammates.entries()]
+      .filter(([, t]) => t.workspace === principal.workspace && t.owner === principal.subject)
+      .map(([id, t]) => ({ id, name: t.name, watch: [...t.watch] }));
+    return reply.send({ teammates: roster });
   });
 
   // Stop a teammate: unregister it (no more wakes), revoke its execution token, and drop it. Owner-scoped; its session
@@ -406,10 +427,34 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
     const session = await deps.sessions.getSession(principal.workspace, principal.subject, id);
     if (!session) return reply.code(404).send({ code: "NOT_FOUND", message: "Teammate not found." });
     supervisor.unregister(id);
-    const entry = teammateTokens.get(id);
-    if (entry && deps.keyStore) await deps.keyStore.revoke(principal.workspace, entry.keyId, principal.subject);
-    teammateTokens.delete(id);
+    const t = teammates.get(id);
+    if (t && deps.keyStore) await deps.keyStore.revoke(principal.workspace, t.keyId, principal.subject);
+    teammates.delete(id);
     return reply.code(204).send();
+  });
+
+  // S4 — fan a platform EVENT out to the caller's teammates that watch its kind, waking each to react proactively.
+  // Owner + workspace scoped (the control plane, acting as the creator's principal, is the real driver of these; a
+  // member can also drive it). Nothing watches the kind → a harmless 200 with notified:0.
+  app.post("/agent/events", async (req, reply) => {
+    const principal = await principalOf(req, reply);
+    if (!principal) return reply;
+    const parsed = z
+      .object({ kind: z.string().min(1), message: z.string().min(1), source: z.string().min(1).optional() })
+      .safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
+    let notified = 0;
+    for (const [sessionId, t] of teammates) {
+      if (t.workspace !== principal.workspace || t.owner !== principal.subject || !t.watch.has(parsed.data.kind))
+        continue;
+      deliver(principal.workspace, sessionId, {
+        from: "event",
+        sender: parsed.data.source ?? parsed.data.kind,
+        content: parsed.data.message,
+      });
+      notified += 1;
+    }
+    return reply.send({ notified });
   });
 
   // Fine-grained permission rules for a conversation — the "always allow / always deny this tool" layer above the

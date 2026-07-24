@@ -104,7 +104,7 @@ export interface AgentLoopOptions {
   // Host callback to spawn a persistent TEAMMATE (S3) — a long-lived autonomous agent the host creates (session +
   // execution token) and returns its id. Present → the agent gets a spawn_teammate tool (autonomous collaboration:
   // agents, not just the web, spawn teammates). Absent → no spawn_teammate tool.
-  spawnTeammate?: (name: string, task: string) => Promise<{ id: string } | { error: string }>;
+  spawnTeammate?: (name: string, task: string, watch: string[]) => Promise<{ id: string } | { error: string }>;
   // Per-tool wall-clock deadline (ms). A tool call that outruns it is aborted and returned as an error the model sees,
   // so a hung MCP tool can't pin the turn's Promise.all forever. Absent → no per-tool timeout (the run signal still applies).
   toolTimeoutMs?: number;

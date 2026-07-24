@@ -134,7 +134,8 @@ export interface ChatHooks {
   ) => { ok: boolean; error?: string } | Promise<{ ok: boolean; error?: string }>;
   // Spawn a persistent teammate (S3) — the host creates its session + execution token and returns its id. Present →
   // the agent gets a spawn_teammate tool (an agent, not just the web, spawns teammates). Absent → no spawn_teammate.
-  spawnTeammate?: (name: string, task: string) => Promise<{ id: string } | { error: string }>;
+  // `watch` = platform event kinds the teammate should react to proactively (S4).
+  spawnTeammate?: (name: string, task: string, watch: string[]) => Promise<{ id: string } | { error: string }>;
 }
 
 export const DEFAULT_SESSION_TITLE = "New conversation";

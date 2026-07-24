@@ -311,6 +311,62 @@ describe("agent server", () => {
     await app.close();
   });
 
+  it("fans a platform event out to the teammates that watch its kind, waking them (S4 proactive)", async () => {
+    const app = buildServer(makeDeps({ keyStore: new InMemoryTenantKeyStore() }));
+    const watcher = (
+      await app.inject({
+        method: "POST",
+        url: "/agent/teammates",
+        headers: auth,
+        payload: { name: "watcher", task: "watch regressions", watch: ["scorecard.regressed"] },
+      })
+    ).json();
+    // A teammate watching a different kind must NOT be woken.
+    await app.inject({
+      method: "POST",
+      url: "/agent/teammates",
+      headers: auth,
+      payload: { name: "other", task: "watch capacity", watch: ["runtime.backpressure"] },
+    });
+
+    const fanned = (
+      await app.inject({
+        method: "POST",
+        url: "/agent/events",
+        headers: auth,
+        payload: { kind: "scorecard.regressed", source: "scorecard sc_9", message: "sc_9 regressed on 3 cases" },
+      })
+    ).json();
+    expect(fanned.notified).toBe(1); // only the watcher
+
+    await new Promise((r) => setTimeout(r, 30)); // let the woken teammate react
+    const msgs = (
+      await app.inject({ method: "GET", url: `/agent/sessions/${watcher.id}/messages`, headers: auth })
+    ).json().messages as { content: string }[];
+    expect(msgs.some((m) => m.content.includes("sc_9 regressed on 3 cases"))).toBe(true);
+    await app.close();
+  });
+
+  it("fanning an event with a kind nothing watches notifies no one", async () => {
+    const app = buildServer(makeDeps({ keyStore: new InMemoryTenantKeyStore() }));
+    await app.inject({
+      method: "POST",
+      url: "/agent/teammates",
+      headers: auth,
+      payload: { name: "watcher", task: "watch", watch: ["scorecard.regressed"] },
+    });
+    const fanned = (
+      await app.inject({
+        method: "POST",
+        url: "/agent/events",
+        headers: auth,
+        payload: { kind: "nobody.watches.this", message: "ignored" },
+      })
+    ).json();
+    expect(fanned.notified).toBe(0);
+    await app.close();
+  });
+
   it("stopping an unknown teammate is 404", async () => {
     const app = buildServer(makeDeps({ keyStore: new InMemoryTenantKeyStore() }));
     const res = await app.inject({ method: "DELETE", url: "/agent/teammates/nope", headers: auth });
