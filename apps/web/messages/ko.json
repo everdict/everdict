@@ -2959,7 +2959,13 @@
     "saving": "저장 중…",
     "savedVersion": "저장됨 (버전 {version}).",
     "savedNoChange": "저장할 변경 사항이 없어요.",
-    "saveError": "에이전트를 저장하지 못했어요."
+    "saveError": "에이전트를 저장하지 못했어요.",
+    "adoptedCapabilities": "채택한 capabilities",
+    "adoptedCapabilitiesHint": "이 에이전트가 스토어에서 채택한 도구·스킬(버전 pin). 새 채택은 스토어에서, 여기선 제거만.",
+    "noAdopted": "아직 채택한 capability 가 없습니다 — 스토어에서 도구·스킬을 추가하세요.",
+    "removeCapability": "capability 제거",
+    "capabilityWrite": "write",
+    "capabilityFrom": "{source} 출처"
   },
   "skillsManager": {
     "newSkill": "새 스킬",

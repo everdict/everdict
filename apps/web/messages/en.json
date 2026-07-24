@@ -2959,7 +2959,13 @@
     "saving": "Saving…",
     "savedVersion": "Saved (version {version}).",
     "savedNoChange": "No changes to save.",
-    "saveError": "Could not save the agent."
+    "saveError": "Could not save the agent.",
+    "adoptedCapabilities": "Adopted capabilities",
+    "adoptedCapabilitiesHint": "Tools and skills this agent adopted from the Store (pinned by version). Adopt more in the Store; remove one here.",
+    "noAdopted": "No capabilities adopted yet — browse the Store to add tools and skills.",
+    "removeCapability": "Remove capability",
+    "capabilityWrite": "write",
+    "capabilityFrom": "from {source}"
   },
   "skillsManager": {
     "newSkill": "New skill",

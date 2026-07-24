@@ -1,15 +1,17 @@
 'use client'
 
-import { Plus, Sparkles, X } from 'lucide-react'
-import { useTranslations } from 'next-intl'
 import { useState, useTransition } from 'react'
+import { Boxes, Plus, Sparkles, X } from 'lucide-react'
+import { useTranslations } from 'next-intl'
 import { toast } from 'sonner'
 
-import type { AgentSpec } from '@/entities/agent-spec'
 import { SecretPicker } from '@/features/pick-secret'
+import type { AgentSpec, CapabilityRef } from '@/entities/agent-spec'
+import { Badge } from '@/shared/ui/badge'
 import { Button } from '@/shared/ui/button'
 import { Combobox } from '@/shared/ui/combobox'
 import { Input, Label, Textarea } from '@/shared/ui/input'
+
 import { saveAgentAction } from '../api/manage-agent'
 
 // 편집 중인 MCP 서버 행(로컬 상태). 저장 시 name/url 이 빈 행은 걸러진다.
@@ -47,11 +49,14 @@ export function AgentManager({
       write: s.write,
     }))
   )
+  // 스토어에서 채택한 capabilities(불변버전 pin). 여기선 검토 + 제거만; 새 채택은 스토어에서. 저장 시 반드시 보존해야 한다.
+  const [capabilities, setCapabilities] = useState<CapabilityRef[]>(agent?.capabilities ?? [])
   const [pending, startTransition] = useTransition()
 
   const patchServer = (index: number, patch: Partial<ServerRow>) =>
     setServers((rows) => rows.map((row, i) => (i === index ? { ...row, ...patch } : row)))
-  const addServer = () => setServers((rows) => [...rows, { name: '', url: '', authSecret: '', write: false }])
+  const addServer = () =>
+    setServers((rows) => [...rows, { name: '', url: '', authSecret: '', write: false }])
   const removeServer = (index: number) => setServers((rows) => rows.filter((_, i) => i !== index))
 
   const modelOptions = [
@@ -73,12 +78,16 @@ export function AgentManager({
           ...(s.authSecret ? { authSecret: s.authSecret } : {}),
           write: s.write,
         })),
+      // 채택한 capabilities 는 이 폼에서 안 만들지만(스토어에서 채택) 반드시 보존해야 한다 — 빠뜨리면 저장 시 전부 사라진다.
+      capabilities,
       tags: agent?.tags ?? [],
     }
     startTransition(async () => {
       const r = await saveAgentAction(configId, body)
       if (r.ok) {
-        toast.success(r.created ? t('savedVersion', { version: r.version ?? '' }) : t('savedNoChange'))
+        toast.success(
+          r.created ? t('savedVersion', { version: r.version ?? '' }) : t('savedNoChange')
+        )
       } else {
         toast.error(r.error ?? t('saveError'))
       }
@@ -178,7 +187,11 @@ export function AgentManager({
                     names={secretNames}
                     scope="workspace"
                     aria-label={t('serverAuthSecret')}
-                    hint={<span className="text-[13px] text-muted-foreground">{t('serverAuthSecretHint')}</span>}
+                    hint={
+                      <span className="text-[13px] text-muted-foreground">
+                        {t('serverAuthSecretHint')}
+                      </span>
+                    }
                   />
                 </div>
                 <label className="flex items-center gap-2 text-[13px]">
@@ -192,7 +205,9 @@ export function AgentManager({
                   <span>{t('serverWrite')}</span>
                 </label>
                 {server.write && (
-                  <p className="text-[12px] text-amber-600 dark:text-amber-500">{t('serverWriteWarn')}</p>
+                  <p className="text-[12px] text-amber-600 dark:text-amber-500">
+                    {t('serverWriteWarn')}
+                  </p>
                 )}
               </div>
             ))}
@@ -204,6 +219,58 @@ export function AgentManager({
             <Plus />
             {t('addServer')}
           </Button>
+        )}
+      </section>
+
+      {/* Adopted capabilities — 스토어에서 채택한 도구/스킬(불변버전 pin). 새 채택은 스토어에서, 여기선 검토 + 제거. */}
+      <section className="space-y-3">
+        <div>
+          <div className="flex items-center gap-1.5 text-sm font-medium">
+            <Boxes className="size-4 text-primary" />
+            {t('adoptedCapabilities')}
+          </div>
+          <p className="mt-1 text-[13px] text-muted-foreground">{t('adoptedCapabilitiesHint')}</p>
+        </div>
+        {capabilities.length === 0 ? (
+          <p className="rounded-lg border border-dashed border-border px-4 py-6 text-center text-[13px] text-muted-foreground">
+            {t('noAdopted')}
+          </p>
+        ) : (
+          <div className="space-y-2">
+            {capabilities.map((c) => (
+              <div
+                key={`${c.source}/${c.id}`}
+                className="flex items-center justify-between gap-3 rounded-lg border border-border bg-card p-3"
+              >
+                <div className="min-w-0 space-y-0.5">
+                  <div className="flex items-center gap-2">
+                    <span className="truncate font-mono text-[13px] font-medium">{c.id}</span>
+                    <code className="rounded bg-secondary px-1.5 py-0.5 font-mono text-[11px] text-secondary-foreground ring-1 ring-inset ring-border">
+                      {c.version}
+                    </code>
+                    {c.enableWrite && <Badge tone="outline">{t('capabilityWrite')}</Badge>}
+                  </div>
+                  <div className="text-[11.5px] text-muted-foreground">
+                    {t('capabilityFrom', { source: c.source })}
+                  </div>
+                </div>
+                {canWrite && (
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    onClick={() =>
+                      setCapabilities((cs) =>
+                        cs.filter((x) => !(x.source === c.source && x.id === c.id))
+                      )
+                    }
+                    aria-label={t('removeCapability')}
+                  >
+                    <X />
+                  </Button>
+                )}
+              </div>
+            ))}
+          </div>
         )}
       </section>
 
