@@ -16,6 +16,7 @@ export * from "./tools/result-store.js";
 export * from "./tools/spawn-tool.js";
 export * from "./tools/send-message-tool.js";
 export * from "./tools/spawn-teammate-tool.js";
+export * from "./tools/list-teammates-tool.js";
 export * from "./tools/plan-tool.js";
 export * from "./mcp/bridge.js";
 export * from "./context/token-budget.js";

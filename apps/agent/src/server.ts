@@ -255,6 +255,11 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
     // spawn_teammate for this run — an agent can spin up an autonomous teammate (owned by the same principal).
     const spawnTeammate = (name: string, task: string, watch: string[]): Promise<{ id: string } | { error: string }> =>
       spawnTeammateFor(principal, name, task, watch);
+    // list_teammates for this run — the caller's live teammates, so the agent can coordinate them.
+    const listTeammates = async (): Promise<{ id: string; name: string; watch: string[] }[]> =>
+      [...teammates.entries()]
+        .filter(([, t]) => t.owner === principal.subject && t.workspace === principal.workspace)
+        .map(([id, t]) => ({ id, name: t.name, watch: [...t.watch] }));
     // A fine-grained rule (allow/deny for a tool in this session) short-circuits the human prompt.
     const withRules =
       (base: PermissionHook): PermissionHook =>
@@ -280,6 +285,7 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
             drainInput,
             sendMessage,
             spawnTeammate,
+            listTeammates,
             ...(mode === "bypass" ? {} : { permit: withRules((): PermissionDecision => "allow") }),
             ...(mode === "plan" ? { planMode: true } : {}),
           },
@@ -334,6 +340,7 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
         drainInput,
         sendMessage,
         spawnTeammate,
+        listTeammates,
       });
       write("done", {});
     } catch (err) {

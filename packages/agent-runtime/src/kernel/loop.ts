@@ -17,6 +17,7 @@ import { toLlmTools } from "../tools/openai.js";
 import { buildPresentPlanTool } from "../tools/plan-tool.js";
 import { ToolRegistry } from "../tools/registry.js";
 import { OFFLOAD_THRESHOLD_CHARS, ResultStore, buildReadResultTool, offloadResult } from "../tools/result-store.js";
+import { buildListTeammatesTool } from "../tools/list-teammates-tool.js";
 import { buildSendMessageTool } from "../tools/send-message-tool.js";
 import { buildSpawnTeammateTool } from "../tools/spawn-teammate-tool.js";
 import { buildSpawnAgentTool } from "../tools/spawn-tool.js";
@@ -105,6 +106,9 @@ export interface AgentLoopOptions {
   // execution token) and returns its id. Present → the agent gets a spawn_teammate tool (autonomous collaboration:
   // agents, not just the web, spawn teammates). Absent → no spawn_teammate tool.
   spawnTeammate?: (name: string, task: string, watch: string[]) => Promise<{ id: string } | { error: string }>;
+  // Host callback listing this run's teammates (S3 discovery) — present → the agent gets a list_teammates tool so it
+  // can see who is on the team and coordinate them with send_message. Absent → no list_teammates tool.
+  listTeammates?: () => Promise<{ id: string; name: string; watch?: string[] }[]>;
   // Per-tool wall-clock deadline (ms). A tool call that outruns it is aborted and returned as an error the model sees,
   // so a hung MCP tool can't pin the turn's Promise.all forever. Absent → no per-tool timeout (the run signal still applies).
   toolTimeoutMs?: number;
@@ -385,6 +389,7 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
           ),
           buildSendMessageTool(deliverMessage),
           ...(opts.spawnTeammate ? [buildSpawnTeammateTool(opts.spawnTeammate)] : []),
+          ...(opts.listTeammates ? [buildListTeammatesTool(opts.listTeammates)] : []),
         ]
       : [];
   // Plan mode: while on, write tools are blocked; present_plan asks the host to approve, then turns it off.

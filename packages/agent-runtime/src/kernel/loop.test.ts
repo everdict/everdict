@@ -742,6 +742,23 @@ describe("runAgentLoop", () => {
     expect(toolMsg?.content).toContain("tm-1");
   });
 
+  it("exposes list_teammates when the host wires it (team discovery for coordination)", async () => {
+    const { transport } = fakeTransport([toolCallResult("l1", "list_teammates", "{}"), textResult("I see the team")]);
+    const result = await runAgentLoop({
+      transport,
+      model: "m",
+      systemPrompt: "sys",
+      history,
+      registry: new ToolRegistry([]),
+      listTeammates: async () => [{ id: "tm-1", name: "researcher", watch: ["scorecard.regressed"] }],
+    });
+    expect(result.content).toBe("I see the team");
+    const toolMsg = result.produced.find((m) => m.role === "tool") as { content: string } | undefined;
+    expect(toolMsg?.content).toContain("tm-1");
+    expect(toolMsg?.content).toContain("researcher");
+    expect(toolMsg?.content).toContain("scorecard.regressed");
+  });
+
   it("stops with aborted when the signal is already aborted", async () => {
     const { transport } = fakeTransport([textResult("unused")]);
     const result = await runAgentLoop({

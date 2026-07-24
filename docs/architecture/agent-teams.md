@@ -107,8 +107,9 @@ The gap is not the loop — it is (a) a **shared message substrate** with addres
   seam → the same `spawnTeammateFor`), so agents autonomously grow their own team and coordinate over
   `send_message`. The roster is in too: `GET /agent/teammates` (the caller's live teammates) + `DELETE
   /agent/teammates/:id` (stop — unregister + revoke its execution token; keeps the transcript). **Remaining
-  polish:** a named `team` grouping + a web surface. The core — persistent, addressable, autonomous,
-  self-spawning, collaborating, stoppable agents — is in.
+  polish:** a named `team` grouping + a web surface. The agent can also DISCOVER its team (a `list_teammates`
+  tool over the roster) to coordinate over send_message. The core — persistent, addressable, autonomous,
+  self-spawning, discoverable, collaborating, stoppable agents — is in.
 - **S4 — event bridge (monitoring → agent inbox). Agent-side LANDED.** A teammate subscribes to event kinds
   (spawn_teammate / POST /agent/teammates `watch: [...]`), and `POST /agent/events {kind, source, message}` fans
   the event out to the caller's teammates that watch that kind — delivering it (attributed) into each mailbox and
