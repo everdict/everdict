@@ -23,15 +23,37 @@ export interface ScoringServiceDeps {
   caseConcurrency?: number; // concurrency cap for case-axis judges (default 4) — protects against provider rate limits
 }
 
+// A result is gradeable by a judge only if it produced a normal eval outcome. `failure` is exactly the "did NOT produce
+// a normal outcome" marker (a case that died at/before dispatch, or whose trace collection returned nothing, has it set;
+// a grader FAIL verdict does not). Running a judge on a failed case has no real trace/snapshot to grade — it burns
+// provider tokens for a meaningless verdict and attaches a spurious judge:<id> score. The judge is strictly downstream
+// of a produced outcome, so judge starvation (0 gradeable results) must be surfaced, not silently "applied".
+export function isGradeable(result: CaseResult): boolean {
+  return result.failure === undefined;
+}
+
+// Gradeability tally for the judge phase — surfaced so the scorecard can say "judges skipped: 0 gradeable traces
+// (N/N failed pre-trace)" instead of a misleading "judges applied" when every case died before producing a trace.
+export interface JudgeStreamStats {
+  pushed: number; // in-dataset results pushed to the stream
+  gradeable: number; // results judged (produced a normal outcome)
+  skipped: number; // results skipped as pre-trace failures (pushed − gradeable)
+}
+
 // Case-streaming scoring handle — push fires a bounded task and returns a Promise that resolves when 'that case's' judge
 // completes (for chaining a later stage — e.g. sink export the moment a case completes). Task errors don't leak through
-// push's Promise; settle rethrows the first error (after joining all tasks).
+// push's Promise; settle rethrows the first error (after joining all tasks). stats() reports the gradeability tally.
 export interface JudgeStream {
   push(result: CaseResult): Promise<void>;
   settle(): Promise<void>;
+  stats(): JudgeStreamStats;
 }
 
-const NOOP_STREAM: JudgeStream = { push: async () => {}, settle: async () => {} };
+const NOOP_STREAM: JudgeStream = {
+  push: async () => {},
+  settle: async () => {},
+  stats: () => ({ pushed: 0, gradeable: 0, skipped: 0 }),
+};
 
 export class ScoringService {
   constructor(private readonly deps: ScoringServiceDeps) {}
@@ -93,10 +115,19 @@ export class ScoringService {
     const limit = createLimiter(this.deps.caseConcurrency ?? 4);
     const tasks: Array<Promise<void>> = [];
     let firstError: unknown;
+    const stats: JudgeStreamStats = { pushed: 0, gradeable: 0, skipped: 0 };
     return {
       push: (result) => {
         const evalCase = caseById.get(result.caseId);
         if (!evalCase) return Promise.resolve(); // skip caseIds not in the dataset (can't align)
+        stats.pushed++;
+        // The judge is downstream of a produced outcome — a pre-trace failure has nothing real to grade. Skip it (no
+        // wasted provider call, no spurious judge:<id> score) and count it so the phase can report the starvation.
+        if (!isGradeable(result)) {
+          stats.skipped++;
+          return Promise.resolve();
+        }
+        stats.gradeable++;
         const task = limit(() => this.applyJudgesToCase(tenant, evalCase, specs, result, runtime, submittedBy)).catch(
           (err) => {
             // Catch at fire time (prevents an unhandled rejection) — settle rethrows the first error.
@@ -110,6 +141,7 @@ export class ScoringService {
         await Promise.all(tasks);
         if (firstError !== undefined) throw firstError;
       },
+      stats: () => ({ ...stats }),
     };
   }
 

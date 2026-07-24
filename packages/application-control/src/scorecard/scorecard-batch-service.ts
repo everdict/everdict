@@ -1254,7 +1254,16 @@ export class ScorecardBatchService {
       }
       await judgeStream.settle(); // trace → judge scores (control plane, streamed the moment each case completes)
       if (judges.length > 0) {
-        pushStep("judges", "ok", "judges applied");
+        // Judge starvation is downstream of trace: if every case died before producing an outcome, the judges never
+        // ran on anything real — say so explicitly instead of the misleading "judges applied".
+        const js = judgeStream.stats();
+        const judgeMsg =
+          js.gradeable === 0
+            ? `judges skipped: 0 gradeable traces (${js.skipped}/${js.pushed} failed pre-trace)`
+            : js.skipped > 0
+              ? `judges applied to ${js.gradeable}/${js.pushed} trace(s) (${js.skipped} failed pre-trace)`
+              : "judges applied";
+        pushStep("judges", "ok", judgeMsg);
         await flushSteps();
       }
       phase = "offload";

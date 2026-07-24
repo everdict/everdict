@@ -208,4 +208,53 @@ describe("ScoringService — case streaming / parallel judge application", () =>
     stream.push(resultFor("c1"));
     await stream.settle(); // completes immediately without throwing
   });
+
+  // A pre-trace failure carries a classified `failure` — the judge has no produced outcome to grade.
+  const failedResultFor = (caseId: string): CaseResult => ({
+    ...resultFor(caseId),
+    trace: [{ t: 0, kind: "error", message: "dispatch died" }],
+    scores: [],
+    failure: { stage: "dispatch", class: "infra", code: "UPSTREAM_ERROR", message: "died", retryable: false },
+  });
+
+  it("createJudgeStream: a pre-trace failure is skipped (no judge call, no spurious score) and counted in stats", async () => {
+    // Regression: a case that died at/before dispatch was still pushed through the judge, so the model judge burned
+    // provider tokens on an error-only trace AND attached a spurious judge:<id> score, while the phase said "judges
+    // applied". The judge is downstream of a produced outcome — skip failures, judge only real outcomes, count both.
+    const judges = new InMemoryJudgeRegistry();
+    await judges.register("acme", JUDGE("j"));
+    const judged: string[] = [];
+    const judgeRunner: JudgeRunner = {
+      async run(_spec: JudgeSpec, _t: string, ctx: GradeContext): Promise<Score[]> {
+        judged.push(ctx.case.id);
+        return [{ graderId: "judge:j", metric: "judge", value: 1, pass: true }];
+      },
+    };
+    const scoring = new ScoringService({ judges, judgeRunner });
+    const ok = resultFor("c1");
+    const failed = failedResultFor("c2");
+    const stream = await scoring.createJudgeStream("acme", datasetWith("c1", "c2"), [{ id: "j", version: "latest" }]);
+    await stream.push(ok);
+    await stream.push(failed);
+    await stream.settle();
+
+    expect(judged).toEqual(["c1"]); // only the gradeable case reached the judge
+    expect(failed.scores.some((s) => s.metric === "judge")).toBe(false); // no spurious judge score on the failure
+    expect(stream.stats()).toEqual({ pushed: 2, gradeable: 1, skipped: 1 });
+  });
+
+  it("createJudgeStream: judge starvation — every case failed pre-trace → 0 gradeable, judge never runs", async () => {
+    const judges = new InMemoryJudgeRegistry();
+    await judges.register("acme", JUDGE("j"));
+    const judgeRunner: JudgeRunner = {
+      async run(): Promise<Score[]> {
+        throw new Error("judge must not run on a pre-trace failure");
+      },
+    };
+    const scoring = new ScoringService({ judges, judgeRunner });
+    const stream = await scoring.createJudgeStream("acme", datasetWith("c1"), [{ id: "j", version: "latest" }]);
+    await stream.push(failedResultFor("c1"));
+    await stream.settle(); // must not throw — the judge never ran
+    expect(stream.stats()).toEqual({ pushed: 1, gradeable: 0, skipped: 1 });
+  });
 });

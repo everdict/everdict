@@ -21,7 +21,11 @@ dataset×harness → `Scorecard` + summary via `runSuite`. Regression = `diffSco
 → `runSuite` (per-case child runs, admit/settle budget, cooperative `AbortSignal` supersede/**user cancel**) with **streaming
 judges** (each case is pushed into `ScoringService.createJudgeStream` from `onResult` the moment it completes —
 bounded case-axis parallelism, deterministic per-case judge order; the `judges` phase after dispatch is just
-`settle()`, the join) → offload → aggregate (`summarizeScorecard`+`scorecardModels`) → persist. Scoring is
+`settle()`, the join) → offload → aggregate (`summarizeScorecard`+`scorecardModels`) → persist. **The judge is
+downstream of a produced outcome**: `createJudgeStream.push` skips a result with a set `failure` (`isGradeable` — a
+pre-trace/dispatch death has no real trace/snapshot, so judging it burns provider tokens for a spurious `judge:<id>`
+score) and tallies `stats()` (`pushed`/`gradeable`/`skipped`); the `judges` phase reports it — `judges skipped: 0
+gradeable traces (N/N failed pre-trace)` when every case died — instead of a misleading "judges applied". Scoring is
 split out to `apps/api/src/execution/scoring-service.ts` (`ScoringService.createJudgeStream`/`applyJudges`(=push-all+settle,
 used by ingest)/`collectJudgeModels`). See `docs/architecture/streaming-case-pipeline.md`.
 
