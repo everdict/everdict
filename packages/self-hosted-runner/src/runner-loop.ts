@@ -134,12 +134,19 @@ export async function runLeaseWorkers(deps: RunnerLoopDeps, opts: RunnerLoopOpts
       const jobId = String(leased.jobId);
       const parsed = CaseJobSchema.safeParse(leased.job); // boundary validation
       if (!parsed.success) {
-        // A discriminator/enum mismatch on the embedded harnessSpec (e.g. target.delivery.mode) almost always means
-        // this self-hosted runner and the control plane are on different everdict versions — the job schema was
-        // tightened on one side. Say so, otherwise a bare "malformed job" can't be told apart from a genuinely bad
-        // spec and the user has no next step. (Any harnessSpec-scoped issue is treated the same way.)
+        // A job the control plane LEASED but this bundle can't parse is, by construction, a contract mismatch — the CP
+        // built it to a schema this stale bundle doesn't know (a new job KIND like `session`, a new field, or a
+        // tightened harnessSpec). So a top-level shape / discriminator / unknown-key failure almost always means the
+        // runner and the control plane are on different everdict versions. Say so, otherwise a bare "malformed job"
+        // can't be told apart from a genuinely bad spec and the user has no next step. Only a DEEP nested value error
+        // (path length > 1, not under harnessSpec) is left as a plain malformed job. (gap: a genuinely new top-level
+        // job kind fell to the bare branch because it wasn't a discriminator/harnessSpec issue.)
         const versionSkew = parsed.error.issues.some(
-          (i) => i.code === "invalid_union_discriminator" || i.path[0] === "harnessSpec",
+          (i) =>
+            i.code === "invalid_union_discriminator" || // a job/harness kind this bundle doesn't know
+            i.code === "unrecognized_keys" || // a field the control plane added that this bundle's schema doesn't know
+            i.path[0] === "harnessSpec" || // the embedded harness spec was tightened on one side
+            i.path.length <= 1, // a top-level shape mismatch — a new job kind/shape this stale bundle can't parse
         );
         const hint = versionSkew
           ? " — this usually means the runner and the control plane are on different everdict versions; update the self-hosted runner (or re-pin the harness) so both match"

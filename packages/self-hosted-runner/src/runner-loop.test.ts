@@ -183,16 +183,20 @@ describe("runLeaseWorkers — case-level parallelism (maxConcurrent)", () => {
     expect(err?.text).toContain("ECONNREFUSED"); // onStatus surfaces the reason locally (lease_job never reached the CP)
   });
 
-  it("malformed job → reply fail_job (don't run)", async () => {
+  it("malformed job (an unknown top-level shape / new job kind) → fail_job WITH the version-skew hint", async () => {
     const submitted: string[] = [];
     const failed: string[] = [];
+    const failMessages: string[] = [];
     let leased = false;
     let stop = false;
     const callJson = async (name: string, args: Record<string, unknown>): Promise<Record<string, unknown>> => {
       if (name === "lease_job") {
         if (leased) return {};
         leased = true;
-        return { jobId: "bad", job: { not: "an CaseJob" } }; // schema violation
+        // A job shape this bundle doesn't recognize — the stand-in for a NEW top-level job kind (e.g. `session`) the
+        // control plane sends that a stale runner can't parse. This is NOT a discriminator/harnessSpec issue, so
+        // pre-fix it fell to a bare "malformed job" with no next step.
+        return { jobId: "bad", job: { not: "an CaseJob" } };
       }
       if (name === "submit_job_result") {
         submitted.push(String(args.jobId));
@@ -200,6 +204,7 @@ describe("runLeaseWorkers — case-level parallelism (maxConcurrent)", () => {
       }
       if (name === "fail_job") {
         failed.push(String(args.jobId));
+        failMessages.push(String(args.message));
         stop = true;
         return {};
       }
@@ -221,6 +226,10 @@ describe("runLeaseWorkers — case-level parallelism (maxConcurrent)", () => {
     expect(failed).toEqual(["bad"]);
     expect(submitted).toEqual([]);
     expect(ran).toBe(false); // a malformed job isn't run
+    // gap 15: an unparseable leased job (a new job kind/shape) now carries the "update your runner" hint, so a stale
+    // bundle rejection is actionable instead of a cryptic dump.
+    expect(failMessages[0]).toContain("malformed job:");
+    expect(failMessages[0]).toContain("different everdict versions");
   });
 
   it("a harnessSpec discriminator mismatch (e.g. target.delivery.mode) → the fail message hints at a version skew", async () => {
