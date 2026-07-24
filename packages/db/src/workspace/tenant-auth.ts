@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { generateKey, hashKey } from "@everdict/application-control";
+import { generateAgentToken, generateKey, hashKey } from "@everdict/application-control";
 import type { ResolvedKey, TenantKeyMeta } from "@everdict/contracts";
 import type { SqlClient } from "../client.js";
 
@@ -140,4 +140,26 @@ export async function issueKey(
   const prefix = key.slice(0, 12); // "ak_" + first 9 chars — list identification hint (not a hash/plaintext)
   await store.add(tenant, hashKey(key), { id: randomUUID(), label, prefix, scopes, owner });
   return key; // return plaintext
+}
+
+// Issue an agent execution token (agt_) into the SAME key store (docs/architecture/agent-execution-auth.md, A2). Owner
+// = the creator the token acts AS (required — never a machine token). Default scope "write" (no governance/secrets).
+// Stored with the agt_ prefix so the key-list surface can distinguish it from a user's ak_ keys. Plaintext once.
+export async function issueAgentToken(
+  store: TenantKeyStore,
+  tenant: string,
+  owner: string,
+  scopes: string[] = ["write"],
+  label?: string,
+): Promise<string> {
+  const token = generateAgentToken();
+  const prefix = token.slice(0, 12); // "agt_" + first 8 chars — list identification hint
+  await store.add(tenant, hashKey(token), { id: randomUUID(), label, prefix, scopes, owner });
+  return token;
+}
+
+// True for a key row that is an agent execution token (agt_), so the personal key-list surface can hide it — an agt_
+// token is not a user-managed API key, it's a teammate/proactive credential tied to that agent's lifecycle.
+export function isAgentTokenPrefix(prefix: string): boolean {
+  return prefix.startsWith("agt_");
 }

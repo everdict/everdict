@@ -1,5 +1,5 @@
 import { API_KEY_SCOPES } from "@everdict/auth";
-import { issueKey } from "@everdict/db";
+import { isAgentTokenPrefix, issueKey } from "@everdict/db";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { type ServerDeps, gate, resolvePrincipal, sendError, zodIssues } from "../route-context.js";
@@ -14,7 +14,9 @@ export function registerApiKeyRoutes(app: FastifyInstance, deps: ServerDeps): vo
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     try {
-      return reply.send(await deps.keyStore.list(principal.workspace, principal.subject)); // only my key metadata (no plaintext/hash)
+      // Only my API key metadata (no plaintext/hash); hide agent execution tokens (agt_) — not user-managed keys.
+      const keys = await deps.keyStore.list(principal.workspace, principal.subject);
+      return reply.send(keys.filter((k) => !isAgentTokenPrefix(k.prefix)));
     } catch (err) {
       return sendError(reply, err);
     }

@@ -1,5 +1,6 @@
 import {
   type Authenticator,
+  agentTokenAuthenticator,
   apiKeyAuthenticator,
   compositeAuthenticator,
   githubActionsAuthenticator,
@@ -67,6 +68,17 @@ export function buildAuthenticator(
     );
   }
   authers.push(apiKeyAuthenticator({ keyStore }));
+  // Autonomous agent execution token (agt_) — a teammate / proactive agent runs request-less (no forwarded user
+  // bearer), so it presents an agt_ token. Stored in the SAME key store (prefix keeps ak_/agt_ from cross-claiming);
+  // resolves AS its creator (owner) → the creator's membership role, capped by scope. See docs/architecture/agent-execution-auth.md.
+  authers.push(
+    agentTokenAuthenticator({
+      resolve: async (hash) => {
+        const r = await keyStore.resolveByHash(hash);
+        return r ? { workspace: r.tenant, owner: r.owner, ...(r.scopes ? { scopes: r.scopes } : {}) } : undefined;
+      },
+    }),
+  );
   // Self-hosted runner pairing token (rnr_) — `everdict runner` authenticates to MCP. Resolves to owner/workspace/runnerId, least-privilege.
   authers.push(runnerAuthenticator({ runnerStore }));
   return compositeAuthenticator(authers);

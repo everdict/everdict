@@ -56,8 +56,11 @@ request-less turn (teammate wake / proactive event)
 
 - **A1 — auth core.** `Principal.via += "agent"`; `agentTokenAuthenticator` (pure, injected resolver);
   export + ready for the composite. Unit-tested (prefix match, fail-closed, scope default, bounded). **← this slice.**
-- **A2 — token store + issuance.** Mint `generateAgentToken()` (`agt_…`, landed), store the hash, issue/revoke
-  tied to the teammate's lifecycle; plaintext once. **Store decision (open):**
+- **A2 — token store + issuance. LANDED.** `agentTokenAuthenticator` is wired into `buildAuthenticator`
+  (resolving `agt_` via the shared `TenantKeyStore`); `issueAgentToken(store, tenant, owner, scopes=["write"])`
+  mints + stores the hash (owner = creator, `agt_` prefix); the personal key list (`GET /keys` +
+  `list_api_keys`) filters out `agt_` via `isAgentTokenPrefix`. The control plane now ACCEPTS an `agt_` bearer as
+  a `via:"agent"` principal. Chosen store approach (a) below (reuse, no migration). **Store decision (resolved → a):**
   - *(a) reuse `TenantKeyStore`* — `add(tenant, hash, { owner: creator, scopes: ["write"], prefix: "agt_" })`;
     `agentTokenAuthenticator({ resolve: h => keyStore.resolveByHash(h) })`. No migration. The prefix check keeps
     `ak_`/`agt_` from cross-claiming (same hash table, different authenticator). **Caveat:** an `agt_` row would

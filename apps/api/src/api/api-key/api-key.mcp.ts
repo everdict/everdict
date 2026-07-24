@@ -1,5 +1,5 @@
 import { API_KEY_SCOPES } from "@everdict/auth";
-import { issueKey } from "@everdict/db";
+import { isAgentTokenPrefix, issueKey } from "@everdict/db";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { type McpToolContext, ok, plain } from "../mcp-context.js";
@@ -13,7 +13,8 @@ export function registerApiKeyTools(server: McpServer, ctx: McpToolContext): voi
     server.registerTool(
       "list_api_keys",
       { description: "My API keys (metadata only — no plaintext/hash, identified by prefix)", inputSchema: {} },
-      () => plain(async () => ok(await keys.list(ws, principal.subject))),
+      () =>
+        plain(async () => ok((await keys.list(ws, principal.subject)).filter((k) => !isAgentTokenPrefix(k.prefix)))),
     );
     server.registerTool(
       "create_api_key",

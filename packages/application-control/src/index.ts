@@ -81,7 +81,7 @@ export {
   RunnerService,
   runnerUpdateRequired,
 } from "./runner/runner-service.js";
-export { generateInviteToken, generateKey, hashKey } from "./credential/credentials.js";
+export { generateAgentToken, generateInviteToken, generateKey, hashKey } from "./credential/credentials.js";
 export { WorkspaceService } from "./workspace/workspace-service.js";
 export { ProfileService } from "./profile/profile-service.js";
 export { MembershipService } from "./member/membership-service.js";

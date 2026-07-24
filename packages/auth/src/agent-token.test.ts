@@ -1,3 +1,4 @@
+import { InMemoryTenantKeyStore, isAgentTokenPrefix, issueAgentToken } from "@everdict/db";
 import { describe, expect, it } from "vitest";
 import { agentTokenAuthenticator } from "./agent-token.js";
 
@@ -33,5 +34,26 @@ describe("agentTokenAuthenticator", () => {
   it("fails closed for an unknown / revoked token (→ 401)", async () => {
     const auth = agentTokenAuthenticator({ resolve: async () => undefined });
     expect(await auth.authenticate("agt_revoked")).toBeUndefined();
+  });
+
+  it("issues an agt_ token via the key store that resolves as its creator and is hidden from the key list (A2)", async () => {
+    const store = new InMemoryTenantKeyStore();
+    const token = await issueAgentToken(store, "acme", "alice");
+    expect(token.startsWith("agt_")).toBe(true);
+    const auth = agentTokenAuthenticator({
+      resolve: async (h) => {
+        const r = await store.resolveByHash(h);
+        return r ? { workspace: r.tenant, owner: r.owner, scopes: r.scopes } : undefined;
+      },
+    });
+    expect(await auth.authenticate(token)).toMatchObject({
+      subject: "alice",
+      workspace: "acme",
+      via: "agent",
+      scopes: ["write"],
+    });
+    // The agt_ row is filtered out of the owner's personal API-key list (not a user-managed key).
+    const listed = await store.list("acme", "alice");
+    expect(listed.filter((k) => !isAgentTokenPrefix(k.prefix))).toEqual([]);
   });
 });

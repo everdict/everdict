@@ -125,7 +125,13 @@ export {
   preflight,
   readMigrations,
 } from "./migrate.js";
-export { InMemoryTenantKeyStore, PgTenantKeyStore, issueKey } from "./workspace/tenant-auth.js";
+export {
+  InMemoryTenantKeyStore,
+  PgTenantKeyStore,
+  issueKey,
+  issueAgentToken,
+  isAgentTokenPrefix,
+} from "./workspace/tenant-auth.js";
 export {
   type SecretCipher,
   type EncryptedSecret,
