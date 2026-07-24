@@ -1,5 +1,5 @@
 import Link from 'next/link'
-import { ChevronLeft } from 'lucide-react'
+import { ChevronLeft, Download } from 'lucide-react'
 import { getTimeZone, getTranslations } from 'next-intl/server'
 
 import { LiveLogs } from '@/widgets/live-logs'
@@ -364,6 +364,20 @@ export default async function RunDetailPage({
                       {snapshot.dom}
                     </dd>
                   </div>
+                )}
+                {/* Full page DOM offloaded to object storage — the inline `dom` above is only an 8KB preview. The ref is a
+                    presigned URL (S3/MinIO), so a plain download link; hidden for the dev in-memory store's memory:// ref. */}
+                {snapshot.domRef && /^https?:\/\//.test(snapshot.domRef) && (
+                  <a
+                    href={snapshot.domRef}
+                    target="_blank"
+                    rel="noreferrer"
+                    download
+                    className="inline-flex items-center gap-1.5 text-[12px] font-[510] text-link transition-colors hover:text-foreground"
+                  >
+                    <Download className="size-3.5" />
+                    {t('downloadDom')}
+                  </a>
                 )}
               </div>
             )}

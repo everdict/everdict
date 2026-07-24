@@ -1007,6 +1007,22 @@ export default async function ScorecardDetailPage({
                       {r.snapshot.url}
                     </p>
                   )}
+                  {/* Full page DOM offloaded to object storage — a presigned download URL (S3/MinIO). Hidden for the dev
+                      in-memory store's non-fetchable memory:// ref (same gate as the screenshot above). */}
+                  {r.snapshot?.kind === 'browser' &&
+                    r.snapshot.domRef &&
+                    /^https?:\/\//.test(r.snapshot.domRef) && (
+                      <a
+                        href={r.snapshot.domRef}
+                        target="_blank"
+                        rel="noreferrer"
+                        download
+                        className="inline-flex items-center gap-1.5 text-[12px] font-[510] text-link transition-colors hover:text-foreground"
+                      >
+                        <Download className="size-3.5" />
+                        {t('downloadDom')}
+                      </a>
+                    )}
                   {/* judge/grader verdict reasoning (VLM rubric reasoning etc.) — shows "why pass/fail" for os-use and the like.
                     Grouped order (overall first, criteria indented beneath) so a multi-criteria judge's reasons read as one block. */}
                   {scoreGroups
