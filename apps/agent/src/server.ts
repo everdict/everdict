@@ -1,3 +1,4 @@
+import { timingSafeEqual } from "node:crypto";
 import type { ChatMessage, PermissionDecision, PermissionHook } from "@everdict/agent-runtime";
 import type { TenantKeyStore } from "@everdict/application-control";
 import type { AgentSessionRecord } from "@everdict/contracts";
@@ -18,6 +19,17 @@ export interface AgentServerDeps extends ChatDeps {
   authenticate: Authenticate;
   // Tenant key store — needed to issue a teammate's agt_ execution token (S3). Absent (no DB) → teammate spawn is 404.
   keyStore?: TenantKeyStore;
+  // Shared secret the control plane presents (x-internal-token) to POST /agent/events on a recipient's behalf (S4 —
+  // the monitoring→agent bridge). Absent → the internal event path is disabled (only user-authenticated events).
+  internalToken?: string;
+}
+
+// Constant-time equality for the internal token (fail-closed: no secret configured OR length mismatch → false).
+function constantTimeEq(a: string | undefined, b: string | undefined): boolean {
+  if (!a || !b) return false;
+  const ab = Buffer.from(a);
+  const bb = Buffer.from(b);
+  return ab.length === bb.length && timingSafeEqual(ab, bb);
 }
 
 function forwardHeaders(req: FastifyRequest): ForwardHeaders {
@@ -126,6 +138,22 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
       content: `You are "${name}", an autonomous teammate. Your standing task:\n${task}`,
     });
     return { id: sessionId };
+  };
+  // Fan a platform event out to a (workspace, owner)'s teammates that watch its kind, waking each. Returns the count.
+  const fanEvent = (
+    workspace: string,
+    owner: string,
+    kind: string,
+    source: string | undefined,
+    message: string,
+  ): number => {
+    let notified = 0;
+    for (const [sessionId, t] of teammates) {
+      if (t.workspace !== workspace || t.owner !== owner || !t.watch.has(kind)) continue;
+      deliver(workspace, sessionId, { from: "event", sender: source ?? kind, content: message });
+      notified += 1;
+    }
+    return notified;
   };
 
   app.get("/healthz", async () => ({ ok: true }));
@@ -440,27 +468,48 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
     return reply.code(204).send();
   });
 
-  // S4 — fan a platform EVENT out to the caller's teammates that watch its kind, waking each to react proactively.
-  // Owner + workspace scoped (the control plane, acting as the creator's principal, is the real driver of these; a
-  // member can also drive it). Nothing watches the kind → a harmless 200 with notified:0.
+  // S4 — fan a platform EVENT out to teammates that watch its kind, waking each to react proactively. Two callers:
+  //  · INTERNAL (the control plane's notification emitter) presents x-internal-token and drives events for a
+  //    recipient in a workspace — this is what auto-wires monitoring → the proactive team.
+  //  · USER (a member) drives events for their OWN teammates (authenticated normally).
+  // Nothing watches the kind → a harmless 200 with notified:0.
   app.post("/agent/events", async (req, reply) => {
+    const presented = req.headers["x-internal-token"];
+    if (typeof presented === "string") {
+      if (!constantTimeEq(presented, deps.internalToken))
+        return reply.code(401).send({ code: "UNAUTHENTICATED", message: "Invalid internal token." });
+      const parsed = z
+        .object({
+          workspace: z.string().min(1),
+          recipient: z.string().min(1),
+          kind: z.string().min(1),
+          message: z.string().min(1),
+          source: z.string().min(1).optional(),
+        })
+        .safeParse(req.body);
+      if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
+      const notified = fanEvent(
+        parsed.data.workspace,
+        parsed.data.recipient,
+        parsed.data.kind,
+        parsed.data.source,
+        parsed.data.message,
+      );
+      return reply.send({ notified });
+    }
     const principal = await principalOf(req, reply);
     if (!principal) return reply;
     const parsed = z
       .object({ kind: z.string().min(1), message: z.string().min(1), source: z.string().min(1).optional() })
       .safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
-    let notified = 0;
-    for (const [sessionId, t] of teammates) {
-      if (t.workspace !== principal.workspace || t.owner !== principal.subject || !t.watch.has(parsed.data.kind))
-        continue;
-      deliver(principal.workspace, sessionId, {
-        from: "event",
-        sender: parsed.data.source ?? parsed.data.kind,
-        content: parsed.data.message,
-      });
-      notified += 1;
-    }
+    const notified = fanEvent(
+      principal.workspace,
+      principal.subject,
+      parsed.data.kind,
+      parsed.data.source,
+      parsed.data.message,
+    );
     return reply.send({ notified });
   });
 

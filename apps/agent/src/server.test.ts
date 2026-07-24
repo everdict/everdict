@@ -347,6 +347,46 @@ describe("agent server", () => {
     await app.close();
   });
 
+  it("fans an event via the internal control-plane path (x-internal-token) to a recipient's teammates (S4)", async () => {
+    const app = buildServer(makeDeps({ keyStore: new InMemoryTenantKeyStore(), internalToken: "sekret" }));
+    const watcher = (
+      await app.inject({
+        method: "POST",
+        url: "/agent/teammates",
+        headers: auth,
+        payload: { name: "watcher", task: "watch", watch: ["scorecard.regressed"] },
+      })
+    ).json();
+    // The control plane (not a user) drives the event for recipient=alice in workspace=acme.
+    const fanned = (
+      await app.inject({
+        method: "POST",
+        url: "/agent/events",
+        headers: { "x-internal-token": "sekret" },
+        payload: { workspace: "acme", recipient: "alice", kind: "scorecard.regressed", message: "sc_9 regressed" },
+      })
+    ).json();
+    expect(fanned.notified).toBe(1);
+    await new Promise((r) => setTimeout(r, 30));
+    const msgs = (
+      await app.inject({ method: "GET", url: `/agent/sessions/${watcher.id}/messages`, headers: auth })
+    ).json().messages as { content: string }[];
+    expect(msgs.some((m) => m.content.includes("sc_9 regressed"))).toBe(true);
+    await app.close();
+  });
+
+  it("rejects the internal event path with a bad token (401)", async () => {
+    const app = buildServer(makeDeps({ keyStore: new InMemoryTenantKeyStore(), internalToken: "sekret" }));
+    const res = await app.inject({
+      method: "POST",
+      url: "/agent/events",
+      headers: { "x-internal-token": "wrong" },
+      payload: { workspace: "acme", recipient: "alice", kind: "x", message: "y" },
+    });
+    expect(res.statusCode).toBe(401);
+    await app.close();
+  });
+
   it("fanning an event with a kind nothing watches notifies no one", async () => {
     const app = buildServer(makeDeps({ keyStore: new InMemoryTenantKeyStore() }));
     await app.inject({

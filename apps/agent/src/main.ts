@@ -101,6 +101,7 @@ async function main(): Promise<void> {
     resolveProfile,
     ...(resolveModelById ? { resolveModelById } : {}),
     ...(keyStore ? { keyStore } : {}),
+    ...(config.AGENT_INTERNAL_TOKEN !== undefined ? { internalToken: config.AGENT_INTERNAL_TOKEN } : {}),
     toolProvider: mcpToolProvider(config.mcpUrl, codeRuntime, { allowEvalDrive: config.AGENT_ALLOW_EVAL_DRIVE }),
     systemPrompt: EVERDICT_AGENT_SYSTEM_PROMPT,
     now: () => new Date().toISOString(),

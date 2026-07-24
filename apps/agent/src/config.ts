@@ -23,6 +23,9 @@ const ConfigSchema = z.object({
     .enum(["true", "false"])
     .optional()
     .transform((v) => v === "true"),
+  // Shared secret the control plane presents (x-internal-token) to POST /agent/events for a recipient (S4 — the
+  // monitoring→proactive-team bridge). Unset → the internal event path is disabled (only user-authenticated events).
+  AGENT_INTERNAL_TOKEN: z.string().optional(),
   // Per-tool wall-clock deadline (ms); a tool that outruns it is aborted and returned as an error. Unset → no deadline.
   AGENT_TOOL_TIMEOUT_MS: z.coerce.number().int().positive().optional(),
   // Extended-thinking budget (tokens). Set → the agent asks the model to reason before answering (Anthropic `thinking`;
