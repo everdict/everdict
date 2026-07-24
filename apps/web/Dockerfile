@@ -6,9 +6,14 @@
 
 # ---- base: shared tooling ----
 FROM node:22-bookworm-slim AS base
+# Enterprise proxy / air-gapped build (gap 17): HTTP_PROXY/HTTPS_PROXY/NO_PROXY are Docker PREDEFINED build args (pass
+# --build-arg to route apt/npm/corepack through a corporate proxy, no Dockerfile change). CA_CERT installs a MITM
+# proxy's root CA so TLS is trusted. Full air-gap also needs an internal npm/pnpm registry mirror (corepack fetches pnpm).
+ARG CA_CERT=""
 RUN apt-get update \
   && apt-get install -y --no-install-recommends ca-certificates \
   && rm -rf /var/lib/apt/lists/* \
+  && if [ -n "$CA_CERT" ]; then printf '%s' "$CA_CERT" > /usr/local/share/ca-certificates/corp-proxy.crt && update-ca-certificates; fi \
   && corepack enable
 WORKDIR /app
 

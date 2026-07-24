@@ -10,9 +10,13 @@
 # ---- base: common runtime tools ----
 FROM node:22-bookworm-slim AS base
 # git: RepoEnvironment seed for any local-backend dispatch the worker performs directly. ca-certificates: TLS.
+# Enterprise proxy / air-gapped build (gap 17): HTTP_PROXY/HTTPS_PROXY/NO_PROXY are Docker PREDEFINED build args (pass
+# --build-arg to route apt/corepack through a corporate proxy). CA_CERT installs a MITM proxy's root CA (TLS trust).
+ARG CA_CERT=""
 RUN apt-get update \
   && apt-get install -y --no-install-recommends git ca-certificates \
   && rm -rf /var/lib/apt/lists/* \
+  && if [ -n "$CA_CERT" ]; then printf '%s' "$CA_CERT" > /usr/local/share/ca-certificates/corp-proxy.crt && update-ca-certificates; fi \
   && corepack enable
 WORKDIR /app
 

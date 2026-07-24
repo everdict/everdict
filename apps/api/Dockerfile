@@ -8,9 +8,16 @@
 FROM node:22-bookworm-slim AS base
 # git: RepoEnvironment seed + git-diff snapshot. claude CLI: the claude-code harness (under test)
 # that LocalBackend runs in-process. ca-certificates: TLS. (works without claude if you only run the scripted harness)
+# Enterprise proxy / air-gapped build (gap 17). Proxy: HTTP_PROXY/HTTPS_PROXY/NO_PROXY are Docker PREDEFINED build args
+# — `docker build --build-arg HTTP_PROXY=http://proxy:3128 …` routes apt/npm/corepack through a corporate proxy with no
+# Dockerfile change. CA_CERT: for a MITM proxy that re-signs TLS, pass its root CA (PEM) so apt/npm/corepack trust it
+# (`--build-arg CA_CERT="$(cat corp-root.crt)"`). Fully air-gapped (no proxy): also point pnpm/npm at an internal
+# registry mirror (an .npmrc), since corepack fetches pnpm@<pinned> at build.
+ARG CA_CERT=""
 RUN apt-get update \
   && apt-get install -y --no-install-recommends git ca-certificates \
   && rm -rf /var/lib/apt/lists/* \
+  && if [ -n "$CA_CERT" ]; then printf '%s' "$CA_CERT" > /usr/local/share/ca-certificates/corp-proxy.crt && update-ca-certificates; fi \
   && npm i -g @anthropic-ai/claude-code \
   && corepack enable
 WORKDIR /app

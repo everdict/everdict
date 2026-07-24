@@ -4,9 +4,14 @@ FROM node:22-bookworm-slim
 
 # Preinstall git (environment seed) + claude CLI (harness under test) + python3/venv/pip (setup for
 # declarative command harnesses — e.g. installing a Python CLI agent into a venv)
+# Enterprise proxy / air-gapped build (gap 17): HTTP_PROXY/HTTPS_PROXY/NO_PROXY are Docker PREDEFINED build args (pass
+# --build-arg to route apt/npm/pip/corepack through a corporate proxy). CA_CERT installs a MITM proxy's root CA (TLS
+# trust). Full air-gap also needs internal npm/pnpm + PyPI registry mirrors (corepack fetches pnpm; pip installs aider).
+ARG CA_CERT=""
 RUN apt-get update \
   && apt-get install -y --no-install-recommends git ca-certificates python3 python3-venv python3-pip \
   && rm -rf /var/lib/apt/lists/* \
+  && if [ -n "$CA_CERT" ]; then printf '%s' "$CA_CERT" > /usr/local/share/ca-certificates/corp-proxy.crt && update-ca-certificates; fi \
   && npm i -g @anthropic-ai/claude-code
 
 # batteries-included: preinstall a common OSS CLI agent (aider) into a dedicated venv → fast and
