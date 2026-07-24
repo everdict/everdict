@@ -19,7 +19,10 @@ A harness can be a process (Claude Code) or a **deployed multi-service topology 
   renderer (`dependencyInjectEnv`, `deploy/inject-env.ts`) from the deployed store's structured `StoreValues`
   (docker/k8s build-time defaults · Nomad discovered endpoints · pool-minted creds via `StorePlan.storeValues`) in all
   3 builders, merged TOPMOST (a stale `service.env` literal must never shadow the deployed store — the
-  `inject-shadowed-literal` portability warning flags such dead literals). `external` deps reject inject (nothing
+  `inject-shadowed-literal` portability warning flags such dead literals; a service.env value that hardcodes a bare
+  container/store DNS `host:port` — e.g. `super-spica-redis:6379`, resolvable only under Docker's embedded DNS — is a
+  `store-by-literal` warning that points the author at inject, since a foreign store name is neither loopback nor a
+  declared peer so the older lints missed it). `external` deps reject inject (nothing
   deployed → no coordinates). One mapping ⇒ one harness works on every runtime/isolation — a literal can't even
   express pool creds. Never flatten store coordinates into env keys before BOTH renderings (conventional connEnv +
   inject) happen — early flattening is the exact rupture this closed.

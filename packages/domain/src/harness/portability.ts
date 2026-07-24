@@ -14,7 +14,8 @@ export type PortabilityRule =
   | "reference-not-address" // front-door / target references a service that is not declared
   | "unique-ports" // two services share a port — the co-located Nomad shared netns forbids it
   | "artifact-store-internal" // an internal object store — artifacts referenced by its URL won't reach the judge
-  | "inject-shadowed-literal"; // a service.env literal under the same key as a dependency inject mapping — dead config
+  | "inject-shadowed-literal" // a service.env literal under the same key as a dependency inject mapping — dead config
+  | "store-by-literal"; // a bare container/store DNS host:port hardcoded in service env — resolves only under Docker
 
 // Portability is a purely STRUCTURAL check over a service topology's addressing (service names/ports/needs/env/wiring +
 // front-door/target/trace references) — it never reads a service `image`. So a template (image-less services) is checked
@@ -48,6 +49,7 @@ const SEVERITY: Record<PortabilityRule, "error" | "warning"> = {
   "unique-ports": "error",
   "artifact-store-internal": "warning",
   "inject-shadowed-literal": "warning",
+  "store-by-literal": "warning",
 };
 
 // Only the issues that hard-block a new registration (used by the registry register + the validate route).
@@ -157,6 +159,26 @@ export function checkPortability(spec: PortabilityServiceSpec): PortabilityIssue
         });
   };
 
+  // A hardcoded single-label DNS authority (host:port) in a service env value — e.g. "super-spica-redis:6379", a foreign
+  // container/store DNS name that resolves only under Docker's embedded DNS, so the harness silently becomes docker-only.
+  // Not a declared peer (that is peer-by-literal, an error), not loopback/private-IP (no-literal-host); a multi-label
+  // FQDN (api.example.com:443) is a real internet host → NOT flagged (the label before ":" is preceded by a ".",
+  // which is not an authority delimiter). Scoped to service env, where store connections are authored. The portable fix
+  // is dependencies[].inject (BYO env name → the deployed store's coordinates) so ONE harness works on every runtime.
+  const scanStoreLiteral = (field: string, value: string, service: string): void => {
+    const bare = withoutTokens(value);
+    for (const m of bare.matchAll(/(?:\/\/|[@\s"']|^)([a-z0-9][a-z0-9-]*):\d/gi)) {
+      const host = m[1];
+      if (!host || LOOPBACK.includes(host) || names.has(host)) continue; // already no-literal-host / peer-by-literal
+      issues.push({
+        rule: "store-by-literal",
+        service,
+        field,
+        message: `${field} hardcodes "${host}:<port>" — a bare container/store DNS name that resolves only under Docker's embedded DNS, so the harness becomes docker-only. Map the store with dependencies[].inject (a BYO env name rendered from the deployed store's coordinates) or address it via a {{peer}} token / runtime-injected variable.`,
+      });
+    }
+  };
+
   // Recurse a JSON template (front-door bodyTemplate) to its string leaves.
   const scanJson = (field: string, node: unknown): void => {
     if (typeof node === "string") scanLiteral(field, node);
@@ -181,6 +203,7 @@ export function checkPortability(spec: PortabilityServiceSpec): PortabilityIssue
       if (typeof value !== "string") continue; // a { secretRef } — no authored address
       const field = `services[${svc.name}].env.${key}`;
       scanLiteral(field, value, svc.name);
+      scanStoreLiteral(field, value, svc.name);
       for (const match of value.matchAll(PEER_TOKEN_RE)) {
         const peer = peerName(match[1] ?? "");
         if (names.has(peer)) checkPeerRef(svc, peer, field); // a token naming no service is the harness's own variable

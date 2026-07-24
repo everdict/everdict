@@ -51,6 +51,27 @@ describe("checkPortability", () => {
     expect(rules(s)).toContain("peer-by-literal");
   });
 
+  // gap 7: a hardcoded foreign container/store DNS name (not a declared peer, not loopback/IP) is docker-only.
+  it("flags a hardcoded foreign store DNS host:port in service env as a warning (surfaced, not blocked)", () => {
+    const s = spec([svc({ name: "app", port: 3000, env: { VALKEY_URL: "redis://super-spica-redis:6379" } })]);
+    const issue = checkPortability(s).find((i) => i.rule === "store-by-literal");
+    expect(issue?.severity).toBe("warning"); // preserves the self-hosted-only escape hatch
+    expect(issue?.message).toContain("super-spica-redis");
+    expect(() => assertPortable(s)).not.toThrow(); // a warning never blocks registration
+  });
+
+  it("does NOT store-by-literal a declared peer, a loopback host, or a multi-label FQDN", () => {
+    const peer = spec([
+      svc({ name: "web", port: 3000, needs: ["api"], env: { API_URL: "http://api:4000" } }),
+      svc({ name: "api", port: 4000 }),
+    ]);
+    expect(rules(peer)).not.toContain("store-by-literal"); // a declared peer is peer-by-literal (error), not this
+    const fqdn = spec([svc({ name: "web", port: 3000, env: { API_URL: "https://api.github.com:443/x" } })]);
+    expect(rules(fqdn)).not.toContain("store-by-literal"); // a real internet host is portable
+    const loop = spec([svc({ name: "web", port: 3000, env: { API_URL: "http://localhost:4000" } })]);
+    expect(rules(loop)).not.toContain("store-by-literal"); // loopback is no-literal-host
+  });
+
   it("flags a {{peer}} reference not declared in needs (works on Docker, fails on per-service Nomad)", () => {
     const s = spec([
       svc({ name: "web", port: 3000, needs: [], env: { API_URL: "http://{{api}}" } }),
