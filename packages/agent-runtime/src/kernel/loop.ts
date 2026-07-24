@@ -17,6 +17,7 @@ import { toLlmTools } from "../tools/openai.js";
 import { buildPresentPlanTool } from "../tools/plan-tool.js";
 import { ToolRegistry } from "../tools/registry.js";
 import { OFFLOAD_THRESHOLD_CHARS, ResultStore, buildReadResultTool, offloadResult } from "../tools/result-store.js";
+import { buildSendMessageTool } from "../tools/send-message-tool.js";
 import { buildSpawnAgentTool } from "../tools/spawn-tool.js";
 import { type TodoItem, buildTodoTool, extractTodosFromHistory, renderTodoReminder } from "../tools/todo-tool.js";
 import { normalizeHistory } from "./normalize.js";
@@ -285,8 +286,15 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
   const backgroundTasks: Promise<void>[] = [];
   const backgroundResults: { id: string; summary: string; ok: boolean }[] = [];
   let bgCounter = 0;
+  // Inbound mailbox per RUNNING background sub-agent (S2 agent-teams.md): the parent can send_message to a sub-agent,
+  // which drains it at its next step — a fire-and-forget delegate becomes a two-way collaborator. Deleted on completion.
+  const bgMailboxes = new Map<string, ChatMessage[]>();
   const subagentTypeByName = new Map((opts.subagentTypes ?? []).map((t) => [t.name, t]));
-  const runNestedSubagent = (task: string, typeName?: string): Promise<string> => {
+  const runNestedSubagent = (
+    task: string,
+    typeName?: string,
+    drainSub?: () => ChatMessage[], // background sub-agents get a drainInput over their mailbox; foreground: none
+  ): Promise<string> => {
     // A selected type overrides the role instruction + model tier; unknown/absent → the generic researcher.
     const type = typeName !== undefined ? subagentTypeByName.get(typeName) : undefined;
     const role = type?.instructions ?? "Do the work with your (read-only) tools";
@@ -300,6 +308,7 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
         history: [{ role: "user", content: task }],
         registry: subagentRegistry,
         depth: depth + 1,
+        ...(drainSub ? { drainInput: drainSub } : {}),
         ...(opts.fallback ? { fallback: opts.fallback } : {}),
         ...(opts.toolTimeoutMs !== undefined ? { toolTimeoutMs: opts.toolTimeoutMs } : {}),
         ...(opts.temperature !== undefined ? { temperature: opts.temperature } : {}),
@@ -312,14 +321,27 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
   const launchBackground = (task: string, typeName?: string): string => {
     bgCounter += 1;
     const id = `bg-${bgCounter}`;
+    bgMailboxes.set(id, []);
     emit({ type: "subagent", id, phase: "launched" });
+    // The sub-agent drains its inbox each turn (attributed as a message from the delegating agent).
+    const drainSub = (): ChatMessage[] => {
+      const pending = bgMailboxes.get(id);
+      if (!pending || pending.length === 0) return [];
+      bgMailboxes.set(id, []);
+      return pending;
+    };
+    const settle = (): void => {
+      bgMailboxes.delete(id); // no more deliveries once it's done
+    };
     backgroundTasks.push(
-      runNestedSubagent(task, typeName)
+      runNestedSubagent(task, typeName, drainSub)
         .then((summary) => {
+          settle();
           backgroundResults.push({ id, summary, ok: true });
           emit({ type: "subagent", id, phase: "done", ok: true });
         })
         .catch((err) => {
+          settle();
           backgroundResults.push({
             id,
             summary: `(the sub-agent failed: ${err instanceof Error ? err.message : String(err)})`,
@@ -330,6 +352,13 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
     );
     return id;
   };
+  // Route a parent → background sub-agent message into that sub-agent's mailbox (S2). Unknown/finished id → soft error.
+  const deliverToSubagent = (to: string, message: string): { ok: boolean; error?: string } => {
+    const box = bgMailboxes.get(to);
+    if (!box) return { ok: false, error: `No running background sub-agent "${to}" to message.` };
+    box.push({ role: "user", content: `[Message from the delegating agent]\n${message}` });
+    return { ok: true };
+  };
   const spawnTools: ToolDefinition[] =
     depth < MAX_AGENT_DEPTH
       ? [
@@ -338,6 +367,7 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
             launchBackground,
             opts.subagentTypes?.map((t) => ({ name: t.name, description: t.description })),
           ),
+          buildSendMessageTool(deliverToSubagent),
         ]
       : [];
   // Plan mode: while on, write tools are blocked; present_plan asks the host to approve, then turns it off.

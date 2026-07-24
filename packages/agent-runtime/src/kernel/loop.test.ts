@@ -641,6 +641,60 @@ describe("runAgentLoop", () => {
     expect(spawnResult?.content).toContain("EXPLORED");
   });
 
+  it("delivers a parent send_message to a running background sub-agent (two-way collaboration)", async () => {
+    let subEnteredWait: () => void = () => {};
+    const subInWait = new Promise<void>((r) => {
+      subEnteredWait = r;
+    });
+    let releaseWait: () => void = () => {};
+    const waitReleased = new Promise<void>((r) => {
+      releaseWait = r;
+    });
+    // A read-only tool the sub-agent parks in until the test releases it — a deterministic window for the parent to send.
+    const wait: ToolDefinition = {
+      name: "wait",
+      description: "park until released",
+      parametersJsonSchema: { type: "object", properties: {} },
+      isReadOnly: true,
+      call: async () => {
+        subEnteredWait();
+        await waitReleased;
+        return { content: "resumed", isError: false };
+      },
+    };
+    const parent = fakeTransport([
+      toolCallResult("s1", "spawn_agent", JSON.stringify({ task: "research", run_in_background: true })),
+      toolCallResult("m1", "send_message", JSON.stringify({ to: "bg-1", message: "STEER-THE-SUB" })),
+      textResult("done"),
+    ]);
+    // Sub: turn 1 parks in wait; turn 2 (after release) drains the delivered message, then finishes.
+    const sub = fakeTransport([toolCallResult("w1", "wait", "{}"), textResult("sub done")]);
+
+    const runP = runAgentLoop({
+      transport: parent.transport,
+      model: "m",
+      systemPrompt: "sys",
+      history,
+      registry: new ToolRegistry([wait]),
+      subagentModel: { transport: sub.transport, model: "cheap" },
+    });
+
+    await subInWait; // the sub is parked in its wait tool
+    // Let the parent run turn 2 (send_message) + turn 3 (end_turn → awaits the sub): the message is now in bg-1's mailbox.
+    await new Promise((r) => setTimeout(r, 0));
+    releaseWait(); // the sub resumes → a later turn drains the delivered message
+
+    const result = await runP;
+    expect(result.content).toBe("done");
+    // The parent's message reached the running sub-agent (attributed), in some turn's request.
+    const sawMessage = sub.requests.some((req) =>
+      (req.messages ?? []).some(
+        (m) => m.role === "user" && typeof m.content === "string" && m.content.includes("STEER-THE-SUB"),
+      ),
+    );
+    expect(sawMessage).toBe(true);
+  });
+
   it("stops with aborted when the signal is already aborted", async () => {
     const { transport } = fakeTransport([textResult("unused")]);
     const result = await runAgentLoop({

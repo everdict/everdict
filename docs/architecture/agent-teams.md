@@ -86,6 +86,11 @@ The gap is not the loop — it is (a) a **shared message substrate** with addres
   content.* **← the first code slice, landing with this doc.**
 - **S2 — `send_message` (agent→agent over the substrate).** Kernel `send_message` tool + host routing to a
   recipient mailbox; bounded. Enables two agents in one workspace to exchange messages.
+  **First increment LANDED — bidirectional background sub-agents:** each running background sub-agent gets an
+  in-kernel inbox; the parent's `send_message(to: 'bg-N', message)` routes into it and the sub-agent drains it
+  at its next step (attributed `[Message from the delegating agent]`), turning fire-and-forget delegates into
+  two-way collaborators. Deliveries to a finished/unknown id are a soft error. Reverse (sub→parent) is the
+  existing result fold-in. Generalizing `send_message` to arbitrary session/teammate recipients is S3.
 - **S3 — teammates + teams.** Named, longer-lived agent sessions in a team; `spawn_agent` gains a
   persistent-teammate variant; team roster storage. Collaboration beyond fan-out-and-summarize.
 - **S4 — event bridge (monitoring → agent inbox).** The notification emitter also routes to subscribed agent
