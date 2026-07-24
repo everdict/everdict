@@ -33,6 +33,7 @@ export type AgentEvent =
   | { type: "permission"; name: string; decision: PermissionDecision }
   | { type: "plan"; plan: string }
   | { type: "input"; messages: number } // user messages injected mid-run via drainInput (steering)
+  | { type: "subagent"; id: string; phase: "launched" | "done"; ok?: boolean } // a background (fire-and-forget) sub-agent
   | { type: "fallback"; from: string; to: string } // switched to the fallback model after sustained upstream failure
   | { type: "compaction"; droppedMessages: number; mode?: "microcompact" | "summarize" | "drop" }
   | { type: "done"; stopReason: StopReason };
@@ -261,30 +262,53 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
   const subagentRegistry = new ToolRegistry(opts.registry.list().filter((t) => t.isReadOnly === true));
   // Bound concurrent sub-agents so a single turn requesting many spawns can't fan out without limit.
   const runSubagent = makeSemaphore(opts.maxConcurrentSubagents ?? DEFAULT_MAX_CONCURRENT_SUBAGENTS);
+  // Background (fire-and-forget) sub-agents: launched detached so the parent keeps working (overlap); each pushes its
+  // result here on completion, and the loop folds pending results into a later turn (at a turn boundary / before it
+  // finishes). Bounded by the same concurrency semaphore + depth cap.
+  const backgroundTasks: Promise<void>[] = [];
+  const backgroundResults: { id: string; summary: string; ok: boolean }[] = [];
+  let bgCounter = 0;
+  const runNestedSubagent = (task: string): Promise<string> =>
+    runSubagent(() =>
+      runAgentLoop({
+        // Sub-agents can run on a cheaper model (subagentModel) — delegated work rarely needs the main model.
+        transport: opts.subagentModel?.transport ?? opts.transport,
+        model: opts.subagentModel?.model ?? opts.model,
+        systemPrompt: `${opts.systemPrompt}\n\n## Sub-task\nYou are handling a scoped sub-task delegated by another agent, with your own fresh context. Do the work with your (read-only) tools, then give a clear, self-contained summary of your findings as your FINAL message — that summary is your only output back to the caller.`,
+        history: [{ role: "user", content: task }],
+        registry: subagentRegistry,
+        depth: depth + 1,
+        ...(opts.fallback ? { fallback: opts.fallback } : {}),
+        ...(opts.toolTimeoutMs !== undefined ? { toolTimeoutMs: opts.toolTimeoutMs } : {}),
+        ...(opts.temperature !== undefined ? { temperature: opts.temperature } : {}),
+        ...(opts.signal ? { signal: opts.signal } : {}),
+        ...(opts.maxTurns !== undefined ? { maxTurns: opts.maxTurns } : {}),
+        ...(opts.summarize ? { summarize: opts.summarize } : {}),
+      }).then((r) => r.content),
+    );
+  const launchBackground = (task: string): string => {
+    bgCounter += 1;
+    const id = `bg-${bgCounter}`;
+    emit({ type: "subagent", id, phase: "launched" });
+    backgroundTasks.push(
+      runNestedSubagent(task)
+        .then((summary) => {
+          backgroundResults.push({ id, summary, ok: true });
+          emit({ type: "subagent", id, phase: "done", ok: true });
+        })
+        .catch((err) => {
+          backgroundResults.push({
+            id,
+            summary: `(the sub-agent failed: ${err instanceof Error ? err.message : String(err)})`,
+            ok: false,
+          });
+          emit({ type: "subagent", id, phase: "done", ok: false });
+        }),
+    );
+    return id;
+  };
   const spawnTools: ToolDefinition[] =
-    depth < MAX_AGENT_DEPTH
-      ? [
-          buildSpawnAgentTool((task) =>
-            runSubagent(() =>
-              runAgentLoop({
-                // Sub-agents can run on a cheaper model (subagentModel) — delegated work rarely needs the main model.
-                transport: opts.subagentModel?.transport ?? opts.transport,
-                model: opts.subagentModel?.model ?? opts.model,
-                systemPrompt: `${opts.systemPrompt}\n\n## Sub-task\nYou are handling a scoped sub-task delegated by another agent, with your own fresh context. Do the work with your (read-only) tools, then give a clear, self-contained summary of your findings as your FINAL message — that summary is your only output back to the caller.`,
-                history: [{ role: "user", content: task }],
-                registry: subagentRegistry,
-                depth: depth + 1,
-                ...(opts.fallback ? { fallback: opts.fallback } : {}),
-                ...(opts.toolTimeoutMs !== undefined ? { toolTimeoutMs: opts.toolTimeoutMs } : {}),
-                ...(opts.temperature !== undefined ? { temperature: opts.temperature } : {}),
-                ...(opts.signal ? { signal: opts.signal } : {}),
-                ...(opts.maxTurns !== undefined ? { maxTurns: opts.maxTurns } : {}),
-                ...(opts.summarize ? { summarize: opts.summarize } : {}),
-              }).then((r) => r.content),
-            ),
-          ),
-        ]
-      : [];
+    depth < MAX_AGENT_DEPTH ? [buildSpawnAgentTool(runNestedSubagent, launchBackground)] : [];
   // Plan mode: while on, write tools are blocked; present_plan asks the host to approve, then turns it off.
   let inPlanMode = opts.planMode === true;
   const planTools: ToolDefinition[] = opts.planMode
@@ -328,8 +352,27 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
     };
   };
 
+  // Fold any completed background sub-agent results into the conversation as a follow-up user turn (labelled). Same
+  // seam discipline as drainInput: only called at a balanced turn boundary. Returns whether anything was injected.
+  const injectBackgroundResults = async (): Promise<boolean> => {
+    if (backgroundResults.length === 0) return false;
+    const done = backgroundResults.splice(0);
+    const text = done
+      .map((r) => `[Background sub-agent ${r.id} ${r.ok ? "finished" : "failed"}]\n${r.summary}`)
+      .join("\n\n");
+    const message: ChatMessage = { role: "user", content: text };
+    messages = [...messages, message];
+    produced.push(message);
+    await opts.onMessage?.(message);
+    emit({ type: "input", messages: done.length });
+    return true;
+  };
+
   for (let turn = 1; turn <= maxTurns; turn++) {
     if (opts.signal?.aborted) return finish("aborted", turn - 1);
+
+    // Fold in any background sub-agent results that have completed since the last turn (overlap delivery).
+    await injectBackgroundResults();
 
     // Mid-run steering: pull any user messages the host queued since the run started. Safe here — the context is
     // balanced at a turn boundary (never mid tool_call/result), so appending a user turn keeps the transcript valid.
@@ -443,7 +486,15 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
     }
     await opts.onMessage?.(assistant);
 
-    if (result.toolCalls.length === 0) return finish("end_turn", turn);
+    if (result.toolCalls.length === 0) {
+      // Don't answer while background sub-agents are still running — wait for them, fold their findings in, and give
+      // the model one more turn to react. Only then finish (no pending results → done).
+      if (backgroundTasks.length > 0) {
+        await Promise.all(backgroundTasks);
+        if (await injectBackgroundResults()) continue;
+      }
+      return finish("end_turn", turn);
+    }
 
     // No-progress guard: track whether this turn's tool-call batch is identical to the previous turns'.
     const signature = toolCallSignature(result.toolCalls);

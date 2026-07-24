@@ -528,6 +528,38 @@ describe("runAgentLoop", () => {
     expect(spawnResult?.content).toContain("SUB summary");
   });
 
+  it("runs a background (fire-and-forget) sub-agent with overlap and folds its result into a later turn", async () => {
+    const parent = fakeTransport([
+      toolCallResult("s1", "spawn_agent", JSON.stringify({ task: "research", run_in_background: true })),
+      textResult("FINAL"),
+    ]);
+    const sub = fakeTransport([textResult("BACKGROUND FINDING")]);
+    const events: AgentEvent[] = [];
+    const result = await runAgentLoop({
+      transport: parent.transport,
+      model: "m",
+      systemPrompt: "sys",
+      history,
+      registry: new ToolRegistry([]),
+      subagentModel: { transport: sub.transport, model: "cheap" },
+      onEvent: (e) => events.push(e),
+    });
+    expect(result.stopReason).toBe("end_turn");
+    expect(result.content).toBe("FINAL");
+    // spawn returned immediately (a launch notice, not the summary — that's the fire-and-forget contract).
+    const launched = result.produced.find((m) => m.role === "tool") as { content: string } | undefined;
+    expect(launched?.content).toContain("launched in the background");
+    // the background finding was folded back in as a follow-up user turn (delivered, not lost).
+    expect(
+      result.produced.some(
+        (m) => m.role === "user" && typeof m.content === "string" && m.content.includes("BACKGROUND FINDING"),
+      ),
+    ).toBe(true);
+    // lifecycle events fire (launched then done).
+    const phases = events.filter((e) => e.type === "subagent").map((e) => (e as { phase: string }).phase);
+    expect(phases).toEqual(["launched", "done"]);
+  });
+
   it("stops with aborted when the signal is already aborted", async () => {
     const { transport } = fakeTransport([textResult("unused")]);
     const result = await runAgentLoop({
