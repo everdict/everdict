@@ -174,6 +174,14 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
     const mode = body.data.mode ?? "default";
 
     const drainInput = (): ChatMessage[] => mailbox.drain(principal.workspace, id);
+    // Route send_message to another of the caller's conversations (S2 generalization): delivered to that session's
+    // mailbox (agent-attributed), absorbed on its next turn. Owner-scoped — an agent only messages its owner's sessions.
+    const sendMessage = async (to: string, message: string): Promise<{ ok: boolean; error?: string }> => {
+      const target = await deps.sessions.getSession(principal.workspace, principal.subject, to);
+      if (!target) return { ok: false, error: `No conversation "${to}" you own to message.` };
+      mailbox.enqueue(principal.workspace, to, { from: "agent", sender: id, content: message });
+      return { ok: true };
+    };
     // A fine-grained rule (allow/deny for a tool in this session) short-circuits the human prompt.
     const withRules =
       (base: PermissionHook): PermissionHook =>
@@ -197,6 +205,7 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
           controller.signal,
           {
             drainInput,
+            sendMessage,
             ...(mode === "bypass" ? {} : { permit: withRules((): PermissionDecision => "allow") }),
             ...(mode === "plan" ? { planMode: true } : {}),
           },
@@ -249,6 +258,7 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
         ...(mode === "bypass" ? {} : { permit }),
         ...(mode === "plan" ? { planMode: true, onPlan } : {}),
         drainInput,
+        sendMessage,
       });
       write("done", {});
     } catch (err) {

@@ -695,6 +695,30 @@ describe("runAgentLoop", () => {
     expect(sawMessage).toBe(true);
   });
 
+  it("routes send_message to the host seam for a recipient that is not a background sub-agent (S2 generalization)", async () => {
+    const routed: { to: string; message: string }[] = [];
+    const { transport } = fakeTransport([
+      toolCallResult("m1", "send_message", JSON.stringify({ to: "teammate-researcher", message: "please dig in" })),
+      textResult("sent"),
+    ]);
+    const result = await runAgentLoop({
+      transport,
+      model: "m",
+      systemPrompt: "sys",
+      history,
+      registry: new ToolRegistry([]),
+      sendMessage: (to, message) => {
+        routed.push({ to, message });
+        return { ok: true };
+      },
+    });
+    expect(result.content).toBe("sent");
+    // No such background sub-agent → the kernel fell through to the host routing seam.
+    expect(routed).toEqual([{ to: "teammate-researcher", message: "please dig in" }]);
+    const toolMsg = result.produced.find((m) => m.role === "tool") as { content: string } | undefined;
+    expect(toolMsg?.content).toContain("Delivered to teammate-researcher");
+  });
+
   it("stops with aborted when the signal is already aborted", async () => {
     const { transport } = fakeTransport([textResult("unused")]);
     const result = await runAgentLoop({

@@ -93,6 +93,13 @@ export interface AgentLoopOptions {
   // Registered specialized sub-agent TYPES the model can pick via spawn_agent(subagent_type) — each bundles a role
   // instruction and an optional model tier (tools stay read-only). Absent/empty → a single generic sub-agent.
   subagentTypes?: SubagentType[];
+  // Host routing for send_message to recipients that are NOT this run's own background sub-agents — a teammate or
+  // another session, delivered via the host's mailbox/bus (S2 generalization, agent-teams.md). The kernel tries its own
+  // background sub-agents first, then falls back to this. Absent → send_message only reaches this run's sub-agents.
+  sendMessage?: (
+    to: string,
+    message: string,
+  ) => { ok: boolean; error?: string } | Promise<{ ok: boolean; error?: string }>;
   // Per-tool wall-clock deadline (ms). A tool call that outruns it is aborted and returned as an error the model sees,
   // so a hung MCP tool can't pin the turn's Promise.all forever. Absent → no per-tool timeout (the run signal still applies).
   toolTimeoutMs?: number;
@@ -352,12 +359,16 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
     );
     return id;
   };
-  // Route a parent → background sub-agent message into that sub-agent's mailbox (S2). Unknown/finished id → soft error.
-  const deliverToSubagent = (to: string, message: string): { ok: boolean; error?: string } => {
+  // Route a send_message: this run's own background sub-agents first (in-kernel), else the host seam (a teammate /
+  // another session, via the host mailbox — S2 generalization). Unknown everywhere → soft error the model sees.
+  const deliverMessage = async (to: string, message: string): Promise<{ ok: boolean; error?: string }> => {
     const box = bgMailboxes.get(to);
-    if (!box) return { ok: false, error: `No running background sub-agent "${to}" to message.` };
-    box.push({ role: "user", content: `[Message from the delegating agent]\n${message}` });
-    return { ok: true };
+    if (box) {
+      box.push({ role: "user", content: `[Message from the delegating agent]\n${message}` });
+      return { ok: true };
+    }
+    if (opts.sendMessage) return await opts.sendMessage(to, message);
+    return { ok: false, error: `No running background sub-agent "${to}" to message.` };
   };
   const spawnTools: ToolDefinition[] =
     depth < MAX_AGENT_DEPTH
@@ -367,7 +378,7 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
             launchBackground,
             opts.subagentTypes?.map((t) => ({ name: t.name, description: t.description })),
           ),
-          buildSendMessageTool(deliverToSubagent),
+          buildSendMessageTool(deliverMessage),
         ]
       : [];
   // Plan mode: while on, write tools are blocked; present_plan asks the host to approve, then turns it off.

@@ -160,6 +160,50 @@ describe("agent server", () => {
     await app.close();
   });
 
+  it("routes an agent's send_message to another of the caller's conversations (S2 generalization)", async () => {
+    const usage = { inputTokens: 5, outputTokens: 1, totalTokens: 6 };
+    let targetId = "";
+    let n = 0;
+    // Session A's agent calls send_message(to: B) on its first turn, then replies; later turns (session B) just reply.
+    const scripted: LlmTransport = {
+      provider: "fake",
+      stream: async () => {
+        n += 1;
+        if (n === 1) {
+          return {
+            content: null,
+            toolCalls: [
+              { id: "m1", name: "send_message", arguments: JSON.stringify({ to: targetId, message: "hello B" }) },
+            ],
+            finishReason: "tool_calls",
+            usage,
+          };
+        }
+        return { content: "reply", toolCalls: [], finishReason: "stop", usage };
+      },
+    };
+    const app = buildServer(makeDeps({ resolveModel: async () => ({ transport: scripted, model: "m" }) }));
+    const a = (await app.inject({ method: "POST", url: "/agent/sessions", headers: auth, payload: {} })).json();
+    const b = (await app.inject({ method: "POST", url: "/agent/sessions", headers: auth, payload: {} })).json();
+    targetId = b.id;
+
+    await app.inject({
+      method: "POST",
+      url: `/agent/sessions/${a.id}/chat`,
+      headers: auth,
+      payload: { message: "go" },
+    });
+    // B has not run yet — the message waits in B's mailbox; B's next turn drains it.
+    await app.inject({ method: "POST", url: `/agent/sessions/${b.id}/chat`, headers: auth, payload: { message: "?" } });
+
+    const bMsgs = (await app.inject({ method: "GET", url: `/agent/sessions/${b.id}/messages`, headers: auth })).json()
+      .messages as { content: string }[];
+    const delivered = bMsgs.find((m) => m.content.includes("hello B"));
+    expect(delivered?.content).toContain("[Message from teammate");
+    expect(delivered?.content).toContain("hello B");
+    await app.close();
+  });
+
   it("absorbs a platform /event into the running turn, attributed as an Everdict event", async () => {
     const app = buildServer(makeDeps());
     const session = (await app.inject({ method: "POST", url: "/agent/sessions", headers: auth, payload: {} })).json();

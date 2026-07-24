@@ -126,6 +126,12 @@ export interface ChatHooks {
   // The SSE handler supplies onPlan to park for the human; absent onPlan → auto-approve.
   planMode?: boolean;
   onPlan?: (plan: string) => boolean | Promise<boolean>;
+  // Route send_message to a recipient that is not this run's own background sub-agent (another session/teammate), via
+  // the host mailbox (S2 generalization). Absent → send_message only reaches this run's background sub-agents.
+  sendMessage?: (
+    to: string,
+    message: string,
+  ) => { ok: boolean; error?: string } | Promise<{ ok: boolean; error?: string }>;
 }
 
 export const DEFAULT_SESSION_TITLE = "New conversation";
@@ -374,6 +380,7 @@ export async function runChat(
       ...(hooks?.drainInput ? { drainInput: hooks.drainInput } : {}),
       ...(hooks?.planMode ? { planMode: hooks.planMode } : {}),
       ...(hooks?.onPlan ? { onPlan: hooks.onPlan } : {}),
+      ...(hooks?.sendMessage ? { sendMessage: hooks.sendMessage } : {}),
       ...(deps.maxTurns !== undefined ? { maxTurns: deps.maxTurns } : {}),
       ...(model.temperature !== undefined ? { temperature: model.temperature } : {}),
       ...(signal ? { signal } : {}),
