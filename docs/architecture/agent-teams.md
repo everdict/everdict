@@ -93,6 +93,18 @@ The gap is not the loop — it is (a) a **shared message substrate** with addres
   existing result fold-in. Generalizing `send_message` to arbitrary session/teammate recipients is S3.
 - **S3 — teammates + teams.** Named, longer-lived agent sessions in a team; `spawn_agent` gains a
   persistent-teammate variant; team roster storage. Collaboration beyond fan-out-and-summarize.
+  **Execution-control core LANDED — `TeammateSupervisor`:** a teammate is a session the supervisor watches; when a
+  message lands in its mailbox the supervisor **wakes a turn**, and turns are **serialized per teammate**
+  (one at a time; mid-turn wakes coalesce into a single follow-up — no pile-up, no lost wake). This is the same
+  "a message/event wakes an agent" primitive S5 (proactive) reuses. `runTurn(sessionId)` is injected (drain
+  mailbox → run one agent turn); the supervisor owns only WHEN a turn runs, so it stays pure + unit-tested.
+  **Remaining for full S3** (the larger integration):
+  1. `runTeammateTurn` — drain the teammate's mailbox, run one agent loop over it, persist. Blocked on (2).
+  2. **Request-less execution auth** — a teammate runs WITHOUT a live HTTP request, so there's no forwarded
+     user bearer for the MCP tools. It needs a stored/service credential (a workspace-scoped agent token). This
+     is the crux; it is **shared with S5** (a proactively-woken agent runs request-less too), so build it once.
+  3. Spawn: a `spawn_teammate`/persistent variant that creates the teammate session + registers it with the
+     supervisor; a `team` roster (a named group) in the session store; web surface. Layered on 1–2.
 - **S4 — event bridge (monitoring → agent inbox).** The notification emitter also routes to subscribed agent
   inboxes; subscription model per agent/team. Everything monitored is now an agent-consumable message.
 - **S5 — proactive triggers.** An event in an idle subscribed agent's mailbox wakes a turn (reuse the
