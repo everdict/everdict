@@ -42,6 +42,14 @@ export interface CacheHints {
   tools?: boolean;
 }
 
+// Extended-thinking / reasoning request. Enables the provider's native reasoning (Anthropic `thinking`; OpenAI-side
+// reasoning models emit reasoning regardless, so this is a no-op there and capture is always on). budgetTokens caps
+// the thinking budget (Anthropic). Absent → thinking off (the historical behaviour); reasoning is still CAPTURED if
+// the model emits it unprompted.
+export interface ReasoningRequest {
+  budgetTokens: number;
+}
+
 export interface StreamRequest {
   model: string;
   system: string;
@@ -51,6 +59,10 @@ export interface StreamRequest {
   maxTokens?: number;
   signal?: AbortSignal;
   onContentDelta?: (delta: string) => void;
+  // Live reasoning/thinking token deltas (extended thinking). Fires only when the model emits reasoning; a normal
+  // (non-reasoning) turn never calls it, so callers can wire it unconditionally.
+  onReasoningDelta?: (delta: string) => void;
+  thinking?: ReasoningRequest;
   cache?: CacheHints;
 }
 
@@ -59,6 +71,24 @@ export interface StreamResult {
   toolCalls: LlmToolCall[];
   finishReason: string | null;
   usage?: LlmUsage;
+  // The turn's reasoning as display text (both providers), when the model produced any. Null/absent → no reasoning.
+  reasoning?: string;
+  // Provider-native reasoning blocks (Anthropic thinking / redacted_thinking, with signatures) needed to replay the
+  // turn's thinking on the FOLLOWING tool-result call. Opaque to the kernel — it carries them back verbatim via the
+  // message side-channel (ReasoningCarrier); the Anthropic transport re-emits them, OpenAI ignores them (stateless).
+  reasoningBlocks?: unknown[];
+}
+
+// One assistant turn's captured reasoning, attached to the assistant message the kernel keeps in its working history:
+// `text` is the display/persistence form; `blocks` are the provider-native thinking blocks re-sent on the next call so
+// Anthropic's "preserve the thinking block when tool use follows thinking" constraint holds within a turn.
+export interface ReasoningTrace {
+  text: string;
+  blocks?: unknown[];
+}
+
+export interface ReasoningCarrier {
+  reasoning?: ReasoningTrace;
 }
 
 // A provider-native transport: translate the canonical request to the provider's API (message protocol, tool format,

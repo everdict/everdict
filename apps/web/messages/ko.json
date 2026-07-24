@@ -3039,6 +3039,10 @@
     "regenerate": "다시 생성",
     "toolArgs": "인자",
     "toolResult": "결과",
+    "toolsUsed": "도구 {count}개 사용",
+    "reasoning": "사고 과정",
+    "reasoningLive": "추론 중…",
+    "todoTitle": "작업 목록",
     "bucket": {
       "today": "오늘",
       "yesterday": "어제",

@@ -1,5 +1,5 @@
 import { UpstreamError } from "@everdict/contracts";
-import type { LlmTransport, StreamResult } from "@everdict/llm";
+import type { LlmTransport, ReasoningCarrier, ReasoningRequest, StreamResult } from "@everdict/llm";
 import { compactStep } from "../context/compaction.js";
 import { type TokenBudget, effectiveBudget, estimateTokens, thresholdReached } from "../context/token-budget.js";
 import { buildSummarizer } from "../llm/summarize.js";
@@ -36,6 +36,7 @@ export interface SubagentType {
 export type AgentEvent =
   | { type: "turn_start"; turn: number }
   | { type: "text_delta"; delta: string }
+  | { type: "reasoning_delta"; delta: string } // extended-thinking / reasoning token (streamed before the answer)
   | { type: "assistant_message"; content: string }
   | { type: "tool_call"; name: string; args: string }
   | { type: "tool_result"; name: string; isError: boolean }
@@ -98,6 +99,10 @@ export interface AgentLoopOptions {
   // runs. onPlan defaults to auto-approve. Off unless the host opts in.
   planMode?: boolean;
   onPlan?: (plan: string) => boolean | Promise<boolean>;
+  // Extended thinking: when set, the model is asked to reason before answering (Anthropic `thinking` budget; OpenAI-side
+  // reasoning models reason regardless, so this is a no-op there). Reasoning is CAPTURED either way and surfaced via
+  // `reasoning_delta` events + the assistant message's reasoning. Absent → thinking off (the historical behaviour).
+  thinking?: ReasoningRequest;
   onEvent?: (e: AgentEvent) => void;
   // Fired (awaited) as each assistant/tool message is appended, so the host can persist the transcript
   // incrementally — the source of live progress for a polling UI.
@@ -439,8 +444,10 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
             // the provider's own prompt/KV caching (Anthropic cache_control; OpenAI caches automatically).
             cache: { system: true, tools: true },
             ...(opts.temperature !== undefined ? { temperature: opts.temperature } : {}),
+            ...(opts.thinking ? { thinking: opts.thinking } : {}),
             ...(opts.signal ? { signal: opts.signal } : {}),
             onContentDelta: (delta) => emit({ type: "text_delta", delta }),
+            onReasoningDelta: (delta) => emit({ type: "reasoning_delta", delta }),
           });
         } catch (err) {
           if (opts.signal?.aborted) return undefined;
@@ -503,6 +510,15 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
           }
         : {}),
     };
+    // Attach the turn's reasoning as a side-channel on the message object: `text` is persisted + shown; `blocks` are the
+    // provider-native thinking blocks re-sent verbatim on the next call so Anthropic's tool-use-after-thinking replay
+    // holds within this turn. The OpenAI transport strips this before sending (stateless). Carried, never spread to wire.
+    if (result.reasoning || result.reasoningBlocks) {
+      (assistant as ReasoningCarrier).reasoning = {
+        text: result.reasoning ?? "",
+        ...(result.reasoningBlocks ? { blocks: result.reasoningBlocks } : {}),
+      };
+    }
     messages = [...messages, assistant];
     const afterAssistantLen = messages.length; // tool results appended past here aren't in the model's usage count
     produced.push(assistant);

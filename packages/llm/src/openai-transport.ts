@@ -1,10 +1,38 @@
 import type OpenAI from "openai";
-import type { LlmTool, LlmToolCall, LlmTransport, LlmUsage, StreamRequest, StreamResult } from "./transport.js";
+import type {
+  LlmMessage,
+  LlmTool,
+  LlmToolCall,
+  LlmTransport,
+  LlmUsage,
+  StreamRequest,
+  StreamResult,
+} from "./transport.js";
 
 interface AccumulatedToolCall {
   id: string;
   name: string;
   arguments: string;
+}
+
+// The kernel may attach a `reasoning` side-channel to assistant messages (for Anthropic thinking replay). OpenAI chat
+// completions are stateless w.r.t. reasoning, and the extra key would be an unexpected field on the request — strip it.
+function stripReasoning(messages: LlmMessage[]): LlmMessage[] {
+  return messages.map((m) => {
+    if (!("reasoning" in m)) return m;
+    const { reasoning: _reasoning, ...rest } = m as LlmMessage & { reasoning?: unknown };
+    return rest as LlmMessage;
+  });
+}
+
+// Reasoning models over an OpenAI-compatible endpoint (LiteLLM/DeepSeek/…) surface the chain-of-thought under a
+// non-standard field — `reasoning_content` (most) or `reasoning` (some). Read whichever is a string.
+function reasoningTextOf(o: unknown): string | undefined {
+  if (o === null || typeof o !== "object") return undefined;
+  const r = o as { reasoning_content?: unknown; reasoning?: unknown };
+  if (typeof r.reasoning_content === "string") return r.reasoning_content;
+  if (typeof r.reasoning === "string") return r.reasoning;
+  return undefined;
 }
 
 function toOpenAiTools(tools: LlmTool[]): OpenAI.Chat.Completions.ChatCompletionTool[] {
@@ -38,7 +66,7 @@ export class OpenAiTransport implements LlmTransport {
   async stream(req: StreamRequest): Promise<StreamResult> {
     const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
       { role: "system", content: req.system },
-      ...req.messages,
+      ...stripReasoning(req.messages),
     ];
     const tools = toOpenAiTools(req.tools);
     const stream = await this.client.chat.completions.create(
@@ -55,6 +83,7 @@ export class OpenAiTransport implements LlmTransport {
     );
 
     let content = "";
+    let reasoning = "";
     const toolCalls = new Map<number, AccumulatedToolCall>();
     let finishReason: string | null = null;
     let usage: OpenAI.Completions.CompletionUsage | undefined;
@@ -65,6 +94,11 @@ export class OpenAiTransport implements LlmTransport {
       if (delta?.content) {
         content += delta.content;
         req.onContentDelta?.(delta.content);
+      }
+      const reasoningDelta = reasoningTextOf(delta);
+      if (reasoningDelta !== undefined && reasoningDelta.length > 0) {
+        reasoning += reasoningDelta;
+        req.onReasoningDelta?.(reasoningDelta);
       }
       if (delta?.tool_calls) {
         for (const tcDelta of delta.tool_calls) {
@@ -94,6 +128,7 @@ export class OpenAiTransport implements LlmTransport {
       toolCalls: orderedToolCalls,
       finishReason,
       usage: normalizeUsage(usage),
+      ...(reasoning.length > 0 ? { reasoning } : {}),
     };
   }
 
@@ -101,7 +136,7 @@ export class OpenAiTransport implements LlmTransport {
   async complete(req: StreamRequest): Promise<StreamResult> {
     const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
       { role: "system", content: req.system },
-      ...req.messages,
+      ...stripReasoning(req.messages),
     ];
     const tools = toOpenAiTools(req.tools);
     const res = await this.client.chat.completions.create(
@@ -122,11 +157,13 @@ export class OpenAiTransport implements LlmTransport {
           tc.type === "function",
       )
       .map((tc) => ({ id: tc.id, name: tc.function.name, arguments: tc.function.arguments }));
+    const reasoning = reasoningTextOf(choice?.message);
     return {
       content: choice?.message.content ?? null,
       toolCalls,
       finishReason: choice?.finish_reason ?? null,
       usage: normalizeUsage(res.usage),
+      ...(reasoning !== undefined && reasoning.length > 0 ? { reasoning } : {}),
     };
   }
 }

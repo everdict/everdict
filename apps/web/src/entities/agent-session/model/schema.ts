@@ -64,6 +64,9 @@ export const agentMessageSchema = z.object({
   seq: z.number(),
   role: z.enum(['user', 'assistant', 'tool']),
   content: z.string(),
+  // assistant turns: the model's reasoning / extended-thinking for this turn (display text only). Absent when the
+  // model produced no reasoning.
+  reasoning: z.string().optional(),
   toolCalls: z.array(agentToolCallSchema).optional(),
   toolCallId: z.string().optional(),
   name: z.string().optional(),

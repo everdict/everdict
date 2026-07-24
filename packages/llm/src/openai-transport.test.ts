@@ -81,6 +81,36 @@ describe("OpenAiTransport", () => {
     });
   });
 
+  it("captures reasoning_content deltas as the turn's reasoning and streams them", async () => {
+    const reasoning: string[] = [];
+    const { client } = fakeClient([
+      { choices: [{ index: 0, delta: { reasoning_content: "Let me " }, finish_reason: null }] },
+      { choices: [{ index: 0, delta: { reasoning_content: "think." }, finish_reason: null }] },
+      { choices: [{ index: 0, delta: { content: "Answer" }, finish_reason: "stop" }] },
+    ] as Partial<Chunk>[]);
+    const result = await new OpenAiTransport(client).stream({
+      ...baseReq,
+      onReasoningDelta: (d) => reasoning.push(d),
+    });
+    expect(reasoning).toEqual(["Let me ", "think."]);
+    expect(result.reasoning).toBe("Let me think.");
+    expect(result.content).toBe("Answer");
+  });
+
+  it("strips the reasoning side-channel from outgoing assistant messages (stateless replay)", async () => {
+    const { client, lastArgs } = fakeClient([
+      { choices: [{ index: 0, delta: { content: "ok" }, finish_reason: "stop" }] },
+    ]);
+    await new OpenAiTransport(client).stream({
+      ...baseReq,
+      // The kernel attaches `reasoning` for Anthropic replay; it must never reach the OpenAI request body.
+      messages: [{ role: "assistant", content: "prior", reasoning: { text: "secret thoughts" } } as never],
+    });
+    const args = lastArgs() as { messages: Record<string, unknown>[] };
+    expect(args.messages[1]).toEqual({ role: "assistant", content: "prior" });
+    expect(args.messages[1]).not.toHaveProperty("reasoning");
+  });
+
   it("complete() returns the non-streaming choice message + usage", async () => {
     let args: { stream?: boolean } = {};
     const create = (a: { stream?: boolean }) => {

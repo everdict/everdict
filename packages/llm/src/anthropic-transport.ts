@@ -5,6 +5,7 @@ import type {
   LlmToolCall,
   LlmTransport,
   LlmUsage,
+  ReasoningCarrier,
   StreamRequest,
   StreamResult,
 } from "./transport.js";
@@ -43,7 +44,33 @@ interface ToolResultBlock {
   content: string;
   cache_control?: { type: "ephemeral" };
 }
-type OutBlock = TextBlock | ImageBlock | ToolUseBlock | ToolResultBlock;
+// Extended-thinking blocks. On the way IN they replay a prior assistant turn's reasoning (Anthropic requires the
+// thinking block, with its signature, be preserved when tool_use follows thinking); on the way OUT they're what the
+// stream produced. `redacted_thinking` carries encrypted reasoning the model chose not to surface — still replayed.
+interface ThinkingBlock {
+  type: "thinking";
+  thinking: string;
+  signature: string;
+}
+interface RedactedThinkingBlock {
+  type: "redacted_thinking";
+  data: string;
+}
+type ThinkingOutBlock = ThinkingBlock | RedactedThinkingBlock;
+type OutBlock = TextBlock | ImageBlock | ToolUseBlock | ToolResultBlock | ThinkingOutBlock;
+
+// Read the reasoning blocks the kernel attached to an assistant message (side-channel) for same-turn thinking replay.
+function reasoningBlocksOf(m: LlmMessage): ThinkingOutBlock[] {
+  const blocks = (m as ReasoningCarrier).reasoning?.blocks;
+  if (!Array.isArray(blocks)) return [];
+  const out: ThinkingOutBlock[] = [];
+  for (const b of blocks) {
+    if (b === null || typeof b !== "object") continue;
+    const t = (b as { type?: unknown }).type;
+    if (t === "thinking" || t === "redacted_thinking") out.push(b as ThinkingOutBlock);
+  }
+  return out;
+}
 interface OutMessage {
   role: "user" | "assistant";
   content: OutBlock[];
@@ -115,7 +142,8 @@ function foldMessages(system: string, messages: LlmMessage[]): { system: string;
     } else if (m.role === "user") {
       push("user", contentToBlocks(m.content));
     } else if (m.role === "assistant") {
-      const blocks: OutBlock[] = [];
+      // Thinking blocks must LEAD the assistant turn (Anthropic rejects a tool_use turn whose thinking isn't first).
+      const blocks: OutBlock[] = [...reasoningBlocksOf(m)];
       const text = contentToString(m.content);
       if (text.length > 0) blocks.push({ type: "text", text });
       const toolCalls = m.tool_calls ?? [];
@@ -170,13 +198,22 @@ export class AnthropicTransport implements LlmTransport {
     }
     const systemField =
       cacheSystem && system.length > 0 ? [{ type: "text", text: system, cache_control: EPHEMERAL }] : system;
+    // Extended thinking: max_tokens must exceed the thinking budget (it caps thinking + visible output), and temperature
+    // must be left at its default (Anthropic rejects a non-default temperature alongside thinking) — so we drop it.
+    const thinking = req.thinking;
+    const baseMaxTokens = req.maxTokens ?? DEFAULT_MAX_TOKENS;
+    const maxTokens = thinking ? Math.max(baseMaxTokens, thinking.budgetTokens + DEFAULT_MAX_TOKENS) : baseMaxTokens;
     return {
       model: req.model,
-      max_tokens: req.maxTokens ?? DEFAULT_MAX_TOKENS,
+      max_tokens: maxTokens,
       system: systemField,
       messages: out,
       ...(req.tools.length > 0 ? { tools: toAnthropicTools(req.tools, cacheTools) } : {}),
-      ...(req.temperature !== undefined ? { temperature: req.temperature } : {}),
+      ...(thinking
+        ? { thinking: { type: "enabled", budget_tokens: thinking.budgetTokens } }
+        : req.temperature !== undefined
+          ? { temperature: req.temperature }
+          : {}),
     };
   }
 
@@ -210,14 +247,23 @@ export class AnthropicTransport implements LlmTransport {
   async stream(req: StreamRequest): Promise<StreamResult> {
     const res = await this.post({ ...this.buildBody(req), stream: true }, req.signal);
     if (res.body === null) throw new UpstreamError("UPSTREAM_ERROR", {}, "The model stream response has no body.");
-    return this.consume(res.body, req.onContentDelta);
+    return this.consume(res.body, req.onContentDelta, req.onReasoningDelta);
   }
 
   // One-shot, non-streaming completion (judges / probes) — the final Messages response instead of an SSE stream.
   async complete(req: StreamRequest): Promise<StreamResult> {
     const res = await this.post(this.buildBody(req), req.signal);
     const json = (await res.json()) as {
-      content?: Array<{ type?: string; text?: string; id?: string; name?: string; input?: unknown }>;
+      content?: Array<{
+        type?: string;
+        text?: string;
+        id?: string;
+        name?: string;
+        input?: unknown;
+        thinking?: string;
+        signature?: string;
+        data?: string;
+      }>;
       stop_reason?: string;
       usage?: {
         input_tokens?: number;
@@ -227,13 +273,22 @@ export class AnthropicTransport implements LlmTransport {
       };
     };
     let content = "";
+    let reasoning = "";
+    const reasoningBlocks: ThinkingOutBlock[] = [];
     const toolCalls: LlmToolCall[] = [];
     for (const block of json.content ?? []) {
-      // Collect text from any block carrying a string `text` (a thinking-enabled model puts a thinking block first);
-      // tool_use blocks become tool calls.
-      if (block.type === "tool_use")
+      // thinking/redacted_thinking blocks are the model's reasoning (preserved verbatim for same-turn tool-use replay);
+      // tool_use blocks become tool calls; any block carrying `text` is the visible answer.
+      if (block.type === "tool_use") {
         toolCalls.push({ id: block.id ?? "", name: block.name ?? "", arguments: JSON.stringify(block.input ?? {}) });
-      else if (typeof block.text === "string") content += block.text;
+      } else if (block.type === "thinking" && typeof block.thinking === "string") {
+        reasoning += block.thinking;
+        reasoningBlocks.push({ type: "thinking", thinking: block.thinking, signature: block.signature ?? "" });
+      } else if (block.type === "redacted_thinking" && typeof block.data === "string") {
+        reasoningBlocks.push({ type: "redacted_thinking", data: block.data });
+      } else if (typeof block.text === "string") {
+        content += block.text;
+      }
     }
     const u = json.usage;
     const cacheRead = u?.cache_read_input_tokens ?? 0;
@@ -251,6 +306,8 @@ export class AnthropicTransport implements LlmTransport {
         ...(cacheRead > 0 ? { cacheReadTokens: cacheRead } : {}),
         ...(cacheWrite > 0 ? { cacheWriteTokens: cacheWrite } : {}),
       },
+      ...(reasoning.length > 0 ? { reasoning } : {}),
+      ...(reasoningBlocks.length > 0 ? { reasoningBlocks } : {}),
     };
   }
 
@@ -258,9 +315,13 @@ export class AnthropicTransport implements LlmTransport {
   private async consume(
     stream: ReadableStream<Uint8Array>,
     onDelta: StreamRequest["onContentDelta"],
+    onReasoning: StreamRequest["onReasoningDelta"],
   ): Promise<StreamResult> {
     let content = "";
     const toolBlocks = new Map<number, { id: string; name: string; args: string }>();
+    // Reasoning blocks accumulate by stream index (they precede text/tool_use), so an index sort restores their order.
+    const thinkingBlocks = new Map<number, ThinkingBlock | RedactedThinkingBlock>();
+    let reasoning = "";
     let stopReason: string | null = null;
     let inputTokens = 0;
     let outputTokens = 0;
@@ -286,18 +347,32 @@ export class AnthropicTransport implements LlmTransport {
         }
       } else if (evt.type === "content_block_start") {
         const idx = evt.index as number;
-        const block = evt.content_block as { type?: string; id?: string; name?: string } | undefined;
+        const block = evt.content_block as { type?: string; id?: string; name?: string; data?: string } | undefined;
         if (block?.type === "tool_use" && typeof idx === "number")
           toolBlocks.set(idx, { id: block.id ?? "", name: block.name ?? "", args: "" });
+        else if (block?.type === "thinking" && typeof idx === "number")
+          thinkingBlocks.set(idx, { type: "thinking", thinking: "", signature: "" });
+        else if (block?.type === "redacted_thinking" && typeof idx === "number")
+          thinkingBlocks.set(idx, { type: "redacted_thinking", data: block.data ?? "" });
       } else if (evt.type === "content_block_delta") {
         const idx = evt.index as number;
-        const delta = evt.delta as { type?: string; text?: string; partial_json?: string } | undefined;
+        const delta = evt.delta as
+          | { type?: string; text?: string; partial_json?: string; thinking?: string; signature?: string }
+          | undefined;
         if (delta?.type === "text_delta" && typeof delta.text === "string") {
           content += delta.text;
           onDelta?.(delta.text);
         } else if (delta?.type === "input_json_delta" && typeof delta.partial_json === "string") {
           const b = toolBlocks.get(idx);
           if (b) b.args += delta.partial_json;
+        } else if (delta?.type === "thinking_delta" && typeof delta.thinking === "string") {
+          const b = thinkingBlocks.get(idx);
+          if (b?.type === "thinking") b.thinking += delta.thinking;
+          reasoning += delta.thinking;
+          onReasoning?.(delta.thinking);
+        } else if (delta?.type === "signature_delta" && typeof delta.signature === "string") {
+          const b = thinkingBlocks.get(idx);
+          if (b?.type === "thinking") b.signature += delta.signature;
         }
       } else if (evt.type === "message_delta") {
         const delta = evt.delta as { stop_reason?: string } | undefined;
@@ -325,6 +400,10 @@ export class AnthropicTransport implements LlmTransport {
       .map(([, b]) => ({ id: b.id, name: b.name, arguments: b.args.length > 0 ? b.args : "{}" }))
       .filter((c) => c.id.length > 0 && c.name.length > 0);
 
+    const reasoningBlocks: ThinkingOutBlock[] = Array.from(thinkingBlocks.entries())
+      .sort(([a], [b]) => a - b)
+      .map(([, b]) => b);
+
     // inputTokens = the full prompt footprint (non-cached + cache read + cache creation); cacheRead/Write are the
     // subsets, surfaced for observability of the caching win.
     const usage: LlmUsage = {
@@ -335,6 +414,13 @@ export class AnthropicTransport implements LlmTransport {
       ...(cacheWrite > 0 ? { cacheWriteTokens: cacheWrite } : {}),
     };
 
-    return { content: content.length > 0 ? content : null, toolCalls, finishReason: stopReason, usage };
+    return {
+      content: content.length > 0 ? content : null,
+      toolCalls,
+      finishReason: stopReason,
+      usage,
+      ...(reasoning.length > 0 ? { reasoning } : {}),
+      ...(reasoningBlocks.length > 0 ? { reasoningBlocks } : {}),
+    };
   }
 }

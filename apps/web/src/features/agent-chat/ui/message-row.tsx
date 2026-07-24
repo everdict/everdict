@@ -10,7 +10,6 @@ import { Markdown } from '@/shared/ui/markdown'
 
 import { AgentAvatar } from './agent-avatar'
 import { ReferenceChip } from './mention-picker'
-import { ToolCall } from './tool-call'
 
 async function copyText(text: string, done: string): Promise<void> {
   try {
@@ -21,17 +20,16 @@ async function copyText(text: string, done: string): Promise<void> {
   }
 }
 
-// One turn in the transcript, laid out full-width (ChatGPT/Claude style) rather than as a chat bubble: a small
+// One text turn in the transcript, laid out full-width (ChatGPT/Claude style) rather than as a chat bubble: a small
 // role avatar + the content, with hover actions. Assistant text renders as markdown; a user turn shows its
-// @-reference chips above the text; tool turns are folded into the preceding assistant row as tool-call cards.
+// @-reference chips above the text. Reasoning, tool activity, and todos are pulled OUT into their own transcript
+// items (see build-transcript) — this row is only the spoken text, so a tool-only assistant turn never renders here.
 export function MessageRow({
   message,
-  resultByCallId,
   isLastAssistant,
   onRegenerate,
 }: {
   message: AgentMessage
-  resultByCallId: Map<string, string>
   isLastAssistant: boolean
   onRegenerate?: () => void
 }) {
@@ -43,9 +41,8 @@ export function MessageRow({
   const hasText = message.content.trim().length > 0
   const hasRefs = message.references !== undefined && message.references.length > 0
   const hasAtts = message.attachments !== undefined && message.attachments.length > 0
-  const hasTools = message.toolCalls !== undefined && message.toolCalls.length > 0
   if (isUser && !hasText && !hasRefs && !hasAtts) return null
-  if (!isUser && !hasText && !hasTools) return null
+  if (!isUser && !hasText) return null
 
   return (
     <div className="group animate-in fade-in-0 slide-in-from-bottom-1 px-3 py-2.5 duration-200">
@@ -85,16 +82,6 @@ export function MessageRow({
               <Markdown
                 content={message.content}
                 className="text-[13px] leading-relaxed text-foreground"
-              />
-            ))}
-
-          {hasTools &&
-            message.toolCalls?.map((tc) => (
-              <ToolCall
-                key={tc.id}
-                name={tc.name}
-                args={tc.arguments}
-                result={resultByCallId.get(tc.id)}
               />
             ))}
 

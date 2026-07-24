@@ -237,6 +237,8 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
       await runChat(deps, principal, headers, id, message, references, attachments, controller.signal, {
         onEvent: (e) => {
           if (e.type === "text_delta") write("delta", { text: e.delta });
+          // Live extended-thinking tokens — grow the transcript's reasoning block before the answer streams in.
+          else if (e.type === "reasoning_delta") write("reasoning", { text: e.delta });
           // The post-decision event: forward it so the web dismisses the prompt even when the decision was the
           // registry's timeout/disconnect default rather than a click.
           else if (e.type === "permission") write("permission_resolved", { name: e.name, decision: e.decision });

@@ -106,6 +106,7 @@ async function main(): Promise<void> {
     ...(config.AGENT_FALLBACK_MODEL !== undefined ? { fallbackModelRef: config.AGENT_FALLBACK_MODEL } : {}),
     ...(config.AGENT_SUBAGENT_MODEL !== undefined ? { subagentModelRef: config.AGENT_SUBAGENT_MODEL } : {}),
     ...(config.AGENT_TOOL_TIMEOUT_MS !== undefined ? { toolTimeoutMs: config.AGENT_TOOL_TIMEOUT_MS } : {}),
+    ...(config.AGENT_THINKING_BUDGET !== undefined ? { thinkingBudgetTokens: config.AGENT_THINKING_BUDGET } : {}),
   });
 
   await app.listen({ port: config.PORT, host: "0.0.0.0" });

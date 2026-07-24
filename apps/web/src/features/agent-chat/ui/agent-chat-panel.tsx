@@ -44,6 +44,7 @@ export function AgentChatPanel() {
   const [references, setReferences] = useState<AgentReference[]>([])
   const [attachments, setAttachments] = useState<AgentAttachmentInput[]>([])
   const [streamingText, setStreamingText] = useState('')
+  const [streamingReasoning, setStreamingReasoning] = useState('')
   const [pendingPermissions, setPendingPermissions] = useState<PendingPermission[]>([])
   const [modelIds, setModelIds] = useState<string[]>([])
   // 드래프트(세션 미생성) 상태에서 고른 모델 — 첫 전송의 세션 생성에 실려 간다.
@@ -221,6 +222,7 @@ export function AgentChatPanel() {
       setSending(true)
       setPendingUser(text)
       setStreamingText('')
+      setStreamingReasoning('')
 
       const controller = new AbortController()
       abortRef.current = controller
@@ -236,13 +238,24 @@ export function AgentChatPanel() {
               : undefined
           if (typeof delta === 'string' && delta.length > 0)
             setStreamingText((prev) => prev + delta)
+        } else if (event === 'reasoning') {
+          // Live extended-thinking tokens — grow the in-flight reasoning block until this turn's record lands.
+          const delta =
+            data !== null && typeof data === 'object' && 'text' in data
+              ? (data as { text?: unknown }).text
+              : undefined
+          if (typeof delta === 'string' && delta.length > 0)
+            setStreamingReasoning((prev) => prev + delta)
         } else if (event === 'message') {
           const parsed = agentMessageSchema.safeParse(data)
           if (!parsed.success) return
           setMessages((prev) => mergeMessages(prev, [parsed.data]))
           if (parsed.data.role === 'user') setPendingUser(null)
-          if (parsed.data.role === 'assistant' && parsed.data.content.trim().length > 0)
-            setStreamingText('')
+          // Each assistant record carries this turn's finalized reasoning + text, so retire the live buffers when it lands.
+          if (parsed.data.role === 'assistant') {
+            setStreamingReasoning('')
+            if (parsed.data.content.trim().length > 0) setStreamingText('')
+          }
         } else if (event === 'permission') {
           if (data !== null && typeof data === 'object' && 'requestId' in data && 'name' in data) {
             const d = data as { requestId?: unknown; name?: unknown; input?: unknown }
@@ -318,6 +331,7 @@ export function AgentChatPanel() {
       } finally {
         abortRef.current = null
         setStreamingText('')
+        setStreamingReasoning('')
         setPendingUser(null)
         setSending(false)
         // The turn is over; any approval still parked was denied server-side (timeout/disconnect), so clear the strip.
@@ -370,6 +384,7 @@ export function AgentChatPanel() {
       pendingUser={pendingUser}
       sending={sending}
       streamingText={streamingText}
+      streamingReasoning={streamingReasoning}
       input={input}
       references={references}
       attachments={attachments}

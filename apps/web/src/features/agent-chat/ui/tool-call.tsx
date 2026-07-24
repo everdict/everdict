@@ -21,7 +21,7 @@ function tryParseJson(text: string): unknown | undefined {
   }
 }
 
-function looksLikeError(result: string): boolean {
+export function looksLikeError(result: string): boolean {
   return /^\(?(could not resolve|error|invalid|unknown tool|tool .* failed)/i.test(result.trim())
 }
 

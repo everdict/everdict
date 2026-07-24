@@ -152,6 +152,33 @@ i18n `agentChat` namespace in `messages/{en,ko}.json`.
   (workspace-shared + own private) each turn, independent of the AgentSpec. Web: **Settings › Skills**
   (`features/manage-skills`) — the library list + a New-skill dialog with an AI generate wizard (describe → draft →
   edit → save) + a private↔workspace share toggle + delete (creator-or-admin).
+- **P8 — a workspace's configured integrations are usable by default (HITL-gated).** Beyond the read-only
+  allowlist, the agent bridges a curated set of **"use the integration" actions** from the base control-plane
+  surface by DEFAULT (`apps/agent/src/mcp-tools.ts` `INTEGRATION_ACTIONS`): `post_mattermost_message` (new — post
+  to the workspace's configured channel), `open_ci_setup_pr`, `get_image_push_credentials`. Each is bridged
+  `isReadOnly:false`, so the existing HITL permission gate approves every call inline. Deliberately narrow —
+  config/register/destroy (`set_/probe_/remove_/assign_/link_/start_`) and secret writes stay excluded, so
+  default-deny still holds for every other mutating verb. This removes the friction of an admin hand-registering a
+  `write:true` `AgentSpec.mcpServers` entry just to let the agent act on integrations the workspace already set up.
+  `post_mattermost_message` is a new control-plane capability (route + MCP tool + `mattermost:post` member action)
+  over `MattermostService.postMessage` — the one genuine gap, since posting to Mattermost previously existed only
+  as the internal completion-notification path.
+- **P11 (reasoning + grouped tool activity, landed)** — the transcript now renders the agent's *thinking* and folds
+  the noise. **Reasoning end-to-end**: `@everdict/llm` captures a turn's reasoning on both providers — Anthropic
+  `thinking`/`redacted_thinking` blocks (streamed `thinking_delta`/`signature_delta`) and OpenAI-compatible
+  `reasoning_content` — and returns it as `StreamResult.reasoning` (display text) + `reasoningBlocks` (native blocks).
+  Extended thinking is opt-in: `StreamRequest.thinking={budgetTokens}` (wired through the loop's `thinking` option and
+  the agent's `AGENT_THINKING_BUDGET` env) enables Anthropic thinking, bumps `max_tokens` above the budget, and drops
+  `temperature` (Anthropic rejects a non-default temperature with thinking); reasoning models reason regardless, so
+  capture is always on. The kernel attaches the reasoning to the assistant message as a **side-channel**
+  (`ReasoningCarrier`): the display `text` is persisted (`AgentMessageRecord.reasoning`, migration `0074`) and the
+  native `blocks` are re-sent verbatim on the following tool-result call so Anthropic's "preserve the thinking block
+  when tool_use follows thinking" holds within a turn (the OpenAI transport strips the side-channel — stateless). The
+  loop emits `reasoning_delta` events → SSE `reasoning` → a live, foldable **ReasoningBlock** in the panel. **Grouped
+  activity (web)**: `buildTranscript` folds the flat message list into render items — assistant text + user turns are
+  role rows; a run of consecutive tool calls collapses into ONE `ToolGroup` ("Used N tools", one click to expand); a
+  `write_todos` call surfaces as a dedicated **TodoList** checklist (plan / progress) instead of a raw tool card;
+  reasoning is its own block. Tool cards no longer repeat the avatar per turn, so a long tool-heavy turn stays compact.
 - **Later** — write-action tools behind HITL (port `permissions`); executable (scripted) skills;
   autonomous scheduled sweeps (runtime monitor → propose/trigger evals); findings → comments + Mattermost;
   SSE token streaming (replace polling); a fallback model + prompt caching; parallel independent tool calls.

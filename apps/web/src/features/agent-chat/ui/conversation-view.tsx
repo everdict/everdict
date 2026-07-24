@@ -15,11 +15,15 @@ import { Button } from '@/shared/ui/button'
 import { DropdownItem, DropdownLabel, DropdownMenu } from '@/shared/ui/dropdown-menu'
 import { Markdown } from '@/shared/ui/markdown'
 
+import { buildTranscript } from '../lib/transcript'
 import { AgentAvatar } from './agent-avatar'
 import { Composer } from './composer'
 import { MessageRow } from './message-row'
 import { PermissionPrompt, type PendingPermission } from './permission-prompt'
+import { ReasoningBlock } from './reasoning-block'
 import { SessionMenu } from './session-menu'
+import { TodoList } from './todo-list'
+import { ToolGroup } from './tool-group'
 
 // A compact model selector in the conversation header — the member picks which registered workspace model powers
 // this conversation. "Workspace default" (null) falls back to the workspace AgentSpec's model / the server default.
@@ -87,6 +91,7 @@ export function ConversationView({
   pendingUser,
   sending,
   streamingText,
+  streamingReasoning,
   input,
   references,
   attachments,
@@ -116,6 +121,7 @@ export function ConversationView({
   pendingUser: string | null
   sending: boolean
   streamingText: string
+  streamingReasoning: string
   input: string
   references: AgentReference[]
   attachments: AgentAttachmentInput[]
@@ -155,9 +161,7 @@ export function ConversationView({
     scrollToBottom('auto')
   }, [scrollToBottom])
 
-  const resultByCallId = new Map<string, string>()
-  for (const m of messages)
-    if (m.role === 'tool' && m.toolCallId) resultByCallId.set(m.toolCallId, m.content)
+  const items = buildTranscript(messages)
 
   let lastAssistantId: string | null = null
   for (const m of messages)
@@ -219,15 +223,20 @@ export function ConversationView({
             </div>
           ) : (
             <>
-              {messages.map((m) => (
-                <MessageRow
-                  key={m.id}
-                  message={m}
-                  resultByCallId={resultByCallId}
-                  isLastAssistant={m.id === lastAssistantId}
-                  onRegenerate={onRegenerate}
-                />
-              ))}
+              {items.map((item) => {
+                if (item.kind === 'reasoning')
+                  return <ReasoningBlock key={item.id} text={item.text} />
+                if (item.kind === 'todos') return <TodoList key={item.id} todos={item.todos} />
+                if (item.kind === 'tools') return <ToolGroup key={item.id} calls={item.calls} />
+                return (
+                  <MessageRow
+                    key={item.message.id}
+                    message={item.message}
+                    isLastAssistant={item.message.id === lastAssistantId}
+                    onRegenerate={onRegenerate}
+                  />
+                )
+              })}
               {pendingUser && (
                 <div className="animate-in fade-in-0 px-3 py-2.5 duration-200">
                   <div className="flex gap-2.5">
@@ -240,6 +249,9 @@ export function ConversationView({
                   </div>
                 </div>
               )}
+              {streamingReasoning.length > 0 && (
+                <ReasoningBlock text={streamingReasoning} streaming />
+              )}
               {streamingText.length > 0 ? (
                 <div className="animate-in fade-in-0 px-3 py-2.5 duration-200">
                   <div className="flex gap-2.5">
@@ -250,7 +262,7 @@ export function ConversationView({
                     />
                   </div>
                 </div>
-              ) : sending ? (
+              ) : sending && streamingReasoning.length === 0 ? (
                 <div className="animate-in fade-in-0 px-3 py-2.5 duration-200">
                   <div className="flex items-center gap-2.5">
                     <AgentAvatar />

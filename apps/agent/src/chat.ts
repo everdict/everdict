@@ -15,6 +15,7 @@ import {
   type AgentToolCall,
   NotFoundError,
 } from "@everdict/contracts";
+import type { ReasoningCarrier } from "@everdict/llm";
 import type { ToolProvider } from "./mcp-tools.js";
 import type { ModelByIdResolver, ModelResolver } from "./model.js";
 import type { ForwardHeaders, Principal } from "./principal.js";
@@ -101,6 +102,9 @@ export interface ChatDeps {
   subagentModelRef?: string;
   // Per-tool wall-clock deadline (ms) forwarded to the loop; a hung tool can't pin a turn forever. Absent → no deadline.
   toolTimeoutMs?: number;
+  // Extended-thinking budget (tokens). Set → the loop asks the model to reason before answering (Anthropic `thinking`;
+  // reasoning models reason regardless). Reasoning is captured + streamed either way; absent → thinking off.
+  thinkingBudgetTokens?: number;
 }
 
 export interface ChatResult {
@@ -244,6 +248,9 @@ export async function runChat(
   const messageToRecord = (message: ChatMessage): AgentMessageRecord | null => {
     if (message.role === "assistant") {
       const toolCalls = extractToolCalls(message);
+      // The loop attaches the turn's reasoning as a side-channel (ReasoningCarrier) on the assistant message; persist
+      // its display text so the transcript can re-render the thought process (the native thinking blocks aren't stored).
+      const reasoning = (message as ReasoningCarrier).reasoning?.text;
       return {
         id: deps.newId(),
         tenant: workspace,
@@ -251,6 +258,7 @@ export async function runChat(
         seq: seq++,
         role: "assistant",
         content: contentToString(message.content),
+        ...(reasoning && reasoning.length > 0 ? { reasoning } : {}),
         ...(toolCalls ? { toolCalls } : {}),
         createdAt: deps.now(),
       };
@@ -360,6 +368,7 @@ export async function runChat(
       ...(subagentModel ? { subagentModel } : {}),
       subagentTypes: BUILTIN_SUBAGENT_TYPES,
       ...(deps.toolTimeoutMs !== undefined ? { toolTimeoutMs: deps.toolTimeoutMs } : {}),
+      ...(deps.thinkingBudgetTokens !== undefined ? { thinking: { budgetTokens: deps.thinkingBudgetTokens } } : {}),
       ...(hooks?.onEvent ? { onEvent: hooks.onEvent } : {}),
       ...(hooks?.permit ? { permit: hooks.permit } : {}),
       ...(hooks?.drainInput ? { drainInput: hooks.drainInput } : {}),

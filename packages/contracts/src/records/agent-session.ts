@@ -59,6 +59,10 @@ export const AgentMessageRecordSchema = z.object({
   seq: z.number().int().nonnegative(),
   role: z.enum(["user", "assistant", "tool"]),
   content: z.string(),
+  // assistant turns: the model's reasoning / extended-thinking text for this turn (display text only — the native
+  // thinking blocks used for same-turn tool-use replay are held in memory by the loop, never persisted). Absent when
+  // the model produced no reasoning (non-reasoning model / thinking disabled).
+  reasoning: z.string().optional(),
   toolCalls: z.array(AgentToolCallSchema).optional(), // assistant turns that requested tools
   toolCallId: z.string().optional(), // tool turns: the assistant tool_call this answers
   name: z.string().optional(), // tool turns: the tool name (for display)

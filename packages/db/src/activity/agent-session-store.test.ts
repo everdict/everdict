@@ -90,6 +90,14 @@ describe("InMemoryAgentSessionStore", () => {
     expect(since.map((m) => m.id)).toEqual(["m2"]);
   });
 
+  it("round-trips an assistant turn's reasoning text", async () => {
+    await store.appendMessages([
+      message({ id: "m0", seq: 0, role: "assistant", content: "Answer", reasoning: "First I weighed the options." }),
+    ]);
+    const [m] = await store.listMessages("acme", "s1");
+    expect(m?.reasoning).toBe("First I weighed the options.");
+  });
+
   it("deleteSession removes the session and its transcript together", async () => {
     await store.createSession(session({ id: "s1", owner: "alice" }));
     await store.appendMessages([message({ id: "m0", sessionId: "s1", seq: 0 })]);

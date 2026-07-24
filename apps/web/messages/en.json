@@ -3039,6 +3039,10 @@
     "regenerate": "Regenerate",
     "toolArgs": "Arguments",
     "toolResult": "Result",
+    "toolsUsed": "{count, plural, one {Used # tool} other {Used # tools}}",
+    "reasoning": "Reasoning",
+    "reasoningLive": "Reasoning…",
+    "todoTitle": "Task list",
     "bucket": {
       "today": "Today",
       "yesterday": "Yesterday",

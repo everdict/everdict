@@ -18,6 +18,11 @@ const ConfigSchema = z.object({
   AGENT_SUBAGENT_MODEL: z.string().optional(),
   // Per-tool wall-clock deadline (ms); a tool that outruns it is aborted and returned as an error. Unset → no deadline.
   AGENT_TOOL_TIMEOUT_MS: z.coerce.number().int().positive().optional(),
+  // Extended-thinking budget (tokens). Set → the agent asks the model to reason before answering (Anthropic `thinking`;
+  // OpenAI-side reasoning models reason regardless). Reasoning is captured + streamed to the chat either way. Unset →
+  // thinking off (no extra cost). Anthropic requires this to exceed 1024 and be below max_tokens; the transport bumps
+  // max_tokens to fit.
+  AGENT_THINKING_BUDGET: z.coerce.number().int().positive().optional(),
   // The registered agent-config id resolved per workspace (instructions + MCP tool servers + model override). A
   // workspace registers an agent under this id ("default") to customize its assistant; unset id → base agent.
   AGENT_CONFIG_ID: z.string().default("default"),

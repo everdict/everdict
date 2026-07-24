@@ -107,6 +107,59 @@ describe("AnthropicTransport", () => {
     expect(msgs[0]?.content[0]?.cache_control).toEqual({ type: "ephemeral" });
   });
 
+  it("captures streamed thinking as reasoning text + replayable blocks (with signature)", async () => {
+    const reasoning: string[] = [];
+    const { fetchImpl } = fakeFetch([
+      frame({ type: "content_block_start", index: 0, content_block: { type: "thinking" } }),
+      frame({ type: "content_block_delta", index: 0, delta: { type: "thinking_delta", thinking: "Weigh " } }),
+      frame({ type: "content_block_delta", index: 0, delta: { type: "thinking_delta", thinking: "options." } }),
+      frame({ type: "content_block_delta", index: 0, delta: { type: "signature_delta", signature: "sig123" } }),
+      frame({ type: "content_block_start", index: 1, content_block: { type: "text" } }),
+      frame({ type: "content_block_delta", index: 1, delta: { type: "text_delta", text: "Answer" } }),
+      frame({ type: "message_delta", delta: { stop_reason: "end_turn" }, usage: { output_tokens: 3 } }),
+      frame({ type: "message_stop" }),
+    ]);
+    const transport = new AnthropicTransport({ apiKey: "k", fetchImpl });
+    const result = await transport.stream({ ...base, onReasoningDelta: (d) => reasoning.push(d) });
+    expect(reasoning).toEqual(["Weigh ", "options."]);
+    expect(result.reasoning).toBe("Weigh options.");
+    expect(result.content).toBe("Answer");
+    expect(result.reasoningBlocks).toEqual([{ type: "thinking", thinking: "Weigh options.", signature: "sig123" }]);
+  });
+
+  it("enables extended thinking: sends a thinking budget, bumps max_tokens, and drops temperature", async () => {
+    const { fetchImpl, body } = fakeFetch([frame({ type: "message_stop" })]);
+    const transport = new AnthropicTransport({ apiKey: "k", fetchImpl });
+    await transport.stream({ ...base, temperature: 0.7, maxTokens: 1000, thinking: { budgetTokens: 2048 } });
+    const b = body();
+    expect(b.thinking).toEqual({ type: "enabled", budget_tokens: 2048 });
+    expect(b.temperature).toBeUndefined(); // Anthropic rejects a non-default temperature with thinking
+    expect(b.max_tokens).toBe(2048 + 4096); // bumped above the budget to leave room for output
+  });
+
+  it("replays a prior assistant turn's thinking blocks as the leading content block", async () => {
+    const { fetchImpl, body } = fakeFetch([frame({ type: "message_stop" })]);
+    const transport = new AnthropicTransport({ apiKey: "k", fetchImpl });
+    await transport.stream({
+      ...base,
+      messages: [
+        { role: "user", content: "go" },
+        // The kernel attaches captured thinking blocks via the reasoning side-channel for same-turn replay.
+        {
+          role: "assistant",
+          content: null,
+          tool_calls: [{ id: "tu_1", type: "function", function: { name: "get_run", arguments: "{}" } }],
+          reasoning: { text: "…", blocks: [{ type: "thinking", thinking: "…", signature: "sig" }] },
+        } as never,
+        { role: "tool", tool_call_id: "tu_1", content: "ok" },
+      ],
+    });
+    const msgs = body().messages as { role: string; content: { type: string; [k: string]: unknown }[] }[];
+    // The assistant turn leads with the thinking block, then the tool_use — Anthropic's replay ordering.
+    expect(msgs[1]?.content[0]).toEqual({ type: "thinking", thinking: "…", signature: "sig" });
+    expect(msgs[1]?.content[1]).toMatchObject({ type: "tool_use", id: "tu_1", name: "get_run" });
+  });
+
   it("maps a non-2xx response to an UpstreamError", async () => {
     const fetchImpl = (async () => new Response("nope", { status: 401 })) as unknown as typeof fetch;
     const transport = new AnthropicTransport({ apiKey: "k", fetchImpl });

@@ -60,6 +60,57 @@ describe("runAgentLoop", () => {
     expect(result.toolCalls).toHaveLength(0);
   });
 
+  it("emits reasoning_delta and attaches the turn's reasoning (text + blocks) to the assistant message", async () => {
+    const events: AgentEvent[] = [];
+    const persisted: ChatMessage[] = [];
+    const blocks = [{ type: "thinking", thinking: "weigh it", signature: "sig" }];
+    const transport: LlmTransport = {
+      provider: "fake",
+      stream: async (req) => {
+        req.onReasoningDelta?.("weigh it");
+        req.onContentDelta?.("Answer");
+        return {
+          content: "Answer",
+          toolCalls: [],
+          finishReason: "stop",
+          usage: usage7,
+          reasoning: "weigh it",
+          reasoningBlocks: blocks,
+        };
+      },
+    };
+    await runAgentLoop({
+      transport,
+      model: "m",
+      systemPrompt: "s",
+      history,
+      registry: new ToolRegistry([]),
+      onEvent: (e) => events.push(e),
+      onMessage: (m) => {
+        persisted.push(m);
+      },
+    });
+    expect(events).toContainEqual({ type: "reasoning_delta", delta: "weigh it" });
+    const assistant = persisted.find((m) => m.role === "assistant");
+    expect((assistant as { reasoning?: { text: string; blocks?: unknown[] } }).reasoning).toEqual({
+      text: "weigh it",
+      blocks,
+    });
+  });
+
+  it("forwards the thinking budget to the transport request", async () => {
+    const { transport, requests } = fakeTransport([textResult("hi")]);
+    await runAgentLoop({
+      transport,
+      model: "m",
+      systemPrompt: "s",
+      history,
+      registry: new ToolRegistry([]),
+      thinking: { budgetTokens: 1500 },
+    });
+    expect(requests[0]?.thinking).toEqual({ budgetTokens: 1500 });
+  });
+
   it("dispatches a tool call, feeds the result back, then finishes", async () => {
     const call = vi.fn(async (input: unknown) => ({ content: `echo:${JSON.stringify(input)}`, isError: false }));
     const echo: ToolDefinition = {
