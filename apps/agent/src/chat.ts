@@ -3,6 +3,7 @@ import {
   type ChatMessage,
   type McpInvoke,
   type PermissionHook,
+  type SubagentType,
   buildSummarizer,
   runAgentLoop,
 } from "@everdict/agent-runtime";
@@ -124,6 +125,23 @@ export interface ChatHooks {
 }
 
 export const DEFAULT_SESSION_TITLE = "New conversation";
+
+// Built-in specialized sub-agent types the model can pick via spawn_agent(subagent_type). Instruction-only (their tools
+// stay read-only; they inherit the workspace's sub-agent model tier if one is configured). A role prompt is the main
+// lever for this control-plane assistant — the tools are the same read surface, but the framing differs.
+const BUILTIN_SUBAGENT_TYPES: SubagentType[] = [
+  {
+    name: "explore",
+    description: "a fast, broad read-only survey to locate the relevant runs/scorecards/harnesses across the workspace",
+    instructions: "Survey broadly and quickly across the workspace to locate what is relevant to the task",
+  },
+  {
+    name: "analyze",
+    description: "a careful, deep analysis of one entity (a scorecard, a judge trace, a harness) and its details",
+    instructions:
+      "Analyze the specified entity carefully and thoroughly — inspect its details, failures, and edge cases before summarizing",
+  },
+];
 
 export function contentToString(content: ChatMessage["content"]): string {
   if (typeof content === "string") return content;
@@ -335,6 +353,7 @@ export async function runChat(
       ...(summarize ? { summarize } : {}),
       ...(fallback ? { fallback } : {}),
       ...(subagentModel ? { subagentModel } : {}),
+      subagentTypes: BUILTIN_SUBAGENT_TYPES,
       ...(deps.toolTimeoutMs !== undefined ? { toolTimeoutMs: deps.toolTimeoutMs } : {}),
       ...(hooks?.onEvent ? { onEvent: hooks.onEvent } : {}),
       ...(hooks?.permit ? { permit: hooks.permit } : {}),

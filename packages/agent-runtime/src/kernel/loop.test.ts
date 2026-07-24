@@ -560,6 +560,36 @@ describe("runAgentLoop", () => {
     expect(phases).toEqual(["launched", "done"]);
   });
 
+  it("routes spawn_agent to a selected subagent_type (its role instructions + model tier)", async () => {
+    const parent = fakeTransport([
+      toolCallResult("s1", "spawn_agent", JSON.stringify({ task: "find X", subagent_type: "explore" })),
+      textResult("done"),
+    ]);
+    const explore = fakeTransport([textResult("EXPLORED")]);
+    const result = await runAgentLoop({
+      transport: parent.transport,
+      model: "big-model",
+      systemPrompt: "sys",
+      history,
+      registry: new ToolRegistry([]),
+      subagentTypes: [
+        {
+          name: "explore",
+          description: "fast broad read-only search",
+          instructions: "Search broadly and fast",
+          model: { transport: explore.transport, model: "explore-model" },
+        },
+      ],
+    });
+    expect(result.content).toBe("done");
+    // The sub-agent ran on the type's model tier with the type's role woven into its system prompt.
+    expect(explore.requests).toHaveLength(1);
+    expect(explore.requests[0]?.model).toBe("explore-model");
+    expect(explore.requests[0]?.system).toContain("Search broadly and fast");
+    const spawnResult = result.produced.find((m) => m.role === "tool") as { content: string } | undefined;
+    expect(spawnResult?.content).toContain("EXPLORED");
+  });
+
   it("stops with aborted when the signal is already aborted", async () => {
     const { transport } = fakeTransport([textResult("unused")]);
     const result = await runAgentLoop({

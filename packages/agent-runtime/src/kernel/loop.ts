@@ -24,6 +24,15 @@ import { buildSystemPrompt } from "./system-prompt.js";
 
 export type StopReason = "end_turn" | "max_turns" | "token_budget" | "no_progress" | "aborted";
 
+// A specialized sub-agent type the model can select via spawn_agent(subagent_type). A type is a ROLE (an instruction
+// appended to the sub-task prompt) plus an optional model tier; its tools stay read-only (the isolation invariant).
+export interface SubagentType {
+  name: string;
+  description: string; // shown to the model so it can pick the right type
+  instructions?: string; // appended to the sub-task system prompt (the type's role)
+  model?: { transport: LlmTransport; model: string }; // a per-type model tier (else subagentModel / the parent's)
+}
+
 export type AgentEvent =
   | { type: "turn_start"; turn: number }
   | { type: "text_delta"; delta: string }
@@ -79,6 +88,9 @@ export interface AgentLoopOptions {
   // A separate (typically cheaper) model for spawn_agent sub-agents — delegated research/analysis rarely needs the
   // main model. Absent → sub-agents inherit the parent's model. Composes with the read-only tool scoping.
   subagentModel?: { transport: LlmTransport; model: string };
+  // Registered specialized sub-agent TYPES the model can pick via spawn_agent(subagent_type) — each bundles a role
+  // instruction and an optional model tier (tools stay read-only). Absent/empty → a single generic sub-agent.
+  subagentTypes?: SubagentType[];
   // Per-tool wall-clock deadline (ms). A tool call that outruns it is aborted and returned as an error the model sees,
   // so a hung MCP tool can't pin the turn's Promise.all forever. Absent → no per-tool timeout (the run signal still applies).
   toolTimeoutMs?: number;
@@ -268,13 +280,18 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
   const backgroundTasks: Promise<void>[] = [];
   const backgroundResults: { id: string; summary: string; ok: boolean }[] = [];
   let bgCounter = 0;
-  const runNestedSubagent = (task: string): Promise<string> =>
-    runSubagent(() =>
+  const subagentTypeByName = new Map((opts.subagentTypes ?? []).map((t) => [t.name, t]));
+  const runNestedSubagent = (task: string, typeName?: string): Promise<string> => {
+    // A selected type overrides the role instruction + model tier; unknown/absent → the generic researcher.
+    const type = typeName !== undefined ? subagentTypeByName.get(typeName) : undefined;
+    const role = type?.instructions ?? "Do the work with your (read-only) tools";
+    const tier = type?.model ?? opts.subagentModel;
+    return runSubagent(() =>
       runAgentLoop({
-        // Sub-agents can run on a cheaper model (subagentModel) — delegated work rarely needs the main model.
-        transport: opts.subagentModel?.transport ?? opts.transport,
-        model: opts.subagentModel?.model ?? opts.model,
-        systemPrompt: `${opts.systemPrompt}\n\n## Sub-task\nYou are handling a scoped sub-task delegated by another agent, with your own fresh context. Do the work with your (read-only) tools, then give a clear, self-contained summary of your findings as your FINAL message — that summary is your only output back to the caller.`,
+        // Sub-agents can run on a cheaper model (per-type tier / subagentModel) — delegated work rarely needs the main model.
+        transport: tier?.transport ?? opts.transport,
+        model: tier?.model ?? opts.model,
+        systemPrompt: `${opts.systemPrompt}\n\n## Sub-task\nYou are handling a scoped sub-task delegated by another agent, with your own fresh context. ${role}, then give a clear, self-contained summary of your findings as your FINAL message — that summary is your only output back to the caller.`,
         history: [{ role: "user", content: task }],
         registry: subagentRegistry,
         depth: depth + 1,
@@ -286,12 +303,13 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
         ...(opts.summarize ? { summarize: opts.summarize } : {}),
       }).then((r) => r.content),
     );
-  const launchBackground = (task: string): string => {
+  };
+  const launchBackground = (task: string, typeName?: string): string => {
     bgCounter += 1;
     const id = `bg-${bgCounter}`;
     emit({ type: "subagent", id, phase: "launched" });
     backgroundTasks.push(
-      runNestedSubagent(task)
+      runNestedSubagent(task, typeName)
         .then((summary) => {
           backgroundResults.push({ id, summary, ok: true });
           emit({ type: "subagent", id, phase: "done", ok: true });
@@ -308,7 +326,15 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
     return id;
   };
   const spawnTools: ToolDefinition[] =
-    depth < MAX_AGENT_DEPTH ? [buildSpawnAgentTool(runNestedSubagent, launchBackground)] : [];
+    depth < MAX_AGENT_DEPTH
+      ? [
+          buildSpawnAgentTool(
+            runNestedSubagent,
+            launchBackground,
+            opts.subagentTypes?.map((t) => ({ name: t.name, description: t.description })),
+          ),
+        ]
+      : [];
   // Plan mode: while on, write tools are blocked; present_plan asks the host to approve, then turns it off.
   let inPlanMode = opts.planMode === true;
   const planTools: ToolDefinition[] = opts.planMode
