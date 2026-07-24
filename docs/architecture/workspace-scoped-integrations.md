@@ -148,6 +148,10 @@ picker (`ci-link-service.ts listRepos`) switches from the personal token to the 
   admin-in-web (no operator/ops ticket). Full two-way inherently requires MM-side admin actions
   (create bot, register the `/everdict` slash command), so a lighter member-level gate wouldn't help —
   resolved to admin.
+- **Posting a message = member (`mattermost:post`).** Registration is admin governance; *using* the
+  registered integration (posting to the channel) is a member action — honestly named as its own action
+  (like `images:push`) rather than overloading admin-only `settings:write`. This is what lets a member's
+  conversational agent notify the team by default.
 
 ## Install / link flow (S2) — mirrors the connections callback
 
@@ -187,6 +191,14 @@ it → **routes the request to the right workspace** (multi-tenant inbound with 
 - Completion / regression / CI / digest notifications (thread-aware).
 - Interactive messages: message `attachments[].actions` buttons (Re-run / View scorecard / Compare /
   Acknowledge).
+- **Agent-callable post** (`POST /workspace/mattermost/messages` + MCP `post_mattermost_message`, over
+  `MattermostService.postMessage`): the conversational agent posts an arbitrary message to the workspace's
+  configured default channel as the bot (e.g. "post this regression summary to the team"). Unlike the
+  fire-and-forget notification path, failures are **surfaced** (config gaps → `BadRequest`; a transport/non-2xx
+  from MM → the adapter's remapped `UpstreamError`) so the agent (and its HITL approver) learns the post's fate.
+  Gated `mattermost:post` (**member+**, not admin) — using the integration is a member's job. The agent gets this
+  tool **by default** (see `agent-conversations.md` P8: it is one of the curated `INTEGRATION_ACTIONS`, bridged
+  HITL-gated).
 
 **Inbound (MM → Everdict), two verified public endpoints:**
 - `POST /integrations/mattermost/command` — `/everdict run|leaderboard|status …` → parse → dispatch →

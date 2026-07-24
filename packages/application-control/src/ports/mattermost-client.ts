@@ -1,6 +1,8 @@
 // Outbound Mattermost port (re-architecture P2d) — the use-case layer decides WHEN to notify and
 // WHAT the message says; the wire protocol (endpoint path, auth header, body shape) is the adapter's
-// (apps/api infrastructure/mattermost). Failure handling stays with the caller (fire-and-forget).
+// (apps/api infrastructure/mattermost). `post` throws a remapped AppError (UpstreamError) on a transport
+// or non-2xx failure: fire-and-forget callers (completion notifications) swallow it in their own try/catch,
+// while the agent's post_mattermost_message tool lets it propagate so the user learns the post failed.
 export interface MattermostPost {
   channelId: string;
   message: string;

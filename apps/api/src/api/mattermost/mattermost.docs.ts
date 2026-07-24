@@ -74,6 +74,22 @@ const docs = {
     tags: ["mattermost"],
     response: { 204: { description: "Removed", type: "null" }, ...errorResponses(401, 403, 404) },
   },
+  postMessage: {
+    summary: "Post a message to the workspace Mattermost channel",
+    description:
+      "Post a message to the workspace's configured default channel as the bot — powers the conversational agent's " +
+      "post_mattermost_message tool (notify the team, e.g. a regression summary). Requires a registered bot + default " +
+      "channel (missing config → 400). Requires mattermost:post (member+), distinct from admin-only registration.",
+    tags: ["mattermost"],
+    body: toJsonSchema(z.object({ message: z.string().min(1).describe("Message text to post (Markdown supported)") })),
+    response: {
+      200: {
+        description: "The channel the message landed in",
+        ...toJsonSchema(z.object({ channelId: z.string() })),
+      },
+      ...errorResponses(400, 401, 403, 404),
+    },
+  },
   command: {
     summary: "Mattermost slash command inbound (public)",
     description:

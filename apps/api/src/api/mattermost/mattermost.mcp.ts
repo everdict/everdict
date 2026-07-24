@@ -78,5 +78,16 @@ export function registerMattermostTools(server: McpServer, ctx: McpToolContext):
           return ok({ ok: true });
         }),
     );
+    server.registerTool(
+      "post_mattermost_message",
+      {
+        description:
+          "Post a message to this workspace's configured Mattermost channel (the default channel of the registered bot), as the workspace bot. Use this to notify the team — e.g. a scorecard regression summary or a run result. Requires the workspace to have a registered Mattermost bot + default channel (otherwise an error). member+ (mattermost:post). Returns the channel id the message landed in.",
+        inputSchema: {
+          message: z.string().min(1).describe("the message text to post (Mattermost Markdown supported)"),
+        },
+      },
+      ({ message }) => run(principal, "mattermost:post", async () => ok(await mm.postMessage(ws, message))),
+    );
   }
 }

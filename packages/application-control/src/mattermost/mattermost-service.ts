@@ -151,4 +151,29 @@ export class MattermostService {
   async clear(workspace: string): Promise<void> {
     await this.settings.set(workspace, { mattermost: null });
   }
+
+  // Post a message to this workspace's configured default channel as the workspace bot (the conversational agent's
+  // post_mattermost_message tool + its HTTP/MCP endpoint). Unlike completion notifications (fire-and-forget), failure
+  // is SURFACED — the agent must know whether the post landed, so config gaps throw BadRequest and a transport/HTTP
+  // failure propagates as the adapter's remapped UpstreamError. Requires the operator server URL + a registered bot +
+  // a defaultChannelId. Returns the channel it landed in.
+  async postMessage(workspace: string, message: string): Promise<{ channelId: string }> {
+    const host = this.requireHost();
+    const mm = (await this.settings.get(workspace))?.mattermost;
+    if (!mm)
+      throw new BadRequestError(
+        "BAD_REQUEST",
+        {},
+        "Mattermost is not registered for this workspace. An admin must register a bot token first (Settings → Integrations).",
+      );
+    if (!mm.defaultChannelId)
+      throw new BadRequestError(
+        "BAD_REQUEST",
+        {},
+        "No default Mattermost channel is configured for this workspace. An admin must set a default channel first.",
+      );
+    const token = await this.botTokenValue(workspace, mm.botTokenSecretName);
+    await this.client.post(host, token, { channelId: mm.defaultChannelId, message });
+    return { channelId: mm.defaultChannelId };
+  }
 }

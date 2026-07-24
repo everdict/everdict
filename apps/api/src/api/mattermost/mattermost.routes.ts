@@ -86,6 +86,28 @@ export function registerMattermostRoutes(app: FastifyInstance, deps: ServerDeps)
       return sendError(reply, err);
     }
   });
+
+  // Post a message to the workspace's configured channel as the bot (mattermost:post — member+, distinct from the
+  // admin-only registration above). Powers the conversational agent's post_mattermost_message tool. Gate BEFORE
+  // validate (don't leak body shape to the unauthorized). Config gaps (no bot / no channel) → 400 from the service.
+  app.post("/workspace/mattermost/messages", { schema: mattermostDocs.postMessage }, async (req, reply) => {
+    if (!deps.mattermostService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "mattermost service not configured" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "mattermost:post");
+    } catch (err) {
+      return sendError(reply, err);
+    }
+    const body = z.object({ message: z.string().min(1) }).safeParse(req.body ?? {});
+    if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: zodIssues(body.error).join("; ") });
+    try {
+      return reply.send(await deps.mattermostService.postMessage(principal.workspace, body.data.message));
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
   // --- Mattermost inbound (slash commands + interactive buttons) — public route. Workspace = ?ws=, authenticity = constant-time commandToken check (fail-closed) ---
   // MM calls this directly (not a user session). Verification failure is ForbiddenError→403. Slash commands are form-urlencoded, button actions are JSON.
   app.post<{ Querystring: { ws?: string } }>(

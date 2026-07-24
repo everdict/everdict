@@ -669,6 +669,53 @@ describe("API — workspace integrations (GitHub App / Mattermost)", () => {
     await app.close();
   });
 
+  it("Mattermost: posting a message — viewer denied (403, gate before validate), authorized post lands, empty text 400", async () => {
+    const h = { authorization: "Bearer x" };
+    // A viewer lacks mattermost:post → 403 even before body validation (no leak) and before any config exists.
+    const viewer = server({ requireAuth: true, authenticator: roleAuth(["viewer"]) });
+    expect(
+      (
+        await viewer.app.inject({
+          method: "POST",
+          url: "/workspace/mattermost/messages",
+          headers: h,
+          payload: { message: "hi" },
+        })
+      ).statusCode,
+    ).toBe(403);
+    await viewer.app.close();
+
+    const { app } = server({ requireAuth: true, authenticator: roleAuth(["admin"]) });
+    // Register a bot + default channel first (admin).
+    await app.inject({
+      method: "PUT",
+      url: "/workspace/mattermost",
+      headers: h,
+      payload: { botTokenSecretName: "MM_BOT", defaultChannelId: "ch" },
+    });
+    // Empty message → 400 (gate passes for admin, validation fails).
+    expect(
+      (
+        await app.inject({
+          method: "POST",
+          url: "/workspace/mattermost/messages",
+          headers: h,
+          payload: { message: "" },
+        })
+      ).statusCode,
+    ).toBe(400);
+    // Valid post → 200 with the channel it landed in.
+    const posted = await app.inject({
+      method: "POST",
+      url: "/workspace/mattermost/messages",
+      headers: h,
+      payload: { message: "scorecard regression summary" },
+    });
+    expect(posted.statusCode).toBe(200);
+    expect(posted.json().channelId).toBe("ch");
+    await app.close();
+  });
+
   it("trace sources (multiple): admin registers/removes by name, member selects per harness, tag-correlation is validated, viewer read-only", async () => {
     const h = { authorization: "Bearer x" };
     const { app } = server({ requireAuth: true, authenticator: roleAuth(["admin"]) });

@@ -1,4 +1,5 @@
 import type { MattermostClient, MattermostProbeResult } from "@everdict/application-control";
+import { UpstreamError } from "@everdict/contracts";
 
 // The fetch-backed Mattermost adapter — owns the wire protocol (/api/v4/*, bot-token bearer,
 // props.attachments envelope). The injectable fetch keeps tests recording the exact wire bytes.
@@ -14,15 +15,34 @@ export function mattermostHttpClient(fetchImpl: typeof fetch = fetch): Mattermos
   return {
     async post(host, botToken, post) {
       const base = trimSlash(host);
-      await fetchImpl(`${base}/api/v4/posts`, {
-        method: "POST",
-        headers: { authorization: `Bearer ${botToken}`, "content-type": "application/json" },
-        body: JSON.stringify({
-          channel_id: post.channelId,
-          message: post.message,
-          ...(post.attachments ? { props: { attachments: post.attachments } } : {}),
-        }),
-      });
+      // Surface failures as our own error (never a raw fetch error): a transport failure or a non-2xx from
+      // Mattermost is remapped to UpstreamError. Fire-and-forget callers (completion notifications) swallow it in
+      // their own try/catch; the agent's post_mattermost_message tool lets it propagate so the user learns it failed.
+      let res: Response;
+      try {
+        res = await fetchImpl(`${base}/api/v4/posts`, {
+          method: "POST",
+          headers: { authorization: `Bearer ${botToken}`, "content-type": "application/json" },
+          body: JSON.stringify({
+            channel_id: post.channelId,
+            message: post.message,
+            ...(post.attachments ? { props: { attachments: post.attachments } } : {}),
+          }),
+        });
+      } catch (e) {
+        const detail = e instanceof Error ? e.message : String(e);
+        throw new UpstreamError(
+          "UPSTREAM_ERROR",
+          { detail },
+          `Could not reach Mattermost to post the message: ${detail}`,
+        );
+      }
+      if (!res.ok)
+        throw new UpstreamError(
+          "UPSTREAM_ERROR",
+          { status: res.status },
+          `Mattermost rejected the post (HTTP ${res.status}).`,
+        );
     },
     // Connection test — GET /api/v4/users/me authenticates the bot token; GET /api/v4/channels/{id} confirms the
     // channel is reachable. Never throws for reachability: a network/DNS/timeout failure is classified as a result.

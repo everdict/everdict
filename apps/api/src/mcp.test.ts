@@ -238,6 +238,31 @@ describe("MCP — budget tools", () => {
   });
 });
 
+describe("MCP — mattermost post", () => {
+  it("a member posts to the configured channel (mattermost:post); a viewer is denied", async () => {
+    const deps = harness();
+    // An admin registers the bot + default channel (settings:write).
+    const admin = await connect(deps, ["admin"]);
+    const registered = await admin.callTool({
+      name: "set_workspace_mattermost",
+      arguments: { botTokenSecretName: "MM_BOT", defaultChannelId: "ch" },
+    });
+    expect(registered.isError).toBeFalsy();
+    // A member (not admin) can post — using the integration is a member's job.
+    const member = await connect(deps, ["member"]);
+    const posted = await member.callTool({
+      name: "post_mattermost_message",
+      arguments: { message: "scorecard regression on suite X" },
+    });
+    expect(posted.isError).toBeFalsy();
+    expect(JSON.parse(text(posted))).toMatchObject({ channelId: "ch" });
+    // A viewer lacks mattermost:post.
+    const viewer = await connect(deps, ["viewer"]);
+    const denied = await viewer.callTool({ name: "post_mattermost_message", arguments: { message: "x" } });
+    expect(denied.isError).toBe(true);
+  });
+});
+
 describe("MCP — live screen (report_case_screen)", () => {
   const withFrames = (frames: LiveFrameStore) => ({ ...harness(), liveFrames: frames });
 
@@ -435,6 +460,7 @@ describe("MCP tools", () => {
       "pair_runner",
       "pair_workspace_runner",
       "pin_harness_images",
+      "post_mattermost_message",
       "probe_runtime",
       "probe_workspace_mattermost",
       "probe_workspace_trace_source",

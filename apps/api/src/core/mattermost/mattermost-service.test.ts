@@ -6,9 +6,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const HOST = "https://mm.corp.io";
 
-// A fake Mattermost client — verify returns whatever the test queues; post is a no-op.
+// A fake Mattermost client — verify returns whatever the test queues; post records its call for assertions.
 function fakeClient(verify: () => Promise<MattermostProbeResult>): MattermostClient {
-  return { post: async () => {}, verify: vi.fn(verify) };
+  return { post: vi.fn(async () => {}), verify: vi.fn(verify) };
 }
 
 describe("MattermostService", () => {
@@ -101,5 +101,36 @@ describe("MattermostService", () => {
     expect(await svc.get("acme")).toEqual({ host: HOST });
     await svc.clear("acme"); // idempotent
     expect(await svc.get("acme")).toEqual({ host: HOST });
+  });
+
+  describe("postMessage (agent post_mattermost_message)", () => {
+    it("posts to the configured default channel via the resolved bot token, returning the channel", async () => {
+      const { svc, client } = build();
+      await svc.set("acme", { botTokenSecretName: "MM_BOT", defaultChannelId: "ch" });
+      const out = await svc.postMessage("acme", "regression on suite X");
+      expect(out).toEqual({ channelId: "ch" });
+      expect(client.post).toHaveBeenCalledWith(HOST, "xoxb-token", {
+        channelId: "ch",
+        message: "regression on suite X",
+      });
+    });
+
+    it("throws when the workspace has not registered Mattermost", async () => {
+      const { svc, client } = build();
+      await expect(svc.postMessage("acme", "hi")).rejects.toBeInstanceOf(BadRequestError);
+      expect(client.post).not.toHaveBeenCalled();
+    });
+
+    it("throws when the registration has no default channel", async () => {
+      const { svc, client } = build();
+      await svc.set("acme", { botTokenSecretName: "MM_BOT" }); // registered, but no channel
+      await expect(svc.postMessage("acme", "hi")).rejects.toBeInstanceOf(BadRequestError);
+      expect(client.post).not.toHaveBeenCalled();
+    });
+
+    it("throws when the operator server URL is unset (MATTERMOST_HOST)", async () => {
+      const { svc } = build({ noHost: true });
+      await expect(svc.postMessage("acme", "hi")).rejects.toBeInstanceOf(BadRequestError);
+    });
   });
 });
