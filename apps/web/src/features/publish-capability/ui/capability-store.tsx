@@ -75,6 +75,8 @@ export function CapabilityStore({
   canAdopt,
   adoptedKeys,
   secretNames,
+  myWorkspaces,
+  currentWorkspace,
   currentSubject,
   isAdmin,
 }: {
@@ -85,6 +87,8 @@ export function CapabilityStore({
   canAdopt: boolean
   adoptedKeys: string[]
   secretNames: string[]
+  myWorkspaces: { id: string; name: string }[]
+  currentWorkspace: string
   currentSubject?: string
   isAdmin: boolean
 }) {
@@ -326,12 +330,19 @@ export function CapabilityStore({
       {editing !== null && (
         <CapabilityEditorDialog
           capability={editing === 'new' ? null : editing}
+          myWorkspaces={myWorkspaces}
+          ownerId={currentWorkspace}
           onClose={() => setEditing(null)}
         />
       )}
 
       {reaching !== null && (
-        <ReachDialog capability={reaching} isAdmin={isAdmin} onClose={() => setReaching(null)} />
+        <ReachDialog
+          capability={reaching}
+          isAdmin={isAdmin}
+          myWorkspaces={myWorkspaces}
+          onClose={() => setReaching(null)}
+        />
       )}
 
       {adopting !== null && (
@@ -377,9 +388,13 @@ export function CapabilityStore({
 // 발행/편집 다이얼로그. 새 capability 면 id + 타입 선택 + 공개범위 선택; 편집이면 콘텐츠만(reach 는 ⋯ → reach 변경).
 function CapabilityEditorDialog({
   capability,
+  myWorkspaces,
+  ownerId,
   onClose,
 }: {
   capability: Capability | null
+  myWorkspaces: { id: string; name: string }[]
+  ownerId: string
   onClose: () => void
 }) {
   const t = useTranslations('capabilityStore')
@@ -391,7 +406,7 @@ function CapabilityEditorDialog({
   const [visibility, setVisibility] = useState<CapabilityVisibility>(
     capability?.visibility ?? 'private'
   )
-  const [sharedWith, setSharedWith] = useState((capability?.sharedWith ?? []).join(', '))
+  const [sharedWith, setSharedWith] = useState<string[]>(capability?.sharedWith ?? [])
   const [tags, setTags] = useState((capability?.tags ?? []).join(', '))
 
   // mcp
@@ -467,7 +482,7 @@ function CapabilityEditorDialog({
         name,
         description,
         spec,
-        ...(isNew ? { visibility, sharedWith: splitCsv(sharedWith) } : {}),
+        ...(isNew ? { visibility, sharedWith } : {}),
         tags: splitCsv(tags),
       })
       if (r.ok) {
@@ -670,13 +685,14 @@ function CapabilityEditorDialog({
             <VisibilityPicker value={visibility} onChange={setVisibility} t={t} />
             {visibility === 'subset' && (
               <div className="space-y-1 pt-1">
-                <Label htmlFor="cap-shared">{t('sharedWith')}</Label>
+                <Label>{t('sharedWith')}</Label>
                 <p className="text-[12px] text-muted-foreground">{t('sharedWithHint')}</p>
-                <Input
-                  id="cap-shared"
+                <WorkspacePicker
+                  workspaces={myWorkspaces}
+                  ownerId={ownerId}
                   value={sharedWith}
-                  onChange={(e) => setSharedWith(e.target.value)}
-                  className="font-mono text-[13px]"
+                  onChange={setSharedWith}
+                  emptyHint={t('sharedWithEmpty')}
                 />
               </div>
             )}
@@ -700,28 +716,24 @@ function CapabilityEditorDialog({
 function ReachDialog({
   capability,
   isAdmin,
+  myWorkspaces,
   onClose,
 }: {
   capability: Capability
   isAdmin: boolean
+  myWorkspaces: { id: string; name: string }[]
   onClose: () => void
 }) {
   const t = useTranslations('capabilityStore')
   const [visibility, setVisibility] = useState<CapabilityVisibility>(capability.visibility)
-  const [sharedWith, setSharedWith] = useState(capability.sharedWith.join(', '))
+  const [sharedWith, setSharedWith] = useState<string[]>(capability.sharedWith)
   const [pending, startTransition] = useTransition()
 
   const apply = () =>
     startTransition(async () => {
       const r = await setCapabilityVisibilityAction(capability.id, {
         visibility,
-        sharedWith:
-          visibility === 'subset'
-            ? sharedWith
-                .split(',')
-                .map((v) => v.trim())
-                .filter((v) => v.length > 0)
-            : [],
+        sharedWith: visibility === 'subset' ? sharedWith : [],
       })
       if (r.ok) {
         toast.success(t('reachSaved', { name: capability.name }))
@@ -746,13 +758,14 @@ function ReachDialog({
         )}
         {visibility === 'subset' && (
           <div className="space-y-1">
-            <Label htmlFor="reach-shared">{t('sharedWith')}</Label>
+            <Label>{t('sharedWith')}</Label>
             <p className="text-[12px] text-muted-foreground">{t('sharedWithHint')}</p>
-            <Input
-              id="reach-shared"
+            <WorkspacePicker
+              workspaces={myWorkspaces}
+              ownerId={capability.tenant}
               value={sharedWith}
-              onChange={(e) => setSharedWith(e.target.value)}
-              className="font-mono text-[13px]"
+              onChange={setSharedWith}
+              emptyHint={t('sharedWithEmpty')}
             />
           </div>
         )}
@@ -853,6 +866,48 @@ function AdoptDialog({
         </div>
       </div>
     </Dialog>
+  )
+}
+
+// subset 대상 피커 — 내가 속한 워크스페이스들(소유 워크스페이스 제외, 그건 항상 읽음) 중 공유할 것을 다중 선택.
+function WorkspacePicker({
+  workspaces,
+  ownerId,
+  value,
+  onChange,
+  emptyHint,
+}: {
+  workspaces: { id: string; name: string }[]
+  ownerId: string
+  value: string[]
+  onChange: (v: string[]) => void
+  emptyHint: string
+}) {
+  const options = workspaces.filter((w) => w.id !== ownerId)
+  if (options.length === 0) return <p className="text-[12px] text-muted-foreground">{emptyHint}</p>
+  const toggle = (id: string) =>
+    onChange(value.includes(id) ? value.filter((v) => v !== id) : [...value, id])
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {options.map((w) => {
+        const on = value.includes(w.id)
+        return (
+          <button
+            key={w.id}
+            type="button"
+            onClick={() => toggle(w.id)}
+            className={cn(
+              'rounded-md px-2.5 py-1 text-[12px] font-medium ring-1 ring-inset transition-colors',
+              on
+                ? 'bg-primary/10 text-primary ring-primary/30'
+                : 'text-muted-foreground ring-border hover:bg-accent'
+            )}
+          >
+            {w.name}
+          </button>
+        )
+      })}
+    </div>
   )
 }
 

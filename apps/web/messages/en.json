@@ -3300,7 +3300,7 @@
     "tags": "Tags (comma-separated)",
     "visibility": "Visibility",
     "sharedWith": "Shared with (workspace ids)",
-    "sharedWithHint": "Comma-separated ids of your own workspaces to share this with.",
+    "sharedWithHint": "Pick the workspaces (your own) to share this with.",
     "saving": "Saving…",
     "save": "Save",
     "published": "Published \"{name}\".",
@@ -3322,6 +3322,7 @@
     "adoptCodeNote": "This is a code tool — it runs in a sandbox; adopted-from-others code only runs on an isolated runtime.",
     "bindSecrets": "Bind secrets",
     "bindSecretsHint": "Map each required secret to one of your workspace secret names.",
-    "enableWrite": "Allow this tool to make changes (write)"
+    "enableWrite": "Allow this tool to make changes (write)",
+    "sharedWithEmpty": "You're only in this workspace — nowhere else to share to yet."
   }
 }

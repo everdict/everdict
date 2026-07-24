@@ -5,6 +5,7 @@ import { agentSpecSchema } from '@/entities/agent-spec'
 import { capabilitiesSchema, type Capability } from '@/entities/capability'
 import { membersSchema } from '@/entities/member'
 import { secretsSchema } from '@/entities/secret'
+import { workspacesSchema } from '@/entities/workspace'
 import { can } from '@/shared/auth/can'
 import { currentPrincipal } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
@@ -76,6 +77,12 @@ export default async function StorePage() {
     )
     .catch(() => [] as string[])
 
+  // subset 공유 대상 피커용 — 내가 속한 워크스페이스들(id + 이름). 소유 워크스페이스는 피커에서 제외(항상 읽음).
+  const myWorkspaces = await controlPlane
+    .listWorkspaces(ctx)
+    .then((r) => workspacesSchema.parse(r).map((w) => ({ id: w.id, name: w.name })))
+    .catch(() => [] as { id: string; name: string }[])
+
   return (
     <div className="space-y-6">
       {header}
@@ -90,6 +97,8 @@ export default async function StorePage() {
           canAdopt={canAdopt}
           adoptedKeys={adoptedKeys}
           secretNames={secretNames}
+          myWorkspaces={myWorkspaces}
+          currentWorkspace={principal?.workspace ?? ''}
           isAdmin={isAdmin}
           {...(principal?.subject !== undefined ? { currentSubject: principal.subject } : {})}
         />
