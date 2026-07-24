@@ -9,15 +9,18 @@ import {
   agentMessageSchema,
   agentSessionListSchema,
   agentSessionSchema,
+  agentTeammateListSchema,
   type AgentAttachmentInput,
   type AgentMessage,
   type AgentReference,
   type AgentSession,
+  type AgentTeammate,
 } from '@/entities/agent-session'
 import { modelsSchema } from '@/entities/model'
 
 import { ConversationView } from './conversation-view'
 import type { PendingPermission } from './permission-prompt'
+import type { TeammateSpawnInput } from './team-menu'
 
 // The agent conversation surface for the infra panel's "agent" tab. Owns all state + I/O; delegates rendering to
 // ConversationView (the chat is ALWAYS on screen — entering the tab lands on a ready-to-type draft, and history
@@ -49,6 +52,9 @@ export function AgentChatPanel() {
   const [modelIds, setModelIds] = useState<string[]>([])
   // 드래프트(세션 미생성) 상태에서 고른 모델 — 첫 전송의 세션 생성에 실려 간다.
   const [draftModel, setDraftModel] = useState<string | null>(null)
+  // The caller's live teammates (docs/architecture/agent-teams.md) — long-lived autonomous agents that watch platform
+  // events and wake to react. Loaded on mount and refreshed after each turn (the agent can self-spawn via a tool).
+  const [teammates, setTeammates] = useState<AgentTeammate[]>([])
   const abortRef = useRef<AbortController | null>(null)
 
   const loadSessions = useCallback(async () => {
@@ -65,6 +71,56 @@ export function AgentChatPanel() {
   useEffect(() => {
     void loadSessions()
   }, [loadSessions])
+
+  const loadTeammates = useCallback(async () => {
+    try {
+      const res = await fetch('/api/agent/teammates', { cache: 'no-store' })
+      if (!res.ok) return
+      const parsed = agentTeammateListSchema.safeParse(await res.json())
+      if (parsed.success) setTeammates(parsed.data.teammates)
+    } catch {
+      // silent — refreshed after the next turn/spawn
+    }
+  }, [])
+
+  useEffect(() => {
+    void loadTeammates()
+  }, [loadTeammates])
+
+  const spawnTeammate = useCallback(
+    async (spawnInput: TeammateSpawnInput) => {
+      try {
+        const res = await fetch('/api/agent/teammates', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(spawnInput),
+        })
+        if (!res.ok) throw new Error('spawn failed')
+        toast.success(t('team.spawned', { name: spawnInput.name }))
+        void loadTeammates()
+      } catch {
+        toast.error(t('errorGeneric'))
+      }
+    },
+    [loadTeammates, t]
+  )
+
+  const stopTeammate = useCallback(
+    async (id: string) => {
+      // Optimistic — drop it immediately; a failure reloads the true roster.
+      setTeammates((prev) => prev.filter((tm) => tm.id !== id))
+      try {
+        const res = await fetch(`/api/agent/teammates/${encodeURIComponent(id)}`, {
+          method: 'DELETE',
+        })
+        if (!res.ok) throw new Error('stop failed')
+      } catch {
+        toast.error(t('errorGeneric'))
+        void loadTeammates()
+      }
+    },
+    [loadTeammates, t]
+  )
 
   // The workspace's registered models power the per-conversation model picker (same ids the agent resolves to
   // run the turn). Best-effort: no registry / no permission → an empty list, and the picker offers only "default".
@@ -337,9 +393,11 @@ export function AgentChatPanel() {
         // The turn is over; any approval still parked was denied server-side (timeout/disconnect), so clear the strip.
         setPendingPermissions([])
         void loadSessions()
+        // The turn may have self-spawned a teammate (spawn_teammate tool) — refresh the roster so the badge reflects it.
+        void loadTeammates()
       }
     },
-    [input, activeId, sending, references, attachments, draftModel, loadSessions, t]
+    [input, activeId, sending, references, attachments, draftModel, loadSessions, loadTeammates, t]
   )
 
   const stop = useCallback(() => abortRef.current?.abort(), [])
@@ -380,6 +438,9 @@ export function AgentChatPanel() {
       onNewConversation={newConversation}
       onDeleteSession={(id) => void deleteSession(id)}
       onRenameSession={(id, title) => void renameSession(id, title)}
+      teammates={teammates}
+      onSpawnTeammate={(spawnInput) => void spawnTeammate(spawnInput)}
+      onStopTeammate={(id) => void stopTeammate(id)}
       messages={messages}
       pendingUser={pendingUser}
       sending={sending}

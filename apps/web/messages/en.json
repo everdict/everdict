@@ -3060,6 +3060,23 @@
       "yesterday": "Yesterday",
       "earlier": "Earlier"
     },
+    "team": {
+      "title": "Team",
+      "empty": "No teammates yet. Spawn one to watch events and react on its own.",
+      "spawn": "Spawn teammate",
+      "spawned": "{name} is now on the team",
+      "namePlaceholder": "Teammate name (e.g. regression-watcher)",
+      "taskPlaceholder": "What should it do when it wakes? (a standing instruction)",
+      "watchLabel": "Wakes on",
+      "watchesNothing": "On-demand only",
+      "stop": "Stop teammate",
+      "confirmStop": "Confirm stop",
+      "cancel": "Cancel",
+      "kind": {
+        "run": { "completed": "Run completed", "failed": "Run failed" },
+        "scorecard": { "completed": "Scorecard completed", "failed": "Scorecard failed" }
+      }
+    },
     "suggestions": [
       "Summarize my most recent scorecard's failures",
       "What datasets and harnesses are in my workspace?",

@@ -58,6 +58,13 @@ export const agentPlane = {
       method: 'PATCH',
       body: JSON.stringify(patch),
     }),
+  // Teammates (docs/architecture/agent-teams.md) — the caller's live autonomous agents. List the roster, spawn one
+  // (name + standing task + watched event kinds), or stop one (unregister + revoke its token; the transcript is kept).
+  listTeammates: <T>(auth: AuthContext) => call<T>(auth, '/agent/teammates'),
+  spawnTeammate: <T>(auth: AuthContext, body: unknown) =>
+    call<T>(auth, '/agent/teammates', { method: 'POST', body: JSON.stringify(body) }),
+  stopTeammate: (auth: AuthContext, id: string) =>
+    call<void>(auth, `/agent/teammates/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   listMessages: <T>(auth: AuthContext, id: string, since?: number) =>
     call<T>(
       auth,

@@ -3060,6 +3060,23 @@
       "yesterday": "어제",
       "earlier": "이전"
     },
+    "team": {
+      "title": "팀",
+      "empty": "아직 팀원이 없어요. 팀원을 생성하면 이벤트를 구독하고 스스로 반응합니다.",
+      "spawn": "팀원 생성",
+      "spawned": "{name} 팀원이 합류했어요",
+      "namePlaceholder": "팀원 이름 (예: regression-watcher)",
+      "taskPlaceholder": "깨어나면 무엇을 해야 하나요? (상시 지시)",
+      "watchLabel": "깨어나는 이벤트",
+      "watchesNothing": "요청 시에만",
+      "stop": "팀원 중지",
+      "confirmStop": "중지 확인",
+      "cancel": "취소",
+      "kind": {
+        "run": { "completed": "실행 완료", "failed": "실행 실패" },
+        "scorecard": { "completed": "스코어카드 완료", "failed": "스코어카드 실패" }
+      }
+    },
     "suggestions": [
       "가장 최근 스코어카드의 실패를 요약해줘",
       "내 워크스페이스에 어떤 데이터셋과 하네스가 있어?",

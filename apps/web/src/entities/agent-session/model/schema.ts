@@ -76,6 +76,25 @@ export const agentMessageSchema = z.object({
 })
 
 export const agentSessionListSchema = z.object({ sessions: z.array(agentSessionSchema) })
+
+// A teammate — a long-lived autonomous agent the member spawns (docs/architecture/agent-teams.md). It watches
+// platform event kinds and wakes to react (proactive team). An agent-server concept with no control-plane record,
+// so the type is local (no @everdict/contracts anchor).
+export const AGENT_EVENT_KINDS = [
+  'run.completed',
+  'run.failed',
+  'scorecard.completed',
+  'scorecard.failed',
+] as const
+export type AgentEventKind = (typeof AGENT_EVENT_KINDS)[number]
+
+export const agentTeammateSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  watch: z.array(z.string()),
+})
+export type AgentTeammate = z.infer<typeof agentTeammateSchema>
+export const agentTeammateListSchema = z.object({ teammates: z.array(agentTeammateSchema) })
 export const agentMessageListSchema = z.object({ messages: z.array(agentMessageSchema) })
 
 // Drift guards — identical-shape entities (the web models every record field and no extra), so each guard is

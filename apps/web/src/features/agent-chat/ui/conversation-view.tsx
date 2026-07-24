@@ -9,6 +9,7 @@ import type {
   AgentMessage,
   AgentReference,
   AgentSession,
+  AgentTeammate,
 } from '@/entities/agent-session'
 import { cn } from '@/shared/lib/utils'
 import { Button } from '@/shared/ui/button'
@@ -22,6 +23,7 @@ import { MessageRow } from './message-row'
 import { PermissionPrompt, type PendingPermission } from './permission-prompt'
 import { ReasoningBlock } from './reasoning-block'
 import { SessionMenu } from './session-menu'
+import { TeamMenu, type TeammateSpawnInput } from './team-menu'
 import { TodoList } from './todo-list'
 import { ToolGroup } from './tool-group'
 
@@ -87,6 +89,9 @@ export function ConversationView({
   onNewConversation,
   onDeleteSession,
   onRenameSession,
+  teammates,
+  onSpawnTeammate,
+  onStopTeammate,
   messages,
   pendingUser,
   sending,
@@ -117,6 +122,9 @@ export function ConversationView({
   onNewConversation: () => void
   onDeleteSession: (id: string) => void
   onRenameSession: (id: string, title: string) => void
+  teammates: AgentTeammate[]
+  onSpawnTeammate: (input: TeammateSpawnInput) => void
+  onStopTeammate: (id: string) => void
   messages: AgentMessage[]
   pendingUser: string | null
   sending: boolean
@@ -178,6 +186,7 @@ export function ConversationView({
           {title}
         </span>
         <ModelPicker models={models} model={model} onChange={onChangeModel} />
+        <TeamMenu teammates={teammates} onSpawn={onSpawnTeammate} onStop={onStopTeammate} />
         <SessionMenu
           sessions={sessions}
           activeId={activeId}
@@ -185,12 +194,7 @@ export function ConversationView({
           onDelete={onDeleteSession}
           onRename={onRenameSession}
         />
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          aria-label={t('new')}
-          onClick={onNewConversation}
-        >
+        <Button variant="ghost" size="icon-sm" aria-label={t('new')} onClick={onNewConversation}>
           <MessageSquarePlus />
         </Button>
       </div>
