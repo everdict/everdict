@@ -1,4 +1,4 @@
-import { ConflictError, type Dataset, DatasetSchema, NotFoundError } from "@everdict/contracts";
+import { BadRequestError, ConflictError, type Dataset, DatasetSchema, NotFoundError } from "@everdict/contracts";
 import type { SqlClient } from "@everdict/db";
 import { describe, expect, it } from "vitest";
 import { PgDatasetRegistry } from "./dataset/pg-dataset-registry.js";
@@ -315,5 +315,16 @@ describe("PgVersionedStore soft-delete invariant — reads carry WHERE deleted_a
     await r.softDelete("acme", "mine", "1.0.0");
     await expect(r.softDelete("acme", "mine", "1.0.0")).rejects.toBeInstanceOf(NotFoundError); // already deleted
     await expect(r.softDelete("acme", "absent", "1.0.0")).rejects.toBeInstanceOf(NotFoundError); // never existed
+  });
+});
+
+describe("PgVersionedStore version invariant — a blank version is rejected (defense-in-depth for the seed/file path)", () => {
+  it("Given a register with a blank version (bypassing the contract schema), Then it throws BadRequestError", async () => {
+    // Regression: an empty/blank version is non-semver, so compareVersions tie-breaks it to the tail → it silently
+    // becomes `latest`. The contract VersionSchema rejects it at the API boundary; the store guards the paths that
+    // bypass the schema (seed/file GitOps). Bypass DatasetSchema here to prove the store's own guard.
+    const r = new PgDatasetRegistry(fakePg());
+    const blank = { id: "d", version: "  ", tags: [], cases: [] } as unknown as Dataset;
+    await expect(r.register("acme", blank)).rejects.toBeInstanceOf(BadRequestError);
   });
 });

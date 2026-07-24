@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { BadRequestError } from "../errors.js";
+import { VersionSchema } from "../version.js";
 import {
   CommandHarnessSpecSchema,
   CommandTraceSpecSchema,
@@ -35,7 +36,7 @@ export type TemplateService = z.infer<typeof TemplateServiceSchema>;
 const templateBase = {
   category: HarnessCategorySchema,
   id: z.string(),
-  version: z.string(), // shape version — bumped only when the shape changes (services added/removed etc.); pin changes are the instance.
+  version: VersionSchema, // shape version — bumped only when the shape changes (services added/removed etc.); pin changes are the instance.
 };
 
 export const ServiceTemplateSpecSchema = z.object({
@@ -118,7 +119,7 @@ export type InstanceOverrides = z.infer<typeof InstanceOverridesSchema>;
 export const HarnessInstanceSpecSchema = z.object({
   template: z.object({ id: z.string(), version: z.string() }),
   id: z.string(), // resolved harness id (conventionally the same as template.id)
-  version: z.string(), // instance tag
+  version: VersionSchema, // instance tag
   // This version's changelog (free-text) — entered by the user on deploying a new version, shown on the harness detail. Unset = none.
   // Part of the version spec so immutable (subject to specsEqual): re-registering the same version with different notes → 409. Runtime-agnostic meta, so not carried into resolve.
   description: z.string().optional(),

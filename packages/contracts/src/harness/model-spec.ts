@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { VersionSchema } from "../version.js";
 
 // Model — a first-class model definition a tenant registers ("what to infer/judge with"). Registration/version/tenant
 // ownership follow the same immutable-version SSOT pattern as harness/judge/runtime. judge·harness reference a registered
@@ -11,7 +12,7 @@ import { z } from "zod";
 // optional — unset falls back to the provider default ANTHROPIC_API_KEY/OPENAI_API_KEY), params (sampling defaults).
 export const ModelSpecSchema = z.object({
   id: z.string(),
-  version: z.string(),
+  version: VersionSchema,
   description: z.string().optional(),
   provider: z.enum(["anthropic", "openai"]).default("anthropic"),
   model: z.string(), // underlying model identifier (e.g. "claude-opus-4-8", "gpt-5.4-mini")

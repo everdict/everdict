@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { VersionSchema } from "../version.js";
 
 // Agent Judge — a registrable first-class entity (ownership/version/lifecycle follow the same pattern as harnesses/datasets).
 // Two forms: model (a function that calls an LLM/VLM directly) | harness (delegate the verdict to a registered harness agent).
@@ -31,7 +32,7 @@ const judgePromptFields = {
 export const ModelJudgeSpecSchema = z.object({
   kind: z.literal("model"),
   id: z.string(),
-  version: z.string(),
+  version: VersionSchema,
   description: z.string().optional(),
   provider: z.enum(["anthropic", "openai"]).default("anthropic"), // fallback provider for a RAW-STRING model; a registered-model ref derives it from the ModelSpec
   // A registered Model reference (id string | {ref, version?, env?}) — the SAME first-class binding a harness uses. A ref
@@ -56,7 +57,7 @@ export type ModelJudgeSpec = z.infer<typeof ModelJudgeSpecSchema>;
 export const CodeJudgeSpecSchema = z.object({
   kind: z.literal("code"),
   id: z.string(),
-  version: z.string(),
+  version: VersionSchema,
   description: z.string().optional(),
   language: z.enum(["python", "node"]),
   code: z.string().optional(), // inline source — frozen into this judge version
@@ -76,7 +77,7 @@ export type CodeJudgeSpec = z.infer<typeof CodeJudgeSpecSchema>;
 export const HarnessJudgeSpecSchema = z.object({
   kind: z.literal("harness"),
   id: z.string(),
-  version: z.string(),
+  version: VersionSchema,
   description: z.string().optional(),
   harness: z.object({ id: z.string(), version: z.string() }),
   rubric: z.union([z.string(), RubricRefSchema]).optional(), // inline text OR a registered-rubric reference

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { VersionSchema } from "../version.js";
 
 // Rubric — HOW to judge (docs/architecture/eval-domain-model.md S3). This module is the dependency root of the
 // judging vocabulary: criteria + the verdict-instruction placeholder live here; judge-spec builds on them.
@@ -36,7 +37,7 @@ export type EvidenceRequirement = z.infer<typeof EvidenceRequirementSchema>;
 export const RubricSpecSchema = z
   .object({
     id: z.string(),
-    version: z.string(),
+    version: VersionSchema,
     description: z.string().optional(),
     text: z.string().optional(), // freeform rubric text (the RUBRIC section / {rubric} placeholder)
     criteria: z.array(JudgeCriterionSchema).min(1).optional(), // multi-criteria: one score per criterion + overall

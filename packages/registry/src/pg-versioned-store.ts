@@ -1,5 +1,5 @@
 import type { VersionMeta } from "@everdict/application-control";
-import { ConflictError, NotFoundError } from "@everdict/contracts";
+import { BadRequestError, ConflictError, NotFoundError } from "@everdict/contracts";
 import type { SqlClient } from "@everdict/db";
 import { SHARED_TENANT, parseVersionTags, resolveRef, sortVersions, specsEqual } from "./registry.js";
 
@@ -72,6 +72,15 @@ export class PgVersionedStore<T extends { id: string; version: string }> {
   }
 
   async register(tenant: string, item: T, createdBy?: string): Promise<void> {
+    // Non-empty version invariant (parity with VersionedStore) — a blank version sorts to the tail as non-semver and
+    // silently becomes `latest`. Reject it before the write.
+    if (item.version.trim().length === 0) {
+      throw new BadRequestError(
+        "BAD_REQUEST",
+        { tenant, id: item.id },
+        `${this.label} ${item.id}: version must be a non-empty string.`,
+      );
+    }
     // The conflict/revive probe is the ONE read that omits deleted_at, so it can see a tombstone and revive it.
     // For a table without soft-delete, there is nothing to revive — the probe reads only the spec column.
     const existing = await this.client.query<SpecRow & { deleted_at: string | Date | null }>(

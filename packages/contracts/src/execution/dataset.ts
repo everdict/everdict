@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { VersionSchema } from "../version.js";
 import { EvalCaseSchema } from "./eval-case.js";
 
 // Dataset: a bundle of eval cases — harness-agnostic (run any harness@version against the same cases for a fair comparison).
@@ -44,7 +45,7 @@ export type DatasetProvenance = z.infer<typeof DatasetProvenanceSchema>;
 
 export const DatasetSchema = z.object({
   id: z.string(),
-  version: z.string(),
+  version: VersionSchema,
   description: z.string().optional(),
   cases: z.array(EvalCaseSchema),
   tags: z.array(z.string()).default([]),

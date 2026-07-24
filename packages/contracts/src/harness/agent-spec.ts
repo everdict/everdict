@@ -1,4 +1,7 @@
 import { z } from "zod";
+import { VersionSchema } from "../version.js";
+
+import { CapabilityRefSchema } from "../records/capability.js";
 
 // A workspace-registered MCP tool server the Everdict agent connects to IN ADDITION to the built-in read-only
 // control-plane tools. The workspace owns this server, so — unlike the built-in tools, which stay read-only — its
@@ -25,12 +28,17 @@ export type AgentMcpServer = z.infer<typeof AgentMcpServerSchema>;
 // ⚠️ NO secrets in the spec — `model` is a registered-model id, each `mcpServers[].authSecret` is a secret NAME.
 export const AgentSpecSchema = z.object({
   id: z.string(),
-  version: z.string(),
+  version: VersionSchema,
   description: z.string().optional(),
   // Workspace context appended to the agent's base system prompt (its persona + tool protocol stay fixed). CLAUDE.md-like.
   instructions: z.string().optional(),
-  // Workspace MCP tool servers connected alongside the built-in read-only tools (write opt-in per server).
+  // Workspace MCP tool servers connected alongside the built-in read-only tools (write opt-in per server). This is
+  // the RAW escape hatch — a server hand-wired without publishing it to the Capability Store (mirrors openai-compatible
+  // as the LLM escape hatch). The curated path is `capabilities` below.
   mcpServers: z.array(AgentMcpServerSchema).default([]),
+  // Capabilities adopted from the Store — immutable-version references (npm-style pins) into the Capability catalog
+  // (mcp | code | skill). Resolved at runtime (cross-tenant, visibility re-checked). See docs/architecture/capability-store.md.
+  capabilities: z.array(CapabilityRefSchema).default([]),
   // Registered model id (this workspace's model registry) powering the agent; unset → the agent server's default model.
   model: z.string().optional(),
   tags: z.array(z.string()).default([]),

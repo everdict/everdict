@@ -1,4 +1,4 @@
-import { ConflictError, NotFoundError } from "@everdict/contracts";
+import { BadRequestError, ConflictError, NotFoundError } from "@everdict/contracts";
 import { LATEST, SHARED_TENANT, compareVersions, resolveRef, specsEqual } from "./registry.js";
 
 import type { VersionMeta } from "@everdict/application-control";
@@ -34,6 +34,16 @@ export class VersionedStore<T extends { id: string; version: string }> {
   }
 
   register(tenant: string, item: T, createdBy?: string): void {
+    // Non-empty version is a registry invariant (defense-in-depth for seed/file paths that bypass the contract
+    // VersionSchema): an empty/blank version is non-semver, so compareVersions sorts it to the tail → it silently
+    // becomes `latest` and corrupts resolution + the detail view. Reject it here too.
+    if (item.version.trim().length === 0) {
+      throw new BadRequestError(
+        "BAD_REQUEST",
+        { tenant, id: item.id },
+        `${this.label} ${item.id}: version must be a non-empty string.`,
+      );
+    }
     let ids = this.byOwner.get(tenant);
     if (!ids) {
       ids = new Map();

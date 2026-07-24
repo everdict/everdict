@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { TraceSourceSpecSchema } from "../harness/harness-spec.js";
+import { VersionSchema } from "../version.js";
 import { CapabilityNameSchema } from "./capability.js";
 
 // Runtime — an execution-infra definition a tenant registers ("where the eval runs"). local | nomad | k8s.
@@ -10,7 +11,7 @@ import { CapabilityNameSchema } from "./capability.js";
 
 const base = {
   id: z.string(),
-  version: z.string(),
+  version: VersionSchema,
   description: z.string().optional(),
   tags: z.array(z.string()).default([]),
   // Capabilities this runtime provides (declared or probe-detected) — matched against the harness's requirements
