@@ -38,12 +38,14 @@ export function WorkspaceRunnersManager({
   githubApp,
   onOpenIntegrations,
   workspace,
+  showHeader = true,
 }: {
   runners: RunnerMeta[]
   canWrite: boolean
   workspace: string // active workspace slug — for the per-runner detail link (/{workspace}/runtimes/self/{id})
   githubApp: GithubAppView // Target list for the GitHub Actions runner registration picker (installations + allowed repos) — same snapshot as the Integrations tab
   onOpenIntegrations?: () => void // "Install/manage GitHub App" CTA — switch to the Integrations tab (same settings page)
+  showHeader?: boolean // false → the host section supplies the heading/description; render only the action buttons + roster
 }) {
   const t = useTranslations('manageWorkspaceRunners')
   const locale = useLocale()
@@ -65,18 +67,34 @@ export function WorkspaceRunnersManager({
 
   return (
     <div className="space-y-5">
-      <div className="flex items-start justify-between gap-4">
-        <div className="space-y-1">
-          <h3 className="text-[13px] font-[560] text-foreground">{t('title')}</h3>
-          <p className="max-w-prose text-[13px] leading-relaxed text-muted-foreground">
-            {t.rich('description', {
-              target: 'self:ws:<id>',
-              mono: (chunks) => <span className="font-mono">{chunks}</span>,
-            })}
-          </p>
+      {showHeader ? (
+        <div className="flex items-start justify-between gap-4">
+          <div className="space-y-1">
+            <h3 className="text-[13px] font-[560] text-foreground">{t('title')}</h3>
+            <p className="max-w-prose text-[13px] leading-relaxed text-muted-foreground">
+              {t.rich('description', {
+                target: 'self:ws:<id>',
+                mono: (chunks) => <span className="font-mono">{chunks}</span>,
+              })}
+            </p>
+          </div>
+          {canWrite && (
+            <span className="flex shrink-0 items-center gap-2">
+              <Button size="sm" variant="secondary" onClick={() => setGithubOpen(true)}>
+                <Github />
+                {t('githubRunner')}
+              </Button>
+              <Button size="sm" onClick={() => setRegisterOpen(true)}>
+                <Server />
+                {t('registerRunner')}
+              </Button>
+            </span>
+          )}
         </div>
-        {canWrite && (
-          <span className="flex shrink-0 items-center gap-2">
+      ) : (
+        // Host section (Runtimes page) supplies the heading — render just the register / GitHub actions, right-aligned.
+        canWrite && (
+          <div className="flex items-center justify-end gap-2">
             <Button size="sm" variant="secondary" onClick={() => setGithubOpen(true)}>
               <Github />
               {t('githubRunner')}
@@ -85,9 +103,9 @@ export function WorkspaceRunnersManager({
               <Server />
               {t('registerRunner')}
             </Button>
-          </span>
-        )}
-      </div>
+          </div>
+        )
+      )}
 
       {error && (
         <Callout tone="danger" className="py-1.5">

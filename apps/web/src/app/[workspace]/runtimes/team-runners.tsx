@@ -6,9 +6,10 @@ import { WorkspaceRunnersManager } from '@/features/manage-workspace-runners'
 import type { GithubAppView } from '@/entities/github-app'
 import type { RunnerMeta } from '@/entities/runner'
 
-// Client wrapper — converts the manager's "install/manage GitHub App" CTA (previously a same-page tab switch)
-// into navigation to the Integrations page's GitHub drill-in, now that each settings section is its own route.
-export function RunnersSection({
+// Client wrapper for the Runtimes-page "Team runners" section. Supplies the manager's "install/manage GitHub App"
+// CTA (routes to the Integrations settings drill-in) and hides the manager's own heading — the host <Section>
+// provides the title/description, so the manager renders only the action buttons + roster.
+export function TeamRunnersSection({
   workspace,
   runners,
   canWrite,
@@ -26,6 +27,7 @@ export function RunnersSection({
       canWrite={canWrite}
       githubApp={githubApp}
       workspace={workspace}
+      showHeader={false}
       onOpenIntegrations={() => router.push(`/${workspace}/settings/integrations?app=github`)}
     />
   )

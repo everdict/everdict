@@ -418,7 +418,7 @@ export function ConnectRepoDialog({
                     {t('noRunnersCallout')}
                     <div className="mt-1.5">
                       <Link
-                        href={`/${encodeURIComponent(workspace)}/settings/runners`}
+                        href={`/${encodeURIComponent(workspace)}/runtimes`}
                         className="text-[12px] font-[510] text-primary hover:underline"
                       >
                         {t('registerRunnerLink')}

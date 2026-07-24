@@ -8,7 +8,6 @@ import {
   KeyRound,
   Lock,
   Plug,
-  Server,
   Shield,
   SlidersHorizontal,
   Sparkles,
@@ -42,7 +41,8 @@ export interface SettingsNavGroup {
 
 // Gates mirror the former settings-tabs.tsx `show:` flags exactly:
 // General/Integrations/CI = settings:read · Members = members:read · Secrets = secrets:read · Models = models:read
-// · Runners = settings:write · Budget = scorecards:read. Account items are ungated (self-scoped).
+// · Budget = scorecards:read. Account items are ungated (self-scoped).
+// (Team shared runners moved to the Runtimes surface — a runner is one flavor of execution runtime, not a settings tab.)
 export const SETTINGS_NAV_GROUPS: SettingsNavGroup[] = [
   {
     headingKey: 'groupAccount',
@@ -79,7 +79,6 @@ export const SETTINGS_NAV_GROUPS: SettingsNavGroup[] = [
         requiredAction: 'harnesses:read',
       },
       { href: '/ci', labelKey: 'ci', icon: GitBranch, requiredAction: 'settings:read' },
-      { href: '/runners', labelKey: 'runners', icon: Server, requiredAction: 'settings:write' },
       { href: '/budget', labelKey: 'budget', icon: Wallet, requiredAction: 'scorecards:read' },
     ],
   },

@@ -3,8 +3,10 @@ import { Server } from 'lucide-react'
 import { getTranslations } from 'next-intl/server'
 
 import { RunnersManager } from '@/features/manage-runners'
+import { githubAppViewSchema, type GithubAppView } from '@/entities/github-app'
 import { runnersResponseSchema, type RunnerMeta } from '@/entities/runner'
 import { runtimesSchema } from '@/entities/runtime'
+import { can } from '@/shared/auth/can'
 import { currentPrincipal } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
 import { Badge } from '@/shared/ui/badge'
@@ -13,9 +15,11 @@ import { Callout } from '@/shared/ui/callout'
 import { EmptyState } from '@/shared/ui/empty-state'
 import { PageHeader } from '@/shared/ui/page-header'
 
+import { TeamRunnersSection } from './team-runners'
+
 export const dynamic = 'force-dynamic'
 
-// Section title + one-line description — distinguishes the two execution-target axes (registered infra / my machine).
+// Section title + one-line description — distinguishes the execution-target axes (registered infra / my machine / team runners).
 function Section({
   title,
   description,
@@ -36,13 +40,15 @@ function Section({
   )
 }
 
-// Runtimes — the single surface for "where evaluations run".
+// Runtimes — the single surface for "where evaluations run", consolidating all three execution targets:
 // ① Registered infra (push: docker/nomad/k8s/topology the control plane connects to — workspace-owned)
-// ② My machine (pull: self-hosted runner — a personally-owned device pulls jobs via lease).
+// ② My machine (pull: personal self-hosted runner — a personally-owned device pulls jobs via lease)
+// ③ Team runners (pull: workspace-owned self-hosted runners — shared build servers / CI, admin-managed).
+// Consolidating ③ here (it used to live in Settings › Runners) makes "a runner" read as one flavor of runtime.
 export default async function RuntimesPage({ params }: { params: Promise<{ workspace: string }> }) {
   const { workspace } = await params
   const t = await getTranslations('runtimesPage')
-  const { ctx } = await currentPrincipal()
+  const { principal, ctx } = await currentPrincipal()
   let error: string | undefined
   let runtimes = runtimesSchema.parse([])
   try {
@@ -57,6 +63,22 @@ export default async function RuntimesPage({ params }: { params: Promise<{ works
     runners = runnersResponseSchema.parse(await controlPlane.listRunners(ctx)).runners
   } catch {
     // Control-plane runner service unconfigured/failed — fall back to an empty list.
+  }
+
+  // Team shared runners — workspace-owned (build servers / CI). Admin-managed, so fetched only for admins (the
+  // owned-roster read + GitHub-App snapshot are settings:write-gated); members target the pool via the run form.
+  const canManageTeam = can(principal?.roles, 'settings:write')
+  let teamRunners: RunnerMeta[] = []
+  let githubApp: GithubAppView = { installations: [], providers: { githubCom: false } }
+  if (canManageTeam) {
+    try {
+      teamRunners = runnersResponseSchema.parse(
+        await controlPlane.listWorkspaceOwnedRunners(ctx)
+      ).runners
+      githubApp = githubAppViewSchema.parse(await controlPlane.getGithubApp(ctx))
+    } catch {
+      // Runner / GitHub-App service unconfigured — fall back to empty; the section still renders.
+    }
   }
 
   return (
@@ -114,6 +136,17 @@ export default async function RuntimesPage({ params }: { params: Promise<{ works
           workspace={workspace}
         />
       </Section>
+
+      {canManageTeam && (
+        <Section title={t('teamRunners')} description={t('teamRunnersDescription')}>
+          <TeamRunnersSection
+            workspace={workspace}
+            runners={teamRunners}
+            canWrite={canManageTeam}
+            githubApp={githubApp}
+          />
+        </Section>
+      )}
     </div>
   )
 }
