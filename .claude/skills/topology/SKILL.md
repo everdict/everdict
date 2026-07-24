@@ -169,6 +169,14 @@ touching `service-backend.ts`'s driving logic.
 - **#3 correlate — DONE.** `frontDoor.correlate` (`injected` default = Everdict runId | `returned` = extract the
   agent's own id from the submit response via `correlate.path` dot-path, used for both trace fetch and the poll
   `statusPath`). `SubmitFn` now returns the response body. Distinct from the still-dormant `frontDoor.trace` endpoint.
+  **Two-axis correlation — for "the agent won't reliably carry OUR run_id".** Correlation is split across two specs by
+  design: `frontDoor.correlate` decides WHICH id identifies the run (ours=`injected` or the agent's own=`returned`),
+  and `traceSource.correlate` decides HOW to find that id on the platform (`id` = the run id IS the trace id, `tag` =
+  search the `everdict.run_id` span tag). The chosen id flows through `DriveOutcome.traceRef` into
+  `traceSource.fetch(traceRef)` (`service-backend.ts`), so an agent that mints its own id (and overwrites our injected
+  tag) is handled by `frontDoor.correlate:returned` + `traceSource.correlate:id|tag` — no separate trace-pull "returned"
+  mode is needed (the returned id already reaches the pull). Reach for this whenever the agent can't be trusted to carry
+  the injected key. (A dedicated `session` correlate — pull by a session/thread key — is a niche future axis, unbuilt.)
 - **#1 payload template — DONE.** `frontDoor.request.bodyTemplate` (`interpolateTemplate` — recursive `{{var}}`
   over the JSON body); per-run wiring variable NAMES derive from `dependencies[].isolateBy` via `wiringVars`
   (`thread_id`/`key_prefix`/`object_prefix`/`schema`), not hardcoded LangGraph names. Absent `request` = today's body.
