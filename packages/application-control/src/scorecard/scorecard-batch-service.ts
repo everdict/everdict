@@ -284,6 +284,10 @@ export class ScorecardBatchService {
       oomAutoBoost?: boolean; // in-batch OOM auto-boost (orchestration.oomAutoBoost)
       traceSink?: string; // per-batch sink override (orchestration.traceSink)
       doneIds: Set<string>;
+      // Cases currently executing in THIS process — a synchronous claim so a same-worker Temporal retry of an
+      // in-flight case skips instead of double-executing (gap 12). Empty on a fresh ctx (a dead worker → cross-process
+      // retry re-executes, so recovery is unaffected).
+      inFlightIds: Set<string>;
       stepChain: Promise<void>;
     }
   >();
@@ -387,6 +391,7 @@ export class ScorecardBatchService {
           }
         : {}),
       doneIds,
+      inFlightIds: new Set<string>(),
       stepChain: Promise.resolve(),
     };
     this.batchContexts.set(id, ctx);
@@ -500,101 +505,119 @@ export class ScorecardBatchService {
     const current = await this.deps.store.get(id);
     if (current && ScorecardBatch.from(current).isSuperseded()) return { settled: true, skipped: true };
     if (ctx.doneIds.has(caseId)) return { settled: true, skipped: true };
-    const evalCase = ctx.caseIndex.get(caseId);
-    if (!evalCase) throw new NotFoundError("NOT_FOUND", { scorecard: id, caseId }, "case not in this batch.");
+    // Concurrent-dispatch guard (gap 12): a Temporal retry can re-invoke runBatchCase for the SAME caseId (same worker)
+    // while the original is still in-flight — before doneIds is set — so both used to execute the harness (wasted
+    // compute; the durable result was already at-most-once via doneIds/planBatch). Claim the caseId SYNCHRONOUSLY here
+    // so the second invocation skips; release in `finally` so a failed/incomplete attempt is retryable. A cross-process
+    // retry (a dead worker → ctx rebuilt) has an empty claim set, so genuine recovery is unaffected.
+    if (ctx.inFlightIds.has(caseId)) return { settled: true, skipped: true };
+    ctx.inFlightIds.add(caseId);
+    try {
+      const evalCase = ctx.caseIndex.get(caseId);
+      if (!evalCase) throw new NotFoundError("NOT_FOUND", { scorecard: id, caseId }, "case not in this batch.");
 
-    this.deps.budget?.admit(ctx.tenant);
-    const runStore = this.deps.runStore;
-    let child: RunRecord | undefined;
-    if (runStore) {
-      child = ScorecardBatch.newChildRun({
-        id: this.newId(),
-        tenant: ctx.tenant,
-        harness: { id: ctx.harnessId, version: ctx.harnessVersion },
-        caseId,
-        parentScorecardId: id,
-        ...(evalCase.placement?.target ? { runtime: evalCase.placement.target } : {}),
-        now: this.now(),
-      });
-      await runStore.create(child);
-    }
-    const baseJob: CaseJob = {
-      evalCase,
-      harness: { id: ctx.harnessId, version: ctx.harnessVersion },
-      tenant: ctx.tenant,
-      batchId: id, // scheduler-side reclaim key (supersede / speculation-loser queue cancel)
-      runId: `evd-${id}-${caseId}`, // trace correlation (Temporal path parity — no trial fan-out here)
-      priority: "batch", // fan-out work — yields the queue to interactive single runs
-      ...(ctx.owner ? { submittedBy: ctx.owner } : {}),
-      ...(ctx.harnessSpec ? { harnessSpec: ctx.harnessSpec } : {}),
-      ...(ctx.judge ? { judge: ctx.judge } : {}),
-    };
-    let result: CaseResult | undefined;
-    let ranOn: string | undefined; // the runtime that actually ran the case (spillover provenance)
-    for (let attempt = 0; ; attempt++) {
-      try {
-        const childId = child?.id;
-        const outcome = await this.runResilientCase(baseJob, {
-          owner: ctx.owner,
-          targets: ctx.targets,
+      this.deps.budget?.admit(ctx.tenant);
+      const runStore = this.deps.runStore;
+      let child: RunRecord | undefined;
+      if (runStore) {
+        child = ScorecardBatch.newChildRun({
+          id: this.newId(),
           tenant: ctx.tenant,
-          secretMap: ctx.secretMap,
-          boostMb: ctx.memoryBoostMb?.[caseId],
-          oomAutoBoost: ctx.oomAutoBoost,
-          speculation: ctx.speculation,
-          onWaiting: (reason) => void this.appendBatchStep(id, { phase: "dispatch", status: "info", message: reason }),
-          ...(childId && runStore ? { onStarted: () => void this.markChildRunning(childId) } : {}),
-          onStep: (message, cid) =>
-            void this.appendBatchStep(id, { phase: "case", status: "info", message, caseId: cid }),
+          harness: { id: ctx.harnessId, version: ctx.harnessVersion },
+          caseId,
+          parentScorecardId: id,
+          ...(evalCase.placement?.target ? { runtime: evalCase.placement.target } : {}),
+          now: this.now(),
         });
-        result = outcome.result;
-        ranOn = outcome.target;
-        break;
-      } catch (err) {
-        const failure = classifyFailure(err, "dispatch");
-        if (attempt >= ctx.retries || !failure.retryable) {
-          const message = err instanceof Error ? err.message : String(err);
-          result = {
-            caseId,
-            harness: `${ctx.harnessId}@${ctx.harnessVersion}`,
-            trace: [{ t: 0, kind: "error", message }],
-            snapshot: { kind: "prompt", output: "" },
-            scores: [
-              { graderId: "dispatch", metric: "error", value: 0, pass: false, detail: `[${failure.class}] ${message}` },
-            ],
-            failure,
-          };
-          break;
-        }
-        await new Promise((r) => setTimeout(r, 1_000 * (attempt + 1)));
+        await runStore.create(child);
       }
-    }
-    const bill = billingTenant(result, ctx.tenant);
-    if (bill) this.deps.budget?.settle(bill, costOf(result));
-    this.deps.usage?.meterCase(result, ctx.tenant); // meter-only billing usage (own-pays runs skip themselves)
-    // Per-case judge scoring — the same "judge the moment the case lands" semantics as the in-process judge stream.
-    if (ctx.judges.length > 0) {
-      await this.scoring
-        .applyJudges(ctx.tenant, ctx.dataset, [result], ctx.judges, undefined, ctx.owner)
-        .catch(() => {});
-    }
-    if (runStore && child)
-      await runStore.update(child.id, {
-        ...Run.from(child).succeed(result, this.now()),
-        // Provenance: record the runtime that ACTUALLY ran the case (differs from the assigned one after a spillover).
-        ...(ranOn ? { runtime: ranOn } : {}),
+      const baseJob: CaseJob = {
+        evalCase,
+        harness: { id: ctx.harnessId, version: ctx.harnessVersion },
+        tenant: ctx.tenant,
+        batchId: id, // scheduler-side reclaim key (supersede / speculation-loser queue cancel)
+        runId: `evd-${id}-${caseId}`, // trace correlation (Temporal path parity — no trial fan-out here)
+        priority: "batch", // fan-out work — yields the queue to interactive single runs
+        ...(ctx.owner ? { submittedBy: ctx.owner } : {}),
+        ...(ctx.harnessSpec ? { harnessSpec: ctx.harnessSpec } : {}),
+        ...(ctx.judge ? { judge: ctx.judge } : {}),
+      };
+      let result: CaseResult | undefined;
+      let ranOn: string | undefined; // the runtime that actually ran the case (spillover provenance)
+      for (let attempt = 0; ; attempt++) {
+        try {
+          const childId = child?.id;
+          const outcome = await this.runResilientCase(baseJob, {
+            owner: ctx.owner,
+            targets: ctx.targets,
+            tenant: ctx.tenant,
+            secretMap: ctx.secretMap,
+            boostMb: ctx.memoryBoostMb?.[caseId],
+            oomAutoBoost: ctx.oomAutoBoost,
+            speculation: ctx.speculation,
+            onWaiting: (reason) =>
+              void this.appendBatchStep(id, { phase: "dispatch", status: "info", message: reason }),
+            ...(childId && runStore ? { onStarted: () => void this.markChildRunning(childId) } : {}),
+            onStep: (message, cid) =>
+              void this.appendBatchStep(id, { phase: "case", status: "info", message, caseId: cid }),
+          });
+          result = outcome.result;
+          ranOn = outcome.target;
+          break;
+        } catch (err) {
+          const failure = classifyFailure(err, "dispatch");
+          if (attempt >= ctx.retries || !failure.retryable) {
+            const message = err instanceof Error ? err.message : String(err);
+            result = {
+              caseId,
+              harness: `${ctx.harnessId}@${ctx.harnessVersion}`,
+              trace: [{ t: 0, kind: "error", message }],
+              snapshot: { kind: "prompt", output: "" },
+              scores: [
+                {
+                  graderId: "dispatch",
+                  metric: "error",
+                  value: 0,
+                  pass: false,
+                  detail: `[${failure.class}] ${message}`,
+                },
+              ],
+              failure,
+            };
+            break;
+          }
+          await new Promise((r) => setTimeout(r, 1_000 * (attempt + 1)));
+        }
+      }
+      const bill = billingTenant(result, ctx.tenant);
+      if (bill) this.deps.budget?.settle(bill, costOf(result));
+      this.deps.usage?.meterCase(result, ctx.tenant); // meter-only billing usage (own-pays runs skip themselves)
+      // Per-case judge scoring — the same "judge the moment the case lands" semantics as the in-process judge stream.
+      if (ctx.judges.length > 0) {
+        await this.scoring
+          .applyJudges(ctx.tenant, ctx.dataset, [result], ctx.judges, undefined, ctx.owner)
+          .catch(() => {});
+      }
+      if (runStore && child)
+        await runStore.update(child.id, {
+          ...Run.from(child).succeed(result, this.now()),
+          // Provenance: record the runtime that ACTUALLY ran the case (differs from the assigned one after a spillover).
+          ...(ranOn ? { runtime: ranOn } : {}),
+        });
+      ctx.doneIds.add(caseId);
+      const v = caseVerdict(result);
+      const reason = caseReason(result);
+      const verdict = v == null ? "no result" : v ? "PASS" : "FAIL";
+      await this.appendBatchStep(id, {
+        phase: "case",
+        status: v === false ? "failed" : "ok",
+        message: `${caseId} → ${verdict}${reason ? ` · ${reason}` : ""}`,
+        caseId,
       });
-    ctx.doneIds.add(caseId);
-    const v = caseVerdict(result);
-    const reason = caseReason(result);
-    const verdict = v == null ? "no result" : v ? "PASS" : "FAIL";
-    await this.appendBatchStep(id, {
-      phase: "case",
-      status: v === false ? "failed" : "ok",
-      message: `${caseId} → ${verdict}${reason ? ` · ${reason}` : ""}`,
-      caseId,
-    });
-    return { settled: true };
+      return { settled: true };
+    } finally {
+      ctx.inFlightIds.delete(caseId); // release the claim so a failed/incomplete attempt (or the next case) is unblocked
+    }
   }
 
   // finalizeBatch — aggregate the children into the final record (summary/models/judges/export) and notify.

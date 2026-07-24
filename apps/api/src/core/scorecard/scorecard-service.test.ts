@@ -2082,6 +2082,37 @@ describe("ScorecardService — batch-on-Temporal internals (plan → case → fi
     expect(rec?.steps?.some((s) => s.phase === "dispatch" && s.message.includes("Temporal"))).toBe(true);
   });
 
+  // Regression (gap 12): a Temporal retry can re-invoke the SAME case's activity on the same worker while the original
+  // is still in-flight (before doneIds is set). Pre-fix both executed the harness (wasted compute); the synchronous
+  // in-flight claim makes the retry skip.
+  it("a concurrent same-worker retry of an in-flight case does not double-dispatch", async () => {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    const seen: string[] = [];
+    const dispatcher: Dispatcher = {
+      async dispatch(job: CaseJob) {
+        seen.push(job.evalCase.id);
+        await gate; // hold the first dispatch in-flight so the concurrent retry arrives while it is running
+        return ok(job.evalCase.id);
+      },
+    };
+    const { store, service, datasets } = wire(dispatcher);
+    await datasets.register("acme", threeCases);
+    await store.create(record());
+    await service.planBatch("sc-t");
+
+    const a = service.runBatchCase("sc-t", "c1"); // executes, held at the gate (in-flight)
+    while (seen.length === 0) await new Promise((r) => setTimeout(r, 0)); // wait until `a` is dispatching
+    const b = await service.runBatchCase("sc-t", "c1"); // the retry — sees the in-flight claim and skips
+    expect(b).toEqual({ settled: true, skipped: true });
+    release();
+    expect(await a).toEqual({ settled: true }); // the original completed normally
+
+    expect(seen).toEqual(["c1"]); // dispatched ONCE (pre-fix: ["c1","c1"] — the retry double-dispatched)
+  });
+
   it("a re-plan after a restart returns only unfinished cases (done children excluded)", async () => {
     const dispatcher: Dispatcher = {
       async dispatch(job: CaseJob) {
