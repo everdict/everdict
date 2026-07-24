@@ -1,6 +1,6 @@
 import type { EnvValue, HarnessSpec, ModelSpec, RuntimeSpec, WorkspaceSettings } from "@everdict/contracts";
 import type { SecretUsageRef } from "@everdict/contracts/wire";
-import { modelApiKeySecretName } from "../harness/model-binding.js";
+import { modelApiKeySecretName } from "../model/model-binding.js";
 
 // Reverse index of workspace secrets — given the CURRENT registry specs (latest per entity) + workspace settings,
 // enumerate every site that names a secret. Pure: the control plane fetches the specs; this decides what references

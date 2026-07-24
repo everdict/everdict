@@ -106,7 +106,7 @@ export {
   modelBindingLabel,
   modelConnectionEnv,
   normalizeModelBinding,
-} from "./harness/model-binding.js";
+} from "./model/model-binding.js";
 
 // runtime — capability gating + trust-zone hardening rules (from @everdict/core)
 export {
