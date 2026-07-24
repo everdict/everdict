@@ -5,6 +5,7 @@ import {
   Database,
   Gavel,
   LayoutDashboard,
+  Store,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -62,6 +63,12 @@ export const NAV_SECTIONS: NavSection[] = [
         labelKey: 'judges',
         icon: Gavel,
         keywords: 'judge grader model harness rubric verdict score',
+      },
+      {
+        href: '/store',
+        labelKey: 'store',
+        icon: Store,
+        keywords: 'store capability tool mcp code skill adopt publish marketplace 도구 스토어',
       },
       {
         href: '/views',

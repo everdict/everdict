@@ -17,13 +17,24 @@ export const agentMcpServerSchema = z.object({
 })
 export type AgentMcpServer = z.infer<typeof agentMcpServerSchema>
 
-// GET /agents/:id/versions/:version 200 — 전체 AgentSpec(instructions + MCP 도구서버 + model 오버라이드). 시크릿 값 없음.
+// 스토어에서 채택한 capability 참조(불변버전 pin). source=발행 워크스페이스(내 것이면 내 tenant), secretBindings=필요시크릿→내 시크릿 이름.
+export const capabilityRefSchema = z.object({
+  source: z.string(),
+  id: z.string(),
+  version: z.string(),
+  secretBindings: z.record(z.string(), z.string()).default({}),
+  enableWrite: z.boolean().default(false),
+})
+export type CapabilityRef = z.infer<typeof capabilityRefSchema>
+
+// GET /agents/:id/versions/:version 200 — 전체 AgentSpec(instructions + MCP 도구서버 + 채택 capability + model 오버라이드). 시크릿 값 없음.
 export const agentSpecSchema = z.object({
   id: z.string(),
   version: z.string(),
   description: z.string().optional(),
   instructions: z.string().optional(),
   mcpServers: z.array(agentMcpServerSchema).default([]),
+  capabilities: z.array(capabilityRefSchema).default([]),
   model: z.string().optional(),
   tags: z.array(z.string()).default([]),
 })

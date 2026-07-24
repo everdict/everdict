@@ -498,7 +498,10 @@ export const controlPlane = {
   getAgent: <T>(auth: AuthContext, id: string, version: string) =>
     call<T>(auth, `/agents/${encodeURIComponent(id)}/versions/${encodeURIComponent(version)}`),
   saveAgent: <T>(auth: AuthContext, id: string, body: unknown) =>
-    call<T>(auth, `/agents/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(body) }),
+    call<T>(auth, `/agents/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
   // Workspace Skills — SKILL.md-style procedures the members author for the conversational agent (dual-scoped
   // private|workspace). Read skills:read (viewer+); author/edit/share/delete skills:write (member+, creator-or-admin
   // for a specific skill). generateSkill drafts a skill from a description via the workspace's model (skill-generate).
@@ -506,11 +509,38 @@ export const controlPlane = {
   createSkill: <T>(auth: AuthContext, body: unknown) =>
     call<T>(auth, '/skills', { method: 'POST', body: JSON.stringify(body) }),
   updateSkill: <T>(auth: AuthContext, id: string, patch: unknown) =>
-    call<T>(auth, `/skills/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+    call<T>(auth, `/skills/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    }),
   deleteSkill: (auth: AuthContext, id: string) =>
     callVoid(auth, `/skills/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   generateSkill: <T>(auth: AuthContext, body: unknown) =>
     call<T>(auth, '/skills/generate', { method: 'POST', body: JSON.stringify(body) }),
+  // Capability Store — 한 판별자 엔티티(mcp|code|skill)를 저작·발행·채택. read capabilities:read(viewer+);
+  // save/reach/delete capabilities:write(member+, 특정 capability 는 owner-or-admin, public 승격은 admin).
+  listCapabilities: <T>(auth: AuthContext) => call<T>(auth, '/capabilities'),
+  listPublicCapabilities: <T>(auth: AuthContext) => call<T>(auth, '/capabilities/public'),
+  getCapability: <T>(auth: AuthContext, id: string) =>
+    call<T>(auth, `/capabilities/${encodeURIComponent(id)}`),
+  saveCapability: <T>(auth: AuthContext, id: string, body: unknown) =>
+    call<T>(auth, `/capabilities/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
+  setCapabilityVisibility: <T>(auth: AuthContext, id: string, body: unknown) =>
+    call<T>(auth, `/capabilities/${encodeURIComponent(id)}/visibility`, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    }),
+  deleteCapabilityVersion: (auth: AuthContext, id: string, version: string) =>
+    callVoid(
+      auth,
+      `/capabilities/${encodeURIComponent(id)}/versions/${encodeURIComponent(version)}`,
+      {
+        method: 'DELETE',
+      }
+    ),
   getWorkspaceSettings: <T>(auth: AuthContext) => call<T>(auth, '/workspace/settings'),
   setWorkspaceSettings: <T>(auth: AuthContext, patch: unknown) =>
     call<T>(auth, '/workspace/settings', { method: 'PUT', body: JSON.stringify(patch) }),
