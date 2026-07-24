@@ -12,6 +12,7 @@ import { TraceSinkService } from "@everdict/application-control";
 import { TraceSourceService } from "@everdict/application-control";
 import type { CommentStore, NotificationStore, OAuthStateStore, WorkspaceSettingsStore } from "@everdict/db";
 import { buildTraceSink, buildTraceSource, probeTraceConnection } from "@everdict/trace";
+import { httpAgentEventSink } from "../infrastructure/agent/agent-event-sink.js";
 import { githubAppGateway } from "../infrastructure/github/app-gateway.js";
 import { mattermostHttpClient } from "../infrastructure/mattermost/mattermost-client.js";
 
@@ -31,6 +32,10 @@ export function buildIntegrations(deps: {
   // operator registers the server URL once, workspaces never input a host. Unset → Mattermost integration unavailable.
   const mattermostHost = process.env.MATTERMOST_HOST;
   const mattermostClient = mattermostHttpClient(); // outbound posting + connection verify (fetch)
+  // Agent event bridge (S4): with the agent service URL + shared internal token, a completion also pushes a platform
+  // event to the agent, waking the creator's watching teammates. Unset → skipped (feed/Mattermost unaffected).
+  const agentUrl = process.env.AGENT_SERVICE_URL;
+  const agentInternalToken = process.env.AGENT_INTERNAL_TOKEN;
   // Completion notifications: when workspace notify settings exist (Mattermost bot + channel), post run/scorecard completion to the channel (consumer slice).
   const notificationService = new NotificationService({
     settingsFor: (tenant) => settingsStore.get(tenant),
@@ -41,6 +46,7 @@ export function buildIntegrations(deps: {
     feed: notificationStore, // personal notification feed (bell inbox) — docs/architecture/notifications.md
     // Rerun button on completion posts — only attaches when Mattermost can reach us back (public URL known).
     ...(process.env.API_PUBLIC_URL ? { apiPublicUrl: process.env.API_PUBLIC_URL } : {}),
+    ...(agentUrl && agentInternalToken ? { agentEvents: httpAgentEventSink(agentUrl, agentInternalToken) } : {}),
   });
   // Workspace-owned Mattermost integration (register → bot notifications + inbound slash commands/buttons). host = operator env;
   // set() verifies the bot token (+ channel) against the live server (strict); apiPublicUrl exposes the inbound URL.

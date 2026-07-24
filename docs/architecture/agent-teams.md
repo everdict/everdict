@@ -116,9 +116,13 @@ The gap is not the loop — it is (a) a **shared message substrate** with addres
   waking it, so it reacts proactively (S5 too). Nothing watches the kind → notified:0. `/agent/events` also takes an INTERNAL
   path (`x-internal-token`, `AGENT_INTERNAL_TOKEN`): the control plane presents the shared secret + a
   `{workspace, recipient}` and the event fans to THAT recipient's watching teammates — so the emitter can drive
-  events for any user without impersonating them. **Remaining:** the control plane's notification emitter
-  (notifications.md) actually POSTing to `/agent/events` on run/scorecard completion/regression (the emitter →
-  agent-URL call) — then everything Everdict monitors auto-drives the proactive team.
+  events for any user without impersonating them. **S4 is now COMPLETE end-to-end:** the
+  control plane's `NotificationService` (its third channel beside the feed + Mattermost) pushes a
+  `run.completed`/`run.failed`/`scorecard.completed`/`scorecard.failed` event via an `AgentEventSink` (an HTTP
+  client to `/agent/events`, wired when `AGENT_SERVICE_URL` + `AGENT_INTERNAL_TOKEN` are set) — best-effort, so
+  an unreachable agent never affects the result. Everything Everdict monitors now auto-drives the proactive
+  team: a run/scorecard completes → its creator's watching teammates wake and react. **Remaining:** only the
+  web surface (teammate list/spawn), and richer event kinds (e.g. a real `scorecard.regressed` from a diff).
 - **S5 — proactive triggers.** An event in an idle subscribed agent's mailbox wakes a turn (reuse the
   schedule-fire path). The proactive agent team is live.
 - **S6 — agent drives eval (write capability).** Expose the write control-plane tools to the agent behind

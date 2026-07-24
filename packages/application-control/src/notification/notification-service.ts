@@ -1,4 +1,5 @@
 import type { NotificationRecord, RunRecord, WorkspaceSettings } from "@everdict/contracts";
+import type { AgentEventSink } from "../ports/agent-event-sink.js";
 import type { MattermostClient } from "../ports/mattermost-client.js";
 import type { NotificationListOptions, NotificationStore } from "../ports/notification-store.js";
 
@@ -19,6 +20,9 @@ export interface NotificationServiceDeps {
   feed?: NotificationStore; // personal notification feed — if unset, only the feed channel is silently skipped
   // Outbound Mattermost transport (adapter) — if unset, channel posting is silently skipped (feed still writes).
   mattermost?: MattermostClient;
+  // Third channel (S4): push the completion as a platform EVENT to the agent service, where it wakes the creator's
+  // watching teammates (proactive team). Unset → skipped. Best-effort like the other channels.
+  agentEvents?: AgentEventSink;
   newId?: () => string;
   now?: () => string;
 }
@@ -33,7 +37,11 @@ export class NotificationService {
 
   async notifyRun(tenant: string, record: RunRecord): Promise<void> {
     // Feed (N2): only top-level runs with a known initiator — scorecard child runs are represented by the single batch entry (flood prevention).
-    if (record.createdBy && !record.parentScorecardId && (record.status === "succeeded" || record.status === "failed"))
+    if (
+      record.createdBy &&
+      !record.parentScorecardId &&
+      (record.status === "succeeded" || record.status === "failed")
+    ) {
       await this.pushFeed({
         workspace: tenant,
         recipient: record.createdBy,
@@ -42,6 +50,14 @@ export class NotificationService {
         body: `case ${record.caseId}`,
         link: { runId: record.id },
       });
+      await this.pushAgentEvent({
+        workspace: tenant,
+        recipient: record.createdBy,
+        kind: record.status === "succeeded" ? "run.completed" : "run.failed",
+        source: `run ${record.id}`,
+        message: `Run ${record.id} ${record.status} — ${record.harness.id}@${record.harness.version} (case ${record.caseId})`,
+      });
+    }
     const icon = record.status === "succeeded" ? "✅" : record.status === "failed" ? "❌" : "•";
     await this.post(
       tenant,
@@ -63,7 +79,7 @@ export class NotificationService {
     },
   ): Promise<void> {
     const scheduled = record.origin?.source === "schedule";
-    if (record.createdBy && (record.status === "succeeded" || record.status === "failed"))
+    if (record.createdBy && (record.status === "succeeded" || record.status === "failed")) {
       await this.pushFeed({
         workspace: tenant,
         recipient: record.createdBy,
@@ -77,6 +93,14 @@ export class NotificationService {
         title: `${scheduled ? "Scheduled run" : "Scorecard"} ${record.status === "succeeded" ? "completed" : "failed"} — ${record.dataset.id}@${record.dataset.version} × ${record.harness.id}@${record.harness.version}`,
         link: { scorecardId: record.id },
       });
+      await this.pushAgentEvent({
+        workspace: tenant,
+        recipient: record.createdBy,
+        kind: record.status === "succeeded" ? "scorecard.completed" : "scorecard.failed",
+        source: `scorecard ${record.id}`,
+        message: `Scorecard ${record.id} ${record.status} — ${record.dataset.id}@${record.dataset.version} × ${record.harness.id}@${record.harness.version}`,
+      });
+    }
     const icon = record.status === "succeeded" ? "✅" : record.status === "failed" ? "❌" : "•";
     await this.post(
       tenant,
@@ -129,6 +153,23 @@ export class NotificationService {
       await this.deps.feed.add({ ...row, id: this.newId(), createdAt: this.nowIso() });
     } catch {
       // Feed failure never affects the result.
+    }
+  }
+
+  // Agent event channel (S4) — push the completion to the agent service, where it wakes the creator's watching
+  // teammates. Best-effort: an unreachable/unconfigured agent never affects the run/scorecard result.
+  private async pushAgentEvent(input: {
+    workspace: string;
+    recipient: string;
+    kind: string;
+    source?: string;
+    message: string;
+  }): Promise<void> {
+    if (!this.deps.agentEvents) return;
+    try {
+      await this.deps.agentEvents.emit(input);
+    } catch {
+      // Notification failure never affects the run/scorecard result.
     }
   }
 

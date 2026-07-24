@@ -12,6 +12,7 @@ export type { CapabilityStore } from "./ports/capability-store.js";
 export type { CallbackStore } from "./ports/callback-store.js";
 export type { CommentStore } from "./ports/comment-store.js";
 export type { NotificationListOptions, NotificationStore } from "./ports/notification-store.js";
+export type { AgentEventSink } from "./ports/agent-event-sink.js";
 export type { BudgetStore } from "./ports/budget-store.js";
 export type { RunListOptions, RunStore } from "./ports/run-store.js";
 export type { RecordingSeal, RecordingStore } from "./ports/recording-store.js";
