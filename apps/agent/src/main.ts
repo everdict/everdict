@@ -3,6 +3,7 @@ import type { AgentSessionStore } from "@everdict/application-control";
 import {
   InMemoryAgentSessionStore,
   PgAgentSessionStore,
+  PgCapabilityStore,
   PgSecretStore,
   PgSkillStore,
   cipherFromEnv,
@@ -64,6 +65,7 @@ async function main(): Promise<void> {
         agentRegistry,
         secretStore,
         skillStore: new PgSkillStore(client),
+        capabilityStore: new PgCapabilityStore(client),
         baseSystemPrompt: EVERDICT_AGENT_SYSTEM_PROMPT,
         configId: config.AGENT_CONFIG_ID,
       });

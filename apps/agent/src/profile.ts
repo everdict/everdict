@@ -1,5 +1,7 @@
 import type { SkillEntry } from "@everdict/agent-runtime";
-import type { AgentRegistry, SecretStore, SkillStore } from "@everdict/application-control";
+import type { AgentRegistry, CapabilityStore, SecretStore, SkillStore } from "@everdict/application-control";
+import type { CapabilityRecord } from "@everdict/contracts";
+import { canConsumeCapability } from "@everdict/domain";
 import type { ResolvedMcpServer } from "./mcp-tools.js";
 import type { Principal } from "./principal.js";
 
@@ -55,6 +57,7 @@ export function registryProfileResolver(opts: {
   agentRegistry: AgentRegistry;
   secretStore: SecretStore;
   skillStore: SkillStore;
+  capabilityStore: CapabilityStore;
   baseSystemPrompt: string;
   configId: string;
 }): ProfileResolver {
@@ -84,16 +87,49 @@ export function registryProfileResolver(opts: {
       };
     }
 
+    // The consumer's secret tiers (workspace + personal) — the auth values for BOTH the raw mcpServers and adopted mcp
+    // capabilities are resolved from here (verbatim `Authorization` header). Fetched once, only if either needs it.
+    const scoped: Awaited<ReturnType<SecretStore["scopedEntries"]>> =
+      spec.mcpServers.length > 0 || spec.capabilities.length > 0
+        ? await opts.secretStore.scopedEntries(principal.workspace, principal.subject)
+        : { workspace: {}, user: {} };
+    const resolveSecret = (name: string | undefined): string | undefined =>
+      name ? (scoped.workspace[name] ?? scoped.user[name]) : undefined;
+
     const mcpServers: ResolvedMcpServer[] = [];
-    if (spec.mcpServers.length > 0) {
-      const scoped = await opts.secretStore.scopedEntries(principal.workspace, principal.subject);
-      for (const s of spec.mcpServers) {
-        let authorization: string | undefined;
-        if (s.authSecret) {
-          const value = scoped.workspace[s.authSecret] ?? scoped.user[s.authSecret];
-          if (value !== undefined) authorization = value; // verbatim header value (e.g. "Bearer …") — same discipline as trace sources
-        }
-        mcpServers.push({ name: s.name, url: s.url, ...(authorization ? { authorization } : {}), write: s.write });
+    for (const s of spec.mcpServers) {
+      const authorization = resolveSecret(s.authSecret); // verbatim header value (e.g. "Bearer …") — same discipline as trace sources
+      mcpServers.push({ name: s.name, url: s.url, ...(authorization ? { authorization } : {}), write: s.write });
+    }
+
+    // Adopted Store capabilities — immutable-version references resolved cross-tenant, with visibility re-checked at
+    // load time (a revoked/unpublished capability degrades to skipped, never fails the turn). mcp → an MCP server
+    // (reuse the bridge); skill → a `use_skill` entry (merged with the ambient library, deduped by name); `code`
+    // capabilities are a later runtime adapter. See docs/architecture/capability-store.md.
+    for (const ref of spec.capabilities) {
+      let record: CapabilityRecord | undefined;
+      try {
+        record = await opts.capabilityStore.getVersion(ref.source, ref.id, ref.version);
+      } catch {
+        record = undefined;
+      }
+      if (!record) continue; // unresolvable pin → skip (best-effort)
+      if (!canConsumeCapability(record, { tenant: principal.workspace, subject: principal.subject })) continue; // access revoked → skip
+      const capSpec = record.spec;
+      if (capSpec.type === "mcp") {
+        // Convention: the first declared required secret is the server's `Authorization` value; the adopter maps its
+        // NAME to one of their own workspace/personal secrets via ref.secretBindings.
+        const authName = capSpec.requiredSecrets[0]?.name;
+        const authorization = resolveSecret(authName ? ref.secretBindings[authName] : undefined);
+        mcpServers.push({
+          name: record.name,
+          url: capSpec.url,
+          ...(authorization ? { authorization } : {}),
+          write: capSpec.write && ref.enableWrite, // adopter opt-in AND the server offers write tools
+        });
+      } else if (capSpec.type === "skill") {
+        if (!skills.some((s) => s.name === record.name))
+          skills.push({ name: record.name, description: record.description, instructions: capSpec.instructions });
       }
     }
     const hasWriteTools = mcpServers.some((s) => s.write);

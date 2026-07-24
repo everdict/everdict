@@ -1,5 +1,12 @@
-import type { AgentRegistry, SecretStore, SkillStore } from "@everdict/application-control";
-import { type AgentSpec, NotFoundError, type SkillRecord } from "@everdict/contracts";
+import type { AgentRegistry, CapabilityStore, SecretStore, SkillStore } from "@everdict/application-control";
+import {
+  type AgentSpec,
+  type CapabilityRecord,
+  type CapabilityRef,
+  type CapabilitySpec,
+  NotFoundError,
+  type SkillRecord,
+} from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import type { Principal } from "./principal.js";
 import { registryProfileResolver } from "./profile.js";
@@ -27,6 +34,40 @@ function skillStore(records: SkillRecord[] = []): SkillStore {
   return { list: async () => records } as unknown as SkillStore;
 }
 
+// A minimal CapabilityStore whose getVersion() resolves an adopted ref against the given records (cross-tenant raw).
+function capabilityStore(records: CapabilityRecord[] = []): CapabilityStore {
+  return {
+    getVersion: async (owner: string, id: string, version: string) =>
+      records.find((r) => r.tenant === owner && r.id === id && r.version === version),
+  } as unknown as CapabilityStore;
+}
+
+const capRef = (over: Partial<CapabilityRef> = {}): CapabilityRef => ({
+  source: "acme",
+  id: "cap1",
+  version: "1.0.0",
+  secretBindings: {},
+  enableWrite: false,
+  ...over,
+});
+
+function capRecord(spec: CapabilitySpec, over: Partial<CapabilityRecord> = {}): CapabilityRecord {
+  return {
+    id: "cap1",
+    tenant: "acme",
+    version: "1.0.0",
+    name: "cap",
+    description: "d",
+    spec,
+    visibility: "public",
+    sharedWith: [],
+    tags: [],
+    createdBy: "owner",
+    createdAt: "t",
+    ...over,
+  };
+}
+
 function skillRecord(over: Partial<SkillRecord>): SkillRecord {
   return {
     id: "s1",
@@ -46,11 +87,13 @@ function resolver(
   spec: AgentSpec | undefined,
   secrets: SecretStore = secretStore({}),
   skills: SkillStore = skillStore(),
+  caps: CapabilityStore = capabilityStore(),
 ) {
   return registryProfileResolver({
     agentRegistry: agentRegistry(spec),
     secretStore: secrets,
     skillStore: skills,
+    capabilityStore: caps,
     baseSystemPrompt: BASE,
     configId: "default",
   });
@@ -121,5 +164,75 @@ describe("registryProfileResolver", () => {
     )(principal);
     expect(writeable.systemPrompt).toContain("can make");
     expect(writeable.mcpServers[0]?.write).toBe(true);
+  });
+
+  it("resolves an adopted mcp capability into an MCP server (auth from the bound secret, write opt-in)", async () => {
+    const cap = capRecord(
+      {
+        type: "mcp",
+        url: "https://cap.example.com/mcp",
+        provides: ["do_thing"],
+        requiredSecrets: [{ name: "API_KEY", description: "the key" }],
+        write: true,
+      },
+      { name: "shared-tools" },
+    );
+    const profile = await resolver(
+      spec({ capabilities: [capRef({ secretBindings: { API_KEY: "my_key" }, enableWrite: true })] }),
+      secretStore({ my_key: "Bearer cap-1" }),
+      skillStore(),
+      capabilityStore([cap]),
+    )(principal);
+    expect(profile.mcpServers).toEqual([
+      { name: "shared-tools", url: "https://cap.example.com/mcp", authorization: "Bearer cap-1", write: true },
+    ]);
+  });
+
+  it("does not enable write on an mcp capability unless the adopter opts in", async () => {
+    const cap = capRecord({ type: "mcp", url: "https://c/mcp", provides: [], requiredSecrets: [], write: true });
+    const profile = await resolver(
+      spec({ capabilities: [capRef({ enableWrite: false })] }),
+      secretStore({}),
+      skillStore(),
+      capabilityStore([cap]),
+    )(principal);
+    expect(profile.mcpServers[0]?.write).toBe(false);
+  });
+
+  it("resolves an adopted skill capability into a use_skill entry (deduped against the ambient library)", async () => {
+    const cap = capRecord({ type: "skill", instructions: "1. adopted step" }, { name: "adopted-skill" });
+    const profile = await resolver(
+      spec({ capabilities: [capRef()] }),
+      secretStore({}),
+      skillStore(),
+      capabilityStore([cap]),
+    )(principal);
+    expect(profile.skills).toContainEqual({ name: "adopted-skill", description: "d", instructions: "1. adopted step" });
+    expect(profile.systemPrompt).toContain("use_skill");
+  });
+
+  it("skips a cross-tenant capability the consumer may not see (best-effort, turn survives)", async () => {
+    const foreignPrivate = capRecord(
+      { type: "mcp", url: "https://x/mcp", provides: [], requiredSecrets: [], write: false },
+      { tenant: "beta", visibility: "private", createdBy: "someone" },
+    );
+    const profile = await resolver(
+      spec({ capabilities: [capRef({ source: "beta" })] }),
+      secretStore({}),
+      skillStore(),
+      capabilityStore([foreignPrivate]),
+    )(principal);
+    expect(profile.mcpServers).toEqual([]); // not visible to acme/u1 → skipped
+  });
+
+  it("skips an unresolvable capability pin without failing the turn", async () => {
+    const profile = await resolver(
+      spec({ capabilities: [capRef({ id: "gone", version: "9.9.9" })] }),
+      secretStore({}),
+      skillStore(),
+      capabilityStore([]), // getVersion returns undefined
+    )(principal);
+    expect(profile.mcpServers).toEqual([]);
+    expect(profile.skills).toEqual([]);
   });
 });
