@@ -3007,8 +3007,8 @@
     "usedSkill": "스킬 {skill} 로드"
   },
   "agentChat": {
-    "subtitle": "평가에 대해 물어보세요",
     "new": "새 대화",
+    "history": "대화 기록",
     "model": "모델",
     "modelDefault": "워크스페이스 기본",
     "modelPick": "모델 선택",
@@ -3017,15 +3017,12 @@
     "placeholder": "에이전트에게 메시지…",
     "send": "보내기",
     "thinking": "생각 중…",
-    "back": "대화 목록으로",
     "delete": "대화 삭제",
     "confirmDelete": "이 대화를 삭제할까요?",
     "cancel": "취소",
     "rename": "대화 이름 변경",
     "attach": "파일 첨부",
     "attachRemove": "첨부 제거",
-    "startChat": "대화 시작하기",
-    "emptyTitle": "아직 대화가 없어요",
     "emptyMessagesTitle": "무엇을 도와드릴까요?",
     "scrollToBottom": "맨 아래로",
     "stop": "정지",
@@ -3039,7 +3036,11 @@
     "regenerate": "다시 생성",
     "toolArgs": "인자",
     "toolResult": "결과",
-    "bucket": { "today": "오늘", "yesterday": "어제", "earlier": "이전" },
+    "bucket": {
+      "today": "오늘",
+      "yesterday": "어제",
+      "earlier": "이전"
+    },
     "suggestions": [
       "가장 최근 스코어카드의 실패를 요약해줘",
       "내 워크스페이스에 어떤 데이터셋과 하네스가 있어?",

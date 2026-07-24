@@ -18,13 +18,14 @@ import { modelsSchema } from '@/entities/model'
 
 import { ConversationView } from './conversation-view'
 import type { PendingPermission } from './permission-prompt'
-import { SessionList } from './session-list'
 
 // The agent conversation surface for the infra panel's "agent" tab. Owns all state + I/O; delegates rendering to
-// SessionList (history) and ConversationView (the open chat). Talks only to the same-origin BFF (/api/agent/*).
-// A turn streams over SSE: `delta` events grow the live assistant bubble, `message` events merge each persisted
-// record (so tool cards + the finalized answer appear live); the Stop button aborts the request → the server
-// aborts the loop.
+// ConversationView (the chat is ALWAYS on screen — entering the tab lands on a ready-to-type draft, and history
+// lives in the header's SessionMenu dropdown, so the user never leaves the chat). A draft (activeId === null) has
+// no server session yet; the first send creates one lazily (so opening the tab never litters empty sessions).
+// Talks only to the same-origin BFF (/api/agent/*). A turn streams over SSE: `delta` events grow the live
+// assistant bubble, `message` events merge each persisted record (so tool cards + the finalized answer appear
+// live); the Stop button aborts the request → the server aborts the loop.
 
 function mergeMessages(prev: AgentMessage[], incoming: AgentMessage[]): AgentMessage[] {
   const byId = new Map(prev.map((m) => [m.id, m]))
@@ -45,6 +46,8 @@ export function AgentChatPanel() {
   const [streamingText, setStreamingText] = useState('')
   const [pendingPermissions, setPendingPermissions] = useState<PendingPermission[]>([])
   const [modelIds, setModelIds] = useState<string[]>([])
+  // 드래프트(세션 미생성) 상태에서 고른 모델 — 첫 전송의 세션 생성에 실려 간다.
+  const [draftModel, setDraftModel] = useState<string | null>(null)
   const abortRef = useRef<AbortController | null>(null)
 
   const loadSessions = useCallback(async () => {
@@ -78,10 +81,7 @@ export function AgentChatPanel() {
   }, [])
 
   useEffect(() => {
-    if (!activeId) {
-      setMessages([])
-      return
-    }
+    if (!activeId) return
     let cancelled = false
     void (async () => {
       try {
@@ -90,7 +90,10 @@ export function AgentChatPanel() {
         })
         if (!res.ok) return
         const parsed = agentMessageListSchema.safeParse(await res.json())
-        if (!cancelled && parsed.success) setMessages(parsed.data.messages)
+        // 병합(교체 아님): 전환 시엔 이미 비워져 있고, 첫 전송이 방금 만든 세션이면 스트리밍으로 먼저
+        // 도착한 레코드를 빈 서버 응답이 덮어쓰면 안 된다.
+        if (!cancelled && parsed.success)
+          setMessages((prev) => mergeMessages(prev, parsed.data.messages))
       } catch {
         // silent
       }
@@ -100,23 +103,25 @@ export function AgentChatPanel() {
     }
   }, [activeId])
 
-  const newConversation = useCallback(async () => {
-    try {
-      const res = await fetch('/api/agent/sessions', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({}),
-      })
-      if (!res.ok) return
-      const parsed = agentSessionSchema.safeParse(await res.json())
-      if (!parsed.success) return
-      setSessions((prev) => [parsed.data, ...prev])
-      setActiveId(parsed.data.id)
-      setMessages([])
-    } catch {
-      toast.error(t('errorGeneric'))
-    }
-  }, [t])
+  // 진행 중 턴을 끊고 다른 대화로 컨텍스트를 전환한다 — 이전 세션의 스트림이 새 화면에 섞이지 않게.
+  const switchTo = useCallback((id: string | null) => {
+    abortRef.current?.abort()
+    setActiveId(id)
+    setMessages([])
+  }, [])
+
+  const newConversation = useCallback(() => {
+    switchTo(null)
+    setDraftModel(null)
+  }, [switchTo])
+
+  const openSession = useCallback(
+    (id: string) => {
+      if (id === activeId) return
+      switchTo(id)
+    },
+    [activeId, switchTo]
+  )
 
   const deleteSession = useCallback(
     async (id: string) => {
@@ -126,15 +131,12 @@ export function AgentChatPanel() {
         })
         if (!res.ok) return
         setSessions((prev) => prev.filter((s) => s.id !== id))
-        if (activeId === id) {
-          setActiveId(null)
-          setMessages([])
-        }
+        if (activeId === id) switchTo(null)
       } catch {
         toast.error(t('errorGeneric'))
       }
     },
-    [activeId, t]
+    [activeId, switchTo, t]
   )
 
   const renameSession = useCallback(
@@ -157,7 +159,11 @@ export function AgentChatPanel() {
 
   const changeModel = useCallback(
     async (model: string | null) => {
-      if (!activeId) return
+      if (!activeId) {
+        // 드래프트엔 아직 서버 세션이 없다 — 로컬에 들고 있다가 첫 전송의 생성 요청에 싣는다.
+        setDraftModel(model)
+        return
+      }
       // Optimistic — reflect the pick immediately; the PATCH persists it (or reverts via reload on failure).
       setSessions((prev) =>
         prev.map((s) => (s.id === activeId ? { ...s, model: model ?? undefined } : s))
@@ -180,7 +186,30 @@ export function AgentChatPanel() {
   const send = useCallback(
     async (textArg?: string, refsArg?: AgentReference[]) => {
       const text = (textArg ?? input).trim()
-      if (text.length === 0 || !activeId || sending) return
+      if (text.length === 0 || sending) return
+
+      // 드래프트의 첫 전송 — 이제서야 서버 세션을 만든다(드래프트에서 고른 모델을 실어서).
+      let sessionId = activeId
+      if (!sessionId) {
+        try {
+          const res = await fetch('/api/agent/sessions', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify(draftModel !== null ? { model: draftModel } : {}),
+          })
+          if (!res.ok) throw new Error('create failed')
+          const parsed = agentSessionSchema.safeParse(await res.json())
+          if (!parsed.success) throw new Error('create failed')
+          setSessions((prev) => [parsed.data, ...prev])
+          setActiveId(parsed.data.id)
+          setDraftModel(null)
+          sessionId = parsed.data.id
+        } catch {
+          toast.error(t('errorGeneric'))
+          return
+        }
+      }
+
       const refs = refsArg ?? references
       const fromComposer = textArg === undefined
       const atts = fromComposer ? attachments : []
@@ -238,7 +267,7 @@ export function AgentChatPanel() {
       }
 
       try {
-        const res = await fetch(`/api/agent/sessions/${encodeURIComponent(activeId)}/chat`, {
+        const res = await fetch(`/api/agent/sessions/${encodeURIComponent(sessionId)}/chat`, {
           method: 'POST',
           headers: { 'content-type': 'application/json', accept: 'text/event-stream' },
           body: JSON.stringify({
@@ -296,7 +325,7 @@ export function AgentChatPanel() {
         void loadSessions()
       }
     },
-    [input, activeId, sending, references, attachments, loadSessions, t]
+    [input, activeId, sending, references, attachments, draftModel, loadSessions, t]
   )
 
   const stop = useCallback(() => abortRef.current?.abort(), [])
@@ -324,26 +353,19 @@ export function AgentChatPanel() {
     if (lastUser) void send(lastUser.content, lastUser.references)
   }, [messages, send])
 
-  if (!activeId) {
-    return (
-      <SessionList
-        sessions={sessions}
-        activeId={null}
-        onOpen={setActiveId}
-        onNew={() => void newConversation()}
-        onDelete={(id) => void deleteSession(id)}
-        onRename={(id, title) => void renameSession(id, title)}
-      />
-    )
-  }
-
-  const active = sessions.find((s) => s.id === activeId)
+  const active = activeId ? sessions.find((s) => s.id === activeId) : undefined
   return (
     <ConversationView
-      title={active?.title ?? ''}
+      title={active?.title ?? t('new')}
       models={modelIds}
-      model={active?.model ?? null}
+      model={activeId ? (active?.model ?? null) : draftModel}
       onChangeModel={(m) => void changeModel(m)}
+      sessions={sessions}
+      activeId={activeId}
+      onOpenSession={openSession}
+      onNewConversation={newConversation}
+      onDeleteSession={(id) => void deleteSession(id)}
+      onRenameSession={(id, title) => void renameSession(id, title)}
       messages={messages}
       pendingUser={pendingUser}
       sending={sending}
@@ -362,7 +384,6 @@ export function AgentChatPanel() {
       onRemoveReference={(i) => setReferences((prev) => prev.filter((_, j) => j !== i))}
       onPickAttachment={(a) => setAttachments((prev) => [...prev, a])}
       onRemoveAttachment={(i) => setAttachments((prev) => prev.filter((_, j) => j !== i))}
-      onBack={() => setActiveId(null)}
       onRegenerate={regenerate}
       onSuggestion={(txt) => void send(txt)}
       pendingPermissions={pendingPermissions}

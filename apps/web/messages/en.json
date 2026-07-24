@@ -3007,8 +3007,8 @@
     "usedSkill": "loaded skill {skill}"
   },
   "agentChat": {
-    "subtitle": "Ask about your evals",
     "new": "New",
+    "history": "History",
     "model": "Model",
     "modelDefault": "Workspace default",
     "modelPick": "Select model",
@@ -3017,15 +3017,12 @@
     "placeholder": "Message the agent…",
     "send": "Send",
     "thinking": "Thinking…",
-    "back": "Back to conversations",
     "delete": "Delete conversation",
     "confirmDelete": "Delete this conversation?",
     "cancel": "Cancel",
     "rename": "Rename conversation",
     "attach": "Attach files",
     "attachRemove": "Remove attachment",
-    "startChat": "Start a conversation",
-    "emptyTitle": "No conversations yet",
     "emptyMessagesTitle": "How can I help?",
     "scrollToBottom": "Scroll to bottom",
     "stop": "Stop",
@@ -3039,7 +3036,11 @@
     "regenerate": "Regenerate",
     "toolArgs": "Arguments",
     "toolResult": "Result",
-    "bucket": { "today": "Today", "yesterday": "Yesterday", "earlier": "Earlier" },
+    "bucket": {
+      "today": "Today",
+      "yesterday": "Yesterday",
+      "earlier": "Earlier"
+    },
     "suggestions": [
       "Summarize my most recent scorecard's failures",
       "What datasets and harnesses are in my workspace?",

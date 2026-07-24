@@ -1,10 +1,15 @@
 'use client'
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { ArrowDown, ArrowLeft, Check, ChevronDown, Cpu, Sparkles, User } from 'lucide-react'
+import { ArrowDown, Check, ChevronDown, Cpu, MessageSquarePlus, Sparkles, User } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
-import type { AgentAttachmentInput, AgentMessage, AgentReference } from '@/entities/agent-session'
+import type {
+  AgentAttachmentInput,
+  AgentMessage,
+  AgentReference,
+  AgentSession,
+} from '@/entities/agent-session'
 import { cn } from '@/shared/lib/utils'
 import { Button } from '@/shared/ui/button'
 import { DropdownItem, DropdownLabel, DropdownMenu } from '@/shared/ui/dropdown-menu'
@@ -14,6 +19,7 @@ import { AgentAvatar } from './agent-avatar'
 import { Composer } from './composer'
 import { MessageRow } from './message-row'
 import { PermissionPrompt, type PendingPermission } from './permission-prompt'
+import { SessionMenu } from './session-menu'
 
 // A compact model selector in the conversation header — the member picks which registered workspace model powers
 // this conversation. "Workspace default" (null) falls back to the workspace AgentSpec's model / the server default.
@@ -38,7 +44,7 @@ function ModelPicker({
           onClick={toggle}
           aria-label={t('modelPick')}
           aria-expanded={open}
-          className="flex max-w-[10rem] shrink-0 items-center gap-1 rounded-md px-1.5 py-1 text-[11.5px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          className="flex min-w-0 max-w-[10rem] items-center gap-1 rounded-md px-1.5 py-1 text-[11.5px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
         >
           <Cpu className="size-3.5 shrink-0" strokeWidth={1.75} />
           <span className="min-w-0 truncate">{model ?? t('modelDefault')}</span>
@@ -71,6 +77,12 @@ export function ConversationView({
   models,
   model,
   onChangeModel,
+  sessions,
+  activeId,
+  onOpenSession,
+  onNewConversation,
+  onDeleteSession,
+  onRenameSession,
   messages,
   pendingUser,
   sending,
@@ -85,7 +97,6 @@ export function ConversationView({
   onRemoveReference,
   onPickAttachment,
   onRemoveAttachment,
-  onBack,
   onRegenerate,
   onSuggestion,
   pendingPermissions,
@@ -95,6 +106,12 @@ export function ConversationView({
   models: string[]
   model: string | null
   onChangeModel: (model: string | null) => void
+  sessions: AgentSession[]
+  activeId: string | null
+  onOpenSession: (id: string) => void
+  onNewConversation: () => void
+  onDeleteSession: (id: string) => void
+  onRenameSession: (id: string, title: string) => void
   messages: AgentMessage[]
   pendingUser: string | null
   sending: boolean
@@ -109,7 +126,6 @@ export function ConversationView({
   onRemoveReference: (index: number) => void
   onPickAttachment: (a: AgentAttachmentInput) => void
   onRemoveAttachment: (index: number) => void
-  onBack: () => void
   onRegenerate: () => void
   onSuggestion: (text: string) => void
   pendingPermissions: PendingPermission[]
@@ -153,14 +169,26 @@ export function ConversationView({
   return (
     <div className="flex h-full flex-col">
       <div className="flex items-center gap-2 border-b border-border px-2 py-1.5">
-        <Button variant="ghost" size="icon-sm" aria-label={t('back')} onClick={onBack}>
-          <ArrowLeft />
-        </Button>
         <AgentAvatar size="sm" />
         <span className="min-w-0 flex-1 truncate text-[13px] font-[560] text-foreground">
           {title}
         </span>
         <ModelPicker models={models} model={model} onChange={onChangeModel} />
+        <SessionMenu
+          sessions={sessions}
+          activeId={activeId}
+          onOpen={onOpenSession}
+          onDelete={onDeleteSession}
+          onRename={onRenameSession}
+        />
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          aria-label={t('new')}
+          onClick={onNewConversation}
+        >
+          <MessageSquarePlus />
+        </Button>
       </div>
 
       <div className="relative min-h-0 flex-1">

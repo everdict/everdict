@@ -117,6 +117,12 @@ export function DropdownMenu({
   )
 }
 
+// DropdownItem 밖의 커스텀 복합 행(중첩 액션 버튼이 있어 단일 버튼으로 못 만드는 행)에서 메뉴를 닫을 때 쓴다.
+export function useDropdownClose(): () => void {
+  const ctx = useContext(Ctx)
+  return ctx?.close ?? (() => {})
+}
+
 export function DropdownItem({
   children,
   onSelect,
