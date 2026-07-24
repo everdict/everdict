@@ -104,6 +104,21 @@ describe("HttpFrontDoorDriver.drive", () => {
     expect(opts?.headers).toEqual({ Authorization: "Bearer x" });
   });
 
+  // Completion liveness — sync's optional timeoutMs must reach the submit as a socket cap; unset stays unbounded (today).
+  it("sync completion passes its optional timeoutMs to submit, and unset leaves it undefined", async () => {
+    const seen: (FrontDoorRequestOpts | undefined)[] = [];
+    const driver = new HttpFrontDoorDriver({
+      submit: async (_url, _payload, o) => {
+        seen.push(o);
+        return {};
+      },
+    });
+    await driver.drive(baseReq({ completion: { mode: "sync", timeoutMs: 4500 } }));
+    await driver.drive(baseReq({ completion: { mode: "sync" } }));
+    expect(seen[0]?.timeoutMs).toBe(4500);
+    expect(seen[1]?.timeoutMs).toBeUndefined();
+  });
+
   it("poll: polls until the status hits the terminal condition (done) and returns done", async () => {
     const responses = [{ status: "running" }, { status: "running" }, { status: "done" }];
     let i = 0;

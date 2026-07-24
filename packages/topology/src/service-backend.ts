@@ -29,6 +29,7 @@ import { keysFor, newRunId, perRunFields, perRunVocabulary, wiringVars } from ".
 import { captureCdpScreenshot } from "./front-door/capture-cdp.js";
 import {
   type CallbackRendezvous,
+  type DriveOutcome,
   type FrontDoorDriver,
   type FrontDoorFilePart,
   type GetJsonFn,
@@ -91,6 +92,9 @@ export interface ServiceTopologyBackendOptions {
   // Resolve a fixture's ArtifactStore ref (large SQL dump / RDB / bucket tarball) to its inline seed body (P2). The
   // control plane injects it (fetch + decode); a case with a ref fixture but no resolver fails loud. Absent = inline only.
   resolveSeedRef?: (ref: string) => Promise<string>;
+  // Injectable timer for the per-case drive wall-clock (completion liveness). Fires `onFire` after `ms`; returns a
+  // cancel fn. Default = setTimeout. Injected in tests for deterministic (no real wait) deadline firing.
+  startDriveDeadline?: (ms: number, onFire: () => void) => () => void;
 }
 
 // The orchestrator-agnostic service-topology backend (a Backend implementation).
@@ -250,21 +254,62 @@ export class ServiceTopologyBackend implements Backend, ScreenCapturable {
       const files = spec.frontDoor.request?.files?.length
         ? resolveFrontDoorFiles(spec.frontDoor.request.files, job.evalCase)
         : undefined;
-      const outcome = await driver.drive({
-        base,
-        submit: spec.frontDoor.submit,
-        payload,
-        completion: spec.frontDoor.completion,
-        correlate: spec.frontDoor.correlate,
-        wiring,
-        traceRef: runId,
-        ...(headers ? { headers } : {}),
-        ...(encoding ? { encoding } : {}),
-        ...(files ? { files } : {}),
-        // Cancellation — a user stop aborts the front-door drive mid-flight (frees the socket + the per-case browser
-        // is torn down by the finally below). Without this the topology run would drain to completion, result discarded.
-        ...(opts?.signal ? { signal: opts.signal } : {}),
+      // Per-case wall-clock (completion liveness). The declared per-case budget (EvalCase.timeoutSec) bounds the WHOLE
+      // drive so a dead/hung front-door — e.g. a sync-completion agent whose command stream died with the socket held
+      // open — fails explicitly with a completion-timeout instead of hanging in `running` until an external cancel.
+      // Every other execution path already honors timeoutSec; this brings the topology drive to parity. The internal
+      // abort chains BOTH the dispatch signal (a user stop still aborts + frees the socket) and the deadline.
+      const budgetMs = job.evalCase.timeoutSec * 1000;
+      const driveAbort = new AbortController();
+      const onOuterAbort = (): void => driveAbort.abort();
+      if (opts?.signal) {
+        if (opts.signal.aborted) driveAbort.abort();
+        else opts.signal.addEventListener("abort", onOuterAbort, { once: true });
+      }
+      let deadlineFired = false;
+      const startDeadline =
+        this.opts.startDriveDeadline ??
+        ((ms, onFire): (() => void) => {
+          const t = setTimeout(onFire, ms);
+          return () => clearTimeout(t);
+        });
+      const cancelDeadline = startDeadline(budgetMs, () => {
+        deadlineFired = true;
+        driveAbort.abort();
       });
+      let outcome: DriveOutcome;
+      try {
+        outcome = await driver.drive({
+          base,
+          submit: spec.frontDoor.submit,
+          payload,
+          completion: spec.frontDoor.completion,
+          correlate: spec.frontDoor.correlate,
+          wiring,
+          traceRef: runId,
+          ...(headers ? { headers } : {}),
+          ...(encoding ? { encoding } : {}),
+          ...(files ? { files } : {}),
+          // Cancellation + deadline — a user stop OR the per-case budget aborts the drive mid-flight (frees the socket +
+          // the per-case browser is torn down by the finally below). Without this the topology run would drain forever.
+          signal: driveAbort.signal,
+        });
+      } catch (err) {
+        // The per-case budget elapsed while the drive was still waiting (the front-door held the socket with no result)
+        // → an explicit completion-timeout, distinct from the CANCELLED an aborted drive throws. A real user stop
+        // (deadline not fired) or a genuine drive error propagates unchanged.
+        if (deadlineFired) {
+          throw new InternalError(
+            "HARNESS_RUN_FAILED",
+            { runId, reason: "completion-timeout", budgetSec: job.evalCase.timeoutSec },
+            "The agent did not finish within the per-case budget (timeoutSec).",
+          );
+        }
+        throw err;
+      } finally {
+        cancelDeadline();
+        if (opts?.signal) opts.signal.removeEventListener("abort", onOuterAbort);
+      }
       // Cancelled between drive completing and the (relatively quick) trace/observe/grade steps → stop here too.
       if (opts?.signal?.aborted) throw dispatchAborted(job);
       // Completion deadline exceeded = the eval result can't be confirmed (grading a half-done state misleads) → make it an explicit run failure.

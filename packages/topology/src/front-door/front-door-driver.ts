@@ -125,6 +125,12 @@ const fetchSubmit: SubmitFn = (url, payload, opts) =>
       target.protocol === "https:"
         ? httpsRequest(target, options, onResponse)
         : httpRequest(target, options, onResponse);
+    // TCP keepalive — a sync-completion peer that dies while holding the response open (no data flowing, no FIN) is
+    // otherwise invisible until the wall-clock. Keepalive probes surface a dead peer (RST) earlier, so a client-control
+    // stream death fails the drive instead of hanging.
+    req.on("socket", (socket) => {
+      socket.setKeepAlive(true, 30_000);
+    });
     if (opts?.timeoutMs !== undefined) {
       req.setTimeout(opts.timeoutMs, () => {
         req.destroy(
@@ -284,9 +290,11 @@ function resolveTraceRef(correlate: FrontDoorCorrelate | undefined, injected: st
   return value;
 }
 
-// Safely read the completion model's timeoutMs — only sync lacks this field (→ undefined). Passed as the submit socket idle timeout.
+// Read the completion model's timeoutMs — sync's is optional (undefined = unbounded here; the backend per-case budget
+// EvalCase.timeoutSec is the real cap). Passed as the submit socket idle timeout: for sync no data flows while the
+// server holds the response, so this value is the effective max wait, cutting a dead agent instead of hanging.
 function completionTimeoutMs(completion: FrontDoorCompletion | undefined): number | undefined {
-  return completion && completion.mode !== "sync" ? completion.timeoutMs : undefined;
+  return completion?.timeoutMs;
 }
 
 export type DriveStatus = "done" | "failed" | "timeout";

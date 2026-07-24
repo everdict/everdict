@@ -249,7 +249,14 @@ export type StatusMatch = z.infer<typeof StatusMatchSchema>;
 // stream = the submit response is an SSE event stream, decided by the terminal event (A2A message/stream). callback = fire-and-forget, then
 // the agent POSTs the terminal result to {{callback_url}} → inbound await. Design: docs/architecture/completion-stream-callback.md.
 export const FrontDoorCompletionSchema = z.discriminatedUnion("mode", [
-  z.object({ mode: z.literal("sync") }),
+  z.object({
+    mode: z.literal("sync"),
+    // Optional wall-clock cap for a sync drive (the submit response IS the completion). Unset = unbounded here — the
+    // per-case budget (EvalCase.timeoutSec) still bounds the whole drive at the backend. Set = the submit socket
+    // no-flow cap: for sync no data flows until the agent finishes, so this value is the effective max wait, cutting a
+    // dead agent that holds the socket open instead of hanging until the case budget elapses.
+    timeoutMs: z.number().int().positive().optional(),
+  }),
   z.object({
     mode: z.literal("poll"),
     statusPath: z.string(), // e.g. "GET /runs/{run_id}/status" — interpolate wiring variables ({run_id} etc.)

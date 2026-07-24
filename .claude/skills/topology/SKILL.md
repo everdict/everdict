@@ -137,9 +137,17 @@ an optional knob defaulting to today — is in `docs/architecture/front-door-gen
 touching `service-backend.ts`'s driving logic.
 - **Default submit is `node:http`/`node:https`, not global `fetch`.** undici's `headersTimeout` (default 300s) aborts
   `sync`-completion harnesses that hold the response for minutes while the agent runs; the raw node request has no such
-  cap. `FrontDoorRequestOpts.timeoutMs` (from `completion.timeoutMs` — `sync` has none, so unbounded) is applied as a
-  **socket idle timeout**: while the server holds the response no data flows, so idle-time *is* the completion deadline.
-  Socket errors remap to `UpstreamError`.
+  cap. `FrontDoorRequestOpts.timeoutMs` (from `completion.timeoutMs`) is applied as a **socket idle timeout**: while the
+  server holds the response no data flows, so idle-time *is* the completion deadline. `sync.timeoutMs` is **optional**
+  (unset = unbounded here — the per-case wall-clock below is the real cap; set = a tighter sync-specific idle cap).
+  The submit socket also enables **TCP keepalive** so a peer that dies while holding the response open (no data, no FIN)
+  is surfaced via keepalive probes rather than hanging. Socket errors remap to `UpstreamError`.
+- **Per-case drive wall-clock (completion liveness).** `ServiceTopologyBackend.dispatch` bounds the WHOLE `driver.drive`
+  by the declared per-case budget (`EvalCase.timeoutSec`) — an internal `AbortController` chains the dispatch signal
+  (user stop) AND a deadline timer, so a dead/hung front-door (e.g. a `sync` agent whose command stream died) fails with
+  an explicit `HARNESS_RUN_FAILED`/`completion-timeout` instead of hanging in `running` forever. Every other execution
+  path already honors `timeoutSec`; this brings the topology drive to parity. Timer injectable via
+  `startDriveDeadline` (test determinism). Follow-up: heartbeat-based *earlier* (sub-budget) stream-death detection.
 - **#2 completion — DONE (4 modes).** `FrontDoorDriver`/`HttpFrontDoorDriver` (`front-door-driver.ts`) own submit +
   await; `frontDoor.completion` in `@everdict/contracts`: `sync` (default) | `poll` (`StatusMatch` done/failed) | `stream`
   (SSE submit; `OpenStreamFn`/`fetchStream`; terminal event via `StatusMatch`; first-event correlate) | `callback`

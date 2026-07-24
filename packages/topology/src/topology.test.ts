@@ -820,6 +820,75 @@ describe("ServiceTopologyBackend (orchestrator-agnostic, mock runtime)", () => {
     expect(recorded[0]?.minio_prefix).toBe("runs/fixed/");
   });
 
+  // Regression (completion liveness) — a sync drive whose agent stream dies with the socket held open must fail on the
+  // per-case budget, not hang in `running` forever. Pre-fix: dispatch passed no deadline, so the never-resolving drive
+  // hung (the race below would yield HUNG). Fixed: the injected deadline aborts the drive → explicit completion-timeout.
+  it("fails a hung sync drive on the per-case budget instead of waiting forever", async () => {
+    const runtime: TopologyRuntime = {
+      id: "mock",
+      async ensureTopology() {
+        return { endpoints: { "agent-server": "http://agent-server:8000" } };
+      },
+      async provisionBrowserEnv() {
+        return {
+          wiring: { target_cdp_url: "ws://browser/ctx" },
+          async snapshot() {
+            return { kind: "browser", url: "https://x", dom: "<html/>", console: [] } satisfies BrowserSnapshot;
+          },
+          async dispose() {},
+        };
+      },
+    };
+    // A driver that never completes on its own — it only settles when its signal aborts (a real sync submit holding the
+    // socket while a dead agent never responds).
+    const hangingDriver: FrontDoorDriver = {
+      drive: (req) =>
+        new Promise((_resolve, reject) => {
+          req.signal?.addEventListener("abort", () => reject(new InternalError("CANCELLED", {}, "aborted")), {
+            once: true,
+          });
+        }),
+    };
+    const backend = new ServiceTopologyBackend({
+      runtime,
+      traceSource: {
+        async fetch() {
+          return [];
+        },
+      },
+      specFor: () => SPEC,
+      frontDoorDriver: hangingDriver,
+      newRunId: () => "fixed",
+      // Fire the deadline immediately (deterministic — no real timeoutSec wait).
+      startDriveDeadline: (_ms, onFire) => {
+        const t = setTimeout(onFire, 0);
+        return () => clearTimeout(t);
+      },
+    });
+    const job: CaseJob = {
+      harness: { id: "browser-use-langgraph", version: "1.0.0" },
+      evalCase: {
+        id: "c1",
+        env: { kind: "browser", startUrl: "https://x" },
+        task: "t",
+        graders: [],
+        timeoutSec: 60,
+        tags: [],
+      },
+    };
+    const HUNG = Symbol("hung");
+    const outcome = await Promise.race([
+      backend.dispatch(job).then(
+        () => "resolved" as const,
+        (e: unknown) => e,
+      ),
+      new Promise<typeof HUNG>((r) => setTimeout(() => r(HUNG), 1000)),
+    ]);
+    expect(outcome).not.toBe(HUNG); // pre-fix hangs here
+    expect(outcome).toBeInstanceOf(InternalError);
+    expect((outcome as InternalError).message).toMatch(/per-case budget/);
+  });
+
   // World-state fixture seeding (P2) — a data store is added to the spec and the case declares a fixture for it.
   const SPEC_SEED: ServiceHarnessSpec = {
     ...SPEC,
@@ -1357,7 +1426,7 @@ describe("ServiceTopologyBackend (orchestrator-agnostic, mock runtime)", () => {
     let threaded: AbortSignal | undefined;
     const driver: FrontDoorDriver = {
       async drive(req) {
-        threaded = req.signal; // dispatch must pass the cancel signal through to the drive
+        threaded = req.signal; // dispatch passes a drive signal that chains the user cancel (+ the per-case deadline)
         controller.abort(); // the drive aborts mid-flight (as the front-door primitives do on a real cancel)
         throw new InternalError("CANCELLED", { reason: "front-door-aborted" }, "aborted");
       },
@@ -1376,7 +1445,7 @@ describe("ServiceTopologyBackend (orchestrator-agnostic, mock runtime)", () => {
 
     const err = await backend.dispatch(job, { signal: controller.signal }).catch((e: unknown) => e);
 
-    expect(threaded).toBe(controller.signal); // the cancel signal reached the drive
+    expect(threaded?.aborted).toBe(true); // the user cancel propagated into the (chained) drive signal
     expect((err as { code?: string }).code).toBe("CANCELLED");
     expect(b.disposed()).toBe(true); // the runtime is freed — per-case browser torn down via the dispatch finally
   });
