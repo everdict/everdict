@@ -100,6 +100,17 @@ export const TraceRefSchema = z.object({
 });
 export type TraceRef = z.infer<typeof TraceRefSchema>;
 
+// An in-run environment delta captured DURING execution (not just the final snapshot) — today: a non-intrusive repo
+// git-diff vs HEAD sampled over time, so a coding harness's replay shows how the repo evolved. Inline text (small,
+// capped, deduped); the control plane folds these into the sealed recording at finalize. A future slice offloads a
+// large diff to a stateDeltas ref. Rides the CaseResult, so it works self-hosted AND managed. docs/architecture/replay.md.
+export const EnvDeltaSchema = z.object({
+  t: z.number(), // wall-clock ms — shares the recording/trace t0 clock
+  kind: z.enum(["repo-diff"]),
+  text: z.string(),
+});
+export type EnvDelta = z.infer<typeof EnvDeltaSchema>;
+
 export const CaseResultSchema = z.object({
   caseId: z.string(),
   harness: z.string(), // "claude-code@1.2.3"
@@ -122,6 +133,9 @@ export const CaseResultSchema = z.object({
   // Object-store pointer to the sealed replay recording (frames/env/runtime tracks on a shared t0 clock) — sibling of
   // traceRef, coordinates never bytes. Absent unless recording was requested. docs/architecture/replay.md
   recordingRef: RecordingRefSchema.optional(),
+  // In-run environment deltas (repo git-diff checkpoints over time) — the environment plane for a non-visual harness.
+  // Folded into the recording at seal, then cleared (not double-stored on the persisted result). docs/architecture/replay.md.
+  envDeltas: z.array(EnvDeltaSchema).optional(),
 });
 export type CaseResult = z.infer<typeof CaseResultSchema>;
 

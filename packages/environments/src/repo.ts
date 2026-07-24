@@ -61,4 +61,19 @@ export class RepoEnvironment implements Environment<RepoSnapshot> {
     const headSha = (await compute.exec("git rev-parse HEAD", { cwd: WORK })).stdout.trim();
     return { kind: "repo", diff, changedFiles: changed ? changed.split("\n") : [], headSha };
   }
+
+  // In-run recorder sample (docs/architecture/replay.md, Principle 1) — the working-tree-vs-HEAD diff mid-run, WITHOUT
+  // touching the agent's own index/staging: stage everything into a throwaway index under .git (GIT_INDEX_FILE, git
+  // never scans .git so it self-excludes) and diff THAT vs HEAD, then delete it. Includes untracked files. run-case
+  // polls this into CaseResult.envDeltas so a coding harness replays how the repo evolved. Empty diff → undefined.
+  async sampleDelta(compute: ComputeHandle): Promise<{ kind: "repo-diff"; text: string } | undefined> {
+    const idx = ".git/everdict-rec.index";
+    const cmd = `rm -f ${idx}; GIT_INDEX_FILE=${idx} git add -A >/dev/null 2>&1; GIT_INDEX_FILE=${idx} git diff --cached HEAD 2>/dev/null; rm -f ${idx}`;
+    try {
+      const text = (await compute.exec(cmd, { cwd: WORK })).stdout;
+      return text.trim() ? { kind: "repo-diff", text } : undefined;
+    } catch {
+      return undefined; // best-effort — a recording sample never affects the run
+    }
+  }
 }

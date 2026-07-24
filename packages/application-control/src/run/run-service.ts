@@ -26,7 +26,7 @@ import type { Dispatcher } from "../ports/dispatcher.js";
 import type { ExecStreamHandle } from "../ports/exec-stream.js";
 import type { RecordingStore } from "../ports/recording-store.js";
 import type { RunStore } from "../ports/run-store.js";
-import { dispatchManifest } from "../recording-manifest.js";
+import { dispatchManifest, foldEnvDeltas } from "../recording-manifest.js";
 import { assertRuntimeTarget } from "../require-runtime/require-runtime.js";
 
 // Where a running case's platform trace is accumulating (derived on read; docs/architecture/live-observability.md).
@@ -413,6 +413,8 @@ export class RunService {
       // a recording failure never fails the run, and an empty recording seals to undefined (no ref). replay.md D3.
       if (this.deps.recordingStore) {
         try {
+          // Fold the in-run repo git-diff checkpoints (CaseResult.envDeltas) into the recording before sealing.
+          await foldEnvDeltas(this.deps.recordingStore, `evd-run-${id}`, result);
           const ref = await this.deps.recordingStore.seal(`evd-run-${id}`, {
             envKind: input.case.env.kind,
             dispatch: dispatchManifest(result.harness, input.case.fixtures),

@@ -102,3 +102,57 @@ describe("runCase — cooperative cancellation via runCtx.signal", () => {
     expect(compute.disposed).toBe(true);
   });
 });
+
+// A harness that yields one event and completes (a normal short run) — so runCase reaches snapshot → env-delta final
+// sample → release → return.
+function completingHarness(): EvaluableHarness {
+  return {
+    id: "scripted",
+    version: "1.0.0",
+    install: async () => {},
+    run: async function* (): AsyncIterable<TraceEvent> {
+      yield { t: 0, kind: "log", text: "hello", stream: "stdout" } as TraceEvent;
+    },
+  };
+}
+
+describe("runCase — in-run environment deltas (the recorder plane)", () => {
+  it("captures the environment's sampleDelta onto CaseResult.envDeltas", async () => {
+    const compute = fakeComputeHandle();
+    const driver = { id: "fake", provision: async () => compute } as Driver;
+    // A repo-like environment that exposes a non-intrusive delta (git-diff). runCase takes a final sample before
+    // release, so even this sub-cadence run records the end state.
+    const repoEnv = {
+      kind: "repo",
+      seed: async () => {},
+      snapshot: async () => ({ kind: "repo", diff: "", changedFiles: [], headSha: "abc" }),
+      sampleDelta: async () => ({ kind: "repo-diff", text: "diff --git a/f b/f\n+added" }),
+    } as unknown as Environment;
+
+    const result = await runCase(CASE, {
+      driver,
+      environment: repoEnv,
+      harness: completingHarness(),
+      graders: [],
+      runCtx: { apiKeyEnv: {}, timeoutSec: 60 },
+    });
+
+    expect(result.envDeltas).toHaveLength(1);
+    expect(result.envDeltas?.[0]).toMatchObject({ kind: "repo-diff", text: "diff --git a/f b/f\n+added" });
+  });
+
+  it("omits envDeltas when the environment exposes no sampleDelta (e.g. prompt/browser)", async () => {
+    const compute = fakeComputeHandle();
+    const driver = { id: "fake", provision: async () => compute } as Driver;
+
+    const result = await runCase(CASE, {
+      driver,
+      environment: ENVIRONMENT, // prompt env — no sampleDelta
+      harness: completingHarness(),
+      graders: [],
+      runCtx: { apiKeyEnv: {}, timeoutSec: 60 },
+    });
+
+    expect(result.envDeltas).toBeUndefined();
+  });
+});

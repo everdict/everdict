@@ -119,6 +119,12 @@ export default async function RunDetailPage({
   const snapshot = run.result?.snapshot
   const usage = run.usage
 
+  // Replay is available for any settled run that produced an agent trace (EVERY harness does) or a recording —
+  // not only ones with environment frames. A still-running run shows the live section instead. The agent trace is
+  // the universal replay spine; frames are a per-kind addition. docs/architecture/replay.md (Principle 1).
+  const isTerminal = run.status === 'succeeded' || run.status === 'failed'
+  const hasReplay = isTerminal && (trace.length > 0 || run.result?.recordingRef != null)
+
   // Source label — reuse the runs-table's shared source vocabulary (web/mcp/api/scorecard/schedule/front-door).
   const tTable = await getTranslations('runsTable')
   const sourceKey = run.trigger ? SOURCE_KEY[run.trigger] : undefined
@@ -158,8 +164,9 @@ export default async function RunDetailPage({
           })}
           actions={
             <div className="flex items-center gap-2">
-              {/* 녹화된 run이면 "리플레이" 배지 노출 → 아래 #replay 섹션으로 점프(발견성) */}
-              {run.result?.recordingRef && (
+              {/* 재생 가능한 run이면 "리플레이" 배지 → 아래 #replay 섹션으로 점프(발견성). agent trace만 있어도
+                  재생되므로(하네스 무관) recordingRef 없이 trace만으로도 노출한다. */}
+              {hasReplay && (
                 <a href="#replay" className="no-underline">
                   <Badge tone="info">{t('replay')}</Badge>
                 </a>
@@ -271,10 +278,11 @@ export default async function RunDetailPage({
         </section>
       )}
 
-      {/* 리플레이 — 녹화가 있는 run에서만 보이는 앵커 섹션(프레임 스크럽 + 로그). 헤더의 "리플레이" 배지가 여기로 점프한다. */}
-      {run.result?.recordingRef && (
+      {/* 리플레이 — 종료된 run의 앵커 섹션. agent trace(모든 하네스 공통)를 벽시계로 스크럽하고, 녹화 프레임이
+          있으면 그 시점 화면을 오버레이한다. 헤더 "리플레이" 배지가 여기로 점프한다. docs/architecture/replay.md */}
+      {hasReplay && (
         <div id="replay" className="scroll-mt-6">
-          <ReplayPlayer runId={run.id} initialStatus={run.status} />
+          <ReplayPlayer runId={run.id} initialStatus={run.status} trace={trace} />
         </div>
       )}
 

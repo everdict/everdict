@@ -6,6 +6,14 @@ import { z } from 'zod'
 // server-side track additions. The flat fields are drift-guarded against the contract below.
 const frameSchema = z.object({ t: z.number(), ref: z.string(), hash: z.string().optional() })
 const logEntrySchema = z.object({ t: z.number(), stream: z.string(), text: z.string() })
+// Open-vocabulary lane — carries in-run environment deltas (name="repo-diff", text=git diff) folded in at seal, plus
+// any future producer's custom track. The player renders known names (repo-diff) specially, unknown ones generically.
+const customEntrySchema = z.object({
+  t: z.number(),
+  name: z.string(),
+  ref: z.string().optional(),
+  text: z.string().optional(),
+})
 
 export const recordingSchema = z.object({
   runId: z.string(),
@@ -16,12 +24,14 @@ export const recordingSchema = z.object({
     .object({
       frames: z.array(frameSchema).optional(),
       logs: z.array(logEntrySchema).optional(),
+      custom: z.array(customEntrySchema).optional(),
     })
     .passthrough(),
 })
 export type Recording = z.infer<typeof recordingSchema>
 export type RecordingFrame = z.infer<typeof frameSchema>
 export type RecordingLog = z.infer<typeof logEntrySchema>
+export type RecordingCustom = z.infer<typeof customEntrySchema>
 
 export const recordingResponseSchema = z.object({
   status: z.string(),

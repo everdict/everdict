@@ -1,28 +1,60 @@
-import type { StoreFixture } from "@everdict/contracts";
+import type { CaseResult, TrackEntry } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
-import { dispatchManifest } from "./recording-manifest.js";
+import type { RecordingStore } from "./ports/recording-store.js";
+import { foldEnvDeltas } from "./recording-manifest.js";
 
-describe("dispatchManifest", () => {
-  it("seals a stable, deterministic fixtures hash when the case has fixtures", () => {
-    const fixtures: StoreFixture[] = [
-      { store: "postgres", role: "world", seed: { inline: "INSERT INTO t VALUES (1);" } },
-    ];
-    const m1 = dispatchManifest("h@1", fixtures);
-    const m2 = dispatchManifest("h@1", fixtures);
-    expect(m1.harness).toBe("h@1");
-    expect(m1.fixtures).toBeDefined();
-    expect(m1.fixtures).toBe(m2.fixtures);
-    expect(m1.fixtures).toHaveLength(32);
+// A recording store that only captures appends — foldEnvDeltas never seals (that's the caller's next step).
+function capturingStore(appended: Array<{ runId: string; item: TrackEntry }>): RecordingStore {
+  return {
+    append: async (runId: string, item: TrackEntry) => {
+      appended.push({ runId, item });
+    },
+    seal: async () => undefined,
+    get: async () => undefined,
+  } as unknown as RecordingStore;
+}
+
+describe("foldEnvDeltas — in-run env deltas → recording custom lane", () => {
+  it("appends each repo-diff delta onto the custom lane and clears them from the result", async () => {
+    const appended: Array<{ runId: string; item: TrackEntry }> = [];
+    const result = {
+      caseId: "c1",
+      harness: "h@1",
+      trace: [],
+      snapshot: { kind: "repo", diff: "", changedFiles: [], headSha: "x" },
+      scores: [],
+      envDeltas: [
+        { t: 100, kind: "repo-diff", text: "d1" },
+        { t: 200, kind: "repo-diff", text: "d2" },
+      ],
+    } as unknown as CaseResult;
+
+    await foldEnvDeltas(capturingStore(appended), "evd-run-1", result);
+
+    expect(appended).toHaveLength(2);
+    expect(appended[0]).toMatchObject({
+      runId: "evd-run-1",
+      item: { track: "custom", entry: { t: 100, name: "repo-diff", text: "d1" } },
+    });
+    expect(appended[1]).toMatchObject({
+      item: { track: "custom", entry: { t: 200, name: "repo-diff", text: "d2" } },
+    });
+    // Folded into the recording → cleared so it is not double-stored on the persisted CaseResult.
+    expect(result.envDeltas).toBeUndefined();
   });
 
-  it("changes the hash when the fixtures change (audit sensitivity)", () => {
-    const a = dispatchManifest("h@1", [{ store: "postgres", seed: { inline: "A" } }]);
-    const b = dispatchManifest("h@1", [{ store: "postgres", seed: { inline: "B" } }]);
-    expect(a.fixtures).not.toBe(b.fixtures);
-  });
+  it("is a no-op when the result carries no env deltas", async () => {
+    const appended: Array<{ runId: string; item: TrackEntry }> = [];
+    const result = {
+      caseId: "c1",
+      harness: "h@1",
+      trace: [],
+      snapshot: { kind: "prompt", output: "" },
+      scores: [],
+    } as unknown as CaseResult;
 
-  it("omits fixtures for a case with none — a harness-only manifest", () => {
-    expect(dispatchManifest("h@1")).toEqual({ harness: "h@1" });
-    expect(dispatchManifest("h@1", [])).toEqual({ harness: "h@1" });
+    await foldEnvDeltas(capturingStore(appended), "evd-run-1", result);
+
+    expect(appended).toHaveLength(0);
   });
 });

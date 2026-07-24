@@ -3113,7 +3113,8 @@
     "logsOnly": "이 녹화는 로그만 있어요 (화면 프레임 없음).",
     "stepOf": "스텝 {i}/{n}",
     "agentPlane": "에이전트",
-    "logLane": "로그"
+    "logLane": "로그",
+    "repoLane": "저장소 변경"
   },
   "sandboxTerminal": {
     "hint": "실행 중인 샌드박스에서 명령을 실행해요 (ls · cat · ps · env …)",

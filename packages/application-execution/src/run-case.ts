@@ -4,6 +4,7 @@ import type {
   ComputeHandle,
   ComputeSpec,
   Driver,
+  EnvDelta,
   EnvSnapshot,
   Environment,
   EvalCase,
@@ -94,6 +95,58 @@ function startLiveScreenCapture(compute: ComputeHandle, hook: LiveScreenCapture)
   };
 }
 
+// In-run environment recorder (docs/architecture/replay.md, Principle 1) — the ENVIRONMENT plane, universal across any
+// environment kind that exposes a non-intrusive sampleDelta (today: repo → git-diff checkpoints). Polls it into `out`,
+// deduped (an unchanged delta is skipped) and capped (a long run keeps the first N; the final snapshot still holds the
+// end state). Mirrors startLiveScreenCapture: overlap-guarded, entirely best-effort — a sample failure never touches
+// the eval. Returns { stop, final }; runCase takes a final sample before release so even a run shorter than the cadence
+// records the end state. Undefined when the environment has no sampleDelta (browser/os-use/prompt today).
+function startEnvDeltaCapture(
+  compute: ComputeHandle,
+  environment: Environment,
+  out: EnvDelta[],
+): { stop: () => void; final: () => Promise<void> } | undefined {
+  if (!environment.sampleDelta) return undefined;
+  const sample = environment.sampleDelta.bind(environment);
+  const intervalMs = 3000;
+  const maxEntries = 40;
+  let stopped = false;
+  let inFlight = false;
+  const push = (delta: { kind: "repo-diff"; text: string } | undefined): void => {
+    if (!delta || out.length >= maxEntries) return;
+    const last = out.length > 0 ? out[out.length - 1]?.text : undefined;
+    if (delta.text !== last) out.push({ t: Date.now(), kind: delta.kind, text: delta.text });
+  };
+  const tick = async (): Promise<void> => {
+    if (stopped || inFlight) return;
+    inFlight = true;
+    try {
+      push(await sample(compute));
+    } catch {
+      // best-effort — a recording sample never affects the run
+    } finally {
+      inFlight = false;
+    }
+  };
+  const timer = setInterval(() => void tick(), intervalMs);
+  (timer as { unref?: () => void }).unref?.();
+  return {
+    stop: () => {
+      stopped = true;
+      clearInterval(timer);
+    },
+    // A final synchronous sample before compute teardown — guarantees the terminal env state is captured even for a run
+    // shorter than the cadence. Deduped against the last captured delta.
+    final: async () => {
+      try {
+        push(await sample(compute));
+      } catch {
+        // best-effort
+      }
+    },
+  };
+}
+
 // Runs one EvalCase end to end:
 // provision → seed → install → run (harness) → snapshot → grade → (trace collection).
 // Scoring is two-phase — compute-bound graders (run commands in the environment: tests-pass etc., declared via needsCompute)
@@ -110,10 +163,15 @@ export async function runCase(evalCase: EvalCase, deps: RunCaseDeps): Promise<Ca
   // Live-screen capture loop handle (opt-in) — started after install, stopped inside release() so the frame grab is
   // always halted before the compute is disposed. Undefined when the run has no liveScreen hook.
   let stopLiveScreen: (() => void) | undefined;
+  // In-run environment deltas (repo git-diff checkpoints) + the recorder handle — the environment plane for a coding
+  // harness's replay. Started after install, stopped inside release(); a final sample is taken before release. replay.md.
+  const envDeltas: EnvDelta[] = [];
+  let envRecorder: { stop: () => void; final: () => Promise<void> } | undefined;
   const release = async (): Promise<void> => {
     if (released) return;
     released = true;
     stopLiveScreen?.();
+    envRecorder?.stop();
     await compute.dispose();
   };
   try {
@@ -121,6 +179,8 @@ export async function runCase(evalCase: EvalCase, deps: RunCaseDeps): Promise<Ca
     await deps.harness.install(compute);
     // Opt-in live screen: push periodic frames of the case's screen (e.g. browser-use's Chromium over CDP) while it runs.
     if (deps.runCtx.liveScreen) stopLiveScreen = startLiveScreenCapture(compute, deps.runCtx.liveScreen);
+    // Env recorder: sample the environment's non-intrusive delta (repo git-diff) over the run for replay (best-effort).
+    envRecorder = startEnvDeltaCapture(compute, deps.environment, envDeltas);
 
     const runId = deps.runCtx.runId ?? newRunId();
     const runCtx: RunContext = { ...deps.runCtx, runId };
@@ -170,6 +230,7 @@ export async function runCase(evalCase: EvalCase, deps: RunCaseDeps): Promise<Ca
     const materialized = await materializeScreenshot(snapshot, compute, observes || defer);
     // With defer, observation scoring happens on the control plane — carry the screenshot in the result snapshot (slims the offload).
     if (defer) snapshot = materialized;
+    await envRecorder?.final(); // final env delta while the compute is still alive (before teardown)
     await release(); // The remaining work (platform pull · observation scoring) doesn't need the environment — release the sandbox here
 
     let collectFailure: CaseFailure | undefined;
@@ -207,6 +268,8 @@ export async function runCase(evalCase: EvalCase, deps: RunCaseDeps): Promise<Ca
       // materialized snapshot (screenshot embedded), same as defer mode.
       snapshot: collectFailure ? materialized : snapshot,
       scores: slots.filter((s): s is Score[] => s !== undefined).flat(),
+      // In-run environment deltas (repo git-diff over time) — folded into the replay recording at seal. replay.md.
+      ...(envDeltas.length > 0 ? { envDeltas } : {}),
       ...(collectFailure ? { failure: collectFailure } : {}),
       ...((defer || collectFailure) && source
         ? {

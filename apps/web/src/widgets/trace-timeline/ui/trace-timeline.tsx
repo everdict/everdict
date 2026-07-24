@@ -1,39 +1,7 @@
 import { useTranslations } from 'next-intl'
 
-import type { TraceEvent } from '@/entities/run'
+import { summarizeTraceEvent, traceKindColor, type TraceEvent } from '@/entities/run'
 import { cn } from '@/shared/lib/utils'
-
-const KIND_COLOR: Record<string, string> = {
-  message: 'bg-muted-foreground',
-  llm_call: 'bg-primary',
-  tool_call: 'bg-[var(--color-success)]',
-  tool_result: 'bg-[var(--color-success)]',
-  env_action: 'bg-accent-foreground',
-  error: 'bg-destructive',
-  log: 'bg-border',
-}
-
-function summarize(e: TraceEvent): string {
-  const a = e as Record<string, unknown>
-  switch (e.kind) {
-    case 'message':
-      return `${String(a.role ?? '')}: ${String(a.text ?? '').slice(0, 140)}`
-    case 'llm_call': {
-      const cost = a.cost as { usd?: number } | undefined
-      return `model ${String(a.model ?? '')}${cost?.usd != null ? ` · $${cost.usd}` : ''}`
-    }
-    case 'tool_call':
-      return `${String(a.name ?? '')}(${JSON.stringify(a.args ?? {}).slice(0, 80)})`
-    case 'tool_result':
-      return `→ ${a.ok ? 'ok' : 'fail'} ${String(a.output ?? '').slice(0, 80)}`
-    case 'error':
-      return String(a.message ?? '')
-    case 'log':
-      return `[${String(a.stream ?? '')}] ${String(a.text ?? '').slice(0, 140)}`
-    default:
-      return ''
-  }
-}
 
 export function TraceTimeline({ trace }: { trace: TraceEvent[] }) {
   const t = useTranslations('traceTimeline')
@@ -47,7 +15,7 @@ export function TraceTimeline({ trace }: { trace: TraceEvent[] }) {
           <span
             className={cn(
               'absolute -left-[1.625rem] top-1 size-2.5 rounded-full ring-4 ring-card',
-              KIND_COLOR[e.kind] ?? 'bg-muted-foreground'
+              traceKindColor(e.kind)
             )}
           />
           <div className="flex items-center gap-2">
@@ -57,7 +25,7 @@ export function TraceTimeline({ trace }: { trace: TraceEvent[] }) {
             <span className="font-mono text-[11px] text-faint">t={e.t}</span>
           </div>
           <p className="mt-1 break-all text-[12px] leading-relaxed text-muted-foreground">
-            {summarize(e)}
+            {summarizeTraceEvent(e)}
           </p>
         </li>
       ))}

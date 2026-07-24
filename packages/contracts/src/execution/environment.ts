@@ -93,4 +93,9 @@ export interface Environment<S extends EnvSnapshot = EnvSnapshot> {
   readonly kind: S["kind"];
   seed(compute: ComputeHandle, spec: EnvSpec): Promise<void>;
   snapshot(compute: ComputeHandle): Promise<S>;
+  // Optional in-run environment sample — the recorder plane, polled by run-case into CaseResult.envDeltas so a run's
+  // replay shows how the world evolved (not just the final snapshot). Must be NON-INTRUSIVE (never mutate the agent's
+  // state): RepoEnvironment returns a git-diff vs HEAD via a throwaway index. Absent = only the final snapshot is
+  // captured. Best-effort — a sampling failure never affects the run. docs/architecture/replay.md (Principle 1).
+  sampleDelta?(compute: ComputeHandle): Promise<{ kind: "repo-diff"; text: string } | undefined>;
 }

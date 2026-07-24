@@ -40,7 +40,7 @@ import { executeWithSpillover } from "../ops/runtime-spillover.js";
 import { weightedTargets } from "../ops/shard-weights.js";
 import { SpeculationController } from "../ops/speculation.js";
 import type { DispatchOptions } from "../ports/dispatcher.js";
-import { dispatchManifest } from "../recording-manifest.js";
+import { dispatchManifest, foldEnvDeltas } from "../recording-manifest.js";
 import { type Dispatch, runSuite } from "../run-suite.js";
 import {
   type ScorecardServiceDeps,
@@ -869,6 +869,8 @@ export class ScorecardBatchService {
       if (!childId) continue;
       if (this.deps.recordingStore) {
         try {
+          // Fold the in-run repo git-diff checkpoints (CaseResult.envDeltas) into the child's recording before sealing.
+          await foldEnvDeltas(this.deps.recordingStore, `evd-${scorecardId}-${r.caseId}`, r);
           // runId parity with dispatch (baseJob.runId = evd-<scorecardId>-<caseId>; RunService.runIdFor for a child).
           // envKind = the observation kind. Empty recording → seal returns undefined → no ref attached.
           const ref = await this.deps.recordingStore.seal(`evd-${scorecardId}-${r.caseId}`, {

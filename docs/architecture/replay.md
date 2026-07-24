@@ -1,13 +1,41 @@
 # Replay — record a run so the analysis phase can re-watch it
 
-> **Status: doc-first SSOT.** The durable successor to
-> [live-observability](./live-observability.md) (watch a run *while* it runs — ephemeral). Replay =
-> the **recorded live run**: the same two streams (screen frames + log lines) live-observability
-> already produces, teed into time-indexed durable storage and aligned to the trace timeline, so an
-> analyst can re-watch a case long after it settled. Related: [run-as-primitive](./run-as-primitive.md)
+> **Status: S1–S5 shipped; the player is being corrected to agent-trace-first (see "Current state" below).**
+> The durable successor to [live-observability](./live-observability.md) (watch a run *while* it runs —
+> ephemeral). Replay is built on the **agent trace** — the one timeline *every* harness produces — with the
+> recorded live streams (screen frames + log lines) aligned to it as a per-environment addition, teed into
+> time-indexed durable storage so an analyst can re-watch a case long after it settled. Related: [run-as-primitive](./run-as-primitive.md)
 > (the run is the addressable unit replay attaches to), [streaming-case-pipeline](./streaming-case-pipeline.md)
 > (the 2-phase collect shape this mirrors), [judge-input-contract](./judge-input-contract.md) (evidence
 > channels a replay can also feed).
+
+## Current state & the agent-trace-first correction (2026-07)
+
+Slices **S1–S5 shipped** and are on `everdict/main`: wall-clock trace timestamps (S1) · the `CaseRecording`
+contract + `EnvironmentRecorder` seam + `RecordingStore` (S2) · the tee/seal pipeline (S3) ·
+`PgRecordingStore` persistent-by-default + `GET /runs/:id/recording` + MCP + the web player (S4) · the
+`report_case_track` deep-capture channel (S5). The recording *backbone* is therefore live.
+
+But two things made replay look like a **browser-only feature** even though the architecture is agnostic:
+
+1. **The shipped web player (S4b) diverged from D6.** It renders only `frames` + `logs` and never the
+   agent-trace lane D6 specifies — so a run with no frames shows nothing to scrub.
+2. **The only wired producer is the `report_case_screen` live-screen tee**, which fires *solely* for
+   `liveScreen` harnesses (browser-use / os-use). No `EnvironmentRecorder` adapter is wired (only
+   `NullRecorder`), so repo/DOM/network/console/runtime tracks are never produced.
+
+Net effect: a **Claude Code / Codex run records a trace but the player is empty**. That is a player+producer
+gap, *not* an architecture problem — the `EnvironmentRecorder` seam, the `repo-diff`/`os-windows`
+`stateDeltas` kinds, the open `custom` lane, and D2's "the player reads `result.trace` side-by-side on the
+shared clock" all already assume harness-agnosticism.
+
+**Correction (this pass):** make the player's **agent-trace lane the primary, always-present plane**
+(Principle 1) so *every* harness — Claude Code, Codex, browser-use, a bespoke Playwright extension — is
+replayable with zero environment support. Frames / DOM / runtime stay optional planes layered on top. The
+environment recorder adapters (repo git-diff, generic CDP) then land *on top of* a player that is already
+universal, instead of being the thing that makes replay work at all. The **repo environment plane shipped in
+this same pass** (S5a below): non-intrusive git-diff checkpoints ride `CaseResult.envDeltas` and fold into the
+recording at seal, so a coding-harness replay now shows how the repo evolved — self-hosted and managed alike.
 
 ## Problem — what survives a run today, and what doesn't
 
@@ -53,8 +81,15 @@ A stochastic LLM agent can't be re-executed bit-for-bit, so "reproducibility" sp
 
 ## Principles
 
-1. **Replay is the recorded live run.** Reuse the live-observability streams and rendering; the only
-   difference is the data source (durable recording vs live poll). No parallel capture path.
+1. **The agent trace is the universal spine; frames are a per-kind addition.** Every harness — Claude Code,
+   Codex, browser-use, a bespoke Playwright extension — emits a normalized `TraceEvent[]`, so the agent-plane
+   replay (the decision timeline scrubbed on the wall clock, logs synced) is available for *any* run with
+   zero environment support. Screen frames / DOM / network are what a *specific* environment kind adds on
+   top — never what replay is *made of*; a repo coding task with no visual environment is still fully
+   replayable. Replay is still **the recorded live run** (it reuses the live-observability rendering and only
+   swaps the data source — durable recording vs live poll, no parallel capture path), but the live view is
+   the *frames* half of a whole whose spine is the trace. Corollary: the player renders the trace lane first
+   and treats frames as optional, or replay silently collapses into a browser-only feature.
 2. **Three recording planes on one clock.** Tracking is *not* only agent-level. Every recording spans
    three planes — **agent** (decisions/tool calls), **environment** (the world it acts on: for a web
    target, DOM mutations + navigation + network + console, not merely screenshots), and **runtime/system**
@@ -327,16 +362,40 @@ the manifest says so; the trace + final snapshot + deltas still make a usable re
 - **S3 — recording pipeline** (D3). Tee `report_case_screen`/`report_case_log` into the recorder, offload
   + dedup, `seal` at finalize, attach `recordingRef`. Self-hosted path first (its push channel exists).
 - **S4 — replay player + Pg** (D6). `GET /runs/:id/recording`, the web player (live-widget reuse),
-  `PgRecordingStore` + migration + object-store retention.
+  `PgRecordingStore` + migration + object-store retention. *Shipped frames+logs only — see S4c.*
+- **S4c — agent-trace lane: universalize the player** (D2/D6; this pass). The shipped S4 player was
+  frames+logs only, so it was empty for any harness without a visual environment. Add the **agent-plane
+  lane** — `result.trace` scrubbed on the wall clock, revealed up to the playhead — as the primary,
+  always-present plane, and widen the replay affordance to **any terminal run with a trace** (not only one
+  carrying a `recordingRef`). This is the slice that makes replay harness-agnostic: Claude Code / Codex / any
+  CLI agent replays without frames; when frames *do* exist (browser/os-use) the same scrubber overlays the
+  environment screen at the playhead. It **precedes** the environment recorder adapters (S5) — they enrich a
+  player that is already universal rather than being what makes replay work.
 - **S5 — recorder adapters** (D5, D7). The **browser** adapter (CDP DOM-mutation/network/console/screencast
   + rrweb-style reconstructed web replay) plus the **repo** (git-diff checkpoints) and **os-use** (scrot)
   adapters behind the seam, and continuous managed-job capture (closes the viewer-dependency gap). The
   richest environment slice; each adapter can land independently.
+- **S5a — repo environment plane (shipped, this pass)** — the first environment recorder, and a deliberate
+  **deviation from the `EnvironmentRecorder` start/checkpoint/stop seam** (which is defined but driven
+  nowhere): the recording is accumulated control-plane-side (the tee is self-hosted-only), while the repo's
+  filesystem is in-sandbox, so a streaming seam would need an in-sandbox→CP push channel + object offload
+  from the sandbox. Instead, `Environment.sampleDelta(compute)` is a **non-intrusive pull sample** —
+  `RepoEnvironment` stages the working tree into a throwaway `GIT_INDEX_FILE` and diffs it vs HEAD, never
+  touching the agent's own index — polled by `run-case` (mirrors `startLiveScreenCapture`; overlap-guarded,
+  deduped, capped, + a final sample before teardown) into **`CaseResult.envDeltas`**. Because the deltas ride
+  the `CaseResult` back (not a self-hosted-only push), the control plane folds them into the recording's open
+  `custom` lane (`name:"repo-diff"`, inline text) at **seal** (`foldEnvDeltas`, both standalone + batch), so
+  repo recording works **self-hosted AND managed**. The player renders the repo-diff lane at the playhead.
+  Follow-ups: promote large diffs to a `stateDeltas` ref (offload) when they outgrow inline; the browser/CDP
+  and os-use adapters still want the streaming seam (they have no cheap pull equivalent).
 - **S6 — runtime/system plane** (D5b). `Backend.sampleRuntime` time-series + the runtime lane in the
   player. The most orchestrator-specific slice, last.
 
 S1 is the cheapest, self-contained entry point (alignment + an existing grader bug), so it leads. S2–S4
-deliver a working frame-level replay; S5–S6 add the deep environment and runtime planes on top.
+delivered a working *frame-level* replay — but frames only exist for browser/os-use, so **S4c makes the
+agent-trace lane the universal spine** (every harness replayable) before S5–S6 add the deep environment and
+runtime planes on top. In hindsight S4c belonged in S4: a player without the trace lane is browser-only by
+construction.
 
 ## Non-goals
 

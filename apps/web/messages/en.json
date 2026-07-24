@@ -3113,7 +3113,8 @@
     "logsOnly": "This recording has logs only — no screen frames.",
     "stepOf": "Step {i}/{n}",
     "agentPlane": "Agent",
-    "logLane": "Logs"
+    "logLane": "Logs",
+    "repoLane": "Repo changes"
   },
   "sandboxTerminal": {
     "hint": "Run a command inside the live sandbox (ls · cat · ps · env …)",

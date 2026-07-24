@@ -11,4 +11,5 @@ export {
   type TraceEvent,
   type Usage,
 } from './model/schema'
+export { summarizeTraceEvent, traceKindColor } from './lib/trace'
 export { RunRow, sourceLabel, costLabel, type RunRowData } from './ui/run-row'
