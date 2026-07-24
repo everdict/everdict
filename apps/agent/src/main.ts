@@ -96,7 +96,7 @@ async function main(): Promise<void> {
     resolveModel,
     resolveProfile,
     ...(resolveModelById ? { resolveModelById } : {}),
-    toolProvider: mcpToolProvider(config.mcpUrl, codeRuntime),
+    toolProvider: mcpToolProvider(config.mcpUrl, codeRuntime, { allowEvalDrive: config.AGENT_ALLOW_EVAL_DRIVE }),
     systemPrompt: EVERDICT_AGENT_SYSTEM_PROMPT,
     now: () => new Date().toISOString(),
     newId: () => randomUUID(),

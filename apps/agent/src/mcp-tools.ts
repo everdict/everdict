@@ -10,6 +10,7 @@ import {
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { type CodeToolRuntime, type ResolvedCodeTool, buildCodeTools } from "./code-tools.js";
+import { isEvalDrivingAction } from "./eval-actions.js";
 import { type ForwardHeaders, forwardHeaderRecord } from "./principal.js";
 
 // Read-only allowlist by verb prefix — default-deny. Only these read/preview verbs from the control-plane MCP surface
@@ -33,13 +34,16 @@ const INTEGRATION_ACTIONS = new Set<string>([
   "get_image_push_credentials",
 ]);
 
-// A base (built-in everdict) tool reaches the agent if it is a read verb OR one of the curated integration actions.
-export function isDefaultBaseTool(name: string): boolean {
-  return isReadOnlyToolName(name) || INTEGRATION_ACTIONS.has(name);
+// A base (built-in everdict) tool reaches the agent if it is a read verb OR one of the curated integration actions —
+// and, when the workspace has opted the agent into driving eval (S6), also a curated eval-driving action. Eval actions
+// are always write verbs (never a read prefix), so they never become read-only below → each is HITL-gated.
+export function isDefaultBaseTool(name: string, allowEvalDrive = false): boolean {
+  return isReadOnlyToolName(name) || INTEGRATION_ACTIONS.has(name) || (allowEvalDrive && isEvalDrivingAction(name));
 }
 
 // A base tool is read-only (skips the HITL gate) only when it is a pure read verb AND not a curated integration
 // action — so an action like get_image_push_credentials (matches get_ but MINTS credentials) is still HITL-gated.
+// (Eval-driving actions are never read verbs, so they are never read-only regardless of the eval-drive flag.)
 export function isBaseToolReadOnly(name: string): boolean {
   return isReadOnlyToolName(name) && !INTEGRATION_ACTIONS.has(name);
 }
@@ -94,8 +98,13 @@ function makeInvoke(client: Client, prefix?: string): McpInvoke {
   };
 }
 
-export function mcpToolProvider(mcpUrl: string, codeRuntime?: CodeToolRuntime): ToolProvider {
+export function mcpToolProvider(
+  mcpUrl: string,
+  codeRuntime?: CodeToolRuntime,
+  opts?: { allowEvalDrive?: boolean },
+): ToolProvider {
   const baseUrl = new URL(mcpUrl);
+  const allowEvalDrive = opts?.allowEvalDrive === true;
   return async (headers, extraServers = [], skills = [], codeTools = []) => {
     const clients: Client[] = [];
     const bridged: ToolDefinition[] = [];
@@ -109,7 +118,7 @@ export function mcpToolProvider(mcpUrl: string, codeRuntime?: CodeToolRuntime): 
         requestInit: { headers: forwardHeaderRecord(headers) },
       });
       await baseClient.connect(transport);
-      const baseTools = (await baseClient.listTools()).tools.filter((t) => isDefaultBaseTool(t.name));
+      const baseTools = (await baseClient.listTools()).tools.filter((t) => isDefaultBaseTool(t.name, allowEvalDrive));
       if (baseTools.length > 0) {
         clients.push(baseClient);
         const invoke = makeInvoke(baseClient);

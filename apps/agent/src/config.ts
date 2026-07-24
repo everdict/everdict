@@ -16,6 +16,13 @@ const ConfigSchema = z.object({
   AGENT_FALLBACK_MODEL: z.string().optional(),
   // A (typically cheaper) registered model for spawn_agent sub-agents — delegated research rarely needs the main model.
   AGENT_SUBAGENT_MODEL: z.string().optional(),
+  // Opt in the agent to DRIVE eval (S6, docs/architecture/agent-teams.md): expose the curated eval-driving write tools
+  // (run/retry scorecards, register/pin harnesses, create datasets/judges, schedule, …) beyond the default read-only +
+  // integration surface. Every such call is still HITL/plan/rule-gated and RBAC-bounded. Default off (read-only agent).
+  AGENT_ALLOW_EVAL_DRIVE: z
+    .enum(["true", "false"])
+    .optional()
+    .transform((v) => v === "true"),
   // Per-tool wall-clock deadline (ms); a tool that outruns it is aborted and returned as an error. Unset → no deadline.
   AGENT_TOOL_TIMEOUT_MS: z.coerce.number().int().positive().optional(),
   // Extended-thinking budget (tokens). Set → the agent asks the model to reason before answering (Anthropic `thinking`;

@@ -119,12 +119,13 @@ The gap is not the loop — it is (a) a **shared message substrate** with addres
   the control-plane RBAC blocks anything its role can't do regardless of the allowlist — the allowlist is
   defense-in-depth + intentional scoping, not the only guard.
 
-  > **Blocked on coordination (2026-07-24):** `mcp-tools.ts` — S6's only edit site — currently has
-  > *uncommitted* teammate WIP that introduces exactly the `INTEGRATION_ACTIONS`/`isDefaultBaseTool`/
-  > `isBaseToolReadOnly` allowlist model above (the "agent uses integrations" slice of S6). Editing it now
-  > would absorb/collide with that WIP. S6's code lands as a small extension (add `EVAL_ACTIONS` +
-  > `AGENT_ALLOW_EVAL_DRIVE`) **once that WIP is committed** — the permission layer it sits behind
-  > (`3e48d9f3`) and the substrate (S1) are already in.
+  > **Status: S6 LANDED.** The `mcp-tools.ts` allowlist model (`INTEGRATION_ACTIONS`/`isDefaultBaseTool`/
+  > `isBaseToolReadOnly`) is now committed; S6 extended it: `isDefaultBaseTool(name, allowEvalDrive)` also admits
+  > `EVAL_ACTIONS` when `AGENT_ALLOW_EVAL_DRIVE=true` (default off → the agent stays read-only). Eval actions are
+  > never read verbs, so they're always bridged `isReadOnly:false` → HITL/plan/rule-gated, RBAC-bounded. The
+  > policy lives in `eval-actions.ts` (curated allowlist + disjoint-from-forbidden invariant). Remaining for a
+  > fuller S6: file-mutating eval work under worktree isolation (the write control-plane actions above already
+  > dispatch through the orchestrator's own isolation).
 
 ## Non-goals / guardrails
 
