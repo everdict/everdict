@@ -124,6 +124,27 @@ describe("agent server", () => {
     await app.close();
   });
 
+  it("resolves the fallback model up front and the small model lazily (only when compaction fires)", async () => {
+    const resolveModelById = vi.fn(async (_principal: unknown, _ref: string) => ({
+      transport: fakeTransportAlways("Hi there"),
+      model: "tier-model",
+    }));
+    const app = buildServer(makeDeps({ resolveModelById, smallModelRef: "small-id", fallbackModelRef: "fb-id" }));
+    const session = (await app.inject({ method: "POST", url: "/agent/sessions", headers: auth, payload: {} })).json();
+    await app.inject({
+      method: "POST",
+      url: `/agent/sessions/${session.id}/chat`,
+      headers: auth,
+      payload: { message: "hello" },
+    });
+    const refs = resolveModelById.mock.calls.map((c) => c[1]);
+    // The fallback is resolved eagerly (ready before the main model can fail); a normal turn triggers no compaction,
+    // so the small summariser model is never resolved (lazy — no cost when unused).
+    expect(refs).toContain("fb-id");
+    expect(refs).not.toContain("small-id");
+    await app.close();
+  });
+
   it("sets the conversation title from the first user message", async () => {
     const app = buildServer(makeDeps());
     const session = (await app.inject({ method: "POST", url: "/agent/sessions", headers: auth, payload: {} })).json();

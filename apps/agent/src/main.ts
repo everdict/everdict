@@ -90,6 +90,9 @@ async function main(): Promise<void> {
     now: () => new Date().toISOString(),
     newId: () => randomUUID(),
     ...(config.AGENT_MAX_TURNS !== undefined ? { maxTurns: config.AGENT_MAX_TURNS } : {}),
+    // Model tiering — only effective with resolveModelById (DB + secrets); otherwise ignored (single env model).
+    ...(config.AGENT_SMALL_MODEL !== undefined ? { smallModelRef: config.AGENT_SMALL_MODEL } : {}),
+    ...(config.AGENT_FALLBACK_MODEL !== undefined ? { fallbackModelRef: config.AGENT_FALLBACK_MODEL } : {}),
   });
 
   await app.listen({ port: config.PORT, host: "0.0.0.0" });

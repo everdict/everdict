@@ -3,6 +3,7 @@ import {
   type ChatMessage,
   type McpInvoke,
   type PermissionHook,
+  buildSummarizer,
   runAgentLoop,
 } from "@everdict/agent-runtime";
 import type { AgentSessionStore } from "@everdict/application-control";
@@ -90,6 +91,11 @@ export interface ChatDeps {
   resolveProfile?: ProfileResolver;
   // Resolve the AgentSpec.model override → the LLM client. Only consulted when a profile names a model.
   resolveModelById?: ModelByIdResolver;
+  // Model tiering (needs resolveModelById). smallModelRef → a cheaper model digests compaction summaries (resolved
+  // lazily, only when compaction fires). fallbackModelRef → an alternate model the run switches to on sustained
+  // upstream failure. Absent → the single main model does everything (the historical behaviour).
+  smallModelRef?: string;
+  fallbackModelRef?: string;
 }
 
 export interface ChatResult {
@@ -289,6 +295,24 @@ export async function runChat(
         : await deps.resolveModel(principal);
     // Append the per-turn environment block (workspace · model · date) now that the model is resolved.
     const systemWithEnv = `${systemPrompt}\n\n${buildEnvironmentSection({ workspace, model: model.model, date: deps.now() })}`;
+
+    // Model tiering (both need the by-id resolver). The summariser is LAZY — the cheaper model is only resolved if a
+    // compaction actually fires — so a normal turn pays nothing. The fallback is resolved up front (opt-in per
+    // workspace) so it's ready the moment the main model starts failing.
+    const byId = deps.resolveModelById;
+    const smallRef = deps.smallModelRef;
+    const summarize =
+      smallRef && byId
+        ? async (span: ChatMessage[]): Promise<string> => {
+            const small = await byId(principal, smallRef);
+            return buildSummarizer(small.transport, small.model)(span);
+          }
+        : undefined;
+    const fallback =
+      deps.fallbackModelRef && byId
+        ? await byId(principal, deps.fallbackModelRef).then((fb) => ({ transport: fb.transport, model: fb.model }))
+        : undefined;
+
     await runAgentLoop({
       transport: model.transport,
       model: model.model,
@@ -296,6 +320,8 @@ export async function runChat(
       history,
       registry: tools.registry,
       onMessage: persist,
+      ...(summarize ? { summarize } : {}),
+      ...(fallback ? { fallback } : {}),
       ...(hooks?.onEvent ? { onEvent: hooks.onEvent } : {}),
       ...(hooks?.permit ? { permit: hooks.permit } : {}),
       ...(hooks?.drainInput ? { drainInput: hooks.drainInput } : {}),

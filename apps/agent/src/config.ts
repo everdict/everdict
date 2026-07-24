@@ -9,6 +9,11 @@ const ConfigSchema = z.object({
   DATABASE_URL: z.string().optional(),
   // The registered workspace model the agent runs on (D3). Falls back to AGENT_LLM_* when unset / no DB.
   AGENT_MODEL: z.string().optional(),
+  // Optional model tiering (needs a registered model + DB + secrets, like AGENT_MODEL). AGENT_SMALL_MODEL digests
+  // compaction summaries on a cheaper/faster model instead of the main one (resolved lazily — only when compaction
+  // fires). AGENT_FALLBACK_MODEL takes over for the rest of a run if the main model keeps failing transiently.
+  AGENT_SMALL_MODEL: z.string().optional(),
+  AGENT_FALLBACK_MODEL: z.string().optional(),
   // The registered agent-config id resolved per workspace (instructions + MCP tool servers + model override). A
   // workspace registers an agent under this id ("default") to customize its assistant; unset id → base agent.
   AGENT_CONFIG_ID: z.string().default("default"),
