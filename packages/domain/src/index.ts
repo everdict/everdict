@@ -144,6 +144,14 @@ export { validateImageRef } from "./image/display-image.js";
 export { usageFromTrace } from "./trace/usage-from-trace.js";
 export { clampFidelity, FIDELITY_ORDER } from "./recording/fidelity.js";
 
+// capability — the Capability Store's reach/visibility kernel (new; the four-tier private|workspace|subset|public authority)
+export {
+  type CapabilityAccess,
+  type CapabilityConsumer,
+  canConsumeCapability,
+  filterConsumableCapabilities,
+} from "./capability/capability-visibility.js";
+
 // registry — the version algebra every versioned registry shares (from @everdict/registry)
 export {
   compareVersions,

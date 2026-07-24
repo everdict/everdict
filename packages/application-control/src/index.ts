@@ -8,6 +8,7 @@ export { type Dispatch, runSuite } from "./run-suite.js";
 export type { AgentSessionStore } from "./ports/agent-session-store.js";
 export type { BrowserProfileStore } from "./ports/browser-profile-store.js";
 export type { SkillStore } from "./ports/skill-store.js";
+export type { CapabilityStore } from "./ports/capability-store.js";
 export type { CallbackStore } from "./ports/callback-store.js";
 export type { CommentStore } from "./ports/comment-store.js";
 export type { NotificationListOptions, NotificationStore } from "./ports/notification-store.js";

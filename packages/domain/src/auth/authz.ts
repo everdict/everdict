@@ -36,6 +36,13 @@ export type Action =
   // like comments/datasets: read viewer+, write (create/edit/share) member+; delete = creator-or-admin (service layer).
   | "skills:read"
   | "skills:write"
+  // Capability Store — one discriminated entity (mcp|code|skill) members author, publish (private|workspace|subset|
+  // public), and adopt into their agent. Collaborative content like agents/skills: read viewer+, write member+;
+  // delete = creator-or-admin (service). Promoting reach to `public` additionally requires admin (service-enforced,
+  // like the View visibility gate) — no separate action, to avoid knob proliferation.
+  | "capabilities:read"
+  | "capabilities:write"
+  | "capabilities:delete"
   | "runtimes:read"
   | "runtimes:write"
   // Destructive live-cluster control (stop a running workload / reclaim idle / purge terminal jobs / cordon a node) —
@@ -54,7 +61,12 @@ export type Action =
   | "comments:write"
   // Minting workspace image-registry push credentials — the only member action where a credential 'value' leaves to the caller,
   // so it's honestly named as a separate action instead of reusing harnesses:register (viewer+) (register/unregister = settings:write, read = harnesses:read).
-  | "images:push";
+  | "images:push"
+  // Posting a message to the workspace's configured Mattermost channel (the conversational agent's post_mattermost_message
+  // tool + its HTTP/MCP endpoint). A member-level runtime action = USING the integration, honestly named as its own action
+  // (like images:push) rather than reusing settings:write — that REGISTERS the bot (admin governance). A member can have the
+  // agent notify the team without being able to reconfigure the integration.
+  | "mattermost:post";
 
 export const EVERDICT_ROLES = ["viewer", "member", "admin"] as const;
 export type EverdictRole = (typeof EVERDICT_ROLES)[number];
@@ -72,6 +84,7 @@ const ROLE_PERMISSIONS: Record<string, ReadonlySet<Action>> = {
     "models:read",
     "agents:read", // reading the workspace agent config is benign → viewer+
     "skills:read", // reading the workspace skill library is benign → viewer+
+    "capabilities:read", // browsing the Capability Store (own + shared + public) is benign → viewer+
     "runtimes:read",
     "runtimes:write", // runtime registration (+validate/probe) is role-independent — every member registers their own workspace's execution infra (same as harnesses:register)
     "members:read", // reading the team (workspace members) is benign → viewer+
@@ -97,12 +110,15 @@ const ROLE_PERMISSIONS: Record<string, ReadonlySet<Action>> = {
     "agents:write", // agent config = eval-authoring content (how the workspace's assistant behaves) → member+ like models/judges
     "skills:read",
     "skills:write", // authoring/sharing a workspace skill = collaborative content → member+ (delete = creator-or-admin, service layer)
+    "capabilities:read",
+    "capabilities:write", // authoring/publishing/adopting a capability = collaborative content → member+ (public promotion + delete gated in the service)
     "runtimes:read",
     "runtimes:write", // runtime registration (+validate/probe) is role-independent
     "members:read",
     "comments:read",
     "comments:write", // writing comments = collaborative content (discussing which model was run) → member+ (deletion = author-or-admin, service layer)
     "images:push", // workspace registry push credential — harness authoring (image publishing) is a member's job
+    "mattermost:post", // posting to the workspace Mattermost channel (using the integration) — a member's job, unlike admin-only registration (settings:write)
   ]),
   // GitHub Actions OIDC federation (via=github-actions) only — the minimum CI needs:
   // fire/poll/diff (scorecards) + re-pin (harnesses:register)/baseline read (harnesses:read). No governance/secrets/members.
@@ -133,6 +149,9 @@ const ROLE_PERMISSIONS: Record<string, ReadonlySet<Action>> = {
     "agents:write",
     "skills:read",
     "skills:write",
+    "capabilities:read",
+    "capabilities:write",
+    "capabilities:delete", // capability version soft-delete — admin-only + creator exception in the service layer
     "runtimes:read",
     "runtimes:write", // runtime registration is role-independent (viewer/member have it too) — the credential 'value' is separately protected by secrets:write (admin)
     "runtimes:control", // destructive live-cluster control (stop workload / reclaim idle / purge / cordon) — admin-only
@@ -147,6 +166,7 @@ const ROLE_PERMISSIONS: Record<string, ReadonlySet<Action>> = {
     "comments:read",
     "comments:write",
     "images:push",
+    "mattermost:post",
   ]),
 };
 
@@ -168,6 +188,7 @@ const SCOPE_READ_ACTIONS: readonly Action[] = [
   "models:read",
   "agents:read",
   "skills:read",
+  "capabilities:read",
   "runtimes:read",
   "members:read",
   "comments:read",
@@ -185,9 +206,11 @@ const SCOPE_WRITE_ACTIONS: readonly Action[] = [
   "models:write",
   "agents:write",
   "skills:write",
+  "capabilities:write",
   "runtimes:write",
   "comments:write",
   "images:push", // image publishing = part of harness authoring (a credential scoped to one's own workspace registry)
+  "mattermost:post", // posting to the workspace Mattermost channel = content mutation (using a configured integration)
 ];
 // admin scope (= Full Access) = every action. Derived from the union of the role matrix (the admin role holds all).
 const ALL_ACTIONS = new Set<Action>(Object.values(ROLE_PERMISSIONS).flatMap((s) => [...s]));
