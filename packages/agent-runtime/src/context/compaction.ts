@@ -43,6 +43,35 @@ export function compactMessages(messages: ChatMessage[], recentKeep = DEFAULT_RE
   return messages;
 }
 
+// The escalation ladder as one step, shared by the loop's proactive (over-budget) path AND its reactive (413 /
+// context-overflow) recovery path. Tries the cheapest, most information-preserving rung first and returns the first
+// that shrinks the context; `mode: null` means nothing could be reclaimed (the caller stops / rethrows). A summariser
+// failure (upstream error) falls through to the structural drop rather than crashing the run.
+export async function compactStep(
+  messages: ChatMessage[],
+  summarize: (oldSpan: ChatMessage[]) => Promise<string>,
+): Promise<{ messages: ChatMessage[]; mode: "microcompact" | "summarize" | "drop" | null; dropped: number }> {
+  // Rung 1: clear old tool-result bodies (deterministic; frees tokens without dropping any turn).
+  const micro = microcompact(messages);
+  if (micro.cleared > 0) return { messages: micro.messages, mode: "microcompact", dropped: 0 };
+  // Rung 2: LLM digest of the old span (goal/pending preserved).
+  let summarized = messages;
+  try {
+    summarized = await summarizeAndCompact(messages, summarize);
+  } catch {
+    summarized = messages;
+  }
+  if (summarized.length < messages.length) {
+    return { messages: summarized, mode: "summarize", dropped: messages.length - summarized.length };
+  }
+  // Rung 3: structural drop to a clean user boundary (last resort).
+  const dropped = compactMessages(messages);
+  if (dropped.length < messages.length) {
+    return { messages: dropped, mode: "drop", dropped: messages.length - dropped.length };
+  }
+  return { messages, mode: null, dropped: 0 };
+}
+
 // Rung 2 — replace the old span with an LLM digest, keep the recent tail from a clean user boundary. The digest is a
 // synthetic user message the model reads as context (Intent/Files/Errors/Pending/Current-Work survive the boundary).
 // Returns the same array when no safe boundary exists (so the loop falls through to structural drop).

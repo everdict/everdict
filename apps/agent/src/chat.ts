@@ -104,6 +104,9 @@ export interface ChatHooks {
   // Human-in-the-loop approval for write (non-read-only) tool calls — the SSE handler supplies one that pauses the
   // loop, asks the web, and resolves allow/deny. Absent (buffered/API callers) → write tools auto-allow as before.
   permit?: PermissionHook;
+  // Mid-run steering: pull any user messages the web queued (POST /input) since this turn started, so the running loop
+  // absorbs them at the next turn boundary instead of the user having to Stop and resend. Absent → strict turn-based.
+  drainInput?: () => ChatMessage[];
 }
 
 export const DEFAULT_SESSION_TITLE = "New conversation";
@@ -232,6 +235,19 @@ export async function runChat(
         createdAt: deps.now(),
       };
     }
+    // A user turn reaching the persist path is a mid-run steering message the loop injected via drainInput — persist it
+    // so the conversation history keeps it (the initial user message is persisted separately, before the loop).
+    if (message.role === "user") {
+      return {
+        id: deps.newId(),
+        tenant: workspace,
+        sessionId,
+        seq: seq++,
+        role: "user",
+        content: contentToString(message.content),
+        createdAt: deps.now(),
+      };
+    }
     return null;
   };
   // Persist each assistant/tool turn the moment the loop produces it, so a polling client sees tool activity as it
@@ -282,6 +298,7 @@ export async function runChat(
       onMessage: persist,
       ...(hooks?.onEvent ? { onEvent: hooks.onEvent } : {}),
       ...(hooks?.permit ? { permit: hooks.permit } : {}),
+      ...(hooks?.drainInput ? { drainInput: hooks.drainInput } : {}),
       ...(deps.maxTurns !== undefined ? { maxTurns: deps.maxTurns } : {}),
       ...(model.temperature !== undefined ? { temperature: model.temperature } : {}),
       ...(signal ? { signal } : {}),

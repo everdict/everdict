@@ -80,6 +80,50 @@ describe("agent server", () => {
     await app.close();
   });
 
+  it("absorbs a queued /input steering message into the running turn (mid-run steering)", async () => {
+    const app = buildServer(makeDeps());
+    const session = (await app.inject({ method: "POST", url: "/agent/sessions", headers: auth, payload: {} })).json();
+
+    // Queue a steering message, then run a chat turn — the loop drains it at the turn boundary and persists it.
+    const queued = await app.inject({
+      method: "POST",
+      url: `/agent/sessions/${session.id}/input`,
+      headers: auth,
+      payload: { message: "also check the regressions" },
+    });
+    expect(queued.statusCode).toBe(202);
+
+    await app.inject({
+      method: "POST",
+      url: `/agent/sessions/${session.id}/chat`,
+      headers: auth,
+      payload: { message: "hello" },
+    });
+
+    const messages = (
+      await app.inject({ method: "GET", url: `/agent/sessions/${session.id}/messages`, headers: auth })
+    ).json().messages as { role: string; content: string }[];
+    // The transcript keeps the injected user turn between the initial message and the assistant reply.
+    expect(messages.map((m) => m.content)).toContain("also check the regressions");
+    expect(messages.filter((m) => m.role === "user").map((m) => m.content)).toEqual([
+      "hello",
+      "also check the regressions",
+    ]);
+    await app.close();
+  });
+
+  it("rejects a /input steering message for a conversation the caller does not own", async () => {
+    const app = buildServer(makeDeps());
+    const res = await app.inject({
+      method: "POST",
+      url: "/agent/sessions/does-not-exist/input",
+      headers: auth,
+      payload: { message: "hi" },
+    });
+    expect(res.statusCode).toBe(404);
+    await app.close();
+  });
+
   it("sets the conversation title from the first user message", async () => {
     const app = buildServer(makeDeps());
     const session = (await app.inject({ method: "POST", url: "/agent/sessions", headers: auth, payload: {} })).json();

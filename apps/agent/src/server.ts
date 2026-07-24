@@ -1,9 +1,10 @@
-import type { PermissionHook } from "@everdict/agent-runtime";
+import type { ChatMessage, PermissionHook } from "@everdict/agent-runtime";
 import type { AgentSessionRecord } from "@everdict/contracts";
 import { AgentReferenceSchema, AppError } from "@everdict/contracts";
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
 import { z } from "zod";
 import { type ChatDeps, DEFAULT_SESSION_TITLE, runChat } from "./chat.js";
+import { InputQueue } from "./input-queue.js";
 import { PermissionRegistry } from "./permission-registry.js";
 import type { Authenticate, ForwardHeaders, Principal } from "./principal.js";
 import { runSkillTry } from "./skill-try.js";
@@ -50,6 +51,8 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
   const app = Fastify({ logger: false });
   // Human-in-the-loop approvals: a write-tool call in an SSE turn parks here until POST /permission resolves it.
   const permissions = new PermissionRegistry();
+  // Mid-run steering: POST /input queues a user message the streaming turn's loop drains at the next turn boundary.
+  const inputQueue = new InputQueue();
 
   app.get("/healthz", async () => ({ ok: true }));
 
@@ -162,10 +165,24 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
     const headers = forwardHeaders(req);
     const { message, references, attachments } = body.data;
 
+    const drainInput = (): ChatMessage[] => inputQueue.drain(principal.workspace, id);
+
     // Non-streaming clients (tests / API callers) get the buffered JSON tail.
     if (!(req.headers.accept ?? "").includes("text/event-stream")) {
       try {
-        const result = await runChat(deps, principal, headers, id, message, references, attachments, controller.signal);
+        const result = await runChat(
+          deps,
+          principal,
+          headers,
+          id,
+          message,
+          references,
+          attachments,
+          controller.signal,
+          {
+            drainInput,
+          },
+        );
         return reply.send(result);
       } catch (err) {
         return sendError(reply, err);
@@ -200,6 +217,7 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
         },
         onRecord: (r) => write("message", r),
         permit,
+        drainInput,
       });
       write("done", {});
     } catch (err) {
@@ -222,6 +240,21 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
     const ok = permissions.respond(parsed.data.requestId, id, parsed.data.decision);
     if (!ok) return reply.code(404).send({ code: "NOT_FOUND", message: "No pending approval for that request." });
     return reply.send({ ok: true });
+  });
+
+  // Mid-run steering: queue a user message for an in-flight streaming turn of this session. The running loop drains it
+  // at its next turn boundary (no restart). If nothing is running the message simply waits; the web only posts while a
+  // turn streams, otherwise it starts a normal /chat turn. Scoped to the session owner.
+  app.post("/agent/sessions/:id/input", async (req, reply) => {
+    const principal = await principalOf(req, reply);
+    if (!principal) return reply;
+    const { id } = idParams.parse(req.params);
+    const parsed = z.object({ message: z.string().min(1) }).safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
+    const session = await deps.sessions.getSession(principal.workspace, principal.subject, id);
+    if (!session) return reply.code(404).send({ code: "NOT_FOUND", message: "Conversation not found." });
+    inputQueue.enqueue(principal.workspace, id, parsed.data.message);
+    return reply.code(202).send({ queued: true });
   });
 
   // Skill test-drive — run a stateless agent turn with just this (possibly unsaved) skill + the read-only tools, and

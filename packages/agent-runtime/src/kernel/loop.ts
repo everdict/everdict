@@ -1,6 +1,6 @@
 import { UpstreamError } from "@everdict/contracts";
 import type { LlmTransport, StreamResult } from "@everdict/llm";
-import { compactMessages, microcompact, summarizeAndCompact } from "../context/compaction.js";
+import { compactStep } from "../context/compaction.js";
 import { type TokenBudget, effectiveBudget, estimateTokens, thresholdReached } from "../context/token-budget.js";
 import { buildSummarizer } from "../llm/summarize.js";
 import type { ChatMessage } from "../messages.js";
@@ -23,7 +23,7 @@ import { type TodoItem, buildTodoTool, extractTodosFromHistory, renderTodoRemind
 import { normalizeHistory } from "./normalize.js";
 import { buildSystemPrompt } from "./system-prompt.js";
 
-export type StopReason = "end_turn" | "max_turns" | "token_budget" | "aborted";
+export type StopReason = "end_turn" | "max_turns" | "token_budget" | "no_progress" | "aborted";
 
 export type AgentEvent =
   | { type: "turn_start"; turn: number }
@@ -33,6 +33,8 @@ export type AgentEvent =
   | { type: "tool_result"; name: string; isError: boolean }
   | { type: "permission"; name: string; decision: PermissionDecision }
   | { type: "plan"; plan: string }
+  | { type: "input"; messages: number } // user messages injected mid-run via drainInput (steering)
+  | { type: "fallback"; from: string; to: string } // switched to the fallback model after sustained upstream failure
   | { type: "compaction"; droppedMessages: number; mode?: "microcompact" | "summarize" | "drop" }
   | { type: "done"; stopReason: StopReason };
 
@@ -43,25 +45,37 @@ export interface AgentLoopOptions {
   transport: LlmTransport;
   model: string;
   systemPrompt: string;
-  // Full conversation so far, including the latest user message. The kernel never appends user turns.
+  // Full conversation so far, including the latest user message. The kernel never appends user turns on its own — the
+  // one exception is the drainInput seam (below), through which the host injects mid-run user steering.
   history: ChatMessage[];
   registry: ToolRegistry;
   maxTurns?: number;
   maxTokens?: number;
   // Retries of a single model call on a transient upstream error (429/5xx/network), same model, fixed backoff.
   maxRetries?: number;
+  // Resilience: a cheaper/alternate model to fall back to when the primary keeps failing transiently (sustained
+  // 429/overloaded) even after retries. Switched to for the rest of the run; a fallback is both a cost tier and an SLA.
+  fallback?: { transport: LlmTransport; model: string };
   temperature?: number;
   signal?: AbortSignal;
   // Rung-2 (LLM) compaction: digest the old span into a summary. Defaults to a summariser bound to this loop's own
-  // model (buildSummarizer); tests inject a deterministic one. Return "" to decline (loop falls through to structural).
+  // model (buildSummarizer); the host can pass one bound to a cheaper "small/fast" model so a mechanical digest doesn't
+  // burn the main model. Return "" to decline (loop falls through to structural).
   summarize?: (oldSpan: ChatMessage[]) => Promise<string>;
   // Permission gate for write (non-read-only) tool calls — the seam a HITL approval plugs into. Read-only tools skip
   // it (auto-allow); absent hook = allow (write tools are already opt-in). A denied call becomes an error result the
   // model sees and can adapt to.
   permit?: PermissionHook;
+  // Mid-run user steering: called at each turn boundary (context balanced) to pull any user messages the host has
+  // queued since the run started, which are appended to the conversation before the next model call — Claude Code's
+  // queued-message model. Absent → strict turn-based (the historical behaviour). The messages must be role:"user".
+  drainInput?: () => ChatMessage[] | Promise<ChatMessage[]>;
   // Sub-agent recursion depth (internal). A top-level run is 0; spawn_agent runs a nested loop at depth+1, and the
   // spawn tool is withheld once depth reaches the cap — so delegation is bounded.
   depth?: number;
+  // Upper bound on how many spawn_agent sub-agents may run CONCURRENTLY (a turn can request many at once). Excess
+  // spawns queue on a semaphore — parallel delegation without an unbounded fan-out that would exhaust rate limits.
+  maxConcurrentSubagents?: number;
   // Plan mode: start read-only-only; the agent must present_plan and get it approved (onPlan) before any write tool
   // runs. onPlan defaults to auto-approve. Off unless the host opts in.
   planMode?: boolean;
@@ -87,10 +101,15 @@ export interface AgentLoopResult {
 const DEFAULT_MAX_TURNS = 50;
 const DEFAULT_MAX_RETRIES = 2;
 // Circuit breaker: if compaction fires this many times in one run without the context ever fitting, stop instead of
-// hammering the summariser forever on an irrecoverably-oversized context.
+// hammering the summariser forever on an irrecoverably-oversized context. Shared by the proactive + reactive paths.
 const MAX_COMPACTIONS = 12;
 // Sub-agent delegation depth cap — a top-level agent can spawn one level of sub-agents; those can't spawn further.
 const MAX_AGENT_DEPTH = 1;
+// Default cap on concurrently-running spawn_agent sub-agents (a turn may request many; excess queue).
+const DEFAULT_MAX_CONCURRENT_SUBAGENTS = 4;
+// No-progress guard: stop if the model asks for the EXACT same tool-call batch this many turns in a row (it has already
+// seen the identical result twice and repeated anyway → it's stuck, not progressing). Prevents silent token burn.
+const NO_PROGRESS_LIMIT = 3;
 const RETRY_BACKOFF_MS = [500, 1500];
 
 // A transient upstream failure worth a retry on the same model: HTTP 429/5xx or a network hiccup.
@@ -99,6 +118,48 @@ function isTransient(err: unknown): boolean {
   if (typeof status === "number" && (status === 429 || status >= 500)) return true;
   const message = err instanceof Error ? err.message : String(err);
   return /\b(429|5\d\d)\b|ETIMEDOUT|ECONNRESET|ECONNREFUSED|ENOTFOUND|fetch failed|timeout/i.test(message);
+}
+
+// A context-overflow failure (the prompt itself is too long) — NOT transient: retrying the same request can't help, but
+// compacting the context once and retrying CAN. Both providers surface it as a 400/413 with a recognisable message.
+function isContextOverflow(err: unknown): boolean {
+  const status = (err as { status?: unknown }).status;
+  if (status === 413) return true;
+  const message = err instanceof Error ? err.message : String(err);
+  return /context.{0,20}(length|window|too long|exceed)|prompt is too long|maximum.{0,12}context|too many tokens|context_length_exceeded|reduce the length|input length/i.test(
+    message,
+  );
+}
+
+// A tiny FIFO semaphore: acquire() resolves with a release fn once a slot is free, bounding concurrency to `max`.
+function makeSemaphore(max: number): (fn: () => Promise<string>) => Promise<string> {
+  let active = 0;
+  const queue: (() => void)[] = [];
+  const acquire = (): Promise<void> =>
+    new Promise((resolve) => {
+      if (active < max) {
+        active += 1;
+        resolve();
+      } else {
+        queue.push(() => {
+          active += 1;
+          resolve();
+        });
+      }
+    });
+  const release = (): void => {
+    active -= 1;
+    const next = queue.shift();
+    if (next) next();
+  };
+  return async (fn) => {
+    await acquire();
+    try {
+      return await fn();
+    } finally {
+      release();
+    }
+  };
 }
 
 function sleep(ms: number, signal?: AbortSignal): Promise<void> {
@@ -126,16 +187,29 @@ function parseArgs(raw: string): { ok: true; value: Record<string, unknown> } | 
   }
 }
 
+// A stable signature of a turn's tool-call batch (name + arguments, order-independent) — used by the no-progress guard.
+function toolCallSignature(calls: { name: string; arguments: string }[]): string {
+  return calls
+    .map((c) => `${c.name}(${c.arguments})`)
+    .sort()
+    .join("|");
+}
+
 // One agentic run: LLM call (with progressively-disclosed tools) → dispatch tool calls → feed results back →
-// repeat until the model stops asking for tools (end_turn), turns/budget run out, or the caller aborts.
+// repeat until the model stops asking for tools (end_turn), turns/budget run out, it stalls, or the caller aborts.
 export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopResult> {
   const maxTurns = opts.maxTurns ?? DEFAULT_MAX_TURNS;
   const maxRetries = opts.maxRetries ?? DEFAULT_MAX_RETRIES;
   // Budget = the model's own context window minus output headroom (compact at ~90% of it), not a fixed constant.
   const budget: TokenBudget = { maxTokens: opts.maxTokens ?? effectiveBudget(opts.model), consumed: 0 };
-  // Rung-2 compaction summariser — the loop's own model by default (a one-shot digest), overridable for tests.
+  // Rung-2 compaction summariser — the loop's own model by default (a one-shot digest), overridable for a cheap tier.
   const summarize = opts.summarize ?? buildSummarizer(opts.transport, opts.model);
   const emit = (e: AgentEvent): void => opts.onEvent?.(e);
+
+  // Active model/transport can switch to the fallback mid-run; the primary is the starting point.
+  let activeTransport = opts.transport;
+  let activeModel = opts.model;
+  let usingFallback = false;
 
   let messages: ChatMessage[] = normalizeHistory(opts.history);
   // Goal persistence: the loop owns a todo list the model manages via write_todos, re-surfaced each turn as a
@@ -143,26 +217,33 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
   let todos: TodoItem[] = extractTodosFromHistory(messages);
   // Large tool results are offloaded here (stored full) and previewed to the model, which pages the rest via read_tool_result.
   const resultStore = new ResultStore();
-  // Sub-agent delegation: below the depth cap, add spawn_agent — it runs a nested loop (fresh context, same base tools)
+  // Sub-agent delegation: below the depth cap, add spawn_agent — it runs a nested loop (fresh context, read-only tools)
   // at depth+1 and returns only its summary, protecting this agent's context from the sub-task's intermediate output.
   const depth = opts.depth ?? 0;
+  // Sub-agents get a READ-ONLY view of the base tools (isolation of capability, not just context): a delegated
+  // research/analysis task shouldn't be able to mutate, and N concurrent sub-agents can't race on writes.
+  const subagentRegistry = new ToolRegistry(opts.registry.list().filter((t) => t.isReadOnly === true));
+  // Bound concurrent sub-agents so a single turn requesting many spawns can't fan out without limit.
+  const runSubagent = makeSemaphore(opts.maxConcurrentSubagents ?? DEFAULT_MAX_CONCURRENT_SUBAGENTS);
   const spawnTools: ToolDefinition[] =
     depth < MAX_AGENT_DEPTH
       ? [
           buildSpawnAgentTool((task) =>
-            runAgentLoop({
-              transport: opts.transport,
-              model: opts.model,
-              systemPrompt: `${opts.systemPrompt}\n\n## Sub-task\nYou are handling a scoped sub-task delegated by another agent, with your own fresh context. Do the work with your tools, then give a clear, self-contained summary of your findings as your FINAL message — that summary is your only output back to the caller.`,
-              history: [{ role: "user", content: task }],
-              registry: opts.registry,
-              depth: depth + 1,
-              ...(opts.temperature !== undefined ? { temperature: opts.temperature } : {}),
-              ...(opts.signal ? { signal: opts.signal } : {}),
-              ...(opts.maxTurns !== undefined ? { maxTurns: opts.maxTurns } : {}),
-              ...(opts.summarize ? { summarize: opts.summarize } : {}),
-              ...(opts.permit ? { permit: opts.permit } : {}),
-            }).then((r) => r.content),
+            runSubagent(() =>
+              runAgentLoop({
+                transport: opts.transport,
+                model: opts.model,
+                systemPrompt: `${opts.systemPrompt}\n\n## Sub-task\nYou are handling a scoped sub-task delegated by another agent, with your own fresh context. Do the work with your (read-only) tools, then give a clear, self-contained summary of your findings as your FINAL message — that summary is your only output back to the caller.`,
+                history: [{ role: "user", content: task }],
+                registry: subagentRegistry,
+                depth: depth + 1,
+                ...(opts.fallback ? { fallback: opts.fallback } : {}),
+                ...(opts.temperature !== undefined ? { temperature: opts.temperature } : {}),
+                ...(opts.signal ? { signal: opts.signal } : {}),
+                ...(opts.maxTurns !== undefined ? { maxTurns: opts.maxTurns } : {}),
+                ...(opts.summarize ? { summarize: opts.summarize } : {}),
+              }).then((r) => r.content),
+            ),
           ),
         ]
       : [];
@@ -189,6 +270,9 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
   ]);
   let finalText = "";
   let compactionCount = 0;
+  // No-progress guard state: the previous turn's tool-call signature + how many turns in a row it has repeated.
+  let lastSignature = "";
+  let repeatRun = 0;
   const toolCalls: { name: string; ok: boolean }[] = [];
   // The messages produced this run, accumulated as they are appended — NOT a tail slice of `messages`, which
   // mid-loop compaction can shrink below the input length (that would drop or misattribute produced turns).
@@ -208,6 +292,21 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
 
   for (let turn = 1; turn <= maxTurns; turn++) {
     if (opts.signal?.aborted) return finish("aborted", turn - 1);
+
+    // Mid-run steering: pull any user messages the host queued since the run started. Safe here — the context is
+    // balanced at a turn boundary (never mid tool_call/result), so appending a user turn keeps the transcript valid.
+    if (opts.drainInput) {
+      const injected = await opts.drainInput();
+      if (injected.length > 0) {
+        for (const m of injected) {
+          messages = [...messages, m];
+          produced.push(m);
+          await opts.onMessage?.(m);
+        }
+        emit({ type: "input", messages: injected.length });
+      }
+    }
+
     emit({ type: "turn_start", turn });
 
     const discovered = extractDiscoveredToolNames(messages);
@@ -215,16 +314,17 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
     const system = buildSystemPrompt(opts.systemPrompt, registry, discovered);
     // Inject the current todos as a transient reminder (this turn only — never persisted, no history bloat).
     const reminder = renderTodoReminder(todos);
-    const turnMessages: ChatMessage[] =
-      reminder.length > 0 ? [...messages, { role: "user", content: reminder }] : messages;
 
-    // `messages` is always balanced here (never ends on a dangling assistant tool_call), so a retry re-sends a
-    // valid transcript without needing to scrub an orphan tail. Returns undefined when the caller aborts.
+    // `messages` is always balanced at the top of a turn (never a dangling assistant tool_call), so a retry re-sends a
+    // valid transcript. On a context-overflow (413), callModel compacts `messages` in place and retries — recovery,
+    // not a crash. Returns undefined when the caller aborts.
     const callModel = async (): Promise<StreamResult | undefined> => {
       for (let attempt = 0; ; attempt++) {
+        const turnMessages: ChatMessage[] =
+          reminder.length > 0 ? [...messages, { role: "user", content: reminder }] : messages;
         try {
-          return await opts.transport.stream({
-            model: opts.model,
+          return await activeTransport.stream({
+            model: activeModel,
             system,
             messages: turnMessages,
             tools,
@@ -237,15 +337,38 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
           });
         } catch (err) {
           if (opts.signal?.aborted) return undefined;
-          if (attempt >= maxRetries || !isTransient(err)) {
-            throw new UpstreamError(
-              "UPSTREAM_ERROR",
-              { detail: err instanceof Error ? err.message : String(err), attempts: attempt + 1 },
-              "The model provider call failed.",
-            );
+          // Reactive recovery: the prompt is too long → compact once and retry the SAME turn (bounded by the shared
+          // circuit breaker) instead of failing the run on a single budget-estimate miss.
+          if (isContextOverflow(err) && compactionCount < MAX_COMPACTIONS) {
+            const step = await compactStep(messages, summarize);
+            if (step.mode) {
+              compactionCount += 1;
+              messages = step.messages;
+              emit({ type: "compaction", mode: step.mode, droppedMessages: step.dropped });
+              attempt -= 1; // this recovery doesn't consume a transient-retry attempt
+              continue;
+            }
+            // Nothing left to reclaim — fall through to the error.
           }
-          await sleep(RETRY_BACKOFF_MS[attempt] ?? 1500, opts.signal);
-          if (opts.signal?.aborted) return undefined;
+          if (isTransient(err) && attempt < maxRetries) {
+            await sleep(RETRY_BACKOFF_MS[attempt] ?? 1500, opts.signal);
+            if (opts.signal?.aborted) return undefined;
+            continue;
+          }
+          // Retries exhausted on a transient error → switch to the fallback model (once) and keep going.
+          if (isTransient(err) && opts.fallback && !usingFallback) {
+            usingFallback = true;
+            emit({ type: "fallback", from: activeModel, to: opts.fallback.model });
+            activeTransport = opts.fallback.transport;
+            activeModel = opts.fallback.model;
+            attempt = -1; // reset the retry budget for the fallback model (the ++ makes this attempt 0)
+            continue;
+          }
+          throw new UpstreamError(
+            "UPSTREAM_ERROR",
+            { detail: err instanceof Error ? err.message : String(err), attempts: attempt + 1 },
+            "The model provider call failed.",
+          );
         }
       }
     };
@@ -284,8 +407,13 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
 
     if (result.toolCalls.length === 0) return finish("end_turn", turn);
 
+    // No-progress guard: track whether this turn's tool-call batch is identical to the previous turns'.
+    const signature = toolCallSignature(result.toolCalls);
+    repeatRun = signature === lastSignature ? repeatRun + 1 : 1;
+    lastSignature = signature;
+
     const ctx: ToolContext = {
-      selectedModel: opts.model,
+      selectedModel: activeModel,
       ...(opts.signal ? { abortSignal: opts.signal } : {}),
     };
     const turnImages: ToolResultImage[] = []; // images returned by this turn's tools → one follow-up multimodal turn
@@ -353,38 +481,22 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
       messages = [...messages, imageMessage];
     }
 
+    // No-progress stop: the model has now asked for the identical tool batch NO_PROGRESS_LIMIT turns running (it saw
+    // the same results and repeated anyway). The transcript is balanced (results appended) — stop the spin.
+    if (repeatRun >= NO_PROGRESS_LIMIT) return finish("no_progress", turn);
+
     // Hybrid budget: the model's reported usage + an estimate of everything appended since (tool results, image turn).
     budget.consumed = usageTokens + estimateTokens(messages.slice(afterAssistantLen));
     if (thresholdReached(budget)) {
       // Circuit breaker — don't hammer the summariser forever on an irrecoverably-oversized context.
       if (++compactionCount > MAX_COMPACTIONS) return finish("token_budget", turn);
-      // Escalation ladder — try the cheapest, most information-preserving compaction first, stop only if none fit.
-      // Rung 1: clear old tool-result bodies (deterministic; freed tokens surface in the next turn's usage).
-      const micro = microcompact(messages);
-      if (micro.cleared > 0) {
-        messages = micro.messages;
-        emit({ type: "compaction", mode: "microcompact", droppedMessages: 0 });
+      // Escalation ladder — cheapest, most information-preserving compaction first; stop only if none fit.
+      const step = await compactStep(messages, summarize);
+      if (step.mode) {
+        messages = step.messages;
+        emit({ type: "compaction", mode: step.mode, droppedMessages: step.dropped });
       } else {
-        // Rung 2: LLM digest of the old span (goal/pending preserved). Rung 3: structural drop. Else: stop.
-        // A summariser failure (upstream error) must not crash the run — fall through to the structural drop.
-        let summarized = messages;
-        try {
-          summarized = await summarizeAndCompact(messages, summarize);
-        } catch {
-          summarized = messages;
-        }
-        if (summarized.length < messages.length) {
-          emit({ type: "compaction", mode: "summarize", droppedMessages: messages.length - summarized.length });
-          messages = summarized;
-        } else {
-          const dropped = compactMessages(messages);
-          if (dropped.length < messages.length) {
-            emit({ type: "compaction", mode: "drop", droppedMessages: messages.length - dropped.length });
-            messages = dropped;
-          } else {
-            return finish("token_budget", turn);
-          }
-        }
+        return finish("token_budget", turn);
       }
     }
   }
