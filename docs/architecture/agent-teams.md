@@ -98,13 +98,14 @@ The gap is not the loop — it is (a) a **shared message substrate** with addres
   (one at a time; mid-turn wakes coalesce into a single follow-up — no pile-up, no lost wake). This is the same
   "a message/event wakes an agent" primitive S5 (proactive) reuses. `runTurn(sessionId)` is injected (drain
   mailbox → run one agent turn); the supervisor owns only WHEN a turn runs, so it stays pure + unit-tested.
-  **Remaining for full S3** (the larger integration):
-  1. `runTeammateTurn` — drain the teammate's mailbox, run one agent loop over it, persist. Blocked on (2).
-  2. **Request-less execution auth** — a teammate runs WITHOUT a live HTTP request, so there's no forwarded
-     user bearer for the MCP tools. It needs a stored/service credential (a workspace-scoped agent token). This
-     is the crux; it is **shared with S5** (a proactively-woken agent runs request-less too), so build it once.
-  3. Spawn: a `spawn_teammate`/persistent variant that creates the teammate session + registers it with the
-     supervisor; a `team` roster (a named group) in the session store; web surface. Layered on 1–2.
+  **S3 is now LIVE end-to-end** (docs/architecture/agent-execution-auth.md landed the auth): `POST
+  /agent/teammates {name, task}` mints the teammate's `agt_` token (`issueAgentToken`, acts AS the creator),
+  creates its session, registers it with the supervisor, seeds the task, and wakes it — it runs a
+  `runTeammateTurn` (authenticated request-less) that processes the task. A peer's `send_message` or a platform
+  `/event` to a teammate's session `deliver()`s into its mailbox AND wakes it, so it reacts autonomously.
+  **Remaining polish:** a `team` roster (a named group) + a `spawn_teammate` agent TOOL (so an agent, not just
+  the web, spawns teammates) + web surface. The core (persistent, addressable, autonomous, collaborating agents)
+  is in.
 - **S4 — event bridge (monitoring → agent inbox).** The notification emitter also routes to subscribed agent
   inboxes; subscription model per agent/team. Everything monitored is now an agent-consumable message.
 - **S5 — proactive triggers.** An event in an idle subscribed agent's mailbox wakes a turn (reuse the

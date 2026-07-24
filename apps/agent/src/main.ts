@@ -1,11 +1,12 @@
 import { randomUUID } from "node:crypto";
-import type { AgentSessionStore } from "@everdict/application-control";
+import type { AgentSessionStore, TenantKeyStore } from "@everdict/application-control";
 import {
   InMemoryAgentSessionStore,
   PgAgentSessionStore,
   PgCapabilityStore,
   PgSecretStore,
   PgSkillStore,
+  PgTenantKeyStore,
   cipherFromEnv,
   makePool,
   sqlClient,
@@ -49,9 +50,12 @@ async function main(): Promise<void> {
   // resolveModelById is only available with a DB + secrets key (needed to resolve an AgentSpec.model override's key).
   let resolveProfile: ProfileResolver = baseProfileResolver(EVERDICT_AGENT_SYSTEM_PROMPT);
   let resolveModelById: ModelByIdResolver | undefined;
+  // Teammate execution tokens (S3) are issued into the shared tenant-key table — only with a DB (else spawn is 404).
+  let keyStore: TenantKeyStore | undefined;
   if (config.DATABASE_URL !== undefined) {
     const client = sqlClient(makePool(config.DATABASE_URL));
     sessions = new PgAgentSessionStore(client);
+    keyStore = new PgTenantKeyStore(client);
     const cipher = cipherFromEnv();
     if (cipher !== undefined) {
       // With the KEK we can decrypt the workspace's model + MCP-server secrets → full per-workspace customization.
@@ -96,6 +100,7 @@ async function main(): Promise<void> {
     resolveModel,
     resolveProfile,
     ...(resolveModelById ? { resolveModelById } : {}),
+    ...(keyStore ? { keyStore } : {}),
     toolProvider: mcpToolProvider(config.mcpUrl, codeRuntime, { allowEvalDrive: config.AGENT_ALLOW_EVAL_DRIVE }),
     systemPrompt: EVERDICT_AGENT_SYSTEM_PROMPT,
     now: () => new Date().toISOString(),

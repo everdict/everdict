@@ -1,6 +1,8 @@
 import type { ChatMessage, PermissionDecision, PermissionHook } from "@everdict/agent-runtime";
+import type { TenantKeyStore } from "@everdict/application-control";
 import type { AgentSessionRecord } from "@everdict/contracts";
 import { AgentReferenceSchema, AppError } from "@everdict/contracts";
+import { issueAgentToken } from "@everdict/db";
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
 import { z } from "zod";
 import { AgentMailbox } from "./agent-mailbox.js";
@@ -9,9 +11,13 @@ import { PermissionRegistry } from "./permission-registry.js";
 import { PermissionRules } from "./permission-rules.js";
 import type { Authenticate, ForwardHeaders, Principal } from "./principal.js";
 import { runSkillTry } from "./skill-try.js";
+import { TeammateSupervisor } from "./teammate-supervisor.js";
+import { runTeammateTurn } from "./teammate-turn.js";
 
 export interface AgentServerDeps extends ChatDeps {
   authenticate: Authenticate;
+  // Tenant key store — needed to issue a teammate's agt_ execution token (S3). Absent (no DB) → teammate spawn is 404.
+  keyStore?: TenantKeyStore;
 }
 
 function forwardHeaders(req: FastifyRequest): ForwardHeaders {
@@ -57,6 +63,18 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
   const mailbox = new AgentMailbox();
   // Fine-grained "always allow / deny this tool" rules (per session) that short-circuit the HITL prompt.
   const rules = new PermissionRules();
+  // S3 teammates — long-lived agents the supervisor wakes when a message lands in their mailbox; each runs a
+  // request-less turn authenticated by its own agt_ token (runTeammateTurn). Turns are serialized per teammate.
+  const teammateTokens = new Map<string, string>(); // sessionId → its agt_ execution token
+  const supervisor = new TeammateSupervisor(async (sessionId) => {
+    const token = teammateTokens.get(sessionId);
+    if (token) await runTeammateTurn(deps, deps.authenticate, mailbox, sessionId, token);
+  });
+  // Deliver to a session's mailbox and, if it is a teammate, wake it to process the message (no-op for plain sessions).
+  const deliver = (workspace: string, sessionId: string, envelope: Parameters<AgentMailbox["enqueue"]>[2]): void => {
+    mailbox.enqueue(workspace, sessionId, envelope);
+    if (supervisor.isTeammate(sessionId)) supervisor.wake(sessionId);
+  };
 
   app.get("/healthz", async () => ({ ok: true }));
 
@@ -179,7 +197,7 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
     const sendMessage = async (to: string, message: string): Promise<{ ok: boolean; error?: string }> => {
       const target = await deps.sessions.getSession(principal.workspace, principal.subject, to);
       if (!target) return { ok: false, error: `No conversation "${to}" you own to message.` };
-      mailbox.enqueue(principal.workspace, to, { from: "agent", sender: id, content: message });
+      deliver(principal.workspace, to, { from: "agent", sender: id, content: message });
       return { ok: true };
     };
     // A fine-grained rule (allow/deny for a tool in this session) short-circuits the human prompt.
@@ -294,7 +312,7 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
     if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
     const session = await deps.sessions.getSession(principal.workspace, principal.subject, id);
     if (!session) return reply.code(404).send({ code: "NOT_FOUND", message: "Conversation not found." });
-    mailbox.enqueueUser(principal.workspace, id, parsed.data.message);
+    deliver(principal.workspace, id, { from: "user", content: parsed.data.message });
     return reply.code(202).send({ queued: true });
   });
 
@@ -309,12 +327,51 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
     if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
     const session = await deps.sessions.getSession(principal.workspace, principal.subject, id);
     if (!session) return reply.code(404).send({ code: "NOT_FOUND", message: "Conversation not found." });
-    mailbox.enqueue(principal.workspace, id, {
+    deliver(principal.workspace, id, {
       from: "event",
       ...(parsed.data.source !== undefined ? { sender: parsed.data.source } : {}),
       content: parsed.data.message,
     });
     return reply.code(202).send({ queued: true });
+  });
+
+  // S3 — spawn a persistent TEAMMATE: a long-lived agent (its own session) that runs autonomously, reacting to
+  // messages (send_message from peers, /event from monitoring) without a human prompt. It gets its own agt_ execution
+  // token (acts AS the creator, capped to write scope) so its request-less turns are authenticated + RBAC-bounded. The
+  // supervisor wakes it whenever a message lands in its mailbox. Owner-scoped; requires the key store (DB).
+  app.post("/agent/teammates", async (req, reply) => {
+    const principal = await principalOf(req, reply);
+    if (!principal) return reply;
+    if (!deps.keyStore)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "Teammate execution tokens are not configured." });
+    const parsed = z.object({ name: z.string().min(1).max(60), task: z.string().min(1) }).safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
+    const now = deps.now();
+    const sessionId = deps.newId();
+    const record: AgentSessionRecord = {
+      id: sessionId,
+      tenant: principal.workspace,
+      owner: principal.subject,
+      title: parsed.data.name,
+      createdAt: now,
+      updatedAt: now,
+    };
+    await deps.sessions.createSession(record);
+    // Mint the teammate's execution token (acts AS the creator), register it, seed the task, and wake it.
+    const token = await issueAgentToken(
+      deps.keyStore,
+      principal.workspace,
+      principal.subject,
+      ["write"],
+      `teammate:${parsed.data.name}`,
+    );
+    teammateTokens.set(sessionId, token);
+    supervisor.register(sessionId, parsed.data.name);
+    deliver(principal.workspace, sessionId, {
+      from: "user",
+      content: `You are "${parsed.data.name}", an autonomous teammate. Your standing task:\n${parsed.data.task}`,
+    });
+    return reply.code(201).send({ id: sessionId, name: parsed.data.name });
   });
 
   // Fine-grained permission rules for a conversation — the "always allow / always deny this tool" layer above the

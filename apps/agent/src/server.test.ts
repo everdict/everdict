@@ -1,6 +1,6 @@
 import { type ToolDefinition, ToolRegistry } from "@everdict/agent-runtime";
 import { UnauthenticatedError } from "@everdict/contracts";
-import { InMemoryAgentSessionStore } from "@everdict/db";
+import { InMemoryAgentSessionStore, InMemoryTenantKeyStore } from "@everdict/db";
 import type { LlmTransport } from "@everdict/llm";
 import { describe, expect, it, vi } from "vitest";
 import type { ToolProvider } from "./mcp-tools.js";
@@ -201,6 +201,38 @@ describe("agent server", () => {
     const delivered = bMsgs.find((m) => m.content.includes("hello B"));
     expect(delivered?.content).toContain("[Message from teammate");
     expect(delivered?.content).toContain("hello B");
+    await app.close();
+  });
+
+  it("spawns a teammate that autonomously processes its standing task (S3 end-to-end)", async () => {
+    const app = buildServer(makeDeps({ keyStore: new InMemoryTenantKeyStore() }));
+    const spawned = await app.inject({
+      method: "POST",
+      url: "/agent/teammates",
+      headers: auth,
+      payload: { name: "researcher", task: "analyze sc_123" },
+    });
+    expect(spawned.statusCode).toBe(201);
+    const { id, name } = spawned.json();
+    expect(name).toBe("researcher");
+    // The supervisor woke the teammate; let its request-less turn run.
+    await new Promise((r) => setTimeout(r, 30));
+    const msgs = (await app.inject({ method: "GET", url: `/agent/sessions/${id}/messages`, headers: auth })).json()
+      .messages as { role: string; content: string }[];
+    expect(msgs.some((m) => m.role === "user" && m.content.includes("analyze sc_123"))).toBe(true);
+    expect(msgs.some((m) => m.role === "assistant" && m.content === "Hi there")).toBe(true);
+    await app.close();
+  });
+
+  it("teammate spawn is 404 when no key store (agent token issuance) is configured", async () => {
+    const app = buildServer(makeDeps()); // no keyStore
+    const res = await app.inject({
+      method: "POST",
+      url: "/agent/teammates",
+      headers: auth,
+      payload: { name: "x", task: "y" },
+    });
+    expect(res.statusCode).toBe(404);
     await app.close();
   });
 
