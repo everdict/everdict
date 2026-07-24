@@ -18,3 +18,10 @@ export function generateKey(): string {
 export function generateInviteToken(): string {
   return `inv_${randomBytes(24).toString("base64url")}`;
 }
+
+// agt_<random> — plaintext agent execution token (docs/architecture/agent-execution-auth.md). A teammate / proactive
+// agent presents it for request-less turns; resolved by agentTokenAuthenticator to a Principal that acts AS its
+// creator. Shown once at issuance, stored only as a hash — same SHA-256 discipline as ak_/inv_.
+export function generateAgentToken(): string {
+  return `agt_${randomBytes(24).toString("base64url")}`;
+}

@@ -56,9 +56,15 @@ request-less turn (teammate wake / proactive event)
 
 - **A1 — auth core.** `Principal.via += "agent"`; `agentTokenAuthenticator` (pure, injected resolver);
   export + ready for the composite. Unit-tested (prefix match, fail-closed, scope default, bounded). **← this slice.**
-- **A2 — token store + issuance.** An `AgentTokenStore` (hash at rest) + issue/revoke in the control plane
-  (mint when a teammate/proactive agent is created, tie its lifecycle to the teammate). `/internal` or a
-  workspace-admin action; plaintext once.
+- **A2 — token store + issuance.** Mint `generateAgentToken()` (`agt_…`, landed), store the hash, issue/revoke
+  tied to the teammate's lifecycle; plaintext once. **Store decision (open):**
+  - *(a) reuse `TenantKeyStore`* — `add(tenant, hash, { owner: creator, scopes: ["write"], prefix: "agt_" })`;
+    `agentTokenAuthenticator({ resolve: h => keyStore.resolveByHash(h) })`. No migration. The prefix check keeps
+    `ak_`/`agt_` from cross-claiming (same hash table, different authenticator). **Caveat:** an `agt_` row would
+    surface in the owner's `list_api_keys` unless that list filters `prefix !== "agt_"` — do that filter.
+  - *(b) dedicated `AgentTokenStore`* (new table + migration) — clean separation + teammate-tied lifecycle, no
+    key-list leak, at the cost of a migration + a parallel store.
+  Lean (a) + the list filter for the first cut (no migration); revisit (b) if agent-token lifecycle diverges.
 - **A3 — request-less turn auth.** `apps/agent` resolves an agent `Principal` from a stored `agt_` token
   (instead of forwarding a user header) for a teammate/proactive turn, and forwards that token to the MCP
   tools. This unblocks S3 `runTeammateTurn` and S5 proactive wake.
