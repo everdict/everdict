@@ -93,9 +93,13 @@ export interface ChatDeps {
   resolveModelById?: ModelByIdResolver;
   // Model tiering (needs resolveModelById). smallModelRef → a cheaper model digests compaction summaries (resolved
   // lazily, only when compaction fires). fallbackModelRef → an alternate model the run switches to on sustained
-  // upstream failure. Absent → the single main model does everything (the historical behaviour).
+  // upstream failure. subagentModelRef → a cheaper model for spawn_agent sub-agents. Absent → the single main model
+  // does everything (the historical behaviour).
   smallModelRef?: string;
   fallbackModelRef?: string;
+  subagentModelRef?: string;
+  // Per-tool wall-clock deadline (ms) forwarded to the loop; a hung tool can't pin a turn forever. Absent → no deadline.
+  toolTimeoutMs?: number;
 }
 
 export interface ChatResult {
@@ -312,6 +316,10 @@ export async function runChat(
       deps.fallbackModelRef && byId
         ? await byId(principal, deps.fallbackModelRef).then((fb) => ({ transport: fb.transport, model: fb.model }))
         : undefined;
+    const subagentModel =
+      deps.subagentModelRef && byId
+        ? await byId(principal, deps.subagentModelRef).then((sm) => ({ transport: sm.transport, model: sm.model }))
+        : undefined;
 
     await runAgentLoop({
       transport: model.transport,
@@ -322,6 +330,8 @@ export async function runChat(
       onMessage: persist,
       ...(summarize ? { summarize } : {}),
       ...(fallback ? { fallback } : {}),
+      ...(subagentModel ? { subagentModel } : {}),
+      ...(deps.toolTimeoutMs !== undefined ? { toolTimeoutMs: deps.toolTimeoutMs } : {}),
       ...(hooks?.onEvent ? { onEvent: hooks.onEvent } : {}),
       ...(hooks?.permit ? { permit: hooks.permit } : {}),
       ...(hooks?.drainInput ? { drainInput: hooks.drainInput } : {}),

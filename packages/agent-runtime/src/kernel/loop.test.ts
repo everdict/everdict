@@ -482,6 +482,52 @@ describe("runAgentLoop", () => {
     expect(result.content).toBe("done");
   });
 
+  it("aborts a tool that outruns toolTimeoutMs and returns an error the model can move past", async () => {
+    const hang: ToolDefinition = {
+      name: "hang",
+      description: "never resolves",
+      parametersJsonSchema: { type: "object", properties: {} },
+      isReadOnly: true,
+      call: () => new Promise<{ content: string; isError: boolean }>(() => {}), // never settles
+    };
+    const { transport } = fakeTransport([toolCallResult("h1", "hang", "{}"), textResult("moved on")]);
+    const result = await runAgentLoop({
+      transport,
+      model: "test-model",
+      systemPrompt: "sys",
+      history,
+      registry: new ToolRegistry([hang]),
+      toolTimeoutMs: 15,
+    });
+    expect(result.stopReason).toBe("end_turn");
+    expect(result.content).toBe("moved on");
+    const toolMsg = result.produced.find((m) => m.role === "tool") as { content: string } | undefined;
+    expect(toolMsg?.content).toContain("deadline");
+    expect(result.toolCalls).toEqual([{ name: "hang", ok: false }]);
+  });
+
+  it("runs spawn_agent sub-agents on the configured (cheaper) subagentModel", async () => {
+    const parent = fakeTransport([
+      toolCallResult("s1", "spawn_agent", JSON.stringify({ task: "research" })),
+      textResult("done"),
+    ]);
+    const sub = fakeTransport([textResult("SUB summary")]);
+    const result = await runAgentLoop({
+      transport: parent.transport,
+      model: "big-model",
+      systemPrompt: "sys",
+      history,
+      registry: new ToolRegistry([]),
+      subagentModel: { transport: sub.transport, model: "cheap-model" },
+    });
+    expect(result.content).toBe("done");
+    // The sub-agent's turn went to the subagent transport/model, not the parent's.
+    expect(sub.requests).toHaveLength(1);
+    expect(sub.requests[0]?.model).toBe("cheap-model");
+    const spawnResult = result.produced.find((m) => m.role === "tool") as { content: string } | undefined;
+    expect(spawnResult?.content).toContain("SUB summary");
+  });
+
   it("stops with aborted when the signal is already aborted", async () => {
     const { transport } = fakeTransport([textResult("unused")]);
     const result = await runAgentLoop({

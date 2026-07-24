@@ -93,6 +93,8 @@ async function main(): Promise<void> {
     // Model tiering — only effective with resolveModelById (DB + secrets); otherwise ignored (single env model).
     ...(config.AGENT_SMALL_MODEL !== undefined ? { smallModelRef: config.AGENT_SMALL_MODEL } : {}),
     ...(config.AGENT_FALLBACK_MODEL !== undefined ? { fallbackModelRef: config.AGENT_FALLBACK_MODEL } : {}),
+    ...(config.AGENT_SUBAGENT_MODEL !== undefined ? { subagentModelRef: config.AGENT_SUBAGENT_MODEL } : {}),
+    ...(config.AGENT_TOOL_TIMEOUT_MS !== undefined ? { toolTimeoutMs: config.AGENT_TOOL_TIMEOUT_MS } : {}),
   });
 
   await app.listen({ port: config.PORT, host: "0.0.0.0" });

@@ -8,7 +8,6 @@ import { extractDiscoveredToolNames } from "../tools/deferred.js";
 import type {
   PermissionDecision,
   PermissionHook,
-  ToolContext,
   ToolDefinition,
   ToolResult,
   ToolResultImage,
@@ -76,6 +75,12 @@ export interface AgentLoopOptions {
   // Upper bound on how many spawn_agent sub-agents may run CONCURRENTLY (a turn can request many at once). Excess
   // spawns queue on a semaphore — parallel delegation without an unbounded fan-out that would exhaust rate limits.
   maxConcurrentSubagents?: number;
+  // A separate (typically cheaper) model for spawn_agent sub-agents — delegated research/analysis rarely needs the
+  // main model. Absent → sub-agents inherit the parent's model. Composes with the read-only tool scoping.
+  subagentModel?: { transport: LlmTransport; model: string };
+  // Per-tool wall-clock deadline (ms). A tool call that outruns it is aborted and returned as an error the model sees,
+  // so a hung MCP tool can't pin the turn's Promise.all forever. Absent → no per-tool timeout (the run signal still applies).
+  toolTimeoutMs?: number;
   // Plan mode: start read-only-only; the agent must present_plan and get it approved (onPlan) before any write tool
   // runs. onPlan defaults to auto-approve. Off unless the host opts in.
   planMode?: boolean;
@@ -195,6 +200,37 @@ function toolCallSignature(calls: { name: string; arguments: string }[]): string
     .join("|");
 }
 
+// Invoke a tool under a wall-clock deadline: the tool runs with a signal that fires on timeout OR run-abort (so a
+// well-behaved tool cancels), and a race guarantees the loop is freed even if the tool ignores the signal. A timeout
+// becomes an error result the model sees. `timeoutMs <= 0` (or undefined via the caller) means no deadline.
+async function invokeWithTimeout(
+  tool: ToolDefinition,
+  input: Record<string, unknown>,
+  selectedModel: string,
+  timeoutMs: number,
+  runSignal?: AbortSignal,
+): Promise<ToolResult> {
+  if (timeoutMs <= 0) {
+    return invokeTool(tool, input, { selectedModel, ...(runSignal ? { abortSignal: runSignal } : {}) });
+  }
+  const controller = new AbortController();
+  const onRunAbort = (): void => controller.abort();
+  runSignal?.addEventListener("abort", onRunAbort, { once: true });
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<ToolResult>((resolve) => {
+    timer = setTimeout(() => {
+      controller.abort();
+      resolve({ content: `Tool "${tool.name}" exceeded its ${timeoutMs}ms deadline and was aborted.`, isError: true });
+    }, timeoutMs);
+  });
+  try {
+    return await Promise.race([invokeTool(tool, input, { selectedModel, abortSignal: controller.signal }), timeout]);
+  } finally {
+    if (timer) clearTimeout(timer);
+    runSignal?.removeEventListener("abort", onRunAbort);
+  }
+}
+
 // One agentic run: LLM call (with progressively-disclosed tools) → dispatch tool calls → feed results back →
 // repeat until the model stops asking for tools (end_turn), turns/budget run out, it stalls, or the caller aborts.
 export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopResult> {
@@ -231,13 +267,15 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
           buildSpawnAgentTool((task) =>
             runSubagent(() =>
               runAgentLoop({
-                transport: opts.transport,
-                model: opts.model,
+                // Sub-agents can run on a cheaper model (subagentModel) — delegated work rarely needs the main model.
+                transport: opts.subagentModel?.transport ?? opts.transport,
+                model: opts.subagentModel?.model ?? opts.model,
                 systemPrompt: `${opts.systemPrompt}\n\n## Sub-task\nYou are handling a scoped sub-task delegated by another agent, with your own fresh context. Do the work with your (read-only) tools, then give a clear, self-contained summary of your findings as your FINAL message — that summary is your only output back to the caller.`,
                 history: [{ role: "user", content: task }],
                 registry: subagentRegistry,
                 depth: depth + 1,
                 ...(opts.fallback ? { fallback: opts.fallback } : {}),
+                ...(opts.toolTimeoutMs !== undefined ? { toolTimeoutMs: opts.toolTimeoutMs } : {}),
                 ...(opts.temperature !== undefined ? { temperature: opts.temperature } : {}),
                 ...(opts.signal ? { signal: opts.signal } : {}),
                 ...(opts.maxTurns !== undefined ? { maxTurns: opts.maxTurns } : {}),
@@ -412,10 +450,6 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
     repeatRun = signature === lastSignature ? repeatRun + 1 : 1;
     lastSignature = signature;
 
-    const ctx: ToolContext = {
-      selectedModel: activeModel,
-      ...(opts.signal ? { abortSignal: opts.signal } : {}),
-    };
     const turnImages: ToolResultImage[] = []; // images returned by this turn's tools → one follow-up multimodal turn
     for (const tc of result.toolCalls) emit({ type: "tool_call", name: tc.name, args: tc.arguments });
 
@@ -443,7 +477,7 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
               isError: true,
             };
         }
-        return invokeTool(tool, parsed.value, ctx);
+        return invokeWithTimeout(tool, parsed.value, activeModel, opts.toolTimeoutMs ?? 0, opts.signal);
       }),
     );
     for (let i = 0; i < result.toolCalls.length; i++) {

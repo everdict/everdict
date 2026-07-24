@@ -14,6 +14,10 @@ const ConfigSchema = z.object({
   // fires). AGENT_FALLBACK_MODEL takes over for the rest of a run if the main model keeps failing transiently.
   AGENT_SMALL_MODEL: z.string().optional(),
   AGENT_FALLBACK_MODEL: z.string().optional(),
+  // A (typically cheaper) registered model for spawn_agent sub-agents — delegated research rarely needs the main model.
+  AGENT_SUBAGENT_MODEL: z.string().optional(),
+  // Per-tool wall-clock deadline (ms); a tool that outruns it is aborted and returned as an error. Unset → no deadline.
+  AGENT_TOOL_TIMEOUT_MS: z.coerce.number().int().positive().optional(),
   // The registered agent-config id resolved per workspace (instructions + MCP tool servers + model override). A
   // workspace registers an agent under this id ("default") to customize its assistant; unset id → base agent.
   AGENT_CONFIG_ID: z.string().default("default"),
