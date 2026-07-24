@@ -228,15 +228,18 @@ export function joinUrl(base: string, path: string): string {
 export function interpolatePath(path: string, vars: Record<string, string>): string {
   return path.replace(/\{(\w+)\}/g, (whole, key: string) => vars[key] ?? whole);
 }
+// Interpolate {{var}} tokens in a single string with wiring values (double-brace convention, same as the body template).
+// Unmatched tokens keep the original. Used for header values + the contextId correlation coordinate template.
+export function interpolateString(template: string, vars: Record<string, string>): string {
+  return template.replace(/\{\{(\w+)\}\}/g, (whole, key: string) => vars[key] ?? whole);
+}
 // Interpolate {{var}} in header values (double-brace convention, same as the body template). Keys stay as-is; unmatched tokens keep the original.
 export function interpolateHeaders(
   headers: Record<string, string>,
   vars: Record<string, string>,
 ): Record<string, string> {
   const out: Record<string, string> = {};
-  for (const [k, v] of Object.entries(headers)) {
-    out[k] = v.replace(/\{\{(\w+)\}\}/g, (whole, key: string) => vars[key] ?? whole);
-  }
+  for (const [k, v] of Object.entries(headers)) out[k] = interpolateString(v, vars);
   return out;
 }
 

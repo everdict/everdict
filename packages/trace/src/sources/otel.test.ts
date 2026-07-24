@@ -59,6 +59,27 @@ describe("OtelTraceSource — tag correlation (Jaeger search)", () => {
     await expect(none.fetch("x")).rejects.toBeInstanceOf(AppError);
   });
 
+  // Regression (controlled-coordinate correlate): correlateTag searches a session/controlled attribute the agent can't
+  // overwrite, instead of `everdict.run_id`. Pre-fix the search always keyed off everdict.run_id, so a trace whose agent
+  // replaced that attribute was unfindable.
+  it("correlateTag overrides the searched Jaeger tag key (controlled-coordinate/session correlation)", async () => {
+    const fetchImpl = vi.fn((..._args: Parameters<typeof fetch>) =>
+      Promise.resolve(new Response(JSON.stringify(JAEGER_BODY), { status: 200 })),
+    );
+    const src = new OtelTraceSource({
+      endpoint: "http://jaeger:16686",
+      correlate: "tag",
+      correlateTag: "session.id",
+      service: "instrumented-cli",
+      fetchImpl: fetchImpl as typeof fetch,
+    });
+
+    await src.fetch("run-session-42");
+
+    const url = new URL(String(fetchImpl.mock.calls[0]?.[0]));
+    expect(url.searchParams.get("tags")).toBe(JSON.stringify({ "session.id": "run-session-42" })); // not everdict.run_id
+  });
+
   it("correlate unset (id default) keeps the existing id path — no regression", async () => {
     const fetchImpl = vi.fn((..._args: Parameters<typeof fetch>) =>
       Promise.resolve(new Response(JSON.stringify(JAEGER_BODY), { status: 200 })),

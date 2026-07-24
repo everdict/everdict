@@ -47,6 +47,19 @@ A harness can be a process (Claude Code) or a **deployed multi-service topology 
 ## Efficiency (the whole point)
 stateless services = per-version warm; stores = shared + per-case logical isolation
 (`thread_id`/key-prefix/object-prefix); browser = per-case. Wiring via the front-door, not a redeploy.
+**A warm store is long-lived but the cases are ephemeral + independent** — so a store's TUNING is derived from its
+ROLE, not baked as one global (`dependencies.ts` `resolveStoreConfig`/`storeArgs`; redis run args are COMPUTED, `STORE_DEFS.redis`
+carries no static `args`). A **`plumbing`** redis (the agent's own per-case state) boots as an eval-CACHE —
+`--maxmemory 200mb --maxmemory-policy allkeys-lru --save "" --appendonly no` — because on Redis defaults (maxmemory
+0/noeviction + RDB `save` on) each case's streams accumulate → GB bloat → the periodic RDB fork stalls under VM
+overcommit → control-state 500s; LRU reclaims a finished case's idle keys (active sessions stay hot → not evicted) and
+`save ""`/AOF-off removes the fork (a cache has no durable state). A **`data`** redis (dataset-seeded world-state a
+grader reads) is instead **DURABLE** (no-evict + persist), so eviction/loss never corrupts the ground truth — baking one
+static cache array (the pre-model bug) applied the cache policy to data stores too. `TopologyDependency.storeConfig`
+(`memoryMb`/`evictWhenFull`/`persistence`) overrides per store. Since the addressing model deploys **one instance per
+store type**, multiple deps for it SAFETY-MERGE (durable/no-evict/unbounded wins → a plumbing+data pair coexists on one
+instance without evicting the data); **cross-tenant pool** stores are always durable. True physically-separate same-type
+instances with independent tuning is the singular-addressing follow-up.
 
 ## Store roles + data-as-condition (P2 — `docs/architecture/dependency-store-roles.md`)
 - **`dependencies[].purpose`** = the store's role: `plumbing` (default — the agent's OWN state, empty at start,
@@ -61,6 +74,10 @@ stateless services = per-version warm; stores = shared + per-case logical isolat
 - **Grade** (`StoreStateGrader`, graders skill): reads the post-run slice via a co-located
   **`TopologyRuntime.readStoreState(spec, runId, query, zone)`** injected as `GradeContext.readStore` — an internal
   store URL can't reach a remote grader (`judge-placement-locality.md`).
+- **Tune** (`resolveStoreConfig`/`storeArgs`): `purpose` also drives the store's CONFIG, not only seed/grade — `plumbing`
+  → eval-cache, `data` → durable (see Efficiency above). This is why `purpose` is no longer "a semantic marker only": it
+  now branches store deployment tuning across all 3 runtimes (the co-located path resolves from the real deps; silo
+  passes the real-spec config; pool forces durable).
 - **The exec is runtime-agnostic**: `buildSeedExec`/`buildReadExec` (pure, `store-seed.ts`) build the in-container
   command per store — postgres (schema slice via the connection's `search_path` startup option, NOT a `SET` that
   would echo into a read), redis + minio (`{prefix}` placeholder; redis via a redis-cli stdin heredoc, minio via `mc`
@@ -181,11 +198,20 @@ touching `service-backend.ts`'s driving logic.
   **Two-axis correlation — for "the agent won't reliably carry OUR run_id".** Correlation is split across two specs by
   design: `frontDoor.correlate` decides WHICH id identifies the run (ours=`injected` or the agent's own=`returned`),
   and `traceSource.correlate` decides HOW to find that id on the platform (`id` = the run id IS the trace id, `tag` =
-  search the `everdict.run_id` span tag). The chosen id flows through `DriveOutcome.traceRef` into
-  `traceSource.fetch(traceRef)` (`service-backend.ts`), so an agent that mints its own id (and overwrites our injected
-  tag) is handled by `frontDoor.correlate:returned` + `traceSource.correlate:id|tag` — no separate trace-pull "returned"
-  mode is needed (the returned id already reaches the pull). Reach for this whenever the agent can't be trusted to carry
-  the injected key. (A dedicated `session` correlate — pull by a session/thread key — is a niche future axis, unbuilt.)
+  search a span tag — `traceSource.correlateTag`, default `everdict.run_id`). The chosen id flows through
+  `DriveOutcome.traceRef` into `traceSource.fetch(traceRef)` (`service-backend.ts`), so an agent that mints its own id
+  (and overwrites our injected tag) is handled by `frontDoor.correlate:returned` + `traceSource.correlate:id|tag` — no
+  separate trace-pull "returned" mode is needed (the returned id already reaches the pull). Reach for this whenever the
+  agent can't be trusted to carry the injected key.
+  **Controlled-coordinate correlate — when the agent OVERWRITES `everdict.run_id`.** If the agent replaces our injected
+  `everdict.run_id` tag with its OWN internal id, BOTH `id`- and `run_id`-tag correlation miss. `frontDoor.contextId` (a
+  `{{var}}`-interpolated template over the per-run vocabulary — e.g. `{{thread_id}}`, `run-{{run_id}}`) names a STABLE
+  session/target coordinate everdict injects as the agent's session identity, which it can't overwrite (unlike a passive
+  tag). When set, the trace is PULLED by that coordinate instead of `outcome.traceRef` (`service-backend.ts`), and
+  `traceSource.correlate:"tag"` + `traceSource.correlateTag` (e.g. `mlflow.trace.session`) searches the SESSION tag the
+  agent DID carry. `contextId` only names an already-injected coordinate — it adds no body field. This is the built form
+  of the former "session correlate" idea (mlflow session-tag search); the tag-key generalization lives in the
+  otel/mlflow adapters (`correlateTag ?? everdict.run_id`).
 - **#1 payload template — DONE.** `frontDoor.request.bodyTemplate` (`interpolateTemplate` — recursive `{{var}}`
   over the JSON body); per-run wiring variable NAMES derive from `dependencies[].isolateBy` via `wiringVars`
   (`thread_id`/`key_prefix`/`object_prefix`/`schema`), not hardcoded LangGraph names. Absent `request` = today's body.
@@ -228,13 +254,21 @@ seam, fourth sibling of `TopologyRuntime`/`FrontDoorDriver`/`ObservationSource`.
 *How* the observation reaches the grader/judge is now a third axis (sibling of `TopologyRuntime`=WHERE,
 `FrontDoorDriver`=HOW-drive): `ObservationSource` (`observation-source.ts`). `TopologyTarget.delivery`
 (`@everdict/contracts`, `.optional()`) selects `reference` (store-fetch, default = today's `snapshot()`/prompt) |
-`sentinel` (inline via result channel) | `egress` (push to a `sink`). `dispatch` delegates to
-`observationSourceFor(spec.target?.delivery)` — all three modes wired. **`sentinel`** reads the observation from the
-**result channel** (`DriveOutcome.response` — `sync` = submit response, `poll` = the `done` status body) via
-`delivery.path?` (dot-path, `getField`). **`egress`** GETs the `{run_id}`-interpolated `delivery.sink` (via `getJson`,
-default `fetchJson`; keyed by `outcome.traceRef`) — the agent pushed there out of band. Both validate the result as an
-`EnvSnapshot` (malformed → explicit run failure). Pairs with judge store-locality (co-locate the judge near the
-store) — `docs/architecture/judge-placement-locality.md`.
+`sentinel` (inline via result channel) | `egress` (push to a `sink`) | `trace` (recover from the harness's own artifact
+store via the trace). `dispatch` delegates to `observationSourceFor(spec.target?.delivery)` — all four modes wired.
+**`sentinel`** reads the observation from the **result channel** (`DriveOutcome.response` — `sync` = submit response,
+`poll` = the `done` status body) via `delivery.path?` (dot-path, `getField`). **`egress`** GETs the
+`{run_id}`-interpolated `delivery.sink` (via `getJson`, default `fetchJson`; keyed by `outcome.traceRef`) — the agent
+pushed there out of band. Both validate the result as an `EnvSnapshot` (malformed → explicit run failure).
+**`trace`** is for a CONTAINERLESS service target (`target.acquire:"service"` — the agent owns its own browser/session,
+everdict provisions none) that offloads its observation (screenshot/DOM) to its OWN object store and references it FROM
+the trace: `reference` has no everdict stage to pull, and the agent inlined nothing (`sentinel`) nor pushed to an
+everdict sink (`egress`). `dispatch` pulls the trace via `TraceSource.fetchDetailed` (whose evidence extraction resolves
+the in-trace artifact refs to real bytes — `ArtifactStore.get`), and `traceObservationSource` synthesizes the browser
+snapshot from that evidence via the shared pure `snapshotFromEvidence` (`@everdict/contracts`, the SAME evidence→snapshot
+the pull-ingest path uses). No browser evidence → prompt fallback (never fails the run). Requires a `traceSource.mapping`
+with evidence slots. Pairs with judge store-locality (co-locate the judge near the store) —
+`docs/architecture/judge-placement-locality.md`.
 
 ## Reference impls
 `packages/topology/src/{nomad-topology,nomad-runtime,k8s-topology,k8s-runtime,kubectl,service-backend,environment-manager}.ts`,

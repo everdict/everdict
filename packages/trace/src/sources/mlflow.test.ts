@@ -108,6 +108,34 @@ describe("MlflowTraceSource — tag correlation", () => {
     expect(events.some((e) => e.kind === "llm_call")).toBe(true);
   });
 
+  // Regression (controlled-coordinate correlate): when the agent overwrites `everdict.run_id` with its own id, both id-
+  // and run_id-tag correlation miss. correlateTag searches a CONTROLLED session tag (the coordinate everdict injects,
+  // e.g. mlflow.trace.session) with the value passed to fetch() (frontDoor.contextId). Pre-fix: correlateTag ignored →
+  // the filter always used `everdict.run_id`, so the trace stayed unfindable.
+  it("correlateTag overrides the searched tag key (controlled-coordinate/session correlation)", async () => {
+    const calls: Array<{ url: string; body?: string }> = [];
+    const fetchImpl = vi.fn((...args: Parameters<typeof fetch>) => {
+      const url = String(args[0]);
+      calls.push({ url, body: args[1]?.body as string | undefined });
+      if (url.includes("/traces/search"))
+        return Promise.resolve(new Response(JSON.stringify({ traces: [{ trace_id: "tr-found" }] }), { status: 200 }));
+      return Promise.resolve(new Response(JSON.stringify(REAL_TRACE), { status: 200 }));
+    });
+    const src = new MlflowTraceSource({
+      endpoint: "http://m",
+      correlate: "tag",
+      correlateTag: "mlflow.trace.session",
+      experimentIds: ["7"],
+      fetchImpl: fetchImpl as typeof fetch,
+    });
+
+    await src.fetch("run-session-42");
+
+    const search = JSON.parse(calls[0]?.body ?? "{}");
+    expect(search.filter).toBe("tags.`mlflow.trace.session` = 'run-session-42'"); // the session tag, not everdict.run_id
+    expect(calls[1]?.url).toContain("trace_id=tr-found");
+  });
+
   it("tag not found → [] degrade (same as id mode's 404), experiment unset → explicit error (locations required)", async () => {
     const empty = vi.fn(() => Promise.resolve(new Response(JSON.stringify({ traces: [] }), { status: 200 })));
     const src = new MlflowTraceSource({

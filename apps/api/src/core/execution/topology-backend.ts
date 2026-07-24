@@ -70,6 +70,7 @@ export function buildTopologyBackend(
     endpoint: ts.endpoint,
     ...(tsAuth ? { headers: { authorization: tsAuth } } : {}),
     ...(ts.correlate ? { correlate: ts.correlate } : {}),
+    ...(ts.correlateTag ? { correlateTag: ts.correlateTag } : {}), // controlled-coordinate tag search (pairs with frontDoor.contextId)
     ...(ts.service ? { service: ts.service } : {}),
     ...(ts.project ? { project: ts.project } : {}),
   });

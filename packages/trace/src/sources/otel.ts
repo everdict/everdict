@@ -105,11 +105,15 @@ export interface OtelTraceSourceOptions {
   // Jaeger-query-API only (`GET /api/traces?service=…&tags=…`, verified on real 1.62: resource attribute = process-tag match,
   // service required). OTLP-native backends (no search API) stay id-correlated.
   correlate?: "id" | "tag";
+  // The tag/resource-attribute key `correlate:"tag"` searches (default `everdict.run_id`). Set to a controlled-
+  // coordinate/session attribute so a trace whose agent overwrote `everdict.run_id` is found by the id everdict injected
+  // (the value comes from fetch(runId), where the caller passes the controlled coordinate — frontDoor.contextId).
+  correlateTag?: string;
   service?: string; // search scope for tag correlation (Jaeger requires the service parameter) — the agent's service.name
   mapping?: SpanAttrMapping; // per-harness span-attribute overrides (non-GenAI-convention instrumentation)
 }
 
-const RUN_ID_ATTR = "everdict.run_id"; // the correlation resource attribute the instrumented agent writes (same value as the injected env)
+const RUN_ID_ATTR = "everdict.run_id"; // the default correlation resource attribute the instrumented agent writes (same value as the injected env)
 
 // Fetch spans from an OTLP/Jaeger-compatible HTTP endpoint by runId (=trace id) and normalize to TraceEvents.
 // With correlate="tag", find it via a Jaeger search (service+tags) — the search response embeds the spans, so it's one request.
@@ -126,9 +130,10 @@ export class OtelTraceSource implements BrowsableTraceSource {
         "OTel tag correlation requires a service scope (the Jaeger search's service parameter is required).",
       );
     }
+    const tag = this.opts.correlateTag ?? RUN_ID_ATTR; // controlled-coordinate attribute override (e.g. a session id) — default everdict.run_id
     const qs = new URLSearchParams({
       service: this.opts.service,
-      tags: JSON.stringify({ [RUN_ID_ATTR]: runId }),
+      tags: JSON.stringify({ [tag]: runId }),
       limit: "1",
     });
     return `${base}/api/traces?${qs.toString()}`;

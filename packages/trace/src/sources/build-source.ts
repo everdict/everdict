@@ -25,6 +25,7 @@ export function buildTraceSource(cfg: TraceSourceConfig): BrowsableTraceSource {
       return new OtelTraceSource({
         ...opts,
         ...(cfg.correlate ? { correlate: cfg.correlate } : {}),
+        ...(cfg.correlateTag ? { correlateTag: cfg.correlateTag } : {}),
         ...(cfg.service ? { service: cfg.service } : {}),
         ...(cfg.mapping ? { mapping: cfg.mapping } : {}),
       });
@@ -32,6 +33,7 @@ export function buildTraceSource(cfg: TraceSourceConfig): BrowsableTraceSource {
       return new MlflowTraceSource({
         ...opts,
         ...(cfg.correlate ? { correlate: cfg.correlate } : {}),
+        ...(cfg.correlateTag ? { correlateTag: cfg.correlateTag } : {}),
         ...(cfg.project ? { experimentIds: [cfg.project] } : {}),
         ...(cfg.mapping ? { mapping: cfg.mapping } : {}),
       });

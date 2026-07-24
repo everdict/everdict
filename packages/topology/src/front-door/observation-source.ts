@@ -1,4 +1,11 @@
-import { type EnvSnapshot, EnvSnapshotSchema, InternalError, type ObservationDelivery } from "@everdict/contracts";
+import {
+  type EnvSnapshot,
+  EnvSnapshotSchema,
+  InternalError,
+  type ObservationDelivery,
+  type TraceEvidence,
+  snapshotFromEvidence,
+} from "@everdict/contracts";
 import { getField, interpolatePath } from "./front-door-driver.js";
 
 // Abstraction for retrieving the observation — the sibling (HOW-observe) of TopologyRuntime (WHERE) / FrontDoorDriver (HOW-drive).
@@ -6,6 +13,8 @@ import { getField, interpolatePath } from "./front-door-driver.js";
 //   reference — the eval pulls from a store (browser CDP etc.) (current, no regression). Pairs with store-locality (co-locate).
 //   sentinel  — the run returns it inline via the result channel (front-door response). No store hop — good for small observations.
 //   egress    — the run pushes to a sink, the eval retrieves from that sink. Push instead of pull when the judge is far.
+//   trace     — recovered from the trace's referenced artifacts (the harness offloaded them to its own store). For a
+//               containerless service target, where none of the above has an everdict-held stage to read.
 // Design: docs/architecture/judge-placement-locality.md.
 
 // Only the per-case target's observation surface (snapshot) — the provisionBrowserEnv handle satisfies it structurally. Minimizes runtime coupling.
@@ -18,6 +27,7 @@ export interface ObserveRequest {
   response?: unknown; // result-channel body (DriveOutcome.response) — sentinel extracts the observation from here
   getJson?: (url: string) => Promise<unknown>; // fetch primitive for egress sink retrieval
   wiring?: Record<string, string>; // sink/path interpolation variables ({run_id} etc.)
+  evidence?: TraceEvidence; // trace-delivery: the evidence the trace source resolved from the harness's own artifact store
 }
 
 export interface ObservationSource {
@@ -82,10 +92,22 @@ export function egressObservationSource(sink: string): ObservationSource {
   };
 }
 
-// delivery → retrieval strategy. Implements unset/reference + sentinel + egress. An unknown mode is filtered at the boundary
-// by the schema (discriminatedUnion) — by the time it reaches here it's one of the three.
+// trace (recover-from-trace): a containerless service target whose agent offloaded its observation to its OWN artifact
+// store and referenced it from the trace. The trace source already resolved those refs to bytes (fetchDetailed →
+// evidence), so synthesize the browser snapshot from that evidence — the same evidence→snapshot the pull-ingest path
+// uses (shared snapshotFromEvidence). No browser evidence (nothing offloaded / a native-kind source with no evidence
+// extraction) → fall back to the result-channel body as prompt output, so a missing observation never fails the run.
+export const traceObservationSource: ObservationSource = {
+  async observe({ evidence, response }) {
+    return snapshotFromEvidence(evidence) ?? { kind: "prompt", output: responseText(response) };
+  },
+};
+
+// delivery → retrieval strategy. Implements unset/reference + sentinel + egress + trace. An unknown mode is filtered at
+// the boundary by the schema (discriminatedUnion) — by the time it reaches here it's one of the four.
 export function observationSourceFor(delivery: ObservationDelivery | undefined): ObservationSource {
   if (!delivery || delivery.mode === "reference") return referenceObservationSource;
   if (delivery.mode === "sentinel") return sentinelObservationSource(delivery.path);
+  if (delivery.mode === "trace") return traceObservationSource;
   return egressObservationSource(delivery.sink);
 }

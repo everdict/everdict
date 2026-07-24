@@ -213,11 +213,15 @@ export interface MlflowTraceSourceOptions {
   // "tag" = search by the `everdict.run_id` tag the instrumented agent wrote to its own trace (the real-agent path,
   // where the id is minted by the server and so can't equal the everdict runId) — search requires locations, so experimentIds is required.
   correlate?: "id" | "tag";
+  // The tag key `correlate:"tag"` searches (default `everdict.run_id`). Set to a controlled-coordinate/session tag
+  // (e.g. `mlflow.trace.session`) so a trace whose agent overwrote `everdict.run_id` is found by the session id everdict
+  // injected — the value comes from fetch(runId), where the caller passes the controlled coordinate (frontDoor.contextId).
+  correlateTag?: string;
   experimentIds?: string[]; // search scope for tag correlation (MLflow 3.x traces/search requires locations)
   mapping?: SpanAttrMapping; // per-harness span-attribute overrides (non-GenAI-convention instrumentation)
 }
 
-const RUN_ID_TAG = "everdict.run_id"; // the correlation tag the instrumented agent writes (same value as the injected env EVERDICT_RUN_ID)
+const RUN_ID_TAG = "everdict.run_id"; // the default correlation tag the instrumented agent writes (same value as the injected env EVERDICT_RUN_ID)
 
 // listTraces model enrichment bounds — one traces/get per row missing a model, so cap the fan-out and its parallelism.
 const MODEL_ENRICH_CAP = 50;
@@ -240,6 +244,7 @@ export class MlflowTraceSource implements BrowsableTraceSource {
         "MLflow tag correlation requires an experiment scope (traces/search requires locations).",
       );
     }
+    const tag = this.opts.correlateTag ?? RUN_ID_TAG; // controlled-coordinate tag override (e.g. mlflow.trace.session) — default everdict.run_id
     const res = await f(`${base}/api/3.0/mlflow/traces/search`, {
       method: "POST",
       headers: { "content-type": "application/json", ...(this.opts.headers ?? {}) },
@@ -248,7 +253,7 @@ export class MlflowTraceSource implements BrowsableTraceSource {
           type: "MLFLOW_EXPERIMENT",
           mlflow_experiment: { experiment_id: id },
         })),
-        filter: `tags.\`${RUN_ID_TAG}\` = '${runId.replace(/'/g, "''")}'`,
+        filter: `tags.\`${tag}\` = '${runId.replace(/'/g, "''")}'`,
         max_results: 1,
       }),
     });

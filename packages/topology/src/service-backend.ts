@@ -18,6 +18,7 @@ import {
   type ServiceHarnessSpec,
   type StoreReader,
   type TraceEvent,
+  type TraceEvidence,
   type TrustZone,
 } from "@everdict/contracts";
 import { type TrustZonePolicy, assertHardenedIsolation } from "@everdict/domain";
@@ -38,6 +39,7 @@ import {
   type SubmitFn,
   fetchJson,
   interpolateHeaders,
+  interpolateString,
   interpolateTemplate,
 } from "./front-door/front-door-driver.js";
 import { extractInlineTrace } from "./front-door/inline-trace.js";
@@ -328,8 +330,22 @@ export class ServiceTopologyBackend implements Backend, ScreenCapturable {
       // pulls from its team's platform; it falls back to the fixed runtime traceSource when no source is selected. Either
       // failure (auth / transient down / not emitted / malformed inline / unresolved source secret) does NOT kill the run
       // — record it as an error event and proceed with snapshot + grading (the browser snapshot is the primary signal).
+      //
+      // Controlled-coordinate correlate (gap 2): when frontDoor.contextId is set, the trace is pulled by that stable
+      // session/target coordinate (interpolated from the per-run vocabulary everdict injected — the agent can't overwrite
+      // it) instead of outcome.traceRef, so a run whose agent replaced `everdict.run_id` with its own id is still found
+      // (pairs with traceSource.correlate:"tag" + correlateTag = the session tag). Absent = the run/correlate id (today).
+      const contextId = spec.frontDoor.contextId
+        ? interpolateString(spec.frontDoor.contextId, perRunVocabulary(keys, wiring))
+        : undefined;
+      const traceKey = contextId ?? outcome.traceRef;
       const inline = spec.frontDoor.traceInline;
+      // trace-delivery (gap 3): a containerless service target where the agent offloaded its observation (screenshot/DOM)
+      // to its OWN artifact store and referenced it FROM the trace. The trace source's evidence extraction resolves those
+      // refs to real bytes (ArtifactStore.get), so pull via fetchDetailed to carry the evidence into the ObservationSource.
+      const wantsTraceEvidence = spec.target?.delivery?.mode === "trace" && !inline;
       let trace: TraceEvent[];
+      let traceEvidence: TraceEvidence | undefined;
       try {
         if (inline) {
           trace = extractInlineTrace(outcome.response, inline.path);
@@ -337,7 +353,14 @@ export class ServiceTopologyBackend implements Backend, ScreenCapturable {
           const selected = this.opts.traceSourceFor
             ? await this.opts.traceSourceFor(job.tenant ?? "default", job.harness.id)
             : undefined;
-          trace = await (selected ?? this.opts.traceSource).fetch(outcome.traceRef);
+          const source = selected ?? this.opts.traceSource;
+          if (wantsTraceEvidence && source.fetchDetailed) {
+            const detailed = await source.fetchDetailed(traceKey);
+            trace = detailed.events;
+            traceEvidence = detailed.evidence;
+          } else {
+            trace = await source.fetch(traceKey);
+          }
         }
       } catch (err) {
         const how = inline ? "extract" : "fetch";
@@ -348,11 +371,13 @@ export class ServiceTopologyBackend implements Backend, ScreenCapturable {
       // Observation (#4 + delivery): retrieve the observation via the per-delivery.mode ObservationSource. Unset = reference (store-fetch, no regression)
       // — pull the snapshot if there's a target, otherwise prompt. sentinel = extract inline from outcome.response (result channel).
       // egress = GET-retrieve from the sink (where the agent pushed; {run_id}-interpolated with the same correlation key as the trace).
+      // trace = synthesize from the trace's resolved evidence (the harness's offloaded artifacts — gap 3).
       const snapshot: EnvSnapshot = await observationSourceFor(spec.target?.delivery).observe({
         target,
         response: outcome.response,
         getJson: this.opts.getJson ?? fetchJson,
         wiring: { ...wiring, run_id: outcome.traceRef },
+        ...(traceEvidence ? { evidence: traceEvidence } : {}),
       });
       // The observations (trace + snapshot) are in hand, so the target (browser etc.) is no longer needed — release it early
       // so it isn't held during grading (judge LLM etc.). docs/architecture/streaming-case-pipeline.md

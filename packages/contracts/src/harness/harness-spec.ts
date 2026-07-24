@@ -14,6 +14,11 @@ export const TraceSourceSpecSchema = z.object({
   endpoint: z.string(),
   authSecret: z.string().optional(),
   correlate: z.enum(["id", "tag"]).optional(),
+  // The tag key `correlate:"tag"` searches — default `everdict.run_id` (the passive tag everdict/the agent writes).
+  // Set it to a CONTROLLED-coordinate tag (e.g. `mlflow.trace.session`) to correlate by a session/target id everdict
+  // injects and the agent can't overwrite, paired with `frontDoor.contextId` (which supplies the value). Reach for it
+  // when the agent mints its own trace id AND overwrites `everdict.run_id`, so both id- and run_id-tag correlation miss.
+  correlateTag: z.string().optional(),
   service: z.string().optional(),
   project: z.string().optional(),
   // Per-harness span→TraceEvent attribute overrides for a harness that doesn't emit the OTel GenAI conventions (otel/mlflow).
@@ -129,6 +134,21 @@ export const DependencyInjectSchema = z
   .strict();
 export type DependencyInject = z.infer<typeof DependencyInjectSchema>;
 
+// Store configuration — how a deployed dependency store is TUNED (distinct from WHICH store / HOW isolated). Store-
+// agnostic INTENT knobs the runtime maps to the store's native flags; a field the store doesn't interpret is ignored
+// (today only redis interprets them — postgres/minio are always durable). Unset per field = the purpose-derived default
+// (plumbing → eval-cache: bounded + evict + no-persist · data → durable: unbounded + no-evict + persist). This is the
+// SSOT knob behind the warm-topology cache boundary: a plumbing store is a CACHE (its keys are the agent's ephemeral
+// per-case state), a data store holds the dataset-seeded world-state a grader reads, so it must NEVER evict/lose it.
+export const StoreConfigSchema = z
+  .object({
+    memoryMb: z.number().int().positive().optional(), // memory cap (redis maxmemory). Unset = the purpose default (plumbing 200 / data unbounded).
+    evictWhenFull: z.boolean().optional(), // at the cap, evict LRU keys (cache) vs reject writes (durable). data must be false.
+    persistence: z.boolean().optional(), // survive a restart (redis RDB/AOF). A cache is false (no fork stall); world-state is true.
+  })
+  .strict();
+export type StoreConfig = z.infer<typeof StoreConfigSchema>;
+
 // Dependency store (shared + per-case logical isolation). isolateBy = the isolation key kind.
 // isolateBy="external" = BYO external/shared store (another cluster etc.) — Everdict does not deploy/isolate it, the service just connects.
 //   The connection is out of spec, injected at deploy time via env (storeEnv)/service.env (consistent with StoreIsolation's external model).
@@ -139,7 +159,9 @@ export type DependencyInject = z.infer<typeof DependencyInjectSchema>;
 //   "plumbing" (default) = the agent's OWN execution state (LangGraph checkpoints / session DB); it comes up empty and
 //     is only per-case logically isolated. This is intrinsic to the agent's deployable → harness-owned.
 //   "data" = a world-state store the TASK operates on; its CONTENT is an experiment condition seeded per-case from the
-//     dataset (EvalCase.fixtures, P2). P1 is a semantic marker only — no runtime branch keys off it yet.
+//     dataset (EvalCase.fixtures, P2). Now also drives store TUNING: a data store defaults to DURABLE (no eviction /
+//     persist) so the seeded world-state a grader reads is never evicted/lost, whereas plumbing defaults to an
+//     eval-cache (bounded + LRU + no-persist). Override per store via `storeConfig`.
 export const TopologyDependencySchema = z
   .object({
     store: z.enum(["postgres", "redis", "minio"]),
@@ -148,6 +170,10 @@ export const TopologyDependencySchema = z
     isolateBy: z.enum(["thread_id", "key-prefix", "object-prefix", "schema", "external"]),
     service: z.string().optional(),
     inject: z.array(DependencyInjectSchema).optional(),
+    // Per-store tuning override on top of the purpose-derived default (StoreConfig). When several deps map to the same
+    // deployed store (one instance per type — the singular-addressing model), the runtime SAFETY-MERGES their configs:
+    // durable / no-evict / unbounded wins, so a plumbing+data pair coexists on one instance without evicting the data.
+    storeConfig: StoreConfigSchema.optional(),
   })
   .superRefine((dep, ctx) => {
     if (!dep.inject?.length) return;
@@ -177,15 +203,21 @@ export const TopologyDependencySchema = z
 export type TopologyDependency = z.infer<typeof TopologyDependencySchema>;
 
 // Observation delivery mode — how the judge/grader receives observations.
-// reference (store-fetch, evaluation pulls) | sentinel (inlined back over the result channel) | egress (pushed to a sink).
-// Unset = reference (current). The topology path implements reference only (sentinel = slice 3, egress = 4). The axis that pairs with
-// placement-locality — docs/architecture/judge-placement-locality.md.
+// reference (store-fetch, evaluation pulls) | sentinel (inlined back over the result channel) | egress (pushed to a sink) |
+// trace (recovered from the harness's own artifact store via the trace's referenced artifacts). Unset = reference. The axis
+// that pairs with placement-locality — docs/architecture/judge-placement-locality.md.
 export const ObservationDeliverySchema = z.discriminatedUnion("mode", [
   z.object({ mode: z.literal("reference") }),
   // sentinel — the observation is returned inline in the front-door response (result channel). path = the dot-path to pull the EnvSnapshot
   // from the response body (if unset, the whole body is the EnvSnapshot). The same no-eval extraction as correlate.path.
   z.object({ mode: z.literal("sentinel"), path: z.string().optional() }),
   z.object({ mode: z.literal("egress"), sink: z.string() }), // the sink to push the observation into (object store etc.)
+  // trace — for a CONTAINERLESS service target (the agent owns its own browser/session, everdict provisions none) that
+  // offloads its observation (screenshot/DOM) to its OWN artifact/object store and references it FROM the trace. reference
+  // has no everdict target to pull, and the agent inlined nothing (sentinel) nor pushed to an everdict sink (egress). The
+  // trace source's evidence extraction resolves those in-trace refs to real bytes (ArtifactStore.get + resolveObservation),
+  // which the eval synthesizes into the judge's browser snapshot. Requires a mapping with evidence slots on the traceSource.
+  z.object({ mode: z.literal("trace") }),
 ]);
 export type ObservationDelivery = z.infer<typeof ObservationDeliverySchema>;
 
@@ -329,6 +361,13 @@ export const FrontDoorSpecSchema = z.object({
   request: FrontDoorRequestSchema.optional(), // unset = current 5-field body
   completion: FrontDoorCompletionSchema.optional(), // unset = sync (current)
   correlate: FrontDoorCorrelateSchema.optional(), // unset = injected (current)
+  // Controlled-coordinate trace key — a stable session/target id everdict injects into the agent (its thread/session
+  // identity) and the agent CANNOT overwrite, unlike the passive `everdict.run_id` tag it may replace with its own id.
+  // A `{{var}}`-interpolated template over the per-run vocabulary (e.g. "{{thread_id}}", "run-{{run_id}}"). When set, the
+  // trace is PULLED by this coordinate instead of the run id — pair it with `traceSource.correlate:"tag"` +
+  // `traceSource.correlateTag` (the session tag the agent writes) so a run whose agent overwrote `everdict.run_id` is
+  // still found. It only names an existing injected coordinate; it does not add a new body field. Design: docs/service-harness.md.
+  contextId: z.string().optional(),
   traceInline: FrontDoorTraceInlineSchema.optional(), // unset = pull from traceSource; set = extract TraceEvent[] from the response
 });
 export type FrontDoorSpec = z.infer<typeof FrontDoorSpecSchema>;

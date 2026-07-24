@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { EnvSnapshot } from "./environment.js";
 import { type TraceEvent, TraceEventSchema } from "./trace.js";
 
 // Pull one run's trace that the harness exported to an observability platform and return it as
@@ -100,6 +101,25 @@ export const TraceEvidenceSchema = z.object({
   custom: z.record(z.string(), z.string()).optional(), // resolved custom slots (name → text) → the judge's {<name>} placeholders
 });
 export type TraceEvidence = z.infer<typeof TraceEvidenceSchema>;
+
+// Evidence extracted from a trace → the browser snapshot a judge reads (dom/screenshot/VLM). The substitute for the
+// EnvSnapshot a live run produces, for the two paths where the observation lives only in the trace: pull-ingest (no
+// harness run) and a containerless service target whose agent offloaded its observation to its own artifact store and
+// referenced it from the trace (trace-delivery). No browser evidence → undefined (the caller keeps its own fallback;
+// the final answer still rides the trace as an assistant message). Pure — the ref→bytes resolution already happened upstream.
+export function snapshotFromEvidence(evidence: TraceEvidence | undefined): EnvSnapshot | undefined {
+  if (!evidence) return undefined;
+  if (evidence.dom === undefined && evidence.screenshot === undefined && evidence.screenshotRef === undefined)
+    return undefined;
+  return {
+    kind: "browser",
+    url: "",
+    dom: evidence.dom ?? "",
+    ...(evidence.screenshot ? { screenshot: evidence.screenshot } : {}),
+    ...(evidence.screenshotRef ? { screenshotRef: evidence.screenshotRef } : {}),
+    console: [],
+  };
+}
 
 // The result of inspect(traceId, mapping): the normalized events (with the SUPPLIED mapping applied for span-based
 // kinds) plus, for span-based kinds, the raw span attributes so a mapping can be authored/iterated live, plus (best-
@@ -207,7 +227,10 @@ export interface TraceSourceConfig {
   // (langfuse/phoenix: Authorization verbatim, langsmith: x-api-key). otel/mlflow keep the existing headers path.
   auth?: string;
   project?: string; // required for phoenix's span-query path (project name/ID) · experiment id for mlflow tag correlation. Ignored by other kinds.
-  correlate?: "id" | "tag"; // mlflow/otel — "tag" finds the trace by searching the everdict.run_id tag (resource attribute) (default "id").
+  correlate?: "id" | "tag"; // mlflow/otel — "tag" finds the trace by searching a span tag (default "id").
+  // The tag key searched when correlate:"tag" (mlflow/otel) — default `everdict.run_id`. Set to a session/controlled-
+  // coordinate tag (e.g. `mlflow.trace.session`) to correlate by an id the agent can't overwrite (pairs with frontDoor.contextId).
+  correlateTag?: string;
   service?: string; // search scope for otel tag correlation (the Jaeger service parameter). Ignored by other kinds.
   mapping?: SpanAttrMapping; // per-harness span-attribute overrides for a non-GenAI-convention harness (otel/mlflow).
   fetchImpl?: typeof fetch;

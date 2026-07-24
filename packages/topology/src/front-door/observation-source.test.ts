@@ -1,10 +1,11 @@
-import type { EnvSnapshot } from "@everdict/contracts";
+import type { EnvSnapshot, TraceEvidence } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import {
   egressObservationSource,
   observationSourceFor,
   referenceObservationSource,
   sentinelObservationSource,
+  traceObservationSource,
 } from "./observation-source.js";
 
 const browserSnap: EnvSnapshot = { kind: "browser", url: "http://x", dom: "<html>", screenshotRef: "s", console: [] };
@@ -77,10 +78,41 @@ describe("observation-source (delivery seam)", () => {
     ).rejects.toThrow(/EnvSnapshot/);
   });
 
-  it("observationSourceFor: unset/reference → reference, sentinel/egress → each source (no throw)", () => {
+  // trace-delivery: a containerless service target's agent offloaded its observation to its own store and referenced it
+  // from the trace; the trace source already resolved those refs into evidence — synthesize the browser snapshot from it.
+  it("trace: synthesizes a browser snapshot from the trace's resolved evidence (the harness's offloaded artifacts)", async () => {
+    const evidence: TraceEvidence = { dom: "<offloaded/>", screenshot: "aGVsbG8=", screenshotMediaType: "image/png" };
+    const snap = await traceObservationSource.observe({ target: undefined, evidence });
+    expect(snap).toEqual({
+      kind: "browser",
+      url: "",
+      dom: "<offloaded/>",
+      screenshot: "aGVsbG8=",
+      console: [],
+    });
+  });
+
+  it("trace: falls back to the result-channel body as prompt output when the trace carries no browser evidence (never fails the run)", async () => {
+    const snap = await traceObservationSource.observe({
+      target: undefined,
+      response: "final answer",
+      evidence: undefined,
+    });
+    expect(snap).toEqual({ kind: "prompt", output: "final answer" });
+    // Evidence present but with no browser slot (only a final answer) → still no snapshot to synthesize → prompt fallback.
+    const answerOnly = await traceObservationSource.observe({
+      target: undefined,
+      response: "x",
+      evidence: { finalAnswer: "done" },
+    });
+    expect(answerOnly).toEqual({ kind: "prompt", output: "x" });
+  });
+
+  it("observationSourceFor: unset/reference → reference, sentinel/egress/trace → each source (no throw)", () => {
     expect(observationSourceFor(undefined)).toBe(referenceObservationSource);
     expect(observationSourceFor({ mode: "reference" })).toBe(referenceObservationSource);
     expect(observationSourceFor({ mode: "sentinel" })).not.toBe(referenceObservationSource);
     expect(observationSourceFor({ mode: "egress", sink: "http://s/x" })).not.toBe(referenceObservationSource);
+    expect(observationSourceFor({ mode: "trace" })).toBe(traceObservationSource);
   });
 });
