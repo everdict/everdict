@@ -1,7 +1,15 @@
 import { BadRequestError, type RegistryAuth, type ServiceHarnessSpec, type TopologyService } from "@everdict/contracts";
 import { flattenEnv, imageUsesRegistryHost } from "@everdict/domain";
 import { DEFAULT_BROWSER_IMAGE } from "./browser-image.js";
-import { type StoreValues, dependencyStores } from "./dependencies.js";
+import {
+  DURABLE_STORE_CONFIG,
+  type EffectiveStoreConfig,
+  type StoreValues,
+  dependencyStores,
+  resolveStoreConfig,
+  resolveStoreConfigs,
+  storeArgs,
+} from "./dependencies.js";
 import { dependencyInjectEnv } from "./inject-env.js";
 import { aliasPeerHost } from "./peer-resolver.js";
 import { sanitizeIdent } from "./store-binding.js";
@@ -107,6 +115,10 @@ export interface NomadTopologyOptions {
   // gateway etc.). Default `host-gateway` = the Docker-CLI magic keyword (the DockerDriver path); a Nomad docker driver
   // that doesn't translate that keyword can override with the concrete bridge-gateway IP (e.g. "172.17.0.1"). See gap 5.
   hostGatewayAddr?: string;
+  // Per-store effective tuning, overriding what would be resolved from `spec.dependencies`. Needed by the pool/silo
+  // builders that route a SYNTHESIZED spec through buildDependencyGroups (so the real purpose is supplied here): pool =
+  // always durable, silo = the real harness deps' resolved config. Absent → resolved from spec.dependencies (co-located).
+  storeConfigs?: Record<string, EffectiveStoreConfig>;
 }
 
 // The default host.docker.internal target — the Docker-CLI `--add-host … :host-gateway` magic keyword. Overridable per
@@ -138,10 +150,12 @@ export function topologyJobId(spec: ServiceHarnessSpec, zoneId?: string): string
 // Render shared stores (spec.dependencies[]) as Nomad task groups (one per type). Exposed via dynamic port "store" →
 // the runtime discovers the host port and wires it into the service storeEnv (K8s fixes it at build time via DNS, Nomad discovers at runtime).
 export function buildDependencyGroups(spec: ServiceHarnessSpec, opts: NomadTopologyOptions = {}): NomadTopoGroup[] {
-  return dependencyStores(spec).map(({ name, def }) => {
+  return dependencyStores(spec).map(({ store, name, def }) => {
     const config: NomadTopoTask["Config"] = { image: def.image, ports: ["store"] };
     if (opts.runtime) config.runtime = opts.runtime;
-    if (def.args) config.args = def.args;
+    // Per-role store tuning: an explicit override (pool=durable / silo=real config) else resolved from the spec's deps.
+    const args = storeArgs(store, def, opts.storeConfigs?.[store] ?? resolveStoreConfig(spec.dependencies, store));
+    if (args) config.args = args;
     return {
       Name: name,
       Count: 1,
@@ -168,13 +182,16 @@ export function buildSharedStoreJob(stores: string[], opts: NomadTopologyOptions
     dependencies: [...new Set(stores)].map((store) => ({ store, role: "shared", isolateBy: "schema" })),
     services: [],
   } as unknown as ServiceHarnessSpec;
+  // Pool stores are cross-tenant shared → always DURABLE (never eval-cache-tuned: one tenant's memory pressure must not
+  // evict another's keys, and lost persistence would drop everyone's state).
+  const storeConfigs = Object.fromEntries([...new Set(stores)].map((store) => [store, DURABLE_STORE_CONFIG]));
   return {
     Job: {
       ID: SHARED_STORE_JOB_ID,
       Type: "service",
       Namespace: opts.namespace,
       Datacenters: opts.datacenters ?? ["dc1"],
-      TaskGroups: buildDependencyGroups(spec, opts),
+      TaskGroups: buildDependencyGroups(spec, { ...opts, storeConfigs }),
     },
   };
 }
@@ -198,13 +215,16 @@ export function buildDedicatedStoreJob(
     dependencies: [...new Set(stores)].map((store) => ({ store, role: "dedicated", isolateBy: "schema" })),
     services: [],
   } as unknown as ServiceHarnessSpec;
+  // The silo deploys the SAME logical stores as the harness needs — so the tuning must follow the REAL spec's purposes
+  // (a data store stays durable), not the synth's generic deps. Resolve config from the real spec and inject it.
+  const storeConfigs = resolveStoreConfigs(spec.dependencies);
   return {
     Job: {
       ID: dedicatedStoreJobId(spec, zoneId),
       Type: "service",
       Namespace: opts.namespace,
       Datacenters: opts.datacenters ?? ["dc1"],
-      TaskGroups: buildDependencyGroups(synth, opts), // group name = everdict-store-<zone>-<store>
+      TaskGroups: buildDependencyGroups(synth, { ...opts, storeConfigs }), // group name = everdict-store-<zone>-<store>
     },
   };
 }

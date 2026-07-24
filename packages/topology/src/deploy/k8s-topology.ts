@@ -1,7 +1,14 @@
 import type { RegistryAuth, ServiceHarnessSpec, ServiceReadiness, ServiceResources } from "@everdict/contracts";
 import { dockerAuthConfigJson, imageUsesRegistryHost } from "@everdict/domain";
 import { DEFAULT_BROWSER_IMAGE } from "./browser-image.js";
-import { type StoreValues, dependencyConnEnv, dependencyStoreValues, dependencyStores } from "./dependencies.js";
+import {
+  type StoreValues,
+  dependencyConnEnv,
+  dependencyStoreValues,
+  dependencyStores,
+  resolveStoreConfig,
+  storeArgs,
+} from "./dependencies.js";
 import { dependencyInjectEnv } from "./inject-env.js";
 import { interpolateServiceEnv, staticWiringEnv } from "./nomad-topology.js";
 import { k8sPeerHost } from "./peer-resolver.js";
@@ -116,7 +123,7 @@ export function buildDependencyManifests(spec: ServiceHarnessSpec, opts: K8sTopo
                 name: store,
                 image: def.image,
                 imagePullPolicy: opts.imagePullPolicy,
-                args: def.args,
+                args: storeArgs(store, def, resolveStoreConfig(spec.dependencies, store)), // per-role tuning (plumbing→cache, data→durable)
                 env,
                 ports: [{ containerPort: def.port }],
               },

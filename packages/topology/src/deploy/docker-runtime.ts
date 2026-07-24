@@ -7,7 +7,14 @@ import {
 } from "@everdict/contracts";
 import { type CdpSocket, captureCdpDom, captureCdpScreenshot } from "../front-door/capture-cdp.js";
 import { DEFAULT_BROWSER_IMAGE } from "./browser-image.js";
-import { dependencyConnEnv, dependencyStoreValues, dependencyStores, storeName } from "./dependencies.js";
+import {
+  dependencyConnEnv,
+  dependencyStoreValues,
+  dependencyStores,
+  resolveStoreConfig,
+  storeArgs,
+  storeName,
+} from "./dependencies.js";
 import { type Docker, dockerCli } from "./docker.js";
 import { dependencyInjectEnv } from "./inject-env.js";
 import { interpolateServiceEnv, staticWiringEnv } from "./nomad-topology.js";
@@ -185,7 +192,8 @@ export class DockerTopologyRuntime implements TopologyRuntime {
         const cname = `${network}-${name}`;
         containers.push(cname);
         await this.docker.rm([cname]).catch(() => {}); // idempotent redeploy — first remove a leftover same-name container from a runner restart (avoid --name collision cascade)
-        await this.docker.run({ name: cname, image: def.image, network, alias: name, env: def.env, args: def.args });
+        const args = storeArgs(store, def, resolveStoreConfig(spec.dependencies, store)); // per-role tuning (plumbing→cache, data→durable)
+        await this.docker.run({ name: cname, image: def.image, network, alias: name, env: def.env, args });
         await this.waitStoreAccepting(store, cname); // pg_isready/redis ping — ready it first since services connect on boot.
       }
       // Service connection env: automatic connEnv (<id>-<store>:<port>). Precedence: connEnv < svc.env (service static) < storeEnv (explicit wins).

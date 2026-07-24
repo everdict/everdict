@@ -1,4 +1,4 @@
-import type { ServiceHarnessSpec } from "@everdict/contracts";
+import type { ServiceHarnessSpec, TopologyDependency } from "@everdict/contracts";
 
 // The structured coordinates of a deployed store — what dependency env injection (dependencies[].inject) renders
 // {field} templates from, and what the conventional connEnv keys are DERIVED from. Built where the endpoint is known
@@ -61,6 +61,11 @@ export const STORE_DEFS: Record<string, StoreDef> = {
   redis: {
     image: "redis:7-alpine",
     port: 6379,
+    // No static args: redis run args are COMPUTED per deployment from the resolved StoreConfig (storeArgs → redisArgs),
+    // because the right tuning depends on the store's role. A plumbing store is an eval-cache (bounded + LRU + no-persist)
+    // — its keys are the agent's ephemeral per-case state; a data store is durable (unbounded + no-evict + persist) — it
+    // holds dataset-seeded world-state a grader reads. Baking one static array here was the bug: it applied the cache
+    // policy to data stores too, which would evict/lose their ground truth. See resolveStoreConfig below.
     values: (ep) => ({ ...splitEndpoint(ep), endpoint: ep, url: `redis://${ep}` }),
     // Both REDIS_URL (de facto) + REDIS_URI (aegra / some LangGraph) — an explicit storeEnv wins if present.
     connEnv: (v) => ({ REDIS_URL: v.url, REDIS_URI: v.url }),
@@ -87,6 +92,80 @@ export const STORE_DEFS: Record<string, StoreDef> = {
     }),
   },
 };
+
+// Fully-resolved store tuning (no optionals except the memory cap) — what the runtime renders into store run args.
+export interface EffectiveStoreConfig {
+  memoryMb?: number; // memory cap in MB; undefined = unbounded
+  evictWhenFull: boolean; // at the cap: evict LRU (cache) vs reject writes (durable)
+  persistence: boolean; // survive a restart (RDB/AOF)
+}
+
+// Durable = the safe default for any store whose contents must survive: a data store's dataset-seeded world-state, and
+// every cross-tenant pool store (eviction/loss across tenants is unsafe). Unbounded + no-evict + persist.
+export const DURABLE_STORE_CONFIG: EffectiveStoreConfig = { evictWhenFull: false, persistence: true };
+// Eval-cache = the plumbing default: the warm store is long-lived but its cases are ephemeral + independent, so a
+// finished case's idle keys are LRU-reclaimed under a cap and persistence is off — removing the RDB fork that stalls
+// under VM overcommit and surfaced as control-state 500s. Plumbing keys are the agent's OWN per-case state (recreatable).
+const EVAL_CACHE_STORE_CONFIG: EffectiveStoreConfig = { memoryMb: 200, evictWhenFull: true, persistence: false };
+
+// One dependency's config = the purpose-derived default with its per-field storeConfig override applied.
+function depStoreConfig(dep: TopologyDependency): EffectiveStoreConfig {
+  const base = dep.purpose === "data" ? DURABLE_STORE_CONFIG : EVAL_CACHE_STORE_CONFIG;
+  const o = dep.storeConfig;
+  if (!o) return base;
+  return {
+    memoryMb: o.memoryMb ?? base.memoryMb,
+    evictWhenFull: o.evictWhenFull ?? base.evictWhenFull,
+    persistence: o.persistence ?? base.persistence,
+  };
+}
+
+// Effective config for the ONE deployed store of `store` type — SAFETY-MERGE across every dep that maps to it (the
+// singular-addressing model deploys one instance per type). Durable / no-evict / unbounded WINS, so a plumbing+data
+// pair coexists on one instance without ever evicting or dropping the data store's world-state. No matching dep
+// (e.g. a synth pool spec) → durable. (True PHYSICALLY-separate same-type instances with independent tuning is the
+// singular-addressing follow-up — see docs/architecture/dependency-store-roles.md.)
+export function resolveStoreConfig(deps: TopologyDependency[], store: string): EffectiveStoreConfig {
+  const matching = deps.filter((d) => d.store === store && d.isolateBy !== "external").map(depStoreConfig);
+  if (matching.length === 0) return DURABLE_STORE_CONFIG;
+  return matching.reduce((acc, c) => ({
+    memoryMb: acc.memoryMb === undefined || c.memoryMb === undefined ? undefined : Math.max(acc.memoryMb, c.memoryMb),
+    evictWhenFull: acc.evictWhenFull && c.evictWhenFull, // any no-evict role → never evict this instance
+    persistence: acc.persistence || c.persistence, // any durable role → persist this instance
+  }));
+}
+
+// All present store types' effective configs — for a runtime deploying a per-tenant silo from the REAL spec's deps.
+export function resolveStoreConfigs(deps: TopologyDependency[]): Record<string, EffectiveStoreConfig> {
+  const out: Record<string, EffectiveStoreConfig> = {};
+  for (const store of new Set(deps.map((d) => d.store))) out[store] = resolveStoreConfig(deps, store);
+  return out;
+}
+
+// redis run args from the resolved config. Empty (→ redis engine defaults = durable noeviction) when there's nothing to
+// override. A plumbing-only store yields the eval-cache args; a data/durable store yields none.
+function redisArgs(cfg: EffectiveStoreConfig): string[] {
+  const args: string[] = [];
+  if (cfg.memoryMb !== undefined)
+    args.push(
+      "--maxmemory",
+      `${cfg.memoryMb}mb`,
+      "--maxmemory-policy",
+      cfg.evictWhenFull ? "allkeys-lru" : "noeviction",
+    );
+  if (!cfg.persistence) args.push("--save", "", "--appendonly", "no");
+  return args;
+}
+
+// Store run args for a deployment: redis is config-driven (per role); other stores keep their static def.args
+// (minio "server /data"). The 3 runtimes render this instead of reading def.args directly.
+export function storeArgs(store: string, def: StoreDef, cfg: EffectiveStoreConfig): string[] | undefined {
+  if (store === "redis") {
+    const args = redisArgs(cfg);
+    return args.length > 0 ? args : undefined;
+  }
+  return def.args;
+}
 
 // Stores to deploy (one per type; declaring the same store under multiple roles still brings it up once).
 export function dependencyStores(spec: ServiceHarnessSpec): Array<{ store: string; name: string; def: StoreDef }> {
@@ -127,11 +206,14 @@ export function storeName(spec: ServiceHarnessSpec, store: string): string {
 }
 
 // Shared-store Deployment+Service for the pool model (one per cluster; fixed name everdict-shared-<store>).
-// The builder is pure — it returns only K8s manifest objects (the runtime does apply/rollout).
+// The builder is pure — it returns only K8s manifest objects (the runtime does apply/rollout). A pool store is
+// cross-tenant shared, so it is always DURABLE (never eval-cache-tuned — evicting/losing one tenant's keys under
+// another's pressure is unsafe). `configs` lets a caller override per store; absent = durable.
 export function buildSharedStoreManifests(
   stores: string[],
   ns: string,
   imagePullPolicy?: string,
+  configs?: Record<string, EffectiveStoreConfig>,
 ): Array<Record<string, unknown>> {
   const out: Array<Record<string, unknown>> = [];
   for (const store of [...new Set(stores)]) {
@@ -155,7 +237,7 @@ export function buildSharedStoreManifests(
                 name: store,
                 image: def.image,
                 imagePullPolicy,
-                args: def.args,
+                args: storeArgs(store, def, configs?.[store] ?? DURABLE_STORE_CONFIG),
                 env,
                 ports: [{ containerPort: def.port }],
               },

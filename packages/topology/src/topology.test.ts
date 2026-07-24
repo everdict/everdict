@@ -550,6 +550,36 @@ describe("provisionDependencies (co-deploy stores + auto-wire connection env)", 
     expect(pg.spec.template.spec.containers[0]?.image).toBe("postgres:16-alpine");
   });
 
+  // The principled gap-1 fix, wired end-to-end: the redis container's args are DERIVED from the store's role. A plumbing
+  // redis (SPEC's redis) renders the eval-cache; a data redis renders durable (no cache args). Proves purpose→config
+  // reaches the actual manifest, not just the pure resolver.
+  it("K8s: a plumbing redis renders the eval-cache args; a data redis renders durable (no eviction/persist-off)", () => {
+    const redisArgs = (spec: ServiceHarnessSpec): string[] | undefined =>
+      (
+        buildK8sManifests(spec, { namespace: "ns", provisionDependencies: true }).find(
+          (m) => m.kind === "Deployment" && m.metadata.name === `${spec.id}-redis`,
+        ) as { spec: { template: { spec: { containers: Array<{ args?: string[] }> } } } }
+      ).spec.template.spec.containers[0]?.args;
+
+    // SPEC's redis is plumbing (action-stream) → eval-cache.
+    expect(redisArgs(SPEC)).toEqual([
+      "--maxmemory",
+      "200mb",
+      "--maxmemory-policy",
+      "allkeys-lru",
+      "--save",
+      "",
+      "--appendonly",
+      "no",
+    ]);
+    // Flip it to a data store (world-state a grader reads) → durable, so eviction never corrupts the seeded ground truth.
+    const dataRedis: ServiceHarnessSpec = {
+      ...SPEC,
+      dependencies: [{ store: "redis", role: "world", purpose: "data", isolateBy: "key-prefix" }],
+    };
+    expect(redisArgs(dataRedis)).toBeUndefined();
+  });
+
   it("K8s: injects the service static env + precedence (connEnv < svc.env < storeEnv)", () => {
     const spec: ServiceHarnessSpec = {
       kind: "service",
@@ -1263,6 +1293,135 @@ describe("ServiceTopologyBackend (orchestrator-agnostic, mock runtime)", () => {
     const result = await backend.dispatch(job);
     expect(fetchedUrl).toBe("http://sink/runs/fixed/obs.json"); // {run_id} interpolated with runId
     expect(result.snapshot).toEqual(fromSink); // retrieved from the sink, not a browser pull
+  });
+
+  // Regression (controlled-coordinate correlate, gap 2): frontDoor.contextId supplies a stable session/target coordinate
+  // (interpolated from the per-run vocabulary everdict injects — the agent can't overwrite it), and the trace is pulled by
+  // THAT, not the run id. Pre-fix the pull always used outcome.traceRef (the run id / the id the agent may have overwritten).
+  it("frontDoor.contextId: the trace is pulled by the injected controlled coordinate, not the run id", async () => {
+    let pulledRef: string | undefined;
+    const runtime: TopologyRuntime = {
+      id: "mock",
+      async ensureTopology() {
+        return { endpoints: { "agent-server": "http://agent-server:8000" } };
+      },
+      async provisionBrowserEnv() {
+        return {
+          wiring: { target_cdp_url: "ws://b" },
+          async snapshot() {
+            return { kind: "browser", url: "https://x", dom: "<html/>", console: [] } satisfies BrowserSnapshot;
+          },
+          async dispose() {},
+        };
+      },
+    };
+    const traceSource: TraceSource = {
+      async fetch(ref) {
+        pulledRef = ref;
+        return [];
+      },
+    };
+    // contextId = the thread/session id everdict injects into the agent (run-<runId>) — the coordinate the agent honors.
+    const contextSpec: ServiceHarnessSpec = {
+      ...SPEC,
+      frontDoor: { ...SPEC.frontDoor, contextId: "{{thread_id}}" },
+    };
+    const backend = new ServiceTopologyBackend({
+      runtime,
+      traceSource,
+      specFor: () => contextSpec,
+      submit: async () => {},
+      newRunId: () => "fixed",
+    });
+    const job: CaseJob = {
+      harness: { id: "browser-use-langgraph", version: "1.0.0" },
+      evalCase: {
+        id: "c1",
+        env: { kind: "browser", startUrl: "https://x" },
+        task: "t",
+        graders: [],
+        timeoutSec: 60,
+        tags: [],
+      },
+    };
+
+    await backend.dispatch(job);
+    expect(pulledRef).toBe(keysFor("fixed").threadId); // = "run-fixed", the injected session coordinate — NOT the run id "fixed"
+    expect(pulledRef).not.toBe("fixed");
+  });
+
+  // Regression (trace-delivery, gap 3): a containerless service target's agent offloaded its observation to its OWN
+  // artifact store and referenced it from the trace; the trace source resolves those refs into evidence (fetchDetailed).
+  // trace-delivery synthesizes the browser snapshot from that evidence. Pre-fix no delivery mode covered this — reference
+  // needs an everdict target, sentinel/egress an everdict-held stage, so the offloaded observation was invisible.
+  it("delivery trace: synthesizes the snapshot from the trace's resolved evidence (the harness's offloaded artifacts)", async () => {
+    const runtime: TopologyRuntime = {
+      id: "mock",
+      async ensureTopology() {
+        return { endpoints: { "agent-server": "http://agent-server:8000" } };
+      },
+      // Containerless target (the agent owns its own browser/session) — target.acquire=service never provisions a browser.
+      async provisionBrowserEnv() {
+        throw new Error("provisionBrowserEnv must not be called for a service-acquired (containerless) target");
+      },
+    };
+    // fetchDetailed resolves the in-trace artifact refs to real bytes (ArtifactStore.get) → evidence.
+    const traceSource: TraceSource = {
+      async fetch() {
+        return [];
+      },
+      async fetchDetailed() {
+        return {
+          events: [{ t: 0, kind: "message", role: "assistant", text: "done" }],
+          evidence: { dom: "<offloaded-page/>", screenshot: "aGVsbG8=", screenshotMediaType: "image/png" },
+        };
+      },
+    };
+    const traceDeliverySpec: ServiceHarnessSpec = {
+      ...SPEC,
+      target: {
+        kind: "browser",
+        engine: "chromium",
+        lifecycle: "per-case-instance",
+        observe: ["dom"],
+        acquire: {
+          mode: "service",
+          service: "agent-server",
+          open: "POST /sessions",
+          coordinates: { session_id: "id" },
+        },
+        delivery: { mode: "trace" },
+      },
+    };
+    const backend = new ServiceTopologyBackend({
+      runtime,
+      traceSource,
+      specFor: () => traceDeliverySpec,
+      submit: async () => ({ id: "sess-1" }),
+      acquireRequest: async () => ({ id: "sess-1" }),
+      newRunId: () => "fixed",
+    });
+    const job: CaseJob = {
+      harness: { id: "browser-use-langgraph", version: "1.0.0" },
+      evalCase: {
+        id: "c1",
+        env: { kind: "browser", startUrl: "https://x" },
+        task: "t",
+        graders: [],
+        timeoutSec: 60,
+        tags: [],
+      },
+    };
+
+    const result = await backend.dispatch(job);
+    // The snapshot came from the trace evidence (the agent's offloaded DOM+screenshot), not a browser pull (there is none).
+    expect(result.snapshot).toEqual({
+      kind: "browser",
+      url: "",
+      dom: "<offloaded-page/>",
+      screenshot: "aGVsbG8=",
+      console: [],
+    });
   });
 
   it("a trace-source failure does not kill the run — record it as an error event and proceed with snapshot + grading", async () => {
