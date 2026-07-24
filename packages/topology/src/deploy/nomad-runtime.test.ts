@@ -102,7 +102,7 @@ describe("NomadTopologyRuntime — pool store isolation", () => {
   });
 
   it("silo: deploys the dedicated store job + injects connEnv into the service with the discovered host:port (no DDL)", async () => {
-    const { registered, execCalls, http } = fakes();
+    const { registered, execCalls, http, exec } = fakes();
     const SILO_ZONE: TrustZone = {
       id: "acme",
       isolationRuntime: "runsc",
@@ -134,10 +134,13 @@ describe("NomadTopologyRuntime — pool store isolation", () => {
         return http.request(method, path, body);
       },
     };
-    const rt = new NomadTopologyRuntime({ addr: "http://nomad", http: http2, pollIntervalMs: 1, maxPolls: 5 });
+    const rt = new NomadTopologyRuntime({ addr: "http://nomad", http: http2, exec, pollIntervalMs: 1, maxPolls: 5 });
     await rt.ensureTopology(SPEC, SILO_ZONE);
     // deploys the dedicated store job (zone-suffixed).
     expect(registered.some((j) => j.Job.ID === "everdict-store-aegra-acme")).toBe(true);
+    // silo waits for the dedicated store to ACCEPT connections before the services connect (parity with pool + Docker;
+    // gap: the silo path used to wait only for the alloc to be running, so a service could connect before initdb finished).
+    expect(execCalls.some((c) => c.cmd === "pg_isready")).toBe(true);
     // silo has no per-tenant DDL (the difference from pool).
     expect(execCalls.some((c) => c.cmd === "psql")).toBe(false);
     // DATABASE_URL in the service env uses the discovered host:port (10.1.2.3:41999) (dedicated instance, default creds).

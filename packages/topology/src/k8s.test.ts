@@ -307,6 +307,16 @@ describe("K8sTopologyRuntime", () => {
     ).toBe(true);
   });
 
+  it("silo deploy: waits for the dedicated store to ACCEPT connections before the services (parity with pool + Docker)", async () => {
+    const { kubectl, calls } = fakeKubectl();
+    const rt = new K8sTopologyRuntime({ kubectl, fetchImpl: okFetch, pollIntervalMs: 1, provisionDependencies: true });
+    await rt.ensureTopology(SPEC_DATA);
+    // rollout Ready ≠ accepting — the silo path now probes pg_isready against the dedicated store pod before the
+    // services connect (pre-fix it waited only for rollout Ready → a service could connect before initdb finished).
+    expect(calls.some((c) => c.startsWith("podFor:") && c.includes("app=bu-postgres"))).toBe(true);
+    expect(calls.some((c) => c.startsWith("exec:") && c.includes("pg_isready"))).toBe(true);
+  });
+
   it("readStoreState: reads the schema slice via psql in the store pod and returns stdout (P2, silo)", async () => {
     const { kubectl, calls } = fakeKubectl("1|alice\n");
     const rt = new K8sTopologyRuntime({ kubectl, fetchImpl: okFetch, pollIntervalMs: 1, provisionDependencies: true });

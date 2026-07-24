@@ -147,9 +147,14 @@ export class K8sTopologyRuntime implements TopologyRuntime {
     });
     await this.kubectl.apply(manifests);
 
-    // silo: bring the dedicated store to Ready before the services (they connect on boot). No port-forward needed thanks to in-cluster DNS.
+    // silo: bring the dedicated store to Ready AND accepting before the services (they connect on boot). rollout Ready
+    // ≠ accepting connections (initdb etc.) — wait for both, parity with the pool path + Docker (closes the silo
+    // initial-connection race). No port-forward needed thanks to in-cluster DNS.
     if (isSilo) {
-      for (const { name } of dependencyStores(spec)) await this.kubectl.rolloutStatus(name, ns, readySec);
+      for (const { store, name } of dependencyStores(spec)) {
+        await this.kubectl.rolloutStatus(name, ns, readySec);
+        await this.waitStoreAccepting(store, ns, name);
+      }
     }
 
     const endpoints: Record<string, string> = {};
@@ -210,13 +215,15 @@ export class K8sTopologyRuntime implements TopologyRuntime {
     for (const s of missing) {
       await this.kubectl.rolloutStatus(`everdict-shared-${s}`, poolNs, readySec);
       // rollout Ready ≠ accepting connections (postgres initdb etc. — no readiness probe). Wait until it actually accepts.
-      await this.waitStoreAccepting(s, poolNs);
+      await this.waitStoreAccepting(s, poolNs, `everdict-shared-${s}`);
       this.sharedStoresReady.add(s);
     }
   }
 
-  // Poll until the store actually accepts connections (pg_isready / redis-cli ping). Called before DDL/ACL.
-  private async waitStoreAccepting(store: string, poolNs: string): Promise<void> {
+  // Poll until the store actually accepts connections (pg_isready / redis-cli ping). Called on the pool AND silo paths
+  // (parity with Docker). `ns` + `appLabel` locate the store pod: pool = poolNs + everdict-shared-<store>, silo = the
+  // zone ns + the dedicated store deployment name.
+  private async waitStoreAccepting(store: string, ns: string, appLabel: string): Promise<void> {
     const probe =
       store === "postgres"
         ? ["pg_isready", "-U", "everdict"]
@@ -230,15 +237,15 @@ export class K8sTopologyRuntime implements TopologyRuntime {
     const steps = Math.max(1, Math.floor((this.opts.readyTimeoutMs ?? 60_000) / interval));
     for (let i = 0; i < steps; i++) {
       try {
-        const pod = await this.kubectl.podFor(`app=everdict-shared-${store}`, poolNs);
-        await this.kubectl.exec(pod, poolNs, probe);
+        const pod = await this.kubectl.podFor(`app=${appLabel}`, ns);
+        await this.kubectl.exec(pod, ns, probe);
         return;
       } catch {
         // not accepting yet → retry
       }
       await new Promise((r) => setTimeout(r, interval));
     }
-    throw new UpstreamError("UPSTREAM_ERROR", { store }, "Timed out waiting for the shared store to become ready");
+    throw new UpstreamError("UPSTREAM_ERROR", { store }, "Timed out waiting for the store to become ready");
   }
 
   // Resolve WHERE a store's per-case slice lives — the SAME decision the deploy made (zone → pool/silo/external; no zone

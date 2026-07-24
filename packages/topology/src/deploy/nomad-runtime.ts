@@ -292,14 +292,14 @@ export class NomadTopologyRuntime implements TopologyRuntime {
     const env: Record<string, string> = {};
     const values: Partial<Record<string, StoreValues>> = {};
     for (const store of stores) {
-      const alloc = await this.waitForGroupRunning(
-        dedicatedStoreJobId(spec, zone.id),
-        dedicatedStoreGroup(zone.id, store),
-        ns,
-      );
+      const group = dedicatedStoreGroup(zone.id, store); // group == task name for a dedicated store
+      const alloc = await this.waitForGroupRunning(dedicatedStoreJobId(spec, zone.id), group, ns);
       const p = resolvePort(alloc, "store");
       if (!p)
         throw new UpstreamError("UPSTREAM_ERROR", { store }, "Could not find the dedicated store port in the alloc.");
+      // Rollout running ≠ accepting connections (initdb etc.) — wait until the dedicated store actually accepts before
+      // the services connect (parity with the pool path + Docker; closes the silo initial-connection race).
+      if (alloc.ID) await this.waitStoreAccepting(store, { allocId: alloc.ID, task: group, ns });
       const def = STORE_DEFS[store];
       if (!def) continue;
       const v = def.values(`${p.hostIp}:${p.port}`);
@@ -322,15 +322,17 @@ export class NomadTopologyRuntime implements TopologyRuntime {
         throw new UpstreamError("UPSTREAM_ERROR", { store: s }, "Could not find the shared store port in the alloc.");
       }
       const rec = { hostPort: `${p.hostIp}:${p.port}`, allocId: alloc.ID, task };
-      await this.waitStoreAccepting(s, rec);
+      await this.waitStoreAccepting(s, { ...rec, ns });
       this.sharedStores.set(s, rec);
       // Shared-store intention: only mesh services can reach it (tenant isolation = DB creds). Enforcement needs a Connect-enabled job.
       if (this.opts.consul) await this.opts.consul.applyIntention(buildSharedStoreIntention(s));
     }
   }
 
-  // Poll until the store actually accepts connections (rollout running ≠ accepting; postgres initdb etc.). Called before DDL.
-  private async waitStoreAccepting(store: string, rec: { allocId: string; task: string }): Promise<void> {
+  // Poll until the store actually accepts connections (rollout running ≠ accepting; postgres initdb etc.). Called on the
+  // pool AND silo paths (parity with Docker) so a service never connects before its store is up. `ns` = the store's
+  // namespace (pool → poolNamespace, silo → the zone ns).
+  private async waitStoreAccepting(store: string, rec: { allocId: string; task: string; ns?: string }): Promise<void> {
     const probe =
       store === "postgres"
         ? ["pg_isready", "-U", "everdict"]
@@ -344,14 +346,14 @@ export class NomadTopologyRuntime implements TopologyRuntime {
     const steps = this.opts.maxPolls ?? 60;
     for (let i = 0; i < steps; i++) {
       try {
-        await this.execImpl.exec(rec.allocId, rec.task, probe, { namespace: this.opts.poolNamespace });
+        await this.execImpl.exec(rec.allocId, rec.task, probe, { namespace: rec.ns });
         return;
       } catch {
         // not accepting yet → retry
       }
       await new Promise((r) => setTimeout(r, interval));
     }
-    throw new UpstreamError("UPSTREAM_ERROR", { store }, "Timed out waiting for the shared store to become ready");
+    throw new UpstreamError("UPSTREAM_ERROR", { store }, "Timed out waiting for the store to become ready");
   }
 
   // Resolve WHERE a store's per-case slice lives + which alloc/task to exec in — the same decision the deploy made.
