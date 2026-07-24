@@ -432,6 +432,67 @@ export class ScorecardBatchService {
   // budget admit → child run → secret resolve → executeCase (CP-side transient retry by failure class) → settle →
   // per-case judges → progress step. Kept deliberately parallel to track() — the two drivers share every primitive
   // (executeCase, classifyFailure, applyJudges, billing), only the loop ownership differs.
+  // Run ONE case through the full resilience machinery — spillover across the shard list (the shared breaker skips
+  // known-outage runtimes) + in-batch OOM auto-boost + tail speculation — returning the result and the runtime that
+  // ACTUALLY ran it. Shared by BOTH batch drivers: the in-process `track` loop and the Temporal per-case activity
+  // `runBatchCase`, which previously mirrored this ~40-line block "by construction". The site-specific concerns (how a
+  // step is appended, whether a child run flips to running) are injected callbacks; the common orchestration events
+  // (spillover / oom_escalated) fire here so both drivers report them identically.
+  private runResilientCase(
+    job: CaseJob,
+    cfg: {
+      owner: string; // executeCase requires it (private-repo token resolution); both drivers have a defined owner
+      targets: string[];
+      tenant: string;
+      secretMap?: HarnessSecretMaps;
+      boostMb?: number;
+      oomAutoBoost?: boolean;
+      speculation?: SpeculationController;
+      onWaiting: (reason: string) => void;
+      onStarted?: () => void;
+      onStep: (message: string, caseId: string) => void;
+    },
+  ): Promise<{ result: CaseResult; target?: string }> {
+    // Resolve env secret references just before dispatch; a missing referenced secret throws → the case is isolated.
+    const resolved =
+      cfg.secretMap && job.harnessSpec
+        ? { ...job, harnessSpec: resolveHarnessSecrets(job.harnessSpec, cfg.secretMap) }
+        : job;
+    // OOM escalation — a boosted retry re-runs a memory-killed case with the higher memoryMb on the job only.
+    const jobToRun =
+      cfg.boostMb !== undefined && resolved.harnessSpec?.kind === "command"
+        ? {
+            ...resolved,
+            harnessSpec: {
+              ...resolved.harnessSpec,
+              resources: { ...resolved.harnessSpec.resources, memoryMb: cfg.boostMb },
+            },
+          }
+        : resolved;
+    const startOpts: DispatchOptions = {
+      onWaiting: cfg.onWaiting,
+      ...(cfg.onStarted ? { onStarted: cfg.onStarted } : {}),
+    };
+    // Spillover wraps executeCase; tail speculation wraps that (a straggler gets a duplicate, first result wins).
+    const exec = (j: CaseJob): Promise<{ result: CaseResult; target?: string }> =>
+      executeWithSpillover((jj) => executeCase(this.deps, cfg.owner, jj, startOpts), j, {
+        targets: cfg.targets,
+        tenant: cfg.tenant,
+        breaker: this.breaker,
+        onSpill: (caseId, from, to, code) => {
+          this.deps.onOrchestrationEvent?.({ kind: "spillover", from, to, code });
+          cfg.onStep(`${caseId}: runtime spillover ${from} → ${to} (${code})`, caseId);
+        },
+      });
+    return executeWithOomBoost((j) => (cfg.speculation ? cfg.speculation.run(exec, j) : exec(j)), jobToRun, {
+      enabled: cfg.oomAutoBoost ?? false,
+      onBoost: (cid, fromMb, toMb) => {
+        this.deps.onOrchestrationEvent?.({ kind: "oom_escalated", memoryMb: toMb });
+        cfg.onStep(`${cid}: OOM auto-boost ${fromMb} → ${toMb}Mb (in-batch retry)`, cid);
+      },
+    });
+  }
+
   async runBatchCase(id: string, caseId: string): Promise<{ settled: boolean; skipped?: boolean }> {
     const ctx = this.batchContexts.get(id) ?? (await this.buildBatchContext(id));
     // Superseded mid-flight (a newer fire reclaimed this batch) — don't spend more compute/LLM on it. The workflow
@@ -472,64 +533,20 @@ export class ScorecardBatchService {
     let ranOn: string | undefined; // the runtime that actually ran the case (spillover provenance)
     for (let attempt = 0; ; attempt++) {
       try {
-        const resolved =
-          ctx.secretMap && baseJob.harnessSpec
-            ? { ...baseJob, harnessSpec: resolveHarnessSecrets(baseJob.harnessSpec, ctx.secretMap) }
-            : baseJob;
-        // OOM escalation parity with the in-process loop — a Temporal-owned retry applies its boost the same way.
-        const boostMb = ctx.memoryBoostMb?.[caseId];
-        const jobToRun =
-          boostMb !== undefined && resolved.harnessSpec?.kind === "command"
-            ? {
-                ...resolved,
-                harnessSpec: {
-                  ...resolved.harnessSpec,
-                  resources: { ...resolved.harnessSpec.resources, memoryMb: boostMb },
-                },
-              }
-            : resolved;
-        // Spillover: same failover as the in-process loop — a retryable infra failure moves the case to the
-        // next healthy runtime of the shard list before the transient retry burns attempts on a dead cluster.
-        // Tail speculation on top (same semantics as the in-process loop): straggler duplicate, first result wins.
         const childId = child?.id;
-        // Parity with track(): surface a "no online runner" placement warning immediately (one step per case — the
-        // Temporal path fans one activity per case, so there's no shared in-memory dedupe across cases here).
-        const startOpts: DispatchOptions = {
+        const outcome = await this.runResilientCase(baseJob, {
+          owner: ctx.owner,
+          targets: ctx.targets,
+          tenant: ctx.tenant,
+          secretMap: ctx.secretMap,
+          boostMb: ctx.memoryBoostMb?.[caseId],
+          oomAutoBoost: ctx.oomAutoBoost,
+          speculation: ctx.speculation,
           onWaiting: (reason) => void this.appendBatchStep(id, { phase: "dispatch", status: "info", message: reason }),
           ...(childId && runStore ? { onStarted: () => void this.markChildRunning(childId) } : {}),
-        };
-        const exec = (j: CaseJob): Promise<{ result: CaseResult; target?: string }> =>
-          executeWithSpillover((jj) => executeCase(this.deps, ctx.owner, jj, startOpts), j, {
-            targets: ctx.targets,
-            tenant: ctx.tenant,
-            breaker: this.breaker,
-            onSpill: (cid, from, to, code) => {
-              this.deps.onOrchestrationEvent?.({ kind: "spillover", from, to, code });
-              void this.appendBatchStep(id, {
-                phase: "case",
-                status: "info",
-                message: `${cid}: runtime spillover ${from} → ${to} (${code})`,
-                caseId: cid,
-              });
-            },
-          });
-        // In-batch OOM auto-boost — same opt-in doubling as the in-process loop (parity by construction).
-        const outcome = await executeWithOomBoost(
-          (j) => (ctx.speculation ? ctx.speculation.run(exec, j) : exec(j)),
-          jobToRun,
-          {
-            enabled: ctx.oomAutoBoost ?? false,
-            onBoost: (cid, fromMb, toMb) => {
-              this.deps.onOrchestrationEvent?.({ kind: "oom_escalated", memoryMb: toMb });
-              void this.appendBatchStep(id, {
-                phase: "case",
-                status: "info",
-                message: `${cid}: OOM auto-boost ${fromMb} → ${toMb}Mb (in-batch retry)`,
-                caseId: cid,
-              });
-            },
-          },
-        );
+          onStep: (message, cid) =>
+            void this.appendBatchStep(id, { phase: "case", status: "info", message, caseId: cid }),
+        });
         result = outcome.result;
         ranOn = outcome.target;
         break;
@@ -1008,62 +1025,22 @@ export class ScorecardBatchService {
       }
       try {
         // Resolve env secret references (just before dispatch). If a referenced secret is missing, resolveHarnessSecrets throws → this case is isolated as a failure.
-        const resolved =
-          secretMap && enriched.harnessSpec
-            ? { ...enriched, harnessSpec: resolveHarnessSecrets(enriched.harnessSpec, secretMap) }
-            : enriched;
-        // OOM escalation — a retry re-runs a memory-killed case with the boosted memoryMb on the job only.
-        const boostMb = opts.memoryBoostMb?.[job.evalCase.id];
-        const jobToRun =
-          boostMb !== undefined && resolved.harnessSpec?.kind === "command"
-            ? {
-                ...resolved,
-                harnessSpec: {
-                  ...resolved.harnessSpec,
-                  resources: { ...resolved.harnessSpec.resources, memoryMb: boostMb },
-                },
-              }
-            : resolved;
-        // Spillover: a retryable infra failure on the assigned runtime moves the case to the next healthy runtime
-        // of the shard list; the shared breaker skips runtimes with a known outage entirely.
-        // Tail speculation on top: at the batch tail a straggler gets a duplicate on another healthy runtime and
-        // the first result wins (the duplicate runs through the same spillover-wrapped executor).
-        // Flip the child run queued→running the moment a backend/runner actually starts this case (not at park) — so a
-        // fan-out parked behind one runner reads as "waiting" until picked up. Best-effort; markChildRunning guards it.
         const childId = child?.id;
-        // onWaiting is ALWAYS wired (a scorecard always has a step timeline, deduped per batch); onStarted only when
-        // there's a child run to flip queued→running. So a self-hosted case whose runner pool is offline surfaces the
-        // reason even when run-record backing is off.
-        const startOpts: DispatchOptions = {
+        const { result, target: ranOn } = await this.runResilientCase(enriched, {
+          owner,
+          targets,
+          tenant,
+          secretMap,
+          boostMb: opts.memoryBoostMb?.[job.evalCase.id],
+          oomAutoBoost: opts.oomAutoBoost,
+          speculation,
           onWaiting,
           ...(childId && runStore ? { onStarted: () => void this.markChildRunning(childId) } : {}),
-        };
-        const exec = (j: CaseJob): Promise<{ result: CaseResult; target?: string }> =>
-          executeWithSpillover((jj) => executeCase(this.deps, owner, jj, startOpts), j, {
-            targets,
-            tenant,
-            breaker: this.breaker,
-            onSpill: (caseId, from, to, code) => {
-              this.deps.onOrchestrationEvent?.({ kind: "spillover", from, to, code });
-              pushStep("case", "info", `${caseId}: runtime spillover ${from} → ${to} (${code})`, caseId);
-              void flushSteps();
-            },
-          });
-        // In-batch OOM auto-boost (opt-in): an OOM_KILLED throw re-dispatches this case with doubled job-only
-        // memory up to the cap — no retry-failed round-trip. Wraps speculation/spillover so a boosted attempt
-        // rides the same failover machinery.
-        const { result, target: ranOn } = await executeWithOomBoost(
-          (j) => (speculation ? speculation.run(exec, j) : exec(j)),
-          jobToRun,
-          {
-            enabled: opts.oomAutoBoost ?? false,
-            onBoost: (cid, fromMb, toMb) => {
-              this.deps.onOrchestrationEvent?.({ kind: "oom_escalated", memoryMb: toMb });
-              pushStep("case", "info", `${cid}: OOM auto-boost ${fromMb} → ${toMb}Mb (in-batch retry)`, cid);
-              void flushSteps();
-            },
+          onStep: (message, cid) => {
+            pushStep("case", "info", message, cid);
+            void flushSteps();
           },
-        );
+        });
         // Cost attribution: managed=batch tenant · workspace-shared runner=that workspace (team resource) · personal runner=own-pays. Same as a single run.
         const bill = billingTenant(result, tenant);
         if (bill) this.deps.budget?.settle(bill, costOf(result));
