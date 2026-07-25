@@ -1,0 +1,311 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Everdict — Know if your agents actually work</title>
+</head>
+<body>
+<title>Everdict — Know if your agents actually work</title>
+<style>
+  :root{
+    --bg:#090a0d; --bg-1:#0f1116; --bg-2:#14171d; --bg-3:#1a1e26;
+    --line:rgba(255,255,255,.08); --line-2:rgba(255,255,255,.12);
+    --tx:#eceef2; --tx-mut:#9a9ea8; --tx-faint:#686c76;
+    --ac:#7c85e8; --ac-br:#9aa2f4; --ac-dim:rgba(124,133,232,.12); --ac-line:rgba(124,133,232,.32);
+    --pass:#4bc48c; --pass-dim:rgba(75,196,140,.13); --fail:#e5796d; --fail-dim:rgba(229,121,109,.13); --warn:#e0b054;
+    --sans:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    --mono:ui-monospace,"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--bg);color:var(--tx);font-family:var(--sans);font-size:16px;line-height:1.6;-webkit-font-smoothing:antialiased;overflow-x:hidden}
+  a{color:inherit;text-decoration:none}
+  .wrap{max-width:1120px;margin:0 auto;padding:0 24px}
+  h1,h2,h3{margin:0;letter-spacing:-.02em;text-wrap:balance}
+  .mono{font-family:var(--mono)} .mut{color:var(--tx-mut)} .faint{color:var(--tx-faint)}
+  .eyebrow{font-family:var(--mono);font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:var(--ac)}
+  .tnum{font-variant-numeric:tabular-nums}
+
+  /* nav */
+  nav{position:sticky;top:0;z-index:50;backdrop-filter:blur(12px);background:rgba(9,10,13,.72);border-bottom:1px solid var(--line)}
+  nav .inner{display:flex;align-items:center;justify-content:space-between;height:60px}
+  .logo{display:flex;align-items:center;gap:10px;font-weight:640;letter-spacing:-.01em}
+  .mark{width:24px;height:24px;border-radius:6px;background:linear-gradient(150deg,#5e6ad2,#8b93f0);display:grid;place-items:center;font-family:var(--mono);font-weight:700;font-size:13px;color:#090a0d;box-shadow:0 0 0 1px var(--ac-line)}
+  .navlinks{display:flex;align-items:center;gap:24px;font-size:14px;color:var(--tx-mut)}
+  .navlinks a:hover{color:var(--tx)}
+  .btn{font-family:var(--mono);font-size:12.5px;font-weight:600;padding:8px 15px;border-radius:8px;display:inline-block;transition:transform .12s ease}
+  .btn:hover{transform:translateY(-1px)}
+  .btn.p{background:var(--ac);color:#090a0d} .btn.p:hover{background:var(--ac-br)}
+  .btn.s{border:1px solid var(--line-2);color:var(--tx)} .btn.s:hover{border-color:var(--ac-line);background:var(--ac-dim)}
+  @media(max-width:720px){.navlinks .hidesm{display:none}}
+
+  /* hero */
+  .hero{position:relative;padding:76px 0 40px}
+  .hero::before{content:"";position:absolute;inset:0;background:radial-gradient(760px 380px at 22% 40px,rgba(124,133,232,.16),transparent 66%);pointer-events:none}
+  .hero .grid{position:relative;display:grid;grid-template-columns:1fr;gap:44px;align-items:center}
+  @media(min-width:940px){.hero .grid{grid-template-columns:1.02fr .98fr;gap:52px}}
+  .hero h1{font-size:clamp(36px,5.4vw,58px);font-weight:700;line-height:1.02}
+  .hero h1 .em{background:linear-gradient(96deg,#a9b0ff,#7c85e8);-webkit-background-clip:text;background-clip:text;color:transparent}
+  .hero .sub{margin-top:20px;font-size:19px;color:var(--tx-mut);max-width:34ch}
+  .hero .cta{margin-top:28px;display:flex;flex-wrap:wrap;gap:12px;align-items:center}
+  .hero .cta .np{font-family:var(--mono);font-size:12.5px;color:var(--tx-faint)}
+  .trust{margin-top:26px;display:flex;flex-wrap:wrap;gap:8px 18px;font-family:var(--mono);font-size:12px;color:var(--tx-faint)}
+  .trust b{color:var(--tx-mut);font-weight:500}
+
+  /* scorecard hero visual */
+  .sc{border:1px solid var(--line-2);border-radius:16px;background:linear-gradient(180deg,#13161c,#0e1014);box-shadow:0 24px 70px -24px rgba(0,0,0,.8),0 0 0 1px rgba(124,133,232,.06);overflow:hidden}
+  .sc .bar{display:flex;align-items:center;gap:7px;padding:11px 14px;border-bottom:1px solid var(--line);background:rgba(255,255,255,.015)}
+  .sc .dot{width:10px;height:10px;border-radius:50%;background:#2a2e37}
+  .sc .bar .t{margin-left:8px;font-family:var(--mono);font-size:11.5px;color:var(--tx-faint)}
+  .sc .body{padding:16px 18px 18px}
+  .sc .schead{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:14px}
+  .sc .schead .h{font-size:13.5px;font-weight:600}
+  .sc .schead .v{font-family:var(--mono);font-size:11px;color:var(--tx-faint)}
+  .row{display:grid;grid-template-columns:1fr auto auto;gap:10px;align-items:center;padding:9px 0;border-top:1px solid var(--line)}
+  .row .name{font-family:var(--mono);font-size:12.5px;color:var(--tx-mut)}
+  .row .name b{color:var(--tx);font-weight:600}
+  .row .barw{position:relative;width:96px;height:6px;border-radius:4px;background:var(--bg-3);overflow:hidden}
+  .row .fill{position:absolute;left:0;top:0;bottom:0;border-radius:4px;background:linear-gradient(90deg,#5e6ad2,#8b93f0);width:0;transition:width 1s cubic-bezier(.4,0,.2,1)}
+  .row .fill.best{background:linear-gradient(90deg,#3fb37f,#5bd39a)}
+  .row .fill.low{background:linear-gradient(90deg,#c9634f,#e5796d)}
+  .score{font-family:var(--mono);font-size:14px;font-weight:600;color:var(--tx);min-width:48px;text-align:right}
+  .row.top .score{color:var(--pass)}
+  .verdict{margin-top:15px;display:flex;align-items:center;gap:11px;padding:11px 13px;border-radius:10px;border:1px solid var(--fail-dim);background:var(--fail-dim)}
+  .verdict .tag{font-family:var(--mono);font-size:10.5px;font-weight:700;letter-spacing:.05em;padding:3px 8px;border-radius:5px;background:var(--fail);color:#0b0b0b}
+  .verdict .msg{font-size:12.5px;color:var(--tx-mut)} .verdict .msg b{color:var(--tx)}
+  .verdict.pass{border-color:var(--pass-dim);background:var(--pass-dim)}
+  .verdict.pass .tag{background:var(--pass)}
+
+  /* section scaffold */
+  section{padding:64px 0} .band{border-top:1px solid var(--line)}
+  .sh{text-align:center;max-width:60ch;margin:0 auto 40px}
+  .sh h2{font-size:clamp(26px,3.4vw,34px);font-weight:680;line-height:1.1}
+  .sh p{margin:13px 0 0;color:var(--tx-mut);font-size:16.5px}
+
+  /* pillars */
+  .pillars{display:grid;grid-template-columns:1fr;gap:16px}
+  @media(min-width:620px){.pillars{grid-template-columns:1fr 1fr}}
+  @media(min-width:980px){.pillars{grid-template-columns:repeat(4,1fr)}}
+  .pl{border:1px solid var(--line);border-radius:14px;background:linear-gradient(180deg,var(--bg-2),var(--bg-1));padding:22px;transition:border-color .15s,transform .15s}
+  .pl:hover{border-color:var(--ac-line);transform:translateY(-2px)}
+  .pl .ic{width:34px;height:34px;border-radius:9px;background:var(--ac-dim);border:1px solid var(--ac-line);display:grid;place-items:center;margin-bottom:14px;color:var(--ac-br)}
+  .pl h3{font-size:16.5px;font-weight:640;margin-bottom:7px}
+  .pl p{margin:0;font-size:14px;color:var(--tx-mut);line-height:1.55}
+  .pl code{font-family:var(--mono);font-size:12px;color:var(--ac-br);background:var(--ac-dim);padding:1px 5px;border-radius:4px}
+
+  /* how it works */
+  .steps{display:grid;grid-template-columns:1fr;gap:16px;counter-reset:s}
+  @media(min-width:820px){.steps{grid-template-columns:repeat(3,1fr)}}
+  .step{position:relative;border:1px solid var(--line);border-radius:14px;background:var(--bg-1);padding:22px 22px 24px}
+  .step .n{font-family:var(--mono);font-size:12px;color:var(--ac);border:1px solid var(--ac-line);background:var(--ac-dim);width:26px;height:26px;border-radius:7px;display:grid;place-items:center;margin-bottom:13px}
+  .step h3{font-size:16px;font-weight:620;margin-bottom:6px}
+  .step p{margin:0;font-size:14px;color:var(--tx-mut);line-height:1.55}
+  .step p code{font-family:var(--mono);font-size:12.5px;color:var(--tx)}
+
+  /* code block */
+  .codewrap{max-width:760px;margin:34px auto 0;border:1px solid var(--line-2);border-radius:13px;background:#0d0f13;overflow:hidden}
+  .codewrap .tabs{display:flex;gap:2px;padding:9px 12px 0;border-bottom:1px solid var(--line);font-family:var(--mono);font-size:12px}
+  .codewrap .tab{padding:6px 12px;color:var(--tx-faint);border-radius:7px 7px 0 0}
+  .codewrap .tab.on{color:var(--tx);background:var(--bg-2)}
+  pre{margin:0;padding:18px 20px;overflow-x:auto;font-family:var(--mono);font-size:13px;line-height:1.72}
+  .cm{color:var(--tx-faint)} .kw{color:#c7cbff} .st{color:#8fd3ac} .fn{color:#e6c07b} .pr{color:var(--ac-br)}
+
+  /* use cases */
+  .uc{display:grid;grid-template-columns:1fr;gap:16px}
+  @media(min-width:820px){.uc{grid-template-columns:repeat(3,1fr)}}
+  .ucard{border:1px solid var(--line);border-radius:14px;background:var(--bg-1);padding:20px}
+  .ucard .k{font-family:var(--mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--tx-faint);margin-bottom:9px}
+  .ucard h3{font-size:15.5px;font-weight:620;margin-bottom:7px}
+  .ucard p{margin:0;font-size:13.5px;color:var(--tx-mut);line-height:1.55}
+
+  /* self-host strip */
+  .strip{border:1px solid var(--ac-line);border-radius:18px;background:linear-gradient(120deg,rgba(124,133,232,.1),transparent 60%),var(--bg-1);padding:34px;text-align:center}
+  .strip h2{font-size:clamp(22px,3vw,30px);font-weight:680}
+  .strip p{margin:12px auto 0;max-width:56ch;color:var(--tx-mut);font-size:16px}
+  .strip .tags{margin-top:20px;display:flex;flex-wrap:wrap;justify-content:center;gap:8px}
+  .tag2{font-family:var(--mono);font-size:12px;color:var(--tx-mut);border:1px solid var(--line-2);border-radius:999px;padding:6px 13px;background:rgba(255,255,255,.02)}
+  .tag2 b{color:var(--tx)}
+
+  /* faq */
+  .faq{max-width:760px;margin:0 auto;display:grid;gap:11px}
+  .fitem{border:1px solid var(--line);border-radius:12px;background:var(--bg-1);padding:17px 19px}
+  .fitem h3{font-size:15px;font-weight:600;margin-bottom:6px}
+  .fitem p{margin:0;font-size:14px;color:var(--tx-mut);line-height:1.55}
+  .fitem code{font-family:var(--mono);font-size:12.5px;color:var(--ac-br)}
+
+  /* final cta */
+  .final{text-align:center;padding:72px 0}
+  .final h2{font-size:clamp(28px,3.8vw,40px);font-weight:700}
+  .final p{margin:14px auto 26px;max-width:46ch;color:var(--tx-mut);font-size:17px}
+  .final .row2{display:flex;flex-wrap:wrap;gap:12px;justify-content:center}
+
+  footer{border-top:1px solid var(--line);padding:34px 0}
+  footer .inner{display:flex;flex-wrap:wrap;gap:16px;justify-content:space-between;align-items:center;font-size:13px;color:var(--tx-faint);font-family:var(--mono)}
+  footer a:hover{color:var(--tx-mut)}
+
+  /* ---- mobile polish ---- */
+  @media(max-width:600px){
+    nav .inner{height:56px}
+    .navlinks{gap:15px;font-size:13.5px}
+    .btn{padding:7px 12px}
+    .hero{padding:44px 0 28px}
+    .hero h1{font-size:clamp(31px,8.6vw,42px)}
+    .hero .sub{font-size:17px;max-width:none}
+    .hero .cta a{flex:1;text-align:center}
+    section{padding:52px 0}
+    .sh{margin-bottom:30px}
+    .sh h2{font-size:clamp(23px,6.4vw,30px)}
+    .strip{padding:26px 20px}
+    .final{padding:56px 0}
+  }
+  @media(max-width:440px){
+    .hidexs{display:none}
+    .row{grid-template-columns:1fr auto;gap:12px}   /* drop the progress bar so name + score breathe */
+    .row .barw{display:none}
+    .trust{gap:6px 12px;font-size:11.5px}
+  }
+  @media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}.row .fill{transition:none!important}}
+</style>
+
+<nav><div class="wrap inner">
+  <a class="logo" href="#"><span class="mark">E</span>Everdict</a>
+  <div class="navlinks">
+    <a class="hidesm" href="#how">How it works</a>
+    <a class="hidesm" href="#use">Use cases</a>
+    <a href="/docs/">Docs</a>
+    <a class="hidexs" href="https://github.com/everdict/everdict">GitHub</a>
+    <a class="btn p" href="#get">Get started</a>
+  </div>
+</div></nav>
+
+<!-- HERO -->
+<header class="hero"><div class="wrap grid">
+  <div>
+    <div class="eyebrow">Agent evaluation runtime</div>
+    <h1 style="margin-top:16px">Know if your agents<br><span class="em">actually work.</span></h1>
+    <p class="sub">Everdict scores any agent — any framework — against your data, and tells you whether your last change made it <b style="color:var(--tx)">better or worse</b>. Self-hosted, on your infra.</p>
+    <div class="cta">
+      <a class="btn p" href="#get" style="padding:11px 20px;font-size:13px">Get started →</a>
+      <a class="btn s" href="#get" style="padding:11px 20px;font-size:13px">Talk to us</a>
+    </div>
+    <div class="trust">
+      <span><b>Apache-2.0</b></span><span>·</span>
+      <span><b>Self-hosted</b> — your infra</span><span>·</span>
+      <span><b>Any framework</b></span><span>·</span>
+      <span><b>Web + MCP</b></span>
+    </div>
+  </div>
+
+  <!-- scorecard -->
+  <div class="sc" id="scorecard">
+    <div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="t">scorecard · support-agent · swe-lite</span></div>
+    <div class="body">
+      <div class="schead"><span class="h">Leaderboard — by score</span><span class="v mono">120 cases · n=3</span></div>
+      <div class="row top"><span class="name"><b>v2.4</b> · gpt-5.4</span><span class="barw"><span class="fill best" data-w="91"></span></span><span class="score tnum">0.91</span></div>
+      <div class="row"><span class="name"><b>v2.3</b> · gpt-5.4</span><span class="barw"><span class="fill" data-w="88"></span></span><span class="score tnum">0.88</span></div>
+      <div class="row"><span class="name"><b>v2.4</b> · claude-o4.8</span><span class="barw"><span class="fill" data-w="86"></span></span><span class="score tnum">0.86</span></div>
+      <div class="row"><span class="name"><b>v2.2</b> · gpt-5.4</span><span class="barw"><span class="fill low" data-w="74"></span></span><span class="score tnum">0.74</span></div>
+      <div class="verdict" id="verdict">
+        <span class="tag">REGRESSION</span>
+        <span class="msg"><b>v2.4</b> vs <b>v2.3</b>: <b style="color:var(--fail)">−4 cases</b> on tool-use. Caught before merge.</span>
+      </div>
+    </div>
+  </div>
+</div></header>
+
+<!-- PILLARS -->
+<section class="band" id="why"><div class="wrap">
+  <div class="sh"><h2>Stop shipping agents you can't measure.</h2>
+  <p>You iterate constantly — prompts, models, tools, versions. Everdict makes “did that help?” a number, not a hunch.</p></div>
+  <div class="pillars">
+    <div class="pl"><div class="ic">▲</div><h3>Know if it got better</h3><p>Score every run. Diff <code>baseline ↔ candidate</code>, catch regressions, and leaderboard your models &amp; prompts.</p></div>
+    <div class="pl"><div class="ic">◇</div><h3>Any agent you build</h3><p>Harness-agnostic — Claude Code, Codex, LangGraph, any CLI or multi-service topology. Evaluate what you already made.</p></div>
+    <div class="pl"><div class="ic">⎇</div><h3>Gate it in CI</h3><p>Block a regression in the pull request. People use the <b style="color:var(--tx)">web</b>; agents &amp; CI use <b style="color:var(--tx)">MCP</b>.</p></div>
+    <div class="pl"><div class="ic">⊚</div><h3>Your code stays yours</h3><p>Runs on your Nomad / K8s / Docker. No vendor sandbox, air-gap capable, bring your own models &amp; keys.</p></div>
+  </div>
+</div></section>
+
+<!-- HOW -->
+<section class="band" id="how"><div class="wrap">
+  <div class="sh"><h2>Register, run, verdict.</h2>
+  <p>Point Everdict at the agent you already built and the data you already have.</p></div>
+  <div class="steps">
+    <div class="step"><div class="n">1</div><h3>Register</h3><p>Version any harness — a CLI via a declarative <code>command</code> spec, or a multi-service topology — and a dataset of cases.</p></div>
+    <div class="step"><div class="n">2</div><h3>Run</h3><p>Everdict executes it across your runtimes — isolated, reproducible — and collects the trace, cost, and outputs.</p></div>
+    <div class="step"><div class="n">3</div><h3>Verdict</h3><p>Graders and LLM/agent judges score it. Compare versions, diff regressions, gate CI — in the web or over MCP.</p></div>
+  </div>
+
+  <div class="codewrap">
+    <div class="tabs"><span class="tab on">cli</span><span class="tab">ci</span></div>
+    <pre><span class="cm"># one eval on this machine — uses your local model login, no API key</span>
+<span class="pr">$</span> everdict run <span class="kw">--task</span> <span class="st">"Fix the failing test in src/parser"</span> \
+      <span class="kw">--test</span> <span class="st">"pnpm test parser"</span>
+
+<span class="cm"># batch a dataset against two versions, then diff</span>
+<span class="pr">$</span> everdict scorecard <span class="kw">--harness</span> support-agent@v2.4 <span class="kw">--dataset</span> swe-lite
+<span class="pr">$</span> everdict diff support-agent@v2.3 support-agent@v2.4
+  <span class="cm">→</span> <span class="fn">0.88 → 0.91</span>  <span class="cm">(+3 cases · −4 on tool-use)</span>  <span class="pr">REGRESSION</span></pre>
+  </div>
+</div></section>
+
+<!-- USE CASES -->
+<section class="band" id="use"><div class="wrap">
+  <div class="sh"><h2>Wherever you ship agents.</h2></div>
+  <div class="uc">
+    <div class="ucard"><div class="k">Coding agents</div><h3>Regression-gate every change</h3><p>Run your coding agent against a benchmark on each PR. Block the merge when a prompt or model change drops the score.</p></div>
+    <div class="ucard"><div class="k">Browser / computer use</div><h3>Score real task completion</h3><p>Drive a browser agent across a fresh per-case environment and grade the DOM, screenshot, or an agent judge's verdict.</p></div>
+    <div class="ucard"><div class="k">Model &amp; prompt selection</div><h3>Leaderboard your options</h3><p>Sweep models and prompts over one dataset, then pick the winner by score, cost, and latency — with the receipts.</p></div>
+  </div>
+</div></section>
+
+<!-- SELF-HOST STRIP -->
+<section><div class="wrap">
+  <div class="strip">
+    <h2>Runs entirely in your infrastructure.</h2>
+    <p>No vendor sandbox, no data egress. Everdict places evals on your own compute and isolates them there.</p>
+    <div class="tags">
+      <span class="tag2"><b>Nomad</b></span><span class="tag2"><b>Kubernetes</b></span><span class="tag2"><b>Docker</b></span>
+      <span class="tag2"><b>your laptop</b></span><span class="tag2">air-gap capable</span><span class="tag2">BYO models &amp; keys</span><span class="tag2"><b>Apache-2.0</b></span>
+    </div>
+  </div>
+</div></section>
+
+<!-- FAQ -->
+<section class="band" id="docs"><div class="wrap">
+  <div class="sh"><h2>Questions, answered.</h2></div>
+  <div class="faq">
+    <div class="fitem"><h3>Which agent frameworks work?</h3><p>Any. Everdict is harness-agnostic — Claude Code, Codex, LangGraph, or any CLI via a declarative <code>command</code> spec, or a deployed multi-service topology. No rewrite.</p></div>
+    <div class="fitem"><h3>Is it really self-hosted?</h3><p>Yes — fully. It runs on your Nomad, Kubernetes, Docker, or a laptop; isolation comes from your own runtime. Air-gap capable, bring your own models and keys. <code>Apache-2.0</code>.</p></div>
+    <div class="fitem"><h3>What makes a score defensible?</h3><p>Reproducible scorecards, deterministic graders (tests / cost / latency / steps), LLM/VLM/agent judges, pass@k trials, and baseline↔candidate diffs — with the full trace behind every number.</p></div>
+    <div class="fitem"><h3>How do agents and CI use it?</h3><p>People use the web; agents and CI use the OAuth-protected <b style="color:var(--tx)">MCP server</b> or an API key — same tools, role-gated and workspace-scoped. Gate a PR from your pipeline.</p></div>
+  </div>
+</div></section>
+
+<!-- FINAL CTA -->
+<section class="final band" id="get"><div class="wrap">
+  <h2>Put a number on your agents.</h2>
+  <p>Self-host the whole stack in one command, or talk to us about your setup.</p>
+  <div class="row2">
+    <a class="btn p" href="https://github.com/everdict/everdict" style="padding:12px 22px;font-size:13px">Get started →</a>
+    <a class="btn s" href="#" style="padding:12px 22px;font-size:13px">Talk to us</a>
+  </div>
+  <div class="mono" style="margin-top:20px;font-size:12.5px;color:var(--tx-faint)">docker compose -f deploy/compose/docker-compose.dev.yaml up</div>
+</div></section>
+
+<footer><div class="wrap inner">
+  <span>© Everdict · Apache-2.0 · the agent evaluation runtime</span>
+  <span style="display:flex;gap:18px"><a href="/docs/">Docs</a><a href="https://github.com/everdict/everdict">GitHub</a><a href="#get">Get started</a></span>
+</div></footer>
+
+<script>
+  // Animate scorecard bars into place on load (respecting reduced-motion via CSS).
+  window.addEventListener("load", () => {
+    document.querySelectorAll(".sc .fill").forEach((el, i) => {
+      setTimeout(() => { el.style.width = el.dataset.w + "%"; }, 180 + i * 130);
+    });
+  });
+</script>
+
+</body>
+</html>
