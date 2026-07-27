@@ -80,6 +80,21 @@ export function MentionPicker({
   const [loading, setLoading] = useState(false)
   const [q, setQ] = useState('')
 
+  // Esc dismisses the picker, not the surrounding infra panel. The panel closes on a window-level
+  // (bubble-phase) Esc listener, so we intercept in the capture phase and stopPropagation — mirroring
+  // the header X button: back out of a selected type first, else close the picker.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return
+      e.preventDefault()
+      e.stopPropagation()
+      if (type) setType(null)
+      else onClose()
+    }
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
+  }, [type, onClose])
+
   useEffect(() => {
     if (!type) return
     let cancelled = false
