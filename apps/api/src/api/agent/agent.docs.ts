@@ -55,6 +55,37 @@ const docs = {
       ...errorResponses(401, 403, 404),
     },
   },
+  defaults: {
+    summary: "List the built-in (first-party) default agent tools",
+    description:
+      "The Everdict-authored default tools every workspace's agent gets WITHOUT adoption (subject to the integration " +
+      "gate + the workspace's disabledDefaults opt-outs) — {id, name, description, requires?}. Powers the Settings › " +
+      "Agent built-in-tools toggles. Requires agents:read (viewer+).",
+    tags: ["agent"],
+    response: {
+      200: {
+        description: "Default tools catalog",
+        type: "object",
+        properties: {
+          defaults: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                id: { type: "string" },
+                name: { type: "string" },
+                description: { type: "string" },
+                requires: { type: "string", nullable: true },
+              },
+              required: ["id", "name", "description"],
+            },
+          },
+        },
+        required: ["defaults"],
+      },
+      ...errorResponses(401, 403, 404),
+    },
+  },
   save: {
     summary: "Save (upsert) an agent configuration",
     description:

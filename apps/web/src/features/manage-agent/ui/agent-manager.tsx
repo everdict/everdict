@@ -1,12 +1,12 @@
 'use client'
 
 import { useState, useTransition } from 'react'
-import { Boxes, Plus, Sparkles, X } from 'lucide-react'
+import { Boxes, Plus, Sparkles, Wrench, X } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 import { toast } from 'sonner'
 
 import { SecretPicker } from '@/features/pick-secret'
-import type { AgentSpec, CapabilityRef } from '@/entities/agent-spec'
+import type { AgentDefault, AgentSpec, CapabilityRef } from '@/entities/agent-spec'
 import { Badge } from '@/shared/ui/badge'
 import { Button } from '@/shared/ui/button'
 import { Combobox } from '@/shared/ui/combobox'
@@ -29,12 +29,14 @@ export function AgentManager({
   agent,
   secretNames,
   modelIds,
+  defaults,
   canWrite,
   configId,
 }: {
   agent?: AgentSpec
   secretNames: string[]
   modelIds: string[]
+  defaults: AgentDefault[]
   canWrite: boolean
   configId: string
 }) {
@@ -51,6 +53,10 @@ export function AgentManager({
   )
   // 스토어에서 채택한 capabilities(불변버전 pin). 여기선 검토 + 제거만; 새 채택은 스토어에서. 저장 시 반드시 보존해야 한다.
   const [capabilities, setCapabilities] = useState<CapabilityRef[]>(agent?.capabilities ?? [])
+  // 워크스페이스가 끈 first-party 기본 도구(id). 기본 도구셋은 채택 없이 붙지만 여기서 끌 수 있다. 저장 시 반드시 보존.
+  const [disabledDefaults, setDisabledDefaults] = useState<string[]>(agent?.disabledDefaults ?? [])
+  const toggleDefault = (id: string, enabled: boolean) =>
+    setDisabledDefaults((ids) => (enabled ? ids.filter((x) => x !== id) : [...new Set([...ids, id])]))
   const [pending, startTransition] = useTransition()
 
   const patchServer = (index: number, patch: Partial<ServerRow>) =>
@@ -80,6 +86,8 @@ export function AgentManager({
         })),
       // 채택한 capabilities 는 이 폼에서 안 만들지만(스토어에서 채택) 반드시 보존해야 한다 — 빠뜨리면 저장 시 전부 사라진다.
       capabilities,
+      // 기본 도구 opt-out — 빠뜨리면 저장 시 꺼둔 기본 도구가 되살아난다(capabilities 와 동일 보존 규칙).
+      disabledDefaults,
       tags: agent?.tags ?? [],
     }
     startTransition(async () => {
@@ -273,6 +281,48 @@ export function AgentManager({
           </div>
         )}
       </section>
+
+      {/* Built-in default tools — Everdict-authored tools the agent gets out of the box; toggle one off here (disabledDefaults). */}
+      {defaults.length > 0 && (
+        <section className="space-y-3">
+          <div>
+            <div className="flex items-center gap-1.5 text-sm font-medium">
+              <Wrench className="size-4 text-primary" />
+              {t('builtinTools')}
+            </div>
+            <p className="mt-1 text-[13px] text-muted-foreground">{t('builtinToolsHint')}</p>
+          </div>
+          <div className="space-y-2">
+            {defaults.map((d) => {
+              const enabled = !disabledDefaults.includes(d.id)
+              return (
+                <label
+                  key={d.id}
+                  className="flex items-start justify-between gap-3 rounded-lg border border-border bg-card p-3"
+                >
+                  <div className="min-w-0 space-y-0.5">
+                    <div className="flex items-center gap-2">
+                      <span className="truncate font-mono text-[13px] font-medium">{d.name}</span>
+                      {d.requires && (
+                        <Badge tone="outline">{t('builtinRequires', { integration: d.requires })}</Badge>
+                      )}
+                    </div>
+                    <div className="text-[11.5px] text-muted-foreground">{d.description}</div>
+                  </div>
+                  <input
+                    type="checkbox"
+                    className="mt-1 accent-primary"
+                    checked={enabled}
+                    disabled={!canWrite}
+                    onChange={(e) => toggleDefault(d.id, e.target.checked)}
+                    aria-label={d.name}
+                  />
+                </label>
+              )
+            })}
+          </div>
+        </section>
+      )}
 
       {canWrite && (
         <div className="flex items-center gap-3 border-t border-border pt-5">

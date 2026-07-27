@@ -42,6 +42,16 @@ export const agentSpecSchema = z.object({
 })
 export type AgentSpec = z.infer<typeof agentSpecSchema>
 
+// GET /agents/defaults 200 — 빌트인(first-party) 기본 도구 카탈로그. 토글 렌더용 읽기 전용 형태(계약 wire 타입 없음 → 드리프트 가드 없음).
+export const agentDefaultSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  description: z.string(),
+  requires: z.string().nullish(),
+})
+export type AgentDefault = z.infer<typeof agentDefaultSchema>
+export const agentDefaultsSchema = z.object({ defaults: z.array(agentDefaultSchema) })
+
 // GET /agents 200 — 에이전트 id 당 한 항목(워크스페이스 소유 + _shared 폴백).
 export const agentSummarySchema = z.object({
   id: z.string(),

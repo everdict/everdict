@@ -1,4 +1,4 @@
-import { deleteAgentVersion, deleteAgentVersions } from "@everdict/application-control";
+import { deleteAgentVersion, deleteAgentVersions, firstPartyDefaults } from "@everdict/application-control";
 import { AgentSpecSchema } from "@everdict/contracts";
 import type { FastifyInstance } from "fastify";
 import { type ServerDeps, gate, resolvePrincipal, sendError, zodIssues } from "../route-context.js";
@@ -83,6 +83,27 @@ export function registerAgentRoutes(app: FastifyInstance, deps: ServerDeps): voi
       );
     } catch (err) {
       return sendError(reply, err); // immutable conflict (concurrent same-version write) → 409
+    }
+  });
+
+  // The built-in (first-party) default tools catalog — for the Settings › Agent built-in-tools toggles. Workspace-
+  // agnostic (the same set for everyone); a workspace opts out via AgentSpec.disabledDefaults. Static route — must be
+  // registered before "/agents/:id/versions/:version" is irrelevant (distinct shape), but kept with the other reads.
+  app.get("/agents/defaults", { schema: agentDocs.defaults }, async (req, reply) => {
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "agents:read");
+      return reply.send({
+        defaults: firstPartyDefaults().map((d) => ({
+          id: d.record.id,
+          name: d.record.name,
+          description: d.record.description,
+          ...(d.requires ? { requires: d.requires } : {}),
+        })),
+      });
+    } catch (err) {
+      return sendError(reply, err);
     }
   });
 

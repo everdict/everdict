@@ -2980,6 +2980,9 @@
     "adoptedCapabilities": "채택한 capabilities",
     "adoptedCapabilitiesHint": "이 에이전트가 스토어에서 채택한 도구·스킬(버전 pin). 새 채택은 스토어에서, 여기선 제거만.",
     "noAdopted": "아직 채택한 capability 가 없습니다 — 스토어에서 도구·스킬을 추가하세요.",
+    "builtinTools": "기본 제공 도구",
+    "builtinToolsHint": "Everdict가 기본 제공하는 도구 — 에이전트가 별도 설정 없이 바로 씁니다. 이 워크스페이스에서 끄려면 여기서 토글하세요.",
+    "builtinRequires": "{integration} 필요",
     "removeCapability": "capability 제거",
     "capabilityWrite": "write",
     "capabilityFrom": "{source} 출처"

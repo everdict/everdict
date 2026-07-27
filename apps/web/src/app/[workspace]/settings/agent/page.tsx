@@ -1,6 +1,6 @@
 import { getTranslations } from 'next-intl/server'
 
-import { type AgentSpec, agentSpecSchema } from '@/entities/agent-spec'
+import { type AgentDefault, agentSpecSchema, agentDefaultsSchema, type AgentSpec } from '@/entities/agent-spec'
 import { modelsSchema } from '@/entities/model'
 import { secretsSchema } from '@/entities/secret'
 import { AgentManager } from '@/features/manage-agent'
@@ -50,6 +50,14 @@ export default async function AgentSettingsPage() {
     // No model registry / no permission — the picker just offers "server default".
   }
 
+  // The built-in default tools (web search, …) the workspace can toggle off. Best-effort — an empty list just hides the section.
+  let defaults: AgentDefault[] = []
+  try {
+    defaults = agentDefaultsSchema.parse(await controlPlane.listAgentDefaults(ctx)).defaults
+  } catch {
+    // No agent registry / no permission — no built-in toggles shown.
+  }
+
   let secretNames: string[] = []
   try {
     secretNames = secretsSchema
@@ -67,6 +75,7 @@ export default async function AgentSettingsPage() {
         {...(agent ? { agent } : {})}
         secretNames={secretNames}
         modelIds={modelIds}
+        defaults={defaults}
         canWrite={canWrite}
         configId={AGENT_CONFIG_ID}
       />

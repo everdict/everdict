@@ -502,6 +502,8 @@ export const controlPlane = {
       method: 'PUT',
       body: JSON.stringify(body),
     }),
+  // The built-in (first-party) default tools catalog — powers the Settings › Agent built-in-tools toggles.
+  listAgentDefaults: <T>(auth: AuthContext) => call<T>(auth, '/agents/defaults'),
   // Workspace Skills — SKILL.md-style procedures the members author for the conversational agent (dual-scoped
   // private|workspace). Read skills:read (viewer+); author/edit/share/delete skills:write (member+, creator-or-admin
   // for a specific skill). generateSkill drafts a skill from a description via the workspace's model (skill-generate).

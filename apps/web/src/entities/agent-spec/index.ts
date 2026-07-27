@@ -1,10 +1,13 @@
 export {
+  agentDefaultSchema,
+  agentDefaultsSchema,
   agentMcpServerSchema,
   agentSpecSchema,
   agentSummarySchema,
   agentsSchema,
   capabilityRefSchema,
   saveAgentResultSchema,
+  type AgentDefault,
   type AgentMcpServer,
   type AgentSpec,
   type AgentSummary,
