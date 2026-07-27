@@ -1,11 +1,21 @@
 import { ImageRegistryService } from "@everdict/application-control";
 import { BadRequestError, NotFoundError } from "@everdict/contracts";
 import { InMemoryWorkspaceSettingsStore } from "@everdict/db";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 function svc(secrets: Record<string, string> = {}) {
   const settings = new InMemoryWorkspaceSettingsStore();
-  return { settings, service: new ImageRegistryService({ settings, secretsFor: async () => secrets }) };
+  // A fake Docker Registry v2 reader — records its (coords, auth, repository) calls; returns canned tags / manifest.
+  const reader = {
+    listTags: vi.fn(async () => ["v1", "v2"]),
+    inspectManifest: vi.fn(async (_c: unknown, _a: unknown, _r: string, reference: string) => ({
+      reference,
+      digest: "sha256:abc",
+      mediaType: "application/vnd.oci.image.manifest.v1+json",
+      layerCount: 3,
+    })),
+  };
+  return { settings, reader, service: new ImageRegistryService({ settings, secretsFor: async () => secrets, reader }) };
 }
 
 describe("ImageRegistryService — multiple registries", () => {
@@ -64,5 +74,52 @@ describe("ImageRegistryService — multiple registries", () => {
     await service.upsert("acme", { name: "b", host: "reg-b.io" });
     await service.remove("acme", "a");
     expect((await service.list("acme")).map((r) => r.name)).toEqual(["b"]);
+  });
+});
+
+describe("ImageRegistryService — registry reads (agent list_image_tags / inspect_image)", () => {
+  it("lists tags via the resolved registry with pull auth (username + pull secret value)", async () => {
+    const { service, reader } = svc({ PULL: "pw" });
+    await service.upsert("acme", {
+      name: "ghcr",
+      host: "ghcr.io",
+      namespace: "acme",
+      username: "u",
+      pullSecretName: "PULL",
+    });
+    const out = await service.listTags("acme", "acme/api", "ghcr");
+    expect(out).toEqual({ registry: "ghcr", repository: "acme/api", tags: ["v1", "v2"] });
+    expect(reader.listTags).toHaveBeenCalledWith(
+      { host: "ghcr.io", namespace: "acme" },
+      { host: "ghcr.io", username: "u", password: "pw" },
+      "acme/api",
+    );
+  });
+
+  it("reads anonymously (no auth) when the registry has no pull secret — name omittable when single", async () => {
+    const { service, reader } = svc();
+    await service.upsert("acme", { name: "ghcr", host: "ghcr.io" });
+    await service.listTags("acme", "library/node");
+    expect(reader.listTags).toHaveBeenCalledWith({ host: "ghcr.io" }, undefined, "library/node");
+  });
+
+  it("inspects a manifest and returns the digest + summary", async () => {
+    const { service } = svc();
+    await service.upsert("acme", { name: "ghcr", host: "ghcr.io" });
+    const out = await service.inspectImage("acme", "acme/api", "v1", "ghcr");
+    expect(out).toMatchObject({
+      registry: "ghcr",
+      repository: "acme/api",
+      reference: "v1",
+      digest: "sha256:abc",
+      layerCount: 3,
+    });
+  });
+
+  it("requires a registry name when multiple are registered", async () => {
+    const { service } = svc();
+    await service.upsert("acme", { name: "ghcr", host: "ghcr.io" });
+    await service.upsert("acme", { name: "harbor", host: "harbor.acme.io" });
+    await expect(service.listTags("acme", "acme/api")).rejects.toBeInstanceOf(BadRequestError);
   });
 });

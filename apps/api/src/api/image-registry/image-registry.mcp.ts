@@ -59,5 +59,32 @@ export function registerImageRegistryTools(server: McpServer, ctx: McpToolContex
       ({ registry: name }) =>
         run(principal, "images:push", async () => ok({ credentials: await registry.pushCredentials(ws, name) })),
     );
+    server.registerTool(
+      "list_image_tags",
+      {
+        description:
+          "List the tags of a repository in a workspace image registry (Docker Registry v2). Use to see available versions of an image. Standard bearer/basic registries (GHCR, Harbor, Docker Hub, generic v2); AWS ECR is unsupported.",
+        inputSchema: {
+          repository: z.string().min(1).describe('repository path within the registry — "acme/api" · "library/node"'),
+          registry: z.string().min(1).optional().describe("registry name (omittable if there's only one)"),
+        },
+      },
+      ({ repository, registry: name }) =>
+        run(principal, "harnesses:read", async () => ok(await registry.listTags(ws, repository, name))),
+    );
+    server.registerTool(
+      "inspect_image",
+      {
+        description:
+          "Inspect a manifest (a tag or digest) of a repository in a workspace image registry — returns the digest, media type, and platforms (manifest list) or layer count (single image). Standard bearer/basic registries only.",
+        inputSchema: {
+          repository: z.string().min(1).describe('repository path within the registry — "acme/api"'),
+          reference: z.string().min(1).describe('a tag or digest — "v1.2.0" · "sha256:…"'),
+          registry: z.string().min(1).optional().describe("registry name (omittable if there's only one)"),
+        },
+      },
+      ({ repository, reference, registry: name }) =>
+        run(principal, "harnesses:read", async () => ok(await registry.inspectImage(ws, repository, reference, name))),
+    );
   }
 }

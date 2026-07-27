@@ -99,6 +99,7 @@ export {
   type ImageRegistryServiceDeps,
   type ImageRegistryView,
 } from "./image-registry/image-registry-service.js";
+export type { ImageManifestInfo, RegistryReader } from "./ports/registry-reader.js";
 export {
   type MattermostConfigView,
   MattermostService,

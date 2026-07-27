@@ -51,6 +51,7 @@ import { JudgePreviewService } from "./core/judge/judge-preview-service.js";
 import { ModelService } from "./core/model/model-service.js";
 import { githubAppGateway } from "./infrastructure/github/app-gateway.js";
 import { githubRepoWriterFactory } from "./infrastructure/github/repo-writer.js";
+import { dockerRegistryReader } from "./infrastructure/registry/registry-reader.js";
 import { buildServer } from "./server.js";
 
 const result: CaseResult = {
@@ -269,6 +270,7 @@ function server(
   const imageRegistryService = new ImageRegistryService({
     settings: settingsStore,
     secretsFor: (ws) => secretStore.entries(ws),
+    reader: dockerRegistryReader(),
   });
   const usageMeter = inMemoryUsageMeter();
   const budget = persistentBudget(new InMemoryBudgetStore());

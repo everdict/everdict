@@ -23,6 +23,7 @@ import { buildTopologyBackend } from "../core/execution/topology-backend.js";
 import { makeRuntimeController } from "../core/ops/runtime-control.js";
 import { makeRuntimeInspector } from "../core/ops/runtime-inspect.js";
 import { makeRuntimeProber } from "../core/ops/runtime-probe.js";
+import { dockerRegistryReader } from "../infrastructure/registry/registry-reader.js";
 
 // Dispatch stack: the self-hosted runner lease hub + the front-door callback rendezvous + tenant runtime routing
 // (RuntimeSpec → live backend) + the one model-resolving/metered dispatcher every path shares + the connection probe.
@@ -98,6 +99,7 @@ export function buildDispatch(deps: {
   const imageRegistryService = new ImageRegistryService({
     settings: settingsStore,
     secretsFor: runtimeSecretsFor, // push/pull credentials + registration warnings resolve from the shared (workspace) secret tier
+    reader: dockerRegistryReader(), // Docker Registry v2 read adapter — the agent's list_image_tags / inspect_image tools
   });
   // Workspace trace-source resolution for the topology pull — a service harness's selected source (name → config with the
   // auth value + correlate + scope) so a dev-cluster-deployed harness's trace is pulled from its team's platform after a case.
