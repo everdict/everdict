@@ -4,7 +4,11 @@
 > with a real model: schedule fire → headless agent turn (37s — get_view → query_scorecards over 79 real
 > scorecards → write_report) → artifact auto-pinned to the View → gallery route + `report_completed`
 > notification, all end-to-end. The live run also caught (and fixed, with a regression test) a wire-shape
-> drift in the report-runner adapter (`tenant` vs `workspace`). Remaining: view-linked sessions
+> drift in the report-runner adapter (`tenant` vs `workspace`). **2026-07-28: `html` artifact kind added**
+> (maintainer feedback — numeric dashboards over prose): `render_html` emission tool + sandboxed-iframe
+> `HtmlView` (principle 2, revised) + the report prompt reworked dashboard-first (metric cards with
+> baseline/delta REQUIRED, markdown demoted to a brief companion; the report turn now pins every artifact
+> it produced, primary = the html dashboard). Remaining: view-linked sessions
 > (deliberately descoped — the `@view` mention covers context injection) and the deploy env pair
 > (`AGENT_SERVICE_URL` + `AGENT_INTERNAL_TOKEN` on the control plane, `AGENT_INTERNAL_TOKEN` on the agent
 > service) which enables report firing. Originally a doc-first SSOT; successor/extension of
@@ -51,10 +55,16 @@ The gap is precisely: (a) the agent has **no artifact-emission path** (`ToolResu
    tool → live canvas update). The user can always take over by hand; the agent never renders a chart the UI
    couldn't have produced itself. Free-form analysis beyond the pivot goes through artifacts (below), not a
    parallel rendering path.
-2. **Artifacts are declarative data, never active content.** A chart artifact is a closed **ChartSpec**
-   (kind + series + axes) rendered by our own SVG components; a report is **markdown**; a table is JSON rows;
-   an export is a file ref. No HTML/JS artifacts — nothing an LLM emits is ever executed or injected into
-   the DOM (XSS). This also keeps the no-chart-library stance: we extend our hand-rolled SVG, not add vega.
+2. **LLM output never executes in the APP origin.** *(Revised 2026-07-28 — maintainer feedback: numeric,
+   metric-by-metric visualization with baseline/delta comparison is the product core, and a closed spec is
+   too rigid for it.)* Two artifact tiers now coexist: **declarative** kinds (ChartSpec/table/markdown —
+   rendered by our own components, the lightweight path) and **free-form `html`** (the Claude-Artifacts
+   model — the agent authors body markup with inline style/script/SVG for rich dashboards: metric cards,
+   ▲/▼ delta chips, custom layouts). The safety invariant is containment, not prohibition: html artifacts
+   execute ONLY inside an opaque-origin sandboxed iframe (`sandbox="allow-scripts"`, no
+   `allow-same-origin` — no parent DOM/cookies) under a shell-injected deny-all CSP (`default-src 'none'`;
+   inline style/script only; `img-src data:` — no network load OR exfiltration). Nothing an LLM emits ever
+   runs in the app origin.
 3. **Compute is dispatched, never on the control plane.** Aggregation the platform already understands runs
    as a server-side query (`query_scorecards`). Arbitrary data-science code (the real "data scientist with
    an agent" power) runs SANDBOXED through the existing job-runner dispatch — the code-judge invariant

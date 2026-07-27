@@ -1,16 +1,18 @@
 'use client'
 
-import { BarChart3, FileText, Pin, Table2 } from 'lucide-react'
+import { BarChart3, FileText, LayoutDashboard, Pin, Table2 } from 'lucide-react'
 import { useFormatter, useTranslations } from 'next-intl'
 
 import { Markdown } from '@/shared/ui/markdown'
 
 import {
   chartSpecSchema,
+  htmlSpecSchema,
   reportSpecSchema,
   tableSpecSchema,
   type AnalysisArtifact,
   type ChartSpec,
+  type HtmlSpec,
   type TableSpec,
 } from '../model/schema'
 
@@ -146,6 +148,30 @@ function ChartView({ spec, ariaLabel }: { spec: ChartSpec; ariaLabel: string }) 
   )
 }
 
+// Free-form agent-authored visualization — the Claude-Artifacts model. The markup executes ONLY inside an
+// opaque-origin sandboxed iframe (`sandbox="allow-scripts"` WITHOUT allow-same-origin: no parent DOM, no
+// cookies/storage of ours) and our shell injects a deny-all CSP (default-src 'none') so no network request —
+// load or exfiltration — can leave it. Inline <style>/<script>/SVG/canvas only, which is exactly the contract
+// the render_html tool states.
+function HtmlView({ spec, title }: { spec: HtmlSpec; title: string }) {
+  const shell =
+    '<!doctype html><html><head><meta charset="utf-8">' +
+    "<meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data: blob:; font-src data:;\">" +
+    '<style>:root{color-scheme:light dark}body{margin:0;font-family:ui-sans-serif,system-ui,sans-serif;font-size:14px}</style>' +
+    `</head><body>${spec.html}</body></html>`
+  return (
+    <iframe
+      sandbox="allow-scripts"
+      referrerPolicy="no-referrer"
+      loading="lazy"
+      srcDoc={shell}
+      title={title}
+      className="w-full rounded-md border border-border/60 bg-background"
+      style={{ height: Math.min(Math.max(spec.height ?? 480, 160), 1600) }}
+    />
+  )
+}
+
 function TableView({ spec }: { spec: TableSpec }) {
   return (
     <div className="overflow-x-auto">
@@ -182,7 +208,12 @@ function TableView({ spec }: { spec: TableSpec }) {
   )
 }
 
-const KIND_ICON = { chart: BarChart3, table: Table2, report: FileText } as const
+const KIND_ICON = {
+  chart: BarChart3,
+  table: Table2,
+  report: FileText,
+  html: LayoutDashboard,
+} as const
 
 export function ArtifactCard({
   artifact,
@@ -210,6 +241,13 @@ export function ArtifactCard({
     ) : (
       <p className="text-sm text-muted-foreground">{t('invalidSpec')}</p>
     )
+  } else if (artifact.kind === 'html') {
+    const spec = htmlSpecSchema.safeParse(artifact.spec)
+    body = spec.success ? (
+      <HtmlView spec={spec.data} title={artifact.title} />
+    ) : (
+      <p className="text-sm text-muted-foreground">{t('invalidSpec')}</p>
+    )
   } else {
     const spec = reportSpecSchema.safeParse(artifact.spec)
     body = spec.success ? (
@@ -227,12 +265,15 @@ export function ArtifactCard({
           <h3 className="truncate text-sm font-medium">{artifact.title}</h3>
           {artifact.pinned && <Pin className="size-3 shrink-0 text-muted-foreground" />}
         </div>
-        <time className="shrink-0 text-xs text-muted-foreground" dateTime={artifact.createdAt}>
-          {format.dateTime(new Date(artifact.createdAt), {
-            dateStyle: 'medium',
-            timeStyle: 'short',
-          })}
-        </time>
+        <div className="flex shrink-0 items-center gap-1">
+          <time className="text-xs text-muted-foreground" dateTime={artifact.createdAt}>
+            {format.dateTime(new Date(artifact.createdAt), {
+              dateStyle: 'medium',
+              timeStyle: 'short',
+            })}
+          </time>
+          {action}
+        </div>
       </header>
       {body}
     </article>

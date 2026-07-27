@@ -3,11 +3,13 @@ export {
   analysisArtifactSchema,
   analysisArtifactsResponseSchema,
   chartSpecSchema,
+  htmlSpecSchema,
   reportSpecSchema,
   tableSpecSchema,
   type AnalysisArtifact,
   type AnalysisArtifactKind,
   type ChartSpec,
+  type HtmlSpec,
   type ReportSpec,
   type TableSpec,
 } from './model/schema'

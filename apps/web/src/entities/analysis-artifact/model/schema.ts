@@ -2,6 +2,7 @@ import type {
   AnalysisArtifactRecord,
   AnalysisArtifactKind as WireAnalysisArtifactKind,
   ChartSpec as WireChartSpec,
+  HtmlSpec as WireHtmlSpec,
   ReportSpec as WireReportSpec,
   TableSpec as WireTableSpec,
 } from '@everdict/contracts'
@@ -12,7 +13,7 @@ import { z } from 'zod'
 // (re-architecture P4, `import type` only). The record's `spec` is opaque jsonb — render paths validate it per
 // kind with the spec schemas below and fall back gracefully on a mismatch (never crash the page on bad data).
 
-export const analysisArtifactKinds = ['chart', 'table', 'report'] as const
+export const analysisArtifactKinds = ['chart', 'table', 'report', 'html'] as const
 export const analysisArtifactKindSchema = z.enum(analysisArtifactKinds)
 
 export const chartSpecSchema = z.object({
@@ -28,6 +29,9 @@ export const tableSpecSchema = z.object({
 })
 
 export const reportSpecSchema = z.object({ markdown: z.string() })
+
+// Sandboxed rich visualization — executed ONLY in an opaque-origin iframe under a deny-all CSP (HtmlView).
+export const htmlSpecSchema = z.object({ html: z.string(), height: z.number().optional() })
 
 export const analysisArtifactSchema = z.object({
   id: z.string(),
@@ -53,6 +57,7 @@ type WebKind = z.infer<typeof analysisArtifactKindSchema>
 type WebChartSpec = z.infer<typeof chartSpecSchema>
 type WebTableSpec = z.infer<typeof tableSpecSchema>
 type WebReportSpec = z.infer<typeof reportSpecSchema>
+type WebHtmlSpec = z.infer<typeof htmlSpecSchema>
 type _artifactFwd = AssertAssignable<
   Omit<WebArtifact, 'spec'>,
   Omit<AnalysisArtifactRecord, 'spec'>
@@ -66,6 +71,7 @@ type _kindBack = AssertAssignable<WireAnalysisArtifactKind, WebKind>
 type _chartFwd = AssertAssignable<WebChartSpec, WireChartSpec>
 type _tableFwd = AssertAssignable<WebTableSpec, WireTableSpec>
 type _reportFwd = AssertAssignable<WebReportSpec, WireReportSpec>
+type _htmlFwd = AssertAssignable<WebHtmlSpec, WireHtmlSpec>
 
 // Exported names alias the contract types (consumers see the wire shapes).
 export type AnalysisArtifact = AnalysisArtifactRecord
@@ -73,6 +79,7 @@ export type AnalysisArtifactKind = WireAnalysisArtifactKind
 export type ChartSpec = WireChartSpec
 export type TableSpec = WireTableSpec
 export type ReportSpec = WireReportSpec
+export type HtmlSpec = WireHtmlSpec
 
 export type __analysisArtifactDriftGuard = [
   _artifactFwd,
@@ -82,4 +89,5 @@ export type __analysisArtifactDriftGuard = [
   _chartFwd,
   _tableFwd,
   _reportFwd,
+  _htmlFwd,
 ]

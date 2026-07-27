@@ -73,6 +73,23 @@ describe("artifact emission tools", () => {
     expect(kinds).toEqual(["table", "report"]);
   });
 
+  it("render_html persists a sandbox-bound html artifact (numeric dashboards)", async () => {
+    const { ctx, store, emitted } = makeContext();
+    const html = buildArtifactTools(ctx).find((t) => t.name === "render_html");
+    if (!html) throw new Error("render_html missing");
+    expect(html.isReadOnly).toBe(true); // presentation-only; execution containment is the web's sandboxed iframe
+
+    const result = await html.call(
+      { title: "Pass-rate dashboard", html: "<style>b{color:red}</style><b>60%</b> ▲ +4.2pt", height: 320 },
+      toolCtx,
+    );
+    expect(result.isError).toBe(false);
+    const stored = await store.listBySession("acme", "s1");
+    expect(stored[0]).toMatchObject({ kind: "html", title: "Pass-rate dashboard" });
+    expect(stored[0]?.spec).toEqual({ html: "<style>b{color:red}</style><b>60%</b> ▲ +4.2pt", height: 320 });
+    expect(emitted).toHaveLength(1);
+  });
+
   it("an invalid chart spec throws (the loop turns it into a correctable tool error) and persists nothing", async () => {
     const { ctx, store } = makeContext();
     const chart = buildArtifactTools(ctx).find((t) => t.name === "render_chart");

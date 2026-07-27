@@ -4,6 +4,7 @@ import {
   type AnalysisArtifactKind,
   type AnalysisArtifactRecord,
   ChartSpecSchema,
+  HtmlSpecSchema,
   ReportSpecSchema,
   TableSpecSchema,
   parseAnalysisArtifactSpec,
@@ -40,6 +41,11 @@ const RenderTableInput = z.object({
 const WriteReportInput = z.object({
   title: z.string().min(1).max(200),
   ...ReportSpecSchema.shape,
+});
+
+const RenderHtmlInput = z.object({
+  title: z.string().min(1).max(200),
+  ...HtmlSpecSchema.shape,
 });
 
 const TITLE_PROPERTY = { type: "string", minLength: 1, maxLength: 200, description: "Short human title" };
@@ -134,6 +140,35 @@ export function buildArtifactTools(ctx: ArtifactToolContext): ToolDefinition[] {
       call: async (input) => {
         const { title, columns, rows } = RenderTableInput.parse(input);
         return emit("table", title, { columns, rows });
+      },
+    },
+    {
+      name: "render_html",
+      description:
+        "Render a rich, custom visualization as sandboxed HTML — THE tool for numeric analysis dashboards: " +
+        "metric cards with big numbers, baseline-vs-current DELTA chips (▲/▼ with color), per-group bar/line " +
+        "charts as inline SVG, small comparison tables, any layout. Author BODY markup with inline <style> and " +
+        "(if needed) inline <script>; ALL external resources and network calls are blocked (strict CSP, opaque " +
+        "sandbox), so everything must be self-contained. Compute the real numbers FIRST (query_scorecards / " +
+        "diff_scorecards), then lay them out — lead with the numbers, not prose. Prefer this over render_chart " +
+        "whenever the analysis needs more than one plain chart.",
+      parametersJsonSchema: {
+        type: "object",
+        properties: {
+          title: TITLE_PROPERTY,
+          html: {
+            type: "string",
+            description: "self-contained body markup (inline <style>/<script> OK; no external URLs — they are blocked)",
+          },
+          height: { type: "integer", minimum: 160, maximum: 1600, description: "render height px (default 480)" },
+        },
+        required: ["title", "html"],
+      },
+      inputSchema: RenderHtmlInput,
+      isReadOnly: true,
+      call: async (input) => {
+        const { title, html, height } = RenderHtmlInput.parse(input);
+        return emit("html", title, { html, ...(height !== undefined ? { height } : {}) });
       },
     },
     {

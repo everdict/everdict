@@ -35,7 +35,21 @@ export const ReportSpecSchema = z.object({
 });
 export type ReportSpec = z.infer<typeof ReportSpecSchema>;
 
-export const AnalysisArtifactKindSchema = z.enum(["chart", "table", "report"]);
+// Free-form rich visualization (the Claude-Artifacts model): the agent authors body markup — metric cards,
+// baseline/delta chips, inline-SVG/canvas charts, inline <style>/<script> — and the web executes it ONLY inside
+// an opaque-origin sandboxed iframe under a deny-all CSP (no network, no parent DOM, no cookies). The safety
+// principle stays intact in refined form: LLM output never runs in the APP origin.
+export const HtmlSpecSchema = z.object({
+  html: z
+    .string()
+    .min(1)
+    .max(512_000)
+    .describe("body markup (inline <style>/<script> allowed; ALL external resources are blocked by CSP)"),
+  height: z.number().int().min(160).max(1600).optional().describe("render height in px (default 480)"),
+});
+export type HtmlSpec = z.infer<typeof HtmlSpecSchema>;
+
+export const AnalysisArtifactKindSchema = z.enum(["chart", "table", "report", "html"]);
 export type AnalysisArtifactKind = z.infer<typeof AnalysisArtifactKindSchema>;
 
 // The record keeps `spec` opaque (jsonb, like View.config) — the emission boundary validates it per kind via
@@ -58,12 +72,13 @@ const SPEC_SCHEMAS = {
   chart: ChartSpecSchema,
   table: TableSpecSchema,
   report: ReportSpecSchema,
+  html: HtmlSpecSchema,
 } as const;
 
 // Validate a spec for its kind (throws ZodError) — the single gate every emission path goes through.
 export function parseAnalysisArtifactSpec(
   kind: AnalysisArtifactKind,
   spec: unknown,
-): ChartSpec | TableSpec | ReportSpec {
+): ChartSpec | TableSpec | ReportSpec | HtmlSpec {
   return SPEC_SCHEMAS[kind].parse(spec);
 }
