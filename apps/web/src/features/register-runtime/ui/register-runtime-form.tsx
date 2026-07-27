@@ -49,6 +49,12 @@ interface Fields {
   server: string
   authSecret: string
   kubeconfigSecret: string
+  // Runtime-side placement binding (operator-owned) — GPU + node targeting. gpu = positive int; the rest are
+  // multi-line text (nodeSelector "k=v" · tolerations "k[=v][:effect]" · constraints "attr [op] value").
+  gpu: string
+  nodeSelector: string
+  tolerations: string
+  constraints: string
   maxConcurrent: string
   memoryBudgetMb: string
   cpuBudget: string
@@ -73,6 +79,10 @@ const INITIAL: Fields = {
   server: '',
   authSecret: '',
   kubeconfigSecret: '',
+  gpu: '',
+  nodeSelector: '',
+  tolerations: '',
+  constraints: '',
   maxConcurrent: '',
   memoryBudgetMb: '',
   cpuBudget: '',
@@ -103,6 +113,10 @@ function fieldsFromSpec(spec: RuntimeSpec): Fields {
     server: str(spec.server),
     authSecret: str(spec.authSecret),
     kubeconfigSecret: str(spec.kubeconfigSecret),
+    gpu: num(spec.gpu),
+    nodeSelector: keyValuesToText(spec.nodeSelector),
+    tolerations: tolerationsToText(spec.tolerations),
+    constraints: constraintsToText(spec.constraints),
     maxConcurrent: num(spec.maxConcurrent),
     memoryBudgetMb: num(spec.memoryBudgetMb),
     cpuBudget: num(spec.cpuBudget),
@@ -126,6 +140,72 @@ const csv = (s: string): string[] =>
     .split(',')
     .map((x) => x.trim())
     .filter(Boolean)
+
+// --- Runtime-side placement binding: multi-line text ↔ structured (operator-owned; k8s nodeSelector/tolerations, nomad constraints) ---
+type Toleration = { key: string; operator?: string; value?: string; effect?: string }
+type Constraint = { attribute: string; operator?: string; value: string }
+
+// "key=value" per line → Record (blank/invalid lines skipped).
+function parseKeyValues(s: string): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const line of s.split('\n')) {
+    const trimmed = line.trim()
+    const eq = trimmed.indexOf('=')
+    if (eq <= 0) continue
+    const k = trimmed.slice(0, eq).trim()
+    if (k) out[k] = trimmed.slice(eq + 1).trim()
+  }
+  return out
+}
+const keyValuesToText = (r: Record<string, string> | undefined): string =>
+  Object.entries(r ?? {})
+    .map(([k, v]) => `${k}=${v}`)
+    .join('\n')
+
+// k8s tolerations: "key[=value][:effect]" per line → { key, operator, value?, effect? }.
+function parseTolerations(s: string): Toleration[] {
+  const out: Toleration[] = []
+  for (const line of s.split('\n')) {
+    let rest = line.trim()
+    if (!rest) continue
+    let effect: string | undefined
+    const colon = rest.lastIndexOf(':')
+    if (colon > 0) {
+      effect = rest.slice(colon + 1).trim()
+      rest = rest.slice(0, colon).trim()
+    }
+    const eq = rest.indexOf('=')
+    if (eq > 0)
+      out.push({
+        key: rest.slice(0, eq).trim(),
+        operator: 'Equal',
+        value: rest.slice(eq + 1).trim(),
+        ...(effect ? { effect } : {}),
+      })
+    else out.push({ key: rest, operator: 'Exists', ...(effect ? { effect } : {}) })
+  }
+  return out
+}
+const tolerationsToText = (ts: Toleration[] | undefined): string =>
+  (ts ?? [])
+    .map((t) => `${t.key}${t.value ? `=${t.value}` : ''}${t.effect ? `:${t.effect}` : ''}`)
+    .join('\n')
+
+// nomad constraints: "attribute [operator] value" per line → { attribute, operator?, value }.
+function parseConstraints(s: string): Constraint[] {
+  const out: Constraint[] = []
+  for (const line of s.split('\n')) {
+    const trimmed = line.trim()
+    if (!trimmed) continue
+    const parts = trimmed.split(/\s+/)
+    if (parts.length < 2) continue
+    if (parts.length === 2) out.push({ attribute: parts[0] ?? '', value: parts[1] ?? '' })
+    else out.push({ attribute: parts[0] ?? '', operator: parts[1], value: parts.slice(2).join(' ') })
+  }
+  return out
+}
+const constraintsToText = (cs: Constraint[] | undefined): string =>
+  (cs ?? []).map((c) => `${c.attribute} ${c.operator ?? '='} ${c.value}`).join('\n')
 
 // Form → RuntimeSpec. Empty optionals are excluded to fit the server schema (discriminatedUnion). Capabilities are NOT
 // sent — the control plane fills them (declared ∪ auto-derived) at register time, so the hardened-runtime set has one owner.
@@ -156,6 +236,11 @@ function buildSpec(f: Fields, submitVersion?: string): Record<string, unknown> {
         ...opt('browserImage', f.browserImage),
       }
     : {}
+  // Runtime-side placement binding (operator-owned) — parsed from the multi-line text inputs.
+  const gpu = posInt(f.gpu)
+  const nodeSelector = parseKeyValues(f.nodeSelector)
+  const tolerations = parseTolerations(f.tolerations)
+  const constraints = parseConstraints(f.constraints)
   if (f.kind === 'nomad')
     return {
       ...base,
@@ -165,6 +250,8 @@ function buildSpec(f: Fields, submitVersion?: string): Record<string, unknown> {
       ...(csv(f.datacenters).length ? { datacenters: csv(f.datacenters) } : {}),
       ...opt('runtime', f.runtime),
       ...opt('authSecret', f.authSecret),
+      ...(gpu !== undefined ? { gpu } : {}),
+      ...(constraints.length ? { constraints } : {}),
       ...envelope,
       ...topology,
     }
@@ -178,6 +265,9 @@ function buildSpec(f: Fields, submitVersion?: string): Record<string, unknown> {
     ...opt('server', f.server),
     ...opt('authSecret', f.authSecret),
     ...opt('kubeconfigSecret', f.kubeconfigSecret),
+    ...(gpu !== undefined ? { gpu } : {}),
+    ...(Object.keys(nodeSelector).length ? { nodeSelector } : {}),
+    ...(tolerations.length ? { tolerations } : {}),
     ...envelope,
     ...topology,
   }
@@ -520,6 +610,58 @@ export function RegisterRuntimeForm({
               autoComplete="off"
             />
           </Field>
+        </div>
+      )}
+
+      {/* Node placement binding (operator-owned) — pin jobs to a node pool + reserve GPUs; the cluster's own scheduler places onto the matching node. */}
+      {cluster && (
+        <div className="space-y-4 rounded-lg border bg-card px-4 py-3.5 shadow-raise">
+          <div className="space-y-0.5">
+            <p className="text-[13px] font-[510] text-foreground">{t('placementTitle')}</p>
+            <p className="text-[12px] text-faint">{t('placementHint')}</p>
+          </div>
+          <Field label={t('gpuLabel')} hint={t('gpuHint')}>
+            <Input
+              value={f.gpu}
+              onChange={(e) => set('gpu', e.target.value)}
+              placeholder="1"
+              inputMode="numeric"
+              autoComplete="off"
+            />
+          </Field>
+          {f.kind === 'k8s' && (
+            <>
+              <Field label={t('nodeSelectorLabel')} hint={t('nodeSelectorHint')}>
+                <textarea
+                  value={f.nodeSelector}
+                  onChange={(e) => set('nodeSelector', e.target.value)}
+                  placeholder="nvidia.com/gpu.present=true"
+                  rows={2}
+                  className="w-full rounded-md border border-border bg-card px-2.5 py-1.5 font-mono text-[13px] shadow-raise focus:border-primary focus:outline-none focus:ring-2 focus:ring-ring/25"
+                />
+              </Field>
+              <Field label={t('tolerationsLabel')} hint={t('tolerationsHint')}>
+                <textarea
+                  value={f.tolerations}
+                  onChange={(e) => set('tolerations', e.target.value)}
+                  placeholder="nvidia.com/gpu:NoSchedule"
+                  rows={2}
+                  className="w-full rounded-md border border-border bg-card px-2.5 py-1.5 font-mono text-[13px] shadow-raise focus:border-primary focus:outline-none focus:ring-2 focus:ring-ring/25"
+                />
+              </Field>
+            </>
+          )}
+          {f.kind === 'nomad' && (
+            <Field label={t('constraintsLabel')} hint={t('constraintsHint')}>
+              <textarea
+                value={f.constraints}
+                onChange={(e) => set('constraints', e.target.value)}
+                placeholder="${node.class} = gpu"
+                rows={2}
+                className="w-full rounded-md border border-border bg-card px-2.5 py-1.5 font-mono text-[13px] shadow-raise focus:border-primary focus:outline-none focus:ring-2 focus:ring-ring/25"
+              />
+            </Field>
+          )}
         </div>
       )}
 

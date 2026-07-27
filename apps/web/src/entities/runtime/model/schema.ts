@@ -42,6 +42,22 @@ export const runtimeSpecSchema = z
     runtimeClass: z.string().optional(),
     server: z.string().optional(),
     kubeconfigSecret: z.string().optional(),
+    // runtime-side placement binding (operator-owned) — GPU + node targeting (k8s nodeSelector/tolerations, nomad constraints).
+    gpu: z.number().optional(),
+    nodeSelector: z.record(z.string(), z.string()).optional(),
+    tolerations: z
+      .array(
+        z.object({
+          key: z.string(),
+          operator: z.string().optional(),
+          value: z.string().optional(),
+          effect: z.string().optional(),
+        }),
+      )
+      .optional(),
+    constraints: z
+      .array(z.object({ attribute: z.string(), operator: z.string().optional(), value: z.string() }))
+      .optional(),
     // common (nomad/k8s)
     image: z.string().optional(),
     namespace: z.string().optional(),
@@ -94,6 +110,10 @@ const inspectNodeSchema = z.object({
   address: z.string().optional(),
   diskMbTotal: z.number().optional(),
   diskMbUsed: z.number().optional(),
+  // GPU composition (best-effort) — total/committed GPUs on the node + the product/model.
+  gpuTotal: z.number().optional(),
+  gpuUsed: z.number().optional(),
+  gpuProduct: z.string().optional(),
 })
 const inspectWorkloadSchema = z.object({
   id: z.string(),

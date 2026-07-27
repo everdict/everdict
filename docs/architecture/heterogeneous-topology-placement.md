@@ -126,6 +126,22 @@ A spec with no `requires` (or all-`linux`) and `replicas:1` derives no new capab
 renders byte-identical Nomad/K8s/Docker output → existing `topology.test.ts`/`k8s.test.ts`/`nomad-runtime.test.ts`
 golden assertions unchanged. New paths engage only when a service declares a non-Linux OS or `replicas>1`.
 
+## Runtime-side placement binding (GPU / node pool) — realized
+
+The "runtime-owned binding" named in the principle above is a concrete, additive part of `RuntimeSpec`
+(`packages/contracts/src/infra/runtime-spec.ts`), set by whoever registers the runtime — never on the harness:
+
+- Shared (nomad + k8s): `gpu?: number` — reserve N GPUs per job. k8s → `nvidia.com/gpu` requests=limits
+  (`buildK8sJob`); nomad → `device "nvidia/gpu" { count = N }` (`buildNomadJob`).
+- k8s: `nodeSelector?` (pin to a node pool) + `tolerations?` (schedule onto tainted GPU nodes) → the pod spec.
+- nomad: `constraints?: {attribute, operator?, value}[]` → task-group `Constraint {LTarget, Operand, RTarget}`.
+
+They flow `RuntimeSpec → k8sRuntimeOptions/nomadRuntimeOptions` (`build-runtime-backend.ts`) `→
+K8s/NomadBackendOptions → the job builder`. Coarse routing stays capability-based (a harness picks a runtime;
+unmet = grey badge); the fine-grained "put THIS job on a GPU node" is exactly this adapter-level binding — below
+the harness seam, as the principle requires. GPU as a harness-declared *capability* (auto-routing) is deliberately
+deferred (it would move GPU into the harness contract — out of scope here).
+
 ## Slices
 
 - **P1 — capability + gate (infra-agnostic core, mixed-OS placement).** `TopologyService.requires.os` +

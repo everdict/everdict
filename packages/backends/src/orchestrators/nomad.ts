@@ -66,6 +66,10 @@ export interface NomadBackendOptions {
   secretEnv?: Record<string, string>; // auth to inject into the alloc (e.g. CLAUDE_CODE_OAUTH_TOKEN). The default when secrets is absent.
   secrets?: SecretProvider; // per-tenant secret scoping — inject only that tenant's keys per job (no leakage).
   datacenters?: string[];
+  // Runtime-side placement binding (from RuntimeSpec, operator-owned) — reserve N GPUs per job + pin jobs to
+  // matching nodes. The harness stays infra-agnostic; the cluster's own scheduler places onto the matching node.
+  gpu?: number;
+  constraints?: Array<{ attribute: string; operator?: string; value: string }>;
   runtime?: string; // docker isolation runtime (e.g. "runsc" = gVisor). trustZones takes precedence if present.
   namespace?: string; // default namespace (when there's no tenant zone)
   trustZones?: TrustZonePolicy; // per-tenant isolation policy — enforces runtime/namespace per job.
@@ -106,7 +110,7 @@ interface NomadTask {
   // auth = docker registry auth (the JSON API representation of the HCL auth block = an array) — when case.image is a workspace registry.
   Config: { image: string; runtime?: string; auth?: Array<{ username: string; password: string }> };
   Env: Record<string, string>;
-  Resources: { CPU: number; MemoryMB: number };
+  Resources: { CPU: number; MemoryMB: number; Devices?: Array<{ Name: string; Count: number }> };
 }
 export interface NomadJobSpec {
   Job: {
@@ -117,6 +121,7 @@ export interface NomadJobSpec {
     TaskGroups: Array<{
       Name: string;
       Count: number;
+      Constraints?: Array<{ LTarget: string; Operand: string; RTarget: string }>;
       RestartPolicy: { Attempts: number; Mode: string };
       Tasks: NomadTask[];
     }>;
@@ -200,14 +205,28 @@ export function nomadNodeResources(
   | "address"
   | "diskMbTotal"
   | "diskMbUsed"
+  | "gpuTotal"
+  | "gpuProduct"
 > {
   try {
     const d = JSON.parse(text) as {
-      NodeResources?: { Cpu?: { CpuShares?: number }; Memory?: { MemoryMB?: number } };
+      NodeResources?: {
+        Cpu?: { CpuShares?: number };
+        Memory?: { MemoryMB?: number };
+        Devices?: Array<{ Type?: string; Vendor?: string; Name?: string; Instances?: unknown[] }>;
+      };
       Attributes?: Record<string, string | undefined>;
     };
     const cpu = d.NodeResources?.Cpu?.CpuShares;
     const mem = d.NodeResources?.Memory?.MemoryMB;
+    // GPU fingerprint — Nomad's device plugin reports gpu devices under NodeResources.Devices (Type "gpu"). The node's
+    // GPU count = the sum of their instances; the product/model is the first gpu device's vendor + name.
+    const gpuDevices = (d.NodeResources?.Devices ?? []).filter((dev) => dev.Type === "gpu");
+    const gpuTotal = gpuDevices.reduce((sum, dev) => sum + (dev.Instances?.length ?? 0), 0) || undefined;
+    const gpuProduct =
+      gpuDevices.length > 0
+        ? [gpuDevices[0]?.Vendor, gpuDevices[0]?.Name].filter(Boolean).join(" ") || undefined
+        : undefined;
     const attr = d.Attributes ?? {};
     const os = [attr["os.name"], attr["os.version"]].filter(Boolean).join(" ");
     const kernel = [attr["kernel.name"], attr["kernel.version"]].filter(Boolean).join(" ");
@@ -232,6 +251,8 @@ export function nomadNodeResources(
       ...(attr["unique.network.ip-address"] ? { address: attr["unique.network.ip-address"] } : {}),
       ...(diskMbTotal !== undefined ? { diskMbTotal } : {}),
       ...(diskMbUsed !== undefined ? { diskMbUsed } : {}),
+      ...(gpuTotal !== undefined ? { gpuTotal } : {}),
+      ...(gpuProduct ? { gpuProduct } : {}),
     };
   } catch {
     return {};
@@ -336,6 +357,12 @@ export function buildNomadJob(job: CaseJob, opts: NomadBackendOptions, jobId?: s
     registryAuth && imageUsesRegistryHost(image, registryAuth.host)
       ? [{ username: registryAuth.username ?? "everdict", password: registryAuth.password }]
       : undefined;
+  // Runtime-side node constraints (operator-owned) → Nomad's {LTarget, Operand, RTarget} form.
+  const constraints = opts.constraints?.map((c) => ({
+    LTarget: c.attribute,
+    Operand: c.operator ?? "=",
+    RTarget: c.value,
+  }));
   return {
     Job: {
       ID: jobId ?? nomadJobId(job),
@@ -346,6 +373,7 @@ export function buildNomadJob(job: CaseJob, opts: NomadBackendOptions, jobId?: s
         {
           Name: "eval",
           Count: 1,
+          ...(constraints && constraints.length > 0 ? { Constraints: constraints } : {}),
           RestartPolicy: { Attempts: 0, Mode: "fail" },
           Tasks: [
             {
@@ -367,6 +395,7 @@ export function buildNomadJob(job: CaseJob, opts: NomadBackendOptions, jobId?: s
                   (job.harnessSpec?.kind === "command" ? job.harnessSpec.resources?.memoryMb : undefined) ??
                   opts.memMb ??
                   1024,
+                ...(opts.gpu !== undefined ? { Devices: [{ Name: "nvidia/gpu", Count: opts.gpu }] } : {}),
               },
             },
           ],

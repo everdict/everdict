@@ -76,6 +76,16 @@ describe("nomadRuntimeOptions (external cluster API auth)", () => {
     expect(opts.apiToken).toBeUndefined();
     expect(opts.secretEnv).toEqual({ ANTHROPIC_API_KEY: "sk-model" });
   });
+
+  it("passes the runtime-side placement binding (gpu + constraints) through to the backend options", () => {
+    const opts = nomadRuntimeOptions({
+      ...spec(),
+      gpu: 2,
+      constraints: [{ attribute: "${node.class}", operator: "=", value: "gpu" }],
+    });
+    expect(opts.gpu).toBe(2);
+    expect(opts.constraints).toEqual([{ attribute: "${node.class}", operator: "=", value: "gpu" }]);
+  });
 });
 
 describe("k8sRuntimeOptions (external cluster API auth)", () => {
@@ -114,5 +124,22 @@ describe("k8sRuntimeOptions (external cluster API auth)", () => {
     expect(opts.apiToken).toBe("bearer-xyz");
     // Both cluster credentials (token + kubeconfig) removed — only the model key remains (never expose cluster credentials to an untrusted agent).
     expect(opts.secretEnv).toEqual({ OPENAI_API_KEY: "sk-model" });
+  });
+
+  it("passes the runtime-side placement binding (gpu + nodeSelector + tolerations) through to the backend options", () => {
+    const spec: Extract<RuntimeSpec, { kind: "k8s" }> = {
+      kind: "k8s",
+      id: "rt",
+      version: "1.0.0",
+      tags: [],
+      image: "img",
+      gpu: 4,
+      nodeSelector: { "nvidia.com/gpu.present": "true" },
+      tolerations: [{ key: "nvidia.com/gpu", operator: "Exists", effect: "NoSchedule" }],
+    };
+    const opts = k8sRuntimeOptions(spec);
+    expect(opts.gpu).toBe(4);
+    expect(opts.nodeSelector).toEqual({ "nvidia.com/gpu.present": "true" });
+    expect(opts.tolerations).toEqual([{ key: "nvidia.com/gpu", operator: "Exists", effect: "NoSchedule" }]);
   });
 });

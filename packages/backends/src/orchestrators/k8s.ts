@@ -71,6 +71,8 @@ export interface K8sApi {
         agentVersion?: string;
         address?: string;
         diskMbTotal?: number;
+        gpuTotal?: number;
+        gpuProduct?: string;
       }>
     | undefined
   >; // cluster composition + allocatable resources + node identity
@@ -282,11 +284,11 @@ export function kubectlApi(
       if (res.code !== 0) return undefined;
       try {
         const items = (JSON.parse(res.stdout).items ?? []) as Array<{
-          metadata?: { name?: string };
+          metadata?: { name?: string; labels?: Record<string, string> };
           spec?: { unschedulable?: boolean };
           status?: {
             conditions?: Array<{ type?: string; status?: string }>;
-            allocatable?: { cpu?: string; memory?: string; "ephemeral-storage"?: string };
+            allocatable?: { cpu?: string; memory?: string; "ephemeral-storage"?: string; "nvidia.com/gpu"?: string };
             nodeInfo?: {
               osImage?: string;
               architecture?: string;
@@ -305,6 +307,10 @@ export function kubectlApi(
           // Allocatable ephemeral-storage as the disk-total fallback; nodeFsStats (kubelet summary) refines it.
           const diskMbTotal = k8sMemToMiB(n.status?.allocatable?.["ephemeral-storage"]);
           const address = (n.status?.addresses ?? []).find((a) => a.type === "InternalIP")?.address;
+          // GPU composition — allocatable "nvidia.com/gpu" is a plain integer string; the model is a node label.
+          const gpuRaw = Number(n.status?.allocatable?.["nvidia.com/gpu"]);
+          const gpuTotal = Number.isFinite(gpuRaw) && gpuRaw > 0 ? gpuRaw : undefined;
+          const gpuProduct = n.metadata?.labels?.["nvidia.com/gpu.product"];
           return {
             name: n.metadata?.name ?? "node",
             ready,
@@ -319,6 +325,8 @@ export function kubectlApi(
             ...(info?.kubeletVersion ? { agentVersion: info.kubeletVersion } : {}),
             ...(address ? { address } : {}),
             ...(diskMbTotal !== undefined ? { diskMbTotal } : {}),
+            ...(gpuTotal !== undefined ? { gpuTotal } : {}),
+            ...(gpuProduct ? { gpuProduct } : {}),
           };
         });
       } catch {
@@ -516,6 +524,11 @@ export interface K8sBackendOptions {
   secrets?: SecretProvider; // per-tenant secret scoping
   namespace?: string; // default namespace (when there's no tenant zone)
   runtimeClass?: string; // explicit runtimeClassName (gVisor=gvisor etc.). trustZones takes precedence.
+  // Runtime-side placement binding (from RuntimeSpec, operator-owned) — pin jobs to a node pool + reserve GPUs.
+  // The harness stays infra-agnostic; the cluster's own scheduler places onto the matching node.
+  nodeSelector?: Record<string, string>;
+  tolerations?: Array<{ key: string; operator?: string; value?: string; effect?: string }>;
+  gpu?: number; // reserve N GPUs per job (→ nvidia.com/gpu requests+limits)
   trustZones?: TrustZonePolicy; // per-tenant isolation — enforces namespace + runtimeClassName
   imagePullPolicy?: string; // default IfNotPresent (kind-loaded image)
   hostNetwork?: boolean; // the pod shares the node network — to reach host services (e.g. dev LiteLLM). ⚠️ weakens isolation: dev only.
@@ -721,6 +734,15 @@ export function buildK8sJob(
   // For a workspace-registry image, imagePullSecrets (dispatch applies the Secret above together) — only when the host matches.
   const pullAuth = Boolean(job.registryAuth && imageUsesRegistryHost(image, job.registryAuth.host));
   const tenant = job.tenant ?? "default";
+  // Harness-declared cpu/mem (command kind) + runtime-declared GPU → requests=limits (deterministic OOM; the
+  // scheduler bin-packs by real weight, and an nvidia.com/gpu request lands the pod on a GPU node). Unset = defaults.
+  const hres = job.harnessSpec?.kind === "command" ? job.harnessSpec.resources : undefined;
+  const resourceReqs: Record<string, string> = {};
+  if (hres?.cpu !== undefined) resourceReqs.cpu = `${hres.cpu}m`;
+  if (hres?.memoryMb !== undefined) resourceReqs.memory = `${hres.memoryMb}Mi`;
+  if (opts.gpu !== undefined) resourceReqs["nvidia.com/gpu"] = String(opts.gpu);
+  const resources =
+    Object.keys(resourceReqs).length > 0 ? { requests: { ...resourceReqs }, limits: { ...resourceReqs } } : undefined;
   return {
     apiVersion: "batch/v1",
     kind: "Job",
@@ -738,6 +760,8 @@ export function buildK8sJob(
         spec: {
           restartPolicy: "Never",
           ...(runtimeClassName ? { runtimeClassName } : {}),
+          ...(opts.nodeSelector ? { nodeSelector: opts.nodeSelector } : {}),
+          ...(opts.tolerations ? { tolerations: opts.tolerations } : {}),
           ...(opts.hostNetwork ? { hostNetwork: true } : {}),
           ...(pullAuth ? { imagePullSecrets: [{ name: K8S_REGISTRY_AUTH_SECRET }] } : {}),
           containers: [
@@ -746,30 +770,7 @@ export function buildK8sJob(
               image,
               imagePullPolicy: opts.imagePullPolicy ?? "IfNotPresent",
               env: Object.entries(env).map(([n, value]) => ({ name: n, value })),
-              // Harness-declared resources → requests=limits (deterministic OOM instead of noisy-neighbor starvation;
-              // the scheduler bin-packs by the real weight). Unset = cluster defaults.
-              ...(job.harnessSpec?.kind === "command" && job.harnessSpec.resources
-                ? {
-                    resources: {
-                      requests: {
-                        ...(job.harnessSpec.resources.cpu !== undefined
-                          ? { cpu: `${job.harnessSpec.resources.cpu}m` }
-                          : {}),
-                        ...(job.harnessSpec.resources.memoryMb !== undefined
-                          ? { memory: `${job.harnessSpec.resources.memoryMb}Mi` }
-                          : {}),
-                      },
-                      limits: {
-                        ...(job.harnessSpec.resources.cpu !== undefined
-                          ? { cpu: `${job.harnessSpec.resources.cpu}m` }
-                          : {}),
-                        ...(job.harnessSpec.resources.memoryMb !== undefined
-                          ? { memory: `${job.harnessSpec.resources.memoryMb}Mi` }
-                          : {}),
-                      },
-                    },
-                  }
-                : {}),
+              ...(resources ? { resources } : {}),
             },
           ],
         },

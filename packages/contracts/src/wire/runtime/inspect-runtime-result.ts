@@ -42,6 +42,11 @@ export const InspectNodeSchema = z.object({
   // summary, falling back to allocatable ephemeral-storage for the total). Used may be absent when only a total is known.
   diskMbTotal: z.number().optional(),
   diskMbUsed: z.number().optional(),
+  // GPU composition (best-effort) — total schedulable GPUs on the node, the committed count, and the product/model.
+  // k8s: allocatable/capacity "nvidia.com/gpu" + the "nvidia.com/gpu.product" node label; nomad: the nvidia device fingerprint.
+  gpuTotal: z.number().optional(),
+  gpuUsed: z.number().optional(),
+  gpuProduct: z.string().optional(),
 });
 export type InspectNode = z.infer<typeof InspectNodeSchema>;
 

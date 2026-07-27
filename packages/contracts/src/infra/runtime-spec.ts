@@ -48,6 +48,22 @@ const topologyConfig = {
   browserImage: z.string().optional(), // per-case browser image (falls back to the runtime default)
 };
 
+// Runtime-side placement binding (operator-owned; docs/architecture/heterogeneous-topology-placement.md).
+// GPU / node-pool targeting lives on the RUNTIME (whoever operates the cluster), never on the harness (which stays
+// infra-agnostic — it declares WHAT it needs, not WHERE). These are the hints the cluster's own scheduler uses to
+// place a job onto a matching node; the operator registers e.g. a "GPU cluster" runtime and a "CPU pool" runtime.
+const K8sTolerationSchema = z.object({
+  key: z.string(),
+  operator: z.enum(["Exists", "Equal"]).optional(),
+  value: z.string().optional(),
+  effect: z.enum(["NoSchedule", "PreferNoSchedule", "NoExecute"]).optional(),
+});
+const NomadConstraintSchema = z.object({
+  attribute: z.string(), // e.g. "${node.class}", "${attr.platform.aws.instance-type}"
+  operator: z.string().default("="), // "=", "!=", ">", "regexp", "set_contains", …
+  value: z.string(),
+});
+
 export const NomadRuntimeSpecSchema = z.object({
   kind: z.literal("nomad"),
   ...base,
@@ -56,6 +72,10 @@ export const NomadRuntimeSpecSchema = z.object({
   runtime: z.string().optional(), // docker isolation runtime (e.g. runsc=gVisor)
   datacenters: z.array(z.string()).optional(),
   namespace: z.string().optional(),
+  // Runtime-side placement binding (operator-owned) — reserve N GPUs per job (→ device "nvidia/gpu") + pin jobs to
+  // matching nodes (constraints, e.g. ${node.class} = gpu). Keeps the harness infra-agnostic; the cluster schedules.
+  gpu: z.number().int().positive().optional(),
+  constraints: z.array(NomadConstraintSchema).optional(),
   // SecretStore key name of the token for control-plane↔Nomad API auth (ACL) — used as the X-Nomad-Token header.
   // The name only, not the value (token). This token is not injected into the alloc env (never expose the cluster token to the agent).
   authSecret: z.string().optional(),
@@ -69,6 +89,11 @@ export const K8sRuntimeSpecSchema = z.object({
   context: z.string().optional(), // kubeconfig context (relative to the control-plane host) — local kubeconfig auth
   namespace: z.string().optional(),
   runtimeClass: z.string().optional(), // runtimeClassName (gVisor=gvisor etc.)
+  // Runtime-side placement binding (operator-owned) — reserve N GPUs per job (→ nvidia.com/gpu) + pin jobs to a node
+  // pool (nodeSelector) + tolerate tainted (e.g. GPU) nodes. Keeps the harness infra-agnostic; the cluster schedules.
+  gpu: z.number().int().positive().optional(),
+  nodeSelector: z.record(z.string(), z.string()).optional(),
+  tolerations: z.array(K8sTolerationSchema).optional(),
   server: z.string().url().optional(), // external API server URL (when authenticating with a bearer token instead of context)
   // SecretStore key name of the K8s API bearer token (with server — kubectl --token). The name, not the value; never leaks into the alloc env.
   authSecret: z.string().optional(),

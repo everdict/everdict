@@ -117,6 +117,24 @@ describe("buildNomadJob", () => {
     const off = buildNomadJob(JOB, { addr: "http://nomad:4646", image: "reg/agent:1" });
     expect(off.Job.TaskGroups[0]?.Tasks[0]?.Config.image).toBe("reg/agent:1"); // default when absent
   });
+
+  it("carries the runtime-side node placement binding (constraints + GPU device) when the runtime declares it", () => {
+    const spec = buildNomadJob(JOB, {
+      addr: "http://nomad:4646",
+      image: "i",
+      gpu: 2,
+      constraints: [{ attribute: "${node.class}", value: "gpu" }], // operator defaults to "="
+    });
+    const group = spec.Job.TaskGroups[0];
+    expect(group?.Constraints).toEqual([{ LTarget: "${node.class}", Operand: "=", RTarget: "gpu" }]);
+    expect(group?.Tasks[0]?.Resources.Devices).toEqual([{ Name: "nvidia/gpu", Count: 2 }]);
+  });
+
+  it("omits constraints + GPU device when the runtime declares none (no-regression)", () => {
+    const off = buildNomadJob(JOB, { addr: "http://nomad:4646", image: "i" });
+    expect(off.Job.TaskGroups[0]?.Constraints).toBeUndefined();
+    expect(off.Job.TaskGroups[0]?.Tasks[0]?.Resources.Devices).toBeUndefined();
+  });
 });
 
 describe("fetchHttp (Nomad API auth)", () => {

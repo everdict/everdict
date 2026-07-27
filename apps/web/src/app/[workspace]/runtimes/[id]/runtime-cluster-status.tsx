@@ -770,6 +770,11 @@ function NodeMetaStrip({ node, t }: { node: InspectNode; t: ReturnType<typeof us
     rows.push({ k: t('clusterNodeOs'), v: node.arch ? `${node.os} · ${node.arch}` : node.os })
   else if (node.arch) rows.push({ k: t('clusterNodeArch'), v: node.arch })
   if (node.kernel) rows.push({ k: t('clusterNodeKernel'), v: node.kernel })
+  if (node.gpuTotal)
+    rows.push({
+      k: t('clusterNodeGpu'),
+      v: node.gpuProduct ? `${node.gpuTotal} × ${node.gpuProduct}` : String(node.gpuTotal),
+    })
   if (node.containerRuntime) rows.push({ k: t('clusterNodeRuntime'), v: node.containerRuntime })
   if (node.agentVersion) rows.push({ k: t('clusterNodeAgent'), v: node.agentVersion })
   if (node.address) rows.push({ k: t('clusterNodeIp'), v: node.address })

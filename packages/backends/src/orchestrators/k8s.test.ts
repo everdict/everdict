@@ -293,6 +293,52 @@ describe("buildK8sJob / k8sJobName", () => {
     expect(off.spec.template.spec.hostNetwork).toBeUndefined();
   });
 
+  it("carries the runtime-side node placement binding (nodeSelector, tolerations, GPU request) when the runtime declares it", () => {
+    const m = buildK8sJob(
+      JOB,
+      {
+        image: "img",
+        nodeSelector: { "nvidia.com/gpu.present": "true" },
+        tolerations: [{ key: "nvidia.com/gpu", operator: "Exists", effect: "NoSchedule" }],
+        gpu: 2,
+      },
+      "n",
+      "ns",
+    ) as unknown as {
+      spec: {
+        template: {
+          spec: {
+            nodeSelector?: Record<string, string>;
+            tolerations?: Array<Record<string, string>>;
+            containers: Array<{ resources?: Record<string, Record<string, string>> }>;
+          };
+        };
+      };
+    };
+    expect(m.spec.template.spec.nodeSelector).toEqual({ "nvidia.com/gpu.present": "true" });
+    expect(m.spec.template.spec.tolerations).toEqual([
+      { key: "nvidia.com/gpu", operator: "Exists", effect: "NoSchedule" },
+    ]);
+    // A GPU-only job (no command-harness cpu/mem) still emits a resources block, requests=limits for the device.
+    expect(m.spec.template.spec.containers[0]?.resources).toEqual({
+      requests: { "nvidia.com/gpu": "2" },
+      limits: { "nvidia.com/gpu": "2" },
+    });
+  });
+
+  it("omits node placement + GPU when the runtime declares none (no-regression)", () => {
+    const off = buildK8sJob(JOB, { image: "img" }, "n", "ns") as unknown as {
+      spec: {
+        template: {
+          spec: { nodeSelector?: unknown; tolerations?: unknown; containers: Array<{ resources?: unknown }> };
+        };
+      };
+    };
+    expect(off.spec.template.spec.nodeSelector).toBeUndefined();
+    expect(off.spec.template.spec.tolerations).toBeUndefined();
+    expect(off.spec.template.spec.containers[0]?.resources).toBeUndefined();
+  });
+
   it("a suffixed name stays within the DNS-1123 63-char cap even for a long case id", () => {
     const long = { ...JOB, evalCase: { ...JOB.evalCase, id: "x".repeat(80) } };
     const name = k8sJobName(long, "ab1cd");
