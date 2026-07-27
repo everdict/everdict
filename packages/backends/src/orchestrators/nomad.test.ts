@@ -130,6 +130,26 @@ describe("buildNomadJob", () => {
     expect(group?.Tasks[0]?.Resources.Devices).toEqual([{ Name: "nvidia/gpu", Count: 2 }]);
   });
 
+  it("a command harness's resources.gpu reserves the GPU device and wins over the runtime binding default", () => {
+    const withGpu: CaseJob = {
+      ...JOB,
+      harnessSpec: {
+        kind: "command",
+        id: "cuda",
+        version: "1",
+        setup: [],
+        command: "run",
+        env: {},
+        params: {},
+        trace: { kind: "none" },
+        resources: { gpu: 4 },
+      },
+    };
+    const spec = buildNomadJob(withGpu, { addr: "http://nomad:4646", image: "i", gpu: 1 });
+    // harness-declared 4 wins over the runtime binding's blanket 1
+    expect(spec.Job.TaskGroups[0]?.Tasks[0]?.Resources.Devices).toEqual([{ Name: "nvidia/gpu", Count: 4 }]);
+  });
+
   it("omits constraints + GPU device when the runtime declares none (no-regression)", () => {
     const off = buildNomadJob(JOB, { addr: "http://nomad:4646", image: "i" });
     expect(off.Job.TaskGroups[0]?.Constraints).toBeUndefined();

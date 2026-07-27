@@ -31,7 +31,10 @@ own runtimes ("bring your own compute") and select one per scorecard run; the co
   `gpu?` = N GPUs reserved per job (k8s → `nvidia.com/gpu` requests=limits; nomad → `device "nvidia/gpu"`).
   k8s `nodeSelector?` pins jobs to a node pool + `tolerations?` schedules onto tainted (e.g. GPU) nodes;
   nomad `constraints?` (`{attribute, operator?, value}`, e.g. `${node.class} = gpu`). Register e.g. a "GPU cluster"
-  runtime and a "CPU pool" runtime, then route a run to the right hardware by picking the runtime.
+  runtime and a "CPU pool" runtime, then route a run to the right hardware by picking the runtime. A harness can also
+  declare `resources.gpu` (a portable per-eval GPU ask, like `resources.cpu`/`memoryMb`): it derives the `gpu`
+  capability so the run auto-routes to a gpu-capable runtime (fail-fast on a non-gpu one) and reserves the device —
+  the harness count wins over the runtime binding's blanket default.
 - **topology** — for a `kind:"service"` topology harness (e.g. browser-use): a warm service pool + per-case
   browser on `orchestrator` (nomad|k8s), trace pulled from `traceSource`.
   `{ orchestrator, addr?|context?, namespace?, browserImage?, traceSource, authSecret? }`.

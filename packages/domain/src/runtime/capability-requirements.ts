@@ -49,6 +49,14 @@ export function requiredCapabilitiesForTopology(spec: ServiceHarnessSpec): Capab
   return [...req];
 }
 
+// Does this harness need a GPU? A portable resource ask (resources.gpu, like cpu/mem) — NOT a node-class/pool, which
+// stays runtime-owned. Drives the `gpu` functional capability so a gpu harness is gated to a gpu-capable runtime.
+function harnessNeedsGpu(spec: HarnessSpec): boolean {
+  if (spec.kind === "command") return (spec.resources?.gpu ?? 0) > 0;
+  if (spec.kind === "service") return spec.services.some((s) => (s.resources?.gpu ?? 0) > 0);
+  return false;
+}
+
 // The full set of capabilities a JOB requires = its case requirements ∪ (for a service/topology harness) the
 // topology's needs: docker (it stands up containers) + each service's intrinsic OS (os-windows/os-macos). This is the
 // single "what does this job need" function the placement gates use — the registered-runtime dispatcher
@@ -57,6 +65,7 @@ export function requiredCapabilitiesForTopology(spec: ServiceHarnessSpec): Capab
 // which would otherwise sit constraint-filtered / pending forever). Pure. Design: docs/architecture/heterogeneous-topology-placement.md.
 export function requiredCapabilitiesForJob(job: CaseJob): CapabilityName[] {
   const caps = new Set<CapabilityName>(requiredCapabilities(job.evalCase));
+  if (job.harnessSpec && harnessNeedsGpu(job.harnessSpec)) caps.add("gpu"); // resources.gpu → a gpu-capable runtime
   if (job.harnessSpec?.kind === "service") {
     caps.add("docker"); // a topology stands up containers even when the case carries no image
     for (const c of requiredCapabilitiesForTopology(job.harnessSpec)) caps.add(c);
@@ -69,8 +78,13 @@ export function requiredCapabilitiesForJob(job: CaseJob): CapabilityName[] {
 // + its services' OS caps; a process/command harness declares none here (its case-level needs are gated at dispatch).
 // Pure. Design: docs/architecture/heterogeneous-topology-placement.md.
 export function requiredCapabilitiesForHarness(spec: HarnessSpec): CapabilityName[] {
-  if (spec.kind !== "service") return [];
-  return ["docker", ...requiredCapabilitiesForTopology(spec)];
+  const caps = new Set<CapabilityName>();
+  if (harnessNeedsGpu(spec)) caps.add("gpu"); // a GPU-needing harness gates to a gpu-capable runtime at submit time
+  if (spec.kind === "service") {
+    caps.add("docker");
+    for (const c of requiredCapabilitiesForTopology(spec)) caps.add(c);
+  }
+  return [...caps];
 }
 
 // Derive the capabilities a registered runtime "provides" by default — the app auto-labels from the spec (like the runner's
@@ -84,6 +98,7 @@ export function defaultRuntimeCapabilities(spec: RuntimeSpec): CapabilityName[] 
     const isolationRuntime = spec.kind === "nomad" ? spec.runtime : spec.runtimeClass;
     if (isolationRuntime && isHardenedRuntime(isolationRuntime)) caps.add("sandbox");
     if (spec.traceSource) caps.add("topology"); // traceSource = topology-capable
+    if (spec.gpu !== undefined) caps.add("gpu"); // a GPU binding (reserve N GPUs) → advertise the gpu capability
   }
   return [...caps];
 }

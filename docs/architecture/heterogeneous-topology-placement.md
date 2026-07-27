@@ -45,8 +45,10 @@ requires: z.object({
 ```
 
 `requires.os` is a **capability**, not placement: a Windows Playwright image needs Windows on *any* infra. Cluster
-specifics (node class, datacenter, pool, GPU) are **NOT** here — those are runtime-owned (a runtime-side binding
-set by whoever operates the cluster), out of the harness. Unset / `linux` adds **no gate** (today's behavior).
+specifics (node class, datacenter, pool, GPU **node pool/selector**) are **NOT** here — those are runtime-owned (a
+runtime-side binding set by whoever operates the cluster), out of the harness. A GPU **count**, however, is a portable
+resource ask like cpu/memory — it lives on the harness as `resources.gpu` (see the realized section below). Unset /
+`linux` adds **no gate** (today's behavior).
 
 **Peer wiring for BYO images (`TopologyService.wiring`).** Once a service is on another node, `<svc.name>` no longer
 resolves for free (Nomad has no DNS without Consul). A third-party image also expects its peers under ITS own env
@@ -139,8 +141,14 @@ The "runtime-owned binding" named in the principle above is a concrete, additive
 They flow `RuntimeSpec → k8sRuntimeOptions/nomadRuntimeOptions` (`build-runtime-backend.ts`) `→
 K8s/NomadBackendOptions → the job builder`. Coarse routing stays capability-based (a harness picks a runtime;
 unmet = grey badge); the fine-grained "put THIS job on a GPU node" is exactly this adapter-level binding — below
-the harness seam, as the principle requires. GPU as a harness-declared *capability* (auto-routing) is deliberately
-deferred (it would move GPU into the harness contract — out of scope here).
+the harness seam, as the principle requires.
+
+**Harness-declared GPU need (realized).** A harness declares `resources.gpu: N` — a PORTABLE resource ask (exactly like
+`resources.cpu`/`memoryMb`, not a node selector). This (a) derives the `gpu` functional capability so `functionalGate`
+routes the job to a gpu-capable runtime — and fail-fast rejects it on a non-gpu one at submit — and (b) reserves N GPUs
+on the job (harness count wins over the runtime binding's blanket default). A runtime advertises `gpu` when its spec
+sets a `gpu` binding (or the operator declares it in `capabilities`). So the COUNT is portable (harness) while WHICH
+node pool it lands on is runtime-owned (binding) — the two layers compose.
 
 ## Slices
 

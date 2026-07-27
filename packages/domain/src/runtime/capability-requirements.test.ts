@@ -122,6 +122,24 @@ describe("requiredCapabilitiesForJob — case ∪ topology (the shared placement
     // a non-topology (process/command) harness declares nothing at submit — case-level caps gate at dispatch.
     expect(requiredCapabilitiesForHarness({ kind: "process", id: "cli", version: "1" })).toEqual([]);
   });
+
+  it("a command harness declaring resources.gpu requires the gpu capability (portable resource ask, like cpu/mem)", () => {
+    const cmd = {
+      kind: "command" as const,
+      id: "cuda",
+      version: "1.0.0",
+      setup: [],
+      command: "run",
+      env: {},
+      params: {},
+      trace: { kind: "none" as const },
+      resources: { gpu: 2 },
+    };
+    expect(requiredCapabilitiesForJob(job({ harnessSpec: cmd }))).toContain("gpu");
+    expect(requiredCapabilitiesForHarness(cmd)).toEqual(["gpu"]);
+    // no gpu declared → no gpu gate (cpu/mem alone don't add it)
+    expect(requiredCapabilitiesForHarness({ ...cmd, resources: { cpu: 500 } })).toEqual([]);
+  });
 });
 
 describe("defaultRuntimeCapabilities — auto-label what a registered runtime provides", () => {
@@ -141,6 +159,11 @@ describe("defaultRuntimeCapabilities — auto-label what a registered runtime pr
       ).sort(),
     ).toEqual(["docker", "topology"]);
     expect(defaultRuntimeCapabilities(rt({ kind: "local" }))).toEqual([]);
+  });
+
+  it("a gpu binding on the spec advertises the gpu capability", () => {
+    expect(defaultRuntimeCapabilities(rt({ kind: "k8s", image: "x", gpu: 2 })).sort()).toEqual(["docker", "gpu"]);
+    expect(defaultRuntimeCapabilities(rt({ kind: "k8s", image: "x" }))).not.toContain("gpu");
   });
 });
 

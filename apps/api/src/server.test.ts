@@ -1196,7 +1196,7 @@ describe("API — runners (self-hosted runner, personally owned device pairing)"
       method: "POST",
       url: "/runners",
       headers: { authorization: "Bearer x" },
-      payload: { label: "x", capabilities: ["gpu"] },
+      payload: { label: "x", capabilities: ["tpu"] }, // out-of-vocabulary (gpu is now a valid capability)
     });
     expect(res.statusCode).toBe(400);
     await app.close();

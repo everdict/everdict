@@ -326,6 +326,31 @@ describe("buildK8sJob / k8sJobName", () => {
     });
   });
 
+  it("a command harness's resources.gpu reserves nvidia.com/gpu and wins over the runtime binding default", () => {
+    const withGpu = {
+      ...JOB,
+      harnessSpec: {
+        kind: "command" as const,
+        id: "cuda",
+        version: "1",
+        setup: [],
+        command: "run",
+        env: {},
+        params: {},
+        trace: { kind: "none" as const },
+        resources: { gpu: 4 },
+      },
+    };
+    const m = buildK8sJob(withGpu, { image: "img", gpu: 1 }, "n", "ns") as unknown as {
+      spec: { template: { spec: { containers: Array<{ resources?: Record<string, Record<string, string>> }> } } };
+    };
+    // harness-declared 4 wins over the runtime binding's blanket 1
+    expect(m.spec.template.spec.containers[0]?.resources).toEqual({
+      requests: { "nvidia.com/gpu": "4" },
+      limits: { "nvidia.com/gpu": "4" },
+    });
+  });
+
   it("omits node placement + GPU when the runtime declares none (no-regression)", () => {
     const off = buildK8sJob(JOB, { image: "img" }, "n", "ns") as unknown as {
       spec: {

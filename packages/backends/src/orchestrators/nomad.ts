@@ -363,6 +363,8 @@ export function buildNomadJob(job: CaseJob, opts: NomadBackendOptions, jobId?: s
     Operand: c.operator ?? "=",
     RTarget: c.value,
   }));
+  // Harness-declared GPUs win over the runtime binding's blanket default (same rule as cpu/mem).
+  const gpuCount = (job.harnessSpec?.kind === "command" ? job.harnessSpec.resources?.gpu : undefined) ?? opts.gpu;
   return {
     Job: {
       ID: jobId ?? nomadJobId(job),
@@ -395,7 +397,7 @@ export function buildNomadJob(job: CaseJob, opts: NomadBackendOptions, jobId?: s
                   (job.harnessSpec?.kind === "command" ? job.harnessSpec.resources?.memoryMb : undefined) ??
                   opts.memMb ??
                   1024,
-                ...(opts.gpu !== undefined ? { Devices: [{ Name: "nvidia/gpu", Count: opts.gpu }] } : {}),
+                ...(gpuCount !== undefined ? { Devices: [{ Name: "nvidia/gpu", Count: gpuCount }] } : {}),
               },
             },
           ],

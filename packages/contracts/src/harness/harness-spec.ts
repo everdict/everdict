@@ -50,6 +50,10 @@ export type ServiceReadiness = z.infer<typeof ServiceReadinessSchema>;
 export const ServiceResourcesSchema = z.object({
   cpu: z.number().int().positive().optional(),
   memoryMb: z.number().int().positive().optional(),
+  // GPUs to reserve for this workload — a PORTABLE resource ask (like cpu/memoryMb), not a node selector. It routes
+  // the job to a gpu-capable runtime (the `gpu` capability) and reserves the device (k8s nvidia.com/gpu / nomad
+  // device); WHICH node pool it lands on is the runtime-owned binding. Harness-declared count wins over the runtime default.
+  gpu: z.number().int().positive().optional(),
 });
 export type ServiceResources = z.infer<typeof ServiceResourcesSchema>;
 

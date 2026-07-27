@@ -737,10 +737,12 @@ export function buildK8sJob(
   // Harness-declared cpu/mem (command kind) + runtime-declared GPU → requests=limits (deterministic OOM; the
   // scheduler bin-packs by real weight, and an nvidia.com/gpu request lands the pod on a GPU node). Unset = defaults.
   const hres = job.harnessSpec?.kind === "command" ? job.harnessSpec.resources : undefined;
+  // Harness-declared GPUs win over the runtime binding's blanket default (same "harness resources win" rule as cpu/mem).
+  const gpuCount = hres?.gpu ?? opts.gpu;
   const resourceReqs: Record<string, string> = {};
   if (hres?.cpu !== undefined) resourceReqs.cpu = `${hres.cpu}m`;
   if (hres?.memoryMb !== undefined) resourceReqs.memory = `${hres.memoryMb}Mi`;
-  if (opts.gpu !== undefined) resourceReqs["nvidia.com/gpu"] = String(opts.gpu);
+  if (gpuCount !== undefined) resourceReqs["nvidia.com/gpu"] = String(gpuCount);
   const resources =
     Object.keys(resourceReqs).length > 0 ? { requests: { ...resourceReqs }, limits: { ...resourceReqs } } : undefined;
   return {

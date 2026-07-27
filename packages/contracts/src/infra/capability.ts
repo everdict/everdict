@@ -25,6 +25,9 @@ export const CAPABILITY_DEFS = {
   // os-windows/os-macos (via RuntimeSpec.capabilities / self-probe) only when its node pool actually has such nodes.
   "os-windows": { kind: "functional" },
   "os-macos": { kind: "functional" },
+  // GPU need: a harness with resources.gpu > 0 gates to a gpu-capable runtime (the COUNT is a portable resource ask
+  // like cpu/mem; WHICH node pool/selector stays runtime-owned — docs/architecture/heterogeneous-topology-placement.md).
+  gpu: { kind: "functional" },
   sandbox: { kind: "security" }, // hardened isolation (gVisor/Kata/Firecracker/Hyper-V/KVM)
   "codex-login": { kind: "auth" }, // machine codex login (own-pays)
   "claude-login": { kind: "auth" }, // machine claude login (own-pays)

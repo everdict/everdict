@@ -27,8 +27,9 @@ describe("capability vocabulary — split by kind (functional/security/auth)", (
 
   it("rejects strings outside the vocabulary (no arbitrary labels)", () => {
     expect(CapabilityNameSchema.safeParse("docker").success).toBe(true);
+    expect(CapabilityNameSchema.safeParse("gpu").success).toBe(true); // gpu is now in the vocabulary (Slice 3)
     expect(CapabilityNameSchema.safeParse("repo").success).toBe(false); // old name — now git
-    expect(CapabilityNameSchema.safeParse("gpu").success).toBe(false);
+    expect(CapabilityNameSchema.safeParse("tpu").success).toBe(false); // still out of vocabulary
   });
 
   it("gives the capability list per kind", () => {
