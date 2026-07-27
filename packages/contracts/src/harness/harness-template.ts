@@ -114,6 +114,19 @@ export const InstanceOverridesSchema = z.object({
 });
 export type InstanceOverrides = z.infer<typeof InstanceOverridesSchema>;
 
+// Store provenance ANNOTATION for a pin filled from the capability store's ENVIRONMENT assets — the identity of the
+// environment capability whose image was inserted. Purely informational: `resolveHarnessInstance` never reads it (the
+// pin VALUE stays the verbatim ref — the no-rewrite invariant of docs/architecture/workspace-image-registry.md), the
+// web renders a "from store" chip from it. docs/architecture/environment-image-store.md.
+export const PinSourceSchema = z
+  .object({
+    source: z.string(), // the OWNER workspace that published the environment
+    id: z.string(),
+    version: z.string(), // the environment version whose image was inserted
+  })
+  .strict();
+export type PinSource = z.infer<typeof PinSourceSchema>;
+
 // Individual harness (instance) — a template reference + pins (slot→value, delta) + overrides (structure-invariant behavior delta). Usually one per PR/SHA.
 // version is a free string (e.g. "pr-123-sha-abc") — the registry handles non-semver in registration order.
 export const HarnessInstanceSpecSchema = z.object({
@@ -124,6 +137,7 @@ export const HarnessInstanceSpecSchema = z.object({
   // Part of the version spec so immutable (subject to specsEqual): re-registering the same version with different notes → 409. Runtime-agnostic meta, so not carried into resolve.
   description: z.string().optional(),
   pins: z.record(z.string()).default({}), // slot → value (image ref; command uses "image"/"model")
+  pinSources: z.record(PinSourceSchema).optional(), // slot → store environment provenance (annotation; resolve ignores)
   overrides: InstanceOverridesSchema.optional(), // structure-invariant behavior variation (env/body/params) — unset = image only (current)
 });
 export type HarnessInstanceSpec = z.infer<typeof HarnessInstanceSpecSchema>;

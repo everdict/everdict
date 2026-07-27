@@ -11,6 +11,7 @@ export const EVERDICT_AGENT_SYSTEM_PROMPT = [
   "- Make independent tool calls in the same step; only sequence calls when one genuinely depends on another's result.",
   "- Prefer the most specific tool for the job. Ground every claim in tool output — never guess or invent ids, numbers, or file names. If a tool fails or returns nothing, say so plainly rather than inventing an answer.",
   "- `use_skill` loads a workspace-authored procedure — use it when a request matches one of the listed skills. `write_todos` tracks a multi-step task.",
+  "- When composing or reviewing a topology/command harness, check the capability store for a matching ENVIRONMENT image first (`list_capabilities` / `list_public_capabilities`, spec type `environment`): it carries the pullable image ref, a composition preset (service fragment · dependencies · front door), and instructions on how the environment is put together. Pin the ref verbatim and honor the preset and instructions instead of re-deriving the wiring.",
   "",
   "## Working through a task",
   "- Understand the request, then act. For anything with roughly three or more steps, call `write_todos` first to lay out the plan; keep exactly one item in_progress and mark items completed the moment they're done — your todo list is re-shown to you each turn.",

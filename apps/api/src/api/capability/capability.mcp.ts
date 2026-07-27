@@ -3,7 +3,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { type McpToolContext, ok, run } from "../mcp-context.js";
 
-// Capability Store MCP tools — the MCP twin of capability.routes.ts (one entity: mcp|code|skill). The everdict
+// Capability Store MCP tools — the MCP twin of capability.routes.ts (one entity: mcp|code|skill|environment). The everdict
 // agent's read-only tool allowlist bridges list_/get_ from here, so the conversational agent can BROWSE the Store
 // (its own + shared + public) but not publish or delete.
 export function registerCapabilityTools(server: McpServer, ctx: McpToolContext): void {
@@ -29,7 +29,7 @@ export function registerCapabilityTools(server: McpServer, ctx: McpToolContext):
         "The public capability catalog — every capability published 'public' across all workspaces (latest live version each)",
       inputSchema: {},
     },
-    () => run(principal, "capabilities:read", async () => ok(await caps.listPublic())),
+    () => run(principal, "capabilities:read", async () => ok(await caps.listPublic(ws))),
   );
 
   server.registerTool(

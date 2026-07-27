@@ -1,9 +1,16 @@
 import { z } from "zod";
+import {
+  FrontDoorSpecSchema,
+  TopologyDependencySchema,
+  TopologyServiceSchema,
+  TopologyTargetSchema,
+} from "../harness/harness-spec.js";
 
-// Capability Store contracts — one discriminated `Capability` entity (kind ∈ mcp|code|skill) that a workspace's
-// members AUTHOR and PUBLISH at one of four reach tiers, and that a browsing member ADOPTS into their agent by an
-// immutable-version reference. Mirrors the Judge model|harness|code idiom (one entity, one `type` discriminant).
-// SSOT: docs/architecture/capability-store.md.
+// Capability Store contracts — one discriminated `Capability` entity (kind ∈ mcp|code|skill|environment) that a
+// workspace's members AUTHOR and PUBLISH at one of four reach tiers, and that a browsing member ADOPTS into their
+// agent (tool kinds) or consumes at harness-authoring time (environment). Mirrors the Judge model|harness|code idiom
+// (one entity, one `type` discriminant). SSOT: docs/architecture/capability-store.md +
+// docs/architecture/environment-image-store.md (the environment kind).
 
 // A capability's reach tier. Extends the private|workspace vocabulary (Views / skills / browser-profiles) with the
 // two cross-tenant tiers. `subset` fans a capability across the AUTHOR's OWN workspaces (a chosen subset of the
@@ -13,7 +20,7 @@ export const CapabilityVisibilitySchema = z.enum(["private", "workspace", "subse
 export type CapabilityVisibility = z.infer<typeof CapabilityVisibilitySchema>;
 
 // The kind discriminant (also stored as an indexed column for browse-by-type). Derived from `spec.type`.
-export const CapabilityTypeSchema = z.enum(["mcp", "code", "skill"]);
+export const CapabilityTypeSchema = z.enum(["mcp", "code", "skill", "environment"]);
 export type CapabilityType = z.infer<typeof CapabilityTypeSchema>;
 
 // The reserved OWNER workspace for FIRST-PARTY (Everdict-authored) capabilities — the default-toolset tier. Mirrors
@@ -76,10 +83,59 @@ export const SkillCapabilitySpecSchema = z.object({
 });
 export type SkillCapabilitySpec = z.infer<typeof SkillCapabilitySpecSchema>;
 
+// environment — a managed eval-environment IMAGE as a store asset: a versioned image reference plus the "wiring
+// dowry" (preset) and prose (instructions) that let a member — or a topology-composing agent — consume the
+// environment without re-discovering how it is put together. Unlike the tool kinds it is consumed at harness
+// AUTHORING time (template pins / services[].image / command image), never bridged as a runtime tool. Pull auth is a
+// per-consumer registry concern (WorkspaceSettings.imageRegistries), so no requiredSecrets on the asset.
+// SSOT: docs/architecture/environment-image-store.md.
+
+// What's inside the image — discovery metadata for the store card (a headline, not a manifest).
+export const EnvironmentContentsSchema = z
+  .object({
+    benchmark: z.string().optional(), // the benchmark this environment serves (e.g. "officeqa")
+    packages: z.array(z.string()).default([]), // headline libraries/tools baked in
+    os: z.string().optional(), // "linux" | "windows" | … — informs placement expectations
+    arch: z.string().optional(), // "amd64" | "arm64" | …
+  })
+  .strict();
+export type EnvironmentContents = z.infer<typeof EnvironmentContentsSchema>;
+
+// The wiring dowry: how a topology composes around THIS image. Every field is a suggestion consumed at AUTHORING
+// time (form prefill / agent context) — never silently applied at dispatch. Reuses the topology vocabulary verbatim
+// so a preset fragment is copy-paste-valid in a HarnessSpec (the inject-template vocabulary etc. validate for free).
+export const EnvironmentPresetSchema = z
+  .object({
+    // Suggested service fragment for running this image as a topology service: port, env defaults, readiness,
+    // resources, wiring, needs. No image (it IS this asset) and no name (the adopting template names the service) —
+    // strict, so an accidental image/name key is REJECTED, not silently stripped.
+    service: TopologyServiceSchema.omit({ image: true, name: true }).partial().strict().optional(),
+    // Stores this environment expects (postgres/redis/minio + isolateBy + inject templates).
+    dependencies: z.array(TopologyDependencySchema).default([]),
+    // Present when the image is a front-door service (how to submit/complete against it).
+    frontDoor: FrontDoorSpecSchema.optional(),
+    // Present when the environment expects a browser/OS target.
+    target: TopologyTargetSchema.optional(),
+  })
+  .strict();
+export type EnvironmentPreset = z.infer<typeof EnvironmentPresetSchema>;
+
+export const EnvironmentImageSpecSchema = z.object({
+  type: z.literal("environment"),
+  image: z.string().min(1), // fully-qualified pullable ref; digest-pinned recommended (mutable tag → publish warning)
+  contents: EnvironmentContentsSchema.optional(),
+  preset: EnvironmentPresetSchema.optional(),
+  // Markdown: how the environment is composed — entry points, conventions, seeded data, gotchas. This is the context
+  // a topology-composing agent receives; written for a reader who will wire the image into a harness.
+  instructions: z.string(),
+});
+export type EnvironmentImageSpec = z.infer<typeof EnvironmentImageSpecSchema>;
+
 export const CapabilitySpecSchema = z.discriminatedUnion("type", [
   McpToolSpecSchema,
   CodeToolSpecSchema,
   SkillCapabilitySpecSchema,
+  EnvironmentImageSpecSchema,
 ]);
 export type CapabilitySpec = z.infer<typeof CapabilitySpecSchema>;
 

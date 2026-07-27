@@ -448,3 +448,33 @@ describe("resolveHarnessInstance — process", () => {
     expect(resolved).toEqual({ kind: "process", id: "claude-code", version: "2026.06" });
   });
 });
+
+// pinSources — store provenance annotation for pins filled from environment capabilities. The pin VALUE stays the
+// verbatim ref (no-rewrite invariant); resolve must ignore the annotation entirely. environment-image-store.md.
+describe("HarnessInstanceSpec.pinSources (store provenance annotation)", () => {
+  it("round-trips through the schema and is ignored by resolve — the pinned image is byte-identical", () => {
+    const instance = HarnessInstanceSpecSchema.parse({
+      template: { id: "bu", version: "1" },
+      id: "bu",
+      version: "pr-1",
+      pins: { planner: "ghcr.io/acme/officeqa-env@sha256:ab", browser: "b:1", action: "a:1" },
+      pinSources: { planner: { source: "acme", id: "officeqa-env", version: "1.0.0" } },
+    });
+    expect(instance.pinSources?.planner?.id).toBe("officeqa-env");
+    const resolved = resolveHarnessInstance(buTemplate, instance);
+    if (resolved.kind !== "service") throw new Error("expected service");
+    expect(resolved.services.find((s) => s.name === "planner")?.image).toBe("ghcr.io/acme/officeqa-env@sha256:ab");
+    expect("pinSources" in resolved).toBe(false);
+  });
+
+  it("rejects a malformed pin source (unknown key)", () => {
+    expect(
+      HarnessInstanceSpecSchema.safeParse({
+        template: { id: "bu", version: "1" },
+        id: "bu",
+        version: "pr-1",
+        pinSources: { planner: { source: "acme", id: "e", version: "1", image: "x" } },
+      }).success,
+    ).toBe(false);
+  });
+});

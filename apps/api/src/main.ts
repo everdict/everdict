@@ -448,10 +448,15 @@ async function main(): Promise<void> {
     // Workspace Skills — SKILL.md procedures the members author (dual-scoped private|workspace) + skill-generate (drafts
     // a skill from a description via the workspace's registered model + key; same secret tiers/base as the model probe).
     skillService: new SkillService({ store: skillStore }),
-    // Capability Store — one discriminated versioned entity (mcp|code|skill) members author, publish (private|workspace|
-    // subset|public), and adopt into their agent. Reach beyond the workspace: subset fans across the author's own
-    // workspaces, public exposes to everyone (admin-gated). See docs/architecture/capability-store.md.
-    capabilityService: new CapabilityService({ store: capabilityStore }),
+    // Capability Store — one discriminated versioned entity (mcp|code|skill|environment) members author, publish
+    // (private|workspace|subset|public), and adopt into their agent (tool kinds) or consume at harness-authoring time
+    // (environment). Reach beyond the workspace: subset fans across the author's own workspaces, public exposes to
+    // everyone (admin-gated). Environment publishes classify their image against the workspace's registries
+    // (warn-not-block). See docs/architecture/capability-store.md + docs/architecture/environment-image-store.md.
+    capabilityService: new CapabilityService({
+      store: capabilityStore,
+      registryCoordinates: (workspace) => imageRegistryService.coordinates(workspace),
+    }),
     skillGenerator: new SkillGenerator({
       models: modelRegistry,
       scopedSecretsFor,

@@ -1,4 +1,9 @@
-import { type CapabilityRecord, ForbiddenError, NotFoundError } from "@everdict/contracts";
+import {
+  type CapabilityRecord,
+  ForbiddenError,
+  type ImageRegistryCoordinates,
+  NotFoundError,
+} from "@everdict/contracts";
 import { compareVersions } from "@everdict/domain";
 import { describe, expect, it } from "vitest";
 import type { CapabilityStore } from "../ports/capability-store.js";
@@ -163,5 +168,85 @@ describe("CapabilityService", () => {
     await expect(s.deleteVersion("acme", "t", "1.0.0", member("bob"))).rejects.toBeInstanceOf(ForbiddenError);
     await expect(s.deleteVersion("acme", "t", "9.9.9", member("alice"))).rejects.toBeInstanceOf(NotFoundError);
     await expect(s.deleteVersion("acme", "t", "1.0.0", member("alice"))).resolves.toBeUndefined();
+  });
+});
+
+// Environment kind — publish-time image classification (docs/architecture/environment-image-store.md). Warn-not-block:
+// a warning never fails the save, and a coordinates failure yields no warnings.
+describe("CapabilityService — environment image warnings", () => {
+  const environment = (image: string) => ({
+    name: "officeqa-env",
+    description: "OfficeQA eval environment",
+    spec: { type: "environment" as const, image, instructions: "wire it" },
+  });
+  const registrySvc = (coordinates: () => Promise<ImageRegistryCoordinates[]>) =>
+    new CapabilityService({
+      store: fakeStore(),
+      registryCoordinates: coordinates,
+      now: () => "2026-07-27T00:00:00.000Z",
+    });
+  const ghcrAcme = async (): Promise<ImageRegistryCoordinates[]> => [{ host: "ghcr.io", namespace: "acme" }];
+
+  it("publishes a digest-pinned workspace image with no warnings", async () => {
+    const s = registrySvc(ghcrAcme);
+    const result = await s.save(
+      "acme",
+      member("alice"),
+      "officeqa-env",
+      environment("ghcr.io/acme/officeqa@sha256:ab12"),
+    );
+    expect(result).toMatchObject({ version: "1.0.0", created: true });
+    expect(result.imageWarnings).toBeUndefined();
+  });
+
+  it("warns (and still saves) on an unqualified image and on a mutable tag — including the idempotent no-op path", async () => {
+    const s = registrySvc(ghcrAcme);
+    const unqualified = await s.save("acme", member("alice"), "e1", environment("officeqa-env:v3"));
+    expect(unqualified.created).toBe(true);
+    expect(unqualified.imageWarnings).toEqual([{ image: "officeqa-env:v3", class: "unqualified" }]);
+    const mutable = await s.save("acme", member("alice"), "e2", environment("ghcr.io/acme/officeqa:latest"));
+    expect(mutable.imageWarnings).toEqual([{ image: "ghcr.io/acme/officeqa:latest", class: "mutable-tag" }]);
+    const noop = await s.save("acme", member("alice"), "e2", environment("ghcr.io/acme/officeqa:latest"));
+    expect(noop.created).toBe(false);
+    expect(noop.imageWarnings).toEqual([{ image: "ghcr.io/acme/officeqa:latest", class: "mutable-tag" }]);
+  });
+
+  it("never blocks a publish when the coordinates provider fails, and stays warning-free without a provider", async () => {
+    const failing = registrySvc(async () => {
+      throw new Error("registry lookup down");
+    });
+    const saved = await failing.save("acme", member("alice"), "e", environment("ghcr.io/acme/officeqa@sha256:ab"));
+    expect(saved.created).toBe(true);
+    expect(saved.imageWarnings).toBeUndefined();
+    const bare = svc(); // no registryCoordinates dep at all
+    const result = await bare.save("acme", member("alice"), "e", environment("officeqa-env:v3"));
+    expect(result.imageWarnings).toBeUndefined();
+  });
+
+  it("does not classify tool kinds — a skill save carries no imageWarnings", async () => {
+    const s = registrySvc(ghcrAcme);
+    const result = await s.save("acme", member("alice"), "triage", skill());
+    expect(result.imageWarnings).toBeUndefined();
+  });
+
+  it("annotates environment reads with the VIEWER-relative image class (publisher sees workspace, a foreign viewer external)", async () => {
+    const store = fakeStore();
+    const s = new CapabilityService({
+      store,
+      // only acme has the ghcr.io/acme registry registered — the classification is per-viewer
+      registryCoordinates: async (workspace) => (workspace === "acme" ? [{ host: "ghcr.io", namespace: "acme" }] : []),
+      now: () => "2026-07-27T00:00:00.000Z",
+    });
+    await s.save("acme", admin("alice"), "officeqa-env", {
+      ...environment("ghcr.io/acme/officeqa@sha256:ab"),
+      visibility: "public",
+    });
+    expect((await s.get("acme", "officeqa-env", "alice")).imageClass).toBe("workspace");
+    const publicForBeta = await s.listPublic("beta");
+    expect(publicForBeta.map((r) => [r.id, r.imageClass])).toEqual([["officeqa-env", "external"]]);
+    // tool kinds are never annotated
+    await s.save("acme", member("alice"), "triage", { ...skill(), visibility: "workspace" });
+    const listed = await s.list("acme", "alice");
+    expect(listed.find((r) => r.id === "triage")?.imageClass).toBeUndefined();
   });
 });

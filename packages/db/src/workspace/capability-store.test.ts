@@ -102,4 +102,29 @@ describe("InMemoryCapabilityStore", () => {
     await store.softDelete("acme", "triage", "1.0.0");
     expect(await store.creatorOfVersion("acme", "triage", "1.0.0")).toBeUndefined();
   });
+
+  it("round-trips the environment kind — an image asset with its preset dowry survives the store intact", async () => {
+    const store = new InMemoryCapabilityStore();
+    await store.register(
+      cap({
+        id: "officeqa-env",
+        name: "officeqa-env",
+        spec: {
+          type: "environment",
+          image: "ghcr.io/acme/officeqa-env@sha256:ab12",
+          contents: { benchmark: "officeqa", packages: ["libreoffice"] },
+          preset: {
+            service: { port: 8000, env: { LOG_LEVEL: "info" } },
+            dependencies: [{ store: "redis", role: "bus", purpose: "plumbing", isolateBy: "key-prefix" }],
+          },
+          instructions: "Entry point serves on :8000.",
+        },
+      }),
+    );
+    const read = await store.get("acme", "officeqa-env");
+    expect(read?.spec.type).toBe("environment");
+    if (read?.spec.type !== "environment") throw new Error("expected environment");
+    expect(read.spec.image).toBe("ghcr.io/acme/officeqa-env@sha256:ab12");
+    expect(read.spec.preset?.dependencies[0]?.store).toBe("redis");
+  });
 });

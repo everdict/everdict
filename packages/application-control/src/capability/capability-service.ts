@@ -3,16 +3,20 @@ import {
   type CapabilitySpec,
   type CapabilityVisibility,
   ForbiddenError,
+  type ImageRefClass,
+  type ImageRegistryCoordinates,
+  type ImageWarning,
   NotFoundError,
 } from "@everdict/contracts";
-import { canConsumeCapability, specsEqual } from "@everdict/domain";
+import { canConsumeCapability, classifyImageRef, imageWarnings, specsEqual } from "@everdict/domain";
 import type { CapabilityStore } from "../ports/capability-store.js";
 
-// Capability Store CRUD — one discriminated versioned entity (mcp|code|skill) members author, publish at a reach tier
-// (private|workspace|subset|public), and adopt into their agent. Versioned like the registry entities (immutable
-// versions; a content edit auto patch-bumps so `latest` moves while pinned adoptions stay reproducible) but with
-// per-capability VISIBILITY (canConsumeCapability, @everdict/domain) instead of the `_shared` fallback. See
-// docs/architecture/capability-store.md.
+// Capability Store CRUD — one discriminated versioned entity (mcp|code|skill|environment) members author, publish at
+// a reach tier (private|workspace|subset|public), and adopt into their agent (tool kinds) or consume at
+// harness-authoring time (environment). Versioned like the registry entities (immutable versions; a content edit auto
+// patch-bumps so `latest` moves while pinned adoptions stay reproducible) but with per-capability VISIBILITY
+// (canConsumeCapability, @everdict/domain) instead of the `_shared` fallback. See
+// docs/architecture/capability-store.md + docs/architecture/environment-image-store.md.
 
 // The author upsert body — everything but the coordinates (id from the path, version assigned).
 export interface CapabilityUpsert {
@@ -31,6 +35,9 @@ export interface SaveCapabilityResult {
   id: string;
   version: string;
   created: boolean;
+  // Environment kind only, warn-not-block (the harness-registration convention): the image classifies
+  // local/unqualified (no pull guarantee off the build machine) or is pinned by a mutable tag.
+  imageWarnings?: ImageWarning[];
 }
 
 // Who is acting — the caller's subject + whether they are a workspace admin. `isAdmin` gates publishing to `public`
@@ -40,8 +47,17 @@ export interface CapabilityActor {
   isAdmin: boolean;
 }
 
+// A read view: the record + (environment kind only) its image classified against the VIEWER's workspace registries —
+// viewer-relative provenance (the same ref can be `workspace` for the publisher and `external` for a consumer), so it
+// is annotated per read, never persisted. Serves the store's pull-readiness badge (the control plane classifies;
+// the web's client-side classify mirror was deleted — the harness `imageClasses` precedent).
+export type CapabilityView = CapabilityRecord & { imageClass?: ImageRefClass };
+
 export interface CapabilityServiceDeps {
   store: CapabilityStore;
+  // The workspace's registered image-registry coordinates (no secrets) — classifies an environment capability's
+  // image at publish time (docs/architecture/environment-image-store.md). Unset = no classification, no warnings.
+  registryCoordinates?: (workspace: string) => Promise<ImageRegistryCoordinates[]>;
   now?: () => string;
 }
 
@@ -80,6 +96,10 @@ export class CapabilityService {
     id: string,
     body: CapabilityUpsert,
   ): Promise<SaveCapabilityResult> {
+    // Computed on every save path (create / new version / idempotent no-op) — the author benefits either way.
+    const warnings = await this.environmentImageWarnings(tenant, body.spec);
+    const withWarnings = (result: SaveCapabilityResult): SaveCapabilityResult =>
+      warnings.length > 0 ? { ...result, imageWarnings: warnings } : result;
     const own = await this.deps.store.versions(tenant, id);
     if (own.length > 0) {
       const latest = await this.deps.store.get(tenant, id, "latest");
@@ -90,7 +110,8 @@ export class CapabilityService {
           { id, action: "capabilities:write" },
           "Only the capability's owner or a workspace admin can publish a new version.",
         );
-      if (contentEqual(latest, body)) return { workspace: tenant, id, version: latest.version, created: false };
+      if (contentEqual(latest, body))
+        return withWarnings({ workspace: tenant, id, version: latest.version, created: false });
       const version = nextVersion(latest.version, new Set(own));
       await this.deps.store.register({
         id,
@@ -105,7 +126,7 @@ export class CapabilityService {
         createdBy: actor.subject,
         createdAt: this.now(),
       });
-      return { workspace: tenant, id, version, created: true };
+      return withWarnings({ workspace: tenant, id, version, created: true });
     }
     const visibility = body.visibility ?? "private";
     if (visibility === "public" && !actor.isAdmin)
@@ -127,26 +148,54 @@ export class CapabilityService {
       createdBy: actor.subject,
       createdAt: this.now(),
     });
-    return { workspace: tenant, id, version: "1.0.0", created: true };
+    return withWarnings({ workspace: tenant, id, version: "1.0.0", created: true });
+  }
+
+  // Classify an environment capability's image against the workspace's registered registries — warn-not-block, so a
+  // coordinates failure (or an unset provider) yields no warnings, never a blocked publish.
+  private async environmentImageWarnings(tenant: string, spec: CapabilitySpec): Promise<ImageWarning[]> {
+    if (spec.type !== "environment" || !this.deps.registryCoordinates) return [];
+    try {
+      return imageWarnings([spec.image], await this.deps.registryCoordinates(tenant));
+    } catch {
+      return [];
+    }
   }
 
   // Browse "my store" — own visible + subset shared to me (excludes the global public catalog).
-  list(tenant: string, subject: string): Promise<CapabilityRecord[]> {
-    return this.deps.store.listVisible(tenant, subject);
+  async list(tenant: string, subject: string): Promise<CapabilityView[]> {
+    return this.annotate(tenant, await this.deps.store.listVisible(tenant, subject));
   }
 
-  // Browse the global public catalog.
-  listPublic(): Promise<CapabilityRecord[]> {
-    return this.deps.store.listPublic();
+  // Browse the global public catalog. `viewerTenant` classifies environment images for the CALLER's workspace.
+  async listPublic(viewerTenant?: string): Promise<CapabilityView[]> {
+    return this.annotate(viewerTenant, await this.deps.store.listPublic());
   }
 
   // A single capability the caller can see, in their own workspace (latest or an exact version). Not visible / missing
   // → 404 (no existence leak — a foreign private capability is indistinguishable from a missing one).
-  async get(tenant: string, id: string, subject: string, ref = "latest"): Promise<CapabilityRecord> {
+  async get(tenant: string, id: string, subject: string, ref = "latest"): Promise<CapabilityView> {
     const record = await this.deps.store.get(tenant, id, ref);
     if (!record || !canConsumeCapability(record, { tenant, subject }))
       throw new NotFoundError("NOT_FOUND", { id, version: ref }, `capability '${id}' not found.`);
-    return record;
+    const [view] = await this.annotate(tenant, [record]);
+    if (!view) throw new NotFoundError("NOT_FOUND", { id, version: ref }, `capability '${id}' not found.`);
+    return view;
+  }
+
+  // Attach the viewer-relative image class to environment records — best-effort (a coordinates failure or an unset
+  // provider annotates nothing; browsing never fails on registry lookup).
+  private async annotate(viewerTenant: string | undefined, records: CapabilityRecord[]): Promise<CapabilityView[]> {
+    if (viewerTenant === undefined || !records.some((r) => r.spec.type === "environment")) return records;
+    let coordinates: ImageRegistryCoordinates[];
+    try {
+      coordinates = (await this.deps.registryCoordinates?.(viewerTenant)) ?? [];
+    } catch {
+      coordinates = [];
+    }
+    return records.map((r) =>
+      r.spec.type === "environment" ? { ...r, imageClass: classifyImageRef(r.spec.image, coordinates) } : r,
+    );
   }
 
   // Change a capability's reach (capability-level metadata, across every live version). Owner-or-admin; promoting to

@@ -1,6 +1,7 @@
 import { CapabilityService, RunService } from "@everdict/application-control";
 import type { Dispatcher } from "@everdict/backends";
 import { InMemoryCapabilityStore, InMemoryRunStore } from "@everdict/db";
+import { InMemoryHarnessInstanceRegistry, InMemoryHarnessTemplateRegistry } from "@everdict/registry";
 import { describe, expect, it } from "vitest";
 import { buildServer } from "../../server.js";
 
@@ -139,5 +140,174 @@ describe("capability routes", () => {
       payload: { visibility: "everyone" },
     });
     expect(badVis.statusCode).toBe(400);
+  });
+
+  // Environment kind — a managed eval-environment image published into the store, its image classified against the
+  // workspace's registries at save time (warn-not-block). docs/architecture/environment-image-store.md.
+  it("saves an environment capability, surfacing image warnings without blocking, and reads the spec back", async () => {
+    const service = new RunService({ dispatcher: unusedDispatcher, store: new InMemoryRunStore() });
+    const app = buildServer({
+      service,
+      capabilityService: new CapabilityService({
+        store: new InMemoryCapabilityStore(),
+        registryCoordinates: async () => [{ host: "ghcr.io", namespace: "acme" }],
+      }),
+    });
+
+    // digest-pinned workspace image → clean save, no warnings field
+    const clean = await app.inject({
+      method: "PUT",
+      url: "/capabilities/officeqa-env",
+      headers: acme,
+      payload: {
+        name: "officeqa-env",
+        description: "OfficeQA eval environment",
+        spec: {
+          type: "environment",
+          image: "ghcr.io/acme/officeqa-env@sha256:ab12",
+          preset: { service: { port: 8000 }, dependencies: [] },
+          instructions: "Serves on :8000.",
+        },
+        visibility: "workspace",
+      },
+    });
+    expect(clean.statusCode).toBe(200);
+    expect(clean.json()).toMatchObject({ id: "officeqa-env", version: "1.0.0", created: true });
+    expect((clean.json() as { imageWarnings?: unknown }).imageWarnings).toBeUndefined();
+
+    // unqualified image → saved anyway, warning surfaced on the response
+    const warned = await app.inject({
+      method: "PUT",
+      url: "/capabilities/local-env",
+      headers: acme,
+      payload: {
+        name: "local-env",
+        description: "a local build",
+        spec: { type: "environment", image: "officeqa-env:v3", instructions: "local only" },
+      },
+    });
+    expect(warned.statusCode).toBe(200);
+    expect(warned.json()).toMatchObject({
+      created: true,
+      imageWarnings: [{ image: "officeqa-env:v3", class: "unqualified" }],
+    });
+
+    // a preset service fragment carrying image/name is rejected at the boundary (strict fragment)
+    const badPreset = await app.inject({
+      method: "PUT",
+      url: "/capabilities/bad-env",
+      headers: acme,
+      payload: {
+        name: "bad-env",
+        description: "d",
+        spec: {
+          type: "environment",
+          image: "ghcr.io/acme/e:v1",
+          preset: { service: { image: "x:1" } },
+          instructions: "x",
+        },
+      },
+    });
+    expect(badPreset.statusCode).toBe(400);
+
+    const got = await app.inject({ method: "GET", url: "/capabilities/officeqa-env", headers: acme });
+    expect(got.statusCode).toBe(200);
+    expect(got.json()).toMatchObject({
+      spec: {
+        type: "environment",
+        image: "ghcr.io/acme/officeqa-env@sha256:ab12",
+        preset: { service: { port: 8000 } },
+      },
+      imageClass: "workspace", // viewer-relative provenance, served by the control plane
+    });
+  });
+
+  // The store→pin flow end-to-end at the HTTP layer: publish an environment, read it as a consumer, pin its image
+  // into a harness instance with the pinSources provenance annotation — the pin value stays the VERBATIM ref and the
+  // resolved spec never carries the annotation. docs/architecture/environment-image-store.md.
+  it("pins a published environment's image into a harness instance — verbatim ref + provenance annotation round-trip", async () => {
+    const service = new RunService({ dispatcher: unusedDispatcher, store: new InMemoryRunStore() });
+    const harnessTemplates = new InMemoryHarnessTemplateRegistry();
+    const harnessInstances = new InMemoryHarnessInstanceRegistry(harnessTemplates);
+    const app = buildServer({
+      service,
+      capabilityService: new CapabilityService({
+        store: new InMemoryCapabilityStore(),
+        registryCoordinates: async () => [{ host: "ghcr.io", namespace: "acme" }],
+      }),
+      harnessTemplates,
+      harnessInstances,
+    });
+
+    // 1. publish the environment into the store
+    await app.inject({
+      method: "PUT",
+      url: "/capabilities/officeqa-env",
+      headers: acme,
+      payload: {
+        name: "officeqa-env",
+        description: "OfficeQA eval environment",
+        spec: {
+          type: "environment",
+          image: "ghcr.io/acme/officeqa-env@sha256:ab12",
+          preset: { service: { port: 8000 } },
+          instructions: "Serves on :8000.",
+        },
+        visibility: "workspace",
+      },
+    });
+
+    // 2. the consumer reads the asset (what the web picker / composing agent does)
+    const env = (await app.inject({ method: "GET", url: "/capabilities/officeqa-env", headers: acme })).json() as {
+      tenant: string;
+      id: string;
+      version: string;
+      spec: { image: string };
+    };
+
+    // 3. register the topology template (image-less slot) + the instance pinned from the store
+    const template = await app.inject({
+      method: "POST",
+      url: "/harness-templates",
+      headers: acme,
+      payload: {
+        kind: "service",
+        category: "topology",
+        id: "officeqa",
+        version: "1",
+        services: [{ name: "officeqa", port: 8000, slot: "officeqa" }],
+        dependencies: [],
+        frontDoor: { service: "officeqa", submit: "POST /runs" },
+        traceSource: { kind: "otel", endpoint: "http://otel:4318" },
+      },
+    });
+    expect(template.statusCode).toBe(201);
+    const registered = await app.inject({
+      method: "POST",
+      url: "/harnesses",
+      headers: acme,
+      payload: {
+        template: { id: "officeqa", version: "1" },
+        id: "officeqa",
+        version: "1.0.0",
+        pins: { officeqa: env.spec.image },
+        pinSources: { officeqa: { source: env.tenant, id: env.id, version: env.version } },
+      },
+    });
+    expect(registered.statusCode).toBe(201);
+    expect((registered.json() as { imageWarnings?: unknown }).imageWarnings).toBeUndefined(); // digest-pinned
+
+    // 4. the raw instance round-trips the annotation; the resolved spec carries the verbatim image and NO annotation
+    const raw = (
+      await app.inject({ method: "GET", url: "/harnesses/officeqa/1.0.0/instance", headers: acme })
+    ).json() as { pins: Record<string, string>; pinSources?: Record<string, { id: string }> };
+    expect(raw.pins.officeqa).toBe("ghcr.io/acme/officeqa-env@sha256:ab12");
+    expect(raw.pinSources?.officeqa?.id).toBe("officeqa-env");
+    const resolved = (await app.inject({ method: "GET", url: "/harnesses/officeqa/1.0.0", headers: acme })).json() as {
+      services?: { name: string; image: string }[];
+      pinSources?: unknown;
+    };
+    expect(resolved.services?.find((s) => s.name === "officeqa")?.image).toBe("ghcr.io/acme/officeqa-env@sha256:ab12");
+    expect(resolved.pinSources).toBeUndefined();
   });
 });

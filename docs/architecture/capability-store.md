@@ -321,6 +321,13 @@ The current curated `INTEGRATION_ACTIONS` (`apps/agent/src/mcp-tools.ts`) — `p
 `open_ci_setup_pr`, `get_image_push_credentials` — are the only genuine "use" actions on the base control-plane surface
 today and are the **seed** of Phase 9; they migrate into first-party integration capabilities as the richer adapters land.
 
+## Fourth kind — `environment` (managed eval-environment images)
+
+The substrate's extensibility claim has been exercised: `type:'environment'` publishes a **managed eval-environment
+image** (pullable ref + composition preset + instructions) into the same store — consumed at harness-AUTHORING time
+(template pins / service images), not adopted as an agent tool. Full design + slices:
+`docs/architecture/environment-image-store.md`.
+
 ## Non-goals (this iteration)
 - No org/group tenancy layer — `subset` is an explicit `sharedWith[]`.
 - No accept/invite handshake for `subset` — the owner shares unilaterally (revocable).

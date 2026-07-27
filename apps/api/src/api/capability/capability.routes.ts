@@ -4,7 +4,7 @@ import { capabilityDocs } from "./capability.docs.js";
 import { SaveCapabilityBodySchema } from "./request/save-capability.js";
 import { SetCapabilityVisibilityBodySchema } from "./request/set-capability-visibility.js";
 
-// Capability Store — one discriminated versioned entity (mcp|code|skill) members author, publish at a reach tier
+// Capability Store — one discriminated versioned entity (mcp|code|skill|environment) members author, publish at a reach tier
 // (private|workspace|subset|public), and adopt into their agent. Read = capabilities:read (viewer+); author/publish/
 // edit-reach/delete = capabilities:write (member+) PLUS the service's owner-or-admin gate (publishing 'public' needs
 // an admin). Cross-tenant reads (subset/public) are authorized by canConsumeCapability in the service.
@@ -53,7 +53,7 @@ export function registerCapabilityRoutes(app: FastifyInstance, deps: ServerDeps)
     if (!principal) return reply;
     try {
       gate(principal, "capabilities:read");
-      return reply.send(await deps.capabilityService.listPublic());
+      return reply.send(await deps.capabilityService.listPublic(principal.workspace));
     } catch (err) {
       return sendError(reply, err);
     }
