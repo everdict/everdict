@@ -10,12 +10,16 @@ const docs = {
   usage: {
     summary: "Get metered LLM usage",
     description:
-      "The workspace's metered LLM cost (orchestration + verdict; own-pays self-hosted runs excluded). " +
-      "Meter-only — it never blocks a run. Readable by members (viewer+, reuses scorecards:read — usage is " +
-      "part of the eval read surface). 404 when the usage meter is not configured.",
+      "The workspace's metered LLM cost (orchestration + verdict), itemized per (source × model). Own-pays " +
+      "self-hosted runs are excluded EXCEPT calls that used a workspace-designated model (the workspace's key " +
+      "paid for those tokens). Meter-only — it never blocks a run. Readable by members (viewer+, reuses " +
+      "scorecards:read — usage is part of the eval read surface). 404 when the usage meter is not configured.",
     tags: ["billing"],
     response: {
-      200: { description: "Tenant usage with per-source breakdown", ...toJsonSchema(UsageResponseSchema) },
+      200: {
+        description: "Tenant usage with per-source and per-model (source × model) breakdown",
+        ...toJsonSchema(UsageResponseSchema),
+      },
       ...errorResponses(401, 403, 404),
     },
   },

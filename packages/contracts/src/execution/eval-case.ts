@@ -79,6 +79,12 @@ export const CaseProvenanceSchema = z.object({
   ranOn: z.string(), // e.g. "self-hosted"
   runner: z.string().optional(), // runner id (device)
   by: z.string().optional(), // the subject that ran it (principal.subject)
+  // Workspace-billed models used on this run — stamped by the control plane at dispatch when a harness model's API
+  // key resolved from the WORKSPACE secret tier (the team pays for those tokens, not the user's own login). Lets the
+  // meter attribute per-model cost even on an own-pays personal self-hosted run: trace llm_calls whose `model`
+  // matches one of these are billed to the workspace, the rest stay own-pays. `id` = registered model id,
+  // `model` = its underlying model string (matches TraceEvent.llm_call.model). Absent = nothing workspace-billed.
+  billedModels: z.array(z.object({ id: z.string(), model: z.string() })).optional(),
 });
 export type CaseProvenance = z.infer<typeof CaseProvenanceSchema>;
 

@@ -6,6 +6,7 @@ import type { RecordingStore } from "@everdict/application-control";
 import type { Dispatcher as CoreDispatcher, ExecStreamHandle } from "@everdict/backends";
 import type { GradeContext, JudgeSpec } from "@everdict/contracts";
 import type { RunStore, WorkspaceSettingsStore } from "@everdict/db";
+import type { UsageMeter } from "@everdict/domain";
 import { makeGraders } from "@everdict/graders";
 import type { HarnessInstanceRegistry, ModelRegistry, RubricRegistry } from "@everdict/registry";
 import type { S3ArtifactStore } from "@everdict/storage";
@@ -54,6 +55,7 @@ export function buildRun(deps: {
   modelRegistry: ModelRegistry;
   rubricRegistry: RubricRegistry;
   budget: PersistentBudget;
+  usageMeter: UsageMeter;
   artifacts: S3ArtifactStore | undefined;
   runtimeSecretsFor: RuntimeSecretsFn;
   scopedSecretsFor: ScopedSecretsFn;
@@ -79,6 +81,7 @@ export function buildRun(deps: {
     modelRegistry,
     rubricRegistry,
     budget,
+    usageMeter,
     artifacts,
     runtimeSecretsFor,
     scopedSecretsFor,
@@ -110,6 +113,7 @@ export function buildRun(deps: {
     // layer never imports the grader impls, so the composition root supplies it (re-architecture P2 S3).
     makeGraders,
     budget,
+    usage: usageMeter, // meter-only billing usage — single runs meter per (source × model), same as a scorecard child
     requireRuntime: true, // policy (default): a run with no runtime/self target is 400 at submit — the API does not register local
     preflightPlacement, // submit-time capability gate: reject a harness/runtime mismatch (e.g. Windows topology → Linux cluster) at 400
     ...(artifacts ? { artifacts } : {}),

@@ -125,6 +125,15 @@ export interface ChatDeps {
   // Direct desktop-app download URL (DESKTOP_DOWNLOAD_URL, e.g. a GitHub Release) — offered alongside the in-app
   // download page when the operator set it.
   desktopDownloadUrl?: string;
+  // Report a conversation's metered LLM usage to the control plane (agent cost → the shared meter + enforcement
+  // budget, source "agent"). Called best-effort after a turn completes, ONLY when the model was workspace-billed.
+  // Absent (no CONTROL_PLANE_INTERNAL_TOKEN) → agent-conversation cost isn't metered. docs/architecture/usage-metering.md
+  reportUsage?: (usage: {
+    workspace: string;
+    model: string;
+    inputTokens: number;
+    outputTokens: number;
+  }) => Promise<void>;
 }
 
 export interface ChatResult {
@@ -419,6 +428,9 @@ export async function runChat(
         ? await byId(principal, deps.subagentModelRef).then((sm) => ({ transport: sm.transport, model: sm.model }))
         : undefined;
 
+    // Accumulate this conversation's token usage across turns (the loop reports tokens; the control plane prices them).
+    let inputTokens = 0;
+    let outputTokens = 0;
     await runAgentLoop({
       transport: model.transport,
       model: model.model,
@@ -426,6 +438,10 @@ export async function runChat(
       history,
       registry,
       onMessage: persist,
+      onUsage: (u) => {
+        inputTokens += u.inputTokens;
+        outputTokens += u.outputTokens;
+      },
       ...(summarize ? { summarize } : {}),
       ...(fallback ? { fallback } : {}),
       ...(subagentModel ? { subagentModel } : {}),
@@ -444,6 +460,13 @@ export async function runChat(
       ...(model.temperature !== undefined ? { temperature: model.temperature } : {}),
       ...(signal ? { signal } : {}),
     });
+    // Meter the conversation's LLM cost against the workspace when it ran on a workspace-billed model — the same rule
+    // as the harness (own-pays/personal-key/dev conversations are not metered). Best-effort: never fail the chat.
+    if (model.billed && deps.reportUsage && inputTokens + outputTokens > 0) {
+      try {
+        await deps.reportUsage({ workspace, model: model.model, inputTokens, outputTokens });
+      } catch {}
+    }
   } finally {
     await tools.close();
   }

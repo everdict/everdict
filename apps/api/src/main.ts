@@ -265,6 +265,7 @@ async function main(): Promise<void> {
     modelRegistry,
     rubricRegistry,
     budget,
+    usageMeter,
     artifacts,
     runtimeSecretsFor,
     scopedSecretsFor,
@@ -420,6 +421,7 @@ async function main(): Promise<void> {
     schedulingControl, // PUT/GET /internal/scheduling — runtime fairness dials (env stays the boot baseline)
     usageMeter, // meter-only billing usage — GET /usage
     budget, // enforcement budget config — GET/PUT /budget (usage + per-tenant limit)
+    settleBudget: (tenant, cost) => budget.settle(tenant, cost), // internal usage bridge → the 402-cap total (agent cost)
     scheduleService,
     queueService,
     viewService,

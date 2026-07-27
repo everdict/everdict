@@ -8,6 +8,10 @@ export interface ResolvedModel {
   transport: LlmTransport;
   model: string;
   temperature?: number;
+  // True when the API key came from the WORKSPACE secret tier — the workspace paid for these tokens, so the
+  // conversation's cost is metered against it (own-pays/personal key or dev fallback → false). Mirrors the harness
+  // billing rule (docs/architecture/usage-metering.md).
+  billed?: boolean;
 }
 
 export type ModelResolver = (principal: Principal) => Promise<ResolvedModel>;
@@ -26,7 +30,8 @@ async function resolveRegisteredModel(
   const spec = await modelRegistry.get(principal.workspace, modelRef);
   const keyName = modelApiKeySecretName(spec);
   const scoped = await secretStore.scopedEntries(principal.workspace, principal.subject);
-  const apiKey = scoped.workspace[keyName] ?? scoped.user[keyName];
+  const fromWorkspace = scoped.workspace[keyName];
+  const apiKey = fromWorkspace ?? scoped.user[keyName];
   if (apiKey === undefined && spec.baseUrl === undefined) {
     throw new BadRequestError(
       "BAD_REQUEST",
@@ -43,6 +48,7 @@ async function resolveRegisteredModel(
     transport,
     model: spec.model,
     ...(spec.params?.temperature !== undefined ? { temperature: spec.params.temperature } : {}),
+    billed: fromWorkspace !== undefined, // the workspace secret paid → meter this conversation's cost to the workspace
   };
 }
 

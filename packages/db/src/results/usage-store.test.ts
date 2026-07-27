@@ -19,34 +19,41 @@ function fakeClient(handler: (text: string, params?: unknown[]) => { rows: unkno
 }
 
 describe("InMemoryUsageStore", () => {
-  it("accumulates per (tenant, source) and returns every row via all()", async () => {
+  it("accumulates per (tenant, source, model) and returns every row via all()", async () => {
     const store = new InMemoryUsageStore();
-    await store.record("acme", "harness", { usd: 0.1, tokens: 100 }, 1);
-    await store.record("acme", "harness", { usd: 0.2, tokens: 200 }, 1);
-    await store.record("acme", "judge", { usd: 0.03, tokens: 30 }, 0);
+    await store.record("acme", "harness", "opus", { usd: 0.1, tokens: 100 }, 1);
+    await store.record("acme", "harness", "opus", { usd: 0.2, tokens: 200 }, 1);
+    await store.record("acme", "harness", "haiku", { usd: 0.05, tokens: 50 }, 1); // different model → its own row
+    await store.record("acme", "judge", "opus", { usd: 0.03, tokens: 30 }, 0);
     const rows = await store.all();
-    const harness = rows.find((r) => r.source === "harness");
-    expect(harness?.usd).toBeCloseTo(0.3, 10);
-    expect(harness).toMatchObject({ tenant: "acme", tokens: 300, evaluations: 2 });
-    expect(rows.find((r) => r.source === "judge")).toMatchObject({ usd: 0.03, tokens: 30, evaluations: 0 });
+    const opus = rows.find((r) => r.source === "harness" && r.model === "opus");
+    expect(opus?.usd).toBeCloseTo(0.3, 10);
+    expect(opus).toMatchObject({ tenant: "acme", tokens: 300, evaluations: 2 });
+    expect(rows.find((r) => r.source === "harness" && r.model === "haiku")).toMatchObject({ tokens: 50 });
+    expect(rows.find((r) => r.source === "judge")).toMatchObject({
+      model: "opus",
+      usd: 0.03,
+      tokens: 30,
+      evaluations: 0,
+    });
   });
 });
 
 describe("PgUsageStore", () => {
-  it("record → an atomic ON CONFLICT increment with the right params", async () => {
+  it("record → an atomic ON CONFLICT increment on (tenant, source, model) with the right params", async () => {
     const { client, calls } = fakeClient(() => ({ rows: [] }));
-    await new PgUsageStore(client).record("acme", "harness", { usd: 0.1, tokens: 100 }, 1);
+    await new PgUsageStore(client).record("acme", "harness", "opus", { usd: 0.1, tokens: 100 }, 1);
     expect(calls[0]?.text).toMatch(/INSERT INTO everdict_usage/);
-    expect(calls[0]?.text).toMatch(/ON CONFLICT \(tenant, source\) DO UPDATE/);
+    expect(calls[0]?.text).toMatch(/ON CONFLICT \(tenant, source, model\) DO UPDATE/);
     expect(calls[0]?.text).toMatch(/usd = everdict_usage\.usd \+ EXCLUDED\.usd/);
-    expect(calls[0]?.params).toEqual(["acme", "harness", 0.1, 100, 1]);
+    expect(calls[0]?.params).toEqual(["acme", "harness", "opus", 0.1, 100, 1]);
   });
 
-  it("all → coerces string numerics and normalizes the source", async () => {
+  it("all → coerces string numerics, keeps model, and normalizes the source (incl. agent)", async () => {
     const { client } = fakeClient(() => ({
-      rows: [{ tenant: "acme", source: "harness", usd: "0.5", tokens: "300", evaluations: "2" }],
+      rows: [{ tenant: "acme", source: "agent", model: "opus", usd: "0.5", tokens: "300", evaluations: "2" }],
     }));
     const rows = await new PgUsageStore(client).all();
-    expect(rows[0]).toEqual({ tenant: "acme", source: "harness", usd: 0.5, tokens: 300, evaluations: 2 });
+    expect(rows[0]).toEqual({ tenant: "acme", source: "agent", model: "opus", usd: 0.5, tokens: 300, evaluations: 2 });
   });
 });

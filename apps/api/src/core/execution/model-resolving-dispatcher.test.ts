@@ -221,4 +221,59 @@ describe("ModelResolvingDispatcher", () => {
     expect(await dispatcher.dispatch(job(commandSpec("opus")))).toBe(result);
     expect((seen?.harnessSpec as CommandHarnessSpec).model).toBe("claude-opus-4-8");
   });
+
+  // A self-hosted backend stamps ranOn/by before the result flows back up to this decorator.
+  const selfHostedResult = (): CaseResult => ({
+    caseId: "c1",
+    harness: "aider@1.0.0",
+    trace: [],
+    snapshot: { kind: "prompt", output: "" },
+    scores: [],
+    provenance: { ranOn: "self-hosted", by: "u-alice" },
+  });
+  const innerReturning = (r: CaseResult) => ({
+    async dispatch(): Promise<CaseResult> {
+      return r;
+    },
+  });
+
+  it("stamps workspace-billed models onto self-hosted provenance (the workspace's key paid)", async () => {
+    const models = await registry();
+    const dispatcher = new ModelResolvingDispatcher(
+      models,
+      innerReturning(selfHostedResult()),
+      secretsFor({ MY_LITELLM_KEY: "sk-live" }),
+    );
+    const out = await dispatcher.dispatch(job(commandSpec("litellm-mini")));
+    expect(out.provenance?.billedModels).toEqual([{ id: "litellm-mini", model: "gpt-5.4-mini" }]);
+  });
+
+  it("does NOT stamp when the key came from the personal tier (own-pays, the user paid)", async () => {
+    const models = await registry();
+    const dispatcher = new ModelResolvingDispatcher(
+      models,
+      innerReturning(selfHostedResult()),
+      secretsFor({}, { MY_LITELLM_KEY: "sk-personal" }),
+    );
+    const out = await dispatcher.dispatch(job(commandSpec("litellm-mini")));
+    expect(out.provenance?.billedModels).toBeUndefined();
+  });
+
+  it("does NOT synthesize provenance for a managed run (no stamp even with a workspace key)", async () => {
+    const models = await registry();
+    const managed: CaseResult = {
+      caseId: "c1",
+      harness: "aider@1.0.0",
+      trace: [],
+      snapshot: { kind: "prompt", output: "" },
+      scores: [],
+    };
+    const dispatcher = new ModelResolvingDispatcher(
+      models,
+      innerReturning(managed),
+      secretsFor({ MY_LITELLM_KEY: "sk-live" }),
+    );
+    const out = await dispatcher.dispatch(job(commandSpec("litellm-mini")));
+    expect(out.provenance).toBeUndefined();
+  });
 });

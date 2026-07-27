@@ -24,6 +24,10 @@ const ConfigSchema = z.object({
   // Shared secret the control plane presents (x-internal-token) to POST /agent/events for a recipient (S4 — the
   // monitoring→proactive-team bridge). Unset → the internal event path is disabled (only user-authenticated events).
   AGENT_INTERNAL_TOKEN: z.string().optional(),
+  // The control plane's x-internal-token (its EVERDICT_INTERNAL_TOKEN) — lets the agent report a conversation's LLM
+  // usage to POST {CONTROL_PLANE_URL}/internal/usage so agent cost lands in the SAME meter + budget as evals. Unset →
+  // usage reporting is off (the agent still runs; workspace-billed conversation cost just isn't metered).
+  CONTROL_PLANE_INTERNAL_TOKEN: z.string().optional(),
   // Per-tool wall-clock deadline (ms); a tool that outruns it is aborted and returned as an error. Unset → no deadline.
   AGENT_TOOL_TIMEOUT_MS: z.coerce.number().int().positive().optional(),
   // Extended-thinking budget (tokens). Set → the agent asks the model to reason before answering (Anthropic `thinking`;

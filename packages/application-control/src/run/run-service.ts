@@ -16,8 +16,8 @@ import {
   type HarnessSecretMaps,
   Run,
   type RunTransition,
-  billingTenant,
-  costOf,
+  type UsageMeter,
+  billingCharges,
   resolveHarnessSecrets,
 } from "@everdict/domain";
 import { type ExecuteCaseDeps, executeCase } from "../execution/execute-case.js";
@@ -82,6 +82,7 @@ export interface RunServiceDeps {
     harness: { id: string; version: string };
   }) => Promise<void>;
   budget?: BudgetTracker; // the API owns the admission gate (402 when exceeded) and cost settle
+  usage?: UsageMeter; // meter-only billing usage — itemized per (source × model), attributed via billingCharges
   // Resolve a declarative harness spec from the registry and embed it in the job (if absent, built-in id branching). An unknown harness is rejected → undefined fallback.
   resolveHarness?: (tenant: string, id: string, version: string) => Promise<HarnessSpec | undefined>;
   // For resolving {secretRef} in harness env — two tiers: shared (workspace) + the submitter's personal secrets. Picked by scope and injected. Same as scorecard.
@@ -400,9 +401,13 @@ export class RunService {
       const result = await executeCase(this.deps, input.submittedBy ?? input.tenant, jobToRun, {
         onStarted: () => void this.markRunning(id),
       });
-      // Cost attribution: managed = the job's tenant · workspace-shared runner = that workspace (team resource) · personal runner = own-pays (not charged).
-      const bill = billingTenant(result, input.tenant);
-      if (bill) this.deps.budget?.settle(bill, costOf(result));
+      // Cost attribution, itemized per model: managed = the job's tenant · workspace-shared runner = that workspace ·
+      // personal runner = own-pays, EXCEPT calls that used a workspace-billed model (the team's key paid) → the
+      // workspace. The same lines feed the meter (usage display) + the enforcement budget.
+      for (const c of billingCharges(result, input.tenant)) {
+        this.deps.budget?.settle(c.tenant, c.cost);
+        this.deps.usage?.record(c.tenant, c.source, c.model, c.cost, c.evaluations);
+      }
       // Offload os-use screenshots (embedded base64) to object storage → the record keeps only the URL (slim). On failure the run still succeeds (fallback: keep base64).
       if (this.deps.artifacts && result.snapshot) {
         try {

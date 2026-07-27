@@ -36,6 +36,7 @@ import { meAuthenticate, viewAccessChecker } from "./principal.js";
 import { type ProfileResolver, baseProfileResolver, registryProfileResolver } from "./profile.js";
 import { buildServer } from "./server.js";
 import { EVERDICT_AGENT_SYSTEM_PROMPT } from "./system-prompt.js";
+import { usageReporter } from "./usage.js";
 
 function envModelFallback(config: AgentConfig): ModelResolver {
   if (config.AGENT_LLM_API_KEY === undefined || config.AGENT_LLM_MODEL === undefined) {
@@ -127,6 +128,10 @@ async function main(): Promise<void> {
     ...(resolveModelById ? { resolveModelById } : {}),
     ...(keyStore ? { keyStore } : {}),
     ...(config.AGENT_INTERNAL_TOKEN !== undefined ? { internalToken: config.AGENT_INTERNAL_TOKEN } : {}),
+    // Meter workspace-billed conversation cost back to the control plane (source "agent"). Off without the token.
+    ...(config.CONTROL_PLANE_INTERNAL_TOKEN !== undefined
+      ? { reportUsage: usageReporter(config.CONTROL_PLANE_URL, config.CONTROL_PLANE_INTERNAL_TOKEN) }
+      : {}),
     toolProvider: mcpToolProvider(config.mcpUrl, codeRuntime),
     systemPrompt: EVERDICT_AGENT_SYSTEM_PROMPT,
     // Web links for the environment block — entity deep links + the desktop download page (see buildEnvironmentSection).

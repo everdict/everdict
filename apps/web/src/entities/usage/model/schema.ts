@@ -11,23 +11,32 @@ export const usageTotalsSchema = z.object({
   evaluations: z.number(),
 })
 
+// One (source × model) line of the itemized breakdown — how much a given activity spent on a given model.
+export const usageItemSchema = usageTotalsSchema.extend({
+  source: z.enum(['harness', 'judge', 'agent']),
+  model: z.string(),
+})
+
 export const tenantUsageSchema = usageTotalsSchema.extend({
   bySource: z.object({
     harness: usageTotalsSchema, // the harness under test
     judge: usageTotalsSchema, // the eval/judge model
+    agent: usageTotalsSchema, // agent conversations
   }),
+  items: z.array(usageItemSchema), // per (source × model) breakdown
 })
 
-// Drift guard — identical-shape entity (totals + bySource), so the guard is bidirectional. A renamed/added
-// total or a change to bySource on EITHER side fails the web typecheck.
+// Drift guard — identical-shape entity (totals + bySource + items), so the guard is bidirectional. A renamed/added
+// total, a change to bySource, or a change to an item field on EITHER side fails the web typecheck.
 type AssertAssignable<A extends B, B> = A
 type WebTenantUsage = z.infer<typeof tenantUsageSchema>
 type _usageFwd = AssertAssignable<WebTenantUsage, UsageResponse>
 type _usageBack = AssertAssignable<UsageResponse, WebTenantUsage>
 
-// Exported names alias the contract type; UsageTotals has no separate wire counterpart (inline on the
-// response) so it is derived FROM the wire response to stay in sync.
+// Exported names alias the contract type; UsageTotals/UsageItem have no separate wire counterpart (inline on the
+// response) so they are derived FROM the wire response to stay in sync.
 export type TenantUsage = UsageResponse
 export type UsageTotals = UsageResponse['bySource']['harness']
+export type UsageItem = UsageResponse['items'][number]
 
 export type __usageDriftGuard = [_usageFwd, _usageBack]

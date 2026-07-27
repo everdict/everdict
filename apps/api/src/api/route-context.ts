@@ -118,6 +118,9 @@ export interface ServerDeps {
   scorecardService?: ScorecardService; // dataset×harness batch eval (route disabled if absent)
   usageMeter?: UsageMeter; // meter-only billing usage (GET /usage) — never blocks (route disabled if absent)
   budget?: BudgetAdmin; // enforcement budget config (GET/PUT /budget) — usage + per-tenant limit (route disabled if absent)
+  // Settle-only capability of the enforcement budget for the internal usage bridge (agent cost → the 402-cap total).
+  // Deliberately narrow (BudgetAdmin withholds settle from user routes; the Scheduler/services own the run settle).
+  settleBudget?: (tenant: string, cost: { usd: number; tokens: number }) => void;
   scheduleService?: ScheduleService; // scheduled (cron) scorecard CRUD (route disabled if absent)
   queueService?: QueueService; // work-queue snapshot (running/waiting/next-scheduled per runtime lane) (route disabled if absent)
   metrics?: { render(): string }; // Prometheus text exposition (GET /metrics) (route disabled if absent)

@@ -284,6 +284,7 @@ function server(
     scorecardService,
     usageMeter,
     budget,
+    settleBudget: (tenant, cost) => budget.settle(tenant, cost),
     scheduleService,
     benchmarkService,
     bundleService,
@@ -2857,12 +2858,52 @@ describe("API — benchmarks (catalog → tenant dataset import)", () => {
   });
 });
 
+describe("API — internal usage bridge (agent-conversation cost)", () => {
+  it("POST /internal/usage prices the tokens, records them (source agent), and settles the budget", async () => {
+    const { app, usageMeter, budget } = server({ internalToken: "itok" });
+    const res = await app.inject({
+      method: "POST",
+      url: "/internal/usage",
+      headers: { "x-internal-token": "itok" },
+      payload: { tenant: "acme", source: "agent", model: "claude-opus-4-8", inputTokens: 1_000_000, outputTokens: 0 },
+    });
+    expect(res.statusCode).toBe(200);
+    const u = usageMeter.usage("acme");
+    expect(u.bySource.agent).toMatchObject({ tokens: 1_000_000, evaluations: 0 });
+    expect(u.bySource.agent.usd).toBeCloseTo(15, 6); // opus $15 / 1M input
+    expect(u.items).toContainEqual({
+      source: "agent",
+      model: "claude-opus-4-8",
+      usd: 15,
+      tokens: 1_000_000,
+      evaluations: 0,
+    });
+    expect(budget.usage("acme").usd).toBeCloseTo(15, 6); // reflected in the 402-cap total too
+    await app.close();
+  });
+
+  it("rejects a wrong or absent x-internal-token", async () => {
+    const { app } = server({ internalToken: "itok" });
+    const payload = { tenant: "acme", source: "agent", model: "m", inputTokens: 1, outputTokens: 1 };
+    const bad = await app.inject({
+      method: "POST",
+      url: "/internal/usage",
+      headers: { "x-internal-token": "nope" },
+      payload,
+    });
+    expect(bad.statusCode).toBe(403);
+    const none = await app.inject({ method: "POST", url: "/internal/usage", payload });
+    expect(none.statusCode).toBe(403);
+    await app.close();
+  });
+});
+
 describe("API — usage (billing meter)", () => {
   it("GET /usage returns the workspace's metered usage; other workspaces are isolated", async () => {
     const { app, keyStore, usageMeter } = server({ requireAuth: true });
     const acme = `Bearer ${await issueKey(keyStore, "acme")}`;
-    usageMeter.record("acme", "harness", { usd: 0.5, tokens: 300 }, 2);
-    usageMeter.record("acme", "judge", { usd: 0.1, tokens: 40 });
+    usageMeter.record("acme", "harness", "opus", { usd: 0.5, tokens: 300 }, 2);
+    usageMeter.record("acme", "judge", "opus", { usd: 0.1, tokens: 40 });
     const res = await app.inject({ method: "GET", url: "/usage", headers: { authorization: acme } });
     expect(res.statusCode).toBe(200);
     expect(res.json()).toMatchObject({
@@ -2870,6 +2911,9 @@ describe("API — usage (billing meter)", () => {
       tokens: 340,
       evaluations: 2,
       bySource: { harness: { usd: 0.5, evaluations: 2 }, judge: { usd: 0.1 } },
+      items: expect.arrayContaining([
+        expect.objectContaining({ source: "harness", model: "opus", usd: 0.5, evaluations: 2 }),
+      ]),
     });
     // another workspace sees only its own (zero) usage
     const beta = `Bearer ${await issueKey(keyStore, "beta")}`;

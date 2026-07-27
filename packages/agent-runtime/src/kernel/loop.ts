@@ -1,5 +1,5 @@
 import { UpstreamError } from "@everdict/contracts";
-import type { LlmTransport, ReasoningCarrier, ReasoningRequest, StreamResult } from "@everdict/llm";
+import type { LlmTransport, LlmUsage, ReasoningCarrier, ReasoningRequest, StreamResult } from "@everdict/llm";
 import { compactStep } from "../context/compaction.js";
 import { type TokenBudget, effectiveBudget, estimateTokens, thresholdReached } from "../context/token-budget.js";
 import { buildSummarizer } from "../llm/summarize.js";
@@ -121,6 +121,9 @@ export interface AgentLoopOptions {
   // `reasoning_delta` events + the assistant message's reasoning. Absent → thinking off (the historical behaviour).
   thinking?: ReasoningRequest;
   onEvent?: (e: AgentEvent) => void;
+  // Fired once per model turn with that turn's token usage (input/output/cache) — the host meters LLM cost from it
+  // (the loop reports tokens; the host prices them). Absent → no metering. See docs/architecture/usage-metering.md.
+  onUsage?: (usage: LlmUsage) => void;
   // Fired (awaited) as each assistant/tool message is appended, so the host can persist the transcript
   // incrementally — the source of live progress for a polling UI.
   onMessage?: (message: ChatMessage) => void | Promise<void>;
@@ -540,6 +543,9 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
     };
     const result = await callModel();
     if (!result) return finish("aborted", turn - 1);
+
+    // Meter this turn's token usage (the host prices it into USD). Fired before the budget bookkeeping below.
+    if (result.usage) opts.onUsage?.(result.usage);
 
     // The latest turn's total_tokens is the context footprint the MODEL saw; tool results appended after its turn are
     // added as an estimate (hybrid) before the budget check below.

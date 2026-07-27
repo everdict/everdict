@@ -252,6 +252,9 @@ services:
       AGENT_SUBAGENT_MODEL: ${AGENT_SUBAGENT_MODEL:-}
       # ── Proactive teammates (S4): must equal the api's AGENT_INTERNAL_TOKEN so pushed completions are accepted ──
       AGENT_INTERNAL_TOKEN: ${AGENT_INTERNAL_TOKEN:-}
+      # ── Meter workspace-billed conversation cost back to the API (POST /internal/usage); must equal the api's
+      #    EVERDICT_INTERNAL_TOKEN. Unset → agent cost isn't metered (the agent still runs). ──
+      CONTROL_PLANE_INTERNAL_TOKEN: ${EVERDICT_INTERNAL_TOKEN:-}
       # ── Let the agent DRIVE eval (run/retry scorecards, register/pin harnesses, …) — every call still HITL/RBAC-gated ──
       AGENT_ALLOW_EVAL_DRIVE: ${AGENT_ALLOW_EVAL_DRIVE:-}
       # ── Built-in web_search (Tavily) for every workspace's agent out of the box ──

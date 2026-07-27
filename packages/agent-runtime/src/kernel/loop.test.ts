@@ -60,6 +60,20 @@ describe("runAgentLoop", () => {
     expect(result.toolCalls).toHaveLength(0);
   });
 
+  it("fires onUsage with each turn's token usage (the host meters LLM cost from it)", async () => {
+    const { transport } = fakeTransport([textResult("Hi there")]);
+    const seen: { inputTokens: number; outputTokens: number }[] = [];
+    await runAgentLoop({
+      transport,
+      model: "test-model",
+      systemPrompt: "s",
+      history,
+      registry: new ToolRegistry([]),
+      onUsage: (u) => seen.push({ inputTokens: u.inputTokens, outputTokens: u.outputTokens }),
+    });
+    expect(seen).toEqual([{ inputTokens: 7, outputTokens: 0 }]); // usage7 from the fake transport
+  });
+
   it("emits reasoning_delta and attaches the turn's reasoning (text + blocks) to the assistant message", async () => {
     const events: AgentEvent[] = [];
     const persisted: ChatMessage[] = [];

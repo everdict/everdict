@@ -1,4 +1,5 @@
 import { issueKey } from "@everdict/db";
+import { priceUsd } from "@everdict/domain";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { constantTimeEq } from "../route-context.js";
@@ -45,6 +46,32 @@ export function registerInternalRoutes(app: FastifyInstance, deps: ServerDeps): 
     if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: body.error.message });
     const apiKey = await issueKey(deps.keyStore, body.data.workspace);
     return reply.code(201).send({ workspace: body.data.workspace, apiKey }); // the plaintext is returned only once here
+  });
+
+  // --- internal: usage report (agent server → meter). The agent loop yields TOKENS per conversation; the control
+  // plane prices them into USD and records + settles them against the workspace, so agent-conversation cost lands in
+  // the SAME meter + enforcement budget as evals. Same x-internal-token guard. docs/architecture/usage-metering.md ---
+  app.post("/internal/usage", { schema: internalDocs.usage }, async (req, reply) => {
+    if (!deps.internalToken || !deps.usageMeter)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "internal endpoints disabled" });
+    const provided = req.headers["x-internal-token"];
+    if (typeof provided !== "string" || !constantTimeEq(provided, deps.internalToken))
+      return reply.code(403).send({ code: "FORBIDDEN", message: "internal token mismatch" });
+    const body = z
+      .object({
+        tenant: z.string().min(1),
+        source: z.enum(["harness", "judge", "agent"]),
+        model: z.string(),
+        inputTokens: z.number().int().nonnegative(),
+        outputTokens: z.number().int().nonnegative(),
+      })
+      .safeParse(req.body);
+    if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: body.error.message });
+    const { tenant, source, model, inputTokens, outputTokens } = body.data;
+    const cost = { usd: priceUsd(model, { inputTokens, outputTokens }), tokens: inputTokens + outputTokens };
+    deps.usageMeter.record(tenant, source, model, cost, 0); // an agent turn is not a metered evaluation (0)
+    deps.settleBudget?.(tenant, cost); // reflect it in the enforcement budget too (settle only — never blocks)
+    return reply.send({ ok: true });
   });
 
   // --- internal: schedule fire (called by the Temporal workflow, x-internal-token guard) ---

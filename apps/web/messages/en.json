@@ -2620,10 +2620,21 @@
     "saved": "Saved",
     "readOnly": "Only workspace admins can change these limits.",
     "meteredTitle": "Metered usage",
-    "meteredTip": "Billable LLM cost for the workspace's runs (orchestration + verdict), measured continuously — this is what the cost/token limits above are checked against. Own-pays self-hosted runs are excluded.",
+    "meteredTip": "Billable LLM cost for the workspace's runs (orchestration + verdict), measured continuously — this is what the cost/token limits above are checked against. Own-pays self-hosted runs are excluded, except calls that used a workspace-designated model (the workspace's key pays for those tokens).",
     "meteredCost": "Cost",
     "meteredTokens": "Tokens",
-    "meteredEvaluations": "Evaluations"
+    "meteredEvaluations": "Evaluations",
+    "breakdownTitle": "By model & activity",
+    "breakdownTip": "How the metered cost splits across each model and the activity that spent it (an evaluation harness, a judge, or an agent conversation).",
+    "colModel": "Model",
+    "colActivity": "Activity",
+    "colCost": "Cost",
+    "colTokens": "Tokens",
+    "colEvaluations": "Evaluations",
+    "modelUnattributed": "Unattributed",
+    "sourceHarness": "Evaluation",
+    "sourceJudge": "Judge",
+    "sourceAgent": "Agent chat"
   },
   "preferencesPage": {
     "themeLabel": "Theme",

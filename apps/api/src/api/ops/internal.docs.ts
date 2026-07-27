@@ -65,6 +65,28 @@ const internal = {
       ...errorResponses(400, 403, 404),
     },
   },
+  usage: {
+    summary: "Report metered LLM usage (internal)",
+    description:
+      "Agent server → meter bridge: the agent loop yields TOKENS per conversation; the control plane prices them " +
+      'into USD and records + settles them against the workspace (source "agent"), so agent-conversation cost lands ' +
+      "in the SAME meter + enforcement budget as evals. Guarded by x-internal-token (403 on mismatch; fail-closed " +
+      "404 when unset).",
+    tags: ["internal"],
+    body: toJsonSchema(
+      z.object({
+        tenant: z.string().min(1),
+        source: z.enum(["harness", "judge", "agent"]),
+        model: z.string(),
+        inputTokens: z.number().int().nonnegative(),
+        outputTokens: z.number().int().nonnegative(),
+      }),
+    ),
+    response: {
+      200: { description: "Recorded", ...toJsonSchema(OkResponseSchema) },
+      ...errorResponses(400, 403, 404),
+    },
+  },
   batchPlan: {
     summary: "Plan a Temporal batch (internal bridge)",
     description:

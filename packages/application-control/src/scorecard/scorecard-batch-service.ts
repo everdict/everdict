@@ -22,10 +22,9 @@ import {
   Run,
   ScorecardBatch,
   type ScorecardOutcomeExtras,
-  billingTenant,
+  billingCharges,
   caseVerdict,
   classifyFailure,
-  costOf,
   modelBindingLabel,
   resolveHarnessSecrets,
   scorecardModels,
@@ -591,9 +590,12 @@ export class ScorecardBatchService {
           await new Promise((r) => setTimeout(r, 1_000 * (attempt + 1)));
         }
       }
-      const bill = billingTenant(result, ctx.tenant);
-      if (bill) this.deps.budget?.settle(bill, costOf(result));
-      this.deps.usage?.meterCase(result, ctx.tenant); // meter-only billing usage (own-pays runs skip themselves)
+      // Bill the case, itemized per model: managed/ws-runner bill the whole cost; an own-pays personal self-hosted run
+      // bills the workspace only for calls on a workspace-billed model. The same lines feed the meter + enforcement budget.
+      for (const c of billingCharges(result, ctx.tenant)) {
+        this.deps.budget?.settle(c.tenant, c.cost);
+        this.deps.usage?.record(c.tenant, c.source, c.model, c.cost, c.evaluations);
+      }
       // Per-case judge scoring — the same "judge the moment the case lands" semantics as the in-process judge stream.
       if (ctx.judges.length > 0) {
         await this.scoring
@@ -1078,9 +1080,12 @@ export class ScorecardBatchService {
           },
         });
         // Cost attribution: managed=batch tenant · workspace-shared runner=that workspace (team resource) · personal runner=own-pays. Same as a single run.
-        const bill = billingTenant(result, tenant);
-        if (bill) this.deps.budget?.settle(bill, costOf(result));
-        this.deps.usage?.meterCase(result, tenant); // meter-only billing usage (own-pays runs skip themselves)
+        // Bill the case, itemized per model (same as a single run): managed/ws-runner bill the whole cost; an own-pays
+        // personal self-hosted run bills the workspace only for calls on a workspace-billed model. Meter + budget together.
+        for (const c of billingCharges(result, tenant)) {
+          this.deps.budget?.settle(c.tenant, c.cost);
+          this.deps.usage?.record(c.tenant, c.source, c.model, c.cost, c.evaluations);
+        }
         // Provenance: record the runtime that ACTUALLY ran the case (differs from the assigned one after a spillover).
         if (runStore && child)
           await runStore.update(child.id, {

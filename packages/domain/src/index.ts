@@ -223,7 +223,8 @@ export {
 export type { AuthContext, Principal } from "./auth/principal.js";
 
 // billing — cost attribution + enforcement budget + metered usage (from @everdict/billing)
-export { billingTenant, costOf, sumCost } from "./billing/cost.js";
+export { type BillingCharge, billingCharges, billingTenant, costOf, sumCost } from "./billing/cost.js";
+export { priceUsd } from "./billing/pricing.js";
 export {
   assertWithinBudget,
   type BudgetLimit,
@@ -237,6 +238,7 @@ export {
   type TenantUsage,
   totalUsage,
   USAGE_SOURCES,
+  type UsageItem,
   type UsageMeter,
   type UsageSource,
   type UsageTotals,

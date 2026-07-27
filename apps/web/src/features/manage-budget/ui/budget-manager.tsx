@@ -4,12 +4,14 @@ import { useState, useTransition } from 'react'
 import { useTranslations } from 'next-intl'
 
 import type { BudgetLimit, BudgetUsage } from '@/entities/budget'
-import type { TenantUsage } from '@/entities/usage'
+import type { TenantUsage, UsageItem } from '@/entities/usage'
+import { fmtTokens, fmtUsd } from '@/shared/lib/format'
 import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
 import { Input } from '@/shared/ui/input'
 import { SettingsList, SettingsRow } from '@/shared/ui/settings-list'
 import { StatCard } from '@/shared/ui/stat-card'
+import { Table, TBody, TD, TH, THead, TR } from '@/shared/ui/table'
 import { InfoTip } from '@/shared/ui/tooltip'
 
 import { setBudgetLimitAction } from '../api/manage-budget'
@@ -50,6 +52,13 @@ export function BudgetManager({
       <InfoTip content={tip} />
     </span>
   )
+
+  // Itemized (source × model) breakdown — drop empty/legacy-unattributed lines, heaviest spend first.
+  const items = (metered?.items ?? [])
+    .filter((i) => i.usd > 0 || i.tokens > 0 || i.evaluations > 0)
+    .sort((a, b) => b.usd - a.usd)
+  const sourceLabel = (s: UsageItem['source']) =>
+    s === 'harness' ? t('sourceHarness') : s === 'judge' ? t('sourceJudge') : t('sourceAgent')
 
   function onSave() {
     setError(undefined)
@@ -145,13 +154,43 @@ export function BudgetManager({
             <InfoTip content={t('meteredTip')} />
           </h3>
           <div className="grid grid-cols-3 gap-3">
-            <StatCard label={t('meteredCost')} value={`$${metered.usd.toFixed(2)}`} />
-            <StatCard label={t('meteredTokens')} value={metered.tokens.toLocaleString()} />
+            <StatCard label={t('meteredCost')} value={fmtUsd(metered.usd)} />
+            <StatCard label={t('meteredTokens')} value={fmtTokens(metered.tokens)} />
             <StatCard
               label={t('meteredEvaluations')}
               value={metered.evaluations.toLocaleString()}
             />
           </div>
+          {items.length > 0 && (
+            <div className="space-y-1.5 pt-1">
+              <h4 className="flex items-center gap-1.5 text-[12px] font-[560] text-muted-foreground">
+                {t('breakdownTitle')}
+                <InfoTip content={t('breakdownTip')} />
+              </h4>
+              <Table>
+                <THead>
+                  <TR>
+                    <TH>{t('colModel')}</TH>
+                    <TH>{t('colActivity')}</TH>
+                    <TH className="text-right">{t('colCost')}</TH>
+                    <TH className="text-right">{t('colTokens')}</TH>
+                    <TH className="text-right">{t('colEvaluations')}</TH>
+                  </TR>
+                </THead>
+                <TBody>
+                  {items.map((i) => (
+                    <TR key={`${i.source} ${i.model}`}>
+                      <TD className="font-[510]">{i.model || t('modelUnattributed')}</TD>
+                      <TD className="text-muted-foreground">{sourceLabel(i.source)}</TD>
+                      <TD className="text-right tabular-nums">{fmtUsd(i.usd)}</TD>
+                      <TD className="text-right tabular-nums">{fmtTokens(i.tokens)}</TD>
+                      <TD className="text-right tabular-nums">{i.evaluations.toLocaleString()}</TD>
+                    </TR>
+                  ))}
+                </TBody>
+              </Table>
+            </div>
+          )}
         </div>
       )}
     </div>
