@@ -16,6 +16,19 @@ export type CapabilityVisibility = z.infer<typeof CapabilityVisibilitySchema>;
 export const CapabilityTypeSchema = z.enum(["mcp", "code", "skill"]);
 export type CapabilityType = z.infer<typeof CapabilityTypeSchema>;
 
+// The reserved OWNER workspace for FIRST-PARTY (Everdict-authored) capabilities — the default-toolset tier. Mirrors
+// the registry's `_shared` fallback: these are readable by every workspace and (the ones shipped as defaults) are
+// included in an agent's toolset WITHOUT an explicit adoption, subject to an integration gate + the workspace's
+// opt-outs. A workspace can still shadow one by adopting a same-named capability. See
+// docs/architecture/capability-store.md ("First-party default toolset").
+export const FIRST_PARTY_TENANT = "_everdict";
+
+// A configured integration a first-party default capability depends on. The default is active only when the workspace
+// has that integration configured (Mattermost set / GitHub App installed / an image registry registered). A generic
+// default (web search / PDF) declares no requirement (`null` at the default site) and is unconditional.
+export const CapabilityRequirementSchema = z.enum(["mattermost", "github", "image-registry"]);
+export type CapabilityRequirement = z.infer<typeof CapabilityRequirementSchema>;
+
 // A secret the ADOPTER must supply when they adopt this capability — declared by NAME + description only, never a
 // value (the adopter maps each name to one of their own workspace SecretStore keys at adoption). Same discipline as
 // AgentMcpServer.authSecret / ModelSpec.apiKeySecret.

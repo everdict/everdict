@@ -35,6 +35,8 @@ export const agentSpecSchema = z.object({
   instructions: z.string().optional(),
   mcpServers: z.array(agentMcpServerSchema).default([]),
   capabilities: z.array(capabilityRefSchema).default([]),
+  // 워크스페이스가 끈 first-party 기본 도구(capability id) — 기본 도구셋(웹검색 등)은 채택 없이 붙지만 여기 나열한 id 는 제외.
+  disabledDefaults: z.array(z.string()).default([]),
   model: z.string().optional(),
   tags: z.array(z.string()).default([]),
 })

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { AgentSessionStore, TenantKeyStore } from "@everdict/application-control";
+import { type AgentSessionStore, type TenantKeyStore, WEBSEARCH_SECRET_NAME } from "@everdict/application-control";
 import {
   InMemoryAgentSessionStore,
   PgAgentSessionStore,
@@ -74,6 +74,10 @@ async function main(): Promise<void> {
         capabilityStore: new PgCapabilityStore(client),
         baseSystemPrompt: EVERDICT_AGENT_SYSTEM_PROMPT,
         configId: config.AGENT_CONFIG_ID,
+        // Operator-global values for the first-party default tools, keyed by the secret name each default declares.
+        defaultToolSecrets: config.AGENT_WEBSEARCH_API_KEY
+          ? { [WEBSEARCH_SECRET_NAME]: config.AGENT_WEBSEARCH_API_KEY }
+          : {},
       });
     } else {
       // No KEK: sessions persist, but a registered model / secret-backed customization can't be decrypted → env model + base agent.

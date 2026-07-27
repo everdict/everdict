@@ -151,6 +151,12 @@ export {
   canConsumeCapability,
   filterConsumableCapabilities,
 } from "./capability/capability-visibility.js";
+// capability — the first-party default-toolset selection kernel (which built-in tools apply to a workspace)
+export {
+  type DefaultCapabilityInput,
+  type DefaultSelectionContext,
+  selectDefaultCapabilities,
+} from "./capability/capability-defaults.js";
 
 // registry — the version algebra every versioned registry shares (from @everdict/registry)
 export {

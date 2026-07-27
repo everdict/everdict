@@ -63,6 +63,7 @@ export {
   type CapabilityUpsert,
   type SaveCapabilityResult,
 } from "./capability/capability-service.js";
+export { type FirstPartyDefault, firstPartyDefaults, WEBSEARCH_SECRET_NAME } from "./capability/first-party.js";
 export { ProxyService, type ProxyServiceDeps, type ProxyView } from "./proxy/proxy-service.js";
 export {
   COMMENT_RESOURCE_TYPES,

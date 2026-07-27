@@ -39,6 +39,10 @@ export const AgentSpecSchema = z.object({
   // Capabilities adopted from the Store — immutable-version references (npm-style pins) into the Capability catalog
   // (mcp | code | skill). Resolved at runtime (cross-tenant, visibility re-checked). See docs/architecture/capability-store.md.
   capabilities: z.array(CapabilityRefSchema).default([]),
+  // First-party DEFAULT capabilities this workspace has turned OFF (capability ids owned by the FIRST_PARTY_TENANT).
+  // Defaults (web search, PDF, integration tools) are included in the agent's toolset without adoption; listing an id
+  // here opts that one default out. Adopting a same-named capability also shadows a default. See capability.ts.
+  disabledDefaults: z.array(z.string()).default([]),
   // Registered model id (this workspace's model registry) powering the agent; unset → the agent server's default model.
   model: z.string().optional(),
   tags: z.array(z.string()).default([]),

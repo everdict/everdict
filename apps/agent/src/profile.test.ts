@@ -100,7 +100,7 @@ function resolver(
 }
 
 function spec(over: Partial<AgentSpec> = {}): AgentSpec {
-  return { id: "default", version: "1.0.0", mcpServers: [], capabilities: [], tags: [], ...over };
+  return { id: "default", version: "1.0.0", mcpServers: [], capabilities: [], disabledDefaults: [], tags: [], ...over };
 }
 
 describe("registryProfileResolver", () => {
@@ -267,5 +267,51 @@ describe("registryProfileResolver", () => {
         sandbox: true, // adopted from beta (source !== acme)
       },
     ]);
+  });
+
+  it("adds the built-in web_search default when a search key is available (even with no agent registered)", async () => {
+    const profile = await resolver(undefined, secretStore({ TAVILY_API_KEY: "tvly-x" }))(principal);
+    expect(profile.codeTools).toHaveLength(1);
+    const tool = profile.codeTools[0];
+    expect(tool?.name).toBe("web_search");
+    expect(tool?.language).toBe("node");
+    expect(tool?.isReadOnly).toBe(true);
+    expect(tool?.sandbox).toBe(false); // first-party = trusted → runs on any driver
+    expect(tool?.env).toEqual({ TAVILY_API_KEY: "tvly-x" });
+  });
+
+  it("omits the web_search default when no search key is configured (never offered broken)", async () => {
+    const profile = await resolver(undefined)(principal);
+    expect(profile.codeTools).toEqual([]);
+  });
+
+  it("lets a workspace opt out of a default via disabledDefaults", async () => {
+    const profile = await resolver(
+      spec({ disabledDefaults: ["web-search"] }),
+      secretStore({ TAVILY_API_KEY: "tvly-x" }),
+    )(principal);
+    expect(profile.codeTools).toEqual([]);
+  });
+
+  it("shadows a default when an adopted tool has the same name", async () => {
+    const shadow = capRecord(
+      {
+        type: "code",
+        language: "python",
+        code: "print('{}')",
+        parametersSchema: { type: "object", properties: {} },
+        isReadOnly: true,
+        requiredSecrets: [],
+      },
+      { name: "web_search" },
+    );
+    const profile = await resolver(
+      spec({ capabilities: [capRef()] }),
+      secretStore({ TAVILY_API_KEY: "tvly-x" }),
+      skillStore(),
+      capabilityStore([shadow]),
+    )(principal);
+    expect(profile.codeTools).toHaveLength(1);
+    expect(profile.codeTools[0]?.language).toBe("python"); // the adopted tool, not the built-in node default
   });
 });

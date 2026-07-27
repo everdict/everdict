@@ -267,6 +267,60 @@ boundary + a pure-HTTP web mirror), like `views`/`schedules`. Each phase ends on
 - Enforce the sandbox for adopted-from-others `code`; adopt-time consent for `code`; the `public` admin gate; (later)
   operator review, ratings/usage, deprecation propagation.
 
+## First-party default toolset (confirmed 2026-07-27)
+
+The store as designed above is **adopt-only**: a capability reaches an agent solely via an explicit
+`AgentSpec.capabilities[]` pin. But an agent should ship with tools **out of the box** — web search, PDF reading, and
+the "use the integration" actions for whatever integrations a workspace has configured — without any member browsing
+the store first. And those same tools must stay **marketplace-installable** (a workspace can swap in a richer/custom
+version). Confirmed direction (2026-07-27, with the user): deliver **both channels on one substrate** — the
+`Capability` entity — by adding a **first-party, default-enabled tier**. No parallel "built-in tools" list in code; a
+default IS a capability, so it is browsable, versioned, and replaceable like any other.
+
+### The tier
+- **First-party** = operator/Everdict-authored capabilities owned by a reserved `_everdict` tenant (mirrors the
+  `_shared` registry fallback), readable by every workspace.
+- **Default-enabled** = the agent includes them **without** an `AgentSpec.capabilities[]` pin. The effective toolset:
+  ```
+  first-party default capabilities (auto, gated)   ← web search · PDF · integration use-actions
+  ∪ adopted capabilities (explicit pins)           ← richer / community / custom
+  ∪ raw mcpServers[] (escape hatch)
+  ```
+- **Gated** — an integration default is on only when its integration is configured (Mattermost set → the Mattermost
+  tools appear; GitHub App installed → the GitHub tools; a registry set → the image tools). A generic default (PDF) is
+  unconditional; web search is on when a search-provider key is resolvable.
+- **Opt-out & shadow** — `AgentSpec.disabledDefaults[]` (capability ids) turns a default off; adopting a capability
+  with the same `name` shadows the default (the pinned, adopted version wins). Defaults never silently override a
+  member's explicit choice.
+
+### Secret resolution for first-party defaults
+A default declares `requiredSecrets` like any capability, but its values resolve **from the workspace's existing
+integration config**, not a manual `secretBindings` map at adoption (there is no adoption step):
+- Mattermost tools → the configured bot token (`workspace/mattermost`).
+- GitHub tools → the workspace GitHub App **installation token** (already minted for clone/CI).
+- image-registry tools → the registry push/pull credentials.
+- Web search → a search-provider key: an **operator-global** key (Everdict runs search for every workspace) or, absent
+  that, a **workspace-bound** secret; unresolved → the tool is listed as "configure to enable," never a hard failure.
+
+### Slices (additive to Phases 1–6)
+- **Phase 7 — first-party tier mechanism.** Reserved `_everdict` owner + a `defaultEnabled` / `requires`
+  (`mattermost | github | image-registry | null`) marking on the record; `CapabilityStore.listDefaults()`; a pure
+  domain gate `applicableDefaults(defaults, { integrationsConfigured })`; `profile.ts` merges resolved defaults
+  (secrets from integration config) with adopted caps and honors `disabledDefaults[]` + name-shadowing; web surfaces
+  defaults in Settings › Agent (per-default toggle) and flags them "built-in" in the store.
+- **Phase 8 — seed the generic tools.** A PDF `code` capability (python, extract text from a URL/artifact; no secret;
+  default-on) and a web-search `code` capability (portable search API — Tavily/Brave/Serper — behind a search-provider
+  key; default-on when resolvable). Portable API over any provider-native web_search so it works across Anthropic +
+  OpenAI harnesses.
+- **Phase 9 — rich integration adapters.** First-party `code` (or hosted `mcp`) capabilities beyond the current three
+  use-actions: Mattermost (list channels · read/post thread), GitHub (create issue · comment on PR/issue · read repo
+  file · list PRs/issues), image-registry (list images/tags · inspect) — each gated on its integration, secrets
+  auto-bound from config, writes HITL-gated.
+
+The current curated `INTEGRATION_ACTIONS` (`apps/agent/src/mcp-tools.ts`) — `post_mattermost_message`,
+`open_ci_setup_pr`, `get_image_push_credentials` — are the only genuine "use" actions on the base control-plane surface
+today and are the **seed** of Phase 9; they migrate into first-party integration capabilities as the richer adapters land.
+
 ## Non-goals (this iteration)
 - No org/group tenancy layer — `subset` is an explicit `sharedWith[]`.
 - No accept/invite handshake for `subset` — the owner shares unilaterally (revocable).

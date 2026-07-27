@@ -36,6 +36,9 @@ const ConfigSchema = z.object({
   // The registered agent-config id resolved per workspace (instructions + MCP tool servers + model override). A
   // workspace registers an agent under this id ("default") to customize its assistant; unset id → base agent.
   AGENT_CONFIG_ID: z.string().default("default"),
+  // Operator-global API key for the built-in `web_search` default tool (Tavily). Set → every workspace's agent gets
+  // web search out of the box; unset → a workspace can still enable it with its own secret of the declared name.
+  AGENT_WEBSEARCH_API_KEY: z.string().optional(),
   AGENT_LLM_BASE_URL: z.string().url().optional(),
   AGENT_LLM_API_KEY: z.string().optional(),
   AGENT_LLM_MODEL: z.string().optional(),
