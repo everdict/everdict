@@ -1,6 +1,10 @@
 import type { FastifyInstance } from "fastify";
 import { type ServerDeps, gate, resolvePrincipal, sendError, zodIssues } from "../route-context.js";
-import { KnowledgeRelatedQuerySchema, KnowledgeSubgraphQuerySchema } from "./request/knowledge-query.js";
+import {
+  KnowledgeGraphQuerySchema,
+  KnowledgeRelatedQuerySchema,
+  KnowledgeSubgraphQuerySchema,
+} from "./request/knowledge-query.js";
 import { AnnotateKnowledgeBodySchema, RelateKnowledgeBodySchema } from "./request/knowledge-write.js";
 
 // Knowledge graph — the workspace's runs/scorecards/schedules/registry entities projected into a queryable graph of
@@ -53,6 +57,25 @@ export function registerKnowledgeRoutes(app: FastifyInstance, deps: ServerDeps):
     try {
       gate(principal, "scorecards:read");
       return reply.send(await deps.knowledgeService.subgraph(principal.workspace, parsed.data.id, parsed.data));
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  // The whole-workspace graph for rendering (Settings › Knowledge) — nodes + edges + counts, rooted at the workspace
+  // hub node so the caller needs no node id: ?depth=1..5 (default 2).
+  app.get("/knowledge/graph", async (req, reply) => {
+    if (!deps.knowledgeService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "knowledge service not configured" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    const parsed = KnowledgeGraphQuerySchema.safeParse(req.query);
+    if (!parsed.success)
+      return reply.code(400).send({ code: "BAD_REQUEST", message: zodIssues(parsed.error).join("; ") });
+    try {
+      gate(principal, "scorecards:read");
+      const opts = parsed.data.depth !== undefined ? { depth: parsed.data.depth } : {};
+      return reply.send(await deps.knowledgeService.graph(principal.workspace, opts));
     } catch (err) {
       return sendError(reply, err);
     }

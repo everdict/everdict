@@ -44,3 +44,10 @@ export const KnowledgeSubgraphQuerySchema = z.object({
   nodeTypes: csvOf(NodeTypeSchema),
 });
 export type KnowledgeSubgraphQuery = z.infer<typeof KnowledgeSubgraphQuerySchema>;
+
+// The whole-workspace graph for rendering — no `id` (the service roots at the workspace hub node). `depth` bounds the
+// BFS: 1 = the star (workspace + all entities), 2 (default) also pulls in the inter-entity edges.
+export const KnowledgeGraphQuerySchema = z.object({
+  depth: z.coerce.number().int().min(1).max(5).optional(),
+});
+export type KnowledgeGraphQuery = z.infer<typeof KnowledgeGraphQuerySchema>;

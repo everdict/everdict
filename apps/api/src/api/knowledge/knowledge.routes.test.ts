@@ -135,6 +135,34 @@ describe("knowledge routes", () => {
     expect((after.json() as { type: string }).type).toBe("dataset");
   });
 
+  it("returns the whole workspace graph rooted at the workspace hub node", async () => {
+    const res = await (await build(true)).inject({ method: "GET", url: "/knowledge/graph", headers: H });
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as {
+      root: string;
+      nodes: Array<{ nodeId: string; type: string }>;
+      edges: Array<{ predicate: string }>;
+      stats: { totalNodes: number; totalEdges: number; nodesByType: Record<string, number> };
+    };
+    // rooted at the workspace hub node — every harvested entity carries an in_workspace edge to it
+    expect(body.root).toBe(nodeId("acme", { type: "workspace", key: "acme" }));
+    // the scorecard is reached (in_workspace incoming), and its eval edges are pulled in at depth 2
+    expect(body.nodes.some((n) => n.nodeId === SC_NODE)).toBe(true);
+    expect(body.stats.nodesByType.scorecard).toBe(1);
+    expect(body.stats.totalNodes).toBe(body.nodes.length);
+    expect(body.edges.some((e) => e.predicate === "evaluates")).toBe(true);
+  });
+
+  it("400s a graph depth below 1", async () => {
+    const res = await (await build(true)).inject({ method: "GET", url: "/knowledge/graph?depth=0", headers: H });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it("404s the graph when the knowledge service is not configured", async () => {
+    const res = await (await build(false)).inject({ method: "GET", url: "/knowledge/graph", headers: H });
+    expect(res.statusCode).toBe(404);
+  });
+
   it("annotate attaches an authored note readable via /knowledge/annotations", async () => {
     const app = await build(true);
     const post = await app.inject({

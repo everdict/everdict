@@ -76,6 +76,11 @@ export const controlPlane = {
     call<T>(auth, '/comments', { method: 'POST', body: JSON.stringify(body) }),
   deleteComment: (auth: AuthContext, id: string) =>
     callVoid(auth, `/comments/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  // Knowledge graph — the workspace's eval data projected into a queryable node/edge graph (Settings › Knowledge).
+  // graph = the whole-workspace projection (read = scorecards:read); reindex = rebuild from records (settings:write).
+  knowledgeGraph: <T>(auth: AuthContext, depth?: number) =>
+    call<T>(auth, `/knowledge/graph${depth !== undefined ? `?depth=${depth}` : ''}`),
+  reindexKnowledge: <T>(auth: AuthContext) => call<T>(auth, '/knowledge/reindex', { method: 'POST' }),
   // Workspace membership (self-serve): my workspace list + create (creator is admin).
   listWorkspaces: <T>(auth: AuthContext) => call<T>(auth, '/workspaces'),
   createWorkspace: <T>(auth: AuthContext, body: unknown) =>

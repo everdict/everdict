@@ -80,6 +80,19 @@ export function registerKnowledgeTools(server: McpServer, ctx: McpToolContext): 
   );
 
   server.registerTool(
+    "get_knowledge_graph",
+    {
+      description:
+        "The whole workspace knowledge graph for an overview — {root, nodes, edges, stats:{totalNodes, totalEdges, nodesByType, edgesByPredicate}}. Rooted at the workspace hub node (no id needed). `depth` bounds the expansion: 1 = the star (workspace + all entities), 2 (default) also pulls in the inter-entity edges.",
+      inputSchema: { depth: z.number().int().min(1).max(5).optional().describe("hops to expand (default 2)") },
+    },
+    ({ depth }) =>
+      run(principal, "scorecards:read", async () =>
+        ok(await knowledge.graph(ws, depth !== undefined ? { depth } : {})),
+      ),
+  );
+
+  server.registerTool(
     "knowledge_notes",
     {
       description:

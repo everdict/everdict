@@ -7,6 +7,7 @@ import {
   type Mention,
   MentionSchema,
   type NodeRef,
+  type NodeType,
   NotFoundError,
   type Predicate,
 } from "@everdict/contracts";
@@ -68,6 +69,20 @@ export interface KnowledgeReindexResult {
   edges: number;
 }
 
+// The whole-workspace graph projection for rendering (Settings › Knowledge): the reachable nodes + edges plus derived
+// counts by node type / predicate for the overview. A read-model over the query engine — no new store surface.
+export interface KnowledgeGraphResult {
+  root: string;
+  nodes: KnowledgeNode[];
+  edges: EdgeMention[];
+  stats: {
+    totalNodes: number;
+    totalEdges: number;
+    nodesByType: Partial<Record<NodeType, number>>;
+    edgesByPredicate: Partial<Record<Predicate, number>>;
+  };
+}
+
 export interface KnowledgeServiceDeps {
   store: KnowledgeStore;
   reindexSources?: KnowledgeReindexSources;
@@ -100,6 +115,25 @@ export class KnowledgeService {
 
   subgraph(tenant: string, nodeId: string, query?: NeighborQuery): Promise<Subgraph> {
     return this.query.subgraph(tenant, nodeId, query ?? {});
+  }
+
+  // The whole-workspace graph for rendering (Settings › Knowledge). Rooted at the workspace HUB node — every harvested
+  // entity carries an `in_workspace` edge to it — so a bounded BFS from it reaches the workspace's knowledge. depth 1 is
+  // the star (workspace + all entities); depth ≥2 also pulls in the inter-entity edges (scorecard→harness,
+  // run→scorecard, member_of, …). Bounded by the query engine's MAX_NODES frontier guard. Read = scorecards:read.
+  async graph(tenant: string, opts?: { depth?: number }): Promise<KnowledgeGraphResult> {
+    const root = nodeId(tenant, { type: "workspace", key: tenant });
+    const sub = await this.query.subgraph(tenant, root, { depth: opts?.depth ?? 2, direction: "both" });
+    const nodesByType: Partial<Record<NodeType, number>> = {};
+    for (const n of sub.nodes) nodesByType[n.type] = (nodesByType[n.type] ?? 0) + 1;
+    const edgesByPredicate: Partial<Record<Predicate, number>> = {};
+    for (const e of sub.edges) edgesByPredicate[e.predicate] = (edgesByPredicate[e.predicate] ?? 0) + 1;
+    return {
+      root,
+      nodes: sub.nodes,
+      edges: sub.edges,
+      stats: { totalNodes: sub.nodes.length, totalEdges: sub.edges.length, nodesByType, edgesByPredicate },
+    };
   }
 
   // The authored notes on a node (the read side of `annotate`), newest first.

@@ -297,6 +297,7 @@ export {
   type TraversalDirection,
 } from "./knowledge/knowledge-query-service.js";
 export {
+  type KnowledgeGraphResult,
   KnowledgeService,
   type KnowledgeReindexResult,
   type KnowledgeReindexSources,
