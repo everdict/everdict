@@ -54,10 +54,18 @@ export class HarvestBuilder {
   }
 
   // Declare a reference from self to another node via `predicate`, cited to the record field at `evidencePath`.
-  ref(predicate: Predicate, objectRef: NodeRef, evidencePath: string, edgeAttrs: Record<string, unknown> = {}): this {
+  // `objectTenant` overrides the tenant the object node id is derived under — for a CROSS-TENANT reference (an agent
+  // adopting a `subset`/`public` capability owned by another workspace). Defaults to this source's own tenant.
+  ref(
+    predicate: Predicate,
+    objectRef: NodeRef,
+    evidencePath: string,
+    edgeAttrs: Record<string, unknown> = {},
+    objectTenant: string = this.tenant,
+  ): this {
     if (this.selfNodeId === undefined) throw new Error("HarvestBuilder.ref called before self()");
-    const objectNodeId = nodeId(this.tenant, objectRef);
-    this.mentions.push(this.mention(objectRef, evidencePath));
+    const objectNodeId = nodeId(objectTenant, objectRef);
+    this.mentions.push(this.mention(objectRef, evidencePath, objectTenant));
     this.edges.push({
       id: edgeId({
         sourceKind: this.sourceKind,
@@ -91,7 +99,7 @@ export class HarvestBuilder {
     return { nodes: [this.selfNode], mentions: this.mentions, edges: this.edges };
   }
 
-  private mention(ref: NodeRef, evidencePath: string): Mention {
+  private mention(ref: NodeRef, evidencePath: string, resolvedTenant: string = this.tenant): Mention {
     const surface = ref.version === undefined ? ref.key : `${ref.key}@${ref.version}`;
     return {
       id: mentionId({
@@ -112,7 +120,7 @@ export class HarvestBuilder {
       confidence: 1,
       evidencePath,
       resolution: "resolved",
-      resolvedNodeId: nodeId(this.tenant, ref),
+      resolvedNodeId: nodeId(resolvedTenant, ref),
       createdAt: this.createdAt,
     };
   }

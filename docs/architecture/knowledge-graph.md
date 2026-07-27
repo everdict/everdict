@@ -176,12 +176,12 @@ Following everdict's one-way spine (no new package — schemas belong at the con
    (`db`, migration `0076`): append-only mention/edge tables (idempotent by id) + an upsert-by-node_id node table.
 2. **Harvesters** — deterministic projectors, one per structured source kind, built on the shared `HarvestBuilder`.
    ✅ the record harvesters `scorecard` / `run` / `schedule` / `comment` / `membership` (`membership` materialises the
-   `user` node) and the registry-spec harvesters `harness` / `dataset` / `judge` / `runtime` (which take a
-   `SpecHarvestMeta` since a spec carries no tenant/timestamp; `judge`/`harness`/`runtime` also pull `uses_model` /
-   `uses_rubric` / `uses_secret` — the secret-usage graph). With these, every core scorecard edge
-   (`evaluates`/`uses_dataset`/`applies_judge`/`runs_on`) resolves to a materialised node. Remaining (lower-fan-in):
-   `model` / `rubric` / `agent` / `capability` / `skill` / `view` / `browser_profile` / `trace_source`. Idempotent,
-   re-runnable, versioned by `extractor`.
+   `user` node) and the registry-spec harvesters `harness` / `dataset` / `judge` / `runtime` / `model` / `rubric` /
+   `agent` / `capability` (which take a `SpecHarvestMeta` since a spec carries no tenant/timestamp; they also pull
+   `uses_model` / `uses_rubric` / `uses_secret` / `adopts` — the secret-usage + capability-adoption graph, incl.
+   cross-tenant `adopts` via `HarvestBuilder.ref`'s `objectTenant`). Every core scorecard edge resolves to a
+   materialised node, and every referenced eval-config node has an owning harvester. Remaining (low-fan-in leaves):
+   `skill` / `view` / `browser_profile` / `trace_source` / `agent_session`. Idempotent, versioned by `extractor`.
 3. **Extractors** — text adapters for `comment` / `agent_message` / `pr_comment` (@-mention regex first, agent
    extraction later), plus a resolver (surface `nodeRef` → `resolvedNodeId`).
 4. ✅ **Multi-hop query engine** — `KnowledgeQueryService` (`application-control`): `subgraph` (BFS by depth /

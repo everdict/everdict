@@ -236,13 +236,21 @@ export {
   SCHEDULE_HARVESTER,
 } from "./knowledge/harvest-records.js";
 export {
+  AGENT_HARVESTER,
+  CAPABILITY_HARVESTER,
   DATASET_HARVESTER,
+  harvestAgent,
+  harvestCapability,
   harvestDataset,
   harvestHarness,
   harvestJudge,
+  harvestModel,
+  harvestRubric,
   harvestRuntime,
   HARNESS_HARVESTER,
   JUDGE_HARVESTER,
+  MODEL_HARVESTER,
+  RUBRIC_HARVESTER,
   RUNTIME_HARVESTER,
   type SpecHarvestMeta,
 } from "./knowledge/harvest-specs.js";

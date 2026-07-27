@@ -1,10 +1,14 @@
 import type {
+  AgentSpec,
+  CapabilityRecord,
   Dataset,
   HarnessSpec,
   JudgeSpec,
   ModelBinding,
+  ModelSpec,
   NodeRef,
   RubricRef,
+  RubricSpec,
   RuntimeSpec,
 } from "@everdict/contracts";
 import { HarvestBuilder, type HarvestResult } from "./harvest.js";
@@ -18,6 +22,10 @@ export const HARNESS_HARVESTER = "harness_harvester_v1";
 export const DATASET_HARVESTER = "dataset_harvester_v1";
 export const JUDGE_HARVESTER = "judge_harvester_v1";
 export const RUNTIME_HARVESTER = "runtime_harvester_v1";
+export const MODEL_HARVESTER = "model_harvester_v1";
+export const RUBRIC_HARVESTER = "rubric_harvester_v1";
+export const AGENT_HARVESTER = "agent_harvester_v1";
+export const CAPABILITY_HARVESTER = "capability_harvester_v1";
 
 // The registry metadata a spec does not carry itself. `tags` is here (not on the spec) for harnesses — a HarnessSpec has
 // no tags field; dataset/judge/runtime carry their own on the spec and ignore this.
@@ -140,5 +148,89 @@ export function harvestRuntime(meta: SpecHarvestMeta, spec: RuntimeSpec): Harves
     if (spec.kubeconfigSecret !== undefined)
       b.ref("uses_secret", { type: "secret", key: spec.kubeconfigSecret }, "kubeconfigSecret");
   }
+  return b.result();
+}
+
+// A ModelSpec — a registered LLM/VLM connection. Its api-key secret name feeds the secret-usage graph.
+export function harvestModel(meta: SpecHarvestMeta, spec: ModelSpec): HarvestResult {
+  const b = new HarvestBuilder(
+    meta.tenant,
+    "model_spec",
+    spec.id,
+    MODEL_HARVESTER,
+    meta.updatedAt,
+    meta.createdAt,
+  ).self({ type: "model", key: spec.id, version: spec.version }, `${spec.id}@${spec.version}`, {
+    provider: spec.provider,
+    model: spec.model,
+  });
+  common(b, meta.tenant, meta, spec.tags);
+  if (spec.apiKeySecret !== undefined && spec.apiKeySecret !== "") {
+    b.ref("uses_secret", { type: "secret", key: spec.apiKeySecret }, "apiKeySecret");
+  }
+  return b.result();
+}
+
+// A RubricSpec — reusable verdict criteria that judges reference via uses_rubric.
+export function harvestRubric(meta: SpecHarvestMeta, spec: RubricSpec): HarvestResult {
+  const b = new HarvestBuilder(
+    meta.tenant,
+    "rubric_spec",
+    spec.id,
+    RUBRIC_HARVESTER,
+    meta.updatedAt,
+    meta.createdAt,
+  ).self({ type: "rubric", key: spec.id, version: spec.version }, `${spec.id}@${spec.version}`, {});
+  common(b, meta.tenant, meta, spec.tags);
+  return b.result();
+}
+
+// An AgentSpec — a conversational-agent configuration. `model` is a registered id; `capabilities` are cross-tenant
+// adoption refs (a subset/public capability is owned by another workspace — the adopts edge points at THAT tenant's
+// capability node); the adopter's secretBindings VALUES are this workspace's real secret names (uses_secret).
+export function harvestAgent(meta: SpecHarvestMeta, spec: AgentSpec): HarvestResult {
+  const b = new HarvestBuilder(
+    meta.tenant,
+    "agent_spec",
+    spec.id,
+    AGENT_HARVESTER,
+    meta.updatedAt,
+    meta.createdAt,
+  ).self({ type: "agent", key: spec.id, version: spec.version }, `${spec.id}@${spec.version}`, {});
+  common(b, meta.tenant, meta, spec.tags);
+  if (spec.model !== undefined && spec.model !== "") b.ref("uses_model", { type: "model", key: spec.model }, "model");
+  spec.mcpServers.forEach((s, i) => {
+    if (s.authSecret !== undefined && s.authSecret !== "") {
+      b.ref("uses_secret", { type: "secret", key: s.authSecret }, `mcpServers[${i}].authSecret`);
+    }
+  });
+  spec.capabilities.forEach((c, i) => {
+    b.ref("adopts", { type: "capability", key: c.id, version: c.version }, `capabilities[${i}]`, {}, c.source);
+    for (const [logical, secretName] of Object.entries(c.secretBindings)) {
+      b.ref("uses_secret", { type: "secret", key: secretName }, `capabilities[${i}].secretBindings.${logical}`);
+    }
+  });
+  return b.result();
+}
+
+// A CapabilityRecord — a published tool/code/skill/environment. Unlike the versioned specs it IS a record (carries
+// tenant/createdAt/createdBy), so it needs no SpecHarvestMeta.
+export function harvestCapability(record: CapabilityRecord): HarvestResult {
+  const b = new HarvestBuilder(
+    record.tenant,
+    "capability_spec",
+    record.id,
+    CAPABILITY_HARVESTER,
+    record.createdAt,
+    record.createdAt,
+  ).self({ type: "capability", key: record.id, version: record.version }, `${record.name} (${record.spec.type})`, {
+    type: record.spec.type,
+    visibility: record.visibility,
+  });
+  b.ref("in_workspace", { type: "workspace", key: record.tenant }, "tenant");
+  if (record.createdBy !== undefined && record.createdBy !== "") {
+    b.ref("created_by", { type: "user", key: record.createdBy }, "createdBy");
+  }
+  record.tags.forEach((t, i) => b.ref("tagged_with", { type: "tag", key: t }, `tags[${i}]`));
   return b.result();
 }
