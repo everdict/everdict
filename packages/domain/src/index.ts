@@ -235,3 +235,14 @@ export {
   RUN_HARVESTER,
   SCHEDULE_HARVESTER,
 } from "./knowledge/harvest-records.js";
+export {
+  DATASET_HARVESTER,
+  harvestDataset,
+  harvestHarness,
+  harvestJudge,
+  harvestRuntime,
+  HARNESS_HARVESTER,
+  JUDGE_HARVESTER,
+  RUNTIME_HARVESTER,
+  type SpecHarvestMeta,
+} from "./knowledge/harvest-specs.js";

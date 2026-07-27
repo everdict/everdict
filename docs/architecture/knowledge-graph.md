@@ -174,9 +174,12 @@ Following everdict's one-way spine (no new package — schemas belong at the con
 1. ✅ **Storage** — the `KnowledgeStore` port (`application-control`) + `InMemoryKnowledgeStore` / `PgKnowledgeStore`
    (`db`, migration `0076`): append-only mention/edge tables (idempotent by id) + an upsert-by-node_id node table.
 2. **Harvesters** — deterministic projectors, one per structured source kind, built on the shared `HarvestBuilder`.
-   ✅ `ScorecardRecord` (the densest FK hub) + the record harvesters `run` / `schedule` / `comment` / `membership`
-   (`membership` materialises the `user` node + the `member_of` edge). Next: the registry specs `harness` / `dataset`
-   / `judge` / `runtime` (which carry no tenant/timestamp in the spec — the harvester takes them alongside). Idempotent,
+   ✅ the record harvesters `scorecard` / `run` / `schedule` / `comment` / `membership` (`membership` materialises the
+   `user` node) and the registry-spec harvesters `harness` / `dataset` / `judge` / `runtime` (which take a
+   `SpecHarvestMeta` since a spec carries no tenant/timestamp; `judge`/`harness`/`runtime` also pull `uses_model` /
+   `uses_rubric` / `uses_secret` — the secret-usage graph). With these, every core scorecard edge
+   (`evaluates`/`uses_dataset`/`applies_judge`/`runs_on`) resolves to a materialised node. Remaining (lower-fan-in):
+   `model` / `rubric` / `agent` / `capability` / `skill` / `view` / `browser_profile` / `trace_source`. Idempotent,
    re-runnable, versioned by `extractor`.
 3. **Extractors** — text adapters for `comment` / `agent_message` / `pr_comment` (@-mention regex first, agent
    extraction later), plus a resolver (surface `nodeRef` → `resolvedNodeId`).
