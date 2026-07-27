@@ -272,3 +272,7 @@ export { ScorecardBatchService } from "./scorecard/scorecard-batch-service.js";
 export { ScorecardIngestService } from "./scorecard/scorecard-ingest-service.js";
 export { ScorecardAnalyticsService } from "./scorecard/scorecard-analytics-service.js";
 export { dispatchManifest, foldEnvDeltas } from "./recording-manifest.js";
+
+// knowledge — the knowledge-graph store port + the harvest ingest use-case (projection lives in @everdict/domain).
+export type { KnowledgeStore } from "./ports/knowledge-store.js";
+export { ingestHarvest } from "./knowledge/ingest-harvest.js";

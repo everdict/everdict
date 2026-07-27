@@ -219,3 +219,8 @@ export {
   type UsageSource,
   type UsageTotals,
 } from "./billing/usage.js";
+
+// knowledge — the knowledge-graph kernel: deterministic id derivation + structured harvesters (record → graph spine).
+export { edgeId, mentionId, nodeId } from "./knowledge/ids.js";
+export { type HarvestResult, HarvestBuilder } from "./knowledge/harvest.js";
+export { harvestScorecard, SCORECARD_HARVESTER } from "./knowledge/harvest-scorecard.js";

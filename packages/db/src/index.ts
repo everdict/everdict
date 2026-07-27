@@ -151,3 +151,4 @@ export { InMemoryWorkspaceInviteStore, PgWorkspaceInviteStore } from "./workspac
 export { InMemoryUserProfileStore, PgUserProfileStore } from "./workspace/user-profile-store.js";
 export { InMemoryCallbackStore, PgCallbackStore } from "./activity/callback-store.js";
 export { InMemoryRunnerJobStore, PgRunnerJobStore } from "./activity/runner-job-store.js";
+export { InMemoryKnowledgeStore } from "./knowledge/in-memory-knowledge-store.js";
