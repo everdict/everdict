@@ -28,6 +28,7 @@ import { type StoreSeedPlan, planStoreSeed } from "./deploy/store-seed.js";
 import type { TopologyRuntime } from "./deploy/topology-runtime.js";
 import { keysFor, newRunId, perRunFields, perRunVocabulary, wiringVars } from "./environment-manager.js";
 import { captureCdpScreenshot } from "./front-door/capture-cdp.js";
+import { CdpEnvironmentRecorder, type EnvRecordSink } from "./front-door/cdp-recorder.js";
 import {
   type CallbackRendezvous,
   type DriveOutcome,
@@ -97,6 +98,12 @@ export interface ServiceTopologyBackendOptions {
   // Injectable timer for the per-case drive wall-clock (completion liveness). Fires `onFire` after `ms`; returns a
   // cancel fn. Default = setTimeout. Injected in tests for deterministic (no real wait) deadline firing.
   startDriveDeadline?: (ms: number, onFire: () => void) => () => void;
+  // Replay environment plane (docs/architecture/replay.md ②) — a per-run sink the CDP environment recorder streams the
+  // browser's own events into (network/console/nav, + screencast frames when the sink provides `frame`). Called once per
+  // dispatch with the runId; returns undefined to skip recording for this run. The sink routes to the durable recorder:
+  // self-hosted → report_case_track/report_case_screen MCP; managed → CaseRecorder.recordTrack/recordFrame. Absent = no
+  // environment recording (trace-only replay, as before). Best-effort — a recorder failure never affects the run.
+  recordSink?: (runId: string) => EnvRecordSink | undefined;
 }
 
 // The orchestrator-agnostic service-topology backend (a Backend implementation).
@@ -193,6 +200,9 @@ export class ServiceTopologyBackend implements Backend, ScreenCapturable {
       targetReleased = true;
       await target.dispose();
     };
+    // Environment-plane recorder (replay ②) — declared here so the finally can always stop it. Started below once the
+    // browser is up (best-effort); streams the browser's own network/console/nav (+ frames) into the per-run sink.
+    let recorder: CdpEnvironmentRecorder | undefined;
     try {
       // Saved-profile injection (browser-profiles S5) — seed the profile's cookies into the per-case browser before
       // the agent drives it, so the eval runs already logged-in. Best-effort: a seed failure leaves the eval
@@ -200,6 +210,20 @@ export class ServiceTopologyBackend implements Backend, ScreenCapturable {
       if (spec.target?.profile && this.opts.seedProfile) {
         const cdpBase = await this.opts.runtime.browserCdpBase?.(runId, zone).catch(() => undefined);
         if (cdpBase) await this.opts.seedProfile(spec.target.profile, cdpBase, job).catch(() => undefined);
+      }
+
+      // Start the environment recorder now the per-case browser is up — it runs IN PARALLEL with the agent (not on its
+      // boundaries), taping the CDP event stream for the whole drive. Only when a browser target exposes a reachable CDP
+      // AND a record sink is configured. Best-effort: a start failure leaves an empty environment plane, never a failed run.
+      const sink = target?.cdpBase && this.opts.recordSink ? this.opts.recordSink(runId) : undefined;
+      if (target?.cdpBase && sink) {
+        const rec = new CdpEnvironmentRecorder(target.cdpBase, sink, { frames: Boolean(sink.frame) });
+        try {
+          await rec.start();
+          recorder = rec;
+        } catch {
+          // no page target yet / CDP unreachable — skip environment recording for this run
+        }
       }
 
       const base = topo.endpoints[spec.frontDoor.service];
@@ -407,6 +431,7 @@ export class ServiceTopologyBackend implements Backend, ScreenCapturable {
 
       return { caseId: job.evalCase.id, harness: `${spec.id}@${spec.version}`, trace, snapshot, scores };
     } finally {
+      recorder?.stop(); // flush the environment recorder before the browser is torn down (idempotent)
       await releaseTarget();
     }
   }

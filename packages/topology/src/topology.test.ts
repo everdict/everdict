@@ -850,6 +850,88 @@ describe("ServiceTopologyBackend (orchestrator-agnostic, mock runtime)", () => {
     expect(recorded[0]?.minio_prefix).toBe("runs/fixed/");
   });
 
+  // Replay ② — when the per-case browser exposes a reachable CDP AND a record sink is configured, dispatch opens an
+  // environment recorder against it (keyed by the runId). The recorder itself is unit- + live-tested; here we assert the
+  // DISPATCH SEAM: the sink factory is invoked with the runId, and a recorder that can't connect (unreachable CDP) is
+  // best-effort — it never fails the run.
+  const browserDispatchFixtures = (cdpBase?: string) => {
+    const browser: TargetEnvHandle = {
+      wiring: { target_cdp_url: "ws://browser/ctx" },
+      ...(cdpBase ? { cdpBase } : {}),
+      async snapshot(): Promise<BrowserSnapshot> {
+        return { kind: "browser", url: "https://x", dom: "<html/>", console: [] };
+      },
+      async dispose() {},
+    };
+    const runtime: TopologyRuntime = {
+      id: "mock",
+      async ensureTopology() {
+        return { endpoints: { "agent-server": "http://agent-server:8000" } };
+      },
+      async provisionBrowserEnv() {
+        return browser;
+      },
+    };
+    const traceSource: TraceSource = {
+      async fetch() {
+        return [{ t: 0, kind: "message", role: "assistant", text: "done" }];
+      },
+    };
+    const job: CaseJob = {
+      harness: { id: "browser-use-langgraph", version: "1.0.0" },
+      evalCase: {
+        id: "c1",
+        env: { kind: "browser", startUrl: "https://x" },
+        task: "go",
+        graders: [],
+        timeoutSec: 60,
+        tags: [],
+      },
+    };
+    return { runtime, traceSource, job };
+  };
+
+  it("opens an environment recorder against the per-case browser CDP (records into the run's sink)", async () => {
+    const sinkRuns: string[] = [];
+    // 127.0.0.1:9 (discard) refuses immediately → the recorder's connect is best-effort and dispatch proceeds.
+    const { runtime, traceSource, job } = browserDispatchFixtures("http://127.0.0.1:9");
+    const backend = new ServiceTopologyBackend({
+      runtime,
+      traceSource,
+      specFor: () => SPEC,
+      submit: async () => {},
+      newRunId: () => "fixed",
+      recordSink: (runId) => {
+        sinkRuns.push(runId);
+        return { track: () => {}, frame: () => {} };
+      },
+    });
+    const result = await backend.dispatch(job);
+    // The sink factory was consulted with the CP-minted runId (the recording is keyed by it) …
+    expect(sinkRuns).toEqual(["fixed"]);
+    // … and the unreachable CDP never broke the run (best-effort recorder).
+    expect(result.caseId).toBe("c1");
+    expect(result.snapshot.kind).toBe("browser");
+  });
+
+  it("does not open a recorder when the target exposes no reachable CDP base", async () => {
+    const sinkRuns: string[] = [];
+    const { runtime, traceSource, job } = browserDispatchFixtures(); // no cdpBase
+    const backend = new ServiceTopologyBackend({
+      runtime,
+      traceSource,
+      specFor: () => SPEC,
+      submit: async () => {},
+      newRunId: () => "fixed",
+      recordSink: (runId) => {
+        sinkRuns.push(runId);
+        return { track: () => {} };
+      },
+    });
+    await backend.dispatch(job);
+    expect(sinkRuns).toEqual([]); // no cdpBase → the sink factory is never consulted (no environment recording)
+  });
+
   // Regression (completion liveness) — a sync drive whose agent stream dies with the socket held open must fail on the
   // per-case budget, not hang in `running` forever. Pre-fix: dispatch passed no deadline, so the never-resolving drive
   // hung (the race below would yield HUNG). Fixed: the injected deadline aborts the drive → explicit completion-timeout.

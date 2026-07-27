@@ -2176,6 +2176,10 @@
     "trace": "트레이스",
     "snapshot": "스냅샷 ({kind})",
     "downloadDom": "전체 DOM 다운로드",
+    "snapshotOutput": "최종 답변",
+    "snapshotWindows": "열린 창",
+    "snapshotChangedFiles": "변경된 파일",
+    "snapshotDiff": "변경 내용",
     "discuss": "논의",
     "liveLogs": "라이브 로그",
     "liveTrace": "이 하니스는 트레이스를 {kind}에 내보내도록 설정돼 있어요 — everdict.run_id로 여기서 찾아봐요:",
@@ -3188,7 +3192,15 @@
     "stepOf": "스텝 {i}/{n}",
     "agentPlane": "에이전트",
     "logLane": "로그",
-    "repoLane": "저장소 변경"
+    "repoLane": "저장소 변경",
+    "networkLane": "네트워크",
+    "consoleLane": "콘솔",
+    "navLane": "URL 이동",
+    "runtimeLane": "런타임",
+    "netPending": "대기 중",
+    "cpuLabel": "CPU",
+    "memLabel": "메모리",
+    "netLabel": "네트워크 I/O"
   },
   "sandboxTerminal": {
     "hint": "실행 중인 샌드박스에서 명령을 실행해요 (ls · cat · ps · env …)",

@@ -371,6 +371,7 @@ export class K8sTopologyRuntime implements TopologyRuntime {
     }
     return {
       wiring: { target_cdp_url: cdpUrl },
+      cdpBase: cdpHttp, // control-plane-reachable CDP HTTP base (via port-forward) — where the environment recorder taps (replay ②)
       async snapshot(): Promise<BrowserSnapshot> {
         let targets: Array<{ url?: string }> = [];
         try {

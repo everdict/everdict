@@ -9,6 +9,7 @@ import {
 import type { HarnessInstanceRegistry } from "@everdict/registry";
 import {
   type CallbackRendezvous,
+  type EnvRecordSink,
   K8sTopologyRuntime,
   NomadTopologyRuntime,
   ServiceTopologyBackend,
@@ -37,6 +38,10 @@ export function buildTopologyBackend(
     // Saved-profile injection (browser-profiles S5) — seed a referenced profile's login into the per-case browser
     // before the agent connects. Built in the composition (BrowserProfileStore + cipher); undefined = no injection.
     seedProfile?: (profileId: string, cdpBase: string, job: CaseJob) => Promise<void>;
+    // Replay environment plane (docs/architecture/replay.md ②) — a per-run sink the CDP recorder streams the browser's
+    // network/console/nav (+ frames) into. For the managed backend this routes straight to the in-process CaseRecorder
+    // (recordTrack/recordFrame → the durable RecordingStore). Undefined = no environment recording (trace-only replay).
+    recordSink?: (runId: string) => EnvRecordSink | undefined;
   },
 ): Backend {
   const ts = spec.traceSource;
@@ -89,6 +94,7 @@ export function buildTopologyBackend(
     // Rendezvous for the callback completion model (if present) — issues {{callback_url}} + awaits inbound. The control-plane route delivers to the same instance.
     ...(deps.callbackRendezvous ? { callbackRendezvous: deps.callbackRendezvous } : {}),
     ...(deps.seedProfile ? { seedProfile: deps.seedProfile } : {}), // browser-profiles S5 — inject a saved login into the eval browser
+    ...(deps.recordSink ? { recordSink: deps.recordSink } : {}), // replay ② — stream the browser's CDP events into the recording
     // The topology shape (services/dependencies/target) comes from the harness (kind:"service"). Reject if it's not a service harness.
     specFor: async (tenant, id, version) => {
       const h = await deps.harnesses.get(tenant, id, version);

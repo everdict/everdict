@@ -1,5 +1,6 @@
 import { type CaseJob, CaseJobSchema, type CaseResult, RUNNER_PROTOCOL_VERSION } from "@everdict/contracts";
 import { classifyFailure, stageForError } from "@everdict/domain";
+import type { EnvRecordSink } from "@everdict/topology";
 
 // The runner's own short liveness note (what it's doing / why it can't work right now). Reported to the control plane
 // on every lease/heartbeat (the roster diagnosability), AND surfaced LOCALLY via onStatus — the crucial second channel
@@ -21,7 +22,13 @@ export interface RunnerLoopDeps {
   // captured frame of the case's screen back to the control plane for live viewing.
   runJob: (
     job: CaseJob,
-    opts?: { signal?: AbortSignal; reportScreen?: (frameBase64: string) => Promise<void> },
+    opts?: {
+      signal?: AbortSignal;
+      reportScreen?: (frameBase64: string) => Promise<void>;
+      // Environment-plane record sink (replay ②) — a topology (browser) case's CDP recorder streams the browser's own
+      // network/console/nav (+ screencast frames) through here to the durable recorder. Only for control-plane dispatch.
+      recordSink?: EnvRecordSink;
+    },
   ) => Promise<CaseResult>;
   log?: (msg: string) => void; // default no-op (tests stay quiet)
   sleep?: (ms: number) => Promise<void>; // default setTimeout
@@ -177,11 +184,22 @@ export async function runLeaseWorkers(deps: RunnerLoopDeps, opts: RunnerLoopOpts
       const reportLog = runId
         ? (line: string): void => void deps.callJson("report_case_log", { runId, line }).catch(() => {})
         : undefined;
+      // Environment-plane record sink (replay ②) — a topology browser case's CDP recorder (inside ServiceTopologyBackend)
+      // streams the browser's network/console/nav through report_case_track and its screencast frames through
+      // report_case_screen (the same channel as a command harness's live screen, offloaded downstream). Only with a
+      // runId (CP dispatch); every push is best-effort — a failure must never affect the run.
+      const recordSink: EnvRecordSink | undefined = runId
+        ? {
+            track: (item) => void deps.callJson("report_case_track", { runId, item }).catch(() => {}),
+            frame: (frame) => void deps.callJson("report_case_screen", { runId, frame }).catch(() => {}),
+          }
+        : undefined;
       reportLog?.("▶ Started — running the case on this self-hosted runner.");
       try {
         const result = await deps.runJob(parsed.data, {
           signal: controller.signal,
           ...(reportScreen ? { reportScreen } : {}),
+          ...(recordSink ? { recordSink } : {}),
         });
         await deps.callJson("submit_job_result", { jobId, result });
         setStatus(active > 1 ? `running ${active - 1} job(s)` : "idle", "info");

@@ -543,6 +543,7 @@ export class NomadTopologyRuntime implements TopologyRuntime {
     const deregister = () => this.deregister(browserJobId(runId), ns);
     return {
       wiring: { target_cdp_url: cdpUrl },
+      cdpBase: cdpHttp, // control-plane-reachable CDP HTTP base — where the environment recorder taps (replay ②)
       async snapshot(): Promise<BrowserSnapshot> {
         // Real browser observation: the open target list (current URLs). Extension-driven navigation is Phase 2.
         let targets: Array<{ url?: string; title?: string }> = [];

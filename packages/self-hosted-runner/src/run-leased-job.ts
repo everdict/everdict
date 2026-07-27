@@ -4,6 +4,7 @@ import { type DriverMount, pullWithRegistryAuth, runCaseJob } from "@everdict/jo
 import {
   DockerTopologyRuntime,
   type DockerTopologyRuntimeOptions,
+  type EnvRecordSink,
   ServiceTopologyBackend,
   type TopologyRuntime,
 } from "@everdict/topology";
@@ -58,6 +59,9 @@ export async function runLeasedJob(
     // Live-screen frame reporter — the runner pushes each captured frame to the control plane. Only meaningful for a
     // containerized command harness that declares liveScreen (host-native execution has no isolated screen to capture).
     reportScreen?: (frameBase64: string) => Promise<void>;
+    // Environment-plane record sink (replay ②) — a service (topology) case's CDP recorder streams the per-case browser's
+    // network/console/nav (+ frames) through here to the durable recorder. Only used by the topology branch below.
+    recordSink?: EnvRecordSink;
   } = {},
 ): Promise<CaseResult> {
   const spec = job.harnessSpec;
@@ -71,7 +75,8 @@ export async function runLeasedJob(
       }
     }
     const runService =
-      opts.runService ?? ((j: CaseJob) => defaultRunService(j, spec, opts.runtimeOptions, opts.signal));
+      opts.runService ??
+      ((j: CaseJob) => defaultRunService(j, spec, opts.runtimeOptions, opts.signal, opts.recordSink));
     return runService(job);
   }
   // process/command. If image is declared + Docker is present, run in that image's container (toolchain bundled — same as managed). Otherwise in-process on the host.
@@ -109,11 +114,14 @@ function defaultRunService(
   spec: ServiceHarnessSpec,
   runtimeOptions?: DockerTopologyRuntimeOptions,
   signal?: AbortSignal,
+  recordSink?: EnvRecordSink,
 ): Promise<CaseResult> {
   const backend = new ServiceTopologyBackend({
     runtime: sharedTopologyRuntime(runtimeOptions), // reused across cases → keeps the warm-pool (topology deployed once per version)
     traceSource: buildTraceSource(spec.traceSource),
     specFor: () => spec,
+    // Replay ② — stream the per-case browser's CDP events into the durable recording (self-hosted path: report_case_* MCP).
+    ...(recordSink ? { recordSink: () => recordSink } : {}),
   });
   // Thread cancellation into the topology dispatch — it refuses a pre-aborted run and stops waiting on abort.
   return backend.dispatch(job, signal ? { signal } : undefined);

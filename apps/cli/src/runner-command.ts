@@ -101,6 +101,7 @@ export async function runnerCommand(flags: Map<string, string>): Promise<void> {
           log: (m) => console.error(m),
           ...(o?.signal ? { signal: o.signal } : {}),
           ...(o?.reportScreen ? { reportScreen: o.reportScreen } : {}),
+          ...(o?.recordSink ? { recordSink: o.recordSink } : {}), // replay ② — topology browser CDP events into the recording
         }),
       log: (m) => console.error(m),
       sleep,

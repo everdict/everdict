@@ -35,6 +35,26 @@ function osUseShotSrc(snapshot?: {
   return undefined
 }
 
+// 스냅샷에 실제로 보여줄 내용이 있는지 — 없으면 상세에서 스냅샷 섹션을 통째로 숨긴다(빈 섹션 규칙). prompt(환경-없는 QA)는
+// 최종 답변(output)이 대개 비어 있어(주 신호는 trace) 예전엔 `{kind:"prompt",output:""}` 원시 JSON만 떠서 "매번 빈 스냅샷"으로
+// 보였다. 이 게이트가 그 문제를 없앤다. docs/web.md — 빈 섹션은 통째로 숨긴다("none" 플레이스홀더 금지).
+function snapshotHasContent(s: NonNullable<Run['result']>['snapshot']): boolean {
+  if (!s) return false
+  if (osUseShotSrc(s)) return true // 어떤 kind든 캡처된 화면이 있으면 표시할 게 있다
+  switch (s.kind) {
+    case 'prompt':
+      return Boolean(s.output?.trim())
+    case 'os-use':
+      return Boolean(s.windows?.length)
+    case 'repo':
+      return Boolean(s.diff?.trim() || s.changedFiles?.length)
+    case 'browser':
+      return Boolean(s.url || s.dom || s.domRef)
+    default:
+      return Boolean(s.url || s.dom || s.output?.trim())
+  }
+}
+
 // Source (the activity view's source axis) → the shared human label (reused from the runs-table). Unset = direct API.
 const SOURCE_KEY: Record<string, string> = {
   web: 'sourceWeb',
@@ -335,7 +355,7 @@ export default async function RunDetailPage({
         </Card>
       </section>
 
-      {snapshot && (
+      {snapshot && snapshotHasContent(snapshot) && (
         <section className="space-y-2.5">
           <SectionHeader title={t('snapshot', { kind: String(snapshot.kind) })} />
           <Card className="space-y-3 p-4">
@@ -347,6 +367,68 @@ export default async function RunDetailPage({
                 alt="os-use screenshot"
                 className="max-h-[480px] w-auto max-w-full rounded-lg border"
               />
+            )}
+            {/* prompt (환경-없는 QA) — 최종 답변 텍스트. 주 신호는 trace라 비어 있는 경우가 흔해, 값이 있을 때만 이 섹션이 뜬다
+                (snapshotHasContent 게이트). 예전엔 `{kind:"prompt",output:""}` 원시 JSON만 떠서 "매번 빈 스냅샷"으로 보였다. */}
+            {snapshot.kind === 'prompt' && snapshot.output && (
+              <div>
+                <dt className="text-[11px] font-[510] uppercase tracking-wide text-faint">
+                  {t('snapshotOutput')}
+                </dt>
+                <dd className="mt-0.5 max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-lg border border-border bg-muted/40 p-2 font-mono text-[13px]">
+                  {snapshot.output}
+                </dd>
+              </div>
+            )}
+            {/* os-use — the titles of visible windows (OSWorld-style desktop). */}
+            {snapshot.kind === 'os-use' && snapshot.windows && snapshot.windows.length > 0 && (
+              <div>
+                <dt className="text-[11px] font-[510] uppercase tracking-wide text-faint">
+                  {t('snapshotWindows')}
+                </dt>
+                <dd className="mt-0.5 flex flex-wrap gap-1.5">
+                  {snapshot.windows.map((w, i) => (
+                    <span
+                      key={`${w}-${i}`}
+                      className="rounded-md border border-border bg-muted/40 px-1.5 py-0.5 font-mono text-[12px] text-muted-foreground"
+                    >
+                      {w}
+                    </span>
+                  ))}
+                </dd>
+              </div>
+            )}
+            {/* repo — the final changed-files list + the git diff (the coding harness's result world). */}
+            {snapshot.kind === 'repo' && (
+              <div className="space-y-2">
+                {snapshot.changedFiles && snapshot.changedFiles.length > 0 && (
+                  <div>
+                    <dt className="text-[11px] font-[510] uppercase tracking-wide text-faint">
+                      {t('snapshotChangedFiles')}
+                    </dt>
+                    <dd className="mt-0.5 flex flex-wrap gap-1.5">
+                      {snapshot.changedFiles.map((f) => (
+                        <span
+                          key={f}
+                          className="rounded-md border border-border bg-muted/40 px-1.5 py-0.5 font-mono text-[12px] text-muted-foreground"
+                        >
+                          {f}
+                        </span>
+                      ))}
+                    </dd>
+                  </div>
+                )}
+                {snapshot.diff && (
+                  <div>
+                    <dt className="text-[11px] font-[510] uppercase tracking-wide text-faint">
+                      {t('snapshotDiff')}
+                    </dt>
+                    <dd className="mt-0.5 max-h-80 overflow-auto whitespace-pre rounded-lg border border-border bg-muted/40 p-2 font-mono text-[12px] text-muted-foreground">
+                      {snapshot.diff}
+                    </dd>
+                  </div>
+                )}
+              </div>
             )}
             {/* browser (service-topology: browser-use, etc.) — the final URL the agent reached + an extracted DOM excerpt. */}
             {snapshot.kind === 'browser' && (
@@ -385,13 +467,6 @@ export default async function RunDetailPage({
                 )}
               </div>
             )}
-            <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-all rounded-lg border border-border bg-muted/40 p-2.5 font-mono text-[12px] text-muted-foreground">
-              {JSON.stringify(
-                { ...snapshot, screenshot: snapshot.screenshot ? '<base64>' : undefined },
-                null,
-                2
-              )}
-            </pre>
           </Card>
         </section>
       )}

@@ -20,9 +20,10 @@ But two things made replay look like a **browser-only feature** even though the 
 
 1. **The shipped web player (S4b) diverged from D6.** It renders only `frames` + `logs` and never the
    agent-trace lane D6 specifies — so a run with no frames shows nothing to scrub.
-2. **The only wired producer is the `report_case_screen` live-screen tee**, which fires *solely* for
-   `liveScreen` harnesses (browser-use / os-use). No `EnvironmentRecorder` adapter is wired (only
-   `NullRecorder`), so repo/DOM/network/console/runtime tracks are never produced.
+2. **The only wired producer was the `report_case_screen` live-screen tee**, which fires *solely* for
+   `liveScreen` harnesses (browser-use / os-use). *(Update: the repo plane [S5a] and the **browser CDP
+   environment recorder** [S5b, below] have since landed — repo git-diff, and browser network/console/nav +
+   screencast, now stream into the recording. The runtime/system plane [S6] remains the open producer.)*
 
 Net effect: a **Claude Code / Codex run records a trace but the player is empty**. That is a player+producer
 gap, *not* an architecture problem — the `EnvironmentRecorder` seam, the `repo-diff`/`os-windows`
@@ -375,6 +376,23 @@ the manifest says so; the trace + final snapshot + deltas still make a usable re
   + rrweb-style reconstructed web replay) plus the **repo** (git-diff checkpoints) and **os-use** (scrot)
   adapters behind the seam, and continuous managed-job capture (closes the viewer-dependency gap). The
   richest environment slice; each adapter can land independently.
+- **S5b — browser CDP environment recorder (shipped, this pass)** — the first *streaming* environment adapter
+  (S5a took the non-intrusive pull route; a browser has no cheap pull equivalent). `CdpEnvironmentRecorder`
+  (`topology/src/front-door/cdp-recorder.ts`) holds a persistent CDP WebSocket for the whole case and
+  subscribes to the browser's own event stream — `Network.requestWillBeSent`/`responseReceived`/`loadingFinished`
+  → the **network** track, `Runtime.consoleAPICalled`/`exceptionThrown` → the **console** track,
+  `Page.frameNavigated` (main frame) → the **nav** track, and `Page.startScreencast` → **frames** (throttled,
+  offloaded downstream) — each stamped with `Date.now()` so it aligns with the agent trace (D1). It runs IN
+  PARALLEL with the agent (not on its boundaries): `ServiceTopologyBackend.dispatch` starts it once the per-case
+  browser is up (`TargetEnvHandle.cdpBase` = the runner/CP-reachable CDP, added to all 3 runtimes) and stops it
+  in the `finally`, gated on a `recordSink` (`ServiceTopologyBackendOptions.recordSink`) — best-effort, so a CDP
+  failure never affects the run. The sink routes the same for both placements: **self-hosted** → the runner's
+  `report_case_track`/`report_case_screen` MCP (threaded runner-loop → runLeasedJob → `defaultRunService`);
+  **managed** → the in-process `CaseRecorder.recordTrack`/`recordFrame` (wired in `apps/api` dispatch
+  composition). The web `ReplayPlayer` renders the network/console/nav lanes (and a runtime lane for S6) synced
+  to the playhead. Live-verified against a real Chrome CDP (`scripts/live/replay-cdp-recorder.mjs` — captures
+  nav + console + network + frames over a real socket). Follow-ups: DOM-mutation (rrweb) semantic track; a full
+  self-hosted browser-eval e2e exercising the whole path in one run.
 - **S5a — repo environment plane (shipped, this pass)** — the first environment recorder, and a deliberate
   **deviation from the `EnvironmentRecorder` start/checkpoint/stop seam** (which is defined but driven
   nowhere): the recording is accumulated control-plane-side (the tee is self-hosted-only), while the repo's

@@ -364,6 +364,8 @@ export class DockerTopologyRuntime implements TopologyRuntime {
     return {
       // The CDP the agent (same network) reaches — injected into the front-door payload as wiring's target_cdp_url.
       wiring: { target_cdp_url: `http://${alias}:9222` },
+      // The runner-reachable CDP (host published port) — where the environment recorder taps network/console/nav.
+      cdpBase: hostCdp,
       async snapshot(): Promise<BrowserSnapshot> {
         let targets: Array<{ url?: string }> = [];
         try {

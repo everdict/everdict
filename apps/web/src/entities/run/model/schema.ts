@@ -47,6 +47,12 @@ export const resultSchema = z
         url: z.string().optional(),
         dom: z.string().optional(),
         domRef: z.string().optional(), // full page DOM offloaded to object storage (dom = inline preview)
+        // prompt=환경-없는 QA의 최종 답변(주 신호는 trace라 비어 있을 때가 많음). os-use=보이는 창 제목. repo=최종 diff+변경 파일.
+        // 스냅샷 kind별 실제 표시 대상 — 이게 비면 상세에서 스냅샷 섹션을 통째로 숨긴다(빈 JSON 덤프 방지).
+        output: z.string().optional(),
+        windows: z.array(z.string()).optional(),
+        diff: z.string().optional(),
+        changedFiles: z.array(z.string()).optional(),
       })
       .passthrough()
       .optional(),

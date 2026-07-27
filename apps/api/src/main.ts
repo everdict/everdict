@@ -176,6 +176,17 @@ async function main(): Promise<void> {
   startAutoscaler({ autoscale, scalingTargets, scheduler });
   const { budget, usageMeter } = await buildBudgets({ budgetStore, usageStore });
 
+  // Artifact store (when env-configured): offload os-use screenshots to S3/MinIO → result records carry only a presigned URL (no base64 inline).
+  // Unset → undefined → the service falls back to base64 inline (dev). Credentials are env secrets (never committed).
+  const artifacts = await artifactStoreFromEnv();
+  if (artifacts) console.log("▶ artifact store: S3/MinIO offload enabled (os-use screenshots)");
+  // Durable replay recording — persistent by DEFAULT (Postgres when DATABASE_URL is set, else in-memory), from
+  // persistence. The runner-lease MCP tees pushed frames/logs into it (self-hosted) and the managed topology backend
+  // streams the browser's CDP events (network/console/nav + frames) into it, so a run can be REPLAYED after it settles;
+  // RunService/scorecard seal it at finalize. Frames need an object store to offload; logs/tracks record regardless.
+  // Built before buildDispatch so the managed topology backend can record into it. docs/architecture/replay.md.
+  const caseRecorder = new CaseRecorder(recordingStore, artifacts);
+
   const {
     runnerHub,
     callbackRendezvous,
@@ -204,15 +215,11 @@ async function main(): Promise<void> {
     metrics,
     browserProfileStore, // browser-profiles S5 — eval-browser profile injection (resolve + owner-gate)
     cipher, // browser-profiles S5 — decrypt the profile's captured storageState
+    caseRecorder, // replay ② — managed topology backend records the per-case browser's CDP events into the recording
   });
   // Revoking a runner drops its lazily-registered self:<owner>:<runnerId> placement backend (runner churn hygiene —
   // built here because the dispatcher is created after the workspace/runner services).
   runnerService.onRevoke = (owner, id) => releaseSelfRunnerBackend(owner, id);
-
-  // Artifact store (when env-configured): offload os-use screenshots to S3/MinIO → result records carry only a presigned URL (no base64 inline).
-  // Unset → undefined → the service falls back to base64 inline (dev). Credentials are env secrets (never committed).
-  const artifacts = await artifactStoreFromEnv();
-  if (artifacts) console.log("▶ artifact store: S3/MinIO offload enabled (os-use screenshots)");
 
   const envMeterPolicy = meterUsagePolicyFromEnv(); // default policy when the workspace has no DB setting
   const {
@@ -249,11 +256,6 @@ async function main(): Promise<void> {
   const liveFrames = new LiveFrameStore();
   // Accumulated live execution log per run, pushed by a self-hosted runner (report_case_log) → served by RunService.logs().
   const liveLogs = new LiveLogStore();
-  // Durable replay recording — persistent by DEFAULT (Postgres when DATABASE_URL is set, else in-memory), from
-  // persistence. The runner-lease MCP tees pushed frames/logs into it so a run can be replayed after it settles;
-  // RunService/scorecard seal it at finalize. Frames need an object store to offload; logs record regardless.
-  // docs/architecture/replay.md.
-  const caseRecorder = new CaseRecorder(recordingStore, artifacts);
   const { service, judgeRunner, submitCodeJudgeRun } = buildRun({
     store,
     meteredDispatcher,

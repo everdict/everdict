@@ -12,6 +12,11 @@ export interface TopologyHandle {
 // (playwright_server_url/action_stream_url/session_id…). Design: docs/architecture/target-acquisition-generalization.md.
 export interface TargetEnvHandle {
   wiring: Record<string, string>;
+  // Host/control-plane-reachable CDP HTTP base of THIS per-case browser (e.g. http://127.0.0.1:<hostPort>), when the
+  // target is a CDP browser. Distinct from wiring.target_cdp_url, which is the AGENT-facing internal alias (unreachable
+  // from the recorder's side). The environment recorder taps this to stream network/console/nav (+ screencast frames)
+  // for replay (docs/architecture/replay.md D5). Absent for a non-browser / injection-free target.
+  cdpBase?: string;
   snapshot(): Promise<EnvSnapshot>;
   dispose(): Promise<void>;
 }

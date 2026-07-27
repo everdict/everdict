@@ -13,6 +13,8 @@ import type { RegistryAuth, RuntimeSpec } from "@everdict/contracts";
 import type { CallbackStore, RunnerStore, SecretCipher, SecretStore, WorkspaceSettingsStore } from "@everdict/db";
 import { classifyFailure, isRunnerOnline } from "@everdict/domain";
 import type { HarnessInstanceRegistry, ModelRegistry, RuntimeRegistry } from "@everdict/registry";
+import type { EnvRecordSink } from "@everdict/topology";
+import type { CaseRecorder } from "../common/case-recorder.js";
 import { makeProfileSeeder } from "../core/browser-profile/browser-profile-injector.js";
 import { JudgeAuthDispatcher } from "../core/execution/judge-auth-dispatcher.js";
 import { ModelResolvingDispatcher } from "../core/execution/model-resolving-dispatcher.js";
@@ -41,6 +43,7 @@ export function buildDispatch(deps: {
   metrics: Metrics;
   browserProfileStore?: BrowserProfileStore; // browser-profiles S5 — resolve a referenced profile for eval injection
   cipher?: SecretCipher; // browser-profiles S5 — decrypt the profile's captured storageState blob
+  caseRecorder?: CaseRecorder; // replay ② — durable recorder the managed topology backend streams browser CDP events into
 }) {
   const {
     callbackStore,
@@ -56,11 +59,22 @@ export function buildDispatch(deps: {
     metrics,
     browserProfileStore,
     cipher,
+    caseRecorder,
   } = deps;
   // Saved-profile injection for browser evals (browser-profiles S5) — seed a referenced profile's login into the
   // per-case topology browser before the agent connects. Only when both the store + cipher are wired.
   const seedProfile =
     browserProfileStore && cipher ? makeProfileSeeder({ store: browserProfileStore, cipher }) : undefined;
+  // Replay ② — the managed topology backend records the per-case browser's CDP events (network/console/nav + frames)
+  // straight into the in-process CaseRecorder (→ RecordingStore), so a MANAGED browser-use run replays how its
+  // environment evolved, not just the agent trace. recordTrack/recordFrame are best-effort (they swallow internally),
+  // so firing-and-forgetting the promise is safe. Undefined when no recorder is wired (recording disabled).
+  const recordSink = caseRecorder
+    ? (runId: string): EnvRecordSink => ({
+        track: (item) => void caseRecorder.recordTrack(runId, item),
+        frame: (frameBase64) => void caseRecorder.recordFrame(runId, frameBase64),
+      })
+    : undefined;
   // Self-hosted runner lease hub — parks self:<runnerId> jobs; the runner protocol (MCP, slice 4) leases/returns them.
   // A single instance shared by the dispatcher (park) and the MCP lease/result tools (lease/complete).
   // EVERDICT_RUNNER_MAX_QUEUE=N → backpressure: a runner/pool queue holding N waiting jobs rejects further parks with
@@ -123,6 +137,8 @@ export function buildDispatch(deps: {
           resolveTraceSource: (tenant, harnessId) => traceSourceForDispatch.resolve(tenant, harnessId),
           // Browser-profiles S5 — seed a referenced saved profile's login into the per-case eval browser.
           ...(seedProfile ? { seedProfile } : {}),
+          // Replay ② — stream the per-case browser's CDP events into the durable recording (managed path).
+          ...(recordSink ? { recordSink } : {}),
         })
       : buildRuntimeBackend(spec, opts);
   // Resolve a command harness's {{model}} to a registered Model id (else raw), then delegate to RuntimeDispatcher (placement).

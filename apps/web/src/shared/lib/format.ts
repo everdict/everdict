@@ -4,6 +4,20 @@ export function fmtPct(n: number): string {
   return `${Math.round(n * 100)}%`
 }
 
+// Byte count → a compact human size (B/KB/MB/GB), 1 decimal above KB. Used by the replay runtime lane (mem/net I/O).
+export function fmtBytes(n: number | null | undefined): string {
+  if (n == null || !Number.isFinite(n)) return '–'
+  if (n < 1024) return `${Math.round(n)} B`
+  const units = ['KB', 'MB', 'GB', 'TB']
+  let value = n / 1024
+  let i = 0
+  while (value >= 1024 && i < units.length - 1) {
+    value /= 1024
+    i += 1
+  }
+  return `${value.toFixed(1)} ${units[i]}`
+}
+
 // Score = passRate first (%), else mean (2f), else '–'. Shared across list/leaderboard/trend/detail.
 export function fmtScore(
   passRate: number | null | undefined,

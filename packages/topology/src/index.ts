@@ -132,6 +132,11 @@ export {
   sentinelObservationSource,
 } from "./front-door/observation-source.js";
 export { captureCdpScreenshot, type CdpSocket, type CaptureCdpOptions } from "./front-door/capture-cdp.js";
+export {
+  CdpEnvironmentRecorder,
+  type CdpEnvironmentRecorderOptions,
+  type EnvRecordSink,
+} from "./front-door/cdp-recorder.js";
 export { reachableWsUrl } from "./front-door/cdp-ws.js";
 export { resetBrowserState } from "./front-door/reset-browser.js";
 export { DEFAULT_BROWSER_IMAGE } from "./deploy/browser-image.js";

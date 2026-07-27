@@ -5,12 +5,55 @@ import { useTranslations } from 'next-intl'
 
 import { recordingResponseSchema, type Recording } from '@/entities/recording'
 import { summarizeTraceEvent, traceKindColor, type TraceEvent } from '@/entities/run'
+import { fmtBytes, fmtPct } from '@/shared/lib/format'
 import { cn } from '@/shared/lib/utils'
 import { Button } from '@/shared/ui/button'
 import { Card } from '@/shared/ui/card'
 import { SectionHeader } from '@/shared/ui/section-header'
 
 const TERMINAL = new Set(['succeeded', 'failed', 'superseded', 'cancelled'])
+
+// HTTP status → text color for the network lane: 2xx/3xx ok (muted), 4xx/5xx error (destructive), pending (faint).
+function netStatusColor(status?: number): string {
+  if (status == null) return 'text-faint'
+  if (status >= 400) return 'text-destructive'
+  return 'text-muted-foreground'
+}
+// console level → dot color: error/warn stand out, everything else muted.
+function consoleLevelColor(level: string): string {
+  if (level === 'error') return 'bg-destructive'
+  if (level === 'warning' || level === 'warn') return 'bg-amber-500'
+  return 'bg-muted-foreground/50'
+}
+
+// One labeled stat of the runtime lane (CPU / memory / net I/O).
+function RuntimeStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <div className="text-[9.5px] font-[560] uppercase tracking-wide text-faint">{label}</div>
+      <div className="mt-0.5 font-mono text-[12.5px] font-[560] tabular-nums">{value}</div>
+    </div>
+  )
+}
+
+// A minimal bar sparkline of CPU% over the runtime samples so far — normalized to the max in-window so the shape shows
+// even at low absolute load. Purely decorative (aria-hidden); the numeric CPU stat carries the value.
+function CpuSparkline({ samples }: { samples: { cpuPct?: number }[] }) {
+  const values = samples.map((s) => s.cpuPct ?? 0)
+  if (values.length < 2) return null
+  const max = Math.max(1, ...values)
+  return (
+    <div className="flex h-6 items-end gap-px" aria-hidden>
+      {values.slice(-40).map((v, i) => (
+        <span
+          key={i}
+          className="w-0.5 rounded-sm bg-primary/60"
+          style={{ height: `${Math.max(6, (v / max) * 100)}%` }}
+        />
+      ))}
+    </div>
+  )
+}
 
 // 리플레이 플레이어 — 종료된 run을 하나의 벽시계(t0) 타임라인에서 재생한다. **agent trace가 척추**다:
 // 어떤 하네스(Claude Code·Codex·browser-use·직접 만든 확장)든 trace는 항상 있으므로, 프레임이 없어도
@@ -52,17 +95,33 @@ export function ReplayPlayer({
 
   const frames = rec?.tracks.frames ?? []
   const logs = rec?.tracks.logs ?? []
+  // ② environment plane (browser CDP) — how the world changed underneath the agent: the request track, console
+  // messages, and navigation history over the wall clock. These are what a browser-use replay needs beyond the
+  // agent's own decisions ("how did the page change", not just "what did the agent do"). docs/architecture/replay.md.
+  const network = rec?.tracks.network ?? []
+  const consoleMsgs = rec?.tracks.console ?? []
+  const nav = rec?.tracks.nav ?? []
+  // ③ runtime/system plane — the sandbox sampled over time (CPU/mem/net I/O + lifecycle). The only plane that shows
+  // "did it OOM / thrash", invisible to both the agent trace and the environment DOM.
+  const runtime = rec?.tracks.runtime ?? []
   // Repo environment plane — the in-run git-diff checkpoints folded onto the `custom` lane (name="repo-diff"). Each
   // entry is the cumulative working-tree-vs-HEAD diff at that moment, so scrubbing shows how the repo evolved.
   const repoDeltas = (rec?.tracks.custom ?? []).filter((c) => c.name === 'repo-diff' && c.text)
 
-  // Scrub axis = wall-clock time. Steps are the meaningful "moments": frame times ∪ trace-event times ∪ repo-diff
-  // times. Logs alone (dense/noisy) only seed steps when nothing else exists, so a log-only recording still scrubs.
+  // Scrub axis = wall-clock time. Steps are the meaningful "moments": frame ∪ trace ∪ repo-diff ∪ navigation ∪ runtime
+  // sample times (each a distinct instant worth landing on). The dense/noisy lanes (network, console, logs) are shown
+  // cumulatively up to the playhead but only SEED steps when nothing else does, so a run made only of them still scrubs.
   const stepSet = new Set<number>()
   for (const f of frames) stepSet.add(f.t)
   for (const e of trace) stepSet.add(e.t)
   for (const d of repoDeltas) stepSet.add(d.t)
-  if (stepSet.size === 0) for (const l of logs) stepSet.add(l.t)
+  for (const n of nav) stepSet.add(n.t)
+  for (const s of runtime) stepSet.add(s.t)
+  if (stepSet.size === 0) {
+    for (const n of network) stepSet.add(n.t)
+    for (const c of consoleMsgs) stepSet.add(c.t)
+    for (const l of logs) stepSet.add(l.t)
+  }
   const steps = Array.from(stepSet).sort((a, b) => a - b)
 
   // Auto-advance one moment at a time; stop at the end.
@@ -105,6 +164,22 @@ export function ReplayPlayer({
   }
   const shownTrace = trace.filter((e) => e.t <= playheadT)
   const shownLogs = logs.filter((l) => l.t <= playheadT)
+  // Environment lanes up to the playhead. Network/console are dense — cap the rendered tail (latest N) so a chatty page
+  // doesn't blow up the DOM; the count reflects the full total so nothing is silently hidden.
+  const shownNet = network.filter((n) => n.t <= playheadT)
+  const shownConsole = consoleMsgs.filter((c) => c.t <= playheadT)
+  const TAIL = 60
+  // The current page URL = the latest navigation at or before the playhead (browser env).
+  let currentUrl: string | undefined
+  for (let i = nav.length - 1; i >= 0; i--) {
+    if (nav[i].t <= playheadT) {
+      currentUrl = nav[i].url
+      break
+    }
+  }
+  // The runtime sample at the playhead (latest at/before now) + the series so far (for the CPU sparkline).
+  const runtimeSoFar = runtime.filter((s) => s.t <= playheadT)
+  const runtimeNow = runtimeSoFar.at(-1)
   const t0 = steps[0]
   const elapsedSec = Math.max(0, playheadT - t0) / 1000
 
@@ -121,6 +196,18 @@ export function ReplayPlayer({
               alt={t('frameAlt')}
               className="max-h-[28rem] w-full object-contain"
             />
+          </div>
+        )}
+
+        {/* Browser location (nav track) — the page URL at the playhead. Reads like an address bar over the frame. */}
+        {currentUrl && (
+          <div className="flex items-center gap-2 rounded-md border border-border bg-elevated px-2 py-1">
+            <span className="shrink-0 text-[9.5px] font-[560] uppercase tracking-wide text-faint">
+              {t('navLane')}
+            </span>
+            <span className="min-w-0 flex-1 truncate font-mono text-[11.5px] text-muted-foreground">
+              {currentUrl}
+            </span>
           </div>
         )}
 
@@ -179,6 +266,56 @@ export function ReplayPlayer({
           </div>
         )}
 
+        {/* Network lane (browser env) — the requests that fired up to the playhead (latest first): method · url · status · ms. */}
+        {shownNet.length > 0 && (
+          <div className="space-y-1.5">
+            <div className="text-[10.5px] font-[560] uppercase tracking-wide text-faint">
+              {t('networkLane')} · {shownNet.length}
+            </div>
+            <div className="max-h-44 space-y-0.5 overflow-auto rounded-md border border-border bg-elevated p-2 font-mono text-[11px]">
+              {shownNet
+                .slice(-TAIL)
+                .reverse()
+                .map((n, i) => (
+                  <div key={`${n.t}-${i}`} className="flex items-center gap-2">
+                    <span className="w-10 shrink-0 font-[560] text-faint">{n.method}</span>
+                    <span className="min-w-0 flex-1 truncate text-muted-foreground">{n.url}</span>
+                    <span
+                      className={cn('w-7 shrink-0 text-right tabular-nums', netStatusColor(n.status))}
+                      title={n.status == null ? t('netPending') : undefined}
+                    >
+                      {n.status ?? '·'}
+                    </span>
+                    <span className="w-12 shrink-0 text-right tabular-nums text-faint">
+                      {n.ms != null ? `${Math.round(n.ms)}ms` : ''}
+                    </span>
+                  </div>
+                ))}
+            </div>
+          </div>
+        )}
+
+        {/* Console lane (browser env) — console messages up to the playhead; error/warn colored. Drops the old constant []. */}
+        {shownConsole.length > 0 && (
+          <div className="space-y-1.5">
+            <div className="text-[10.5px] font-[560] uppercase tracking-wide text-faint">
+              {t('consoleLane')} · {shownConsole.length}
+            </div>
+            <div className="max-h-40 space-y-0.5 overflow-auto rounded-md border border-border bg-elevated p-2 font-mono text-[11px]">
+              {shownConsole.slice(-TAIL).map((c, i) => (
+                <div key={`${c.t}-${i}`} className="flex items-start gap-2">
+                  <span
+                    className={cn('mt-1 size-1.5 shrink-0 rounded-full', consoleLevelColor(c.level))}
+                  />
+                  <span className="min-w-0 whitespace-pre-wrap break-all text-muted-foreground">
+                    {c.text}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Repo environment plane — the cumulative git-diff at the playhead (a coding harness's "how the repo changed"). */}
         {repo?.text && (
           <div className="space-y-1.5">
@@ -204,6 +341,33 @@ export function ReplayPlayer({
                 </div>
               ))}
             </pre>
+          </div>
+        )}
+
+        {/* Runtime/system plane — the sandbox at the playhead (CPU/mem/net I/O + a CPU sparkline over the samples so far).
+            The only lane that shows "did it OOM / thrash", invisible to the agent trace and the environment DOM. */}
+        {runtimeNow && (
+          <div className="space-y-1.5">
+            <div className="text-[10.5px] font-[560] uppercase tracking-wide text-faint">
+              {t('runtimeLane')}
+            </div>
+            <div className="flex flex-wrap items-center gap-x-5 gap-y-2 rounded-md border border-border bg-elevated p-2.5">
+              <RuntimeStat
+                label={t('cpuLabel')}
+                value={runtimeNow.cpuPct != null ? fmtPct(runtimeNow.cpuPct / 100) : '–'}
+              />
+              <RuntimeStat label={t('memLabel')} value={fmtBytes(runtimeNow.memBytes)} />
+              <RuntimeStat
+                label={t('netLabel')}
+                value={`↓${fmtBytes(runtimeNow.rxBytes)} · ↑${fmtBytes(runtimeNow.txBytes)}`}
+              />
+              <CpuSparkline samples={runtimeSoFar} />
+              {runtimeNow.event && (
+                <span className="rounded bg-muted px-1.5 py-0.5 text-[10.5px] font-[560] text-muted-foreground">
+                  {runtimeNow.event}
+                </span>
+              )}
+            </div>
           </div>
         )}
 

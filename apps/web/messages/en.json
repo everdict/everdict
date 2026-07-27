@@ -2176,6 +2176,10 @@
     "trace": "Trace",
     "snapshot": "Snapshot ({kind})",
     "downloadDom": "Download full DOM",
+    "snapshotOutput": "Final answer",
+    "snapshotWindows": "Open windows",
+    "snapshotChangedFiles": "Changed files",
+    "snapshotDiff": "Diff",
     "discuss": "Discussion",
     "liveLogs": "Live logs",
     "liveTrace": "This harness is configured to report its trace to {kind} — find it there by everdict.run_id:",
@@ -3188,7 +3192,15 @@
     "stepOf": "Step {i}/{n}",
     "agentPlane": "Agent",
     "logLane": "Logs",
-    "repoLane": "Repo changes"
+    "repoLane": "Repo changes",
+    "networkLane": "Network",
+    "consoleLane": "Console",
+    "navLane": "Navigation",
+    "runtimeLane": "Runtime",
+    "netPending": "pending",
+    "cpuLabel": "CPU",
+    "memLabel": "Memory",
+    "netLabel": "Net I/O"
   },
   "sandboxTerminal": {
     "hint": "Run a command inside the live sandbox (ls · cat · ps · env …)",

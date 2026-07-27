@@ -1,4 +1,5 @@
 import type { CaseJob, CaseResult } from "@everdict/contracts";
+import type { EnvRecordSink } from "@everdict/topology";
 import { detectCapabilities } from "./capabilities.js";
 import { runLeasedJob } from "./run-leased-job.js";
 import type { RunnerLoopStatus } from "./runner-loop.js";
@@ -47,7 +48,7 @@ export interface RunnerHostOpts {
   connect?: ConnectClient; // default mcpConnect(new URL("/mcp", apiUrl), token)
   runJob?: (
     job: CaseJob,
-    opts?: { signal?: AbortSignal; reportScreen?: (frameBase64: string) => Promise<void> },
+    opts?: { signal?: AbortSignal; reportScreen?: (frameBase64: string) => Promise<void>; recordSink?: EnvRecordSink },
   ) => Promise<CaseResult>; // default runLeasedJob (signal = lease cancel; reportScreen = live-screen frames)
   detect?: () => Promise<string[]>; // default detectCapabilities
   sleep?: (ms: number) => Promise<void>;
@@ -92,17 +93,29 @@ export class RunnerHost {
     const dockerAvailable = this.capabilities.includes("docker");
     const baseRun =
       this.opts.runJob ??
-      ((job: CaseJob, opts?: { signal?: AbortSignal; reportScreen?: (frameBase64: string) => Promise<void> }) =>
+      ((
+        job: CaseJob,
+        opts?: {
+          signal?: AbortSignal;
+          reportScreen?: (frameBase64: string) => Promise<void>;
+          recordSink?: EnvRecordSink;
+        },
+      ) =>
         runLeasedJob(job, {
           dockerAvailable,
           log: this.opts.log,
           ...(opts?.signal ? { signal: opts.signal } : {}),
           ...(opts?.reportScreen ? { reportScreen: opts.reportScreen } : {}),
+          ...(opts?.recordSink ? { recordSink: opts.recordSink } : {}),
         }));
     // Wrap job start/finish to track activeJobs (the basis for running/idle events) + emit a completion notice.
     const runJob = async (
       job: CaseJob,
-      opts?: { signal?: AbortSignal; reportScreen?: (frameBase64: string) => Promise<void> },
+      opts?: {
+        signal?: AbortSignal;
+        reportScreen?: (frameBase64: string) => Promise<void>;
+        recordSink?: EnvRecordSink;
+      },
     ): Promise<CaseResult> => {
       this.activeJobs++;
       this.emit();
