@@ -1,7 +1,7 @@
+import type { ScorecardService } from "@everdict/application-control";
 import { InMemoryScheduleStore } from "@everdict/db";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ScheduleServiceRef, wireScheduleService } from "./schedule.js";
-import type { ScorecardService } from "@everdict/application-control";
 
 // Regression for the live 400: the report-runner adapter must speak the agent's internal vocabulary
 // (`workspace`, the /agent/events precedent) while the port input speaks control-plane `tenant` — an input
