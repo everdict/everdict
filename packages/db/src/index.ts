@@ -152,3 +152,4 @@ export { InMemoryUserProfileStore, PgUserProfileStore } from "./workspace/user-p
 export { InMemoryCallbackStore, PgCallbackStore } from "./activity/callback-store.js";
 export { InMemoryRunnerJobStore, PgRunnerJobStore } from "./activity/runner-job-store.js";
 export { InMemoryKnowledgeStore } from "./knowledge/in-memory-knowledge-store.js";
+export { PgKnowledgeStore } from "./knowledge/pg-knowledge-store.js";

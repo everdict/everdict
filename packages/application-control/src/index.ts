@@ -282,3 +282,10 @@ export { dispatchManifest, foldEnvDeltas } from "./recording-manifest.js";
 // knowledge — the knowledge-graph store port + the harvest ingest use-case (projection lives in @everdict/domain).
 export type { KnowledgeStore } from "./ports/knowledge-store.js";
 export { ingestHarvest } from "./knowledge/ingest-harvest.js";
+export {
+  KnowledgeQueryService,
+  type NeighborQuery,
+  type RelatedFact,
+  type Subgraph,
+  type TraversalDirection,
+} from "./knowledge/knowledge-query-service.js";

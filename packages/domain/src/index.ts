@@ -224,3 +224,4 @@ export {
 export { edgeId, mentionId, nodeId } from "./knowledge/ids.js";
 export { type HarvestResult, HarvestBuilder } from "./knowledge/harvest.js";
 export { harvestScorecard, SCORECARD_HARVESTER } from "./knowledge/harvest-scorecard.js";
+export { PREDICATE_PRIORITY, predicateRank } from "./knowledge/ranking.js";
