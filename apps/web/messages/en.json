@@ -3088,6 +3088,8 @@
     "reasoning": "Reasoning",
     "reasoningLive": "Reasoning…",
     "todoTitle": "Task list",
+    "subagentsTitle": "Sub-agents",
+    "subagentTeammate": "teammate",
     "bucket": {
       "today": "Today",
       "yesterday": "Yesterday",

@@ -3088,6 +3088,8 @@
     "reasoning": "사고 과정",
     "reasoningLive": "추론 중…",
     "todoTitle": "작업 목록",
+    "subagentsTitle": "서브 에이전트",
+    "subagentTeammate": "팀메이트",
     "bucket": {
       "today": "오늘",
       "yesterday": "어제",

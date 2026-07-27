@@ -23,6 +23,7 @@ import { MessageRow } from './message-row'
 import { PermissionPrompt, type PendingPermission } from './permission-prompt'
 import { ReasoningBlock } from './reasoning-block'
 import { SessionMenu } from './session-menu'
+import { SubagentList } from './subagent-list'
 import { TeamMenu, type TeammateSpawnInput } from './team-menu'
 import { TodoList } from './todo-list'
 
@@ -224,6 +225,8 @@ export function ConversationView({
                 if (item.kind === 'reasoning')
                   return <ReasoningBlock key={item.id} text={item.text} />
                 if (item.kind === 'todos') return <TodoList key={item.id} todos={item.todos} />
+                if (item.kind === 'agents')
+                  return <SubagentList key={item.id} agents={item.agents} />
                 return <MessageRow key={item.message.id} message={item.message} />
               })}
               {pendingUser && (
