@@ -59,10 +59,20 @@ export function wireScheduleService(
           run: async (input) => {
             let res: Response;
             try {
+              // The agent's internal surface says `workspace` (the /agent/events precedent); the port input says
+              // `tenant` (control-plane vocabulary) — map explicitly, never spread (a live 400 caught the drift).
               res = await fetch(new URL("/internal/report", agentUrl), {
                 method: "POST",
                 headers: { "content-type": "application/json", "x-internal-token": agentInternalToken },
-                body: JSON.stringify(input),
+                body: JSON.stringify({
+                  workspace: input.tenant,
+                  createdBy: input.createdBy,
+                  scheduleId: input.scheduleId,
+                  scheduleName: input.scheduleName,
+                  view: input.view,
+                  ...(input.instructions !== undefined ? { instructions: input.instructions } : {}),
+                  ...(input.compare !== undefined ? { compare: input.compare } : {}),
+                }),
               });
             } catch (err) {
               throw new UpstreamError(
