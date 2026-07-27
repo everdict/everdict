@@ -5,6 +5,7 @@ import {
   TopologyServiceSchema,
   TopologyTargetSchema,
 } from "../harness/harness-spec.js";
+import { SkillFilesSchema } from "./skill.js";
 
 // Capability Store contracts — one discriminated `Capability` entity (kind ∈ mcp|code|skill|environment) that a
 // workspace's members AUTHOR and PUBLISH at one of four reach tiers, and that a browsing member ADOPTS into their
@@ -75,11 +76,12 @@ export const CodeToolSpecSchema = z.object({
 });
 export type CodeToolSpec = z.infer<typeof CodeToolSpecSchema>;
 
-// skill — instructions-only (Claude-Code-style progressive disclosure via the use_skill tool). The versioned,
-// shareable successor to SkillRecord.instructions.
+// skill — instructions + optional supporting files (Claude-Code-style progressive disclosure: the SKILL.md body loads
+// via use_skill, each reference file via read_skill_file). The versioned, shareable successor to SkillRecord.
 export const SkillCapabilitySpecSchema = z.object({
   type: z.literal("skill"),
   instructions: z.string(), // the SKILL.md body, loaded on demand when the agent invokes the skill
+  files: SkillFilesSchema.default([]), // supporting reference files, each loaded individually on demand
 });
 export type SkillCapabilitySpec = z.infer<typeof SkillCapabilitySpecSchema>;
 

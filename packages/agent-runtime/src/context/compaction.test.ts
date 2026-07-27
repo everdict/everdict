@@ -45,6 +45,42 @@ describe("microcompact", () => {
     const once = microcompact(transcript()).messages;
     expect(microcompact(once).cleared).toBe(0);
   });
+
+  it("keeps loaded-skill payloads (use_skill / read_skill_file results) that ordinary results would lose", () => {
+    const m = transcript();
+    // Rebrand the two OLD calls as skill loads: c0 = use_skill, c1 = read_skill_file.
+    const skillNames = ["use_skill", "read_skill_file"];
+    for (const [k, name] of skillNames.entries()) {
+      m[1 + 2 * k] = {
+        role: "assistant",
+        content: null,
+        tool_calls: [{ id: `c${k}`, type: "function", function: { name, arguments: "{}" } }],
+      };
+    }
+    const { messages, cleared } = microcompact(m);
+    expect(cleared).toBe(0); // both old results were skill payloads — survived
+    expect((messages[2] as { content: string }).content).toBe(big());
+    expect((messages[4] as { content: string }).content).toBe(big());
+  });
+
+  it("clears the OLDEST skill payloads first once they exceed the keep budget", () => {
+    const m: ChatMessage[] = [{ role: "user", content: "goal" }];
+    // 3 old use_skill loads of 10k each (30k > the 24k budget) + filler turns pushing them past the recent window.
+    for (let i = 0; i < 3; i++) {
+      m.push({
+        role: "assistant",
+        content: null,
+        tool_calls: [{ id: `s${i}`, type: "function", function: { name: "use_skill", arguments: "{}" } }],
+      });
+      m.push({ role: "tool", tool_call_id: `s${i}`, content: `# Skill: s${i}\n${"B".repeat(10_000)}` });
+    }
+    for (let i = 0; i < 9; i++) m.push({ role: "assistant", content: `filler ${i}` });
+    const { messages, cleared } = microcompact(m);
+    expect(cleared).toBe(1); // only the oldest fell out of the 24k budget
+    expect((messages[2] as { content: string }).content).toContain("elided");
+    expect((messages[4] as { content: string }).content).toContain("# Skill: s1");
+    expect((messages[6] as { content: string }).content).toContain("# Skill: s2");
+  });
 });
 
 describe("summarizeAndCompact", () => {

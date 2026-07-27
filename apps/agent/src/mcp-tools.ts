@@ -3,7 +3,7 @@ import {
   type SkillEntry,
   type ToolDefinition,
   ToolRegistry,
-  buildSkillTool,
+  buildSkillTools,
   buildToolSearchTool,
   mcpToolToDefinition,
 } from "@everdict/agent-runtime";
@@ -187,18 +187,18 @@ export function mcpToolProvider(mcpUrl: string, codeRuntime?: CodeToolRuntime): 
     // Deterministic tool order (name-sorted) so ToolSearch results + the outbound tools[] are stable across runs.
     bridged.sort((a, b) => a.name.localeCompare(b.name));
 
-    // The native `use_skill` tool (progressive disclosure over the workspace's skills) is added even when no MCP tools
-    // are reachable — a workspace can rely on skills alone.
-    const skillTool = buildSkillTool(skills);
+    // The native skill tools (use_skill + read_skill_file — progressive disclosure over the workspace's skills) are
+    // added even when no MCP tools are reachable — a workspace can rely on skills alone.
+    const skillTools = buildSkillTools(skills);
     // Adopted code capabilities → native `code__<name>` tools. buildCodeTools drops any adopted-from-others code the
     // runtime can't safely (isolatedly) run — never execute untrusted code on the host.
     const { defs: codeDefs } = buildCodeTools(codeTools, codeRuntime);
-    if (bridged.length === 0 && !skillTool && codeDefs.length === 0) return EMPTY_SESSION;
+    if (bridged.length === 0 && skillTools.length === 0 && codeDefs.length === 0) return EMPTY_SESSION;
 
     const tools: ToolDefinition[] = [];
     if (bridged.length > 0) tools.push(buildToolSearchTool(new ToolRegistry(bridged)), ...bridged);
     tools.push(...codeDefs); // native code tools — always loaded (not deferred behind ToolSearch)
-    if (skillTool) tools.push(skillTool);
+    tools.push(...skillTools);
     const registry = new ToolRegistry(tools);
     return {
       registry,

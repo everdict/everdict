@@ -4,7 +4,7 @@ import { BookOpen, FlaskConical, Play, Wrench } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 import { useState, useTransition } from 'react'
 
-import type { SkillTryMessage } from '@/entities/skill'
+import type { SkillFile, SkillTryMessage } from '@/entities/skill'
 import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
 import { Textarea } from '@/shared/ui/input'
@@ -16,7 +16,7 @@ import { trySkillAction } from '../api/manage-skills'
 export function TestSkillPanel({
   skill,
 }: {
-  skill: { name: string; description: string; instructions: string }
+  skill: { name: string; description: string; instructions: string; files?: SkillFile[] }
 }) {
   const t = useTranslations('skillsManager')
   const [prompt, setPrompt] = useState('')

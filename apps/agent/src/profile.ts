@@ -53,7 +53,8 @@ function composeSystemPrompt(
     parts.push(
       "## Workspace skills\nThis workspace has saved SKILLs — reusable procedures the members authored for recurring " +
         "tasks. The `use_skill` tool lists them (name + when-to-use). When a request matches a skill, call `use_skill` " +
-        "to load its steps and follow them; otherwise proceed normally.",
+        "to load its steps and follow them; load any supporting file it lists via `read_skill_file` only at the step " +
+        "that needs it. Otherwise proceed normally.",
     );
   }
   return parts.join("\n\n");
@@ -118,7 +119,12 @@ function applyFirstPartyDefaults(
         write: spec.write,
       });
     } else if (spec.type === "skill" && !acc.skills.some((s) => s.name === def.record.name)) {
-      acc.skills.push({ name: def.record.name, description: def.record.description, instructions: spec.instructions });
+      acc.skills.push({
+        name: def.record.name,
+        description: def.record.description,
+        instructions: spec.instructions,
+        files: spec.files,
+      });
     }
   }
 }
@@ -149,7 +155,12 @@ export function registryProfileResolver(opts: {
     let skills: SkillEntry[] = [];
     try {
       const records = await opts.skillStore.list(principal.workspace, principal.subject);
-      skills = records.map((s) => ({ name: s.name, description: s.description, instructions: s.instructions }));
+      skills = records.map((s) => ({
+        name: s.name,
+        description: s.description,
+        instructions: s.instructions,
+        files: s.files,
+      }));
     } catch {
       skills = [];
     }
@@ -217,7 +228,12 @@ export function registryProfileResolver(opts: {
           });
         } else if (capSpec.type === "skill") {
           if (!skills.some((s) => s.name === record.name))
-            skills.push({ name: record.name, description: record.description, instructions: capSpec.instructions });
+            skills.push({
+              name: record.name,
+              description: record.description,
+              instructions: capSpec.instructions,
+              files: capSpec.files,
+            });
         } else if (capSpec.type === "code") {
           // Bind each declared required secret to the adopter's own secret VALUE (the code reads it as an env var by
           // its logical name). sandbox = adopted from another workspace → the ToolProvider requires an isolated runtime.

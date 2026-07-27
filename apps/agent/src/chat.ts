@@ -34,6 +34,7 @@ const REFERENCE_TOOL: Record<AgentReferenceType, string> = {
   scorecard: "get_scorecard",
   judge: "get_judge",
   view: "get_view",
+  skill: "get_skill",
 };
 
 const MAX_REFERENCE_CHARS = 4_000;

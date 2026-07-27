@@ -34,8 +34,15 @@ describe("firstPartyDefaults", () => {
     if (skill.record.spec.type !== "skill") return;
     // The procedure's load-bearing steps: diagnose from scorecard evidence, fix via a PR, and carry the experiment
     // context in the PR body (the whole point of the skill — a reviewer judges the fix without re-running).
-    for (const anchor of ["get_scorecard", "get_github_file", "open_github_pr", "Root cause", "Failing cases"]) {
+    for (const anchor of ["get_scorecard", "get_github_file", "open_github_pr", "references/pr-body.md"]) {
       expect(skill.record.spec.instructions).toContain(anchor);
+    }
+    // The mandatory PR-body structure lives in a supporting file (progressive disclosure: loaded via read_skill_file
+    // only at the PR step), keeping the body lean.
+    const prBody = skill.record.spec.files.find((f) => f.path === "references/pr-body.md");
+    expect(prBody).toBeDefined();
+    for (const anchor of ["What failed", "Failing cases", "Root cause", "Verification"]) {
+      expect(prBody?.content).toContain(anchor);
     }
   });
 

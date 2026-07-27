@@ -29,6 +29,7 @@ export function registerSkillRoutes(app: FastifyInstance, deps: ServerDeps): voi
           name: parsed.data.name,
           description: parsed.data.description,
           instructions: parsed.data.instructions,
+          ...(parsed.data.files ? { files: parsed.data.files } : {}),
           ...(parsed.data.visibility ? { visibility: parsed.data.visibility } : {}),
         }),
       );

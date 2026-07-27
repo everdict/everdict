@@ -1,4 +1,4 @@
-import { BadRequestError } from "@everdict/contracts";
+import { BadRequestError, SkillFilesSchema } from "@everdict/contracts";
 import type { GenerateSkillResult } from "@everdict/contracts/wire";
 import { modelApiKeySecretName } from "@everdict/domain";
 import { type JudgeCompletion, transportComplete } from "@everdict/graders";
@@ -23,6 +23,9 @@ const SYSTEM_PROMPT = [
   '  "description": one line — when to use this skill / what it produces,',
   '  "instructions": the skill body as a numbered markdown procedure the agent follows step by step, naming concrete',
   "     Everdict read tools where relevant and telling the agent how to present its findings.",
+  '  "files": OPTIONAL — an array of {"path", "content"} supporting reference files. Keep the body lean: when the',
+  "     skill needs long reference material (a report template, a rubric, a checklist), put it in a file (e.g. path",
+  '     "references/report-template.md") and have a body step load it via read_skill_file. Small skills need no files.',
   "Do not wrap the JSON in prose or code fences. Output the JSON object and nothing else.",
 ].join("\n");
 
@@ -53,12 +56,14 @@ function parseDraft(text: string, description: string): GenerateSkillResult {
         typeof obj.instructions === "string" && obj.instructions.trim().length > 0
           ? obj.instructions.trim()
           : text.trim();
-      return { name, description: desc, instructions };
+      // Lenient on the optional files: keep them only when they validate as a whole (paths relative + unique).
+      const files = SkillFilesSchema.safeParse(obj.files);
+      return { name, description: desc, instructions, files: files.success ? files.data : [] };
     } catch {
       // fall through to the raw-text fallback
     }
   }
-  return { name: "new-skill", description: description.slice(0, 120), instructions: text.trim() };
+  return { name: "new-skill", description: description.slice(0, 120), instructions: text.trim(), files: [] };
 }
 
 export class SkillGenerator {

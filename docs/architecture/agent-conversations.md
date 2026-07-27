@@ -139,19 +139,36 @@ i18n `agentChat` namespace in `messages/{en,ko}.json`.
   filesystem port), **instructions-only** (v1 — no executable code; actions come from MCP tools), generation lives in a
   **web wizard**, and sharing is **private → workspace** (`visibility private|workspace`, the Views/browser-profile
   pattern — a member drafts privately then "shares to the workspace", managed creator-or-admin). A store-backed `Skill`
-  entity (`SkillRecord` {name, description, instructions, visibility, createdBy}; `SkillStore` InMemory/Pg, migration
-  `0071`; `SkillService` with the per-visibility gate) — NOT versioned (skills are living docs, edited in place, unlike
-  the immutable AgentSpec/Model). Surfaces: `POST/GET /skills` + `PATCH` (edit / share = visibility toggle) + `DELETE`
+  entity (`SkillRecord` {name, description, instructions, **files**, visibility, createdBy}; `SkillStore` InMemory/Pg,
+  migrations `0071` + `0080`; `SkillService` with the per-visibility gate) — NOT versioned (skills are living docs,
+  edited in place, unlike the immutable AgentSpec/Model). Surfaces: `POST/GET /skills` (+ `GET /skills/:id`) + `PATCH`
+  (edit / share = visibility toggle; `files` replaces the whole set when present, omitted = kept) + `DELETE`
   + `POST /skills/generate` (**skill-generate** — a description + a registered model id → an AI-drafted
-  {name, description, instructions} via the workspace's model + key, reusing the model-probe connection resolution; the
-  draft persists nothing), with MCP parity for CRUD (`list_/get_/create_/update_/delete_skill`; generate stays
-  HTTP-only, an interactive flow). authz `skills:read` (viewer+) / `skills:write` (member+, creator-or-admin per skill
-  in the service). The agent consumes skills via **progressive disclosure**: a native `use_skill` tool
-  (`@everdict/agent-runtime` `buildSkillTool`) lists every available skill (name + when-to-use) in its description and
-  returns the chosen skill's full body on call; the profile resolver loads the caller's visible skills
-  (workspace-shared + own private) each turn, independent of the AgentSpec. Web: **Settings › Skills**
-  (`features/manage-skills`) — the library list + a New-skill dialog with an AI generate wizard (describe → draft →
-  edit → save) + a private↔workspace share toggle + delete (creator-or-admin).
+  {name, description, instructions, files} via the workspace's model + key, reusing the model-probe connection
+  resolution; the draft persists nothing), with MCP parity for CRUD (`list_/get_/create_/update_/delete_skill`;
+  generate stays HTTP-only, an interactive flow). authz `skills:read` (viewer+) / `skills:write` (member+,
+  creator-or-admin per skill in the service).
+  **A skill is NOT one giant document** (the Claude Code skill-directory reinterpretation): the SKILL.md body
+  (`instructions`) stays a lean procedure, and long reference material lives in `files` [{path, content}] — relative
+  forward-slash paths, no traversal, ≤32 files × ≤256 KiB, unique paths (contract-validated). The agent consumes
+  skills via **three-tier progressive disclosure** (`@everdict/agent-runtime` `buildSkillTools`): (1) the `use_skill`
+  tool description lists every skill (name + when-to-use) under a Claude-Code-parity listing budget (250 chars/entry,
+  8 000-char budget, even shrink → names-only floor — a skill is never dropped from the listing); (2) `use_skill(name)`
+  returns the body plus a paths+sizes **index** of its files; (3) `read_skill_file(skill, path)` loads exactly one
+  file at the step that needs it (the tool exists only when some skill bundles files). Loaded-skill payloads survive
+  microcompact within a 24 k-char budget, newest first (Claude Code's post-compact skill re-emission, reinterpreted) —
+  an agent mid-procedure does not lose its instructions. The profile resolver loads the caller's visible skills
+  (workspace-shared + own private) each turn, independent of the AgentSpec; capability-store skill specs
+  (`SkillCapabilitySpec`) carry the same optional `files`. Web: **Settings › Skills** (`features/manage-skills`) — the
+  list grouped **Personal drafts / Workspace skills** + a New-skill dialog with an AI generate wizard (describe →
+  draft [may include files] → edit → save) + a private↔workspace share toggle + delete (creator-or-admin), and a
+  **detail page** `settings/skills/[id]` (`SkillDetail`): SKILL.md + per-file tabs (markdown rendered, others mono),
+  meta strip, and **"Edit with agent"** as the primary editing path — `AskAgentButton` (widgets/infra-panel) opens the
+  right-hand agent chat panel with the skill @-referenced (`skill` is an `AGENT_REFERENCE_TYPES` member, resolved via
+  `get_skill`) and a draft prompt pre-typed (`askAgent(prompt, ref)` on the panel context; nothing auto-sends), so the
+  agent reviews and applies edits through `get_skill`/`update_skill` under the conversation's permission mode (HITL).
+  The manual editor dialog stays as the secondary path (files are listed/removable there; file content authoring is
+  the agent's job).
 - **P8 — a workspace's configured integrations are usable by default (HITL-gated).** Beyond the read-only
   allowlist, the agent bridges a curated set of **"use the integration" actions** from the base control-plane
   surface by DEFAULT (`apps/agent/src/mcp-tools.ts` `INTEGRATION_ACTIONS`): `post_mattermost_message` (new — post

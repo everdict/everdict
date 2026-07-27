@@ -1,4 +1,10 @@
-import { ForbiddenError, NotFoundError, type SkillRecord, type SkillVisibility } from "@everdict/contracts";
+import {
+  ForbiddenError,
+  NotFoundError,
+  type SkillFile,
+  type SkillRecord,
+  type SkillVisibility,
+} from "@everdict/contracts";
 import type { SkillStore } from "../ports/skill-store.js";
 
 // Workspace Skill CRUD — dual-scoped like browser profiles / Views:
@@ -13,6 +19,7 @@ export interface CreateSkillInput {
   name: string;
   description: string;
   instructions: string;
+  files?: SkillFile[]; // supporting reference files (defaults to none)
   visibility?: SkillVisibility; // defaults to "private" (personal draft) — sharing is an explicit opt-in
 }
 
@@ -20,6 +27,7 @@ export interface UpdateSkillInput {
   name?: string;
   description?: string;
   instructions?: string;
+  files?: SkillFile[]; // full replacement of the file set when provided (omit to keep as-is)
   visibility?: SkillVisibility; // promote private→workspace ("share") or demote workspace→private
 }
 
@@ -53,6 +61,7 @@ export class SkillService {
       name: input.name,
       description: input.description,
       instructions: input.instructions,
+      files: input.files ?? [],
       visibility: input.visibility ?? "private", // personal draft by default — sharing is explicit
       createdBy: input.createdBy,
       createdAt: ts,
@@ -82,6 +91,7 @@ export class SkillService {
     if (patch.name !== undefined) next.name = patch.name;
     if (patch.description !== undefined) next.description = patch.description;
     if (patch.instructions !== undefined) next.instructions = patch.instructions;
+    if (patch.files !== undefined) next.files = patch.files;
     if (patch.visibility !== undefined) next.visibility = patch.visibility;
     const updated = await this.deps.store.update(tenant, id, next);
     if (!updated) throw new NotFoundError("NOT_FOUND", { id }, `skill '${id}' not found.`);

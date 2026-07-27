@@ -76,6 +76,7 @@ function skillRecord(over: Partial<SkillRecord>): SkillRecord {
     name: "triage",
     description: "d",
     instructions: "1. …",
+    files: [],
     visibility: "workspace",
     createdBy: "u1",
     createdAt: "t",
@@ -122,7 +123,7 @@ describe("registryProfileResolver", () => {
       secretStore({}),
       skillStore([skillRecord({ name: "triage" })]),
     )(principal);
-    expect(profile.skills).toEqual([{ name: "triage", description: "d", instructions: "1. …" }]);
+    expect(profile.skills).toEqual([{ name: "triage", description: "d", instructions: "1. …", files: [] }]);
     expect(profile.systemPrompt).toContain("use_skill");
   });
 
@@ -207,14 +208,19 @@ describe("registryProfileResolver", () => {
   });
 
   it("resolves an adopted skill capability into a use_skill entry (deduped against the ambient library)", async () => {
-    const cap = capRecord({ type: "skill", instructions: "1. adopted step" }, { name: "adopted-skill" });
+    const cap = capRecord({ type: "skill", instructions: "1. adopted step", files: [] }, { name: "adopted-skill" });
     const profile = await resolver(
       spec({ capabilities: [capRef()] }),
       secretStore({}),
       skillStore(),
       capabilityStore([cap]),
     )(principal);
-    expect(profile.skills).toContainEqual({ name: "adopted-skill", description: "d", instructions: "1. adopted step" });
+    expect(profile.skills).toContainEqual({
+      name: "adopted-skill",
+      description: "d",
+      instructions: "1. adopted step",
+      files: [],
+    });
     expect(profile.systemPrompt).toContain("use_skill");
   });
 

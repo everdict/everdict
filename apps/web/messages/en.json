@@ -3107,7 +3107,15 @@
     "testError": "Could not run the test.",
     "usedSkill": "loaded skill {skill}",
     "createdBy": "Created by {name}",
-    "skillMenu": "Skill actions"
+    "skillMenu": "Skill actions",
+    "personalSection": "Personal drafts",
+    "workspaceSection": "Workspace skills",
+    "files": "Supporting files",
+    "filesHint": "Reference material the agent loads one file at a time (read_skill_file) — the SKILL.md body stays lean. Author or edit file contents with the agent from the skill's detail page.",
+    "removeFile": "Remove {path}",
+    "fileCount": "{count, plural, one {# file} other {# files}}",
+    "editWithAgent": "Edit with agent",
+    "editWithAgentPrompt": "Help me improve the skill \"{name}\". Review its SKILL.md body and supporting files, then propose concrete edits — keep the body a lean step-by-step procedure and move long reference material into supporting files. Once I confirm, apply the changes with update_skill."
   },
   "agentChat": {
     "new": "New",
@@ -3199,7 +3207,8 @@
       "dataset": "Dataset",
       "scorecard": "Scorecard",
       "judge": "Judge",
-      "view": "View"
+      "view": "View",
+      "skill": "Skill"
     }
   },
   "workspaceSettings": {

@@ -1,4 +1,4 @@
-import { SkillVisibilitySchema } from "@everdict/contracts";
+import { SkillFilesSchema, SkillVisibilitySchema } from "@everdict/contracts";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { type McpToolContext, ok, run } from "../mcp-context.js";
@@ -25,7 +25,7 @@ export function registerSkillTools(server: McpServer, ctx: McpToolContext): void
     "get_skill",
     {
       description:
-        "A single skill (name + description + instructions). A workspace skill is visible to any member; a private one only to its creator (else NOT_FOUND)",
+        "A single skill (name + description + instructions + supporting files). A workspace skill is visible to any member; a private one only to its creator (else NOT_FOUND)",
       inputSchema: { id: z.string() },
     },
     ({ id }) => run(principal, "skills:read", async () => ok(await skills.get(ws, id, principal.subject))),
@@ -35,15 +35,16 @@ export function registerSkillTools(server: McpServer, ctx: McpToolContext): void
     "create_skill",
     {
       description:
-        "Author a workspace skill (a SKILL.md-style procedure the agent follows). Defaults to visibility 'private'; pass 'workspace' to share. Requires skills:write.",
+        "Author a workspace skill (a SKILL.md-style procedure the agent follows). Keep `instructions` (the SKILL.md body) lean; put long reference material into `files` [{path, content}] — each file is loaded on demand, never inlined. Defaults to visibility 'private'; pass 'workspace' to share. Requires skills:write.",
       inputSchema: {
         name: z.string(),
         description: z.string(),
         instructions: z.string(),
+        files: SkillFilesSchema.optional(),
         visibility: SkillVisibilitySchema.optional(),
       },
     },
-    ({ name, description, instructions, visibility }) =>
+    ({ name, description, instructions, files, visibility }) =>
       run(principal, "skills:write", async () =>
         ok(
           await skills.create({
@@ -52,6 +53,7 @@ export function registerSkillTools(server: McpServer, ctx: McpToolContext): void
             name,
             description,
             instructions,
+            ...(files ? { files } : {}),
             ...(visibility ? { visibility } : {}),
           }),
         ),
@@ -62,16 +64,17 @@ export function registerSkillTools(server: McpServer, ctx: McpToolContext): void
     "update_skill",
     {
       description:
-        "Edit a skill or change its visibility (share = private→workspace). Only the creator or a workspace admin may manage it. Requires skills:write.",
+        "Edit a skill or change its visibility (share = private→workspace). `files` replaces the whole supporting-file set when provided (fetch the current set via get_skill first for a file-level edit); omit it to keep files as-is. Only the creator or a workspace admin may manage it. Requires skills:write.",
       inputSchema: {
         id: z.string(),
         name: z.string().optional(),
         description: z.string().optional(),
         instructions: z.string().optional(),
+        files: SkillFilesSchema.optional(),
         visibility: SkillVisibilitySchema.optional(),
       },
     },
-    ({ id, name, description, instructions, visibility }) =>
+    ({ id, name, description, instructions, files, visibility }) =>
       run(principal, "skills:write", async () =>
         ok(
           await skills.update(
@@ -81,6 +84,7 @@ export function registerSkillTools(server: McpServer, ctx: McpToolContext): void
               ...(name !== undefined ? { name } : {}),
               ...(description !== undefined ? { description } : {}),
               ...(instructions !== undefined ? { instructions } : {}),
+              ...(files !== undefined ? { files } : {}),
               ...(visibility !== undefined ? { visibility } : {}),
             },
             actor,

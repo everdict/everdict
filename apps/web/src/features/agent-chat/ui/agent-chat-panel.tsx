@@ -44,14 +44,15 @@ function mergeMessages(prev: AgentMessage[], incoming: AgentMessage[]): AgentMes
 }
 
 // pendingMention (+ onConsumeMention) is threaded down from the infra panel: an entity detail page asked to
-// analyze its entity here, so drop it into the composer as a reference chip. The prop shape is declared inline
-// (not imported from the widget) to keep the FSD import direction downward-only.
+// analyze its entity here, so drop it into the composer as a reference chip and/or pre-type a draft prompt
+// (nothing auto-sends — the member reviews and presses send). The prop shape is declared inline (not imported
+// from the widget) to keep the FSD import direction downward-only.
 export function AgentChatPanel({
   pendingMention,
   onConsumeMention,
   user,
 }: {
-  pendingMention?: { ref: AgentReference } | null
+  pendingMention?: { ref?: AgentReference; prompt?: string } | null
   onConsumeMention?: () => void
   user?: ChatUser
 } = {}) {
@@ -486,11 +487,14 @@ export function AgentChatPanel({
     )
   }, [])
 
-  // A detail page asked to analyze its entity here — drop it into the composer, then clear the buffer so a later
-  // tab re-mount (the agent tab unmounts when another infra tab is shown) does not re-inject the same reference.
+  // A detail page asked to analyze its entity here — drop the reference chip into the composer and/or pre-type
+  // the draft prompt, then clear the buffer so a later tab re-mount (the agent tab unmounts when another infra
+  // tab is shown) does not re-inject the same prefill. A prompt overwrites only an empty composer — never a
+  // member's in-progress draft.
   useEffect(() => {
     if (!pendingMention) return
-    addReference(pendingMention.ref)
+    if (pendingMention.ref) addReference(pendingMention.ref)
+    if (pendingMention.prompt) setInput((prev) => (prev.trim().length > 0 ? prev : pendingMention.prompt ?? ''))
     onConsumeMention?.()
   }, [pendingMention, addReference, onConsumeMention])
 

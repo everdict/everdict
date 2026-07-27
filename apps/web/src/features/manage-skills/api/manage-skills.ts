@@ -5,6 +5,7 @@ import { revalidatePath } from 'next/cache'
 import {
   generateSkillResultSchema,
   type GenerateSkillResult,
+  type SkillFile,
   skillSchema,
   type Skill,
   type SkillTryResult,
@@ -20,11 +21,12 @@ export interface SkillActionResult {
   error?: string
 }
 
-// 스킬 저작(POST /skills). visibility 기본 private. authZ(skills:write)는 컨트롤플레인이 강제.
+// 스킬 저작(POST /skills). visibility 기본 private. files=부속 참조파일(본문은 슬림하게). authZ(skills:write)는 컨트롤플레인이 강제.
 export async function createSkillAction(body: {
   name: string
   description: string
   instructions: string
+  files?: SkillFile[]
   visibility?: 'private' | 'workspace'
 }): Promise<SkillActionResult> {
   const ctx = await authContext()
@@ -37,10 +39,17 @@ export async function createSkillAction(body: {
   }
 }
 
-// 스킬 편집/공유(PATCH /skills/:id). visibility-만 보내면 공유 토글. 관리는 작성자-or-admin(컨트롤플레인).
+// 스킬 편집/공유(PATCH /skills/:id). visibility-만 보내면 공유 토글. files 는 주면 통째 교체, 생략하면 유지.
+// 관리는 작성자-or-admin(컨트롤플레인).
 export async function updateSkillAction(
   id: string,
-  patch: { name?: string; description?: string; instructions?: string; visibility?: 'private' | 'workspace' }
+  patch: {
+    name?: string
+    description?: string
+    instructions?: string
+    files?: SkillFile[]
+    visibility?: 'private' | 'workspace'
+  }
 ): Promise<SkillActionResult> {
   const ctx = await authContext()
   try {
@@ -90,7 +99,7 @@ export interface TrySkillActionResult {
 // 스킬 테스트 드라이브 — (미저장일 수도 있는) 스킬 + 샘플 요청으로 에이전트를 실제 1턴 실행(POST /agent/skills/try, 무상태),
 // 트랜스크립트 반환. 저장 전에 "이 스킬이 실제로 잘 도는지" 검증. 실패(모델/키/업스트림)는 error.
 export async function trySkillAction(
-  skill: { name: string; description: string; instructions: string },
+  skill: { name: string; description: string; instructions: string; files?: SkillFile[] },
   message: string
 ): Promise<TrySkillActionResult> {
   const ctx = await authContext()

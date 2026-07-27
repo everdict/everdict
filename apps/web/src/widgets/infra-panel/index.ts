@@ -10,3 +10,4 @@ export {
 export { InfraPanel } from './ui/infra-panel'
 export { InfraRail } from './ui/infra-rail'
 export { MentionInChatButton } from './ui/mention-in-chat-button'
+export { AskAgentButton } from './ui/ask-agent-button'

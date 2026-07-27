@@ -702,7 +702,8 @@ function CapabilityEditorDialog({
         instructions,
       }
     }
-    return { type: 'skill', instructions }
+    // 부속 파일은 위저드가 저작하지 않는다 — 기존 스킬을 편집할 땐 원본 파일셋을 보존(안 그러면 편집이 파일을 지운다).
+    return { type: 'skill', instructions, files: skill?.files ?? [] }
   }
 
   // mcp 연결 테스트 — URL(+ 선택 토큰)로 test-connect 하고 도구를 발견한다. 실패는 결과(reachable:false)로 표시.

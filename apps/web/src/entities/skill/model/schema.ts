@@ -8,13 +8,21 @@ import { z } from 'zod'
 export const skillVisibilitySchema = z.enum(['private', 'workspace'])
 export type SkillVisibility = z.infer<typeof skillVisibilitySchema>
 
-// GET /skills · /skills/:id — 전체 SkillRecord. visibility: private(개인 초안)|workspace(공유). instructions=SKILL.md 본문.
+// 스킬 부속 파일(claude-code references/* 재해석) — 본문은 슬림하게, 긴 참조자료는 파일로. 에이전트가 read_skill_file 로 온디맨드 로드.
+export const skillFileSchema = z.object({
+  path: z.string(),
+  content: z.string(),
+})
+export type SkillFile = z.infer<typeof skillFileSchema>
+
+// GET /skills · /skills/:id — 전체 SkillRecord. visibility: private(개인 초안)|workspace(공유). instructions=SKILL.md 본문 + files=부속 파일.
 export const skillSchema = z.object({
   id: z.string(),
   tenant: z.string(),
   name: z.string(),
   description: z.string(),
   instructions: z.string(),
+  files: z.array(skillFileSchema),
   visibility: skillVisibilitySchema,
   createdBy: z.string(),
   createdAt: z.string(),
@@ -28,6 +36,7 @@ export const generateSkillResultSchema = z.object({
   name: z.string(),
   description: z.string(),
   instructions: z.string(),
+  files: z.array(skillFileSchema),
 })
 export type GenerateSkillResult = z.infer<typeof generateSkillResultSchema>
 

@@ -249,22 +249,34 @@ context — a reviewer must be able to judge the fix without re-running anything
 ## 4. Open the fix PR
 - Keep the change minimal and targeted; prepare the FULL new content of every changed file (update the adjacent
   test when the repo has one).
-- Call \`open_github_pr\` with:
+- Load \`references/pr-body.md\` (via \`read_skill_file\`) — it carries the MANDATORY PR-body structure (the
+  experiment context a reviewer needs) — then call \`open_github_pr\` with:
   - branch: \`everdict/scorecard-<scorecard-id>\` — near-idempotent: re-running updates the same branch/PR.
   - title: an imperative one-line summary of the fix.
   - changes: the full new file contents.
-  - body — the experiment context is MANDATORY. Structure it as:
-    - **What failed** — scorecard <id> (<harness>@<version> × <dataset>@<version>): N of M cases failed, with the
-      scorecard link.
-    - **Failing cases** — per case: case id, verdict, judge scores with a one-line rationale each.
-    - **Root cause** — the code-level mechanism, quoting the minimal evidence excerpts (log/trace lines) that prove it.
-    - **The fix** — what changed and why it resolves each failing case.
-    - **Verification** — how to confirm (re-run the scorecard / the failing cases after merge).
+  - body: composed per \`references/pr-body.md\`.
 - Summarize the intended diff to the member before the call — the PR write is approved inline (HITL).
 
 ## Constraints
 - Never include secrets, API keys, or raw full logs in the PR body — quote only the minimal excerpts.
 - One PR per scorecard; never target the default branch directly.
+`.trim();
+
+// The mandatory PR-body structure — a supporting file (loaded via read_skill_file only when the agent reaches the
+// PR step), keeping the skill body itself lean.
+const SCORECARD_FIX_PR_BODY_TEMPLATE = `
+# Fix-PR body structure (mandatory)
+
+The PR body must let a reviewer judge the fix without re-running anything. Structure it as:
+
+- **What failed** — scorecard <id> (<harness>@<version> × <dataset>@<version>): N of M cases failed, with the
+  scorecard link.
+- **Failing cases** — per case: case id, verdict, judge scores with a one-line rationale each.
+- **Root cause** — the code-level mechanism, quoting the minimal evidence excerpts (log/trace lines) that prove it.
+- **The fix** — what changed and why it resolves each failing case.
+- **Verification** — how to confirm (re-run the scorecard / the failing cases after merge).
+
+Never include secrets, API keys, or raw full logs — quote only the minimal excerpts that prove the diagnosis.
 `.trim();
 
 const SCORECARD_FIX_PR: FirstPartyDefault = {
@@ -278,7 +290,11 @@ const SCORECARD_FIX_PR: FirstPartyDefault = {
       "Diagnose a scorecard's failing cases down to the harness's source code and open a GitHub pull request with " +
       "the fix, carrying the experiment context (failing cases, judge verdicts, evidence) in the PR body. Use when " +
       "a member asks why an eval failed and wants a fix proposed on the repository.",
-    spec: { type: "skill", instructions: SCORECARD_FIX_PR_INSTRUCTIONS },
+    spec: {
+      type: "skill",
+      instructions: SCORECARD_FIX_PR_INSTRUCTIONS,
+      files: [{ path: "references/pr-body.md", content: SCORECARD_FIX_PR_BODY_TEMPLATE }],
+    },
     visibility: "public",
     sharedWith: [],
     tags: ["scorecard", "github", "analysis", "built-in"],

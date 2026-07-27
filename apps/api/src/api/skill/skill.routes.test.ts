@@ -61,6 +61,65 @@ describe("skill routes", () => {
     expect(after.statusCode).toBe(404);
   });
 
+  it("round-trips supporting files: authored with the skill, replaced whole by PATCH, kept when omitted", async () => {
+    const app = build(true);
+    const created = await app.inject({
+      method: "POST",
+      url: "/skills",
+      headers: H,
+      payload: {
+        name: "fix-pr",
+        description: "Open a fix PR",
+        instructions: "1. diagnose\n2. load references/pr-body.md",
+        files: [{ path: "references/pr-body.md", content: "# PR body\n- What failed" }],
+      },
+    });
+    expect(created.statusCode).toBe(200);
+    const skill = created.json() as { id: string; files: Array<{ path: string }> };
+    expect(skill.files.map((f) => f.path)).toEqual(["references/pr-body.md"]);
+
+    // A files-less PATCH keeps the file set as-is.
+    const renamed = await app.inject({
+      method: "PATCH",
+      url: `/skills/${skill.id}`,
+      headers: H,
+      payload: { description: "Open a targeted fix PR" },
+    });
+    expect((renamed.json() as { files: Array<{ path: string }> }).files).toHaveLength(1);
+
+    // Providing files replaces the whole set.
+    const replaced = await app.inject({
+      method: "PATCH",
+      url: `/skills/${skill.id}`,
+      headers: H,
+      payload: { files: [{ path: "references/checklist.md", content: "- [ ] tests" }] },
+    });
+    expect((replaced.json() as { files: Array<{ path: string }> }).files.map((f) => f.path)).toEqual([
+      "references/checklist.md",
+    ]);
+  });
+
+  it("rejects traversal / absolute / duplicate file paths (400)", async () => {
+    const app = build(true);
+    const cases = [
+      [{ path: "../escape.md", content: "x" }],
+      [{ path: "/etc/passwd", content: "x" }],
+      [
+        { path: "a.md", content: "x" },
+        { path: "a.md", content: "y" },
+      ],
+    ];
+    for (const files of cases) {
+      const res = await app.inject({
+        method: "POST",
+        url: "/skills",
+        headers: H,
+        payload: { name: "bad", description: "d", instructions: "i", files },
+      });
+      expect(res.statusCode).toBe(400);
+    }
+  });
+
   it("rejects an empty PATCH body (at least one field required)", async () => {
     const app = build(true);
     const created = await app.inject({

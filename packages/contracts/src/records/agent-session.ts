@@ -37,7 +37,16 @@ export type AgentToolCall = z.infer<typeof AgentToolCallSchema>;
 
 // The workspace entity kinds a message can @-reference. Each maps to a control-plane read (get_<kind>) the agent
 // resolves into context, and to a list endpoint the composer's mention picker browses.
-export const AGENT_REFERENCE_TYPES = ["harness", "runtime", "run", "dataset", "scorecard", "judge", "view"] as const;
+export const AGENT_REFERENCE_TYPES = [
+  "harness",
+  "runtime",
+  "run",
+  "dataset",
+  "scorecard",
+  "judge",
+  "view",
+  "skill",
+] as const;
 export const AgentReferenceTypeSchema = z.enum(AGENT_REFERENCE_TYPES);
 export type AgentReferenceType = z.infer<typeof AgentReferenceTypeSchema>;
 

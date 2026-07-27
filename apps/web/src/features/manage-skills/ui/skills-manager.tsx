@@ -1,11 +1,24 @@
 'use client'
 
 import { useState, useTransition } from 'react'
-import { Globe, Lock, MoreHorizontal, Pencil, Plus, Sparkles, Trash2, Wand2 } from 'lucide-react'
+import Link from 'next/link'
+import { useParams } from 'next/navigation'
+import {
+  FileText,
+  Globe,
+  Lock,
+  MoreHorizontal,
+  Pencil,
+  Plus,
+  Sparkles,
+  Trash2,
+  Wand2,
+  X,
+} from 'lucide-react'
 import { useTranslations } from 'next-intl'
 import { toast } from 'sonner'
 
-import type { Skill, SkillVisibility } from '@/entities/skill'
+import type { Skill, SkillFile, SkillVisibility } from '@/entities/skill'
 import { fmtSubject } from '@/shared/lib/format'
 import { Avatar } from '@/shared/ui/avatar'
 import { Badge } from '@/shared/ui/badge'
@@ -45,6 +58,7 @@ export function SkillsManager({
   isAdmin: boolean
 }) {
   const t = useTranslations('skillsManager')
+  const { workspace } = useParams<{ workspace: string }>()
   // null = 닫힘, 'new' = 새 스킬(생성 위저드 포함), Skill = 편집.
   const [editing, setEditing] = useState<Skill | 'new' | null>(null)
   const [confirming, setConfirming] = useState<Skill | null>(null)
@@ -100,18 +114,38 @@ export function SkillsManager({
             : {})}
         />
       ) : (
-        <div className="space-y-2">
-          {skills.map((s) => {
+        <div className="space-y-5">
+          {(
+            [
+              { key: 'private', title: t('personalSection'), items: skills.filter((s) => s.visibility === 'private') },
+              {
+                key: 'workspace',
+                title: t('workspaceSection'),
+                items: skills.filter((s) => s.visibility === 'workspace'),
+              },
+            ] as const
+          )
+            .filter((section) => section.items.length > 0)
+            .map((section) => (
+              <div key={section.key} className="space-y-2">
+                {/* 개인 초안 / 워크스페이스 공유 — 두 스코프를 섹션으로 구분(클러드코드 user/project 스킬 구분의 재해석) */}
+                <div className="text-[11.5px] font-medium uppercase tracking-wide text-faint">
+                  {section.title}
+                </div>
+                {section.items.map((s) => {
             const author = authorOf(s.createdBy)
             return (
               <div key={s.id} className="rounded-lg border border-border bg-card p-4">
-                {/* 헤더 — 이름 + 공개범위 배지(왼쪽) · 관리 액션(오른쪽, 관리 권한 있을 때만) */}
+                {/* 헤더 — 이름(상세로 링크) + 공개범위 배지 + 파일 수(왼쪽) · 관리 액션(오른쪽, 관리 권한 있을 때만) */}
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex min-w-0 flex-1 items-center gap-2">
                     <Sparkles className="size-4 shrink-0 text-primary" />
-                    <span className="min-w-0 truncate font-mono text-[13px] font-medium">
+                    <Link
+                      href={`/${workspace}/settings/skills/${encodeURIComponent(s.id)}`}
+                      className="min-w-0 truncate font-mono text-[13px] font-medium hover:text-primary hover:underline"
+                    >
                       {s.name}
-                    </span>
+                    </Link>
                     <Badge
                       tone={s.visibility === 'workspace' ? 'info' : 'outline'}
                       className="shrink-0 gap-1"
@@ -123,6 +157,12 @@ export function SkillsManager({
                       )}
                       {t(s.visibility)}
                     </Badge>
+                    {s.files.length > 0 && (
+                      <Badge tone="outline" className="shrink-0 gap-1">
+                        <FileText className="size-3" />
+                        {s.files.length}
+                      </Badge>
+                    )}
                   </div>
                   {canManage(s) && (
                     <DropdownMenu
@@ -180,6 +220,8 @@ export function SkillsManager({
               </div>
             )
           })}
+              </div>
+            ))}
         </div>
       )}
 
@@ -219,8 +261,8 @@ export function SkillsManager({
   )
 }
 
-// 생성/편집 다이얼로그. 새 스킬이면 상단에 AI 생성 위저드(설명 + 모델 → 초안이 필드를 채움).
-function SkillEditorDialog({
+// 생성/편집 다이얼로그. 새 스킬이면 상단에 AI 생성 위저드(설명 + 모델 → 초안이 필드를 채움). 상세 페이지에서도 재사용(export).
+export function SkillEditorDialog({
   skill,
   modelIds,
   author,
@@ -236,6 +278,8 @@ function SkillEditorDialog({
   const [name, setName] = useState(skill?.name ?? '')
   const [description, setDescription] = useState(skill?.description ?? '')
   const [instructions, setInstructions] = useState(skill?.instructions ?? '')
+  // 부속 파일 — 다이얼로그에선 목록/제거만(내용 저작은 상세 페이지의 에이전트 편집 흐름). AI 초안이 파일을 내면 여기 실린다.
+  const [files, setFiles] = useState<SkillFile[]>(skill?.files ?? [])
   const [visibility, setVisibility] = useState<SkillVisibility>(skill?.visibility ?? 'private')
   const [pending, startTransition] = useTransition()
 
@@ -251,6 +295,7 @@ function SkillEditorDialog({
         setName(r.draft.name)
         setDescription(r.draft.description)
         setInstructions(r.draft.instructions)
+        setFiles(r.draft.files)
         toast.success(t('generated'))
       } else {
         toast.error(r.error ?? t('generateError'))
@@ -260,8 +305,8 @@ function SkillEditorDialog({
   const save = () =>
     startTransition(async () => {
       const r = isNew
-        ? await createSkillAction({ name, description, instructions, visibility })
-        : await updateSkillAction(skill.id, { name, description, instructions, visibility })
+        ? await createSkillAction({ name, description, instructions, files, visibility })
+        : await updateSkillAction(skill.id, { name, description, instructions, files, visibility })
       if (r.ok) {
         toast.success(isNew ? t('created', { name }) : t('saved', { name }))
         onClose()
@@ -362,8 +407,36 @@ function SkillEditorDialog({
           />
         </div>
 
+        {/* 부속 참조파일 — 본문은 슬림하게, 긴 자료는 파일로(에이전트가 read_skill_file 로 온디맨드 로드). 여기선 목록/제거만. */}
+        {files.length > 0 && (
+          <div className="space-y-1.5">
+            <Label>{t('files')}</Label>
+            <p className="text-[12px] text-muted-foreground">{t('filesHint')}</p>
+            <div className="flex flex-wrap gap-1.5">
+              {files.map((f) => (
+                <span
+                  key={f.path}
+                  className="inline-flex items-center gap-1 rounded-md border border-border bg-muted/40 px-2 py-1 font-mono text-[12px]"
+                >
+                  <FileText className="size-3 text-muted-foreground" />
+                  {f.path}
+                  <span className="text-faint">({(f.content.length / 1024).toFixed(1)}KB)</span>
+                  <button
+                    type="button"
+                    aria-label={t('removeFile', { path: f.path })}
+                    onClick={() => setFiles((prev) => prev.filter((x) => x.path !== f.path))}
+                    className="ml-0.5 text-muted-foreground transition-colors hover:text-destructive"
+                  >
+                    <X className="size-3" />
+                  </button>
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* 저장 전에 이 스킬이 실제로 잘 도는지 검증 — 미저장 상태로도 현재 필드 값으로 테스트. */}
-        <TestSkillPanel skill={{ name, description, instructions }} />
+        <TestSkillPanel skill={{ name, description, instructions, files }} />
 
         <label className="flex items-center gap-2 text-[13px]">
           <input

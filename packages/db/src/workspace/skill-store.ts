@@ -45,6 +45,7 @@ interface SkillRow {
   name: string;
   description: string;
   instructions: string;
+  files: unknown;
   visibility: string;
   created_by: string;
   created_at: string | Date;
@@ -60,6 +61,7 @@ function rowToRecord(row: SkillRow): SkillRecord {
     name: row.name,
     description: row.description,
     instructions: row.instructions,
+    files: row.files ?? [],
     visibility: row.visibility,
     createdBy: row.created_by,
     createdAt: iso(row.created_at),
@@ -73,14 +75,15 @@ export class PgSkillStore implements SkillStore {
 
   async create(record: SkillRecord): Promise<void> {
     await this.client.query(
-      `INSERT INTO everdict_skills (id, tenant, name, description, instructions, visibility, created_by, created_at, updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+      `INSERT INTO everdict_skills (id, tenant, name, description, instructions, files, visibility, created_by, created_at, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
       [
         record.id,
         record.tenant,
         record.name,
         record.description,
         record.instructions,
+        JSON.stringify(record.files),
         record.visibility,
         record.createdBy,
         record.createdAt,
@@ -112,8 +115,17 @@ export class PgSkillStore implements SkillStore {
     if (!current) return undefined;
     const next: SkillRecord = { ...current, ...patch, id: current.id, tenant: current.tenant };
     await this.client.query(
-      "UPDATE everdict_skills SET name=$3, description=$4, instructions=$5, visibility=$6, updated_at=$7 WHERE tenant=$1 AND id=$2",
-      [tenant, id, next.name, next.description, next.instructions, next.visibility, next.updatedAt],
+      "UPDATE everdict_skills SET name=$3, description=$4, instructions=$5, files=$6, visibility=$7, updated_at=$8 WHERE tenant=$1 AND id=$2",
+      [
+        tenant,
+        id,
+        next.name,
+        next.description,
+        next.instructions,
+        JSON.stringify(next.files),
+        next.visibility,
+        next.updatedAt,
+      ],
     );
     return next;
   }

@@ -636,6 +636,7 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
           name: z.string().min(1),
           description: z.string(),
           instructions: z.string().min(1),
+          files: z.array(z.object({ path: z.string().min(1), content: z.string() })).default([]),
         }),
         message: z.string().min(1),
       })

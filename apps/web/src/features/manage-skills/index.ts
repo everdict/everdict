@@ -1,4 +1,5 @@
-export { SkillsManager } from './ui/skills-manager'
+export { SkillsManager, SkillEditorDialog } from './ui/skills-manager'
+export { SkillDetail } from './ui/skill-detail'
 export {
   createSkillAction,
   updateSkillAction,

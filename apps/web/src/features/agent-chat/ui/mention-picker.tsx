@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import {
+  BookOpen,
   Boxes,
   ClipboardCheck,
   Database,
@@ -28,6 +29,7 @@ export const REFERENCE_TYPE_ICON: Record<AgentReferenceType, LucideIcon> = {
   scorecard: ClipboardCheck,
   judge: Scale,
   view: Eye,
+  skill: BookOpen,
 }
 
 interface MentionItem {

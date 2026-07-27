@@ -1,11 +1,13 @@
 export {
   skillVisibilitySchema,
+  skillFileSchema,
   skillSchema,
   skillsSchema,
   generateSkillResultSchema,
   skillTryMessageSchema,
   skillTryResultSchema,
   type Skill,
+  type SkillFile,
   type SkillVisibility,
   type GenerateSkillResult,
   type SkillTryMessage,

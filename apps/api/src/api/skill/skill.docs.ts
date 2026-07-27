@@ -15,7 +15,8 @@ const docs = {
   create: {
     summary: "Author a workspace skill",
     description:
-      "Creates a SKILL.md-style procedure (name + description + instructions) the conversational agent follows. " +
+      "Creates a SKILL.md-style procedure (name + description + instructions + optional supporting files) the " +
+      "conversational agent follows with progressive disclosure — the body loads on demand, each file individually. " +
       "Defaults to visibility 'private' (a personal draft); share to the workspace via visibility 'workspace'. " +
       "Requires skills:write (member+).",
     tags: ["skill"],

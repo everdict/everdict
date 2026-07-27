@@ -29,10 +29,12 @@ export type InfraTab = 'schedules' | 'runtimes' | 'runs' | 'work' | 'agent'
 // the iframe in between).
 export type FrameRequest = { tab: InfraTab; path: string; seq: number }
 
-// A request to drop an entity reference into the agent chat composer and reveal the chat. Buffered here because
-// the AgentChatPanel mounts the 'agent' tab lazily — the panel consumes this on mount, then clears it via
-// consumePendingMention so a later tab re-mount does not re-inject the same reference.
-export type PendingMention = { ref: AgentReference }
+// A request to prefill the agent chat composer and reveal the chat: an entity reference chip (ref) and/or a draft
+// prompt text (prompt) — e.g. "edit this skill" opens the chat with the skill referenced AND the ask pre-typed
+// (the member reviews and sends; nothing auto-sends). Buffered here because the AgentChatPanel mounts the 'agent'
+// tab lazily — the panel consumes this on mount, then clears it via consumePendingMention so a later tab re-mount
+// does not re-inject the same prefill.
+export type PendingMention = { ref?: AgentReference; prompt?: string }
 
 // postMessage `type` a detail page rendered INSIDE the infra panel's iframe (run / runtime) sends to the PARENT
 // shell — which owns the agent chat — to mention its entity. Same-origin only.
@@ -54,6 +56,8 @@ type InfraPanelValue = {
   frameRequest: FrameRequest | null
   // Open the agent chat and drop an entity reference into the composer (from an entity detail page).
   mentionInChat: (ref: AgentReference) => void
+  // Open the agent chat with a draft prompt pre-typed (and optionally an entity referenced) — nothing auto-sends.
+  askAgent: (prompt: string, ref?: AgentReference) => void
   pendingMention: PendingMention | null
   consumePendingMention: () => void
   snapshot: QueueSnapshot | null
@@ -195,6 +199,14 @@ export function InfraPanelProvider({
     setOpen(true)
   }, [])
 
+  // Reveal the agent chat with a draft prompt pre-typed (and optionally an entity referenced) — the "ask the
+  // agent to do X with this" entry (e.g. edit a skill from its detail page). The member still presses send.
+  const askAgent = useCallback((prompt: string, ref?: AgentReference) => {
+    setPendingMention({ prompt, ...(ref ? { ref } : {}) })
+    setTab('agent')
+    setOpen(true)
+  }, [])
+
   const consumePendingMention = useCallback(() => setPendingMention(null), [])
 
   return (
@@ -211,6 +223,7 @@ export function InfraPanelProvider({
         openSchedule,
         frameRequest,
         mentionInChat,
+        askAgent,
         pendingMention,
         consumePendingMention,
         snapshot,

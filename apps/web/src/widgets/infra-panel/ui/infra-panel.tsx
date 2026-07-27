@@ -74,6 +74,7 @@ export function InfraPanel({ user }: { user?: ChatUser } = {}) {
     close,
     frameRequest,
     mentionInChat,
+    askAgent,
     pendingMention,
     consumePendingMention,
   } = useInfraPanel()
@@ -181,11 +182,15 @@ export function InfraPanel({ user }: { user?: ChatUser } = {}) {
         href?: string
         bounce?: boolean
         reference?: unknown
+        prompt?: unknown
       } | null
-      // A detail page inside an iframe (run / runtime) asked to mention its entity in the parent's agent chat.
+      // A detail page inside an iframe (run / runtime) asked to mention its entity in the parent's agent chat
+      // — optionally with a draft prompt pre-typed (the ask-agent variant).
       if (data?.type === MENTION_IN_CHAT_MESSAGE) {
         const parsed = agentReferenceSchema.safeParse(data.reference)
-        if (parsed.success) mentionInChat(parsed.data)
+        const prompt = typeof data.prompt === 'string' && data.prompt.length > 0 ? data.prompt : undefined
+        if (prompt) askAgent(prompt, parsed.success ? parsed.data : undefined)
+        else if (parsed.success) mentionInChat(parsed.data)
         return
       }
       // An iframe landed on an infra route (EmbedShell report) — record it on that tab's back stack.
@@ -224,7 +229,7 @@ export function InfraPanel({ user }: { user?: ChatUser } = {}) {
     }
     window.addEventListener('message', onMessage)
     return () => window.removeEventListener('message', onMessage)
-  }, [router, onNavigate, workspace, mentionInChat, toRelative])
+  }, [router, onNavigate, workspace, mentionInChat, askAgent, toRelative])
 
   // A server-resolved per-device preference (locale / timezone) changed in the parent. The mounted iframes read
   // it server-side off the cookie and stay frozen, so router.refresh() in the switcher never reaches their

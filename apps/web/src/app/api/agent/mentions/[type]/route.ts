@@ -34,6 +34,8 @@ async function fetchRows(ctx: AuthContext, type: AgentReferenceType): Promise<un
       return controlPlane.listScorecards<Row[]>(ctx)
     case 'run':
       return controlPlane.listRuns<Row[]>(ctx, { limit: 30 })
+    case 'skill':
+      return controlPlane.listSkills<Row[]>(ctx)
   }
 }
 

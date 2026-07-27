@@ -9,7 +9,7 @@ const cap = (over: Partial<CapabilityRecord> = {}): CapabilityRecord => ({
   version: "1.0.0",
   name: "triage",
   description: "when to triage",
-  spec: { type: "skill", instructions: "do the thing" },
+  spec: { type: "skill", instructions: "do the thing", files: [] },
   visibility: "workspace",
   sharedWith: [],
   tags: [],

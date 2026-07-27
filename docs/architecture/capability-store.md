@@ -104,9 +104,10 @@ interface CodeToolSpec {          // a python/node function Everdict runs and br
   requiredSecrets?: { name: string; description: string }[]  // env the adopter binds at adoption
 }
 
-interface SkillSpec {             // instructions-only (today's SkillRecord.instructions), now versioned + shareable
+interface SkillSpec {             // the SKILL.md shape (today's SkillRecord), now versioned + shareable
   type: 'skill'
   instructions: string             // the SKILL.md body, loaded on demand via use_skill
+  files: SkillFile[]               // supporting reference files, each loaded individually via read_skill_file
 }
 
 type CapabilitySpec = McpToolSpec | CodeToolSpec | SkillSpec
@@ -195,8 +196,8 @@ store.
 - **`mcp`** — resolve each `secretBindings` value → workspace SecretStore value → `Authorization` header; connect via
   Streamable HTTP; bridge with `mcpToolToDefinition`, namespaced `mcp__<name>__<tool>`, write-filtered by
   `enableWrite`. **Identical to the current bridge** — zero new runtime code.
-- **`skill`** — feed `{name, description, instructions}` into the existing `buildSkillTool` → the `use_skill` tool.
-  **Zero new runtime code.**
+- **`skill`** — feed `{name, description, instructions, files}` into the existing `buildSkillTools` → the `use_skill`
+  (+ `read_skill_file` when files exist) tools. **Zero new runtime code.**
 - **`code`** — NEW. Register a `ToolDefinition` (`name` from the capability, `parametersJsonSchema` = the spec's
   `parametersSchema`, `isReadOnly` from the spec) whose `call(input, ctx)`:
   1. provisions a **sandbox** `ComputeHandle` (see security),

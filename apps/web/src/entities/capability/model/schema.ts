@@ -36,7 +36,11 @@ const codeToolSpecSchema = z.object({
   timeoutSec: z.number().optional(),
   image: z.string().optional(),
 })
-const skillCapabilitySpecSchema = z.object({ type: z.literal('skill'), instructions: z.string() })
+const skillCapabilitySpecSchema = z.object({
+  type: z.literal('skill'),
+  instructions: z.string(),
+  files: z.array(z.object({ path: z.string(), content: z.string() })),
+})
 
 // environment — 평가환경 이미지 자산(docs/architecture/environment-image-store.md). preset 은 깊은 토폴로지 서브어휘라
 // 런타임은 shallow 체크만(컨트롤플레인이 실스키마로 검증·서빙, traceEvent passthrough 선례), 타입은 계약 앵커.

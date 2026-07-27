@@ -3107,7 +3107,15 @@
     "testError": "테스트를 실행하지 못했어요.",
     "usedSkill": "스킬 {skill} 로드",
     "createdBy": "작성자 {name}",
-    "skillMenu": "스킬 작업"
+    "skillMenu": "스킬 작업",
+    "personalSection": "개인 초안",
+    "workspaceSection": "워크스페이스 스킬",
+    "files": "부속 파일",
+    "filesHint": "에이전트가 필요한 순간에 한 파일씩 로드하는 참조 자료예요(read_skill_file) — SKILL.md 본문은 간결하게 유지돼요. 파일 내용의 저작·수정은 상세 화면의 에이전트 편집을 이용하세요.",
+    "removeFile": "{path} 제거",
+    "fileCount": "파일 {count}개",
+    "editWithAgent": "에이전트로 편집",
+    "editWithAgentPrompt": "\"{name}\" 스킬을 개선하고 싶어. SKILL.md 본문과 부속 파일을 검토해서 구체적인 수정안을 제안해줘 — 본문은 간결한 단계별 절차로 유지하고, 긴 참조 자료는 부속 파일로 분리해줘. 내가 확인하면 update_skill 로 반영해줘."
   },
   "agentChat": {
     "new": "새 대화",
@@ -3199,7 +3207,8 @@
       "dataset": "데이터셋",
       "scorecard": "스코어카드",
       "judge": "평가자",
-      "view": "뷰"
+      "view": "뷰",
+      "skill": "스킬"
     }
   },
   "workspaceSettings": {

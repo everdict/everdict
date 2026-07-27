@@ -42,6 +42,7 @@ export const AGENT_REFERENCE_TYPES = [
   'scorecard',
   'judge',
   'view',
+  'skill',
 ] as const
 export const agentReferenceTypeSchema = z.enum(AGENT_REFERENCE_TYPES)
 export type AgentReferenceType = z.infer<typeof agentReferenceTypeSchema>

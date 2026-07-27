@@ -81,7 +81,7 @@ const svc = () => new CapabilityService({ store: fakeStore(), now: () => "2026-0
 const skill = (over: { name?: string; description?: string } = {}) => ({
   name: over.name ?? "triage",
   description: over.description ?? "d",
-  spec: { type: "skill" as const, instructions: "1. …" },
+  spec: { type: "skill" as const, instructions: "1. …", files: [] },
 });
 const admin = (subject: string) => ({ subject, isAdmin: true });
 const member = (subject: string) => ({ subject, isAdmin: false });

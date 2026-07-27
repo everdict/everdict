@@ -1,4 +1,5 @@
 import type { ChatMessage } from "../messages.js";
+import { READ_SKILL_FILE_TOOL_NAME, USE_SKILL_TOOL_NAME } from "../tools/skill-tool.js";
 
 // Context compaction — a 3-rung escalation ladder that raises tokens-per-information instead of just discarding the
 // oldest turns (Claude Code parity). The loop applies them in order until it fits:
@@ -11,19 +12,49 @@ const CLEARED_MARK = "[tool result elided to fit the context window";
 const DEFAULT_RECENT_KEEP = 8;
 // Clearing a tiny result isn't worth the churn (and would thrash the prompt cache); only elide sizeable ones.
 const MIN_CLEAR_CHARS = 400;
+// Loaded skill payloads (use_skill / read_skill_file results) are ACTIVE guidance, not stale output — the agent may
+// still be mid-procedure. Keep them across microcompact within a budget, most recent first (Claude Code re-emits
+// invoked skills post-compact under a similar budget); beyond the budget they clear like any other result.
+const SKILL_KEEP_BUDGET_CHARS = 24_000;
+const SKILL_TOOL_NAMES: ReadonlySet<string> = new Set([USE_SKILL_TOOL_NAME, READ_SKILL_FILE_TOOL_NAME]);
+
+// tool_call_ids of skill-tool invocations — found on the assistant turns (a tool message carries no tool name).
+function skillToolCallIds(messages: ChatMessage[]): Set<string> {
+  const ids = new Set<string>();
+  for (const m of messages) {
+    if (m.role !== "assistant" || !m.tool_calls) continue;
+    for (const call of m.tool_calls) {
+      if (call.type === "function" && SKILL_TOOL_NAMES.has(call.function.name)) ids.add(call.id);
+    }
+  }
+  return ids;
+}
 
 // Rung 1 — clear the CONTENT of tool messages older than the recent window, keeping role + tool_call_id so the
 // assistant.tool_calls ↔ tool pairing stays valid (the next model call must still see a balanced transcript). Already
-// cleared / small results are left as-is. Returns the (possibly new) array + how many bodies were cleared.
+// cleared / small results are left as-is; loaded-skill results survive within SKILL_KEEP_BUDGET_CHARS (newest first).
+// Returns the (possibly new) array + how many bodies were cleared.
 export function microcompact(
   messages: ChatMessage[],
   recentKeep = DEFAULT_RECENT_KEEP,
 ): { messages: ChatMessage[]; cleared: number } {
   if (messages.length <= recentKeep) return { messages, cleared: 0 };
   const cutoff = messages.length - recentKeep;
+  const skillIds = skillToolCallIds(messages);
+  // Skill results to retain within the budget — newest first; older ones beyond it clear like any other result.
+  const keptSkillIndexes = new Set<number>();
+  let skillBudget = SKILL_KEEP_BUDGET_CHARS;
+  for (let i = cutoff - 1; i >= 0; i--) {
+    const m = messages[i];
+    if (!m || m.role !== "tool" || !skillIds.has(m.tool_call_id)) continue;
+    const length = typeof m.content === "string" ? m.content.length : 0;
+    if (length > skillBudget) continue;
+    skillBudget -= length;
+    keptSkillIndexes.add(i);
+  }
   let cleared = 0;
   const out = messages.map((m, i): ChatMessage => {
-    if (i >= cutoff || m.role !== "tool") return m;
+    if (i >= cutoff || m.role !== "tool" || keptSkillIndexes.has(i)) return m;
     const content = typeof m.content === "string" ? m.content : "";
     if (content.length < MIN_CLEAR_CHARS || content.startsWith(CLEARED_MARK)) return m;
     cleared++;
