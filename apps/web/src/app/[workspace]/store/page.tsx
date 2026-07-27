@@ -3,6 +3,7 @@ import { getTranslations } from 'next-intl/server'
 import { CapabilityStore } from '@/features/publish-capability'
 import { agentSpecSchema } from '@/entities/agent-spec'
 import { capabilitiesSchema, type Capability } from '@/entities/capability'
+import { imageRegistriesResponseSchema } from '@/entities/image-registry'
 import { membersSchema } from '@/entities/member'
 import { secretsSchema } from '@/entities/secret'
 import { workspacesSchema } from '@/entities/workspace'
@@ -85,6 +86,15 @@ export default async function StorePage() {
     .then((r) => workspacesSchema.parse(r).map((w) => ({ id: w.id, name: w.name })))
     .catch(() => [] as { id: string; name: string }[])
 
+  // environment 이미지 태그 피커용 — 워크스페이스 레지스트리(이름 + host)로 태그를 조회해 image ref 를 조립한다.
+  // 소프트: 레지스트리 read 권한/등록이 없으면 빈 목록(피커 미노출, 수동 입력).
+  const imageRegistries = await controlPlane
+    .listImageRegistries(ctx)
+    .then((r) =>
+      imageRegistriesResponseSchema.parse(r).registries.map((reg) => ({ name: reg.name, host: reg.host }))
+    )
+    .catch(() => [] as { name: string; host: string }[])
+
   return (
     <div className="space-y-6">
       {header}
@@ -100,6 +110,7 @@ export default async function StorePage() {
           adoptedKeys={adoptedKeys}
           secretNames={secretNames}
           myWorkspaces={myWorkspaces}
+          imageRegistries={imageRegistries}
           currentWorkspace={principal?.workspace ?? ''}
           isAdmin={isAdmin}
           allowMemberPublicPublish={allowMemberPublicPublish}
