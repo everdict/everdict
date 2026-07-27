@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { type CapabilityProbes, detectCapabilities } from "./capabilities.js";
+import { type CapabilityProbes, defaultProbes, detectCapabilities } from "./capabilities.js";
 
 // Injected probes — simulate supporting only the capabilities listed in `on` (deterministic test without real OS access).
 const probes = (on: string[]): CapabilityProbes => ({
@@ -10,6 +10,7 @@ const probes = (on: string[]): CapabilityProbes => ({
   sandbox: async () => on.includes("sandbox"),
   "codex-login": async () => on.includes("codex-login"),
   "claude-login": async () => on.includes("claude-login"),
+  gpu: async () => on.includes("gpu"),
 });
 
 describe("detectCapabilities — measure vocabulary probes → self-advertise only supported capabilities", () => {
@@ -37,5 +38,14 @@ describe("detectCapabilities — measure vocabulary probes → self-advertise on
     const caps = await detectCapabilities({ git: async () => true, docker: async () => true });
     expect(caps).toEqual(["git", "docker"]);
     expect(caps).not.toContain("topology");
+  });
+
+  it("advertises gpu when the GPU probe passes (so the workspace pool lease routes gpu evals here)", async () => {
+    expect(await detectCapabilities(probes(["gpu"]))).toEqual(["gpu"]);
+    expect(await detectCapabilities(probes(["docker"]))).not.toContain("gpu");
+  });
+
+  it("the default probes wire a gpu probe (a real GPU box self-advertises without manual declaration)", () => {
+    expect(typeof defaultProbes.gpu).toBe("function");
   });
 });

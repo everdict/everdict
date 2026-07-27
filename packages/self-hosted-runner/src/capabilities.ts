@@ -73,6 +73,9 @@ export const defaultProbes: CapabilityProbes = {
   sandbox: () => probeSandbox(),
   "codex-login": () => fileExists(home(".codex", "auth.json")),
   "claude-login": () => fileExists(home(".claude.json")),
+  // A GPU present? nvidia-smi lists the GPUs (driver + device), or the device node exists when the CLI isn't on PATH.
+  // Advertising gpu lets the workspace pool lease route a gpu-requiring eval (resources.gpu) to this runner, skipping non-gpu ones.
+  gpu: async () => (await cmdOk("nvidia-smi", ["-L"])) || fileExists("/dev/nvidia0"),
 };
 
 // Runner capability self-advertisement — measure each probe in the vocabulary (CAPABILITY_DEFS) and return only the supported names in vocabulary order.
