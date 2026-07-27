@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState, useTransition } from 'react'
+import { useEffect, useMemo, useState, useTransition } from 'react'
 import {
   Boxes,
   Check,
@@ -47,7 +47,11 @@ import {
   saveCapabilityAction,
   setCapabilityVisibilityAction,
 } from '../api/manage-capabilities'
-import { probeCapabilityMcpAction, validateCapabilityAction } from '../api/wizard-tools'
+import {
+  listImageTagsAction,
+  probeCapabilityMcpAction,
+  validateCapabilityAction,
+} from '../api/wizard-tools'
 import type { ProbeCapabilityMcpResult, ValidateCapabilityResult } from '@/entities/capability'
 
 // capability 의 필요 시크릿(채택 시 내 시크릿으로 바인딩). skill 은 없음.
@@ -103,6 +107,7 @@ export function CapabilityStore({
   adoptedKeys,
   secretNames,
   myWorkspaces,
+  imageRegistries,
   currentWorkspace,
   currentSubject,
   isAdmin,
@@ -116,6 +121,7 @@ export function CapabilityStore({
   adoptedKeys: string[]
   secretNames: string[]
   myWorkspaces: { id: string; name: string }[]
+  imageRegistries: { name: string; host: string }[]
   currentWorkspace: string
   currentSubject?: string
   isAdmin: boolean
@@ -126,6 +132,9 @@ export function CapabilityStore({
   const [query, setQuery] = useState('')
   const [typeFilter, setTypeFilter] = useState<'all' | CapabilityType>('all')
   const [sort, setSort] = useState<'recent' | 'name' | 'type'>('recent')
+  // 클라이언트 페이지네이션 — 큰 공개 카탈로그에서 한 번에 렌더할 카드 수(더 보기로 증가). 필터 변경 시 리셋.
+  const PAGE = 24
+  const [visibleCount, setVisibleCount] = useState(PAGE)
   const [editing, setEditing] = useState<Capability | 'new' | null>(null)
   const [reaching, setReaching] = useState<Capability | null>(null)
   const [confirming, setConfirming] = useState<Capability | null>(null)
@@ -167,6 +176,10 @@ export function CapabilityStore({
       return b.createdAt.localeCompare(a.createdAt) // recent
     })
   }, [tab, mine, publicCaps, query, typeFilter, sort])
+
+  // 필터/탭/정렬/검색이 바뀌면 페이지네이션을 처음으로 되돌린다.
+  useEffect(() => setVisibleCount(PAGE), [tab, query, typeFilter, sort])
+  const visible = list.slice(0, visibleCount)
 
   const del = (c: Capability) =>
     startTransition(async () => {
@@ -281,7 +294,7 @@ export function CapabilityStore({
         />
       ) : (
         <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-          {list.map((c) => {
+          {visible.map((c) => {
             const author = authorOf(c.createdBy)
             const TypeIcon = TYPE_ICON[c.spec.type]
             const VisIcon = VIS_ICON[c.visibility]
@@ -353,6 +366,21 @@ export function CapabilityStore({
                 <p className="mt-1.5 line-clamp-2 text-[13px] text-muted-foreground">
                   {c.description}
                 </p>
+
+                {/* mcp·code·skill — 전체 스펙 제자리 드릴인(라우트 대신: 크로스테넌트 public 은 tenant 미상이라 재조회 불가,
+                    이미 로드된 데이터로 상세 표시). environment 는 아래 자체 드릴인 유지. */}
+                {c.spec.type !== 'environment' && (
+                  <div className="mt-2">
+                    <button
+                      type="button"
+                      onClick={() => setExpandedKey(expandedKey === capKey(c) ? null : capKey(c))}
+                      className="rounded-md px-1.5 py-0.5 text-[11.5px] font-medium text-primary transition-colors hover:bg-primary/10"
+                    >
+                      {t(expandedKey === capKey(c) ? 'hideDetails' : 'showDetails')}
+                    </button>
+                    {expandedKey === capKey(c) && <CapabilityDetail capability={c} />}
+                  </div>
+                )}
 
                 {/* environment — 이미지 ref + 뷰어 기준 분류 배지 + 벤치마크/OS 요약(스토어에서 이미지 정보 기본 노출)
                     + 제자리 드릴인(instructions·preset) */}
@@ -462,10 +490,19 @@ export function CapabilityStore({
         </div>
       )}
 
+      {visibleCount < list.length && (
+        <div className="flex justify-center">
+          <Button variant="secondary" size="sm" onClick={() => setVisibleCount((n) => n + PAGE)}>
+            {t('showMore')}
+          </Button>
+        </div>
+      )}
+
       {editing !== null && (
         <CapabilityEditorDialog
           capability={editing === 'new' ? null : editing}
           myWorkspaces={myWorkspaces}
+          imageRegistries={imageRegistries}
           ownerId={currentWorkspace}
           canPublishPublic={canPublishPublic}
           onClose={() => setEditing(null)}
@@ -525,12 +562,14 @@ export function CapabilityStore({
 function CapabilityEditorDialog({
   capability,
   myWorkspaces,
+  imageRegistries,
   ownerId,
   canPublishPublic,
   onClose,
 }: {
   capability: Capability | null
   myWorkspaces: { id: string; name: string }[]
+  imageRegistries: { name: string; host: string }[]
   ownerId: string
   canPublishPublic: boolean
   onClose: () => void
@@ -575,6 +614,11 @@ function CapabilityEditorDialog({
   const [envOs, setEnvOs] = useState(env?.contents?.os ?? '')
   const [envArch, setEnvArch] = useState(env?.contents?.arch ?? '')
   const [envPreset, setEnvPreset] = useState(env?.preset ? JSON.stringify(env.preset, null, 2) : '')
+  // environment 이미지 태그 피커 — 워크스페이스 레지스트리의 repository 태그를 조회해 image ref(host/repo:tag)를 조립.
+  const [tagRegistry, setTagRegistry] = useState(imageRegistries[0]?.name ?? '')
+  const [tagRepo, setTagRepo] = useState('')
+  const [tagLoading, setTagLoading] = useState(false)
+  const [imageTags, setImageTags] = useState<string[] | null>(null)
 
   const initialSecrets: RequiredSecret[] = mcp?.requiredSecrets ?? code?.requiredSecrets ?? []
   const [secrets, setSecrets] = useState<RequiredSecret[]>(initialSecrets)
@@ -674,6 +718,22 @@ function CapabilityEditorDialog({
   // 발견한 도구 이름을 provides 로 채운다(수동 입력 대체).
   const fillProvides = () => {
     if (probeResult) setProvides(probeResult.tools.map((tool) => tool.name).join(', '))
+  }
+
+  // environment 이미지 태그 조회 — repository(+ 선택 레지스트리)의 태그 목록.
+  const runListTags = () => {
+    setTagLoading(true)
+    setImageTags(null)
+    void listImageTagsAction(tagRepo.trim(), tagRegistry || undefined).then((r) => {
+      setTagLoading(false)
+      if (r.ok && r.tags) setImageTags(r.tags)
+      else toast.error(r.error ?? t('tagsError'))
+    })
+  }
+  // 태그를 고르면 host/repository:tag 로 image ref 를 조립한다. (mutable 태그 경고는 저장/검증에서 안내)
+  const pickTag = (tag: string) => {
+    const host = imageRegistries.find((reg) => reg.name === tagRegistry)?.host
+    setEnvImage(`${host ? `${host}/` : ''}${tagRepo.trim()}:${tag}`)
   }
 
   // 저장 전 검증(dry-run) — 새 capability/새 버전 여부 + 예측 버전 + 이미지 경고를 인라인으로 보여준다.
@@ -973,6 +1033,66 @@ function CapabilityEditorDialog({
                 className="font-mono text-[13px]"
               />
             </div>
+            {/* 이미지 태그 피커 — 워크스페이스 레지스트리의 repository 태그를 조회해 image ref 를 조립(수동 타이핑 대체) */}
+            {imageRegistries.length > 0 && (
+              <div className="space-y-2 rounded-md border border-border bg-secondary/30 p-3">
+                <div className="flex flex-wrap items-end gap-2">
+                  {imageRegistries.length > 1 && (
+                    <div className="space-y-1">
+                      <Label htmlFor="cap-tag-registry">{t('tagRegistry')}</Label>
+                      <select
+                        id="cap-tag-registry"
+                        value={tagRegistry}
+                        onChange={(e) => setTagRegistry(e.target.value)}
+                        className="h-8 rounded-md border border-border bg-card px-2 text-[12px] text-foreground"
+                      >
+                        {imageRegistries.map((reg) => (
+                          <option key={reg.name} value={reg.name}>
+                            {reg.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+                  <div className="min-w-[10rem] flex-1 space-y-1">
+                    <Label htmlFor="cap-tag-repo">{t('tagRepo')}</Label>
+                    <Input
+                      id="cap-tag-repo"
+                      value={tagRepo}
+                      onChange={(e) => setTagRepo(e.target.value)}
+                      placeholder="acme/officeqa-env"
+                      className="font-mono text-[12px]"
+                    />
+                  </div>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    disabled={tagLoading || tagRepo.trim().length === 0}
+                    onClick={runListTags}
+                  >
+                    {tagLoading ? <Loader2 className="animate-spin" /> : <Boxes />}
+                    {t('listTags')}
+                  </Button>
+                </div>
+                {imageTags !== null &&
+                  (imageTags.length === 0 ? (
+                    <p className="text-[12px] text-muted-foreground">{t('tagsNone')}</p>
+                  ) : (
+                    <div className="flex flex-wrap gap-1">
+                      {imageTags.map((tag) => (
+                        <button
+                          key={tag}
+                          type="button"
+                          onClick={() => pickTag(tag)}
+                          className="rounded-md px-2 py-0.5 font-mono text-[11.5px] text-muted-foreground ring-1 ring-inset ring-border transition-colors hover:bg-primary/10 hover:text-primary hover:ring-primary/30"
+                        >
+                          {tag}
+                        </button>
+                      ))}
+                    </div>
+                  ))}
+              </div>
+            )}
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1">
                 <Label htmlFor="cap-env-benchmark">{t('envBenchmark')}</Label>
@@ -1285,6 +1405,69 @@ function AdoptDialog({
         </div>
       </div>
     </Dialog>
+  )
+}
+
+// capability 상세(제자리 드릴인) — mcp/code/skill 의 전체 스펙을 카드 안에서 읽기전용으로 노출한다(라우트 미사용).
+function CapabilityDetail({ capability }: { capability: Capability }) {
+  const t = useTranslations('capabilityStore')
+  const s = capability.spec
+  const secrets = s.type === 'mcp' || s.type === 'code' ? s.requiredSecrets : []
+  return (
+    <div className="mt-2 space-y-3 rounded-md border border-border bg-secondary/30 p-3 text-[12.5px]">
+      {s.type === 'mcp' && (
+        <>
+          <div className="space-y-0.5">
+            <p className="text-[11px] font-[510] text-muted-foreground">{t('mcpUrl')}</p>
+            <code className="block break-all font-mono text-foreground">{s.url}</code>
+          </div>
+          {s.provides.length > 0 && (
+            <div className="flex flex-wrap gap-1">
+              {s.provides.map((p) => (
+                <Badge key={p} tone="neutral">
+                  {p}
+                </Badge>
+              ))}
+            </div>
+          )}
+          {s.write && <Badge tone="warning">{t('mcpWrite')}</Badge>}
+        </>
+      )}
+      {s.type === 'code' && (
+        <>
+          <div className="flex flex-wrap gap-1">
+            <Badge tone="outline">{s.language}</Badge>
+            <Badge tone={s.isReadOnly ? 'success' : 'warning'}>
+              {t(s.isReadOnly ? 'codeReadOnly' : 'codeWrites')}
+            </Badge>
+          </div>
+          <CodeEditor
+            value={s.code}
+            language={s.language}
+            readOnly
+            minHeight="120px"
+            maxHeight="320px"
+            aria-label={t('code')}
+          />
+        </>
+      )}
+      {s.type === 'skill' && (
+        <pre className="whitespace-pre-wrap font-sans leading-relaxed text-foreground">
+          {s.instructions}
+        </pre>
+      )}
+      {secrets.length > 0 && (
+        <div className="space-y-0.5">
+          <p className="text-[11px] font-[510] text-muted-foreground">{t('requiredSecrets')}</p>
+          {secrets.map((secret) => (
+            <div key={secret.name} className="text-muted-foreground">
+              <span className="font-mono text-foreground">{secret.name}</span>
+              {secret.description ? ` — ${secret.description}` : ''}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   )
 }
 
