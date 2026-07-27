@@ -1,6 +1,13 @@
 # Analysis Studio — natural-language analysis, artifacts, and scheduled reports over Views
 
-> **Status: doc-first SSOT (2026-07-27) — planning, not started.** Successor/extension of
+> **Status: V1–V5 LANDED + LIVE-VERIFIED (2026-07-28).** The full report loop ran against the dev stack
+> with a real model: schedule fire → headless agent turn (37s — get_view → query_scorecards over 79 real
+> scorecards → write_report) → artifact auto-pinned to the View → gallery route + `report_completed`
+> notification, all end-to-end. The live run also caught (and fixed, with a regression test) a wire-shape
+> drift in the report-runner adapter (`tenant` vs `workspace`). Remaining: view-linked sessions
+> (deliberately descoped — the `@view` mention covers context injection) and the deploy env pair
+> (`AGENT_SERVICE_URL` + `AGENT_INTERNAL_TOKEN` on the control plane, `AGENT_INTERNAL_TOKEN` on the agent
+> service) which enables report firing. Originally a doc-first SSOT; successor/extension of
 > [scorecard-analysis-views.md](./scorecard-analysis-views.md) (the pivot engine + saved Views) composed
 > with [agent-conversations.md](./agent-conversations.md) (the conversational agent runtime) and
 > [agent-teams.md](./agent-teams.md) (proactive/scheduled agent turns).
