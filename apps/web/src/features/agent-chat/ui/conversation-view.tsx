@@ -12,6 +12,7 @@ import {
 } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
+import { PinControl } from '@/features/analysis-artifacts'
 import {
   AGENT_PERMISSION_MODES,
   type AgentAttachmentInput,
@@ -302,7 +303,10 @@ export function ConversationView({
                 if (item.kind === 'artifact')
                   return (
                     <div key={item.id} className="px-3 py-1.5">
-                      <ArtifactCard artifact={item.artifact} />
+                      <ArtifactCard
+                        artifact={item.artifact}
+                        action={<PinControl artifact={item.artifact} />}
+                      />
                     </div>
                   )
                 return <MessageRow key={item.message.id} message={item.message} user={user} />

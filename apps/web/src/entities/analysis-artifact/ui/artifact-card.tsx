@@ -3,6 +3,8 @@
 import { BarChart3, FileText, Pin, Table2 } from 'lucide-react'
 import { useFormatter, useTranslations } from 'next-intl'
 
+import { Markdown } from '@/shared/ui/markdown'
+
 import {
   chartSpecSchema,
   reportSpecSchema,
@@ -11,7 +13,6 @@ import {
   type ChartSpec,
   type TableSpec,
 } from '../model/schema'
-import { Markdown } from '@/shared/ui/markdown'
 
 // One rendered analysis artifact (chart | table | report) — declarative data only, drawn by OUR components
 // (the agent's output is never injected as HTML; analysis-studio principle 2). The opaque `spec` is validated
@@ -183,7 +184,13 @@ function TableView({ spec }: { spec: TableSpec }) {
 
 const KIND_ICON = { chart: BarChart3, table: Table2, report: FileText } as const
 
-export function ArtifactCard({ artifact }: { artifact: AnalysisArtifact }) {
+export function ArtifactCard({
+  artifact,
+  action,
+}: {
+  artifact: AnalysisArtifact
+  action?: React.ReactNode
+}) {
   const t = useTranslations('analysisArtifacts')
   const format = useFormatter()
   const Icon = KIND_ICON[artifact.kind]

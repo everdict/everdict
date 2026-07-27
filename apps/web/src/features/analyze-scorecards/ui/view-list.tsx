@@ -3,7 +3,7 @@
 import { useState, useTransition } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { Globe, Lock, MoreHorizontal, Trash2 } from 'lucide-react'
+import { FileChartColumn, Globe, Lock, MoreHorizontal, Trash2 } from 'lucide-react'
 import { useLocale, useTimeZone, useTranslations } from 'next-intl'
 
 import type { View } from '@/entities/view'
@@ -25,12 +25,15 @@ export function ViewList({
   currentSubject,
   isAdmin,
   workspace,
+  artifactSummary,
 }: {
   views: View[]
   authors: Record<string, Author>
   currentSubject: string
   isAdmin: boolean
   workspace: string
+  // Per-view artifact rollup from the agent service (best-effort — absent renders nothing).
+  artifactSummary?: Record<string, { count: number; lastReportAt?: string }>
 }) {
   const t = useTranslations('analyzeScorecards')
   const locale = useLocale()
@@ -97,6 +100,16 @@ export function ViewList({
                     {c}
                   </span>
                 ))}
+                {artifactSummary?.[v.id] && (
+                  <span className="inline-flex items-center gap-1 rounded bg-primary/10 px-1.5 py-0.5 text-[11px] font-[510] text-primary">
+                    <FileChartColumn className="size-3" />
+                    {t('artifactCount', { count: artifactSummary[v.id].count })}
+                    {artifactSummary[v.id].lastReportAt &&
+                      ` · ${t('lastReportAt', {
+                        time: fmtTimeAgo(artifactSummary[v.id].lastReportAt as string, locale),
+                      })}`}
+                  </span>
+                )}
               </div>
             </Link>
 

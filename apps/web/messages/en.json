@@ -26,7 +26,14 @@
     "galleryDescription": "Reports and charts the Everdict agent produced for this view — scheduled reports land here automatically.",
     "emptyTitle": "No artifacts yet",
     "emptyHint": "Create a report schedule for this view, or ask the agent to analyze it — pinned charts and reports appear here.",
-    "invalidSpec": "This artifact could not be rendered (unrecognized spec)."
+    "invalidSpec": "This artifact could not be rendered (unrecognized spec).",
+    "pinTo": "Pin to a view",
+    "unpin": "Unpin from the view",
+    "pinned": "Pinned to the view.",
+    "unpinned": "Unpinned.",
+    "pinFailed": "Pin action failed.",
+    "loadingViews": "Loading views…",
+    "noViews": "No views yet — save one from the analyze dashboard."
   },
   "analyzeScorecards": {
     "all": "All",
@@ -131,7 +138,9 @@
     "viewNameAria": "View name",
     "viewNamePlaceholder": "View name (e.g. nightly regression trend)",
     "vizBars": "Bars",
-    "vizTable": "Table"
+    "vizTable": "Table",
+    "artifactCount": "{count, plural, one {# artifact} other {# artifacts}}",
+    "lastReportAt": "report {time}"
   },
   "byHarnessScorecards": {
     "harnessLabel": "Harness"
@@ -2494,6 +2503,8 @@
     "watchLive": "Watch live",
     "metaRunBy": "Run by",
     "metaRuntime": "Runtime",
+    "metaDuration": "Duration",
+    "durationRunning": "{elapsed} · running",
     "metaSource": "Origin",
     "runtimeDetailTitle": "Runtime detail",
     "runtimePoolPersonal": "My runner (any)",

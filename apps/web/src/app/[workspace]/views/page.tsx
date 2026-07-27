@@ -2,6 +2,8 @@ import Link from 'next/link'
 import { getTranslations } from 'next-intl/server'
 
 import { loadAnalysisData, ViewList } from '@/features/analyze-scorecards'
+import { authContext } from '@/shared/auth/principal'
+import { agentPlane } from '@/shared/lib/agent-plane'
 import { buttonVariants } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
 import { EmptyState } from '@/shared/ui/empty-state'
@@ -14,6 +16,21 @@ export default async function ViewsPage({ params }: { params: Promise<{ workspac
   const { workspace } = await params
   const t = await getTranslations('viewsPage')
   const { savedViews, authors, subject, isAdmin, error } = await loadAnalysisData()
+  // Per-view artifact rollup (agent service, best-effort) — the cards show "N artifacts · last report …".
+  let artifactSummary: Record<string, { count: number; lastReportAt?: string }> | undefined
+  if (savedViews.length > 0) {
+    try {
+      const ctx = await authContext()
+      artifactSummary = (
+        (await agentPlane.viewArtifactsSummary(
+          ctx,
+          savedViews.map((v) => v.id)
+        )) as { summary: Record<string, { count: number; lastReportAt?: string }> }
+      ).summary
+    } catch {
+      // silent — the list renders without artifact chips
+    }
+  }
 
   return (
     <div className="space-y-6">
@@ -51,6 +68,7 @@ export default async function ViewsPage({ params }: { params: Promise<{ workspac
           currentSubject={subject}
           isAdmin={isAdmin}
           workspace={workspace}
+          artifactSummary={artifactSummary}
         />
       )}
     </div>

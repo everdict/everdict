@@ -44,6 +44,19 @@ export const agentPlane = {
   // A conversation's emitted analysis artifacts, oldest first (owner-scoped by the agent service).
   listSessionArtifacts: <T>(auth: AuthContext, sessionId: string) =>
     call<T>(auth, `/agent/sessions/${encodeURIComponent(sessionId)}/artifacts`),
+  // Pin/unpin a conversation artifact onto a View (creator-only; view visibility re-verified by the agent service).
+  pinArtifact: <T>(auth: AuthContext, artifactId: string, viewId: string) =>
+    call<T>(auth, `/agent/artifacts/${encodeURIComponent(artifactId)}/pin`, {
+      method: 'POST',
+      body: JSON.stringify({ viewId }),
+    }),
+  unpinArtifact: (auth: AuthContext, artifactId: string) =>
+    call<void>(auth, `/agent/artifacts/${encodeURIComponent(artifactId)}/pin`, {
+      method: 'DELETE',
+    }),
+  // Per-view artifact rollup for the views the caller already holds (count + newest report time).
+  viewArtifactsSummary: <T>(auth: AuthContext, viewIds: string[]) =>
+    call<T>(auth, `/agent/views/artifacts-summary?ids=${encodeURIComponent(viewIds.join(','))}`),
   createSession: <T>(auth: AuthContext, body: unknown) =>
     call<T>(auth, '/agent/sessions', { method: 'POST', body: JSON.stringify(body) }),
   getSession: <T>(auth: AuthContext, id: string) =>

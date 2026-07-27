@@ -1,15 +1,16 @@
 import { getTranslations } from 'next-intl/server'
 
 import {
-  ArtifactCard,
   analysisArtifactsResponseSchema,
+  ArtifactCard,
   type AnalysisArtifact,
 } from '@/entities/analysis-artifact'
-import { authContext } from '@/shared/auth/principal'
+import { authContext, currentPrincipal } from '@/shared/auth/principal'
 import { agentPlane } from '@/shared/lib/agent-plane'
 import { EmptyState } from '@/shared/ui/empty-state'
 import { SectionHeader } from '@/shared/ui/section-header'
 
+import { PinControl } from './pin-control'
 
 // The View's pinned analysis artifacts (analysis-studio V3) — scheduled reports and agent-pinned charts/tables,
 // newest first. Server-rendered from the agent service (visibility is double-gated: this page already 404s a
@@ -18,11 +19,13 @@ import { SectionHeader } from '@/shared/ui/section-header'
 export async function ViewArtifactGallery({ viewId }: { viewId: string }) {
   const t = await getTranslations('analysisArtifacts')
   let artifacts: AnalysisArtifact[]
+  let subject: string | undefined
   try {
     const ctx = await authContext()
     artifacts = analysisArtifactsResponseSchema.parse(
       await agentPlane.listViewArtifacts(ctx, viewId)
     ).artifacts
+    subject = (await currentPrincipal()).principal?.subject
   } catch {
     return null
   }
@@ -36,7 +39,13 @@ export async function ViewArtifactGallery({ viewId }: { viewId: string }) {
       ) : (
         <div className="space-y-3">
           {artifacts.map((artifact) => (
-            <ArtifactCard key={artifact.id} artifact={artifact} />
+            <ArtifactCard
+              key={artifact.id}
+              artifact={artifact}
+              action={
+                artifact.createdBy === subject ? <PinControl artifact={artifact} /> : undefined
+              }
+            />
           ))}
         </div>
       )}

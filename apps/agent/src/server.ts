@@ -569,6 +569,55 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
     return reply.send({ artifacts: await deps.artifacts.listByView(principal.workspace, viewId) });
   });
 
+  // Pin a conversation artifact to a View (the Studio gallery). Only the artifact's creator pins their own
+  // conversation output; the target View's private|workspace gate is the control plane's (checkViewAccess).
+  app.post("/agent/artifacts/:id/pin", async (req, reply) => {
+    if (!deps.checkViewAccess || !deps.artifacts)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "Artifact pinning is not configured." });
+    const principal = await principalOf(req, reply);
+    if (!principal) return reply;
+    const { id } = idParams.parse(req.params);
+    const body = z.object({ viewId: z.string().min(1) }).safeParse(req.body);
+    if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: body.error.message });
+    const artifact = await deps.artifacts.get(principal.workspace, id);
+    if (!artifact || artifact.createdBy !== principal.subject)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "Artifact not found." });
+    if (!(await deps.checkViewAccess(forwardHeaders(req), body.data.viewId)))
+      return reply.code(404).send({ code: "NOT_FOUND", message: "View not found." });
+    await deps.artifacts.attachToView(principal.workspace, id, body.data.viewId);
+    return reply.send(await deps.artifacts.get(principal.workspace, id));
+  });
+
+  app.delete("/agent/artifacts/:id/pin", async (req, reply) => {
+    if (!deps.artifacts)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "Artifact pinning is not configured." });
+    const principal = await principalOf(req, reply);
+    if (!principal) return reply;
+    const { id } = idParams.parse(req.params);
+    const artifact = await deps.artifacts.get(principal.workspace, id);
+    if (!artifact || artifact.createdBy !== principal.subject)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "Artifact not found." });
+    await deps.artifacts.detachFromView(principal.workspace, id);
+    return reply.code(204).send();
+  });
+
+  // Per-view artifact rollup (count + newest report time) for the views list — one workspace-wide query,
+  // answered ONLY for the ids the caller already holds (its own visible views list) so the response never
+  // discloses other views' ids (the private-view no-existence-leak discipline).
+  app.get("/agent/views/artifacts-summary", async (req, reply) => {
+    if (!deps.artifacts)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "View artifacts are not configured." });
+    const principal = await principalOf(req, reply);
+    if (!principal) return reply;
+    const query = z.object({ ids: z.string().min(1) }).safeParse(req.query);
+    if (!query.success) return reply.code(400).send({ code: "BAD_REQUEST", message: "ids query param is required." });
+    const requested = new Set(query.data.ids.split(",").filter(Boolean));
+    const all = await deps.artifacts.summarizeByView(principal.workspace);
+    const summary: typeof all = {};
+    for (const [viewId, entry] of Object.entries(all)) if (requested.has(viewId)) summary[viewId] = entry;
+    return reply.send({ summary });
+  });
+
   // Scheduled-report fire (analysis-studio V4) — INTERNAL ONLY (the control plane's report-mode schedule fire).
   // Runs one budgeted, request-less analysis turn acting AS the schedule creator and returns the report artifact.
   app.post("/internal/report", async (req, reply) => {

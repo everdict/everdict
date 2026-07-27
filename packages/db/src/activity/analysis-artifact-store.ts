@@ -34,6 +34,26 @@ export class InMemoryAnalysisArtifactStore implements AnalysisArtifactStore {
       .filter((a) => a.tenant === tenant && a.viewId === viewId)
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   }
+
+  async detachFromView(tenant: string, id: string): Promise<void> {
+    const artifact = this.artifacts.find((a) => a.tenant === tenant && a.id === id);
+    if (!artifact) return;
+    artifact.viewId = undefined;
+    artifact.pinned = false;
+  }
+
+  async summarizeByView(tenant: string): Promise<Record<string, { count: number; lastReportAt?: string }>> {
+    const out: Record<string, { count: number; lastReportAt?: string }> = {};
+    for (const a of this.artifacts) {
+      if (a.tenant !== tenant || a.viewId === undefined) continue;
+      const entry = out[a.viewId] ?? { count: 0 };
+      entry.count += 1;
+      if (a.kind === "report" && (entry.lastReportAt === undefined || a.createdAt > entry.lastReportAt))
+        entry.lastReportAt = a.createdAt;
+      out[a.viewId] = entry;
+    }
+    return out;
+  }
 }
 
 interface ArtifactRow {
@@ -119,5 +139,31 @@ export class PgAnalysisArtifactStore implements AnalysisArtifactStore {
       [tenant, viewId],
     );
     return res.rows.map(rowToRecord);
+  }
+
+  async detachFromView(tenant: string, id: string): Promise<void> {
+    await this.client.query(
+      "UPDATE everdict_analysis_artifacts SET view_id = NULL, pinned = false WHERE tenant = $1 AND id = $2",
+      [tenant, id],
+    );
+  }
+
+  async summarizeByView(tenant: string): Promise<Record<string, { count: number; lastReportAt?: string }>> {
+    const res = await this.client.query<{ view_id: string; count: string; last_report_at: string | Date | null }>(
+      `SELECT view_id, COUNT(*) AS count,
+              MAX(created_at) FILTER (WHERE kind = 'report') AS last_report_at
+       FROM everdict_analysis_artifacts
+       WHERE tenant = $1 AND view_id IS NOT NULL
+       GROUP BY view_id`,
+      [tenant],
+    );
+    const out: Record<string, { count: number; lastReportAt?: string }> = {};
+    for (const row of res.rows) {
+      out[row.view_id] = {
+        count: Number(row.count),
+        ...(row.last_report_at !== null ? { lastReportAt: new Date(row.last_report_at).toISOString() } : {}),
+      };
+    }
+    return out;
   }
 }

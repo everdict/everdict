@@ -197,6 +197,90 @@ describe("agent server", () => {
     await app.close();
   });
 
+  it("pin/unpin: the creator curates their artifact onto a visible view; foreign artifacts and views 404", async () => {
+    const artifacts = new InMemoryAnalysisArtifactStore();
+    const mine = {
+      id: "art-1",
+      tenant: "acme",
+      kind: "chart" as const,
+      title: "Mine",
+      sessionId: "s1",
+      pinned: false,
+      spec: { type: "line", x: ["a"], series: [{ label: "s", points: [1] }] },
+      createdBy: "alice",
+      createdAt: "2026-07-01T00:00:00.000Z",
+    };
+    await artifacts.create(mine);
+    await artifacts.create({ ...mine, id: "art-bob", createdBy: "bob" });
+    const app = buildServer(makeDeps({ artifacts, checkViewAccess: async (_h, viewId) => viewId === "v-1" }));
+
+    // Pin my artifact to a visible view.
+    const pinned = await app.inject({
+      method: "POST",
+      url: "/agent/artifacts/art-1/pin",
+      headers: auth,
+      payload: { viewId: "v-1" },
+    });
+    expect(pinned.statusCode).toBe(200);
+    expect(pinned.json()).toMatchObject({ viewId: "v-1", pinned: true });
+
+    // Not my artifact / invisible view → 404 (no existence leak).
+    expect(
+      (
+        await app.inject({
+          method: "POST",
+          url: "/agent/artifacts/art-bob/pin",
+          headers: auth,
+          payload: { viewId: "v-1" },
+        })
+      ).statusCode,
+    ).toBe(404);
+    expect(
+      (
+        await app.inject({
+          method: "POST",
+          url: "/agent/artifacts/art-1/pin",
+          headers: auth,
+          payload: { viewId: "v-private" },
+        })
+      ).statusCode,
+    ).toBe(404);
+
+    // Unpin.
+    expect((await app.inject({ method: "DELETE", url: "/agent/artifacts/art-1/pin", headers: auth })).statusCode).toBe(
+      204,
+    );
+    expect((await artifacts.get("acme", "art-1"))?.pinned).toBe(false);
+    await app.close();
+  });
+
+  it("artifacts-summary answers only for the requested ids (no view-id disclosure)", async () => {
+    const artifacts = new InMemoryAnalysisArtifactStore();
+    const base = {
+      tenant: "acme",
+      kind: "report" as const,
+      title: "r",
+      sessionId: "s1",
+      pinned: false,
+      spec: { markdown: "# r" },
+      createdBy: "alice",
+      createdAt: "2026-07-01T00:00:00.000Z",
+    };
+    await artifacts.create({ ...base, id: "a1" });
+    await artifacts.create({ ...base, id: "a2" });
+    await artifacts.attachToView("acme", "a1", "v-known");
+    await artifacts.attachToView("acme", "a2", "v-secret");
+    const app = buildServer(makeDeps({ artifacts }));
+
+    const res = await app.inject({ method: "GET", url: "/agent/views/artifacts-summary?ids=v-known", headers: auth });
+    expect(res.statusCode).toBe(200);
+    expect(Object.keys(res.json().summary)).toEqual(["v-known"]); // v-secret never leaves the server
+    expect((await app.inject({ method: "GET", url: "/agent/views/artifacts-summary", headers: auth })).statusCode).toBe(
+      400,
+    );
+    await app.close();
+  });
+
   it("absorbs a queued /input steering message into the running turn (mid-run steering)", async () => {
     const app = buildServer(makeDeps());
     const session = (await app.inject({ method: "POST", url: "/agent/sessions", headers: auth, payload: {} })).json();

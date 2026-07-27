@@ -1,1 +1,1 @@
-export { ViewArtifactGallery } from './ui/view-artifact-gallery'
+export { PinControl } from './ui/pin-control'

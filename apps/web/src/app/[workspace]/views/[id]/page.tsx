@@ -4,7 +4,7 @@ import { ArrowLeft } from 'lucide-react'
 import { getTranslations } from 'next-intl/server'
 
 import { MentionInChatButton } from '@/widgets/infra-panel'
-import { ViewArtifactGallery } from '@/features/analysis-artifacts'
+import { ViewArtifactGallery } from '@/features/analysis-artifacts/server'
 import { CustomAnalyzer, loadAnalysisData, storedToConfig } from '@/features/analyze-scorecards'
 import { CommentsSection } from '@/features/discuss'
 import { ViewReportSchedules } from '@/features/view-report-schedule'

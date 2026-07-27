@@ -26,7 +26,14 @@
     "galleryDescription": "Everdict 에이전트가 이 뷰에 대해 만든 리포트와 차트입니다. 예약 리포트는 자동으로 이곳에 쌓입니다.",
     "emptyTitle": "아직 아티팩트가 없습니다",
     "emptyHint": "이 뷰에 리포트 예약을 만들거나 에이전트에게 분석을 요청해 보세요. 고정된 차트와 리포트가 여기에 표시됩니다.",
-    "invalidSpec": "이 아티팩트를 렌더링할 수 없습니다(알 수 없는 스펙)."
+    "invalidSpec": "이 아티팩트를 렌더링할 수 없습니다(알 수 없는 스펙).",
+    "pinTo": "뷰에 고정",
+    "unpin": "뷰에서 고정 해제",
+    "pinned": "뷰에 고정했습니다.",
+    "unpinned": "고정을 해제했습니다.",
+    "pinFailed": "고정 작업에 실패했습니다.",
+    "loadingViews": "뷰 불러오는 중…",
+    "noViews": "아직 뷰가 없습니다. 분석 대시보드에서 저장해 보세요."
   },
   "analyzeScorecards": {
     "all": "전체",
@@ -131,7 +138,9 @@
     "viewNameAria": "뷰 이름",
     "viewNamePlaceholder": "뷰 이름 (예: 나이트 회귀 추이)",
     "vizBars": "막대",
-    "vizTable": "표"
+    "vizTable": "표",
+    "artifactCount": "아티팩트 {count}개",
+    "lastReportAt": "리포트 {time}"
   },
   "byHarnessScorecards": {
     "harnessLabel": "Harness"
@@ -2494,6 +2503,8 @@
     "watchLive": "라이브 보기",
     "metaRunBy": "실행자",
     "metaRuntime": "런타임",
+    "metaDuration": "소요시간",
+    "durationRunning": "{elapsed} · 실행 중",
     "metaSource": "출처",
     "runtimeDetailTitle": "런타임 상세",
     "runtimePoolPersonal": "내 러너 (아무거나)",

@@ -206,9 +206,15 @@ cover the 80% (pivot + charts + reports) with zero new attack surface.
   saved-View stored-form vocabulary (get_view output can be tweaked and re-applied verbatim); the SSE
   `view_config` event broadcasts same-window (`everdict:view-config` CustomEvent) and `CustomAnalyzer`
   applies it via `storedToConfig` (defensive normalize) — the agent drives the same canvas the pickers
-  drive, the member keeps manual control. **Remaining for full V3:** a web pin/unpin action, `/views` card
-  thumbnails + last-report time, and view-linked sessions (`viewId` on AgentSession + the view-context
-  preamble).
+  drive, the member keeps manual control. **Fifth cut:** pin/unpin + list rollups — `POST/DELETE
+  /agent/artifacts/:id/pin` (creator-only; the target View re-verified via checkViewAccess) +
+  `AnalysisArtifactStore.detachFromView`/`summarizeByView`; the web `PinControl` (lazy view picker over a
+  new `/api/views` BFF) rides the `ArtifactCard` action slot in both the transcript and the gallery
+  (client-safe feature barrel split from a `server.ts` entry — the gallery is server-only);
+  `GET /agent/views/artifacts-summary?ids=` (answers ONLY the ids the caller already holds — no private
+  view-id disclosure) powers the `/views` card chip (artifact count + last report time). **Remaining for
+  full V3:** view-linked sessions (`viewId` on AgentSession + the view-context preamble — today the
+  `@view` mention covers context injection).
 - **V4 — scheduled reports. ✅ LANDED (backend; web form → V3 batch).** Third `ScheduleRunTemplate` kind
   `{report: {view, instructions?, compare?: "previous-period"}}` (exactly-one-mode refine, DTO + MCP
   `create_schedule report_view/…` parity); `ScheduleService.fire` report branch → the `AgentReportRunner`
