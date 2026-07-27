@@ -134,7 +134,18 @@ async function main(): Promise<void> {
   // tenant-listable record stores (scorecards/runs/schedules) into it. See docs/architecture/knowledge-graph.md.
   const knowledgeService = new KnowledgeService({
     store: knowledgeStore,
-    reindexSources: { scorecards: scorecardStore, runs: store, schedules: scheduleStore },
+    reindexSources: {
+      scorecards: scorecardStore,
+      runs: store,
+      schedules: scheduleStore,
+      datasets: datasetRegistry,
+      judges: judgeRegistry,
+      runtimes: runtimeRegistry,
+      models: modelRegistry,
+      rubrics: rubricRegistry,
+      harnesses: harnessInstanceRegistry,
+      agents: agentRegistry,
+    },
   });
 
   // The schedule↔membership↔scorecard construction cycle: MembershipService's member-removal hook needs the

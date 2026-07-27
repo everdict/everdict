@@ -190,8 +190,10 @@ Following everdict's one-way spine (no new package — schemas belong at the con
    behind the same surface later.
 5. ✅ **API + MCP** — an isolated `knowledge/` slice: `GET /knowledge/node|related|subgraph` + `POST /knowledge/reindex`
    (read = `scorecards:read`; reindex = `settings:write`) and the four matching MCP tools, over a `KnowledgeService`
-   facade. The `KnowledgeStore` is `InMemory`/`Pg` by `DATABASE_URL`; `reindex` is a pull harvest of the tenant-listable
-   record stores (write-path ingest-on-write is the follow-up).
+   facade. The `KnowledgeStore` is `InMemory`/`Pg` by `DATABASE_URL`; `reindex` is a pull harvest of the record stores
+   (scorecards/runs/schedules) AND the registries (dataset/judge/runtime/model/rubric/harness/agent, at each entity's
+   latest version) — so a reindex materialises every eval-config node, not just the record nodes. Write-path
+   ingest-on-write (keeping the graph current without a manual reindex) is the follow-up.
 6. **Rendering** — like digo, flat, ranked fact lists powering resource "related" panels, impact analysis, and the
    agent's context first — not a graph visualization. Plus ingest-on-write hooks so the graph stays current without a
    manual reindex.

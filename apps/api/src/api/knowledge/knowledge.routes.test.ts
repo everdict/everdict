@@ -1,9 +1,10 @@
 import { KnowledgeService } from "@everdict/application-control";
 import { RunService } from "@everdict/application-control";
 import type { Dispatcher } from "@everdict/backends";
-import type { ScorecardRecord } from "@everdict/contracts";
+import type { Dataset, ScorecardRecord } from "@everdict/contracts";
 import { InMemoryKnowledgeStore, InMemoryRunStore, InMemoryScorecardStore } from "@everdict/db";
 import { harvestScorecard, nodeId } from "@everdict/domain";
+import { InMemoryDatasetRegistry } from "@everdict/registry";
 import { describe, expect, it } from "vitest";
 import { buildServer } from "../../server.js";
 
@@ -39,8 +40,21 @@ async function build(withKnowledge: boolean) {
   await store.putEdges(h.edges);
   const scorecards = new InMemoryScorecardStore();
   await scorecards.create(SCORECARD);
-  return buildServer({ service, knowledgeService: new KnowledgeService({ store, reindexSources: { scorecards } }) });
+  const datasets = new InMemoryDatasetRegistry();
+  await datasets.register("acme", DATASET, "user-alice");
+  return buildServer({
+    service,
+    knowledgeService: new KnowledgeService({ store, reindexSources: { scorecards, datasets } }),
+  });
 }
+
+const DATASET: Dataset = {
+  id: "web-bench",
+  version: "1.0.0",
+  cases: [{ id: "c1", env: { kind: "repo", source: { files: {} } }, task: "t", timeoutSec: 60, tags: [], graders: [] }],
+  tags: ["web"],
+};
+const DATASET_NODE = nodeId("acme", { type: "dataset", key: "web-bench", version: "1.0.0" });
 
 describe("knowledge routes", () => {
   it("returns 404 when the knowledge service is not configured", async () => {
@@ -100,5 +114,24 @@ describe("knowledge routes", () => {
     const reindex = await app.inject({ method: "POST", url: "/knowledge/reindex", headers: H });
     expect(reindex.statusCode).toBe(200);
     expect((reindex.json() as { scanned: number }).scanned).toBeGreaterThanOrEqual(1);
+  });
+
+  it("reindex materialises registry nodes — the dataset node the scorecard edge pointed at", async () => {
+    const app = await build(true);
+    // Before reindex, only the scorecard's dataset EDGE exists; the dataset NODE row is not yet materialised.
+    const before = await app.inject({
+      method: "GET",
+      url: `/knowledge/node?id=${encodeURIComponent(DATASET_NODE)}`,
+      headers: H,
+    });
+    expect(before.statusCode).toBe(404);
+    await app.inject({ method: "POST", url: "/knowledge/reindex", headers: H });
+    const after = await app.inject({
+      method: "GET",
+      url: `/knowledge/node?id=${encodeURIComponent(DATASET_NODE)}`,
+      headers: H,
+    });
+    expect(after.statusCode).toBe(200);
+    expect((after.json() as { type: string }).type).toBe("dataset");
   });
 });
