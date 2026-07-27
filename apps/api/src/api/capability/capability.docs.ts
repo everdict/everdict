@@ -2,8 +2,12 @@ import { CapabilityRecordSchema } from "@everdict/contracts";
 import type { FastifySchema } from "fastify";
 import { z } from "zod";
 import { errorResponses, toJsonSchema } from "../openapi.js";
+import { ProbeCapabilityMcpBodySchema } from "./request/probe-capability-mcp.js";
 import { SaveCapabilityBodySchema } from "./request/save-capability.js";
 import { SetCapabilityVisibilityBodySchema } from "./request/set-capability-visibility.js";
+import { ValidateCapabilityBodySchema } from "./request/validate-capability.js";
+import { ProbeCapabilityMcpResultSchema } from "./response/probe-capability-mcp-result.js";
+import { ValidateCapabilityResultSchema } from "./response/validate-capability-result.js";
 
 // OpenAPI descriptors for the capability routes — doc-only (rule api-layer): attaching these is behavior-free.
 
@@ -41,6 +45,32 @@ const docs = {
     body: toJsonSchema(SaveCapabilityBodySchema),
     response: {
       200: { description: "Saved (version assigned)", ...toJsonSchema(SaveResultSchema) },
+      ...errorResponses(400, 401, 403, 404),
+    },
+  },
+  validate: {
+    summary: "Validate a capability (dry-run of a save)",
+    description:
+      "Parse the discriminated spec and predict what a save would do WITHOUT writing: whether it creates a new " +
+      "capability or a new version (and which version), the existing live versions, and — for an environment kind — " +
+      "image pull-readiness warnings. Bad spec → { ok:false, errors }. Requires capabilities:write (member+).",
+    tags: ["capability"],
+    body: toJsonSchema(ValidateCapabilityBodySchema),
+    response: {
+      200: { description: "Validation result", ...toJsonSchema(ValidateCapabilityResultSchema) },
+      ...errorResponses(401, 403, 404),
+    },
+  },
+  probeMcp: {
+    summary: "Probe an mcp capability URL (test connection + tool discovery)",
+    description:
+      "Connect to a candidate MCP server (Streamable HTTP) and list its tools, so the wizard can verify reachability " +
+      "and prefill `provides`. A failure is a result (reachable:false + reason), never an error. `token` is a transient " +
+      "bearer for the test only (never stored). Requires capabilities:write (member+).",
+    tags: ["capability"],
+    body: toJsonSchema(ProbeCapabilityMcpBodySchema),
+    response: {
+      200: { description: "Probe result", ...toJsonSchema(ProbeCapabilityMcpResultSchema) },
       ...errorResponses(400, 401, 403, 404),
     },
   },

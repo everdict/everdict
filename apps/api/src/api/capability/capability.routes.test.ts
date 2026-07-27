@@ -104,6 +104,44 @@ describe("capability routes", () => {
     expect(ids(await app.inject({ method: "GET", url: "/capabilities/public", headers: beta }))).toEqual(["tool"]);
   });
 
+  it("validates a capability (dry-run) — predicts the version without writing, and flags a bad spec", async () => {
+    const app = build(true);
+    // brand-new id → would create 1.0.0, and validate must NOT register it
+    const fresh = await app.inject({
+      method: "POST",
+      url: "/capabilities/validate",
+      headers: acme,
+      payload: { id: "triage", name: "triage", description: "d", spec: skillSpec },
+    });
+    expect(fresh.json()).toMatchObject({ ok: true, willCreate: true, version: "1.0.0", existingVersions: [] });
+    expect(ids(await app.inject({ method: "GET", url: "/capabilities", headers: acme }))).toEqual([]);
+
+    // after a real save, unchanged content validates as a no-op; changed content as the next version
+    await app.inject({
+      method: "PUT",
+      url: "/capabilities/triage",
+      headers: acme,
+      payload: { name: "triage", description: "d", spec: skillSpec },
+    });
+    const noop = await app.inject({
+      method: "POST",
+      url: "/capabilities/validate",
+      headers: acme,
+      payload: { id: "triage", name: "triage", description: "d", spec: skillSpec },
+    });
+    expect(noop.json()).toMatchObject({ ok: true, willCreate: false, version: "1.0.0" });
+
+    // a malformed spec → ok:false with errors (never a 400/throw)
+    const bad = await app.inject({
+      method: "POST",
+      url: "/capabilities/validate",
+      headers: acme,
+      payload: { id: "x", name: "x", description: "d", spec: { type: "code", language: "ruby" } },
+    });
+    expect(bad.statusCode).toBe(200);
+    expect((bad.json() as { ok: boolean }).ok).toBe(false);
+  });
+
   it("soft-deletes a version (then reads 404)", async () => {
     const app = build(true);
     await app.inject({
@@ -116,6 +154,41 @@ describe("capability routes", () => {
     expect(del.statusCode).toBe(204);
     const after = await app.inject({ method: "GET", url: "/capabilities/d", headers: acme });
     expect(after.statusCode).toBe(404);
+  });
+
+  it("probes an mcp capability URL — returns the injected prober's reachability + discovered tools", async () => {
+    const service = new RunService({ dispatcher: unusedDispatcher, store: new InMemoryRunStore() });
+    const app = buildServer({
+      service,
+      capabilityService: new CapabilityService({ store: new InMemoryCapabilityStore() }),
+      probeCapabilityMcp: async (url: string, token?: string) => ({
+        reachable: true,
+        detail: `ok ${url}${token ? " (auth)" : ""}`,
+        tools: [{ name: "search" }, { name: "fetch", description: "get a url" }],
+      }),
+    });
+    const res = await app.inject({
+      method: "POST",
+      url: "/capabilities/probe-mcp",
+      headers: acme,
+      payload: { url: "https://mcp.example.com/mcp", token: "t" },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({
+      reachable: true,
+      detail: "ok https://mcp.example.com/mcp (auth)",
+      tools: [{ name: "search" }, { name: "fetch", description: "get a url" }],
+    });
+  });
+
+  it("returns 404 for probe-mcp when the prober is not wired", async () => {
+    const res = await build(true).inject({
+      method: "POST",
+      url: "/capabilities/probe-mcp",
+      headers: acme,
+      payload: { url: "https://mcp.example.com/mcp" },
+    });
+    expect(res.statusCode).toBe(404);
   });
 
   it("rejects a malformed save (missing spec) and a bad visibility value with 400", async () => {

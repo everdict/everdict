@@ -169,6 +169,32 @@ describe("CapabilityService", () => {
     await expect(s.deleteVersion("acme", "t", "9.9.9", member("alice"))).rejects.toBeInstanceOf(NotFoundError);
     await expect(s.deleteVersion("acme", "t", "1.0.0", member("alice"))).resolves.toBeUndefined();
   });
+
+  it("validate() predicts the version a save would assign without writing", async () => {
+    const s = svc();
+    // brand-new id → 1.0.0, no existing versions, nothing written
+    expect(await s.validate("acme", "triage", skill())).toMatchObject({
+      type: "skill",
+      willCreate: true,
+      version: "1.0.0",
+      existingVersions: [],
+    });
+    expect(await s.list("acme", "alice")).toEqual([]); // validate never registers
+
+    await s.save("acme", member("alice"), "triage", skill());
+    // unchanged content → no-op (willCreate false, current version)
+    expect(await s.validate("acme", "triage", skill())).toMatchObject({
+      willCreate: false,
+      version: "1.0.0",
+      existingVersions: ["1.0.0"],
+    });
+    // changed content → next patch
+    expect(await s.validate("acme", "triage", skill({ description: "d2" }))).toMatchObject({
+      willCreate: true,
+      version: "1.0.1",
+      existingVersions: ["1.0.0"],
+    });
+  });
 });
 
 // Instance policy (operator EVERDICT_ALLOW_MEMBER_PUBLIC_PUBLISH) — when opted in, a plain member may publish/promote

@@ -94,6 +94,8 @@ export function registerMcpRoutes(app: FastifyInstance, deps: ServerDeps): void 
           modelRegistry: deps.modelRegistry,
           agentRegistry: deps.agentRegistry,
           skillService: deps.skillService,
+          capabilityService: deps.capabilityService, // Capability Store MCP tools (list/get/save/validate/probe/reach/delete) — was missing here, so the agent's /mcp saw no capability tools
+          probeCapabilityMcp: deps.probeCapabilityMcp, // capability wizard mcp "test connection" (probe_capability_mcp)
           runtimeRegistry: deps.runtimeRegistry,
           probeRuntime: deps.probeRuntime,
           inspectRuntime: deps.inspectRuntime,

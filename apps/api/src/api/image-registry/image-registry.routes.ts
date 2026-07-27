@@ -62,6 +62,54 @@ export function registerImageRegistryRoutes(app: FastifyInstance, deps: ServerDe
     }
   });
 
+  // List a repository's tags (Docker Registry v2) — powers the capability wizard's environment image picker (pick a
+  // tag instead of hand-typing a ref) and any "which versions exist" view. Read (harnesses:read). ?registry= selects
+  // one when several are registered (omit with exactly one). Upstream failures surface as our AppError (502/etc).
+  app.get<{ Querystring: { repository?: string; registry?: string } }>(
+    "/workspace/image-registries/tags",
+    { schema: imageRegistryDocs.tags },
+    async (req, reply) => {
+      if (!deps.imageRegistryService)
+        return reply.code(404).send({ code: "NOT_FOUND", message: "image registry service not configured" });
+      const principal = await resolvePrincipal(req, reply, deps);
+      if (!principal) return reply;
+      const repository = req.query.repository;
+      if (!repository) return reply.code(400).send({ code: "BAD_REQUEST", message: "repository is required" });
+      try {
+        gate(principal, "harnesses:read");
+        return reply.send(
+          await deps.imageRegistryService.listTags(principal.workspace, repository, req.query.registry),
+        );
+      } catch (err) {
+        return sendError(reply, err);
+      }
+    },
+  );
+
+  // Inspect a manifest (tag or digest) — returns the digest (for a digest-pinned ref, the recommended environment
+  // pin), media type, and platforms/layer count. Read (harnesses:read). Same registry selection as tags.
+  app.get<{ Querystring: { repository?: string; reference?: string; registry?: string } }>(
+    "/workspace/image-registries/manifest",
+    { schema: imageRegistryDocs.manifest },
+    async (req, reply) => {
+      if (!deps.imageRegistryService)
+        return reply.code(404).send({ code: "NOT_FOUND", message: "image registry service not configured" });
+      const principal = await resolvePrincipal(req, reply, deps);
+      if (!principal) return reply;
+      const { repository, reference } = req.query;
+      if (!repository || !reference)
+        return reply.code(400).send({ code: "BAD_REQUEST", message: "repository and reference are required" });
+      try {
+        gate(principal, "harnesses:read");
+        return reply.send(
+          await deps.imageRegistryService.inspectImage(principal.workspace, repository, reference, req.query.registry),
+        );
+      } catch (err) {
+        return sendError(reply, err);
+      }
+    },
+  );
+
   // Mint push credentials — the 'value' of pushSecretName goes out in the response (non-persistent, the caller discards it after docker login+push).
   // Select the registry via ?name= — omitting it is allowed only when there's exactly one (omitting it with multiple → 400, listing the names).
   app.post<{ Querystring: { name?: string } }>(

@@ -110,6 +110,7 @@ import type { ModelService } from "../core/model/model-service.js";
 import type { RuntimeProbeResult } from "../core/ops/runtime-probe.js";
 import type { SecretUsageService } from "../core/secret/secret-usage-service.js";
 import type { SkillGenerator } from "../core/skill/skill-generator.js";
+import type { McpProbeResult } from "../infrastructure/mcp/probe-mcp.js";
 import { buildMcpServer } from "../mcp.js";
 
 export interface ServerDeps {
@@ -137,6 +138,8 @@ export interface ServerDeps {
   skillService?: SkillService; // Workspace Skills (SKILL.md procedures the members author) CRUD (routes disabled if absent)
   capabilityService?: CapabilityService; // Capability Store (mcp|code|skill authored + published + adopted) CRUD (routes disabled if absent)
   allowMemberPublicPublish?: boolean; // instance policy surfaced to the web via GET /me (config): members may publish `public`, not only admins
+  // Capability wizard mcp probe — connect to an MCP URL and list its tools ("test connection" + tool discovery). Injected by main (infrastructure/mcp). Route disabled if absent.
+  probeCapabilityMcp?: (url: string, token?: string) => Promise<McpProbeResult>;
 
   skillGenerator?: SkillGenerator; // skill-generate — draft a skill from a description via the workspace's model (route disabled if absent)
   runtimeRegistry?: RuntimeRegistry; // Runtime (execution infra) CRUD (route disabled if absent)
