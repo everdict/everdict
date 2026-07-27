@@ -228,9 +228,16 @@ cover the 80% (pivot + charts + reports) with zero new attack surface.
   window when `compare`) → `write_report`; the newest report artifact is then attached + pinned to the
   View (`AnalysisArtifactStore.attachToView`). `scheduledScorecardWorkflow` ends without polling when the
   fire returns no scorecardId (a report completes inside the fire activity).
-- **V5 — sandboxed `run_analysis`.** The dispatched script tool (D), isolated-runtime-only + HITL;
-  starter snippets (cohort split, significance test on pass-rate deltas, custom bucketing). Off by
-  default per workspace (an `AgentSpec.disabledDefaults`-style toggle, default disabled).
+- **V5 — sandboxed `run_analysis`. ✅ LANDED.** `apps/agent/src/analysis-script-tool.ts` — the model
+  writes a short python|node script and it executes through the SAME code-tool contract (provision →
+  input file → interpreter → stdout), reusing `buildCodeTool` verbatim with the model's code as the
+  one-call source. Two hard gates: the builder returns NO tool on a non-isolated runtime (the
+  adopted-code precedent — model-authored code never runs on the host), and `isReadOnly:false` puts
+  every call behind the HITL/permission-mode gate. `env` is deliberately empty (no secrets) and the
+  call is timeboxed. Registered via the chat `extraTools` seam when `ChatDeps.analysisScriptRuntime`
+  is wired — delta vs the sketch: the opt-in is the operator env `AGENT_ALLOW_RUN_ANALYSIS=true`
+  (default off; the `AGENT_ALLOW_EVAL_DRIVE` precedent) rather than a per-workspace toggle — promote
+  it to an AgentSpec knob if workspaces need to diverge.
 - **V6 — polish.** Report period-over-period diffs rendered as delta chips; regression callouts wired to
   `diff_scorecards`; artifact search/browse page; comment threads on artifacts (reuse `view` comments or
   extend resource types); MCP parity for any human-facing surface added along the way.

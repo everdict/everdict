@@ -119,6 +119,9 @@ async function main(): Promise<void> {
     checkViewAccess: viewAccessChecker(config.CONTROL_PLANE_URL), // view-artifacts gallery gate (analysis-studio V3)
     sessions,
     artifacts,
+    // run_analysis (V5) opt-in — model-authored scripts additionally require an ISOLATED runtime (the builder
+    // refuses a non-isolated host regardless of the flag).
+    ...(process.env.AGENT_ALLOW_RUN_ANALYSIS === "true" ? { analysisScriptRuntime: codeRuntime } : {}),
     resolveModel,
     resolveProfile,
     ...(resolveModelById ? { resolveModelById } : {}),

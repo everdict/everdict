@@ -18,13 +18,15 @@ import {
   NotFoundError,
 } from "@everdict/contracts";
 import type { ReasoningCarrier } from "@everdict/llm";
+import { buildRunAnalysisTool } from "./analysis-script-tool.js";
 import { buildArtifactTools } from "./artifact-tools.js";
-import { buildViewConfigTool } from "./view-config-tool.js";
+import type { CodeToolRuntime } from "./code-tools.js";
 import type { ToolProvider } from "./mcp-tools.js";
 import type { ModelByIdResolver, ModelResolver } from "./model.js";
 import type { ForwardHeaders, Principal } from "./principal.js";
 import type { ProfileResolver } from "./profile.js";
 import { buildEnvironmentSection } from "./system-prompt.js";
+import { buildViewConfigTool } from "./view-config-tool.js";
 
 // An @-reference resolves to the workspace read tool that fetches that entity's full record.
 const REFERENCE_TOOL: Record<AgentReferenceType, string> = {
@@ -90,6 +92,9 @@ export interface ChatDeps {
   // Analysis-artifact persistence (docs/architecture/analysis-studio.md V2). Present → the agent gets the
   // render_chart/render_table/write_report emission tools; absent → no artifact tools (dev without a store).
   artifacts?: AnalysisArtifactStore;
+  // run_analysis sandbox (analysis-studio V5) — present AND isolated → the agent may run model-authored analysis
+  // scripts (HITL-gated). Wired only when the operator opts in (AGENT_ALLOW_RUN_ANALYSIS); absent → no tool.
+  analysisScriptRuntime?: CodeToolRuntime;
   resolveModel: ModelResolver;
   toolProvider: ToolProvider;
   systemPrompt: string; // base persona — used as-is when no resolveProfile is wired (dev / no DB)
@@ -360,7 +365,8 @@ export async function runChat(
   // Canvas control (analysis-studio V3) — only a live web chat wires onViewConfig, so headless turns never
   // carry a tool that has no canvas to drive.
   const canvasTools = hooks?.onViewConfig ? [buildViewConfigTool(hooks.onViewConfig)] : [];
-  const extraTools = [...artifactTools, ...canvasTools];
+  const analysisScriptTool = deps.analysisScriptRuntime ? buildRunAnalysisTool(deps.analysisScriptRuntime) : undefined;
+  const extraTools = [...artifactTools, ...canvasTools, ...(analysisScriptTool ? [analysisScriptTool] : [])];
   const registry = extraTools.length > 0 ? new ToolRegistry([...tools.registry.list(), ...extraTools]) : tools.registry;
   try {
     // Fold any @-referenced entity context into the user turn the model sees (the persisted record keeps the
