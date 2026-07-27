@@ -14,10 +14,11 @@ import {
 import { useTranslations } from 'next-intl'
 
 import { AgentChatPanel } from '@/features/agent-chat'
+import { agentReferenceSchema } from '@/entities/agent-session'
 import { RELOAD_INFRA_FRAMES_EVENT } from '@/shared/lib/reload-infra-frames'
 import { cn } from '@/shared/lib/utils'
 
-import { useInfraPanel, type InfraTab } from '../model/infra-panel-context'
+import { MENTION_IN_CHAT_MESSAGE, useInfraPanel, type InfraTab } from '../model/infra-panel-context'
 import { WorkTab } from './work-tab'
 
 // The floating infra panel — the right half of the split view. On md+ it takes real layout space as a flex-1
@@ -63,7 +64,16 @@ function withEmbed(path: string): string {
 export function InfraPanel() {
   const t = useTranslations('infraPanel')
   const router = useRouter()
-  const { workspace, open, tab, close, frameRequest } = useInfraPanel()
+  const {
+    workspace,
+    open,
+    tab,
+    close,
+    frameRequest,
+    mentionInChat,
+    pendingMention,
+    consumePendingMention,
+  } = useInfraPanel()
   const frames = useRef<Partial<Record<PageTab, HTMLIFrameElement | null>>>({})
   // Tabs whose iframe has been opened at least once — kept mounted (hidden) afterward so each tab's in-iframe
   // navigation state and live streams survive tab switches and panel collapse. The initial src is frozen per
@@ -106,7 +116,18 @@ export function InfraPanel() {
   useEffect(() => {
     const onMessage = (e: MessageEvent) => {
       if (e.origin !== window.location.origin) return
-      const data = e.data as { type?: string; href?: string; bounce?: boolean } | null
+      const data = e.data as {
+        type?: string
+        href?: string
+        bounce?: boolean
+        reference?: unknown
+      } | null
+      // A detail page inside an iframe (run / runtime) asked to mention its entity in the parent's agent chat.
+      if (data?.type === MENTION_IN_CHAT_MESSAGE) {
+        const parsed = agentReferenceSchema.safeParse(data.reference)
+        if (parsed.success) mentionInChat(parsed.data)
+        return
+      }
       if (data?.type === 'everdict:left-nav' && typeof data.href === 'string') {
         router.push(data.href)
         onNavigate()
@@ -125,7 +146,7 @@ export function InfraPanel() {
     }
     window.addEventListener('message', onMessage)
     return () => window.removeEventListener('message', onMessage)
-  }, [router, onNavigate, workspace])
+  }, [router, onNavigate, workspace, mentionInChat])
 
   // A server-resolved per-device preference (locale / timezone) changed in the parent. The mounted iframes read
   // it server-side off the cookie and stay frozen, so router.refresh() in the switcher never reaches their
@@ -197,7 +218,10 @@ export function InfraPanel() {
             )}
             {tab === 'agent' && (
               <div className="h-full">
-                <AgentChatPanel />
+                <AgentChatPanel
+                  pendingMention={pendingMention}
+                  onConsumeMention={consumePendingMention}
+                />
               </div>
             )}
             {mountedTabs.map((pageTab) => (

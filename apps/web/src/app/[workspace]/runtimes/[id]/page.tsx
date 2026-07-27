@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation'
 import { ChevronLeft, Pencil } from 'lucide-react'
 import { getTranslations } from 'next-intl/server'
 
+import { MentionInChatButton } from '@/widgets/infra-panel'
 import { CommentsSection } from '@/features/discuss'
 import {
   runtimeSpecSchema,
@@ -160,15 +161,18 @@ export default async function RuntimeDetailPage({
         title={id}
         description={t('detailDescription')}
         actions={
-          editable ? (
-            <Link
-              href={`/${workspace}/runtimes/${encodeURIComponent(id)}/edit`}
-              className={buttonVariants({ variant: 'secondary', size: 'sm' })}
-            >
-              <Pencil className="size-3.5" />
-              {t('edit')}
-            </Link>
-          ) : undefined
+          <div className="flex items-center gap-2">
+            <MentionInChatButton reference={{ type: 'runtime', id, label: id }} />
+            {editable && (
+              <Link
+                href={`/${workspace}/runtimes/${encodeURIComponent(id)}/edit`}
+                className={buttonVariants({ variant: 'secondary', size: 'sm' })}
+              >
+                <Pencil className="size-3.5" />
+                {t('edit')}
+              </Link>
+            )}
+          </div>
         }
       />
       {error || !spec ? (

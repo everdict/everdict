@@ -2,6 +2,7 @@ import Link from 'next/link'
 import { ChevronLeft, Download } from 'lucide-react'
 import { getTimeZone, getTranslations } from 'next-intl/server'
 
+import { MentionInChatButton } from '@/widgets/infra-panel'
 import { LiveLogs } from '@/widgets/live-logs'
 import { ReplayPlayer } from '@/widgets/replay-player'
 import { LiveScreen, SandboxTerminal } from '@/widgets/sandbox-terminal'
@@ -164,6 +165,9 @@ export default async function RunDetailPage({
           })}
           actions={
             <div className="flex items-center gap-2">
+              <MentionInChatButton
+                reference={{ type: 'run', id: run.id, label: run.id.slice(0, 8) }}
+              />
               {/* 재생 가능한 run이면 "리플레이" 배지 → 아래 #replay 섹션으로 점프(발견성). agent trace만 있어도
                   재생되므로(하네스 무관) recordingRef 없이 trace만으로도 노출한다. */}
               {hasReplay && (

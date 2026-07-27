@@ -3,6 +3,7 @@ import Link from 'next/link'
 import { ChevronLeft, FileText, GitBranchPlus, GitCompare, Lock } from 'lucide-react'
 import { getTimeZone, getTranslations } from 'next-intl/server'
 
+import { MentionInChatButton } from '@/widgets/infra-panel'
 import { DeleteHarnessButton } from '@/features/delete-harness'
 import { CommentsSection } from '@/features/discuss'
 import { HarnessVersionSwitcher } from '@/features/harness-versions'
@@ -235,6 +236,14 @@ export default async function HarnessDetailPage({
           description={summary}
           actions={
             <div className="flex flex-wrap items-center justify-end gap-2">
+              <MentionInChatButton
+                reference={{
+                  type: 'harness',
+                  id,
+                  ...(active ? { version: active } : {}),
+                  label: spec.id,
+                }}
+              />
               {versions.length > 1 ? (
                 <HarnessVersionSwitcher
                   id={id}

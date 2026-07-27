@@ -3,6 +3,7 @@ import { notFound } from 'next/navigation'
 import { ArrowLeft } from 'lucide-react'
 import { getTranslations } from 'next-intl/server'
 
+import { MentionInChatButton } from '@/widgets/infra-panel'
 import { CustomAnalyzer, loadAnalysisData, storedToConfig } from '@/features/analyze-scorecards'
 import { CommentsSection } from '@/features/discuss'
 import { buttonVariants } from '@/shared/ui/button'
@@ -36,12 +37,15 @@ export default async function ViewPage({
             : t('detailDescriptionPrivate')
         }
         actions={
-          <Link
-            href={`/${workspace}/views`}
-            className={buttonVariants({ size: 'sm', variant: 'secondary' })}
-          >
-            <ArrowLeft className="size-4" /> {t('backToList')}
-          </Link>
+          <div className="flex items-center gap-2">
+            <MentionInChatButton reference={{ type: 'view', id: view.id, label: view.name }} />
+            <Link
+              href={`/${workspace}/views`}
+              className={buttonVariants({ size: 'sm', variant: 'secondary' })}
+            >
+              <ArrowLeft className="size-4" /> {t('backToList')}
+            </Link>
+          </div>
         }
       />
       {error ? (

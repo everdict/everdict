@@ -10,6 +10,7 @@ import {
   type ReactNode,
 } from 'react'
 
+import type { AgentReference } from '@/entities/agent-session'
 import { membersSchema } from '@/entities/member'
 import { queueSnapshotSchema, type QueueSnapshot } from '@/entities/queue'
 
@@ -28,6 +29,15 @@ export type InfraTab = 'schedules' | 'runtimes' | 'runs' | 'work' | 'agent'
 // the iframe in between).
 export type FrameRequest = { tab: InfraTab; path: string; seq: number }
 
+// A request to drop an entity reference into the agent chat composer and reveal the chat. Buffered here because
+// the AgentChatPanel mounts the 'agent' tab lazily — the panel consumes this on mount, then clears it via
+// consumePendingMention so a later tab re-mount does not re-inject the same reference.
+export type PendingMention = { ref: AgentReference }
+
+// postMessage `type` a detail page rendered INSIDE the infra panel's iframe (run / runtime) sends to the PARENT
+// shell — which owns the agent chat — to mention its entity. Same-origin only.
+export const MENTION_IN_CHAT_MESSAGE = 'everdict:mention-in-chat'
+
 type InfraPanelValue = {
   workspace: string
   open: boolean
@@ -42,6 +52,10 @@ type InfraPanelValue = {
   openRuntime: (kind: 'runtime' | 'runner', id: string) => void
   openSchedule: (id: string) => void
   frameRequest: FrameRequest | null
+  // Open the agent chat and drop an entity reference into the composer (from an entity detail page).
+  mentionInChat: (ref: AgentReference) => void
+  pendingMention: PendingMention | null
+  consumePendingMention: () => void
   snapshot: QueueSnapshot | null
   authors: Record<string, WorkAuthor>
 }
@@ -65,6 +79,7 @@ export function InfraPanelProvider({
   const [snapshot, setSnapshot] = useState<QueueSnapshot | null>(null)
   const [authors, setAuthors] = useState<Record<string, WorkAuthor>>({})
   const authorsLoaded = useRef(false)
+  const [pendingMention, setPendingMention] = useState<PendingMention | null>(null)
 
   const poll = useCallback(async () => {
     try {
@@ -172,6 +187,16 @@ export function InfraPanelProvider({
   // The schedules surface is the list page (no per-schedule route) — open it; the id stays for a future anchor.
   const openSchedule = useCallback((_id: string) => request('schedules', '/schedules'), [request])
 
+  // Reveal the agent chat with this entity pre-mentioned. Buffer the reference (the panel consumes it on mount)
+  // and open on the 'agent' tab.
+  const mentionInChat = useCallback((ref: AgentReference) => {
+    setPendingMention({ ref })
+    setTab('agent')
+    setOpen(true)
+  }, [])
+
+  const consumePendingMention = useCallback(() => setPendingMention(null), [])
+
   return (
     <InfraPanelContext.Provider
       value={{
@@ -185,6 +210,9 @@ export function InfraPanelProvider({
         openRuntime,
         openSchedule,
         frameRequest,
+        mentionInChat,
+        pendingMention,
+        consumePendingMention,
         snapshot,
         authors,
       }}
@@ -198,4 +226,11 @@ export function useInfraPanel(): InfraPanelValue {
   const ctx = useContext(InfraPanelContext)
   if (!ctx) throw new Error('useInfraPanel must be used within InfraPanelProvider')
   return ctx
+}
+
+// Non-throwing variant — for a component (e.g. the "analyze in chat" button) that may render INSIDE the panel's
+// iframe, where the embed shell mounts no InfraPanelProvider. Returns null there (the button posts to the parent
+// shell instead).
+export function useInfraPanelOptional(): InfraPanelValue | null {
+  return useContext(InfraPanelContext)
 }

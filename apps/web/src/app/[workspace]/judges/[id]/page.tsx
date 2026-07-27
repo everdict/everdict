@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation'
 import { ChevronLeft, GitCompare } from 'lucide-react'
 import { getTimeZone, getTranslations } from 'next-intl/server'
 
+import { MentionInChatButton } from '@/widgets/infra-panel'
 import { DeleteJudgeButton } from '@/features/delete-judge'
 import { JudgeHistory, type JudgeHistoryEntry } from '@/features/judge-history'
 import {
@@ -142,28 +143,34 @@ export default async function JudgeDetailPage({
           title={judge.id}
           description={judge.description}
           actions={
-            canDeleteJudge || versions.length > 1 ? (
-              <div className="flex flex-wrap items-center justify-end gap-2">
-                {versions.length > 1 && (
-                  <Link
-                    href={`/${workspace}/judges/${encodeURIComponent(judge.id)}/diff`}
-                    className={buttonVariants({ variant: 'secondary', size: 'sm' })}
-                  >
-                    <GitCompare className="size-3.5" />
-                    {t('compareVersions')}
-                  </Link>
-                )}
-                {canDeleteJudge && (
-                  <DeleteJudgeButton
-                    id={judge.id}
-                    versions={[...versions].reverse()}
-                    latest={latest}
-                    workspace={workspace}
-                    versionTags={summary.versionTags ?? {}}
-                  />
-                )}
-              </div>
-            ) : null
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              <MentionInChatButton
+                reference={{
+                  type: 'judge',
+                  id: judge.id,
+                  version: judge.version,
+                  label: judge.id,
+                }}
+              />
+              {versions.length > 1 && (
+                <Link
+                  href={`/${workspace}/judges/${encodeURIComponent(judge.id)}/diff`}
+                  className={buttonVariants({ variant: 'secondary', size: 'sm' })}
+                >
+                  <GitCompare className="size-3.5" />
+                  {t('compareVersions')}
+                </Link>
+              )}
+              {canDeleteJudge && (
+                <DeleteJudgeButton
+                  id={judge.id}
+                  versions={[...versions].reverse()}
+                  latest={latest}
+                  workspace={workspace}
+                  versionTags={summary.versionTags ?? {}}
+                />
+              )}
+            </div>
           }
         />
         {/* Meta strip — kind · ownership · version · kind-specific facts. Absent facts are simply not rendered. */}

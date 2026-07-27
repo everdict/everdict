@@ -36,7 +36,16 @@ function mergeMessages(prev: AgentMessage[], incoming: AgentMessage[]): AgentMes
   return [...byId.values()].sort((a, b) => a.seq - b.seq)
 }
 
-export function AgentChatPanel() {
+// pendingMention (+ onConsumeMention) is threaded down from the infra panel: an entity detail page asked to
+// analyze its entity here, so drop it into the composer as a reference chip. The prop shape is declared inline
+// (not imported from the widget) to keep the FSD import direction downward-only.
+export function AgentChatPanel({
+  pendingMention,
+  onConsumeMention,
+}: {
+  pendingMention?: { ref: AgentReference } | null
+  onConsumeMention?: () => void
+} = {}) {
   const t = useTranslations('agentChat')
   const [sessions, setSessions] = useState<AgentSession[]>([])
   const [activeId, setActiveId] = useState<string | null>(null)
@@ -400,6 +409,20 @@ export function AgentChatPanel() {
     [input, activeId, sending, references, attachments, draftModel, loadSessions, loadTeammates, t]
   )
 
+  const addReference = useCallback((r: AgentReference) => {
+    setReferences((prev) =>
+      prev.some((x) => x.type === r.type && x.id === r.id) ? prev : [...prev, r]
+    )
+  }, [])
+
+  // A detail page asked to analyze its entity here — drop it into the composer, then clear the buffer so a later
+  // tab re-mount (the agent tab unmounts when another infra tab is shown) does not re-inject the same reference.
+  useEffect(() => {
+    if (!pendingMention) return
+    addReference(pendingMention.ref)
+    onConsumeMention?.()
+  }, [pendingMention, addReference, onConsumeMention])
+
   const stop = useCallback(() => abortRef.current?.abort(), [])
 
   const decidePermission = useCallback(
@@ -417,13 +440,6 @@ export function AgentChatPanel() {
     },
     [activeId]
   )
-
-  const regenerate = useCallback(() => {
-    const lastUser = [...messages]
-      .reverse()
-      .find((m) => m.role === 'user' && m.content.trim().length > 0)
-    if (lastUser) void send(lastUser.content, lastUser.references)
-  }, [messages, send])
 
   const active = activeId ? sessions.find((s) => s.id === activeId) : undefined
   return (
@@ -452,15 +468,10 @@ export function AgentChatPanel() {
       onChange={setInput}
       onSend={() => void send()}
       onStop={stop}
-      onPickReference={(r) =>
-        setReferences((prev) =>
-          prev.some((x) => x.type === r.type && x.id === r.id) ? prev : [...prev, r]
-        )
-      }
+      onPickReference={addReference}
       onRemoveReference={(i) => setReferences((prev) => prev.filter((_, j) => j !== i))}
       onPickAttachment={(a) => setAttachments((prev) => [...prev, a])}
       onRemoveAttachment={(i) => setAttachments((prev) => prev.filter((_, j) => j !== i))}
-      onRegenerate={regenerate}
       onSuggestion={(txt) => void send(txt)}
       pendingPermissions={pendingPermissions}
       onDecidePermission={decidePermission}

@@ -21,6 +21,7 @@ import {
 import { useTranslations } from 'next-intl'
 import { getTimeZone, getTranslations } from 'next-intl/server'
 
+import { MentionInChatButton } from '@/widgets/infra-panel'
 import { VersionSwitcher } from '@/features/dataset-versions'
 import { DeleteDatasetButton } from '@/features/delete-dataset'
 import { CommentsSection } from '@/features/discuss'
@@ -212,6 +213,14 @@ export default async function DatasetDetailPage({
           description={dataset.description ?? t('defaultDescription')}
           actions={
             <div className="flex items-center gap-2">
+              <MentionInChatButton
+                reference={{
+                  type: 'dataset',
+                  id: dataset.id,
+                  version: dataset.version,
+                  label: dataset.id,
+                }}
+              />
               {versions.length > 1 ? (
                 <VersionSwitcher
                   id={dataset.id}

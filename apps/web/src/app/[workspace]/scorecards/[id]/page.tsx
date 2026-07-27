@@ -2,6 +2,7 @@ import Link from 'next/link'
 import { ChevronLeft, Download } from 'lucide-react'
 import { getLocale, getTimeZone, getTranslations } from 'next-intl/server'
 
+import { MentionInChatButton } from '@/widgets/infra-panel'
 import { DeleteScorecardButton } from '@/features/delete-scorecard'
 import { CommentsSection } from '@/features/discuss'
 import { RerunScorecardButton } from '@/features/rerun-scorecard'
@@ -402,6 +403,9 @@ export default async function ScorecardDetailPage({
           }
           actions={
             <div className="flex items-center gap-2">
+              <MentionInChatButton
+                reference={{ type: 'scorecard', id: record.id, label: record.id.slice(0, 8) }}
+              />
               {/* Download the self-contained analysis artifact (summary + per-case verdict/scores) — a presigned
                   object-store URL. Shown only when the ref is a browser-fetchable http(s) URL (S3/MinIO); the dev
                   in-memory store's memory:// ref is not fetchable, so the link is hidden (same gate as screenshots). */}

@@ -3105,6 +3105,7 @@
     "errorSend": "Couldn’t send the message. Try again.",
     "errorGeneric": "Something went wrong.",
     "mentionAdd": "Reference a workspace entity",
+    "sendToChat": "Analyze in chat",
     "mentionRemove": "Remove reference",
     "mentionClose": "Close",
     "mentionPick": "Reference…",

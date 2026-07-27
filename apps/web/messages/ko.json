@@ -3105,6 +3105,7 @@
     "errorSend": "메시지를 보내지 못했어요. 다시 시도해 주세요.",
     "errorGeneric": "문제가 발생했어요.",
     "mentionAdd": "워크스페이스 엔티티 참조",
+    "sendToChat": "대화에서 분석",
     "mentionRemove": "참조 제거",
     "mentionClose": "닫기",
     "mentionPick": "참조…",
