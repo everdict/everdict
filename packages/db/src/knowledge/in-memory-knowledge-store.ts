@@ -48,4 +48,10 @@ export class InMemoryKnowledgeStore implements KnowledgeStore {
       (m) => m.tenant === tenant && m.sourceKind === sourceKind && m.sourceId === sourceId,
     );
   }
+
+  async notesForNode(tenant: string, nodeId: string): Promise<Mention[]> {
+    return [...this.mentions.values()]
+      .filter((m) => m.tenant === tenant && m.resolvedNodeId === nodeId && m.origin === "authored")
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }
 }

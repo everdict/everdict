@@ -134,4 +134,73 @@ describe("knowledge routes", () => {
     expect(after.statusCode).toBe(200);
     expect((after.json() as { type: string }).type).toBe("dataset");
   });
+
+  it("annotate attaches an authored note readable via /knowledge/annotations", async () => {
+    const app = await build(true);
+    const post = await app.inject({
+      method: "POST",
+      url: "/knowledge/annotate",
+      headers: H,
+      payload: { node: { type: "scorecard", key: "sc1" }, note: "flaky on network cases" },
+    });
+    expect(post.statusCode).toBe(201);
+    const notes = await app.inject({
+      method: "GET",
+      url: `/knowledge/annotations?id=${encodeURIComponent(SC_NODE)}`,
+      headers: H,
+    });
+    expect(notes.statusCode).toBe(200);
+    const body = notes.json() as { notes: Array<{ evidenceQuote?: string; origin: string }> };
+    expect(body.notes[0]?.evidenceQuote).toBe("flaky on network cases");
+    expect(body.notes[0]?.origin).toBe("authored");
+  });
+
+  it("400s an empty annotate note", async () => {
+    const res = await (await build(true)).inject({
+      method: "POST",
+      url: "/knowledge/annotate",
+      headers: H,
+      payload: { node: { type: "scorecard", key: "sc1" }, note: "" },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it("relate asserts an authored edge readable via /knowledge/related", async () => {
+    const app = await build(true);
+    const post = await app.inject({
+      method: "POST",
+      url: "/knowledge/relate",
+      headers: H,
+      payload: {
+        subject: { type: "scorecard", key: "sc1" },
+        predicate: "compared_to",
+        object: { type: "scorecard", key: "sc2" },
+        note: "same dataset, newer harness",
+      },
+    });
+    expect(post.statusCode).toBe(201);
+    const related = await app.inject({
+      method: "GET",
+      url: `/knowledge/related?id=${encodeURIComponent(SC_NODE)}&direction=out&predicates=compared_to`,
+      headers: H,
+    });
+    const facts = (related.json() as { facts: Array<{ predicate: string; nodeId: string }> }).facts;
+    expect(facts.find((f) => f.predicate === "compared_to")?.nodeId).toBe(
+      nodeId("acme", { type: "scorecard", key: "sc2" }),
+    );
+  });
+
+  it("400s relating a node to itself", async () => {
+    const res = await (await build(true)).inject({
+      method: "POST",
+      url: "/knowledge/relate",
+      headers: H,
+      payload: {
+        subject: { type: "scorecard", key: "sc1" },
+        predicate: "compared_to",
+        object: { type: "scorecard", key: "sc1" },
+      },
+    });
+    expect(res.statusCode).toBe(400);
+  });
 });

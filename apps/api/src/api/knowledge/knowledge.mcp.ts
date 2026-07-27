@@ -1,4 +1,4 @@
-import { NodeTypeSchema, PredicateSchema } from "@everdict/contracts";
+import { NodeRefSchema, NodeTypeSchema, PredicateSchema } from "@everdict/contracts";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { type McpToolContext, ok, run } from "../mcp-context.js";
@@ -80,12 +80,68 @@ export function registerKnowledgeTools(server: McpServer, ctx: McpToolContext): 
   );
 
   server.registerTool(
+    "knowledge_notes",
+    {
+      description:
+        "The authored notes/observations attached to a node (newest first) — the read side of annotate_knowledge.",
+      inputSchema: { id: z.string().min(1) },
+    },
+    ({ id }) => run(principal, "scorecards:read", async () => ok({ notes: await knowledge.notes(ws, id) })),
+  );
+
+  server.registerTool(
     "reindex_knowledge",
     {
       description:
-        "Rebuild this workspace's knowledge graph by harvesting its existing records (scorecards/runs/schedules). Idempotent. Admin only.",
+        "Rebuild this workspace's knowledge graph by harvesting its existing records + registry entities (scorecards/runs/schedules + datasets/judges/runtimes/models/rubrics/harnesses/agents). Idempotent. Admin only.",
       inputSchema: {},
     },
     () => run(principal, "settings:write", async () => ok(await knowledge.reindex(ws))),
+  );
+
+  // --- authored write path: contribute knowledge from Claude Code ---
+
+  server.registerTool(
+    "annotate_knowledge",
+    {
+      description:
+        "Attach a free-form note/observation to a node (e.g. 'this harness is flaky on network cases'). Author = me. The node is identified by {type, key, version?} — e.g. {type:'harness', key:'web-agent', version:'2.1.0'}.",
+      inputSchema: {
+        node: NodeRefSchema,
+        note: z.string().min(1),
+        confidence: z.number().min(0).max(1).optional().describe("how sure you are (default 1)"),
+      },
+    },
+    ({ node, note, confidence }) =>
+      run(principal, "comments:write", async () =>
+        ok(await knowledge.annotate(ws, principal.subject, { node, note, confidence: confidence ?? 1 })),
+      ),
+  );
+
+  server.registerTool(
+    "relate_knowledge",
+    {
+      description:
+        "Assert a typed relationship between two nodes over the closed predicate vocabulary (e.g. subject scorecard —compared_to→ object scorecard). Author = me. Re-asserting the same fact is idempotent. Subject/object are {type, key, version?}.",
+      inputSchema: {
+        subject: NodeRefSchema,
+        predicate: PredicateSchema,
+        object: NodeRefSchema,
+        note: z.string().optional().describe("why / rationale (becomes the edge's evidence)"),
+        confidence: z.number().min(0).max(1).optional(),
+      },
+    },
+    ({ subject, predicate, object, note, confidence }) =>
+      run(principal, "comments:write", async () =>
+        ok(
+          await knowledge.relate(ws, principal.subject, {
+            subject,
+            predicate,
+            object,
+            confidence: confidence ?? 1,
+            ...(note !== undefined ? { note } : {}),
+          }),
+        ),
+      ),
   );
 }

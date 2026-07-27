@@ -299,4 +299,14 @@ export class PgKnowledgeStore implements KnowledgeStore {
     );
     return res.rows.map(rowToMention);
   }
+
+  async notesForNode(tenant: string, nodeId: string): Promise<Mention[]> {
+    const res = await this.client.query<MentionRow>(
+      `SELECT ${MENTION_COLS} FROM everdict_knowledge_mentions
+       WHERE tenant = $1 AND resolved_node_id = $2 AND origin = 'authored'
+       ORDER BY created_at DESC`,
+      [tenant, nodeId],
+    );
+    return res.rows.map(rowToMention);
+  }
 }

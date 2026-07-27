@@ -18,4 +18,7 @@ export interface KnowledgeStore {
   incoming(tenant: string, objectNodeId: string, predicate?: Predicate): Promise<EdgeMention[]>;
   // Every mention observed in one source — the audit trail for a record's projection.
   listMentions(tenant: string, sourceKind: SourceKind, sourceId: string): Promise<Mention[]>;
+  // The AUTHORED notes attached to a node (origin="authored" mentions that resolved to it), newest first — the read
+  // side of `annotate`. Backed by the mentions' resolved_node_id index.
+  notesForNode(tenant: string, nodeId: string): Promise<Mention[]>;
 }

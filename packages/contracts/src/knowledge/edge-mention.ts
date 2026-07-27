@@ -94,11 +94,11 @@ export const EdgeMentionSchema = z
         message: "harvest edge must cite the source record field path (audit lock)",
       });
     }
-    if (e.origin === "extraction" && (e.evidenceQuote === undefined || e.evidenceQuote === "")) {
+    if (e.origin !== "harvest" && (e.evidenceQuote === undefined || e.evidenceQuote === "")) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["evidenceQuote"],
-        message: "extraction edge must cite a text excerpt (audit lock)",
+        message: "an extraction/authored edge must cite a text excerpt / note (audit lock)",
       });
     }
   });

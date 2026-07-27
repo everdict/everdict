@@ -1,9 +1,11 @@
 # Workspace Knowledge Graph
 
-> **SSOT** for everdict's knowledge system. Status: **the backend + API/MCP surface are landed** — the contract spine;
-> the `KnowledgeStore` (in-memory + Postgres); the multi-hop query engine; nine harvesters (scorecard/run/schedule/
-> comment/membership + harness/dataset/judge/runtime); and the `knowledge/` HTTP + MCP slice (node/related/subgraph +
-> reindex). Text extraction + resolution, ingest-on-write, and web rendering are next (see §Roadmap).
+> **SSOT** for everdict's knowledge system. Status: **the backend + API/MCP surface + the authored write path are
+> landed** — the contract spine; the `KnowledgeStore` (in-memory + Postgres); the multi-hop query engine; thirteen
+> harvesters (scorecard/run/schedule/comment/membership + harness/dataset/judge/runtime/model/rubric/agent/capability);
+> and the `knowledge/` HTTP + MCP slice — read (node/related/subgraph/annotations) + `reindex` + the **authored write
+> path** (`annotate`/`relate`) so a user or agent contributes knowledge from Claude Code via the everdict plugin.
+> Text extraction + resolution, ingest-on-write, and web rendering are next (see §Roadmap).
 
 Everdict's data is a web of relationships that today is only *implicit* — a scorecard's config names a harness,
 dataset, judges, and a runtime; a comment @-mentions a user and discusses a scorecard; an agent's reasoning talks
@@ -182,8 +184,13 @@ Following everdict's one-way spine (no new package — schemas belong at the con
    cross-tenant `adopts` via `HarvestBuilder.ref`'s `objectTenant`). Every core scorecard edge resolves to a
    materialised node, and every referenced eval-config node has an owning harvester. Remaining (low-fan-in leaves):
    `skill` / `view` / `browser_profile` / `trace_source` / `agent_session`. Idempotent, versioned by `extractor`.
-3. **Extractors** — text adapters for `comment` / `agent_message` / `pr_comment` (@-mention regex first, agent
-   extraction later), plus a resolver (surface `nodeRef` → `resolvedNodeId`).
+3. **Contribution & extraction** — ✅ the AUTHORED write path (`annotate` / `relate`, origin `authored`): a user or
+   agent contributes knowledge from Claude Code via the everdict MCP plugin. An authored note is a mention resolved to
+   its node (read back via `GET /knowledge/annotations`); an authored relation is an edge over the closed predicate
+   vocabulary (read back via `related`/`subgraph`), idempotent by (author, subject, predicate, object). The `authored`
+   origin lets a query separate what the system DERIVED from what a person ASSERTED. Next: text EXTRACTORS for
+   `comment` / `agent_message` / `pr_comment` (@-mention regex first, agent extraction later) + a resolver (surface
+   `nodeRef` → `resolvedNodeId`).
 4. ✅ **Multi-hop query engine** — `KnowledgeQueryService` (`application-control`): `subgraph` (BFS by depth /
    direction / predicate / node-type over the store's single-hop primitives) + `relatedFacts` (ranked 1-hop flat facts
    for rendering, the `mentionGrounding` / `cityKnowledge` analog). A Pg-native recursive-CTE fast path can slot in

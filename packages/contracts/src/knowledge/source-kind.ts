@@ -42,6 +42,9 @@ export const SOURCE_KINDS = [
   "comment",
   "agent_message",
   "pr_comment",
+
+  // AUTHORED — a user or agent deliberately contributing knowledge (via the API / MCP, e.g. from Claude Code)
+  "authored",
 ] as const;
 
 export const SourceKindSchema = z.enum(SOURCE_KINDS);
@@ -50,8 +53,10 @@ export type SourceKind = z.infer<typeof SourceKindSchema>;
 // How a mention/edge_mention was drawn out of its source — the everdict-specific axis absent from digo-data (whose
 // mentions are all LLM-extracted). `harvest` = a deterministic projection of a structured record field (exact,
 // confidence 1.0, always resolved). `extraction` = pulled from free text by an agent/regex (fuzzy, confidence < 1,
-// resolved downstream). The SAME type-agnostic spine carries both — this is the unification that lets a config
-// foreign-key and an agent's reasoning about a harness live in one queryable graph.
-export const MENTION_ORIGINS = ["harvest", "extraction"] as const;
+// resolved downstream). `authored` = a user or agent DELIBERATELY asserted it (via the API / MCP — e.g. from Claude
+// Code through the everdict plugin): a first-class contribution, evidence = the author's note/rationale, resolved to
+// the node it is about. The SAME type-agnostic spine carries all three — the distinction lets a query separate what
+// the system DERIVED from what a person ASSERTED (a trust signal).
+export const MENTION_ORIGINS = ["harvest", "extraction", "authored"] as const;
 export const MentionOriginSchema = z.enum(MENTION_ORIGINS);
 export type MentionOrigin = z.infer<typeof MentionOriginSchema>;

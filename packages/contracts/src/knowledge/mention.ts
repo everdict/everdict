@@ -69,11 +69,11 @@ export const MentionSchema = z
         message: "harvest mention must cite the source record field path (audit lock)",
       });
     }
-    if (m.origin === "extraction" && (m.evidenceQuote === undefined || m.evidenceQuote === "")) {
+    if (m.origin !== "harvest" && (m.evidenceQuote === undefined || m.evidenceQuote === "")) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["evidenceQuote"],
-        message: "extraction mention must cite a text excerpt (audit lock)",
+        message: "an extraction/authored mention must cite a text excerpt / note (audit lock)",
       });
     }
     // A resolved mention names the node it resolved to.

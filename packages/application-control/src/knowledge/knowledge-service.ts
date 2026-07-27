@@ -1,7 +1,19 @@
-import { type KnowledgeNode, NotFoundError, type Predicate } from "@everdict/contracts";
+import { randomUUID } from "node:crypto";
+import {
+  BadRequestError,
+  type EdgeMention,
+  EdgeMentionSchema,
+  type KnowledgeNode,
+  type Mention,
+  MentionSchema,
+  type NodeRef,
+  NotFoundError,
+  type Predicate,
+} from "@everdict/contracts";
 import {
   type HarvestResult,
   type SpecHarvestMeta,
+  edgeId,
   harvestAgent,
   harvestDataset,
   harvestHarness,
@@ -12,6 +24,7 @@ import {
   harvestRuntime,
   harvestSchedule,
   harvestScorecard,
+  nodeId,
 } from "@everdict/domain";
 import type { AgentRegistry } from "../ports/agent-registry.js";
 import type { DatasetRegistry } from "../ports/dataset-registry.js";
@@ -89,6 +102,11 @@ export class KnowledgeService {
     return this.query.subgraph(tenant, nodeId, query ?? {});
   }
 
+  // The authored notes on a node (the read side of `annotate`), newest first.
+  notes(tenant: string, nodeId: string): Promise<Mention[]> {
+    return this.deps.store.notesForNode(tenant, nodeId);
+  }
+
   // Harvest the workspace's existing records + registry entities into the graph. Idempotent (the harvesters emit
   // deterministic ids), so a re-run reconciles rather than duplicates. Registry entities are harvested at their LATEST
   // version; the registration timestamp is unavailable uniformly, so the node's observation time is the reindex moment.
@@ -142,5 +160,80 @@ export class KnowledgeService {
         await apply(harvestAgent(meta(e.createdBy), await src.agents.get(tenant, e.id)));
     }
     return acc;
+  }
+
+  // Attach a free-form note/observation to a node — a user or agent (from Claude Code via the everdict plugin)
+  // contributing knowledge. Recorded as an `authored` mention (the note is its evidence). Multiple notes on the same
+  // node coexist (each is a distinct contribution → a fresh id), unlike the idempotent harvest mentions.
+  async annotate(
+    tenant: string,
+    author: string,
+    input: { node: NodeRef; note: string; confidence: number },
+  ): Promise<{ id: string; nodeId: string }> {
+    const note = input.note.trim();
+    if (note === "") throw new BadRequestError("BAD_REQUEST", {}, "a knowledge note must be non-empty.");
+    const resolvedNodeId = nodeId(tenant, input.node);
+    const surface = input.node.version === undefined ? input.node.key : `${input.node.key}@${input.node.version}`;
+    const mention: Mention = MentionSchema.parse({
+      id: `mtn_authored_${randomUUID()}`,
+      tenant,
+      nodeType: input.node.type,
+      nodeRef: surface,
+      nodeAttrs: { note, author },
+      sourceKind: "authored",
+      sourceId: author,
+      origin: "authored",
+      extractor: "authored_v1",
+      confidence: input.confidence,
+      evidenceQuote: note,
+      resolution: "resolved",
+      resolvedNodeId,
+      createdAt: new Date().toISOString(),
+    } satisfies Mention);
+    await this.deps.store.putMentions([mention]);
+    return { id: mention.id, nodeId: resolvedNodeId };
+  }
+
+  // Assert a typed relationship between two nodes — an `authored` edge over the CLOSED predicate vocabulary. Idempotent
+  // by (author, subject, predicate, object): re-asserting the same fact is a no-op (the deterministic id collides), so
+  // the graph does not accrue duplicate authored edges.
+  async relate(
+    tenant: string,
+    author: string,
+    input: { subject: NodeRef; predicate: Predicate; object: NodeRef; note?: string; confidence: number },
+  ): Promise<{ id: string }> {
+    const subjectNodeId = nodeId(tenant, input.subject);
+    const objectNodeId = nodeId(tenant, input.object);
+    if (subjectNodeId === objectNodeId) throw new BadRequestError("BAD_REQUEST", {}, "cannot relate a node to itself.");
+    const note = (input.note ?? "").trim();
+    const extractor = "authored_v1";
+    const edge: EdgeMention = EdgeMentionSchema.parse({
+      id: edgeId({
+        sourceKind: "authored",
+        sourceId: author,
+        predicate: input.predicate,
+        subject: subjectNodeId,
+        object: objectNodeId,
+        extractor,
+      }),
+      tenant,
+      predicate: input.predicate,
+      subjectNodeId,
+      objectNodeId,
+      subjectTypeHint: input.subject.type,
+      objectTypeHint: input.object.type,
+      edgeAttrs: { author },
+      polarity: "affirmed",
+      sourceKind: "authored",
+      sourceId: author,
+      origin: "authored",
+      extractor,
+      confidence: input.confidence,
+      evidenceQuote: note !== "" ? note : `asserted by ${author}`,
+      resolution: "resolved",
+      createdAt: new Date().toISOString(),
+    } satisfies EdgeMention);
+    await this.deps.store.putEdges([edge]);
+    return { id: edge.id };
   }
 }
