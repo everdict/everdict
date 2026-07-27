@@ -5,6 +5,7 @@ import {
   Boxes,
   Check,
   Code2,
+  Container,
   Globe,
   Lock,
   MoreHorizontal,
@@ -20,6 +21,7 @@ import { toast } from 'sonner'
 
 import type {
   Capability,
+  CapabilityImageClass,
   CapabilitySpec,
   CapabilityType,
   CapabilityVisibility,
@@ -57,12 +59,24 @@ const capKey = (c: { tenant: string; id: string }): string => `${c.tenant}/${c.i
 type Author = { name: string; avatarUrl?: string }
 type RequiredSecret = { name: string; description: string }
 
-const TYPE_ICON: Record<CapabilityType, typeof Boxes> = { mcp: Boxes, code: Code2, skill: Sparkles }
+const TYPE_ICON: Record<CapabilityType, typeof Boxes> = {
+  mcp: Boxes,
+  code: Code2,
+  skill: Sparkles,
+  environment: Container,
+}
 const VIS_ICON: Record<CapabilityVisibility, typeof Lock> = {
   private: Lock,
   workspace: Users,
   subset: Share2,
   public: Globe,
+}
+// 뷰어 기준 이미지 분류 배지 톤 — workspace/external=풀 가능, local/unqualified=풀 보장 없음(경고).
+const IMG_CLASS_TONE: Record<CapabilityImageClass, 'success' | 'info' | 'warning'> = {
+  workspace: 'success',
+  external: 'info',
+  local: 'warning',
+  unqualified: 'warning',
 }
 
 // Store — 워크스페이스가 함께 만드는 도구/스킬 카탈로그. 내 스토어(내가 볼 수 있는 것)와 공개 카탈로그를 탭으로 브라우즈하고,
@@ -100,6 +114,8 @@ export function CapabilityStore({
   const [reaching, setReaching] = useState<Capability | null>(null)
   const [confirming, setConfirming] = useState<Capability | null>(null)
   const [adopting, setAdopting] = useState<Capability | null>(null)
+  // environment 카드 제자리 확장(단일-오픈) — instructions + preset 을 카드 안에서 드릴인.
+  const [expandedKey, setExpandedKey] = useState<string | null>(null)
   const [pending, startTransition] = useTransition()
 
   const adopted = useMemo(() => new Set(adoptedKeys), [adoptedKeys])
@@ -198,7 +214,7 @@ export function CapabilityStore({
           className="h-8 max-w-xs text-[13px]"
         />
         <div className="flex items-center gap-1">
-          {(['all', 'mcp', 'code', 'skill'] as const).map((k) => (
+          {(['all', 'mcp', 'code', 'skill', 'environment'] as const).map((k) => (
             <button
               key={k}
               type="button"
@@ -293,6 +309,72 @@ export function CapabilityStore({
                   {c.description}
                 </p>
 
+                {/* environment — 이미지 ref + 뷰어 기준 분류 배지 + 벤치마크/OS 요약(스토어에서 이미지 정보 기본 노출)
+                    + 제자리 드릴인(instructions·preset) */}
+                {c.spec.type === 'environment' && (
+                  <>
+                    <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                      <code className="min-w-0 truncate rounded bg-secondary px-1.5 py-0.5 font-mono text-[11px] text-secondary-foreground ring-1 ring-inset ring-border">
+                        {c.spec.image}
+                      </code>
+                      {c.imageClass && (
+                        <Badge tone={IMG_CLASS_TONE[c.imageClass]} className="shrink-0">
+                          {t(`imgClass_${c.imageClass}`)}
+                        </Badge>
+                      )}
+                      {c.spec.contents?.benchmark && (
+                        <Badge tone="outline" className="shrink-0">
+                          {c.spec.contents.benchmark}
+                        </Badge>
+                      )}
+                      {c.spec.contents?.os && (
+                        <Badge tone="outline" className="shrink-0">
+                          {c.spec.contents.os}
+                          {c.spec.contents.arch ? `/${c.spec.contents.arch}` : ''}
+                        </Badge>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => setExpandedKey(expandedKey === capKey(c) ? null : capKey(c))}
+                        className="shrink-0 rounded-md px-1.5 py-0.5 text-[11.5px] font-medium text-primary transition-colors hover:bg-primary/10"
+                      >
+                        {t(expandedKey === capKey(c) ? 'envHideDetail' : 'envShowDetail')}
+                      </button>
+                    </div>
+                    {expandedKey === capKey(c) && (
+                      <div className="mt-3 space-y-3 rounded-md border border-border bg-secondary/30 p-3">
+                        <div>
+                          <p className="text-[11px] font-[510] text-muted-foreground">
+                            {t('envInstructions')}
+                          </p>
+                          <pre className="mt-1 whitespace-pre-wrap font-sans text-[12.5px] leading-relaxed text-foreground">
+                            {c.spec.instructions}
+                          </pre>
+                        </div>
+                        {c.spec.preset && (
+                          <div>
+                            <p className="text-[11px] font-[510] text-muted-foreground">
+                              {t('envPreset')}
+                            </p>
+                            <pre className="mt-1 overflow-x-auto font-mono text-[11.5px] leading-relaxed text-muted-foreground">
+                              {JSON.stringify(c.spec.preset, null, 2)}
+                            </pre>
+                          </div>
+                        )}
+                        {c.spec.contents && c.spec.contents.packages.length > 0 && (
+                          <div className="flex flex-wrap items-center gap-1">
+                            {c.spec.contents.packages.map((p) => (
+                              <Badge key={p} tone="neutral">
+                                {p}
+                              </Badge>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </>
+                )}
+
                 <div className="mt-3 flex items-center justify-between gap-2">
                   <div className="flex items-center gap-1.5 text-[11.5px] text-faint">
                     <Avatar
@@ -304,6 +386,7 @@ export function CapabilityStore({
                     <span>{t('createdBy', { name: author.name })}</span>
                   </div>
                   {canAdopt &&
+                    c.spec.type !== 'environment' &&
                     (adopted.has(capKey(c)) ? (
                       <Button
                         variant="secondary"
@@ -420,9 +503,17 @@ function CapabilityEditorDialog({
   const [source, setSource] = useState(code?.code ?? '')
   const [params, setParams] = useState(code ? JSON.stringify(code.parametersSchema, null, 2) : '{}')
   const [isReadOnly, setIsReadOnly] = useState(code?.isReadOnly ?? true)
-  // skill
+  // skill · environment 공용 — 둘 다 instructions 본문을 가진다(스킬=절차, 환경=구성 설명).
   const skill = capability?.spec.type === 'skill' ? capability.spec : undefined
-  const [instructions, setInstructions] = useState(skill?.instructions ?? '')
+  const env = capability?.spec.type === 'environment' ? capability.spec : undefined
+  const [instructions, setInstructions] = useState(skill?.instructions ?? env?.instructions ?? '')
+  // environment
+  const [envImage, setEnvImage] = useState(env?.image ?? '')
+  const [envBenchmark, setEnvBenchmark] = useState(env?.contents?.benchmark ?? '')
+  const [envPackages, setEnvPackages] = useState((env?.contents?.packages ?? []).join(', '))
+  const [envOs, setEnvOs] = useState(env?.contents?.os ?? '')
+  const [envArch, setEnvArch] = useState(env?.contents?.arch ?? '')
+  const [envPreset, setEnvPreset] = useState(env?.preset ? JSON.stringify(env.preset, null, 2) : '')
 
   const initialSecrets: RequiredSecret[] = mcp?.requiredSecrets ?? code?.requiredSecrets ?? []
   const [secrets, setSecrets] = useState<RequiredSecret[]>(initialSecrets)
@@ -468,6 +559,44 @@ function CapabilityEditorDialog({
         requiredSecrets: cleanSecrets,
       }
     }
+    if (type === 'environment') {
+      // preset 은 토폴로지 서브어휘 JSON — 편집은 raw JSON(overrides JSON textarea 선례), 최종 검증은 컨트롤플레인.
+      type EnvPreset = NonNullable<Extract<CapabilitySpec, { type: 'environment' }>['preset']>
+      let preset: EnvPreset | undefined
+      const rawPreset = envPreset.trim()
+      if (rawPreset.length > 0) {
+        try {
+          const parsed: unknown = JSON.parse(rawPreset)
+          if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed))
+            return { error: t('presetInvalid') }
+          preset = parsed as EnvPreset
+        } catch {
+          return { error: t('presetInvalid') }
+        }
+      }
+      const packages = splitCsv(envPackages)
+      const benchmark = envBenchmark.trim()
+      const os = envOs.trim()
+      const arch = envArch.trim()
+      const hasContents =
+        packages.length > 0 || benchmark.length > 0 || os.length > 0 || arch.length > 0
+      return {
+        type: 'environment',
+        image: envImage.trim(),
+        ...(hasContents
+          ? {
+              contents: {
+                packages,
+                ...(benchmark ? { benchmark } : {}),
+                ...(os ? { os } : {}),
+                ...(arch ? { arch } : {}),
+              },
+            }
+          : {}),
+        ...(preset !== undefined ? { preset } : {}),
+        instructions,
+      }
+    }
     return { type: 'skill', instructions }
   }
 
@@ -487,6 +616,13 @@ function CapabilityEditorDialog({
       })
       if (r.ok) {
         toast.success(isNew ? t('published', { name }) : t('saved', { name }))
+        // 이미지 분류 경고(warn-not-block) — 발행은 성공, 풀 보장/재현성만 주의 환기.
+        for (const w of r.result?.imageWarnings ?? [])
+          toast.warning(
+            t(`imageWarning_${w.class === 'mutable-tag' ? 'mutableTag' : 'noPull'}`, {
+              image: w.image,
+            })
+          )
         onClose()
       } else {
         toast.error(r.error ?? t('saveError'))
@@ -501,7 +637,9 @@ function CapabilityEditorDialog({
       ? url.trim().length > 0
       : type === 'code'
         ? source.trim().length > 0
-        : instructions.trim().length > 0)
+        : type === 'environment'
+          ? envImage.trim().length > 0 && instructions.trim().length > 0
+          : instructions.trim().length > 0)
 
   return (
     <Dialog open onClose={onClose} align="top" className="max-w-2xl">
@@ -545,7 +683,7 @@ function CapabilityEditorDialog({
         <div className="space-y-1">
           <Label>{t('type')}</Label>
           <div className="flex gap-1">
-            {(['mcp', 'code', 'skill'] as const).map((k) => (
+            {(['mcp', 'code', 'skill', 'environment'] as const).map((k) => (
               <button
                 key={k}
                 type="button"
@@ -667,6 +805,87 @@ function CapabilityEditorDialog({
               className="font-mono text-[13px]"
             />
           </div>
+        )}
+
+        {type === 'environment' && (
+          <>
+            <div className="space-y-1">
+              <Label htmlFor="cap-env-image">{t('envImage')}</Label>
+              <p className="text-[12px] text-muted-foreground">{t('envImageHint')}</p>
+              <Input
+                id="cap-env-image"
+                value={envImage}
+                onChange={(e) => setEnvImage(e.target.value)}
+                placeholder="ghcr.io/acme/officeqa-env@sha256:…"
+                className="font-mono text-[13px]"
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label htmlFor="cap-env-benchmark">{t('envBenchmark')}</Label>
+                <Input
+                  id="cap-env-benchmark"
+                  value={envBenchmark}
+                  onChange={(e) => setEnvBenchmark(e.target.value)}
+                  placeholder="officeqa"
+                  className="text-[13px]"
+                />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="cap-env-packages">{t('envPackages')}</Label>
+                <Input
+                  id="cap-env-packages"
+                  value={envPackages}
+                  onChange={(e) => setEnvPackages(e.target.value)}
+                  placeholder="libreoffice, python3.12"
+                  className="text-[13px]"
+                />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="cap-env-os">{t('envOs')}</Label>
+                <Input
+                  id="cap-env-os"
+                  value={envOs}
+                  onChange={(e) => setEnvOs(e.target.value)}
+                  placeholder="linux"
+                  className="text-[13px]"
+                />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="cap-env-arch">{t('envArch')}</Label>
+                <Input
+                  id="cap-env-arch"
+                  value={envArch}
+                  onChange={(e) => setEnvArch(e.target.value)}
+                  placeholder="amd64"
+                  className="text-[13px]"
+                />
+              </div>
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="cap-env-preset">{t('envPreset')}</Label>
+              <p className="text-[12px] text-muted-foreground">{t('envPresetHint')}</p>
+              <Textarea
+                id="cap-env-preset"
+                value={envPreset}
+                onChange={(e) => setEnvPreset(e.target.value)}
+                rows={6}
+                placeholder={'{ "service": { "port": 8000 }, "dependencies": [] }'}
+                className="font-mono text-[12px]"
+              />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="cap-env-instructions">{t('envInstructions')}</Label>
+              <p className="text-[12px] text-muted-foreground">{t('envInstructionsHint')}</p>
+              <Textarea
+                id="cap-env-instructions"
+                value={instructions}
+                onChange={(e) => setInstructions(e.target.value)}
+                rows={8}
+                className="font-mono text-[13px]"
+              />
+            </div>
+          </>
         )}
 
         <div className="space-y-1">

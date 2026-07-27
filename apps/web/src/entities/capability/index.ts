@@ -4,10 +4,12 @@ export {
   capabilitySpecSchema,
   capabilitySchema,
   capabilitiesSchema,
+  capabilityImageClassSchema,
   saveCapabilityResultSchema,
   type Capability,
   type CapabilityVisibility,
   type CapabilityType,
   type CapabilitySpec,
+  type CapabilityImageClass,
   type SaveCapabilityResult,
 } from './model/schema'

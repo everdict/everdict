@@ -273,6 +273,11 @@ export const harnessInstanceSpecSchema = z.object({
   version: z.string(),
   description: z.string().optional(), // this version's changelog (free text) — shown in the detail view
   pins: z.record(z.string(), z.string()).default({}),
+  // store provenance annotation for pins filled from environment capabilities — slot → the environment's identity.
+  // The pin value stays the verbatim ref; this only drives the "from store" chip (resolve ignores it).
+  pinSources: z
+    .record(z.string(), z.object({ source: z.string(), id: z.string(), version: z.string() }))
+    .optional(),
   overrides: harnessOverridesSchema.optional(),
 })
 export type HarnessInstanceSpec = z.infer<typeof harnessInstanceSpecSchema>

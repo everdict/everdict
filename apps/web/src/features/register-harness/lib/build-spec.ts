@@ -444,6 +444,9 @@ export function templateSlots(s: TemplateState): string[] {
 export interface PinRow {
   slot: string
   value: string
+  // Store provenance when the value was inserted from an environment capability ("From store" picker) — cleared the
+  // moment the value is hand-edited so the annotation never lies. Emitted as HarnessInstanceSpec.pinSources.
+  source?: { source: string; id: string; version: string }
 }
 
 // Per-service override row (overrides.services[name]) — the shape (template) stays; only behavior knobs are a delta.
@@ -554,7 +557,12 @@ export function buildOverrides(s: InstanceState): Record<string, unknown> | unde
 // Assemble the instance spec (template reference + pins + overrides). overrides is included only when non-empty.
 export function buildInstance(s: InstanceState): Record<string, unknown> {
   const pins: Record<string, string> = {}
-  for (const p of s.pins) if (p.slot.trim() && p.value.trim()) pins[p.slot.trim()] = p.value.trim()
+  const pinSources: Record<string, { source: string; id: string; version: string }> = {}
+  for (const p of s.pins) {
+    if (!p.slot.trim() || !p.value.trim()) continue
+    pins[p.slot.trim()] = p.value.trim()
+    if (p.source) pinSources[p.slot.trim()] = p.source
+  }
   const overrides = buildOverrides(s)
   return {
     template: { id: s.templateId, version: s.templateVersion },
@@ -562,6 +570,7 @@ export function buildInstance(s: InstanceState): Record<string, unknown> {
     version: s.version,
     ...(s.description.trim() ? { description: s.description.trim() } : {}),
     pins,
+    ...(Object.keys(pinSources).length > 0 ? { pinSources } : {}),
     ...(overrides ? { overrides } : {}),
   }
 }
@@ -668,20 +677,104 @@ function serviceOverridesFromSpec(ov: Record<string, unknown>): ServiceOverrideR
   })
 }
 
+// Prefill a template service row (and append missing dependencies) from a store ENVIRONMENT's composition preset —
+// the authoring-time consumption of the dowry (docs/architecture/environment-image-store.md). Only fields the preset
+// carries are overwritten; everything else keeps the author's values. Dependencies are appended when no row with the
+// same store+role exists (management reverse-derived from the preset's isolateBy); the row's service scope defaults to
+// the prefilled service. Structurally typed so the caller passes the entity's preset without a cross-entity import.
+export function applyEnvironmentPreset(
+  s: TemplateState,
+  serviceIndex: number,
+  preset: {
+    service?: {
+      port?: number
+      needs?: string[]
+      perRun?: string[]
+      env?: Record<string, string | { secretRef: string; scope?: 'user' | 'workspace' }>
+      wiring?: { service: string; hostEnv?: string; portEnv?: string; urlEnv?: string }[]
+      readiness?: { timeoutMs?: number; intervalMs?: number }
+      requires?: { os?: string }
+    }
+    dependencies?: {
+      store: string
+      role: string
+      purpose?: 'plumbing' | 'data'
+      isolateBy: string
+      service?: string
+      inject?: { env: string; template?: string }[]
+    }[]
+  }
+): TemplateState {
+  const svc = preset.service
+  const services = s.services.map((row, j) => {
+    if (j !== serviceIndex || !svc) return row
+    const envRows: EnvRow[] = Object.entries(svc.env ?? {}).map(([key, v]) =>
+      typeof v === 'string'
+        ? { key, secret: false, value: v }
+        : { key, secret: true, value: v.secretRef, ...(v.scope ? { scope: v.scope } : {}) }
+    )
+    return {
+      ...row,
+      ...(svc.port !== undefined ? { port: String(svc.port) } : {}),
+      ...(svc.needs && svc.needs.length > 0 ? { needs: svc.needs.join(', ') } : {}),
+      ...(svc.perRun && svc.perRun.length > 0 ? { perRun: svc.perRun.join(', ') } : {}),
+      ...(envRows.length > 0 ? { env: envRows } : {}),
+      ...(svc.wiring && svc.wiring.length > 0
+        ? {
+            wiring: svc.wiring.map((w) => ({
+              service: w.service,
+              hostEnv: w.hostEnv ?? '',
+              portEnv: w.portEnv ?? '',
+              urlEnv: w.urlEnv ?? '',
+            })),
+          }
+        : {}),
+      ...(svc.readiness?.timeoutMs !== undefined
+        ? { readinessTimeout: String(svc.readiness.timeoutMs) }
+        : {}),
+      ...(svc.readiness?.intervalMs !== undefined
+        ? { readinessInterval: String(svc.readiness.intervalMs) }
+        : {}),
+      ...(svc.requires?.os ? { os: svc.requires.os } : {}),
+    }
+  })
+  const serviceName = s.services[serviceIndex]?.name.trim() ?? ''
+  const existing = new Set(s.deps.map((d) => `${d.store} ${d.role}`))
+  const appended: DepRow[] = (preset.dependencies ?? [])
+    .filter((d) => !existing.has(`${d.store} ${d.role}`))
+    .map((d) => ({
+      store: d.store,
+      role: d.role,
+      purpose: d.purpose ?? 'plumbing',
+      management:
+        d.isolateBy === 'external' ? 'external' : d.isolateBy === 'thread_id' ? 'agent' : 'managed',
+      service: d.service ?? serviceName,
+      inject: (d.inject ?? []).map((x) => ({ env: x.env, template: x.template ?? '' })),
+      externalEndpoint: '',
+      externalSecret: '',
+    }))
+  return { ...s, services, deps: appended.length > 0 ? [...s.deps, ...appended] : s.deps }
+}
+
 export function instanceStateFromSpec(
   inst: {
     template: { id: string; version: string }
     id: string
     version: string
     pins: Record<string, string>
+    pinSources?: Record<string, { source: string; id: string; version: string }>
     overrides?: Record<string, unknown>
   },
   slots?: string[]
 ): InstanceState {
+  const rowOf = (slot: string, value: string): PinRow => {
+    const source = inst.pinSources?.[slot]
+    return { slot, value, ...(source ? { source } : {}) }
+  }
   const rows: PinRow[] =
     slots && slots.length > 0
-      ? slots.map((slot) => ({ slot, value: inst.pins[slot] ?? '' }))
-      : Object.entries(inst.pins).map(([slot, value]) => ({ slot, value }))
+      ? slots.map((slot) => rowOf(slot, inst.pins[slot] ?? ''))
+      : Object.entries(inst.pins).map(([slot, value]) => rowOf(slot, value))
   const ov = inst.overrides ?? {}
   const fd = asObj(ov.frontDoor)
   const body = asObj(asObj(fd?.request)?.bodyTemplate)

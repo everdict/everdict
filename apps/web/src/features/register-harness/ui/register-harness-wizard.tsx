@@ -27,6 +27,7 @@ import {
   type ValidateHarnessResult,
 } from '../api/register-harness'
 import {
+  applyEnvironmentPreset,
   buildInstance,
   buildTemplate,
   CONVENTIONAL_CONN_KEY,
@@ -48,6 +49,7 @@ import {
   type WiringRow,
 } from '../lib/build-spec'
 import { EnvEditor, type ScopedSecretNames } from './env-editor'
+import { EnvironmentPicker } from './environment-picker'
 import { SpanMappingEditor } from './span-mapping-editor'
 
 const EMPTY_SECRETS: ScopedSecretNames = { workspace: [], user: [] }
@@ -374,6 +376,15 @@ export function TemplateForm({
           >
             {s.services.map((sv, i) => (
               <div key={i} className="space-y-2.5 rounded-lg border bg-card p-3">
+                {/* Prefill this row's wiring (port·needs·env·wiring·readiness·os + missing deps) from a store
+                    environment's composition preset — authoring-time consumption of the dowry. */}
+                <div className="flex justify-end">
+                  <EnvironmentPicker
+                    onPick={(env) =>
+                      setS((prev) => applyEnvironmentPreset(prev, i, env.preset ?? {}))
+                    }
+                  />
+                </div>
                 <div className="grid grid-cols-2 gap-2.5">
                   <LabeledInput
                     label="name"
@@ -675,13 +686,23 @@ export function TemplateForm({
       {mode === 'form' && s.kind === 'command' && (
         <div className="space-y-3">
           <div className="grid grid-cols-3 gap-2.5">
-            <LabeledInput
-              label={t('imageLabel')}
-              tip={t('imageTip')}
-              value={s.image}
-              onChange={(v) => set({ image: v })}
-              placeholder="ghcr.io/…"
-            />
+            <div className="space-y-1">
+              <span className="flex items-center gap-1">
+                <span className="text-[11px] font-[510] text-muted-foreground">
+                  {t('imageLabel')}
+                </span>
+                <InfoTip content={t('imageTip')} />
+              </span>
+              <div className="flex items-center gap-2">
+                <Input
+                  aria-label={t('imageLabel')}
+                  value={s.image}
+                  onChange={(e) => set({ image: e.target.value })}
+                  placeholder="ghcr.io/…"
+                />
+                <EnvironmentPicker onPick={(env) => set({ image: env.image })} />
+              </div>
+            </div>
             <LabeledModel
               label={t('modelLabel')}
               tip={
@@ -896,12 +917,27 @@ export function InstanceForm({
                   <span className="font-mono text-[13px] font-[560] text-foreground">{p.slot}</span>
                   <span className="text-[12px] text-muted-foreground">{g.hint}</span>
                 </div>
-                <Input
-                  value={p.value}
-                  onChange={(e) => setPin(i, { value: e.target.value })}
-                  placeholder={g.placeholder}
-                  aria-label={t('pinValueAria', { slot: p.slot })}
-                />
+                <div className="flex items-center gap-2">
+                  <Input
+                    value={p.value}
+                    onChange={(e) => setPin(i, { value: e.target.value, source: undefined })}
+                    placeholder={g.placeholder}
+                    aria-label={t('pinValueAria', { slot: p.slot })}
+                  />
+                  <EnvironmentPicker
+                    onPick={(env) =>
+                      setPin(i, {
+                        value: env.image,
+                        source: { source: env.tenant, id: env.id, version: env.version },
+                      })
+                    }
+                  />
+                </div>
+                {p.source && (
+                  <p className="text-[11.5px] text-muted-foreground">
+                    {t('pinFromStore', { id: p.source.id, version: p.source.version })}
+                  </p>
+                )}
               </div>
             )
           })}
@@ -921,8 +957,16 @@ export function InstanceForm({
               />
               <Input
                 value={p.value}
-                onChange={(e) => setPin(i, { value: e.target.value })}
+                onChange={(e) => setPin(i, { value: e.target.value, source: undefined })}
                 placeholder="value (ghcr.io/…/agent:abc)"
+              />
+              <EnvironmentPicker
+                onPick={(env) =>
+                  setPin(i, {
+                    value: env.image,
+                    source: { source: env.tenant, id: env.id, version: env.version },
+                  })
+                }
               />
               {s.pins.length > 1 && (
                 <RemoveBtn onClick={() => set({ pins: s.pins.filter((_, j) => j !== i) })} />

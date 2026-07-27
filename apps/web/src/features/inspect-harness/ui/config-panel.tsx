@@ -75,6 +75,16 @@ export function ConfigPanel({
                       <span className="text-[12px] text-muted-foreground">{t('unset')}</span>
                     )}
                     {!pinned && fallback && <Badge tone="outline">{t('templateDefault')}</Badge>}
+                    {/* store provenance — the pin was filled from an environment capability (annotation only;
+                        the value above is the verbatim ref) */}
+                    {instance.pinSources?.[slot] && (
+                      <Badge tone="info" title={t('pinSourceTip')}>
+                        {t('pinSource', {
+                          id: instance.pinSources[slot].id,
+                          version: instance.pinSources[slot].version,
+                        })}
+                      </Badge>
+                    )}
                   </div>
                 </div>
               )
