@@ -3080,6 +3080,8 @@
     "modelPick": "Select model",
     "permissions": "Permissions",
     "permissionsPick": "Select permission mode",
+    "contextTeammate": "Teammate message",
+    "contextEvent": "Platform event",
     "permissionModes": {
       "default": "Always ask",
       "auto": "Auto — ask only for risky actions",

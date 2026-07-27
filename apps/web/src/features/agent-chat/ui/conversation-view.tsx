@@ -29,6 +29,7 @@ import { Markdown } from '@/shared/ui/markdown'
 import { buildTranscript } from '../lib/transcript'
 import { AgentAvatar } from './agent-avatar'
 import { Composer } from './composer'
+import { ContextBlock } from './context-block'
 import { MessageRow, UserBadge, type ChatUser } from './message-row'
 import { PermissionPrompt, type PendingPermission } from './permission-prompt'
 import { ReasoningBlock } from './reasoning-block'
@@ -283,6 +284,15 @@ export function ConversationView({
               {items.map((item) => {
                 if (item.kind === 'reasoning')
                   return <ReasoningBlock key={item.id} text={item.text} />
+                if (item.kind === 'context')
+                  return (
+                    <ContextBlock
+                      key={item.id}
+                      source={item.source}
+                      sender={item.sender}
+                      text={item.text}
+                    />
+                  )
                 if (item.kind === 'todos') return <TodoList key={item.id} todos={item.todos} />
                 if (item.kind === 'agents')
                   return <SubagentList key={item.id} agents={item.agents} />

@@ -3080,6 +3080,8 @@
     "modelPick": "모델 선택",
     "permissions": "실행 권한",
     "permissionsPick": "실행 권한 선택",
+    "contextTeammate": "팀메이트 메시지",
+    "contextEvent": "플랫폼 이벤트",
     "permissionModes": {
       "default": "항상 확인",
       "auto": "자동 — 위험 작업만 확인",

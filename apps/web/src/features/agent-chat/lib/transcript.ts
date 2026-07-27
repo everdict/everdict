@@ -20,6 +20,10 @@ const SPAWN_TEAMMATE_TOOL = 'spawn_teammate'
 const BG_RESULT_PREFIX = '[Background sub-agent '
 const BG_RESULT_HEAD = /^\[Background sub-agent (\S+) (finished|failed)\]\n?/
 const BG_LAUNCH_ACK = /Sub-agent (\S+) launched in the background/
+// 메일박스가 주입한 컨텍스트 턴의 attribution 접두사 (apps/agent agent-mailbox.ts renderEnvelope와 짝) — 팀메이트
+// 메시지·플랫폼 이벤트는 유저가 쓴 말이 아니므로 말풍선이 아니라 접힌 컨텍스트 블록으로 렌더한다.
+const TEAMMATE_MSG_HEAD = /^\[Message from teammate ([^\]]*)\]\n?/
+const EVENT_MSG_HEAD = /^\[Everdict event(?: — ([^\]]*))?\]\n?/
 
 const todoItemSchema = z.object({
   content: z.string(),
@@ -45,6 +49,8 @@ export type TranscriptItem =
   | { kind: 'reasoning'; id: string; text: string } // an assistant turn's reasoning / thinking
   | { kind: 'todos'; id: string; todos: TodoItemView[] } // the current write_todos checklist
   | { kind: 'agents'; id: string; agents: SubagentView[] } // a burst of delegated sub-agents / teammates
+  // context injected by the mailbox (a teammate's message / a platform event) — folded like reasoning, hidden by default
+  | { kind: 'context'; id: string; source: 'teammate' | 'event'; sender?: string; text: string }
 
 // Parse a write_todos tool-call argument string into checklist items. Best-effort: a malformed payload yields [].
 export function parseTodosArg(raw: string): TodoItemView[] {
@@ -94,7 +100,12 @@ function parseSpawnEntry(
     }
   }
 
-  const base = { id: tc.id, kind: 'subagent' as const, task, ...(type !== undefined ? { type } : {}) }
+  const base = {
+    id: tc.id,
+    kind: 'subagent' as const,
+    task,
+    ...(type !== undefined ? { type } : {}),
+  }
   if (background) {
     // 런치 ack에서 커널의 bg id를 얻는다; 완료는 나중에 주입되는 [Background sub-agent …] user 턴이 알려준다.
     const ack = result !== undefined ? BG_LAUNCH_ACK.exec(result) : null
@@ -153,6 +164,32 @@ export function buildTranscript(messages: AgentMessage[]): TranscriptItem[] {
           if (summary.length > 0) entry.summary = summary
           pendingBg.delete(head[1])
         }
+        continue
+      }
+      // 메일박스 주입 컨텍스트(팀메이트 메시지·플랫폼 이벤트) — 유저 발화가 아니므로 접힌 컨텍스트 블록으로.
+      // 열린 활동 카드는 쪼개지 않는다(reasoning과 같은 취급 — 대화 흐름을 끊는 건 진짜 유저/어시스턴트 발화뿐).
+      const teammate = TEAMMATE_MSG_HEAD.exec(m.content)
+      if (teammate) {
+        const sender = (teammate[1] ?? '').trim()
+        items.push({
+          kind: 'context',
+          id: m.id,
+          source: 'teammate',
+          ...(sender.length > 0 ? { sender } : {}),
+          text: m.content.slice(teammate[0].length),
+        })
+        continue
+      }
+      const event = EVENT_MSG_HEAD.exec(m.content)
+      if (event) {
+        const sender = (event[1] ?? '').trim()
+        items.push({
+          kind: 'context',
+          id: m.id,
+          source: 'event',
+          ...(sender.length > 0 ? { sender } : {}),
+          text: m.content.slice(event[0].length),
+        })
         continue
       }
       agentBuf = null

@@ -5,6 +5,8 @@ import { Bot, ChevronRight, CircleCheck, LoaderCircle, TriangleAlert } from 'luc
 import { useTranslations } from 'next-intl'
 
 import { cn } from '@/shared/lib/utils'
+import { Markdown } from '@/shared/ui/markdown'
+
 import type { SubagentView } from '../lib/transcript'
 
 // A burst of delegated work rendered as a live activity card (Claude Code's Task pattern): each spawn_agent
@@ -87,9 +89,13 @@ export function SubagentList({ agents }: { agents: SubagentView[] }) {
                       {a.task}
                     </p>
                     {a.summary !== undefined && (
-                      <p className="max-h-56 overflow-y-auto whitespace-pre-wrap break-words rounded-md bg-muted/30 px-2 py-1.5 leading-relaxed text-muted-foreground">
-                        {a.summary}
-                      </p>
+                      <div className="max-h-56 overflow-y-auto rounded-md bg-muted/30 px-2 py-1.5">
+                        {/* the sub-agent's returned findings are markdown — render them, don't dump raw text */}
+                        <Markdown
+                          content={a.summary}
+                          className="text-[12px] leading-relaxed text-muted-foreground [&_*]:text-muted-foreground"
+                        />
+                      </div>
                     )}
                   </div>
                 )}
