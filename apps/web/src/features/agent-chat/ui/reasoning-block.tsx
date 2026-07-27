@@ -15,7 +15,7 @@ export function ReasoningBlock({ text, streaming = false }: { text: string; stre
   const [open, setOpen] = useState(streaming)
 
   return (
-    <div className="py-0.5 pl-[2.875rem] pr-3">
+    <div className="px-3 py-0.5">
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}

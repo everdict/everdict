@@ -3,16 +3,40 @@
 import { Paperclip, User } from 'lucide-react'
 
 import type { AgentMessage } from '@/entities/agent-session'
+import { Avatar } from '@/shared/ui/avatar'
 import { Markdown } from '@/shared/ui/markdown'
 
-import { AgentAvatar } from './agent-avatar'
 import { ReferenceChip } from './mention-picker'
 
-// One text turn in the transcript, laid out full-width (ChatGPT/Claude style) rather than as a chat bubble: a small
-// role avatar + the content. Assistant text renders as markdown; a user turn shows its @-reference chips above the
-// text. Reasoning and todos are pulled OUT into their own transcript items (see build-transcript) — this row is only
-// the spoken text, so a tool-only assistant turn never renders here.
-export function MessageRow({ message }: { message: AgentMessage }) {
+// The signed-in member shown next to their own turns — resolved by the shell (profile name/avatar) and threaded down.
+export interface ChatUser {
+  name: string
+  avatarUrl?: string
+}
+
+// The member's profile avatar for a user turn (monogram fallback while the profile hasn't loaded).
+export function UserBadge({ user }: { user?: ChatUser }) {
+  if (user === undefined)
+    return (
+      <div className="grid size-6 shrink-0 place-items-center rounded-full bg-muted text-muted-foreground">
+        <User className="size-3.5" />
+      </div>
+    )
+  return (
+    <Avatar
+      name={user.name}
+      {...(user.avatarUrl !== undefined ? { url: user.avatarUrl } : {})}
+      size="md"
+      className="rounded-full"
+    />
+  )
+}
+
+// One text turn in the transcript, laid out full-width (ChatGPT/Claude style) rather than as a chat bubble. A user
+// turn shows the member's profile avatar + their @-reference chips above the text; assistant text renders as bare
+// markdown with NO avatar/gutter (the agent needs no face — its words are the surface). Reasoning, todos, and
+// sub-agent activity are pulled OUT into their own transcript items (see build-transcript).
+export function MessageRow({ message, user }: { message: AgentMessage; user?: ChatUser }) {
   if (message.role === 'tool') return null
 
   const isUser = message.role === 'user'
@@ -22,17 +46,20 @@ export function MessageRow({ message }: { message: AgentMessage }) {
   if (isUser && !hasText && !hasRefs && !hasAtts) return null
   if (!isUser && !hasText) return null
 
+  if (!isUser)
+    return (
+      <div className="animate-in fade-in-0 slide-in-from-bottom-1 px-3 py-2.5 duration-200">
+        <Markdown
+          content={message.content}
+          className="text-[13px] leading-relaxed text-foreground"
+        />
+      </div>
+    )
+
   return (
     <div className="animate-in fade-in-0 slide-in-from-bottom-1 px-3 py-2.5 duration-200">
       <div className="flex gap-2.5">
-        {isUser ? (
-          <div className="grid size-6 shrink-0 place-items-center rounded-full bg-muted text-muted-foreground">
-            <User className="size-3.5" />
-          </div>
-        ) : (
-          <AgentAvatar />
-        )}
-
+        <UserBadge user={user} />
         <div className="min-w-0 flex-1 space-y-1.5">
           {(hasRefs || hasAtts) && (
             <div className="flex flex-wrap gap-1">
@@ -50,18 +77,11 @@ export function MessageRow({ message }: { message: AgentMessage }) {
               ))}
             </div>
           )}
-
-          {hasText &&
-            (isUser ? (
-              <p className="whitespace-pre-wrap break-words text-[13px] leading-relaxed text-foreground">
-                {message.content}
-              </p>
-            ) : (
-              <Markdown
-                content={message.content}
-                className="text-[13px] leading-relaxed text-foreground"
-              />
-            ))}
+          {hasText && (
+            <p className="whitespace-pre-wrap break-words text-[13px] leading-relaxed text-foreground">
+              {message.content}
+            </p>
+          )}
         </div>
       </div>
     </div>

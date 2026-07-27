@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { ArrowDown, Check, ChevronDown, Cpu, MessageSquarePlus, Sparkles, User } from 'lucide-react'
+import { ArrowDown, Check, ChevronDown, Cpu, MessageSquarePlus, Sparkles } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
 import type {
@@ -19,7 +19,7 @@ import { Markdown } from '@/shared/ui/markdown'
 import { buildTranscript } from '../lib/transcript'
 import { AgentAvatar } from './agent-avatar'
 import { Composer } from './composer'
-import { MessageRow } from './message-row'
+import { MessageRow, UserBadge, type ChatUser } from './message-row'
 import { PermissionPrompt, type PendingPermission } from './permission-prompt'
 import { ReasoningBlock } from './reasoning-block'
 import { SessionMenu } from './session-menu'
@@ -80,6 +80,7 @@ function ModelPicker({
 
 export function ConversationView({
   title,
+  user,
   models,
   model,
   onChangeModel,
@@ -112,6 +113,7 @@ export function ConversationView({
   onDecidePermission,
 }: {
   title: string
+  user?: ChatUser
   models: string[]
   model: string | null
   onChangeModel: (model: string | null) => void
@@ -227,14 +229,12 @@ export function ConversationView({
                 if (item.kind === 'todos') return <TodoList key={item.id} todos={item.todos} />
                 if (item.kind === 'agents')
                   return <SubagentList key={item.id} agents={item.agents} />
-                return <MessageRow key={item.message.id} message={item.message} />
+                return <MessageRow key={item.message.id} message={item.message} user={user} />
               })}
               {pendingUser && (
                 <div className="animate-in fade-in-0 px-3 py-2.5 duration-200">
                   <div className="flex gap-2.5">
-                    <div className="grid size-6 shrink-0 place-items-center rounded-full bg-muted text-muted-foreground">
-                      <User className="size-3.5" />
-                    </div>
+                    <UserBadge user={user} />
                     <p className="min-w-0 flex-1 whitespace-pre-wrap break-words text-[13px] leading-relaxed text-foreground/70">
                       {pendingUser}
                     </p>
@@ -246,28 +246,22 @@ export function ConversationView({
               )}
               {streamingText.length > 0 ? (
                 <div className="animate-in fade-in-0 px-3 py-2.5 duration-200">
-                  <div className="flex gap-2.5">
-                    <AgentAvatar />
-                    <Markdown
-                      content={streamingText}
-                      className="min-w-0 flex-1 text-[13px] leading-relaxed text-foreground"
-                    />
-                  </div>
+                  <Markdown
+                    content={streamingText}
+                    className="text-[13px] leading-relaxed text-foreground"
+                  />
                 </div>
               ) : sending && streamingReasoning.length === 0 ? (
                 <div className="animate-in fade-in-0 px-3 py-2.5 duration-200">
-                  <div className="flex items-center gap-2.5">
-                    <AgentAvatar />
-                    <span className="flex gap-1" aria-label={t('thinking')}>
-                      {[0, 1, 2].map((i) => (
-                        <span
-                          key={i}
-                          className="size-1.5 animate-bounce rounded-full bg-muted-foreground/50"
-                          style={{ animationDelay: `${i * 140}ms` }}
-                        />
-                      ))}
-                    </span>
-                  </div>
+                  <span className="flex gap-1" aria-label={t('thinking')}>
+                    {[0, 1, 2].map((i) => (
+                      <span
+                        key={i}
+                        className="size-1.5 animate-bounce rounded-full bg-muted-foreground/50"
+                        style={{ animationDelay: `${i * 140}ms` }}
+                      />
+                    ))}
+                  </span>
                 </div>
               ) : null}
             </>

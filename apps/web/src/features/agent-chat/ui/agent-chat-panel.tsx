@@ -19,6 +19,7 @@ import {
 import { modelsSchema } from '@/entities/model'
 
 import { ConversationView } from './conversation-view'
+import type { ChatUser } from './message-row'
 import type { PendingPermission } from './permission-prompt'
 import type { TeammateSpawnInput } from './team-menu'
 
@@ -42,9 +43,11 @@ function mergeMessages(prev: AgentMessage[], incoming: AgentMessage[]): AgentMes
 export function AgentChatPanel({
   pendingMention,
   onConsumeMention,
+  user,
 }: {
   pendingMention?: { ref: AgentReference } | null
   onConsumeMention?: () => void
+  user?: ChatUser
 } = {}) {
   const t = useTranslations('agentChat')
   const [sessions, setSessions] = useState<AgentSession[]>([])
@@ -445,6 +448,7 @@ export function AgentChatPanel({
   return (
     <ConversationView
       title={active?.title ?? t('new')}
+      user={user}
       models={modelIds}
       model={activeId ? (active?.model ?? null) : draftModel}
       onChangeModel={(m) => void changeModel(m)}

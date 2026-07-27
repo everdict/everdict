@@ -19,7 +19,7 @@ export function SubagentList({ agents }: { agents: SubagentView[] }) {
   const settled = agents.length - running
 
   return (
-    <div className="py-0.5 pl-[2.875rem] pr-3">
+    <div className="px-3 py-0.5">
       <div className="rounded-lg border border-border bg-card/60 text-[12px]">
         <div className="flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-[560] text-muted-foreground">
           <Bot className="size-3.5 shrink-0" strokeWidth={1.75} />

@@ -37,6 +37,8 @@ export function AppShell({
   profile?: { name?: string; username?: string; avatarUrl?: string }
   children: ReactNode
 }) {
+  // 대화 패널의 사용자 턴 아바타 — 사이드바 계정 표시와 같은 해석(프로필 이름 > 사용자명 > 이메일 > subject).
+  const chatUserName = profile?.name ?? profile?.username ?? email ?? subject
   return (
     <InfraPanelProvider workspace={workspace}>
       <div className="flex min-h-screen flex-col md:flex-row">
@@ -59,7 +61,12 @@ export function AppShell({
         </main>
         {/* Infra split view — the rail (divider) + the floating panel must be siblings of main to take layout space. */}
         <InfraRail />
-        <InfraPanel />
+        <InfraPanel
+          user={{
+            name: chatUserName,
+            ...(profile?.avatarUrl !== undefined ? { avatarUrl: profile.avatarUrl } : {}),
+          }}
+        />
       </div>
       <CommandPalette workspace={workspace} />
       <TopControls workspace={workspace} />

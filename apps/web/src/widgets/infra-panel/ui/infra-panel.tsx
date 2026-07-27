@@ -13,7 +13,7 @@ import {
 } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
-import { AgentChatPanel } from '@/features/agent-chat'
+import { AgentChatPanel, type ChatUser } from '@/features/agent-chat'
 import { agentReferenceSchema } from '@/entities/agent-session'
 import { RELOAD_INFRA_FRAMES_EVENT } from '@/shared/lib/reload-infra-frames'
 import { cn } from '@/shared/lib/utils'
@@ -61,7 +61,7 @@ function withEmbed(path: string): string {
   return `${path}${path.includes('?') ? '&' : '?'}embed=1`
 }
 
-export function InfraPanel() {
+export function InfraPanel({ user }: { user?: ChatUser } = {}) {
   const t = useTranslations('infraPanel')
   const router = useRouter()
   const {
@@ -221,6 +221,7 @@ export function InfraPanel() {
                 <AgentChatPanel
                   pendingMention={pendingMention}
                   onConsumeMention={consumePendingMention}
+                  user={user}
                 />
               </div>
             )}

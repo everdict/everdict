@@ -16,7 +16,7 @@ export function TodoList({ todos }: { todos: TodoItemView[] }) {
   const done = todos.filter((td) => td.status === 'completed').length
 
   return (
-    <div className="py-0.5 pl-[2.875rem] pr-3">
+    <div className="px-3 py-0.5">
       <div className="rounded-lg border border-border bg-card/60 px-2.5 py-2 text-[12px]">
         <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-[560] text-muted-foreground">
           <ListTodo className="size-3.5 shrink-0" strokeWidth={1.75} />
