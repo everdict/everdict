@@ -58,6 +58,15 @@ export interface CapabilityServiceDeps {
   // The workspace's registered image-registry coordinates (no secrets) — classifies an environment capability's
   // image at publish time (docs/architecture/environment-image-store.md). Unset = no classification, no warnings.
   registryCoordinates?: (workspace: string) => Promise<ImageRegistryCoordinates[]>;
+  // Instance policy (operator env EVERDICT_ALLOW_MEMBER_PUBLIC_PUBLISH): when true, ANY member — not just an admin —
+  // may publish/promote a capability to `public` (the instance-wide catalog). Default false keeps public an
+  // admin-only reach. This is a deployment property ("is this a community instance?"), not per-workspace state, so
+  // it lives in operator config, not WorkspaceSettings. See docs/architecture/capability-store.md ("public policy").
+  allowMemberPublicPublish?: boolean;
+  // The first-party (Everdict-authored) default toolset, surfaced in the public catalog so the built-in tools are
+  // discoverable/adoptable alongside user-published ones. Injected (not imported) so the service stays test-isolable
+  // and the operator can suppress the built-ins from the store. Unset = no built-ins merged.
+  firstPartyCatalog?: () => CapabilityRecord[];
   now?: () => string;
 }
 
@@ -85,6 +94,12 @@ export class CapabilityService {
 
   constructor(private readonly deps: CapabilityServiceDeps) {
     this.now = deps.now ?? (() => new Date().toISOString());
+  }
+
+  // May this actor publish/promote to `public`? An admin always may; a plain member only when the instance opts in
+  // (operator policy). The one authority for the public-reach gate — both save() and setVisibility() consult it.
+  private mayPublishPublic(actor: CapabilityActor): boolean {
+    return actor.isAdmin || this.deps.allowMemberPublicPublish === true;
   }
 
   // Version-free upsert (the author "publish/edit" path). New id → 1.0.0; an owner's changed content → next patch
@@ -129,7 +144,7 @@ export class CapabilityService {
       return withWarnings({ workspace: tenant, id, version, created: true });
     }
     const visibility = body.visibility ?? "private";
-    if (visibility === "public" && !actor.isAdmin)
+    if (visibility === "public" && !this.mayPublishPublic(actor))
       throw new ForbiddenError(
         "FORBIDDEN",
         { id, action: "capabilities:write" },
@@ -167,9 +182,14 @@ export class CapabilityService {
     return this.annotate(tenant, await this.deps.store.listVisible(tenant, subject));
   }
 
-  // Browse the global public catalog. `viewerTenant` classifies environment images for the CALLER's workspace.
+  // Browse the global public catalog — the first-party (Everdict-authored) built-ins FIRST, then every user-published
+  // `public` capability. Built-ins are code-defined (not DB rows), so they are merged in here rather than stored; this
+  // is what makes "the same tool, two channels: default + marketplace" true in the store surface (a workspace can
+  // adopt a built-in explicitly, or leave it on as a default via Settings › Agent). `viewerTenant` classifies
+  // environment images for the CALLER's workspace.
   async listPublic(viewerTenant?: string): Promise<CapabilityView[]> {
-    return this.annotate(viewerTenant, await this.deps.store.listPublic());
+    const builtIns = this.deps.firstPartyCatalog?.() ?? [];
+    return this.annotate(viewerTenant, [...builtIns, ...(await this.deps.store.listPublic())]);
   }
 
   // A single capability the caller can see, in their own workspace (latest or an exact version). Not visible / missing
@@ -214,7 +234,7 @@ export class CapabilityService {
         { id, action: "capabilities:write" },
         "Only the capability's owner or a workspace admin can change its reach.",
       );
-    if (next.visibility === "public" && !actor.isAdmin)
+    if (next.visibility === "public" && !this.mayPublishPublic(actor))
       throw new ForbiddenError(
         "FORBIDDEN",
         { id, action: "capabilities:write" },

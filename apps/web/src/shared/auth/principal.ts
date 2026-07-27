@@ -32,6 +32,12 @@ export interface WebPrincipal {
   email?: string // OIDC email/preferred_username claim (display-only·read-only)
   workspaces?: WebWorkspace[] // list of workspaces I belong to (when a membership store exists)
   profile?: WebProfile // mutable display info (name/username/avatar)
+  config?: WebInstanceConfig // read-only instance config for UX gating (control plane still enforces)
+}
+
+// Read-only instance config the control plane surfaces on GET /me — display/UX-gating only, never an authz input.
+export interface WebInstanceConfig {
+  allowMemberPublicPublish?: boolean // a member (not only an admin) may publish a capability to the public catalog
 }
 
 // The control plane auth context for the current request. Logged-in user → Keycloak Bearer, dev (unset) → x-everdict-tenant=default.

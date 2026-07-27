@@ -13,10 +13,14 @@ export function registerProfileRoutes(app: FastifyInstance, deps: ServerDeps): v
       : undefined;
     // Profile (name/username/avatar) is control-plane-owned mutable info — layered on top of the Principal (email and other SSO claims).
     const profile = deps.profileService ? await deps.profileService.get(principal.subject) : undefined;
+    // Instance config the web needs but can't derive from the token — read-only, display/UX-gating only (the control
+    // plane still enforces). Currently: whether a member (not only an admin) may publish to the public catalog.
+    const config = { allowMemberPublicPublish: deps.allowMemberPublicPublish === true };
     return reply.send({
       ...principal,
       ...(workspaces ? { workspaces } : {}),
       ...(profile ? { profile } : {}),
+      config,
     });
   });
 

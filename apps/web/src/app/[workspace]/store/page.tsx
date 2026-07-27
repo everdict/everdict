@@ -24,6 +24,8 @@ export default async function StorePage() {
   const canWrite = can(principal?.roles, 'capabilities:write')
   const canAdopt = can(principal?.roles, 'agents:write') // 채택 = 내 에이전트 설정 편집
   const isAdmin = (principal?.roles ?? []).includes('admin')
+  // 인스턴스 정책(operator env) — 멤버도 public 발행 가능? admin 은 항상 가능. UX 게이팅용(서버가 최종 강제).
+  const allowMemberPublicPublish = principal?.config?.allowMemberPublicPublish === true
   const header = <PageHeader title={t('title')} description={t('description')} />
   if (!canRead) {
     return (
@@ -100,6 +102,7 @@ export default async function StorePage() {
           myWorkspaces={myWorkspaces}
           currentWorkspace={principal?.workspace ?? ''}
           isAdmin={isAdmin}
+          allowMemberPublicPublish={allowMemberPublicPublish}
           {...(principal?.subject !== undefined ? { currentSubject: principal.subject } : {})}
         />
       )}
