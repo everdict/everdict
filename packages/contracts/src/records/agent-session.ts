@@ -1,5 +1,13 @@
 import { z } from "zod";
 
+// How a conversation's mutating tool calls are approved — the member's standing choice for the session (a per-turn
+// body.mode still overrides). default = ask for every mutation (HITL) · auto = auto-allow routine mutations, ask only
+// for guarded (destructive / governance / credential) actions · bypass = never ask · plan = read-only until the
+// agent's plan is approved. Coarse control-plane RBAC bounds every call regardless of mode.
+export const AGENT_PERMISSION_MODES = ["default", "auto", "bypass", "plan"] as const;
+export const AgentPermissionModeSchema = z.enum(AGENT_PERMISSION_MODES);
+export type AgentPermissionMode = z.infer<typeof AgentPermissionModeSchema>;
+
 // A conversation between a workspace member and Everdict's own agent. Personal to its owner (the creator's
 // subject) but workspace-scoped for data access — the agent reads that workspace's eval data on the owner's
 // behalf. See docs/architecture/agent-conversations.md.
@@ -11,6 +19,8 @@ export const AgentSessionRecordSchema = z.object({
   // Registered model id this conversation runs on (a per-conversation override the member picks in the chat).
   // Unset → the workspace AgentSpec's model (Settings › Agent) → the agent server's default model.
   model: z.string().optional(),
+  // The session's standing permission mode (the member picks it in the chat header). Unset → "default" (ask).
+  permissionMode: AgentPermissionModeSchema.optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });

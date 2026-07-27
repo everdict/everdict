@@ -2,10 +2,11 @@ import { timingSafeEqual } from "node:crypto";
 import type { ChatMessage, PermissionDecision, PermissionHook } from "@everdict/agent-runtime";
 import type { TenantKeyStore } from "@everdict/application-control";
 import type { AgentSessionRecord } from "@everdict/contracts";
-import { AgentReferenceSchema, AppError } from "@everdict/contracts";
+import { AgentPermissionModeSchema, AgentReferenceSchema, AppError } from "@everdict/contracts";
 import { issueAgentToken } from "@everdict/db";
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
 import { z } from "zod";
+import { isGuardedAction } from "./action-policy.js";
 import { AgentMailbox } from "./agent-mailbox.js";
 import { type ChatDeps, DEFAULT_SESSION_TITLE, runChat } from "./chat.js";
 import { PermissionRegistry } from "./permission-registry.js";
@@ -176,7 +177,11 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
     const principal = await principalOf(req, reply);
     if (!principal) return reply;
     const body = z
-      .object({ title: z.string().optional(), model: z.string().min(1).optional() })
+      .object({
+        title: z.string().optional(),
+        model: z.string().min(1).optional(),
+        permissionMode: AgentPermissionModeSchema.optional(), // a draft picked before the first send carries over
+      })
       .safeParse(req.body ?? {});
     if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: body.error.message });
     const now = deps.now();
@@ -186,6 +191,7 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
       owner: principal.subject,
       title: body.data.title && body.data.title.length > 0 ? body.data.title : DEFAULT_SESSION_TITLE,
       ...(body.data.model !== undefined ? { model: body.data.model } : {}),
+      ...(body.data.permissionMode !== undefined ? { permissionMode: body.data.permissionMode } : {}),
       createdAt: now,
       updatedAt: now,
     };
@@ -218,8 +224,12 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
         title: z.string().min(1).max(200).optional(),
         // A registered model id pins this conversation's model; null clears the override (→ workspace/server default).
         model: z.string().min(1).nullable().optional(),
+        // The session's standing permission mode; null clears it (→ "default": ask for every mutation).
+        permissionMode: AgentPermissionModeSchema.nullable().optional(),
       })
-      .refine((b) => b.title !== undefined || b.model !== undefined, { message: "Nothing to update." })
+      .refine((b) => b.title !== undefined || b.model !== undefined || b.permissionMode !== undefined, {
+        message: "Nothing to update.",
+      })
       .safeParse(req.body);
     if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: body.error.message });
     const session = await deps.sessions.getSession(principal.workspace, principal.subject, id);
@@ -228,6 +238,8 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
     if (body.data.title !== undefined) await deps.sessions.touchSession(principal.workspace, id, now, body.data.title);
     if (body.data.model !== undefined)
       await deps.sessions.setSessionModel(principal.workspace, id, body.data.model, now);
+    if (body.data.permissionMode !== undefined)
+      await deps.sessions.setSessionPermissionMode(principal.workspace, id, body.data.permissionMode, now);
     // Return the fresh persisted record — the single source of truth after the write(s).
     const fresh = await deps.sessions.getSession(principal.workspace, principal.subject, id);
     return reply.send(fresh ?? session);
@@ -273,9 +285,10 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
         message: z.string().min(1),
         references: z.array(AgentReferenceSchema).optional(),
         attachments: z.array(attachmentInputSchema).optional(),
-        // Permission mode for this turn: default = ask on write tools (HITL) · bypass = auto-allow writes ·
-        // plan = read-only until the agent presents a plan and it is approved. (Coarse RBAC still gates every call.)
-        mode: z.enum(["default", "bypass", "plan"]).optional(),
+        // Permission mode for this turn: default = ask on every write tool (HITL) · auto = auto-allow routine writes,
+        // ask only for guarded (destructive/governance/credential) actions · bypass = auto-allow everything · plan =
+        // read-only until the agent presents a plan and it is approved. (Coarse RBAC still gates every call.)
+        mode: AgentPermissionModeSchema.optional(),
       })
       .safeParse(req.body);
     if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: body.error.message });
@@ -285,7 +298,11 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
     req.raw.on("close", () => controller.abort());
     const headers = forwardHeaders(req);
     const { message, references, attachments } = body.data;
-    const mode = body.data.mode ?? "default";
+    // The turn's effective mode: an explicit body.mode (API callers / one-off overrides) wins, else the session's
+    // standing mode (the chat-header picker, persisted on the record), else "default" (ask). A missing session is
+    // left to runChat's own NotFound so this stays a pure mode lookup.
+    const session = await deps.sessions.getSession(principal.workspace, principal.subject, id);
+    const mode = body.data.mode ?? session?.permissionMode ?? "default";
 
     const drainInput = (): ChatMessage[] => mailbox.drain(principal.workspace, id);
     // Route send_message to another of the caller's conversations (S2 generalization): delivered to that session's
@@ -313,7 +330,7 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
       };
 
     // Non-streaming clients (tests / API callers) get the buffered JSON tail. No human channel: writes auto-allow
-    // (bypass) or follow the session rules (default/plan), and plan mode auto-approves (onPlan absent).
+    // (bypass/auto alike) or follow the session rules (default/plan), and plan mode auto-approves (onPlan absent).
     if (!(req.headers.accept ?? "").includes("text/event-stream")) {
       try {
         const result = await runChat(
@@ -353,12 +370,16 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
     };
     // HITL: a write tool call parks here — emit a `permission` ask (with a fresh id) and await the human's POST. A
     // client disconnect or timeout resolves to "deny" (the registry's safe default). Wrapped by withRules so a
-    // standing "always allow/deny" rule for the tool answers without prompting.
-    const permit: PermissionHook = withRules((request) => {
+    // standing "always allow/deny" rule for the tool answers without prompting. In "auto" mode, routine mutations
+    // run without asking — only the guarded (destructive/governance/credential) actions still park for approval.
+    const ask = (request: { name: string; input: unknown }): Promise<PermissionDecision> => {
       const requestId = deps.newId();
       write("permission", { requestId, name: request.name, input: request.input });
       return permissions.wait(requestId, id, controller.signal);
-    });
+    };
+    const permit: PermissionHook = withRules((request) =>
+      mode === "auto" && !isGuardedAction(request.name) ? "allow" : ask(request),
+    );
     // Plan approval reuses the same park-and-await channel: emit a `plan` ask, resolve via POST /permission.
     const onPlan = async (plan: string): Promise<boolean> => {
       const requestId = deps.newId();
@@ -380,7 +401,8 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
         // An emitted analysis artifact (chart/table/report) — push the record so the web renders it live.
         onArtifact: (artifact) => write("artifact", artifact),
         onRecord: (r) => write("message", r),
-        // bypass → no permit (auto-allow writes); default/plan → HITL + rules. plan → planMode + onPlan approval.
+        // bypass → no permit (auto-allow writes); default/plan → HITL + rules; auto → ask only guarded actions
+        // (folded into `permit` above). plan → planMode + onPlan approval.
         ...(mode === "bypass" ? {} : { permit }),
         ...(mode === "plan" ? { planMode: true, onPlan } : {}),
         drainInput,

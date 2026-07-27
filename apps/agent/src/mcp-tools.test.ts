@@ -1,79 +1,80 @@
 import { describe, expect, it } from "vitest";
 import { isBaseToolReadOnly, isDefaultBaseTool } from "./mcp-tools.js";
 
-// The base control-plane surface reaches the agent through a default-deny allowlist: read verbs plus a curated set
-// of "use the integration" actions. These predicates are the SSOT for what a workspace's configured integrations
-// expose to the conversational agent by default, and which of those calls the HITL permission gate approves inline.
+// The base control-plane surface is bridge-all: every entity's reads AND mutations reach the agent, and safety lives
+// in the layers (RBAC + the session's permission mode over the gate), not in surface shaping. These predicates are
+// the SSOT for what is bridged and which calls skip the permission gate.
 describe("base tool default wiring", () => {
-  it("bridges read verbs", () => {
+  it("bridges reads and mutations alike (the whole catalog is the default surface)", () => {
     for (const name of [
+      // reads
       "list_ci_links",
       "get_workspace_mattermost",
       "inspect_trace",
       "list_workspace_image_registries",
-    ])
-      expect(isDefaultBaseTool(name)).toBe(true);
-  });
-
-  it("bridges the curated integration actions (so configured integrations are usable by default)", () => {
-    for (const name of [
+      // integration actions
       "post_mattermost_message",
       "open_ci_setup_pr",
-      "get_image_push_credentials",
       "create_github_issue",
-      "comment_on_github_issue",
       "open_github_pr",
+      // eval-driving mutations (previously behind the eval-drive opt-in)
+      "run_scorecard",
+      "create_dataset",
+      "pin_harness_images",
+      "create_schedule",
+      // destructive / governance verbs — bridged too; the permission mode decides per call
+      "delete_scorecard",
+      "remove_member",
+      "set_secret",
+      "set_workspace_mattermost",
+      // knowledge reads + writes
+      "knowledge_related",
+      "annotate_knowledge",
+      "relate_knowledge",
     ])
       expect(isDefaultBaseTool(name)).toBe(true);
   });
 
-  it("bridges the knowledge-graph reads + authored-write contribution tools by default", () => {
-    // Reads whose names don't match a read prefix (so the agent can consult the workspace's knowledge).
-    for (const name of ["knowledge_related", "knowledge_subgraph", "knowledge_notes"])
-      expect(isDefaultBaseTool(name)).toBe(true);
-    // get_ knowledge reads are covered by the read prefixes.
-    for (const name of ["get_knowledge_node", "get_knowledge_graph"]) expect(isDefaultBaseTool(name)).toBe(true);
-    // The authored-write contribution path — how the agent ACCUMULATES knowledge as it works.
-    for (const name of ["annotate_knowledge", "relate_knowledge"]) expect(isDefaultBaseTool(name)).toBe(true);
-  });
-
-  it("HITL-gates knowledge WRITES but lets knowledge reads skip the gate", () => {
-    // Contribution writes are gated — the member confirms each recorded observation/relationship inline.
-    expect(isBaseToolReadOnly("annotate_knowledge")).toBe(false);
-    expect(isBaseToolReadOnly("relate_knowledge")).toBe(false);
-    // Knowledge reads are pure reads → no gate.
-    expect(isBaseToolReadOnly("knowledge_related")).toBe(true);
-    expect(isBaseToolReadOnly("knowledge_subgraph")).toBe(true);
-    expect(isBaseToolReadOnly("knowledge_notes")).toBe(true);
-  });
-
-  it("keeps the admin knowledge-graph rebuild (reindex) default-denied", () => {
-    expect(isDefaultBaseTool("reindex_knowledge")).toBe(false);
-  });
-
-  it("excludes config/register/destroy and secret-write tools (default-deny holds)", () => {
+  it("excludes only the runner wire-protocol tools from bridging", () => {
     for (const name of [
-      "set_workspace_mattermost",
-      "remove_workspace_trace_source",
-      "assign_harness_trace_source",
-      "link_ci_repository",
-      "start_workspace_github_app_install",
-      "set_secret",
-      "delete_secret",
+      "lease_job",
+      "submit_job_result",
+      "heartbeat_job",
+      "fail_job",
+      "report_case_log",
+      "report_case_screen",
+      "report_case_track",
     ])
       expect(isDefaultBaseTool(name)).toBe(false);
   });
 
-  it("HITL-gates the integration actions but not plain reads", () => {
-    // Pure read verbs skip the gate.
-    expect(isBaseToolReadOnly("list_ci_links")).toBe(true);
-    expect(isBaseToolReadOnly("inspect_trace")).toBe(true);
-    // The actions are gated — including get_image_push_credentials, which matches get_ but MINTS credentials.
-    expect(isBaseToolReadOnly("post_mattermost_message")).toBe(false);
-    expect(isBaseToolReadOnly("open_ci_setup_pr")).toBe(false);
-    expect(isBaseToolReadOnly("get_image_push_credentials")).toBe(false);
-    expect(isBaseToolReadOnly("create_github_issue")).toBe(false);
-    expect(isBaseToolReadOnly("comment_on_github_issue")).toBe(false);
-    expect(isBaseToolReadOnly("open_github_pr")).toBe(false);
+  it("classifies pure read verbs (and the knowledge reads) as gate-skipping read-only", () => {
+    for (const name of [
+      "list_ci_links",
+      "inspect_trace",
+      "get_knowledge_node",
+      "knowledge_related",
+      "knowledge_subgraph",
+      "knowledge_notes",
+    ])
+      expect(isBaseToolReadOnly(name)).toBe(true);
+  });
+
+  it("keeps every mutation permission-gated — including the credential-minting get_ read", () => {
+    for (const name of [
+      "get_image_push_credentials", // matches get_ but MINTS credentials
+      "post_mattermost_message",
+      "open_ci_setup_pr",
+      "create_github_issue",
+      "comment_on_github_issue",
+      "open_github_pr",
+      "run_scorecard",
+      "delete_dataset",
+      "set_secret",
+      "annotate_knowledge",
+      "relate_knowledge",
+      "reindex_knowledge",
+    ])
+      expect(isBaseToolReadOnly(name)).toBe(false);
   });
 });

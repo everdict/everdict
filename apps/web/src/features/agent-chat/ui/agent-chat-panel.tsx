@@ -12,6 +12,7 @@ import {
   agentTeammateListSchema,
   type AgentAttachmentInput,
   type AgentMessage,
+  type AgentPermissionMode,
   type AgentReference,
   type AgentSession,
   type AgentTeammate,
@@ -64,6 +65,8 @@ export function AgentChatPanel({
   const [modelIds, setModelIds] = useState<string[]>([])
   // 드래프트(세션 미생성) 상태에서 고른 모델 — 첫 전송의 세션 생성에 실려 간다.
   const [draftModel, setDraftModel] = useState<string | null>(null)
+  // 드래프트에서 고른 실행 권한 모드 — 'default'(항상 확인)가 기본이라 기본값이면 생성 요청에 싣지 않는다.
+  const [draftPermissionMode, setDraftPermissionMode] = useState<AgentPermissionMode>('default')
   // The caller's live teammates (docs/architecture/agent-teams.md) — long-lived autonomous agents that watch platform
   // events and wake to react. Loaded on mount and refreshed after each turn (the agent can self-spawn via a tool).
   const [teammates, setTeammates] = useState<AgentTeammate[]>([])
@@ -182,6 +185,7 @@ export function AgentChatPanel({
   const newConversation = useCallback(() => {
     switchTo(null)
     setDraftModel(null)
+    setDraftPermissionMode('default')
   }, [switchTo])
 
   const openSession = useCallback(
@@ -252,19 +256,50 @@ export function AgentChatPanel({
     [activeId, loadSessions, t]
   )
 
+  const changePermissionMode = useCallback(
+    async (mode: AgentPermissionMode) => {
+      if (!activeId) {
+        // 드래프트엔 아직 서버 세션이 없다 — 로컬에 들고 있다가 첫 전송의 생성 요청에 싣는다.
+        setDraftPermissionMode(mode)
+        return
+      }
+      // Optimistic — reflect the pick immediately; the PATCH persists it ("default" clears the standing mode).
+      setSessions((prev) =>
+        prev.map((s) =>
+          s.id === activeId ? { ...s, permissionMode: mode === 'default' ? undefined : mode } : s
+        )
+      )
+      try {
+        const res = await fetch(`/api/agent/sessions/${encodeURIComponent(activeId)}`, {
+          method: 'PATCH',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ permissionMode: mode === 'default' ? null : mode }),
+        })
+        if (!res.ok) throw new Error('patch failed')
+      } catch {
+        toast.error(t('errorGeneric'))
+        void loadSessions()
+      }
+    },
+    [activeId, loadSessions, t]
+  )
+
   const send = useCallback(
     async (textArg?: string, refsArg?: AgentReference[]) => {
       const text = (textArg ?? input).trim()
       if (text.length === 0 || sending) return
 
-      // 드래프트의 첫 전송 — 이제서야 서버 세션을 만든다(드래프트에서 고른 모델을 실어서).
+      // 드래프트의 첫 전송 — 이제서야 서버 세션을 만든다(드래프트에서 고른 모델·실행 권한 모드를 실어서).
       let sessionId = activeId
       if (!sessionId) {
         try {
           const res = await fetch('/api/agent/sessions', {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
-            body: JSON.stringify(draftModel !== null ? { model: draftModel } : {}),
+            body: JSON.stringify({
+              ...(draftModel !== null ? { model: draftModel } : {}),
+              ...(draftPermissionMode !== 'default' ? { permissionMode: draftPermissionMode } : {}),
+            }),
           })
           if (!res.ok) throw new Error('create failed')
           const parsed = agentSessionSchema.safeParse(await res.json())
@@ -272,6 +307,7 @@ export function AgentChatPanel({
           setSessions((prev) => [parsed.data, ...prev])
           setActiveId(parsed.data.id)
           setDraftModel(null)
+          setDraftPermissionMode('default')
           sessionId = parsed.data.id
         } catch {
           toast.error(t('errorGeneric'))
@@ -452,6 +488,8 @@ export function AgentChatPanel({
       models={modelIds}
       model={activeId ? (active?.model ?? null) : draftModel}
       onChangeModel={(m) => void changeModel(m)}
+      permissionMode={activeId ? (active?.permissionMode ?? 'default') : draftPermissionMode}
+      onChangePermissionMode={(m) => void changePermissionMode(m)}
       sessions={sessions}
       activeId={activeId}
       onOpenSession={openSession}

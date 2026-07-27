@@ -78,6 +78,19 @@ describe("InMemoryAgentSessionStore", () => {
     expect(s?.model).toBe("claude-sonnet");
   });
 
+  it("setSessionPermissionMode sets the standing mode and clearing it falls back to default (ask)", async () => {
+    await store.createSession(session({ id: "a", owner: "alice" }));
+    await store.setSessionPermissionMode("acme", "a", "auto", "2026-07-27T00:00:00.000Z");
+    let s = await store.getSession("acme", "alice", "a");
+    expect(s?.permissionMode).toBe("auto");
+    expect(s?.updatedAt).toBe("2026-07-27T00:00:00.000Z");
+    // null clears the standing mode → "default" (ask for every mutation)
+    await store.setSessionPermissionMode("acme", "a", null, "2026-07-28T00:00:00.000Z");
+    s = await store.getSession("acme", "alice", "a");
+    expect(s?.permissionMode).toBeUndefined();
+    expect(s?.updatedAt).toBe("2026-07-28T00:00:00.000Z");
+  });
+
   it("returns messages seq-ascending and honors sinceSeq for polling", async () => {
     await store.appendMessages([
       message({ id: "m0", seq: 0, role: "user", content: "hi" }),

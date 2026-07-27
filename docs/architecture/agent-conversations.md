@@ -186,9 +186,22 @@ i18n `agentChat` namespace in `messages/{en,ko}.json`.
   persisted on the conversation (`AnalysisArtifactStore`, mig 0077), streamed live (SSE `artifact`) and
   listable (`GET /agent/sessions/:id/artifacts`). Never active content (no HTML/JS). Web rendering + View
   pinning land with the Analysis Studio — see `docs/architecture/analysis-studio.md` (the SSOT for this direction).
-- **Later** — write-action tools behind HITL (port `permissions`); executable (scripted) skills;
-  autonomous scheduled sweeps (runtime monitor → propose/trigger evals); findings → comments + Mattermost;
-  SSE token streaming (replace polling); a fallback model + prompt caching; parallel independent tool calls.
+- **P13 (bridge-all mutations + permission modes, landed)** — the agent can act on EVERY everdict entity: the base
+  surface is the whole control-plane MCP catalog (mutations included — `run_scorecard`, `create_dataset`,
+  `register_harness`, `delete_*`, `set_workspace_*`, …), with only the runner wire-protocol tools excluded
+  (`apps/agent/src/action-policy.ts` `isProtocolTool`). This SUPERSEDES both the default-deny read allowlist framing
+  and the `AGENT_ALLOW_EVAL_DRIVE` opt-in (P8's curated `INTEGRATION_ACTIONS` survives only as the classification
+  that keeps a minting `get_` read HITL-gated). Safety is layered, not surface-shaped: the control-plane **RBAC**
+  bounds every call to the member's role, and every mutation goes through the permission gate under the session's
+  **permission mode** — `default` (ask every mutation) · `auto` (auto-allow routine mutations, ask only the GUARDED
+  destructive/governance/credential actions — `isGuardedAction`) · `bypass` (never ask — the member's explicit
+  standing choice; session rules are skipped too) · `plan` (read-only until the presented plan is approved). The
+  mode is a first-class session field (`AgentSessionRecord.permissionMode`, mig 0079) picked in the chat header
+  (next to the model picker; a draft's pick rides the lazy session create), resolved per turn as
+  `body.mode ?? session.permissionMode ?? "default"` (an explicit body.mode is a one-off override), and the
+  existing session rules ("always allow/deny this tool") still short-circuit the prompt in default/auto.
+- **Later** — executable (scripted) skills; autonomous scheduled sweeps (runtime monitor → propose/trigger evals);
+  findings → comments + Mattermost; a fallback model + prompt caching; parallel independent tool calls.
 
 ## Running it (dev)
 

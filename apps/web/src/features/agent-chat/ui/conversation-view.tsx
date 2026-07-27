@@ -1,15 +1,25 @@
 'use client'
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { ArrowDown, Check, ChevronDown, Cpu, MessageSquarePlus, Sparkles } from 'lucide-react'
+import {
+  ArrowDown,
+  Check,
+  ChevronDown,
+  Cpu,
+  MessageSquarePlus,
+  ShieldCheck,
+  Sparkles,
+} from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
-import type {
-  AgentAttachmentInput,
-  AgentMessage,
-  AgentReference,
-  AgentSession,
-  AgentTeammate,
+import {
+  AGENT_PERMISSION_MODES,
+  type AgentAttachmentInput,
+  type AgentMessage,
+  type AgentPermissionMode,
+  type AgentReference,
+  type AgentSession,
+  type AgentTeammate,
 } from '@/entities/agent-session'
 import { cn } from '@/shared/lib/utils'
 import { Button } from '@/shared/ui/button'
@@ -78,12 +88,56 @@ function ModelPicker({
   )
 }
 
+// The conversation's standing permission mode — how the agent's mutating tool calls are approved: ask every time
+// (default) · auto (ask only destructive/governance actions) · bypass (never ask) · plan (read-only until the plan
+// is approved). Persisted on the session; coarse control-plane RBAC bounds every call regardless.
+function PermissionModePicker({
+  mode,
+  onChange,
+}: {
+  mode: AgentPermissionMode
+  onChange: (mode: AgentPermissionMode) => void
+}) {
+  const t = useTranslations('agentChat')
+  return (
+    <DropdownMenu
+      align="end"
+      trigger={({ toggle, open }) => (
+        <button
+          type="button"
+          onClick={toggle}
+          aria-label={t('permissionsPick')}
+          aria-expanded={open}
+          className="flex min-w-0 max-w-[12rem] items-center gap-1 rounded-md px-1.5 py-1 text-[11.5px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+        >
+          <ShieldCheck className="size-3.5 shrink-0" strokeWidth={1.75} />
+          <span className="min-w-0 truncate">{t(`permissionModes.${mode}`)}</span>
+          <ChevronDown className="size-3 shrink-0 opacity-60" />
+        </button>
+      )}
+    >
+      <DropdownLabel>{t('permissions')}</DropdownLabel>
+      {AGENT_PERMISSION_MODES.map((m) => (
+        <DropdownItem
+          key={m}
+          onSelect={() => onChange(m)}
+          trailing={mode === m ? <Check className="size-4" /> : undefined}
+        >
+          {t(`permissionModes.${m}`)}
+        </DropdownItem>
+      ))}
+    </DropdownMenu>
+  )
+}
+
 export function ConversationView({
   title,
   user,
   models,
   model,
   onChangeModel,
+  permissionMode,
+  onChangePermissionMode,
   sessions,
   activeId,
   onOpenSession,
@@ -117,6 +171,8 @@ export function ConversationView({
   models: string[]
   model: string | null
   onChangeModel: (model: string | null) => void
+  permissionMode: AgentPermissionMode
+  onChangePermissionMode: (mode: AgentPermissionMode) => void
   sessions: AgentSession[]
   activeId: string | null
   onOpenSession: (id: string) => void
@@ -182,6 +238,7 @@ export function ConversationView({
           {title}
         </span>
         <ModelPicker models={models} model={model} onChange={onChangeModel} />
+        <PermissionModePicker mode={permissionMode} onChange={onChangePermissionMode} />
         <TeamMenu teammates={teammates} onSpawn={onSpawnTeammate} onStop={onStopTeammate} />
         <SessionMenu
           sessions={sessions}

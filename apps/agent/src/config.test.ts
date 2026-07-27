@@ -19,13 +19,11 @@ describe("loadConfig", () => {
       AGENT_TOOL_TIMEOUT_MS: "", // z.coerce.number() on "" → 0 → .positive() would throw if not stripped
       AGENT_THINKING_BUDGET: "",
       AGENT_MAX_TURNS: "",
-      AGENT_ALLOW_EVAL_DRIVE: "", // z.enum(["true","false"]) rejects "" if not stripped
     });
     expect(config.AGENT_MODEL).toBeUndefined();
     expect(config.AGENT_TOOL_TIMEOUT_MS).toBeUndefined();
     expect(config.AGENT_THINKING_BUDGET).toBeUndefined();
     expect(config.AGENT_MAX_TURNS).toBeUndefined();
-    expect(config.AGENT_ALLOW_EVAL_DRIVE).toBe(false);
   });
 
   it("still parses configured optional values", () => {
@@ -33,10 +31,8 @@ describe("loadConfig", () => {
       ...BASE,
       AGENT_MODEL: "claude-opus-4-8",
       AGENT_TOOL_TIMEOUT_MS: "120000",
-      AGENT_ALLOW_EVAL_DRIVE: "true",
     });
     expect(config.AGENT_MODEL).toBe("claude-opus-4-8");
     expect(config.AGENT_TOOL_TIMEOUT_MS).toBe(120000);
-    expect(config.AGENT_ALLOW_EVAL_DRIVE).toBe(true);
   });
 });

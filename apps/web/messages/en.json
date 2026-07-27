@@ -3078,6 +3078,14 @@
     "model": "Model",
     "modelDefault": "Workspace default",
     "modelPick": "Select model",
+    "permissions": "Permissions",
+    "permissionsPick": "Select permission mode",
+    "permissionModes": {
+      "default": "Always ask",
+      "auto": "Auto — ask only for risky actions",
+      "bypass": "Never ask",
+      "plan": "Plan before acting"
+    },
     "empty": "No conversations yet. Start one to review harnesses, analyze scorecards, or inspect runtimes.",
     "emptyMessages": "Ask the agent about your scorecards, judge traces, harnesses, or runtimes.",
     "placeholder": "Message the agent…",

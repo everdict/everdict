@@ -9,13 +9,12 @@ import {
 } from "@everdict/agent-runtime";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { isProtocolTool } from "./action-policy.js";
 import { type CodeToolRuntime, type ResolvedCodeTool, buildCodeTools } from "./code-tools.js";
-import { isEvalDrivingAction } from "./eval-actions.js";
 import { type ForwardHeaders, forwardHeaderRecord } from "./principal.js";
 
-// Read-only allowlist by verb prefix — default-deny. Only these read/preview verbs from the control-plane MCP surface
-// are bridged; mutating tools (run_/create_/set_/delete_/control_/…) are excluded. Applies to the BUILT-IN everdict
-// surface always, and to a workspace MCP server UNLESS that server was registered write-allowed (opt-in).
+// Read-verb classification — decides which bridged tools SKIP the permission gate, not which are bridged (the whole
+// base surface is; see isDefaultBaseTool). A workspace MCP server registered without write remains read-only-bridged.
 const READ_PREFIXES = ["get_", "list_", "inspect_", "diff_", "estimate_", "leaderboard_", "search_", "hf_", "preview_"];
 
 // Knowledge-graph READ tools whose names don't match the read prefixes but are pure reads (a node's ranked
@@ -28,47 +27,25 @@ function isReadOnlyToolName(name: string): boolean {
   return READ_PREFIXES.some((p) => name.startsWith(p)) || KNOWLEDGE_READS.has(name);
 }
 
-// Curated "use the integration" ACTION tools from the control-plane surface, exposed to the agent BY DEFAULT (beyond
-// the read verbs) so a workspace's configured integrations (Mattermost / CI / image registry) are usable without an
-// admin hand-registering a write-allowed MCP server. Kept deliberately narrow: only genuine use-the-integration
-// actions — NOT config/register/destroy (set_/probe_/remove_/assign_/link_/unlink_/start_) and NOT secret writes.
-// Each is bridged as isReadOnly:false so the agent's HITL permission gate approves every call inline. This is an
-// explicit allowlist, so default-deny still holds for every other mutating verb on the base surface.
-const INTEGRATION_ACTIONS = new Set<string>([
-  "post_mattermost_message",
-  "open_ci_setup_pr",
-  "get_image_push_credentials",
-  "create_github_issue",
-  "comment_on_github_issue",
-  "open_github_pr",
-]);
+// Read-prefixed tools that actually MINT credentials — they must not skip the permission gate despite the get_ verb.
+const MINTING_READS = new Set<string>(["get_image_push_credentials"]);
 
-// Knowledge-graph authored-WRITE tools — the contribution path. Exposed to the agent BY DEFAULT so it ACCUMULATES
-// durable workspace knowledge as it works: record an observation on a node (`annotate_knowledge`) or assert a typed
-// relationship over the closed predicate vocabulary (`relate_knowledge`). This is the everdict-native analog of a
-// member contributing knowledge from Claude Code via the everdict plugin — the same authored write path, now driven by
-// the in-product agent. Bridged isReadOnly:false → every write is HITL-gated (the member confirms it inline). Kept
-// narrow to the two authored-write verbs; reindex_knowledge (an admin graph rebuild) stays default-denied.
-const KNOWLEDGE_WRITES = new Set<string>(["annotate_knowledge", "relate_knowledge"]);
-
-// A base (built-in everdict) tool reaches the agent if it is a read verb (incl. the knowledge reads) OR one of the
-// curated integration actions OR a knowledge-contribution write — and, when the workspace has opted the agent into
-// driving eval (S6), also a curated eval-driving action. The write actions are never read prefixes, so they never
-// become read-only below → each is HITL-gated.
-export function isDefaultBaseTool(name: string, allowEvalDrive = false): boolean {
-  return (
-    isReadOnlyToolName(name) ||
-    INTEGRATION_ACTIONS.has(name) ||
-    KNOWLEDGE_WRITES.has(name) ||
-    (allowEvalDrive && isEvalDrivingAction(name))
-  );
+// The base (built-in everdict) surface is the WHOLE control-plane catalog — every entity's reads AND mutations — so
+// the agent can directly perform any action the member could (create datasets, run/cancel scorecards, register
+// harnesses, configure integrations, delete entities, …). Only the runner wire-protocol tools are excluded (machine
+// protocol, never member actions). Safety is layered, not surface-shaped: the control-plane RBAC bounds every call to
+// the member's own role, and every mutation goes through the permission gate under the session's permission mode
+// (default=ask · auto=ask only guarded actions · bypass=never ask · plan=read-only until approved) — see
+// action-policy.ts + server.ts. Supersedes the default-deny allowlist + the AGENT_ALLOW_EVAL_DRIVE opt-in.
+export function isDefaultBaseTool(name: string): boolean {
+  return !isProtocolTool(name);
 }
 
-// A base tool is read-only (skips the HITL gate) only when it is a pure read verb AND not a curated integration
-// action — so an action like get_image_push_credentials (matches get_ but MINTS credentials) is still HITL-gated.
-// (Eval-driving actions are never read verbs, so they are never read-only regardless of the eval-drive flag.)
+// A base tool is read-only (skips the permission gate) only when it is a pure read verb and not a minting read — so
+// get_image_push_credentials (matches get_ but mints credentials) still asks. Everything else is isReadOnly:false and
+// therefore decided by the session's permission mode.
 export function isBaseToolReadOnly(name: string): boolean {
-  return isReadOnlyToolName(name) && !INTEGRATION_ACTIONS.has(name);
+  return isReadOnlyToolName(name) && !MINTING_READS.has(name);
 }
 
 // A workspace-registered MCP tool server (from the workspace's AgentSpec), with its authSecret already resolved to a
@@ -121,28 +98,23 @@ function makeInvoke(client: Client, prefix?: string): McpInvoke {
   };
 }
 
-export function mcpToolProvider(
-  mcpUrl: string,
-  codeRuntime?: CodeToolRuntime,
-  opts?: { allowEvalDrive?: boolean },
-): ToolProvider {
+export function mcpToolProvider(mcpUrl: string, codeRuntime?: CodeToolRuntime): ToolProvider {
   const baseUrl = new URL(mcpUrl);
-  const allowEvalDrive = opts?.allowEvalDrive === true;
   return async (headers, extraServers = [], skills = [], codeTools = []) => {
     const clients: Client[] = [];
     const bridged: ToolDefinition[] = [];
     let baseCall: McpInvoke | null = null;
 
-    // 1. Base everdict MCP — read verbs (incl. the knowledge reads) + the curated integration actions + the knowledge
-    // contribution writes, forwarding the caller's bearer (dogfooding the control plane's own tools). The action/write
-    // tools are bridged isReadOnly:false so each call is HITL-gated.
+    // 1. Base everdict MCP — the whole catalog minus the runner protocol tools, forwarding the caller's bearer
+    // (dogfooding the control plane's own tools). Mutations are bridged isReadOnly:false so each call is decided by
+    // the session's permission mode (see action-policy.ts).
     const baseClient = new Client({ name: "everdict-agent", version: "0.1.0" });
     try {
       const transport = new StreamableHTTPClientTransport(baseUrl, {
         requestInit: { headers: forwardHeaderRecord(headers) },
       });
       await baseClient.connect(transport);
-      const baseTools = (await baseClient.listTools()).tools.filter((t) => isDefaultBaseTool(t.name, allowEvalDrive));
+      const baseTools = (await baseClient.listTools()).tools.filter((t) => isDefaultBaseTool(t.name));
       if (baseTools.length > 0) {
         clients.push(baseClient);
         const invoke = makeInvoke(baseClient);

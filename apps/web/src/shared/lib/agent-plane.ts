@@ -56,7 +56,7 @@ export const agentPlane = {
   updateSession: <T>(
     auth: AuthContext,
     id: string,
-    patch: { title?: string; model?: string | null }
+    patch: { title?: string; model?: string | null; permissionMode?: string | null }
   ) =>
     call<T>(auth, `/agent/sessions/${encodeURIComponent(id)}`, {
       method: 'PATCH',

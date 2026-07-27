@@ -624,6 +624,96 @@ describe("agent server", () => {
       expect(res.statusCode).toBe(404);
       await app.close();
     });
+
+    it("persists the session's standing permission mode via PATCH, and null clears it back to default", async () => {
+      const app = buildServer(makeDeps());
+      const s = (await app.inject({ method: "POST", url: "/agent/sessions", headers: auth, payload: {} })).json();
+      const patched = (
+        await app.inject({
+          method: "PATCH",
+          url: `/agent/sessions/${s.id}`,
+          headers: auth,
+          payload: { permissionMode: "auto" },
+        })
+      ).json();
+      expect(patched.permissionMode).toBe("auto");
+      const cleared = (
+        await app.inject({
+          method: "PATCH",
+          url: `/agent/sessions/${s.id}`,
+          headers: auth,
+          payload: { permissionMode: null },
+        })
+      ).json();
+      expect(cleared.permissionMode).toBeUndefined();
+      await app.close();
+    });
+
+    it("a turn without an explicit mode runs under the session's standing mode (plan blocks the write)", async () => {
+      const writeCall = vi.fn(async () => ({ content: "wrote", isError: false }));
+      const app = buildServer(makeDeps(writeToolDeps(writeCall)));
+      const s = (await app.inject({ method: "POST", url: "/agent/sessions", headers: auth, payload: {} })).json();
+      await app.inject({
+        method: "PATCH",
+        url: `/agent/sessions/${s.id}`,
+        headers: auth,
+        payload: { permissionMode: "plan" },
+      });
+      await app.inject({
+        method: "POST",
+        url: `/agent/sessions/${s.id}/chat`,
+        headers: auth,
+        payload: { message: "write it" }, // no body.mode → the session's standing "plan" applies
+      });
+      expect(writeCall).not.toHaveBeenCalled();
+      await app.close();
+    });
+
+    it("a standing bypass mode skips even a session deny-rule (no permission gate at all)", async () => {
+      const writeCall = vi.fn(async () => ({ content: "wrote", isError: false }));
+      const app = buildServer(makeDeps(writeToolDeps(writeCall)));
+      const s = (await app.inject({ method: "POST", url: "/agent/sessions", headers: auth, payload: {} })).json();
+      await app.inject({
+        method: "POST",
+        url: `/agent/sessions/${s.id}/rules`,
+        headers: auth,
+        payload: { tool: "do_write", decision: "deny" },
+      });
+      await app.inject({
+        method: "PATCH",
+        url: `/agent/sessions/${s.id}`,
+        headers: auth,
+        payload: { permissionMode: "bypass" },
+      });
+      await app.inject({
+        method: "POST",
+        url: `/agent/sessions/${s.id}/chat`,
+        headers: auth,
+        payload: { message: "write it" },
+      });
+      expect(writeCall).toHaveBeenCalled(); // bypass = the member's explicit standing choice — rules don't apply
+      await app.close();
+    });
+
+    it("an explicit body.mode overrides the session's standing mode for that turn", async () => {
+      const writeCall = vi.fn(async () => ({ content: "wrote", isError: false }));
+      const app = buildServer(makeDeps(writeToolDeps(writeCall)));
+      const s = (await app.inject({ method: "POST", url: "/agent/sessions", headers: auth, payload: {} })).json();
+      await app.inject({
+        method: "PATCH",
+        url: `/agent/sessions/${s.id}`,
+        headers: auth,
+        payload: { permissionMode: "bypass" },
+      });
+      await app.inject({
+        method: "POST",
+        url: `/agent/sessions/${s.id}/chat`,
+        headers: auth,
+        payload: { message: "write it", mode: "plan" }, // one-off plan turn wins over the standing bypass
+      });
+      expect(writeCall).not.toHaveBeenCalled();
+      await app.close();
+    });
   });
 
   it("sets the conversation title from the first user message", async () => {

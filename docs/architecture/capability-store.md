@@ -340,10 +340,12 @@ integration config**, not a manual `secretBindings` map at adoption (there is no
   derives it per workspace from the settings store via the pure `configuredIntegrations` (`@everdict/domain`) — a
   gated default activates the moment its integration is configured, no adoption step.
 
-The current curated `INTEGRATION_ACTIONS` (`apps/agent/src/mcp-tools.ts`) — `post_mattermost_message`,
-`open_ci_setup_pr`, `get_image_push_credentials`, `create_github_issue`, `comment_on_github_issue`, `open_github_pr` —
-are the genuine "use" actions on the base control-plane surface today and are the **seed** of Phase 9; they migrate
-into first-party integration capabilities as the richer adapters land.
+The base control-plane surface is now **bridge-all** (docs/architecture/agent-conversations.md P13): every entity's
+reads AND mutations reach the agent (only the runner wire-protocol tools are excluded), with each mutation decided by
+the session's permission mode (default=ask · auto=ask only guarded actions · bypass · plan) on top of the RBAC. The
+former curated `INTEGRATION_ACTIONS` admission list is gone — the integration "use" actions (post_mattermost_message,
+open_ci_setup_pr, open_github_pr, …) are simply part of that surface, and they still migrate into first-party
+integration capabilities as the richer Phase 9 adapters land.
 
 ## Fourth kind — `environment` (managed eval-environment images)
 

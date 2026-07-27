@@ -3078,6 +3078,14 @@
     "model": "모델",
     "modelDefault": "워크스페이스 기본",
     "modelPick": "모델 선택",
+    "permissions": "실행 권한",
+    "permissionsPick": "실행 권한 선택",
+    "permissionModes": {
+      "default": "항상 확인",
+      "auto": "자동 — 위험 작업만 확인",
+      "bypass": "확인 없이 실행",
+      "plan": "플랜 승인 후 실행"
+    },
     "empty": "아직 대화가 없어요. 하네스 리뷰·스코어카드 분석·런타임 점검을 대화로 시작해 보세요.",
     "emptyMessages": "스코어카드·judge 트레이스·하네스·런타임에 대해 에이전트에게 물어보세요.",
     "placeholder": "에이전트에게 메시지…",

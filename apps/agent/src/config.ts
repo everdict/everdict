@@ -16,13 +16,6 @@ const ConfigSchema = z.object({
   AGENT_FALLBACK_MODEL: z.string().optional(),
   // A (typically cheaper) registered model for spawn_agent sub-agents — delegated research rarely needs the main model.
   AGENT_SUBAGENT_MODEL: z.string().optional(),
-  // Opt in the agent to DRIVE eval (S6, docs/architecture/agent-teams.md): expose the curated eval-driving write tools
-  // (run/retry scorecards, register/pin harnesses, create datasets/judges, schedule, …) beyond the default read-only +
-  // integration surface. Every such call is still HITL/plan/rule-gated and RBAC-bounded. Default off (read-only agent).
-  AGENT_ALLOW_EVAL_DRIVE: z
-    .enum(["true", "false"])
-    .optional()
-    .transform((v) => v === "true"),
   // Shared secret the control plane presents (x-internal-token) to POST /agent/events for a recipient (S4 — the
   // monitoring→proactive-team bridge). Unset → the internal event path is disabled (only user-authenticated events).
   AGENT_INTERNAL_TOKEN: z.string().optional(),

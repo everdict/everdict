@@ -157,13 +157,17 @@ The gap is not the loop — it is (a) a **shared message substrate** with addres
   the control-plane RBAC blocks anything its role can't do regardless of the allowlist — the allowlist is
   defense-in-depth + intentional scoping, not the only guard.
 
-  > **Status: S6 LANDED.** The `mcp-tools.ts` allowlist model (`INTEGRATION_ACTIONS`/`isDefaultBaseTool`/
-  > `isBaseToolReadOnly`) is now committed; S6 extended it: `isDefaultBaseTool(name, allowEvalDrive)` also admits
-  > `EVAL_ACTIONS` when `AGENT_ALLOW_EVAL_DRIVE=true` (default off → the agent stays read-only). Eval actions are
-  > never read verbs, so they're always bridged `isReadOnly:false` → HITL/plan/rule-gated, RBAC-bounded. The
-  > policy lives in `eval-actions.ts` (curated allowlist + disjoint-from-forbidden invariant). Remaining for a
-  > fuller S6: file-mutating eval work under worktree isolation (the write control-plane actions above already
-  > dispatch through the orchestrator's own isolation).
+  > **Status: S6 LANDED, then SUPERSEDED by bridge-all + permission modes.** The curated `EVAL_ACTIONS` opt-in
+  > (`AGENT_ALLOW_EVAL_DRIVE`) shipped first; the confirmed direction (2026-07-27, with the user) then replaced
+  > surface-shaping with mode-governed access: the agent's base surface is now the WHOLE control-plane catalog
+  > (mutations included; only the runner wire-protocol tools are excluded), and every mutation is decided by the
+  > session's **permission mode** — `default` (ask every time) · `auto` (ask only guarded destructive/governance/
+  > credential actions) · `bypass` (never ask) · `plan` (read-only until the plan is approved) — on top of the
+  > control-plane RBAC. The policy lives in `apps/agent/src/action-policy.ts` (protocol exclusion + the guarded
+  > class, which absorbs the old FORBIDDEN list as "ask even in auto" instead of "never see"); the mode lives on
+  > the session (`AgentSessionRecord.permissionMode`, chat-header picker, per-turn `body.mode` override). See
+  > `docs/architecture/agent-conversations.md`. Remaining for a fuller S6: file-mutating eval work under worktree
+  > isolation (the write control-plane actions above already dispatch through the orchestrator's own isolation).
 
 ## Non-goals / guardrails
 

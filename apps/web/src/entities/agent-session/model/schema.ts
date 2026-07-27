@@ -1,9 +1,19 @@
-import type { AgentMessageRecord, AgentSessionRecord } from '@everdict/contracts'
+import type {
+  AgentMessageRecord,
+  AgentPermissionMode,
+  AgentSessionRecord,
+} from '@everdict/contracts'
 import { z } from 'zod'
 
 // Runtime boundary validation stays here (zod v4); the EXPORTED types are anchored to @everdict/contracts
 // (re-architecture P4). `import type` only — the zod v3 wire schemas never run in the web.
 // Client mirror of the agent server's conversation records (docs/architecture/agent-conversations.md).
+
+// How the conversation's mutating tool calls are approved (the member's standing pick in the chat header):
+// default = ask every time · auto = ask only destructive/governance actions · bypass = never ask · plan = read-only
+// until the agent's plan is approved.
+export const AGENT_PERMISSION_MODES = ['default', 'auto', 'bypass', 'plan'] as const
+export const agentPermissionModeSchema = z.enum(AGENT_PERMISSION_MODES)
 
 export const agentSessionSchema = z.object({
   id: z.string(),
@@ -12,6 +22,8 @@ export const agentSessionSchema = z.object({
   title: z.string(),
   // Registered model id this conversation runs on (the member's per-conversation pick); unset → workspace/server default.
   model: z.string().optional(),
+  // The session's standing permission mode; unset → "default" (ask for every mutation).
+  permissionMode: agentPermissionModeSchema.optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 })
@@ -110,5 +122,6 @@ type _messageBack = AssertAssignable<AgentMessageRecord, WebAgentMessage>
 // Exported names alias the contract types (consumers untouched: same identifiers).
 export type AgentSession = AgentSessionRecord
 export type AgentMessage = AgentMessageRecord
+export type { AgentPermissionMode }
 
 export type __agentSessionDriftGuard = [_sessionFwd, _sessionBack, _messageFwd, _messageBack]
