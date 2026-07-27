@@ -171,6 +171,68 @@ describe("CapabilityService", () => {
   });
 });
 
+// Instance policy (operator EVERDICT_ALLOW_MEMBER_PUBLIC_PUBLISH) — when opted in, a plain member may publish/promote
+// to `public` (the community-instance model), otherwise public stays admin-gated.
+describe("CapabilityService — member public-publish policy", () => {
+  const open = () =>
+    new CapabilityService({
+      store: fakeStore(),
+      allowMemberPublicPublish: true,
+      now: () => "2026-07-27T00:00:00.000Z",
+    });
+
+  it("lets a member publish a new capability public when the instance opts in", async () => {
+    const s = open();
+    await expect(s.save("acme", member("alice"), "pub", { ...skill(), visibility: "public" })).resolves.toMatchObject({
+      created: true,
+    });
+  });
+
+  it("lets a member promote reach to public when the instance opts in", async () => {
+    const s = open();
+    await s.save("acme", member("alice"), "t", { ...skill(), visibility: "private" });
+    await expect(
+      s.setVisibility("acme", "t", { visibility: "public", sharedWith: [] }, member("alice")),
+    ).resolves.toMatchObject({ visibility: "public" });
+  });
+});
+
+// First-party (Everdict-authored) built-ins surfaced in the public catalog — merged in FIRST, ahead of user-published
+// public capabilities, so the store shows "the same tool, two channels: default + marketplace".
+describe("CapabilityService — first-party built-ins in the public catalog", () => {
+  const builtIn: CapabilityRecord = {
+    id: "web-search",
+    tenant: "_everdict",
+    version: "1.0.0",
+    name: "web_search",
+    description: "Search the web",
+    spec: { type: "code", language: "node", code: "…", parametersSchema: {}, isReadOnly: true, requiredSecrets: [] },
+    visibility: "public",
+    sharedWith: [],
+    tags: ["built-in"],
+    createdBy: "everdict",
+    createdAt: "2026-07-27T00:00:00.000Z",
+  };
+  const s = () =>
+    new CapabilityService({
+      store: fakeStore(),
+      firstPartyCatalog: () => [builtIn],
+      now: () => "2026-07-27T00:00:00.000Z",
+    });
+
+  it("merges the built-ins ahead of the DB public capabilities", async () => {
+    const svcWith = s();
+    await svcWith.save("acme", admin("alice"), "custom", { ...skill(), visibility: "public" });
+    const listed = await svcWith.listPublic("beta");
+    expect(listed.map((c) => c.id)).toEqual(["web-search", "custom"]);
+    expect(listed[0]?.tenant).toBe("_everdict");
+  });
+
+  it("shows the built-ins even with an empty DB catalog", async () => {
+    expect((await s().listPublic("beta")).map((c) => c.id)).toEqual(["web-search"]);
+  });
+});
+
 // Environment kind — publish-time image classification (docs/architecture/environment-image-store.md). Warn-not-block:
 // a warning never fails the save, and a coordinates failure yields no warnings.
 describe("CapabilityService — environment image warnings", () => {

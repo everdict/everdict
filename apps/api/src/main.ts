@@ -1,7 +1,7 @@
 import { KnowledgeService } from "@everdict/application-control";
 import { ProxyService } from "@everdict/application-control";
 import { SkillService } from "@everdict/application-control";
-import { CapabilityService } from "@everdict/application-control";
+import { CapabilityService, firstPartyDefaults } from "@everdict/application-control";
 import { perTenantTrustZones } from "@everdict/domain";
 import type { BrowserSessionProvisioner } from "./common/browser-session-provisioner.js";
 import { CaseRecorder } from "./common/case-recorder.js";
@@ -381,6 +381,9 @@ async function main(): Promise<void> {
   // node, so bound them so one tenant (or the fleet) can't exhaust the host. Unset ⇒ unlimited (single-tenant/dev).
   const browserMaxPerTenant = positiveIntEnv(process.env.EVERDICT_BROWSER_MAX_SESSIONS_PER_TENANT);
   const browserMaxTotal = positiveIntEnv(process.env.EVERDICT_BROWSER_MAX_SESSIONS);
+  // Community-instance policy: let any member (not just an admin) publish a capability to the instance-wide public
+  // catalog. Off by default (public stays admin-gated). See docs/architecture/capability-store.md.
+  const allowMemberPublicPublish = process.env.EVERDICT_ALLOW_MEMBER_PUBLIC_PUBLISH === "1";
   const browserSessionService = browserSessionsEnabled
     ? new BrowserSessionService(routingBrowserProvisioner, {
         resolveProxy: (ws, country) => proxyService.resolve(ws, country),
@@ -456,7 +459,12 @@ async function main(): Promise<void> {
     capabilityService: new CapabilityService({
       store: capabilityStore,
       registryCoordinates: (workspace) => imageRegistryService.coordinates(workspace),
+      allowMemberPublicPublish,
+      firstPartyCatalog: () => firstPartyDefaults().map((d) => d.record),
     }),
+    // Instance policy surfaced to the web (GET /me → config): does a plain member — not only an admin — get to
+    // publish a capability to the instance-wide `public` catalog? Operator opt-in for a community-style deployment.
+    allowMemberPublicPublish,
     skillGenerator: new SkillGenerator({
       models: modelRegistry,
       scopedSecretsFor,

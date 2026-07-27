@@ -143,8 +143,14 @@ capabilities to be readable from a workspace other than the one they live in —
   `sharedWith`. Member-gated (a member owns fanning out their own capability).
 - **public** — the real "expose to everyone" tier: readable by any authenticated subject in **any** Everdict
   workspace (a dedicated `listPublic()` read path, no tenant filter). This is where the genuine trust-boundary cost
-  lives, so setting `visibility='public'` is **admin-gated** (publishing globally is a heavy act; operator review is
-  a later option).
+  lives, so setting `visibility='public'` is **admin-gated by default** (publishing globally is a heavy act).
+  **Instance policy (`EVERDICT_ALLOW_MEMBER_PUBLIC_PUBLISH`)** relaxes this: a self-hosted operator running a
+  *community* instance sets it so **any member** — not only an admin — may publish/promote to `public`. It is a
+  deployment property ("is this a shared-catalog instance?"), not per-workspace state, so it lives in operator config
+  (no migration), is injected into `CapabilityService` as `allowMemberPublicPublish`, and is surfaced to the web on
+  `GET /me → config.allowMemberPublicPublish` for UX gating (the service still enforces). The `mayPublishPublic(actor)`
+  helper is the single authority — both `save()` (new-capability create) and `setVisibility()` (reach promotion)
+  consult it.
 
 A pure kernel in `@everdict/domain` — `canConsume(capability, { tenant, subject })` and
 `visibleCapabilities(all, { tenant, subject })` — is the single authority, reused by the store service (browse) AND
@@ -280,6 +286,12 @@ default IS a capability, so it is browsable, versioned, and replaceable like any
 ### The tier
 - **First-party** = operator/Everdict-authored capabilities owned by a reserved `_everdict` tenant (mirrors the
   `_shared` registry fallback), readable by every workspace.
+- **Browsable in the store** — the built-ins are code-defined (`firstPartyDefaults()`, not DB rows), so
+  `CapabilityService.listPublic()` **merges them ahead of** the DB `public` catalog (`firstPartyCatalog` injected).
+  This is what makes "the same tool, two channels" true in the store *surface*, not just in the agent runtime: the
+  public tab shows the built-ins with a **"built-in" badge** (owner `_everdict`), and because they aren't DB rows they
+  are **read-only** there (no edit/reach/delete — even for an admin) and shown as *provided by default* rather than an
+  Adopt button (they're managed via Settings › Agent `disabledDefaults`, not adoption).
 - **Default-enabled** = the agent includes them **without** an `AgentSpec.capabilities[]` pin. The effective toolset:
   ```
   first-party default capabilities (auto, gated)   ← web search · PDF · integration use-actions

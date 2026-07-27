@@ -3318,6 +3318,8 @@
     "vis_workspace": "워크스페이스",
     "vis_subset": "부분공개",
     "vis_public": "전체공개",
+    "builtIn": "기본 도구",
+    "builtInProvided": "기본 제공됨",
     "emptyTitle": "아직 없습니다",
     "emptyHint": "워크스페이스가 채택·실행할 도구나 스킬을 발행하세요.",
     "menu": "capability 메뉴",

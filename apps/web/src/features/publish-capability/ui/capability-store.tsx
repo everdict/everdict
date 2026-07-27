@@ -56,6 +56,12 @@ function offersWrite(c: Capability): boolean {
 }
 const capKey = (c: { tenant: string; id: string }): string => `${c.tenant}/${c.id}`
 
+// The reserved owner of first-party (Everdict-authored) built-ins — mirrors contracts FIRST_PARTY_TENANT. These are
+// code-defined (not DB rows), merged into the public catalog by the control plane; they can't be edited/deleted and
+// are provided as defaults (managed in Settings › Agent), so the store shows them read-only with a "built-in" badge.
+const BUILT_IN_TENANT = '_everdict'
+const isBuiltIn = (c: { tenant: string }): boolean => c.tenant === BUILT_IN_TENANT
+
 type Author = { name: string; avatarUrl?: string }
 type RequiredSecret = { name: string; description: string }
 
@@ -93,6 +99,7 @@ export function CapabilityStore({
   currentWorkspace,
   currentSubject,
   isAdmin,
+  allowMemberPublicPublish,
 }: {
   mine: Capability[]
   publicCaps: Capability[]
@@ -105,6 +112,7 @@ export function CapabilityStore({
   currentWorkspace: string
   currentSubject?: string
   isAdmin: boolean
+  allowMemberPublicPublish: boolean
 }) {
   const t = useTranslations('capabilityStore')
   const [tab, setTab] = useState<'mine' | 'public'>('mine')
@@ -120,7 +128,10 @@ export function CapabilityStore({
 
   const adopted = useMemo(() => new Set(adoptedKeys), [adoptedKeys])
 
-  const canManage = (c: Capability) => c.createdBy === currentSubject || isAdmin
+  // public 발행 가능? admin 은 항상, 멤버는 인스턴스 정책이 열려 있을 때. (서버가 최종 강제 — 여기선 UX 게이팅)
+  const canPublishPublic = isAdmin || allowMemberPublicPublish
+  // built-in 은 코드정의(DB 미존재)라 편집/삭제/reach 불가 — admin 이라도 관리 메뉴를 숨긴다(setVisibility/delete 는 404).
+  const canManage = (c: Capability) => !isBuiltIn(c) && (c.createdBy === currentSubject || isAdmin)
   const authorOf = (createdBy: string): Author => {
     const a = authors[createdBy]
     return {
@@ -267,6 +278,12 @@ export function CapabilityStore({
                       <VisIcon className="size-3" />
                       {t(`vis_${c.visibility}`)}
                     </Badge>
+                    {isBuiltIn(c) && (
+                      <Badge tone="success" className="shrink-0 gap-1">
+                        <Sparkles className="size-3" />
+                        {t('builtIn')}
+                      </Badge>
+                    )}
                     <code className="shrink-0 rounded bg-secondary px-1.5 py-0.5 font-mono text-[11px] text-secondary-foreground ring-1 ring-inset ring-border">
                       {c.version}
                     </code>
@@ -385,7 +402,13 @@ export function CapabilityStore({
                     />
                     <span>{t('createdBy', { name: author.name })}</span>
                   </div>
-                  {canAdopt &&
+                  {isBuiltIn(c) ? (
+                    <span className="flex items-center gap-1 text-[11.5px] text-muted-foreground">
+                      <Check className="size-3.5 text-success" />
+                      {t('builtInProvided')}
+                    </span>
+                  ) : (
+                    canAdopt &&
                     c.spec.type !== 'environment' &&
                     (adopted.has(capKey(c)) ? (
                       <Button
@@ -402,7 +425,8 @@ export function CapabilityStore({
                         <Plus />
                         {t('adopt')}
                       </Button>
-                    ))}
+                    ))
+                  )}
                 </div>
               </div>
             )
@@ -415,6 +439,7 @@ export function CapabilityStore({
           capability={editing === 'new' ? null : editing}
           myWorkspaces={myWorkspaces}
           ownerId={currentWorkspace}
+          canPublishPublic={canPublishPublic}
           onClose={() => setEditing(null)}
         />
       )}
@@ -422,7 +447,7 @@ export function CapabilityStore({
       {reaching !== null && (
         <ReachDialog
           capability={reaching}
-          isAdmin={isAdmin}
+          canPublishPublic={canPublishPublic}
           myWorkspaces={myWorkspaces}
           onClose={() => setReaching(null)}
         />
@@ -473,11 +498,13 @@ function CapabilityEditorDialog({
   capability,
   myWorkspaces,
   ownerId,
+  canPublishPublic,
   onClose,
 }: {
   capability: Capability | null
   myWorkspaces: { id: string; name: string }[]
   ownerId: string
+  canPublishPublic: boolean
   onClose: () => void
 }) {
   const t = useTranslations('capabilityStore')
@@ -901,7 +928,15 @@ function CapabilityEditorDialog({
         {isNew && (
           <div className="space-y-1">
             <Label>{t('visibility')}</Label>
-            <VisibilityPicker value={visibility} onChange={setVisibility} t={t} />
+            <VisibilityPicker
+              value={visibility}
+              onChange={setVisibility}
+              t={t}
+              disablePublic={!canPublishPublic}
+            />
+            {visibility === 'public' && !canPublishPublic && (
+              <p className="text-[12px] text-muted-foreground">{t('publicAdminOnly')}</p>
+            )}
             {visibility === 'subset' && (
               <div className="space-y-1 pt-1">
                 <Label>{t('sharedWith')}</Label>
@@ -934,12 +969,12 @@ function CapabilityEditorDialog({
 // reach(공개범위) 변경 다이얼로그 — 전 라이브 버전 관통. public 은 admin 만.
 function ReachDialog({
   capability,
-  isAdmin,
+  canPublishPublic,
   myWorkspaces,
   onClose,
 }: {
   capability: Capability
-  isAdmin: boolean
+  canPublishPublic: boolean
   myWorkspaces: { id: string; name: string }[]
   onClose: () => void
 }) {
@@ -970,9 +1005,9 @@ function ReachDialog({
           value={visibility}
           onChange={setVisibility}
           t={t}
-          disablePublic={!isAdmin}
+          disablePublic={!canPublishPublic}
         />
-        {visibility === 'public' && !isAdmin && (
+        {visibility === 'public' && !canPublishPublic && (
           <p className="text-[12px] text-muted-foreground">{t('publicAdminOnly')}</p>
         )}
         {visibility === 'subset' && (
@@ -995,7 +1030,7 @@ function ReachDialog({
           <Button
             size="sm"
             onClick={apply}
-            disabled={pending || (visibility === 'public' && !isAdmin)}
+            disabled={pending || (visibility === 'public' && !canPublishPublic)}
           >
             {pending ? t('saving') : t('save')}
           </Button>

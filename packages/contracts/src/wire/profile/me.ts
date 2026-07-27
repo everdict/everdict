@@ -20,5 +20,13 @@ export const MeResponseSchema = z.object({
     "All workspaces the subject is a member of (present when the workspace service is configured)",
   ),
   profile: UserProfileResponseSchema.optional().describe("Mutable display profile (present when one exists)"),
+  config: z
+    .object({
+      allowMemberPublicPublish: z
+        .boolean()
+        .describe("Instance policy: a member (not only an admin) may publish a capability to the public catalog"),
+    })
+    .optional()
+    .describe("Read-only instance config the web needs for UX gating (the control plane still enforces)"),
 });
 export type MeResponse = z.infer<typeof MeResponseSchema>;

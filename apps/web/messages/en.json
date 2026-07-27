@@ -3318,6 +3318,8 @@
     "vis_workspace": "Workspace",
     "vis_subset": "Subset",
     "vis_public": "Public",
+    "builtIn": "Built-in",
+    "builtInProvided": "Provided by default",
     "emptyTitle": "Nothing here yet",
     "emptyHint": "Publish a tool or skill your workspace can adopt and run.",
     "menu": "Capability menu",
