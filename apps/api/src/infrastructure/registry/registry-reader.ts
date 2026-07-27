@@ -1,5 +1,7 @@
-import type { ImageManifestInfo, RegistryReader } from "@everdict/application-control";
+import type { ImageManifestInfo, RegistryConnectivity, RegistryReader } from "@everdict/application-control";
 import { type ImageRegistryCoordinates, type RegistryAuth, UpstreamError } from "@everdict/contracts";
+
+const PROBE_TIMEOUT_MS = 10_000; // cap a connection probe so an unreachable host doesn't hang the settings form
 
 // The fetch-backed Docker Registry HTTP API v2 read adapter — owns the base URL, the bearer/basic token-auth handshake
 // (401 → WWW-Authenticate Bearer challenge → fetch a token from the realm with Basic creds → retry; basic-auth direct
@@ -103,6 +105,57 @@ export function dockerRegistryReader(fetchImpl?: typeof fetch): RegistryReader {
   };
 
   return {
+    // Connectivity + auth probe — GET /v2/ (the version endpoint) with the same handshake, classified rather than
+    // thrown. A transport/DNS/timeout failure = unreachable; a rejected 401 challenge = auth; any other non-2xx =
+    // error; a 2xx (anon or post-handshake) = reachable. Bounded by PROBE_TIMEOUT_MS so a dead host doesn't hang.
+    async checkConnection(coords, auth): Promise<RegistryConnectivity> {
+      const doFetch = fetchImpl ?? fetch;
+      const url = `${baseUrl(coords.host)}/v2/`;
+      const get = (headers: Record<string, string>): Promise<Response> =>
+        doFetch(url, { headers, signal: AbortSignal.timeout(PROBE_TIMEOUT_MS) });
+      let res: Response;
+      try {
+        res = await get({});
+        if (res.status === 401) {
+          const challenge = parseChallenge(res.headers.get("www-authenticate") ?? "");
+          if (challenge) {
+            const token = await fetchToken(challenge, auth);
+            if (token) res = await get({ authorization: `Bearer ${token}` });
+            else
+              return {
+                reachable: false,
+                reason: "auth",
+                detail: auth
+                  ? "The registry rejected the credentials."
+                  : "The registry requires authentication — configure a pull or push secret, then test again.",
+              };
+          } else if (auth) {
+            res = await get({ authorization: basicHeader(auth) });
+          }
+        }
+      } catch (e) {
+        const detail = e instanceof Error ? e.message : String(e);
+        return { reachable: false, reason: "unreachable", detail: `Could not reach ${coords.host}: ${detail}` };
+      }
+      if (res.ok)
+        return {
+          reachable: true,
+          detail: auth
+            ? `Connected to ${coords.host} — the registry accepted the credentials.`
+            : `Connected to ${coords.host} (anonymous access).`,
+        };
+      if (res.status === 401 || res.status === 403)
+        return {
+          reachable: false,
+          reason: "auth",
+          detail: `The registry rejected the credentials (HTTP ${res.status}).`,
+        };
+      return {
+        reachable: false,
+        reason: "error",
+        detail: `${coords.host} did not respond as a Docker Registry v2 API (HTTP ${res.status}).`,
+      };
+    },
     async listTags(coords, auth, repository) {
       const body: unknown = await (await v2Get(coords, auth, `${repository}/tags/list`, undefined))
         .json()

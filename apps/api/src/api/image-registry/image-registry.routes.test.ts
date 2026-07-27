@@ -15,6 +15,7 @@ const acme = { "x-everdict-tenant": "acme" };
 function build() {
   const settings = new InMemoryWorkspaceSettingsStore();
   const reader = {
+    checkConnection: vi.fn(async () => ({ reachable: true, detail: "Connected (anonymous access)." })),
     listTags: vi.fn(async () => ["v1", "v2"]),
     inspectManifest: vi.fn(async (_c: unknown, _a: unknown, _r: string, reference: string) => ({
       reference,
@@ -60,6 +61,29 @@ describe("image registry read routes (tags / manifest)", () => {
       method: "GET",
       url: "/workspace/image-registries/tags",
       headers: acme,
+    });
+    expect(res.statusCode).toBe(400);
+  });
+});
+
+describe("image registry probe route (connection test before registering)", () => {
+  it("returns the classified connection outcome for a host (no side effects)", async () => {
+    const res = await build().app.inject({
+      method: "POST",
+      url: "/workspace/image-registries/probe",
+      headers: acme,
+      payload: { host: "ghcr.io", namespace: "acme" },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({ reachable: true, credential: "anonymous" });
+  });
+
+  it("400s when host is missing", async () => {
+    const res = await build().app.inject({
+      method: "POST",
+      url: "/workspace/image-registries/probe",
+      headers: acme,
+      payload: {},
     });
     expect(res.statusCode).toBe(400);
   });

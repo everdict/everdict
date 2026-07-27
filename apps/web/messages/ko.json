@@ -1022,6 +1022,13 @@
     "update": "갱신",
     "register": "등록",
     "cancel": "취소",
+    "testConnection": "연결 테스트",
+    "testing": "테스트 중…",
+    "probeConnected": "연결됨",
+    "probeAuthFailed": "인증 실패",
+    "probeUnreachable": "레지스트리에 연결할 수 없음",
+    "probeError": "올바른 레지스트리가 아님",
+    "testBeforeSave": "저장하기 전에 연결을 테스트하세요.",
     "missingSecrets": "참조한 시크릿이 아직 없어요: {names} — 시크릿 탭에서 저장하면 바로 동작해요."
   },
   "manageInvites": {

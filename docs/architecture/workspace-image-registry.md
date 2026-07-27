@@ -120,6 +120,7 @@ tool twins in `mcp.ts`:
 |---|---|---|
 | `GET /workspace/image-registries` → `{registries}` | `list_workspace_image_registries` | `harnesses:read` (viewer+) |
 | `PUT /workspace/image-registries` (name upsert) | `set_workspace_image_registry` | `settings:write` (admin) |
+| `POST /workspace/image-registries/probe` | `probe_workspace_image_registry` | `settings:write` (admin) |
 | `DELETE /workspace/image-registries/:name` | `remove_workspace_image_registry` | `settings:write` (admin) |
 | `POST /workspace/image-registries/push-credentials?name=` | `get_image_push_credentials` (`registry` arg) | `images:push` (member+) |
 
@@ -128,6 +129,20 @@ tool twins in `mcp.ts`:
   building and classification.
 - `PUT` verifies referenced secret names exist in the workspace SecretStore (warn field
   `missingSecrets`, not a hard failure — same convention as runtime registration).
+- **`probe` (connection test — before registering).** `GET /v2/` against `host` with the
+  configured credential resolved from the SecretStore, run through the same bearer/basic
+  token-auth handshake as the read adapter (`RegistryReader.checkConnection`, so no new engine)
+  and **classified, never thrown** (a probe classifies): `{reachable, detail, reason?, credential}`
+  where `reason ∈ auth | unreachable | error` (absent when reachable) and `credential ∈ push |
+  pull | anonymous`. Single-credential test: the **push** secret is preferred (the `everdict
+  image push` write path), else the **pull** secret, else an anonymous probe; a secret name with
+  no stored value returns a friendly `{reachable:false, reason:"auth"}` ("save the secret first")
+  rather than an error. Nothing is stored (side-effect-free), and a classified failure is still a
+  `200`. The **web register form gates Save on a fresh successful probe** (the fingerprint is
+  `host|namespace|username|pull|push`; editing any of them requires re-testing) so a registry is
+  never registered without verifying it is reachable and the credential authenticates — the API
+  `PUT` upsert itself stays pure (MCP/programmatic writes are unaffected). Mirrors the trace-source
+  connection probe.
 - `push-credentials` resolves `pushSecretName` → value from the **workspace** secret tier and
   returns `{host, namespace?, username?, password, imagePrefix}`. Missing registry → 404;
   registry without `pushSecretName` → 400 (push not configured); referenced secret absent → 404 with

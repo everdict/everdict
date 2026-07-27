@@ -2,6 +2,7 @@ import type {
   ImageRegistryRoster,
   ImageRegistryUpsertResult,
   ImageRegistryView,
+  ImageRegistryProbeResult as WireImageRegistryProbeResult,
 } from '@everdict/contracts/wire'
 import { z } from 'zod'
 
@@ -31,23 +32,36 @@ export const imageRegistrySetResponseSchema = z.object({
   missingSecrets: z.array(z.string()).optional(),
 })
 
-// Drift guards — all three are identical-shape (config = every wire field; roster = registries; set = config +
-// missingSecrets), so the guards are bidirectional: a renamed/added field on EITHER side fails the web typecheck.
+// POST /workspace/image-registries/probe → the connection-test outcome (a classified failure is still a 200).
+export const imageRegistryProbeResultSchema = z.object({
+  reachable: z.boolean(),
+  detail: z.string(),
+  reason: z.enum(['auth', 'unreachable', 'error']).optional(),
+  credential: z.enum(['push', 'pull', 'anonymous']),
+})
+
+// Drift guards — all four are identical-shape (config = every wire field; roster = registries; set = config +
+// missingSecrets; probe = the probe result), so the guards are bidirectional: a renamed/added field on EITHER side
+// fails the web typecheck.
 type AssertAssignable<A extends B, B> = A
 type WebImageRegistryConfig = z.infer<typeof imageRegistryConfigSchema>
 type WebImageRegistriesResponse = z.infer<typeof imageRegistriesResponseSchema>
 type WebImageRegistrySetResponse = z.infer<typeof imageRegistrySetResponseSchema>
+type WebImageRegistryProbeResult = z.infer<typeof imageRegistryProbeResultSchema>
 type _configFwd = AssertAssignable<WebImageRegistryConfig, ImageRegistryView>
 type _configBack = AssertAssignable<ImageRegistryView, WebImageRegistryConfig>
 type _rosterFwd = AssertAssignable<WebImageRegistriesResponse, ImageRegistryRoster>
 type _rosterBack = AssertAssignable<ImageRegistryRoster, WebImageRegistriesResponse>
 type _setFwd = AssertAssignable<WebImageRegistrySetResponse, ImageRegistryUpsertResult>
 type _setBack = AssertAssignable<ImageRegistryUpsertResult, WebImageRegistrySetResponse>
+type _probeFwd = AssertAssignable<WebImageRegistryProbeResult, WireImageRegistryProbeResult>
+type _probeBack = AssertAssignable<WireImageRegistryProbeResult, WebImageRegistryProbeResult>
 
 // Exported names alias the contract types (consumers untouched: same identifiers).
 export type ImageRegistryConfig = ImageRegistryView
 export type ImageRegistriesResponse = ImageRegistryRoster
 export type ImageRegistrySetResponse = ImageRegistryUpsertResult
+export type ImageRegistryProbeResult = WireImageRegistryProbeResult
 
 export type __imageRegistryDriftGuard = [
   _configFwd,
@@ -56,4 +70,6 @@ export type __imageRegistryDriftGuard = [
   _rosterBack,
   _setFwd,
   _setBack,
+  _probeFwd,
+  _probeBack,
 ]

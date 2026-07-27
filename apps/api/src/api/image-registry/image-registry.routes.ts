@@ -47,6 +47,32 @@ export function registerImageRegistryRoutes(app: FastifyInstance, deps: ServerDe
     }
   });
 
+  // Connection test BEFORE registering (the web form gates Save on a reachable result) — GET /v2/ against the host
+  // with the configured credential resolved from the SecretStore, classified (a failure is still a 200). settings:write
+  // (same as register — it resolves the workspace secret). No side effects (nothing is stored).
+  app.post("/workspace/image-registries/probe", { schema: imageRegistryDocs.probe }, async (req, reply) => {
+    if (!deps.imageRegistryService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "image registry service not configured" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    const body = z
+      .object({
+        host: z.string().min(1),
+        namespace: z.string().min(1).optional(),
+        username: z.string().min(1).optional(),
+        pullSecretName: z.string().min(1).optional(),
+        pushSecretName: z.string().min(1).optional(),
+      })
+      .safeParse(req.body ?? {});
+    if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: zodIssues(body.error).join("; ") });
+    try {
+      gate(principal, "settings:write");
+      return reply.send(await deps.imageRegistryService.probe(principal.workspace, body.data));
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
   app.delete("/workspace/image-registries/:name", { schema: imageRegistryDocs.remove }, async (req, reply) => {
     if (!deps.imageRegistryService)
       return reply.code(404).send({ code: "NOT_FOUND", message: "image registry service not configured" });

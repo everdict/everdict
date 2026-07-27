@@ -7,6 +7,7 @@ function svc(secrets: Record<string, string> = {}) {
   const settings = new InMemoryWorkspaceSettingsStore();
   // A fake Docker Registry v2 reader — records its (coords, auth, repository) calls; returns canned tags / manifest.
   const reader = {
+    checkConnection: vi.fn(async () => ({ reachable: true, detail: "ok" })),
     listTags: vi.fn(async () => ["v1", "v2"]),
     inspectManifest: vi.fn(async (_c: unknown, _a: unknown, _r: string, reference: string) => ({
       reference,
@@ -66,6 +67,44 @@ describe("ImageRegistryService — multiple registries", () => {
     await expect(service.pushCredentials("acme")).rejects.toBeInstanceOf(BadRequestError);
     expect((await service.pushCredentials("acme", "two")).host).toBe("reg2.io");
     await expect(service.pushCredentials("acme", "missing")).rejects.toBeInstanceOf(NotFoundError);
+  });
+
+  it("probe prefers the push secret, resolves its value, and passes it to the reader as the credential", async () => {
+    const { service, reader } = svc({ PUSH: "ptok", PULL: "ltok" });
+    const r = await service.probe("acme", {
+      host: "ghcr.io",
+      namespace: "acme",
+      username: "u",
+      pullSecretName: "PULL",
+      pushSecretName: "PUSH",
+    });
+    expect(r).toEqual({ reachable: true, detail: "ok", credential: "push" });
+    expect(reader.checkConnection).toHaveBeenCalledWith(
+      { host: "ghcr.io", namespace: "acme" },
+      { host: "ghcr.io", username: "u", password: "ptok" },
+    );
+  });
+
+  it("probe falls back to the pull secret when no push secret is configured", async () => {
+    const { service, reader } = svc({ PULL: "ltok" });
+    const r = await service.probe("acme", { host: "reg.io", pullSecretName: "PULL" });
+    expect(r.credential).toBe("pull");
+    expect(reader.checkConnection).toHaveBeenCalledWith({ host: "reg.io" }, { host: "reg.io", password: "ltok" });
+  });
+
+  it("probe runs anonymously (no auth) when neither secret is configured", async () => {
+    const { service, reader } = svc();
+    const r = await service.probe("acme", { host: "reg.io" });
+    expect(r.credential).toBe("anonymous");
+    expect(reader.checkConnection).toHaveBeenCalledWith({ host: "reg.io" }, undefined);
+  });
+
+  it("probe returns a friendly auth result (not a throw, no reader call) when the secret has no value yet", async () => {
+    const { service, reader } = svc(); // SecretStore empty — PUSH not saved
+    const r = await service.probe("acme", { host: "reg.io", pushSecretName: "PUSH" });
+    expect(r).toMatchObject({ reachable: false, reason: "auth", credential: "push" });
+    expect(r.detail).toContain("save the secret first");
+    expect(reader.checkConnection).not.toHaveBeenCalled();
   });
 
   it("remove unregisters by name — the other registries remain", async () => {

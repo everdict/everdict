@@ -1,3 +1,4 @@
+import { ImageRegistryProbeResultSchema } from "@everdict/contracts/wire";
 import { PushCredentialsResponseSchema } from "@everdict/contracts/wire";
 import { ImageRegistryRosterSchema } from "@everdict/contracts/wire";
 import { ImageRegistryUpsertResultSchema } from "@everdict/contracts/wire";
@@ -44,6 +45,28 @@ const docs = {
         description: "Stored registry (+ missing-secret warning)",
         ...toJsonSchema(ImageRegistryUpsertResultSchema),
       },
+      ...errorResponses(400, 401, 403, 404),
+    },
+  },
+  probe: {
+    summary: "Test a registry connection before registering",
+    description:
+      "Connection test — GET /v2/ against the host with the configured credential resolved from the SecretStore, " +
+      "classified (reachable / auth / unreachable / error). Single-credential test: the push secret is preferred " +
+      "(the `everdict image push` write path), else the pull secret, else an anonymous probe. Nothing is stored. A " +
+      "classified failure is still a 200 (reason set, reachable=false). Requires settings:write (it resolves the workspace secret).",
+    tags: ["image-registry"],
+    body: toJsonSchema(
+      z.object({
+        host: z.string().min(1).describe("Registry host[:port] — not a URL (no scheme)"),
+        namespace: z.string().min(1).optional(),
+        username: z.string().min(1).optional().describe("docker login username (omit for token-only registries)"),
+        pullSecretName: z.string().min(1).optional().describe("SecretStore name of the pull token/password"),
+        pushSecretName: z.string().min(1).optional().describe("SecretStore name of the push token/password"),
+      }),
+    ),
+    response: {
+      200: { description: "Connection-test outcome", ...toJsonSchema(ImageRegistryProbeResultSchema) },
       ...errorResponses(400, 401, 403, 404),
     },
   },

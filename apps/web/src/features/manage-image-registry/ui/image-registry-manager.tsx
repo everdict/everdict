@@ -11,7 +11,21 @@ import { Input, Label } from '@/shared/ui/input'
 import { SettingsList, SettingsRow } from '@/shared/ui/settings-list'
 import { InfoTip } from '@/shared/ui/tooltip'
 
-import { removeImageRegistryAction, upsertImageRegistryAction } from '../api/manage-image-registry'
+import {
+  probeImageRegistryAction,
+  removeImageRegistryAction,
+  upsertImageRegistryAction,
+} from '../api/manage-image-registry'
+
+// A connection test the form gates Save on — the (host|namespace|username|pull|push) fingerprint it ran against is
+// stored so any edit to those fields invalidates it (re-test required), mirroring the trace-source probe.
+type ProbeState = {
+  status: 'idle' | 'testing' | 'ok' | 'fail'
+  key?: string
+  detail?: string
+  reason?: 'auth' | 'unreachable' | 'error'
+  credential?: 'push' | 'pull' | 'anonymous'
+}
 
 // Workspace image registries (BYO, multiple) — once an admin registers one it becomes the provenance-classification baseline for harness images,
 // and members publish locally built images here via everdict image push (with several, select via --registry <name>).
@@ -40,7 +54,15 @@ export function ImageRegistryManager({
   const [pullName, setPullName] = useState('')
   const [pushName, setPushName] = useState('')
   const [created, setCreated] = useState<string[]>([])
+  const [probe, setProbe] = useState<ProbeState>({ status: 'idle' })
   const names = [...new Set([...secretNames, ...created])]
+
+  // The connection fingerprint the probe must match — editing any connection field invalidates a prior test.
+  const probeKey = `${host.trim()}|${namespace.trim()}|${username.trim()}|${pullName.trim()}|${pushName.trim()}`
+  const probeFresh = probe.key === probeKey
+  const reachable = probe.status === 'ok' && probeFresh
+  // Save is gated on a fresh successful test (so a registry is never registered blind) + a name.
+  const canSave = reachable && name.trim() !== '' && !pending
 
   function resetForm() {
     setEditing(undefined)
@@ -50,6 +72,7 @@ export function ImageRegistryManager({
     setUsername('')
     setPullName('')
     setPushName('')
+    setProbe({ status: 'idle' })
   }
 
   function startEdit(r: ImageRegistryConfig) {
@@ -62,6 +85,37 @@ export function ImageRegistryManager({
     setUsername(r.username ?? '')
     setPullName(r.pullSecretName ?? '')
     setPushName(r.pushSecretName ?? '')
+    setProbe({ status: 'idle' }) // editing requires re-testing the connection
+  }
+
+  function onTest() {
+    setError(undefined)
+    if (!host.trim()) {
+      setError(t('validationHost'))
+      return
+    }
+    const key = probeKey
+    setProbe({ status: 'testing', key })
+    startTransition(async () => {
+      const r = await probeImageRegistryAction({
+        host: host.trim(),
+        ...(namespace.trim() ? { namespace: namespace.trim() } : {}),
+        ...(username.trim() ? { username: username.trim() } : {}),
+        ...(pullName.trim() ? { pullSecretName: pullName.trim() } : {}),
+        ...(pushName.trim() ? { pushSecretName: pushName.trim() } : {}),
+      })
+      if (!r.ok) {
+        setProbe({ status: 'fail', key, reason: 'error', detail: r.error })
+        return
+      }
+      setProbe({
+        status: r.result.reachable ? 'ok' : 'fail',
+        key,
+        detail: r.result.detail,
+        reason: r.result.reason,
+        credential: r.result.credential,
+      })
+    })
   }
 
   function onSave() {
@@ -244,20 +298,52 @@ export function ImageRegistryManager({
             </div>
           </div>
 
-          <div className="flex items-center gap-3">
-            <Button size="sm" disabled={pending} onClick={onSave}>
-              {pending ? t('saving') : editing ? t('update') : t('register')}
-            </Button>
-            {editing && (
-              <button
+          <div className="space-y-2">
+            <div className="flex flex-wrap items-center gap-3">
+              {/* Test connection before registering — gates Save so a registry is never saved without verifying the host is reachable and the credential authenticates. */}
+              <Button
                 type="button"
-                className="text-[12px] text-muted-foreground hover:text-foreground"
-                disabled={pending}
-                onClick={resetForm}
+                variant="secondary"
+                size="sm"
+                disabled={pending || !host.trim()}
+                onClick={onTest}
               >
-                {t('cancel')}
-              </button>
+                {probe.status === 'testing' ? t('testing') : t('testConnection')}
+              </Button>
+              {reachable && (
+                <span className="text-[12px] font-[510] text-success">{t('probeConnected')}</span>
+              )}
+              {probe.status === 'fail' && probeFresh && (
+                <span className="text-[12px] font-[510] text-destructive">
+                  {probe.reason === 'auth'
+                    ? t('probeAuthFailed')
+                    : probe.reason === 'unreachable'
+                      ? t('probeUnreachable')
+                      : t('probeError')}
+                </span>
+              )}
+            </div>
+            {probeFresh && probe.detail && probe.status !== 'testing' && (
+              <p className="break-all text-[11.5px] text-muted-foreground">{probe.detail}</p>
             )}
+            <div className="flex items-center gap-3 pt-1">
+              <Button size="sm" disabled={!canSave} onClick={onSave}>
+                {pending ? t('saving') : editing ? t('update') : t('register')}
+              </Button>
+              {!reachable && host.trim() !== '' && (
+                <span className="text-[11.5px] text-muted-foreground">{t('testBeforeSave')}</span>
+              )}
+              {editing && (
+                <button
+                  type="button"
+                  className="text-[12px] text-muted-foreground hover:text-foreground"
+                  disabled={pending}
+                  onClick={resetForm}
+                >
+                  {t('cancel')}
+                </button>
+              )}
+            </div>
           </div>
         </div>
       )}

@@ -80,7 +80,8 @@ export const controlPlane = {
   // graph = the whole-workspace projection (read = scorecards:read); reindex = rebuild from records (settings:write).
   knowledgeGraph: <T>(auth: AuthContext, depth?: number) =>
     call<T>(auth, `/knowledge/graph${depth !== undefined ? `?depth=${depth}` : ''}`),
-  reindexKnowledge: <T>(auth: AuthContext) => call<T>(auth, '/knowledge/reindex', { method: 'POST' }),
+  reindexKnowledge: <T>(auth: AuthContext) =>
+    call<T>(auth, '/knowledge/reindex', { method: 'POST' }),
   // Workspace membership (self-serve): my workspace list + create (creator is admin).
   listWorkspaces: <T>(auth: AuthContext) => call<T>(auth, '/workspaces'),
   createWorkspace: <T>(auth: AuthContext, body: unknown) =>
@@ -681,6 +682,13 @@ export const controlPlane = {
   listImageRegistries: <T>(auth: AuthContext) => call<T>(auth, '/workspace/image-registries'),
   upsertImageRegistry: <T>(auth: AuthContext, body: unknown) =>
     call<T>(auth, '/workspace/image-registries', { method: 'PUT', body: JSON.stringify(body) }),
+  // Connection test before registering — GET /v2/ against the host with the configured credential resolved from the
+  // SecretStore, classified. settings:write (it resolves the workspace secret). A classified failure is still a 200.
+  probeImageRegistry: <T>(auth: AuthContext, body: unknown) =>
+    call<T>(auth, '/workspace/image-registries/probe', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
   removeImageRegistry: (auth: AuthContext, name: string) =>
     callVoid(auth, `/workspace/image-registries/${encodeURIComponent(name)}`, {
       method: 'DELETE',

@@ -74,3 +74,88 @@ describe("dockerRegistryReader — Docker Registry v2 reads", () => {
     );
   });
 });
+
+describe("dockerRegistryReader — checkConnection (classified connection probe)", () => {
+  it("reachable when GET /v2/ succeeds after the 401 → Bearer-token handshake with the given credential", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string | URL, init?: RequestInit) => {
+        const s = String(url);
+        if (s.endsWith("/v2/")) {
+          const authz = (init?.headers as Record<string, string> | undefined)?.authorization;
+          if (authz === "Bearer TOKEN") return new Response("{}", { status: 200 });
+          return new Response("", {
+            status: 401,
+            headers: { "www-authenticate": 'Bearer realm="https://auth.ghcr.io/token",service="ghcr.io"' },
+          });
+        }
+        if (s.startsWith("https://auth.ghcr.io/token"))
+          return new Response(JSON.stringify({ token: "TOKEN" }), { status: 200 });
+        return new Response("", { status: 404 });
+      }),
+    );
+    const r = await dockerRegistryReader().checkConnection(
+      { host: "ghcr.io" },
+      { host: "ghcr.io", username: "u", password: "p" },
+    );
+    expect(r).toEqual({ reachable: true, detail: expect.stringContaining("accepted the credentials") });
+  });
+
+  it("reachable via anonymous access when GET /v2/ returns 200 with no credential", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("{}", { status: 200 })),
+    );
+    const r = await dockerRegistryReader().checkConnection({ host: "reg.internal:5000" }, undefined);
+    expect(r).toEqual({ reachable: true, detail: expect.stringContaining("anonymous") });
+  });
+
+  it("classifies a rejected Bearer challenge (bad token realm) as reason=auth, not a throw", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string | URL) => {
+        const s = String(url);
+        if (s.endsWith("/v2/"))
+          return new Response("", {
+            status: 401,
+            headers: { "www-authenticate": 'Bearer realm="https://auth.ghcr.io/token",service="ghcr.io"' },
+          });
+        return new Response("denied", { status: 401 }); // the realm rejects the creds → no token
+      }),
+    );
+    const r = await dockerRegistryReader().checkConnection(
+      { host: "ghcr.io" },
+      { host: "ghcr.io", username: "u", password: "bad" },
+    );
+    expect(r).toMatchObject({ reachable: false, reason: "auth" });
+  });
+
+  it("classifies a 401 with no credential (auth required) as reason=auth", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("", { status: 401, headers: { "www-authenticate": 'Basic realm="reg"' } })),
+    );
+    const r = await dockerRegistryReader().checkConnection({ host: "reg.io" }, undefined);
+    expect(r).toMatchObject({ reachable: false, reason: "auth" });
+  });
+
+  it("classifies a transport failure (DNS/refused/timeout) as reason=unreachable", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new Error("getaddrinfo ENOTFOUND does-not-exist.example");
+      }),
+    );
+    const r = await dockerRegistryReader().checkConnection({ host: "does-not-exist.example" }, undefined);
+    expect(r).toMatchObject({ reachable: false, reason: "unreachable" });
+  });
+
+  it("classifies a non-auth non-2xx (e.g. 500) as reason=error", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("boom", { status: 500 })),
+    );
+    const r = await dockerRegistryReader().checkConnection({ host: "reg.io" }, undefined);
+    expect(r).toMatchObject({ reachable: false, reason: "error" });
+  });
+});

@@ -1022,6 +1022,13 @@
     "update": "Update",
     "register": "Register",
     "cancel": "Cancel",
+    "testConnection": "Test connection",
+    "testing": "Testing…",
+    "probeConnected": "Connected",
+    "probeAuthFailed": "Authentication failed",
+    "probeUnreachable": "Registry unreachable",
+    "probeError": "Not a valid registry",
+    "testBeforeSave": "Test the connection before saving.",
     "missingSecrets": "The referenced secrets don’t exist yet: {names} — save them in the Secrets tab and it works right away."
   },
   "manageInvites": {

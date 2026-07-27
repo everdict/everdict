@@ -1,4 +1,10 @@
-import { BadRequestError, type ImageRegistryCoordinates, NotFoundError, type RegistryAuth } from "@everdict/contracts";
+import {
+  BadRequestError,
+  type ImageRegistryCoordinates,
+  type ImageRegistryProbeResult,
+  NotFoundError,
+  type RegistryAuth,
+} from "@everdict/contracts";
 import type { WorkspaceSettings } from "@everdict/contracts";
 import { imageRegistryPrefix } from "@everdict/domain";
 import type { ImageManifestInfo, RegistryReader } from "../ports/registry-reader.js";
@@ -76,6 +82,40 @@ export class ImageRegistryService {
       host: r.host,
       ...(r.namespace ? { namespace: r.namespace } : {}),
     }));
+  }
+
+  // Connection test BEFORE registering (the web form gates Save on a reachable result) — verify the host answers
+  // as a Docker Registry v2 API and that the configured credential authenticates, via GET /v2/ (the reader owns
+  // the fetch/handshake). Single-credential test: prefer the push secret (the everdict image push write path),
+  // else the pull secret, else an anonymous probe. A missing secret VALUE is a friendly {reachable:false,
+  // reason:"auth"} rather than a throw (a probe classifies). The API upsert stays pure — only the web flow gates.
+  async probe(
+    workspace: string,
+    input: { host: string; namespace?: string; username?: string; pullSecretName?: string; pushSecretName?: string },
+  ): Promise<ImageRegistryProbeResult> {
+    const coords: ImageRegistryCoordinates = {
+      host: input.host,
+      ...(input.namespace ? { namespace: input.namespace } : {}),
+    };
+    const secretName = input.pushSecretName ?? input.pullSecretName;
+    const credential: ImageRegistryProbeResult["credential"] = input.pushSecretName
+      ? "push"
+      : input.pullSecretName
+        ? "pull"
+        : "anonymous";
+    let auth: RegistryAuth | undefined;
+    if (secretName) {
+      const value = (await this.deps.secretsFor(workspace))[secretName];
+      if (value === undefined)
+        return {
+          reachable: false,
+          reason: "auth",
+          credential,
+          detail: `No value for '${secretName}' in the SecretStore — save the secret first, then test.`,
+        };
+      auth = { host: input.host, ...(input.username ? { username: input.username } : {}), password: value };
+    }
+    return { ...(await this.deps.reader.checkConnection(coords, auth)), credential };
   }
 
   // Register/update (admin, upsert by name — declarative full replace: optional fields must be removable).

@@ -36,6 +36,21 @@ export function registerImageRegistryTools(server: McpServer, ctx: McpToolContex
       (input) => run(principal, "settings:write", async () => ok(await registry.upsert(ws, input))),
     );
     server.registerTool(
+      "probe_workspace_image_registry",
+      {
+        description:
+          "Test a registry connection before registering (admin) — GET /v2/ against the host with the configured credential (prefers the push secret, else pull, else anonymous). Returns {reachable,detail,reason?,credential}. Nothing is stored.",
+        inputSchema: {
+          host: z.string().min(1).describe('registry host[:port] — "ghcr.io" · "registry.acme.dev:5000"'),
+          namespace: z.string().min(1).optional().describe('path prefix under host — "acme"'),
+          username: z.string().min(1).optional().describe("docker login username (omit for token-only registries)"),
+          pullSecretName: z.string().min(1).optional().describe("SecretStore key name holding the pull token/password"),
+          pushSecretName: z.string().min(1).optional().describe("SecretStore key name holding the push token/password"),
+        },
+      },
+      (input) => run(principal, "settings:write", async () => ok(await registry.probe(ws, input))),
+    );
+    server.registerTool(
       "remove_workspace_image_registry",
       {
         description: "Remove an image registry (admin, by name). Afterward its images are classified as external.",

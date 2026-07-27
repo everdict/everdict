@@ -2,7 +2,11 @@
 
 import { revalidatePath } from 'next/cache'
 
-import { imageRegistrySetResponseSchema } from '@/entities/image-registry'
+import {
+  imageRegistryProbeResultSchema,
+  imageRegistrySetResponseSchema,
+  type ImageRegistryProbeResult,
+} from '@/entities/image-registry'
 import { authContext } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
 
@@ -10,6 +14,24 @@ export interface ImageRegistryMutationResult {
   ok: boolean
   error?: string
   missingSecrets?: string[] // referenced-secret-absent warning (warn-not-block) — the save succeeded, just add the secret later
+}
+
+// Connection test (before registering) — the web form gates Save on a reachable result. GET /v2/ against the host
+// with the configured credential (prefers push, else pull, else anonymous). authZ (settings:write) is control-plane enforced.
+export async function probeImageRegistryAction(input: {
+  host: string
+  namespace?: string
+  username?: string
+  pullSecretName?: string
+  pushSecretName?: string
+}): Promise<{ ok: true; result: ImageRegistryProbeResult } | { ok: false; error: string }> {
+  const ctx = await authContext()
+  try {
+    const raw = await controlPlane.probeImageRegistry(ctx, input)
+    return { ok: true, result: imageRegistryProbeResultSchema.parse(raw) }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
 }
 
 // Register/update image registry (admin, upsert keyed by name). Put the pull/push token (value) in a workspace secret
