@@ -125,6 +125,7 @@ export function CapabilityStore({
   const [tab, setTab] = useState<'mine' | 'public'>('mine')
   const [query, setQuery] = useState('')
   const [typeFilter, setTypeFilter] = useState<'all' | CapabilityType>('all')
+  const [sort, setSort] = useState<'recent' | 'name' | 'type'>('recent')
   const [editing, setEditing] = useState<Capability | 'new' | null>(null)
   const [reaching, setReaching] = useState<Capability | null>(null)
   const [confirming, setConfirming] = useState<Capability | null>(null)
@@ -150,7 +151,7 @@ export function CapabilityStore({
   const list = useMemo(() => {
     const source = tab === 'mine' ? mine : publicCaps
     const q = query.trim().toLowerCase()
-    return source.filter(
+    const filtered = source.filter(
       (c) =>
         (typeFilter === 'all' || c.spec.type === typeFilter) &&
         (q.length === 0 ||
@@ -158,7 +159,14 @@ export function CapabilityStore({
           c.description.toLowerCase().includes(q) ||
           c.tags.some((tag) => tag.toLowerCase().includes(q)))
     )
-  }, [tab, mine, publicCaps, query, typeFilter])
+    // built-in 을 항상 위로(공개 카탈로그의 얼굴), 그다음 선택한 정렬 기준. recent=발행 최신, name=이름, type=종류.
+    return [...filtered].sort((a, b) => {
+      if (isBuiltIn(a) !== isBuiltIn(b)) return isBuiltIn(a) ? -1 : 1
+      if (sort === 'name') return a.name.localeCompare(b.name)
+      if (sort === 'type') return a.spec.type.localeCompare(b.spec.type) || a.name.localeCompare(b.name)
+      return b.createdAt.localeCompare(a.createdAt) // recent
+    })
+  }, [tab, mine, publicCaps, query, typeFilter, sort])
 
   const del = (c: Capability) =>
     startTransition(async () => {
@@ -223,7 +231,7 @@ export function CapabilityStore({
         ))}
       </div>
 
-      {/* 검색 + 타입 필터 */}
+      {/* 검색 + 타입 필터 + 정렬 */}
       <div className="flex flex-wrap items-center gap-2">
         <Input
           value={query}
@@ -248,6 +256,19 @@ export function CapabilityStore({
             </button>
           ))}
         </div>
+        <div className="ml-auto flex items-center gap-2">
+          <span className="text-[12px] text-muted-foreground">{t('resultCount', { count: list.length })}</span>
+          <select
+            value={sort}
+            onChange={(e) => setSort(e.target.value as 'recent' | 'name' | 'type')}
+            aria-label={t('sortBy')}
+            className="h-8 rounded-md border border-border bg-card px-2 text-[12px] text-foreground"
+          >
+            <option value="recent">{t('sortRecent')}</option>
+            <option value="name">{t('sortName')}</option>
+            <option value="type">{t('sortType')}</option>
+          </select>
+        </div>
       </div>
 
       {list.length === 0 ? (
@@ -259,7 +280,7 @@ export function CapabilityStore({
             : {})}
         />
       ) : (
-        <div className="space-y-2">
+        <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
           {list.map((c) => {
             const author = authorOf(c.createdBy)
             const TypeIcon = TYPE_ICON[c.spec.type]
@@ -267,7 +288,7 @@ export function CapabilityStore({
             return (
               <div
                 key={`${c.tenant}/${c.id}`}
-                className="rounded-lg border border-border bg-card p-4"
+                className="flex flex-col rounded-lg border border-border bg-card p-4"
               >
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex min-w-0 flex-1 items-center gap-2">
@@ -399,7 +420,7 @@ export function CapabilityStore({
                   </>
                 )}
 
-                <div className="mt-3 flex items-center justify-between gap-2">
+                <div className="mt-auto flex items-center justify-between gap-2 pt-3">
                   <div className="flex items-center gap-1.5 text-[11.5px] text-faint">
                     <Avatar
                       name={author.name}
