@@ -95,8 +95,126 @@ const WEB_SEARCH: FirstPartyDefault = {
   },
 };
 
-// The first-party default toolset, in the order they are offered. Currently: web search (unconditional, key-gated).
-// PDF reading + rich integration adapters (Mattermost / GitHub / image-registry) land as further entries here.
+// The pdf_read tool body. Runs as an ESM module, using built-in fetch + zlib (no dependencies — deliberately no PDF
+// library, so it runs on any runtime / image, matching web_search). Best-effort text extraction: it inflates
+// FlateDecode (or reads uncompressed) content streams and pulls the Tj / TJ string operators — good for text-based
+// PDFs (standard fonts), NOT scanned/image-only PDFs or custom CID-font encodings. String.raw keeps the embedded
+// escapes literal for the runtime; the body avoids backticks / `${}`.
+const PDF_READ_CODE = String.raw`
+import { readFileSync } from "node:fs";
+import { inflateSync, inflateRawSync } from "node:zlib";
+const emit = (content, isError) => process.stdout.write(JSON.stringify({ content: content, isError: !!isError }));
+function decodePdfString(s) {
+  return s.replace(/\\(\d{1,3}|.)/g, (_m, e) => {
+    if (/^[0-7]+$/.test(e)) return String.fromCharCode(parseInt(e, 8) & 255);
+    const map = { n: "\n", r: "\r", t: "\t", b: "\b", f: "\f" };
+    return map[e] !== undefined ? map[e] : e;
+  });
+}
+function extractOps(content) {
+  const out = [];
+  const re = /\((?:\\.|[^\\()])*\)\s*Tj|\[(?:\\.|[^\][])*\]\s*TJ/g;
+  let m;
+  while ((m = re.exec(content)) !== null) {
+    const tok = m[0];
+    if (tok.charAt(tok.length - 1) === "j") {
+      out.push(decodePdfString(tok.slice(tok.indexOf("(") + 1, tok.lastIndexOf(")"))));
+    } else {
+      const arr = tok.slice(tok.indexOf("[") + 1, tok.lastIndexOf("]"));
+      const sre = /\((?:\\.|[^\\()])*\)/g;
+      let sm;
+      const pieces = [];
+      while ((sm = sre.exec(arr)) !== null) pieces.push(decodePdfString(sm[0].slice(1, -1)));
+      out.push(pieces.join(""));
+    }
+  }
+  return out.join(" ");
+}
+function extractPdfText(buf) {
+  const s = buf.toString("latin1");
+  const parts = [];
+  let idx = 0;
+  for (;;) {
+    const st = s.indexOf("stream", idx);
+    if (st < 0) break;
+    if (st >= 3 && s.slice(st - 3, st) === "end") { idx = st + 6; continue; }
+    const dictStart = s.lastIndexOf("<<", st);
+    const dict = dictStart >= 0 ? s.slice(dictStart, st) : "";
+    let ds = st + 6;
+    if (s.charAt(ds) === "\r") ds++;
+    if (s.charAt(ds) === "\n") ds++;
+    const en = s.indexOf("endstream", ds);
+    if (en < 0) break;
+    idx = en + 9;
+    const raw = buf.subarray(ds, en);
+    let data = null;
+    if (/FlateDecode/.test(dict)) {
+      try { data = inflateSync(raw); } catch (e1) { try { data = inflateRawSync(raw); } catch (e2) { data = null; } }
+    } else if (/\/Filter/.test(dict)) {
+      data = null;
+    } else {
+      data = raw;
+    }
+    if (data) parts.push(extractOps(data.toString("latin1")));
+  }
+  return parts.join("\n").replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
+}
+await (async () => {
+  let input = {};
+  try { input = JSON.parse(readFileSync(process.argv[2], "utf8")); } catch (e) { input = {}; }
+  const url = typeof input.url === "string" ? input.url.trim() : "";
+  if (!/^https?:\/\//i.test(url)) return emit("pdf_read: an http(s) 'url' is required.", true);
+  const maxChars = Math.min(Math.max(parseInt(input.max_chars, 10) || 20000, 1000), 200000);
+  let buf;
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return emit("pdf_read: could not fetch the PDF (HTTP " + res.status + ").", true);
+    buf = Buffer.from(await res.arrayBuffer());
+  } catch (e) { return emit("pdf_read: fetch failed: " + (e && e.message ? e.message : String(e)), true); }
+  const text = extractPdfText(buf);
+  if (!text) return emit("pdf_read: no extractable text (the PDF may be scanned/image-only or use unsupported fonts).", false);
+  emit(text.length > maxChars ? text.slice(0, maxChars) + "\n...[truncated]" : text, false);
+})();
+`.trim();
+
+const PDF_READ: FirstPartyDefault = {
+  requires: null,
+  record: {
+    id: "pdf-read",
+    tenant: FIRST_PARTY_TENANT,
+    version: "1.0.0",
+    name: "pdf_read",
+    description:
+      "Fetch a PDF by URL and extract its text. Use to read a PDF referenced in the conversation (docs, papers, reports). Best-effort for text-based PDFs; scanned/image-only PDFs yield no text.",
+    spec: {
+      type: "code",
+      language: "node",
+      code: PDF_READ_CODE,
+      parametersSchema: {
+        type: "object",
+        properties: {
+          url: { type: "string", description: "The http(s) URL of the PDF to read." },
+          max_chars: { type: "number", description: "Max characters to return (1000-200000, default 20000)." },
+        },
+        required: ["url"],
+      },
+      // Not marked read-only: it fetches an arbitrary caller-supplied URL, so each call passes the HITL gate (an SSRF
+      // guardrail against prompt-injected fetches of internal addresses — unlike web_search, which hits a fixed host).
+      isReadOnly: false,
+      requiredSecrets: [], // no key — unconditional default (works on any runtime; zlib/fetch are built in)
+      timeoutSec: 30,
+    },
+    visibility: "public",
+    sharedWith: [],
+    tags: ["pdf", "read", "built-in"],
+    createdBy: "everdict",
+    createdAt: "2026-07-27T00:00:00.000Z",
+  },
+};
+
+// The first-party default toolset, in the order they are offered: web search (unconditional, key-gated) + PDF read
+// (unconditional, no key, HITL-gated). Rich integration adapters (Mattermost / GitHub / image-registry) are shipped
+// as control-plane MCP tools, not first-party capabilities (their credentials live server-side).
 export function firstPartyDefaults(): FirstPartyDefault[] {
-  return [WEB_SEARCH];
+  return [WEB_SEARCH, PDF_READ];
 }

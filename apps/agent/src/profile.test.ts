@@ -104,9 +104,13 @@ function spec(over: Partial<AgentSpec> = {}): AgentSpec {
 }
 
 describe("registryProfileResolver", () => {
-  it("falls back to the base profile when no agent is registered", async () => {
+  it("falls back to the base profile when no agent is registered (+ the unconditional built-in defaults)", async () => {
     const profile = await resolver(undefined)(principal);
-    expect(profile).toEqual({ systemPrompt: BASE, mcpServers: [], skills: [], codeTools: [] });
+    expect(profile.systemPrompt).toBe(BASE);
+    expect(profile.mcpServers).toEqual([]);
+    expect(profile.skills).toEqual([]);
+    // pdf_read is unconditional (no key); web_search needs a key (absent here) → omitted.
+    expect(profile.codeTools.map((t) => t.name)).toEqual(["pdf_read"]);
   });
 
   it("loads the workspace's skills into the profile (even with no agent registered) and notes them in the prompt", async () => {
@@ -234,7 +238,7 @@ describe("registryProfileResolver", () => {
     )(principal);
     expect(profile.mcpServers).toEqual([]);
     expect(profile.skills).toEqual([]);
-    expect(profile.codeTools).toEqual([]);
+    expect(profile.codeTools.map((t) => t.name)).toEqual(["pdf_read"]); // pin skipped; only the built-in default remains
   });
 
   it("resolves an adopted code capability into a runnable code tool (env bound, sandbox flag from source)", async () => {
@@ -255,25 +259,22 @@ describe("registryProfileResolver", () => {
       skillStore(),
       capabilityStore([cap]),
     )(principal);
-    expect(profile.codeTools).toEqual([
-      {
-        name: "scorer",
-        description: "d",
-        language: "python",
-        code: "print('{}')",
-        parametersSchema: { type: "object", properties: {} },
-        isReadOnly: true,
-        env: { API_KEY: "sk-9" },
-        sandbox: true, // adopted from beta (source !== acme)
-      },
-    ]);
+    expect(profile.codeTools.find((t) => t.name === "scorer")).toEqual({
+      name: "scorer",
+      description: "d",
+      language: "python",
+      code: "print('{}')",
+      parametersSchema: { type: "object", properties: {} },
+      isReadOnly: true,
+      env: { API_KEY: "sk-9" },
+      sandbox: true, // adopted from beta (source !== acme)
+    });
   });
 
   it("adds the built-in web_search default when a search key is available (even with no agent registered)", async () => {
     const profile = await resolver(undefined, secretStore({ TAVILY_API_KEY: "tvly-x" }))(principal);
-    expect(profile.codeTools).toHaveLength(1);
-    const tool = profile.codeTools[0];
-    expect(tool?.name).toBe("web_search");
+    const tool = profile.codeTools.find((t) => t.name === "web_search");
+    expect(tool).toBeDefined();
     expect(tool?.language).toBe("node");
     expect(tool?.isReadOnly).toBe(true);
     expect(tool?.sandbox).toBe(false); // first-party = trusted → runs on any driver
@@ -282,7 +283,7 @@ describe("registryProfileResolver", () => {
 
   it("omits the web_search default when no search key is configured (never offered broken)", async () => {
     const profile = await resolver(undefined)(principal);
-    expect(profile.codeTools).toEqual([]);
+    expect(profile.codeTools.some((t) => t.name === "web_search")).toBe(false); // no key → not offered (pdf_read still is)
   });
 
   it("lets a workspace opt out of a default via disabledDefaults", async () => {
@@ -290,7 +291,7 @@ describe("registryProfileResolver", () => {
       spec({ disabledDefaults: ["web-search"] }),
       secretStore({ TAVILY_API_KEY: "tvly-x" }),
     )(principal);
-    expect(profile.codeTools).toEqual([]);
+    expect(profile.codeTools.some((t) => t.name === "web_search")).toBe(false); // opted out even though the key is present
   });
 
   it("shadows a default when an adopted tool has the same name", async () => {
@@ -311,7 +312,8 @@ describe("registryProfileResolver", () => {
       skillStore(),
       capabilityStore([shadow]),
     )(principal);
-    expect(profile.codeTools).toHaveLength(1);
-    expect(profile.codeTools[0]?.language).toBe("python"); // the adopted tool, not the built-in node default
+    const webSearch = profile.codeTools.filter((t) => t.name === "web_search");
+    expect(webSearch).toHaveLength(1); // the built-in default is shadowed, not duplicated
+    expect(webSearch[0]?.language).toBe("python"); // the adopted tool, not the built-in node default
   });
 });

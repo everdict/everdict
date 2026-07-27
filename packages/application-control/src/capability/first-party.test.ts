@@ -24,4 +24,15 @@ describe("firstPartyDefaults", () => {
     expect(web.record.spec.requiredSecrets.map((s) => s.name)).toContain(WEBSEARCH_SECRET_NAME);
     expect(web.record.spec.isReadOnly).toBe(true);
   });
+
+  it("ships a pdf-read code tool that needs no secret and is HITL-gated (arbitrary-URL fetch)", () => {
+    const pdf = defaults.find((d) => d.record.id === "pdf-read");
+    expect(pdf).toBeDefined();
+    if (!pdf) return;
+    expect(pdf.requires).toBeNull(); // unconditional
+    expect(pdf.record.spec.type).toBe("code");
+    if (pdf.record.spec.type !== "code") return;
+    expect(pdf.record.spec.requiredSecrets).toEqual([]); // no key → always offered
+    expect(pdf.record.spec.isReadOnly).toBe(false); // arbitrary URL fetch → HITL-gated
+  });
 });
