@@ -40,6 +40,7 @@ import { Dialog } from '@/shared/ui/dialog'
 import { DropdownItem, DropdownMenu, DropdownSeparator } from '@/shared/ui/dropdown-menu'
 import { EmptyState } from '@/shared/ui/empty-state'
 import { Input, Label, Textarea } from '@/shared/ui/input'
+import { Markdown } from '@/shared/ui/markdown'
 
 import { adoptCapabilityAction, unadoptCapabilityAction } from '../api/adopt-capability'
 import {
@@ -420,9 +421,11 @@ export function CapabilityStore({
                           <p className="text-[11px] font-[510] text-muted-foreground">
                             {t('envInstructions')}
                           </p>
-                          <pre className="mt-1 whitespace-pre-wrap font-sans text-[12.5px] leading-relaxed text-foreground">
-                            {c.spec.instructions}
-                          </pre>
+                          {/* instructions 는 마크다운 문서 — raw 텍스트가 아니라 렌더링해 보여준다 */}
+                          <Markdown
+                            content={c.spec.instructions}
+                            className="mt-1 text-[12.5px] leading-relaxed"
+                          />
                         </div>
                         {c.spec.preset && (
                           <div>
@@ -1453,9 +1456,22 @@ function CapabilityDetail({ capability }: { capability: Capability }) {
         </>
       )}
       {s.type === 'skill' && (
-        <pre className="whitespace-pre-wrap font-sans leading-relaxed text-foreground">
-          {s.instructions}
-        </pre>
+        <div className="space-y-3">
+          {/* SKILL.md 본문 + 부속 파일 — 마크다운 문서로 렌더링(.md 아닌 파일만 mono raw) */}
+          <Markdown content={s.instructions} className="text-[12.5px] leading-relaxed" />
+          {s.files.map((f) => (
+            <div key={f.path}>
+              <p className="font-mono text-[11px] font-[510] text-muted-foreground">{f.path}</p>
+              {f.path.endsWith('.md') ? (
+                <Markdown content={f.content} className="mt-1 text-[12.5px] leading-relaxed" />
+              ) : (
+                <pre className="mt-1 overflow-x-auto whitespace-pre-wrap font-mono text-[11.5px] leading-relaxed text-muted-foreground">
+                  {f.content}
+                </pre>
+              )}
+            </div>
+          ))}
+        </div>
       )}
       {secrets.length > 0 && (
         <div className="space-y-0.5">
