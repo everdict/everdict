@@ -76,6 +76,16 @@ Migrations: `packages/db/migrations/0006_create_scorecards.sql`, `0035_add_score
 | `GET /scorecards` (summary only) | `list_scorecards` | `scorecards:read` (viewer+) |
 | `GET /scorecards/:id` (full) | `get_scorecard` | `scorecards:read` |
 | `GET /scorecards/diff?baseline=&candidate=` | `diff_scorecards` | `scorecards:read` |
+| `POST /scorecards/query` `{filters?, groupBy?, pivotBy?, metric?, measure?, viz?, sort?, search?}` | `query_scorecards` | `scorecards:read` |
+| `GET /scorecards/:id/analysis` (the offloaded analysis bundle, fetched server-side) | `get_scorecard_analysis` | `scorecards:read` |
+
+`POST /scorecards/query` is the **flexible analysis pivot** — the server-side twin of the web analyze
+dashboard's engine (`@everdict/domain computeAnalysis`; the two stay in lockstep): filter/group (0..2 dims)/
+pivot/measure (`passRate|mean|count|latest`) over the lightweight list shape, `viz: table|bars` → grid rows,
+`viz: line` → time-bucketed series. Incomplete batches (queued/running/superseded/cancelled) are excluded
+unless `includeIncomplete`. `GET /scorecards/:id/analysis` returns the self-contained analysis artifact
+(`analysisRef`: summary + per-case verdicts/scores) as one JSON document — 404 when the record has no
+downloadable (http) artifact. Both power the analysis agent (`docs/architecture/analysis-studio.md`).
 
 Optional `graders: GraderSpec[]` is the **run-time grading plan** — it replaces every case's default graders for
 this batch only (the dataset stays pure data), and is persisted in `orchestration.graders` so restart-resume /

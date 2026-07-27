@@ -24,7 +24,7 @@ import {
   InMemoryJudgeRegistry,
 } from "@everdict/registry";
 import type { TraceSource, TraceSourceConfig } from "@everdict/trace";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 // Trace-only grader factory injected into the ingest path (re-architecture P2 S4) — the application layer never
 // imports @everdict/graders, so the composition side supplies the steps/cost/latency graders the ingest re-derives.
@@ -337,6 +337,85 @@ describe("ScorecardService.leaderboard", () => {
       [2, "1", "gpt-5", 0.6],
     ]);
     expect(lb.rows.some((r) => r.model === "x")).toBe(false); // beta workspace excluded
+  });
+});
+
+describe("ScorecardService.analysis — flexible pivot", () => {
+  const scored = (id: string, harnessId: string, passRate: number): Partial<ScorecardRecord> => ({
+    harness: { id: harnessId, version: "1" },
+    summary: [{ metric: "judge", count: 10, mean: passRate, passRate }],
+  });
+
+  const config = {
+    filters: {},
+    groupBy: ["harness" as const],
+    measure: "passRate" as const,
+    sort: { by: "measure" as const, dir: "desc" as const },
+    viz: "table" as const,
+  };
+
+  it("groups the workspace's scorecards by dimension and scopes out other workspaces", async () => {
+    const store = new InMemoryScorecardStore();
+    await store.create(record("a", scored("a", "h1", 0.4)));
+    await store.create(record("b", scored("b", "h2", 0.9)));
+    await store.create(record("other", { ...scored("other", "h3", 1.0), tenant: "beta" }));
+    const result = await svc(store).analysis("acme", config);
+    if (result.kind !== "grid") throw new Error("expected grid");
+    expect(result.rows.map((r) => [r.labels[0], r.value])).toEqual([
+      ["h2", 0.9],
+      ["h1", 0.4],
+    ]);
+    expect(result.total).toBe(2); // beta workspace excluded
+  });
+
+  it("a line viz buckets by the time dimension", async () => {
+    const store = new InMemoryScorecardStore();
+    await store.create(record("a", { ...scored("a", "h1", 0.5), createdAt: "2026-06-01T00:00:00.000Z" }));
+    await store.create(record("b", { ...scored("b", "h1", 0.7), createdAt: "2026-06-02T00:00:00.000Z" }));
+    const result = await svc(store).analysis("acme", { ...config, groupBy: ["day"], viz: "line" });
+    if (result.kind !== "line") throw new Error("expected line");
+    expect(result.buckets).toEqual(["2026-06-01", "2026-06-02"]);
+    expect(result.series[0]?.points).toEqual([0.5, 0.7]);
+  });
+});
+
+describe("ScorecardService.analysisBundle — offloaded analysis fetch", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("returns 404-shaped NotFound when the record has no fetchable (http) analysisRef", async () => {
+    const store = new InMemoryScorecardStore();
+    await store.create(record("none"));
+    await store.create(record("mem", { analysisRef: "memory://analyses/mem.json" }));
+    await expect(svc(store).analysisBundle("acme", "none")).rejects.toBeInstanceOf(NotFoundError);
+    await expect(svc(store).analysisBundle("acme", "mem")).rejects.toBeInstanceOf(NotFoundError);
+    await expect(svc(store).analysisBundle("acme", "missing")).rejects.toBeInstanceOf(NotFoundError);
+  });
+
+  it("another workspace's record reads NotFound (no existence leak) even with a ref", async () => {
+    const store = new InMemoryScorecardStore();
+    await store.create(record("theirs", { tenant: "beta", analysisRef: "https://s3/analyses/theirs.json" }));
+    await expect(svc(store).analysisBundle("acme", "theirs")).rejects.toBeInstanceOf(NotFoundError);
+  });
+
+  it("fetches an http ref server-side and returns the parsed bundle", async () => {
+    const bundle = { scorecardId: "sc", dataset: "d@1", harness: "h@1", summary: [], cases: [] };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify(bundle), { status: 200 })),
+    );
+    const store = new InMemoryScorecardStore();
+    await store.create(record("sc", { analysisRef: "https://s3.example/analyses/sc.json" }));
+    await expect(svc(store).analysisBundle("acme", "sc")).resolves.toEqual(bundle);
+  });
+
+  it("a non-ok upstream response is remapped to UpstreamError", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("expired", { status: 403 })),
+    );
+    const store = new InMemoryScorecardStore();
+    await store.create(record("sc", { analysisRef: "https://s3.example/analyses/sc.json" }));
+    await expect(svc(store).analysisBundle("acme", "sc")).rejects.toBeInstanceOf(UpstreamError);
   });
 });
 

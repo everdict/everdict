@@ -85,6 +85,11 @@ weighted overall (`judge:<id>`). See `docs/judges.md` + `docs/architecture/eval-
   trace) + **declared** (command harness `spec.model`) both kept; `primary` = mode observed → declared fallback.
   Persisted as `models` jsonb (mig `0028_add_scorecard_models.sql`); judge models mig `0030`.
 - Trend/regression-over-time: `trendSeries` (`packages/suite/src/trend.ts`), route `GET /scorecards/trend`.
+- Flexible analysis pivot: `computeAnalysis` (`packages/domain/src/scorecard/analysis.ts`) — filter/group/pivot/
+  measure over the light list shape; route `POST /scorecards/query` + MCP `query_scorecards`. It is the
+  **server-side twin of the web engine** (`apps/web/.../analyze-scorecards/model/analysis.ts`) — change BOTH in
+  lockstep. `GET /scorecards/:id/analysis` + `get_scorecard_analysis` fetch the offloaded `analysisRef` bundle
+  server-side (http-only ref → else 404). See `docs/architecture/analysis-studio.md`.
 
 ## Trace ingest (no harness run)
 `POST /scorecards/ingest` (push): upload externally-run `TraceEvent[]`; re-derive trace graders

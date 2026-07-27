@@ -1,5 +1,6 @@
 import { IngestScorecardBodySchema, PullIngestBodySchema } from "@everdict/application-control";
 import { BackfillModelsResponseSchema } from "@everdict/contracts/wire";
+import { ScorecardAnalysisBundleResponseSchema, ScorecardAnalysisResponseSchema } from "@everdict/contracts/wire";
 import { DeleteScorecardResultSchema } from "@everdict/contracts/wire";
 import { LeaderboardResponseSchema } from "@everdict/contracts/wire";
 import { ScorecardDiffResponseSchema } from "@everdict/contracts/wire";
@@ -10,6 +11,7 @@ import { ScorecardResponseSchema } from "@everdict/contracts/wire";
 import type { FastifySchema } from "fastify";
 import { z } from "zod";
 import { errorResponses, toJsonSchema } from "../openapi.js";
+import { AnalysisQueryBodySchema } from "./request/analysis-query.js";
 import { RerunScorecardBodySchema } from "./request/rerun-scorecard.js";
 import { RunScorecardBodySchema } from "./request/run-scorecard.js";
 
@@ -231,6 +233,21 @@ const docs = {
       ...errorResponses(400, 401, 403),
     },
   },
+  query: {
+    summary: "Flexible analysis pivot over the workspace's scorecards",
+    description:
+      "Filter/group/pivot/measure the workspace's scorecards server-side (the engine behind the analyze dashboard " +
+      "and saved Views): groupBy 0..2 dimensions, optional pivotBy column dimension, measure passRate|mean|count|" +
+      "latest over a summary metric, viz table|bars (grid result) or line (time-bucketed series). Incomplete " +
+      "batches (queued/running/superseded/cancelled) are excluded unless includeIncomplete. Requires " +
+      "scorecards:read (viewer+), workspace-scoped.",
+    tags: ["scorecard"],
+    body: toJsonSchema(AnalysisQueryBodySchema),
+    response: {
+      200: { description: "Analysis result (grid | line)", ...toJsonSchema(ScorecardAnalysisResponseSchema) },
+      ...errorResponses(400, 401, 403),
+    },
+  },
   backfillModels: {
     summary: "Backfill the model axis of past scorecards",
     description:
@@ -253,6 +270,20 @@ const docs = {
     response: {
       200: { description: "The scorecard record", ...toJsonSchema(ScorecardResponseSchema) },
       ...errorResponses(401, 403, 404),
+    },
+  },
+  analysisBundle: {
+    summary: "Get a scorecard's offloaded analysis bundle",
+    description:
+      "Fetches the self-contained analysis artifact (ScorecardRecord.analysisRef) server-side and returns it as " +
+      "one JSON document: aggregate summary + per-case verdicts/scores/failures. 404 when the record has no " +
+      "downloadable analysis artifact (no ArtifactStore configured, offload failed, or a non-http ref). Requires " +
+      "scorecards:read (viewer+), workspace-scoped.",
+    tags: ["scorecard"],
+    params: scorecardIdParams,
+    response: {
+      200: { description: "The analysis bundle", ...toJsonSchema(ScorecardAnalysisBundleResponseSchema) },
+      ...errorResponses(401, 403, 404, 502),
     },
   },
 } satisfies Record<string, FastifySchema>;

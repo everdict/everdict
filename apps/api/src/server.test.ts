@@ -3192,6 +3192,68 @@ describe("API — scorecards (dataset×harness batch eval)", () => {
     await app.close();
   });
 
+  it("query: the flexible analysis pivot groups the workspace's scorecards; a bad dimension is 400", async () => {
+    const { app } = server({ requireAuth: true, authenticator: roleAuth(["member"]) });
+    const h = { authorization: "Bearer x" };
+    await app.inject({ method: "POST", url: "/datasets", headers: h, payload: DATASET });
+    const runOne = async () => {
+      const post = await app.inject({
+        method: "POST",
+        url: "/scorecards",
+        headers: h,
+        payload: { dataset: { id: "smoke" }, harness: { id: "scripted" } },
+      });
+      await pollScorecard(app, post.json().id, h);
+    };
+    await runOne();
+    await runOne();
+
+    // Bad enum at the boundary → 400 (stored View recipes normalize web-side instead).
+    expect(
+      (await app.inject({ method: "POST", url: "/scorecards/query", headers: h, payload: { groupBy: ["bogus"] } }))
+        .statusCode,
+    ).toBe(400);
+
+    // An empty body defaults to group-by-harness table.
+    const res = await app.inject({ method: "POST", url: "/scorecards/query", headers: h, payload: {} });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.kind).toBe("grid");
+    expect(body.total).toBe(2);
+    expect(body.rows).toHaveLength(1); // both runs share one harness
+    expect(body.rows[0].labels).toEqual(["scripted"]);
+    expect(body.rows[0].count).toBe(2);
+
+    // A line viz buckets by day.
+    const line = await app.inject({
+      method: "POST",
+      url: "/scorecards/query",
+      headers: h,
+      payload: { viz: "line", groupBy: ["day"] },
+    });
+    expect(line.statusCode).toBe(200);
+    expect(line.json().kind).toBe("line");
+    expect(line.json().buckets).toHaveLength(1);
+    await app.close();
+  });
+
+  it("GET /scorecards/:id/analysis: 404 when the record has no downloadable analysis artifact", async () => {
+    const { app } = server({ requireAuth: true, authenticator: roleAuth(["member"]) });
+    const h = { authorization: "Bearer x" };
+    await app.inject({ method: "POST", url: "/datasets", headers: h, payload: DATASET });
+    const post = await app.inject({
+      method: "POST",
+      url: "/scorecards",
+      headers: h,
+      payload: { dataset: { id: "smoke" }, harness: { id: "scripted" } },
+    });
+    await pollScorecard(app, post.json().id, h);
+    const res = await app.inject({ method: "GET", url: `/scorecards/${post.json().id}/analysis`, headers: h });
+    expect(res.statusCode).toBe(404); // no ArtifactStore wired → no http analysisRef
+    expect((await app.inject({ method: "GET", url: "/scorecards/nope/analysis", headers: h })).statusCode).toBe(404);
+    await app.close();
+  });
+
   it("leaderboard: the observed model from an ingested trace lands on the leaderboard row (model→leaderboard E2E)", async () => {
     const { app } = server({ requireAuth: true, authenticator: roleAuth(["member"]) });
     const h = { authorization: "Bearer x" };

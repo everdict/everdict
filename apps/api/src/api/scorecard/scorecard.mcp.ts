@@ -2,6 +2,7 @@ import { IngestScorecardBodySchema, PullIngestBodySchema, originSource } from "@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { type McpToolContext, fail, ok, plain, run } from "../mcp-context.js";
+import { AnalysisDimensionSchema } from "./request/analysis-query.js";
 import { serveScorecard } from "./serve.js";
 
 // Scorecard resource MCP tools — the MCP twin of scorecard.routes.ts (same ScorecardService core, second transport).
@@ -379,6 +380,73 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
             }),
           ),
         ),
+    );
+
+    server.registerTool(
+      "query_scorecards",
+      {
+        description:
+          "Flexible analysis pivot over the workspace's scorecards (the engine behind the analyze dashboard/Views): " +
+          "filter, group by 0..2 dimensions, optional pivot column, measure passRate|mean|count|latest over a " +
+          "summary metric. viz table|bars → grid rows; viz line → time-bucketed series (x = the time dimension in " +
+          "group_by, one series per non-time dimension). Incomplete batches are excluded unless include_incomplete.",
+        inputSchema: {
+          group_by: z
+            .array(AnalysisDimensionSchema)
+            .max(2)
+            .optional()
+            .describe("0..2 row dimensions (default [harness])"),
+          pivot_by: AnalysisDimensionSchema.optional().describe("optional column dimension → matrix"),
+          metric: z.string().optional().describe("summary metric name (unset = each card's first summary row)"),
+          measure: z.enum(["passRate", "mean", "count", "latest"]).optional().describe("default passRate"),
+          viz: z.enum(["table", "bars", "line"]).optional().describe("table|bars = grid, line = time series"),
+          sort_by: z.enum(["measure", "label"]).optional().describe("grid row sort key (default measure)"),
+          sort_dir: z.enum(["asc", "desc"]).optional().describe("default desc"),
+          search: z.string().optional().describe("free-text filter over dataset/harness/model/origin/owner"),
+          include_incomplete: z.boolean().optional(),
+          filters: z
+            .object({
+              dataset: z.array(z.string()).optional(),
+              harness: z.array(z.string()).optional(),
+              model: z.array(z.string()).optional(),
+              judgeModel: z.array(z.string()).optional(),
+              status: z.array(z.string()).optional(),
+              owner: z.array(z.string()).optional(),
+              originSource: z.array(z.string()).optional(),
+              from: z.string().optional().describe("createdAt >= (ISO date)"),
+              to: z.string().optional().describe("createdAt <= (ISO date, inclusive)"),
+            })
+            .optional(),
+        },
+      },
+      ({ group_by, pivot_by, metric, measure, viz, sort_by, sort_dir, search, include_incomplete, filters }) =>
+        run(principal, "scorecards:read", async () =>
+          ok(
+            await scorecards.analysis(ws, {
+              filters: filters ?? {},
+              groupBy: group_by ?? ["harness"],
+              ...(pivot_by ? { pivotBy: pivot_by } : {}),
+              ...(metric ? { metric } : {}),
+              measure: measure ?? "passRate",
+              sort: { by: sort_by ?? "measure", dir: sort_dir ?? "desc" },
+              ...(search ? { search } : {}),
+              viz: viz ?? "table",
+              ...(include_incomplete !== undefined ? { includeIncomplete: include_incomplete } : {}),
+            }),
+          ),
+        ),
+    );
+
+    server.registerTool(
+      "get_scorecard_analysis",
+      {
+        description:
+          "Get a scorecard's offloaded analysis bundle (analysisRef) as one JSON document: aggregate summary + " +
+          "per-case verdicts/scores/failures — the case-level deep dive without reading every child run. 404 when " +
+          "the record has no downloadable analysis artifact.",
+        inputSchema: { id: z.string().describe("Scorecard id") },
+      },
+      ({ id }) => run(principal, "scorecards:read", async () => ok(await scorecards.analysisBundle(ws, id))),
     );
 
     server.registerTool(

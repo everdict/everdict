@@ -2,13 +2,15 @@ import { IngestScorecardBodySchema, PullIngestBodySchema, originSource } from "@
 import type { FastifyInstance } from "fastify";
 import type { z } from "zod";
 import { type ServerDeps, gate, resolvePrincipal, sendError, zodIssues } from "../route-context.js";
+import { AnalysisQueryBodySchema } from "./request/analysis-query.js";
 import { RerunScorecardBodySchema } from "./request/rerun-scorecard.js";
 import { RunScorecardBodySchema } from "./request/run-scorecard.js";
 import { scorecardDocs } from "./scorecard.docs.js";
 import { serveScorecard } from "./serve.js";
 
 // scorecards (dataset×harness batch eval → aggregated result): run/retry, push+pull trace ingest,
-// list/get, estimate, baseline↔candidate diff, leaderboard/trend, model backfill.
+// list/get, estimate, baseline↔candidate diff, leaderboard/trend, flexible analysis pivot (query) +
+// offloaded analysis bundle, model backfill.
 export function registerScorecardRoutes(app: FastifyInstance, deps: ServerDeps): void {
   app.post("/scorecards", { schema: scorecardDocs.submit }, async (req, reply) => {
     if (!deps.scorecardService)
@@ -341,6 +343,27 @@ export function registerScorecardRoutes(app: FastifyInstance, deps: ServerDeps):
     }
   });
 
+  // Flexible analysis pivot — filter/group/pivot/measure over the workspace's scorecards (the server-side twin of
+  // the web analyze dashboard; docs/architecture/analysis-studio.md V1). Static path → before :id.
+  app.post("/scorecards/query", { schema: scorecardDocs.query }, async (req, reply) => {
+    if (!deps.scorecardService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "scorecard service not configured" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "scorecards:read");
+    } catch (err) {
+      return sendError(reply, err);
+    }
+    const parsed = AnalysisQueryBodySchema.safeParse(req.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: zodIssues(parsed.error) });
+    try {
+      return reply.send(await deps.scorecardService.analysis(principal.workspace, parsed.data));
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
   // model-axis backfill — fill past succeeded scorecards that lack models from stored traces (idempotent). Static path → before :id.
   app.post("/scorecards/backfill-models", { schema: scorecardDocs.backfillModels }, async (req, reply) => {
     if (!deps.scorecardService)
@@ -370,4 +393,22 @@ export function registerScorecardRoutes(app: FastifyInstance, deps: ServerDeps):
       return sendError(reply, err);
     }
   });
+
+  // The offloaded analysis bundle (analysisRef) fetched server-side — per-case verdicts/scores as one JSON document.
+  app.get<{ Params: { id: string } }>(
+    "/scorecards/:id/analysis",
+    { schema: scorecardDocs.analysisBundle },
+    async (req, reply) => {
+      if (!deps.scorecardService)
+        return reply.code(404).send({ code: "NOT_FOUND", message: "scorecard service not configured" });
+      const principal = await resolvePrincipal(req, reply, deps);
+      if (!principal) return reply;
+      try {
+        gate(principal, "scorecards:read");
+        return reply.send(await deps.scorecardService.analysisBundle(principal.workspace, req.params.id));
+      } catch (err) {
+        return sendError(reply, err);
+      }
+    },
+  );
 }

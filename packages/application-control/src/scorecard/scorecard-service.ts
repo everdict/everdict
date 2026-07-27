@@ -9,6 +9,8 @@ import {
   type ScorecardRecord,
 } from "@everdict/contracts";
 import {
+  type AnalysisConfig,
+  type AnalysisResult,
   CircuitBreaker,
   type Leaderboard,
   type Principal,
@@ -629,5 +631,13 @@ export class ScorecardService {
 
   backfillModels(tenant: string): Promise<{ scanned: number; updated: number }> {
     return this.analytics.backfillModels(tenant);
+  }
+
+  analysis(tenant: string, config: AnalysisConfig): Promise<AnalysisResult> {
+    return this.analytics.analysis(tenant, config);
+  }
+
+  analysisBundle(tenant: string, id: string): Promise<unknown> {
+    return this.analytics.analysisBundle(tenant, id);
   }
 }

@@ -39,6 +39,27 @@ export {
 export { type ScorecardModels, scorecardModels } from "./scorecard/models.js";
 export { headlinePassRate } from "./scorecard/headline.js";
 
+// scorecard — flexible analysis pivot (filter/group/pivot/measure), the server-side twin of the web engine
+export {
+  ANALYSIS_DIMENSIONS,
+  ANALYSIS_MEASURES,
+  ANALYSIS_TIME_DIMENSIONS,
+  ANALYSIS_VIZ,
+  type AnalysisCard,
+  type AnalysisConfig,
+  type AnalysisDimension,
+  type AnalysisFilters,
+  type AnalysisGridResult,
+  type AnalysisGridRow,
+  type AnalysisLineResult,
+  type AnalysisMeasure,
+  type AnalysisResult,
+  type AnalysisViz,
+  analysisDimensionValue,
+  analysisMetricNames,
+  computeAnalysis,
+} from "./scorecard/analysis.js";
+
 // scorecard — the ScorecardBatch aggregate (from apps/api core/scorecard)
 export {
   type NewChildRunInput,

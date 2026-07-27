@@ -1,9 +1,19 @@
-import { BadRequestError, NotFoundError, type Scorecard, type ScorecardRecord } from "@everdict/contracts";
 import {
+  AppError,
+  BadRequestError,
+  NotFoundError,
+  type Scorecard,
+  type ScorecardRecord,
+  UpstreamError,
+} from "@everdict/contracts";
+import {
+  type AnalysisConfig,
+  type AnalysisResult,
   type Leaderboard,
   type ScorecardDiff,
   type ScorecardTrend,
   type TrialDiff,
+  computeAnalysis,
   diffScorecards,
   diffTrials,
   leaderboard,
@@ -80,6 +90,52 @@ export class ScorecardAnalyticsService {
       ...(opts.harnessId ? { harness: opts.harnessId } : {}),
     });
     return leaderboard(records, opts);
+  }
+
+  // Flexible analysis pivot (filter/group/pivot/measure) over the workspace's scorecards — the server-side twin of
+  // the web analyze dashboard, shared by the web (large workspaces) and the agent (query_scorecards).
+  // Computed from the list (lightweight summary/models/origin) alone — ScorecardRecord structurally satisfies
+  // AnalysisCard. Narrows dataset/harness at the SQL level when the filter pins exactly one (domain re-filters
+  // defensively). docs/architecture/analysis-studio.md (V1).
+  async analysis(tenant: string, config: AnalysisConfig): Promise<AnalysisResult> {
+    const f = config.filters;
+    const dataset = f.dataset?.length === 1 ? f.dataset[0] : undefined;
+    const harness = f.harness?.length === 1 ? f.harness[0] : undefined;
+    const records = await this.deps.store.list(tenant, {
+      ...(dataset !== undefined ? { dataset } : {}),
+      ...(harness !== undefined ? { harness } : {}),
+    });
+    return computeAnalysis(records, config);
+  }
+
+  // The offloaded analysis bundle (ScorecardRecord.analysisRef) fetched server-side — the per-case verdicts/scores
+  // without re-reading every child run. Only an http(s) ref is fetchable (the same gate as the web download link);
+  // a record without one reads 404 like a missing resource. The artifact was written by our own offload path, so the
+  // URL is trusted; a fetch/parse failure is the upstream store's fault → UpstreamError.
+  async analysisBundle(tenant: string, id: string): Promise<unknown> {
+    const record = await this.getRecord(id);
+    if (!record || record.tenant !== tenant)
+      throw new NotFoundError("NOT_FOUND", { id }, `scorecard '${id}' not found.`);
+    const ref = record.analysisRef;
+    if (!ref || !/^https?:\/\//i.test(ref))
+      throw new NotFoundError("NOT_FOUND", { id }, `scorecard '${id}' has no downloadable analysis artifact.`);
+    try {
+      const res = await fetch(ref);
+      if (!res.ok)
+        throw new UpstreamError(
+          "UPSTREAM_ERROR",
+          { id, status: res.status },
+          `analysis artifact fetch failed (${res.status}).`,
+        );
+      return (await res.json()) as unknown;
+    } catch (err) {
+      if (err instanceof AppError) throw err;
+      throw new UpstreamError(
+        "UPSTREAM_ERROR",
+        { id },
+        `analysis artifact fetch failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
   }
 
   // model-axis backfill — derive the observed model from the stored trace of (old) succeeded scorecards that lack models yet, and fill it in.
