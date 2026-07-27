@@ -7,8 +7,8 @@ function fakeHandle(exec: (cmd: string) => Promise<ExecResult>) {
   const files = new Map<string, string>();
   let disposed = false;
   const handle: ComputeHandle = {
-    exec: async (cmd) => exec(cmd),
-    writeFile: async (path, data) => {
+    exec: async (cmd: string) => exec(cmd),
+    writeFile: async (path: string, data: string | Buffer) => {
       files.set(path, typeof data === "string" ? data : data.toString("utf8"));
     },
     dispose: async () => {
