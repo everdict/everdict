@@ -386,6 +386,11 @@ export function AgentChatPanel({
             setStreamingReasoning('')
             if (parsed.data.content.trim().length > 0) setStreamingText('')
           }
+        } else if (event === 'view_config') {
+          // The agent drove the analysis canvas (apply_view_config) — same-window broadcast; the analyze
+          // dashboard / open View listens and applies the stored-form config live.
+          if (data !== null && typeof data === 'object')
+            window.dispatchEvent(new CustomEvent('everdict:view-config', { detail: data }))
         } else if (event === 'artifact') {
           // A chart/table/report the agent just emitted — render it live in place.
           const parsed = analysisArtifactSchema.safeParse(data)
@@ -494,7 +499,8 @@ export function AgentChatPanel({
   useEffect(() => {
     if (!pendingMention) return
     if (pendingMention.ref) addReference(pendingMention.ref)
-    if (pendingMention.prompt) setInput((prev) => (prev.trim().length > 0 ? prev : pendingMention.prompt ?? ''))
+    if (pendingMention.prompt)
+      setInput((prev) => (prev.trim().length > 0 ? prev : (pendingMention.prompt ?? '')))
     onConsumeMention?.()
   }, [pendingMention, addReference, onConsumeMention])
 

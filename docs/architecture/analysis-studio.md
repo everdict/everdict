@@ -201,9 +201,14 @@ cover the 80% (pivot + charts + reports) with zero new attack surface.
   or before its creation (closing an open activity card like assistant text would), hydrated via
   `GET /api/agent/sessions/:id/artifacts` on session open and appended live from the SSE `artifact`
   event; `ArtifactCard` became a client component shared by the transcript and the view gallery.
-  **Remaining for full V3:** the `apply_view_config` host tool + `view_config` SSE + live canvas apply,
-  a web pin/unpin action, `/views` card thumbnails + last-report time, and view-linked sessions
-  (`viewId` on AgentSession + the view-context preamble).
+  **Fourth cut:** `apply_view_config` — a host tool (`apps/agent/src/view-config-tool.ts`, registered only
+  when the SSE handler wires `ChatHooks.onViewConfig`, so headless turns never carry it) whose input IS the
+  saved-View stored-form vocabulary (get_view output can be tweaked and re-applied verbatim); the SSE
+  `view_config` event broadcasts same-window (`everdict:view-config` CustomEvent) and `CustomAnalyzer`
+  applies it via `storedToConfig` (defensive normalize) — the agent drives the same canvas the pickers
+  drive, the member keeps manual control. **Remaining for full V3:** a web pin/unpin action, `/views` card
+  thumbnails + last-report time, and view-linked sessions (`viewId` on AgentSession + the view-context
+  preamble).
 - **V4 — scheduled reports. ✅ LANDED (backend; web form → V3 batch).** Third `ScheduleRunTemplate` kind
   `{report: {view, instructions?, compare?: "previous-period"}}` (exactly-one-mode refine, DTO + MCP
   `create_schedule report_view/…` parity); `ScheduleService.fire` report branch → the `AgentReportRunner`

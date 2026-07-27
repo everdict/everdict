@@ -400,6 +400,8 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
         },
         // An emitted analysis artifact (chart/table/report) — push the record so the web renders it live.
         onArtifact: (artifact) => write("artifact", artifact),
+        // The agent drove the analysis canvas — push the stored-form config so the web applies it live.
+        onViewConfig: (config) => write("view_config", config),
         onRecord: (r) => write("message", r),
         // bypass → no permit (auto-allow writes); default/plan → HITL + rules; auto → ask only guarded actions
         // (folded into `permit` above). plan → planMode + onPlan approval.

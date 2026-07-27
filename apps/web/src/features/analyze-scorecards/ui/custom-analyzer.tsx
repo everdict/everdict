@@ -27,6 +27,7 @@ import {
   dimValue,
   MEASURE_KEY,
   metricsOf,
+  storedToConfig,
   type AnalysisConfig,
   type Dimension,
   type Measure,
@@ -212,6 +213,18 @@ export function CustomAnalyzer({
     p.set('mode', 'custom')
     window.history.replaceState(null, '', `?${p.toString()}`)
   }, [config])
+
+  // The agent drove the canvas (apply_view_config in the chat panel, same window) — apply the streamed
+  // stored-form config live. storedToConfig normalizes defensively, so a malformed payload degrades to defaults;
+  // the member keeps full manual control afterwards (this is just another setConfig).
+  useEffect(() => {
+    const onApply = (e: Event) => {
+      const detail = (e as CustomEvent<unknown>).detail
+      if (detail !== null && typeof detail === 'object') setConfig(storedToConfig(detail))
+    }
+    window.addEventListener('everdict:view-config', onApply)
+    return () => window.removeEventListener('everdict:view-config', onApply)
+  }, [])
 
   const resolveOwner = (s: string) => authors[s]?.name ?? (s ? fmtSubject(s) : '—')
   const patch = (p: Partial<AnalysisConfig>) => setConfig((c) => ({ ...c, ...p }))

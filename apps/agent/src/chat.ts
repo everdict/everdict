@@ -19,6 +19,7 @@ import {
 } from "@everdict/contracts";
 import type { ReasoningCarrier } from "@everdict/llm";
 import { buildArtifactTools } from "./artifact-tools.js";
+import { buildViewConfigTool } from "./view-config-tool.js";
 import type { ToolProvider } from "./mcp-tools.js";
 import type { ModelByIdResolver, ModelResolver } from "./model.js";
 import type { ForwardHeaders, Principal } from "./principal.js";
@@ -133,6 +134,9 @@ export interface ChatHooks {
   // Fires as an analysis artifact (chart/table/report) is persisted — the SSE handler pushes it so the web
   // renders the artifact live in the transcript.
   onArtifact?: (record: AnalysisArtifactRecord) => void;
+  // The agent drove the analysis canvas (apply_view_config) — the SSE handler streams the stored-form config so
+  // the web applies it live. Present → the tool is registered; absent (headless turns) → no canvas tool.
+  onViewConfig?: (config: Record<string, string>) => void;
   // Human-in-the-loop approval for write (non-read-only) tool calls — the SSE handler supplies one that pauses the
   // loop, asks the web, and resolves allow/deny. Absent (buffered/API callers) → write tools auto-allow as before.
   permit?: PermissionHook;
@@ -353,8 +357,11 @@ export async function runChat(
         ...(hooks?.onArtifact ? { onArtifact: hooks.onArtifact } : {}),
       })
     : [];
-  const registry =
-    artifactTools.length > 0 ? new ToolRegistry([...tools.registry.list(), ...artifactTools]) : tools.registry;
+  // Canvas control (analysis-studio V3) — only a live web chat wires onViewConfig, so headless turns never
+  // carry a tool that has no canvas to drive.
+  const canvasTools = hooks?.onViewConfig ? [buildViewConfigTool(hooks.onViewConfig)] : [];
+  const extraTools = [...artifactTools, ...canvasTools];
+  const registry = extraTools.length > 0 ? new ToolRegistry([...tools.registry.list(), ...extraTools]) : tools.registry;
   try {
     // Fold any @-referenced entity context into the user turn the model sees (the persisted record keeps the
     // clean text + the reference metadata separately).
