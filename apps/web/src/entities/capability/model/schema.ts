@@ -96,6 +96,38 @@ export const saveCapabilityResultSchema = z.object({
 })
 export type SaveCapabilityResult = z.infer<typeof saveCapabilityResultSchema>
 
+// POST /capabilities/validate 200 — save dry-run: 스펙 파싱 실패(ok:false) 또는 버전 예측 + 이미지 경고(ok:true).
+export const validateCapabilityResultSchema = z.union([
+  z.object({ ok: z.literal(false), errors: z.array(z.string()) }),
+  z.object({
+    ok: z.literal(true),
+    id: z.string(),
+    type: capabilityTypeSchema,
+    willCreate: z.boolean(),
+    version: z.string(),
+    existingVersions: z.array(z.string()),
+    imageWarnings: z.array(z.object({ image: z.string(), class: z.string() })).optional(),
+  }),
+])
+export type ValidateCapabilityResult = z.infer<typeof validateCapabilityResultSchema>
+
+// POST /capabilities/probe-mcp 200 — mcp 연결 테스트: 도달성 + 발견한 도구(provides 자동채움용). 실패는 결과(reachable:false).
+export const probeCapabilityMcpResultSchema = z.object({
+  reachable: z.boolean(),
+  detail: z.string(),
+  reason: z.enum(['auth', 'unreachable', 'protocol']).optional(),
+  tools: z.array(z.object({ name: z.string(), description: z.string().optional() })),
+})
+export type ProbeCapabilityMcpResult = z.infer<typeof probeCapabilityMcpResultSchema>
+
+// GET /workspace/image-registries/tags — environment 이미지 피커용 태그 목록.
+export const imageTagsSchema = z.object({
+  registry: z.string(),
+  repository: z.string(),
+  tags: z.array(z.string()),
+})
+export type ImageTags = z.infer<typeof imageTagsSchema>
+
 // 드리프트 가드 — 레코드는 양방향(어느 쪽 필드 변경도 웹 타입체크를 깨뜨린다).
 type AssertAssignable<A extends B, B> = A
 type _CapFwd = AssertAssignable<Capability, ContractCapabilityRecord>

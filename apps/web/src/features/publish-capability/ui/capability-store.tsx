@@ -4,9 +4,12 @@ import { useMemo, useState, useTransition } from 'react'
 import {
   Boxes,
   Check,
+  CircleAlert,
+  CircleCheck,
   Code2,
   Container,
   Globe,
+  Loader2,
   Lock,
   MoreHorizontal,
   Pencil,
@@ -15,6 +18,7 @@ import {
   Sparkles,
   Trash2,
   Users,
+  Zap,
 } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 import { toast } from 'sonner'
@@ -31,6 +35,7 @@ import { cn } from '@/shared/lib/utils'
 import { Avatar } from '@/shared/ui/avatar'
 import { Badge } from '@/shared/ui/badge'
 import { Button } from '@/shared/ui/button'
+import { CodeEditor } from '@/shared/ui/code-editor'
 import { Dialog } from '@/shared/ui/dialog'
 import { DropdownItem, DropdownMenu, DropdownSeparator } from '@/shared/ui/dropdown-menu'
 import { EmptyState } from '@/shared/ui/empty-state'
@@ -42,6 +47,8 @@ import {
   saveCapabilityAction,
   setCapabilityVisibilityAction,
 } from '../api/manage-capabilities'
+import { probeCapabilityMcpAction, validateCapabilityAction } from '../api/wizard-tools'
+import type { ProbeCapabilityMcpResult, ValidateCapabilityResult } from '@/entities/capability'
 
 // capability 의 필요 시크릿(채택 시 내 시크릿으로 바인딩). skill 은 없음.
 function requiredSecretsOf(c: Capability): RequiredSecret[] {
@@ -524,6 +531,12 @@ function CapabilityEditorDialog({
   const [url, setUrl] = useState(mcp?.url ?? '')
   const [provides, setProvides] = useState((mcp?.provides ?? []).join(', '))
   const [mcpWrite, setMcpWrite] = useState(mcp?.write ?? false)
+  // mcp 연결 테스트(probe) — 테스트 전용 토큰(미저장) + 결과(도달성 + 발견 도구, provides 자동채움).
+  const [probeToken, setProbeToken] = useState('')
+  const [probing, setProbing] = useState(false)
+  const [probeResult, setProbeResult] = useState<ProbeCapabilityMcpResult | null>(null)
+  // 저장 전 검증(dry-run) 결과 — 전 종류 공통(footer 에 인라인 표시).
+  const [validateResult, setValidateResult] = useState<ValidateCapabilityResult | null>(null)
   // code
   const code = capability?.spec.type === 'code' ? capability.spec : undefined
   const [language, setLanguage] = useState<'python' | 'node'>(code?.language ?? 'python')
@@ -626,6 +639,39 @@ function CapabilityEditorDialog({
     }
     return { type: 'skill', instructions }
   }
+
+  // mcp 연결 테스트 — URL(+ 선택 토큰)로 test-connect 하고 도구를 발견한다. 실패는 결과(reachable:false)로 표시.
+  const runProbe = () => {
+    setProbing(true)
+    setProbeResult(null)
+    void probeCapabilityMcpAction(url.trim(), probeToken.trim() || undefined).then((r) => {
+      setProbing(false)
+      if (r.ok && r.result) setProbeResult(r.result)
+      else toast.error(r.error ?? t('probeError'))
+    })
+  }
+  // 발견한 도구 이름을 provides 로 채운다(수동 입력 대체).
+  const fillProvides = () => {
+    if (probeResult) setProvides(probeResult.tools.map((tool) => tool.name).join(', '))
+  }
+
+  // 저장 전 검증(dry-run) — 새 capability/새 버전 여부 + 예측 버전 + 이미지 경고를 인라인으로 보여준다.
+  const runValidate = () =>
+    startTransition(async () => {
+      const spec = buildSpec()
+      if ('error' in spec) {
+        setValidateResult({ ok: false, errors: [spec.error] })
+        return
+      }
+      const r = await validateCapabilityAction(
+        (isNew ? id.trim() : capability.id) || '(unnamed)',
+        name.trim(),
+        description.trim(),
+        spec
+      )
+      if (r.ok && r.result) setValidateResult(r.result)
+      else toast.error(r.error ?? t('saveError'))
+    })
 
   const save = () =>
     startTransition(async () => {
@@ -741,6 +787,64 @@ function CapabilityEditorDialog({
                 className="font-mono text-[13px]"
               />
             </div>
+            {/* 연결 테스트 — URL(+선택 토큰)로 test-connect 하고 도구를 발견 → provides 자동채움 */}
+            <div className="space-y-2 rounded-md border border-border bg-secondary/30 p-3">
+              <div className="flex flex-wrap items-end gap-2">
+                <div className="min-w-[10rem] flex-1 space-y-1">
+                  <Label htmlFor="cap-probe-token">{t('probeToken')}</Label>
+                  <Input
+                    id="cap-probe-token"
+                    type="password"
+                    value={probeToken}
+                    onChange={(e) => setProbeToken(e.target.value)}
+                    placeholder={t('probeTokenPlaceholder')}
+                    className="font-mono text-[12px]"
+                  />
+                </div>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  disabled={probing || url.trim().length === 0}
+                  onClick={runProbe}
+                >
+                  {probing ? <Loader2 className="animate-spin" /> : <Zap />}
+                  {t('testConnection')}
+                </Button>
+              </div>
+              <p className="text-[11.5px] text-muted-foreground">{t('probeTokenHint')}</p>
+              {probeResult && (
+                <div className="space-y-2 border-t border-border pt-2">
+                  <div
+                    className={cn(
+                      'flex items-center gap-1.5 text-[12.5px] font-medium',
+                      probeResult.reachable ? 'text-success' : 'text-destructive'
+                    )}
+                  >
+                    {probeResult.reachable ? (
+                      <CircleCheck className="size-4" />
+                    ) : (
+                      <CircleAlert className="size-4" />
+                    )}
+                    <span>{probeResult.detail}</span>
+                  </div>
+                  {probeResult.tools.length > 0 && (
+                    <>
+                      <div className="flex flex-wrap gap-1">
+                        {probeResult.tools.map((tool) => (
+                          <Badge key={tool.name} tone="neutral" title={tool.description}>
+                            {tool.name}
+                          </Badge>
+                        ))}
+                      </div>
+                      <Button variant="ghost" size="sm" onClick={fillProvides}>
+                        <Check />
+                        {t('fillProvides')}
+                      </Button>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
             <div className="space-y-1">
               <Label htmlFor="cap-provides">{t('provides')}</Label>
               <p className="text-[12px] text-muted-foreground">{t('providesHint')}</p>
@@ -789,12 +893,13 @@ function CapabilityEditorDialog({
             <div className="space-y-1">
               <Label htmlFor="cap-code">{t('code')}</Label>
               <p className="text-[12px] text-muted-foreground">{t('codeHint')}</p>
-              <Textarea
-                id="cap-code"
+              <CodeEditor
                 value={source}
-                onChange={(e) => setSource(e.target.value)}
-                rows={10}
-                className="font-mono text-[12px]"
+                onChange={setSource}
+                language={language}
+                minHeight="220px"
+                maxHeight="420px"
+                aria-label={t('code')}
               />
             </div>
             <div className="space-y-1">
@@ -953,9 +1058,48 @@ function CapabilityEditorDialog({
           </div>
         )}
 
+        {/* 저장 전 검증(dry-run) 결과 — 새 capability/새 버전 여부 + 예측 버전 + 스펙 오류/이미지 경고 */}
+        {validateResult &&
+          (validateResult.ok ? (
+            <div className="space-y-1.5 rounded-md border border-border bg-secondary/30 p-3 text-[12.5px]">
+              <div className="flex items-center gap-1.5 font-medium text-success">
+                <CircleCheck className="size-4" />
+                <span>
+                  {validateResult.willCreate
+                    ? t(validateResult.existingVersions.length === 0 ? 'validateNew' : 'validateNewVersion', {
+                        version: validateResult.version,
+                      })
+                    : t('validateNoop', { version: validateResult.version })}
+                </span>
+              </div>
+              {(validateResult.imageWarnings ?? []).map((w) => (
+                <div key={w.image} className="flex items-center gap-1.5 text-warning">
+                  <CircleAlert className="size-3.5" />
+                  <span className="font-mono">{w.image}</span>
+                  <span>— {w.class}</span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="space-y-1 rounded-md border border-destructive/30 bg-destructive/5 p-3 text-[12.5px]">
+              <div className="flex items-center gap-1.5 font-medium text-destructive">
+                <CircleAlert className="size-4" />
+                <span>{t('validateFailed')}</span>
+              </div>
+              {validateResult.errors.map((e) => (
+                <p key={e} className="pl-5 text-muted-foreground">
+                  {e}
+                </p>
+              ))}
+            </div>
+          ))}
+
         <div className="flex justify-end gap-2 border-t border-border pt-4">
           <Button variant="secondary" size="sm" onClick={onClose}>
             {t('cancel')}
+          </Button>
+          <Button variant="ghost" size="sm" onClick={runValidate} disabled={pending || !canSave}>
+            {t('validate')}
           </Button>
           <Button size="sm" onClick={save} disabled={pending || !canSave}>
             {pending ? t('saving') : isNew ? t('publish') : t('save')}
