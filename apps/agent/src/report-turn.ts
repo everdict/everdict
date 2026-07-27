@@ -19,7 +19,7 @@ export interface ReportTurnInput {
 
 // Report turns are unattended — cap them tighter than an interactive chat so a wandering model can't burn the
 // tenant's budget on one fire.
-const REPORT_MAX_TURNS = 16;
+const REPORT_MAX_TURNS = 24;
 
 export function buildReportPrompt(input: ReportTurnInput): string {
   const lines = [
@@ -32,6 +32,8 @@ export function buildReportPrompt(input: ReportTurnInput): string {
     "   (group → groupBy array, pivot → pivotBy, origin → filters.originSource, q → search, incomplete →",
     "   includeIncomplete). Also run per-metric variants (measure passRate AND mean; per-metric where useful)",
     "   so the dashboard shows metric-by-metric indicators, not one aggregate.",
+    "   BUDGET: keep data-gathering to AT MOST 6 query calls, then RENDER — an unfinished run with no dashboard",
+    "   is a failure; fewer well-chosen queries beat exhaustive exploration.",
   ];
   if (input.compare === "previous-period") {
     lines.push(
