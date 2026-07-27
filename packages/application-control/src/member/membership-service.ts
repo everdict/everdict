@@ -21,6 +21,10 @@ export class MembershipService {
     // Called right after a member is removed from / leaves the workspace (best-effort) — a cleanup hook, e.g. auto-disabling scheduled (cron) evals.
     // Failure never affects the member-removal result (the store is the source of truth). Shared HTTP/MCP core, so it applies to both.
     private readonly onMemberRemoved?: (workspace: string, subject: string) => Promise<unknown>,
+    // The web app's public base URL (WEB_BASE_URL) — lets createInvite return the FULL shareable link, not just the
+    // raw token. Without it a non-browser consumer (the agent, an API caller) cannot compose the URL: the web builds
+    // it from window.location.origin, which only a browser has. Unset → the response carries the token only.
+    private readonly webBaseUrl?: string,
   ) {}
 
   // --- Members ---
@@ -74,14 +78,16 @@ export class MembershipService {
   }
 
   // --- Invites ---
-  // Create a reusable invite link — returns the plaintext token exactly once (embedded in the link). Only the hash is stored (in the store).
-  // The link works for anyone who has it until it expires or an admin revokes it (not single-use).
+  // Create a reusable invite link — returns the plaintext token exactly once (embedded in the link), plus the FULL
+  // shareable inviteUrl when the service knows the web base URL. Only the hash is stored (in the store), so neither
+  // can be recovered later — list/revoke work by id. The link works for anyone who has it until it expires or an
+  // admin revokes it (not single-use).
   async createInvite(input: {
     workspace: string;
     role: EverdictRole;
     createdBy: string;
     expiresInHours?: number;
-  }): Promise<{ token: string; meta: WorkspaceInviteMeta }> {
+  }): Promise<{ token: string; meta: WorkspaceInviteMeta; inviteUrl?: string }> {
     const token = generateInviteToken();
     const expiresAt =
       input.expiresInHours !== undefined
@@ -95,7 +101,11 @@ export class MembershipService {
       prefix: token.slice(0, 12),
       ...(expiresAt !== undefined ? { expiresAt } : {}),
     });
-    return { token, meta };
+    // Same shape the web's invite-accept entry point expects: {web}/invite?token=… (apps/web app/invite/page.tsx).
+    const inviteUrl = this.webBaseUrl
+      ? `${this.webBaseUrl.replace(/\/$/, "")}/invite?token=${encodeURIComponent(token)}`
+      : undefined;
+    return { token, meta, ...(inviteUrl !== undefined ? { inviteUrl } : {}) };
   }
 
   listInvites(workspace: string): Promise<WorkspaceInviteMeta[]> {

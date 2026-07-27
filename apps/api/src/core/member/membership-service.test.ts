@@ -28,6 +28,23 @@ async function issueToken(invites: InMemoryWorkspaceInviteStore, workspace: stri
   return token;
 }
 
+describe("MembershipService.createInvite — the full shareable link", () => {
+  it("returns inviteUrl composed from the web base URL (trailing slash normalized, token URL-encoded)", async () => {
+    const members = new InMemoryWorkspaceStore();
+    const invites = new InMemoryWorkspaceInviteStore(members);
+    const svc = new MembershipService(members, invites, new InMemoryUserProfileStore(), undefined, "http://web.test/");
+    const { token, inviteUrl } = await svc.createInvite({ workspace: "acme", role: "member", createdBy: "alice" });
+    expect(inviteUrl).toBe(`http://web.test/invite?token=${encodeURIComponent(token)}`);
+  });
+
+  it("omits inviteUrl when no web base URL is configured (token only — the caller composes)", async () => {
+    const { svc } = setup();
+    const created = await svc.createInvite({ workspace: "acme", role: "member", createdBy: "alice" });
+    expect(created.inviteUrl).toBeUndefined();
+    expect(created.token.startsWith("inv_")).toBe(true);
+  });
+});
+
 describe("MembershipService.previewInvite — link landing (non-consuming)", () => {
   it("valid token → workspace name/logo/role, and does not consume it", async () => {
     const { members, invites, svc } = setup();

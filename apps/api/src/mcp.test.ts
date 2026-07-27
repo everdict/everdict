@@ -179,6 +179,8 @@ function harness() {
       workspaceStore,
       new InMemoryWorkspaceInviteStore(workspaceStore),
       new InMemoryUserProfileStore(),
+      undefined,
+      "http://web.test", // createInvite composes the full shareable inviteUrl from this
     ),
     scorecardService: new ScorecardService({
       dispatcher: okDispatcher,
@@ -2039,6 +2041,8 @@ describe("MCP tools", () => {
     const created = JSON.parse(text(await admin.callTool({ name: "create_invite", arguments: { role: "member" } })));
     const token = created.token as string;
     expect(token.startsWith("inv_")).toBe(true);
+    // The agent gets the FULL shareable link, not just the raw token (it cannot compose the web origin itself).
+    expect(created.inviteUrl).toBe(`http://web.test/invite?token=${encodeURIComponent(token)}`);
 
     // A different principal (the first invitee) accepts — no workspace gate.
     const invitee = await connect(deps, ["viewer"], "other-ws", "u");

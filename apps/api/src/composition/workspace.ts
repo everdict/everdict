@@ -17,8 +17,13 @@ export function buildWorkspace(deps: {
 }) {
   const { workspaceStore, inviteStore, userProfileStore, runnerStore, scheduleRef } = deps;
   const workspaceService = new WorkspaceService(workspaceStore);
-  const membershipService = new MembershipService(workspaceStore, inviteStore, userProfileStore, (ws, sub) =>
-    scheduleRef.require().disableByCreator(ws, sub),
+  const membershipService = new MembershipService(
+    workspaceStore,
+    inviteStore,
+    userProfileStore,
+    (ws, sub) => scheduleRef.require().disableByCreator(ws, sub),
+    // Lets createInvite return the full shareable link (…/invite?token=…) — same default as the other web-base sites.
+    process.env.WEB_BASE_URL ?? "http://localhost:3001",
   );
   const profileService = new ProfileService(userProfileStore);
   const runnerService = new RunnerService(runnerStore);

@@ -31,13 +31,14 @@ export function registerInviteRoutes(app: FastifyInstance, deps: ServerDeps): vo
     if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: body.error.message });
     try {
       gate(principal, "members:write");
-      const { token, meta } = await deps.membershipService.createInvite({
+      const { token, meta, inviteUrl } = await deps.membershipService.createInvite({
         workspace: principal.workspace,
         role: body.data.role,
         createdBy: principal.subject,
         ...(body.data.expiresInHours !== undefined ? { expiresInHours: body.data.expiresInHours } : {}),
       });
-      return reply.code(201).send({ ...meta, token }); // the plaintext token is returned only once here (embedded in the link)
+      // The plaintext token (and the full inviteUrl composed from it) is returned only once here — only a hash is stored.
+      return reply.code(201).send({ ...meta, token, ...(inviteUrl !== undefined ? { inviteUrl } : {}) });
     } catch (err) {
       return sendError(reply, err);
     }

@@ -12,7 +12,9 @@ export function registerInviteTools(server: McpServer, ctx: McpToolContext): voi
       "list_invites",
       {
         description:
-          "This workspace's active invite links (metadata only — no token/hash; acceptedCount = joins so far)",
+          "This workspace's active invite links (metadata only: id, role, prefix, expiry, acceptedCount = joins so " +
+          "far). Tokens are stored hashed, so an existing invite's URL cannot be recovered — the full link exists " +
+          "only in the create_invite response. Use the id here with revoke_invite.",
         inputSchema: {},
       },
       () => run(principal, "members:write", async () => ok(await membership.listInvites(ws))),
@@ -21,18 +23,20 @@ export function registerInviteTools(server: McpServer, ctx: McpToolContext): voi
       "create_invite",
       {
         description:
-          "Issue a reusable invite link. The response token (inv_…) is shown once — share it, and anyone with the link joins with that role until it expires or you revoke it.",
+          "Issue a reusable invite link. The response carries inviteUrl — the FULL shareable link " +
+          "(…/invite?token=…) — plus the raw token (inv_…); both are shown exactly ONCE (only a hash is stored). " +
+          "Give the member the inviteUrl; anyone with it joins with that role until it expires or is revoked.",
         inputSchema: { role: z.enum(EVERDICT_ROLES), expiresInHours: z.number().int().positive().max(8760).optional() },
       },
       ({ role, expiresInHours }) =>
         run(principal, "members:write", async () => {
-          const { token, meta } = await membership.createInvite({
+          const { token, meta, inviteUrl } = await membership.createInvite({
             workspace: ws,
             role,
             createdBy: principal.subject,
             ...(expiresInHours !== undefined ? { expiresInHours } : {}),
           });
-          return ok({ ...meta, token });
+          return ok({ ...meta, token, ...(inviteUrl !== undefined ? { inviteUrl } : {}) });
         }),
     );
     server.registerTool(
