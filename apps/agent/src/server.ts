@@ -248,6 +248,18 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
     return reply.send({ messages });
   });
 
+  // The conversation's analysis artifacts (charts/tables/reports the agent emitted) — createdAt ascending, so the
+  // web can interleave them with the transcript on reload (live delivery is the SSE `artifact` event).
+  app.get("/agent/sessions/:id/artifacts", async (req, reply) => {
+    const principal = await principalOf(req, reply);
+    if (!principal) return reply;
+    const { id } = idParams.parse(req.params);
+    const session = await deps.sessions.getSession(principal.workspace, principal.subject, id);
+    if (!session) return reply.code(404).send({ code: "NOT_FOUND", message: "Conversation not found." });
+    const artifacts = deps.artifacts ? await deps.artifacts.listBySession(principal.workspace, id) : [];
+    return reply.send({ artifacts });
+  });
+
   app.post("/agent/sessions/:id/chat", async (req, reply) => {
     const principal = await principalOf(req, reply);
     if (!principal) return reply;
@@ -361,6 +373,8 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
           else if (e.type === "permission") write("permission_resolved", { name: e.name, decision: e.decision });
           else if (e.type === "plan") write("plan_presented", { plan: e.plan });
         },
+        // An emitted analysis artifact (chart/table/report) — push the record so the web renders it live.
+        onArtifact: (artifact) => write("artifact", artifact),
         onRecord: (r) => write("message", r),
         // bypass → no permit (auto-allow writes); default/plan → HITL + rules. plan → planMode + onPlan approval.
         ...(mode === "bypass" ? {} : { permit }),

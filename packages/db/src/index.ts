@@ -145,6 +145,7 @@ export { InMemoryOAuthStateStore, PgOAuthStateStore, generateOAuthState } from "
 export { InMemoryNotificationStore, PgNotificationStore } from "./activity/notification-store.js";
 export { InMemoryCommentStore, PgCommentStore } from "./activity/comment-store.js";
 export { InMemoryAgentSessionStore, PgAgentSessionStore } from "./activity/agent-session-store.js";
+export { InMemoryAnalysisArtifactStore, PgAnalysisArtifactStore } from "./activity/analysis-artifact-store.js";
 export { InMemoryRunnerStore, PgRunnerStore, generateRunnerToken } from "./workspace/runner-store.js";
 export { InMemoryWorkspaceSettingsStore, PgWorkspaceSettingsStore } from "./workspace/workspace-settings.js";
 export { InMemoryWorkspaceStore, PgWorkspaceStore } from "./workspace/workspace-store.js";

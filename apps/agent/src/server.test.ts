@@ -1,6 +1,6 @@
 import { type ToolDefinition, ToolRegistry } from "@everdict/agent-runtime";
 import { UnauthenticatedError } from "@everdict/contracts";
-import { InMemoryAgentSessionStore, InMemoryTenantKeyStore } from "@everdict/db";
+import { InMemoryAgentSessionStore, InMemoryAnalysisArtifactStore, InMemoryTenantKeyStore } from "@everdict/db";
 import type { LlmTransport } from "@everdict/llm";
 import { describe, expect, it, vi } from "vitest";
 import type { ToolProvider } from "./mcp-tools.js";
@@ -113,6 +113,60 @@ describe("agent server", () => {
       await app.inject({ method: "GET", url: `/agent/sessions/${session.id}/messages`, headers: auth })
     ).json().messages as { role: string }[];
     expect(messages.map((m) => m.role)).toEqual(["user", "assistant"]);
+    await app.close();
+  });
+
+  it("a turn can emit an analysis artifact (render_chart) — persisted and listed on the conversation", async () => {
+    // Turn 1 calls render_chart with a valid spec; turn 2 ends with text.
+    let n = 0;
+    const usage = { inputTokens: 5, outputTokens: 1, totalTokens: 6 };
+    const chartCall: LlmTransport = {
+      provider: "fake",
+      stream: async () => {
+        n += 1;
+        if (n === 1) {
+          return {
+            content: null,
+            toolCalls: [
+              {
+                id: "a1",
+                name: "render_chart",
+                arguments: JSON.stringify({
+                  title: "Pass rate by harness",
+                  spec: { type: "bar", x: ["h1"], series: [{ label: "passRate", points: [0.9] }] },
+                }),
+              },
+            ],
+            finishReason: "tool_calls",
+            usage,
+          };
+        }
+        return { content: "charted", toolCalls: [], finishReason: "stop", usage };
+      },
+    };
+    const artifacts = new InMemoryAnalysisArtifactStore();
+    const app = buildServer(
+      makeDeps({ artifacts, resolveModel: async () => ({ transport: chartCall, model: "test-model" }) }),
+    );
+    const session = (await app.inject({ method: "POST", url: "/agent/sessions", headers: auth, payload: {} })).json();
+    const chat = await app.inject({
+      method: "POST",
+      url: `/agent/sessions/${session.id}/chat`,
+      headers: auth,
+      payload: { message: "chart the pass rate" },
+    });
+    expect(chat.statusCode).toBe(200);
+
+    const listed = await app.inject({ method: "GET", url: `/agent/sessions/${session.id}/artifacts`, headers: auth });
+    expect(listed.statusCode).toBe(200);
+    const arts = listed.json().artifacts as { kind: string; title: string }[];
+    expect(arts).toHaveLength(1);
+    expect(arts[0]).toMatchObject({ kind: "chart", title: "Pass rate by harness" });
+
+    // Unknown/foreign session → 404 (no existence leak).
+    expect((await app.inject({ method: "GET", url: "/agent/sessions/nope/artifacts", headers: auth })).statusCode).toBe(
+      404,
+    );
     await app.close();
   });
 

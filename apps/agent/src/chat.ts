@@ -4,18 +4,21 @@ import {
   type McpInvoke,
   type PermissionHook,
   type SubagentType,
+  ToolRegistry,
   buildSummarizer,
   runAgentLoop,
 } from "@everdict/agent-runtime";
-import type { AgentSessionStore } from "@everdict/application-control";
+import type { AgentSessionStore, AnalysisArtifactStore } from "@everdict/application-control";
 import {
   type AgentMessageRecord,
   type AgentReference,
   type AgentReferenceType,
   type AgentToolCall,
+  type AnalysisArtifactRecord,
   NotFoundError,
 } from "@everdict/contracts";
 import type { ReasoningCarrier } from "@everdict/llm";
+import { buildArtifactTools } from "./artifact-tools.js";
 import type { ToolProvider } from "./mcp-tools.js";
 import type { ModelByIdResolver, ModelResolver } from "./model.js";
 import type { ForwardHeaders, Principal } from "./principal.js";
@@ -82,6 +85,9 @@ function buildAttachmentPreamble(attachments: AgentAttachmentInput[]): string | 
 
 export interface ChatDeps {
   sessions: AgentSessionStore;
+  // Analysis-artifact persistence (docs/architecture/analysis-studio.md V2). Present → the agent gets the
+  // render_chart/render_table/write_report emission tools; absent → no artifact tools (dev without a store).
+  artifacts?: AnalysisArtifactStore;
   resolveModel: ModelResolver;
   toolProvider: ToolProvider;
   systemPrompt: string; // base persona — used as-is when no resolveProfile is wired (dev / no DB)
@@ -116,6 +122,9 @@ export interface ChatResult {
 export interface ChatHooks {
   onEvent?: (event: AgentEvent) => void;
   onRecord?: (record: AgentMessageRecord) => void;
+  // Fires as an analysis artifact (chart/table/report) is persisted — the SSE handler pushes it so the web
+  // renders the artifact live in the transcript.
+  onArtifact?: (record: AnalysisArtifactRecord) => void;
   // Human-in-the-loop approval for write (non-read-only) tool calls — the SSE handler supplies one that pauses the
   // loop, asks the web, and resolves allow/deny. Absent (buffered/API callers) → write tools auto-allow as before.
   permit?: PermissionHook;
@@ -323,6 +332,21 @@ export async function runChat(
     profile?.skills ?? [],
     profile?.codeTools ?? [],
   );
+  // Artifact emission tools (analysis-studio V2) — native, per-turn (they carry this session's identity). The
+  // registry is immutable, so extend it with a wrapper when a store is wired.
+  const artifactTools = deps.artifacts
+    ? buildArtifactTools({
+        artifacts: deps.artifacts,
+        tenant: workspace,
+        sessionId,
+        createdBy: principal.subject,
+        now: deps.now,
+        newId: deps.newId,
+        ...(hooks?.onArtifact ? { onArtifact: hooks.onArtifact } : {}),
+      })
+    : [];
+  const registry =
+    artifactTools.length > 0 ? new ToolRegistry([...tools.registry.list(), ...artifactTools]) : tools.registry;
   try {
     // Fold any @-referenced entity context into the user turn the model sees (the persisted record keeps the
     // clean text + the reference metadata separately).
@@ -373,7 +397,7 @@ export async function runChat(
       model: model.model,
       systemPrompt: systemWithEnv,
       history,
-      registry: tools.registry,
+      registry,
       onMessage: persist,
       ...(summarize ? { summarize } : {}),
       ...(fallback ? { fallback } : {}),

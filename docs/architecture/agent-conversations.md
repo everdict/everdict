@@ -179,6 +179,13 @@ i18n `agentChat` namespace in `messages/{en,ko}.json`.
   role rows; a run of consecutive tool calls collapses into ONE `ToolGroup` ("Used N tools", one click to expand); a
   `write_todos` call surfaces as a dedicated **TodoList** checklist (plan / progress) instead of a raw tool card;
   reasoning is its own block. Tool cards no longer repeat the avatar per turn, so a long tool-heavy turn stays compact.
+- **P12 (analysis artifacts, landed — backend)** — the agent emits **durable, declarative artifacts**
+  (chart/table/report) instead of ephemeral chat text: native per-turn emission tools
+  (`apps/agent/src/artifact-tools.ts` — `render_chart`/`render_table`/`write_report`, spec-validated via
+  `@everdict/contracts` `parseAnalysisArtifactSpec`, `isReadOnly:true` per the write_todos precedent),
+  persisted on the conversation (`AnalysisArtifactStore`, mig 0077), streamed live (SSE `artifact`) and
+  listable (`GET /agent/sessions/:id/artifacts`). Never active content (no HTML/JS). Web rendering + View
+  pinning land with the Analysis Studio — see `docs/architecture/analysis-studio.md` (the SSOT for this direction).
 - **Later** — write-action tools behind HITL (port `permissions`); executable (scripted) skills;
   autonomous scheduled sweeps (runtime monitor → propose/trigger evals); findings → comments + Mattermost;
   SSE token streaming (replace polling); a fallback model + prompt caching; parallel independent tool calls.

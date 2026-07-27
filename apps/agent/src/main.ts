@@ -1,8 +1,15 @@
 import { randomUUID } from "node:crypto";
-import { type AgentSessionStore, type TenantKeyStore, WEBSEARCH_SECRET_NAME } from "@everdict/application-control";
+import {
+  type AgentSessionStore,
+  type AnalysisArtifactStore,
+  type TenantKeyStore,
+  WEBSEARCH_SECRET_NAME,
+} from "@everdict/application-control";
 import {
   InMemoryAgentSessionStore,
+  InMemoryAnalysisArtifactStore,
   PgAgentSessionStore,
+  PgAnalysisArtifactStore,
   PgCapabilityStore,
   PgSecretStore,
   PgSkillStore,
@@ -45,6 +52,7 @@ async function main(): Promise<void> {
   const config = loadConfig();
 
   let sessions: AgentSessionStore;
+  let artifacts: AnalysisArtifactStore;
   let resolveModel: ModelResolver;
   // Per-workspace agent customization (Phase 1). resolveProfile is always set (base fallback when no DB / no key);
   // resolveModelById is only available with a DB + secrets key (needed to resolve an AgentSpec.model override's key).
@@ -55,6 +63,7 @@ async function main(): Promise<void> {
   if (config.DATABASE_URL !== undefined) {
     const client = sqlClient(makePool(config.DATABASE_URL));
     sessions = new PgAgentSessionStore(client);
+    artifacts = new PgAnalysisArtifactStore(client);
     keyStore = new PgTenantKeyStore(client);
     const cipher = cipherFromEnv();
     if (cipher !== undefined) {
@@ -88,6 +97,7 @@ async function main(): Promise<void> {
     }
   } else {
     sessions = new InMemoryAgentSessionStore();
+    artifacts = new InMemoryAnalysisArtifactStore();
     resolveModel = envModelFallback(config);
   }
 
@@ -101,6 +111,7 @@ async function main(): Promise<void> {
   const app = buildServer({
     authenticate: meAuthenticate(config.CONTROL_PLANE_URL),
     sessions,
+    artifacts,
     resolveModel,
     resolveProfile,
     ...(resolveModelById ? { resolveModelById } : {}),

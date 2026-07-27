@@ -169,10 +169,19 @@ cover the 80% (pivot + charts + reports) with zero new attack surface.
   The web dashboard still computes client-side (switching it to the route above a workspace-size threshold
   moved to V3, where the Studio consumes the same route). Covered by domain fixture tests + service tests
   (narrowing, bundle fetch/404/502) + route/MCP tests.
-- **V2 — artifact substrate.** Contracts (`AnalysisArtifactRecord`, ChartSpec) + store/migration +
-  `ArtifactStore.getUrl` + `ToolResult.artifact` + emission tools in the agent host + SSE `artifact`
-  event + transcript rendering (chart/table/markdown cards) + `shared/ui/charts`. No view coupling yet —
-  artifacts live on conversations. Unit: emission→persist→render round-trip; ChartSpec zod fuzz.
+- **V2 — artifact substrate. ✅ LANDED (backend; web rendering moved to V3).** Contracts
+  `records/analysis-artifact.ts` (`AnalysisArtifactRecordSchema` — spec opaque-jsonb like View.config,
+  validated per kind at the emission boundary via `parseAnalysisArtifactSpec`; `ChartSpecSchema`
+  line|bar with series/point caps + `TableSpecSchema` + `ReportSpecSchema`); `AnalysisArtifactStore`
+  port (application-control) + InMemory/Pg stores (`@everdict/db` activity/, mig 0077); apps/agent
+  emission tools (`artifact-tools.ts`: `render_chart`/`render_table`/`write_report` — native, per-turn,
+  `isReadOnly:true` per the write_todos precedent since they only write conversation-scoped presentation
+  state) wired in `runChat` when `ChatDeps.artifacts` is present (registry extended per turn); SSE
+  `artifact` event + `GET /agent/sessions/:id/artifacts` (owner-scoped, createdAt asc). Design deltas vs
+  the original sketch: no `ToolResult.artifact` kernel change (host tools persist + notify directly — the
+  kernel stays domain-agnostic) and no `ArtifactStore.getUrl`/file kind yet (blob payloads have no caller
+  until `run_analysis` V5; charts/tables/reports are inline declarative specs). Transcript/gallery
+  rendering lands with V3 (the agent-chat UI was under concurrent rework).
 - **V3 — the Studio.** `/views/[id]` redesign (canvas + embedded chat + artifact rail), session `viewId`,
   view-context preamble, `apply_view_config` host tool + `view_config` SSE + live canvas apply,
   `pin_artifact` + pinned gallery + `/views` card thumbnails. This is the slice that delivers the
