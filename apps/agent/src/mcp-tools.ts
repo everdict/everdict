@@ -18,8 +18,14 @@ import { type ForwardHeaders, forwardHeaderRecord } from "./principal.js";
 // surface always, and to a workspace MCP server UNLESS that server was registered write-allowed (opt-in).
 const READ_PREFIXES = ["get_", "list_", "inspect_", "diff_", "estimate_", "leaderboard_", "search_", "hf_", "preview_"];
 
+// Knowledge-graph READ tools whose names don't match the read prefixes but are pure reads (a node's ranked
+// relationships, a multi-hop neighbourhood, a node's authored notes). Bridged read-only, exactly like a read verb — so
+// the agent can consult the workspace's knowledge before analyzing or contributing. (get_knowledge_node /
+// get_knowledge_graph already match `get_`.)
+const KNOWLEDGE_READS = new Set<string>(["knowledge_related", "knowledge_subgraph", "knowledge_notes"]);
+
 function isReadOnlyToolName(name: string): boolean {
-  return READ_PREFIXES.some((p) => name.startsWith(p));
+  return READ_PREFIXES.some((p) => name.startsWith(p)) || KNOWLEDGE_READS.has(name);
 }
 
 // Curated "use the integration" ACTION tools from the control-plane surface, exposed to the agent BY DEFAULT (beyond
@@ -36,11 +42,25 @@ const INTEGRATION_ACTIONS = new Set<string>([
   "comment_on_github_issue",
 ]);
 
-// A base (built-in everdict) tool reaches the agent if it is a read verb OR one of the curated integration actions —
-// and, when the workspace has opted the agent into driving eval (S6), also a curated eval-driving action. Eval actions
-// are always write verbs (never a read prefix), so they never become read-only below → each is HITL-gated.
+// Knowledge-graph authored-WRITE tools — the contribution path. Exposed to the agent BY DEFAULT so it ACCUMULATES
+// durable workspace knowledge as it works: record an observation on a node (`annotate_knowledge`) or assert a typed
+// relationship over the closed predicate vocabulary (`relate_knowledge`). This is the everdict-native analog of a
+// member contributing knowledge from Claude Code via the everdict plugin — the same authored write path, now driven by
+// the in-product agent. Bridged isReadOnly:false → every write is HITL-gated (the member confirms it inline). Kept
+// narrow to the two authored-write verbs; reindex_knowledge (an admin graph rebuild) stays default-denied.
+const KNOWLEDGE_WRITES = new Set<string>(["annotate_knowledge", "relate_knowledge"]);
+
+// A base (built-in everdict) tool reaches the agent if it is a read verb (incl. the knowledge reads) OR one of the
+// curated integration actions OR a knowledge-contribution write — and, when the workspace has opted the agent into
+// driving eval (S6), also a curated eval-driving action. The write actions are never read prefixes, so they never
+// become read-only below → each is HITL-gated.
 export function isDefaultBaseTool(name: string, allowEvalDrive = false): boolean {
-  return isReadOnlyToolName(name) || INTEGRATION_ACTIONS.has(name) || (allowEvalDrive && isEvalDrivingAction(name));
+  return (
+    isReadOnlyToolName(name) ||
+    INTEGRATION_ACTIONS.has(name) ||
+    KNOWLEDGE_WRITES.has(name) ||
+    (allowEvalDrive && isEvalDrivingAction(name))
+  );
 }
 
 // A base tool is read-only (skips the HITL gate) only when it is a pure read verb AND not a curated integration
@@ -112,8 +132,9 @@ export function mcpToolProvider(
     const bridged: ToolDefinition[] = [];
     let baseCall: McpInvoke | null = null;
 
-    // 1. Base everdict MCP — read verbs + the curated integration actions, forwarding the caller's bearer (dogfooding
-    // the control plane's own tools). The integration actions are bridged isReadOnly:false so each call is HITL-gated.
+    // 1. Base everdict MCP — read verbs (incl. the knowledge reads) + the curated integration actions + the knowledge
+    // contribution writes, forwarding the caller's bearer (dogfooding the control plane's own tools). The action/write
+    // tools are bridged isReadOnly:false so each call is HITL-gated.
     const baseClient = new Client({ name: "everdict-agent", version: "0.1.0" });
     try {
       const transport = new StreamableHTTPClientTransport(baseUrl, {

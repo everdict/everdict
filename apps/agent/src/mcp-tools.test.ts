@@ -26,6 +26,30 @@ describe("base tool default wiring", () => {
       expect(isDefaultBaseTool(name)).toBe(true);
   });
 
+  it("bridges the knowledge-graph reads + authored-write contribution tools by default", () => {
+    // Reads whose names don't match a read prefix (so the agent can consult the workspace's knowledge).
+    for (const name of ["knowledge_related", "knowledge_subgraph", "knowledge_notes"])
+      expect(isDefaultBaseTool(name)).toBe(true);
+    // get_ knowledge reads are covered by the read prefixes.
+    for (const name of ["get_knowledge_node", "get_knowledge_graph"]) expect(isDefaultBaseTool(name)).toBe(true);
+    // The authored-write contribution path — how the agent ACCUMULATES knowledge as it works.
+    for (const name of ["annotate_knowledge", "relate_knowledge"]) expect(isDefaultBaseTool(name)).toBe(true);
+  });
+
+  it("HITL-gates knowledge WRITES but lets knowledge reads skip the gate", () => {
+    // Contribution writes are gated — the member confirms each recorded observation/relationship inline.
+    expect(isBaseToolReadOnly("annotate_knowledge")).toBe(false);
+    expect(isBaseToolReadOnly("relate_knowledge")).toBe(false);
+    // Knowledge reads are pure reads → no gate.
+    expect(isBaseToolReadOnly("knowledge_related")).toBe(true);
+    expect(isBaseToolReadOnly("knowledge_subgraph")).toBe(true);
+    expect(isBaseToolReadOnly("knowledge_notes")).toBe(true);
+  });
+
+  it("keeps the admin knowledge-graph rebuild (reindex) default-denied", () => {
+    expect(isDefaultBaseTool("reindex_knowledge")).toBe(false);
+  });
+
   it("excludes config/register/destroy and secret-write tools (default-deny holds)", () => {
     for (const name of [
       "set_workspace_mattermost",

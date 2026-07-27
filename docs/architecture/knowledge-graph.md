@@ -185,12 +185,16 @@ Following everdict's one-way spine (no new package — schemas belong at the con
    materialised node, and every referenced eval-config node has an owning harvester. Remaining (low-fan-in leaves):
    `skill` / `view` / `browser_profile` / `trace_source` / `agent_session`. Idempotent, versioned by `extractor`.
 3. **Contribution & extraction** — ✅ the AUTHORED write path (`annotate` / `relate`, origin `authored`): a user or
-   agent contributes knowledge from Claude Code via the everdict MCP plugin. An authored note is a mention resolved to
-   its node (read back via `GET /knowledge/annotations`); an authored relation is an edge over the closed predicate
-   vocabulary (read back via `related`/`subgraph`), idempotent by (author, subject, predicate, object). The `authored`
-   origin lets a query separate what the system DERIVED from what a person ASSERTED. Next: text EXTRACTORS for
-   `comment` / `agent_message` / `pr_comment` (@-mention regex first, agent extraction later) + a resolver (surface
-   `nodeRef` → `resolvedNodeId`).
+   agent contributes knowledge from Claude Code via the everdict MCP plugin, AND ✅ the **in-product conversational
+   agent** (`apps/agent`) drives the same path — the `annotate_knowledge` / `relate_knowledge` tools are in its default
+   tool surface (HITL-gated writes; the knowledge reads `get_knowledge_graph` / `knowledge_related` / `knowledge_subgraph`
+   / `knowledge_notes` are read-only), and its system prompt directs it to consult the graph and record durable,
+   evidence-backed observations as it works, so the workspace's institutional knowledge accumulates from in-product use
+   too. An authored note is a mention resolved to its node (read back via `GET /knowledge/annotations`); an authored
+   relation is an edge over the closed predicate vocabulary (read back via `related`/`subgraph`), idempotent by (author,
+   subject, predicate, object). The `authored` origin lets a query separate what the system DERIVED from what a person
+   (or their agent) ASSERTED. Next: text EXTRACTORS for `comment` / `agent_message` / `pr_comment` (@-mention regex
+   first, agent extraction later) + a resolver (surface `nodeRef` → `resolvedNodeId`).
 4. ✅ **Multi-hop query engine** — `KnowledgeQueryService` (`application-control`): `subgraph` (BFS by depth /
    direction / predicate / node-type over the store's single-hop primitives) + `relatedFacts` (ranked 1-hop flat facts
    for rendering, the `mentionGrounding` / `cityKnowledge` analog). A Pg-native recursive-CTE fast path can slot in
