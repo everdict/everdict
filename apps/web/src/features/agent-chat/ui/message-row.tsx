@@ -1,40 +1,18 @@
 'use client'
 
-import { Copy, Paperclip, RefreshCw, User } from 'lucide-react'
-import { useTranslations } from 'next-intl'
-import { toast } from 'sonner'
+import { Paperclip, User } from 'lucide-react'
 
 import type { AgentMessage } from '@/entities/agent-session'
-import { Button } from '@/shared/ui/button'
 import { Markdown } from '@/shared/ui/markdown'
 
 import { AgentAvatar } from './agent-avatar'
 import { ReferenceChip } from './mention-picker'
 
-async function copyText(text: string, done: string): Promise<void> {
-  try {
-    await navigator.clipboard.writeText(text)
-    toast.success(done)
-  } catch {
-    toast.error('Copy failed')
-  }
-}
-
 // One text turn in the transcript, laid out full-width (ChatGPT/Claude style) rather than as a chat bubble: a small
-// role avatar + the content, with hover actions. Assistant text renders as markdown; a user turn shows its
-// @-reference chips above the text. Reasoning, tool activity, and todos are pulled OUT into their own transcript
-// items (see build-transcript) — this row is only the spoken text, so a tool-only assistant turn never renders here.
-export function MessageRow({
-  message,
-  isLastAssistant,
-  onRegenerate,
-}: {
-  message: AgentMessage
-  isLastAssistant: boolean
-  onRegenerate?: () => void
-}) {
-  const t = useTranslations('agentChat')
-
+// role avatar + the content. Assistant text renders as markdown; a user turn shows its @-reference chips above the
+// text. Reasoning and todos are pulled OUT into their own transcript items (see build-transcript) — this row is only
+// the spoken text, so a tool-only assistant turn never renders here.
+export function MessageRow({ message }: { message: AgentMessage }) {
   if (message.role === 'tool') return null
 
   const isUser = message.role === 'user'
@@ -45,7 +23,7 @@ export function MessageRow({
   if (!isUser && !hasText) return null
 
   return (
-    <div className="group animate-in fade-in-0 slide-in-from-bottom-1 px-3 py-2.5 duration-200">
+    <div className="animate-in fade-in-0 slide-in-from-bottom-1 px-3 py-2.5 duration-200">
       <div className="flex gap-2.5">
         {isUser ? (
           <div className="grid size-6 shrink-0 place-items-center rounded-full bg-muted text-muted-foreground">
@@ -84,29 +62,6 @@ export function MessageRow({
                 className="text-[13px] leading-relaxed text-foreground"
               />
             ))}
-
-          {!isUser && hasText && (
-            <div className="flex items-center gap-0.5 pt-0.5 opacity-0 transition-opacity group-hover:opacity-100">
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                aria-label={t('copy')}
-                onClick={() => void copyText(message.content, t('copied'))}
-              >
-                <Copy />
-              </Button>
-              {isLastAssistant && onRegenerate && (
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  aria-label={t('regenerate')}
-                  onClick={onRegenerate}
-                >
-                  <RefreshCw />
-                </Button>
-              )}
-            </div>
-          )}
         </div>
       </div>
     </div>

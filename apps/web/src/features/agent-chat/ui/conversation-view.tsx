@@ -25,7 +25,6 @@ import { ReasoningBlock } from './reasoning-block'
 import { SessionMenu } from './session-menu'
 import { TeamMenu, type TeammateSpawnInput } from './team-menu'
 import { TodoList } from './todo-list'
-import { ToolGroup } from './tool-group'
 
 // A compact model selector in the conversation header — the member picks which registered workspace model powers
 // this conversation. "Workspace default" (null) falls back to the workspace AgentSpec's model / the server default.
@@ -107,7 +106,6 @@ export function ConversationView({
   onRemoveReference,
   onPickAttachment,
   onRemoveAttachment,
-  onRegenerate,
   onSuggestion,
   pendingPermissions,
   onDecidePermission,
@@ -140,7 +138,6 @@ export function ConversationView({
   onRemoveReference: (index: number) => void
   onPickAttachment: (a: AgentAttachmentInput) => void
   onRemoveAttachment: (index: number) => void
-  onRegenerate: () => void
   onSuggestion: (text: string) => void
   pendingPermissions: PendingPermission[]
   onDecidePermission: (requestId: string, decision: 'allow' | 'deny') => void
@@ -170,10 +167,6 @@ export function ConversationView({
   }, [scrollToBottom])
 
   const items = buildTranscript(messages)
-
-  let lastAssistantId: string | null = null
-  for (const m of messages)
-    if (m.role === 'assistant' && m.content.trim().length > 0) lastAssistantId = m.id
 
   const isEmpty = messages.length === 0 && !pendingUser && !sending
   const suggestions = t.raw('suggestions') as string[]
@@ -231,15 +224,7 @@ export function ConversationView({
                 if (item.kind === 'reasoning')
                   return <ReasoningBlock key={item.id} text={item.text} />
                 if (item.kind === 'todos') return <TodoList key={item.id} todos={item.todos} />
-                if (item.kind === 'tools') return <ToolGroup key={item.id} calls={item.calls} />
-                return (
-                  <MessageRow
-                    key={item.message.id}
-                    message={item.message}
-                    isLastAssistant={item.message.id === lastAssistantId}
-                    onRegenerate={onRegenerate}
-                  />
-                )
+                return <MessageRow key={item.message.id} message={item.message} />
               })}
               {pendingUser && (
                 <div className="animate-in fade-in-0 px-3 py-2.5 duration-200">

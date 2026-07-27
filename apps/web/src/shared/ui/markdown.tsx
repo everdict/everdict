@@ -3,8 +3,9 @@ import type { ReactNode } from 'react'
 import { cn } from '@/shared/lib/utils'
 
 // Dependency-free lightweight markdown viewer — parses text into React elements (no dangerouslySetInnerHTML → XSS-safe).
-// Supports: headings(#~######) · code fences(```) · blockquotes(>) · lists(-/*/+·1.) · horizontal rules · paragraphs (line breaks preserved) /
-// inline: `code` · **bold** · *italic* · [text](url). Advanced syntax like tables·nested lists is surfaced as raw source.
+// Supports: headings(#~######) · code fences(```) · blockquotes(>) · lists(-/*/+·1.) · GFM tables · horizontal rules ·
+// paragraphs (line breaks preserved) / inline: `code` · **bold** · *italic* · [text](url).
+// Advanced syntax like nested lists is surfaced as raw source.
 
 // Inline parsing — by priority (code > bold > link > italic), substitute the earliest token first, handling nesting recursively.
 function parseInline(text: string, key: string): ReactNode[] {
@@ -85,8 +86,24 @@ function isBlockStart(l: string): boolean {
     /^\s*[-*+]\s+/.test(l) ||
     /^\s*\d+\.\s+/.test(l) ||
     /^>\s?/.test(l) ||
-    /^(-{3,}|\*{3,}|_{3,})\s*$/.test(l.trim())
+    /^(-{3,}|\*{3,}|_{3,})\s*$/.test(l.trim()) ||
+    /^\s*\|.*\|\s*$/.test(l)
   )
+}
+
+// GFM table rows — split `| a | b |` into trimmed cells (leading/trailing pipes optional).
+function splitTableRow(line: string): string[] {
+  let s = line.trim()
+  if (s.startsWith('|')) s = s.slice(1)
+  if (s.endsWith('|')) s = s.slice(0, -1)
+  return s.split('|').map((c) => c.trim())
+}
+
+// The `|---|:--:|` delimiter row that turns the preceding row into a table header.
+function isTableSeparator(line: string, columns: number): boolean {
+  if (!line.includes('|') || !line.includes('-')) return false
+  const cells = splitTableRow(line)
+  return cells.length === columns && cells.every((c) => /^:?-+:?$/.test(c))
 }
 
 export function Markdown({ content, className }: { content: string; className?: string }) {
@@ -178,6 +195,65 @@ export function Markdown({ content, className }: { content: string; className?: 
         </ol>
       )
       continue
+    }
+
+    // GFM table — header row + `|---|` separator, then body rows until the first non-piped line.
+    if (line.includes('|') && i + 1 < lines.length) {
+      const header = splitTableRow(line)
+      if (header.length >= 2 && isTableSeparator(lines[i + 1], header.length)) {
+        const align = splitTableRow(lines[i + 1]).map((c) =>
+          c.startsWith(':') && c.endsWith(':')
+            ? 'text-center'
+            : c.endsWith(':')
+              ? 'text-right'
+              : 'text-left'
+        )
+        i += 2
+        const rows: string[][] = []
+        while (i < lines.length && lines[i].includes('|') && lines[i].trim() !== '') {
+          rows.push(splitTableRow(lines[i]))
+          i++
+        }
+        blocks.push(
+          <div key={key++} className="overflow-x-auto">
+            <table className="min-w-full border-collapse text-[12.5px]">
+              <thead>
+                <tr>
+                  {header.map((c, j) => (
+                    <th
+                      key={j}
+                      className={cn(
+                        'border border-border bg-muted/40 px-2.5 py-1.5 font-[560] text-foreground',
+                        align[j]
+                      )}
+                    >
+                      {parseInline(c, `th${key}-${j}`)}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((r, ri) => (
+                  <tr key={ri}>
+                    {header.map((_, j) => (
+                      <td
+                        key={j}
+                        className={cn(
+                          'border border-border px-2.5 py-1.5 align-top text-muted-foreground',
+                          align[j]
+                        )}
+                      >
+                        {parseInline(r[j] ?? '', `td${key}-${ri}-${j}`)}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )
+        continue
+      }
     }
 
     if (line.trim() === '') {
