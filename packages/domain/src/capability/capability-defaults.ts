@@ -1,4 +1,4 @@
-import type { CapabilityRequirement } from "@everdict/contracts";
+import type { CapabilityRequirement, WorkspaceSettings } from "@everdict/contracts";
 
 // The first-party DEFAULT-toolset selection kernel — the single authority for "does this default apply to this
 // workspace right now". Pure (no I/O): given the workspace's configured integrations, its opt-outs, and the tool names
@@ -16,6 +16,19 @@ export interface DefaultSelectionContext {
   integrationsConfigured: readonly CapabilityRequirement[]; // integrations the workspace has configured
   disabledDefaults: readonly string[]; // capability ids the workspace opted out of
   takenNames: readonly string[]; // tool names already provided by adopted/authored tools (shadow the default)
+}
+
+// WorkspaceSettings → the integrations configured on it, in the CapabilityRequirement vocabulary. The pure derivation
+// the runtime resolver feeds into selectDefaultCapabilities (apps/agent wires it over the settings store). undefined
+// settings (workspace never configured anything) ⇒ no integrations — the gated defaults simply stay off.
+export function configuredIntegrations(settings: WorkspaceSettings | undefined): CapabilityRequirement[] {
+  if (!settings) return [];
+  const configured: CapabilityRequirement[] = [];
+  if (settings.mattermost) configured.push("mattermost");
+  if ((settings.githubApp?.installations.length ?? 0) > 0) configured.push("github");
+  // Plural roster first; the legacy singular registry still counts (read-compat, see WorkspaceSettingsSchema).
+  if ((settings.imageRegistries?.length ?? 0) > 0 || settings.imageRegistry) configured.push("image-registry");
+  return configured;
 }
 
 // Filter first-party defaults to the ones that apply: not opted out (by id), not shadowed by a same-named tool, and —

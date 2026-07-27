@@ -77,7 +77,7 @@ export function githubRepoWriterFactory(fetchImpl?: typeof fetch): GithubRepoWri
               ...(existingSha ? { sha: existingSha } : {}),
             }),
           });
-          if (!put.ok) throw await upstream(put, "workflow file commit failed");
+          if (!put.ok) throw await upstream(put, "file commit failed");
         },
         async openPr(repository, opts) {
           // Create PR — if one is already open (422), find and return the existing PR.

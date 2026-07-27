@@ -104,6 +104,36 @@ export function registerGithubAppTools(server: McpServer, ctx: McpToolContext): 
         ),
     );
     server.registerTool(
+      "open_github_pr",
+      {
+        description:
+          "Open a pull request with file changes in a repository the workspace's GitHub App is installed on — creates " +
+          "(or reuses) the branch off the default branch, commits each change (full new file content), and opens the " +
+          "PR (an already-open PR for the branch is returned instead). Put the motivating context (what failed, " +
+          "evidence, why this fix) in the body — the PR must be reviewable on its own. member+ (github:write).",
+        inputSchema: {
+          repository: z.string().min(1).describe('"owner/name"'),
+          branch: z.string().min(1).describe("head branch to create/reuse (e.g. everdict/scorecard-123-fix)"),
+          title: z.string().min(1).describe("PR title (imperative summary of the change)"),
+          body: z.string().min(1).describe("PR body (GitHub Markdown) — carries the full context for the reviewer"),
+          changes: z
+            .array(
+              z.object({
+                path: z.string().min(1).describe("file path within the repo"),
+                content: z.string().describe("the FULL new content of the file (create or overwrite)"),
+              }),
+            )
+            .min(1)
+            .describe("files to commit on the branch"),
+          host: z.string().url().optional().describe("GitHub Enterprise base URL (unset = github.com)"),
+        },
+      },
+      ({ repository, branch, title, body, changes, host }) =>
+        run(principal, "github:write", async () =>
+          ok(await gh.openPullRequest(ws, repository, { branch, title, body, changes }, host)),
+        ),
+    );
+    server.registerTool(
       "comment_on_github_issue",
       {
         description:

@@ -322,6 +322,90 @@ describe("GithubAppService", () => {
     expect(out).toEqual({ url: "https://gh/acme-org/api/issues/5#comment-1" });
   });
 
+  // Stub for the PR write ops — access-token mint + repo head + branch/contents/pulls, branched by URL; records the
+  // mutating calls so the write ORDER (branch → files → PR) is assertable.
+  function stubPrWrite(opts: { branchStatus?: number; prStatus?: number } = {}): {
+    calls: { method: string; url: string; body?: unknown }[];
+  } {
+    const calls: { method: string; url: string; body?: unknown }[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string | URL, init?: RequestInit) => {
+        const s = String(url);
+        const method = init?.method ?? "GET";
+        if (method !== "GET")
+          calls.push({ method, url: s, ...(init?.body ? { body: JSON.parse(String(init.body)) } : {}) });
+        if (s.endsWith("/access_tokens"))
+          return new Response(JSON.stringify({ token: "ghs_inst", expires_at: "2026-07-05T12:00:00Z" }), {
+            status: 200,
+          });
+        if (s.endsWith("/repos/acme-org/api"))
+          return new Response(JSON.stringify({ default_branch: "main" }), { status: 200 });
+        if (s.includes("/git/ref/heads/main"))
+          return new Response(JSON.stringify({ object: { sha: "base-sha" } }), { status: 200 });
+        if (s.includes("/git/refs")) return new Response("{}", { status: opts.branchStatus ?? 201 });
+        if (s.includes("/contents/") && method === "GET") return new Response("{}", { status: 404 }); // new file
+        if (s.includes("/contents/")) return new Response("{}", { status: 201 });
+        if (s.endsWith("/pulls") && method === "POST")
+          return new Response(
+            JSON.stringify(
+              (opts.prStatus ?? 201) === 201 ? { html_url: "https://gh/acme-org/api/pull/9" } : { message: "exists" },
+            ),
+            { status: opts.prStatus ?? 201 },
+          );
+        if (s.includes("/pulls?head="))
+          return new Response(JSON.stringify([{ html_url: "https://gh/acme-org/api/pull/8" }]), { status: 200 });
+        return new Response(JSON.stringify({ id: 1, account: { login: "acme-org" } }), { status: 200 }); // getInstallation
+      }),
+    );
+    return { calls };
+  }
+
+  it("openPullRequest commits each change on the branch then opens the PR against the default branch (branch → files → PR)", async () => {
+    const { calls } = stubPrWrite();
+    await installOrg();
+    const out = await svc.openPullRequest("acme", "acme-org/api", {
+      branch: "everdict/scorecard-sc-1",
+      title: "fix: handle empty cart",
+      body: "## What failed\nscorecard sc-1 …",
+      changes: [
+        { path: "src/cart.ts", content: "export const cart = 1;\n" },
+        { path: "src/cart.test.ts", content: "test();\n" },
+      ],
+    });
+    expect(out).toEqual({ url: "https://gh/acme-org/api/pull/9", branch: "everdict/scorecard-sc-1", base: "main" });
+    const writes = calls.filter((c) => !c.url.endsWith("/access_tokens"));
+    expect(writes.map((c) => c.url.split("/api/").at(-1))).toEqual([
+      "git/refs",
+      "contents/src/cart.ts",
+      "contents/src/cart.test.ts",
+      "pulls",
+    ]);
+    expect(writes[0]?.body).toMatchObject({ ref: "refs/heads/everdict/scorecard-sc-1", sha: "base-sha" });
+    expect(writes[3]?.body).toMatchObject({ head: "everdict/scorecard-sc-1", base: "main" });
+  });
+
+  it("openPullRequest is near-idempotent — an existing branch (422) is reused and an already-open PR is returned", async () => {
+    stubPrWrite({ branchStatus: 422, prStatus: 422 });
+    await installOrg();
+    const out = await svc.openPullRequest("acme", "acme-org/api", {
+      branch: "everdict/scorecard-sc-1",
+      title: "fix",
+      body: "ctx",
+      changes: [{ path: "src/cart.ts", content: "x" }],
+    });
+    expect(out.url).toBe("https://gh/acme-org/api/pull/8"); // the existing open PR, not an error
+  });
+
+  it("openPullRequest with no changes → BadRequestError before any GitHub call", async () => {
+    const { calls } = stubPrWrite();
+    await installOrg();
+    await expect(
+      svc.openPullRequest("acme", "acme-org/api", { branch: "b", title: "t", body: "b", changes: [] }),
+    ).rejects.toBeInstanceOf(BadRequestError);
+    expect(calls.filter((c) => !c.url.endsWith("/access_tokens"))).toEqual([]);
+  });
+
   it("createIssue → NotFound when the App is not installed on the repo owner", async () => {
     stubRepoWrite();
     await installOrg();

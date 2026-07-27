@@ -212,9 +212,85 @@ const PDF_READ: FirstPartyDefault = {
   },
 };
 
+// The scorecard-fix-PR skill body (SKILL.md-style instructions the agent loads on demand via use_skill). A SKILL —
+// not code: it orchestrates tools the agent already has (scorecard reads + the GitHub App tools), so the procedure
+// and its guardrails ARE the capability. Escaped backticks keep the markdown code spans literal inside the template.
+const SCORECARD_FIX_PR_INSTRUCTIONS = `
+# Scorecard root-cause fix PR
+
+Turn a failing scorecard into a reviewable code fix: establish WHAT failed from the eval evidence, WHERE in the
+harness's source repository it goes wrong, then open a GitHub pull request whose body carries the full experiment
+context — a reviewer must be able to judge the fix without re-running anything.
+
+## 1. Collect the evidence
+- Load the scorecard: \`get_scorecard\` (and \`get_scorecard_analysis\` when available). If the member did not name
+  one, find it with \`list_scorecards\` and confirm which they mean.
+- Identify the failing cases: verdicts, per-case scores, and every judge's score rationale (\`judge:<id>\` entries).
+- For the most informative failing cases (start with 3-5): \`get_run\` + \`get_run_logs\` — extract the concrete
+  failure signature (assertion text, stack trace, error line, wrong output vs the expected value).
+- Group cases by symptom: a shared signature usually means one root cause. Note counts (N of M cases).
+
+## 2. Locate the code under test
+- Find the source repository for the harness under evaluation: check \`list_ci_links\` (repo ↔ harness links) first,
+  then \`list_github_app_repos\` + the harness spec (\`get_harness_instance\` — image/command names hint at the repo).
+  If it stays ambiguous, ask the member — never guess a repository for a write.
+- Follow the failure signatures into the source: \`get_github_file\` on each implicated file (and its tests), walking
+  imports as needed, until you can name the file, the line, and the mechanism.
+
+## 3. Diagnose at code level
+- State the root cause in the form: case X fails because <file:line> does <wrong thing> when <condition>.
+- Every claim must be backed by evidence you actually collected (a log line, a trace event, a judge rationale) tied
+  to code you actually read. If you cannot connect the failure to code, do NOT force a PR — file the findings as an
+  issue instead (\`create_github_issue\`) and say what is missing.
+- Distinguish target-code bugs from eval-setup problems (a wrong dataset expectation, judge misconfiguration, a
+  flaky environment). If the eval setup is at fault, report that and stop — never "fix" the target repository to
+  satisfy a broken expectation.
+
+## 4. Open the fix PR
+- Keep the change minimal and targeted; prepare the FULL new content of every changed file (update the adjacent
+  test when the repo has one).
+- Call \`open_github_pr\` with:
+  - branch: \`everdict/scorecard-<scorecard-id>\` — near-idempotent: re-running updates the same branch/PR.
+  - title: an imperative one-line summary of the fix.
+  - changes: the full new file contents.
+  - body — the experiment context is MANDATORY. Structure it as:
+    - **What failed** — scorecard <id> (<harness>@<version> × <dataset>@<version>): N of M cases failed, with the
+      scorecard link.
+    - **Failing cases** — per case: case id, verdict, judge scores with a one-line rationale each.
+    - **Root cause** — the code-level mechanism, quoting the minimal evidence excerpts (log/trace lines) that prove it.
+    - **The fix** — what changed and why it resolves each failing case.
+    - **Verification** — how to confirm (re-run the scorecard / the failing cases after merge).
+- Summarize the intended diff to the member before the call — the PR write is approved inline (HITL).
+
+## Constraints
+- Never include secrets, API keys, or raw full logs in the PR body — quote only the minimal excerpts.
+- One PR per scorecard; never target the default branch directly.
+`.trim();
+
+const SCORECARD_FIX_PR: FirstPartyDefault = {
+  requires: "github", // needs the workspace GitHub App (read the repo + open the PR) — off until it is installed
+  record: {
+    id: "scorecard-fix-pr",
+    tenant: FIRST_PARTY_TENANT,
+    version: "1.0.0",
+    name: "scorecard_fix_pr",
+    description:
+      "Diagnose a scorecard's failing cases down to the harness's source code and open a GitHub pull request with " +
+      "the fix, carrying the experiment context (failing cases, judge verdicts, evidence) in the PR body. Use when " +
+      "a member asks why an eval failed and wants a fix proposed on the repository.",
+    spec: { type: "skill", instructions: SCORECARD_FIX_PR_INSTRUCTIONS },
+    visibility: "public",
+    sharedWith: [],
+    tags: ["scorecard", "github", "analysis", "built-in"],
+    createdBy: "everdict",
+    createdAt: "2026-07-27T00:00:00.000Z",
+  },
+};
+
 // The first-party default toolset, in the order they are offered: web search (unconditional, key-gated) + PDF read
-// (unconditional, no key, HITL-gated). Rich integration adapters (Mattermost / GitHub / image-registry) are shipped
-// as control-plane MCP tools, not first-party capabilities (their credentials live server-side).
+// (unconditional, no key, HITL-gated) + the scorecard-fix-PR skill (github-gated — the first skill-kind default).
+// Rich integration adapters (Mattermost / GitHub / image-registry) are shipped as control-plane MCP tools, not
+// first-party capabilities (their credentials live server-side); a SKILL default orchestrates those tools instead.
 export function firstPartyDefaults(): FirstPartyDefault[] {
-  return [WEB_SEARCH, PDF_READ];
+  return [WEB_SEARCH, PDF_READ, SCORECARD_FIX_PR];
 }

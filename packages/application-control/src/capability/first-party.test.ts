@@ -25,6 +25,20 @@ describe("firstPartyDefaults", () => {
     expect(web.record.spec.isReadOnly).toBe(true);
   });
 
+  it("ships the scorecard-fix-PR skill, gated on the GitHub integration (the first skill-kind default)", () => {
+    const skill = defaults.find((d) => d.record.id === "scorecard-fix-pr");
+    expect(skill).toBeDefined();
+    if (!skill) return;
+    expect(skill.requires).toBe("github"); // reads the repo + opens the PR via the workspace GitHub App
+    expect(skill.record.spec.type).toBe("skill");
+    if (skill.record.spec.type !== "skill") return;
+    // The procedure's load-bearing steps: diagnose from scorecard evidence, fix via a PR, and carry the experiment
+    // context in the PR body (the whole point of the skill — a reviewer judges the fix without re-running).
+    for (const anchor of ["get_scorecard", "get_github_file", "open_github_pr", "Root cause", "Failing cases"]) {
+      expect(skill.record.spec.instructions).toContain(anchor);
+    }
+  });
+
   it("ships a pdf-read code tool that needs no secret and is HITL-gated (arbitrary-URL fetch)", () => {
     const pdf = defaults.find((d) => d.record.id === "pdf-read");
     expect(pdf).toBeDefined();

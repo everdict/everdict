@@ -3,6 +3,7 @@ import {
   type AgentSpec,
   type CapabilityRecord,
   type CapabilityRef,
+  type CapabilityRequirement,
   type CapabilitySpec,
   NotFoundError,
   type SkillRecord,
@@ -88,6 +89,7 @@ function resolver(
   secrets: SecretStore = secretStore({}),
   skills: SkillStore = skillStore(),
   caps: CapabilityStore = capabilityStore(),
+  integrations: readonly CapabilityRequirement[] = [],
 ) {
   return registryProfileResolver({
     agentRegistry: agentRegistry(spec),
@@ -96,6 +98,7 @@ function resolver(
     capabilityStore: caps,
     baseSystemPrompt: BASE,
     configId: "default",
+    integrationsConfigured: async () => integrations,
   });
 }
 
@@ -292,6 +295,33 @@ describe("registryProfileResolver", () => {
       secretStore({ TAVILY_API_KEY: "tvly-x" }),
     )(principal);
     expect(profile.codeTools.some((t) => t.name === "web_search")).toBe(false); // opted out even though the key is present
+  });
+
+  it("adds the built-in scorecard_fix_pr SKILL default only when the GitHub integration is configured", async () => {
+    // Gated default + integration configured → the skill rides into the profile (use_skill), no adoption needed.
+    const withGithub = await resolver(undefined, secretStore({}), skillStore(), capabilityStore(), ["github"])(
+      principal,
+    );
+    const skill = withGithub.skills.find((s) => s.name === "scorecard_fix_pr");
+    expect(skill).toBeDefined();
+    expect(skill?.instructions).toContain("open_github_pr");
+    // No GitHub App installed → the gated default stays off (unconditional defaults are unaffected).
+    const without = await resolver(undefined)(principal);
+    expect(without.skills.some((s) => s.name === "scorecard_fix_pr")).toBe(false);
+    expect(without.codeTools.map((t) => t.name)).toEqual(["pdf_read"]);
+  });
+
+  it("a workspace-authored skill of the same name shadows the built-in skill default", async () => {
+    const profile = await resolver(
+      undefined,
+      secretStore({}),
+      skillStore([skillRecord({ name: "scorecard_fix_pr", instructions: "our own playbook" })]),
+      capabilityStore(),
+      ["github"],
+    )(principal);
+    const entries = profile.skills.filter((s) => s.name === "scorecard_fix_pr");
+    expect(entries).toHaveLength(1); // shadowed, not duplicated
+    expect(entries[0]?.instructions).toBe("our own playbook"); // the authored skill wins
   });
 
   it("shadows a default when an adopted tool has the same name", async () => {

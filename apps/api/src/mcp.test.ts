@@ -281,6 +281,21 @@ describe("MCP — github write", () => {
     });
     expect(res.isError).toBe(true);
   });
+
+  it("open_github_pr is gated github:write — a viewer is denied (before any GitHub call)", async () => {
+    const viewer = await connect(harness(), ["viewer"]);
+    const res = await viewer.callTool({
+      name: "open_github_pr",
+      arguments: {
+        repository: "acme-org/api",
+        branch: "everdict/fix",
+        title: "fix",
+        body: "ctx",
+        changes: [{ path: "a.ts", content: "x" }],
+      },
+    });
+    expect(res.isError).toBe(true);
+  });
 });
 
 describe("MCP — live screen (report_case_screen)", () => {
@@ -484,6 +499,7 @@ describe("MCP tools", () => {
       "list_workspace_owned_runners",
       "list_workspace_runners",
       "list_workspace_trace_sources",
+      "open_github_pr",
       "pair_runner",
       "pair_workspace_runner",
       "pin_harness_images",

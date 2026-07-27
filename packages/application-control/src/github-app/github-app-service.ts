@@ -195,6 +195,44 @@ export class GithubAppService {
     return this.repoOps.for(token, resolved).createIssueComment(repository, issueNumber, body);
   }
 
+  // Open a pull request carrying file changes in a repo the workspace App is installed on (the agent's
+  // open_github_pr tool). The use-case owns the write ORDER + reuse semantics — branch reused if it exists, an
+  // already-open PR for the head is returned instead of failing (same near-idempotence as the CI setup PR); the
+  // adapter owns the wire. Token scoped to contents+pull_requests write. The PR always targets the default branch.
+  async openPullRequest(
+    workspace: string,
+    repository: string,
+    opts: { branch: string; title: string; body: string; changes: { path: string; content: string }[] },
+    host?: string,
+  ): Promise<{ url: string; branch: string; base: string }> {
+    if (opts.changes.length === 0)
+      throw new BadRequestError("BAD_REQUEST", { repository }, "a pull request needs at least one file change.");
+    const { token, host: resolved } = await this.tokenForRepository(
+      workspace,
+      repository,
+      { contents: "write", pull_requests: "write" },
+      host,
+    );
+    const writer = this.repoOps.for(token, resolved);
+    const { defaultBranch, headSha } = await writer.repoHead(repository);
+    await writer.ensureBranch(repository, opts.branch, headSha);
+    for (const change of opts.changes) {
+      await writer.putFile(repository, {
+        branch: opts.branch,
+        path: change.path,
+        contentUtf8: change.content,
+        message: opts.title,
+      });
+    }
+    const pr = await writer.openPr(repository, {
+      title: opts.title,
+      head: opts.branch,
+      base: defaultBranch,
+      body: opts.body,
+    });
+    return { url: pr.url, branch: opts.branch, base: defaultBranch };
+  }
+
   // Which App install targets the operator configured via env (github.com and/or the enterprise host).
   private providers(): GithubAppProviders {
     const e = this.config.githubEnterprise;

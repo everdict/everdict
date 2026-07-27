@@ -40,6 +40,7 @@ const INTEGRATION_ACTIONS = new Set<string>([
   "get_image_push_credentials",
   "create_github_issue",
   "comment_on_github_issue",
+  "open_github_pr",
 ]);
 
 // Knowledge-graph authored-WRITE tools — the contribution path. Exposed to the agent BY DEFAULT so it ACCUMULATES

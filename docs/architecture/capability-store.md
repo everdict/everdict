@@ -328,10 +328,22 @@ integration config**, not a manual `secretBindings` map at adoption (there is no
   use-actions: Mattermost (list channels · read/post thread), GitHub (create issue · comment on PR/issue · read repo
   file · list PRs/issues), image-registry (list images/tags · inspect) — each gated on its integration, secrets
   auto-bound from config, writes HITL-gated.
+- **Phase 10 — first-party SKILLs over the integration actions (landed).** The `skill` kind joins the default tier: a
+  first-party skill rides `AgentProfile.skills` → `use_skill` with zero new runtime code (the adapters were already
+  generic). First seed: **`scorecard-fix-pr`** (`requires: "github"`) — the eval→fix loop as a procedure: diagnose a
+  scorecard's failing cases from the eval evidence (scorecard/run/judge reads), locate the root cause in the harness's
+  source repository (`get_github_file`), and open the fix PR via the `open_github_pr` action (branch → per-file
+  commits → PR over the workspace GitHub App installation token, near-idempotent like the CI setup-PR, `github:write`,
+  HITL-gated) — with the **experiment context** (scorecard link, harness@version × dataset@version, failing case ids +
+  judge verdicts, evidence excerpts) MANDATORY in the PR body, so a reviewer judges the fix without re-running
+  anything. With a gated default now real, the `integrationsConfigured` seam is wired: `apps/agent/src/main.ts`
+  derives it per workspace from the settings store via the pure `configuredIntegrations` (`@everdict/domain`) — a
+  gated default activates the moment its integration is configured, no adoption step.
 
 The current curated `INTEGRATION_ACTIONS` (`apps/agent/src/mcp-tools.ts`) — `post_mattermost_message`,
-`open_ci_setup_pr`, `get_image_push_credentials` — are the only genuine "use" actions on the base control-plane surface
-today and are the **seed** of Phase 9; they migrate into first-party integration capabilities as the richer adapters land.
+`open_ci_setup_pr`, `get_image_push_credentials`, `create_github_issue`, `comment_on_github_issue`, `open_github_pr` —
+are the genuine "use" actions on the base control-plane surface today and are the **seed** of Phase 9; they migrate
+into first-party integration capabilities as the richer adapters land.
 
 ## Fourth kind — `environment` (managed eval-environment images)
 

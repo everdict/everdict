@@ -176,6 +176,7 @@ export {
 export {
   type DefaultCapabilityInput,
   type DefaultSelectionContext,
+  configuredIntegrations,
   selectDefaultCapabilities,
 } from "./capability/capability-defaults.js";
 

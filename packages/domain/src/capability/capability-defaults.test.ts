@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { type DefaultCapabilityInput, selectDefaultCapabilities } from "./capability-defaults.js";
+import {
+  type DefaultCapabilityInput,
+  configuredIntegrations,
+  selectDefaultCapabilities,
+} from "./capability-defaults.js";
 
 const webSearch: DefaultCapabilityInput = { id: "web-search", name: "web_search", requires: null };
 const pdf: DefaultCapabilityInput = { id: "pdf-read", name: "pdf_read", requires: null };
@@ -36,5 +40,34 @@ describe("selectDefaultCapabilities", () => {
       integrationsConfigured: ["github"],
     });
     expect(selected.map((d) => d.id)).toEqual(["pdf-read", "web-search", "gh-issue"]);
+  });
+});
+
+describe("configuredIntegrations", () => {
+  it("derives nothing from absent settings (a workspace that never configured anything)", () => {
+    expect(configuredIntegrations(undefined)).toEqual([]);
+    expect(configuredIntegrations({})).toEqual([]);
+  });
+
+  it("maps each configured integration to its CapabilityRequirement", () => {
+    expect(
+      configuredIntegrations({
+        mattermost: { botTokenSecretName: "MM_BOT" },
+        githubApp: {
+          installations: [{ installationId: 1, account: "acme-org", connectedBy: "u", connectedAt: "2026-07-01" }],
+        },
+        imageRegistries: [{ name: "default", host: "ghcr.io" }],
+      }),
+    ).toEqual(["mattermost", "github", "image-registry"]);
+  });
+
+  it("a cleared (null) or empty integration does not count as configured", () => {
+    expect(configuredIntegrations({ mattermost: null, githubApp: { installations: [] }, imageRegistry: null })).toEqual(
+      [],
+    );
+  });
+
+  it("the legacy singular image registry still counts (read-compat)", () => {
+    expect(configuredIntegrations({ imageRegistry: { host: "ghcr.io" } })).toEqual(["image-registry"]);
   });
 });

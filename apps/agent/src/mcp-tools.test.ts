@@ -22,6 +22,7 @@ describe("base tool default wiring", () => {
       "get_image_push_credentials",
       "create_github_issue",
       "comment_on_github_issue",
+      "open_github_pr",
     ])
       expect(isDefaultBaseTool(name)).toBe(true);
   });
@@ -73,5 +74,6 @@ describe("base tool default wiring", () => {
     expect(isBaseToolReadOnly("get_image_push_credentials")).toBe(false);
     expect(isBaseToolReadOnly("create_github_issue")).toBe(false);
     expect(isBaseToolReadOnly("comment_on_github_issue")).toBe(false);
+    expect(isBaseToolReadOnly("open_github_pr")).toBe(false);
   });
 });
