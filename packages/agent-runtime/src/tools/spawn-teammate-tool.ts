@@ -33,7 +33,11 @@ export function buildSpawnTeammateTool(
       required: ["name", "task"],
       additionalProperties: false,
     },
-    isReadOnly: true, // spawning is orchestration; the teammate's OWN actions are bounded by its execution token
+    // NOT read-only: spawning delegates standing WRITE authority — the host mints the teammate an execution token
+    // and it then acts autonomously with no human channel of its own. So the spawn itself must pass the host's
+    // permission gate (ask/auto/bypass; plan mode blocks it until the plan is approved) — the one moment a human
+    // can consent to the delegation.
+    isReadOnly: false,
     alwaysLoad: true,
     call: async (input) => {
       const name = (input as { name?: unknown }).name;

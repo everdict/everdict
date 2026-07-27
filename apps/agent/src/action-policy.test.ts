@@ -41,6 +41,7 @@ describe("action policy (bridge-all surface)", () => {
       "pair_runner",
       "pair_workspace_runner",
       "github_install_workspace_runner",
+      "spawn_teammate", // delegates a write-scoped execution token to an autonomous agent
     ])
       expect(isGuardedAction(name)).toBe(true);
   });

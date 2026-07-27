@@ -45,6 +45,9 @@ const GUARDED_NAMES = new Set<string>([
   "pair_runner", // device/runner credential minting …
   "pair_workspace_runner",
   "github_install_workspace_runner",
+  // native (non-MCP) kernel tool — spawning a persistent teammate mints it a write-scoped execution token and it
+  // then acts autonomously with no human channel, so the delegation itself stays consented even in auto mode.
+  "spawn_teammate",
 ]);
 
 export function isGuardedAction(name: string): boolean {

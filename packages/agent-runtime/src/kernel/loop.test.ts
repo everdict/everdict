@@ -742,6 +742,30 @@ describe("runAgentLoop", () => {
     expect(toolMsg?.content).toContain("tm-1");
   });
 
+  it("gates spawn_teammate behind the permission hook — a denied spawn never reaches the host callback", async () => {
+    // Spawning delegates standing WRITE authority (the host mints the teammate an execution token), so the tool is
+    // NOT read-only: the permit hook decides. Pre-fix, isReadOnly:true skipped the gate entirely.
+    const spawned: string[] = [];
+    const { transport } = fakeTransport([
+      toolCallResult("t1", "spawn_teammate", JSON.stringify({ name: "rogue", task: "act freely" })),
+      textResult("understood"),
+    ]);
+    const result = await runAgentLoop({
+      transport,
+      model: "m",
+      systemPrompt: "sys",
+      history,
+      registry: new ToolRegistry([]),
+      spawnTeammate: async (name) => {
+        spawned.push(name);
+        return { id: "tm-x" };
+      },
+      permit: async () => "deny" as const,
+    });
+    expect(spawned).toEqual([]); // the delegation was refused before the host created anything
+    expect(result.content).toBe("understood");
+  });
+
   it("exposes list_teammates when the host wires it (team discovery for coordination)", async () => {
     const { transport } = fakeTransport([toolCallResult("l1", "list_teammates", "{}"), textResult("I see the team")]);
     const result = await runAgentLoop({
