@@ -83,6 +83,7 @@ export type {
   NotificationStore,
   NotificationListOptions,
   CommentStore,
+  KnowledgeStore,
   TenantKeyStore,
   SecretStore,
   OAuthStateStore,

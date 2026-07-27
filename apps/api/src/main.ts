@@ -1,3 +1,4 @@
+import { KnowledgeService } from "@everdict/application-control";
 import { ProxyService } from "@everdict/application-control";
 import { SkillService } from "@everdict/application-control";
 import { CapabilityService } from "@everdict/application-control";
@@ -118,6 +119,7 @@ async function main(): Promise<void> {
     scheduleStore,
     notificationStore,
     commentStore,
+    knowledgeStore,
     viewStore,
     browserProfileStore,
     skillStore,
@@ -127,6 +129,13 @@ async function main(): Promise<void> {
     budgetStore,
     cipher,
   } = await makePersistence();
+
+  // Workspace knowledge graph — the query surface over the harvested graph + a pull reindex that harvests the
+  // tenant-listable record stores (scorecards/runs/schedules) into it. See docs/architecture/knowledge-graph.md.
+  const knowledgeService = new KnowledgeService({
+    store: knowledgeStore,
+    reindexSources: { scorecards: scorecardStore, runs: store, schedules: scheduleStore },
+  });
 
   // The schedule↔membership↔scorecard construction cycle: MembershipService's member-removal hook needs the
   // late-built ScheduleService (it depends on ScorecardService). The hook closes over this reference, resolved by
@@ -461,6 +470,7 @@ async function main(): Promise<void> {
     runnerService,
     notificationService, // notification feed (bell inbox) route — self-scoped
     commentService, // resource comments route + MCP
+    knowledgeService, // workspace knowledge graph route + MCP
     runnerHub,
     authenticator: buildAuthenticator(keyStore, runnerStore, settingsStore),
     keyStore,

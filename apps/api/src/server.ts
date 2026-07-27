@@ -100,6 +100,7 @@ import { registerHarnessTemplateRoutes } from "./api/harness/harness-template.ro
 import { registerHarnessRoutes } from "./api/harness/harness.routes.js";
 import { registerImageRegistryRoutes } from "./api/image-registry/image-registry.routes.js";
 import { registerJudgeRoutes } from "./api/judge/judge.routes.js";
+import { registerKnowledgeRoutes } from "./api/knowledge/knowledge.routes.js";
 import { registerMattermostRoutes } from "./api/mattermost/mattermost.routes.js";
 import { registerInviteRoutes } from "./api/member/invite.routes.js";
 import { registerMemberRoutes } from "./api/member/member.routes.js";
@@ -226,6 +227,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     registerNotificationRoutes(routes, deps);
     registerCommentRoutes(routes, deps);
     registerViewRoutes(routes, deps);
+    registerKnowledgeRoutes(routes, deps);
     registerGithubAppRoutes(routes, deps);
     registerMattermostRoutes(routes, deps);
     registerTraceSourceRoutes(routes, deps);

@@ -16,6 +16,7 @@ import { registerHarnessTemplateTools } from "./api/harness/harness-template.mcp
 import { registerHarnessTools } from "./api/harness/harness.mcp.js";
 import { registerImageRegistryTools } from "./api/image-registry/image-registry.mcp.js";
 import { registerJudgeTools } from "./api/judge/judge.mcp.js";
+import { registerKnowledgeTools } from "./api/knowledge/knowledge.mcp.js";
 import { registerMattermostTools } from "./api/mattermost/mattermost.mcp.js";
 import type { McpDeps, McpToolContext } from "./api/mcp-context.js";
 import { registerInviteTools } from "./api/member/invite.mcp.js";
@@ -76,6 +77,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
   registerBrowserProfileTools(server, ctx);
   registerProxyTools(server, ctx);
   registerCommentTools(server, ctx);
+  registerKnowledgeTools(server, ctx);
   registerApiKeyTools(server, ctx);
   registerMemberTools(server, ctx);
   registerInviteTools(server, ctx);

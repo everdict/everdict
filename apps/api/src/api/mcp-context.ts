@@ -1,5 +1,6 @@
 import type { CiLinkService } from "@everdict/application-control";
 import type { CommentService } from "@everdict/application-control";
+import type { KnowledgeService } from "@everdict/application-control";
 import type { GithubAppService } from "@everdict/application-control";
 import type { ImageRegistryService } from "@everdict/application-control";
 import type { ProxyService } from "@everdict/application-control";
@@ -93,6 +94,7 @@ export interface McpDeps {
   runnerService?: RunnerService; // self-hosted runners (personal device pairing) — pair/list/revoke + workspace roster
   notificationService?: NotificationService; // personal notification feed (bell inbox) — list/read (self-scoped)
   commentService?: CommentService; // resource comments (datasets, etc.) — list/create/delete
+  knowledgeService?: KnowledgeService; // workspace knowledge graph — get_knowledge_node/knowledge_related/knowledge_subgraph/reindex_knowledge
   runnerHub?: RunnerHubLike; // runner lease hub — lease_job/submit_job_result/fail_job/heartbeat_job (runner token only)
   liveFrames?: LiveFrameStore; // latest live-screen frame per run, pushed by a self-hosted runner (report_case_screen)
   liveLogs?: LiveLogStore; // accumulated live execution log per run, pushed by a self-hosted runner (report_case_log)

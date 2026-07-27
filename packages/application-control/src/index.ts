@@ -294,3 +294,9 @@ export {
   type Subgraph,
   type TraversalDirection,
 } from "./knowledge/knowledge-query-service.js";
+export {
+  KnowledgeService,
+  type KnowledgeReindexResult,
+  type KnowledgeReindexSources,
+  type KnowledgeServiceDeps,
+} from "./knowledge/knowledge-service.js";
