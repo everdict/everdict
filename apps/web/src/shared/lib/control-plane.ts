@@ -548,6 +548,17 @@ export const controlPlane = {
         method: 'DELETE',
       }
     ),
+  // Capability wizard helpers — validate (dry-run save: predict version + image warnings) + mcp probe (test-connect a
+  // URL and discover its tools) + image tags (environment picker). capabilities:write / harnesses:read (control plane).
+  validateCapability: <T>(auth: AuthContext, body: unknown) =>
+    call<T>(auth, '/capabilities/validate', { method: 'POST', body: JSON.stringify(body) }),
+  probeCapabilityMcp: <T>(auth: AuthContext, body: unknown) =>
+    call<T>(auth, '/capabilities/probe-mcp', { method: 'POST', body: JSON.stringify(body) }),
+  listImageTags: <T>(auth: AuthContext, repository: string, registry?: string) =>
+    call<T>(
+      auth,
+      `/workspace/image-registries/tags?repository=${encodeURIComponent(repository)}${registry ? `&registry=${encodeURIComponent(registry)}` : ''}`
+    ),
   getWorkspaceSettings: <T>(auth: AuthContext) => call<T>(auth, '/workspace/settings'),
   setWorkspaceSettings: <T>(auth: AuthContext, patch: unknown) =>
     call<T>(auth, '/workspace/settings', { method: 'PUT', body: JSON.stringify(patch) }),
