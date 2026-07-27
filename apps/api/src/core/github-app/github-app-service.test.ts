@@ -82,6 +82,24 @@ function stubRepoOps(opts: { fileB64?: string; issues?: unknown[] }): void {
   );
 }
 
+// Stub for the repo write ops — access-token mint + POST issue / POST comment, branched by URL.
+function stubRepoWrite(): void {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string | URL) => {
+      const s = String(url);
+      const body = s.endsWith("/access_tokens")
+        ? { token: "ghs_inst", expires_at: "2026-07-05T12:00:00Z" }
+        : s.includes("/comments")
+          ? { html_url: "https://gh/acme-org/api/issues/5#comment-1" }
+          : s.endsWith("/issues")
+            ? { number: 5, html_url: "https://gh/acme-org/api/issues/5" }
+            : { id: 1, account: { login: "acme-org" } }; // getInstallation
+      return new Response(JSON.stringify(body), { status: 200 });
+    }),
+  );
+}
+
 describe("GithubAppService", () => {
   let states: InMemoryOAuthStateStore;
   let settings: InMemoryWorkspaceSettingsStore;
@@ -288,6 +306,26 @@ describe("GithubAppService", () => {
         updatedAt: "2026-07-01T00:00:00Z",
       },
     ]);
+  });
+
+  it("createIssue mints an issues:write token and returns the new issue number + URL", async () => {
+    stubRepoWrite();
+    await installOrg();
+    const out = await svc.createIssue("acme", "acme-org/api", { title: "bug", body: "broken" });
+    expect(out).toEqual({ number: 5, url: "https://gh/acme-org/api/issues/5" });
+  });
+
+  it("commentOnIssue posts a comment and returns its URL", async () => {
+    stubRepoWrite();
+    await installOrg();
+    const out = await svc.commentOnIssue("acme", "acme-org/api", 5, "on it");
+    expect(out).toEqual({ url: "https://gh/acme-org/api/issues/5#comment-1" });
+  });
+
+  it("createIssue → NotFound when the App is not installed on the repo owner", async () => {
+    stubRepoWrite();
+    await installOrg();
+    await expect(svc.createIssue("acme", "other-org/api", { title: "x" })).rejects.toBeInstanceOf(NotFoundError);
   });
 
   it("runnerRegistrationToken mints a runner registration token via the App (administration)", async () => {

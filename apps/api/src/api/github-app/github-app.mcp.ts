@@ -86,5 +86,39 @@ export function registerGithubAppTools(server: McpServer, ctx: McpToolContext): 
       ({ repository, path, ref, host }) =>
         run(principal, "settings:read", async () => ok(await gh.getRepoFile(ws, repository, path, ref, host))),
     );
+    server.registerTool(
+      "create_github_issue",
+      {
+        description:
+          "Create an issue in a repository the workspace's GitHub App is installed on — returns the new issue number and URL. Use to file a bug or task on the team's behalf. member+ (github:write).",
+        inputSchema: {
+          repository: z.string().min(1).describe('"owner/name"'),
+          title: z.string().min(1).describe("issue title"),
+          body: z.string().optional().describe("issue body (GitHub Markdown)"),
+          host: z.string().url().optional().describe("GitHub Enterprise base URL (unset = github.com)"),
+        },
+      },
+      ({ repository, title, body, host }) =>
+        run(principal, "github:write", async () =>
+          ok(await gh.createIssue(ws, repository, { title, ...(body ? { body } : {}) }, host)),
+        ),
+    );
+    server.registerTool(
+      "comment_on_github_issue",
+      {
+        description:
+          "Add a comment to an issue or pull request (PRs are issues) in a repository the workspace's GitHub App is installed on — returns the comment URL. member+ (github:write).",
+        inputSchema: {
+          repository: z.string().min(1).describe('"owner/name"'),
+          issueNumber: z.number().int().positive().describe("the issue or PR number"),
+          body: z.string().min(1).describe("the comment text (GitHub Markdown)"),
+          host: z.string().url().optional().describe("GitHub Enterprise base URL (unset = github.com)"),
+        },
+      },
+      ({ repository, issueNumber, body, host }) =>
+        run(principal, "github:write", async () =>
+          ok(await gh.commentOnIssue(ws, repository, issueNumber, body, host)),
+        ),
+    );
   }
 }

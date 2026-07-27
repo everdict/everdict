@@ -66,7 +66,11 @@ export type Action =
   // tool + its HTTP/MCP endpoint). A member-level runtime action = USING the integration, honestly named as its own action
   // (like images:push) rather than reusing settings:write — that REGISTERS the bot (admin governance). A member can have the
   // agent notify the team without being able to reconfigure the integration.
-  | "mattermost:post";
+  | "mattermost:post"
+  // Using the workspace GitHub App to create an issue or add a comment (the conversational agent's create_github_issue /
+  // comment_on_github_issue tools). A member-level runtime action = USING the integration (like mattermost:post), not the
+  // admin-only App registration (settings:write). Read (issues/files) stays settings:read; only mutation needs this.
+  | "github:write";
 
 export const EVERDICT_ROLES = ["viewer", "member", "admin"] as const;
 export type EverdictRole = (typeof EVERDICT_ROLES)[number];
@@ -119,6 +123,7 @@ const ROLE_PERMISSIONS: Record<string, ReadonlySet<Action>> = {
     "comments:write", // writing comments = collaborative content (discussing which model was run) → member+ (deletion = author-or-admin, service layer)
     "images:push", // workspace registry push credential — harness authoring (image publishing) is a member's job
     "mattermost:post", // posting to the workspace Mattermost channel (using the integration) — a member's job, unlike admin-only registration (settings:write)
+    "github:write", // creating a GitHub issue/comment via the workspace App (using the integration) — a member's job, unlike admin-only App registration (settings:write)
   ]),
   // GitHub Actions OIDC federation (via=github-actions) only — the minimum CI needs:
   // fire/poll/diff (scorecards) + re-pin (harnesses:register)/baseline read (harnesses:read). No governance/secrets/members.
@@ -167,6 +172,7 @@ const ROLE_PERMISSIONS: Record<string, ReadonlySet<Action>> = {
     "comments:write",
     "images:push",
     "mattermost:post",
+    "github:write",
   ]),
 };
 
@@ -211,6 +217,7 @@ const SCOPE_WRITE_ACTIONS: readonly Action[] = [
   "comments:write",
   "images:push", // image publishing = part of harness authoring (a credential scoped to one's own workspace registry)
   "mattermost:post", // posting to the workspace Mattermost channel = content mutation (using a configured integration)
+  "github:write", // creating a GitHub issue/comment via the workspace App = content mutation (using a configured integration)
 ];
 // admin scope (= Full Access) = every action. Derived from the union of the role matrix (the admin role holds all).
 const ALL_ACTIONS = new Set<Action>(Object.values(ROLE_PERMISSIONS).flatMap((s) => [...s]));

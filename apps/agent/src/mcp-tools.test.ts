@@ -16,7 +16,13 @@ describe("base tool default wiring", () => {
   });
 
   it("bridges the curated integration actions (so configured integrations are usable by default)", () => {
-    for (const name of ["post_mattermost_message", "open_ci_setup_pr", "get_image_push_credentials"])
+    for (const name of [
+      "post_mattermost_message",
+      "open_ci_setup_pr",
+      "get_image_push_credentials",
+      "create_github_issue",
+      "comment_on_github_issue",
+    ])
       expect(isDefaultBaseTool(name)).toBe(true);
   });
 
@@ -41,5 +47,7 @@ describe("base tool default wiring", () => {
     expect(isBaseToolReadOnly("post_mattermost_message")).toBe(false);
     expect(isBaseToolReadOnly("open_ci_setup_pr")).toBe(false);
     expect(isBaseToolReadOnly("get_image_push_credentials")).toBe(false);
+    expect(isBaseToolReadOnly("create_github_issue")).toBe(false);
+    expect(isBaseToolReadOnly("comment_on_github_issue")).toBe(false);
   });
 });

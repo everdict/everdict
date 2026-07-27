@@ -32,6 +32,8 @@ const INTEGRATION_ACTIONS = new Set<string>([
   "post_mattermost_message",
   "open_ci_setup_pr",
   "get_image_push_credentials",
+  "create_github_issue",
+  "comment_on_github_issue",
 ]);
 
 // A base (built-in everdict) tool reaches the agent if it is a read verb OR one of the curated integration actions —

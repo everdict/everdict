@@ -170,6 +170,31 @@ export class GithubAppService {
       .listIssues(repository, { ...(opts.state ? { state: opts.state } : {}), perPage });
   }
 
+  // Create an issue in a repo the workspace App is installed on (the agent's create_github_issue tool). Token scoped
+  // to issues:write. NotFound when the App is not installed on the repo's owner.
+  async createIssue(
+    workspace: string,
+    repository: string,
+    opts: { title: string; body?: string },
+    host?: string,
+  ): Promise<{ number: number; url: string }> {
+    const { token, host: resolved } = await this.tokenForRepository(workspace, repository, { issues: "write" }, host);
+    return this.repoOps.for(token, resolved).createIssue(repository, opts);
+  }
+
+  // Comment on an issue or pull request (PRs are issues) in a repo the workspace App is installed on (the agent's
+  // comment_on_github_issue tool). Token scoped to issues:write (PR comments use the issues API).
+  async commentOnIssue(
+    workspace: string,
+    repository: string,
+    issueNumber: number,
+    body: string,
+    host?: string,
+  ): Promise<{ url: string }> {
+    const { token, host: resolved } = await this.tokenForRepository(workspace, repository, { issues: "write" }, host);
+    return this.repoOps.for(token, resolved).createIssueComment(repository, issueNumber, body);
+  }
+
   // Which App install targets the operator configured via env (github.com and/or the enterprise host).
   private providers(): GithubAppProviders {
     const e = this.config.githubEnterprise;

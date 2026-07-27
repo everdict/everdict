@@ -272,6 +272,17 @@ describe("MCP — mattermost post", () => {
   });
 });
 
+describe("MCP — github write", () => {
+  it("create_github_issue is gated github:write — a viewer is denied (before any GitHub call)", async () => {
+    const viewer = await connect(harness(), ["viewer"]);
+    const res = await viewer.callTool({
+      name: "create_github_issue",
+      arguments: { repository: "acme-org/api", title: "bug" },
+    });
+    expect(res.isError).toBe(true);
+  });
+});
+
 describe("MCP — live screen (report_case_screen)", () => {
   const withFrames = (frames: LiveFrameStore) => ({ ...harness(), liveFrames: frames });
 
@@ -390,10 +401,12 @@ describe("MCP tools", () => {
       "assign_harness_trace_source",
       "backfill_scorecard_models",
       "cancel_scorecard",
+      "comment_on_github_issue",
       "control_runtime",
       "create_agent",
       "create_api_key",
       "create_dataset",
+      "create_github_issue",
       "create_invite",
       "create_judge",
       "create_model",

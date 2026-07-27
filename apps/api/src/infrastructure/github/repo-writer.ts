@@ -146,6 +146,26 @@ export function githubRepoWriterFactory(fetchImpl?: typeof fetch): GithubRepoWri
             updatedAt: r.updated_at,
           }));
         },
+        async createIssue(repository, opts) {
+          const res = await doFetch(`${base}/repos/${repository}/issues`, {
+            method: "POST",
+            headers: headers(token),
+            body: JSON.stringify({ title: opts.title, ...(opts.body ? { body: opts.body } : {}) }),
+          });
+          if (!res.ok) throw await upstream(res, "issue creation failed");
+          const issue = z.object({ number: z.number(), html_url: z.string() }).parse(await res.json());
+          return { number: issue.number, url: issue.html_url };
+        },
+        async createIssueComment(repository, issueNumber, body) {
+          const res = await doFetch(`${base}/repos/${repository}/issues/${issueNumber}/comments`, {
+            method: "POST",
+            headers: headers(token),
+            body: JSON.stringify({ body }),
+          });
+          if (!res.ok) throw await upstream(res, "comment creation failed");
+          const comment = z.object({ html_url: z.string() }).parse(await res.json());
+          return { url: comment.html_url };
+        },
       };
     },
   };

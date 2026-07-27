@@ -41,6 +41,10 @@ export interface GithubRepoWriter {
   getFile(repository: string, path: string, ref?: string): Promise<GithubFileContent>;
   // List issues (includes PRs), filtered by state ("open"|"closed"|"all", default open), most-recently-updated first.
   listIssues(repository: string, opts: { state?: string; perPage: number }): Promise<GithubIssue[]>;
+  // Create an issue; returns its number + html_url.
+  createIssue(repository: string, opts: { title: string; body?: string }): Promise<{ number: number; url: string }>;
+  // Add a comment to an issue or PR (PRs are issues via the issues API); returns the comment's html_url.
+  createIssueComment(repository: string, issueNumber: number, body: string): Promise<{ url: string }>;
 }
 
 // Writers are minted per (installation token, host) — the use-case resolves the token via the
