@@ -1,8 +1,9 @@
 # Workspace Knowledge Graph
 
-> **SSOT** for everdict's knowledge system. Status: **steps 1–3 landed** — the contract spine + this doc; the first
-> harvester (`ScorecardRecord`) + the `KnowledgeStore` (in-memory + Postgres); and the multi-hop query engine. More
-> harvesters, text extraction + resolution, and the API/rendering surface are next (see §Roadmap).
+> **SSOT** for everdict's knowledge system. Status: **the backend + API/MCP surface are landed** — the contract spine;
+> the `KnowledgeStore` (in-memory + Postgres); the multi-hop query engine; nine harvesters (scorecard/run/schedule/
+> comment/membership + harness/dataset/judge/runtime); and the `knowledge/` HTTP + MCP slice (node/related/subgraph +
+> reindex). Text extraction + resolution, ingest-on-write, and web rendering are next (see §Roadmap).
 
 Everdict's data is a web of relationships that today is only *implicit* — a scorecard's config names a harness,
 dataset, judges, and a runtime; a comment @-mentions a user and discusses a scorecard; an agent's reasoning talks
@@ -187,9 +188,13 @@ Following everdict's one-way spine (no new package — schemas belong at the con
    direction / predicate / node-type over the store's single-hop primitives) + `relatedFacts` (ranked 1-hop flat facts
    for rendering, the `mentionGrounding` / `cityKnowledge` analog). A Pg-native recursive-CTE fast path can slot in
    behind the same surface later.
-5. **API + rendering** — the HTTP/MCP surface (graph queries, per-record ingest on write) + rendering: like digo, flat,
-   ranked fact lists powering resource "related" panels, impact analysis, and the agent's context first — not a graph
-   visualization.
+5. ✅ **API + MCP** — an isolated `knowledge/` slice: `GET /knowledge/node|related|subgraph` + `POST /knowledge/reindex`
+   (read = `scorecards:read`; reindex = `settings:write`) and the four matching MCP tools, over a `KnowledgeService`
+   facade. The `KnowledgeStore` is `InMemory`/`Pg` by `DATABASE_URL`; `reindex` is a pull harvest of the tenant-listable
+   record stores (write-path ingest-on-write is the follow-up).
+6. **Rendering** — like digo, flat, ranked fact lists powering resource "related" panels, impact analysis, and the
+   agent's context first — not a graph visualization. Plus ingest-on-write hooks so the graph stays current without a
+   manual reindex.
 
 ## References
 
