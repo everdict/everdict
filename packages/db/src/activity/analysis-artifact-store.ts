@@ -28,6 +28,12 @@ export class InMemoryAnalysisArtifactStore implements AnalysisArtifactStore {
     artifact.viewId = viewId;
     artifact.pinned = true;
   }
+
+  async listByView(tenant: string, viewId: string): Promise<AnalysisArtifactRecord[]> {
+    return this.artifacts
+      .filter((a) => a.tenant === tenant && a.viewId === viewId)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }
 }
 
 interface ArtifactRow {
@@ -104,5 +110,14 @@ export class PgAnalysisArtifactStore implements AnalysisArtifactStore {
       "UPDATE everdict_analysis_artifacts SET view_id = $3, pinned = true WHERE tenant = $1 AND id = $2",
       [tenant, id, viewId],
     );
+  }
+
+  async listByView(tenant: string, viewId: string): Promise<AnalysisArtifactRecord[]> {
+    const res = await this.client.query<ArtifactRow>(
+      `SELECT ${COLUMNS} FROM everdict_analysis_artifacts WHERE tenant = $1 AND view_id = $2
+       ORDER BY created_at DESC, id DESC`,
+      [tenant, viewId],
+    );
+    return res.rows.map(rowToRecord);
   }
 }

@@ -4,6 +4,7 @@ import { ArrowLeft } from 'lucide-react'
 import { getTranslations } from 'next-intl/server'
 
 import { MentionInChatButton } from '@/widgets/infra-panel'
+import { ViewArtifactGallery } from '@/features/analysis-artifacts'
 import { CustomAnalyzer, loadAnalysisData, storedToConfig } from '@/features/analyze-scorecards'
 import { CommentsSection } from '@/features/discuss'
 import { buttonVariants } from '@/shared/ui/button'
@@ -64,6 +65,9 @@ export default async function ViewPage({
           activeViewId={view.id}
         />
       )}
+
+      {/* Pinned analysis artifacts — scheduled reports + agent-pinned charts/tables (analysis-studio V3). */}
+      <ViewArtifactGallery viewId={id} />
 
       <CommentsSection
         workspace={workspace}

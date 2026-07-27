@@ -15,6 +15,7 @@ export const notificationKinds = [
   'scorecard_failed',
   'schedule_completed',
   'schedule_failed',
+  'report_completed',
   'comment_mention',
 ] as const
 export const notificationKindSchema = z.enum(notificationKinds)
@@ -33,6 +34,7 @@ export const notificationSchema = z.object({
       resourceType: z.string().optional(),
       resourceId: z.string().optional(),
       commentId: z.string().optional(),
+      artifactId: z.string().optional(), // report notifications anchor the view's report artifact
     })
     .optional(),
   createdAt: z.string(),

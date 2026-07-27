@@ -182,10 +182,19 @@ cover the 80% (pivot + charts + reports) with zero new attack surface.
   kernel stays domain-agnostic) and no `ArtifactStore.getUrl`/file kind yet (blob payloads have no caller
   until `run_analysis` V5; charts/tables/reports are inline declarative specs). Transcript/gallery
   rendering lands with V3 (the agent-chat UI was under concurrent rework).
-- **V3 — the Studio.** `/views/[id]` redesign (canvas + embedded chat + artifact rail), session `viewId`,
-  view-context preamble, `apply_view_config` host tool + `view_config` SSE + live canvas apply,
-  `pin_artifact` + pinned gallery + `/views` card thumbnails. This is the slice that delivers the
-  "NL-driven analysis on every view" experience end-to-end.
+- **V3 — the Studio. ◐ FIRST CUT LANDED (gallery + report_completed surfaces).** Landed:
+  `AnalysisArtifactStore.listByView` + `GET /agent/views/:viewId/artifacts` (visibility double-gate — the
+  agent forwards the caller's bearer to the control-plane views read via `viewAccessChecker`, so the
+  private|workspace rule stays single-sourced); web `entities/analysis-artifact` (drift-guarded mirrors) +
+  `features/analysis-artifacts` (`ArtifactCard` — hand-rolled SVG line/bar ChartView + TableView +
+  markdown ReportView, per-kind spec validation with graceful fallback; `ViewArtifactGallery` as a server
+  component over `agentPlane.listViewArtifacts`) rendered on `/views/[id]`; `report_completed` bell
+  kind + `link.artifactId` mirrored (the drift guard caught it, as designed); `analysisArtifacts` i18n
+  namespace (en/ko). **Remaining for full V3:** artifact cards in the agent-chat transcript (live SSE
+  `artifact` event consumption — deferred while the transcript UI was under concurrent rework), the
+  `apply_view_config` host tool + `view_config` SSE + live canvas apply, a web pin/unpin action,
+  `/views` card thumbnails + last-report time, view-linked sessions (`viewId` on AgentSession + the
+  view-context preamble), and the view-page "Report" tab that creates the report schedule underneath.
 - **V4 — scheduled reports. ✅ LANDED (backend; web form → V3 batch).** Third `ScheduleRunTemplate` kind
   `{report: {view, instructions?, compare?: "previous-period"}}` (exactly-one-mode refine, DTO + MCP
   `create_schedule report_view/…` parity); `ScheduleService.fire` report branch → the `AgentReportRunner`

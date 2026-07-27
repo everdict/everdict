@@ -30,4 +30,19 @@ describe("InMemoryAnalysisArtifactStore", () => {
     expect(await store.get("beta", "a")).toBeUndefined();
     expect((await store.get("acme", "a"))?.title).toBe("a");
   });
+
+  it("attachToView pins the artifact onto the view; listByView returns the view's artifacts newest-first", async () => {
+    const store = new InMemoryAnalysisArtifactStore();
+    await store.create(rec("old", "acme", "s1", "2026-07-01T00:00:00.000Z"));
+    await store.create(rec("new", "acme", "s2", "2026-07-02T00:00:00.000Z"));
+    await store.create(rec("unrelated", "acme", "s3", "2026-07-03T00:00:00.000Z"));
+    await store.attachToView("acme", "old", "v-1");
+    await store.attachToView("acme", "new", "v-1");
+    await store.attachToView("beta", "unrelated", "v-1"); // wrong workspace — no-op
+    expect((await store.listByView("acme", "v-1")).map((r) => [r.id, r.pinned])).toEqual([
+      ["new", true],
+      ["old", true],
+    ]);
+    expect((await store.get("acme", "unrelated"))?.viewId).toBeUndefined();
+  });
 });

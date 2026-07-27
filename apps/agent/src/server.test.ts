@@ -170,6 +170,33 @@ describe("agent server", () => {
     await app.close();
   });
 
+  it("GET /agent/views/:id/artifacts lists the view's pinned artifacts, gated by control-plane view visibility", async () => {
+    const artifacts = new InMemoryAnalysisArtifactStore();
+    await artifacts.create({
+      id: "art-1",
+      tenant: "acme",
+      kind: "report",
+      title: "Weekly",
+      sessionId: "s1",
+      pinned: false,
+      spec: { markdown: "# hi" },
+      createdBy: "alice",
+      createdAt: "2026-07-01T00:00:00.000Z",
+    });
+    await artifacts.attachToView("acme", "art-1", "v-1");
+    // The control plane says: v-1 visible, v-private not (its ViewService already 404s foreign/private views).
+    const app = buildServer(makeDeps({ artifacts, checkViewAccess: async (_h, viewId) => viewId === "v-1" }));
+
+    const ok = await app.inject({ method: "GET", url: "/agent/views/v-1/artifacts", headers: auth });
+    expect(ok.statusCode).toBe(200);
+    expect((ok.json().artifacts as { id: string }[]).map((a) => a.id)).toEqual(["art-1"]);
+
+    expect(
+      (await app.inject({ method: "GET", url: "/agent/views/v-private/artifacts", headers: auth })).statusCode,
+    ).toBe(404); // not visible → 404, no existence leak
+    await app.close();
+  });
+
   it("absorbs a queued /input steering message into the running turn (mid-run steering)", async () => {
     const app = buildServer(makeDeps());
     const session = (await app.inject({ method: "POST", url: "/agent/sessions", headers: auth, payload: {} })).json();

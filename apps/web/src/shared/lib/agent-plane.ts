@@ -37,6 +37,10 @@ export const agentPlane = {
       body: JSON.stringify({ skill, message }),
     }),
   listSessions: <T>(auth: AuthContext) => call<T>(auth, '/agent/sessions'),
+  // A View's pinned analysis artifacts (analysis-studio V3) — the agent service re-verifies view visibility
+  // with the forwarded bearer, so this stays a pure courier.
+  listViewArtifacts: <T>(auth: AuthContext, viewId: string) =>
+    call<T>(auth, `/agent/views/${encodeURIComponent(viewId)}/artifacts`),
   createSession: <T>(auth: AuthContext, body: unknown) =>
     call<T>(auth, '/agent/sessions', { method: 'POST', body: JSON.stringify(body) }),
   getSession: <T>(auth: AuthContext, id: string) =>

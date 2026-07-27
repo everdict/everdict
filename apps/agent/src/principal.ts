@@ -32,6 +32,26 @@ export function forwardHeaderRecord(h: ForwardHeaders): Record<string, string> {
   return out;
 }
 
+// Can the CALLER see this View? — forward the bearer to the control plane's views read, whose service enforces the
+// private|workspace gate (a foreign/private view reads 404 there). Used by the view-artifacts route (analysis-studio
+// V3) so the agent service never re-implements view visibility. Any non-ok (401/404/…) → false.
+export function viewAccessChecker(
+  controlPlaneUrl: string,
+  fetchImpl: typeof fetch = fetch,
+): (headers: ForwardHeaders, viewId: string) => Promise<boolean> {
+  const base = controlPlaneUrl.replace(/\/$/, "");
+  return async (headers, viewId) => {
+    try {
+      const res = await fetchImpl(`${base}/views/${encodeURIComponent(viewId)}`, {
+        headers: forwardHeaderRecord(headers),
+      });
+      return res.ok;
+    } catch {
+      return false; // unreachable control plane = no access (fail closed)
+    }
+  };
+}
+
 // Authenticate by forwarding the caller's headers to the control plane's GET /me, which already resolves identity,
 // membership, and the active workspace. apps/agent stays a pure token courier — no JWKS/OIDC or key store of its own.
 export function meAuthenticate(controlPlaneUrl: string, fetchImpl: typeof fetch = fetch): Authenticate {

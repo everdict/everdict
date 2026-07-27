@@ -14,10 +14,12 @@ import {
   PgSecretStore,
   PgSkillStore,
   PgTenantKeyStore,
+  PgWorkspaceSettingsStore,
   cipherFromEnv,
   makePool,
   sqlClient,
 } from "@everdict/db";
+import { configuredIntegrations } from "@everdict/domain";
 import { LocalDriver } from "@everdict/drivers";
 import { PgAgentRegistry, PgModelRegistry } from "@everdict/registry";
 import type { CodeToolRuntime } from "./code-tools.js";
@@ -30,7 +32,7 @@ import {
   registryModelByIdResolver,
   registryModelResolver,
 } from "./model.js";
-import { meAuthenticate } from "./principal.js";
+import { meAuthenticate, viewAccessChecker } from "./principal.js";
 import { type ProfileResolver, baseProfileResolver, registryProfileResolver } from "./profile.js";
 import { buildServer } from "./server.js";
 import { EVERDICT_AGENT_SYSTEM_PROMPT } from "./system-prompt.js";
@@ -76,6 +78,7 @@ async function main(): Promise<void> {
           ? registryModelResolver({ modelRegistry, secretStore, modelRef: config.AGENT_MODEL })
           : envModelFallback(config);
       resolveModelById = registryModelByIdResolver({ modelRegistry, secretStore });
+      const settingsStore = new PgWorkspaceSettingsStore(client);
       resolveProfile = registryProfileResolver({
         agentRegistry,
         secretStore,
@@ -87,6 +90,9 @@ async function main(): Promise<void> {
         defaultToolSecrets: config.AGENT_WEBSEARCH_API_KEY
           ? { [WEBSEARCH_SECRET_NAME]: config.AGENT_WEBSEARCH_API_KEY }
           : {},
+        // The integration gate for the gated first-party defaults — derived from the workspace's own settings
+        // (GitHub App installed / Mattermost set / image registry registered). Best-effort inside the resolver.
+        integrationsConfigured: async (workspace) => configuredIntegrations(await settingsStore.get(workspace)),
       });
     } else {
       // No KEK: sessions persist, but a registered model / secret-backed customization can't be decrypted → env model + base agent.
@@ -110,6 +116,7 @@ async function main(): Promise<void> {
 
   const app = buildServer({
     authenticate: meAuthenticate(config.CONTROL_PLANE_URL),
+    checkViewAccess: viewAccessChecker(config.CONTROL_PLANE_URL), // view-artifacts gallery gate (analysis-studio V3)
     sessions,
     artifacts,
     resolveModel,

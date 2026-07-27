@@ -10,4 +10,7 @@ export interface AnalysisArtifactStore {
   listBySession(tenant: string, sessionId: string): Promise<AnalysisArtifactRecord[]>;
   // Attach an artifact to a View and pin it (Studio gallery / scheduled-report archive). No-op on a missing id.
   attachToView(tenant: string, id: string, viewId: string): Promise<void>;
+  // Newest first — the View's pinned gallery / report archive. Visibility is the CALLER's job (the view's
+  // private|workspace gate lives in the control plane; the agent route verifies access before listing).
+  listByView(tenant: string, viewId: string): Promise<AnalysisArtifactRecord[]>;
 }

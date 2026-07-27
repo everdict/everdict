@@ -18,6 +18,9 @@ import { runTeammateTurn } from "./teammate-turn.js";
 
 export interface AgentServerDeps extends ChatDeps {
   authenticate: Authenticate;
+  // Verify the CALLER can see a View (its private|workspace gate lives in the control plane) — the view-artifacts
+  // route consults it with the forwarded bearer before listing (analysis-studio V3). Absent → the route is 404.
+  checkViewAccess?: (headers: ForwardHeaders, viewId: string) => Promise<boolean>;
   // Tenant key store — needed to issue a teammate's agt_ execution token (S3). Absent (no DB) → teammate spawn is 404.
   keyStore?: TenantKeyStore;
   // Shared secret the control plane presents (x-internal-token) to POST /agent/events on a recipient's behalf (S4 —
@@ -526,6 +529,20 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
       parsed.data.message,
     );
     return reply.send({ notified });
+  });
+
+  // A View's pinned artifacts (the Studio gallery / report archive — analysis-studio V3). The view's
+  // private|workspace visibility is enforced by the control plane: we forward the caller's bearer to the views
+  // read and 404 when it can't see the view (no existence leak).
+  app.get("/agent/views/:viewId/artifacts", async (req, reply) => {
+    if (!deps.checkViewAccess || !deps.artifacts)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "View artifacts are not configured." });
+    const principal = await principalOf(req, reply);
+    if (!principal) return reply;
+    const { viewId } = z.object({ viewId: z.string().min(1) }).parse(req.params);
+    if (!(await deps.checkViewAccess(forwardHeaders(req), viewId)))
+      return reply.code(404).send({ code: "NOT_FOUND", message: "View not found." });
+    return reply.send({ artifacts: await deps.artifacts.listByView(principal.workspace, viewId) });
   });
 
   // Scheduled-report fire (analysis-studio V4) — INTERNAL ONLY (the control plane's report-mode schedule fire).

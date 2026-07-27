@@ -70,6 +70,7 @@ const KIND_META: Record<NotificationKind, { Icon: LucideIcon; tone: KindTone }> 
   scorecard_failed: { Icon: ClipboardX, tone: 'danger' },
   schedule_completed: { Icon: CalendarCheck, tone: 'success' },
   schedule_failed: { Icon: CalendarX, tone: 'danger' },
+  report_completed: { Icon: ClipboardCheck, tone: 'info' }, // scheduled analysis report pinned to a view
   comment_mention: { Icon: AtSign, tone: 'info' },
 }
 const TONE_CHIP: Record<KindTone, string> = {

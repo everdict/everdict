@@ -21,6 +21,13 @@
     "tabKeys": "API keys",
     "keysLoadError": "Couldn't load keys: {error}"
   },
+  "analysisArtifacts": {
+    "galleryTitle": "Analysis artifacts",
+    "galleryDescription": "Reports and charts the Everdict agent produced for this view — scheduled reports land here automatically.",
+    "emptyTitle": "No artifacts yet",
+    "emptyHint": "Create a report schedule for this view, or ask the agent to analyze it — pinned charts and reports appear here.",
+    "invalidSpec": "This artifact could not be rendered (unrecognized spec)."
+  },
   "analyzeScorecards": {
     "all": "All",
     "descFilters": "Filters {count}",
