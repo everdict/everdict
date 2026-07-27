@@ -21,9 +21,21 @@ export const SchedulePullConfigSchema = z.object({
 });
 export type SchedulePullConfig = z.infer<typeof SchedulePullConfigSchema>;
 
-// The eval definition that flows into the fire path. A schedule runs in ONE of two modes (enforced by the refine):
+// Report fire mode — instead of running an eval, each fire wakes the workspace agent for ONE headless analysis turn
+// over a saved View: it queries the view's lens (query_scorecards), optionally compares against the previous period,
+// and emits a report artifact pinned to the view (docs/architecture/analysis-studio.md V4). "Every Monday, report
+// this view's pass-rate movement to the team."
+export const ScheduleReportConfigSchema = z.object({
+  view: z.string().min(1), // the saved View id the report covers (its config is the analysis lens)
+  instructions: z.string().min(1).max(4_000).optional(), // standing instructions appended to the report prompt
+  compare: z.enum(["previous-period"]).optional(), // also diff against the preceding window of the same length
+});
+export type ScheduleReportConfig = z.infer<typeof ScheduleReportConfigSchema>;
+
+// The eval definition that flows into the fire path. A schedule runs in ONE of three modes (enforced by the refine):
 // batch (dataset×harness → ScorecardService.submit) OR trace evaluation (pull → ScorecardService.ingestPull over a
-// rolling window). tenant/submittedBy are filled from the schedule at fire time.
+// rolling window) OR report (report → a headless agent analysis turn over a View). tenant/submittedBy are filled
+// from the schedule at fire time.
 export const ScheduleRunTemplateSchema = z
   .object({
     // batch mode — optional so a pull-mode schedule omits them.
@@ -31,6 +43,8 @@ export const ScheduleRunTemplateSchema = z
     harness: z.object({ id: z.string(), version: z.string() }).optional(),
     // trace-evaluation mode — mutually exclusive with dataset/harness.
     pull: SchedulePullConfigSchema.optional(),
+    // report mode — mutually exclusive with both eval modes.
+    report: ScheduleReportConfigSchema.optional(),
     judges: z.array(z.object({ id: z.string(), version: z.string() })).default([]),
     runtime: z.string().optional(),
     concurrency: z.number().int().min(1).max(64).optional(),
@@ -46,10 +60,15 @@ export const ScheduleRunTemplateSchema = z
       })
       .optional(),
   })
-  .refine((t) => (t.pull !== undefined) !== (t.dataset !== undefined && t.harness !== undefined), {
-    message:
-      "a schedule runs EITHER a dataset×harness batch (dataset+harness) OR a trace evaluation (pull) — not both, not neither",
-  });
+  .refine(
+    (t) =>
+      [t.pull !== undefined, t.dataset !== undefined && t.harness !== undefined, t.report !== undefined].filter(Boolean)
+        .length === 1,
+    {
+      message:
+        "a schedule runs EXACTLY ONE mode: a dataset×harness batch (dataset+harness), a trace evaluation (pull), or a view report (report)",
+    },
+  );
 export type ScheduleRunTemplate = z.infer<typeof ScheduleRunTemplateSchema>;
 
 export const ScheduleRecordSchema = z.object({
@@ -63,8 +82,9 @@ export const ScheduleRecordSchema = z.object({
   createdBy: z.string(), // creator subject — the fired run's submittedBy (budget → tenant, resolves private-repo connections).
   runTemplate: ScheduleRunTemplateSchema,
   lastFiredAt: z.string().optional(),
-  lastStatus: z.string().optional(), // the previous fire's result (scorecard status or error reason)
+  lastStatus: z.string().optional(), // the previous fire's result (scorecard status / "reported" / error reason)
   lastScorecardId: z.string().optional(),
+  lastArtifactId: z.string().optional(), // report mode — the previous fire's report artifact (mig 0078)
   createdAt: z.string(),
   updatedAt: z.string(),
 });

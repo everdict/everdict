@@ -114,6 +114,8 @@ export async function scorecardBatchWorkflow(input: {
 
 export async function scheduledScorecardWorkflow(input: { scheduleId: string; tenant: string }): Promise<void> {
   const { scorecardId } = await fireScheduledScorecard(input);
+  // A report-mode fire completes synchronously inside the fire activity (no scorecard) — nothing to poll/finalize.
+  if (scorecardId === undefined) return;
   for (let i = 0; i < MAX_POLLS; i++) {
     const status = await scheduledScorecardStatus(scorecardId);
     if (status === "succeeded" || status === "failed") {

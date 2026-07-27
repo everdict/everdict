@@ -329,6 +329,7 @@ async function main(): Promise<void> {
     scheduleStore,
     scorecardService,
     ...(traceSourceService ? { traceSourceService } : {}),
+    notificationService, // report-mode fire completion fan-out (analysis-studio V4)
   });
 
   const queueService = buildQueue({

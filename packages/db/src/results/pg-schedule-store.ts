@@ -15,6 +15,7 @@ interface ScheduleRow {
   last_fired_at: string | Date | null;
   last_status: string | null;
   last_scorecard_id: string | null;
+  last_artifact_id: string | null;
   created_at: string | Date;
   updated_at: string | Date;
 }
@@ -36,6 +37,7 @@ function rowToRecord(row: ScheduleRow): ScheduleRecord {
     lastFiredAt: row.last_fired_at !== null ? iso(row.last_fired_at) : undefined,
     lastStatus: row.last_status ?? undefined,
     lastScorecardId: row.last_scorecard_id ?? undefined,
+    lastArtifactId: row.last_artifact_id ?? undefined,
     createdAt: iso(row.created_at),
     updatedAt: iso(row.updated_at),
   });
@@ -49,8 +51,8 @@ export class PgScheduleStore implements ScheduleStore {
     await this.client.query(
       `INSERT INTO everdict_schedules
          (id, tenant, name, cron, timezone, overlap_policy, enabled, created_by, run_template,
-          last_fired_at, last_status, last_scorecard_id, created_at, updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+          last_fired_at, last_status, last_scorecard_id, last_artifact_id, created_at, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
       [
         record.id,
         record.tenant,
@@ -64,6 +66,7 @@ export class PgScheduleStore implements ScheduleStore {
         record.lastFiredAt ?? null,
         record.lastStatus ?? null,
         record.lastScorecardId ?? null,
+        record.lastArtifactId ?? null,
         record.createdAt,
         record.updatedAt,
       ],
@@ -104,6 +107,7 @@ export class PgScheduleStore implements ScheduleStore {
     if (patch.lastFiredAt !== undefined) set("last_fired_at", patch.lastFiredAt);
     if (patch.lastStatus !== undefined) set("last_status", patch.lastStatus);
     if (patch.lastScorecardId !== undefined) set("last_scorecard_id", patch.lastScorecardId);
+    if (patch.lastArtifactId !== undefined) set("last_artifact_id", patch.lastArtifactId);
     if (patch.updatedAt !== undefined) set("updated_at", patch.updatedAt);
     if (sets.length === 0) return this.get(tenant, id);
     vals.push(tenant, id);

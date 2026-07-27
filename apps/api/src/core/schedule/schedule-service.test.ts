@@ -289,6 +289,78 @@ describe("ScheduleService.fire — firing (called by the internal route)", () =>
     expect((await s.get("acme", "sch-1"))?.enabled).toBe(true);
   });
 
+  it("a report-mode schedule runs the agent report turn under the creator and stamps lastArtifactId/'reported'", async () => {
+    // "Every Monday morning, report this view's movement": no scorecard — the runner's headless agent turn is the fire.
+    const store = new InMemoryScheduleStore();
+    const seen: unknown[] = [];
+    const s = new ScheduleService({
+      store,
+      newId: () => "sch-1",
+      now: () => "2026-06-29T03:00:00.000Z",
+      reportRunner: {
+        run: async (input) => {
+          seen.push(input);
+          return { sessionId: "sess-1", artifactId: "art-1" };
+        },
+      },
+    });
+    await s.create({
+      ...base,
+      runTemplate: { report: { view: "v-1", instructions: "focus on judge", compare: "previous-period" }, judges: [] },
+    });
+    const res = await s.fire("acme", "sch-1");
+    expect(res).toEqual({ artifactId: "art-1" });
+    expect(seen[0]).toMatchObject({
+      tenant: "acme",
+      createdBy: "u-1",
+      scheduleId: "sch-1",
+      scheduleName: "nightly",
+      view: "v-1",
+      instructions: "focus on judge",
+      compare: "previous-period",
+    });
+    expect(await s.get("acme", "sch-1")).toMatchObject({
+      lastStatus: "reported",
+      lastArtifactId: "art-1",
+      lastFiredAt: "2026-06-29T03:00:00.000Z",
+    });
+  });
+
+  it("a report turn that produced no artifact stamps 'report-empty'; a missing report firer is a BadRequest", async () => {
+    const store = new InMemoryScheduleStore();
+    const s = new ScheduleService({
+      store,
+      newId: () => "sch-1",
+      now: () => "t",
+      reportRunner: { run: async () => ({ sessionId: "sess-1" }) },
+    });
+    await s.create({ ...base, runTemplate: { report: { view: "v-1" }, judges: [] } });
+    expect(await s.fire("acme", "sch-1")).toEqual({});
+    expect((await s.get("acme", "sch-1"))?.lastStatus).toBe("report-empty");
+
+    const bare = new ScheduleService({ store: new InMemoryScheduleStore(), newId: () => "sch-1", now: () => "t" });
+    await bare.create({ ...base, runTemplate: { report: { view: "v-1" }, judges: [] } });
+    await expect(bare.fire("acme", "sch-1")).rejects.toBeInstanceOf(BadRequestError);
+    expect((await bare.get("acme", "sch-1"))?.enabled).toBe(true); // deployment-config problem — no auto-disable
+  });
+
+  it("a transient report failure rethrows without disabling the schedule (the workflow retry owns it)", async () => {
+    const store = new InMemoryScheduleStore();
+    const s = new ScheduleService({
+      store,
+      newId: () => "sch-1",
+      now: () => "t",
+      reportRunner: {
+        run: async () => {
+          throw new UpstreamError("UPSTREAM_ERROR", {}, "agent service unreachable");
+        },
+      },
+    });
+    await s.create({ ...base, runTemplate: { report: { view: "v-1" }, judges: [] } });
+    await expect(s.fire("acme", "sch-1")).rejects.toBeInstanceOf(UpstreamError);
+    expect((await s.get("acme", "sch-1"))?.enabled).toBe(true);
+  });
+
   it("a CONFIG-class fire failure auto-disables the schedule (visible reason + Temporal pause); transient failures don't", async () => {
     const store = new InMemoryScheduleStore();
     const ensured: Array<{ id: string; paused: boolean }> = [];

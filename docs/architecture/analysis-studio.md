@@ -186,10 +186,19 @@ cover the 80% (pivot + charts + reports) with zero new attack surface.
   view-context preamble, `apply_view_config` host tool + `view_config` SSE + live canvas apply,
   `pin_artifact` + pinned gallery + `/views` card thumbnails. This is the slice that delivers the
   "NL-driven analysis on every view" experience end-to-end.
-- **V4 — scheduled reports.** Schedule `report` template kind + fire branch + `AgentReportRunner` +
-  headless turn (budgeted, read+emit tools only) + report archive on the view + `notifyReport` fan-out +
-  schedules web form gains the report kind (view picker + instructions + cadence) — or equivalently a
-  "Report" tab on the view that creates the schedule underneath (recommended UX; one engine either way).
+- **V4 — scheduled reports. ✅ LANDED (backend; web form → V3 batch).** Third `ScheduleRunTemplate` kind
+  `{report: {view, instructions?, compare?: "previous-period"}}` (exactly-one-mode refine, DTO + MCP
+  `create_schedule report_view/…` parity); `ScheduleService.fire` report branch → the `AgentReportRunner`
+  port, stamping `lastArtifactId` + `lastStatus: reported|report-empty` (mig 0078) with the same
+  config-failure auto-disable / transient-rethrow discipline; the apps/api adapter (composition/schedule)
+  posts to the agent service's `POST /internal/report` (x-internal-token, the agent-event-sink env pair)
+  and fans out `notifyReport` (feed kind `report_completed` linking `{resourceType: view, artifactId}` +
+  Mattermost + agent event `report.completed`) best-effort. The agent side (`apps/agent/report-turn.ts`)
+  runs ONE budgeted headless turn (16-turn cap) as the creator via a minted read-scoped one-shot `agt_`
+  token (revoked in a finally): the prompt walks get_view → query_scorecards (+ the shifted previous
+  window when `compare`) → `write_report`; the newest report artifact is then attached + pinned to the
+  View (`AnalysisArtifactStore.attachToView`). `scheduledScorecardWorkflow` ends without polling when the
+  fire returns no scorecardId (a report completes inside the fire activity).
 - **V5 — sandboxed `run_analysis`.** The dispatched script tool (D), isolated-runtime-only + HITL;
   starter snippets (cohort split, significance test on pass-rate deltas, custom bucketing). Off by
   default per workspace (an `AgentSpec.disabledDefaults`-style toggle, default disabled).

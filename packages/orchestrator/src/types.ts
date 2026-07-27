@@ -4,7 +4,8 @@ import type { CaseJob, CaseResult } from "@everdict/contracts";
 export interface Activities {
   dispatchCase(job: CaseJob): Promise<CaseResult>;
   // Scheduled fire — submit a scorecard via the control-plane internal route (the worker has no ScorecardService, so an HTTP bridge).
-  fireScheduledScorecard(input: { scheduleId: string; tenant: string }): Promise<{ scorecardId: string }>;
+  // A report-mode fire completes inside the activity and returns no scorecardId (the workflow ends without polling).
+  fireScheduledScorecard(input: { scheduleId: string; tenant: string }): Promise<{ scorecardId?: string }>;
   // Poll the fired scorecard's status (workflow poll-to-terminal — so the overlap policy is meaningful).
   scheduledScorecardStatus(scorecardId: string): Promise<string | null>;
   // Finalization — record the fired scorecard's terminal status on the schedule (internal route → ScheduleService.finalize).

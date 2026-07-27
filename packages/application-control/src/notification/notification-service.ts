@@ -109,6 +109,43 @@ export class NotificationService {
     );
   }
 
+  // A scheduled analysis report was produced (analysis-studio V4) — called by the report-runner adapter after the
+  // headless turn completes. Same three best-effort channels as a completion: feed + Mattermost + agent event.
+  async notifyReport(
+    tenant: string,
+    input: {
+      scheduleId: string;
+      scheduleName: string;
+      viewId: string;
+      artifactId?: string;
+      createdBy: string;
+    },
+  ): Promise<void> {
+    await this.pushFeed({
+      workspace: tenant,
+      recipient: input.createdBy,
+      kind: "report_completed",
+      title: `Report ready — ${input.scheduleName}`,
+      body: input.artifactId ? undefined : "The run produced no report artifact.",
+      link: {
+        resourceType: "view",
+        resourceId: input.viewId,
+        ...(input.artifactId !== undefined ? { artifactId: input.artifactId } : {}),
+      },
+    });
+    await this.pushAgentEvent({
+      workspace: tenant,
+      recipient: input.createdBy,
+      kind: "report.completed",
+      source: `schedule ${input.scheduleId}`,
+      message: `Scheduled report "${input.scheduleName}" is ready on view ${input.viewId}${input.artifactId ? ` (artifact ${input.artifactId})` : " (no artifact produced)"}.`,
+    });
+    await this.post(
+      tenant,
+      `📈 **Report ready — ${input.scheduleName}** (view \`${input.viewId}\`)${input.artifactId ? "" : " — no report artifact was produced"}`,
+    );
+  }
+
   // --- Personal feed (bell inbox) — self-scoped (same as connections/runners), no role gate ---
 
   listFeed(recipient: string, workspace: string, opts?: NotificationListOptions): Promise<NotificationRecord[]> {

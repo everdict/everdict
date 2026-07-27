@@ -16,7 +16,7 @@ export function createActivities(dispatcher: Dispatcher, schedule?: ScheduleActi
     dispatchCase(job: CaseJob): Promise<CaseResult> {
       return dispatcher.dispatch(job);
     },
-    async fireScheduledScorecard(input: { scheduleId: string; tenant: string }): Promise<{ scorecardId: string }> {
+    async fireScheduledScorecard(input: { scheduleId: string; tenant: string }): Promise<{ scorecardId?: string }> {
       if (!schedule)
         throw new Error("Schedule activities are not configured (EVERDICT_API_URL/EVERDICT_INTERNAL_TOKEN).");
       const res = await fetch(
@@ -28,9 +28,10 @@ export function createActivities(dispatcher: Dispatcher, schedule?: ScheduleActi
         },
       );
       if (!res.ok) throw new Error(`Scheduled fire failed: ${res.status} ${await res.text()}`);
+      // A batch/pull fire returns the scorecard to poll; a REPORT-mode fire completes synchronously inside the fire
+      // (headless agent turn) and returns no scorecardId — the workflow then ends without polling.
       const json = (await res.json()) as { scorecardId?: unknown };
-      if (typeof json.scorecardId !== "string") throw new Error("The fire response has no scorecardId.");
-      return { scorecardId: json.scorecardId };
+      return typeof json.scorecardId === "string" ? { scorecardId: json.scorecardId } : {};
     },
     async scheduledScorecardStatus(scorecardId: string): Promise<string | null> {
       if (!schedule)

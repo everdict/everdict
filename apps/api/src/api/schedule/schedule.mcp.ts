@@ -13,7 +13,7 @@ export function registerScheduleTools(server: McpServer, ctx: McpToolContext): v
       "create_schedule",
       {
         description:
-          "Create a scheduled (cron) scorecard. Two modes: (1) BATCH — periodically run dataset×harness (pass dataset_id+harness_id); (2) TRACE EVALUATION — periodically judge the recent traces of a registered observability source over a rolling window (pass pull_source, e.g. daily judge the last 24h of production traces), no harness run. Provide EITHER dataset_id+harness_id OR pull_source, not both. Fired runs execute under my identity (budget→workspace). cron is 5 fields (min hour day month weekday).",
+          "Create a scheduled (cron) scorecard. Three modes: (1) BATCH — periodically run dataset×harness (pass dataset_id+harness_id); (2) TRACE EVALUATION — periodically judge the recent traces of a registered observability source over a rolling window (pass pull_source, e.g. daily judge the last 24h of production traces), no harness run; (3) REPORT — periodically have the workspace agent analyze a saved View and pin a markdown report artifact to it (pass report_view, e.g. a Monday-morning pass-rate report). Provide EXACTLY ONE of dataset_id+harness_id / pull_source / report_view. Fired runs execute under my identity (budget→workspace). cron is 5 fields (min hour day month weekday).",
         inputSchema: {
           name: z.string(),
           cron: z.string().describe("5-field cron (e.g. '0 3 * * *' = daily at 03:00)"),
@@ -39,6 +39,16 @@ export function registerScheduleTools(server: McpServer, ctx: McpToolContext): v
             .max(24 * 30)
             .optional()
             .describe("rolling lookback ending at each fire (default 24 = last day)"),
+          // report mode
+          report_view: z
+            .string()
+            .optional()
+            .describe("a saved View id — enables report mode (agent analysis report pinned to the view)"),
+          report_instructions: z.string().optional().describe("standing instructions for the report turn"),
+          report_compare: z
+            .enum(["previous-period"])
+            .optional()
+            .describe("also compare against the preceding period of equal length"),
           judges: z.array(z.object({ id: z.string(), version: z.string().optional() })).optional(),
           runtime: z.string().optional(),
           concurrency: z.number().int().min(1).max(64).optional(),
@@ -46,30 +56,39 @@ export function registerScheduleTools(server: McpServer, ctx: McpToolContext): v
       },
       (a) => {
         const judges = (a.judges ?? []).map((j) => ({ id: j.id, version: j.version ?? "latest" }));
-        // pull_source present → trace-evaluation mode; else batch (dataset×harness). The service/schema refine rejects
-        // a body that is neither or both.
-        const runTemplate = a.pull_source
+        // report_view → report mode; pull_source → trace-evaluation mode; else batch (dataset×harness). The
+        // service/schema refine rejects a body that is none or several.
+        const runTemplate = a.report_view
           ? {
-              pull: {
-                source: a.pull_source,
-                ...(a.pull_correlate !== undefined ? { correlate: a.pull_correlate } : {}),
-                ...(a.pull_scope !== undefined ? { scope: a.pull_scope } : {}),
-                windowHours: a.pull_window_hours ?? 24,
+              report: {
+                view: a.report_view,
+                ...(a.report_instructions !== undefined ? { instructions: a.report_instructions } : {}),
+                ...(a.report_compare !== undefined ? { compare: a.report_compare } : {}),
               },
               judges,
             }
-          : {
-              // Omit (not empty-default) when absent so the refine rejects a body that is neither mode.
-              ...(a.dataset_id !== undefined
-                ? { dataset: { id: a.dataset_id, version: a.dataset_version ?? "latest" } }
-                : {}),
-              ...(a.harness_id !== undefined
-                ? { harness: { id: a.harness_id, version: a.harness_version ?? "latest" } }
-                : {}),
-              judges,
-              ...(a.runtime !== undefined ? { runtime: a.runtime } : {}),
-              ...(a.concurrency !== undefined ? { concurrency: a.concurrency } : {}),
-            };
+          : a.pull_source
+            ? {
+                pull: {
+                  source: a.pull_source,
+                  ...(a.pull_correlate !== undefined ? { correlate: a.pull_correlate } : {}),
+                  ...(a.pull_scope !== undefined ? { scope: a.pull_scope } : {}),
+                  windowHours: a.pull_window_hours ?? 24,
+                },
+                judges,
+              }
+            : {
+                // Omit (not empty-default) when absent so the refine rejects a body that is neither mode.
+                ...(a.dataset_id !== undefined
+                  ? { dataset: { id: a.dataset_id, version: a.dataset_version ?? "latest" } }
+                  : {}),
+                ...(a.harness_id !== undefined
+                  ? { harness: { id: a.harness_id, version: a.harness_version ?? "latest" } }
+                  : {}),
+                judges,
+                ...(a.runtime !== undefined ? { runtime: a.runtime } : {}),
+                ...(a.concurrency !== undefined ? { concurrency: a.concurrency } : {}),
+              };
         return run(principal, "schedules:write", async () =>
           ok(
             await schedules.create({

@@ -5,6 +5,7 @@
 export { type Dispatch, runSuite } from "./run-suite.js";
 
 // Store ports (interfaces only) — the impls (InMemory*/Pg*) live in @everdict/db, which binds these.
+export type { AgentReportRunner } from "./ports/agent-report-runner.js";
 export type { AgentSessionStore } from "./ports/agent-session-store.js";
 export type { AnalysisArtifactStore } from "./ports/analysis-artifact-store.js";
 export type { BrowserProfileStore } from "./ports/browser-profile-store.js";

@@ -8,4 +8,6 @@ export interface AnalysisArtifactStore {
   get(tenant: string, id: string): Promise<AnalysisArtifactRecord | undefined>;
   // Oldest first (createdAt ascending) — interleaves with the session transcript by time.
   listBySession(tenant: string, sessionId: string): Promise<AnalysisArtifactRecord[]>;
+  // Attach an artifact to a View and pin it (Studio gallery / scheduled-report archive). No-op on a missing id.
+  attachToView(tenant: string, id: string, viewId: string): Promise<void>;
 }

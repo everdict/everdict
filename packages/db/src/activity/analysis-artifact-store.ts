@@ -21,6 +21,13 @@ export class InMemoryAnalysisArtifactStore implements AnalysisArtifactStore {
       .filter((a) => a.tenant === tenant && a.sessionId === sessionId)
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   }
+
+  async attachToView(tenant: string, id: string, viewId: string): Promise<void> {
+    const artifact = this.artifacts.find((a) => a.tenant === tenant && a.id === id);
+    if (!artifact) return;
+    artifact.viewId = viewId;
+    artifact.pinned = true;
+  }
 }
 
 interface ArtifactRow {
@@ -90,5 +97,12 @@ export class PgAnalysisArtifactStore implements AnalysisArtifactStore {
       [tenant, sessionId],
     );
     return res.rows.map(rowToRecord);
+  }
+
+  async attachToView(tenant: string, id: string, viewId: string): Promise<void> {
+    await this.client.query(
+      "UPDATE everdict_analysis_artifacts SET view_id = $3, pinned = true WHERE tenant = $1 AND id = $2",
+      [tenant, id, viewId],
+    );
   }
 }

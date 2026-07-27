@@ -11,6 +11,7 @@ import { type ChatDeps, DEFAULT_SESSION_TITLE, runChat } from "./chat.js";
 import { PermissionRegistry } from "./permission-registry.js";
 import { PermissionRules } from "./permission-rules.js";
 import type { Authenticate, ForwardHeaders, Principal } from "./principal.js";
+import { runReportTurn } from "./report-turn.js";
 import { runSkillTry } from "./skill-try.js";
 import { TeammateSupervisor } from "./teammate-supervisor.js";
 import { runTeammateTurn } from "./teammate-turn.js";
@@ -525,6 +526,31 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
       parsed.data.message,
     );
     return reply.send({ notified });
+  });
+
+  // Scheduled-report fire (analysis-studio V4) — INTERNAL ONLY (the control plane's report-mode schedule fire).
+  // Runs one budgeted, request-less analysis turn acting AS the schedule creator and returns the report artifact.
+  app.post("/internal/report", async (req, reply) => {
+    const presented = req.headers["x-internal-token"];
+    if (typeof presented !== "string" || !constantTimeEq(presented, deps.internalToken))
+      return reply.code(401).send({ code: "UNAUTHENTICATED", message: "Invalid internal token." });
+    const parsed = z
+      .object({
+        workspace: z.string().min(1),
+        createdBy: z.string().min(1),
+        scheduleId: z.string().min(1),
+        scheduleName: z.string().min(1),
+        view: z.string().min(1),
+        instructions: z.string().min(1).optional(),
+        compare: z.enum(["previous-period"]).optional(),
+      })
+      .safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
+    try {
+      return reply.send(await runReportTurn(deps, parsed.data));
+    } catch (err) {
+      return sendError(reply, err);
+    }
   });
 
   // Fine-grained permission rules for a conversation — the "always allow / always deny this tool" layer above the

@@ -72,15 +72,20 @@ A **`Schedule`** = a stored `RunScorecardInput` + `{ cron, timezone, overlapPoli
 `Pg` + numbered migration), workspace-scoped. It is mutable (pause/resume/edit) → a **Store**, not the immutable
 versioned registry. **No new execution engine** — firing = calling the existing `submit`.
 
-### Two fire modes: batch run vs trace evaluation
+### Three fire modes: batch run · trace evaluation · view report
 
-`ScheduleRunTemplate` is a discriminated definition (XOR-refined) with two mutually-exclusive modes:
+`ScheduleRunTemplate` is a discriminated definition (exactly-one-mode refine) with three mutually-exclusive modes:
 
 - **Batch** (`dataset` + `harness`) — the original: each fire runs dataset×harness → `ScorecardService.submit`.
 - **Trace evaluation** (`pull: { source, correlate?, scope?, windowHours }`) — each fire pulls the recent traces of a
   registered observability source over a **rolling window ending at the fire moment** and judges them directly (no
   harness run) → `ScorecardService.ingestPull`. This is "**every day, judge the last 24h of production traces**"
   (`cron="0 3 * * *"`, `windowHours=24`).
+- **View report** (`report: { view, instructions?, compare? }`) — each fire runs ONE budgeted headless agent
+  analysis turn over a saved View and pins the emitted markdown report artifact to it (`AgentReportRunner` →
+  the agent service's internal route; stamps `lastArtifactId` + `lastStatus: reported`; `notifyReport` fans
+  out feed/Mattermost/agent-event). "**Every Monday morning, report this view's pass-rate movement**". No
+  scorecard is produced — the workflow ends without polling. See `docs/architecture/analysis-studio.md` (V4).
 
 `ScheduleService.fire()` branches on `runTemplate.pull`: it computes `until=now()`, `since=now()-windowHours`,
 enumerates the window via `listTraceIds` (= `TraceSourceService.listTraces({scope, since, until})` → trace ids), and

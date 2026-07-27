@@ -7,6 +7,7 @@ import {
   type ScheduleRunTemplate,
 } from "@everdict/contracts";
 import { Schedule, type ScheduleSpec, classifyFailure } from "@everdict/domain";
+import type { AgentReportRunner } from "../ports/agent-report-runner.js";
 import type { ScheduleStore } from "../ports/schedule-store.js";
 import type { RunScorecardInput } from "../scorecard/scorecard-service.js";
 import type { PullIngestInput } from "../scorecard/scorecard-shared.js";
@@ -68,6 +69,10 @@ export interface ScheduleServiceDeps {
   // finalize uses it to record the terminal lastStatus; the completion notification itself comes from the scorecard's
   // onComplete (schedule-branded via origin.source === "schedule" — see NotificationService.notifyScorecard).
   scorecardStatus?: (scorecardId: string) => Promise<string | undefined>;
+  // Called on a REPORT-mode fire — one headless agent analysis turn over the template's View (analysis-studio V4).
+  // Synchronous within the fire (the runner enforces the turn budget); the completion notification is emitted by the
+  // apps/api runner adapter, not here. If not injected, a report-mode fire throws BadRequest.
+  reportRunner?: AgentReportRunner;
   newId?: () => string;
   now?: () => string;
 }
@@ -183,12 +188,47 @@ export class ScheduleService {
 
   // Fire (called by the Temporal workflow via an internal route) — submit the schedule's runTemplate under the creator's identity.
   // Records lastFired/last* and returns the submitted scorecard id. If no firer is configured, BadRequest (Temporal-less dev).
-  async fire(tenant: string, id: string): Promise<{ scorecardId: string }> {
+  async fire(tenant: string, id: string): Promise<{ scorecardId?: string; artifactId?: string }> {
     const schedule = await this.getRecord(tenant, id); // 404
     const t = schedule.runTemplate;
-    const { submitScorecard, ingestPull, listTraceIds } = this.deps;
+    const { submitScorecard, ingestPull, listTraceIds, reportRunner } = this.deps;
     // Firer-configured checks live OUTSIDE the try: a missing firer is a deployment-config problem, not a schedule-config
     // one, so it must NOT auto-disable the schedule (the catch's classifyFailure would). Each mode needs its own firer.
+    if (t.report) {
+      if (!reportRunner)
+        throw new BadRequestError("BAD_REQUEST", { id }, "Report firer is not configured (report firing disabled).");
+      // Report fire — one headless agent analysis turn over the View; no scorecard is produced. The same
+      // catch-classify applies: a deterministic failure (deleted view, revoked creator) auto-disables the schedule.
+      try {
+        const result = await reportRunner.run({
+          tenant,
+          createdBy: schedule.createdBy,
+          scheduleId: id,
+          scheduleName: schedule.name,
+          view: t.report.view,
+          ...(t.report.instructions !== undefined ? { instructions: t.report.instructions } : {}),
+          ...(t.report.compare !== undefined ? { compare: t.report.compare } : {}),
+        });
+        await this.deps.store.update(tenant, id, {
+          lastFiredAt: this.now(),
+          lastStatus: result.artifactId !== undefined ? "reported" : "report-empty",
+          ...(result.artifactId !== undefined ? { lastArtifactId: result.artifactId } : {}),
+          updatedAt: this.now(),
+        });
+        return result.artifactId !== undefined ? { artifactId: result.artifactId } : {};
+      } catch (err) {
+        const failure = classifyFailure(err, "dispatch");
+        if (failure.class === "config") {
+          const updated = await this.deps.store.update(
+            tenant,
+            id,
+            Schedule.from(schedule).autoDisable(`${failure.code} — ${failure.message}`, this.now()),
+          );
+          if (updated) await this.deps.driver?.ensure(this.specOf(updated)); // Temporal pause
+        }
+        throw err;
+      }
+    }
     if (t.pull) {
       if (!ingestPull || !listTraceIds)
         throw new BadRequestError(

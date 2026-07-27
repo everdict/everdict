@@ -1,9 +1,10 @@
 import { isValidCron } from "@everdict/application-control";
 import { z } from "zod";
 
-// Scheduled (cron) scorecard request — the definition that flows into the fire path. Two mutually-exclusive modes
+// Scheduled (cron) scorecard request — the definition that flows into the fire path. Three mutually-exclusive modes
 // (enforced by the refine): batch (dataset×harness → submit) OR trace evaluation (pull → ingestPull over a rolling
-// window). Mirrors @everdict/contracts ScheduleRunTemplateSchema (the boundary adds version defaults).
+// window) OR view report (report → a headless agent analysis turn; docs/architecture/analysis-studio.md V4).
+// Mirrors @everdict/contracts ScheduleRunTemplateSchema (the boundary adds version defaults).
 export const ScheduleRunTemplateBodySchema = z
   .object({
     dataset: z.object({ id: z.string(), version: z.string().default("latest") }).optional(),
@@ -21,6 +22,14 @@ export const ScheduleRunTemplateBodySchema = z
           .max(24 * 30), // rolling lookback ending at each fire (24 = last day)
       })
       .optional(),
+    // report mode — one headless agent analysis turn over a saved View, ending in a report artifact pinned to it.
+    report: z
+      .object({
+        view: z.string().min(1), // saved View id (the analysis lens)
+        instructions: z.string().min(1).max(4_000).optional(),
+        compare: z.enum(["previous-period"]).optional(),
+      })
+      .optional(),
     judges: z.array(z.object({ id: z.string(), version: z.string().default("latest") })).default([]),
     runtime: z.string().optional(),
     concurrency: z.number().int().min(1).max(64).optional(),
@@ -35,9 +44,14 @@ export const ScheduleRunTemplateBodySchema = z
       })
       .optional(),
   })
-  .refine((t) => (t.pull !== undefined) !== (t.dataset !== undefined && t.harness !== undefined), {
-    message: "provide EITHER dataset+harness (batch) OR pull (trace evaluation) — not both, not neither",
-  });
+  .refine(
+    (t) =>
+      [t.pull !== undefined, t.dataset !== undefined && t.harness !== undefined, t.report !== undefined].filter(Boolean)
+        .length === 1,
+    {
+      message: "provide EXACTLY ONE mode: dataset+harness (batch), pull (trace evaluation), or report (view report)",
+    },
+  );
 export const cronExpr = z
   .string()
   .refine(isValidCron, "invalid cron expression (5 fields: minute hour day month weekday).");

@@ -1,5 +1,11 @@
 import { ScheduleService } from "@everdict/application-control";
-import type { ScorecardService, TraceSourceService } from "@everdict/application-control";
+import type {
+  AgentReportRunner,
+  NotificationService,
+  ScorecardService,
+  TraceSourceService,
+} from "@everdict/application-control";
+import { UpstreamError } from "@everdict/contracts";
 import type { ScheduleStore } from "@everdict/db";
 import { TemporalScheduleDriver } from "../core/schedule/temporal-schedule-driver.js";
 
@@ -35,10 +41,56 @@ export function wireScheduleService(
     scorecardService: ScorecardService;
     // Optional — enables PULL-mode schedules (judge a rolling window of a trace source). Absent = batch-only firing.
     traceSourceService?: TraceSourceService;
+    // Optional — REPORT-mode completion fan-out (feed + Mattermost + agent event). Absent = report fires silently.
+    notificationService?: NotificationService;
   },
 ): ScheduleService {
-  const { scheduleStore, scorecardService, traceSourceService } = deps;
+  const { scheduleStore, scorecardService, traceSourceService, notificationService } = deps;
   const temporalAddress = process.env.EVERDICT_TEMPORAL_ADDRESS;
+  // REPORT-mode firer (analysis-studio V4): a headless analysis turn on the agent service over its internal,
+  // x-internal-token-gated route. Wired only when the agent bridge env is present (the same pair the agent-event
+  // sink uses); absent → a report-mode fire cleanly 400s. The adapter also owns the completion notification
+  // (best-effort — a notify failure never fails the fire).
+  const agentUrl = process.env.AGENT_SERVICE_URL;
+  const agentInternalToken = process.env.AGENT_INTERNAL_TOKEN;
+  const reportRunner: AgentReportRunner | undefined =
+    agentUrl && agentInternalToken
+      ? {
+          run: async (input) => {
+            let res: Response;
+            try {
+              res = await fetch(new URL("/internal/report", agentUrl), {
+                method: "POST",
+                headers: { "content-type": "application/json", "x-internal-token": agentInternalToken },
+                body: JSON.stringify(input),
+              });
+            } catch (err) {
+              throw new UpstreamError(
+                "UPSTREAM_ERROR",
+                { scheduleId: input.scheduleId },
+                `agent report service unreachable: ${err instanceof Error ? err.message : String(err)}`,
+              );
+            }
+            if (!res.ok)
+              throw new UpstreamError(
+                "UPSTREAM_ERROR",
+                { scheduleId: input.scheduleId, status: res.status },
+                `agent report turn failed (${res.status}): ${(await res.text()).slice(0, 300)}`,
+              );
+            const body = (await res.json()) as { sessionId: string; artifactId?: string };
+            await notificationService
+              ?.notifyReport(input.tenant, {
+                scheduleId: input.scheduleId,
+                scheduleName: input.scheduleName,
+                viewId: input.view,
+                ...(body.artifactId !== undefined ? { artifactId: body.artifactId } : {}),
+                createdBy: input.createdBy,
+              })
+              .catch(() => undefined); // fire-and-forget — the notification never fails the report
+            return body;
+          },
+        }
+      : undefined;
   const scheduleService = new ScheduleService({
     store: scheduleStore,
     ...(temporalAddress ? { driver: new TemporalScheduleDriver({ address: temporalAddress }) } : {}),
@@ -55,6 +107,7 @@ export function wireScheduleService(
     // Terminal status recorded on the schedule at finalize; the creator's completion notification is emitted by the
     // scorecard's own onComplete (schedule-branded via origin.source === "schedule").
     scorecardStatus: async (id) => (await scorecardService.get(id))?.status,
+    ...(reportRunner ? { reportRunner } : {}),
   });
   ref.set(scheduleService);
   return scheduleService;

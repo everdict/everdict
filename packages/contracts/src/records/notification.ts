@@ -10,6 +10,7 @@ export const NotificationKindSchema = z.enum([
   "scorecard_failed",
   "schedule_completed", // a scheduled eval (cron fire or manual "run now") finished — branded with "Scheduled run"
   "schedule_failed",
+  "report_completed", // a scheduled analysis report was produced — links to the view's report artifact (analysis-studio V4)
   "comment_mention", // @-mentioned in a comment — the link jumps straight to that context (dataset comment)
 ]);
 export type NotificationKind = z.infer<typeof NotificationKindSchema>;
@@ -30,6 +31,7 @@ export const NotificationRecordSchema = z.object({
       resourceType: z.string().optional(),
       resourceId: z.string().optional(),
       commentId: z.string().optional(),
+      artifactId: z.string().optional(), // report notifications anchor the view's report artifact (analysis-studio V4)
     })
     .optional(),
   createdAt: z.string(),
