@@ -1,6 +1,7 @@
 import { z } from 'zod'
 
 import type { AgentMessage } from '@/entities/agent-session'
+import type { AnalysisArtifact } from '@/entities/analysis-artifact'
 
 // Fold the flat message transcript into render items. The agent loop emits MANY assistant turns (one per model call),
 // each with a little text and/or a burst of tool calls — rendering all of that makes the panel a long noisy stack.
@@ -51,6 +52,8 @@ export type TranscriptItem =
   | { kind: 'agents'; id: string; agents: SubagentView[] } // a burst of delegated sub-agents / teammates
   // context injected by the mailbox (a teammate's message / a platform event) — folded like reasoning, hidden by default
   | { kind: 'context'; id: string; source: 'teammate' | 'event'; sender?: string; text: string }
+  // an analysis artifact (chart/table/report) the agent emitted this conversation — rendered as a card in place
+  | { kind: 'artifact'; id: string; artifact: AnalysisArtifact }
 
 // Parse a write_todos tool-call argument string into checklist items. Best-effort: a malformed payload yields [].
 export function parseTodosArg(raw: string): TodoItemView[] {
@@ -129,7 +132,28 @@ function parseSpawnEntry(
   }
 }
 
-export function buildTranscript(messages: AgentMessage[]): TranscriptItem[] {
+// Artifacts interleave by time: each renders after the LAST message created at or before it (an artifact is born
+// between its tool call and the next persisted turn), so a chart appears where the conversation produced it.
+function artifactsByAnchor(
+  messages: AgentMessage[],
+  artifacts: AnalysisArtifact[]
+): Map<number, AnalysisArtifact[]> {
+  const byAnchor = new Map<number, AnalysisArtifact[]>()
+  for (const artifact of artifacts) {
+    let anchor = -1
+    for (let i = 0; i < messages.length; i++) {
+      const at = messages[i]?.createdAt
+      if (at !== undefined && at <= artifact.createdAt) anchor = i
+    }
+    byAnchor.set(anchor, [...(byAnchor.get(anchor) ?? []), artifact])
+  }
+  return byAnchor
+}
+
+export function buildTranscript(
+  messages: AgentMessage[],
+  artifacts: AnalysisArtifact[] = []
+): TranscriptItem[] {
   // spawn 계열 도구의 결과만 call id로 되짚는다 — 일반 도구 결과는 렌더에 쓰지 않는다.
   const spawnCallIds = new Set<string>()
   for (const m of messages)
@@ -149,8 +173,8 @@ export function buildTranscript(messages: AgentMessage[]): TranscriptItem[] {
   // 완료 턴을 만나는 시점의 미해결 런치와 순서대로 짝지어야 한다.
   const pendingBg = new Map<string, SubagentView>()
 
-  for (const m of messages) {
-    if (m.role === 'tool') continue // tool results are folded into the activity card / not rendered
+  const processMessage = (m: AgentMessage): void => {
+    if (m.role === 'tool') return // tool results are folded into the activity card / not rendered
     if (m.role === 'user') {
       // 커널이 주입한 백그라운드 결과 턴 — 카드의 상태·요약으로 접고, 말풍선으로는 렌더하지 않는다.
       if (m.content.startsWith(BG_RESULT_PREFIX)) {
@@ -164,7 +188,7 @@ export function buildTranscript(messages: AgentMessage[]): TranscriptItem[] {
           if (summary.length > 0) entry.summary = summary
           pendingBg.delete(head[1])
         }
-        continue
+        return
       }
       // 메일박스 주입 컨텍스트(팀메이트 메시지·플랫폼 이벤트) — 유저 발화가 아니므로 접힌 컨텍스트 블록으로.
       // 열린 활동 카드는 쪼개지 않는다(reasoning과 같은 취급 — 대화 흐름을 끊는 건 진짜 유저/어시스턴트 발화뿐).
@@ -178,7 +202,7 @@ export function buildTranscript(messages: AgentMessage[]): TranscriptItem[] {
           ...(sender.length > 0 ? { sender } : {}),
           text: m.content.slice(teammate[0].length),
         })
-        continue
+        return
       }
       const event = EVENT_MSG_HEAD.exec(m.content)
       if (event) {
@@ -190,11 +214,11 @@ export function buildTranscript(messages: AgentMessage[]): TranscriptItem[] {
           ...(sender.length > 0 ? { sender } : {}),
           text: m.content.slice(event[0].length),
         })
-        continue
+        return
       }
       agentBuf = null
       items.push({ kind: 'message', message: m })
-      continue
+      return
     }
     // assistant turn — reasoning, then text, then this turn's todo/spawn calls (plain tool calls are skipped)
     if (m.reasoning !== undefined && m.reasoning.trim().length > 0)
@@ -224,6 +248,22 @@ export function buildTranscript(messages: AgentMessage[]): TranscriptItem[] {
         agentBuf.push(entry)
       }
     }
+  }
+
+  // Emitted artifacts render in place (after the last message at or before their creation) — they close an
+  // open activity card exactly like assistant text would (the card shows delegation, the artifact is output).
+  const anchored = artifactsByAnchor(messages, artifacts)
+  const pushArtifacts = (anchor: number): void => {
+    for (const artifact of anchored.get(anchor) ?? []) {
+      agentBuf = null
+      items.push({ kind: 'artifact', id: artifact.id, artifact })
+    }
+  }
+  pushArtifacts(-1)
+  for (let mi = 0; mi < messages.length; mi++) {
+    const m = messages[mi]
+    if (m !== undefined) processMessage(m)
+    pushArtifacts(mi)
   }
   return items
 }

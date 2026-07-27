@@ -196,11 +196,14 @@ cover the 80% (pivot + charts + reports) with zero new attack surface.
   custom cron], standing instructions, and the previous-period compare toggle; server actions over the
   existing schedule surface — one scheduling engine, surfaced where the report lives). The web schedule
   mirror gained `runTemplate.report` + `lastArtifactId` (optional-field additions slip past a structural
-  drift guard, so mirror them deliberately). **Remaining for full V3:** artifact cards in the agent-chat
-  transcript (live SSE `artifact` event consumption — the transcript UI is under concurrent rework), the
-  `apply_view_config` host tool + `view_config` SSE + live canvas apply, a web pin/unpin action,
-  `/views` card thumbnails + last-report time, and view-linked sessions (`viewId` on AgentSession + the
-  view-context preamble).
+  drift guard, so mirror them deliberately). **Third cut:** artifact cards render IN the agent-chat
+  transcript — `buildTranscript(messages, artifacts)` interleaves each artifact after the last message at
+  or before its creation (closing an open activity card like assistant text would), hydrated via
+  `GET /api/agent/sessions/:id/artifacts` on session open and appended live from the SSE `artifact`
+  event; `ArtifactCard` became a client component shared by the transcript and the view gallery.
+  **Remaining for full V3:** the `apply_view_config` host tool + `view_config` SSE + live canvas apply,
+  a web pin/unpin action, `/views` card thumbnails + last-report time, and view-linked sessions
+  (`viewId` on AgentSession + the view-context preamble).
 - **V4 — scheduled reports. ✅ LANDED (backend; web form → V3 batch).** Third `ScheduleRunTemplate` kind
   `{report: {view, instructions?, compare?: "previous-period"}}` (exactly-one-mode refine, DTO + MCP
   `create_schedule report_view/…` parity); `ScheduleService.fire` report branch → the `AgentReportRunner`

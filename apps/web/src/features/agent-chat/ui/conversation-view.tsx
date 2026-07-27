@@ -21,6 +21,7 @@ import {
   type AgentSession,
   type AgentTeammate,
 } from '@/entities/agent-session'
+import { ArtifactCard, type AnalysisArtifact } from '@/entities/analysis-artifact'
 import { cn } from '@/shared/lib/utils'
 import { Button } from '@/shared/ui/button'
 import { DropdownItem, DropdownLabel, DropdownMenu } from '@/shared/ui/dropdown-menu'
@@ -149,6 +150,7 @@ export function ConversationView({
   onSpawnTeammate,
   onStopTeammate,
   messages,
+  artifacts,
   pendingUser,
   sending,
   streamingText,
@@ -184,6 +186,7 @@ export function ConversationView({
   onSpawnTeammate: (input: TeammateSpawnInput) => void
   onStopTeammate: (id: string) => void
   messages: AgentMessage[]
+  artifacts?: AnalysisArtifact[]
   pendingUser: string | null
   sending: boolean
   streamingText: string
@@ -226,7 +229,7 @@ export function ConversationView({
     scrollToBottom('auto')
   }, [scrollToBottom])
 
-  const items = buildTranscript(messages)
+  const items = buildTranscript(messages, artifacts)
 
   const isEmpty = messages.length === 0 && !pendingUser && !sending
   const suggestions = t.raw('suggestions') as string[]
@@ -296,6 +299,12 @@ export function ConversationView({
                 if (item.kind === 'todos') return <TodoList key={item.id} todos={item.todos} />
                 if (item.kind === 'agents')
                   return <SubagentList key={item.id} agents={item.agents} />
+                if (item.kind === 'artifact')
+                  return (
+                    <div key={item.id} className="px-3 py-1.5">
+                      <ArtifactCard artifact={item.artifact} />
+                    </div>
+                  )
                 return <MessageRow key={item.message.id} message={item.message} user={user} />
               })}
               {pendingUser && (

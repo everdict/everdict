@@ -1,6 +1,7 @@
 import { getTranslations } from 'next-intl/server'
 
 import {
+  ArtifactCard,
   analysisArtifactsResponseSchema,
   type AnalysisArtifact,
 } from '@/entities/analysis-artifact'
@@ -9,7 +10,6 @@ import { agentPlane } from '@/shared/lib/agent-plane'
 import { EmptyState } from '@/shared/ui/empty-state'
 import { SectionHeader } from '@/shared/ui/section-header'
 
-import { ArtifactCard } from './artifact-card'
 
 // The View's pinned analysis artifacts (analysis-studio V3) — scheduled reports and agent-pinned charts/tables,
 // newest first. Server-rendered from the agent service (visibility is double-gated: this page already 404s a

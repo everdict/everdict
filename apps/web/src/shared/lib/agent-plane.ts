@@ -41,6 +41,9 @@ export const agentPlane = {
   // with the forwarded bearer, so this stays a pure courier.
   listViewArtifacts: <T>(auth: AuthContext, viewId: string) =>
     call<T>(auth, `/agent/views/${encodeURIComponent(viewId)}/artifacts`),
+  // A conversation's emitted analysis artifacts, oldest first (owner-scoped by the agent service).
+  listSessionArtifacts: <T>(auth: AuthContext, sessionId: string) =>
+    call<T>(auth, `/agent/sessions/${encodeURIComponent(sessionId)}/artifacts`),
   createSession: <T>(auth: AuthContext, body: unknown) =>
     call<T>(auth, '/agent/sessions', { method: 'POST', body: JSON.stringify(body) }),
   getSession: <T>(auth: AuthContext, id: string) =>

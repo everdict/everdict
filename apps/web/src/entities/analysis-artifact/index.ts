@@ -11,3 +11,4 @@ export {
   type ReportSpec,
   type TableSpec,
 } from './model/schema'
+export { ArtifactCard } from './ui/artifact-card'

@@ -17,6 +17,11 @@ import {
   type AgentSession,
   type AgentTeammate,
 } from '@/entities/agent-session'
+import {
+  analysisArtifactSchema,
+  analysisArtifactsResponseSchema,
+  type AnalysisArtifact,
+} from '@/entities/analysis-artifact'
 import { modelsSchema } from '@/entities/model'
 
 import { ConversationView } from './conversation-view'
@@ -54,6 +59,8 @@ export function AgentChatPanel({
   const [sessions, setSessions] = useState<AgentSession[]>([])
   const [activeId, setActiveId] = useState<string | null>(null)
   const [messages, setMessages] = useState<AgentMessage[]>([])
+  // Emitted analysis artifacts (charts/tables/reports) — hydrated per session, appended live via SSE `artifact`.
+  const [artifacts, setArtifacts] = useState<AnalysisArtifact[]>([])
   const [pendingUser, setPendingUser] = useState<string | null>(null)
   const [input, setInput] = useState('')
   const [sending, setSending] = useState(false)
@@ -170,6 +177,23 @@ export function AgentChatPanel({
         // silent
       }
     })()
+    // 이 대화의 분석 아티팩트(차트/표/리포트) — 트랜스크립트에 시간순으로 끼워 렌더된다.
+    void (async () => {
+      try {
+        const res = await fetch(`/api/agent/sessions/${encodeURIComponent(activeId)}/artifacts`, {
+          cache: 'no-store',
+        })
+        if (!res.ok) return
+        const parsed = analysisArtifactsResponseSchema.safeParse(await res.json())
+        if (!cancelled && parsed.success)
+          setArtifacts((prev) => {
+            const seen = new Set(prev.map((a) => a.id))
+            return [...prev, ...parsed.data.artifacts.filter((a) => !seen.has(a.id))]
+          })
+      } catch {
+        // silent — the transcript renders without artifacts
+      }
+    })()
     return () => {
       cancelled = true
     }
@@ -180,6 +204,7 @@ export function AgentChatPanel({
     abortRef.current?.abort()
     setActiveId(id)
     setMessages([])
+    setArtifacts([])
   }, [])
 
   const newConversation = useCallback(() => {
@@ -360,6 +385,13 @@ export function AgentChatPanel({
             setStreamingReasoning('')
             if (parsed.data.content.trim().length > 0) setStreamingText('')
           }
+        } else if (event === 'artifact') {
+          // A chart/table/report the agent just emitted — render it live in place.
+          const parsed = analysisArtifactSchema.safeParse(data)
+          if (parsed.success)
+            setArtifacts((prev) =>
+              prev.some((a) => a.id === parsed.data.id) ? prev : [...prev, parsed.data]
+            )
         } else if (event === 'permission') {
           if (data !== null && typeof data === 'object' && 'requestId' in data && 'name' in data) {
             const d = data as { requestId?: unknown; name?: unknown; input?: unknown }
@@ -500,6 +532,7 @@ export function AgentChatPanel({
       onSpawnTeammate={(spawnInput) => void spawnTeammate(spawnInput)}
       onStopTeammate={(id) => void stopTeammate(id)}
       messages={messages}
+      artifacts={artifacts}
       pendingUser={pendingUser}
       sending={sending}
       streamingText={streamingText}

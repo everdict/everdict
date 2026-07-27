@@ -1,5 +1,7 @@
+'use client'
+
 import { BarChart3, FileText, Pin, Table2 } from 'lucide-react'
-import { getFormatter, getTranslations } from 'next-intl/server'
+import { useFormatter, useTranslations } from 'next-intl'
 
 import {
   chartSpecSchema,
@@ -8,7 +10,7 @@ import {
   type AnalysisArtifact,
   type ChartSpec,
   type TableSpec,
-} from '@/entities/analysis-artifact'
+} from '../model/schema'
 import { Markdown } from '@/shared/ui/markdown'
 
 // One rendered analysis artifact (chart | table | report) — declarative data only, drawn by OUR components
@@ -181,9 +183,9 @@ function TableView({ spec }: { spec: TableSpec }) {
 
 const KIND_ICON = { chart: BarChart3, table: Table2, report: FileText } as const
 
-export async function ArtifactCard({ artifact }: { artifact: AnalysisArtifact }) {
-  const t = await getTranslations('analysisArtifacts')
-  const format = await getFormatter()
+export function ArtifactCard({ artifact }: { artifact: AnalysisArtifact }) {
+  const t = useTranslations('analysisArtifacts')
+  const format = useFormatter()
   const Icon = KIND_ICON[artifact.kind]
 
   let body: React.ReactNode
