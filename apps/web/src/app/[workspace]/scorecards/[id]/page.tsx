@@ -26,7 +26,6 @@ import {
   fmtMetricLabel,
   fmtMetricValue,
   fmtPct,
-  fmtScoreDetail,
   fmtSubject,
   fmtTimeAgo,
   groupMetricRows,
@@ -46,6 +45,7 @@ import { CriterionBadge, MetricLabel } from '@/shared/ui/metric-label'
 import { OriginInline, OriginPins } from '@/shared/ui/origin'
 import { buttonVariants } from '@/shared/ui/button'
 import { PageHeader } from '@/shared/ui/page-header'
+import { ScoreDetail } from '@/shared/ui/score-detail'
 import { SectionHeader } from '@/shared/ui/section-header'
 import { StatCard } from '@/shared/ui/stat-card'
 import { StatusPill } from '@/shared/ui/status-pill'
@@ -1028,26 +1028,23 @@ export default async function ScorecardDetailPage({
                       </a>
                     )}
                   {/* judge/grader verdict reasoning (VLM rubric reasoning etc.) — shows "why pass/fail" for os-use and the like.
-                    Grouped order (overall first, criteria indented beneath) so a multi-criteria judge's reasons read as one block. */}
+                    Grouped order (overall first, criteria indented beneath) so a multi-criteria judge's reasons read as one block.
+                    A structured verdict (code judge / store-state → { actual, expected }) renders as a collapsible JSON tree; prose stays inline. */}
                   {scoreGroups
                     .flatMap((g) => [{ row: g.row, parsed: g.parsed }, ...g.criteria])
-                    .map((e) => ({ ...e, detailText: fmtScoreDetail(e.row.detail) }))
-                    .filter((e) => e.detailText)
                     .map((e) => (
-                      <p
+                      <ScoreDetail
                         key={`${e.row.graderId}:${e.row.metric}-detail`}
-                        className={cn(
-                          'rounded-lg border border-border bg-muted/40 px-3 py-2 text-[12px] leading-relaxed text-muted-foreground',
-                          e.parsed.kind === 'judge-criterion' && 'ml-5'
-                        )}
-                      >
-                        <MetricLabel
-                          metric={e.row.metric}
-                          siblings={caseMetrics}
-                          className="mr-1 max-w-full align-middle font-[510] text-foreground"
-                        />{' '}
-                        · {e.detailText}
-                      </p>
+                        detail={e.row.detail}
+                        indented={e.parsed.kind === 'judge-criterion'}
+                        header={
+                          <MetricLabel
+                            metric={e.row.metric}
+                            siblings={caseMetrics}
+                            className="mr-1 max-w-full align-middle font-[510] text-foreground"
+                          />
+                        }
+                      />
                     ))}
                   {/* error events from the run trace — how the case failed (harness crash/dispatch error). The full
                       message is shown, clamped to a few lines with an expand toggle so a long stack trace stays readable. */}

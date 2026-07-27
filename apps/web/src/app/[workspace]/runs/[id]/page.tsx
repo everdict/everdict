@@ -12,13 +12,14 @@ import { membersSchema } from '@/entities/member'
 import { runSchema, type Run } from '@/entities/run'
 import { authContext } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
-import { fmtScoreDetail, fmtSubject, fmtTokens, fmtUsd } from '@/shared/lib/format'
+import { fmtSubject, fmtTokens, fmtUsd } from '@/shared/lib/format'
 import { Badge } from '@/shared/ui/badge'
 import { Callout } from '@/shared/ui/callout'
 import { Card } from '@/shared/ui/card'
 import { RuntimeChip } from '@/shared/ui/chip'
 import { MetricLabel } from '@/shared/ui/metric-label'
 import { PageHeader } from '@/shared/ui/page-header'
+import { ScoreDetail } from '@/shared/ui/score-detail'
 import { SectionHeader } from '@/shared/ui/section-header'
 import { StatusPill } from '@/shared/ui/status-pill'
 
@@ -317,33 +318,27 @@ export default async function RunDetailPage({
         ) : (
           <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3">
             {/* key includes the metric — a multi-criteria judge emits several scores under one graderId. */}
-            {scores.map((s) => {
-              const detailText = fmtScoreDetail(s.detail)
-              return (
-                <Card key={`${s.graderId}:${s.metric}`} className="p-3.5">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="min-w-0 truncate text-[13px] font-[510]">{s.graderId}</span>
-                    {s.pass != null && (
-                      <Badge tone={s.pass ? 'success' : 'danger'} className="shrink-0">
-                        {s.pass ? 'pass' : 'fail'}
-                      </Badge>
-                    )}
-                  </div>
-                  <div className="mt-1.5 break-words font-mono text-2xl font-[560] tabular-nums tracking-tight">
-                    {s.value}
-                  </div>
-                  <div className="text-[12px] text-faint">
-                    <MetricLabel metric={s.metric} siblings={scores.map((x) => x.metric)} />
-                  </div>
-                  {/* Verdict reasoning (judge rubric reasoning, command output, etc.) — shows the "why" in os-use VLM grading. */}
-                  {detailText && (
-                    <p className="mt-2 border-t border-border/60 pt-2 text-[12px] leading-relaxed text-muted-foreground">
-                      {detailText}
-                    </p>
+            {scores.map((s) => (
+              <Card key={`${s.graderId}:${s.metric}`} className="p-3.5">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="min-w-0 truncate text-[13px] font-[510]">{s.graderId}</span>
+                  {s.pass != null && (
+                    <Badge tone={s.pass ? 'success' : 'danger'} className="shrink-0">
+                      {s.pass ? 'pass' : 'fail'}
+                    </Badge>
                   )}
-                </Card>
-              )
-            })}
+                </div>
+                <div className="mt-1.5 break-words font-mono text-2xl font-[560] tabular-nums tracking-tight">
+                  {s.value}
+                </div>
+                <div className="text-[12px] text-faint">
+                  <MetricLabel metric={s.metric} siblings={scores.map((x) => x.metric)} />
+                </div>
+                {/* Verdict reasoning (judge rubric reasoning, command output, structured code-judge verdict, etc.) —
+                    shows the "why". A structured detail renders as a collapsible JSON tree; prose stays verbatim. */}
+                <ScoreDetail detail={s.detail} className="mt-2" />
+              </Card>
+            ))}
           </div>
         )}
       </section>

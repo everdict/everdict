@@ -36,6 +36,32 @@ export function fmtScoreDetail(detail: unknown): string | undefined {
   return JSON.stringify(detail)
 }
 
+// Score.detail split for rendering: a structured verdict (a real object/array from a code or store-state grader —
+// e.g. `{ actual, expected }` — OR a JSON container serialized as a string) reads far better as a collapsible JSON
+// tree than the old one-line `JSON.stringify`; everything else stays prose (shown verbatim, multi-line output kept).
+// Returns undefined when there is nothing to show. The rendering counterpart is `shared/ui/score-detail`.
+export type ScoreDetailView = { kind: 'json'; value: unknown } | { kind: 'text'; text: string }
+export function classifyScoreDetail(detail: unknown): ScoreDetailView | undefined {
+  if (detail == null) return undefined
+  if (typeof detail === 'object') return { kind: 'json', value: detail } // object/array from a code/store-state grader
+  if (typeof detail === 'string') {
+    const trimmed = detail.trim()
+    if (!trimmed) return undefined
+    // Some graders embed their structured verdict as a JSON string — parse only containers (a bare number/string
+    // gains nothing from a tree, and a prose reason that merely starts with a brace must stay prose).
+    if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+      try {
+        const parsed: unknown = JSON.parse(trimmed)
+        if (parsed !== null && typeof parsed === 'object') return { kind: 'json', value: parsed }
+      } catch {
+        // not JSON → fall through to prose
+      }
+    }
+    return { kind: 'text', text: detail }
+  }
+  return { kind: 'text', text: String(detail) } // number/boolean detail
+}
+
 // Pass-rate health — for color encoding. Only meaningful for passRate (0~1); numeric metrics are 'none' = neutral.
 export type Health = 'good' | 'mid' | 'low' | 'none'
 export function rateHealth(passRate: number | null | undefined): Health {
