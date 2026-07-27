@@ -112,6 +112,13 @@ export interface ChatDeps {
   // Extended-thinking budget (tokens). Set → the loop asks the model to reason before answering (Anthropic `thinking`;
   // reasoning models reason regardless). Reasoning is captured + streamed either way; absent → thinking off.
   thinkingBudgetTokens?: number;
+  // The web app's public base URL (WEB_BASE_URL) — lets the agent hand the member REAL links: entity deep links
+  // ({web}/{workspace}/scorecards/<id> …) and the desktop-app download page ({web}/{workspace}/download). Absent →
+  // the environment block omits the link lines and the agent should not guess URLs.
+  webBaseUrl?: string;
+  // Direct desktop-app download URL (DESKTOP_DOWNLOAD_URL, e.g. a GitHub Release) — offered alongside the in-app
+  // download page when the operator set it.
+  desktopDownloadUrl?: string;
 }
 
 export interface ChatResult {
@@ -370,7 +377,13 @@ export async function runChat(
         ? await deps.resolveModelById(principal, modelRef)
         : await deps.resolveModel(principal);
     // Append the per-turn environment block (workspace · model · date) now that the model is resolved.
-    const systemWithEnv = `${systemPrompt}\n\n${buildEnvironmentSection({ workspace, model: model.model, date: deps.now() })}`;
+    const systemWithEnv = `${systemPrompt}\n\n${buildEnvironmentSection({
+      workspace,
+      model: model.model,
+      date: deps.now(),
+      ...(deps.webBaseUrl !== undefined ? { webBaseUrl: deps.webBaseUrl } : {}),
+      ...(deps.desktopDownloadUrl !== undefined ? { desktopDownloadUrl: deps.desktopDownloadUrl } : {}),
+    })}`;
 
     // Model tiering (both need the by-id resolver). The summariser is LAZY — the cheaper model is only resolved if a
     // compaction actually fires — so a normal turn pays nothing. The fallback is resolved up front (opt-in per

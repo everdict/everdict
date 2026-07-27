@@ -29,7 +29,23 @@ export const EVERDICT_AGENT_SYSTEM_PROMPT = [
 ].join("\n");
 
 // The per-turn environment block (Claude Code's `# Environment`) — the concrete context this turn runs in. Appended to
-// the system prompt at chat time, where the workspace, resolved model, and current date are known.
-export function buildEnvironmentSection(env: { workspace: string; model: string; date: string }): string {
-  return ["## Environment", `- Workspace: ${env.workspace}`, `- Model: ${env.model}`, `- Date: ${env.date}`].join("\n");
+// the system prompt at chat time, where the workspace, resolved model, and current date are known. With a web base
+// URL the agent can hand the member REAL links (entity deep links, the desktop download page) instead of bare ids;
+// without one it must not guess URLs.
+export function buildEnvironmentSection(env: {
+  workspace: string;
+  model: string;
+  date: string;
+  webBaseUrl?: string;
+  desktopDownloadUrl?: string;
+}): string {
+  const lines = ["## Environment", `- Workspace: ${env.workspace}`, `- Model: ${env.model}`, `- Date: ${env.date}`];
+  if (env.webBaseUrl !== undefined) {
+    const web = env.webBaseUrl.replace(/\/$/, "");
+    lines.push(
+      `- Web app: ${web} — deep-link entities for the member as ${web}/${env.workspace}/<resource>/<id> (resources: scorecards · runs · harnesses · datasets · judges · runtimes · views · schedules; settings live under ${web}/${env.workspace}/settings).`,
+      `- Desktop app (pairs a personal self-hosted runner): download page ${web}/${env.workspace}/download${env.desktopDownloadUrl !== undefined ? ` · direct ${env.desktopDownloadUrl}` : ""} — give this link when the member needs the desktop app or asks to run evals on their own machine.`,
+    );
+  }
+  return lines.join("\n");
 }

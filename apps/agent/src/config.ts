@@ -16,6 +16,11 @@ const ConfigSchema = z.object({
   AGENT_FALLBACK_MODEL: z.string().optional(),
   // A (typically cheaper) registered model for spawn_agent sub-agents — delegated research rarely needs the main model.
   AGENT_SUBAGENT_MODEL: z.string().optional(),
+  // The web app's public base URL — lets the agent hand the member real links (entity deep links, the desktop-app
+  // download page). Same env name + default as the control plane's web-base sites (invite links, App callbacks).
+  WEB_BASE_URL: z.string().url().default("http://localhost:3001"),
+  // Direct desktop-app download URL (e.g. a GitHub Release) — offered alongside the in-app download page when set.
+  DESKTOP_DOWNLOAD_URL: z.string().url().optional(),
   // Shared secret the control plane presents (x-internal-token) to POST /agent/events for a recipient (S4 — the
   // monitoring→proactive-team bridge). Unset → the internal event path is disabled (only user-authenticated events).
   AGENT_INTERNAL_TOKEN: z.string().optional(),

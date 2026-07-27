@@ -126,6 +126,9 @@ async function main(): Promise<void> {
     ...(config.AGENT_INTERNAL_TOKEN !== undefined ? { internalToken: config.AGENT_INTERNAL_TOKEN } : {}),
     toolProvider: mcpToolProvider(config.mcpUrl, codeRuntime),
     systemPrompt: EVERDICT_AGENT_SYSTEM_PROMPT,
+    // Web links for the environment block — entity deep links + the desktop download page (see buildEnvironmentSection).
+    webBaseUrl: config.WEB_BASE_URL,
+    ...(config.DESKTOP_DOWNLOAD_URL !== undefined ? { desktopDownloadUrl: config.DESKTOP_DOWNLOAD_URL } : {}),
     now: () => new Date().toISOString(),
     newId: () => randomUUID(),
     ...(config.AGENT_MAX_TURNS !== undefined ? { maxTurns: config.AGENT_MAX_TURNS } : {}),
