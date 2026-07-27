@@ -1,7 +1,8 @@
 # Workspace Knowledge Graph
 
-> **SSOT** for everdict's knowledge system. Status: **step 1 — definitions landed** (contracts + this doc). Storage,
-> harvesting, the multi-hop query engine, and the rendering engine are the next steps (see §Roadmap).
+> **SSOT** for everdict's knowledge system. Status: **steps 1–3 landed** — the contract spine + this doc; the first
+> harvester (`ScorecardRecord`) + the `KnowledgeStore` (in-memory + Postgres); and the multi-hop query engine. More
+> harvesters, text extraction + resolution, and the API/rendering surface are next (see §Roadmap).
 
 Everdict's data is a web of relationships that today is only *implicit* — a scorecard's config names a harness,
 dataset, judges, and a runtime; a comment @-mentions a user and discusses a scorecard; an agent's reasoning talks
@@ -168,19 +169,22 @@ Following everdict's one-way spine (no new package — schemas belong at the con
 | HTTP + MCP surface (graph queries) | `apps/api` |
 | Rendering | `apps/web` |
 
-## Roadmap (next steps, not yet built)
+## Roadmap
 
-1. **Storage** — a `KnowledgeStore` port in `application-control`, `InMemory` + `Pg` impls in `db`, with append-only
-   mention/edge tables and a reduced node table.
-2. **Harvesters** — deterministic projectors, one per structured source kind, starting with `ScorecardRecord`
-   (the densest FK hub). Idempotent, re-runnable, versioned by `extractor`.
+1. ✅ **Storage** — the `KnowledgeStore` port (`application-control`) + `InMemoryKnowledgeStore` / `PgKnowledgeStore`
+   (`db`, migration `0076`): append-only mention/edge tables (idempotent by id) + an upsert-by-node_id node table.
+2. **Harvesters** — deterministic projectors, one per structured source kind, built on the shared `HarvestBuilder`.
+   ✅ `ScorecardRecord` (the densest FK hub). Next: `harness` / `dataset` / `judge` / `run` / `schedule` / `comment` /
+   `membership` — each materialises its own node + edges. Idempotent, re-runnable, versioned by `extractor`.
 3. **Extractors** — text adapters for `comment` / `agent_message` / `pr_comment` (@-mention regex first, agent
    extraction later), plus a resolver (surface `nodeRef` → `resolvedNodeId`).
-4. **Multi-hop query engine** — the digo analog is relational joins over the published mention/edge tables with
-   predicate-priority caps and co-mention expansion (see `mentionGrounding` / `cityKnowledge` in digo-data). everdict's
-   version resolves neighbors by predicate and hop count over the reduced graph.
-5. **Rendering engine** — like digo, **not** a graph visualization first: flat, ranked `{predicate, subject, object,
-   attrs, evidenceCount}` fact lists powering resource "related" panels, impact analysis, and the agent's context.
+4. ✅ **Multi-hop query engine** — `KnowledgeQueryService` (`application-control`): `subgraph` (BFS by depth /
+   direction / predicate / node-type over the store's single-hop primitives) + `relatedFacts` (ranked 1-hop flat facts
+   for rendering, the `mentionGrounding` / `cityKnowledge` analog). A Pg-native recursive-CTE fast path can slot in
+   behind the same surface later.
+5. **API + rendering** — the HTTP/MCP surface (graph queries, per-record ingest on write) + rendering: like digo, flat,
+   ranked fact lists powering resource "related" panels, impact analysis, and the agent's context first — not a graph
+   visualization.
 
 ## References
 
