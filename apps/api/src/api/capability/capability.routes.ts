@@ -1,8 +1,10 @@
 import type { FastifyInstance } from "fastify";
-import { type ServerDeps, gate, resolvePrincipal, sendError } from "../route-context.js";
+import { type ServerDeps, gate, resolvePrincipal, sendError, zodIssues } from "../route-context.js";
 import { capabilityDocs } from "./capability.docs.js";
+import { ProbeCapabilityMcpBodySchema } from "./request/probe-capability-mcp.js";
 import { SaveCapabilityBodySchema } from "./request/save-capability.js";
 import { SetCapabilityVisibilityBodySchema } from "./request/set-capability-visibility.js";
+import { ValidateCapabilityBodySchema } from "./request/validate-capability.js";
 
 // Capability Store — one discriminated versioned entity (mcp|code|skill|environment) members author, publish at a reach tier
 // (private|workspace|subset|public), and adopt into their agent. Read = capabilities:read (viewer+); author/publish/
@@ -33,6 +35,44 @@ export function registerCapabilityRoutes(app: FastifyInstance, deps: ServerDeps)
     } catch (err) {
       return sendError(reply, err);
     }
+  });
+
+  // Dry-run validate — parse the spec + predict the version a save would assign + environment image warnings. Never
+  // writes. Static path, registered before the parameterized reads. capabilities:write (member+, same as save).
+  app.post("/capabilities/validate", { schema: capabilityDocs.validate }, async (req, reply) => {
+    if (!deps.capabilityService) return reply.code(404).send(notConfigured);
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "capabilities:write");
+    } catch (err) {
+      return sendError(reply, err);
+    }
+    const parsed = ValidateCapabilityBodySchema.safeParse(req.body);
+    if (!parsed.success) return reply.send({ ok: false, errors: zodIssues(parsed.error) });
+    try {
+      const { id, name, description, spec } = parsed.data;
+      const result = await deps.capabilityService.validate(principal.workspace, id, { name, description, spec });
+      return reply.send({ ok: true, ...result });
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  // Probe an mcp capability URL — test-connect and list its tools (wizard "test connection" + tool discovery). Failure
+  // is a result (reachable:false), never a throw. capabilities:write (authoring). 404 when the prober isn't wired.
+  app.post("/capabilities/probe-mcp", { schema: capabilityDocs.probeMcp }, async (req, reply) => {
+    if (!deps.probeCapabilityMcp) return reply.code(404).send(notConfigured);
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "capabilities:write");
+    } catch (err) {
+      return sendError(reply, err);
+    }
+    const parsed = ProbeCapabilityMcpBodySchema.safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
+    return reply.send(await deps.probeCapabilityMcp(parsed.data.url, parsed.data.token));
   });
 
   app.get("/capabilities", { schema: capabilityDocs.list }, async (req, reply) => {

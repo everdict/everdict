@@ -51,6 +51,7 @@ import type { JudgePreviewService } from "../core/judge/judge-preview-service.js
 import type { ModelService } from "../core/model/model-service.js";
 import type { RuntimeProbeResult } from "../core/ops/runtime-probe.js";
 import type { SecretUsageService } from "../core/secret/secret-usage-service.js";
+import type { McpProbeResult } from "../infrastructure/mcp/probe-mcp.js";
 
 // MCP tool surface — the "agent transport" sharing the same service core as the HTTP routes.
 // Each tool is authorized by the Principal's roles and scoped to workspace (the control plane is the auth/authz authority).
@@ -74,6 +75,7 @@ export interface McpDeps {
   agentService?: AgentService; // Agent version-free save/edit upsert
   skillService?: SkillService; // Workspace Skills (SKILL.md procedures the members author) CRUD — dual-scoped private|workspace
   capabilityService?: CapabilityService; // Capability Store (mcp|code|skill authored + published + adopted) CRUD
+  probeCapabilityMcp?: (url: string, token?: string) => Promise<McpProbeResult>; // capability wizard mcp "test connection" + tool discovery
   runtimeRegistry?: RuntimeRegistry;
   probeRuntime?: (workspace: string, spec: RuntimeSpec) => Promise<RuntimeProbeResult>; // runtime connection test
   inspectRuntime?: (workspace: string, spec: RuntimeSpec) => Promise<InspectRuntimeResult>; // runtime live cluster view

@@ -54,6 +54,58 @@ const docs = {
     params: toJsonSchema(z.object({ name: z.string().describe("Registry name") })),
     response: { 204: { description: "Removed", type: "null" }, ...errorResponses(401, 403, 404) },
   },
+  tags: {
+    summary: "List a repository's tags",
+    description:
+      "List the tags of a repository in a workspace image registry (Docker Registry v2) — powers the capability " +
+      "wizard's environment image picker. ?registry= selects one when several are registered (omit with exactly one). " +
+      "Standard bearer/basic registries (GHCR, Harbor, Docker Hub, generic v2); AWS ECR is unsupported. Requires harnesses:read.",
+    tags: ["image-registry"],
+    querystring: toJsonSchema(
+      z.object({
+        repository: z.string().describe('Repository path — "acme/api" · "library/node"'),
+        registry: z.string().optional().describe("Registry name — required when several are registered"),
+      }),
+    ),
+    response: {
+      200: {
+        description: "Repository tags",
+        ...toJsonSchema(z.object({ registry: z.string(), repository: z.string(), tags: z.array(z.string()) })),
+      },
+      ...errorResponses(400, 401, 403, 404),
+    },
+  },
+  manifest: {
+    summary: "Inspect a repository manifest (digest resolution)",
+    description:
+      "Inspect a tag or digest of a repository — returns the digest (the recommended digest-pinned environment ref), " +
+      "media type, and platforms/layer count. Same registry selection as tags. Requires harnesses:read.",
+    tags: ["image-registry"],
+    querystring: toJsonSchema(
+      z.object({
+        repository: z.string().describe("Repository path"),
+        reference: z.string().describe('A tag or digest — "v1.2.0" · "sha256:…"'),
+        registry: z.string().optional(),
+      }),
+    ),
+    response: {
+      200: {
+        description: "Manifest summary",
+        ...toJsonSchema(
+          z.object({
+            registry: z.string(),
+            repository: z.string(),
+            reference: z.string(),
+            digest: z.string().optional(),
+            mediaType: z.string().optional(),
+            platforms: z.array(z.string()).optional(),
+            layerCount: z.number().optional(),
+          }),
+        ),
+      },
+      ...errorResponses(400, 401, 403, 404),
+    },
+  },
   pushCredentials: {
     summary: "Mint push credentials for a registry",
     description:

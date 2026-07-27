@@ -48,6 +48,7 @@ import { PooledBrowserProvisioner } from "./infrastructure/browser-session/poole
 import { RoutingBrowserProvisioner } from "./infrastructure/browser-session/routing-browser-provisioner.js";
 import { RuntimeBrowserProvisioner } from "./infrastructure/browser-session/runtime-browser-provisioner.js";
 import { installProxyDispatcher } from "./infrastructure/http/proxy-dispatcher.js";
+import { probeMcpServer } from "./infrastructure/mcp/probe-mcp.js";
 import { buildServer } from "./server.js";
 
 // Parse an env var as a strictly-positive integer; undefined (unset/blank/zero/negative/NaN) ⇒ "no limit".
@@ -465,6 +466,8 @@ async function main(): Promise<void> {
     // Instance policy surfaced to the web (GET /me → config): does a plain member — not only an admin — get to
     // publish a capability to the instance-wide `public` catalog? Operator opt-in for a community-style deployment.
     allowMemberPublicPublish,
+    // Capability wizard "test connection" for the mcp kind — connect to an MCP URL and enumerate its tools.
+    probeCapabilityMcp: probeMcpServer,
     skillGenerator: new SkillGenerator({
       models: modelRegistry,
       scopedSecretsFor,

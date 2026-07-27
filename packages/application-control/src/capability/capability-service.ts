@@ -1,6 +1,7 @@
 import {
   type CapabilityRecord,
   type CapabilitySpec,
+  type CapabilityType,
   type CapabilityVisibility,
   ForbiddenError,
   type ImageRefClass,
@@ -37,6 +38,18 @@ export interface SaveCapabilityResult {
   created: boolean;
   // Environment kind only, warn-not-block (the harness-registration convention): the image classifies
   // local/unqualified (no pull guarantee off the build machine) or is pinned by a mutable tag.
+  imageWarnings?: ImageWarning[];
+}
+
+// The dry-run of a save (POST /capabilities/validate) — the same version-assignment + image-classification logic as
+// save(), WITHOUT writing. The wizard's review step calls it: it tells the author whether this is a new capability or
+// a new version (and which one), the existing live versions, and any environment image warnings (pull readiness).
+export interface CapabilityValidation {
+  id: string;
+  type: CapabilityType;
+  willCreate: boolean; // true = save registers a new version; false = identical content (idempotent no-op)
+  version: string; // the version save would assign (or the current one when unchanged)
+  existingVersions: string[]; // this workspace's live versions of the id (ascending)
   imageWarnings?: ImageWarning[];
 }
 
@@ -164,6 +177,29 @@ export class CapabilityService {
       createdAt: this.now(),
     });
     return withWarnings({ workspace: tenant, id, version: "1.0.0", created: true });
+  }
+
+  // Dry-run of save (no write) — predict the version assignment and surface environment image warnings so the wizard
+  // can show a truthful review step. Mirrors save()'s version logic exactly (new id → 1.0.0; changed content → next
+  // patch; unchanged → the current version, willCreate=false). Spec validity is the route's concern (Zod parse).
+  async validate(
+    tenant: string,
+    id: string,
+    body: { name: string; description: string; spec: CapabilitySpec },
+  ): Promise<CapabilityValidation> {
+    const imageWarnings = await this.environmentImageWarnings(tenant, body.spec);
+    const withWarnings = <T extends object>(v: T): T => (imageWarnings.length > 0 ? { ...v, imageWarnings } : v);
+    const existingVersions = await this.deps.store.versions(tenant, id);
+    const base = { id, type: body.spec.type, existingVersions };
+    if (existingVersions.length === 0) return withWarnings({ ...base, willCreate: true, version: "1.0.0" });
+    const latest = await this.deps.store.get(tenant, id, "latest");
+    if (!latest) return withWarnings({ ...base, willCreate: true, version: "1.0.0" });
+    if (contentEqual(latest, body)) return withWarnings({ ...base, willCreate: false, version: latest.version });
+    return withWarnings({
+      ...base,
+      willCreate: true,
+      version: nextVersion(latest.version, new Set(existingVersions)),
+    });
   }
 
   // Classify an environment capability's image against the workspace's registered registries — warn-not-block, so a
