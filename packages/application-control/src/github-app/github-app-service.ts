@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { BadRequestError, NotFoundError, type WorkspaceSettings } from "@everdict/contracts";
 import type { GithubAppGateway } from "../ports/github-app-gateway.js";
+import type { GithubFileContent, GithubIssue, GithubRepoWriterFactory } from "../ports/github-repo-writer.js";
 import type { OAuthStateStore } from "../ports/oauth-state-store.js";
 import type { WorkspaceSettingsStore } from "../ports/workspace-settings-store.js";
 
@@ -113,6 +114,8 @@ export interface GithubAppServiceDeps {
   states: OAuthStateStore;
   settings: WorkspaceSettingsStore;
   gateway: GithubAppGateway;
+  // Per-token repo-ops adapter — mints a repo client from a resolved installation token (the agent's read tools).
+  repoOps: GithubRepoWriterFactory;
   config: GithubAppServiceConfig;
   now?: () => Date;
 }
@@ -121,14 +124,50 @@ export class GithubAppService {
   private readonly states: OAuthStateStore;
   private readonly settings: WorkspaceSettingsStore;
   private readonly gateway: GithubAppGateway;
+  private readonly repoOps: GithubRepoWriterFactory;
   private readonly config: GithubAppServiceConfig;
   private readonly now: () => Date;
   constructor(deps: GithubAppServiceDeps) {
     this.states = deps.states;
     this.settings = deps.settings;
     this.gateway = deps.gateway;
+    this.repoOps = deps.repoOps;
     this.config = deps.config;
     this.now = deps.now ?? (() => new Date());
+  }
+
+  // Read a text file from a repo the workspace App is installed on (the agent's get_github_file tool). Resolves an
+  // installation token scoped to that repo (contents:read), then reads via the repo-ops adapter. NotFound if the App
+  // is not installed on the repo's owner; a non-file path / transport failure surfaces as the adapter's UpstreamError.
+  async getRepoFile(
+    workspace: string,
+    repository: string,
+    path: string,
+    ref?: string,
+    host?: string,
+  ): Promise<GithubFileContent> {
+    const { token, host: resolved } = await this.tokenForRepository(workspace, repository, { contents: "read" }, host);
+    return this.repoOps.for(token, resolved).getFile(repository, path, ref);
+  }
+
+  // List issues + pull requests in a repo the workspace App is installed on (the agent's list_github_issues tool),
+  // most-recently-updated first, limit clamped to 1..100. Token scoped to issues/pull_requests read.
+  async listRepoIssues(
+    workspace: string,
+    repository: string,
+    opts: { state?: string; limit?: number },
+    host?: string,
+  ): Promise<GithubIssue[]> {
+    const { token, host: resolved } = await this.tokenForRepository(
+      workspace,
+      repository,
+      { issues: "read", pull_requests: "read" },
+      host,
+    );
+    const perPage = Math.min(Math.max(opts.limit ?? 30, 1), 100);
+    return this.repoOps
+      .for(token, resolved)
+      .listIssues(repository, { ...(opts.state ? { state: opts.state } : {}), perPage });
   }
 
   // Which App install targets the operator configured via env (github.com and/or the enterprise host).

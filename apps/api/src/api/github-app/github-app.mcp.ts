@@ -47,5 +47,44 @@ export function registerGithubAppTools(server: McpServer, ctx: McpToolContext): 
       ({ installationId }) =>
         run(principal, "settings:write", async () => ok(await gh.unlinkInstallation(ws, installationId))),
     );
+    server.registerTool(
+      "list_github_issues",
+      {
+        description:
+          "List issues and pull requests in a repository the workspace's GitHub App is installed on (most-recently-updated first): number, title, state, author, URL, and whether each is a PR. Use to triage or find an item to read.",
+        inputSchema: {
+          repository: z.string().min(1).describe('"owner/name"'),
+          state: z.enum(["open", "closed", "all"]).optional().describe("state filter (default open)"),
+          limit: z.number().int().positive().max(100).optional().describe("max rows (default 30, max 100)"),
+          host: z.string().url().optional().describe("GitHub Enterprise base URL (unset = github.com)"),
+        },
+      },
+      ({ repository, state, limit, host }) =>
+        run(principal, "settings:read", async () =>
+          ok({
+            issues: await gh.listRepoIssues(
+              ws,
+              repository,
+              { ...(state ? { state } : {}), ...(limit !== undefined ? { limit } : {}) },
+              host,
+            ),
+          }),
+        ),
+    );
+    server.registerTool(
+      "get_github_file",
+      {
+        description:
+          "Read a text file from a repository the workspace's GitHub App is installed on — returns its UTF-8 content, sha, and size. Use to inspect code or config referenced in a task.",
+        inputSchema: {
+          repository: z.string().min(1).describe('"owner/name"'),
+          path: z.string().min(1).describe("file path within the repo"),
+          ref: z.string().optional().describe("branch, tag, or sha (default: the repo's default branch)"),
+          host: z.string().url().optional().describe("GitHub Enterprise base URL (unset = github.com)"),
+        },
+      },
+      ({ repository, path, ref, host }) =>
+        run(principal, "settings:read", async () => ok(await gh.getRepoFile(ws, repository, path, ref, host))),
+    );
   }
 }

@@ -50,6 +50,7 @@ import { defaultJudgeRunner } from "./core/execution/judge-runner.js";
 import { JudgePreviewService } from "./core/judge/judge-preview-service.js";
 import { ModelService } from "./core/model/model-service.js";
 import { githubAppGateway } from "./infrastructure/github/app-gateway.js";
+import { githubRepoWriterFactory } from "./infrastructure/github/repo-writer.js";
 import { buildServer } from "./server.js";
 
 const result: CaseResult = {
@@ -209,6 +210,7 @@ function server(
     states: new InMemoryOAuthStateStore(),
     settings: settingsStore,
     gateway: githubAppGateway(),
+    repoOps: githubRepoWriterFactory(),
     config: {
       webBaseUrl: "http://web.test",
       apiPublicUrl: "http://api.test",

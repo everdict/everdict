@@ -4,6 +4,7 @@ import { BadRequestError, NotFoundError } from "@everdict/contracts";
 import { InMemoryOAuthStateStore, InMemoryWorkspaceSettingsStore } from "@everdict/db";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { githubAppGateway } from "../../infrastructure/github/app-gateway.js";
+import { githubRepoWriterFactory } from "../../infrastructure/github/repo-writer.js";
 
 const { privateKey } = generateKeyPairSync("rsa", {
   modulusLength: 2048,
@@ -63,6 +64,24 @@ function stubApi(repos: string[], runnerTok = "RUNNERTOK"): void {
   );
 }
 
+// Stub for the repo read ops — installation lookup + access-token mint + contents/issues, branched by URL.
+function stubRepoOps(opts: { fileB64?: string; issues?: unknown[] }): void {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string | URL) => {
+      const s = String(url);
+      const body = s.endsWith("/access_tokens")
+        ? { token: "ghs_inst", expires_at: "2026-07-05T12:00:00Z" }
+        : s.includes("/contents/")
+          ? { type: "file", path: "README.md", sha: "abc", size: 5, content: opts.fileB64 ?? "", encoding: "base64" }
+          : s.includes("/issues")
+            ? (opts.issues ?? [])
+            : { id: 1, account: { login: "acme-org" } }; // getInstallation
+      return new Response(JSON.stringify(body), { status: 200 });
+    }),
+  );
+}
+
 describe("GithubAppService", () => {
   let states: InMemoryOAuthStateStore;
   let settings: InMemoryWorkspaceSettingsStore;
@@ -75,6 +94,8 @@ describe("GithubAppService", () => {
       states,
       settings,
       gateway: githubAppGateway(), // fake fetch (vi.stubGlobal) routes through the real adapter → wire assertions survive
+      repoOps: githubRepoWriterFactory(), // same fake-fetch-through-real-adapter for the repo read ops
+
       config: {
         webBaseUrl: "http://web.test",
         apiPublicUrl: "http://api.test",
@@ -208,6 +229,65 @@ describe("GithubAppService", () => {
     stubApi([]);
     await installOrg();
     await expect(svc.tokenForRepository("acme", "other-org/api", {})).rejects.toBeInstanceOf(NotFoundError);
+  });
+
+  it("getRepoFile mints a repo-scoped token and returns the base64-decoded file content", async () => {
+    stubRepoOps({ fileB64: Buffer.from("hello world", "utf8").toString("base64") });
+    await installOrg();
+    const file = await svc.getRepoFile("acme", "acme-org/api", "README.md");
+    expect(file).toEqual({ path: "README.md", content: "hello world", sha: "abc", size: 5 });
+  });
+
+  it("getRepoFile → NotFound when the App is not installed on the repo owner", async () => {
+    stubRepoOps({});
+    await installOrg();
+    await expect(svc.getRepoFile("acme", "other-org/api", "README.md")).rejects.toBeInstanceOf(NotFoundError);
+  });
+
+  it("listRepoIssues returns issues and PRs (PRs flagged), clamping the limit", async () => {
+    stubRepoOps({
+      issues: [
+        {
+          number: 7,
+          title: "bug",
+          state: "open",
+          html_url: "https://gh/7",
+          updated_at: "2026-07-02T00:00:00Z",
+          user: { login: "dev" },
+        },
+        {
+          number: 8,
+          title: "feat",
+          state: "open",
+          html_url: "https://gh/8",
+          updated_at: "2026-07-01T00:00:00Z",
+          user: { login: "dev" },
+          pull_request: { url: "x" },
+        },
+      ],
+    });
+    await installOrg();
+    const issues = await svc.listRepoIssues("acme", "acme-org/api", { limit: 500 });
+    expect(issues).toEqual([
+      {
+        number: 7,
+        title: "bug",
+        state: "open",
+        author: "dev",
+        url: "https://gh/7",
+        isPullRequest: false,
+        updatedAt: "2026-07-02T00:00:00Z",
+      },
+      {
+        number: 8,
+        title: "feat",
+        state: "open",
+        author: "dev",
+        url: "https://gh/8",
+        isPullRequest: true,
+        updatedAt: "2026-07-01T00:00:00Z",
+      },
+    ]);
   });
 
   it("runnerRegistrationToken mints a runner registration token via the App (administration)", async () => {

@@ -29,13 +29,16 @@ async function upstream(res: Response, prefix: string): Promise<UpstreamError> {
   );
 }
 
-export function githubRepoWriterFactory(fetchImpl: typeof fetch = fetch): GithubRepoWriterFactory {
+export function githubRepoWriterFactory(fetchImpl?: typeof fetch): GithubRepoWriterFactory {
   return {
     for(token, host): GithubRepoWriter {
       const base = apiBase(host);
+      // Resolve fetch at operation time (not factory-creation time) so a test's vi.stubGlobal("fetch") is honored —
+      // mirrors the gateway adapter, which references the global fetch inside its methods. An injected fetchImpl wins.
+      const doFetch = fetchImpl ?? fetch;
       // Common for GET-family — remap non-2xx to UpstreamError (never leak a raw GitHub error).
       const gh = async (url: string): Promise<Response> => {
-        const res = await fetchImpl(url, { headers: headers(token) });
+        const res = await doFetch(url, { headers: headers(token) });
         if (!res.ok) throw await upstream(res, "GitHub API call failed");
         return res;
       };
@@ -51,7 +54,7 @@ export function githubRepoWriterFactory(fetchImpl: typeof fetch = fetch): Github
         },
         async ensureBranch(repository, branch, fromSha) {
           // Create branch (reuse if it already exists — 422 Reference already exists).
-          const mkRef = await fetchImpl(`${base}/repos/${repository}/git/refs`, {
+          const mkRef = await doFetch(`${base}/repos/${repository}/git/refs`, {
             method: "POST",
             headers: headers(token),
             body: JSON.stringify({ ref: `refs/heads/${branch}`, sha: fromSha }),
@@ -60,11 +63,11 @@ export function githubRepoWriterFactory(fetchImpl: typeof fetch = fetch): Github
         },
         async putFile(repository, opts) {
           // Commit the file — if the file already exists, its sha is required (update). 404 = new.
-          const existing = await fetchImpl(`${base}/repos/${repository}/contents/${opts.path}?ref=${opts.branch}`, {
+          const existing = await doFetch(`${base}/repos/${repository}/contents/${opts.path}?ref=${opts.branch}`, {
             headers: headers(token),
           });
           const existingSha = existing.ok ? z.object({ sha: z.string() }).parse(await existing.json()).sha : undefined;
-          const put = await fetchImpl(`${base}/repos/${repository}/contents/${opts.path}`, {
+          const put = await doFetch(`${base}/repos/${repository}/contents/${opts.path}`, {
             method: "PUT",
             headers: headers(token),
             body: JSON.stringify({
@@ -78,7 +81,7 @@ export function githubRepoWriterFactory(fetchImpl: typeof fetch = fetch): Github
         },
         async openPr(repository, opts) {
           // Create PR — if one is already open (422), find and return the existing PR.
-          const mkPr = await fetchImpl(`${base}/repos/${repository}/pulls`, {
+          const mkPr = await doFetch(`${base}/repos/${repository}/pulls`, {
             method: "POST",
             headers: headers(token),
             body: JSON.stringify({ title: opts.title, head: opts.head, base: opts.base, body: opts.body }),
@@ -96,6 +99,52 @@ export function githubRepoWriterFactory(fetchImpl: typeof fetch = fetch): Github
             if (first) return { url: first.html_url };
           }
           throw await upstream(mkPr, "PR creation failed");
+        },
+        async getFile(repository, path, ref) {
+          const url = `${base}/repos/${repository}/contents/${path.split("/").map(encodeURIComponent).join("/")}${
+            ref ? `?ref=${encodeURIComponent(ref)}` : ""
+          }`;
+          const body = z
+            .object({
+              type: z.string(),
+              path: z.string(),
+              sha: z.string(),
+              size: z.number(),
+              content: z.string().optional(),
+              encoding: z.string().optional(),
+            })
+            .parse(await (await gh(url)).json());
+          if (body.type !== "file" || body.content === undefined)
+            throw new UpstreamError("UPSTREAM_ERROR", { path }, `GitHub path is not a readable file: ${path}`);
+          const content =
+            body.encoding === "base64" ? Buffer.from(body.content, "base64").toString("utf8") : body.content;
+          return { path: body.path, content, sha: body.sha, size: body.size };
+        },
+        async listIssues(repository, opts) {
+          const state = opts.state === "closed" || opts.state === "all" ? opts.state : "open";
+          const url = `${base}/repos/${repository}/issues?state=${state}&per_page=${opts.perPage}&sort=updated&direction=desc`;
+          const rows = z
+            .array(
+              z.object({
+                number: z.number(),
+                title: z.string(),
+                state: z.string(),
+                html_url: z.string(),
+                updated_at: z.string(),
+                user: z.object({ login: z.string() }).nullish(),
+                pull_request: z.unknown().optional(),
+              }),
+            )
+            .parse(await (await gh(url)).json());
+          return rows.map((r) => ({
+            number: r.number,
+            title: r.title,
+            state: r.state,
+            author: r.user?.login ?? "",
+            url: r.html_url,
+            isPullRequest: r.pull_request !== undefined,
+            updatedAt: r.updated_at,
+          }));
         },
       };
     },

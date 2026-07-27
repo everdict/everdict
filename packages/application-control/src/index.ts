@@ -144,7 +144,12 @@ export type {
   MattermostProbeResult,
 } from "./ports/mattermost-client.js";
 export { NotificationService, type NotificationServiceDeps } from "./notification/notification-service.js";
-export type { GithubRepoWriter, GithubRepoWriterFactory } from "./ports/github-repo-writer.js";
+export type {
+  GithubFileContent,
+  GithubIssue,
+  GithubRepoWriter,
+  GithubRepoWriterFactory,
+} from "./ports/github-repo-writer.js";
 export {
   CiLinkService,
   type CiLinkServiceDeps,

@@ -49,6 +49,7 @@ import { LiveFrameStore } from "./common/live-frame-store.js";
 import { LiveLogStore } from "./common/live-log-store.js";
 import { BundleService } from "./core/bundle/bundle-service.js";
 import { githubAppGateway } from "./infrastructure/github/app-gateway.js";
+import { githubRepoWriterFactory } from "./infrastructure/github/repo-writer.js";
 import { buildMcpServer } from "./mcp.js";
 
 const result: CaseResult = {
@@ -115,6 +116,7 @@ function harness() {
       states: new InMemoryOAuthStateStore(),
       settings: new InMemoryWorkspaceSettingsStore(),
       gateway: githubAppGateway(),
+      repoOps: githubRepoWriterFactory(),
       config: {
         webBaseUrl: "http://web.test",
         apiPublicUrl: "http://api.test",
@@ -420,6 +422,7 @@ describe("MCP tools", () => {
       "fire_schedule",
       "get_agent",
       "get_dataset",
+      "get_github_file",
       "get_harness_instance",
       "get_harness_template",
       "get_judge",
@@ -447,6 +450,7 @@ describe("MCP tools", () => {
       "list_agents",
       "list_api_keys",
       "list_datasets",
+      "list_github_issues",
       "list_harness_templates",
       "list_harnesses",
       "list_invites",
