@@ -89,5 +89,27 @@ export function registerMattermostTools(server: McpServer, ctx: McpToolContext):
       },
       ({ message }) => run(principal, "mattermost:post", async () => ok(await mm.postMessage(ws, message))),
     );
+    server.registerTool(
+      "list_mattermost_channels",
+      {
+        description:
+          "List the Mattermost channels this workspace's bot can access (across its teams): id, name, display name, team, type. Requires a registered bot. Use to find a channel id before reading it with get_mattermost_channel_posts.",
+        inputSchema: {},
+      },
+      () => run(principal, "settings:read", async () => ok(await mm.listChannels(ws))),
+    );
+    server.registerTool(
+      "get_mattermost_channel_posts",
+      {
+        description:
+          "Read recent posts in a Mattermost channel (newest first): author user id, message, timestamp. Requires a registered bot with access to the channel. Get the channel id from list_mattermost_channels.",
+        inputSchema: {
+          channelId: z.string().min(1).describe("the channel id (from list_mattermost_channels)"),
+          limit: z.number().int().positive().max(100).optional().describe("max posts to return (default 30, max 100)"),
+        },
+      },
+      ({ channelId, limit }) =>
+        run(principal, "settings:read", async () => ok(await mm.getChannelPosts(ws, channelId, limit))),
+    );
   }
 }

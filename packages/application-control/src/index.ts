@@ -136,7 +136,13 @@ export {
   type VersionTaggable,
   VersionTagsBodySchema,
 } from "./version-tag/version-tag-service.js";
-export type { MattermostClient, MattermostPost, MattermostProbeResult } from "./ports/mattermost-client.js";
+export type {
+  MattermostChannel,
+  MattermostClient,
+  MattermostPost,
+  MattermostPostView,
+  MattermostProbeResult,
+} from "./ports/mattermost-client.js";
 export { NotificationService, type NotificationServiceDeps } from "./notification/notification-service.js";
 export type { GithubRepoWriter, GithubRepoWriterFactory } from "./ports/github-repo-writer.js";
 export {

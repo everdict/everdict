@@ -227,6 +227,8 @@ function server(
     client: {
       post: async () => {},
       verify: async () => ({ reachable: true, detail: "stub", botUsername: "everdict-bot" }),
+      listChannels: async () => [],
+      getChannelPosts: async () => [],
     },
     secretsFor: async () => ({ MM_BOT: "xoxb-test" }),
     config: { host: "https://mm.corp.io", apiPublicUrl: "http://api.test" },

@@ -1,5 +1,10 @@
 import { BadRequestError, type WorkspaceSettings } from "@everdict/contracts";
-import type { MattermostClient, MattermostProbeResult } from "../ports/mattermost-client.js";
+import type {
+  MattermostChannel,
+  MattermostClient,
+  MattermostPostView,
+  MattermostProbeResult,
+} from "../ports/mattermost-client.js";
 import type { WorkspaceSettingsStore } from "../ports/workspace-settings-store.js";
 
 // Workspace-owned Mattermost integration service — an admin registers the workspace's bot + channel against the
@@ -152,13 +157,9 @@ export class MattermostService {
     await this.settings.set(workspace, { mattermost: null });
   }
 
-  // Post a message to this workspace's configured default channel as the workspace bot (the conversational agent's
-  // post_mattermost_message tool + its HTTP/MCP endpoint). Unlike completion notifications (fire-and-forget), failure
-  // is SURFACED — the agent must know whether the post landed, so config gaps throw BadRequest and a transport/HTTP
-  // failure propagates as the adapter's remapped UpstreamError. Requires the operator server URL + a registered bot +
-  // a defaultChannelId. Returns the channel it landed in.
-  async postMessage(workspace: string, message: string): Promise<{ channelId: string }> {
-    const host = this.requireHost();
+  // The workspace's Mattermost registration, or a BadRequest when no bot is registered yet (shared by the read tools
+  // and postMessage — every "use the integration" op needs a registered bot).
+  private async requireRegistered(workspace: string): Promise<MattermostSettings> {
     const mm = (await this.settings.get(workspace))?.mattermost;
     if (!mm)
       throw new BadRequestError(
@@ -166,6 +167,40 @@ export class MattermostService {
         {},
         "Mattermost is not registered for this workspace. An admin must register a bot token first (Settings → Integrations).",
       );
+    return mm;
+  }
+
+  // List the channels the workspace bot can access (across its teams) — for the agent to discover a channel id before
+  // reading it. Requires the operator server URL + a registered bot.
+  async listChannels(workspace: string): Promise<{ channels: MattermostChannel[] }> {
+    const host = this.requireHost();
+    const mm = await this.requireRegistered(workspace);
+    const token = await this.botTokenValue(workspace, mm.botTokenSecretName);
+    return { channels: await this.client.listChannels(host, token) };
+  }
+
+  // Read recent posts in a channel (newest-first, clamped to 1..100). Requires the operator server URL + a registered
+  // bot with access to the channel (a transport/non-2xx failure surfaces as the adapter's remapped UpstreamError).
+  async getChannelPosts(
+    workspace: string,
+    channelId: string,
+    limit?: number,
+  ): Promise<{ posts: MattermostPostView[] }> {
+    const host = this.requireHost();
+    const mm = await this.requireRegistered(workspace);
+    const token = await this.botTokenValue(workspace, mm.botTokenSecretName);
+    const perPage = Math.min(Math.max(limit ?? 30, 1), 100);
+    return { posts: await this.client.getChannelPosts(host, token, channelId, perPage) };
+  }
+
+  // Post a message to this workspace's configured default channel as the workspace bot (the conversational agent's
+  // post_mattermost_message tool + its HTTP/MCP endpoint). Unlike completion notifications (fire-and-forget), failure
+  // is SURFACED — the agent must know whether the post landed, so config gaps throw BadRequest and a transport/HTTP
+  // failure propagates as the adapter's remapped UpstreamError. Requires the operator server URL + a registered bot +
+  // a defaultChannelId. Returns the channel it landed in.
+  async postMessage(workspace: string, message: string): Promise<{ channelId: string }> {
+    const host = this.requireHost();
+    const mm = await this.requireRegistered(workspace);
     if (!mm.defaultChannelId)
       throw new BadRequestError(
         "BAD_REQUEST",

@@ -130,7 +130,14 @@ function harness() {
     // Mattermost host is operator env (config.host); verify stubbed reachable so the MCP tool wiring is testable.
     mattermostService: new MattermostService({
       settings: new InMemoryWorkspaceSettingsStore(),
-      client: { post: async () => {}, verify: async () => ({ reachable: true, detail: "stub" }) },
+      client: {
+        post: async () => {},
+        verify: async () => ({ reachable: true, detail: "stub" }),
+        listChannels: async () => [
+          { id: "c1", name: "town-square", displayName: "Town Square", teamId: "t1", type: "O" },
+        ],
+        getChannelPosts: async () => [{ id: "p1", userId: "u1", message: "hi", createdAt: 1 }],
+      },
       secretsFor: async () => ({ MM_BOT: "xoxb-test" }),
       config: { host: "https://mm.corp.io" },
     }),
@@ -416,6 +423,7 @@ describe("MCP tools", () => {
       "get_harness_instance",
       "get_harness_template",
       "get_judge",
+      "get_mattermost_channel_posts",
       "get_model",
       "get_rubric",
       "get_run",
@@ -443,6 +451,7 @@ describe("MCP tools", () => {
       "list_harnesses",
       "list_invites",
       "list_judges",
+      "list_mattermost_channels",
       "list_members",
       "list_models",
       "list_rubrics",

@@ -1,4 +1,9 @@
-import type { MattermostClient, MattermostProbeResult } from "@everdict/application-control";
+import type {
+  MattermostChannel,
+  MattermostClient,
+  MattermostPostView,
+  MattermostProbeResult,
+} from "@everdict/application-control";
 import { UpstreamError } from "@everdict/contracts";
 
 // The fetch-backed Mattermost adapter — owns the wire protocol (/api/v4/*, bot-token bearer,
@@ -82,7 +87,93 @@ export function mattermostHttpClient(fetchImpl: typeof fetch = fetch): Mattermos
         ...(channelName ? { channelName } : {}),
       };
     },
+    // GET /api/v4/users/me/teams → the bot's teams, then per team GET /users/me/teams/{team}/channels → the channels
+    // the bot is a member of. Flattened; a transport/non-2xx failure is remapped (never a raw fetch error).
+    async listChannels(host, botToken): Promise<MattermostChannel[]> {
+      const base = trimSlash(host);
+      const teams = await getJson(fetchImpl, `${base}/api/v4/users/me/teams`, botToken, "list Mattermost teams");
+      const teamIds = (Array.isArray(teams) ? teams : [])
+        .map((t) => (isRecord(t) && typeof t.id === "string" ? t.id : undefined))
+        .filter((id): id is string => id !== undefined);
+      const channels: MattermostChannel[] = [];
+      for (const teamId of teamIds) {
+        const list = await getJson(
+          fetchImpl,
+          `${base}/api/v4/users/me/teams/${encodeURIComponent(teamId)}/channels`,
+          botToken,
+          "list Mattermost channels",
+        );
+        for (const c of Array.isArray(list) ? list : []) {
+          if (!isRecord(c) || typeof c.id !== "string") continue;
+          channels.push({
+            id: c.id,
+            name: typeof c.name === "string" ? c.name : "",
+            displayName: typeof c.display_name === "string" ? c.display_name : "",
+            teamId: typeof c.team_id === "string" ? c.team_id : teamId,
+            type: typeof c.type === "string" ? c.type : "",
+          });
+        }
+      }
+      return channels;
+    },
+    // GET /api/v4/channels/{id}/posts?per_page=N → { order:[ids newest-first], posts:{id:post} }; mapped in order.
+    async getChannelPosts(host, botToken, channelId, perPage): Promise<MattermostPostView[]> {
+      const base = trimSlash(host);
+      const body = await getJson(
+        fetchImpl,
+        `${base}/api/v4/channels/${encodeURIComponent(channelId)}/posts?per_page=${perPage}`,
+        botToken,
+        "read Mattermost channel posts",
+      );
+      if (!isRecord(body)) return [];
+      const order = Array.isArray(body.order) ? body.order : [];
+      const posts = isRecord(body.posts) ? body.posts : {};
+      const out: MattermostPostView[] = [];
+      for (const id of order) {
+        if (typeof id !== "string") continue;
+        const p = posts[id];
+        if (!isRecord(p)) continue;
+        out.push({
+          id,
+          userId: typeof p.user_id === "string" ? p.user_id : "",
+          message: typeof p.message === "string" ? p.message : "",
+          createdAt: typeof p.create_at === "number" ? p.create_at : 0,
+        });
+      }
+      return out;
+    },
   };
+}
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === "object" && v !== null;
+}
+
+// A GET returning parsed JSON, with the same error discipline as post(): a transport failure, a non-2xx, or an
+// unreadable body is remapped to UpstreamError (never a raw fetch/parse error crossing the boundary).
+async function getJson(fetchImpl: typeof fetch, url: string, botToken: string, what: string): Promise<unknown> {
+  let res: Response;
+  try {
+    res = await fetchImpl(url, { headers: botHeaders(botToken) });
+  } catch (e) {
+    const detail = e instanceof Error ? e.message : String(e);
+    throw new UpstreamError("UPSTREAM_ERROR", { detail }, `Could not reach Mattermost to ${what}: ${detail}`);
+  }
+  if (!res.ok)
+    throw new UpstreamError(
+      "UPSTREAM_ERROR",
+      { status: res.status },
+      `Mattermost failed to ${what} (HTTP ${res.status}).`,
+    );
+  try {
+    return await res.json();
+  } catch {
+    throw new UpstreamError(
+      "UPSTREAM_ERROR",
+      {},
+      `Mattermost returned an unreadable response while trying to ${what}.`,
+    );
+  }
 }
 
 // Best-effort field reads — a missing/oddly-shaped body must not turn a 200 into a failure.

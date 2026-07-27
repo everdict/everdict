@@ -1,4 +1,9 @@
-import type { MattermostClient, MattermostProbeResult } from "@everdict/application-control";
+import type {
+  MattermostChannel,
+  MattermostClient,
+  MattermostPostView,
+  MattermostProbeResult,
+} from "@everdict/application-control";
 import { MattermostService } from "@everdict/application-control";
 import { BadRequestError } from "@everdict/contracts";
 import { InMemoryWorkspaceSettingsStore } from "@everdict/db";
@@ -6,9 +11,18 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const HOST = "https://mm.corp.io";
 
-// A fake Mattermost client — verify returns whatever the test queues; post records its call for assertions.
-function fakeClient(verify: () => Promise<MattermostProbeResult>): MattermostClient {
-  return { post: vi.fn(async () => {}), verify: vi.fn(verify) };
+// A fake Mattermost client — verify returns whatever the test queues; post/listChannels/getChannelPosts record their
+// calls for assertions and return the queued reads.
+function fakeClient(
+  verify: () => Promise<MattermostProbeResult>,
+  reads?: { channels?: MattermostChannel[]; posts?: MattermostPostView[] },
+): MattermostClient {
+  return {
+    post: vi.fn(async () => {}),
+    verify: vi.fn(verify),
+    listChannels: vi.fn(async () => reads?.channels ?? []),
+    getChannelPosts: vi.fn(async () => reads?.posts ?? []),
+  };
 }
 
 describe("MattermostService", () => {
@@ -21,8 +35,12 @@ describe("MattermostService", () => {
     noHost?: boolean;
     verify?: () => Promise<MattermostProbeResult>;
     secrets?: Record<string, string>;
+    reads?: { channels?: MattermostChannel[]; posts?: MattermostPostView[] };
   }): { svc: MattermostService; client: MattermostClient } {
-    const client = fakeClient(opts?.verify ?? (async () => ({ reachable: true, detail: "ok", botUsername: "bot" })));
+    const client = fakeClient(
+      opts?.verify ?? (async () => ({ reachable: true, detail: "ok", botUsername: "bot" })),
+      opts?.reads,
+    );
     const host = opts?.noHost ? undefined : (opts?.host ?? HOST);
     const svc = new MattermostService({
       settings,
@@ -131,6 +149,42 @@ describe("MattermostService", () => {
     it("throws when the operator server URL is unset (MATTERMOST_HOST)", async () => {
       const { svc } = build({ noHost: true });
       await expect(svc.postMessage("acme", "hi")).rejects.toBeInstanceOf(BadRequestError);
+    });
+  });
+
+  describe("read tools (agent list_mattermost_channels / get_mattermost_channel_posts)", () => {
+    const channels: MattermostChannel[] = [
+      { id: "c1", name: "town-square", displayName: "Town Square", teamId: "t1", type: "O" },
+    ];
+    const posts: MattermostPostView[] = [{ id: "p1", userId: "u1", message: "hi", createdAt: 1 }];
+
+    it("lists channels via the resolved bot token", async () => {
+      const { svc, client } = build({ reads: { channels } });
+      await svc.set("acme", { botTokenSecretName: "MM_BOT" });
+      expect(await svc.listChannels("acme")).toEqual({ channels });
+      expect(client.listChannels).toHaveBeenCalledWith(HOST, "xoxb-token");
+    });
+
+    it("reads channel posts with the limit clamped to 1..100 (default 30)", async () => {
+      const { svc, client } = build({ reads: { posts } });
+      await svc.set("acme", { botTokenSecretName: "MM_BOT" });
+      expect(await svc.getChannelPosts("acme", "c1")).toEqual({ posts });
+      expect(client.getChannelPosts).toHaveBeenCalledWith(HOST, "xoxb-token", "c1", 30); // default
+      await svc.getChannelPosts("acme", "c1", 500); // over max → clamped
+      expect(client.getChannelPosts).toHaveBeenLastCalledWith(HOST, "xoxb-token", "c1", 100);
+    });
+
+    it("throws when the workspace has not registered Mattermost", async () => {
+      const { svc, client } = build();
+      await expect(svc.listChannels("acme")).rejects.toBeInstanceOf(BadRequestError);
+      await expect(svc.getChannelPosts("acme", "c1")).rejects.toBeInstanceOf(BadRequestError);
+      expect(client.listChannels).not.toHaveBeenCalled();
+      expect(client.getChannelPosts).not.toHaveBeenCalled();
+    });
+
+    it("throws when the operator server URL is unset (MATTERMOST_HOST)", async () => {
+      const { svc } = build({ noHost: true });
+      await expect(svc.listChannels("acme")).rejects.toBeInstanceOf(BadRequestError);
     });
   });
 });
