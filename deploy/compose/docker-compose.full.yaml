@@ -2,10 +2,12 @@
 #
 #   cp deploy/compose/.env.full.example deploy/compose/.env
 #   # edit .env: at minimum POSTGRES_PASSWORD, EVERDICT_INTERNAL_TOKEN, EVERDICT_SECRETS_KEY
+#   #            + a model for the conversational agent (AGENT_MODEL or AGENT_LLM_*) — see below
 #   docker compose -f deploy/compose/docker-compose.full.yaml --env-file deploy/compose/.env up -d --build
 #
 #     web          : http://localhost:3001
 #     API          : http://localhost:8787   (/healthz, /docs)
+#     agent        : http://localhost:8790   (/healthz — the assistant behind the web chat + teammates)
 #     Temporal UI  : http://localhost:8233
 #
 # What this stack turns on (vs docker-compose.prod.yaml, which is single-node + in-memory hub + no Temporal):
@@ -20,6 +22,11 @@
 #     API, so self-hosted runners keep working) + durable scheduled/cron evals (TemporalScheduleDriver). Temporal
 #     itself is persistent (auto-setup on Postgres), NOT the in-memory `start-dev` server.
 #   • A dedicated Temporal WORKER process (apps/cli `everdict worker`) polling the task queue.
+#   • The conversational AGENT service (@everdict/agent, :8790) — the assistant behind the web chat + proactive
+#     teammates. The web proxies chat to it (AGENT_URL) and the api pushes run/scorecard completions to it
+#     (AGENT_SERVICE_URL + AGENT_INTERNAL_TOKEN → teammate wake-ups). It needs a MODEL to answer: set AGENT_MODEL
+#     (a registered workspace model) or AGENT_LLM_* (a raw provider endpoint). Unconfigured → the agent fails fast
+#     on boot and ONLY the chat is down; the rest of the stack is unaffected (web/api do not wait on its health).
 #   • Secret-at-rest encryption (EVERDICT_SECRETS_KEY) + /internal token (EVERDICT_INTERNAL_TOKEN).
 #
 # Auth: OFF by default (single tenant=default, trusted network). For real multi-tenant SSO add Keycloak:
@@ -110,6 +117,10 @@ services:
       EVERDICT_SECRETS_KEY: ${EVERDICT_SECRETS_KEY:?set EVERDICT_SECRETS_KEY (openssl rand -base64 32)}
       # Guards /internal/** — the Temporal worker → API bridge (schedules/batches) AND tenant-key minting. Required for Temporal firing.
       EVERDICT_INTERNAL_TOKEN: ${EVERDICT_INTERNAL_TOKEN:?set EVERDICT_INTERNAL_TOKEN (openssl rand -hex 32)}
+      # ── Proactive teammates (S4): where + how the api pushes run/scorecard completions to the agent service so a
+      #    creator's watching teammates wake. AGENT_INTERNAL_TOKEN must match the agent service's value (x-internal-token). ──
+      AGENT_SERVICE_URL: http://agent:8790
+      AGENT_INTERNAL_TOKEN: ${AGENT_INTERNAL_TOKEN:-}
       # ── Externally reachable URLs (GitHub App callback · Mattermost inbound · live trace deep-links) ──
       API_PUBLIC_URL: ${API_PUBLIC_URL:-}
       WEB_BASE_URL: ${WEB_BASE_URL:-}
@@ -208,6 +219,60 @@ services:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped
 
+  # ── Conversational agent (@everdict/agent, Fastify :8790) — the assistant behind the web chat + teammates ─────
+  # The web proxies chat here (web.AGENT_URL) and the api pushes completions here (api.AGENT_SERVICE_URL). It needs a
+  # MODEL to answer — set exactly one of:
+  #   • AGENT_MODEL   — a registered workspace model id (resolved per request against the shared Pg; its provider key
+  #                     is read from the workspace SecretStore and decrypted with EVERDICT_SECRETS_KEY). Preferred.
+  #   • AGENT_LLM_*   — a raw OpenAI-compatible endpoint (LiteLLM / vLLM), e.g. on the host via host.docker.internal.
+  # With NEITHER set the container fails fast on boot with an actionable error; web/api are unaffected (they do not
+  # wait on the agent's health), so only the chat is down until you configure a model.
+  agent:
+    image: ghcr.io/everdict/everdict-agent:${EVERDICT_VERSION:-latest}
+    build:
+      context: ../..
+      dockerfile: apps/agent/Dockerfile
+      target: runtime
+    environment:
+      PORT: "8790"
+      # Identity (GET /me) + the MCP tool endpoint (<url>/mcp) both live on the control plane.
+      CONTROL_PLANE_URL: http://api:8787
+      # Shared Postgres: durable chat sessions + teammate execution tokens + per-workspace model/secret/skill resolution.
+      DATABASE_URL: postgresql://${POSTGRES_USER:-everdict}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-everdict}
+      # Same KEK as the api — decrypts the workspace's model provider key + MCP-server secrets (per-workspace agent).
+      EVERDICT_SECRETS_KEY: ${EVERDICT_SECRETS_KEY:?set EVERDICT_SECRETS_KEY (openssl rand -base64 32)}
+      # ── Model (REQUIRED — set AGENT_MODEL or AGENT_LLM_*; see the block comment above) ──
+      AGENT_MODEL: ${AGENT_MODEL:-}
+      AGENT_LLM_BASE_URL: ${AGENT_LLM_BASE_URL:-}
+      AGENT_LLM_API_KEY: ${AGENT_LLM_API_KEY:-}
+      AGENT_LLM_MODEL: ${AGENT_LLM_MODEL:-}
+      # ── Optional model tiering (registered model ids, like AGENT_MODEL) ──
+      AGENT_SMALL_MODEL: ${AGENT_SMALL_MODEL:-}
+      AGENT_FALLBACK_MODEL: ${AGENT_FALLBACK_MODEL:-}
+      AGENT_SUBAGENT_MODEL: ${AGENT_SUBAGENT_MODEL:-}
+      # ── Proactive teammates (S4): must equal the api's AGENT_INTERNAL_TOKEN so pushed completions are accepted ──
+      AGENT_INTERNAL_TOKEN: ${AGENT_INTERNAL_TOKEN:-}
+      # ── Let the agent DRIVE eval (run/retry scorecards, register/pin harnesses, …) — every call still HITL/RBAC-gated ──
+      AGENT_ALLOW_EVAL_DRIVE: ${AGENT_ALLOW_EVAL_DRIVE:-}
+      # ── Built-in web_search (Tavily) for every workspace's agent out of the box ──
+      AGENT_WEBSEARCH_API_KEY: ${AGENT_WEBSEARCH_API_KEY:-}
+      # ── Extended thinking (tokens) · per-tool deadline (ms) · loop-turn cap · agent-config id ──
+      AGENT_THINKING_BUDGET: ${AGENT_THINKING_BUDGET:-}
+      AGENT_TOOL_TIMEOUT_MS: ${AGENT_TOOL_TIMEOUT_MS:-}
+      AGENT_MAX_TURNS: ${AGENT_MAX_TURNS:-}
+      AGENT_CONFIG_ID: ${AGENT_CONFIG_ID:-default}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      api:
+        condition: service_started
+    extra_hosts:
+      # Reach a host-side LLM proxy (LiteLLM / vLLM) for the AGENT_LLM_* fallback.
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "${AGENT_PORT:-8790}:8790"
+    restart: unless-stopped
+
   # ── SaaS web (Next.js :3001) — pure HTTP client of the API; token courier for Keycloak when auth is on ───────
   web:
     image: ghcr.io/everdict/everdict-web:${EVERDICT_VERSION:-latest}
@@ -217,6 +282,8 @@ services:
       target: runtime
     environment:
       CONTROL_PLANE_URL: http://api:8787
+      # The web (server) proxies the assistant chat + teammates to the agent service over the compose network.
+      AGENT_URL: http://agent:8790
       # Loopback default is fine: the web rebases a loopback host onto the browser's request host at render
       # time (the Temporal UI is published on the same host as the web), so remote users get a reachable link.
       TEMPORAL_UI_URL: ${TEMPORAL_UI_URL:-http://localhost:${TEMPORAL_UI_PORT:-8233}}
@@ -229,6 +296,7 @@ services:
       DESKTOP_DOWNLOAD_URL: ${DESKTOP_DOWNLOAD_URL:-}
     depends_on:
       - api
+      - agent
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:

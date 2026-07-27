@@ -1,8 +1,9 @@
 # Everdict full-stack dev compose — web + API at once, with hot reload.
 #
 #   docker compose -f deploy/compose/docker-compose.dev.yaml up --build
-#     web : http://localhost:3001   (operates as tenant=default without auth)
-#     API : http://localhost:8787   (dev fallback: x-everdict-tenant header)
+#     web   : http://localhost:3001   (operates as tenant=default without auth)
+#     API   : http://localhost:8787   (dev fallback: x-everdict-tenant header)
+#     agent : http://localhost:8790   (web chat + teammates; needs AGENT_LLM_* — see the agent service)
 #
 # Characteristics (dev defaults):
 #  - Auth OFF: without Keycloak, the web runs in dev mode and the API uses the dev fallback → clickable right away.
@@ -36,6 +37,36 @@ services:
     ports:
       - "8787:8787"
 
+  # Conversational agent (@everdict/agent :8790) — the assistant behind the web chat + teammates. Hot-reloaded like
+  # the API. Dev has no DB → in-memory sessions + the env LLM fallback, so it needs AGENT_LLM_* to answer (a raw
+  # OpenAI-compatible endpoint, e.g. a LiteLLM on the host via host.docker.internal). Passed through from the host
+  # shell/.env; unset → the agent fails fast on boot and only the chat is down (web/api are unaffected).
+  agent:
+    build:
+      context: ../..
+      dockerfile: apps/agent/Dockerfile
+      target: dev
+    working_dir: /app
+    command:
+      - sh
+      - -lc
+      - pnpm install --frozen-lockfile && pnpm --filter @everdict/agent... build && (node_modules/.bin/tsc -p apps/agent/tsconfig.json --watch --preserveWatchOutput & exec node --watch apps/agent/dist/main.js)
+    environment:
+      PORT: "8790"
+      CONTROL_PLANE_URL: http://api:8787
+      # Raw OpenAI-compatible endpoint for the dev agent (no DB → no registered model). Host proxy → host.docker.internal.
+      AGENT_LLM_BASE_URL: ${AGENT_LLM_BASE_URL:-}
+      AGENT_LLM_API_KEY: ${AGENT_LLM_API_KEY:-}
+      AGENT_LLM_MODEL: ${AGENT_LLM_MODEL:-}
+    volumes:
+      - ../..:/app
+    ports:
+      - "8790:8790"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - api
+
   web:
     build:
       context: ../..
@@ -49,6 +80,8 @@ services:
     environment:
       # The web (server) → API call uses the compose network's service name.
       CONTROL_PLANE_URL: http://api:8787
+      # The web (server) proxies the assistant chat + teammates to the agent service over the compose network.
+      AGENT_URL: http://agent:8790
       # KEYCLOAK_* unset → the web runs in dev mode (no auth, x-everdict-tenant=default), and the API accepts the dev fallback.
     volumes:
       - ../..:/app
@@ -56,3 +89,4 @@ services:
       - "3001:3001"
     depends_on:
       - api
+      - agent

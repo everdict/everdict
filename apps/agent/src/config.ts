@@ -50,7 +50,14 @@ export interface AgentConfig extends z.infer<typeof ConfigSchema> {
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AgentConfig {
-  const parsed = ConfigSchema.parse(env);
+  // Treat empty-string env values as unset. Compose / `.env` pass-through writes "" for every unconfigured optional
+  // var (`${AGENT_TOOL_TIMEOUT_MS:-}` → ""), and z.coerce on "" would otherwise fail boot (Number("")→0 fails
+  // .positive(); z.enum rejects ""). This mirrors the control plane's truthiness tolerance (`process.env.X ? …`).
+  const cleaned: NodeJS.ProcessEnv = {};
+  for (const [key, value] of Object.entries(env)) {
+    if (value !== "") cleaned[key] = value;
+  }
+  const parsed = ConfigSchema.parse(cleaned);
   const mcpUrl = parsed.EVERDICT_MCP_URL ?? `${parsed.CONTROL_PLANE_URL.replace(/\/$/, "")}/mcp`;
   return { ...parsed, mcpUrl };
 }

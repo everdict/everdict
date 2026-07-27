@@ -58,11 +58,49 @@ services:
       # Needed only when the local backend runs the claude-code harness in-process (can be replaced by tenant secrets).
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
+      # Proactive teammates (S4): where + how the api pushes run/scorecard completions to the agent service so a
+      # creator's watching teammates wake. AGENT_INTERNAL_TOKEN must match the agent service (x-internal-token).
+      AGENT_SERVICE_URL: http://agent:8790
+      AGENT_INTERNAL_TOKEN: ${AGENT_INTERNAL_TOKEN:-}
     depends_on:
       postgres:
         condition: service_healthy
     ports:
       - "${API_PORT:-8787}:8787"
+    restart: unless-stopped
+
+  # ── Conversational agent (@everdict/agent, Fastify :8790) — the assistant behind the web chat + teammates ────
+  # Needs a MODEL to answer: set AGENT_MODEL (a registered workspace model; requires EVERDICT_SECRETS_KEY to decrypt
+  # its provider key) OR AGENT_LLM_* (a raw OpenAI-compatible endpoint). With neither the agent fails fast on boot —
+  # web/api are unaffected (they do not wait on its health), only the chat is down until a model is configured.
+  agent:
+    image: ghcr.io/everdict/everdict-agent:${EVERDICT_VERSION:-latest}
+    build:
+      context: ../..
+      dockerfile: apps/agent/Dockerfile
+      target: runtime
+    environment:
+      PORT: "8790"
+      CONTROL_PLANE_URL: http://api:8787
+      DATABASE_URL: postgresql://${POSTGRES_USER:-everdict}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-everdict}
+      EVERDICT_SECRETS_KEY: ${EVERDICT_SECRETS_KEY:-}
+      # Model — set one (see the block comment above).
+      AGENT_MODEL: ${AGENT_MODEL:-}
+      AGENT_LLM_BASE_URL: ${AGENT_LLM_BASE_URL:-}
+      AGENT_LLM_API_KEY: ${AGENT_LLM_API_KEY:-}
+      AGENT_LLM_MODEL: ${AGENT_LLM_MODEL:-}
+      # Proactive teammates — must equal the api's AGENT_INTERNAL_TOKEN.
+      AGENT_INTERNAL_TOKEN: ${AGENT_INTERNAL_TOKEN:-}
+      # Optional: eval-driving (HITL/RBAC-gated) + built-in web_search.
+      AGENT_ALLOW_EVAL_DRIVE: ${AGENT_ALLOW_EVAL_DRIVE:-}
+      AGENT_WEBSEARCH_API_KEY: ${AGENT_WEBSEARCH_API_KEY:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "${AGENT_PORT:-8790}:8790"
     restart: unless-stopped
 
   web:
@@ -75,8 +113,11 @@ services:
     environment:
       # The web (server) → API call uses the compose network's service name. KEYCLOAK_* unset → operates as tenant=default.
       CONTROL_PLANE_URL: http://api:8787
+      # The web (server) proxies the assistant chat + teammates to the agent service over the compose network.
+      AGENT_URL: http://agent:8790
     depends_on:
       - api
+      - agent
     ports:
       - "${WEB_PORT:-3001}:3001"
     restart: unless-stopped
