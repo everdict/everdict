@@ -20,6 +20,14 @@ export const scheduleRunTemplateSchema = z.object({
       windowHours: z.number(),
     })
     .optional(),
+  // report mode — a headless agent analysis turn over a saved View, ending in a report artifact pinned to it.
+  report: z
+    .object({
+      view: z.string(),
+      instructions: z.string().optional(),
+      compare: z.enum(['previous-period']).optional(),
+    })
+    .optional(),
   judges: z.array(z.object({ id: z.string(), version: z.string() })).default([]),
   runtime: z.string().optional(),
   concurrency: z.number().optional(),
@@ -46,6 +54,7 @@ export const scheduleSchema = z.object({
   lastFiredAt: z.string().optional(),
   lastStatus: z.string().optional(),
   lastScorecardId: z.string().optional(),
+  lastArtifactId: z.string().optional(), // report mode — the previous fire's report artifact
   // the authoritative next fire time computed by Temporal (ISO). The control plane attaches it via the driver —
   // if absent (Temporal not deployed) the web approximates from cron. Not stored·read-only.
   nextFireTimes: z.array(z.string()).optional(),

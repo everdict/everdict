@@ -190,11 +190,17 @@ cover the 80% (pivot + charts + reports) with zero new attack surface.
   markdown ReportView, per-kind spec validation with graceful fallback; `ViewArtifactGallery` as a server
   component over `agentPlane.listViewArtifacts`) rendered on `/views/[id]`; `report_completed` bell
   kind + `link.artifactId` mirrored (the drift guard caught it, as designed); `analysisArtifacts` i18n
-  namespace (en/ko). **Remaining for full V3:** artifact cards in the agent-chat transcript (live SSE
-  `artifact` event consumption — deferred while the transcript UI was under concurrent rework), the
+  namespace (en/ko). **Second cut:** the view-page **Report schedules section**
+  (`features/view-report-schedule` — lists this view's report-mode schedules in place with run-now/
+  pause/delete row actions, and a member-gated create dialog with cadence presets [weekly/daily/monthly/
+  custom cron], standing instructions, and the previous-period compare toggle; server actions over the
+  existing schedule surface — one scheduling engine, surfaced where the report lives). The web schedule
+  mirror gained `runTemplate.report` + `lastArtifactId` (optional-field additions slip past a structural
+  drift guard, so mirror them deliberately). **Remaining for full V3:** artifact cards in the agent-chat
+  transcript (live SSE `artifact` event consumption — the transcript UI is under concurrent rework), the
   `apply_view_config` host tool + `view_config` SSE + live canvas apply, a web pin/unpin action,
-  `/views` card thumbnails + last-report time, view-linked sessions (`viewId` on AgentSession + the
-  view-context preamble), and the view-page "Report" tab that creates the report schedule underneath.
+  `/views` card thumbnails + last-report time, and view-linked sessions (`viewId` on AgentSession + the
+  view-context preamble).
 - **V4 — scheduled reports. ✅ LANDED (backend; web form → V3 batch).** Third `ScheduleRunTemplate` kind
   `{report: {view, instructions?, compare?: "previous-period"}}` (exactly-one-mode refine, DTO + MCP
   `create_schedule report_view/…` parity); `ScheduleService.fire` report branch → the `AgentReportRunner`

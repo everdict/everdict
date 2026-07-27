@@ -2933,6 +2933,36 @@
     "newTag": "New tag",
     "tag": "Tag"
   },
+  "viewReportSchedule": {
+    "title": "Report schedules",
+    "emptyHint": "No report schedule yet — create one and the agent will analyze this view on a cadence and pin a markdown report below.",
+    "paused": "Paused",
+    "comparesPrevious": "compares vs previous period",
+    "lastStatus": "last: {status}",
+    "runNow": "Run now",
+    "running": "Running…",
+    "pause": "Pause",
+    "resume": "Resume",
+    "remove": "Delete",
+    "actionFailed": "The action failed.",
+    "newSchedule": "New report schedule",
+    "dialogTitle": "Schedule a report for this view",
+    "dialogDescription": "On each fire, the Everdict agent analyzes this view's data and pins a markdown report to it. You'll get a notification when it's ready.",
+    "nameLabel": "Name",
+    "namePlaceholder": "Weekly pass-rate report",
+    "cadenceLabel": "Cadence",
+    "preset_weekly": "Weekly (Mon 09:00)",
+    "preset_daily": "Daily (09:00)",
+    "preset_monthly": "Monthly (1st, 09:00)",
+    "preset_custom": "Custom cron",
+    "cronLabel": "Cron expression (5 fields)",
+    "instructionsLabel": "Standing instructions (optional)",
+    "instructionsPlaceholder": "e.g. Focus on the judge metric and call out any harness that regressed.",
+    "compareLabel": "Compare against the previous period",
+    "cancel": "Cancel",
+    "create": "Create schedule",
+    "creating": "Creating…"
+  },
   "viewsPage": {
     "title": "Views",
     "description": "Save analyses you check often and reopen them with fresh data every time.",
@@ -3130,8 +3160,14 @@
       "confirmStop": "Confirm stop",
       "cancel": "Cancel",
       "kind": {
-        "run": { "completed": "Run completed", "failed": "Run failed" },
-        "scorecard": { "completed": "Scorecard completed", "failed": "Scorecard failed" }
+        "run": {
+          "completed": "Run completed",
+          "failed": "Run failed"
+        },
+        "scorecard": {
+          "completed": "Scorecard completed",
+          "failed": "Scorecard failed"
+        }
       }
     },
     "suggestions": [

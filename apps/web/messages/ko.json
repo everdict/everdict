@@ -2933,6 +2933,36 @@
     "newTag": "새 태그",
     "tag": "태그"
   },
+  "viewReportSchedule": {
+    "title": "리포트 예약",
+    "emptyHint": "아직 리포트 예약이 없습니다. 예약을 만들면 에이전트가 주기적으로 이 뷰를 분석해 아래에 마크다운 리포트를 고정합니다.",
+    "paused": "일시정지됨",
+    "comparesPrevious": "이전 기간과 비교",
+    "lastStatus": "최근: {status}",
+    "runNow": "지금 실행",
+    "running": "실행 중…",
+    "pause": "일시정지",
+    "resume": "재개",
+    "remove": "삭제",
+    "actionFailed": "작업에 실패했습니다.",
+    "newSchedule": "리포트 예약 만들기",
+    "dialogTitle": "이 뷰의 리포트 예약",
+    "dialogDescription": "예약이 실행될 때마다 Everdict 에이전트가 이 뷰의 데이터를 분석해 마크다운 리포트를 고정합니다. 준비되면 알림을 받습니다.",
+    "nameLabel": "이름",
+    "namePlaceholder": "주간 통과율 리포트",
+    "cadenceLabel": "주기",
+    "preset_weekly": "매주 (월 09:00)",
+    "preset_daily": "매일 (09:00)",
+    "preset_monthly": "매월 (1일 09:00)",
+    "preset_custom": "커스텀 cron",
+    "cronLabel": "Cron 식 (5필드)",
+    "instructionsLabel": "상시 지침 (선택)",
+    "instructionsPlaceholder": "예: judge 지표 중심으로, 회귀한 하네스를 짚어주세요.",
+    "compareLabel": "이전 기간과 비교하기",
+    "cancel": "취소",
+    "create": "예약 만들기",
+    "creating": "만드는 중…"
+  },
   "viewsPage": {
     "title": "뷰",
     "description": "자주 보는 분석을 저장해 두고, 열 때마다 최신 데이터로 다시 봐요.",
@@ -3130,8 +3160,14 @@
       "confirmStop": "중지 확인",
       "cancel": "취소",
       "kind": {
-        "run": { "completed": "실행 완료", "failed": "실행 실패" },
-        "scorecard": { "completed": "스코어카드 완료", "failed": "스코어카드 실패" }
+        "run": {
+          "completed": "실행 완료",
+          "failed": "실행 실패"
+        },
+        "scorecard": {
+          "completed": "스코어카드 완료",
+          "failed": "스코어카드 실패"
+        }
       }
     },
     "suggestions": [

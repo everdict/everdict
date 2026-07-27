@@ -7,6 +7,7 @@ import { MentionInChatButton } from '@/widgets/infra-panel'
 import { ViewArtifactGallery } from '@/features/analysis-artifacts'
 import { CustomAnalyzer, loadAnalysisData, storedToConfig } from '@/features/analyze-scorecards'
 import { CommentsSection } from '@/features/discuss'
+import { ViewReportSchedules } from '@/features/view-report-schedule'
 import { buttonVariants } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
 import { EmptyState } from '@/shared/ui/empty-state'
@@ -65,6 +66,9 @@ export default async function ViewPage({
           activeViewId={view.id}
         />
       )}
+
+      {/* Report schedules for THIS view — "every Monday, report this view's movement" (analysis-studio V3/V4). */}
+      <ViewReportSchedules viewId={id} canManage={canManage} />
 
       {/* Pinned analysis artifacts — scheduled reports + agent-pinned charts/tables (analysis-studio V3). */}
       <ViewArtifactGallery viewId={id} />
