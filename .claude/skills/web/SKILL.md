@@ -79,6 +79,14 @@ near-black `#08090a` dark surface). Light+dark via the `.dark` class (`@custom-v
   (`everdict:left-nav` → left router); infra links stay in-iframe. Deep entries = `useInfraPanel().openRun/
   openRuntime/openSchedule` (iframe `src` is frozen at first mount — deep-opens go through
   `contentWindow.location`, never the src prop, or React would undo the user's in-iframe navigation).
+  Panel lifecycle: iframes persist across TAB SWITCHES only — CLOSING the panel discards them (user decision:
+  reopen = fresh per-tab render, and the recovery gesture for stuck frames). The header back button walks a
+  parent-tracked per-tab stack fed by `everdict:frame-nav` reports — never `history.back()` (joint session
+  history would undo LEFT-side navigation). Theme: the parent is the single authority — framed docs adopt its
+  `html.dark` at load (layout inline script) and `EmbedShell` mirrors it live via MutationObserver; never give
+  a framed page its own theme computation. Auth: a dead session must never render sign-in inside the panel —
+  middleware 401-escapes embed requests, and the [workspace] layout renders `FrameEscape` (top-window escape)
+  for the principal-null case the middleware can't see.
 - **Secret-name inputs** are never free text — use `SecretPicker` from `features/pick-secret`
   (combobox over preloaded names + "new" inline create; `defaultMultiline` for PEM/kubeconfig).
   Used by harness env, GHE App private key, Mattermost tokens.

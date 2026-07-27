@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   Activity,
+  ArrowLeft,
   CalendarClock,
   ChevronsRight,
   Play,
@@ -28,10 +29,12 @@ import { WorkTab } from './work-tab'
 //
 // The page tabs (schedules · runtimes · runs) host the REAL routed pages in same-origin iframes rendered
 // chrome-less by the [workspace] layout (sec-fetch-dest=iframe → EmbedShell) — full existing screens, not
-// re-implemented summaries. Each iframe owns its history (independent right-side navigation) and stays mounted
-// once opened, so switching tabs or navigating the left half never interrupts a live view. Eval-axis links
-// inside an iframe post back here (everdict:left-nav) and navigate the LEFT router instead. The work tab stays
-// purpose-built (the queue snapshot has no full page).
+// re-implemented summaries. Each iframe owns its navigation (independent right side) and stays mounted across
+// TAB SWITCHES while the panel is open, so flipping tabs or navigating the left half never interrupts a live
+// view; CLOSING the panel discards the page iframes, so reopening renders each tab fresh. The header back
+// button walks a parent-tracked per-tab stack (everdict:frame-nav reports). Eval-axis links inside an iframe
+// post back here (everdict:left-nav) and navigate the LEFT router instead. The work tab stays purpose-built
+// (the queue snapshot has no full page).
 
 const TAB_META: Record<InfraTab, { icon: LucideIcon }> = {
   schedules: { icon: CalendarClock },
@@ -75,23 +78,45 @@ export function InfraPanel({ user }: { user?: ChatUser } = {}) {
     consumePendingMention,
   } = useInfraPanel()
   const frames = useRef<Partial<Record<PageTab, HTMLIFrameElement | null>>>({})
-  // Tabs whose iframe has been opened at least once — kept mounted (hidden) afterward so each tab's in-iframe
-  // navigation state and live streams survive tab switches and panel collapse. The initial src is frozen per
+  // Tabs whose iframe is currently open — kept mounted (hidden) across TAB SWITCHES so a tab's in-iframe
+  // navigation state and live streams survive while the panel stays open. The initial src is frozen per
   // tab at first mount (ref, not a prop off live state) — React must never rewrite src on re-render, or it
   // would undo the user's own in-iframe navigation.
   const [mountedTabs, setMountedTabs] = useState<PageTab[]>([])
   const initialSrc = useRef<Partial<Record<PageTab, string>>>({})
+  // Per-tab navigation stacks (workspace-relative paths, current page last) — fed by everdict:frame-nav
+  // reports from EmbedShell, consumed by the header back button.
+  const [stacks, setStacks] = useState<Partial<Record<PageTab, string[]>>>({})
+  // Deep-open requests already applied — a stale frameRequest must not resurrect an old deep target when a
+  // tab remounts after the panel was closed (reopen = the tab's home, unless a NEW request arrived).
+  const consumedFrameSeq = useRef(0)
   const everOpened = useRef(false)
   if (open) everOpened.current = true
 
   useEffect(() => {
     if (open && isPageTab(tab) && !mountedTabs.includes(tab)) {
       // A pending deep-open for this tab becomes its first document; otherwise the tab's home page.
-      initialSrc.current[tab] =
-        frameRequest && frameRequest.tab === tab ? frameRequest.path : HOME_PATH[tab]
+      const pending =
+        frameRequest && frameRequest.tab === tab && frameRequest.seq > consumedFrameSeq.current
+          ? frameRequest
+          : null
+      if (pending) consumedFrameSeq.current = pending.seq
+      initialSrc.current[tab] = pending ? pending.path : HOME_PATH[tab]
       setMountedTabs((prev) => [...prev, tab])
     }
   }, [open, tab, mountedTabs, frameRequest])
+
+  // Closing the panel DISCARDS the page iframes (user decision: reopen = a fresh render per tab). Reopening
+  // remounts the active tab's page from scratch — a clean, correctly-themed document — which also makes
+  // close→reopen a reliable recovery gesture for any stuck frame. The work/agent tabs keep their state
+  // (a conversation must survive a collapse).
+  useEffect(() => {
+    if (open || mountedTabs.length === 0) return
+    setMountedTabs([])
+    setStacks({})
+    initialSrc.current = {}
+    frames.current = {}
+  }, [open, mountedTabs])
 
   // Deep-open requests (openRun/openRuntime/openSchedule) into an ALREADY-mounted iframe — applied
   // imperatively via contentWindow (first mounts consume the request through initialSrc instead).
@@ -99,6 +124,7 @@ export function InfraPanel({ user }: { user?: ChatUser } = {}) {
     if (!frameRequest || !isPageTab(frameRequest.tab)) return
     const el = frames.current[frameRequest.tab]
     if (!el) return
+    consumedFrameSeq.current = frameRequest.seq
     const target = withEmbed(`/${workspace}${frameRequest.path}`)
     try {
       el.contentWindow?.location.replace(target)
@@ -106,6 +132,40 @@ export function InfraPanel({ user }: { user?: ChatUser } = {}) {
       el.src = target
     }
   }, [frameRequest, workspace])
+
+  // '/{workspace}/runs/x?y' → '/runs/x?y' — the workspace-relative form HOME_PATH and the stacks use.
+  const toRelative = useCallback(
+    (href: string) => {
+      const prefix = `/${workspace}`
+      if (href === prefix) return '/'
+      return href.startsWith(`${prefix}/`) ? href.slice(prefix.length) : href
+    },
+    [workspace]
+  )
+
+  // Header back button — navigate the ACTIVE tab's iframe to the previous entry in its own stack (or its
+  // home page as the final fallback, so a deep-opened detail is never a dead end). Deliberately NOT
+  // history.back(): an iframe shares the top-level joint session history, so going "back" there could undo
+  // the user's LEFT-side navigation instead of this frame's. A hard replace also recovers foreign/stuck
+  // documents that a soft in-frame navigation could never leave.
+  const activeStack = isPageTab(tab) ? (stacks[tab] ?? []) : []
+  const canGoBack =
+    isPageTab(tab) &&
+    (activeStack.length > 1 || (activeStack.length === 1 && activeStack[0] !== HOME_PATH[tab]))
+  const goBack = useCallback(() => {
+    if (!isPageTab(tab)) return
+    const stack = stacks[tab] ?? []
+    const target = (stack.length > 1 ? stack[stack.length - 2] : undefined) ?? HOME_PATH[tab]
+    setStacks((prev) => ({ ...prev, [tab]: (prev[tab] ?? []).slice(0, -1) }))
+    const el = frames.current[tab]
+    if (!el) return
+    const href = withEmbed(`/${workspace}${target}`)
+    try {
+      el.contentWindow?.location.replace(href)
+    } catch {
+      el.src = href
+    }
+  }, [tab, stacks, workspace])
 
   // Eval-axis links clicked inside an iframe (EmbedShell postMessage) → navigate the LEFT half.
   const onNavigate = useCallback(() => {
@@ -128,15 +188,33 @@ export function InfraPanel({ user }: { user?: ChatUser } = {}) {
         if (parsed.success) mentionInChat(parsed.data)
         return
       }
+      // An iframe landed on an infra route (EmbedShell report) — record it on that tab's back stack.
+      if (data?.type === 'everdict:frame-nav' && typeof data.href === 'string') {
+        const href = data.href
+        for (const pageTab of PAGE_TABS) {
+          const frameWindow = frames.current[pageTab]?.contentWindow
+          if (frameWindow && frameWindow === e.source) {
+            const rel = toRelative(href)
+            setStacks((prev) => {
+              const stack = prev[pageTab] ?? []
+              if (stack[stack.length - 1] === rel) return prev
+              return { ...prev, [pageTab]: [...stack.slice(-49), rel] }
+            })
+            break
+          }
+        }
+        return
+      }
       if (data?.type === 'everdict:left-nav' && typeof data.href === 'string') {
         router.push(data.href)
         onNavigate()
         // A bounced document (a non-infra page that got INTO an iframe) — the panel is infra-only, so send
-        // that iframe back to its tab's home page.
+        // that iframe back to its tab's home page (and restart its back stack there).
         if (data.bounce) {
           for (const pageTab of PAGE_TABS) {
             const frameWindow = frames.current[pageTab]?.contentWindow
             if (frameWindow && frameWindow === e.source) {
+              setStacks((prev) => ({ ...prev, [pageTab]: [] }))
               frameWindow.location.replace(withEmbed(`/${workspace}${HOME_PATH[pageTab]}`))
               break
             }
@@ -146,7 +224,7 @@ export function InfraPanel({ user }: { user?: ChatUser } = {}) {
     }
     window.addEventListener('message', onMessage)
     return () => window.removeEventListener('message', onMessage)
-  }, [router, onNavigate, workspace, mentionInChat])
+  }, [router, onNavigate, workspace, mentionInChat, toRelative])
 
   // A server-resolved per-device preference (locale / timezone) changed in the parent. The mounted iframes read
   // it server-side off the cookie and stay frozen, so router.refresh() in the switcher never reaches their
@@ -195,6 +273,17 @@ export function InfraPanel({ user }: { user?: ChatUser } = {}) {
         <div className="flex h-full flex-col overflow-hidden rounded-xl border border-border bg-background shadow-pop">
           <div className="flex items-center justify-between gap-2 border-b border-border px-3.5 py-2.5">
             <div className="flex min-w-0 items-center gap-2">
+              {isPageTab(tab) && (
+                <button
+                  type="button"
+                  aria-label={t('back')}
+                  onClick={goBack}
+                  disabled={!canGoBack}
+                  className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-35"
+                >
+                  <ArrowLeft className="size-4" />
+                </button>
+              )}
               <Icon className="size-4 shrink-0 text-primary" strokeWidth={1.75} />
               <h2 className="truncate text-[14px] font-[560] tracking-[-0.01em]">
                 {t(`tab_${tab}`)}

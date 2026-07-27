@@ -29,6 +29,44 @@ export function EmbedShell({ children }: { children: ReactNode }) {
     return () => window.removeEventListener('message', onMessage)
   }, [router])
 
+  // Theme: the PARENT is the only authority. The layout's inline script adopts its class once at document
+  // load; this observer keeps the adoption LIVE for the document's whole lifetime, so the framed page can
+  // never drift from the app around it. (The storage-event path alone is racy: it doesn't fire for same-value
+  // writes or when localStorage is blocked, and cross-document dispatch order can adopt a stale parent class.)
+  useEffect(() => {
+    if (window.self === window.top) return
+    let parentRoot: HTMLElement
+    try {
+      parentRoot = window.parent.document.documentElement
+    } catch {
+      return // cross-origin parent (embedded outside the app) — keep the self-computed theme
+    }
+    const own = document.documentElement
+    const adopt = () => {
+      const dark = parentRoot.classList.contains('dark')
+      own.classList.toggle('dark', dark)
+      own.style.colorScheme = dark ? 'dark' : 'light'
+    }
+    adopt()
+    const observer = new MutationObserver(adopt)
+    observer.observe(parentRoot, { attributes: true, attributeFilter: ['class'] })
+    return () => observer.disconnect()
+  }, [])
+
+  // Report every infra route this frame lands on — the parent panel keeps a per-tab stack that powers the
+  // panel header's back button (detail pages inside the panel have no back affordance of their own).
+  useEffect(() => {
+    if (window.self === window.top) return
+    const segment = pathname.split('/')[2] ?? ''
+    if (!INFRA_SEGMENTS.has(segment)) return // non-infra documents are handled by the bounce guard below
+    const url = new URL(window.location.href)
+    url.searchParams.delete('embed')
+    window.parent.postMessage(
+      { type: 'everdict:frame-nav', href: url.pathname + url.search },
+      window.location.origin
+    )
+  }, [pathname])
+
   // Bounce guard — if a NON-infra page ends up inside the panel's iframe anyway (a pre-hydration click beats
   // the interceptor below, a redirect, a programmatic push, …), forward it to the parent so the LEFT half
   // shows the real page (e.g. the sidebar's desktop-download page) and let the panel reset this iframe.

@@ -115,10 +115,20 @@ panel/list guidance is not.
   chrome-less — the [workspace] layout passes an embed hint (sec-fetch-dest=iframe, only sent on trustworthy
   origins, OR the panel's `?embed=1` promoted to `x-everdict-embed` by the middleware) to `ShellSwitch`
   (client), whose framed decision is STICKY because the dynamic layout re-renders on soft nav without those
-  signals; `EmbedShell` renders the page bare. Each iframe owns its history (fully independent right-side
-  navigation: list → detail → back, live 20s cluster polling, run detail with trace/logs/screen — the full
-  existing screens) and stays mounted once opened, so tab switches and left-side navigation never interrupt a
-  live view. Eval-axis links clicked inside an iframe (anything but runs/runtimes/schedules) are intercepted by
+  signals; `EmbedShell` renders the page bare. Each iframe owns its navigation (fully independent right-side
+  navigation: list → detail, live 20s cluster polling, run detail with trace/logs/screen — the full existing
+  screens) and stays mounted across TAB SWITCHES while the panel is open, so flipping tabs or navigating the
+  left half never interrupts a live view; CLOSING the panel discards the page iframes, so reopening renders
+  each tab fresh (also the recovery gesture for any stuck frame). The panel header's **back button** walks a
+  parent-tracked per-tab path stack (`EmbedShell` reports infra routes via `everdict:frame-nav`; back = a hard
+  `contentWindow.location.replace` to the previous entry, home as the final fallback) — NEVER
+  `history.back()`, which traverses the top-level joint session history and could undo a left-side navigation.
+  Framed pages never compute their own theme: the layout's inline script adopts the parent's `html.dark` at
+  load and `EmbedShell` mirrors it live via a MutationObserver (the parent is the single theme authority). A
+  dead session never renders the sign-in flow inside the panel: the middleware 401-escapes embed requests, and
+  the [workspace] layout covers the remaining case (session cookie decodes but the control-plane exchange
+  fails → `FrameEscape` sends the TOP window to sign-in instead of redirecting the iframe).
+  Eval-axis links clicked inside an iframe (anything but runs/runtimes/schedules) are intercepted by
   `EmbedShell` and posted to the parent (`everdict:left-nav`) → the LEFT router navigates instead. Deep entries
   `useInfraPanel().openRun/openRuntime/openSchedule` point the tab's iframe at the entity's real page. The
   **work** tab stays purpose-built (no full page): the queue snapshot per-runtime lanes (default backend ·

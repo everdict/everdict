@@ -2984,7 +2984,8 @@
     "tab_runs": "Runs",
     "tab_work": "Work",
     "tab_agent": "Agent",
-    "collapse": "Collapse panel"
+    "collapse": "Collapse panel",
+    "back": "Back"
   },
   "agentManager": {
     "instructions": "Instructions",
