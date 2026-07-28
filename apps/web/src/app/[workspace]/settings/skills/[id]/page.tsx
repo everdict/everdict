@@ -11,13 +11,14 @@ import { fmtSubject } from '@/shared/lib/format'
 import { controlPlane } from '@/shared/lib/control-plane'
 import { EmptyState } from '@/shared/ui/empty-state'
 import { PageHeader } from '@/shared/ui/page-header'
-import { AskAgentButton, MentionInChatButton } from '@/widgets/infra-panel'
+import { MentionInChatButton } from '@/widgets/infra-panel'
 
 export const dynamic = 'force-dynamic'
 
-// Workspace › Skills › 상세 — SKILL.md 본문 + 부속 파일 열람. 편집의 주 경로는 "에이전트로 편집": 우측 대화 패널을
-// 이 스킬 @참조 + 프리필 프롬프트로 열어, 에이전트가 get_skill/update_skill 로 검토·수정한다(HITL 승인). 수동 편집
-// 다이얼로그는 보조 경로. 비공개 스킬은 작성자 외 404(컨트롤플레인이 강제).
+// Workspace › Skills › 상세 — SKILL.md 본문 + 부속 파일 열람. 편집의 주 경로는 "대화로 편집하기": 우측 대화 패널을
+// 열고(닫혀 있으면) 이 스킬 @참조만 떨어뜨린다 — 프리필 프롬프트 없이, 무엇을 고칠지는 사용자가 말한다(에이전트가
+// get_skill/update_skill 로 검토·수정, HITL 승인). 수동 편집 다이얼로그는 보조 경로. 비공개 스킬은 작성자 외
+// 404(컨트롤플레인이 강제).
 export default async function SkillDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
   const t = await getTranslations('skillsManager')
@@ -55,8 +56,7 @@ export default async function SkillDetailPage({ params }: { params: Promise<{ id
     // 모델 미등록/권한 없음 — 편집 다이얼로그의 AI 위저드만 비활성.
   }
 
-  // 대화 패널 진입 2종 — 참조만 떨어뜨리는 "대화에서 분석"(모두)과, 편집 프롬프트까지 프리필하는
-  // "에이전트로 편집"(관리 가능자만). 위젯 버튼은 앱 레이어가 조립해 feature 에 내려준다.
+  // 대화 패널 진입은 "대화로 편집하기" 하나 — 참조 칩만 떨어뜨린다. 위젯 버튼은 앱 레이어가 조립해 feature 에 내려준다.
   const reference = { type: 'skill' as const, id: skill.id, label: skill.name }
   return (
     <div className="space-y-6">
@@ -68,19 +68,7 @@ export default async function SkillDetailPage({ params }: { params: Promise<{ id
         canPublish={can(principal?.roles, 'capabilities:write')}
         isAdmin={isAdmin}
         modelIds={modelIds}
-        actions={
-          <>
-            <MentionInChatButton reference={reference} />
-            {canManage && (
-              <AskAgentButton
-                variant="primary"
-                label={t('editWithAgent')}
-                prompt={t('editWithAgentPrompt', { name: skill.name })}
-                reference={reference}
-              />
-            )}
-          </>
-        }
+        actions={<MentionInChatButton reference={reference} label={t('editInChat')} />}
       />
     </div>
   )

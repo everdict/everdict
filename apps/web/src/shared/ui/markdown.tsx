@@ -1,11 +1,14 @@
 import type { ReactNode } from 'react'
 
 import { cn } from '@/shared/lib/utils'
+import { MermaidDiagram } from '@/shared/ui/mermaid'
 
 // Dependency-free lightweight markdown viewer — parses text into React elements (no dangerouslySetInnerHTML → XSS-safe).
 // Supports: headings(#~######) · code fences(```) · blockquotes(>) · lists(-/*/+·1.) · GFM tables · horizontal rules ·
 // paragraphs (line breaks preserved) / inline: `code` · **bold** · *italic* · [text](url).
 // Advanced syntax like nested lists is surfaced as raw source.
+// Opt-in `mermaid`: renders ```mermaid fences as diagrams (shared/ui/mermaid, falls back to the raw fence on
+// parse failure). Off by default — streaming surfaces (agent chat) re-parse on every chunk, so callers choose.
 
 // Inline parsing — by priority (code > bold > link > italic), substitute the earliest token first, handling nesting recursively.
 function parseInline(text: string, key: string): ReactNode[] {
@@ -106,7 +109,15 @@ function isTableSeparator(line: string, columns: number): boolean {
   return cells.length === columns && cells.every((c) => /^:?-+:?$/.test(c))
 }
 
-export function Markdown({ content, className }: { content: string; className?: string }) {
+export function Markdown({
+  content,
+  className,
+  mermaid = false,
+}: {
+  content: string
+  className?: string
+  mermaid?: boolean
+}) {
   const lines = content.replace(/\r\n/g, '\n').split('\n')
   const blocks: ReactNode[] = []
   let i = 0
@@ -116,6 +127,7 @@ export function Markdown({ content, className }: { content: string; className?: 
     const line = lines[i]
 
     if (/^```/.test(line.trim())) {
+      const lang = line.trim().slice(3).trim().toLowerCase()
       const buf: string[] = []
       i++
       while (i < lines.length && !/^```/.test(lines[i].trim())) {
@@ -124,12 +136,16 @@ export function Markdown({ content, className }: { content: string; className?: 
       }
       i++ // closing fence
       blocks.push(
-        <pre
-          key={key++}
-          className="overflow-x-auto rounded-md border border-border bg-muted/40 p-3 font-mono text-[12px] leading-relaxed text-foreground"
-        >
-          <code>{buf.join('\n')}</code>
-        </pre>
+        mermaid && lang === 'mermaid' ? (
+          <MermaidDiagram key={key++} chart={buf.join('\n')} />
+        ) : (
+          <pre
+            key={key++}
+            className="overflow-x-auto rounded-md border border-border bg-muted/40 p-3 font-mono text-[12px] leading-relaxed text-foreground"
+          >
+            <code>{buf.join('\n')}</code>
+          </pre>
+        )
       )
       continue
     }

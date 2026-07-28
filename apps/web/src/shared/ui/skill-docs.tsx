@@ -7,7 +7,8 @@ import { Markdown } from '@/shared/ui/markdown'
 
 // 스킬 문서 뷰어(읽기 전용) — SKILL.md 본문 + 부속 파일을 탭으로 열람한다(클로드코드 스킬 디렉토리의 재해석: 본문은
 // 문서, 파일은 온디맨드 참조자료). 스킬은 더 이상 단일 문서가 아니라 여러 파일로 구성되므로, 스토어 상세와 스킬 관리
-// 상세가 이 하나의 뷰어를 공유해 표현이 갈리지 않게 한다. .md 파일은 마크다운 렌더, 그 외는 mono raw.
+// 상세가 이 하나의 뷰어를 공유해 표현이 갈리지 않게 한다. .md 파일은 마크다운 렌더(```mermaid 펜스는 다이어그램으로),
+// 그 외는 mono raw.
 export function SkillDocs({
   instructions,
   files,
@@ -44,9 +45,9 @@ export function SkillDocs({
       )}
       <div className="p-4">
         {activeFile === undefined ? (
-          <Markdown content={instructions} className="text-[13px]" />
+          <Markdown content={instructions} mermaid className="text-[13px]" />
         ) : activeFile.path.endsWith('.md') ? (
-          <Markdown content={activeFile.content} className="text-[13px]" />
+          <Markdown content={activeFile.content} mermaid className="text-[13px]" />
         ) : (
           <pre className="overflow-x-auto whitespace-pre-wrap font-mono text-[12px] leading-relaxed text-muted-foreground">
             {activeFile.content}

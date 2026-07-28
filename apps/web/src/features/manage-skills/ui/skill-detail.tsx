@@ -15,9 +15,9 @@ import { ShareSkillToStoreDialog } from './share-skill-to-store-dialog'
 import { SkillEditorDialog } from './skills-manager'
 
 // 스킬 상세 뷰어 — SKILL.md 본문 + 부속 파일을 탭으로 열람(클러드코드 스킬 디렉토리의 재해석: 본문은 문서, 파일은 온디맨드
-// 참조자료). 편집은 두 갈래: "에이전트로 편집"(페이지가 우측 대화 패널을 프롬프트 프리필로 연다 — 주 편집 경로)과 수동 편집
-// 다이얼로그(메타/본문 직접 수정). 스토어 발행(capability 화)은 여기서 바로. actions(대화 패널 버튼들)는 앱 레이어가
-// 구성해 내려준다(FSD: feature 는 widgets 를 모른다).
+// 참조자료). 편집은 두 갈래: "대화로 편집하기"(페이지가 우측 대화 패널을 열고 이 스킬 @참조를 떨어뜨린다 — 주 편집 경로)와
+// 수동 편집 다이얼로그(메타/본문 직접 수정). 스토어 발행(capability 화)은 여기서 바로. actions(대화 패널 버튼)는 앱
+// 레이어가 구성해 내려준다(FSD: feature 는 widgets 를 모른다).
 export function SkillDetail({
   skill,
   author,
