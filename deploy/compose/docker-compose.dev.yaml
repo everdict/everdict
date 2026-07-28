@@ -28,7 +28,7 @@ x-build-args: &build-args
   CA_CERT: ${CA_CERT:-}
 
 # Corporate-network RUNTIME passthrough — dev containers `pnpm install` at start (honors these env vars), and the
-# running processes need them for outbound calls (api: installProxyDispatcher; web: instrumentation.ts). Internal
+# running processes need them for outbound calls (api/agent: installProxyDispatcher; web: instrumentation.ts). Internal
 # service names are ALWAYS appended to NO_PROXY so in-cluster calls (web→api, api→agent) never hit the corporate
 # proxy. NODE_EXTRA_CA_CERTS points at the CA the Dockerfiles bake in the base stage (set only when CA_CERT is
 # present in the deploy env at up-time).

@@ -51,8 +51,9 @@ x-build-args: &build-args
 
 # Corporate-network RUNTIME passthrough — build args above cover image builds only; the running processes need the
 # same env to reach the internet (api: installProxyDispatcher covers LLM providers / trace pull·export / GitHub App /
-# Mattermost; web: instrumentation.ts covers the desktop-releases GitHub fetch). Merged only into services whose
-# process actually honors it. Compose-internal service names are ALWAYS appended to NO_PROXY so in-cluster calls
+# Mattermost; agent: LLM providers / web search / integration actions; worker: trace pull + tenant cluster APIs;
+# web: the desktop-releases GitHub fetch — each process installs the same proxy dispatcher at boot).
+# Compose-internal service names are ALWAYS appended to NO_PROXY so in-cluster calls
 # (web→api, api→agent, api→temporal, …) never route through the corporate proxy. NODE_EXTRA_CA_CERTS points at the
 # CA the Dockerfiles bake in the base stage — interpolated only when CA_CERT is present in the deploy env at up-time.
 x-runtime-proxy-env: &runtime-proxy-env
@@ -238,6 +239,7 @@ services:
       args: *build-args
     command: ["node", "apps/cli/dist/main.js", "worker", "--temporal-address", "temporal:7233"]
     environment:
+      <<: *runtime-proxy-env
       # The worker→API bridge for scheduled fires + Temporal batches (must match the API's EVERDICT_INTERNAL_TOKEN).
       EVERDICT_API_URL: http://api:8787
       EVERDICT_INTERNAL_TOKEN: ${EVERDICT_INTERNAL_TOKEN}
@@ -266,6 +268,7 @@ services:
       target: runtime
       args: *build-args
     environment:
+      <<: *runtime-proxy-env
       PORT: "8790"
       # Identity (GET /me) + the MCP tool endpoint (<url>/mcp) both live on the control plane.
       CONTROL_PLANE_URL: http://api:8787

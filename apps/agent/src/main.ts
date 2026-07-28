@@ -36,6 +36,7 @@ import {
 } from "./model.js";
 import { meAuthenticate, viewAccessChecker } from "./principal.js";
 import { type ProfileResolver, baseProfileResolver, registryProfileResolver } from "./profile.js";
+import { installProxyDispatcher } from "./proxy-dispatcher.js";
 import { buildServer } from "./server.js";
 import { EVERDICT_AGENT_SYSTEM_PROMPT } from "./system-prompt.js";
 import { usageReporter } from "./usage.js";
@@ -54,6 +55,12 @@ function envModelFallback(config: AgentConfig): ModelResolver {
 }
 
 async function main(): Promise<void> {
+  // Proxy-aware outbound: install a global dispatcher FIRST (before any client fetches) so every outbound call
+  // (LLM providers, web search, GitHub/Mattermost integration actions) honors HTTP(S)_PROXY / NO_PROXY behind a
+  // corporate proxy. No-op when no proxy env is set.
+  const proxy = installProxyDispatcher();
+  if (proxy) console.log(`[everdict-agent] outbound proxy: ${proxy.httpsProxy ?? proxy.httpProxy} (NO_PROXY honored)`);
+
   const config = loadConfig();
 
   let sessions: AgentSessionStore;
