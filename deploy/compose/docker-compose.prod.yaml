@@ -23,6 +23,19 @@
 #      · Human SSO               → a reverse proxy such as oauth2-proxy in front, or add Keycloak back
 name: everdict-prod
 
+# Corporate-network build passthrough — `docker compose build` does NOT read the shell env for the predefined
+# proxy args (it only honors ~/.docker/config.json), so behind a proxy `up --build` failed at the first
+# apt-get/corepack step of every image. CA_CERT rides along for a TLS-intercepting proxy (the Dockerfiles'
+# existing `ARG CA_CERT` installs it). All default to empty — a no-proxy host builds byte-identically.
+x-build-args: &build-args
+  HTTP_PROXY: ${HTTP_PROXY:-}
+  HTTPS_PROXY: ${HTTPS_PROXY:-}
+  NO_PROXY: ${NO_PROXY:-}
+  http_proxy: ${http_proxy:-}
+  https_proxy: ${https_proxy:-}
+  no_proxy: ${no_proxy:-}
+  CA_CERT: ${CA_CERT:-}
+
 services:
   postgres:
     image: postgres:16-alpine
@@ -46,6 +59,7 @@ services:
       context: ../..
       dockerfile: apps/api/Dockerfile
       target: runtime
+      args: *build-args
     environment:
       PORT: "8787"
       DATABASE_URL: postgresql://${POSTGRES_USER:-everdict}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-everdict}
@@ -79,6 +93,7 @@ services:
       context: ../..
       dockerfile: apps/agent/Dockerfile
       target: runtime
+      args: *build-args
     environment:
       PORT: "8790"
       CONTROL_PLANE_URL: http://api:8787
@@ -110,6 +125,7 @@ services:
       context: ../..
       dockerfile: apps/web/Dockerfile
       target: runtime
+      args: *build-args
     environment:
       # The web (server) → API call uses the compose network's service name. KEYCLOAK_* unset → operates as tenant=default.
       CONTROL_PLANE_URL: http://api:8787

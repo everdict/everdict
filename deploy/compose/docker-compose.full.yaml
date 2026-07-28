@@ -36,6 +36,19 @@
 #      PUBLIC_HOST to a real host/IP (not `localhost`) and update realm-everdict.json redirectUris to that origin.
 name: everdict-full
 
+# Corporate-network build passthrough — `docker compose build` does NOT read the shell env for the predefined
+# proxy args (it only honors ~/.docker/config.json), so behind a proxy `up --build` failed at the first
+# apt-get/corepack step of every image. CA_CERT rides along for a TLS-intercepting proxy (the Dockerfiles'
+# existing `ARG CA_CERT` installs it). All default to empty — a no-proxy host builds byte-identically.
+x-build-args: &build-args
+  HTTP_PROXY: ${HTTP_PROXY:-}
+  HTTPS_PROXY: ${HTTPS_PROXY:-}
+  NO_PROXY: ${NO_PROXY:-}
+  http_proxy: ${http_proxy:-}
+  https_proxy: ${https_proxy:-}
+  no_proxy: ${no_proxy:-}
+  CA_CERT: ${CA_CERT:-}
+
 services:
   # ── Postgres — shared by the control-plane stores AND Temporal (separate databases in one instance) ──────────
   postgres:
@@ -99,6 +112,7 @@ services:
       context: ../..
       dockerfile: apps/api/Dockerfile
       target: runtime
+      args: *build-args
     environment:
       PORT: "8787"
       # ── Persistence: every store on Postgres; migrations apply at startup ──
@@ -205,6 +219,7 @@ services:
       context: ../..
       dockerfile: apps/cli/Dockerfile
       target: runtime
+      args: *build-args
     command: ["node", "apps/cli/dist/main.js", "worker", "--temporal-address", "temporal:7233"]
     environment:
       # The worker→API bridge for scheduled fires + Temporal batches (must match the API's EVERDICT_INTERNAL_TOKEN).
@@ -233,6 +248,7 @@ services:
       context: ../..
       dockerfile: apps/agent/Dockerfile
       target: runtime
+      args: *build-args
     environment:
       PORT: "8790"
       # Identity (GET /me) + the MCP tool endpoint (<url>/mcp) both live on the control plane.
@@ -283,6 +299,7 @@ services:
       context: ../..
       dockerfile: apps/web/Dockerfile
       target: runtime
+      args: *build-args
     environment:
       CONTROL_PLANE_URL: http://api:8787
       # The web (server) proxies the assistant chat + teammates to the agent service over the compose network.
