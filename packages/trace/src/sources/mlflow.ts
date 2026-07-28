@@ -221,6 +221,7 @@ export interface MlflowTraceSourceOptions {
   correlateTag?: string;
   experimentIds?: string[]; // search scope for tag correlation (MLflow 3.x traces/search requires locations)
   mapping?: SpanAttrMapping; // per-harness span-attribute overrides (non-GenAI-convention instrumentation)
+  artifactBaseUrl?: string; // base for ROOT-RELATIVE evidence artifact refs (else the judge gets the raw path string)
 }
 
 const RUN_ID_TAG = "everdict.run_id"; // the default correlation tag the instrumented agent writes (same value as the injected env EVERDICT_RUN_ID)
@@ -235,18 +236,10 @@ const MODEL_ENRICH_CONCURRENCY = 6;
 export class MlflowTraceSource implements BrowsableTraceSource {
   constructor(private readonly opts: MlflowTraceSourceOptions) {}
 
-  private async traceIdByTag(runId: string): Promise<string | undefined> {
+  // One traces/search call with the given filter clause → the first trace_id (or undefined on no match).
+  private async searchTraceId(experiments: string[], filter: string): Promise<string | undefined> {
     const f = this.opts.fetchImpl ?? fetch;
     const base = this.opts.endpoint.replace(/\/$/, "");
-    const experiments = this.opts.experimentIds ?? [];
-    if (experiments.length === 0) {
-      throw new UpstreamError(
-        "UPSTREAM_ERROR",
-        { correlate: "tag" },
-        "MLflow tag correlation requires an experiment scope (traces/search requires locations).",
-      );
-    }
-    const tag = this.opts.correlateTag ?? RUN_ID_TAG; // controlled-coordinate tag override (e.g. mlflow.trace.session) — default everdict.run_id
     const res = await f(`${base}/api/3.0/mlflow/traces/search`, {
       method: "POST",
       headers: { "content-type": "application/json", ...(this.opts.headers ?? {}) },
@@ -255,7 +248,7 @@ export class MlflowTraceSource implements BrowsableTraceSource {
           type: "MLFLOW_EXPERIMENT",
           mlflow_experiment: { experiment_id: id },
         })),
-        filter: `tags.\`${tag}\` = '${runId.replace(/'/g, "''")}'`,
+        filter,
         max_results: 1,
       }),
     });
@@ -269,6 +262,29 @@ export class MlflowTraceSource implements BrowsableTraceSource {
     }
     const body = (await res.json().catch(() => ({}))) as { traces?: Array<{ trace_id?: string }> };
     return body.traces?.[0]?.trace_id;
+  }
+
+  private async traceIdByTag(runId: string): Promise<string | undefined> {
+    const experiments = this.opts.experimentIds ?? [];
+    if (experiments.length === 0) {
+      throw new UpstreamError(
+        "UPSTREAM_ERROR",
+        { correlate: "tag" },
+        "MLflow tag correlation requires an experiment scope (traces/search requires locations).",
+      );
+    }
+    const tag = this.opts.correlateTag ?? RUN_ID_TAG; // controlled-coordinate tag override (e.g. mlflow.trace.session) — default everdict.run_id
+    const value = runId.replace(/'/g, "''");
+    const byTag = await this.searchTraceId(experiments, `tags.\`${tag}\` = '${value}'`);
+    if (byTag) return byTag;
+    // Request-metadata fallback: some SDK paths record the correlation key in the trace's REQUEST METADATA
+    // (TraceInfo.trace_metadata — e.g. metadata attached at trace creation) instead of a tag the agent would have
+    // to PATCH afterwards. The tag search then missed a trace that IS correlatable and the pull degraded to 0
+    // events; try the metadata filter before declaring absence (one extra call, only on a tag miss).
+    const byMetadata = await this.searchTraceId(experiments, `request_metadata.\`${tag}\` = '${value}'`).catch(
+      () => undefined, // a server too old for the metadata filter grammar must not break the (authoritative) tag path
+    );
+    return byMetadata;
   }
 
   // GET the trace by its (server-minted) trace_id and parse to Span[]. Absent/unparseable → 0 spans (flush lag).
@@ -356,6 +372,7 @@ export class MlflowTraceSource implements BrowsableTraceSource {
       this.opts.fetchImpl ?? fetch,
       this.opts.headers,
       this.opts.endpoint,
+      this.opts.artifactBaseUrl,
     );
     return {
       events: withEvidenceEvents(spansToTraceEvents(spans, m), evidence),
@@ -372,6 +389,7 @@ export class MlflowTraceSource implements BrowsableTraceSource {
       this.opts.fetchImpl ?? fetch,
       this.opts.headers,
       this.opts.endpoint,
+      this.opts.artifactBaseUrl,
     );
     const provenance = provenanceFromSpans(spans); // span attrs carry everdict.scorecard_id/harness (OTLP)
     return {

@@ -171,6 +171,13 @@ const ARTIFACT_KEYS = {
   role: ["artifact.role"],
 } as const;
 
+// Does the span's DECLARED kind say "tool" (mlflow.spanType=TOOL, openinference TOOL/FUNCTION, …)? The kind-driven
+// twin of the attribute-driven toolName detection — langfuse/langsmith/phoenix already branch on their native kinds.
+function declaredKindIsTool(a: Record<string, unknown>): boolean {
+  const declared = pickStr(a, SPAN_KIND_KEYS)?.toUpperCase();
+  return declared !== undefined && (declared.includes("TOOL") || declared.includes("FUNCTION"));
+}
+
 // First defined string among a field's mapping-override keys then its defaults.
 function pickStr(a: Record<string, unknown>, keys: readonly string[]): string | undefined {
   for (const k of keys) {
@@ -255,6 +262,22 @@ export function spansToTraceEvents(spans: Span[], mapping?: SpanAttrMapping): Tr
       out.push({ t, kind: "tool_call", id, name: toolName, args: firstDefined(a, keys.toolArgs) });
       const ok = a["tool.error"] === undefined && a.error === undefined;
       out.push({ t: s.endMs - base, kind: "tool_result", id, ok, output: pickStr(a, keys.toolResult) ?? "" });
+    } else if (declaredKindIsTool(a)) {
+      // TOOL-kind spans WITHOUT gen_ai/tool.* attrs (mlflow.spanType=TOOL, openinference TOOL/FUNCTION, …): the
+      // platform DECLARES the span a tool step even when no attribute carries a tool name. These used to demote to
+      // a generic `span` event — the inspect waterfall showed "tool" while the judge-facing TraceEvents said
+      // "span", so the judge saw NO tool actions at all for such harnesses. Name = the span itself; args/result
+      // fall back to the platform's generic I/O channels.
+      const id = pickStr(a, keys.toolCallId) ?? `${s.name}-${i}`;
+      out.push({ t, kind: "tool_call", id, name: s.name, args: firstDefined(a, [...keys.toolArgs, ...IO_INPUT_KEYS]) });
+      const ok = a["tool.error"] === undefined && a.error === undefined;
+      out.push({
+        t: s.endMs - base,
+        kind: "tool_result",
+        id,
+        ok,
+        output: pickStr(a, keys.toolResult) ?? pickIo(a, IO_OUTPUT_KEYS) ?? "",
+      });
     } else {
       const text = pickStr(a, keys.messageText);
       if (text !== undefined) out.push({ t, kind: "message", role: "assistant", text });

@@ -180,3 +180,45 @@ describe("parseMlflowTrace", () => {
     expect(spansToTraceEvents(spans).map((e) => e.kind)).toEqual(["tool_call", "tool_result"]);
   });
 });
+
+// B4 — TOOL-kind spans WITHOUT gen_ai/tool.* attrs: the platform DECLARES the span a tool step (mlflow.spanType,
+// openinference kind); these used to demote to a generic `span` event, so judges saw no tool actions at all.
+describe("spansToTraceEvents — declared TOOL-kind spans (no tool.name attr)", () => {
+  it("normalizes an mlflow.spanType=TOOL span into a tool_call/tool_result pair named after the span", () => {
+    const spans = [
+      {
+        name: "browser_click",
+        startMs: 0,
+        endMs: 40,
+        attrs: {
+          "mlflow.spanType": "TOOL",
+          "mlflow.spanInputs": { selector: "#submit" },
+          "mlflow.spanOutputs": { clicked: true },
+        },
+      },
+    ];
+    const events = spansToTraceEvents(spans);
+    const call = events.find((e) => e.kind === "tool_call");
+    const result = events.find((e) => e.kind === "tool_result");
+    expect(call).toMatchObject({ kind: "tool_call", name: "browser_click" });
+    expect(call && "args" in call ? call.args : undefined).toEqual({ selector: "#submit" });
+    expect(result).toMatchObject({ kind: "tool_result", ok: true, output: JSON.stringify({ clicked: true }) });
+    expect(events.some((e) => e.kind === "span")).toBe(false); // no longer demoted to a structural span
+  });
+
+  it("openinference FUNCTION kind also classifies as a tool step; undeclared spans stay structural", () => {
+    const events = spansToTraceEvents([
+      { name: "call_fn", startMs: 0, endMs: 5, attrs: { "openinference.span.kind": "FUNCTION" } },
+      { name: "plain", startMs: 1, endMs: 2, attrs: {} },
+    ]);
+    expect(events.find((e) => e.kind === "tool_call")).toMatchObject({ name: "call_fn" });
+    expect(events.find((e) => e.kind === "span")).toMatchObject({ name: "plain" });
+  });
+
+  it("an explicit tool.name attr still wins over the span name (attribute-driven path unchanged)", () => {
+    const events = spansToTraceEvents([
+      { name: "step", startMs: 0, endMs: 5, attrs: { "mlflow.spanType": "TOOL", "tool.name": "bash" } },
+    ]);
+    expect(events.find((e) => e.kind === "tool_call")).toMatchObject({ name: "bash" });
+  });
+});

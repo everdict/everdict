@@ -195,3 +195,57 @@ describe("MlflowTraceSource.status", () => {
     expect(await src.status("run-9")).toBe("absent");
   });
 });
+
+// B4 — request-metadata fallback: some SDK paths record the correlation key in the trace's REQUEST METADATA
+// instead of a tag, and the tag-only search degraded a correlatable pull to 0 events.
+describe("MlflowTraceSource — tag correlation metadata fallback", () => {
+  it("falls back to the request_metadata filter when the tag search misses", async () => {
+    const searches: string[] = [];
+    const fetchImpl = vi.fn((...args: Parameters<typeof fetch>) => {
+      const url = String(args[0]);
+      if (url.includes("/traces/search")) {
+        const body = JSON.parse(String(args[1]?.body ?? "{}")) as { filter?: string };
+        searches.push(body.filter ?? "");
+        // tag search misses; metadata search hits
+        const hit = body.filter?.startsWith("request_metadata.");
+        return Promise.resolve(
+          new Response(JSON.stringify({ traces: hit ? [{ trace_id: "tr-meta" }] : [] }), { status: 200 }),
+        );
+      }
+      return Promise.resolve(new Response(JSON.stringify(REAL_TRACE), { status: 200 }));
+    });
+    const src = new MlflowTraceSource({
+      endpoint: "http://m",
+      correlate: "tag",
+      experimentIds: ["7"],
+      fetchImpl: fetchImpl as typeof fetch,
+    });
+
+    const events = await src.fetch("run-9");
+
+    expect(searches).toEqual(["tags.`everdict.run_id` = 'run-9'", "request_metadata.`everdict.run_id` = 'run-9'"]);
+    expect(events.length).toBeGreaterThan(0); // the trace found via metadata was fetched by its id
+    expect(String(fetchImpl.mock.calls.at(-1)?.[0])).toMatch(/trace_id=tr-meta/);
+  });
+
+  it("does not touch the metadata filter when the tag search hits (one call, authoritative path)", async () => {
+    const searches: string[] = [];
+    const fetchImpl = vi.fn((...args: Parameters<typeof fetch>) => {
+      const url = String(args[0]);
+      if (url.includes("/traces/search")) {
+        const body = JSON.parse(String(args[1]?.body ?? "{}")) as { filter?: string };
+        searches.push(body.filter ?? "");
+        return Promise.resolve(new Response(JSON.stringify({ traces: [{ trace_id: "tr-tag" }] }), { status: 200 }));
+      }
+      return Promise.resolve(new Response(JSON.stringify(REAL_TRACE), { status: 200 }));
+    });
+    const src = new MlflowTraceSource({
+      endpoint: "http://m",
+      correlate: "tag",
+      experimentIds: ["7"],
+      fetchImpl: fetchImpl as typeof fetch,
+    });
+    await src.fetch("run-9");
+    expect(searches).toEqual(["tags.`everdict.run_id` = 'run-9'"]);
+  });
+});
