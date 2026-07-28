@@ -90,6 +90,12 @@ near-black `#08090a` dark surface). Light+dark via the `.dark` class (`@custom-v
 - **Secret-name inputs** are never free text — use `SecretPicker` from `features/pick-secret`
   (combobox over preloaded names + "new" inline create; `defaultMultiline` for PEM/kubeconfig).
   Used by harness env, GHE App private key, Mattermost tokens.
+- **Judge multi-select** = `JudgePicker` from `entities/judge` (add-combobox + one row per selected judge
+  with its own version combobox via `versionOptions`) — never re-implement the chip picker or hardcode
+  `version: 'latest'`. Used by the scorecard wizard (both modes), schedule form, re-run dialog.
+- **Create/edit form width**: the page's `Card` owns the width cap (`max-w-2xl`, `max-w-3xl` for the judge
+  code editor) and the form fills it — never cap the form inside a full-width Card (fields would hug the
+  left edge on wide screens). Field grids stack below `sm` (`grid gap-3 sm:grid-cols-3`).
 
 ## Language & i18n (per CLAUDE.md)
 Skill/rule bodies English; **code comments Korean**. User-facing UI copy is **never hardcoded** —
