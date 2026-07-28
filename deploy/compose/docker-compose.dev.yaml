@@ -27,6 +27,20 @@ x-build-args: &build-args
   no_proxy: ${no_proxy:-}
   CA_CERT: ${CA_CERT:-}
 
+# Corporate-network RUNTIME passthrough — dev containers `pnpm install` at start (honors these env vars), and the
+# running processes need them for outbound calls (api: installProxyDispatcher; web: instrumentation.ts). Internal
+# service names are ALWAYS appended to NO_PROXY so in-cluster calls (web→api, api→agent) never hit the corporate
+# proxy. NODE_EXTRA_CA_CERTS points at the CA the Dockerfiles bake in the base stage (set only when CA_CERT is
+# present in the deploy env at up-time).
+x-runtime-proxy-env: &runtime-proxy-env
+  HTTP_PROXY: ${HTTP_PROXY:-}
+  HTTPS_PROXY: ${HTTPS_PROXY:-}
+  http_proxy: ${http_proxy:-}
+  https_proxy: ${https_proxy:-}
+  NO_PROXY: ${NO_PROXY:-}${NO_PROXY:+,}api,agent,web,host.docker.internal,localhost,127.0.0.1
+  no_proxy: ${no_proxy:-}${no_proxy:+,}api,agent,web,host.docker.internal,localhost,127.0.0.1
+  NODE_EXTRA_CA_CERTS: ${CA_CERT:+/usr/local/share/ca-certificates/corp-proxy.crt}
+
 services:
   api:
     build:
@@ -40,6 +54,7 @@ services:
       - -lc
       - pnpm install --frozen-lockfile && pnpm --filter @everdict/api... build && (node_modules/.bin/tsc -p apps/api/tsconfig.json --watch --preserveWatchOutput & exec node --watch apps/api/dist/main.js)
     environment:
+      <<: *runtime-proxy-env
       PORT: "8787"
       EVERDICT_TIMEOUT_SEC: "300"
       # Needed only when the local backend runs the claude-code harness in-process (the scripted harness does not).
@@ -67,6 +82,7 @@ services:
       - -lc
       - pnpm install --frozen-lockfile && pnpm --filter @everdict/agent... build && (node_modules/.bin/tsc -p apps/agent/tsconfig.json --watch --preserveWatchOutput & exec node --watch apps/agent/dist/main.js)
     environment:
+      <<: *runtime-proxy-env
       PORT: "8790"
       CONTROL_PLANE_URL: http://api:8787
       # Raw OpenAI-compatible endpoint for the dev agent (no DB → no registered model). Host proxy → host.docker.internal.
@@ -94,6 +110,7 @@ services:
       - -lc
       - pnpm install --frozen-lockfile && pnpm --filter @everdict/web dev
     environment:
+      <<: *runtime-proxy-env
       # The web (server) → API call uses the compose network's service name.
       CONTROL_PLANE_URL: http://api:8787
       # The web (server) proxies the assistant chat + teammates to the agent service over the compose network.

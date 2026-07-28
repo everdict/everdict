@@ -40,6 +40,13 @@ doing all runtime validation; exported types are anchored to the contract types 
 schemas can't silently diverge from the control plane. `import type` only (no value/schema import — zod v3 never runs in
 the web); `@everdict/contracts` is the ONLY permitted `@everdict` dependency.
 
+**Outbound proxy (corporate networks).** The web server's few external calls (the desktop-releases GitHub fetch) honor
+standard `HTTP(S)_PROXY` / `NO_PROXY` env: `src/instrumentation.ts` installs an undici `EnvHttpProxyAgent` global
+dispatcher at boot (`shared/lib/proxy-dispatcher.ts` — the local mirror of `apps/api`'s, kept in-app because of the
+runtime-decoupling rule). No proxy env → no-op. The compose stacks pass the proxy env through at runtime and append
+compose-internal service names to `NO_PROXY` so web→api never routes through the corporate proxy
+(`deploy/compose/*.yaml` `x-runtime-proxy-env`); a TLS-intercepting proxy's CA rides on `NODE_EXTRA_CA_CERTS`.
+
 ## FSD layout (`src/`)
 ```
 app/        Next App Router — landing(/), [workspace]/{layout(shell+membership validation), page(overview), runs, runs/[id],
