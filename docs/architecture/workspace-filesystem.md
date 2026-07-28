@@ -41,6 +41,10 @@ move(tenant, from, to) → FsEntry            // file rename or whole-subtree mo
   bucket, keys ARE the canonical paths (empty-dir markers `<dir>/`). Same `EVERDICT_S3_*`
   endpoint/credentials as the artifact store; SDK failures remap to `UpstreamError`.
 - **InMemoryWorkspaceFs** — dev/test, mirrors the exact semantics (per-process, not persisted).
+- **Self-hosted deploy**: the full compose stack (`deploy/compose/docker-compose.full.yaml`, one-shot
+  `deploy/compose/full.sh`) ships a MinIO service wired to the api (`EVERDICT_S3_*` from
+  `MINIO_ROOT_USER/PASSWORD`; `full.sh` generates the password with the other required secrets), so the
+  filesystem is durable + bucket-isolated out of the box.
 - The file/dir axis stays consistent everywhere: no file over a dir, no children under a file —
   every surface can render one coherent tree.
 - Distinct from `ArtifactStore` (write-only blob offload → presigned ref): the filesystem is a

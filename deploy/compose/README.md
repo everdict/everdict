@@ -54,6 +54,22 @@ If you need real auth:
   (`ak_…`) from `/internal/tenant-keys`. Note that in this case the web UI has no means of authentication and will not work.
 - **Human SSO** → put a reverse proxy such as oauth2-proxy in front, or add Keycloak back (see `deploy/keycloak/`).
 
+## full — the self-hosted flagship (nothing in-memory: Postgres + Temporal + MinIO)
+
+```bash
+bash deploy/compose/full.sh                  # creates .env + generates every required secret, then up -d --build
+bash deploy/compose/full.sh --profile auth   # extra compose args pass through (Keycloak auth, browser sidecars)
+```
+
+Everything the prod stack has, plus: **Temporal** (durable batches + schedules) and **MinIO** — the object
+storage behind the **workspace filesystem** (one bucket per tenant, `everdict-fs-<tenant>-<hash8>`, created
+lazily; skill/knowledge bodies + agent task outputs + the web `/files` tree live there) and artifact offload
+(`everdict-artifacts`, presigned URLs). Buckets persist on the `minio-data` volume; the MinIO console
+(`:9101`) lets an operator inspect a tenant's bucket. Secrets live in `deploy/compose/.env` (gitignored) —
+`full.sh` fills any missing/`change-me-*` value and never overwrites a real one. Manual alternative:
+`cp .env.full.example .env`, set the four required secrets, then
+`docker compose -f deploy/compose/docker-compose.full.yaml --env-file deploy/compose/.env up -d --build`.
+
 ## Build just the images
 
 ```bash
