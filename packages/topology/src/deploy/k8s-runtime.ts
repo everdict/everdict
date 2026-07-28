@@ -27,7 +27,13 @@ import {
   sharedStoreName,
 } from "./store-binding.js";
 import { type StoreSeedPlan, buildReadExec, buildSeedExec, resolveStoreReadSlice } from "./store-seed.js";
-import type { TargetEnvHandle, TopologyHandle, TopologyRuntime } from "./topology-runtime.js";
+import {
+  DEFAULT_WARM_IDLE_TTL_MS,
+  DEFAULT_WARM_SWEEP_INTERVAL_MS,
+  type TargetEnvHandle,
+  type TopologyHandle,
+  type TopologyRuntime,
+} from "./topology-runtime.js";
 
 export interface K8sTopologyRuntimeOptions {
   kubectl?: Kubectl;
@@ -49,12 +55,20 @@ export interface K8sTopologyRuntimeOptions {
   readyTimeoutMs?: number;
   pollIntervalMs?: number;
   fetchImpl?: typeof fetch; // for endpoint readiness/CDP lookups (test injection)
+  // Warm-topology reclamation (A9): tear down warm entries idle past this TTL (default 30 min; <=0 disables).
+  warmIdleTtlMs?: number;
+  sweepIntervalMs?: number; // reclamation loop cadence (default 60s)
+  now?: () => number; // injectable clock (idle-TTL test determinism)
 }
 
 interface WarmEntry {
   handle: TopologyHandle;
   forwards: PortForward[];
   ns: string;
+  // idle-sweep inputs (A9) — teardown needs the spec/zone, the TTL needs the last touch.
+  spec: ServiceHarnessSpec;
+  zone?: TrustZone;
+  lastUsedAt: number;
 }
 
 // Live K8sTopologyRuntime: apply manifests + wait for rollout + discover endpoints via port-forward.
@@ -83,6 +97,7 @@ export class K8sTopologyRuntime implements TopologyRuntime {
   }
 
   async ensureTopology(spec: ServiceHarnessSpec, zone?: TrustZone): Promise<TopologyHandle> {
+    this.ensureSweeper(); // lazy-start the idle-TTL reclamation loop (A9) — see sweepIdle
     const key = `${spec.id}@${spec.version}@${zone?.id ?? "default"}`;
     const cached = this.warm.get(key);
     if (cached) {
@@ -90,7 +105,10 @@ export class K8sTopologyRuntime implements TopologyRuntime {
       // deleted (teardown/purge) leaves the cached port-forwards dead — serving them forever fails every later case.
       // Re-verify each service still has a pod; on a dead set drop the entry and redeploy. K8s `apply` is idempotent
       // (a redeploy adopts the existing Deployments if present), so treating any probe error as "redeploy" is safe.
-      if (await this.topologyAlive(spec, cached.ns)) return cached.handle;
+      if (await this.topologyAlive(spec, cached.ns)) {
+        cached.lastUsedAt = this.now(); // touch — an actively-used topology never idles out
+        return cached.handle;
+      }
       this.warm.delete(key);
     }
     const inflight = this.inFlight.get(key);
@@ -196,8 +214,40 @@ export class K8sTopologyRuntime implements TopologyRuntime {
     }
 
     const handle: TopologyHandle = { endpoints };
-    this.warm.set(key, { handle, forwards, ns });
+    this.warm.set(key, { handle, forwards, ns, spec, zone, lastUsedAt: this.now() });
     return handle;
+  }
+
+  private now(): number {
+    return (this.opts.now ?? Date.now)();
+  }
+
+  // Lazy-start the reclamation loop — one unref'd interval per runtime instance, so even a SUPERSEDED runtime
+  // version (still referenced by the backend registry, no longer dispatched to) drains its warm topologies within
+  // the TTL. Isomorphic to Nomad/Docker.
+  private sweeper: ReturnType<typeof setInterval> | undefined;
+  private ensureSweeper(): void {
+    if (this.sweeper !== undefined) return;
+    const ttl = this.opts.warmIdleTtlMs ?? DEFAULT_WARM_IDLE_TTL_MS;
+    if (ttl <= 0) return; // 0/negative = reclamation disabled (operator opt-out)
+    this.sweeper = setInterval(() => {
+      void this.sweepIdle(ttl).catch(() => {});
+    }, this.opts.sweepIntervalMs ?? DEFAULT_WARM_SWEEP_INTERVAL_MS);
+    this.sweeper.unref?.();
+  }
+
+  // Reclaim idle warm topologies (A9) — teardown() existed but had NO caller (no TTL, no supersede eviction), so
+  // version iteration piled superseded warm namespaces up until the cluster ran out. Best-effort per entry.
+  async sweepIdle(idleMs: number): Promise<string[]> {
+    const cutoff = this.now() - idleMs;
+    const reclaimed: string[] = [];
+    for (const [key, entry] of [...this.warm]) {
+      if (entry.lastUsedAt > cutoff) continue;
+      if (this.inFlight.has(key)) continue; // a deploy in flight = someone wants it right now — not idle
+      await this.teardown(entry.spec, entry.zone).catch(() => {});
+      reclaimed.push(key);
+    }
+    return reclaimed;
   }
 
   // pool: bring up the shared store once, and mint per-tenant logical objects (dedicated DB+role / Redis ACL) on it.

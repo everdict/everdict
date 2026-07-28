@@ -688,3 +688,37 @@ describe("DockerTopologyRuntime", () => {
     expect(f.rmNets).toEqual(["everdict-bu-1.0.0"]);
   });
 });
+
+// A9 — warm-topology reclamation on the laptop runner: teardown() existed but had NO caller, so superseded warm
+// topologies (containers + networks) accumulated forever on the user's daemon.
+describe("DockerTopologyRuntime — warm-topology idle reclamation", () => {
+  it("sweepIdle removes an idle warm topology's containers + network; an actively-touched one survives", async () => {
+    const f = fakeDocker();
+    let t = 0;
+    const rt = new DockerTopologyRuntime({
+      docker: f.docker,
+      fetchImpl: okFetch,
+      warmIdleTtlMs: 0, // self-timer off — sweeps driven explicitly for determinism
+      now: () => t,
+    });
+    await rt.ensureTopology(SPEC);
+    // Keep the containers "running" so the warm-cache liveness guard serves (and touches) the cached entry.
+    f.runningNames.push(
+      "everdict-bu-1.0.0-bu-postgres",
+      "everdict-bu-1.0.0-bu-redis",
+      "everdict-bu-1.0.0-agent-server",
+    );
+    const baseline = f.removed.length; // deploy itself does idempotent pre-rm's — only count NEW removals below
+    // Given the topology stays actively used — Then a sweep reclaims nothing
+    t = 4 * 60_000;
+    await rt.ensureTopology(SPEC); // cache hit → touch
+    t = 8 * 60_000; // 4 min since last use
+    expect(await rt.sweepIdle(5 * 60_000)).toEqual([]);
+    expect(f.removed.length).toBe(baseline);
+    // Given it then idles past the TTL — Then the sweep tears containers + network down
+    t = 20 * 60_000;
+    expect(await rt.sweepIdle(5 * 60_000)).toEqual(["bu@1.0.0"]);
+    expect(f.removed.slice(baseline)).toEqual(expect.arrayContaining(["everdict-bu-1.0.0-agent-server"]));
+    expect(f.rmNets).toContain("everdict-bu-1.0.0");
+  });
+});

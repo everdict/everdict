@@ -565,3 +565,61 @@ describe("NomadTopologyRuntime — fixture seed/read (silo)", () => {
     expect(seed?.task).toBe("everdict-shared-postgres"); // routed to the cluster-shared store
   });
 });
+
+// A9 — warm-topology reclamation. teardown() existed but had NO caller (no TTL, no supersede eviction), so version
+// iteration left every superseded warm job running until the cluster ran out of capacity.
+describe("NomadTopologyRuntime — warm-topology idle reclamation", () => {
+  function recordingHttp(): { calls: Array<{ method: string; path: string }>; http: NomadHttp } {
+    const calls: Array<{ method: string; path: string }> = [];
+    const http: NomadHttp = {
+      async request(method, path) {
+        calls.push({ method, path });
+        return { status: 200, text: "[]" };
+      },
+    };
+    return { calls, http };
+  }
+
+  it("sweepIdle tears down a warm topology idle past the TTL (job deregistered) and the next ensure redeploys", async () => {
+    const { calls, http } = recordingHttp();
+    let t = 0;
+    const rt = new NomadTopologyRuntime({
+      addr: "http://nomad",
+      http,
+      pollIntervalMs: 1,
+      maxPolls: 2,
+      warmIdleTtlMs: 0, // self-timer off — sweeps driven explicitly for determinism
+      now: () => t,
+    });
+    await rt.ensureTopology(SPEC);
+    // Given no traffic for longer than the TTL
+    t = 10 * 60_000;
+    // When swept — Then the idle entry is torn down (deregistered with purge) and reported
+    const reclaimed = await rt.sweepIdle(5 * 60_000);
+    expect(reclaimed).toEqual([`${SPEC.id}@${SPEC.version}@default`]);
+    expect(calls.some((c) => c.method === "DELETE" && c.path.includes(topologyJobId(SPEC)))).toBe(true);
+    // And the next ensure redeploys instead of serving the dead handle
+    const posts = calls.filter((c) => c.method === "POST" && c.path.startsWith("/v1/jobs")).length;
+    await rt.ensureTopology(SPEC);
+    expect(calls.filter((c) => c.method === "POST" && c.path.startsWith("/v1/jobs")).length).toBe(posts + 1);
+  });
+
+  it("an actively-used warm topology is NOT reclaimed — each ensure touches its idle clock", async () => {
+    const { calls, http } = recordingHttp();
+    let t = 0;
+    const rt = new NomadTopologyRuntime({
+      addr: "http://nomad",
+      http,
+      pollIntervalMs: 1,
+      maxPolls: 2,
+      warmIdleTtlMs: 0,
+      now: () => t,
+    });
+    await rt.ensureTopology(SPEC);
+    t = 4 * 60_000;
+    await rt.ensureTopology(SPEC); // cache hit → touch
+    t = 8 * 60_000; // 8 min after deploy, but only 4 min after the last use
+    expect(await rt.sweepIdle(5 * 60_000)).toEqual([]);
+    expect(calls.some((c) => c.method === "DELETE")).toBe(false);
+  });
+});

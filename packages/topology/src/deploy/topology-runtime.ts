@@ -41,4 +41,18 @@ export interface TopologyRuntime {
   // itself (an internal store URL is unreachable from a remote grader). Resolves (store, role) → slice and runs the
   // query there, returning stdout. Optional: only store-exec-capable runtimes implement it.
   readStoreState?(spec: ServiceHarnessSpec, runId: string, query: StoreReadQuery, zone?: TrustZone): Promise<string>;
+  // Tear down one warm topology (cluster job/namespace/containers + the warm entry). Formalized on the port (A9) —
+  // the impls existed but had NO caller, so nothing ever reclaimed a warm topology.
+  teardown?(spec: ServiceHarnessSpec, zone?: TrustZone): Promise<void>;
+  // Reclaim warm topologies idle past idleMs (best-effort per entry; never throws). The runtimes self-schedule this
+  // on an unref'd interval, so superseded versions' warm jobs stop exhausting the cluster even with no new dispatch.
+  // Returns the reclaimed warm keys (observability/tests).
+  sweepIdle?(idleMs: number): Promise<string[]>;
 }
+
+// Warm-topology reclamation defaults (A9). Browser sessions always swept on a 60s timer; warm topologies never did —
+// version iteration then piled superseded warm jobs up until the cluster ran out of capacity. A warm topology idle
+// for 30 minutes is torn down; the next ensure simply redeploys (the whole point of the warm pool is to amortize
+// ACTIVE traffic, not to pin dead versions forever).
+export const DEFAULT_WARM_IDLE_TTL_MS = 30 * 60_000;
+export const DEFAULT_WARM_SWEEP_INTERVAL_MS = 60_000;

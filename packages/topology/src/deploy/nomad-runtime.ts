@@ -36,7 +36,13 @@ import {
 import { endpointUnreachableError } from "./reachability.js";
 import { type StorePlan, planTenantStores, resolveStoreIsolation, sanitizeIdent } from "./store-binding.js";
 import { type StoreSeedPlan, buildReadExec, buildSeedExec, resolveStoreReadSlice } from "./store-seed.js";
-import type { TargetEnvHandle, TopologyHandle, TopologyRuntime } from "./topology-runtime.js";
+import {
+  DEFAULT_WARM_IDLE_TTL_MS,
+  DEFAULT_WARM_SWEEP_INTERVAL_MS,
+  type TargetEnvHandle,
+  type TopologyHandle,
+  type TopologyRuntime,
+} from "./topology-runtime.js";
 
 // Nomad HTTP abstraction (mockable in tests; same shape as NomadHttp in @everdict/backends).
 export interface NomadHttp {
@@ -125,6 +131,10 @@ export interface NomadTopologyRuntimeOptions {
   // Override for `host.docker.internal` (gap 5) — default `host-gateway` keyword; a Nomad docker driver that doesn't
   // translate it takes a concrete bridge-gateway IP (e.g. "172.17.0.1").
   hostGatewayAddr?: string;
+  // Warm-topology reclamation (A9): tear down warm entries idle past this TTL (default 30 min; <=0 disables).
+  warmIdleTtlMs?: number;
+  sweepIntervalMs?: number; // reclamation loop cadence (default 60s)
+  now?: () => number; // injectable clock (idle-TTL test determinism)
 }
 
 // The store-namespace id used for a no-zone silo (there are no tenants, so one default id names the dedicated store job).
@@ -138,7 +148,20 @@ export class NomadTopologyRuntime implements TopologyRuntime {
   private readonly execImpl: NomadExec;
   // key: id@version@zone → the handle + what's needed to re-verify liveness (jobId + the service groups that must
   // still have a running alloc + the namespace). A warm entry is re-checked on every cache hit (gap 2).
-  private readonly warm = new Map<string, { handle: TopologyHandle; jobId: string; ns?: string; groups: string[] }>();
+  // spec/zone/lastUsedAt feed the idle sweep (A9) — teardown needs the spec, and the TTL needs the last touch.
+  private readonly warm = new Map<
+    string,
+    {
+      handle: TopologyHandle;
+      jobId: string;
+      ns?: string;
+      groups: string[];
+      spec: ServiceHarnessSpec;
+      zone?: TrustZone;
+      lastUsedAt: number;
+    }
+  >();
+  private sweeper: ReturnType<typeof setInterval> | undefined;
   // In-progress deploy (single-flight). The topology job ID is deterministic (everdict-harness-<id>-<version>-<zone>),
   // so under case-level parallelism a second ensure while the warm entry is still empty would re-POST the SAME job →
   // Nomad treats that as a job UPDATE and churns the alloc, so the services never stabilize ("many cases of the same
@@ -154,6 +177,7 @@ export class NomadTopologyRuntime implements TopologyRuntime {
   }
 
   async ensureTopology(spec: ServiceHarnessSpec, zone?: TrustZone): Promise<TopologyHandle> {
+    this.ensureSweeper(); // lazy-start the idle-TTL reclamation loop (A9) — see sweepIdle
     // Separate the warm pool per tenant (zone) — don't share arbitrary code execution within the same process.
     const key = `${spec.id}@${spec.version}@${zone?.id ?? "default"}`;
     const cached = this.warm.get(key);
@@ -163,7 +187,10 @@ export class NomadTopologyRuntime implements TopologyRuntime {
       // group still has a running alloc; on a dead set drop the entry and fall through to redeploy (mirrors the
       // DockerTopologyRuntime docker-ps guard, keeping the runtimes isomorphic). A Nomad blip serves cached best-effort.
       const alive = await this.topologyAlive(cached).catch(() => undefined);
-      if (alive === undefined || alive) return cached.handle;
+      if (alive === undefined || alive) {
+        cached.lastUsedAt = this.now(); // touch — an actively-used topology never idles out
+        return cached.handle;
+      }
       this.warm.delete(key);
     }
     const inflight = this.inFlight.get(key);
@@ -272,8 +299,39 @@ export class NomadTopologyRuntime implements TopologyRuntime {
         ? [SERVICE_GROUP_NAME]
         : [];
     const handle: TopologyHandle = { endpoints };
-    this.warm.set(key, { handle, jobId, ns, groups });
+    this.warm.set(key, { handle, jobId, ns, groups, spec, zone, lastUsedAt: this.now() });
     return handle;
+  }
+
+  private now(): number {
+    return (this.opts.now ?? Date.now)();
+  }
+
+  // Lazy-start the reclamation loop — one unref'd interval per runtime instance, so even a SUPERSEDED runtime
+  // version (still referenced by the backend registry, no longer dispatched to) drains its warm jobs within the TTL.
+  private ensureSweeper(): void {
+    if (this.sweeper !== undefined) return;
+    const ttl = this.opts.warmIdleTtlMs ?? DEFAULT_WARM_IDLE_TTL_MS;
+    if (ttl <= 0) return; // 0/negative = reclamation disabled (operator opt-out)
+    this.sweeper = setInterval(() => {
+      void this.sweepIdle(ttl).catch(() => {});
+    }, this.opts.sweepIntervalMs ?? DEFAULT_WARM_SWEEP_INTERVAL_MS);
+    this.sweeper.unref?.();
+  }
+
+  // Reclaim idle warm topologies (A9). teardown() existed but had NO caller — no TTL, no supersede eviction — so
+  // version iteration left every superseded warm job running until the cluster ran out of capacity (browser sessions
+  // sweep every 60s; topologies never did). Best-effort per entry; the sweep itself never throws.
+  async sweepIdle(idleMs: number): Promise<string[]> {
+    const cutoff = this.now() - idleMs;
+    const reclaimed: string[] = [];
+    for (const [key, entry] of [...this.warm]) {
+      if (entry.lastUsedAt > cutoff) continue;
+      if (this.inFlight.has(key)) continue; // a deploy in flight = someone wants it right now — not idle
+      await this.teardown(entry.spec, entry.zone).catch(() => {});
+      reclaimed.push(key);
+    }
+    return reclaimed;
   }
 
   // Cheap liveness check for a warm topology — ONE Nomad allocations Get: every service group must still have a running

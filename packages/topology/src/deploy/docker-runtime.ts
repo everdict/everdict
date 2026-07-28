@@ -23,7 +23,13 @@ import { interpolateServiceEnv, staticWiringEnv } from "./nomad-topology.js";
 import { aliasPeerHost } from "./peer-resolver.js";
 import { endpointUnreachableError } from "./reachability.js";
 import { type StoreSeedPlan, buildReadExec, buildSeedExec, resolveStoreReadSlice } from "./store-seed.js";
-import type { TargetEnvHandle, TopologyHandle, TopologyRuntime } from "./topology-runtime.js";
+import {
+  DEFAULT_WARM_IDLE_TTL_MS,
+  DEFAULT_WARM_SWEEP_INTERVAL_MS,
+  type TargetEnvHandle,
+  type TopologyHandle,
+  type TopologyRuntime,
+} from "./topology-runtime.js";
 
 export interface DockerTopologyRuntimeOptions {
   docker?: Docker; // injectable (tests pass a fake Docker). Default execFile("docker", …)
@@ -33,12 +39,18 @@ export interface DockerTopologyRuntimeOptions {
   pollIntervalMs?: number;
   fetchImpl?: typeof fetch; // for endpoint readiness/CDP lookups (test injection)
   cdpConnect?: (url: string) => CdpSocket; // CDP WebSocket factory for DOM/screenshot capture (test injection; default = global WebSocket)
+  // Warm-topology reclamation (A9): tear down warm entries idle past this TTL (default 30 min; <=0 disables).
+  warmIdleTtlMs?: number;
+  sweepIntervalMs?: number; // reclamation loop cadence (default 60s)
+  now?: () => number; // injectable clock (idle-TTL test determinism)
 }
 
 interface WarmEntry {
   handle: TopologyHandle;
   network: string;
   containers: string[]; // the containers this topology brought up (teardown targets)
+  spec: ServiceHarnessSpec; // idle-sweep input (A9) — teardown resolves names from the spec
+  lastUsedAt: number;
 }
 
 // Sanitize to the docker naming rule ([a-zA-Z0-9][a-zA-Z0-9_.-]).
@@ -96,6 +108,7 @@ export class DockerTopologyRuntime implements TopologyRuntime {
         `Host-exec service "${hostSvc.name}" cannot run on the Docker runtime (containers only) — use a Nomad runtime (raw_exec).`,
       );
     }
+    this.ensureSweeper(); // lazy-start the idle-TTL reclamation loop (A9) — see sweepIdle
     const key = `${spec.id}@${spec.version}`;
     const cached = this.warm.get(key);
     if (cached) {
@@ -103,7 +116,10 @@ export class DockerTopologyRuntime implements TopologyRuntime {
       // be served forever — every later case would fail against dead endpoints with no self-heal. One docker ps
       // per ensure is cheap; on a partial/absent set, drop the entry and fall through to adopt-or-redeploy.
       const up = await this.docker.running(cached.containers).catch(() => undefined);
-      if (up === undefined || up.length === cached.containers.length) return cached.handle; // daemon blip → serve cached (best effort)
+      if (up === undefined || up.length === cached.containers.length) {
+        cached.lastUsedAt = this.now(); // touch — an actively-used topology never idles out (A9)
+        return cached.handle; // daemon blip → serve cached (best effort)
+      }
       this.warm.delete(key);
     }
     const inflight = this.inFlight.get(key);
@@ -177,7 +193,37 @@ export class DockerTopologyRuntime implements TopologyRuntime {
   }
 
   private warmEntryFor(spec: ServiceHarnessSpec, network: string, handle: TopologyHandle): WarmEntry {
-    return { handle, network, containers: this.topologyContainerNames(spec, network) };
+    return { handle, network, containers: this.topologyContainerNames(spec, network), spec, lastUsedAt: this.now() };
+  }
+
+  private now(): number {
+    return (this.opts.now ?? Date.now)();
+  }
+
+  // Lazy-start the reclamation loop (A9) — one unref'd interval per runtime instance. Isomorphic to Nomad/K8s.
+  private sweeper: ReturnType<typeof setInterval> | undefined;
+  private ensureSweeper(): void {
+    if (this.sweeper !== undefined) return;
+    const ttl = this.opts.warmIdleTtlMs ?? DEFAULT_WARM_IDLE_TTL_MS;
+    if (ttl <= 0) return; // 0/negative = reclamation disabled (operator opt-out)
+    this.sweeper = setInterval(() => {
+      void this.sweepIdle(ttl).catch(() => {});
+    }, this.opts.sweepIntervalMs ?? DEFAULT_WARM_SWEEP_INTERVAL_MS);
+    this.sweeper.unref?.();
+  }
+
+  // Reclaim idle warm topologies (A9) — teardown() existed but had NO caller, so a laptop runner accumulated
+  // superseded warm topologies (containers + networks) forever. Best-effort per entry; never throws.
+  async sweepIdle(idleMs: number): Promise<string[]> {
+    const cutoff = this.now() - idleMs;
+    const reclaimed: string[] = [];
+    for (const [key, entry] of [...this.warm]) {
+      if (entry.lastUsedAt > cutoff) continue;
+      if (this.inFlight.has(key)) continue; // a deploy in flight = someone wants it right now — not idle
+      await this.teardown(entry.spec).catch(() => {});
+      reclaimed.push(key);
+    }
+    return reclaimed;
   }
 
   // Win the right to demolish+redeploy a stuck topology. Atomic via network create; a lock left by a
@@ -291,7 +337,7 @@ export class DockerTopologyRuntime implements TopologyRuntime {
         if ((await this.fetchImpl(url)).status >= 500) return undefined;
         endpoints[svc.name] = url;
       }
-      return { handle: { endpoints }, network, containers: names };
+      return { handle: { endpoints }, network, containers: names, spec, lastUsedAt: this.now() };
     } catch {
       return undefined; // any probe failure = not adoptable (never kills what it probed — redeploy decides)
     }
@@ -426,7 +472,7 @@ export class DockerTopologyRuntime implements TopologyRuntime {
     };
   }
 
-  // Explicit teardown — remove the warm topology's containers + network (outside the interface — ServiceTopologyBackend only calls dispose).
+  // Explicit teardown — remove the warm topology's containers + network. On the port since A9 (the idle sweep calls it).
   async teardown(spec: ServiceHarnessSpec): Promise<void> {
     const key = `${spec.id}@${spec.version}`;
     const entry = this.warm.get(key);

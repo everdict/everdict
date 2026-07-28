@@ -111,6 +111,14 @@ an admin `stopWorkload everdict-harness-<id>-<version>-<zone>` (the existing run
 gated `runtimes:control`) deregisters the cluster job, and the warm-cache liveness re-check above then drops the now-
 dead in-memory entry on the next `ensureTopology` and redeploys. So a poisoned/stale warm topology is cleared by
 `stopWorkload` (durable, cluster) + the auto-heal (in-memory) — no control-plane restart, no dedicated teardown route.
+**Warm-topology idle reclamation (A9).** `teardown()` is now ON the `TopologyRuntime` port and actually called: every
+runtime (Nomad/K8s/Docker — isomorphic) stamps `lastUsedAt` on its warm entries (touched on each ensure) and
+self-schedules an unref'd `sweepIdle(ttl)` interval (lazy-started on first ensure; defaults
+`DEFAULT_WARM_IDLE_TTL_MS`=30 min / sweep 60s; opts `warmIdleTtlMs<=0` disables, `now` injectable). An entry idle past
+the TTL is torn down best-effort (in-flight deploys are skipped); the next ensure simply redeploys. Because the
+interval lives on the runtime INSTANCE, a superseded runtime/harness version (still in the backend registry, no
+longer dispatched) also drains its warm jobs — pre-fix nothing ever called teardown, so version iteration exhausted
+the cluster (browser sessions swept every 60s; topologies never).
 **No-zone store parity:** declared `dependencies[]` must be provisioned on every runtime regardless of zone — Docker
 always deploys them, K8s deploys when `provisionDependencies` is set, and Nomad now honors the SAME
 `provisionDependencies` option for the no-zone case (deploys the stores as a dedicated silo under a `default` id via
