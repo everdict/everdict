@@ -2722,8 +2722,8 @@
       "superseded": "대체됨",
       "deprecated": "폐기됨"
     },
-    "freshness": {
-      "staleRefs": "참조 구버전",
+    "coverage": {
+      "behind": "이전 버전 기준",
       "unverified": "미검증"
     },
     "empty": {
@@ -2756,7 +2756,10 @@
     "detail": {
       "meta": "{by} · {updated} 수정",
       "verifiedAt": "{at} 검증",
-      "staleTitle": "구버전을 참조하고 있습니다 — 신뢰 전 검증하세요:",
+      "asOfTitle": "이전 버전에 핀된 지식입니다 — 현재 버전에서의 성립 여부는 기록되지 않았습니다:",
+      "asOfHint": "지금도 유효하면 '아직 유효함'으로 구간을 연장하고, 달라졌으면 변화 지점에 핀한 엔트리로 대체하세요. 과거 기록으로 그대로 두어도 됩니다.",
+      "currentVersion": "현재 {version}",
+      "unpinned": "(핀 없음)",
       "refs": "대상",
       "evidence": "근거",
       "verify": "아직 유효함",

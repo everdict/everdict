@@ -2722,8 +2722,8 @@
       "superseded": "Superseded",
       "deprecated": "Deprecated"
     },
-    "freshness": {
-      "staleRefs": "Stale refs",
+    "coverage": {
+      "behind": "As-of older versions",
       "unverified": "Unverified"
     },
     "empty": {
@@ -2756,7 +2756,10 @@
     "detail": {
       "meta": "by {by} · updated {updated}",
       "verifiedAt": "verified {at}",
-      "staleTitle": "References superseded versions — verify before trusting:",
+      "asOfTitle": "Pinned to earlier versions — validity at the present is unrecorded:",
+      "asOfHint": "Still holds? Verify to extend its coverage. Changed? Supersede it, pinned at the version where it changed. Or leave it — knowledge about an earlier version is a valid record.",
+      "currentVersion": "current {version}",
+      "unpinned": "(unpinned)",
       "refs": "Concerns",
       "evidence": "Evidence",
       "verify": "Still holds",

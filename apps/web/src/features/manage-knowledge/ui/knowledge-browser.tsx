@@ -2,13 +2,14 @@
 
 import { useMemo, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
-import { AlertTriangle, BadgeCheck, Lock, Plus } from 'lucide-react'
+import { BadgeCheck, History, Lock, Plus } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
 import {
   KNOWLEDGE_ENTRY_KINDS,
+  type KnowledgeCoverage,
   type KnowledgeEntry,
-  type KnowledgeFreshness,
+  type KnowledgePinView,
   type NodeRefView,
 } from '@/entities/knowledge'
 import { fmtDateTime } from '@/shared/lib/format'
@@ -42,22 +43,23 @@ function KindChip({ kind }: { kind: KnowledgeEntry['kind'] }) {
   )
 }
 
-// freshness 배지 — fresh 는 무표시(신호 없음=조용), stale/unverified 만 소리 냄.
-function FreshnessBadge({ freshness }: { freshness?: KnowledgeFreshness }) {
+// 커버리지 배지 — current 는 무표시(신호 없음=조용). behind 는 "as-of 이전 버전"(틀림이 아니라 좌표),
+// unverified 는 wall-clock 미확인 — 톤도 경보(빨강)가 아닌 중립(앰버 계열)로.
+function CoverageBadge({ coverage }: { coverage?: KnowledgeCoverage }) {
   const t = useTranslations('knowledge')
-  if (!freshness || freshness.state === 'fresh') return null
-  const stale = freshness.state === 'superseded_refs'
+  if (!coverage || coverage.state === 'current') return null
+  const behind = coverage.state === 'behind'
   return (
     <span
       className={cn(
         'inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium',
-        stale
-          ? 'bg-destructive/10 text-destructive'
+        behind
+          ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400'
           : 'bg-yellow-500/10 text-yellow-600 dark:text-yellow-400'
       )}
     >
-      <AlertTriangle className="size-3" />
-      {stale ? t('freshness.staleRefs') : t('freshness.unverified')}
+      <History className="size-3" />
+      {behind ? t('coverage.behind') : t('coverage.unverified')}
     </span>
   )
 }
@@ -110,7 +112,14 @@ function EntryDetailDialog({
       if (close) onClose()
     })
 
-  const stale = entry.freshness?.state === 'superseded_refs'
+  const behind = entry.coverage?.state === 'behind'
+
+  // 구간 표기: "documented @2.1.0 · verified through 2.2.0 · current 2.3.0" — as-of 좌표를 그대로 보여준다.
+  const gapLabel = (g: { ref: KnowledgePinView; latest: string }) => {
+    const asOf = g.ref.version ? `@${g.ref.version}` : t('detail.unpinned')
+    const through = g.ref.verifiedVersion ? ` → ${g.ref.verifiedVersion}` : ''
+    return `${g.ref.type}:${g.ref.key} ${asOf}${through} · ${t('detail.currentVersion', { version: g.latest })}`
+  }
 
   return (
     <Dialog open onClose={onClose} className="max-w-2xl">
@@ -118,7 +127,7 @@ function EntryDetailDialog({
         <div className="space-y-2">
           <div className="flex flex-wrap items-center gap-2">
             <KindChip kind={entry.kind} />
-            <FreshnessBadge freshness={entry.freshness} />
+            <CoverageBadge coverage={entry.coverage} />
             {entry.visibility === 'private' && <Lock className="size-3.5 text-muted-foreground" />}
             {entry.status !== 'active' && (
               <span className="rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">
@@ -137,16 +146,17 @@ function EntryDetailDialog({
           </p>
         </div>
 
-        {stale && entry.freshness && entry.freshness.staleRefs.length > 0 && (
-          <div className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-xs">
-            <p className="mb-1 font-medium text-destructive">{t('detail.staleTitle')}</p>
+        {behind && entry.coverage && entry.coverage.gaps.length > 0 && (
+          <div className="rounded-md border border-amber-500/30 bg-amber-500/5 p-3 text-xs">
+            <p className="mb-1 font-medium text-amber-600 dark:text-amber-400">
+              {t('detail.asOfTitle')}
+            </p>
             <ul className="space-y-0.5 font-mono text-muted-foreground">
-              {entry.freshness.staleRefs.map((s) => (
-                <li key={refLabel(s.ref)}>
-                  {refLabel(s.ref)} → {s.latest}
-                </li>
+              {entry.coverage.gaps.map((g) => (
+                <li key={refLabel(g.ref)}>{gapLabel(g)}</li>
               ))}
             </ul>
+            <p className="mt-1.5 text-muted-foreground">{t('detail.asOfHint')}</p>
           </div>
         )}
 
@@ -276,7 +286,7 @@ export function KnowledgeBrowser({
                 >
                   {e.title}
                 </span>
-                <FreshnessBadge freshness={e.freshness} />
+                <CoverageBadge coverage={e.coverage} />
                 {e.visibility === 'private' && (
                   <Lock className="size-3.5 shrink-0 text-muted-foreground" />
                 )}

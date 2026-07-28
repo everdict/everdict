@@ -21,6 +21,7 @@ export const skillRefSchema = z.object({
   type: z.string(),
   key: z.string(),
   version: z.string().optional(),
+  verifiedVersion: z.string().optional(), // 시스템 소유 — verify 가 구간 [version, verifiedVersion]을 연장
 })
 
 // GET /skills · /skills/:id — 전체 SkillRecord. visibility: private(개인 초안)|workspace(공유). instructions=SKILL.md 본문 + files=부속 파일.

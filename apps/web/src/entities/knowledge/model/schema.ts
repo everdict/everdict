@@ -58,16 +58,24 @@ export const nodeRefSchema = z.object({
 })
 export type NodeRefView = z.infer<typeof nodeRefSchema>
 
+// A knowledge-layer pin: the NodeRef plus the claim's known-valid INTERVAL end along the entity's timeline —
+// [version, verifiedVersion]. verifiedVersion is system-owned (verify extends it); the form never authors it.
+export const knowledgePinSchema = nodeRefSchema.extend({
+  verifiedVersion: z.string().optional(),
+})
+export type KnowledgePinView = z.infer<typeof knowledgePinSchema>
+
 export const KNOWLEDGE_ENTRY_KINDS = ['finding', 'decision', 'convention', 'context'] as const
 export const KNOWLEDGE_ENTRY_STATUSES = ['active', 'superseded', 'deprecated'] as const
 
-// Server-computed freshness decoration (not part of the record): `superseded_refs` = a pinned ref's entity has a
-// newer version; `unverified` = no recent edit or verification. Absent = no signal (treated as fresh).
-export const knowledgeFreshnessSchema = z.object({
-  state: z.enum(['fresh', 'superseded_refs', 'unverified']),
-  staleRefs: z.array(z.object({ ref: nodeRefSchema, latest: z.string() })).default([]),
+// Server-computed subject-time coverage (not part of the record): `behind` = a pin's interval ends before the
+// entity's present (the claim is AS-OF an earlier point — still true about it, validity at the present unknown);
+// `unverified` = no recent edit or verification on the wall clock. Absent = no signal (treated as current).
+export const knowledgeCoverageSchema = z.object({
+  state: z.enum(['current', 'behind', 'unverified']),
+  gaps: z.array(z.object({ ref: knowledgePinSchema, latest: z.string() })).default([]),
 })
-export type KnowledgeFreshness = z.infer<typeof knowledgeFreshnessSchema>
+export type KnowledgeCoverage = z.infer<typeof knowledgeCoverageSchema>
 
 export const knowledgeEntrySchema = z.object({
   id: z.string(),
@@ -75,7 +83,7 @@ export const knowledgeEntrySchema = z.object({
   kind: z.enum(KNOWLEDGE_ENTRY_KINDS),
   title: z.string(),
   body: z.string(),
-  refs: z.array(nodeRefSchema).default([]),
+  refs: z.array(knowledgePinSchema).default([]),
   evidence: z.array(nodeRefSchema).default([]),
   status: z.enum(KNOWLEDGE_ENTRY_STATUSES).default('active'),
   supersedes: z.string().optional(),
@@ -84,7 +92,7 @@ export const knowledgeEntrySchema = z.object({
   createdAt: z.string(),
   updatedAt: z.string(),
   verifiedAt: z.string().optional(),
-  freshness: knowledgeFreshnessSchema.optional(),
+  coverage: knowledgeCoverageSchema.optional(),
 })
 export type KnowledgeEntry = z.infer<typeof knowledgeEntrySchema>
 
@@ -101,9 +109,9 @@ type _EdgeGuard = AssertAssignable<
   Pick<ContractEdgeMention, keyof KnowledgeEdgeView>,
   KnowledgeEdgeView
 >
-// Entry guard: the record fields (freshness excluded — a server-side decoration with no contract type) follow the
+// Entry guard: the record fields (coverage excluded — a server-side decoration with no contract type) follow the
 // same loose-consumer-view rule: the contract record must stay assignable to this view.
 type _EntryGuard = AssertAssignable<
-  Pick<ContractKnowledgeEntryRecord, Exclude<keyof KnowledgeEntry, 'freshness'>>,
-  Omit<KnowledgeEntry, 'freshness'>
+  Pick<ContractKnowledgeEntryRecord, Exclude<keyof KnowledgeEntry, 'coverage'>>,
+  Omit<KnowledgeEntry, 'coverage'>
 >
