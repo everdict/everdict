@@ -47,7 +47,7 @@ export function ImportTerminalBenchForm() {
   }
 
   return (
-    <div className="max-w-2xl space-y-4">
+    <div className="space-y-4">
       <p className="text-[12px] text-muted-foreground">{t('tbDescription')}</p>
 
       <div className="grid grid-cols-3 gap-3">

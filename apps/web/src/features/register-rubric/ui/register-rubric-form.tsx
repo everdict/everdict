@@ -167,7 +167,7 @@ export function RegisterRubricForm({ workspace }: { workspace: string }) {
   const busy = validating || saving
 
   return (
-    <div className="max-w-2xl space-y-6">
+    <div className="space-y-6">
       <div className="grid grid-cols-2 gap-4">
         <Field label={t('idLabel')} hint={t('idHint')}>
           <Input

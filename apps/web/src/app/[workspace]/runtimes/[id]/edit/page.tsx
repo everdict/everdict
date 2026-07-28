@@ -70,7 +70,7 @@ export default async function EditRuntimePage({
       ) : spec.kind === 'local' ? (
         <Callout tone="warning">{t('notEditableLocal')}</Callout>
       ) : (
-        <Card className="p-5">
+        <Card className="max-w-2xl p-5">
           <RegisterRuntimeForm workspace={workspace} initial={spec} submitVersion={submitVersion} />
         </Card>
       )}

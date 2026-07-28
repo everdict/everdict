@@ -35,7 +35,7 @@ export default async function NewRubricPage({
         <PageHeader title={t('register')} description={t('registerDescription')} />
       </div>
       {allowed ? (
-        <Card className="p-5">
+        <Card className="max-w-2xl p-5">
           <RegisterRubricForm workspace={workspace} />
         </Card>
       ) : (

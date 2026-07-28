@@ -43,7 +43,7 @@ export default async function IngestScorecardPage({
       </Link>
       <PageHeader title={t('ingest')} description={t('ingestDescription')} />
       {allowed ? (
-        <Card className="p-5">
+        <Card className="max-w-2xl p-5">
           <IngestScorecardForm datasets={datasets} />
         </Card>
       ) : (

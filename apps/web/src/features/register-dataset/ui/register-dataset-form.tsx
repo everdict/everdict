@@ -119,7 +119,7 @@ export function RegisterDatasetForm({
   }
 
   return (
-    <div className="max-w-2xl space-y-5">
+    <div className="space-y-5">
       <div className="space-y-1.5">
         <Label htmlFor="id">{t('idLabel')}</Label>
         <Input

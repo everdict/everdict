@@ -61,7 +61,7 @@ export default async function NewRunPage({ params }: { params: Promise<{ workspa
       </Link>
       <PageHeader title={t('newRun')} description={t('newRunDescription')} />
       {allowed ? (
-        <Card className="p-6">
+        <Card className="max-w-2xl p-6">
           <SubmitRunForm
             harnesses={harnesses}
             runtimes={runtimes}

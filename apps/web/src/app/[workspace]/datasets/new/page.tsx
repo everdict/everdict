@@ -44,7 +44,7 @@ export default async function NewDatasetPage({
       </Link>
       <PageHeader title={t('registerTitle')} description={t('registerDescription')} />
       {allowed ? (
-        <Card className="p-5">
+        <Card className="max-w-2xl p-5">
           <RegisterDatasetForm existingDatasets={existingDatasets} />
         </Card>
       ) : (

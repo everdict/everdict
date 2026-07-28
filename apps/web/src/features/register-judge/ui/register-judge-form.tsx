@@ -219,7 +219,7 @@ export function RegisterJudgeForm({
   const busy = validating || saving
 
   return (
-    <div className="max-w-3xl space-y-6">
+    <div className="space-y-6">
       <div className="grid grid-cols-2 gap-4">
         <Field label={t('idLabel')} hint={t('idHint')}>
           <Input

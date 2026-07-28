@@ -65,7 +65,10 @@ export function SubmitRunForm({
   // Drives the runtime capability-fit preview (a service/topology harness needs a container-capable runtime).
   const harnessKind = harnessEntry?.kind
   // Version picker options — the harness list already carries versions/tags (no extra request), same as the scorecard form.
-  const harnessVersionOptions = versionOptions(harnessEntry?.versions ?? [], harnessEntry?.versionTags)
+  const harnessVersionOptions = versionOptions(
+    harnessEntry?.versions ?? [],
+    harnessEntry?.versionTags
+  )
 
   async function onSubmit(values: Values) {
     setServerError(undefined)
@@ -80,7 +83,7 @@ export function SubmitRunForm({
   }
 
   return (
-    <form onSubmit={handleSubmit(onSubmit)} className="max-w-xl space-y-5">
+    <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
       <div className="space-y-1.5">
         <Label htmlFor="harnessId">{t('harnessLabel')}</Label>
         <Controller

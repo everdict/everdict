@@ -187,7 +187,7 @@ export function RegisterHarnessWizard({
   const [tab, setTab] = useState<Tab>('template')
 
   return (
-    <div className="max-w-2xl space-y-5">
+    <div className="space-y-5">
       <div className="inline-flex rounded-md border border-border bg-secondary/50 p-0.5 text-[13px]">
         <TabBtn active={tab === 'template'} onClick={() => setTab('template')}>
           {t('tabTemplate')}

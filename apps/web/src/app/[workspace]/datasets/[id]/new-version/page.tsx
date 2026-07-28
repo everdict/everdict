@@ -68,7 +68,7 @@ export default async function NewDatasetVersionPage({
       ) : !dataset ? (
         <Callout tone="danger">{t('loadError', { error: error ?? '' })}</Callout>
       ) : (
-        <Card className="p-5">
+        <Card className="max-w-2xl p-5">
           <RegisterDatasetForm
             existingDatasets={existingDatasets}
             lockId

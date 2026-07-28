@@ -78,7 +78,7 @@ export default async function ImportBenchmarkPage({
         <Callout tone="danger">{t('catalogLoadError', { error })}</Callout>
       ) : (
         <>
-          <Card className="p-5">
+          <Card className="max-w-2xl p-5">
             <AddBenchmark
               benchmarks={benchmarks}
               recipes={recipes}
@@ -89,7 +89,7 @@ export default async function ImportBenchmarkPage({
           </Card>
           {/* Standard task-format on-ramp — bring an existing Terminal-Bench task set (directory/container tasks the
               row-based wizard above can't express). docs/architecture/standard-task-formats.md */}
-          <Card className="space-y-4 p-5">
+          <Card className="max-w-2xl space-y-4 p-5">
             <div>
               <h2 className="text-[14px] font-[560] tracking-[-0.01em]">{t('tbTitle')}</h2>
               <p className="text-[12px] text-muted-foreground">{t('tbSubtitle')}</p>

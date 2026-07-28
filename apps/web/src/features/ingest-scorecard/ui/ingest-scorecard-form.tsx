@@ -86,7 +86,7 @@ export function IngestScorecardForm({ datasets }: { datasets: { id: string }[] }
   }
 
   return (
-    <div className="max-w-2xl space-y-4">
+    <div className="space-y-4">
       {/* mode toggle */}
       <div className="inline-flex rounded-lg border border-border bg-secondary/40 p-1 text-[13px]">
         {(['push', 'pull'] as const).map((m) => (

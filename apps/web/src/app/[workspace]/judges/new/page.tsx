@@ -76,7 +76,7 @@ export default async function NewJudgePage({ params }: { params: Promise<{ works
         <PageHeader title={t('register')} description={t('registerDescription')} />
       </div>
       {allowed ? (
-        <Card className="p-5">
+        <Card className="max-w-3xl p-5">
           <RegisterJudgeForm
             workspace={workspace}
             runtimes={runtimes}
