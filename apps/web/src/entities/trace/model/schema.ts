@@ -99,7 +99,12 @@ export const traceSummarySchema = z.object({
   scope: z.string().optional(),
   provenance: traceProvenanceSchema.optional(),
 })
-export const tracesListResponseSchema = z.object({ traces: z.array(traceSummarySchema) })
+// A page of traces + the token to fetch the next page (absent = last page / a non-paginating platform). The browser
+// streams the list by looping nextCursor and appending, so a slow platform pull surfaces progressively.
+export const tracesListResponseSchema = z.object({
+  traces: z.array(traceSummarySchema),
+  nextCursor: z.string().optional(),
+})
 
 // One span's raw attributes (span-based kinds) — the keys a user maps in the wizard's conversion editor.
 export const spanAttrSampleSchema = z.object({

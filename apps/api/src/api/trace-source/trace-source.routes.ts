@@ -140,14 +140,15 @@ export function registerTraceSourceRoutes(app: FastifyInstance, deps: ServerDeps
         limit: z.coerce.number().int().positive().max(500).optional(),
         since: z.string().min(1).optional(), // ISO-8601 lower time bound (best-effort)
         until: z.string().min(1).optional(), // ISO-8601 upper time bound (best-effort — bounded window with since)
+        cursor: z.string().min(1).optional(), // opaque page token from a prior page's nextCursor (streamed append)
       })
       .safeParse(req.query ?? {});
     if (!query.success)
       return reply.code(400).send({ code: "BAD_REQUEST", message: zodIssues(query.error).join("; ") });
     try {
       gate(principal, "harnesses:read");
-      const traces = await deps.traceSourceService.listTraces(principal.workspace, name, query.data);
-      return reply.send({ traces });
+      // The page ({ traces, nextCursor? }) is returned verbatim — the web loops nextCursor to append the next page.
+      return reply.send(await deps.traceSourceService.listTraces(principal.workspace, name, query.data));
     } catch (err) {
       return sendError(reply, err);
     }

@@ -28,7 +28,8 @@ import type { ProfileResolver } from "./profile.js";
 import { buildEnvironmentSection } from "./system-prompt.js";
 import { buildViewConfigTool } from "./view-config-tool.js";
 
-// An @-reference resolves to the workspace read tool that fetches that entity's full record.
+// An @-reference resolves to the workspace read tool that fetches that entity's full record. `trace` is the exception:
+// it is keyed by (source, id=traceId), so it resolves via inspect_trace with those args (see referenceArgs).
 const REFERENCE_TOOL: Record<AgentReferenceType, string> = {
   harness: "get_harness_instance",
   runtime: "get_runtime",
@@ -38,7 +39,15 @@ const REFERENCE_TOOL: Record<AgentReferenceType, string> = {
   judge: "get_judge",
   view: "get_view",
   skill: "get_skill",
+  trace: "inspect_trace",
 };
+
+// The read-tool arguments for a reference. Most entities read by (id, version?); a `trace` reads by (name=source,
+// traceId=id) — inspect_trace's own signature — so the context injection hands the model the trace's normalized events.
+function referenceArgs(ref: AgentReference): Record<string, unknown> {
+  if (ref.type === "trace") return { name: ref.source ?? "", traceId: ref.id };
+  return { id: ref.id, ...(ref.version ? { version: ref.version } : {}) };
+}
 
 const MAX_REFERENCE_CHARS = 4_000;
 
@@ -47,7 +56,7 @@ const MAX_REFERENCE_CHARS = 4_000;
 async function resolveReferences(call: McpInvoke, references: AgentReference[]): Promise<string> {
   const blocks: string[] = [];
   for (const ref of references) {
-    const args: Record<string, unknown> = { id: ref.id, ...(ref.version ? { version: ref.version } : {}) };
+    const args = referenceArgs(ref);
     let detail: string;
     try {
       const r = await call(REFERENCE_TOOL[ref.type], args);

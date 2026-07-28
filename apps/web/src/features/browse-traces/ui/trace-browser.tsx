@@ -38,8 +38,8 @@ import { TraceDetailDialog } from './trace-detail-dialog'
 type StatusFilter = 'all' | 'ok' | 'error'
 type TraceStatus = 'ok' | 'error' | 'unset'
 
-const PAGE_SIZE = 50 // first load + each "load more" increment
-const MAX_LIMIT = 500 // the control plane's listTraces limit cap
+const PAGE_SIZE = 25 // small pages → fast first paint; the list auto-streams more pages by cursor
+const AUTO_PAGE_CAP = 8 // auto-append up to N pages per run (N*PAGE_SIZE) before a user-driven "load more"
 
 // Card display standard: status = color icon only, label in a hover tooltip (same principle as StatusIcon/UserAvatar).
 const STATUS_ICON: Record<TraceStatus, { icon: typeof CheckCircle2; className: string }> = {
@@ -100,6 +100,7 @@ export function TraceBrowser({
   selectedTraceId,
   selection,
   autoLoad = true,
+  onMention,
 }: {
   sources: TraceSourceConfig[]
   onPick?: (trace: TraceSummary, sourceName: string) => void
@@ -109,6 +110,10 @@ export function TraceBrowser({
   // want the list ready; the settings Observability page opts OUT so registering a source doesn't fire a slow pull —
   // the user selects a source and presses Fetch. Default stays true to preserve the pick flows' behavior.
   autoLoad?: boolean
+  // "Analyze in chat" — when set, the detail dialog offers a button that hands this trace to the agent chat as
+  // context (the observability browse passes it; the pick/selection flows don't). Kept as a plain callback so the
+  // features layer stays free of the widget-layer infra-panel wiring (the widget wrapper supplies the dispatch).
+  onMention?: (trace: TraceSummary, sourceName: string) => void
 }) {
   const t = useTranslations('traceBrowser')
   const locale = useLocale()
@@ -122,36 +127,70 @@ export function TraceBrowser({
   const [traces, setTraces] = useState<TraceSummary[]>([])
   const [error, setError] = useState<string | undefined>()
   const [loaded, setLoaded] = useState(false)
-  const [limit, setLimit] = useState(PAGE_SIZE)
+  const [cursor, setCursor] = useState<string | undefined>(undefined) // next page token (undefined = no more / not paginating)
   const [openTrace, setOpenTrace] = useState<TraceSummary | undefined>()
   const [pending, start] = useTransition()
   const loadedSource = useRef<string | undefined>(undefined)
+  const genRef = useRef(0) // load generation — a newer load bumps it so an in-flight stream drops its stale pages
 
-  const load = useCallback(
-    (name: string, scopeValue: string, limitValue: number, preset: TimePreset) => {
+  // Stream pages by cursor: fetch page 1 (small → fast first paint) then auto-append subsequent pages until the
+  // platform runs out of cursor OR the per-run page cap is hit (then the "Load more" button continues from `cursor`).
+  // reset=true clears first (source/scope/window change); reset=false appends (load more). A newer call supersedes.
+  const streamPages = useCallback(
+    (
+      name: string,
+      scopeValue: string,
+      preset: TimePreset,
+      startCursor: string | undefined,
+      reset: boolean
+    ) => {
       if (!name) return
+      const gen = ++genRef.current
       const win = windowFor(preset)
       start(async () => {
         setError(undefined)
-        setOpenTrace(undefined)
-        const res = await listTracesAction(name, {
-          ...(scopeValue ? { scope: scopeValue } : {}),
-          limit: limitValue,
-          ...(win.since ? { since: win.since } : {}),
-          ...(win.until ? { until: win.until } : {}),
-        })
-        if (res.ok) {
-          setTraces(res.traces)
-          setLoaded(true)
-        } else {
-          setError(res.error)
+        if (reset) {
+          setOpenTrace(undefined)
           setTraces([])
-          setLoaded(true)
+          setLoaded(false)
+          setCursor(undefined)
         }
+        let cursorTok = startCursor
+        let pages = 0
+        do {
+          const res = await listTracesAction(name, {
+            ...(scopeValue ? { scope: scopeValue } : {}),
+            limit: PAGE_SIZE,
+            ...(win.since ? { since: win.since } : {}),
+            ...(win.until ? { until: win.until } : {}),
+            ...(cursorTok ? { cursor: cursorTok } : {}),
+          })
+          if (gen !== genRef.current) return // a newer load started — abandon this page (no stale append)
+          if (!res.ok) {
+            setError(res.error)
+            setLoaded(true)
+            setCursor(undefined)
+            if (reset) setTraces([])
+            return
+          }
+          const replace = reset && pages === 0
+          setTraces((prev) => (replace ? res.traces : [...prev, ...res.traces]))
+          setLoaded(true)
+          cursorTok = res.nextCursor
+          setCursor(cursorTok)
+          pages += 1
+        } while (cursorTok && pages < AUTO_PAGE_CAP)
       })
     },
     [start]
   )
+  // Reset + stream (source/scope/window change, Fetch/reload). loadMore continues from the current cursor (append).
+  const load = useCallback(
+    (name: string, scopeValue: string, preset: TimePreset) =>
+      streamPages(name, scopeValue, preset, undefined, true),
+    [streamPages]
+  )
+  const loadMore = () => streamPages(sourceName, scope, timePreset, cursor, false)
 
   // Prime the scope + list ONCE per selected source, keyed by NAME — never by the `source` object identity: each
   // server-action response re-renders the route and hands this island a fresh `sources` array, so an identity-keyed
@@ -164,14 +203,14 @@ export function TraceBrowser({
     loadedSource.current = source.name
     const defaultScope = source.project ?? source.service ?? ''
     setScope(defaultScope)
-    setLimit(PAGE_SIZE)
     if (autoLoad) {
-      load(source.name, defaultScope, PAGE_SIZE, timePreset)
+      load(source.name, defaultScope, timePreset)
     } else {
       setTraces([])
       setLoaded(false)
       setError(undefined)
       setOpenTrace(undefined)
+      setCursor(undefined)
     }
   }, [source, load, timePreset, autoLoad])
 
@@ -181,12 +220,6 @@ export function TraceBrowser({
     const first = sources[0]?.name
     if (!sourceName && first) setSourceName(first)
   }, [sources, sourceName])
-
-  const loadMore = () => {
-    const next = Math.min(limit + PAGE_SIZE, MAX_LIMIT)
-    setLimit(next)
-    load(sourceName, scope, next, timePreset)
-  }
 
   // Filter → recent-first order → date groups (header = today/yesterday/date, rows show time only; undated rows
   // form a trailing headerless group). `flat` is the on-screen order the detail dialog's prev/next walks.
@@ -263,7 +296,7 @@ export function TraceBrowser({
         <Input
           value={scope}
           onChange={(e) => setScope(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && load(sourceName, scope, limit, timePreset)}
+          onKeyDown={(e) => e.key === 'Enter' && load(sourceName, scope, timePreset)}
           placeholder={t('scopePlaceholder')}
           className="w-[180px]"
           aria-label={t('scopeLabel')}
@@ -276,7 +309,7 @@ export function TraceBrowser({
             const preset = (TIME_PRESETS as string[]).includes(v) ? (v as TimePreset) : 'any'
             setTimePreset(preset)
             // Before the first manual fetch, changing the window just stages the choice — the Fetch button pulls with it.
-            if (autoLoad || loaded) load(sourceName, scope, limit, preset)
+            if (autoLoad || loaded) load(sourceName, scope, preset)
           }}
           searchable={false}
           className="w-[120px]"
@@ -293,7 +326,7 @@ export function TraceBrowser({
         <Button
           variant="secondary"
           size="md"
-          onClick={() => load(sourceName, scope, limit, timePreset)}
+          onClick={() => load(sourceName, scope, timePreset)}
           disabled={pending || !sourceName}
         >
           <RefreshCw className={cn('size-4', pending && 'animate-spin')} />
@@ -312,7 +345,7 @@ export function TraceBrowser({
           action={
             <Button
               size="sm"
-              onClick={() => load(sourceName, scope, limit, timePreset)}
+              onClick={() => load(sourceName, scope, timePreset)}
               disabled={pending || !sourceName}
             >
               <RefreshCw className={cn('size-4', pending && 'animate-spin')} />
@@ -441,10 +474,17 @@ export function TraceBrowser({
         </div>
       )}
 
-      {/* A full page means the platform may hold more — grow the limit and refetch (user-driven, no cursor state). */}
-      {!error && traces.length >= limit && limit < MAX_LIMIT && (
+      {/* Streaming append: while pages are still arriving, show a live indicator; once idle with a cursor left, offer to
+          continue (the per-run auto-cap stops the loop so a huge platform never streams forever). */}
+      {!error && pending && flat.length > 0 && (
+        <div className="flex items-center justify-center gap-2 py-1 text-[12px] text-faint">
+          <RefreshCw className="size-3.5 animate-spin" />
+          {t('streamingMore')}
+        </div>
+      )}
+      {!error && !pending && cursor && (
         <div className="flex justify-center">
-          <Button variant="ghost" size="sm" disabled={pending} onClick={loadMore}>
+          <Button variant="ghost" size="sm" onClick={loadMore}>
             {t('loadMore')}
           </Button>
         </div>
@@ -475,6 +515,7 @@ export function TraceBrowser({
                 }
               : undefined
           }
+          onMention={onMention}
         />
       )}
     </div>

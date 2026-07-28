@@ -2747,6 +2747,8 @@
     "notLoadedTitle": "No traces loaded",
     "notLoadedHint": "Pick a source and press Fetch to pull its traces from the platform.",
     "loadMore": "Load more",
+    "streamingMore": "Streaming more traces…",
+    "analyzeInChat": "Analyze in chat",
     "traceCount": "{shown} of {total}",
     "filterPlaceholder": "Filter by name, id, model…",
     "status_all": "All",
@@ -3273,7 +3275,8 @@
       "scorecard": "Scorecard",
       "judge": "Judge",
       "view": "View",
-      "skill": "Skill"
+      "skill": "Skill",
+      "trace": "Trace"
     }
   },
   "workspaceSettings": {

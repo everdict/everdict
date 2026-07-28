@@ -4,6 +4,7 @@ import {
   type SpanAttrMapping,
   type TraceEvent,
   type TraceInspectResult,
+  type TraceListPage,
   type TraceProvenance,
   type TraceSummary,
   UpstreamError,
@@ -215,7 +216,9 @@ export class PhoenixTraceSource implements BrowsableTraceSource {
     };
   }
 
-  async listTraces(opts?: ListTracesOptions): Promise<TraceSummary[]> {
+  // Single best-effort page — Phoenix has no list-traces endpoint, so listTraces groups one recent span page by
+  // trace_id (a span cursor can't safely page TRACES: a trace's spans could straddle two pages). No nextCursor.
+  async listTraces(opts?: ListTracesOptions): Promise<TraceListPage> {
     const project = opts?.scope ?? this.opts.project;
     if (!project) throw new UpstreamError("UPSTREAM_ERROR", {}, "Phoenix trace listing requires a project scope.");
     const f = this.opts.fetchImpl ?? fetch;
@@ -240,6 +243,6 @@ export class PhoenixTraceSource implements BrowsableTraceSource {
     const body = (await res.json().catch(() => ({}))) as { data?: PhoenixSpan[] };
     const summaries = phoenixSpansToSummaries(body.data ?? [], project);
     summaries.sort((a, b) => (b.startedAt ?? "").localeCompare(a.startedAt ?? ""));
-    return summaries.slice(0, limit);
+    return { traces: summaries.slice(0, limit) };
   }
 }

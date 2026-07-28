@@ -10,18 +10,26 @@ import {
 import { authContext } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
 
-export type ListTracesResult = { ok: true; traces: TraceSummary[] } | { ok: false; error: string }
+export type ListTracesResult =
+  | { ok: true; traces: TraceSummary[]; nextCursor?: string }
+  | { ok: false; error: string }
 
-// Enumerate a registered source's recent traces (the settings observability view + the judge-wizard sample picker).
+// Enumerate ONE page of a registered source's recent traces (the settings observability view + the judge-wizard sample
+// picker). `cursor` (a prior page's nextCursor) fetches the next page — the browser loops it to stream/append the list.
 // authZ (harnesses:read) is enforced by the control plane.
 export async function listTracesAction(
   sourceName: string,
-  query: { scope?: string; limit?: number; since?: string; until?: string } = {}
+  query: { scope?: string; limit?: number; since?: string; until?: string; cursor?: string } = {}
 ): Promise<ListTracesResult> {
   const ctx = await authContext()
   try {
     const raw = await controlPlane.listTraceSourceTraces(ctx, sourceName, query)
-    return { ok: true, traces: tracesListResponseSchema.parse(raw).traces }
+    const page = tracesListResponseSchema.parse(raw)
+    return {
+      ok: true,
+      traces: page.traces,
+      ...(page.nextCursor ? { nextCursor: page.nextCursor } : {}),
+    }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }
   }

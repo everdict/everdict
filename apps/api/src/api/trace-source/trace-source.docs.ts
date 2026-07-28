@@ -128,14 +128,19 @@ const docs = {
           .string()
           .optional()
           .describe("Platform scope to list within (defaults to the source's configured scope)"),
-        limit: z.coerce.number().int().positive().max(500).optional().describe("Max traces (default 50)"),
+        limit: z.coerce.number().int().positive().max(500).optional().describe("Max traces per page (default 50)"),
         since: z.string().optional().describe("ISO-8601 lower time bound (best-effort)"),
+        until: z.string().optional().describe("ISO-8601 upper time bound (best-effort — bounded window with since)"),
+        cursor: z
+          .string()
+          .optional()
+          .describe("Opaque page token from a prior page's nextCursor — fetch the next page (streamed append)"),
       }),
     ),
     response: {
       200: {
-        description: "Recent traces",
-        ...toJsonSchema(z.object({ traces: z.array(TraceSummarySchema) })),
+        description: "A page of recent traces + the token to fetch the next page (absent = last page)",
+        ...toJsonSchema(z.object({ traces: z.array(TraceSummarySchema), nextCursor: z.string().optional() })),
       },
       ...errorResponses(400, 401, 403, 404),
     },

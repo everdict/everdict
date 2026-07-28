@@ -120,7 +120,7 @@ export function registerTraceSourceTools(server: McpServer, ctx: McpToolContext)
       "list_trace_source_traces",
       {
         description:
-          "Enumerate a registered trace source's recent traces + observability metrics (id, name, startedAt, durationMs, tokens, costUsd, status, tags) — the list the judge wizard samples from and the settings traces view. When a trace was produced by Everdict, each row carries `provenance` {runId, scorecardId, dataset, harness, caseId} — the origin to fetch related context (the scorecard/run/dataset/harness) before analyzing it. scope defaults to the source's configured scope (mlflow experiment / phoenix|langfuse|langsmith project / otel[jaeger] service).",
+          "Enumerate a registered trace source's recent traces + observability metrics (id, name, startedAt, durationMs, tokens, costUsd, status, tags) — the list the judge wizard samples from and the settings traces view. Returns one PAGE: `{ traces, nextCursor? }`; pass `nextCursor` back as `cursor` to fetch the next page (absent = no more). When a trace was produced by Everdict, each row carries `provenance` {runId, scorecardId, dataset, harness, caseId} — the origin to fetch related context (the scorecard/run/dataset/harness) before analyzing it. scope defaults to the source's configured scope (mlflow experiment / phoenix|langfuse|langsmith project / otel[jaeger] service).",
         inputSchema: {
           name: z.string().min(1).describe("registered source name"),
           scope: z
@@ -128,21 +128,23 @@ export function registerTraceSourceTools(server: McpServer, ctx: McpToolContext)
             .min(1)
             .optional()
             .describe("platform scope to list within (defaults to the source's configured scope)"),
-          limit: z.number().int().positive().max(500).optional().describe("max traces (default 50)"),
+          limit: z.number().int().positive().max(500).optional().describe("max traces per page (default 50)"),
           since: z.string().min(1).optional().describe("ISO-8601 lower time bound (best-effort)"),
           until: z.string().min(1).optional().describe("ISO-8601 upper time bound (best-effort — bounded window)"),
+          cursor: z.string().min(1).optional().describe("page token from a prior page's nextCursor (next page)"),
         },
       },
-      ({ name, scope, limit, since, until }) =>
+      ({ name, scope, limit, since, until, cursor }) =>
         run(principal, "harnesses:read", async () =>
-          ok({
-            traces: await source.listTraces(ws, name, {
+          ok(
+            await source.listTraces(ws, name, {
               ...(scope ? { scope } : {}),
               ...(limit ? { limit } : {}),
               ...(since ? { since } : {}),
               ...(until ? { until } : {}),
+              ...(cursor ? { cursor } : {}),
             }),
-          }),
+          ),
         ),
     );
     server.registerTool(

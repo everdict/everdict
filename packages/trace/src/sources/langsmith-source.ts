@@ -4,6 +4,7 @@ import {
   type SpanAttrMapping,
   type TraceEvent,
   type TraceInspectResult,
+  type TraceListPage,
   type TraceProvenance,
   type TraceSummary,
   UpstreamError,
@@ -137,7 +138,7 @@ export class LangsmithTraceSource implements BrowsableTraceSource {
     };
   }
 
-  async listTraces(opts?: ListTracesOptions): Promise<TraceSummary[]> {
+  async listTraces(opts?: ListTracesOptions): Promise<TraceListPage> {
     const session = opts?.scope;
     if (!session) {
       throw new UpstreamError("UPSTREAM_ERROR", {}, "LangSmith trace listing requires a project (session) scope.");
@@ -171,6 +172,7 @@ export class LangsmithTraceSource implements BrowsableTraceSource {
           "extra",
         ],
         limit: opts?.limit ?? 50,
+        ...(opts?.cursor ? { cursor: opts.cursor } : {}), // /runs/query threads cursors.next back as body.cursor
       }),
     });
     if (!res.ok) {
@@ -181,8 +183,13 @@ export class LangsmithTraceSource implements BrowsableTraceSource {
         `LangSmith trace list ${res.status}: ${text.slice(0, 200)}`,
       );
     }
-    const body = (await res.json().catch(() => ({}))) as { runs?: LangsmithRun[] };
-    return langsmithRunsToSummaries(body.runs ?? [], session);
+    const body = (await res.json().catch(() => ({}))) as {
+      runs?: LangsmithRun[];
+      cursors?: { next?: string | null };
+    };
+    const traces = langsmithRunsToSummaries(body.runs ?? [], session);
+    const next = body.cursors?.next ?? undefined;
+    return { traces, ...(next ? { nextCursor: next } : {}) };
   }
   async fetch(runId: string): Promise<TraceEvent[]> {
     return langsmithRunsToTraceEvents(await this.fetchRuns(runId));

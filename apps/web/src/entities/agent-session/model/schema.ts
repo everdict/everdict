@@ -45,15 +45,19 @@ export const AGENT_REFERENCE_TYPES = [
   'judge',
   'view',
   'skill',
+  'trace',
 ] as const
 export const agentReferenceTypeSchema = z.enum(AGENT_REFERENCE_TYPES)
 export type AgentReferenceType = z.infer<typeof agentReferenceTypeSchema>
 
+// `source` is set ONLY for a `trace` reference — the registered trace-source name the trace lives in (keyed by
+// (source, id=traceId), attached from the observability browser rather than the @-picker).
 export const agentReferenceSchema = z.object({
   type: agentReferenceTypeSchema,
   id: z.string(),
   version: z.string().optional(),
   label: z.string(),
+  source: z.string().optional(),
 })
 export type AgentReference = z.infer<typeof agentReferenceSchema>
 

@@ -412,6 +412,96 @@ const SCORECARD_FIX_PR: FirstPartyDefault = {
   },
 };
 
+// The trace-analysis skill body (SKILL.md-style instructions the agent loads on demand via use_skill). A SKILL — not
+// code: it orchestrates the trace-source reads the agent already has (inspect_trace / list_trace_source_traces) plus,
+// for Everdict-produced traces, the run/scorecard reads. The procedure + its grounding discipline ARE the capability.
+// This is the skill the "analyze in chat" button (Settings › Observability) hands a trace to. Escaped backticks keep
+// the markdown code spans literal inside the template.
+const TRACE_ANALYSIS_INSTRUCTIONS = `
+# Trace analysis
+
+Analyze one observability trace — a single agent run captured on a workspace trace platform (MLflow / Langfuse /
+LangSmith / Phoenix / OTel) — and give the member a grounded read: what the agent did, where it failed, what it cost,
+and what to do next. Every claim MUST be backed by something in the trace; never infer beyond the evidence.
+
+## 1. Get the trace
+- If the member attached a trace ("analyze in chat"), its normalized events are ALREADY in your context — start there.
+- Otherwise locate it with \`list_trace_source_traces\` (a registered source; optional scope + time window), then pull
+  the full detail with \`inspect_trace\` (source name + trace id): the normalized events, the span waterfall
+  (\`detail.spans\` — offsets/durations/tokens/cost), and \`provenance\` when the trace is Everdict-produced.
+
+## 2. Reconstruct what happened
+- The goal: the first user message (or the run's input).
+- The path: the ordered tool_call → tool_result pairs and llm_call events — what the agent tried, in order.
+- The outcome: the final assistant message / final answer, and the trace status (ok / error).
+
+## 3. Surface failures
+- Errors: \`error\` events, tool_results with ok=false, and any error status on a span.
+- The failure signature: the concrete assertion / stack / error text — the thing any fix must address.
+- Attribute it: an agent mistake (wrong tool, wrong argument, gave up early) vs an environment/tool fault (a 5xx, a timeout).
+
+## 4. Cost & latency hotspots
+- From the waterfall + llm_call events: the longest-running spans and the most expensive llm_calls (tokens / cost).
+- Report the trace totals (duration, tokens in→out, cost) and the top 2-3 contributors — that is where tuning pays off.
+
+## 5. Connect to the eval (when Everdict-produced)
+- If the trace carries \`provenance\` {runId, scorecardId, dataset, harness, caseId}, pull that context with
+  \`get_run\` / \`get_scorecard\` so the analysis ties the trace to its case verdict + judge rationale, not just raw
+  spans. For a FAILING eval case whose harness has a source repo, hand off to the \`scorecard_fix_pr\` skill to propose
+  a code fix — do not duplicate that procedure here.
+
+## 6. Report
+- Load \`references/report.md\` (via \`read_skill_file\`) for the structure, then give a concise, evidence-grounded
+  analysis: lead with the verdict (what happened + why), then the supporting detail.
+
+## Constraints
+- Ground every claim in a trace event/span you actually read; if the trace is thin, say what is MISSING rather than guessing.
+- Quote only minimal excerpts — never dump the whole trace back.
+`.trim();
+
+// The trace-analysis report structure — a supporting file (loaded via read_skill_file only when the agent reaches the
+// report step), keeping the skill body itself lean (progressive disclosure).
+const TRACE_ANALYSIS_REPORT = `
+# Trace analysis report structure
+
+Give the member a scannable read, verdict first:
+
+- **Verdict** — one or two lines: what the run did, whether it succeeded, and the single most important finding.
+- **What happened** — the goal, then the ordered path (tool / LLM steps) to the outcome.
+- **Failures** — each failure with its concrete signature (error text / failed tool result) and whether it is an
+  agent mistake or an environment/tool fault.
+- **Cost & latency** — trace totals (duration, tokens, cost) + the top 2-3 hotspots (longest spans / priciest calls).
+- **Origin** — when Everdict-produced: the run / scorecard / dataset / harness / case the trace came from (with links),
+  and the case verdict + judge rationale.
+- **Next steps** — concrete, evidence-backed recommendations (a config change, a fix, or a scorecard_fix_pr handoff).
+
+Quote only minimal excerpts that prove each point — never paste the whole trace.
+`.trim();
+
+const TRACE_ANALYSIS: FirstPartyDefault = {
+  requires: null, // unconditional — uses the always-present trace-source reads (inspect_trace / list_trace_source_traces)
+  record: {
+    id: "trace-analysis",
+    tenant: FIRST_PARTY_TENANT,
+    version: "1.0.0",
+    name: "analyze_trace",
+    description:
+      "Analyze one observability trace pulled from a workspace trace source — summarize what the agent did, surface " +
+      "failures, flag cost/latency hotspots, and (for Everdict-produced traces) tie it back to the run/scorecard it " +
+      'came from. Use when a member attaches a trace ("analyze in chat") or asks about a trace in Settings › Observability.',
+    spec: {
+      type: "skill",
+      instructions: TRACE_ANALYSIS_INSTRUCTIONS,
+      files: [{ path: "references/report.md", content: TRACE_ANALYSIS_REPORT }],
+    },
+    visibility: "public",
+    sharedWith: [],
+    tags: ["trace", "observability", "analysis", "built-in"],
+    createdBy: "everdict",
+    createdAt: "2026-07-28T00:00:00.000Z",
+  },
+};
+
 // --- First-party CATALOG (public + adoptable, but NOT auto-enabled defaults) ---
 // A curated store entry a member ADOPTS (it needs per-user config, so it isn't a default). The first containerized
 // stdio MCP capability: the official Grafana MCP server (grafana/mcp-grafana, Apache-2.0), run as
@@ -521,13 +611,14 @@ export function firstPartyCatalogExtras(): CapabilityRecord[] {
   return [GRAFANA_MCP, PLAYWRIGHT_MCP, POSTGRES_MCP];
 }
 
-// The first-party default toolset, in the order they are offered — a web-reading trio then the skill: web search
+// The first-party default toolset, in the order they are offered — a web-reading trio then the skills: web search
 // (find; unconditional, key-gated) + fetch_url (read a page; unconditional, no key, HITL) + PDF read (read a PDF;
-// unconditional, no key, HITL) + the scorecard-fix-PR skill (github-gated — the first skill-kind default). All are
+// unconditional, no key, HITL) + the scorecard-fix-PR skill (github-gated — the first skill-kind default) + the
+// trace-analysis skill (unconditional — the "analyze in chat" companion to Settings › Observability). All are
 // portable Everdict-authored code/skill capabilities — NOT external MCP servers: the store's `mcp` kind + the agent
 // bridge are remote-Streamable-HTTP only, so a stdio/self-hosted server (ClickHouse, Playwright, Git, …) can't be a
 // universal first-party default; those are user-registered (their own endpoint). Rich integration adapters
 // (Mattermost / GitHub / image-registry) ship as control-plane MCP tools (credentials live server-side).
 export function firstPartyDefaults(): FirstPartyDefault[] {
-  return [WEB_SEARCH, FETCH_URL, PDF_READ, SCORECARD_FIX_PR];
+  return [WEB_SEARCH, FETCH_URL, PDF_READ, SCORECARD_FIX_PR, TRACE_ANALYSIS];
 }

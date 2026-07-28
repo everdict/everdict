@@ -5,6 +5,7 @@ import {
   type SpanAttrMapping,
   type TraceEvent,
   type TraceInspectResult,
+  type TraceListPage,
   type TraceSummary,
   UpstreamError,
 } from "@everdict/contracts";
@@ -203,7 +204,8 @@ export class OtelTraceSource implements BrowsableTraceSource {
     };
   }
 
-  async listTraces(opts?: ListTracesOptions): Promise<TraceSummary[]> {
+  // Single best-effort page — the Jaeger find-traces API has no cursor, so this returns one page with no nextCursor.
+  async listTraces(opts?: ListTracesOptions): Promise<TraceListPage> {
     const base = this.opts.endpoint.replace(/\/$/, "");
     const scope = opts?.scope ?? this.opts.service;
     if (!scope) {
@@ -232,6 +234,6 @@ export class OtelTraceSource implements BrowsableTraceSource {
       );
     }
     const body = (await res.json().catch(() => ({}))) as { data?: JaegerTraceDoc[] };
-    return jaegerTracesToSummaries(body.data ?? [], scope);
+    return { traces: jaegerTracesToSummaries(body.data ?? [], scope) };
   }
 }

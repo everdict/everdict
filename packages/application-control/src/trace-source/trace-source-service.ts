@@ -5,10 +5,10 @@ import {
   NotFoundError,
   type SpanAttrMapping,
   type TraceInspectResult,
+  type TraceListPage,
   type TraceProbeConfig,
   type TraceProbeResult,
   type TraceSourceConfig,
-  type TraceSummary,
   type WorkspaceSettings,
 } from "@everdict/contracts";
 import type { WorkspaceSettingsStore } from "../ports/workspace-settings-store.js";
@@ -301,7 +301,7 @@ export class TraceSourceService {
 
   // Enumerate a registered source's recent traces (the browser/wizard list). scope defaults to the source's configured
   // scope (experiment/project/service) when omitted.
-  async listTraces(tenant: string, name: string, opts?: ListTracesOptions): Promise<TraceSummary[]> {
+  async listTraces(tenant: string, name: string, opts?: ListTracesOptions): Promise<TraceListPage> {
     return (await this.browsableFor(tenant, name)).listTraces(opts);
   }
 

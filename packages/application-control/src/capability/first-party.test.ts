@@ -57,6 +57,25 @@ describe("firstPartyDefaults", () => {
     }
   });
 
+  it("ships the trace-analysis skill, unconditional (the 'analyze in chat' observability companion)", () => {
+    const skill = defaults.find((d) => d.record.id === "trace-analysis");
+    expect(skill).toBeDefined();
+    if (!skill) return;
+    expect(skill.requires).toBeNull(); // unconditional — uses the always-present trace-source reads
+    expect(skill.record.spec.type).toBe("skill");
+    if (skill.record.spec.type !== "skill") return;
+    // The procedure's load-bearing steps: pull the trace, connect Everdict-produced traces to their eval, and report
+    // via the supporting file (progressive disclosure).
+    for (const anchor of ["inspect_trace", "list_trace_source_traces", "provenance", "references/report.md"]) {
+      expect(skill.record.spec.instructions).toContain(anchor);
+    }
+    const report = skill.record.spec.files.find((f) => f.path === "references/report.md");
+    expect(report).toBeDefined();
+    for (const anchor of ["Verdict", "Failures", "Cost & latency", "Next steps"]) {
+      expect(report?.content).toContain(anchor);
+    }
+  });
+
   it("ships a pdf-read code tool that needs no secret and is HITL-gated (arbitrary-URL fetch)", () => {
     const pdf = defaults.find((d) => d.record.id === "pdf-read");
     expect(pdf).toBeDefined();

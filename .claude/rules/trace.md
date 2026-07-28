@@ -62,7 +62,11 @@ docs/service-harness.md + docs/architecture/trace-sink.md.
   docs/architecture/trace-sink.md.
 - **Browse + inspect + the conversion overlay** (`BrowsableTraceSource extends TraceSource`, what
   `buildTraceSource` now returns): `listTraces(opts)` enumerates a source's recent traces + observability metrics
-  (started/duration/tokens/cost/status/tags — pure per-kind summary parsers). `opts` carries a best-effort time window
+  (started/duration/tokens/cost/status/tags — pure per-kind summary parsers) and returns ONE `TraceListPage`
+  (`{traces, nextCursor?}`) — the web streams the list by looping `nextCursor` back as `opts.cursor` and APPENDING
+  (small first page → fast paint, no re-pull). Cursor mapping is per-platform: mlflow `page_token`→`next_page_token`
+  (traces/search), langfuse a 1-based `page` number, langsmith `cursors.next` (/runs/query); phoenix + otel(jaeger)
+  don't paginate the listing → single page, `nextCursor` omitted. `opts` also carries a best-effort time window
   (`since`/`until`, ISO-8601) each adapter maps to its platform's params — langfuse `from/toTimestamp`, jaeger
   `start/end` micros, phoenix `start_time/end_time`, mlflow `filter: timestamp_ms >= … AND <= …` (traces/search),
   langsmith `filter: and(gte/lte(start_time, …))` (/runs/query). The two POST-body filters (mlflow/langsmith) are

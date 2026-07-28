@@ -5,6 +5,7 @@ import {
   type SpanAttrMapping,
   type TraceEvent,
   type TraceInspectResult,
+  type TraceListPage,
   type TraceRunStatus,
   type TraceSummary,
   UpstreamError,
@@ -401,7 +402,7 @@ export class MlflowTraceSource implements BrowsableTraceSource {
     };
   }
 
-  async listTraces(opts?: ListTracesOptions): Promise<TraceSummary[]> {
+  async listTraces(opts?: ListTracesOptions): Promise<TraceListPage> {
     const f = this.opts.fetchImpl ?? fetch;
     const base = this.opts.endpoint.replace(/\/$/, "");
     const experiments = opts?.scope ? [opts.scope] : (this.opts.experimentIds ?? []);
@@ -429,6 +430,7 @@ export class MlflowTraceSource implements BrowsableTraceSource {
         locations: experiments.map((id) => ({ type: "MLFLOW_EXPERIMENT", mlflow_experiment: { experiment_id: id } })),
         max_results: opts?.limit ?? 50,
         ...(filter ? { filter } : {}),
+        ...(opts?.cursor ? { page_token: opts.cursor } : {}), // traces/search pages via page_token → next_page_token
       }),
     });
     if (!res.ok) {
@@ -439,8 +441,13 @@ export class MlflowTraceSource implements BrowsableTraceSource {
         `MLflow trace list ${res.status}: ${text.slice(0, 200)}`,
       );
     }
-    const body = (await res.json().catch(() => ({}))) as { traces?: MlflowTraceInfo[] };
-    return await this.enrichListModels(mlflowTracesToSummaries(body.traces ?? [], experiments[0]));
+    const body = (await res.json().catch(() => ({}))) as {
+      traces?: MlflowTraceInfo[];
+      next_page_token?: string | null;
+    };
+    const traces = await this.enrichListModels(mlflowTracesToSummaries(body.traces ?? [], experiments[0]));
+    const next = body.next_page_token ?? undefined;
+    return { traces, ...(next ? { nextCursor: next } : {}) };
   }
 
   // TraceInfo never carries the model (only tokens/cost — live-verified 3.11/3.14), so the list would show every row

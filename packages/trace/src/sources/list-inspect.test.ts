@@ -55,7 +55,7 @@ describe("OtelTraceSource — listTraces + inspect (Jaeger)", () => {
   it("lists traces from the service scope and summarizes the embedded spans", async () => {
     const fetchImpl = vi.fn((..._args: Parameters<typeof fetch>) => Promise.resolve(json(listBody)));
     const src = new OtelTraceSource({ endpoint: "http://jaeger:16686", fetchImpl: fetchImpl as typeof fetch });
-    const traces = await src.listTraces({ scope: "svc-a", limit: 25 });
+    const { traces } = await src.listTraces({ scope: "svc-a", limit: 25 });
     const url = new URL(String(fetchImpl.mock.calls[0]?.[0]));
     expect(url.pathname).toBe("/api/traces");
     expect(url.searchParams.get("service")).toBe("svc-a");
@@ -110,7 +110,7 @@ describe("MlflowTraceSource — listTraces + inspect", () => {
       ),
     );
     const src = new MlflowTraceSource({ endpoint: "http://mlflow:5000", fetchImpl: fetchImpl as typeof fetch });
-    const traces = await src.listTraces({ scope: "exp1", limit: 10 });
+    const { traces } = await src.listTraces({ scope: "exp1", limit: 10 });
     expect(String(fetchImpl.mock.calls[0]?.[0])).toContain("/api/3.0/mlflow/traces/search");
     expect(traces[0]).toMatchObject({ id: "tr1", durationMs: 1200, status: "ok", scope: "exp1" });
     expect(traces[0]?.tokens).toEqual({ input: 10, output: 5 });
@@ -147,7 +147,7 @@ describe("MlflowTraceSource — listTraces + inspect", () => {
       ),
     );
     const src = new MlflowTraceSource({ endpoint: "http://mlflow:5000", fetchImpl: fetchImpl as typeof fetch });
-    const traces = await src.listTraces({ scope: "exp1" });
+    const { traces } = await src.listTraces({ scope: "exp1" });
     expect(traces[0]).toMatchObject({ id: "tr2", name: "agent-run", durationMs: 1200, status: "error" });
     expect(traces[0]?.startedAt).toBe(new Date("2026-07-17T01:02:03Z").toISOString());
   });
@@ -174,7 +174,7 @@ describe("MlflowTraceSource — listTraces + inspect", () => {
       ),
     );
     const src = new MlflowTraceSource({ endpoint: "http://mlflow:5000", fetchImpl: fetchImpl as typeof fetch });
-    const traces = await src.listTraces({ scope: "exp1" });
+    const { traces } = await src.listTraces({ scope: "exp1" });
     expect(traces[0]?.costUsd).toBe(0.0012);
   });
 
@@ -200,7 +200,7 @@ describe("MlflowTraceSource — listTraces + inspect", () => {
       return Promise.resolve(json(spansFor("claude-fable-5")));
     });
     const src = new MlflowTraceSource({ endpoint: "http://mlflow:5000", fetchImpl: fetchImpl as typeof fetch });
-    const traces = await src.listTraces({ scope: "exp1" });
+    const { traces } = await src.listTraces({ scope: "exp1" });
     expect(traces.map((t) => t.llmModel)).toEqual(["gpt-5.4-mini", "claude-fable-5"]);
     // one traces/get per model-less row, after the single search
     const gets = fetchImpl.mock.calls.map((c) => String(c[0])).filter((u) => u.includes("/traces/get"));
@@ -214,7 +214,7 @@ describe("MlflowTraceSource — listTraces + inspect", () => {
       return Promise.resolve(new Response("boom", { status: 500 }));
     });
     const src = new MlflowTraceSource({ endpoint: "http://mlflow:5000", fetchImpl: fetchImpl as typeof fetch });
-    const traces = await src.listTraces({ scope: "exp1" });
+    const { traces } = await src.listTraces({ scope: "exp1" });
     expect(traces).toHaveLength(1);
     expect(traces[0]?.llmModel).toBeUndefined();
   });
@@ -270,7 +270,7 @@ describe("PhoenixTraceSource — listTraces groups spans by trace_id", () => {
       project: "p",
       fetchImpl: fetchImpl as typeof fetch,
     });
-    const traces = await src.listTraces();
+    const { traces } = await src.listTraces();
     expect(traces).toHaveLength(1);
     expect(traces[0]).toMatchObject({ id: "t1", spanCount: 2, status: "ok", llmModel: "gpt-4", scope: "p" });
     expect(traces[0]?.tokens).toEqual({ input: 8, output: 3 });
@@ -314,7 +314,7 @@ describe("LangfuseTraceSource — listTraces", () => {
     };
     const fetchImpl = vi.fn((..._args: Parameters<typeof fetch>) => Promise.resolve(json(body)));
     const src = new LangfuseTraceSource({ endpoint: "http://langfuse:3000", fetchImpl: fetchImpl as typeof fetch });
-    const traces = await src.listTraces({ limit: 20 });
+    const { traces } = await src.listTraces({ limit: 20 });
     expect(String(fetchImpl.mock.calls[0]?.[0])).toContain("/api/public/traces?");
     expect(traces[0]).toMatchObject({ id: "lf1", name: "agent", durationMs: 2500, costUsd: 0.03 });
     expect(traces[0]?.tags).toEqual({ prod: "" });
@@ -352,7 +352,7 @@ describe("LangsmithTraceSource — listTraces (root runs)", () => {
       endpoint: "https://api.smith.langchain.com",
       fetchImpl: fetchImpl as typeof fetch,
     });
-    const traces = await src.listTraces({ scope: "sess1" });
+    const { traces } = await src.listTraces({ scope: "sess1" });
     expect(traces[0]).toMatchObject({ id: "t1", durationMs: 1000, status: "ok", costUsd: 0.01, scope: "sess1" });
     expect(traces[0]?.tokens).toEqual({ input: 10, output: 5 });
   });
@@ -373,5 +373,84 @@ describe("LangsmithTraceSource — listTraces (root runs)", () => {
   it("listTraces requires a session (project) scope", async () => {
     const src = new LangsmithTraceSource({ endpoint: "https://x", fetchImpl: vi.fn() as unknown as typeof fetch });
     await expect(src.listTraces()).rejects.toThrow("project");
+  });
+});
+
+describe("trace list pagination (cursor → nextCursor)", () => {
+  it("MlflowTraceSource threads page_token and surfaces next_page_token as nextCursor", async () => {
+    const fetchImpl = vi.fn((..._args: Parameters<typeof fetch>) =>
+      Promise.resolve(
+        json({ traces: [{ trace_id: "tr1", state: "OK", tags: { "mlflow.llm.model": "x" } }], next_page_token: "pt2" }),
+      ),
+    );
+    const src = new MlflowTraceSource({ endpoint: "http://mlflow:5000", fetchImpl: fetchImpl as typeof fetch });
+    const page = await src.listTraces({ scope: "exp1", cursor: "pt1" });
+    expect(page.nextCursor).toBe("pt2");
+    const req = JSON.parse(String(fetchImpl.mock.calls[0]?.[1]?.body));
+    expect(req.page_token).toBe("pt1");
+  });
+
+  it("MlflowTraceSource omits nextCursor when the search returns no page token (last page)", async () => {
+    const fetchImpl = vi.fn((..._args: Parameters<typeof fetch>) =>
+      Promise.resolve(json({ traces: [{ trace_id: "tr1", state: "OK", tags: { "mlflow.llm.model": "x" } }] })),
+    );
+    const src = new MlflowTraceSource({ endpoint: "http://mlflow:5000", fetchImpl: fetchImpl as typeof fetch });
+    expect((await src.listTraces({ scope: "exp1" })).nextCursor).toBeUndefined();
+  });
+
+  it("LangfuseTraceSource pages by number and reports the next page as nextCursor", async () => {
+    const fetchImpl = vi.fn((..._args: Parameters<typeof fetch>) =>
+      Promise.resolve(json({ data: [{ id: "lf1" }], meta: { totalPages: 3 } })),
+    );
+    const src = new LangfuseTraceSource({ endpoint: "http://langfuse:3000", fetchImpl: fetchImpl as typeof fetch });
+    const page = await src.listTraces({ cursor: "2", limit: 10 });
+    const url = new URL(String(fetchImpl.mock.calls[0]?.[0]));
+    expect(url.searchParams.get("page")).toBe("2");
+    expect(page.nextCursor).toBe("3"); // page 2 of 3 → next is 3
+  });
+
+  it("LangfuseTraceSource omits nextCursor on the last page (totalPages reached)", async () => {
+    const fetchImpl = vi.fn((..._args: Parameters<typeof fetch>) =>
+      Promise.resolve(json({ data: [{ id: "lf1" }], meta: { totalPages: 2 } })),
+    );
+    const src = new LangfuseTraceSource({ endpoint: "http://langfuse:3000", fetchImpl: fetchImpl as typeof fetch });
+    expect((await src.listTraces({ cursor: "2", limit: 10 })).nextCursor).toBeUndefined();
+  });
+
+  it("LangfuseTraceSource infers a next page from a full page when meta is absent", async () => {
+    const data = Array.from({ length: 10 }, (_, i) => ({ id: `lf${i}` }));
+    const fetchImpl = vi.fn((..._args: Parameters<typeof fetch>) => Promise.resolve(json({ data })));
+    const src = new LangfuseTraceSource({ endpoint: "http://langfuse:3000", fetchImpl: fetchImpl as typeof fetch });
+    expect((await src.listTraces({ limit: 10 })).nextCursor).toBe("2"); // full page 1 ⇒ maybe more ⇒ page 2
+  });
+
+  it("LangsmithTraceSource threads cursor and returns cursors.next as nextCursor", async () => {
+    const fetchImpl = vi.fn((..._args: Parameters<typeof fetch>) =>
+      Promise.resolve(json({ runs: [{ trace_id: "t1", name: "root", run_type: "chain" }], cursors: { next: "c2" } })),
+    );
+    const src = new LangsmithTraceSource({
+      endpoint: "https://api.smith.langchain.com",
+      fetchImpl: fetchImpl as typeof fetch,
+    });
+    const page = await src.listTraces({ scope: "sess1", cursor: "c1" });
+    expect(page.nextCursor).toBe("c2");
+    const req = JSON.parse(String(fetchImpl.mock.calls[0]?.[1]?.body));
+    expect(req.cursor).toBe("c1");
+  });
+
+  it("OtelTraceSource returns a single page with no nextCursor (Jaeger find-traces has no cursor)", async () => {
+    const fetchImpl = vi.fn((..._args: Parameters<typeof fetch>) => Promise.resolve(json({ data: [] })));
+    const src = new OtelTraceSource({ endpoint: "http://jaeger:16686", fetchImpl: fetchImpl as typeof fetch });
+    expect((await src.listTraces({ scope: "svc-a" })).nextCursor).toBeUndefined();
+  });
+
+  it("PhoenixTraceSource returns a single best-effort page with no nextCursor", async () => {
+    const fetchImpl = vi.fn((..._args: Parameters<typeof fetch>) => Promise.resolve(json({ data: [] })));
+    const src = new PhoenixTraceSource({
+      endpoint: "http://phoenix:6006",
+      project: "p",
+      fetchImpl: fetchImpl as typeof fetch,
+    });
+    expect((await src.listTraces()).nextCursor).toBeUndefined();
   });
 });

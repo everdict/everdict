@@ -10,6 +10,7 @@ import {
   Play,
   Scale,
   Server,
+  Telescope,
   X,
   type LucideIcon,
 } from 'lucide-react'
@@ -30,7 +31,12 @@ export const REFERENCE_TYPE_ICON: Record<AgentReferenceType, LucideIcon> = {
   judge: Scale,
   view: Eye,
   skill: BookOpen,
+  trace: Telescope,
 }
+
+// `trace` is attached from the observability browser (a "mention in chat" button), never @-picked here — a
+// cross-source trace browse would be prohibitively wide. So the picker tabs offer every type EXCEPT trace.
+const PICKABLE_REFERENCE_TYPES = AGENT_REFERENCE_TYPES.filter((rt) => rt !== 'trace')
 
 interface MentionItem {
   id: string
@@ -143,7 +149,7 @@ export function MentionPicker({
 
       {!type ? (
         <ul className="max-h-60 overflow-y-auto p-1">
-          {AGENT_REFERENCE_TYPES.map((rt) => {
+          {PICKABLE_REFERENCE_TYPES.map((rt) => {
             const Icon = REFERENCE_TYPE_ICON[rt]
             return (
               <li key={rt}>

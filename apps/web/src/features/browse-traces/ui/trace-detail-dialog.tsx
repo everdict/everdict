@@ -13,6 +13,7 @@ import {
   FileText,
   Hash,
   Play,
+  Sparkles,
   X,
 } from 'lucide-react'
 import { useTimeZone, useTranslations } from 'next-intl'
@@ -76,6 +77,7 @@ export function TraceDetailDialog({
   trace,
   nav,
   onSelect,
+  onMention,
 }: {
   open: boolean
   onClose: () => void
@@ -83,6 +85,8 @@ export function TraceDetailDialog({
   trace: TraceSummary
   nav?: { index: number; total: number; onPrev: () => void; onNext: () => void }
   onSelect?: (trace: TraceSummary) => void
+  // "Analyze in chat" — when set, a header button hands this trace to the agent chat as context (observability browse).
+  onMention?: (trace: TraceSummary, sourceName: string) => void
 }) {
   const t = useTranslations('traceBrowser')
   const timeZone = useTimeZone()
@@ -159,6 +163,12 @@ export function TraceDetailDialog({
           {provenance && <OriginBar provenance={provenance} />}
         </div>
         <div className="flex shrink-0 items-center gap-2">
+          {onMention && (
+            <Button variant="outline" size="sm" onClick={() => onMention(trace, sourceName)}>
+              <Sparkles className="size-4" />
+              {t('analyzeInChat')}
+            </Button>
+          )}
           {nav && (
             <div className="flex items-center gap-1 rounded-md border border-border p-0.5">
               <button

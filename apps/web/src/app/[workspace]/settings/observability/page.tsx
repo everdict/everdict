@@ -1,6 +1,6 @@
 import { getTranslations } from 'next-intl/server'
 
-import { TraceBrowser } from '@/features/browse-traces'
+import { ObservabilityTraceBrowser } from '@/widgets/infra-panel'
 import { TraceSourceManager } from '@/features/manage-trace-source'
 import { secretsSchema } from '@/entities/secret'
 import { traceSourcesResponseSchema, type TraceSourcesResponse } from '@/entities/trace-source'
@@ -68,8 +68,9 @@ export default async function ObservabilityPage() {
           />
           <div className="border-t pt-6">
             {/* Opt out of auto-pull here: registering/listing a source shouldn't fire a slow platform query — the user
-                selects a source and presses Fetch. The pick flows (judge wizard, evaluate-traces) keep auto-loading. */}
-            <TraceBrowser sources={roster?.sources ?? []} autoLoad={false} />
+                selects a source and presses Fetch. Each trace's detail dialog can hand it to the agent chat as context
+                ("analyze in chat"). The pick flows (judge wizard, evaluate-traces) keep auto-loading, no mention. */}
+            <ObservabilityTraceBrowser sources={roster?.sources ?? []} />
           </div>
         </>
       )}

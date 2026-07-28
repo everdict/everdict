@@ -36,6 +36,9 @@ async function fetchRows(ctx: AuthContext, type: AgentReferenceType): Promise<un
       return controlPlane.listRuns<Row[]>(ctx, { limit: 30 })
     case 'skill':
       return controlPlane.listSkills<Row[]>(ctx)
+    case 'trace':
+      // trace references are attached from the observability browser (keyed by source+traceId), not @-picked here.
+      return []
   }
 }
 

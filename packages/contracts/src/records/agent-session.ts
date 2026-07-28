@@ -39,7 +39,9 @@ export const AgentToolCallSchema = z.object({
 export type AgentToolCall = z.infer<typeof AgentToolCallSchema>;
 
 // The workspace entity kinds a message can @-reference. Each maps to a control-plane read (get_<kind>) the agent
-// resolves into context, and to a list endpoint the composer's mention picker browses.
+// resolves into context, and to a list endpoint the composer's mention picker browses. `trace` is the exception: it is
+// keyed by (source, id=traceId) not (id, version), resolves via inspect_trace, and is attached from the observability
+// browser (a "mention in chat" button), not the @-picker — cross-source browsing there would be prohibitively wide.
 export const AGENT_REFERENCE_TYPES = [
   "harness",
   "runtime",
@@ -49,17 +51,20 @@ export const AGENT_REFERENCE_TYPES = [
   "judge",
   "view",
   "skill",
+  "trace",
 ] as const;
 export const AgentReferenceTypeSchema = z.enum(AGENT_REFERENCE_TYPES);
 export type AgentReferenceType = z.infer<typeof AgentReferenceTypeSchema>;
 
 // An @-mention on a user turn — the entity whose context the agent is handed. label is the display text the
-// composer showed (denormalized so the transcript renders the chip without re-fetching).
+// composer showed (denormalized so the transcript renders the chip without re-fetching). `source` is set ONLY for a
+// `trace` reference: the registered trace-source name the trace lives in (the agent inspects it as (source, id)).
 export const AgentReferenceSchema = z.object({
   type: AgentReferenceTypeSchema,
   id: z.string(),
   version: z.string().optional(),
   label: z.string(),
+  source: z.string().optional(),
 });
 export type AgentReference = z.infer<typeof AgentReferenceSchema>;
 

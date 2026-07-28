@@ -31,6 +31,16 @@ export interface ListTracesOptions {
   // phoenix start_time/end_time · mlflow/langsmith timestamp filter).
   since?: string; // ISO-8601 lower time bound.
   until?: string; // ISO-8601 upper time bound.
+  // Opaque platform page token from a prior page's `nextCursor` — fetch the NEXT page. Absent = the first page.
+  // The web streams the list by looping pages (append, no re-pull) until an adapter stops returning a cursor.
+  cursor?: string;
+}
+
+// One page of a source's recent traces + the token to fetch the next page. `nextCursor` absent = the last page (or a
+// platform whose listing doesn't paginate — mlflow/langfuse/langsmith return it; phoenix/otel[jaeger] omit it).
+export interface TraceListPage {
+  traces: TraceSummary[];
+  nextCursor?: string;
 }
 
 // Everdict origin recovered from a pulled trace's platform metadata/attributes — the `everdict.*` keys the sink
@@ -155,7 +165,7 @@ export interface FetchedTrace {
 // A TraceSource that can also enumerate its recent traces and inspect one (raw spans + re-normalize with a supplied
 // mapping). buildTraceSource returns this; consumers that only pull-by-id keep using the narrower TraceSource.
 export interface BrowsableTraceSource extends TraceSource {
-  listTraces(opts?: ListTracesOptions): Promise<TraceSummary[]>;
+  listTraces(opts?: ListTracesOptions): Promise<TraceListPage>;
   // inspect a specific trace by id. Span-based kinds (otel/mlflow) apply `mapping` (overriding the source's configured
   // mapping) and include rawAttributes; native kinds (langfuse/langsmith/phoenix) ignore mapping and omit rawAttributes.
   inspect(traceId: string, mapping?: SpanAttrMapping): Promise<TraceInspectResult>;

@@ -253,9 +253,9 @@ function server(
     // Browse engine stub — echoes the scope/trace id so list/inspect route wiring is verifiable without cluster I/O.
     buildSource: (cfg) => ({
       fetch: async () => [],
-      listTraces: async (opts) => [
-        { id: "trace-1", name: `${cfg.kind}-root`, ...(opts?.scope ? { scope: opts.scope } : {}) },
-      ],
+      listTraces: async (opts) => ({
+        traces: [{ id: "trace-1", name: `${cfg.kind}-root`, ...(opts?.scope ? { scope: opts.scope } : {}) }],
+      }),
       inspect: async (traceId, mapping) => ({
         events: [{ t: 0, kind: "message", role: "assistant", text: "hi" }],
         rawAttributes: [{ spanName: traceId, attrs: { mappedModel: mapping?.model?.[0] ?? null } }],

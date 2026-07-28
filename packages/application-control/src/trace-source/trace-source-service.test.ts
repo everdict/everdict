@@ -228,7 +228,7 @@ describe("TraceSourceService", () => {
   // The observability browser + judge-wizard sampling — list/inspect over an injected buildSource.
   const fakeBrowsable: BrowsableTraceSource = {
     fetch: async () => [],
-    listTraces: async (opts) => [{ id: "t1", ...(opts?.scope ? { scope: opts.scope } : {}) }],
+    listTraces: async (opts) => ({ traces: [{ id: "t1", ...(opts?.scope ? { scope: opts.scope } : {}) }] }),
     inspect: async (traceId, mapping) => ({
       events: [],
       rawAttributes: [{ spanName: traceId, attrs: { mappedModel: mapping?.model?.[0] ?? null } }],
@@ -239,8 +239,8 @@ describe("TraceSourceService", () => {
     const buildSource = vi.fn(() => fakeBrowsable);
     const svc = new TraceSourceService(fakeSettings(), { buildSource });
     await svc.upsert(WS, { name: "s1", kind: "otel", endpoint: "http://jaeger", service: "svc" });
-    const traces = await svc.listTraces(WS, "s1", { scope: "svc" });
-    expect(traces).toEqual([{ id: "t1", scope: "svc" }]);
+    const page = await svc.listTraces(WS, "s1", { scope: "svc" });
+    expect(page).toEqual({ traces: [{ id: "t1", scope: "svc" }] });
     expect(buildSource).toHaveBeenCalledWith(expect.objectContaining({ kind: "otel", endpoint: "http://jaeger" }));
   });
 

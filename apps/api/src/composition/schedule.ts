@@ -111,7 +111,7 @@ export function wireScheduleService(
     ...(traceSourceService
       ? {
           listTraceIds: async (tenant, source, opts) =>
-            (await traceSourceService.listTraces(tenant, source, opts)).map((t) => t.id),
+            (await traceSourceService.listTraces(tenant, source, opts)).traces.map((t) => t.id),
         }
       : {}),
     // Terminal status recorded on the schedule at finalize; the creator's completion notification is emitted by the

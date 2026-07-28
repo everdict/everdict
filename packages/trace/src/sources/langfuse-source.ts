@@ -4,6 +4,7 @@ import {
   type SpanAttrMapping,
   type TraceEvent,
   type TraceInspectResult,
+  type TraceListPage,
   type TraceSummary,
   UpstreamError,
 } from "@everdict/contracts";
@@ -34,6 +35,13 @@ interface LangfuseTraceDetail {
 }
 
 const ms = (iso: string | null | undefined): number => (iso ? Date.parse(iso) : 0);
+
+// The list cursor for a page-numbered platform (Langfuse) is just the 1-based page number as a string. A missing or
+// unparseable cursor is page 1 (never trust a client-supplied token to be a valid integer).
+function pageFromCursor(cursor: string | undefined): number {
+  const n = cursor ? Number(cursor) : 1;
+  return Number.isFinite(n) && n >= 1 ? Math.floor(n) : 1;
+}
 
 // Observation array → TraceEvent[] (pure). model present → llm_call, a TOOL observation → a tool_call/result pair, other structural observations are skipped.
 export function langfuseObservationsToTraceEvents(observations: LangfuseObservation[]): TraceEvent[] {
@@ -153,10 +161,13 @@ export class LangfuseTraceSource implements BrowsableTraceSource {
     };
   }
 
-  async listTraces(opts?: ListTracesOptions): Promise<TraceSummary[]> {
+  async listTraces(opts?: ListTracesOptions): Promise<TraceListPage> {
     const f = this.opts.fetchImpl ?? fetch;
     const base = this.opts.endpoint.replace(/\/$/, "");
-    const qs = new URLSearchParams({ limit: String(opts?.limit ?? 50), page: "1" });
+    const limit = opts?.limit ?? 50;
+    // Langfuse paginates by 1-based page number — the cursor IS the next page number (default page 1).
+    const page = pageFromCursor(opts?.cursor);
+    const qs = new URLSearchParams({ limit: String(limit), page: String(page) });
     if (opts?.since) qs.set("fromTimestamp", opts.since);
     if (opts?.until) qs.set("toTimestamp", opts.until); // upper bound — symmetric with fromTimestamp (Langfuse public API)
     const res = await f(`${base}/api/public/traces?${qs.toString()}`, {
@@ -170,7 +181,15 @@ export class LangfuseTraceSource implements BrowsableTraceSource {
         `Langfuse trace list ${res.status}: ${text.slice(0, 200)}`,
       );
     }
-    const body = (await res.json().catch(() => ({}))) as { data?: LangfuseTraceListItem[] };
-    return langfuseTracesToSummaries(body.data ?? [], opts?.scope);
+    const body = (await res.json().catch(() => ({}))) as {
+      data?: LangfuseTraceListItem[];
+      meta?: { totalPages?: number | null };
+    };
+    const items = body.data ?? [];
+    const traces = langfuseTracesToSummaries(items, opts?.scope);
+    // Prefer the API's totalPages; fall back to inferring "a full page ⇒ maybe more" when meta is absent.
+    const totalPages = body.meta?.totalPages;
+    const hasMore = typeof totalPages === "number" ? page < totalPages : items.length >= limit;
+    return { traces, ...(hasMore ? { nextCursor: String(page + 1) } : {}) };
   }
 }
