@@ -1,6 +1,6 @@
 import type { GithubAppService } from "@everdict/application-control";
 import type { ImageRegistryService } from "@everdict/application-control";
-import type { NotificationService } from "@everdict/application-control";
+import type { NotificationService, PlatformEventService } from "@everdict/application-control";
 import type { Metrics } from "@everdict/application-control";
 import type { RecordingStore } from "@everdict/application-control";
 import type { RunnerHubLike } from "@everdict/application-control";
@@ -51,6 +51,7 @@ export function buildScorecard(deps: {
   githubAppService: GithubAppService;
   imageRegistryService: ImageRegistryService;
   notificationService: NotificationService;
+  platformEventService: PlatformEventService;
   traceSinkService: TraceSinkService;
   preflightPlacement: PlacementPreflight;
   killCase: ScorecardRuntimeAccess["killCase"];
@@ -79,6 +80,7 @@ export function buildScorecard(deps: {
     githubAppService,
     imageRegistryService,
     notificationService,
+    platformEventService,
     traceSinkService,
     preflightPlacement,
     killCase,
@@ -182,6 +184,8 @@ export function buildScorecard(deps: {
     registryAuthsFor: (workspace) => imageRegistryService.pullAuths(workspace),
     // Completion notification (Mattermost) — batch-eval completion posts to the channel just like a run.
     onComplete: (tenant, record) => notificationService.notifyScorecard(tenant, record),
+    // Lifecycle facts (agent-automation A1) — scorecard.submitted / case.completed / cancelled.
+    events: platformEventService,
     // Trace sink export — export judged detail results to the workspace observability platform (outcome recorded on record.export).
     exportResults: (tenant, ctx, results, attach) => traceSinkService.exportScorecard(tenant, ctx, results, attach),
     // A live batch streams the export the moment a case completes (after judging) (D5) — ingest keeps the batched exportResults above.

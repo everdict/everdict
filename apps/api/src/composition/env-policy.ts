@@ -17,24 +17,25 @@ export function meterUsagePolicyFromEnv(): (tenant: string) => boolean {
   return () => all;
 }
 
-// The workspace filesystem's distributed backend: the SAME 4 S3/MinIO env vars as the artifact store (one object
-// storage serves both; the filesystem namespaces itself under the "fs/" key prefix). Unset → undefined → the caller
-// falls back to InMemoryWorkspaceFs (dev: per-process, not persisted).
+// The workspace filesystem's distributed backend: the SAME S3/MinIO endpoint + credentials as the artifact store,
+// but its OWN buckets — one bucket PER TENANT (`<prefix>-<tenant>-<hash8>`, default prefix "everdict-fs",
+// override via EVERDICT_S3_FS_BUCKET_PREFIX), created lazily on a tenant's first filesystem touch. The bucket is
+// the isolation boundary (per-tenant credentials/quota/lifecycle attach at the storage layer). Unset → undefined
+// → the caller falls back to InMemoryWorkspaceFs (dev: per-process, not persisted).
 export async function workspaceFsFromEnv(): Promise<S3WorkspaceFs | undefined> {
   const endpoint = process.env.EVERDICT_S3_ENDPOINT;
-  const bucket = process.env.EVERDICT_S3_FS_BUCKET ?? process.env.EVERDICT_S3_BUCKET;
   const accessKeyId = process.env.EVERDICT_S3_ACCESS_KEY;
   const secretAccessKey = process.env.EVERDICT_S3_SECRET_KEY;
-  if (!endpoint || !bucket || !accessKeyId || !secretAccessKey) return undefined;
-  const fs = new S3WorkspaceFs({
+  if (!endpoint || !accessKeyId || !secretAccessKey) return undefined;
+  return new S3WorkspaceFs({
     endpoint,
-    bucket,
     accessKeyId,
     secretAccessKey,
     ...(process.env.EVERDICT_S3_REGION ? { region: process.env.EVERDICT_S3_REGION } : {}),
+    ...(process.env.EVERDICT_S3_FS_BUCKET_PREFIX
+      ? { bucketPrefix: process.env.EVERDICT_S3_FS_BUCKET_PREFIX }
+      : {}),
   });
-  await fs.ensureBucket().catch(() => {});
-  return fs;
 }
 
 // Artifact (screenshot) object storage: if all 4 env vars (endpoint/bucket/access/secret) are present, configure the S3/MinIO store + ensure the bucket.

@@ -63,11 +63,15 @@ export default async function SkillsPage() {
 
   return (
     <div className="space-y-6">
-      {header}
       {error !== undefined ? (
-        <Callout tone="danger">{s('connectError', { error })}</Callout>
+        <>
+          {header}
+          <Callout tone="danger">{s('connectError', { error })}</Callout>
+        </>
       ) : (
+        // Header is rendered inside the manager so the "New skill" button sits on the title row (PageHeader actions).
         <SkillsManager
+          header={{ title: t('skills'), description: t('skillsDesc') }}
           skills={skills}
           modelIds={modelIds}
           authors={authors}

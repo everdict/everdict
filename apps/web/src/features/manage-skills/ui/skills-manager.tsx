@@ -28,6 +28,7 @@ import { Dialog } from '@/shared/ui/dialog'
 import { DropdownItem, DropdownMenu, DropdownSeparator } from '@/shared/ui/dropdown-menu'
 import { EmptyState } from '@/shared/ui/empty-state'
 import { Input, Label, Textarea } from '@/shared/ui/input'
+import { PageHeader } from '@/shared/ui/page-header'
 
 import {
   createSkillAction,
@@ -49,6 +50,7 @@ export function SkillsManager({
   canWrite,
   currentSubject,
   isAdmin,
+  header,
 }: {
   skills: Skill[]
   modelIds: string[]
@@ -56,6 +58,9 @@ export function SkillsManager({
   canWrite: boolean
   currentSubject?: string
   isAdmin: boolean
+  // 전용 페이지(설정 › 스킬)에선 매니저가 페이지 헤더까지 그린다 — "새 스킬" 버튼이 제목과 같은 줄(actions)에 앉도록.
+  // 섹션 임베드(계정 › 개인 능력)에선 생략하면 기존 우측 버튼 행으로 폴백.
+  header?: { title: string; description: string }
 }) {
   const t = useTranslations('skillsManager')
   const { workspace } = useParams<{ workspace: string }>()
@@ -94,15 +99,23 @@ export function SkillsManager({
       else toast.error(r.error ?? t('saveError'))
     })
 
+  const newSkillButton = canWrite ? (
+    <Button size="sm" onClick={() => setEditing('new')}>
+      <Plus />
+      {t('newSkill')}
+    </Button>
+  ) : undefined
+
   return (
-    <div className="space-y-4">
-      {canWrite && (
-        <div className="flex justify-end">
-          <Button size="sm" onClick={() => setEditing('new')}>
-            <Plus />
-            {t('newSkill')}
-          </Button>
-        </div>
+    <div className={header ? 'space-y-6' : 'space-y-4'}>
+      {header ? (
+        <PageHeader
+          title={header.title}
+          description={header.description}
+          actions={newSkillButton}
+        />
+      ) : (
+        newSkillButton && <div className="flex justify-end">{newSkillButton}</div>
       )}
 
       {skills.length === 0 ? (
@@ -117,7 +130,11 @@ export function SkillsManager({
         <div className="space-y-5">
           {(
             [
-              { key: 'private', title: t('personalSection'), items: skills.filter((s) => s.visibility === 'private') },
+              {
+                key: 'private',
+                title: t('personalSection'),
+                items: skills.filter((s) => s.visibility === 'private'),
+              },
               {
                 key: 'workspace',
                 title: t('workspaceSection'),
@@ -133,93 +150,93 @@ export function SkillsManager({
                   {section.title}
                 </div>
                 {section.items.map((s) => {
-            const author = authorOf(s.createdBy)
-            return (
-              <div key={s.id} className="rounded-lg border border-border bg-card p-4">
-                {/* 헤더 — 이름(상세로 링크) + 공개범위 배지 + 파일 수(왼쪽) · 관리 액션(오른쪽, 관리 권한 있을 때만) */}
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex min-w-0 flex-1 items-center gap-2">
-                    <Sparkles className="size-4 shrink-0 text-primary" />
-                    <Link
-                      href={`/${workspace}/settings/skills/${encodeURIComponent(s.id)}`}
-                      className="min-w-0 truncate font-mono text-[13px] font-medium hover:text-primary hover:underline"
-                    >
-                      {s.name}
-                    </Link>
-                    <Badge
-                      tone={s.visibility === 'workspace' ? 'info' : 'outline'}
-                      className="shrink-0 gap-1"
-                    >
-                      {s.visibility === 'workspace' ? (
-                        <Globe className="size-3" />
-                      ) : (
-                        <Lock className="size-3" />
-                      )}
-                      {t(s.visibility)}
-                    </Badge>
-                    {s.files.length > 0 && (
-                      <Badge tone="outline" className="shrink-0 gap-1">
-                        <FileText className="size-3" />
-                        {s.files.length}
-                      </Badge>
-                    )}
-                  </div>
-                  {canManage(s) && (
-                    <DropdownMenu
-                      align="end"
-                      trigger={({ open, toggle }) => (
-                        <button
-                          type="button"
-                          onClick={toggle}
-                          disabled={pending}
-                          aria-label={t('skillMenu')}
-                          aria-expanded={open}
-                          className="grid size-8 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
-                        >
-                          <MoreHorizontal className="size-4" />
-                        </button>
-                      )}
-                    >
-                      <DropdownItem
-                        icon={s.visibility === 'private' ? <Globe /> : <Lock />}
-                        onSelect={() =>
-                          share(s, s.visibility === 'private' ? 'workspace' : 'private')
-                        }
-                      >
-                        {s.visibility === 'private' ? t('share') : t('unshare')}
-                      </DropdownItem>
-                      <DropdownItem icon={<Pencil />} onSelect={() => setEditing(s)}>
-                        {t('edit')}
-                      </DropdownItem>
-                      <DropdownSeparator />
-                      <DropdownItem
-                        icon={<Trash2 />}
-                        tone="danger"
-                        onSelect={() => setConfirming(s)}
-                      >
-                        {t('delete')}
-                      </DropdownItem>
-                    </DropdownMenu>
-                  )}
-                </div>
+                  const author = authorOf(s.createdBy)
+                  return (
+                    <div key={s.id} className="rounded-lg border border-border bg-card p-4">
+                      {/* 헤더 — 이름(상세로 링크) + 공개범위 배지 + 파일 수(왼쪽) · 관리 액션(오른쪽, 관리 권한 있을 때만) */}
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex min-w-0 flex-1 items-center gap-2">
+                          <Sparkles className="size-4 shrink-0 text-primary" />
+                          <Link
+                            href={`/${workspace}/settings/skills/${encodeURIComponent(s.id)}`}
+                            className="min-w-0 truncate font-mono text-[13px] font-medium hover:text-primary hover:underline"
+                          >
+                            {s.name}
+                          </Link>
+                          <Badge
+                            tone={s.visibility === 'workspace' ? 'info' : 'outline'}
+                            className="shrink-0 gap-1"
+                          >
+                            {s.visibility === 'workspace' ? (
+                              <Globe className="size-3" />
+                            ) : (
+                              <Lock className="size-3" />
+                            )}
+                            {t(s.visibility)}
+                          </Badge>
+                          {s.files.length > 0 && (
+                            <Badge tone="outline" className="shrink-0 gap-1">
+                              <FileText className="size-3" />
+                              {s.files.length}
+                            </Badge>
+                          )}
+                        </div>
+                        {canManage(s) && (
+                          <DropdownMenu
+                            align="end"
+                            trigger={({ open, toggle }) => (
+                              <button
+                                type="button"
+                                onClick={toggle}
+                                disabled={pending}
+                                aria-label={t('skillMenu')}
+                                aria-expanded={open}
+                                className="grid size-8 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
+                              >
+                                <MoreHorizontal className="size-4" />
+                              </button>
+                            )}
+                          >
+                            <DropdownItem
+                              icon={s.visibility === 'private' ? <Globe /> : <Lock />}
+                              onSelect={() =>
+                                share(s, s.visibility === 'private' ? 'workspace' : 'private')
+                              }
+                            >
+                              {s.visibility === 'private' ? t('share') : t('unshare')}
+                            </DropdownItem>
+                            <DropdownItem icon={<Pencil />} onSelect={() => setEditing(s)}>
+                              {t('edit')}
+                            </DropdownItem>
+                            <DropdownSeparator />
+                            <DropdownItem
+                              icon={<Trash2 />}
+                              tone="danger"
+                              onSelect={() => setConfirming(s)}
+                            >
+                              {t('delete')}
+                            </DropdownItem>
+                          </DropdownMenu>
+                        )}
+                      </div>
 
-                <p className="mt-1.5 line-clamp-2 text-[13px] text-muted-foreground">
-                  {s.description}
-                </p>
+                      <p className="mt-1.5 line-clamp-2 text-[13px] text-muted-foreground">
+                        {s.description}
+                      </p>
 
-                {/* 하단 메타 — 이 스킬을 누가 만들었는지(아바타 + 이름) */}
-                <div className="mt-3 flex items-center gap-1.5 text-[11.5px] text-faint">
-                  <Avatar
-                    name={author.name}
-                    url={author.avatarUrl}
-                    size="sm"
-                    className="rounded-full"
-                  />
-                  <span>{t('createdBy', { name: author.name })}</span>
-                </div>
-              </div>
-            )
-          })}
+                      {/* 하단 메타 — 이 스킬을 누가 만들었는지(아바타 + 이름) */}
+                      <div className="mt-3 flex items-center gap-1.5 text-[11.5px] text-faint">
+                        <Avatar
+                          name={author.name}
+                          url={author.avatarUrl}
+                          size="sm"
+                          className="rounded-full"
+                        />
+                        <span>{t('createdBy', { name: author.name })}</span>
+                      </div>
+                    </div>
+                  )
+                })}
               </div>
             ))}
         </div>

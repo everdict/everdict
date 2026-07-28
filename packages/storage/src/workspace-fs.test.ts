@@ -1,5 +1,6 @@
 import { BadRequestError, ConflictError, NotFoundError, normalizeFsPath } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
+import { fsBucketFor } from "./fs-shared.js";
 import { InMemoryWorkspaceFs } from "./in-memory-fs.js";
 
 const utf8 = (s: string) => new TextEncoder().encode(s);
@@ -18,6 +19,30 @@ describe("normalizeFsPath (the one isolation gate every operation funnels throug
     expect(() => normalizeFsPath("a/../../b")).toThrow(BadRequestError);
     expect(() => normalizeFsPath("a/b c")).toThrow(BadRequestError); // spaces are outside the safe set
     expect(() => normalizeFsPath("a\\b")).toThrow(BadRequestError);
+  });
+});
+
+describe("fsBucketFor (one MinIO/S3 bucket per tenant — the isolation boundary)", () => {
+  it("derives a deterministic, bucket-legal name per tenant", () => {
+    const name = fsBucketFor("everdict-fs", "acme");
+    expect(name).toBe(fsBucketFor("everdict-fs", "acme")); // deterministic
+    expect(name.startsWith("everdict-fs-acme-")).toBe(true); // operator-readable
+    expect(name).toMatch(/^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$/); // S3 bucket-name rules
+    expect(name.length).toBeLessThanOrEqual(63);
+  });
+
+  it("never collides two DISTINCT tenants onto one bucket, even when sanitization would", () => {
+    // case-only and charset-only differences sanitize to the same readable head — the hash tail keeps them apart
+    expect(fsBucketFor("everdict-fs", "Acme")).not.toBe(fsBucketFor("everdict-fs", "acme"));
+    expect(fsBucketFor("everdict-fs", "a.b")).not.toBe(fsBucketFor("everdict-fs", "a-b"));
+    expect(fsBucketFor("everdict-fs", "a_b")).not.toBe(fsBucketFor("everdict-fs", "a.b"));
+  });
+
+  it("caps overlong tenants at the 63-char bucket limit and rejects an illegal prefix", () => {
+    const long = fsBucketFor("everdict-fs", "w".repeat(200));
+    expect(long.length).toBeLessThanOrEqual(63);
+    expect(long).toMatch(/^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$/);
+    expect(() => fsBucketFor("Bad_Prefix", "acme")).toThrow(BadRequestError);
   });
 });
 

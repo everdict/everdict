@@ -1,3 +1,4 @@
+import type { PermissionHook } from "@everdict/agent-runtime";
 import type { AgentMailbox } from "./agent-mailbox.js";
 import { type ChatDeps, contentToString, runChat } from "./chat.js";
 import type { Authenticate } from "./principal.js";
@@ -14,6 +15,8 @@ export async function runTeammateTurn(
   mailbox: AgentMailbox,
   sessionId: string,
   agentToken: string,
+  signal?: AbortSignal,
+  permit?: PermissionHook,
 ): Promise<void> {
   const headers = { authorization: `Bearer ${agentToken}` };
   try {
@@ -25,8 +28,11 @@ export async function runTeammateTurn(
     // The incoming messages (peer/event, attribution-rendered) are this turn's prompt; further messages that arrive
     // mid-turn are pulled by the loop's own drainInput at each turn boundary.
     const prompt = drained.map((m) => contentToString(m.content)).join("\n\n");
-    await runChat(deps, principal, headers, sessionId, prompt, undefined, undefined, undefined, {
+    await runChat(deps, principal, headers, sessionId, prompt, undefined, undefined, signal, {
       drainInput: () => mailbox.drain(principal.workspace, sessionId),
+      // Activation runs carry a mode-derived approval hook (agent-automation A6); a plain teammate turn has
+      // none (its autonomy boundary is consent at spawn time).
+      ...(permit ? { permit } : {}),
     });
   } catch (err) {
     console.error(`[agent] teammate turn failed for ${sessionId}:`, err instanceof Error ? err.message : err);

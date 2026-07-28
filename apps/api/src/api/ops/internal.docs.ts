@@ -113,6 +113,55 @@ const internal = {
       ...errorResponses(400, 403, 404),
     },
   },
+  events: {
+    summary: "Read the platform-event log from a cursor (internal)",
+    description:
+      "Agent-service reconcile bridge (docs/architecture/agent-automation.md): platform events (lifecycle facts) " +
+      "are pushed best-effort as they happen; the agent service walks `seq > after` per workspace at startup/interval " +
+      "so a missed push is recovered (at-least-once + event-id dedup). Ascending by seq. Guarded by x-internal-token " +
+      "(403 on mismatch; fail-closed 404 when unset).",
+    tags: ["internal"],
+    querystring: toJsonSchema(
+      z.object({
+        workspace: z.string().min(1).optional().describe("omit for the deployment-wide cursor (one reconcile loop)"),
+        after: z.coerce.number().int().nonnegative().optional().describe("reconcile cursor — events with seq > after"),
+        kinds: z.string().optional().describe("comma-separated kind filter"),
+        limit: z.coerce.number().int().positive().max(500).optional(),
+      }),
+    ),
+    response: {
+      200: { description: "Events (ascending by seq)" },
+      ...errorResponses(400, 403, 404),
+    },
+  },
+  agentRunEvents: {
+    summary: "Record an agent-run lifecycle fact (internal)",
+    description:
+      "Agent service → event-log bridge (docs/architecture/agent-automation.md A5): the activation wrapper reports " +
+      "agent.run.started/completed/failed/cancelled so the fleet view + audit read one durable record. These kinds " +
+      "are never trigger-matchable. Guarded by x-internal-token (403 on mismatch; fail-closed 404 when unset).",
+    tags: ["internal"],
+    body: toJsonSchema(
+      z.object({
+        tenant: z.string().min(1),
+        kind: z.enum([
+          "agent.run.started",
+          "agent.run.awaiting_approval",
+          "agent.run.completed",
+          "agent.run.failed",
+          "agent.run.cancelled",
+        ]),
+        sessionId: z.string().min(1),
+        agentId: z.string().min(1),
+        eventKind: z.string().min(1).describe("the platform-event kind that woke the run"),
+        message: z.string().min(1),
+      }),
+    ),
+    response: {
+      200: { description: "Recorded", ...toJsonSchema(OkResponseSchema) },
+      ...errorResponses(400, 403, 404),
+    },
+  },
   batchPlan: {
     summary: "Plan a Temporal batch (internal bridge)",
     description:

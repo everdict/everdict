@@ -105,15 +105,27 @@ function resolver(
 }
 
 function spec(over: Partial<AgentSpec> = {}): AgentSpec {
-  return { id: "default", version: "1.0.0", mcpServers: [], capabilities: [], disabledDefaults: [], tags: [], ...over };
+  return {
+    id: "default",
+    version: "1.0.0",
+    mcpServers: [],
+    capabilities: [],
+    disabledDefaults: [],
+    triggers: [],
+    enabled: false,
+    tags: [],
+    ...over,
+  };
 }
 
 describe("registryProfileResolver", () => {
   it("falls back to the base profile when no agent is registered (+ the unconditional built-in defaults)", async () => {
     const profile = await resolver(undefined)(principal);
-    expect(profile.systemPrompt).toBe(BASE);
+    // The unconditional first-party analyze_trace SKILL rides along even with no workspace skills, so the
+    // base prompt gains the skills note; the workspace-authored set stays empty.
+    expect(profile.systemPrompt.startsWith(BASE)).toBe(true);
     expect(profile.mcpServers).toEqual([]);
-    expect(profile.skills).toEqual([]);
+    expect(profile.skills.map((s) => s.name)).toEqual(["analyze_trace"]);
     // pdf_read is unconditional (no key); web_search needs a key (absent here) → omitted.
     expect(profile.codeTools.map((t) => t.name)).toEqual(["fetch_url", "pdf_read"]);
   });
@@ -124,7 +136,8 @@ describe("registryProfileResolver", () => {
       secretStore({}),
       skillStore([skillRecord({ name: "triage" })]),
     )(principal);
-    expect(profile.skills).toEqual([{ name: "triage", description: "d", instructions: "1. …", files: [] }]);
+    expect(profile.skills.map((s) => s.name)).toEqual(["triage", "analyze_trace"]);
+    expect(profile.skills[0]).toMatchObject({ name: "triage", description: "d", instructions: "1. …", files: [] });
     expect(profile.systemPrompt).toContain("use_skill");
   });
 
@@ -321,7 +334,7 @@ describe("registryProfileResolver", () => {
       capabilityStore([]), // getVersion returns undefined
     )(principal);
     expect(profile.mcpServers).toEqual([]);
-    expect(profile.skills).toEqual([]);
+    expect(profile.skills.map((s) => s.name)).toEqual(["analyze_trace"]); // the first-party skill remains
     expect(profile.codeTools.map((t) => t.name)).toEqual(["fetch_url", "pdf_read"]); // pin skipped; only the built-in defaults remain
   });
 

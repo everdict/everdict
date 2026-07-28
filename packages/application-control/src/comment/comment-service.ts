@@ -8,6 +8,7 @@ import {
 } from "@everdict/contracts";
 import type { CommentStore } from "../ports/comment-store.js";
 import type { DiscussionTurnRunner } from "../ports/discussion-turn-runner.js";
+import type { PlatformEventEmitter } from "../ports/platform-event-emitter.js";
 
 // Comment service — collaborative discussion on resources (harness/dataset/scorecard/view/schedule/job/runtime) + single-level replies.
 // Shared by HTTP routes and MCP tools (BFF↔MCP parity). authZ: read=comments:read, write=comments:write, delete=author-or-admin.
@@ -30,6 +31,10 @@ export const COMMENT_AGENT_AUTHOR = "everdict:agent";
 
 export interface CommentServiceDeps {
   store: CommentStore;
+  // Platform-event emit seam (agent-automation A1) — comment.created facts. Agent-authored comments are
+  // deliberately NOT emitted (an agent watching comment.created must never wake on its own answers). emit
+  // never throws (best-effort).
+  events?: PlatformEventEmitter;
   // Mention notification hook — called when a comment contains an @-mention (recipients excluding the author). Silently skipped if unset.
   // Wired in main.ts to NotificationService.notifyMention (including actor-name resolution).
   notifyMention?: (input: { tenant: string; comment: CommentRecord; recipients: string[] }) => Promise<void>;
@@ -124,6 +129,21 @@ export class CommentService {
       updatedAt: ts,
     };
     await this.deps.store.add(record);
+    // Lifecycle FACT (agent-automation A2) — agent-authored comments are excluded so a watching agent never
+    // wakes on its own (or a peer agent's) answers: the echo would loop.
+    if (input.author !== COMMENT_AGENT_AUTHOR) {
+      void this.deps.events?.emit({
+        workspace: input.tenant,
+        kind: "comment.created",
+        subject: { type: input.resourceType, id: input.resourceId },
+        actor: input.author,
+        payload: {
+          commentId: record.id,
+          ...(record.parentId !== undefined ? { parentId: record.parentId } : {}),
+        },
+        message: `New comment on ${input.resourceType} ${input.resourceId}: ${body.slice(0, 140)}`,
+      });
+    }
     // Mention notifications — exclude the author, dedupe. A notification failure doesn't affect the comment result (swallowed).
     const recipients = [...new Set(input.mentions ?? [])].filter((s) => s && s !== input.author);
     if (recipients.length > 0 && this.deps.notifyMention) {

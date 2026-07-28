@@ -1,4 +1,5 @@
 import type { CiLinkService } from "@everdict/application-control";
+import type { PlatformEventService } from "@everdict/application-control";
 import type { CommentService } from "@everdict/application-control";
 import type { KnowledgeEntryService, KnowledgeService } from "@everdict/application-control";
 import type { GithubAppService } from "@everdict/application-control";
@@ -49,8 +50,8 @@ import type { BrowserProfileCaptureService } from "../core/browser-profile/brows
 import type { BrowserSessionService } from "../core/browser-session/browser-session-service.js";
 import type { BundleService } from "../core/bundle/bundle-service.js";
 import type { JudgePreviewService } from "../core/judge/judge-preview-service.js";
-import type { ModelService } from "../core/model/model-service.js";
 import type { KnowledgeExtractionService } from "../core/knowledge/knowledge-extraction-service.js";
+import type { ModelService } from "../core/model/model-service.js";
 import type { RuntimeProbeResult } from "../core/ops/runtime-probe.js";
 import type { SecretUsageService } from "../core/secret/secret-usage-service.js";
 import type { McpProbeResult } from "../infrastructure/mcp/probe-mcp.js";
@@ -99,6 +100,7 @@ export interface McpDeps {
   ciLinkService?: CiLinkService; // CI repo link (repo↔harness slot + OIDC trust) + picker/setup-PR
   runnerService?: RunnerService; // self-hosted runners (personal device pairing) — pair/list/revoke + workspace roster
   notificationService?: NotificationService; // personal notification feed (bell inbox) — list/read (self-scoped)
+  platformEvents?: PlatformEventService; // platform-event log (lifecycle facts) — list (events:read)
   commentService?: CommentService; // resource comments (datasets, etc.) — list/create/delete
   knowledgeService?: KnowledgeService; // workspace knowledge graph — get_knowledge_node/knowledge_related/knowledge_subgraph/reindex_knowledge
   knowledgeEntryService?: KnowledgeEntryService; // knowledge entries (reified claims) — create/list/get/update/delete/verify_knowledge_entry

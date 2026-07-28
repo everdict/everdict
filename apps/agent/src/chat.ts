@@ -491,6 +491,8 @@ export async function runChat(
       workspace,
       model: model.model,
       date: deps.now(),
+      taskDirectory: `tasks/${sessionId}`, // per-task separation on the workspace filesystem
+
       ...(deps.webBaseUrl !== undefined ? { webBaseUrl: deps.webBaseUrl } : {}),
       ...(deps.desktopDownloadUrl !== undefined ? { desktopDownloadUrl: deps.desktopDownloadUrl } : {}),
     })}`;

@@ -39,7 +39,9 @@
     ".next-verify-multirunner/types/**/*.ts",
     ".next-verify-multirunner/dev/types/**/*.ts",
     ".next-verify/types/**/*.ts",
-    ".next-verify/dev/types/**/*.ts"
+    ".next-verify/dev/types/**/*.ts",
+    ".next-dev-claude/types/**/*.ts",
+    ".next-dev-claude/dev/types/**/*.ts"
   ],
   "exclude": [
     "node_modules"

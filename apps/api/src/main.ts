@@ -1,7 +1,11 @@
-import { KnowledgeEntryService, KnowledgeService, registryLatestVersionResolver } from "@everdict/application-control";
+import {
+  KnowledgeEntryService,
+  KnowledgeService,
+  registryLatestVersionResolver,
+  seedFirstPartyAgents,
+} from "@everdict/application-control";
 import { ProxyService } from "@everdict/application-control";
 import { FsService, SkillService } from "@everdict/application-control";
-import { InMemoryWorkspaceFs } from "@everdict/storage";
 import {
   CapabilityService,
   EnvironmentAdoptionService,
@@ -9,6 +13,7 @@ import {
   firstPartyDefaults,
 } from "@everdict/application-control";
 import { perTenantTrustZones } from "@everdict/domain";
+import { InMemoryWorkspaceFs } from "@everdict/storage";
 import type { BrowserSessionProvisioner } from "./common/browser-session-provisioner.js";
 import { CaseRecorder } from "./common/case-recorder.js";
 import { LiveFrameStore } from "./common/live-frame-store.js";
@@ -44,9 +49,9 @@ import { BrowserProfileCaptureService } from "./core/browser-profile/browser-pro
 import { BrowserSessionService } from "./core/browser-session/browser-session-service.js";
 import { buildPlacementPreflight } from "./core/execution/placement-preflight.js";
 import { JudgePreviewService } from "./core/judge/judge-preview-service.js";
+import { KnowledgeExtractionService } from "./core/knowledge/knowledge-extraction-service.js";
 import { ModelService } from "./core/model/model-service.js";
 import { SecretUsageService } from "./core/secret/secret-usage-service.js";
-import { KnowledgeExtractionService } from "./core/knowledge/knowledge-extraction-service.js";
 import { SkillGenerator } from "./core/skill/skill-generator.js";
 import { DockerBrowserProvisioner } from "./infrastructure/browser-session/docker-browser-provisioner.js";
 import { LocalChromeProvisioner } from "./infrastructure/browser-session/local-chrome-provisioner.js";
@@ -126,6 +131,7 @@ async function main(): Promise<void> {
     runnerJobStore,
     scheduleStore,
     notificationStore,
+    platformEventStore,
     commentStore,
     knowledgeStore,
     knowledgeEntryStore,
@@ -138,6 +144,10 @@ async function main(): Promise<void> {
     budgetStore,
     cipher,
   } = await makePersistence();
+
+  // First-party agent templates (agent-automation B4) — seed the two flagship automation agents into _shared
+  // (idempotent; disabled + creator-less by design: a workspace adopts one by saving its own copy).
+  await seedFirstPartyAgents(agentRegistry);
 
   // Latest-version resolution over the registries — backs the freshness decoration (skills / knowledge entries) and
   // task-time context assembly. Best-effort: an unknown/deleted entity resolves to "no signal", never an error.
@@ -270,6 +280,7 @@ async function main(): Promise<void> {
   const envMeterPolicy = meterUsagePolicyFromEnv(); // default policy when the workspace has no DB setting
   const {
     notificationService,
+    platformEventService,
     mattermostService,
     traceSinkService,
     traceSourceService,
@@ -279,6 +290,7 @@ async function main(): Promise<void> {
   } = buildIntegrations({
     settingsStore,
     notificationStore,
+    platformEventStore,
     commentStore,
     oauthStateStore,
     membershipService,
@@ -322,6 +334,7 @@ async function main(): Promise<void> {
     githubAppService,
     imageRegistryService,
     notificationService,
+    platformEventService,
     envMeterPolicy,
     preflightPlacement,
     readers: { readCaseLogsFn, execInSandboxFn, captureBrowserScreenFn, openTerminalStreamFn },
@@ -353,6 +366,7 @@ async function main(): Promise<void> {
     githubAppService,
     imageRegistryService,
     notificationService,
+    platformEventService,
     traceSinkService,
     preflightPlacement,
     killCase,
@@ -574,6 +588,7 @@ async function main(): Promise<void> {
     ciLinkService,
     runnerService,
     notificationService, // notification feed (bell inbox) route — self-scoped
+    platformEvents: platformEventService, // platform-event log — internal reconcile cursor (agent-automation A1)
     commentService, // resource comments route + MCP
     knowledgeService, // workspace knowledge graph route + MCP
     knowledgeEntryService, // knowledge entries (reified claims) CRUD + verify — route + MCP

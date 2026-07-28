@@ -31,4 +31,16 @@ describe("buildEnvironmentSection", () => {
     expect(section).not.toContain("Web app");
     expect(section).not.toContain("download");
   });
+
+  it("names the conversation's task directory so each task's files stay separated on the filesystem", () => {
+    const section = buildEnvironmentSection({
+      workspace: "acme",
+      model: "m1",
+      date: "2026-07-27",
+      taskDirectory: "tasks/sess-1",
+    });
+    expect(section).toContain("- Task directory: tasks/sess-1 —");
+    const bare = buildEnvironmentSection({ workspace: "acme", model: "m1", date: "2026-07-27" });
+    expect(bare).not.toContain("Task directory"); // sessionless callers (try/preview) get no task area
+  });
 });

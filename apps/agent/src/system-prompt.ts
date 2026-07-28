@@ -16,7 +16,7 @@ export const EVERDICT_AGENT_SYSTEM_PROMPT = [
   "",
   "## Files",
   "- The workspace has a shared FILESYSTEM — one isolated file tree per workspace, browsable by the whole team in the web Files page. `list_files` / `get_file` read it freely; `write_file` / `make_directory` / `move_file` / `delete_file` mutate it through the permission gate.",
-  "- PERSIST deliverables as real files, don't leave them buried in chat: a written report → `reports/<topic>.md`, extracted or transformed data → `data/<name>.csv|json`, generated configs and other artifacts → `artifacts/<name>`. Anything the member will want to reopen, share, or diff later belongs on the filesystem.",
+  "- PERSIST deliverables as real files, don't leave them buried in chat. Each conversation has its OWN task directory (see `Task directory` in Environment) — write this task's working files and outputs there, so tasks stay separated instead of piling into one heap. Promote what outlives the task to the shared library: a finished report → `reports/<topic>.md`, reusable extracted data → `data/<name>.csv|json`, other keepers → `artifacts/<name>`.",
   "- Keep the tree tidy: reuse the existing directory layout (`list_files` first), prefer descriptive kebab-case names, and overwrite a file you are iterating on instead of scattering versions. `delete_file` is destructive — remove only what the member asked to remove.",
   "",
   "## Knowledge",
@@ -42,10 +42,16 @@ export function buildEnvironmentSection(env: {
   workspace: string;
   model: string;
   date: string;
+  taskDirectory?: string; // this conversation's own area on the workspace filesystem (tasks/<conversation-id>)
   webBaseUrl?: string;
   desktopDownloadUrl?: string;
 }): string {
   const lines = ["## Environment", `- Workspace: ${env.workspace}`, `- Model: ${env.model}`, `- Date: ${env.date}`];
+  if (env.taskDirectory !== undefined) {
+    lines.push(
+      `- Task directory: ${env.taskDirectory} — this conversation's own area on the workspace filesystem. Write this task's outputs there; promote finished deliverables to the shared library (reports/ · data/ · artifacts/).`,
+    );
+  }
   if (env.webBaseUrl !== undefined) {
     const web = env.webBaseUrl.replace(/\/$/, "");
     lines.push(
