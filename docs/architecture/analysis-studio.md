@@ -150,7 +150,10 @@ carries presence: the canvas announces unprompted on mount/change and clears on 
 composer shows a "canvas linked · name" chip — the member SEES that the agent shares their screen.
 The preamble additionally steers saving (update_view for an open saved View / create_view otherwise,
 both taking the in-context stored-form config), and the panel soft-refreshes the left routed page
-after each turn so agent-created entities appear without a manual reload.)* New FSD slices:
+after each turn so agent-created entities appear without a manual reload. Finally, the pre-studio
+wizard is REMOVED (maintainer decision): the easy 3-question mode (`ScorecardAnalyzer`) and the
+easy/custom toggle are gone — `/scorecards/analyze` is the one studio canvas, NL chat + pickers over
+a single AnalysisConfig.)* New FSD slices:
 `entities/analysis-artifact`, `features/analysis-studio`; `features/agent-chat` gains artifact rendering in
 the transcript (chart/table/markdown cards) and an embed mode. Sessions opened from a view carry
 `viewId` (new nullable column on `everdict_agent_sessions`), and the turn's context preamble injects the
