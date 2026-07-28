@@ -63,11 +63,11 @@ export function DefRow({
   return (
     <div
       className={cn(
-        'flex flex-col gap-1 sm:flex-row sm:items-baseline sm:gap-4',
+        'flex flex-col gap-1 @xs:flex-row @xs:items-baseline @xs:gap-4',
         wide && 'col-span-full'
       )}
     >
-      <span className="shrink-0 text-[11px] font-[510] uppercase tracking-wide text-faint sm:w-20">
+      <span className="shrink-0 text-[11px] font-[510] uppercase tracking-wide text-faint @xs:w-20">
         {label}
       </span>
       <div

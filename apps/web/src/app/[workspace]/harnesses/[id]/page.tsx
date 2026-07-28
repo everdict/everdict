@@ -58,10 +58,10 @@ function MetaItem({
 }) {
   return (
     <div
-      className="flex flex-col gap-1 sm:flex-row sm:items-baseline sm:gap-4"
+      className="flex flex-col gap-1 @xs:flex-row @xs:items-baseline @xs:gap-4"
       {...(title ? { title } : {})}
     >
-      <span className="shrink-0 text-[11px] font-[510] uppercase tracking-wide text-faint sm:w-20">
+      <span className="shrink-0 text-[11px] font-[510] uppercase tracking-wide text-faint @xs:w-20">
         {label}
       </span>
       <div className="flex min-w-0 flex-1 items-center gap-1.5 text-[13px] text-foreground">
@@ -228,7 +228,7 @@ export default async function HarnessDetailPage({
         : t('summaryProcess')
 
   return (
-    <div className="space-y-7">
+    <div className="@container space-y-7">
       <div className="space-y-3">
         <BackLink workspace={workspace} label={t('backToList')} />
         <PageHeader
@@ -299,7 +299,7 @@ export default async function HarnessDetailPage({
       )}
 
       {/* Meta — label(left)·value(right) items in a responsive grid. The wider the screen, the more columns (2→3→4) to spread out generously. */}
-      <Card className="grid grid-cols-1 gap-x-10 gap-y-4 p-5 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
+      <Card className="grid grid-cols-1 gap-x-10 gap-y-4 p-5 @md:grid-cols-2 @3xl:grid-cols-3 @5xl:grid-cols-4">
         <MetaItem label={t('metaKind')}>
           <Badge tone={KIND_TONE[spec.kind]}>{spec.kind}</Badge>
         </MetaItem>

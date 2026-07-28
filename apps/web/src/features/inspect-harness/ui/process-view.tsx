@@ -24,14 +24,14 @@ export function ProcessView({ spec }: { spec: HarnessSpec }) {
             </p>
           </div>
         </div>
-        <dl className="grid grid-cols-3 gap-4 border-t border-border p-4">
+        <dl className="grid grid-cols-1 gap-4 border-t border-border p-4 @xs:grid-cols-3">
           <Field label={t('kind')} value={spec.kind} />
           <Field label="id" value={spec.id} />
           <Field label={t('version')} value={spec.version} />
         </dl>
       </Card>
 
-      <div className="grid gap-3 sm:grid-cols-2">
+      <div className="grid gap-3 @md:grid-cols-2">
         <InfoCard
           icon={<Terminal className="size-4" />}
           title={t('runModeTitle')}

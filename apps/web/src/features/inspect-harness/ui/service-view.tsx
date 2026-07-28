@@ -28,7 +28,7 @@ export function ServiceView({ spec }: { spec: HarnessSpec }) {
       {frontDoor && (
         <SubSection title="Front door" icon={<DoorOpen className="size-4" />}>
           <Card>
-            <dl className="grid grid-cols-2 gap-4 p-4 sm:grid-cols-3">
+            <dl className="grid grid-cols-1 gap-4 p-4 @xs:grid-cols-2 @2xl:grid-cols-3">
               <Field label={t('service')} value={frontDoor.service} />
               <Field label={t('submit')} value={<Mono>{frontDoor.submit}</Mono>} mono={false} />
               {frontDoor.trace && <Field label={t('trace')} value={frontDoor.trace} />}
@@ -70,7 +70,7 @@ export function ServiceView({ spec }: { spec: HarnessSpec }) {
                   />
                 </div>
               )}
-              <div className="mt-3 grid grid-cols-2 gap-4">
+              <div className="mt-3 grid grid-cols-1 gap-4 @xs:grid-cols-2">
                 <ChipList label="needs" items={s.needs} empty="—" />
                 <ChipList label="per-run keys" items={s.perRun} empty="—" />
               </div>
@@ -171,7 +171,7 @@ export function ServiceView({ spec }: { spec: HarnessSpec }) {
       {target && (
         <SubSection title="Target env" icon={<Globe className="size-4" />}>
           <Card>
-            <dl className="grid grid-cols-2 gap-4 p-4 sm:grid-cols-4">
+            <dl className="grid grid-cols-1 gap-4 p-4 @xs:grid-cols-2 @3xl:grid-cols-4">
               <Field label={t('kind')} value={target.kind} />
               {target.engine && <Field label={t('engine')} value={target.engine} />}
               {target.lifecycle && <Field label={t('lifecycle')} value={target.lifecycle} />}
@@ -214,7 +214,7 @@ export function ServiceView({ spec }: { spec: HarnessSpec }) {
       {traceSource && (
         <SubSection title="Trace source" icon={<Radio className="size-4" />}>
           <Card>
-            <dl className="grid grid-cols-2 gap-4 p-4">
+            <dl className="grid grid-cols-1 gap-4 p-4 @sm:grid-cols-2">
               <Field label={t('kind')} value={traceSource.kind} />
               <Field label={t('endpoint')} value={traceSource.endpoint} />
             </dl>

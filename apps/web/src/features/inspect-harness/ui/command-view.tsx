@@ -19,7 +19,7 @@ export function CommandView({ spec }: { spec: HarnessSpec }) {
   return (
     <div className="space-y-6">
       {/* The wider the screen, the more columns, so values spread out generously. The command is long, so it spans full width (col-span-full). */}
-      <Card className="grid grid-cols-1 gap-x-10 gap-y-4 p-5 sm:grid-cols-2 lg:grid-cols-3">
+      <Card className="grid grid-cols-1 gap-x-10 gap-y-4 p-5 @md:grid-cols-2 @3xl:grid-cols-3">
         {spec.command && (
           <DefRow label={t('command')} wide>
             <pre className="overflow-x-auto whitespace-pre-wrap break-all font-mono text-[12.5px] leading-relaxed text-foreground">
