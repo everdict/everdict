@@ -35,7 +35,7 @@ export class InMemoryPlatformEventStore implements PlatformEventStore {
           (opts?.afterSeq === undefined || r.seq > opts.afterSeq) &&
           (opts?.kinds === undefined || (opts.kinds as readonly string[]).includes(r.kind)),
       )
-      .sort((a, b) => a.seq - b.seq)
+      .sort((a, b) => (opts?.order === "desc" ? b.seq - a.seq : a.seq - b.seq))
       .slice(0, opts?.limit ?? DEFAULT_LIMIT);
   }
 
@@ -129,7 +129,7 @@ export class PgPlatformEventStore implements PlatformEventStore {
     const res = await this.client.query<PlatformEventRow>(
       `SELECT seq, id, tenant, kind, subject_type, subject_id, actor, payload, caused_by, message, created_at
        FROM everdict_platform_events${where}
-       ORDER BY seq ASC LIMIT $${params.length}`,
+       ORDER BY seq ${opts?.order === "desc" ? "DESC" : "ASC"} LIMIT $${params.length}`,
       params,
     );
     return res.rows.map(rowToRecord);

@@ -4,6 +4,8 @@ export interface PlatformEventListOptions {
   afterSeq?: number; // only events with seq > afterSeq (the reconcile cursor)
   kinds?: string[]; // restrict to these kinds
   limit?: number; // default 100
+  // "asc" (default) walks the reconcile cursor; "desc" serves the newest-first surfaces (fleet feed, replay picker).
+  order?: "asc" | "desc";
 }
 
 // Append-only platform event log (docs/architecture/agent-automation.md A1) — the durable record behind

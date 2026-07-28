@@ -9,6 +9,7 @@ import { z } from "zod";
 import { isGuardedAction } from "./action-policy.js";
 import { AgentActivator } from "./agent-activation.js";
 import { AgentMailbox } from "./agent-mailbox.js";
+import { runAgentTry } from "./agent-try.js";
 import { type ChatDeps, DEFAULT_SESSION_TITLE, runChat } from "./chat.js";
 import { type CodeTryDeps, runCodeToolTry } from "./code-try.js";
 import type { CommentActivityReporter } from "./comment-activity.js";
@@ -624,6 +625,40 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
   //    recipient in a workspace — this is what auto-wires monitoring → the proactive team.
   //  · USER (a member) drives events for their OWN teammates (authenticated normally).
   // Nothing watches the kind → a harmless 200 with notified:0.
+  // Try-drive (agent-automation B3): fire a (replayed or hand-built) platform event at a saved agent or an
+  // instruction draft in SHADOW mode — reads run for real (caller's bearer), mutations are captured as
+  // would-have-done and denied. Stateless; returns the transcript + captured intents.
+  app.post("/agent/agents/try", async (req, reply) => {
+    const principal = await principalOf(req, reply);
+    if (!principal) return reply;
+    const parsed = z
+      .object({
+        agentId: z.string().min(1).optional(),
+        draft: z.object({ instructions: z.string().optional(), task: z.string().optional() }).optional(),
+        event: z.object({
+          kind: z.string().min(1),
+          message: z.string().min(1),
+          subject: z.object({ type: z.string().min(1), id: z.string().min(1) }).optional(),
+          payload: z.record(z.unknown()).optional(),
+        }),
+      })
+      .safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
+    try {
+      const { agentId, draft, event } = parsed.data;
+      const result = await runAgentTry(
+        deps,
+        principal,
+        forwardHeaders(req),
+        { ...(agentId !== undefined ? { agentId } : {}), ...(draft !== undefined ? { draft } : {}) },
+        event,
+      );
+      return reply.send(result);
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
   // Fleet view (agent-automation A5): every agent RUN in the caller's workspace (sessions with an origin),
   // newest first — trigger activations, teammates, discussion turns. Workspace observability, any member.
   app.get("/agent/runs", async (req, reply) => {

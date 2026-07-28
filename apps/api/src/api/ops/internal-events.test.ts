@@ -62,20 +62,56 @@ describe("GET /internal/events — platform-event reconcile cursor", () => {
     await app.close();
   });
 
-  it("rejects a wrong internal token (403) and a missing workspace (400)", async () => {
-    const { app } = harness();
+  it("rejects a wrong internal token (403); no workspace = the deployment-wide cursor", async () => {
+    const { app, platformEvents } = harness();
+    await platformEvents.emit({
+      workspace: "acme",
+      kind: "run.completed",
+      subject: { type: "run", id: "r-1" },
+      message: "acme run",
+    });
+    await platformEvents.emit({
+      workspace: "other",
+      kind: "run.completed",
+      subject: { type: "run", id: "r-2" },
+      message: "other run",
+    });
     const wrong = await app.inject({
       method: "GET",
       url: "/internal/events?workspace=acme",
       headers: { "x-internal-token": "nope" },
     });
     expect(wrong.statusCode).toBe(403);
-    const missing = await app.inject({
+    const global = await app.inject({
       method: "GET",
       url: "/internal/events",
       headers: { "x-internal-token": "itok" },
     });
-    expect(missing.statusCode).toBe(400);
+    expect(global.statusCode).toBe(200);
+    const tenants = (global.json() as { events: Array<{ tenant: string }> }).events.map((e) => e.tenant);
+    expect(tenants).toEqual(["acme", "other"]);
+    await app.close();
+  });
+
+  it("serves members the workspace log newest-first (GET /events, events:read)", async () => {
+    const { app, platformEvents } = harness();
+    await platformEvents.emit({
+      workspace: "acme",
+      kind: "scorecard.submitted",
+      subject: { type: "scorecard", id: "sc-1" },
+      message: "submitted",
+    });
+    await platformEvents.emit({
+      workspace: "acme",
+      kind: "scorecard.completed",
+      subject: { type: "scorecard", id: "sc-1" },
+      message: "completed",
+    });
+
+    const res = await app.inject({ method: "GET", url: "/events", headers: { "x-everdict-tenant": "acme" } });
+    expect(res.statusCode).toBe(200);
+    const events = (res.json() as { events: Array<{ kind: string }> }).events;
+    expect(events.map((e) => e.kind)).toEqual(["scorecard.completed", "scorecard.submitted"]);
     await app.close();
   });
 

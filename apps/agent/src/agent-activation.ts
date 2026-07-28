@@ -388,8 +388,9 @@ interface ReconciledEvent {
 }
 
 // The run's opening prompt: the crafted agent's standing task first (its job), then the fact that woke it —
-// pointers only; the agent reads detail through its (RBAC-bounded) tools.
-function renderActivationPrompt(spec: AgentSpec, event: ActivationEvent): string {
+// pointers only; the agent reads detail through its (RBAC-bounded) tools. Exported for the try-drive (B3),
+// which renders the same prompt shape for a shadow activation.
+export function renderActivationPrompt(spec: Pick<AgentSpec, "task">, event: ActivationEvent): string {
   const lines: string[] = [];
   if (spec.task !== undefined && spec.task.length > 0) lines.push(`Your standing task:\n${spec.task}`);
   lines.push(`Platform event — ${event.kind}${event.source ? ` (${event.source})` : ""}:\n${event.message}`);
