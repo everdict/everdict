@@ -22,7 +22,7 @@ import { queueSnapshotSchema, type QueueSnapshot } from '@/entities/queue'
 
 export type WorkAuthor = { name: string; avatarUrl?: string }
 
-export type InfraTab = 'schedules' | 'runtimes' | 'runs' | 'work' | 'agent'
+export type InfraTab = 'schedules' | 'runtimes' | 'runs' | 'work' | 'agent' | 'files'
 
 // A deep-open request into a page tab's iframe — e.g. openRun() points the runs tab at that run's REAL detail
 // page. seq forces re-application even for a repeated identical target (the user may have navigated away inside
@@ -73,6 +73,14 @@ type InfraPanelValue = {
   openAgentSession: (sessionId: string) => void
   pendingSession: PendingSession | null
   consumePendingSession: () => void
+  // The files tab — a workspace-filesystem file rendered interactively in the panel (Settings › Files selects
+  // it; the tab has no rail button). openFile re-points an open viewer; closeFile clears it (after a delete).
+  filePath: string | null
+  openFile: (path: string) => void
+  closeFile: () => void
+  // Bumped after every panel-side filesystem mutation (save / move / delete) so a host tree refetches in place.
+  fsRevision: number
+  notifyFsMutation: () => void
   snapshot: QueueSnapshot | null
   authors: Record<string, WorkAuthor>
 }
@@ -231,6 +239,18 @@ export function InfraPanelProvider({
   }, [])
   const consumePendingSession = useCallback(() => setPendingSession(null), [])
 
+  // The files tab — Settings › Files selects a path, the panel renders it. State lives here so the viewer
+  // survives left-side navigation and the tree (a separate surface) can mirror the selection.
+  const [filePath, setFilePath] = useState<string | null>(null)
+  const [fsRevision, setFsRevision] = useState(0)
+  const openFile = useCallback((path: string) => {
+    setFilePath(path)
+    setTab('files')
+    setOpen(true)
+  }, [])
+  const closeFile = useCallback(() => setFilePath(null), [])
+  const notifyFsMutation = useCallback(() => setFsRevision((revision) => revision + 1), [])
+
   return (
     <InfraPanelContext.Provider
       value={{
@@ -251,6 +271,11 @@ export function InfraPanelProvider({
         openAgentSession,
         pendingSession,
         consumePendingSession,
+        filePath,
+        openFile,
+        closeFile,
+        fsRevision,
+        notifyFsMutation,
         snapshot,
         authors,
       }}

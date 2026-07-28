@@ -142,7 +142,11 @@ panel/list guidance is not.
   registered runtimes · `self:<runner>`) with running (batch = case-progress bar), waiting (FIFO, first badged
   'Next') and next-scheduled fires, from `GET /queue` (`runs:read`; MCP parity `get_queue`; see
   `docs/architecture/work-queue.md`); its run rows open the run's real page in the runs tab. Runtime placement
-  is captured on records (`RunRecord.runtime`/`ScorecardRecord.runtime`, mig 0040).
+  is captured on records (`RunRecord.runtime`/`ScorecardRecord.runtime`, mig 0040). The **files** tab is also
+  purpose-built (no iframe, no rail button): Settings › Files selects a workspace-filesystem path via
+  `useInfraPanel().openFile(path)` and the panel renders it interactively (`FileViewer` — Markdown preview /
+  code / images, member editing); re-selecting swaps content in place, and a panel-side mutation bumps
+  `fsRevision` so the selecting tree refetches (see `docs/architecture/workspace-filesystem.md`).
 - **Judge `/{workspace}/judges`** — owned vs `_shared` Agent Judges (kind + version chips; rows link to detail).
   **Detail `/{workspace}/judges/[id]`** shows kind + fields + rubric. **Register `/{workspace}/judges/new`** — a
   **kind-toggle form** (model | harness) with a validate (dry-run) step → `POST /judges`. Role-gated off `/me`

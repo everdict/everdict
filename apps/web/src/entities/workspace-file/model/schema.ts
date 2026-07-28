@@ -2,7 +2,6 @@ import type { FsEntry as ContractFsEntry } from '@everdict/contracts'
 import type {
   FsFileContent as ContractFsFileContent,
   FsRemoveResult as ContractFsRemoveResult,
-  FsUsage as ContractFsUsage,
 } from '@everdict/contracts/wire'
 import { z } from 'zod'
 
@@ -29,22 +28,6 @@ export type FsFileContentView = z.infer<typeof fsFileContentSchema>
 export const fsRemoveResultSchema = z.object({ removed: z.number().int().nonnegative() })
 export type FsRemoveResultView = z.infer<typeof fsRemoveResultSchema>
 
-export const fsUsageSchema = z.object({
-  files: z.number().int().nonnegative(),
-  bytes: z.number().int().nonnegative(),
-  truncated: z.boolean(), // the sweep hit its walk cap — counts are a floor
-  topLevel: z.array(
-    z.object({
-      path: z.string(),
-      name: z.string(),
-      kind: z.enum(['file', 'dir']),
-      files: z.number().int().nonnegative(),
-      bytes: z.number().int().nonnegative(),
-    })
-  ),
-})
-export type FsUsageView = z.infer<typeof fsUsageSchema>
-
 // Drift guards — the contract satisfies the local view (loose-consumer direction).
 type AssertAssignable<A extends B, B> = A
 type _EntryGuard = AssertAssignable<Pick<ContractFsEntry, keyof FsEntryView>, FsEntryView>
@@ -59,4 +42,3 @@ type _RemoveGuard = AssertAssignable<
   Pick<ContractFsRemoveResult, keyof FsRemoveResultView>,
   FsRemoveResultView
 >
-type _UsageGuard = AssertAssignable<Pick<ContractFsUsage, keyof FsUsageView>, FsUsageView>

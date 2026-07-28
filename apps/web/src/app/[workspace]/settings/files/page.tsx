@@ -1,24 +1,20 @@
 import { getTranslations } from 'next-intl/server'
 import { z } from 'zod'
 
-import { FilesSettings } from '@/features/browse-files'
-import {
-  fsEntrySchema,
-  fsUsageSchema,
-  type FsEntryView,
-  type FsUsageView,
-} from '@/entities/workspace-file'
+import { fsEntrySchema, type FsEntryView } from '@/entities/workspace-file'
 import { can } from '@/shared/auth/can'
 import { currentPrincipal } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
 import { EmptyState } from '@/shared/ui/empty-state'
 import { PageHeader } from '@/shared/ui/page-header'
 
+import { SettingsFilesExplorer } from './settings-files-explorer'
+
 export const dynamic = 'force-dynamic'
 
-// Settings › Files — govern the workspace filesystem entirely IN-SERVICE (never the object-storage console):
-// the storage picture (totals + per-top-level breakdown) and cleanup (per-entry recursive delete = files:write;
-// whole-tree clear = settings:write/admin). Browsing/rendering/editing lives on the main Files page.
+// Settings › Files — the workspace filesystem (the workspace's own isolated bucket), browsed entirely
+// in-service: the page is the folder tree, and a selected file renders interactively in the right-hand
+// split-view panel. Read = files:read (viewer+); writes pre-gate on files:write (control-plane enforced).
 export default async function FilesSettingsPage() {
   const t = await getTranslations('settingsNav')
   const f = await getTranslations('files')
@@ -35,11 +31,9 @@ export default async function FilesSettingsPage() {
     )
   }
 
-  let usage: FsUsageView | undefined
   let entries: FsEntryView[] = []
   let error: string | undefined
   try {
-    usage = fsUsageSchema.parse(await controlPlane.fsUsage(ctx))
     entries = z.array(fsEntrySchema).parse(await controlPlane.listFsEntries(ctx, ''))
   } catch (e) {
     error = e instanceof Error ? e.message : String(e)
@@ -48,15 +42,12 @@ export default async function FilesSettingsPage() {
   return (
     <div className="space-y-6">
       {header}
-      {usage === undefined ? (
+      {error !== undefined ? (
         <EmptyState title={f('loadError')} hint={error} />
       ) : (
-        <FilesSettings
-          workspace={principal.workspace}
-          initialUsage={usage}
+        <SettingsFilesExplorer
           initialEntries={entries}
           canWrite={can(principal.roles, 'files:write')}
-          canManage={can(principal.roles, 'settings:write')}
         />
       )}
     </div>

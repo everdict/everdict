@@ -2703,7 +2703,7 @@
     "budget": "예산·사용량",
     "budgetDesc": "집행 한도와 계량 사용량.",
     "files": "파일",
-    "filesDesc": "워크스페이스 파일시스템 — 사용량과 정리를 서비스 안에서 관리합니다."
+    "filesDesc": "워크스페이스 파일시스템 — 폴더를 탐색하고, 파일을 선택하면 우측 패널에 표시됩니다."
   },
   "knowledge": {
     "title": "지식",
@@ -2820,19 +2820,7 @@
     "deleteFileBody": "이 파일이 워크스페이스 파일시스템에서 제거됩니다.",
     "readOnlyNotice": "읽기 전용 — 쓰기는 member 역할이 필요합니다.",
     "shellTitle": "셸",
-    "shellHint": "ls · cd · cat · tree · mkdir · echo > · mv · cp · rm — `help` 입력",
-    "settingsStorageTitle": "저장 공간",
-    "settingsTotalFiles": "파일 수",
-    "settingsTotalBytes": "사용 용량",
-    "settingsOpenBrowser": "파일 열기",
-    "settingsTruncated": "트리가 커서 집계가 상한에서 멈췄습니다 — 수치는 최소값입니다.",
-    "settingsEntryStats": "{files}개 파일 · {size}",
-    "settingsDangerTitle": "위험 구역",
-    "settingsDangerBody": "워크스페이스 파일시스템 전체를 비웁니다. 스킬·지식 본문은 다음 읽기 때 레코드에서 다시 투영되지만, 그 외 파일은 복구할 수 없습니다.",
-    "settingsClearAll": "파일시스템 비우기",
-    "settingsClearAllTitle": "파일시스템 전체를 비울까요?",
-    "settingsClearAllBody": "이 워크스페이스의 모든 파일과 디렉토리가 제거됩니다. 되돌릴 수 없습니다.",
-    "settingsDeleteEntryBody": "이 항목과 하위 전체가 제거됩니다. 되돌릴 수 없습니다."
+    "shellHint": "ls · cd · cat · tree · mkdir · echo > · mv · cp · rm — `help` 입력"
   },
   "observabilityPage": {
     "title": "옵저버빌리티",
@@ -3177,6 +3165,7 @@
     "tab_runs": "실행",
     "tab_work": "작업",
     "tab_agent": "에이전트",
+    "tab_files": "파일",
     "collapse": "패널 접기",
     "back": "뒤로"
   },

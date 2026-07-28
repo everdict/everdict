@@ -3,6 +3,7 @@ import type { ReactNode } from 'react'
 import { InfraPanel, InfraPanelProvider, InfraRail } from '@/widgets/infra-panel'
 import { ProductTour } from '@/widgets/product-tour'
 import type { Workspace } from '@/entities/workspace'
+import { can } from '@/shared/auth/can'
 
 import { CommandPalette } from './command-palette'
 import { PageTransition } from './page-transition'
@@ -67,6 +68,7 @@ export function AppShell({
             name: chatUserName,
             ...(profile?.avatarUrl !== undefined ? { avatarUrl: profile.avatarUrl } : {}),
           }}
+          canFilesWrite={can(roles, 'files:write')}
         />
       </div>
       <CommandPalette workspace={workspace} />

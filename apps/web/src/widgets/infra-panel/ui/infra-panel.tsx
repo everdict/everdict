@@ -7,6 +7,7 @@ import {
   ArrowLeft,
   CalendarClock,
   ChevronsRight,
+  FileText,
   Play,
   Server,
   Sparkles,
@@ -25,6 +26,7 @@ import {
   useInfraPanel,
   type InfraTab,
 } from '../model/infra-panel-context'
+import { FilesTab } from './files-tab'
 import { WorkTab } from './work-tab'
 
 // The floating infra panel — the right half of the split view. On md+ it takes real layout space as a flex-1
@@ -47,6 +49,7 @@ const TAB_META: Record<InfraTab, { icon: LucideIcon }> = {
   runs: { icon: Play },
   work: { icon: Activity },
   agent: { icon: Sparkles },
+  files: { icon: FileText },
 }
 
 // The page tabs and their iframe home paths (workspace-relative).
@@ -69,7 +72,10 @@ function withEmbed(path: string): string {
   return `${path}${path.includes('?') ? '&' : '?'}embed=1`
 }
 
-export function InfraPanel({ user }: { user?: ChatUser } = {}) {
+export function InfraPanel({
+  user,
+  canFilesWrite = false,
+}: { user?: ChatUser; canFilesWrite?: boolean } = {}) {
   const t = useTranslations('infraPanel')
   const router = useRouter()
   const {
@@ -327,6 +333,7 @@ export function InfraPanel({ user }: { user?: ChatUser } = {}) {
                 <WorkTab onNavigate={onNavigate} />
               </div>
             )}
+            {tab === 'files' && <FilesTab canWrite={canFilesWrite} />}
             {tab === 'agent' && (
               <div className="h-full">
                 <AgentChatPanel

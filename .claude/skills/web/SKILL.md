@@ -71,7 +71,8 @@ near-black `#08090a` dark surface). Light+dark via the `.dark` class (`@custom-v
   bare `dl` grid.
 - **State toggles** = a status icon + click dropdown (`shared/ui/dropdown-menu.tsx`; e.g.
   `widgets/notification-bell/`), not text links.
-- **Infra split view** (`widgets/infra-panel`): infra concerns (schedules · runtimes · runs · work queue) open
+- **Infra split view** (`widgets/infra-panel`): infra concerns (schedules · runtimes · runs · work queue · a
+  selected workspace file) open
   in the floating right panel toggled by the vertical rail — eval pages stay on the left half, and the sidebar
   is eval-only (don't re-add runs/schedules/runtimes nav entries; the palette's infra group opens the panel
   via `openTab`). **The page tabs host the REAL routed pages in same-origin iframes** (user decision — never
@@ -82,6 +83,9 @@ near-black `#08090a` dark surface). Light+dark via the `.dark` class (`@custom-v
   (`everdict:left-nav` → left router); infra links stay in-iframe. Deep entries = `useInfraPanel().openRun/
   openRuntime/openSchedule` (iframe `src` is frozen at first mount — deep-opens go through
   `contentWindow.location`, never the src prop, or React would undo the user's in-iframe navigation).
+  The **files** tab is purpose-built like work/agent (no iframe, no rail button): Settings › Files calls
+  `useInfraPanel().openFile(path)` → the panel renders `FileViewer` (features/browse-files) interactively;
+  panel-side mutations bump `fsRevision` so the selecting tree refetches in place.
   Panel lifecycle: iframes persist across TAB SWITCHES only — CLOSING the panel discards them (user decision:
   reopen = fresh per-tab render, and the recovery gesture for stuck frames). The header back button walks a
   parent-tracked per-tab stack fed by `everdict:frame-nav` reports — never `history.back()` (joint session

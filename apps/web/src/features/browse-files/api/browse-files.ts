@@ -6,11 +6,9 @@ import {
   fsEntrySchema,
   fsFileContentSchema,
   fsRemoveResultSchema,
-  fsUsageSchema,
   type FsEntryView,
   type FsFileContentView,
   type FsRemoveResultView,
-  type FsUsageView,
 } from '@/entities/workspace-file'
 import { authContext } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
@@ -101,25 +99,6 @@ export async function removeEntryAction(
       ok: true,
       data: fsRemoveResultSchema.parse(await controlPlane.removeFsEntry(ctx, path, recursive)),
     }
-  } catch (e) {
-    return fail(e)
-  }
-}
-
-export async function getFsUsageAction(): Promise<FsActionResult<FsUsageView>> {
-  const ctx = await authContext()
-  try {
-    return { ok: true, data: fsUsageSchema.parse(await controlPlane.fsUsage(ctx)) }
-  } catch (e) {
-    return fail(e)
-  }
-}
-
-// The Settings danger-zone action — empties the whole workspace filesystem (settings:write, control-plane enforced).
-export async function clearFilesAction(): Promise<FsActionResult<FsRemoveResultView>> {
-  const ctx = await authContext()
-  try {
-    return { ok: true, data: fsRemoveResultSchema.parse(await controlPlane.clearFs(ctx)) }
   } catch (e) {
     return fail(e)
   }
