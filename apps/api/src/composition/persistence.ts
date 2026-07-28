@@ -9,6 +9,7 @@ import {
   InMemoryCallbackStore,
   InMemoryCapabilityStore,
   InMemoryCommentStore,
+  InMemoryKnowledgeEntryStore,
   InMemoryKnowledgeStore,
   InMemoryNotificationStore,
   InMemoryOAuthStateStore,
@@ -27,6 +28,7 @@ import {
   InMemoryWorkspaceInviteStore,
   InMemoryWorkspaceSettingsStore,
   InMemoryWorkspaceStore,
+  type KnowledgeEntryStore,
   type KnowledgeStore,
   type NotificationStore,
   type OAuthStateStore,
@@ -35,6 +37,7 @@ import {
   PgCallbackStore,
   PgCapabilityStore,
   PgCommentStore,
+  PgKnowledgeEntryStore,
   PgKnowledgeStore,
   PgNotificationStore,
   PgOAuthStateStore,
@@ -132,6 +135,7 @@ export interface Persistence {
   notificationStore: NotificationStore; // personal notification feed (bell inbox) — records run/scorecard completion with recipient=subject
   commentStore: CommentStore; // resource comments (datasets, etc.) — collaborative discussion
   knowledgeStore: KnowledgeStore; // workspace knowledge graph — append-only mention/edge + upsert node projection
+  knowledgeEntryStore: KnowledgeEntryStore; // knowledge entries (reified claims) — dual-scoped private|workspace
   viewStore: ViewStore; // saved scorecard-analysis Views (named AnalysisConfig, private|workspace) — live re-run
   browserProfileStore: BrowserProfileStore; // saved authenticated browser profiles (browser-profiles S2) — personal metadata
   skillStore: SkillStore; // workspace Skills (SKILL.md procedures the members author) — dual-scoped private|workspace
@@ -194,6 +198,7 @@ export async function makePersistence(): Promise<Persistence> {
       notificationStore: new InMemoryNotificationStore(),
       commentStore: new InMemoryCommentStore(),
       knowledgeStore: new InMemoryKnowledgeStore(),
+      knowledgeEntryStore: new InMemoryKnowledgeEntryStore(),
       viewStore: new InMemoryViewStore(),
       browserProfileStore: new InMemoryBrowserProfileStore(),
       skillStore: new InMemorySkillStore(),
@@ -234,6 +239,7 @@ export async function makePersistence(): Promise<Persistence> {
     notificationStore: new PgNotificationStore(client),
     commentStore: new PgCommentStore(client),
     knowledgeStore: new PgKnowledgeStore(client),
+    knowledgeEntryStore: new PgKnowledgeEntryStore(client),
     viewStore: new PgViewStore(client),
     browserProfileStore: new PgBrowserProfileStore(client),
     skillStore: new PgSkillStore(client),

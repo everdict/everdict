@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { NodeRefSchema } from "../knowledge/knowledge-node.js";
 
 // A skill's scope (workspace skill-share, mirrors the browser-profile / View visibility vocabulary). `private` = a
 // personal draft visible/manageable only by its creator; `workspace` = a shared workspace asset any member can see and
@@ -48,10 +49,18 @@ export const SkillRecordSchema = z.object({
   description: z.string(), // when-to-use / what it does — the discovery line the agent reads to decide whether to load it
   instructions: z.string(), // the SKILL.md body — the procedure, loaded into context when the agent invokes the skill
   files: SkillFilesSchema.default([]), // supporting reference files, each loaded individually on demand
+  // The version-PINNED entities this skill documents (`{type, key, version?}`), projected into the knowledge graph as
+  // `skill -[about]-> entity@version` edges. The pin is the staleness contract: when a referenced version gains an
+  // incoming `succeeds` edge (a newer version exists), the skill is mechanically flagged as potentially stale.
+  // See docs/architecture/knowledge-graph.md §Skills join the graph.
+  refs: z.array(NodeRefSchema).max(16).default([]),
   // `private` = personal draft (creator-only) · `workspace` = shared asset (read/use by any member + the agent, manage creator-or-admin).
   visibility: SkillVisibilitySchema,
   createdBy: z.string(), // owner subject
   createdAt: z.string(),
   updatedAt: z.string(),
+  // Last time a human/agent confirmed the procedure still matches reality — distinct from `updatedAt` (a skill rots
+  // even when untouched). Optional: absent means never verified.
+  verifiedAt: z.string().optional(),
 });
 export type SkillRecord = z.infer<typeof SkillRecordSchema>;

@@ -1,4 +1,4 @@
-import { SkillFilesSchema, SkillVisibilitySchema } from "@everdict/contracts";
+import { NodeRefSchema, SkillFilesSchema, SkillVisibilitySchema } from "@everdict/contracts";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { type McpToolContext, ok, run } from "../mcp-context.js";
@@ -35,16 +35,17 @@ export function registerSkillTools(server: McpServer, ctx: McpToolContext): void
     "create_skill",
     {
       description:
-        "Author a workspace skill (a SKILL.md-style procedure the agent follows). Keep `instructions` (the SKILL.md body) lean; put long reference material into `files` [{path, content}] — each file is loaded on demand, never inlined. Defaults to visibility 'private'; pass 'workspace' to share. Requires skills:write.",
+        "Author a workspace skill (a SKILL.md-style procedure the agent follows). Keep `instructions` (the SKILL.md body) lean; put long reference material into `files` [{path, content}] — each file is loaded on demand, never inlined. Pin the entities the skill documents in `refs` [{type, key, version?}] — the version pins are the staleness contract (a newer version flags the skill). Defaults to visibility 'private'; pass 'workspace' to share. Requires skills:write.",
       inputSchema: {
         name: z.string(),
         description: z.string(),
         instructions: z.string(),
         files: SkillFilesSchema.optional(),
+        refs: z.array(NodeRefSchema).max(16).optional(),
         visibility: SkillVisibilitySchema.optional(),
       },
     },
-    ({ name, description, instructions, files, visibility }) =>
+    ({ name, description, instructions, files, refs, visibility }) =>
       run(principal, "skills:write", async () =>
         ok(
           await skills.create({
@@ -54,6 +55,7 @@ export function registerSkillTools(server: McpServer, ctx: McpToolContext): void
             description,
             instructions,
             ...(files ? { files } : {}),
+            ...(refs ? { refs } : {}),
             ...(visibility ? { visibility } : {}),
           }),
         ),
@@ -71,10 +73,11 @@ export function registerSkillTools(server: McpServer, ctx: McpToolContext): void
         description: z.string().optional(),
         instructions: z.string().optional(),
         files: SkillFilesSchema.optional(),
+        refs: z.array(NodeRefSchema).max(16).optional(),
         visibility: SkillVisibilitySchema.optional(),
       },
     },
-    ({ id, name, description, instructions, files, visibility }) =>
+    ({ id, name, description, instructions, files, refs, visibility }) =>
       run(principal, "skills:write", async () =>
         ok(
           await skills.update(
@@ -85,12 +88,23 @@ export function registerSkillTools(server: McpServer, ctx: McpToolContext): void
               ...(description !== undefined ? { description } : {}),
               ...(instructions !== undefined ? { instructions } : {}),
               ...(files !== undefined ? { files } : {}),
+              ...(refs !== undefined ? { refs } : {}),
               ...(visibility !== undefined ? { visibility } : {}),
             },
             actor,
           ),
         ),
       ),
+  );
+
+  server.registerTool(
+    "verify_skill",
+    {
+      description:
+        "Attest a skill's procedure still matches reality — stamps verifiedAt (the freshness baseline) without counting as an edit. Use after checking a skill against the current harness/dataset versions. Manage = creator-or-admin. Requires skills:write.",
+      inputSchema: { id: z.string() },
+    },
+    ({ id }) => run(principal, "skills:write", async () => ok(await skills.verify(ws, id, actor))),
   );
 
   server.registerTool(

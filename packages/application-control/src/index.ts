@@ -10,6 +10,7 @@ export type { AgentSessionStore } from "./ports/agent-session-store.js";
 export type { AnalysisArtifactStore } from "./ports/analysis-artifact-store.js";
 export type { BrowserProfileStore } from "./ports/browser-profile-store.js";
 export type { SkillStore } from "./ports/skill-store.js";
+export type { KnowledgeEntryStore } from "./ports/knowledge-entry-store.js";
 export type { CapabilityStore } from "./ports/capability-store.js";
 export type { CallbackStore } from "./ports/callback-store.js";
 export type { CommentStore } from "./ports/comment-store.js";
@@ -56,6 +57,7 @@ export {
   SkillService,
   type SkillActor,
   type SkillServiceDeps,
+  type SkillWithFreshness,
   type UpdateSkillInput,
 } from "./skill/skill-service.js";
 export {
@@ -311,9 +313,27 @@ export {
   type TraversalDirection,
 } from "./knowledge/knowledge-query-service.js";
 export {
+  type KnowledgeContextSources,
   type KnowledgeGraphResult,
   KnowledgeService,
   type KnowledgeReindexResult,
   type KnowledgeReindexSources,
   type KnowledgeServiceDeps,
+  type TaskContext,
+  type TaskContextAnchor,
+  type TaskContextSkill,
 } from "./knowledge/knowledge-service.js";
+export {
+  type LatestVersionResolver,
+  registryLatestVersionResolver,
+  resolveFreshness,
+  type VersionedRegistries,
+} from "./knowledge/freshness-resolver.js";
+export {
+  type CreateKnowledgeEntryInput,
+  type KnowledgeEntryActor,
+  KnowledgeEntryService,
+  type KnowledgeEntryServiceDeps,
+  type KnowledgeEntryWithFreshness,
+  type UpdateKnowledgeEntryInput,
+} from "./knowledge/knowledge-entry-service.js";

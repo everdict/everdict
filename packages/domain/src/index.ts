@@ -281,3 +281,16 @@ export {
   RUNTIME_HARVESTER,
   type SpecHarvestMeta,
 } from "./knowledge/harvest-specs.js";
+export {
+  harvestKnowledgeEntry,
+  harvestSkill,
+  KNOWLEDGE_ENTRY_HARVESTER,
+  SKILL_HARVESTER,
+} from "./knowledge/harvest-knowledge.js";
+export {
+  assessFreshness,
+  DEFAULT_UNVERIFIED_AFTER_DAYS,
+  type Freshness,
+  type FreshnessState,
+  type StaleRef,
+} from "./knowledge/freshness.js";

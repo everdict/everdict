@@ -1,0 +1,99 @@
+import { ForbiddenError, type KnowledgeEntryRecord, NotFoundError } from "@everdict/contracts";
+import { describe, expect, it } from "vitest";
+import type { KnowledgeEntryStore } from "../ports/knowledge-entry-store.js";
+import { KnowledgeEntryService } from "./knowledge-entry-service.js";
+
+// Minimal in-memory store (mirrors @everdict/db InMemoryKnowledgeEntryStore).
+function fakeStore(): KnowledgeEntryStore {
+  const byId = new Map<string, KnowledgeEntryRecord>();
+  return {
+    async create(r) {
+      byId.set(r.id, r);
+    },
+    async get(tenant, id) {
+      const r = byId.get(id);
+      return r && r.tenant === tenant ? r : undefined;
+    },
+    async list(tenant, subject) {
+      return [...byId.values()].filter(
+        (r) => r.tenant === tenant && (r.visibility === "workspace" || r.createdBy === subject),
+      );
+    },
+    async update(tenant, id, patch) {
+      const r = byId.get(id);
+      if (!r || r.tenant !== tenant) return undefined;
+      const next = { ...r, ...patch, id: r.id, tenant: r.tenant };
+      byId.set(id, next);
+      return next;
+    },
+    async remove(tenant, id) {
+      const r = byId.get(id);
+      if (r && r.tenant === tenant) byId.delete(id);
+    },
+  };
+}
+
+let n = 0;
+function service(
+  latestVersionOf?: (tenant: string, ref: { type: string; key: string }) => Promise<string | undefined>,
+) {
+  return new KnowledgeEntryService({
+    store: fakeStore(),
+    newId: () => `kn-${n++}`,
+    now: () => "2026-07-28T00:00:00.000Z",
+    ...(latestVersionOf !== undefined ? { latestVersionOf } : {}),
+  });
+}
+
+const base = { tenant: "acme", kind: "finding" as const, title: "flaky on k8s", body: "…" };
+
+describe("KnowledgeEntryService", () => {
+  it("creates a private draft by default and records supersedes WITHOUT flipping the old entry", async () => {
+    const svc = service();
+    const old = await svc.create({ ...base, createdBy: "alice", visibility: "workspace" });
+    const next = await svc.create({ ...base, createdBy: "bob", supersedes: old.id, visibility: "workspace" });
+    expect(next.supersedes).toBe(old.id);
+    // the old entry's status is an explicit, gated write — a supersede by a non-manager must not bypass the gate
+    expect((await svc.get("acme", old.id, "alice")).status).toBe("active");
+  });
+
+  it("hides a private entry from other members (404, no existence leak)", async () => {
+    const svc = service();
+    const priv = await svc.create({ ...base, createdBy: "alice" });
+    await expect(svc.get("acme", priv.id, "bob")).rejects.toBeInstanceOf(NotFoundError);
+    expect((await svc.list("acme", "bob")).length).toBe(0);
+  });
+
+  it("gates managing a shared entry to creator-or-admin (403 for another member)", async () => {
+    const svc = service();
+    const shared = await svc.create({ ...base, createdBy: "alice", visibility: "workspace" });
+    await expect(
+      svc.update("acme", shared.id, { status: "deprecated" }, { subject: "bob", isAdmin: false }),
+    ).rejects.toBeInstanceOf(ForbiddenError);
+    const byAdmin = await svc.update("acme", shared.id, { status: "deprecated" }, { subject: "bob", isAdmin: true });
+    expect(byAdmin.status).toBe("deprecated");
+  });
+
+  it("verify stamps verifiedAt without touching updatedAt (a verification is not an edit)", async () => {
+    const svc = service();
+    const rec = await svc.create({ ...base, createdBy: "alice", visibility: "workspace" });
+    const verified = await svc.verify("acme", rec.id, { subject: "alice", isAdmin: false });
+    expect(verified.verifiedAt).toBe("2026-07-28T00:00:00.000Z");
+    expect(verified.updatedAt).toBe(rec.updatedAt);
+  });
+
+  it("decorates list/get with freshness when a resolver is present (superseded ref → stale)", async () => {
+    const svc = service(async (_t, ref) => (ref.key === "web-agent" ? "2.3.0" : undefined));
+    const rec = await svc.create({
+      ...base,
+      createdBy: "alice",
+      visibility: "workspace",
+      refs: [{ type: "harness", key: "web-agent", version: "2.1.0" }],
+    });
+    const [listed] = await svc.list("acme", "alice");
+    expect(listed?.freshness?.state).toBe("superseded_refs");
+    expect(listed?.freshness?.staleRefs[0]?.latest).toBe("2.3.0");
+    const got = await svc.get("acme", rec.id, "alice");
+    expect(got.freshness?.state).toBe("superseded_refs");
+  });
+});

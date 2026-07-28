@@ -1,6 +1,11 @@
 import type { FastifyInstance } from "fastify";
 import { type ServerDeps, gate, resolvePrincipal, sendError, zodIssues } from "../route-context.js";
 import {
+  AssembleContextBodySchema,
+  CreateKnowledgeEntryBodySchema,
+  UpdateKnowledgeEntryBodySchema,
+} from "./request/knowledge-entry-write.js";
+import {
   KnowledgeGraphQuerySchema,
   KnowledgeRelatedQuerySchema,
   KnowledgeSubgraphQuerySchema,
@@ -144,6 +149,143 @@ export function registerKnowledgeRoutes(app: FastifyInstance, deps: ServerDeps):
       return reply
         .code(201)
         .send(await deps.knowledgeService.relate(principal.workspace, principal.subject, parsed.data));
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  // Task-time context assembly — per-anchor structural facts + the knowledge entries and skill candidates ABOUT the
+  // anchors, freshness-decorated. POST because anchors are structured NodeRefs (keys may contain '/' / ':').
+  app.post("/knowledge/context", async (req, reply) => {
+    if (!deps.knowledgeService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "knowledge service not configured" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    const parsed = AssembleContextBodySchema.safeParse(req.body);
+    if (!parsed.success)
+      return reply.code(400).send({ code: "BAD_REQUEST", message: zodIssues(parsed.error).join("; ") });
+    try {
+      gate(principal, "scorecards:read");
+      return reply.send(
+        await deps.knowledgeService.assembleContext(principal.workspace, principal.subject, parsed.data.refs),
+      );
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  // --- knowledge entries: reified claims (the knowledge layer's record; annotate's promoted successor) ---
+  // Reads = scorecards:read (like every knowledge read); writes = comments:write (a member contribution, like
+  // annotate/relate); manage (edit/delete/verify) additionally gates creator-or-admin in the service.
+
+  app.post("/knowledge/entries", async (req, reply) => {
+    if (!deps.knowledgeEntryService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "knowledge entries not configured" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "comments:write");
+    } catch (err) {
+      return sendError(reply, err);
+    }
+    const parsed = CreateKnowledgeEntryBodySchema.safeParse(req.body);
+    if (!parsed.success)
+      return reply.code(400).send({ code: "BAD_REQUEST", message: zodIssues(parsed.error).join("; ") });
+    try {
+      return reply.code(201).send(
+        await deps.knowledgeEntryService.create({
+          tenant: principal.workspace,
+          createdBy: principal.subject,
+          ...parsed.data,
+        }),
+      );
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  app.get("/knowledge/entries", async (req, reply) => {
+    if (!deps.knowledgeEntryService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "knowledge entries not configured" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "scorecards:read");
+      return reply.send(await deps.knowledgeEntryService.list(principal.workspace, principal.subject));
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  app.get<{ Params: { id: string } }>("/knowledge/entries/:id", async (req, reply) => {
+    if (!deps.knowledgeEntryService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "knowledge entries not configured" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "scorecards:read");
+      return reply.send(await deps.knowledgeEntryService.get(principal.workspace, req.params.id, principal.subject));
+    } catch (err) {
+      return sendError(reply, err); // foreign private / missing → 404
+    }
+  });
+
+  app.patch<{ Params: { id: string } }>("/knowledge/entries/:id", async (req, reply) => {
+    if (!deps.knowledgeEntryService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "knowledge entries not configured" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "comments:write");
+    } catch (err) {
+      return sendError(reply, err);
+    }
+    const parsed = UpdateKnowledgeEntryBodySchema.safeParse(req.body);
+    if (!parsed.success)
+      return reply.code(400).send({ code: "BAD_REQUEST", message: zodIssues(parsed.error).join("; ") });
+    try {
+      return reply.send(
+        await deps.knowledgeEntryService.update(principal.workspace, req.params.id, parsed.data, {
+          subject: principal.subject,
+          isAdmin: principal.roles.includes("admin"),
+        }),
+      );
+    } catch (err) {
+      return sendError(reply, err); // creator-or-admin gate → 403/404
+    }
+  });
+
+  app.delete<{ Params: { id: string } }>("/knowledge/entries/:id", async (req, reply) => {
+    if (!deps.knowledgeEntryService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "knowledge entries not configured" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "comments:write");
+      await deps.knowledgeEntryService.remove(principal.workspace, req.params.id, {
+        subject: principal.subject,
+        isAdmin: principal.roles.includes("admin"),
+      });
+      return reply.code(204).send();
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  // Attest a claim still holds — stamps verifiedAt without touching updatedAt (the freshness baseline).
+  app.post<{ Params: { id: string } }>("/knowledge/entries/:id/verify", async (req, reply) => {
+    if (!deps.knowledgeEntryService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "knowledge entries not configured" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "comments:write");
+      return reply.send(
+        await deps.knowledgeEntryService.verify(principal.workspace, req.params.id, {
+          subject: principal.subject,
+          isAdmin: principal.roles.includes("admin"),
+        }),
+      );
     } catch (err) {
       return sendError(reply, err);
     }

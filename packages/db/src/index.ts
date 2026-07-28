@@ -77,6 +77,7 @@ export type {
   ViewStore,
   BrowserProfileStore,
   SkillStore,
+  KnowledgeEntryStore,
   CapabilityStore,
   UsageStore,
   BudgetStore,
@@ -105,6 +106,7 @@ export { InMemoryScheduleStore } from "./results/schedule-store.js";
 export { InMemoryViewStore, PgViewStore } from "./results/view-store.js";
 export { InMemoryBrowserProfileStore, PgBrowserProfileStore } from "./workspace/browser-profile-store.js";
 export { InMemorySkillStore, PgSkillStore } from "./workspace/skill-store.js";
+export { InMemoryKnowledgeEntryStore, PgKnowledgeEntryStore } from "./workspace/knowledge-entry-store.js";
 export { InMemoryCapabilityStore, PgCapabilityStore } from "./workspace/capability-store.js";
 export { type SqlClient, type PgPool, makePool, sqlClient } from "./client.js";
 export {

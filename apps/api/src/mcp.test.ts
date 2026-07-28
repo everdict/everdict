@@ -543,6 +543,7 @@ describe("MCP tools", () => {
       "validate_model",
       "validate_rubric",
       "validate_runtime",
+      "verify_skill",
     ]);
   });
 

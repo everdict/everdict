@@ -38,6 +38,10 @@ export const SOURCE_KINDS = [
   "membership",
   "workspace_settings", // CI links, GitHub App installs, trace sources, image registries — the integration graph
 
+  // STRUCTURED knowledge-layer records (the claim stratum — see §knowledge layer in the design doc)
+  "skill",
+  "knowledge_entry",
+
   // TEXT surfaces (extraction)
   "comment",
   "agent_message",

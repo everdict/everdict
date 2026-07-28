@@ -1,10 +1,13 @@
 import {
   ForbiddenError,
+  type NodeRef,
   NotFoundError,
   type SkillFile,
   type SkillRecord,
   type SkillVisibility,
 } from "@everdict/contracts";
+import type { Freshness } from "@everdict/domain";
+import { type LatestVersionResolver, resolveFreshness } from "../knowledge/freshness-resolver.js";
 import type { SkillStore } from "../ports/skill-store.js";
 
 // Workspace Skill CRUD — dual-scoped like browser profiles / Views:
@@ -20,6 +23,7 @@ export interface CreateSkillInput {
   description: string;
   instructions: string;
   files?: SkillFile[]; // supporting reference files (defaults to none)
+  refs?: NodeRef[]; // the version-pinned entities the skill documents (→ `about` edges, the staleness contract)
   visibility?: SkillVisibility; // defaults to "private" (personal draft) — sharing is an explicit opt-in
 }
 
@@ -28,6 +32,7 @@ export interface UpdateSkillInput {
   description?: string;
   instructions?: string;
   files?: SkillFile[]; // full replacement of the file set when provided (omit to keep as-is)
+  refs?: NodeRef[]; // full replacement of the pinned refs when provided (omit to keep as-is)
   visibility?: SkillVisibility; // promote private→workspace ("share") or demote workspace→private
 }
 
@@ -38,8 +43,15 @@ export interface SkillActor {
   isAdmin: boolean;
 }
 
+// A skill decorated with its freshness — how trustworthy the procedure is right now: `superseded_refs` (a pinned
+// `refs` target has a newer version) / `unverified` (no recent edit or verification) / `fresh`. Additive on the wire.
+export type SkillWithFreshness = SkillRecord & { freshness?: Freshness };
+
 export interface SkillServiceDeps {
   store: SkillStore;
+  // Optional latest-version resolver (composition wires it over the registries). When present, list/get decorate
+  // each skill with `freshness` — the staleness contract the agent surfaces as a listing badge / use_skill banner.
+  latestVersionOf?: LatestVersionResolver;
   newId?: () => string;
   now?: () => string;
 }
@@ -62,6 +74,7 @@ export class SkillService {
       description: input.description,
       instructions: input.instructions,
       files: input.files ?? [],
+      refs: input.refs ?? [],
       visibility: input.visibility ?? "private", // personal draft by default — sharing is explicit
       createdBy: input.createdBy,
       createdAt: ts,
@@ -71,18 +84,20 @@ export class SkillService {
     return record;
   }
 
-  // Skills the caller can see — every workspace skill + their own private ones.
-  list(tenant: string, subject: string): Promise<SkillRecord[]> {
-    return this.deps.store.list(tenant, subject);
+  // Skills the caller can see — every workspace skill + their own private ones, freshness-decorated.
+  async list(tenant: string, subject: string): Promise<SkillWithFreshness[]> {
+    return this.decorate(tenant, await this.deps.store.list(tenant, subject));
   }
 
   // A single skill the caller can see — a workspace skill is visible to any member; a private one only to its creator.
   // Otherwise 404 (no existence leak — a foreign private skill is indistinguishable from a missing one).
-  async get(tenant: string, id: string, subject: string): Promise<SkillRecord> {
+  async get(tenant: string, id: string, subject: string): Promise<SkillWithFreshness> {
     const record = await this.deps.store.get(tenant, id);
     if (!record || (record.visibility === "private" && record.createdBy !== subject))
       throw new NotFoundError("NOT_FOUND", { id }, `skill '${id}' not found.`);
-    return record;
+    const [decorated] = await this.decorate(tenant, [record]);
+    if (!decorated) throw new NotFoundError("NOT_FOUND", { id }, `skill '${id}' not found.`);
+    return decorated;
   }
 
   async update(tenant: string, id: string, patch: UpdateSkillInput, actor: SkillActor): Promise<SkillRecord> {
@@ -92,8 +107,18 @@ export class SkillService {
     if (patch.description !== undefined) next.description = patch.description;
     if (patch.instructions !== undefined) next.instructions = patch.instructions;
     if (patch.files !== undefined) next.files = patch.files;
+    if (patch.refs !== undefined) next.refs = patch.refs;
     if (patch.visibility !== undefined) next.visibility = patch.visibility;
     const updated = await this.deps.store.update(tenant, id, next);
+    if (!updated) throw new NotFoundError("NOT_FOUND", { id }, `skill '${id}' not found.`);
+    return updated;
+  }
+
+  // Attest that the procedure still matches reality — stamps `verifiedAt` WITHOUT touching `updatedAt` (a
+  // verification is not an edit; the freshness baseline is the later of the two). Gated like any management op.
+  async verify(tenant: string, id: string, actor: SkillActor): Promise<SkillRecord> {
+    await this.manageableOrThrow(tenant, id, actor);
+    const updated = await this.deps.store.update(tenant, id, { verifiedAt: this.now() });
     if (!updated) throw new NotFoundError("NOT_FOUND", { id }, `skill '${id}' not found.`);
     return updated;
   }
@@ -101,6 +126,16 @@ export class SkillService {
   async remove(tenant: string, id: string, actor: SkillActor): Promise<void> {
     await this.manageableOrThrow(tenant, id, actor);
     await this.deps.store.remove(tenant, id);
+  }
+
+  private async decorate(tenant: string, records: SkillRecord[]): Promise<SkillWithFreshness[]> {
+    const resolver = this.deps.latestVersionOf;
+    if (resolver === undefined || records.length === 0) return records;
+    const freshness = await resolveFreshness(tenant, records, resolver, this.now());
+    return records.map((record, i) => {
+      const f = freshness[i];
+      return f !== undefined ? { ...record, freshness: f } : record;
+    });
   }
 
   // The gate for every management op (update/remove): a `private` skill is manageable ONLY by its creator (invisible to

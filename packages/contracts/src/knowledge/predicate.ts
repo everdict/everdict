@@ -46,6 +46,12 @@ export const PREDICATES = [
   "reply_to", // comment → comment (a threaded reply)
   "mentions", // comment | agent_message → user (an @user mention)
 
+  // KNOWLEDGE — the claim stratum's deliberately GENERIC grammar. The structural predicates above stay specific
+  // because they mirror deterministic FKs; a claim's specificity lives in the knowledge NODE's content instead
+  // (reification), so two predicates suffice. See docs/architecture/knowledge-graph.md §knowledge layer.
+  "about", // skill | knowledge → any node (what a procedure documents / what a claim concerns — version-pinned)
+  "evidenced_by", // knowledge → scorecard | run | comment | agent_session (the observation backing a claim)
+
   // INTEGRATION
   "triggers", // repository → harness (a CI link: repo PR/merge fires this harness)
   "connects_repo", // workspace → repository (a GitHub App install / CI repo link)

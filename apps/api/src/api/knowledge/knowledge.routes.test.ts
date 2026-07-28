@@ -1,8 +1,13 @@
-import { KnowledgeService } from "@everdict/application-control";
+import { KnowledgeEntryService, KnowledgeService } from "@everdict/application-control";
 import { RunService } from "@everdict/application-control";
 import type { Dispatcher } from "@everdict/backends";
-import type { Dataset, ScorecardRecord } from "@everdict/contracts";
-import { InMemoryKnowledgeStore, InMemoryRunStore, InMemoryScorecardStore } from "@everdict/db";
+import type { Dataset, NodeRef, ScorecardRecord } from "@everdict/contracts";
+import {
+  InMemoryKnowledgeEntryStore,
+  InMemoryKnowledgeStore,
+  InMemoryRunStore,
+  InMemoryScorecardStore,
+} from "@everdict/db";
 import { harvestScorecard, nodeId } from "@everdict/domain";
 import { InMemoryDatasetRegistry } from "@everdict/registry";
 import { describe, expect, it } from "vitest";
@@ -42,9 +47,18 @@ async function build(withKnowledge: boolean) {
   await scorecards.create(SCORECARD);
   const datasets = new InMemoryDatasetRegistry();
   await datasets.register("acme", DATASET, "user-alice");
+  const knowledgeEntryStore = new InMemoryKnowledgeEntryStore();
+  // Fake registry-latest: the harness family moved on to 2.3.0 (so a 2.1.0-pinned ref reads superseded).
+  const latestVersionOf = async (_tenant: string, ref: NodeRef) =>
+    ref.type === "harness" && ref.key === "web-agent" ? "2.3.0" : undefined;
   return buildServer({
     service,
-    knowledgeService: new KnowledgeService({ store, reindexSources: { scorecards, datasets } }),
+    knowledgeService: new KnowledgeService({
+      store,
+      reindexSources: { scorecards, datasets },
+      contextSources: { knowledgeEntries: knowledgeEntryStore, latestVersionOf },
+    }),
+    knowledgeEntryService: new KnowledgeEntryService({ store: knowledgeEntryStore, latestVersionOf }),
   });
 }
 
@@ -228,6 +242,109 @@ describe("knowledge routes", () => {
         predicate: "compared_to",
         object: { type: "scorecard", key: "sc1" },
       },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+});
+
+describe("knowledge entries — reified claims", () => {
+  const entryPayload = {
+    kind: "finding",
+    title: "login cases flaky on k8s",
+    body: "variance only on the k8s runtime",
+    refs: [{ type: "harness", key: "web-agent", version: "2.1.0" }],
+    evidence: [{ type: "scorecard", key: "sc1" }],
+    visibility: "workspace",
+  };
+
+  it("404s when the entry service is not configured", async () => {
+    const res = await (await build(false)).inject({ method: "GET", url: "/knowledge/entries", headers: H });
+    expect(res.statusCode).toBe(404);
+  });
+
+  it("creates an entry, lists it freshness-decorated (pinned 2.1.0 vs latest 2.3.0 → superseded_refs)", async () => {
+    const app = await build(true);
+    const post = await app.inject({ method: "POST", url: "/knowledge/entries", headers: H, payload: entryPayload });
+    expect(post.statusCode).toBe(201);
+    const created = post.json() as { id: string; status: string };
+    expect(created.status).toBe("active");
+
+    const list = await app.inject({ method: "GET", url: "/knowledge/entries", headers: H });
+    expect(list.statusCode).toBe(200);
+    const entries = list.json() as Array<{ id: string; freshness?: { state: string } }>;
+    expect(entries[0]?.id).toBe(created.id);
+    expect(entries[0]?.freshness?.state).toBe("superseded_refs");
+  });
+
+  it("400s an unknown kind (closed vocabulary, no fallback)", async () => {
+    const res = await (await build(true)).inject({
+      method: "POST",
+      url: "/knowledge/entries",
+      headers: H,
+      payload: { ...entryPayload, kind: "insight" },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it("verify stamps verifiedAt without touching updatedAt; PATCH edits; DELETE removes", async () => {
+    const app = await build(true);
+    const created = (
+      await app.inject({ method: "POST", url: "/knowledge/entries", headers: H, payload: entryPayload })
+    ).json() as { id: string; updatedAt: string };
+
+    const verified = await app.inject({
+      method: "POST",
+      url: `/knowledge/entries/${created.id}/verify`,
+      headers: H,
+    });
+    expect(verified.statusCode).toBe(200);
+    const vBody = verified.json() as { verifiedAt?: string; updatedAt: string };
+    expect(vBody.verifiedAt).toBeDefined();
+    expect(vBody.updatedAt).toBe(created.updatedAt);
+
+    const patched = await app.inject({
+      method: "PATCH",
+      url: `/knowledge/entries/${created.id}`,
+      headers: H,
+      payload: { status: "deprecated" },
+    });
+    expect(patched.statusCode).toBe(200);
+    expect((patched.json() as { status: string }).status).toBe("deprecated");
+
+    const removed = await app.inject({ method: "DELETE", url: `/knowledge/entries/${created.id}`, headers: H });
+    expect(removed.statusCode).toBe(204);
+    const gone = await app.inject({ method: "GET", url: `/knowledge/entries/${created.id}`, headers: H });
+    expect(gone.statusCode).toBe(404);
+  });
+
+  it("assembles task context: anchors' facts + the entries about the anchor family (version-agnostic match)", async () => {
+    const app = await build(true);
+    await app.inject({ method: "POST", url: "/knowledge/entries", headers: H, payload: entryPayload });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/knowledge/context",
+      headers: H,
+      // The task anchors a NEWER harness version — the 2.1.0-pinned claim must still surface (family match).
+      payload: { refs: [{ type: "harness", key: "web-agent", version: "2.3.0" }] },
+    });
+    expect(res.statusCode).toBe(200);
+    const ctx = res.json() as {
+      anchors: Array<{ nodeId: string; facts: unknown[] }>;
+      knowledge: Array<{ title: string; freshness?: { state: string } }>;
+      skills: unknown[];
+    };
+    expect(ctx.anchors[0]?.nodeId).toBe(nodeId("acme", { type: "harness", key: "web-agent", version: "2.3.0" }));
+    expect(ctx.knowledge[0]?.title).toBe(entryPayload.title);
+    expect(ctx.knowledge[0]?.freshness?.state).toBe("superseded_refs");
+  });
+
+  it("400s an empty context anchor list", async () => {
+    const res = await (await build(true)).inject({
+      method: "POST",
+      url: "/knowledge/context",
+      headers: H,
+      payload: { refs: [] },
     });
     expect(res.statusCode).toBe(400);
   });

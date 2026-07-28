@@ -44,6 +44,7 @@ export const NODE_TYPES = [
 
   // KNOWLEDGE & COMMS — text-bearing surfaces that are also first-class nodes
   "skill", // a workspace instruction-library entry
+  "knowledge", // a reified claim (KnowledgeEntryRecord) — a workspace-general assertion about other nodes
   "comment", // a resource-discussion comment (participates in threads + authorship + @-mentions)
   "agent_session", // a conversation between a member and everdict's own agent
 

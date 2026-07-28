@@ -2,9 +2,11 @@ import type { SkillEntry } from "@everdict/agent-runtime";
 import {
   type AgentRegistry,
   type CapabilityStore,
+  type LatestVersionResolver,
   type SecretStore,
   type SkillStore,
   firstPartyDefaults,
+  resolveFreshness,
 } from "@everdict/application-control";
 import type { CapabilityRecord, CapabilityRequirement } from "@everdict/contracts";
 import { canConsumeCapability, selectDefaultCapabilities } from "@everdict/domain";
@@ -151,6 +153,9 @@ export function registryProfileResolver(opts: {
   // Which integrations the workspace has configured — gates the integration-dependent defaults. Best-effort; unset or
   // a failure ⇒ no integration defaults (the unconditional ones still apply). Wired in the integration-adapter phase.
   integrationsConfigured?: (workspace: string) => Promise<readonly CapabilityRequirement[]>;
+  // Latest-version resolution over the registries — when present, each skill carries a freshness state (the
+  // knowledge-layer staleness contract) that use_skill surfaces as a listing badge + body banner. Best-effort.
+  latestVersionOf?: LatestVersionResolver;
 }): ProfileResolver {
   return async (principal) => {
     // Skills load independently of the AgentSpec — a workspace can have a skill library without a registered agent
@@ -158,12 +163,20 @@ export function registryProfileResolver(opts: {
     let skills: SkillEntry[] = [];
     try {
       const records = await opts.skillStore.list(principal.workspace, principal.subject);
-      skills = records.map((s) => ({
-        name: s.name,
-        description: s.description,
-        instructions: s.instructions,
-        files: s.files,
-      }));
+      const resolver = opts.latestVersionOf;
+      const freshness = resolver
+        ? await resolveFreshness(principal.workspace, records, resolver, new Date().toISOString())
+        : undefined;
+      skills = records.map((s, i) => {
+        const f = freshness?.[i];
+        return {
+          name: s.name,
+          description: s.description,
+          instructions: s.instructions,
+          files: s.files,
+          ...(f !== undefined ? { freshness: f } : {}),
+        };
+      });
     } catch {
       skills = [];
     }

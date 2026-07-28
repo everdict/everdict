@@ -1,4 +1,4 @@
-import { KnowledgeService } from "@everdict/application-control";
+import { KnowledgeEntryService, KnowledgeService, registryLatestVersionResolver } from "@everdict/application-control";
 import { ProxyService } from "@everdict/application-control";
 import { SkillService } from "@everdict/application-control";
 import {
@@ -126,6 +126,7 @@ async function main(): Promise<void> {
     notificationStore,
     commentStore,
     knowledgeStore,
+    knowledgeEntryStore,
     viewStore,
     browserProfileStore,
     skillStore,
@@ -136,8 +137,24 @@ async function main(): Promise<void> {
     cipher,
   } = await makePersistence();
 
+  // Latest-version resolution over the registries — backs the freshness decoration (skills / knowledge entries) and
+  // task-time context assembly. Best-effort: an unknown/deleted entity resolves to "no signal", never an error.
+  const latestVersionOf = registryLatestVersionResolver({
+    datasets: datasetRegistry,
+    judges: judgeRegistry,
+    runtimes: runtimeRegistry,
+    models: modelRegistry,
+    rubrics: rubricRegistry,
+    harnesses: harnessInstanceRegistry,
+    agents: agentRegistry,
+  });
+
+  // Knowledge entries — reified claims (the knowledge layer's record). CRUD + verify; freshness-decorated reads.
+  const knowledgeEntryService = new KnowledgeEntryService({ store: knowledgeEntryStore, latestVersionOf });
+
   // Workspace knowledge graph — the query surface over the harvested graph + a pull reindex that harvests the
-  // tenant-listable record stores (scorecards/runs/schedules) into it. See docs/architecture/knowledge-graph.md.
+  // tenant-listable record stores (scorecards/runs/schedules) into it, plus task-time context assembly over the
+  // knowledge-layer records (skills + entries). See docs/architecture/knowledge-graph.md.
   const knowledgeService = new KnowledgeService({
     store: knowledgeStore,
     reindexSources: {
@@ -151,6 +168,13 @@ async function main(): Promise<void> {
       rubrics: rubricRegistry,
       harnesses: harnessInstanceRegistry,
       agents: agentRegistry,
+      skills: skillStore,
+      knowledgeEntries: knowledgeEntryStore,
+    },
+    contextSources: {
+      skills: skillStore,
+      knowledgeEntries: knowledgeEntryStore,
+      latestVersionOf,
     },
   });
 
@@ -461,7 +485,7 @@ async function main(): Promise<void> {
     agentService: new AgentService({ agents: agentRegistry }),
     // Workspace Skills — SKILL.md procedures the members author (dual-scoped private|workspace) + skill-generate (drafts
     // a skill from a description via the workspace's registered model + key; same secret tiers/base as the model probe).
-    skillService: new SkillService({ store: skillStore }),
+    skillService: new SkillService({ store: skillStore, latestVersionOf }),
     // Capability Store — one discriminated versioned entity (mcp|code|skill|environment) members author, publish
     // (private|workspace|subset|public), and adopt into their agent (tool kinds) or consume at harness-authoring time
     // (environment). Reach beyond the workspace: subset fans across the author's own workspaces, public exposes to
@@ -516,6 +540,7 @@ async function main(): Promise<void> {
     notificationService, // notification feed (bell inbox) route — self-scoped
     commentService, // resource comments route + MCP
     knowledgeService, // workspace knowledge graph route + MCP
+    knowledgeEntryService, // knowledge entries (reified claims) CRUD + verify — route + MCP
     runnerHub,
     authenticator: buildAuthenticator(keyStore, runnerStore, settingsStore),
     keyStore,

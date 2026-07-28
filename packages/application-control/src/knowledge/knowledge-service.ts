@@ -11,7 +11,9 @@ import {
   NotFoundError,
   type Predicate,
 } from "@everdict/contracts";
+import type { KnowledgeEntryRecord } from "@everdict/contracts";
 import {
+  type Freshness,
   type HarvestResult,
   type SpecHarvestMeta,
   edgeId,
@@ -19,18 +21,21 @@ import {
   harvestDataset,
   harvestHarness,
   harvestJudge,
+  harvestKnowledgeEntry,
   harvestModel,
   harvestRubric,
   harvestRun,
   harvestRuntime,
   harvestSchedule,
   harvestScorecard,
+  harvestSkill,
   nodeId,
 } from "@everdict/domain";
 import type { AgentRegistry } from "../ports/agent-registry.js";
 import type { DatasetRegistry } from "../ports/dataset-registry.js";
 import type { HarnessInstanceRegistry } from "../ports/harness-instance-registry.js";
 import type { JudgeRegistry } from "../ports/judge-registry.js";
+import type { KnowledgeEntryStore } from "../ports/knowledge-entry-store.js";
 import type { KnowledgeStore } from "../ports/knowledge-store.js";
 import type { ModelRegistry } from "../ports/model-registry.js";
 import type { RubricRegistry } from "../ports/rubric-registry.js";
@@ -38,6 +43,8 @@ import type { RunStore } from "../ports/run-store.js";
 import type { RuntimeRegistry } from "../ports/runtime-registry.js";
 import type { ScheduleStore } from "../ports/schedule-store.js";
 import type { ScorecardStore } from "../ports/scorecard-store.js";
+import type { SkillStore } from "../ports/skill-store.js";
+import { type LatestVersionResolver, resolveFreshness } from "./freshness-resolver.js";
 import { ingestHarvest } from "./ingest-harvest.js";
 import {
   KnowledgeQueryService,
@@ -61,6 +68,10 @@ export interface KnowledgeReindexSources {
   rubrics?: RubricRegistry;
   harnesses?: HarnessInstanceRegistry;
   agents?: AgentRegistry;
+  // Knowledge-layer records — only WORKSPACE-visible ones enter the shared graph (a private draft is personal until
+  // its author shares it). Listed with an empty subject so no private rows leak into the projection.
+  skills?: Pick<SkillStore, "list">;
+  knowledgeEntries?: Pick<KnowledgeEntryStore, "list">;
 }
 
 export interface KnowledgeReindexResult {
@@ -83,9 +94,45 @@ export interface KnowledgeGraphResult {
   };
 }
 
+// The sources task-time context assembly reads. Unlike reindex (graph projection), assembleContext reads the
+// RECORDS directly — always current, no reindex dependency on the hot path; the graph carries the same info for
+// graph queries.
+export interface KnowledgeContextSources {
+  skills?: Pick<SkillStore, "list">;
+  knowledgeEntries?: Pick<KnowledgeEntryStore, "list">;
+  latestVersionOf?: LatestVersionResolver;
+}
+
 export interface KnowledgeServiceDeps {
   store: KnowledgeStore;
   reindexSources?: KnowledgeReindexSources;
+  contextSources?: KnowledgeContextSources;
+}
+
+// One anchor's assembled context lane — the anchor + its ranked structural facts (which include `discusses` edges
+// from harvested comments, so the discussion trail rides along).
+export interface TaskContextAnchor {
+  ref: NodeRef;
+  nodeId: string;
+  facts: RelatedFact[];
+}
+
+// A skill candidate in the assembled context — listing-level only (name/description/refs/freshness), never the
+// instructions body: selection stays cheap, the agent loads the body via use_skill when it picks one.
+export interface TaskContextSkill {
+  id: string;
+  name: string;
+  description: string;
+  refs: NodeRef[];
+  freshness?: Freshness;
+}
+
+// assembleContext's result — the one payload that feeds the in-product agent, spawned teammates/subagents, and
+// Claude Code via the plugin (MCP get_task_context). See docs/architecture/knowledge-graph.md §Consumption.
+export interface TaskContext {
+  anchors: TaskContextAnchor[];
+  knowledge: (KnowledgeEntryRecord & { freshness?: Freshness })[];
+  skills: TaskContextSkill[];
 }
 
 // The control-plane facade over the knowledge graph — the read surface (node / related / subgraph, delegating to the
@@ -193,7 +240,74 @@ export class KnowledgeService {
       for (const e of await src.agents.list(tenant))
         await apply(harvestAgent(meta(e.createdBy), await src.agents.get(tenant, e.id)));
     }
+
+    // Knowledge-layer records — workspace-visible only (empty subject → no private drafts; belt-and-braces filter).
+    if (src?.skills) {
+      for (const s of await src.skills.list(tenant, "")) if (s.visibility === "workspace") await apply(harvestSkill(s));
+    }
+    if (src?.knowledgeEntries) {
+      for (const e of await src.knowledgeEntries.list(tenant, ""))
+        if (e.visibility === "workspace") await apply(harvestKnowledgeEntry(e));
+    }
     return acc;
+  }
+
+  // Task-time context assembly — the knowledge layer's consumption surface. For a set of anchors (the entities a
+  // task concerns: @-references, the scorecard under discussion, a harness being edited), returns per-anchor ranked
+  // structural facts (graph) + the knowledge entries and skill candidates ABOUT those anchors (records, family-matched
+  // on (type, key) so a claim about web-agent@2.1.0 still surfaces when the task anchors web-agent@2.3.0), each
+  // freshness-decorated. Skill candidates are listing-level (no instructions body) — the agent loads a body on demand.
+  async assembleContext(tenant: string, subject: string, anchors: NodeRef[]): Promise<TaskContext> {
+    const ctxSrc = this.deps.contextSources;
+    const now = new Date().toISOString();
+    const anchorLanes: TaskContextAnchor[] = [];
+    for (const ref of anchors) {
+      const id = nodeId(tenant, ref);
+      anchorLanes.push({ ref, nodeId: id, facts: await this.query.relatedFacts(tenant, id, {}) });
+    }
+
+    const families = new Set(anchors.map((a) => `${a.type}:${a.key}`));
+    const matches = (refs: NodeRef[]): boolean => refs.some((r) => families.has(`${r.type}:${r.key}`));
+    const baseline = (r: { verifiedAt?: string; updatedAt: string }): string =>
+      r.verifiedAt !== undefined && r.verifiedAt > r.updatedAt ? r.verifiedAt : r.updatedAt;
+
+    let knowledge: (KnowledgeEntryRecord & { freshness?: Freshness })[] = [];
+    if (ctxSrc?.knowledgeEntries) {
+      const entries = (await ctxSrc.knowledgeEntries.list(tenant, subject)).filter((e) => matches(e.refs));
+      // Active claims first, freshest baseline first — a deprecated/superseded claim still surfaces (it may be the
+      // correction trail) but never above a live one.
+      entries.sort((a, b) =>
+        a.status === b.status ? baseline(b).localeCompare(baseline(a)) : a.status === "active" ? -1 : 1,
+      );
+      const page = entries.slice(0, 20);
+      const decorated = ctxSrc.latestVersionOf
+        ? await resolveFreshness(tenant, page, ctxSrc.latestVersionOf, now)
+        : undefined;
+      knowledge = page.map((e, i) => {
+        const f = decorated?.[i];
+        return f !== undefined ? { ...e, freshness: f } : e;
+      });
+    }
+
+    let skills: TaskContextSkill[] = [];
+    if (ctxSrc?.skills) {
+      const matched = (await ctxSrc.skills.list(tenant, subject)).filter((s) => matches(s.refs)).slice(0, 20);
+      const decorated = ctxSrc.latestVersionOf
+        ? await resolveFreshness(tenant, matched, ctxSrc.latestVersionOf, now)
+        : undefined;
+      skills = matched.map((s, i) => {
+        const f = decorated?.[i];
+        return {
+          id: s.id,
+          name: s.name,
+          description: s.description,
+          refs: s.refs,
+          ...(f !== undefined ? { freshness: f } : {}),
+        };
+      });
+    }
+
+    return { anchors: anchorLanes, knowledge, skills };
   }
 
   // Attach a free-form note/observation to a node — a user or agent (from Claude Code via the everdict plugin)

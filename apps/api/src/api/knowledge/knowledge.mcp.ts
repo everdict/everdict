@@ -1,4 +1,12 @@
-import { NodeRefSchema, NodeTypeSchema, PredicateSchema } from "@everdict/contracts";
+import {
+  KNOWLEDGE_ENTRY_MAX_REFS,
+  KnowledgeEntryKindSchema,
+  KnowledgeEntryStatusSchema,
+  KnowledgeEntryVisibilitySchema,
+  NodeRefSchema,
+  NodeTypeSchema,
+  PredicateSchema,
+} from "@everdict/contracts";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { type McpToolContext, ok, run } from "../mcp-context.js";
@@ -132,6 +140,19 @@ export function registerKnowledgeTools(server: McpServer, ctx: McpToolContext): 
   );
 
   server.registerTool(
+    "get_task_context",
+    {
+      description:
+        "Assemble workspace context for a task: for each anchor ({type, key, version?} — the entities the task concerns), the graph's related facts PLUS the workspace's knowledge entries (claims/decisions/conventions) and skill candidates ABOUT those anchors, each with a freshness state (fresh | superseded_refs | unverified). Call this BEFORE working on a harness/dataset/scorecard to inherit what the workspace already knows.",
+      inputSchema: {
+        refs: z.array(NodeRefSchema).min(1).max(KNOWLEDGE_ENTRY_MAX_REFS),
+      },
+    },
+    ({ refs }) =>
+      run(principal, "scorecards:read", async () => ok(await knowledge.assembleContext(ws, principal.subject, refs))),
+  );
+
+  server.registerTool(
     "relate_knowledge",
     {
       description:
@@ -155,6 +176,126 @@ export function registerKnowledgeTools(server: McpServer, ctx: McpToolContext): 
             ...(note !== undefined ? { note } : {}),
           }),
         ),
+      ),
+  );
+
+  // --- knowledge entries: reified claims (annotate's promoted successor — multi-anchor, evidenced, revisable) ---
+
+  const entries = deps.knowledgeEntryService;
+  if (!entries) return;
+
+  server.registerTool(
+    "create_knowledge_entry",
+    {
+      description:
+        "Contribute a knowledge entry — a durable claim about the workspace's entities: a finding ('harness X is flaky on k8s login cases'), a decision (+ rationale), a convention, or background context. `refs` = the version-pinned entities it concerns; `evidence` = the scorecards/runs/comments backing it; `supersedes` = the entry it revises. Defaults to a private draft — pass visibility:'workspace' to share.",
+      inputSchema: {
+        kind: KnowledgeEntryKindSchema,
+        title: z.string().min(1).max(300).describe("the one-line claim itself"),
+        body: z.string().min(1).describe("markdown — details, caveats, rationale"),
+        refs: z.array(NodeRefSchema).max(KNOWLEDGE_ENTRY_MAX_REFS).optional(),
+        evidence: z.array(NodeRefSchema).max(KNOWLEDGE_ENTRY_MAX_REFS).optional(),
+        supersedes: z.string().min(1).optional(),
+        visibility: KnowledgeEntryVisibilitySchema.optional(),
+      },
+    },
+    ({ kind, title, body, refs, evidence, supersedes, visibility }) =>
+      run(principal, "comments:write", async () =>
+        ok(
+          await entries.create({
+            tenant: ws,
+            createdBy: principal.subject,
+            kind,
+            title,
+            body,
+            ...(refs !== undefined ? { refs } : {}),
+            ...(evidence !== undefined ? { evidence } : {}),
+            ...(supersedes !== undefined ? { supersedes } : {}),
+            ...(visibility !== undefined ? { visibility } : {}),
+          }),
+        ),
+      ),
+  );
+
+  server.registerTool(
+    "list_knowledge_entries",
+    {
+      description:
+        "The workspace's knowledge entries the caller can see (shared + own drafts), each with a freshness state (fresh | superseded_refs | unverified).",
+      inputSchema: {},
+    },
+    () => run(principal, "scorecards:read", async () => ok(await entries.list(ws, principal.subject))),
+  );
+
+  server.registerTool(
+    "get_knowledge_entry",
+    {
+      description: "One knowledge entry by id (freshness-decorated).",
+      inputSchema: { id: z.string().min(1) },
+    },
+    ({ id }) => run(principal, "scorecards:read", async () => ok(await entries.get(ws, id, principal.subject))),
+  );
+
+  server.registerTool(
+    "update_knowledge_entry",
+    {
+      description:
+        "Edit a knowledge entry — re-pin refs, revise the body, change status (deprecate / mark superseded) or visibility. Manage = creator-or-admin.",
+      inputSchema: {
+        id: z.string().min(1),
+        kind: KnowledgeEntryKindSchema.optional(),
+        title: z.string().min(1).max(300).optional(),
+        body: z.string().min(1).optional(),
+        refs: z.array(NodeRefSchema).max(KNOWLEDGE_ENTRY_MAX_REFS).optional(),
+        evidence: z.array(NodeRefSchema).max(KNOWLEDGE_ENTRY_MAX_REFS).optional(),
+        status: KnowledgeEntryStatusSchema.optional(),
+        visibility: KnowledgeEntryVisibilitySchema.optional(),
+      },
+    },
+    ({ id, kind, title, body, refs, evidence, status, visibility }) =>
+      run(principal, "comments:write", async () =>
+        ok(
+          await entries.update(
+            ws,
+            id,
+            {
+              ...(kind !== undefined ? { kind } : {}),
+              ...(title !== undefined ? { title } : {}),
+              ...(body !== undefined ? { body } : {}),
+              ...(refs !== undefined ? { refs } : {}),
+              ...(evidence !== undefined ? { evidence } : {}),
+              ...(status !== undefined ? { status } : {}),
+              ...(visibility !== undefined ? { visibility } : {}),
+            },
+            { subject: principal.subject, isAdmin: principal.roles.includes("admin") },
+          ),
+        ),
+      ),
+  );
+
+  server.registerTool(
+    "delete_knowledge_entry",
+    {
+      description: "Delete a knowledge entry. Manage = creator-or-admin.",
+      inputSchema: { id: z.string().min(1) },
+    },
+    ({ id }) =>
+      run(principal, "comments:write", async () => {
+        await entries.remove(ws, id, { subject: principal.subject, isAdmin: principal.roles.includes("admin") });
+        return ok({ deleted: true });
+      }),
+  );
+
+  server.registerTool(
+    "verify_knowledge_entry",
+    {
+      description:
+        "Attest a knowledge entry still holds — stamps verifiedAt (the freshness baseline) without counting as an edit. Manage = creator-or-admin.",
+      inputSchema: { id: z.string().min(1) },
+    },
+    ({ id }) =>
+      run(principal, "comments:write", async () =>
+        ok(await entries.verify(ws, id, { subject: principal.subject, isAdmin: principal.roles.includes("admin") })),
       ),
   );
 }

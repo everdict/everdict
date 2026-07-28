@@ -120,3 +120,56 @@ describe("renderSkillListing", () => {
     expect(listing.split("\n").every((line) => /^- skill-\d+$/.test(line))).toBe(true);
   });
 });
+
+describe("skill freshness — the staleness contract surfaced at consumption time", () => {
+  const stale = {
+    name: "stale-skill",
+    description: "documents an old harness version",
+    instructions: "1. …",
+    freshness: {
+      state: "superseded_refs" as const,
+      staleRefs: [{ ref: { type: "harness" as const, key: "web-agent", version: "2.1.0" }, latest: "2.3.0" }],
+    },
+  };
+  const unverified = {
+    name: "dusty-skill",
+    description: "not confirmed recently",
+    instructions: "1. …",
+    freshness: { state: "unverified" as const },
+  };
+
+  it("badges stale/unverified skills in the listing while a fresh skill stays unmarked", () => {
+    const listing = renderSkillListing([stale, unverified, ...skills]);
+    expect(listing).toContain("- stale-skill [stale: refs superseded]:");
+    expect(listing).toContain("- dusty-skill [unverified]:");
+    expect(listing).toContain("- scorecard-triage: ");
+  });
+
+  it("keeps the badge in the names-only degradation tier (the signal is part of the name)", () => {
+    const crowd = Array.from({ length: 400 }, (_, i) => ({
+      name: `skill-${i}`,
+      description: "d".repeat(240),
+      instructions: "",
+    }));
+    const listing = renderSkillListing([stale, ...crowd]);
+    expect(listing.split("\n")[0]).toBe("- stale-skill [stale: refs superseded]");
+  });
+
+  it("opens a stale skill's body with a banner naming each superseded ref and the latest version", async () => {
+    const [tool] = buildSkillTools([stale, ...skills]);
+    const result = await tool?.call({ skill: "stale-skill" }, {});
+    expect(result?.isError).toBe(false);
+    expect(result?.content).toContain("STALE SKILL");
+    expect(result?.content).toContain("harness web-agent@2.1.0 → latest 2.3.0");
+    expect(result?.content).toContain("propose an");
+  });
+
+  it("opens an unverified skill's body with the unverified banner, and a fresh skill's body with none", async () => {
+    const [tool] = buildSkillTools([unverified, ...skills]);
+    const dusty = await tool?.call({ skill: "dusty-skill" }, {});
+    expect(dusty?.content).toContain("UNVERIFIED SKILL");
+    const fresh = await tool?.call({ skill: "scorecard-triage" }, {});
+    expect(fresh?.content).not.toContain("SKILL:");
+    expect(fresh?.content).toContain("# Skill: scorecard-triage");
+  });
+});

@@ -65,6 +65,19 @@ const docs = {
     params: idParams,
     response: { 204: { description: "Deleted" }, ...errorResponses(401, 403, 404) },
   },
+  verify: {
+    summary: "Verify a skill (attest it still holds)",
+    description:
+      "Stamps verifiedAt — the freshness baseline — without counting as an edit (updatedAt is untouched). Use after " +
+      "checking the procedure against the current versions of its pinned refs. Requires skills:write; manage = " +
+      "creator-or-admin (service-enforced).",
+    tags: ["skill"],
+    params: idParams,
+    response: {
+      200: { description: "Verified skill", ...toJsonSchema(SkillRecordSchema) },
+      ...errorResponses(401, 403, 404),
+    },
+  },
   generate: {
     summary: "Generate a skill draft (skill-generate)",
     description:

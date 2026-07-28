@@ -30,6 +30,7 @@ export function registerSkillRoutes(app: FastifyInstance, deps: ServerDeps): voi
           description: parsed.data.description,
           instructions: parsed.data.instructions,
           ...(parsed.data.files ? { files: parsed.data.files } : {}),
+          ...(parsed.data.refs ? { refs: parsed.data.refs } : {}),
           ...(parsed.data.visibility ? { visibility: parsed.data.visibility } : {}),
         }),
       );
@@ -100,6 +101,25 @@ export function registerSkillRoutes(app: FastifyInstance, deps: ServerDeps): voi
         isAdmin: principal.roles.includes("admin"),
       });
       return reply.code(204).send();
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  // Attest the procedure still matches reality — stamps verifiedAt (the freshness baseline) without counting as an
+  // edit. Manage = creator-or-admin (service gate).
+  app.post<{ Params: { id: string } }>("/skills/:id/verify", { schema: skillDocs.verify }, async (req, reply) => {
+    if (!deps.skillService) return reply.code(404).send({ code: "NOT_FOUND", message: "skills not configured" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "skills:write");
+      return reply.send(
+        await deps.skillService.verify(principal.workspace, req.params.id, {
+          subject: principal.subject,
+          isAdmin: principal.roles.includes("admin"),
+        }),
+      );
     } catch (err) {
       return sendError(reply, err);
     }

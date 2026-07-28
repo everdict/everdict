@@ -6,6 +6,7 @@ import {
   type SecretStore,
   type TenantKeyStore,
   WEBSEARCH_SECRET_NAME,
+  registryLatestVersionResolver,
 } from "@everdict/application-control";
 import {
   InMemoryAgentSessionStore,
@@ -23,7 +24,16 @@ import {
 } from "@everdict/db";
 import { configuredIntegrations } from "@everdict/domain";
 import { LocalDriver } from "@everdict/drivers";
-import { PgAgentRegistry, PgModelRegistry } from "@everdict/registry";
+import {
+  PgAgentRegistry,
+  PgDatasetRegistry,
+  PgHarnessInstanceRegistry,
+  PgHarnessTemplateRegistry,
+  PgJudgeRegistry,
+  PgModelRegistry,
+  PgRubricRegistry,
+  PgRuntimeRegistry,
+} from "@everdict/registry";
 import type { CodeToolRuntime } from "./code-tools.js";
 import { type AgentConfig, loadConfig } from "./config.js";
 import { mcpToolProvider } from "./mcp-tools.js";
@@ -88,6 +98,18 @@ async function main(): Promise<void> {
           : envModelFallback(config);
       resolveModelById = registryModelByIdResolver({ modelRegistry, secretStore });
       const settingsStore = new PgWorkspaceSettingsStore(client);
+      // Latest-version resolution for skill freshness (the knowledge-layer staleness contract): a skill pinning
+      // harness@2.1.0 surfaces as stale once the registry's latest moved on. Best-effort inside the resolver.
+      const harnessTemplateRegistry = new PgHarnessTemplateRegistry(client);
+      const latestVersionOf = registryLatestVersionResolver({
+        datasets: new PgDatasetRegistry(client),
+        judges: new PgJudgeRegistry(client),
+        runtimes: new PgRuntimeRegistry(client),
+        models: modelRegistry,
+        rubrics: new PgRubricRegistry(client),
+        harnesses: new PgHarnessInstanceRegistry(client, harnessTemplateRegistry),
+        agents: agentRegistry,
+      });
       resolveProfile = registryProfileResolver({
         agentRegistry,
         secretStore,
@@ -95,6 +117,7 @@ async function main(): Promise<void> {
         capabilityStore: new PgCapabilityStore(client),
         baseSystemPrompt: EVERDICT_AGENT_SYSTEM_PROMPT,
         configId: config.AGENT_CONFIG_ID,
+        latestVersionOf,
         // Operator-global values for the first-party default tools, keyed by the secret name each default declares.
         defaultToolSecrets: config.AGENT_WEBSEARCH_API_KEY
           ? { [WEBSEARCH_SECRET_NAME]: config.AGENT_WEBSEARCH_API_KEY }
@@ -146,6 +169,10 @@ async function main(): Promise<void> {
     // Meter workspace-billed conversation cost back to the control plane (source "agent"). Off without the token.
     ...(config.CONTROL_PLANE_INTERNAL_TOKEN !== undefined
       ? { reportUsage: usageReporter(config.CONTROL_PLANE_URL, config.CONTROL_PLANE_INTERNAL_TOKEN) }
+      : {}),
+    // Discussion-turn lifecycle bridge (@everdict in a comment thread) — reports the placeholder comment's
+    // progress to /internal/comment-activity. Same token pair as the usage meter; off without it.
+    ...(config.CONTROL_PLANE_INTERNAL_TOKEN !== undefined
       : {}),
     // allowStdio (AGENT_MCP_ALLOW_STDIO): permit adopted containerized stdio MCP servers to spawn `docker run`. Off by
     // default. allowedImages (AGENT_MCP_STDIO_ALLOWED_IMAGES): optional operator image allowlist (space/comma-separated).

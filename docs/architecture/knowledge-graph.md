@@ -121,7 +121,7 @@ that resolve to it, aggregating evidence. It never duplicates a record's body �
 
 ## Node vocabulary (closed, PR-gated)
 
-`NODE_TYPES` ([node-type.ts](../../packages/contracts/src/knowledge/node-type.ts)) — 26 types by axis. The vocabulary
+`NODE_TYPES` ([node-type.ts](../../packages/contracts/src/knowledge/node-type.ts)) — 27 types by axis. The vocabulary
 is **closed**: inventing a type is a code change, never a runtime value. Because the spine is type-agnostic, adding one
 is a one-line enum extension plus a harvester — the same cheap axis digo grew 14 → 17 on.
 
@@ -132,7 +132,7 @@ is a one-line enum extension plus a harvester — the same cheap axis digo grew 
 | **Execution infra (WHERE)** | `runtime`, `runner`, `image` |
 | **Execution & outcomes (WHEN)** | `run`, `scorecard`, `schedule` |
 | **Analysis** | `tag`, `metric`, `view` |
-| **Knowledge & comms** | `skill`, `comment`, `agent_session` |
+| **Knowledge & comms** | `skill`, `knowledge`, `comment`, `agent_session` |
 | **Integration & external** | `repository`, `trace_source`, `secret`, `browser_profile` |
 
 Deliberately **not** nodes: `member` (an edge, `member_of`), `notification` / `budget` / `usage` (projections /
@@ -140,7 +140,7 @@ metering, downstream of the graph), `workspace_settings` (a source whose sub-obj
 
 ## Predicate vocabulary (closed, PR-gated)
 
-`PREDICATES` ([predicate.ts](../../packages/contracts/src/knowledge/predicate.ts)) — 33 predicates by axis. **Direction
+`PREDICATES` ([predicate.ts](../../packages/contracts/src/knowledge/predicate.ts)) — 35 predicates by axis. **Direction
 is fixed**: an edge points FROM the dependent/referencing node TO the referenced node. The `typical (subject → object)`
 shapes are conventions the harvesters emit, not wire enforcement — per-predicate validation is a downstream (reduce)
 concern, keeping the vocabulary the single extension axis.
@@ -152,12 +152,96 @@ concern, keeping the vocabulary the single extension axis.
 | **Results & measurement** | `measures` (→ metric; value/pass in `edgeAttrs`), `compared_to` (scorecard ↔ scorecard diff), `supersedes` (scorecard → scorecard) |
 | **Lineage** | `succeeds` (entity@vN → @vN-1), `derived_from` (dataset → dataset, instance → template) |
 | **Agent & comms** | `adopts` (agent → capability), `references` (agent turn → any), `discusses` (comment → resource), `reply_to` (comment → comment), `mentions` (→ user) |
+| **Knowledge** | `about` (skill/knowledge → any — what a claim/procedure concerns), `evidenced_by` (knowledge → scorecard/run/comment/agent_session — the evidence trail) |
 | **Integration** | `triggers` (repository → harness), `connects_repo` (workspace → repository), `pins_image` (harness → image), `runs_image` (case/run → image), `exports_to` / `pulls_from` (harness → trace_source), `uses_secret` (any → secret), `uses_browser_profile` |
 | **Classification** | `tagged_with` (any → tag) |
 
 `uses_secret` deserves note: it turns the existing secret-usage feature into a first-class graph query ("what
 references this secret"), and `pins_image` / `runs_image` do the same for image provenance — showing the payoff of a
 unified graph over point features.
+
+## The knowledge layer — claims over predicates
+
+The vocabulary above mirrors the entity schema: it answers *"what is wired to what"* (config topology, provenance,
+usage) and is deliberately specific, because every one of those edges is a deterministic FK projection. What it cannot
+express is a **claim about entities** — "harness `web-agent@2.x` is flaky on login cases when run on k8s", "we chose
+rubric-based judging over judge X; the A↔B diff is the evidence". Trying to encode claims in the predicate vocabulary
+would force it open (breaking the closed-vocab lock); giving up leaves free-text notes (`annotate`) that cannot carry
+revision, evidence, or multi-entity anchoring.
+
+The resolution is to **move the specificity from the edge into the node** (reification): a claim is a first-class
+`knowledge` node whose *content* carries the specifics, and the graph only records what the claim concerns (`about`)
+and what backs it (`evidenced_by`). The structural stratum keeps its specific, closed 33-predicate grammar; the
+knowledge stratum uses a deliberately GENERIC grammar — two predicates, rich nodes:
+
+```
+knowledge:"login cases flaky on k8s"
+   -[about]->        harness:web-agent@2.1.0
+   -[about]->        runtime:k8s-prod
+   -[evidenced_by]-> scorecard:abc123
+   -[evidenced_by]-> comment:thread-42
+```
+
+### Knowledge entries
+
+A **`KnowledgeEntryRecord`** ([knowledge-entry.ts](../../packages/contracts/src/records/knowledge-entry.ts)) is the
+record behind a `knowledge` node — the promoted successor of an `annotate` note (which stays as the lightweight margin
+note). It is workspace-general, high-level knowledge NOT bound to one task: `kind` (`finding` | `decision` |
+`convention` | `context` — a thin classifier, not a workflow), a one-line `title` (the node label — the claim itself),
+a markdown `body` (where the specificity lives), `refs: NodeRef[]` (→ `about` edges), `evidence: NodeRef[]`
+(→ `evidenced_by` edges), `status` (`active` | `superseded` | `deprecated`) + `supersedes` (knowledge has revision
+lineage too), the `private | workspace` visibility vocabulary, and `verifiedAt` (last time a human/agent confirmed the
+claim still holds — distinct from `updatedAt`, because knowledge rots even when untouched). A deterministic harvester
+projects entries into the graph like any other record.
+
+Deliberately NOT in v1: per-kind structured claim schemas (that is the too-specific trap again — free text + anchors +
+evidence is the right grain), argumentation predicates (`supports`/`contradicts` — edge `polarity` already carries
+negation; defer until needed), and embedding search (structural adjacency first — the anchors are already structured).
+
+### Skills join the graph — staleness becomes a query
+
+A **Skill** ([skill.ts](../../packages/contracts/src/records/skill.ts)) is the task-oriented complement: "how do I do
+this" (a procedure bundle) vs a knowledge entry's "what is true / why we decided" (a claim). Skills decay differently —
+the harnesses/datasets they document keep versioning forward, so a skill is *inherently* a legacy risk. Two additive
+fields close this: `refs: NodeRef[]` — the version-PINNED entities the skill documents (authoring surface + agent both
+maintain it) — and `verifiedAt`. The skill harvester projects `refs` into `skill -[about]-> harness:web@2.1.0` edges,
+and then the graph's existing design pays out:
+
+> **a skill is stale ⟺ an `about` target has an incoming `succeeds` edge** (a newer version exists)
+
+No new staleness machinery — version-pinned node ids + `succeeds` lineage were already there; connecting `refs` turns
+them into a staleness detector. Surfaced at consumption time: the skill listing carries a freshness state
+(fresh / superseded-refs / unverified), and a `use_skill` result opens with a staleness banner ("references
+harness@2.1.0; latest is 2.3.0 — verify before trusting"), so the agent uses an old procedure *knowing* it is old.
+Skill selection reuses the same edges: skills `about`-adjacent to the task's anchors (the conversation's
+`AgentReference`s, the scorecard under discussion) rank up in the listing — task-appropriate selection from structural
+adjacency, no embeddings.
+
+### Consumption converges on `assembleContext`
+
+The point of the layer is context assembly for agents — everdict's own agent, spawned teammates/subagents, and
+developers' Claude Code sessions via the plugin (MCP `get_task_context`). One service feeds all three:
+
+```
+assembleContext(anchors: NodeRef[]) →
+  1. structural facts:  relatedFacts(anchors)                     (existing)
+  2. knowledge:         entries `about` the anchors               (active first, verifiedAt-ranked)
+  3. skill candidates:  skills `about` the anchors                (with staleness state)
+  4. discussion trail:  comments `discusses`-ing the anchors      (existing edges)
+```
+
+This is the substance of "knowledge migration into everdict": the moment a developer's Claude Code pulls task context
+from the workspace graph instead of a local CLAUDE.md, the workspace — not the individual — owns the knowledge.
+
+### The accumulation loop
+
+The three origins already cover how the layer fills: **harvest** (structural facts accrue for free; the skill/knowledge
+harvesters project `refs`), **authored** (`create_knowledge` / `update_skill` via MCP + the in-product agent, whose
+system prompt already directs it to record durable observations — promoted from `annotate` to entries; after a task
+that used a skill, the agent proposes a revision when the procedure and reality diverged — HITL via the existing edit
+path), and **extraction** (next: when a comment thread / agent session closes, an extraction agent proposes entry
+candidates, confidence < 1, promoted to authored on approval). The staleness query feeds notifications ("3 skills
+reference superseded versions"), so the improvement trigger is the graph's state, not someone's memory.
 
 ## Where the code lives
 
@@ -182,8 +266,9 @@ Following everdict's one-way spine (no new package — schemas belong at the con
    `agent` / `capability` (which take a `SpecHarvestMeta` since a spec carries no tenant/timestamp; they also pull
    `uses_model` / `uses_rubric` / `uses_secret` / `adopts` — the secret-usage + capability-adoption graph, incl.
    cross-tenant `adopts` via `HarvestBuilder.ref`'s `objectTenant`). Every core scorecard edge resolves to a
-   materialised node, and every referenced eval-config node has an owning harvester. Remaining (low-fan-in leaves):
-   `skill` / `view` / `browser_profile` / `trace_source` / `agent_session`. Idempotent, versioned by `extractor`.
+   materialised node, and every referenced eval-config node has an owning harvester. ✅ the knowledge-layer harvesters
+   `skill` / `knowledge_entry` (projecting `refs` → `about`, `evidence` → `evidenced_by`). Remaining (low-fan-in
+   leaves): `view` / `browser_profile` / `trace_source` / `agent_session`. Idempotent, versioned by `extractor`.
 3. **Contribution & extraction** — ✅ the AUTHORED write path (`annotate` / `relate`, origin `authored`): a user or
    agent contributes knowledge from Claude Code via the everdict MCP plugin, AND ✅ the **in-product conversational
    agent** (`apps/agent`) drives the same path — the `annotate_knowledge` / `relate_knowledge` tools are in its default
@@ -208,6 +293,11 @@ Following everdict's one-way spine (no new package — schemas belong at the con
 6. **Rendering** — like digo, flat, ranked fact lists powering resource "related" panels, impact analysis, and the
    agent's context first — not a graph visualization. Plus ingest-on-write hooks so the graph stays current without a
    manual reindex.
+7. **Knowledge layer (v1)** — §The knowledge layer: the `knowledge` node type + `about`/`evidenced_by` predicates,
+   `KnowledgeEntryRecord` (store + CRUD + MCP parity + harvester), `SkillRecord.refs`/`verifiedAt` + the skill
+   harvester, the staleness query surfaced in the skill listing / `use_skill`, and `assembleContext` +
+   MCP `get_task_context`. Next: extraction-based entry proposals from closed comment threads / agent sessions,
+   staleness notifications, and a web Knowledge surface.
 
 ## References
 
