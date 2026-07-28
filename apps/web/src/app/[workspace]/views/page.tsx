@@ -11,7 +11,7 @@ import { PageHeader } from '@/shared/ui/page-header'
 
 export const dynamic = 'force-dynamic'
 
-// Saved analysis views — first-class objects. List/manage + open (live re-run). Creation happens in the analysis dashboard (custom).
+// Saved analysis views — first-class objects. List/manage + open (live re-run). Creation happens in the studio canvas (+ agent chat).
 export default async function ViewsPage({ params }: { params: Promise<{ workspace: string }> }) {
   const { workspace } = await params
   const t = await getTranslations('viewsPage')
@@ -39,7 +39,7 @@ export default async function ViewsPage({ params }: { params: Promise<{ workspac
         description={t('description')}
         actions={
           <Link
-            href={`/${workspace}/scorecards/analyze?mode=custom&chat=1`}
+            href={`/${workspace}/scorecards/analyze?chat=1`}
             className={buttonVariants({ size: 'sm' })}
           >
             {t('newAnalysis')}
@@ -54,7 +54,7 @@ export default async function ViewsPage({ params }: { params: Promise<{ workspac
           hint={t('emptyHint')}
           action={
             <Link
-              href={`/${workspace}/scorecards/analyze?mode=custom&chat=1`}
+              href={`/${workspace}/scorecards/analyze?chat=1`}
               className={buttonVariants({ size: 'sm' })}
             >
               {t('createAnalysis')}

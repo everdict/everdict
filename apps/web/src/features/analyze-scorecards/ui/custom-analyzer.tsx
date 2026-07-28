@@ -208,10 +208,9 @@ export function CustomAnalyzer({
   const [config, setConfig] = useState<AnalysisConfig>(initialConfig)
   const [copied, setCopied] = useState(false)
 
-  // config → URL (no navigation) — for deep-linking/sharing. Keep mode=custom (restore custom mode on refresh).
+  // config → URL (no navigation) — for deep-linking/sharing.
   useEffect(() => {
     const p = configToParams(config)
-    p.set('mode', 'custom')
     window.history.replaceState(null, '', `?${p.toString()}`)
   }, [config])
 
