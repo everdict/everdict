@@ -1,4 +1,9 @@
-import { KnowledgeEntryService, KnowledgeService, registryLatestVersionResolver } from "@everdict/application-control";
+import {
+  KnowledgeEntryService,
+  KnowledgeService,
+  registryLatestVersionResolver,
+  seedFirstPartyAgents,
+} from "@everdict/application-control";
 import { ProxyService } from "@everdict/application-control";
 import { SkillService } from "@everdict/application-control";
 import {
@@ -137,6 +142,10 @@ async function main(): Promise<void> {
     budgetStore,
     cipher,
   } = await makePersistence();
+
+  // First-party agent templates (agent-automation B4) — seed the two flagship automation agents into _shared
+  // (idempotent; disabled + creator-less by design: a workspace adopts one by saving its own copy).
+  await seedFirstPartyAgents(agentRegistry);
 
   // Latest-version resolution over the registries — backs the freshness decoration (skills / knowledge entries) and
   // task-time context assembly. Best-effort: an unknown/deleted entity resolves to "no signal", never an error.

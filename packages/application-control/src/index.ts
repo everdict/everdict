@@ -167,6 +167,7 @@ export type {
 } from "./ports/mattermost-client.js";
 export { NotificationService, type NotificationServiceDeps } from "./notification/notification-service.js";
 export { PlatformEventService, type PlatformEventServiceDeps } from "./platform-event/platform-event-service.js";
+export { FIRST_PARTY_AGENT_TEMPLATES, seedFirstPartyAgents } from "./agent/first-party-agents.js";
 export type {
   GithubFileContent,
   GithubIssue,
