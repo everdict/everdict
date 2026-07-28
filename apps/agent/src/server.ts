@@ -289,6 +289,10 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
         message: z.string().min(1),
         references: z.array(AgentReferenceSchema).optional(),
         attachments: z.array(attachmentInputSchema).optional(),
+        // The analysis canvas the member currently sees (stored-form config + the open View, if saved) —
+        // captured by the web right before send, so multi-turn "change the viz / regroup" requests ground on
+        // the live state including manual picker changes (analysis-studio C).
+        canvas: z.object({ config: z.record(z.string()), viewId: z.string().min(1).optional() }).optional(),
         // Permission mode for this turn: default = ask on every write tool (HITL) · auto = auto-allow routine writes,
         // ask only for guarded (destructive/governance/credential) actions · bypass = auto-allow everything · plan =
         // read-only until the agent presents a plan and it is approved. (Coarse RBAC still gates every call.)
@@ -301,11 +305,12 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
     const controller = new AbortController();
     req.raw.on("close", () => controller.abort());
     const headers = forwardHeaders(req);
-    const { message, references, attachments } = body.data;
+    const { message, references, attachments, canvas } = body.data;
     // The turn's effective mode: an explicit body.mode (API callers / one-off overrides) wins, else the session's
     // standing mode (the chat-header picker, persisted on the record), else "default" (ask). A missing session is
-    // left to runChat's own NotFound so this stays a pure mode lookup.
-    const session = await deps.sessions.getSession(principal.workspace, principal.subject, id);
+    // left to runChat's own NotFound so this stays a pure mode lookup. Visibility-aware: any member may continue a
+    // workspace-visible (discussion) session.
+    const session = await deps.sessions.getVisibleSession(principal.workspace, principal.subject, id);
     const mode = body.data.mode ?? session?.permissionMode ?? "default";
 
     const drainInput = (): ChatMessage[] => mailbox.drain(principal.workspace, id);
@@ -354,6 +359,7 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
             ...(mode === "bypass" ? {} : { permit: withRules((): PermissionDecision => "allow") }),
             ...(mode === "plan" ? { planMode: true } : {}),
           },
+          canvas,
         );
         return reply.send(result);
       } catch (err) {
@@ -392,30 +398,41 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
       return decision === "allow";
     };
     try {
-      await runChat(deps, principal, headers, id, message, references, attachments, controller.signal, {
-        onEvent: (e) => {
-          if (e.type === "text_delta") write("delta", { text: e.delta });
-          // Live extended-thinking tokens — grow the transcript's reasoning block before the answer streams in.
-          else if (e.type === "reasoning_delta") write("reasoning", { text: e.delta });
-          // The post-decision event: forward it so the web dismisses the prompt even when the decision was the
-          // registry's timeout/disconnect default rather than a click.
-          else if (e.type === "permission") write("permission_resolved", { name: e.name, decision: e.decision });
-          else if (e.type === "plan") write("plan_presented", { plan: e.plan });
+      await runChat(
+        deps,
+        principal,
+        headers,
+        id,
+        message,
+        references,
+        attachments,
+        controller.signal,
+        {
+          onEvent: (e) => {
+            if (e.type === "text_delta") write("delta", { text: e.delta });
+            // Live extended-thinking tokens — grow the transcript's reasoning block before the answer streams in.
+            else if (e.type === "reasoning_delta") write("reasoning", { text: e.delta });
+            // The post-decision event: forward it so the web dismisses the prompt even when the decision was the
+            // registry's timeout/disconnect default rather than a click.
+            else if (e.type === "permission") write("permission_resolved", { name: e.name, decision: e.decision });
+            else if (e.type === "plan") write("plan_presented", { plan: e.plan });
+          },
+          // An emitted analysis artifact (chart/table/report) — push the record so the web renders it live.
+          onArtifact: (artifact) => write("artifact", artifact),
+          // The agent drove the analysis canvas — push the stored-form config so the web applies it live.
+          onViewConfig: (config) => write("view_config", config),
+          onRecord: (r) => write("message", r),
+          // bypass → no permit (auto-allow writes); default/plan → HITL + rules; auto → ask only guarded actions
+          // (folded into `permit` above). plan → planMode + onPlan approval.
+          ...(mode === "bypass" ? {} : { permit }),
+          ...(mode === "plan" ? { planMode: true, onPlan } : {}),
+          drainInput,
+          sendMessage,
+          spawnTeammate,
+          listTeammates,
         },
-        // An emitted analysis artifact (chart/table/report) — push the record so the web renders it live.
-        onArtifact: (artifact) => write("artifact", artifact),
-        // The agent drove the analysis canvas — push the stored-form config so the web applies it live.
-        onViewConfig: (config) => write("view_config", config),
-        onRecord: (r) => write("message", r),
-        // bypass → no permit (auto-allow writes); default/plan → HITL + rules; auto → ask only guarded actions
-        // (folded into `permit` above). plan → planMode + onPlan approval.
-        ...(mode === "bypass" ? {} : { permit }),
-        ...(mode === "plan" ? { planMode: true, onPlan } : {}),
-        drainInput,
-        sendMessage,
-        spawnTeammate,
-        listTeammates,
-      });
+        canvas,
+      );
       write("done", {});
     } catch (err) {
       write("error", { message: err instanceof AppError ? err.message : "Internal error" });

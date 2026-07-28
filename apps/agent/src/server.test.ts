@@ -920,6 +920,45 @@ describe("agent server", () => {
     await app.close();
   });
 
+  it("folds the open analysis canvas into the model's user turn so NL refinement grounds on the live state", async () => {
+    const seenUserTurns: string[] = [];
+    const transport: LlmTransport = {
+      provider: "fake",
+      stream: async (req) => {
+        const user = [...req.messages].reverse().find((m) => m.role === "user");
+        if (user && typeof user.content === "string") seenUserTurns.push(user.content);
+        return {
+          content: "ok",
+          toolCalls: [],
+          finishReason: "stop",
+          usage: { inputTokens: 5, outputTokens: 1, totalTokens: 6 },
+        };
+      },
+    };
+    const app = buildServer(makeDeps({ resolveModel: async () => ({ transport, model: "test-model" }) }));
+    const session = (await app.inject({ method: "POST", url: "/agent/sessions", headers: auth, payload: {} })).json();
+    await app.inject({
+      method: "POST",
+      url: `/agent/sessions/${session.id}/chat`,
+      headers: auth,
+      payload: {
+        message: "make it a bar chart",
+        canvas: { config: { group: "harness", viz: "table", measure: "passRate" }, viewId: "view-1" },
+      },
+    });
+    const turn = seenUserTurns.at(-1);
+    expect(turn).toContain('"viz":"table"');
+    expect(turn).toContain("view-1");
+    expect(turn).toContain("apply_view_config");
+    expect(turn).toContain("User message:\nmake it a bar chart");
+    // The persisted user record keeps the clean text — the canvas context is model-facing only.
+    const messages = (
+      await app.inject({ method: "GET", url: `/agent/sessions/${session.id}/messages`, headers: auth })
+    ).json().messages as { role: string; content: string }[];
+    expect(messages.find((m) => m.role === "user")?.content).toBe("make it a bar chart");
+    await app.close();
+  });
+
   it("deletes a conversation", async () => {
     const app = buildServer(makeDeps());
     const session = (await app.inject({ method: "POST", url: "/agent/sessions", headers: auth, payload: {} })).json();

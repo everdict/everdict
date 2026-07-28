@@ -23,6 +23,7 @@ import { StatCard } from '@/shared/ui/stat-card'
 import {
   computeAnalysis,
   configToParams,
+  configToStored,
   DIMENSION_KEY,
   dimValue,
   MEASURE_KEY,
@@ -225,6 +226,23 @@ export function CustomAnalyzer({
     window.addEventListener('everdict:view-config', onApply)
     return () => window.removeEventListener('everdict:view-config', onApply)
   }, [])
+
+  // Canvas-state feedback, the reverse direction: right before sending each turn the agent chat asks what the
+  // canvas CURRENTLY shows (synchronous same-window request/response), so multi-turn refinement — "make it a
+  // bar chart", "regroup by model" — grounds on the live state including the member's manual picker changes.
+  useEffect(() => {
+    const respond = () =>
+      window.dispatchEvent(
+        new CustomEvent('everdict:canvas-state', {
+          detail: {
+            config: configToStored(config),
+            ...(activeViewId ? { viewId: activeViewId } : {}),
+          },
+        })
+      )
+    window.addEventListener('everdict:canvas-state-request', respond)
+    return () => window.removeEventListener('everdict:canvas-state-request', respond)
+  }, [config, activeViewId])
 
   const resolveOwner = (s: string) => authors[s]?.name ?? (s ? fmtSubject(s) : '—')
   const patch = (p: Partial<AnalysisConfig>) => setConfig((c) => ({ ...c, ...p }))

@@ -357,6 +357,27 @@ export function AgentChatPanel({
       const controller = new AbortController()
       abortRef.current = controller
 
+      // Ask the analysis canvas (analyze dashboard / open View, same window) what it CURRENTLY shows — a
+      // synchronous request/response round-trip, so every turn grounds on the live stored-form config
+      // including the member's manual picker changes. No canvas mounted → no listener answers → undefined.
+      let canvas: { config: Record<string, string>; viewId?: string } | undefined
+      const captureCanvas = (e: Event) => {
+        const detail = (e as CustomEvent<unknown>).detail
+        if (detail === null || typeof detail !== 'object') return
+        const d = detail as { config?: unknown; viewId?: unknown }
+        if (d.config === null || typeof d.config !== 'object') return
+        const entries = Object.entries(d.config as Record<string, unknown>).filter(
+          (pair): pair is [string, string] => typeof pair[1] === 'string'
+        )
+        canvas = {
+          config: Object.fromEntries(entries),
+          ...(typeof d.viewId === 'string' ? { viewId: d.viewId } : {}),
+        }
+      }
+      window.addEventListener('everdict:canvas-state', captureCanvas)
+      window.dispatchEvent(new Event('everdict:canvas-state-request'))
+      window.removeEventListener('everdict:canvas-state', captureCanvas)
+
       // Apply one SSE event: a text delta grows the live assistant bubble; a persisted record merges into the
       // transcript (and, for the finalized assistant text, retires the live bubble); a `permission` event parks a
       // write-tool approval the member must decide, and `permission_resolved` dismisses it (e.g. server timeout).
@@ -429,6 +450,7 @@ export function AgentChatPanel({
             message: text,
             ...(refs.length > 0 ? { references: refs } : {}),
             ...(atts.length > 0 ? { attachments: atts } : {}),
+            ...(canvas ? { canvas } : {}),
           }),
           signal: controller.signal,
         })

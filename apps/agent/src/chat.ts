@@ -72,6 +72,27 @@ export interface AgentAttachmentInput {
   content?: string;
 }
 
+// The analysis canvas the member is looking at RIGHT NOW (docs/architecture/analysis-studio.md C). The web
+// captures it per turn (a synchronous same-window round-trip right before send), so multi-turn refinement —
+// "make it a bar chart", "regroup by model" — grounds on the live state INCLUDING the member's manual picker
+// changes, not on whatever the agent last applied. config is the stored-form vocabulary apply_view_config takes.
+export interface CanvasState {
+  config: Record<string, string>;
+  viewId?: string | undefined;
+}
+
+// Fold the open canvas into the turn context, with the delta-editing rule spelled out: apply_view_config resets
+// unset keys, so "change one thing" means re-sending the kept keys too.
+function buildCanvasPreamble(canvas: CanvasState): string {
+  const target = canvas.viewId ? `the saved View '${canvas.viewId}'` : "an unsaved analysis on the analyze dashboard";
+  const intro = `The user has the analysis canvas open (${target}). Its CURRENT stored-form config — the exact vocabulary apply_view_config takes — is:`;
+  const rule =
+    "When the user asks to change the visualization or the analysis itself, call apply_view_config with the FULL " +
+    "desired config: start from the current one above, change what they asked, and re-send every key you keep " +
+    "(unset keys reset to defaults).";
+  return `${intro}\n${JSON.stringify(canvas.config)}\n${rule}`;
+}
+
 // Fold attached text files into a context preamble (their content is not persisted, only their metadata).
 function buildAttachmentPreamble(attachments: AgentAttachmentInput[]): string | undefined {
   const blocks: string[] = [];
@@ -261,9 +282,12 @@ export async function runChat(
   attachments?: AgentAttachmentInput[],
   signal?: AbortSignal,
   hooks?: ChatHooks,
+  canvas?: CanvasState,
 ): Promise<ChatResult> {
   const { workspace, subject } = principal;
-  const session = await deps.sessions.getSession(workspace, subject, sessionId);
+  // Visibility-aware: the owner's own session OR a workspace-visible one (a comment-thread discussion session any
+  // member may continue). Private sessions stay owner-only — the lookup behaves like getSession for them.
+  const session = await deps.sessions.getVisibleSession(workspace, subject, sessionId);
   if (!session) throw new NotFoundError("NOT_FOUND", undefined, "Conversation not found.");
 
   const existing = await deps.sessions.listMessages(workspace, sessionId);
@@ -381,6 +405,7 @@ export async function runChat(
     // Fold any @-referenced entity context into the user turn the model sees (the persisted record keeps the
     // clean text + the reference metadata separately).
     const preambles: string[] = [];
+    if (canvas) preambles.push(buildCanvasPreamble(canvas));
     if (attachments && attachments.length > 0) {
       const attPreamble = buildAttachmentPreamble(attachments);
       if (attPreamble) preambles.push(attPreamble);
