@@ -33,9 +33,17 @@ export default async function AgentsPage({ params }: { params: Promise<{ workspa
         title={t('title')}
         description={t('description')}
         actions={
-          <Link href={`/${workspace}/agents/craft`} className={buttonVariants({ size: 'sm' })}>
-            {t('craftNew')}
-          </Link>
+          <span className="flex items-center gap-2">
+            <Link
+              href={`/${workspace}/settings/agent`}
+              className={buttonVariants({ size: 'sm', variant: 'outline' })}
+            >
+              {t('manage')}
+            </Link>
+            <Link href={`/${workspace}/agents/craft`} className={buttonVariants({ size: 'sm' })}>
+              {t('craftNew')}
+            </Link>
+          </span>
         }
       />
       {error ? <Callout tone="warning">{t('unavailable')}</Callout> : null}
