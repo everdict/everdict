@@ -99,6 +99,8 @@ export const controlPlane = {
     call<T>(auth, `/fs/entry?path=${encodeURIComponent(path)}${recursive ? '&recursive=true' : ''}`, {
       method: 'DELETE',
     }),
+  fsUsage: <T>(auth: AuthContext) => call<T>(auth, '/fs/usage'),
+  clearFs: <T>(auth: AuthContext) => call<T>(auth, '/fs', { method: 'DELETE' }),
   listKnowledgeEntries: <T>(auth: AuthContext) => call<T>(auth, '/knowledge/entries'),
   createKnowledgeEntry: <T>(auth: AuthContext, body: unknown) =>
     call<T>(auth, '/knowledge/entries', { method: 'POST', body: JSON.stringify(body) }),

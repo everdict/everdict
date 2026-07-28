@@ -58,6 +58,7 @@ move(tenant, from, to) → FsEntry            // file rename or whole-subtree mo
 | MCP (parity) | `list_files` / `get_file` (read-classified by prefix) · `write_file` / `make_directory` / `move_file` / `delete_file` (permission-gated; `delete_` is additionally guarded in auto mode). |
 | Conversational agent | Bridge-all picks the tools up with no extra wiring; the system prompt's **Files** section sets the convention and the per-turn Environment names the conversation's **task directory** (`tasks/<conversation-id>/`) — each task's working files land in its own area, and finished deliverables get promoted to the shared library (`reports/` · `data/` · `artifacts/`). |
 | Web (`/[workspace]/files`) | Lazy tree + viewer/editor (Markdown preview, CodeMirror, image preview) + a bash-style shell (`ls cd cat tree mkdir touch echo>/>> cp mv rm`) sharing one directory cache. |
+| Settings › Files | The governance view — storage usage (`GET /fs/usage`: totals + per-top-level breakdown, walk-capped) and cleanup (per-entry recursive delete; whole-tree `DELETE /fs` = settings:write/admin). Everything in-service — the user never opens the object-storage console. MCP twins: `get_fs_usage` / `delete_all_files`. |
 
 AuthZ: `files:read` (viewer+ — browsing is benign) / `files:write` (member+ — collaborative content
 like datasets/skills). No `files:delete`: removal is ordinary content mutation, not governance.

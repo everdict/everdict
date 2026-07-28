@@ -108,6 +108,31 @@ export function registerFsRoutes(app: FastifyInstance, deps: ServerDeps): void {
     }
   });
 
+  app.get("/fs/usage", { schema: fsDocs.usage }, async (req, reply) => {
+    if (!deps.fsService) return reply.code(404).send({ code: "NOT_FOUND", message: "filesystem not configured" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "files:read");
+      return reply.send(await deps.fsService.usage(principal.workspace));
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  // Empty the whole tree — governance, not content mutation: settings:write (admin), like the knowledge reindex.
+  app.delete("/fs", { schema: fsDocs.clear }, async (req, reply) => {
+    if (!deps.fsService) return reply.code(404).send({ code: "NOT_FOUND", message: "filesystem not configured" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "settings:write");
+      return reply.send(await deps.fsService.clear(principal.workspace));
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
   app.delete("/fs/entry", { schema: fsDocs.remove }, async (req, reply) => {
     if (!deps.fsService) return reply.code(404).send({ code: "NOT_FOUND", message: "filesystem not configured" });
     const principal = await resolvePrincipal(req, reply, deps);

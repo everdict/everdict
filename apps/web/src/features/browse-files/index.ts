@@ -1,4 +1,6 @@
 export {
+  clearFilesAction,
+  getFsUsageAction,
   listFilesAction,
   makeDirectoryAction,
   moveEntryAction,
@@ -6,4 +8,5 @@ export {
   removeEntryAction,
   writeFileAction,
 } from './api/browse-files'
+export { FilesSettings } from './ui/files-settings'
 export { FilesWorkbench } from './ui/files-workbench'

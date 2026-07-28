@@ -1,5 +1,5 @@
 import { FsEntrySchema } from "@everdict/contracts";
-import { FsFileContentSchema, FsRemoveResultSchema } from "@everdict/contracts/wire";
+import { FsFileContentSchema, FsRemoveResultSchema, FsUsageSchema } from "@everdict/contracts/wire";
 import type { FastifySchema } from "fastify";
 import { z } from "zod";
 import { errorResponses, toJsonSchema } from "../openapi.js";
@@ -75,6 +75,28 @@ const docs = {
     response: {
       200: { description: "Entry at the new path", ...toJsonSchema(FsEntrySchema) },
       ...errorResponses(400, 401, 403, 404, 409),
+    },
+  },
+  usage: {
+    summary: "Filesystem storage usage",
+    description:
+      "Totals plus a per-top-level-entry breakdown (files/bytes) — the Settings › Files overview. `truncated` " +
+      "means the sweep hit its walk cap and the counts are a floor. Requires files:read (viewer+).",
+    tags: ["fs"],
+    response: {
+      200: { description: "Usage", ...toJsonSchema(FsUsageSchema) },
+      ...errorResponses(401, 403, 404),
+    },
+  },
+  clear: {
+    summary: "Empty the workspace filesystem",
+    description:
+      "Removes EVERY top-level entry recursively — the Settings danger-zone action. The tree itself stays, ready " +
+      "for new writes. Requires settings:write (admin) — a whole-tree wipe is governance, not ordinary content mutation.",
+    tags: ["fs"],
+    response: {
+      200: { description: "Removal result", ...toJsonSchema(FsRemoveResultSchema) },
+      ...errorResponses(401, 403, 404),
     },
   },
   remove: {

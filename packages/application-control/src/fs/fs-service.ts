@@ -20,6 +20,26 @@ export interface FsFileContent {
   encoding: "utf8" | "base64";
 }
 
+// Storage usage as the Settings surface reports it — counted through the SERVICE (never by touching object
+// storage directly): totals + a per-top-level-entry breakdown so an operator sees where the bytes live
+// (tasks/ · reports/ · skills/ · …). `truncated` = the walk stopped at the cap; counts are a floor.
+export interface FsUsageTopLevel {
+  path: string;
+  name: string;
+  kind: "file" | "dir";
+  files: number;
+  bytes: number;
+}
+
+export interface FsUsage {
+  files: number;
+  bytes: number;
+  truncated: boolean;
+  topLevel: FsUsageTopLevel[];
+}
+
+const USAGE_WALK_CAP = 20_000; // max entries visited per usage sweep — keeps a huge tree from stalling Settings
+
 // The workspace-filesystem use-cases — response shaping over the WorkspaceFs port: text-vs-binary encoding on
 // read, base64 decode on write, a read/remove miss mapped to 404. Path safety + tenant isolation live in the
 // port implementations (every operation normalizes + prefix-scopes internally); this layer never re-derives them.
@@ -67,6 +87,62 @@ export class FsService {
 
   move(tenant: string, from: string, to: string): Promise<FsEntry> {
     return this.fs.move(tenant, from, to);
+  }
+
+  // The workspace's storage picture for Settings › Files: totals + per-top-level breakdown, walked through the
+  // port (works identically over S3 and InMemory; the user never needs the object-storage console).
+  async usage(tenant: string): Promise<FsUsage> {
+    const budget = { left: USAGE_WALK_CAP, truncated: false };
+    const top = await this.fs.list(tenant, "");
+    const topLevel: FsUsageTopLevel[] = [];
+    let files = 0;
+    let bytes = 0;
+    for (const entry of top) {
+      const stats =
+        entry.kind === "file" ? { files: 1, bytes: entry.size ?? 0 } : await this.walkUsage(tenant, entry.path, budget);
+      topLevel.push({ path: entry.path, name: entry.name, kind: entry.kind, ...stats });
+      files += stats.files;
+      bytes += stats.bytes;
+    }
+    return { files, bytes, truncated: budget.truncated, topLevel };
+  }
+
+  private async walkUsage(
+    tenant: string,
+    dir: string,
+    budget: { left: number; truncated: boolean },
+  ): Promise<{ files: number; bytes: number }> {
+    if (budget.left <= 0) {
+      budget.truncated = true;
+      return { files: 0, bytes: 0 };
+    }
+    let files = 0;
+    let bytes = 0;
+    for (const entry of await this.fs.list(tenant, dir)) {
+      if (budget.left-- <= 0) {
+        budget.truncated = true;
+        break;
+      }
+      if (entry.kind === "file") {
+        files += 1;
+        bytes += entry.size ?? 0;
+      } else {
+        const nested = await this.walkUsage(tenant, entry.path, budget);
+        files += nested.files;
+        bytes += nested.bytes;
+      }
+    }
+    return { files, bytes };
+  }
+
+  // Empty the whole workspace filesystem — the Settings danger-zone action (admin-gated at the route). Removes
+  // every top-level entry recursively; the tree itself (the tenant's bucket) stays, ready for new writes.
+  async clear(tenant: string): Promise<{ removed: number }> {
+    let removed = 0;
+    for (const entry of await this.fs.list(tenant, "")) {
+      removed += await this.fs.remove(tenant, entry.path, { recursive: true });
+    }
+    return { removed };
   }
 }
 

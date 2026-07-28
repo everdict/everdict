@@ -77,6 +77,26 @@ export function registerFsTools(server: McpServer, ctx: McpToolContext): void {
   );
 
   server.registerTool(
+    "get_fs_usage",
+    {
+      description:
+        "The workspace filesystem's storage usage — totals plus a per-top-level-entry breakdown (files/bytes). `truncated` means the sweep hit its cap and counts are a floor.",
+      inputSchema: {},
+    },
+    () => run(principal, "files:read", async () => ok(await fs.usage(ws))),
+  );
+
+  server.registerTool(
+    "delete_all_files",
+    {
+      description:
+        "Empty the WHOLE workspace filesystem — removes every top-level entry recursively (the tree stays, ready for new writes). Destructive and workspace-wide; requires settings:write (admin).",
+      inputSchema: {},
+    },
+    () => run(principal, "settings:write", async () => ok(await fs.clear(ws))),
+  );
+
+  server.registerTool(
     "delete_file",
     {
       description:

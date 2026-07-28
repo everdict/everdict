@@ -6,6 +6,7 @@ import {
   Fingerprint,
   GitBranch,
   Globe,
+  HardDrive,
   KeyRound,
   Lock,
   Network,
@@ -92,6 +93,8 @@ export const SETTINGS_NAV_GROUPS: SettingsNavGroup[] = [
         icon: Container,
         requiredAction: 'capabilities:read',
       },
+      // The workspace filesystem's governance view (usage + cleanup) — in-service, never the object-storage console.
+      { href: '/files', labelKey: 'files', icon: HardDrive, requiredAction: 'files:read' },
       { href: '/ci', labelKey: 'ci', icon: GitBranch, requiredAction: 'settings:read' },
       { href: '/budget', labelKey: 'budget', icon: Wallet, requiredAction: 'scorecards:read' },
     ],

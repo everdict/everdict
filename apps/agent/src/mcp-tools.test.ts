@@ -67,6 +67,7 @@ describe("base tool default wiring", () => {
       // workspace-filesystem reads (list_/get_ verbs)
       "list_files",
       "get_file",
+      "get_fs_usage",
     ])
       expect(isBaseToolReadOnly(name)).toBe(true);
   });
@@ -90,11 +91,12 @@ describe("base tool default wiring", () => {
       "update_knowledge_entry",
       "verify_knowledge_entry",
       "verify_skill",
-      // workspace-filesystem writes — permission-gated; delete_file additionally matches the guarded delete_ prefix
+      // workspace-filesystem writes — permission-gated; the delete_ verbs additionally match the guarded prefix
       "write_file",
       "make_directory",
       "move_file",
       "delete_file",
+      "delete_all_files",
     ])
       expect(isBaseToolReadOnly(name)).toBe(false);
   });

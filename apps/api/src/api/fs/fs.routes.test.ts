@@ -117,6 +117,35 @@ describe("fs routes (the workspace filesystem HTTP surface)", () => {
     expect(write.statusCode).toBe(400);
   });
 
+  it("usage reports totals + per-top-level breakdown, and clear empties the whole tree (admin governance)", async () => {
+    const app = build();
+    await app.inject({
+      method: "PUT",
+      url: "/fs/file",
+      headers: H,
+      payload: { path: "reports/q3.md", content: "1234" },
+    });
+    await app.inject({ method: "PUT", url: "/fs/file", headers: H, payload: { path: "data/rows.csv", content: "ab" } });
+    await app.inject({ method: "PUT", url: "/fs/file", headers: H, payload: { path: "top.txt", content: "x" } });
+
+    const usage = await app.inject({ method: "GET", url: "/fs/usage", headers: H });
+    expect(usage.statusCode).toBe(200);
+    const body = usage.json();
+    expect(body).toMatchObject({ files: 3, bytes: 7, truncated: false });
+    expect(body.topLevel).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ path: "reports", kind: "dir", files: 1, bytes: 4 }),
+        expect.objectContaining({ path: "top.txt", kind: "file", files: 1, bytes: 1 }),
+      ]),
+    );
+
+    const cleared = await app.inject({ method: "DELETE", url: "/fs", headers: H }); // dev fallback = admin
+    expect(cleared.statusCode).toBe(200);
+    expect(cleared.json().removed).toBe(3);
+    const after = await app.inject({ method: "GET", url: "/fs/entries", headers: H });
+    expect(after.json()).toEqual([]);
+  });
+
   it("feature-gates: without fsService every /fs route is 404", async () => {
     const app = build(false);
     const res = await app.inject({ method: "GET", url: "/fs/entries", headers: H });

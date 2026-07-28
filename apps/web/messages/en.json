@@ -2701,7 +2701,9 @@
     "runners": "Runners",
     "runnersDesc": "Shared runners for this workspace's team.",
     "budget": "Budget",
-    "budgetDesc": "Enforcement caps and metered usage."
+    "budgetDesc": "Enforcement caps and metered usage.",
+    "files": "Files",
+    "filesDesc": "The workspace filesystem — storage usage and cleanup, managed entirely in-service."
   },
   "knowledge": {
     "title": "Knowledge",
@@ -2818,7 +2820,18 @@
     "deleteFileBody": "This file will be removed from the workspace filesystem.",
     "readOnlyNotice": "Read-only — writing requires the member role.",
     "shellTitle": "Shell",
-    "shellHint": "ls · cd · cat · tree · mkdir · echo > · mv · cp · rm — type `help`"
+    "shellHint": "ls · cd · cat · tree · mkdir · echo > · mv · cp · rm — type `help`",
+    "settingsTotalFiles": "Files",
+    "settingsTotalBytes": "Storage used",
+    "settingsOpenBrowser": "Open Files",
+    "settingsTruncated": "Large tree — the sweep stopped at its cap, so counts are a floor.",
+    "settingsEntryStats": "{files} files · {size}",
+    "settingsDangerTitle": "Danger zone",
+    "settingsDangerBody": "Empty the whole workspace filesystem. Skill and knowledge bodies are re-projected from their records on next read; everything else is gone for good.",
+    "settingsClearAll": "Empty the filesystem",
+    "settingsClearAllTitle": "Empty the whole filesystem?",
+    "settingsClearAllBody": "Every file and directory in this workspace will be removed. This cannot be undone.",
+    "settingsDeleteEntryBody": "The entry and everything under it will be removed. This cannot be undone."
   },
   "observabilityPage": {
     "title": "Observability",
