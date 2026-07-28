@@ -31,6 +31,10 @@ describe("base tool default wiring", () => {
       "knowledge_related",
       "annotate_knowledge",
       "relate_knowledge",
+      // the workspace filesystem — reads and writes alike
+      "list_files",
+      "get_file",
+      "write_file",
     ])
       expect(isDefaultBaseTool(name)).toBe(true);
   });
@@ -60,6 +64,9 @@ describe("base tool default wiring", () => {
       "get_task_context",
       "list_knowledge_entries",
       "get_knowledge_entry",
+      // workspace-filesystem reads (list_/get_ verbs)
+      "list_files",
+      "get_file",
     ])
       expect(isBaseToolReadOnly(name)).toBe(true);
   });
@@ -83,6 +90,11 @@ describe("base tool default wiring", () => {
       "update_knowledge_entry",
       "verify_knowledge_entry",
       "verify_skill",
+      // workspace-filesystem writes — permission-gated; delete_file additionally matches the guarded delete_ prefix
+      "write_file",
+      "make_directory",
+      "move_file",
+      "delete_file",
     ])
       expect(isBaseToolReadOnly(name)).toBe(false);
   });
