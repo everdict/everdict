@@ -18,6 +18,8 @@ import {
   NotFoundError,
 } from "@everdict/contracts";
 import type { ReasoningCarrier } from "@everdict/llm";
+import { type AgentDraft, buildAgentDraftTools } from "./agent-draft-tool.js";
+import type { AgentTryEvent, AgentTryResult } from "./agent-try.js";
 import { buildRunAnalysisTool } from "./analysis-script-tool.js";
 import { buildArtifactTools } from "./artifact-tools.js";
 import type { CodeToolRuntime } from "./code-tools.js";
@@ -88,6 +90,32 @@ export interface AgentAttachmentInput {
 export interface CanvasState {
   config: Record<string, string>;
   viewId?: string | undefined;
+}
+
+// The agent-crafting canvas the member has open RIGHT NOW (docs/architecture/agent-automation.md B2/B3 — the
+// analysis-canvas pattern applied to crafting). The web captures the draft per turn (same-window round-trip
+// right before send), so multi-turn refinement grounds on the live draft INCLUDING the member's manual edits.
+export interface AgentDraftState {
+  draft: AgentDraft;
+  agentId?: string | undefined; // editing an existing registered agent (the canvas opened on it)
+}
+
+// Fold the open crafting canvas into the turn context: current draft + the patch rule (craft_agent changes
+// only what you send), the verify path (try_agent_draft = shadow run) and the save path (create_agent), so
+// craft → try → save closes inside one conversation. The crafted agent is DECLARATION over the same agentic
+// loop this conversation runs on — never code, never a second runtime.
+function buildDraftPreamble(state: AgentDraftState): string {
+  const target = state.agentId ? `the registered agent '${state.agentId}'` : "a new, unsaved agent";
+  return [
+    `The user has the AGENT CRAFTING canvas open (${target}). The draft's CURRENT state — the exact vocabulary craft_agent patches — is:`,
+    JSON.stringify(state.draft),
+    "Shape it with craft_agent (a PATCH — send only the fields that change; `clear` unsets). Verify behavior with " +
+      "try_agent_draft (a shadow activation: reads run live, mutations are captured as would-have-done and denied) — " +
+      "prefer replaying a REAL past event's kind/payload found via list_platform_events. When the user wants to save, " +
+      "call create_agent with the agent id and the FULL spec assembled from the draft (set enabled:true only when they " +
+      "explicitly want it activated). The crafted agent runs on the SAME agentic loop as this conversation — its spec " +
+      "is pure declaration (instructions/task/triggers/permission mode), never code.",
+  ].join("\n");
 }
 
 // Fold the open canvas into the turn context, with the delta-editing rule spelled out (apply_view_config resets
@@ -185,6 +213,12 @@ export interface ChatHooks {
   // The agent drove the analysis canvas (apply_view_config) — the SSE handler streams the stored-form config so
   // the web applies it live. Present → the tool is registered; absent (headless turns) → no canvas tool.
   onViewConfig?: (config: Record<string, string>) => void;
+  // The agent shaped the crafting canvas (craft_agent) — the SSE handler streams the patched draft so the web
+  // applies it live. Present → the crafting tools are registered; absent (headless turns) → no crafting tools.
+  onAgentDraft?: (draft: AgentDraft) => void;
+  // Shadow-run the current draft against a simulated event (try_agent_draft) — the SSE handler binds runAgentTry
+  // with the caller's own headers. Only meaningful beside onAgentDraft.
+  tryAgentDraft?: (draft: AgentDraft, event: AgentTryEvent) => Promise<AgentTryResult>;
   // Human-in-the-loop approval for write (non-read-only) tool calls — the SSE handler supplies one that pauses the
   // loop, asks the web, and resolves allow/deny. Absent (buffered/API callers) → write tools auto-allow as before.
   permit?: PermissionHook;
@@ -296,6 +330,7 @@ export async function runChat(
   signal?: AbortSignal,
   hooks?: ChatHooks,
   canvas?: CanvasState,
+  agentDraft?: AgentDraftState,
 ): Promise<ChatResult> {
   const { workspace, subject } = principal;
   // Visibility-aware: the owner's own session OR a workspace-visible one (a comment-thread discussion session any
@@ -385,8 +420,9 @@ export async function runChat(
   };
 
   // Resolve the workspace's agent customization (Phase 1): system prompt (base + instructions), MCP tool servers, and
-  // an optional model override. Absent resolver → the base agent (unchanged behavior).
-  const profile = deps.resolveProfile ? await deps.resolveProfile(principal) : undefined;
+  // an optional model override. A trigger-activated run resolves the CRAFTED agent's config (origin.agentId) — its
+  // instructions/tools/model are its identity; everything else keeps the workspace chat default.
+  const profile = deps.resolveProfile ? await deps.resolveProfile(principal, session.origin?.agentId) : undefined;
   const systemPrompt = profile?.systemPrompt ?? deps.systemPrompt;
 
   const tools = await deps.toolProvider(
@@ -411,14 +447,28 @@ export async function runChat(
   // Canvas control (analysis-studio V3) — only a live web chat wires onViewConfig, so headless turns never
   // carry a tool that has no canvas to drive.
   const canvasTools = hooks?.onViewConfig ? [buildViewConfigTool(hooks.onViewConfig)] : [];
+  // Crafting control (agent-automation B2/B3) — same rule: only a live crafting chat wires onAgentDraft.
+  const draftTools = hooks?.onAgentDraft
+    ? buildAgentDraftTools({
+        initial: agentDraft?.draft ?? {},
+        onDraft: hooks.onAgentDraft,
+        ...(hooks.tryAgentDraft ? { tryDraft: hooks.tryAgentDraft } : {}),
+      })
+    : [];
   const analysisScriptTool = deps.analysisScriptRuntime ? buildRunAnalysisTool(deps.analysisScriptRuntime) : undefined;
-  const extraTools = [...artifactTools, ...canvasTools, ...(analysisScriptTool ? [analysisScriptTool] : [])];
+  const extraTools = [
+    ...artifactTools,
+    ...canvasTools,
+    ...draftTools,
+    ...(analysisScriptTool ? [analysisScriptTool] : []),
+  ];
   const registry = extraTools.length > 0 ? new ToolRegistry([...tools.registry.list(), ...extraTools]) : tools.registry;
   try {
     // Fold any @-referenced entity context into the user turn the model sees (the persisted record keeps the
     // clean text + the reference metadata separately).
     const preambles: string[] = [];
     if (canvas) preambles.push(buildCanvasPreamble(canvas));
+    if (agentDraft) preambles.push(buildDraftPreamble(agentDraft));
     if (attachments && attachments.length > 0) {
       const attPreamble = buildAttachmentPreamble(attachments);
       if (attPreamble) preambles.push(attPreamble);

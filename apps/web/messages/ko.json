@@ -1543,7 +1543,8 @@
     "guide": "가이드",
     "connectDesktop": "데스크탑 앱",
     "connectClaude": "Claude Code",
-    "connectCodex": "Codex"
+    "connectCodex": "Codex",
+    "agents": "에이전트"
   },
   "usagePage": {
     "title": "사용량",
@@ -2706,7 +2707,9 @@
     "description": "워크스페이스 엔티티에 대한 지속 가능한 주장 — 발견·결정·관례·컨텍스트를 대상 버전에 핀해 기록합니다.",
     "newEntry": "새 엔트리",
     "actionFailed": "작업에 실패했습니다. 다시 시도해 주세요.",
-    "filters": { "all": "전체" },
+    "filters": {
+      "all": "전체"
+    },
     "kinds": {
       "finding": "발견",
       "decision": "결정",
@@ -3211,11 +3214,10 @@
     "personalSection": "개인 초안",
     "workspaceSection": "워크스페이스 스킬",
     "files": "부속 파일",
-    "filesHint": "에이전트가 필요한 순간에 한 파일씩 로드하는 참조 자료예요(read_skill_file) — SKILL.md 본문은 간결하게 유지돼요. 파일 내용의 저작·수정은 상세 화면의 에이전트 편집을 이용하세요.",
+    "filesHint": "에이전트가 필요한 순간에 한 파일씩 로드하는 참조 자료예요(read_skill_file) — SKILL.md 본문은 간결하게 유지돼요. 파일 내용의 저작·수정은 상세 화면의 대화로 편집하기를 이용하세요.",
     "removeFile": "{path} 제거",
     "fileCount": "파일 {count}개",
-    "editWithAgent": "에이전트로 편집",
-    "editWithAgentPrompt": "\"{name}\" 스킬을 개선하고 싶어. SKILL.md 본문과 부속 파일을 검토해서 구체적인 수정안을 제안해줘 — 본문은 간결한 단계별 절차로 유지하고, 긴 참조 자료는 부속 파일로 분리해줘. 내가 확인하면 update_skill 로 반영해줘.",
+    "editInChat": "대화로 편집하기",
     "shareToStore": "스토어에 공유",
     "shareToStoreTitle": "능력 스토어에 공유",
     "shareToStoreHint": "이 스킬을 스토어에 버전드 자산으로 발행해요(같은 ID로 재발행하면 버전이 올라가요). 이후 이곳에서의 수정은 자동 반영되지 않으니, 스토어 사본을 갱신하려면 다시 발행하세요.",
@@ -3842,5 +3844,59 @@
       "title": "계정 & 설정",
       "body": "프로필, API 키, 워크스페이스 멤버, 시크릿, 통합이 여기 있어요."
     }
+  },
+  "agentFleet": {
+    "title": "에이전트",
+    "description": "이 워크스페이스의 모든 에이전트 실행 — 무엇이 깨웠고, 무엇을 했고, 어떻게 끝났는지.",
+    "emptyTitle": "아직 에이전트 실행이 없습니다",
+    "emptyHint": "트리거를 가진 에이전트를 활성화하면(또는 대화로 요청하면) 실행이 여기에 나타납니다.",
+    "wokeOn": "{kind} 이벤트로 기동",
+    "viewTranscript": "대화 기록 보기",
+    "stop": "실행 중지",
+    "loading": "대화 기록 불러오는 중…",
+    "noMessages": "기록된 메시지가 없습니다.",
+    "roleEvent": "이벤트 / 입력",
+    "roleAgent": "에이전트",
+    "unavailable": "에이전트 서비스에 연결할 수 없어 실행 목록을 불러오지 못했습니다.",
+    "status": {
+      "running": "실행 중",
+      "awaiting_approval": "승인 대기",
+      "completed": "완료",
+      "failed": "실패",
+      "cancelled": "중지됨"
+    },
+    "approve": "허용",
+    "deny": "거부",
+    "craftNew": "에이전트 크래프트"
+  },
+  "craftAgent": {
+    "title": "에이전트 크래프트",
+    "description": "대화로 에이전트를 빚습니다 — 왼쪽 캔버스가 초안이고, 오른쪽 대화로 고치고 실행해 보고 저장합니다.",
+    "kickoffPrompt": "에이전트를 만들어 봅시다. 무엇을 감시하고 무엇을 해야 하는지 물어봐 주세요. craft_agent 로 초안을 빚고, try_agent_draft 로 실제 과거 이벤트에 시험해 보고, 제가 확정하면 create_agent 로 저장해 주세요.",
+    "idPlaceholder": "agent-id (kebab-case)",
+    "descriptionPlaceholder": "이 에이전트의 용도",
+    "task": "Task",
+    "taskHint": "트리거가 깨웠을 때 할 일",
+    "instructions": "Instructions",
+    "instructionsHint": "매 턴에 적용되는 상시 컨텍스트",
+    "triggers": "트리거",
+    "triggersHint": "이 에이전트를 깨우는 플랫폼 이벤트",
+    "addTrigger": "트리거 kind 추가…",
+    "removeTrigger": "트리거 제거",
+    "permissionMode": "권한 모드",
+    "model": "모델",
+    "modelPlaceholder": "워크스페이스 기본",
+    "enableOnSave": "저장 시 활성화",
+    "enabled": "활성",
+    "disabled": "비활성",
+    "save": "에이전트 저장",
+    "savedAs": "v{version} 로 저장됨",
+    "idRequired": "먼저 에이전트 id 를 정해 주세요.",
+    "tryTitle": "실제 이벤트로 시험 실행 (섀도)",
+    "run": "실행",
+    "running": "실행 중…",
+    "noEvents": "기록된 이벤트가 아직 없습니다 — 스코어카드를 먼저 돌리거나, 대화에서 try_agent_draft 로 시험하세요.",
+    "wouldHave": "했을 작업:",
+    "none": "없음"
   }
 }

@@ -1543,7 +1543,8 @@
     "guide": "Guide",
     "connectDesktop": "Desktop app",
     "connectClaude": "Claude Code",
-    "connectCodex": "Codex"
+    "connectCodex": "Codex",
+    "agents": "Agents"
   },
   "usagePage": {
     "title": "Usage",
@@ -2706,7 +2707,9 @@
     "description": "Durable claims about this workspace's entities — findings, decisions, conventions, and context — version-pinned to what they concern.",
     "newEntry": "New entry",
     "actionFailed": "The action failed. Try again.",
-    "filters": { "all": "All" },
+    "filters": {
+      "all": "All"
+    },
     "kinds": {
       "finding": "Finding",
       "decision": "Decision",
@@ -3214,8 +3217,7 @@
     "filesHint": "Reference material the agent loads one file at a time (read_skill_file) — the SKILL.md body stays lean. Author or edit file contents with the agent from the skill's detail page.",
     "removeFile": "Remove {path}",
     "fileCount": "{count, plural, one {# file} other {# files}}",
-    "editWithAgent": "Edit with agent",
-    "editWithAgentPrompt": "Help me improve the skill \"{name}\". Review its SKILL.md body and supporting files, then propose concrete edits — keep the body a lean step-by-step procedure and move long reference material into supporting files. Once I confirm, apply the changes with update_skill.",
+    "editInChat": "Edit in chat",
     "shareToStore": "Share to store",
     "shareToStoreTitle": "Share to the capability store",
     "shareToStoreHint": "Publishes this skill to the store as a versioned, adoptable asset (republishing the same id bumps its version). Later edits here don't sync automatically — republish to update the store copy.",
@@ -3842,5 +3844,59 @@
       "title": "Account & settings",
       "body": "Your profile, API keys, workspace members, secrets, and integrations live here."
     }
+  },
+  "agentFleet": {
+    "title": "Agents",
+    "description": "Every agent run in this workspace — what woke it, what it did, how it settled.",
+    "emptyTitle": "No agent runs yet",
+    "emptyHint": "Enable an agent with triggers (or ask one in chat) and its runs appear here.",
+    "wokeOn": "woke on {kind}",
+    "viewTranscript": "View transcript",
+    "stop": "Stop run",
+    "loading": "Loading transcript…",
+    "noMessages": "No messages recorded.",
+    "roleEvent": "Event / input",
+    "roleAgent": "Agent",
+    "unavailable": "The agent service is unreachable — runs cannot be listed right now.",
+    "status": {
+      "running": "Running",
+      "awaiting_approval": "Awaiting approval",
+      "completed": "Completed",
+      "failed": "Failed",
+      "cancelled": "Cancelled"
+    },
+    "approve": "Allow",
+    "deny": "Deny",
+    "craftNew": "Craft agent"
+  },
+  "craftAgent": {
+    "title": "Craft an agent",
+    "description": "Shape the agent in conversation — the canvas on the left is the draft; ask on the right to change it, try it, and save it.",
+    "kickoffPrompt": "Let's craft an agent. Ask me what it should watch and do, shape the draft with craft_agent, verify it with try_agent_draft on a real past event, and save it with create_agent when I confirm.",
+    "idPlaceholder": "agent-id (kebab-case)",
+    "descriptionPlaceholder": "What this agent is for",
+    "task": "Task",
+    "taskHint": "what to do when a trigger wakes it",
+    "instructions": "Instructions",
+    "instructionsHint": "standing context for every turn",
+    "triggers": "Triggers",
+    "triggersHint": "platform events that wake it",
+    "addTrigger": "Add a trigger kind…",
+    "removeTrigger": "Remove trigger",
+    "permissionMode": "Permission mode",
+    "model": "Model",
+    "modelPlaceholder": "workspace default",
+    "enableOnSave": "Enable on save",
+    "enabled": "enabled",
+    "disabled": "disabled",
+    "save": "Save agent",
+    "savedAs": "Saved as v{version}",
+    "idRequired": "Give the agent an id first.",
+    "tryTitle": "Try on a real event (shadow)",
+    "run": "Run",
+    "running": "Running…",
+    "noEvents": "No recorded events yet — run a scorecard first, or try from the conversation with try_agent_draft.",
+    "wouldHave": "Would have done:",
+    "none": "none"
   }
 }

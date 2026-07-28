@@ -415,6 +415,23 @@ export function AgentChatPanel({
       window.dispatchEvent(new Event('everdict:canvas-state-request'))
       window.removeEventListener('everdict:canvas-state', captureCanvas)
 
+      // 크래프팅 캔버스도 같은 계약(agent-automation B2/B3): 열려 있으면 전송 직전 현 draft 를 캡처해
+      // 매 턴이 수동 편집 포함 라이브 상태에 근거한다. 캔버스 없음 → 응답 없음 → undefined.
+      let agentDraft: { draft: Record<string, unknown>; agentId?: string } | undefined
+      const captureDraft = (e: Event) => {
+        const detail = (e as CustomEvent<unknown>).detail
+        if (detail === null || typeof detail !== 'object') return
+        const d = detail as { draft?: unknown; agentId?: unknown }
+        if (d.draft === null || typeof d.draft !== 'object') return
+        agentDraft = {
+          draft: d.draft as Record<string, unknown>,
+          ...(typeof d.agentId === 'string' ? { agentId: d.agentId } : {}),
+        }
+      }
+      window.addEventListener('everdict:agent-draft-state', captureDraft)
+      window.dispatchEvent(new Event('everdict:agent-draft-request'))
+      window.removeEventListener('everdict:agent-draft-state', captureDraft)
+
       // Apply one SSE event: a text delta grows the live assistant bubble; a persisted record merges into the
       // transcript (and, for the finalized assistant text, retires the live bubble); a `permission` event parks a
       // write-tool approval the member must decide, and `permission_resolved` dismisses it (e.g. server timeout).
@@ -449,6 +466,10 @@ export function AgentChatPanel({
           // dashboard / open View listens and applies the stored-form config live.
           if (data !== null && typeof data === 'object')
             window.dispatchEvent(new CustomEvent('everdict:view-config', { detail: data }))
+        } else if (event === 'agent_draft') {
+          // 에이전트가 크래프팅 캔버스를 빚었다(craft_agent) — 같은 창 브로드캐스트; 스튜디오가 적용한다.
+          if (data !== null && typeof data === 'object')
+            window.dispatchEvent(new CustomEvent('everdict:agent-draft', { detail: data }))
         } else if (event === 'artifact') {
           // A chart/table/report the agent just emitted — render it live in place.
           const parsed = analysisArtifactSchema.safeParse(data)
@@ -488,6 +509,7 @@ export function AgentChatPanel({
             ...(refs.length > 0 ? { references: refs } : {}),
             ...(atts.length > 0 ? { attachments: atts } : {}),
             ...(canvas ? { canvas } : {}),
+            ...(agentDraft ? { agentDraft } : {}),
           }),
           signal: controller.signal,
         })
