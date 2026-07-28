@@ -150,6 +150,12 @@ services:
       CONTROL_PLANE_URL: http://api:8787
       # The web (server) proxies the assistant chat + teammates to the agent service over the compose network.
       AGENT_URL: http://agent:8790
+      # Desktop installer list source — override for a GHE releases mirror (…/api/v3) / a private releases repo;
+      # DESKTOP_DOWNLOAD_URL is the external-link fallback shown when the release list can't be fetched.
+      DESKTOP_RELEASES_REPO: ${DESKTOP_RELEASES_REPO:-}
+      DESKTOP_RELEASES_API_URL: ${DESKTOP_RELEASES_API_URL:-}
+      DESKTOP_RELEASES_TOKEN: ${DESKTOP_RELEASES_TOKEN:-}
+      DESKTOP_DOWNLOAD_URL: ${DESKTOP_DOWNLOAD_URL:-}
     depends_on:
       - api
       - agent

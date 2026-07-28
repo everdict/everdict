@@ -37,6 +37,11 @@ export interface DesktopRelease {
 // Filename convention (electron-builder artifactName): Everdict-<ver>-<os>-<arch>.<ext> — blockmap/yml are excluded.
 const ASSET_NAME_RE = /-(linux|mac|win)-([A-Za-z0-9_]+)\.(AppImage|deb|dmg|zip|exe)$/
 
+// GitHub REST base (api.github.com or a GHE mirror's /api/v3) — trailing slash stripped so composed paths stay clean.
+export function releasesApiBase(): string {
+  return env.DESKTOP_RELEASES_API_URL.replace(/\/+$/, '')
+}
+
 function classifyAsset(asset: z.infer<typeof githubAssetSchema>): DesktopAsset | null {
   const m = ASSET_NAME_RE.exec(asset.name)
   if (!m) return null
@@ -50,7 +55,7 @@ export async function fetchDesktopRelease(): Promise<DesktopRelease | null> {
   const token = env.DESKTOP_RELEASES_TOKEN // optional — public repo reads unauthenticated; only a private releases repo needs it
   try {
     const res = await fetch(
-      `https://api.github.com/repos/${env.DESKTOP_RELEASES_REPO}/releases?per_page=20`,
+      `${releasesApiBase()}/repos/${env.DESKTOP_RELEASES_REPO}/releases?per_page=20`,
       {
         headers: {
           accept: 'application/vnd.github+json',

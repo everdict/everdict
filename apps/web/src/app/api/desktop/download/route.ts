@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { getTranslations } from 'next-intl/server'
 
-import { findDesktopAsset } from '@/features/download-desktop/api/releases'
+import { findDesktopAsset, releasesApiBase } from '@/features/download-desktop/api/releases'
 import { currentPrincipal } from '@/shared/auth/principal'
 import { env } from '@/shared/config/env'
 
@@ -25,7 +25,7 @@ export async function GET(request: Request): Promise<Response> {
   if (!asset) return NextResponse.json({ error: t('errorReleaseNotFound') }, { status: 404 })
 
   const gh = await fetch(
-    `https://api.github.com/repos/${env.DESKTOP_RELEASES_REPO}/releases/assets/${asset.id}`,
+    `${releasesApiBase()}/repos/${env.DESKTOP_RELEASES_REPO}/releases/assets/${asset.id}`,
     {
       headers: {
         accept: 'application/octet-stream',

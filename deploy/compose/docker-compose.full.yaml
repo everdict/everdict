@@ -334,6 +334,10 @@ services:
       KEYCLOAK_CLIENT_ID: ${KEYCLOAK_CLIENT_ID:-}
       KEYCLOAK_CLIENT_SECRET: ${KEYCLOAK_CLIENT_SECRET:-}
       DESKTOP_DOWNLOAD_URL: ${DESKTOP_DOWNLOAD_URL:-}
+      # Desktop installer list source — override for a GHE releases mirror (…/api/v3) / a private releases repo.
+      DESKTOP_RELEASES_REPO: ${DESKTOP_RELEASES_REPO:-}
+      DESKTOP_RELEASES_API_URL: ${DESKTOP_RELEASES_API_URL:-}
+      DESKTOP_RELEASES_TOKEN: ${DESKTOP_RELEASES_TOKEN:-}
     depends_on:
       - api
       - agent
