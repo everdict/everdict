@@ -1,6 +1,6 @@
-import { FsService, RunService } from "@everdict/application-control";
+import { FsService, RunService, SkillService } from "@everdict/application-control";
 import type { Dispatcher } from "@everdict/backends";
-import { InMemoryRunStore } from "@everdict/db";
+import { InMemoryRunStore, InMemorySkillStore } from "@everdict/db";
 import { InMemoryWorkspaceFs } from "@everdict/storage";
 import { describe, expect, it } from "vitest";
 import { buildServer } from "../../server.js";
@@ -122,5 +122,38 @@ describe("fs routes (the workspace filesystem HTTP surface)", () => {
     const res = await app.inject({ method: "GET", url: "/fs/entries", headers: H });
     expect(res.statusCode).toBe(404);
     expect(res.json().message).toContain("not configured");
+  });
+
+  it("skill content lives ON the filesystem: saving a skill materializes skills/<id>/SKILL.md, and a shell edit wins", async () => {
+    const service = new RunService({ dispatcher: unusedDispatcher, store: new InMemoryRunStore() });
+    const workspaceFs = new InMemoryWorkspaceFs();
+    const app = buildServer({
+      service,
+      fsService: new FsService(workspaceFs),
+      skillService: new SkillService({ store: new InMemorySkillStore(), fs: workspaceFs }),
+    });
+
+    const created = await app.inject({
+      method: "POST",
+      url: "/skills",
+      headers: H,
+      payload: { name: "triage", description: "d", instructions: "# How to triage" },
+    });
+    expect(created.statusCode).toBe(200);
+    const id = created.json().id as string;
+
+    const onFs = await app.inject({ method: "GET", url: `/fs/file?path=skills/${id}/SKILL.md`, headers: H });
+    expect(onFs.statusCode).toBe(200);
+    expect(onFs.json()).toMatchObject({ content: "# How to triage", encoding: "utf8" });
+
+    // edit through the filesystem surface (the shell / agent write_file path) → the skill read reflects it
+    await app.inject({
+      method: "PUT",
+      url: "/fs/file",
+      headers: H,
+      payload: { path: `skills/${id}/SKILL.md`, content: "# Edited via the shell" },
+    });
+    const skill = await app.inject({ method: "GET", url: `/skills/${id}`, headers: H });
+    expect(skill.json().instructions).toBe("# Edited via the shell");
   });
 });

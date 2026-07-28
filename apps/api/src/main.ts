@@ -150,8 +150,23 @@ async function main(): Promise<void> {
     agents: agentRegistry,
   });
 
+  // The workspace filesystem — S3/MinIO when env-configured (distributed: every replica sees one tree), else
+  // in-memory (dev). Same object storage as artifacts, namespaced under the "fs/" key prefix. Skill + knowledge
+  // bodies live on it as the SSOT (content-projection); the Files page + fs tools browse it.
+  const workspaceFs = (await workspaceFsFromEnv()) ?? new InMemoryWorkspaceFs();
+  console.log(
+    workspaceFs instanceof InMemoryWorkspaceFs
+      ? "▶ workspace filesystem: in-memory (dev — set EVERDICT_S3_* for the distributed backend)"
+      : "▶ workspace filesystem: S3/MinIO (distributed)",
+  );
+
   // Knowledge entries — reified claims (the knowledge layer's record). CRUD + verify; freshness-decorated reads.
-  const knowledgeEntryService = new KnowledgeEntryService({ store: knowledgeEntryStore, latestVersionOf });
+  // Bodies live on the workspace filesystem (knowledge/<id>.md) with the DB row as the replica.
+  const knowledgeEntryService = new KnowledgeEntryService({
+    store: knowledgeEntryStore,
+    latestVersionOf,
+    fs: workspaceFs,
+  });
 
   // Workspace knowledge graph — the query surface over the harvested graph + a pull reindex that harvests the
   // tenant-listable record stores (scorecards/runs/schedules) into it, plus task-time context assembly over the
@@ -210,14 +225,6 @@ async function main(): Promise<void> {
   // Unset → undefined → the service falls back to base64 inline (dev). Credentials are env secrets (never committed).
   const artifacts = await artifactStoreFromEnv();
   if (artifacts) console.log("▶ artifact store: S3/MinIO offload enabled (os-use screenshots)");
-  // The workspace filesystem — S3/MinIO when env-configured (distributed: every replica sees one tree), else
-  // in-memory (dev). Same object storage as artifacts, namespaced under the "fs/" key prefix.
-  const workspaceFs = (await workspaceFsFromEnv()) ?? new InMemoryWorkspaceFs();
-  console.log(
-    workspaceFs instanceof InMemoryWorkspaceFs
-      ? "▶ workspace filesystem: in-memory (dev — set EVERDICT_S3_* for the distributed backend)"
-      : "▶ workspace filesystem: S3/MinIO (distributed)",
-  );
   // Durable replay recording — persistent by DEFAULT (Postgres when DATABASE_URL is set, else in-memory), from
   // persistence. The runner-lease MCP tees pushed frames/logs into it (self-hosted) and the managed topology backend
   // streams the browser's CDP events (network/console/nav + frames) into it, so a run can be REPLAYED after it settles;
@@ -498,7 +505,7 @@ async function main(): Promise<void> {
     agentService: new AgentService({ agents: agentRegistry }),
     // Workspace Skills — SKILL.md procedures the members author (dual-scoped private|workspace) + skill-generate (drafts
     // a skill from a description via the workspace's registered model + key; same secret tiers/base as the model probe).
-    skillService: new SkillService({ store: skillStore, latestVersionOf }),
+    skillService: new SkillService({ store: skillStore, latestVersionOf, fs: workspaceFs }),
     // The workspace filesystem — the shared, workspace-isolated file tree (web Files page + list_files/get_file/
     // write_file MCP tools; agents persist task outputs here as real files). Backed by S3/MinIO when env-configured.
     fsService: new FsService(workspaceFs),

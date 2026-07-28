@@ -8,12 +8,19 @@ import {
 } from "@everdict/contracts";
 import type { Coverage } from "@everdict/domain";
 import {
+  readSkillContent,
+  removeSkillContent,
+  skillContentEquals,
+  writeSkillContent,
+} from "../fs/content-projection.js";
+import {
   type LatestVersionResolver,
   extendPinCoverage,
   mergePinCoverage,
   resolveCoverage,
 } from "../knowledge/freshness-resolver.js";
 import type { SkillStore } from "../ports/skill-store.js";
+import type { WorkspaceFs } from "../ports/workspace-fs.js";
 
 // Workspace Skill CRUD — dual-scoped like browser profiles / Views:
 //   - `private` (default) = a personal draft, visible and manageable only by its creator (NO admin override).
@@ -58,6 +65,12 @@ export interface SkillServiceDeps {
   // Optional latest-version resolver (composition wires it over the registries). When present, list/get decorate
   // each skill with `coverage`, and verify EXTENDS the pins' known-valid intervals to the entities' current latest.
   latestVersionOf?: LatestVersionResolver;
+  // The workspace filesystem — when wired, skill CONTENT (instructions + supporting files) lives on it as the
+  // SSOT (`skills/<id>/SKILL.md` + `skills/<id>/files/*`, browsable in the Files page and editable by agents):
+  // saves project the filesystem FIRST (a failed projection fails the save), `get` reads it first — lazily
+  // migrating a legacy DB-only row onto it and re-syncing the DB replica after an out-of-band filesystem edit.
+  // The DB row keeps a full replica so `list` stays one query and filesystem-less processes keep working.
+  fs?: WorkspaceFs;
   newId?: () => string;
   now?: () => string;
 }
@@ -86,6 +99,13 @@ export class SkillService {
       createdAt: ts,
       updatedAt: ts,
     };
+    if (this.deps.fs) {
+      // filesystem first: if the projection fails, no DB row is created — the SSOT is never silently stale
+      await writeSkillContent(this.deps.fs, input.tenant, record.id, {
+        instructions: record.instructions,
+        files: record.files,
+      });
+    }
     await this.deps.store.create(record);
     return record;
   }
@@ -98,12 +118,33 @@ export class SkillService {
   // A single skill the caller can see — a workspace skill is visible to any member; a private one only to its creator.
   // Otherwise 404 (no existence leak — a foreign private skill is indistinguishable from a missing one).
   async get(tenant: string, id: string, subject: string): Promise<SkillWithCoverage> {
-    const record = await this.deps.store.get(tenant, id);
-    if (!record || (record.visibility === "private" && record.createdBy !== subject))
+    const stored = await this.deps.store.get(tenant, id);
+    if (!stored || (stored.visibility === "private" && stored.createdBy !== subject))
       throw new NotFoundError("NOT_FOUND", { id }, `skill '${id}' not found.`);
+    const record = await this.hydrateFromFs(tenant, stored);
     const [decorated] = await this.decorate(tenant, [record]);
     if (!decorated) throw new NotFoundError("NOT_FOUND", { id }, `skill '${id}' not found.`);
     return decorated;
+  }
+
+  // Filesystem-first content resolution for a detail read: the projection wins when present (an out-of-band edit —
+  // shell, agent write_file — re-syncs the DB replica right here); a legacy DB-only row is migrated onto the
+  // filesystem on first read (best-effort — a read must not fail because object storage hiccuped).
+  private async hydrateFromFs(tenant: string, record: SkillRecord): Promise<SkillRecord> {
+    const fs = this.deps.fs;
+    if (!fs) return record;
+    try {
+      const content = await readSkillContent(fs, tenant, record.id);
+      if (!content) {
+        await writeSkillContent(fs, tenant, record.id, { instructions: record.instructions, files: record.files });
+        return record;
+      }
+      if (skillContentEquals(content, { instructions: record.instructions, files: record.files })) return record;
+      await this.deps.store.update(tenant, record.id, { instructions: content.instructions, files: content.files });
+      return { ...record, instructions: content.instructions, files: content.files };
+    } catch {
+      return record; // the DB replica keeps the read alive when the filesystem is unreachable
+    }
   }
 
   async update(tenant: string, id: string, patch: UpdateSkillInput, actor: SkillActor): Promise<SkillRecord> {
@@ -116,6 +157,13 @@ export class SkillService {
     // Clients author plain NodeRefs; verifiedVersion is system-owned — carried over when the pin is unchanged.
     if (patch.refs !== undefined) next.refs = mergePinCoverage(current.refs, patch.refs);
     if (patch.visibility !== undefined) next.visibility = patch.visibility;
+    if (this.deps.fs && (patch.instructions !== undefined || patch.files !== undefined)) {
+      // filesystem first (same discipline as create): project the merged content before the DB write
+      await writeSkillContent(this.deps.fs, tenant, id, {
+        instructions: next.instructions ?? current.instructions,
+        files: next.files ?? current.files,
+      });
+    }
     const updated = await this.deps.store.update(tenant, id, next);
     if (!updated) throw new NotFoundError("NOT_FOUND", { id }, `skill '${id}' not found.`);
     return updated;
@@ -136,6 +184,7 @@ export class SkillService {
   async remove(tenant: string, id: string, actor: SkillActor): Promise<void> {
     await this.manageableOrThrow(tenant, id, actor);
     await this.deps.store.remove(tenant, id);
+    if (this.deps.fs) await removeSkillContent(this.deps.fs, tenant, id).catch(() => {}); // best-effort cleanup
   }
 
   private async decorate(tenant: string, records: SkillRecord[]): Promise<SkillWithCoverage[]> {

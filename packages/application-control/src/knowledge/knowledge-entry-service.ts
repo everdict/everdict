@@ -8,7 +8,9 @@ import {
   NotFoundError,
 } from "@everdict/contracts";
 import type { Coverage } from "@everdict/domain";
+import { readKnowledgeBody, removeKnowledgeBody, writeKnowledgeBody } from "../fs/content-projection.js";
 import type { KnowledgeEntryStore } from "../ports/knowledge-entry-store.js";
+import type { WorkspaceFs } from "../ports/workspace-fs.js";
 import {
   type LatestVersionResolver,
   extendPinCoverage,
@@ -54,6 +56,11 @@ export type KnowledgeEntryWithCoverage = KnowledgeEntryRecord & { coverage?: Cov
 export interface KnowledgeEntryServiceDeps {
   store: KnowledgeEntryStore;
   latestVersionOf?: LatestVersionResolver;
+  // The workspace filesystem — when wired, the entry's markdown BODY lives on it as the SSOT
+  // (`knowledge/<id>.md`, browsable in the Files page): saves project it FIRST, `get` reads it first (lazy
+  // migration of legacy rows + DB re-sync after an out-of-band edit). The DB keeps a full replica so `list`
+  // stays one query. Same discipline as SkillService — see that class.
+  fs?: WorkspaceFs;
   newId?: () => string;
   now?: () => string;
 }
@@ -84,6 +91,7 @@ export class KnowledgeEntryService {
       createdAt: ts,
       updatedAt: ts,
     };
+    if (this.deps.fs) await writeKnowledgeBody(this.deps.fs, input.tenant, record.id, record.body); // filesystem first
     await this.deps.store.create(record);
     return record;
   }
@@ -94,12 +102,32 @@ export class KnowledgeEntryService {
   }
 
   async get(tenant: string, id: string, subject: string): Promise<KnowledgeEntryWithCoverage> {
-    const record = await this.deps.store.get(tenant, id);
-    if (!record || (record.visibility === "private" && record.createdBy !== subject))
+    const stored = await this.deps.store.get(tenant, id);
+    if (!stored || (stored.visibility === "private" && stored.createdBy !== subject))
       throw new NotFoundError("NOT_FOUND", { id }, `knowledge entry '${id}' not found.`);
+    const record = await this.hydrateFromFs(tenant, stored);
     const [decorated] = await this.decorate(tenant, [record]);
     if (!decorated) throw new NotFoundError("NOT_FOUND", { id }, `knowledge entry '${id}' not found.`);
     return decorated;
+  }
+
+  // Filesystem-first body resolution (mirror of SkillService.hydrateFromFs): the projection wins when present,
+  // a legacy row is migrated onto it, and an out-of-band edit re-syncs the DB replica — all best-effort.
+  private async hydrateFromFs(tenant: string, record: KnowledgeEntryRecord): Promise<KnowledgeEntryRecord> {
+    const fs = this.deps.fs;
+    if (!fs) return record;
+    try {
+      const body = await readKnowledgeBody(fs, tenant, record.id);
+      if (body === undefined) {
+        await writeKnowledgeBody(fs, tenant, record.id, record.body);
+        return record;
+      }
+      if (body === record.body) return record;
+      await this.deps.store.update(tenant, record.id, { body });
+      return { ...record, body };
+    } catch {
+      return record; // the DB replica keeps the read alive when the filesystem is unreachable
+    }
   }
 
   async update(
@@ -118,6 +146,9 @@ export class KnowledgeEntryService {
     if (patch.evidence !== undefined) next.evidence = patch.evidence;
     if (patch.status !== undefined) next.status = patch.status;
     if (patch.visibility !== undefined) next.visibility = patch.visibility;
+    if (this.deps.fs && patch.body !== undefined) {
+      await writeKnowledgeBody(this.deps.fs, tenant, id, patch.body); // filesystem first, same as create
+    }
     const updated = await this.deps.store.update(tenant, id, next);
     if (!updated) throw new NotFoundError("NOT_FOUND", { id }, `knowledge entry '${id}' not found.`);
     return updated;
@@ -126,6 +157,7 @@ export class KnowledgeEntryService {
   async remove(tenant: string, id: string, actor: KnowledgeEntryActor): Promise<void> {
     await this.manageableOrThrow(tenant, id, actor);
     await this.deps.store.remove(tenant, id);
+    if (this.deps.fs) await removeKnowledgeBody(this.deps.fs, tenant, id).catch(() => {}); // best-effort cleanup
   }
 
   // Attest that the claim still holds — a COORDINATE EXTENSION along subject time: each versioned pin's
