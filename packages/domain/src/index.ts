@@ -288,9 +288,12 @@ export {
   SKILL_HARVESTER,
 } from "./knowledge/harvest-knowledge.js";
 export {
-  assessFreshness,
+  type AnchorRelation,
+  anchorRelation,
+  assessCoverage,
+  type Coverage,
+  type CoverageGap,
+  type CoverageState,
   DEFAULT_UNVERIFIED_AFTER_DAYS,
-  type Freshness,
-  type FreshnessState,
-  type StaleRef,
+  intervalEnd,
 } from "./knowledge/freshness.js";

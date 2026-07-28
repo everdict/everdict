@@ -40,6 +40,19 @@ describe("KnowledgeEntryRecord — a reified claim", () => {
     expect(KnowledgeEntryRecordSchema.safeParse({ ...baseEntry, title: "" }).success).toBe(false);
   });
 
+  it("parses v1 point pins unchanged and accepts the interval end (verifiedVersion) — backward compatible", () => {
+    const point = KnowledgeEntryRecordSchema.parse({
+      ...baseEntry,
+      refs: [{ type: "harness", key: "web-agent", version: "2.1.0" }],
+    });
+    expect(point.refs[0]?.verifiedVersion).toBeUndefined(); // v1 pin ⇒ interval [2.1.0, 2.1.0]
+    const interval = KnowledgeEntryRecordSchema.parse({
+      ...baseEntry,
+      refs: [{ type: "harness", key: "web-agent", version: "2.1.0", verifiedVersion: "2.3.0" }],
+    });
+    expect(interval.refs[0]?.verifiedVersion).toBe("2.3.0");
+  });
+
   it("caps refs at the atomic-claim bound", () => {
     const refs = Array.from({ length: KNOWLEDGE_ENTRY_MAX_REFS + 1 }, (_, i) => ({
       type: "harness",

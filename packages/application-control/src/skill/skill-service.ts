@@ -6,8 +6,13 @@ import {
   type SkillRecord,
   type SkillVisibility,
 } from "@everdict/contracts";
-import type { Freshness } from "@everdict/domain";
-import { type LatestVersionResolver, resolveFreshness } from "../knowledge/freshness-resolver.js";
+import type { Coverage } from "@everdict/domain";
+import {
+  type LatestVersionResolver,
+  extendPinCoverage,
+  mergePinCoverage,
+  resolveCoverage,
+} from "../knowledge/freshness-resolver.js";
 import type { SkillStore } from "../ports/skill-store.js";
 
 // Workspace Skill CRUD — dual-scoped like browser profiles / Views:
@@ -43,14 +48,15 @@ export interface SkillActor {
   isAdmin: boolean;
 }
 
-// A skill decorated with its freshness — how trustworthy the procedure is right now: `superseded_refs` (a pinned
-// `refs` target has a newer version) / `unverified` (no recent edit or verification) / `fresh`. Additive on the wire.
-export type SkillWithFreshness = SkillRecord & { freshness?: Freshness };
+// A skill decorated with its subject-time coverage — where its known-valid intervals sit relative to the entities'
+// PRESENT: `current` / `behind` (as-of an earlier point; validity at the present unknown — not wrong) / `unverified`
+// (wall-clock aged). Additive on the wire.
+export type SkillWithCoverage = SkillRecord & { coverage?: Coverage };
 
 export interface SkillServiceDeps {
   store: SkillStore;
   // Optional latest-version resolver (composition wires it over the registries). When present, list/get decorate
-  // each skill with `freshness` — the staleness contract the agent surfaces as a listing badge / use_skill banner.
+  // each skill with `coverage`, and verify EXTENDS the pins' known-valid intervals to the entities' current latest.
   latestVersionOf?: LatestVersionResolver;
   newId?: () => string;
   now?: () => string;
@@ -84,14 +90,14 @@ export class SkillService {
     return record;
   }
 
-  // Skills the caller can see — every workspace skill + their own private ones, freshness-decorated.
-  async list(tenant: string, subject: string): Promise<SkillWithFreshness[]> {
+  // Skills the caller can see — every workspace skill + their own private ones, coverage-decorated.
+  async list(tenant: string, subject: string): Promise<SkillWithCoverage[]> {
     return this.decorate(tenant, await this.deps.store.list(tenant, subject));
   }
 
   // A single skill the caller can see — a workspace skill is visible to any member; a private one only to its creator.
   // Otherwise 404 (no existence leak — a foreign private skill is indistinguishable from a missing one).
-  async get(tenant: string, id: string, subject: string): Promise<SkillWithFreshness> {
+  async get(tenant: string, id: string, subject: string): Promise<SkillWithCoverage> {
     const record = await this.deps.store.get(tenant, id);
     if (!record || (record.visibility === "private" && record.createdBy !== subject))
       throw new NotFoundError("NOT_FOUND", { id }, `skill '${id}' not found.`);
@@ -101,24 +107,28 @@ export class SkillService {
   }
 
   async update(tenant: string, id: string, patch: UpdateSkillInput, actor: SkillActor): Promise<SkillRecord> {
-    await this.manageableOrThrow(tenant, id, actor); // per-visibility gate before the write
+    const current = await this.manageableOrThrow(tenant, id, actor); // per-visibility gate before the write
     const next: Partial<SkillRecord> = { updatedAt: this.now() };
     if (patch.name !== undefined) next.name = patch.name;
     if (patch.description !== undefined) next.description = patch.description;
     if (patch.instructions !== undefined) next.instructions = patch.instructions;
     if (patch.files !== undefined) next.files = patch.files;
-    if (patch.refs !== undefined) next.refs = patch.refs;
+    // Clients author plain NodeRefs; verifiedVersion is system-owned — carried over when the pin is unchanged.
+    if (patch.refs !== undefined) next.refs = mergePinCoverage(current.refs, patch.refs);
     if (patch.visibility !== undefined) next.visibility = patch.visibility;
     const updated = await this.deps.store.update(tenant, id, next);
     if (!updated) throw new NotFoundError("NOT_FOUND", { id }, `skill '${id}' not found.`);
     return updated;
   }
 
-  // Attest that the procedure still matches reality — stamps `verifiedAt` WITHOUT touching `updatedAt` (a
-  // verification is not an edit; the freshness baseline is the later of the two). Gated like any management op.
+  // Attest that the procedure still matches reality — a COORDINATE EXTENSION along subject time: each versioned pin's
+  // `verifiedVersion` advances to the entity's current latest ("confirmed to hold at this point"), plus the wall-clock
+  // `verifiedAt`. `updatedAt` stays untouched (a verification is not an edit). Gated like any management op.
   async verify(tenant: string, id: string, actor: SkillActor): Promise<SkillRecord> {
-    await this.manageableOrThrow(tenant, id, actor);
-    const updated = await this.deps.store.update(tenant, id, { verifiedAt: this.now() });
+    const record = await this.manageableOrThrow(tenant, id, actor);
+    const resolver = this.deps.latestVersionOf;
+    const refs = resolver ? await extendPinCoverage(tenant, record.refs, resolver) : record.refs;
+    const updated = await this.deps.store.update(tenant, id, { refs, verifiedAt: this.now() });
     if (!updated) throw new NotFoundError("NOT_FOUND", { id }, `skill '${id}' not found.`);
     return updated;
   }
@@ -128,13 +138,13 @@ export class SkillService {
     await this.deps.store.remove(tenant, id);
   }
 
-  private async decorate(tenant: string, records: SkillRecord[]): Promise<SkillWithFreshness[]> {
+  private async decorate(tenant: string, records: SkillRecord[]): Promise<SkillWithCoverage[]> {
     const resolver = this.deps.latestVersionOf;
     if (resolver === undefined || records.length === 0) return records;
-    const freshness = await resolveFreshness(tenant, records, resolver, this.now());
+    const coverage = await resolveCoverage(tenant, records, resolver, this.now());
     return records.map((record, i) => {
-      const f = freshness[i];
-      return f !== undefined ? { ...record, freshness: f } : record;
+      const c = coverage[i];
+      return c !== undefined ? { ...record, coverage: c } : record;
     });
   }
 

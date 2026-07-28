@@ -68,9 +68,10 @@ const docs = {
   verify: {
     summary: "Verify a skill (attest it still holds)",
     description:
-      "Stamps verifiedAt — the freshness baseline — without counting as an edit (updatedAt is untouched). Use after " +
-      "checking the procedure against the current versions of its pinned refs. Requires skills:write; manage = " +
-      "creator-or-admin (service-enforced).",
+      "Extends each versioned pin's known-valid interval to the entity's current latest (verifiedVersion) and stamps " +
+      "the wall-clock verifiedAt, without counting as an edit (updatedAt is untouched). Use after checking the " +
+      "procedure against the current versions of its pinned refs. Requires skills:write; manage = creator-or-admin " +
+      "(service-enforced).",
     tags: ["skill"],
     params: idParams,
     response: {

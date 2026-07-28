@@ -7,9 +7,14 @@ import {
   type NodeRef,
   NotFoundError,
 } from "@everdict/contracts";
-import type { Freshness } from "@everdict/domain";
+import type { Coverage } from "@everdict/domain";
 import type { KnowledgeEntryStore } from "../ports/knowledge-entry-store.js";
-import { type LatestVersionResolver, resolveFreshness } from "./freshness-resolver.js";
+import {
+  type LatestVersionResolver,
+  extendPinCoverage,
+  mergePinCoverage,
+  resolveCoverage,
+} from "./freshness-resolver.js";
 
 // Knowledge-entry CRUD — reified claims, the knowledge layer's record (docs/architecture/knowledge-graph.md §The
 // knowledge layer). Dual-scoped and gated exactly like Skills: `private` = a personal draft (creator-only, non-creator
@@ -44,7 +49,7 @@ export interface KnowledgeEntryActor {
   isAdmin: boolean;
 }
 
-export type KnowledgeEntryWithFreshness = KnowledgeEntryRecord & { freshness?: Freshness };
+export type KnowledgeEntryWithCoverage = KnowledgeEntryRecord & { coverage?: Coverage };
 
 export interface KnowledgeEntryServiceDeps {
   store: KnowledgeEntryStore;
@@ -83,12 +88,12 @@ export class KnowledgeEntryService {
     return record;
   }
 
-  // Entries the caller can see — every workspace entry + their own private ones, freshness-decorated.
-  async list(tenant: string, subject: string): Promise<KnowledgeEntryWithFreshness[]> {
+  // Entries the caller can see — every workspace entry + their own private ones, coverage-decorated.
+  async list(tenant: string, subject: string): Promise<KnowledgeEntryWithCoverage[]> {
     return this.decorate(tenant, await this.deps.store.list(tenant, subject));
   }
 
-  async get(tenant: string, id: string, subject: string): Promise<KnowledgeEntryWithFreshness> {
+  async get(tenant: string, id: string, subject: string): Promise<KnowledgeEntryWithCoverage> {
     const record = await this.deps.store.get(tenant, id);
     if (!record || (record.visibility === "private" && record.createdBy !== subject))
       throw new NotFoundError("NOT_FOUND", { id }, `knowledge entry '${id}' not found.`);
@@ -103,12 +108,13 @@ export class KnowledgeEntryService {
     patch: UpdateKnowledgeEntryInput,
     actor: KnowledgeEntryActor,
   ): Promise<KnowledgeEntryRecord> {
-    await this.manageableOrThrow(tenant, id, actor);
+    const current = await this.manageableOrThrow(tenant, id, actor);
     const next: Partial<KnowledgeEntryRecord> = { updatedAt: this.now() };
     if (patch.kind !== undefined) next.kind = patch.kind;
     if (patch.title !== undefined) next.title = patch.title;
     if (patch.body !== undefined) next.body = patch.body;
-    if (patch.refs !== undefined) next.refs = patch.refs;
+    // Clients author plain NodeRefs; verifiedVersion is system-owned — carried over when the pin is unchanged.
+    if (patch.refs !== undefined) next.refs = mergePinCoverage(current.refs, patch.refs);
     if (patch.evidence !== undefined) next.evidence = patch.evidence;
     if (patch.status !== undefined) next.status = patch.status;
     if (patch.visibility !== undefined) next.visibility = patch.visibility;
@@ -122,22 +128,25 @@ export class KnowledgeEntryService {
     await this.deps.store.remove(tenant, id);
   }
 
-  // Attest that the claim still holds — stamps `verifiedAt` WITHOUT touching `updatedAt` (a verification is not an
-  // edit; the freshness baseline is the later of the two).
+  // Attest that the claim still holds — a COORDINATE EXTENSION along subject time: each versioned pin's
+  // `verifiedVersion` advances to the entity's current latest, plus the wall-clock `verifiedAt`. `updatedAt` stays
+  // untouched (a verification is not an edit).
   async verify(tenant: string, id: string, actor: KnowledgeEntryActor): Promise<KnowledgeEntryRecord> {
-    await this.manageableOrThrow(tenant, id, actor);
-    const updated = await this.deps.store.update(tenant, id, { verifiedAt: this.now() });
+    const record = await this.manageableOrThrow(tenant, id, actor);
+    const resolver = this.deps.latestVersionOf;
+    const refs = resolver ? await extendPinCoverage(tenant, record.refs, resolver) : record.refs;
+    const updated = await this.deps.store.update(tenant, id, { refs, verifiedAt: this.now() });
     if (!updated) throw new NotFoundError("NOT_FOUND", { id }, `knowledge entry '${id}' not found.`);
     return updated;
   }
 
-  private async decorate(tenant: string, records: KnowledgeEntryRecord[]): Promise<KnowledgeEntryWithFreshness[]> {
+  private async decorate(tenant: string, records: KnowledgeEntryRecord[]): Promise<KnowledgeEntryWithCoverage[]> {
     const resolver = this.deps.latestVersionOf;
     if (resolver === undefined || records.length === 0) return records;
-    const freshness = await resolveFreshness(tenant, records, resolver, this.now());
+    const coverage = await resolveCoverage(tenant, records, resolver, this.now());
     return records.map((record, i) => {
-      const f = freshness[i];
-      return f !== undefined ? { ...record, freshness: f } : record;
+      const c = coverage[i];
+      return c !== undefined ? { ...record, coverage: c } : record;
     });
   }
 

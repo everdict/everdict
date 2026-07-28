@@ -1,4 +1,4 @@
-import type { KnowledgeEntryRecord, SkillRecord } from "@everdict/contracts";
+import type { KnowledgeEntryRecord, KnowledgePin, SkillRecord } from "@everdict/contracts";
 import { HarvestBuilder, type HarvestResult } from "./harvest.js";
 
 // Structured harvesters for the KNOWLEDGE LAYER records — the claim stratum over the entity graph. Both project their
@@ -9,6 +9,16 @@ import { HarvestBuilder, type HarvestResult } from "./harvest.js";
 
 export const SKILL_HARVESTER = "skill_harvester_v1";
 export const KNOWLEDGE_ENTRY_HARVESTER = "knowledge_entry_harvester_v1";
+
+// The pin's known-valid interval, carried on the `about` edge (edgeAttrs — the type-agnostic wire's extension bag):
+// asOf = the subject-time point the knowledge was observed at, verifiedVersion = the latest point it was confirmed to
+// still hold. A graph query can read a claim's temporal extent without fetching the record.
+function intervalAttrs(pin: KnowledgePin): Record<string, unknown> {
+  return {
+    ...(pin.version !== undefined ? { asOf: pin.version } : {}),
+    ...(pin.verifiedVersion !== undefined ? { verifiedVersion: pin.verifiedVersion } : {}),
+  };
+}
 
 // A SkillRecord — a task procedure bundle. Its `refs` are the version-PINNED entities the procedure documents.
 export function harvestSkill(s: SkillRecord): HarvestResult {
@@ -21,7 +31,7 @@ export function harvestSkill(s: SkillRecord): HarvestResult {
   );
   b.ref("in_workspace", { type: "workspace", key: s.tenant }, "tenant");
   b.ref("created_by", { type: "user", key: s.createdBy }, "createdBy");
-  s.refs.forEach((r, i) => b.ref("about", r, `refs[${i}]`));
+  s.refs.forEach((r, i) => b.ref("about", r, `refs[${i}]`, intervalAttrs(r)));
   return b.result();
 }
 
@@ -40,7 +50,7 @@ export function harvestKnowledgeEntry(e: KnowledgeEntryRecord): HarvestResult {
   ).self({ type: "knowledge", key: e.id }, e.title, attrs);
   b.ref("in_workspace", { type: "workspace", key: e.tenant }, "tenant");
   b.ref("created_by", { type: "user", key: e.createdBy }, "createdBy");
-  e.refs.forEach((r, i) => b.ref("about", r, `refs[${i}]`));
+  e.refs.forEach((r, i) => b.ref("about", r, `refs[${i}]`, intervalAttrs(r)));
   e.evidence.forEach((r, i) => b.ref("evidenced_by", r, `evidence[${i}]`));
   if (e.supersedes !== undefined && e.supersedes !== "")
     b.ref("supersedes", { type: "knowledge", key: e.supersedes }, "supersedes");

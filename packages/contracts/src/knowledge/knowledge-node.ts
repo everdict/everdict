@@ -14,6 +14,19 @@ export const NodeRefSchema = z.object({
 });
 export type NodeRef = z.infer<typeof NodeRefSchema>;
 
+// A knowledge-layer PIN — a NodeRef extended with the claim's known-valid INTERVAL along the entity's timeline:
+// `[version, verifiedVersion]`. `version` is the subject-time point the knowledge was first observed at (immutable —
+// re-pinning to latest would erase the origin); `verifiedVersion` is the latest point where the claim was CONFIRMED to
+// still hold (system-maintained: `verify` resolves each pinned family's current latest and extends it — a coordinate
+// extension along subject time, not a wall-clock stamp). Absent verifiedVersion ⇒ the interval is the point
+// [version, version] (backward compatible with v1 pins). An unversioned pin is a timeless family-wide claim (its
+// temporal signal is wall-clock verifiedAt on the record). Time is a COORDINATE of knowledge, not decay — see
+// docs/architecture/knowledge-graph.md §The time axis.
+export const KnowledgePinSchema = NodeRefSchema.extend({
+  verifiedVersion: z.string().optional(),
+});
+export type KnowledgePin = z.infer<typeof KnowledgePinSchema>;
+
 // The resolution state of a node — whether the canonical projection is backed by a live domain record.
 //   • resolved  — the node maps to an existing record (every harvested node; a resolved extraction target).
 //   • dangling  — a surface reference from text that no record matched (e.g. a comment names a deleted scorecard).

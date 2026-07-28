@@ -11,11 +11,13 @@ import {
   NotFoundError,
   type Predicate,
 } from "@everdict/contracts";
-import type { KnowledgeEntryRecord } from "@everdict/contracts";
+import type { KnowledgeEntryRecord, KnowledgePin } from "@everdict/contracts";
 import {
-  type Freshness,
+  type AnchorRelation,
+  type Coverage,
   type HarvestResult,
   type SpecHarvestMeta,
+  anchorRelation,
   edgeId,
   harvestAgent,
   harvestDataset,
@@ -44,7 +46,7 @@ import type { RuntimeRegistry } from "../ports/runtime-registry.js";
 import type { ScheduleStore } from "../ports/schedule-store.js";
 import type { ScorecardStore } from "../ports/scorecard-store.js";
 import type { SkillStore } from "../ports/skill-store.js";
-import { type LatestVersionResolver, resolveFreshness } from "./freshness-resolver.js";
+import { type LatestVersionResolver, resolveCoverage } from "./freshness-resolver.js";
 import { ingestHarvest } from "./ingest-harvest.js";
 import {
   KnowledgeQueryService,
@@ -117,21 +119,25 @@ export interface TaskContextAnchor {
   facts: RelatedFact[];
 }
 
-// A skill candidate in the assembled context — listing-level only (name/description/refs/freshness), never the
-// instructions body: selection stays cheap, the agent loads the body via use_skill when it picks one.
+// A skill candidate in the assembled context — listing-level only (name/description/refs/coverage/relation), never
+// the instructions body: selection stays cheap, the agent loads the body via use_skill when it picks one.
 export interface TaskContextSkill {
   id: string;
   name: string;
   description: string;
-  refs: NodeRef[];
-  freshness?: Freshness;
+  refs: KnowledgePin[];
+  coverage?: Coverage;
+  relation?: AnchorRelation;
 }
 
 // assembleContext's result — the one payload that feeds the in-product agent, spawned teammates/subagents, and
-// Claude Code via the plugin (MCP get_task_context). See docs/architecture/knowledge-graph.md §Consumption.
+// Claude Code via the plugin (MCP get_task_context). Each knowledge/skill item carries its ANCHOR RELATION — where
+// its known-valid interval sits relative to the anchor coordinate (`covers | earlier | later | general`): the
+// anchor's own version IS the as-of coordinate (pass an old scorecard's harness@2.1.0 and the knowledge base is
+// projected onto that point; an unversioned anchor projects onto the present). See knowledge-graph.md §The time axis.
 export interface TaskContext {
   anchors: TaskContextAnchor[];
-  knowledge: (KnowledgeEntryRecord & { freshness?: Freshness })[];
+  knowledge: (KnowledgeEntryRecord & { coverage?: Coverage; relation?: AnchorRelation })[];
   skills: TaskContextSkill[];
 }
 
@@ -255,8 +261,13 @@ export class KnowledgeService {
   // Task-time context assembly — the knowledge layer's consumption surface. For a set of anchors (the entities a
   // task concerns: @-references, the scorecard under discussion, a harness being edited), returns per-anchor ranked
   // structural facts (graph) + the knowledge entries and skill candidates ABOUT those anchors (records, family-matched
-  // on (type, key) so a claim about web-agent@2.1.0 still surfaces when the task anchors web-agent@2.3.0), each
-  // freshness-decorated. Skill candidates are listing-level (no instructions body) — the agent loads a body on demand.
+  // on (type, key) so a claim pinned at web-agent@2.1.0 still surfaces when the task anchors web-agent@2.3.0).
+  //
+  // AS-OF PROJECTION: the anchor's own version is the coordinate the knowledge base is projected onto — an
+  // unversioned anchor resolves to the family's current latest (present-projection); an old scorecard's
+  // harness@2.1.0 anchor projects onto that point. Each matched item carries its ANCHOR RELATION
+  // (`covers | earlier | later | general`), and the ranking is relation > status > recency — at a past coordinate a
+  // SUPERSEDED claim that covers it outranks an active claim pinned later (time is a coordinate, not decay).
   async assembleContext(tenant: string, subject: string, anchors: NodeRef[]): Promise<TaskContext> {
     const ctxSrc = this.deps.contextSources;
     const now = new Date().toISOString();
@@ -266,43 +277,87 @@ export class KnowledgeService {
       anchorLanes.push({ ref, nodeId: id, facts: await this.query.relatedFacts(tenant, id, {}) });
     }
 
-    const families = new Set(anchors.map((a) => `${a.type}:${a.key}`));
-    const matches = (refs: NodeRef[]): boolean => refs.some((r) => families.has(`${r.type}:${r.key}`));
+    // The projection coordinate per anchor family: the anchor's own version, else the family's current latest.
+    const famKey = (r: NodeRef): string => `${r.type}:${r.key}`;
+    const coordinates = new Map<string, string | undefined>();
+    for (const a of anchors) {
+      const coordinate = a.version ?? (await ctxSrc?.latestVersionOf?.(tenant, a));
+      coordinates.set(famKey(a), coordinate);
+    }
+    const matches = (refs: NodeRef[]): boolean => refs.some((r) => coordinates.has(famKey(r)));
+
+    // The strongest relation of a record's pins to the anchor coordinates. Priority mirrors the ranking: confirmed-
+    // at-this-coordinate and timeless claims lead; earlier (validity here unknown) next; later (from this
+    // coordinate's future — the "what happened next" trail) last.
+    const RELATION_TIER: Record<AnchorRelation, number> = { covers: 0, general: 0, earlier: 1, later: 2 };
+    const relationFor = (refs: KnowledgePin[]): AnchorRelation | undefined => {
+      let best: AnchorRelation | undefined;
+      for (const pin of refs) {
+        if (!coordinates.has(famKey(pin))) continue; // not an anchor family
+        const rel = anchorRelation(pin, coordinates.get(famKey(pin)));
+        if (rel === undefined) continue; // unresolved coordinate — indeterminate, never penalized
+        if (best === undefined || RELATION_TIER[rel] < RELATION_TIER[best]) best = rel;
+      }
+      return best;
+    };
+    const tier = (rel: AnchorRelation | undefined): number => (rel === undefined ? 0 : RELATION_TIER[rel]);
     const baseline = (r: { verifiedAt?: string; updatedAt: string }): string =>
       r.verifiedAt !== undefined && r.verifiedAt > r.updatedAt ? r.verifiedAt : r.updatedAt;
 
-    let knowledge: (KnowledgeEntryRecord & { freshness?: Freshness })[] = [];
+    let knowledge: TaskContext["knowledge"] = [];
     if (ctxSrc?.knowledgeEntries) {
-      const entries = (await ctxSrc.knowledgeEntries.list(tenant, subject)).filter((e) => matches(e.refs));
-      // Active claims first, freshest baseline first — a deprecated/superseded claim still surfaces (it may be the
-      // correction trail) but never above a live one.
-      entries.sort((a, b) =>
-        a.status === b.status ? baseline(b).localeCompare(baseline(a)) : a.status === "active" ? -1 : 1,
-      );
-      const page = entries.slice(0, 20);
+      const matched = (await ctxSrc.knowledgeEntries.list(tenant, subject)).filter((e) => matches(e.refs));
+      const withRelation = matched.map((e) => ({ entry: e, relation: relationFor(e.refs) }));
+      // relation > status > recency: a superseded claim that COVERS the anchor coordinate is that coordinate's
+      // truth — it outranks an active claim from the coordinate's future. Status only breaks ties within a tier.
+      withRelation.sort((a, b) => {
+        const t = tier(a.relation) - tier(b.relation);
+        if (t !== 0) return t;
+        if (a.entry.status !== b.entry.status) return a.entry.status === "active" ? -1 : 1;
+        return baseline(b.entry).localeCompare(baseline(a.entry));
+      });
+      const page = withRelation.slice(0, 20);
       const decorated = ctxSrc.latestVersionOf
-        ? await resolveFreshness(tenant, page, ctxSrc.latestVersionOf, now)
+        ? await resolveCoverage(
+            tenant,
+            page.map((p) => p.entry),
+            ctxSrc.latestVersionOf,
+            now,
+          )
         : undefined;
-      knowledge = page.map((e, i) => {
-        const f = decorated?.[i];
-        return f !== undefined ? { ...e, freshness: f } : e;
+      knowledge = page.map(({ entry, relation }, i) => {
+        const c = decorated?.[i];
+        return {
+          ...entry,
+          ...(relation !== undefined ? { relation } : {}),
+          ...(c !== undefined ? { coverage: c } : {}),
+        };
       });
     }
 
     let skills: TaskContextSkill[] = [];
     if (ctxSrc?.skills) {
-      const matched = (await ctxSrc.skills.list(tenant, subject)).filter((s) => matches(s.refs)).slice(0, 20);
+      const matched = (await ctxSrc.skills.list(tenant, subject)).filter((s) => matches(s.refs));
+      const withRelation = matched.map((s) => ({ record: s, relation: relationFor(s.refs) }));
+      withRelation.sort((a, b) => tier(a.relation) - tier(b.relation));
+      const page = withRelation.slice(0, 20);
       const decorated = ctxSrc.latestVersionOf
-        ? await resolveFreshness(tenant, matched, ctxSrc.latestVersionOf, now)
+        ? await resolveCoverage(
+            tenant,
+            page.map((p) => p.record),
+            ctxSrc.latestVersionOf,
+            now,
+          )
         : undefined;
-      skills = matched.map((s, i) => {
-        const f = decorated?.[i];
+      skills = page.map(({ record, relation }, i) => {
+        const c = decorated?.[i];
         return {
-          id: s.id,
-          name: s.name,
-          description: s.description,
-          refs: s.refs,
-          ...(f !== undefined ? { freshness: f } : {}),
+          id: record.id,
+          name: record.name,
+          description: record.description,
+          refs: record.refs,
+          ...(c !== undefined ? { coverage: c } : {}),
+          ...(relation !== undefined ? { relation } : {}),
         };
       });
     }

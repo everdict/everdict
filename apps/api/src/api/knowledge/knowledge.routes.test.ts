@@ -262,7 +262,7 @@ describe("knowledge entries — reified claims", () => {
     expect(res.statusCode).toBe(404);
   });
 
-  it("creates an entry, lists it freshness-decorated (pinned 2.1.0 vs latest 2.3.0 → superseded_refs)", async () => {
+  it("creates an entry, lists it coverage-decorated (interval ends at 2.1.0, present 2.3.0 → behind)", async () => {
     const app = await build(true);
     const post = await app.inject({ method: "POST", url: "/knowledge/entries", headers: H, payload: entryPayload });
     expect(post.statusCode).toBe(201);
@@ -271,9 +271,9 @@ describe("knowledge entries — reified claims", () => {
 
     const list = await app.inject({ method: "GET", url: "/knowledge/entries", headers: H });
     expect(list.statusCode).toBe(200);
-    const entries = list.json() as Array<{ id: string; freshness?: { state: string } }>;
+    const entries = list.json() as Array<{ id: string; coverage?: { state: string } }>;
     expect(entries[0]?.id).toBe(created.id);
-    expect(entries[0]?.freshness?.state).toBe("superseded_refs");
+    expect(entries[0]?.coverage?.state).toBe("behind");
   });
 
   it("400s an unknown kind (closed vocabulary, no fallback)", async () => {
@@ -331,12 +331,13 @@ describe("knowledge entries — reified claims", () => {
     expect(res.statusCode).toBe(200);
     const ctx = res.json() as {
       anchors: Array<{ nodeId: string; facts: unknown[] }>;
-      knowledge: Array<{ title: string; freshness?: { state: string } }>;
+      knowledge: Array<{ title: string; relation?: string; coverage?: { state: string } }>;
       skills: unknown[];
     };
     expect(ctx.anchors[0]?.nodeId).toBe(nodeId("acme", { type: "harness", key: "web-agent", version: "2.3.0" }));
     expect(ctx.knowledge[0]?.title).toBe(entryPayload.title);
-    expect(ctx.knowledge[0]?.freshness?.state).toBe("superseded_refs");
+    expect(ctx.knowledge[0]?.coverage?.state).toBe("behind");
+    expect(ctx.knowledge[0]?.relation).toBe("earlier"); // pinned at 2.1.0, anchored at 2.3.0
   });
 
   it("400s an empty context anchor list", async () => {

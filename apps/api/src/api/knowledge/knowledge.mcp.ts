@@ -143,7 +143,7 @@ export function registerKnowledgeTools(server: McpServer, ctx: McpToolContext): 
     "get_task_context",
     {
       description:
-        "Assemble workspace context for a task: for each anchor ({type, key, version?} — the entities the task concerns), the graph's related facts PLUS the workspace's knowledge entries (claims/decisions/conventions) and skill candidates ABOUT those anchors, each with a freshness state (fresh | superseded_refs | unverified). Call this BEFORE working on a harness/dataset/scorecard to inherit what the workspace already knows.",
+        "Assemble workspace context for a task: for each anchor ({type, key, version?} — the entities the task concerns), the graph's related facts PLUS the workspace's knowledge entries (claims/decisions/conventions) and skill candidates ABOUT those anchors. The anchor's version IS the as-of coordinate: pass an old scorecard's harness@2.1.0 and the knowledge base is projected onto that point (unversioned anchors project onto the present). Each item carries its anchor relation — covers (confirmed at this coordinate) | earlier (about an earlier point; validity here unknown, not wrong) | later (from this coordinate's future, e.g. the eventual fix) | general (timeless family claim) — and a coverage state vs the present (current | behind | unverified). Call this BEFORE working on a harness/dataset/scorecard to inherit what the workspace already knows.",
       inputSchema: {
         refs: z.array(NodeRefSchema).min(1).max(KNOWLEDGE_ENTRY_MAX_REFS),
       },
@@ -221,7 +221,7 @@ export function registerKnowledgeTools(server: McpServer, ctx: McpToolContext): 
     "list_knowledge_entries",
     {
       description:
-        "The workspace's knowledge entries the caller can see (shared + own drafts), each with a freshness state (fresh | superseded_refs | unverified).",
+        "The workspace's knowledge entries the caller can see (shared + own drafts), each with a coverage state vs the entities' present (current | behind | unverified). `behind` means the claim is as-of an earlier point — still true ABOUT that point; whether it extends to the present is what verify records.",
       inputSchema: {},
     },
     () => run(principal, "scorecards:read", async () => ok(await entries.list(ws, principal.subject))),
@@ -230,7 +230,7 @@ export function registerKnowledgeTools(server: McpServer, ctx: McpToolContext): 
   server.registerTool(
     "get_knowledge_entry",
     {
-      description: "One knowledge entry by id (freshness-decorated).",
+      description: "One knowledge entry by id (coverage-decorated).",
       inputSchema: { id: z.string().min(1) },
     },
     ({ id }) => run(principal, "scorecards:read", async () => ok(await entries.get(ws, id, principal.subject))),
@@ -290,7 +290,7 @@ export function registerKnowledgeTools(server: McpServer, ctx: McpToolContext): 
     "verify_knowledge_entry",
     {
       description:
-        "Attest a knowledge entry still holds — stamps verifiedAt (the freshness baseline) without counting as an edit. Manage = creator-or-admin.",
+        "Attest a knowledge entry still holds — EXTENDS each versioned pin's known-valid interval to the entity's current latest (verifiedVersion) plus the wall-clock verifiedAt, without counting as an edit. Use when a behind-flagged claim checks out at the present; if the claim no longer holds, create a superseding entry pinned at the version where it changed instead. Manage = creator-or-admin.",
       inputSchema: { id: z.string().min(1) },
     },
     ({ id }) =>

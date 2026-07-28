@@ -82,7 +82,7 @@ describe("KnowledgeEntryService", () => {
     expect(verified.updatedAt).toBe(rec.updatedAt);
   });
 
-  it("decorates list/get with freshness when a resolver is present (superseded ref → stale)", async () => {
+  it("decorates list/get with coverage when a resolver is present (interval behind the present → behind)", async () => {
     const svc = service(async (_t, ref) => (ref.key === "web-agent" ? "2.3.0" : undefined));
     const rec = await svc.create({
       ...base,
@@ -91,9 +91,57 @@ describe("KnowledgeEntryService", () => {
       refs: [{ type: "harness", key: "web-agent", version: "2.1.0" }],
     });
     const [listed] = await svc.list("acme", "alice");
-    expect(listed?.freshness?.state).toBe("superseded_refs");
-    expect(listed?.freshness?.staleRefs[0]?.latest).toBe("2.3.0");
+    expect(listed?.coverage?.state).toBe("behind");
+    expect(listed?.coverage?.gaps[0]?.latest).toBe("2.3.0");
     const got = await svc.get("acme", rec.id, "alice");
-    expect(got.freshness?.state).toBe("superseded_refs");
+    expect(got.coverage?.state).toBe("behind");
+  });
+
+  it("verify EXTENDS each versioned pin's interval to the entity's current latest (a subject-time coordinate, not a stamp)", async () => {
+    const svc = service(async (_t, ref) => (ref.key === "web-agent" ? "2.3.0" : undefined));
+    const rec = await svc.create({
+      ...base,
+      createdBy: "alice",
+      visibility: "workspace",
+      refs: [
+        { type: "harness", key: "web-agent", version: "2.1.0" },
+        { type: "dataset", key: "unknown-family" }, // unversioned: timeless claim, untouched
+      ],
+    });
+    const verified = await svc.verify("acme", rec.id, { subject: "alice", isAdmin: false });
+    expect(verified.refs[0]?.verifiedVersion).toBe("2.3.0"); // interval is now [2.1.0, 2.3.0]
+    expect(verified.refs[0]?.version).toBe("2.1.0"); // the origin pin is preserved (history, not overwritten)
+    expect(verified.refs[1]?.verifiedVersion).toBeUndefined();
+    expect(verified.updatedAt).toBe(rec.updatedAt); // still not an edit
+    // ...and the coverage now reads current, not behind — the extension is what verify MEANS
+    const got = await svc.get("acme", rec.id, "alice");
+    expect(got.coverage?.state).toBe("current");
+  });
+
+  it("an edit carries verifiedVersion over for unchanged pins and resets it on a re-pin (system-owned field)", async () => {
+    const svc = service(async () => "2.3.0");
+    const rec = await svc.create({
+      ...base,
+      createdBy: "alice",
+      visibility: "workspace",
+      refs: [{ type: "harness", key: "web-agent", version: "2.1.0" }],
+    });
+    await svc.verify("acme", rec.id, { subject: "alice", isAdmin: false });
+    // client PATCHes plain NodeRefs (it never sees verifiedVersion) — same pin keeps the extension
+    const kept = await svc.update(
+      "acme",
+      rec.id,
+      { refs: [{ type: "harness", key: "web-agent", version: "2.1.0" }], body: "edited" },
+      { subject: "alice", isAdmin: false },
+    );
+    expect(kept.refs[0]?.verifiedVersion).toBe("2.3.0");
+    // re-pinning to a different version starts a fresh point interval
+    const repinned = await svc.update(
+      "acme",
+      rec.id,
+      { refs: [{ type: "harness", key: "web-agent", version: "2.3.0" }] },
+      { subject: "alice", isAdmin: false },
+    );
+    expect(repinned.refs[0]?.verifiedVersion).toBeUndefined();
   });
 });

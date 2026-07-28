@@ -121,26 +121,31 @@ describe("renderSkillListing", () => {
   });
 });
 
-describe("skill freshness — the staleness contract surfaced at consumption time", () => {
-  const stale = {
-    name: "stale-skill",
-    description: "documents an old harness version",
+describe("skill coverage — as-of coordinates surfaced at consumption time (time is a coordinate, not decay)", () => {
+  const behind = {
+    name: "behind-skill",
+    description: "documents an earlier harness version",
     instructions: "1. …",
-    freshness: {
-      state: "superseded_refs" as const,
-      staleRefs: [{ ref: { type: "harness" as const, key: "web-agent", version: "2.1.0" }, latest: "2.3.0" }],
+    coverage: {
+      state: "behind" as const,
+      gaps: [
+        {
+          ref: { type: "harness" as const, key: "web-agent", version: "2.1.0", verifiedVersion: "2.2.0" },
+          latest: "2.3.0",
+        },
+      ],
     },
   };
   const unverified = {
     name: "dusty-skill",
     description: "not confirmed recently",
     instructions: "1. …",
-    freshness: { state: "unverified" as const },
+    coverage: { state: "unverified" as const },
   };
 
-  it("badges stale/unverified skills in the listing while a fresh skill stays unmarked", () => {
-    const listing = renderSkillListing([stale, unverified, ...skills]);
-    expect(listing).toContain("- stale-skill [stale: refs superseded]:");
+  it("badges behind/unverified skills in the listing while a current skill stays unmarked", () => {
+    const listing = renderSkillListing([behind, unverified, ...skills]);
+    expect(listing).toContain("- behind-skill [as-of older versions]:");
     expect(listing).toContain("- dusty-skill [unverified]:");
     expect(listing).toContain("- scorecard-triage: ");
   });
@@ -151,25 +156,26 @@ describe("skill freshness — the staleness contract surfaced at consumption tim
       description: "d".repeat(240),
       instructions: "",
     }));
-    const listing = renderSkillListing([stale, ...crowd]);
-    expect(listing.split("\n")[0]).toBe("- stale-skill [stale: refs superseded]");
+    const listing = renderSkillListing([behind, ...crowd]);
+    expect(listing.split("\n")[0]).toBe("- behind-skill [as-of older versions]");
   });
 
-  it("opens a stale skill's body with a banner naming each superseded ref and the latest version", async () => {
-    const [tool] = buildSkillTools([stale, ...skills]);
-    const result = await tool?.call({ skill: "stale-skill" }, {});
+  it("opens a behind skill's body with the interval per gap (documented @ · verified through · current)", async () => {
+    const [tool] = buildSkillTools([behind, ...skills]);
+    const result = await tool?.call({ skill: "behind-skill" }, {});
     expect(result?.isError).toBe(false);
-    expect(result?.content).toContain("STALE SKILL");
-    expect(result?.content).toContain("harness web-agent@2.1.0 → latest 2.3.0");
-    expect(result?.content).toContain("propose an");
+    expect(result?.content).toContain("AS-OF COVERAGE");
+    expect(result?.content).toContain("harness web-agent: documented @2.1.0, verified through 2.2.0 · current 2.3.0");
+    expect(result?.content).toContain("It is not wrong"); // as-of, never a distrust warning
+    expect(result?.content).toContain("verify the skill (extends its coverage"); // the three-response steer
   });
 
-  it("opens an unverified skill's body with the unverified banner, and a fresh skill's body with none", async () => {
+  it("opens an unverified skill's body with the unverified banner, and a current skill's body with none", async () => {
     const [tool] = buildSkillTools([unverified, ...skills]);
     const dusty = await tool?.call({ skill: "dusty-skill" }, {});
-    expect(dusty?.content).toContain("UNVERIFIED SKILL");
+    expect(dusty?.content).toContain("UNVERIFIED");
     const fresh = await tool?.call({ skill: "scorecard-triage" }, {});
-    expect(fresh?.content).not.toContain("SKILL:");
+    expect(fresh?.content).not.toContain("AS-OF COVERAGE");
     expect(fresh?.content).toContain("# Skill: scorecard-triage");
   });
 });

@@ -30,7 +30,6 @@ export type { SecretStore } from "./ports/secret-store.js";
 export type { OfflineTokenMinter } from "./ports/offline-token-minter.js";
 export type { TenantKeyStore } from "./ports/tenant-key-store.js";
 export type { UserProfileStore } from "./ports/user-profile-store.js";
-export type { FsFile, WorkspaceFs } from "./ports/workspace-fs.js";
 export type { WorkspaceInviteStore } from "./ports/workspace-invite-store.js";
 export type { WorkspaceSettingsStore } from "./ports/workspace-settings-store.js";
 export type { WorkspaceStore } from "./ports/workspace-store.js";
@@ -54,13 +53,12 @@ export {
   type CreateBrowserProfileInput,
   type UpdateBrowserProfileInput,
 } from "./browser-profile/browser-profile-service.js";
-export { type FsFileContent, FsService, type WriteFsFileInput } from "./fs/fs-service.js";
 export {
   type CreateSkillInput,
   SkillService,
   type SkillActor,
   type SkillServiceDeps,
-  type SkillWithFreshness,
+  type SkillWithCoverage,
   type UpdateSkillInput,
 } from "./skill/skill-service.js";
 export {
@@ -330,7 +328,7 @@ export {
 export {
   type LatestVersionResolver,
   registryLatestVersionResolver,
-  resolveFreshness,
+  resolveCoverage,
   type VersionedRegistries,
 } from "./knowledge/freshness-resolver.js";
 export {
@@ -338,6 +336,6 @@ export {
   type KnowledgeEntryActor,
   KnowledgeEntryService,
   type KnowledgeEntryServiceDeps,
-  type KnowledgeEntryWithFreshness,
+  type KnowledgeEntryWithCoverage,
   type UpdateKnowledgeEntryInput,
 } from "./knowledge/knowledge-entry-service.js";

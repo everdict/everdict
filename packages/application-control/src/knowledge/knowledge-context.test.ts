@@ -57,7 +57,7 @@ const entry = (
 describe("KnowledgeService.assembleContext", () => {
   const webAgent = { type: "harness" as const, key: "web-agent" };
 
-  it("family-matches records to anchors (version-agnostic), ranks active claims first, decorates freshness, and keeps skills listing-level", async () => {
+  it("family-matches records to anchors (version-agnostic), labels relations, decorates coverage, and keeps skills listing-level", async () => {
     const svc = new KnowledgeService({
       store: emptyGraph,
       contextSources: {
@@ -84,12 +84,36 @@ describe("KnowledgeService.assembleContext", () => {
     expect(ctx.anchors[0]?.nodeId).toBe("harness:acme:web-agent@2.3.0");
     expect(ctx.anchors[0]?.facts).toEqual([]);
 
-    expect(ctx.knowledge.map((k) => k.id)).toEqual(["live-claim", "old-deprecated"]); // active outranks deprecated
-    expect(ctx.knowledge[0]?.freshness?.state).toBe("superseded_refs"); // pinned 2.1.0, latest 2.3.0
+    expect(ctx.knowledge.map((k) => k.id)).toEqual(["live-claim", "old-deprecated"]); // same tier → active first
+    expect(ctx.knowledge[0]?.relation).toBe("earlier"); // pinned at 2.1.0 — an earlier point of the 2.3.0 anchor
+    expect(ctx.knowledge[0]?.coverage?.state).toBe("behind"); // interval ends at 2.1.0, present is 2.3.0
 
     expect(ctx.skills.map((s) => s.id)).toEqual(["triage"]);
-    expect(ctx.skills[0]?.freshness?.state).toBe("superseded_refs");
+    expect(ctx.skills[0]?.coverage?.state).toBe("behind");
     expect(JSON.stringify(ctx.skills)).not.toContain("SECRET-BODY"); // no instructions body in the context payload
+  });
+
+  it("projects onto a PAST anchor coordinate: a superseded claim covering it outranks an active claim from its future", async () => {
+    const svc = new KnowledgeService({
+      store: emptyGraph,
+      contextSources: {
+        knowledgeEntries: {
+          list: async () => [
+            // the then-truth: pinned at 2.1.0, since superseded by the fix note
+            entry("then-truth", [{ ...webAgent, version: "2.1.0" }], "superseded", "2026-07-01T00:00:00.000Z"),
+            // the fix, observed at 2.2.0 — this coordinate's FUTURE
+            entry("the-fix", [{ ...webAgent, version: "2.2.0" }], "active", "2026-07-20T00:00:00.000Z"),
+          ],
+        },
+        latestVersionOf: async () => "2.3.0",
+      },
+    });
+
+    // analyzing an old scorecard that ran harness@2.1.0 — the anchor's version IS the as-of coordinate
+    const ctx = await svc.assembleContext("acme", "alice", [{ ...webAgent, version: "2.1.0" }]);
+    expect(ctx.knowledge.map((k) => k.id)).toEqual(["then-truth", "the-fix"]);
+    expect(ctx.knowledge[0]?.relation).toBe("covers"); // superseded, but the truth AT this coordinate
+    expect(ctx.knowledge[1]?.relation).toBe("later"); // the "what happened next" trail, ranked after
   });
 
   it("returns empty lanes when no context sources are wired (graph-only deployment)", async () => {

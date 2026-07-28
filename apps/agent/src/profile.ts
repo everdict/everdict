@@ -6,7 +6,7 @@ import {
   type SecretStore,
   type SkillStore,
   firstPartyDefaults,
-  resolveFreshness,
+  resolveCoverage,
 } from "@everdict/application-control";
 import type { CapabilityRecord, CapabilityRequirement } from "@everdict/contracts";
 import { canConsumeCapability, selectDefaultCapabilities } from "@everdict/domain";
@@ -153,8 +153,8 @@ export function registryProfileResolver(opts: {
   // Which integrations the workspace has configured — gates the integration-dependent defaults. Best-effort; unset or
   // a failure ⇒ no integration defaults (the unconditional ones still apply). Wired in the integration-adapter phase.
   integrationsConfigured?: (workspace: string) => Promise<readonly CapabilityRequirement[]>;
-  // Latest-version resolution over the registries — when present, each skill carries a freshness state (the
-  // knowledge-layer staleness contract) that use_skill surfaces as a listing badge + body banner. Best-effort.
+  // Latest-version resolution over the registries — when present, each skill carries its subject-time coverage
+  // (current | behind | unverified) that use_skill surfaces as a listing badge + as-of body banner. Best-effort.
   latestVersionOf?: LatestVersionResolver;
 }): ProfileResolver {
   return async (principal) => {
@@ -164,17 +164,17 @@ export function registryProfileResolver(opts: {
     try {
       const records = await opts.skillStore.list(principal.workspace, principal.subject);
       const resolver = opts.latestVersionOf;
-      const freshness = resolver
-        ? await resolveFreshness(principal.workspace, records, resolver, new Date().toISOString())
+      const coverage = resolver
+        ? await resolveCoverage(principal.workspace, records, resolver, new Date().toISOString())
         : undefined;
       skills = records.map((s, i) => {
-        const f = freshness?.[i];
+        const c = coverage?.[i];
         return {
           name: s.name,
           description: s.description,
           instructions: s.instructions,
           files: s.files,
-          ...(f !== undefined ? { freshness: f } : {}),
+          ...(c !== undefined ? { coverage: c } : {}),
         };
       });
     } catch {

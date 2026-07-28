@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { NodeRefSchema } from "../knowledge/knowledge-node.js";
+import { KnowledgePinSchema } from "../knowledge/knowledge-node.js";
 
 // A skill's scope (workspace skill-share, mirrors the browser-profile / View visibility vocabulary). `private` = a
 // personal draft visible/manageable only by its creator; `workspace` = a shared workspace asset any member can see and
@@ -49,11 +49,12 @@ export const SkillRecordSchema = z.object({
   description: z.string(), // when-to-use / what it does — the discovery line the agent reads to decide whether to load it
   instructions: z.string(), // the SKILL.md body — the procedure, loaded into context when the agent invokes the skill
   files: SkillFilesSchema.default([]), // supporting reference files, each loaded individually on demand
-  // The version-PINNED entities this skill documents (`{type, key, version?}`), projected into the knowledge graph as
-  // `skill -[about]-> entity@version` edges. The pin is the staleness contract: when a referenced version gains an
-  // incoming `succeeds` edge (a newer version exists), the skill is mechanically flagged as potentially stale.
-  // See docs/architecture/knowledge-graph.md §Skills join the graph.
-  refs: z.array(NodeRefSchema).max(16).default([]),
+  // The entities this skill documents, pinned on the SUBJECT-TIME axis (`{type, key, version?, verifiedVersion?}` —
+  // the known-valid interval [version, verifiedVersion]), projected into the knowledge graph as
+  // `skill -[about]-> entity@version` edges carrying the interval. Coverage against the entity's present is derived
+  // by comparing its latest version to the interval end — knowledge about an earlier point stays valid ABOUT that
+  // point (a coordinate, not decay). See docs/architecture/knowledge-graph.md §The time axis.
+  refs: z.array(KnowledgePinSchema).max(16).default([]),
   // `private` = personal draft (creator-only) · `workspace` = shared asset (read/use by any member + the agent, manage creator-or-admin).
   visibility: SkillVisibilitySchema,
   createdBy: z.string(), // owner subject

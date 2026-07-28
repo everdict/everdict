@@ -101,7 +101,7 @@ export function registerSkillTools(server: McpServer, ctx: McpToolContext): void
     "verify_skill",
     {
       description:
-        "Attest a skill's procedure still matches reality — stamps verifiedAt (the freshness baseline) without counting as an edit. Use after checking a skill against the current harness/dataset versions. Manage = creator-or-admin. Requires skills:write.",
+        "Attest a skill's procedure still matches reality — EXTENDS each versioned pin's known-valid interval to the entity's current latest (verifiedVersion) plus the wall-clock verifiedAt, without counting as an edit. Use after checking a behind-flagged skill against the current versions; if the procedure has drifted, update the skill (re-pinning refs) instead. Manage = creator-or-admin. Requires skills:write.",
       inputSchema: { id: z.string() },
     },
     ({ id }) => run(principal, "skills:write", async () => ok(await skills.verify(ws, id, actor))),

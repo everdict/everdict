@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { NodeRefSchema } from "../knowledge/knowledge-node.js";
+import { KnowledgePinSchema, NodeRefSchema } from "../knowledge/knowledge-node.js";
 
 // A knowledge entry's lifecycle status. Knowledge has revision lineage like every versioned entity: a re-decision or a
 // refuting observation does not delete the old claim — a new entry `supersedes` it (the audit trail survives), and a
@@ -36,9 +36,12 @@ export const KnowledgeEntryRecordSchema = z.object({
   kind: KnowledgeEntryKindSchema,
   title: z.string().min(1).max(300), // the one-line claim itself — becomes the graph node's label
   body: z.string(), // markdown — where the claim's specificity lives (details, caveats, rationale)
-  // What the claim concerns — version-PINNED NodeRefs, projected as `about` edges. Pinning is what lets the graph's
-  // `succeeds` lineage flag an entry whose subject has moved on (same mechanism as skill staleness).
-  refs: z.array(NodeRefSchema).max(KNOWLEDGE_ENTRY_MAX_REFS).default([]),
+  // What the claim concerns — subject-time PINS ({type, key, version?, verifiedVersion?}: the known-valid interval
+  // [version, verifiedVersion]), projected as `about` edges carrying the interval. The pin's version is the point the
+  // claim was observed at; `verify` extends verifiedVersion to the entity's then-latest. A claim about an earlier
+  // point is not stale — it is knowledge ABOUT that coordinate; whether it extends to the present is a separate,
+  // recorded fact. See docs/architecture/knowledge-graph.md §The time axis.
+  refs: z.array(KnowledgePinSchema).max(KNOWLEDGE_ENTRY_MAX_REFS).default([]),
   // What backs the claim — the observations it was drawn from (a scorecard, a run, a comment thread, an agent
   // session), projected as `evidenced_by` edges. An unevidenced entry is allowed (a convention has no scorecard).
   evidence: z.array(NodeRefSchema).max(KNOWLEDGE_ENTRY_MAX_REFS).default([]),

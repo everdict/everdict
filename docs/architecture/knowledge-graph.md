@@ -198,37 +198,64 @@ Deliberately NOT in v1: per-kind structured claim schemas (that is the too-speci
 evidence is the right grain), argumentation predicates (`supports`/`contradicts` — edge `polarity` already carries
 negation; defer until needed), and embedding search (structural adjacency first — the anchors are already structured).
 
-### Skills join the graph — staleness becomes a query
+### The time axis — intervals, not decay
 
-A **Skill** ([skill.ts](../../packages/contracts/src/records/skill.ts)) is the task-oriented complement: "how do I do
-this" (a procedure bundle) vs a knowledge entry's "what is true / why we decided" (a claim). Skills decay differently —
-the harnesses/datasets they document keep versioning forward, so a skill is *inherently* a legacy risk. Two additive
-fields close this: `refs: NodeRef[]` — the version-PINNED entities the skill documents (authoring surface + agent both
-maintain it) — and `verifiedAt`. The skill harvester projects `refs` into `skill -[about]-> harness:web@2.1.0` edges,
-and then the graph's existing design pays out:
+Knowledge has COORDINATES: a **space axis** (which entity family a claim concerns — `(type, key)`) and a **time axis**
+(which point of that entity's timeline it is about — a *version* for versioned entities, a *timestamp* for continuous
+ones; assertion time — when the workspace learned it — is a third, always-wall-clock signal via
+`createdAt`/`verifiedAt`). The graph's version-pinned node id (`harness:acme:web-agent@2.1.0`) already IS that
+spacetime coordinate. Crucially, **time is a coordinate, not decay**: a claim pinned at `web-agent@2.1.0` stays true
+ABOUT 2.1.0 forever — the open question is whether its validity *extends* to a given coordinate, and that is itself a
+recorded fact.
 
-> **a skill is stale ⟺ an `about` target has an incoming `succeeds` edge** (a newer version exists)
+The pin is therefore an INTERVAL, not a point: **`KnowledgePin = NodeRef + { verifiedVersion? }`**
+([knowledge-node.ts](../../packages/contracts/src/knowledge/knowledge-node.ts)) — the known-valid interval
+`[version, verifiedVersion]`. `version` is the subject-time point the knowledge was observed at (immutable — the
+origin is history, never overwritten); `verify` EXTENDS `verifiedVersion` to each pinned family's current latest (a
+coordinate extension along subject time, plus the wall-clock `verifiedAt`; `updatedAt` untouched — verification is not
+an edit). Client edits author plain `NodeRef`s; `verifiedVersion` is system-owned and carried over server-side when
+the `(type, key, version)` triple is unchanged (a re-pin starts a fresh point interval). Closing an interval needs no
+field: a superseding entry **pinned at the version where the behavior changed** closes the old claim's interval by
+derivation — and the `supersedes` chain is the workspace's knowledge *trajectory*, not noise. The `about` edges carry
+the interval in `edgeAttrs` (`{asOf, verifiedVersion}`), so it is readable from the graph without fetching the record.
 
-No new staleness machinery — version-pinned node ids + `succeeds` lineage were already there; connecting `refs` turns
-them into a staleness detector. Surfaced at consumption time: the skill listing carries a freshness state
-(fresh / superseded-refs / unverified), and a `use_skill` result opens with a staleness banner ("references
-harness@2.1.0; latest is 2.3.0 — verify before trusting"), so the agent uses an old procedure *knowing* it is old.
-Skill selection reuses the same edges: skills `about`-adjacent to the task's anchors (the conversation's
-`AgentReference`s, the scorecard under discussion) rank up in the listing — task-appropriate selection from structural
-adjacency, no embeddings.
+Both vocabularies live in the pure kernel ([freshness.ts](../../packages/domain/src/knowledge/freshness.ts)) and are
+deliberately NOT merged — they answer different questions:
 
-### Consumption converges on `assembleContext`
+- **Coverage** (record vs the entity's PRESENT, for listings/badges): `current | behind | unverified` —
+  `assessCoverage` compares each pin's interval end against the family's latest (resolved from the registries today;
+  a graph-native `succeeds` join can back the same resolver seam later). `behind` means "as-of an earlier point;
+  validity at the present unknown" — never "wrong". A `behind` item has THREE legitimate outcomes: verify (extend),
+  supersede (close, pinned at the change point), or leave as history — a valid record, not an error to clean up.
+- **Anchor relation** (record vs an ANCHOR coordinate, for context assembly): `covers | earlier | later | general` —
+  `anchorRelation` positions the interval against a projection coordinate (below).
+
+Skills join the same model: a **Skill** ([skill.ts](../../packages/contracts/src/records/skill.ts)) is the
+task-oriented complement ("how do I do this" vs an entry's "what is true / why we decided"), its `refs` are the same
+`KnowledgePin[]`, and the skill listing/`use_skill` banner surface its coverage as *as-of coordinates*
+("documented @2.1.0, verified through 2.2.0 · current 2.3.0"), steering the agent to the three responses. Skill
+selection reuses the `about` edges: skills adjacent to the task's anchors rank up — structural adjacency, no
+embeddings.
+
+### Consumption converges on `assembleContext` — as-of projection
 
 The point of the layer is context assembly for agents — everdict's own agent, spawned teammates/subagents, and
-developers' Claude Code sessions via the plugin (MCP `get_task_context`). One service feeds all three:
+developers' Claude Code sessions via the plugin (MCP `get_task_context`). One service feeds all three, and **the
+anchor's own version IS the as-of coordinate** (no separate parameter): an unversioned anchor resolves to the family's
+latest (present-projection); analyzing a month-old scorecard, its `harness@2.1.0` anchor projects the knowledge base
+onto that point — the analysis runs on the knowledge that was valid *then*, plus the `later` trail of what happened
+next.
 
 ```
-assembleContext(anchors: NodeRef[]) →
-  1. structural facts:  relatedFacts(anchors)                     (existing)
-  2. knowledge:         entries `about` the anchors               (active first, verifiedAt-ranked)
-  3. skill candidates:  skills `about` the anchors                (with staleness state)
-  4. discussion trail:  comments `discusses`-ing the anchors      (existing edges)
+assembleContext(anchors: NodeRef[]) →                      anchor.version ?? latest = the projection coordinate
+  1. structural facts:  relatedFacts(anchors)               (graph; includes the comments' discusses trail)
+  2. knowledge:         entries family-matched to anchors,  each labeled relation ∈ covers|earlier|later|general
+  3. skill candidates:  skills  family-matched to anchors,  same labels; listing-level only (no body)
 ```
+
+Ranking is **relation > status > recency**: at a past coordinate, a SUPERSEDED claim that `covers` it is that
+coordinate's truth and outranks an `active` claim from the coordinate's future — the "old/superseded is inferior"
+assumption is removed from ranking too. Every item also carries its present-coverage state.
 
 This is the substance of "knowledge migration into everdict": the moment a developer's Claude Code pulls task context
 from the workspace graph instead of a local CLAUDE.md, the workspace — not the individual — owns the knowledge.
@@ -240,8 +267,10 @@ harvesters project `refs`), **authored** (`create_knowledge` / `update_skill` vi
 system prompt already directs it to record durable observations — promoted from `annotate` to entries; after a task
 that used a skill, the agent proposes a revision when the procedure and reality diverged — HITL via the existing edit
 path), and **extraction** (next: when a comment thread / agent session closes, an extraction agent proposes entry
-candidates, confidence < 1, promoted to authored on approval). The staleness query feeds notifications ("3 skills
-reference superseded versions"), so the improvement trigger is the graph's state, not someone's memory.
+candidates, confidence < 1, promoted to authored on approval). The coverage computation feeds a **coverage-gap
+agenda** (next): a periodic review list of the points where entity evolution outpaced knowledge coverage — NOT a
+"stale, go fix it" alarm, since each gap has three legitimate outcomes (extend / close / leave as history); the
+improvement trigger is the graph's state, not someone's memory.
 
 ## Where the code lives
 
@@ -277,8 +306,9 @@ Following everdict's one-way spine (no new package — schemas belong at the con
    evidence-backed observations as it works, so the workspace's institutional knowledge accumulates from in-product use
    too. With the knowledge layer, the prompt now steers the full loop: `get_task_context` opens an entity-anchored
    task, durable conclusions are recorded as knowledge ENTRIES (`create_knowledge_entry`, annotate demoted to margin
-   notes), and freshness is maintained in-band (`verify_skill` / `verify_knowledge_entry` when a stale-flagged item
-   still holds; a proposed revision when it drifted). An authored note is a mention resolved to its node (read back via `GET /knowledge/annotations`); an authored
+   notes), and coverage is maintained in-band (`verify_skill` / `verify_knowledge_entry` when a behind-flagged item
+   still holds — an interval extension; a superseding revision pinned at the change point when it drifted; or left as
+   a valid historical record). An authored note is a mention resolved to its node (read back via `GET /knowledge/annotations`); an authored
    relation is an edge over the closed predicate vocabulary (read back via `related`/`subgraph`), idempotent by (author,
    subject, predicate, object). The `authored` origin lets a query separate what the system DERIVED from what a person
    (or their agent) ASSERTED. Next: text EXTRACTORS for `comment` / `agent_message` / `pr_comment` (@-mention regex
@@ -298,9 +328,12 @@ Following everdict's one-way spine (no new package — schemas belong at the con
    manual reindex.
 7. **Knowledge layer (v1)** — §The knowledge layer: the `knowledge` node type + `about`/`evidenced_by` predicates,
    `KnowledgeEntryRecord` (store + CRUD + MCP parity + harvester), `SkillRecord.refs`/`verifiedAt` + the skill
-   harvester, the staleness query surfaced in the skill listing / `use_skill`, and `assembleContext` +
-   MCP `get_task_context`. Next: extraction-based entry proposals from closed comment threads / agent sessions,
-   staleness notifications, and a web Knowledge surface.
+   harvester, coverage surfaced in the skill listing / `use_skill`, and `assembleContext` + MCP `get_task_context`
+   — ✅ plus the TIME-AXIS revision (§The time axis): interval pins (`KnowledgePin.verifiedVersion`), verify as
+   coordinate extension, anchor-relative projection (`covers | earlier | later | general`) with relation-first
+   ranking, and the coverage vocabulary (`current | behind | unverified`) across every surface. Next:
+   extraction-based entry proposals from closed comment threads / agent sessions, the coverage-gap agenda, and the
+   entity-timeline web view.
 
 ## References
 

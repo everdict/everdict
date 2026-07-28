@@ -1,13 +1,15 @@
 import type { NodeRef, SkillFile } from "@everdict/contracts";
 import type { ToolDefinition, ToolResult } from "./definition.js";
 
-// The freshness state the control plane computes for a skill (the knowledge-layer staleness contract — see
-// docs/architecture/knowledge-graph.md §Skills join the graph). Carried through so the agent uses an old procedure
-// KNOWING it is old: `superseded_refs` = a version the skill documents has moved on; `unverified` = nobody has
-// confirmed the procedure recently.
-export interface SkillFreshness {
-  state: "fresh" | "superseded_refs" | "unverified";
-  staleRefs?: { ref: NodeRef; latest: string }[];
+// The subject-time coverage the control plane computes for a skill (see docs/architecture/knowledge-graph.md §The
+// time axis). Time is a coordinate, not decay: `behind` = the skill's knowledge is AS-OF earlier entity versions —
+// still true about those versions; its validity at the present is UNKNOWN (not wrong). `unverified` = nobody
+// confirmed the procedure recently on the wall clock. Carried through so the agent follows an as-of procedure
+// knowing its coordinates.
+export interface SkillCoverage {
+  state: "current" | "behind" | "unverified";
+  // Each gap names the pin whose known-valid interval [version, verifiedVersion] ends before the entity's present.
+  gaps?: { ref: NodeRef & { verifiedVersion?: string }; latest: string }[];
 }
 
 // A workspace skill made available to the agent: a name + a discovery line (description) + the full procedure (body)
@@ -20,7 +22,7 @@ export interface SkillEntry {
   description: string;
   instructions: string;
   files?: SkillFile[]; // supporting reference files (absent/empty = a body-only skill)
-  freshness?: SkillFreshness; // control-plane-computed staleness (absent = no signal, treated as fresh)
+  coverage?: SkillCoverage; // control-plane-computed subject-time coverage (absent = no signal, treated as current)
 }
 
 export const USE_SKILL_TOOL_NAME = "use_skill";
@@ -37,11 +39,12 @@ function truncate(text: string, max: number): string {
   return text.length <= max ? text : `${text.slice(0, Math.max(0, max - 1))}…`;
 }
 
-// The listing badge for a non-fresh skill — short enough to survive the budget, loud enough to steer selection.
-function freshnessBadge(skill: SkillEntry): string {
-  switch (skill.freshness?.state) {
-    case "superseded_refs":
-      return " [stale: refs superseded]";
+// The listing badge for a non-current skill — short enough to survive the budget, precise enough not to lie:
+// `behind` is an as-of marker (the skill describes earlier versions), never a "broken" flag.
+function coverageBadge(skill: SkillEntry): string {
+  switch (skill.coverage?.state) {
+    case "behind":
+      return " [as-of older versions]";
     case "unverified":
       return " [unverified]";
     default:
@@ -49,11 +52,11 @@ function freshnessBadge(skill: SkillEntry): string {
   }
 }
 
-// Render the availability listing within the budget: full → evenly-shrunk descriptions → names-only. A stale/
-// unverified skill keeps its badge in every degradation tier — the freshness signal is part of the name.
+// Render the availability listing within the budget: full → evenly-shrunk descriptions → names-only. A behind/
+// unverified skill keeps its badge in every degradation tier — the coverage signal is part of the name.
 export function renderSkillListing(skills: SkillEntry[]): string {
   const entries = skills.map((s) => ({
-    name: `${s.name}${freshnessBadge(s)}`,
+    name: `${s.name}${coverageBadge(s)}`,
     description: truncate(s.description.replace(/\s+/g, " ").trim(), MAX_LISTING_DESCRIPTION_CHARS),
   }));
   const full = entries.map((e) => `- ${e.name}: ${e.description}`).join("\n");
@@ -64,26 +67,29 @@ export function renderSkillListing(skills: SkillEntry[]): string {
   return entries.map((e) => `- ${e.name}: ${truncate(e.description, perDescription)}`).join("\n");
 }
 
-// The staleness banner a non-fresh skill's body opens with — the agent follows an old procedure KNOWING it is old,
-// and is nudged to propose a revision when procedure and reality have drifted.
-function renderFreshnessBanner(skill: SkillEntry): string | undefined {
-  const freshness = skill.freshness;
-  if (freshness === undefined || freshness.state === "fresh") return undefined;
-  if (freshness.state === "superseded_refs") {
-    const lines = (freshness.staleRefs ?? []).map(
-      (s) =>
-        `> - ${s.ref.type} ${s.ref.key}${s.ref.version !== undefined ? `@${s.ref.version}` : ""} → latest ${s.latest}`,
-    );
+// The coverage banner a non-current skill's body opens with — as-of coordinates, not a distrust warning: the
+// procedure stays true ABOUT the versions it documents; its validity at the present is unknown until confirmed.
+// The agent is steered to the three legitimate responses (extend / close / leave as history), never just "refresh".
+function renderCoverageBanner(skill: SkillEntry): string | undefined {
+  const coverage = skill.coverage;
+  if (coverage === undefined || coverage.state === "current") return undefined;
+  if (coverage.state === "behind") {
+    const lines = (coverage.gaps ?? []).map((g) => {
+      const asOf = g.ref.version !== undefined ? `documented @${g.ref.version}` : "documented (unpinned)";
+      const through = g.ref.verifiedVersion !== undefined ? `, verified through ${g.ref.verifiedVersion}` : "";
+      return `> - ${g.ref.type} ${g.ref.key}: ${asOf}${through} · current ${g.latest}`;
+    });
     return [
-      "> ⚠ STALE SKILL: it documents entity versions that have been superseded:",
+      "> ◔ AS-OF COVERAGE: this skill's knowledge is pinned to earlier versions of what it documents:",
       ...lines,
-      "> Verify each step against the newer versions before trusting it; if the procedure has drifted, propose an",
-      "> update to this skill after the task.",
+      "> It is not wrong — it describes those versions. At the current versions its validity is UNKNOWN: check the",
+      "> flagged steps as you go. If they still hold, verify the skill (extends its coverage to the present); if",
+      "> behavior changed, propose an update re-pinned at the version where it changed.",
     ].join("\n");
   }
   return [
-    "> ⚠ UNVERIFIED SKILL: nobody has recently confirmed this procedure still matches reality.",
-    "> Double-check critical steps as you follow it; verify or update the skill afterwards.",
+    "> ◔ UNVERIFIED: nobody has recently confirmed this procedure still matches reality.",
+    "> Double-check critical steps as you follow it; verify the skill if it holds, or propose the revision if not.",
   ].join("\n");
 }
 
@@ -91,7 +97,7 @@ function renderFreshnessBanner(skill: SkillEntry): string | undefined {
 // sizes only — the contents stay out of context until read_skill_file pulls one).
 function renderSkillBody(skill: SkillEntry): string {
   const files = skill.files ?? [];
-  const banner = renderFreshnessBanner(skill);
+  const banner = renderCoverageBanner(skill);
   const head = [`# Skill: ${skill.name}`, ...(banner !== undefined ? ["", banner] : []), "", skill.instructions].join(
     "\n",
   );
