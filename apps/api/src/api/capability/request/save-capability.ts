@@ -5,11 +5,26 @@ import { z } from "zod";
 // content change (name/description/spec) on an existing id patch-bumps to a NEW immutable version. `visibility` /
 // `sharedWith` are honored ONLY when creating the first version — editing inherits the current reach (change it via
 // PATCH /capabilities/:id/visibility, which gates public → admin), so a content edit never silently re-shares.
-export const SaveCapabilityBodySchema = z.object({
-  name: z.string().min(1),
-  description: z.string().min(1),
-  spec: CapabilitySpecSchema,
-  visibility: CapabilityVisibilitySchema.optional(),
-  sharedWith: z.array(z.string()).optional(),
-  tags: z.array(z.string()).optional(),
-});
+export const SaveCapabilityBodySchema = z
+  .object({
+    name: z.string().min(1),
+    description: z.string().min(1),
+    spec: CapabilitySpecSchema,
+    visibility: CapabilityVisibilitySchema.optional(),
+    sharedWith: z.array(z.string()).optional(),
+    tags: z.array(z.string()).optional(),
+  })
+  // An mcp capability needs EXACTLY ONE transport — `url` (Streamable HTTP) or `image` (containerized stdio). The
+  // contract McpToolSpec leaves both optional (a discriminatedUnion member can't be a refined ZodEffects), so the
+  // invariant is enforced here at the request boundary → 400.
+  .superRefine((body, ctx) => {
+    if (body.spec.type !== "mcp") return;
+    const hasUrl = body.spec.url !== undefined;
+    const hasImage = body.spec.image !== undefined;
+    if (hasUrl === hasImage)
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["spec"],
+        message: "an mcp capability needs exactly one transport: `url` (HTTP) or `image` (containerized stdio)",
+      });
+  });

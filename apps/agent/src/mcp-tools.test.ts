@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isBaseToolReadOnly, isDefaultBaseTool } from "./mcp-tools.js";
+import { dockerRunArgs, imageAllowed, isBaseToolReadOnly, isDefaultBaseTool } from "./mcp-tools.js";
 
 // The base control-plane surface is bridge-all: every entity's reads AND mutations reach the agent, and safety lives
 // in the layers (RBAC + the session's permission mode over the gate), not in surface shaping. These predicates are
@@ -76,5 +76,66 @@ describe("base tool default wiring", () => {
       "reindex_knowledge",
     ])
       expect(isBaseToolReadOnly(name)).toBe(false);
+  });
+});
+
+describe("dockerRunArgs — containerized stdio MCP transport", () => {
+  it("assembles `docker run --rm -i --env NAME … <image> [args]`, passing secret NAMES only (values never on argv)", () => {
+    const argv = dockerRunArgs({
+      image: "grafana/mcp-grafana",
+      args: ["-t", "stdio"],
+      env: { GRAFANA_URL: "https://g.example.com", GRAFANA_SERVICE_ACCOUNT_TOKEN: "glsa_secret" },
+    });
+    expect(argv).toEqual([
+      "run",
+      "--rm",
+      "-i",
+      "--init",
+      "--env",
+      "GRAFANA_URL",
+      "--env",
+      "GRAFANA_SERVICE_ACCOUNT_TOKEN",
+      "grafana/mcp-grafana",
+      "-t",
+      "stdio",
+    ]);
+    // The secret VALUES never appear on argv (no `NAME=value`) — they ride in the spawned docker process's env.
+    const joined = argv.join(" ");
+    expect(joined).not.toContain("glsa_secret");
+    expect(joined).not.toContain("https://g.example.com");
+  });
+
+  it("assembles a bare `docker run --rm -i --init <image>` with no secrets and no args", () => {
+    expect(dockerRunArgs({ image: "mcr.microsoft.com/playwright/mcp", args: [], env: {} })).toEqual([
+      "run",
+      "--rm",
+      "-i",
+      "--init",
+      "mcr.microsoft.com/playwright/mcp",
+    ]);
+  });
+});
+
+describe("imageAllowed — operator stdio image allowlist", () => {
+  it("permits any image when the allowlist is empty (no restriction)", () => {
+    expect(imageAllowed("grafana/mcp-grafana", [])).toBe(true);
+  });
+
+  it("matches an exact repo, with or without a tag/digest", () => {
+    const allow = ["crystaldba/postgres-mcp"];
+    expect(imageAllowed("crystaldba/postgres-mcp", allow)).toBe(true);
+    expect(imageAllowed("crystaldba/postgres-mcp:latest", allow)).toBe(true);
+    expect(imageAllowed("crystaldba/postgres-mcp@sha256:abc", allow)).toBe(true);
+    expect(imageAllowed("evil/postgres-mcp", allow)).toBe(false);
+  });
+
+  it("matches a trailing-slash repo prefix (a whole namespace)", () => {
+    const allow = ["mcr.microsoft.com/playwright/"];
+    expect(imageAllowed("mcr.microsoft.com/playwright/mcp", allow)).toBe(true);
+    expect(imageAllowed("mcr.microsoft.com/other/mcp", allow)).toBe(false);
+  });
+
+  it("refuses an image that is on no allowlist entry", () => {
+    expect(imageAllowed("attacker/backdoor", ["grafana/mcp-grafana", "crystaldba/"])).toBe(false);
   });
 });

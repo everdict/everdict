@@ -212,6 +212,94 @@ const PDF_READ: FirstPartyDefault = {
   },
 };
 
+// The fetch_url tool body. Runs as an ESM module, using ONLY the built-in fetch (no dependencies — no HTML parser),
+// so it runs on any runtime / image (same portability contract as web_search / pdf_read). Best-effort readability:
+// it strips <script>/<style>/comments, turns block-close/<br>/<li> into line breaks, removes remaining tags, and
+// decodes common HTML entities — good enough to read an article/doc page as plain text. String.raw keeps the embedded
+// escapes literal for the runtime; the body avoids backticks / `${}`.
+const FETCH_URL_CODE = String.raw`
+import { readFileSync } from "node:fs";
+const emit = (content, isError) => process.stdout.write(JSON.stringify({ content: content, isError: !!isError }));
+function decodeEntities(s) {
+  const named = { amp: "&", lt: "<", gt: ">", quot: "\"", apos: "'", nbsp: " " };
+  return s.replace(/&(#x?[0-9a-fA-F]+|[a-zA-Z]+);/g, (m, e) => {
+    if (e.charAt(0) === "#") {
+      const code = (e.charAt(1) === "x" || e.charAt(1) === "X") ? parseInt(e.slice(2), 16) : parseInt(e.slice(1), 10);
+      return Number.isFinite(code) ? String.fromCharCode(code) : m;
+    }
+    const key = e.toLowerCase();
+    return named[key] !== undefined ? named[key] : m;
+  });
+}
+function htmlToText(html) {
+  let s = html;
+  s = s.replace(/<!--[\s\S]*?-->/g, " ");
+  s = s.replace(/<(script|style|noscript|template|svg)[\s\S]*?<\/\1>/gi, " ");
+  s = s.replace(/<\/(p|div|section|article|header|footer|h[1-6]|tr|ul|ol|table|blockquote|pre)>/gi, "\n");
+  s = s.replace(/<br\s*\/?>/gi, "\n");
+  s = s.replace(/<li[^>]*>/gi, "\n- ");
+  s = s.replace(/<[^>]+>/g, " ");
+  s = decodeEntities(s);
+  s = s.replace(/[ \t\f\v]+/g, " ").replace(/ *\n */g, "\n").replace(/\n{3,}/g, "\n\n");
+  return s.trim();
+}
+await (async () => {
+  let input = {};
+  try { input = JSON.parse(readFileSync(process.argv[2], "utf8")); } catch (e) { input = {}; }
+  const url = typeof input.url === "string" ? input.url.trim() : "";
+  if (!/^https?:\/\//i.test(url)) return emit("fetch_url: an http(s) 'url' is required.", true);
+  const maxChars = Math.min(Math.max(parseInt(input.max_chars, 10) || 20000, 1000), 200000);
+  let res;
+  try {
+    res = await fetch(url, { headers: { "user-agent": "everdict-agent/1.0 (+fetch_url)", accept: "text/html,text/plain,*/*" } });
+  } catch (e) { return emit("fetch_url: fetch failed: " + (e && e.message ? e.message : String(e)), true); }
+  if (!res.ok) return emit("fetch_url: could not fetch the URL (HTTP " + res.status + ").", true);
+  const ctype = (res.headers.get("content-type") || "").toLowerCase();
+  let body;
+  try { body = await res.text(); } catch (e) { return emit("fetch_url: could not read the response body.", true); }
+  const looksHtml = ctype.indexOf("html") >= 0 || /^\s*<(!doctype|html)/i.test(body);
+  const out = looksHtml ? htmlToText(body) : body.trim();
+  if (!out) return emit("fetch_url: the page had no extractable text.", false);
+  emit(out.length > maxChars ? out.slice(0, maxChars) + "\n...[truncated]" : out, false);
+})();
+`.trim();
+
+const FETCH_URL: FirstPartyDefault = {
+  requires: null,
+  record: {
+    id: "fetch-url",
+    tenant: FIRST_PARTY_TENANT,
+    version: "1.0.0",
+    name: "fetch_url",
+    description:
+      "Fetch a web page by URL and return its readable text (HTML stripped to plain text). Use to READ a specific page " +
+      "the conversation references — the reading companion to web_search (which FINDS pages) and pdf_read (which reads PDFs).",
+    spec: {
+      type: "code",
+      language: "node",
+      code: FETCH_URL_CODE,
+      parametersSchema: {
+        type: "object",
+        properties: {
+          url: { type: "string", description: "The http(s) URL of the page to read." },
+          max_chars: { type: "number", description: "Max characters to return (1000-200000, default 20000)." },
+        },
+        required: ["url"],
+      },
+      // Not read-only: it fetches an arbitrary caller-supplied URL, so each call passes the HITL gate (an SSRF
+      // guardrail against prompt-injected fetches of internal addresses — same discipline as pdf_read).
+      isReadOnly: false,
+      requiredSecrets: [], // no key — unconditional default (works on any runtime; fetch is built in)
+      timeoutSec: 30,
+    },
+    visibility: "public",
+    sharedWith: [],
+    tags: ["fetch", "web", "read", "built-in"],
+    createdBy: "everdict",
+    createdAt: "2026-07-28T00:00:00.000Z",
+  },
+};
+
 // The scorecard-fix-PR skill body (SKILL.md-style instructions the agent loads on demand via use_skill). A SKILL —
 // not code: it orchestrates tools the agent already has (scorecard reads + the GitHub App tools), so the procedure
 // and its guardrails ARE the capability. Escaped backticks keep the markdown code spans literal inside the template.
@@ -303,10 +391,122 @@ const SCORECARD_FIX_PR: FirstPartyDefault = {
   },
 };
 
-// The first-party default toolset, in the order they are offered: web search (unconditional, key-gated) + PDF read
-// (unconditional, no key, HITL-gated) + the scorecard-fix-PR skill (github-gated — the first skill-kind default).
-// Rich integration adapters (Mattermost / GitHub / image-registry) are shipped as control-plane MCP tools, not
-// first-party capabilities (their credentials live server-side); a SKILL default orchestrates those tools instead.
+// --- First-party CATALOG (public + adoptable, but NOT auto-enabled defaults) ---
+// A curated store entry a member ADOPTS (it needs per-user config, so it isn't a default). The first containerized
+// stdio MCP capability: the official Grafana MCP server (grafana/mcp-grafana, Apache-2.0), run as
+// `docker run --rm -i --env GRAFANA_URL --env GRAFANA_SERVICE_ACCOUNT_TOKEN grafana/mcp-grafana -t stdio` (the image
+// defaults to SSE, so `-t stdio` selects stdio). The adopter binds the two env vars to their own secrets. Active only
+// when the operator has enabled stdio MCP (AGENT_MCP_ALLOW_STDIO) AND the adopter has bound both secrets.
+const GRAFANA_MCP: CapabilityRecord = {
+  id: "grafana",
+  tenant: FIRST_PARTY_TENANT,
+  version: "1.0.0",
+  name: "grafana",
+  description:
+    "Query a Grafana instance — search dashboards, run Prometheus/Loki queries, list alert rules and incidents. " +
+    "Adopt it, bind your Grafana URL + a service-account token, and the agent runs the official grafana/mcp-grafana " +
+    "server in a container. Read-only.",
+  spec: {
+    type: "mcp",
+    image: "grafana/mcp-grafana",
+    args: ["-t", "stdio"], // the image defaults to SSE mode; -t stdio selects the stdio transport
+    provides: ["search_dashboards", "query_prometheus", "query_loki_logs", "list_alert_rules", "list_incidents"],
+    requiredSecrets: [
+      {
+        name: "GRAFANA_URL",
+        description:
+          "Your Grafana base URL, e.g. https://myorg.grafana.net (bind to a workspace secret holding the URL).",
+      },
+      {
+        name: "GRAFANA_SERVICE_ACCOUNT_TOKEN",
+        description: "A Grafana service-account token (Grafana → Administration → Service accounts → Add token).",
+      },
+    ],
+    write: false,
+  },
+  visibility: "public",
+  sharedWith: [],
+  tags: ["observability", "grafana", "mcp", "built-in"],
+  createdBy: "everdict",
+  createdAt: "2026-07-28T00:00:00.000Z",
+};
+
+// The Playwright MCP server (microsoft/playwright-mcp, Apache-2.0) as a containerized stdio capability — browser
+// automation over accessibility snapshots. No secrets (it drives an ephemeral headless chromium inside the container);
+// stdio is the image's default transport, so no args. write=true because its tools (navigate/click/type) are actions,
+// not read-prefixed — the adopter opts in via enableWrite; each call is still HITL-gated by the session's permission mode.
+const PLAYWRIGHT_MCP: CapabilityRecord = {
+  id: "playwright",
+  tenant: FIRST_PARTY_TENANT,
+  version: "1.0.0",
+  name: "playwright",
+  description:
+    "Drive a real browser — navigate, click, type, and read pages via Playwright's accessibility snapshots (token-" +
+    "efficient, no screenshots). Runs the official microsoft/playwright-mcp server (headless chromium) in a container. " +
+    "Enable write at adoption to allow the navigation/interaction tools.",
+  spec: {
+    type: "mcp",
+    image: "mcr.microsoft.com/playwright/mcp",
+    args: [],
+    provides: ["browser_navigate", "browser_click", "browser_type", "browser_snapshot", "browser_take_screenshot"],
+    requiredSecrets: [],
+    write: true,
+  },
+  visibility: "public",
+  sharedWith: [],
+  tags: ["browser", "playwright", "mcp", "built-in"],
+  createdBy: "everdict",
+  createdAt: "2026-07-28T00:00:00.000Z",
+};
+
+// Postgres MCP Pro (crystaldba/postgres-mcp, MIT) as a containerized stdio capability — query + inspect a Postgres
+// database. Pinned to `--access-mode=restricted` (read-only transactions + resource caps) so an adopted DB is never
+// mutated. The adopter binds DATABASE_URI to their own connection-string secret. write=true so its query/inspect tools
+// (not read-prefixed) bridge on enableWrite — the DB stays read-only via the restricted access mode regardless.
+const POSTGRES_MCP: CapabilityRecord = {
+  id: "postgres",
+  tenant: FIRST_PARTY_TENANT,
+  version: "1.0.0",
+  name: "postgres",
+  description:
+    "Query and inspect a Postgres database (schemas, indexes, query plans, health) in READ-ONLY restricted mode. " +
+    "Runs the official crystaldba/postgres-mcp server in a container; bind your DATABASE_URI connection string.",
+  spec: {
+    type: "mcp",
+    image: "crystaldba/postgres-mcp",
+    args: ["--access-mode=restricted"], // read-only transactions + resource caps — never mutates the DB
+    provides: ["list_schemas", "list_objects", "execute_sql", "explain_query", "analyze_db_health"],
+    requiredSecrets: [
+      {
+        name: "DATABASE_URI",
+        description:
+          "Postgres connection string, e.g. postgresql://user:pass@host:5432/db (bind to a workspace secret).",
+      },
+    ],
+    write: true,
+  },
+  visibility: "public",
+  sharedWith: [],
+  tags: ["database", "postgres", "sql", "mcp", "built-in"],
+  createdBy: "everdict",
+  createdAt: "2026-07-28T00:00:00.000Z",
+};
+
+// The first-party CATALOG-only entries — public + adoptable in the store, but absent from the default-enabled set
+// (they need per-user config). Merged into listPublic alongside the defaults' records. Containerized MCP servers
+// (image transport) live here — never auto-enabled, always explicitly adopted. Self-hosted servers without an official
+// image (ClickHouse, Qdrant, Chroma, …) are left for members to self-author via the wizard's container-image transport.
+export function firstPartyCatalogExtras(): CapabilityRecord[] {
+  return [GRAFANA_MCP, PLAYWRIGHT_MCP, POSTGRES_MCP];
+}
+
+// The first-party default toolset, in the order they are offered — a web-reading trio then the skill: web search
+// (find; unconditional, key-gated) + fetch_url (read a page; unconditional, no key, HITL) + PDF read (read a PDF;
+// unconditional, no key, HITL) + the scorecard-fix-PR skill (github-gated — the first skill-kind default). All are
+// portable Everdict-authored code/skill capabilities — NOT external MCP servers: the store's `mcp` kind + the agent
+// bridge are remote-Streamable-HTTP only, so a stdio/self-hosted server (ClickHouse, Playwright, Git, …) can't be a
+// universal first-party default; those are user-registered (their own endpoint). Rich integration adapters
+// (Mattermost / GitHub / image-registry) ship as control-plane MCP tools (credentials live server-side).
 export function firstPartyDefaults(): FirstPartyDefault[] {
-  return [WEB_SEARCH, PDF_READ, SCORECARD_FIX_PR];
+  return [WEB_SEARCH, FETCH_URL, PDF_READ, SCORECARD_FIX_PR];
 }

@@ -8,6 +8,7 @@ import {
   mcpToolToDefinition,
 } from "@everdict/agent-runtime";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { isProtocolTool } from "./action-policy.js";
 import { type CodeToolRuntime, type ResolvedCodeTool, buildCodeTools } from "./code-tools.js";
@@ -48,13 +49,41 @@ export function isBaseToolReadOnly(name: string): boolean {
   return isReadOnlyToolName(name) && !MINTING_READS.has(name);
 }
 
-// A workspace-registered MCP tool server (from the workspace's AgentSpec), with its authSecret already resolved to a
-// verbatim Authorization header value. write=true → all of its tools are bridged (mutating allowed); else read-only subset.
-export interface ResolvedMcpServer {
-  name: string;
-  url: string;
-  authorization?: string; // verbatim `Authorization` header value (e.g. "Bearer …") resolved from the server's authSecret
-  write: boolean;
+// A resolved MCP tool server the agent connects to (from the workspace's AgentSpec / an adopted capability), with its
+// secrets already resolved. Two transports: `http` = a remote Streamable-HTTP endpoint (authSecret → verbatim
+// Authorization header); `stdio` = a container image the agent runs (`docker run --rm -i <image> [args]`) with the
+// bound secrets as env. write=true → all of its tools are bridged (mutating allowed); else read-only subset.
+export type ResolvedMcpServer =
+  | { kind: "http"; name: string; url: string; authorization?: string; write: boolean }
+  | { kind: "stdio"; name: string; image: string; args: string[]; env: Record<string, string>; write: boolean };
+
+// `docker run --rm -i --init [--env NAME …] <image> [args]`. `--init` runs a tiny init as PID 1 so servers that spawn
+// children (e.g. Playwright → chromium) don't leak zombies over the session. Secrets pass through with `--env NAME`
+// (no `=value` on argv, so the values never appear in `ps`/logs) — their VALUES ride in the spawned docker process's
+// env (stdioEnv below).
+export function dockerRunArgs(server: { image: string; args: string[]; env: Record<string, string> }): string[] {
+  const envFlags = Object.keys(server.env).flatMap((name) => ["--env", name]);
+  return ["run", "--rm", "-i", "--init", ...envFlags, server.image, ...server.args];
+}
+
+// The env for the spawned `docker` process: the bound secrets (referenced by `--env NAME`) + a minimal PATH/HOME so
+// the docker CLI itself resolves and runs. Nothing else from the agent's own environment is forwarded.
+function stdioEnv(secrets: Record<string, string>): Record<string, string> {
+  const env: Record<string, string> = { ...secrets };
+  if (process.env.PATH) env.PATH = process.env.PATH;
+  if (process.env.HOME) env.HOME = process.env.HOME;
+  return env;
+}
+
+// Operator image allowlist (AGENT_MCP_STDIO_ALLOWED_IMAGES) — defense-in-depth beyond the allowStdio flag: when the
+// operator pins a set of permitted images, a stdio server whose image isn't on it is refused. An empty allowlist means
+// "no restriction" (any image runs, still gated by allowStdio). Matching: exact (with/without tag/digest) OR a
+// `repo/`-style trailing-slash prefix. e.g. "grafana/" allows any grafana image; "crystaldba/postgres-mcp" is exact.
+export function imageAllowed(image: string, allow: readonly string[]): boolean {
+  if (allow.length === 0) return true;
+  const bare = image.split("@")[0] ?? image; // strip @digest
+  const repo = bare.split(":")[0] ?? bare; // strip :tag
+  return allow.some((a) => (a.endsWith("/") ? bare.startsWith(a) : a === image || a === bare || a === repo));
 }
 
 export interface ToolSession {
@@ -98,8 +127,17 @@ function makeInvoke(client: Client, prefix?: string): McpInvoke {
   };
 }
 
-export function mcpToolProvider(mcpUrl: string, codeRuntime?: CodeToolRuntime): ToolProvider {
+// opts.allowStdio — the operator opt-in (AGENT_MCP_ALLOW_STDIO) that permits containerized stdio MCP servers to spawn
+// (`docker run`). Default false → stdio servers are skipped (degrade), so process-spawning is off unless enabled.
+// opts.allowedImages — an optional operator allowlist (AGENT_MCP_STDIO_ALLOWED_IMAGES); empty = any image.
+export function mcpToolProvider(
+  mcpUrl: string,
+  codeRuntime?: CodeToolRuntime,
+  opts: { allowStdio?: boolean; allowedImages?: readonly string[] } = {},
+): ToolProvider {
   const baseUrl = new URL(mcpUrl);
+  const allowStdio = opts.allowStdio ?? false;
+  const allowedImages = opts.allowedImages ?? [];
   return async (headers, extraServers = [], skills = [], codeTools = []) => {
     const clients: Client[] = [];
     const bridged: ToolDefinition[] = [];
@@ -144,14 +182,22 @@ export function mcpToolProvider(mcpUrl: string, codeRuntime?: CodeToolRuntime): 
     // tools are NAMESPACED `mcp__<server>__<tool>` so multiple servers (and the built-in tools) can't collide, and the
     // model can see which server a tool belongs to. The invoke strips the prefix before calling the server.
     for (const server of extraServers) {
+      // Containerized stdio servers spawn a `docker run` process — only when the operator has opted in AND (if an
+      // allowlist is set) the image is on it; else skip (degrade).
+      if (server.kind === "stdio" && (!allowStdio || !imageAllowed(server.image, allowedImages))) continue;
       const client = new Client({ name: "everdict-agent", version: "0.1.0" });
       try {
-        const requestHeaders: Record<string, string> = server.authorization
-          ? { authorization: server.authorization }
-          : {};
-        const transport = new StreamableHTTPClientTransport(new URL(server.url), {
-          requestInit: { headers: requestHeaders },
-        });
+        const transport =
+          server.kind === "stdio"
+            ? new StdioClientTransport({
+                command: "docker",
+                args: dockerRunArgs(server),
+                env: stdioEnv(server.env),
+                stderr: "pipe",
+              })
+            : new StreamableHTTPClientTransport(new URL(server.url), {
+                requestInit: { headers: server.authorization ? { authorization: server.authorization } : {} },
+              });
         await client.connect(transport);
         const prefix = `mcp__${server.name.replace(/[^a-zA-Z0-9_]/g, "_")}__`;
         const listed = (await client.listTools()).tools;

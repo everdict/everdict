@@ -50,13 +50,21 @@ export type RequiredSecret = z.infer<typeof RequiredSecretSchema>;
 
 // --- the discriminated spec: a capability is exactly one of three kinds ---
 
-// mcp — a curated, managed MCP connection (the "adapter"): the store entry already knows the endpoint, which secrets
-// the adopter must supply, and what tools it provides, so a member adopts it instead of hand-typing a server URL.
+// mcp — a curated, managed MCP connection (the "adapter"): the store entry already knows how to reach the server,
+// which secrets the adopter must supply, and what tools it provides, so a member adopts it instead of hand-wiring one.
+// TWO transports: a remote Streamable-HTTP server (`url`) OR a containerized stdio server (`image`, run as
+// `docker run --rm -i <image> [args]` — isolation by construction, enabled per operator opt-in). EXACTLY ONE of
+// {url, image} — enforced at the input boundary (SaveCapabilityBodySchema.superRefine), NOT here, because a
+// discriminatedUnion member may not be a refined ZodEffects (zod v3); the runtime prefers image, else url, else skips.
+// requiredSecrets bind to the `Authorization` header (url) or to container env vars (image); the adopter maps each
+// name to one of their own secrets at adoption.
 export const McpToolSpecSchema = z.object({
   type: z.literal("mcp"),
-  url: z.string().url(), // MCP endpoint (Streamable HTTP)
+  url: z.string().url().optional(), // remote MCP endpoint (Streamable HTTP) — auth = requiredSecrets[0] → Authorization header
+  image: z.string().min(1).optional(), // container image → `docker run --rm -i <image> [args]` (MCP over stdio); requiredSecrets → --env
+  args: z.array(z.string()).default([]), // trailing args appended after the image (stdio transport only; ignored for url)
   provides: z.array(z.string()).default([]), // the tool names this server exposes (store card / discovery only)
-  requiredSecrets: z.array(RequiredSecretSchema).default([]), // secrets the adopter supplies at adoption
+  requiredSecrets: z.array(RequiredSecretSchema).default([]), // secrets the adopter supplies at adoption (header value for url; env vars for image)
   write: z.boolean().default(false), // does this server offer mutating tools (adopter still opts in per-adoption)
 });
 export type McpToolSpec = z.infer<typeof McpToolSpecSchema>;

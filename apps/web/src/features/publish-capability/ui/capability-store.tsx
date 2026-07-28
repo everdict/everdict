@@ -29,6 +29,8 @@ import type {
   CapabilitySpec,
   CapabilityType,
   CapabilityVisibility,
+  ProbeCapabilityMcpResult,
+  ValidateCapabilityResult,
 } from '@/entities/capability'
 import { fmtSubject } from '@/shared/lib/format'
 import { cn } from '@/shared/lib/utils'
@@ -53,7 +55,6 @@ import {
   probeCapabilityMcpAction,
   validateCapabilityAction,
 } from '../api/wizard-tools'
-import type { ProbeCapabilityMcpResult, ValidateCapabilityResult } from '@/entities/capability'
 
 // capability 의 필요 시크릿(채택 시 내 시크릿으로 바인딩). skill 은 없음.
 function requiredSecretsOf(c: Capability): RequiredSecret[] {
@@ -173,7 +174,8 @@ export function CapabilityStore({
     return [...filtered].sort((a, b) => {
       if (isBuiltIn(a) !== isBuiltIn(b)) return isBuiltIn(a) ? -1 : 1
       if (sort === 'name') return a.name.localeCompare(b.name)
-      if (sort === 'type') return a.spec.type.localeCompare(b.spec.type) || a.name.localeCompare(b.name)
+      if (sort === 'type')
+        return a.spec.type.localeCompare(b.spec.type) || a.name.localeCompare(b.name)
       return b.createdAt.localeCompare(a.createdAt) // recent
     })
   }, [tab, mine, publicCaps, query, typeFilter, sort])
@@ -271,7 +273,9 @@ export function CapabilityStore({
           ))}
         </div>
         <div className="ml-auto flex items-center gap-2">
-          <span className="text-[12px] text-muted-foreground">{t('resultCount', { count: list.length })}</span>
+          <span className="text-[12px] text-muted-foreground">
+            {t('resultCount', { count: list.length })}
+          </span>
           <select
             value={sort}
             onChange={(e) => setSort(e.target.value as 'recent' | 'name' | 'type')}
@@ -591,7 +595,11 @@ function CapabilityEditorDialog({
 
   // mcp
   const mcp = capability?.spec.type === 'mcp' ? capability.spec : undefined
+  // 두 transport: 원격 HTTP url(default) 또는 컨테이너 이미지(stdio). 편집 시 image 가 있으면 이미지 모드.
+  const [mcpImageMode, setMcpImageMode] = useState(!!mcp?.image)
   const [url, setUrl] = useState(mcp?.url ?? '')
+  const [image, setImage] = useState(mcp?.image ?? '')
+  const [imageArgs, setImageArgs] = useState((mcp?.args ?? []).join(' '))
   const [provides, setProvides] = useState((mcp?.provides ?? []).join(', '))
   const [mcpWrite, setMcpWrite] = useState(mcp?.write ?? false)
   // mcp 연결 테스트(probe) — 테스트 전용 토큰(미저장) + 결과(도달성 + 발견 도구, provides 자동채움).
@@ -637,9 +645,24 @@ function CapabilityEditorDialog({
   const buildSpec = (): CapabilitySpec | { error: string } => {
     const cleanSecrets = secrets.filter((s) => s.name.trim().length > 0)
     if (type === 'mcp') {
+      // Two transports — a remote HTTP url OR a container image the agent runs over stdio (`docker run -i`).
+      if (mcpImageMode) {
+        if (!image.trim()) return { error: t('imageRequired') }
+        return {
+          type: 'mcp',
+          image: image.trim(),
+          // args are whitespace-split (e.g. "-t stdio" → ["-t","stdio"]); requiredSecrets become container env vars.
+          args: imageArgs.trim() ? imageArgs.trim().split(/\s+/) : [],
+          provides: splitCsv(provides),
+          requiredSecrets: cleanSecrets,
+          write: mcpWrite,
+        }
+      }
+      if (!url.trim()) return { error: t('urlRequired') }
       return {
         type: 'mcp',
         url: url.trim(),
+        args: [],
         provides: splitCsv(provides),
         requiredSecrets: cleanSecrets,
         write: mcpWrite,
@@ -862,74 +885,127 @@ function CapabilityEditorDialog({
 
         {type === 'mcp' && (
           <>
+            {/* transport 토글 — 원격 HTTP url vs 컨테이너 이미지(stdio, `docker run -i`) */}
             <div className="space-y-1">
-              <Label htmlFor="cap-url">{t('mcpUrl')}</Label>
-              <Input
-                id="cap-url"
-                value={url}
-                onChange={(e) => setUrl(e.target.value)}
-                placeholder="https://mcp.example.com/mcp"
-                className="font-mono text-[13px]"
-              />
-            </div>
-            {/* 연결 테스트 — URL(+선택 토큰)로 test-connect 하고 도구를 발견 → provides 자동채움 */}
-            <div className="space-y-2 rounded-md border border-border bg-secondary/30 p-3">
-              <div className="flex flex-wrap items-end gap-2">
-                <div className="min-w-[10rem] flex-1 space-y-1">
-                  <Label htmlFor="cap-probe-token">{t('probeToken')}</Label>
-                  <Input
-                    id="cap-probe-token"
-                    type="password"
-                    value={probeToken}
-                    onChange={(e) => setProbeToken(e.target.value)}
-                    placeholder={t('probeTokenPlaceholder')}
-                    className="font-mono text-[12px]"
-                  />
-                </div>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  disabled={probing || url.trim().length === 0}
-                  onClick={runProbe}
-                >
-                  {probing ? <Loader2 className="animate-spin" /> : <Zap />}
-                  {t('testConnection')}
-                </Button>
-              </div>
-              <p className="text-[11.5px] text-muted-foreground">{t('probeTokenHint')}</p>
-              {probeResult && (
-                <div className="space-y-2 border-t border-border pt-2">
-                  <div
+              <Label>{t('mcpTransport')}</Label>
+              <div className="flex gap-1">
+                {([false, true] as const).map((imageMode) => (
+                  <button
+                    key={String(imageMode)}
+                    type="button"
+                    onClick={() => setMcpImageMode(imageMode)}
                     className={cn(
-                      'flex items-center gap-1.5 text-[12.5px] font-medium',
-                      probeResult.reachable ? 'text-success' : 'text-destructive'
+                      'flex-1 rounded-md px-3 py-2 text-[13px] font-medium ring-1 ring-inset transition-colors',
+                      mcpImageMode === imageMode
+                        ? 'bg-primary/10 text-primary ring-primary/30'
+                        : 'text-muted-foreground ring-border hover:bg-accent'
                     )}
                   >
-                    {probeResult.reachable ? (
-                      <CircleCheck className="size-4" />
-                    ) : (
-                      <CircleAlert className="size-4" />
-                    )}
-                    <span>{probeResult.detail}</span>
+                    {t(imageMode ? 'mcpTransportImage' : 'mcpTransportUrl')}
+                  </button>
+                ))}
+              </div>
+              <p className="text-[11.5px] text-muted-foreground">
+                {t(mcpImageMode ? 'mcpTransportImageHint' : 'mcpTransportUrlHint')}
+              </p>
+            </div>
+
+            {mcpImageMode ? (
+              <>
+                <div className="space-y-1">
+                  <Label htmlFor="cap-image">{t('mcpImage')}</Label>
+                  <Input
+                    id="cap-image"
+                    value={image}
+                    onChange={(e) => setImage(e.target.value)}
+                    placeholder="grafana/mcp-grafana"
+                    className="font-mono text-[13px]"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor="cap-args">{t('mcpArgs')}</Label>
+                  <p className="text-[12px] text-muted-foreground">{t('mcpArgsHint')}</p>
+                  <Input
+                    id="cap-args"
+                    value={imageArgs}
+                    onChange={(e) => setImageArgs(e.target.value)}
+                    placeholder="-t stdio"
+                    className="font-mono text-[13px]"
+                  />
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="space-y-1">
+                  <Label htmlFor="cap-url">{t('mcpUrl')}</Label>
+                  <Input
+                    id="cap-url"
+                    value={url}
+                    onChange={(e) => setUrl(e.target.value)}
+                    placeholder="https://mcp.example.com/mcp"
+                    className="font-mono text-[13px]"
+                  />
+                </div>
+                {/* 연결 테스트 — URL(+선택 토큰)로 test-connect 하고 도구를 발견 → provides 자동채움 */}
+                <div className="space-y-2 rounded-md border border-border bg-secondary/30 p-3">
+                  <div className="flex flex-wrap items-end gap-2">
+                    <div className="min-w-[10rem] flex-1 space-y-1">
+                      <Label htmlFor="cap-probe-token">{t('probeToken')}</Label>
+                      <Input
+                        id="cap-probe-token"
+                        type="password"
+                        value={probeToken}
+                        onChange={(e) => setProbeToken(e.target.value)}
+                        placeholder={t('probeTokenPlaceholder')}
+                        className="font-mono text-[12px]"
+                      />
+                    </div>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      disabled={probing || url.trim().length === 0}
+                      onClick={runProbe}
+                    >
+                      {probing ? <Loader2 className="animate-spin" /> : <Zap />}
+                      {t('testConnection')}
+                    </Button>
                   </div>
-                  {probeResult.tools.length > 0 && (
-                    <>
-                      <div className="flex flex-wrap gap-1">
-                        {probeResult.tools.map((tool) => (
-                          <Badge key={tool.name} tone="neutral" title={tool.description}>
-                            {tool.name}
-                          </Badge>
-                        ))}
+                  <p className="text-[11.5px] text-muted-foreground">{t('probeTokenHint')}</p>
+                  {probeResult && (
+                    <div className="space-y-2 border-t border-border pt-2">
+                      <div
+                        className={cn(
+                          'flex items-center gap-1.5 text-[12.5px] font-medium',
+                          probeResult.reachable ? 'text-success' : 'text-destructive'
+                        )}
+                      >
+                        {probeResult.reachable ? (
+                          <CircleCheck className="size-4" />
+                        ) : (
+                          <CircleAlert className="size-4" />
+                        )}
+                        <span>{probeResult.detail}</span>
                       </div>
-                      <Button variant="ghost" size="sm" onClick={fillProvides}>
-                        <Check />
-                        {t('fillProvides')}
-                      </Button>
-                    </>
+                      {probeResult.tools.length > 0 && (
+                        <>
+                          <div className="flex flex-wrap gap-1">
+                            {probeResult.tools.map((tool) => (
+                              <Badge key={tool.name} tone="neutral" title={tool.description}>
+                                {tool.name}
+                              </Badge>
+                            ))}
+                          </div>
+                          <Button variant="ghost" size="sm" onClick={fillProvides}>
+                            <Check />
+                            {t('fillProvides')}
+                          </Button>
+                        </>
+                      )}
+                    </div>
                   )}
                 </div>
-              )}
-            </div>
+              </>
+            )}
             <div className="space-y-1">
               <Label htmlFor="cap-provides">{t('provides')}</Label>
               <p className="text-[12px] text-muted-foreground">{t('providesHint')}</p>
@@ -1211,9 +1287,14 @@ function CapabilityEditorDialog({
                 <CircleCheck className="size-4" />
                 <span>
                   {validateResult.willCreate
-                    ? t(validateResult.existingVersions.length === 0 ? 'validateNew' : 'validateNewVersion', {
-                        version: validateResult.version,
-                      })
+                    ? t(
+                        validateResult.existingVersions.length === 0
+                          ? 'validateNew'
+                          : 'validateNewVersion',
+                        {
+                          version: validateResult.version,
+                        }
+                      )
                     : t('validateNoop', { version: validateResult.version })}
                 </span>
               </div>
@@ -1422,8 +1503,12 @@ function CapabilityDetail({ capability }: { capability: Capability }) {
       {s.type === 'mcp' && (
         <>
           <div className="space-y-0.5">
-            <p className="text-[11px] font-[510] text-muted-foreground">{t('mcpUrl')}</p>
-            <code className="block break-all font-mono text-foreground">{s.url}</code>
+            <p className="text-[11px] font-[510] text-muted-foreground">
+              {t(s.image ? 'mcpImage' : 'mcpUrl')}
+            </p>
+            <code className="block break-all font-mono text-foreground">
+              {s.image ? `${s.image}${s.args.length > 0 ? ` ${s.args.join(' ')}` : ''}` : s.url}
+            </code>
           </div>
           {s.provides.length > 0 && (
             <div className="flex flex-wrap gap-1">

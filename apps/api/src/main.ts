@@ -1,7 +1,7 @@
 import { KnowledgeService } from "@everdict/application-control";
 import { ProxyService } from "@everdict/application-control";
 import { SkillService } from "@everdict/application-control";
-import { CapabilityService, firstPartyDefaults } from "@everdict/application-control";
+import { CapabilityService, firstPartyCatalogExtras, firstPartyDefaults } from "@everdict/application-control";
 import { perTenantTrustZones } from "@everdict/domain";
 import type { BrowserSessionProvisioner } from "./common/browser-session-provisioner.js";
 import { CaseRecorder } from "./common/case-recorder.js";
@@ -466,7 +466,7 @@ async function main(): Promise<void> {
       store: capabilityStore,
       registryCoordinates: (workspace) => imageRegistryService.coordinates(workspace),
       allowMemberPublicPublish,
-      firstPartyCatalog: () => firstPartyDefaults().map((d) => d.record),
+      firstPartyCatalog: () => [...firstPartyDefaults().map((d) => d.record), ...firstPartyCatalogExtras()],
     }),
     // Instance policy surfaced to the web (GET /me → config): does a plain member — not only an admin — get to
     // publish a capability to the instance-wide `public` catalog? Operator opt-in for a community-style deployment.

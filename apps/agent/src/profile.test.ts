@@ -114,7 +114,7 @@ describe("registryProfileResolver", () => {
     expect(profile.mcpServers).toEqual([]);
     expect(profile.skills).toEqual([]);
     // pdf_read is unconditional (no key); web_search needs a key (absent here) → omitted.
-    expect(profile.codeTools.map((t) => t.name)).toEqual(["pdf_read"]);
+    expect(profile.codeTools.map((t) => t.name)).toEqual(["fetch_url", "pdf_read"]);
   });
 
   it("loads the workspace's skills into the profile (even with no agent registered) and notes them in the prompt", async () => {
@@ -147,7 +147,7 @@ describe("registryProfileResolver", () => {
       secretStore({ MCP_KEY: "Bearer sk-123" }),
     )(principal);
     expect(profile.mcpServers).toEqual([
-      { name: "tools", url: "https://mcp.example.com/mcp", authorization: "Bearer sk-123", write: false },
+      { kind: "http", name: "tools", url: "https://mcp.example.com/mcp", authorization: "Bearer sk-123", write: false },
     ]);
   });
 
@@ -157,8 +157,12 @@ describe("registryProfileResolver", () => {
         mcpServers: [{ name: "tools", url: "https://mcp.example.com/mcp", authSecret: "MISSING", write: false }],
       }),
     )(principal);
-    expect(profile.mcpServers[0]).toEqual({ name: "tools", url: "https://mcp.example.com/mcp", write: false });
-    expect(profile.mcpServers[0]?.authorization).toBeUndefined();
+    expect(profile.mcpServers[0]).toEqual({
+      kind: "http",
+      name: "tools",
+      url: "https://mcp.example.com/mcp",
+      write: false,
+    }); // no `authorization` key → the missing secret left it unset
   });
 
   it("notes the write-tool caveat in the prompt when a server is write-allowed", async () => {
@@ -179,6 +183,7 @@ describe("registryProfileResolver", () => {
       {
         type: "mcp",
         url: "https://cap.example.com/mcp",
+        args: [],
         provides: ["do_thing"],
         requiredSecrets: [{ name: "API_KEY", description: "the key" }],
         write: true,
@@ -192,12 +197,81 @@ describe("registryProfileResolver", () => {
       capabilityStore([cap]),
     )(principal);
     expect(profile.mcpServers).toEqual([
-      { name: "shared-tools", url: "https://cap.example.com/mcp", authorization: "Bearer cap-1", write: true },
+      {
+        kind: "http",
+        name: "shared-tools",
+        url: "https://cap.example.com/mcp",
+        authorization: "Bearer cap-1",
+        write: true,
+      },
     ]);
   });
 
+  it("resolves an adopted containerized (image) mcp capability into a stdio server, binding secrets to env", async () => {
+    const cap = capRecord(
+      {
+        type: "mcp",
+        image: "grafana/mcp-grafana",
+        args: ["-t", "stdio"],
+        provides: ["search_dashboards"],
+        requiredSecrets: [
+          { name: "GRAFANA_URL", description: "url" },
+          { name: "GRAFANA_SERVICE_ACCOUNT_TOKEN", description: "token" },
+        ],
+        write: false,
+      },
+      { name: "grafana" },
+    );
+    const profile = await resolver(
+      spec({
+        capabilities: [capRef({ secretBindings: { GRAFANA_URL: "gf_url", GRAFANA_SERVICE_ACCOUNT_TOKEN: "gf_tok" } })],
+      }),
+      secretStore({ gf_url: "https://grafana.example.com", gf_tok: "glsa_abc" }),
+      skillStore(),
+      capabilityStore([cap]),
+    )(principal);
+    expect(profile.mcpServers).toEqual([
+      {
+        kind: "stdio",
+        name: "grafana",
+        image: "grafana/mcp-grafana",
+        args: ["-t", "stdio"],
+        env: { GRAFANA_URL: "https://grafana.example.com", GRAFANA_SERVICE_ACCOUNT_TOKEN: "glsa_abc" },
+        write: false,
+      },
+    ]);
+  });
+
+  it("skips an image mcp capability when a required secret is unbound (unconfigured → not offered)", async () => {
+    const cap = capRecord(
+      {
+        type: "mcp",
+        image: "grafana/mcp-grafana",
+        args: [],
+        provides: [],
+        requiredSecrets: [{ name: "GRAFANA_URL", description: "url" }],
+        write: false,
+      },
+      { name: "grafana" },
+    );
+    const profile = await resolver(
+      spec({ capabilities: [capRef({ secretBindings: {} })] }), // GRAFANA_URL not bound
+      secretStore({}),
+      skillStore(),
+      capabilityStore([cap]),
+    )(principal);
+    expect(profile.mcpServers).toEqual([]);
+  });
+
   it("does not enable write on an mcp capability unless the adopter opts in", async () => {
-    const cap = capRecord({ type: "mcp", url: "https://c/mcp", provides: [], requiredSecrets: [], write: true });
+    const cap = capRecord({
+      type: "mcp",
+      url: "https://c/mcp",
+      args: [],
+      provides: [],
+      requiredSecrets: [],
+      write: true,
+    });
     const profile = await resolver(
       spec({ capabilities: [capRef({ enableWrite: false })] }),
       secretStore({}),
@@ -226,7 +300,7 @@ describe("registryProfileResolver", () => {
 
   it("skips a cross-tenant capability the consumer may not see (best-effort, turn survives)", async () => {
     const foreignPrivate = capRecord(
-      { type: "mcp", url: "https://x/mcp", provides: [], requiredSecrets: [], write: false },
+      { type: "mcp", url: "https://x/mcp", args: [], provides: [], requiredSecrets: [], write: false },
       { tenant: "beta", visibility: "private", createdBy: "someone" },
     );
     const profile = await resolver(
@@ -247,7 +321,7 @@ describe("registryProfileResolver", () => {
     )(principal);
     expect(profile.mcpServers).toEqual([]);
     expect(profile.skills).toEqual([]);
-    expect(profile.codeTools.map((t) => t.name)).toEqual(["pdf_read"]); // pin skipped; only the built-in default remains
+    expect(profile.codeTools.map((t) => t.name)).toEqual(["fetch_url", "pdf_read"]); // pin skipped; only the built-in defaults remain
   });
 
   it("resolves an adopted code capability into a runnable code tool (env bound, sandbox flag from source)", async () => {
@@ -314,7 +388,7 @@ describe("registryProfileResolver", () => {
     // No GitHub App installed → the gated default stays off (unconditional defaults are unaffected).
     const without = await resolver(undefined)(principal);
     expect(without.skills.some((s) => s.name === "scorecard_fix_pr")).toBe(false);
-    expect(without.codeTools.map((t) => t.name)).toEqual(["pdf_read"]);
+    expect(without.codeTools.map((t) => t.name)).toEqual(["fetch_url", "pdf_read"]);
   });
 
   it("a workspace-authored skill of the same name shadows the built-in skill default", async () => {

@@ -87,11 +87,22 @@ type CapabilityVisibility =
 
 interface McpToolSpec {           // a curated, managed MCP connection (the "adapter")
   type: 'mcp'
-  url: string                      // MCP endpoint (Streamable HTTP)
+  // EXACTLY ONE transport (enforced at the save boundary — SaveCapabilityBodySchema — since a discriminatedUnion
+  // member can't be a refined ZodEffects). url = a remote server; image = a container Everdict runs over stdio.
+  url?: string                     // remote MCP endpoint (Streamable HTTP); auth = requiredSecrets[0] → Authorization
+  image?: string                   // container image → `docker run --rm -i <image> [args]` (MCP over stdio); requiredSecrets → --env
+  args?: string[]                  // trailing args after the image (stdio only) — e.g. ["-t","stdio"] for grafana/mcp-grafana
   provides?: string[]              // the tool names this server exposes (for the store card; discovery only)
   requiredSecrets: { name: string; description: string }[]  // secrets the ADOPTER must supply (declared, never valued)
   write: boolean                   // does this server offer mutating tools (adopter still opts in per-adoption)
 }
+// Containerized stdio servers are ISOLATED by construction (the container is the sandbox — matching the code-tool
+// sandbox discipline and the Docker MCP Catalog distribution) and are OPERATOR-GATED: the agent spawns `docker run`
+// only when AGENT_MCP_ALLOW_STDIO is set (default off), and — if AGENT_MCP_STDIO_ALLOWED_IMAGES pins a set — only for
+// images on that allowlist; otherwise the capability is skipped (degrade, never fail). Curated
+// image-transport servers are seeded in `firstPartyCatalogExtras()` (public + adoptable, NOT default-enabled) —
+// e.g. the Grafana MCP server (grafana/mcp-grafana). Self-hosted stdio servers (ClickHouse, Playwright, Qdrant, …)
+// are the reason for this transport: they have no universal HTTP endpoint, so `url` alone couldn't publish them.
 
 interface CodeToolSpec {          // a python/node function Everdict runs and bridges as a callable tool
   type: 'code'
@@ -193,9 +204,13 @@ store.
 `apps/agent/src/mcp-tools.ts` builds the `ToolRegistry`; each resolved capability becomes one or more
 `ToolDefinition`s:
 
-- **`mcp`** — resolve each `secretBindings` value → workspace SecretStore value → `Authorization` header; connect via
-  Streamable HTTP; bridge with `mcpToolToDefinition`, namespaced `mcp__<name>__<tool>`, write-filtered by
-  `enableWrite`. **Identical to the current bridge** — zero new runtime code.
+- **`mcp`** — two transports resolved in `profile.ts` to a `ResolvedMcpServer` union. **http** (`url`): each
+  `secretBindings` value → workspace SecretStore value → `Authorization` header; connect via Streamable HTTP.
+  **stdio** (`image`): each `requiredSecrets` → the adopter's bound secret value → a container env var; the agent
+  connects via `StdioClientTransport` running `docker run --rm -i --env NAME … <image> [args]` (secret VALUES ride in
+  the spawned process's env, only `--env NAME` on argv — no `ps`/log leak). Both bridge with `mcpToolToDefinition`,
+  namespaced `mcp__<name>__<tool>`, write-filtered by `enableWrite`. stdio is skipped unless `AGENT_MCP_ALLOW_STDIO`
+  is set, and skipped when a required secret is unbound.
 - **`skill`** — feed `{name, description, instructions, files}` into the existing `buildSkillTools` → the `use_skill`
   (+ `read_skill_file` when files exist) tools. **Zero new runtime code.**
 - **`code`** — NEW. Register a `ToolDefinition` (`name` from the capability, `parametersJsonSchema` = the spec's

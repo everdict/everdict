@@ -45,6 +45,14 @@ const ConfigSchema = z.object({
   AGENT_LLM_API_KEY: z.string().optional(),
   AGENT_LLM_MODEL: z.string().optional(),
   AGENT_MAX_TURNS: z.coerce.number().int().positive().optional(),
+  // Operator opt-in for containerized stdio MCP servers (Capability Store `mcp` capabilities that declare an `image`).
+  // "1"/"true" → the agent may spawn `docker run --rm -i <image>` for an adopted stdio server; anything else (default)
+  // → those capabilities are skipped. Requires Docker where the agent runs. Off by default (no process-spawning).
+  AGENT_MCP_ALLOW_STDIO: z.string().optional(),
+  // Optional operator allowlist for stdio MCP images (space/comma-separated) — defense-in-depth beyond ALLOW_STDIO.
+  // e.g. "grafana/mcp-grafana crystaldba/postgres-mcp mcr.microsoft.com/playwright/" — a trailing "/" is a repo prefix.
+  // Unset/empty → no restriction (any image, still gated by ALLOW_STDIO).
+  AGENT_MCP_STDIO_ALLOWED_IMAGES: z.string().optional(),
 });
 
 export interface AgentConfig extends z.infer<typeof ConfigSchema> {

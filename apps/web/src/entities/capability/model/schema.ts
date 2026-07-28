@@ -19,9 +19,12 @@ export type CapabilityType = z.infer<typeof capabilityTypeSchema>
 const requiredSecretSchema = z.object({ name: z.string(), description: z.string() })
 
 // 판별자 spec — 한 capability 는 정확히 세 종류 중 하나.
+// mcp — 두 transport: 원격 HTTP(`url`) 또는 컨테이너 stdio(`image`, `docker run -i`). 정확히 하나(계약 저장 경계에서 강제).
 const mcpToolSpecSchema = z.object({
   type: z.literal('mcp'),
-  url: z.string(),
+  url: z.string().optional(),
+  image: z.string().optional(),
+  args: z.array(z.string()),
   provides: z.array(z.string()),
   requiredSecrets: z.array(requiredSecretSchema),
   write: z.boolean(),

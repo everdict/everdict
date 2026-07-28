@@ -1,6 +1,6 @@
 import { CapabilityRecordSchema, FIRST_PARTY_TENANT } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
-import { WEBSEARCH_SECRET_NAME, firstPartyDefaults } from "./first-party.js";
+import { WEBSEARCH_SECRET_NAME, firstPartyCatalogExtras, firstPartyDefaults } from "./first-party.js";
 
 describe("firstPartyDefaults", () => {
   const defaults = firstPartyDefaults();
@@ -23,6 +23,17 @@ describe("firstPartyDefaults", () => {
     if (web.record.spec.type !== "code") return;
     expect(web.record.spec.requiredSecrets.map((s) => s.name)).toContain(WEBSEARCH_SECRET_NAME);
     expect(web.record.spec.isReadOnly).toBe(true);
+  });
+
+  it("ships a fetch_url code tool that needs no secret and is HITL-gated (arbitrary-URL fetch)", () => {
+    const fetchUrl = defaults.find((d) => d.record.id === "fetch-url");
+    expect(fetchUrl).toBeDefined();
+    if (!fetchUrl) return;
+    expect(fetchUrl.requires).toBeNull(); // unconditional
+    expect(fetchUrl.record.spec.type).toBe("code");
+    if (fetchUrl.record.spec.type !== "code") return;
+    expect(fetchUrl.record.spec.requiredSecrets).toEqual([]); // no key → always offered
+    expect(fetchUrl.record.spec.isReadOnly).toBe(false); // arbitrary URL fetch → HITL-gated (SSRF guardrail)
   });
 
   it("ships the scorecard-fix-PR skill, gated on the GitHub integration (the first skill-kind default)", () => {
@@ -55,5 +66,54 @@ describe("firstPartyDefaults", () => {
     if (pdf.record.spec.type !== "code") return;
     expect(pdf.record.spec.requiredSecrets).toEqual([]); // no key → always offered
     expect(pdf.record.spec.isReadOnly).toBe(false); // arbitrary URL fetch → HITL-gated
+  });
+});
+
+describe("firstPartyCatalogExtras", () => {
+  const extras = firstPartyCatalogExtras();
+
+  it("every catalog entry is a valid, first-party, public CapabilityRecord that is NOT a default (adopt-only)", () => {
+    const defaultIds = new Set(firstPartyDefaults().map((d) => d.record.id));
+    for (const rec of extras) {
+      const parsed = CapabilityRecordSchema.parse(rec); // throws on any drift from the contract
+      expect(parsed.tenant).toBe(FIRST_PARTY_TENANT);
+      expect(parsed.visibility).toBe("public"); // browsable/adoptable in the store
+      expect(defaultIds.has(parsed.id)).toBe(false); // catalog-only — never auto-enabled
+    }
+  });
+
+  it("seeds containerized (image-transport) MCP servers — every one declares an image and no url", () => {
+    for (const id of ["grafana", "playwright", "postgres"]) {
+      const rec = extras.find((r) => r.id === id);
+      expect(rec, id).toBeDefined();
+      if (!rec || rec.spec.type !== "mcp") continue;
+      expect(rec.spec.image, id).toBeTruthy(); // container-image transport
+      expect(rec.spec.url, id).toBeUndefined(); // NOT an HTTP server
+    }
+  });
+
+  it("ships the Grafana MCP server with the two Grafana env secrets and the -t stdio arg", () => {
+    const grafana = extras.find((r) => r.id === "grafana");
+    if (!grafana || grafana.spec.type !== "mcp") throw new Error("grafana seed missing");
+    expect(grafana.spec.image).toBe("grafana/mcp-grafana");
+    expect(grafana.spec.args).toEqual(["-t", "stdio"]); // the image defaults to SSE; -t stdio selects stdio
+    expect(grafana.spec.requiredSecrets.map((s) => s.name)).toEqual(["GRAFANA_URL", "GRAFANA_SERVICE_ACCOUNT_TOKEN"]);
+    expect(grafana.spec.write).toBe(false);
+  });
+
+  it("pins Postgres MCP Pro to read-only restricted access mode and binds DATABASE_URI", () => {
+    const pg = extras.find((r) => r.id === "postgres");
+    if (!pg || pg.spec.type !== "mcp") throw new Error("postgres seed missing");
+    expect(pg.spec.image).toBe("crystaldba/postgres-mcp");
+    expect(pg.spec.args).toContain("--access-mode=restricted"); // never mutates the DB
+    expect(pg.spec.requiredSecrets.map((s) => s.name)).toEqual(["DATABASE_URI"]);
+  });
+
+  it("ships Playwright as a no-secret browser server (write-capable, adopter opts in)", () => {
+    const pw = extras.find((r) => r.id === "playwright");
+    if (!pw || pw.spec.type !== "mcp") throw new Error("playwright seed missing");
+    expect(pw.spec.image).toBe("mcr.microsoft.com/playwright/mcp");
+    expect(pw.spec.requiredSecrets).toEqual([]); // no credentials — ephemeral headless chromium
+    expect(pw.spec.write).toBe(true); // navigate/click/type are actions → bridged only on enableWrite
   });
 });

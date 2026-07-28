@@ -109,10 +109,12 @@ function applyFirstPartyDefaults(
         sandbox: false, // first-party = trusted → runs on any runtime, including the host LocalDriver
       });
     } else if (spec.type === "mcp") {
+      if (!spec.url) continue; // first-party mcp DEFAULTS are HTTP-url only (image/stdio servers are catalog-adopt, never defaults)
       const authName = spec.requiredSecrets[0]?.name;
       const authorization = authName ? resolveDefaultSecret(authName) : undefined;
       if (spec.requiredSecrets.length > 0 && authorization === undefined) continue; // unconfigured → not offered
       acc.mcpServers.push({
+        kind: "http",
         name: def.record.name,
         url: spec.url,
         ...(authorization ? { authorization } : {}),
@@ -199,7 +201,14 @@ export function registryProfileResolver(opts: {
     if (spec) {
       for (const s of spec.mcpServers) {
         const authorization = resolveSecret(s.authSecret); // verbatim header value (e.g. "Bearer …") — same discipline as trace sources
-        mcpServers.push({ name: s.name, url: s.url, ...(authorization ? { authorization } : {}), write: s.write });
+        // The raw escape hatch is HTTP-only (stdio is reachable via the curated capability path below).
+        mcpServers.push({
+          kind: "http",
+          name: s.name,
+          url: s.url,
+          ...(authorization ? { authorization } : {}),
+          write: s.write,
+        });
       }
 
       // Adopted Store capabilities — immutable-version references resolved cross-tenant, with visibility re-checked at
@@ -216,16 +225,36 @@ export function registryProfileResolver(opts: {
         if (!canConsumeCapability(record, { tenant: principal.workspace, subject: principal.subject })) continue; // access revoked → skip
         const capSpec = record.spec;
         if (capSpec.type === "mcp") {
-          // Convention: the first declared required secret is the server's `Authorization` value; the adopter maps its
-          // NAME to one of their own workspace/personal secrets via ref.secretBindings.
-          const authName = capSpec.requiredSecrets[0]?.name;
-          const authorization = resolveSecret(authName ? ref.secretBindings[authName] : undefined);
-          mcpServers.push({
-            name: record.name,
-            url: capSpec.url,
-            ...(authorization ? { authorization } : {}),
-            write: capSpec.write && ref.enableWrite, // adopter opt-in AND the server offers write tools
-          });
+          const write = capSpec.write && ref.enableWrite; // adopter opt-in AND the server offers write tools
+          if (capSpec.image) {
+            // Containerized stdio server: bind each required secret to the adopter's own secret VALUE → a container
+            // env var. Skip if a required secret is unbound (unconfigured → not offered, mirroring the code-tool path).
+            const env: Record<string, string> = {};
+            let unbound = false;
+            for (const rs of capSpec.requiredSecrets) {
+              const value = resolveSecret(ref.secretBindings[rs.name]);
+              if (value === undefined) {
+                unbound = true;
+                break;
+              }
+              env[rs.name] = value;
+            }
+            if (unbound) continue;
+            mcpServers.push({ kind: "stdio", name: record.name, image: capSpec.image, args: capSpec.args, env, write });
+          } else if (capSpec.url) {
+            // Remote HTTP server: the first declared required secret is the `Authorization` value; the adopter maps
+            // its NAME to one of their own workspace/personal secrets via ref.secretBindings.
+            const authName = capSpec.requiredSecrets[0]?.name;
+            const authorization = resolveSecret(authName ? ref.secretBindings[authName] : undefined);
+            mcpServers.push({
+              kind: "http",
+              name: record.name,
+              url: capSpec.url,
+              ...(authorization ? { authorization } : {}),
+              write,
+            });
+          }
+          // neither image nor url → an invalid mcp spec (rejected at the save boundary); skip defensively.
         } else if (capSpec.type === "skill") {
           if (!skills.some((s) => s.name === record.name))
             skills.push({

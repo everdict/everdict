@@ -132,7 +132,12 @@ async function main(): Promise<void> {
     ...(config.CONTROL_PLANE_INTERNAL_TOKEN !== undefined
       ? { reportUsage: usageReporter(config.CONTROL_PLANE_URL, config.CONTROL_PLANE_INTERNAL_TOKEN) }
       : {}),
-    toolProvider: mcpToolProvider(config.mcpUrl, codeRuntime),
+    // allowStdio (AGENT_MCP_ALLOW_STDIO): permit adopted containerized stdio MCP servers to spawn `docker run`. Off by
+    // default. allowedImages (AGENT_MCP_STDIO_ALLOWED_IMAGES): optional operator image allowlist (space/comma-separated).
+    toolProvider: mcpToolProvider(config.mcpUrl, codeRuntime, {
+      allowStdio: config.AGENT_MCP_ALLOW_STDIO === "1" || config.AGENT_MCP_ALLOW_STDIO === "true",
+      allowedImages: (config.AGENT_MCP_STDIO_ALLOWED_IMAGES ?? "").split(/[\s,]+/).filter(Boolean),
+    }),
     systemPrompt: EVERDICT_AGENT_SYSTEM_PROMPT,
     // Web links for the environment block — entity deep links + the desktop download page (see buildEnvironmentSection).
     webBaseUrl: config.WEB_BASE_URL,
