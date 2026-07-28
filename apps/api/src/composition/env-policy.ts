@@ -32,9 +32,7 @@ export async function workspaceFsFromEnv(): Promise<S3WorkspaceFs | undefined> {
     accessKeyId,
     secretAccessKey,
     ...(process.env.EVERDICT_S3_REGION ? { region: process.env.EVERDICT_S3_REGION } : {}),
-    ...(process.env.EVERDICT_S3_FS_BUCKET_PREFIX
-      ? { bucketPrefix: process.env.EVERDICT_S3_FS_BUCKET_PREFIX }
-      : {}),
+    ...(process.env.EVERDICT_S3_FS_BUCKET_PREFIX ? { bucketPrefix: process.env.EVERDICT_S3_FS_BUCKET_PREFIX } : {}),
   });
 }
 

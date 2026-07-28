@@ -30,10 +30,16 @@ move(tenant, from, to) → FsEntry            // file rename or whole-subtree mo
 - **Isolation lives INSIDE the adapters, never in caller discipline.** Every operation funnels
   through `normalizeFsPath` (`@everdict/contracts` `records/workspace-file.ts`) — traversal (`..`)
   and unsafe characters are rejected, paths canonicalize to `"" | "a/b/c"` — and the tenant slug
-  (same strict charset) becomes an inescapable key prefix.
-- **S3WorkspaceFs** — the distributed backend (`fs/<tenant>/<path>`, dir markers `fs/<tenant>/<dir>/`);
-  every control-plane replica sees one tree. Same `EVERDICT_S3_*` env as the artifact store
-  (optional `EVERDICT_S3_FS_BUCKET` override); SDK failures remap to `UpstreamError`.
+  (same strict charset) selects the tenant's own storage namespace.
+- **S3WorkspaceFs** — the distributed backend, **one MinIO/S3 bucket per tenant**: the bucket IS the
+  isolation boundary (per-tenant credentials, quotas and lifecycle policies attach at the storage
+  layer; dropping a workspace's data = dropping its bucket). Bucket names come from `fsBucketFor` —
+  `<prefix>-<sanitized-tenant>-<sha256:8>` (default prefix `everdict-fs`, override
+  `EVERDICT_S3_FS_BUCKET_PREFIX`): the readable head is for operators, the hash tail guarantees
+  distinct tenants ("Acme" vs "acme", "a.b" vs "a-b") never collide onto one bucket. Buckets are
+  created lazily on a tenant's first touch (HeadBucket → CreateBucket, per-process cached). Inside a
+  bucket, keys ARE the canonical paths (empty-dir markers `<dir>/`). Same `EVERDICT_S3_*`
+  endpoint/credentials as the artifact store; SDK failures remap to `UpstreamError`.
 - **InMemoryWorkspaceFs** — dev/test, mirrors the exact semantics (per-process, not persisted).
 - The file/dir axis stays consistent everywhere: no file over a dir, no children under a file —
   every surface can render one coherent tree.
@@ -46,11 +52,16 @@ move(tenant, from, to) → FsEntry            // file rename or whole-subtree mo
 | --- | --- |
 | HTTP (`apps/api` `api/fs/`) | `GET /fs/entries` · `GET/PUT /fs/file` · `POST /fs/directories` · `POST /fs/move` · `DELETE /fs/entry` — thin routes over `FsService` (application-control): utf8-vs-base64 shaping on read, strict base64 decode on write, miss → 404. |
 | MCP (parity) | `list_files` / `get_file` (read-classified by prefix) · `write_file` / `make_directory` / `move_file` / `delete_file` (permission-gated; `delete_` is additionally guarded in auto mode). |
-| Conversational agent | Bridge-all picks the tools up with no extra wiring; the system prompt's **Files** section sets the convention — reports → `reports/`, data → `data/`, other artifacts → `artifacts/`; deliverables become files, not chat text. |
+| Conversational agent | Bridge-all picks the tools up with no extra wiring; the system prompt's **Files** section sets the convention and the per-turn Environment names the conversation's **task directory** (`tasks/<conversation-id>/`) — each task's working files land in its own area, and finished deliverables get promoted to the shared library (`reports/` · `data/` · `artifacts/`). |
 | Web (`/[workspace]/files`) | Lazy tree + viewer/editor (Markdown preview, CodeMirror, image preview) + a bash-style shell (`ls cd cat tree mkdir touch echo>/>> cp mv rm`) sharing one directory cache. |
 
 AuthZ: `files:read` (viewer+ — browsing is benign) / `files:write` (member+ — collaborative content
 like datasets/skills). No `files:delete`: removal is ordinary content mutation, not governance.
+
+Separation, layered: **tenant = bucket** (storage-level, inescapable) → **task = directory**
+(`tasks/<conversation-id>/` — convention carried by the agent's environment block, so parallel
+tasks never trample each other's files) → shared library dirs (`reports/` `data/` `artifacts/`
+`skills/` `knowledge/`) for what outlives a single task.
 
 ## Skill + knowledge content lives ON the filesystem (content-projection)
 

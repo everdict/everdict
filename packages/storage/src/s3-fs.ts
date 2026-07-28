@@ -16,12 +16,19 @@ import {
   ConflictError,
   FS_FILE_MAX_BYTES,
   type FsEntry,
-  guessFsContentType,
   NotFoundError,
-  normalizeFsPath,
   UpstreamError,
+  guessFsContentType,
+  normalizeFsPath,
 } from "@everdict/contracts";
-import { assertFsBucketPrefix, FS_ROOT_ENTRY, fsAncestors, fsBucketFor, fsEntryName, sortFsEntries } from "./fs-shared.js";
+import {
+  FS_ROOT_ENTRY,
+  assertFsBucketPrefix,
+  fsAncestors,
+  fsBucketFor,
+  fsEntryName,
+  sortFsEntries,
+} from "./fs-shared.js";
 
 export interface S3WorkspaceFsOptions {
   endpoint: string; // S3 API endpoint (e.g. http://localhost:9100 = MinIO)
@@ -34,7 +41,9 @@ export interface S3WorkspaceFsOptions {
 function isS3NotFound(err: unknown): boolean {
   if (typeof err !== "object" || err === null) return false;
   const e = err as { name?: unknown; $metadata?: { httpStatusCode?: unknown } };
-  return e.name === "NotFound" || e.name === "NoSuchKey" || e.name === "NoSuchBucket" || e.$metadata?.httpStatusCode === 404;
+  return (
+    e.name === "NotFound" || e.name === "NoSuchKey" || e.name === "NoSuchBucket" || e.$metadata?.httpStatusCode === 404
+  );
 }
 
 // Workspace filesystem on S3-compatible object storage (incl. MinIO) — the DISTRIBUTED backend: every control-plane
@@ -89,9 +98,7 @@ export class S3WorkspaceFs implements WorkspaceFs {
 
   private async headFile(bucket: string, path: string): Promise<FsEntry | undefined> {
     try {
-      const res = await this.send("stat", () =>
-        this.client.send(new HeadObjectCommand({ Bucket: bucket, Key: path })),
-      );
+      const res = await this.send("stat", () => this.client.send(new HeadObjectCommand({ Bucket: bucket, Key: path })));
       return {
         path,
         name: fsEntryName(path),
@@ -208,9 +215,7 @@ export class S3WorkspaceFs implements WorkspaceFs {
     const bucket = await this.bucketFor(tenant);
     if (p === "") throw new BadRequestError("BAD_REQUEST", {}, "cannot read the filesystem root");
     try {
-      const res = await this.send("read", () =>
-        this.client.send(new GetObjectCommand({ Bucket: bucket, Key: p })),
-      );
+      const res = await this.send("read", () => this.client.send(new GetObjectCommand({ Bucket: bucket, Key: p })));
       const data = (await res.Body?.transformToByteArray()) ?? new Uint8Array();
       return {
         entry: {
