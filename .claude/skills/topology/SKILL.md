@@ -111,6 +111,12 @@ an admin `stopWorkload everdict-harness-<id>-<version>-<zone>` (the existing run
 gated `runtimes:control`) deregisters the cluster job, and the warm-cache liveness re-check above then drops the now-
 dead in-memory entry on the next `ensureTopology` and redeploys. So a poisoned/stale warm topology is cleared by
 `stopWorkload` (durable, cluster) + the auto-heal (in-memory) — no control-plane restart, no dedicated teardown route.
+**Topology-health diagnosis (A6).** `TopologyRuntime.diagnose?(spec, zone)` (Nomad implemented: alloc TaskStates →
+"task: OOM-killed (exit 137), restarts=N" / restart churn) is appended best-effort to BOTH completion-timeout
+failures in `service-backend` (message + `extra.topologyHealth`) — a service OOM loop no longer hides behind "the
+agent did not finish within the budget". The batch-path twin: backends' `eventsIndicateOom` now also matches a bare
+exit 137, K8s `podFailureReason` maps exit 137 → OOMKilled, and a missing `__EVERDICT_RESULT__` sentinel is explained
+from the alloc task events (OOM → `OOM_KILLED` fatal-infra verdict) instead of the bare "could not find the agent result".
 **Warm-topology idle reclamation (A9).** `teardown()` is now ON the `TopologyRuntime` port and actually called: every
 runtime (Nomad/K8s/Docker — isomorphic) stamps `lastUsedAt` on its warm entries (touched on each ensure) and
 self-schedules an unref'd `sweepIdle(ttl)` interval (lazy-started on first ensure; defaults

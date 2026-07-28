@@ -799,6 +799,15 @@ describe("summarizeAllocFailure / eventsIndicateOom (task-event cause extraction
     expect(eventsIndicateOom([{ Details: { oom_killed: "true" } }])).toBe(true);
     expect(eventsIndicateOom([{ Type: "Driver Failure", DisplayMessage: "pull denied" }])).toBe(false);
   });
+
+  it("detects OOM from a bare exit code 137 (SIGKILL) — real drivers report neither oom_killed nor an 'oom' substring", () => {
+    // Pre-fix these fell through to the mushy generic and a 30-minute OOM loop read as "incomplete within budget".
+    expect(eventsIndicateOom([{ Type: "Terminated", DisplayMessage: "Exit Code: 137" }])).toBe(true);
+    expect(eventsIndicateOom([{ Type: "Terminated", Details: { exit_code: "137" } }])).toBe(true);
+    // A non-137 exit is NOT an OOM signature.
+    expect(eventsIndicateOom([{ Type: "Terminated", DisplayMessage: "Exit Code: 1" }])).toBe(false);
+    expect(eventsIndicateOom([{ Type: "Terminated", Details: { exit_code: "1" } }])).toBe(false);
+  });
 });
 
 describe("NomadBackend.logs (live tail stream selection)", () => {

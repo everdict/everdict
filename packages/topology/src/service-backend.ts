@@ -356,10 +356,18 @@ export class ServiceTopologyBackend implements Backend, ScreenCapturable {
         // → an explicit completion-timeout, distinct from the CANCELLED an aborted drive throws. A real user stop
         // (deadline not fired) or a genuine drive error propagates unchanged.
         if (deadlineFired) {
+          // Name WHY when the topology itself is sick (A6): a service OOM-looping (exit 137) burns the whole budget
+          // "running", and the bare completion-timeout hid it for 30 minutes downstream. Best-effort.
+          const health = await this.opts.runtime.diagnose?.(spec, zone).catch(() => undefined);
           throw new InternalError(
             "HARNESS_RUN_FAILED",
-            { runId, reason: "completion-timeout", budgetSec: job.evalCase.timeoutSec },
-            "The agent did not finish within the per-case budget (timeoutSec).",
+            {
+              runId,
+              reason: "completion-timeout",
+              budgetSec: job.evalCase.timeoutSec,
+              ...(health ? { topologyHealth: health } : {}),
+            },
+            `The agent did not finish within the per-case budget (timeoutSec).${health ? ` Topology health: ${health}` : ""}`,
           );
         }
         throw err;
@@ -371,10 +379,12 @@ export class ServiceTopologyBackend implements Backend, ScreenCapturable {
       if (opts?.signal?.aborted) throw dispatchAborted(job);
       // Completion deadline exceeded = the eval result can't be confirmed (grading a half-done state misleads) → make it an explicit run failure.
       if (outcome.status === "timeout") {
+        // Same A6 diagnosis as the budget path — a completion timeout with a sick service must name the sickness.
+        const health = await this.opts.runtime.diagnose?.(spec, zone).catch(() => undefined);
         throw new InternalError(
           "HARNESS_RUN_FAILED",
-          { runId, reason: "completion-timeout" },
-          "The agent did not finish within the completion deadline.",
+          { runId, reason: "completion-timeout", ...(health ? { topologyHealth: health } : {}) },
+          `The agent did not finish within the completion deadline.${health ? ` Topology health: ${health}` : ""}`,
         );
       }
 

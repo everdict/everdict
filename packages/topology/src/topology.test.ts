@@ -2324,3 +2324,61 @@ describe("buildNomadTopologyJob — host-exec services (raw_exec)", () => {
     expect(() => buildK8sManifests(HOST_SPEC)).toThrow(/cannot run on K8s/);
   });
 });
+
+// A6 — a completion timeout with a sick topology must name the sickness (OOM/exit 137/restarts), not just
+// "the agent did not finish": that bare message hid a 30-minute service OOM loop downstream.
+describe("ServiceTopologyBackend — completion timeout carries the topology diagnosis", () => {
+  it("appends runtime.diagnose() to the completion-timeout failure (message + extra)", async () => {
+    const runtime: TopologyRuntime = {
+      id: "mock",
+      async ensureTopology() {
+        return { endpoints: { "agent-server": "http://agent-server:8000" } };
+      },
+      async provisionBrowserEnv() {
+        return {
+          wiring: { target_cdp_url: "ws://browser/ctx" },
+          async snapshot(): Promise<BrowserSnapshot> {
+            return { kind: "browser", url: "https://x", dom: "<html/>", console: [] };
+          },
+          async dispose() {},
+        };
+      },
+      async diagnose() {
+        return "agent-server: OOM-killed (exit 137), restarts=3";
+      },
+    };
+    const driver: FrontDoorDriver = {
+      async drive() {
+        return { traceRef: "fixed", status: "timeout" };
+      },
+    };
+    const backend = new ServiceTopologyBackend({
+      runtime,
+      traceSource: {
+        async fetch() {
+          return [];
+        },
+      },
+      specFor: () => SPEC,
+      frontDoorDriver: driver,
+      newRunId: () => "fixed",
+    });
+    const job: CaseJob = {
+      harness: { id: "browser-use-langgraph", version: "1.0.0" },
+      evalCase: {
+        id: "c1",
+        env: { kind: "browser", startUrl: "https://x" },
+        task: "go",
+        graders: [],
+        timeoutSec: 60,
+        tags: [],
+      },
+    };
+
+    const err = await backend.dispatch(job).catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(InternalError);
+    expect((err as InternalError).message).toContain("Topology health: agent-server: OOM-killed (exit 137)");
+    expect((err as InternalError).extra?.topologyHealth).toBe("agent-server: OOM-killed (exit 137), restarts=3");
+  });
+});

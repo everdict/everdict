@@ -623,3 +623,57 @@ describe("NomadTopologyRuntime — warm-topology idle reclamation", () => {
     expect(calls.some((c) => c.method === "DELETE")).toBe(false);
   });
 });
+
+// A6 — service-health diagnosis: an OOM-looping service (exit 137) burned the whole case budget while the drive
+// reported only "did not finish within the budget"; diagnose() names the OOM + restarts from the alloc task states.
+describe("NomadTopologyRuntime.diagnose", () => {
+  const diagHttp = (taskStates: Record<string, { Restarts?: number; Events?: unknown[] }>): NomadHttp => ({
+    async request(_method, path) {
+      if (path.includes("/allocations")) return { status: 200, text: JSON.stringify([{ TaskStates: taskStates }]) };
+      return { status: 200, text: "[]" };
+    },
+  });
+
+  it("names an OOM-killed (exit 137) service with its restart count", async () => {
+    const rt = new NomadTopologyRuntime({
+      addr: "http://nomad",
+      http: diagHttp({
+        "agent-server": { Restarts: 3, Events: [{ Type: "Terminated", DisplayMessage: "Exit Code: 137" }] },
+        "browser-mcp": { Restarts: 0, Events: [{ Type: "Started" }] },
+      }),
+    });
+    const health = await rt.diagnose(SPEC);
+    expect(health).toContain("agent-server: OOM-killed (exit 137), restarts=3");
+    expect(health).not.toContain("browser-mcp");
+  });
+
+  it("names restart churn without an OOM signature (last described event carried)", async () => {
+    const rt = new NomadTopologyRuntime({
+      addr: "http://nomad",
+      http: diagHttp({
+        "agent-server": {
+          Restarts: 2,
+          Events: [{ Type: "Terminated", DisplayMessage: "Exit Code: 1" }],
+        },
+      }),
+    });
+    expect(await rt.diagnose(SPEC)).toBe("agent-server: restarts=2 — Exit Code: 1");
+  });
+
+  it("returns undefined when nothing is notable (healthy topology) or the API errors", async () => {
+    const healthy = new NomadTopologyRuntime({
+      addr: "http://nomad",
+      http: diagHttp({ "agent-server": { Restarts: 0, Events: [{ Type: "Started" }] } }),
+    });
+    expect(await healthy.diagnose(SPEC)).toBeUndefined();
+    const erroring = new NomadTopologyRuntime({
+      addr: "http://nomad",
+      http: {
+        async request() {
+          return { status: 500, text: "" };
+        },
+      },
+    });
+    expect(await erroring.diagnose(SPEC)).toBeUndefined();
+  });
+});

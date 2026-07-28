@@ -140,6 +140,23 @@ export interface NomadTopologyRuntimeOptions {
 // The store-namespace id used for a no-zone silo (there are no tenants, so one default id names the dedicated store job).
 const NO_ZONE_STORE_ID = "default";
 
+// One task event of an alloc's TaskStates — the diagnosis view (A6). Mirrors the backends' NomadTaskEvent shape
+// (topology and backends are sibling packages, so the tiny matcher is kept local rather than cross-imported).
+interface TaskEventLike {
+  Type?: string;
+  DisplayMessage?: string;
+  Details?: Record<string, string>;
+}
+// OOM signature: the explicit oom_killed detail, a bare exit code 137 (SIGKILL — the OOM killer's), or "oom" text.
+function eventLooksOom(e: TaskEventLike): boolean {
+  return (
+    e.Details?.oom_killed === "true" ||
+    e.Details?.exit_code === "137" ||
+    /\bexit code:?\s*137\b/i.test(e.DisplayMessage ?? "") ||
+    `${e.Type ?? ""} ${e.DisplayMessage ?? ""}`.toLowerCase().includes("oom")
+  );
+}
+
 // Live NomadTopologyRuntime: register the warm service job + discover endpoints + per-case browser (real CDP).
 // The orchestrator-agnostic ServiceTopologyBackend drives topologies on Nomad through this.
 export class NomadTopologyRuntime implements TopologyRuntime {
@@ -622,6 +639,36 @@ export class NomadTopologyRuntime implements TopologyRuntime {
         await deregister();
       },
     };
+  }
+
+  // Service-health diagnosis (A6): read the warm topology's alloc task states and name what actually happened —
+  // OOM kills (exit 137) and restart churn. The drive timeout used to report only "did not finish within the
+  // budget" while a service OOM-looped for the whole 30 minutes; this is what makes that failure explain itself.
+  async diagnose(spec: ServiceHarnessSpec, zone?: TrustZone): Promise<string | undefined> {
+    const ns = zone?.namespace ?? this.opts.namespace;
+    const res = await this.http.request(
+      "GET",
+      `/v1/job/${topologyJobId(spec, zone?.id)}/allocations${this.nsq(ns, "?")}`,
+    );
+    if (res.status >= 300) return undefined;
+    const allocs = JSON.parse(res.text) as Array<{
+      TaskStates?: Record<string, { Restarts?: number; Events?: TaskEventLike[] }>;
+    }>;
+    const notes: string[] = [];
+    for (const a of allocs) {
+      for (const [task, st] of Object.entries(a.TaskStates ?? {})) {
+        const restarts = st.Restarts ?? 0;
+        if ((st.Events ?? []).some(eventLooksOom)) {
+          notes.push(`${task}: OOM-killed (exit 137)${restarts > 0 ? `, restarts=${restarts}` : ""}`);
+        } else if (restarts > 0) {
+          const last = [...(st.Events ?? [])].reverse().find((e) => (e.DisplayMessage ?? "").trim().length > 0);
+          notes.push(
+            `${task}: restarts=${restarts}${last?.DisplayMessage ? ` — ${last.DisplayMessage.slice(0, 120)}` : ""}`,
+          );
+        }
+      }
+    }
+    return notes.length > 0 ? [...new Set(notes)].join("; ") : undefined;
   }
 
   // Tear down the warm topology (for teardown after a live run). Given a zone, tear down only that zone's warm entry.

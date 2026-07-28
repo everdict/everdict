@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { parseResult, stripSentinel } from "@everdict/contracts";
 import {
+  AppError,
   BadRequestError,
   type CaseJob,
   type CaseResult,
@@ -141,10 +142,15 @@ export interface NomadTaskEvent {
 
 export function eventsIndicateOom(events: NomadTaskEvent[]): boolean {
   // Details.oom_killed carries "true"/"false" — the docker driver may report the kill ONLY there
-  // (Type "Terminated", message "Exit Code: 137"), so a text match on "oom" alone misses it.
+  // (Type "Terminated", message "Exit Code: 137"), so a text match on "oom" alone misses it. Exit code 137
+  // (SIGKILL — the OOM killer's signature) is ALSO detected on its own: real drivers report a bare 137 with
+  // neither the oom_killed detail nor an "oom" substring, and that used to fall through to the mushy generic.
   return events.some(
     (e) =>
-      e.Details?.oom_killed === "true" || `${e.Type ?? ""} ${e.DisplayMessage ?? ""}`.toLowerCase().includes("oom"),
+      e.Details?.oom_killed === "true" ||
+      e.Details?.exit_code === "137" ||
+      /\bexit code:?\s*137\b/i.test(e.DisplayMessage ?? "") ||
+      `${e.Type ?? ""} ${e.DisplayMessage ?? ""}`.toLowerCase().includes("oom"),
   );
 }
 
@@ -705,7 +711,7 @@ export class NomadBackend implements Backend, Recoverable, Observable, Shellable
             ? "alloc log fetch failed (alloc dir already GC'd — raise the Nomad client's gc_max_allocs for eval churn)"
             : "alloc log fetch failed",
         );
-      return parseResult(logs.text);
+      return await this.parseResultOrExplain(logs.text, allocId);
     } catch (err) {
       // If the wait was aborted, reclaim the submitted job so it doesn't keep running (best-effort, never masks err).
       if (options?.signal?.aborted) {
@@ -763,9 +769,37 @@ export class NomadBackend implements Backend, Recoverable, Observable, Shellable
         `/v1/client/fs/logs/${allocId}?task=agent&type=stdout&plain=true${nsq}`,
       );
       if (logs.status >= 300) return { status: "unknown" };
-      return { status: "adopted", result: parseResult(logs.text) };
+      return { status: "adopted", result: await this.parseResultOrExplain(logs.text, allocId) };
     } catch {
       return { status: "unknown" };
+    }
+  }
+
+  // Decode the job-runner's stdout sentinel; when it is ABSENT, explain WHY from the alloc's task events instead of
+  // the mushy generic. A bare crash (OOM SIGKILL) bypasses the in-process result guard entirely — the sentinel is
+  // simply missing — so an OOM here becomes the fatal-infra OOM_KILLED verdict (never an "agent failure"), and any
+  // other death carries its task-event cause. This is the batch-path twin of the topology drive diagnosis (A6).
+  private async parseResultOrExplain(logsText: string, allocId: string): Promise<CaseResult> {
+    try {
+      return parseResult(logsText);
+    } catch (err) {
+      const events = await this.allocTaskEvents(allocId).catch(() => [] as NomadTaskEvent[]);
+      if (eventsIndicateOom(events)) {
+        throw new UpstreamError(
+          "UPSTREAM_ERROR",
+          { alloc: allocId, signal: OOM_KILLED },
+          "task OOM-killed (exit 137) — raise the harness's resources.memoryMb (infra, not an agent failure)",
+        );
+      }
+      const cause = summarizeAllocFailure(events);
+      if (err instanceof AppError && cause) {
+        throw new UpstreamError(
+          "UPSTREAM_ERROR",
+          { ...(err.extra ?? {}), alloc: allocId },
+          `${err.message} — ${cause}`,
+        );
+      }
+      throw err;
     }
   }
 

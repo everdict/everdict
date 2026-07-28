@@ -204,11 +204,15 @@ export function kubectlApi(
         `job-name=${name}`,
         "-o",
         // waiting.reason last — a pod that never starts (ImagePullBackOff/ErrImagePull) has no terminated state,
-        // and it's what the TIMEOUT path needs to explain a job that never progressed.
-        'jsonpath={range .items[*]}{.status.containerStatuses[*].state.terminated.reason}{" "}{.status.containerStatuses[*].lastState.terminated.reason}{" "}{.status.containerStatuses[*].state.waiting.reason}{end}',
+        // and it's what the TIMEOUT path needs to explain a job that never progressed. Exit codes ride along so a
+        // bare 137 (SIGKILL — the OOM killer's signature, reported by some nodes WITHOUT the OOMKilled reason)
+        // still classifies as an OOM instead of the generic "Job failed".
+        'jsonpath={range .items[*]}{.status.containerStatuses[*].state.terminated.reason}{" "}{.status.containerStatuses[*].lastState.terminated.reason}{" "}{.status.containerStatuses[*].state.waiting.reason}{" "}{.status.containerStatuses[*].state.terminated.exitCode}{" "}{.status.containerStatuses[*].lastState.terminated.exitCode}{end}',
       ]);
       if (res.code !== 0) return undefined;
-      const reason = res.stdout.trim().split(/\s+/).find(Boolean);
+      const tokens = res.stdout.trim().split(/\s+/).filter(Boolean);
+      if (tokens.includes("OOMKilled") || tokens.includes("137")) return "OOMKilled";
+      const reason = tokens.find((t) => !/^\d+$/.test(t)); // named reasons win over bare non-137 exit codes
       return reason || undefined;
     },
     async deleteJob(name, ns) {

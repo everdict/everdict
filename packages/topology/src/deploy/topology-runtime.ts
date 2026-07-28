@@ -44,6 +44,11 @@ export interface TopologyRuntime {
   // Tear down one warm topology (cluster job/namespace/containers + the warm entry). Formalized on the port (A9) —
   // the impls existed but had NO caller, so nothing ever reclaimed a warm topology.
   teardown?(spec: ServiceHarnessSpec, zone?: TrustZone): Promise<void>;
+  // Name what's wrong with the warm topology's SERVICES (A6) — OOM kills (exit 137), restart churn — so a drive
+  // failure/timeout explains itself. Downstream lost 30 minutes to "the agent did not finish within the budget"
+  // while a service was OOM-looping (exit 137) the whole time; nothing surfaced the restarts anywhere. Optional +
+  // best-effort: undefined = nothing notable / not inspectable.
+  diagnose?(spec: ServiceHarnessSpec, zone?: TrustZone): Promise<string | undefined>;
   // Reclaim warm topologies idle past idleMs (best-effort per entry; never throws). The runtimes self-schedule this
   // on an unref'd interval, so superseded versions' warm jobs stop exhausting the cluster even with no new dispatch.
   // Returns the reclaimed warm keys (observability/tests).
