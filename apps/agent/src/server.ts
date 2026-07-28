@@ -36,7 +36,12 @@ export interface AgentServerDeps extends ChatDeps {
   // agent.run.* lifecycle facts → the control plane's event log (fleet observability, agent-automation A5).
   reportRunEvent?: (input: {
     workspace: string;
-    kind: "agent.run.started" | "agent.run.completed" | "agent.run.failed" | "agent.run.cancelled";
+    kind:
+      | "agent.run.started"
+      | "agent.run.awaiting_approval"
+      | "agent.run.completed"
+      | "agent.run.failed"
+      | "agent.run.cancelled";
     sessionId: string;
     agentId: string;
     eventKind: string;
@@ -85,6 +90,10 @@ function sendError(reply: FastifyReply, err: unknown): FastifyReply {
 }
 
 const idParams = z.object({ id: z.string().min(1) });
+
+// How long a headless run's parked mutation waits for a member decision before the registry's deny-on-expiry
+// settles it (same window as the discussion turn's park).
+const ACTIVATION_APPROVAL_TIMEOUT_MS = 10 * 60_000;
 
 // Project the parsed event-body fields into an ActivationEvent tail (workspace is supplied by the caller).
 function eventOf(data: {
@@ -217,8 +226,12 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
           mailbox,
           runTurn:
             deps.activationRunTurn ??
-            ((sessionId, agentToken, signal) =>
-              runTeammateTurn(deps, deps.authenticate, mailbox, sessionId, agentToken, signal)),
+            ((sessionId, agentToken, signal, permit) =>
+              runTeammateTurn(deps, deps.authenticate, mailbox, sessionId, agentToken, signal, permit)),
+          // Approval parking (A6): the shared registry the fleet view discovers via GET /pending and answers
+          // via POST /permission — same channel as the discussion turn, same 10 min deny-on-expiry window.
+          waitApproval: (sessionId, request, signal) =>
+            permissions.wait(deps.newId(), sessionId, signal, request, ACTIVATION_APPROVAL_TIMEOUT_MS),
           now: deps.now,
           newId: deps.newId,
           ...(deps.reportRunEvent ? { reportRunEvent: deps.reportRunEvent } : {}),

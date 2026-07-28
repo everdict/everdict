@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Bot, Eye, Square } from 'lucide-react'
 import { useLocale, useTranslations } from 'next-intl'
+import { z } from 'zod'
 
 import {
   agentMessageListSchema,
@@ -104,6 +105,9 @@ export function AgentFleet({
           >
             <Eye className="size-4" aria-hidden />
           </Button>
+          {run.status === 'awaiting_approval' && canStop ? (
+            <ApprovalPrompt sessionId={run.id} onDecided={() => void refresh()} />
+          ) : null}
           {canStop && run.status === 'running' ? (
             <Button
               variant="ghost"
@@ -118,6 +122,58 @@ export function AgentFleet({
       ))}
       <RunTranscriptDialog run={openRun} onClose={() => setOpenRun(null)} />
     </div>
+  )
+}
+
+// 파킹된 mutation 승인 프롬프트(agent-automation A6) — 대기 중인 요청을 GET /pending으로 발견해
+// 도구 이름과 함께 허용/거부를 인라인으로 묻는다. 결정은 기존 POST /permission 채널을 그대로 쓴다.
+const pendingSchema = z.object({
+  pending: z.array(z.object({ requestId: z.string(), name: z.string(), input: z.unknown() })),
+})
+
+function ApprovalPrompt({ sessionId, onDecided }: { sessionId: string; onDecided: () => void }) {
+  const t = useTranslations('agentFleet')
+  const [ask, setAsk] = useState<{ requestId: string; name: string } | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      try {
+        const res = await fetch(`/api/agent/sessions/${encodeURIComponent(sessionId)}/pending`)
+        if (!res.ok || cancelled) return
+        const first = pendingSchema.parse(await res.json()).pending[0]
+        if (first) setAsk({ requestId: first.requestId, name: first.name })
+      } catch {
+        // 대기 요청 조회 실패 — 배지만 남는다(다음 폴링에서 재시도)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [sessionId])
+
+  const decide = async (decision: 'allow' | 'deny') => {
+    if (!ask) return
+    await fetch(`/api/agent/sessions/${encodeURIComponent(sessionId)}/permission`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ requestId: ask.requestId, decision }),
+    })
+    setAsk(null)
+    onDecided()
+  }
+
+  if (!ask) return null
+  return (
+    <span className="flex items-center gap-1.5">
+      <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-[11px]">{ask.name}</code>
+      <Button size="sm" onClick={() => void decide('allow')}>
+        {t('approve')}
+      </Button>
+      <Button size="sm" variant="outline" onClick={() => void decide('deny')}>
+        {t('deny')}
+      </Button>
+    </span>
   )
 }
 

@@ -151,7 +151,13 @@ export function registerInternalRoutes(app: FastifyInstance, deps: ServerDeps): 
     const body = z
       .object({
         tenant: z.string().min(1),
-        kind: z.enum(["agent.run.started", "agent.run.completed", "agent.run.failed", "agent.run.cancelled"]),
+        kind: z.enum([
+          "agent.run.started",
+          "agent.run.awaiting_approval",
+          "agent.run.completed",
+          "agent.run.failed",
+          "agent.run.cancelled",
+        ]),
         sessionId: z.string().min(1),
         agentId: z.string().min(1),
         eventKind: z.string().min(1),

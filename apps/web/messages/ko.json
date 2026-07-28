@@ -3882,6 +3882,8 @@
       "completed": "완료",
       "failed": "실패",
       "cancelled": "중지됨"
-    }
+    },
+    "approve": "허용",
+    "deny": "거부"
   }
 }

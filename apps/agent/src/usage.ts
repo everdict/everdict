@@ -31,7 +31,12 @@ export function usageReporter(controlPlaneUrl: string, internalToken: string): (
 // fleet observability, agent-automation A5). Best-effort at the call site (the activator swallows failures).
 export interface AgentRunEventReport {
   workspace: string;
-  kind: "agent.run.started" | "agent.run.completed" | "agent.run.failed" | "agent.run.cancelled";
+  kind:
+    | "agent.run.started"
+    | "agent.run.awaiting_approval"
+    | "agent.run.completed"
+    | "agent.run.failed"
+    | "agent.run.cancelled";
   sessionId: string;
   agentId: string;
   eventKind: string;

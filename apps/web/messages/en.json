@@ -3882,6 +3882,8 @@
       "completed": "Completed",
       "failed": "Failed",
       "cancelled": "Cancelled"
-    }
+    },
+    "approve": "Allow",
+    "deny": "Deny"
   }
 }

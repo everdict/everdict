@@ -1,6 +1,8 @@
+import type { PermissionDecision, PermissionHook, PermissionRequest } from "@everdict/agent-runtime";
 import type { AgentRegistry, AgentSessionStore, TenantKeyStore } from "@everdict/application-control";
 import type { AgentSpec, AgentTrigger, AgentTriggerFilter } from "@everdict/contracts";
 import { issueAgentToken } from "@everdict/db";
+import { isGuardedAction } from "./action-policy.js";
 import type { AgentMailbox } from "./agent-mailbox.js";
 
 // Registry-driven activation (docs/architecture/agent-automation.md A3): a platform event matches an ENABLED
@@ -54,7 +56,12 @@ export interface AgentActivatorDeps {
   sessions: AgentSessionStore;
   mailbox: AgentMailbox;
   // One request-less turn over the run's session (the teammate-turn machinery) — injected so tests own it.
-  runTurn: (sessionId: string, agentToken: string, signal: AbortSignal) => Promise<void>;
+  // permit is the run's mode-derived approval hook (undefined = bypass: no gate).
+  runTurn: (sessionId: string, agentToken: string, signal: AbortSignal, permit?: PermissionHook) => Promise<void>;
+  // Park a mutation for member approval (agent-automation A6): the shared PermissionRegistry the fleet view
+  // discovers via GET /pending and answers via POST /permission. Absent → headless mutations are DENIED under
+  // default/auto (never silently allowed — fail closed when there is no one to ask).
+  waitApproval?: (sessionId: string, request: PermissionRequest, signal: AbortSignal) => Promise<PermissionDecision>;
   now: () => string;
   newId: () => string;
   // Loop guard #2: minimum spacing between activations of the same (agent, kind). Default 30s.
@@ -65,7 +72,12 @@ export interface AgentActivatorDeps {
   // automation A5). Best-effort — an unreachable control plane never affects the run.
   reportRunEvent?: (input: {
     workspace: string;
-    kind: "agent.run.started" | "agent.run.completed" | "agent.run.failed" | "agent.run.cancelled";
+    kind:
+      | "agent.run.started"
+      | "agent.run.awaiting_approval"
+      | "agent.run.completed"
+      | "agent.run.failed"
+      | "agent.run.cancelled";
     sessionId: string;
     agentId: string;
     eventKind: string;
@@ -210,7 +222,8 @@ export class AgentActivator {
         sender: event.source ?? event.kind,
         content: renderActivationPrompt(spec, event),
       });
-      await this.deps.runTurn(sessionId, token, controller.signal);
+      const permit = this.buildPermit(event, agentId, sessionId, spec, controller.signal);
+      await this.deps.runTurn(sessionId, token, controller.signal, permit);
       const settled = this.stopped.has(sessionId) ? "cancelled" : "completed";
       await this.deps.sessions.setSessionStatus(event.workspace, sessionId, settled, this.deps.now());
       void this.report(
@@ -238,9 +251,53 @@ export class AgentActivator {
     }
   }
 
+  // The run's mode-derived approval hook (agent-automation A6). bypass → no gate (undefined). auto → guarded
+  // (destructive/governance/credential) actions park, the rest run. default AND plan → every mutation parks
+  // (a headless plan has no plan-approval channel, so it degrades to ask-per-mutation, never to silent allow).
+  // Parking flips the run to awaiting_approval (+ a lifecycle fact) so the fleet view surfaces the ask; the
+  // member answers through the same GET /pending → POST /permission channel the discussion turn uses. With no
+  // waitApproval wired, gated mutations are DENIED — fail closed when there is nobody to ask.
+  private buildPermit(
+    event: ActivationEvent,
+    agentId: string,
+    sessionId: string,
+    spec: AgentSpec,
+    signal: AbortSignal,
+  ): PermissionHook | undefined {
+    const mode = spec.permissionMode ?? "default";
+    if (mode === "bypass") return undefined;
+    return async (request) => {
+      if (mode === "auto" && !isGuardedAction(request.name)) return "allow";
+      const wait = this.deps.waitApproval;
+      if (!wait) return "deny";
+      await this.deps.sessions
+        .setSessionStatus(event.workspace, sessionId, "awaiting_approval", this.deps.now())
+        .catch(() => {});
+      void this.report(
+        "agent.run.awaiting_approval",
+        event,
+        agentId,
+        sessionId,
+        `Agent ${agentId} is waiting for approval to run ${request.name}.`,
+      );
+      try {
+        return await wait(sessionId, request, signal);
+      } finally {
+        await this.deps.sessions
+          .setSessionStatus(event.workspace, sessionId, "running", this.deps.now())
+          .catch(() => {});
+      }
+    };
+  }
+
   // agent.run.* lifecycle FACT back to the control plane — best-effort, never affects the run.
   private report(
-    kind: "agent.run.started" | "agent.run.completed" | "agent.run.failed" | "agent.run.cancelled",
+    kind:
+      | "agent.run.started"
+      | "agent.run.awaiting_approval"
+      | "agent.run.completed"
+      | "agent.run.failed"
+      | "agent.run.cancelled",
     event: ActivationEvent,
     agentId: string,
     sessionId: string,

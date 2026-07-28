@@ -214,6 +214,68 @@ describe("AgentActivator", () => {
     expect(keyStore.revoked).toHaveLength(1);
   });
 
+  it("parks a default-mode mutation for member approval (awaiting_approval → running) and honors the decision", async () => {
+    // Given a default-mode agent whose turn attempts one mutation
+    const approvals: string[] = [];
+    const sessions = sessionsStub();
+    const registry = registryOf(spec({ permissionMode: "default" }));
+    const mailbox = new AgentMailbox();
+    const keyStore = keyStoreStub();
+    const instance = new AgentActivator({
+      registry,
+      keyStore,
+      sessions,
+      mailbox,
+      runTurn: async (_sessionId, _token, _signal, permit) => {
+        const decision = await permit?.({ name: "create_dataset", isReadOnly: false, input: {} });
+        approvals.push(`create_dataset:${decision}`);
+      },
+      waitApproval: async (_sessionId, request) => {
+        approvals.push(`asked:${request.name}`);
+        return "allow";
+      },
+      now: () => new Date().toISOString(),
+      newId: (() => {
+        let n = 0;
+        return () => `s-${++n}`;
+      })(),
+    });
+
+    // When the event activates it
+    await instance.onEvent(event());
+    await instance.idle();
+
+    // Then the mutation parked, the member decision applied, and the run passed through awaiting_approval
+    expect(approvals).toEqual(["asked:create_dataset", "create_dataset:allow"]);
+    expect(sessions.statuses.map((s) => s.status)).toEqual(["awaiting_approval", "running", "completed"]);
+  });
+
+  it("auto mode allows routine mutations without parking but fails CLOSED (deny) when nobody can approve a guarded one", async () => {
+    const decisions: Array<string | undefined> = [];
+    const base = {
+      sessions: sessionsStub(),
+      keyStore: keyStoreStub(),
+      mailbox: new AgentMailbox(),
+      now: () => new Date().toISOString(),
+    };
+    const instance = new AgentActivator({
+      ...base,
+      registry: registryOf(spec({ permissionMode: "auto" })),
+      // waitApproval NOT wired — a guarded ask has nobody to approve it
+      runTurn: async (_sessionId, _token, _signal, permit) => {
+        decisions.push(await permit?.({ name: "create_dataset", isReadOnly: false, input: {} }));
+        decisions.push(await permit?.({ name: "delete_dataset", isReadOnly: false, input: {} }));
+      },
+      newId: (() => {
+        let n = 0;
+        return () => `s-${++n}`;
+      })(),
+    });
+    await instance.onEvent(event());
+    await instance.idle();
+    expect(decisions).toEqual(["allow", "deny"]);
+  });
+
   it("applies the per-(agent, kind) cooldown to distinct events", async () => {
     const { instance, runs } = activator({ registry: registryOf(spec()), cooldownMs: 60_000 });
     await instance.onEvent(event({ eventId: "ev-1" }));
