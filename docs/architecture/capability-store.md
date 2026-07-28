@@ -210,7 +210,10 @@ store.
   connects via `StdioClientTransport` running `docker run --rm -i --env NAME … <image> [args]` (secret VALUES ride in
   the spawned process's env, only `--env NAME` on argv — no `ps`/log leak). Both bridge with `mcpToolToDefinition`,
   namespaced `mcp__<name>__<tool>`, write-filtered by `enableWrite`. stdio is skipped unless `AGENT_MCP_ALLOW_STDIO`
-  is set, and skipped when a required secret is unbound.
+  is set, and skipped when a required secret is unbound. **Private images**: the docker CLI inherits the operator's
+  host credentials (the agent forwards only `HOME`/`PATH` — not its own secrets — to the docker process), so a private
+  image pulls via the host's `docker login` / credential helpers. Per-*workspace* registry credentials (the workspace
+  image-registry pull auth) into the docker pull is a future item — the operator-host login covers the managed case.
 - **`skill`** — feed `{name, description, instructions, files}` into the existing `buildSkillTools` → the `use_skill`
   (+ `read_skill_file` when files exist) tools. **Zero new runtime code.**
 - **`code`** — NEW. Register a `ToolDefinition` (`name` from the capability, `parametersJsonSchema` = the spec's

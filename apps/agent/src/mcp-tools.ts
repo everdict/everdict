@@ -67,8 +67,12 @@ export function dockerRunArgs(server: { image: string; args: string[]; env: Reco
 }
 
 // The env for the spawned `docker` process: the bound secrets (referenced by `--env NAME`) + a minimal PATH/HOME so
-// the docker CLI itself resolves and runs. Nothing else from the agent's own environment is forwarded.
-function stdioEnv(secrets: Record<string, string>): Record<string, string> {
+// the docker CLI itself resolves and runs. Nothing else from the agent's own environment is forwarded (no accidental
+// leak of the agent's own secrets into the docker invocation). Forwarding HOME also means a PRIVATE image pulls with
+// the operator's host `docker login` (`$HOME/.docker/config.json` / credential helpers on PATH) — no per-workspace
+// registry plumbing needed for the operator-managed case. The bound secrets reach the CONTAINER via `--env NAME`
+// (dockerRunArgs); HOME/PATH stay on the docker CLI, never passed into the container.
+export function stdioEnv(secrets: Record<string, string>): Record<string, string> {
   const env: Record<string, string> = { ...secrets };
   if (process.env.PATH) env.PATH = process.env.PATH;
   if (process.env.HOME) env.HOME = process.env.HOME;

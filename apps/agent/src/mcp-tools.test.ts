@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { dockerRunArgs, imageAllowed, isBaseToolReadOnly, isDefaultBaseTool } from "./mcp-tools.js";
+import { describe, expect, it, vi } from "vitest";
+import { dockerRunArgs, imageAllowed, isBaseToolReadOnly, isDefaultBaseTool, stdioEnv } from "./mcp-tools.js";
 
 // The base control-plane surface is bridge-all: every entity's reads AND mutations reach the agent, and safety lives
 // in the layers (RBAC + the session's permission mode over the gate), not in surface shaping. These predicates are
@@ -137,5 +137,22 @@ describe("imageAllowed — operator stdio image allowlist", () => {
 
   it("refuses an image that is on no allowlist entry", () => {
     expect(imageAllowed("attacker/backdoor", ["grafana/mcp-grafana", "crystaldba/"])).toBe(false);
+  });
+});
+
+describe("stdioEnv — the docker CLI process environment", () => {
+  it("carries the bound secrets + HOME + PATH, and does not leak the agent's own env vars", () => {
+    vi.stubEnv("SECRET_ON_AGENT", "leak-me");
+    vi.stubEnv("AWS_ACCESS_KEY_ID", "leak-too");
+    const env = stdioEnv({ DATABASE_URI: "postgres://u:p@h/db" });
+    expect(env.DATABASE_URI).toBe("postgres://u:p@h/db"); // bound secret → passed to the container via --env NAME
+    if (process.env.PATH) expect(env.PATH).toBe(process.env.PATH); // forwarded so the docker CLI resolves
+    if (process.env.HOME) expect(env.HOME).toBe(process.env.HOME); // forwarded → private image pulls via host `docker login`
+    // The docker CLI env is exactly {bound secrets} + PATH/HOME — the agent's OWN secrets are never forwarded.
+    const allowed = new Set(["DATABASE_URI", "PATH", "HOME"]);
+    expect(Object.keys(env).every((k) => allowed.has(k))).toBe(true);
+    expect(env.SECRET_ON_AGENT).toBeUndefined();
+    expect(env.AWS_ACCESS_KEY_ID).toBeUndefined();
+    vi.unstubAllEnvs();
   });
 });
