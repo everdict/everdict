@@ -13,6 +13,7 @@ import {
   fmtDateHeading,
   fmtDateTime,
   fmtDateTimeFull,
+  fmtElapsed,
   fmtSubject,
   fmtTimeOnly,
 } from '@/shared/lib/format'
@@ -20,7 +21,7 @@ import { usePersistentFilters } from '@/shared/lib/use-persistent-filters'
 import { cn } from '@/shared/lib/utils'
 import { UserAvatar } from '@/shared/ui/avatar'
 import { Button } from '@/shared/ui/button'
-import { EntityRef, MetricChip, ModelChip, SubsetChip } from '@/shared/ui/chip'
+import { EntityRef, MetricChip, ModelChip, RuntimeChip, SubsetChip } from '@/shared/ui/chip'
 import { Combobox } from '@/shared/ui/combobox'
 import { EmptyState } from '@/shared/ui/empty-state'
 import { Input } from '@/shared/ui/input'
@@ -42,16 +43,39 @@ const FILTER_DEFAULTS = {
   user: '',
 }
 
+// The runtime a batch ran on → a display label (no link — the whole card is already a <Link>, so a nested <a> is
+// invalid). A registered runtime's id IS its name; a self-hosted runner shows its friendly device name (resolved
+// from the workspace roster passed in), and the bare pools resolve to their "(any)" labels. Mirror of the detail
+// page's runtimeDisplay (minus the href), kept in sync with it.
+function runtimeChipLabel(
+  target: string,
+  opts: {
+    runnerLabelOf: (id: string) => string | undefined
+    poolPersonal: string
+    poolWorkspace: string
+  }
+): string {
+  const { runnerLabelOf, poolPersonal, poolWorkspace } = opts
+  if (target === 'self') return poolPersonal
+  if (target === 'self:ws') return poolWorkspace
+  if (target.startsWith('self:ws:')) return runnerLabelOf(target.slice('self:ws:'.length)) ?? target
+  if (target.startsWith('self:')) return runnerLabelOf(target.slice('self:'.length)) ?? target
+  return target // registered runtime id — shown as-is
+}
+
 // Scorecard list — same pattern as the dataset list (search + Combobox filter + sort + runner avatar).
 export function ScorecardList({
   workspace,
   scorecards,
   authors,
+  runnerLabels,
   viewer,
 }: {
   workspace: string
   scorecards: ScorecardRecord[]
   authors: Record<string, Author>
+  // Self-hosted runner id → friendly device name, for resolving a row's self:<id> runtime to a readable chip.
+  runnerLabels: Record<string, string>
   // Delete gating (mirrors the harness/judge list-row trash): a workspace admin deletes any terminal batch, a
   // member only their own. The control plane is the final enforcer — this only pre-hides the button.
   viewer: { subject?: string; admin: boolean }
@@ -405,6 +429,16 @@ export function ScorecardList({
                 const judges = s.judgeModels ?? []
                 const selectable = canDeleteRow(s)
                 const isSelected = selected.has(s.id)
+                // Runtime the batch ran on (self-hosted names resolved to device labels); unset on legacy·ingest rows.
+                const runtimeText = s.runtime
+                  ? runtimeChipLabel(s.runtime, {
+                      runnerLabelOf: (id) => runnerLabels[id],
+                      poolPersonal: t('runtimePoolPersonal'),
+                      poolWorkspace: t('runtimePoolWorkspace'),
+                    })
+                  : undefined
+                // Wall-clock duration (submit → finish) is only meaningful once terminal — a live batch has no end yet.
+                const terminal = s.status !== 'queued' && s.status !== 'running'
                 return (
                   // Fixed-format card — 3 lines (dataset/harness/aggregate), no arrow·inline name. Status is a color icon only.
                   <Link
@@ -514,6 +548,14 @@ export function ScorecardList({
                                 <OriginChip origin={s.origin} />
                               </span>
                             ) : null}
+                            {runtimeText ? (
+                              <span
+                                className="hidden shrink-0 sm:inline-flex"
+                                title={t('runtimeTitle')}
+                              >
+                                <RuntimeChip label={runtimeText} />
+                              </span>
+                            ) : null}
                           </div>
                         </>
                       )}
@@ -575,6 +617,17 @@ export function ScorecardList({
                           ? fmtTimeOnly(s.createdAt, timeZone)
                           : fmtDateTime(s.createdAt, timeZone)}
                       </time>
+                      {/* Wall-clock duration (submit → finish) — a dash while the batch is still live (no end yet). */}
+                      <span
+                        className="hidden w-[54px] text-right font-mono text-[11px] text-muted-foreground sm:block"
+                        title={t('durationTitle')}
+                      >
+                        {terminal ? (
+                          fmtElapsed(s.createdAt, s.updatedAt)
+                        ) : (
+                          <span className="text-faint">–</span>
+                        )}
+                      </span>
                       <span className="flex w-5 justify-end">
                         <StatusIcon status={s.status} />
                       </span>

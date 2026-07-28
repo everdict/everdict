@@ -3,6 +3,7 @@ import { getTranslations } from 'next-intl/server'
 
 import { ScorecardList } from '@/widgets/scorecard-list'
 import { membersSchema } from '@/entities/member'
+import { runnersResponseSchema } from '@/entities/runner'
 import { scorecardsSchema } from '@/entities/scorecard'
 import { can } from '@/shared/auth/can'
 import { currentPrincipal } from '@/shared/auth/principal'
@@ -44,6 +45,23 @@ export default async function ScorecardsPage({
       ...(m.avatarUrl ? { avatarUrl: m.avatarUrl } : {}),
     }
 
+  // Self-hosted runner device names for the per-row runtime chip — resolve self:<id> / self:ws:<id> to a friendly
+  // label (bare pools self / self:ws carry no id, so they need no roster). Fetched only when some row names a specific
+  // runner; best-effort like the members join, so a failed fetch just falls back to the raw runtime id.
+  const runnerLabels: Record<string, string> = {}
+  if (
+    scorecards.some(
+      (s) => s.runtime !== undefined && s.runtime.startsWith('self:') && s.runtime !== 'self:ws'
+    )
+  ) {
+    try {
+      const roster = runnersResponseSchema.parse(await controlPlane.listWorkspaceRunners(ctx))
+      for (const r of roster.runners) runnerLabels[r.id] = r.label
+    } catch {
+      // roster fetch failed → the chip shows the raw runtime id
+    }
+  }
+
   const canRun = can(principal?.roles, 'scorecards:run')
   // Row-trash gating info for the list: an admin deletes any terminal batch, a member only their own.
   const viewer = {
@@ -58,10 +76,7 @@ export default async function ScorecardsPage({
         description={t('description')}
         actions={
           canRun ? (
-            <Link
-              href={`/${workspace}/scorecards/new`}
-              className={buttonVariants({ size: 'sm' })}
-            >
+            <Link href={`/${workspace}/scorecards/new`} className={buttonVariants({ size: 'sm' })}>
               {t('run')}
             </Link>
           ) : null
@@ -77,6 +92,7 @@ export default async function ScorecardsPage({
           workspace={workspace}
           scorecards={scorecards}
           authors={authors}
+          runnerLabels={runnerLabels}
           viewer={viewer}
         />
       )}
