@@ -647,8 +647,17 @@ export interface AllocLike {
   ID?: string;
   ClientStatus?: string;
   TaskGroup?: string;
+  CreateIndex?: number; // creation order — the CURRENT alloc of a group is the newest (see currentGroupAlloc)
   AllocatedResources?: { Shared?: { Ports?: AllocPort[] } };
   Resources?: { Networks?: Array<{ IP?: string; DynamicPorts?: AllocPort[]; ReservedPorts?: AllocPort[] }> };
+}
+
+// The CURRENT alloc of a group — newest CreateIndex wins. After a task restart / reschedule / warm re-ensure the
+// allocations list STILL contains the previous dead alloc until GC; judging that stale terminal alloc ("failed")
+// while the current one was running made the first poll throw "Topology alloc failed" on a healthy topology.
+// Pure — verdicts must only ever be made on the alloc this deploy actually owns NOW.
+export function currentGroupAlloc(allocs: AllocLike[], group: string): AllocLike | undefined {
+  return allocs.filter((a) => a.TaskGroup === group).sort((a, b) => (b.CreateIndex ?? 0) - (a.CreateIndex ?? 0))[0];
 }
 
 export interface ResolvedPort {

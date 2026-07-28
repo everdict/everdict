@@ -677,3 +677,54 @@ describe("NomadTopologyRuntime.diagnose", () => {
     expect(await erroring.diagnose(SPEC)).toBeUndefined();
   });
 });
+
+// B5 — store probe demotion: over the CLI, "store not ready" and a broken exec path (no nomad binary / no ACL /
+// no probe binary in the image) reject identically, and the old hard fail bricked healthy deploys.
+describe("NomadTopologyRuntime — store probe is best-effort", () => {
+  it("an exec path that can never probe no longer fails the deploy after the budget (demote, then proceed)", async () => {
+    // Silo path (no zone, provisionDependencies) — no tenant DDL, so the throwing exec exercises ONLY the probe.
+    // The allocations list also carries a STALE failed alloc so the currency fix is exercised on the same poll.
+    const siloGroup = "everdict-store-default-postgres"; // dedicatedStoreGroup("default", "postgres")
+    const http: NomadHttp = {
+      async request(_method, path) {
+        if (path.includes("/allocations")) {
+          return {
+            status: 200,
+            text: JSON.stringify([
+              { ID: "a-old", TaskGroup: siloGroup, ClientStatus: "failed", CreateIndex: 1 },
+              { ID: "a-new", TaskGroup: siloGroup, ClientStatus: "running", CreateIndex: 2 },
+            ]),
+          };
+        }
+        if (path.startsWith("/v1/allocation/")) {
+          return {
+            status: 200,
+            text: JSON.stringify({
+              ID: "a-new",
+              TaskGroup: siloGroup,
+              AllocatedResources: { Shared: { Ports: [{ Label: "store", Value: 35432, HostIP: "10.0.0.7" }] } },
+            }),
+          };
+        }
+        return { status: 200, text: "[]" };
+      },
+    };
+    const exec: NomadExec = {
+      async exec() {
+        throw new Error("spawn nomad ENOENT"); // no nomad CLI on the control plane — the probe can NEVER pass
+      },
+    };
+    // Pre-fix: UpstreamError "Timed out waiting for the store to become ready" after the probe budget
+    // (and, separately, the stale failed alloc alone threw "Topology alloc failed" on the first poll).
+    await expect(
+      new NomadTopologyRuntime({
+        addr: "http://nomad",
+        http,
+        exec,
+        pollIntervalMs: 1,
+        maxPolls: 2,
+        provisionDependencies: true,
+      }).ensureTopology(SPEC),
+    ).resolves.toBeDefined();
+  });
+});

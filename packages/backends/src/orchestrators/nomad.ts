@@ -140,6 +140,16 @@ export interface NomadTaskEvent {
   Details?: Record<string, string>;
 }
 
+// The CURRENT alloc of a dispatch job — desired-run allocs first, newest CreateIndex wins. A task restart or
+// reschedule under the SAME job id leaves the previous dead alloc in the list until GC, and the old `allocs[0]`
+// could read the PAST alloc's terminal state (and later its logs) as this case's result. Pure/generic — the
+// list-stub shapes vary per call site ("DesiredStatus" is "run" for the alloc the scheduler currently wants,
+// "stop"/"evict" for superseded ones).
+export function currentAlloc<T extends { CreateIndex?: number; DesiredStatus?: string }>(allocs: T[]): T | undefined {
+  const sorted = [...allocs].sort((a, b) => (b.CreateIndex ?? 0) - (a.CreateIndex ?? 0));
+  return sorted.find((a) => a.DesiredStatus === "run") ?? sorted[0];
+}
+
 export function eventsIndicateOom(events: NomadTaskEvent[]): boolean {
   // Details.oom_killed carries "true"/"false" — the docker driver may report the kill ONLY there
   // (Type "Terminated", message "Exit Code: 137"), so a text match on "oom" alone misses it. Exit code 137
@@ -894,8 +904,11 @@ export class NomadBackend implements Backend, Recoverable, Observable, Shellable
       const nsq = ns ? `?namespace=${encodeURIComponent(ns)}` : "";
       const allocsRes = await this.http.request("GET", `/v1/job/${encodeURIComponent(newest.ID)}/allocations${nsq}`);
       if (allocsRes.status >= 300) return undefined;
-      const alloc = (JSON.parse(allocsRes.text) as Array<{ ID: string }>)[0];
-      if (!alloc) return undefined; // still queued — nothing to tail yet
+      // The CURRENT alloc's log file — a stale terminal alloc's file used to be tailed as "live progress".
+      const alloc = currentAlloc(
+        JSON.parse(allocsRes.text) as Array<{ ID: string; CreateIndex?: number; DesiredStatus?: string }>,
+      );
+      if (!alloc?.ID) return undefined; // still queued — nothing to tail yet
       const nsq2 = ns ? `&namespace=${encodeURIComponent(ns)}` : "";
       const logs = await this.http.request(
         "GET",
@@ -1103,8 +1116,16 @@ export class NomadBackend implements Backend, Recoverable, Observable, Shellable
       if (signal?.aborted) throw new InternalError("CANCELLED", { jobId }, "dispatch aborted while waiting for alloc.");
       const res = await this.http.request("GET", `/v1/job/${jobId}/allocations${nsq}`);
       if (res.status < 300) {
-        const allocs = JSON.parse(res.text) as Array<{ ID: string; ClientStatus: string }>;
-        const alloc = allocs[0];
+        const allocs = JSON.parse(res.text) as Array<{
+          ID: string;
+          ClientStatus: string;
+          CreateIndex?: number;
+          DesiredStatus?: string;
+        }>;
+        // The CURRENT alloc only — the unique per-dispatch job id shields against CROSS-dispatch staleness, but an
+        // in-job restart/reschedule still lists the previous dead alloc, and allocs[0] could judge (and later read
+        // the logs of) the PAST alloc as this case's result.
+        const alloc = currentAlloc(allocs);
         // No alloc yet: an UNPLACEABLE job (resources beyond every node) never produces one — the scheduler
         // parks a BLOCKED evaluation instead, and this loop would grind the full 30-minute budget on a job
         // that can never start. Surface the blocked verdict (with the exhausted dimensions) after a bounded

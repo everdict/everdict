@@ -9,6 +9,7 @@ import {
   type NomadHttp,
   type StreamChild,
   buildNomadJob,
+  currentAlloc,
   eventsIndicateOom,
   fetchHttp,
   nomadAllocAgeSeconds,
@@ -1236,5 +1237,22 @@ describe("nomad resource parse helpers (pure)", () => {
     expect(nomadNodeAllocated(text)).toEqual({ cpuUsed: 700, memoryMbUsed: 1536 });
     expect(nomadNodeAllocated("not json")).toEqual({});
     expect(nomadNodeAllocated(JSON.stringify([]))).toEqual({});
+  });
+});
+
+// B5 — alloc currency: verdicts/logs must come from the alloc the dispatch owns NOW, never a pre-GC leftover.
+describe("currentAlloc (allocation currency)", () => {
+  it("prefers the desired-run alloc over a superseded dead one, regardless of list order", () => {
+    const stale = { ID: "a-old", ClientStatus: "failed", CreateIndex: 10, DesiredStatus: "stop" };
+    const live = { ID: "a-new", ClientStatus: "running", CreateIndex: 20, DesiredStatus: "run" };
+    // Nomad lists in arbitrary order — the old allocs[0] read the PAST alloc's terminal state as the result.
+    expect(currentAlloc([stale, live])?.ID).toBe("a-new");
+    expect(currentAlloc([live, stale])?.ID).toBe("a-new");
+  });
+
+  it("falls back to the newest CreateIndex when no alloc is desired-run (all terminal)", () => {
+    const first = { ID: "a1", ClientStatus: "failed", CreateIndex: 1, DesiredStatus: "stop" };
+    const second = { ID: "a2", ClientStatus: "complete", CreateIndex: 2, DesiredStatus: "stop" };
+    expect(currentAlloc([first, second])?.ID).toBe("a2");
   });
 });

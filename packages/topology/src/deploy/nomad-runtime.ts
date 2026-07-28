@@ -25,6 +25,7 @@ import {
   buildDedicatedStoreJob,
   buildNomadTopologyJob,
   buildSharedStoreJob,
+  currentGroupAlloc,
   dedicatedStoreGroup,
   dedicatedStoreJobId,
   needsPerServiceGroups,
@@ -476,7 +477,11 @@ export class NomadTopologyRuntime implements TopologyRuntime {
       }
       await new Promise((r) => setTimeout(r, interval));
     }
-    throw new UpstreamError("UPSTREAM_ERROR", { store }, "Timed out waiting for the store to become ready");
+    // Best-effort DEMOTION on exhaustion (B5): over the CLI a "store not ready yet" and a broken exec path (no
+    // `nomad` binary on the control plane, no alloc-exec ACL, no pg_isready/redis-cli in the store image) reject
+    // IDENTICALLY, and the hard fail here bricked deploys of perfectly healthy stores for the full probe budget.
+    // The probe is an ORDERING optimization, not the source of truth — a genuinely-down store still fails honestly
+    // at service boot / drive time with its own connect error. So: wait the budget, then proceed.
   }
 
   // Resolve WHERE a store's per-case slice lives + which alloc/task to exec in — the same decision the deploy made.
@@ -708,14 +713,15 @@ export class NomadTopologyRuntime implements TopologyRuntime {
       const res = await this.http.request("GET", `/v1/job/${jobId}/allocations${this.nsq(namespace, "?")}`);
       if (res.status < 300) {
         const allocs = JSON.parse(res.text) as AllocLike[];
-        const mine = allocs.filter((a) => a.TaskGroup === group);
-        const failed = mine.find((a) => a.ClientStatus === "failed" || a.ClientStatus === "lost");
-        if (failed) {
-          throw new UpstreamError("UPSTREAM_ERROR", { group, status: failed.ClientStatus }, "Topology alloc failed");
+        // Judge ONLY the group's CURRENT alloc: a stale terminal alloc (pre-GC leftover of a reschedule / warm
+        // re-ensure) used to be scanned too, and its "failed" threw on the FIRST poll while the current alloc was
+        // healthy — an entire deploy misdiagnosed by a past alloc.
+        const current = currentGroupAlloc(allocs, group);
+        if (current && (current.ClientStatus === "failed" || current.ClientStatus === "lost")) {
+          throw new UpstreamError("UPSTREAM_ERROR", { group, status: current.ClientStatus }, "Topology alloc failed");
         }
-        const running = mine.find((a) => a.ClientStatus === "running");
-        if (running?.ID) {
-          const full = await this.http.request("GET", `/v1/allocation/${running.ID}${this.nsq(namespace, "?")}`);
+        if (current?.ClientStatus === "running" && current.ID) {
+          const full = await this.http.request("GET", `/v1/allocation/${current.ID}${this.nsq(namespace, "?")}`);
           if (full.status < 300) return JSON.parse(full.text) as AllocLike;
         }
       }

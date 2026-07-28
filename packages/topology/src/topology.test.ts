@@ -23,6 +23,7 @@ import {
   buildDedicatedStoreJob,
   buildNomadTopologyJob,
   buildSharedStoreJob,
+  currentGroupAlloc,
   needsPerServiceGroups,
   nomadServiceName,
   peerEnvName,
@@ -2380,5 +2381,19 @@ describe("ServiceTopologyBackend — completion timeout carries the topology dia
     expect(err).toBeInstanceOf(InternalError);
     expect((err as InternalError).message).toContain("Topology health: agent-server: OOM-killed (exit 137)");
     expect((err as InternalError).extra?.topologyHealth).toBe("agent-server: OOM-killed (exit 137), restarts=3");
+  });
+});
+
+// B5 — allocation currency for topology groups: verdicts must come from the alloc the deploy owns NOW.
+describe("currentGroupAlloc (topology allocation currency)", () => {
+  it("picks the newest alloc of the group — a stale pre-GC failed alloc never fails a healthy topology", () => {
+    const stale: AllocLike = { ID: "a-old", TaskGroup: SERVICE_GROUP_NAME, ClientStatus: "failed", CreateIndex: 5 };
+    const live: AllocLike = { ID: "a-new", TaskGroup: SERVICE_GROUP_NAME, ClientStatus: "running", CreateIndex: 9 };
+    const other: AllocLike = { ID: "x", TaskGroup: "other-group", ClientStatus: "failed", CreateIndex: 99 };
+    // Pre-fix the failed-scan looked at EVERY alloc of the group, so [stale, live] threw "Topology alloc failed"
+    // on the first poll after a reschedule / warm re-ensure.
+    expect(currentGroupAlloc([stale, live, other], SERVICE_GROUP_NAME)?.ID).toBe("a-new");
+    expect(currentGroupAlloc([live, stale], SERVICE_GROUP_NAME)?.ID).toBe("a-new");
+    expect(currentGroupAlloc([other], SERVICE_GROUP_NAME)).toBeUndefined();
   });
 });
