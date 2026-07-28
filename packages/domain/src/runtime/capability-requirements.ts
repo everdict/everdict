@@ -57,19 +57,26 @@ function harnessNeedsGpu(spec: HarnessSpec): boolean {
   return false;
 }
 
-// The full set of capabilities a JOB requires = its case requirements ∪ (for a service/topology harness) the
-// topology's needs: docker (it stands up containers) + each service's intrinsic OS (os-windows/os-macos). This is the
-// single "what does this job need" function the placement gates use — the registered-runtime dispatcher
-// (runtimeSatisfies vs RuntimeSpec.capabilities) and the self-hosted runner hub (vs a runner's probed capabilities) —
-// so both reject a job a target can't run BEFORE placing it (e.g. a Windows-service topology on a Linux-only target,
-// which would otherwise sit constraint-filtered / pending forever). Pure. Design: docs/architecture/heterogeneous-topology-placement.md.
+// The full set of capabilities a JOB requires — the single "what does this job need" function the placement gates
+// use: the registered-runtime dispatcher (runtimeSatisfies vs RuntimeSpec.capabilities) and the self-hosted runner
+// hub (vs a runner's probed capabilities) — so both reject a job a target can't run BEFORE placing it (e.g. a
+// Windows-service topology on a Linux-only target, which would otherwise sit constraint-filtered / pending forever).
+//
+// For a service/topology harness the CASE-ENV capabilities are deliberately NOT merged in: the topology PROVIDES the
+// case environment itself — the per-case browser comes from provisionBrowserEnv / a declared session service, and
+// repo files ride the front-door request. Merging them (the pre-fix behavior) contradicted the submit-time gate
+// (requiredCapabilitiesForHarness, which never asks for case caps) and made every topology runtime reject browser
+// cases outright, since no runtime advertises "browser". The runtime keeps only what IT must provide: docker + the
+// services' intrinsic OS + gpu (= the harness gate) + the case's isolation ask (sandbox IS a runtime property).
+// Pure. Design: docs/architecture/heterogeneous-topology-placement.md.
 export function requiredCapabilitiesForJob(job: CaseJob): CapabilityName[] {
+  if (job.harnessSpec?.kind === "service") {
+    const caps = new Set<CapabilityName>(requiredCapabilitiesForHarness(job.harnessSpec));
+    if (job.evalCase.placement?.isolation) caps.add("sandbox");
+    return [...caps];
+  }
   const caps = new Set<CapabilityName>(requiredCapabilities(job.evalCase));
   if (job.harnessSpec && harnessNeedsGpu(job.harnessSpec)) caps.add("gpu"); // resources.gpu → a gpu-capable runtime
-  if (job.harnessSpec?.kind === "service") {
-    caps.add("docker"); // a topology stands up containers even when the case carries no image
-    for (const c of requiredCapabilitiesForTopology(job.harnessSpec)) caps.add(c);
-  }
   return [...caps];
 }
 

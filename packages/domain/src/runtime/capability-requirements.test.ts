@@ -113,6 +113,26 @@ describe("requiredCapabilitiesForJob — case ∪ topology (the shared placement
     ]);
   });
 
+  it("a service harness does NOT require the case-env caps the topology itself provides (browser case ≠ browser runtime)", () => {
+    // Given a browser-env case dispatched to a topology harness — the topology provisions the per-case browser,
+    // so requiring "browser" of the RUNTIME (pre-fix) rejected every browser case on every topology runtime and
+    // contradicted the submit-time gate (requiredCapabilitiesForHarness).
+    const browserJob = job({ evalCase: base({ env: { kind: "browser" } }), harnessSpec: topo([svc("hub")]) });
+    expect(requiredCapabilitiesForJob(browserJob)).toEqual(["docker"]);
+    // The dispatch-time set equals the submit-time set for the same harness — no gate contradiction.
+    expect(requiredCapabilitiesForJob(browserJob).sort()).toEqual(
+      requiredCapabilitiesForHarness(topo([svc("hub")])).sort(),
+    );
+  });
+
+  it("a service harness keeps the case's isolation ask — sandbox is a runtime property, not topology-provided", () => {
+    const isolated = job({
+      evalCase: base({ env: { kind: "browser" }, placement: { isolation: "gvisor" } }),
+      harnessSpec: topo([svc("hub")]),
+    });
+    expect(requiredCapabilitiesForJob(isolated).sort()).toEqual(["docker", "sandbox"]);
+  });
+
   it("requiredCapabilitiesForHarness — the submit-time (case-independent) input", () => {
     expect(requiredCapabilitiesForHarness(topo([svc("hub")]))).toEqual(["docker"]); // linux topology
     expect(requiredCapabilitiesForHarness(topo([svc("hub"), svc("win", "windows")])).sort()).toEqual([
