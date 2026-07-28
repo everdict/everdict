@@ -1,4 +1,10 @@
-import { BadRequestError, type RegistryAuth, type ServiceHarnessSpec, type TopologyService } from "@everdict/contracts";
+import {
+  BadRequestError,
+  type RegistryAuth,
+  type ServiceHarnessSpec,
+  type TopologyService,
+  serviceIsHostExec,
+} from "@everdict/contracts";
 import { flattenEnv, imageUsesRegistryHost } from "@everdict/domain";
 import { DEFAULT_BROWSER_IMAGE } from "./browser-image.js";
 import {
@@ -27,7 +33,9 @@ interface NomadTopoTask {
   Name: string;
   Driver: string;
   Config: {
-    image: string;
+    image?: string; // docker driver (containerized services); absent for raw_exec (host-exec services)
+    // raw_exec driver (host-exec services) — the program + args run directly on the node (no container).
+    command?: string;
     runtime?: string;
     ports?: string[];
     args?: string[];
@@ -41,6 +49,8 @@ interface NomadTopoTask {
   Resources: { CPU: number; MemoryMB: number };
   // Rendered templates (peer address discovery for the per-service-group model — Nomad-native service catalog → env).
   Templates?: NomadTemplate[];
+  // Pre-start artifact fetch (host-exec services) — e.g. a zip/exe the raw_exec command runs from the task dir.
+  Artifacts?: Array<{ GetterSource: string }>;
 }
 // Nomad template stanza — renders the service catalog into an env file so a service reaches its peers by address
 // (the Nomad-native, no-Consul analog of K8s Service DNS). ChangeMode "restart" re-resolves on a peer reschedule.
@@ -69,6 +79,8 @@ interface NomadDynamicPort {
 interface NomadNetwork {
   Mode?: string; // Connect requires "bridge"
   DynamicPorts: NomadDynamicPort[];
+  // host-exec services bind their declared port directly on the node — reserve it so discovery yields the real address.
+  ReservedPorts?: Array<{ Label: string; Value: number }>;
 }
 // Consul Connect: group service + Envoy sidecar (+ upstreams to other mesh services). The mesh enforces via intentions.
 export interface NomadConnectUpstream {
@@ -255,10 +267,11 @@ function osConstraint(os: "linux" | "windows" | "macos" | undefined): NomadConst
 }
 
 // Does the topology need per-service groups (K8s-style) instead of the single co-located group? True when it is
-// heterogeneous (a service needs a non-Linux OS, so it can't share a Linux netns) OR scaled (replicas>1 can't bind
-// the same port twice in a shared netns). A homogeneous, single-instance Linux topology stays co-located (no regression).
+// heterogeneous (a service needs a non-Linux OS, so it can't share a Linux netns), scaled (replicas>1 can't bind
+// the same port twice in a shared netns), OR carries a host-exec service (raw_exec has no netns to co-locate in).
+// A homogeneous, single-instance Linux container topology stays co-located (no regression).
 export function needsPerServiceGroups(spec: ServiceHarnessSpec): boolean {
-  return spec.services.some((s) => (s.requires?.os ?? "linux") !== "linux" || s.replicas > 1);
+  return spec.services.some((s) => (s.requires?.os ?? "linux") !== "linux" || s.replicas > 1 || serviceIsHostExec(s));
 }
 
 // Nomad-native service name a peer registers under (stable per harness/service/zone → discoverable via the catalog).
@@ -424,6 +437,14 @@ function serviceConfig(
   svc: ServiceHarnessSpec["services"][number],
   opts: NomadTopologyOptions,
 ): NomadTopoTask["Config"] {
+  // The docker-driver config — host-exec services take the raw_exec branch in buildPerServiceGroups, never this one.
+  if (svc.image === undefined) {
+    throw new BadRequestError(
+      "BAD_REQUEST",
+      { service: svc.name },
+      `Containerized service "${svc.name}" has no image.`,
+    );
+  }
   const auth = opts.registryAuth;
   const config: NomadTopoTask["Config"] = opts.runtime
     ? { image: svc.image, runtime: opts.runtime }
@@ -495,9 +516,23 @@ function buildColocatedGroup(spec: ServiceHarnessSpec, opts: NomadTopologyOption
 // Nomad-native discovery (Consul optional), peers resolved by an injected EVERDICT_SVC_<PEER> address (no DNS needed).
 function buildPerServiceGroups(spec: ServiceHarnessSpec, opts: NomadTopologyOptions): NomadTopoGroup[] {
   return spec.services.map((svc) => {
-    const config = serviceConfig(svc, opts);
+    // host-exec (raw_exec): the program runs directly on the node — no image, no docker driver, no netns. The
+    // portable Windows-without-Docker path: `requires.os: windows` used to be satisfiable only by a docker-capable
+    // Windows node, so an otherwise-fine native service could never run.
+    const hostExec = serviceIsHostExec(svc);
+    const command = svc.exec?.command ?? [];
+    if (hostExec && command.length === 0) {
+      throw new BadRequestError(
+        "BAD_REQUEST",
+        { service: svc.name },
+        `Host-exec service "${svc.name}" requires exec.command.`,
+      );
+    }
+    const config: NomadTopoTask["Config"] = hostExec
+      ? { command: command[0], ...(command.length > 1 ? { args: command.slice(1) } : {}) }
+      : serviceConfig(svc, opts);
     const label = servicePortLabel(svc.name);
-    if (svc.port !== undefined) config.ports = [label];
+    if (svc.port !== undefined && !hostExec) config.ports = [label];
     // Peer discovery: render each declared `needs` peer's address (default EVERDICT_SVC_<PEER>) + each `wiring` entry's
     // BYO env name + any {{peer}}-referencing svc.env value into env from the native catalog (ChangeMode restart so a
     // peer reschedule re-resolves). A service with no such reference gets no template. The no-DNS Nomad analog of K8s DNS.
@@ -508,19 +543,25 @@ function buildPerServiceGroups(spec: ServiceHarnessSpec, opts: NomadTopologyOpti
       : undefined;
     const task: NomadTopoTask = {
       Name: svc.name,
-      Driver: "docker",
+      Driver: hostExec ? "raw_exec" : "docker",
       Config: config,
       // Store endpoints are build-time-known (opts.storeValues) even on the per-service path — only PEER addresses need
       // the runtime catalog template, so dependency inject renders straight into Env here too.
       Env: { ...staticEnv, ...opts.storeEnv, ...dependencyInjectEnv(spec, opts.storeValues ?? {}, svc.name) },
       Resources: { CPU: svc.resources?.cpu ?? 1000, MemoryMB: svc.resources?.memoryMb ?? 1024 },
       ...(template ? { Templates: [template] } : {}),
+      // Pre-start artifact fetch (host-exec) — a zip/exe the raw_exec command runs from the task dir.
+      ...(hostExec && svc.exec?.artifact ? { Artifacts: [{ GetterSource: svc.exec.artifact }] } : {}),
     };
     // Windows/macOS groups can't use the Linux bridge netns — omit Mode (host networking) there.
+    // A host-exec process has no port mapping at all: it binds its DECLARED port directly on the node, so that port
+    // is RESERVED (discovery then yields the real address) instead of dynamically mapped.
     const kernel = svc.requires?.os ?? "linux";
     const network: NomadNetwork | undefined =
       svc.port !== undefined
-        ? { ...(kernel === "linux" ? { Mode: "bridge" } : {}), DynamicPorts: [{ Label: label, To: svc.port }] }
+        ? hostExec
+          ? { DynamicPorts: [], ReservedPorts: [{ Label: label, Value: svc.port }] }
+          : { ...(kernel === "linux" ? { Mode: "bridge" } : {}), DynamicPorts: [{ Label: label, To: svc.port }] }
         : undefined;
     return {
       Name: perServiceGroupName(svc.name),

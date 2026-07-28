@@ -49,6 +49,11 @@ Schema is the source of truth; the type is `z.infer`. `.parse()` throws on a bad
 no default-to-first**. Discriminated unions carry the shape variants:
 - `HarnessSpecSchema` (`harness-spec.ts`) — `process | service | command`. `command` = declarative CLI
   agent (no code). `service` carries topology (`TopologyService`, `FrontDoorSpec`, `TraceSourceSpec`).
+  `TopologyService.image` is OPTIONAL: a host-exec service (`exec: {kind:"host", command, artifact?}` — runs
+  directly on the node, Nomad raw_exec) carries none; the image↔exec pairing is enforced by `validateServiceExec`
+  on the services ARRAY (the object schemas stay plain ZodObjects for `.omit`/discriminatedUnion). FrontDoor
+  completion is a 5-mode union (`sync|poll|stream|callback|trace`); `trace` bans `returned` correlate +
+  `traceInline` via the spec-level superRefine.
 - `HarnessTemplateSpec` + `HarnessInstanceSpec` (`harness-template.ts`) — template (structure, versioned by
   shape) + `pins`/`overrides` (deltas); `resolveHarnessInstance()` merges → a resolved `HarnessSpec`,
   throwing `BadRequestError` on a missing/mismatched slot.

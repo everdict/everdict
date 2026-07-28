@@ -478,3 +478,62 @@ describe("HarnessInstanceSpec.pinSources (store provenance annotation)", () => {
     ).toBe(false);
   });
 });
+
+describe("resolveHarnessInstance — host-exec services (no container, no image pin)", () => {
+  const winTemplate: HarnessTemplateSpec = HarnessTemplateSpecSchema.parse({
+    kind: "service",
+    category: "topology",
+    id: "native-win",
+    version: "1",
+    services: [
+      { name: "agent", needs: [] },
+      {
+        name: "win-ui",
+        needs: [],
+        requires: { os: "windows" },
+        exec: { kind: "host", command: ["C:/drivers/ui-driver.exe", "--serve"] },
+      },
+    ],
+    dependencies: [],
+    frontDoor: { service: "agent", submit: "POST /runs" },
+    traceSource: { kind: "otel", endpoint: "http://o:4318" },
+  });
+
+  it("a host-exec service needs no pin — it resolves imageless with its exec carried through", () => {
+    const instance = HarnessInstanceSpecSchema.parse({
+      template: { id: "native-win", version: "1" },
+      id: "native-win",
+      version: "1.0.0",
+      pins: { agent: "reg/agent:1" }, // only the containerized service is pinned
+    });
+    const resolved = resolveHarnessInstance(winTemplate, instance);
+    if (resolved.kind !== "service") throw new Error("expected service");
+    const win = resolved.services.find((s) => s.name === "win-ui");
+    expect(win?.image).toBeUndefined();
+    expect(win?.exec).toEqual({ kind: "host", command: ["C:/drivers/ui-driver.exe", "--serve"] });
+  });
+
+  it("pinning an image onto a host-exec slot is a BadRequest (nothing would run it)", () => {
+    const instance = HarnessInstanceSpecSchema.parse({
+      template: { id: "native-win", version: "1" },
+      id: "native-win",
+      version: "1.0.0",
+      pins: { agent: "reg/agent:1", "win-ui": "reg/oops:1" },
+    });
+    expect(() => resolveHarnessInstance(winTemplate, instance)).toThrow(BadRequestError);
+  });
+
+  it("a host-exec template service without exec.command is rejected at the schema boundary", () => {
+    const res = HarnessTemplateSpecSchema.safeParse({
+      kind: "service",
+      category: "topology",
+      id: "bad",
+      version: "1",
+      services: [{ name: "win-ui", exec: { kind: "host" } }],
+      dependencies: [],
+      frontDoor: { service: "win-ui", submit: "POST /runs" },
+      traceSource: { kind: "otel", endpoint: "http://o:4318" },
+    });
+    expect(res.success).toBe(false);
+  });
+});

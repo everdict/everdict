@@ -64,7 +64,9 @@ export type ServiceResources = z.infer<typeof ServiceResourcesSchema>;
 // readinessProbe; nomad: docker volumes + runtime HTTP wait; docker: -v + polling).
 export const TopologyServiceSchema = z.object({
   name: z.string(),
-  image: z.string(),
+  // The container image — required for a containerized service (exec unset / "container"); a host-exec service takes
+  // none (there is no container to run one). Pairing is enforced by validateServiceExec on the services array.
+  image: z.string().optional(),
   port: z.number().int().optional(),
   needs: z.array(z.string()).default([]),
   perRun: z.array(z.string()).default([]),
@@ -87,6 +89,22 @@ export const TopologyServiceSchema = z.object({
     .object({ os: z.enum(["linux", "windows", "macos"]).optional() })
     .strict()
     .optional(),
+  // How the service is REALIZED on a node — "container" (default: a docker/k8s image) | "host" (no container: the
+  // program runs directly on the node, Nomad raw_exec-style). The portable escape hatch for nodes without Docker:
+  // `requires.os: windows` used to be satisfiable ONLY by a docker-capable Windows node, so an otherwise-fine native
+  // Windows service (UI driver, Playwright server exe) could never run. A host service declares `command` (the
+  // program + args — preinstalled on the node, or fetched via `artifact` into the task dir first) and omits `image`.
+  // Realization per runtime: Nomad = raw_exec task (own per-service group; no bridge netns); K8s/Docker = fail-fast
+  // BadRequest (no non-container path there). Capability derivation: a topology needs `docker` only if it has at
+  // least one CONTAINERIZED service, so a pure-host Windows topology gates on os-windows alone.
+  exec: z
+    .object({
+      kind: z.enum(["container", "host"]),
+      command: z.array(z.string()).optional(), // host: the program + args to run on the node
+      artifact: z.string().optional(), // host: optional artifact URL (zip/exe) fetched into the task dir before start
+    })
+    .strict()
+    .optional(),
   // Inject a `needs` peer's runtime coordinates under BYO env var names, so an unmodified third-party image finds its
   // peers under the names IT expects (e.g. Selenium's SE_EVENT_BUS_HOST). Portable: each runtime fills these its own
   // way — co-located Nomad/Docker = the peer's loopback/alias + declared port (static); per-service Nomad = the
@@ -106,6 +124,44 @@ export const TopologyServiceSchema = z.object({
 });
 export type TopologyService = z.infer<typeof TopologyServiceSchema>;
 export type ServiceWiring = NonNullable<TopologyService["wiring"]>[number];
+
+// Is this service realized on the node itself (no container)? The single predicate every consumer branches on.
+export function serviceIsHostExec(svc: Pick<TopologyService, "exec">): boolean {
+  return svc.exec?.kind === "host";
+}
+
+// Pairing rules for the service realization axis (exec) — applied to the services ARRAY (a field-level refine
+// can't cross-check image ↔ exec, and the object schemas must stay plain ZodObjects for .omit/discriminatedUnion).
+// container (default): image required. host: exec.command required; image forbidden (nothing would run it).
+export function validateServiceExec(
+  services: Array<Pick<TopologyService, "name" | "image" | "exec">>,
+  ctx: z.RefinementCtx,
+): void {
+  services.forEach((svc, i) => {
+    if (serviceIsHostExec(svc)) {
+      if (!svc.exec?.command || svc.exec.command.length === 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: [i, "exec", "command"],
+          message: `Host-exec service "${svc.name}" requires exec.command (the program to run on the node).`,
+        });
+      }
+      if (svc.image !== undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: [i, "image"],
+          message: `Host-exec service "${svc.name}" takes no image (it runs directly on the node).`,
+        });
+      }
+    } else if (svc.image === undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: [i, "image"],
+        message: `Containerized service "${svc.name}" requires an image.`,
+      });
+    }
+  });
+}
 
 // The closed {field} vocabulary for dependency env injection (dependencies[].inject), per store kind. These are the
 // coordinates a deployed store exposes to an inject template — the SSOT the schema validates against and
@@ -422,7 +478,8 @@ export const ServiceHarnessSpecSchema = z.object({
   kind: z.literal("service"),
   id: z.string(),
   version: VersionSchema,
-  services: z.array(TopologyServiceSchema),
+  // The array-level refine enforces the image↔exec pairing (the object stays a plain ZodObject for the union).
+  services: z.array(TopologyServiceSchema).superRefine(validateServiceExec),
   dependencies: z.array(TopologyDependencySchema).default([]),
   target: TopologyTargetSchema.optional(),
   frontDoor: FrontDoorSpecSchema,

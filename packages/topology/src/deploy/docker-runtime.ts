@@ -1,9 +1,11 @@
 import {
+  BadRequestError,
   type BrowserSnapshot,
   type ServiceHarnessSpec,
   type ServiceReadiness,
   type StoreReadQuery,
   UpstreamError,
+  serviceIsHostExec,
 } from "@everdict/contracts";
 import { type CdpSocket, captureCdpDom, captureCdpScreenshot } from "../front-door/capture-cdp.js";
 import { DEFAULT_BROWSER_IMAGE } from "./browser-image.js";
@@ -84,6 +86,16 @@ export class DockerTopologyRuntime implements TopologyRuntime {
   }
 
   async ensureTopology(spec: ServiceHarnessSpec): Promise<TopologyHandle> {
+    // The Docker runtime only realizes containers — a host-exec service (raw_exec-style, exec.kind "host") has no
+    // non-container path here. Fail fast and honestly instead of `docker run`-ing an imageless service.
+    const hostSvc = spec.services.find((s) => serviceIsHostExec(s));
+    if (hostSvc) {
+      throw new BadRequestError(
+        "BAD_REQUEST",
+        { service: hostSvc.name },
+        `Host-exec service "${hostSvc.name}" cannot run on the Docker runtime (containers only) — use a Nomad runtime (raw_exec).`,
+      );
+    }
     const key = `${spec.id}@${spec.version}`;
     const cached = this.warm.get(key);
     if (cached) {
@@ -208,6 +220,14 @@ export class DockerTopologyRuntime implements TopologyRuntime {
         const cname = `${network}-${sanitize(svc.name)}`;
         containers.push(cname);
         await this.docker.rm([cname]).catch(() => {}); // idempotent redeploy — remove a leftover same-name container (avoid the non-idempotent --name collision cascade)
+        if (svc.image === undefined) {
+          // ensureTopology already rejected host-exec specs — this guards registry-bypassing callers.
+          throw new BadRequestError(
+            "BAD_REQUEST",
+            { service: svc.name },
+            `Containerized service "${svc.name}" has no image.`,
+          );
+        }
         await this.docker.run({
           name: cname,
           image: svc.image,

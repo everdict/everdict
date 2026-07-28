@@ -125,6 +125,24 @@ describe("requiredCapabilitiesForJob — case ∪ topology (the shared placement
     );
   });
 
+  it("a pure host-exec Windows topology needs os-windows but NOT docker (Windows-without-Docker placement)", () => {
+    // Pre-fix `docker` was unconditional for service harnesses, so `requires.os: windows` was satisfiable
+    // only by a docker-capable Windows node — an otherwise-fine native service could never place.
+    const host: ServiceHarnessSpec["services"][number] = {
+      name: "win-ui",
+      needs: [],
+      perRun: [],
+      replicas: 1,
+      env: {},
+      requires: { os: "windows" },
+      exec: { kind: "host", command: ["C:/drivers/ui-driver.exe"] },
+    };
+    expect(requiredCapabilitiesForHarness(topo([host]))).toEqual(["os-windows"]);
+    expect(requiredCapabilitiesForJob(job({ harnessSpec: topo([host]) }))).toEqual(["os-windows"]);
+    // A mixed topology (any containerized peer) still needs docker.
+    expect(requiredCapabilitiesForHarness(topo([svc("hub"), host])).sort()).toEqual(["docker", "os-windows"]);
+  });
+
   it("a service harness keeps the case's isolation ask — sandbox is a runtime property, not topology-provided", () => {
     const isolated = job({
       evalCase: base({ env: { kind: "browser" }, placement: { isolation: "gvisor" } }),

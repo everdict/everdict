@@ -144,6 +144,7 @@ export {
   requiredCapabilitiesForJob,
   requiredCapabilitiesForTopology,
   runtimeSpecWithCapabilities,
+  topologyNeedsDocker,
 } from "./runtime/capability-requirements.js";
 export { assertHardenedIsolation, isHardenedRuntime } from "./runtime/trust-zone-hardening.js";
 
@@ -179,6 +180,8 @@ export {
   configuredIntegrations,
   selectDefaultCapabilities,
 } from "./capability/capability-defaults.js";
+// capability — spec version diff (base ↔ candidate); shares the spec-diff engine with the harness/judge diffs
+export { diffCapabilitySpecs } from "./capability/capability-diff.js";
 
 // registry — the version algebra every versioned registry shares (from @everdict/registry)
 export {

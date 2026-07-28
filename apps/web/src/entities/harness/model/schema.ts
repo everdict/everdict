@@ -186,9 +186,18 @@ export const serviceWiringSchema = z.object({
 })
 export type ServiceWiring = z.infer<typeof serviceWiringSchema>
 
+// How the service is realized — "container" (default; runs `image`) | "host" (no container: `command` runs directly
+// on the node, Nomad raw_exec). Loose display mirror (the control plane validates the pairing rules).
+export const serviceExecSchema = z.object({
+  kind: z.string(),
+  command: z.array(z.string()).optional(),
+  artifact: z.string().optional(),
+})
+export type ServiceExec = z.infer<typeof serviceExecSchema>
+
 export const topologyServiceSchema = z.object({
   name: z.string(),
-  image: z.string(),
+  image: z.string().optional(), // absent for a host-exec service (exec.kind "host" — it runs no container)
   port: z.number().optional(),
   needs: z.array(z.string()).default([]),
   perRun: z.array(z.string()).default([]),
@@ -199,6 +208,7 @@ export const topologyServiceSchema = z.object({
   readiness: serviceReadinessSchema.optional(),
   wiring: z.array(serviceWiringSchema).optional(),
   requires: serviceRequiresSchema.optional(), // intrinsic OS need → node placement (windows/macos; linux = default, no gate)
+  exec: serviceExecSchema.optional(), // host-exec realization (no container) — display passthrough
 })
 export type TopologyService = z.infer<typeof topologyServiceSchema>
 
@@ -328,6 +338,7 @@ export const templateServiceSchema = z.object({
   readiness: serviceReadinessSchema.optional(),
   wiring: z.array(serviceWiringSchema).optional(),
   requires: serviceRequiresSchema.optional(), // intrinsic OS need (structure, not a pin target)
+  exec: serviceExecSchema.optional(), // host-exec realization (no container, no image pin) — display passthrough
 })
 export type TemplateService = z.infer<typeof templateServiceSchema>
 

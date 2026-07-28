@@ -22,12 +22,18 @@ export interface ExecuteCaseDeps extends CollectTraceDeps {
   registryAuthsFor?: (workspace: string) => Promise<RegistryAuth[]>;
 }
 
-// Every image reference this job can pull — the case image + service-harness service images (+per-dispatch pin override).
+// Every image reference this job can pull — the case image + service-harness service images (+per-dispatch pin
+// override). Host-exec services carry no image and contribute nothing here.
 export function jobImages(job: CaseJob): string[] {
   const images: string[] = [];
   if (job.evalCase.image) images.push(job.evalCase.image);
   const spec = job.harnessSpec;
-  if (spec?.kind === "service") for (const s of spec.services) images.push(job.imagePins?.[s.name] ?? s.image);
+  if (spec?.kind === "service") {
+    for (const s of spec.services) {
+      const image = job.imagePins?.[s.name] ?? s.image;
+      if (image) images.push(image);
+    }
+  }
   return images;
 }
 

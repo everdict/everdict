@@ -33,6 +33,23 @@ export const TemplateServiceSchema = TopologyServiceSchema.omit({ image: true })
 });
 export type TemplateService = z.infer<typeof TemplateServiceSchema>;
 
+// Template services carry no image (pins provide it at instance time) — only the host-exec command rule applies here;
+// the full image↔exec pairing (validateServiceExec) runs on the resolved spec.
+function validateTemplateServiceExec(
+  services: Array<Pick<TemplateService, "name" | "exec">>,
+  ctx: z.RefinementCtx,
+): void {
+  services.forEach((svc, i) => {
+    if (svc.exec?.kind === "host" && (!svc.exec.command || svc.exec.command.length === 0)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: [i, "exec", "command"],
+        message: `Host-exec service "${svc.name}" requires exec.command (the program to run on the node).`,
+      });
+    }
+  });
+}
+
 const templateBase = {
   category: HarnessCategorySchema,
   id: z.string(),
@@ -42,7 +59,7 @@ const templateBase = {
 export const ServiceTemplateSpecSchema = z.object({
   kind: z.literal("service"),
   ...templateBase,
-  services: z.array(TemplateServiceSchema),
+  services: z.array(TemplateServiceSchema).superRefine(validateTemplateServiceExec),
   dependencies: z.array(TopologyDependencySchema).default([]),
   target: TopologyTargetSchema.optional(),
   frontDoor: FrontDoorSpecSchema,
@@ -172,7 +189,16 @@ export function resolveHarnessInstance(template: HarnessTemplateSpec, instance: 
       const services = template.services.map((s) => {
         const slot = s.slot ?? s.name;
         const image = pins[slot];
-        if (!image) {
+        // A host-exec service runs directly on the node — its slot takes no image pin (there is no container).
+        const hostExec = s.exec?.kind === "host";
+        if (hostExec && image !== undefined) {
+          throw new BadRequestError(
+            "BAD_REQUEST",
+            { service: s.name, slot },
+            `Slot '${slot}' belongs to host-exec service '${s.name}' — it takes no image pin.`,
+          );
+        }
+        if (!hostExec && !image) {
           throw new BadRequestError(
             "BAD_REQUEST",
             { service: s.name, slot },
@@ -193,7 +219,7 @@ export function resolveHarnessInstance(template: HarnessTemplateSpec, instance: 
         const { slot: _slot, ...passthrough } = s;
         return {
           ...passthrough,
-          image,
+          ...(image !== undefined ? { image } : {}), // host-exec services stay imageless
           replicas: ov?.replicas ?? s.replicas,
           env,
           ...(volumes !== undefined ? { volumes } : {}),

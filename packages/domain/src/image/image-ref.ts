@@ -68,9 +68,10 @@ export function imageRegistryPrefix(registry: ImageRegistryCoordinates): string 
   return registry.namespace ? `${registry.host}/${registry.namespace}/` : `${registry.host}/`;
 }
 
-// All images a (resolved) harness spec references — service is per-service, command is the dispatch image.
+// All images a (resolved) harness spec references — service is per-service (host-exec services carry none),
+// command is the dispatch image.
 export function collectHarnessImages(spec: HarnessSpec): string[] {
-  if (spec.kind === "service") return spec.services.map((s) => s.image);
+  if (spec.kind === "service") return spec.services.flatMap((s) => (s.image ? [s.image] : []));
   if (spec.kind === "command") return spec.image ? [spec.image] : [];
   return []; // process — no image reference (code adapter)
 }

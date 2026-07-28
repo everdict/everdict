@@ -1,4 +1,12 @@
-import type { RegistryAuth, ServiceHarnessSpec, ServiceReadiness, ServiceResources } from "@everdict/contracts";
+import {
+  BadRequestError,
+  type RegistryAuth,
+  type ServiceHarnessSpec,
+  type ServiceReadiness,
+  type ServiceResources,
+  type TopologyService,
+  serviceIsHostExec,
+} from "@everdict/contracts";
 import { dockerAuthConfigJson, imageUsesRegistryHost } from "@everdict/domain";
 import { DEFAULT_BROWSER_IMAGE } from "./browser-image.js";
 import {
@@ -142,7 +150,29 @@ export function buildDependencyManifests(spec: ServiceHarnessSpec, opts: K8sTopo
   return out;
 }
 
+// Narrow a containerized service's image (the schema guarantees the pairing; this guards registry-bypassing callers).
+function svcImage(svc: Pick<TopologyService, "name" | "image">): string {
+  if (svc.image === undefined) {
+    throw new BadRequestError(
+      "BAD_REQUEST",
+      { service: svc.name },
+      `Containerized service "${svc.name}" has no image.`,
+    );
+  }
+  return svc.image;
+}
+
 export function buildK8sManifests(spec: ServiceHarnessSpec, opts: K8sTopologyOptions = {}): K8sManifest[] {
+  // K8s has no non-container execution path — a host-exec service (raw_exec-style) can't be realized here.
+  // Fail fast and honestly instead of rendering a Deployment with no image.
+  const hostSvc = spec.services.find((s) => serviceIsHostExec(s));
+  if (hostSvc) {
+    throw new BadRequestError(
+      "BAD_REQUEST",
+      { service: hostSvc.name },
+      `Host-exec service "${hostSvc.name}" cannot run on K8s (containers only) — use a Nomad runtime (raw_exec) or a host-capable runner.`,
+    );
+  }
   const ns = opts.namespace ?? "everdict-platform";
   // When stores are brought up too, auto-inject the connection env — precedence: connEnv (convention) < svc.env (service static) < storeEnv (operational override) < dependency inject.
   const depEnv = opts.provisionDependencies ? dependencyConnEnv(spec) : {};
@@ -150,7 +180,7 @@ export function buildK8sManifests(spec: ServiceHarnessSpec, opts: K8sTopologyOpt
   const out: K8sManifest[] = [];
   // Render the dockerconfigjson Secret + imagePullSecrets only when a workspace-registry image is actually present.
   const auth = opts.registryAuth;
-  const needsAuth = Boolean(auth && spec.services.some((s) => imageUsesRegistryHost(s.image, auth.host)));
+  const needsAuth = Boolean(auth && spec.services.some((s) => imageUsesRegistryHost(svcImage(s), auth.host)));
   if (auth && needsAuth) out.push(registryAuthSecretManifest(auth, ns));
   if (opts.provisionDependencies) out.push(...buildDependencyManifests(spec, opts));
   for (const svc of spec.services) {
@@ -188,7 +218,7 @@ export function buildK8sManifests(spec: ServiceHarnessSpec, opts: K8sTopologyOpt
               ? { nodeSelector: { "kubernetes.io/os": svc.requires.os === "macos" ? "darwin" : svc.requires.os } }
               : {}),
             // Workspace-registry image auth — reference it (the Secret above) only when this service image's host matches.
-            ...(auth && imageUsesRegistryHost(svc.image, auth.host)
+            ...(auth && imageUsesRegistryHost(svcImage(svc), auth.host)
               ? { imagePullSecrets: [{ name: REGISTRY_AUTH_SECRET_NAME }] }
               : {}),
             // host.docker.internal parity (gap 5) — opt-in: only when a concrete gateway IP is configured (the Docker
@@ -199,7 +229,7 @@ export function buildK8sManifests(spec: ServiceHarnessSpec, opts: K8sTopologyOpt
             containers: [
               {
                 name: svc.name,
-                image: svc.image,
+                image: svcImage(svc),
                 imagePullPolicy: opts.imagePullPolicy,
                 ports: svc.port ? [{ containerPort: svc.port }] : [],
                 env,

@@ -15,7 +15,13 @@ import {
   type RegistryAuth,
   type RuntimeSpec,
 } from "@everdict/contracts";
-import { capabilityKind, imageUsesRegistryHost, requiredCapabilitiesForJob, runtimeSatisfies } from "@everdict/domain";
+import {
+  capabilityKind,
+  imageUsesRegistryHost,
+  requiredCapabilitiesForJob,
+  runtimeSatisfies,
+  topologyNeedsDocker,
+} from "@everdict/domain";
 import type { RuntimeRegistry } from "@everdict/registry";
 
 export interface RuntimeDispatcherDeps {
@@ -164,8 +170,14 @@ export class RuntimeDispatcher implements Dispatcher {
             ? "No shared runner found in this workspace."
             : "Self-hosted runner not found — you can only target runners you own.",
         );
-      // A service (topology) harness stands up a local Docker topology, so the runner needs the docker capability — if absent, reject explicitly before running.
-      if (job.harnessSpec?.kind === "service" && !runner.capabilities.includes("docker"))
+      // A service (topology) harness with CONTAINERIZED services stands up a local Docker topology, so the runner
+      // needs the docker capability — if absent, reject explicitly before running. A pure host-exec topology
+      // (exec.kind "host" — e.g. a native Windows service) needs no Docker, so it passes this gate.
+      if (
+        job.harnessSpec?.kind === "service" &&
+        topologyNeedsDocker(job.harnessSpec) &&
+        !runner.capabilities.includes("docker")
+      )
         throw new BadRequestError(
           "BAD_REQUEST",
           { runnerId, need: "docker", have: runner.capabilities },

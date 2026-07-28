@@ -6,9 +6,17 @@ browser-mcp, action-stream} + {Postgres checkpoints, Redis stream, MinIO snapsho
 Chromium loading a client browser extension (the extension drives the browser).
 
 ## Spec (`HarnessSpec`, kind: "service")
-`services[]` (per-version warm; each `{image, port?, needs, env?}` — `env` = per-service static config, e.g.
+`services[]` (per-version warm; each `{image?, port?, needs, env?, exec?}` — `env` = per-service static config, e.g.
 `MODEL`/`LOG_LEVEL`/flags) · `dependencies[]` (shared store + `isolateBy`) · `target`
 (browser+extension, per-case) · `frontDoor` ({service, submit, trace}) · `traceSource` ({kind: otel|mlflow, endpoint}).
+
+**Host-exec services (`exec: {kind: "host", command, artifact?}`)** — the portable no-Docker realization: the program
+runs directly on the node (Nomad `raw_exec`; the declared `port` is reserved, not dynamically mapped; `artifact` is
+fetched into the task dir pre-start). A host service omits `image` (the array-level `validateServiceExec` enforces the
+pairing; image pins on a host slot are rejected). K8s/Docker runtimes decline host services fail-fast (containers
+only). Capability-wise a topology needs `docker` only if it has at least one containerized service
+(`topologyNeedsDocker`), so a pure-host `requires.os: windows` topology places on any `os-windows` node — Docker no
+longer required — and self-hosted runners advertise `os-windows`/`os-macos` from their own platform.
 Service env precedence: store `connEnv` (conventional) < `service.env` (author) < runtime `storeEnv` (operator
 override) < `dependencies[].inject` (BYO store env names — rendered from the deployed store, nothing shadows it).
 

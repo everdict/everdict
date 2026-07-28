@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { FrontDoorSpecSchema, TopologyDependencySchema, injectTemplateFields } from "./harness-spec.js";
+import {
+  FrontDoorSpecSchema,
+  ServiceHarnessSpecSchema,
+  TopologyDependencySchema,
+  injectTemplateFields,
+} from "./harness-spec.js";
 
 const base = { store: "redis", role: "queue", purpose: "plumbing", isolateBy: "key-prefix" };
 
@@ -81,5 +86,44 @@ describe('FrontDoorSpecSchema — the "trace" completion model', () => {
   it("keeps allowing returned correlation for the response-bearing models (no regression)", () => {
     const res = FrontDoorSpecSchema.safeParse({ ...fd, correlate: { mode: "returned", path: "run_id" } });
     expect(res.success).toBe(true);
+  });
+});
+
+describe("TopologyService exec — the host-exec pairing rules (validateServiceExec)", () => {
+  const spec = (svc: Record<string, unknown>) => ({
+    kind: "service",
+    id: "t",
+    version: "1.0.0",
+    services: [svc],
+    dependencies: [],
+    frontDoor: { service: "s", submit: "POST /runs" },
+    traceSource: { kind: "otel", endpoint: "http://x" },
+  });
+  const hostSvc = {
+    name: "win-ui",
+    needs: [],
+    perRun: [],
+    replicas: 1,
+    env: {},
+    requires: { os: "windows" },
+    exec: { kind: "host", command: ["C:/drivers/ui-driver.exe", "--serve"] },
+  };
+
+  it("accepts a host-exec service with a command and no image (the Windows-without-Docker contract)", () => {
+    expect(ServiceHarnessSpecSchema.safeParse(spec(hostSvc)).success).toBe(true);
+  });
+
+  it("rejects a host-exec service without exec.command", () => {
+    expect(ServiceHarnessSpecSchema.safeParse(spec({ ...hostSvc, exec: { kind: "host" } })).success).toBe(false);
+  });
+
+  it("rejects a host-exec service that also sets an image (nothing would run it)", () => {
+    expect(ServiceHarnessSpecSchema.safeParse(spec({ ...hostSvc, image: "reg/x:1" })).success).toBe(false);
+  });
+
+  it("rejects a containerized service without an image (pre-existing invariant, now explicit)", () => {
+    expect(
+      ServiceHarnessSpecSchema.safeParse(spec({ name: "s", needs: [], perRun: [], replicas: 1, env: {} })).success,
+    ).toBe(false);
   });
 });

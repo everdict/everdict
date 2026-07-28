@@ -2268,3 +2268,59 @@ describe("ServiceTopologyBackend — trace completion", () => {
     expect(fetches).toBeGreaterThanOrEqual(3); // 2 probe fetches (empty → present) + the final pull
   });
 });
+
+// host-exec services (exec.kind "host") — the Windows-without-Docker path: the program runs directly on the node
+// via Nomad raw_exec; K8s/Docker (containers only) decline fail-fast.
+describe("buildNomadTopologyJob — host-exec services (raw_exec)", () => {
+  const HOST_SPEC: ServiceHarnessSpec = {
+    kind: "service",
+    id: "native-win",
+    version: "1.0.0",
+    services: [
+      { name: "agent", image: "reg/agent:1", port: 8000, needs: [], perRun: [], replicas: 1, env: {} },
+      {
+        name: "win-ui",
+        port: 9515,
+        needs: [],
+        perRun: [],
+        replicas: 1,
+        env: {},
+        requires: { os: "windows" },
+        exec: {
+          kind: "host",
+          command: ["C:/drivers/ui-driver.exe", "--port", "9515"],
+          artifact: "https://dl.example.com/ui-driver.zip",
+        },
+      },
+    ],
+    dependencies: [],
+    frontDoor: { service: "agent", submit: "POST /runs" },
+    traceSource: { kind: "otel", endpoint: "http://x" },
+  };
+
+  it("a host-exec service forces per-service groups and renders a raw_exec task (command/args, no image, artifact fetch)", () => {
+    expect(needsPerServiceGroups(HOST_SPEC)).toBe(true);
+    const job = buildNomadTopologyJob(HOST_SPEC);
+    const group = job.Job.TaskGroups.find((g) => g.Name.includes(servicePortLabel("win-ui")));
+    const task = group?.Tasks[0];
+    expect(task?.Driver).toBe("raw_exec");
+    expect(task?.Config.command).toBe("C:/drivers/ui-driver.exe");
+    expect(task?.Config.args).toEqual(["--port", "9515"]);
+    expect(task?.Config.image).toBeUndefined();
+    expect(task?.Artifacts).toEqual([{ GetterSource: "https://dl.example.com/ui-driver.zip" }]);
+  });
+
+  it("reserves the host service's declared port (the process binds it directly) while docker peers stay dynamically mapped", () => {
+    const job = buildNomadTopologyJob(HOST_SPEC);
+    const win = job.Job.TaskGroups.find((g) => g.Name.includes(servicePortLabel("win-ui")));
+    expect(win?.Networks?.[0]?.ReservedPorts).toEqual([{ Label: servicePortLabel("win-ui"), Value: 9515 }]);
+    expect(win?.Networks?.[0]?.DynamicPorts).toEqual([]);
+    const agent = job.Job.TaskGroups.find((g) => g.Name.includes("agent"));
+    expect(agent?.Tasks[0]?.Driver).toBe("docker");
+    expect(agent?.Networks?.[0]?.DynamicPorts?.[0]?.To).toBe(8000);
+  });
+
+  it("K8s declines a host-exec service fail-fast (containers only — no silent imageless Deployment)", () => {
+    expect(() => buildK8sManifests(HOST_SPEC)).toThrow(/cannot run on K8s/);
+  });
+});

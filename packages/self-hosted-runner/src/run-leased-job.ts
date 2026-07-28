@@ -103,7 +103,11 @@ export function workspaceImagesToPull(
   imagePins: Record<string, string> | undefined,
   auth: RegistryAuth,
 ): string[] {
-  const images = spec.services.map((s) => imagePins?.[s.name] ?? s.image);
+  // Host-exec services carry no image (nothing to pull).
+  const images = spec.services.flatMap((s) => {
+    const image = imagePins?.[s.name] ?? s.image;
+    return image ? [image] : [];
+  });
   return [...new Set(images.filter((image) => imageUsesRegistryHost(image, auth.host)))];
 }
 

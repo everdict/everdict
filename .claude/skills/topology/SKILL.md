@@ -9,9 +9,16 @@ A harness can be a process (Claude Code) or a **deployed multi-service topology 
 (browser/OS). See `docs/service-harness.md`.
 
 ## The model
-- `HarnessSpec(kind:"service")`: `services[]` (each `{image, port?, needs, env?, model?}`; `env` = per-service static
+- `HarnessSpec(kind:"service")`: `services[]` (each `{image?, port?, needs, env?, model?, exec?}`; `env` = per-service static
   config — precedence store `connEnv` < `service.env` < runtime `storeEnv` < `dependencies[].inject`) + `dependencies[]`
   (shared stores) + `target` (browser+ext) + `frontDoor` + `traceSource`.
+- **Host-exec services (`exec: {kind:"host", command, artifact?}`)** — the portable Windows-without-Docker contract: the
+  program runs DIRECTLY on the node (no container, no image; `validateServiceExec` enforces the pairing, image pins are
+  rejected for host slots). Nomad realizes it as a `raw_exec` per-service group (declared port RESERVED, not mapped;
+  artifact fetched pre-start); K8s/Docker runtimes decline fail-fast (containers only). Capability derivation: a
+  topology needs `docker` only if it has ≥1 CONTAINERIZED service (`topologyNeedsDocker`), so a pure-host `requires.os:
+  windows` topology gates on `os-windows` alone — pre-fix it demanded a docker-capable Windows node, which is why an
+  otherwise-fine native service could never place. Runners now probe+advertise `os-windows`/`os-macos`.
 - **Dependency env injection (`dependencies[].inject`) — BYO store env names.** The store-side sibling of
   `service.wiring`: an image reading its store connection under its OWN keys (`VALKEY_URL`, `OBJECT_STORAGE_ENDPOINT`)
   maps them on the dependency (`{env, template?}`; template = `{field}` over the closed per-store vocabulary

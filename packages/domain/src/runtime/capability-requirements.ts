@@ -57,6 +57,14 @@ function harnessNeedsGpu(spec: HarnessSpec): boolean {
   return false;
 }
 
+// Does this topology stand up any CONTAINER? A host-exec service (exec.kind "host" — runs directly on the node,
+// Nomad raw_exec) needs no container runtime, so a pure-host topology (e.g. a native Windows UI driver) gates on its
+// OS capability alone. Pre-fix `docker` was unconditional, so `requires.os: windows` was satisfiable only by a
+// docker-capable Windows node — an otherwise-fine native service could never place.
+export function topologyNeedsDocker(spec: ServiceHarnessSpec): boolean {
+  return spec.services.some((s) => s.exec?.kind !== "host");
+}
+
 // The full set of capabilities a JOB requires — the single "what does this job need" function the placement gates
 // use: the registered-runtime dispatcher (runtimeSatisfies vs RuntimeSpec.capabilities) and the self-hosted runner
 // hub (vs a runner's probed capabilities) — so both reject a job a target can't run BEFORE placing it (e.g. a
@@ -88,7 +96,7 @@ export function requiredCapabilitiesForHarness(spec: HarnessSpec): CapabilityNam
   const caps = new Set<CapabilityName>();
   if (harnessNeedsGpu(spec)) caps.add("gpu"); // a GPU-needing harness gates to a gpu-capable runtime at submit time
   if (spec.kind === "service") {
-    caps.add("docker");
+    if (topologyNeedsDocker(spec)) caps.add("docker"); // only a containerized service needs a container runtime
     for (const c of requiredCapabilitiesForTopology(spec)) caps.add(c);
   }
   return [...caps];

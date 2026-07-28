@@ -49,3 +49,10 @@ describe("detectCapabilities — measure vocabulary probes → self-advertise on
     expect(typeof defaultProbes.gpu).toBe("function");
   });
 });
+
+describe("os capability probes (os-windows / os-macos)", () => {
+  it("advertises the node's own OS so requires.os can place without Docker (never probed before — a Windows runner could not satisfy os-windows at all)", async () => {
+    expect(await defaultProbes["os-windows"]?.()).toBe(process.platform === "win32");
+    expect(await defaultProbes["os-macos"]?.()).toBe(process.platform === "darwin");
+  });
+});

@@ -76,6 +76,11 @@ export const defaultProbes: CapabilityProbes = {
   // A GPU present? nvidia-smi lists the GPUs (driver + device), or the device node exists when the CLI isn't on PATH.
   // Advertising gpu lets the workspace pool lease route a gpu-requiring eval (resources.gpu) to this runner, skipping non-gpu ones.
   gpu: async () => (await cmdOk("nvidia-smi", ["-L"])) || fileExists("/dev/nvidia0"),
+  // The node's own OS — the placement capability `requires.os` derives to (os-windows/os-macos). Never probed
+  // before, so a Windows runner could not satisfy `requires.os: windows` AT ALL (the gate saw no os-windows
+  // anywhere). With host-exec services (exec.kind "host") a Docker-less Windows box is now a valid target.
+  "os-windows": async () => platform() === "win32",
+  "os-macos": async () => platform() === "darwin",
 };
 
 // Runner capability self-advertisement — measure each probe in the vocabulary (CAPABILITY_DEFS) and return only the supported names in vocabulary order.
