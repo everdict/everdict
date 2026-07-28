@@ -145,7 +145,12 @@ send the chat panel captures the canvas's LIVE state over a synchronous same-win
 (`everdict:canvas-state-request` → `everdict:canvas-state`, `configToStored(config)` + the open View
 id), the chat body carries it as `canvas {config, viewId?}`, and `runChat` folds it into the model's
 user turn with the delta-editing rule — so multi-turn refinement ("make it a bar chart", "regroup by
-model") grounds on what the member actually sees, manual picker changes included.)* New FSD slices:
+model") grounds on what the member actually sees, manual picker changes included. The channel also
+carries presence: the canvas announces unprompted on mount/change and clears on unmount, and the
+composer shows a "canvas linked · name" chip — the member SEES that the agent shares their screen.
+The preamble additionally steers saving (update_view for an open saved View / create_view otherwise,
+both taking the in-context stored-form config), and the panel soft-refreshes the left routed page
+after each turn so agent-created entities appear without a manual reload.)* New FSD slices:
 `entities/analysis-artifact`, `features/analysis-studio`; `features/agent-chat` gains artifact rendering in
 the transcript (chart/table/markdown cards) and an embed mode. Sessions opened from a view carry
 `viewId` (new nullable column on `everdict_agent_sessions`), and the turn's context preamble injects the
