@@ -42,6 +42,7 @@ import type { Dispatcher } from "../ports/dispatcher.js";
 import type { HarnessInstanceRegistry } from "../ports/harness-instance-registry.js";
 import type { JudgeRegistry } from "../ports/judge-registry.js";
 import type { JudgeRunner } from "../ports/judge-runner.js";
+import type { PlatformEventEmitter } from "../ports/platform-event-emitter.js";
 import type { RecordingStore } from "../ports/recording-store.js";
 import type { RunStore } from "../ports/run-store.js";
 import type { ScorecardStore } from "../ports/scorecard-store.js";
@@ -348,6 +349,10 @@ export interface ScorecardServiceDeps {
   registryAuthsFor?: (workspace: string) => Promise<RegistryAuth[]>;
   // Completion callback (succeeded/failed) — completion notification (Mattermost etc.). A failure here is independent of the scorecard result (the service swallows it).
   onComplete?: (tenant: string, record: ScorecardRecord) => Promise<void>;
+  // Platform-event emit seam (agent-automation A1) — the lifecycle FACTS this service records: scorecard.submitted,
+  // scorecard.case.completed (streaming, both drivers), scorecard.cancelled. Completion facts stay on the
+  // NotificationService path (onComplete), which emits through the same seam. emit never throws (best-effort).
+  events?: PlatformEventEmitter;
   // Trace-sink export (when configured) — send scored results (trace+scores) to the workspace observability platform (TraceSinkService).
   // The returned outcome is recorded in record.export; a failure is isolated from the scorecard result (surfaced via outcome.status only). docs/architecture/trace-sink.md
   // attach: the pull-ingest (source.kind, caseId→external runId) — if source=sink platform, attach scores to the existing trace instead of duplicating.

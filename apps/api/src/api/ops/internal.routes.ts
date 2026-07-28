@@ -107,6 +107,33 @@ export function registerInternalRoutes(app: FastifyInstance, deps: ServerDeps): 
     }
   });
 
+  // --- internal: platform-event reconcile cursor (agent service → event log). The agent service walks
+  // `seq > after` per workspace at startup/interval so a missed best-effort push is recovered (at-least-once +
+  // event-id dedup — docs/architecture/agent-automation.md). Same x-internal-token guard. ---
+  app.get("/internal/events", { schema: internalDocs.events }, async (req, reply) => {
+    if (!deps.internalToken || !deps.platformEvents)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "internal endpoints disabled" });
+    const provided = req.headers["x-internal-token"];
+    if (typeof provided !== "string" || !constantTimeEq(provided, deps.internalToken))
+      return reply.code(403).send({ code: "FORBIDDEN", message: "internal token mismatch" });
+    const query = z
+      .object({
+        workspace: z.string().min(1),
+        after: z.coerce.number().int().nonnegative().optional(),
+        kinds: z.string().optional(), // comma-separated kind filter
+        limit: z.coerce.number().int().positive().max(500).optional(),
+      })
+      .safeParse(req.query ?? {});
+    if (!query.success) return reply.code(400).send({ code: "BAD_REQUEST", message: query.error.message });
+    const { workspace, after, kinds, limit } = query.data;
+    const events = await deps.platformEvents.list(workspace, {
+      ...(after !== undefined ? { afterSeq: after } : {}),
+      ...(kinds !== undefined ? { kinds: kinds.split(",").filter((k) => k.length > 0) } : {}),
+      ...(limit !== undefined ? { limit } : {}),
+    });
+    return reply.send({ events });
+  });
+
   // --- internal: schedule fire (called by the Temporal workflow, x-internal-token guard) ---
   // The worker doesn't hold a ScorecardService, so a schedule fire goes workflow→activity→this route→ScheduleService.fire.
   // tenant is baked in as a workflow argument at schedule creation and arrives in a trusted body (already trusted via the internal token).

@@ -618,6 +618,15 @@ export class ScorecardBatchService {
         message: `${caseId} → ${verdict}${reason ? ` · ${reason}` : ""}`,
         caseId,
       });
+      // Lifecycle FACT (agent-automation A2): one streamed case landed — a watching agent reacts MID-batch.
+      void this.deps.events?.emit({
+        workspace: ctx.tenant,
+        kind: "scorecard.case.completed",
+        subject: { type: "scorecard", id },
+        ...(ctx.owner !== undefined ? { recipient: ctx.owner } : {}),
+        payload: { caseId, verdict: v ?? null, ...(reason !== undefined ? { reason } : {}) },
+        message: `Scorecard ${id} case ${caseId} → ${verdict}${reason ? ` · ${reason}` : ""}`,
+      });
       return { settled: true };
     } finally {
       ctx.inFlightIds.delete(caseId); // release the claim so a failed/incomplete attempt (or the next case) is unblocked
@@ -1222,6 +1231,15 @@ export class ScorecardBatchService {
             r.caseId,
           );
           void flushSteps();
+          // Lifecycle FACT (agent-automation A2): one streamed case landed — a watching agent reacts MID-batch.
+          void this.deps.events?.emit({
+            workspace: tenant,
+            kind: "scorecard.case.completed",
+            subject: { type: "scorecard", id },
+            recipient: owner,
+            payload: { caseId: r.caseId, verdict: v ?? null, ...(reason !== undefined ? { reason } : {}) },
+            message: `Scorecard ${id} case ${r.caseId} → ${verdict}${reason ? ` · ${reason}` : ""}`,
+          });
           // After supersede, skip firing judges too (don't spend more LLM cost on a reclaimed batch).
           if (!controller.signal.aborted) {
             const judged = judgeStream.push(r);

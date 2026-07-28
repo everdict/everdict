@@ -10,36 +10,42 @@ const scorecard = {
   harness: { id: "h", version: "1" },
 };
 
-describe("NotificationService — agent event bridge (S4)", () => {
-  it("pushes a scorecard completion to the agent sink for the creator", async () => {
-    const emit = vi.fn(async () => {});
-    const svc = new NotificationService({ settingsFor: async () => undefined, agentEvents: { emit } });
-    await svc.notifyScorecard("acme", scorecard);
+describe("NotificationService — platform-event channel", () => {
+  it("records a scorecard completion fact addressed at the creator", async () => {
+    const emit = vi.fn(async () => undefined);
+    const svc = new NotificationService({ settingsFor: async () => undefined, events: { emit } });
+    await svc.notifyScorecard("acme", { ...scorecard, summary: [{ passRate: 0.5 }] });
     expect(emit).toHaveBeenCalledWith(
-      expect.objectContaining({ workspace: "acme", recipient: "alice", kind: "scorecard.completed" }),
+      expect.objectContaining({
+        workspace: "acme",
+        recipient: "alice",
+        kind: "scorecard.completed",
+        subject: { type: "scorecard", id: "sc_9" },
+        payload: expect.objectContaining({ status: "succeeded", passRate: 0.5 }),
+      }),
     );
   });
 
   it("uses the failed kind for a failed scorecard", async () => {
-    const emit = vi.fn(async () => {});
-    const svc = new NotificationService({ settingsFor: async () => undefined, agentEvents: { emit } });
+    const emit = vi.fn(async () => undefined);
+    const svc = new NotificationService({ settingsFor: async () => undefined, events: { emit } });
     await svc.notifyScorecard("acme", { ...scorecard, status: "failed" });
     expect(emit).toHaveBeenCalledWith(expect.objectContaining({ kind: "scorecard.failed" }));
   });
 
-  it("does not push without a creator (nobody to wake)", async () => {
-    const emit = vi.fn(async () => {});
-    const svc = new NotificationService({ settingsFor: async () => undefined, agentEvents: { emit } });
+  it("does not record without a creator (nobody to wake)", async () => {
+    const emit = vi.fn(async () => undefined);
+    const svc = new NotificationService({ settingsFor: async () => undefined, events: { emit } });
     await svc.notifyScorecard("acme", { ...scorecard, createdBy: undefined });
     expect(emit).not.toHaveBeenCalled();
   });
 
-  it("swallows an agent-sink failure so it never affects the result", async () => {
+  it("swallows an emitter failure so it never affects the result", async () => {
     const svc = new NotificationService({
       settingsFor: async () => undefined,
-      agentEvents: {
+      events: {
         emit: async () => {
-          throw new Error("agent unreachable");
+          throw new Error("event channel down");
         },
       },
     });

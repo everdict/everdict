@@ -113,6 +113,27 @@ const internal = {
       ...errorResponses(400, 403, 404),
     },
   },
+  events: {
+    summary: "Read the platform-event log from a cursor (internal)",
+    description:
+      "Agent-service reconcile bridge (docs/architecture/agent-automation.md): platform events (lifecycle facts) " +
+      "are pushed best-effort as they happen; the agent service walks `seq > after` per workspace at startup/interval " +
+      "so a missed push is recovered (at-least-once + event-id dedup). Ascending by seq. Guarded by x-internal-token " +
+      "(403 on mismatch; fail-closed 404 when unset).",
+    tags: ["internal"],
+    querystring: toJsonSchema(
+      z.object({
+        workspace: z.string().min(1),
+        after: z.coerce.number().int().nonnegative().optional().describe("reconcile cursor — events with seq > after"),
+        kinds: z.string().optional().describe("comma-separated kind filter"),
+        limit: z.coerce.number().int().positive().max(500).optional(),
+      }),
+    ),
+    response: {
+      200: { description: "Events (ascending by seq)" },
+      ...errorResponses(400, 403, 404),
+    },
+  },
   batchPlan: {
     summary: "Plan a Temporal batch (internal bridge)",
     description:

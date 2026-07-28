@@ -124,6 +124,7 @@ async function main(): Promise<void> {
     runnerJobStore,
     scheduleStore,
     notificationStore,
+    platformEventStore,
     commentStore,
     knowledgeStore,
     knowledgeEntryStore,
@@ -253,6 +254,7 @@ async function main(): Promise<void> {
   const envMeterPolicy = meterUsagePolicyFromEnv(); // default policy when the workspace has no DB setting
   const {
     notificationService,
+    platformEventService,
     mattermostService,
     traceSinkService,
     traceSourceService,
@@ -262,6 +264,7 @@ async function main(): Promise<void> {
   } = buildIntegrations({
     settingsStore,
     notificationStore,
+    platformEventStore,
     commentStore,
     oauthStateStore,
     membershipService,
@@ -305,6 +308,7 @@ async function main(): Promise<void> {
     githubAppService,
     imageRegistryService,
     notificationService,
+    platformEventService,
     envMeterPolicy,
     preflightPlacement,
     readers: { readCaseLogsFn, execInSandboxFn, captureBrowserScreenFn, openTerminalStreamFn },
@@ -336,6 +340,7 @@ async function main(): Promise<void> {
     githubAppService,
     imageRegistryService,
     notificationService,
+    platformEventService,
     traceSinkService,
     preflightPlacement,
     killCase,
@@ -542,6 +547,7 @@ async function main(): Promise<void> {
     ciLinkService,
     runnerService,
     notificationService, // notification feed (bell inbox) route — self-scoped
+    platformEvents: platformEventService, // platform-event log — internal reconcile cursor (agent-automation A1)
     commentService, // resource comments route + MCP
     knowledgeService, // workspace knowledge graph route + MCP
     knowledgeEntryService, // knowledge entries (reified claims) CRUD + verify — route + MCP

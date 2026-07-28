@@ -4,13 +4,15 @@ import {
   type GithubComAppConfig,
   type GithubEnterpriseAppConfig,
 } from "@everdict/application-control";
-import { UpstreamError } from "@everdict/contracts";
 import { MattermostService } from "@everdict/application-control";
 import type { MembershipService } from "@everdict/application-control";
 import { NotificationService } from "@everdict/application-control";
+import { PlatformEventService } from "@everdict/application-control";
 import { SpanAttrMappingService } from "@everdict/application-control";
 import { TraceSinkService } from "@everdict/application-control";
 import { TraceSourceService } from "@everdict/application-control";
+import { UpstreamError } from "@everdict/contracts";
+import type { PlatformEventStore } from "@everdict/db";
 import type { CommentStore, NotificationStore, OAuthStateStore, WorkspaceSettingsStore } from "@everdict/db";
 import { buildTraceSink, buildTraceSource, probeTraceConnection } from "@everdict/trace";
 import { httpAgentEventSink } from "../infrastructure/agent/agent-event-sink.js";
@@ -23,13 +25,21 @@ import { mattermostHttpClient } from "../infrastructure/mattermost/mattermost-cl
 export function buildIntegrations(deps: {
   settingsStore: WorkspaceSettingsStore;
   notificationStore: NotificationStore;
+  platformEventStore: PlatformEventStore;
   commentStore: CommentStore;
   oauthStateStore: OAuthStateStore;
   membershipService: MembershipService;
   runtimeSecretsFor: (tenant: string) => Promise<Record<string, string>>;
 }) {
-  const { settingsStore, notificationStore, commentStore, oauthStateStore, membershipService, runtimeSecretsFor } =
-    deps;
+  const {
+    settingsStore,
+    notificationStore,
+    platformEventStore,
+    commentStore,
+    oauthStateStore,
+    membershipService,
+    runtimeSecretsFor,
+  } = deps;
   // Mattermost server URL is an operator env (MATTERMOST_HOST), shared across the deployment — the self-hosted
   // operator registers the server URL once, workspaces never input a host. Unset → Mattermost integration unavailable.
   const mattermostHost = process.env.MATTERMOST_HOST;
@@ -38,6 +48,12 @@ export function buildIntegrations(deps: {
   // event to the agent, waking the creator's watching teammates. Unset → skipped (feed/Mattermost unaffected).
   const agentUrl = process.env.AGENT_SERVICE_URL;
   const agentInternalToken = process.env.AGENT_INTERNAL_TOKEN;
+  // Platform events (agent-automation A1) — the ONE emit seam for lifecycle facts: append to the durable log,
+  // push to the agent service (trigger matching + teammate wake). Both channels best-effort by contract.
+  const platformEventService = new PlatformEventService({
+    store: platformEventStore,
+    ...(agentUrl && agentInternalToken ? { agentEvents: httpAgentEventSink(agentUrl, agentInternalToken) } : {}),
+  });
   // Completion notifications: when workspace notify settings exist (Mattermost bot + channel), post run/scorecard completion to the channel (consumer slice).
   const notificationService = new NotificationService({
     settingsFor: (tenant) => settingsStore.get(tenant),
@@ -48,7 +64,7 @@ export function buildIntegrations(deps: {
     feed: notificationStore, // personal notification feed (bell inbox) — docs/architecture/notifications.md
     // Rerun button on completion posts — only attaches when Mattermost can reach us back (public URL known).
     ...(process.env.API_PUBLIC_URL ? { apiPublicUrl: process.env.API_PUBLIC_URL } : {}),
-    ...(agentUrl && agentInternalToken ? { agentEvents: httpAgentEventSink(agentUrl, agentInternalToken) } : {}),
+    events: platformEventService,
   });
   // Workspace-owned Mattermost integration (register → bot notifications + inbound slash commands/buttons). host = operator env;
   // set() verifies the bot token (+ channel) against the live server (strict); apiPublicUrl exposes the inbound URL.
@@ -120,6 +136,7 @@ export function buildIntegrations(deps: {
   // Resource comments (datasets, etc.) for collaborative discussion + @mention notifications. On a mention, resolve the mentioner's name from profile/membership into the personal feed.
   const commentService = new CommentService({
     store: commentStore,
+    events: platformEventService, // comment.created facts (agent-authored comments excluded in the service)
     ...(discussionRunner ? { discussionRunner } : {}),
     // subject → display name for the discussion agent's thread snapshot (name > email local-part > raw subject).
     memberNames: async (tenant) => {
@@ -174,6 +191,7 @@ export function buildIntegrations(deps: {
   else console.warn("▶ github-app: GITHUB_ENTERPRISE_APP_* unset — GitHub Enterprise install disabled.");
   return {
     notificationService,
+    platformEventService,
     mattermostService,
     traceSinkService,
     traceSourceService,
