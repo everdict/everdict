@@ -84,6 +84,21 @@ export const controlPlane = {
     call<T>(auth, '/knowledge/reindex', { method: 'POST' }),
   // Knowledge entries — reified claims (the knowledge layer). List is freshness-decorated; read=scorecards:read,
   // write=comments:write, manage=creator-or-admin (control plane enforces). verify stamps verifiedAt (not an edit).
+  // Workspace filesystem — the shared, workspace-isolated file tree (paths travel as query params; the control
+  // plane normalizes them and rejects traversal).
+  listFsEntries: <T>(auth: AuthContext, path: string) =>
+    call<T>(auth, `/fs/entries?path=${encodeURIComponent(path)}`),
+  readFsFile: <T>(auth: AuthContext, path: string) => call<T>(auth, `/fs/file?path=${encodeURIComponent(path)}`),
+  writeFsFile: <T>(auth: AuthContext, body: unknown) =>
+    call<T>(auth, '/fs/file', { method: 'PUT', body: JSON.stringify(body) }),
+  makeFsDirectory: <T>(auth: AuthContext, body: unknown) =>
+    call<T>(auth, '/fs/directories', { method: 'POST', body: JSON.stringify(body) }),
+  moveFsEntry: <T>(auth: AuthContext, body: unknown) =>
+    call<T>(auth, '/fs/move', { method: 'POST', body: JSON.stringify(body) }),
+  removeFsEntry: <T>(auth: AuthContext, path: string, recursive: boolean) =>
+    call<T>(auth, `/fs/entry?path=${encodeURIComponent(path)}${recursive ? '&recursive=true' : ''}`, {
+      method: 'DELETE',
+    }),
   listKnowledgeEntries: <T>(auth: AuthContext) => call<T>(auth, '/knowledge/entries'),
   createKnowledgeEntry: <T>(auth: AuthContext, body: unknown) =>
     call<T>(auth, '/knowledge/entries', { method: 'POST', body: JSON.stringify(body) }),

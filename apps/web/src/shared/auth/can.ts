@@ -25,6 +25,8 @@ export type WebAction =
   | 'agents:delete'
   | 'skills:read'
   | 'skills:write'
+  | 'files:read'
+  | 'files:write'
   | 'capabilities:read'
   | 'capabilities:write'
   | 'capabilities:delete'
@@ -54,6 +56,7 @@ const PERMS: Record<string, WebAction[]> = {
     'models:read',
     'agents:read', // reading the workspace agent config is viewer+
     'skills:read', // reading the workspace skill library is viewer+
+    'files:read', // browsing/reading the workspace filesystem is viewer+
     'capabilities:read', // browsing the Capability Store (own + shared + public) is viewer+
     'runtimes:read',
     'runtimes:write', // runtime registration (+connection test) is role-agnostic — same as harnesses:register
@@ -79,6 +82,8 @@ const PERMS: Record<string, WebAction[]> = {
     'agents:write', // agent config = eval-authoring content → member+
     'skills:read',
     'skills:write', // authoring/sharing a workspace skill → member+ (delete = creator-or-admin, server-side)
+    'files:read',
+    'files:write', // writing to the workspace filesystem → member+ like datasets/skills
     'capabilities:read',
     'capabilities:write', // authoring/publishing/adopting a capability → member+ (public promotion + delete gated server-side)
     'runtimes:read',
@@ -112,6 +117,8 @@ const PERMS: Record<string, WebAction[]> = {
     'agents:delete', // agent version soft-delete = admin (creator exception is server-side)
     'skills:read',
     'skills:write',
+    'files:read',
+    'files:write',
     'capabilities:read',
     'capabilities:write',
     'capabilities:delete', // capability version soft-delete = admin (creator exception is server-side)
