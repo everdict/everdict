@@ -111,6 +111,10 @@ export const controlPlane = {
     callVoid(auth, `/knowledge/entries/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   verifyKnowledgeEntry: <T>(auth: AuthContext, id: string) =>
     call<T>(auth, `/knowledge/entries/${encodeURIComponent(id)}/verify`, { method: 'POST' }),
+  approveKnowledgeEntry: <T>(auth: AuthContext, id: string) =>
+    call<T>(auth, `/knowledge/entries/${encodeURIComponent(id)}/approve`, { method: 'POST' }),
+  rejectKnowledgeEntry: (auth: AuthContext, id: string) =>
+    callVoid(auth, `/knowledge/entries/${encodeURIComponent(id)}/reject`, { method: 'POST' }),
   // Workspace membership (self-serve): my workspace list + create (creator is admin).
   listWorkspaces: <T>(auth: AuthContext) => call<T>(auth, '/workspaces'),
   createWorkspace: <T>(auth: AuthContext, body: unknown) =>

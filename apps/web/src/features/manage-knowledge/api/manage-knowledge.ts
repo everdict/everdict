@@ -84,3 +84,29 @@ export async function deleteKnowledgeEntryAction(
     return { ok: false, error: e instanceof Error ? e.message : String(e) }
   }
 }
+
+// 제안 승인(POST /knowledge/entries/:id/approve) — proposed→active + 승인자에게 저작권 이전(추출 출처는 감사용 유지).
+export async function approveKnowledgeEntryAction(id: string): Promise<KnowledgeEntryActionResult> {
+  const ctx = await authContext()
+  try {
+    const entry = knowledgeEntrySchema.parse(await controlPlane.approveKnowledgeEntry(ctx, id))
+    revalidatePath('/[workspace]/knowledge', 'page')
+    return { ok: true, entry }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
+}
+
+// 제안 거부(POST /knowledge/entries/:id/reject) — 후보 삭제. proposed 전용(그 외 409).
+export async function rejectKnowledgeEntryAction(
+  id: string
+): Promise<{ ok: boolean; error?: string }> {
+  const ctx = await authContext()
+  try {
+    await controlPlane.rejectKnowledgeEntry(ctx, id)
+    revalidatePath('/[workspace]/knowledge', 'page')
+    return { ok: true }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
+}

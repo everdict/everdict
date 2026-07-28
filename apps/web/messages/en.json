@@ -2718,6 +2718,7 @@
       "context": "Context"
     },
     "statuses": {
+      "proposed": "Proposed",
       "active": "Active",
       "superseded": "Superseded",
       "deprecated": "Deprecated"
@@ -2756,6 +2757,10 @@
     "detail": {
       "meta": "by {by} · updated {updated}",
       "verifiedAt": "verified {at}",
+      "approve": "Approve",
+      "reject": "Reject",
+      "proposedHint": "Extracted from a discussion — review the claim: approving makes it yours.",
+      "extractedFrom": "extracted from {source} ({confidence}% confidence)",
       "asOfTitle": "Pinned to earlier versions — validity at the present is unrecorded:",
       "asOfHint": "Still holds? Verify to extend its coverage. Changed? Supersede it, pinned at the version where it changed. Or leave it — knowledge about an earlier version is a valid record.",
       "currentVersion": "current {version}",

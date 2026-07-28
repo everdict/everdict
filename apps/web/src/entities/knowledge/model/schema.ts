@@ -66,7 +66,7 @@ export const knowledgePinSchema = nodeRefSchema.extend({
 export type KnowledgePinView = z.infer<typeof knowledgePinSchema>
 
 export const KNOWLEDGE_ENTRY_KINDS = ['finding', 'decision', 'convention', 'context'] as const
-export const KNOWLEDGE_ENTRY_STATUSES = ['active', 'superseded', 'deprecated'] as const
+export const KNOWLEDGE_ENTRY_STATUSES = ['proposed', 'active', 'superseded', 'deprecated'] as const
 
 // Server-computed subject-time coverage (not part of the record): `behind` = a pin's interval ends before the
 // entity's present (the claim is AS-OF an earlier point — still true about it, validity at the present unknown);
@@ -87,6 +87,15 @@ export const knowledgeEntrySchema = z.object({
   evidence: z.array(nodeRefSchema).default([]),
   status: z.enum(KNOWLEDGE_ENTRY_STATUSES).default('active'),
   supersedes: z.string().optional(),
+  // 추출 출처 — proposed(제안) 엔트리의 감사 락. 승인 후에도 출처 표시용으로 유지.
+  extraction: z
+    .object({
+      sourceKind: z.string(),
+      sourceId: z.string(),
+      extractor: z.string(),
+      confidence: z.number(),
+    })
+    .optional(),
   visibility: z.enum(['private', 'workspace']),
   createdBy: z.string(),
   createdAt: z.string(),

@@ -20,7 +20,9 @@ import { EmptyState } from '@/shared/ui/empty-state'
 import { Markdown } from '@/shared/ui/markdown'
 
 import {
+  approveKnowledgeEntryAction,
   deleteKnowledgeEntryAction,
+  rejectKnowledgeEntryAction,
   updateKnowledgeEntryAction,
   verifyKnowledgeEntryAction,
 } from '../api/manage-knowledge'
@@ -86,11 +88,13 @@ function RefChips({ label, refs }: { label: string; refs: NodeRefView[] }) {
 function EntryDetailDialog({
   entry,
   manageable,
+  canReview,
   onClose,
   onEdit,
 }: {
   entry: KnowledgeEntry
   manageable: boolean
+  canReview: boolean
   onClose: () => void
   onEdit: () => void
 }) {
@@ -143,6 +147,11 @@ function EntryDetailDialog({
             })}
             {entry.verifiedAt &&
               ` · ${t('detail.verifiedAt', { at: fmtDateTime(entry.verifiedAt) })}`}
+            {entry.extraction &&
+              ` · ${t('detail.extractedFrom', {
+                source: `${entry.extraction.sourceKind}:${entry.extraction.sourceId}`,
+                confidence: Math.round(entry.extraction.confidence * 100),
+              })}`}
           </p>
         </div>
 
@@ -166,6 +175,29 @@ function EntryDetailDialog({
         <RefChips label={t('detail.evidence')} refs={entry.evidence} />
 
         {error && <p className="text-xs text-destructive">{error}</p>}
+
+        {entry.status === 'proposed' && canReview && (
+          <div className="flex items-center justify-between gap-2 rounded-md border border-primary/25 bg-primary/5 p-3">
+            <p className="text-xs text-muted-foreground">{t('detail.proposedHint')}</p>
+            <div className="flex shrink-0 gap-2">
+              <Button
+                size="sm"
+                disabled={pending}
+                onClick={() => act(() => approveKnowledgeEntryAction(entry.id))}
+              >
+                {t('detail.approve')}
+              </Button>
+              <Button
+                size="sm"
+                variant="secondary"
+                disabled={pending}
+                onClick={() => act(() => rejectKnowledgeEntryAction(entry.id), true)}
+              >
+                {t('detail.reject')}
+              </Button>
+            </div>
+          </div>
+        )}
 
         {manageable && (
           <div className="flex flex-wrap items-center justify-end gap-2 border-t border-border pt-3">
@@ -303,6 +335,7 @@ export function KnowledgeBrowser({
         <EntryDetailDialog
           entry={detail}
           manageable={canWrite && (isAdmin || detail.createdBy === subject)}
+          canReview={canWrite}
           onClose={() => setDetailId(undefined)}
           onEdit={() => {
             setEditing(detail)

@@ -2718,6 +2718,7 @@
       "context": "컨텍스트"
     },
     "statuses": {
+      "proposed": "제안됨",
       "active": "활성",
       "superseded": "대체됨",
       "deprecated": "폐기됨"
@@ -2756,6 +2757,10 @@
     "detail": {
       "meta": "{by} · {updated} 수정",
       "verifiedAt": "{at} 검증",
+      "approve": "승인",
+      "reject": "거부",
+      "proposedHint": "토론에서 추출된 제안입니다 — 주장을 검토하세요. 승인하면 내 지식이 됩니다.",
+      "extractedFrom": "{source}에서 추출 (신뢰도 {confidence}%)",
       "asOfTitle": "이전 버전에 핀된 지식입니다 — 현재 버전에서의 성립 여부는 기록되지 않았습니다:",
       "asOfHint": "지금도 유효하면 '아직 유효함'으로 구간을 연장하고, 달라졌으면 변화 지점에 핀한 엔트리로 대체하세요. 과거 기록으로 그대로 두어도 됩니다.",
       "currentVersion": "현재 {version}",
