@@ -2,6 +2,7 @@ import {
   BarChart3,
   Bookmark,
   BookOpen,
+  Bot,
   Boxes,
   Database,
   Gavel,
@@ -81,6 +82,12 @@ export const NAV_SECTIONS: NavSection[] = [
         labelKey: 'views',
         icon: Bookmark,
         keywords: 'view analysis saved dashboard leaderboard trend compare pivot',
+      },
+      {
+        href: '/agents',
+        labelKey: 'agents',
+        icon: Bot,
+        keywords: 'agent fleet run trigger automation 에이전트 자동화 플릿',
       },
       {
         href: '/knowledge',

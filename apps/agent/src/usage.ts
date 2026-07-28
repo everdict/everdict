@@ -26,3 +26,36 @@ export function usageReporter(controlPlaneUrl: string, internalToken: string): (
     if (!res.ok) throw new Error(`usage report failed: ${res.status}`);
   };
 }
+
+// Report an agent.run.* lifecycle FACT to the control plane's event log (POST /internal/agent-run-events —
+// fleet observability, agent-automation A5). Best-effort at the call site (the activator swallows failures).
+export interface AgentRunEventReport {
+  workspace: string;
+  kind: "agent.run.started" | "agent.run.completed" | "agent.run.failed" | "agent.run.cancelled";
+  sessionId: string;
+  agentId: string;
+  eventKind: string;
+  message: string;
+}
+
+export function runEventReporter(
+  controlPlaneUrl: string,
+  internalToken: string,
+): (input: AgentRunEventReport) => Promise<void> {
+  const url = `${controlPlaneUrl.replace(/\/$/, "")}/internal/agent-run-events`;
+  return async (input) => {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-internal-token": internalToken },
+      body: JSON.stringify({
+        tenant: input.workspace,
+        kind: input.kind,
+        sessionId: input.sessionId,
+        agentId: input.agentId,
+        eventKind: input.eventKind,
+        message: input.message,
+      }),
+    });
+    if (!res.ok) throw new Error(`agent-run event report failed: ${res.status}`);
+  };
+}

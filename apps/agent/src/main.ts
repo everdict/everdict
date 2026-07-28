@@ -52,7 +52,7 @@ import { type ProfileResolver, baseProfileResolver, registryProfileResolver } fr
 import { installProxyDispatcher } from "./proxy-dispatcher.js";
 import { buildServer } from "./server.js";
 import { EVERDICT_AGENT_SYSTEM_PROMPT } from "./system-prompt.js";
-import { usageReporter } from "./usage.js";
+import { runEventReporter, usageReporter } from "./usage.js";
 
 function envModelFallback(config: AgentConfig): ModelResolver {
   if (config.AGENT_LLM_API_KEY === undefined || config.AGENT_LLM_MODEL === undefined) {
@@ -184,6 +184,10 @@ async function main(): Promise<void> {
     // Meter workspace-billed conversation cost back to the control plane (source "agent"). Off without the token.
     ...(config.CONTROL_PLANE_INTERNAL_TOKEN !== undefined
       ? { reportUsage: usageReporter(config.CONTROL_PLANE_URL, config.CONTROL_PLANE_INTERNAL_TOKEN) }
+      : {}),
+    // agent.run.* lifecycle facts → the control plane's event log (fleet observability). Same token pair.
+    ...(config.CONTROL_PLANE_INTERNAL_TOKEN !== undefined
+      ? { reportRunEvent: runEventReporter(config.CONTROL_PLANE_URL, config.CONTROL_PLANE_INTERNAL_TOKEN) }
       : {}),
     // Discussion-turn lifecycle bridge (@everdict in a comment thread) — reports the placeholder comment's
     // progress to /internal/comment-activity. Same token pair as the usage meter; off without it.

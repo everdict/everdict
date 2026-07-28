@@ -91,6 +91,9 @@ function sessionsStub() {
     async hasTriggerSession(_tenant: string, agentId: string, eventId: string) {
       return created.some((s) => s.origin?.agentId === agentId && s.origin?.eventId === eventId);
     },
+    async listRuns() {
+      return created.filter((s) => s.origin !== undefined);
+    },
     async deleteSession() {},
     async appendMessages() {},
     async listMessages() {

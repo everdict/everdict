@@ -54,19 +54,31 @@ export interface AgentActivatorDeps {
   sessions: AgentSessionStore;
   mailbox: AgentMailbox;
   // One request-less turn over the run's session (the teammate-turn machinery) — injected so tests own it.
-  runTurn: (sessionId: string, agentToken: string) => Promise<void>;
+  runTurn: (sessionId: string, agentToken: string, signal: AbortSignal) => Promise<void>;
   now: () => string;
   newId: () => string;
   // Loop guard #2: minimum spacing between activations of the same (agent, kind). Default 30s.
   cooldownMs?: number;
   // Backpressure: activations queued per agent beyond this are dropped (logged), never piled up. Default 3.
   maxQueued?: number;
+  // Report agent.run.* lifecycle FACTS back to the control plane (event log → fleet observability, agent-
+  // automation A5). Best-effort — an unreachable control plane never affects the run.
+  reportRunEvent?: (input: {
+    workspace: string;
+    kind: "agent.run.started" | "agent.run.completed" | "agent.run.failed" | "agent.run.cancelled";
+    sessionId: string;
+    agentId: string;
+    eventKind: string;
+    message: string;
+  }) => Promise<void>;
 }
 
 export class AgentActivator {
   private readonly chains = new Map<string, Promise<void>>(); // per-agent serialization (one run at a time)
   private readonly pending = new Map<string, number>();
   private readonly lastActivation = new Map<string, number>(); // `${ws}:${agent}:${kind}` → epoch ms
+  private readonly controllers = new Map<string, AbortController>(); // live runs, by session id (stop control)
+  private readonly stopped = new Set<string>(); // session ids stopped by a member (settle as cancelled, not failed)
   private readonly cooldownMs: number;
   private readonly maxQueued: number;
 
@@ -134,6 +146,16 @@ export class AgentActivator {
     await Promise.all([...this.chains.values()]);
   }
 
+  // Member stop (fleet view control): abort the live run's loop; the wrapper settles it as cancelled.
+  // Returns false when the session has no live run here (already settled / not this process).
+  stop(sessionId: string): boolean {
+    const controller = this.controllers.get(sessionId);
+    if (!controller) return false;
+    this.stopped.add(sessionId);
+    controller.abort();
+    return true;
+  }
+
   private enqueueRun(agentKey: string, event: ActivationEvent, agentId: string, spec: AgentSpec, creator: string) {
     this.pending.set(agentKey, (this.pending.get(agentKey) ?? 0) + 1);
     const prev = this.chains.get(agentKey) ?? Promise.resolve();
@@ -157,6 +179,9 @@ export class AgentActivator {
       owner: creator,
       title: `${agentId} — ${event.kind}`,
       ...(spec.permissionMode !== undefined ? { permissionMode: spec.permissionMode } : {}),
+      // Workspace-visible by design: a headless run is workspace observability (the fleet view + any member
+      // drilling into its transcript), not the creator's private chat history.
+      visibility: "workspace",
       origin: {
         type: "trigger",
         agentId,
@@ -168,6 +193,7 @@ export class AgentActivator {
       createdAt: now,
       updatedAt: now,
     });
+    void this.report("agent.run.started", event, agentId, sessionId, `Agent ${agentId} woke on ${event.kind}.`);
     // One-shot execution credential: minted for this run, revoked with it (no standing token accumulation).
     const { token, id: keyId } = await issueAgentToken(
       this.deps.keyStore,
@@ -176,20 +202,60 @@ export class AgentActivator {
       ["write"],
       `agent:${agentId}`,
     );
+    const controller = new AbortController();
+    this.controllers.set(sessionId, controller);
     try {
       this.deps.mailbox.enqueue(event.workspace, sessionId, {
         from: "event",
         sender: event.source ?? event.kind,
         content: renderActivationPrompt(spec, event),
       });
-      await this.deps.runTurn(sessionId, token);
-      await this.deps.sessions.setSessionStatus(event.workspace, sessionId, "completed", this.deps.now());
+      await this.deps.runTurn(sessionId, token, controller.signal);
+      const settled = this.stopped.has(sessionId) ? "cancelled" : "completed";
+      await this.deps.sessions.setSessionStatus(event.workspace, sessionId, settled, this.deps.now());
+      void this.report(
+        settled === "cancelled" ? "agent.run.cancelled" : "agent.run.completed",
+        event,
+        agentId,
+        sessionId,
+        `Agent ${agentId} run ${settled} (${event.kind}).`,
+      );
     } catch (err) {
-      await this.deps.sessions.setSessionStatus(event.workspace, sessionId, "failed", this.deps.now()).catch(() => {});
-      throw err;
+      const settled = this.stopped.has(sessionId) ? "cancelled" : "failed";
+      await this.deps.sessions.setSessionStatus(event.workspace, sessionId, settled, this.deps.now()).catch(() => {});
+      void this.report(
+        settled === "cancelled" ? "agent.run.cancelled" : "agent.run.failed",
+        event,
+        agentId,
+        sessionId,
+        `Agent ${agentId} run ${settled} (${event.kind})${err instanceof Error ? `: ${err.message}` : ""}.`,
+      );
+      if (settled === "failed") throw err;
     } finally {
+      this.controllers.delete(sessionId);
+      this.stopped.delete(sessionId);
       await this.deps.keyStore.revoke(event.workspace, keyId, creator).catch(() => {});
     }
+  }
+
+  // agent.run.* lifecycle FACT back to the control plane — best-effort, never affects the run.
+  private report(
+    kind: "agent.run.started" | "agent.run.completed" | "agent.run.failed" | "agent.run.cancelled",
+    event: ActivationEvent,
+    agentId: string,
+    sessionId: string,
+    message: string,
+  ): Promise<void> {
+    return (
+      this.deps.reportRunEvent?.({
+        workspace: event.workspace,
+        kind,
+        sessionId,
+        agentId,
+        eventKind: event.kind,
+        message,
+      }) ?? Promise.resolve()
+    ).catch(() => {});
   }
 }
 

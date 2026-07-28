@@ -32,7 +32,16 @@ export interface AgentServerDeps extends ChatDeps {
   // event matching an ENABLED agent's triggers launches a headless run. Absent → events only wake teammates.
   agentRegistry?: AgentRegistry;
   // Test seam: the activation run executor. Default = the teammate-turn machinery (one request-less loop turn).
-  activationRunTurn?: (sessionId: string, agentToken: string) => Promise<void>;
+  activationRunTurn?: (sessionId: string, agentToken: string, signal: AbortSignal) => Promise<void>;
+  // agent.run.* lifecycle facts → the control plane's event log (fleet observability, agent-automation A5).
+  reportRunEvent?: (input: {
+    workspace: string;
+    kind: "agent.run.started" | "agent.run.completed" | "agent.run.failed" | "agent.run.cancelled";
+    sessionId: string;
+    agentId: string;
+    eventKind: string;
+    message: string;
+  }) => Promise<void>;
   // Shared secret the control plane presents (x-internal-token) to POST /agent/events on a recipient's behalf (S4 —
   // the monitoring→agent bridge). Absent → the internal event path is disabled (only user-authenticated events).
   internalToken?: string;
@@ -208,9 +217,11 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
           mailbox,
           runTurn:
             deps.activationRunTurn ??
-            ((sessionId, agentToken) => runTeammateTurn(deps, deps.authenticate, mailbox, sessionId, agentToken)),
+            ((sessionId, agentToken, signal) =>
+              runTeammateTurn(deps, deps.authenticate, mailbox, sessionId, agentToken, signal)),
           now: deps.now,
           newId: deps.newId,
+          ...(deps.reportRunEvent ? { reportRunEvent: deps.reportRunEvent } : {}),
         })
       : undefined;
   app.decorate("agentActivator", activator);
@@ -600,6 +611,34 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
   //    recipient in a workspace — this is what auto-wires monitoring → the proactive team.
   //  · USER (a member) drives events for their OWN teammates (authenticated normally).
   // Nothing watches the kind → a harmless 200 with notified:0.
+  // Fleet view (agent-automation A5): every agent RUN in the caller's workspace (sessions with an origin),
+  // newest first — trigger activations, teammates, discussion turns. Workspace observability, any member.
+  app.get("/agent/runs", async (req, reply) => {
+    const principal = await principalOf(req, reply);
+    if (!principal) return reply;
+    const query = z
+      .object({ limit: z.coerce.number().int().positive().max(200).optional() })
+      .safeParse(req.query ?? {});
+    if (!query.success) return reply.code(400).send({ code: "BAD_REQUEST", message: query.error.message });
+    const runs = await deps.sessions.listRuns(principal.workspace, {
+      ...(query.data.limit !== undefined ? { limit: query.data.limit } : {}),
+    });
+    return reply.send({ runs });
+  });
+
+  // Stop a live headless run (fleet control) — aborts its loop; the wrapper settles it as cancelled. Viewer
+  // roles can watch but not stop. 404 when there is no live run for that session in this process.
+  app.post("/agent/runs/:id/stop", async (req, reply) => {
+    const principal = await principalOf(req, reply);
+    if (!principal) return reply;
+    if (!principal.roles.some((r) => r === "member" || r === "admin"))
+      return reply.code(403).send({ code: "FORBIDDEN", message: "Stopping a run requires the member role." });
+    const { id } = idParams.parse(req.params);
+    if (!activator?.stop(id))
+      return reply.code(404).send({ code: "NOT_FOUND", message: "No live run for that session." });
+    return reply.send({ ok: true });
+  });
+
   // The event body — kind/message plus the platform-event identity + matching context (agent-automation A1/A3):
   // eventId (durable activation dedup), subject/payload (declarative trigger filters), causedBy (loop guard).
   const eventFieldsSchema = z.object({

@@ -27,7 +27,37 @@ export const capabilityRefSchema = z.object({
 })
 export type CapabilityRef = z.infer<typeof capabilityRefSchema>
 
-// GET /agents/:id/versions/:version 200 — 전체 AgentSpec(instructions + MCP 도구서버 + 채택 capability + model 오버라이드). 시크릿 값 없음.
+// 트리거 구독 가능한 플랫폼 이벤트 kind — agent.run.* 라이프사이클 사실은 제외(에이전트가 에이전트를 보는 폭주 벡터 차단).
+export const TRIGGERABLE_EVENT_KINDS = [
+  'run.submitted',
+  'run.completed',
+  'run.failed',
+  'scorecard.submitted',
+  'scorecard.case.completed',
+  'scorecard.completed',
+  'scorecard.failed',
+  'scorecard.cancelled',
+  'report.completed',
+  'comment.created',
+] as const
+
+// 이벤트 payload 에 대한 선언적 필터 하나 — filters 는 AND 결합(예: passRate < 1 = 실패 케이스 있는 배치).
+export const agentTriggerFilterSchema = z.object({
+  field: z.string().min(1),
+  op: z.enum(['eq', 'neq', 'lt', 'lte', 'gt', 'gte', 'exists']),
+  value: z.union([z.string(), z.number(), z.boolean()]).optional(),
+})
+export const agentTriggerSchema = z.object({
+  kinds: z.array(z.enum(TRIGGERABLE_EVENT_KINDS)).min(1),
+  filters: z.array(agentTriggerFilterSchema).default([]),
+})
+export type AgentTrigger = z.infer<typeof agentTriggerSchema>
+
+// 세션 권한 모드 — agent-session 엔티티와 같은 어휘(default=매번 확인 · auto · bypass · plan).
+export const agentSpecPermissionModeSchema = z.enum(['default', 'auto', 'bypass', 'plan'])
+
+// GET /agents/:id/versions/:version 200 — 전체 AgentSpec(instructions + MCP 도구서버 + 채택 capability + model 오버라이드
+// + 트리거/상시 task/권한모드/활성화 — agent-automation A3). 시크릿 값 없음.
 export const agentSpecSchema = z.object({
   id: z.string(),
   version: z.string(),
@@ -38,6 +68,13 @@ export const agentSpecSchema = z.object({
   // 워크스페이스가 끈 first-party 기본 도구(capability id) — 기본 도구셋(웹검색 등)은 채택 없이 붙지만 여기 나열한 id 는 제외.
   disabledDefaults: z.array(z.string()).default([]),
   model: z.string().optional(),
+  // 트리거 활성화 시 첫 메시지로 렌더되는 상시 지시(매 턴을 물들이는 instructions 와 구분).
+  task: z.string().optional(),
+  triggers: z.array(agentTriggerSchema).default([]),
+  // 이 에이전트의 헤드리스 런 기본 권한 모드(챗 세션의 자체 모드가 대화별로 우선).
+  permissionMode: agentSpecPermissionModeSchema.optional(),
+  // 활성화 옵트인 — enabled 인 에이전트만 트리거 매칭 대상.
+  enabled: z.boolean().default(false),
   tags: z.array(z.string()).default([]),
 })
 export type AgentSpec = z.infer<typeof agentSpecSchema>

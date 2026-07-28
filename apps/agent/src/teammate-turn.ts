@@ -14,6 +14,7 @@ export async function runTeammateTurn(
   mailbox: AgentMailbox,
   sessionId: string,
   agentToken: string,
+  signal?: AbortSignal,
 ): Promise<void> {
   const headers = { authorization: `Bearer ${agentToken}` };
   try {
@@ -25,7 +26,7 @@ export async function runTeammateTurn(
     // The incoming messages (peer/event, attribution-rendered) are this turn's prompt; further messages that arrive
     // mid-turn are pulled by the loop's own drainInput at each turn boundary.
     const prompt = drained.map((m) => contentToString(m.content)).join("\n\n");
-    await runChat(deps, principal, headers, sessionId, prompt, undefined, undefined, undefined, {
+    await runChat(deps, principal, headers, sessionId, prompt, undefined, undefined, signal, {
       drainInput: () => mailbox.drain(principal.workspace, sessionId),
     });
   } catch (err) {

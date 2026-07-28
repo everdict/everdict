@@ -72,6 +72,13 @@ export class InMemoryAgentSessionStore implements AgentSessionStore {
     );
   }
 
+  async listRuns(tenant: string, opts?: { limit?: number }): Promise<AgentSessionRecord[]> {
+    return this.sessions
+      .filter((s) => s.tenant === tenant && s.origin !== undefined)
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+      .slice(0, opts?.limit ?? 50);
+  }
+
   async deleteSession(tenant: string, owner: string, id: string): Promise<void> {
     for (let i = this.sessions.length - 1; i >= 0; i--) {
       const s = this.sessions[i];
@@ -260,6 +267,16 @@ export class PgAgentSessionStore implements AgentSessionStore {
       [tenant, agentId, eventId],
     );
     return res.rows.length > 0;
+  }
+
+  async listRuns(tenant: string, opts?: { limit?: number }): Promise<AgentSessionRecord[]> {
+    const res = await this.client.query<SessionRow>(
+      `SELECT ${SESSION_COLUMNS}
+       FROM everdict_agent_sessions WHERE tenant = $1 AND origin IS NOT NULL
+       ORDER BY updated_at DESC, id DESC LIMIT $2`,
+      [tenant, opts?.limit ?? 50],
+    );
+    return res.rows.map(sessionRowToRecord);
   }
 
   async deleteSession(tenant: string, owner: string, id: string): Promise<void> {

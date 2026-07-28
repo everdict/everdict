@@ -25,6 +25,9 @@ export interface AgentSessionStore {
   ): Promise<void>;
   // Headless-run lifecycle transition (agent-automation A4) — owned by the agent service's activation wrapper.
   setSessionStatus(tenant: string, id: string, status: AgentRunStatus, updatedAt: string): Promise<void>;
+  // The fleet view (agent-automation A5): every session with an origin (= every agent RUN, newest first),
+  // workspace-wide — unlike listSessions, which is a member's own chat history.
+  listRuns(tenant: string, opts?: { limit?: number }): Promise<AgentSessionRecord[]>;
   // Durable activation dedup (agent-automation A3): has this crafted agent already run for this platform event?
   // At-least-once delivery (push + reconcile) collapses here, surviving agent-service restarts.
   hasTriggerSession(tenant: string, agentId: string, eventId: string): Promise<boolean>;

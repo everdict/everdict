@@ -82,6 +82,15 @@ export const agentPlane = {
       method: 'PATCH',
       body: JSON.stringify(patch),
     }),
+  // Fleet view (docs/architecture/agent-automation.md A5) — every agent RUN in the workspace (trigger
+  // activations, teammates, discussion turns), newest first; stopRun aborts a live headless run.
+  listRuns: <T>(auth: AuthContext, limit?: number) =>
+    call<T>(auth, `/agent/runs${limit !== undefined ? `?limit=${limit}` : ''}`),
+  stopRun: <T>(auth: AuthContext, id: string) =>
+    call<T>(auth, `/agent/runs/${encodeURIComponent(id)}/stop`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    }),
   // Teammates (docs/architecture/agent-teams.md) — the caller's live autonomous agents. List the roster, spawn one
   // (name + standing task + watched event kinds), or stop one (unregister + revoke its token; the transcript is kept).
   listTeammates: <T>(auth: AuthContext) => call<T>(auth, '/agent/teammates'),

@@ -1557,7 +1557,8 @@
     "guide": "가이드",
     "connectDesktop": "데스크탑 앱",
     "connectClaude": "Claude Code",
-    "connectCodex": "Codex"
+    "connectCodex": "Codex",
+    "agents": "에이전트"
   },
   "usagePage": {
     "title": "사용량",
@@ -2723,7 +2724,9 @@
     "description": "워크스페이스 엔티티에 대한 지속 가능한 주장 — 발견·결정·관례·컨텍스트를 대상 버전에 핀해 기록합니다.",
     "newEntry": "새 엔트리",
     "actionFailed": "작업에 실패했습니다. 다시 시도해 주세요.",
-    "filters": { "all": "전체" },
+    "filters": {
+      "all": "전체"
+    },
     "kinds": {
       "finding": "발견",
       "decision": "결정",
@@ -3858,6 +3861,27 @@
     "account": {
       "title": "계정 & 설정",
       "body": "프로필, API 키, 워크스페이스 멤버, 시크릿, 통합이 여기 있어요."
+    }
+  },
+  "agentFleet": {
+    "title": "에이전트",
+    "description": "이 워크스페이스의 모든 에이전트 실행 — 무엇이 깨웠고, 무엇을 했고, 어떻게 끝났는지.",
+    "emptyTitle": "아직 에이전트 실행이 없습니다",
+    "emptyHint": "트리거를 가진 에이전트를 활성화하면(또는 대화로 요청하면) 실행이 여기에 나타납니다.",
+    "wokeOn": "{kind} 이벤트로 기동",
+    "viewTranscript": "대화 기록 보기",
+    "stop": "실행 중지",
+    "loading": "대화 기록 불러오는 중…",
+    "noMessages": "기록된 메시지가 없습니다.",
+    "roleEvent": "이벤트 / 입력",
+    "roleAgent": "에이전트",
+    "unavailable": "에이전트 서비스에 연결할 수 없어 실행 목록을 불러오지 못했습니다.",
+    "status": {
+      "running": "실행 중",
+      "awaiting_approval": "승인 대기",
+      "completed": "완료",
+      "failed": "실패",
+      "cancelled": "중지됨"
     }
   }
 }

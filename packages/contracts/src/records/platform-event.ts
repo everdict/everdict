@@ -22,6 +22,7 @@ export const PLATFORM_EVENT_KINDS = [
   "agent.run.awaiting_approval",
   "agent.run.completed",
   "agent.run.failed",
+  "agent.run.cancelled",
 ] as const;
 export const PlatformEventKindSchema = z.enum(PLATFORM_EVENT_KINDS);
 export type PlatformEventKind = z.infer<typeof PlatformEventKindSchema>;

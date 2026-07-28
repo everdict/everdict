@@ -1557,7 +1557,8 @@
     "guide": "Guide",
     "connectDesktop": "Desktop app",
     "connectClaude": "Claude Code",
-    "connectCodex": "Codex"
+    "connectCodex": "Codex",
+    "agents": "Agents"
   },
   "usagePage": {
     "title": "Usage",
@@ -2723,7 +2724,9 @@
     "description": "Durable claims about this workspace's entities — findings, decisions, conventions, and context — version-pinned to what they concern.",
     "newEntry": "New entry",
     "actionFailed": "The action failed. Try again.",
-    "filters": { "all": "All" },
+    "filters": {
+      "all": "All"
+    },
     "kinds": {
       "finding": "Finding",
       "decision": "Decision",
@@ -3858,6 +3861,27 @@
     "account": {
       "title": "Account & settings",
       "body": "Your profile, API keys, workspace members, secrets, and integrations live here."
+    }
+  },
+  "agentFleet": {
+    "title": "Agents",
+    "description": "Every agent run in this workspace — what woke it, what it did, how it settled.",
+    "emptyTitle": "No agent runs yet",
+    "emptyHint": "Enable an agent with triggers (or ask one in chat) and its runs appear here.",
+    "wokeOn": "woke on {kind}",
+    "viewTranscript": "View transcript",
+    "stop": "Stop run",
+    "loading": "Loading transcript…",
+    "noMessages": "No messages recorded.",
+    "roleEvent": "Event / input",
+    "roleAgent": "Agent",
+    "unavailable": "The agent service is unreachable — runs cannot be listed right now.",
+    "status": {
+      "running": "Running",
+      "awaiting_approval": "Awaiting approval",
+      "completed": "Completed",
+      "failed": "Failed",
+      "cancelled": "Cancelled"
     }
   }
 }

@@ -139,6 +139,38 @@ export function registerInternalRoutes(app: FastifyInstance, deps: ServerDeps): 
     return reply.send({ events });
   });
 
+  // --- internal: agent-run lifecycle facts (agent service → event log). The activation wrapper reports
+  // agent.run.started/completed/failed/cancelled so the fleet view + audit read one durable record. These kinds
+  // are NEVER trigger-matchable (agents watching agents is a runaway vector). Same x-internal-token guard. ---
+  app.post("/internal/agent-run-events", { schema: internalDocs.agentRunEvents }, async (req, reply) => {
+    if (!deps.internalToken || !deps.platformEvents)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "internal endpoints disabled" });
+    const provided = req.headers["x-internal-token"];
+    if (typeof provided !== "string" || !constantTimeEq(provided, deps.internalToken))
+      return reply.code(403).send({ code: "FORBIDDEN", message: "internal token mismatch" });
+    const body = z
+      .object({
+        tenant: z.string().min(1),
+        kind: z.enum(["agent.run.started", "agent.run.completed", "agent.run.failed", "agent.run.cancelled"]),
+        sessionId: z.string().min(1),
+        agentId: z.string().min(1),
+        eventKind: z.string().min(1),
+        message: z.string().min(1),
+      })
+      .safeParse(req.body);
+    if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: body.error.message });
+    const { tenant, kind, sessionId, agentId, eventKind, message } = body.data;
+    await deps.platformEvents.emit({
+      workspace: tenant,
+      kind,
+      subject: { type: "agent_session", id: sessionId },
+      payload: { agentId, eventKind },
+      causedBy: `agent:${agentId}:${sessionId}`,
+      message,
+    });
+    return reply.send({ ok: true });
+  });
+
   // --- internal: schedule fire (called by the Temporal workflow, x-internal-token guard) ---
   // The worker doesn't hold a ScorecardService, so a schedule fire goes workflow→activity→this route→ScheduleService.fire.
   // tenant is baked in as a workflow argument at schedule creation and arrives in a trusted body (already trusted via the internal token).
