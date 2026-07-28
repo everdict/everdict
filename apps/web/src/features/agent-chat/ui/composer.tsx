@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { AtSign, Paperclip, SendHorizontal, Square, X } from 'lucide-react'
+import { AtSign, BarChart3, Paperclip, SendHorizontal, Square, X } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
 import type { AgentAttachmentInput, AgentReference } from '@/entities/agent-session'
@@ -76,6 +76,7 @@ export function Composer({
   onRemoveReference,
   onPickAttachment,
   onRemoveAttachment,
+  canvasLink,
 }: {
   value: string
   onChange: (v: string) => void
@@ -88,6 +89,7 @@ export function Composer({
   onRemoveReference: (index: number) => void
   onPickAttachment: (a: AgentAttachmentInput) => void
   onRemoveAttachment: (index: number) => void
+  canvasLink?: { viewName?: string } | null
 }) {
   const t = useTranslations('agentChat')
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -132,6 +134,18 @@ export function Composer({
         if (e.dataTransfer.files.length > 0) void handleFiles(Array.from(e.dataTransfer.files))
       }}
     >
+      {/* Ambient status, not a removable chip: an analysis canvas is open and every turn carries its live
+          state — the member sees that the agent sees it. */}
+      {canvasLink && (
+        <div className="mb-1.5 flex items-center gap-1.5 px-1 text-[10.5px] text-muted-foreground">
+          <BarChart3 className="size-3 shrink-0 text-primary" />
+          <span className="truncate">
+            {canvasLink.viewName
+              ? t('canvasLinkedNamed', { name: canvasLink.viewName })
+              : t('canvasLinked')}
+          </span>
+        </div>
+      )}
       {hasChips && (
         <div className="mb-1.5 flex flex-wrap gap-1">
           {references.map((r, i) => (

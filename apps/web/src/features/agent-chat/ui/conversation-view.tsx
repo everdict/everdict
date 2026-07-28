@@ -169,6 +169,7 @@ export function ConversationView({
   onSuggestion,
   pendingPermissions,
   onDecidePermission,
+  canvasLink,
 }: {
   title: string
   user?: ChatUser
@@ -205,6 +206,9 @@ export function ConversationView({
   onSuggestion: (text: string) => void
   pendingPermissions: PendingPermission[]
   onDecidePermission: (requestId: string, decision: 'allow' | 'deny') => void
+  // An analysis canvas is open in the left half (analyze dashboard / saved View) — the composer shows a
+  // "canvas linked" chip so the member knows the agent sees it. null/undefined → no canvas, no chip.
+  canvasLink?: { viewName?: string } | null
 }) {
   const t = useTranslations('agentChat')
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -372,6 +376,7 @@ export function ConversationView({
         onSend={onSend}
         onStop={onStop}
         sending={sending}
+        canvasLink={canvasLink}
         references={references}
         attachments={attachments}
         onPickReference={onPickReference}

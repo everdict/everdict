@@ -90,8 +90,9 @@ export interface CanvasState {
   viewId?: string | undefined;
 }
 
-// Fold the open canvas into the turn context, with the delta-editing rule spelled out: apply_view_config resets
-// unset keys, so "change one thing" means re-sending the kept keys too.
+// Fold the open canvas into the turn context, with the delta-editing rule spelled out (apply_view_config resets
+// unset keys, so "change one thing" means re-sending the kept keys too) and the save path (create_view /
+// update_view take this exact config), so "save this analysis" closes in the same conversation.
 function buildCanvasPreamble(canvas: CanvasState): string {
   const target = canvas.viewId ? `the saved View '${canvas.viewId}'` : "an unsaved analysis on the analyze dashboard";
   const intro = `The user has the analysis canvas open (${target}). Its CURRENT stored-form config — the exact vocabulary apply_view_config takes — is:`;
@@ -99,7 +100,10 @@ function buildCanvasPreamble(canvas: CanvasState): string {
     "When the user asks to change the visualization or the analysis itself, call apply_view_config with the FULL " +
     "desired config: start from the current one above, change what they asked, and re-send every key you keep " +
     "(unset keys reset to defaults).";
-  return `${intro}\n${JSON.stringify(canvas.config)}\n${rule}`;
+  const save = canvas.viewId
+    ? `If the user asks to save these changes, call update_view with id '${canvas.viewId}' and this config.`
+    : "If the user asks to save this analysis, call create_view with a name and this config.";
+  return `${intro}\n${JSON.stringify(canvas.config)}\n${rule} ${save}`;
 }
 
 // Fold attached text files into a context preamble (their content is not persisted, only their metadata).

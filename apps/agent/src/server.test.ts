@@ -950,6 +950,8 @@ describe("agent server", () => {
     expect(turn).toContain('"viz":"table"');
     expect(turn).toContain("view-1");
     expect(turn).toContain("apply_view_config");
+    // Saving closes in-conversation too: an open saved View steers to update_view (create_view when unsaved).
+    expect(turn).toContain("update_view");
     expect(turn).toContain("User message:\nmake it a bar chart");
     // The persisted user record keeps the clean text — the canvas context is model-facing only.
     const messages = (

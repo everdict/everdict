@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { useTranslations } from 'next-intl'
 import { toast } from 'sonner'
 
@@ -63,6 +64,7 @@ export function AgentChatPanel({
   user?: ChatUser
 } = {}) {
   const t = useTranslations('agentChat')
+  const router = useRouter()
   const [sessions, setSessions] = useState<AgentSession[]>([])
   const [activeId, setActiveId] = useState<string | null>(null)
   const [messages, setMessages] = useState<AgentMessage[]>([])
@@ -89,6 +91,29 @@ export function AgentChatPanel({
   // while this session is active the panel polls its persisted transcript + parked approvals instead.
   const [watchId, setWatchId] = useState<string | null>(null)
   const maxSeqRef = useRef(-1)
+  // Live analysis-canvas presence (same window): the analyze dashboard / open View announces its state on
+  // mount/change and clears with a null on unmount — shown as a "canvas linked" chip above the composer, so
+  // the member KNOWS the agent sees what they see. Send-time capture stays its own synchronous round-trip.
+  const [canvasLink, setCanvasLink] = useState<{ viewName?: string } | null>(null)
+  useEffect(() => {
+    const onState = (e: Event) => {
+      const detail = (e as CustomEvent<unknown>).detail
+      if (detail === null || typeof detail !== 'object') {
+        setCanvasLink(null)
+        return
+      }
+      const d = detail as { config?: unknown; viewName?: unknown }
+      if (d.config === null || typeof d.config !== 'object') return
+      const viewName = typeof d.viewName === 'string' ? d.viewName : undefined
+      setCanvasLink((prev) =>
+        prev && prev.viewName === viewName ? prev : viewName ? { viewName } : {}
+      )
+    }
+    window.addEventListener('everdict:canvas-state', onState)
+    // The canvas may have mounted before this panel — ask it to announce itself.
+    window.dispatchEvent(new Event('everdict:canvas-state-request'))
+    return () => window.removeEventListener('everdict:canvas-state', onState)
+  }, [])
 
   const loadSessions = useCallback(async () => {
     try {
@@ -515,9 +540,23 @@ export function AgentChatPanel({
         void loadSessions()
         // The turn may have self-spawned a teammate (spawn_teammate tool) — refresh the roster so the badge reflects it.
         void loadTeammates()
+        // The turn may have created/updated workspace entities (a saved View via create_view, a schedule, …) —
+        // soft-refresh the left routed page so its server-rendered lists reflect them without a manual reload.
+        router.refresh()
       }
     },
-    [input, activeId, sending, references, attachments, draftModel, loadSessions, loadTeammates, t]
+    [
+      input,
+      activeId,
+      sending,
+      references,
+      attachments,
+      draftModel,
+      loadSessions,
+      loadTeammates,
+      router,
+      t,
+    ]
   )
 
   const addReference = useCallback((r: AgentReference) => {
@@ -644,6 +683,7 @@ export function AgentChatPanel({
     <ConversationView
       title={active?.title ?? t('new')}
       user={user}
+      canvasLink={canvasLink}
       models={modelIds}
       model={activeId ? (active?.model ?? null) : draftModel}
       onChangeModel={(m) => void changeModel(m)}

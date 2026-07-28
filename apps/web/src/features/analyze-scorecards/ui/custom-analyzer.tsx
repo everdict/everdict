@@ -227,22 +227,35 @@ export function CustomAnalyzer({
     return () => window.removeEventListener('everdict:view-config', onApply)
   }, [])
 
-  // Canvas-state feedback, the reverse direction: right before sending each turn the agent chat asks what the
-  // canvas CURRENTLY shows (synchronous same-window request/response), so multi-turn refinement — "make it a
-  // bar chart", "regroup by model" — grounds on the live state including the member's manual picker changes.
+  // Canvas-state feedback, the reverse direction: the agent chat asks what the canvas CURRENTLY shows right
+  // before sending each turn (synchronous same-window request/response), so multi-turn refinement — "make it
+  // a bar chart", "regroup by model" — grounds on the live state including the member's manual picker changes.
+  // The same state is also announced unprompted on mount and on every change, so the chat composer can show a
+  // live "canvas linked" chip (presence, not just per-send capture).
+  const activeViewName = savedViews.find((v) => v.id === activeViewId)?.name
   useEffect(() => {
-    const respond = () =>
+    const announce = () =>
       window.dispatchEvent(
         new CustomEvent('everdict:canvas-state', {
           detail: {
             config: configToStored(config),
             ...(activeViewId ? { viewId: activeViewId } : {}),
+            ...(activeViewName ? { viewName: activeViewName } : {}),
           },
         })
       )
-    window.addEventListener('everdict:canvas-state-request', respond)
-    return () => window.removeEventListener('everdict:canvas-state-request', respond)
-  }, [config, activeViewId])
+    announce()
+    window.addEventListener('everdict:canvas-state-request', announce)
+    return () => window.removeEventListener('everdict:canvas-state-request', announce)
+  }, [config, activeViewId, activeViewName])
+
+  // Departure — real unmount only ([] deps): the member left the canvas, so the chat's "canvas linked" chip
+  // must clear (and the next turn carries no canvas).
+  useEffect(() => {
+    return () => {
+      window.dispatchEvent(new CustomEvent('everdict:canvas-state', { detail: null }))
+    }
+  }, [])
 
   const resolveOwner = (s: string) => authors[s]?.name ?? (s ? fmtSubject(s) : '—')
   const patch = (p: Partial<AnalysisConfig>) => setConfig((c) => ({ ...c, ...p }))
