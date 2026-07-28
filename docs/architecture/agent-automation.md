@@ -1,6 +1,7 @@
 # Agent automation — platform-triggered agents, fleet observability, and the crafting studio
 
-> **Status: doc-first SSOT (2026-07-28). Plan only — no code yet.** Successor and generalization of
+> **Status: P1–P7 LANDED (2026-07-28) — see "Implementation status" at the end for the shipped surface and
+> the recorded v1 bounds.** Successor and generalization of
 > [agent-teams.md](./agent-teams.md) (teammates + event bridge, S1–S6 landed) and
 > [agent-conversations.md](./agent-conversations.md) (the chat runtime).
 >
@@ -245,6 +246,52 @@ onward as the manual test harness.
    and `schedule.fired` is just another event kind.
 4. **Shadow-mode fidelity.** `plan`-forced replay captures intent but not real side effects. Good enough
    for B3/B5 v1; a worktree/sandbox execution rung can be added later for code-mutating agents.
+
+## Implementation status (2026-07-28)
+
+All seven phases landed in one pass (commits `2e4ac419` P1 → `f4ad9f69` P2 → `54122f70` P3 → `402267e6`
+P4 → `5b596abf` P5 → `88542c6c` P6 → P7 with this doc update):
+
+- **Events**: `PlatformEventRecord` + `platform_events` log (mig 0085) + the `PlatformEventEmitter` seam;
+  facts emitted at run/scorecard/comment transition points; `GET /internal/events` reconcile cursor
+  (workspace-optional = one deployment-wide loop); member surface `GET /events` + MCP
+  `list_platform_events` (`events:read`, viewer+).
+- **Activation**: AgentSpec v2 (`task`/`triggers`/`permissionMode`/`enabled`); `AgentActivator` in the
+  agent service — kind+filter matching, self-cause skip, per-(agent,kind) cooldown, durable (agent,event)
+  dedup on the session record (mig 0086), per-agent serialization + bounded queue, one-shot `agt_` token
+  revoked with the run, the crafted agent's own profile resolved via `origin.agentId`.
+- **Observability**: session `origin`/`status`; `agent.run.*` facts reported to the event log; web
+  **Agents** page — live run feed, transcript drill-in, stop control; runs are workspace-visible.
+- **Approvals**: mode-derived permit on headless runs (bypass / auto-guarded / default+plan = park all);
+  parking reuses the discussion turn's PermissionRegistry + `GET /pending` + `POST /permission`; the fleet
+  shows an inline Allow/Deny prompt; fail-closed deny when no approval channel exists.
+- **Crafting**: `POST /agent/agents/try` — replay a real (or hand-built) event at a saved agent or draft
+  in SHADOW mode (reads live under the caller's bearer, mutations captured as `wouldHave` + denied).
+- **Templates**: `scorecard-sentinel` + `failure-fix-pr` seeded into `_shared` at boot (disabled,
+  creator-less — adopting = saving a workspace copy).
+- **Agent evals (B5 v1)**: a try returns its transcript as a normalized `TraceEvent[]` — the eval recipe
+  is N scenario tries → `POST /scorecards/ingest` (one case per try) → judges → a scorecard diffable
+  across agent versions.
+
+### Recorded v1 bounds (deliberate cuts, not omissions)
+
+- **Teammate roster stays process-local.** Registry agents are the durable tier; chat-spawned teammates
+  still live in the server Map. Persisting the roster (re-mint tokens on boot) is the follow-up.
+- **Approval parks are in-process.** 10 min deny-on-expiry; an agent-service restart expires a park as
+  deny (never allow). Durable resumable approvals (A6's full shape) are the next rung.
+- **No run outcome roll-up yet** (turns/toolCalls/priceUsd on the record) — cost is metered via the usage
+  bridge; the fleet shows status, not per-run cost.
+- **`agent.run.*` facts reach the event log, not the bell.** Feed/Mattermost notification of failed runs
+  is a NotificationKind addition away.
+- **Web authoring wizard + replay-picker UI deferred.** The backend surface is complete (`/agents` CRUD,
+  `/agent/agents/try`, `GET /events`); Settings › Agent still edits the chat default config only.
+- **`causedBy` stamping covers agent.run facts.** A scorecard an agent submits does not yet carry the
+  submitting run's provenance — cooldown + dedup + the agent.run trigger ban carry the loop-guard load
+  until the MCP layer stamps it.
+- **`schedule.fired` kind omitted** — `scorecard.submitted` carries `origin`/`scheduleId` pointers, which
+  covers the cron-trigger decision (reuse Schedules) without a second kind.
+- **Per-agent budgets not enforced yet** — conversation metering covers cost attribution; a per-agent
+  priceUsd cap on activation runs is A7's remaining piece.
 
 ## Non-goals / guardrails
 

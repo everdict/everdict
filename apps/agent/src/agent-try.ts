@@ -1,4 +1,5 @@
 import { type ChatMessage, runAgentLoop } from "@everdict/agent-runtime";
+import type { TraceEvent } from "@everdict/contracts";
 import { renderActivationPrompt } from "./agent-activation.js";
 import { contentToString, extractToolCalls } from "./chat.js";
 import type { ToolProvider } from "./mcp-tools.js";
@@ -29,6 +30,10 @@ export interface AgentTryResult {
   messages: AgentTryMessage[];
   // The mutations the agent WOULD have made (tool name + arguments) — shadow mode's whole point.
   wouldHave: { name: string; input: unknown }[];
+  // The same transcript as a normalized TraceEvent stream — directly ingestable by POST /scorecards/ingest,
+  // which is how AGENT EVALS close the loop (agent-automation B5): run N scenario tries, ingest each try's
+  // trace as a case, judge the batch, diff across agent versions.
+  trace: TraceEvent[];
 }
 
 export interface AgentTryDeps {
@@ -108,8 +113,37 @@ export async function runAgentTry(
       ...(model.temperature !== undefined ? { temperature: model.temperature } : {}),
       ...(signal ? { signal } : {}),
     });
-    return { messages, wouldHave };
+    return { messages, wouldHave, trace: tryMessagesToTrace(event, messages) };
   } finally {
     await tools.close();
   }
+}
+
+// Normalize a try transcript into the platform's TraceEvent stream (agent-automation B5) — the transcript is
+// already tool-call shaped, so this is a projection, not an inference. `t` is a monotonic step index (a try
+// has no meaningful wall-clock and the graders that need one read llm_call latency, which a try doesn't emit).
+export function tryMessagesToTrace(event: AgentTryEvent, messages: AgentTryMessage[]): TraceEvent[] {
+  const trace: TraceEvent[] = [{ t: 0, kind: "message", role: "user", text: `[${event.kind}] ${event.message}` }];
+  let t = 1;
+  const pendingToolIds: string[] = [];
+  for (const m of messages) {
+    if (m.role === "assistant") {
+      if (m.content.length > 0) trace.push({ t: t++, kind: "message", role: "assistant", text: m.content });
+      for (const call of m.toolCalls ?? []) {
+        const id = `call-${t}`;
+        pendingToolIds.push(id);
+        let args: unknown = call.arguments;
+        try {
+          args = JSON.parse(call.arguments);
+        } catch {
+          // 원문 문자열 그대로 둔다 — 모델이 비 JSON arguments를 낸 경우
+        }
+        trace.push({ t: t++, kind: "tool_call", id, name: call.name, args });
+      }
+    } else {
+      const id = pendingToolIds.shift() ?? `call-${t}`;
+      trace.push({ t: t++, kind: "tool_result", id, ok: !m.content.startsWith("Error"), output: m.content });
+    }
+  }
+  return trace;
 }
