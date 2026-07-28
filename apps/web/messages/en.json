@@ -2821,6 +2821,7 @@
     "readOnlyNotice": "Read-only — writing requires the member role.",
     "shellTitle": "Shell",
     "shellHint": "ls · cd · cat · tree · mkdir · echo > · mv · cp · rm — type `help`",
+    "settingsStorageTitle": "Storage",
     "settingsTotalFiles": "Files",
     "settingsTotalBytes": "Storage used",
     "settingsOpenBrowser": "Open Files",

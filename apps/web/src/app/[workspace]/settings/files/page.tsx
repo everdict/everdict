@@ -1,7 +1,13 @@
 import { getTranslations } from 'next-intl/server'
+import { z } from 'zod'
 
 import { FilesSettings } from '@/features/browse-files'
-import { fsUsageSchema, type FsUsageView } from '@/entities/workspace-file'
+import {
+  fsEntrySchema,
+  fsUsageSchema,
+  type FsEntryView,
+  type FsUsageView,
+} from '@/entities/workspace-file'
 import { can } from '@/shared/auth/can'
 import { currentPrincipal } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
@@ -30,9 +36,11 @@ export default async function FilesSettingsPage() {
   }
 
   let usage: FsUsageView | undefined
+  let entries: FsEntryView[] = []
   let error: string | undefined
   try {
     usage = fsUsageSchema.parse(await controlPlane.fsUsage(ctx))
+    entries = z.array(fsEntrySchema).parse(await controlPlane.listFsEntries(ctx, ''))
   } catch (e) {
     error = e instanceof Error ? e.message : String(e)
   }
@@ -46,6 +54,7 @@ export default async function FilesSettingsPage() {
         <FilesSettings
           workspace={principal.workspace}
           initialUsage={usage}
+          initialEntries={entries}
           canWrite={can(principal.roles, 'files:write')}
           canManage={can(principal.roles, 'settings:write')}
         />

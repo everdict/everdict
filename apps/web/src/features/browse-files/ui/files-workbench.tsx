@@ -53,9 +53,13 @@ type DialogMode =
 export function FilesWorkbench({
   initialEntries,
   canWrite,
+  refreshToken,
+  onMutated,
 }: {
   initialEntries: FsEntryView[]
   canWrite: boolean
+  refreshToken?: number // bump from outside (e.g. the Settings governance rows) to refetch the tree
+  onMutated?: () => void // fired after every refresh sweep so a host view can refresh its own data (usage)
 }) {
   const t = useTranslations('files')
   const [dirs, setDirs] = useState<DirCache>({ '': initialEntries })
@@ -84,7 +88,8 @@ export function FilesWorkbench({
   const refreshAll = useCallback(() => {
     void loadDir('')
     for (const dir of expanded) void loadDir(dir)
-  }, [expanded, loadDir])
+    onMutated?.()
+  }, [expanded, loadDir, onMutated])
 
   async function toggleDir(path: string) {
     setExpanded((prev) => {
@@ -111,9 +116,11 @@ export function FilesWorkbench({
     }
   }, [])
 
+  // An outside mutation (Settings governance rows) bumps refreshToken → refetch the tree in place.
+  // Deliberately keyed on the token alone — refreshAll identity churn must not re-trigger the sweep.
   useEffect(() => {
-    // If a shell mutation removed the open file, the next explicit read surfaces it — no polling here.
-  }, [])
+    if (refreshToken !== undefined && refreshToken > 0) refreshAll()
+  }, [refreshToken])
 
   async function saveDraft() {
     if (selectedPath === undefined) return

@@ -2821,6 +2821,7 @@
     "readOnlyNotice": "읽기 전용 — 쓰기는 member 역할이 필요합니다.",
     "shellTitle": "셸",
     "shellHint": "ls · cd · cat · tree · mkdir · echo > · mv · cp · rm — `help` 입력",
+    "settingsStorageTitle": "저장 공간",
     "settingsTotalFiles": "파일 수",
     "settingsTotalBytes": "사용 용량",
     "settingsOpenBrowser": "파일 열기",
