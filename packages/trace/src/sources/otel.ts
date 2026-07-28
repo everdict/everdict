@@ -105,6 +105,7 @@ export interface OtelTraceSourceOptions {
   // Jaeger-query-API only (`GET /api/traces?service=…&tags=…`, verified on real 1.62: resource attribute = process-tag match,
   // service required). OTLP-native backends (no search API) stay id-correlated.
   correlate?: "id" | "tag";
+  artifactBaseUrl?: string; // base for ROOT-RELATIVE evidence artifact refs (else the judge gets the raw path string)
   // The tag/resource-attribute key `correlate:"tag"` searches (default `everdict.run_id`). Set to a controlled-
   // coordinate/session attribute so a trace whose agent overwrote `everdict.run_id` is found by the id everdict injected
   // (the value comes from fetch(runId), where the caller passes the controlled coordinate — frontDoor.contextId).
@@ -172,6 +173,7 @@ export class OtelTraceSource implements BrowsableTraceSource {
       this.opts.fetchImpl ?? fetch,
       this.opts.headers,
       this.opts.endpoint,
+      this.opts.artifactBaseUrl,
     );
     return {
       events: withEvidenceEvents(spansToTraceEvents(spans, m), evidence),
@@ -189,6 +191,7 @@ export class OtelTraceSource implements BrowsableTraceSource {
       this.opts.fetchImpl ?? fetch,
       this.opts.headers,
       this.opts.endpoint,
+      this.opts.artifactBaseUrl,
     );
     const provenance = provenanceFromSpans(spans); // resource/span attrs carry everdict.run_id + everdict.scorecard_id/harness
     return {

@@ -151,7 +151,14 @@ export const PullIngestBodySchema = z.object({
       // SecretStore key name → its value used as the credential. otel/mlflow use the Authorization header verbatim (scheme included:
       // "Bearer …"|"Basic …"); for langfuse/langsmith/phoenix the adapter places it in the platform's conventional header (langsmith=x-api-key).
       authSecret: z.string().optional(),
-      project: z.string().optional(), // required for phoenix span-lookup path (project name/ID). Ignored for other kinds.
+      project: z.string().optional(), // required for phoenix span-lookup path (project name/ID) · mlflow experiment for tag search.
+      // Correlation for the inline config — the same axes the registered pool carries. Pre-fix these were silently
+      // STRIPPED (no .strict()), so an inline mlflow/otel pull could only ever fetch by trace id: a client passing
+      // correlate:"tag" got id-fetch and a batch of empty traces with no hint why.
+      correlate: z.enum(["id", "tag"]).optional(), // default id (fetch runId AS the trace id)
+      correlateTag: z.string().optional(), // the tag key searched when correlate:"tag" (default everdict.run_id)
+      service: z.string().optional(), // otel/jaeger tag-search scope (required by the Jaeger query API)
+      artifactBaseUrl: z.string().optional(), // resolve root-relative evidence artifact refs during the pull
     }),
   ]),
   runs: z.array(z.object({ caseId: z.string(), runId: z.string() })).min(1),

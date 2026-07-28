@@ -18,6 +18,10 @@ export const TraceSourceConfigViewSchema = z.object({
       "scope per kind: mlflow experiment_id / phoenix|langfuse|langsmith project (required for mlflow/phoenix)",
     ),
   webUrl: z.string().optional().describe("export deep-link base when it differs from the endpoint (export-target use)"),
+  artifactBaseUrl: z
+    .string()
+    .optional()
+    .describe("base URL for root-relative artifact refs in pulled traces (evidence resolution; pull-only)"),
 });
 export type TraceSourceConfigView = z.infer<typeof TraceSourceConfigViewSchema>;
 

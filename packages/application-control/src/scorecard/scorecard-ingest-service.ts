@@ -185,6 +185,12 @@ export class ScorecardIngestService {
           // credential 'value' for the newer sources (langfuse/langsmith/phoenix) — the adapter owns the header name.
           ...(headers?.authorization ? { auth: headers.authorization } : {}),
           ...(source.project ? { project: source.project } : {}),
+          // Correlation axes — pre-fix the inline path dropped these entirely, so correlate:"tag" silently became
+          // an id-fetch and every pulled trace came back empty.
+          ...(source.correlate ? { correlate: source.correlate } : {}),
+          ...(source.correlateTag ? { correlateTag: source.correlateTag } : {}),
+          ...(source.service ? { service: source.service } : {}),
+          ...(source.artifactBaseUrl ? { artifactBaseUrl: source.artifactBaseUrl } : {}),
         };
       }
       // Per-harness conversion overlay (judge-wizard-authored) — production traces normalize the way this harness/judge

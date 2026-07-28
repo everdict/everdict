@@ -147,6 +147,7 @@ export const traceSourceSchema = z.object({
   correlate: z.string().optional(),
   service: z.string().optional(),
   project: z.string().optional(),
+  artifactBaseUrl: z.string().optional(), // base for root-relative evidence artifact refs (else judges get path strings)
   // Per-harness span→TraceEvent attribute overrides — the full SpanAttrMapping shape (incl. evidence slots);
   // absent = OTel GenAI conventions.
   mapping: spanAttrMappingSchema.optional(),

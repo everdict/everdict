@@ -32,6 +32,7 @@ export interface TraceSourceConfigView {
   service?: string;
   project?: string;
   webUrl?: string;
+  artifactBaseUrl?: string;
 }
 
 type TraceSourceEntry = NonNullable<WorkspaceSettings["traceSources"]>[number];
@@ -67,6 +68,7 @@ const toView = (s: TraceSourceEntry): TraceSourceConfigView => ({
   ...(s.service ? { service: s.service } : {}),
   ...(s.project ? { project: s.project } : {}),
   ...(s.webUrl ? { webUrl: s.webUrl } : {}),
+  ...(s.artifactBaseUrl ? { artifactBaseUrl: s.artifactBaseUrl } : {}),
 });
 
 export interface TraceSourceServiceDeps {
@@ -116,6 +118,7 @@ export class TraceSourceService {
       service?: string;
       project?: string;
       webUrl?: string;
+      artifactBaseUrl?: string;
     },
   ): Promise<TraceSourceConfigView> {
     const correlate = input.correlate ?? "id";
@@ -144,6 +147,7 @@ export class TraceSourceService {
       ...(input.service ? { service: input.service } : {}),
       ...(input.project ? { project: input.project } : {}),
       ...(input.webUrl ? { webUrl: input.webUrl } : {}),
+      ...(input.artifactBaseUrl ? { artifactBaseUrl: input.artifactBaseUrl } : {}),
     };
     const existing = unifiedTraceSources(await this.settings.get(workspace));
     const next = [...existing.filter((s) => s.name !== input.name), entry];
@@ -251,6 +255,7 @@ export class TraceSourceService {
       correlate: source.correlate,
       ...(source.service ? { service: source.service } : {}),
       ...(source.project ? { project: source.project } : {}),
+      ...(source.artifactBaseUrl ? { artifactBaseUrl: source.artifactBaseUrl } : {}), // root-relative evidence refs
     };
   }
 

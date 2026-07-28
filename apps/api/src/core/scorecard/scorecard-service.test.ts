@@ -744,6 +744,47 @@ describe("ScorecardService.ingestPull", () => {
     expect(captured?.headers?.authorization).toBe("Bearer secret-xyz");
   });
 
+  it("an INLINE source carries its correlation axes (correlate/correlateTag/service/artifactBaseUrl) into the built source", async () => {
+    // Pre-fix the inline variant silently STRIPPED these fields (schema without them + no passthrough), so a
+    // correlate:"tag" inline pull degraded to an id-fetch and every trace came back empty with no hint why.
+    const store = new InMemoryScorecardStore();
+    const datasets = new InMemoryDatasetRegistry();
+    await datasets.register("acme", datasetWithCase());
+    let captured: TraceSourceConfig | undefined;
+    const service = new ScorecardService({
+      dispatcher,
+      store,
+      datasets,
+      defaultTraceGraders,
+      buildTraceSource: (cfg): TraceSource => {
+        captured = cfg;
+        return { fetch: async () => [{ t: 0, kind: "llm_call", model: "m" }] };
+      },
+    });
+    const created = await service.ingestPull({
+      tenant: "acme",
+      dataset: { id: "d", version: "latest" },
+      harness: { id: "h", version: "1.0.0" },
+      source: {
+        kind: "otel",
+        endpoint: "http://jaeger:16686",
+        correlate: "tag",
+        correlateTag: "mlflow.trace.session",
+        service: "agent",
+        artifactBaseUrl: "https://artifacts.internal",
+      },
+      runs: [{ caseId: "c1", runId: "run-9" }],
+      judges: [],
+    });
+    await waitTerminal(store, created.id);
+    expect(captured).toMatchObject({
+      correlate: "tag",
+      correlateTag: "mlflow.trace.session",
+      service: "agent",
+      artifactBaseUrl: "https://artifacts.internal",
+    });
+  });
+
   it("resolves a REGISTERED source referenced by name (register once, pull by name) — the credential comes from the pool, not the request", async () => {
     const store = new InMemoryScorecardStore();
     const datasets = new InMemoryDatasetRegistry();

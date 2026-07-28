@@ -68,39 +68,60 @@ export async function fetchTextArtifact(
   }
 }
 
+// Resolve a ROOT-RELATIVE artifact ref ("/artifacts/run-1/shot.png") against the source's artifactBaseUrl.
+// Absolute http(s) refs pass through untouched; with no base (or a non-path value) the original stays — the
+// pre-existing "keep the raw string" behavior. Without this, a harness that references its artifacts
+// root-relatively left the judge holding path STRINGS instead of the resolved bytes/text.
+export function resolveArtifactRef(value: string, artifactBaseUrl: string | undefined): string {
+  if (isHttpUrl(value)) return value;
+  if (!artifactBaseUrl || !value.startsWith("/")) return value;
+  try {
+    return new URL(value, artifactBaseUrl).toString();
+  } catch {
+    return value;
+  }
+}
+
 // spansToEvidence (pure) + I/O resolution — the one evidence entrypoint the span-based sources (otel/mlflow)
 // call from fetchDetailed/inspect: ① a screenshot ref resolves to image bytes (ref kept as provenance);
-// ② a dom/custom-slot value that IS an http(s) URL auto-resolves to the artifact's real text (URL kept on miss).
-// finalAnswer is never auto-fetched — the answer is the answer, not a pointer. Credentials: same-origin only.
+// ② a dom/custom-slot value that IS an http(s) URL (or a root-relative ref + artifactBaseUrl) auto-resolves to
+// the artifact's real text (the original string kept on miss). finalAnswer is never auto-fetched — the answer is
+// the answer, not a pointer. Credentials: same-origin only.
 export async function extractEvidence(
   spans: Span[],
   mapping: SpanAttrMapping | undefined,
   f: typeof fetch,
   headers?: Record<string, string>,
   endpoint?: string,
+  artifactBaseUrl?: string,
 ): Promise<TraceEvidence | undefined> {
   const evidence = spansToEvidence(spans, mapping);
   if (!evidence) return undefined;
   const out: TraceEvidence = { ...evidence };
 
   if (out.screenshotRef && !out.screenshot) {
-    const img = await fetchImageBase64(f, out.screenshotRef, headersFor(out.screenshotRef, headers, endpoint));
+    const url = resolveArtifactRef(out.screenshotRef, artifactBaseUrl); // the UNRESOLVED ref stays as provenance
+    const img = await fetchImageBase64(f, url, headersFor(url, headers, endpoint));
     if (img) {
       out.screenshot = img.base64;
       out.screenshotMediaType = img.mediaType;
     }
   }
 
-  if (out.dom !== undefined && isHttpUrl(out.dom)) {
-    const text = await fetchTextArtifact(f, out.dom, headersFor(out.dom, headers, endpoint));
-    if (text !== undefined) out.dom = text;
+  if (out.dom !== undefined) {
+    const url = resolveArtifactRef(out.dom, artifactBaseUrl);
+    if (isHttpUrl(url)) {
+      const text = await fetchTextArtifact(f, url, headersFor(url, headers, endpoint));
+      if (text !== undefined) out.dom = text;
+    }
   }
 
   if (out.custom) {
     const custom: Record<string, string> = {};
     for (const [name, value] of Object.entries(out.custom)) {
-      if (isHttpUrl(value)) {
-        const text = await fetchTextArtifact(f, value, headersFor(value, headers, endpoint));
+      const url = resolveArtifactRef(value, artifactBaseUrl);
+      if (isHttpUrl(url)) {
+        const text = await fetchTextArtifact(f, url, headersFor(url, headers, endpoint));
         custom[name] = text ?? value;
       } else {
         custom[name] = value;

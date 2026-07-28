@@ -241,5 +241,9 @@ export interface TraceSourceConfig {
   correlateTag?: string;
   service?: string; // search scope for otel tag correlation (the Jaeger service parameter). Ignored by other kinds.
   mapping?: SpanAttrMapping; // per-harness span-attribute overrides for a non-GenAI-convention harness (otel/mlflow).
+  // Base URL for ROOT-RELATIVE artifact refs in the trace (evidence slots: screenshots/DOM dumps referenced as
+  // "/artifacts/run-1/shot.png"). Without it such refs can't resolve to bytes and the judge receives the raw path
+  // string. Refs that are already absolute http(s) URLs are untouched. (otel/mlflow evidence extraction.)
+  artifactBaseUrl?: string;
   fetchImpl?: typeof fetch;
 }

@@ -75,6 +75,7 @@ export const runtimeSpecSchema = z
         correlate: z.string().optional(),
         service: z.string().optional(),
         project: z.string().optional(),
+        artifactBaseUrl: z.string().optional(), // base for root-relative evidence artifact refs
       })
       .passthrough()
       .optional(),

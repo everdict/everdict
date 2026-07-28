@@ -37,6 +37,7 @@ export function registerTraceSourceRoutes(app: FastifyInstance, deps: ServerDeps
         service: z.string().min(1).optional(),
         project: z.string().min(1).optional(),
         webUrl: z.string().url().optional(),
+        artifactBaseUrl: z.string().url().optional(),
       })
       .safeParse(req.body ?? {});
     if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: zodIssues(body.error).join("; ") });

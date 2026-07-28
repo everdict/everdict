@@ -78,6 +78,7 @@ export function buildTopologyBackend(
     ...(ts.correlateTag ? { correlateTag: ts.correlateTag } : {}), // controlled-coordinate tag search (pairs with frontDoor.contextId)
     ...(ts.service ? { service: ts.service } : {}),
     ...(ts.project ? { project: ts.project } : {}),
+    ...(ts.artifactBaseUrl ? { artifactBaseUrl: ts.artifactBaseUrl } : {}), // resolve root-relative evidence refs
   });
   // Resolve the harness's selected workspace source per-dispatch → build a full TraceSource (auth/correlate/scope).
   const resolve = deps.resolveTraceSource;

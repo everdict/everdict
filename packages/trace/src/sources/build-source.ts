@@ -28,6 +28,7 @@ export function buildTraceSource(cfg: TraceSourceConfig): BrowsableTraceSource {
         ...(cfg.correlateTag ? { correlateTag: cfg.correlateTag } : {}),
         ...(cfg.service ? { service: cfg.service } : {}),
         ...(cfg.mapping ? { mapping: cfg.mapping } : {}),
+        ...(cfg.artifactBaseUrl ? { artifactBaseUrl: cfg.artifactBaseUrl } : {}),
       });
     case "mlflow":
       return new MlflowTraceSource({
@@ -36,6 +37,7 @@ export function buildTraceSource(cfg: TraceSourceConfig): BrowsableTraceSource {
         ...(cfg.correlateTag ? { correlateTag: cfg.correlateTag } : {}),
         ...(cfg.project ? { experimentIds: [cfg.project] } : {}),
         ...(cfg.mapping ? { mapping: cfg.mapping } : {}),
+        ...(cfg.artifactBaseUrl ? { artifactBaseUrl: cfg.artifactBaseUrl } : {}),
       });
     case "langfuse":
       return new LangfuseTraceSource(authOpts);

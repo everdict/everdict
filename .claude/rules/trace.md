@@ -9,6 +9,16 @@ docs/service-harness.md + docs/architecture/trace-sink.md.
 
 - Each source (`OtelTraceSource` / `MlflowTraceSource`) parses its raw format → a normalized `Span[]`, then the
   shared `spansToTraceEvents` maps to `TraceEvent` (OTel GenAI semantic conventions; attr keys are configurable).
+  A span whose DECLARED kind is TOOL/FUNCTION (`mlflow.spanType`, `openinference.span.kind`, …) normalizes to a
+  `tool_call`/`tool_result` pair even with NO `tool.name`/gen_ai attrs (name = the span; args/result from the
+  generic I/O channels) — pre-fix such spans demoted to `span` and judges saw no tool actions at all.
+- MLflow `correlate:"tag"`: a tag-search miss falls back to the `request_metadata.` filter before declaring
+  absence (some SDK paths record the correlation key in trace metadata, not tags; one extra call on miss only).
+- `TraceSourceConfig.artifactBaseUrl` (spec/pool/pull-ingest-inline parity): resolves ROOT-RELATIVE evidence
+  artifact refs (`/artifacts/run-1/shot.png`) before the ref→bytes fetch — without it judges receive raw path
+  strings. Absolute http(s) refs untouched; credentials remain same-origin-guarded against the resolved URL.
+- `POST /scorecards/ingest/pull` INLINE sources carry `correlate`/`correlateTag`/`service`/`artifactBaseUrl`
+  (pre-fix they were silently stripped, so an inline tag-correlated pull degraded to empty id-fetches).
 - Keep parsing pure/deterministic (unit-testable with sample span JSON); only `fetch()` does I/O. Inject `fetchImpl`
   for tests.
 - **Credentials are injected, never embedded.** A source takes `headers?`; the caller resolves the value from the

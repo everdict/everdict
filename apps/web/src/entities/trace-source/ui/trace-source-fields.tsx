@@ -17,6 +17,7 @@ export interface TraceSourceValue {
   correlate: string // '' (default) | id | tag — how the platform finds THIS run's trace
   service: string // otel/jaeger service scope ('' = unset)
   project: string // mlflow experiment / langsmith project / phoenix project / langfuse projectId ('' = unset)
+  artifactBaseUrl: string // base URL for root-relative artifact refs in pulled traces ('' = unset)
 }
 
 export const EMPTY_TRACE_SOURCE: TraceSourceValue = {
@@ -26,6 +27,7 @@ export const EMPTY_TRACE_SOURCE: TraceSourceValue = {
   correlate: '',
   service: '',
   project: '',
+  artifactBaseUrl: '',
 }
 
 const KIND_OPTIONS = [
@@ -122,6 +124,18 @@ export function TraceSourceFields({
           />
         </div>
       </div>
+      <div className="space-y-1.5">
+        <div className="flex items-center gap-1">
+          <Label>{t('artifactBaseUrlLabel')}</Label>
+          <InfoTip content={t('artifactBaseUrlTip')} />
+        </div>
+        <Input
+          value={value.artifactBaseUrl}
+          onChange={(e) => onChange({ artifactBaseUrl: e.target.value })}
+          placeholder="https://mlflow.internal:5000"
+          autoComplete="off"
+        />
+      </div>
     </div>
   )
 }
@@ -135,5 +149,6 @@ export function traceSourceToSpec(v: TraceSourceValue): Record<string, unknown> 
     ...(v.correlate ? { correlate: v.correlate } : {}),
     ...(v.service.trim() ? { service: v.service.trim() } : {}),
     ...(v.project.trim() ? { project: v.project.trim() } : {}),
+    ...(v.artifactBaseUrl.trim() ? { artifactBaseUrl: v.artifactBaseUrl.trim() } : {}),
   }
 }

@@ -43,6 +43,11 @@ export function registerTraceSourceTools(server: McpServer, ctx: McpToolContext)
           service: z.string().min(1).optional().describe("otel/jaeger tag-search scope (the agent's service.name)"),
           project: z.string().min(1).optional().describe("mlflow experiment_id / phoenix|langfuse|langsmith project"),
           webUrl: z.string().url().optional().describe("export deep-link base when it differs from the endpoint"),
+          artifactBaseUrl: z
+            .string()
+            .url()
+            .optional()
+            .describe("base URL for root-relative artifact refs in pulled traces (evidence resolution)"),
         },
       },
       (input) => run(principal, "settings:write", async () => ok({ config: await source.upsert(ws, input) })),

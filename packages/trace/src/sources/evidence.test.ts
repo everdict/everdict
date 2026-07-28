@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { extractEvidence, fetchImageBase64 } from "./evidence-resolve.js";
+import { extractEvidence, fetchImageBase64, resolveArtifactRef } from "./evidence-resolve.js";
 import { MlflowTraceSource } from "./mlflow.js";
 import {
   type Span,
@@ -231,5 +231,20 @@ describe("MlflowTraceSource.fetchDetailed (evidence end-to-end)", () => {
     expect(last).toMatchObject({ kind: "message", role: "assistant", text: "42" });
     // fetch() stays the events view of the same pull.
     expect(await src.fetch("tr-1")).toEqual(detailed.events);
+  });
+});
+
+// B2 — root-relative artifact refs resolve against traceSource.artifactBaseUrl (else judges get path strings).
+describe("resolveArtifactRef (artifactBaseUrl)", () => {
+  it("joins a root-relative ref onto the base, passes absolute URLs through, and keeps the raw value without a base", () => {
+    expect(resolveArtifactRef("/artifacts/run-1/shot.png", "https://mlflow.internal:5000")).toBe(
+      "https://mlflow.internal:5000/artifacts/run-1/shot.png",
+    );
+    expect(resolveArtifactRef("https://cdn.example.com/a.png", "https://mlflow.internal:5000")).toBe(
+      "https://cdn.example.com/a.png",
+    );
+    // No base / not root-relative → the pre-existing "keep the raw string" behavior.
+    expect(resolveArtifactRef("/artifacts/a.png", undefined)).toBe("/artifacts/a.png");
+    expect(resolveArtifactRef("runs/fixed/a.png", "https://mlflow.internal:5000")).toBe("runs/fixed/a.png");
   });
 });

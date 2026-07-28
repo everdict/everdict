@@ -130,6 +130,7 @@ function fieldsFromSpec(spec: RuntimeSpec): Fields {
           correlate: str(trace.correlate),
           service: str(trace.service),
           project: str(trace.project),
+          artifactBaseUrl: str(trace.artifactBaseUrl),
         }
       : EMPTY_TRACE_SOURCE,
   }

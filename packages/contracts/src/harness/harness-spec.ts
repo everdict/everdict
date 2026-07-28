@@ -23,6 +23,9 @@ export const TraceSourceSpecSchema = z.object({
   project: z.string().optional(),
   // Per-harness span→TraceEvent attribute overrides for a harness that doesn't emit the OTel GenAI conventions (otel/mlflow).
   mapping: SpanAttrMappingSchema.optional(),
+  // Base URL for ROOT-RELATIVE artifact refs in the trace (evidence slots) — without it the judge receives the raw
+  // path string instead of the resolved bytes. Absolute http(s) refs are untouched.
+  artifactBaseUrl: z.string().optional(),
 });
 export type TraceSourceSpec = z.infer<typeof TraceSourceSpecSchema>;
 

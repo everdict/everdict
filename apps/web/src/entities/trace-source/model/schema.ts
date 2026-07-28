@@ -17,6 +17,7 @@ export const traceSourceConfigSchema = z.object({
   service: z.string().optional(), // otel/jaeger tag-search scope (the agent's service.name)
   project: z.string().optional(), // per-kind scope: mlflow experiment_id · phoenix|langfuse|langsmith project
   webUrl: z.string().optional(), // export deep-link base when it differs from the endpoint (export-target use)
+  artifactBaseUrl: z.string().optional(), // base for root-relative artifact refs in pulled traces (evidence resolution)
 })
 
 // GET /workspace/trace-sources → { sources, assignments, sinkAssignments }: the ONE registered-source pool + the two
