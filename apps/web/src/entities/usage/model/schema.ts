@@ -17,6 +17,11 @@ export const usageItemSchema = usageTotalsSchema.extend({
   model: z.string(),
 })
 
+// One (day × source × model) line of the daily spend series — what the billing chart plots.
+export const usageDayItemSchema = usageItemSchema.extend({
+  day: z.string(), // UTC day, YYYY-MM-DD
+})
+
 export const tenantUsageSchema = usageTotalsSchema.extend({
   bySource: z.object({
     harness: usageTotalsSchema, // the harness under test
@@ -24,6 +29,7 @@ export const tenantUsageSchema = usageTotalsSchema.extend({
     agent: usageTotalsSchema, // agent conversations
   }),
   items: z.array(usageItemSchema), // per (source × model) breakdown
+  daily: z.array(usageDayItemSchema), // per (day × source × model) series, oldest first (legacy bucket excluded)
 })
 
 // Drift guard — identical-shape entity (totals + bySource + items), so the guard is bidirectional. A renamed/added
@@ -38,5 +44,6 @@ type _usageBack = AssertAssignable<UsageResponse, WebTenantUsage>
 export type TenantUsage = UsageResponse
 export type UsageTotals = UsageResponse['bySource']['harness']
 export type UsageItem = UsageResponse['items'][number]
+export type UsageDayItem = UsageResponse['daily'][number]
 
 export type __usageDriftGuard = [_usageFwd, _usageBack]

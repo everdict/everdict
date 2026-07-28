@@ -12,7 +12,7 @@ export function registerBillingTools(server: McpServer, ctx: McpToolContext): vo
       "get_usage",
       {
         description:
-          "The workspace's metered billing usage — LLM cost (usd/tokens) + evaluations for orchestration + verdict (harness under test + eval/judge model + agent conversations), split by source AND itemized per (source × model). Own-pays (personal self-hosted) runs are excluded (BYO compute) EXCEPT calls that used a workspace-designated model (the workspace's key pays). Meter-only — this never blocks a run.",
+          "The workspace's metered billing usage — LLM cost (usd/tokens) + evaluations for orchestration + verdict (harness under test + eval/judge model + agent conversations), split by source, itemized per (source × model), AND as a per-UTC-day spend series (daily). Own-pays (personal self-hosted) runs are excluded (BYO compute) EXCEPT calls that used a workspace-designated model (the workspace's key pays). Meter-only — this never blocks a run.",
         inputSchema: {},
       },
       () => run(principal, "scorecards:read", async () => ok(usageMeter.usage(ws))),

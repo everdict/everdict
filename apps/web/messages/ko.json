@@ -2644,7 +2644,17 @@
     "modelUnattributed": "미귀속",
     "sourceHarness": "평가",
     "sourceJudge": "평가자",
-    "sourceAgent": "에이전트 대화"
+    "sourceAgent": "에이전트 대화",
+    "mtdCost": "이번 달",
+    "allTimeHint": "전체 기간",
+    "dailyTitle": "일별 비용",
+    "dailyTip": "UTC 기준 하루 단위로 계측된 LLM 비용을 선택한 기준으로 누적해 보여줍니다. 막대에 마우스를 올리거나 포커스하면 그날의 상세 내역이, 아래 표에는 전체 기간 집계가 있습니다.",
+    "rangeDays": "{days}일",
+    "groupActivity": "활동별",
+    "groupModel": "모델별",
+    "periodTotal": "최근 {days}일",
+    "chartEmpty": "이 기간에 계측된 사용량이 아직 없습니다.",
+    "otherSeries": "기타"
   },
   "preferencesPage": {
     "themeLabel": "테마",

@@ -241,6 +241,8 @@ export {
   type TenantUsage,
   totalUsage,
   USAGE_SOURCES,
+  usageDay,
+  type UsageDayItem,
   type UsageItem,
   type UsageMeter,
   type UsageSource,

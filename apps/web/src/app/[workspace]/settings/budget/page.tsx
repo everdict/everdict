@@ -2,18 +2,20 @@ import { getTranslations } from 'next-intl/server'
 
 import { budgetResponseSchema, type BudgetResponse } from '@/entities/budget'
 import { tenantUsageSchema, type TenantUsage } from '@/entities/usage'
-import { BudgetManager } from '@/features/manage-budget'
+import { BudgetManager, UsageOverview } from '@/features/manage-budget'
 import { can } from '@/shared/auth/can'
 import { currentPrincipal } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
 import { Callout } from '@/shared/ui/callout'
 import { EmptyState } from '@/shared/ui/empty-state'
 import { PageHeader } from '@/shared/ui/page-header'
+import { Separator } from '@/shared/ui/separator'
 
 export const dynamic = 'force-dynamic'
 
-// Workspace › Budget — enforcement caps (block runs with 402) + metered billing usage. Readable by members
-// (viewer+, reuses scorecards:read); editing the limit stays admin (settings:write). Consolidated from the old /usage page.
+// Workspace › Budget — the billing view: metered usage FIRST (daily-spend chart + tiles + breakdown, the money the
+// workspace actually burns) with the enforcement caps (block runs with 402) below. Readable by members (viewer+,
+// reuses scorecards:read); editing the limit stays admin (settings:write). Consolidated from the old /usage page.
 export default async function BudgetPage() {
   const t = await getTranslations('settingsNav')
   const s = await getTranslations('settingsPage')
@@ -45,14 +47,13 @@ export default async function BudgetPage() {
       {header}
       {error !== undefined ? (
         <Callout tone="danger">{s('connectError', { error })}</Callout>
-      ) : budget ? (
-        <BudgetManager
-          usage={budget.usage}
-          limit={budget.limit}
-          {...(metered !== undefined ? { metered } : {})}
-          canWrite={canWrite}
-        />
-      ) : null}
+      ) : (
+        <>
+          {metered !== undefined && <UsageOverview metered={metered} />}
+          {metered !== undefined && budget && <Separator />}
+          {budget && <BudgetManager usage={budget.usage} limit={budget.limit} canWrite={canWrite} />}
+        </>
+      )}
     </div>
   )
 }

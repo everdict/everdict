@@ -10,7 +10,8 @@ const docs = {
   usage: {
     summary: "Get metered LLM usage",
     description:
-      "The workspace's metered LLM cost (orchestration + verdict), itemized per (source × model). Own-pays " +
+      "The workspace's metered LLM cost (orchestration + verdict), itemized per (source × model) and as a " +
+      "per-UTC-day spend series (`daily`). Own-pays " +
       "self-hosted runs are excluded EXCEPT calls that used a workspace-designated model (the workspace's key " +
       "paid for those tokens). Meter-only — it never blocks a run. Readable by members (viewer+, reuses " +
       "scorecards:read — usage is part of the eval read surface). 404 when the usage meter is not configured.",

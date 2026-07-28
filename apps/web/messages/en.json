@@ -2644,7 +2644,17 @@
     "modelUnattributed": "Unattributed",
     "sourceHarness": "Evaluation",
     "sourceJudge": "Judge",
-    "sourceAgent": "Agent chat"
+    "sourceAgent": "Agent chat",
+    "mtdCost": "This month",
+    "allTimeHint": "All time",
+    "dailyTitle": "Daily spend",
+    "dailyTip": "Metered LLM cost per UTC day, stacked by the selected grouping. Hover or focus a day for its exact split; the breakdown table below carries the full all-time numbers.",
+    "rangeDays": "{days}d",
+    "groupActivity": "By activity",
+    "groupModel": "By model",
+    "periodTotal": "Last {days} days",
+    "chartEmpty": "No metered usage in this period yet.",
+    "otherSeries": "Other"
   },
   "preferencesPage": {
     "themeLabel": "Theme",

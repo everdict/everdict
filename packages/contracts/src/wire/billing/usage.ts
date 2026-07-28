@@ -14,6 +14,11 @@ const UsageItemSchema = UsageTotalsSchema.extend({
   model: z.string().describe("The underlying model billed against ('' = legacy/unattributed)"),
 });
 
+// One (day × source × model) line of the daily spend series (the billing chart's data).
+const UsageDayItemSchema = UsageItemSchema.extend({
+  day: z.string().describe("UTC day (YYYY-MM-DD) the cost landed on"),
+});
+
 export const UsageResponseSchema = UsageTotalsSchema.extend({
   bySource: z
     .object({
@@ -23,5 +28,11 @@ export const UsageResponseSchema = UsageTotalsSchema.extend({
     })
     .describe("Per-source breakdown of the totals"),
   items: z.array(UsageItemSchema).describe("Per (source × model) breakdown of the totals"),
+  daily: z
+    .array(UsageDayItemSchema)
+    .describe(
+      "Per (day × source × model) spend series, oldest day first. Usage accumulated before daily itemization " +
+        "is included in the totals/items but not here.",
+    ),
 });
 export type UsageResponse = z.infer<typeof UsageResponseSchema>;
