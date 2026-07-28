@@ -16,26 +16,31 @@ import { buttonVariants } from '@/shared/ui/button'
 const TOUR_VERSION = 'v1'
 const DONE_KEY = `everdict:tour:done:${TOUR_VERSION}`
 
-type Placement = 'right' | 'bottom' | 'top'
+type Placement = 'right' | 'left' | 'bottom' | 'top'
 
 interface TourStep {
-  anchor: string // sidebar 요소의 data-tour 값
+  anchor: string // 화면 요소의 data-tour 값(사이드바 nav·검색·인프라 레일·알림·계정)
   titleKey: string
   bodyKey: string
   placement: Placement
-  href?: string // 이 스텝에서 본문을 이동시킬 워크스페이스 상대 경로
+  href?: string // 이 스텝에서 본문을 이동시킬 워크스페이스 상대 경로('' = 개요/워크스페이스 루트, undefined = 이동 없음)
 }
 
-// 사이드바 nav 순서와 동일한 흐름: 워크스페이스 → 검색 → 하니스 → 데이터셋 → 스코어카드 → 평가자 → 스토어 → 가이드 → 계정.
+// 모든 주요 화면을 사이드바 nav 순서대로 훑는다: 워크스페이스 → 검색 → 개요 → 하니스 → 데이터셋 → 스코어카드 →
+// 평가자 → 스토어 → 뷰 → 가이드 → 알림 → 인프라(실행/예약/런타임/큐) → 계정. 각 nav 스텝은 본문을 해당 화면으로 이동.
 const STEPS: TourStep[] = [
   { anchor: 'workspace-switcher', titleKey: 'workspace.title', bodyKey: 'workspace.body', placement: 'bottom' },
   { anchor: 'search', titleKey: 'search.title', bodyKey: 'search.body', placement: 'bottom' },
+  { anchor: 'nav-overview', titleKey: 'overview.title', bodyKey: 'overview.body', placement: 'right', href: '' },
   { anchor: 'nav-harnesses', titleKey: 'harnesses.title', bodyKey: 'harnesses.body', placement: 'right', href: '/harnesses' },
   { anchor: 'nav-datasets', titleKey: 'datasets.title', bodyKey: 'datasets.body', placement: 'right', href: '/datasets' },
   { anchor: 'nav-scorecards', titleKey: 'scorecards.title', bodyKey: 'scorecards.body', placement: 'right', href: '/scorecards' },
   { anchor: 'nav-judges', titleKey: 'judges.title', bodyKey: 'judges.body', placement: 'right', href: '/judges' },
   { anchor: 'nav-store', titleKey: 'store.title', bodyKey: 'store.body', placement: 'right', href: '/store' },
+  { anchor: 'nav-views', titleKey: 'views.title', bodyKey: 'views.body', placement: 'right', href: '/views' },
   { anchor: 'nav-guide', titleKey: 'guide.title', bodyKey: 'guide.body', placement: 'right', href: '/guide' },
+  { anchor: 'notifications', titleKey: 'notifications.title', bodyKey: 'notifications.body', placement: 'bottom' },
+  { anchor: 'infra-rail', titleKey: 'infra.title', bodyKey: 'infra.body', placement: 'left' },
   { anchor: 'user-menu', titleKey: 'account.title', bodyKey: 'account.body', placement: 'top' },
 ]
 
@@ -116,8 +121,9 @@ export function ProductTour({ workspace }: { workspace: string }) {
   }, [])
 
   // 스텝이 href 를 가지면 본문 화면을 이동(사이드바 앵커는 그대로라 스포트라이트는 안정적).
+  // href === '' 는 개요(워크스페이스 루트)로 이동을 의미하므로 undefined 만 "이동 없음"으로 취급한다.
   useEffect(() => {
-    if (!step?.href) return
+    if (step?.href === undefined) return
     const target = `/${workspace}${step.href}`
     if (pathname !== target) router.push(target)
   }, [step, workspace, pathname, router])
@@ -161,9 +167,13 @@ export function ProductTour({ workspace }: { workspace: string }) {
     const vh = window.innerHeight
     let top = rect.top
     let left = rect.left
+    const midY = rect.top + rect.height / 2 - card.height / 2 // 좌/우 배치는 대상 세로 중앙에 정렬(가는 세로 레일에도 자연스럽게)
     if (step.placement === 'right') {
       left = rect.right + gap
-      top = rect.top
+      top = midY
+    } else if (step.placement === 'left') {
+      left = rect.left - card.width - gap
+      top = midY
     } else if (step.placement === 'bottom') {
       top = rect.bottom + gap
       left = rect.left

@@ -3659,6 +3659,22 @@
       "title": "Guide & setup",
       "body": "The full getting-started guide, plus how to connect Claude Code, Codex, or the desktop app."
     },
+    "overview": {
+      "title": "Overview",
+      "body": "Your workspace at a glance — recent runs, scorecards, and activity."
+    },
+    "views": {
+      "title": "Views",
+      "body": "Saved analysis lenses over your scorecards — leaderboards, trends, and comparisons you can reopen."
+    },
+    "notifications": {
+      "title": "Notifications",
+      "body": "Run completions, regressions, and mentions land here."
+    },
+    "infra": {
+      "title": "Runs & infrastructure",
+      "body": "Live runs, schedules, runtimes, and the work queue open in this side panel — your eval pages stay put."
+    },
     "account": {
       "title": "Account & settings",
       "body": "Your profile, API keys, workspace members, secrets, and integrations live here."

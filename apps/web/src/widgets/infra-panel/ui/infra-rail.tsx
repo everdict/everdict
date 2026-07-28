@@ -80,6 +80,7 @@ export function InfraRail() {
       </div>
       {/* md+ — a slim in-flow column between main and the panel; the vertically centered button stack is the divider. */}
       <div
+        data-tour="infra-rail"
         style={{ top: 'var(--titlebar-h)', height: 'calc(100dvh - var(--titlebar-h))' }}
         className="sticky hidden w-11 shrink-0 flex-col items-center justify-center self-start md:flex"
       >

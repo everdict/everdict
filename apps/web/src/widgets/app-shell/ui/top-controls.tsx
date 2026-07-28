@@ -10,6 +10,7 @@ import { NotificationBell } from '@/widgets/notification-bell'
 export function TopControls({ workspace }: { workspace: string }) {
   return (
     <div
+      data-tour="notifications"
       style={{ top: 'calc(var(--titlebar-h) + 0.375rem)' }}
       className="fixed right-4 z-40 flex items-center gap-0.5 rounded-lg border border-border bg-card p-0.5 shadow-raise"
     >
