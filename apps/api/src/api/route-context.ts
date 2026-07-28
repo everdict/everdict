@@ -2,7 +2,6 @@ import { randomUUID, timingSafeEqual } from "node:crypto";
 import { VersionTagsBodySchema, setVersionTags } from "@everdict/application-control";
 import { type CiLinkService, UpsertCiLinkBodySchema } from "@everdict/application-control";
 import { COMMENT_RESOURCE_TYPES, type CommentService } from "@everdict/application-control";
-import type { PlatformEventService } from "@everdict/application-control";
 import type { KnowledgeEntryService, KnowledgeService } from "@everdict/application-control";
 import { deleteDatasetVersion } from "@everdict/application-control";
 import type { GithubAppService } from "@everdict/application-control";
@@ -170,7 +169,6 @@ export interface ServerDeps {
   ciLinkService?: CiLinkService; // CI repo links (repo↔harness slot + OIDC trust) + picker/setup-PR (route disabled if absent)
   runnerService?: RunnerService; // self-hosted runners (personal device pairing) (route disabled if absent)
   notificationService?: NotificationService; // personal notification feed (bell inbox) — self-scoped (route disabled if absent)
-  platformEvents?: PlatformEventService; // platform-event log (agent-automation A1) — internal reconcile cursor (route disabled if absent)
   commentService?: CommentService; // resource comments (datasets, etc.) — collaborative discussion (route disabled if absent)
   knowledgeService?: KnowledgeService; // workspace knowledge graph — node/related/subgraph queries + reindex (route disabled if absent)
   knowledgeEntryService?: KnowledgeEntryService; // knowledge entries (reified claims) CRUD + verify (routes disabled if absent)

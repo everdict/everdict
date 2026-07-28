@@ -247,15 +247,7 @@ describe("CommentService discussion agent (askAgent)", () => {
       newId: () => `c${++n}`,
       now: () => new Date(Date.parse("2026-07-04T00:00:00.000Z") + clock).toISOString(),
     });
-    return {
-      service,
-      store,
-      calls,
-      pings,
-      advance: (ms: number) => {
-        clock += ms;
-      },
-    };
+    return { service, store, calls, pings, advance: (ms: number) => (clock += ms) };
   }
 
   it("askAgent posts the member comment, creates a running agent placeholder in the same thread, and fires the runner with the thread snapshot", async () => {

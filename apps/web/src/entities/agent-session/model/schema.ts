@@ -15,35 +15,6 @@ import { z } from 'zod'
 export const AGENT_PERMISSION_MODES = ['default', 'auto', 'bypass', 'plan'] as const
 export const agentPermissionModeSchema = z.enum(AGENT_PERMISSION_MODES)
 
-// What started a session (agent-automation A3/A4) — trigger runs pin the crafted agent + the waking event.
-export const AGENT_SESSION_ORIGIN_TYPES = [
-  'chat',
-  'discussion',
-  'teammate',
-  'trigger',
-  'schedule',
-  'api',
-] as const
-export const agentSessionOriginSchema = z.object({
-  type: z.enum(AGENT_SESSION_ORIGIN_TYPES),
-  agentId: z.string().optional(),
-  agentVersion: z.string().optional(),
-  eventId: z.string().optional(),
-  eventKind: z.string().optional(),
-})
-export type AgentSessionOrigin = z.infer<typeof agentSessionOriginSchema>
-
-// A headless run's lifecycle (the fleet view's status chip). Plain conversations have none.
-export const AGENT_RUN_STATUSES = [
-  'running',
-  'awaiting_approval',
-  'completed',
-  'failed',
-  'cancelled',
-] as const
-export const agentRunStatusSchema = z.enum(AGENT_RUN_STATUSES)
-export type AgentRunStatus = z.infer<typeof agentRunStatusSchema>
-
 export const agentSessionSchema = z.object({
   id: z.string(),
   tenant: z.string(),
@@ -55,10 +26,6 @@ export const agentSessionSchema = z.object({
   permissionMode: agentPermissionModeSchema.optional(),
   // Who may read/continue: unset|"private" = owner only; "workspace" = any member (a comment thread's discussion session).
   visibility: z.enum(['private', 'workspace']).optional(),
-  // What started the session (unset = legacy/chat); trigger runs carry agentId@version + the waking event.
-  origin: agentSessionOriginSchema.optional(),
-  // Headless-run lifecycle status (unset for plain conversations).
-  status: agentRunStatusSchema.optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 })
@@ -148,8 +115,6 @@ export const agentTeammateSchema = z.object({
 export type AgentTeammate = z.infer<typeof agentTeammateSchema>
 export const agentTeammateListSchema = z.object({ teammates: z.array(agentTeammateSchema) })
 export const agentMessageListSchema = z.object({ messages: z.array(agentMessageSchema) })
-// Fleet view (agent-automation A5): every agent RUN in the workspace (sessions with an origin), newest first.
-export const agentRunListSchema = z.object({ runs: z.array(agentSessionSchema) })
 
 // Drift guards — identical-shape entities (the web models every record field and no extra), so each guard is
 // bidirectional: a renamed/dropped/added field on EITHER side fails the web typecheck.

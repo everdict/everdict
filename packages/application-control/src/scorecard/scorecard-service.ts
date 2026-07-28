@@ -206,22 +206,6 @@ export class ScorecardService {
     });
 
     await this.deps.store.create(record);
-    // Lifecycle FACT (agent-automation A2): the batch entered the system — watching agents can follow it from here.
-    void this.deps.events?.emit({
-      workspace: input.tenant,
-      kind: "scorecard.submitted",
-      subject: { type: "scorecard", id: record.id },
-      ...(record.createdBy !== undefined ? { actor: record.createdBy, recipient: record.createdBy } : {}),
-      payload: {
-        status: record.status,
-        dataset: `${record.dataset.id}@${record.dataset.version}`,
-        harness: `${record.harness.id}@${record.harness.version}`,
-        cases: dataset.cases.length,
-        ...(origin?.source !== undefined ? { origin: origin.source } : {}),
-        ...(origin?.scheduleId !== undefined ? { scheduleId: origin.scheduleId } : {}),
-      },
-      message: `Scorecard ${record.id} submitted — ${record.dataset.id}@${record.dataset.version} × ${record.harness.id}@${record.harness.version} (${dataset.cases.length} cases)`,
-    });
     // Server-side supersede — reclaim any in-flight batch for the same PR (origin.repo+prNumber) × same (harness, dataset) and
     // replace it with this fire. GitHub-side concurrency only cancels the "workflow" while an already-submitted batch keeps running on the server
     // (preventing an orphaned eval from tying up environments/budget/runner queue). merge/dev fires (no prNumber) are out of scope.
@@ -431,20 +415,6 @@ export class ScorecardService {
     if (!rec || rec.tenant !== input.tenant)
       throw new NotFoundError("NOT_FOUND", { scorecard: input.id }, "Scorecard not found.");
     await this.deps.store.update(rec.id, ScorecardBatch.from(rec).cancel(this.now()));
-    // Lifecycle FACT (agent-automation A2) — the completion path deliberately skips aborted batches, so the
-    // cancelled fact is recorded here, at the only place the transition happens.
-    void this.deps.events?.emit({
-      workspace: input.tenant,
-      kind: "scorecard.cancelled",
-      subject: { type: "scorecard", id: rec.id },
-      ...(rec.createdBy !== undefined ? { actor: rec.createdBy, recipient: rec.createdBy } : {}),
-      payload: {
-        status: "cancelled",
-        dataset: `${rec.dataset.id}@${rec.dataset.version}`,
-        harness: `${rec.harness.id}@${rec.harness.version}`,
-      },
-      message: `Scorecard ${rec.id} cancelled — ${rec.dataset.id}@${rec.dataset.version} × ${rec.harness.id}@${rec.harness.version}`,
-    });
     await this.stopInFlight(rec);
     return (await this.get(rec.id)) ?? rec;
   }

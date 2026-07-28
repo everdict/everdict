@@ -24,7 +24,6 @@ import { type ExecuteCaseDeps, executeCase } from "../execution/execute-case.js"
 import { type ArtifactStore, offloadSnapshot } from "../ports/artifact-store.js";
 import type { Dispatcher } from "../ports/dispatcher.js";
 import type { ExecStreamHandle } from "../ports/exec-stream.js";
-import type { PlatformEventEmitter } from "../ports/platform-event-emitter.js";
 import type { RecordingStore } from "../ports/recording-store.js";
 import type { RunStore } from "../ports/run-store.js";
 import { dispatchManifest, foldEnvDeltas } from "../recording-manifest.js";
@@ -143,9 +142,6 @@ export interface RunServiceDeps {
   ) => Promise<{ stdout: string; stderr: string; exitCode: number } | undefined>;
   // Completion callback (succeeded/failed) — completion notifications (Mattermost etc.). Failure is independent of the run result (the service swallows it). Separate from webhook.
   onComplete?: (tenant: string, record: RunRecord) => Promise<void>;
-  // Platform-event emit seam (agent-automation A1) — run.submitted only; completion facts flow through
-  // onComplete → NotificationService, which emits on the same seam. emit never throws (best-effort).
-  events?: PlatformEventEmitter;
   // Artifact store (when configured): offload os-use screenshots to object storage → the record keeps only the URL (no inline base64).
   artifacts?: ArtifactStore;
   newId?: () => string;
@@ -193,22 +189,6 @@ export class RunService {
       now: this.now(),
     });
     await this.deps.store.create(record);
-    // Lifecycle FACT (agent-automation A2): the run entered the system. Scorecard child runs are excluded —
-    // the batch's own submitted/case.completed facts represent them (flood prevention, same as the feed).
-    if (!record.parentScorecardId) {
-      void this.deps.events?.emit({
-        workspace: record.tenant,
-        kind: "run.submitted",
-        subject: { type: "run", id: record.id },
-        ...(record.createdBy !== undefined ? { actor: record.createdBy, recipient: record.createdBy } : {}),
-        payload: {
-          status: record.status,
-          harness: `${record.harness.id}@${record.harness.version}`,
-          caseId: record.caseId,
-        },
-        message: `Run ${record.id} submitted — ${record.harness.id}@${record.harness.version} (case ${record.caseId})`,
-      });
-    }
     void this.track(record.id, effective); // fire-and-track
     return record;
   }

@@ -1,6 +1,5 @@
 import { randomUUID } from "node:crypto";
 import {
-  type AgentRegistry,
   type AgentSessionStore,
   type AnalysisArtifactStore,
   type CapabilityStore,
@@ -35,7 +34,6 @@ import {
   PgRubricRegistry,
   PgRuntimeRegistry,
 } from "@everdict/registry";
-import { type ActivationEvent, startEventReconcile } from "./agent-activation.js";
 import type { CodeToolRuntime } from "./code-tools.js";
 import { commentActivityReporter } from "./comment-activity.js";
 import { type AgentConfig, loadConfig } from "./config.js";
@@ -52,7 +50,7 @@ import { type ProfileResolver, baseProfileResolver, registryProfileResolver } fr
 import { installProxyDispatcher } from "./proxy-dispatcher.js";
 import { buildServer } from "./server.js";
 import { EVERDICT_AGENT_SYSTEM_PROMPT } from "./system-prompt.js";
-import { runEventReporter, usageReporter } from "./usage.js";
+import { usageReporter } from "./usage.js";
 
 function envModelFallback(config: AgentConfig): ModelResolver {
   if (config.AGENT_LLM_API_KEY === undefined || config.AGENT_LLM_MODEL === undefined) {
@@ -85,9 +83,6 @@ async function main(): Promise<void> {
   let resolveModelById: ModelByIdResolver | undefined;
   // Teammate execution tokens (S3) are issued into the shared tenant-key table — only with a DB (else spawn is 404).
   let keyStore: TenantKeyStore | undefined;
-  // Registry-driven trigger activation (agent-automation A3) — with a DB+KEK, platform events match enabled
-  // crafted agents' triggers and launch headless runs.
-  let activationRegistry: AgentRegistry | undefined;
   // Code-tool try (check/run before publish/adopt) — the capability store resolves published refs (any DB), the
   // secret store binds requiredSecrets by name (needs the KEK).
   let tryCapabilityStore: CapabilityStore | undefined;
@@ -105,7 +100,6 @@ async function main(): Promise<void> {
       trySecretStore = secretStore;
       const modelRegistry = new PgModelRegistry(client);
       const agentRegistry = new PgAgentRegistry(client);
-      activationRegistry = agentRegistry;
       resolveModel =
         config.AGENT_MODEL !== undefined
           ? registryModelResolver({ modelRegistry, secretStore, modelRef: config.AGENT_MODEL })
@@ -172,7 +166,6 @@ async function main(): Promise<void> {
     resolveProfile,
     ...(resolveModelById ? { resolveModelById } : {}),
     ...(keyStore ? { keyStore } : {}),
-    ...(activationRegistry ? { agentRegistry: activationRegistry } : {}),
     // Code-tool verification (check/run before publish or adopt) — always available (the runtime exists even
     // without a DB; a missing store just disables ref targets / secret binding inside the try).
     codeTry: {
@@ -184,10 +177,6 @@ async function main(): Promise<void> {
     // Meter workspace-billed conversation cost back to the control plane (source "agent"). Off without the token.
     ...(config.CONTROL_PLANE_INTERNAL_TOKEN !== undefined
       ? { reportUsage: usageReporter(config.CONTROL_PLANE_URL, config.CONTROL_PLANE_INTERNAL_TOKEN) }
-      : {}),
-    // agent.run.* lifecycle facts → the control plane's event log (fleet observability). Same token pair.
-    ...(config.CONTROL_PLANE_INTERNAL_TOKEN !== undefined
-      ? { reportRunEvent: runEventReporter(config.CONTROL_PLANE_URL, config.CONTROL_PLANE_INTERNAL_TOKEN) }
       : {}),
     // Discussion-turn lifecycle bridge (@everdict in a comment thread) — reports the placeholder comment's
     // progress to /internal/comment-activity. Same token pair as the usage meter; off without it.
@@ -214,21 +203,6 @@ async function main(): Promise<void> {
     ...(config.AGENT_TOOL_TIMEOUT_MS !== undefined ? { toolTimeoutMs: config.AGENT_TOOL_TIMEOUT_MS } : {}),
     ...(config.AGENT_THINKING_BUDGET !== undefined ? { thinkingBudgetTokens: config.AGENT_THINKING_BUDGET } : {}),
   });
-
-  // Reconcile loop (agent-automation A1): pushes are best-effort, so walk the control plane's deployment-wide
-  // event cursor and re-feed missed events into the activation path (durable dedup makes at-least-once safe).
-  if (activationRegistry && config.CONTROL_PLANE_INTERNAL_TOKEN !== undefined) {
-    const activator = (app as unknown as { agentActivator?: { onEvent: (e: ActivationEvent) => Promise<number> } })
-      .agentActivator;
-    if (activator) {
-      startEventReconcile({
-        controlPlaneUrl: config.CONTROL_PLANE_URL,
-        internalToken: config.CONTROL_PLANE_INTERNAL_TOKEN,
-        onEvent: (event) => activator.onEvent(event),
-      });
-      console.error("▶ everdict-agent: event reconcile loop on (registry-driven trigger activation)");
-    }
-  }
 
   await app.listen({ port: config.PORT, host: "0.0.0.0" });
   console.error(`▶ everdict-agent listening on :${config.PORT} (control plane ${config.CONTROL_PLANE_URL})`);

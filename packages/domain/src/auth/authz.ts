@@ -32,10 +32,6 @@ export type Action =
   | "agents:read"
   | "agents:write"
   | "agents:delete"
-  // Platform-event log (agent-automation A1) — lifecycle FACTS. Reading is benign observability (the fleet's
-  // event feed + the crafting studio's replay picker) → viewer+. Events are emitted by the system, never written
-  // through the API, so there is no events:write.
-  | "events:read"
   // Workspace Skills — SKILL.md-style procedures members author for the conversational agent. Collaborative content
   // like comments/datasets: read viewer+, write (create/edit/share) member+; delete = creator-or-admin (service layer).
   | "skills:read"
@@ -91,7 +87,6 @@ const ROLE_PERMISSIONS: Record<string, ReadonlySet<Action>> = {
     "judges:read",
     "models:read",
     "agents:read", // reading the workspace agent config is benign → viewer+
-    "events:read", // reading the platform-event log is benign observability → viewer+
     "skills:read", // reading the workspace skill library is benign → viewer+
     "capabilities:read", // browsing the Capability Store (own + shared + public) is benign → viewer+
     "runtimes:read",
@@ -116,7 +111,6 @@ const ROLE_PERMISSIONS: Record<string, ReadonlySet<Action>> = {
     "models:read",
     "models:write", // model definition = eval content (which model was run) → member-allowed like judges/datasets
     "agents:read",
-    "events:read",
     "agents:write", // agent config = eval-authoring content (how the workspace's assistant behaves) → member+ like models/judges
     "skills:read",
     "skills:write", // authoring/sharing a workspace skill = collaborative content → member+ (delete = creator-or-admin, service layer)
@@ -157,7 +151,6 @@ const ROLE_PERMISSIONS: Record<string, ReadonlySet<Action>> = {
     "models:read",
     "models:write",
     "agents:read",
-    "events:read",
     "agents:write",
     "skills:read",
     "skills:write",
@@ -200,7 +193,6 @@ const SCOPE_READ_ACTIONS: readonly Action[] = [
   "judges:read",
   "models:read",
   "agents:read",
-  "events:read",
   "skills:read",
   "capabilities:read",
   "runtimes:read",

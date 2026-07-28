@@ -1,15 +1,13 @@
 import { timingSafeEqual } from "node:crypto";
 import type { ChatMessage, PermissionDecision, PermissionHook } from "@everdict/agent-runtime";
-import type { AgentRegistry, TenantKeyStore } from "@everdict/application-control";
+import type { TenantKeyStore } from "@everdict/application-control";
 import type { AgentSessionRecord } from "@everdict/contracts";
 import { AgentPermissionModeSchema, AgentReferenceSchema, AppError, CodeToolSpecSchema } from "@everdict/contracts";
 import { issueAgentToken } from "@everdict/db";
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
 import { z } from "zod";
 import { isGuardedAction } from "./action-policy.js";
-import { AgentActivator } from "./agent-activation.js";
 import { AgentMailbox } from "./agent-mailbox.js";
-import { runAgentTry } from "./agent-try.js";
 import { type ChatDeps, DEFAULT_SESSION_TITLE, runChat } from "./chat.js";
 import { type CodeTryDeps, runCodeToolTry } from "./code-try.js";
 import type { CommentActivityReporter } from "./comment-activity.js";
@@ -29,25 +27,6 @@ export interface AgentServerDeps extends ChatDeps {
   checkViewAccess?: (headers: ForwardHeaders, viewId: string) => Promise<boolean>;
   // Tenant key store — needed to issue a teammate's agt_ execution token (S3). Absent (no DB) → teammate spawn is 404.
   keyStore?: TenantKeyStore;
-  // Agent registry — with keyStore, powers registry-driven trigger activation (agent-automation A3): a platform
-  // event matching an ENABLED agent's triggers launches a headless run. Absent → events only wake teammates.
-  agentRegistry?: AgentRegistry;
-  // Test seam: the activation run executor. Default = the teammate-turn machinery (one request-less loop turn).
-  activationRunTurn?: (sessionId: string, agentToken: string, signal: AbortSignal) => Promise<void>;
-  // agent.run.* lifecycle facts → the control plane's event log (fleet observability, agent-automation A5).
-  reportRunEvent?: (input: {
-    workspace: string;
-    kind:
-      | "agent.run.started"
-      | "agent.run.awaiting_approval"
-      | "agent.run.completed"
-      | "agent.run.failed"
-      | "agent.run.cancelled";
-    sessionId: string;
-    agentId: string;
-    eventKind: string;
-    message: string;
-  }) => Promise<void>;
   // Shared secret the control plane presents (x-internal-token) to POST /agent/events on a recipient's behalf (S4 —
   // the monitoring→agent bridge). Absent → the internal event path is disabled (only user-authenticated events).
   internalToken?: string;
@@ -91,31 +70,6 @@ function sendError(reply: FastifyReply, err: unknown): FastifyReply {
 }
 
 const idParams = z.object({ id: z.string().min(1) });
-
-// How long a headless run's parked mutation waits for a member decision before the registry's deny-on-expiry
-// settles it (same window as the discussion turn's park).
-const ACTIVATION_APPROVAL_TIMEOUT_MS = 10 * 60_000;
-
-// Project the parsed event-body fields into an ActivationEvent tail (workspace is supplied by the caller).
-function eventOf(data: {
-  kind: string;
-  message: string;
-  source?: string;
-  eventId?: string;
-  subject?: { type: string; id: string };
-  payload?: Record<string, unknown>;
-  causedBy?: string;
-}) {
-  return {
-    kind: data.kind,
-    message: data.message,
-    ...(data.source !== undefined ? { source: data.source } : {}),
-    ...(data.eventId !== undefined ? { eventId: data.eventId } : {}),
-    ...(data.subject !== undefined ? { subject: data.subject } : {}),
-    ...(data.payload !== undefined ? { payload: data.payload } : {}),
-    ...(data.causedBy !== undefined ? { causedBy: data.causedBy } : {}),
-  };
-}
 
 // A chat attachment as sent by the web: metadata + the read text `content` (content is folded into the model
 // context, not persisted).
@@ -215,30 +169,6 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
     }
     return notified;
   };
-
-  // Registry-driven activation (agent-automation A3): the same events that wake teammates also match ENABLED
-  // crafted agents' triggers workspace-wide, each match launching a headless trigger-origin run.
-  const activator =
-    deps.agentRegistry && deps.keyStore
-      ? new AgentActivator({
-          registry: deps.agentRegistry,
-          keyStore: deps.keyStore,
-          sessions: deps.sessions,
-          mailbox,
-          runTurn:
-            deps.activationRunTurn ??
-            ((sessionId, agentToken, signal, permit) =>
-              runTeammateTurn(deps, deps.authenticate, mailbox, sessionId, agentToken, signal, permit)),
-          // Approval parking (A6): the shared registry the fleet view discovers via GET /pending and answers
-          // via POST /permission — same channel as the discussion turn, same 10 min deny-on-expiry window.
-          waitApproval: (sessionId, request, signal) =>
-            permissions.wait(deps.newId(), sessionId, signal, request, ACTIVATION_APPROVAL_TIMEOUT_MS),
-          now: deps.now,
-          newId: deps.newId,
-          ...(deps.reportRunEvent ? { reportRunEvent: deps.reportRunEvent } : {}),
-        })
-      : undefined;
-  app.decorate("agentActivator", activator);
 
   app.get("/healthz", async () => ({ ok: true }));
 
@@ -625,101 +555,35 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
   //    recipient in a workspace — this is what auto-wires monitoring → the proactive team.
   //  · USER (a member) drives events for their OWN teammates (authenticated normally).
   // Nothing watches the kind → a harmless 200 with notified:0.
-  // Try-drive (agent-automation B3): fire a (replayed or hand-built) platform event at a saved agent or an
-  // instruction draft in SHADOW mode — reads run for real (caller's bearer), mutations are captured as
-  // would-have-done and denied. Stateless; returns the transcript + captured intents.
-  app.post("/agent/agents/try", async (req, reply) => {
-    const principal = await principalOf(req, reply);
-    if (!principal) return reply;
-    const parsed = z
-      .object({
-        agentId: z.string().min(1).optional(),
-        draft: z.object({ instructions: z.string().optional(), task: z.string().optional() }).optional(),
-        event: z.object({
-          kind: z.string().min(1),
-          message: z.string().min(1),
-          subject: z.object({ type: z.string().min(1), id: z.string().min(1) }).optional(),
-          payload: z.record(z.unknown()).optional(),
-        }),
-      })
-      .safeParse(req.body);
-    if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
-    try {
-      const { agentId, draft, event } = parsed.data;
-      const result = await runAgentTry(
-        deps,
-        principal,
-        forwardHeaders(req),
-        { ...(agentId !== undefined ? { agentId } : {}), ...(draft !== undefined ? { draft } : {}) },
-        event,
-      );
-      return reply.send(result);
-    } catch (err) {
-      return sendError(reply, err);
-    }
-  });
-
-  // Fleet view (agent-automation A5): every agent RUN in the caller's workspace (sessions with an origin),
-  // newest first — trigger activations, teammates, discussion turns. Workspace observability, any member.
-  app.get("/agent/runs", async (req, reply) => {
-    const principal = await principalOf(req, reply);
-    if (!principal) return reply;
-    const query = z
-      .object({ limit: z.coerce.number().int().positive().max(200).optional() })
-      .safeParse(req.query ?? {});
-    if (!query.success) return reply.code(400).send({ code: "BAD_REQUEST", message: query.error.message });
-    const runs = await deps.sessions.listRuns(principal.workspace, {
-      ...(query.data.limit !== undefined ? { limit: query.data.limit } : {}),
-    });
-    return reply.send({ runs });
-  });
-
-  // Stop a live headless run (fleet control) — aborts its loop; the wrapper settles it as cancelled. Viewer
-  // roles can watch but not stop. 404 when there is no live run for that session in this process.
-  app.post("/agent/runs/:id/stop", async (req, reply) => {
-    const principal = await principalOf(req, reply);
-    if (!principal) return reply;
-    if (!principal.roles.some((r) => r === "member" || r === "admin"))
-      return reply.code(403).send({ code: "FORBIDDEN", message: "Stopping a run requires the member role." });
-    const { id } = idParams.parse(req.params);
-    if (!activator?.stop(id))
-      return reply.code(404).send({ code: "NOT_FOUND", message: "No live run for that session." });
-    return reply.send({ ok: true });
-  });
-
-  // The event body — kind/message plus the platform-event identity + matching context (agent-automation A1/A3):
-  // eventId (durable activation dedup), subject/payload (declarative trigger filters), causedBy (loop guard).
-  const eventFieldsSchema = z.object({
-    kind: z.string().min(1),
-    message: z.string().min(1),
-    source: z.string().min(1).optional(),
-    eventId: z.string().min(1).optional(),
-    subject: z.object({ type: z.string().min(1), id: z.string().min(1) }).optional(),
-    payload: z.record(z.unknown()).optional(),
-    causedBy: z.string().min(1).optional(),
-  });
   app.post("/agent/events", async (req, reply) => {
     const presented = req.headers["x-internal-token"];
     if (typeof presented === "string") {
       if (!constantTimeEq(presented, deps.internalToken))
         return reply.code(401).send({ code: "UNAUTHENTICATED", message: "Invalid internal token." });
-      const parsed = eventFieldsSchema
-        .extend({
+      const parsed = z
+        .object({
           workspace: z.string().min(1),
-          // Teammate compatibility: the creator whose chat-spawned teammates also wake. Absent → registry
-          // activation only (workspace-scoped facts have no single recipient).
-          recipient: z.string().min(1).optional(),
+          recipient: z.string().min(1),
+          kind: z.string().min(1),
+          message: z.string().min(1),
+          source: z.string().min(1).optional(),
         })
         .safeParse(req.body);
       if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
-      const { workspace, recipient, kind, source, message } = parsed.data;
-      const notified = recipient !== undefined ? fanEvent(workspace, recipient, kind, source, message) : 0;
-      const activated = activator ? await activator.onEvent({ workspace, ...eventOf(parsed.data) }) : 0;
-      return reply.send({ notified, activated });
+      const notified = fanEvent(
+        parsed.data.workspace,
+        parsed.data.recipient,
+        parsed.data.kind,
+        parsed.data.source,
+        parsed.data.message,
+      );
+      return reply.send({ notified });
     }
     const principal = await principalOf(req, reply);
     if (!principal) return reply;
-    const parsed = eventFieldsSchema.safeParse(req.body);
+    const parsed = z
+      .object({ kind: z.string().min(1), message: z.string().min(1), source: z.string().min(1).optional() })
+      .safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
     const notified = fanEvent(
       principal.workspace,
@@ -728,11 +592,7 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
       parsed.data.source,
       parsed.data.message,
     );
-    // A member-driven event also matches the registry (the manual "fire this at my agent" path).
-    const activated = activator
-      ? await activator.onEvent({ workspace: principal.workspace, ...eventOf(parsed.data) })
-      : 0;
-    return reply.send({ notified, activated });
+    return reply.send({ notified });
   });
 
   // A View's pinned artifacts (the Studio gallery / report archive — analysis-studio V3). The view's

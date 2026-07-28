@@ -56,8 +56,6 @@ describe("harvestAgent", () => {
     const spec: AgentSpec = {
       id: "assistant",
       version: "1.0.0",
-      triggers: [],
-      enabled: false,
       mcpServers: [{ name: "internal", url: "https://mcp.internal", authSecret: "MCP_TOKEN", write: false }],
       capabilities: [
         {

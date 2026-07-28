@@ -1,9 +1,4 @@
-import {
-  KnowledgeEntryService,
-  KnowledgeService,
-  registryLatestVersionResolver,
-  seedFirstPartyAgents,
-} from "@everdict/application-control";
+import { KnowledgeEntryService, KnowledgeService, registryLatestVersionResolver } from "@everdict/application-control";
 import { ProxyService } from "@everdict/application-control";
 import { SkillService } from "@everdict/application-control";
 import {
@@ -129,7 +124,6 @@ async function main(): Promise<void> {
     runnerJobStore,
     scheduleStore,
     notificationStore,
-    platformEventStore,
     commentStore,
     knowledgeStore,
     knowledgeEntryStore,
@@ -142,10 +136,6 @@ async function main(): Promise<void> {
     budgetStore,
     cipher,
   } = await makePersistence();
-
-  // First-party agent templates (agent-automation B4) — seed the two flagship automation agents into _shared
-  // (idempotent; disabled + creator-less by design: a workspace adopts one by saving its own copy).
-  await seedFirstPartyAgents(agentRegistry);
 
   // Latest-version resolution over the registries — backs the freshness decoration (skills / knowledge entries) and
   // task-time context assembly. Best-effort: an unknown/deleted entity resolves to "no signal", never an error.
@@ -263,7 +253,6 @@ async function main(): Promise<void> {
   const envMeterPolicy = meterUsagePolicyFromEnv(); // default policy when the workspace has no DB setting
   const {
     notificationService,
-    platformEventService,
     mattermostService,
     traceSinkService,
     traceSourceService,
@@ -273,7 +262,6 @@ async function main(): Promise<void> {
   } = buildIntegrations({
     settingsStore,
     notificationStore,
-    platformEventStore,
     commentStore,
     oauthStateStore,
     membershipService,
@@ -317,7 +305,6 @@ async function main(): Promise<void> {
     githubAppService,
     imageRegistryService,
     notificationService,
-    platformEventService,
     envMeterPolicy,
     preflightPlacement,
     readers: { readCaseLogsFn, execInSandboxFn, captureBrowserScreenFn, openTerminalStreamFn },
@@ -349,7 +336,6 @@ async function main(): Promise<void> {
     githubAppService,
     imageRegistryService,
     notificationService,
-    platformEventService,
     traceSinkService,
     preflightPlacement,
     killCase,
@@ -556,7 +542,6 @@ async function main(): Promise<void> {
     ciLinkService,
     runnerService,
     notificationService, // notification feed (bell inbox) route — self-scoped
-    platformEvents: platformEventService, // platform-event log — internal reconcile cursor (agent-automation A1)
     commentService, // resource comments route + MCP
     knowledgeService, // workspace knowledge graph route + MCP
     knowledgeEntryService, // knowledge entries (reified claims) CRUD + verify — route + MCP

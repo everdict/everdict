@@ -385,9 +385,8 @@ export async function runChat(
   };
 
   // Resolve the workspace's agent customization (Phase 1): system prompt (base + instructions), MCP tool servers, and
-  // an optional model override. A trigger-activated run resolves the CRAFTED agent's config (origin.agentId) — its
-  // instructions/tools/model are its identity; everything else keeps the workspace chat default.
-  const profile = deps.resolveProfile ? await deps.resolveProfile(principal, session.origin?.agentId) : undefined;
+  // an optional model override. Absent resolver → the base agent (unchanged behavior).
+  const profile = deps.resolveProfile ? await deps.resolveProfile(principal) : undefined;
   const systemPrompt = profile?.systemPrompt ?? deps.systemPrompt;
 
   const tools = await deps.toolProvider(

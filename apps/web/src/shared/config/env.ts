@@ -9,6 +9,10 @@ const schema = z.object({
   // GitHub repo the desktop download page (/{ws}/download) reads releases from. Public (everdict/everdict) → read
   // unauthenticated; members download via the /api/desktop/download proxy (302) after web login.
   DESKTOP_RELEASES_REPO: z.string().default('everdict/everdict'),
+  // GitHub REST API base the releases are read from. Override for a GitHub Enterprise mirror of the releases repo
+  // (GHE REST base = `https://<ghe-host>/api/v3`) — the answer for air-gapped networks where api.github.com is
+  // unreachable even through the proxy. Trailing slash tolerated (stripped at use).
+  DESKTOP_RELEASES_API_URL: z.string().url().default('https://api.github.com'),
   // Optional server-only PAT (fine-grained contents:read) — only needed for a PRIVATE releases repo (also lifts the API
   // rate limit). Unset is fine for the public repo.
   DESKTOP_RELEASES_TOKEN: z.string().optional(),
@@ -41,20 +45,26 @@ const schema = z.object({
   KEYCLOAK_CLIENT_SECRET: z.string().optional(),
 })
 
+// compose passes unset vars through as EMPTY strings (`${VAR:-}`), and `""` fails `.url()`/poisons defaults —
+// treat blank as unset so optional/defaulted values behave identically under compose and a bare shell.
+const blankAsUnset = (v: string | undefined): string | undefined =>
+  v !== undefined && v.trim() !== '' ? v : undefined
+
 export const env = schema.parse({
-  CONTROL_PLANE_URL: process.env.CONTROL_PLANE_URL,
-  AGENT_URL: process.env.AGENT_URL,
-  DESKTOP_RELEASES_REPO: process.env.DESKTOP_RELEASES_REPO,
-  DESKTOP_RELEASES_TOKEN: process.env.DESKTOP_RELEASES_TOKEN,
-  DESKTOP_DOWNLOAD_URL: process.env.DESKTOP_DOWNLOAD_URL,
-  TEMPORAL_UI_URL: process.env.TEMPORAL_UI_URL,
-  WORKSPACE_URL_BASE: process.env.WORKSPACE_URL_BASE,
-  CONTROL_PLANE_WS_URL: process.env.CONTROL_PLANE_WS_URL,
-  CONTROL_PLANE_PUBLIC_URL: process.env.CONTROL_PLANE_PUBLIC_URL,
-  AUTH_SECRET: process.env.AUTH_SECRET,
-  KEYCLOAK_ISSUER: process.env.KEYCLOAK_ISSUER,
-  KEYCLOAK_CLIENT_ID: process.env.KEYCLOAK_CLIENT_ID,
-  KEYCLOAK_CLIENT_SECRET: process.env.KEYCLOAK_CLIENT_SECRET,
+  CONTROL_PLANE_URL: blankAsUnset(process.env.CONTROL_PLANE_URL),
+  AGENT_URL: blankAsUnset(process.env.AGENT_URL),
+  DESKTOP_RELEASES_REPO: blankAsUnset(process.env.DESKTOP_RELEASES_REPO),
+  DESKTOP_RELEASES_API_URL: blankAsUnset(process.env.DESKTOP_RELEASES_API_URL),
+  DESKTOP_RELEASES_TOKEN: blankAsUnset(process.env.DESKTOP_RELEASES_TOKEN),
+  DESKTOP_DOWNLOAD_URL: blankAsUnset(process.env.DESKTOP_DOWNLOAD_URL),
+  TEMPORAL_UI_URL: blankAsUnset(process.env.TEMPORAL_UI_URL),
+  WORKSPACE_URL_BASE: blankAsUnset(process.env.WORKSPACE_URL_BASE),
+  CONTROL_PLANE_WS_URL: blankAsUnset(process.env.CONTROL_PLANE_WS_URL),
+  CONTROL_PLANE_PUBLIC_URL: blankAsUnset(process.env.CONTROL_PLANE_PUBLIC_URL),
+  AUTH_SECRET: blankAsUnset(process.env.AUTH_SECRET),
+  KEYCLOAK_ISSUER: blankAsUnset(process.env.KEYCLOAK_ISSUER),
+  KEYCLOAK_CLIENT_ID: blankAsUnset(process.env.KEYCLOAK_CLIENT_ID),
+  KEYCLOAK_CLIENT_SECRET: blankAsUnset(process.env.KEYCLOAK_CLIENT_SECRET),
 })
 
 export const keycloakConfigured = Boolean(env.KEYCLOAK_ISSUER && env.KEYCLOAK_CLIENT_ID)

@@ -1,7 +1,7 @@
 import type { NotificationRecord, RunRecord, WorkspaceSettings } from "@everdict/contracts";
+import type { AgentEventSink } from "../ports/agent-event-sink.js";
 import type { MattermostClient } from "../ports/mattermost-client.js";
 import type { NotificationListOptions, NotificationStore } from "../ports/notification-store.js";
-import type { EmitPlatformEventInput, PlatformEventEmitter } from "../ports/platform-event-emitter.js";
 
 // Completion notifications — one completion event fans out to two channels [personal feed, Mattermost] (docs/architecture/notifications.md N5).
 // Feed: the personal (recipient = record.createdBy) inbox — consumed by the web bell / desktop native notifications (N1/N2).
@@ -20,10 +20,9 @@ export interface NotificationServiceDeps {
   feed?: NotificationStore; // personal notification feed — if unset, only the feed channel is silently skipped
   // Outbound Mattermost transport (adapter) — if unset, channel posting is silently skipped (feed still writes).
   mattermost?: MattermostClient;
-  // Third channel: record the completion as a platform EVENT (durable log + agent push — agent-automation A1).
-  // The agent service wakes the creator's watching teammates AND matches registry-agent triggers workspace-wide.
-  // Unset → skipped. Best-effort like the other channels.
-  events?: PlatformEventEmitter;
+  // Third channel (S4): push the completion as a platform EVENT to the agent service, where it wakes the creator's
+  // watching teammates (proactive team). Unset → skipped. Best-effort like the other channels.
+  agentEvents?: AgentEventSink;
   newId?: () => string;
   now?: () => string;
 }
@@ -51,17 +50,11 @@ export class NotificationService {
         body: `case ${record.caseId}`,
         link: { runId: record.id },
       });
-      await this.pushEvent({
+      await this.pushAgentEvent({
         workspace: tenant,
         recipient: record.createdBy,
-        actor: record.createdBy,
         kind: record.status === "succeeded" ? "run.completed" : "run.failed",
-        subject: { type: "run", id: record.id },
-        payload: {
-          status: record.status,
-          harness: `${record.harness.id}@${record.harness.version}`,
-          caseId: record.caseId,
-        },
+        source: `run ${record.id}`,
         message: `Run ${record.id} ${record.status} — ${record.harness.id}@${record.harness.version} (case ${record.caseId})`,
       });
     }
@@ -83,8 +76,6 @@ export class NotificationService {
       // Provenance — a scorecard fired by a schedule (cron tick or manual "run now") gets a schedule-BRANDED feed
       // notification ("Scheduled run …") in place of the generic one, so the bell reads as "my scheduled job ran".
       origin?: { source?: string };
-      // The persisted metric summary — the platform event carries its first passRate as a filterable pointer.
-      summary?: { passRate?: number }[];
     },
   ): Promise<void> {
     const scheduled = record.origin?.source === "schedule";
@@ -102,23 +93,12 @@ export class NotificationService {
         title: `${scheduled ? "Scheduled run" : "Scorecard"} ${record.status === "succeeded" ? "completed" : "failed"} — ${record.dataset.id}@${record.dataset.version} × ${record.harness.id}@${record.harness.version}`,
         link: { scorecardId: record.id },
       });
-      // passRate from the persisted metric summary (first row that has one) — the pointer an agent trigger can
-      // filter on (`passRate < 1` = the batch had failing cases) without re-reading the full results.
-      const passRate = record.summary?.find((row) => row.passRate !== undefined)?.passRate;
-      await this.pushEvent({
+      await this.pushAgentEvent({
         workspace: tenant,
         recipient: record.createdBy,
-        actor: record.createdBy,
         kind: record.status === "succeeded" ? "scorecard.completed" : "scorecard.failed",
-        subject: { type: "scorecard", id: record.id },
-        payload: {
-          status: record.status,
-          dataset: `${record.dataset.id}@${record.dataset.version}`,
-          harness: `${record.harness.id}@${record.harness.version}`,
-          ...(passRate !== undefined ? { passRate } : {}),
-          ...(record.origin?.source !== undefined ? { origin: record.origin.source } : {}),
-        },
-        message: `Scorecard ${record.id} ${record.status} — ${record.dataset.id}@${record.dataset.version} × ${record.harness.id}@${record.harness.version}${passRate !== undefined ? ` (pass rate ${Math.round(passRate * 100)}%)` : ""}`,
+        source: `scorecard ${record.id}`,
+        message: `Scorecard ${record.id} ${record.status} — ${record.dataset.id}@${record.dataset.version} × ${record.harness.id}@${record.harness.version}`,
       });
     }
     const icon = record.status === "succeeded" ? "✅" : record.status === "failed" ? "❌" : "•";
@@ -153,16 +133,11 @@ export class NotificationService {
         ...(input.artifactId !== undefined ? { artifactId: input.artifactId } : {}),
       },
     });
-    await this.pushEvent({
+    await this.pushAgentEvent({
       workspace: tenant,
       recipient: input.createdBy,
-      actor: input.createdBy,
       kind: "report.completed",
-      subject: { type: "view", id: input.viewId },
-      payload: {
-        scheduleId: input.scheduleId,
-        ...(input.artifactId !== undefined ? { artifactId: input.artifactId } : {}),
-      },
+      source: `schedule ${input.scheduleId}`,
       message: `Scheduled report "${input.scheduleName}" is ready on view ${input.viewId}${input.artifactId ? ` (artifact ${input.artifactId})` : " (no artifact produced)"}.`,
     });
     await this.post(
@@ -243,12 +218,18 @@ export class NotificationService {
     }
   }
 
-  // Platform-event channel (agent-automation A1) — record the completion FACT (durable log + agent push).
-  // Best-effort: an unreachable/unconfigured log or agent never affects the run/scorecard result.
-  private async pushEvent(input: EmitPlatformEventInput): Promise<void> {
-    if (!this.deps.events) return;
+  // Agent event channel (S4) — push the completion to the agent service, where it wakes the creator's watching
+  // teammates. Best-effort: an unreachable/unconfigured agent never affects the run/scorecard result.
+  private async pushAgentEvent(input: {
+    workspace: string;
+    recipient: string;
+    kind: string;
+    source?: string;
+    message: string;
+  }): Promise<void> {
+    if (!this.deps.agentEvents) return;
     try {
-      await this.deps.events.emit(input);
+      await this.deps.agentEvents.emit(input);
     } catch {
       // Notification failure never affects the run/scorecard result.
     }

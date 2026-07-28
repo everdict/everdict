@@ -83,8 +83,6 @@ export type {
   BudgetStore,
   NotificationStore,
   NotificationListOptions,
-  PlatformEventStore,
-  PlatformEventListOptions,
   CommentStore,
   KnowledgeStore,
   TenantKeyStore,
@@ -147,7 +145,6 @@ export {
 export { InMemorySecretStore, PgSecretStore } from "./workspace/secret-store.js";
 export { InMemoryOAuthStateStore, PgOAuthStateStore, generateOAuthState } from "./workspace/oauth-state-store.js";
 export { InMemoryNotificationStore, PgNotificationStore } from "./activity/notification-store.js";
-export { InMemoryPlatformEventStore, PgPlatformEventStore } from "./activity/platform-event-store.js";
 export { InMemoryCommentStore, PgCommentStore } from "./activity/comment-store.js";
 export { InMemoryAgentSessionStore, PgAgentSessionStore } from "./activity/agent-session-store.js";
 export { InMemoryAnalysisArtifactStore, PgAnalysisArtifactStore } from "./activity/analysis-artifact-store.js";

@@ -30,10 +30,7 @@ export interface AgentProfile {
   codeTools: ResolvedCodeTool[];
 }
 
-// agentId overrides which registered AgentSpec shapes the turn — a trigger activation runs with the CRAFTED
-// agent's config (its instructions/tools/model ARE its identity), not the workspace's chat default
-// (agent-automation A3). Unset → the resolver's configured default ("default", the chat config).
-export type ProfileResolver = (principal: Principal, agentId?: string) => Promise<AgentProfile>;
+export type ProfileResolver = (principal: Principal) => Promise<AgentProfile>;
 
 // Compose the base persona with the workspace's own instructions (appended, so the persona + tool protocol stay
 // fixed), a note when any workspace tool can mutate, and a note when the workspace has authored skills.
@@ -160,7 +157,7 @@ export function registryProfileResolver(opts: {
   // knowledge-layer staleness contract) that use_skill surfaces as a listing badge + body banner. Best-effort.
   latestVersionOf?: LatestVersionResolver;
 }): ProfileResolver {
-  return async (principal, agentId) => {
+  return async (principal) => {
     // Skills load independently of the AgentSpec — a workspace can have a skill library without a registered agent
     // config. The caller sees the workspace-shared skills + their own private drafts. Best-effort.
     let skills: SkillEntry[] = [];
@@ -208,7 +205,7 @@ export function registryProfileResolver(opts: {
 
     let spec: Awaited<ReturnType<AgentRegistry["get"]>> | undefined;
     try {
-      spec = await opts.agentRegistry.get(principal.workspace, agentId ?? opts.configId, "latest");
+      spec = await opts.agentRegistry.get(principal.workspace, opts.configId, "latest");
     } catch {
       spec = undefined; // no workspace agent registered (or lookup failed) → base persona + skills + defaults only
     }

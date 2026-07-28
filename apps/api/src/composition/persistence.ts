@@ -13,7 +13,6 @@ import {
   InMemoryKnowledgeStore,
   InMemoryNotificationStore,
   InMemoryOAuthStateStore,
-  InMemoryPlatformEventStore,
   InMemoryRecordingStore,
   InMemoryRunStore,
   InMemoryRunnerJobStore,
@@ -42,7 +41,6 @@ import {
   PgKnowledgeStore,
   PgNotificationStore,
   PgOAuthStateStore,
-  PgPlatformEventStore,
   PgRecordingStore,
   PgRunStore,
   PgRunnerJobStore,
@@ -58,7 +56,6 @@ import {
   PgWorkspaceInviteStore,
   PgWorkspaceSettingsStore,
   PgWorkspaceStore,
-  type PlatformEventStore,
   type RecordingStore,
   type RunStore,
   type RunnerJobStore,
@@ -136,7 +133,6 @@ export interface Persistence {
   runnerJobStore: RunnerJobStore; // store-backed self-hosted lease queue (multi-replica StoreRunnerHub); unused by the in-memory hub
   scheduleStore: ScheduleStore; // scheduled (cron) scorecards — stored RunScorecardInput + cron expression (SSOT, mutable)
   notificationStore: NotificationStore; // personal notification feed (bell inbox) — records run/scorecard completion with recipient=subject
-  platformEventStore: PlatformEventStore; // append-only platform-event log (agent-automation A1) — durable facts + reconcile cursor
   commentStore: CommentStore; // resource comments (datasets, etc.) — collaborative discussion
   knowledgeStore: KnowledgeStore; // workspace knowledge graph — append-only mention/edge + upsert node projection
   knowledgeEntryStore: KnowledgeEntryStore; // knowledge entries (reified claims) — dual-scoped private|workspace
@@ -200,7 +196,6 @@ export async function makePersistence(): Promise<Persistence> {
       runnerJobStore: new InMemoryRunnerJobStore(),
       scheduleStore: new InMemoryScheduleStore(),
       notificationStore: new InMemoryNotificationStore(),
-      platformEventStore: new InMemoryPlatformEventStore(),
       commentStore: new InMemoryCommentStore(),
       knowledgeStore: new InMemoryKnowledgeStore(),
       knowledgeEntryStore: new InMemoryKnowledgeEntryStore(),
@@ -242,7 +237,6 @@ export async function makePersistence(): Promise<Persistence> {
     runnerJobStore: new PgRunnerJobStore(client),
     scheduleStore: new PgScheduleStore(client),
     notificationStore: new PgNotificationStore(client),
-    platformEventStore: new PgPlatformEventStore(client),
     commentStore: new PgCommentStore(client),
     knowledgeStore: new PgKnowledgeStore(client),
     knowledgeEntryStore: new PgKnowledgeEntryStore(client),

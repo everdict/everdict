@@ -1,6 +1,6 @@
 import type { GithubAppService } from "@everdict/application-control";
 import type { ImageRegistryService } from "@everdict/application-control";
-import type { NotificationService, PlatformEventService } from "@everdict/application-control";
+import type { NotificationService } from "@everdict/application-control";
 import { RunService } from "@everdict/application-control";
 import type { RecordingStore } from "@everdict/application-control";
 import type { Dispatcher as CoreDispatcher, ExecStreamHandle } from "@everdict/backends";
@@ -62,7 +62,6 @@ export function buildRun(deps: {
   githubAppService: GithubAppService;
   imageRegistryService: ImageRegistryService;
   notificationService: NotificationService;
-  platformEventService: PlatformEventService;
   envMeterPolicy: (tenant: string) => boolean;
   preflightPlacement: PlacementPreflight;
   readers: RuntimeAccessReaders;
@@ -89,7 +88,6 @@ export function buildRun(deps: {
     githubAppService,
     imageRegistryService,
     notificationService,
-    platformEventService,
     envMeterPolicy,
     preflightPlacement,
     readers,
@@ -137,8 +135,6 @@ export function buildRun(deps: {
     secretsFor: runtimeSecretsFor, // pull auth for collection (re-resolve traceRef.authSecret)
     // Completion notification (Mattermost) — post to the channel when workspace notify settings exist. Failure is independent of the run result.
     onComplete: (tenant, record) => notificationService.notifyRun(tenant, record),
-    // Lifecycle facts (agent-automation A1) — run.submitted; completion facts flow through onComplete above.
-    events: platformEventService,
   });
   // Judge runner: a model judge (anthropic/openai) makes a real call with the tenant secret key; a harness judge dispatches a reference agent to render the verdict.
   // Skip (with a stated reason) if the key/secret is missing. An openai base (LiteLLM etc.) comes from the OPENAI_BASE_URL secret or env.

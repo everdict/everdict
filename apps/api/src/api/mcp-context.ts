@@ -1,5 +1,4 @@
 import type { CiLinkService } from "@everdict/application-control";
-import type { PlatformEventService } from "@everdict/application-control";
 import type { CommentService } from "@everdict/application-control";
 import type { KnowledgeEntryService, KnowledgeService } from "@everdict/application-control";
 import type { GithubAppService } from "@everdict/application-control";
@@ -97,7 +96,6 @@ export interface McpDeps {
   ciLinkService?: CiLinkService; // CI repo link (repo↔harness slot + OIDC trust) + picker/setup-PR
   runnerService?: RunnerService; // self-hosted runners (personal device pairing) — pair/list/revoke + workspace roster
   notificationService?: NotificationService; // personal notification feed (bell inbox) — list/read (self-scoped)
-  platformEvents?: PlatformEventService; // platform-event log (lifecycle facts) — list (events:read)
   commentService?: CommentService; // resource comments (datasets, etc.) — list/create/delete
   knowledgeService?: KnowledgeService; // workspace knowledge graph — get_knowledge_node/knowledge_related/knowledge_subgraph/reindex_knowledge
   knowledgeEntryService?: KnowledgeEntryService; // knowledge entries (reified claims) — create/list/get/update/delete/verify_knowledge_entry

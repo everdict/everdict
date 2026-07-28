@@ -59,7 +59,7 @@ describe("InMemoryKnowledgeEntryStore", () => {
 describe("PgKnowledgeEntryStore", () => {
   it("round-trips refs/evidence jsonb and null-able supersedes/verified_at through the row mapping", async () => {
     const record = { ...rec("kn1", "acme", "alice", "2026-07-01T00:00:00.000Z"), supersedes: "kn0" };
-    const query = vi.fn(async (sql: string, _params?: unknown[]) => {
+    const query = vi.fn(async (sql: string) => {
       if (sql.startsWith("SELECT")) {
         return {
           rows: [

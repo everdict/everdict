@@ -17,8 +17,6 @@ export type { CommentStore, CommentUpdatePatch } from "./ports/comment-store.js"
 export type { DiscussionTurnRunner } from "./ports/discussion-turn-runner.js";
 export type { NotificationListOptions, NotificationStore } from "./ports/notification-store.js";
 export type { AgentEventSink } from "./ports/agent-event-sink.js";
-export type { PlatformEventListOptions, PlatformEventStore } from "./ports/platform-event-store.js";
-export type { EmitPlatformEventInput, PlatformEventEmitter } from "./ports/platform-event-emitter.js";
 export type { BudgetStore } from "./ports/budget-store.js";
 export type { RunListOptions, RunStore } from "./ports/run-store.js";
 export type { RecordingSeal, RecordingStore } from "./ports/recording-store.js";
@@ -166,8 +164,6 @@ export type {
   MattermostProbeResult,
 } from "./ports/mattermost-client.js";
 export { NotificationService, type NotificationServiceDeps } from "./notification/notification-service.js";
-export { PlatformEventService, type PlatformEventServiceDeps } from "./platform-event/platform-event-service.js";
-export { FIRST_PARTY_AGENT_TEMPLATES, seedFirstPartyAgents } from "./agent/first-party-agents.js";
 export type {
   GithubFileContent,
   GithubIssue,
