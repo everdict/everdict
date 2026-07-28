@@ -19,12 +19,16 @@ export function VersionTagsEditor({
   version,
   tags,
   canEdit,
+  onSaved,
 }: {
   entity: VersionTagEntity
   id: string
   version: string
   tags: string[]
   canEdit: boolean
+  // Optional: fired after a successful save, IN ADDITION to router.refresh() — for a client drill-in (the store) whose
+  // version data is client-fetched (not page props), so it can re-load. Server-rendered callers omit it.
+  onSaved?: () => void
 }) {
   const router = useRouter()
   const tr = useTranslations('versionTags')
@@ -44,6 +48,7 @@ export function VersionTagsEditor({
       setAdding(false)
       setDraft('')
       router.refresh()
+      onSaved?.()
     })
 
   const addDraft = () => {

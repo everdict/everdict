@@ -156,6 +156,87 @@ describe("capability routes", () => {
     expect(after.statusCode).toBe(404);
   });
 
+  it("lists a capability's versions and round-trips a version's tags", async () => {
+    const app = build(true);
+    await app.inject({
+      method: "PUT",
+      url: "/capabilities/v",
+      headers: acme,
+      payload: { name: "v", description: "d1", spec: skillSpec, visibility: "workspace" },
+    });
+    await app.inject({
+      method: "PUT",
+      url: "/capabilities/v",
+      headers: acme,
+      payload: { name: "v", description: "d2", spec: skillSpec },
+    });
+    const versions = await app.inject({ method: "GET", url: "/capabilities/v/versions", headers: acme });
+    expect(versions.json()).toEqual({ id: "v", source: "acme", versions: ["1.0.0", "1.0.1"], versionTags: {} });
+
+    // tag 1.0.0 (trims + dedupes)
+    const tagged = await app.inject({
+      method: "PUT",
+      url: "/capabilities/v/versions/1.0.0/tags",
+      headers: acme,
+      payload: { tags: [" baseline ", "baseline", "stable"] },
+    });
+    expect(tagged.statusCode).toBe(200);
+    expect(tagged.json()).toEqual({ workspace: "acme", id: "v", version: "1.0.0", tags: ["baseline", "stable"] });
+    const after = await app.inject({ method: "GET", url: "/capabilities/v/versions", headers: acme });
+    expect((after.json() as { versionTags: unknown }).versionTags).toEqual({ "1.0.0": ["baseline", "stable"] });
+  });
+
+  it("diffs two versions and 400s without base/candidate", async () => {
+    const app = build(true);
+    await app.inject({
+      method: "PUT",
+      url: "/capabilities/v",
+      headers: acme,
+      payload: { name: "v", description: "first", spec: skillSpec, visibility: "workspace" },
+    });
+    await app.inject({
+      method: "PUT",
+      url: "/capabilities/v",
+      headers: acme,
+      payload: { name: "v", description: "second", spec: skillSpec },
+    });
+    const diff = await app.inject({
+      method: "GET",
+      url: "/capabilities/v/diff?base=1.0.0&candidate=latest",
+      headers: acme,
+    });
+    expect(diff.statusCode).toBe(200);
+    expect(diff.json()).toMatchObject({ id: "v", base: "1.0.0", candidate: "1.0.1", typeChanged: false });
+    expect((diff.json() as { changes: unknown[] }).changes).toContainEqual({
+      path: "description",
+      before: "first",
+      after: "second",
+      change: "changed",
+    });
+    const missing = await app.inject({ method: "GET", url: "/capabilities/v/diff?base=1.0.0", headers: acme });
+    expect(missing.statusCode).toBe(400);
+  });
+
+  it("reads a cross-tenant public capability's versions via source, and 404s a non-visible one", async () => {
+    const app = build(true);
+    await app.inject({
+      method: "PUT",
+      url: "/capabilities/pub",
+      headers: acme,
+      payload: { name: "pub", description: "d", spec: skillSpec, visibility: "public" },
+    });
+    // beta can list acme's public capability versions through ?source=acme …
+    const viaSource = await app.inject({
+      method: "GET",
+      url: "/capabilities/pub/versions?source=acme",
+      headers: beta,
+    });
+    expect(viaSource.json()).toMatchObject({ source: "acme", versions: ["1.0.0"] });
+    // … but not without source (its own workspace has no such id) → 404
+    const own = await app.inject({ method: "GET", url: "/capabilities/pub/versions", headers: beta });
+    expect(own.statusCode).toBe(404);
+  });
+
   it("probes an mcp capability URL — returns the injected prober's reachability + discovered tools", async () => {
     const service = new RunService({ dispatcher: unusedDispatcher, store: new InMemoryRunStore() });
     const app = buildServer({

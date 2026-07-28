@@ -11,6 +11,8 @@ export {
   imageTagsSchema,
   codeToolExampleSchema,
   codeToolTryResultSchema,
+  capabilityVersionsSchema,
+  capabilitySpecDiffSchema,
   type Capability,
   type CapabilityVisibility,
   type CapabilityType,
@@ -22,4 +24,7 @@ export {
   type ImageTags,
   type CodeToolExample,
   type CodeToolTryResult,
+  type CapabilityVersions,
+  type CapabilitySpecDiff,
+  type CapabilityFieldChange,
 } from './model/schema'

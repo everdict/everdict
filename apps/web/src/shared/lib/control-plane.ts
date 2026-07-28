@@ -530,8 +530,40 @@ export const controlPlane = {
   // save/reach/delete capabilities:write(member+, 특정 capability 는 owner-or-admin, public 승격은 admin).
   listCapabilities: <T>(auth: AuthContext) => call<T>(auth, '/capabilities'),
   listPublicCapabilities: <T>(auth: AuthContext) => call<T>(auth, '/capabilities/public'),
-  getCapability: <T>(auth: AuthContext, id: string) =>
-    call<T>(auth, `/capabilities/${encodeURIComponent(id)}`),
+  getCapability: <T>(auth: AuthContext, id: string, version?: string, source?: string) => {
+    const q = new URLSearchParams()
+    if (source) q.set('source', source)
+    const suffix = q.toString() ? `?${q.toString()}` : ''
+    return call<T>(
+      auth,
+      version
+        ? `/capabilities/${encodeURIComponent(id)}/versions/${encodeURIComponent(version)}${suffix}`
+        : `/capabilities/${encodeURIComponent(id)}${suffix}`
+    )
+  },
+  // 버전 관리(레지스트리 엔티티 패리티) — 버전 목록·구조 diff·버전 태그(생성자-or-admin). source=크로스테넌트 public/subset 오너.
+  listCapabilityVersions: <T>(auth: AuthContext, id: string, source?: string) =>
+    call<T>(
+      auth,
+      `/capabilities/${encodeURIComponent(id)}/versions${source ? `?source=${encodeURIComponent(source)}` : ''}`
+    ),
+  diffCapabilityVersions: <T>(
+    auth: AuthContext,
+    id: string,
+    base: string,
+    candidate: string,
+    source?: string
+  ) => {
+    const q = new URLSearchParams({ base, candidate })
+    if (source) q.set('source', source)
+    return call<T>(auth, `/capabilities/${encodeURIComponent(id)}/diff?${q.toString()}`)
+  },
+  setCapabilityVersionTags: <T>(auth: AuthContext, id: string, version: string, tags: string[]) =>
+    call<T>(
+      auth,
+      `/capabilities/${encodeURIComponent(id)}/versions/${encodeURIComponent(version)}/tags`,
+      { method: 'PUT', body: JSON.stringify({ tags }) }
+    ),
   saveCapability: <T>(auth: AuthContext, id: string, body: unknown) =>
     call<T>(auth, `/capabilities/${encodeURIComponent(id)}`, {
       method: 'PUT',

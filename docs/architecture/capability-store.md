@@ -200,6 +200,30 @@ skill is absurd (you would inherit every public skill on Everdict). So an agent 
 has adopted — a deliberate behavior change from today's `skillStore.list` ambient model, and the correct one for a
 store.
 
+## Version management (parity with the registry entities)
+
+All four kinds (mcp | code | skill | environment) are versioned on ONE substrate, so versioning is uniform by
+construction: `(tenant, id, version)` is immutable, a content edit auto patch-bumps (`latest` moves; pinned adoptions
+stay reproducible), and per-version `tags` are mutable metadata OUTSIDE spec immutability. The full management surface
+mirrors the registry entities (harness/dataset/judge/runtime) — one service core (`CapabilityService`), two transports
+(BFF + MCP), one web drill-in:
+
+- **List versions** — `GET /capabilities/:id/versions` + `list_capability_versions` → the ascending live versions plus
+  a `version → tags` display map. `?source=` reads a cross-tenant public/subset owner (so the store can show the
+  history of a capability published from another workspace).
+- **Version tags** — `PUT /capabilities/:id/versions/:version/tags` + `set_capability_version_tags` → replace a
+  version's free-form labels (trimmed / deduped, ≤20×60, reusing `normalizeVersionTags`). Gate: `capabilities:write`
+  PLUS the version's creator-or-admin (the `deleteVersion` gate); own-workspace versions only.
+- **Version diff** — `GET /capabilities/:id/diff?base=&candidate=` + `diff_capability_versions` → a structural diff over
+  the immutable content (name/description/spec) via the shared `diffSpecFields` engine (the same one behind the
+  harness/judge diffs); `typeChanged` flags an mcp ↔ code ↔ skill ↔ environment restructure. `?source=` diffs a
+  cross-tenant public/subset owner. Reproducible by the immutable-version guarantee (`CapabilitySpecDiff`).
+- **Reads** — `GET /capabilities/:id` and `GET /capabilities/:id/versions/:version` also take an optional `?source=`, so
+  the store's version switcher can inspect an older version of a public capability owned by another workspace.
+- **Web** — the store detail drill-in (`CapabilityVersionsPanel`) adds a version switcher (loads any version's spec),
+  the shared `VersionTagsEditor` (`entity="capability"`, editable only for an own-workspace creator/admin), and an
+  inline base ↔ candidate diff. Built-ins (`_everdict`) are code-defined single-version → no panel.
+
 ## Runtime consumption (per-type adapters)
 
 `apps/agent/src/mcp-tools.ts` builds the `ToolRegistry`; each resolved capability becomes one or more

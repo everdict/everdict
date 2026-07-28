@@ -1,14 +1,17 @@
 'use client'
 
-import { useEffect, useMemo, useState, useTransition } from 'react'
+import { useCallback, useEffect, useMemo, useState, useTransition } from 'react'
 import {
+  ArrowRight,
   Boxes,
   Check,
   CircleAlert,
   CircleCheck,
   Code2,
   Container,
+  GitCompare,
   Globe,
+  History,
   Loader2,
   Lock,
   MoreHorizontal,
@@ -23,11 +26,14 @@ import {
 import { useTranslations } from 'next-intl'
 import { toast } from 'sonner'
 
+import { VersionTagsEditor } from '@/features/version-tags'
 import type {
   Capability,
   CapabilityImageClass,
   CapabilitySpec,
+  CapabilitySpecDiff,
   CapabilityType,
+  CapabilityVersions,
   CapabilityVisibility,
   ProbeCapabilityMcpResult,
   ValidateCapabilityResult,
@@ -51,7 +57,11 @@ import {
   unadoptEnvironmentAction,
   verifyAdoptedEnvironmentAction,
 } from '../api/adopt-environment'
-import { CodeTryPanel } from './code-try-panel'
+import {
+  diffCapabilityVersionsAction,
+  loadCapabilityVersionAction,
+  loadCapabilityVersionsAction,
+} from '../api/capability-versions'
 import {
   deleteCapabilityVersionAction,
   saveCapabilityAction,
@@ -62,6 +72,7 @@ import {
   probeCapabilityMcpAction,
   validateCapabilityAction,
 } from '../api/wizard-tools'
+import { CodeTryPanel } from './code-try-panel'
 
 // capability 의 필요 시크릿(채택 시 내 시크릿으로 바인딩). skill 은 없음.
 function requiredSecretsOf(c: Capability): RequiredSecret[] {
@@ -1756,12 +1767,40 @@ function AdoptDialog({
 }
 
 // capability 상세(제자리 드릴인) — mcp/code/skill 의 전체 스펙을 카드 안에서 읽기전용으로 노출한다(라우트 미사용).
-function CapabilityDetail({ capability }: { capability: Capability }) {
+function CapabilityDetail({
+  capability,
+  currentWorkspace,
+  currentSubject,
+  isAdmin,
+}: {
+  capability: Capability
+  currentWorkspace: string
+  currentSubject?: string
+  isAdmin: boolean
+}) {
   const t = useTranslations('capabilityStore')
-  const s = capability.spec
+  // 크로스테넌트 public/subset 카드는 오너 워크스페이스를 source 로 넘겨 버전을 조회한다. 내 워크스페이스 것이면 생략.
+  const source = capability.tenant !== currentWorkspace ? capability.tenant : undefined
+  const builtin = isBuiltIn(capability)
+  // 버전 태그 편집 = 내 워크스페이스 소유 + 버전 생성자-or-admin(서버가 최종 강제). 빌트인/크로스테넌트는 읽기전용.
+  const canManageVersions =
+    !builtin && source === undefined && (capability.createdBy === currentSubject || isAdmin)
+  // 상세에 표시할 레코드 — 최신(넘어온 capability) 또는 스위처로 고른 과거 버전.
+  const [shown, setShown] = useState<Capability>(capability)
+  const s = shown.spec
   const secrets = s.type === 'mcp' || s.type === 'code' ? s.requiredSecrets : []
   return (
     <div className="mt-2 space-y-3 rounded-md border border-border bg-secondary/30 p-3 text-[12.5px]">
+      {!builtin && (
+        <CapabilityVersionsPanel
+          id={capability.id}
+          source={source}
+          latestVersion={capability.version}
+          shownVersion={shown.version}
+          canManage={canManageVersions}
+          onShowVersion={setShown}
+        />
+      )}
       {s.type === 'mcp' && (
         <>
           <div className="space-y-0.5">
@@ -1824,7 +1863,7 @@ function CapabilityDetail({ capability }: { capability: Capability }) {
           <CodeTryPanel
             showCheck={false}
             buildTarget={() => ({
-              ref: { source: capability.tenant, id: capability.id, version: capability.version },
+              ref: { source: shown.tenant, id: shown.id, version: shown.version },
             })}
             initialInput={s.examples[0] ? JSON.stringify(s.examples[0].input, null, 2) : '{}'}
           />
@@ -1859,6 +1898,227 @@ function CapabilityDetail({ capability }: { capability: Capability }) {
           ))}
         </div>
       )}
+    </div>
+  )
+}
+
+// 버전 관리 패널(레지스트리 엔티티 패리티) — 상세 드릴인 안의 버전 목록·스위처·버전 태그·구조 diff. 드릴인은 라우트가
+// 아니라 클라이언트 상태라 열 때 온디맨드로 로드한다. 내 워크스페이스 소유 + 생성자/admin 이면 태그 편집(canManage), 아니면
+// 읽기전용. source=크로스테넌트 public/subset 오너(내 것이면 생략).
+function CapabilityVersionsPanel({
+  id,
+  source,
+  latestVersion,
+  shownVersion,
+  canManage,
+  onShowVersion,
+}: {
+  id: string
+  source?: string
+  latestVersion: string
+  shownVersion: string
+  canManage: boolean
+  onShowVersion: (record: Capability) => void
+}) {
+  const t = useTranslations('capabilityStore')
+  const [data, setData] = useState<CapabilityVersions | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string>()
+  const [switching, startSwitch] = useTransition()
+  const [base, setBase] = useState('')
+  const [candidate, setCandidate] = useState('')
+  const [diff, setDiff] = useState<CapabilitySpecDiff | null>(null)
+  const [diffing, startDiff] = useTransition()
+  const [diffError, setDiffError] = useState<string>()
+
+  const reload = useCallback(() => {
+    setLoading(true)
+    loadCapabilityVersionsAction(id, source).then((r) => {
+      if (r.ok) {
+        setData(r.data)
+        setError(undefined)
+      } else {
+        setError(r.error)
+      }
+      setLoading(false)
+    })
+  }, [id, source])
+  useEffect(() => {
+    reload()
+  }, [reload])
+
+  // 스위처 — 고른 버전의 전체 레코드를 불러 상세 spec 을 교체.
+  const showVersion = (version: string) => {
+    if (version === shownVersion) return
+    startSwitch(async () => {
+      const r = await loadCapabilityVersionAction(id, version, source)
+      if (r.ok) onShowVersion(r.data)
+      else setError(r.error)
+    })
+  }
+
+  const runDiff = () => {
+    if (!base || !candidate) return
+    startDiff(async () => {
+      const r = await diffCapabilityVersionsAction(id, base, candidate, source)
+      if (r.ok) {
+        setDiff(r.data)
+        setDiffError(undefined)
+      } else {
+        setDiff(null)
+        setDiffError(r.error)
+      }
+    })
+  }
+
+  if (loading) return <p className="text-[11px] text-muted-foreground">{t('versionsLoading')}</p>
+  if (error) return <p className="text-[11px] text-[var(--color-danger)]">{error}</p>
+  if (!data || data.versions.length === 0) return null
+
+  const descending = [...data.versions].reverse() // 최신 먼저
+
+  return (
+    <div className="space-y-2 rounded-md border border-border/70 bg-background/40 p-2.5">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="inline-flex items-center gap-1 text-[11px] font-[510] text-muted-foreground">
+          <History className="size-3.5" />
+          {t('versionsLabel')}
+        </span>
+        <select
+          value={shownVersion}
+          disabled={switching}
+          onChange={(e) => showVersion(e.target.value)}
+          aria-label={t('versionsLabel')}
+          className="h-6 rounded border border-border bg-transparent px-1.5 text-[11px] text-foreground outline-none focus:border-ring disabled:opacity-50"
+        >
+          {descending.map((v) => (
+            <option key={v} value={v}>
+              {v === latestVersion ? `${v} · ${t('latest')}` : v}
+              {(data.versionTags[v]?.length ?? 0) > 0
+                ? ` — ${data.versionTags[v]?.join(' · ')}`
+                : ''}
+            </option>
+          ))}
+        </select>
+        {switching && <Loader2 className="size-3.5 animate-spin text-muted-foreground" />}
+      </div>
+
+      {(canManage || (data.versionTags[shownVersion]?.length ?? 0) > 0) && (
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-[11px] text-faint">{t('versionTagsLabel')}</span>
+          <VersionTagsEditor
+            entity="capability"
+            id={id}
+            version={shownVersion}
+            tags={data.versionTags[shownVersion] ?? []}
+            canEdit={canManage}
+            onSaved={reload}
+          />
+        </div>
+      )}
+
+      {data.versions.length > 1 && (
+        <div className="space-y-1.5 border-t border-border/60 pt-2">
+          <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
+            <GitCompare className="size-3.5 text-muted-foreground" />
+            <VersionSelect
+              versions={descending}
+              value={base}
+              placeholder={t('diffBase')}
+              onChange={setBase}
+            />
+            <ArrowRight className="size-3 text-faint" />
+            <VersionSelect
+              versions={descending}
+              value={candidate}
+              placeholder={t('diffCandidate')}
+              onChange={setCandidate}
+            />
+            <button
+              type="button"
+              disabled={!base || !candidate || diffing}
+              onClick={runDiff}
+              className="rounded border border-border px-2 py-0.5 text-[11px] font-medium text-foreground transition-colors hover:bg-accent disabled:opacity-50"
+            >
+              {t('diffCompare')}
+            </button>
+            {diffing && <Loader2 className="size-3.5 animate-spin text-muted-foreground" />}
+          </div>
+          {diffError && <p className="text-[11px] text-[var(--color-danger)]">{diffError}</p>}
+          {diff && <CapabilityDiffView diff={diff} />}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function VersionSelect({
+  versions,
+  value,
+  placeholder,
+  onChange,
+}: {
+  versions: string[]
+  value: string
+  placeholder: string
+  onChange: (v: string) => void
+}) {
+  return (
+    <select
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      aria-label={placeholder}
+      className="h-6 rounded border border-border bg-transparent px-1.5 text-[11px] text-foreground outline-none focus:border-ring"
+    >
+      <option value="">{placeholder}</option>
+      {versions.map((v) => (
+        <option key={v} value={v}>
+          {v}
+        </option>
+      ))}
+    </select>
+  )
+}
+
+// 구조 diff 렌더 — 필드 경로별 before → after + added/removed/changed 톤. typeChanged(종류 재구성) 힌트.
+function CapabilityDiffView({ diff }: { diff: CapabilitySpecDiff }) {
+  const t = useTranslations('capabilityStore')
+  if (diff.changes.length === 0)
+    return <p className="text-[11px] text-muted-foreground">{t('diffNoChanges')}</p>
+  const label = (change: CapabilitySpecDiff['changes'][number]['change']) =>
+    change === 'added' ? t('diffAdded') : change === 'removed' ? t('diffRemoved') : t('diffChanged')
+  const tone = (change: CapabilitySpecDiff['changes'][number]['change']) =>
+    change === 'added' ? 'success' : change === 'removed' ? 'danger' : 'warning'
+  return (
+    <div className="space-y-1.5">
+      <p className="text-[11px] text-muted-foreground">
+        {t('diffSummary', {
+          added: diff.summary.added,
+          removed: diff.summary.removed,
+          changed: diff.summary.changed,
+        })}
+        {diff.typeChanged ? ` · ${t('diffTypeChanged')}` : ''}
+      </p>
+      <div className="space-y-1">
+        {diff.changes.map((ch) => (
+          <div
+            key={ch.path}
+            className="rounded border border-border/60 bg-secondary/30 p-1.5 text-[11px]"
+          >
+            <div className="flex items-center gap-1.5">
+              <Badge tone={tone(ch.change)}>{label(ch.change)}</Badge>
+              <code className="break-all font-mono text-foreground">{ch.path}</code>
+            </div>
+            <div className="mt-1 flex flex-wrap items-center gap-1 font-mono text-[10.5px] text-muted-foreground">
+              <span className="break-all line-through decoration-[var(--color-danger)]/50">
+                {ch.before}
+              </span>
+              <ArrowRight className="size-3 shrink-0 text-faint" />
+              <span className="break-all text-foreground">{ch.after}</span>
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   )
 }

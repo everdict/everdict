@@ -36,12 +36,41 @@ export function registerCapabilityTools(server: McpServer, ctx: McpToolContext):
     "get_capability",
     {
       description:
-        "A single capability (name + description + discriminated spec). The latest version, or an exact one via `version`. Not visible / missing → NOT_FOUND",
-      inputSchema: { id: z.string(), version: z.string().optional() },
+        "A single capability (name + description + discriminated spec). The latest version, or an exact one via `version`. `source` reads a cross-tenant public/subset owner (defaults to my workspace). Not visible / missing → NOT_FOUND",
+      inputSchema: { id: z.string(), version: z.string().optional(), source: z.string().optional() },
     },
-    ({ id, version }) =>
+    ({ id, version, source }) =>
       run(principal, "capabilities:read", async () =>
-        ok(await caps.get(ws, id, principal.subject, version ?? "latest")),
+        ok(await caps.get(ws, id, principal.subject, version ?? "latest", source)),
+      ),
+  );
+
+  server.registerTool(
+    "list_capability_versions",
+    {
+      description:
+        "Live versions (ascending) + per-version tags for one capability id — my workspace by default, or a cross-tenant public/subset owner via `source`. Not visible / missing → NOT_FOUND. Requires capabilities:read.",
+      inputSchema: { id: z.string(), source: z.string().optional() },
+    },
+    ({ id, source }) =>
+      run(principal, "capabilities:read", async () => ok(await caps.listVersions(ws, principal.subject, id, source))),
+  );
+
+  server.registerTool(
+    "diff_capability_versions",
+    {
+      description:
+        'Structural diff between two versions of the same capability, over the immutable content (name/description/spec) — leaf field changes by path, typeChanged flag for a kind restructure (mcp ↔ code ↔ skill ↔ environment). Both refs accept "latest". `source` diffs a cross-tenant public/subset owner (defaults to my workspace). Requires capabilities:read. Reproducible by the immutable-version guarantee.',
+      inputSchema: {
+        id: z.string(),
+        base: z.string().describe('base version ref (accepts "latest")'),
+        candidate: z.string().describe('candidate version ref (accepts "latest")'),
+        source: z.string().optional(),
+      },
+    },
+    ({ id, base, candidate, source }) =>
+      run(principal, "capabilities:read", async () =>
+        ok(await caps.diff(ws, principal.subject, id, base, candidate, source)),
       ),
   );
 
@@ -121,6 +150,21 @@ export function registerCapabilityTools(server: McpServer, ctx: McpToolContext):
       run(principal, "capabilities:write", async () =>
         ok(await caps.setVisibility(ws, id, { visibility, sharedWith: sharedWith ?? [] }, actor)),
       ),
+  );
+
+  server.registerTool(
+    "set_capability_version_tags",
+    {
+      description:
+        "Replace a capability version's full tag set (empty array = remove all) — free-form labels to tell versions apart, outside spec immutability (each ≤60 chars, ≤20 per version; replace semantics). Only the version's creator or a workspace admin. Requires capabilities:write.",
+      inputSchema: {
+        id: z.string(),
+        version: z.string().describe("exact version (latest not allowed)"),
+        tags: z.array(z.string()).describe("this version's full tag set (replace semantics)"),
+      },
+    },
+    ({ id, version, tags }) =>
+      run(principal, "capabilities:write", async () => ok(await caps.setVersionTags(ws, id, version, tags, actor))),
   );
 
   server.registerTool(

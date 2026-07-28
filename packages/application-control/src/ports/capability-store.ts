@@ -35,6 +35,14 @@ export interface CapabilityStore {
     next: { visibility: CapabilityVisibility; sharedWith: string[] },
   ): Promise<void>;
 
+  // Replace a single live version's tags — MUTABLE metadata (free-form labels to tell versions apart), outside the
+  // spec-content immutability, on par with the registry entities' version tags. Own-workspace versions only; a missing /
+  // deleted / other-workspace version is a no-op (the service applies the creator-or-admin gate first).
+  setVersionTags(tenant: string, id: string, version: string, tags: string[]): Promise<void>;
+
+  // version → tags for every live version of this id that HAS tags (the switcher/diff display aid). Empty map if none.
+  versionTags(tenant: string, id: string): Promise<Record<string, string[]>>;
+
   // Soft-delete a single version (tombstone; content preserved, excluded from every read).
   softDelete(tenant: string, id: string, version: string): Promise<void>;
 

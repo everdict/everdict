@@ -1,4 +1,5 @@
-import { CapabilityRecordSchema } from "@everdict/contracts";
+import { VersionTagsBodySchema } from "@everdict/application-control";
+import { CapabilityRecordSchema, CapabilitySpecDiffSchema } from "@everdict/contracts";
 import type { FastifySchema } from "fastify";
 import { z } from "zod";
 import { errorResponses, toJsonSchema } from "../openapi.js";
@@ -6,8 +7,18 @@ import { ProbeCapabilityMcpBodySchema } from "./request/probe-capability-mcp.js"
 import { SaveCapabilityBodySchema } from "./request/save-capability.js";
 import { SetCapabilityVisibilityBodySchema } from "./request/set-capability-visibility.js";
 import { ValidateCapabilityBodySchema } from "./request/validate-capability.js";
+import { CapabilityVersionsResponseSchema } from "./response/capability-versions.js";
 import { ProbeCapabilityMcpResultSchema } from "./response/probe-capability-mcp-result.js";
 import { ValidateCapabilityResultSchema } from "./response/validate-capability-result.js";
+
+// The optional `source` querystring on the version reads — the OWNER workspace of a cross-tenant public/subset
+// capability (defaults to the caller's own workspace when omitted).
+const sourceQuery = {
+  type: "object",
+  properties: {
+    source: { type: "string", description: "Owner workspace for a cross-tenant public/subset capability" },
+  },
+};
 
 // OpenAPI descriptors for the capability routes — doc-only (rule api-layer): attaching these is behavior-free.
 
@@ -99,10 +110,12 @@ const docs = {
   get: {
     summary: "Get a capability (latest version)",
     description:
-      "The latest live version of a capability in my workspace. A private one is visible only to its creator; " +
-      "workspace/subset/public to any member (otherwise 404). Requires capabilities:read.",
+      "The latest live version of a capability. A private one is visible only to its creator; workspace/subset/public " +
+      "to any member (otherwise 404). By default my workspace; `source` reads a cross-tenant public/subset owner. " +
+      "Requires capabilities:read.",
     tags: ["capability"],
     params: idParams,
+    querystring: sourceQuery,
     response: {
       200: { description: "Capability", ...toJsonSchema(CapabilityRecordSchema) },
       ...errorResponses(401, 403, 404),
@@ -111,12 +124,70 @@ const docs = {
   getVersion: {
     summary: "Get an exact capability version",
     description:
-      "A specific immutable version of a capability in my workspace (visibility-checked, else 404). Requires capabilities:read.",
+      "A specific immutable version of a capability (visibility-checked, else 404). By default my workspace; `source` " +
+      "reads a cross-tenant public/subset owner (so the store switcher can inspect an older public version). Requires capabilities:read.",
     tags: ["capability"],
     params: versionParams,
+    querystring: sourceQuery,
     response: {
       200: { description: "Capability version", ...toJsonSchema(CapabilityRecordSchema) },
       ...errorResponses(401, 403, 404),
+    },
+  },
+  versions: {
+    summary: "List a capability's versions",
+    description:
+      "The live versions (ascending) of a capability the caller can see + a version→tags display map (only tagged " +
+      "versions). By default my workspace; `source` reads a cross-tenant public/subset owner. A not-visible / missing " +
+      "capability is 404 (no existence leak). Requires capabilities:read (viewer+).",
+    tags: ["capability"],
+    params: idParams,
+    querystring: sourceQuery,
+    response: {
+      200: { description: "Versions + version tags", ...toJsonSchema(CapabilityVersionsResponseSchema) },
+      ...errorResponses(401, 403, 404),
+    },
+  },
+  diff: {
+    summary: "Diff two capability versions",
+    description:
+      "Structural diff between base and candidate versions of the same capability, over the immutable content " +
+      '(name/description/spec). Reports leaf field changes by path; typeChanged flags a kind restructure. Both refs may be "latest". ' +
+      "By default my workspace; `source` diffs a cross-tenant public/subset owner. Missing base/candidate is 400; an " +
+      "unknown version or a not-visible capability is 404. Requires capabilities:read (viewer+).",
+    tags: ["capability"],
+    params: idParams,
+    querystring: {
+      type: "object",
+      properties: {
+        base: { type: "string", description: 'Base version ref (accepts "latest")' },
+        candidate: { type: "string", description: 'Candidate version ref (accepts "latest")' },
+        source: { type: "string", description: "Owner workspace for a cross-tenant public/subset capability" },
+      },
+      required: ["base", "candidate"],
+    },
+    response: {
+      200: { description: "Structural spec diff (base ↔ candidate)", ...toJsonSchema(CapabilitySpecDiffSchema) },
+      ...errorResponses(400, 401, 403, 404),
+    },
+  },
+  setVersionTags: {
+    summary: "Replace a capability version's tags",
+    description:
+      "Replace the full tag set of a single version (empty array = remove all) — free-form labels to tell versions " +
+      "apart, outside spec immutability (each ≤60 chars, ≤20 per version; replace semantics). Only the version's " +
+      "creator or a workspace admin. Requires capabilities:write (member+).",
+    tags: ["capability"],
+    params: versionParams,
+    body: toJsonSchema(VersionTagsBodySchema),
+    response: {
+      200: {
+        description: "Updated version tags",
+        ...toJsonSchema(
+          z.object({ workspace: z.string(), id: z.string(), version: z.string(), tags: z.array(z.string()) }),
+        ),
+      },
+      ...errorResponses(400, 401, 403, 404),
     },
   },
   setVisibility: {

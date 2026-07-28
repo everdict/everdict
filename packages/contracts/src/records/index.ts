@@ -5,6 +5,7 @@ export * from "./analysis-artifact.js";
 export * from "./browser-profile.js";
 export * from "./budget.js";
 export * from "./capability.js";
+export * from "./capability-diff.js";
 export * from "./comment.js";
 export * from "./notification.js";
 export * from "./oauth-state.js";

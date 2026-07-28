@@ -1,3 +1,4 @@
+import { VersionTagsBodySchema } from "@everdict/application-control";
 import type { FastifyInstance } from "fastify";
 import { type ServerDeps, gate, resolvePrincipal, sendError, zodIssues } from "../route-context.js";
 import { capabilityDocs } from "./capability.docs.js";
@@ -99,19 +100,88 @@ export function registerCapabilityRoutes(app: FastifyInstance, deps: ServerDeps)
     }
   });
 
-  app.get<{ Params: { id: string } }>("/capabilities/:id", { schema: capabilityDocs.get }, async (req, reply) => {
-    if (!deps.capabilityService) return reply.code(404).send(notConfigured);
-    const principal = await resolvePrincipal(req, reply, deps);
-    if (!principal) return reply;
-    try {
-      gate(principal, "capabilities:read");
-      return reply.send(await deps.capabilityService.get(principal.workspace, req.params.id, principal.subject));
-    } catch (err) {
-      return sendError(reply, err); // not visible / missing → 404
-    }
-  });
+  app.get<{ Params: { id: string }; Querystring: { source?: string } }>(
+    "/capabilities/:id",
+    { schema: capabilityDocs.get },
+    async (req, reply) => {
+      if (!deps.capabilityService) return reply.code(404).send(notConfigured);
+      const principal = await resolvePrincipal(req, reply, deps);
+      if (!principal) return reply;
+      try {
+        gate(principal, "capabilities:read");
+        return reply.send(
+          await deps.capabilityService.get(
+            principal.workspace,
+            req.params.id,
+            principal.subject,
+            "latest",
+            req.query.source,
+          ),
+        );
+      } catch (err) {
+        return sendError(reply, err); // not visible / missing → 404
+      }
+    },
+  );
 
-  app.get<{ Params: { id: string; version: string } }>(
+  // Live versions + version tags for one capability id — my workspace, or a cross-tenant public/subset owner via
+  // `?source=`. Not visible / missing → 404. Static "versions" segment resolves ahead of :version.
+  app.get<{ Params: { id: string }; Querystring: { source?: string } }>(
+    "/capabilities/:id/versions",
+    { schema: capabilityDocs.versions },
+    async (req, reply) => {
+      if (!deps.capabilityService) return reply.code(404).send(notConfigured);
+      const principal = await resolvePrincipal(req, reply, deps);
+      if (!principal) return reply;
+      try {
+        gate(principal, "capabilities:read");
+        return reply.send(
+          await deps.capabilityService.listVersions(
+            principal.workspace,
+            principal.subject,
+            req.params.id,
+            req.query.source,
+          ),
+        );
+      } catch (err) {
+        return sendError(reply, err);
+      }
+    },
+  );
+
+  // Structural diff of two versions over the immutable content (name/description/spec). Both refs accept "latest".
+  // `?source=` diffs a cross-tenant public/subset owner. Static "diff" segment resolves ahead of :version.
+  app.get<{ Params: { id: string }; Querystring: { base?: string; candidate?: string; source?: string } }>(
+    "/capabilities/:id/diff",
+    { schema: capabilityDocs.diff },
+    async (req, reply) => {
+      if (!deps.capabilityService) return reply.code(404).send(notConfigured);
+      const principal = await resolvePrincipal(req, reply, deps);
+      if (!principal) return reply;
+      const { base, candidate, source } = req.query;
+      if (!base || !candidate)
+        return reply
+          .code(400)
+          .send({ code: "BAD_REQUEST", message: "base and candidate query parameters are required." });
+      try {
+        gate(principal, "capabilities:read");
+        return reply.send(
+          await deps.capabilityService.diff(
+            principal.workspace,
+            principal.subject,
+            req.params.id,
+            base,
+            candidate,
+            source,
+          ),
+        );
+      } catch (err) {
+        return sendError(reply, err); // version not found / not visible → 404
+      }
+    },
+  );
+
+  app.get<{ Params: { id: string; version: string }; Querystring: { source?: string } }>(
     "/capabilities/:id/versions/:version",
     { schema: capabilityDocs.getVersion },
     async (req, reply) => {
@@ -121,10 +191,49 @@ export function registerCapabilityRoutes(app: FastifyInstance, deps: ServerDeps)
       try {
         gate(principal, "capabilities:read");
         return reply.send(
-          await deps.capabilityService.get(principal.workspace, req.params.id, principal.subject, req.params.version),
+          await deps.capabilityService.get(
+            principal.workspace,
+            req.params.id,
+            principal.subject,
+            req.params.version,
+            req.query.source,
+          ),
         );
       } catch (err) {
         return sendError(reply, err);
+      }
+    },
+  );
+
+  // Replace a version's tags (whole-array PUT; empty = clear) — mutable metadata outside spec immutability (free labels
+  // to tell versions apart). capabilities:write (member+) PLUS the service's creator-or-admin gate. Missing / another
+  // workspace's version → 404.
+  app.put<{ Params: { id: string; version: string } }>(
+    "/capabilities/:id/versions/:version/tags",
+    { schema: capabilityDocs.setVersionTags },
+    async (req, reply) => {
+      if (!deps.capabilityService) return reply.code(404).send(notConfigured);
+      const principal = await resolvePrincipal(req, reply, deps);
+      if (!principal) return reply;
+      try {
+        gate(principal, "capabilities:write");
+      } catch (err) {
+        return sendError(reply, err);
+      }
+      const parsed = VersionTagsBodySchema.safeParse(req.body);
+      if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
+      try {
+        return reply.send(
+          await deps.capabilityService.setVersionTags(
+            principal.workspace,
+            req.params.id,
+            req.params.version,
+            parsed.data.tags,
+            actorOf(principal),
+          ),
+        );
+      } catch (err) {
+        return sendError(reply, err); // creator-or-admin gate → 403/404
       }
     },
   );

@@ -1,5 +1,6 @@
 import type {
   CapabilityRecord as ContractCapabilityRecord,
+  CapabilitySpecDiff as ContractCapabilitySpecDiff,
   EnvironmentPreset,
 } from '@everdict/contracts'
 import { z } from 'zod'
@@ -155,7 +156,41 @@ export const codeToolTryResultSchema = z.object({
 })
 export type CodeToolTryResult = z.infer<typeof codeToolTryResultSchema>
 
+// GET /capabilities/:id/versions — 이 워크스페이스가 볼 수 있는 라이브 버전(오름차순) + 버전→태그 표시맵.
+// source=오너 워크스페이스(내 것, 또는 크로스테넌트 public/subset 오너). API 전용 응답이라 계약 앵커 없음.
+export const capabilityVersionsSchema = z.object({
+  id: z.string(),
+  source: z.string(),
+  versions: z.array(z.string()),
+  versionTags: z.record(z.string(), z.array(z.string())),
+})
+export type CapabilityVersions = z.infer<typeof capabilityVersionsSchema>
+
+// GET /capabilities/:id/diff — 두 버전의 불변 콘텐츠(name/description/spec) 구조 diff. 타입은 계약 고정(드리프트 가드).
+const capabilityFieldChangeSchema = z.object({
+  path: z.string(),
+  before: z.string(),
+  after: z.string(),
+  change: z.enum(['added', 'removed', 'changed']),
+})
+export type CapabilityFieldChange = z.infer<typeof capabilityFieldChangeSchema>
+export const capabilitySpecDiffSchema = z.object({
+  id: z.string(),
+  base: z.string(),
+  candidate: z.string(),
+  typeChanged: z.boolean(),
+  changes: z.array(capabilityFieldChangeSchema),
+  summary: z.object({
+    added: z.number().int(),
+    removed: z.number().int(),
+    changed: z.number().int(),
+  }),
+})
+export type CapabilitySpecDiff = z.infer<typeof capabilitySpecDiffSchema>
+
 // 드리프트 가드 — 레코드는 양방향(어느 쪽 필드 변경도 웹 타입체크를 깨뜨린다).
 type AssertAssignable<A extends B, B> = A
 type _CapFwd = AssertAssignable<Capability, ContractCapabilityRecord>
 type _CapBack = AssertAssignable<ContractCapabilityRecord, Capability>
+type _DiffFwd = AssertAssignable<CapabilitySpecDiff, ContractCapabilitySpecDiff>
+type _DiffBack = AssertAssignable<ContractCapabilitySpecDiff, CapabilitySpecDiff>

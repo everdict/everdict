@@ -63,6 +63,7 @@ export {
   CapabilityService,
   type CapabilityServiceDeps,
   type CapabilityUpsert,
+  type CapabilityVersions,
   type SaveCapabilityResult,
 } from "./capability/capability-service.js";
 export {

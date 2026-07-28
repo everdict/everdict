@@ -95,6 +95,28 @@ describe("InMemoryCapabilityStore", () => {
     expect((await store.listVisible("beta", "carol")).map((r) => r.id)).toEqual(["s"]);
   });
 
+  it("setVersionTags replaces a single version's tags; versionTags returns the map of tagged live versions only", async () => {
+    const store = new InMemoryCapabilityStore();
+    await store.register(cap({ id: "t", version: "1.0.0" }));
+    await store.register(cap({ id: "t", version: "1.1.0" }));
+    await store.setVersionTags("acme", "t", "1.0.0", ["baseline", "stable"]);
+    await store.setVersionTags("acme", "t", "1.1.0", ["candidate"]);
+    expect((await store.getVersion("acme", "t", "1.0.0"))?.tags).toEqual(["baseline", "stable"]);
+    expect(await store.versionTags("acme", "t")).toEqual({ "1.0.0": ["baseline", "stable"], "1.1.0": ["candidate"] });
+    // clearing a version drops it from the map
+    await store.setVersionTags("acme", "t", "1.0.0", []);
+    expect(await store.versionTags("acme", "t")).toEqual({ "1.1.0": ["candidate"] });
+  });
+
+  it("setVersionTags is a no-op on a tombstoned or missing version", async () => {
+    const store = new InMemoryCapabilityStore();
+    await store.register(cap({ id: "t", version: "1.0.0" }));
+    await store.softDelete("acme", "t", "1.0.0");
+    await store.setVersionTags("acme", "t", "1.0.0", ["x"]); // tombstoned → no revive, no throw
+    await store.setVersionTags("acme", "t", "9.9.9", ["y"]); // missing → no throw
+    expect(await store.versionTags("acme", "t")).toEqual({});
+  });
+
   it("creatorOfVersion returns the registering subject for a live version, undefined once tombstoned", async () => {
     const store = new InMemoryCapabilityStore();
     await store.register(cap({ version: "1.0.0", createdBy: "alice" }));

@@ -67,6 +67,16 @@ function fakeStore(): CapabilityStore {
       for (const r of rows)
         if (!r.deleted && r.record.tenant === tenant && r.record.id === id) r.record = { ...r.record, ...next };
     },
+    async setVersionTags(tenant, id, version, tags) {
+      const e = find(tenant, id, version);
+      if (e) e.record = { ...e.record, tags };
+    },
+    async versionTags(tenant, id) {
+      const out: Record<string, string[]> = {};
+      for (const r of live().filter((x) => x.tenant === tenant && x.id === id))
+        if (r.tags.length > 0) out[r.version] = r.tags;
+      return out;
+    },
     async softDelete(tenant, id, version) {
       const e = find(tenant, id, version);
       if (e) e.deleted = true;
@@ -193,6 +203,66 @@ describe("CapabilityService", () => {
       willCreate: true,
       version: "1.0.1",
       existingVersions: ["1.0.0"],
+    });
+  });
+
+  it("listVersions returns the ascending versions + the version→tags map, 404 when not visible", async () => {
+    const s = svc();
+    await s.save("acme", member("alice"), "t", { ...skill(), visibility: "workspace" });
+    await s.save("acme", member("alice"), "t", skill({ description: "v2" }));
+    await s.setVersionTags("acme", "t", "1.0.0", ["baseline"], member("alice"));
+    expect(await s.listVersions("acme", "bob", "t")).toEqual({
+      id: "t",
+      source: "acme",
+      versions: ["1.0.0", "1.0.1"],
+      versionTags: { "1.0.0": ["baseline"] },
+    });
+    // a private capability of another member → 404 (no existence leak)
+    await s.save("acme", member("alice"), "secret", skill());
+    await expect(s.listVersions("acme", "bob", "secret")).rejects.toBeInstanceOf(NotFoundError);
+  });
+
+  it("listVersions reads a cross-tenant public owner via source", async () => {
+    const s = svc();
+    await s.save("beta", admin("bob"), "shared", { ...skill(), visibility: "public" });
+    expect(await s.listVersions("acme", "carol", "shared", "beta")).toMatchObject({
+      source: "beta",
+      versions: ["1.0.0"],
+    });
+    // without source it resolves the caller's own workspace, where the id does not exist → 404
+    await expect(s.listVersions("acme", "carol", "shared")).rejects.toBeInstanceOf(NotFoundError);
+  });
+
+  it("diff compares two versions over the immutable content (both refs accept latest)", async () => {
+    const s = svc();
+    await s.save("acme", member("alice"), "t", { ...skill({ description: "first" }), visibility: "workspace" });
+    await s.save("acme", member("alice"), "t", skill({ description: "second" }));
+    const diff = await s.diff("acme", "bob", "t", "1.0.0", "latest");
+    expect(diff).toMatchObject({ id: "t", base: "1.0.0", candidate: "1.0.1", typeChanged: false });
+    expect(diff.changes).toContainEqual({ path: "description", before: "first", after: "second", change: "changed" });
+  });
+
+  it("diff 404s a version the caller cannot see", async () => {
+    const s = svc();
+    await s.save("acme", member("alice"), "secret", skill()); // private to alice
+    await expect(s.diff("acme", "bob", "secret", "1.0.0", "1.0.0")).rejects.toBeInstanceOf(NotFoundError);
+  });
+
+  it("setVersionTags gates to the version's creator or an admin, normalizes, and 404s a missing version", async () => {
+    const s = svc();
+    await s.save("acme", member("alice"), "t", { ...skill(), visibility: "workspace" });
+    await expect(s.setVersionTags("acme", "t", "1.0.0", ["x"], member("bob"))).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(s.setVersionTags("acme", "t", "9.9.9", ["x"], member("alice"))).rejects.toBeInstanceOf(NotFoundError);
+    // trims + dedupes + drops empties
+    expect(await s.setVersionTags("acme", "t", "1.0.0", [" prod ", "prod", ""], member("alice"))).toEqual({
+      workspace: "acme",
+      id: "t",
+      version: "1.0.0",
+      tags: ["prod"],
+    });
+    // an admin who is not the creator may still edit
+    await expect(s.setVersionTags("acme", "t", "1.0.0", ["stable"], admin("carol"))).resolves.toMatchObject({
+      tags: ["stable"],
     });
   });
 });

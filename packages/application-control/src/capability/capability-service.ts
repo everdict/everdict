@@ -1,6 +1,7 @@
 import {
   type CapabilityRecord,
   type CapabilitySpec,
+  type CapabilitySpecDiff,
   type CapabilityType,
   type CapabilityVisibility,
   ForbiddenError,
@@ -9,8 +10,15 @@ import {
   type ImageWarning,
   NotFoundError,
 } from "@everdict/contracts";
-import { canConsumeCapability, classifyImageRef, imageWarnings, specsEqual } from "@everdict/domain";
+import {
+  canConsumeCapability,
+  classifyImageRef,
+  diffCapabilitySpecs,
+  imageWarnings,
+  specsEqual,
+} from "@everdict/domain";
 import type { CapabilityStore } from "../ports/capability-store.js";
+import { normalizeVersionTags } from "../version-tag/version-tag-service.js";
 
 // Capability Store CRUD — one discriminated versioned entity (mcp|code|skill|environment) members author, publish at
 // a reach tier (private|workspace|subset|public), and adopt into their agent (tool kinds) or consume at
@@ -51,6 +59,15 @@ export interface CapabilityValidation {
   version: string; // the version save would assign (or the current one when unchanged)
   existingVersions: string[]; // this workspace's live versions of the id (ascending)
   imageWarnings?: ImageWarning[];
+}
+
+// The version list of a capability the caller can see — the ascending live versions + the version→tags display map
+// (only versions that have tags). `source` is the OWNER workspace (the caller's own, or a cross-tenant public/subset owner).
+export interface CapabilityVersions {
+  id: string;
+  source: string;
+  versions: string[];
+  versionTags: Record<string, string[]>;
 }
 
 // Who is acting — the caller's subject + whether they are a workspace admin. `isAdmin` gates publishing to `public`
@@ -228,13 +245,22 @@ export class CapabilityService {
     return this.annotate(viewerTenant, [...builtIns, ...(await this.deps.store.listPublic())]);
   }
 
-  // A single capability the caller can see, in their own workspace (latest or an exact version). Not visible / missing
-  // → 404 (no existence leak — a foreign private capability is indistinguishable from a missing one).
-  async get(tenant: string, id: string, subject: string, ref = "latest"): Promise<CapabilityView> {
-    const record = await this.deps.store.get(tenant, id, ref);
-    if (!record || !canConsumeCapability(record, { tenant, subject }))
+  // A single capability the caller can see (latest or an exact version). `source` reads a cross-tenant public/subset
+  // OWNER (defaults to the caller's own workspace) — so the store's version switcher can inspect an older version of a
+  // public capability owned by another workspace. Not visible / missing → 404 (no existence leak — a foreign private
+  // capability is indistinguishable from a missing one). The image class is always annotated for the VIEWER's workspace.
+  async get(
+    viewerTenant: string,
+    id: string,
+    subject: string,
+    ref = "latest",
+    source?: string,
+  ): Promise<CapabilityView> {
+    const owner = source ?? viewerTenant;
+    const record = await this.deps.store.get(owner, id, ref);
+    if (!record || !canConsumeCapability(record, { tenant: viewerTenant, subject }))
       throw new NotFoundError("NOT_FOUND", { id, version: ref }, `capability '${id}' not found.`);
-    const [view] = await this.annotate(tenant, [record]);
+    const [view] = await this.annotate(viewerTenant, [record]);
     if (!view) throw new NotFoundError("NOT_FOUND", { id, version: ref }, `capability '${id}' not found.`);
     return view;
   }
@@ -278,6 +304,78 @@ export class CapabilityService {
       );
     await this.deps.store.setVisibility(tenant, id, next);
     return { ...latest, visibility: next.visibility, sharedWith: next.sharedWith };
+  }
+
+  // The live versions of a capability the caller can see, with the version→tags display map. `source` selects a
+  // cross-tenant public/subset OWNER (defaults to the caller's own workspace); existence is gated by
+  // canConsumeCapability on the latest (a not-visible / missing id → 404, no existence leak) — the same rule as get().
+  async listVersions(viewerTenant: string, subject: string, id: string, source?: string): Promise<CapabilityVersions> {
+    const owner = source ?? viewerTenant;
+    const latest = await this.deps.store.get(owner, id, "latest");
+    if (!latest || !canConsumeCapability(latest, { tenant: viewerTenant, subject }))
+      throw new NotFoundError("NOT_FOUND", { id }, `capability '${id}' not found.`);
+    const [versions, versionTags] = await Promise.all([
+      this.deps.store.versions(owner, id),
+      this.deps.store.versionTags(owner, id),
+    ]);
+    return { id, source: owner, versions, versionTags };
+  }
+
+  // Structural diff of two versions over the immutable content (name/description/spec). Both refs accept "latest".
+  // `source` selects a cross-tenant public/subset OWNER (defaults to the caller's own workspace); each side is
+  // visibility-checked (a not-visible / missing version → 404, no existence leak). Reproducible by version immutability.
+  async diff(
+    viewerTenant: string,
+    subject: string,
+    id: string,
+    base: string,
+    candidate: string,
+    source?: string,
+  ): Promise<CapabilitySpecDiff> {
+    const owner = source ?? viewerTenant;
+    const [baseRecord, candidateRecord] = await Promise.all([
+      this.resolveVisible(viewerTenant, subject, owner, id, base),
+      this.resolveVisible(viewerTenant, subject, owner, id, candidate),
+    ]);
+    return diffCapabilitySpecs(baseRecord, candidateRecord);
+  }
+
+  // Resolve a (owner, id, ref) to a record the caller may consume, else 404 (no existence leak) — shared by diff.
+  private async resolveVisible(
+    viewerTenant: string,
+    subject: string,
+    owner: string,
+    id: string,
+    ref: string,
+  ): Promise<CapabilityRecord> {
+    const record = await this.deps.store.get(owner, id, ref);
+    if (!record || !canConsumeCapability(record, { tenant: viewerTenant, subject }))
+      throw new NotFoundError("NOT_FOUND", { id, version: ref }, `capability ${id}@${ref} not found.`);
+    return record;
+  }
+
+  // Replace a single version's tags — mutable metadata outside spec immutability (free labels to tell versions apart,
+  // like the registry entities' version tags). The version's creator or a workspace admin (same gate as deleteVersion);
+  // own-workspace versions only (another workspace's / missing version → 404). Tags are trimmed/deduped/capped (≤20×60).
+  async setVersionTags(
+    tenant: string,
+    id: string,
+    version: string,
+    tags: string[],
+    actor: CapabilityActor,
+  ): Promise<{ workspace: string; id: string; version: string; tags: string[] }> {
+    const creator = await this.deps.store.creatorOfVersion(tenant, id, version);
+    if (creator === undefined)
+      throw new NotFoundError("NOT_FOUND", { id, version }, `capability ${id}@${version} not found.`);
+    if (creator !== actor.subject && !actor.isAdmin)
+      throw new ForbiddenError(
+        "FORBIDDEN",
+        { id, version, action: "capabilities:write" },
+        "Only the version's creator or a workspace admin can edit this capability version's tags.",
+      );
+    const normalized = normalizeVersionTags(tags);
+    await this.deps.store.setVersionTags(tenant, id, version, normalized);
+    return { workspace: tenant, id, version, tags: normalized };
   }
 
   // Soft-delete a single version — the version's creator or a workspace admin (capabilities:delete). Missing /
