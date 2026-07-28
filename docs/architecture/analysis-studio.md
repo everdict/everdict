@@ -140,7 +140,12 @@ left = routed content canvas, right = the one persistent agent conversation. Lan
 entry: "New analysis" (`/views`) → `/scorecards/analyze?mode=custom&chat=1` — the canvas on the left
 with the chat revealed on the right via `AgentChatOpener` (askAgent draft prefilled, nothing
 auto-sends), plus a persistent "Analyze with agent" header button on the analyze page,
-view-referenced when a saved View is linked.)* New FSD slices:
+view-referenced when a saved View is linked. The reverse direction also landed: right before each
+send the chat panel captures the canvas's LIVE state over a synchronous same-window round-trip
+(`everdict:canvas-state-request` → `everdict:canvas-state`, `configToStored(config)` + the open View
+id), the chat body carries it as `canvas {config, viewId?}`, and `runChat` folds it into the model's
+user turn with the delta-editing rule — so multi-turn refinement ("make it a bar chart", "regroup by
+model") grounds on what the member actually sees, manual picker changes included.)* New FSD slices:
 `entities/analysis-artifact`, `features/analysis-studio`; `features/agent-chat` gains artifact rendering in
 the transcript (chart/table/markdown cards) and an embed mode. Sessions opened from a view carry
 `viewId` (new nullable column on `everdict_agent_sessions`), and the turn's context preamble injects the
