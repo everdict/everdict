@@ -335,6 +335,26 @@ boundary + a pure-HTTP web mirror), like `views`/`schedules`. Each phase ends on
 - Enforce the sandbox for adopted-from-others `code`; adopt-time consent for `code`; the `public` admin gate; (later)
   operator review, ratings/usage, deprecation propagation.
 
+## Web IA — management in Settings, the store as discovery (confirmed 2026-07-28)
+
+The one store page originally mixed three different owners: browse/adopt (discovery), the workspace's own
+publications (management), and the imported-environment inventory (`settings:write`-shaped workspace state). Confirmed
+split — **no API/authz change, web IA only**:
+
+- **`/store` = discovery only.** Browse + adopt/import over the public catalog (public + first-party managed
+  capabilities); rows show an in-workspace badge instead of management actions. The workspace's own publications live
+  on `/store/mine` (all kinds in one list) and in the kind-scoped Settings pages below — both render the same
+  `CapabilityStore` `variant='mine'`.
+- **Settings › Agent group = the agent as one concern**: `/settings/agent` (config + adopted refs + default-tool
+  toggles) · `/settings/tools` (workspace-authored `mcp`/`code` capabilities: publish · version · reach · adopt) ·
+  `/settings/skills` (living workspace skills) · `/settings/knowledge` (the knowledge graph, moved from the
+  Workspace group).
+- **Settings › Workspace › Environments** (`/settings/environments`) — environments are eval infra, not agent
+  config: the workspace's authored `environment` capabilities plus the imported-environment inventory
+  (`EnvironmentInventory`: pinned ref · pull-usability verify badge · re-check / remove).
+- **Settings › Account › My tools & skills** (`/settings/personal-capabilities`) — the user-private scope:
+  `visibility='private'` capabilities the user created + personal (private) skill drafts.
+
 ## First-party default toolset (confirmed 2026-07-27)
 
 The store as designed above is **adopt-only**: a capability reaches an agent solely via an explicit

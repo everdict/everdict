@@ -29,6 +29,19 @@ function toSaveBody(agent: AgentSpec | undefined, capabilities: CapabilityRef[])
   }
 }
 
+// 채택 상태를 렌더하는 표면 — 스토어(카탈로그·내 발행)와 설정(에이전트의 채택 목록 + 관리 페이지들).
+function revalidateAdoptionPages(): void {
+  for (const path of [
+    '/[workspace]/store',
+    '/[workspace]/store/mine',
+    '/[workspace]/settings',
+    '/[workspace]/settings/agent',
+    '/[workspace]/settings/tools',
+    '/[workspace]/settings/personal-capabilities',
+  ])
+    revalidatePath(path)
+}
+
 export interface AdoptActionResult {
   ok: boolean
   error?: string
@@ -43,8 +56,7 @@ export async function adoptCapabilityAction(ref: CapabilityRef): Promise<AdoptAc
     const existing = agent?.capabilities ?? []
     const next = [...existing.filter((c) => !(c.source === ref.source && c.id === ref.id)), ref]
     await controlPlane.saveAgent(ctx, AGENT_CONFIG_ID, toSaveBody(agent, next))
-    revalidatePath('/[workspace]/store')
-    revalidatePath('/[workspace]/settings')
+    revalidateAdoptionPages()
     return { ok: true }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }
@@ -61,8 +73,7 @@ export async function unadoptCapabilityAction(
     const agent = await loadAgent(ctx)
     const next = (agent?.capabilities ?? []).filter((c) => !(c.source === source && c.id === id))
     await controlPlane.saveAgent(ctx, AGENT_CONFIG_ID, toSaveBody(agent, next))
-    revalidatePath('/[workspace]/store')
-    revalidatePath('/[workspace]/settings')
+    revalidateAdoptionPages()
     return { ok: true }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }

@@ -13,6 +13,18 @@ import {
 import { authContext } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
 
+// capability 목록을 렌더하는 모든 표면 — 스토어(카탈로그·내 발행)와 설정의 관리 페이지들(도구/환경/내 도구·스킬).
+function revalidateCapabilityPages(): void {
+  for (const path of [
+    '/[workspace]/store',
+    '/[workspace]/store/mine',
+    '/[workspace]/settings/tools',
+    '/[workspace]/settings/environments',
+    '/[workspace]/settings/personal-capabilities',
+  ])
+    revalidatePath(path)
+}
+
 export interface SaveCapabilityInput {
   name: string
   description: string
@@ -39,7 +51,7 @@ export async function saveCapabilityAction(
     const result = saveCapabilityResultSchema.parse(
       await controlPlane.saveCapability(ctx, id, body)
     )
-    revalidatePath('/[workspace]/store')
+    revalidateCapabilityPages()
     return { ok: true, result }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }
@@ -62,7 +74,7 @@ export async function setCapabilityVisibilityAction(
     const capability = capabilitySchema.parse(
       await controlPlane.setCapabilityVisibility(ctx, id, body)
     )
-    revalidatePath('/[workspace]/store')
+    revalidateCapabilityPages()
     return { ok: true, capability }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }
@@ -77,7 +89,7 @@ export async function deleteCapabilityVersionAction(
   const ctx = await authContext()
   try {
     await controlPlane.deleteCapabilityVersion(ctx, id, version)
-    revalidatePath('/[workspace]/store')
+    revalidateCapabilityPages()
     return { ok: true }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }

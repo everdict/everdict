@@ -1,6 +1,7 @@
 import {
   BookOpen,
   Building2,
+  Container,
   Cpu,
   Fingerprint,
   GitBranch,
@@ -8,6 +9,7 @@ import {
   KeyRound,
   Lock,
   Network,
+  Package,
   Plug,
   Shield,
   SlidersHorizontal,
@@ -16,6 +18,7 @@ import {
   UserCircle,
   Users,
   Wallet,
+  Wrench,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -52,6 +55,8 @@ export const SETTINGS_NAV_GROUPS: SettingsNavGroup[] = [
       { href: '/preferences', labelKey: 'preferences', icon: SlidersHorizontal },
       { href: '/api-keys', labelKey: 'apiKeys', icon: KeyRound },
       { href: '/personal-secrets', labelKey: 'personalSecrets', icon: Lock },
+      // My private capabilities + personal skill drafts — user-private scope, so it lives under Account.
+      { href: '/personal-capabilities', labelKey: 'personalCapabilities', icon: Package },
     ],
   },
   {
@@ -79,24 +84,33 @@ export const SETTINGS_NAV_GROUPS: SettingsNavGroup[] = [
         icon: Telescope,
         requiredAction: 'harnesses:read',
       },
+      // Workspace-owned eval-environment images (author/version) + the imported-environment inventory. Eval infra,
+      // not agent config — so it sits with the workspace ops, not in the Agent group.
       {
-        href: '/knowledge',
-        labelKey: 'knowledge',
-        icon: Network,
-        requiredAction: 'scorecards:read',
+        href: '/environments',
+        labelKey: 'environments',
+        icon: Container,
+        requiredAction: 'capabilities:read',
       },
       { href: '/ci', labelKey: 'ci', icon: GitBranch, requiredAction: 'settings:read' },
       { href: '/budget', labelKey: 'budget', icon: Wallet, requiredAction: 'scorecards:read' },
     ],
   },
   {
-    // Evaluation-specialized workspace env — the workspace assistant. Its own group (mirrors Browser) so the agent's
-    // config (instructions/tools/model + the skills it follows) reads as one concern, not lost among generic ops.
-    // Reads are role-gated per item (agents:read / skills:read); writes are enforced in-page and by the control plane.
+    // Evaluation-specialized workspace env — the workspace assistant as ONE concern: the agent's config, the tools it
+    // can use (workspace-authored mcp/code capabilities), the skills it follows, and the knowledge graph it draws on.
+    // Reads are role-gated per item; writes are enforced in-page and by the control plane.
     headingKey: 'groupAgent',
     items: [
       { href: '/agent', labelKey: 'agent', icon: Sparkles, requiredAction: 'agents:read' },
+      { href: '/tools', labelKey: 'tools', icon: Wrench, requiredAction: 'capabilities:read' },
       { href: '/skills', labelKey: 'skills', icon: BookOpen, requiredAction: 'skills:read' },
+      {
+        href: '/knowledge',
+        labelKey: 'knowledge',
+        icon: Network,
+        requiredAction: 'scorecards:read',
+      },
     ],
   },
   {

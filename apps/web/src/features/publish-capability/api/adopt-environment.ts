@@ -14,6 +14,16 @@ import { controlPlane } from '@/shared/lib/control-plane'
 // pull-usability verification (warn-not-block). authZ (capabilities:read / settings:write) is control-plane enforced.
 const msg = (e: unknown) => (e instanceof Error ? e.message : String(e))
 
+// 환경 인벤토리/가져옴 상태를 렌더하는 표면 — 스토어(카탈로그·내 발행)와 설정의 Environments 페이지.
+function revalidateEnvironmentPages(): void {
+  for (const path of [
+    '/[workspace]/store',
+    '/[workspace]/store/mine',
+    '/[workspace]/settings/environments',
+  ])
+    revalidatePath(path)
+}
+
 export async function listAdoptedEnvironmentsAction(): Promise<
   { ok: true; environments: AdoptedEnvironment[] } | { ok: false; error: string }
 > {
@@ -34,7 +44,7 @@ export async function adoptEnvironmentAction(ref: {
   const ctx = await authContext()
   try {
     const raw = await controlPlane.adoptEnvironment(ctx, ref)
-    revalidatePath('/[workspace]/store')
+    revalidateEnvironmentPages()
     return { ok: true, environment: adoptedEnvironmentSchema.parse(raw) }
   } catch (e) {
     return { ok: false, error: msg(e) }
@@ -48,7 +58,7 @@ export async function verifyAdoptedEnvironmentAction(
   const ctx = await authContext()
   try {
     const raw = await controlPlane.verifyAdoptedEnvironment(ctx, { source, id })
-    revalidatePath('/[workspace]/store')
+    revalidateEnvironmentPages()
     return { ok: true, environment: adoptedEnvironmentSchema.parse(raw) }
   } catch (e) {
     return { ok: false, error: msg(e) }
@@ -62,7 +72,7 @@ export async function unadoptEnvironmentAction(
   const ctx = await authContext()
   try {
     await controlPlane.unadoptEnvironment(ctx, source, id)
-    revalidatePath('/[workspace]/store')
+    revalidateEnvironmentPages()
     return { ok: true }
   } catch (e) {
     return { ok: false, error: msg(e) }
