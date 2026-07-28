@@ -3143,7 +3143,20 @@
     "removeFile": "Remove {path}",
     "fileCount": "{count, plural, one {# file} other {# files}}",
     "editWithAgent": "Edit with agent",
-    "editWithAgentPrompt": "Help me improve the skill \"{name}\". Review its SKILL.md body and supporting files, then propose concrete edits — keep the body a lean step-by-step procedure and move long reference material into supporting files. Once I confirm, apply the changes with update_skill."
+    "editWithAgentPrompt": "Help me improve the skill \"{name}\". Review its SKILL.md body and supporting files, then propose concrete edits — keep the body a lean step-by-step procedure and move long reference material into supporting files. Once I confirm, apply the changes with update_skill.",
+    "shareToStore": "Share to store",
+    "shareToStoreTitle": "Share to the capability store",
+    "shareToStoreHint": "Publishes this skill to the store as a versioned, adoptable asset (republishing the same id bumps its version). Later edits here don't sync automatically — republish to update the store copy.",
+    "shareToStoreSummary": "Publishing \"{name}\": the SKILL.md body and {count, plural, =0 {no supporting files} one {# supporting file} other {# supporting files}}.",
+    "capabilityId": "Store id",
+    "reach": "Reach",
+    "reachWorkspace": "This workspace",
+    "reachPrivate": "Only me",
+    "reachPublic": "Public (everyone)",
+    "publish": "Publish",
+    "publishing": "Publishing…",
+    "publishedToStore": "Published \"{name}\" to the store as v{version}.",
+    "publishError": "Could not publish to the store."
   },
   "agentChat": {
     "new": "New",

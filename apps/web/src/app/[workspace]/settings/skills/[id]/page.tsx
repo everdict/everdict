@@ -11,7 +11,7 @@ import { fmtSubject } from '@/shared/lib/format'
 import { controlPlane } from '@/shared/lib/control-plane'
 import { EmptyState } from '@/shared/ui/empty-state'
 import { PageHeader } from '@/shared/ui/page-header'
-import { AskAgentButton } from '@/widgets/infra-panel'
+import { AskAgentButton, MentionInChatButton } from '@/widgets/infra-panel'
 
 export const dynamic = 'force-dynamic'
 
@@ -55,6 +55,9 @@ export default async function SkillDetailPage({ params }: { params: Promise<{ id
     // 모델 미등록/권한 없음 — 편집 다이얼로그의 AI 위저드만 비활성.
   }
 
+  // 대화 패널 진입 2종 — 참조만 떨어뜨리는 "대화에서 분석"(모두)과, 편집 프롬프트까지 프리필하는
+  // "에이전트로 편집"(관리 가능자만). 위젯 버튼은 앱 레이어가 조립해 feature 에 내려준다.
+  const reference = { type: 'skill' as const, id: skill.id, label: skill.name }
   return (
     <div className="space-y-6">
       <PageHeader title={skill.name} description={skill.description} />
@@ -62,19 +65,22 @@ export default async function SkillDetailPage({ params }: { params: Promise<{ id
         skill={skill}
         author={author}
         canManage={canManage}
+        canPublish={can(principal?.roles, 'capabilities:write')}
+        isAdmin={isAdmin}
         modelIds={modelIds}
-        {...(canManage
-          ? {
-              agentAction: (
-                <AskAgentButton
-                  variant="primary"
-                  label={t('editWithAgent')}
-                  prompt={t('editWithAgentPrompt', { name: skill.name })}
-                  reference={{ type: 'skill', id: skill.id, label: skill.name }}
-                />
-              ),
-            }
-          : {})}
+        actions={
+          <>
+            <MentionInChatButton reference={reference} />
+            {canManage && (
+              <AskAgentButton
+                variant="primary"
+                label={t('editWithAgent')}
+                prompt={t('editWithAgentPrompt', { name: skill.name })}
+                reference={reference}
+              />
+            )}
+          </>
+        }
       />
     </div>
   )

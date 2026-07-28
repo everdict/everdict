@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { FileText, Globe, Lock, Pencil } from 'lucide-react'
+import { FileText, Globe, Lock, Pencil, Store } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
 import type { Skill } from '@/entities/skill'
@@ -12,29 +12,36 @@ import { Button } from '@/shared/ui/button'
 import { cn } from '@/shared/lib/utils'
 import { Markdown } from '@/shared/ui/markdown'
 
+import { ShareSkillToStoreDialog } from './share-skill-to-store-dialog'
 import { SkillEditorDialog } from './skills-manager'
 
 // 스킬 상세 뷰어 — SKILL.md 본문 + 부속 파일을 탭으로 열람(클러드코드 스킬 디렉토리의 재해석: 본문은 문서, 파일은 온디맨드
 // 참조자료). 편집은 두 갈래: "에이전트로 편집"(페이지가 우측 대화 패널을 프롬프트 프리필로 연다 — 주 편집 경로)과 수동 편집
-// 다이얼로그(메타/본문 직접 수정). agentAction 은 앱 레이어가 구성해 내려준다(FSD: feature 는 widgets 를 모른다).
+// 다이얼로그(메타/본문 직접 수정). 스토어 발행(capability 화)은 여기서 바로. actions(대화 패널 버튼들)는 앱 레이어가
+// 구성해 내려준다(FSD: feature 는 widgets 를 모른다).
 export function SkillDetail({
   skill,
   author,
   canManage,
+  canPublish,
+  isAdmin,
   modelIds,
-  agentAction,
+  actions,
 }: {
   skill: Skill
   author: { name: string; avatarUrl?: string }
   canManage: boolean
+  canPublish: boolean
+  isAdmin: boolean
   modelIds: string[]
-  agentAction?: React.ReactNode
+  actions?: React.ReactNode
 }) {
   const t = useTranslations('skillsManager')
   const router = useRouter()
   // '' = SKILL.md 본문 탭, 그 외 = 해당 path 의 부속 파일 탭.
   const [tab, setTab] = useState('')
   const [editing, setEditing] = useState(false)
+  const [sharing, setSharing] = useState(false)
 
   const activeFile = skill.files.find((f) => f.path === tab)
 
@@ -63,7 +70,13 @@ export function SkillDetail({
           )}
         </div>
         <div className="flex items-center gap-2">
-          {agentAction}
+          {actions}
+          {canPublish && (
+            <Button variant="outline" size="sm" onClick={() => setSharing(true)}>
+              <Store />
+              {t('shareToStore')}
+            </Button>
+          )}
           {canManage && (
             <Button variant="outline" size="sm" onClick={() => setEditing(true)}>
               <Pencil />
@@ -117,6 +130,10 @@ export function SkillDetail({
             router.refresh() // 편집 결과를 서버 데이터로 다시 읽는다(상세는 서버 컴포넌트 fetch).
           }}
         />
+      )}
+
+      {sharing && (
+        <ShareSkillToStoreDialog skill={skill} isAdmin={isAdmin} onClose={() => setSharing(false)} />
       )}
     </div>
   )

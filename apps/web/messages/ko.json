@@ -3143,7 +3143,20 @@
     "removeFile": "{path} 제거",
     "fileCount": "파일 {count}개",
     "editWithAgent": "에이전트로 편집",
-    "editWithAgentPrompt": "\"{name}\" 스킬을 개선하고 싶어. SKILL.md 본문과 부속 파일을 검토해서 구체적인 수정안을 제안해줘 — 본문은 간결한 단계별 절차로 유지하고, 긴 참조 자료는 부속 파일로 분리해줘. 내가 확인하면 update_skill 로 반영해줘."
+    "editWithAgentPrompt": "\"{name}\" 스킬을 개선하고 싶어. SKILL.md 본문과 부속 파일을 검토해서 구체적인 수정안을 제안해줘 — 본문은 간결한 단계별 절차로 유지하고, 긴 참조 자료는 부속 파일로 분리해줘. 내가 확인하면 update_skill 로 반영해줘.",
+    "shareToStore": "스토어에 공유",
+    "shareToStoreTitle": "능력 스토어에 공유",
+    "shareToStoreHint": "이 스킬을 스토어에 버전드 자산으로 발행해요(같은 ID로 재발행하면 버전이 올라가요). 이후 이곳에서의 수정은 자동 반영되지 않으니, 스토어 사본을 갱신하려면 다시 발행하세요.",
+    "shareToStoreSummary": "\"{name}\" 발행 — SKILL.md 본문과 부속 파일 {count}개.",
+    "capabilityId": "스토어 ID",
+    "reach": "공개 범위",
+    "reachWorkspace": "이 워크스페이스",
+    "reachPrivate": "나만",
+    "reachPublic": "전체 공개",
+    "publish": "발행",
+    "publishing": "발행 중…",
+    "publishedToStore": "\"{name}\"을(를) 스토어에 v{version}(으)로 발행했어요.",
+    "publishError": "스토어에 발행하지 못했어요."
   },
   "agentChat": {
     "new": "새 대화",
