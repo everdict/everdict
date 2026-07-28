@@ -1876,7 +1876,8 @@
     "field_toolCallId": "도구 호출 id",
     "field_toolArgs": "도구 인자",
     "field_toolResult": "도구 결과",
-    "field_messageText": "메시지 텍스트"
+    "field_messageText": "메시지 텍스트",
+    "preservedSlots": "증거 슬롯은 등록된 그대로 보존됩니다 (API로 편집): {slots}"
   },
   "registerJudge": {
     "kindModelLabel": "model (LLM/VLM 호출)",

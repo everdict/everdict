@@ -1876,7 +1876,8 @@
     "field_toolCallId": "tool call id",
     "field_toolArgs": "tool args",
     "field_toolResult": "tool result",
-    "field_messageText": "message text"
+    "field_messageText": "message text",
+    "preservedSlots": "Evidence slots are kept as registered (edit via API): {slots}"
   },
   "registerJudge": {
     "kindModelLabel": "model (LLM/VLM call)",

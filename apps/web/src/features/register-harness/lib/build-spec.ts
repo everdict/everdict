@@ -1,5 +1,7 @@
 // Assemble wizard form state → HarnessTemplateSpec / HarnessInstanceSpec (pure). The control plane does the final schema/conflict validation.
 // Template (top-level category) = shape/slots (version not pinned); Instance = template reference + pins (slot→image/value).
+import type { SpanAttrMapping } from '@everdict/contracts'
+
 import type { HarnessTemplateSpec } from '@/entities/harness'
 import { traceSourceToSpec, type TraceSourceValue } from '@/entities/trace-source'
 
@@ -133,6 +135,10 @@ export interface TemplateState {
   // Per-harness span→TraceEvent attribute overrides — field name → comma-separated attribute keys.
   // Empty for a GenAI-convention harness; a non-standard harness maps its own keys. See SpanAttrMapping.
   traceMapping: Record<string, string>
+  // Evidence slots loaded from the spec (finalAnswer/dom/screenshot/evidence) — the editor has no UI for
+  // them, so they round-trip through the form UNTOUCHED. Rebuilding the mapping from the 9 editor fields
+  // alone silently deleted every slot on save (data loss on open→save).
+  traceMappingSlots: SpanMappingSlots
   targetEnabled: boolean
   targetLifecycle: string
   targetObserve: string[]
@@ -177,20 +183,53 @@ export const SPAN_MAPPING_FIELDS = [
   'toolResult',
   'messageText',
 ] as const
+type SpanMappingField = (typeof SPAN_MAPPING_FIELDS)[number]
 
-// comma-text record → SpanAttrMapping (only non-empty fields); undefined when nothing is mapped (a GenAI-convention harness).
-const recordToMapping = (rec: Record<string, string>): Record<string, string[]> | undefined => {
-  const out: Record<string, string[]> = {}
+// The evidence-slot side of the mapping — everything the comma-text editor does NOT author. Preserved
+// verbatim across an open→save round trip; authored via the API/MCP (`set_harness_span_attr_mapping`).
+export type SpanMappingSlots = Omit<SpanAttrMapping, SpanMappingField>
+// Coverage guard: if the contract grows a new mapping field, it must be claimed by the editor list or fall
+// into the slots type — this trips when a new field would otherwise be dropped by recordToMapping again.
+type AssertAssignable<A extends B, B> = A
+type _mappingKeysCovered = AssertAssignable<
+  keyof SpanAttrMapping,
+  SpanMappingField | keyof SpanMappingSlots
+>
+export type __spanMappingCoverageGuard = _mappingKeysCovered
+
+// SpanAttrMapping → its evidence slots (the non-editor keys), kept in form state untouched.
+const mappingSlots = (m: SpanAttrMapping | undefined): SpanMappingSlots => {
+  if (!m) return {}
+  return {
+    ...(m.finalAnswer ? { finalAnswer: m.finalAnswer } : {}),
+    ...(m.dom ? { dom: m.dom } : {}),
+    ...(m.screenshot ? { screenshot: m.screenshot } : {}),
+    ...(m.evidence ? { evidence: m.evidence } : {}),
+  }
+}
+
+// comma-text record + preserved slots → SpanAttrMapping; undefined when nothing is mapped (GenAI-convention harness).
+const recordToMapping = (
+  rec: Record<string, string>,
+  slots: SpanMappingSlots,
+): SpanAttrMapping | undefined => {
+  const out: Partial<Record<SpanMappingField, string[]>> = {}
   for (const f of SPAN_MAPPING_FIELDS) {
     const keys = csv(rec[f] ?? '')
     if (keys.length) out[f] = keys
   }
-  return Object.keys(out).length ? out : undefined
+  const merged: SpanAttrMapping = { ...slots, ...out }
+  return Object.keys(merged).length ? merged : undefined
 }
 // SpanAttrMapping → comma-text record (prefill an existing spec into the editor).
-const mappingToRecord = (m: Record<string, string[]> | undefined): Record<string, string> => {
+const mappingToRecord = (m: SpanAttrMapping | undefined): Record<string, string> => {
   const out: Record<string, string> = {}
-  if (m) for (const f of SPAN_MAPPING_FIELDS) if (Array.isArray(m[f])) out[f] = m[f].join(', ')
+  if (m) {
+    for (const f of SPAN_MAPPING_FIELDS) {
+      const keys = m[f]
+      if (Array.isArray(keys)) out[f] = keys.join(', ')
+    }
+  }
   return out
 }
 
@@ -357,7 +396,10 @@ export function buildTemplate(s: TemplateState): Record<string, unknown> {
     },
     traceSource: {
       ...traceSourceToSpec(s.traceSource),
-      ...(recordToMapping(s.traceMapping) ? { mapping: recordToMapping(s.traceMapping) } : {}),
+      ...(() => {
+        const mapping = recordToMapping(s.traceMapping, s.traceMappingSlots)
+        return mapping ? { mapping } : {}
+      })(),
     },
   }
   if (s.targetEnabled) {
@@ -421,6 +463,7 @@ export function templateStateFromSpec(t: HarnessTemplateSpec): TemplateState {
       project: t.traceSource?.project ?? '',
     },
     traceMapping: mappingToRecord(t.traceSource?.mapping),
+    traceMappingSlots: mappingSlots(t.traceSource?.mapping),
     targetEnabled: t.target !== undefined,
     targetLifecycle: t.target?.lifecycle ?? 'per-case-instance',
     targetObserve: t.target?.observe ?? ['dom', 'screenshot', 'url'],
@@ -610,6 +653,7 @@ export const INITIAL_TEMPLATE: TemplateState = {
     project: '',
   },
   traceMapping: {},
+  traceMappingSlots: {},
   targetEnabled: false,
   targetLifecycle: 'per-case-instance',
   targetObserve: ['dom', 'screenshot', 'url'],

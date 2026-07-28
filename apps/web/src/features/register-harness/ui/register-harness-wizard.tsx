@@ -676,6 +676,7 @@ export function TemplateForm({
             />
             <SpanMappingEditor
               mapping={s.traceMapping}
+              slots={s.traceMappingSlots}
               onChange={(traceMapping) => set({ traceMapping })}
             />
           </div>

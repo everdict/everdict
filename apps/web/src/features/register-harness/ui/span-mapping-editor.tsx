@@ -7,20 +7,30 @@ import { useTranslations } from 'next-intl'
 import { cn } from '@/shared/lib/utils'
 import { Input } from '@/shared/ui/input'
 
-import { SPAN_MAPPING_FIELDS } from '../lib/build-spec'
+import { SPAN_MAPPING_FIELDS, type SpanMappingSlots } from '../lib/build-spec'
 
 // Per-harness span-attribute mapping editor (otel/mlflow) — the escape hatch for a harness that doesn't emit the OTel
 // GenAI conventions. Each row maps a TraceEvent field to that harness's own comma-separated span-attribute keys.
 // Collapsed by default (advanced); a filled field expands it so the override is visible on edit.
+// `slots` = evidence slots loaded from the spec — no editor UI here, but they are preserved on save, so the
+// panel names them to make the round trip visible (they used to be silently deleted).
 export function SpanMappingEditor({
   mapping,
+  slots,
   onChange,
 }: {
   mapping: Record<string, string>
+  slots?: SpanMappingSlots
   onChange: (next: Record<string, string>) => void
 }) {
   const t = useTranslations('spanMapping')
-  const hasAny = Object.values(mapping).some((v) => v.trim())
+  const slotNames = [
+    ...(slots?.finalAnswer ? ['finalAnswer'] : []),
+    ...(slots?.dom ? ['dom'] : []),
+    ...(slots?.screenshot ? ['screenshot'] : []),
+    ...Object.keys(slots?.evidence ?? {}).map((k) => `evidence:${k}`),
+  ]
+  const hasAny = Object.values(mapping).some((v) => v.trim()) || slotNames.length > 0
   const [open, setOpen] = useState(hasAny)
 
   return (
@@ -50,6 +60,11 @@ export function SpanMappingEditor({
               </label>
             ))}
           </div>
+          {slotNames.length > 0 ? (
+            <p className="text-[11px] text-muted-foreground">
+              {t('preservedSlots', { slots: slotNames.join(', ') })}
+            </p>
+          ) : null}
         </div>
       ) : null}
     </div>

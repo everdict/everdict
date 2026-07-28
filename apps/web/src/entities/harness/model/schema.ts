@@ -1,3 +1,4 @@
+import type { SpanAttrMapping } from '@everdict/contracts'
 import type {
   HarnessListEntry,
   HarnessSpecDiffResponse,
@@ -105,6 +106,37 @@ export type EnvValue = z.infer<typeof envValueSchema>
 export const envValueText = (v: EnvValue, secretLabel: string = '시크릿'): string =>
   typeof v === 'string' ? v : `${v.secretRef} · ${secretLabel}`
 
+// One evidence selector — an attr key + an optional dot/bracket path INTO its JSON value. A bare string = { key }.
+export const evidenceSelectorSchema = z.object({
+  key: z.string(),
+  path: z.string().optional(),
+  pick: z.enum(['last', 'first']).optional(),
+})
+export const evidenceSlotSchema = z.array(z.union([z.string(), evidenceSelectorSchema]))
+
+// Contract-faithful SpanAttrMapping mirror (drift-guarded below; evidence keys relaxed to a bare string —
+// a superset, the control plane enforces the name rules). The former "loose record" (string[] values only)
+// was in fact STRICTER than the contract: it rejected evidence-selector objects and the `evidence` record,
+// so a harness registered with those failed to load in the web at all.
+export const spanAttrMappingSchema = z.object({
+  model: z.array(z.string()).optional(),
+  inputTokens: z.array(z.string()).optional(),
+  outputTokens: z.array(z.string()).optional(),
+  costUsd: z.array(z.string()).optional(),
+  toolName: z.array(z.string()).optional(),
+  toolCallId: z.array(z.string()).optional(),
+  toolArgs: z.array(z.string()).optional(),
+  toolResult: z.array(z.string()).optional(),
+  messageText: z.array(z.string()).optional(),
+  finalAnswer: evidenceSlotSchema.optional(),
+  dom: evidenceSlotSchema.optional(),
+  screenshot: evidenceSlotSchema.optional(),
+  evidence: z.record(z.string(), evidenceSlotSchema).optional(),
+})
+type _spanAttrMappingFwd = AssertAssignable<z.infer<typeof spanAttrMappingSchema>, SpanAttrMapping>
+type _spanAttrMappingBack = AssertAssignable<SpanAttrMapping, z.infer<typeof spanAttrMappingSchema>>
+export type __harnessMappingDriftGuard = [_spanAttrMappingFwd, _spanAttrMappingBack]
+
 // trace source — the eval pulls the trace the harness exported to its observability platform (5 kinds).
 // Loose display mirror (kind is a plain string; the control plane validates the exact enum). authSecret is a
 // SecretStore key NAME; correlate/service/project are how the platform locates this run's trace.
@@ -115,9 +147,9 @@ export const traceSourceSchema = z.object({
   correlate: z.string().optional(),
   service: z.string().optional(),
   project: z.string().optional(),
-  // Per-harness span→TraceEvent attribute overrides (SpanAttrMapping): field name → the harness's own attr keys.
-  // Loose record here (the control plane validates the exact SpanAttrMapping shape); absent = OTel GenAI conventions.
-  mapping: z.record(z.string(), z.array(z.string())).optional(),
+  // Per-harness span→TraceEvent attribute overrides — the full SpanAttrMapping shape (incl. evidence slots);
+  // absent = OTel GenAI conventions.
+  mapping: spanAttrMappingSchema.optional(),
 })
 export type TraceSource = z.infer<typeof traceSourceSchema>
 
