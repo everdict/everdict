@@ -72,6 +72,17 @@ export type McpToolSpec = z.infer<typeof McpToolSpecSchema>;
 // code — a python/node function Everdict runs (the script-grader execution contract: serialized context JSON as
 // argv[1], a ToolResult-shaped JSON on stdout) and bridges as a callable tool. The source is pinned by the immutable
 // version, so an adopter can audit exactly what they run; adopted-from-others code runs sandboxed (see the docs).
+// A worked example for a code tool — a concrete input (the tool's argument object) with an optional label/note.
+// Triple duty: store detail shows it (a browsing member sees what the tool DOES, not just its source), the store's
+// try-runner executes it (verify before adopting), and the agent bridge appends it to the tool description (the
+// model learns the call shape from a real invocation, not just the JSON Schema).
+export const CodeToolExampleSchema = z.object({
+  name: z.string().min(1).max(60).optional(), // short label (e.g. "basic search")
+  input: z.record(z.unknown()).default({}), // the tool-call arguments this example runs with
+  note: z.string().max(300).optional(), // what this example demonstrates / what to expect
+});
+export type CodeToolExample = z.infer<typeof CodeToolExampleSchema>;
+
 export const CodeToolSpecSchema = z.object({
   type: z.literal("code"),
   language: z.enum(["python", "node"]),
@@ -81,6 +92,7 @@ export const CodeToolSpecSchema = z.object({
   requiredSecrets: z.array(RequiredSecretSchema).default([]), // env the adopter binds at adoption
   timeoutSec: z.number().int().positive().optional(),
   image: z.string().optional(), // optional dedicated sandbox image (else the default hardened sandbox)
+  examples: z.array(CodeToolExampleSchema).max(8).default([]), // worked examples (store detail · try-runner · tool description)
 });
 export type CodeToolSpec = z.infer<typeof CodeToolSpecSchema>;
 

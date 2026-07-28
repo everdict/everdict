@@ -2,12 +2,15 @@
 
 import {
   type CapabilitySpec,
+  codeToolTryResultSchema,
+  type CodeToolTryResult,
   imageTagsSchema,
   probeCapabilityMcpResultSchema,
   type ProbeCapabilityMcpResult,
   type ValidateCapabilityResult,
   validateCapabilityResultSchema,
 } from '@/entities/capability'
+import { agentPlane } from '@/shared/lib/agent-plane'
 import { authContext } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
 
@@ -51,6 +54,31 @@ export async function probeCapabilityMcpAction(url: string, token?: string): Pro
     const result = probeCapabilityMcpResultSchema.parse(
       await controlPlane.probeCapabilityMcp(ctx, { url, ...(token ? { token } : {}) })
     )
+    return { ok: true, result }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
+}
+
+export interface TryCodeToolActionResult {
+  ok: boolean
+  result?: CodeToolTryResult
+  error?: string
+}
+
+// code 도구 검증(POST /agent/code-tools/try) — check=구문만(파스, 실행 없음) · run=예제 입력으로 실제 1회 실행(에이전트와
+// 동일 실행계약; 타 워크스페이스 코드는 격리 런타임에서만 — 게이트는 서버가 소유권으로 판정). 위저드는 draft spec 을,
+// 스토어 상세는 발행본 ref 를 보낸다. 무상태.
+export async function tryCodeToolAction(body: {
+  mode: 'check' | 'run'
+  name?: string
+  spec?: CapabilitySpec
+  ref?: { source: string; id: string; version: string }
+  input?: Record<string, unknown>
+}): Promise<TryCodeToolActionResult> {
+  const ctx = await authContext()
+  try {
+    const result = codeToolTryResultSchema.parse(await agentPlane.tryCodeTool(ctx, body))
     return { ok: true, result }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }

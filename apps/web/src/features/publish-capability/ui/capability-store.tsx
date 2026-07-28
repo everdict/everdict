@@ -45,6 +45,7 @@ import { Input, Label, Textarea } from '@/shared/ui/input'
 import { Markdown } from '@/shared/ui/markdown'
 
 import { adoptCapabilityAction, unadoptCapabilityAction } from '../api/adopt-capability'
+import { CodeTryPanel } from './code-try-panel'
 import {
   deleteCapabilityVersionAction,
   saveCapabilityAction,
@@ -614,6 +615,14 @@ function CapabilityEditorDialog({
   const [source, setSource] = useState(code?.code ?? '')
   const [params, setParams] = useState(code ? JSON.stringify(code.parametersSchema, null, 2) : '{}')
   const [isReadOnly, setIsReadOnly] = useState(code?.isReadOnly ?? true)
+  // 워크드 예제(행 편집: 이름/입력 JSON/노트) — 스토어 상세·try 실행·에이전트 tool description 3중 용도.
+  const [codeExamples, setCodeExamples] = useState<{ name: string; input: string; note: string }[]>(
+    (code?.examples ?? []).map((e) => ({
+      name: e.name ?? '',
+      input: JSON.stringify(e.input),
+      note: e.note ?? '',
+    }))
+  )
   // skill · environment 공용 — 둘 다 instructions 본문을 가진다(스킬=절차, 환경=구성 설명).
   const skill = capability?.spec.type === 'skill' ? capability.spec : undefined
   const env = capability?.spec.type === 'environment' ? capability.spec : undefined
@@ -681,6 +690,23 @@ function CapabilityEditorDialog({
           return { error: t('paramsInvalid') }
         }
       }
+      // 예제 행 → spec.examples. 완전히 빈 행은 건너뛰고, 입력이 JSON 오브젝트가 아니면 저장을 막는다.
+      const examples: NonNullable<Extract<CapabilitySpec, { type: 'code' }>['examples']> = []
+      for (const row of codeExamples) {
+        if (row.name.trim().length === 0 && row.input.trim().length === 0 && row.note.trim().length === 0) continue
+        try {
+          const parsed: unknown = row.input.trim().length > 0 ? JSON.parse(row.input) : {}
+          if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed))
+            return { error: t('exampleInvalid') }
+          examples.push({
+            ...(row.name.trim() ? { name: row.name.trim() } : {}),
+            input: parsed as Record<string, unknown>,
+            ...(row.note.trim() ? { note: row.note.trim() } : {}),
+          })
+        } catch {
+          return { error: t('exampleInvalid') }
+        }
+      }
       return {
         type: 'code',
         language,
@@ -688,6 +714,7 @@ function CapabilityEditorDialog({
         parametersSchema,
         isReadOnly,
         requiredSecrets: cleanSecrets,
+        examples,
       }
     }
     if (type === 'environment') {
@@ -1084,6 +1111,69 @@ function CapabilityEditorDialog({
               />
               <span>{t('isReadOnly')}</span>
             </label>
+            {/* 워크드 예제 — 이 도구가 무엇을 하는지 입력 형태로 보여준다(상세 표시·try·tool description 3중 용도) */}
+            <div className="space-y-1.5">
+              <Label>{t('examplesLabel')}</Label>
+              <p className="text-[12px] text-muted-foreground">{t('examplesHint')}</p>
+              {codeExamples.map((row, i) => (
+                <div key={i} className="space-y-1.5 rounded-md border border-border p-2.5">
+                  <div className="flex items-center gap-2">
+                    <Input
+                      value={row.name}
+                      onChange={(e) =>
+                        setCodeExamples((p) => p.map((x, idx) => (idx === i ? { ...x, name: e.target.value } : x)))
+                      }
+                      placeholder={t('exampleName')}
+                      className="text-[12px]"
+                    />
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => setCodeExamples((p) => p.filter((_, idx) => idx !== i))}
+                      aria-label={t('remove')}
+                    >
+                      <Trash2 />
+                    </Button>
+                  </div>
+                  <Textarea
+                    value={row.input}
+                    onChange={(e) =>
+                      setCodeExamples((p) => p.map((x, idx) => (idx === i ? { ...x, input: e.target.value } : x)))
+                    }
+                    rows={2}
+                    placeholder='{"query": "…"}'
+                    className="font-mono text-[12px]"
+                  />
+                  <Input
+                    value={row.note}
+                    onChange={(e) =>
+                      setCodeExamples((p) => p.map((x, idx) => (idx === i ? { ...x, note: e.target.value } : x)))
+                    }
+                    placeholder={t('exampleNote')}
+                    className="text-[12px]"
+                  />
+                </div>
+              ))}
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => setCodeExamples((p) => [...p, { name: '', input: '{}', note: '' }])}
+                disabled={codeExamples.length >= 8}
+              >
+                <Plus />
+                {t('addExample')}
+              </Button>
+            </div>
+            {/* 발행 전 검증 — check(구문)와 run(예제 실행). 코드만 보고 발행하지 않는다. */}
+            <CodeTryPanel
+              showCheck
+              buildTarget={() => {
+                const spec = buildSpec()
+                if ('error' in spec) return spec
+                return { name: name.trim().length > 0 ? name.trim() : 'draft-tool', spec }
+              }}
+              initialInput={codeExamples[0]?.input ?? '{}'}
+            />
           </>
         )}
 
@@ -1537,6 +1627,34 @@ function CapabilityDetail({ capability }: { capability: Capability }) {
             minHeight="120px"
             maxHeight="320px"
             aria-label={t('code')}
+          />
+          {Object.keys(s.parametersSchema).length > 0 && (
+            <div className="space-y-0.5">
+              <p className="text-[11px] font-[510] text-muted-foreground">{t('params')}</p>
+              <pre className="max-h-40 overflow-auto rounded-md bg-secondary/50 p-2 font-mono text-[11px] leading-relaxed">
+                {JSON.stringify(s.parametersSchema, null, 2)}
+              </pre>
+            </div>
+          )}
+          {s.examples.length > 0 && (
+            <div className="space-y-1">
+              <p className="text-[11px] font-[510] text-muted-foreground">{t('examplesLabel')}</p>
+              {s.examples.map((e, i) => (
+                <div key={i} className="text-[12px] text-muted-foreground">
+                  {e.name && <span className="font-[510] text-foreground">{e.name}: </span>}
+                  <code className="break-all font-mono">{JSON.stringify(e.input)}</code>
+                  {e.note ? ` — ${e.note}` : ''}
+                </div>
+              ))}
+            </div>
+          )}
+          {/* 예제로 직접 실행 — 코드만 읽고 채택하지 않는다(타 워크스페이스 코드는 격리 런타임에서만; 서버가 판정). */}
+          <CodeTryPanel
+            showCheck={false}
+            buildTarget={() => ({
+              ref: { source: capability.tenant, id: capability.id, version: capability.version },
+            })}
+            initialInput={s.examples[0] ? JSON.stringify(s.examples[0].input, null, 2) : '{}'}
           />
         </>
       )}

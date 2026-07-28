@@ -333,6 +333,7 @@ describe("registryProfileResolver", () => {
         parametersSchema: { type: "object", properties: {} },
         isReadOnly: true,
         requiredSecrets: [{ name: "API_KEY", description: "k" }],
+        examples: [],
       },
       { name: "scorer", tenant: "beta", visibility: "public", createdBy: "owner" },
     );
@@ -351,6 +352,7 @@ describe("registryProfileResolver", () => {
       isReadOnly: true,
       env: { API_KEY: "sk-9" },
       sandbox: true, // adopted from beta (source !== acme)
+      examples: [],
     });
   });
 
@@ -413,6 +415,7 @@ describe("registryProfileResolver", () => {
         parametersSchema: { type: "object", properties: {} },
         isReadOnly: true,
         requiredSecrets: [],
+        examples: [],
       },
       { name: "web_search" },
     );

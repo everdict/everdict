@@ -113,6 +113,7 @@ interface CodeToolSpec {          // a python/node function Everdict runs and br
   timeoutSec?: number
   image?: string                   // optional dedicated sandbox image (else the default hardened sandbox)
   requiredSecrets?: { name: string; description: string }[]  // env the adopter binds at adoption
+  examples?: { name?: string; input: Record<string, unknown>; note?: string }[]  // worked examples (see below)
 }
 
 interface SkillSpec {             // the SKILL.md shape (today's SkillRecord), now versioned + shareable
@@ -216,6 +217,24 @@ store.
   image-registry pull auth) into the docker pull is a future item — the operator-host login covers the managed case.
 - **`skill`** — feed `{name, description, instructions, files}` into the existing `buildSkillTools` → the `use_skill`
   (+ `read_skill_file` when files exist) tools. **Zero new runtime code.**
+
+### Code-tool verification — nobody adopts by reading source
+
+A code capability carries **worked `examples`** ({name?, input, note?} — concrete argument objects), and they do
+triple duty: the store detail shows them (what the tool DOES, not just its code), the try-runner executes them, and
+the agent bridge appends up to two to the bridged tool's description (the model learns the call shape from a real
+invocation, alongside `parametersSchema`). Verification runs on the agent service (`POST /agent/code-tools/try`,
+mirroring the skill test-drive):
+
+- **check** — parse-only compile validation (`node --check` / `python3 -m py_compile`): the source is written into a
+  fresh handle and parsed, never executed — safe for any target. The wizard offers it before publish.
+- **run** — execute the tool against an example input under the agent's EXACT execution contract (input JSON as
+  argv[1], last-JSON-on-stdout result, per-call handle, dispose in finally) and the same sandbox gate: a target from
+  ANOTHER workspace runs only on an isolated runtime, refused otherwise. Targets are an unsaved draft `spec` (the
+  wizard) or a published `{source,id,version}` ref (the store's try panel) — the ref is resolved and
+  visibility-re-checked server-side, so the client never asserts trust. `requiredSecrets` bind by their declared name
+  from the caller's workspace → personal secrets; unresolved names come back in `missingSecrets` so a failing run is
+  explainable rather than mysterious.
 - **`code`** — NEW. Register a `ToolDefinition` (`name` from the capability, `parametersJsonSchema` = the spec's
   `parametersSchema`, `isReadOnly` from the spec) whose `call(input, ctx)`:
   1. provisions a **sandbox** `ComputeHandle` (see security),

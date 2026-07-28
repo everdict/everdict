@@ -9,6 +9,8 @@ export {
   validateCapabilityResultSchema,
   probeCapabilityMcpResultSchema,
   imageTagsSchema,
+  codeToolExampleSchema,
+  codeToolTryResultSchema,
   type Capability,
   type CapabilityVisibility,
   type CapabilityType,
@@ -18,4 +20,6 @@ export {
   type ValidateCapabilityResult,
   type ProbeCapabilityMcpResult,
   type ImageTags,
+  type CodeToolExample,
+  type CodeToolTryResult,
 } from './model/schema'

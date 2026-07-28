@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 import {
   type AgentSessionStore,
   type AnalysisArtifactStore,
+  type CapabilityStore,
+  type SecretStore,
   type TenantKeyStore,
   WEBSEARCH_SECRET_NAME,
 } from "@everdict/application-control";
@@ -63,15 +65,21 @@ async function main(): Promise<void> {
   let resolveModelById: ModelByIdResolver | undefined;
   // Teammate execution tokens (S3) are issued into the shared tenant-key table — only with a DB (else spawn is 404).
   let keyStore: TenantKeyStore | undefined;
+  // Code-tool try (check/run before publish/adopt) — the capability store resolves published refs (any DB), the
+  // secret store binds requiredSecrets by name (needs the KEK).
+  let tryCapabilityStore: CapabilityStore | undefined;
+  let trySecretStore: SecretStore | undefined;
   if (config.DATABASE_URL !== undefined) {
     const client = sqlClient(makePool(config.DATABASE_URL));
     sessions = new PgAgentSessionStore(client);
     artifacts = new PgAnalysisArtifactStore(client);
     keyStore = new PgTenantKeyStore(client);
+    tryCapabilityStore = new PgCapabilityStore(client);
     const cipher = cipherFromEnv();
     if (cipher !== undefined) {
       // With the KEK we can decrypt the workspace's model + MCP-server secrets → full per-workspace customization.
       const secretStore = new PgSecretStore(client, cipher);
+      trySecretStore = secretStore;
       const modelRegistry = new PgModelRegistry(client);
       const agentRegistry = new PgAgentRegistry(client);
       resolveModel =
@@ -127,6 +135,13 @@ async function main(): Promise<void> {
     resolveProfile,
     ...(resolveModelById ? { resolveModelById } : {}),
     ...(keyStore ? { keyStore } : {}),
+    // Code-tool verification (check/run before publish or adopt) — always available (the runtime exists even
+    // without a DB; a missing store just disables ref targets / secret binding inside the try).
+    codeTry: {
+      runtime: codeRuntime,
+      ...(trySecretStore ? { secretStore: trySecretStore } : {}),
+      ...(tryCapabilityStore ? { capabilityStore: tryCapabilityStore } : {}),
+    },
     ...(config.AGENT_INTERNAL_TOKEN !== undefined ? { internalToken: config.AGENT_INTERNAL_TOKEN } : {}),
     // Meter workspace-billed conversation cost back to the control plane (source "agent"). Off without the token.
     ...(config.CONTROL_PLANE_INTERNAL_TOKEN !== undefined

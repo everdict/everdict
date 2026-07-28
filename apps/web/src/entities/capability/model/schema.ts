@@ -29,6 +29,14 @@ const mcpToolSpecSchema = z.object({
   requiredSecrets: z.array(requiredSecretSchema),
   write: z.boolean(),
 })
+// code 도구의 워크드 예제 — 스토어 상세 표시·try 실행·에이전트 tool description 3중 용도(입력 형태를 실호출로 보여준다).
+export const codeToolExampleSchema = z.object({
+  name: z.string().optional(),
+  input: z.record(z.string(), z.unknown()),
+  note: z.string().optional(),
+})
+export type CodeToolExample = z.infer<typeof codeToolExampleSchema>
+
 const codeToolSpecSchema = z.object({
   type: z.literal('code'),
   language: z.enum(['python', 'node']),
@@ -38,6 +46,7 @@ const codeToolSpecSchema = z.object({
   requiredSecrets: z.array(requiredSecretSchema),
   timeoutSec: z.number().optional(),
   image: z.string().optional(),
+  examples: z.array(codeToolExampleSchema),
 })
 const skillCapabilitySpecSchema = z.object({
   type: z.literal('skill'),
@@ -134,6 +143,17 @@ export const imageTagsSchema = z.object({
   tags: z.array(z.string()),
 })
 export type ImageTags = z.infer<typeof imageTagsSchema>
+
+// POST /agent/code-tools/try 200 — code 도구 검증 결과. check=구문(파스만) · run=예제 입력 실제 실행(에이전트와 동일
+// 실행계약+샌드박스 게이트). 무상태·영속 안 됨(스킬 try 와 동형이라 계약 앵커 없이 로컬 형태만).
+export const codeToolTryResultSchema = z.object({
+  mode: z.enum(['check', 'run']),
+  ok: z.boolean(),
+  content: z.string(),
+  durationMs: z.number(),
+  missingSecrets: z.array(z.string()),
+})
+export type CodeToolTryResult = z.infer<typeof codeToolTryResultSchema>
 
 // 드리프트 가드 — 레코드는 양방향(어느 쪽 필드 변경도 웹 타입체크를 깨뜨린다).
 type AssertAssignable<A extends B, B> = A

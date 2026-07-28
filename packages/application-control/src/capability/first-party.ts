@@ -77,6 +77,13 @@ const WEB_SEARCH: FirstPartyDefault = {
         },
         required: ["query"],
       },
+      examples: [
+        {
+          name: "basic search",
+          input: { query: "MLflow 3 trace API changes", max_results: 3 },
+          note: "Top-3 ranked results (title, URL, snippet) plus a short synthesized answer.",
+        },
+      ],
       isReadOnly: true,
       requiredSecrets: [
         {
@@ -198,6 +205,13 @@ const PDF_READ: FirstPartyDefault = {
         },
         required: ["url"],
       },
+      examples: [
+        {
+          name: "read a paper",
+          input: { url: "https://arxiv.org/pdf/2210.03629", max_chars: 8000 },
+          note: "Extracts the text of a text-based PDF (scanned/image-only PDFs yield no text).",
+        },
+      ],
       // Not marked read-only: it fetches an arbitrary caller-supplied URL, so each call passes the HITL gate (an SSRF
       // guardrail against prompt-injected fetches of internal addresses — unlike web_search, which hits a fixed host).
       isReadOnly: false,
@@ -286,6 +300,13 @@ const FETCH_URL: FirstPartyDefault = {
         },
         required: ["url"],
       },
+      examples: [
+        {
+          name: "read a page",
+          input: { url: "https://mlflow.org/releases", max_chars: 6000 },
+          note: "Plain-text extraction of the page body (HTML stripped).",
+        },
+      ],
       // Not read-only: it fetches an arbitrary caller-supplied URL, so each call passes the HITL gate (an SSRF
       // guardrail against prompt-injected fetches of internal addresses — same discipline as pdf_read).
       isReadOnly: false,

@@ -107,6 +107,7 @@ function applyFirstPartyDefaults(
         ...(spec.timeoutSec !== undefined ? { timeoutSec: spec.timeoutSec } : {}),
         ...(spec.image !== undefined ? { image: spec.image } : {}),
         sandbox: false, // first-party = trusted → runs on any runtime, including the host LocalDriver
+        examples: spec.examples,
       });
     } else if (spec.type === "mcp") {
       if (!spec.url) continue; // first-party mcp DEFAULTS are HTTP-url only (image/stdio servers are catalog-adopt, never defaults)
@@ -282,6 +283,7 @@ export function registryProfileResolver(opts: {
             ...(capSpec.timeoutSec !== undefined ? { timeoutSec: capSpec.timeoutSec } : {}),
             ...(capSpec.image !== undefined ? { image: capSpec.image } : {}),
             sandbox: ref.source !== principal.workspace,
+            examples: capSpec.examples,
           });
         }
       }

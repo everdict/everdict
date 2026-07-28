@@ -36,6 +36,10 @@ export const agentPlane = {
       method: 'POST',
       body: JSON.stringify({ skill, message }),
     }),
+  // Code-tool verification — check (parse-only) or run (execute an example input) a draft spec or a published
+  // capability ref, under the agent's own execution contract + sandbox gate. Stateless.
+  tryCodeTool: <T>(auth: AuthContext, body: unknown) =>
+    call<T>(auth, '/agent/code-tools/try', { method: 'POST', body: JSON.stringify(body) }),
   listSessions: <T>(auth: AuthContext) => call<T>(auth, '/agent/sessions'),
   // A View's pinned analysis artifacts (analysis-studio V3) — the agent service re-verifies view visibility
   // with the forwarded bearer, so this stays a pure courier.

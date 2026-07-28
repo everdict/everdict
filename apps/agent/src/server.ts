@@ -2,13 +2,14 @@ import { timingSafeEqual } from "node:crypto";
 import type { ChatMessage, PermissionDecision, PermissionHook } from "@everdict/agent-runtime";
 import type { TenantKeyStore } from "@everdict/application-control";
 import type { AgentSessionRecord } from "@everdict/contracts";
-import { AgentPermissionModeSchema, AgentReferenceSchema, AppError } from "@everdict/contracts";
+import { AgentPermissionModeSchema, AgentReferenceSchema, AppError, CodeToolSpecSchema } from "@everdict/contracts";
 import { issueAgentToken } from "@everdict/db";
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
 import { z } from "zod";
 import { isGuardedAction } from "./action-policy.js";
 import { AgentMailbox } from "./agent-mailbox.js";
 import { type ChatDeps, DEFAULT_SESSION_TITLE, runChat } from "./chat.js";
+import { type CodeTryDeps, runCodeToolTry } from "./code-try.js";
 import { PermissionRegistry } from "./permission-registry.js";
 import { PermissionRules } from "./permission-rules.js";
 import type { Authenticate, ForwardHeaders, Principal } from "./principal.js";
@@ -27,6 +28,9 @@ export interface AgentServerDeps extends ChatDeps {
   // Shared secret the control plane presents (x-internal-token) to POST /agent/events on a recipient's behalf (S4 —
   // the monitoring→agent bridge). Absent → the internal event path is disabled (only user-authenticated events).
   internalToken?: string;
+  // Code-tool verification (check/run before publish or adopt) — the runtime + stores POST /agent/code-tools/try
+  // needs. Absent → the route is 404.
+  codeTry?: CodeTryDeps;
 }
 
 // Constant-time equality for the internal token (fail-closed: no secret configured OR length mismatch → false).
@@ -705,6 +709,41 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
         controller.signal,
       );
       return reply.send(result);
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  // Code-tool verification — `check` (parse-only compile validation) or `run` (execute against an example input,
+  // under the same sandbox gate as the agent) for a DRAFT spec (the wizard, pre-publish) or a PUBLISHED capability
+  // ref (the store's try panel — resolved + visibility-re-checked server-side; the client never asserts trust).
+  app.post("/agent/code-tools/try", async (req, reply) => {
+    if (!deps.codeTry) return reply.code(404).send({ code: "NOT_FOUND", message: "code-tool try is not configured" });
+    const principal = await principalOf(req, reply);
+    if (!principal) return reply;
+    const body = z
+      .object({
+        mode: z.enum(["check", "run"]),
+        name: z.string().min(1).max(60).optional(), // draft tool name (spec mode)
+        spec: CodeToolSpecSchema.optional(),
+        ref: z.object({ source: z.string().min(1), id: z.string().min(1), version: z.string().min(1) }).optional(),
+        input: z.record(z.unknown()).optional(), // run mode: the example input (the tool's argument object)
+      })
+      .refine((b) => (b.spec !== undefined) !== (b.ref !== undefined), {
+        message: "exactly one of spec or ref is required",
+      })
+      .safeParse(req.body);
+    if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: body.error.message });
+    const { spec, ref } = body.data;
+    const target =
+      spec !== undefined
+        ? { kind: "spec" as const, name: body.data.name ?? "draft-tool", spec }
+        : ref !== undefined
+          ? { kind: "ref" as const, source: ref.source, id: ref.id, version: ref.version }
+          : undefined;
+    if (!target) return reply.code(400).send({ code: "BAD_REQUEST", message: "spec or ref is required" });
+    try {
+      return reply.send(await runCodeToolTry(deps.codeTry, principal, body.data.mode, target, body.data.input));
     } catch (err) {
       return sendError(reply, err);
     }

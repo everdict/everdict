@@ -1,5 +1,5 @@
 import type { ToolDefinition, ToolResult } from "@everdict/agent-runtime";
-import type { ComputeHandle, ComputeSpec } from "@everdict/contracts";
+import type { CodeToolExample, ComputeHandle, ComputeSpec } from "@everdict/contracts";
 
 // Code capabilities (type:'code') the conversational agent adopted from the Store, resolved to a runnable form. The
 // pinned source runs inside a provisioned ComputeHandle — reusing the exact script-grader execution contract (input
@@ -16,6 +16,7 @@ export interface ResolvedCodeTool {
   timeoutSec?: number;
   image?: string; // dedicated sandbox image (else the runtime's default)
   sandbox: boolean; // true when adopted from ANOTHER workspace (source !== tenant) → requires an isolated runtime
+  examples?: CodeToolExample[]; // worked examples — appended to the tool description so the model sees a real call shape
 }
 
 // How a code tool gets its compute. `isolated` = the provisioned handle is a real sandbox (e.g. DockerDriver), not the
@@ -60,6 +61,21 @@ function toToolResult(stdout: string): ToolResult {
   return { content: stdout.trim() || "(no output)", isError: false };
 }
 
+// Worked examples folded into the tool description — the model learns the call shape from a real invocation. Capped
+// (2 examples × 300 chars of input JSON) so metadata never crowds the tool listing.
+const MAX_DESCRIPTION_EXAMPLES = 2;
+const MAX_EXAMPLE_INPUT_CHARS = 300;
+export function describeWithExamples(description: string, examples: CodeToolExample[] | undefined): string {
+  const shown = (examples ?? []).slice(0, MAX_DESCRIPTION_EXAMPLES);
+  if (shown.length === 0) return description;
+  const lines = shown.map((e) => {
+    const input = JSON.stringify(e.input);
+    const capped = input.length > MAX_EXAMPLE_INPUT_CHARS ? `${input.slice(0, MAX_EXAMPLE_INPUT_CHARS)}…` : input;
+    return `- ${e.name ? `${e.name}: ` : ""}${capped}${e.note ? ` — ${e.note}` : ""}`;
+  });
+  return `${description}\n\nExample input${shown.length > 1 ? "s" : ""}:\n${lines.join("\n")}`;
+}
+
 // Bridge one resolved code tool to a native ToolDefinition. Each call provisions a fresh handle, runs the script
 // (input JSON in, result on stdout), and disposes the handle in a finally. Any execution failure becomes an
 // error-marked ToolResult (never thrown) so the agent loop records it and can self-correct.
@@ -68,7 +84,7 @@ export function buildCodeTool(tool: ResolvedCodeTool, runtime: CodeToolRuntime):
     Object.keys(tool.parametersSchema).length > 0 ? tool.parametersSchema : { type: "object", properties: {} };
   return {
     name: `code__${tool.name}`,
-    description: tool.description,
+    description: describeWithExamples(tool.description, tool.examples),
     parametersJsonSchema,
     isReadOnly: tool.isReadOnly,
     call: async (input): Promise<ToolResult> => {
