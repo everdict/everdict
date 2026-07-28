@@ -82,6 +82,20 @@ export const controlPlane = {
     call<T>(auth, `/knowledge/graph${depth !== undefined ? `?depth=${depth}` : ''}`),
   reindexKnowledge: <T>(auth: AuthContext) =>
     call<T>(auth, '/knowledge/reindex', { method: 'POST' }),
+  // Knowledge entries — reified claims (the knowledge layer). List is freshness-decorated; read=scorecards:read,
+  // write=comments:write, manage=creator-or-admin (control plane enforces). verify stamps verifiedAt (not an edit).
+  listKnowledgeEntries: <T>(auth: AuthContext) => call<T>(auth, '/knowledge/entries'),
+  createKnowledgeEntry: <T>(auth: AuthContext, body: unknown) =>
+    call<T>(auth, '/knowledge/entries', { method: 'POST', body: JSON.stringify(body) }),
+  updateKnowledgeEntry: <T>(auth: AuthContext, id: string, patch: unknown) =>
+    call<T>(auth, `/knowledge/entries/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    }),
+  deleteKnowledgeEntry: (auth: AuthContext, id: string) =>
+    callVoid(auth, `/knowledge/entries/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  verifyKnowledgeEntry: <T>(auth: AuthContext, id: string) =>
+    call<T>(auth, `/knowledge/entries/${encodeURIComponent(id)}/verify`, { method: 'POST' }),
   // Workspace membership (self-serve): my workspace list + create (creator is admin).
   listWorkspaces: <T>(auth: AuthContext) => call<T>(auth, '/workspaces'),
   createWorkspace: <T>(auth: AuthContext, body: unknown) =>

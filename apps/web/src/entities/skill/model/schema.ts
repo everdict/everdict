@@ -15,7 +15,16 @@ export const skillFileSchema = z.object({
 })
 export type SkillFile = z.infer<typeof skillFileSchema>
 
+// 스킬이 문서화하는 대상의 버전핀 참조({type,key,version?}) — staleness 계약(대상 버전이 넘어가면 스킬이 stale 로 표시).
+// type 은 닫힌 NodeType vocabulary 지만 웹은 값 배열을 import 못 하므로 느슨한 string(드리프트 가드가 겹치는 필드를 잠금).
+export const skillRefSchema = z.object({
+  type: z.string(),
+  key: z.string(),
+  version: z.string().optional(),
+})
+
 // GET /skills · /skills/:id — 전체 SkillRecord. visibility: private(개인 초안)|workspace(공유). instructions=SKILL.md 본문 + files=부속 파일.
+// verifiedAt="아직 유효함" 마지막 확인 시각(updatedAt 과 별개 — 편집이 아님).
 export const skillSchema = z.object({
   id: z.string(),
   tenant: z.string(),
@@ -23,10 +32,12 @@ export const skillSchema = z.object({
   description: z.string(),
   instructions: z.string(),
   files: z.array(skillFileSchema),
+  refs: z.array(skillRefSchema).default([]),
   visibility: skillVisibilitySchema,
   createdBy: z.string(),
   createdAt: z.string(),
   updatedAt: z.string(),
+  verifiedAt: z.string().optional(),
 })
 export const skillsSchema = z.array(skillSchema)
 export type Skill = z.infer<typeof skillSchema>
@@ -51,9 +62,10 @@ export const skillTryResultSchema = z.object({ messages: z.array(skillTryMessage
 export type SkillTryMessage = z.infer<typeof skillTryMessageSchema>
 export type SkillTryResult = z.infer<typeof skillTryResultSchema>
 
-// 드리프트 가드 — 레코드는 양방향(어느 쪽 필드 변경도 웹 타입체크를 깨뜨린다); 생성결과는 양방향(동일 형태).
+// 드리프트 가드 — 레코드는 refs 제외 양방향(refs.type 은 의도적으로 느슨한 string 이라 계약→웹 단방향만 성립);
+// 생성결과는 양방향(동일 형태).
 type AssertAssignable<A extends B, B> = A
-type _SkillFwd = AssertAssignable<Skill, ContractSkillRecord>
+type _SkillFwd = AssertAssignable<Omit<Skill, 'refs'>, Omit<ContractSkillRecord, 'refs'>>
 type _SkillBack = AssertAssignable<ContractSkillRecord, Skill>
 type _GenFwd = AssertAssignable<GenerateSkillResult, ContractGenerateSkillResult>
 type _GenBack = AssertAssignable<ContractGenerateSkillResult, GenerateSkillResult>

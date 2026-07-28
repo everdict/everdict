@@ -1545,6 +1545,7 @@
     "scorecards": "Scorecards",
     "judges": "Judges",
     "views": "Views",
+    "knowledge": "Knowledge",
     "schedules": "Schedules",
     "runtimes": "Runtimes",
     "runs": "Runs",
@@ -2716,6 +2717,66 @@
     "budgetDesc": "Enforcement caps and metered usage."
   },
   "knowledge": {
+    "title": "Knowledge",
+    "description": "Durable claims about this workspace's entities — findings, decisions, conventions, and context — version-pinned to what they concern.",
+    "newEntry": "New entry",
+    "actionFailed": "The action failed. Try again.",
+    "filters": { "all": "All" },
+    "kinds": {
+      "finding": "Finding",
+      "decision": "Decision",
+      "convention": "Convention",
+      "context": "Context"
+    },
+    "statuses": {
+      "active": "Active",
+      "superseded": "Superseded",
+      "deprecated": "Deprecated"
+    },
+    "freshness": {
+      "staleRefs": "Stale refs",
+      "unverified": "Unverified"
+    },
+    "empty": {
+      "title": "No knowledge entries yet",
+      "hint": "Record what the workspace learns — a flaky harness, a judging decision, a working convention — so agents and members inherit it."
+    },
+    "form": {
+      "createTitle": "New knowledge entry",
+      "editTitle": "Edit knowledge entry",
+      "description": "One atomic claim per entry. Pin the entities it concerns — the pins are what flag the entry when a version moves on.",
+      "kind": "Kind",
+      "title": "Claim",
+      "titlePlaceholder": "e.g. Login cases are flaky on the k8s runtime",
+      "body": "Details (markdown)",
+      "bodyPlaceholder": "The specifics: what you observed, caveats, rationale…",
+      "refs": "Concerns (version-pinned)",
+      "refsHint": "The entities this claim is about.",
+      "evidence": "Evidence",
+      "evidenceHint": "The scorecards / runs / comments backing it.",
+      "keyPlaceholder": "id (e.g. web-agent)",
+      "versionPlaceholder": "version",
+      "addRef": "Add",
+      "removeRef": "Remove reference",
+      "shareToWorkspace": "Share with the workspace (otherwise a private draft)",
+      "cancel": "Cancel",
+      "create": "Create",
+      "save": "Save",
+      "saving": "Saving…"
+    },
+    "detail": {
+      "meta": "by {by} · updated {updated}",
+      "verifiedAt": "verified {at}",
+      "staleTitle": "References superseded versions — verify before trusting:",
+      "refs": "Concerns",
+      "evidence": "Evidence",
+      "verify": "Still holds",
+      "edit": "Edit",
+      "deprecate": "Deprecate",
+      "reactivate": "Reactivate",
+      "delete": "Delete",
+      "deleteConfirm": "Really delete?"
+    },
     "summary": "{nodes} nodes · {edges} edges",
     "truncated": "+{count} more not shown",
     "reindex": "Rebuild graph",

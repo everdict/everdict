@@ -1,8 +1,16 @@
 export {
+  KNOWLEDGE_ENTRY_KINDS,
+  KNOWLEDGE_ENTRY_STATUSES,
   knowledgeEdgeSchema,
+  knowledgeEntrySchema,
+  knowledgeFreshnessSchema,
   knowledgeGraphSchema,
   knowledgeNodeSchema,
+  nodeRefSchema,
   type KnowledgeEdgeView,
+  type KnowledgeEntry,
+  type KnowledgeFreshness,
   type KnowledgeGraph,
   type KnowledgeNodeView,
+  type NodeRefView,
 } from './model/schema'
