@@ -23,7 +23,7 @@ export function SkillDetail({
   author,
   canManage,
   canPublish,
-  isAdmin,
+  canPublishPublic,
   modelIds,
   actions,
 }: {
@@ -31,7 +31,7 @@ export function SkillDetail({
   author: { name: string; avatarUrl?: string }
   canManage: boolean
   canPublish: boolean
-  isAdmin: boolean
+  canPublishPublic: boolean // 스토어 발행 시 public 리치 허용 여부(admin 또는 인스턴스 정책)
   modelIds: string[]
   actions?: React.ReactNode
 }) {
@@ -99,7 +99,7 @@ export function SkillDetail({
       {sharing && (
         <ShareSkillToStoreDialog
           skill={skill}
-          isAdmin={isAdmin}
+          canPublishPublic={canPublishPublic}
           onClose={() => setSharing(false)}
         />
       )}

@@ -38,6 +38,9 @@ export default async function SkillDetailPage({ params }: { params: Promise<{ id
   const isAdmin = (principal?.roles ?? []).includes('admin')
   const canManage =
     can(principal?.roles, 'skills:write') && (skill.createdBy === principal?.subject || isAdmin)
+  // 스토어 public 발행 가능 여부 — admin 또는 인스턴스 정책(GET /me 의 config.allowMemberPublicPublish).
+  // UX 게이팅용일 뿐 최종 강제는 컨트롤플레인(CapabilityService).
+  const canPublishPublic = isAdmin || principal?.config?.allowMemberPublicPublish === true
 
   // 작성자 표시(멤버 프로필 → 이름/아바타, 실패 시 subject 축약) + 편집 다이얼로그의 생성 모델 목록. 둘 다 소프트 실패.
   const members = await controlPlane
@@ -66,7 +69,7 @@ export default async function SkillDetailPage({ params }: { params: Promise<{ id
         author={author}
         canManage={canManage}
         canPublish={can(principal?.roles, 'capabilities:write')}
-        isAdmin={isAdmin}
+        canPublishPublic={canPublishPublic}
         modelIds={modelIds}
         actions={<MentionInChatButton reference={reference} label={t('editInChat')} />}
       />

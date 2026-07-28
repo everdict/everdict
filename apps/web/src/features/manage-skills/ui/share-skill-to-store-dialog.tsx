@@ -17,14 +17,15 @@ import { Input, Label } from '@/shared/ui/input'
 // (스토어는 불변 버전, 스킬은 제자리 편집 — 갱신하려면 다시 발행).
 export function ShareSkillToStoreDialog({
   skill,
-  isAdmin,
+  canPublishPublic,
   onClose,
 }: {
   skill: Skill
-  isAdmin: boolean
+  canPublishPublic: boolean // admin 이거나 인스턴스 정책(allowMemberPublicPublish)이 열려 있을 때 true
   onClose: () => void
 }) {
   const t = useTranslations('skillsManager')
+  const tc = useTranslations('capabilityStore')
   // 스토어 id 는 kebab 관례 — 스킬 이름에서 제안하되 편집 가능(같은 id 재발행 = 같은 자산의 새 버전).
   const [capId, setCapId] = useState(
     skill.name
@@ -35,12 +36,14 @@ export function ShareSkillToStoreDialog({
   const [reach, setReach] = useState<'private' | 'workspace' | 'public'>('workspace')
   const [pending, startTransition] = useTransition()
 
+  // public 도 항상 목록에 노출 — 권한이 없으면 숨기는 대신 선택 시 사유를 보여주고 발행만 막는다
+  // (스토어 에디터와 동일 패턴; 말없이 숨기면 "왜 없지?"가 된다). 컨트롤플레인이 최종 강제.
   const reachOptions = [
     { value: 'workspace', label: t('reachWorkspace') },
     { value: 'private', label: t('reachPrivate') },
-    // public 발행은 admin 게이트(컨트롤플레인 강제) — 비admin 에겐 보기부터 제외.
-    ...(isAdmin ? [{ value: 'public', label: t('reachPublic') }] : []),
+    { value: 'public', label: t('reachPublic') },
   ]
+  const publicLocked = reach === 'public' && !canPublishPublic
 
   const publish = () =>
     startTransition(async () => {
@@ -86,6 +89,9 @@ export function ShareSkillToStoreDialog({
             onChange={(v) => setReach(v as 'private' | 'workspace' | 'public')}
             options={reachOptions}
           />
+          {publicLocked && (
+            <p className="text-[12px] text-muted-foreground">{tc('publicAdminOnly')}</p>
+          )}
         </div>
 
         {/* 무엇이 발행되는지 요약 — 본문 + 파일 수 (내용 미리보기는 스토어 상세가 담당) */}
@@ -97,7 +103,11 @@ export function ShareSkillToStoreDialog({
           <Button variant="secondary" size="sm" onClick={onClose}>
             {t('cancel')}
           </Button>
-          <Button size="sm" onClick={publish} disabled={pending || capId.trim().length === 0}>
+          <Button
+            size="sm"
+            onClick={publish}
+            disabled={pending || capId.trim().length === 0 || publicLocked}
+          >
             <Store />
             {pending ? t('publishing') : t('publish')}
           </Button>
