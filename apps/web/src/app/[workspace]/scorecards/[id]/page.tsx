@@ -23,6 +23,7 @@ import { currentPrincipal } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
 import {
   classifyMetric,
+  fmtElapsed,
   fmtMetricLabel,
   fmtMetricValue,
   fmtPct,
@@ -643,6 +644,18 @@ export default async function ScorecardDetailPage({
         <Prop
           label="updated"
           value={new Date(record.updatedAt).toLocaleString(undefined, { timeZone })}
+        />
+        {/* Duration (소요시간) — wall-clock from submit (createdAt) to completion (updatedAt). While the batch is
+            still live there is no end yet, so show the elapsed-so-far (the page auto-refreshes, so it ticks up). */}
+        <Prop
+          label={t('metaDuration')}
+          value={
+            live
+              ? t('durationRunning', {
+                  elapsed: fmtElapsed(record.createdAt, new Date().toISOString()),
+                })
+              : fmtElapsed(record.createdAt, record.updatedAt)
+          }
         />
         {authorName && <Prop label={t('metaRunBy')} value={authorName} />}
         {/* Temporal-owned batch — the durable workflow's id; deep-links to the Temporal UI when TEMPORAL_UI_URL is set. */}

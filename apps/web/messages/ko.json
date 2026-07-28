@@ -2487,6 +2487,8 @@
     "watchLive": "라이브 보기",
     "metaRunBy": "실행자",
     "metaRuntime": "런타임",
+    "metaDuration": "소요시간",
+    "durationRunning": "{elapsed} · 실행 중",
     "metaSource": "출처",
     "runtimeDetailTitle": "런타임 상세",
     "runtimePoolPersonal": "내 러너 (아무거나)",

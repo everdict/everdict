@@ -2487,6 +2487,8 @@
     "watchLive": "Watch live",
     "metaRunBy": "Run by",
     "metaRuntime": "Runtime",
+    "metaDuration": "Duration",
+    "durationRunning": "{elapsed} · running",
     "metaSource": "Origin",
     "runtimeDetailTitle": "Runtime detail",
     "runtimePoolPersonal": "My runner (any)",

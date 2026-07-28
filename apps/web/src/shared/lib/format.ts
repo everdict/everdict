@@ -227,6 +227,20 @@ export function fmtDurationMs(ms: number | null | undefined): string {
   const m = Math.floor(s / 60)
   return `${m}m ${Math.round(s - m * 60)}s`
 }
+// Wall-clock elapsed between two ISO timestamps (start → end) — the total time a batch/run took (submit → finish).
+// Hour-aware and compact: 320ms · 4.2s · 3m 12s · 1h 4m. '–' when either bound is unparseable or end precedes start.
+export function fmtElapsed(startIso: string, endIso: string): string {
+  const ms = new Date(endIso).getTime() - new Date(startIso).getTime()
+  if (!Number.isFinite(ms) || ms < 0) return '–'
+  if (ms < 1000) return `${Math.round(ms)}ms`
+  const totalSec = Math.round(ms / 1000)
+  if (totalSec < 60) return `${(ms / 1000).toFixed(ms < 10_000 ? 1 : 0)}s`
+  const totalMin = Math.floor(totalSec / 60)
+  const sec = totalSec % 60
+  if (totalMin < 60) return `${totalMin}m ${sec}s`
+  const hr = Math.floor(totalMin / 60)
+  return `${hr}h ${totalMin % 60}m`
+}
 // Compact token count for a metrics column (1_234 → 1.2k). '–' for unknown.
 export function fmtTokens(n: number | null | undefined): string {
   if (n == null || !Number.isFinite(n)) return '–'
