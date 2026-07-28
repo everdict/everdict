@@ -227,8 +227,11 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      # Ordering hint ONLY (service_started, not service_healthy): the S3 client connects lazily, so the api must
+      # come up even when MinIO is broken — filesystem requests then fail with 502 while everything else keeps
+      # working (skill/knowledge reads fall back to their DB replicas). Never hold the control plane hostage to storage.
       minio:
-        condition: service_healthy
+        condition: service_started
     extra_hosts:
       # Reach host-side services (a self-hosted runner or a LiteLLM proxy running on the Docker host).
       - "host.docker.internal:host-gateway"
