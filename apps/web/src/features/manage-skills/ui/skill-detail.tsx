@@ -9,8 +9,7 @@ import type { Skill } from '@/entities/skill'
 import { Avatar } from '@/shared/ui/avatar'
 import { Badge } from '@/shared/ui/badge'
 import { Button } from '@/shared/ui/button'
-import { cn } from '@/shared/lib/utils'
-import { Markdown } from '@/shared/ui/markdown'
+import { SkillDocs } from '@/shared/ui/skill-docs'
 
 import { ShareSkillToStoreDialog } from './share-skill-to-store-dialog'
 import { SkillEditorDialog } from './skills-manager'
@@ -38,12 +37,8 @@ export function SkillDetail({
 }) {
   const t = useTranslations('skillsManager')
   const router = useRouter()
-  // '' = SKILL.md 본문 탭, 그 외 = 해당 path 의 부속 파일 탭.
-  const [tab, setTab] = useState('')
   const [editing, setEditing] = useState(false)
   const [sharing, setSharing] = useState(false)
-
-  const activeFile = skill.files.find((f) => f.path === tab)
 
   return (
     <div className="space-y-4">
@@ -86,39 +81,8 @@ export function SkillDetail({
         </div>
       </div>
 
-      {/* 문서 탭 — SKILL.md + 파일별 탭. 파일이 없으면 탭 줄 자체를 숨긴다(빈 섹션 숨김 관례). */}
-      <div className="overflow-hidden rounded-lg border border-border bg-card">
-        {skill.files.length > 0 && (
-          <div className="flex flex-wrap gap-0.5 border-b border-border bg-muted/30 px-2 pt-1.5">
-            {['', ...skill.files.map((f) => f.path)].map((p) => (
-              <button
-                key={p === '' ? 'SKILL.md' : p}
-                type="button"
-                onClick={() => setTab(p)}
-                className={cn(
-                  'rounded-t-md border-b-2 px-2.5 py-1.5 font-mono text-[12px] transition-colors',
-                  tab === p
-                    ? 'border-primary text-foreground'
-                    : 'border-transparent text-muted-foreground hover:text-foreground'
-                )}
-              >
-                {p === '' ? 'SKILL.md' : p}
-              </button>
-            ))}
-          </div>
-        )}
-        <div className="p-5">
-          {activeFile === undefined ? (
-            <Markdown content={skill.instructions} className="text-[13.5px]" />
-          ) : activeFile.path.endsWith('.md') ? (
-            <Markdown content={activeFile.content} className="text-[13.5px]" />
-          ) : (
-            <pre className="overflow-x-auto whitespace-pre-wrap font-mono text-[12.5px] leading-relaxed">
-              {activeFile.content}
-            </pre>
-          )}
-        </div>
-      </div>
+      {/* 멀티문서 스킬 뷰어(SKILL.md + 부속 파일 탭) — 스토어 상세와 공용 뷰어를 공유해 표현이 갈리지 않게 한다. */}
+      <SkillDocs instructions={skill.instructions} files={skill.files} />
 
       {editing && (
         <SkillEditorDialog
@@ -133,7 +97,11 @@ export function SkillDetail({
       )}
 
       {sharing && (
-        <ShareSkillToStoreDialog skill={skill} isAdmin={isAdmin} onClose={() => setSharing(false)} />
+        <ShareSkillToStoreDialog
+          skill={skill}
+          isAdmin={isAdmin}
+          onClose={() => setSharing(false)}
+        />
       )}
     </div>
   )

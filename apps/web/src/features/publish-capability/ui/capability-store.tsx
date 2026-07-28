@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useState, useTransition } from 'react'
+import Link from 'next/link'
 import {
   ArrowRight,
   Boxes,
@@ -17,6 +18,7 @@ import {
   MoreHorizontal,
   Pencil,
   Plus,
+  Search,
   Share2,
   Sparkles,
   Trash2,
@@ -40,16 +42,21 @@ import type {
 } from '@/entities/capability'
 import type { AdoptedEnvironment } from '@/entities/environment-adoption'
 import { fmtSubject } from '@/shared/lib/format'
+import { usePersistentFilters } from '@/shared/lib/use-persistent-filters'
 import { cn } from '@/shared/lib/utils'
 import { Avatar } from '@/shared/ui/avatar'
 import { Badge } from '@/shared/ui/badge'
 import { Button } from '@/shared/ui/button'
 import { CodeEditor } from '@/shared/ui/code-editor'
+import { Combobox } from '@/shared/ui/combobox'
 import { Dialog } from '@/shared/ui/dialog'
 import { DropdownItem, DropdownMenu, DropdownSeparator } from '@/shared/ui/dropdown-menu'
 import { EmptyState } from '@/shared/ui/empty-state'
 import { Input, Label, Textarea } from '@/shared/ui/input'
 import { Markdown } from '@/shared/ui/markdown'
+import { ResetFiltersButton } from '@/shared/ui/reset-filters-button'
+import { SkillDocs } from '@/shared/ui/skill-docs'
+import { StatCard } from '@/shared/ui/stat-card'
 
 import { adoptCapabilityAction, unadoptCapabilityAction } from '../api/adopt-capability'
 import {
@@ -116,11 +123,15 @@ const IMG_CLASS_TONE: Record<CapabilityImageClass, 'success' | 'info' | 'warning
   unqualified: 'warning',
 }
 
-// Store — 워크스페이스가 함께 만드는 도구/스킬 카탈로그. 내 스토어(내가 볼 수 있는 것)와 공개 카탈로그를 탭으로 브라우즈하고,
-// 멤버가 발행(mcp|code|skill)·편집·reach 변경·삭제한다. 채택(에이전트에 추가)은 후속 단계.
+type StoreVariant = 'catalog' | 'mine'
+
+// Store — 매니지드/공개 발행된 capability 카탈로그. 하네스·데이터셋 목록과 같은 행 레이아웃(스탯 + 필터 + 행) 위에
+// 얹고, 상세는 제자리 확장이 아니라 Dialog 로 띄운다(다른 컬럼 위젯을 밀지 않게). variant='catalog' 는 공개 목록만
+// (가져옴/채택 여부를 행에 표시), variant='mine' 는 내 워크스페이스가 발행한 것(편집/공개범위/삭제 관리 + 발행). 매니지드
+// (첫당사자) 항목은 "기본 제공"이 아니라 스토어가 매니지드하는 것 → 배지 + 채택/가져오기 버튼으로 노출한다.
 export function CapabilityStore({
-  mine,
-  publicCaps,
+  items,
+  variant,
   authors,
   canWrite,
   canAdopt,
@@ -135,8 +146,8 @@ export function CapabilityStore({
   isAdmin,
   allowMemberPublicPublish,
 }: {
-  mine: Capability[]
-  publicCaps: Capability[]
+  items: Capability[]
+  variant: StoreVariant
   authors: Record<string, Author>
   canWrite: boolean
   canAdopt: boolean
@@ -152,73 +163,43 @@ export function CapabilityStore({
   allowMemberPublicPublish: boolean
 }) {
   const t = useTranslations('capabilityStore')
-  const [tab, setTab] = useState<'mine' | 'public' | 'adopted'>('mine')
-  const [query, setQuery] = useState('')
-  const [typeFilter, setTypeFilter] = useState<'all' | CapabilityType>('all')
-  const [sort, setSort] = useState<'recent' | 'name' | 'type'>('recent')
-  // 클라이언트 페이지네이션 — 큰 공개 카탈로그에서 한 번에 렌더할 카드 수(더 보기로 증가). 필터 변경 시 리셋.
+  // 클라이언트 페이지네이션 — 큰 카탈로그에서 한 번에 렌더할 행 수(더 보기로 증가). 필터 변경 시 리셋.
   const PAGE = 24
   const [visibleCount, setVisibleCount] = useState(PAGE)
   const [editing, setEditing] = useState<Capability | 'new' | null>(null)
   const [reaching, setReaching] = useState<Capability | null>(null)
   const [confirming, setConfirming] = useState<Capability | null>(null)
   const [adopting, setAdopting] = useState<Capability | null>(null)
-  // environment 카드 제자리 확장(단일-오픈) — instructions + preset 을 카드 안에서 드릴인.
-  const [expandedKey, setExpandedKey] = useState<string | null>(null)
+  // 상세 Dialog 로 띄울 대상(제자리 확장 대체).
+  const [detail, setDetail] = useState<Capability | null>(null)
   const [pending, startTransition] = useTransition()
 
+  // 필터 — 하네스/데이터셋 목록과 동일한 지속 필터(검색·종류·상태·정렬). 워크스페이스 + variant 별로 기억.
+  const FILTER_DEFAULTS = { query: '', type: 'all', status: 'all', sort: 'recent' }
+  const { values, set, reset, dirty } = usePersistentFilters(
+    `store:${variant}:${currentWorkspace}`,
+    FILTER_DEFAULTS
+  )
+  const { query, type, status, sort } = values
+
   const adopted = useMemo(() => new Set(adoptedKeys), [adoptedKeys])
-  // 가져온(import) 환경 이미지 — source/id → 인벤토리 항목(사용가능 검증 상태). environment 카드의 "가져옴/가져오기"용.
+  // 가져온(import) 환경 이미지 — source/id → 인벤토리 항목(사용가능 검증 상태). environment 의 "가져옴/가져오기"용.
   const adoptedEnvMap = useMemo(
     () => new Map(adoptedEnvironments.map((e) => [`${e.source}/${e.id}`, e])),
     [adoptedEnvironments]
   )
-  // environment 가져오기/해제 — 워크스페이스 인벤토리에 넣고, 넣을 때 pull 가능성을 검증한다(warn-not-block).
-  const importEnv = (c: Capability) =>
-    startTransition(async () => {
-      const r = await adoptEnvironmentAction({ source: c.tenant, id: c.id, version: c.version })
-      if (!r.ok) toast.error(r.error ?? t('importError'))
-      else if (r.environment.verify?.pullable === false)
-        toast.warning(t('importedNotPullable', { name: c.name }))
-      else toast.success(t('imported', { name: c.name }))
-    })
-  const removeEnv = (c: Capability) =>
-    startTransition(async () => {
-      const r = await unadoptEnvironmentAction(c.tenant, c.id)
-      if (!r.ok) toast.error(r.error ?? t('unimportError'))
-      else toast.success(t('unimported', { name: c.name }))
-    })
-  // 인벤토리 탭에서 source/id 로 직접 제거/재검증 (카드가 아니라 AdoptedEnvironment 항목).
-  const removeEnvBy = (source: string, id: string, name: string) =>
-    startTransition(async () => {
-      const r = await unadoptEnvironmentAction(source, id)
-      if (!r.ok) toast.error(r.error ?? t('unimportError'))
-      else toast.success(t('unimported', { name }))
-    })
-  const reverifyEnv = (e: AdoptedEnvironment) =>
-    startTransition(async () => {
-      const r = await verifyAdoptedEnvironmentAction(e.source, e.id)
-      if (!r.ok) toast.error(r.error ?? t('reverifyError'))
-      else if (r.environment.verify?.pullable === false)
-        toast.warning(t('importedNotPullable', { name: e.name ?? e.id }))
-      else toast.success(t('reverified'))
-    })
-  // 검증 실패 사유 라벨 — pull 못 하는 이유를 배지로.
-  const verifyLabel = (v: NonNullable<AdoptedEnvironment['verify']>): string =>
-    v.pullable
-      ? t('importedBadge')
-      : t(
-          v.reason === 'auth'
-            ? 'verifyAuth'
-            : v.reason === 'not-found'
-              ? 'verifyNotFound'
-              : 'verifyUnreachable'
-        )
+  // 이미 워크스페이스에 있는가 — 환경은 가져옴(import), 그 외는 채택(adopt).
+  const inWorkspace = useCallback(
+    (c: Capability): boolean =>
+      c.spec.type === 'environment' ? adoptedEnvMap.has(capKey(c)) : adopted.has(capKey(c)),
+    [adopted, adoptedEnvMap]
+  )
 
   // public 발행 가능? admin 은 항상, 멤버는 인스턴스 정책이 열려 있을 때. (서버가 최종 강제 — 여기선 UX 게이팅)
   const canPublishPublic = isAdmin || allowMemberPublicPublish
-  // built-in 은 코드정의(DB 미존재)라 편집/삭제/reach 불가 — admin 이라도 관리 메뉴를 숨긴다(setVisibility/delete 는 404).
-  const canManage = (c: Capability) => !isBuiltIn(c) && (c.createdBy === currentSubject || isAdmin)
+  // 관리 메뉴(편집/공개범위/삭제)는 내 발행(mine) 뷰에서 + 매니지드가 아니고 + 생성자/admin 일 때만. 카탈로그는 브라우즈 전용.
+  const canManage = (c: Capability) =>
+    variant === 'mine' && !isBuiltIn(c) && (c.createdBy === currentSubject || isAdmin)
   const authorOf = (createdBy: string): Author => {
     const a = authors[createdBy]
     return {
@@ -228,17 +209,19 @@ export function CapabilityStore({
   }
 
   const list = useMemo(() => {
-    const source = tab === 'mine' ? mine : publicCaps
     const q = query.trim().toLowerCase()
-    const filtered = source.filter(
-      (c) =>
-        (typeFilter === 'all' || c.spec.type === typeFilter) &&
-        (q.length === 0 ||
-          c.name.toLowerCase().includes(q) ||
-          c.description.toLowerCase().includes(q) ||
-          c.tags.some((tag) => tag.toLowerCase().includes(q)))
-    )
-    // built-in 을 항상 위로(공개 카탈로그의 얼굴), 그다음 선택한 정렬 기준. recent=발행 최신, name=이름, type=종류.
+    const filtered = items.filter((c) => {
+      if (type !== 'all' && c.spec.type !== type) return false
+      if (status === 'adopted' && !inWorkspace(c)) return false
+      if (status === 'not' && inWorkspace(c)) return false
+      return (
+        q.length === 0 ||
+        c.name.toLowerCase().includes(q) ||
+        c.description.toLowerCase().includes(q) ||
+        c.tags.some((tag) => tag.toLowerCase().includes(q))
+      )
+    })
+    // 매니지드(카탈로그의 얼굴)를 위로, 그다음 선택한 정렬. recent=발행 최신, name=이름, type=종류.
     return [...filtered].sort((a, b) => {
       if (isBuiltIn(a) !== isBuiltIn(b)) return isBuiltIn(a) ? -1 : 1
       if (sort === 'name') return a.name.localeCompare(b.name)
@@ -246,11 +229,14 @@ export function CapabilityStore({
         return a.spec.type.localeCompare(b.spec.type) || a.name.localeCompare(b.name)
       return b.createdAt.localeCompare(a.createdAt) // recent
     })
-  }, [tab, mine, publicCaps, query, typeFilter, sort])
+  }, [items, query, type, status, sort, inWorkspace])
 
-  // 필터/탭/정렬/검색이 바뀌면 페이지네이션을 처음으로 되돌린다.
-  useEffect(() => setVisibleCount(PAGE), [tab, query, typeFilter, sort])
+  // 필터가 바뀌면 페이지네이션을 처음으로 되돌린다.
+  useEffect(() => setVisibleCount(PAGE), [query, type, status, sort])
   const visible = list.slice(0, visibleCount)
+
+  const adoptedCount = useMemo(() => items.filter(inWorkspace).length, [items, inWorkspace])
+  const managedCount = useMemo(() => items.filter(isBuiltIn).length, [items])
 
   const del = (c: Capability) =>
     startTransition(async () => {
@@ -285,355 +271,246 @@ export function CapabilityStore({
       else toast.error(r.error ?? t('adoptError'))
     })
 
+  // environment 가져오기/해제 — 워크스페이스 인벤토리에 넣고, 넣을 때 pull 가능성을 검증한다(warn-not-block).
+  const importEnv = (c: Capability) =>
+    startTransition(async () => {
+      const r = await adoptEnvironmentAction({ source: c.tenant, id: c.id, version: c.version })
+      if (!r.ok) toast.error(r.error ?? t('importError'))
+      else if (r.environment.verify?.pullable === false)
+        toast.warning(t('importedNotPullable', { name: c.name }))
+      else toast.success(t('imported', { name: c.name }))
+    })
+  const removeEnv = (c: Capability) =>
+    startTransition(async () => {
+      const r = await unadoptEnvironmentAction(c.tenant, c.id)
+      if (!r.ok) toast.error(r.error ?? t('unimportError'))
+      else toast.success(t('unimported', { name: c.name }))
+    })
+  const reverifyEnv = (e: AdoptedEnvironment) =>
+    startTransition(async () => {
+      const r = await verifyAdoptedEnvironmentAction(e.source, e.id)
+      if (!r.ok) toast.error(r.error ?? t('reverifyError'))
+      else if (r.environment.verify?.pullable === false)
+        toast.warning(t('importedNotPullable', { name: e.name ?? e.id }))
+      else toast.success(t('reverified'))
+    })
+
+  const typeOptions = [
+    { value: 'all', label: t('typeLabel') },
+    { value: 'mcp', label: t('type_mcp') },
+    { value: 'code', label: t('type_code') },
+    { value: 'skill', label: t('type_skill') },
+    { value: 'environment', label: t('type_environment') },
+  ]
+  const statusOptions = [
+    { value: 'all', label: t('statusLabel') },
+    { value: 'adopted', label: t('statusAdopted') },
+    { value: 'not', label: t('statusNotAdopted') },
+  ]
+  const sortOptions = [
+    { value: 'recent', label: t('sortRecent') },
+    { value: 'name', label: t('sortName') },
+    { value: 'type', label: t('sortType') },
+  ]
+
+  const showActionRow = variant === 'mine' || (variant === 'catalog' && canWrite)
+
   return (
-    <div className="space-y-4">
-      {canWrite && (
-        <div className="flex justify-end">
-          <Button size="sm" onClick={() => setEditing('new')}>
-            <Plus />
-            {t('publish')}
-          </Button>
+    <div className="space-y-5">
+      {showActionRow && (
+        <div className="flex items-center justify-between gap-2">
+          <div>
+            {variant === 'mine' && (
+              <Link
+                href={`/${currentWorkspace}/store`}
+                className="inline-flex items-center gap-1 text-[13px] font-[510] text-muted-foreground transition-colors hover:text-foreground"
+              >
+                <ArrowRight className="size-3.5 rotate-180" />
+                {t('backToStore')}
+              </Link>
+            )}
+          </div>
+          <div className="flex items-center gap-3">
+            {variant === 'catalog' && canWrite && (
+              <Link
+                href={`/${currentWorkspace}/store/mine`}
+                className="inline-flex items-center gap-1 text-[13px] font-[510] text-link transition-colors hover:text-foreground"
+              >
+                {t('myPublished')}
+                <ArrowRight className="size-3.5" />
+              </Link>
+            )}
+            {variant === 'mine' && canWrite && (
+              <Button size="sm" onClick={() => setEditing('new')}>
+                <Plus />
+                {t('publish')}
+              </Button>
+            )}
+          </div>
         </div>
       )}
 
-      {/* 탭 — 내 스토어 / 공개 카탈로그 / 내 워크스페이스 환경(가져온 것) */}
-      <div className="flex items-center gap-1 border-b border-border">
-        {(['mine', 'public', 'adopted'] as const).map((k) => (
-          <button
-            key={k}
-            type="button"
-            onClick={() => setTab(k)}
-            className={cn(
-              'border-b-2 px-3 py-2 text-[13px] font-medium transition-colors',
-              tab === k
-                ? 'border-primary text-foreground'
-                : 'border-transparent text-muted-foreground hover:text-foreground'
-            )}
-          >
-            {t(k === 'mine' ? 'tabMine' : k === 'public' ? 'tabPublic' : 'tabAdopted')}
-          </button>
-        ))}
+      <div className={cn('grid gap-3', variant === 'catalog' ? 'grid-cols-3' : 'grid-cols-2')}>
+        <StatCard label={t('statTotal')} value={items.length} />
+        <StatCard
+          label={t('statAdopted')}
+          value={adoptedCount}
+          tone={adoptedCount > 0 ? 'primary' : 'default'}
+        />
+        {variant === 'catalog' && <StatCard label={t('statManaged')} value={managedCount} />}
       </div>
 
-      {tab === 'adopted' ? (
-        // 내 워크스페이스가 가져온(import) 환경 이미지 인벤토리 — 사용가능(pull) 검증 상태 + 재검증/제거.
-        adoptedEnvironments.length === 0 ? (
-          <EmptyState title={t('adoptedEmptyTitle')} hint={t('adoptedEmptyHint')} />
-        ) : (
-          <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-            {adoptedEnvironments.map((e) => (
-              <div
-                key={`${e.source}/${e.id}`}
-                className="flex flex-col gap-2 rounded-lg border border-border bg-card p-4"
-              >
-                <div className="flex items-center gap-2">
-                  <Container className="size-4 shrink-0 text-muted-foreground" />
-                  <span className="min-w-0 flex-1 truncate text-[14px] font-[560]">
-                    {e.name ?? e.id}
-                  </span>
-                  {!e.available && (
-                    <Badge tone="warning" className="shrink-0">
-                      {t('envUnavailable')}
-                    </Badge>
-                  )}
-                </div>
-                {e.image && (
-                  <code className="truncate rounded bg-secondary px-1.5 py-0.5 font-mono text-[11px] text-secondary-foreground ring-1 ring-inset ring-border">
-                    {e.image}
-                  </code>
-                )}
-                <div className="flex flex-wrap items-center gap-1.5">
-                  {e.imageClass && (
-                    <Badge tone={IMG_CLASS_TONE[e.imageClass]} className="shrink-0">
-                      {t(`imgClass_${e.imageClass}`)}
-                    </Badge>
-                  )}
-                  {e.benchmark && (
-                    <Badge tone="outline" className="shrink-0">
-                      {e.benchmark}
-                    </Badge>
-                  )}
-                  {e.verify && (
-                    <Badge tone={e.verify.pullable ? 'success' : 'warning'} className="shrink-0">
-                      {verifyLabel(e.verify)}
-                    </Badge>
-                  )}
-                </div>
-                {canImportEnvironment && (
-                  <div className="mt-1 flex items-center gap-3">
-                    <button
-                      type="button"
-                      className="text-[12px] font-[510] text-link hover:text-foreground"
-                      disabled={pending}
-                      onClick={() => reverifyEnv(e)}
-                    >
-                      {t('reverify')}
-                    </button>
-                    <button
-                      type="button"
-                      className="text-[12px] font-[510] text-destructive hover:underline"
-                      disabled={pending}
-                      onClick={() => removeEnvBy(e.source, e.id, e.name ?? e.id)}
-                    >
-                      {t('importedRemove')}
-                    </button>
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-        )
-      ) : (
-        <>
-          {/* 검색 + 타입 필터 + 정렬 */}
-          <div className="flex flex-wrap items-center gap-2">
-            <Input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder={t('searchPlaceholder')}
-              className="h-8 max-w-xs text-[13px]"
-            />
-            <div className="flex items-center gap-1">
-              {(['all', 'mcp', 'code', 'skill', 'environment'] as const).map((k) => (
-                <button
-                  key={k}
-                  type="button"
-                  onClick={() => setTypeFilter(k)}
-                  className={cn(
-                    'rounded-md px-2.5 py-1 text-[12px] font-medium ring-1 ring-inset transition-colors',
-                    typeFilter === k
-                      ? 'bg-primary/10 text-primary ring-primary/30'
-                      : 'text-muted-foreground ring-border hover:bg-accent'
-                  )}
-                >
-                  {k === 'all' ? t('filterAll') : t(`type_${k}`)}
-                </button>
-              ))}
-            </div>
-            <div className="ml-auto flex items-center gap-2">
-              <span className="text-[12px] text-muted-foreground">
-                {t('resultCount', { count: list.length })}
-              </span>
-              <select
-                value={sort}
-                onChange={(e) => setSort(e.target.value as 'recent' | 'name' | 'type')}
-                aria-label={t('sortBy')}
-                className="h-8 rounded-md border border-border bg-card px-2 text-[12px] text-foreground"
-              >
-                <option value="recent">{t('sortRecent')}</option>
-                <option value="name">{t('sortName')}</option>
-                <option value="type">{t('sortType')}</option>
-              </select>
-            </div>
-          </div>
+      <div className="flex flex-wrap items-center gap-2.5">
+        <div className="relative min-w-[200px] flex-1">
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={query}
+            onChange={(e) => set('query', e.target.value)}
+            placeholder={t('searchPlaceholder')}
+            className="pl-8"
+            aria-label={t('searchPlaceholder')}
+          />
+        </div>
+        <Combobox
+          options={typeOptions}
+          value={type}
+          onChange={(v) => set('type', v)}
+          className="w-[140px]"
+          aria-label={t('typeLabel')}
+        />
+        <Combobox
+          options={statusOptions}
+          value={status}
+          onChange={(v) => set('status', v)}
+          className="w-[150px]"
+          aria-label={t('statusLabel')}
+        />
+        <Combobox
+          options={sortOptions}
+          value={sort}
+          onChange={(v) => set('sort', v)}
+          className="w-[150px]"
+          align="end"
+          aria-label={t('sortBy')}
+        />
+        {dirty && <ResetFiltersButton onClick={reset} />}
+      </div>
 
-          {list.length === 0 ? (
-            <EmptyState
-              title={t('emptyTitle')}
-              hint={t('emptyHint')}
-              {...(canWrite && tab === 'mine'
-                ? { action: <Button onClick={() => setEditing('new')}>{t('publish')}</Button> }
-                : {})}
-            />
-          ) : (
-            <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-              {visible.map((c) => {
-                const author = authorOf(c.createdBy)
-                const TypeIcon = TYPE_ICON[c.spec.type]
-                const VisIcon = VIS_ICON[c.visibility]
-                return (
-                  <div
-                    key={`${c.tenant}/${c.id}`}
-                    className="flex flex-col rounded-lg border border-border bg-card p-4"
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="flex min-w-0 flex-1 items-center gap-2">
-                        <TypeIcon className="size-4 shrink-0 text-primary" />
-                        <span className="min-w-0 truncate font-mono text-[13px] font-medium">
+      {list.length === 0 ? (
+        <EmptyState
+          icon={<Boxes />}
+          title={t(variant === 'mine' ? 'mineEmptyTitle' : 'emptyTitle')}
+          hint={t(variant === 'mine' ? 'mineEmptyHint' : 'emptyHint')}
+          {...(variant === 'mine' && canWrite
+            ? { action: <Button onClick={() => setEditing('new')}>{t('publish')}</Button> }
+            : {})}
+        />
+      ) : (
+        <div className="space-y-2">
+          {visible.map((c) => {
+            const author = authorOf(c.createdBy)
+            const TypeIcon = TYPE_ICON[c.spec.type]
+            const VisIcon = VIS_ICON[c.visibility]
+            const managed = isBuiltIn(c)
+            const here = inWorkspace(c)
+            const isEnv = c.spec.type === 'environment'
+            return (
+              <div
+                key={capKey(c)}
+                role="button"
+                tabIndex={0}
+                onClick={() => setDetail(c)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault()
+                    setDetail(c)
+                  }
+                }}
+                className="group block cursor-pointer rounded-lg border bg-card p-3.5 shadow-raise outline-none transition-colors hover:border-border-strong hover:bg-elevated focus-visible:border-border-strong"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex min-w-0 items-start gap-3">
+                    <span className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-md bg-elevated text-muted-foreground ring-1 ring-inset ring-border group-hover:text-foreground">
+                      <TypeIcon className="size-[18px]" strokeWidth={1.75} />
+                    </span>
+                    <div className="min-w-0 space-y-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="truncate font-mono text-[13px] font-[560] text-foreground">
                           {c.name}
                         </span>
                         <Badge tone="outline" className="shrink-0">
                           {t(`type_${c.spec.type}`)}
                         </Badge>
-                        <Badge
-                          tone={c.visibility === 'private' ? 'outline' : 'info'}
-                          className="shrink-0 gap-1"
-                        >
-                          <VisIcon className="size-3" />
-                          {t(`vis_${c.visibility}`)}
-                        </Badge>
-                        {isBuiltIn(c) && (
-                          <Badge tone="success" className="shrink-0 gap-1">
+                        {managed && (
+                          <Badge tone="info" title={t('managedHint')} className="shrink-0 gap-1">
                             <Sparkles className="size-3" />
-                            {t('builtIn')}
+                            {t('managed')}
                           </Badge>
                         )}
-                        <code className="shrink-0 rounded bg-secondary px-1.5 py-0.5 font-mono text-[11px] text-secondary-foreground ring-1 ring-inset ring-border">
+                        {variant === 'mine' && (
+                          <Badge
+                            tone={c.visibility === 'private' ? 'outline' : 'info'}
+                            className="shrink-0 gap-1"
+                          >
+                            <VisIcon className="size-3" />
+                            {t(`vis_${c.visibility}`)}
+                          </Badge>
+                        )}
+                        {here && (
+                          <Badge tone="success" className="shrink-0">
+                            {isEnv ? t('importedBadge') : t('adoptedBadge')}
+                          </Badge>
+                        )}
+                        <code className="shrink-0 rounded bg-secondary px-1.5 py-0.5 font-mono text-[10.5px] text-secondary-foreground ring-1 ring-inset ring-border">
                           {c.version}
                         </code>
                       </div>
-                      {canManage(c) && (
-                        <DropdownMenu
-                          align="end"
-                          trigger={({ open, toggle }) => (
-                            <button
-                              type="button"
-                              onClick={toggle}
-                              disabled={pending}
-                              aria-label={t('menu')}
-                              aria-expanded={open}
-                              className="grid size-8 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
-                            >
-                              <MoreHorizontal className="size-4" />
-                            </button>
-                          )}
-                        >
-                          <DropdownItem icon={<Pencil />} onSelect={() => setEditing(c)}>
-                            {t('edit')}
-                          </DropdownItem>
-                          <DropdownItem icon={<Share2 />} onSelect={() => setReaching(c)}>
-                            {t('changeReach')}
-                          </DropdownItem>
-                          <DropdownSeparator />
-                          <DropdownItem
-                            icon={<Trash2 />}
-                            tone="danger"
-                            onSelect={() => setConfirming(c)}
-                          >
-                            {t('delete')}
-                          </DropdownItem>
-                        </DropdownMenu>
-                      )}
+                      <p className="line-clamp-1 text-[12px] text-muted-foreground">
+                        {c.description}
+                      </p>
+                      <RowMeta capability={c} />
                     </div>
-
-                    <p className="mt-1.5 line-clamp-2 text-[13px] text-muted-foreground">
-                      {c.description}
-                    </p>
-
-                    {/* mcp·code·skill — 전체 스펙 제자리 드릴인(라우트 대신: 크로스테넌트 public 은 tenant 미상이라 재조회 불가,
-                    이미 로드된 데이터로 상세 표시). environment 는 아래 자체 드릴인 유지. */}
-                    {c.spec.type !== 'environment' && (
-                      <div className="mt-2">
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setExpandedKey(expandedKey === capKey(c) ? null : capKey(c))
-                          }
-                          className="rounded-md px-1.5 py-0.5 text-[11.5px] font-medium text-primary transition-colors hover:bg-primary/10"
-                        >
-                          {t(expandedKey === capKey(c) ? 'hideDetails' : 'showDetails')}
-                        </button>
-                        {expandedKey === capKey(c) && (
-                          <CapabilityDetail
-                            capability={c}
-                            currentWorkspace={currentWorkspace}
-                            currentSubject={currentSubject}
-                            isAdmin={isAdmin}
-                          />
-                        )}
-                      </div>
-                    )}
-
-                    {/* environment — 이미지 ref + 뷰어 기준 분류 배지 + 벤치마크/OS 요약(스토어에서 이미지 정보 기본 노출)
-                    + 제자리 드릴인(instructions·preset) */}
-                    {c.spec.type === 'environment' && (
-                      <>
-                        <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                          <code className="min-w-0 truncate rounded bg-secondary px-1.5 py-0.5 font-mono text-[11px] text-secondary-foreground ring-1 ring-inset ring-border">
-                            {c.spec.image}
-                          </code>
-                          {c.imageClass && (
-                            <Badge tone={IMG_CLASS_TONE[c.imageClass]} className="shrink-0">
-                              {t(`imgClass_${c.imageClass}`)}
-                            </Badge>
-                          )}
-                          {c.spec.contents?.benchmark && (
-                            <Badge tone="outline" className="shrink-0">
-                              {c.spec.contents.benchmark}
-                            </Badge>
-                          )}
-                          {c.spec.contents?.os && (
-                            <Badge tone="outline" className="shrink-0">
-                              {c.spec.contents.os}
-                              {c.spec.contents.arch ? `/${c.spec.contents.arch}` : ''}
-                            </Badge>
-                          )}
-                          {/* 가져온 환경이면 사용가능(pull) 검증 상태 배지 — 스토어에서 "가져온 것"을 구분한다. */}
-                          {adoptedEnvMap.has(capKey(c)) &&
-                            (adoptedEnvMap.get(capKey(c))?.verify?.pullable === false ? (
-                              <Badge tone="warning" className="shrink-0">
-                                {t('importedNotPullableBadge')}
-                              </Badge>
-                            ) : (
-                              <Badge tone="success" className="shrink-0">
-                                {t('importedBadge')}
-                              </Badge>
-                            ))}
+                  </div>
+                  {/* 우측 액션 영역 — 카드(role=button)가 상세를 열므로, 여기 버튼 클릭이 카드 열림으로 버블링되지 않게 막는다. */}
+                  <div
+                    className="flex shrink-0 items-center gap-1.5"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    {canManage(c) && (
+                      <DropdownMenu
+                        align="end"
+                        trigger={({ open, toggle }) => (
                           <button
                             type="button"
-                            onClick={() =>
-                              setExpandedKey(expandedKey === capKey(c) ? null : capKey(c))
-                            }
-                            className="shrink-0 rounded-md px-1.5 py-0.5 text-[11.5px] font-medium text-primary transition-colors hover:bg-primary/10"
+                            onClick={toggle}
+                            disabled={pending}
+                            aria-label={t('menu')}
+                            aria-expanded={open}
+                            className="grid size-8 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
                           >
-                            {t(expandedKey === capKey(c) ? 'envHideDetail' : 'envShowDetail')}
+                            <MoreHorizontal className="size-4" />
                           </button>
-                        </div>
-                        {expandedKey === capKey(c) && (
-                          <div className="mt-3 space-y-3 rounded-md border border-border bg-secondary/30 p-3">
-                            <div>
-                              <p className="text-[11px] font-[510] text-muted-foreground">
-                                {t('envInstructions')}
-                              </p>
-                              {/* instructions 는 마크다운 문서 — raw 텍스트가 아니라 렌더링해 보여준다 */}
-                              <Markdown
-                                content={c.spec.instructions}
-                                className="mt-1 text-[12.5px] leading-relaxed"
-                              />
-                            </div>
-                            {c.spec.preset && (
-                              <div>
-                                <p className="text-[11px] font-[510] text-muted-foreground">
-                                  {t('envPreset')}
-                                </p>
-                                <pre className="mt-1 overflow-x-auto font-mono text-[11.5px] leading-relaxed text-muted-foreground">
-                                  {JSON.stringify(c.spec.preset, null, 2)}
-                                </pre>
-                              </div>
-                            )}
-                            {c.spec.contents && c.spec.contents.packages.length > 0 && (
-                              <div className="flex flex-wrap items-center gap-1">
-                                {c.spec.contents.packages.map((p) => (
-                                  <Badge key={p} tone="neutral">
-                                    {p}
-                                  </Badge>
-                                ))}
-                              </div>
-                            )}
-                          </div>
                         )}
-                      </>
+                      >
+                        <DropdownItem icon={<Pencil />} onSelect={() => setEditing(c)}>
+                          {t('edit')}
+                        </DropdownItem>
+                        <DropdownItem icon={<Share2 />} onSelect={() => setReaching(c)}>
+                          {t('changeReach')}
+                        </DropdownItem>
+                        <DropdownSeparator />
+                        <DropdownItem
+                          icon={<Trash2 />}
+                          tone="danger"
+                          onSelect={() => setConfirming(c)}
+                        >
+                          {t('delete')}
+                        </DropdownItem>
+                      </DropdownMenu>
                     )}
-
-                    <div className="mt-auto flex items-center justify-between gap-2 pt-3">
-                      <div className="flex items-center gap-1.5 text-[11.5px] text-faint">
-                        <Avatar
-                          name={author.name}
-                          url={author.avatarUrl}
-                          size="sm"
-                          className="rounded-full"
-                        />
-                        <span>{t('createdBy', { name: author.name })}</span>
-                      </div>
-                      {isBuiltIn(c) ? (
-                        <span className="flex items-center gap-1 text-[11.5px] text-muted-foreground">
-                          <Check className="size-3.5 text-success" />
-                          {t('builtInProvided')}
-                        </span>
-                      ) : c.spec.type === 'environment' ? (
-                        // environment 는 워크스페이스 인벤토리로 "가져오기"(import) — 넣을 때 pull 가능성 검증(settings:write).
-                        canImportEnvironment &&
-                        (adoptedEnvMap.has(capKey(c)) ? (
+                    {isEnv
+                      ? canImportEnvironment &&
+                        (here ? (
                           <Button
                             variant="secondary"
                             size="sm"
@@ -649,9 +526,8 @@ export function CapabilityStore({
                             {t('import')}
                           </Button>
                         ))
-                      ) : (
-                        canAdopt &&
-                        (adopted.has(capKey(c)) ? (
+                      : canAdopt &&
+                        (here ? (
                           <Button
                             variant="secondary"
                             size="sm"
@@ -666,27 +542,48 @@ export function CapabilityStore({
                             <Plus />
                             {t('adopt')}
                           </Button>
-                        ))
-                      )}
-                    </div>
+                        ))}
+                    <Avatar
+                      name={author.name}
+                      url={author.avatarUrl}
+                      size="sm"
+                      className="rounded-full"
+                    />
                   </div>
-                )
-              })}
-            </div>
-          )}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
 
-          {visibleCount < list.length && (
-            <div className="flex justify-center">
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={() => setVisibleCount((n) => n + PAGE)}
-              >
-                {t('showMore')}
-              </Button>
-            </div>
-          )}
-        </>
+      {visibleCount < list.length && (
+        <div className="flex justify-center">
+          <Button variant="secondary" size="sm" onClick={() => setVisibleCount((n) => n + PAGE)}>
+            {t('showMore')}
+          </Button>
+        </div>
+      )}
+
+      {detail !== null && (
+        <CapabilityDetailDialog
+          capability={detail}
+          variant={variant}
+          currentWorkspace={currentWorkspace}
+          currentSubject={currentSubject}
+          isAdmin={isAdmin}
+          inWorkspace={inWorkspace(detail)}
+          adoptedEnv={adoptedEnvMap.get(capKey(detail))}
+          canAdopt={canAdopt}
+          canImportEnvironment={canImportEnvironment}
+          pending={pending}
+          onClose={() => setDetail(null)}
+          onAdopt={() => startAdopt(detail)}
+          onUnadopt={() => unadopt(detail)}
+          onImport={() => importEnv(detail)}
+          onRemoveEnv={() => removeEnv(detail)}
+          onReverifyEnv={reverifyEnv}
+        />
       )}
 
       {editing !== null && (
@@ -746,6 +643,205 @@ export function CapabilityStore({
         </div>
       </Dialog>
     </div>
+  )
+}
+
+// 행 메타 — 종류별 한 줄 요약(mcp=제공 도구, code=언어+읽기전용, environment=이미지 참조) + 태그 몇 개. 없으면 렌더 안 함.
+function RowMeta({ capability }: { capability: Capability }) {
+  const t = useTranslations('capabilityStore')
+  const s = capability.spec
+  const hasTypeMeta =
+    s.type === 'mcp' ? s.provides.length > 0 : s.type === 'code' || s.type === 'environment'
+  if (!hasTypeMeta && capability.tags.length === 0) return null
+  return (
+    <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-faint">
+      {s.type === 'mcp' &&
+        s.provides.slice(0, 3).map((p) => (
+          <code
+            key={p}
+            className="rounded bg-secondary px-1.5 py-0.5 font-mono text-[10.5px] text-secondary-foreground"
+          >
+            {p}
+          </code>
+        ))}
+      {s.type === 'code' && (
+        <>
+          <span className="rounded bg-secondary px-1.5 py-0.5 font-mono text-[10.5px] text-secondary-foreground">
+            {s.language}
+          </span>
+          <span>{t(s.isReadOnly ? 'codeReadOnly' : 'codeWrites')}</span>
+        </>
+      )}
+      {s.type === 'environment' && (
+        <code className="max-w-[16rem] truncate rounded bg-secondary px-1.5 py-0.5 font-mono text-[10.5px] text-secondary-foreground">
+          {s.image}
+        </code>
+      )}
+      {capability.tags.slice(0, 3).map((tag) => (
+        <span
+          key={tag}
+          className="rounded bg-muted/40 px-1.5 py-0.5 text-[10.5px] text-muted-foreground ring-1 ring-inset ring-border"
+        >
+          #{tag}
+        </span>
+      ))}
+    </div>
+  )
+}
+
+// 상세 Dialog — 카드 클릭 시 전체 스펙을 모달로 띄운다(제자리 확장이 아니라, 다른 컬럼에 영향 없이). 헤더(이름/종류/버전/
+// 배지) + CapabilityDetail(버전 패널 + 스펙 본문) + 푸터 액션(채택/가져오기, environment 는 pull 상태·재검증 포함).
+function CapabilityDetailDialog({
+  capability,
+  variant,
+  currentWorkspace,
+  currentSubject,
+  isAdmin,
+  inWorkspace,
+  adoptedEnv,
+  canAdopt,
+  canImportEnvironment,
+  pending,
+  onClose,
+  onAdopt,
+  onUnadopt,
+  onImport,
+  onRemoveEnv,
+  onReverifyEnv,
+}: {
+  capability: Capability
+  variant: StoreVariant
+  currentWorkspace: string
+  currentSubject?: string
+  isAdmin: boolean
+  inWorkspace: boolean
+  adoptedEnv?: AdoptedEnvironment
+  canAdopt: boolean
+  canImportEnvironment: boolean
+  pending: boolean
+  onClose: () => void
+  onAdopt: () => void
+  onUnadopt: () => void
+  onImport: () => void
+  onRemoveEnv: () => void
+  onReverifyEnv: (e: AdoptedEnvironment) => void
+}) {
+  const t = useTranslations('capabilityStore')
+  const TypeIcon = TYPE_ICON[capability.spec.type]
+  const VisIcon = VIS_ICON[capability.visibility]
+  const managed = isBuiltIn(capability)
+  const isEnv = capability.spec.type === 'environment'
+  const verify = adoptedEnv?.verify
+  return (
+    <Dialog open onClose={onClose} align="top" className="max-w-2xl">
+      <div className="max-h-[85vh] space-y-4 overflow-y-auto p-6">
+        <div className="space-y-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <TypeIcon className="size-5 shrink-0 text-primary" />
+            <span className="min-w-0 truncate font-mono text-[15px] font-[560]">
+              {capability.name}
+            </span>
+            <Badge tone="outline" className="shrink-0">
+              {t(`type_${capability.spec.type}`)}
+            </Badge>
+            {managed && (
+              <Badge tone="info" className="shrink-0 gap-1">
+                <Sparkles className="size-3" />
+                {t('managed')}
+              </Badge>
+            )}
+            {variant === 'mine' && (
+              <Badge
+                tone={capability.visibility === 'private' ? 'outline' : 'info'}
+                className="shrink-0 gap-1"
+              >
+                <VisIcon className="size-3" />
+                {t(`vis_${capability.visibility}`)}
+              </Badge>
+            )}
+            <code className="shrink-0 rounded bg-secondary px-1.5 py-0.5 font-mono text-[11px] text-secondary-foreground ring-1 ring-inset ring-border">
+              {capability.version}
+            </code>
+          </div>
+          <p className="text-[13px] text-muted-foreground">{capability.description}</p>
+          {managed && <p className="text-[12px] text-muted-foreground">{t('managedHint')}</p>}
+        </div>
+
+        <CapabilityDetail
+          capability={capability}
+          currentWorkspace={currentWorkspace}
+          currentSubject={currentSubject}
+          isAdmin={isAdmin}
+        />
+
+        {isEnv && inWorkspace && verify && (
+          <div className="flex items-center gap-3">
+            <Badge tone={verify.pullable ? 'success' : 'warning'}>
+              {verify.pullable
+                ? t('importedBadge')
+                : t(
+                    verify.reason === 'auth'
+                      ? 'verifyAuth'
+                      : verify.reason === 'not-found'
+                        ? 'verifyNotFound'
+                        : 'verifyUnreachable'
+                  )}
+            </Badge>
+            {canImportEnvironment && adoptedEnv && (
+              <button
+                type="button"
+                className="text-[12px] font-[510] text-link transition-colors hover:text-foreground"
+                disabled={pending}
+                onClick={() => onReverifyEnv(adoptedEnv)}
+              >
+                {t('reverify')}
+              </button>
+            )}
+          </div>
+        )}
+
+        <div className="flex items-center justify-between gap-2 border-t border-border pt-4">
+          {inWorkspace ? (
+            <span className="inline-flex items-center gap-1.5 text-[12px] font-[510] text-success">
+              <CircleCheck className="size-4" />
+              {t('detailAdopted')}
+            </span>
+          ) : (
+            <span />
+          )}
+          <div className="flex items-center gap-2">
+            <Button variant="secondary" size="sm" onClick={onClose}>
+              {t('close')}
+            </Button>
+            {isEnv
+              ? canImportEnvironment &&
+                (inWorkspace ? (
+                  <Button variant="secondary" size="sm" disabled={pending} onClick={onRemoveEnv}>
+                    <Check />
+                    {t('importedRemove')}
+                  </Button>
+                ) : (
+                  <Button size="sm" disabled={pending} onClick={onImport}>
+                    <Plus />
+                    {t('import')}
+                  </Button>
+                ))
+              : canAdopt &&
+                (inWorkspace ? (
+                  <Button variant="secondary" size="sm" disabled={pending} onClick={onUnadopt}>
+                    <Check />
+                    {t('adoptedRemove')}
+                  </Button>
+                ) : (
+                  <Button size="sm" disabled={pending} onClick={onAdopt}>
+                    <Plus />
+                    {t('adopt')}
+                  </Button>
+                ))}
+          </div>
+        </div>
+      </div>
+    </Dialog>
   )
 }
 
@@ -1404,18 +1500,17 @@ function CapabilityEditorDialog({
                   {imageRegistries.length > 1 && (
                     <div className="space-y-1">
                       <Label htmlFor="cap-tag-registry">{t('tagRegistry')}</Label>
-                      <select
+                      <Combobox
                         id="cap-tag-registry"
+                        options={imageRegistries.map((reg) => ({
+                          value: reg.name,
+                          label: reg.name,
+                        }))}
                         value={tagRegistry}
-                        onChange={(e) => setTagRegistry(e.target.value)}
-                        className="h-8 rounded-md border border-border bg-card px-2 text-[12px] text-foreground"
-                      >
-                        {imageRegistries.map((reg) => (
-                          <option key={reg.name} value={reg.name}>
-                            {reg.name}
-                          </option>
-                        ))}
-                      </select>
+                        onChange={setTagRegistry}
+                        className="w-[160px]"
+                        aria-label={t('tagRegistry')}
+                      />
                     </div>
                   )}
                   <div className="min-w-[10rem] flex-1 space-y-1">
@@ -1881,21 +1976,51 @@ function CapabilityDetail({
         </>
       )}
       {s.type === 'skill' && (
+        // 멀티문서 스킬 뷰어(SKILL.md + 부속 파일 탭) — 스킬 관리 상세와 동일한 공용 뷰어를 공유(v1 단일 문서 나열 대체).
+        <SkillDocs instructions={s.instructions} files={s.files} />
+      )}
+      {s.type === 'environment' && (
         <div className="space-y-3">
-          {/* SKILL.md 본문 + 부속 파일 — 마크다운 문서로 렌더링(.md 아닌 파일만 mono raw) */}
-          <Markdown content={s.instructions} className="text-[12.5px] leading-relaxed" />
-          {s.files.map((f) => (
-            <div key={f.path}>
-              <p className="font-mono text-[11px] font-[510] text-muted-foreground">{f.path}</p>
-              {f.path.endsWith('.md') ? (
-                <Markdown content={f.content} className="mt-1 text-[12.5px] leading-relaxed" />
-              ) : (
-                <pre className="mt-1 overflow-x-auto whitespace-pre-wrap font-mono text-[11.5px] leading-relaxed text-muted-foreground">
-                  {f.content}
-                </pre>
-              )}
+          {/* 이미지 참조 + 뷰어 기준 분류 + 벤치마크/OS 요약 */}
+          <div className="flex flex-wrap items-center gap-1.5">
+            <code className="min-w-0 truncate rounded bg-secondary px-1.5 py-0.5 font-mono text-[11px] text-secondary-foreground ring-1 ring-inset ring-border">
+              {s.image}
+            </code>
+            {shown.imageClass && (
+              <Badge tone={IMG_CLASS_TONE[shown.imageClass]}>
+                {t(`imgClass_${shown.imageClass}`)}
+              </Badge>
+            )}
+            {s.contents?.benchmark && <Badge tone="outline">{s.contents.benchmark}</Badge>}
+            {s.contents?.os && (
+              <Badge tone="outline">
+                {s.contents.os}
+                {s.contents.arch ? `/${s.contents.arch}` : ''}
+              </Badge>
+            )}
+          </div>
+          <div>
+            <p className="text-[11px] font-[510] text-muted-foreground">{t('envInstructions')}</p>
+            {/* instructions 는 마크다운 문서 — 렌더링해 보여준다 */}
+            <Markdown content={s.instructions} className="mt-1 text-[12.5px] leading-relaxed" />
+          </div>
+          {s.preset && (
+            <div>
+              <p className="text-[11px] font-[510] text-muted-foreground">{t('envPreset')}</p>
+              <pre className="mt-1 overflow-x-auto font-mono text-[11.5px] leading-relaxed text-muted-foreground">
+                {JSON.stringify(s.preset, null, 2)}
+              </pre>
             </div>
-          ))}
+          )}
+          {s.contents && s.contents.packages.length > 0 && (
+            <div className="flex flex-wrap items-center gap-1">
+              {s.contents.packages.map((p) => (
+                <Badge key={p} tone="neutral">
+                  {p}
+                </Badge>
+              ))}
+            </div>
+          )}
         </div>
       )}
       {secrets.length > 0 && (
@@ -1995,22 +2120,20 @@ function CapabilityVersionsPanel({
           <History className="size-3.5" />
           {t('versionsLabel')}
         </span>
-        <select
+        <Combobox
+          options={descending.map((v) => ({
+            value: v,
+            label: v === latestVersion ? `${v} · ${t('latest')}` : v,
+            ...((data.versionTags[v]?.length ?? 0) > 0
+              ? { hint: data.versionTags[v]?.join(' · ') }
+              : {}),
+          }))}
           value={shownVersion}
+          onChange={showVersion}
           disabled={switching}
-          onChange={(e) => showVersion(e.target.value)}
+          className="w-[200px]"
           aria-label={t('versionsLabel')}
-          className="h-6 rounded border border-border bg-transparent px-1.5 text-[11px] text-foreground outline-none focus:border-ring disabled:opacity-50"
-        >
-          {descending.map((v) => (
-            <option key={v} value={v}>
-              {v === latestVersion ? `${v} · ${t('latest')}` : v}
-              {(data.versionTags[v]?.length ?? 0) > 0
-                ? ` — ${data.versionTags[v]?.join(' · ')}`
-                : ''}
-            </option>
-          ))}
-        </select>
+        />
         {switching && <Loader2 className="size-3.5 animate-spin text-muted-foreground" />}
       </div>
 
@@ -2075,19 +2198,14 @@ function VersionSelect({
   onChange: (v: string) => void
 }) {
   return (
-    <select
+    <Combobox
+      options={versions.map((v) => ({ value: v, label: v }))}
       value={value}
-      onChange={(e) => onChange(e.target.value)}
+      onChange={onChange}
+      placeholder={placeholder}
+      className="w-[120px]"
       aria-label={placeholder}
-      className="h-6 rounded border border-border bg-transparent px-1.5 text-[11px] text-foreground outline-none focus:border-ring"
-    >
-      <option value="">{placeholder}</option>
-      {versions.map((v) => (
-        <option key={v} value={v}>
-          {v}
-        </option>
-      ))}
-    </select>
+    />
   )
 }
 

@@ -13,19 +13,24 @@ import { PageHeader } from '@/shared/ui/page-header'
 
 export const dynamic = 'force-dynamic'
 
-// Store — 공개 카탈로그만 브라우즈한다(공개 + 매니지드/첫당사자). 이미 워크스페이스에 데려온 것(채택/가져옴)은 행에
-// 배지 + 상태 필터로 구분한다. 발행/편집·내 항목 관리는 별도 페이지(store/mine). capabilities:read 로 보기.
-export default async function StorePage() {
+// My published — 내 워크스페이스가 발행한 capability(모든 공개범위). 여기서 발행·편집·공개범위 변경·삭제하고, 스토어(공개
+// 카탈로그)는 브라우즈 전용이다. 첫당사자(매니지드) 항목은 워크스페이스 소유가 아니라 목록에서 제외된다.
+export default async function MyPublishedPage({
+  params,
+}: {
+  params: Promise<{ workspace: string }>
+}) {
+  const { workspace } = await params
   const t = await getTranslations('capabilityStore')
   const { principal, ctx } = await currentPrincipal()
   const canRead = can(principal?.roles, 'capabilities:read')
   const canWrite = can(principal?.roles, 'capabilities:write')
-  const canAdopt = can(principal?.roles, 'agents:write') // 채택 = 내 에이전트 설정 편집
-  const canImportEnvironment = can(principal?.roles, 'settings:write') // 환경 가져오기 = 워크스페이스 인벤토리(설정)
+  const canAdopt = can(principal?.roles, 'agents:write')
+  const canImportEnvironment = can(principal?.roles, 'settings:write')
   const isAdmin = (principal?.roles ?? []).includes('admin')
-  // 인스턴스 정책(operator env) — 멤버도 public 발행 가능? admin 은 항상 가능. UX 게이팅용(서버가 최종 강제).
   const allowMemberPublicPublish = principal?.config?.allowMemberPublicPublish === true
-  const header = <PageHeader title={t('title')} description={t('description')} />
+  const currentWorkspace = principal?.workspace ?? workspace
+  const header = <PageHeader title={t('minePageTitle')} description={t('minePageDescription')} />
   if (!canRead) {
     return (
       <div className="space-y-6">
@@ -35,10 +40,13 @@ export default async function StorePage() {
     )
   }
 
-  let publicCaps: Capability[] = []
+  let mine: Capability[] = []
   let error: string | undefined
   try {
-    publicCaps = capabilitiesSchema.parse(await controlPlane.listPublicCapabilities(ctx))
+    // 내가 볼 수 있는 것 중 내 워크스페이스가 소유한 것만 — 남의 public/subset·첫당사자는 스토어에서 다룬다.
+    mine = capabilitiesSchema
+      .parse(await controlPlane.listCapabilities(ctx))
+      .filter((c) => c.tenant === currentWorkspace)
   } catch (e) {
     error = e instanceof Error ? e.message : String(e)
   }
@@ -51,8 +59,8 @@ export default async function StorePage() {
         <Callout tone="danger">{t('connectError', { error })}</Callout>
       ) : (
         <CapabilityStore
-          items={publicCaps}
-          variant="catalog"
+          items={mine}
+          variant="mine"
           authors={store.authors}
           canWrite={canWrite}
           canAdopt={canAdopt}
@@ -62,7 +70,7 @@ export default async function StorePage() {
           secretNames={store.secretNames}
           myWorkspaces={store.myWorkspaces}
           imageRegistries={store.imageRegistries}
-          currentWorkspace={principal?.workspace ?? ''}
+          currentWorkspace={currentWorkspace}
           isAdmin={isAdmin}
           allowMemberPublicPublish={allowMemberPublicPublish}
           {...(principal?.subject !== undefined ? { currentSubject: principal.subject } : {})}
