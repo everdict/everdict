@@ -56,6 +56,10 @@ describe("base tool default wiring", () => {
       "knowledge_related",
       "knowledge_subgraph",
       "knowledge_notes",
+      // knowledge-layer reads: context assembly + entry reads (get_/list_ verbs)
+      "get_task_context",
+      "list_knowledge_entries",
+      "get_knowledge_entry",
     ])
       expect(isBaseToolReadOnly(name)).toBe(true);
   });
@@ -74,6 +78,11 @@ describe("base tool default wiring", () => {
       "annotate_knowledge",
       "relate_knowledge",
       "reindex_knowledge",
+      // knowledge-entry writes — contributions stay HITL under the session's permission mode
+      "create_knowledge_entry",
+      "update_knowledge_entry",
+      "verify_knowledge_entry",
+      "verify_skill",
     ])
       expect(isBaseToolReadOnly(name)).toBe(false);
   });

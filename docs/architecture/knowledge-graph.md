@@ -275,7 +275,10 @@ Following everdict's one-way spine (no new package — schemas belong at the con
    tool surface (HITL-gated writes; the knowledge reads `get_knowledge_graph` / `knowledge_related` / `knowledge_subgraph`
    / `knowledge_notes` are read-only), and its system prompt directs it to consult the graph and record durable,
    evidence-backed observations as it works, so the workspace's institutional knowledge accumulates from in-product use
-   too. An authored note is a mention resolved to its node (read back via `GET /knowledge/annotations`); an authored
+   too. With the knowledge layer, the prompt now steers the full loop: `get_task_context` opens an entity-anchored
+   task, durable conclusions are recorded as knowledge ENTRIES (`create_knowledge_entry`, annotate demoted to margin
+   notes), and freshness is maintained in-band (`verify_skill` / `verify_knowledge_entry` when a stale-flagged item
+   still holds; a proposed revision when it drifted). An authored note is a mention resolved to its node (read back via `GET /knowledge/annotations`); an authored
    relation is an edge over the closed predicate vocabulary (read back via `related`/`subgraph`), idempotent by (author,
    subject, predicate, object). The `authored` origin lets a query separate what the system DERIVED from what a person
    (or their agent) ASSERTED. Next: text EXTRACTORS for `comment` / `agent_message` / `pr_comment` (@-mention regex
