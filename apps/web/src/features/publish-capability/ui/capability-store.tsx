@@ -876,7 +876,12 @@ function CapabilityEditorDialog({
       // 예제 행 → spec.examples. 완전히 빈 행은 건너뛰고, 입력이 JSON 오브젝트가 아니면 저장을 막는다.
       const examples: NonNullable<Extract<CapabilitySpec, { type: 'code' }>['examples']> = []
       for (const row of codeExamples) {
-        if (row.name.trim().length === 0 && row.input.trim().length === 0 && row.note.trim().length === 0) continue
+        if (
+          row.name.trim().length === 0 &&
+          row.input.trim().length === 0 &&
+          row.note.trim().length === 0
+        )
+          continue
         try {
           const parsed: unknown = row.input.trim().length > 0 ? JSON.parse(row.input) : {}
           if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed))
@@ -1304,7 +1309,9 @@ function CapabilityEditorDialog({
                     <Input
                       value={row.name}
                       onChange={(e) =>
-                        setCodeExamples((p) => p.map((x, idx) => (idx === i ? { ...x, name: e.target.value } : x)))
+                        setCodeExamples((p) =>
+                          p.map((x, idx) => (idx === i ? { ...x, name: e.target.value } : x))
+                        )
                       }
                       placeholder={t('exampleName')}
                       className="text-[12px]"
@@ -1321,7 +1328,9 @@ function CapabilityEditorDialog({
                   <Textarea
                     value={row.input}
                     onChange={(e) =>
-                      setCodeExamples((p) => p.map((x, idx) => (idx === i ? { ...x, input: e.target.value } : x)))
+                      setCodeExamples((p) =>
+                        p.map((x, idx) => (idx === i ? { ...x, input: e.target.value } : x))
+                      )
                     }
                     rows={2}
                     placeholder='{"query": "…"}'
@@ -1330,7 +1339,9 @@ function CapabilityEditorDialog({
                   <Input
                     value={row.note}
                     onChange={(e) =>
-                      setCodeExamples((p) => p.map((x, idx) => (idx === i ? { ...x, note: e.target.value } : x)))
+                      setCodeExamples((p) =>
+                        p.map((x, idx) => (idx === i ? { ...x, note: e.target.value } : x))
+                      )
                     }
                     placeholder={t('exampleNote')}
                     className="text-[12px]"

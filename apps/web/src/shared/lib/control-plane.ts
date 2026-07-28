@@ -514,7 +514,8 @@ export const controlPlane = {
   // private|workspace). Read skills:read (viewer+); author/edit/share/delete skills:write (member+, creator-or-admin
   // for a specific skill). generateSkill drafts a skill from a description via the workspace's model (skill-generate).
   listSkills: <T>(auth: AuthContext) => call<T>(auth, '/skills'),
-  getSkill: <T>(auth: AuthContext, id: string) => call<T>(auth, `/skills/${encodeURIComponent(id)}`),
+  getSkill: <T>(auth: AuthContext, id: string) =>
+    call<T>(auth, `/skills/${encodeURIComponent(id)}`),
   createSkill: <T>(auth: AuthContext, body: unknown) =>
     call<T>(auth, '/skills', { method: 'POST', body: JSON.stringify(body) }),
   updateSkill: <T>(auth: AuthContext, id: string, patch: unknown) =>
