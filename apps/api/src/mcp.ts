@@ -12,6 +12,7 @@ import { registerCiLinkTools } from "./api/ci-link/ci-link.mcp.js";
 import { registerCommentTools } from "./api/comment/comment.mcp.js";
 import { registerDatasetTools } from "./api/dataset/dataset.mcp.js";
 import { registerEnvironmentAdoptionTools } from "./api/environment-adoption/environment-adoption.mcp.js";
+import { registerFsTools } from "./api/fs/fs.mcp.js";
 import { registerGithubAppTools } from "./api/github-app/github-app.mcp.js";
 import { registerHarnessTemplateTools } from "./api/harness/harness-template.mcp.js";
 import { registerHarnessTools } from "./api/harness/harness.mcp.js";
@@ -66,6 +67,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
   registerModelTools(server, ctx);
   registerAgentTools(server, ctx);
   registerSkillTools(server, ctx);
+  registerFsTools(server, ctx);
   registerCapabilityTools(server, ctx);
   registerRuntimeTools(server, ctx);
   registerBenchmarkTools(server, ctx);

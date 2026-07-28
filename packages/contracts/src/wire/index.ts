@@ -37,6 +37,8 @@ export * from "./dataset/register-dataset-result.js";
 export * from "./dataset/set-version-tags-result.js";
 export * from "./dataset/validate-dataset-result.js";
 export * from "./execution/callback-ack.js";
+export * from "./fs/fs-file-content.js";
+export * from "./fs/fs-remove-result.js";
 export * from "./github-app/github-app-detail-view.js";
 export * from "./github-app/github-app-view.js";
 export * from "./github-app/install-start.js";

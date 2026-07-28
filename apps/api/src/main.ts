@@ -1,6 +1,7 @@
 import { KnowledgeEntryService, KnowledgeService, registryLatestVersionResolver } from "@everdict/application-control";
 import { ProxyService } from "@everdict/application-control";
-import { SkillService } from "@everdict/application-control";
+import { FsService, SkillService } from "@everdict/application-control";
+import { InMemoryWorkspaceFs } from "@everdict/storage";
 import {
   CapabilityService,
   EnvironmentAdoptionService,
@@ -16,7 +17,7 @@ import { TerminalTicketStore } from "./common/terminal-ticket.js";
 import { TicketStore } from "./common/ticket-store.js";
 import { buildAuthenticator } from "./composition/authenticator.js";
 import { buildDispatch } from "./composition/dispatch.js";
-import { artifactStoreFromEnv, meterUsagePolicyFromEnv } from "./composition/env-policy.js";
+import { artifactStoreFromEnv, meterUsagePolicyFromEnv, workspaceFsFromEnv } from "./composition/env-policy.js";
 import {
   buildBudgets,
   buildExecutionScheduling,
@@ -209,6 +210,14 @@ async function main(): Promise<void> {
   // Unset → undefined → the service falls back to base64 inline (dev). Credentials are env secrets (never committed).
   const artifacts = await artifactStoreFromEnv();
   if (artifacts) console.log("▶ artifact store: S3/MinIO offload enabled (os-use screenshots)");
+  // The workspace filesystem — S3/MinIO when env-configured (distributed: every replica sees one tree), else
+  // in-memory (dev). Same object storage as artifacts, namespaced under the "fs/" key prefix.
+  const workspaceFs = (await workspaceFsFromEnv()) ?? new InMemoryWorkspaceFs();
+  console.log(
+    workspaceFs instanceof InMemoryWorkspaceFs
+      ? "▶ workspace filesystem: in-memory (dev — set EVERDICT_S3_* for the distributed backend)"
+      : "▶ workspace filesystem: S3/MinIO (distributed)",
+  );
   // Durable replay recording — persistent by DEFAULT (Postgres when DATABASE_URL is set, else in-memory), from
   // persistence. The runner-lease MCP tees pushed frames/logs into it (self-hosted) and the managed topology backend
   // streams the browser's CDP events (network/console/nav + frames) into it, so a run can be REPLAYED after it settles;
@@ -490,6 +499,9 @@ async function main(): Promise<void> {
     // Workspace Skills — SKILL.md procedures the members author (dual-scoped private|workspace) + skill-generate (drafts
     // a skill from a description via the workspace's registered model + key; same secret tiers/base as the model probe).
     skillService: new SkillService({ store: skillStore, latestVersionOf }),
+    // The workspace filesystem — the shared, workspace-isolated file tree (web Files page + list_files/get_file/
+    // write_file MCP tools; agents persist task outputs here as real files). Backed by S3/MinIO when env-configured.
+    fsService: new FsService(workspaceFs),
     // Capability Store — one discriminated versioned entity (mcp|code|skill|environment) members author, publish
     // (private|workspace|subset|public), and adopt into their agent (tool kinds) or consume at harness-authoring time
     // (environment). Reach beyond the workspace: subset fans across the author's own workspaces, public exposes to

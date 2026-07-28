@@ -1,8 +1,10 @@
 import {
   CopyObjectCommand,
+  CreateBucketCommand,
   DeleteObjectCommand,
   DeleteObjectsCommand,
   GetObjectCommand,
+  HeadBucketCommand,
   HeadObjectCommand,
   ListObjectsV2Command,
   PutObjectCommand,
@@ -52,6 +54,15 @@ export class S3WorkspaceFs implements WorkspaceFs {
       forcePathStyle: true, // MinIO requires path-style
       credentials: { accessKeyId: opts.accessKeyId, secretAccessKey: opts.secretAccessKey },
     });
+  }
+
+  // Ensure the bucket (create if absent). Called once at startup — not on every operation (same as S3ArtifactStore).
+  async ensureBucket(): Promise<void> {
+    try {
+      await this.client.send(new HeadBucketCommand({ Bucket: this.opts.bucket }));
+    } catch {
+      await this.client.send(new CreateBucketCommand({ Bucket: this.opts.bucket })).catch(() => {});
+    }
   }
 
   private tenantRoot(tenant: string): string {

@@ -133,6 +133,7 @@ import { registerRuntimeRoutes } from "./api/runtime/runtime.routes.js";
 import { registerScheduleRoutes } from "./api/schedule/schedule.routes.js";
 import { registerScorecardRoutes } from "./api/scorecard/scorecard.routes.js";
 import { registerSecretRoutes } from "./api/secret/secret.routes.js";
+import { registerFsRoutes } from "./api/fs/fs.routes.js";
 import { registerSkillRoutes } from "./api/skill/skill.routes.js";
 import { registerTraceSourceRoutes } from "./api/trace-source/trace-source.routes.js";
 import { registerViewRoutes } from "./api/view/view.routes.js";
@@ -216,6 +217,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     registerModelRoutes(routes, deps);
     registerAgentRoutes(routes, deps);
     registerSkillRoutes(routes, deps);
+    registerFsRoutes(routes, deps);
     registerCapabilityRoutes(routes, deps);
     registerRuntimeRoutes(routes, deps);
     registerProfileRoutes(routes, deps);

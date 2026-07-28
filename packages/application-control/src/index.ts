@@ -54,6 +54,7 @@ export {
   type CreateBrowserProfileInput,
   type UpdateBrowserProfileInput,
 } from "./browser-profile/browser-profile-service.js";
+export { type FsFileContent, FsService, type WriteFsFileInput } from "./fs/fs-service.js";
 export {
   type CreateSkillInput,
   SkillService,

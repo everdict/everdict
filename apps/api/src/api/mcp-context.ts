@@ -16,6 +16,7 @@ import type { RunnerService } from "@everdict/application-control";
 import type { ScheduleService } from "@everdict/application-control";
 import type { ScorecardService } from "@everdict/application-control";
 import type { SkillService } from "@everdict/application-control";
+import type { FsService } from "@everdict/application-control";
 import type { SpanAttrMappingService } from "@everdict/application-control";
 import type { TraceSourceService } from "@everdict/application-control";
 import type { ViewService } from "@everdict/application-control";
@@ -74,6 +75,7 @@ export interface McpDeps {
   agentRegistry?: AgentRegistry; // Agent config (instructions + MCP tool servers + model) register/read — the conversational agent per workspace
   agentService?: AgentService; // Agent version-free save/edit upsert
   skillService?: SkillService; // Workspace Skills (SKILL.md procedures the members author) CRUD — dual-scoped private|workspace
+  fsService?: FsService; // the workspace filesystem (shared, workspace-isolated file tree) list/read/write/mkdir/move/remove
   capabilityService?: CapabilityService; // Capability Store (mcp|code|skill authored + published + adopted) CRUD
   probeCapabilityMcp?: (url: string, token?: string) => Promise<McpProbeResult>; // capability wizard mcp "test connection" + tool discovery
   runtimeRegistry?: RuntimeRegistry;

@@ -36,6 +36,11 @@ export type Action =
   // like comments/datasets: read viewer+, write (create/edit/share) member+; delete = creator-or-admin (service layer).
   | "skills:read"
   | "skills:write"
+  // The workspace filesystem — the shared, workspace-isolated file tree (agent task outputs, artifacts, skill/knowledge
+  // bodies). Browsing/reading is benign → viewer+; writing (files, dirs, moves, removals) = collaborative content →
+  // member+ like datasets/skills. No files:delete — removal is ordinary content mutation, not governance.
+  | "files:read"
+  | "files:write"
   // Capability Store — one discriminated entity (mcp|code|skill) members author, publish (private|workspace|subset|
   // public), and adopt into their agent. Collaborative content like agents/skills: read viewer+, write member+;
   // delete = creator-or-admin (service). Promoting reach to `public` additionally requires admin (service-enforced,
@@ -88,6 +93,7 @@ const ROLE_PERMISSIONS: Record<string, ReadonlySet<Action>> = {
     "models:read",
     "agents:read", // reading the workspace agent config is benign → viewer+
     "skills:read", // reading the workspace skill library is benign → viewer+
+    "files:read", // browsing/reading the workspace filesystem is benign → viewer+
     "capabilities:read", // browsing the Capability Store (own + shared + public) is benign → viewer+
     "runtimes:read",
     "runtimes:write", // runtime registration (+validate/probe) is role-independent — every member registers their own workspace's execution infra (same as harnesses:register)
@@ -114,6 +120,8 @@ const ROLE_PERMISSIONS: Record<string, ReadonlySet<Action>> = {
     "agents:write", // agent config = eval-authoring content (how the workspace's assistant behaves) → member+ like models/judges
     "skills:read",
     "skills:write", // authoring/sharing a workspace skill = collaborative content → member+ (delete = creator-or-admin, service layer)
+    "files:read",
+    "files:write", // writing to the workspace filesystem = collaborative content → member+ like datasets/skills
     "capabilities:read",
     "capabilities:write", // authoring/publishing/adopting a capability = collaborative content → member+ (public promotion + delete gated in the service)
     "runtimes:read",
@@ -154,6 +162,8 @@ const ROLE_PERMISSIONS: Record<string, ReadonlySet<Action>> = {
     "agents:write",
     "skills:read",
     "skills:write",
+    "files:read",
+    "files:write",
     "capabilities:read",
     "capabilities:write",
     "capabilities:delete", // capability version soft-delete — admin-only + creator exception in the service layer
@@ -194,6 +204,7 @@ const SCOPE_READ_ACTIONS: readonly Action[] = [
   "models:read",
   "agents:read",
   "skills:read",
+  "files:read",
   "capabilities:read",
   "runtimes:read",
   "members:read",
@@ -212,6 +223,7 @@ const SCOPE_WRITE_ACTIONS: readonly Action[] = [
   "models:write",
   "agents:write",
   "skills:write",
+  "files:write",
   "capabilities:write",
   "runtimes:write",
   "comments:write",

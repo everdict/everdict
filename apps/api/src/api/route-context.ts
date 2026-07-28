@@ -31,6 +31,7 @@ import type { TraceSourceService } from "@everdict/application-control";
 import type { ViewService } from "@everdict/application-control";
 import type { BrowserProfileService } from "@everdict/application-control";
 import type { SkillService } from "@everdict/application-control";
+import type { FsService } from "@everdict/application-control";
 import type { CapabilityService } from "@everdict/application-control";
 import type { WorkspaceService } from "@everdict/application-control";
 import {
@@ -139,6 +140,7 @@ export interface ServerDeps {
   agentRegistry?: AgentRegistry; // Agent config (instructions + MCP tool servers + model) CRUD — the workspace's conversational agent (route disabled if absent)
   agentService?: AgentService; // Agent version-free save/edit upsert (routes disabled if absent)
   skillService?: SkillService; // Workspace Skills (SKILL.md procedures the members author) CRUD (routes disabled if absent)
+  fsService?: FsService; // the workspace filesystem (shared, workspace-isolated file tree) list/read/write/mkdir/move/remove (routes disabled if absent)
   capabilityService?: CapabilityService; // Capability Store (mcp|code|skill authored + published + adopted) CRUD (routes disabled if absent)
   allowMemberPublicPublish?: boolean; // instance policy surfaced to the web via GET /me (config): members may publish `public`, not only admins
   // Capability wizard mcp probe — connect to an MCP URL and list its tools ("test connection" + tool discovery). Injected by main (infrastructure/mcp). Route disabled if absent.
