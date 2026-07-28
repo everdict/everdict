@@ -224,14 +224,16 @@ describe("RuntimeDispatcher", () => {
     return { d, seen, backends, resolveSelfRunner, buildSelfHostedBackend };
   };
 
-  // A service-harness job (harnessSpec.kind==="service") — for verifying the docker capability gate.
+  // A service-harness job (harnessSpec.kind==="service") — for verifying the docker capability gate. Carries one
+  // CONTAINERIZED service: the docker requirement now derives from the services (topologyNeedsDocker — a pure
+  // host-exec topology needs no docker), so the fixture must model a real containerized topology to exercise the gate.
   const selfServiceJob = (target: string, submittedBy: string): CaseJob => ({
     ...selfJob(target, submittedBy),
     harnessSpec: {
       kind: "service",
       id: "bu",
       version: "1",
-      services: [],
+      services: [{ name: "s", image: "reg/agent:1", needs: [], perRun: [], replicas: 1, env: {} }],
       dependencies: [],
       frontDoor: { service: "s", submit: "POST /runs" },
       traceSource: { kind: "mlflow", endpoint: "http://x" },
