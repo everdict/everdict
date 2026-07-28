@@ -5,6 +5,10 @@ Brings up `apps/web` (Next.js, `:3001`) and `apps/api` (the Fastify control plan
 Image definitions: `apps/api/Dockerfile`, `apps/web/Dockerfile` (both multi-stage — `dev` / `runtime` targets).
 Every build context is the **repo root** (`../..`) — since this is a pnpm monorepo, the whole workspace is needed.
 
+Behind a corporate proxy (egress via HTTP proxy / TLS-intercepting CA / air-gap): set the standard
+`HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY`/`CA_CERT` in the compose env — the stacks pass them through at build
+AND runtime. Full guide: `docs/runbooks/corporate-proxy.md`.
+
 ## dev — fast full-stack startup (hot reload, auth OFF)
 
 ```bash
